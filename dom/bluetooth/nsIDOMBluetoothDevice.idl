@@ -20,4 +20,6 @@ interface nsIDOMBluetoothDevice : nsIDOMEventTarget
   [implicit_jscontext] attribute jsval onpropertychanged;
   [implicit_jscontext] attribute jsval onconnected;
   [implicit_jscontext] attribute jsval ondisconnected;
+
+  void connectHeadset();
 };
