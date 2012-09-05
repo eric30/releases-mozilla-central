@@ -64,7 +64,7 @@ public:
                       bool aEncrypt,
                       BluetoothReplyRunnable* aRunnable);
 
-  virtual bool CloseSocket(int aFd, BluetoothReplyRunnable* aRunnable);
+  virtual bool CloseSocket(mozilla::ipc::SocketConsumer* aConsumer, BluetoothReplyRunnable* aRunnable);
 
   virtual nsresult
   CreatePairedDeviceInternal(const nsAString& aAdapterPath,

@@ -1463,6 +1463,9 @@ GetDeviceServiceChannel(const nsAString& aObjectPath,
   // This is a blocking call, should not be run on main thread.
   MOZ_ASSERT(!NS_IsMainThread());
 
+#ifdef MOZ_WIDGET_GONK
+  // GetServiceAttributeValue only exists in android's bluez dbus binding
+  // implementation
   nsCString tempPattern = NS_ConvertUTF16toUTF8(aPattern);
   const char* pattern = tempPattern.get();
 
@@ -1475,6 +1478,11 @@ GetDeviceServiceChannel(const nsAString& aObjectPath,
                    DBUS_TYPE_INVALID);
 
   return reply ? dbus_returns_int32(reply) : -1;
+#else
+  // xxx qdot: Just return something for desktop, until we have a parser for the
+  // GetServiceAttributes xml block
+  return 1;
+#endif
 }
 
 static void
@@ -1765,12 +1773,14 @@ class CreateBluetoothSocketRunnable : public nsRunnable
 {
 public:
   CreateBluetoothSocketRunnable(BluetoothReplyRunnable* aRunnable,
+                                SocketConsumer* aConsumer,
                                 const nsAString& aObjectPath,
                                 const nsAString& aServiceUUID,
                                 int aType,
                                 bool aAuth,
                                 bool aEncrypt)
     : mRunnable(dont_AddRef(aRunnable)),
+      mConsumer(aConsumer),
       mObjectPath(aObjectPath),
       mServiceUUID(aServiceUUID),
       mType(aType),
@@ -1787,17 +1797,15 @@ public:
 
     nsString address = GetAddressFromObjectPath(mObjectPath);
     int channel = GetDeviceServiceChannel(mObjectPath, mServiceUUID, 0x0004);
-    int fd = mozilla::ipc::GetNewSocket(mType, NS_ConvertUTF16toUTF8(address).get(),
-                                        channel, mAuth, mEncrypt);
     BluetoothValue v;
     nsString replyError;
-    if (fd < 0) {
+    if (!mozilla::ipc::ConnectSocket(mConsumer, mType,
+                                     NS_ConvertUTF16toUTF8(address).get(),
+                                     channel, mAuth, mEncrypt)) {
       replyError.AssignLiteral("SocketConnectionError");
       DispatchBluetoothReply(mRunnable, v, replyError);
       return NS_ERROR_FAILURE;
     }
-
-    v = (uint32_t)fd;
 
     DispatchBluetoothReply(mRunnable, v, replyError);
 
@@ -1806,6 +1814,7 @@ public:
 
 private:
   nsRefPtr<BluetoothReplyRunnable> mRunnable;
+  nsRefPtr<SocketConsumer> mConsumer;
   nsString mObjectPath;
   nsString mServiceUUID;
   int mType;
@@ -1819,6 +1828,7 @@ BluetoothDBusService::GetSocketViaService(const nsAString& aObjectPath,
                                           int aType,
                                           bool aAuth,
                                           bool aEncrypt,
+                                          SocketConsumer* aSocketConsumer,
                                           BluetoothReplyRunnable* aRunnable)
 {
   NS_ASSERTION(NS_IsMainThread(), "Must be called from main thread!");
@@ -1828,7 +1838,9 @@ BluetoothDBusService::GetSocketViaService(const nsAString& aObjectPath,
   }
   nsRefPtr<BluetoothReplyRunnable> runnable = aRunnable;
 
-  nsRefPtr<nsRunnable> func(new CreateBluetoothSocketRunnable(runnable, aObjectPath,
+  nsRefPtr<nsRunnable> func(new CreateBluetoothSocketRunnable(runnable,
+                                                              aSocketConsumer,
+                                                              aObjectPath,
                                                               aService, aType,
                                                               aAuth, aEncrypt));
   if (NS_FAILED(mBluetoothCommandThread->Dispatch(func, NS_DISPATCH_NORMAL))) {
@@ -1844,9 +1856,9 @@ class CloseBluetoothSocketRunnable : public nsRunnable
 {
 public:
   CloseBluetoothSocketRunnable(BluetoothReplyRunnable* aRunnable,
-                               int aFd)
+                               mozilla::ipc::SocketConsumer* aConsumer)
     : mRunnable(dont_AddRef(aRunnable)),
-      mFd(aFd)
+      mConsumer(aConsumer)
   {
   }
 
@@ -1855,7 +1867,7 @@ public:
   {
     BluetoothValue v;
     nsString replyError;
-    if (mozilla::ipc::CloseSocket(mFd) != 0) {
+    if (!mozilla::ipc::CloseSocket(mConsumer)) {
       replyError.AssignLiteral("SocketConnectionError");
       DispatchBluetoothReply(mRunnable, v, replyError);
       return NS_ERROR_FAILURE;
@@ -1868,11 +1880,11 @@ public:
 
 private:
   nsRefPtr<BluetoothReplyRunnable> mRunnable;
-  int mFd;
+  nsRefPtr<SocketConsumer> mConsumer;
 };
 
 bool
-BluetoothDBusService::CloseSocket(int aFd, BluetoothReplyRunnable* aRunnable)
+BluetoothDBusService::CloseSocket(mozilla::ipc::SocketConsumer* aConsumer, BluetoothReplyRunnable* aRunnable)
 {
   NS_ASSERTION(NS_IsMainThread(), "Must be called from main thread!");
   if (!mConnection || !gThreadConnection) {
@@ -1881,7 +1893,7 @@ BluetoothDBusService::CloseSocket(int aFd, BluetoothReplyRunnable* aRunnable)
   }
   nsRefPtr<BluetoothReplyRunnable> runnable = aRunnable;
 
-  nsRefPtr<nsRunnable> func(new CloseBluetoothSocketRunnable(runnable, aFd));
+  nsRefPtr<nsRunnable> func(new CloseBluetoothSocketRunnable(runnable, aConsumer));
   if (NS_FAILED(mBluetoothCommandThread->Dispatch(func, NS_DISPATCH_NORMAL))) {
     NS_WARNING("Cannot dispatch firmware loading task!");
     return false;
