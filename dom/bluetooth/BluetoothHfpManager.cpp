@@ -1,8 +1,10 @@
 #include "BluetoothHfpManager.h"
+#include "BluetoothReplyRunnable.h"
+#include "BluetoothService.h"
+#include "BluetoothServiceUuid.h"
 #include "AudioManager.h"
+#include "mozilla/ipc/Socket.h"
 #include <unistd.h> /* usleep() */
-#include <linux/input.h>
-#include <linux/uinput.h>
 #include <linux/ioctl.h>
 #include <fcntl.h>
 
@@ -18,7 +20,7 @@ USING_BLUETOOTH_NAMESPACE
 static BluetoothHfpManager* sInstance = nullptr;
 //static bool sStopEventLoopFlag = false;
 //static bool sStopAcceptFlag = false;
-static int sCurrentVgs = 7;
+//static int sCurrentVgs = 7;
 
 BluetoothHfpManager::BluetoothHfpManager() : mConnected(false)
                                            , mChannel(-1)
@@ -74,38 +76,7 @@ BluetoothHfpManager::Disconnect()
   mConnected = false;
 }
 
-bool
-BluetoothHfpManager::Connect(int channel, const char* asciiAddress)
-{
-  if (channel <= 0)
-    return false;
 
-  if (mSocket != NULL) {
-    mSocket->Disconnect();
-
-    delete mSocket;
-    mSocket = NULL;
-  }
-
-  mSocket = new BluetoothSocket(BluetoothSocket::TYPE_RFCOMM);
-
-  if (mSocket->Connect(channel, asciiAddress)) {
-    LOG("Connect successfully");
-    mConnected = true;
-    pthread_create(&mEventThread, NULL, BluetoothHfpManager::MessageHandler, mSocket);
-
-    // Connect ok, next : establish a SCO link
-  } else {
-    LOG("Connect failed");
-
-    delete mSocket;
-    mSocket = NULL;
-
-    return false;
-  }
-
-  return true;
-}
 void
 BluetoothHfpManager::Close()
 {
@@ -383,3 +354,29 @@ BluetoothHfpManager::MessageHandler(void* ptr)
   return NULL;
 }
 */
+
+bool
+BluetoothHfpManager::Connect(const nsAString& aObjectPath,
+                             BluetoothReplyRunnable* aRunnable)
+{
+  BluetoothService* bs = BluetoothService::Get();
+  if (!bs) {
+    NS_WARNING("BluetoothService not available!");
+    return nullptr;
+  }
+
+  nsString serviceUuidStr =
+    NS_ConvertUTF8toUTF16(mozilla::dom::bluetooth::BluetoothServiceUuidStr::Handsfree);
+
+  nsRefPtr<BluetoothReplyRunnable> runnable = aRunnable;
+
+  nsresult rv = bs->GetSocketViaService(aObjectPath,
+                                        serviceUuidStr,
+                                        BluetoothSocketType::RFCOMM,
+                                        true,
+                                        false,
+                                        runnable);
+
+  runnable.forget();
+  return NS_FAILED(rv) ? false : true;
+}

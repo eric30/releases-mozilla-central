@@ -10,10 +10,15 @@
 
 BEGIN_BLUETOOTH_NAMESPACE
 
+class BluetoothReplyRunnable;
+
 class BluetoothHfpManager
 {
 public:
   static BluetoothHfpManager* GetManager();
+
+  bool Connect(const nsAString& aObjectPath,
+               BluetoothReplyRunnable* aRunnable);
   /*
   bool Connect(int channel, const char* asciiAddress);
   void Disconnect();

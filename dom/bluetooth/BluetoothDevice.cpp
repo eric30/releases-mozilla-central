@@ -12,6 +12,7 @@
 #include "BluetoothService.h"
 #include "BluetoothUtils.h"
 #include "BluetoothServiceUuid.h"
+#include "BluetoothHfpManager.h"
 
 #include "nsIDOMDOMRequest.h"
 #include "nsDOMClassInfo.h"
@@ -25,7 +26,6 @@
 #define BTDEBUG true
 #define LOG(args...) if (BTDEBUG) printf(args);
 #endif
-
 
 USING_BLUETOOTH_NAMESPACE
 
@@ -109,6 +109,7 @@ BluetoothDevice::SetPropertyByValue(const BluetoothNamedValue& aValue)
 {
   const nsString& name = aValue.name();
   const BluetoothValue& value = aValue.value();
+
   if (name.EqualsLiteral("Name")) {
     mName = value.get_nsString();
   } else if (name.EqualsLiteral("Path")) {
@@ -122,6 +123,12 @@ BluetoothDevice::SetPropertyByValue(const BluetoothNamedValue& aValue)
     }
   } else if (name.EqualsLiteral("Address")) {
     mAddress = value.get_nsString();
+    BluetoothService* bs = BluetoothService::Get();
+    if (!bs) {
+      NS_WARNING("BluetoothService not available!");
+    } else {
+      bs->GetDevicePath(mAdapterPath, mAddress, mPath);
+    }
   } else if (name.EqualsLiteral("Class")) {
     mClass = value.get_uint32_t();
   } else if (name.EqualsLiteral("Icon")) {
@@ -300,9 +307,33 @@ BluetoothDevice::GetServices(JSContext* aCx, jsval* aServices)
 }
 
 NS_IMETHODIMP
-BluetoothDevice::ConnectHeadset()
+BluetoothDevice::ConnectHeadset(nsIDOMDOMRequest** aRequest)
 {
-  LOG("Connect Headset");
+  nsCOMPtr<nsIDOMRequestService> rs = do_GetService("@mozilla.org/dom/dom-request-service;1");
+  if (!rs) {
+    NS_WARNING("No DOMRequest Service!");
+    return NS_ERROR_FAILURE;
+  }
+
+  nsCOMPtr<nsIDOMDOMRequest> req;
+  nsresult rv = rs->CreateRequest(GetOwner(), getter_AddRefs(req));
+  if (NS_FAILED(rv)) {
+    NS_WARNING("Can't create DOMRequest!");
+    return NS_ERROR_FAILURE;
+  }
+
+  nsRefPtr<BluetoothVoidReplyRunnable> result = new BluetoothVoidReplyRunnable(req);
+
+  BluetoothHfpManager* hfp = BluetoothHfpManager::GetManager();
+
+  if (hfp->Connect(mPath, result)) {
+    LOG("[HFP] Start connecting with headset");
+  } else {
+    LOG("[HFP] Start connecting failed");
+  }
+
+  req.forget(aRequest);
+
   return NS_OK;
 }
 
