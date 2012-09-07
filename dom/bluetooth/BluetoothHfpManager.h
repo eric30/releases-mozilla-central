@@ -30,10 +30,8 @@ protected:
   static void* AcceptInternal(void* ptr);
 
   pthread_t mAcceptThread;
-  
-  BluetoothSocket* mSocket;
-  BluetoothSocket* mServerSocket;
   */
+
   bool mConnected;
   int mChannel;
   char* mAddress;

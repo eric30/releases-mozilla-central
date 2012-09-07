@@ -1,14 +1,16 @@
-/* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this file,
- * You can obtain one at http://mozilla.org/MPL/2.0/. */
+  /* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
+  /* vim: set ts=2 et sw=2 tw=80: */
+  /* This Source Code Form is subject to the terms of the Mozilla Public
+   * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+   * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "base/basictypes.h"
 #include "BluetoothAdapter.h"
 #include "BluetoothDevice.h"
+#include "BluetoothHfpManager.h"
 #include "BluetoothPropertyEvent.h"
 #include "BluetoothService.h"
+#include "BluetoothServiceUuid.h"
 #include "BluetoothTypes.h"
 #include "BluetoothReplyRunnable.h"
 #include "BluetoothUtils.h"
@@ -142,6 +144,18 @@ BluetoothAdapter::BluetoothAdapter(nsPIDOMWindow* aOwner, const BluetoothValue& 
   for (uint32_t i = 0; i < values.Length(); ++i) {
     SetPropertyByValue(values[i]);
   }
+
+  // Add services to adapter
+  nsTArray<uint32_t> uuids;
+  uint32_t test = (uint32_t)(BluetoothServiceUuid::HandsfreeAG >> 32);
+  uuids.AppendElement(test);
+
+  BluetoothService* bs = BluetoothService::Get();
+  bs->AddReservedServicesInternal(mPath, uuids);
+
+  // Start listening remote HFP connection request
+  BluetoothHfpManager* hfp = BluetoothHfpManager::GetManager();
+  //hfp->Listen(1);
 }
 
 BluetoothAdapter::~BluetoothAdapter()
@@ -614,7 +628,7 @@ BluetoothAdapter::SetPairingConfirmation(const nsAString& aDeviceAddress, bool a
 
   bool result = bs->SetPairingConfirmationInternal(aDeviceAddress, aConfirmation);
 
-  return result ? NS_OK : NS_ERROR_FAILURE;
+    return result ? NS_OK : NS_ERROR_FAILURE;
 }
 
 nsresult

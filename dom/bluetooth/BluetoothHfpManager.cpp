@@ -15,21 +15,21 @@
 
 USING_BLUETOOTH_NAMESPACE
 
-static BluetoothHfpManager* sInstance = NULL;
+static BluetoothHfpManager* sInstance = nullptr;
 //static bool sStopEventLoopFlag = false;
 //static bool sStopAcceptFlag = false;
 static int sCurrentVgs = 7;
 
 BluetoothHfpManager::BluetoothHfpManager() : mConnected(false)
                                            , mChannel(-1)
-                                           , mAddress(NULL)
+                                           , mAddress(nullptr)
 {
 }
 
 BluetoothHfpManager*
 BluetoothHfpManager::GetManager()
 {
-  if (sInstance == NULL)
+  if (sInstance == nullptr)
   {
     sInstance = new BluetoothHfpManager();
   }
@@ -106,7 +106,6 @@ BluetoothHfpManager::Connect(int channel, const char* asciiAddress)
 
   return true;
 }
-
 void
 BluetoothHfpManager::Close()
 {
@@ -151,10 +150,10 @@ BluetoothHfpManager::Listen(int channel)
       break;
     } else if (errno == 98) {
       LOG("Channel is still in use.");
-      mServerSocket->Disconnect();
+      mServerSocket->Close();
     } else {
       LOG("Unexpected error: %d", errno);
-      mServerSocket->Disconnect();
+      mServerSocket->Close();
     }
   }
 

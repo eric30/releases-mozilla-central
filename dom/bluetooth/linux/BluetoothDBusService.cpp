@@ -1516,10 +1516,21 @@ BluetoothDBusService::AddReservedServicesInternal(const nsAString& aAdapterPath,
 {
   MOZ_ASSERT(!NS_IsMainThread());
 
+  nsTArray<uint32_t> ret;
+
+  nsString test(aAdapterPath);
+  const char* temp = NS_ConvertUTF16toUTF8(test).get();
+  LOG("Register services, count: %d, Path: %s", aServices.Length(), temp);
+
   int length = aServices.Length();
   if (length == 0) return false;
 
   const uint32_t* services = aServices.Elements();
+
+  for (int i = 0; i < length; ++i) {
+    LOG("Service [%d]: %x", i, aServices[i]);
+  }
+
   DBusMessage* reply =
     dbus_func_args(gThreadConnection->GetConnection(),
                    NS_ConvertUTF16toUTF8(aAdapterPath).get(),
