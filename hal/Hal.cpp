@@ -349,7 +349,7 @@ GetCurrentBatteryInformation(BatteryInformation* aInfo)
 void
 NotifyBatteryChange(const BatteryInformation& aInfo)
 {
-  AssertMainThread();
+  //AssertMainThread();
   sBatteryObservers.CacheInformation(aInfo);
   sBatteryObservers.BroadcastCachedInformation();
 }
