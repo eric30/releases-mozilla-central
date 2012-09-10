@@ -355,6 +355,17 @@ BluetoothHfpManager::MessageHandler(void* ptr)
 }
 */
 
+BluetoothHfpManager::~BluetoothHfpManager()
+{
+
+}
+
+void
+BluetoothHfpManager::ReceiveSocketData(SocketRawData* aMessage)
+{
+    LOG("Receive message!!");
+}
+
 bool
 BluetoothHfpManager::Connect(const nsAString& aObjectPath,
                              BluetoothReplyRunnable* aRunnable)
@@ -375,6 +386,7 @@ BluetoothHfpManager::Connect(const nsAString& aObjectPath,
                                         BluetoothSocketType::RFCOMM,
                                         true,
                                         false,
+                                        this,
                                         runnable);
 
   runnable.forget();

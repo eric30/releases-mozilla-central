@@ -6,21 +6,26 @@
 #define mozilla_dom_bluetooth_bluetoothhfpmanager_h__
 
 #include "BluetoothCommon.h"
+#include "mozilla/ipc/Socket.h"
 #include <pthread.h>
 
 BEGIN_BLUETOOTH_NAMESPACE
 
+using namespace mozilla::ipc;
+
 class BluetoothReplyRunnable;
 
-class BluetoothHfpManager
+class BluetoothHfpManager : public SocketConsumer
 {
 public:
+  ~BluetoothHfpManager();
   static BluetoothHfpManager* GetManager();
 
   bool Connect(const nsAString& aObjectPath,
                BluetoothReplyRunnable* aRunnable);
+
+  void ReceiveSocketData(SocketRawData* aMessage);
   /*
-  bool Connect(int channel, const char* asciiAddress);
   void Disconnect();
   bool ReachedMaxConnection();
   bool Listen(int channel);

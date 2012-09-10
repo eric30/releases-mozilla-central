@@ -9,6 +9,7 @@
 
 #include "BluetoothCommon.h"
 #include "mozilla/ipc/RawDBusConnection.h"
+#include "mozilla/ipc/Socket.h"
 #include "BluetoothService.h"
 
 class DBusMessage;
@@ -62,6 +63,7 @@ public:
                       int aType,
                       bool aAuth,
                       bool aEncrypt,
+                      mozilla::ipc::SocketConsumer* aSocketConsumer,
                       BluetoothReplyRunnable* aRunnable);
 
   virtual bool CloseSocket(mozilla::ipc::SocketConsumer* aConsumer, BluetoothReplyRunnable* aRunnable);
