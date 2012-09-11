@@ -18,9 +18,8 @@
 USING_BLUETOOTH_NAMESPACE
 
 static BluetoothHfpManager* sInstance = nullptr;
-//static bool sStopEventLoopFlag = false;
-//static bool sStopAcceptFlag = false;
-//static int sCurrentVgs = 7;
+
+const char* kHfpCRLF = "\xd\xa";
 
 BluetoothHfpManager::BluetoothHfpManager() : mConnected(false)
                                            , mChannel(-1)
@@ -133,81 +132,6 @@ BluetoothHfpManager::Listen(int channel)
   return true;
 }
 
-void reply_ok(int fd)
-{
-  if (BluetoothSocket::send_line(fd, "OK") != 0) {
-    LOG("Reply [OK] failed");
-  }
-}
-
-void reply_error(int fd)
-{
-  if (BluetoothSocket::send_line(fd, "ERROR") != 0) {
-    LOG("Reply [ERROR] failed");
-  }
-}
-
-void reply_brsf(int fd)
-{
-  if (BluetoothSocket::send_line(fd, "+BRSF: 23") != 0) {
-    LOG("Reply +BRSF failed");
-  }
-}
-
-void reply_cind_current_status(int fd)
-{
-  const char* str = "+CIND: 1,0,0,0,3,0,3";
-
-  if (BluetoothSocket::send_line(fd, str) != 0) {
-    LOG("Reply +CIND failed");
-  }
-}
-
-void reply_cind_range(int fd)
-{
-  const char* str = "+CIND: (\"service\",(0-1)),(\"call\",(0-1)),(\"callsetup\",(0-3)), \
-                     (\"callheld\",(0-2)),(\"signal\",(0-5)),(\"roam\",(0-1)), \
-                     (\"battchg\",(0-5))";
-
-  if (BluetoothSocket::send_line(fd, str) != 0) {
-    LOG("Reply +CIND=? failed");
-  }
-}
-
-void reply_cmer(int fd, bool enableIndicator)
-{
-  const char* str = enableIndicator ? "+CMER: 3,0,0,1" : "+CMER: 3,0,0,0";
-
-  if (BluetoothSocket::send_line(fd, str) != 0) {
-    LOG("Reply +CMER= failed");
-  }
-}
-
-void reply_chld_range(int fd)
-{
-  const char* str = "+CHLD: (0,1,2,3)";
-
-  if (BluetoothSocket::send_line(fd, str) != 0) {
-    LOG("Reply +CHLD=? failed");
-  }
-}
-
-void reply_vgs(int fd)
-{
-  char* str = "AT+VGS=";
-  int vol = sCurrentVgs;
-  char* vgs = "00";
-
-  vgs[1] = (vol % 10) + '0';
-  vgs[0] = (vol / 10) + '0';
-
-  strcat(str, vgs);
-
-  if (BluetoothSocket::send_line(fd, str) != 0) {
-    LOG("Reply AT+VGS= failed");
-  }
-}
-
 void*
 BluetoothHfpManager::AcceptInternal(void* ptr)
 {
@@ -251,108 +175,6 @@ BluetoothHfpManager::AcceptInternal(void* ptr)
   return NULL;
 }
 
-static int sendEvent(int fd, uint16_t type, uint16_t code, int32_t value)
-{
-  struct input_event event;
-
-  memset(&event, 0, sizeof(event));
-  event.type = type;
-  event.code = code;
-  event.value = value;
-
-  return write(fd, &event, sizeof(event));
-}
-
-static void pressKey(uint16_t keyCode)
-{
-  sendEvent(uinputFd, EV_KEY, keyCode, true);
-  sendEvent(uinputFd, EV_SYN, SYN_REPORT, 0);
-
-  sendEvent(uinputFd, EV_KEY, keyCode, false);
-  sendEvent(uinputFd, EV_SYN, SYN_REPORT, 0);
-}
-
-void*
-BluetoothHfpManager::MessageHandler(void* ptr)
-{
-  BluetoothSocket* socket = static_cast<BluetoothSocket*>(ptr);
-  int err;
-  sStopEventLoopFlag = false;
-
-  while (!sStopEventLoopFlag)
-  {
-    int timeout = 500; //0.5 sec
-    char buf[256];
-
-    const char *ret = BluetoothSocket::get_line(socket->mFd,
-        buf, sizeof(buf),
-        timeout,
-        &err);
-
-    if (ret == NULL) {
-      LOG("HFP: Read Nothing");
-    } else {
-      LOG("HFP: Received:%s", ret);
-
-      if (!strncmp(ret, "AT+BRSF=", 8)) {
-        reply_brsf(socket->mFd);
-        reply_ok(socket->mFd);
-      } else if (!strncmp(ret, "AT+CIND=?", 9)) {
-        reply_cind_range(socket->mFd);
-        reply_ok(socket->mFd);
-      } else if (!strncmp(ret, "AT+CIND", 7)) {
-        reply_cind_current_status(socket->mFd);
-        reply_ok(socket->mFd);
-      } else if (!strncmp(ret, "AT+CMER=", 8)) {
-        reply_ok(socket->mFd);
-      } else if (!strncmp(ret, "AT+CHLD=?", 9)) {
-        reply_chld_range(socket->mFd);
-        reply_ok(socket->mFd);
-      } else if (!strncmp(ret, "AT+CHLD=", 9)) {
-        reply_ok(socket->mFd);
-      } else if (!strncmp(ret, "AT+VGS=", 7)) {
-        // Get vgs value in the msg
-        int newVgs = ret[7] - '0';
-
-        if (strlen(ret) > 8) {
-          newVgs = newVgs * 10 + (ret[8] - '0');
-        }
-
-        if (newVgs > sCurrentVgs) {
-          pressKey(KEY_VOLUMEUP);
-        } else if (newVgs < sCurrentVgs) {
-          pressKey(KEY_VOLUMEDOWN);
-        }
-
-        sCurrentVgs = newVgs;
-
-        reply_ok(socket->mFd);
-      } else if (!strncmp(ret, "AT+VGM=", 7)) {
-        reply_ok(socket->mFd);
-      } else if (!strncmp(ret, "ATA", 3)) {
-        LOG("Answer the call!");
-        pressKey(KEY_F23);
-        reply_ok(socket->mFd);
-      } else if (!strncmp(ret, "AT+BLDN", 7)) {
-        // Obvious that's wrong, however it's just for demo.
-        LOG("Hang up the call!");
-        pressKey(KEY_F24);
-        reply_ok(socket->mFd);
-      } else if (!strncmp(ret, "AT+BVRA", 7)) {
-        reply_error(socket->mFd);
-        mozilla::dom::gonk::AudioManager::SetAudioRoute(3);
-      } else if (!strncmp(ret, "OK", 2)) {
-        // Do nothing
-        LOG("Got an OK");
-      } else {
-        LOG("Not handled.");
-        reply_ok(socket->mFd);
-      }
-    }
-  }
-
-  return NULL;
-}
 */
 
 BluetoothHfpManager::~BluetoothHfpManager()
@@ -360,10 +182,117 @@ BluetoothHfpManager::~BluetoothHfpManager()
 
 }
 
+void 
+BluetoothHfpManager::ReplyCindCurrentStatus()
+{
+  const char* str = "+CIND: 1,0,0,0,3,0,3";
+  char response[256];
+
+  strcat(response, kHfpCRLF);
+  strcat(response, str);
+  strcat(response, kHfpCRLF);
+    
+  mozilla::ipc::SocketRawData* s = new mozilla::ipc::SocketRawData(response);
+  SendSocketData(s);
+}
+
+void 
+BluetoothHfpManager::ReplyCindRange()
+{
+  const char* str = "+CIND: (\"service\",(0-1)),(\"call\",(0-1)),(\"callsetup\",(0-3)), \
+                     (\"callheld\",(0-2)),(\"signal\",(0-5)),(\"roam\",(0-1)), \
+                     (\"battchg\",(0-5))";  
+                     
+  char response[256];
+
+  strcat(response, kHfpCRLF);
+  strcat(response, str);
+  strcat(response, kHfpCRLF);
+    
+  mozilla::ipc::SocketRawData* s = new mozilla::ipc::SocketRawData(response);
+  SendSocketData(s);
+}
+
+void 
+BluetoothHfpManager::ReplyCmer(bool enableIndicator)
+{
+  const char* str = enableIndicator ? "+CMER: 3,0,0,1" : "+CMER: 3,0,0,0";
+  char response[256];
+
+  strcat(response, kHfpCRLF);
+  strcat(response, str);
+  strcat(response, kHfpCRLF);
+    
+  mozilla::ipc::SocketRawData* s = new mozilla::ipc::SocketRawData(response);
+  SendSocketData(s);
+}
+
+void 
+BluetoothHfpManager::ReplyChldRange()
+{  
+  char response[256];
+
+  strcat(response, kHfpCRLF);
+  strcat(response, "+CHLD: (0,1,2,3)");
+  strcat(response, kHfpCRLF);
+    
+  mozilla::ipc::SocketRawData* s = new mozilla::ipc::SocketRawData(response);
+  SendSocketData(s);
+}
+
+void 
+BluetoothHfpManager::ReplyBrsf()
+{    
+  char response[256];
+
+  strcat(response, kHfpCRLF);
+  strcat(response, "+BRSF: 23");
+  strcat(response, kHfpCRLF);
+    
+  mozilla::ipc::SocketRawData* s = new mozilla::ipc::SocketRawData(response);
+  SendSocketData(s);
+}
+
+void 
+BluetoothHfpManager::ReplyOk()
+{    
+  char response[256];
+
+  strcat(response, kHfpCRLF);
+  strcat(response, "OK");
+  strcat(response, kHfpCRLF);  
+    
+  mozilla::ipc::SocketRawData* s = new mozilla::ipc::SocketRawData(response);
+  SendSocketData(s);
+}
+
 void
 BluetoothHfpManager::ReceiveSocketData(SocketRawData* aMessage)
 {
-    LOG("Receive message!!");
+  LOG("Receive message: %s", aMessage->mData);
+
+  const char* msg = (const char*)aMessage->mData;
+
+  if (!strncmp(msg, "AT+BRSF=", 8)) {
+    ReplyBrsf();
+    ReplyOk();
+  }else if (!strncmp(msg, "AT+CIND=?", 9)) {
+    ReplyCindRange();
+    ReplyOk();
+  } else if (!strncmp(msg, "AT+CIND", 7)) {
+    ReplyCindCurrentStatus();
+    ReplyOk();
+  } else if (!strncmp(msg, "AT+CMER=", 8)) {
+    ReplyOk();
+  } else if (!strncmp(msg, "AT+CHLD=?", 9)) {
+    ReplyChldRange();
+    ReplyOk();
+  } else if (!strncmp(msg, "AT+CHLD=", 9)) {
+    ReplyOk();
+  } else {
+    LOG("Unhandled message, reply ok");
+    ReplyOk();
+  }
 }
 
 bool

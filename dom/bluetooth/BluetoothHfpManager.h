@@ -46,6 +46,14 @@ protected:
   int mChannel;
   char* mAddress;
   int mCurrentVgs;
+
+private:
+  void ReplyCindCurrentStatus();
+  void ReplyCindRange();
+  void ReplyCmer(bool enableIndicator);
+  void ReplyChldRange();
+  void ReplyBrsf();
+  void ReplyOk();
 };
 
 END_BLUETOOTH_NAMESPACE
