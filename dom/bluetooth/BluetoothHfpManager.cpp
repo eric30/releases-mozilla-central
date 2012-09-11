@@ -185,7 +185,7 @@ BluetoothHfpManager::~BluetoothHfpManager()
 void 
 BluetoothHfpManager::ReplyCindCurrentStatus()
 {
-  const char* str = "+CIND: 1,0,0,0,3,0,3";
+  const char* str = "+CIND: 5,5,1,0,0,0,0";
 	char response[256] = {'\0'};
 
   strcat(response, kHfpCRLF);
@@ -199,9 +199,11 @@ BluetoothHfpManager::ReplyCindCurrentStatus()
 void 
 BluetoothHfpManager::ReplyCindRange()
 {
-  const char* str = "+CIND: (\"service\",(0-1)),(\"call\",(0-1)),(\"callsetup\",(0-3)), \
+  const char* str = "+CIND: (\"battchg\",(0-5)),(\"signal\",(0-5)),(\"service\",(0,1)),(\"call\",(0,1)),(\"callsetup\",(0-3)),(\"callheld\",(0-2)),(\"roam\",(0,1))";
+/*
+	+CIND: (\"service\",(0-1)),(\"call\",(0-1)),(\"callsetup\",(0-3)),		\
                      (\"callheld\",(0-2)),(\"signal\",(0-5)),(\"roam\",(0-1)), \
-                     (\"battchg\",(0-5))";  
+                     (\"battchg\",(0-5))";  */
                      
 	char response[256] = {'\0'};
 
@@ -246,7 +248,7 @@ BluetoothHfpManager::ReplyBrsf()
 	char response[256] = {'\0'};
 
   strcat(response, kHfpCRLF);
-  strcat(response, "+BRSF: 23");
+  strcat(response, "+BRSF: 352");
   strcat(response, kHfpCRLF);
     
   mozilla::ipc::SocketRawData* s = new mozilla::ipc::SocketRawData(response);
