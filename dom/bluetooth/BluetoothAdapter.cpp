@@ -151,7 +151,7 @@ BluetoothAdapter::BluetoothAdapter(nsPIDOMWindow* aOwner, const BluetoothValue& 
   uuids.AppendElement(test);
 
   BluetoothService* bs = BluetoothService::Get();
-  bs->AddReservedServicesInternal(mPath, uuids, handles);
+  //bs->AddReservedServicesInternal(mPath, uuids, handles);
 
   // Start listening remote HFP connection request
   BluetoothHfpManager* hfp = BluetoothHfpManager::GetManager();
