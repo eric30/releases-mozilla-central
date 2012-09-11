@@ -186,7 +186,7 @@ void
 BluetoothHfpManager::ReplyCindCurrentStatus()
 {
   const char* str = "+CIND: 1,0,0,0,3,0,3";
-  char response[256];
+	char response[256] = {'\0'};
 
   strcat(response, kHfpCRLF);
   strcat(response, str);
@@ -203,7 +203,7 @@ BluetoothHfpManager::ReplyCindRange()
                      (\"callheld\",(0-2)),(\"signal\",(0-5)),(\"roam\",(0-1)), \
                      (\"battchg\",(0-5))";  
                      
-  char response[256];
+	char response[256] = {'\0'};
 
   strcat(response, kHfpCRLF);
   strcat(response, str);
@@ -217,7 +217,7 @@ void
 BluetoothHfpManager::ReplyCmer(bool enableIndicator)
 {
   const char* str = enableIndicator ? "+CMER: 3,0,0,1" : "+CMER: 3,0,0,0";
-  char response[256];
+	char response[256] = {'\0'};
 
   strcat(response, kHfpCRLF);
   strcat(response, str);
@@ -229,8 +229,8 @@ BluetoothHfpManager::ReplyCmer(bool enableIndicator)
 
 void 
 BluetoothHfpManager::ReplyChldRange()
-{  
-  char response[256];
+{
+	char response[256] = {'\0'};
 
   strcat(response, kHfpCRLF);
   strcat(response, "+CHLD: (0,1,2,3)");
@@ -243,7 +243,7 @@ BluetoothHfpManager::ReplyChldRange()
 void 
 BluetoothHfpManager::ReplyBrsf()
 {    
-  char response[256];
+	char response[256] = {'\0'};
 
   strcat(response, kHfpCRLF);
   strcat(response, "+BRSF: 23");
@@ -256,7 +256,7 @@ BluetoothHfpManager::ReplyBrsf()
 void 
 BluetoothHfpManager::ReplyOk()
 {    
-  char response[256];
+  char response[256] = {'\0'};
 
   strcat(response, kHfpCRLF);
   strcat(response, "OK");
