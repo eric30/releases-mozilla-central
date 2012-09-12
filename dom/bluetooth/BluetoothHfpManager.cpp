@@ -198,20 +198,9 @@ BluetoothHfpManager::Disconnect(BluetoothReplyRunnable* aRunnable)
 
   nsRefPtr<BluetoothReplyRunnable> runnable = aRunnable;
 
-  // nsresult rv = bs->GetSocketViaService(aObjectPath,
-  //                                       serviceUuidStr,
-  //                                       BluetoothSocketType::RFCOMM,
-  //                                       true,
-  //                                       false,
-  //                                       this,
-  //                                       runnable);
+  nsresult rv = bs->CloseSocket(this,
+																runnable);
+  runnable.forget();
 
-  // runnable.forget();
-	RemoveSocketWatcher(this);
-	BluetoothValue v;
-	BluetoothReply* reply = new BluetoothReply(BluetoothReplySuccess(v));
-  runnable->SetReply(reply);
-	runnable->Run();
-	nsresult rv = NS_OK;
   return NS_FAILED(rv) ? false : true;
 }
