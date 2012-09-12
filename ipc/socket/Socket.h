@@ -47,6 +47,9 @@ StopSocketManager();
 class SocketConsumer;
 
 bool
+ListenSocket(SocketConsumer* s, int aType, int aChannel, bool aAuth, bool aEncrypt);
+
+bool
 ConnectSocket(SocketConsumer* s, int aType, const char* aAddress, int aChannel, bool aAuth, bool aEncrypt);
 
 bool

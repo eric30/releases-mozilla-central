@@ -89,6 +89,7 @@ struct SocketManager : public RefCounted<SocketManager>,
   bool AddSocket(SocketConsumer* aConsumer, int aFd);
   bool RemoveSocket(SocketConsumer* aConsumer);
 
+  nsTArray<uint32_t> mListeningSockets;
   nsAutoPtr<SocketRawData> mIncoming;
   MessageLoopForIO* mIOLoop;
 
@@ -157,9 +158,9 @@ SocketConsumer::SendSocketData(SocketRawData* aData)
 }
 
 int
-OpenSocket(int aType, const char* aAddress, int aChannel, bool aAuth, bool aEncrypt)
+OpenSocket(int aType, const char* aAddress, int aChannel, bool aAuth, bool aEncrypt, bool aServer)
 {
-  MOZ_ASSERT(!NS_IsMainThread());
+  //MOZ_ASSERT(!NS_IsMainThread());
   int lm = 0;
   int fd = -1;
   int sndbuf;
@@ -214,15 +215,20 @@ OpenSocket(int aType, const char* aAddress, int aChannel, bool aAuth, bool aEncr
 
   int n = 1;
   setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &n, sizeof(n));
-  
+
   socklen_t addr_sz;
   struct sockaddr *addr;
-  bdaddr_t bd_address_obj;
+  // Create default as any address for server
+  bdaddr_t bd_address_obj = {{0, 0, 0, 0, 0, 0}};
 
-  if (get_bdaddr(aAddress, &bd_address_obj)) {
-    NS_WARNING("Can't get bluetooth address!");
-    return -1;
+  // If we have a specific client socket, get address for that instead
+  if(!aServer) {
+    if (get_bdaddr(aAddress, &bd_address_obj)) {
+      NS_WARNING("Can't get bluetooth address!");
+      return -1;
+    }
   }
+  
 
   switch (aType) {
   case TYPE_RFCOMM:
@@ -249,16 +255,26 @@ OpenSocket(int aType, const char* aAddress, int aChannel, bool aAuth, bool aEncr
     return -1;
   }
 
-  int ret = connect(fd, addr, addr_sz);
-
-  if (ret) {
+  if (!aServer) {
+    if(connect(fd, addr, addr_sz)) {
 #if DEBUG
-    LOG("Socket connect errno=%d\n", errno);
+      LOG("Socket connect errno=%d\n", errno);
 #endif
-    NS_WARNING("Socket connect error!");
-    return -1;
-  }
+      NS_WARNING("Socket connect error!");
+      return -1;
+    }
+  } else {    
+    if (bind(fd, addr, addr_sz)) {
+      LOG("...bind(%d) gave errno %d", fd, errno);
+      return -1;
+    }
 
+    if (listen(fd, 1)) {
+      LOG("...listen(%d) gave errno %d", fd, errno);
+      return -1;
+    }
+  }
+  
   return fd;
 }
 
@@ -321,6 +337,10 @@ SocketManager::OnFileCanReadWithoutBlocking(int aFd)
   //     data available on the socket
   //     If so, break;
 
+  if(mListeningSockets.Contains(aFd)) {
+    NS_WARNING("LIstening socket was connected to!");
+  }
+  
   while (true) {
     if (!mIncoming) {
       mIncoming = new SocketRawData();
@@ -463,10 +483,27 @@ ConnectSocket(SocketConsumer* aConsumer, int aType, const char* aAddress, int aC
     NS_WARNING("Manager not yet started!");
     return false;
   }
-  int fd = OpenSocket(aType, aAddress, aChannel, aAuth, aEncrypt);
+  int fd = OpenSocket(aType, aAddress, aChannel, aAuth, aEncrypt, false);
   if (fd <= 0) {
     return false;
   }
+  return sManager->AddSocket(aConsumer, fd);
+}
+
+bool
+ListenSocket(SocketConsumer* aConsumer, int aType, int aChannel, bool aAuth, bool aEncrypt)
+{
+  if (!sManager) {
+    NS_WARNING("Manager not yet started!");
+    return false;
+  }
+  int fd = OpenSocket(aType, nullptr, aChannel, aAuth, aEncrypt, true);
+  if (fd <= 0) {
+    NS_WARNING("LIstening socket fucked up!");
+    return false;
+  }
+  sManager->mListeningSockets.AppendElement(fd);
+  NS_WARNING("LIstening socket!");
   return sManager->AddSocket(aConsumer, fd);
 }
 
