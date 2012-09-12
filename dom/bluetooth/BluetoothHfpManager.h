@@ -24,23 +24,11 @@ public:
   bool Connect(const nsAString& aObjectPath,
                BluetoothReplyRunnable* aRunnable);
 
+	bool Disconnect(BluetoothReplyRunnable* aRunnable);
   void ReceiveSocketData(SocketRawData* aMessage);
-  /*
-  void Disconnect();
-  bool ReachedMaxConnection();
-  bool Listen(int channel);
-  void Close();
-  pthread_t mEventThread;
-  */
 
 protected:
   BluetoothHfpManager();
-  /*
-  static void* MessageHandler(void* ptr);
-  static void* AcceptInternal(void* ptr);
-
-  pthread_t mAcceptThread;
-  */
 
   bool mConnected;
   int mChannel;

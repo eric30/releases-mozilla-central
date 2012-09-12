@@ -1,3 +1,6 @@
+#include "base/basictypes.h"
+
+#include "BluetoothTypes.h"
 #include "BluetoothHfpManager.h"
 #include "BluetoothReplyRunnable.h"
 #include "BluetoothService.h"
@@ -178,5 +181,37 @@ BluetoothHfpManager::Connect(const nsAString& aObjectPath,
                                         runnable);
 
   runnable.forget();
+  return NS_FAILED(rv) ? false : true;
+}
+
+bool
+BluetoothHfpManager::Disconnect(BluetoothReplyRunnable* aRunnable)
+{
+  BluetoothService* bs = BluetoothService::Get();
+  if (!bs) {
+    NS_WARNING("BluetoothService not available!");
+    return nullptr;
+  }
+
+  nsString serviceUuidStr =
+    NS_ConvertUTF8toUTF16(mozilla::dom::bluetooth::BluetoothServiceUuidStr::Handsfree);
+
+  nsRefPtr<BluetoothReplyRunnable> runnable = aRunnable;
+
+  // nsresult rv = bs->GetSocketViaService(aObjectPath,
+  //                                       serviceUuidStr,
+  //                                       BluetoothSocketType::RFCOMM,
+  //                                       true,
+  //                                       false,
+  //                                       this,
+  //                                       runnable);
+
+  // runnable.forget();
+	RemoveSocketWatcher(this);
+	BluetoothValue v;
+	BluetoothReply* reply = new BluetoothReply(BluetoothReplySuccess(v));
+  runnable->SetReply(reply);
+	runnable->Run();
+	nsresult rv = NS_OK;
   return NS_FAILED(rv) ? false : true;
 }
