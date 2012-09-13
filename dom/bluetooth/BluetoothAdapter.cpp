@@ -155,7 +155,7 @@ BluetoothAdapter::BluetoothAdapter(nsPIDOMWindow* aOwner, const BluetoothValue& 
 
   // Start listening remote HFP connection request
   BluetoothHfpManager* hfp = BluetoothHfpManager::GetManager();
-  //hfp->Listen(1);
+  hfp->Listen();
 }
 
 BluetoothAdapter::~BluetoothAdapter()

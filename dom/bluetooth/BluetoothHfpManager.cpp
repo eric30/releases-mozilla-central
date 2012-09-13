@@ -204,3 +204,13 @@ BluetoothHfpManager::Disconnect(BluetoothReplyRunnable* aRunnable)
 
   return NS_FAILED(rv) ? false : true;
 }
+
+void
+BluetoothHfpManager::Listen()
+{
+	mozilla::ipc::ListenSocket(this,
+														 BluetoothSocketType::RFCOMM,
+														 1,
+														 true,
+														 false);
+}

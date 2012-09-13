@@ -26,7 +26,7 @@ public:
 
 	bool Disconnect(BluetoothReplyRunnable* aRunnable);
   void ReceiveSocketData(SocketRawData* aMessage);
-
+	void Listen();
 protected:
   BluetoothHfpManager();
 
