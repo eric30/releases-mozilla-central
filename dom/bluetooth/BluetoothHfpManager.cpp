@@ -16,6 +16,9 @@
 #include <linux/ioctl.h>
 #include <fcntl.h>
 
+#include "mozilla/Services.h"
+#include "nsIObserverService.h"
+
 #if defined(MOZ_WIDGET_GONK)
 #include <android/log.h>
 #define LOG(args...) __android_log_print(ANDROID_LOG_INFO, "Bluetooth", args)
@@ -169,6 +172,16 @@ BluetoothHfpManager::ReceiveSocketData(SocketRawData* aMessage)
     ReplyOk();
   } else if (!strncmp(msg, "AT+CHLD=", 8)) {
     ReplyOk();
+  } else if (!strncmp(msg, "AT+VGS=", 7)) {
+    ReplyOk();
+
+    nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
+    os->NotifyObservers(nullptr, "bluetooth-volume-up", nullptr);
+    /*
+    os->NotifyObservers(nsContentUtils::GetRootDocument(this),
+                        "fullscreen-origin-change",
+                        PromiseFlatString(aOrigin).get());
+    */
   } else {
     LOG("Unhandled message, reply ok");
     ReplyOk();

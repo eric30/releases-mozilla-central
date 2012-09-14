@@ -425,6 +425,11 @@ Services.obs.addObserver(function onWebappsReady(subject, topic, data) {
   shell.sendChromeEvent({ type: 'webapps-registry-ready' });
 }, 'webapps-registry-ready', false);
 
+Services.obs.addObserver(function onBluetoothVolumeUp(subject, topic, data) {
+  shell.sendChromeEvent({ type: 'volume-up-button-press' });
+  shell.sendChromeEvent({ type: 'volume-up-button-release' });
+}, 'bluetooth-volume-up', false);
+
 (function Repl() {
   if (!Services.prefs.getBoolPref('b2g.remote-js.enabled')) {
     return;
