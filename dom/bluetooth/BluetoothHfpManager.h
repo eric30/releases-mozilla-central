@@ -13,6 +13,7 @@ BEGIN_BLUETOOTH_NAMESPACE
 
 using namespace mozilla::ipc;
 
+class BluetoothRilListener;
 class BluetoothReplyRunnable;
 
 class BluetoothHfpManager : public SocketConsumer
@@ -26,22 +27,30 @@ public:
 
 	bool Disconnect(BluetoothReplyRunnable* aRunnable);
   void ReceiveSocketData(SocketRawData* aMessage);
-	void Listen();
-protected:
-  BluetoothHfpManager();
-
-  bool mConnected;
-  int mChannel;
-  char* mAddress;
-  int mCurrentVgs;
+  void CallStateChanged(int aCallIndex, int aCallState, 
+                        const char* aNumber, bool aIsActive);
 
 private:
+  BluetoothHfpManager();
+
+  void SendLine(const char* msg);
   void ReplyCindCurrentStatus();
   void ReplyCindRange();
   void ReplyCmer(bool enableIndicator);
   void ReplyChldRange();
   void ReplyBrsf();
   void ReplyOk();
+
+  int mLocalBrsf;
+
+  bool mConnected;
+  int mChannel;
+  char* mAddress;
+  int mCurrentVgs;
+  int mCurrentCallIndex;
+  int mCurrentCallState;
+
+  BluetoothRilListener* mRilListener;
 };
 
 END_BLUETOOTH_NAMESPACE

@@ -8,7 +8,7 @@
 
 interface nsIDOMDOMRequest;
 
-[scriptable, builtinclass, uuid(4a679fc6-572a-4ddc-8e93-cfbddb9f2d6a)]
+[scriptable, builtinclass, uuid(c7bf50cc-1872-42bc-9242-f2816f69871e)]
 interface nsIDOMBluetoothDevice : nsIDOMEventTarget
 {
   readonly attribute DOMString address;
