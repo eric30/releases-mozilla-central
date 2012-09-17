@@ -175,13 +175,20 @@ BluetoothHfpManager::ReceiveSocketData(SocketRawData* aMessage)
   } else if (!strncmp(msg, "AT+VGS=", 7)) {
     ReplyOk();
 
+    int newVgs = msg[7] - '0';
+
+    if (strlen(msg) > 8) {
+      newVgs = newVgs * 10 + (msg[8] - '0');
+    }
+
+    mCurrentVgs = newVgs;
+
     nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
-    os->NotifyObservers(nullptr, "bluetooth-volume-up", nullptr);
-    /*
-    os->NotifyObservers(nsContentUtils::GetRootDocument(this),
-                        "fullscreen-origin-change",
-                        PromiseFlatString(aOrigin).get());
-    */
+    if (newVgs > mCurrentVgs) {
+      os->NotifyObservers(nullptr, "bluetooth-volume-up", nullptr);
+    } else if (newVgs < mCurrentVgs) {
+      os->NotifyObservers(nullptr, "bluetooth-volume-down", nullptr);
+    }
   } else {
     LOG("Unhandled message, reply ok");
     ReplyOk();
