@@ -181,14 +181,14 @@ BluetoothHfpManager::ReceiveSocketData(SocketRawData* aMessage)
       newVgs = newVgs * 10 + (msg[8] - '0');
     }
 
-    mCurrentVgs = newVgs;
-
     nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
     if (newVgs > mCurrentVgs) {
       os->NotifyObservers(nullptr, "bluetooth-volume-up", nullptr);
     } else if (newVgs < mCurrentVgs) {
       os->NotifyObservers(nullptr, "bluetooth-volume-down", nullptr);
     }
+
+    mCurrentVgs = newVgs;
   } else {
     LOG("Unhandled message, reply ok");
     ReplyOk();
