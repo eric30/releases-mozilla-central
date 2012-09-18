@@ -1,170 +1,54 @@
-#include "base/basictypes.h"
+/* -*- Mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; tab-width: 40 -*- */
+/* vim: set ts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+ * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "BluetoothTypes.h"
 #include "BluetoothHfpManager.h"
+
 #include "BluetoothReplyRunnable.h"
 #include "BluetoothService.h"
 #include "BluetoothServiceUuid.h"
-#include "AudioManager.h"
-#include "mozilla/ipc/Socket.h"
-#include <unistd.h> /* usleep() */
-#include <linux/ioctl.h>
-#include <fcntl.h>
-
-#if defined(MOZ_WIDGET_GONK)
-#include <android/log.h>
-#define LOG(args...) __android_log_print(ANDROID_LOG_INFO, "Bluetooth", args)
-#else
-#define LOG(args...) printf(args); printf("\n");
-#endif
 
 USING_BLUETOOTH_NAMESPACE
 
 static BluetoothHfpManager* sInstance = nullptr;
 
-const char* kHfpCRLF = "\xd\xa";
-
-BluetoothHfpManager::BluetoothHfpManager() : mConnected(false)
-                                           , mChannel(-1)
-                                           , mAddress(nullptr)
+BluetoothHfpManager::BluetoothHfpManager()
 {
 }
 
-BluetoothHfpManager*
-BluetoothHfpManager::GetManager()
+BluetoothHfpManager::~BluetoothHfpManager()
 {
-  if (sInstance == nullptr)
-  {
+}
+
+//static
+BluetoothHfpManager*
+BluetoothHfpManager::Get()
+{
+  if (sInstance == nullptr) {
     sInstance = new BluetoothHfpManager();
   }
 
   return sInstance;
 }
 
-BluetoothHfpManager::~BluetoothHfpManager()
-{
-
-}
-
+// Virtual function of class SocketConsumer
 void
-BluetoothHfpManager::ReplyCindCurrentStatus()
+BluetoothHfpManager::ReceiveSocketData(mozilla::ipc::SocketRawData* aMessage)
 {
-  const char* str = "+CIND: 5,5,1,0,0,0,0";
-	char response[256] = {'\0'};
-
-  strcat(response, kHfpCRLF);
-  strcat(response, str);
-  strcat(response, kHfpCRLF);
-
-  mozilla::ipc::SocketRawData* s = new mozilla::ipc::SocketRawData(response);
-  SendSocketData(s);
-}
-
-void
-BluetoothHfpManager::ReplyCindRange()
-{
-  const char* str = "+CIND: (\"battchg\",(0-5)),(\"signal\",(0-5)),(\"service\",(0,1)),(\"call\",(0,1)),(\"callsetup\",(0-3)),(\"callheld\",(0-2)),(\"roam\",(0,1))";
-
-	char response[256] = {'\0'};
-
-  strcat(response, kHfpCRLF);
-  strcat(response, str);
-  strcat(response, kHfpCRLF);
-
-  mozilla::ipc::SocketRawData* s = new mozilla::ipc::SocketRawData(response);
-  SendSocketData(s);
-}
-
-void
-BluetoothHfpManager::ReplyCmer(bool enableIndicator)
-{
-  const char* str = enableIndicator ? "+CMER: 3,0,0,1" : "+CMER: 3,0,0,0";
-	char response[256] = {'\0'};
-
-  strcat(response, kHfpCRLF);
-  strcat(response, str);
-  strcat(response, kHfpCRLF);
-
-  mozilla::ipc::SocketRawData* s = new mozilla::ipc::SocketRawData(response);
-  SendSocketData(s);
-}
-
-void
-BluetoothHfpManager::ReplyChldRange()
-{
-	char response[256] = {'\0'};
-
-  strcat(response, kHfpCRLF);
-  strcat(response, "+CHLD: (0,1,2,3)");
-  strcat(response, kHfpCRLF);
-
-  mozilla::ipc::SocketRawData* s = new mozilla::ipc::SocketRawData(response);
-  SendSocketData(s);
-}
-
-void
-BluetoothHfpManager::ReplyBrsf()
-{
-	char response[256] = {'\0'};
-
-  strcat(response, kHfpCRLF);
-  strcat(response, "+BRSF: 352");
-  strcat(response, kHfpCRLF);
-
-  mozilla::ipc::SocketRawData* s = new mozilla::ipc::SocketRawData(response);
-  SendSocketData(s);
-}
-
-void
-BluetoothHfpManager::ReplyOk()
-{
-  char response[256] = {'\0'};
-
-  strcat(response, kHfpCRLF);
-  strcat(response, "OK");
-  strcat(response, kHfpCRLF);
-
-  mozilla::ipc::SocketRawData* s = new mozilla::ipc::SocketRawData(response);
-  SendSocketData(s);
-}
-
-void
-BluetoothHfpManager::ReceiveSocketData(SocketRawData* aMessage)
-{
-  LOG("Receive message: %s", aMessage->mData);
-
-  const char* msg = (const char*)aMessage->mData;
-
-  if (!strncmp(msg, "AT+BRSF=", 8)) {
-    ReplyBrsf();
-    ReplyOk();
-  }else if (!strncmp(msg, "AT+CIND=?", 9)) {
-    ReplyCindRange();
-    ReplyOk();
-  } else if (!strncmp(msg, "AT+CIND", 7)) {
-    ReplyCindCurrentStatus();
-    ReplyOk();
-  } else if (!strncmp(msg, "AT+CMER=", 8)) {
-    ReplyOk();
-  } else if (!strncmp(msg, "AT+CHLD=?", 9)) {
-    ReplyChldRange();
-    ReplyOk();
-  } else if (!strncmp(msg, "AT+CHLD=", 9)) {
-    ReplyOk();
-  } else {
-    LOG("Unhandled message, reply ok");
-    ReplyOk();
-  }
 }
 
 bool
-BluetoothHfpManager::Connect(const nsAString& aObjectPath,
+BluetoothHfpManager::Connect(const nsAString& aDeviceObjectPath,
                              BluetoothReplyRunnable* aRunnable)
 {
+  MOZ_ASSERT(NS_IsMainThread());
+
   BluetoothService* bs = BluetoothService::Get();
   if (!bs) {
     NS_WARNING("BluetoothService not available!");
-    return nullptr;
+    return false;
   }
 
   nsString serviceUuidStr =
@@ -172,7 +56,7 @@ BluetoothHfpManager::Connect(const nsAString& aObjectPath,
 
   nsRefPtr<BluetoothReplyRunnable> runnable = aRunnable;
 
-  nsresult rv = bs->GetSocketViaService(aObjectPath,
+  nsresult rv = bs->GetSocketViaService(aDeviceObjectPath,
                                         serviceUuidStr,
                                         BluetoothSocketType::RFCOMM,
                                         true,
@@ -187,30 +71,18 @@ BluetoothHfpManager::Connect(const nsAString& aObjectPath,
 bool
 BluetoothHfpManager::Disconnect(BluetoothReplyRunnable* aRunnable)
 {
+  MOZ_ASSERT(NS_IsMainThread());
+
   BluetoothService* bs = BluetoothService::Get();
   if (!bs) {
     NS_WARNING("BluetoothService not available!");
-    return nullptr;
+    return false;
   }
-
-  nsString serviceUuidStr =
-    NS_ConvertUTF8toUTF16(mozilla::dom::bluetooth::BluetoothServiceUuidStr::Handsfree);
 
   nsRefPtr<BluetoothReplyRunnable> runnable = aRunnable;
 
-  nsresult rv = bs->CloseSocket(this,
-																runnable);
+  nsresult rv = bs->CloseSocket(this, runnable);
   runnable.forget();
 
   return NS_FAILED(rv) ? false : true;
-}
-
-void
-BluetoothHfpManager::Listen()
-{
-	mozilla::ipc::ListenSocket(this,
-														 BluetoothSocketType::RFCOMM,
-														 1,
-														 true,
-														 false);
 }
