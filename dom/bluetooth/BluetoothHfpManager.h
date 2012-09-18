@@ -25,6 +25,7 @@ public:
   bool Connect(const nsAString& aDeviceObjectPath,
                BluetoothReplyRunnable* aRunnable);
   bool Disconnect(BluetoothReplyRunnable* aRunnable);
+  void SendLine(const char* aMessage);
 
 private:
   BluetoothHfpManager();
