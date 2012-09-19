@@ -324,7 +324,7 @@ BluetoothDevice::ConnectHeadset(nsIDOMDOMRequest** aRequest)
 
   nsRefPtr<BluetoothVoidReplyRunnable> result = new BluetoothVoidReplyRunnable(req);
 
-  BluetoothHfpManager* hfp = BluetoothHfpManager::GetManager();
+  BluetoothHfpManager* hfp = BluetoothHfpManager::Get();
 
   if (hfp->Connect(mPath, result)) {
     LOG("[HFP] Start connecting with headset");
@@ -355,7 +355,7 @@ BluetoothDevice::DisconnectHeadset(nsIDOMDOMRequest** aRequest)
 
   nsRefPtr<BluetoothVoidReplyRunnable> result = new BluetoothVoidReplyRunnable(req);
 
-  BluetoothHfpManager* hfp = BluetoothHfpManager::GetManager();
+  BluetoothHfpManager* hfp = BluetoothHfpManager::Get();
 
   if (hfp->Disconnect(result)) {
     LOG("[HFP] Stopping connecting with headset");
