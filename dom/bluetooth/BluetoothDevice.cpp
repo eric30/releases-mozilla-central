@@ -134,7 +134,8 @@ BluetoothDevice::SetPropertyByValue(const BluetoothNamedValue& aValue)
   } else if (name.EqualsLiteral("Icon")) {
     mIcon = value.get_nsString();
   } else if (name.EqualsLiteral("Connected")) {
-    mConnected = value.get_bool();
+    InfallibleTArray<nsString> arr = value.get_ArrayOfnsString();
+    mConnected = arr[0][0] - '0';
   } else if (name.EqualsLiteral("Paired")) {
     mPaired = value.get_bool();
   } else if (name.EqualsLiteral("UUIDs")) {
@@ -209,11 +210,12 @@ BluetoothDevice::Notify(const BluetoothSignal& aData)
     BluetoothNamedValue v = aData.value().get_ArrayOfBluetoothNamedValue()[0];
     nsString name = v.name();
 
+    SetPropertyByValue(v);
+
     if (name.EqualsLiteral("Connected")) {
-      bool isConnected = v.value();
       nsRefPtr<nsDOMEvent> event = new nsDOMEvent(nullptr, nullptr);
       nsresult rv;
-      if (isConnected) {
+      if (mConnected) {
         rv = event->InitEvent(NS_LITERAL_STRING("connected"), false, false);
       } else {
         rv = event->InitEvent(NS_LITERAL_STRING("disconnected"), false, false);
@@ -227,7 +229,6 @@ BluetoothDevice::Notify(const BluetoothSignal& aData)
       bool dummy;
       DispatchEvent(event, &dummy);
     } else {
-      SetPropertyByValue(v);
       nsRefPtr<BluetoothPropertyEvent> e = BluetoothPropertyEvent::Create(name);
       e->Dispatch(ToIDOMEventTarget(), NS_LITERAL_STRING("propertychanged"));
     }

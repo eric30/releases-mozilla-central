@@ -420,8 +420,6 @@ BluetoothService::UnregisterManager(BluetoothManager* aManager)
 BluetoothService*
 BluetoothService::Get()
 {
-  MOZ_ASSERT(NS_IsMainThread());
-
   // If we already exist, exit early
   if (gBluetoothService) {
     return gBluetoothService;

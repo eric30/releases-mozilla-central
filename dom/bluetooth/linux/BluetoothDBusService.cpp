@@ -80,7 +80,7 @@ static Properties sDeviceProperties[] = {
   {"Class", DBUS_TYPE_UINT32},
   {"UUIDs", DBUS_TYPE_ARRAY},
   {"Paired", DBUS_TYPE_BOOLEAN},
-  {"Connected", DBUS_TYPE_BOOLEAN},
+  {"Connected", DBUS_TYPE_ARRAY},
   {"Trusted", DBUS_TYPE_BOOLEAN},
   {"Blocked", DBUS_TYPE_BOOLEAN},
   {"Alias", DBUS_TYPE_STRING},
@@ -555,8 +555,6 @@ RegisterAgent(const nsAString& aAdapterPath)
   return true;
 }
 
-
-
 static void
 AddReservedServices(const nsAString& aAdapterPath)
 {
@@ -694,6 +692,7 @@ GetProperty(DBusMessageIter aIter, Properties* aPropertyTypes,
       dbus_message_iter_recurse(&prop_val, &array_val_iter);
       array_type = dbus_message_iter_get_arg_type(&array_val_iter);
       if (array_type == DBUS_TYPE_OBJECT_PATH ||
+          array_type == DBUS_TYPE_BYTE ||
           array_type == DBUS_TYPE_STRING){
         InfallibleTArray<nsString> arr;
         do {

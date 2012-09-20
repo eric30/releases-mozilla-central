@@ -29,11 +29,10 @@ public:
   void ReceiveSocketData(SocketRawData* aMessage);
   void CallStateChanged(int aCallIndex, int aCallState, 
                         const char* aNumber, bool aIsActive);
-
+  void SendLine(const char* msg);
 private:
   BluetoothHfpManager();
 
-  void SendLine(const char* msg);
   void ReplyCindCurrentStatus();
   void ReplyCindRange();
   void ReplyCmer(bool enableIndicator);

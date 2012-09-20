@@ -32,23 +32,6 @@ static BluetoothHfpManager* sInstance = nullptr;
 static bool sStopSendingRingFlag = true;
 static nsCOMPtr<nsIThread> sHfpCommandThread;
 
-const char* kHfpCRLF = "\xd\xa";
-
-static void
-SendLine(const char* msg)
-{
-  char response[256] = {'\0'};
-
-  strcat(response, kHfpCRLF);
-  strcat(response, msg);
-  strcat(response, kHfpCRLF);
-
-  mozilla::ipc::SocketRawData* s = new mozilla::ipc::SocketRawData(response);
-
-  BluetoothHfpManager* hfp = BluetoothHfpManager::GetManager();
-  hfp->SendSocketData(s);
-}
-
 class SendRingIndicatorTask : public nsRunnable
 {
 public:
@@ -62,7 +45,7 @@ public:
     MOZ_ASSERT(!NS_IsMainThread());
 
     while (!sStopSendingRingFlag) {
-      SendLine("RING");
+      sInstance->SendLine("RING");
       LOG("Sending RING...");
 
       usleep(3000000);
@@ -101,16 +84,16 @@ BluetoothHfpManager::~BluetoothHfpManager()
 }
 
 void
-BluetoothHfpManager::SendLine(const char* msg)
+BluetoothHfpManager::SendLine(const char* aMsg)
 {
-  char response[256] = {'\0'};
+  const char* kHfpCrlf = "\xd\xa";
+  nsAutoCString msg;
 
-  strcat(response, kHfpCRLF);
-  strcat(response, msg);
-  strcat(response, kHfpCRLF);
+  msg += kHfpCrlf;
+  msg += aMsg;
+  msg += kHfpCrlf;
 
-  mozilla::ipc::SocketRawData* s = new mozilla::ipc::SocketRawData(response);
-  SendSocketData(s);
+  SendSocketData(new mozilla::ipc::SocketRawData(msg.get()));
 }
 
 void
