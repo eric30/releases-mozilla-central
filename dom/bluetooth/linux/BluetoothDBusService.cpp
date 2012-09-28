@@ -2296,3 +2296,15 @@ BluetoothDBusService::DisconnectObjectPush(BluetoothReplyRunnable* aRunnable)
   BluetoothValue v = true;
   DispatchBluetoothReply(aRunnable, v, replyError);
 }
+
+bool
+BluetoothDBusService::SendFile(const nsAString& aDeviceAddress,
+                               BlobParent* aBlobParent,
+                               BlobChild* aBlobChild,
+                               BluetoothReplyRunnable* aRunnable)
+{
+  BluetoothOppManager* opp = BluetoothOppManager::Get();
+  opp->SendFile(aBlobParent, aRunnable);
+
+  return true;
+}
