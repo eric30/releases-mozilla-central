@@ -2289,7 +2289,7 @@ BluetoothDBusService::DisconnectObjectPush(BluetoothReplyRunnable* aRunnable)
   BluetoothOppManager* opp = BluetoothOppManager::Get();
   opp->Disconnect();
   
-  // Currently, just fire success because Disconnect() doesn't fail, 
+  // Currently, just fire success because Disconnect() doesn't fail,
   // but we still make aRunnable pass into this function for future
   // once Disconnect will fail.
   nsString replyError;
@@ -2303,6 +2303,10 @@ BluetoothDBusService::SendFile(const nsAString& aDeviceAddress,
                                BlobChild* aBlobChild,
                                BluetoothReplyRunnable* aRunnable)
 {
+  // Currently we only support one device sending one file at a time,
+  // so we don't need aDeviceAddress here because the target device
+  // has been determined when calling 'Connect()'. Nevertheless, keep
+  // it for future use.
   BluetoothOppManager* opp = BluetoothOppManager::Get();
   opp->SendFile(aBlobParent, aRunnable);
 

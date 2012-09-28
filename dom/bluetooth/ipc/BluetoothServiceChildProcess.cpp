@@ -322,7 +322,8 @@ BluetoothServiceChildProcess::SendFile(
   BlobChild* aBlobChild,
   BluetoothReplyRunnable* aRunnable)
 {
-  // Will implement in another patch
+  SendRequest(aRunnable,
+              SendFileRequest(nsString(aDeviceAddress), nullptr, aBlobChild));
   return true;
 }
 
