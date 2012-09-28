@@ -282,6 +282,10 @@ BluetoothServiceChildProcess::ConnectHeadset(
   const nsAString& aAdapterPath,
   BluetoothReplyRunnable* aRunnable)
 {
+  SendRequest(aRunnable,
+              ConnectHeadsetRequest(nsString(aDeviceAddress), 
+                                    nsString(aAdapterPath)));
+
   return true;
 }
 
@@ -289,7 +293,7 @@ void
 BluetoothServiceChildProcess::DisconnectHeadset(
   BluetoothReplyRunnable* aRunnable)
 {
-  return;
+  SendRequest(aRunnable, DisconnectHeadsetRequest());
 }
 
 bool
@@ -298,6 +302,9 @@ BluetoothServiceChildProcess::ConnectObjectPush(
   const nsAString& aAdapterPath,
   BluetoothReplyRunnable* aRunnable)
 {
+  SendRequest(aRunnable,
+              ConnectObjectPushRequest(nsString(aDeviceAddress), 
+                                       nsString(aAdapterPath)));
   return true;
 }
 
@@ -305,7 +312,7 @@ void
 BluetoothServiceChildProcess::DisconnectObjectPush(
   BluetoothReplyRunnable* aRunnable)
 {
-  return;
+  SendRequest(aRunnable, DisconnectObjectPushRequest());
 }
 
 nsresult
