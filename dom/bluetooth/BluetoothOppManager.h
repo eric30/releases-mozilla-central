@@ -10,6 +10,7 @@
 #include "BluetoothCommon.h"
 #include "mozilla/dom/ipc/Blob.h"
 #include "mozilla/ipc/UnixSocket.h"
+#include "nsIDOMFile.h"
 
 BEGIN_BLUETOOTH_NAMESPACE
 
@@ -50,13 +51,23 @@ public:
 
   bool StopSendingFile(BluetoothReplyRunnable* aRunnable);
 
+  // xxx For runnable use
+  void SendConnectReqeust();
+  void SendPutReqeust(uint8_t* fileName, int fileNameLength,
+                      uint8_t* fileBody, int fileBodyLength);
+  void SendDisconnectReqeust();
+
 private:
   BluetoothOppManager();
-  void SendConnectReqeust();
 
   bool mConnected;
   int mConnectionId;
   int mLastCommand;
+  uint8_t mRemoteObexVersion;
+  uint8_t mRemoteConnectionFlags;
+  int mRemoteMaxPacketLength;
+
+  nsCOMPtr<nsIDOMBlob> mBlob;
 };
 
 END_BLUETOOTH_NAMESPACE
