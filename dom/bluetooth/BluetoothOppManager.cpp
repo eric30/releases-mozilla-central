@@ -28,11 +28,13 @@ USING_BLUETOOTH_NAMESPACE
 using namespace mozilla::ipc;
 
 static mozilla::RefPtr<BluetoothOppManager> sInstance;
+static bool sPause;
 
 class ReadFileTask : public nsRunnable
 {
 public:
-  ReadFileTask(nsIDOMBlob* aBlob) : mBlob(aBlob)
+  ReadFileTask(nsIDOMBlob* aBlob, int aMaxLength) : mBlob(aBlob)
+                                               , mMaxLength(aMaxLength)
   {
     MOZ_ASSERT(NS_IsMainThread());
   }
@@ -49,7 +51,6 @@ public:
     nsString fileName;
     if (file) {
       rv = file->GetName(fileName);
-      LOG("File name: %s", NS_ConvertUTF16toUTF8(fileName).get());
     }
 
     if (!file || fileName.IsEmpty()) {
@@ -58,9 +59,21 @@ public:
 
     nsString contentType;
     rv = mBlob->GetType(contentType);
+    if (NS_FAILED(rv)) {
+      NS_WARNING("Can't get content type");
+      return NS_ERROR_FAILURE;
+    }
 
-    uint64_t length;
-    rv = mBlob->GetSize(&length);
+    uint64_t fileSize;
+    rv = mBlob->GetSize(&fileSize);
+    if (NS_FAILED(rv)) {
+      NS_WARNING("Can't get size");
+      return NS_ERROR_FAILURE;
+    }
+
+    LOG("Blob Size: %d", fileSize);
+    // xxx 625 is a temp value, use fileSize
+    fileSize = 625;
 
     nsCOMPtr<nsIInputStream> stream;
     rv = mBlob->GetInternalStream(getter_AddRefs(stream));
@@ -68,38 +81,48 @@ public:
       NS_WARNING("Can't get internal stream of blob");
       return NS_ERROR_FAILURE;
     }
+  
+    sPause = true;
+    sInstance->SendPutHeaderRequest(fileName, fileSize);
+    while(sPause) {};
 
-    // xxxxxxx obviously 255 is not a good choice
-    char buffer[255] = {'\0'};
-    uint32_t readBytes;
-    stream->Read(&buffer[0], 255, &readBytes);
-    //LOG("Read bytes count = %u", readBytes);
+    LOG("Put Header sent");
 
-    const char* fileNameUtf8 = NS_ConvertUTF16toUTF8(fileName).get();
-    int charLength = (strlen(fileNameUtf8) + 1)* 2;
-    uint8_t* tempName = new uint8_t[charLength];
+    // ConsumeStream, referenced from https://developer.mozilla.org/
+    // en-US/docs/XPCOM_Interface_Reference/nsIInputStream
+    PRUint32 numRead;
+    char buf[1024];
+    int offset = 0;
 
-    for (int i = 0; i < charLength; ++i) {
-      if (i % 2 > 0) {
-        if (i == charLength - 1) {
-          tempName[i] = 0x00;
-        } else {
-          tempName[i] = fileNameUtf8[i / 2];
-        }
-      } else {
-        tempName[i] = 0x00;
+    while (offset + numRead < fileSize) {
+      // function inputstream->Read() only works on non-main thread
+      rv = stream->Read(buf, sizeof(buf), &numRead);
+      if (NS_FAILED(rv)) {
+        // Needs error handling
+        LOG("### error reading stream: %x\n", rv);
+        break;
       }
 
-      LOG("Temp[%d]:%x", i, tempName[i]);
-    }
+      if (numRead == 0) {
+        LOG("No more bytes can be read");
+        break;
+      }
 
-    sInstance->SendPutReqeust(tempName, charLength, (uint8_t*)buffer, readBytes);
+      if (offset + numRead == fileSize) {
+        sInstance->SendPutRequest((uint8_t*)buf, numRead, true);
+      } else {
+        sInstance->SendPutRequest((uint8_t*)buf, numRead, false);
+      }
+
+      offset += numRead;
+    }
 
     return NS_OK;
   };
 
 private:
   nsCOMPtr<nsIDOMBlob> mBlob;
+  int mMaxLength;
 };
 
 BluetoothOppManager::BluetoothOppManager() : mConnected(false)
@@ -182,7 +205,7 @@ BluetoothOppManager::SendFile(BlobParent* aActor,
    */
   mBlob = aActor->GetBlob();
 
-  SendConnectReqeust();
+  SendConnectRequest();
 
   return true;
 }
@@ -209,13 +232,15 @@ BluetoothOppManager::ReceiveSocketData(UnixSocketRawData* aMessage)
       // Keep remote information
       mRemoteObexVersion = aMessage->mData[3];
       mRemoteConnectionFlags = aMessage->mData[4];
-      mRemoteMaxPacketLength = (((int)(aMessage->mData[5]) << 8) | aMessage->mData[6]);
+      mRemoteMaxPacketLength = 
+        (((int)(aMessage->mData[5]) << 8) | aMessage->mData[6]);
 
       if (mBlob) {
         nsCOMPtr<nsIThread> t;
         NS_NewThread(getter_AddRefs(t));
 
-        ReadFileTask* task = new ReadFileTask(mBlob);
+        nsRefPtr<ReadFileTask> task 
+          = new ReadFileTask(mBlob, mRemoteMaxPacketLength);
 
         if (NS_FAILED(t->Dispatch(task, NS_DISPATCH_NORMAL))) {
           LOG("Can't dispatch");
@@ -236,20 +261,23 @@ BluetoothOppManager::ReceiveSocketData(UnixSocketRawData* aMessage)
       // FIXME: Needs error handling here
       NS_WARNING("[OPP] Put failed");
     } else {
-      // xxxxxx Keep putting?
+      // Keep putting
+      sPause = false;
+
+      LOG("Set Pause to false");
     }
   } else if (mLastCommand == ObexRequestCode::PutFinal) {
     if (responseCode != ObexResponseCode::Success) {
       // FIXME: Needs error handling here
       NS_WARNING("[OPP] PutFinal failed");
     } else {
-      SendDisconnectReqeust();
+      SendDisconnectRequest();
     }
   }
 }
 
 void
-BluetoothOppManager::SendConnectReqeust()
+BluetoothOppManager::SendConnectRequest()
 {
   if (mConnected) return;
 
@@ -273,8 +301,39 @@ BluetoothOppManager::SendConnectReqeust()
 }
 
 void
-BluetoothOppManager::SendPutReqeust(uint8_t* fileName, int fileNameLength,
-                                    uint8_t* fileBody, int fileBodyLength)
+BluetoothOppManager::SendPutHeaderRequest(const nsAString& aFileName, int aFileSize)
+{
+  uint8_t* req = new uint8_t[mRemoteMaxPacketLength];
+  
+  const PRUnichar* fileNamePtr = aFileName.BeginReading();
+  uint32_t len = aFileName.Length();
+  uint8_t* fileName = new uint8_t[(len + 1) * 2];
+  for (int i = 0; i < len; i++) {
+    fileName[i * 2] = (uint8_t)(fileNamePtr[i] >> 8);
+    fileName[i * 2 + 1] = (uint8_t)fileNamePtr[i];
+  }
+
+  fileName[len * 2] = 0x00;
+  fileName[len * 2 + 1] = 0x00;
+
+  int index = 3;
+  index += AppendHeaderConnectionId(&req[index], mConnectionId);
+  index += AppendHeaderName(&req[index], (char*)fileName, (len + 1) * 2);
+  index += AppendHeaderLength(&req[index], aFileSize);
+
+  SetObexPacketInfo(req, ObexRequestCode::Put, index);
+  mLastCommand = ObexRequestCode::Put;
+
+  UnixSocketRawData* s = new UnixSocketRawData(index);
+  memcpy(s->mData, req, s->mSize);
+  SendSocketData(s);
+
+  delete [] req;
+}
+
+void
+BluetoothOppManager::SendPutRequest(uint8_t* aFileBody, int aFileBodyLength,
+                                    bool aFinal)
 {
   if (!mConnected) return;
 
@@ -286,26 +345,30 @@ BluetoothOppManager::SendPutReqeust(uint8_t* fileName, int fileNameLength,
   int index = 3;
 
   LOG("Send [Put] Request: fileBodyLength: %d, max length:%d", 
-    fileBodyLength, mRemoteMaxPacketLength);
+    aFileBodyLength, mRemoteMaxPacketLength);
 
-  index += AppendHeaderConnectionId(&req[index], mConnectionId);
-  index += AppendHeaderName(&req[index], (char*)fileName, fileNameLength);
-  index += AppendHeaderLength(&req[index], fileBodyLength);
+  sPause = false;
 
-  while (fileBodyLength > sentFileBodyLength) {
+  while (aFileBodyLength > sentFileBodyLength) {
+    LOG("Prepare to send ...");
+    while (sPause) {}
+    sPause = true;
+    LOG("Starting ...");
+
     int packetLeftSpace = mRemoteMaxPacketLength - index - 3;
+    LOG("Packet left space: %d", packetLeftSpace);
 
-    if (fileBodyLength <= packetLeftSpace) {
-      index += AppendHeaderBody(&req[index], &fileBody[sentFileBodyLength], fileBodyLength);
-      sentFileBodyLength += fileBodyLength;
+    if (aFileBodyLength <= packetLeftSpace) {
+      index += AppendHeaderBody(&req[index], &aFileBody[sentFileBodyLength], aFileBodyLength);
+      sentFileBodyLength += aFileBodyLength;
     } else {
-      index += AppendHeaderBody(&req[index], &fileBody[sentFileBodyLength], packetLeftSpace);
+      index += AppendHeaderBody(&req[index], &aFileBody[sentFileBodyLength], packetLeftSpace);
       sentFileBodyLength += packetLeftSpace;
     }
 
     LOG("Sent file body length: %d", sentFileBodyLength);
 
-    if (sentFileBodyLength >= fileBodyLength) {
+    if (aFinal && sentFileBodyLength >= aFileBodyLength) {
       SetObexPacketInfo(req, ObexRequestCode::PutFinal, index);
       mLastCommand = ObexRequestCode::PutFinal;
     } else {
@@ -318,13 +381,18 @@ BluetoothOppManager::SendPutReqeust(uint8_t* fileName, int fileNameLength,
     SendSocketData(s);
 
     index = 3;
+
+    LOG("before deleting");
+
+    delete [] req;
+    req = new uint8_t[mRemoteMaxPacketLength];
   }
 
   delete [] req;
 }
 
 void
-BluetoothOppManager::SendDisconnectReqeust()
+BluetoothOppManager::SendDisconnectRequest()
 {
   // IrOBEX 1.2 3.3.2
   // [opcode:1][length:2][Headers:var]

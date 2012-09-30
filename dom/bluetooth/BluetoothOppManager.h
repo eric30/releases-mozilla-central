@@ -52,10 +52,11 @@ public:
   bool StopSendingFile(BluetoothReplyRunnable* aRunnable);
 
   // xxx For runnable use
-  void SendConnectReqeust();
-  void SendPutReqeust(uint8_t* fileName, int fileNameLength,
-                      uint8_t* fileBody, int fileBodyLength);
-  void SendDisconnectReqeust();
+  void SendConnectRequest();
+  void SendPutHeaderRequest(const nsAString& aFileName, int aFileSize);
+  void SendPutRequest(uint8_t* aFileBody, int aFileBodyLength,
+                      bool aFinal);
+  void SendDisconnectRequest();
 
 private:
   BluetoothOppManager();
