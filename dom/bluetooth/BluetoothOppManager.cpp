@@ -96,6 +96,7 @@ BluetoothOppManager::BluetoothOppManager() : mConnected(false)
                                            , mAbortFlag(false)
                                            , mReadFileThread(nullptr)
                                            , mPacketLeftLength(0)
+                                           , mReceiving(false)
 {
 }
 
@@ -250,6 +251,7 @@ BluetoothOppManager::ReceiveSocketData(UnixSocketRawData* aMessage)
       NS_WARNING("[OPP] Disconnect failed");
     } else {
       mConnected = false;
+      mReceiving = false;
       mLastCommand = 0;
       mBlob = nullptr;
       mReadFileThread = nullptr;
@@ -292,12 +294,37 @@ BluetoothOppManager::ReceiveSocketData(UnixSocketRawData* aMessage)
     SendDisconnectRequest();
   } else {
     // Remote request or unknown mLastCommand
+    ObexHeaderSet pktHeaders(opCode);
+
     if (opCode == ObexRequestCode::Connect) {
+      ParseHeaders(&aMessage->mData[7], receivedLength - 7, &pktHeaders);
       ReplyToConnect();
     } else if (opCode == ObexRequestCode::Disconnect) {
+      ParseHeaders(&aMessage->mData[3], receivedLength - 3, &pktHeaders);
       ReplyToDisconnect();
     } else if (opCode == ObexRequestCode::Put ||
                opCode == ObexRequestCode::PutFinal) {
+      if (!mReceiving) {
+        MOZ_ASSERT(mPacketLeftLength == 0);
+        ParseHeaders(&aMessage->mData[3], receivedLength - 3, &pktHeaders);
+
+        nsString fileName;
+        pktHeaders.GetName(fileName);
+
+        uint32_t fileLength;
+        pktHeaders.GetLength(&fileLength);
+
+        nsString contentType;
+        pktHeaders.GetContentType(contentType);
+
+        // xxx We don't know what the address is unless we can get notification
+        // from lower level implementation. Bug 796176 is trying to fix this,
+        // so need to wait for it landed.
+        nsString address;
+
+        ReceivingFileConfirmation(address, fileName, fileLength, contentType);
+      }
+
       /*
        * A PUT request from remote devices may be divided into multiple parts.
        * In other words, one request may need to be received multiple times,
@@ -307,10 +334,12 @@ BluetoothOppManager::ReceiveSocketData(UnixSocketRawData* aMessage)
       bool final = (opCode == ObexRequestCode::PutFinal);
 
       if (mPacketLeftLength == 0) {
+        mReceiving = true;
         if (receivedLength < packetLength) {
           mPacketLeftLength = packetLength - receivedLength;
         } else {
           ReplyToPut(final);
+          if (final) mReceiving = false;
         }
       } else {
         NS_ASSERTION(mPacketLeftLength < receivedLength,
@@ -319,6 +348,7 @@ BluetoothOppManager::ReceiveSocketData(UnixSocketRawData* aMessage)
         if (mPacketLeftLength <= receivedLength) {
           ReplyToPut(final);
           mPacketLeftLength = 0;
+          if (final) mReceiving = false;
         } else {
           mPacketLeftLength -= receivedLength;
         }

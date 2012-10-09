@@ -78,6 +78,7 @@ private:
   int mRemoteMaxPacketLength;
   bool mAbortFlag;
   int mPacketLeftLength;
+  bool mReceiving;
 
   nsCOMPtr<nsIDOMBlob> mBlob;
   nsCOMPtr<nsIThread> mReadFileThread;
