@@ -62,6 +62,10 @@ private:
   void FileTransferComplete(bool aSuccess, bool aReceived,
                             const nsString& aFileName, uint32_t aFileLength);
   void UpdateProgress(uint32_t aProcessed, uint32_t aFileLength);
+  void ReceivingFileConfirmation(const nsString& aAddress,
+                                 const nsString& aFileName,
+                                 uint32_t aFileLength,
+                                 const nsString& aContentType);
   void ReplyToConnect();
   void ReplyToDisconnect();
   void ReplyToPut(bool aFinal);
