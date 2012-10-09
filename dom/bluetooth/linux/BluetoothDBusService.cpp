@@ -767,6 +767,7 @@ public:
 
     uuids.AppendElement((uint32_t)(BluetoothServiceUuid::HandsfreeAG >> 32));
     uuids.AppendElement((uint32_t)(BluetoothServiceUuid::HeadsetAG >> 32));
+    uuids.AppendElement((uint32_t)(BluetoothServiceUuid::ObjectPush >> 32));
 
     sServiceHandles.Clear();
     if (!BluetoothDBusService::AddReservedServicesInternal(mPath, uuids, sServiceHandles)) {
@@ -776,6 +777,16 @@ public:
 
     if(!RegisterAgent(mPath)) {
       NS_WARNING("Failed to register agent");
+      return NS_ERROR_FAILURE;
+    }
+
+    BluetoothUnixSocketConnector* c =
+      new BluetoothUnixSocketConnector(BluetoothSocketType::RFCOMM, 
+                                       BluetoothReservedChannels::OPUSH, true, false);
+
+    BluetoothOppManager* opp = BluetoothOppManager::Get();
+    if (!opp->ListenSocket(c)) {
+      NS_WARNING("Can't listen on socket!");
       return NS_ERROR_FAILURE;
     }
 
