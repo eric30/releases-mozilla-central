@@ -197,6 +197,7 @@ int AppendHeaderLength(uint8_t* retBuf, int objectLength);
 int AppendHeaderConnectionId(uint8_t* retBuf, int connectionId);
 void SetObexPacketInfo(uint8_t* retBuf, uint8_t opcode, int packetLength);
 void ParseHeaders(uint8_t* buf, int totalLength, ObexHeaderSet* retHanderSet);
+int GetHeaderBodyOffset(uint8_t* headerStart, int totalLength);
 
 END_BLUETOOTH_NAMESPACE
 

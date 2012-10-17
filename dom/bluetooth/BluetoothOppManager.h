@@ -97,6 +97,7 @@ private:
   bool mAbortFlag;
   int mPacketLeftLength;
   nsString mConnectedDeviceAddress;
+  nsString mTargetDirectory;
   bool mReceiving;
   bool mPutFinal;
   bool mWaitingForConfirmationFlag;

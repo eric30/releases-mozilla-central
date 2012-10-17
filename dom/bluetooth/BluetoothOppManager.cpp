@@ -17,19 +17,41 @@
 #include "mozilla/RefPtr.h"
 #include "nsIInputStream.h"
 
+// xxxxxxxxxxxxxx Temp
+#include "nsIFile.h"
+#include "nsIDOMFile.h"
+#include "nsIOutputStream.h"
+#include "nsNetUtil.h"
+
+#undef LOG
+#if defined(MOZ_WIDGET_GONK)
+#include <android/log.h>
+#define LOG(args...)  __android_log_print(ANDROID_LOG_INFO, "GonkDBus", args);
+#else
+#define BTDEBUG true
+#define LOG(args...) if (BTDEBUG) printf(args);
+#endif
+
+
 USING_BLUETOOTH_NAMESPACE
 using namespace mozilla::ipc;
+using namespace mozilla::dom::devicestorage;
 
 // Sending system message "bluetooth-opp-update-progress" every 50kb
 static const uint32_t kUpdateProgressBase = 50 * 1024;
+static const char* kRootDirectory = "/sdcard/download/bluetooth/";
 
 static mozilla::RefPtr<BluetoothOppManager> sInstance;
 static nsCOMPtr<nsIInputStream> stream = nullptr;
 static uint32_t sSentFileLength = 0;
 static nsString sFileName;
 static uint32_t sFileLength = 0;
+static uint8_t* sFileBody;
+static int sFileBodyIndex;
 static nsString sContentType;
 static int sUpdateProgressCounter = 0;
+static nsCOMPtr<nsIFile> sFile = nullptr;
+static nsCOMPtr<nsIOutputStream> outputStream;
 
 class ReadFileTask : public nsRunnable
 {
@@ -380,9 +402,12 @@ BluetoothOppManager::ReceiveSocketData(UnixSocketRawData* aMessage)
       ReplyToDisconnect();
     } else if (opCode == ObexRequestCode::Put ||
                opCode == ObexRequestCode::PutFinal) {
+      int headerStartIndex = 3;
+
       if (!mReceiving) {
         MOZ_ASSERT(mPacketLeftLength == 0);
-        ParseHeaders(&aMessage->mData[3], receivedLength - 3, &pktHeaders);
+        ParseHeaders(&aMessage->mData[headerStartIndex], 
+                     receivedLength - headerStartIndex, &pktHeaders);
 
         pktHeaders.GetName(sFileName);
         pktHeaders.GetContentType(sContentType);
@@ -390,6 +415,33 @@ BluetoothOppManager::ReceiveSocketData(UnixSocketRawData* aMessage)
 
         mReceiving = true;
         mWaitingForConfirmationFlag = true;
+
+        // Create a file in kRootDirectory
+        nsString path;
+
+        path.AssignASCII(kRootDirectory);
+        path += sFileName;
+
+        nsresult rv = NS_NewLocalFile(path, false, getter_AddRefs(sFile));
+        if (NS_FAILED(rv)) {
+          LOG("New local file failed");
+        }
+
+        bool check = false;
+        sFile->Exists(&check);
+        if (check) {
+          LOG("File exists!!");
+        }
+
+        rv = sFile->Create(nsIFile::NORMAL_FILE_TYPE, 00644);
+        if (NS_FAILED(rv)) {
+          LOG("Create file failed");
+        }
+
+        NS_NewLocalFileOutputStream(getter_AddRefs(outputStream), sFile);
+        if (!outputStream) {
+          LOG("No output stream");
+        }
       }
 
       /*
@@ -401,12 +453,41 @@ BluetoothOppManager::ReceiveSocketData(UnixSocketRawData* aMessage)
       mPutFinal = (opCode == ObexRequestCode::PutFinal);
 
       if (mPacketLeftLength == 0) {
+        int headerBodyOffset = GetHeaderBodyOffset(&aMessage->mData[headerStartIndex], 
+                                                   receivedLength - headerStartIndex);
+        LOG("Header [BODY] offset: %d", headerBodyOffset);
+
+        uint8_t headerId = aMessage->mData[headerStartIndex + headerBodyOffset];
+        LOG("Header BODY ID: %x", headerId);
+
+        int headerLength = (((int)aMessage->mData[headerStartIndex + headerBodyOffset + 1]) << 8) | 
+                           aMessage->mData[headerStartIndex + headerBodyOffset + 2];
+        LOG("Header Length: %d", headerLength);
+
         NS_ASSERTION(mPacketLeftLength >= receivedLength,
                      "Invalid packet length");
+        
+        // xxxxxxxxxxxx Temp, make a complete buffer
+        int fileBodyIndex = headerStartIndex + headerBodyOffset + 3;
+        sFileBody = new uint8_t[headerLength - 3];
+        memcpy(sFileBody, &aMessage->mData[fileBodyIndex], receivedLength - fileBodyIndex);
+        sFileBodyIndex = receivedLength - fileBodyIndex;
+        
+        uint32_t wrote;
+        outputStream->Write((char*)&aMessage->mData[fileBodyIndex], receivedLength - fileBodyIndex, &wrote);
+
         mPacketLeftLength = packetLength - receivedLength;
       } else {
         NS_ASSERTION(mPacketLeftLength >= receivedLength,
                      "Invalid packet length");
+        
+        // xxxxxxxxxxxx Temp, make a complete buffer
+        memcpy(&sFileBody[sFileBodyIndex], &aMessage->mData[0], receivedLength);
+        sFileBodyIndex += receivedLength;
+
+        uint32_t wrote;
+        outputStream->Write((char*)&aMessage->mData[0], receivedLength, &wrote);
+
         mPacketLeftLength -= receivedLength;
       }
 
