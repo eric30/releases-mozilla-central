@@ -15,13 +15,18 @@
 
 #include "mozilla/dom/bluetooth/BluetoothTypes.h"
 #include "mozilla/RefPtr.h"
+#include "nsIDOMFile.h"
+#include "nsIFile.h"
 #include "nsIInputStream.h"
+#include "nsIOutputStream.h"
+#include "nsNetUtil.h"
 
 USING_BLUETOOTH_NAMESPACE
 using namespace mozilla::ipc;
 
 // Sending system message "bluetooth-opp-update-progress" every 50kb
 static const uint32_t kUpdateProgressBase = 50 * 1024;
+static const char* kRootDirectory = "/sdcard/download/bluetooth/";
 
 static mozilla::RefPtr<BluetoothOppManager> sInstance;
 static nsCOMPtr<nsIInputStream> stream = nullptr;
@@ -30,6 +35,8 @@ static nsString sFileName;
 static uint32_t sFileLength = 0;
 static nsString sContentType;
 static int sUpdateProgressCounter = 0;
+static nsCOMPtr<nsIFile> sFile = nullptr;
+static nsCOMPtr<nsIOutputStream> outputStream = nullptr;
 
 class ReadFileTask : public nsRunnable
 {
@@ -231,11 +238,35 @@ BluetoothOppManager::ConfirmReceivingFile(bool aConfirm,
   mWaitingForConfirmationFlag = false;
   ReplyToPut(mPutFinal, aConfirm);
 
+  if (aConfirm) {
+    StartFileTransfer(mConnectedDeviceAddress, true,
+                      sFileName, sFileLength, sContentType);
+  }
+
   if (mPutFinal || !aConfirm) {
     mReceiving = false;
     FileTransferComplete(mConnectedDeviceAddress, aConfirm, true, sFileName,
                          sSentFileLength, sContentType);
   }
+}
+
+void
+BluetoothOppManager::AfterOppConnected()
+{
+  mConnected = true;
+  sUpdateProgressCounter = 1;
+  sSentFileLength = 0;
+  mAbortFlag = false;
+}
+
+void
+BluetoothOppManager::AfterOppDisconnected()
+{
+  mConnected = false;
+  mReceiving = false;
+  mLastCommand = 0;
+  mBlob = nullptr;
+  mReadFileThread = nullptr;
 }
 
 // Virtual function of class SocketConsumer
@@ -256,7 +287,7 @@ BluetoothOppManager::ReceiveSocketData(UnixSocketRawData* aMessage)
 
   if (mLastCommand == ObexRequestCode::Connect) {
     if (opCode == ObexResponseCode::Success) {
-      mConnected = true;
+      AfterOppConnected();
 
       // Keep remote information
       mRemoteObexVersion = aMessage->mData[3];
@@ -311,9 +342,6 @@ BluetoothOppManager::ReceiveSocketData(UnixSocketRawData* aMessage)
           return;
         }
 
-        sUpdateProgressCounter = 1;
-        sSentFileLength = 0;
-        mAbortFlag = false;
         sInstance->SendPutHeaderRequest(sFileName, sFileLength);
         StartFileTransfer(mConnectedDeviceAddress, false,
                           sFileName, sFileLength, sContentType);
@@ -323,43 +351,41 @@ BluetoothOppManager::ReceiveSocketData(UnixSocketRawData* aMessage)
     if (opCode != ObexResponseCode::Success) {
       // FIXME: Needs error handling here
       NS_WARNING("[OPP] Disconnect failed");
-    } else {
-      mConnected = false;
-      mReceiving = false;
-      mLastCommand = 0;
-      mBlob = nullptr;
-      mReadFileThread = nullptr;
     }
+
+    AfterOppDisconnected();
   } else if (mLastCommand == ObexRequestCode::Put) {
     if (opCode != ObexResponseCode::Continue) {
       // FIXME: Needs error handling here
       NS_WARNING("[OPP] Put failed");
+      return;
+    }
+
+    if (mAbortFlag || mReadFileThread == nullptr) {
+      SendAbortRequest();
     } else {
-      if (mAbortFlag || mReadFileThread == nullptr) {
-        SendAbortRequest();
-      } else {
-        if (kUpdateProgressBase * sUpdateProgressCounter < sSentFileLength) {
-          UpdateProgress(mConnectedDeviceAddress, false,
-                         sSentFileLength, sFileLength);
-          ++sUpdateProgressCounter;
-        }
+      if (kUpdateProgressBase * sUpdateProgressCounter < sSentFileLength) {
+        UpdateProgress(mConnectedDeviceAddress, false,
+                       sSentFileLength, sFileLength);
+        sUpdateProgressCounter = sSentFileLength / kUpdateProgressBase + 1;
+      }
 
-        nsRefPtr<ReadFileTask> task = new ReadFileTask(mBlob);
+      nsRefPtr<ReadFileTask> task = new ReadFileTask(mBlob);
 
-        if (NS_FAILED(mReadFileThread->Dispatch(task, NS_DISPATCH_NORMAL))) {
-          NS_WARNING("Cannot dispatch ring task!");
-        }
+      if (NS_FAILED(mReadFileThread->Dispatch(task, NS_DISPATCH_NORMAL))) {
+        NS_WARNING("Cannot dispatch ring task!");
       }
     }
   } else if (mLastCommand == ObexRequestCode::PutFinal) {
     if (opCode != ObexResponseCode::Success) {
       // FIXME: Needs error handling here
       NS_WARNING("[OPP] PutFinal failed");
-    } else {
-      FileTransferComplete(mConnectedDeviceAddress, true, false, sFileName,
-                           sSentFileLength, sContentType);
-      SendDisconnectRequest();
+      return;
     }
+
+    FileTransferComplete(mConnectedDeviceAddress, true, false, sFileName,
+                         sSentFileLength, sContentType);
+    SendDisconnectRequest();
   } else if (mLastCommand == ObexRequestCode::Abort) {
     if (opCode != ObexResponseCode::Success) {
       NS_WARNING("[OPP] Abort failed");
@@ -375,14 +401,19 @@ BluetoothOppManager::ReceiveSocketData(UnixSocketRawData* aMessage)
     if (opCode == ObexRequestCode::Connect) {
       ParseHeaders(&aMessage->mData[7], receivedLength - 7, &pktHeaders);
       ReplyToConnect();
+      AfterOppConnected();
     } else if (opCode == ObexRequestCode::Disconnect) {
       ParseHeaders(&aMessage->mData[3], receivedLength - 3, &pktHeaders);
       ReplyToDisconnect();
+      AfterOppDisconnected();
     } else if (opCode == ObexRequestCode::Put ||
                opCode == ObexRequestCode::PutFinal) {
+      int headerStartIndex = 3;
+
       if (!mReceiving) {
         MOZ_ASSERT(mPacketLeftLength == 0);
-        ParseHeaders(&aMessage->mData[3], receivedLength - 3, &pktHeaders);
+        ParseHeaders(&aMessage->mData[headerStartIndex],
+                     receivedLength - headerStartIndex, &pktHeaders);
 
         pktHeaders.GetName(sFileName);
         pktHeaders.GetContentType(sContentType);
@@ -390,6 +421,35 @@ BluetoothOppManager::ReceiveSocketData(UnixSocketRawData* aMessage)
 
         mReceiving = true;
         mWaitingForConfirmationFlag = true;
+
+        // Create a file in kRootDirectory
+        nsString path;
+
+        path.AssignASCII(kRootDirectory);
+        path += sFileName;
+
+        nsresult rv = NS_NewLocalFile(path, false, getter_AddRefs(sFile));
+        if (NS_FAILED(rv)) {
+          NS_WARNING("Couldn't new a local file");
+        }
+
+        // FIXME: Need a mechanism to save a file which has the
+        // same name as an existing file
+        bool check = false;
+        sFile->Exists(&check);
+        if (check) {
+          NS_WARNING("The file already exists");
+        }
+
+        rv = sFile->Create(nsIFile::NORMAL_FILE_TYPE, 00644);
+        if (NS_FAILED(rv)) {
+          NS_WARNING("Couldn't create the file");
+        }
+
+        NS_NewLocalFileOutputStream(getter_AddRefs(outputStream), sFile);
+        if (!outputStream) {
+          NS_WARNING("Couldn't new an output stream");
+        }
       }
 
       /*
@@ -400,14 +460,44 @@ BluetoothOppManager::ReceiveSocketData(UnixSocketRawData* aMessage)
        */
       mPutFinal = (opCode == ObexRequestCode::PutFinal);
 
+      uint32_t wrote = 0;
       if (mPacketLeftLength == 0) {
-        NS_ASSERTION(mPacketLeftLength >= receivedLength,
+        NS_ASSERTION(packetLength >= receivedLength,
                      "Invalid packet length");
         mPacketLeftLength = packetLength - receivedLength;
+
+        int headerBodyOffset = GetHeaderBodyOffset(&aMessage->mData[headerStartIndex],
+                                                   receivedLength - headerStartIndex);
+        if (headerBodyOffset != -1) {
+          /* 
+           * Adding by 3 is because the format of a header is like:
+           *     [HeaderId:1 (BODY)][HeaderLength:2][Data:n]
+           * and headerStartIndex + headerBodyOffset points to HeaderId,
+           * so adding 3 is to point to the beginning of data.
+           *
+           */
+          int fileBodyIndex = headerStartIndex + headerBodyOffset + 3;
+
+          outputStream->Write((char*)&aMessage->mData[fileBodyIndex],
+                              receivedLength - fileBodyIndex, &wrote);
+          NS_ASSERTION(receivedLength - fileBodyIndex == wrote,
+                       "Writing to the file failed");
+        }
       } else {
         NS_ASSERTION(mPacketLeftLength >= receivedLength,
                      "Invalid packet length");
         mPacketLeftLength -= receivedLength;
+
+        outputStream->Write((char*)&aMessage->mData[0], receivedLength, &wrote);
+        NS_ASSERTION(receivedLength == wrote, "Writing to the file failed");
+      }
+
+      sSentFileLength += wrote;
+      if (sSentFileLength > kUpdateProgressBase * sUpdateProgressCounter &&
+          !mWaitingForConfirmationFlag) {
+        UpdateProgress(mConnectedDeviceAddress, true,
+                       sSentFileLength, sFileLength);
+        sUpdateProgressCounter = sSentFileLength / kUpdateProgressBase + 1;
       }
 
       if (mPacketLeftLength == 0) {

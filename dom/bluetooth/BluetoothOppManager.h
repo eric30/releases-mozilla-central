@@ -84,6 +84,8 @@ private:
   void ReplyToConnect();
   void ReplyToDisconnect();
   void ReplyToPut(bool aFinal, bool aContinue);
+  void AfterOppConnected();
+  void AfterOppDisconnected();
   virtual void OnConnectSuccess() MOZ_OVERRIDE;
   virtual void OnConnectError() MOZ_OVERRIDE;
   virtual void OnDisconnect() MOZ_OVERRIDE;

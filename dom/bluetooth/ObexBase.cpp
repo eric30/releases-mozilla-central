@@ -115,4 +115,52 @@ ParseHeaders(uint8_t* buf, int totalLength, ObexHeaderSet* retHandlerSet)
   }
 }
 
+// -1 means cannot find header "Body"
+int
+GetHeaderBodyOffset(uint8_t* headerStart, int totalLength)
+{
+  uint8_t* ptr = headerStart;
+
+  while (ptr - headerStart < totalLength) {
+    ObexHeaderId headerId = (ObexHeaderId)*ptr;
+
+    if (headerId == ObexHeaderId::Body ||
+        headerId == ObexHeaderId::EndOfBody) {
+      return ptr - headerStart;
+    }
+
+    ++ptr;
+
+    int contentLength = 0;
+    uint8_t highByte, lowByte;
+
+    // Defined in 2.1 OBEX Headers, IrOBEX 1.2
+    switch (headerId >> 6)
+    {
+      case 0x00:
+        // NULL terminated Unicode text, length prefixed with 2 byte unsigned integer.
+      case 0x01:
+        // byte sequence, length prefixed with 2 byte unsigned integer.
+        highByte = *ptr++;
+        lowByte = *ptr++;
+        contentLength = (((int)highByte << 8) | lowByte) - 3;
+        break;
+
+      case 0x02:
+        // 1 byte quantity
+        contentLength = 1;
+        break;
+
+      case 0x03:
+        // 4 byte quantity
+        contentLength = 4;
+        break;
+    }
+
+    ptr += contentLength;
+  }
+
+  return -1;
+}
+
 END_BLUETOOTH_NAMESPACE
