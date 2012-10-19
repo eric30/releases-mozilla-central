@@ -174,7 +174,8 @@ SystemMessageManager.prototype = {
           " (" + this._manifest + ")");
 
     let msg = aMessage.json;
-    if (msg.manifest != this._manifest || msg.uri != this._uri) {
+    //if (msg.manifest != this._manifest || msg.uri != this._uri) {
+    if (msg.manifest != this._manifest) {
       return;
     }
 
