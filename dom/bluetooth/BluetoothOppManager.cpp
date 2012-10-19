@@ -252,6 +252,11 @@ BluetoothOppManager::ConfirmReceivingFile(bool aConfirm,
 
   mWaitingForConfirmationFlag = false;
   ReplyToPut(mPutFinal, aConfirm);
+  
+  if (aConfirm) {
+    StartFileTransfer(mConnectedDeviceAddress, true,
+                      sFileName, sFileLength, sContentType);
+  }
 
   if (mPutFinal || !aConfirm) {
     mReceiving = false;
@@ -424,23 +429,25 @@ BluetoothOppManager::ReceiveSocketData(UnixSocketRawData* aMessage)
 
         nsresult rv = NS_NewLocalFile(path, false, getter_AddRefs(sFile));
         if (NS_FAILED(rv)) {
-          LOG("New local file failed");
+          NS_WARNING("Couldn't new a local file");
         }
 
+        // FIXME: Need a mechanism to save a file which has the 
+        // same name as an existing file
         bool check = false;
         sFile->Exists(&check);
         if (check) {
-          LOG("File exists!!");
+          NS_WARNING("The file already exists");
         }
 
         rv = sFile->Create(nsIFile::NORMAL_FILE_TYPE, 00644);
         if (NS_FAILED(rv)) {
-          LOG("Create file failed");
+          NS_WARNING("Couldn't create the file");
         }
 
         NS_NewLocalFileOutputStream(getter_AddRefs(outputStream), sFile);
         if (!outputStream) {
-          LOG("No output stream");
+          NS_WARNING("Couldn't new an output stream");
         }
       }
 
@@ -453,25 +460,12 @@ BluetoothOppManager::ReceiveSocketData(UnixSocketRawData* aMessage)
       mPutFinal = (opCode == ObexRequestCode::PutFinal);
 
       if (mPacketLeftLength == 0) {
-        int headerBodyOffset = GetHeaderBodyOffset(&aMessage->mData[headerStartIndex], 
-                                                   receivedLength - headerStartIndex);
-        LOG("Header [BODY] offset: %d", headerBodyOffset);
-
-        uint8_t headerId = aMessage->mData[headerStartIndex + headerBodyOffset];
-        LOG("Header BODY ID: %x", headerId);
-
-        int headerLength = (((int)aMessage->mData[headerStartIndex + headerBodyOffset + 1]) << 8) | 
-                           aMessage->mData[headerStartIndex + headerBodyOffset + 2];
-        LOG("Header Length: %d", headerLength);
-
         NS_ASSERTION(mPacketLeftLength >= receivedLength,
                      "Invalid packet length");
-        
-        // xxxxxxxxxxxx Temp, make a complete buffer
+  
+        int headerBodyOffset = GetHeaderBodyOffset(&aMessage->mData[headerStartIndex], 
+                                                   receivedLength - headerStartIndex);
         int fileBodyIndex = headerStartIndex + headerBodyOffset + 3;
-        sFileBody = new uint8_t[headerLength - 3];
-        memcpy(sFileBody, &aMessage->mData[fileBodyIndex], receivedLength - fileBodyIndex);
-        sFileBodyIndex = receivedLength - fileBodyIndex;
         
         uint32_t wrote;
         outputStream->Write((char*)&aMessage->mData[fileBodyIndex], receivedLength - fileBodyIndex, &wrote);
@@ -480,11 +474,6 @@ BluetoothOppManager::ReceiveSocketData(UnixSocketRawData* aMessage)
       } else {
         NS_ASSERTION(mPacketLeftLength >= receivedLength,
                      "Invalid packet length");
-        
-        // xxxxxxxxxxxx Temp, make a complete buffer
-        memcpy(&sFileBody[sFileBodyIndex], &aMessage->mData[0], receivedLength);
-        sFileBodyIndex += receivedLength;
-
         uint32_t wrote;
         outputStream->Write((char*)&aMessage->mData[0], receivedLength, &wrote);
 

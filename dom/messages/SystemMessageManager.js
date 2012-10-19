@@ -66,7 +66,7 @@ SystemMessageManager.prototype = {
     // To do so, we check if we have a with a contract ID of
     // "@mozilla.org/dom/system-messages/wrapper/TYPE;1" component implementing
     // nsISystemMessageWrapper.
-    debug("Dispatching " + JSON.stringify(aMessage) + "\n");
+    dump("Dispatching " + JSON.stringify(aMessage) + "\n");
     let contractID = "@mozilla.org/dom/system-messages/wrapper/" + aType + ";1";
     let wrapped = false;
 
@@ -169,15 +169,18 @@ SystemMessageManager.prototype = {
   },
 
   receiveMessage: function sysMessMgr_receiveMessage(aMessage) {
-    debug("receiveMessage " + aMessage.name + " - " +
+    dump("receiveMessage " + aMessage.name + " - " +
           aMessage.json.type + " for " + aMessage.json.manifest +
           " (" + this._manifest + ")");
 
     let msg = aMessage.json;
+
     //if (msg.manifest != this._manifest || msg.uri != this._uri) {
     if (msg.manifest != this._manifest) {
       return;
     }
+
+    dump("gene test");
 
     // Send an acknowledgement to parent to clean up the pending message,
     // so a re-launched app won't handle it again, which is redundant.
@@ -190,7 +193,7 @@ SystemMessageManager.prototype = {
 
     // Bail out if we have no handlers registered for this type.
     if (!(msg.type in this._handlers)) {
-      debug("No handler for this type");
+      dump("No handler for this type");
       return;
     }
 
