@@ -68,13 +68,21 @@ SetObexPacketInfo(uint8_t* retBuf, uint8_t opcode, int packetLength)
   retBuf[2] = packetLength & 0x00FF;
 }
 
-void
-ParseHeaders(uint8_t* buf, int totalLength, ObexHeaderSet* retHandlerSet)
+int
+ParseHeadersAndFindBody(uint8_t* aHeaderStart,
+                        int aTotalLength,
+                        ObexHeaderSet* aRetHandlerSet)
 {
-  uint8_t* ptr = buf;
+  uint8_t* ptr = aHeaderStart;
 
-  while (ptr - buf < totalLength) {
+  while (ptr - aHeaderStart < aTotalLength) {
     ObexHeaderId headerId = (ObexHeaderId)*ptr++;
+
+    if (headerId == ObexHeaderId::Body ||
+        headerId == ObexHeaderId::EndOfBody) {
+      return ptr - aHeaderStart;
+    }
+
     int contentLength = 0;
     uint8_t highByte, lowByte;
 
@@ -101,18 +109,14 @@ ParseHeaders(uint8_t* buf, int totalLength, ObexHeaderSet* retHandlerSet)
         break;
     }
 
-    // FIXME: This case should be happened when we are receiving header 'Body'
-    // (file body). I will handle this in another bug.
-    if (contentLength + (ptr - buf) > totalLength) {
-      break;
-    }
-
     uint8_t* content = new uint8_t[contentLength];
     memcpy(content, ptr, contentLength);
-    retHandlerSet->AddHeader(new ObexHeader(headerId, contentLength, content));
+    aRetHandlerSet->AddHeader(new ObexHeader(headerId, contentLength, content));
 
     ptr += contentLength;
   }
+
+  return -1;
 }
 
 END_BLUETOOTH_NAMESPACE
