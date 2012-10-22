@@ -21,6 +21,18 @@
 #include "nsIOutputStream.h"
 #include "nsNetUtil.h"
 
+#include <prtime.h>
+
+#undef LOG
+#if defined(MOZ_WIDGET_GONK)
+#include <android/log.h>
+#define LOG(args...)  __android_log_print(ANDROID_LOG_INFO, "GonkDBus", args);
+#else
+#define BTDEBUG true
+#define LOG(args...) if (BTDEBUG) printf(args);
+#endif
+
+
 USING_BLUETOOTH_NAMESPACE
 using namespace mozilla::ipc;
 
@@ -423,9 +435,19 @@ BluetoothOppManager::ReceiveSocketData(UnixSocketRawData* aMessage)
         mWaitingForConfirmationFlag = true;
 
         // Create a file in kRootDirectory
-        nsString path;
-
+        nsString path, localFileName;
         path.AssignASCII(kRootDirectory);
+
+        PRExplodedTime now;
+        PR_ExplodeTime(PR_Now(), PR_LocalTimeParameters, &now);
+
+        path.AppendInt(now.tm_year);
+        path.AppendInt(now.tm_month);
+        path.AppendInt(now.tm_mday);
+        path.AppendInt(now.tm_hour);
+        path.AppendInt(now.tm_min);
+        path.AppendInt(now.tm_sec);
+        path += PRUnichar('-');
         path += sFileName;
 
         nsresult rv = NS_NewLocalFile(path, false, getter_AddRefs(sFile));
@@ -450,6 +472,8 @@ BluetoothOppManager::ReceiveSocketData(UnixSocketRawData* aMessage)
         if (!outputStream) {
           NS_WARNING("Couldn't new an output stream");
         }
+
+        LOG("Create a file");
       }
 
       /*
@@ -500,6 +524,7 @@ BluetoothOppManager::ReceiveSocketData(UnixSocketRawData* aMessage)
         sUpdateProgressCounter = sSentFileLength / kUpdateProgressBase + 1;
       }
 
+      LOG("Left Length = %d, Flag = %d", mPacketLeftLength, mWaitingForConfirmationFlag);
       if (mPacketLeftLength == 0) {
         if (mWaitingForConfirmationFlag) {
           ReceivingFileConfirmation(mConnectedDeviceAddress, sFileName,
@@ -802,6 +827,7 @@ BluetoothOppManager::UpdateProgress(const nsString& aDeviceAddress,
                                     uint32_t aProcessedLength,
                                     uint32_t aFileLength)
 {
+  LOG("Send UpdateProgress");
   nsString type, name;
   BluetoothValue v;
   InfallibleTArray<BluetoothNamedValue> parameters;
@@ -835,6 +861,7 @@ BluetoothOppManager::ReceivingFileConfirmation(const nsString& aAddress,
                                                uint32_t aFileLength,
                                                const nsString& aContentType)
 {
+  LOG("Send ReceivingFileConfirmation");
   nsString type, name;
   BluetoothValue v;
   InfallibleTArray<BluetoothNamedValue> parameters;
