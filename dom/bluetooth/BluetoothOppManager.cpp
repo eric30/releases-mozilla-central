@@ -83,6 +83,13 @@ public:
 namespace {
 // Sending system message "bluetooth-opp-update-progress" every 50kb
 static const uint32_t kUpdateProgressBase = 50 * 1024;
+
+/*
+ * The format of the header of an PUT request is
+ * [opcode:1][packet length:2][headerId:1][header length:2]
+ */
+static const uint32_t kPutRequestHeaderSize = 6;
+
 StaticRefPtr<BluetoothOppManager> sInstance;
 StaticRefPtr<BluetoothOppManagerObserver> sOppObserver;
 
@@ -120,9 +127,12 @@ BluetoothOppManagerObserver::Observe(nsISupports* aSubject,
 class ReadFileTask : public nsRunnable
 {
 public:
-  ReadFileTask(nsIInputStream* aInputStream) : mInputStream(aInputStream)
+  ReadFileTask(nsIInputStream* aInputStream,
+               uint32_t aRemoteMaxPacketSize) : mInputStream(aInputStream)
   {
     MOZ_ASSERT(NS_IsMainThread());
+
+    mAvailablePacketSize = aRemoteMaxPacketSize - kPutRequestHeaderSize;
   }
 
   NS_IMETHOD Run()
@@ -133,11 +143,11 @@ public:
      * 255 is the Minimum OBEX Packet Length (See section 3.3.1.4,
      * IrOBEX ver 1.2)
      */
-    char buf[255];
+    char* buf = new char[mAvailablePacketSize];
     uint32_t numRead;
 
     // function inputstream->Read() only works on non-main thread
-    nsresult rv = mInputStream->Read(buf, sizeof(buf), &numRead);
+    nsresult rv = mInputStream->Read(buf, mAvailablePacketSize, &numRead);
     if (NS_FAILED(rv)) {
       // Needs error handling here
       return NS_ERROR_FAILURE;
@@ -153,11 +163,14 @@ public:
       sSentFileLength += numRead;
     }
 
+    delete [] buf;
+
     return NS_OK;
   };
 
 private:
   nsCOMPtr<nsIInputStream> mInputStream;
+  uint32_t mAvailablePacketSize;
 };
 
 BluetoothOppManager::BluetoothOppManager() : mConnected(false)
@@ -595,7 +608,8 @@ BluetoothOppManager::ReceiveSocketData(UnixSocketRawData* aMessage)
       }
     }
 
-    nsRefPtr<ReadFileTask> task = new ReadFileTask(mInputStream);
+    nsRefPtr<ReadFileTask> task = new ReadFileTask(mInputStream,
+                                                   mRemoteMaxPacketLength);
     if (NS_FAILED(mReadFileThread->Dispatch(task, NS_DISPATCH_NORMAL))) {
       NS_WARNING("Cannot dispatch ring task!");
     }
@@ -803,8 +817,7 @@ BluetoothOppManager::SendPutRequest(uint8_t* aFileBody,
                                     int aFileBodyLength,
                                     bool aFinal)
 {
-  int index = 3;
-  int packetLeftSpace = mRemoteMaxPacketLength - index - 3;
+  int packetLeftSpace = mRemoteMaxPacketLength - kPutRequestHeaderSize;
 
   if (!mConnected) return;
   if (aFileBodyLength > packetLeftSpace) {
@@ -815,7 +828,7 @@ BluetoothOppManager::SendPutRequest(uint8_t* aFileBody,
   // Section 3.3.3 "Put", IrOBEX 1.2
   // [opcode:1][length:2][Headers:var]
   uint8_t* req = new uint8_t[mRemoteMaxPacketLength];
-
+  int index = 3;
   index += AppendHeaderBody(&req[index], aFileBody, aFileBodyLength);
 
   if (aFinal) {
