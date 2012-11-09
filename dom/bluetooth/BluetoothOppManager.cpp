@@ -27,6 +27,15 @@
 
 #define TARGET_FOLDER "/sdcard/downloads/bluetooth/"
 
+#undef LOG
+#if defined(MOZ_WIDGET_GONK)
+#include <android/log.h>
+#define LOG(args...)  __android_log_print(ANDROID_LOG_INFO, "GonkDBus", args);
+#else
+#define BTDEBUG true
+#define LOG(args...) if (BTDEBUG) printf(args);
+#endif
+
 USING_BLUETOOTH_NAMESPACE
 using namespace mozilla;
 using namespace mozilla::ipc;
@@ -196,17 +205,21 @@ BluetoothOppManager::Connect(const nsAString& aDeviceObjectPath,
     return false;
   }
 
+  LOG("Connect 1");
   CloseSocket();
+  LOG("Connect 2");
 
   BluetoothService* bs = BluetoothService::Get();
   if (!bs) {
     NS_WARNING("BluetoothService not available!");
+    LOG("Connect 3");
     return false;
   }
 
   nsString serviceUuidStr =
     NS_ConvertUTF8toUTF16(BluetoothServiceUuidStr::ObjectPush);
 
+    LOG("Connect 4");
   mRunnable = aRunnable;
 
   nsresult rv = bs->GetSocketViaService(aDeviceObjectPath,
@@ -217,12 +230,18 @@ BluetoothOppManager::Connect(const nsAString& aDeviceObjectPath,
                                         this,
                                         mRunnable);
 
+  LOG("Connect 5, %d", NS_FAILED(rv));
   return NS_FAILED(rv) ? false : true;
 }
 
 void
 BluetoothOppManager::Disconnect()
 {
+  if (GetConnectionStatus() == SocketConnectionStatus::SOCKET_DISCONNECTED) {
+    NS_WARNING("BluetoothOppManager has been disconnected!");
+    return;
+  }
+
   CloseSocket();
 }
 
@@ -262,11 +281,14 @@ BluetoothOppManager::Listen()
 bool
 BluetoothOppManager::SendFile(BlobParent* aActor)
 {
+  LOG("Send file 1");
   if (mBlob) {
     // Means there's a sending process. Reply error.
+    LOG("Send file 2");
     return false;
   }
 
+    LOG("Send file 3");
   /*
    * Process of sending a file:
    *  - Keep blob because OPP connection has not been established yet.
@@ -275,16 +297,28 @@ BluetoothOppManager::SendFile(BlobParent* aActor)
    */
   mBlob = aActor->GetBlob();
 
+  uint64_t fileLength;
+  nsresult rv = mBlob->GetSize(&fileLength);
+  if (NS_FAILED(rv)) {
+    NS_WARNING("Can't get file size");
+    LOG("Send file 10");
+  }
+
+  LOG("File Length: %d", fileLength);
   // Check if we can get file name from the blob, if not, then we don't
   // send anything.
   nsCOMPtr<nsIDOMFile> file = do_QueryInterface(mBlob);
   if (!file) {
+    LOG("Send file 5");
     return false;
   }
 
+  LOG("Send file 6");
   file->GetName(sFileName);
   if (sFileName.IsEmpty()) {
-    return false;
+    sFileName.AssignLiteral("Eric.jpg");
+    LOG("Send file 7");
+    //return false;
   }
 
   SendConnectRequest();
@@ -483,7 +517,7 @@ BluetoothOppManager::ReceiveSocketData(UnixSocketRawData* aMessage)
 
       MOZ_ASSERT(!sFileName.IsEmpty());
       MOZ_ASSERT(mBlob);
-
+      LOG("Test Test 1");
       /*
        * Before sending content, we have to send a header including
        * information such as file name, file length and content type.
@@ -494,6 +528,7 @@ BluetoothOppManager::ReceiveSocketData(UnixSocketRawData* aMessage)
         return;
       }
 
+      LOG("Test Test 2");
       uint64_t fileLength;
       rv = mBlob->GetSize(&fileLength);
       if (NS_FAILED(rv)) {
@@ -501,6 +536,7 @@ BluetoothOppManager::ReceiveSocketData(UnixSocketRawData* aMessage)
         return;
       }
 
+      LOG("Test Test 3");
       // Currently we keep the size of files which were sent/received via
       // Bluetooth not exceed UINT32_MAX because the Length header in OBEX
       // is only 4-byte long. Although it is possible to transfer a file
@@ -519,6 +555,8 @@ BluetoothOppManager::ReceiveSocketData(UnixSocketRawData* aMessage)
         SendDisconnectRequest();
         return;
       }
+
+      sFileLength = 250398;
 
       sInstance->SendPutHeaderRequest(sFileName, sFileLength);
       StartFileTransfer(mConnectedDeviceAddress, false,

@@ -1374,6 +1374,18 @@ EventFilter(DBusConnection* aConn, DBusMessage* aMsg, void* aData)
       signalName = NS_LITERAL_STRING("PairedStatusChanged");
       signalPath = NS_LITERAL_STRING(LOCAL_AGENT_PATH);
       v.get_ArrayOfBluetoothNamedValue()[0].name() = NS_LITERAL_STRING("paired");
+    } else if (v.get_ArrayOfBluetoothNamedValue()[0].name().EqualsLiteral("Connected")) {
+      /*
+      bool connected = v.get_ArrayOfBluetoothNamedValue()[0].value().get_bool();
+
+      if (!connected) {
+        BluetoothHfpManager* hfp = BluetoothHfpManager::Get();
+        hfp->Disconnect();
+        
+        BluetoothOppManager* opp = BluetoothOppManager::Get();
+        opp->Disconnect();
+      }
+      */
     }
   } else if (dbus_message_is_signal(aMsg, DBUS_MANAGER_IFACE, "AdapterAdded")) {
     const char* str;
@@ -2343,6 +2355,7 @@ BluetoothDBusService::Connect(const nsAString& aDeviceAddress,
       DispatchBluetoothReply(aRunnable, v, errorStr);
       return false;
     }
+    LOG("Should be the first 'Connect place'");
     return true;
   } else if (aProfileId == (uint16_t)(BluetoothServiceUuid::Headset >> 32)) {
     BluetoothHfpManager* hfp = BluetoothHfpManager::Get();
@@ -2441,6 +2454,7 @@ public:
       DispatchBluetoothReply(mRunnable, v, replyError);
       return NS_ERROR_FAILURE;
     }
+    LOG("ConnectBluetoothSocket");
     return NS_OK;
   }
 
@@ -2483,6 +2497,7 @@ public:
     int channel = GetDeviceServiceChannel(mObjectPath, mServiceUUID, 0x0004);
     BluetoothValue v;
     nsString replyError;
+    LOG("Get device channel: %d", channel);
     if(channel < 0) {
       replyError.AssignLiteral("DeviceChannelRetrievalError");
       DispatchBluetoothReply(mRunnable, v, replyError);
@@ -2522,11 +2537,14 @@ BluetoothDBusService::GetSocketViaService(const nsAString& aObjectPath,
                                           mozilla::ipc::UnixSocketConsumer* aConsumer,
                                           BluetoothReplyRunnable* aRunnable)
 {
+  LOG("GetSocketViaService");
   NS_ASSERTION(NS_IsMainThread(), "Must be called from main thread!");
   if (!mConnection || !gThreadConnection) {
     NS_ERROR("Bluetooth service not started yet!");
     return NS_ERROR_FAILURE;
   }
+
+  LOG("Get socket via service");
 
   nsRefPtr<BluetoothReplyRunnable> runnable = aRunnable;
 

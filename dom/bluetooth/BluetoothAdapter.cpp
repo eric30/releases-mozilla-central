@@ -24,10 +24,24 @@
 #include "nsThreadUtils.h"
 #include "nsXPCOMCIDInternal.h"
 
+#include "nsIDOMFile.h"
+#include "nsIFile.h"
+
+
 #include "mozilla/dom/bluetooth/BluetoothTypes.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/LazyIdleThread.h"
 #include "mozilla/Util.h"
+
+#undef LOG
+#if defined(MOZ_WIDGET_GONK)
+#include <android/log.h>
+#define LOG(args...)  __android_log_print(ANDROID_LOG_INFO, "GonkDBus", args);
+#else
+#define BTDEBUG true
+#define LOG(args...) if (BTDEBUG) printf(args);
+#endif
+
 
 using namespace mozilla;
 
@@ -793,6 +807,15 @@ BluetoothAdapter::SendFile(const nsAString& aDeviceAddress,
                            nsIDOMBlob* aBlob,
                            nsIDOMDOMRequest** aRequest)
 {
+  uint64_t fileLength;
+  nsresult rv = aBlob->GetSize(&fileLength);
+  if (NS_FAILED(rv)) {
+    NS_WARNING("Can't get file size");
+    LOG("Send file 10");
+  }
+
+  LOG("File Length: %d", fileLength);
+
   BluetoothService* bs = BluetoothService::Get();
   if (!bs) {
     NS_WARNING("BluetoothService not available!");
@@ -806,7 +829,7 @@ BluetoothAdapter::SendFile(const nsAString& aDeviceAddress,
   }
 
   nsCOMPtr<nsIDOMDOMRequest> req;
-  nsresult rv = rs->CreateRequest(GetOwner(), getter_AddRefs(req));
+  rv = rs->CreateRequest(GetOwner(), getter_AddRefs(req));
   if (NS_FAILED(rv)) {
     NS_WARNING("Can't create DOMRequest!");
     return NS_ERROR_FAILURE;
