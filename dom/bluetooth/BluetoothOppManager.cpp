@@ -17,13 +17,14 @@
 #include "mozilla/RefPtr.h"
 #include "mozilla/Services.h"
 #include "mozilla/StaticPtr.h"
+#include "nsCExternalHandlerService.h"
 #include "nsIObserver.h"
 #include "nsIObserverService.h"
 #include "nsIDOMFile.h"
 #include "nsIFile.h"
 #include "nsIInputStream.h"
+#include "nsIMIMEService.h"
 #include "nsIOutputStream.h"
-#include "nsLocalFile.h"
 #include "nsNetUtil.h"
 
 #define TARGET_FOLDER "/sdcard/downloads/bluetooth/"
@@ -284,20 +285,39 @@ BluetoothOppManager::SendFile(BlobParent* aActor)
    */
   mBlob = aActor->GetBlob();
 
-  nsCOMPtr<nsIDOMFile> domFile = do_QueryInterface(mBlob);
-  nsString fullPath;
+  sFileName.Truncate();
 
-  if (domFile && NS_SUCCEEDED(domFile->GetMozFullPathInternal(fullPath))) {
-    nsCOMPtr<nsIFile> localFile = new nsLocalFile();
-    NS_NewLocalFile(fullPath, false, getter_AddRefs(localFile));
-
-    if (localFile) {
-      localFile->GetLeafName(sFileName);
-    }
+  nsCOMPtr<nsIDOMFile> file = do_QueryInterface(mBlob);
+  if (file) {
+    file->GetName(sFileName);
   }
-
+ 
   if (sFileName.IsEmpty()) {
+    // FIXME: Localize
     sFileName.AssignLiteral("Unknown");
+  } else {
+    int32_t offset = sFileName.RFindChar('/');
+    if (offset != kNotFound) {
+      sFileName = Substring(sFileName, offset + 1);
+    } else {
+      nsCOMPtr<nsIMIMEService> mimeSvc =
+        do_GetService(NS_MIMESERVICE_CONTRACTID);
+
+      if (mimeSvc) {
+        nsString mimeType;
+        mBlob->GetType(mimeType);
+
+        nsCString extension;
+        nsresult rv =
+          mimeSvc->GetPrimaryExtension(NS_LossyConvertUTF16toASCII(mimeType),
+                                       EmptyCString(),
+                                       extension);
+        if (NS_SUCCEEDED(rv)) {
+          sFileName.AppendLiteral(".");
+          sFileName.Append(extension);
+        }
+      }
+    }
   }
 
   SendConnectRequest();
@@ -925,6 +945,7 @@ BluetoothOppManager::ReplyToPut(bool aFinal, bool aContinue)
   memcpy(s->mData, req, s->mSize);
   SendSocketData(s);
 }
+
 
 void
 BluetoothOppManager::FileTransferComplete(const nsString& aDeviceAddress,
