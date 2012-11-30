@@ -54,7 +54,9 @@ interface nsIDOMBluetoothAdapter : nsIDOMEventTarget
   nsIDOMDOMRequest disconnect(in unsigned short aProfile);
 
   // One device can only send one file at a time
-  nsIDOMDOMRequest sendFile(in DOMString aDeviceAddress, in nsIDOMBlob aBlob);
+  nsIDOMDOMRequest sendFile(in DOMString aDeviceAddress,
+                            in nsIDOMBlob aBlob,
+                            [optional] in DOMString aBlobName);
   nsIDOMDOMRequest stopSendingFile(in DOMString aDeviceAddress);
   nsIDOMDOMRequest confirmReceivingFile(in DOMString aDeviceAddress, in bool aConfirmation);
 

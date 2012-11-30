@@ -787,6 +787,7 @@ BluetoothAdapter::Disconnect(uint16_t aProfileId,
 NS_IMETHODIMP
 BluetoothAdapter::SendFile(const nsAString& aDeviceAddress,
                            nsIDOMBlob* aBlob,
+                           const nsAString& aBlobName,
                            nsIDOMDOMRequest** aRequest)
 {
   BluetoothService* bs = BluetoothService::Get();
