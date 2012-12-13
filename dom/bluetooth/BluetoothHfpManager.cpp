@@ -28,6 +28,14 @@
 #define MOZSETTINGS_CHANGED_ID "mozsettings-changed"
 #define AUDIO_VOLUME_BT_SCO "audio.volume.bt_sco"
 
+/**
+ * These constants are used in result code such as +CLIP and +CCWA. The value
+ * of these constants is the same as TOA_INTERNATIONAL/TOA_UNKNOWN defined in
+ * ril_consts.js
+ */
+#define TOA_UNKNOWN 0x81
+#define TOA_INTERNATIONAL 0x91
+
 using namespace mozilla;
 using namespace mozilla::ipc;
 USING_BLUETOOTH_NAMESPACE
@@ -202,7 +210,9 @@ BluetoothHfpManagerObserver::Observe(nsISupports* aSubject,
 class SendRingIndicatorTask : public Task
 {
 public:
-  SendRingIndicatorTask()
+  SendRingIndicatorTask(const char* aNumber, int aType = TOA_UNKNOWN)
+    : mNumber(aNumber)
+    , mType(aType)
   {
     MOZ_ASSERT(NS_IsMainThread());
   }
@@ -217,15 +227,27 @@ public:
       NS_WARNING("BluetoothHfpManager no longer exists, cannot send ring!");
       return;
     }
+
     gBluetoothHfpManager->SendLine("RING");
+
+    if (!mNumber.IsEmpty()) {
+      nsAutoCString resultCode("+CLIP: \"");
+      resultCode += mNumber;
+      resultCode += "\",";
+      resultCode.AppendInt(mType);
+
+      gBluetoothHfpManager->SendLine(resultCode.get());
+    }
 
     MessageLoop::current()->
       PostDelayedTask(FROM_HERE,
-                      new SendRingIndicatorTask(),
+                      new SendRingIndicatorTask(mNumber.get(), mType),
                       sRingInterval);
-
-    return;
   }
+
+private:
+  nsCString mNumber;
+  int mType;
 };
 
 void
@@ -534,7 +556,7 @@ BluetoothHfpManager::ReceiveSocketData(UnixSocketRawData* aMessage)
     mReceiveVgsFlag = true;
 
     int length = strlen(msg) - 8;
-    nsAutoCString vgsString(nsDependentCSubstring(msg+7, length));
+    nsAutoCString vgsString(nsDependentCSubstring(msg + 7, length));
 
     nsresult rv;
     int newVgs = vgsString.ToInteger(&rv);
@@ -566,8 +588,16 @@ BluetoothHfpManager::ReceiveSocketData(UnixSocketRawData* aMessage)
   } else if (!strncmp(msg, "AT+CHUP", 7)) {
     NotifyDialer(NS_LITERAL_STRING("CHUP"));
     SendLine("OK");
+  } else if (!strncmp(msg, "AT+CLIP", 7)) {
+    /**
+     * 4.23 Calling Line Identification (CLI) Notification, HFP spec 1.6
+     */
+    int length = strlen(msg);
+    mCLIP = (msg[length - 1] == '0') ? false : true;
+
+    SendLine("OK");
   } else if (!strncmp(msg, "AT+CKPD", 7)) {
-    // For Headset
+    // For Headset Profile (HSP)
     switch (currentCallState) {
       case nsIRadioInterfaceLayer::CALL_STATE_INCOMING:
         NotifyDialer(NS_LITERAL_STRING("ATA"));
@@ -754,12 +784,13 @@ BluetoothHfpManager::SendCommand(const char* aCommand, const int aValue)
 }
 
 void
-BluetoothHfpManager::SetupCIND(int aCallIndex, int aCallState, bool aInitial)
+BluetoothHfpManager::SetupCIND(int aCallIndex, int aCallState,
+                               const char* aNumber, bool aInitial)
 {
   nsRefPtr<nsRunnable> sendRingTask;
   nsString address;
 
-  while (aCallIndex >= mCurrentCallStateArray.Length()) {
+  while (aCallIndex >= (int)mCurrentCallStateArray.Length()) {
     mCurrentCallStateArray.AppendElement((int)nsIRadioInterfaceLayer::CALL_STATE_DISCONNECTED);
   }
 
@@ -775,8 +806,20 @@ BluetoothHfpManager::SetupCIND(int aCallIndex, int aCallState, bool aInitial)
       if (!mCurrentCallIndex) {
         // Start sending RING indicator to HF
         sStopSendingRingFlag = false;
-        MessageLoop::current()->PostTask(FROM_HERE,
-                                         new SendRingIndicatorTask());
+
+        if (!mCLIP) {
+          MessageLoop::current()->PostTask(FROM_HERE,
+                                           new SendRingIndicatorTask(""));
+        } else {
+          int type = TOA_UNKNOWN;
+
+          if (aNumber && aNumber[0] == '+') {
+            type = TOA_INTERNATIONAL;
+          }
+
+          MessageLoop::current()->PostTask(FROM_HERE,
+                                           new SendRingIndicatorTask(aNumber, type));
+        }
       }
       break;
     case nsIRadioInterfaceLayer::CALL_STATE_DIALING:
@@ -860,7 +903,7 @@ BluetoothHfpManager::SetupCIND(int aCallIndex, int aCallState, bool aInitial)
           // Find the first non-disconnected call (like connected, held),
           // and update mCurrentCallIndex
           int c;
-          for (c = 1; c < mCurrentCallStateArray.Length(); c++) {
+          for (c = 1; c < (int)mCurrentCallStateArray.Length(); c++) {
             if (mCurrentCallStateArray[c] != nsIRadioInterfaceLayer::CALL_STATE_DISCONNECTED) {
               mCurrentCallIndex = c;
               break;
@@ -868,7 +911,7 @@ BluetoothHfpManager::SetupCIND(int aCallIndex, int aCallState, bool aInitial)
           }
 
           // There is no call 
-          if (c == mCurrentCallStateArray.Length()) {
+          if (c == (int)mCurrentCallStateArray.Length()) {
             mCurrentCallIndex = 0;
             CloseScoSocket();
           } 
@@ -903,7 +946,7 @@ void
 BluetoothHfpManager::EnumerateCallState(int aCallIndex, int aCallState,
                                         const char* aNumber, bool aIsActive)
 {
-  SetupCIND(aCallIndex, aCallState, true);
+  SetupCIND(aCallIndex, aCallState, aNumber, true);
 
   if (sCINDItems[CINDType::CALL].value == CallState::IN_PROGRESS ||
       sCINDItems[CINDType::CALLSETUP].value == CallSetupState::OUTGOING ||
@@ -927,7 +970,7 @@ BluetoothHfpManager::CallStateChanged(int aCallIndex, int aCallState,
     return;
   }
 
-  SetupCIND(aCallIndex, aCallState, false);
+  SetupCIND(aCallIndex, aCallState, aNumber, false);
 }
 
 void
@@ -990,4 +1033,5 @@ BluetoothHfpManager::OnDisconnect()
   sCINDItems[CINDType::CALL].value = CallState::NO_CALL;
   sCINDItems[CINDType::CALLSETUP].value = CallSetupState::NO_CALLSETUP;
   sCINDItems[CINDType::CALLHELD].value = CallHeldState::NO_CALLHELD;
+  mCLIP = false;
 }
