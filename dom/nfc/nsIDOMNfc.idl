@@ -1,0 +1,29 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "nsIDOMEventTarget.idl"
+#include "nsIDOMMozNdefRecord.idl"
+#include "nsIDOMDOMRequest.idl"
+
+[scriptable, builtinclass, uuid(c2c01a50-4779-11e1-b86c-0800200c9a66)]
+interface nsIDOMNfc : nsIDOMEventTarget {
+
+  [implicit_jscontext] attribute jsval onndefdiscovered;
+  [implicit_jscontext] attribute jsval onndefdisconnected;
+
+  [implicit_jscontext]
+  boolean validateNdefTag(in jsval records);
+
+  // records is an array of 1 or more records
+  [implicit_jscontext]
+  nsIDOMDOMRequest writeNdefTag(in jsval records);
+
+  // records is an array of 1 or more records
+  [implicit_jscontext]
+  nsIDOMDOMRequest ndefPush(in jsval records);
+
+  // Only for debug/development purposes to send a unfiltered
+  // message to the nfcd socket
+  void sendToNfcd(in DOMString message);
+};

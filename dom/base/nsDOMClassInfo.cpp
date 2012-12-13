@@ -517,6 +517,13 @@ using mozilla::dom::indexedDB::IDBWrapperCache;
 #include "BluetoothPropertyEvent.h"
 #endif
 
+#ifdef MOZ_B2G_NFC
+#include "nsNfc.h"
+#include "nsIDOMNfc.h"
+#include "NfcNdefEvent.h"
+#include "NdefRecord.h"
+#endif
+
 #include "nsIDOMNavigatorSystemMessages.h"
 
 #ifdef MOZ_SYS_MSG
@@ -1664,6 +1671,15 @@ static nsDOMClassInfoData sClassInfoData[] = {
                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
 #endif
 
+#ifdef MOZ_B2G_NFC
+  NS_DEFINE_CLASSINFO_DATA(Nfc, nsEventTargetSH,
+                           EVENTTARGET_SCRIPTABLE_FLAGS)
+  NS_DEFINE_CLASSINFO_DATA(NfcNdefEvent, nsDOMGenericSH,
+                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
+  NS_DEFINE_CLASSINFO_DATA(MozNdefRecord, nsDOMGenericSH,
+                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
+#endif
+
   NS_DEFINE_CLASSINFO_DATA(CameraManager, nsDOMGenericSH,
                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
   NS_DEFINE_CLASSINFO_DATA(CameraControl, nsDOMGenericSH,
@@ -1724,6 +1740,9 @@ NS_DEFINE_CONTRACT_CTOR(XSLTProcessor,
                         "@mozilla.org/document-transformer;1?type=xslt")
 NS_DEFINE_CONTRACT_CTOR(EventSource, NS_EVENTSOURCE_CONTRACTID)
 NS_DEFINE_CONTRACT_CTOR(MutationObserver, NS_DOMMUTATIONOBSERVER_CONTRACTID)
+#ifdef MOZ_B2G_NFC
+//NS_DEFINE_CONTRACT_CTOR(MozNdefRecord, NS_DOMMOZNDEFREOCRD_CONTRACTID)
+#endif
 #ifdef MOZ_SYS_MSG
 NS_DEFINE_CONTRACT_CTOR(MozActivity, NS_DOMACTIVITY_CONTRACTID)
 #endif
@@ -1796,6 +1815,9 @@ static const nsConstructorFuncMapData kConstructorFuncMap[] =
   NS_DEFINE_CONSTRUCTOR_FUNC_DATA(XSLTProcessor, XSLTProcessorCtor)
   NS_DEFINE_CONSTRUCTOR_FUNC_DATA(EventSource, EventSourceCtor)
   NS_DEFINE_CONSTRUCTOR_FUNC_DATA(MutationObserver, MutationObserverCtor)
+#ifdef MOZ_B2G_NFC
+  NS_DEFINE_CONSTRUCTOR_FUNC_DATA(MozNdefRecord, nfc::NdefRecord::NewNdefRecord)
+#endif
 #ifdef MOZ_SYS_MSG
   NS_DEFINE_CONSTRUCTOR_FUNC_DATA(MozActivity, MozActivityCtor)
 #endif
@@ -2431,6 +2453,16 @@ nsDOMClassInfo::Init()
     do_GetService("@mozilla.org/js/xpc/ContextStack;1", &rv);
   NS_ENSURE_SUCCESS(rv, rv);
 
+
+  // This might fail here, but we just wwant to see if the object
+  // is at all valid:
+  NS_WARNING("UUUUUUUUUUUUUUUUU TESTING NFC CONTENTHELPER UUUUUUUUUUUUU");
+  nsCOMPtr<nsINfcContentHelper> nfc =
+    do_GetService("@mozilla.org/nfc/content-helper;1");
+  NS_WARNING("UUUUUUUUUUUUUUUUU RETURN GET NFC CONTENTHELPER UUUUUUUUUUUUU");
+  NS_ENSURE_SUCCESS(rv, rv);
+  NS_WARNING("UUUUUUUUUUUUUUUUU TESTED OK NFC CONTENTHELPER UUUUUUUUUUUUU");
+
   JSContext* cx = stack->GetSafeJSContext();
   NS_ENSURE_TRUE(cx, NS_ERROR_FAILURE);
 
@@ -2471,6 +2503,9 @@ nsDOMClassInfo::Init()
 #endif
 #ifdef MOZ_B2G_BT
     DOM_CLASSINFO_MAP_ENTRY(nsIDOMNavigatorBluetooth)
+#endif
+#ifdef MOZ_B2G_NFC
+    DOM_CLASSINFO_MAP_ENTRY(nsIDOMNavigatorNfc)
 #endif
     DOM_CLASSINFO_MAP_ENTRY(nsIDOMNavigatorCamera)
 #ifdef MOZ_SYS_MSG
@@ -4411,6 +4446,22 @@ nsDOMClassInfo::Init()
   DOM_CLASSINFO_MAP_BEGIN(BluetoothPropertyEvent, nsIDOMBluetoothPropertyEvent)
     DOM_CLASSINFO_MAP_ENTRY(nsIDOMBluetoothPropertyEvent)
     DOM_CLASSINFO_MAP_ENTRY(nsIDOMEvent)
+  DOM_CLASSINFO_MAP_END
+#endif
+
+#ifdef MOZ_B2G_NFC
+  DOM_CLASSINFO_MAP_BEGIN(Nfc, nsIDOMNfc)
+    DOM_CLASSINFO_MAP_ENTRY(nsIDOMNfc)
+    DOM_CLASSINFO_MAP_ENTRY(nsIDOMEventTarget)
+  DOM_CLASSINFO_MAP_END
+
+  DOM_CLASSINFO_MAP_BEGIN(NfcNdefEvent, nsIDOMNfcNdefEvent)
+    DOM_CLASSINFO_MAP_ENTRY(nsIDOMNfcNdefEvent)
+    DOM_CLASSINFO_MAP_ENTRY(nsIDOMEvent)
+  DOM_CLASSINFO_MAP_END
+
+  DOM_CLASSINFO_MAP_BEGIN(MozNdefRecord, nsIDOMMozNdefRecord)
+    DOM_CLASSINFO_MAP_ENTRY(nsIDOMMozNdefRecord)
   DOM_CLASSINFO_MAP_END
 #endif
 

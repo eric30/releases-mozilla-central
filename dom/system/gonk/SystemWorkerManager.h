@@ -51,17 +51,28 @@ public:
   static nsIInterfaceRequestor*
   GetInterfaceRequestor();
 
+#ifdef MOZ_B2G_NFC
+  static bool IsNfcEnabled();
+#endif
+
 private:
   SystemWorkerManager();
   ~SystemWorkerManager();
 
   nsresult InitRIL(JSContext *cx);
+#ifdef MOZ_B2G_NFC
+  nsresult InitNfc(JSContext *cx);
+#endif
 #ifdef MOZ_WIDGET_GONK
   nsresult InitNetd(JSContext *cx);
 #endif
   nsresult InitWifi(JSContext *cx);
 
   nsCOMPtr<nsIRadioInterfaceLayer> mRIL;
+#ifdef MOZ_B2G_NFC
+  nsCOMPtr<nsIWorkerHolder> mNfcWorker;
+#endif
+
 #ifdef MOZ_WIDGET_GONK
   nsCOMPtr<nsIWorkerHolder> mNetdWorker;
 #endif

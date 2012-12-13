@@ -57,5 +57,9 @@ ifdef MOZ_B2G_BT
 DOM_SRCDIRS += dom/bluetooth
 endif
 
+ifdef MOZ_B2G_NFC
+DOM_SRCDIRS += dom/nfc
+endif
+
 LOCAL_INCLUDES += $(DOM_SRCDIRS:%=-I$(topsrcdir)/%)
 DEFINES += -D_IMPL_NS_LAYOUT

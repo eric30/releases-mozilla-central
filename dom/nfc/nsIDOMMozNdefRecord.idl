@@ -1,0 +1,13 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "nsISupports.idl"
+
+[scriptable, builtinclass, uuid(42a70160-c4a3-11e1-9b21-0800200c9a66)]
+interface nsIDOMMozNdefRecord : nsISupports {
+  readonly attribute octet tnf;
+  readonly attribute DOMString type;
+  readonly attribute DOMString id;
+  readonly attribute jsval payload;
+};
