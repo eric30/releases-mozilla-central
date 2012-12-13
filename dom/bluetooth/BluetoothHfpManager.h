@@ -34,7 +34,8 @@ public:
                         const char* aNumber, bool aIsActive);
   void EnumerateCallState(int aCallIndex, int aCallState,
                           const char* aNumber, bool aIsActive);
-  void SetupCIND(int aCallIndex, int aCallState, bool aInitial);
+  void SetupCIND(int aCallIndex, int aCallState,
+                 const char* aPhoneNumber, bool aInitial);
   bool Listen();
   void SetVolume(int aVolume);
 
@@ -53,6 +54,7 @@ private:
 
   int mCurrentVgs;
   int mCurrentCallIndex;
+  bool mCLIP;
   bool mReceiveVgsFlag;
   nsString mDevicePath;
   enum mozilla::ipc::SocketConnectionStatus mSocketStatus;
