@@ -28,6 +28,16 @@
 #define MOZSETTINGS_CHANGED_ID "mozsettings-changed"
 #define AUDIO_VOLUME_BT_SCO "audio.volume.bt_sco"
 
+#undef LOG
+#if defined(MOZ_WIDGET_GONK)
+#include <android/log.h>
+#define LOG(args...)  __android_log_print(ANDROID_LOG_INFO, "GonkDBus", args);
+#else
+#define BTDEBUG true
+#define LOG(args...) if (BTDEBUG) printf(args);
+#endif
+
+
 /**
  * These constants are used in result code such as +CLIP and +CCWA. The value
  * of these constants is the same as TOA_INTERNATIONAL/TOA_UNKNOWN defined in
@@ -503,34 +513,45 @@ BluetoothHfpManager::ReceiveSocketData(UnixSocketRawData* aMessage)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  const char* msg = (const char*)aMessage->mData;
   int currentCallState = mCurrentCallStateArray[mCurrentCallIndex];
+
+  nsAutoCString msg((const char*)aMessage->mData);
+  msg.StripWhitespace();
+
+  nsTArray<nsCString> atCommandValues;
+
+  /*
+  nsCString testtest("AT+TEST=1,5,645,10");
+  AtCommandParser(testtest, 8, atCommandValues);
+  */
 
   // For more information, please refer to 4.34.1 "Bluetooth Defined AT
   // Capabilities" in Bluetooth hands-free profile 1.6
-  if (!strncmp(msg, "AT+BRSF=", 8)) {
+  if (msg.Find("AT+BRSF=") != -1) {
     SendCommand("+BRSF: ", 23);
-    SendLine("OK");
-  } else if (!strncmp(msg, "AT+CIND=?", 9)) {
+  } else if (msg.Find("AT+CIND=?") != -1) {
     // Asking for CIND range
     SendCommand("+CIND: ", 0);
-    SendLine("OK");
-  } else if (!strncmp(msg, "AT+CIND?", 8)) {
+  } else if (msg.Find("AT+CIND?") != -1) {
     // Asking for CIND value
     SendCommand("+CIND: ", 1);
-    SendLine("OK");
-  } else if (!strncmp(msg, "AT+CMER=", 8)) {
-    // SLC establishment
-    SendLine("OK");
-  } else if (!strncmp(msg, "AT+CHLD=?", 9)) {
+  } else if (msg.Find("AT+CMER=") != -1) {
+    /**
+     * SLC establishment is done when AT+CMER has been received.
+     * Do nothing but respond with "OK".
+     */
+  } else if (msg.Find("AT+CHLD=?") != -1) {
     SendLine("+CHLD: (1,2)");
-    SendLine("OK");
-  } else if (!strncmp(msg, "AT+CHLD=", 8)) {
-    int length = strlen(msg) - 9;
-    nsAutoCString chldString(nsDependentCSubstring(msg+8, length));
+  } else if (msg.Find("AT+CHLD=") != -1) {
+    AtCommandParser(msg, 8, atCommandValues);
+
+    if (atCommandValues.IsEmpty()) {
+      NS_WARNING("Could't get the value of command [AT+VGS=]");
+      goto respond_with_ok;
+    }
 
     nsresult rv;
-    int chld = chldString.ToInteger(&rv);
+    int chld = atCommandValues[0].ToInteger(&rv);
     if (NS_FAILED(rv)) {
       NS_WARNING("Failed to extract volume value from bluetooth headset!");
     }
@@ -550,23 +571,25 @@ BluetoothHfpManager::ReceiveSocketData(UnixSocketRawData* aMessage)
 #endif
         break;
     }
-    SendLine("OK");
-  } else if (!strncmp(msg, "AT+VGS=", 7)) {
+  } else if (msg.Find("AT+VGS=") != -1) {
     // Adjust volume by headset
     mReceiveVgsFlag = true;
+    AtCommandParser(msg, 7, atCommandValues);
 
-    int length = strlen(msg) - 8;
-    nsAutoCString vgsString(nsDependentCSubstring(msg + 7, length));
+    if (atCommandValues.IsEmpty()) {
+      NS_WARNING("Could't get the value of command [AT+VGS=]");
+      goto respond_with_ok;
+    }
 
     nsresult rv;
-    int newVgs = vgsString.ToInteger(&rv);
+    int newVgs = atCommandValues[0].ToInteger(&rv);
     if (NS_FAILED(rv)) {
       NS_WARNING("Failed to extract volume value from bluetooth headset!");
+      goto respond_with_ok;
     }
 
     if (newVgs == mCurrentVgs) {
-      SendLine("OK");
-      return;
+      goto respond_with_ok;
     }
 
 #ifdef DEBUG
@@ -577,26 +600,25 @@ BluetoothHfpManager::ReceiveSocketData(UnixSocketRawData* aMessage)
     nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
     data.AppendInt(newVgs);
     os->NotifyObservers(nullptr, "bluetooth-volume-change", data.get());
-
-    SendLine("OK");
-  } else if (!strncmp(msg, "AT+BLDN", 7)) {
+  } else if (msg.Find("AT+BLDN") != -1) {
     NotifyDialer(NS_LITERAL_STRING("BLDN"));
-    SendLine("OK");
-  } else if (!strncmp(msg, "ATA", 3)) {
+  } else if (msg.Find("ATA") != -1) {
     NotifyDialer(NS_LITERAL_STRING("ATA"));
-    SendLine("OK");
-  } else if (!strncmp(msg, "AT+CHUP", 7)) {
+  } else if (msg.Find("AT+CHUP") != -1) {
     NotifyDialer(NS_LITERAL_STRING("CHUP"));
-    SendLine("OK");
-  } else if (!strncmp(msg, "AT+CLIP", 7)) {
+  } else if (msg.Find("AT+CLIP=") != -1) {
     /**
      * 4.23 Calling Line Identification (CLI) Notification, HFP spec 1.6
      */
-    int length = strlen(msg);
-    mCLIP = (msg[length - 1] == '0') ? false : true;
+    AtCommandParser(msg, 8, atCommandValues);
 
-    SendLine("OK");
-  } else if (!strncmp(msg, "AT+CKPD", 7)) {
+    if (atCommandValues.IsEmpty()) {
+      NS_WARNING("Could't get the value of command [AT+CLIP=]");
+      goto respond_with_ok;
+    }
+
+    mCLIP = (atCommandValues[0].EqualsLiteral("1"));
+  } else if (msg.Find("AT+CKPD") != -1) {
     // For Headset Profile (HSP)
     switch (currentCallState) {
       case nsIRadioInterfaceLayer::CALL_STATE_INCOMING:
@@ -616,7 +638,6 @@ BluetoothHfpManager::ReceiveSocketData(UnixSocketRawData* aMessage)
 #endif
         break;
     }
-    SendLine("OK");
   } else {
 #ifdef DEBUG
     nsCString warningMsg;
@@ -624,8 +645,11 @@ BluetoothHfpManager::ReceiveSocketData(UnixSocketRawData* aMessage)
     warningMsg.Append(msg);
     NS_WARNING(warningMsg.get());
 #endif
-    SendLine("OK");
   }
+
+respond_with_ok:
+  // We always respond to remote device with "OK" in general cases.
+  SendLine("OK");
 }
 
 bool
@@ -811,9 +835,10 @@ BluetoothHfpManager::SetupCIND(int aCallIndex, int aCallState,
           MessageLoop::current()->PostTask(FROM_HERE,
                                            new SendRingIndicatorTask(""));
         } else {
+          // Same logic as implementation in ril_worker.js
           int type = TOA_UNKNOWN;
 
-          if (aNumber && aNumber[0] == '+') {
+          if (aNumber && strlen(aNumber) > 0 && aNumber[0] == '+') {
             type = TOA_INTERNATIONAL;
           }
 
@@ -910,11 +935,11 @@ BluetoothHfpManager::SetupCIND(int aCallIndex, int aCallState,
             }
           }
 
-          // There is no call 
+          // There is no call
           if (c == (int)mCurrentCallStateArray.Length()) {
             mCurrentCallIndex = 0;
             CloseScoSocket();
-          } 
+          }
         }
       }
       break;

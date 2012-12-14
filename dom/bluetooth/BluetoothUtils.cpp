@@ -16,6 +16,16 @@
 #include "nsString.h"
 #include "nsTArray.h"
 
+#undef LOG
+#if defined(MOZ_WIDGET_GONK)
+#include <android/log.h>
+#define LOG(args...)  __android_log_print(ANDROID_LOG_INFO, "GonkDBus", args);
+#else
+#define BTDEBUG true
+#define LOG(args...) if (BTDEBUG) printf(args);
+#endif
+
+
 BEGIN_BLUETOOTH_NAMESPACE
 
 bool
@@ -134,6 +144,29 @@ DispatchBluetoothReply(BluetoothReplyRunnable* aRunnable,
   if (NS_FAILED(NS_DispatchToMainThread(aRunnable))) {
     NS_WARNING("Failed to dispatch to main thread!");
   }
+}
+
+void
+AtCommandParser(const nsACString& aAtCommand, int aStart,
+                nsTArray<nsCString>& aRetValues)
+{
+  // Use ',' as separator
+  int length = aAtCommand.Length();
+  int begin = aStart;
+
+  for (int i = aStart; i < length; ++i) {
+    if (aAtCommand[i] == ',') {
+      nsCString tmp(nsDependentCSubstring(aAtCommand, begin, i - begin));
+      LOG("Substring: %s", tmp.get());
+      aRetValues.AppendElement(tmp);
+
+      begin = i + 1;
+    }
+  }
+
+  nsCString tmp(nsDependentCSubstring(aAtCommand, begin));
+  aRetValues.AppendElement(tmp);
+  LOG("Final Substring: %s", tmp.get());
 }
 
 END_BLUETOOTH_NAMESPACE
