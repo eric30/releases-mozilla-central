@@ -84,19 +84,19 @@ class ConnectWorkerToNfc : public WorkerTask
 public:
   virtual bool RunTask(JSContext *aCx);
 };
- 
+
 JSBool
 PostToNfc(JSContext *cx, unsigned argc, jsval *vp)
 {
   NS_ASSERTION(!NS_IsMainThread(), "Expecting to be on the worker thread");
- 
+
   if (argc != 1) {
     JS_ReportError(cx, "Expecting a single argument with the NFC message");
     return false;
   }
- 
+
   jsval v = JS_ARGV(cx, vp)[0];
- 
+
   nsAutoPtr<NfcData> rm(new NfcData());
   JSAutoByteString abs;
   void *data;
@@ -106,7 +106,7 @@ PostToNfc(JSContext *cx, unsigned argc, jsval *vp)
     if (!abs.encode(cx, str)) {
       return false;
     }
- 
+
     size = JS_GetStringLength(str);
     data = abs.ptr();
   } else {
@@ -114,14 +114,14 @@ PostToNfc(JSContext *cx, unsigned argc, jsval *vp)
                    "Incorrect argument. Expecting a string.");
     return false;
   }
- 
+
   rm->json = (char *) malloc(size + 1);
   memcpy(rm->json, data, size + 1);
   NfcData *tosend = rm.forget();
   JS_ALWAYS_TRUE(SendNfcData(&tosend));
   return true;
 }
- 
+
 bool
 ConnectWorkerToNfc::RunTask(JSContext *aCx)
 {
@@ -130,11 +130,11 @@ ConnectWorkerToNfc::RunTask(JSContext *aCx)
   NS_ASSERTION(!NS_IsMainThread(), "Expecting to be on the worker thread");
   NS_ASSERTION(!JS_IsRunning(aCx), "Are we being called somehow?");
   JSObject *workerGlobal = JS_GetGlobalObject(aCx);
- 
+
   return !!JS_DefineFunction(aCx, workerGlobal, "postNfcMessage", PostToNfc, 1,
                              0);
 }
- 
+
 class NfcReceiver : public NfcConsumer
 {
   class DispatchNfcEvent : public WorkerTask
@@ -143,39 +143,39 @@ class NfcReceiver : public NfcConsumer
     DispatchNfcEvent(NfcData *aMessage)
       : mMessage(aMessage)
     { }
- 
+
     virtual bool RunTask(JSContext *aCx);
- 
+
   private:
     nsAutoPtr<NfcData> mMessage;
   };
- 
+
 public:
   NfcReceiver(WorkerCrossThreadDispatcher *aDispatcher)
     : mDispatcher(aDispatcher)
   { }
- 
+
   virtual void MessageReceived(NfcData *aMessage) {
     nsRefPtr<DispatchNfcEvent> dre(new DispatchNfcEvent(aMessage));
     mDispatcher->PostTask(dre);
   }
- 
+
 private:
   nsRefPtr<WorkerCrossThreadDispatcher> mDispatcher;
 };
- 
+
 bool
 NfcReceiver::DispatchNfcEvent::RunTask(JSContext *aCx)
 {
   JSObject *obj = JS_GetGlobalObject(aCx);
- 
+
   JSString *string = JS_NewStringCopyN(aCx, mMessage->json, strlen(mMessage->json));
   free(mMessage->json);
- 
+
   if (!string) {
     return false;
   }
- 
+
   jsval argv[] = { STRING_TO_JSVAL(string) };
   return JS_CallFunctionName(aCx, obj, "onNfcMessage", NS_ARRAY_LENGTH(argv),
                              argv, argv);
@@ -726,8 +726,8 @@ SystemWorkerManager::InitNfc(JSContext *cx)
   if (!isNfcEnabled) {
     LOG("NFC Property not enabled.");
     return NS_OK;
-  } 
- 
+  }
+
   // We're keeping as much of this implementation as possible in JS, so the real
   // worker lives in Nfc.js. All we do here is hold it alive and
   // hook it up to the NFC thread.
@@ -740,15 +740,15 @@ SystemWorkerManager::InitNfc(JSContext *cx)
     return NS_OK;
   }
   NS_ENSURE_TRUE(worker, NS_ERROR_FAILURE);
- 
+
   jsval workerval;
   LOG("XXXXXXXX NFC %d", ++voo);
   nsresult rv = worker->GetWorker(&workerval);
   NS_ENSURE_SUCCESS(rv, rv);
- 
+
   LOG("XXXXXXXX NFC %d", ++voo);
   NS_ENSURE_TRUE(!JSVAL_IS_PRIMITIVE(workerval), NS_ERROR_UNEXPECTED);
- 
+
   LOG("XXXXXXXX NFC %d", ++voo);
   JSAutoRequest ar(cx);
   LOG("XXXXXXXX NFC %d", ++voo);
@@ -762,20 +762,20 @@ SystemWorkerManager::InitNfc(JSContext *cx)
   LOG("XXXXXXXX NFC %d", ++voo);
     return NS_ERROR_FAILURE;
   }
- 
+
   LOG("XXXXXXXX NFC %d", ++voo);
   nsRefPtr<ConnectWorkerToNfc> connection = new ConnectWorkerToNfc();
   if (!wctd->PostTask(connection)) {
   LOG("XXXXXXXX NFC %d", ++voo);
     return NS_ERROR_UNEXPECTED;
   }
- 
+
   LOG("XXXXXXXX NFC %d", ++voo);
   // Now that we're set up, connect ourselves to the NFC thread.
   mozilla::RefPtr<NfcReceiver> receiver = new NfcReceiver(wctd);
   LOG("XXXXXXXX NFC %d", ++voo);
   StartNfc(receiver);
- 
+
   LOG("XXXXXXXX NFC %d", ++voo);
   mNfcWorker = worker;
   return NS_OK;
@@ -796,7 +796,7 @@ bool SystemWorkerManager::IsNfcEnabled()
 }
 #endif
 
- 
+
 NS_IMPL_ISUPPORTS2(SystemWorkerManager, nsIObserver, nsIInterfaceRequestor)
 
 NS_IMETHODIMP

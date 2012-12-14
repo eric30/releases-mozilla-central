@@ -8,15 +8,15 @@
 
 #include "nsCOMPtr.h"
 #include "nsDOMEventTargetHelper.h"
- 
+
 #include "nsIDOMNfc.h"
 #include "nsINfcContentHelper.h"
 #include "nsINfcCallback.h"
- 
+
 #define NS_NFC_CONTRACTID "@mozilla.org/nfc/nfc;1"
- 
+
 class nsPIDOMWindow;
- 
+
 nsresult
 NS_NewNfc(nsPIDOMWindow* aWindow, nsIDOMNfc** aNfc);
 
@@ -26,14 +26,12 @@ namespace nfc {
 
 class nsNfc : public nsDOMEventTargetHelper
             , public nsIDOMNfc
-            , public nsIObserver
 {
   nsCOMPtr<nsINfcContentHelper> mNfc;
   nsCOMPtr<nsINfcCallback> mNfcCallback;
 
 public:
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_NSIOBSERVER
   NS_DECL_NSIDOMNFC
   NS_DECL_NSINFCCALLBACK
   NS_FORWARD_NSIDOMEVENTTARGET(nsDOMEventTargetHelper::)

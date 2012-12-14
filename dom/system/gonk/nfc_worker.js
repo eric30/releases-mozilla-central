@@ -106,4 +106,5 @@ onmessage = function onmessage(event) {
 onerror = function onerror(event) {
   debug("OnError: event: " + JSON.stringify(event));
   debug("NFC Worker error " + event.message + "\n");
-};   
+};
+

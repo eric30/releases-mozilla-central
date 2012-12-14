@@ -31,7 +31,7 @@ const NFC_IPC_MSG_NAMES = [
   "NFC:WriteNdefTag",
   "NFC:NdefPush"
 ];
- 
+
 XPCOMUtils.defineLazyServiceGetter(this, "ppmm",
                                    "@mozilla.org/parentprocessmessagemanager;1",
                                    "nsIMessageBroadcaster");
@@ -45,7 +45,7 @@ function Nfc() {
   for each (let msgname in NFC_IPC_MSG_NAMES) {
     ppmm.addMessageListener(msgname, this);
   }
- 
+
   Services.obs.addObserver(this, "xpcom-shutdown", false);
   debug("Starting Worker");
 }
@@ -146,7 +146,7 @@ Nfc.prototype = {
   },
 
   // nsIObserver
- 
+
   observe: function observe(subject, topic, data) {
     switch (topic) {
       case "xpcom-shutdown":

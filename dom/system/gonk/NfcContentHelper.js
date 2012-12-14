@@ -12,41 +12,41 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
- 
+
 "use strict";
- 
+
 const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
- 
+
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/DOMRequestHelper.jsm");
- 
+
 const DEBUG = true; // set to true to see debug messages
 
-const NFCCONTENTHELPER_CONTRACTID = "@mozilla.org/nfc/content-helper;1"; 
+const NFCCONTENTHELPER_CONTRACTID = "@mozilla.org/nfc/content-helper;1";
 const NFCCONTENTHELPER_CID =
   Components.ID("{4d72c120-da5f-11e1-9b23-0800200c9a66}");
 
- 
+
 const NFC_IPC_MSG_NAMES = [
   "NFC:NdefDiscovered",
   "NFC:NdefDisconnected",
   "NFC:RequestStatus"
 ];
- 
+
 XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
                                    "@mozilla.org/childprocessmessagemanager;1",
                                    "nsISyncMessageSender");
- 
+
 function NfcContentHelper() {
   Services.obs.addObserver(this, "xpcom-shutdown", false);
   this.initRequests();
   this.initMessageListener(NFC_IPC_MSG_NAMES);
 }
- 
+
 NfcContentHelper.prototype = {
   __proto__: DOMRequestIpcHelper.prototype,
- 
+
   QueryInterface: XPCOMUtils.generateQI([Ci.nsINfcContentHelper,
                                          Ci.nsIObserver]),
   classID:   NFCCONTENTHELPER_CID,
@@ -56,7 +56,7 @@ NfcContentHelper.prototype = {
     flags:            Ci.nsIClassInfo.DOM_OBJECT,
     interfaces:       [Ci.nsINfcContentHelper]
   }),
- 
+
   sendToNfcd: function sendToNfcd(message) {
     cpmm.sendAsyncMessage("NFC:SendToNfcd", message);
   },
@@ -112,7 +112,7 @@ NfcContentHelper.prototype = {
     });
     return request;
   },
- 
+
   registerCallback: function registerCallback(callbackType, callback) {
     let callbacks = this[callbackType];
     if (!callbacks) {
@@ -146,8 +146,8 @@ NfcContentHelper.prototype = {
 
   unregisterNfcCallback: function unregisterNfcCallback(callback) {
     this.unregisterCallback("_nfcCallbacks", callback);
-  }, 
- 
+  },
+
   receiveMessage: function receiveMessage(message) {
     let request;
     switch (message.name) {
@@ -162,7 +162,7 @@ NfcContentHelper.prototype = {
         break;
     }
   },
- 
+
   handleNdefDiscovered: function handleNdefDiscovered(message) {
     let records = message.content.records;
     for (var i = 0; i < records.length; i++) {
@@ -222,7 +222,7 @@ NfcContentHelper.prototype = {
     }
     Services.DOMRequest.fireError(request, error);
   },
- 
+
   _deliverCallback: function _deliverCallback(callbackType, name, args) {
     let thisCallbacks = this[callbackType];
     if (!thisCallbacks) {
@@ -245,9 +245,9 @@ NfcContentHelper.prototype = {
       }
     }
   },
- 
+
   // nsIObserver
- 
+
   observe: function observe(subject, topic, data) {
     if (topic == "xpcom-shutdown") {
       this.removeMessageListener();
@@ -255,11 +255,11 @@ NfcContentHelper.prototype = {
       cpmm = null;
     }
   }
- 
+
 };
- 
+
 const NSGetFactory = XPCOMUtils.generateNSGetFactory([NfcContentHelper]);
- 
+
 let debug;
 if (DEBUG) {
   debug = function (s) {

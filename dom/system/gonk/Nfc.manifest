@@ -11,11 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
- 
+
 # Nfc.js
 component {2ff24790-5e74-11e1-b86c-0800200c9a66} Nfc.js
 contract @mozilla.org/nfc;1 {2ff24790-5e74-11e1-b86c-0800200c9a66}
- 
+
 # NfcContentHelper.js
 component {4d72c120-da5f-11e1-9b23-0800200c9a66} NfcContentHelper.js
 contract @mozilla.org/nfc/content-helper;1 {4d72c120-da5f-11e1-9b23-0800200c9a66}
