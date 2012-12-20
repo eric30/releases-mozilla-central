@@ -34,7 +34,6 @@ using namespace mozilla::dom::nfc;
 #define LOG(args...)  __android_log_print(ANDROID_LOG_INFO, "Gonk NFC", args)
 #endif
 
-static int voo = 0;
 nsNfc::nsNfc()
 {
 }
@@ -53,24 +52,16 @@ nsNfc::Create(nsPIDOMWindow* aOwner, nsINfcContentHelper* aNfc)
   NS_ASSERTION(aOwner, "Null owner!");
   NS_ASSERTION(aNfc, "Null NFC!");
 
-  LOG("nsNfc::Create %d", voo=1);
-  return nullptr;
   nsRefPtr<nsNfc> nfc = new nsNfc();
 
-  LOG("nsNfc::Create %d", ++voo);
   nfc->BindToOwner(aOwner);
 
-  LOG("nsNfc::Create %d", ++voo);
   nfc->mNfc = aNfc;
-  LOG("nsNfc::Create %d", ++voo);
   nfc->mNfcCallback = new NfcCallback(nfc);
 
-  LOG("nsNfc::Create %d", ++voo); return nfc.forget();
   nsresult rv = aNfc->RegisterNfcCallback(nfc->mNfcCallback);
-  LOG("nsNfc::Create %d", ++voo);
   NS_ENSURE_SUCCESS(rv, nullptr);
 
-  LOG("nsNfc::Create %d", ++voo);
   return nfc.forget();
 }
 
@@ -261,61 +252,39 @@ NS_NewNfc(nsPIDOMWindow* aWindow, nsIDOMNfc** aNfc)
 {
   NS_ASSERTION(aWindow, "Null pointer!");
 
-  voo = 1;
-  LOG("YYYYY NS_NewNfc %d", voo);
   // Check if Nfc exists and return null if it doesn't
   if(!mozilla::dom::gonk::SystemWorkerManager::IsNfcEnabled()) {
     *aNfc = nullptr;
-  LOG("YYYYY NS_NewNfc %d", ++voo);
     return NS_OK;
   }
 
   // Make sure we're dealing with an inner window.
-  LOG("YYYYY NS_NewNfc %d", ++voo);
   nsPIDOMWindow* innerWindow = aWindow->IsInnerWindow() ?
                                aWindow :
                                aWindow->GetCurrentInnerWindow();
-  LOG("YYYYY NS_NewNfc %d", ++voo);
   NS_ENSURE_TRUE(innerWindow, NS_ERROR_FAILURE);
-  LOG("YYYYY NS_NewNfc Got Inner Window! %d", ++voo);
 
-  LOG("NS_NewNfc %d", ++voo);
   // Make sure we're being called from a window that we have permission to
   // access.
   if (!nsContentUtils::CanCallerAccess(innerWindow)) {
-  LOG("NS_NewNfc %d", ++voo);
     return NS_ERROR_DOM_SECURITY_ERR;
   }
 
-  LOG("NS_NewNfc %d", ++voo);
   nsCOMPtr<nsIDocument> document =
     do_QueryInterface(innerWindow->GetExtantDocument());
-  LOG("NS_NewNfc %d", voo++);
   NS_ENSURE_TRUE(document, NS_NOINTERFACE);
 
   // Do security checks.
   nsCOMPtr<nsIURI> uri;
-  LOG("NS_NewNfc %d", ++voo);
   document->NodePrincipal()->GetURI(getter_AddRefs(uri));
 
-  LOG("YYYYY NS_NewNfc %d", ++voo);
   // Security checks passed, make a NFC object.
+  nsresult rv;
   nsCOMPtr<nsINfcContentHelper> nfc =
-    do_GetService(NS_NFCCONTENTHELPER_CONTRACTID);
- // nsCOMPtr<nsINfcContentHelper> nfc =
- //   do_GetService("@mozilla.org/nfc/content-helper;1");
-    //do_GetService(NS_NFCCONTENTHELPER_CONTRACTID);
-  LOG("YYYYY NS_NewNfc %d, returned from get NFCContentHelper!", ++voo);
-  nsCOMPtr<nsIRILContentHelper> ril =
-    do_GetService("@mozilla.org/ril/content-helper;1");
-  NS_ENSURE_TRUE(ril, NS_ERROR_UNEXPECTED);
-  LOG("YYYYY NS_NewNfc %d, got ril ContentHelper!", ++voo);
-  NS_ENSURE_TRUE(nfc, NS_ERROR_UNEXPECTED);
-  LOG("YYYYY NS_NewNfc %d, got NFCContentHelper!", ++voo);
+    do_GetService(NS_NFCCONTENTHELPER_CONTRACTID, &rv);
+  NS_ENSURE_SUCCESS(rv,rv);
 
-  LOG("YYYYY NS_NewNfc %d", ++voo);
   nsRefPtr<nsNfc> domNfc = nsNfc::Create(innerWindow, nfc);
-  LOG("YYYYY NS_NewNfc %d", ++voo);
   NS_ENSURE_TRUE(domNfc, NS_ERROR_UNEXPECTED);
 
   domNfc.forget(aNfc);

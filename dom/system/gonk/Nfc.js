@@ -37,7 +37,6 @@ XPCOMUtils.defineLazyServiceGetter(this, "ppmm",
                                    "nsIMessageBroadcaster");
 
 function Nfc() {
-  debug("XXXXXXXXXXXXXXX NFC.js: NFC()");
   this.worker = new ChromeWorker("resource://gre/modules/nfc_worker.js");
   this.worker.onerror = this.onerror.bind(this);
   this.worker.onmessage = this.onmessage.bind(this);
@@ -53,7 +52,6 @@ Nfc.prototype = {
 
   classID:   NFC_CID,
   classInfo: XPCOMUtils.generateCI({classID: NFC_CID,
-                                    contractID: NFC_CONTRACTID,
                                     classDescription: "Nfc",
                                     interfaces: [Ci.nsIWorkerHolder,
                                                  Ci.nsINfc]}),
@@ -161,7 +159,7 @@ Nfc.prototype = {
 
 };
 
-const NSGetFactory = XPCOMUtils.generateNSGetFactory([Nfc]);
+this.NSGetFactory = XPCOMUtils.generateNSGetFactory([Nfc]);
 
 let debug;
 if (DEBUG) {

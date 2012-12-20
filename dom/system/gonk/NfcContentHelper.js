@@ -23,7 +23,6 @@ Cu.import("resource://gre/modules/DOMRequestHelper.jsm");
 
 const DEBUG = true; // set to true to see debug messages
 
-const NFCCONTENTHELPER_CONTRACTID = "@mozilla.org/nfc/content-helper;1";
 const NFCCONTENTHELPER_CID =
   Components.ID("{4d72c120-da5f-11e1-9b23-0800200c9a66}");
 
@@ -39,9 +38,9 @@ XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
                                    "nsISyncMessageSender");
 
 function NfcContentHelper() {
-  Services.obs.addObserver(this, "xpcom-shutdown", false);
   this.initRequests();
   this.initMessageListener(NFC_IPC_MSG_NAMES);
+  Services.obs.addObserver(this, "xpcom-shutdown", false);
 }
 
 NfcContentHelper.prototype = {
@@ -53,7 +52,6 @@ NfcContentHelper.prototype = {
   classInfo: XPCOMUtils.generateCI({
     classID:          NFCCONTENTHELPER_CID,
     classDescription: "NfcContentHelper",
-    flags:            Ci.nsIClassInfo.DOM_OBJECT,
     interfaces:       [Ci.nsINfcContentHelper]
   }),
 
@@ -95,7 +93,6 @@ NfcContentHelper.prototype = {
   },
 
   writeNdefTag: function writeNdefTag(window, records) {
-    debug("writeNdefTag");
     if (window == null) {
       throw Components.Exception("Can't get window object",
                                   Cr.NS_ERROR_UNEXPECTED);
@@ -148,6 +145,68 @@ NfcContentHelper.prototype = {
     this.unregisterCallback("_nfcCallbacks", callback);
   },
 
+
+  // nsIObserver
+
+  observe: function observe(subject, topic, data) {
+    if (topic == "xpcom-shutdown") {
+      this.removeMessageListener();
+      Services.obs.removeObserver(this, "xpcom-shutdown");
+      cpmm = null;
+    }
+  },
+
+  // nsIMessageListener
+
+
+  fireRequestSuccess: function fireRequestSuccess(requestId, result) {
+    let request = this.takeRequest(requestId);
+    if (!request) {
+      if (DEBUG) {
+        debug("not firing success for id: " + requestId +
+              ", result: " + JSON.stringify(result));
+      }
+      return;
+    }
+
+    if (DEBUG) {
+      debug("fire request success, id: " + requestId +
+            ", result: " + JSON.stringify(result));
+    }
+    Services.DOMRequest.fireSuccess(request, result);
+  },
+
+  dispatchFireRequestSuccess: function dispatchFireRequestSuccess(requestId, result) {
+    let currentThread = Services.tm.currentThread;
+
+    currentThread.dispatch(this.fireRequestSuccess.bind(this, requestId, result),
+                           Ci.nsIThread.DISPATCH_NORMAL);
+  },
+
+  fireRequestError: function fireRequestError(requestId, error) {
+    let request = this.takeRequest(requestId);
+    if (!request) {
+      if (DEBUG) {
+        debug("not firing error for id: " + requestId +
+              ", error: " + JSON.stringify(error));
+      }
+      return;
+    }
+
+    if (DEBUG) {
+      debug("fire request error, id: " + requestId +
+            ", result: " + JSON.stringify(error));
+    }
+    Services.DOMRequest.fireError(request, error);
+  },
+
+  dispatchFireRequestError: function dispatchFireRequestError(requestId, error) {
+    let currentThread = Services.tm.currentThread;
+
+    currentThread.dispatch(this.fireRequestError.bind(this, requestId, error),
+                           Ci.nsIThread.DISPATCH_NORMAL);
+  },
+
   receiveMessage: function receiveMessage(message) {
     let request;
     switch (message.name) {
@@ -189,40 +248,6 @@ NfcContentHelper.prototype = {
     }
   },
 
-  fireRequestSuccess: function fireRequestSuccess(requestId, result) {
-    let request = this.takeRequest(requestId);
-    if (!request) {
-      if (DEBUG) {
-        debug("not firing success for id: " + requestId +
-              ", result: " + JSON.stringify(result));
-      }
-      return;
-    }
-
-    if (DEBUG) {
-      debug("fire request success, id: " + requestId +
-            ", result: " + JSON.stringify(result));
-    }
-    Services.DOMRequest.fireSuccess(request, result);
-  },
-
-  fireRequestError: function fireRequestError(requestId, error) {
-    let request = this.takeRequest(requestId);
-    if (!request) {
-      if (DEBUG) {
-        debug("not firing error for id: " + requestId +
-              ", error: " + JSON.stringify(error));
-      }
-      return;
-    }
-
-    if (DEBUG) {
-      debug("fire request error, id: " + requestId +
-            ", result: " + JSON.stringify(error));
-    }
-    Services.DOMRequest.fireError(request, error);
-  },
-
   _deliverCallback: function _deliverCallback(callbackType, name, args) {
     let thisCallbacks = this[callbackType];
     if (!thisCallbacks) {
@@ -246,19 +271,10 @@ NfcContentHelper.prototype = {
     }
   },
 
-  // nsIObserver
-
-  observe: function observe(subject, topic, data) {
-    if (topic == "xpcom-shutdown") {
-      this.removeMessageListener();
-      Services.obs.removeObserver(this, "xpcom-shutdown");
-      cpmm = null;
-    }
-  }
 
 };
 
-const NSGetFactory = XPCOMUtils.generateNSGetFactory([NfcContentHelper]);
+this.NSGetFactory = XPCOMUtils.generateNSGetFactory([NfcContentHelper]);
 
 let debug;
 if (DEBUG) {

@@ -1740,9 +1740,6 @@ NS_DEFINE_CONTRACT_CTOR(XSLTProcessor,
                         "@mozilla.org/document-transformer;1?type=xslt")
 NS_DEFINE_CONTRACT_CTOR(EventSource, NS_EVENTSOURCE_CONTRACTID)
 NS_DEFINE_CONTRACT_CTOR(MutationObserver, NS_DOMMUTATIONOBSERVER_CONTRACTID)
-#ifdef MOZ_B2G_NFC
-//NS_DEFINE_CONTRACT_CTOR(MozNdefRecord, NS_DOMMOZNDEFREOCRD_CONTRACTID)
-#endif
 #ifdef MOZ_SYS_MSG
 NS_DEFINE_CONTRACT_CTOR(MozActivity, NS_DOMACTIVITY_CONTRACTID)
 #endif
@@ -2452,16 +2449,6 @@ nsDOMClassInfo::Init()
   nsCOMPtr<nsIThreadJSContextStack> stack =
     do_GetService("@mozilla.org/js/xpc/ContextStack;1", &rv);
   NS_ENSURE_SUCCESS(rv, rv);
-
-
-  // This might fail here, but we just wwant to see if the object
-  // is at all valid:
-  NS_WARNING("UUUUUUUUUUUUUUUUU TESTING NFC CONTENTHELPER UUUUUUUUUUUUU");
-  nsCOMPtr<nsINfcContentHelper> nfc =
-    do_GetService("@mozilla.org/nfc/content-helper;1");
-  NS_WARNING("UUUUUUUUUUUUUUUUU RETURN GET NFC CONTENTHELPER UUUUUUUUUUUUU");
-  NS_ENSURE_SUCCESS(rv, rv);
-  NS_WARNING("UUUUUUUUUUUUUUUUU TESTED OK NFC CONTENTHELPER UUUUUUUUUUUUU");
 
   JSContext* cx = stack->GetSafeJSContext();
   NS_ENSURE_TRUE(cx, NS_ERROR_FAILURE);

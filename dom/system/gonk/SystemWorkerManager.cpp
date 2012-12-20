@@ -62,10 +62,6 @@ using namespace mozilla::system;
   { 0x33901e46, 0x33b8, 0x11e1, \
   { 0x98, 0x69, 0xf4, 0x6d, 0x04, 0xd2, 0x5b, 0xcc } }
 
-#define NS_NFC_CID\
-  { 0x33901e46, 0x33b8, 0x11e1, \
-  { 0x98, 0x69, 0xf4, 0x6d, 0x04, 0xd2, 0x5b, 0xcc } }
-
 namespace {
 
 NS_DEFINE_CID(kWifiWorkerCID, NS_WIFIWORKER_CID);
@@ -175,7 +171,6 @@ NfcReceiver::DispatchNfcEvent::RunTask(JSContext *aCx)
   if (!string) {
     return false;
   }
-
   jsval argv[] = { STRING_TO_JSVAL(string) };
   return JS_CallFunctionName(aCx, obj, "onNfcMessage", NS_ARRAY_LENGTH(argv),
                              argv, argv);
@@ -511,7 +506,9 @@ SystemWorkerManager::Init()
 
 #ifdef MOZ_B2G_NFC
   rv = InitNfc(cx);
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_FAILED(rv)) {
+    NS_WARNING("Failed to initialized NFC!");
+  }
 #endif
 
   nsCOMPtr<nsIObserverService> obs =
@@ -717,12 +714,11 @@ SystemWorkerManager::InitWifi(JSContext *cx)
 }
 
 #ifdef MOZ_B2G_NFC
-static int voo = 2;
 nsresult
 SystemWorkerManager::InitNfc(JSContext *cx)
 {
   // Check a system property to see if NFC is enabled.
-  bool isNfcEnabled = true; //IsNfcEnabled();
+  bool isNfcEnabled = IsNfcEnabled();
   if (!isNfcEnabled) {
     LOG("NFC Property not enabled.");
     return NS_OK;
@@ -731,52 +727,36 @@ SystemWorkerManager::InitNfc(JSContext *cx)
   // We're keeping as much of this implementation as possible in JS, so the real
   // worker lives in Nfc.js. All we do here is hold it alive and
   // hook it up to the NFC thread.
-  LOG("XXXXXXXX InitNfc %d", voo=1);
   nsCOMPtr<nsIWorkerHolder> worker = do_CreateInstance(kNfcWorkerCID);
-  //nsCOMPtr<nsIWorkerHolder> worker = do_CreateInstance(kNetworkManagerCID);
-  LOG("XXXXXXXX NFC fake %d", ++voo);
   if (!worker) {
-    LOG("XXXXXXXX NFC can't create any instance %d XXXXXXXXXX", ++voo);
     return NS_OK;
   }
   NS_ENSURE_TRUE(worker, NS_ERROR_FAILURE);
 
   jsval workerval;
-  LOG("XXXXXXXX NFC %d", ++voo);
   nsresult rv = worker->GetWorker(&workerval);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  LOG("XXXXXXXX NFC %d", ++voo);
   NS_ENSURE_TRUE(!JSVAL_IS_PRIMITIVE(workerval), NS_ERROR_UNEXPECTED);
 
-  LOG("XXXXXXXX NFC %d", ++voo);
   JSAutoRequest ar(cx);
-  LOG("XXXXXXXX NFC %d", ++voo);
   JSAutoCompartment ac(cx, JSVAL_TO_OBJECT(workerval));
 
-  LOG("XXXXXXXX NFC %d", ++voo);
   WorkerCrossThreadDispatcher *wctd =
     GetWorkerCrossThreadDispatcher(cx, workerval);
-  LOG("XXXXXXXX NFC %d", voo++);
   if (!wctd) {
-  LOG("XXXXXXXX NFC %d", ++voo);
     return NS_ERROR_FAILURE;
   }
 
-  LOG("XXXXXXXX NFC %d", ++voo);
   nsRefPtr<ConnectWorkerToNfc> connection = new ConnectWorkerToNfc();
   if (!wctd->PostTask(connection)) {
-  LOG("XXXXXXXX NFC %d", ++voo);
     return NS_ERROR_UNEXPECTED;
   }
 
-  LOG("XXXXXXXX NFC %d", ++voo);
   // Now that we're set up, connect ourselves to the NFC thread.
   mozilla::RefPtr<NfcReceiver> receiver = new NfcReceiver(wctd);
-  LOG("XXXXXXXX NFC %d", ++voo);
   StartNfc(receiver);
 
-  LOG("XXXXXXXX NFC %d", ++voo);
   mNfcWorker = worker;
   return NS_OK;
 }
