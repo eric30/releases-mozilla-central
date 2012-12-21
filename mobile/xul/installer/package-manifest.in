@@ -164,6 +164,9 @@
 #ifdef MOZ_B2G_BT
 @BINPATH@/components/dom_bluetooth.xpt
 #endif
+#ifdef MOZ_B2G_NFC
+@BINPATH@/components/dom_nfc.xpt
+#endif
 @BINPATH@/components/dom_camera.xpt
 @BINPATH@/components/dom_canvas.xpt
 @BINPATH@/components/dom_core.xpt
@@ -417,6 +420,10 @@
 @BINPATH@/components/WifiWorker.manifest
 @BINPATH@/components/DOMWifiManager.js
 @BINPATH@/components/DOMWifiManager.manifest
+#endif
+#ifdef MOZ_B2G_NFC
+@BINPATH@/components/Nfc.manifest
+@BINPATH@/components/Nfc.js
 #endif
 #ifdef XP_MACOSX
 @BINPATH@/components/libalerts.dylib

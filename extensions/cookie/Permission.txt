@@ -106,6 +106,10 @@ old name: tcp-socket
 permissions
 {}
 
+nfc
+{}
+Near Field Communications
+
 telephony
 {}
 WebTelephony
