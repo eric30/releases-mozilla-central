@@ -123,7 +123,6 @@ _BROWSER_FILES = \
                  browser_bug556061.js \
                  browser_bug559991.js \
                  browser_bug561623.js \
-                 browser_bug561636.js \
                  browser_bug562649.js \
                  browser_bug563588.js \
                  browser_bug565575.js \
@@ -186,6 +185,7 @@ _BROWSER_FILES = \
                  browser_pinnedTabs.js \
                  browser_plainTextLinks.js \
                  browser_pluginnotification.js \
+                 browser_clickToPlayPluginScriptAccessPopup.js \
                  browser_pluginplaypreview.js \
                  browser_relatedTabs.js \
                  browser_sanitize-passwordDisabledHosts.js \
@@ -238,6 +238,13 @@ _BROWSER_FILES = \
                  plugin_test.html \
                  plugin_test2.html \
                  plugin_test3.html \
+                 plugin_test_noScriptNoPopup.html \
+                 plugin_test_scriptedPopup1.html \
+                 plugin_test_scriptedPopup2.html \
+                 plugin_test_scriptedPopup3.html \
+                 plugin_test_scriptedNoPopup1.html \
+                 plugin_test_scriptedNoPopup2.html \
+                 plugin_test_scriptedNoPopup3.html \
                  plugin_alternate_content.html \
                  plugin_both.html \
                  plugin_both2.html \
@@ -274,6 +281,7 @@ _BROWSER_FILES = \
                  browser_bug734076.js \
                  browser_bug812562.js \
                  browser_bug818009.js \
+                 browser_bug818118.js \
                  blockPluginVulnerableUpdatable.xml \
                  blockPluginVulnerableNoUpdate.xml \
                  blockNoPlugins.xml \
@@ -305,10 +313,15 @@ else
 _BROWSER_FILES += \
 		browser_bug565667.js \
 		$(NULL)
-
 # TODO: Activate after carbon test plugin lands, bug 628651
-# 		browser_maconly_carbon_mismatch_plugin.js \
+# 		browser_maconly_carbon_mismatch_plugin.js
+endif
 
+# bug 766546, disable browser_bug561636.js on Windows
+ifneq ($(OS_ARCH),WINNT)
+_BROWSER_FILES += \
+                 browser_bug561636.js \
+                 $(NULL)
 endif
 
 ifdef MOZ_PER_WINDOW_PRIVATE_BROWSING
