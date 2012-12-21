@@ -20,8 +20,6 @@
 #include "nsServiceManagerUtils.h"
 #include "SystemWorkerManager.h"
 
-#include "nsIRadioInterfaceLayer.h"
-
 #include "NfcNdefEvent.h"
 
 using namespace mozilla::dom::nfc;

@@ -728,9 +728,6 @@ SystemWorkerManager::InitNfc(JSContext *cx)
   // worker lives in Nfc.js. All we do here is hold it alive and
   // hook it up to the NFC thread.
   nsCOMPtr<nsIWorkerHolder> worker = do_CreateInstance(kNfcWorkerCID);
-  if (!worker) {
-    return NS_OK;
-  }
   NS_ENSURE_TRUE(worker, NS_ERROR_FAILURE);
 
   jsval workerval;
