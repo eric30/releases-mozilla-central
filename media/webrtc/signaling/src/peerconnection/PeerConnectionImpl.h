@@ -119,14 +119,14 @@ public:
   static nsresult ConvertConstraints(
     const JS::Value& aConstraints, MediaConstraints* aObj, JSContext* aCx);
   static nsresult MakeMediaStream(uint32_t aHint, nsIDOMMediaStream** aStream);
-  static nsresult MakeRemoteSource(nsDOMMediaStream* aStream, RemoteSourceStreamInfo** aInfo);
 
   Role GetRole() const {
     PC_AUTO_ENTER_API_CALL_NO_CHECK();
     return mRole;
   }
 
-  nsresult CreateRemoteSourceStreamInfo(uint32_t aHint, RemoteSourceStreamInfo** aInfo);
+  nsresult CreateRemoteSourceStreamInfo(uint32_t aHint,
+    nsRefPtr<RemoteSourceStreamInfo>* aInfo);
 
   // Implementation of the only observer we need
   virtual void onCallEvent(
@@ -217,8 +217,8 @@ private:
   void ShutdownMedia(bool isSynchronous);
 
   // ICE callbacks run on the right thread.
-  void IceGatheringCompleted_m(NrIceCtx *aCtx);
-  void IceCompleted_m(NrIceCtx *aCtx);
+  nsresult IceGatheringCompleted_m(NrIceCtx *aCtx);
+  nsresult IceCompleted_m(NrIceCtx *aCtx);
 
   // The role we are adopting
   Role mRole;

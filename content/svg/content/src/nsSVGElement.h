@@ -103,6 +103,7 @@ public:
   static const MappedAttributeEntry sFiltersMap[];
   static const MappedAttributeEntry sFEFloodMap[];
   static const MappedAttributeEntry sLightingEffectsMap[];
+  static const MappedAttributeEntry sMaskMap[];
 
   // nsIDOMNode
   NS_IMETHOD IsSupported(const nsAString& aFeature, const nsAString& aVersion,
@@ -641,7 +642,7 @@ NS_NewSVG##_elementName##Element(nsIContent **aResult,                       \
   return rv;                                                                 \
 }
 
- // No unlinking, we'd need to null out the value pointer (the object it
+// No unlinking, we'd need to null out the value pointer (the object it
 // points to is held by the element) and null-check it everywhere.
 #define NS_SVG_VAL_IMPL_CYCLE_COLLECTION(_val, _element)                     \
 NS_IMPL_CYCLE_COLLECTION_CLASS(_val)                                         \
@@ -650,5 +651,17 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(_val)                                \
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END                                        \
 NS_IMPL_CYCLE_COLLECTION_UNLINK_0(_val)
 
+#define NS_SVG_VAL_IMPL_CYCLE_COLLECTION_WRAPPERCACHED(_val, _element)       \
+NS_IMPL_CYCLE_COLLECTION_CLASS(_val)                                         \
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(_val)                                  \
+NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER                            \
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END                                          \
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(_val)                                \
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_element)                                \
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS                           \
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END                                        \
+NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(_val)                                   \
+NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER                             \
+NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 #endif // __NS_SVGELEMENT_H__

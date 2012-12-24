@@ -45,10 +45,8 @@ endif
 endif
 
 ifdef LIBXUL_SDK
-GRE_MILESTONE = $(shell $(PYTHON) $(topsrcdir)/config/printconfigsetting.py $(LIBXUL_DIST)/bin/platform.ini Build Milestone)
 APP_INI_DEPS = $(LIBXUL_DIST)/bin/platform.ini
 else
-GRE_MILESTONE = $(shell tail -n 1 $(topsrcdir)/config/milestone.txt 2>/dev/null || tail -1 $(topsrcdir)/config/milestone.txt)
 APP_INI_DEPS = $(topsrcdir)/config/milestone.txt
 endif
 
@@ -56,12 +54,6 @@ APP_BUILDID := $(shell cat $(DEPTH)/config/buildid)
 APP_INI_DEPS += $(DEPTH)/config/buildid
 
 DEFINES += -DGRE_MILESTONE=$(GRE_MILESTONE) -DAPP_BUILDID=$(APP_BUILDID)
-
-# Set a flag that can be used in pref files to disable features if
-# we are not building for Aurora or Nightly.
-ifeq (,$(findstring a,$(GRE_MILESTONE)))
-PREF_PPFLAGS += -DRELEASE_BUILD
-endif
 
 DEFINES += -DMOZ_APP_VERSION="$(MOZ_APP_VERSION)"
 APP_INI_DEPS += $(DEPTH)/config/autoconf.mk
@@ -153,6 +145,8 @@ ifdef MOZ_APP_BASENAME
 $(FINAL_TARGET)/application.ini: $(APP_INI_DEPS)
 
 ifdef MOZ_APP_STATIC_INI
+DEFINES += -DMOZ_APP_STATIC_INI
+
 application.ini.h: appini_header.py $(FINAL_TARGET)/application.ini
 	$(PYTHON) $^ > $@
 export:: application.ini.h
