@@ -616,6 +616,23 @@ BluetoothHfpManager::ReceiveSocketData(UnixSocketRawData* aMessage)
      * SLC establishment is done when AT+CMER has been received.
      * Do nothing but respond with "OK".
      */
+    ParseAtCommand(msg, 8, atCommandValues);
+
+    if (atCommandValues.IsEmpty() || atCommandValues.Length() < 4) {
+      NS_WARNING("Could't get the value of command [AT+CMER=]");
+      goto respond_with_ok;
+    }
+
+    nsresult rv;
+    int cmer = atCommandValues[3].ToInteger(&rv);
+    if (!atCommandValues[0].EqualsLiteral("3") ||
+        !atCommandValues[1].EqualsLiteral("0") ||
+        !atCommandValues[2].EqualsLiteral("0") ||
+        NS_FAILED(rv) || cmer > 1 || cmer < 0) {
+      NS_WARNING("Wrong value of CMER");
+      goto respond_with_ok;
+    }
+    mCMER = (bool)cmer;
   } else if (msg.Find("AT+CHLD=?") != -1) {
     SendLine("+CHLD: (1,2)");
   } else if (msg.Find("AT+CHLD=") != -1) {
@@ -862,6 +879,11 @@ BluetoothHfpManager::SendCommand(const char* aCommand, const int aValue)
     if ((aValue < 1) || (aValue > ArrayLength(sCINDItems) - 1)) {
       NS_WARNING("unexpected CINDType for CIEV command");
       return false;
+    }
+
+    if (!mCMER) {
+      // Indicator status update is disabled
+      return true;
     }
 
     message.AppendInt(aValue);
@@ -1149,4 +1171,5 @@ BluetoothHfpManager::OnDisconnect()
   sCINDItems[CINDType::CALLSETUP].value = CallSetupState::NO_CALLSETUP;
   sCINDItems[CINDType::CALLHELD].value = CallHeldState::NO_CALLHELD;
   mCLIP = false;
+  mCMER = false;
 }
