@@ -1506,7 +1506,7 @@ nsContentUtils::Shutdown()
  */
 // static
 nsresult
-nsContentUtils::CheckSameOrigin(nsINode *aTrustedNode,
+nsContentUtils::CheckSameOrigin(const nsINode *aTrustedNode,
                                 nsIDOMNode *aUnTrustedNode)
 {
   MOZ_ASSERT(aTrustedNode);
@@ -1518,8 +1518,8 @@ nsContentUtils::CheckSameOrigin(nsINode *aTrustedNode,
 }
 
 nsresult
-nsContentUtils::CheckSameOrigin(nsINode* aTrustedNode,
-                                nsINode* unTrustedNode)
+nsContentUtils::CheckSameOrigin(const nsINode* aTrustedNode,
+                                const nsINode* unTrustedNode)
 {
   MOZ_ASSERT(aTrustedNode);
   MOZ_ASSERT(unTrustedNode);
@@ -3440,8 +3440,7 @@ nsresult GetEventAndTarget(nsIDocument* aDoc, nsISupports* aTarget,
   rv = event->InitEvent(aEventName, aCanBubble, aCancelable);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  rv = event->SetTrusted(aTrusted);
-  NS_ENSURE_SUCCESS(rv, rv);
+  event->SetTrusted(aTrusted);
 
   rv = event->SetTarget(target);
   NS_ENSURE_SUCCESS(rv, rv);

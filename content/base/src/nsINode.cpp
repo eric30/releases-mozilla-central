@@ -102,6 +102,8 @@
 #include "nsCSSParser.h"
 #include "nsHTMLLegendElement.h"
 #include "nsWrapperCacheInlines.h"
+#include "WrapperFactory.h"
+#include "nsDOMDocumentType.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -1442,7 +1444,7 @@ bool IsAllowedAsChild(nsIContent* aNewChild, nsINode* aParent,
         return true;
       }
 
-      nsIContent* docTypeContent = parentDocument->GetDocumentType();
+      nsIContent* docTypeContent = parentDocument->GetDoctype();
       if (!docTypeContent) {
         // It's all good.
         return true;
@@ -1465,7 +1467,7 @@ bool IsAllowedAsChild(nsIContent* aNewChild, nsINode* aParent,
       }
 
       nsIDocument* parentDocument = static_cast<nsIDocument*>(aParent);
-      nsIContent* docTypeContent = parentDocument->GetDocumentType();
+      nsIContent* docTypeContent = parentDocument->GetDoctype();
       if (docTypeContent) {
         // Already have a doctype, so this is only OK if we're replacing it
         return aIsReplace && docTypeContent == aRefChild;
@@ -2352,7 +2354,18 @@ nsINode::WrapObject(JSContext *aCx, JSObject *aScope, bool *aTriedToWrap)
     return nullptr;
   }
 
-  return WrapNode(aCx, aScope, aTriedToWrap);
+  JSObject* obj = WrapNode(aCx, aScope, aTriedToWrap);
+  if (obj && ChromeOnlyAccess()) {
+    // Create a new wrapper and cache it.
+    JSAutoCompartment ac(aCx, obj);
+    JSObject* wrapper = xpc::WrapperFactory::WrapSOWObject(aCx, obj);
+    if (!wrapper) {
+      ClearWrapper();
+      return nullptr;
+    }
+    dom::SetSystemOnlyWrapper(obj, this, *wrapper);
+  }
+  return obj;
 }
 
 bool

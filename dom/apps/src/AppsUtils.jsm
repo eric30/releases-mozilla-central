@@ -38,7 +38,9 @@ this.AppsUtils = {
       manifestURL: aApp.manifestURL,
       appStatus: aApp.appStatus,
       removable: aApp.removable,
+      id: aApp.id,
       localId: aApp.localId,
+      basePath: aApp.basePath,
       progress: aApp.progress || 0.0,
       installState: aApp.installState || "installed",
       downloadAvailable: aApp.downloadAvailable,
@@ -48,6 +50,7 @@ this.AppsUtils = {
       lastUpdateCheck: aApp.lastUpdateCheck,
       updateTime: aApp.updateTime,
       etag: aApp.etag,
+      packageEtag: aApp.packageEtag,
       installerAppId: aApp.installerAppId || Ci.nsIScriptSecurityManager.NO_APP_ID,
       installerIsBrowser: !!aApp.installerIsBrowser
     };

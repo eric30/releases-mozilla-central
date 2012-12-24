@@ -186,6 +186,12 @@ public:
           }
           break;
         }
+
+      case UPDATELOCALDESC:
+      case UPDATEREMOTEDESC:
+        /* No action necessary */
+        break;
+
       default:
         CSFLogDebugS(logTag, ": **** UNHANDLED CALL STATE : " << mStateStr);
         break;
@@ -260,19 +266,7 @@ PeerConnectionImpl::MakeMediaStream(uint32_t aHint, nsIDOMMediaStream** aRetval)
 }
 
 nsresult
-PeerConnectionImpl::MakeRemoteSource(nsDOMMediaStream* aStream, RemoteSourceStreamInfo** aInfo)
-{
-  MOZ_ASSERT(aInfo);
-  MOZ_ASSERT(aStream);
-
-  // TODO(ekr@rtfm.com): Add the track info with the first segment
-  nsRefPtr<RemoteSourceStreamInfo> remote = new RemoteSourceStreamInfo(aStream);
-  NS_ADDREF(*aInfo = remote);
-  return NS_OK;
-}
-
-nsresult
-PeerConnectionImpl::CreateRemoteSourceStreamInfo(uint32_t aHint, RemoteSourceStreamInfo** aInfo)
+PeerConnectionImpl::CreateRemoteSourceStreamInfo(uint32_t aHint, nsRefPtr<RemoteSourceStreamInfo>* aInfo)
 {
   MOZ_ASSERT(aInfo);
   PC_AUTO_ENTER_API_CALL_NO_CHECK();
@@ -288,19 +282,8 @@ PeerConnectionImpl::CreateRemoteSourceStreamInfo(uint32_t aHint, RemoteSourceStr
   static_cast<mozilla::SourceMediaStream*>(comstream->GetStream())->SetPullEnabled(true);
 
   nsRefPtr<RemoteSourceStreamInfo> remote;
-  if (!mThread || NS_IsMainThread()) {
-    remote = new RemoteSourceStreamInfo(comstream);
-    NS_ADDREF(*aInfo = remote);
-    return NS_OK;
-  }
-
-  mThread->Dispatch(WrapRunnableNMRet(
-    &PeerConnectionImpl::MakeRemoteSource, comstream, aInfo, &res
-  ), NS_DISPATCH_SYNC);
-
-  if (NS_FAILED(res)) {
-    return res;
-  }
+  remote = new RemoteSourceStreamInfo(comstream);
+  *aInfo = remote;
 
   return NS_OK;
 }
@@ -524,6 +507,9 @@ PeerConnectionImpl::CreateDataChannel(const nsACString& aLabel,
   NS_ENSURE_TRUE(dataChannel,NS_ERROR_FAILURE);
 
   CSFLogDebugS(logTag, __FUNCTION__ << ": making DOMDataChannel");
+
+  // TODO -- need something like "mCall->addStream(stream_id, 0, DATA);" so
+  // the SDP can be generated correctly
 
   return NS_NewDOMDataChannel(dataChannel.forget(), mWindow, aRetval);
 #else
@@ -919,6 +905,8 @@ PeerConnectionImpl::CheckApiState(bool assert_ice_ready) const
 
   if (mReadyState == kClosed)
     return NS_ERROR_FAILURE;
+  if (!mMedia)
+    return NS_ERROR_FAILURE;
   return NS_OK;
 }
 
@@ -1001,11 +989,15 @@ PeerConnectionImpl::onCallEvent(ccapi_call_event_e aCallEvent,
 
   switch (event) {
     case SETLOCALDESC:
-      mLocalSDP = mLocalRequestedSDP;
+    case UPDATELOCALDESC:
+      mLocalSDP = aInfo->getSDP();
       break;
+
     case SETREMOTEDESC:
-      mRemoteSDP = mRemoteRequestedSDP;
+    case UPDATEREMOTEDESC:
+      mRemoteSDP = aInfo->getSDP();
       break;
+
     case CONNECTED:
       CSFLogDebugS(logTag, "Setting PeerConnnection state to kActive");
       ChangeReadyState(kActive);
@@ -1068,17 +1060,19 @@ PeerConnectionImpl::GetHandle()
 void
 PeerConnectionImpl::IceGatheringCompleted(NrIceCtx *aCtx)
 {
+  // Do an async call here to unwind the stack. refptr keeps the PC alive.
+  nsRefPtr<PeerConnectionImpl> pc(this);
   RUN_ON_THREAD(mThread,
-                WrapRunnable(this,
+                WrapRunnable(pc,
                              &PeerConnectionImpl::IceGatheringCompleted_m,
                              aCtx),
-                NS_DISPATCH_SYNC);
+                NS_DISPATCH_NORMAL);
 }
 
-void
+nsresult
 PeerConnectionImpl::IceGatheringCompleted_m(NrIceCtx *aCtx)
 {
-  PC_AUTO_ENTER_API_CALL_NO_CHECK();
+  PC_AUTO_ENTER_API_CALL(false);
   MOZ_ASSERT(aCtx);
 
   CSFLogDebugS(logTag, __FUNCTION__ << ": ctx: " << static_cast<void*>(aCtx));
@@ -1095,22 +1089,25 @@ PeerConnectionImpl::IceGatheringCompleted_m(NrIceCtx *aCtx)
                   NS_DISPATCH_NORMAL);
   }
 #endif
+  return NS_OK;
 }
 
 void
 PeerConnectionImpl::IceCompleted(NrIceCtx *aCtx)
 {
+  // Do an async call here to unwind the stack. refptr keeps the PC alive.
+  nsRefPtr<PeerConnectionImpl> pc(this);
   RUN_ON_THREAD(mThread,
-                WrapRunnable(this,
+                WrapRunnable(pc,
                              &PeerConnectionImpl::IceCompleted_m,
                              aCtx),
-                NS_DISPATCH_SYNC);
+                NS_DISPATCH_NORMAL);
 }
 
-void
+nsresult
 PeerConnectionImpl::IceCompleted_m(NrIceCtx *aCtx)
 {
-  PC_AUTO_ENTER_API_CALL_NO_CHECK();
+  PC_AUTO_ENTER_API_CALL(false);
   MOZ_ASSERT(aCtx);
 
   CSFLogDebugS(logTag, __FUNCTION__ << ": ctx: " << static_cast<void*>(aCtx));
@@ -1127,6 +1124,7 @@ PeerConnectionImpl::IceCompleted_m(NrIceCtx *aCtx)
                   NS_DISPATCH_NORMAL);
   }
 #endif
+  return NS_OK;
 }
 
 void
