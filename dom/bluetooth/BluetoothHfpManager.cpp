@@ -4,7 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "base/basictypes.h" 
+#include "base/basictypes.h"
 
 #include "BluetoothHfpManager.h"
 
@@ -300,6 +300,23 @@ CloseScoSocket()
     return;
   }
   sco->Disconnect();
+}
+
+bool
+IsValidDtmf(const char* aChar) {
+  switch (*aChar) {
+    case '*':
+    case '#':
+      return true;
+    default:
+      LOG("aChar: %d", *aChar);
+      if (*aChar >= '0' && *aChar <= '9')
+        return true;
+      else if (*aChar >= 'A' || *aChar <= 'D')
+        return true;
+      else
+        return false;
+  }
 }
 
 BluetoothHfpManager::BluetoothHfpManager()
@@ -633,6 +650,18 @@ BluetoothHfpManager::ReceiveSocketData(UnixSocketRawData* aMessage)
       goto respond_with_ok;
     }
     mCMER = (bool)cmer;
+  } else if (msg.Find("AT+VTS=") != -1) {
+    ParseAtCommand(msg, 7, atCommandValues);
+    if (atCommandValues.IsEmpty() || atCommandValues.Length() > 1) {
+      NS_WARNING("Couldn't get the value of command [AT+VTS=]");
+      goto respond_with_ok;
+    }
+
+    if (IsValidDtmf(msg.get() + 7)) {
+      nsAutoCString message(nsDependentCSubstring(msg, 3, 5));
+      LOG("[Hfp] message: %s", message.get());
+      NotifyDialer(NS_ConvertUTF8toUTF16(message));
+    }
   } else if (msg.Find("AT+CHLD=?") != -1) {
     SendLine("+CHLD: (1,2)");
   } else if (msg.Find("AT+CHLD=") != -1) {
