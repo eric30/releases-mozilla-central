@@ -662,6 +662,27 @@ BluetoothHfpManager::ReceiveSocketData(UnixSocketRawData* aMessage)
       LOG("[Hfp] message: %s", message.get());
       NotifyDialer(NS_ConvertUTF8toUTF16(message));
     }
+  } else if (msg.Find("AT+VGM=") != -1) {
+    ParseAtCommand(msg, 7, atCommandValues);
+
+    if (atCommandValues.IsEmpty()) {
+      NS_WARNING("Couldn't get the value of command [AT+VGM]");
+      goto respond_with_ok;
+    }
+
+    nsresult rv;
+    int vgm = atCommandValues[0].ToInteger(&rv);
+    if (NS_FAILED(rv)) {
+      NS_WARNING("Failed to extract microphone volume from bluetooth headset!");
+      goto respond_with_ok;
+    }
+
+#ifdef DEBUG
+    NS_ASSERTION(vgm >= 0 && vgm <= 15, "Received invalid VGM value");
+    goto respons_with_ok;
+#endif
+
+    mCurrentVgm = vgm;
   } else if (msg.Find("AT+CHLD=?") != -1) {
     SendLine("+CHLD: (1,2)");
   } else if (msg.Find("AT+CHLD=") != -1) {
@@ -717,6 +738,7 @@ BluetoothHfpManager::ReceiveSocketData(UnixSocketRawData* aMessage)
 
 #ifdef DEBUG
     NS_ASSERTION(newVgs >= 0 && newVgs <= 15, "Received invalid VGS value");
+    goto respond_with_ok;
 #endif
 
     nsString data;
