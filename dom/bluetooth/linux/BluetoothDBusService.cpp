@@ -317,6 +317,15 @@ private:
   BluetoothSignal mSignal;
 };
 
+struct DiscoverServicesParameters
+{
+  BluetoothReplyRunnable* runnable;
+  nsString objectPath;
+  nsString serviceUuid;
+  BluetoothSocketType type;
+  mozilla::ipc::UnixSocketConsumer* consumer;
+};
+
 static bool
 IsDBusMessageError(DBusMessage* aMsg, DBusError* aErr, nsAString& aErrorStr)
 {
@@ -929,6 +938,7 @@ UnpackVoidMessage(DBusMessage* aMsg, DBusError* aErr, BluetoothValue& aValue,
   }
 }
 
+
 void
 GetVoidCallback(DBusMessage* aMsg, void* aBluetoothReplyRunnable)
 {
@@ -1064,6 +1074,7 @@ GetProperty(DBusMessageIter aIter, Properties* aPropertyTypes,
         do {
           const char* tmp;
           dbus_message_iter_get_basic(&array_val_iter, &tmp);
+          LOG("Property[%s]: %s", NS_ConvertUTF16toUTF8(propertyName).get(), tmp);
           nsString s;
           s = NS_ConvertUTF8toUTF16(tmp);
           arr.AppendElement(s);
@@ -2076,6 +2087,39 @@ GetDeviceServiceChannel(const nsAString& aObjectPath,
 #endif
 }
 
+void
+OnDiscoverServicesResult(DBusMessage* aMsg, void* aParameters)
+{
+  LOG("Discover Services callback");
+
+  BluetoothValue v;
+  nsString replyError;
+
+  DiscoverServicesParameters* p =
+    static_cast<DiscoverServicesParameters*>(aParameters);
+
+  int channel = GetDeviceServiceChannel(p->objectPath,
+                                        p->serviceUuid,
+                                        0x0004);
+  if (channel < 0) {
+    // Still can't get the channel for requested service, reply error.
+    replyError.AssignLiteral("SocketConnectionError");
+    DispatchBluetoothReply(p->runnable, v, replyError);
+    return;
+  }
+
+  LOG("Again, We got channel: %d", channel);
+
+  nsString address = GetAddressFromObjectPath(p->objectPath);
+  BluetoothUnixSocketConnector* c =
+    new BluetoothUnixSocketConnector(p->type, channel, true, true);
+
+  if (!p->consumer->ConnectSocket(c, NS_ConvertUTF16toUTF8(address).get())) {
+    replyError.AssignLiteral("SocketConnectionError");
+    DispatchBluetoothReply(p->runnable, v, replyError);
+  }
+}
+
 // static
 bool
 BluetoothDBusService::RemoveReservedServicesInternal(const nsAString& aAdapterPath,
@@ -2460,115 +2504,6 @@ BluetoothDBusService::IsConnected(const uint16_t aProfileId)
   return false;
 }
 
-class ConnectBluetoothSocketRunnable : public nsRunnable
-{
-public:
-  ConnectBluetoothSocketRunnable(BluetoothReplyRunnable* aRunnable,
-                                 UnixSocketConsumer* aConsumer,
-                                 const nsAString& aObjectPath,
-                                 const nsAString& aServiceUUID,
-                                 BluetoothSocketType aType,
-                                 bool aAuth,
-                                 bool aEncrypt,
-                                 int aChannel)
-    : mRunnable(dont_AddRef(aRunnable))
-    , mConsumer(aConsumer)
-    , mObjectPath(aObjectPath)
-    , mServiceUUID(aServiceUUID)
-    , mType(aType)
-    , mAuth(aAuth)
-    , mEncrypt(aEncrypt)
-    , mChannel(aChannel)
-  {
-  }
-
-  nsresult
-  Run()
-  {
-    MOZ_ASSERT(NS_IsMainThread());
-
-    nsString address = GetAddressFromObjectPath(mObjectPath);
-    BluetoothValue v;
-    nsString replyError;
-    BluetoothUnixSocketConnector* c =
-      new BluetoothUnixSocketConnector(mType, mChannel, mAuth, mEncrypt);
-    if (!mConsumer->ConnectSocket(c, NS_ConvertUTF16toUTF8(address).get())) {
-      replyError.AssignLiteral("SocketConnectionError");
-      DispatchBluetoothReply(mRunnable, v, replyError);
-      return NS_ERROR_FAILURE;
-    }
-    return NS_OK;
-  }
-
-private:
-  nsRefPtr<BluetoothReplyRunnable> mRunnable;
-  nsRefPtr<UnixSocketConsumer> mConsumer;
-  nsString mObjectPath;
-  nsString mServiceUUID;
-  BluetoothSocketType mType;
-  bool mAuth;
-  bool mEncrypt;
-  int mChannel;
-};
-
-class GetDeviceChannelForConnectRunnable : public nsRunnable
-{
-public:
-  GetDeviceChannelForConnectRunnable(BluetoothReplyRunnable* aRunnable,
-                                     UnixSocketConsumer* aConsumer,
-                                     const nsAString& aObjectPath,
-                                     const nsAString& aServiceUUID,
-                                     BluetoothSocketType aType,
-                                     bool aAuth,
-                                     bool aEncrypt)
-    : mRunnable(dont_AddRef(aRunnable)),
-      mConsumer(aConsumer),
-      mObjectPath(aObjectPath),
-      mServiceUUID(aServiceUUID),
-      mType(aType),
-      mAuth(aAuth),
-      mEncrypt(aEncrypt)
-  {
-  }
-
-  nsresult
-  Run()
-  {
-    MOZ_ASSERT(!NS_IsMainThread());
-
-    int channel = GetDeviceServiceChannel(mObjectPath, mServiceUUID, 0x0004);
-    BluetoothValue v;
-    nsString replyError;
-    if (channel < 0) {
-      replyError.AssignLiteral("DeviceChannelRetrievalError");
-      DispatchBluetoothReply(mRunnable, v, replyError);
-      return NS_OK;
-    }
-    nsRefPtr<nsRunnable> func(new ConnectBluetoothSocketRunnable(mRunnable,
-                                                                 mConsumer,
-                                                                 mObjectPath,
-                                                                 mServiceUUID,
-                                                                 mType, mAuth,
-                                                                 mEncrypt,
-                                                                 channel));
-    if (NS_FAILED(NS_DispatchToMainThread(func, NS_DISPATCH_NORMAL))) {
-      NS_WARNING("Cannot dispatch connection task!");
-      return NS_ERROR_FAILURE;
-    }
-
-    return NS_OK;
-  }
-
-private:
-  nsRefPtr<BluetoothReplyRunnable> mRunnable;
-  nsRefPtr<UnixSocketConsumer> mConsumer;
-  nsString mObjectPath;
-  nsString mServiceUUID;
-  BluetoothSocketType mType;
-  bool mAuth;
-  bool mEncrypt;
-};
-
 nsresult
 BluetoothDBusService::GetSocketViaService(const nsAString& aObjectPath,
                                           const nsAString& aService,
@@ -2579,28 +2514,58 @@ BluetoothDBusService::GetSocketViaService(const nsAString& aObjectPath,
                                           BluetoothReplyRunnable* aRunnable)
 {
   NS_ASSERTION(NS_IsMainThread(), "Must be called from main thread!");
+
+  BluetoothValue v;
+  nsString replyError;
+
   if (!IsReady()) {
-    BluetoothValue v;
-    nsString errorStr;
-    errorStr.AssignLiteral("Bluetooth service is not ready yet!");
-    DispatchBluetoothReply(aRunnable, v, errorStr);
+    replyError.AssignLiteral("Bluetooth service is not ready yet!");
+    DispatchBluetoothReply(aRunnable, v, replyError);
     return NS_OK;
   }
 
-  nsRefPtr<BluetoothReplyRunnable> runnable = aRunnable;
+  char* cool = new char[1];
+  cool = "";
 
-  nsRefPtr<nsRunnable> func(new GetDeviceChannelForConnectRunnable(
-                              runnable,
-                              aConsumer,
-                              aObjectPath,
-                              aService, aType,
-                              aAuth, aEncrypt));
-  if (NS_FAILED(mBluetoothCommandThread->Dispatch(func, NS_DISPATCH_NORMAL))) {
-    NS_WARNING("Cannot dispatch firmware loading task!");
-    return NS_ERROR_FAILURE;
+  int channel = GetDeviceServiceChannel(aObjectPath, aService, 0x0004);
+  if (channel < 0) {
+    LOG("Bad channel, see if remote has been updated");
+    // Update channel first
+    DiscoverServicesParameters* p = new DiscoverServicesParameters();
+
+    p->runnable = aRunnable;
+    p->objectPath = aObjectPath;
+    p->serviceUuid = aService;
+    p->type = aType;
+    p->consumer = aConsumer;
+
+    if (!dbus_func_args_async(mConnection, -1,
+                              OnDiscoverServicesResult,
+                              (void*)p,
+                              NS_ConvertUTF16toUTF8(aObjectPath).get(),
+                              DBUS_DEVICE_IFACE,
+                              "DiscoverServices",
+                              DBUS_TYPE_STRING, &cool,
+                              DBUS_TYPE_INVALID)) {
+      LOG("not good at DiscoverServices");
+      replyError.AssignLiteral("SocketConnectionError");
+      DispatchBluetoothReply(aRunnable, v, replyError);
+    }
+  } else {
+    LOG("We got channel: %d", channel);
+
+    // Got the channel, connect
+    nsString address = GetAddressFromObjectPath(aObjectPath);
+
+    BluetoothUnixSocketConnector* c =
+      new BluetoothUnixSocketConnector(aType, channel, aAuth, aEncrypt);
+    if (!aConsumer->ConnectSocket(c, NS_ConvertUTF16toUTF8(address).get())) {
+      replyError.AssignLiteral("SocketConnectionError");
+      DispatchBluetoothReply(aRunnable, v, replyError);
+      return NS_ERROR_FAILURE;
+    }
   }
 
-  runnable.forget();
   return NS_OK;
 }
 
