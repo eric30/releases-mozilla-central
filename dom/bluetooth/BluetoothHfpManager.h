@@ -72,6 +72,7 @@ private:
   bool mCMER;
   bool mReceiveVgsFlag;
   nsString mDevicePath;
+  nsString mOperatorName;
   nsString mMsisdn;
   enum mozilla::ipc::SocketConnectionStatus mSocketStatus;
 
