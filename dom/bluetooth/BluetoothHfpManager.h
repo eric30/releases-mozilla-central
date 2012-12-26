@@ -16,6 +16,15 @@ BEGIN_BLUETOOTH_NAMESPACE
 
 class BluetoothReplyRunnable;
 class BluetoothHfpManagerObserver;
+class Call;
+
+/**
+ * These constants are used in result code such as +CLIP and +CCWA. The value
+ * of these constants is the same as TOA_INTERNATIONAL/TOA_UNKNOWN defined in
+ * ril_consts.js
+ */
+#define TOA_UNKNOWN 0x81
+#define TOA_INTERNATIONAL 0x91
 
 class BluetoothHfpManager : public mozilla::ipc::UnixSocketConsumer
 {
@@ -30,6 +39,7 @@ public:
   void Disconnect();
   bool SendLine(const char* aMessage);
   bool SendCommand(const char* aCommand, const int aValue);
+  void SendCLCC();
   void CallStateChanged(int aCallIndex, int aCallState,
                         const char* aNumber, bool aIsActive);
   void EnumerateCallState(int aCallIndex, int aCallState,
@@ -64,7 +74,8 @@ private:
   nsString mDevicePath;
   nsString mMsisdn;
   enum mozilla::ipc::SocketConnectionStatus mSocketStatus;
-  nsTArray<int> mCurrentCallStateArray;
+
+  nsTArray<Call> mCurrentCallArray;
   nsAutoPtr<BluetoothRilListener> mListener;
   nsRefPtr<BluetoothReplyRunnable> mRunnable;
 };
