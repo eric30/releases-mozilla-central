@@ -571,6 +571,11 @@ BluetoothHfpManager::HandleVoiceConnectionChanged()
     SendCommand("+CIEV: ", CINDType::SIGNAL);
   }
 
+  nsIDOMMozMobileNetworkInfo* network;
+  voiceInfo->GetNetwork(&network);
+  NS_ENSURE_TRUE(network, NS_ERROR_FAILURE);
+  network->GetShortName(mOperatorName);
+
   return NS_OK;
 }
 
@@ -584,13 +589,7 @@ BluetoothHfpManager::HandleIccInfoChanged()
   nsIDOMMozMobileICCInfo* iccInfo;
   connection->GetIccInfo(&iccInfo);
   NS_ENSURE_TRUE(iccInfo, NS_ERROR_FAILURE);
-
-  nsString msisdn;
-  iccInfo->GetMsisdn(msisdn);
-
-  if (!msisdn.Equals(mMsisdn)) {
-    mMsisdn = msisdn;
-  }
+  iccInfo->GetMsisdn(mMsisdn);
 
   return NS_OK;
 }
@@ -807,6 +806,11 @@ BluetoothHfpManager::ReceiveSocketData(UnixSocketRawData* aMessage)
       message += ",,4";
       SendLine(message.get());
     }
+  } else if (msg.Find("AT+COPS?") != -1) {
+    nsAutoCString message("+COPS: 0,0,\"");
+    message += NS_ConvertUTF16toUTF8(mOperatorName);
+    message += "\"";
+    SendLine(message.get());
   } else if (msg.Find("AT+CLCC") != -1) {
     SendCLCC();
   } else {
