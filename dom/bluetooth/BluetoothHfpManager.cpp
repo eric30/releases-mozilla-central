@@ -813,6 +813,9 @@ BluetoothHfpManager::ReceiveSocketData(UnixSocketRawData* aMessage)
     SendLine(message.get());
   } else if (msg.Find("AT+CLCC") != -1) {
     SendCLCC();
+  } else if (msg.Find("AT+BVRA") != -1) {
+    // Currently, we don't support voice recognition in AG
+    SendLine("ERROR");
   } else {
 #ifdef DEBUG
     nsCString warningMsg;
