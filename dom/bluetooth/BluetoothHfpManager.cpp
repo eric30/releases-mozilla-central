@@ -644,16 +644,26 @@ BluetoothHfpManager::ReceiveSocketData(UnixSocketRawData* aMessage)
       goto respond_with_ok;
     }
 
-    nsresult rv;
-    int cmer = atCommandValues[3].ToInteger(&rv);
     if (!atCommandValues[0].EqualsLiteral("3") ||
         !atCommandValues[1].EqualsLiteral("0") ||
-        !atCommandValues[2].EqualsLiteral("0") ||
-        NS_FAILED(rv) || cmer > 1 || cmer < 0) {
+        !atCommandValues[2].EqualsLiteral("0")) {
       NS_WARNING("Wrong value of CMER");
       goto respond_with_ok;
     }
-    mCMER = (bool)cmer;
+
+    mCMER = atCommandValues[3].EqualsLiteral("1");
+  } else if (msg.Find("AT+CMEE=") != -1) {
+    ParseAtCommand(msg, 8, atCommandValues);
+
+    if (atCommandValues.IsEmpty()) {
+      NS_WARNING("Could't get the value of command [AT+CMEE=]");
+      goto respond_with_ok;
+    }
+
+    // AT+CMEE = 0: +CME ERROR shall not be used
+    // AT+CMEE = 1: use numeric <err>
+    // AT+CMEE = 2: use verbose <err>
+    mCMEE = !atCommandValues[0].EqualsLiteral("0");
   } else if (msg.Find("AT+VTS=") != -1) {
     ParseAtCommand(msg, 7, atCommandValues);
     if (atCommandValues.IsEmpty() || atCommandValues.Length() > 1) {
@@ -693,7 +703,7 @@ BluetoothHfpManager::ReceiveSocketData(UnixSocketRawData* aMessage)
     ParseAtCommand(msg, 8, atCommandValues);
 
     if (atCommandValues.IsEmpty()) {
-      NS_WARNING("Could't get the value of command [AT+VGS=]");
+      NS_WARNING("Could't get the value of command [AT+CHLD=]");
       goto respond_with_ok;
     }
 
@@ -758,6 +768,7 @@ BluetoothHfpManager::ReceiveSocketData(UnixSocketRawData* aMessage)
   } else if (msg.Find("ATD>") != -1) {
     // Currently, we don't support memory dialing in Dialer app
     SendLine("ERROR");
+    return;
   } else if (msg.Find("ATD") != -1) {
     nsAutoCString message(msg), newMsg;
     int end = message.FindChar(';');
@@ -816,6 +827,7 @@ BluetoothHfpManager::ReceiveSocketData(UnixSocketRawData* aMessage)
   } else if (msg.Find("AT+BVRA") != -1) {
     // Currently, we don't support voice recognition in AG
     SendLine("ERROR");
+    return;
   } else {
 #ifdef DEBUG
     nsCString warningMsg;
@@ -1301,4 +1313,5 @@ BluetoothHfpManager::OnDisconnect()
   sCINDItems[CINDType::CALLHELD].value = CallHeldState::NO_CALLHELD;
   mCLIP = false;
   mCMER = false;
+  mCMEE = false;
 }
