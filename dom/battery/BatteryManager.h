@@ -25,6 +25,8 @@ class BatteryInformation;
 namespace dom {
 namespace battery {
 
+#define BATTERY_LEVEL_CHANGED "battery-level-changed"
+
 class BatteryManager : public nsDOMEventTargetHelper
                      , public nsIDOMBatteryManager
                      , public BatteryObserver
