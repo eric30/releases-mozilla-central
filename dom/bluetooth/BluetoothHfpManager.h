@@ -82,6 +82,7 @@ public:
 private:
   friend class BluetoothHfpManagerObserver;
   BluetoothHfpManager();
+  nsresult HandleBatteryLevelChanged(const nsAString& aData);
   nsresult HandleIccInfoChanged();
   nsresult HandleShutdown();
   nsresult HandleVolumeChanged(const nsAString& aData);
