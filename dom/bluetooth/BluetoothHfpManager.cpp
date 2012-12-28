@@ -14,18 +14,18 @@
 #include "BluetoothUtils.h"
 #include "BluetoothUuid.h"
 
+#include "BatteryManager.h"
 #include "MobileConnection.h"
 #include "mozilla/dom/bluetooth/BluetoothTypes.h"
 #include "mozilla/Services.h"
 #include "mozilla/StaticPtr.h"
 #include "nsContentUtils.h"
 #include "nsIAudioManager.h"
+#include "nsIDOMBatteryManager.h"
 #include "nsIObserverService.h"
 #include "nsISettingsService.h"
 #include "nsIRadioInterfaceLayer.h"
 #include "nsRadioInterfaceLayer.h"
-
-#include <unistd.h> /* usleep() */
 
 #define AUDIO_VOLUME_BT_SCO "audio.volume.bt_sco"
 #define MOZSETTINGS_CHANGED_ID "mozsettings-changed"
@@ -155,6 +155,11 @@ public:
       return false;
     }
 
+    if (NS_FAILED(obs->AddObserver(this, BATTERY_LEVEL_CHANGED, false))) {
+      NS_WARNING("Failed to add battery level change observer!");
+      return false;
+    }
+
     return true;
   }
 
@@ -165,7 +170,8 @@ public:
         NS_FAILED(obs->RemoveObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID)) ||
         NS_FAILED(obs->RemoveObserver(this, MOZSETTINGS_CHANGED_ID)) ||
         NS_FAILED(obs->RemoveObserver(this, MOBILE_CONNECTION_ICCINFO_CHANGED)) ||
-        NS_FAILED(obs->RemoveObserver(this, MOBILE_CONNECTION_VOICE_CHANGED))) {
+        NS_FAILED(obs->RemoveObserver(this, MOBILE_CONNECTION_VOICE_CHANGED)) ||
+        NS_FAILED(obs->RemoveObserver(this, BATTERY_LEVEL_CHANGED))) {
       NS_WARNING("Can't unregister observers, or already unregistered!");
       return false;
     }
@@ -227,6 +233,8 @@ BluetoothHfpManagerObserver::Observe(nsISupports* aSubject,
     return gBluetoothHfpManager->HandleIccInfoChanged();
   } else if (!strcmp(aTopic, MOBILE_CONNECTION_VOICE_CHANGED)) {
     return gBluetoothHfpManager->HandleVoiceConnectionChanged();
+  } else if (!strcmp(aTopic, BATTERY_LEVEL_CHANGED)) {
+    return gBluetoothHfpManager->HandleBatteryLevelChanged(nsDependentString(aData));
   }
 
   MOZ_ASSERT(false, "BluetoothHfpManager got unexpected topic!");
@@ -314,7 +322,6 @@ IsValidDtmf(const char* aChar) {
     case '#':
       return true;
     default:
-      LOG("aChar: %d", *aChar);
       if (*aChar >= '0' && *aChar <= '9')
         return true;
       else if (*aChar >= 'A' || *aChar <= 'D')
@@ -460,6 +467,27 @@ BluetoothHfpManager::NotifyDialer(const nsAString& aCommand)
     NS_WARNING("Failed to broadcast system message to dialer");
     return;
   }
+}
+
+nsresult
+BluetoothHfpManager::HandleBatteryLevelChanged(const nsAString& aData)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  nsresult rv;
+  int level = nsString(aData).ToInteger(&rv);
+  if (NS_FAILED(rv)) {
+    NS_WARNING("Failed to get battery level in BluetoothHfpManager");
+    return NS_ERROR_FAILURE;
+  }
+  level = ceil(level / 20.0);
+
+  if (level != sCINDItems[CINDType::BATTCHG].value) {
+    sCINDItems[CINDType::BATTCHG].value = level;
+    SendCommand("+CIEV: ", CINDType::BATTCHG);
+  }
+
+  return NS_OK;
 }
 
 nsresult
@@ -673,7 +701,6 @@ BluetoothHfpManager::ReceiveSocketData(UnixSocketRawData* aMessage)
 
     if (IsValidDtmf(msg.get() + 7)) {
       nsAutoCString message(nsDependentCSubstring(msg, 3, 5));
-      LOG("[Hfp] message: %s", message.get());
       NotifyDialer(NS_ConvertUTF8toUTF16(message));
     }
   } else if (msg.Find("AT+VGM=") != -1) {

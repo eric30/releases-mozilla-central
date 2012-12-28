@@ -7,9 +7,11 @@
 #include "mozilla/Hal.h"
 #include "BatteryManager.h"
 #include "nsIDOMClassInfo.h"
+#include "nsIObserverService.h"
 #include "Constants.h"
 #include "nsDOMEvent.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/Services.h"
 #include "nsDOMEventTargetHelper.h"
 
 /**
@@ -141,6 +143,15 @@ BatteryManager::Notify(const hal::BatteryInformation& aBatteryInfo)
 
   if (previousLevel != mLevel) {
     DispatchTrustedEvent(LEVELCHANGE_EVENT_NAME);
+
+    nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
+    nsAutoString data;
+    data.AppendInt((int)floor(mLevel * 100));
+    if (NS_FAILED(os->NotifyObservers(nullptr,
+                                      BATTERY_LEVEL_CHANGED,
+                                      data.get()))) {
+      NS_WARNING("Failed to notify battery-level-changed observsers!");
+    }
   }
 
   /*
