@@ -720,7 +720,7 @@ BluetoothHfpManager::ReceiveSocketData(UnixSocketRawData* aMessage)
 
 #ifdef DEBUG
     NS_ASSERTION(vgm >= 0 && vgm <= 15, "Received invalid VGM value");
-    goto respons_with_ok;
+    goto respond_with_ok;
 #endif
 
     mCurrentVgm = vgm;
