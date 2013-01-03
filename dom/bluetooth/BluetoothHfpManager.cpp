@@ -246,7 +246,7 @@ NS_IMPL_ISUPPORTS1(BluetoothHfpManagerObserver, nsIObserver)
 class SendRingIndicatorTask : public Task
 {
 public:
-  SendRingIndicatorTask(const char* aNumber, int aType = TOA_UNKNOWN)
+  SendRingIndicatorTask(const char* aNumber, int aType)
     : mNumber(aNumber)
     , mType(aType)
   {
@@ -650,7 +650,7 @@ BluetoothHfpManager::ReceiveSocketData(UnixSocketRawData* aMessage)
   // For more information, please refer to 4.34.1 "Bluetooth Defined AT
   // Capabilities" in Bluetooth hands-free profile 1.6
   if (msg.Find("AT+BRSF=") != -1) {
-    SendCommand("+BRSF: ", 33);
+    SendCommand("+BRSF: ", 103);
   } else if (msg.Find("AT+CIND=?") != -1) {
     // Asking for CIND range
     SendCommand("+CIND: ", 0);
@@ -837,6 +837,15 @@ BluetoothHfpManager::ReceiveSocketData(UnixSocketRawData* aMessage)
       message += ",,4";
       SendLine(message.get());
     }
+  } else if (msg.Find("AT+CCWA") != -1) {
+    ParseAtCommand(msg, 8, atCommandValues);
+
+    if (atCommandValues.IsEmpty()) {
+      NS_WARNING("Could't get the value of command [AT+CCWA=]");
+      goto respond_with_ok;
+    }
+
+    mCCWA = (atCommandValues[0].EqualsLiteral("1"));
   } else if (msg.Find("AT+COPS?") != -1) {
     nsAutoCString message("+COPS: 0,0,\"");
     message += NS_ConvertUTF16toUTF8(mOperatorName);
@@ -1092,31 +1101,37 @@ BluetoothHfpManager::SetupCIND(int aCallIndex, int aCallState,
     case nsIRadioInterfaceLayer::CALL_STATE_INCOMING:
       mCurrentCallArray[aCallIndex].direction = true;
       sCINDItems[CINDType::CALLSETUP].value = CallSetupState::INCOMING;
-      if (!aInitial) {
-        SendCommand("+CIEV: ", CINDType::CALLSETUP);
-      }
 
-      if (!mCurrentCallIndex) {
+      if (mCurrentCallIndex) {
+        if (mCCWA) {
+          nsAutoCString resultCode("+CCWA: \"");
+          resultCode += aNumber;
+          resultCode += "\",";
+          resultCode.AppendInt(mCurrentCallArray[aCallIndex].type);
+          SendLine(resultCode.get());
+        }
+
+        if (!aInitial) {
+          SendCommand("+CIEV: ", CINDType::CALLSETUP);
+        }
+      } else {
         // Start sending RING indicator to HF
         sStopSendingRingFlag = false;
 
         if (!mCLIP) {
-          MessageLoop::current()->
-            PostDelayedTask(FROM_HERE,
-                            new SendRingIndicatorTask(""),
-                            sRingInterval);
+          MessageLoop::current()->PostDelayedTask(
+            FROM_HERE,
+            new SendRingIndicatorTask("", 0),
+            sRingInterval);
         } else {
-          // Same logic as implementation in ril_worker.js
-          int type = TOA_UNKNOWN;
+          MessageLoop::current()->PostTask(
+            FROM_HERE,
+            new SendRingIndicatorTask(aNumber,
+                                      mCurrentCallArray[aCallIndex].type));
+        }
 
-          if (aNumber && strlen(aNumber) > 0 && aNumber[0] == '+') {
-            type = TOA_INTERNATIONAL;
-          }
-
-          MessageLoop::current()->
-            PostDelayedTask(FROM_HERE,
-                            new SendRingIndicatorTask(aNumber, type),
-                            sRingInterval);
+        if (!aInitial) {
+          SendCommand("+CIEV: ", CINDType::CALLSETUP);
         }
       }
       break;
@@ -1336,6 +1351,7 @@ BluetoothHfpManager::OnDisconnect()
   sCINDItems[CINDType::CALLSETUP].value = CallSetupState::NO_CALLSETUP;
   sCINDItems[CINDType::CALLHELD].value = CallHeldState::NO_CALLHELD;
   mCLIP = false;
+  mCCWA = false;
   mCMEE = false;
   mCMER = false;
 }

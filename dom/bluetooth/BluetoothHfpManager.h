@@ -100,6 +100,7 @@ private:
   int mCurrentVgm;
   int mCurrentCallIndex;
   bool mCLIP;
+  bool mCCWA;
   bool mCMEE;
   bool mCMER;
   bool mReceiveVgsFlag;
