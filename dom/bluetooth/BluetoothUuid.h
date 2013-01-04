@@ -22,6 +22,8 @@ BEGIN_BLUETOOTH_NAMESPACE
  */
 enum BluetoothServiceClass
 {
+  A2DP          = 0x110D,
+  AVRCP         = 0x110E,
   HEADSET       = 0x1108,
   HEADSET_AG    = 0x1112,
   HANDSFREE     = 0x111E,

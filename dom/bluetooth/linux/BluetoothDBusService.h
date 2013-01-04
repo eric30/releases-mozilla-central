@@ -161,6 +161,10 @@ public:
   ConfirmReceivingFile(const nsAString& aDeviceAddress, bool aConfirm,
                        BluetoothReplyRunnable* aRunnable);
 
+  // =========== A2DP ===========
+  virtual bool ConnectSink();
+  virtual bool DisconnectSink();
+
 private:
   nsresult SendGetPropertyMessage(const nsAString& aPath,
                                   const char* aInterface,

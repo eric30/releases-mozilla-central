@@ -396,3 +396,17 @@ BluetoothServiceChildProcess::IsConnected(uint16_t aProfileId)
   MOZ_NOT_REACHED("This should never be called!");
   return false;
 }
+
+bool
+BluetoothServiceChildProcess::ConnectSink()
+{
+  MOZ_NOT_REACHED("This should never be called!");
+  return false;
+}
+
+bool
+BluetoothServiceChildProcess::DisconnectSink()
+{
+  MOZ_NOT_REACHED("This should never be called!");
+  return false;
+}

@@ -156,6 +156,11 @@ public:
   ConfirmReceivingFile(const nsAString& aDeviceAddress,
                        bool aConfirm,
                        BluetoothReplyRunnable* aRunnable) MOZ_OVERRIDE;
+
+  // ================ A2DP ================
+  virtual bool ConnectSink() MOZ_OVERRIDE;
+  virtual bool DisconnectSink() MOZ_OVERRIDE;
+
 protected:
   BluetoothServiceChildProcess();
   virtual ~BluetoothServiceChildProcess();

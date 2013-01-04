@@ -17,6 +17,7 @@
 */
 
 #include "base/basictypes.h"
+#include "BluetoothA2dpManager.h"
 #include "BluetoothDBusService.h"
 #include "BluetoothHfpManager.h"
 #include "BluetoothOppManager.h"
@@ -2453,7 +2454,15 @@ BluetoothDBusService::Connect(const nsAString& aDeviceAddress,
       errorStr.AssignLiteral("BluetoothOppManager has connected/is connecting!");
       DispatchBluetoothReply(aRunnable, v, errorStr);
     }
+  } else if (aProfileId == BluetoothServiceClass::A2DP) {
+    BluetoothA2dpManager* a2dp = BluetoothA2dpManager::Get();
+    if (!a2dp->Connect(GetObjectPathFromAddress(aAdapterPath, aDeviceAddress),
+                       aRunnable)) {
+      errorStr.AssignLiteral("BluetoothA2dpManager has connected/is connecting!");
+      DispatchBluetoothReply(aRunnable, v, errorStr);
+    }
   }
+
 
 #ifdef DEBUG
   NS_WARNING("Unknown Profile");
@@ -2754,4 +2763,28 @@ BluetoothDBusService::ListenSocketViaService(int aChannel,
   }
 
   return NS_OK;
+}
+
+bool
+BluetoothDBusService::ConnectSink()
+{
+  bool ret = true;
+  /*
+    ret = dbus_func_args_async(env, nat->conn, -1, onConnectSinkResult, context_path,
+                               nat, c_path, "org.bluez.AudioSink", "Connect",
+                               DBUS_TYPE_INVALID);
+  */
+  return ret;
+}
+
+bool
+BluetoothDBusService::DisconnectSink()
+{
+  bool ret = true;
+  /*
+  ret = dbus_func_args_async(env, nat->conn, -1, NULL, NULL, nat,
+                             c_path, "org.bluez.AudioSink", "Disconnect",
+                             DBUS_TYPE_INVALID);
+  */
+  return ret;
 }
