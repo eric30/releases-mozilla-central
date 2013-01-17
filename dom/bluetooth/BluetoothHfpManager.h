@@ -19,14 +19,6 @@ class BluetoothHfpManagerObserver;
 class Call;
 
 /**
- * These constants are used in result code such as +CLIP and +CCWA. The value
- * of these constants is the same as TOA_INTERNATIONAL/TOA_UNKNOWN defined in
- * ril_consts.js
- */
-#define TOA_UNKNOWN 0x81
-#define TOA_INTERNATIONAL 0x91
-
-/**
  * These costants are defined in 4.33.2 "AT Capabilities Re-Used from GSM 07.07
  * and 3GPP 27.007" in Bluetooth hands-free profile 1.6
  */
@@ -59,30 +51,29 @@ enum BluetoothCmeError {
 class BluetoothHfpManager : public mozilla::ipc::UnixSocketConsumer
 {
 public:
-  ~BluetoothHfpManager();
   static BluetoothHfpManager* Get();
   virtual void ReceiveSocketData(mozilla::ipc::UnixSocketRawData* aMessage)
     MOZ_OVERRIDE;
+
   bool Connect(const nsAString& aDeviceObjectPath,
                const bool aIsHandsfree,
                BluetoothReplyRunnable* aRunnable);
   void Disconnect();
-  bool SendLine(const char* aMessage);
-  bool SendCommand(const char* aCommand, const int aValue);
-  void SendCLCC();
-  void CallStateChanged(int aCallIndex, int aCallState,
-                        const char* aNumber, bool aIsActive);
-  void EnumerateCallState(int aCallIndex, int aCallState,
-                          const char* aNumber, bool aIsActive);
-  void SetupCIND(int aCallIndex, int aCallState,
-                 const char* aPhoneNumber, bool aInitial);
   bool Listen();
-  void SetVolume(int aVolume);
+
+  /**
+   * @param aSend A boolean indicates whether we need to notify headset or not
+   */
+  void HandleCallStateChanged(uint32_t aCallIndex, uint16_t aCallState,
+                              const nsAString& aNumber, bool aSend);
 
 private:
+  class GetVolumeTask;
+  friend class GetVolumeTask;
   friend class BluetoothHfpManagerObserver;
+
   BluetoothHfpManager();
-  nsresult HandleBatteryLevelChanged(const nsAString& aData);
+  ~BluetoothHfpManager();
   nsresult HandleIccInfoChanged();
   nsresult HandleShutdown();
   nsresult HandleVolumeChanged(const nsAString& aData);
@@ -90,17 +81,25 @@ private:
 
   bool Init();
   void Cleanup();
+  void Reset();
+  void ResetCallArray();
+
   void NotifyDialer(const nsAString& aCommand);
   void NotifySettings();
+
+  bool SendCommand(const char* aCommand, uint8_t aValue = 0);
+  bool SendLine(const char* aMessage);
+  void UpdateCIND(uint8_t aType, uint8_t aValue, bool aSend);
+
   virtual void OnConnectSuccess() MOZ_OVERRIDE;
   virtual void OnConnectError() MOZ_OVERRIDE;
   virtual void OnDisconnect() MOZ_OVERRIDE;
 
   int mCurrentVgs;
   int mCurrentVgm;
-  int mCurrentCallIndex;
-  bool mCLIP;
+  uint32_t mCurrentCallIndex;
   bool mCCWA;
+  bool mCLIP;
   bool mCMEE;
   bool mCMER;
   bool mReceiveVgsFlag;
