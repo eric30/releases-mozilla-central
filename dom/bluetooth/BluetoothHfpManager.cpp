@@ -620,10 +620,24 @@ BluetoothHfpManager::HandleVoiceConnectionChanged()
     SendCommand("+CIEV: ", CINDType::SIGNAL);
   }
 
+  /**
+   * Possible return values for mode are:
+   * - null (unknown): set mNetworkSelectionMode to 0 (auto)
+   * - automatic: set mNetworkSelectionMode to 0 (auto)
+   * - manual: set mNetworkSelectionMode to 1 (manual)
+   */
+  nsString mode;
+  connection->GetNetworkSelectionMode(mode);
+  if (mode.EqualsLiteral("manual")) {
+    mNetworkSelectionMode = 1;
+  } else {
+    mNetworkSelectionMode = 0;
+  }
+
   nsIDOMMozMobileNetworkInfo* network;
   voiceInfo->GetNetwork(&network);
   NS_ENSURE_TRUE(network, NS_ERROR_FAILURE);
-  network->GetShortName(mOperatorName);
+  network->GetLongName(mOperatorName);
 
   return NS_OK;
 }
@@ -708,6 +722,7 @@ BluetoothHfpManager::ReceiveSocketData(UnixSocketRawData* aMessage)
     mCMEE = !atCommandValues[0].EqualsLiteral("0");
   } else if (msg.Find("AT+COPS=") != -1) {
     ParseAtCommand(msg, 8, atCommandValues);
+
     if (atCommandValues.Length() != 2) {
       NS_WARNING("Could't get the value of command [AT+COPS=]");
       goto respond_with_ok;
@@ -718,9 +733,18 @@ BluetoothHfpManager::ReceiveSocketData(UnixSocketRawData* aMessage)
         !atCommandValues[1].EqualsLiteral("0")) {
       if (mCMEE) {
         SendCommand("+CME ERROR: ", BluetoothCmeError::OPERATION_NOT_SUPPORTED);
+      } else {
+        SendLine("ERROR");
       }
       return;
     }
+  } else if (msg.Find("AT+COPS?") != -1) {
+    nsAutoCString message("+COPS: ");
+    message.AppendInt(mNetworkSelectionMode);
+    message += ",0,\"";
+    message += NS_ConvertUTF16toUTF8(mOperatorName);
+    message += "\"";
+    SendLine(message.get());
   } else if (msg.Find("AT+VTS=") != -1) {
     ParseAtCommand(msg, 7, atCommandValues);
 
@@ -754,8 +778,14 @@ BluetoothHfpManager::ReceiveSocketData(UnixSocketRawData* aMessage)
   } else if (msg.Find("AT+CHLD=?") != -1) {
     SendLine("+CHLD: (1,2)");
   } else if (msg.Find("AT+CHLD=") != -1) {
-    char chld = msg[8];
+    ParseAtCommand(msg, 8, atCommandValues);
 
+    if (atCommandValues.IsEmpty()) {
+      NS_WARNING("Could't get the value of command [AT+CHLD=]");
+      goto respond_with_ok;
+    }
+
+    PRUnichar chld = atCommandValues[0][0];
     if (chld < '0' || chld > '4') {
       NS_WARNING("Wrong value of command [AT+CHLD]");
       SendLine("ERROR");
@@ -764,30 +794,29 @@ BluetoothHfpManager::ReceiveSocketData(UnixSocketRawData* aMessage)
 
     /**
      * The following two cases are supported:
-     * AT+CHLD=1 - Releases active calls and accepts the other (held or waiting) call
-     * AT+CHLD=2 - Places active calls on hold and accepts the other (held or waiting) call
+     * AT+CHLD=1 - Releases active calls and accepts the other (held or
+     *             waiting) call
+     * AT+CHLD=2 - Places active calls on hold and accepts the other (held
+     *             or waiting) call
      *
      * The following cases are NOT supported yet:
      * AT+CHLD=0, AT+CHLD=1<idx>, AT+CHLD=2<idx>, AT+CHLD=3, AT+CHLD=4
-     * Please see 4.33.2 in Bluetooth hands-free profile 1.6 for more information.
+     * Please see 4.33.2 in Bluetooth hands-free profile 1.6 for more
+     * information.
      */
 
     // Check if the value of idx is valid
-    int length = msg.Length();
-    if (length -= 9) {
+    if (msg.Length() - 9) {
       SendLine("ERROR");
       return;
     }
 
-    switch (chld) {
-      case '1':
-        NotifyDialer(NS_LITERAL_STRING("CHUP+ATA"));
-        break;
-      case '2':
-        NotifyDialer(NS_LITERAL_STRING("CHLD+ATA"));
-        break;
-      default:
-        NS_WARNING("Not handling chld value");
+    if (chld == '1') {
+      NotifyDialer(NS_LITERAL_STRING("CHUP+ATA"));
+    } else if (chld == '2') {
+      NotifyDialer(NS_LITERAL_STRING("CHLD+ATA"));
+    } else {
+      NS_WARNING("Not handling chld value");
     }
   } else if (msg.Find("AT+VGS=") != -1) {
     // Adjust volume by headset
@@ -826,6 +855,8 @@ BluetoothHfpManager::ReceiveSocketData(UnixSocketRawData* aMessage)
     // Currently, we don't support memory dialing in Dialer app
     SendLine("ERROR");
     return;
+  } else if (msg.Find("AT+CLCC") != -1) {
+    SendCommand("+CLCC: ");
   } else if (msg.Find("ATD") != -1) {
     nsAutoCString message(msg), newMsg;
     int end = message.FindChar(';');
@@ -881,11 +912,6 @@ BluetoothHfpManager::ReceiveSocketData(UnixSocketRawData* aMessage)
       message += ",,4";
       SendLine(message.get());
     }
-  } else if (msg.Find("AT+COPS?") != -1) {
-    nsAutoCString message("+COPS: 0,0,\"");
-    message += NS_ConvertUTF16toUTF8(mOperatorName);
-    message += "\"";
-    SendLine(message.get());
   } else if (msg.Find("AT+BVRA") != -1) {
     // Currently, we don't support voice recognition in AG
     SendLine("ERROR");
@@ -984,7 +1010,6 @@ BluetoothHfpManager::Disconnect()
     return;
   }
 
-  CloseScoSocket();
   CloseSocket();
 }
 
@@ -1137,6 +1162,8 @@ BluetoothHfpManager::HandleCallStateChanged(uint32_t aCallIndex,
   nsRefPtr<nsRunnable> sendRingTask;
   nsString address;
   uint16_t prevCallState = mCurrentCallArray[aCallIndex].mState;
+  uint32_t callArrayLength = mCurrentCallArray.Length();
+  uint32_t index = 1;
 
   switch (aCallState) {
     case nsIRadioInterfaceLayer::CALL_STATE_HELD:
@@ -1202,6 +1229,23 @@ BluetoothHfpManager::HandleCallStateChanged(uint32_t aCallIndex,
           UpdateCIND(CINDType::CALL, CallState::IN_PROGRESS, aSend);
           UpdateCIND(CINDType::CALLSETUP, CallSetupState::NO_CALLSETUP, aSend);
           break;
+        case nsIRadioInterfaceLayer::CALL_STATE_HELD:
+
+          // Check if there's another call on hold
+          while (index < callArrayLength) {
+            if (index != mCurrentCallIndex &&
+                (mCurrentCallArray[index].mState ==
+                 nsIRadioInterfaceLayer::CALL_STATE_HELD)) {
+              break;
+            }
+            index++;
+          }
+
+          // There is no call on hold, update CIND
+          if (index == callArrayLength) {
+            UpdateCIND(CINDType::CALLHELD, CallHeldState::NO_CALLHELD, aSend);
+          }
+          break;
         default:
           NS_WARNING("Not handling state changed");
       }
@@ -1218,7 +1262,10 @@ BluetoothHfpManager::HandleCallStateChanged(uint32_t aCallIndex,
           UpdateCIND(CINDType::CALLSETUP, CallSetupState::NO_CALLSETUP, aSend);
           break;
         case nsIRadioInterfaceLayer::CALL_STATE_CONNECTED:
-          UpdateCIND(CINDType::CALL, CallState::NO_CALL, aSend);
+          // No call is ongoing
+          if (sCINDItems[CINDType::CALLHELD].value == CallHeldState::NO_CALLHELD) {
+            UpdateCIND(CINDType::CALL, CallState::NO_CALL, aSend);
+          }
           break;
         case nsIRadioInterfaceLayer::CALL_STATE_HELD:
           UpdateCIND(CINDType::CALLHELD, CallHeldState::NO_CALLHELD, aSend);
@@ -1234,19 +1281,17 @@ BluetoothHfpManager::HandleCallStateChanged(uint32_t aCallIndex,
 
         // Find the first non-disconnected call (like connected, held),
         // and update mCurrentCallIndex
-        uint32_t c = 1;
-        uint32_t length = mCurrentCallArray.Length();
-        while (c < length) {
-          if (mCurrentCallArray[c].mState !=
+        while (index < callArrayLength) {
+          if (mCurrentCallArray[index].mState !=
               nsIRadioInterfaceLayer::CALL_STATE_DISCONNECTED) {
-            mCurrentCallIndex = c;
+            mCurrentCallIndex = index;
             break;
           }
-          c++;
+          index++;
         }
 
         // There is no call, close Sco and clear mCurrentCallArray
-        if (c == length) {
+        if (index == callArrayLength) {
           CloseScoSocket();
           ResetCallArray();
         }
