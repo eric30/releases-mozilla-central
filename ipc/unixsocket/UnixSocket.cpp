@@ -264,6 +264,7 @@ public:
   NS_IMETHOD Run()
   {
     delete mInstance;
+    LOG("Deleted UnixSocketImpl");
 
     return NS_OK;
   }
@@ -375,7 +376,15 @@ public:
 
   NS_IMETHOD
   Run()
-  {
+  { 
+    if(!mImpl->mConsumer) {
+      NS_WARNING("mConsumer is null, aborting receive!");
+      LOG("It really happened!!");
+      // Since we've already explicitly closed and the close happened before
+      // this, this isn't really an error. Since we've warned, return OK.
+      return NS_OK;
+    }
+
     mImpl->mConsumer->CloseSocket();
     return NS_OK;
   }

@@ -6,26 +6,48 @@
 
 #include "BluetoothSocket.h"
 
+#undef LOG
+#if defined(MOZ_WIDGET_GONK)
+#include <android/log.h>
+#define LOG(args...)  __android_log_print(ANDROID_LOG_INFO, "GonkDBus", args);
+#else
+#define BTDEBUG true
+#define LOG(args...) if (BTDEBUG) printf(args);
+#endif
+
 USING_BLUETOOTH_NAMESPACE
+
+BluetoothSocket::BluetoothSocket(UnixSocketConsumer* aManager) : UnixSocketConsumer()
+{
+  mManager = aManager;
+}
+
+BluetoothSocket::~BluetoothSocket()
+{
+  LOG("Bluetooth Socket dtor");
+}
 
 void BluetoothSocket::ReceiveSocketData(UnixSocketRawData* aMessage)
 {
-
-
+  LOG("BluetoothSocket::ReceiveSocketData");
+  mManager->ReceiveSocketData(aMessage);
 }
 
 void BluetoothSocket::OnConnectSuccess()
 {
-
+  LOG("BluetoothSocket::OnConnectSuccess");
+  mManager->OnConnectSuccess();
 }
 
 void BluetoothSocket::OnConnectError()
 {
-
+  LOG("BluetoothSocket::OnConnectError");
+  mManager->OnConnectError();
 }
 
 void BluetoothSocket::OnDisconnect()
 {
-
+  LOG("BluetoothSocket::OnDisconnect");
+  mManager->OnDisconnect();
 }
 
