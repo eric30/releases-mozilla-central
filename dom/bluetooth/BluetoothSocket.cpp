@@ -17,7 +17,7 @@
 
 USING_BLUETOOTH_NAMESPACE
 
-BluetoothSocket::BluetoothSocket(UnixSocketConsumer* aManager) : UnixSocketConsumer()
+BluetoothSocket::BluetoothSocket(BluetoothProfileManager* aManager) : UnixSocketConsumer()
 {
   mManager = aManager;
 }

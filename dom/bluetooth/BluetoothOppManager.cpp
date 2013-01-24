@@ -94,7 +94,7 @@ static const uint32_t kUpdateProgressBase = 50 * 1024;
  */
 static const uint32_t kPutRequestHeaderSize = 6;
 
-StaticRefPtr<BluetoothOppManager> sInstance;
+static nsAutoPtr<BluetoothOppManager> sInstance;
 StaticRefPtr<BluetoothOppManagerObserver> sOppObserver;
 
 /*
@@ -177,14 +177,10 @@ public:
   void Run() MOZ_OVERRIDE
   {
     if (!sInstance) {
-      NS_WARNING("BluetoothOppManager no longer exists, cannot close socket!");
       return;
     }
 
-    if (sInstance->GetConnectionStatus() ==
-          SocketConnectionStatus::SOCKET_CONNECTED) {
-      sInstance->CloseSocket();
-    }
+    sInstance->CloseSocket();
   }
 };
 
@@ -1363,4 +1359,13 @@ BluetoothOppManager::OnDisconnect()
   AfterOppDisconnected();
   mConnectedDeviceAddress.AssignLiteral("00:00:00:00:00:00");
   mSuccessFlag = false;
+}
+
+void
+BluetoothOppManager::CloseSocket()
+{
+  if (mSocket->GetConnectionStatus() !=
+        SocketConnectionStatus::SOCKET_DISCONNECTED) {
+    mSocket->CloseSocket();
+  }
 }

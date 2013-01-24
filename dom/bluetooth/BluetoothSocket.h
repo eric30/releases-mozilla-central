@@ -8,7 +8,7 @@
 #define mozilla_dom_bluetooth_BluetoothSocket_h
 
 #include "BluetoothCommon.h"
-#include "BluetoothOppManager.h"
+#include "BluetoothProfileManager.h"
 #include <mozilla/ipc/UnixSocket.h>
 
 using namespace mozilla::ipc;
@@ -18,17 +18,16 @@ BEGIN_BLUETOOTH_NAMESPACE
 class BluetoothSocket : public UnixSocketConsumer
 {
 public:
-  BluetoothSocket(UnixSocketConsumer* aManager);
-
+  BluetoothSocket(BluetoothProfileManager* aManager);
   ~BluetoothSocket();
 
-  void ReceiveSocketData(UnixSocketRawData* aMessage);
-  void OnConnectSuccess();
-  void OnConnectError();
-  void OnDisconnect();
+  void ReceiveSocketData(UnixSocketRawData* aMessage) MOZ_OVERRIDE;
+  void OnConnectSuccess() MOZ_OVERRIDE;
+  void OnConnectError() MOZ_OVERRIDE;
+  void OnDisconnect() MOZ_OVERRIDE;
 
 private:
-  UnixSocketConsumer* mManager;
+  BluetoothProfileManager* mManager;
 };
 
 END_BLUETOOTH_NAMESPACE

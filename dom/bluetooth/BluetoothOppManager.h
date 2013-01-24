@@ -8,6 +8,7 @@
 #define mozilla_dom_bluetooth_bluetoothoppmanager_h__
 
 #include "BluetoothCommon.h"
+#include "BluetoothProfileManager.h"
 #include "BluetoothSocket.h"
 #include "mozilla/dom/ipc/Blob.h"
 #include "mozilla/ipc/UnixSocket.h"
@@ -22,7 +23,7 @@ class BluetoothReplyRunnable;
 class BluetoothSocket;
 class ObexHeaderSet;
 
-class BluetoothOppManager : public mozilla::ipc::UnixSocketConsumer
+class BluetoothOppManager : public BluetoothProfileManager
 {
 public:
   /*
@@ -35,8 +36,7 @@ public:
 
   ~BluetoothOppManager();
   static BluetoothOppManager* Get();
-  void ReceiveSocketData(mozilla::ipc::UnixSocketRawData* aMessage)
-    MOZ_OVERRIDE;
+  void ReceiveSocketData(mozilla::ipc::UnixSocketRawData* aMessage) MOZ_OVERRIDE;
   void ClientDataHandler(mozilla::ipc::UnixSocketRawData* aMessage);
   void ServerDataHandler(mozilla::ipc::UnixSocketRawData* aMessage);
 
@@ -75,9 +75,12 @@ public:
   // Bug 827267 for more information.
   bool IsTransferring();
 
-  virtual void OnConnectSuccess() MOZ_OVERRIDE;
-  virtual void OnConnectError() MOZ_OVERRIDE;
-  virtual void OnDisconnect() MOZ_OVERRIDE;
+  void OnConnectSuccess() MOZ_OVERRIDE;
+  void OnConnectError() MOZ_OVERRIDE;
+  void OnDisconnect() MOZ_OVERRIDE;
+
+  // xxx Temp
+  void CloseSocket();
 
 private:
   BluetoothOppManager();
