@@ -222,6 +222,13 @@ interface nsIRILContentHelper : nsIMobileConnectionProvider
   readonly attribute nsIDOMMozVoicemailStatus voicemailStatus;
   readonly attribute DOMString voicemailNumber;
   readonly attribute DOMString voicemailDisplayName;
+
+  /**
+   * SIM card ICC communication channel
+   */
+  nsIDOMDOMRequest iccOpenChannel(in nsIDOMWindow window, in DOMString aid);
+  nsIDOMDOMRequest iccExchangeAPDU(in nsIDOMWindow window, in long channel, in jsval apdu);
+  nsIDOMDOMRequest iccCloseChannel(in nsIDOMWindow window, in long channel);
 };
 
 [scriptable, uuid(4efdb1d4-1e49-4f5d-a656-44e6180062a7)]

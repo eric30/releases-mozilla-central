@@ -8,6 +8,7 @@
 
 interface nsIDOMEventListener;
 interface nsIDOMTelephonyCall;
+interface nsIDOMDOMRequest;
 
 [scriptable, builtinclass, uuid(ec253100-630d-4366-ac77-b67525167960)]
 interface nsIDOMTelephony : nsIDOMEventTarget
@@ -30,4 +31,9 @@ interface nsIDOMTelephony : nsIDOMEventTarget
 
   [implicit_jscontext] attribute jsval onincoming;
   [implicit_jscontext] attribute jsval oncallschanged;
+
+  // UICC SE API
+  nsIDOMDOMRequest iccOpenChannel(in DOMString aid);
+  nsIDOMDOMRequest iccExchangeAPDU(in long channel, in jsval apdu);
+  nsIDOMDOMRequest iccCloseChannel(in long channel);
 };

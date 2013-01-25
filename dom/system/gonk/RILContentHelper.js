@@ -77,7 +77,10 @@ const RIL_IPC_MSG_NAMES = [
   "RIL:DataError",
   "RIL:SetCallForwardingOption",
   "RIL:GetCallForwardingOption",
-  "RIL:CellBroadcastReceived"
+  "RIL:CellBroadcastReceived",
+  "RIL:IccOpenChannel",
+  "RIL:IccCloseChannel",
+  "RIL:IccExchangeAPDU"
 ];
 
 const kVoiceChangedTopic     = "mobile-connection-voice-changed";
@@ -581,6 +584,46 @@ RILContentHelper.prototype = {
     cpmm.sendAsyncMessage("RIL:SendStkEventDownload", {event: event});
   },
 
+  iccOpenChannel: function iccOpenChannel(window, aid) {
+    if (window == null) {
+      throw Components.Exception("Can't get window object",
+                                  Cr.NS_ERROR_UNEXPECTED);
+    }
+
+    let request = Services.DOMRequest.createRequest(window);
+    let requestId = this.getRequestId(request);
+
+    cpmm.sendAsyncMessage("RIL:IccOpenChannel", {requestId: requestId, aid: aid});
+    return request;
+  },
+
+  iccExchangeAPDU: function iccExchangeAPDU(window, channel, apdu) {
+    if (window == null) {
+      throw Components.Exception("Can't get window object",
+                                  Cr.NS_ERROR_UNEXPECTED);
+    }
+
+    let request = Services.DOMRequest.createRequest(window);
+    let requestId = this.getRequestId(request);
+
+    //Potentially you need serialization here and can't pass the jsval through
+    cpmm.sendAsyncMessage("RIL:IccExchangeAPDU", {requestId: requestId, channel: channel, apdu: apdu});
+    return request;
+  },
+
+  iccCloseChannel: function iccCloseChannel(window, channel) {
+    if (window == null) {
+      throw Components.Exception("Can't get window object",
+                                  Cr.NS_ERROR_UNEXPECTED);
+    }
+
+    let request = Services.DOMRequest.createRequest(window);
+    let requestId = this.getRequestId(request);
+
+    cpmm.sendAsyncMessage("RIL:IccCloseChannel", {requestId: requestId, channel: channel});
+    return request;
+  },
+
   getCallForwardingOption: function getCallForwardingOption(window, reason) {
     if (window == null) {
       throw Components.Exception("Can't get window object",
@@ -936,6 +979,15 @@ RILContentHelper.prototype = {
       case "RIL:StkSessionEnd":
         Services.obs.notifyObservers(null, kStkSessionEndTopic, null);
         break;
+      case "RIL:IccOpenChannel":
+        this.handleIccOpenChannel(msg.json);
+        break;
+      case "RIL:IccCloseChannel":
+        this.handleIccCloseChannel(msg.json);
+        break;
+      case "RIL:IccExchangeAPDU":
+        this.handleIccExchangeAPDU(msg.json);
+        break;
       case "RIL:DataError":
         this.updateConnectionInfo(msg.json, this.dataConnectionInfo);
         Services.obs.notifyObservers(null, kDataErrorTopic, msg.json.error);
@@ -1017,6 +1069,32 @@ RILContentHelper.prototype = {
       this.fireRequestSuccess(message.requestId, null);
     }
   },
+
+  handleIccOpenChannel: function handleIccOpenChannel(message) {
+    if (message.error) {
+      this.fireRequestError(message.requestId, message.error);
+    } else {
+      this.fireRequestSuccess(message.requestId, message.channel);
+    }
+  },
+
+  handleIccCloseChannel: function handleIccCloseChannel(message) {
+    if (message.error) {
+      this.fireRequestError(message.requestId, message.error);
+    } else {
+      this.fireRequestSuccess(message.requestId, null);
+    }
+  },
+
+  handleIccExchangeAPDU: function handleIccExchangeAPDU(message) {
+    if (message.error) {
+      this.fireRequestError(message.requestId, message.error);
+    } else {
+      var result = [message.sw1, message.sw2, message.simResponse];
+      this.fireRequestSuccess(message.requestId, result);
+    }
+  },
+
 
   handleVoicemailNotification: function handleVoicemailNotification(message) {
     let changed = false;

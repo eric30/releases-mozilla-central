@@ -456,6 +456,39 @@ Telephony::EnumerateCallState(uint32_t aCallIndex, uint16_t aCallState,
 }
 
 NS_IMETHODIMP
+Telephony::IccOpenChannel(const nsAString& aAid, nsIDOMDOMRequest** aRequest)
+{
+  // Call to RILContentHelper.js in dom/system/gonk
+  *aRequest = nullptr;
+  //LOG("Calling IccOpenChannel");
+  nsresult rv = mRIL->IccOpenChannel(GetOwner(), aAid, aRequest);
+  NS_ENSURE_SUCCESS(rv, rv);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+Telephony::IccExchangeAPDU(PRInt32 aChannel, const jsval& aApdu, nsIDOMDOMRequest** aRequest)
+{
+  // Call to RILContentHelper.js in dom/system/gonk
+  *aRequest = nullptr;
+  //LOG("Calling IccExchangeAPDU");
+  nsresult rv = mRIL->IccExchangeAPDU(GetOwner(), aChannel, aApdu, aRequest);
+  NS_ENSURE_SUCCESS(rv, rv);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+Telephony::IccCloseChannel(PRInt32 aChannel, nsIDOMDOMRequest** aRequest)
+{
+  // Call to RILContentHelper.js in dom/system/gonk
+  *aRequest = nullptr;
+  //LOG("Calling IccCloseChannel");
+  nsresult rv = mRIL->IccCloseChannel(GetOwner(), aChannel, aRequest);
+  NS_ENSURE_SUCCESS(rv, rv);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 Telephony::NotifyError(int32_t aCallIndex,
                        const nsAString& aError)
 {
