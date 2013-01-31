@@ -740,11 +740,6 @@ GK_ATOM(onMozMousePixelScroll, "onMozMousePixelScroll")
 GK_ATOM(onMozScrolledAreaChanged, "onMozScrolledAreaChanged")
 GK_ATOM(onmoznetworkupload, "onmoznetworkupload")
 GK_ATOM(onmoznetworkdownload, "onmoznetworkdownload")
-#ifdef MOZ_B2G_NFC
-GK_ATOM(onsecureelementactivated, "onsecureelementactivated")
-GK_ATOM(onsecureelementdeactivated, "onsecureelementdeactivated")
-GK_ATOM(onsecureelementtransaction, "onsecureelementtransaction")
-#endif
 GK_ATOM(onnoupdate, "onnoupdate")
 GK_ATOM(onobsolete, "onobsolete")
 GK_ATOM(ononline, "ononline")
@@ -772,6 +767,11 @@ GK_ATOM(onresuming, "onresuming")
 GK_ATOM(onMozBeforeResize, "onMozBeforeResize")
 GK_ATOM(onresize, "onresize")
 GK_ATOM(onscroll, "onscroll")
+#ifdef MOZ_B2G_NFC
+GK_ATOM(onsecureelementactivated, "onsecureelementactivated")
+GK_ATOM(onsecureelementdeactivated, "onsecureelementdeactivated")
+GK_ATOM(onsecureelementtransaction, "onsecureelementtransaction")
+#endif
 GK_ATOM(onselect, "onselect")
 GK_ATOM(onsent, "onsent")
 GK_ATOM(onset, "onset")
