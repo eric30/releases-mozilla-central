@@ -35,6 +35,8 @@ NS_IMPL_RELEASE(NdefRecord)
 NdefRecord::NdefRecord()
 {
   tnf = 0;
+  type.AssignLiteral("");
+  id.AssignLiteral("");
   payload = JSVAL_NULL;
 }
 
@@ -76,7 +78,7 @@ NdefRecord::Initialize(nsISupports* aOwner,
     }
     type.Assign(typechars, length);
   } else if (aArgv[1] == JSVAL_NULL) {
-    // keep type unassigned/as-is.
+    type.AssignLiteral("");
   } else {
     return NS_ERROR_INVALID_ARG;
   }
@@ -90,7 +92,7 @@ NdefRecord::Initialize(nsISupports* aOwner,
     }
     id.Assign(idchars, length);
   } else if (aArgv[2] == JSVAL_NULL) {
-    // keep id unassigned/as-is.
+    id.AssignLiteral("");
   } else {
     return NS_ERROR_INVALID_ARG;
   }
