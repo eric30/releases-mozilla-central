@@ -192,17 +192,6 @@ BluetoothServiceChildProcess::RemoveDeviceInternal(
   return NS_OK;
 }
 
-nsresult
-BluetoothServiceChildProcess::GetScoSocket(
-                                    const nsAString& aObjectPath,
-                                    bool aAuth,
-                                    bool aEncrypt,
-                                    mozilla::ipc::UnixSocketConsumer* aConsumer)
-{
-  MOZ_NOT_REACHED("This should never be called!");
-  return NS_ERROR_FAILURE;
-}
-
 int
 BluetoothServiceChildProcess::GetDeviceServiceChannel(
   const nsAString& aObjectPath,

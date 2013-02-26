@@ -209,12 +209,6 @@ public:
                           const nsAString& aPattern,
                           int aAttributeId) = 0;
 
-  virtual nsresult
-  GetScoSocket(const nsAString& aObjectPath,
-               bool aAuth,
-               bool aEncrypt,
-               mozilla::ipc::UnixSocketConsumer* aConsumer) = 0;
-
   virtual bool
   SetPinCodeInternal(const nsAString& aDeviceAddress, const nsAString& aPinCode,
                      BluetoothReplyRunnable* aRunnable) = 0;

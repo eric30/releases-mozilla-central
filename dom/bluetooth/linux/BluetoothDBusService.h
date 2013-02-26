@@ -84,12 +84,6 @@ public:
                           int aAttributeId);
 
   virtual nsresult
-  GetScoSocket(const nsAString& aObjectPath,
-               bool aAuth,
-               bool aEncrypt,
-               mozilla::ipc::UnixSocketConsumer* aConsumer);
-
-  virtual nsresult
   CreatePairedDeviceInternal(const nsAString& aAdapterPath,
                              const nsAString& aDeviceAddress,
                              int aTimeout,

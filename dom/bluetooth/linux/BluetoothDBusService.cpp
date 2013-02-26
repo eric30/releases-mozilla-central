@@ -2554,32 +2554,6 @@ private:
   int mChannel;
 };
 
-nsresult
-BluetoothDBusService::GetScoSocket(const nsAString& aAddress,
-                                   bool aAuth,
-                                   bool aEncrypt,
-                                   mozilla::ipc::UnixSocketConsumer* aConsumer)
-{
-  NS_ASSERTION(NS_IsMainThread(), "Must be called from main thread!");
-
-  if (!mConnection || !gThreadConnection) {
-    NS_ERROR("Bluetooth service not started yet!");
-    return NS_ERROR_FAILURE;
-  }
-
-  nsString replyError;
-  BluetoothUnixSocketConnector* c =
-    new BluetoothUnixSocketConnector(BluetoothSocketType::SCO, -1,
-                                     aAuth, aEncrypt);
-
-  if (!aConsumer->ConnectSocket(c, NS_ConvertUTF16toUTF8(aAddress).get())) {
-    replyError.AssignLiteral("SocketConnectionError");
-    return NS_ERROR_FAILURE;
-  }
-
-  return NS_OK;
-}
-
 void
 BluetoothDBusService::SendFile(const nsAString& aDeviceAddress,
                                BlobParent* aBlobParent,
