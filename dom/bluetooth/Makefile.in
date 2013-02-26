@@ -56,6 +56,7 @@ CPPSRCS += \
   ObexBase.cpp \
   BluetoothScoManager.cpp \
   BluetoothUuid.cpp \
+  BluetoothSocket.cpp \
   $(NULL)
 
 ifdef MOZ_B2G_RIL
