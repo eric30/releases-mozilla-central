@@ -86,12 +86,6 @@ public:
                        const nsAString& aObjectPath,
                        BluetoothReplyRunnable* aRunnable) MOZ_OVERRIDE;
 
-  virtual nsresult
-  GetScoSocket(const nsAString& aObjectPath,
-               bool aAuth,
-               bool aEncrypt,
-               mozilla::ipc::UnixSocketConsumer* aConsumer) MOZ_OVERRIDE;
-
   virtual bool
   SetPinCodeInternal(const nsAString& aDeviceAddress,
                      const nsAString& aPinCode,
