@@ -8,6 +8,7 @@
 #define mozilla_dom_bluetooth_bluetoothscomanager_h__
 
 #include "BluetoothCommon.h"
+#include "BluetoothSocket.h"
 #include "mozilla/ipc/UnixSocket.h"
 #include "nsIObserver.h"
 
@@ -16,7 +17,7 @@ BEGIN_BLUETOOTH_NAMESPACE
 class BluetoothReplyRunnable;
 class BluetoothScoManagerObserver;
 
-class BluetoothScoManager : public mozilla::ipc::UnixSocketConsumer
+class BluetoothScoManager : public BluetoothSocketObserver
 {
 public:
   ~BluetoothScoManager();
@@ -28,6 +29,12 @@ public:
   bool Connect(const nsAString& aDeviceObjectPath);
   void Disconnect();
   bool Listen();
+  
+  void OnConnectSuccess() MOZ_OVERRIDE;
+  void OnConnectError() MOZ_OVERRIDE;
+  void OnDisconnect() MOZ_OVERRIDE;
+
+  RefPtr<BluetoothSocket> mSocket;
 
 private:
   friend class BluetoothScoManagerObserver;
@@ -36,9 +43,6 @@ private:
   void Cleanup();
   nsresult HandleShutdown();
   void NotifyAudioManager(const nsAString& aAddress);
-  virtual void OnConnectSuccess() MOZ_OVERRIDE;
-  virtual void OnConnectError() MOZ_OVERRIDE;
-  virtual void OnDisconnect() MOZ_OVERRIDE;
 
   int mSocketStatus;
 };
