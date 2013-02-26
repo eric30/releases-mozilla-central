@@ -204,20 +204,16 @@ public:
                        const nsAString& aObjectPath,
                        BluetoothReplyRunnable* aRunnable) = 0;
 
+  virtual int
+  GetDeviceServiceChannel(const nsAString& aObjectPath,
+                          const nsAString& aPattern,
+                          int aAttributeId) = 0;
+
   virtual nsresult
   GetScoSocket(const nsAString& aObjectPath,
                bool aAuth,
                bool aEncrypt,
                mozilla::ipc::UnixSocketConsumer* aConsumer) = 0;
-
-  virtual nsresult
-  GetSocketViaService(const nsAString& aObjectPath,
-                      const nsAString& aService,
-                      BluetoothSocketType aType,
-                      bool aAuth,
-                      bool aEncrypt,
-                      mozilla::ipc::UnixSocketConsumer* aSocketConsumer,
-                      BluetoothReplyRunnable* aRunnable) = 0;
 
   virtual bool
   SetPinCodeInternal(const nsAString& aDeviceAddress, const nsAString& aPinCode,
@@ -259,13 +255,6 @@ public:
   virtual void
   StopSendingFile(const nsAString& aDeviceAddress,
                   BluetoothReplyRunnable* aRunnable) = 0;
-
-  virtual nsresult
-  ListenSocketViaService(int aChannel,
-                         BluetoothSocketType aType,
-                         bool aAuth,
-                         bool aEncrypt,
-                         mozilla::ipc::UnixSocketConsumer* aConsumer) = 0;
 
   virtual void
   ConfirmReceivingFile(const nsAString& aDeviceAddress, bool aConfirm,

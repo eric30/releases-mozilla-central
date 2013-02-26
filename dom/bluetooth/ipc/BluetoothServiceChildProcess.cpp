@@ -203,28 +203,11 @@ BluetoothServiceChildProcess::GetScoSocket(
   return NS_ERROR_FAILURE;
 }
 
-nsresult
-BluetoothServiceChildProcess::GetSocketViaService(
-                                       const nsAString& aObjectPath,
-                                       const nsAString& aService,
-                                       BluetoothSocketType aType,
-                                       bool aAuth,
-                                       bool aEncrypt,
-                                       mozilla::ipc::UnixSocketConsumer* aConsumer,
-                                       BluetoothReplyRunnable* aRunnable)
-{
-  MOZ_NOT_REACHED("This should never be called!");
-  return NS_ERROR_FAILURE;
-}
-
-
-nsresult
-BluetoothServiceChildProcess::ListenSocketViaService(
-  int aChannel,
-  BluetoothSocketType aType,
-  bool aAuth,
-  bool aEncrypt,
-  mozilla::ipc::UnixSocketConsumer* aConsumer)
+int
+BluetoothServiceChildProcess::GetDeviceServiceChannel(
+  const nsAString& aObjectPath,
+  const nsAString& aPattern,
+  int aAttributeId)
 {
   MOZ_NOT_REACHED("This should never be called!");
   return NS_ERROR_FAILURE;
