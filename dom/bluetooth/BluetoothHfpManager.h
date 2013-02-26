@@ -9,6 +9,8 @@
 
 #include "BluetoothCommon.h"
 #include "BluetoothRilListener.h"
+#include "BluetoothSocket.h"
+#include "BluetoothSocketObserver.h"
 #include "mozilla/ipc/UnixSocket.h"
 #include "nsIObserver.h"
 
@@ -48,13 +50,13 @@ enum BluetoothCmeError {
   NETWORK_NOT_ALLOWED = 32
 };
 
-class BluetoothHfpManager : public mozilla::ipc::UnixSocketConsumer
+class BluetoothHfpManager : public BluetoothProfileManager
+                          , public BluetoothSocketObserver
 {
 public:
+  ~BluetoothHfpManager();
   static BluetoothHfpManager* Get();
-  virtual void ReceiveSocketData(nsAutoPtr<mozilla::ipc::UnixSocketRawData>& aMessage)
-    MOZ_OVERRIDE;
-
+  void ReceiveSocketData(nsAutoPtr<mozilla::ipc::UnixSocketRawData>& aMessage) MOZ_OVERRIDE;
   bool Connect(const nsAString& aDeviceObjectPath,
                const bool aIsHandsfree,
                BluetoothReplyRunnable* aRunnable);
@@ -67,13 +69,18 @@ public:
   void HandleCallStateChanged(uint32_t aCallIndex, uint16_t aCallState,
                               const nsAString& aNumber, bool aSend);
 
+  RefPtr<BluetoothSocket> mSocket;
+
+  void OnConnectSuccess() MOZ_OVERRIDE;
+  void OnConnectError() MOZ_OVERRIDE;
+  void OnDisconnect() MOZ_OVERRIDE;
+
 private:
   class GetVolumeTask;
   friend class GetVolumeTask;
   friend class BluetoothHfpManagerObserver;
 
   BluetoothHfpManager();
-  ~BluetoothHfpManager();
   nsresult HandleIccInfoChanged();
   nsresult HandleShutdown();
   nsresult HandleVolumeChanged(const nsAString& aData);
@@ -90,10 +97,6 @@ private:
   bool SendCommand(const char* aCommand, uint8_t aValue = 0);
   bool SendLine(const char* aMessage);
   void UpdateCIND(uint8_t aType, uint8_t aValue, bool aSend);
-
-  virtual void OnConnectSuccess() MOZ_OVERRIDE;
-  virtual void OnConnectError() MOZ_OVERRIDE;
-  virtual void OnDisconnect() MOZ_OVERRIDE;
 
   int mCurrentVgs;
   int mCurrentVgm;

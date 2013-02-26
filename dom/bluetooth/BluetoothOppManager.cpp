@@ -28,6 +28,16 @@
 #include "nsIOutputStream.h"
 #include "nsNetUtil.h"
 
+#undef LOG
+#if defined(MOZ_WIDGET_GONK)
+#include <android/log.h>
+#define LOG(args...)  __android_log_print(ANDROID_LOG_INFO, "GonkDBus", args);
+#else
+#define BTDEBUG true
+#define LOG(args...) if (BTDEBUG) printf(args);
+#endif
+
+
 #define TARGET_FOLDER "/sdcard/downloads/bluetooth/"
 
 USING_BLUETOOTH_NAMESPACE
@@ -84,7 +94,7 @@ static const uint32_t kUpdateProgressBase = 50 * 1024;
  */
 static const uint32_t kPutRequestHeaderSize = 6;
 
-StaticRefPtr<BluetoothOppManager> sInstance;
+static nsAutoPtr<BluetoothOppManager> sInstance;
 StaticRefPtr<BluetoothOppManagerObserver> sOppObserver;
 
 /*
@@ -197,13 +207,13 @@ public:
   void Run() MOZ_OVERRIDE
   {
     if (!sInstance) {
-      NS_WARNING("BluetoothOppManager no longer exists, cannot close socket!");
       return;
     }
 
-    if (sInstance->GetConnectionStatus() ==
-          SocketConnectionStatus::SOCKET_CONNECTED) {
-      sInstance->CloseSocket();
+    if (sInstance->mSocket->GetConnectionStatus() ==
+        SocketConnectionStatus::SOCKET_CONNECTED) {
+      LOG("Disconnect @ CloseSocketTask");
+      sInstance->Disconnect();
     }
   }
 };
@@ -224,7 +234,15 @@ BluetoothOppManager::BluetoothOppManager() : mConnected(false)
                                            , mWaitingForConfirmationFlag(false)
 {
   mConnectedDeviceAddress.AssignLiteral("00:00:00:00:00:00");
-  mSocketStatus = GetConnectionStatus();
+
+  // Initialize listening socket
+  BluetoothUnixSocketConnector* c =
+    new BluetoothUnixSocketConnector(BluetoothSocketType::RFCOMM,
+                                     BluetoothReservedChannels::CHANNEL_OPUSH,
+                                     true, true);
+
+  mSocket = new BluetoothSocket(c, this);
+  mSocketStatus = mSocket->GetConnectionStatus();
 }
 
 BluetoothOppManager::~BluetoothOppManager()
@@ -237,7 +255,7 @@ BluetoothOppManager::Get()
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  if (sInstance == nullptr) {
+  if (!sInstance) {
     sInstance = new BluetoothOppManager();
   }
 
@@ -250,45 +268,52 @@ BluetoothOppManager::Connect(const nsAString& aDeviceObjectPath,
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  if (GetConnectionStatus() == SocketConnectionStatus::SOCKET_CONNECTED ||
-      GetConnectionStatus() == SocketConnectionStatus::SOCKET_CONNECTING) {
+  if (mSocket->GetConnectionStatus() == SocketConnectionStatus::SOCKET_CONNECTED ||
+      mSocket->GetConnectionStatus() == SocketConnectionStatus::SOCKET_CONNECTING) {
     NS_WARNING("BluetoothOppManager has been already connected");
     return false;
   }
 
-  CloseSocket();
+  if (mSocket->GetConnectionStatus() != SocketConnectionStatus::SOCKET_DISCONNECTED) {
+    LOG("Close socket");
+    mSocket->CloseSocket();
+  }
 
   BluetoothService* bs = BluetoothService::Get();
-  if (!bs) {
-    NS_WARNING("BluetoothService not available!");
-    return false;
-  }
+  NS_ENSURE_TRUE(bs, false);
 
   nsString uuid;
   BluetoothUuidHelper::GetString(BluetoothServiceClass::OBJECT_PUSH, uuid);
+  int channel = bs->GetDeviceServiceChannel(aDeviceObjectPath, uuid, 0x0004);
 
-  mRunnable = aRunnable;
+  BluetoothUnixSocketConnector* c =
+    new BluetoothUnixSocketConnector(BluetoothSocketType::RFCOMM, channel, true, true);
+  mSocket = new BluetoothSocket(c, this);
 
-  nsresult rv = bs->GetSocketViaService(aDeviceObjectPath,
-                                        uuid,
-                                        BluetoothSocketType::RFCOMM,
-                                        true,
-                                        true,
-                                        this,
-                                        mRunnable);
+  BluetoothValue v = true;
+  if (!mSocket->Connect(GetAddressFromObjectPath(aDeviceObjectPath))) {
+    LOG("[OPP] socket->Connect failed");
+    DispatchBluetoothReply(aRunnable, v, NS_LITERAL_STRING("SocketConnectionError"));
+    return false;
+  }
 
-  return NS_FAILED(rv) ? false : true;
+  mSocketStatus = mSocket->GetConnectionStatus();
+
+  LOG("[OPP] socket->Connect succeeded");
+  DispatchBluetoothReply(aRunnable, v, NS_LITERAL_STRING(""));
+  return true;
 }
 
 void
 BluetoothOppManager::Disconnect()
 {
-  if (GetConnectionStatus() == SocketConnectionStatus::SOCKET_DISCONNECTED) {
+  if (mSocket->GetConnectionStatus() == SocketConnectionStatus::SOCKET_DISCONNECTED) {
     NS_WARNING("BluetoothOppManager has been disconnected!");
     return;
   }
 
-  CloseSocket();
+  LOG("[OPP] socket->CloseSocket succeeded");
+  mSocket->CloseSocket();
 }
 
 nsresult
@@ -296,7 +321,7 @@ BluetoothOppManager::HandleShutdown()
 {
   MOZ_ASSERT(NS_IsMainThread());
   sInShutdown = true;
-  CloseSocket();
+  mSocket->CloseSocket();
   sInstance = nullptr;
   return NS_OK;
 }
@@ -305,13 +330,19 @@ bool
 BluetoothOppManager::Listen()
 {
   MOZ_ASSERT(NS_IsMainThread());
-
-  if (GetConnectionStatus() == SocketConnectionStatus::SOCKET_LISTENING) {
+  if (mSocket->GetConnectionStatus() == SocketConnectionStatus::SOCKET_LISTENING) {
     NS_WARNING("BluetoothOppManager has been already listening");
     return true;
   }
 
-  CloseSocket();
+  mSocket->CloseSocket();
+
+  BluetoothUnixSocketConnector* c =
+    new BluetoothUnixSocketConnector(BluetoothSocketType::RFCOMM,
+                                     BluetoothReservedChannels::CHANNEL_OPUSH,
+                                     true, true);
+
+  mSocket = new BluetoothSocket(c, this);
 
   BluetoothService* bs = BluetoothService::Get();
   if (!bs) {
@@ -319,20 +350,21 @@ BluetoothOppManager::Listen()
     return false;
   }
 
-  nsresult rv =
-    bs->ListenSocketViaService(BluetoothReservedChannels::CHANNEL_OPUSH,
-                               BluetoothSocketType::RFCOMM,
-                               true,
-                               true,
-                               this);
-  mSocketStatus = GetConnectionStatus();
+  LOG("[OPP] socket->Listen");
 
-  return NS_FAILED(rv) ? false : true;
+  if (!mSocket->Listen()) {
+    LOG("[OPP] Can't listen on socket!");
+    return false;
+  }
+
+  mSocketStatus = mSocket->GetConnectionStatus();
+  return true;
 }
 
 bool
 BluetoothOppManager::SendFile(BlobParent* aActor)
 {
+  LOG("Sendfile");
   if (mBlob) {
     // Means there's a sending process. Reply error.
     return false;
@@ -956,7 +988,7 @@ BluetoothOppManager::SendConnectRequest()
 
   UnixSocketRawData* s = new UnixSocketRawData(index);
   memcpy(s->mData, req, s->mSize);
-  SendSocketData(s);
+  mSocket->SendSocketData(s);
 }
 
 void
@@ -986,7 +1018,7 @@ BluetoothOppManager::SendPutHeaderRequest(const nsAString& aFileName,
 
   UnixSocketRawData* s = new UnixSocketRawData(index);
   memcpy(s->mData, req, s->mSize);
-  SendSocketData(s);
+  mSocket->SendSocketData(s);
 
   delete [] fileName;
   delete [] req;
@@ -1016,7 +1048,7 @@ BluetoothOppManager::SendPutRequest(uint8_t* aFileBody,
 
   UnixSocketRawData* s = new UnixSocketRawData(index);
   memcpy(s->mData, req, s->mSize);
-  SendSocketData(s);
+  mSocket->SendSocketData(s);
 
   delete [] req;
 }
@@ -1042,7 +1074,7 @@ BluetoothOppManager::SendPutFinalRequest()
 
   UnixSocketRawData* s = new UnixSocketRawData(index);
   memcpy(s->mData, req, s->mSize);
-  SendSocketData(s);
+  mSocket->SendSocketData(s);
 
   sWaitingToSendPutFinal = false;
 
@@ -1062,7 +1094,7 @@ BluetoothOppManager::SendDisconnectRequest()
 
   UnixSocketRawData* s = new UnixSocketRawData(index);
   memcpy(s->mData, req, s->mSize);
-  SendSocketData(s);
+  mSocket->SendSocketData(s);
 }
 
 void
@@ -1078,7 +1110,7 @@ BluetoothOppManager::SendAbortRequest()
 
   UnixSocketRawData* s = new UnixSocketRawData(index);
   memcpy(s->mData, req, s->mSize);
-  SendSocketData(s);
+  mSocket->SendSocketData(s);
 }
 
 bool
@@ -1108,7 +1140,7 @@ BluetoothOppManager::ReplyToConnect()
 
   UnixSocketRawData* s = new UnixSocketRawData(index);
   memcpy(s->mData, req, s->mSize);
-  SendSocketData(s);
+  mSocket->SendSocketData(s);
 }
 
 void
@@ -1126,7 +1158,7 @@ BluetoothOppManager::ReplyToDisconnect()
 
   UnixSocketRawData* s = new UnixSocketRawData(index);
   memcpy(s->mData, req, s->mSize);
-  SendSocketData(s);
+  mSocket->SendSocketData(s);
 }
 
 void
@@ -1157,7 +1189,7 @@ BluetoothOppManager::ReplyToPut(bool aFinal, bool aContinue)
 
   UnixSocketRawData* s = new UnixSocketRawData(index);
   memcpy(s->mData, req, s->mSize);
-  SendSocketData(s);
+  mSocket->SendSocketData(s);
 }
 
 void
@@ -1301,9 +1333,11 @@ BluetoothOppManager::ReceivingFileConfirmation()
 void
 BluetoothOppManager::OnConnectSuccess()
 {
+  LOG("OnConnectSuccess 1");
   if (mRunnable) {
     BluetoothReply* reply = new BluetoothReply(BluetoothReplySuccess(true));
     mRunnable->SetReply(reply);
+    LOG("OnConnectSuccess 2");
     if (NS_FAILED(NS_DispatchToMainThread(mRunnable))) {
       NS_WARNING("Failed to dispatch to main thread!");
     }
@@ -1312,9 +1346,10 @@ BluetoothOppManager::OnConnectSuccess()
 
   // Cache device address since we can't get socket address when a remote
   // device disconnect with us.
-  GetSocketAddr(mConnectedDeviceAddress);
-
-  mSocketStatus = GetConnectionStatus();
+  mSocket->GetSocketAddr(mConnectedDeviceAddress);
+  mSocketStatus = mSocket->GetConnectionStatus();
+  LOG("OnConnectSuccess address: %s, status: %d",
+      NS_ConvertUTF16toUTF8(mConnectedDeviceAddress).get(), mSocketStatus);
 }
 
 void
@@ -1331,8 +1366,8 @@ BluetoothOppManager::OnConnectError()
     mRunnable.forget();
   }
 
-  CloseSocket();
-  mSocketStatus = GetConnectionStatus();
+  mSocket->CloseSocket();
+  mSocketStatus = mSocket->GetConnectionStatus();
   Listen();
 }
 
@@ -1365,6 +1400,7 @@ BluetoothOppManager::OnDisconnect()
       FileTransferComplete();
     }
 
+    LOG("Listen @ OnDisconnect");
     Listen();
   } else if (mSocketStatus == SocketConnectionStatus::SOCKET_CONNECTING) {
     NS_WARNING("BluetoothOppManager got unexpected socket status!");
@@ -1374,3 +1410,4 @@ BluetoothOppManager::OnDisconnect()
   mConnectedDeviceAddress.AssignLiteral("00:00:00:00:00:00");
   mSuccessFlag = false;
 }
+
