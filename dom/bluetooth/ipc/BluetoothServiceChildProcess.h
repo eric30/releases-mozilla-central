@@ -76,6 +76,11 @@ public:
                              int aTimeout,
                              BluetoothReplyRunnable* aRunnable) MOZ_OVERRIDE;
 
+  virtual int
+  GetDeviceServiceChannel(const nsAString& aObjectPath,
+                          const nsAString& aPattern,
+                          int aAttributeId) MOZ_OVERRIDE;
+
   virtual nsresult
   RemoveDeviceInternal(const nsAString& aAdapterPath,
                        const nsAString& aObjectPath,
@@ -86,22 +91,6 @@ public:
                bool aAuth,
                bool aEncrypt,
                mozilla::ipc::UnixSocketConsumer* aConsumer) MOZ_OVERRIDE;
-
-  virtual nsresult
-  GetSocketViaService(const nsAString& aObjectPath,
-                      const nsAString& aService,
-                      BluetoothSocketType aType,
-                      bool aAuth,
-                      bool aEncrypt,
-                      mozilla::ipc::UnixSocketConsumer* aConsumer,
-                      BluetoothReplyRunnable* aRunnable) MOZ_OVERRIDE;
-
-  virtual nsresult
-  ListenSocketViaService(int aChannel,
-                         BluetoothSocketType aType,
-                         bool aAuth,
-                         bool aEncrypt,
-                         mozilla::ipc::UnixSocketConsumer* aConsumer) MOZ_OVERRIDE;
 
   virtual bool
   SetPinCodeInternal(const nsAString& aDeviceAddress,

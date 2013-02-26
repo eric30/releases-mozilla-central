@@ -78,27 +78,16 @@ public:
   RemoveReservedServicesInternal(const nsAString& aAdapterPath,
                                  const nsTArray<uint32_t>& aServiceHandles);
 
+  virtual int
+  GetDeviceServiceChannel(const nsAString& aObjectPath,
+                          const nsAString& aPattern,
+                          int aAttributeId);
+
   virtual nsresult
   GetScoSocket(const nsAString& aObjectPath,
                bool aAuth,
                bool aEncrypt,
                mozilla::ipc::UnixSocketConsumer* aConsumer);
-
-  virtual nsresult
-  GetSocketViaService(const nsAString& aObjectPath,
-                      const nsAString& aService,
-                      BluetoothSocketType aType,
-                      bool aAuth,
-                      bool aEncrypt,
-                      mozilla::ipc::UnixSocketConsumer* aConsumer,
-                      BluetoothReplyRunnable* aRunnable);
-
-  virtual nsresult
-  ListenSocketViaService(int aChannel,
-                         BluetoothSocketType aType,
-                         bool aAuth,
-                         bool aEncrypt,
-                         mozilla::ipc::UnixSocketConsumer* aConsumer);
 
   virtual nsresult
   CreatePairedDeviceInternal(const nsAString& aAdapterPath,
