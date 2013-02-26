@@ -359,6 +359,30 @@ var shell = {
       case evt.DOM_VK_F1: // headset button
         type = 'headset-button';
         break;
+      case evt.DOM_VK_F15: // media play button
+        type = 'media-play-button';
+        break;
+      case evt.DOM_VK_F16: // media pause button
+        type = 'media-pause-button';
+        break;
+      case evt.DOM_VK_U: // media play/pause button
+        type = 'media-play-pause-button';
+        break;
+      case evt.DOM_VK_V: // media stop button
+        type = 'media-stop-button';
+        break;
+      case evt.DOM_VK_W: // media forward button
+        type = 'media-forward-button';
+        break;
+      case evt.DOM_VK_X: // media backward button
+        type = 'media-backward-button';
+        break;
+      case evt.DOM_VK_Y: // media rewind button
+        type = 'media-rewind-button';
+        break;
+      case evt.DOM_VK_Z: // media fastforward button
+        type = 'media-fastforward-button';
+        break;
       default:                      // Anything else is a real key
         return;  // Don't filter it at all; let it propagate to Gaia
     }
@@ -386,6 +410,15 @@ var shell = {
       this.lastHardwareButtonEventType = type;
       gSystemMessenger.broadcastMessage('headset-button', type);
       return;
+    }
+
+    if ((evt.keyCode >= evt.DOM_VK_U && evt.keyCode <= evt.DOM_VK_Z) ||
+        (evt.keyCode >= evt.DOM_VK_F15 && evt.keyCode <= evt.DOM_VK_F16))
+      if (type !== this.lastHardwareButtonEventType) {
+        this.lastHardwareButtonEventType = type;
+        gSystemMessenger.broadcastMessage('media-button', type);
+        return;
+      }
     }
 
     // On my device, the physical hardware buttons (sleep and volume)
