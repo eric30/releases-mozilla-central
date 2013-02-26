@@ -55,6 +55,9 @@ this.SystemMessagePermissionsTable = {
   "bluetooth-hfp-status-changed": {
     "bluetooth": []
   },
+  "bluetooth-a2dp-status-changed": {
+    "bluetooth": []
+  },
   "bluetooth-opp-transfer-complete": {
     "bluetooth": []
   },
@@ -68,6 +71,7 @@ this.SystemMessagePermissionsTable = {
     "bluetooth": []
   },
   "headset-button": { },
+  "media-button": { },
   "icc-stkcommand": {
     "settings": ["read", "write"]
   },
