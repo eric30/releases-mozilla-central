@@ -78,6 +78,30 @@ this.SystemMessagePermissionsTable = {
   },
   "telephony-new-call": {
     "telephony": []
+  },
+  "nfc-ndef-discovered": {
+    "nfc": []
+  },
+  "nfc-ndef-disconnected": {
+    "nfc": []
+  },
+  "nfc-ndef-write": {
+    "nfc": []
+  },
+  "nfc-request-status": {
+    "nfc": []
+  },
+  "nfc-ndef-push": {
+    "nfc": []
+  },
+  "nfc-secure-element-activated": {
+    "nfc": []
+  },
+  "nfc-secure-element-transaction": {
+    "nfc": []
+  },
+  "nfc-secure-element-deactivated": {
+    "nfc": []
   }
 };
 
