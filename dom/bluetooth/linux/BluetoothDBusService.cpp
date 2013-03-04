@@ -151,13 +151,14 @@ typedef void (*UnpackFunc)(DBusMessage*, DBusError*, BluetoothValue&, nsAString&
 class RemoveDeviceTask : public nsRunnable {
 public:
   RemoveDeviceTask(const nsAString& aAdapterPath,
-                   const char* aDeviceObjectPath,
+                   const NS_ConvertUTF16toUTF8& aDeviceObjectPath,
                    BluetoothReplyRunnable* aRunnable)
     : mAdapterPath(aAdapterPath)
     , mDeviceObjectPath(aDeviceObjectPath)
     , mRunnable(aRunnable)
   {
-    MOZ_ASSERT(aDeviceObjectPath);
+    MOZ_ASSERT(!mAdapterPath.IsEmpty());
+    MOZ_ASSERT(!mDeviceObjectPath.IsEmpty());
     MOZ_ASSERT(aRunnable);
   }
 
@@ -168,11 +169,13 @@ public:
     BluetoothValue v = true;
     nsString errorStr;
 
+    const char* tempDeviceObjectPath = mDeviceObjectPath.get();
+
     DBusMessage *reply =
       dbus_func_args(gThreadConnection->GetConnection(),
                      NS_ConvertUTF16toUTF8(mAdapterPath).get(),
                      DBUS_ADAPTER_IFACE, "RemoveDevice",
-                     DBUS_TYPE_OBJECT_PATH, &mDeviceObjectPath,
+                     DBUS_TYPE_OBJECT_PATH, &tempDeviceObjectPath,
                      DBUS_TYPE_INVALID);
 
     if (reply) {
@@ -188,7 +191,7 @@ public:
 
 private:
   nsString mAdapterPath;
-  const char* mDeviceObjectPath;
+  nsCString mDeviceObjectPath;
   nsRefPtr<BluetoothReplyRunnable> mRunnable;
 };
 
@@ -2214,13 +2217,12 @@ BluetoothDBusService::RemoveDeviceInternal(const nsAString& aAdapterPath,
     return NS_OK;
   }
 
-  nsCString tempDeviceObjectPath =
-    NS_ConvertUTF16toUTF8(GetObjectPathFromAddress(aAdapterPath,
-                                                   aDeviceAddress));
-
-  nsRefPtr<nsRunnable> task(new RemoveDeviceTask(aAdapterPath,
-                                                 tempDeviceObjectPath.get(),
-                                                 aRunnable));
+  nsRefPtr<nsRunnable> task(
+    new RemoveDeviceTask(aAdapterPath,
+                         NS_ConvertUTF16toUTF8(
+                           GetObjectPathFromAddress(aAdapterPath,
+                                                    aDeviceAddress)),
+                         aRunnable));
 
   if (NS_FAILED(mBluetoothCommandThread->Dispatch(task, NS_DISPATCH_NORMAL))) {
     NS_WARNING("Cannot dispatch firmware loading task!");
