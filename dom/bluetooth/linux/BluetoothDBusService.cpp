@@ -1633,8 +1633,13 @@ BluetoothDBusService::StartInternal()
     return NS_ERROR_FAILURE;
   }
 
-  sPairingReqTable.Init();
-  sAuthorizeReqTable.Init();
+  if (!sPairingReqTable.IsInitialized()) {
+    sPairingReqTable.Init();
+  }
+
+  if (!sAuthorizeReqTable.IsInitialized()) {
+    sAuthorizeReqTable.Init();
+  }
 
   BluetoothValue v;
   nsString replyError;
