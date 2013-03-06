@@ -797,6 +797,9 @@ BluetoothService::Notify(const BluetoothSignal& aData)
     NS_ASSERTION(aData.value().get_ArrayOfBluetoothNamedValue().Length() == 1,
       "PairedStatusChagned: Wrong length of parameters");
     type.AssignLiteral("bluetooth-pairedstatuschanged");
+  } else if (aData.name().EqualsLiteral("A2dpConnStatusChanged")) {
+    MOZ_ASSERT(aData.value().get_ArrayOfBluetoothNamedValue().Length() == 2);
+    type.AssignLiteral("bluetooth-a2dp-status-changed");
   } else {
 #ifdef DEBUG
     nsCString warningMsg;

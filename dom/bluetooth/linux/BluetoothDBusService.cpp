@@ -117,6 +117,13 @@ static Properties sManagerProperties[] = {
   {"Adapters", DBUS_TYPE_ARRAY},
 };
 
+static Properties sSinkProperties[] = {
+  {"State", DBUS_TYPE_STRING},
+  {"Connected", DBUS_TYPE_BOOLEAN},
+  {"Playing", DBUS_TYPE_BOOLEAN},
+  {"Protected", DBUS_TYPE_BOOLEAN},
+};
+
 static const char* sBluetoothDBusIfaces[] =
 {
   DBUS_MANAGER_IFACE,
@@ -1561,6 +1568,42 @@ EventFilter(DBusConnection* aConn, DBusMessage* aMsg, void* aData)
                         errorStr,
                         sManagerProperties,
                         ArrayLength(sManagerProperties));
+  } else if (dbus_message_is_signal(aMsg, DBUS_SINK_IFACE, "PropertyChanged")) {
+    BT_LOG("[SINK] PropertyChanged");
+    ParsePropertyChange(aMsg,
+                        v,
+                        errorStr,
+                        sSinkProperties,
+                        ArrayLength(sSinkProperties));
+
+    InfallibleTArray<BluetoothNamedValue>& properties =
+      v.get_ArrayOfBluetoothNamedValue();
+
+#ifdef DEBUG
+    for (int i = 0; i < properties.Length(); ++i) {
+      if (properties[i].value().type() == BluetoothValue::Tbool) {
+        BT_LOG("PropertyChanged - Boolean - Name: %s, Value: %x",
+               NS_ConvertUTF16toUTF8(properties[i].name()).get(),
+               properties[i].value().get_bool());
+      } else {
+        BT_LOG("PropertyChanged - String - Name: %s, Value: %s",
+               NS_ConvertUTF16toUTF8(properties[i].name()).get(),
+               NS_ConvertUTF16toUTF8(properties[i].value().get_nsString()).get());
+      }
+    }
+#endif
+
+    // Notify Gaia for A2DP link state change
+    if (properties[0].name().EqualsLiteral("State")) {
+      nsString address = GetAddressFromObjectPath(signalPath);
+      // transfer signal to BluetoothService
+      signalName = NS_LITERAL_STRING("A2dpConnStatusChanged");
+
+      // xxx This is not good, LOCAL_AGENT_PATH should not be used this way.
+      signalPath = NS_LITERAL_STRING(LOCAL_AGENT_PATH);
+      properties.AppendElement(BluetoothNamedValue(NS_LITERAL_STRING("Address"),
+                               BluetoothValue(address)));
+    }
   } else {
 #ifdef DEBUG
     nsAutoCString signalStr;
