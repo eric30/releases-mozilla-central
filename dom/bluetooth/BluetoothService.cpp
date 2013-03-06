@@ -427,6 +427,7 @@ BluetoothService::DistributeSignal(const BluetoothSignal& aSignal)
     return;
   }
   MOZ_ASSERT(ol->Length());
+  BT_LOG("Matching listener count: %d", ol->Length());
   ol->Broadcast(aSignal);
 }
 

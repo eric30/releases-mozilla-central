@@ -102,6 +102,7 @@ BluetoothManager::BluetoothManager(nsPIDOMWindow *aWindow)
 
   BluetoothService* bs = BluetoothService::Get();
   NS_ENSURE_TRUE_VOID(bs);
+  BT_LOG("Register in ctor of BluetoothManager");
   bs->RegisterBluetoothSignalHandler(mPath, this);
 }
 
@@ -109,6 +110,7 @@ BluetoothManager::~BluetoothManager()
 {
   BluetoothService* bs = BluetoothService::Get();
   NS_ENSURE_TRUE_VOID(bs);
+  BT_LOG("Unregister in dtor of BluetoothManager");
   bs->UnregisterBluetoothSignalHandler(mPath, this);
 }
 
@@ -201,10 +203,13 @@ BluetoothManager::Notify(const BluetoothSignal& aData)
 
   if (aData.name().EqualsLiteral("AdapterAdded")) {
     DispatchTrustedEvent(NS_LITERAL_STRING("adapteradded"));
+    BT_LOG("AdapterAdded event has been dispatched.");
   } else if (aData.name().EqualsLiteral("Enabled")) {
     DispatchTrustedEvent(NS_LITERAL_STRING("enabled"));
+    BT_LOG("Enabled event has been dispatched.");
   } else if (aData.name().EqualsLiteral("Disabled")) {
     DispatchTrustedEvent(NS_LITERAL_STRING("disabled"));
+    BT_LOG("Disabled event has been dispatched.");
   } else {
 #ifdef DEBUG
     nsCString warningMsg;
