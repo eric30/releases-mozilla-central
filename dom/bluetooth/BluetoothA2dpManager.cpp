@@ -6,7 +6,10 @@
 
 #include "BluetoothA2dpManager.h"
 #include "BluetoothService.h"
+#include "gonk/AudioSystem.h"
 #include "nsThreadUtils.h"
+
+#include <utils/String8.h>
 
 USING_BLUETOOTH_NAMESPACE
 
@@ -41,6 +44,40 @@ BluetoothA2dpManager::Get()
   return gBluetoothA2dpManager;
 };
 
+static void
+SetParameter(const nsAString& aParameter)
+{
+  android::String8 cmd;
+  cmd.appendFormat(NS_ConvertUTF16toUTF8(aParameter).get());
+  android::AudioSystem::setParameters(0, cmd);
+}
+
+static void
+SetupA2dpDevice(const nsAString& aDeviceAddress)
+{
+  SetParameter(NS_LITERAL_STRING("bluetooth_enabled=true"));
+  SetParameter(NS_LITERAL_STRING("A2dpSuspended=false"));
+
+  // Make a2dp device available
+  android::AudioSystem::
+    setDeviceConnectionState(AUDIO_DEVICE_OUT_BLUETOOTH_A2DP,
+                             AUDIO_POLICY_DEVICE_STATE_AVAILABLE,
+                             NS_ConvertUTF16toUTF8(aDeviceAddress).get());
+}
+
+static void
+TeardownA2dpDevice(const nsAString& aDeviceAddress)
+{
+  SetParameter(NS_LITERAL_STRING("bluetooth_enabled=false"));
+  SetParameter(NS_LITERAL_STRING("A2dpSuspended=true"));
+
+  // Make a2dp device unavailable
+  android::AudioSystem::
+    setDeviceConnectionState(AUDIO_DEVICE_OUT_BLUETOOTH_A2DP,
+                             AUDIO_POLICY_DEVICE_STATE_UNAVAILABLE,
+                             NS_ConvertUTF16toUTF8(aDeviceAddress).get());
+}
+
 bool
 BluetoothA2dpManager::Connect(const nsAString& aDeviceAddress)
 {
@@ -53,6 +90,8 @@ BluetoothA2dpManager::Connect(const nsAString& aDeviceAddress)
     BT_LOG("[A2DP] Connect failed!");
     return false;
   }
+
+  SetupA2dpDevice(aDeviceAddress);
 
   BT_LOG("[A2DP] Connect successfully!");
   return true;
@@ -69,6 +108,7 @@ BluetoothA2dpManager::Disconnect(const nsAString& aDeviceAddress)
     return;
   }
 
+  TeardownA2dpDevice(aDeviceAddress);
   BT_LOG("[A2DP] Disconnect successfully!");
 }
 

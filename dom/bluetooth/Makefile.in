@@ -78,7 +78,9 @@ VPATH += \
   $(srcdir)/linux \
   $(srcdir)/gonk \
   $(NULL)
-LOCAL_INCLUDES += $(MOZ_DBUS_CFLAGS)
+LOCAL_INCLUDES += $(MOZ_DBUS_CFLAGS) \
+                  -I$(topsrcdir)/media/libsydneyaudio/src \
+                  -I$(ANDROID_SOURCE)/frameworks/base/include
 CPPSRCS += \
   BluetoothDBusService.cpp \
   BluetoothGonkService.cpp \
