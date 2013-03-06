@@ -62,8 +62,10 @@ USING_BLUETOOTH_NAMESPACE
 #define B2G_AGENT_CAPABILITIES "DisplayYesNo"
 #define DBUS_MANAGER_IFACE BLUEZ_DBUS_BASE_IFC ".Manager"
 #define DBUS_ADAPTER_IFACE BLUEZ_DBUS_BASE_IFC ".Adapter"
-#define DBUS_DEVICE_IFACE BLUEZ_DBUS_BASE_IFC ".Device"
-#define DBUS_AGENT_IFACE BLUEZ_DBUS_BASE_IFC ".Agent"
+#define DBUS_DEVICE_IFACE BLUEZ_DBUS_BASE_IFC  ".Device"
+#define DBUS_AGENT_IFACE BLUEZ_DBUS_BASE_IFC   ".Agent"
+#define DBUS_SINK_IFACE BLUEZ_DBUS_BASE_IFC    ".AudioSink"
+#define DBUS_CTL_IFACE BLUEZ_DBUS_BASE_IFC     ".Control"
 #define BLUEZ_DBUS_BASE_PATH      "/org/bluez"
 #define BLUEZ_DBUS_BASE_IFC       "org.bluez"
 #define BLUEZ_ERROR_IFC           "org.bluez.Error"
@@ -918,6 +920,46 @@ RunDBusCallback(DBusMessage* aMsg, void* aBluetoothReplyRunnable,
   BluetoothValue v;
   aFunc(aMsg, nullptr, v, replyError);
   DispatchBluetoothReply(replyRunnable, v, replyError);
+}
+
+void
+ConnectSinkCallback(DBusMessage* aMsg, void* aParam)
+{
+  BT_LOG("ConnectSinkCallBack");
+
+  DBusError err;
+  dbus_error_init(&err);
+
+  if (dbus_set_error_from_message(&err, aMsg)) {
+    BT_LOG("ConnectSinkCallback error");
+    LOG_AND_FREE_DBUS_ERROR(&err);
+  }
+
+  const char* path = (const char*)aParam;
+  BT_LOG("ConnectSinkCallback: Device path: %s", path);
+
+  // TEMP
+  // delete path;
+}
+
+void
+DisconnectSinkCallback(DBusMessage* aMsg, void* aParam)
+{
+  BT_LOG("DisconnectSinkCallBack");
+
+  DBusError err;
+  dbus_error_init(&err);
+
+  if (dbus_set_error_from_message(&err, aMsg)) {
+    BT_LOG("DisconnectSinkCallback error");
+    LOG_AND_FREE_DBUS_ERROR(&err);
+  }
+
+  const char* path = (const char*)aParam;
+  BT_LOG("DisconnectSinkCallback: Device path: %s", path);
+
+  // TEMP
+  // delete path;
 }
 
 void
@@ -2112,7 +2154,8 @@ BluetoothDBusService::GetDeviceServiceChannel(const nsAString& aObjectPath,
                                               int aAttributeId)
 {
   // This is a blocking call, should not be run on main thread.
-  MOZ_ASSERT(!NS_IsMainThread());
+  //MOZ_ASSERT(!NS_IsMainThread());
+  MOZ_ASSERT(NS_IsMainThread());
 
 #ifdef MOZ_WIDGET_GONK
   // GetServiceAttributeValue only exists in android's bluez dbus binding
@@ -2121,7 +2164,8 @@ BluetoothDBusService::GetDeviceServiceChannel(const nsAString& aObjectPath,
   const char* pattern = tempPattern.get();
 
   DBusMessage *reply =
-    dbus_func_args(gThreadConnection->GetConnection(),
+//    dbus_func_args(gThreadConnection->GetConnection(),
+    dbus_func_args(mConnection,
                    NS_ConvertUTF16toUTF8(aObjectPath).get(),
                    DBUS_DEVICE_IFACE, "GetServiceAttributeValue",
                    DBUS_TYPE_STRING, &pattern,
@@ -2530,8 +2574,7 @@ public:
     , mAuth(aAuth)
     , mEncrypt(aEncrypt)
     , mChannel(aChannel)
-  {
-  }
+  {}
 
   nsresult
   Run()
@@ -2628,3 +2671,54 @@ BluetoothDBusService::ConfirmReceivingFile(const nsAString& aDeviceAddress,
   DispatchBluetoothReply(aRunnable, v, errorStr);
 }
 
+bool
+BluetoothDBusService::ConnectSink(const nsAString& aDeviceAddress,
+                                  BluetoothReplyRunnable* aRunnable)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  BT_LOG("ConnectSink");
+  BT_LOG(NS_ConvertUTF16toUTF8(aDeviceAddress).get());
+
+  // Created rawPath for further use (in callback funciton)
+  nsString path = GetObjectPathFromAddress(sAdapterPath, aDeviceAddress);
+  char* rawPath = new char[path.Length() + 1];
+  strcpy(rawPath, NS_ConvertUTF16toUTF8(path).get());
+
+  BT_LOG("RawPath: %s", rawPath);
+
+  return dbus_func_args_async(mConnection,
+                              -1,
+                              ConnectSinkCallback,
+                              (void*)rawPath,
+                              NS_ConvertUTF16toUTF8(path).get(),
+                              DBUS_SINK_IFACE,
+                              "Connect",
+                              DBUS_TYPE_INVALID);
+}
+
+bool
+BluetoothDBusService::DisconnectSink(const nsAString& aDeviceAddress,
+                                     BluetoothReplyRunnable* aRunnable)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  BT_LOG("DisconnectSink");
+  BT_LOG(NS_ConvertUTF16toUTF8(aDeviceAddress).get());
+
+  // Created rawPath for further use (in callback funciton)
+  nsString path = GetObjectPathFromAddress(sAdapterPath, aDeviceAddress);
+  char* rawPath = new char[path.Length() + 1];
+  strcpy(rawPath, NS_ConvertUTF16toUTF8(path).get());
+
+  BT_LOG("RawPath: %s", rawPath);
+
+  return dbus_func_args_async(mConnection,
+                              -1,
+                              DisconnectSinkCallback,
+                              (void*)rawPath,
+                              NS_ConvertUTF16toUTF8(path).get(),
+                              DBUS_SINK_IFACE,
+                              "Disconnect",
+                              DBUS_TYPE_INVALID);
+}

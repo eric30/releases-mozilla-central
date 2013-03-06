@@ -139,6 +139,14 @@ public:
   ConfirmReceivingFile(const nsAString& aDeviceAddress, bool aConfirm,
                        BluetoothReplyRunnable* aRunnable);
 
+  virtual bool
+  ConnectSink(const nsAString& aDeviceObjectPath,
+              BluetoothReplyRunnable* aRunnable);
+
+  virtual bool
+  DisconnectSink(const nsAString& aDeviceObjectPath,
+                 BluetoothReplyRunnable* aRunnable);
+
 private:
   nsresult SendGetPropertyMessage(const nsAString& aPath,
                                   const char* aInterface,

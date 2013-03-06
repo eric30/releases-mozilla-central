@@ -134,6 +134,15 @@ public:
   ConfirmReceivingFile(const nsAString& aDeviceAddress,
                        bool aConfirm,
                        BluetoothReplyRunnable* aRunnable) MOZ_OVERRIDE;
+
+  virtual bool
+  ConnectSink(const nsAString& aDeviceObjectPath,
+              BluetoothReplyRunnable* aRunnable) MOZ_OVERRIDE;
+
+  virtual bool
+  DisconnectSink(const nsAString& aDeviceObjectPath,
+                 BluetoothReplyRunnable* aRunnable) MOZ_OVERRIDE;
+
 protected:
   BluetoothServiceChildProcess();
   virtual ~BluetoothServiceChildProcess();
