@@ -2746,6 +2746,10 @@ BluetoothDBusService::DisconnectSink(const nsAString& aDeviceAddress,
 {
   MOZ_ASSERT(NS_IsMainThread());
 
+  if (!mConnection) {
+    return true;
+  }
+
   BT_LOG("DisconnectSink");
   BT_LOG(NS_ConvertUTF16toUTF8(aDeviceAddress).get());
 
