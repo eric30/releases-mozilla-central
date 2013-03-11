@@ -81,7 +81,7 @@ public:
   {
     MOZ_ASSERT(NS_IsMainThread());
     MOZ_ASSERT(!IsShutdownOnMainThread());
-    mConsumer == nullptr;
+    mConsumer = nullptr;
   }
 
   bool IsShutdownOnIOThread()
