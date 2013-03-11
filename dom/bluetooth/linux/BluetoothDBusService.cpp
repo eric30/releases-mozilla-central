@@ -1604,6 +1604,12 @@ EventFilter(DBusConnection* aConn, DBusMessage* aMsg, void* aData)
       properties.AppendElement(BluetoothNamedValue(NS_LITERAL_STRING("Address"),
                                BluetoothValue(address)));
     }
+  } else if (dbus_message_is_signal(aMsg, DBUS_CTL_IFACE, "PropertyChanged")) {
+    BT_LOG("[CTL Interface] PropertyChanged");
+    return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
+  } else if (dbus_message_is_signal(aMsg, DBUS_CTL_IFACE, "GetPlayStatus")) {
+    BT_LOG("[CTL Interface] GetPlayStatus");
+    return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
   } else {
 #ifdef DEBUG
     nsAutoCString signalStr;
@@ -2769,3 +2775,46 @@ BluetoothDBusService::DisconnectSink(const nsAString& aDeviceAddress,
                               "Disconnect",
                               DBUS_TYPE_INVALID);
 }
+
+//AVRCP 1.3 feature
+bool
+BluetoothDBusService::UpdatePlayStatus(const nsAString& aDeviceAddress,
+                                       const uint32_t aDuration,
+                                       const uint32_t aPosition,
+                                       const uint32_t aPlayStatus,
+                                       BluetoothReplyRunnable* aRunnable)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(mConnection);
+
+  BT_LOG("UpdatePlayStatus Duration: %d, Position: %d, PlayStatus: %d",
+         aDuration, aPosition, aPlayStatus);
+
+  nsString objectPath = GetObjectPathFromAddress(sAdapterPath,
+                                                 aDeviceAddress);
+
+  BT_LOG("[UpdatePlayStatus] Object path: %s", NS_ConvertUTF16toUTF8(objectPath).get());
+
+  //TODO:
+  //Still have problem with control.c duration, position is abnormal
+  bool ret = true;
+  //TODO:Need to handle callback to check return value if dbus failed
+  ret = dbus_func_args_async(mConnection,
+                             -1,
+                             NULL,
+                             NULL,
+                             NS_ConvertUTF16toUTF8(objectPath).get(),
+                             DBUS_CTL_IFACE,
+                             "UpdatePlayStatus",
+                             DBUS_TYPE_UINT32, &aDuration,
+                             DBUS_TYPE_UINT32, &aPosition,
+                             DBUS_TYPE_UINT32, &aPlayStatus,
+                             DBUS_TYPE_INVALID);
+  if (!ret) {
+    BT_LOG("[UpdatePlayStatus] ret = false");
+    return false;
+  }
+
+  return true;
+}
+

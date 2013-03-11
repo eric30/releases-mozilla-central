@@ -147,6 +147,13 @@ public:
   DisconnectSink(const nsAString& aDeviceObjectPath,
                  BluetoothReplyRunnable* aRunnable);
 
+  virtual bool
+  UpdatePlayStatus(const nsAString& aDeviceAddress,
+                   const uint32_t aDuration,
+                   const uint32_t aPosition,
+                   const uint32_t aPlayStatus,
+                   BluetoothReplyRunnable* aRunnable);
+
 private:
   nsresult SendGetPropertyMessage(const nsAString& aPath,
                                   const char* aInterface,

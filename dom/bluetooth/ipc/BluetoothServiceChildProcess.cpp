@@ -361,7 +361,7 @@ BluetoothServiceChildProcess::IsConnected(uint16_t aProfileId)
 }
 
 bool
-BluetoothServiceChildProcess::ConnectSink(const nsAString& aDeviceObjectPath,
+BluetoothServiceChildProcess::ConnectSink(const nsAString& aDeviceAddress,
                                           BluetoothReplyRunnable* aRunnable)
 {
   MOZ_NOT_REACHED("This should never be called!");
@@ -369,9 +369,21 @@ BluetoothServiceChildProcess::ConnectSink(const nsAString& aDeviceObjectPath,
 }
 
 bool
-BluetoothServiceChildProcess::DisconnectSink(const nsAString& aDeviceObjectPath,
+BluetoothServiceChildProcess::DisconnectSink(const nsAString& aDeviceAddress,
                                              BluetoothReplyRunnable* aRunnable)
 {
   MOZ_NOT_REACHED("This should never be called!");
+  return false;
+}
+
+bool
+BluetoothServiceChildProcess::UpdatePlayStatus(const nsAString& aDeviceAddress,
+                                               const uint32_t aDuration,
+                                               const uint32_t aPosition,
+                                               const uint32_t aPlayStatus,
+                                               BluetoothReplyRunnable* aRunnable)
+{
+  // xxx Implement me!! 
+  MOZ_NOT_REACHED("Haven't implemented yet!!");
   return false;
 }
