@@ -19,7 +19,7 @@ namespace {
 
 BluetoothA2dpManager::BluetoothA2dpManager()
 {
-
+  mConnectedDeviceAddress.AssignLiteral(BLUETOOTH_INVALID_ADDRESS);
 }
 
 BluetoothA2dpManager::~BluetoothA2dpManager()
@@ -83,6 +83,12 @@ BluetoothA2dpManager::Connect(const nsAString& aDeviceAddress)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
+  if ((mConnectedDeviceAddress != aDeviceAddress) &&
+      (mConnectedDeviceAddress != NS_LITERAL_STRING(BLUETOOTH_INVALID_ADDRESS))) {
+    BT_LOG("[A2DP] Connection already exists");
+    return false;
+  }
+
   BluetoothService* bs = BluetoothService::Get();
   NS_ENSURE_TRUE(bs, false);
 
@@ -92,8 +98,10 @@ BluetoothA2dpManager::Connect(const nsAString& aDeviceAddress)
   }
 
   SetupA2dpDevice(aDeviceAddress);
-
   BT_LOG("[A2DP] Connect successfully!");
+
+  mConnectedDeviceAddress = aDeviceAddress;
+
   return true;
 }
 
@@ -101,6 +109,10 @@ void
 BluetoothA2dpManager::Disconnect(const nsAString& aDeviceAddress)
 {
   MOZ_ASSERT(NS_IsMainThread());
+
+  if (mConnectedDeviceAddress == NS_LITERAL_STRING(BLUETOOTH_INVALID_ADDRESS)) {
+    return;
+  }
 
   BluetoothService* bs = BluetoothService::Get();
   if (!bs->DisconnectSink(aDeviceAddress, nullptr)) {
@@ -110,6 +122,8 @@ BluetoothA2dpManager::Disconnect(const nsAString& aDeviceAddress)
 
   TeardownA2dpDevice(aDeviceAddress);
   BT_LOG("[A2DP] Disconnect successfully!");
+
+  mConnectedDeviceAddress.AssignLiteral(BLUETOOTH_INVALID_ADDRESS);
 }
 
 bool

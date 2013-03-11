@@ -49,6 +49,7 @@ extern bool gBluetoothDebugFlag;
 
 // Bluetooth address format: xx:xx:xx:xx:xx:xx (or xx_xx_xx_xx_xx_xx)
 #define BLUETOOTH_ADDRESS_LENGTH 17
+#define BLUETOOTH_INVALID_ADDRESS "00:00:00:00:00:00"
 
 BEGIN_BLUETOOTH_NAMESPACE
 

@@ -23,6 +23,8 @@ public:
 
 private:
   BluetoothA2dpManager();
+
+  nsString mConnectedDeviceAddress;
 };
 
 END_BLUETOOTH_NAMESPACE
