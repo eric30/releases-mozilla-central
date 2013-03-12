@@ -8,7 +8,7 @@
 #include "Nfc.h"
 #include "NfcNdefEvent.h"
 
-DOMCI_DATA(MozStkCommandEvent, mozilla::dom::nfc::NfcNdefEvent)
+DOMCI_DATA(NfcNdefEvent, mozilla::dom::nfc::NfcNdefEvent)
 
 using namespace mozilla::dom::nfc;
 
@@ -36,7 +36,6 @@ NS_INTERFACE_MAP_BEGIN(NfcNdefEvent)
   NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(NfcNdefEvent)
 NS_INTERFACE_MAP_END_INHERITING(nsDOMEvent)
 
-DOMCI_DATA(NfcNdefEvent, NfcNdefEvent)
 
 NS_IMETHODIMP
 NfcNdefEvent::GetNdefMessages(jsval* aNdefMessages)
