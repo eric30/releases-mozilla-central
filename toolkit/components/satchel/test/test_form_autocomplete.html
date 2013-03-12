@@ -92,6 +92,24 @@ Form History test: form field autocomplete
     <button type="submit">Submit</button>
   </form>
 
+  <!-- form with input type='date' -->
+  <form id="form14" onsubmit="return false;">
+    <input  type="date" name="field11">
+    <button type="submit">Submit</button>
+  </form>
+
+  <!-- form with input type='time' -->
+  <form id="form15" onsubmit="return false;">
+    <input  type="time" name="field12">
+    <button type="submit">Submit</button>
+  </form>
+
+  <!-- form with input type='range' -->
+  <form id="form16" onsubmit="return false;">
+    <input  type="range" name="field13" max="64">
+    <button type="submit">Submit</button>
+  </form>
+
 </div>
 
 <pre id="test">
@@ -99,13 +117,11 @@ Form History test: form field autocomplete
 
 /** Test for Form History autocomplete **/
 
-netscape.security.PrivilegeManager.enablePrivilege('UniversalXPConnect');
-
 var input = $_(1, "field1");
-const shiftModifier = Components.interfaces.nsIDOMEvent.SHIFT_MASK;
+const shiftModifier = Event.SHIFT_MASK;
 
 // Get the form history service
-var fh = Components.classes["@mozilla.org/satchel/form-history;1"].
+var fh = SpecialPowers.Cc["@mozilla.org/satchel/form-history;1"].
          getService(Components.interfaces.nsIFormHistory2);
 ok(fh != null, "got form history service");
 
@@ -134,13 +150,15 @@ fh.addEntry("field7", "value");
 fh.addEntry("field8", "value");
 fh.addEntry("field9", "value");
 fh.addEntry("field10", "42");
+fh.addEntry("field11", "2010-10-10");
+fh.addEntry("field12", "21:21");
+fh.addEntry("field13", "32"); // not used, since type=range doesn't have a drop down menu
 fh.addEntry("searchbar-history", "blacklist test");
 
 // All these non-implemeted types might need autocomplete tests in the future.
-var todoTypes = [ "datetime", "date", "month", "week", "time", "datetime-local",
-                  "range", "color" ];
+var todoTypes = [ "datetime", "month", "week", "datetime-local", "color" ];
 var todoInput = document.createElement("input");
-for each (var type in todoTypes) {
+for (var type of todoTypes) {
   todoInput.type = type;
   todo_is(todoInput.type, type, type + " type shouldn't be implemented");
 }
@@ -174,8 +192,6 @@ function checkForm(expectedValue) {
  * timeout.
  */
 function runTest(testNum) {
-  // Seems we need to enable this again, or sendKeyEvent() complaints.
-  netscape.security.PrivilegeManager.enablePrivilege('UniversalXPConnect');
   ok(true, "Starting test #" + testNum);
 
   switch(testNum) {
@@ -355,9 +371,7 @@ function runTest(testNum) {
 
         // On OS X, shift-backspace and shift-delete work, just delete does not.
         // On Win/Linux, shift-backspace does not work, delete and shift-delete do.
-        var osString = Components.classes["@mozilla.org/xre/app-info;1"].
-                       getService(Components.interfaces.nsIXULRuntime).OS;
-        if (osString == "Darwin")
+        if (SpecialPowers.OS == "Darwin")
           doKey("back_space", shiftModifier);
         else
           doKey("delete", shiftModifier);
@@ -729,6 +743,39 @@ function runTest(testNum) {
         doKey("down");
         doKey("return");
         checkForm("42");
+
+        input = $_(14, "field11");
+        restoreForm();
+        doKey("down");
+        break;
+
+    case 405:
+        checkMenuEntries(["2010-10-10"]);
+        doKey("down");
+        doKey("return");
+        checkForm("2010-10-10");
+
+        input = $_(15, "field12");
+        restoreForm();
+        doKey("down");
+        break;
+
+    case 406:
+        checkMenuEntries(["21:21"]);
+        doKey("down");
+        doKey("return");
+        checkForm("21:21");
+
+        input = $_(16, "field13");
+        restoreForm();
+        doKey("down");
+        break;
+
+      case 407:
+        checkMenuEntries([]); // type=range does not have a drop down menu
+        doKey("down");
+        doKey("return");
+        checkForm("30"); // default (midway between minimum (0) and maximum (64)) - step
 
         // Go to test 500.
         fh.addEntry("field1", "value1");

@@ -10,7 +10,6 @@ import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.View;
-import android.view.ViewGroup;
 
 /**
  * A PopupMenu that uses the custom GeckoMenu. This menu is 
@@ -129,6 +128,15 @@ public class GeckoPopupMenu implements GeckoMenu.Callback,
             if (mDismissListener != null)
                 mDismissListener.onDismiss(mMenu);
         }
+    }
+
+    /**
+     * Show/hide the arrow pointing to the anchor.
+     *
+     * @param show Show/hide the arrow.
+     */
+    public void showArrowToAnchor(boolean show) {
+        mMenuPopup.showArrowToAnchor(show);
     }
 
     @Override

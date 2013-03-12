@@ -251,6 +251,11 @@ class MochitestOptions(optparse.OptionParser):
                     help = "Delay execution between test files.")
     defaults["runSlower"] = False
 
+    self.add_option("--metro-immersive",
+                    action = "store_true", dest = "immersiveMode",
+                    help = "launches tests in immersive browser")
+    defaults["immersiveMode"] = False
+
     # -h, --help are automatically handled by OptionParser
 
     self.set_defaults(**defaults)
@@ -363,6 +368,15 @@ See <http://mochikit.com/doc/html/MochiKit/Logging.html> for details on the logg
       if options.testingModulesDir[-1] != '/':
         options.testingModulesDir += '/'
 
+    if options.immersiveMode:
+      if not self._automation.IS_WIN32:
+        self.error("immersive is only supported on Windows 8 and up.")
+      mochitest.immersiveHelperPath = os.path.join(
+        options.utilityPath, "metrotestharness.exe")
+      if not os.path.exists(mochitest.immersiveHelperPath):
+        self.error("%s not found, cannot launch immersive tests." %
+                   mochitest.immersiveHelperPath)
+
     return options
 
 
@@ -389,6 +403,13 @@ class MochitestServer:
     
     env = self._automation.environment(xrePath = self._xrePath)
     env["XPCOM_DEBUG_BREAK"] = "warn"
+
+    # When running with an ASan build, our xpcshell server will also be ASan-enabled,
+    # thus consuming too much resources when running together with the browser on
+    # the test slaves. Try to limit the amount of resources by disabling certain
+    # features.
+    env["ASAN_OPTIONS"] = "quarantine_size=1:redzone=32"
+
     if self._automation.IS_WIN32:
       env["PATH"] = env["PATH"] + ";" + self._xrePath
 
@@ -563,7 +584,11 @@ class Mochitest(object):
 
   def buildProfile(self, options):
     """ create the profile and add optional chrome bits and files if requested """
-    self.automation.initializeProfile(options.profilePath, options.extraPrefs, useServerLocations = True)
+    if options.browserChrome and options.timeout:
+      options.extraPrefs.append("testing.browserTestHarness.timeout=%d" % options.timeout)
+    self.automation.initializeProfile(options.profilePath,
+                                      options.extraPrefs,
+                                      useServerLocations=True)
     manifest = self.addChromeToProfile(options)
     self.copyExtraFilesToProfile(options)
     self.installExtensionsToProfile(options)
@@ -682,7 +707,7 @@ class Mochitest(object):
                                     "VMware recording: (%s)" % str(e))
       self.vmwareHelper = None
 
-  def runTests(self, options):
+  def runTests(self, options, onLaunch=None):
     """ Prepare, configure, run tests and cleanup """
     debuggerInfo = getDebuggerInfo(self.oldcwd, options.debugger, options.debuggerArgs,
                       options.debuggerInteractive);
@@ -709,6 +734,9 @@ class Mochitest(object):
       options.browserArgs.extend(('-test-mode', testURL))
       testURL = None
 
+    if options.immersiveMode:
+      options.app = self.immersiveHelperPath
+
     # Remove the leak detection file so it can't "leak" to the tests run.
     # The file is not there if leak logging was not enabled in the application build.
     if os.path.exists(self.leak_report_file):
@@ -729,13 +757,14 @@ class Mochitest(object):
     try:
       status = self.automation.runApp(testURL, browserEnv, options.app,
                                   options.profilePath, options.browserArgs,
-                                  runSSLTunnel = self.runSSLTunnel,
-                                  utilityPath = options.utilityPath,
-                                  xrePath = options.xrePath,
+                                  runSSLTunnel=self.runSSLTunnel,
+                                  utilityPath=options.utilityPath,
+                                  xrePath=options.xrePath,
                                   certPath=options.certPath,
                                   debuggerInfo=debuggerInfo,
                                   symbolsPath=options.symbolsPath,
-                                  timeout = timeout)
+                                  timeout=timeout,
+                                  onLaunch=onLaunch)
     except KeyboardInterrupt:
       self.automation.log.info("INFO | runtests.py | Received keyboard interrupt.\n");
       status = -1
@@ -788,7 +817,10 @@ class Mochitest(object):
     options.testPath = options.testPath.replace("\\", "\\\\")
     testRoot = 'chrome'
     if (options.browserChrome):
-      testRoot = 'browser'
+      if (options.immersiveMode):
+        testRoot = 'metro'
+      else:
+        testRoot = 'browser'
     elif (options.a11y):
       testRoot = 'a11y'
     elif (options.webapprtChrome):

@@ -79,6 +79,8 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
     static MBasicBlock *NewPendingLoopHeader(MIRGraph &graph, CompileInfo &info,
                                              MBasicBlock *pred, jsbytecode *entryPc);
     static MBasicBlock *NewSplitEdge(MIRGraph &graph, CompileInfo &info, MBasicBlock *pred);
+    static MBasicBlock *NewParBailout(MIRGraph &graph, CompileInfo &info,
+                                      MBasicBlock *pred, jsbytecode *entryPc);
 
     bool dominates(MBasicBlock *other);
 
@@ -104,6 +106,9 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
     MDefinition *peek(int32_t depth);
 
     MDefinition *scopeChain();
+
+    // Increase the number of slots available
+    bool increaseSlots(size_t num);
 
     // Initializes a slot value; must not be called for normal stack
     // operations, as it will not create new SSA names for copies.
@@ -138,6 +143,7 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
 
     // Returns the top of the stack, then decrements the virtual stack pointer.
     MDefinition *pop();
+    void popn(uint32_t n);
 
     // Adds an instruction to this block's instruction list. |ins| may be NULL
     // to simplify OOM checking.
@@ -161,14 +167,31 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
     void inheritSlots(MBasicBlock *parent);
     bool initEntrySlots();
 
-    // Replaces an edge for a given block with a new block. This is used for
-    // critical edge splitting.
+    // Replaces an edge for a given block with a new block. This is
+    // used for critical edge splitting and also for inserting
+    // bailouts during ParallelArrayAnalysis.
+    //
+    // Note: If successorWithPhis is set, you must not be replacing it.
     void replacePredecessor(MBasicBlock *old, MBasicBlock *split);
     void replaceSuccessor(size_t pos, MBasicBlock *split);
+
+    // Removes `pred` from the predecessor list.  `pred` should not be
+    // the final predecessor. If this block defines phis, removes the
+    // entry for `pred` and updates the indices of later entries.
+    // This may introduce redundant phis if the new block has fewer
+    // than two predecessors.
+    void removePredecessor(MBasicBlock *pred);
+
+    // Resets all the dominator info so that it can be recomputed.
+    void clearDominatorInfo();
 
     // Sets a back edge. This places phi nodes and rewrites instructions within
     // the current loop as necessary.
     bool setBackedge(MBasicBlock *block);
+
+    // Resets a LOOP_HEADER block to a NORMAL block.  This is needed when
+    // optimizations remove the backedge.
+    void clearLoopHeader();
 
     // Propagates phis placed in a loop header down to this successor block.
     void inheritPhis(MBasicBlock *header);
@@ -204,6 +227,9 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
     }
     jsbytecode *pc() const {
         return pc_;
+    }
+    uint32_t nslots() const {
+        return slots_.length();
     }
     uint32_t id() const {
         return id_;
@@ -373,6 +399,7 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
     }
     size_t numSuccessors() const;
     MBasicBlock *getSuccessor(size_t index) const;
+    size_t getSuccessorIndex(MBasicBlock *) const;
 
     // Specifies the closest loop header dominating this block.
     void setLoopHeader(MBasicBlock *loop) {
@@ -390,8 +417,8 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
         return loopDepth_;
     }
 
-    bool strictModeCode() const {
-        return info_.script()->strictModeCode;
+    bool strict() const {
+        return info_.script()->strict;
     }
 
     void dumpStack(FILE *fp);
@@ -454,11 +481,9 @@ class MIRGraph
     MStart *osrStart_;
 
     // List of compiled/inlined scripts.
-    Vector<JSScript *, 4, IonAllocPolicy> scripts_;
+    Vector<RawScript, 4, IonAllocPolicy> scripts_;
 
-#ifdef DEBUG
     size_t numBlocks_;
-#endif
 
   public:
     MIRGraph(TempAllocator *alloc)
@@ -467,10 +492,8 @@ class MIRGraph
         blockIdGen_(0),
         idGen_(0),
         osrBlock_(NULL),
-        osrStart_(NULL)
-#ifdef DEBUG
-        , numBlocks_(0)
-#endif
+        osrStart_(NULL),
+        numBlocks_(0)
     { }
 
     template <typename T>
@@ -504,9 +527,7 @@ class MIRGraph
     void clearBlockList() {
         blocks_.clear();
         blockIdGen_ = 0;
-#ifdef DEBUG
         numBlocks_ = 0;
-#endif
     }
     void resetInstructionNumber() {
         idGen_ = 0;
@@ -534,20 +555,16 @@ class MIRGraph
     }
     void removeBlock(MBasicBlock *block) {
         blocks_.remove(block);
-#ifdef DEBUG
         numBlocks_--;
-#endif
     }
     void moveBlockToEnd(MBasicBlock *block) {
         JS_ASSERT(block->id());
         blocks_.remove(block);
         blocks_.pushBack(block);
     }
-#ifdef DEBUG
     size_t numBlocks() const {
         return numBlocks_;
     }
-#endif
     uint32_t numBlockIds() const {
         return blockIdGen_;
     }
@@ -567,9 +584,7 @@ class MIRGraph
     void copyIds(const MIRGraph &other) {
         idGen_ = other.idGen_;
         blockIdGen_ = other.blockIdGen_;
-#ifdef DEBUG
         numBlocks_ = other.numBlocks_;
-#endif
     }
 
     void setOsrBlock(MBasicBlock *osrBlock) {
@@ -585,7 +600,7 @@ class MIRGraph
     MStart *osrStart() {
         return osrStart_;
     }
-    bool addScript(JSScript *script) {
+    bool addScript(RawScript script) {
         // The same script may be inlined multiple times, add it only once.
         for (size_t i = 0; i < scripts_.length(); i++) {
             if (scripts_[i] == script)
@@ -599,6 +614,14 @@ class MIRGraph
     JSScript **scripts() {
         return scripts_.begin();
     }
+
+    // The ParSlice is an instance of ForkJoinSlice*, it carries
+    // "per-helper-thread" information.  So as not to modify the
+    // calling convention for parallel code, we obtain the current
+    // slice from thread-local storage.  This helper method will
+    // lazilly insert an MParSlice instruction in the entry block and
+    // return the definition.
+    MDefinition *parSlice();
 };
 
 class MDefinitionIterator

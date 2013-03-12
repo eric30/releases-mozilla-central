@@ -19,6 +19,10 @@ Cu.import("resource://gre/modules/ctypes.jsm");
 // When modifying the payload in incompatible ways, please bump this version number
 const PAYLOAD_VERSION = 1;
 
+// This is the HG changeset of the Histogram.json file, used to associate
+// submitted ping data with its histogram definition (bug 832007)
+#expand const HISTOGRAMS_FILE_VERSION = "__HISTOGRAMS_FILE_VERSION__";
+
 const PREF_SERVER = "toolkit.telemetry.server";
 #ifdef MOZ_TELEMETRY_ON_BY_DEFAULT
 const PREF_ENABLED = "toolkit.telemetry.enabledPreRelease";
@@ -56,7 +60,7 @@ const MEM_HISTOGRAMS = {
   "js-compartments/system": "MEMORY_JS_COMPARTMENTS_SYSTEM",
   "js-compartments/user": "MEMORY_JS_COMPARTMENTS_USER",
   "explicit": "MEMORY_EXPLICIT",
-  "resident": "MEMORY_RESIDENT",
+  "resident-fast": "MEMORY_RESIDENT",
   "vsize": "MEMORY_VSIZE",
   "storage-sqlite": "MEMORY_STORAGE_SQLITE",
   "images-content-used-uncompressed":
@@ -118,8 +122,13 @@ function getSimpleMeasurements() {
   var appTimestamps = {};
   try {
     let o = {};
-    Cu.import("resource:///modules/TelemetryTimestamps.jsm", o);
+    Cu.import("resource://gre/modules/TelemetryTimestamps.jsm", o);
     appTimestamps = o.TelemetryTimestamps.get();
+  } catch (ex) {}
+  try {
+    let o = {};
+    Cu.import("resource://gre/modules/AddonManager.jsm", o);
+    ret.addonManager = o.AddonManagerPrivate.getSimpleMeasures();
   } catch (ex) {}
 
   if (si.process) {
@@ -147,9 +156,13 @@ function getSimpleMeasurements() {
            .getService(Ci.nsIJSEngineTelemetryStats)
            .telemetryValue;
 
-  let shutdownDuration = Services.startup.lastShutdownDuration;
+  let shutdownDuration = Telemetry.lastShutdownDuration;
   if (shutdownDuration)
     ret.shutdownDuration = shutdownDuration;
+
+  let failedProfileLockCount = Telemetry.failedProfileLockCount;
+  if (failedProfileLockCount)
+    ret.failedProfileLockCount = failedProfileLockCount;
 
   return ret;
 }
@@ -255,12 +268,17 @@ TelemetryPing.prototype = {
       bucket_count: r.length,
       histogram_type: hgram.histogram_type,
       values: {},
-      sum: hgram.sum,
-      sum_squares_lo: hgram.sum_squares_lo,
-      sum_squares_hi: hgram.sum_squares_hi,
-      log_sum: hgram.log_sum,
-      log_sum_squares: hgram.log_sum_squares
+      sum: hgram.sum
     };
+
+    if (hgram.histogram_type == Telemetry.HISTOGRAM_EXPONENTIAL) {
+      retgram.log_sum = hgram.log_sum;
+      retgram.log_sum_squares = hgram.log_sum_squares;
+    } else {
+      retgram.sum_squares_lo = hgram.sum_squares_lo;
+      retgram.sum_squares_hi = hgram.sum_squares_hi;
+    }
+
     let first = true;
     let last = 0;
 
@@ -345,6 +363,7 @@ TelemetryPing.prototype = {
       appBuildID: ai.appBuildID,
       appUpdateChannel: UpdateChannel.get(),
       platformBuildID: ai.platformBuildID,
+      revision: HISTOGRAMS_FILE_VERSION,
       locale: getLocale()
     };
 
@@ -354,7 +373,7 @@ TelemetryPing.prototype = {
                   "device", "manufacturer", "hardware",
                   "hasMMX", "hasSSE", "hasSSE2", "hasSSE3",
                   "hasSSSE3", "hasSSE4A", "hasSSE4_1", "hasSSE4_2",
-                  "hasEDSP", "hasARMv6", "hasARMv7", "hasNEON"];
+                  "hasEDSP", "hasARMv6", "hasARMv7", "hasNEON", "isWow64"];
     for each (let field in fields) {
       let value;
       try {
@@ -423,6 +442,8 @@ TelemetryPing.prototype = {
       return;
     }
 
+    let histogram = Telemetry.getHistogramById("TELEMETRY_MEMORY_REPORTER_MS");
+    let startTime = new Date();
     let e = mgr.enumerateReporters();
     while (e.hasMoreElements()) {
       let mr = e.getNext().QueryInterface(Ci.nsIMemoryReporter);
@@ -439,6 +460,7 @@ TelemetryPing.prototype = {
       catch (e) {
       }
     }
+    histogram.add(new Date() - startTime);
   },
 
   handleMemoryReport: function handleMemoryReport(id, path, units, amount) {
@@ -510,6 +532,7 @@ TelemetryPing.prototype = {
       histograms: this.getHistograms(Telemetry.histogramSnapshots),
       slowSQL: Telemetry.slowSQL,
       chromeHangs: Telemetry.chromeHangs,
+      lateWrites: Telemetry.lateWrites,
       addonHistograms: this.getAddonHistograms()
     };
 
@@ -538,8 +561,8 @@ TelemetryPing.prototype = {
   getCurrentSessionPayloadAndSlug: function getCurrentSessionPayloadAndSlug(reason) {
     let isTestPing = (reason == "test-ping");
     let payloadObj = this.getCurrentSessionPayload(reason);
-    let slug = (isTestPing ? reason : this._uuid);
-    return { slug: slug, payload: JSON.stringify(payloadObj) };
+    let slug = this._uuid;
+    return { slug: slug, reason: reason, payload: JSON.stringify(payloadObj) };
   },
 
   getPayloads: function getPayloads(reason) {
@@ -550,7 +573,7 @@ TelemetryPing.prototype = {
         let data = this._pendingPings.pop();
         // Send persisted pings to the test URL too.
         if (reason == "test-ping") {
-          data.slug = reason;
+          data.reason = reason;
         }
         yield data;
       }
@@ -611,6 +634,7 @@ TelemetryPing.prototype = {
       this.sendPingsFromIterator(server, reason, i);
     }
     function onError() {
+      this.savePing(data, true);
       // Notify that testing is complete, even if we didn't send everything.
       finishPings(reason);
     }
@@ -635,7 +659,9 @@ TelemetryPing.prototype = {
   },
 
   doPing: function doPing(server, ping, onSuccess, onError) {
-    let submitPath = "/submit/telemetry/" + ping.slug;
+    let submitPath = "/submit/telemetry/" + (ping.reason == "test-ping"
+                                             ? "test-ping"
+                                             : ping.slug);
     let url = server + submitPath;
     let request = Cc["@mozilla.org/xmlextras/xmlhttprequest;1"]
                   .createInstance(Ci.nsIXMLHttpRequest);
@@ -708,6 +734,15 @@ TelemetryPing.prototype = {
    * Initializes telemetry within a timer. If there is no PREF_SERVER set, don't turn on telemetry.
    */
   setup: function setup() {
+#ifdef MOZILLA_OFFICIAL
+    if (!Telemetry.canSend) {
+      // We can't send data; no point in initializing observers etc.
+      // Only do this for official builds so that e.g. developer builds
+      // still enable Telemetry based on prefs.
+      Telemetry.canRecord = false;
+      return;
+    }
+#endif
     let enabled = false; 
     try {
       enabled = Services.prefs.getBoolPref(PREF_ENABLED);
@@ -721,7 +756,6 @@ TelemetryPing.prototype = {
       Telemetry.canRecord = false;
       return;
     }
-    Services.obs.addObserver(this, "private-browsing", false);
     Services.obs.addObserver(this, "profile-before-change", false);
     Services.obs.addObserver(this, "sessionstore-windows-restored", false);
     Services.obs.addObserver(this, "quit-application-granted", false);
@@ -735,23 +769,28 @@ TelemetryPing.prototype = {
     this._timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
     function timerCallback() {
       this._initialized = true;
+      this.loadSavedPings(false);
       this.attachObservers();
       this.gatherMemory();
+
+      Telemetry.asyncFetchTelemetryData(function () {
+      });
       delete this._timer;
     }
     this._timer.initWithCallback(timerCallback.bind(this), TELEMETRY_DELAY,
                                  Ci.nsITimer.TYPE_ONE_SHOT);
-    this.loadSavedPings(false);
   },
 
-  verifyPingChecksum: function verifyPingChecksum(ping) {
+  ensurePingChecksum: function ensurePingChecksum(ping) {
     /* A ping from the current session won't have a checksum.  */
     if (!ping.checksum) {
-      return true;
+      return;
     }
 
     let checksumNow = this.hashString(ping.payload);
-    return ping.checksum == checksumNow;
+    if (ping.checksum != checksumNow) {
+      throw new Error("Invalid ping checksum")
+    }
   },
 
   addToPendingPings: function addToPendingPings(file, stream) {
@@ -762,18 +801,16 @@ TelemetryPing.prototype = {
       stream.close();
       let ping = JSON.parse(string);
       this._pingLoadsCompleted++;
-
-      if (this.verifyPingChecksum(ping)) {
-        this._pendingPings.push(ping);
-      }
-
+      // This will throw if checksum is invalid.
+      this.ensurePingChecksum(ping);
+      this._pendingPings.push(ping);
       if (this._doLoadSaveNotifications &&
           this._pingLoadsCompleted == this._pingsLoaded) {
         Services.obs.notifyObservers(null, "telemetry-test-load-complete", null);
       }
       success = true;
     } catch (e) {
-      // An error reading the file, or an error parsing the contents.
+      // An error reading the file, or an error parsing/checksumming the contents.
       stream.close();           // close is idempotent.
       file.remove(true);
     }
@@ -943,7 +980,6 @@ TelemetryPing.prototype = {
       this._hasXulWindowVisibleObserver = false;
     }
     Services.obs.removeObserver(this, "profile-before-change");
-    Services.obs.removeObserver(this, "private-browsing");
     Services.obs.removeObserver(this, "quit-application-granted");
   },
 
@@ -1011,14 +1047,6 @@ TelemetryPing.prototype = {
         this.gatherMemory();
       }
       break;
-    case "private-browsing":
-      Telemetry.canRecord = aData == "exit";
-      if (aData == "enter") {
-        this.detachObservers()
-      } else {
-        this.attachObservers()
-      }
-      break;
     case "xul-window-visible":
       Services.obs.removeObserver(this, "xul-window-visible");
       this._hasXulWindowVisibleObserver = false;   
@@ -1059,7 +1087,7 @@ TelemetryPing.prototype = {
   },
 
   classID: Components.ID("{55d6a5fa-130e-4ee6-a158-0133af3b86ba}"),
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsITelemetryPing]),
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsITelemetryPing, Ci.nsIObserver]),
 };
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory([TelemetryPing]);

@@ -19,7 +19,7 @@
 #include "nsDOMAttributeMap.h"
 #include "nsIAtom.h"
 #include "nsINodeInfo.h"
-#include "nsIDocument.h"
+#include "nsIDocumentInlines.h"
 #include "nsIDOMNodeList.h"
 #include "nsIDOMDocument.h"
 #include "nsIContentIterator.h"
@@ -88,12 +88,11 @@
 #include "nsGenericHTMLElement.h"
 #include "nsIEditor.h"
 #include "nsIEditorIMESupport.h"
-#include "nsIEditorDocShell.h"
 #include "nsEventDispatcher.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsIControllers.h"
-#include "nsIView.h"
-#include "nsIViewManager.h"
+#include "nsView.h"
+#include "nsViewManager.h"
 #include "nsIScrollableFrame.h"
 #include "nsXBLInsertionPoint.h"
 #include "mozilla/css/StyleRule.h" /* For nsCSSSelectorList */
@@ -101,6 +100,7 @@
 #include "nsAsyncDOMEvent.h"
 #include "nsTextNode.h"
 #include "mozilla/dom/NodeListBinding.h"
+#include "mozilla/dom/UndoManager.h"
 
 #ifdef MOZ_XUL
 #include "nsIXULDocument.h"
@@ -226,9 +226,9 @@ nsIContent::GetEditingHost()
   }
 
   nsIContent* content = this;
-  for (dom::Element* parent = GetElementParent();
+  for (dom::Element* parent = GetParentElement();
        parent && parent->HasFlag(NODE_IS_EDITABLE);
-       parent = content->GetElementParent()) {
+       parent = content->GetParentElement()) {
     content = parent;
   }
   return content->AsElement();
@@ -376,13 +376,8 @@ NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_THIS_END
 
 NS_INTERFACE_TABLE_HEAD(nsChildContentList)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
-  NS_NODELIST_OFFSET_AND_INTERFACE_TABLE_BEGIN(nsChildContentList)
-    NS_INTERFACE_TABLE_ENTRY(nsChildContentList, nsINodeList)
-    NS_INTERFACE_TABLE_ENTRY(nsChildContentList, nsIDOMNodeList)
-  NS_OFFSET_AND_INTERFACE_TABLE_END
-  NS_OFFSET_AND_INTERFACE_TABLE_TO_MAP_SEGUE
-  NS_INTERFACE_MAP_ENTRIES_CYCLE_COLLECTION(nsChildContentList)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(NodeList)
+  NS_INTERFACE_TABLE2(nsChildContentList, nsINodeList, nsIDOMNodeList)
+  NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(nsChildContentList)
 NS_INTERFACE_MAP_END
 
 JSObject*
@@ -539,6 +534,7 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(nsInlineEventHandlersTearoff)
 FragmentOrElement::nsDOMSlots::nsDOMSlots()
   : nsINode::nsSlots(),
     mDataset(nullptr),
+    mUndoManager(nullptr),
     mBindingParent(nullptr)
 {
 }
@@ -566,6 +562,9 @@ FragmentOrElement::nsDOMSlots::Traverse(nsCycleCollectionTraversalCallback &cb, 
   NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mSlots->mAttributeMap");
   cb.NoteXPCOMChild(mAttributeMap.get());
 
+  NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mSlots->mUndoManager");
+  cb.NoteXPCOMChild(mUndoManager.get());
+
   if (aIsXUL) {
     NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mSlots->mControllers");
     cb.NoteXPCOMChild(mControllers);
@@ -590,6 +589,7 @@ FragmentOrElement::nsDOMSlots::Unlink(bool aIsXUL)
   if (aIsXUL)
     NS_IF_RELEASE(mControllers);
   mChildrenList = nullptr;
+  mUndoManager = nullptr;
   if (mClassList) {
     mClassList->DropReference();
     mClassList = nullptr;
@@ -837,6 +837,43 @@ nsIContent::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
   return NS_OK;
 }
 
+bool
+nsIContent::GetAttr(int32_t aNameSpaceID, nsIAtom* aName,
+                    nsAString& aResult) const
+{
+  if (IsElement()) {
+    return AsElement()->GetAttr(aNameSpaceID, aName, aResult);
+  }
+  aResult.Truncate();
+  return false;
+}
+
+bool
+nsIContent::HasAttr(int32_t aNameSpaceID, nsIAtom* aName) const
+{
+  return IsElement() && AsElement()->HasAttr(aNameSpaceID, aName);
+}
+
+bool
+nsIContent::AttrValueIs(int32_t aNameSpaceID,
+                        nsIAtom* aName,
+                        const nsAString& aValue,
+                        nsCaseTreatment aCaseSensitive) const
+{
+  return IsElement() &&
+    AsElement()->AttrValueIs(aNameSpaceID, aName, aValue, aCaseSensitive);
+}
+
+bool
+nsIContent::AttrValueIs(int32_t aNameSpaceID,
+                        nsIAtom* aName,
+                        nsIAtom* aValue,
+                        nsCaseTreatment aCaseSensitive) const
+{
+  return IsElement() &&
+    AsElement()->AttrValueIs(aNameSpaceID, aName, aValue, aCaseSensitive);
+}
+
 const nsAttrValue*
 FragmentOrElement::DoGetClasses() const
 {
@@ -956,8 +993,6 @@ FragmentOrElement::FireNodeInserted(nsIDocument* aDoc,
 //----------------------------------------------------------------------
 
 // nsISupports implementation
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(FragmentOrElement)
 
 #define SUBTREE_UNBINDINGS_PER_RUNNABLE 500
 
@@ -1660,6 +1695,7 @@ NS_INTERFACE_MAP_BEGIN(FragmentOrElement)
   NS_INTERFACE_MAP_ENTRY(nsIContent)
   NS_INTERFACE_MAP_ENTRY(nsINode)
   NS_INTERFACE_MAP_ENTRY(nsIDOMEventTarget)
+  NS_INTERFACE_MAP_ENTRY(mozilla::dom::EventTarget)
   NS_INTERFACE_MAP_ENTRY_TEAROFF(nsISupportsWeakReference,
                                  new nsNodeSupportsWeakRefTearoff(this))
   NS_INTERFACE_MAP_ENTRY_TEAROFF(nsIDOMNodeSelector,

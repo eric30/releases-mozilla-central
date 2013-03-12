@@ -7,9 +7,12 @@
 #include "nsDOMClassInfo.h"
 #include "jsapi.h"
 #include "nsThread.h"
+#include "mozilla/dom/ContentChild.h"
 #include "mozilla/Services.h"
+#include "mozilla/unused.h"
 #include "nsIObserverService.h"
 #include "nsIDOMDeviceStorage.h"
+#include "nsXULAppAPI.h"
 #include "DOMCameraManager.h"
 #include "DOMCameraCapabilities.h"
 #include "DOMCameraControl.h"
@@ -241,7 +244,7 @@ nsDOMCameraControl::StartRecording(const JS::Value& aOptions, nsIDOMDeviceStorag
   NS_ENSURE_TRUE(onSuccess, NS_ERROR_INVALID_ARG);
   NS_ENSURE_TRUE(storageArea, NS_ERROR_INVALID_ARG);
 
-  CameraStartRecordingOptions options;
+  mozilla::idl::CameraStartRecordingOptions options;
 
   // Default values, until the dictionary parser can handle them.
   options.rotation = 0;
@@ -259,6 +262,24 @@ nsDOMCameraControl::StartRecording(const JS::Value& aOptions, nsIDOMDeviceStorag
   obs->NotifyObservers(nullptr,
                        "recording-device-events",
                        NS_LITERAL_STRING("starting").get());
+  // Forward recording events to parent process.
+  // The events are gathered in chrome process and used for recording indicator
+  if (XRE_GetProcessType() != GeckoProcessType_Default) {
+    unused << ContentChild::GetSingleton()->SendRecordingDeviceEvents(NS_LITERAL_STRING("starting"));
+  }
+
+  #ifdef MOZ_B2G
+  if (!mAudioChannelAgent) {
+    mAudioChannelAgent = do_CreateInstance("@mozilla.org/audiochannelagent;1");
+    if (mAudioChannelAgent) {
+      // Camera app will stop recording when it falls to the background, so no callback is necessary.
+      mAudioChannelAgent->Init(AUDIO_CHANNEL_CONTENT, nullptr);
+      // Video recording doesn't output any sound, so it's not necessary to check canPlay.
+      bool canPlay;
+      mAudioChannelAgent->StartPlaying(&canPlay);
+    }
+  }
+  #endif
 
   nsCOMPtr<nsIFile> folder;
   storageArea->GetRootDirectory(getter_AddRefs(folder));
@@ -278,6 +299,18 @@ nsDOMCameraControl::StopRecording()
   obs->NotifyObservers(nullptr,
                        "recording-device-events",
                        NS_LITERAL_STRING("shutdown").get());
+  // Forward recording events to parent process.
+  // The events are gathered in chrome process and used for recording indicator
+  if (XRE_GetProcessType() != GeckoProcessType_Default) {
+    unused << ContentChild::GetSingleton()->SendRecordingDeviceEvents(NS_LITERAL_STRING("shutdown"));
+  }
+
+  #ifdef MOZ_B2G
+  if (mAudioChannelAgent) {
+    mAudioChannelAgent->StopPlaying();
+    mAudioChannelAgent = nullptr;
+  }
+  #endif
 
   return mCameraControl->StopRecording();
 }
@@ -288,7 +321,7 @@ nsDOMCameraControl::GetPreviewStream(const JS::Value& aOptions, nsICameraPreview
 {
   NS_ENSURE_TRUE(onSuccess, NS_ERROR_INVALID_ARG);
 
-  CameraSize size;
+  mozilla::idl::CameraSize size;
   nsresult rv = size.Init(cx, &aOptions);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -316,9 +349,9 @@ nsDOMCameraControl::TakePicture(const JS::Value& aOptions, nsICameraTakePictureC
 {
   NS_ENSURE_TRUE(onSuccess, NS_ERROR_INVALID_ARG);
 
-  CameraPictureOptions  options;
-  CameraSize            size;
-  CameraPosition        pos;
+  mozilla::idl::CameraPictureOptions options;
+  mozilla::idl::CameraSize           size;
+  mozilla::idl::CameraPosition       pos;
 
   nsresult rv = options.Init(cx, &aOptions);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -337,7 +370,7 @@ nsDOMCameraControl::TakePicture(const JS::Value& aOptions, nsICameraTakePictureC
   rv = pos.Init(cx, &options.position);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  return mCameraControl->TakePicture(size, options.rotation, options.fileFormat, pos, onSuccess, onError);
+  return mCameraControl->TakePicture(size, options.rotation, options.fileFormat, pos, options.dateTime, onSuccess, onError);
 }
 
 /* [implicit_jscontext] void GetPreviewStreamVideoMode (in jsval aOptions, in nsICameraPreviewStreamCallback onSuccess, [optional] in nsICameraErrorCallback onError); */
@@ -346,11 +379,17 @@ nsDOMCameraControl::GetPreviewStreamVideoMode(const JS::Value& aOptions, nsICame
 {
   NS_ENSURE_TRUE(onSuccess, NS_ERROR_INVALID_ARG);
 
-  CameraRecorderOptions options;
+  mozilla::idl::CameraRecorderOptions options;
   nsresult rv = options.Init(cx, &aOptions);
   NS_ENSURE_SUCCESS(rv, rv);
 
   return mCameraControl->GetPreviewStreamVideoMode(&options, onSuccess, onError);
+}
+
+NS_IMETHODIMP
+nsDOMCameraControl::ReleaseHardware(nsICameraReleaseCallback* onSuccess, nsICameraErrorCallback* onError)
+{
+  return mCameraControl->ReleaseHardware(onSuccess, onError);
 }
 
 class GetCameraResult : public nsRunnable

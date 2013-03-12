@@ -2496,6 +2496,16 @@ CSS_PROP_DISPLAY(
     kPageBreakInsideKTable,
     CSS_PROP_NO_OFFSET,
     eStyleAnimType_None)
+CSS_PROP_SVG(
+    paint-order,
+    paint_order,
+    PaintOrder,
+    CSS_PROPERTY_PARSE_FUNCTION,
+    "svg.paint-order.enabled",
+    0,
+    nullptr,
+    CSS_PROP_NO_OFFSET,
+    eStyleAnimType_None)
 CSS_PROP_VISIBILITY(
     pointer-events,
     pointer_events,
@@ -2665,7 +2675,8 @@ CSS_PROP_TEXTRESET(
     text_overflow,
     TextOverflow,
     CSS_PROPERTY_PARSE_VALUE |
-        CSS_PROPERTY_VALUE_PARSER_FUNCTION,
+        CSS_PROPERTY_VALUE_PARSER_FUNCTION |
+        CSS_PROPERTY_APPLIES_TO_PLACEHOLDER,
     "",
     0,
     kTextOverflowKTable,
@@ -3294,6 +3305,16 @@ CSS_PROP_SVGRESET(
     nullptr,
     CSS_PROP_NO_OFFSET,
     eStyleAnimType_None)
+CSS_PROP_SVGRESET(
+    mask-type,
+    mask_type,
+    MaskType,
+    CSS_PROPERTY_PARSE_VALUE,
+    "layout.css.masking.enabled",
+    VARIANT_HK,
+    kMaskTypeKTable,
+    offsetof(nsStyleSVGReset, mMaskType),
+    eStyleAnimType_EnumU8)
 CSS_PROP_SVG(
     shape-rendering,
     shape_rendering,
@@ -3459,22 +3480,11 @@ CSS_PROP_SHORTHAND(
 #ifdef CSS_PROP_STUB_NOT_CSS
 CSS_PROP_STUB_NOT_CSS
 CSS_PROP_STUB_NOT_CSS
-CSS_PROP_STUB_NOT_CSS
 #else
 CSS_PROP_FONT(
     -x-lang,
     _x_lang,
     Lang,
-    CSS_PROPERTY_PARSE_INACCESSIBLE,
-    "",
-    0,
-    nullptr,
-    CSS_PROP_NO_OFFSET,
-    eStyleAnimType_None)
-CSS_PROP_TABLE(
-    -x-cols,
-    _x_cols,
-    Cols,
     CSS_PROPERTY_PARSE_INACCESSIBLE,
     "",
     0,

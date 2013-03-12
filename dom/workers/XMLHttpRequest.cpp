@@ -301,34 +301,6 @@ const char* const sEventStrings[] = {
 
 JS_STATIC_ASSERT(JS_ARRAY_LENGTH(sEventStrings) == STRING_COUNT);
 
-class MainThreadSyncRunnable : public WorkerSyncRunnable
-{
-public:
-  MainThreadSyncRunnable(WorkerPrivate* aWorkerPrivate,
-                         ClearingBehavior aClearingBehavior,
-                         uint32_t aSyncQueueKey,
-                         bool aBypassSyncEventQueue)
-  : WorkerSyncRunnable(aWorkerPrivate, aSyncQueueKey, aBypassSyncEventQueue,
-                       aClearingBehavior)
-  {
-    AssertIsOnMainThread();
-  }
-
-  bool
-  PreDispatch(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
-  {
-    AssertIsOnMainThread();
-    return true;
-  }
-
-  void
-  PostDispatch(JSContext* aCx, WorkerPrivate* aWorkerPrivate,
-               bool aDispatchResult)
-  {
-    AssertIsOnMainThread();
-  }
-};
-
 class MainThreadProxyRunnable : public MainThreadSyncRunnable
 {
 protected:
@@ -830,18 +802,15 @@ public:
   {
     mWorkerPrivate->AssertIsOnWorkerThread();
 
-    mSyncQueueKey = mWorkerPrivate->CreateNewSyncLoop();
+    AutoSyncLoopHolder syncLoop(mWorkerPrivate);
+    mSyncQueueKey = syncLoop.SyncQueueKey();
 
     if (NS_FAILED(NS_DispatchToMainThread(this, NS_DISPATCH_NORMAL))) {
       JS_ReportError(aCx, "Failed to dispatch to main thread!");
       return false;
     }
 
-    if (!mWorkerPrivate->RunSyncLoop(aCx, mSyncQueueKey)) {
-      return false;
-    }
-
-    return true;
+    return syncLoop.RunAndForget(aCx);
   }
 
   virtual nsresult
@@ -887,23 +856,6 @@ public:
     mProxy->Teardown();
 
     return NS_OK;
-  }
-};
-
-class SetMultipartRunnable : public WorkerThreadProxySyncRunnable
-{
-  bool mValue;
-
-public:
-  SetMultipartRunnable(WorkerPrivate* aWorkerPrivate, Proxy* aProxy,
-                       bool aValue)
-  : WorkerThreadProxySyncRunnable(aWorkerPrivate, aProxy), mValue(aValue)
-  { }
-
-  nsresult
-  MainThreadRun()
-  {
-    return mProxy->mXHR->SetMultipart(mValue);
   }
 };
 
@@ -1058,7 +1010,6 @@ class OpenRunnable : public WorkerThreadProxySyncRunnable
   nsString mUserStr;
   Optional<nsAString> mPassword;
   nsString mPasswordStr;
-  bool mMultipart;
   bool mBackgroundRequest;
   bool mWithCredentials;
   uint32_t mTimeout;
@@ -1068,10 +1019,10 @@ public:
                const nsAString& aMethod, const nsAString& aURL,
                const Optional<nsAString>& aUser,
                const Optional<nsAString>& aPassword,
-               bool aMultipart, bool aBackgroundRequest, bool aWithCredentials,
+               bool aBackgroundRequest, bool aWithCredentials,
                uint32_t aTimeout)
   : WorkerThreadProxySyncRunnable(aWorkerPrivate, aProxy), mMethod(aMethod),
-    mURL(aURL), mMultipart(aMultipart),
+    mURL(aURL),
     mBackgroundRequest(aBackgroundRequest), mWithCredentials(aWithCredentials),
     mTimeout(aTimeout)
   {
@@ -1105,11 +1056,6 @@ public:
     }
 
     nsresult rv;
-
-    if (mMultipart) {
-      rv = mProxy->mXHR->SetMultipart(mMultipart);
-      NS_ENSURE_SUCCESS(rv, rv);
-    }
 
     if (mBackgroundRequest) {
       rv = mProxy->mXHR->SetMozBackgroundRequest(mBackgroundRequest);
@@ -1456,7 +1402,7 @@ XMLHttpRequest::XMLHttpRequest(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
 : XMLHttpRequestEventTarget(aCx), mJSObject(NULL), mUpload(NULL),
   mWorkerPrivate(aWorkerPrivate),
   mResponseType(XMLHttpRequestResponseTypeValues::Text), mTimeout(0),
-  mJSObjectRooted(false), mMultipart(false), mBackgroundRequest(false),
+  mJSObjectRooted(false), mBackgroundRequest(false),
   mWithCredentials(false), mCanceled(false), mMozAnon(false), mMozSystem(false)
 {
   mWorkerPrivate->AssertIsOnWorkerThread();
@@ -1487,24 +1433,24 @@ XMLHttpRequest::_finalize(JSFreeOp* aFop)
 
 // static
 XMLHttpRequest*
-XMLHttpRequest::Constructor(JSContext* aCx,
-                            JSObject* aGlobal,
+XMLHttpRequest::Constructor(const WorkerGlobalObject& aGlobal,
                             const MozXMLHttpRequestParametersWorkers& aParams,
                             ErrorResult& aRv)
 {
-  WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
+  JSContext* cx = aGlobal.GetContext();
+  WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(cx);
   MOZ_ASSERT(workerPrivate);
 
-  nsRefPtr<XMLHttpRequest> xhr = new XMLHttpRequest(aCx, workerPrivate);
+  nsRefPtr<XMLHttpRequest> xhr = new XMLHttpRequest(cx, workerPrivate);
 
-  if (!Wrap(aCx, aGlobal, xhr)) {
+  if (!Wrap(cx, aGlobal.Get(), xhr)) {
     aRv.Throw(NS_ERROR_FAILURE);
     return NULL;
   }
 
   if (workerPrivate->XHRParamsAllowed()) {
-    xhr->mMozAnon = aParams.mozAnon;
-    xhr->mMozSystem = aParams.mozSystem;
+    xhr->mMozAnon = aParams.mMozAnon;
+    xhr->mMozSystem = aParams.mMozSystem;
   }
 
   xhr->mJSObject = xhr->GetJSObject();
@@ -1707,10 +1653,13 @@ XMLHttpRequest::SendInternal(const nsAString& aStringBody,
   }
 
   AutoUnpinXHR autoUnpin(this);
+  Maybe<AutoSyncLoopHolder> autoSyncLoop;
 
   uint32_t syncQueueKey = UINT32_MAX;
-  if (mProxy->mIsSyncXHR) {
-    syncQueueKey = mWorkerPrivate->CreateNewSyncLoop();
+  bool isSyncXHR = mProxy->mIsSyncXHR;
+  if (isSyncXHR) {
+    autoSyncLoop.construct(mWorkerPrivate);
+    syncQueueKey = autoSyncLoop.ref().SyncQueueKey();
   }
 
   mProxy->mOuterChannelId++;
@@ -1724,16 +1673,24 @@ XMLHttpRequest::SendInternal(const nsAString& aStringBody,
     return;
   }
 
-  autoUnpin.Clear();
+  if (!isSyncXHR)  {
+    autoUnpin.Clear();
+    MOZ_ASSERT(autoSyncLoop.empty());
+    return;
+  }
 
-  // The event loop was spun above, make sure we aren't canceled already.
+  // If our sync XHR was canceled during the send call the worker is going
+  // away.  We have no idea how far through the send call we got.  There may
+  // be a ProxyCompleteRunnable in the sync loop, but rather than run the loop
+  // to get it we just let our RAII helpers clean up.
   if (mCanceled) {
     return;
   }
 
-  if (mProxy->mIsSyncXHR && !mWorkerPrivate->RunSyncLoop(cx, syncQueueKey)) {
+  autoUnpin.Clear();
+
+  if (!autoSyncLoop.ref().RunAndForget(cx)) {
     aRv.Throw(NS_ERROR_FAILURE);
-    return;
   }
 }
 
@@ -1777,7 +1734,7 @@ XMLHttpRequest::Open(const nsAString& aMethod, const nsAString& aUrl,
 
   nsRefPtr<OpenRunnable> runnable =
     new OpenRunnable(mWorkerPrivate, mProxy, aMethod, aUrl, aUser, aPassword,
-                     mMultipart, mBackgroundRequest, mWithCredentials,
+                     mBackgroundRequest, mWithCredentials,
                      mTimeout);
 
   if (!runnable->Dispatch(GetJSContext())) {
@@ -1861,32 +1818,6 @@ XMLHttpRequest::SetWithCredentials(bool aWithCredentials, ErrorResult& aRv)
 
   nsRefPtr<SetWithCredentialsRunnable> runnable =
     new SetWithCredentialsRunnable(mWorkerPrivate, mProxy, aWithCredentials);
-  if (!runnable->Dispatch(GetJSContext())) {
-    aRv.Throw(NS_ERROR_FAILURE);
-    return;
-  }
-}
-
-void
-XMLHttpRequest::SetMultipart(bool aMultipart, ErrorResult& aRv)
-{
-  mWorkerPrivate->AssertIsOnWorkerThread();
-
-  if (mCanceled) {
-    aRv.Throw(UNCATCHABLE_EXCEPTION);
-    return;
-  }
-
-  mMultipart = aMultipart;
-
-  if (!mProxy) {
-    // Open may not have been called yet, in which case we'll handle the
-    // multipart in OpenRunnable.
-    return;
-  }
-
-  nsRefPtr<SetMultipartRunnable> runnable =
-    new SetMultipartRunnable(mWorkerPrivate, mProxy, aMultipart);
   if (!runnable->Dispatch(GetJSContext())) {
     aRv.Throw(NS_ERROR_FAILURE);
     return;
@@ -2009,7 +1940,8 @@ XMLHttpRequest::Send(JSObject* aBody, ErrorResult& aRv)
   JSContext* cx = GetJSContext();
 
   jsval valToClone;
-  if (JS_IsArrayBufferObject(aBody) || file::GetDOMBlobFromJSObject(aBody)) {
+  if (JS_IsArrayBufferObject(aBody) || JS_IsArrayBufferViewObject(aBody) ||
+      file::GetDOMBlobFromJSObject(aBody)) {
     valToClone = OBJECT_TO_JSVAL(aBody);
   }
   else {

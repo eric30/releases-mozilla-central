@@ -47,6 +47,10 @@ public:
     virtual gfxFontEntry* MakePlatformFont(const gfxProxyFontEntry *aProxyEntry,
                                            const uint8_t *aFontData, uint32_t aLength);
 
+    virtual void GetCommonFallbackFonts(const uint32_t aCh,
+                                        int32_t aRunScript,
+                                        nsTArray<const char*>& aFontList);
+
     virtual nsresult GetFontList(nsIAtom *aLangGroup,
                                  const nsACString& aGenericFamily,
                                  nsTArray<nsString>& aListOfFonts);
@@ -65,6 +69,7 @@ public:
                                           gfxUserFontSet* aUserFontSet);
 
     virtual bool FontHintingEnabled() MOZ_OVERRIDE;
+    virtual bool RequiresLinearZoom() MOZ_OVERRIDE;
 
     FT_Library GetFTLibrary();
 

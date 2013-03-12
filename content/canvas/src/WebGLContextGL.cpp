@@ -23,6 +23,7 @@
 
 #include "WebGLTexelConversions.h"
 #include "WebGLValidateStrings.h"
+#include <algorithm>
 
 // needed to check if current OS is lower than 10.7
 #if defined(MOZ_WIDGET_COCOA)
@@ -45,7 +46,7 @@ static WebGLenum InternalFormatForFormatAndType(WebGLenum format, WebGLenum type
 void
 WebGLContext::ActiveTexture(WebGLenum texture)
 {
-    if (!IsContextStable())
+    if (!IsContextStable()) 
         return;
 
     if (texture < LOCAL_GL_TEXTURE0 ||
@@ -170,7 +171,7 @@ WebGLContext::BindFramebuffer(WebGLenum target, WebGLFramebuffer *wfb)
     MakeContextCurrent();
 
     if (!wfb) {
-        gl->fBindFramebuffer(target, gl->GetOffscreenFBO());
+        gl->fBindFramebuffer(target, 0);
     } else {
         WebGLuint framebuffername = wfb->GLName();
         gl->fBindFramebuffer(target, framebuffername);
@@ -574,32 +575,52 @@ WebGLContext::Clear(WebGLbitfield mask)
     if (mask != m)
         return ErrorInvalidValue("clear: invalid mask bits");
 
-    bool needClearCallHere = true;
-
     if (mBoundFramebuffer) {
         if (!mBoundFramebuffer->CheckAndInitializeRenderbuffers())
             return ErrorInvalidFramebufferOperation("clear: incomplete framebuffer");
-    } else {
-        // no FBO is bound, so we are clearing the backbuffer here
-        EnsureBackbufferClearedAsNeeded();
-        bool valuesAreDefault = mColorClearValue[0] == 0.0f &&
-                                  mColorClearValue[1] == 0.0f &&
-                                  mColorClearValue[2] == 0.0f &&
-                                  mColorClearValue[3] == 0.0f &&
-                                  mDepthClearValue    == 1.0f &&
-                                  mStencilClearValue  == 0;
-        if (valuesAreDefault &&
-            mBackbufferClearingStatus == BackbufferClearingStatus::ClearedToDefaultValues)
-        {
-            needClearCallHere = false;
-        }
+
+        gl->fClear(mask);
+        return;
     }
 
-    if (needClearCallHere) {
-        gl->fClear(mask);
-        mBackbufferClearingStatus = BackbufferClearingStatus::HasBeenDrawnTo;
-        Invalidate();
+    // Ok, we're clearing the default framebuffer/screen.
+
+    bool needsClear = true;
+    if (mIsScreenCleared) {
+        bool isClearRedundant = true;
+        if (mask & LOCAL_GL_COLOR_BUFFER_BIT) {
+            if (mColorClearValue[0] != 0.0f ||
+                mColorClearValue[1] != 0.0f ||
+                mColorClearValue[2] != 0.0f ||
+                mColorClearValue[3] != 0.0f)
+            {
+                isClearRedundant = false;
+            }
+        }
+
+        if (mask & LOCAL_GL_DEPTH_BUFFER_BIT) {
+            if (mDepthClearValue != 1.0f) {
+                isClearRedundant = false;
+            }
+        }
+
+        if (mask & LOCAL_GL_DEPTH_BUFFER_BIT) {
+            if (mStencilClearValue != 0) {
+                isClearRedundant = false;
+            }
+        }
+
+        if (isClearRedundant)
+            needsClear = false;
     }
+
+    if (needsClear) {
+        gl->fClear(mask);
+        mIsScreenCleared = false;
+    }
+
+    Invalidate();
+    mShouldPresent = true;
 }
 
 void
@@ -748,6 +769,9 @@ WebGLContext::CopyTexSubImage2D_base(WebGLenum target,
 
         gl->fCopyTexSubImage2D(target, level, actual_xoffset, actual_yoffset, actual_x, actual_y, actual_width, actual_height);
     }
+
+    if (!sub)
+        ReattachTextureToAnyFramebufferToWorkAroundBugs(tex, level);
 }
 
 void
@@ -811,7 +835,7 @@ WebGLContext::CopyTexImage2D(WebGLenum target,
                                     internalformat == LOCAL_GL_ALPHA ||
                                     internalformat == LOCAL_GL_LUMINANCE_ALPHA;
     bool fboFormatHasAlpha = mBoundFramebuffer ? mBoundFramebuffer->ColorAttachment().HasAlpha()
-                                                 : bool(gl->ActualFormat().alpha > 0);
+                                                 : bool(gl->GetPixelFormat().alpha > 0);
     if (texFormatRequiresAlpha && !fboFormatHasAlpha)
         return ErrorInvalidOperation("copyTexImage2D: texture format requires an alpha channel "
                                      "but the framebuffer doesn't have one");
@@ -921,7 +945,7 @@ WebGLContext::CopyTexSubImage2D(WebGLenum target,
                                   format == LOCAL_GL_ALPHA ||
                                   format == LOCAL_GL_LUMINANCE_ALPHA;
     bool fboFormatHasAlpha = mBoundFramebuffer ? mBoundFramebuffer->ColorAttachment().HasAlpha()
-                                                 : bool(gl->ActualFormat().alpha > 0);
+                                                 : bool(gl->GetPixelFormat().alpha > 0);
 
     if (texFormatRequiresAlpha && !fboFormatHasAlpha)
         return ErrorInvalidOperation("copyTexSubImage2D: texture format requires an alpha channel "
@@ -1061,6 +1085,7 @@ WebGLContext::DeleteTexture(WebGLTexture *tex)
     if (mBoundFramebuffer)
         mBoundFramebuffer->DetachTexture(tex);
 
+    WebGLuint activeTexture = mActiveTexture;
     for (int32_t i = 0; i < mGLMaxTextureUnits; i++) {
         if ((tex->Target() == LOCAL_GL_TEXTURE_2D && mBound2DTextures[i] == tex) ||
             (tex->Target() == LOCAL_GL_TEXTURE_CUBE_MAP && mBoundCubeMapTextures[i] == tex))
@@ -1069,7 +1094,7 @@ WebGLContext::DeleteTexture(WebGLTexture *tex)
             BindTexture(tex->Target(), static_cast<WebGLTexture*>(nullptr));
         }
     }
-    ActiveTexture(LOCAL_GL_TEXTURE0 + mActiveTexture);
+    ActiveTexture(LOCAL_GL_TEXTURE0 + activeTexture);
 
     tex->RequestDelete();
 }
@@ -1435,8 +1460,6 @@ WebGLContext::DrawArrays(GLenum mode, WebGLint first, WebGLsizei count)
     if (mBoundFramebuffer) {
         if (!mBoundFramebuffer->CheckAndInitializeRenderbuffers())
             return ErrorInvalidFramebufferOperation("drawArrays: incomplete framebuffer");
-    } else {
-        EnsureBackbufferClearedAsNeeded();
     }
 
     BindFakeBlackTextures();
@@ -1449,8 +1472,11 @@ WebGLContext::DrawArrays(GLenum mode, WebGLint first, WebGLsizei count)
     UndoFakeVertexAttrib0();
     UnbindFakeBlackTextures();
 
-    mBackbufferClearingStatus = BackbufferClearingStatus::HasBeenDrawnTo;
-    Invalidate();
+    if (!mBoundFramebuffer) {
+        Invalidate();
+        mShouldPresent = true;
+        mIsScreenCleared = false;
+    }
 }
 
 void
@@ -1528,8 +1554,6 @@ WebGLContext::DrawElements(WebGLenum mode, WebGLsizei count, WebGLenum type,
     if (mBoundFramebuffer) {
         if (!mBoundFramebuffer->CheckAndInitializeRenderbuffers())
             return ErrorInvalidFramebufferOperation("drawElements: incomplete framebuffer");
-    } else {
-        EnsureBackbufferClearedAsNeeded();
     }
 
     BindFakeBlackTextures();
@@ -1542,8 +1566,11 @@ WebGLContext::DrawElements(WebGLenum mode, WebGLsizei count, WebGLenum type,
     UndoFakeVertexAttrib0();
     UnbindFakeBlackTextures();
 
-    mBackbufferClearingStatus = BackbufferClearingStatus::HasBeenDrawnTo;
-    Invalidate();
+    if (!mBoundFramebuffer) {
+        Invalidate();
+        mShouldPresent = true;
+        mIsScreenCleared = false;
+    }
 }
 
 void
@@ -1962,15 +1989,12 @@ WebGLContext::GetParameter(JSContext* cx, WebGLenum pname, ErrorResult& rv)
         case LOCAL_GL_UNPACK_ALIGNMENT:
         case LOCAL_GL_PACK_ALIGNMENT:
         case LOCAL_GL_SUBPIXEL_BITS:
-        case LOCAL_GL_MAX_TEXTURE_SIZE:
-        case LOCAL_GL_MAX_CUBE_MAP_TEXTURE_SIZE:
         case LOCAL_GL_SAMPLE_BUFFERS:
         case LOCAL_GL_SAMPLES:
         case LOCAL_GL_MAX_VERTEX_ATTRIBS:
         case LOCAL_GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS:
         case LOCAL_GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS:
         case LOCAL_GL_MAX_TEXTURE_IMAGE_UNITS:
-        case LOCAL_GL_MAX_RENDERBUFFER_SIZE:
         case LOCAL_GL_RED_BITS:
         case LOCAL_GL_GREEN_BITS:
         case LOCAL_GL_BLUE_BITS:
@@ -1992,6 +2016,15 @@ WebGLContext::GetParameter(JSContext* cx, WebGLenum pname, ErrorResult& rv)
                 ErrorInvalidEnum("getParameter: parameter", pname);
                 return JS::NullValue();
             }
+
+        case LOCAL_GL_MAX_TEXTURE_SIZE:
+            return JS::Int32Value(mGLMaxTextureSize);
+
+        case LOCAL_GL_MAX_CUBE_MAP_TEXTURE_SIZE:
+            return JS::Int32Value(mGLMaxCubeMapTextureSize);
+
+        case LOCAL_GL_MAX_RENDERBUFFER_SIZE:
+            return JS::Int32Value(mGLMaxRenderbufferSize);
 
         case LOCAL_GL_MAX_VERTEX_UNIFORM_VECTORS:
             return JS::Int32Value(mGLMaxVertexUniformVectors);
@@ -2817,6 +2850,15 @@ WebGLContext::GetVertexAttrib(JSContext* cx, WebGLuint index, WebGLenum pname,
             return JS::Int32Value(mAttribBuffers[index].stride);
 
         case LOCAL_GL_VERTEX_ATTRIB_ARRAY_SIZE:
+        {
+            if (!ValidateAttribIndex(index, "enableVertexAttribArray"))
+                return JS::NullValue();
+
+            if (!mAttribBuffers[index].enabled)
+                return JS::Int32Value(4);
+
+            // Don't break; fall through.
+        }
         case LOCAL_GL_VERTEX_ATTRIB_ARRAY_TYPE:
         {
             GLint i = 0;
@@ -3156,9 +3198,6 @@ WebGLContext::ReadPixels(WebGLint x, WebGLint y, WebGLsizei width,
     WebGLsizei framebufferWidth = framebufferRect ? framebufferRect->Width() : 0;
     WebGLsizei framebufferHeight = framebufferRect ? framebufferRect->Height() : 0;
 
-    uint32_t dataByteLen = JS_GetTypedArrayByteLength(pixels->Obj());
-    int dataType = JS_GetTypedArrayType(pixels->Obj());
-
     uint32_t channels = 0;
 
     // Check the format param
@@ -3195,6 +3234,8 @@ WebGLContext::ReadPixels(WebGLint x, WebGLint y, WebGLsizei width,
             return ErrorInvalidEnum("readPixels: Bad type");
     }
 
+    int dataType = JS_GetArrayBufferViewType(pixels->Obj());
+
     // Check the pixels param type
     if (dataType != requiredDataType)
         return ErrorInvalidOperation("readPixels: Mismatched type/pixels types");
@@ -3211,6 +3252,7 @@ WebGLContext::ReadPixels(WebGLint x, WebGLint y, WebGLsizei width,
     if (!checked_neededByteLength.isValid())
         return ErrorInvalidOperation("readPixels: integer overflow computing the needed buffer size");
 
+    uint32_t dataByteLen = JS_GetTypedArrayByteLength(pixels->Obj());
     if (checked_neededByteLength.value() > dataByteLen)
         return ErrorInvalidOperation("readPixels: buffer too small");
 
@@ -3273,12 +3315,12 @@ WebGLContext::ReadPixels(WebGLint x, WebGLint y, WebGLsizei width,
         }
 
         // compute the parameters of the subrect we're actually going to call glReadPixels on
-        GLint   subrect_x      = NS_MAX(x, 0);
-        GLint   subrect_end_x  = NS_MIN(x+width, framebufferWidth);
+        GLint   subrect_x      = std::max(x, 0);
+        GLint   subrect_end_x  = std::min(x+width, framebufferWidth);
         GLsizei subrect_width  = subrect_end_x - subrect_x;
 
-        GLint   subrect_y      = NS_MAX(y, 0);
-        GLint   subrect_end_y  = NS_MIN(y+height, framebufferHeight);
+        GLint   subrect_y      = std::max(y, 0);
+        GLint   subrect_end_y  = std::min(y+height, framebufferHeight);
         GLsizei subrect_height = subrect_end_y - subrect_y;
 
         if (subrect_width < 0 || subrect_height < 0 ||
@@ -3321,7 +3363,7 @@ WebGLContext::ReadPixels(WebGLint x, WebGLint y, WebGLsizei width,
         if (mBoundFramebuffer) {
             needAlphaFixup = !mBoundFramebuffer->ColorAttachment().HasAlpha();
         } else {
-            needAlphaFixup = gl->ActualFormat().alpha == 0;
+            needAlphaFixup = gl->GetPixelFormat().alpha == 0;
         }
 
         if (needAlphaFixup) {
@@ -3373,8 +3415,8 @@ WebGLContext::RenderbufferStorage(WebGLenum target, WebGLenum internalformat, We
     if (width < 0 || height < 0)
         return ErrorInvalidValue("renderbufferStorage: width and height must be >= 0");
 
-    if (!mBoundRenderbuffer || !mBoundRenderbuffer->GLName())
-        return ErrorInvalidOperation("renderbufferStorage called on renderbuffer 0");
+    if (width > mGLMaxRenderbufferSize || height > mGLMaxRenderbufferSize)
+        return ErrorInvalidValue("renderbufferStorage: width or height exceeds maximum renderbuffer size");
 
     // certain OpenGL ES renderbuffer formats may not exist on desktop OpenGL
     WebGLenum internalformatForGL = internalformat;
@@ -3640,12 +3682,17 @@ WebGLContext::SurfaceFromElementResultToImageSurface(nsLayoutUtils::SurfaceFromE
 }
 
 
+
 void
 WebGLContext::Uniform1i(WebGLUniformLocation *location_object, WebGLint a1)
 {
     GLint location;
     if (!ValidateUniformSetter("Uniform1i", location_object, location))
         return;
+
+    if (!ValidateSamplerUniformSetter("Uniform1i", location_object, a1))
+        return;
+
     MakeContextCurrent();
     gl->fUniform1i(location, a1);
 }
@@ -3657,6 +3704,13 @@ WebGLContext::Uniform2i(WebGLUniformLocation *location_object, WebGLint a1,
     GLint location;
     if (!ValidateUniformSetter("Uniform2i", location_object, location))
         return;
+
+    if (!ValidateSamplerUniformSetter("Uniform2i", location_object, a1) ||
+        !ValidateSamplerUniformSetter("Uniform2i", location_object, a2))
+    {
+        return;
+    }
+
     MakeContextCurrent();
     gl->fUniform2i(location, a1, a2);
 }
@@ -3668,6 +3722,14 @@ WebGLContext::Uniform3i(WebGLUniformLocation *location_object, WebGLint a1,
     GLint location;
     if (!ValidateUniformSetter("Uniform3i", location_object, location))
         return;
+
+    if (!ValidateSamplerUniformSetter("Uniform3i", location_object, a1) ||
+        !ValidateSamplerUniformSetter("Uniform3i", location_object, a2) ||
+        !ValidateSamplerUniformSetter("Uniform3i", location_object, a3))
+    {
+        return;
+    }
+
     MakeContextCurrent();
     gl->fUniform3i(location, a1, a2, a3);
 }
@@ -3679,6 +3741,15 @@ WebGLContext::Uniform4i(WebGLUniformLocation *location_object, WebGLint a1,
     GLint location;
     if (!ValidateUniformSetter("Uniform4i", location_object, location))
         return;
+
+    if (!ValidateSamplerUniformSetter("Uniform4i", location_object, a1) ||
+        !ValidateSamplerUniformSetter("Uniform4i", location_object, a2) ||
+        !ValidateSamplerUniformSetter("Uniform4i", location_object, a3) ||
+        !ValidateSamplerUniformSetter("Uniform4i", location_object, a4))
+    {
+        return;
+    }
+
     MakeContextCurrent();
     gl->fUniform4i(location, a1, a2, a3, a4);
 }
@@ -3736,6 +3807,10 @@ WebGLContext::Uniform1iv_base(WebGLUniformLocation *location_object,
                                     numElementsToUpload, arrayLength)) {
         return;
     }
+
+    if (!ValidateSamplerUniformSetter("Uniform1iv", location_object, data[0]))
+        return;
+
     MakeContextCurrent();
     gl->fUniform1iv(location, numElementsToUpload, data);
 }
@@ -3750,6 +3825,13 @@ WebGLContext::Uniform2iv_base(WebGLUniformLocation *location_object,
                                     numElementsToUpload, arrayLength)) {
         return;
     }
+
+    if (!ValidateSamplerUniformSetter("Uniform2iv", location_object, data[0]) ||
+        !ValidateSamplerUniformSetter("Uniform2iv", location_object, data[1]))
+    {
+        return;
+    }
+
     MakeContextCurrent();
     gl->fUniform2iv(location, numElementsToUpload, data);
 }
@@ -3764,6 +3846,14 @@ WebGLContext::Uniform3iv_base(WebGLUniformLocation *location_object,
                                     numElementsToUpload, arrayLength)) {
         return;
     }
+
+    if (!ValidateSamplerUniformSetter("Uniform3iv", location_object, data[0]) ||
+        !ValidateSamplerUniformSetter("Uniform3iv", location_object, data[1]) ||
+        !ValidateSamplerUniformSetter("Uniform3iv", location_object, data[2]))
+    {
+        return;
+    }
+
     MakeContextCurrent();
     gl->fUniform3iv(location, numElementsToUpload, data);
 }
@@ -3778,6 +3868,15 @@ WebGLContext::Uniform4iv_base(WebGLUniformLocation *location_object,
                                     numElementsToUpload, arrayLength)) {
         return;
     }
+
+    if (!ValidateSamplerUniformSetter("Uniform4iv", location_object, data[0]) ||
+        !ValidateSamplerUniformSetter("Uniform4iv", location_object, data[1]) ||
+        !ValidateSamplerUniformSetter("Uniform4iv", location_object, data[2]) ||
+        !ValidateSamplerUniformSetter("Uniform4iv", location_object, data[3]))
+    {
+        return;
+    }
+
     MakeContextCurrent();
     gl->fUniform4iv(location, numElementsToUpload, data);
 }
@@ -4159,15 +4258,13 @@ WebGLContext::CompileShader(WebGLShader *shader)
         // cleanSource nsAString instance will be destroyed before the reference is
         // actually used.
         StripComments stripComments(shader->Source());
-        const nsAString& cleanSource = nsString(stripComments.result().Elements(), stripComments.length());
+        const nsAString& cleanSource = Substring(stripComments.result().Elements(), stripComments.length());
         if (!ValidateGLSLString(cleanSource, "compileShader"))
             return;
 
-        const nsPromiseFlatString& flatSource = PromiseFlatString(cleanSource);
-
         // shaderSource() already checks that the source stripped of comments is in the
         // 7-bit ASCII range, so we can skip the NS_IsAscii() check.
-        const nsCString& sourceCString = NS_LossyConvertUTF16toASCII(flatSource);
+        NS_LossyConvertUTF16toASCII sourceCString(cleanSource);
 
         if (gl->WorkAroundDriverBugs()) {
             const uint32_t maxSourceLength = 0x3ffff;
@@ -4183,7 +4280,17 @@ WebGLContext::CompileShader(WebGLShader *shader)
                                        targetShaderSourceLanguage,
                                        &resources);
 
-        int compileOptions = SH_ATTRIBUTES_UNIFORMS;
+        int compileOptions = SH_ATTRIBUTES_UNIFORMS |
+                             SH_ENFORCE_PACKING_RESTRICTIONS;
+
+        // we want to do this everywhere, but:
+#ifndef XP_WIN // to do this on Windows, we need ANGLE r1719, 1733, 1734.
+#ifndef XP_MACOSX // to do this on Mac, we need to do it only on Mac OSX > 10.6 as this
+                  // causes the shader compiler in 10.6 to crash
+        compileOptions |= SH_CLAMP_INDIRECT_ARRAY_BOUNDS;
+#endif
+#endif
+
         if (useShaderSourceTranslation) {
             compileOptions |= SH_OBJECT_CODE
                             | SH_MAP_LONG_VARIABLE_NAMES;
@@ -4287,8 +4394,7 @@ WebGLContext::CompileShader(WebGLShader *shader)
             translatedSrc.SetLength(len);
             ShGetObjectCode(compiler, translatedSrc.BeginWriting());
 
-            nsPromiseFlatCString translatedSrc2(translatedSrc);
-            const char *ts = translatedSrc2.get();
+            const char *ts = translatedSrc.get();
 
             gl->fShaderSource(shadername, 1, &ts, NULL);
         } else { // not useShaderSourceTranslation
@@ -4345,6 +4451,8 @@ WebGLContext::CompressedTexImage2D(WebGLenum target, WebGLint level, WebGLenum i
 
     gl->fCompressedTexImage2D(target, level, internalformat, width, height, border, byteLength, view.Data());
     tex->SetImageInfo(target, level, width, height, internalformat, LOCAL_GL_UNSIGNED_BYTE);
+
+    ReattachTextureToAnyFramebufferToWorkAroundBugs(tex, level);
 }
 
 void
@@ -4600,7 +4708,7 @@ WebGLContext::ShaderSource(WebGLShader *shader, const nsAString& source)
     // cleanSource nsAString instance will be destroyed before the reference is
     // actually used.
     StripComments stripComments(source);
-    const nsAString& cleanSource = nsString(stripComments.result().Elements(), stripComments.length());
+    const nsAString& cleanSource = Substring(stripComments.result().Elements(), stripComments.length());
     if (!ValidateGLSLString(cleanSource, "compileShader"))
         return;
 
@@ -4857,13 +4965,15 @@ WebGLContext::TexImage2D_base(WebGLenum target, WebGLint level, WebGLenum intern
 
         free(tempZeroData);
     }
-    
+
     if (error) {
         GenerateWarning("texImage2D generated error %s", ErrorName(error));
         return;
     }
 
     tex->SetImageInfo(target, level, width, height, format, type);
+
+    ReattachTextureToAnyFramebufferToWorkAroundBugs(tex, level);
 }
 
 void
@@ -4878,7 +4988,7 @@ WebGLContext::TexImage2D(WebGLenum target, WebGLint level,
     return TexImage2D_base(target, level, internalformat, width, height, 0, border, format, type,
                            pixels ? pixels->Data() : 0,
                            pixels ? pixels->Length() : 0,
-                           pixels ? (int)JS_GetTypedArrayType(pixels->Obj()) : -1,
+                           pixels ? (int)JS_GetArrayBufferViewType(pixels->Obj()) : -1,
                            WebGLTexelConversions::Auto, false);
 }
 
@@ -5032,7 +5142,7 @@ WebGLContext::TexSubImage2D(WebGLenum target, WebGLint level,
     return TexSubImage2D_base(target, level, xoffset, yoffset,
                               width, height, 0, format, type,
                               pixels->Data(), pixels->Length(),
-                              JS_GetTypedArrayType(pixels->Obj()),
+                              JS_GetArrayBufferViewType(pixels->Obj()),
                               WebGLTexelConversions::Auto, false);
 }
 
@@ -5276,3 +5386,43 @@ InternalFormatForFormatAndType(WebGLenum format, WebGLenum type, bool isGLES2)
     return 0;
 }
 
+void
+WebGLContext::ReattachTextureToAnyFramebufferToWorkAroundBugs(WebGLTexture *tex,
+                                                              WebGLint level)
+{
+    MOZ_ASSERT(tex);
+
+    if (!gl->WorkAroundDriverBugs())
+        return;
+
+    if (!mIsMesa)
+        return;
+
+    MakeContextCurrent();
+
+    for(WebGLFramebuffer *framebuffer = mFramebuffers.getFirst();
+        framebuffer;
+        framebuffer = framebuffer->getNext())
+    {
+        if (framebuffer->ColorAttachment().Texture() == tex) {
+            framebuffer->FramebufferTexture2D(
+              LOCAL_GL_FRAMEBUFFER, LOCAL_GL_COLOR_ATTACHMENT0,
+              tex->Target(), tex, level);
+        }
+        if (framebuffer->DepthAttachment().Texture() == tex) {
+            framebuffer->FramebufferTexture2D(
+              LOCAL_GL_FRAMEBUFFER, LOCAL_GL_DEPTH_ATTACHMENT,
+              tex->Target(), tex, level);
+        }
+        if (framebuffer->StencilAttachment().Texture() == tex) {
+            framebuffer->FramebufferTexture2D(
+              LOCAL_GL_FRAMEBUFFER, LOCAL_GL_STENCIL_ATTACHMENT,
+              tex->Target(), tex, level);
+        }
+        if (framebuffer->DepthStencilAttachment().Texture() == tex) {
+            framebuffer->FramebufferTexture2D(
+              LOCAL_GL_FRAMEBUFFER, LOCAL_GL_DEPTH_STENCIL_ATTACHMENT,
+              tex->Target(), tex, level);
+        }
+    }
+}

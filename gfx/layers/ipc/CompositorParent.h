@@ -36,28 +36,28 @@ class LayerManager;
 
 // Represents (affine) transforms that are calculated from a content view.
 struct ViewTransform {
-  ViewTransform(nsIntPoint aTranslation = nsIntPoint(0, 0), float aXScale = 1, float aYScale = 1)
+  ViewTransform(gfxPoint aTranslation = gfxPoint(),
+                gfxSize aScale = gfxSize(1, 1))
     : mTranslation(aTranslation)
-    , mXScale(aXScale)
-    , mYScale(aYScale)
+    , mScale(aScale)
   {}
 
   operator gfx3DMatrix() const
   {
     return
-      gfx3DMatrix::ScalingMatrix(mXScale, mYScale, 1) *
+      gfx3DMatrix::ScalingMatrix(mScale.width, mScale.height, 1) *
       gfx3DMatrix::Translation(mTranslation.x, mTranslation.y, 0);
   }
 
-  nsIntPoint mTranslation;
-  float mXScale;
-  float mYScale;
+  gfxPoint mTranslation;
+  gfxSize mScale;
 };
 
 class CompositorParent : public PCompositorParent,
                          public ShadowLayersManager
 {
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(CompositorParent)
+
 public:
   CompositorParent(nsIWidget* aWidget,
                    bool aRenderToEGLSurface = false,
@@ -75,6 +75,14 @@ public:
   virtual void ShadowLayersUpdated(ShadowLayersParent* aLayerTree,
                                    const TargetConfig& aTargetConfig,
                                    bool isFirstPaint) MOZ_OVERRIDE;
+  /**
+   * This forces the is-first-paint flag to true. This is intended to
+   * be called by the widget code when it loses its viewport information
+   * (or for whatever reason wants to refresh the viewport information).
+   * The information refresh happens because the compositor will call
+   * SetFirstPaintViewport on the next frame of composition.
+   */
+  void ForceIsFirstPaint() { mIsFirstPaint = true; }
   void Destroy();
 
   LayerManager* GetLayerManager() { return mLayerManager; }
@@ -85,7 +93,11 @@ public:
   // Can be called from any thread
   void ScheduleRenderOnCompositorThread();
   void SchedulePauseOnCompositorThread();
-  void ScheduleResumeOnCompositorThread(int width, int height);
+  /**
+   * Returns true if a surface was obtained and the resume succeeded; false
+   * otherwise.
+   */
+  bool ScheduleResumeOnCompositorThread(int width, int height);
 
   virtual void ScheduleComposition();
   void NotifyShadowTreeTransaction();
@@ -169,17 +181,24 @@ protected:
   virtual void SetFirstPaintViewport(const nsIntPoint& aOffset, float aZoom, const nsIntRect& aPageRect, const gfx::Rect& aCssPageRect);
   virtual void SetPageRect(const gfx::Rect& aCssPageRect);
   virtual void SyncViewportInfo(const nsIntRect& aDisplayPort, float aDisplayResolution, bool aLayersUpdated,
-                                nsIntPoint& aScrollOffset, float& aScaleX, float& aScaleY);
+                                nsIntPoint& aScrollOffset, float& aScaleX, float& aScaleY,
+                                gfx::Margin& aFixedLayerMargins);
   void SetEGLSurfaceSize(int width, int height);
+  // If SetPanZoomControllerForLayerTree is not set, Compositor will use
+  // derived class AsyncPanZoomController transformations.
+  // Compositor will not own AsyncPanZoomController here.
+  virtual AsyncPanZoomController* GetDefaultPanZoomController() { return nullptr; }
 
 private:
   void PauseComposition();
   void ResumeComposition();
   void ResumeCompositionAndResize(int width, int height);
+  void ForceComposition();
 
   // Sample transforms for layer trees.  Return true to request
   // another animation frame.
   bool TransformShadowTree(TimeStamp aCurrentFrame);
+  void TransformScrollableLayer(Layer* aLayer, const gfx3DMatrix& aRootTransform);
   // Return true if an AsyncPanZoomController content transform was
   // applied for |aLayer|.  *aWantNextFrame is set to true if the
   // controller wants another animation frame.
@@ -243,7 +262,8 @@ private:
    */
   void TransformFixedLayers(Layer* aLayer,
                             const gfxPoint& aTranslation,
-                            const gfxPoint& aScaleDiff);
+                            const gfxSize& aScaleDiff,
+                            const gfx::Margin& aFixedLayerMargins);
 
   virtual PGrallocBufferParent* AllocPGrallocBuffer(
     const gfxIntSize&, const uint32_t&, const uint32_t&,
@@ -266,7 +286,6 @@ private:
   float mYScale;
   nsIntPoint mScrollOffset;
   nsIntRect mContentRect;
-  nsIntSize mWidgetSize;
 
   // When this flag is set, the next composition will be the first for a
   // particular document (i.e. the document displayed on the screen will change).
@@ -286,6 +305,9 @@ private:
   mozilla::Monitor mResumeCompositionMonitor;
 
   uint64_t mCompositorID;
+
+  bool mOverrideComposeReadiness;
+  CancelableTask* mForceCompositionTask;
 
   DISALLOW_EVIL_CONSTRUCTORS(CompositorParent);
 };

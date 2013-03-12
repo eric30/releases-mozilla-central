@@ -4,6 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/DebugOnly.h"
+
 #include "nsXBLDocumentInfo.h"
 #include "nsHashtable.h"
 #include "nsIDocument.h"
@@ -29,7 +31,6 @@
 #include "mozilla/scache/StartupCacheUtils.h"
 #include "nsCCUncollectableMarker.h"
 #include "mozilla/dom/BindingUtils.h"
-#include "mozilla/Util.h"
 
 using namespace mozilla::scache;
 using namespace mozilla;
@@ -271,7 +272,7 @@ nsXBLDocGlobalObject::EnsureScriptEnvironment()
 
   mScriptContext = newCtx;
 
-  JSContext *cx = mScriptContext->GetNativeContext();
+  AutoPushJSContext cx(mScriptContext->GetNativeContext());
   JSAutoRequest ar(cx);
 
   // nsJSEnvironment set the error reporter to NS_ScriptErrorReporter so
@@ -425,7 +426,6 @@ TraceProtos(nsHashKey *aKey, void *aData, void* aClosure)
   return kHashEnumerateNext;
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsXBLDocumentInfo)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsXBLDocumentInfo)
   if (tmp->mBindingTable) {
     tmp->mBindingTable->Enumerate(UnlinkProtoJSObjects, nullptr);

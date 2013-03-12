@@ -9,13 +9,13 @@ import android.content.res.TypedArray;
 import android.graphics.Canvas;
 import android.graphics.Path;
 import android.graphics.PorterDuff.Mode;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.StateListDrawable;
 import android.util.AttributeSet;
 
 public class BrowserToolbarBackground extends GeckoLinearLayout
-                                      implements CanvasDelegate.DrawManager,
-                                                 LightweightTheme.OnChangeListener { 
+                                      implements CanvasDelegate.DrawManager {
     private GeckoActivity mActivity;
     private Path mPath;
     private CurveTowards mSide;
@@ -44,24 +44,12 @@ public class BrowserToolbarBackground extends GeckoLinearLayout
     }
 
     @Override
-    public void onAttachedToWindow() {
-        super.onAttachedToWindow();
-        mActivity.getLightweightTheme().addListener(this);
-    }
-
-    @Override
-    public void onDetachedFromWindow() {
-        super.onDetachedFromWindow();
-        mActivity.getLightweightTheme().removeListener(this);
-    }
-
-    @Override
     public void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
         super.onMeasure(widthMeasureSpec, heightMeasureSpec);
 
         int width = getMeasuredWidth();
         int height = getMeasuredHeight();
-        float curve = height * 1.125f;
+        int curve = (int) (height * 1.125f);
 
         mPath.reset();
 
@@ -99,7 +87,7 @@ public class BrowserToolbarBackground extends GeckoLinearLayout
             return;
 
         StateListDrawable stateList = new StateListDrawable();
-        stateList.addState(new int[] { R.attr.state_private }, mActivity.getResources().getDrawable(R.drawable.address_bar_bg_private));
+        stateList.addState(new int[] { R.attr.state_private }, new ColorDrawable(mActivity.getResources().getColor(R.color.background_private)));
         stateList.addState(new int[] {}, drawable);
 
         int[] padding =  new int[] { getPaddingLeft(),
@@ -120,12 +108,6 @@ public class BrowserToolbarBackground extends GeckoLinearLayout
                                    };
         setBackgroundResource(R.drawable.address_bar_bg);
         setPadding(padding[0], padding[1], padding[2], padding[3]);
-    }
-
-    @Override
-    protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
-        super.onLayout(changed, left, top, right, bottom);
-        onLightweightThemeChanged();
     }
 
     public CurveTowards getCurveTowards() {

@@ -246,11 +246,9 @@ ShadowLayersParent::RecvUpdate(const InfallibleTArray<Edit>& cset,
       layer->SetClipRect(common.useClipRect() ? &common.clipRect() : NULL);
       layer->SetBaseTransform(common.transform().value());
       layer->SetPostScale(common.postXScale(), common.postYScale());
-      static bool fixedPositionLayersEnabled = getenv("MOZ_ENABLE_FIXED_POSITION_LAYERS") != 0;
-      if (fixedPositionLayersEnabled) {
-        layer->SetIsFixedPosition(common.isFixedPosition());
-        layer->SetFixedPositionAnchor(common.fixedPositionAnchor());
-      }
+      layer->SetIsFixedPosition(common.isFixedPosition());
+      layer->SetFixedPositionAnchor(common.fixedPositionAnchor());
+      layer->SetFixedPositionMargins(common.fixedPositionMargin());
       if (PLayerParent* maskLayer = common.maskLayerParent()) {
         layer->SetMaskLayer(cast(maskLayer)->AsLayer());
       } else {
@@ -285,6 +283,7 @@ ShadowLayersParent::RecvUpdate(const InfallibleTArray<Edit>& cset,
           specific.get_ContainerLayerAttributes();
         containerLayer->SetFrameMetrics(attrs.metrics());
         containerLayer->SetPreScale(attrs.preXScale(), attrs.preYScale());
+        containerLayer->SetInheritedScale(attrs.inheritedXScale(), attrs.inheritedYScale());
         break;
       }
       case Specific::TColorLayerAttributes:

@@ -45,6 +45,9 @@ class MathCache
     size_t sizeOfIncludingThis(JSMallocSizeOfFun mallocSizeOf);
 };
 
+extern void
+InitRandom(JSRuntime *rt, uint64_t *rngState);
+
 } /* namespace js */
 
 /*
@@ -53,9 +56,6 @@ class MathCache
 
 extern JSObject *
 js_InitMathClass(JSContext *cx, js::HandleObject obj);
-
-extern void
-js_InitRandom(JSContext *cx);
 
 extern double
 math_random_no_outparam(JSContext *cx);
@@ -96,6 +96,9 @@ js_math_floor_impl(double x);
 namespace js {
 
 extern JSBool
+math_imul(JSContext *cx, unsigned argc, js::Value *vp);
+
+extern JSBool
 math_log(JSContext *cx, unsigned argc, js::Value *vp);
 
 extern double
@@ -114,10 +117,34 @@ extern double
 math_cos_impl(MathCache *cache, double x);
 
 extern JSBool
+math_exp(JSContext *cx, unsigned argc, js::Value *vp);
+
+extern double
+math_exp_impl(MathCache *cache, double x);
+
+extern JSBool
 math_tan(JSContext *cx, unsigned argc, js::Value *vp);
 
 extern double
 math_tan_impl(MathCache *cache, double x);
+
+extern double
+math_atan_impl(MathCache *cache, double x);
+
+extern JSBool
+math_atan(JSContext *cx, unsigned argc, js::Value *vp);
+
+extern double
+math_asin_impl(MathCache *cache, double x);
+
+extern JSBool
+math_asin(JSContext *cx, unsigned argc, js::Value *vp);
+
+extern double
+math_acos_impl(MathCache *cache, double x);
+
+extern JSBool
+math_acos(JSContext *cx, unsigned argc, js::Value *vp);
 
 extern double
 powi(double x, int y);

@@ -175,12 +175,14 @@ TiltVisualizer.prototype = {
                              false);
 
     let target = TargetFactory.forTab(aTab);
-    let inspector = gDevTools.getPanelForTarget("inspector", target);
-    if (inspector) {
-      this.inspector = inspector;
-      this.inspector.selection.on("new-node", this.onNewNodeFromInspector);
-      this.inspector.selection.on("detached", this.onNewNodeFromInspector);
-      this.onNewNodeFromInspector();
+    let toolbox = gDevTools.getToolbox(target);
+    if (toolbox) {
+      let panel = toolbox.getPanel("inspector");
+      if (panel) {
+        this.inspector = panel;
+        this.inspector.selection.on("new-node", this.onNewNodeFromInspector);
+        this.onNewNodeFromInspector();
+      }
     }
   },
 
@@ -192,8 +194,9 @@ TiltVisualizer.prototype = {
     this._browserTab = null;
 
     if (this.inspector) {
-      this.inspector.selection.off("new-node", this.onNewNodeFromInspector);
-      this.inspector.selection.off("detached", this.onNewNodeFromInspector);
+      if (this.inspector.selection) {
+        this.inspector.selection.off("new-node", this.onNewNodeFromInspector);
+      }
       this.inspector = null;
     }
 
@@ -214,7 +217,6 @@ TiltVisualizer.prototype = {
     if (toolbox.target.tab === this._browserTab) {
       this.inspector = panel;
       this.inspector.selection.on("new-node", this.onNewNodeFromInspector);
-      this.inspector.selection.on("detached", this.onNewNodeFromInspector);
       this.onNewNodeFromTilt();
     }
   },
@@ -228,7 +230,6 @@ TiltVisualizer.prototype = {
         this.inspector) {
       if (this.inspector.selection) {
         this.inspector.selection.off("new-node", this.onNewNodeFromInspector);
-        this.inspector.selection.off("detached", this.onNewNodeFromInspector);
       }
       this.inspector = null;
     }
@@ -1126,7 +1127,11 @@ TiltVisualizer.Presenter.prototype = {
 
     TiltUtils.destroyObject(this._renderer);
 
-    this.contentWindow.removeEventListener("resize", this._onResize, false);
+    // Closing the tab would result in contentWindow being a dead object,
+    // so operations like removing event listeners won't work anymore.
+    if (this.contentWindow == this.chromeWindow.content) {
+      this.contentWindow.removeEventListener("resize", this._onResize, false);
+    }
   }
 };
 
@@ -1231,7 +1236,11 @@ TiltVisualizer.Controller.prototype = {
     canvas.removeEventListener("keypress", this._onKeyPress, true);
     canvas.removeEventListener("blur", this._onBlur, false);
 
-    presenter.contentWindow.removeEventListener("resize", this._onResize, false);
+    // Closing the tab would result in contentWindow being a dead object,
+    // so operations like removing event listeners won't work anymore.
+    if (presenter.contentWindow == presenter.chromeWindow.content) {
+      presenter.contentWindow.removeEventListener("resize", this._onResize, false);
+    }
   },
 
   /**

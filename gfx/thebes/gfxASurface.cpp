@@ -16,6 +16,7 @@
 #include "nsRect.h"
 
 #include "cairo.h"
+#include <algorithm>
 
 #ifdef CAIRO_HAS_WIN32_SURFACE
 #include "gfxWindowsSurface.h"
@@ -307,6 +308,35 @@ gfxASurface::CreateSimilarSurface(gfxContentType aContent,
     nsRefPtr<gfxASurface> result = Wrap(surface);
     cairo_surface_destroy(surface);
     return result.forget();
+}
+
+already_AddRefed<gfxImageSurface>
+gfxASurface::GetAsReadableARGB32ImageSurface()
+{
+    nsRefPtr<gfxImageSurface> imgSurface = GetAsImageSurface();
+    if (!imgSurface || imgSurface->Format() != gfxASurface::ImageFormatARGB32) {
+      imgSurface = CopyToARGB32ImageSurface();
+    }
+    return imgSurface.forget();
+}
+
+already_AddRefed<gfxImageSurface>
+gfxASurface::CopyToARGB32ImageSurface()
+{
+    if (!mSurface || !mSurfaceValid) {
+      return nullptr;
+    }
+
+    const gfxIntSize size = GetSize();
+    nsRefPtr<gfxImageSurface> imgSurface =
+        new gfxImageSurface(size, gfxASurface::ImageFormatARGB32);
+
+    gfxContext ctx(imgSurface);
+    ctx.SetOperator(gfxContext::OPERATOR_SOURCE);
+    ctx.SetSource(this);
+    ctx.Paint();
+
+    return imgSurface.forget();
 }
 
 int
@@ -661,6 +691,27 @@ gfxASurface::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
 }
 
+/* static */ uint8_t
+gfxASurface::BytesPerPixel(gfxImageFormat aImageFormat)
+{
+  switch (aImageFormat) {
+    case ImageFormatARGB32:
+      return 4;
+    case ImageFormatRGB24:
+      return 4;
+    case ImageFormatRGB16_565:
+      return 2;
+    case ImageFormatA8:
+      return 1;
+    case ImageFormatA1:
+      return 1; // Close enough
+    case ImageFormatUnknown:
+    default:
+      NS_NOTREACHED("Not really sure what you want me to say here");
+      return 0;
+  }
+}
+
 #ifdef MOZ_DUMP_IMAGES
 void
 gfxASurface::WriteAsPNG(const char* aFile)
@@ -704,7 +755,8 @@ gfxASurface::WriteAsPNG_internal(FILE* aFile, bool aBinary)
   nsRefPtr<gfxImageSurface> imgsurf = GetAsImageSurface();
   gfxIntSize size;
 
-  if (!imgsurf) {
+  // FIXME/bug 831898: hack r5g6b5 for now.
+  if (!imgsurf || imgsurf->Format() == ImageFormatRGB16_565) {
     size = GetSize();
     if (size.width == -1 && size.height == -1) {
       printf("Could not determine surface size\n");
@@ -735,8 +787,8 @@ gfxASurface::WriteAsPNG_internal(FILE* aFile, bool aBinary)
   nsCOMPtr<imgIEncoder> encoder =
     do_CreateInstance("@mozilla.org/image/encoder;2?type=image/png");
   if (!encoder) {
-    int32_t w = NS_MIN(size.width, 8);
-    int32_t h = NS_MIN(size.height, 8);
+    int32_t w = std::min(size.width, 8);
+    int32_t h = std::min(size.height, 8);
     printf("Could not create encoder. Printing %dx%d pixels.\n", w, h);
     for (int32_t y = 0; y < h; ++y) {
       for (int32_t x = 0; x < w; ++x) {

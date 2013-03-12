@@ -8,6 +8,8 @@
 #ifndef jsion_frames_h__
 #define jsion_frames_h__
 
+#include "mozilla/DebugOnly.h"
+
 #include "jsfun.h"
 #include "jstypes.h"
 #include "jsutil.h"
@@ -15,8 +17,8 @@
 #include "IonCode.h"
 #include "IonFrameIterator.h"
 
-struct JSFunction;
-struct JSScript;
+class JSFunction;
+class JSScript;
 
 namespace js {
 namespace ion {
@@ -57,17 +59,16 @@ CalleeTokenToFunction(CalleeToken token)
     JS_ASSERT(CalleeTokenIsFunction(token));
     return (JSFunction *)token;
 }
-static inline UnrootedScript
+static inline RawScript
 CalleeTokenToScript(CalleeToken token)
 {
     JS_ASSERT(GetCalleeTokenTag(token) == CalleeToken_Script);
     return (RawScript)(uintptr_t(token) & ~uintptr_t(0x3));
 }
 
-static inline UnrootedScript
+static inline RawScript
 ScriptFromCalleeToken(CalleeToken token)
 {
-    AutoAssertNoGC nogc;
     switch (GetCalleeTokenTag(token)) {
       case CalleeToken_Script:
         return CalleeTokenToScript(token);
@@ -75,7 +76,7 @@ ScriptFromCalleeToken(CalleeToken token)
         return CalleeTokenToFunction(token)->nonLazyScript();
     }
     JS_NOT_REACHED("invalid callee token tag");
-    return UnrootedScript(NULL);
+    return NULL;
 }
 
 // In between every two frames lies a small header describing both frames. This
@@ -246,6 +247,8 @@ struct ResumeFromException
 
 void HandleException(ResumeFromException *rfe);
 
+void EnsureExitFrame(IonCommonFrameLayout *frame);
+
 void MarkIonActivations(JSRuntime *rt, JSTracer *trc);
 void MarkIonCompilerRoots(JSTracer *trc);
 
@@ -269,13 +272,13 @@ MakeFrameDescriptor(uint32_t frameSize, FrameType type)
 namespace js {
 namespace ion {
 
-UnrootedScript
+RawScript
 GetTopIonJSScript(JSContext *cx,
                   const SafepointIndex **safepointIndexOut = NULL,
                   void **returnAddrOut = NULL);
 
 void
-GetPcScript(JSContext *cx, MutableHandleScript scriptRes, jsbytecode **pcRes);
+GetPcScript(JSContext *cx, JSScript **scriptRes, jsbytecode **pcRes);
 
 // Given a slot index, returns the offset, in bytes, of that slot from an
 // IonJSFrameLayout. Slot distances are uniform across architectures, however,

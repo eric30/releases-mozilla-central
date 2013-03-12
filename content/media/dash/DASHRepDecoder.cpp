@@ -20,6 +20,7 @@
 #include "MediaResource.h"
 #include "DASHRepDecoder.h"
 #include "WebMReader.h"
+#include <algorithm>
 
 namespace mozilla {
 
@@ -73,8 +74,8 @@ DASHRepDecoder::SetReader(WebMReader* aReader)
 
 nsresult
 DASHRepDecoder::Load(MediaResource* aResource,
-                       nsIStreamListener** aListener,
-                       MediaDecoder* aCloneDonor)
+                     nsIStreamListener** aListener,
+                     MediaDecoder* aCloneDonor)
 {
   NS_ASSERTION(NS_IsMainThread(), "Should be on main thread.");
   NS_ENSURE_TRUE(mMPDRepresentation, NS_ERROR_NOT_INITIALIZED);
@@ -101,12 +102,12 @@ DASHRepDecoder::Load(MediaResource* aResource,
   // delta between it and the INIT byte ranges is less than
   // |SEEK_VS_READ_THRESHOLD|. To get around this, request all metadata bytes
   // now so |MediaCache| can assume the bytes are en route.
-  int64_t delta = NS_MAX(mIndexByteRange.mStart, mInitByteRange.mStart)
-                - NS_MIN(mIndexByteRange.mEnd, mInitByteRange.mEnd);
+  int64_t delta = std::max(mIndexByteRange.mStart, mInitByteRange.mStart)
+                - std::min(mIndexByteRange.mEnd, mInitByteRange.mEnd);
   MediaByteRange byteRange;
   if (delta <= SEEK_VS_READ_THRESHOLD) {
-    byteRange.mStart = NS_MIN(mIndexByteRange.mStart, mInitByteRange.mStart);
-    byteRange.mEnd = NS_MAX(mIndexByteRange.mEnd, mInitByteRange.mEnd);
+    byteRange.mStart = std::min(mIndexByteRange.mStart, mInitByteRange.mStart);
+    byteRange.mEnd = std::max(mIndexByteRange.mEnd, mInitByteRange.mEnd);
     // Loading everything in one chunk .
     mMetadataChunkCount = 1;
   } else {
@@ -124,13 +125,16 @@ DASHRepDecoder::NotifyDownloadEnded(nsresult aStatus)
   NS_ASSERTION(NS_IsMainThread(), "Should be on main thread.");
 
   if (!mMainDecoder) {
-    LOG("Error! Main Decoder is reported as null: mMainDecoder [%p]",
-        mMainDecoder.get());
-    DecodeError();
+    if (!mShuttingDown) {
+      LOG("Error! Main Decoder is null before shutdown: mMainDecoder [%p] ",
+          mMainDecoder.get());
+      DecodeError();
+    }
     return;
   }
 
   if (NS_SUCCEEDED(aStatus)) {
+    ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
     // Decrement counter as metadata chunks are downloaded.
     // Note: Reader gets next chunk download via |ChannelMediaResource|:|Seek|.
     if (mMetadataChunkCount > 0) {
@@ -148,13 +152,11 @@ DASHRepDecoder::NotifyDownloadEnded(nsresult aStatus)
         mResource->NotifyLastByteRange();
       }
       // Notify main decoder that a DATA byte range is downloaded.
-      // Only notify IF this decoder is allowed to download data.
-      NS_ASSERTION(mMainDecoder->IsDecoderAllowedToDownloadData(this),
-                   "This decoder should not have downloaded data.");
       mMainDecoder->NotifyDownloadEnded(this, aStatus, mSubsegmentIdx);
     }
   } else if (aStatus == NS_BINDING_ABORTED) {
-    LOG("MPD download has been cancelled by the user: aStatus [%x].", aStatus);
+    LOG("Media download has been cancelled by the user: aStatus [%x].",
+        aStatus);
     if (mMainDecoder) {
       mMainDecoder->LoadAborted();
     }
@@ -197,6 +199,7 @@ DASHRepDecoder::PopulateByteRanges()
   // Should not be called during shutdown.
   NS_ENSURE_FALSE(mShuttingDown, NS_ERROR_UNEXPECTED);
 
+  ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
   if (!mByteRanges.IsEmpty()) {
     return NS_OK;
   }
@@ -217,6 +220,7 @@ DASHRepDecoder::LoadNextByteRange()
     return;
   }
 
+  ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
   NS_ASSERTION(mMainDecoder, "Error: main decoder is null!");
   NS_ASSERTION(mMainDecoder->IsDecoderAllowedToDownloadData(this),
                "Should not be called on non-active decoders!");
@@ -250,6 +254,22 @@ DASHRepDecoder::LoadNextByteRange()
     mReader->RequestSeekToSubsegment(0);
   }
 
+  // Query resource for cached ranges; only download if it's not there.
+  if (IsSubsegmentCached(mSubsegmentIdx)) {
+    LOG("Subsegment [%d] bytes [%lld] to [%lld] already cached. No need to "
+        "download.", mSubsegmentIdx,
+        mCurrentByteRange.mStart, mCurrentByteRange.mEnd);
+    nsCOMPtr<nsIRunnable> event =
+      NS_NewRunnableMethod(this, &DASHRepDecoder::DoNotifyDownloadEnded);
+    nsresult rv = NS_DispatchToMainThread(event);
+    if (NS_FAILED(rv)) {
+      LOG("Error notifying subsegment [%d] cached: rv[0x%x].",
+          mSubsegmentIdx, rv);
+      NetworkError();
+    }
+    return;
+  }
+
   // Open byte range corresponding to subsegment.
   nsresult rv = mResource->OpenByteRange(nullptr, mCurrentByteRange);
   if (NS_FAILED(rv)) {
@@ -260,20 +280,39 @@ DASHRepDecoder::LoadNextByteRange()
   }
 }
 
+bool
+DASHRepDecoder::IsSubsegmentCached(int32_t aSubsegmentIdx)
+{
+  GetReentrantMonitor().AssertCurrentThreadIn();
+
+  MediaByteRange byteRange = mByteRanges[aSubsegmentIdx];
+  int64_t start = mResource->GetNextCachedData(byteRange.mStart);
+  int64_t end = mResource->GetCachedDataEnd(byteRange.mStart);
+  return (start == byteRange.mStart &&
+          end >= byteRange.mEnd);
+}
+
+void
+DASHRepDecoder::DoNotifyDownloadEnded()
+{
+  NotifyDownloadEnded(NS_OK);
+}
+
 nsresult
 DASHRepDecoder::GetByteRangeForSeek(int64_t const aOffset,
-                                      MediaByteRange& aByteRange)
+                                    MediaByteRange& aByteRange)
 {
   NS_ASSERTION(NS_IsMainThread(), "Should be on main thread.");
 
   // Only check data ranges if they're available and if this decoder is active,
   // i.e. inactive rep decoders should only load metadata.
-  bool canDownloadData = mMainDecoder->IsDecoderAllowedToDownloadData(this);
-  if (canDownloadData) {
-    for (int i = 0; i < mByteRanges.Length(); i++) {
-      NS_ENSURE_FALSE(mByteRanges[i].IsNull(), NS_ERROR_NOT_INITIALIZED);
-      // Check if |aOffset| lies within the current data range.
-      if (mByteRanges[i].mStart <= aOffset && aOffset <= mByteRanges[i].mEnd) {
+  ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
+
+  for (uint32_t i = 0; i < mByteRanges.Length(); i++) {
+    NS_ENSURE_FALSE(mByteRanges[i].IsNull(), NS_ERROR_NOT_INITIALIZED);
+    // Check if |aOffset| lies within the current data range.
+    if (mByteRanges[i].mStart <= aOffset && aOffset <= mByteRanges[i].mEnd) {
+      if (mMainDecoder->IsDecoderAllowedToDownloadSubsegment(this, i)) {
         mCurrentByteRange = aByteRange = mByteRanges[i];
         mSubsegmentIdx = i;
         // XXX Hack: should be setting subsegment outside this function, but
@@ -284,9 +323,8 @@ DASHRepDecoder::GetByteRangeForSeek(int64_t const aOffset,
             i, aOffset, aByteRange.mStart, aByteRange.mEnd);
         return NS_OK;
       }
+      break;
     }
-  } else {
-    LOG1("Restricting seekable byte ranges to metadata for this decoder.");
   }
   // Don't allow metadata downloads once they're loaded and byte ranges have
   // been populated.
@@ -314,12 +352,11 @@ DASHRepDecoder::GetByteRangeForSeek(int64_t const aOffset,
 
   // If no byte range is found by this stage, clear the parameter and return.
   aByteRange.Clear();
-  if (mByteRanges.IsEmpty() || !canDownloadData || !canDownloadMetadata) {
+  if (mByteRanges.IsEmpty() || !canDownloadMetadata) {
     // Assume mByteRanges will be populated after metadata is read.
-    LOG("Data ranges not populated [%s]; data download restricted [%s]; "
-        "metadata download restricted [%s]: offset[%lld].",
+    LOG("Data ranges not populated [%s]; metadata download restricted [%s]: "
+        "offset[%lld].",
         (mByteRanges.IsEmpty() ? "yes" : "no"),
-        (canDownloadData ? "no" : "yes"),
         (canDownloadMetadata ? "no" : "yes"), aOffset);
     return NS_ERROR_NOT_AVAILABLE;
   } else {
@@ -362,7 +399,8 @@ DASHRepDecoder::SetInfinite(bool aInfinite)
 void
 DASHRepDecoder::SetMediaSeekable(bool aMediaSeekable)
 {
-  NS_ASSERTION(NS_IsMainThread(), "Should be on main thread.");
+  NS_ASSERTION(NS_IsMainThread() || OnDecodeThread(),
+               "Should be on main thread or decode thread.");
   if (mMainDecoder) { mMainDecoder->SetMediaSeekable(aMediaSeekable); }
 }
 
@@ -374,8 +412,8 @@ DASHRepDecoder::Progress(bool aTimer)
 
 void
 DASHRepDecoder::NotifyDataArrived(const char* aBuffer,
-                                    uint32_t aLength,
-                                    int64_t aOffset)
+                                  uint32_t aLength,
+                                  int64_t aOffset)
 {
   NS_ASSERTION(NS_IsMainThread(), "Should be on main thread.");
 
@@ -422,14 +460,20 @@ DASHRepDecoder::OnDecodeThread() const
 ReentrantMonitor&
 DASHRepDecoder::GetReentrantMonitor()
 {
-  return mMainDecoder->GetReentrantMonitor();
+  NS_ASSERTION(mMainDecoder, "Can't get monitor if main decoder is null!");
+  if (mMainDecoder) {
+    return mMainDecoder->GetReentrantMonitor();
+  } else {
+    // XXX If mMainDecoder is gone, most likely we're past shutdown and
+    // a waiting function has been wakened. Just return this decoder's own
+    // monitor and let the function complete.
+    return MediaDecoder::GetReentrantMonitor();
+  }
 }
 
 mozilla::layers::ImageContainer*
 DASHRepDecoder::GetImageContainer()
 {
-  NS_ASSERTION(mMainDecoder && mMainDecoder->OnDecodeThread(),
-               "Should be on decode thread.");
   return (mMainDecoder ? mMainDecoder->GetImageContainer() : nullptr);
 }
 
@@ -457,6 +501,18 @@ DASHRepDecoder::ReleaseStateMachine()
   mReader = nullptr;
 
   MediaDecoder::ReleaseStateMachine();
+}
+
+void DASHRepDecoder::StopProgressUpdates()
+{
+  NS_ENSURE_TRUE_VOID(mMainDecoder);
+  MediaDecoder::StopProgressUpdates();
+}
+
+void DASHRepDecoder::StartProgressUpdates()
+{
+  NS_ENSURE_TRUE_VOID(mMainDecoder);
+  MediaDecoder::StartProgressUpdates();
 }
 
 } // namespace mozilla

@@ -228,7 +228,6 @@ private:
 uint32_t nsXBLInsertionPointEntry::gRefCnt = 0;
 nsFixedSizeAllocator* nsXBLInsertionPointEntry::kPool;
 
-NS_IMPL_CYCLE_COLLECTION_NATIVE_CLASS(nsXBLInsertionPointEntry)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsXBLInsertionPointEntry)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mInsertionParent)
   if (tmp->mDefaultContent) {
@@ -542,10 +541,10 @@ nsXBLPrototypeBinding::SetDestructor(nsXBLProtoImplAnonymousMethod* aMethod)
 }
 
 nsresult
-nsXBLPrototypeBinding::InstallImplementation(nsIContent* aBoundElement)
+nsXBLPrototypeBinding::InstallImplementation(nsXBLBinding* aBinding)
 {
   if (mImplementation)
-    return mImplementation->InstallImplementation(this, aBoundElement);
+    return mImplementation->InstallImplementation(this, aBinding);
   return NS_OK;
 }
 
@@ -842,14 +841,15 @@ nsresult
 nsXBLPrototypeBinding::InitClass(const nsCString& aClassName,
                                  JSContext * aContext, JSObject * aGlobal,
                                  JSObject * aScriptObject,
-                                 JSObject** aClassObject)
+                                 JSObject** aClassObject,
+                                 bool* aNew)
 {
   NS_ENSURE_ARG_POINTER(aClassObject); 
 
   *aClassObject = nullptr;
 
   return nsXBLBinding::DoInitJSClass(aContext, aGlobal, aScriptObject,
-                                     aClassName, this, aClassObject);
+                                     aClassName, this, aClassObject, aNew);
 }
 
 nsIContent*
@@ -1899,7 +1899,7 @@ nsXBLPrototypeBinding::ReadContentNode(nsIObjectInputStream* aStream,
 
     nsCOMPtr<Element> result;
     nsresult rv =
-      nsXULElement::Create(prototype, aDocument, false, getter_AddRefs(result));
+      nsXULElement::Create(prototype, aDocument, false, false, getter_AddRefs(result));
     NS_ENSURE_SUCCESS(rv, rv);
     content = result;
   }

@@ -51,9 +51,9 @@ public:
   }
 #endif
 
-  NS_IMETHOD BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                              const nsRect&           aDirtyRect,
-                              const nsDisplayListSet& aLists);
+  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
+                                const nsRect&           aDirtyRect,
+                                const nsDisplayListSet& aLists) MOZ_OVERRIDE;
 
   // nsISVGChildFrame interface:
   virtual void NotifySVGChanged(uint32_t aFlags);
@@ -73,10 +73,10 @@ public:
   virtual uint32_t GetNumberOfChars();
   virtual float GetComputedTextLength();
   virtual float GetSubStringLength(uint32_t charnum, uint32_t nchars);
-  virtual int32_t GetCharNumAtPosition(nsIDOMSVGPoint *point);
+  virtual int32_t GetCharNumAtPosition(mozilla::nsISVGPoint *point);
 
-  NS_IMETHOD GetStartPositionOfChar(uint32_t charnum, nsIDOMSVGPoint **_retval);
-  NS_IMETHOD GetEndPositionOfChar(uint32_t charnum, nsIDOMSVGPoint **_retval);
+  NS_IMETHOD GetStartPositionOfChar(uint32_t charnum, nsISupports **_retval);
+  NS_IMETHOD GetEndPositionOfChar(uint32_t charnum, nsISupports **_retval);
   NS_IMETHOD GetExtentOfChar(uint32_t charnum, nsIDOMSVGRect **_retval);
   NS_IMETHOD GetRotationOfChar(uint32_t charnum, float *_retval);
 

@@ -1,0 +1,666 @@
+<?xml version="1.0"?>
+
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
+
+<?xml-stylesheet href="chrome://browser/skin/platform.css" type="text/css"?>
+<?xml-stylesheet href="chrome://browser/skin/browser.css" type="text/css"?>
+<?xml-stylesheet href="chrome://browser/skin/forms.css" type="text/css"?>
+<?xml-stylesheet href="chrome://browser/content/browser.css" type="text/css"?>
+
+<!DOCTYPE window [
+<!ENTITY % globalDTD SYSTEM "chrome://global/locale/global.dtd">
+%globalDTD;
+<!ENTITY % browserDTD SYSTEM "chrome://browser/locale/browser.dtd">
+%browserDTD;
+<!ENTITY % brandDTD SYSTEM "chrome://branding/locale/brand.dtd">
+%brandDTD;
+<!ENTITY % prefsDTD SYSTEM "chrome://browser/locale/preferences.dtd">
+%prefsDTD;
+#ifdef MOZ_SERVICES_SYNC
+<!ENTITY % syncDTD SYSTEM "chrome://browser/locale/sync.dtd">
+%syncDTD;
+#endif
+]>
+
+<window id="main-window"
+        onload="Browser.startup();"
+        onunload="Browser.shutdown();"
+        onclose="return Browser.closing();"
+        windowtype="navigator:browser"
+        chromedir="&locale.dir;"
+        title="&brandShortName;"
+        width="1366"
+        height="768"
+        xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+        xmlns:svg="http://www.w3.org/2000/svg"
+        xmlns:html="http://www.w3.org/1999/xhtml">
+
+  <script type="application/javascript" src="chrome://browser/content/browser.js"/>
+  <script type="application/javascript" src="chrome://browser/content/browser-scripts.js"/>
+  <script type="application/javascript" src="chrome://browser/content/browser-ui.js"/>
+  <script type="application/javascript" src="chrome://browser/content/Util.js"/>
+  <script type="application/javascript" src="chrome://browser/content/input.js"/>
+  <script type="application/javascript;version=1.8" src="chrome://browser/content/appbar.js"/>
+
+  <broadcasterset id="broadcasterset">
+    <broadcaster id="bcast_contentShowing" disabled="false"/>
+    <broadcaster id="bcast_urlbarState" mode="view"/>
+    <broadcaster id="bcast_preciseInput" input="imprecise"/>
+    <broadcaster id="bcast_windowState" viewstate=""/>
+  </broadcasterset>
+
+  <observerset id="observerset">
+    <observes id="observe_contentShowing" element="bcast_contentShowing" attribute="disabled" onbroadcast="BrowserUI.updateUIFocus();"/>
+  </observerset>
+
+  <commandset id="mainCommandSet">
+    <!-- basic navigation -->
+    <command id="cmd_back" disabled="true" oncommand="CommandUpdater.doCommand(this.id);"/>
+    <command id="cmd_forward" disabled="true" oncommand="CommandUpdater.doCommand(this.id);" observes="bcast_urlbarState"/>
+    <command id="cmd_handleBackspace" oncommand="BrowserUI.handleBackspace();" />
+    <command id="cmd_handleShiftBackspace" oncommand="BrowserUI.handleShiftBackspace();" />
+    <command id="cmd_reload" oncommand="CommandUpdater.doCommand(this.id);"/>
+    <command id="cmd_forceReload" oncommand="CommandUpdater.doCommand(this.id);"/>
+    <command id="cmd_stop" oncommand="CommandUpdater.doCommand(this.id);"/>
+    <command id="cmd_go" oncommand="CommandUpdater.doCommand(this.id);"/>
+    <command id="cmd_openLocation" oncommand="CommandUpdater.doCommand(this.id);"/>
+    <command id="cmd_home" oncommand="CommandUpdater.doCommand(this.id);"/>
+    <command id="cmd_openFile" oncommand="CommandUpdater.doCommand(this.id);"/>
+    <command id="cmd_savePage" oncommand="CommandUpdater.doCommand(this.id);"/>
+
+    <!-- tabs -->
+    <command id="cmd_newTab" oncommand="CommandUpdater.doCommand(this.id);"/>
+    <command id="cmd_closeTab" oncommand="CommandUpdater.doCommand(this.id);"/>
+    <command id="cmd_undoCloseTab" oncommand="CommandUpdater.doCommand(this.id);"/>
+#ifdef MOZ_SERVICES_SYNC
+    <command id="cmd_remoteTabs" oncommand="CommandUpdater.doCommand(this.id);"/>
+#endif
+
+    <!-- misc -->
+    <command id="cmd_close" oncommand="CommandUpdater.doCommand(this.id);"/>
+    <command id="cmd_quit" oncommand="CommandUpdater.doCommand(this.id);"/>
+    <command id="cmd_actions" oncommand="CommandUpdater.doCommand(this.id);"/>
+    <command id="cmd_panel" oncommand="CommandUpdater.doCommand(this.id);"/>
+    <command id="cmd_flyout_back" oncommand="CommandUpdater.doCommand(this.id);"/>
+    <command id="cmd_addBookmark" oncommand="CommandUpdater.doCommand(this.id);"/>
+    <command id="cmd_bookmarks" oncommand="CommandUpdater.doCommand(this.id);"/>
+    <command id="cmd_history" oncommand="CommandUpdater.doCommand(this.id);"/>
+    <command id="cmd_sanitize" oncommand="CommandUpdater.doCommand(this.id);"/>
+    <command id="cmd_contextUI" oncommand="CommandUpdater.doCommand(this.id);"/>
+
+    <!-- screen/display -->
+    <command id="cmd_zoomin" observes="bcast_contentShowing" oncommand="CommandUpdater.doCommand(this.id);"/>
+    <command id="cmd_zoomout" observes="bcast_contentShowing" oncommand="CommandUpdater.doCommand(this.id);"/>
+    <command id="cmd_lockscreen" oncommand="CommandUpdater.doCommand(this.id);"/>
+
+    <command id="cmd_volumeLeft" observes="bcast_contentShowing" oncommand="CommandUpdater.doCommand(this.id);"/>
+    <command id="cmd_volumeRight" observes="bcast_contentShowing" oncommand="CommandUpdater.doCommand(this.id);"/>
+
+    <!-- scrolling -->
+    <command id="cmd_scrollPageUp" oncommand="CommandUpdater.doCommand(this.id);"/>
+    <command id="cmd_scrollPageDown" oncommand="CommandUpdater.doCommand(this.id);"/>
+
+    <!-- editing -->
+    <command id="cmd_cut" oncommand="CommandUpdater.doCommand(this.id);"/>
+    <command id="cmd_copy" oncommand="CommandUpdater.doCommand(this.id);"/>
+    <command id="cmd_copylink" oncommand="CommandUpdater.doCommand(this.id);"/>
+    <command id="cmd_paste" oncommand="CommandUpdater.doCommand(this.id);"/>
+    <command id="cmd_delete" oncommand="CommandUpdater.doCommand(this.id);"/>
+    <command id="cmd_selectAll" oncommand="CommandUpdater.doCommand(this.id);"/>
+
+    <!-- forms navigation -->
+    <command id="cmd_formPrevious" oncommand="FormHelperUI.goToPrevious();"/>
+    <command id="cmd_formNext" oncommand="FormHelperUI.goToNext();"/>
+    <command id="cmd_formClose" oncommand="FormHelperUI.hide();"/>
+
+    <!-- find navigation -->
+    <command id="cmd_findPrevious" oncommand="FindHelperUI.goToPrevious();"/>
+    <command id="cmd_findNext" oncommand="FindHelperUI.goToNext();"/>
+    <command id="cmd_findClose" oncommand="FindHelperUI.hide();"/>
+    <command id="cmd_find" oncommand="FindHelperUI.show();"/>
+  </commandset>
+
+  <keyset id="mainKeyset">
+    <!-- basic navigation -->
+    <key id="key_back" keycode="VK_LEFT" command="cmd_back" modifiers="alt"/>
+    <key id="key_forward" keycode="VK_RIGHT" command="cmd_forward" modifiers="alt"/>
+    <key id="key_backspace" keycode="VK_BACK" command="cmd_handleBackspace"/>
+    <key id="key_shift_backspace" keycode="VK_BACK" command="cmd_handleShiftBackspace" modifiers="shift"/>
+    <key id="key_reload" keycode="VK_F5" command="cmd_reload"/>
+    <key id="key_reload2" key="r" modifiers="accel" command="cmd_reload"/>
+    <key id="key_forceReload" keycode="VK_F5" modifiers="shift" command="cmd_forceReload"/>
+    <key id="key_forceReload2" key="r" modifiers="accel,shift" command="cmd_forceReload"/>
+    <key id="key_focusURL" key="l" modifiers="accel" command="cmd_openLocation"/>
+    <key id="key_focusURL2" key="&urlbar.accesskey;" modifiers="alt" command="cmd_openLocation"/>
+    <key id="key_home" keycode="VK_HOME" modifiers="accel" command="cmd_home"/>
+    <key id="key_open" key="o" modifiers="accel" command="cmd_openFile"/>
+    <key id="key_save" key="s" modifiers="accel" command="cmd_savePage"/>
+
+    <!-- misc -->
+    <key id="key_zoomin" key="+" modifiers="accel" command="cmd_zoomin"/>
+    <key id="key_zoomout" key="-" modifiers="accel" command="cmd_zoomout"/>
+    <key id="key_find" key="f" modifiers="accel" command="cmd_find"/>
+    <key id="key_find" key="/" command="cmd_find"/>
+    <key id="key_findNext" keycode="VK_F3" command="cmd_findNext"/>
+    <key id="key_findNext2" key="g" modifiers="accel" command="cmd_findNext"/>
+    <key id="key_findPrevious" keycode="VK_F3" modifiers="shift" command="cmd_findPrevious"/>
+    <key id="key_findPrevious2" key="g" modifiers="accel,shift" command="cmd_findPrevious"/>
+    <key id="key_quit" key="q" modifiers="accel" command="cmd_quit"/>
+    <key id="key_addBoomkark" key="d" modifiers="accel" command="cmd_addBookmark"/>
+    <key id="key_console" key="j" modifiers="accel,shift" oncommand="PanelUI.show('console-container')"/>
+    <key id="key_options" key="o" modifiers="accel,shift" oncommand="Elements.prefsFlyout.show()"/>
+
+    <!-- manage tabs -->
+    <key id="key_newTab" key="t" modifiers="accel" command="cmd_newTab"/>
+    <key id="key_newTab2" key="n" modifiers="accel" command="cmd_newTab"/>
+    <key id="key_closeTab" key="w" modifiers="accel" command="cmd_closeTab"/>
+    <key id="key_closeTab2" keycode="VK_F4" modifiers="accel" command="cmd_closeTab"/>
+    <key id="key_undoCloseTab" key="t" modifiers="accel,shift" command="cmd_undoCloseTab"/>
+
+    <!-- tab selection -->
+    <key id="key_nextTab" oncommand="BrowserUI.selectNextTab();" keycode="VK_TAB" modifiers="accel"/>
+    <key id="key_nextTab2" oncommand="BrowserUI.selectNextTab();" keycode="VK_PAGE_DOWN" modifiers="accel"/>
+    <key id="key_prevTab" oncommand="BrowserUI.selectPreviousTab();" keycode="VK_TAB" modifiers="accel,shift"/>
+    <key id="key_prevTab2" oncommand="BrowserUI.selectPreviousTab();" keycode="VK_PAGE_UP" modifiers="accel"/>
+    <key id="key_selectTab1" oncommand="BrowserUI.selectTabAtIndex(0);" key="1" modifiers="accel"/>
+    <key id="key_selectTab2" oncommand="BrowserUI.selectTabAtIndex(1);" key="2" modifiers="accel"/>
+    <key id="key_selectTab3" oncommand="BrowserUI.selectTabAtIndex(2);" key="3" modifiers="accel"/>
+    <key id="key_selectTab4" oncommand="BrowserUI.selectTabAtIndex(3);" key="4" modifiers="accel"/>
+    <key id="key_selectTab5" oncommand="BrowserUI.selectTabAtIndex(4);" key="5" modifiers="accel"/>
+    <key id="key_selectTab6" oncommand="BrowserUI.selectTabAtIndex(5);" key="6" modifiers="accel"/>
+    <key id="key_selectTab7" oncommand="BrowserUI.selectTabAtIndex(6);" key="7" modifiers="accel"/>
+    <key id="key_selectTab8" oncommand="BrowserUI.selectTabAtIndex(7);" key="8" modifiers="accel"/>
+    <key id="key_selectLastTab" oncommand="BrowserUI.selectTabAtIndex(-1);" key="9" modifiers="accel"/>
+  </keyset>
+
+  <stack id="stack" flex="1">
+    <!-- Page Area -->
+    <vbox id="page">
+      <vbox id="tray" class="tray-toolbar" visible="true" observes="bcast_windowState" >
+        <!-- Tabs -->
+        <hbox id="tabs-container">
+          <box id="tabs" flex="1"
+                observes="bcast_preciseInput"
+                onselect="BrowserUI.selectTabAndDismiss(this);"
+                onclosetab="BrowserUI.closeTab(this);"/>
+          <vbox id="tabs-controls">
+            <toolbarbutton id="newtab-button" command="cmd_newTab" label="&newtab.label;"/>
+          </vbox>
+        </hbox>
+
+        <!-- Main Toolbar -->
+        <hbox id="toolbar-container" observes="bcast_windowState" >
+          <toolbar id="toolbar" flex="1">
+            <observes element="bcast_windowState" attribute="*"/>
+            <observes element="bcast_urlbarState" attribute="*"/>
+            <hbox id="unified-back-forward-button" class="chromeclass-toolbar-additional"
+               observes="bcast_windowState"
+               context="backForwardMenu" removable="true"
+               forwarddisabled="true"
+               title="Back/Forward">
+              <toolbarbutton id="back-button" class="toolbarbutton"
+                             label="&back.label;"
+                             command="cmd_back"/>
+              <toolbarbutton id="forward-button" class="toolbarbutton"
+                             label="&forward.label;"
+                             command="cmd_forward"/>
+              <dummyobservertarget hidden="true"
+                                   onbroadcast="if (this.getAttribute('disabled') == 'true')
+                                                  this.parentNode.setAttribute('forwarddisabled', 'true');
+                                                else
+                                                  this.parentNode.removeAttribute('forwarddisabled');">
+                <observes element="cmd_forward" attribute="disabled"/>
+              </dummyobservertarget>
+            </hbox>
+
+            <hbox id="urlbar-container" flex="1" observes="bcast_urlbarState">
+              <hbox id="urlbar" flex="1">
+                <box id="identity-box" role="button">
+                  <hbox id="identity-box-inner" align="center" mousethrough="always">
+                    <image id="identity-icon"/>
+                  </hbox>
+                </box>
+
+                <textbox id="urlbar-edit"
+                         type="url"
+                         class="uri-element"
+                         autocompletesearch="history"
+                         autocompletepopup="start-autocomplete"
+                         completeselectedindex="true"
+                         placeholder="&urlbar.emptytext;"
+                         flex="1"
+                         ontextentered="BrowserUI.handleUrlbarEnter(param);"
+                         onkeydown="BrowserUI.navEditKeyPress();"
+                         onclick="BrowserUI._urlbarClicked(event);"
+                         onblur="BrowserUI._urlbarBlurred();"/>
+              </hbox>
+            </hbox>
+
+            <hbox id="urlbar-icons" observes="bcast_urlbarState">
+              <toolbarbutton id="tool-reload" oncommand="CommandUpdater.doCommand(event.shiftKey ? 'cmd_forceReload' : 'cmd_reload');"/>
+              <toolbarbutton id="tool-stop" command="cmd_stop"/>
+            </hbox>
+          </toolbar>
+
+          <box id="toolbar-transition" observes="bcast_windowState" >
+            <toolbarbutton id="tool-new-tab" command="cmd_newTab" label="&newtab.label;"/>
+          </box>
+        </hbox>
+
+        <hbox id="progress-control" layer="true"></hbox>
+
+        <!-- Start UI -->
+        <hbox id="start-container" flex="1" observes="bcast_windowState" class="meta content-height content-width" onclick="false;">
+          <!-- portrait/landscape/filled view -->
+          <hbox id="start" class="start-page" flex="1" observes="bcast_windowState">
+            <scrollbox id="start-scrollbox" orient="horizontal" flex="1">
+            <vbox id="start-topsites" class="meta-section">
+              <label class="meta-section-title" value="&startTopSitesHeader.label;"/>
+              <richgrid id="start-topsites-grid" seltype="single" flex="1"/>
+            </vbox>
+
+            <vbox id="start-bookmarks" class="meta-section">
+              <label class="meta-section-title" value="&startBookmarksHeader.label;"
+                onclick="PanelUI.show('bookmarks-container');"/>
+              <richgrid id="start-bookmarks-grid" seltype="single" flex="1"/>
+            </vbox>
+
+            <vbox id="start-history" class="meta-section">
+              <label class="meta-section-title" value="&startHistoryHeader.label;"/>
+              <richgrid id="start-history-grid" seltype="single" flex="1"/>
+            </vbox>
+            <vbox id="start-remotetabs" class="meta-section">
+              <label class="meta-section-title" value="&startRemoteTabsHeader.label;"
+                onclick="PanelUI.show('remotetabs-container');"/>
+              <richgrid id="start-remotetabs-grid" seltype="single" flex="1"/>
+            </vbox>
+            </scrollbox>
+          </hbox>
+          <!-- snapped view -->
+          <vbox id="snapped-start" class="start-page" observes="bcast_windowState">
+            <scrollbox id="snapped-scrollbox" orient="vertical" flex="1">
+              <vbox id="snapped-topsites">
+                <label class="meta-section-title" value="&startTopSitesHeader.label;"/>
+                <!--  TODO bug 835999 -->
+              </vbox>
+              <label class="meta-section-title" value="&startBookmarksHeader.label;"
+                onclick="PanelUI.show('bookmarks-container');"/>
+              <label class="meta-section-title" value="&startHistoryHeader.label;"
+                onclick="PanelUI.show('history-container');" inputProcessing="true"/>
+              <label class="meta-section-title" value="&startRemoteTabsHeader.label;"
+                onclick="PanelUI.show('remotetabs-container');" inputProcessing="true"/>
+            </scrollbox>
+          </vbox>
+          <!-- Autocompletion interface -->
+          <box id="start-autocomplete"/>
+        </hbox>
+      </vbox> <!-- end tray -->
+
+      <!-- Content viewport -->
+      <stack id="content-viewport">
+        <deck id="browsers" flex="1"/>
+        <box id="vertical-scroller" class="scroller" orient="vertical" end="0" top="0"/>
+        <box id="horizontal-scroller" class="scroller" orient="horizontal" left="0" bottom="0"/>
+      </stack>
+    </vbox>
+
+    <!-- popup for content navigator helper -->
+    <vbox id="content-navigator" top="0">
+      <textbox id="find-helper-textbox" class="search-bar content-navigator-item" oncommand="FindHelperUI.search(this.value)" oninput="FindHelperUI.updateCommands(this.value);" type="search"/>
+    </vbox>
+
+    <!-- Windows 8 Appbar -->
+    <appbar id="appbar" mousethrough="never" observes="bcast_windowState">
+      <!-- contextual actions temporarily hidden, pending #800996, #831918 -->
+      <hbox id="contextualactions-tray" flex="1" hidden="true">
+        <toolbarbutton id="delete-selected-button" hidden="true" oncommand="Appbar.dispatchContextualAction('delete')"/>
+        <toolbarbutton id="restore-selected-button" hidden="true" oncommand="Appbar.dispatchContextualAction('restore')"/>
+        <toolbarbutton id="pin-selected-button" hidden="true" oncommand="Appbar.dispatchContextualAction('pin')"/>
+        <toolbarbutton id="unpin-selected-button" hidden="true" oncommand="Appbar.dispatchContextualAction('unpin')"/>
+      </hbox>
+      <hbox flex="1">
+        <toolbarbutton id="download-button" oncommand="Appbar.onDownloadButton()"/>
+        <toolbarbutton id="console-button" oncommand="Appbar.onConsoleButton()"/>
+        <toolbarbutton id="jsshell-button" oncommand="Appbar.onJSShellButton()"/>
+      </hbox>
+      <hbox>
+        <toolbarbutton id="more-button" onclick="Appbar.onMoreButton(event)" />
+        <toolbarbutton id="zoomout-button" oncommand="Appbar.onZoomOutButton()"/>
+        <toolbarbutton id="zoomin-button" oncommand="Appbar.onZoomInButton()"/>
+        <toolbarbutton id="star-button" type="checkbox" oncommand="Appbar.onStarButton()"/>
+        <toolbarbutton id="pin-button" type="checkbox" oncommand="Appbar.onPinButton()"/>
+      </hbox>
+    </appbar>
+
+    <vbox id="panel-container" hidden="true" class="window-width window-height meta">
+      <hbox id="panel-header">
+        <toolbarbutton id="panel-close-button" command="cmd_panel"/>
+
+        <menulist id="panel-view-switcher" oncommand="PanelUI.switchPane(this.value);">
+          <menupopup>
+            <menuitem label="&bookmarksHeader.label;" value="bookmarks-container" id="menuitem-bookmarks"/>
+            <menuitem label="&startHistoryHeader.label;" value="history-container" id="menuitem-history"/>
+            <menuitem label="&startRemoteTabsHeader.label;" value="remotetabs-container" id="menuitem-remotetabs"/>
+            <menuitem label="&downloadsHeader.label;" value="downloads-container" id="menuitem-downloads"/>
+            <menuitem label="&consoleHeader.label;" value="console-container" id="menuitem-console"/>
+          </menupopup>
+        </menulist>
+      </hbox>
+
+      <deck id="panel-items" selectedIndex="0" flex="1">
+        <scrollbox id="bookmarks-container" flex="1">
+          <richgrid id="bookmarks-list" seltype="single" flex="1"/>
+        </scrollbox>
+        <scrollbox id="history-container" flex="1">
+          <richgrid id="history-list" seltype="single" flex="1"/>
+        </scrollbox>
+        <scrollbox id="downloads-container" flex="1">
+          <richgrid id="downloads-list" seltype="single" flex="1"/>
+        </scrollbox>
+        <scrollbox id="remotetabs-container" flex="1">
+          <richgrid id="remotetabs-list" seltype="single" flex="1"/>
+        </scrollbox>
+        <vbox id="console-container" flex="1">
+          <vbox id="console-header" class="panel-list">
+            <label class="panel-header" value="&consoleHeader.label;"/>
+            <hbox align="center">
+              <label value="&consoleCodeEval.label;" control="console-eval-textbox"/>
+              <textbox id="console-eval-textbox" class="toolbar search-bar" value="" onkeypress="ConsolePanelView.onEvalKeyPress(event)" flex="1"/>
+              <button id="console-button-eval" class="show-text" label="&consoleEvaluate.label;" oncommand="ConsolePanelView.evaluateTypein()"/>
+            </hbox>
+            <hbox align="center" pack="end">
+              <radiogroup id="console-filter" oncommand="ConsolePanelView.changeMode();">
+                <radio id="console-filter-all" label="&consoleAll.label;" value="all" selected="true"/>
+                <radio id="console-filter-messages" label="&consoleMessages.label;" value="message"/>
+                <radio id="console-filter-warnings" label="&consoleWarnings.label;" value="warning"/>
+                <radio id="console-filter-errors" label="&consoleErrors.label;" value="error"/>
+              </radiogroup>
+              <button id="console-clear" class="show-text" oncommand="ConsolePanelView.clearConsole();" label="&consoleClear.label;"/>
+            </hbox>
+          </vbox>
+
+          <richlistbox id="console-box" class="panel-list console-box" flex="1" onkeypress="ConsolePanelView.onConsoleBoxKeyPress(event)" oncontextmenu="ConsolePanelView.onContextMenu(event);"/>
+        </vbox>
+      </deck>
+    </vbox>
+
+  <!-- Selection overlay - this should be below any content that can have selectable text -->
+  <!-- onclick addresses dom bug 835175, str in bug 832957 -->
+  <box onclick="false" class="selection-overlay-hidden" id="selection-overlay"/>
+
+  <flyoutpanel id="about-flyoutpanel" headertext="&aboutHeader.title;">
+        <label id="about-product-label" value="&aboutHeader.product.label;"/>
+        <label value="&aboutHeader.company.label;"/>
+#expand <label id="about-version-label">__MOZ_APP_VERSION__</label>
+        <label id="about-policy-label"
+               onclick="if (event.button == 0) { Browser.onAboutPolicyClick(); }"
+               class="text-link" value="&aboutHeader.policy.label;"/>
+    </flyoutpanel>
+
+    <flyoutpanel id="sync-flyoutpanel" headertext="&syncHeader.title;">
+      <setting id="sync-connect" title="&sync.notconnected;" type="control">
+        <button label="&sync.connect;" oncommand="WeaveGlue.tryConnect();" />
+      </setting>
+      <setting id="sync-connected" class="setting-group" title="&sync.connected;" type="control" collapsed="true">
+        <button id="sync-pairdevice" label="&sync.pair.title;" oncommand="SyncPairDevice.open();" />
+      </setting>
+      <setting id="sync-sync" class="setting-subgroup" type="control" collapsed="true">
+        <button id="sync-syncButton" label="&sync.syncNow;" oncommand="WeaveGlue.sync();"/>
+      </setting>
+      <setting id="sync-device" class="setting-subgroup" type="string" title="&sync.deviceName;" onchange="WeaveGlue.changeName(this);" collapsed="true"/>
+      <setting id="sync-disconnect" class="setting-subgroup" type="control" collapsed="true">
+        <button label="&sync.disconnect;" oncommand="WeaveGlue.disconnect();" />
+      </setting>
+    </flyoutpanel>
+
+    <flyoutpanel id="prefs-flyoutpanel" headertext="&optionsHeader.title;">
+      <settings id="prefs-startup" label="&optionsHeader.startup.title;"> <!-- note, this element has a custom margin-top -->
+        <setting id="prefs-homepage" title="&optionsHeader.homepage.title;" type="menulist" pref="browser.startup.sessionRestore" class="setting-expanded">
+          <menulist id="prefs-homepage-options">
+            <menupopup id="prefs-homepage-popup" position="after_end">
+              <menuitem id="prefs-homepage-default" label="&optionsHeader.homepage.startPage.button;" value="false"/>
+              <menuitem id="prefs-homepage-session" label="&optionsHeader.homepage.sessionRestore.button;" value="true"/>
+            </menupopup>
+          </menulist>
+        </setting>
+      </settings>
+      <setting pref="browser.tabs.tabsOnly" title="&optionsHeader.tabs.title;" type="bool"/>
+      <settings id="prefs-charencoding" label="&optionsHeader.char.title;">
+        <setting pref="browser.menu.showCharacterEncoding" title="&optionsHeader.char.options.label;" type="bool"/>
+      </settings>
+      <settings id="prefs-privdata" label="&optionsHeader.privacy.clearPrivateData.title;">
+        <setting title="&optionsHeader.privacy.clearPrivateData.label;" type="control">
+          <button id="prefs-clear-data" label="&optionsHeader.privacy.clearPrivateData.button;" command="cmd_sanitize"/>
+        </setting>
+      </settings>
+      <setting pref="signon.rememberSignons" title="&optionsHeader.privacy.passwords.label;" type="bool"/>
+      <settings id="prefs-donottrack" label="&optionsHeader.privacy.doNotTrack.title;">
+        <setting pref="privacy.donottrackheader.enabled" title="&optionsHeader.privacy.doNotTrack.label;" type="bool"/>
+      </settings>
+
+      <setting id="prefs-master-password" title="&optionsHeader.privacy.masterPassword.label;" type="bool" oncommand="MasterPasswordUI.show(this.value);"/>
+    </flyoutpanel>
+
+    <!-- Form Helper form validation helper popup -->
+    <arrowbox id="form-helper-validation-container" class="arrowbox-dark" flex="1" hidden="true" offset="0" top="0" left="0">
+      <label/>
+    </arrowbox>
+
+#ifdef MOZ_SERVICES_SYNC
+    <box id="syncsetup-container" class="perm-modal-block" hidden="true">
+      <dialog id="syncsetup-dialog" class="content-dialog" flex="1">
+        <vbox class="prompt-inner">
+          <hbox class="prompt-title">
+            <description>&sync.setup.title;</description>
+          </hbox>
+          <vbox id="syncsetup-simple" class="syncsetup-page" flex="1">
+            <scrollbox id="sync-message" class="prompt-message" orient="vertical" flex="1">
+              <description class="syncsetup-desc" flex="1">&sync.setup.pair;</description>
+              <description class="link" flex="1" onclick="WeaveGlue.openTutorial();">&sync.setup.tutorial;</description>
+              <separator/>
+              <vbox flex="1" pack="center" align="start">
+                <description id="syncsetup-code1" class="syncsetup-code">....</description>
+                <description id="syncsetup-code2" class="syncsetup-code">....</description>
+                <description id="syncsetup-code3" class="syncsetup-code">....</description>
+              </vbox>
+              <separator/>
+              <description class="link" flex="1" onclick="WeaveGlue.openManual();">&sync.fallback;</description>
+              <separator flex="1"/>
+            </scrollbox>
+            <hbox class="prompt-buttons">
+              <button class="prompt-button" oncommand="WeaveGlue.close();">&sync.setup.cancel;</button>
+            </hbox>
+          </vbox>
+          <vbox id="syncsetup-waiting" class="syncsetup-page" flex="1" hidden="true">
+            <progressmeter id="syncsetup-progressbar" mode="undetermined"/>
+            <vbox id="syncsetup-waiting-top" align="center" flex="1">
+              <description id="syncsetup-waiting-desc" class="syncsetup-desc" flex="1">&sync.setup.waiting2;</description>
+              <description id="syncsetup-waitingdownload-desc" class="syncsetup-desc" hidden="true" flex="1">&sync.setup.waitingdownload;</description>
+            </vbox>
+            <hbox class="prompt-buttons" pack="center" align="end">
+              <button id="syncsetup-waiting-cancel" class="prompt-button" oncommand="WeaveGlue.close();">&sync.setup.cancel;</button>
+              <button id="syncsetup-waiting-close" class="prompt-button" hidden="true" oncommand="WeaveGlue.close();">&sync.setup.close;</button>
+            </hbox>
+          </vbox>
+          <vbox id="syncsetup-fallback" class="syncsetup-page" flex="1" hidden="true">
+            <scrollbox class="prompt-message" orient="vertical" flex="1">
+              <description class="syncsetup-desc" flex="1">&sync.setup.manual;</description>
+              <separator/>
+              <textbox id="syncsetup-account" class="prompt-edit" placeholder="&sync.account;" oninput="WeaveGlue.canConnect();"/>
+              <textbox id="syncsetup-password" class="prompt-edit" placeholder="&sync.password;" type="password" oninput="WeaveGlue.canConnect();"/>
+              <textbox id="syncsetup-synckey" class="prompt-edit" placeholder="&sync.recoveryKey;" oninput="WeaveGlue.canConnect();"/>
+              <separator class="thin"/>
+              <checkbox id="syncsetup-usecustomserver" label="&sync.customServer;" oncommand="WeaveGlue.toggleCustomServer();"/>
+              <textbox id="syncsetup-customserver" class="prompt-edit" placeholder="&sync.serverURL;"/>
+              <separator flex="1"/>
+            </scrollbox>
+            <hbox class="prompt-buttons">
+              <button class="prompt-button" oncommand="WeaveGlue.close();">&sync.setup.cancel;</button>
+              <separator/>
+              <button id="syncsetup-button-connect" class="prompt-button" oncommand="WeaveGlue.close(); WeaveGlue.connect();">&sync.setup.connect;</button>
+            </hbox>
+          </vbox>
+        </vbox>
+      </dialog>
+    </box>
+
+    <box id="syncpair-container" class="perm-modal-block" hidden="true">
+      <dialog id="syncpair-dialog" class="content-dialog" flex="1">
+        <vbox class="prompt-inner">
+          <hbox class="prompt-title">
+            <description>&sync.pair.title;</description>
+          </hbox>
+          <vbox id="syncpair-simple" class="syncsetup-page" flex="1">
+            <scrollbox id="sync-message" class="prompt-message" orient="vertical" flex="1">
+              <description class="syncsetup-desc" flex="1">&sync.pair.description;</description>
+              <description class="link" flex="1" onclick="SyncPairDevice.close(); WeaveGlue.openTutorial();">&sync.setup.tutorial;</description>
+              <separator/>
+              <vbox align="center" flex="1">
+                <textbox id="syncpair-code1" class="syncsetup-code" oninput="SyncPairDevice.onTextBoxInput(this);"/>
+                <textbox id="syncpair-code2" class="syncsetup-code" oninput="SyncPairDevice.onTextBoxInput(this);"/>
+                <textbox id="syncpair-code3" class="syncsetup-code" oninput="SyncPairDevice.onTextBoxInput(this);"/>
+              </vbox>
+              <separator flex="1"/>
+            </scrollbox>
+            <hbox class="prompt-buttons" pack="center">
+              <button class="prompt-button" oncommand="SyncPairDevice.close();">&sync.setup.cancel;</button>
+              <button id="syncpair-connectbutton" class="prompt-button" disabled="true" oncommand="SyncPairDevice.connect();">&sync.setup.connect;</button>
+            </hbox>
+          </vbox>
+        </vbox>
+      </dialog>
+    </box>
+#endif
+
+    <box id="context-container" class="menu-container" hidden="true">
+      <vbox id="context-popup" class="menu-popup">
+        <richlistbox id="context-commands" bindingType="contextmenu" flex="1">
+          <!-- priority="low" items are hidden by default when a context is being displayed
+               for two or more media types. (e.g. a linked image) -->
+          <!-- content types preceeded by '!' act as exclusion rules, the menu item will not 
+               be displayed if the content type is present. -->
+          <!-- Note the order of richlistitem here is important as it is reflected in the
+               menu itself. -->
+          <!-- ux spec: https://bug782810.bugzilla.mozilla.org/attachment.cgi?id=714804 -->
+
+          <!-- Text related -->
+          <!-- for text inputs, this will copy selected text, or if no text is selected, copy all -->
+          <richlistitem id="context-copy" type="copy,selectable" onclick="ContextCommands.copy();">
+            <label value="&contextTextCopy.label;"/>
+          </richlistitem>
+          <!-- only displayed if there is text on the clipboard -->
+          <richlistitem id="context-paste" type="paste" onclick="ContextCommands.paste();">
+            <label value="&contextTextPaste.label;"/>
+          </richlistitem>
+          <!-- Search Bing for "(text..)", displayed on selected content text only -->
+          <richlistitem id="context-search" type="selected-text,!input-text" onclick="ContextCommands.searchText(this);">
+            <label id="context-search-label" value=""/>
+          </richlistitem>
+          <!-- only display if there is text on the clipboard and the target is the urlbar -->
+          <richlistitem id="context-paste-n-go" type="paste-url" onclick="ContextCommands.pasteAndGo();">
+            <label value="&contextTextPasteAndGo.label;"/>
+          </richlistitem>
+          <!-- only displayed in inputs with text that do not have selection -->
+          <richlistitem id="context-select" type="selectable" onclick="ContextCommands.select();">
+            <label value="&contextTextSelect.label;"/>
+          </richlistitem>
+          <!-- only displayed in inputs with text that do not have selection -->
+          <richlistitem id="context-select-all" type="selectable" onclick="ContextCommands.selectAll();">
+            <label value="&contextTextSelectAll.label;"/>
+          </richlistitem>
+
+          <!-- Image related -->
+          <!-- save image to user pictures library -->
+          <richlistitem id="context-save-image-lib" type="image" onclick="ContextCommands.saveImageToLib();">
+            <label value="&contextSaveImageLib.label;"/>
+          </richlistitem>
+          <!-- copy image data to clipboard -->
+          <richlistitem id="context-copy-image" type="image" onclick="ContextCommands.copyImage();">
+            <label value="&contextCopyImage.label;"/>
+          </richlistitem>
+          <!-- copy the uri of the image src -->
+          <richlistitem id="context-copy-image-loc" type="image" onclick="ContextCommands.copyImageSrc();">
+            <label value="&contextCopyImageLocation.label;"/>
+          </richlistitem>
+          <!-- open the uri of the image src in a new tab -->
+          <richlistitem id="context-open-image-tab" type="image" priority="low" onclick="ContextCommands.openImageInNewTab();">
+            <label value="&contextOpenImageTab.label;"/>
+          </richlistitem>
+
+          <!-- Video related -->
+          <!-- save video to user videos library -->
+          <richlistitem id="context-save-video-lib" type="video" onclick="ContextCommands.saveVideoToLib();">
+            <label value="&contextSaveVideoLib.label;"/>
+          </richlistitem>
+          <!-- copy the uri of the video src -->
+          <richlistitem id="context-copy-video-loc" type="video" onclick="ContextCommands.copyVideoSrc();">
+            <label value="&contextCopyVideoLocation.label;"/>
+          </richlistitem>
+          <!-- open the uri of the video src in a new tab -->
+          <richlistitem id="context-open-video-tab" type="video" priority="low" onclick="ContextCommands.openVideoInNewTab();">
+            <label value="&contextOpenVideoTab.label;"/>
+          </richlistitem>
+
+          <!-- Link related -->
+          <!-- all of these apply to underlying link href values -->
+          <richlistitem id="context-open-in-new-tab" type="link" onclick="ContextCommands.openLinkInNewTab();">
+            <label value="&contextOpenLinkTab.label;"/>
+          </richlistitem>
+          <richlistitem id="context-copy-link" type="link" onclick="ContextCommands.copyLink();">
+            <label value="&contextCopyLinkHref.label;"/>
+          </richlistitem>
+          <richlistitem id="context-bookmark-link" type="link" priority="low" onclick="ContextCommands.bookmarkLink();">
+            <label value="&contextBookmarkLinkHref.label;"/>
+          </richlistitem>
+
+          <!-- App bar: 'more' button context menu -->
+          <richlistitem id="context-findinpage" type="find-in-page" onclick="ContextCommands.findInPage();">
+          <label value="&appbarFindInPage.label;"/>
+          </richlistitem>
+          <richlistitem id="context-viewondesktop" type="view-on-desktop" onclick="ContextCommands.viewOnDesktop();">
+          <label value="&appbarViewOnDesktop.label;"/>
+          </richlistitem>
+        </richlistbox>
+      </vbox>
+    </box>
+
+    <vbox id="select-container" class="menu-container" hidden="true">
+      <vbox id="select-popup" class="select-popup">
+        <richlistbox id="select-commands" flex="1"/>
+      </vbox>
+    </vbox>
+
+    <box id="menucontrol-container" class="menu-container" hidden="true">
+      <vbox id="menucontrol-popup" class="menu-popup">
+        <richlistbox id="menupopup-commands" onclick="if (event.target != this) MenuControlUI.selectByIndex(this.selectedIndex);" flex="1"/>
+      </vbox>
+    </box>
+
+    <box id="autofill-container" class="menu-container" hidden="true">
+      <vbox id="autofill-popup" class="menu-popup">
+        <richlistbox id="menupopup-commands" onclick="if (event.target != this) AutofillMenuUI.selectByIndex(this.selectedIndex);" flex="1"/>
+      </vbox>
+    </box>
+
+    <!-- alerts for content -->
+    <hbox id="alerts-container" hidden="true" align="start" bottom="0" onclick="AlertsHelper.click(event);">
+      <image id="alerts-image"/>
+      <vbox flex="1">
+        <label id="alerts-title" value=""/>
+        <description id="alerts-text" flex="1"/>
+      </vbox>
+    </hbox>
+  </stack>
+
+  <svg:svg height="0">
+    <svg:clipPath id="forward-button-clip-path" clipPathUnits="objectBoundingBox">
+      <svg:path d="M 0,0 C 0.15,0.12 0.25,0.3 0.25,0.5 0.25,0.7 0.15,0.88 0,1 L 1,1 1,0 0,0 z"/>
+    </svg:clipPath>
+    <svg:clipPath id="back-button-clip-path" clipPathUnits="userSpaceOnUse">
+      <svg:path d="m -1,-5 0,4.03 C 3.6,1.8 18,21.4 0,40 l 0,27 10000,0 0,-55 L 0,-5 z" />
+    </svg:clipPath>
+  </svg:svg>
+
+</window>

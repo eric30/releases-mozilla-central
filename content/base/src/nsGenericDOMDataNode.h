@@ -115,9 +115,6 @@ public:
                            bool aNotify);
   virtual nsresult UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
                              bool aNotify);
-  virtual bool GetAttr(int32_t aNameSpaceID, nsIAtom *aAttribute,
-                         nsAString& aResult) const;
-  virtual bool HasAttr(int32_t aNameSpaceID, nsIAtom *aAttribute) const;
   virtual const nsAttrName* GetAttrNameAt(uint32_t aIndex) const;
   virtual uint32_t GetAttrCount() const;
   virtual const nsTextFragment *GetText();
@@ -167,6 +164,34 @@ public:
 
   nsresult SplitData(uint32_t aOffset, nsIContent** aReturn,
                      bool aCloneAfterOriginal = true);
+
+  // WebIDL API
+  // Our XPCOM GetData is just fine for WebIDL
+  void SetData(const nsAString& aData, mozilla::ErrorResult& rv)
+  {
+    rv = SetData(aData);
+  }
+  // nsINode::Length() returns the right thing for our length attribute
+  void SubstringData(uint32_t aStart, uint32_t aCount, nsAString& aReturn,
+                     mozilla::ErrorResult& rv);
+  void AppendData(const nsAString& aData, mozilla::ErrorResult& rv)
+  {
+    rv = AppendData(aData);
+  }
+  void InsertData(uint32_t aOffset, const nsAString& aData,
+                  mozilla::ErrorResult& rv)
+  {
+    rv = InsertData(aOffset, aData);
+  }
+  void DeleteData(uint32_t aOffset, uint32_t aCount, mozilla::ErrorResult& rv)
+  {
+    rv = DeleteData(aOffset, aCount);
+  }
+  void ReplaceData(uint32_t aOffset, uint32_t aCount, const nsAString& aData,
+                   mozilla::ErrorResult& rv)
+  {
+    rv = ReplaceData(aOffset, aCount, aData);
+  }
 
   //----------------------------------------
 

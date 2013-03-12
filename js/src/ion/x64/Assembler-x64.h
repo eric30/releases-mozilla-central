@@ -11,6 +11,7 @@
 #include "ion/shared/Assembler-shared.h"
 #include "ion/CompactBuffer.h"
 #include "ion/IonCode.h"
+#include "mozilla/Util.h"
 
 namespace js {
 namespace ion {
@@ -91,6 +92,10 @@ static const Register IntArgReg3 = r9;
 static const uint32_t NumIntArgRegs = 4;
 static const Register IntArgRegs[NumIntArgRegs] = { rcx, rdx, r8, r9 };
 
+static const Register CallTempNonArgRegs[] = { rax, rdi, rbx, rsi };
+static const uint32_t NumCallTempNonArgRegs =
+    mozilla::ArrayLength(CallTempNonArgRegs);
+
 static const FloatRegister FloatArgReg0 = xmm0;
 static const FloatRegister FloatArgReg1 = xmm1;
 static const FloatRegister FloatArgReg2 = xmm2;
@@ -106,6 +111,10 @@ static const Register IntArgReg4 = r8;
 static const Register IntArgReg5 = r9;
 static const uint32_t NumIntArgRegs = 6;
 static const Register IntArgRegs[NumIntArgRegs] = { rdi, rsi, rdx, rcx, r8, r9 };
+
+static const Register CallTempNonArgRegs[] = { rax, rbx };
+static const uint32_t NumCallTempNonArgRegs =
+    mozilla::ArrayLength(CallTempNonArgRegs);
 
 static const FloatRegister FloatArgReg0 = xmm0;
 static const FloatRegister FloatArgReg1 = xmm1;
@@ -179,6 +188,16 @@ class Operand
         base_(reg.code()),
         disp_(disp)
     { }
+
+    Address toAddress() {
+        JS_ASSERT(kind() == REG_DISP);
+        return Address(Register::FromCode(base()), disp());
+    }
+
+    BaseIndex toBaseIndex() {
+        JS_ASSERT(kind() == SCALE);
+        return BaseIndex(Register::FromCode(base()), Register::FromCode(index()), scale(), disp());
+    }
 
     Kind kind() const {
         return kind_;
@@ -276,7 +295,7 @@ class Assembler : public AssemblerX86Shared
 
     // The buffer is about to be linked, make sure any constant pools or excess
     // bookkeeping has been flushed to the instruction stream.
-    void flush();
+    void finish();
 
     // Copy the assembly code to the given buffer, and perform any pending
     // relocations relying on the target address.
@@ -381,12 +400,36 @@ class Assembler : public AssemblerX86Shared
     void addq(const Register &src, const Register &dest) {
         masm.addq_rr(src.code(), dest.code());
     }
+    void addq(const Operand &src, const Register &dest) {
+        switch (src.kind()) {
+          case Operand::REG:
+            masm.addq_rr(src.reg(), dest.code());
+            break;
+          case Operand::REG_DISP:
+            masm.addq_mr(src.disp(), src.base(), dest.code());
+            break;
+          default:
+            JS_NOT_REACHED("unexpected operand kind");
+        }
+    }
 
     void subq(Imm32 imm, const Register &dest) {
         masm.subq_ir(imm.value, dest.code());
     }
     void subq(const Register &src, const Register &dest) {
         masm.subq_rr(src.code(), dest.code());
+    }
+    void subq(const Operand &src, const Register &dest) {
+        switch (src.kind()) {
+          case Operand::REG:
+            masm.subq_rr(src.reg(), dest.code());
+            break;
+          case Operand::REG_DISP:
+            masm.subq_mr(src.disp(), src.base(), dest.code());
+            break;
+          default:
+            JS_NOT_REACHED("unexpected operand kind");
+        }
     }
     void shlq(Imm32 imm, const Register &dest) {
         masm.shlq_i8r(imm.value, dest.code());
@@ -414,6 +457,9 @@ class Assembler : public AssemblerX86Shared
     }
     void xorq(const Register &src, const Register &dest) {
         masm.xorq_rr(src.code(), dest.code());
+    }
+    void xorq(Imm32 imm, const Register &dest) {
+        masm.xorq_ir(imm.value, dest.code());
     }
 
     void mov(ImmWord word, const Register &dest) {
@@ -468,6 +514,9 @@ class Assembler : public AssemblerX86Shared
     }
     void cmpq(const Operand &lhs, Imm32 rhs) {
         switch (lhs.kind()) {
+          case Operand::REG:
+            masm.cmpq_ir(rhs.value, lhs.reg());
+            break;
           case Operand::REG_DISP:
             masm.cmpq_im(rhs.value, lhs.disp(), lhs.base());
             break;
@@ -490,10 +539,10 @@ class Assembler : public AssemblerX86Shared
     void cmpq(const Register &lhs, const Register &rhs) {
         masm.cmpq_rr(rhs.code(), lhs.code());
     }
-    void cmpq(Imm32 lhs, const Register &rhs) {
-        masm.cmpq_ir(lhs.value, rhs.code());
+    void cmpq(const Register &lhs, Imm32 rhs) {
+        masm.cmpq_ir(rhs.value, lhs.code());
     }
-    
+
     void testq(const Register &lhs, Imm32 rhs) {
         masm.testq_i32r(rhs.value, lhs.code());
     }
@@ -522,14 +571,20 @@ class Assembler : public AssemblerX86Shared
         addPendingJump(src, target->raw(), Relocation::IONCODE);
     }
 
+    // Emit a CALL or CMP (nop) instruction. ToggleCall can be used to patch
+    // this instruction.
+    CodeOffsetLabel toggledCall(IonCode *target, bool enabled) {
+        CodeOffsetLabel offset(size());
+        JmpSrc src = enabled ? masm.call() : masm.cmp_eax();
+        addPendingJump(src, target->raw(), Relocation::IONCODE);
+        return offset;
+    }
+
     // Do not mask shared implementations.
     using AssemblerX86Shared::call;
 
-    void cvttsd2sq(const FloatRegister &src, const Register &dest) {
-        masm.cvttsd2sq_rr(src.code(), dest.code());
-    }
-    void cvttsd2s(const FloatRegister &src, const Register &dest) {
-        cvttsd2sq(src, dest);
+    void cvttsd2si(const FloatRegister &src, const Register &dest) {
+        masm.cvttsd2si_rr(src.code(), dest.code());
     }
     void cvtsq2sd(const Register &src, const FloatRegister &dest) {
         masm.cvtsq2sd_rr(src.code(), dest.code());
@@ -558,6 +613,31 @@ GetIntArgReg(uint32_t intArg, uint32_t floatArg, Register *out)
     if (arg >= NumIntArgRegs)
         return false;
     *out = IntArgRegs[arg];
+    return true;
+}
+
+// Get a register in which we plan to put a quantity that will be used as an
+// integer argument.  This differs from GetIntArgReg in that if we have no more
+// actual argument registers to use we will fall back on using whatever
+// CallTempReg* don't overlap the argument registers, and only fail once those
+// run out too.
+static inline bool
+GetTempRegForIntArg(uint32_t usedIntArgs, uint32_t usedFloatArgs, Register *out)
+{
+    if (GetIntArgReg(usedIntArgs, usedFloatArgs, out))
+        return true;
+    // Unfortunately, we have to assume things about the point at which
+    // GetIntArgReg returns false, because we need to know how many registers it
+    // can allocate.
+#if defined(_WIN64)
+    uint32_t arg = usedIntArgs + usedFloatArgs;
+#else
+    uint32_t arg = usedIntArgs;
+#endif
+    arg -= NumIntArgRegs;
+    if (arg >= NumCallTempNonArgRegs)
+        return false;
+    *out = CallTempNonArgRegs[arg];
     return true;
 }
 

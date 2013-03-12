@@ -19,13 +19,13 @@
 #include "nsAutoPtr.h"
 #include "nsWeakPtr.h"
 #include "nsIPrompt.h"
-#include "nsISupportsArray.h"
 #include "nsWeakReference.h"
 #include "nsThreadUtils.h"
 #include "nsTArray.h"
 #include "nsTObserverArray.h"
 #include "nsITimer.h"
 #include "nsPluginTags.h"
+#include "nsPluginPlayPreviewInfo.h"
 #include "nsIEffectiveTLDService.h"
 #include "nsIIDNService.h"
 #include "nsCRT.h"
@@ -81,7 +81,6 @@ public:
                                nsPluginInstanceOwner *aOwner);
   nsresult IsPluginEnabledForType(const char* aMimeType);
   nsresult IsPluginEnabledForExtension(const char* aExtension, const char* &aMimeType);
-  bool     IsPluginPlayPreviewForType(const char *aMimeType);
   nsresult GetBlocklistStateForType(const char *aMimeType, uint32_t *state);
 
   nsresult GetPluginCount(uint32_t* aPluginCount);
@@ -119,7 +118,6 @@ public:
 
   nsresult GetPluginName(nsNPAPIPluginInstance *aPluginInstance, const char** aPluginName);
   nsresult StopPluginInstance(nsNPAPIPluginInstance* aInstance);
-  nsresult HandleBadPlugin(PRLibrary* aLibrary, nsNPAPIPluginInstance *aInstance);
   nsresult GetPluginTagForInstance(nsNPAPIPluginInstance *aPluginInstance, nsIPluginTag **aPluginTag);
 
   nsresult
@@ -177,42 +175,29 @@ public:
 
   nsTArray< nsRefPtr<nsNPAPIPluginInstance> > *InstanceArray();
 
-  void DestroyRunningInstances(nsISupportsArray* aReloadDocs, nsPluginTag* aPluginTag);
+  void DestroyRunningInstances(nsTArray<nsCOMPtr<nsIDocument> >* aReloadDocs, nsPluginTag* aPluginTag);
 
   // Return the tag for |aLibrary| if found, nullptr if not.
   nsPluginTag* FindTagForLibrary(PRLibrary* aLibrary);
 
   // The last argument should be false if we already have an in-flight stream
   // and don't need to set up a new stream.
-  nsresult InstantiateEmbeddedPluginInstance(const char *aMimeType, nsIURI* aURL,
-                                             nsObjectLoadingContent *aContent,
-                                             nsPluginInstanceOwner** aOwner);
-
-  nsresult InstantiateFullPagePluginInstance(const char *aMimeType,
-                                             nsIURI* aURI,
-                                             nsObjectLoadingContent *aContent,
-                                             nsPluginInstanceOwner **aOwner,
-                                             nsIStreamListener **aStreamListener);
+  nsresult InstantiatePluginInstance(const char *aMimeType, nsIURI* aURL,
+                                     nsObjectLoadingContent *aContent,
+                                     nsPluginInstanceOwner** aOwner);
 
   // Does not accept NULL and should never fail.
   nsPluginTag* TagForPlugin(nsNPAPIPlugin* aPlugin);
 
   nsresult GetPlugin(const char *aMimeType, nsNPAPIPlugin** aPlugin);
 
-  nsresult NewEmbeddedPluginStreamListener(nsIURI* aURL, nsObjectLoadingContent *aContent,
-                                           nsNPAPIPluginInstance* aInstance,
-                                           nsIStreamListener **aStreamListener);
-
-  nsresult NewFullPagePluginStreamListener(nsIURI* aURI,
-                                           nsNPAPIPluginInstance *aInstance,
-                                           nsIStreamListener **aStreamListener);
+  nsresult NewPluginStreamListener(nsIURI* aURL,
+                                   nsNPAPIPluginInstance* aInstance,
+                                   nsIStreamListener **aStreamListener);
 
 private:
   nsresult
   TrySetUpPluginInstance(const char *aMimeType, nsIURI *aURL, nsPluginInstanceOwner *aOwner);
-
-  nsresult
-  NewEmbeddedPluginStream(nsIURI* aURL, nsObjectLoadingContent *aContent, nsNPAPIPluginInstance* aInstance);
 
   nsPluginTag*
   FindPreferredPlugin(const InfallibleTArray<nsPluginTag*>& matches);
@@ -277,9 +262,8 @@ private:
   nsRefPtr<nsPluginTag> mPlugins;
   nsRefPtr<nsPluginTag> mCachedPlugins;
   nsRefPtr<nsInvalidPluginTag> mInvalidPlugins;
-  nsTArray<nsCString> mPlayPreviewMimeTypes;
+  nsTArray< nsRefPtr<nsPluginPlayPreviewInfo> > mPlayPreviewMimeTypes;
   bool mPluginsLoaded;
-  bool mDontShowBadPluginMessage;
 
   // set by pref plugin.override_internal_types
   bool mOverrideInternalTypes;

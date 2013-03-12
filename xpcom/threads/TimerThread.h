@@ -11,6 +11,7 @@
 #include "nsIThread.h"
 
 #include "nsTimerImpl.h"
+#include "nsThreadUtils.h"
 
 #include "nsTArray.h"
 
@@ -49,6 +50,11 @@ public:
   void DoBeforeSleep();
   void DoAfterSleep();
 
+  bool IsOnTimerThread() const
+  {
+    return mThread == NS_GetCurrentThread();
+  }
+
 private:
   ~TimerThread();
 
@@ -79,6 +85,41 @@ private:
   uint32_t mDelayLineCounter;
   uint32_t mMinTimerPeriod;     // milliseconds
   TimeDuration mTimeoutAdjustment;
+};
+
+struct TimerAdditionComparator {
+  TimerAdditionComparator(const mozilla::TimeStamp &aNow,
+                          const mozilla::TimeDuration &aTimeoutAdjustment,
+                          nsTimerImpl *aTimerToInsert) :
+    now(aNow),
+    timeoutAdjustment(aTimeoutAdjustment)
+#ifdef DEBUG
+    , timerToInsert(aTimerToInsert)
+#endif
+  {}
+
+  PRBool LessThan(nsTimerImpl *fromArray, nsTimerImpl *newTimer) const {
+    NS_ABORT_IF_FALSE(newTimer == timerToInsert, "Unexpected timer ordering");
+
+    // Skip any overdue timers.
+
+    // XXXbz why?  Given our definition of overdue in terms of
+    // mTimeoutAdjustment, aTimer might be overdue already!  Why not
+    // just fire timers in order?
+    return now >= fromArray->mTimeout + timeoutAdjustment ||
+           fromArray->mTimeout <= newTimer->mTimeout;
+  }
+
+  PRBool Equals(nsTimerImpl* fromArray, nsTimerImpl* newTimer) const {
+    return PR_FALSE;
+  }
+
+private:
+  const mozilla::TimeStamp &now;
+  const mozilla::TimeDuration &timeoutAdjustment;
+#ifdef DEBUG
+  const nsTimerImpl * const timerToInsert;
+#endif
 };
 
 #endif /* TimerThread_h___ */

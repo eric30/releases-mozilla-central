@@ -44,11 +44,14 @@
 #include "nsIDOMAttr.h"
 #include "nsISMILAttr.h"
 #include "nsClientRect.h"
-#include "nsIDOMDOMTokenList.h"
+#include "nsEvent.h"
+#include "nsAttrValue.h"
+#include "mozilla/dom/BindingDeclarations.h"
+#include "nsIHTMLCollection.h"
 
 class nsIDOMEventListener;
 class nsIFrame;
-class nsIDOMNamedNodeMap;
+class nsIDOMMozNamedAttrMap;
 class nsIDOMCSSStyleDeclaration;
 class nsIURI;
 class nsINodeInfo;
@@ -60,7 +63,6 @@ class nsAttrValueOrString;
 class ContentUnbinder;
 class nsClientRect;
 class nsClientRectList;
-class nsIHTMLCollection;
 class nsContentList;
 class nsDOMTokenList;
 struct nsRect;
@@ -115,11 +117,12 @@ namespace mozilla {
 namespace dom {
 
 class Link;
+class UndoManager;
 
 // IID for the dom::Element interface
 #define NS_ELEMENT_IID \
-{ 0xc6c049a1, 0x96e8, 0x4580, \
-  { 0xa6, 0x93, 0xb9, 0x5f, 0x53, 0xbe, 0xe8, 0x1c } }
+{ 0xcae9f7e7, 0x6163, 0x47b5, \
+ { 0xa1, 0x63, 0x30, 0xc8, 0x1d, 0x2d, 0x79, 0x39 } }
 
 class Element : public FragmentOrElement
 {
@@ -337,7 +340,7 @@ public:
   // false
   inline bool HasDirAuto() const {
     return (!HasFixedDir() &&
-            (HasValidDir() || NodeInfo()->Equals(nsGkAtoms::bdi)));
+            (HasValidDir() || IsHTML(nsGkAtoms::bdi)));
   }
 
 protected:
@@ -416,7 +419,7 @@ public:
     return SetAttr(aNameSpaceID, aName, nullptr, aValue, aNotify);
   }
 
-  NS_IMETHOD GetAttributes(nsIDOMNamedNodeMap** aAttributes);
+  NS_IMETHOD GetAttributes(nsIDOMMozNamedAttrMap** aAttributes);
 
   /**
    * Helper for SetAttr/SetParsedAttr. This method will return true if aNotify
@@ -444,31 +447,24 @@ public:
                               nsIAtom* aPrefix,
                               const nsAttrValueOrString& aValue,
                               bool aNotify, nsAttrValue& aOldValue,
-                              uint8_t* aModType, bool* aHasListeners)
-  {
-    if (MaybeCheckSameAttrVal(aNamespaceID, aName, aPrefix, aValue, aNotify,
-                              aOldValue, aModType, aHasListeners)) {
-      nsAutoScriptBlocker scriptBlocker;
-      nsNodeUtils::AttributeSetToCurrentValue(this, aNamespaceID, aName);
-      return true;
-    }
-    return false;
-  }
+                              uint8_t* aModType, bool* aHasListeners);
 
   virtual nsresult SetAttr(int32_t aNameSpaceID, nsIAtom* aName, nsIAtom* aPrefix,
                            const nsAString& aValue, bool aNotify);
-  virtual nsresult SetParsedAttr(int32_t aNameSpaceID, nsIAtom* aName,
-                                 nsIAtom* aPrefix, nsAttrValue& aParsedValue,
-                                 bool aNotify);
-  virtual bool GetAttr(int32_t aNameSpaceID, nsIAtom* aName,
-                         nsAString& aResult) const;
-  virtual bool HasAttr(int32_t aNameSpaceID, nsIAtom* aName) const;
-  virtual bool AttrValueIs(int32_t aNameSpaceID, nsIAtom* aName,
-                             const nsAString& aValue,
-                             nsCaseTreatment aCaseSensitive) const;
-  virtual bool AttrValueIs(int32_t aNameSpaceID, nsIAtom* aName,
-                             nsIAtom* aValue,
-                             nsCaseTreatment aCaseSensitive) const;
+  nsresult SetParsedAttr(int32_t aNameSpaceID, nsIAtom* aName, nsIAtom* aPrefix,
+                         nsAttrValue& aParsedValue, bool aNotify);
+  // GetAttr is not inlined on purpose, to keep down codesize from all
+  // the inlined nsAttrValue bits for C++ callers.
+  bool GetAttr(int32_t aNameSpaceID, nsIAtom* aName,
+               nsAString& aResult) const;
+  inline bool HasAttr(int32_t aNameSpaceID, nsIAtom* aName) const;
+  // aCaseSensitive == eIgnoreCaase means ASCII case-insensitive matching.
+  inline bool AttrValueIs(int32_t aNameSpaceID, nsIAtom* aName,
+                          const nsAString& aValue,
+                          nsCaseTreatment aCaseSensitive) const;
+  inline bool AttrValueIs(int32_t aNameSpaceID, nsIAtom* aName,
+                          nsIAtom* aValue,
+                          nsCaseTreatment aCaseSensitive) const;
   virtual int32_t FindAttrValueIn(int32_t aNameSpaceID,
                                   nsIAtom* aName,
                                   AttrValuesArray* aValues,
@@ -516,6 +512,23 @@ private:
                           const MappedAttributeEntry* const aMaps[],
                           uint32_t aMapCount);
 
+protected:
+  inline bool GetAttr(int32_t aNameSpaceID, nsIAtom* aName,
+                      mozilla::dom::DOMString& aResult) const
+  {
+    NS_ASSERTION(nullptr != aName, "must have attribute name");
+    NS_ASSERTION(aNameSpaceID != kNameSpaceID_Unknown,
+                 "must have a real namespace ID!");
+    MOZ_ASSERT(aResult.HasStringBuffer() && aResult.StringBufferLength() == 0,
+               "Should have empty string coming in");
+    const nsAttrValue* val = mAttrsAndChildren.GetAttr(aName, aNameSpaceID);
+    if (val) {
+      val->ToString(aResult);
+    }
+    // else DOMString comes pre-emptied.
+    return val != nullptr;
+  }
+
 public:
   void GetTagName(nsAString& aTagName) const
   {
@@ -525,22 +538,33 @@ public:
   {
     GetAttr(kNameSpaceID_None, nsGkAtoms::id, aId);
   }
+  void GetId(mozilla::dom::DOMString& aId) const
+  {
+    GetAttr(kNameSpaceID_None, nsGkAtoms::id, aId);
+  }
   void SetId(const nsAString& aId)
   {
     SetAttr(kNameSpaceID_None, nsGkAtoms::id, aId, true);
   }
 
   nsDOMTokenList* GetClassList();
-  nsDOMAttributeMap* GetAttributes()
+  nsDOMAttributeMap* Attributes()
   {
-    nsDOMSlots *slots = DOMSlots();
+    nsDOMSlots* slots = DOMSlots();
     if (!slots->mAttributeMap) {
       slots->mAttributeMap = new nsDOMAttributeMap(this);
     }
 
     return slots->mAttributeMap;
   }
-  virtual void GetAttribute(const nsAString& aName, nsString& aReturn);
+  void GetAttribute(const nsAString& aName, nsString& aReturn)
+  {
+    mozilla::dom::DOMString str;
+    GetAttribute(aName, str);
+    str.ToString(aReturn);
+  }
+
+  void GetAttribute(const nsAString& aName, mozilla::dom::DOMString& aReturn);
   void GetAttributeNS(const nsAString& aNamespaceURI,
                       const nsAString& aLocalName,
                       nsAString& aReturn);
@@ -550,12 +574,12 @@ public:
                       const nsAString& aLocalName,
                       const nsAString& aValue,
                       ErrorResult& aError);
-  virtual void RemoveAttribute(const nsAString& aName,
-                               ErrorResult& aError);
+  void RemoveAttribute(const nsAString& aName,
+                       ErrorResult& aError);
   void RemoveAttributeNS(const nsAString& aNamespaceURI,
                          const nsAString& aLocalName,
                          ErrorResult& aError);
-  virtual bool HasAttribute(const nsAString& aName) const
+  bool HasAttribute(const nsAString& aName) const
   {
     return InternalGetExistingAttrNameFromQName(aName) != nullptr;
   }
@@ -695,6 +719,29 @@ public:
            0;
   }
 
+  virtual already_AddRefed<mozilla::dom::UndoManager> GetUndoManager()
+  {
+    return nullptr;
+  }
+
+  virtual bool UndoScope()
+  {
+    return false;
+  }
+
+  virtual void SetUndoScope(bool aUndoScope, mozilla::ErrorResult& aError)
+  {
+  }
+
+  virtual void GetInnerHTML(nsAString& aInnerHTML,
+                            mozilla::ErrorResult& aError);
+  virtual void SetInnerHTML(const nsAString& aInnerHTML,
+                            mozilla::ErrorResult& aError);
+  void GetOuterHTML(nsAString& aOuterHTML, mozilla::ErrorResult& aError);
+  void SetOuterHTML(const nsAString& aOuterHTML, mozilla::ErrorResult& aError);
+  void InsertAdjacentHTML(const nsAString& aPosition, const nsAString& aText,
+                          mozilla::ErrorResult& aError);
+
   //----------------------------------------
 
   /**
@@ -721,12 +768,15 @@ public:
    * through the full dispatching of the presshell of the aPresContext; if it's
    * false the event will be dispatched only as a DOM event.
    * If aPresContext is nullptr, this does nothing.
+   *
+   * @param aFlags      Extra flags for the dispatching event.  The true flags
+   *                    will be respected.
    */
   static nsresult DispatchClickEvent(nsPresContext* aPresContext,
                                      nsInputEvent* aSourceEvent,
                                      nsIContent* aTarget,
                                      bool aFullDispatch,
-                                     uint32_t aFlags,
+                                     const mozilla::widget::EventFlags* aFlags,
                                      nsEventStatus* aStatus);
 
   /**
@@ -835,10 +885,38 @@ public:
   nsresult
     GetElementsByClassName(const nsAString& aClassNames,
                            nsIDOMHTMLCollection** aResult);
-  void GetClassList(nsIDOMDOMTokenList** aClassList);
+  void GetClassList(nsISupports** aClassList);
 
   virtual JSObject* WrapObject(JSContext *aCx, JSObject *aScope,
                                bool *aTriedToWrap) MOZ_FINAL;
+
+  /**
+   * Locate an nsIEditor rooted at this content node, if there is one.
+   */
+  nsIEditor* GetEditorInternal();
+
+  /**
+   * Helper method for NS_IMPL_BOOL_ATTR macro.
+   * Gets value of boolean attribute. Only works for attributes in null
+   * namespace.
+   *
+   * @param aAttr    name of attribute.
+   * @param aValue   Boolean value of attribute.
+   */
+  NS_HIDDEN_(bool) GetBoolAttr(nsIAtom* aAttr) const
+  {
+    return HasAttr(kNameSpaceID_None, aAttr);
+  }
+
+  /**
+   * Helper method for NS_IMPL_BOOL_ATTR macro.
+   * Sets value of boolean attribute by removing attribute or setting it to
+   * the empty string. Only works for attributes in null namespace.
+   *
+   * @param aAttr    name of attribute.
+   * @param aValue   Boolean value of attribute.
+   */
+  NS_HIDDEN_(nsresult) SetBoolAttr(nsIAtom* aAttr, bool aValue);
 
 protected:
   /*
@@ -981,13 +1059,6 @@ protected:
    */
   virtual Element* GetOffsetRect(nsRect& aRect);
 
-  /**
-   * Retrieve the size of the padding rect of this element.
-   *
-   * @param aSize the size of the padding rect
-   */
-  nsIntSize GetPaddingRectSize();
-
   nsIFrame* GetStyledFrame();
 
   virtual Element* GetNameSpaceElement()
@@ -1078,11 +1149,50 @@ private:
 
   nsIScrollableFrame* GetScrollFrame(nsIFrame **aStyledFrame = nullptr);
 
+  nsresult GetMarkup(bool aIncludeSelf, nsAString& aMarkup);
+
   // Data members
   nsEventStates mState;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(Element, NS_ELEMENT_IID)
+
+inline bool
+Element::HasAttr(int32_t aNameSpaceID, nsIAtom* aName) const
+{
+  NS_ASSERTION(nullptr != aName, "must have attribute name");
+  NS_ASSERTION(aNameSpaceID != kNameSpaceID_Unknown,
+               "must have a real namespace ID!");
+
+  return mAttrsAndChildren.IndexOfAttr(aName, aNameSpaceID) >= 0;
+}
+
+inline bool
+Element::AttrValueIs(int32_t aNameSpaceID,
+                     nsIAtom* aName,
+                     const nsAString& aValue,
+                     nsCaseTreatment aCaseSensitive) const
+{
+  NS_ASSERTION(aName, "Must have attr name");
+  NS_ASSERTION(aNameSpaceID != kNameSpaceID_Unknown, "Must have namespace");
+
+  const nsAttrValue* val = mAttrsAndChildren.GetAttr(aName, aNameSpaceID);
+  return val && val->Equals(aValue, aCaseSensitive);
+}
+
+inline bool
+Element::AttrValueIs(int32_t aNameSpaceID,
+                     nsIAtom* aName,
+                     nsIAtom* aValue,
+                     nsCaseTreatment aCaseSensitive) const
+{
+  NS_ASSERTION(aName, "Must have attr name");
+  NS_ASSERTION(aNameSpaceID != kNameSpaceID_Unknown, "Must have namespace");
+  NS_ASSERTION(aValue, "Null value atom");
+
+  const nsAttrValue* val = mAttrsAndChildren.GetAttr(aName, aNameSpaceID);
+  return val && val->Equals(aValue, aCaseSensitive);
+}
 
 } // namespace dom
 } // namespace mozilla
@@ -1180,6 +1290,24 @@ _elementName::Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const        \
     return SetAttr(kNameSpaceID_None, nsGkAtoms::_atom, nullptr, aValue, true); \
   }
 
+/**
+ * A macro to implement the getter and setter for a given boolean
+ * valued content property. The method uses the GetBoolAttr and
+ * SetBoolAttr methods.
+ */
+#define NS_IMPL_BOOL_ATTR(_class, _method, _atom)                     \
+  NS_IMETHODIMP                                                       \
+  _class::Get##_method(bool* aValue)                                  \
+  {                                                                   \
+    *aValue = GetBoolAttr(nsGkAtoms::_atom);                          \
+    return NS_OK;                                                     \
+  }                                                                   \
+  NS_IMETHODIMP                                                       \
+  _class::Set##_method(bool aValue)                                   \
+  {                                                                   \
+    return SetBoolAttr(nsGkAtoms::_atom, aValue);                     \
+  }
+
 #define NS_FORWARD_NSIDOMELEMENT_TO_GENERIC                                   \
 typedef mozilla::dom::Element Element;                                        \
 NS_IMETHOD GetTagName(nsAString& aTagName) MOZ_FINAL                          \
@@ -1187,7 +1315,7 @@ NS_IMETHOD GetTagName(nsAString& aTagName) MOZ_FINAL                          \
   Element::GetTagName(aTagName);                                              \
   return NS_OK;                                                               \
 }                                                                             \
-NS_IMETHOD GetClassList(nsIDOMDOMTokenList** aClassList) MOZ_FINAL            \
+NS_IMETHOD GetClassList(nsISupports** aClassList) MOZ_FINAL                   \
 {                                                                             \
   Element::GetClassList(aClassList);                                          \
   return NS_OK;                                                               \

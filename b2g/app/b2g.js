@@ -174,7 +174,6 @@ pref("content.sink.perf_parse_time", 50000000);
 
 // Maximum scripts runtime before showing an alert
 pref("dom.max_chrome_script_run_time", 0); // disable slow script dialog for chrome
-pref("dom.max_script_run_time", 20);
 
 // plugins
 pref("plugin.disable", true);
@@ -182,7 +181,7 @@ pref("dom.ipc.plugins.enabled", true);
 
 // product URLs
 // The breakpad report server to link to in about:crashes
-pref("breakpad.reportURL", "http://crash-stats.mozilla.com/report/index/");
+pref("breakpad.reportURL", "https://crash-stats.mozilla.com/report/index/");
 pref("app.releaseNotesURL", "http://www.mozilla.com/%LOCALE%/b2g/%VERSION%/releasenotes/");
 pref("app.support.baseURL", "http://support.mozilla.com/b2g");
 pref("app.feedbackURL", "http://input.mozilla.com/feedback/");
@@ -234,16 +233,25 @@ pref("editor.singleLine.pasteNewlines", 2);
 pref("ui.dragThresholdX", 25);
 pref("ui.dragThresholdY", 25);
 
-// Layers Acceleration
-pref("layers.acceleration.disabled", false);
-#ifndef XP_WIN
-//TODO: turn this on for Windows in bug 808016
+// Layers Acceleration.  We can only have nice things on gonk, because
+// they're not maintained anywhere else.
+#ifndef MOZ_WIDGET_GONK
+pref("dom.ipc.tabs.disabled", true);
+pref("layers.offmainthreadcomposition.enabled", false);
+pref("layers.offmainthreadcomposition.animate-opacity", false);
+pref("layers.offmainthreadcomposition.animate-transform", false);
+pref("layers.offmainthreadcomposition.throttle-animations", false);
+pref("layers.async-video.enabled", false);
+#else
+pref("dom.ipc.tabs.disabled", false);
 pref("layers.offmainthreadcomposition.enabled", true);
-#endif
+pref("layers.acceleration.disabled", false);
 pref("layers.offmainthreadcomposition.animate-opacity", true);
 pref("layers.offmainthreadcomposition.animate-transform", true);
+pref("layers.offmainthreadcomposition.throttle-animations", true);
 pref("layers.async-video.enabled", true);
 pref("layers.async-pan-zoom.enabled", true);
+#endif
 
 // Web Notifications
 pref("notification.feature.enabled", true);
@@ -273,10 +281,14 @@ pref("content.image.allow_locking", true);
 pref("image.mem.min_discard_timeout_ms", 10000);
 pref("image.mem.max_decoded_image_kb", 5120); /* 5MB */
 
+// XXX this isn't a good check for "are touch events supported", but
+// we don't really have a better one at the moment.
+#ifdef MOZ_WIDGET_GONK
 // enable touch events interfaces
 pref("dom.w3c_touch_events.enabled", 1);
 pref("dom.w3c_touch_events.safetyX", 0); // escape borders in units of 1/240"
 pref("dom.w3c_touch_events.safetyY", 120); // escape borders in units of 1/240"
+#endif
 
 #ifdef MOZ_SAFE_BROWSING
 // Safe browsing does nothing unless this pref is set
@@ -314,16 +326,13 @@ pref("urlclassifier.alternate_error_page", "blocked");
 // The number of random entries to send with a gethash request.
 pref("urlclassifier.gethashnoise", 4);
 
-// Randomize all UrlClassifier data with a per-client key.
-pref("urlclassifier.randomizeclient", false);
-
 // The list of tables that use the gethash request to confirm partial results.
 pref("urlclassifier.gethashtables", "goog-phish-shavar,goog-malware-shavar");
 
 // If an urlclassifier table has not been updated in this number of seconds,
 // a gethash request will be forced to check that the result is still in
 // the database.
-pref("urlclassifier.confirm-age", 2700);
+pref("urlclassifier.max-complete-age", 2700);
 
 // URL for checking the reason for a malware warning.
 pref("browser.safebrowsing.malware.reportURL", "http://safebrowsing.clients.google.com/safebrowsing/diagnostic?client=%NAME%&hl=%LOCALE%&site=");
@@ -345,13 +354,6 @@ pref("content.ime.strict_policy", true);
 // $ adb shell setprop log.redirect-stdio true
 // $ adb shell start
 pref("browser.dom.window.dump.enabled", false);
-
-
-
-// Temporarily relax file:// origin checks so that we can use <img>s
-// from other dirs as webgl textures and more.  Remove me when we have
-// installable apps or wifi support.
-pref("security.fileuri.strict_origin_policy", false);
 
 // Default Content Security Policy to apply to privileged and certified apps
 pref("security.apps.privileged.CSP.default", "default-src *; script-src 'self'; object-src 'none'; style-src 'self' 'unsafe-inline'");
@@ -379,7 +381,6 @@ pref("dom.mozBrowserFramesEnabled", true);
 // We'll run out of PIDs on UNIX-y systems before we hit this limit.
 pref("dom.ipc.processCount", 100000);
 
-pref("dom.ipc.tabs.disabled", false);
 pref("dom.ipc.browser_frames.oop_by_default", false);
 
 // Temporary permission hack for WebSMS
@@ -395,6 +396,7 @@ pref("dom.mozAlarms.enabled", true);
 // NetworkStats
 #ifdef MOZ_B2G_RIL
 pref("dom.mozNetworkStats.enabled", true);
+pref("ril.lastKnownMcc", 724);
 #endif
 
 // WebSettings
@@ -441,6 +443,10 @@ pref("media.volume.steps", 10);
 //Enable/disable marionette server, set listening port
 pref("marionette.defaultPrefs.enabled", true);
 pref("marionette.defaultPrefs.port", 2828);
+#ifndef MOZ_WIDGET_GONK
+// On desktop builds, we need to force the socket to listen on localhost only
+pref("marionette.force-local", true);
+#endif
 #endif
 
 #ifdef MOZ_UPDATER
@@ -451,9 +457,9 @@ pref("shutdown.watchdog.timeoutSecs", 5);
 pref("b2g.update.apply-prompt-timeout", 60000); // milliseconds
 // Amount of time to wait after the user is idle before prompting to apply an update
 pref("b2g.update.apply-idle-timeout", 600000); // milliseconds
-// Amount of time the updater waits for the process to exit cleanly before
-// forcefully exiting the process
-pref("b2g.update.self-destruct-timeout", 5000); // milliseconds
+// Amount of time after which connection will be restarted if no progress
+pref("b2g.update.download-watchdog-timeout", 120000); // milliseconds
+pref("b2g.update.download-watchdog-max-retries", 5);
 
 pref("app.update.enabled", true);
 pref("app.update.auto", false);
@@ -472,6 +478,14 @@ pref("app.update.interval", 86400); // 1 day
 // Don't throttle background updates.
 pref("app.update.download.backgroundInterval", 0);
 
+// Retry update socket connections every 30 seconds in the cases of certain kinds of errors
+pref("app.update.socket.retryTimeout", 30000);
+
+// Max of 20 consecutive retries (total 10 minutes) before giving up and marking
+// the update download as failed.
+// Note: Offline errors will always retry when the network comes online.
+pref("app.update.socket.maxErrors", 20);
+
 // Enable update logging for now, to diagnose growing pains in the
 // field.
 pref("app.update.log", true);
@@ -487,7 +501,7 @@ pref("extensions.getAddons.cache.enabled", false);
 
 // Context Menu
 pref("ui.click_hold_context_menus", true);
-pref("ui.click_hold_context_menus.delay", 1000);
+pref("ui.click_hold_context_menus.delay", 750);
 
 // Enable device storage
 pref("device.storage.enabled", true);
@@ -513,13 +527,16 @@ pref("javascript.options.mem.log", false);
 // Increase mark slice time from 10ms to 30ms
 pref("javascript.options.mem.gc_incremental_slice_ms", 30);
 
-pref("javascript.options.mem.gc_high_frequency_heap_growth_max", 120);
-pref("javascript.options.mem.gc_high_frequency_heap_growth_min", 101);
+pref("javascript.options.mem.gc_high_frequency_heap_growth_max", 150);
+pref("javascript.options.mem.gc_high_frequency_heap_growth_min", 120);
 pref("javascript.options.mem.gc_high_frequency_high_limit_mb", 40);
 pref("javascript.options.mem.gc_high_frequency_low_limit_mb", 10);
-pref("javascript.options.mem.gc_low_frequency_heap_growth", 105);
+pref("javascript.options.mem.gc_low_frequency_heap_growth", 120);
 pref("javascript.options.mem.high_water_mark", 6);
 pref("javascript.options.mem.gc_allocation_threshold_mb", 3);
+
+// Allocation Threshold for workers
+pref("dom.workers.mem.gc_allocation_threshold_mb", 3);
 
 // Show/Hide scrollbars when active/inactive
 pref("ui.showHideScrollbars", 1);
@@ -528,30 +545,45 @@ pref("ui.showHideScrollbars", 1);
 // documents a 1s grace period before they're eligible to be marked as
 // background.
 pref("dom.ipc.processPriorityManager.enabled", true);
-pref("dom.ipc.processPriorityManager.gracePeriodMS", 1000);
+pref("dom.ipc.processPriorityManager.backgroundGracePeriodMS", 1000);
+pref("dom.ipc.processPriorityManager.temporaryPriorityLockMS", 5000);
 
 // Kernel parameters for how processes are killed on low-memory.
 pref("gonk.systemMemoryPressureRecoveryPollMS", 5000);
 pref("hal.processPriorityManager.gonk.masterOomScoreAdjust", 0);
-pref("hal.processPriorityManager.gonk.masterKillUnderMB", 1);
-pref("hal.processPriorityManager.gonk.foregroundOomScoreAdjust", 67);
-pref("hal.processPriorityManager.gonk.foregroundKillUnderMB", 4);
+pref("hal.processPriorityManager.gonk.masterKillUnderMB", 4);
+pref("hal.processPriorityManager.gonk.foregroundHighOomScoreAdjust", 67);
+pref("hal.processPriorityManager.gonk.foregroundHighKillUnderMB", 5);
+pref("hal.processPriorityManager.gonk.foregroundOomScoreAdjust", 134);
+pref("hal.processPriorityManager.gonk.foregroundKillUnderMB", 6);
+pref("hal.processPriorityManager.gonk.backgroundPerceivableOomScoreAdjust", 200);
+pref("hal.processPriorityManager.gonk.backgroundPerceivableKillUnderMB", 7);
+pref("hal.processPriorityManager.gonk.backgroundHomescreenOomScoreAdjust", 267);
+pref("hal.processPriorityManager.gonk.backgroundHomescreenKillUnderMB", 8);
 pref("hal.processPriorityManager.gonk.backgroundOomScoreAdjust", 400);
-pref("hal.processPriorityManager.gonk.backgroundKillUnderMB", 8);
+pref("hal.processPriorityManager.gonk.backgroundKillUnderMB", 20);
 pref("hal.processPriorityManager.gonk.notifyLowMemUnderMB", 10);
 
 // Niceness values (i.e., CPU priorities) for B2G processes.
-pref("hal.processPriorityManager.gonk.masterNice", -1);
-pref("hal.processPriorityManager.gonk.foregroundNice", 0);
-pref("hal.processPriorityManager.gonk.backgroundNice", 10);
+pref("hal.processPriorityManager.gonk.masterNice", 0);
+pref("hal.processPriorityManager.gonk.foregroundHighNice", 0);
+pref("hal.processPriorityManager.gonk.foregroundNice", 1);
+pref("hal.processPriorityManager.gonk.backgroundPerceivableNice", 10);
+pref("hal.processPriorityManager.gonk.backgroundHomescreenNice", 20);
+pref("hal.processPriorityManager.gonk.backgroundNice", 20);
 
 #ifndef DEBUG
 // Enable pre-launching content processes for improved startup time
 // (hiding latency).
 pref("dom.ipc.processPrelaunch.enabled", true);
 // Wait this long before pre-launching a new subprocess.
-pref("dom.ipc.processPrelaunch.delayMs", 1000);
+pref("dom.ipc.processPrelaunch.delayMs", 5000);
 #endif
+
+// When a process receives a system message, we hold a CPU wake lock on its
+// behalf for this many seconds, or until it handles the system message,
+// whichever comes first.
+pref("dom.ipc.systemMessageCPULockTimeoutSec", 30);
 
 // Ignore the "dialog=1" feature in window.open.
 pref("dom.disable_window_open_dialog_feature", true);
@@ -581,6 +613,13 @@ pref("browser.prompt.allowNative", false);
 // a restart is required to enable a new value.
 pref("network.activity.blipIntervalMilliseconds", 250);
 
+// By default we want the NetworkManager service to manage Gecko's offline
+// status for us according to the state of Wifi/cellular data connections.
+// In some environments, such as the emulator or hardware with other network
+// connectivity, this is not desireable, however, in which case this pref
+// can be flipped to false.
+pref("network.gonk.manage-offline-status", true);
+
 pref("jsloader.reuseGlobal", true);
 
 // Enable font inflation for browser tab content.
@@ -595,3 +634,28 @@ pref("memory.free_dirty_pages", true);
 // UAProfile settings
 pref("wap.UAProf.url", "");
 pref("wap.UAProf.tagname", "x-wap-profile");
+
+pref("layout.imagevisibility.enabled", false);
+
+// Enable native identity (persona/browserid)
+pref("dom.identity.enabled", true);
+
+// Wait up to this much milliseconds when orientation changed
+pref("layers.orientation.sync.timeout", 1000);
+
+// Don't discard WebGL contexts for foreground apps on memory
+// pressure.
+pref("webgl.can-lose-context-in-foreground", false);
+
+// Allow nsMemoryInfoDumper to create a fifo in the temp directory.  We use
+// this fifo to trigger about:memory dumps, among other things.
+pref("memory_info_dumper.watch_fifo.enabled", true);
+pref("memory_info_dumper.watch_fifo.directory", "/data/local");
+
+// <input type='file'> implementation is not complete. We have to disable the
+// type to web content to help them do feature detection.
+pref("dom.disable_input_file", true);
+
+pref("general.useragent.enable_overrides", true);
+
+pref("b2g.version", @MOZ_B2G_VERSION@);

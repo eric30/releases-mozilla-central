@@ -12,6 +12,7 @@ LIBRARY_NAME     = dombindings_s
 LIBXUL_LIBRARY   = 1
 FORCE_STATIC_LIB = 1
 EXPORT_LIBRARY   = 1
+FAIL_ON_WARNINGS := 1
 
 include $(topsrcdir)/config/config.mk
 include $(topsrcdir)/ipc/chromium/chromium-config.mk
@@ -46,7 +47,8 @@ CPPSRCS = \
   $(linked_binding_cpp_files) \
   $(filter %.cpp, $(globalgen_targets)) \
   BindingUtils.cpp \
-  CallbackFunction.cpp \
+  CallbackInterface.cpp \
+  CallbackObject.cpp \
   DOMJSProxyHandler.cpp \
   $(NULL)
 
@@ -57,8 +59,11 @@ EXPORTS_mozilla = \
   $(NULL)
 
 EXPORTS_$(binding_include_path) = \
+  BindingDeclarations.h \
   BindingUtils.h \
   CallbackFunction.h \
+  CallbackInterface.h \
+  CallbackObject.h \
   DOMJSClass.h \
   DOMJSProxyHandler.h \
   Errors.msg \
@@ -70,7 +75,6 @@ EXPORTS_$(binding_include_path) = \
   TypedArray.h \
   UnionConversions.h \
   UnionTypes.h \
-  $(exported_binding_headers) \
   $(NULL)
 
 LOCAL_INCLUDES += -I$(topsrcdir)/js/xpconnect/src \
@@ -79,9 +83,50 @@ LOCAL_INCLUDES += -I$(topsrcdir)/js/xpconnect/src \
   -I$(topsrcdir)/content/html/content/src \
   -I$(topsrcdir)/media/webrtc/signaling/src/peerconnection \
   -I$(topsrcdir)/dom/base \
+  -I$(topsrcdir)/dom/battery \
+  -I$(topsrcdir)/content/xslt/src/base \
+  -I$(topsrcdir)/content/xslt/src/xpath \
+  -I$(topsrcdir)/content/xml/content/src \
+  -I$(topsrcdir)/content/xul/content/src \
   $(NULL)
 
+ifdef MOZ_AUDIO_CHANNEL_MANAGER
+LOCAL_INCLUDES += \
+  -I$(topsrcdir)/dom/system/gonk \
+  $(NULL)
+endif
+
+# XXXkhuey this is a terrible hack to avoid blowing out the command line
+ifneq (,$(filter-out all chrome default export realchrome tools clean clobber clobber_all distclean realclean,$(MAKECMDGOALS)))
+$(shell echo "$(addsuffix .pp,$(binding_header_files))" > pp.list)
+$(shell echo "$(addsuffix .pp,$(binding_cpp_files))" >> pp.list)
+
+# The script mddepend.pl checks the dependencies and writes to stdout
+# one rule to force out-of-date objects. For example,
+#   foo.o boo.o: FORCE
+# The script has an advantage over including the *.pp files directly
+# because it handles the case when header files are removed from the build.
+# 'make' would complain that there is no way to build missing headers.
+ALL_PP_RESULTS = $(shell cat pp.list | $(PERL) $(BUILD_TOOLS)/mddepend.pl)
+$(eval $(ALL_PP_RESULTS))
+
+endif
+
+EXPORTS_GENERATED_FILES := $(exported_binding_headers)
+EXPORTS_GENERATED_DEST := $(DIST)/include/$(binding_include_path)
+EXPORTS_GENERATED_TARGET := webidl-export
+INSTALL_TARGETS += EXPORTS_GENERATED
+
+ifdef GNU_CC
+CXXFLAGS += -Wno-uninitialized
+endif
+
 include $(topsrcdir)/config/rules.mk
+
+# We need to create a separate target so we can ensure that the pickle is
+# done before generating headers.
+export:: ParserResults.pkl
+	$(MAKE) webidl-export
 
 # If you change bindinggen_dependencies here, change it in
 # dom/bindings/test/Makefile.in too.
@@ -91,7 +136,6 @@ bindinggen_dependencies := \
   Configuration.py \
   Codegen.py \
   parser/WebIDL.py \
-  ParserResults.pkl \
   $(GLOBAL_DEPS) \
   $(NULL)
 
@@ -113,20 +157,26 @@ $(test_webidl_files): %: $(srcdir)/test/%
 
 $(binding_header_files): %Binding.h: $(bindinggen_dependencies) \
                                      %.webidl \
+                                     $(call mkdir_deps,$(MDDEPDIR)) \
                                      $(NULL)
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) $(topsrcdir)/config/pythonpath.py \
 	  $(PLY_INCLUDE) -I$(srcdir)/parser \
 	  $(srcdir)/BindingGen.py header \
-	  $(srcdir)/Bindings.conf $*Binding \
+	  $(srcdir)/Bindings.conf \
+	  $*Binding \
+	  $(topsrcdir)/dom/webidl/ \
 	  $*.webidl
 
 $(binding_cpp_files): %Binding.cpp: $(bindinggen_dependencies) \
                                     %.webidl \
+                                    $(call mkdir_deps,$(MDDEPDIR)) \
                                     $(NULL)
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) $(topsrcdir)/config/pythonpath.py \
 	  $(PLY_INCLUDE) -I$(srcdir)/parser \
 	  $(srcdir)/BindingGen.py cpp \
-	  $(srcdir)/Bindings.conf $*Binding \
+	  $(srcdir)/Bindings.conf \
+	  $*Binding \
+	  $(topsrcdir)/dom/webidl/ \
 	  $*.webidl
 
 $(globalgen_targets): ParserResults.pkl
@@ -147,6 +197,8 @@ globalgen_dependencies := \
   Configuration.py \
   Codegen.py \
   parser/WebIDL.py \
+  ../webidl/WebIDL.mk \
+  $(all_webidl_files) \
   $(CACHE_DIR)/.done \
   $(GLOBAL_DEPS) \
   $(NULL)
@@ -155,8 +207,7 @@ $(CACHE_DIR)/.done:
 	$(MKDIR) -p $(CACHE_DIR)
 	@$(TOUCH) $@
 
-ParserResults.pkl: $(globalgen_dependencies) \
-                   $(all_webidl_files)
+ParserResults.pkl: $(globalgen_dependencies)
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) $(topsrcdir)/config/pythonpath.py \
     $(PLY_INCLUDE) -I$(srcdir)/parser \
     $(srcdir)/GlobalGen.py $(srcdir)/Bindings.conf . \
@@ -179,4 +230,6 @@ GARBAGE += \
 # don't have issues with .cpp files being compiled before we've generated the
 # headers they depend on.  This is really only needed for the test files, since
 # the non-test headers are all exported above anyway.
-export:: $(binding_header_files)
+webidl-export:: $(binding_header_files)
+
+.PHONY: webidl-export

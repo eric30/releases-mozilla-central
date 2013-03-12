@@ -9,10 +9,20 @@ interface nsIEventTarget;
 interface nsIDNSRecord;
 interface nsIDNSListener;
 
+%{C++
+#include "nsTArray.h"
+
+namespace mozilla { namespace net {
+    struct DNSCacheEntries;
+} }
+%}
+
+[ptr] native EntriesArray(nsTArray<mozilla::net::DNSCacheEntries>);
+
 /**
  * nsIDNSService
  */
-[scriptable, uuid(F6E05CC3-8A13-463D-877F-D59B20B59724)]
+[scriptable, uuid(f1971942-19db-44bf-81e8-d15df220a39f)]
 interface nsIDNSService : nsISupports
 {
     /**
@@ -59,8 +69,9 @@ interface nsIDNSService : nsISupports
                             in nsresult          aReason);
     
     /**
-     * Called to synchronously resolve a hostname.  This method will fail
-     * if called from the main thread.
+     * called to synchronously resolve a hostname.  warning this method may
+     * block the calling thread for a long period of time.  it is extremely
+     * unwise to call this function on the UI thread of an application.
      *
      * @param aHostName
      *        the hostname or IP-address-literal to resolve.
@@ -72,6 +83,13 @@ interface nsIDNSService : nsISupports
      */
     nsIDNSRecord resolve(in AUTF8String   aHostName,
                          in unsigned long aFlags);
+
+    /**
+     * The method takes a pointer to an nsTArray
+     * and fills it with cache entry data
+     * Called by the networking dashboard
+     */
+    [noscript] void getDNSCacheEntries(in EntriesArray args);
 
     /**
      * @return the hostname of the operating system.
@@ -116,4 +134,9 @@ interface nsIDNSService : nsISupports
      * asyncResolve.
      */
     const unsigned long RESOLVE_OFFLINE = (1 << 6);
+
+    /**
+     * If set, only IPv6 addresses will be returned from resolve/asyncResolve.
+     */
+    const unsigned long RESOLVE_DISABLE_IPV4 = (1 << 7);
 };

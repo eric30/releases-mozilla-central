@@ -9,8 +9,9 @@
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsDOMClassInfoID.h"
 
-nsDOMTimeEvent::nsDOMTimeEvent(nsPresContext* aPresContext, nsEvent* aEvent)
-  : nsDOMEvent(aPresContext, aEvent ? aEvent : new nsUIEvent(false, 0, 0)),
+nsDOMTimeEvent::nsDOMTimeEvent(mozilla::dom::EventTarget* aOwner,
+                               nsPresContext* aPresContext, nsEvent* aEvent)
+  : nsDOMEvent(aOwner, aPresContext, aEvent ? aEvent : new nsUIEvent(false, 0, 0)),
     mDetail(0)
 {
   if (aEvent) {
@@ -25,8 +26,8 @@ nsDOMTimeEvent::nsDOMTimeEvent(nsPresContext* aPresContext, nsEvent* aEvent)
     mDetail = event->detail;
   }
 
-  mEvent->flags |= NS_EVENT_FLAG_CANT_BUBBLE |
-                   NS_EVENT_FLAG_CANT_CANCEL;
+  mEvent->mFlags.mBubbles = false;
+  mEvent->mFlags.mCancelable = false;
 
   if (mPresContext) {
     nsCOMPtr<nsISupports> container = mPresContext->GetContainer();
@@ -38,8 +39,6 @@ nsDOMTimeEvent::nsDOMTimeEvent(nsPresContext* aPresContext, nsEvent* aEvent)
     }
   }
 }
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsDOMTimeEvent)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsDOMTimeEvent, nsDOMEvent)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mView)
@@ -90,9 +89,10 @@ nsDOMTimeEvent::InitTimeEvent(const nsAString& aTypeArg,
 }
 
 nsresult NS_NewDOMTimeEvent(nsIDOMEvent** aInstancePtrResult,
+                            mozilla::dom::EventTarget* aOwner,
                             nsPresContext* aPresContext,
                             nsEvent* aEvent)
 {
-  nsDOMTimeEvent* it = new nsDOMTimeEvent(aPresContext, aEvent);
+  nsDOMTimeEvent* it = new nsDOMTimeEvent(aOwner, aPresContext, aEvent);
   return CallQueryInterface(it, aInstancePtrResult);
 }

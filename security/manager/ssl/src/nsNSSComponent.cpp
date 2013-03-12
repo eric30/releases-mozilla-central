@@ -19,30 +19,38 @@
 #include "nsIStreamListener.h"
 #include "nsIStringBundle.h"
 #include "nsIDirectoryService.h"
-#include "nsIDOMNode.h"
 #include "nsCURILoader.h"
 #include "nsDirectoryServiceDefs.h"
 #include "nsIX509Cert.h"
 #include "nsIX509CertDB.h"
-#include "nsIProfileChangeStatus.h"
 #include "nsNSSCertificate.h"
 #include "nsNSSHelper.h"
-#include "nsSmartCardMonitor.h"
 #include "prlog.h"
 #include "nsIPrefService.h"
 #include "nsIPrefBranch.h"
 #include "nsIDateTimeFormat.h"
 #include "nsDateTimeFormatCID.h"
+#include "nsThreadUtils.h"
+
+#ifndef MOZ_DISABLE_CRYPTOLEGACY
+#include "nsIDOMNode.h"
 #include "nsIDOMEvent.h"
 #include "nsIDOMDocument.h"
 #include "nsIDOMWindow.h"
 #include "nsIDOMWindowCollection.h"
+#include "nsIDocument.h"
 #include "nsIDOMSmartCardEvent.h"
+#include "nsSmartCardMonitor.h"
+#include "nsIDOMCryptoLegacy.h"
+#include "nsIPrincipal.h"
+#else
 #include "nsIDOMCrypto.h"
-#include "nsThreadUtils.h"
+#endif
+
 #include "nsCRT.h"
 #include "nsCRLInfo.h"
 #include "nsCertOverrideService.h"
+#include "nsNTLMAuthModule.h"
 
 #include "nsIWindowWatcher.h"
 #include "nsIPrompt.h"
@@ -57,9 +65,10 @@
 #include "nsITokenPasswordDialogs.h"
 #include "nsICRLManager.h"
 #include "nsNSSShutDown.h"
-#include "nsSmartCardEvent.h"
+#include "GeneratedEvents.h"
 #include "nsIKeyModule.h"
 #include "ScopedNSSTypes.h"
+#include "SharedSSLState.h"
 
 #include "nss.h"
 #include "pk11func.h"
@@ -77,6 +86,7 @@
 #include "cert.h"
 
 #include "nsXULAppAPI.h"
+#include <algorithm>
 
 #ifdef XP_WIN
 #include "nsILocalFileWin.h"
@@ -202,6 +212,7 @@ private:
   nsCOMPtr<nsIStreamListener> mListener;
 };
 
+#ifndef MOZ_DISABLE_CRYPTOLEGACY
 //This class is used to run the callback code
 //passed to the event handlers for smart card notification
 class nsTokenEventRunnable : public nsIRunnable {
@@ -236,6 +247,7 @@ nsTokenEventRunnable::Run()
 
   return nssComponent->DispatchEvent(mType, mTokenName);
 }
+#endif // MOZ_DISABLE_CRYPTOLEGACY
 
 bool nsPSMInitPanic::isPanic = false;
 
@@ -323,7 +335,9 @@ nsNSSComponent::nsNSSComponent()
   :mutex("nsNSSComponent.mutex"),
    mNSSInitialized(false),
    mCrlTimerLock("nsNSSComponent.mCrlTimerLock"),
+#ifndef MOZ_DISABLE_CRYPTOLEGACY
    mThreadList(nullptr),
+#endif
    mCertVerificationThread(nullptr)
 {
 #ifdef PR_LOGGING
@@ -400,7 +414,7 @@ nsNSSComponent::~nsNSSComponent()
   // All cleanup code requiring services needs to happen in xpcom_shutdown
 
   ShutdownNSS();
-  nsSSLIOLayerHelpers::Cleanup();
+  SharedSSLState::GlobalCleanup();
   RememberCertErrorsTable::Cleanup();
   --mInstanceCount;
   delete mShutdownObjectList;
@@ -412,6 +426,7 @@ nsNSSComponent::~nsNSSComponent()
   PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsNSSComponent::dtor finished\n"));
 }
 
+#ifndef MOZ_DISABLE_CRYPTOLEGACY
 NS_IMETHODIMP
 nsNSSComponent::PostEvent(const nsAString &eventType, 
                                                   const nsAString &tokenName)
@@ -464,52 +479,47 @@ nsNSSComponent::DispatchEvent(const nsAString &eventType,
 
 nsresult
 nsNSSComponent::DispatchEventToWindow(nsIDOMWindow *domWin,
-                      const nsAString &eventType, const nsAString &tokenName)
+                                      const nsAString &eventType,
+                                      const nsAString &tokenName)
 {
-  // first walk the children and dispatch their events 
-  {
-    nsresult rv;
-    nsCOMPtr<nsIDOMWindowCollection> frames;
-    rv = domWin->GetFrames(getter_AddRefs(frames));
-    if (NS_FAILED(rv)) {
-      return rv;
-    }
+  if (!domWin) {
+    return NS_OK;
+  }
 
-    uint32_t length;
-    frames->GetLength(&length);
-    uint32_t i;
-    for (i = 0; i < length; i++) {
-      nsCOMPtr<nsIDOMWindow> childWin;
-      frames->Item(i, getter_AddRefs(childWin));
-      DispatchEventToWindow(childWin, eventType, tokenName);
-    }
+  // first walk the children and dispatch their events 
+  nsresult rv;
+  nsCOMPtr<nsIDOMWindowCollection> frames;
+  rv = domWin->GetFrames(getter_AddRefs(frames));
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
+  uint32_t length;
+  frames->GetLength(&length);
+  uint32_t i;
+  for (i = 0; i < length; i++) {
+    nsCOMPtr<nsIDOMWindow> childWin;
+    frames->Item(i, getter_AddRefs(childWin));
+    DispatchEventToWindow(childWin, eventType, tokenName);
   }
 
   // check if we've enabled smart card events on this window
   // NOTE: it's not an error to say that we aren't going to dispatch
   // the event.
-  {
-    nsCOMPtr<nsIWindowCrypto> domWindow = do_QueryInterface(domWin);
-    if (!domWindow) {
-      return NS_OK; // nope, it's not an internal window
-    }
+  nsCOMPtr<nsIDOMCrypto> crypto;
+  domWin->GetCrypto(getter_AddRefs(crypto));
+  if (!crypto) {
+    return NS_OK; // nope, it doesn't have a crypto property
+  }
 
-    nsCOMPtr<nsIDOMCrypto> crypto;
-    domWindow->GetCrypto(getter_AddRefs(crypto));
-    if (!crypto) {
-      return NS_OK; // nope, it doesn't have a crypto property
-    }
-
-    bool boolrv;
-    crypto->GetEnableSmartCardEvents(&boolrv);
-    if (!boolrv) {
-      return NS_OK; // nope, it's not enabled.
-    }
+  bool boolrv;
+  crypto->GetEnableSmartCardEvents(&boolrv);
+  if (!boolrv) {
+    return NS_OK; // nope, it's not enabled.
   }
 
   // dispatch the event ...
 
-  nsresult rv;
   // find the document
   nsCOMPtr<nsIDOMDocument> doc;
   rv = domWin->GetDocument(getter_AddRefs(doc));
@@ -517,25 +527,15 @@ nsNSSComponent::DispatchEventToWindow(nsIDOMWindow *domWin,
     return NS_FAILED(rv) ? rv : NS_ERROR_FAILURE;
   }
 
+  nsCOMPtr<nsIDocument> d = do_QueryInterface(doc);
+
   // create the event
   nsCOMPtr<nsIDOMEvent> event;
-  rv = doc->CreateEvent(NS_LITERAL_STRING("Events"), 
-                        getter_AddRefs(event));
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
-
-  event->InitEvent(eventType, false, true);
-
-  // create the Smart Card Event;
-  nsCOMPtr<nsIDOMSmartCardEvent> smartCardEvent = 
-                                          new nsSmartCardEvent(tokenName);
-  // init the smart card event, fail here if we can't complete the 
-  // initialization.
-  rv = smartCardEvent->Init(event);
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
+  NS_NewDOMSmartCardEvent(getter_AddRefs(event), d, nullptr, nullptr);
+  nsCOMPtr<nsIDOMSmartCardEvent> smartCardEvent = do_QueryInterface(event);
+  rv = smartCardEvent->InitSmartCardEvent(eventType, false, true, tokenName);
+  NS_ENSURE_SUCCESS(rv, rv);
+  smartCardEvent->SetTrusted(true);
 
   // Send it 
   nsCOMPtr<nsIDOMEventTarget> target = do_QueryInterface(doc, &rv);
@@ -543,11 +543,9 @@ nsNSSComponent::DispatchEventToWindow(nsIDOMWindow *domWin,
     return rv;
   }
 
-  bool boolrv;
-  rv = target->DispatchEvent(smartCardEvent, &boolrv);
-  return rv;
+  return target->DispatchEvent(smartCardEvent, &boolrv);
 }
-
+#endif // MOZ_DISABLE_CRYPTOLEGACY
 
 NS_IMETHODIMP
 nsNSSComponent::PIPBundleFormatStringFromName(const char *name,
@@ -629,6 +627,7 @@ nsNSSComponent::GetNSSBundleString(const char *name,
   return rv;
 }
 
+#ifndef MOZ_DISABLE_CRYPTOLEGACY
 void
 nsNSSComponent::LaunchSmartCardThreads()
 {
@@ -684,6 +683,7 @@ nsNSSComponent::ShutdownSmartCardThreads()
   delete mThreadList;
   mThreadList = nullptr;
 }
+#endif // MOZ_DISABLE_CRYPTOLEGACY
 
 static char *
 nss_addEscape(const char *string, char quote)
@@ -1809,7 +1809,9 @@ nsNSSComponent::InitializeNSS(bool showWarningBox)
 
       InstallLoadableRoots();
 
+#ifndef MOZ_DISABLE_CRYPTOLEGACY
       LaunchSmartCardThreads();
+#endif
 
       PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("NSS Initialization done\n"));
     }
@@ -1830,7 +1832,7 @@ nsNSSComponent::InitializeNSS(bool showWarningBox)
   return NS_OK;
 }
 
-nsresult
+void
 nsNSSComponent::ShutdownNSS()
 {
   // Can be called both during init and profile change,
@@ -1839,7 +1841,6 @@ nsNSSComponent::ShutdownNSS()
   PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsNSSComponent::ShutdownNSS\n"));
 
   MutexAutoLock lock(mutex);
-  nsresult rv = NS_OK;
 
   if (hashTableCerts) {
     PL_HashTableEnumerateEntries(hashTableCerts, certHashtable_clearEntry, 0);
@@ -1858,11 +1859,10 @@ nsNSSComponent::ShutdownNSS()
       mPrefBranch->RemoveObserver("security.", this);
     }
 
+#ifndef MOZ_DISABLE_CRYPTOLEGACY
     ShutdownSmartCardThreads();
+#endif
     SSL_ClearSessionCache();
-    if (mClientAuthRememberService) {
-      mClientAuthRememberService->ClearRememberedDecisions();
-    }
     UnloadLoadableRoots();
     CleanupIdentityInfo();
     PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("evaporating psm resources\n"));
@@ -1870,14 +1870,11 @@ nsNSSComponent::ShutdownNSS()
     EnsureNSSInitialized(nssShutdown);
     if (SECSuccess != ::NSS_Shutdown()) {
       PR_LOG(gPIPNSSLog, PR_LOG_ALWAYS, ("NSS SHUTDOWN FAILURE\n"));
-      rv = NS_ERROR_FAILURE;
     }
     else {
       PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("NSS shutdown =====>> OK <<=====\n"));
     }
   }
-
-  return rv;
 }
  
 NS_IMETHODIMP
@@ -1920,6 +1917,10 @@ nsNSSComponent::Init()
     NS_ASSERTION(mPrefBranch, "Unable to get pref service");
   }
 
+  bool sendLM = false;
+  mPrefBranch->GetBoolPref("network.ntlm.send-lm-response", &sendLM);
+  nsNTLMAuthModule::SetSendLM(sendLM);
+
   // Do that before NSS init, to make sure we won't get unloaded.
   RegisterObservers();
 
@@ -1933,27 +1934,8 @@ nsNSSComponent::Init()
   }
 
   RememberCertErrorsTable::Init();
-  nsSSLIOLayerHelpers::Init();
-  char *unrestricted_hosts=nullptr;
-  mPrefBranch->GetCharPref("security.ssl.renego_unrestricted_hosts", &unrestricted_hosts);
-  if (unrestricted_hosts) {
-    nsSSLIOLayerHelpers::setRenegoUnrestrictedSites(nsDependentCString(unrestricted_hosts));
-    nsMemory::Free(unrestricted_hosts);
-    unrestricted_hosts=nullptr;
-  }
-
-  bool enabled = false;
-  mPrefBranch->GetBoolPref("security.ssl.treat_unsafe_negotiation_as_broken", &enabled);
-  nsSSLIOLayerHelpers::setTreatUnsafeNegotiationAsBroken(enabled);
-
-  int32_t warnLevel = 1;
-  mPrefBranch->GetIntPref("security.ssl.warn_missing_rfc5746", &warnLevel);
-  nsSSLIOLayerHelpers::setWarnLevelMissingRFC5746(warnLevel);
+  SharedSSLState::GlobalInit();
   
-  mClientAuthRememberService = new nsClientAuthRememberService;
-  if (mClientAuthRememberService)
-    mClientAuthRememberService->Init();
-
   createBackgroundThreads();
   if (!mCertVerificationThread)
   {
@@ -2154,9 +2136,7 @@ nsNSSComponent::RandomUpdate(void *entropy, int32_t bufLen)
 
 #define PROFILE_CHANGE_NET_TEARDOWN_TOPIC "profile-change-net-teardown"
 #define PROFILE_CHANGE_NET_RESTORE_TOPIC "profile-change-net-restore"
-#define PROFILE_APPROVE_CHANGE_TOPIC "profile-approve-change"
 #define PROFILE_CHANGE_TEARDOWN_TOPIC "profile-change-teardown"
-#define PROFILE_CHANGE_TEARDOWN_VETO_TOPIC "profile-change-teardown-veto"
 #define PROFILE_BEFORE_CHANGE_TOPIC "profile-before-change"
 #define PROFILE_DO_CHANGE_TOPIC "profile-do-change"
 
@@ -2164,15 +2144,9 @@ NS_IMETHODIMP
 nsNSSComponent::Observe(nsISupports *aSubject, const char *aTopic, 
                         const PRUnichar *someData)
 {
-  if (nsCRT::strcmp(aTopic, PROFILE_APPROVE_CHANGE_TOPIC) == 0) {
-    DoProfileApproveChange(aSubject);
-  }
-  else if (nsCRT::strcmp(aTopic, PROFILE_CHANGE_TEARDOWN_TOPIC) == 0) {
+  if (nsCRT::strcmp(aTopic, PROFILE_CHANGE_TEARDOWN_TOPIC) == 0) {
     PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("in PSM code, receiving change-teardown\n"));
     DoProfileChangeTeardown(aSubject);
-  }
-  else if (nsCRT::strcmp(aTopic, PROFILE_CHANGE_TEARDOWN_VETO_TOPIC) == 0) {
-    mShutdownObjectList->allowUI();
   }
   else if (nsCRT::strcmp(aTopic, PROFILE_BEFORE_CHANGE_TOPIC) == 0) {
     PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("receiving profile change topic\n"));
@@ -2187,7 +2161,6 @@ nsNSSComponent::Observe(nsISupports *aSubject, const char *aTopic,
       // it again. We use the same cleanup functionality used when switching
       // profiles. The order of function calls must correspond to the order
       // of notifications sent by Profile Manager (nsProfile).
-      DoProfileApproveChange(aSubject);
       DoProfileChangeNetTeardown();
       DoProfileChangeTeardown(aSubject);
       DoProfileBeforeChange(aSubject);
@@ -2209,10 +2182,6 @@ nsNSSComponent::Observe(nsISupports *aSubject, const char *aTopic,
     if (needsInit) {
       if (NS_FAILED(InitializeNSS(false))) { // do not show a warning box on failure
         PR_LOG(gPIPNSSLog, PR_LOG_ERROR, ("Unable to Initialize NSS after profile switch.\n"));
-        nsCOMPtr<nsIProfileChangeStatus> status = do_QueryInterface(aSubject);
-        if (status) {
-          status->ChangeFailed();
-        }
       }
     }
 
@@ -2271,20 +2240,6 @@ nsNSSComponent::Observe(nsISupports *aSubject, const char *aTopic,
       mPrefBranch->GetBoolPref("security.ssl.allow_unrestricted_renego_everywhere__temporarily_available_pref", &enabled);
       SSL_OptionSetDefault(SSL_ENABLE_RENEGOTIATION, 
         enabled ? SSL_RENEGOTIATE_UNRESTRICTED : SSL_RENEGOTIATE_REQUIRES_XTN);
-    } else if (prefName.Equals("security.ssl.renego_unrestricted_hosts")) {
-      char *unrestricted_hosts=nullptr;
-      mPrefBranch->GetCharPref("security.ssl.renego_unrestricted_hosts", &unrestricted_hosts);
-      if (unrestricted_hosts) {
-        nsSSLIOLayerHelpers::setRenegoUnrestrictedSites(nsDependentCString(unrestricted_hosts));
-        nsMemory::Free(unrestricted_hosts);
-      }
-    } else if (prefName.Equals("security.ssl.treat_unsafe_negotiation_as_broken")) {
-      mPrefBranch->GetBoolPref("security.ssl.treat_unsafe_negotiation_as_broken", &enabled);
-      nsSSLIOLayerHelpers::setTreatUnsafeNegotiationAsBroken(enabled);
-    } else if (prefName.Equals("security.ssl.warn_missing_rfc5746")) {
-      int32_t warnLevel = 1;
-      mPrefBranch->GetIntPref("security.ssl.warn_missing_rfc5746", &warnLevel);
-      nsSSLIOLayerHelpers::setWarnLevelMissingRFC5746(warnLevel);
 #ifdef SSL_ENABLE_FALSE_START // Requires NSS 3.12.8
     } else if (prefName.Equals("security.ssl.enable_false_start")) {
       mPrefBranch->GetBoolPref("security.ssl.enable_false_start", &enabled);
@@ -2298,6 +2253,10 @@ nsNSSComponent::Observe(nsISupports *aSubject, const char *aTopic,
                || prefName.Equals("security.OCSP.require")) {
       MutexAutoLock lock(mutex);
       setValidationOptions(mPrefBranch);
+    } else if (prefName.Equals("network.ntlm.send-lm-response")) {
+      bool sendLM = false;
+      mPrefBranch->GetBoolPref("network.ntlm.send-lm-response", &sendLM);
+      nsNTLMAuthModule::SetSendLM(sendLM);
     } else {
       /* Look through the cipher table and set according to pref setting */
       for (CipherPref* cp = CipherPrefs; cp->pref; ++cp) {
@@ -2387,9 +2346,7 @@ nsresult nsNSSComponent::LogoutAuthenticatedPK11()
             0);
   }
 
-  if (mClientAuthRememberService) {
-    mClientAuthRememberService->ClearRememberedDecisions();
-  }
+  nsClientAuthRememberService::ClearAllRememberedDecisions();
 
   return mShutdownObjectList->doPK11Logout();
 }
@@ -2414,9 +2371,7 @@ nsNSSComponent::RegisterObservers()
 
     observerService->AddObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID, false);
 
-    observerService->AddObserver(this, PROFILE_APPROVE_CHANGE_TOPIC, false);
     observerService->AddObserver(this, PROFILE_CHANGE_TEARDOWN_TOPIC, false);
-    observerService->AddObserver(this, PROFILE_CHANGE_TEARDOWN_VETO_TOPIC, false);
     observerService->AddObserver(this, PROFILE_BEFORE_CHANGE_TOPIC, false);
     observerService->AddObserver(this, PROFILE_DO_CHANGE_TOPIC, false);
     observerService->AddObserver(this, PROFILE_CHANGE_NET_TEARDOWN_TOPIC, false);
@@ -2439,9 +2394,7 @@ nsNSSComponent::DeregisterObservers()
 
     observerService->RemoveObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID);
 
-    observerService->RemoveObserver(this, PROFILE_APPROVE_CHANGE_TOPIC);
     observerService->RemoveObserver(this, PROFILE_CHANGE_TEARDOWN_TOPIC);
-    observerService->RemoveObserver(this, PROFILE_CHANGE_TEARDOWN_VETO_TOPIC);
     observerService->RemoveObserver(this, PROFILE_BEFORE_CHANGE_TOPIC);
     observerService->RemoveObserver(this, PROFILE_DO_CHANGE_TOPIC);
     observerService->RemoveObserver(this, PROFILE_CHANGE_NET_TEARDOWN_TOPIC);
@@ -2481,23 +2434,6 @@ nsNSSComponent::RememberCert(CERTCertificate *cert)
   return NS_OK;
 }
 
-static const char PROFILE_SWITCH_CRYPTO_UI_ACTIVE[] =
-                        "ProfileSwitchCryptoUIActive";
-static const char PROFILE_SWITCH_SOCKETS_STILL_ACTIVE[] =
-                        "ProfileSwitchSocketsStillActive";
-
-void
-nsNSSComponent::DoProfileApproveChange(nsISupports* aSubject)
-{
-  if (mShutdownObjectList->isUIActive()) {
-    ShowAlertFromStringBundle(PROFILE_SWITCH_CRYPTO_UI_ACTIVE);
-    nsCOMPtr<nsIProfileChangeStatus> status = do_QueryInterface(aSubject);
-    if (status) {
-      status->VetoChange();
-    }
-  }
-}
-
 void
 nsNSSComponent::DoProfileChangeNetTeardown()
 {
@@ -2509,23 +2445,7 @@ nsNSSComponent::DoProfileChangeNetTeardown()
 void
 nsNSSComponent::DoProfileChangeTeardown(nsISupports* aSubject)
 {
-  bool callVeto = false;
-
-  if (!mShutdownObjectList->ifPossibleDisallowUI()) {
-    callVeto = true;
-    ShowAlertFromStringBundle(PROFILE_SWITCH_CRYPTO_UI_ACTIVE);
-  }
-  else if (mShutdownObjectList->areSSLSocketsActive()) {
-    callVeto = true;
-    ShowAlertFromStringBundle(PROFILE_SWITCH_SOCKETS_STILL_ACTIVE);
-  }
-
-  if (callVeto) {
-    nsCOMPtr<nsIProfileChangeStatus> status = do_QueryInterface(aSubject);
-    if (status) {
-      status->VetoChange();
-    }
-  }
+  mShutdownObjectList->ifPossibleDisallowUI();
 }
 
 void
@@ -2549,12 +2469,7 @@ nsNSSComponent::DoProfileBeforeChange(nsISupports* aSubject)
   StopCRLUpdateTimer();
 
   if (needsCleanup) {
-    if (NS_FAILED(ShutdownNSS())) {
-      nsCOMPtr<nsIProfileChangeStatus> status = do_QueryInterface(aSubject);
-      if (status) {
-        status->ChangeFailed();
-      }
-    }
+    ShutdownNSS();
   }
   mShutdownObjectList->allowUI();
 }
@@ -2566,14 +2481,6 @@ nsNSSComponent::DoProfileChangeNetRestore()
   deleteBackgroundThreads();
   createBackgroundThreads();
   mIsNetworkDown = false;
-}
-
-NS_IMETHODIMP
-nsNSSComponent::GetClientAuthRememberService(nsClientAuthRememberService **cars)
-{
-  NS_ENSURE_ARG_POINTER(cars);
-  NS_IF_ADDREF(*cars = mClientAuthRememberService);
-  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -2744,7 +2651,7 @@ nsCryptoHash::UpdateFromStream(nsIInputStream *data, uint32_t aLen)
   
   while(NS_SUCCEEDED(rv) && len>0)
   {
-    readLimit = (uint32_t)NS_MIN<uint64_t>(NS_CRYPTO_HASH_BUFFER_SIZE, len);
+    readLimit = (uint32_t)std::min<uint64_t>(NS_CRYPTO_HASH_BUFFER_SIZE, len);
     
     rv = data->Read(buffer, readLimit, &read);
     
@@ -2937,7 +2844,7 @@ NS_IMETHODIMP nsCryptoHMAC::UpdateFromStream(nsIInputStream *aStream, uint32_t a
   
   while(NS_SUCCEEDED(rv) && len > 0)
   {
-    readLimit = (uint32_t)NS_MIN<uint64_t>(NS_CRYPTO_HASH_BUFFER_SIZE, len);
+    readLimit = (uint32_t)std::min<uint64_t>(NS_CRYPTO_HASH_BUFFER_SIZE, len);
     
     rv = aStream->Read(buffer, readLimit, &read);
     if (read == 0)

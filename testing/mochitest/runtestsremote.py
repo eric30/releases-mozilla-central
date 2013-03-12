@@ -8,6 +8,8 @@ import time
 import tempfile
 import re
 import traceback
+import shutil
+import math
 
 sys.path.insert(0, os.path.abspath(os.path.realpath(os.path.dirname(sys.argv[0]))))
 
@@ -91,7 +93,11 @@ class RemoteOptions(MochitestOptions):
                     help = "name of the file containing the view ID map (fennec_ids.txt)")
         defaults["robocopIds"] = ""
 
+        self.add_option("--remoteTestRoot", action = "store",
+                    type = "string", dest = "remoteTestRoot",
+                    help = "remote directory to use as test root (eg. /mnt/sdcard/tests or /data/local/tests)")
         defaults["remoteTestRoot"] = None
+
         defaults["logFile"] = "mochitest.log"
         defaults["autorun"] = True
         defaults["closeWhenDone"] = True
@@ -101,7 +107,8 @@ class RemoteOptions(MochitestOptions):
         self.set_defaults(**defaults)
 
     def verifyRemoteOptions(self, options, automation):
-        options.remoteTestRoot = automation._devicemanager.getDeviceRoot()
+        if not options.remoteTestRoot:
+            options.remoteTestRoot = automation._devicemanager.getDeviceRoot()
         productRoot = options.remoteTestRoot + "/" + automation._product
 
         if (options.utilityPath == self._automation.DIST_BIN):
@@ -168,6 +175,8 @@ class RemoteOptions(MochitestOptions):
                 return None
             options.robocopIds = os.path.abspath(options.robocopIds)
 
+        # allow us to keep original application around for cleanup while running robocop via 'am'
+        options.remoteappname = options.app
         return options
 
     def verifyOptions(self, options, mochitest):
@@ -266,6 +275,12 @@ class MochiRemote(Mochitest):
             print "ERROR: unable to find utility path for %s, please specify with --utility-path" % (os.name)
             sys.exit(1)
 
+        xpcshell_path = os.path.join(options.utilityPath, xpcshell)
+        if localAutomation.elf_arm(xpcshell_path):
+            self.error('xpcshell at %s is an ARM binary; please use '
+                       'the --utility-path argument to specify the path '
+                       'to a desktop version.' % xpcshell)
+
         options.profilePath = tempfile.mkdtemp()
         self.server = MochitestServer(localAutomation, options)
         self.server.start()
@@ -289,6 +304,20 @@ class MochiRemote(Mochitest):
         manifest = Mochitest.buildProfile(self, options)
         self.localProfile = options.profilePath
         self._dm.removeDir(self.remoteProfile)
+
+        # we do not need this for robotium based tests, lets save a LOT of time
+        if options.robocop:
+            shutil.rmtree(os.path.join(options.profilePath, 'webapps'))
+            shutil.rmtree(os.path.join(options.profilePath, 'extensions', 'staged', 'mochikit@mozilla.org'))
+            shutil.rmtree(os.path.join(options.profilePath, 'extensions', 'staged', 'worker-test@mozilla.org'))
+            shutil.rmtree(os.path.join(options.profilePath, 'extensions', 'staged', 'workerbootstrap-test@mozilla.org'))
+            shutil.rmtree(os.path.join(options.profilePath, 'extensions', 'staged', 'special-powers@mozilla.org'))
+            os.remove(os.path.join(options.profilePath, 'userChrome.css'))
+            if os.path.exists(os.path.join(options.profilePath, 'tests.jar')):
+                os.remove(os.path.join(options.profilePath, 'tests.jar'))
+            if os.path.exists(os.path.join(options.profilePath, 'tests.manifest')):
+                os.remove(os.path.join(options.profilePath, 'tests.manifest'))
+
         try:
             self._dm.pushDir(options.profilePath, self.remoteProfile)
         except devicemanager.DMError:
@@ -304,12 +333,14 @@ class MochiRemote(Mochitest):
         options.profilePath = self.localProfile
         env["MOZ_HIDE_RESULTS_TABLE"] = "1"
         retVal = Mochitest.buildURLOptions(self, options, env)
-        #we really need testConfig.js (for browser chrome)
-        try:
-            self._dm.pushDir(options.profilePath, self.remoteProfile)
-        except devicemanager.DMError:
-            print "Automation Error: Unable to copy profile to device."
-            raise
+
+        if not options.robocop:
+            #we really need testConfig.js (for browser chrome)
+            try:
+                self._dm.pushDir(options.profilePath, self.remoteProfile)
+            except devicemanager.DMError:
+                print "Automation Error: Unable to copy profile to device."
+                raise
 
         options.profilePath = self.remoteProfile
         options.logFile = self.localLog
@@ -339,13 +370,15 @@ class MochiRemote(Mochitest):
 
         restart = re.compile('0 INFO SimpleTest START.*')
         reend = re.compile('([0-9]+) INFO TEST-START . Shutdown.*')
+        refail = re.compile('([0-9]+) INFO TEST-UNEXPECTED-FAIL.*')
         start_found = False
         end_found = False
+        fail_found = False
         for line in data:
             if reend.match(line):
                 end_found = True
                 start_found = False
-                return
+                break
 
             if start_found and not end_found:
                 # Append the line without the number to increment
@@ -353,6 +386,15 @@ class MochiRemote(Mochitest):
 
             if restart.match(line):
                 start_found = True
+            if refail.match(line):
+                fail_found = True
+        result = 0
+        if fail_found:
+            result = 1
+        if not end_found:
+            print "ERROR: missing end of test marker (process crashed?)"
+            result = 1
+        return result
 
     def printLog(self):
         passed = 0
@@ -439,11 +481,11 @@ def main():
     options, args = parser.parse_args()
     if (options.dm_trans == "adb"):
         if (options.deviceIP):
-            dm = devicemanagerADB.DeviceManagerADB(options.deviceIP, options.devicePort)
+            dm = devicemanagerADB.DeviceManagerADB(options.deviceIP, options.devicePort, deviceRoot=options.remoteTestRoot)
         else:
-            dm = devicemanagerADB.DeviceManagerADB()
+            dm = devicemanagerADB.DeviceManagerADB(deviceRoot=options.remoteTestRoot)
     else:
-         dm = devicemanagerSUT.DeviceManagerSUT(options.deviceIP, options.devicePort)
+         dm = devicemanagerSUT.DeviceManagerSUT(options.deviceIP, options.devicePort, deviceRoot=options.remoteTestRoot)
     auto.setDeviceManager(dm)
     options = parser.verifyRemoteOptions(options, auto)
     if (options == None):
@@ -478,6 +520,19 @@ def main():
         # TODO: pull this in dynamically
         mp.read(options.robocop)
         robocop_tests = mp.active_tests(exists=False)
+        tests = []
+        my_tests = tests
+        for test in robocop_tests:
+            tests.append(test['name'])
+
+        if options.totalChunks:
+            tests_per_chunk = math.ceil(len(tests) / (options.totalChunks * 1.0))
+            start = int(round((options.thisChunk-1) * tests_per_chunk))
+            end = int(round(options.thisChunk * tests_per_chunk))
+            if end > len(tests):
+                end = len(tests)
+            my_tests = tests[start:end]
+            print "Running tests %d-%d/%d" % ((start+1), end, len(tests))
 
         deviceRoot = dm.getDeviceRoot()      
         dm.removeFile(os.path.join(deviceRoot, "fennec_ids.txt"))
@@ -488,31 +543,35 @@ def main():
         options.extraPrefs.append('robocop.logfile="%s/robocop.log"' % deviceRoot)
         options.extraPrefs.append('browser.search.suggest.enabled=true')
         options.extraPrefs.append('browser.search.suggest.prompted=true')
+        options.extraPrefs.append('browser.viewport.scaleRatio=100')
 
         if (options.dm_trans == 'adb' and options.robocopPath):
           dm._checkCmd(["install", "-r", os.path.join(options.robocopPath, "robocop.apk")])
 
-        appname = options.app
         retVal = None
         for test in robocop_tests:
             if options.testPath and options.testPath != test['name']:
                 continue
 
+            if not test['name'] in my_tests:
+                continue
+
             options.app = "am"
             options.browserArgs = ["instrument", "-w", "-e", "deviceroot", deviceRoot, "-e", "class"]
-            options.browserArgs.append("%s.tests.%s" % (appname, test['name']))
-            options.browserArgs.append("org.mozilla.roboexample.test/%s.FennecInstrumentationTestRunner" % appname)
+            options.browserArgs.append("%s.tests.%s" % (options.remoteappname, test['name']))
+            options.browserArgs.append("org.mozilla.roboexample.test/%s.FennecInstrumentationTestRunner" % options.remoteappname)
 
             try:
                 dm.recordLogcat()
                 result = mochitest.runTests(options)
                 if result != 0:
                     print "ERROR: runTests() exited with code %s" % result
+                log_result = mochitest.addLogData()
+                if result != 0 or log_result != 0:
                     mochitest.printDeviceInfo()
                 # Ensure earlier failures aren't overwritten by success on this run
                 if retVal is None or retVal == 0:
                     retVal = result
-                mochitest.addLogData()
             except:
                 print "Automation Error: Exception caught while running tests"
                 traceback.print_exc()
@@ -531,7 +590,9 @@ def main():
         else:
             # if we didn't have some kind of error running the tests, make
             # sure the tests actually passed
+            print "INFO | runtests.py | Test summary: start."
             overallResult = mochitest.printLog()
+            print "INFO | runtests.py | Test summary: end."
             if retVal == 0:
                 retVal = overallResult
     else:

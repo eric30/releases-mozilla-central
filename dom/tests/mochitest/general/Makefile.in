@@ -29,6 +29,8 @@ MOCHITEST_FILES = \
 		test_consoleAPI.html \
 		test_domWindowUtils.html \
 		test_domWindowUtils_scrollXY.html \
+		test_domWindowUtils_scrollbarSize.html \
+		file_domWindowUtils_scrollbarSize.html \
 		test_offsets.html \
 		test_offsets.js \
 		test_windowProperties.html \
@@ -47,6 +49,7 @@ MOCHITEST_FILES = \
 		test_performance_now.html \
 		test_interfaces.html \
 		test_idleapi_permissions.html \
+		test_stylesheetPI.html \
 		$(NULL)
 
 # Disable this test until bug 795711 is fixed.

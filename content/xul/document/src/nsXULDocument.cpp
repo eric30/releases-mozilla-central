@@ -29,8 +29,8 @@
 #include "nsError.h"
 #include "nsIBoxObject.h"
 #include "nsIChromeRegistry.h"
-#include "nsIView.h"
-#include "nsIViewManager.h"
+#include "nsView.h"
+#include "nsViewManager.h"
 #include "nsIContentViewer.h"
 #include "nsGUIEvent.h"
 #include "nsIDOMXULElement.h"
@@ -81,7 +81,6 @@
 #include "nsEventDispatcher.h"
 #include "nsIObserverService.h"
 #include "nsNodeUtils.h"
-#include "nsIDocShellTreeItem.h"
 #include "nsIDocShellTreeOwner.h"
 #include "nsIXULWindow.h"
 #include "nsXULPopupManager.h"
@@ -249,12 +248,6 @@ nsXULDocument::~nsXULDocument()
         NS_IF_RELEASE(kNC_persist);
         NS_IF_RELEASE(kNC_attribute);
         NS_IF_RELEASE(kNC_value);
-
-        // Remove the current document here from the table in
-        // case the document did not make it past StartLayout in
-        // ResumeWalk. 
-        if (mDocumentURI)
-            nsXULPrototypeCache::GetInstance()->RemoveFromCacheSet(mDocumentURI);
     }
 }
 
@@ -286,8 +279,6 @@ NS_NewXULDocument(nsIXULDocument** result)
 //
 // nsISupports interface
 //
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsXULDocument)
 
 static PLDHashOperator
 TraverseTemplateBuilders(nsISupports* aKey, nsIXULTemplateBuilder* aData,
@@ -2221,6 +2212,15 @@ nsXULDocument::ApplyPersistentAttributesToElements(nsIRDFResource* aResource,
     return NS_OK;
 }
 
+void
+nsXULDocument::TraceProtos(JSTracer* aTrc, uint32_t aGCNumber)
+{
+    uint32_t i, count = mPrototypes.Length();
+    for (i = 0; i < count; ++i) {
+        mPrototypes[i]->TraceProtos(aTrc, aGCNumber);
+    }
+}
+
 //----------------------------------------------------------------------
 //
 // nsXULDocument::ContextStack
@@ -2368,7 +2368,7 @@ nsXULDocument::PrepareToWalk()
 
     if (mState == eState_Master) {
         // Add the root element
-        rv = CreateElementFromPrototype(proto, getter_AddRefs(root));
+        rv = CreateElementFromPrototype(proto, getter_AddRefs(root), true);
         if (NS_FAILED(rv)) return rv;
 
         rv = AppendChildTo(root, false);
@@ -2873,7 +2873,8 @@ nsXULDocument::ResumeWalk()
 
                 if (!processingOverlayHookupNodes) {
                     rv = CreateElementFromPrototype(protoele,
-                                                    getter_AddRefs(child));
+                                                    getter_AddRefs(child),
+                                                    false);
                     if (NS_FAILED(rv)) return rv;
 
                     // ...and append it to the content model.
@@ -2932,7 +2933,7 @@ nsXULDocument::ResumeWalk()
                     if (NS_SUCCEEDED(rv) && blocked)
                         return NS_OK;
                 }
-                else if (scriptproto->mScriptObject.mObject) {
+                else if (scriptproto->GetScriptObject()) {
                     // An inline script
                     rv = ExecuteScript(scriptproto);
                     if (NS_FAILED(rv)) return rv;
@@ -3285,7 +3286,7 @@ nsXULDocument::LoadScript(nsXULPrototypeScript* aScriptProto, bool* aBlock)
 
     bool isChromeDoc = IsChromeURI(mDocumentURI);
 
-    if (isChromeDoc && aScriptProto->mScriptObject.mObject) {
+    if (isChromeDoc && aScriptProto->GetScriptObject()) {
         rv = ExecuteScript(aScriptProto);
 
         // Ignore return value from execution, and don't block
@@ -3308,7 +3309,7 @@ nsXULDocument::LoadScript(nsXULPrototypeScript* aScriptProto, bool* aBlock)
             aScriptProto->Set(newScriptObject);
         }
 
-        if (aScriptProto->mScriptObject.mObject) {
+        if (aScriptProto->GetScriptObject()) {
             rv = ExecuteScript(aScriptProto);
 
             // Ignore return value from execution, and don't block
@@ -3466,7 +3467,7 @@ nsXULDocument::OnStreamComplete(nsIStreamLoader* aLoader,
             if (useXULCache && IsChromeURI(mDocumentURI)) {
                 nsXULPrototypeCache::GetInstance()->PutScript(
                                    scriptProto->mSrcURI,
-                                   scriptProto->mScriptObject.mObject);
+                                   scriptProto->GetScriptObject());
             }
 
             if (mIsWritingFastLoad && mCurrentPrototype != mMasterPrototype) {
@@ -3517,7 +3518,7 @@ nsXULDocument::OnStreamComplete(nsIStreamLoader* aLoader,
         doc->mNextSrcLoadWaiter = nullptr;
 
         // Execute only if we loaded and compiled successfully, then resume
-        if (NS_SUCCEEDED(aStatus) && scriptProto->mScriptObject.mObject) {
+        if (NS_SUCCEEDED(aStatus) && scriptProto->GetScriptObject()) {
             doc->ExecuteScript(scriptProto);
         }
         doc->ResumeWalk();
@@ -3539,7 +3540,7 @@ nsXULDocument::ExecuteScript(nsIScriptContext * aContext, JSScript* aScriptObjec
 
     // Execute the precompiled script with the given version
     JSObject* global = mScriptGlobalObject->GetGlobalJSObject();
-    return aContext->ExecuteScript(aScriptObject, global, nullptr, nullptr);
+    return aContext->ExecuteScript(aScriptObject, global);
 }
 
 nsresult
@@ -3558,8 +3559,8 @@ nsXULDocument::ExecuteScript(nsXULPrototypeScript *aScript)
     // failure getting a script context is fatal.
     NS_ENSURE_TRUE(context != nullptr, NS_ERROR_UNEXPECTED);
 
-    if (aScript->mScriptObject.mObject)
-        rv = ExecuteScript(context, aScript->mScriptObject.mObject);
+    if (aScript->GetScriptObject())
+        rv = ExecuteScript(context, aScript->GetScriptObject());
     else
         rv = NS_ERROR_UNEXPECTED;
     return rv;
@@ -3568,7 +3569,8 @@ nsXULDocument::ExecuteScript(nsXULPrototypeScript *aScript)
 
 nsresult
 nsXULDocument::CreateElementFromPrototype(nsXULPrototypeElement* aPrototype,
-                                          Element** aResult)
+                                          Element** aResult,
+                                          bool aIsRoot)
 {
     // Create a content model element from a prototype element.
     NS_PRECONDITION(aPrototype != nullptr, "null ptr");
@@ -3591,7 +3593,7 @@ nsXULDocument::CreateElementFromPrototype(nsXULPrototypeElement* aPrototype,
     if (aPrototype->mNodeInfo->NamespaceEquals(kNameSpaceID_XUL)) {
         // If it's a XUL element, it'll be lightweight until somebody
         // monkeys with it.
-        rv = nsXULElement::Create(aPrototype, this, true, getter_AddRefs(result));
+        rv = nsXULElement::Create(aPrototype, this, true, aIsRoot, getter_AddRefs(result));
         if (NS_FAILED(rv)) return rv;
     }
     else {
@@ -3630,7 +3632,7 @@ nsXULDocument::CreateOverlayElement(nsXULPrototypeElement* aPrototype,
     nsresult rv;
 
     nsRefPtr<Element> element;
-    rv = CreateElementFromPrototype(aPrototype, getter_AddRefs(element));
+    rv = CreateElementFromPrototype(aPrototype, getter_AddRefs(element), false);
     if (NS_FAILED(rv)) return rv;
 
     OverlayForwardReference* fwdref =

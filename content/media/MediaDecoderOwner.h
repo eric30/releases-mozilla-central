@@ -56,6 +56,7 @@ public:
   virtual void MetadataLoaded(int aChannels,
                               int aRate,
                               bool aHasAudio,
+                              bool aHasVideo,
                               const MetadataTags* aTags) = 0;
 
   // Called by the video decoder object, on the main thread,
@@ -126,7 +127,9 @@ public:
     // is paused while it buffers up data
     NEXT_FRAME_UNAVAILABLE_BUFFERING,
     // The next frame of audio/video is unavailable for some other reasons
-    NEXT_FRAME_UNAVAILABLE
+    NEXT_FRAME_UNAVAILABLE,
+    // Sentinel value
+    NEXT_FRAME_UNINITIALIZED
   };
 
   // Called by the decoder when some data has been downloaded or

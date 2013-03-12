@@ -13,10 +13,14 @@
 #include "nsReadableUtils.h"
 #include "nsXBLProtoImplMethod.h"
 #include "nsIScriptContext.h"
+#include "nsJSUtils.h"
 #include "nsContentUtils.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsIXPConnect.h"
+#include "xpcpublic.h"
 #include "nsXBLPrototypeBinding.h"
+
+using namespace mozilla;
 
 nsXBLProtoImplMethod::nsXBLProtoImplMethod(const PRUnichar* aName) :
   nsXBLProtoImplMember(aName), 
@@ -91,40 +95,32 @@ nsXBLProtoImplMethod::SetLineNumber(uint32_t aLineNumber)
 }
 
 nsresult
-nsXBLProtoImplMethod::InstallMember(nsIScriptContext* aContext,
-                                    nsIContent* aBoundElement, 
-                                    JSObject* aScriptObject,
-                                    JSObject* aTargetClassObject,
-                                    const nsCString& aClassStr)
+nsXBLProtoImplMethod::InstallMember(JSContext* aCx,
+                                    JSObject* aTargetClassObject)
 {
   NS_PRECONDITION(IsCompiled(),
                   "Should not be installing an uncompiled method");
-  JSContext* cx = aContext->GetNativeContext();
+  MOZ_ASSERT(js::IsObjectInContextCompartment(aTargetClassObject, aCx));
 
-  nsIScriptGlobalObject* sgo = aBoundElement->OwnerDoc()->GetScopeObject();
-
-  if (!sgo) {
-    return NS_ERROR_UNEXPECTED;
-  }
-
-  NS_ASSERTION(aScriptObject, "uh-oh, script Object should NOT be null or bad things will happen");
-  if (!aScriptObject)
-    return NS_ERROR_FAILURE;
-
-  JSObject* globalObject = sgo->GetGlobalJSObject();
+  JSObject* globalObject = JS_GetGlobalForObject(aCx, aTargetClassObject);
+  JSObject* scopeObject = xpc::GetXBLScope(aCx, globalObject);
 
   // now we want to reevaluate our property using aContext and the script object for this window...
-  if (mJSMethodObject && aTargetClassObject) {
+  if (mJSMethodObject) {
     nsDependentString name(mName);
-    JSAutoRequest ar(cx);
-    JSAutoCompartment ac(cx, globalObject);
 
-    JSObject * method = ::JS_CloneFunctionObject(cx, mJSMethodObject, globalObject);
+    // First, make the function in the compartment of the scope object.
+    JSAutoCompartment ac(aCx, scopeObject);
+    JSObject * method = ::JS_CloneFunctionObject(aCx, mJSMethodObject, scopeObject);
     if (!method) {
       return NS_ERROR_OUT_OF_MEMORY;
     }
 
-    if (!::JS_DefineUCProperty(cx, aTargetClassObject,
+    // Then, enter the content compartment, wrap the method pointer, and define
+    // the wrapped version on the class object.
+    JSAutoCompartment ac2(aCx, aTargetClassObject);
+    if (!JS_WrapObject(aCx, &method) ||
+        !::JS_DefineUCProperty(aCx, aTargetClassObject,
                                static_cast<const jschar*>(mName),
                                name.Length(), OBJECT_TO_JSVAL(method),
                                NULL, NULL, JSPROP_ENUMERATE)) {
@@ -198,17 +194,19 @@ nsXBLProtoImplMethod::CompileMember(nsIScriptContext* aContext, const nsCString&
   }
 
   JSObject* methodObject = nullptr;
-  nsresult rv = aContext->CompileFunction(aClassObject,
-                                          cname,
-                                          paramCount,
-                                          const_cast<const char**>(args),
-                                          body, 
-                                          functionUri.get(),
-                                          uncompiledMethod->mBodyText.GetLineNumber(),
-                                          JSVERSION_LATEST,
-                                          /* aShared = */ true,
-                                          /* aIsXBL = */ true,
-                                          &methodObject);
+  AutoPushJSContext cx(aContext->GetNativeContext());
+  JSAutoRequest ar(cx);
+  JSAutoCompartment ac(cx, aClassObject);
+  JS::CompileOptions options(cx);
+  options.setFileAndLine(functionUri.get(),
+                         uncompiledMethod->mBodyText.GetLineNumber())
+         .setVersion(JSVERSION_LATEST)
+         .setUserBit(true); // Flag us as XBL
+  JS::RootedObject rootedNull(cx, nullptr); // See bug 781070.
+  nsresult rv = nsJSUtils::CompileFunction(cx, rootedNull, options, cname,
+                                           paramCount,
+                                           const_cast<const char**>(args),
+                                           body, &methodObject);
 
   // Destroy our uncompiled method and delete our arg list.
   delete uncompiledMethod;
@@ -291,7 +289,7 @@ nsXBLProtoImplAnonymousMethod::Execute(nsIContent* aBoundElement)
 
   nsAutoMicroTask mt;
 
-  JSContext* cx = context->GetNativeContext();
+  AutoPushJSContext cx(context->GetNativeContext());
 
   JSObject* globalObject = global->GetGlobalJSObject();
 
@@ -302,10 +300,21 @@ nsXBLProtoImplAnonymousMethod::Execute(nsIContent* aBoundElement)
                                getter_AddRefs(wrapper));
   NS_ENSURE_SUCCESS(rv, rv);
 
+  // Use nsCxPusher to make sure we call ScriptEvaluated when we're done.
+  //
+  // Make sure to do this before entering the compartment, since pushing Push()
+  // may call JS_SaveFrameChain(), which puts us back in an unentered state.
+  nsCxPusher pusher;
+  NS_ENSURE_STATE(pusher.Push(aBoundElement));
+  MOZ_ASSERT(cx == nsContentUtils::GetCurrentJSContext());
+
   JSObject* thisObject = JSVAL_TO_OBJECT(v);
+  JSObject* scopeObject = xpc::GetXBLScope(cx, globalObject);
 
   JSAutoRequest ar(cx);
-  JSAutoCompartment ac(cx, thisObject);
+  JSAutoCompartment ac(cx, scopeObject);
+  if (!JS_WrapObject(cx, &thisObject))
+      return NS_ERROR_OUT_OF_MEMORY;
 
   // Clone the function object, using thisObject as the parent so "this" is in
   // the scope chain of the resulting function (for backwards compat to the
@@ -315,10 +324,6 @@ nsXBLProtoImplAnonymousMethod::Execute(nsIContent* aBoundElement)
     return NS_ERROR_OUT_OF_MEMORY;
 
   // Now call the method
-
-  // Use nsCxPusher to make sure we call ScriptEvaluated when we're done.
-  nsCxPusher pusher;
-  NS_ENSURE_STATE(pusher.Push(aBoundElement));
 
   // Check whether it's OK to call the method.
   rv = nsContentUtils::GetSecurityManager()->CheckFunctionAccess(cx, method,

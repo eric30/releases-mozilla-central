@@ -61,9 +61,10 @@ FilterSetter(JSContext *cx, JSObject *wrapper, jsid id, js::PropertyDescriptor *
 template <typename Base, typename Policy>
 bool
 FilteringWrapper<Base, Policy>::getPropertyDescriptor(JSContext *cx, JSObject *wrapper, jsid id,
-                                                      bool set, js::PropertyDescriptor *desc)
+                                                      js::PropertyDescriptor *desc, unsigned flags)
 {
-    if (!Base::getPropertyDescriptor(cx, wrapper, id, set, desc))
+    assertEnteredPolicy(cx, wrapper, id);
+    if (!Base::getPropertyDescriptor(cx, wrapper, id, desc, flags))
         return false;
     return FilterSetter<Policy>(cx, wrapper, id, desc);
 }
@@ -71,9 +72,11 @@ FilteringWrapper<Base, Policy>::getPropertyDescriptor(JSContext *cx, JSObject *w
 template <typename Base, typename Policy>
 bool
 FilteringWrapper<Base, Policy>::getOwnPropertyDescriptor(JSContext *cx, JSObject *wrapper, jsid id,
-                                                         bool set, js::PropertyDescriptor *desc)
+                                                         js::PropertyDescriptor *desc,
+                                                         unsigned flags)
 {
-    if (!Base::getOwnPropertyDescriptor(cx, wrapper, id, set, desc))
+    assertEnteredPolicy(cx, wrapper, id);
+    if (!Base::getOwnPropertyDescriptor(cx, wrapper, id, desc, flags))
         return false;
     return FilterSetter<Policy>(cx, wrapper, id, desc);
 }
@@ -82,6 +85,7 @@ template <typename Base, typename Policy>
 bool
 FilteringWrapper<Base, Policy>::getOwnPropertyNames(JSContext *cx, JSObject *wrapper, AutoIdVector &props)
 {
+    assertEnteredPolicy(cx, wrapper, JSID_VOID);
     return Base::getOwnPropertyNames(cx, wrapper, props) &&
            Filter<Policy>(cx, wrapper, props);
 }
@@ -90,6 +94,7 @@ template <typename Base, typename Policy>
 bool
 FilteringWrapper<Base, Policy>::enumerate(JSContext *cx, JSObject *wrapper, AutoIdVector &props)
 {
+    assertEnteredPolicy(cx, wrapper, JSID_VOID);
     return Base::enumerate(cx, wrapper, props) &&
            Filter<Policy>(cx, wrapper, props);
 }
@@ -98,6 +103,7 @@ template <typename Base, typename Policy>
 bool
 FilteringWrapper<Base, Policy>::keys(JSContext *cx, JSObject *wrapper, AutoIdVector &props)
 {
+    assertEnteredPolicy(cx, wrapper, JSID_VOID);
     return Base::keys(cx, wrapper, props) &&
            Filter<Policy>(cx, wrapper, props);
 }
@@ -106,6 +112,7 @@ template <typename Base, typename Policy>
 bool
 FilteringWrapper<Base, Policy>::iterate(JSContext *cx, JSObject *wrapper, unsigned flags, Value *vp)
 {
+    assertEnteredPolicy(cx, wrapper, JSID_VOID);
     // We refuse to trigger the iterator hook across chrome wrappers because
     // we don't know how to censor custom iterator objects. Instead we trigger
     // the default proxy iterate trap, which will ask enumerate() for the list
@@ -115,27 +122,48 @@ FilteringWrapper<Base, Policy>::iterate(JSContext *cx, JSObject *wrapper, unsign
 
 template <typename Base, typename Policy>
 bool
+FilteringWrapper<Base, Policy>::nativeCall(JSContext *cx, JS::IsAcceptableThis test,
+                                           JS::NativeImpl impl, JS::CallArgs args)
+{
+    if (Policy::allowNativeCall(cx, test, impl))
+        return Base::Permissive::nativeCall(cx, test, impl, args);
+    return Base::Restrictive::nativeCall(cx, test, impl, args);
+}
+
+template <typename Base, typename Policy>
+bool
 FilteringWrapper<Base, Policy>::enter(JSContext *cx, JSObject *wrapper, jsid id,
                                       Wrapper::Action act, bool *bp)
 {
+    // This is a super ugly hacky to get around Xray Resolve wonkiness.
+    //
+    // Basically, XPCWN Xrays sometimes call into the Resolve hook of the
+    // scriptable helper, and pass the wrapper itself as the object upon which
+    // the resolve is happening. Then, special handling happens in
+    // XrayWrapper::defineProperty to detect the resolve and redefine the
+    // property on the holder. Really, we should just pass the holder itself to
+    // NewResolve, but there's too much code in nsDOMClassInfo that assumes this
+    // isn't the case (in particular, code expects to be able to look up
+    // properties on the object, which doesn't work for the holder). Given that
+    // these hooks are going away eventually with the new DOM bindings, let's
+    // just hack around this for now.
+    if (XrayUtils::IsXrayResolving(cx, wrapper, id)) {
+        *bp = true;
+        return true;
+    }
     if (!Policy::check(cx, wrapper, id, act)) {
-        if (JS_IsExceptionPending(cx)) {
-            *bp = false;
-            return false;
-        }
-        JSAutoCompartment ac(cx, wrapper);
-        *bp = Policy::deny(cx, id, act);
+        *bp = JS_IsExceptionPending(cx) ? false : Policy::deny(act);
         return false;
     }
     *bp = true;
-    return Base::enter(cx, wrapper, id, act, bp);
+    return true;
 }
 
 #define SOW FilteringWrapper<CrossCompartmentSecurityWrapper, OnlyIfSubjectIsSystem>
 #define SCSOW FilteringWrapper<SameCompartmentSecurityWrapper, OnlyIfSubjectIsSystem>
 #define XOW FilteringWrapper<SecurityXrayXPCWN, CrossOriginAccessiblePropertiesOnly>
 #define DXOW   FilteringWrapper<SecurityXrayDOM, CrossOriginAccessiblePropertiesOnly>
-#define NNXOW FilteringWrapper<CrossCompartmentSecurityWrapper, CrossOriginAccessiblePropertiesOnly>
+#define NNXOW FilteringWrapper<CrossCompartmentSecurityWrapper, Opaque>
 #define CW FilteringWrapper<SameCompartmentSecurityWrapper, ComponentsObjectPolicy>
 #define XCW FilteringWrapper<CrossCompartmentSecurityWrapper, ComponentsObjectPolicy>
 template<> SOW SOW::singleton(WrapperFactory::SCRIPT_ACCESS_ONLY_FLAG |

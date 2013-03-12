@@ -87,6 +87,7 @@
  "content/html/content/test/test_fullscreen-api.html": "TIMED_OUT",
  "content/html/content/test/test_iframe_sandbox_plugins.html": "",
  "content/html/content/test/test_object_plugin_nav.html": "TIMED_OUT",
+ "content/html/document/test/test_bug199692.html": "bug 811644",
  "content/html/document/test/test_bug369370.html": "",
  "content/html/document/test/test_bug391777.html": "",
  "content/html/document/test/test_bug445004.html": "",
@@ -125,6 +126,7 @@
  "docshell/test/test_bug344861.html": "",
  "docshell/test/test_bug94514.html": "TIMED_OUT",
  "docshell/test/test_bug413310.html": "",
+ "docshell/test/test_bug590573.html": "bug 823022",
  "docshell/test/test_bug598895.html": "",
  "docshell/test/test_bug637644.html": "",
  "docshell/test/test_bug668513.html": "RANDOM",
@@ -160,7 +162,7 @@
  "dom/indexedDB/test/test_webapp_clearBrowserData_oop_inproc.html": "No test app installed",
  "dom/network/tests/test_network_basics.html": "",
  "dom/permission/tests/test_permission_basics.html": "",
- "dom/sms/tests/test_sms_basics.html": "",
+ "dom/mobilemessage/tests/test_sms_basics.html": "",
  "dom/tests/mochitest/ajax/jquery/test_jQuery.html": "bug 775227",
  "dom/tests/mochitest/ajax/offline/test_simpleManifest.html": "TIMED_OUT",
  "dom/tests/mochitest/ajax/offline/test_updatingManifest.html": "TIMED_OUT",
@@ -306,6 +308,7 @@
  "toolkit/components/passwordmgr/test/test_master_password_cleanup.html": "",
  "toolkit/components/passwordmgr/test/test_notifications.html": "",
  "toolkit/components/passwordmgr/test/test_notifications_popup.html": "",
+ "toolkit/components/passwordmgr/test/test_privbrowsing_perwindowpb.html": "",
  "toolkit/components/passwordmgr/test/test_prompt.html": "TIMED_OUT",
  "toolkit/components/passwordmgr/test/test_prompt_async.html": "TIMED_OUT",
  "toolkit/components/passwordmgr/test/test_xhr.html": "TIMED_OUT",
@@ -328,6 +331,7 @@
  "uriloader/exthandler/tests/mochitest/test_handlerApps.xhtml": "",
  "widget/tests/test_bug760802.html": "",
  "dom/tests/mochitest/ajax/offline": "SLOW_DIRECTORY",
- "layout/base/tests": "SLOW_DIRECTORY"
+ "layout/base/tests": "SLOW_DIRECTORY",
+ "Harness_sanity/test_bug816847.html": "No test app installed"
  }
 }

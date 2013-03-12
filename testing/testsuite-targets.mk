@@ -6,11 +6,13 @@
 # Shortcut for mochitest* and xpcshell-tests targets,
 # replaces 'EXTRA_TEST_ARGS=--test-path=...'.
 ifdef TEST_PATH
-TEST_PATH_ARG := --test-path=$(TEST_PATH)
-PEPTEST_PATH_ARG := --test-path=$(TEST_PATH)
+TEST_PATH_ARG := --test-path="$(TEST_PATH)"
+PEPTEST_PATH_ARG := --test-path="$(TEST_PATH)"
+IPCPLUGINS_PATH_ARG := --test-path="$(TEST_PATH)"
 else
 TEST_PATH_ARG :=
 PEPTEST_PATH_ARG := --test-path=_tests/peptest/tests/firefox/firefox_all.ini
+IPCPLUGINS_PATH_ARG := --test-path=dom/plugins/test
 endif
 
 # include automation-build.mk to get the path to the binary
@@ -27,12 +29,21 @@ ifndef TEST_PACKAGE_NAME
 TEST_PACKAGE_NAME := $(ANDROID_PACKAGE_NAME)
 endif
 
+RUN_MOCHITEST_B2G_DESKTOP = \
+  rm -f ./$@.log && \
+  $(PYTHON) _tests/testing/mochitest/runtestsb2g.py --autorun --close-when-done \
+    --console-level=INFO --log-file=./$@.log --file-level=INFO \
+    --desktop --profile ${GAIA_PROFILE_DIR} \
+    --failure-file=$(call core_abspath,_tests/testing/mochitest/makefailures.json) \
+    $(TEST_PATH_ARG) $(EXTRA_TEST_ARGS)
+
 RUN_MOCHITEST = \
   rm -f ./$@.log && \
   $(PYTHON) _tests/testing/mochitest/runtests.py --autorun --close-when-done \
     --console-level=INFO --log-file=./$@.log --file-level=INFO \
     --failure-file=$(call core_abspath,_tests/testing/mochitest/makefailures.json) \
     --testing-modules-dir=$(call core_abspath,_tests/modules) \
+    --extra-profile-file=$(DIST)/plugins \
     $(SYMBOLS_PATH) $(TEST_PATH_ARG) $(EXTRA_TEST_ARGS)
 
 RERUN_MOCHITEST = \
@@ -41,6 +52,7 @@ RERUN_MOCHITEST = \
     --console-level=INFO --log-file=./$@.log --file-level=INFO \
     --run-only-tests=makefailures.json \
     --testing-modules-dir=$(call core_abspath,_tests/modules) \
+    --extra-profile-file=$(DIST)/plugins \
     $(SYMBOLS_PATH) $(TEST_PATH_ARG) $(EXTRA_TEST_ARGS)
 
 RUN_MOCHITEST_REMOTE = \
@@ -94,9 +106,19 @@ mochitest-robotium:
         $(RUN_MOCHITEST_ROBOTIUM); \
     fi
 
+ifdef MOZ_B2G
+mochitest-plain:
+	@if [ "${GAIA_PROFILE_DIR}"  = "" ]; then \
+        echo "please specify the GAIA_PROFILE_DIR env variable"; \
+    else \
+        $(RUN_MOCHITEST_B2G_DESKTOP); \
+        $(CHECK_TEST_ERROR_RERUN); \
+    fi
+else
 mochitest-plain:
 	$(RUN_MOCHITEST)
 	$(CHECK_TEST_ERROR_RERUN)
+endif
 
 mochitest-plain-rerun-failures:
 	$(RERUN_MOCHITEST)
@@ -119,13 +141,13 @@ mochitest-a11y:
 mochitest-ipcplugins:
 ifeq (Darwin,$(OS_ARCH))
 ifeq (i386,$(TARGET_CPU))
-	$(RUN_MOCHITEST) --setpref=dom.ipc.plugins.enabled.i386.test.plugin=false --test-path=dom/plugins/test
+	$(RUN_MOCHITEST) --setpref=dom.ipc.plugins.enabled.i386.test.plugin=false $(IPCPLUGINS_PATH_ARG)
 endif
 ifeq (x86_64,$(TARGET_CPU))
-	$(RUN_MOCHITEST) --setpref=dom.ipc.plugins.enabled.x86_64.test.plugin=false --test-path=dom/plugins/test
+	$(RUN_MOCHITEST) --setpref=dom.ipc.plugins.enabled.x86_64.test.plugin=false $(IPCPLUGINS_PATH_ARG)
 endif
 ifeq (powerpc,$(TARGET_CPU))
-	$(RUN_MOCHITEST) --setpref=dom.ipc.plugins.enabled.ppc.test.plugin=false --test-path=dom/plugins/test
+	$(RUN_MOCHITEST) --setpref=dom.ipc.plugins.enabled.ppc.test.plugin=false $(IPCPLUGINS_PATH_ARG)
 endif
 else
 	$(RUN_MOCHITEST) --setpref=dom.ipc.plugins.enabled=false --test-path=dom/plugins/test
@@ -153,17 +175,18 @@ endif
 
 # Usage: |make [EXTRA_TEST_ARGS=...] *test|.
 RUN_REFTEST = rm -f ./$@.log && $(PYTHON) _tests/reftest/runreftest.py \
-  $(SYMBOLS_PATH) $(EXTRA_TEST_ARGS) $(1) | tee ./$@.log
+  --extra-profile-file=$(DIST)/plugins \
+  $(SYMBOLS_PATH) $(EXTRA_TEST_ARGS) "$(1)" | tee ./$@.log
 
 REMOTE_REFTEST = rm -f ./$@.log && $(PYTHON) _tests/reftest/remotereftest.py \
   --dm_trans=$(DM_TRANS) --ignore-window-size \
   --app=$(TEST_PACKAGE_NAME) --deviceIP=${TEST_DEVICE} --xre-path=${MOZ_HOST_BIN} \
-  $(SYMBOLS_PATH) $(EXTRA_TEST_ARGS) $(1) | tee ./$@.log
+  $(SYMBOLS_PATH) $(EXTRA_TEST_ARGS) "$(1)" | tee ./$@.log
 
 RUN_REFTEST_B2G = rm -f ./$@.log && $(PYTHON) _tests/reftest/runreftestb2g.py \
   --remote-webserver=10.0.2.2 --b2gpath=${B2G_PATH} --adbpath=${ADB_PATH} \
   --xre-path=${MOZ_HOST_BIN} $(SYMBOLS_PATH) --ignore-window-size \
-  $(EXTRA_TEST_ARGS) $(1) | tee ./$@.log
+  $(EXTRA_TEST_ARGS) "$(1)" | tee ./$@.log
 
 ifeq ($(OS_ARCH),WINNT) #{
 # GPU-rendered shadow layers are unsupported here
@@ -238,7 +261,7 @@ jstestbrowser:
 	$(MAKE) -C $(DEPTH)/config
 	$(MAKE) -C $(DEPTH)/js/src/config
 	$(MAKE) stage-jstests
-	$(call RUN_REFTEST,$(DIST)/$(TESTS_PATH)/jstests.list --extra-profile-file=$(DIST)/$(TESTS_PATH)/user.js)
+	$(call RUN_REFTEST,$(DIST)/$(TESTS_PATH)/jstests.list --extra-profile-file=$(DIST)/test-package-stage/jsreftest/tests/user.js)
 	$(CHECK_TEST_ERROR)
 
 GARBAGE += $(addsuffix .log,$(MOCHITESTS) reftest crashtest jstestbrowser)
@@ -260,22 +283,6 @@ xpcshell-tests:
           $(SYMBOLS_PATH) \
 	  $(TEST_PATH_ARG) $(EXTRA_TEST_ARGS) \
 	  $(LIBXUL_DIST)/bin/xpcshell
-
-REMOTE_XPCSHELL = \
-	rm -f ./$@.log && \
-	$(PYTHON) -u $(topsrcdir)/config/pythonpath.py \
-	  -I$(topsrcdir)/build \
-	  -I$(topsrcdir)/testing/mozbase/mozdevice/mozdevice \
-	  $(topsrcdir)/testing/xpcshell/remotexpcshelltests.py \
-	  --manifest=$(DEPTH)/_tests/xpcshell/xpcshell.ini \
-	  --build-info-json=$(DEPTH)/mozinfo.json \
-	  --no-logfiles \
-	  --testing-modules-dir=$(call core_abspath,_tests/modules) \
-	  --dm_trans=$(DM_TRANS) \
-	  --deviceIP=${TEST_DEVICE} \
-	  --objdir=$(DEPTH) \
-	  $(SYMBOLS_PATH) \
-	  $(TEST_PATH_ARG) $(EXTRA_TEST_ARGS)
 
 B2G_XPCSHELL = \
 	rm -f ./@.log && \
@@ -311,7 +318,17 @@ xpcshell-tests-b2g:
 xpcshell-tests-remote: DM_TRANS?=adb
 xpcshell-tests-remote:
 	@if [ "${TEST_DEVICE}" != "" -o "$(DM_TRANS)" = "adb" ]; \
-          then $(call REMOTE_XPCSHELL); $(CHECK_TEST_ERROR); \
+          then $(PYTHON) -u $(topsrcdir)/testing/xpcshell/remotexpcshelltests.py \
+	    --manifest=$(DEPTH)/_tests/xpcshell/xpcshell_android.ini \
+	    --build-info-json=$(DEPTH)/mozinfo.json \
+	    --no-logfiles \
+	    --testing-modules-dir=$(call core_abspath,_tests/modules) \
+	    --dm_trans=$(DM_TRANS) \
+	    --deviceIP=${TEST_DEVICE} \
+	    --objdir=$(DEPTH) \
+	    $(SYMBOLS_PATH) \
+	    $(TEST_PATH_ARG) $(EXTRA_TEST_ARGS); \
+	    $(CHECK_TEST_ERROR); \
         else \
           echo "please prepare your host with environment variables for TEST_DEVICE"; \
         fi
@@ -329,6 +346,33 @@ RUN_PEPTEST = \
 peptest:
 	$(RUN_PEPTEST)
 	$(CHECK_TEST_ERROR)
+
+REMOTE_CPPUNITTESTS = \
+	$(PYTHON) -u $(topsrcdir)/testing/remotecppunittests.py \
+	  --xre-path=$(DEPTH)/dist/bin \
+	  --localLib=$(DEPTH)/dist/fennec \
+	  --dm_trans=$(DM_TRANS) \
+	  --deviceIP=${TEST_DEVICE} \
+	  $(TEST_PATH) $(EXTRA_TEST_ARGS)
+
+# Usage: |make [TEST_PATH=...] [EXTRA_TEST_ARGS=...] cppunittests-remote|.
+cppunittests-remote: DM_TRANS?=adb
+cppunittests-remote:
+	@if [ "${TEST_DEVICE}" != "" -o "$(DM_TRANS)" = "adb" ]; \
+          then $(call REMOTE_CPPUNITTESTS); \
+        else \
+          echo "please prepare your host with environment variables for TEST_DEVICE"; \
+        fi
+
+jetpack-tests:
+	$(PYTHON) $(topsrcdir)/addon-sdk/source/bin/cfx -b $(browser_path) --parseable testpkgs
+
+# -- -register
+# -- --trace-malloc malloc.log --shutdown-leaks=sdleak.log
+leaktest:
+	$(PYTHON) _leaktest/leaktest.py $(LEAKTEST_ARGS)
+
+
 
 # Package up the tests and test harnesses
 include $(topsrcdir)/toolkit/mozapps/installer/package-name.mk
@@ -369,6 +413,10 @@ ifeq ($(MOZ_WIDGET_TOOLKIT),android)
 package-tests: stage-android
 endif
 
+ifeq ($(MOZ_WIDGET_TOOLKIT),gonk)
+package-tests: stage-b2g
+endif
+
 make-stage-dir:
 	rm -rf $(PKG_STAGE)
 	$(NSINSTALL) -D $(PKG_STAGE)
@@ -379,6 +427,9 @@ make-stage-dir:
 	$(NSINSTALL) -D $(PKG_STAGE)/peptest
 	$(NSINSTALL) -D $(PKG_STAGE)/mozbase
 	$(NSINSTALL) -D $(PKG_STAGE)/modules
+
+stage-b2g: make-stage-dir
+	$(NSINSTALL) $(topsrcdir)/b2g/test/b2g-unittest-requirements.txt $(PKG_STAGE)/b2g
 
 robotium-id-map:
 ifeq ($(MOZ_BUILD_APP),mobile/android)
@@ -409,6 +460,7 @@ stage-android: make-stage-dir
 
 stage-jetpack: make-stage-dir
 	$(NSINSTALL) $(topsrcdir)/testing/jetpack/jetpack-location.txt $(PKG_STAGE)/jetpack
+	$(MAKE) -C $(DEPTH)/addon-sdk stage-tests-package
 
 stage-peptest: make-stage-dir
 	$(MAKE) -C $(DEPTH)/testing/peptest stage-package
@@ -448,6 +500,7 @@ stage-mozbase: make-stage-dir
   peptest \
   package-tests \
   make-stage-dir \
+  stage-b2g \
   stage-mochitest \
   stage-reftest \
   stage-xpcshell \

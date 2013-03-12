@@ -3,15 +3,17 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 #include <string>
 
+#include "CSFLog.h"
+
 #include "nspr.h"
 #include "cc_constants.h"
-#include "CSFLog.h"
-#include "CSFLogStream.h"
 
 #include "nricectx.h"
 #include "nricemediastream.h"
 #include "PeerConnectionImpl.h"
 #include "PeerConnectionMedia.h"
+#include "AudioConduit.h"
+#include "VideoConduit.h"
 #include "runnable_utils.h"
 
 #ifdef MOZILLA_INTERNAL_API
@@ -27,22 +29,6 @@ namespace sipcc {
 static const char* logTag = "PeerConnectionMedia";
 static const mozilla::TrackID TRACK_AUDIO = 0;
 static const mozilla::TrackID TRACK_VIDEO = 1;
-
-/* We get this callback in order to find out which tracks are audio and which
- * are video. We should get this callback right away for existing streams after
- * we add this class as a listener.
- */
-void
-LocalSourceStreamInfo::NotifyQueuedTrackChanges(
-  mozilla::MediaStreamGraph* aGraph,
-  mozilla::TrackID aID,
-  mozilla::TrackRate aTrackRate,
-  mozilla::TrackTicks aTrackOffset,
-  uint32_t aTrackEvents,
-  const mozilla::MediaSegment& aQueuedMedia)
-{
-  /* TODO: use this callback to keep track of changes to the MediaStream */
-}
 
 /* If the ExpectAudio hint is on we will add a track at the default first
  * audio track ID (0)
@@ -78,22 +64,34 @@ PeerConnectionImpl* PeerConnectionImpl::CreatePeerConnection()
 {
   PeerConnectionImpl *pc = new PeerConnectionImpl();
 
-  CSFLogDebugS(logTag, "Created PeerConnection: " << static_cast<void*>(pc));
+  CSFLogDebug(logTag, "Created PeerConnection: %p", pc);
 
   return pc;
 }
 
 
-nsresult PeerConnectionMedia::Init()
+nsresult PeerConnectionMedia::Init(const std::vector<NrIceStunServer>& stun_servers)
 {
   // TODO(ekr@rtfm.com): need some way to set not offerer later
   // Looks like a bug in the NrIceCtx API.
   mIceCtx = NrIceCtx::Create("PC:" + mParent->GetHandle(), true);
   if(!mIceCtx) {
-    CSFLogErrorS(logTag, __FUNCTION__ << ": Failed to create Ice Context");
+    CSFLogError(logTag, "%s: Failed to create Ice Context", __FUNCTION__);
     return NS_ERROR_FAILURE;
   }
-
+  nsresult rv;
+  if (NS_FAILED(rv = mIceCtx->SetStunServers(stun_servers))) {
+    CSFLogError(logTag, "%s: Failed to set stun servers", __FUNCTION__);
+    return rv;
+  }
+  if (NS_FAILED(rv = mDNSResolver->Init())) {
+    CSFLogError(logTag, "%s: Failed to initialize dns resolver", __FUNCTION__);
+    return rv;
+  }
+  if (NS_FAILED(rv = mIceCtx->SetResolver(mDNSResolver->AllocateResolver()))) {
+    CSFLogError(logTag, "%s: Failed to get dns resolver", __FUNCTION__);
+    return rv;
+  }
   mIceCtx->SignalGatheringCompleted.connect(this,
                                             &PeerConnectionMedia::IceGatheringCompleted);
   mIceCtx->SignalCompleted.connect(this,
@@ -107,21 +105,21 @@ nsresult PeerConnectionMedia::Init()
   RefPtr<NrIceMediaStream> dcStream = mIceCtx->CreateStream("stream3", 2);
 
   if (!audioStream) {
-    CSFLogErrorS(logTag, __FUNCTION__ << ": audio stream is NULL");
+    CSFLogError(logTag, "%s: audio stream is NULL", __FUNCTION__);
     return NS_ERROR_FAILURE;
   } else {
     mIceStreams.push_back(audioStream);
   }
 
   if (!videoStream) {
-    CSFLogErrorS(logTag, __FUNCTION__ << ": video stream is NULL");
+    CSFLogError(logTag, "%s: video stream is NULL", __FUNCTION__);
     return NS_ERROR_FAILURE;
   } else {
     mIceStreams.push_back(videoStream);
   }
 
   if (!dcStream) {
-    CSFLogErrorS(logTag, __FUNCTION__ << ": datachannel stream is NULL");
+    CSFLogError(logTag, "%s: datachannel stream is NULL", __FUNCTION__);
     return NS_ERROR_FAILURE;
   } else {
     mIceStreams.push_back(dcStream);
@@ -140,8 +138,8 @@ nsresult PeerConnectionMedia::Init()
   );
 
   if (NS_FAILED(res)) {
-    CSFLogErrorS(logTag, __FUNCTION__ << ": StartGathering failed: " <<
-        static_cast<uint32_t>(res));
+    CSFLogError(logTag, "%s: StartGathering failed: %u",
+      __FUNCTION__, static_cast<uint32_t>(res));
     return res;
   }
 
@@ -156,15 +154,16 @@ PeerConnectionMedia::AddStream(nsIDOMMediaStream* aMediaStream, uint32_t *stream
     return NS_ERROR_FAILURE;
   }
 
-  nsDOMMediaStream* stream = static_cast<nsDOMMediaStream*>(aMediaStream);
+  DOMMediaStream* stream = static_cast<DOMMediaStream*>(aMediaStream);
 
-  CSFLogDebugS(logTag, __FUNCTION__ << ": MediaStream: " << static_cast<void*>(aMediaStream));
+  CSFLogDebug(logTag, "%s: MediaStream: %p",
+    __FUNCTION__, aMediaStream);
 
   // Adding tracks here based on nsDOMMediaStream expectation settings
   uint32_t hints = stream->GetHintContents();
 
-  if (!(hints & (nsDOMMediaStream::HINT_CONTENTS_AUDIO |
-        nsDOMMediaStream::HINT_CONTENTS_VIDEO))) {
+  if (!(hints & (DOMMediaStream::HINT_CONTENTS_AUDIO |
+        DOMMediaStream::HINT_CONTENTS_VIDEO))) {
     CSFLogDebug(logTag, "Empty Stream !!");
     return NS_OK;
   }
@@ -173,13 +172,12 @@ PeerConnectionMedia::AddStream(nsIDOMMediaStream* aMediaStream, uint32_t *stream
   // allow one of each.
   // TODO(ekr@rtfm.com): remove this when multiple of each stream
   // is allowed
-  PR_Lock(mLocalSourceStreamsLock);
+  mozilla::MutexAutoLock lock(mLocalSourceStreamsLock);
   for (uint32_t u = 0; u < mLocalSourceStreams.Length(); u++) {
     nsRefPtr<LocalSourceStreamInfo> localSourceStream = mLocalSourceStreams[u];
 
     if (localSourceStream->GetMediaStream()->GetHintContents() & hints) {
       CSFLogError(logTag, "Only one stream of any given type allowed");
-      PR_Unlock(mLocalSourceStreamsLock);
       return NS_ERROR_FAILURE;
     }
   }
@@ -189,24 +187,16 @@ PeerConnectionMedia::AddStream(nsIDOMMediaStream* aMediaStream, uint32_t *stream
     new LocalSourceStreamInfo(stream);
   *stream_id = mLocalSourceStreams.Length();
 
-  if (hints & nsDOMMediaStream::HINT_CONTENTS_AUDIO) {
+  if (hints & DOMMediaStream::HINT_CONTENTS_AUDIO) {
     localSourceStream->ExpectAudio(TRACK_AUDIO);
   }
 
-  if (hints & nsDOMMediaStream::HINT_CONTENTS_VIDEO) {
+  if (hints & DOMMediaStream::HINT_CONTENTS_VIDEO) {
     localSourceStream->ExpectVideo(TRACK_VIDEO);
-  }
-
-  // Make it the listener for info from the MediaStream and add it to the list
-  mozilla::MediaStream *plainMediaStream = stream->GetStream();
-
-  if (plainMediaStream) {
-    plainMediaStream->AddListener(localSourceStream);
   }
 
   mLocalSourceStreams.AppendElement(localSourceStream);
 
-  PR_Unlock(mLocalSourceStreamsLock);
   return NS_OK;
 }
 
@@ -215,16 +205,16 @@ PeerConnectionMedia::RemoveStream(nsIDOMMediaStream* aMediaStream, uint32_t *str
 {
   MOZ_ASSERT(aMediaStream);
 
-  nsDOMMediaStream* stream = static_cast<nsDOMMediaStream*>(aMediaStream);
+  DOMMediaStream* stream = static_cast<DOMMediaStream*>(aMediaStream);
 
-  CSFLogDebugS(logTag, __FUNCTION__ << ": MediaStream: " << static_cast<void*>(aMediaStream));
+  CSFLogDebug(logTag, "%s: MediaStream: %p",
+    __FUNCTION__, aMediaStream);
 
-  PR_Lock(mLocalSourceStreamsLock);
+  mozilla::MutexAutoLock lock(mLocalSourceStreamsLock);
   for (uint32_t u = 0; u < mLocalSourceStreams.Length(); u++) {
     nsRefPtr<LocalSourceStreamInfo> localSourceStream = mLocalSourceStreams[u];
     if (localSourceStream->GetMediaStream() == stream) {
       *stream_id = u;
-      PR_Unlock(mLocalSourceStreamsLock);
       return NS_OK;
     }
   }
@@ -235,16 +225,16 @@ PeerConnectionMedia::RemoveStream(nsIDOMMediaStream* aMediaStream, uint32_t *str
 void
 PeerConnectionMedia::SelfDestruct()
 {
-   CSFLogDebugS(logTag, __FUNCTION__ << " Disconnecting media streams from PC");
+   CSFLogDebug(logTag, "%s: Disconnecting media streams from PC", __FUNCTION__);
 
    DisconnectMediaStreams();
 
-   CSFLogDebugS(logTag, __FUNCTION__ << " Disconnecting transport");
+   CSFLogDebug(logTag, "%s: Disconnecting transport", __FUNCTION__);
    // Shutdown the transport.
    RUN_ON_THREAD(mParent->GetSTSThread(), WrapRunnable(
        this, &PeerConnectionMedia::ShutdownMediaTransport), NS_DISPATCH_SYNC);
 
-  CSFLogDebugS(logTag, __FUNCTION__ << " Media shut down");
+  CSFLogDebug(logTag, "%s: Media shut down", __FUNCTION__);
 
   // This should destroy the object.
   this->Release();
@@ -268,6 +258,7 @@ PeerConnectionMedia::DisconnectMediaStreams()
 void
 PeerConnectionMedia::ShutdownMediaTransport()
 {
+  disconnect_all();
   mTransportFlows.clear();
   mIceStreams.clear();
   mIceCtx = NULL;
@@ -328,7 +319,7 @@ PeerConnectionMedia::IceStreamReady(NrIceMediaStream *aStream)
 {
   MOZ_ASSERT(aStream);
 
-  CSFLogDebugS(logTag, __FUNCTION__ << ": "  << aStream->name().c_str());
+  CSFLogDebug(logTag, "%s: %s", __FUNCTION__, aStream->name().c_str());
 }
 
 
@@ -338,7 +329,7 @@ LocalSourceStreamInfo::StorePipeline(int aTrack,
 {
   MOZ_ASSERT(mPipelines.find(aTrack) == mPipelines.end());
   if (mPipelines.find(aTrack) != mPipelines.end()) {
-    CSFLogErrorS(logTag, __FUNCTION__ << ": Storing duplicate track");
+    CSFLogError(logTag, "%s: Storing duplicate track", __FUNCTION__);
     return;
   }
   //TODO: Revisit once we start supporting multiple streams or multiple tracks
@@ -348,16 +339,39 @@ LocalSourceStreamInfo::StorePipeline(int aTrack,
 
 void
 RemoteSourceStreamInfo::StorePipeline(int aTrack,
-  mozilla::RefPtr<mozilla::MediaPipeline> aPipeline)
+                                      bool aIsVideo,
+                                      mozilla::RefPtr<mozilla::MediaPipeline> aPipeline)
 {
   MOZ_ASSERT(mPipelines.find(aTrack) == mPipelines.end());
   if (mPipelines.find(aTrack) != mPipelines.end()) {
-    CSFLogErrorS(logTag, __FUNCTION__ << ": Storing duplicate track");
+    CSFLogError(logTag, "%s: Request to store duplicate track %d", __FUNCTION__, aTrack);
     return;
+  }
+  CSFLogDebug(logTag, "%s track %d %s = %p", __FUNCTION__, aTrack, aIsVideo ? "video" : "audio",
+              aPipeline.get());
+  // See if we have both audio and video here, and if so cross the streams and sync them
+  // XXX Needs to be adjusted when we support multiple streams of the same type
+  for (std::map<int, bool>::iterator it = mTypes.begin(); it != mTypes.end(); ++it) {
+    if (it->second != aIsVideo) {
+      // Ok, we have one video, one non-video - cross the streams!
+      mozilla::WebrtcAudioConduit *audio_conduit = static_cast<mozilla::WebrtcAudioConduit*>
+                                                   (aIsVideo ?
+                                                    mPipelines[it->first]->Conduit() :
+                                                    aPipeline->Conduit());
+      mozilla::WebrtcVideoConduit *video_conduit = static_cast<mozilla::WebrtcVideoConduit*>
+                                                   (aIsVideo ?
+                                                    aPipeline->Conduit() :
+                                                    mPipelines[it->first]->Conduit());
+      video_conduit->SyncTo(audio_conduit);
+      CSFLogDebug(logTag, "Syncing %p to %p, %d to %d", video_conduit, audio_conduit,
+                  aTrack, it->first);
+    }
   }
   //TODO: Revisit once we start supporting multiple streams or multiple tracks
   // of same type
   mPipelines[aTrack] = aPipeline;
+  //TODO: move to attribute on Pipeline
+  mTypes[aTrack] = aIsVideo;
 }
 
 

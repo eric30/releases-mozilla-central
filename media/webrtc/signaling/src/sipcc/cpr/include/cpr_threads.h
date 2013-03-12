@@ -70,6 +70,13 @@ cprThread_t cprCreateThread(const char *name,
                             void *data);
 
 
+/*
+ * cprJoinThread
+ *
+ * wait for thread termination
+ */
+void cprJoinThread(cprThread_t thread);
+
 /**
  * cprDestroyThread
  *
@@ -119,7 +126,6 @@ cprRC_t cprDestroyThread(cprThread_t thread);
  * @return CPR_SUCCESS or CPR_FAILURE
  */
 cprRC_t cprAdjustRelativeThreadPriority(int relPri);
-
 
 __END_DECLS
 

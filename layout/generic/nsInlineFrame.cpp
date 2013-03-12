@@ -5,8 +5,9 @@
 
 /* rendering object for CSS display:inline objects */
 
-#include "nsCOMPtr.h"
 #include "nsInlineFrame.h"
+#include "nsCOMPtr.h"
+#include "nsLineLayout.h"
 #include "nsBlockFrame.h"
 #include "nsPlaceholderFrame.h"
 #include "nsGkAtoms.h"
@@ -58,6 +59,32 @@ nsInlineFrame::GetType() const
   return nsGkAtoms::inlineFrame;
 }
 
+void
+nsInlineFrame::InvalidateFrame(uint32_t aDisplayItemKey)
+{
+  if (IsSVGText()) {
+    nsIFrame* svgTextFrame =
+      nsLayoutUtils::GetClosestFrameOfType(GetParent(),
+                                           nsGkAtoms::svgTextFrame2);
+    svgTextFrame->InvalidateFrame();
+    return;
+  }
+  nsInlineFrameBase::InvalidateFrame(aDisplayItemKey);
+}
+
+void
+nsInlineFrame::InvalidateFrameWithRect(const nsRect& aRect, uint32_t aDisplayItemKey)
+{
+  if (IsSVGText()) {
+    nsIFrame* svgTextFrame =
+      nsLayoutUtils::GetClosestFrameOfType(GetParent(),
+                                           nsGkAtoms::svgTextFrame2);
+    svgTextFrame->InvalidateFrame();
+    return;
+  }
+  nsInlineFrameBase::InvalidateFrameWithRect(aRect, aDisplayItemKey);
+}
+
 static inline bool
 IsMarginZero(const nsStyleCoord &aCoord)
 {
@@ -75,9 +102,9 @@ nsInlineFrame::IsSelfEmpty()
     return false;
   }
 #endif
-  const nsStyleMargin* margin = GetStyleMargin();
-  const nsStyleBorder* border = GetStyleBorder();
-  const nsStylePadding* padding = GetStylePadding();
+  const nsStyleMargin* margin = StyleMargin();
+  const nsStyleBorder* border = StyleBorder();
+  const nsStylePadding* padding = StylePadding();
   // XXX Top and bottom removed, since they shouldn't affect things, but this
   // doesn't really match with nsLineLayout.cpp's setting of
   // ZeroEffectiveSpanBox, anymore, so what should this really be?
@@ -92,7 +119,7 @@ nsInlineFrame::IsSelfEmpty()
   if (haveLeft || haveRight) {
     if (GetStateBits() & NS_FRAME_IS_SPECIAL) {
       bool haveStart, haveEnd;
-      if (NS_STYLE_DIRECTION_LTR == GetStyleVisibility()->mDirection) {
+      if (NS_STYLE_DIRECTION_LTR == StyleVisibility()->mDirection) {
         haveStart = haveLeft;
         haveEnd = haveRight;
       } else {
@@ -147,22 +174,20 @@ nsInlineFrame::PeekOffsetCharacter(bool aForward, int32_t* aOffset,
   return false;
 }
 
-NS_IMETHODIMP
+void
 nsInlineFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                 const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists)
 {
-  nsresult rv = BuildDisplayListForInline(aBuilder, aDirtyRect, aLists);
-  NS_ENSURE_SUCCESS(rv, rv);
+  BuildDisplayListForInline(aBuilder, aDirtyRect, aLists);
 
   // The sole purpose of this is to trigger display of the selection
   // window for Named Anchors, which don't have any children and
   // normally don't have any size, but in Editor we use CSS to display
   // an image to represent this "hidden" element.
   if (!mFrames.FirstChild()) {
-    rv = DisplaySelectionOverlay(aBuilder, aLists.Content());
+    DisplaySelectionOverlay(aBuilder, aLists.Content());
   }
-  return rv;
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -196,7 +221,7 @@ nsRect
 nsInlineFrame::ComputeTightBounds(gfxContext* aContext) const
 {
   // be conservative
-  if (GetStyleContext()->HasTextDecorationLines()) {
+  if (StyleContext()->HasTextDecorationLines()) {
     return GetVisualOverflowRect();
   }
   return ComputeSimpleTightBounds(aContext);
@@ -218,9 +243,7 @@ nsInlineFrame::ReparentFloatsForInlineChild(nsIFrame* aOurLineContainer,
   }
 
   nsIFrame* ancestor = aFrame;
-  nsIFrame* ancestorBlockChild;
   do {
-    ancestorBlockChild = ancestor;
     ancestor = ancestor->GetParent();
     if (!ancestor)
       return;
@@ -234,11 +257,8 @@ nsInlineFrame::ReparentFloatsForInlineChild(nsIFrame* aOurLineContainer,
   nsBlockFrame* frameBlock = nsLayoutUtils::GetAsBlock(ancestor);
   NS_ASSERTION(frameBlock, "ancestor not a block");
 
-  const nsFrameList& blockChildren(ancestor->PrincipalChildList());
-  bool isOverflow = !blockChildren.ContainsFrame(ancestorBlockChild);
-
   while (true) {
-    ourBlock->ReparentFloats(aFrame, frameBlock, isOverflow, false);
+    ourBlock->ReparentFloats(aFrame, frameBlock, false);
 
     if (!aReparentSiblings)
       return;
@@ -458,13 +478,11 @@ nsInlineFrame::ReflowFrames(nsPresContext* aPresContext,
   lineLayout->BeginSpan(this, &aReflowState, leftEdge,
                         leftEdge + availableWidth, &mBaseline);
 
-  // First reflow our current children
+  // First reflow our principal children.
   nsIFrame* frame = mFrames.FirstChild();
   bool done = false;
-  while (nullptr != frame) {
-    bool reflowingFirstLetter = lineLayout->GetFirstLetterStyleOK();
-
-    // Check if we should lazily set the child frame's parent pointer
+  while (frame) {
+    // Check if we should lazily set the child frame's parent pointer.
     if (irs.mSetParentPointer) {
       bool havePrevBlock =
         irs.mLineContainer && irs.mLineContainer->GetPrevContinuation();
@@ -540,6 +558,7 @@ nsInlineFrame::ReflowFrames(nsPresContext* aPresContext,
     MOZ_ASSERT(frame->GetParent() == this);
 
     if (!done) {
+      bool reflowingFirstLetter = lineLayout->GetFirstLetterStyleOK();
       rv = ReflowInlineFrame(aPresContext, aReflowState, irs, frame, aStatus);
       done = NS_FAILED(rv) ||
              NS_INLINE_IS_BREAK(aStatus) || 
@@ -862,7 +881,7 @@ nsInlineFrame::GetSkipSides() const
     // a split should skip the "start" side.  But figuring out which part of
     // the split we are involves getting our first continuation, which might be
     // expensive.  So don't bother if we already have the relevant bits set.
-    bool ltr = (NS_STYLE_DIRECTION_LTR == GetStyleVisibility()->mDirection);
+    bool ltr = (NS_STYLE_DIRECTION_LTR == StyleVisibility()->mDirection);
     int startBit = (1 << (ltr ? NS_SIDE_LEFT : NS_SIDE_RIGHT));
     int endBit = (1 << (ltr ? NS_SIDE_RIGHT : NS_SIDE_LEFT));
     if (((startBit | endBit) & skip) != (startBit | endBit)) {
@@ -895,13 +914,13 @@ nsInlineFrame::AccessibleType()
   // replaces the image or image control frame with an inline frame
   nsIAtom *tagAtom = mContent->Tag();
   if (tagAtom == nsGkAtoms::input)  // Broken <input type=image ... />
-    return a11y::eHTMLButtonAccessible;
+    return a11y::eHTMLButtonType;
   if (tagAtom == nsGkAtoms::img)  // Create accessible for broken <img>
-    return a11y::eImageAccessible;
+    return a11y::eImageType;
   if (tagAtom == nsGkAtoms::label)  // Creat accessible for <label>
-    return a11y::eHTMLLabelAccessible;
+    return a11y::eHTMLLabelType;
 
-  return a11y::eNoAccessible;
+  return a11y::eNoType;
 }
 #endif
 
@@ -1029,22 +1048,20 @@ nsFirstLineFrame::Reflow(nsPresContext* aPresContext,
     if (mStyleContext == first->mStyleContext) {
       // Fixup our style context and our children. First get the
       // proper parent context.
-      nsStyleContext* parentContext = first->GetParent()->GetStyleContext();
-      if (parentContext) {
-        // Create a new style context that is a child of the parent
-        // style context thus removing the :first-line style. This way
-        // we behave as if an anonymous (unstyled) span was the child
-        // of the parent frame.
-        nsRefPtr<nsStyleContext> newSC;
-        newSC = aPresContext->StyleSet()->
-          ResolveAnonymousBoxStyle(nsCSSAnonBoxes::mozLineFrame, parentContext);
-        if (newSC) {
-          // Switch to the new style context.
-          SetStyleContext(newSC);
+      nsStyleContext* parentContext = first->GetParent()->StyleContext();
+      // Create a new style context that is a child of the parent
+      // style context thus removing the :first-line style. This way
+      // we behave as if an anonymous (unstyled) span was the child
+      // of the parent frame.
+      nsRefPtr<nsStyleContext> newSC;
+      newSC = aPresContext->StyleSet()->
+        ResolveAnonymousBoxStyle(nsCSSAnonBoxes::mozLineFrame, parentContext);
+      if (newSC) {
+        // Switch to the new style context.
+        SetStyleContext(newSC);
 
-          // Re-resolve all children
-          ReparentChildListStyle(aPresContext, mFrames, this);
-        }
+        // Re-resolve all children
+        ReparentChildListStyle(aPresContext, mFrames, this);
       }
     }
   }

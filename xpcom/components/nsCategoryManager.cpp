@@ -401,8 +401,7 @@ CategoryEnumerator::enumfunc_createenumerator(const char* aStr, CategoryNode* aN
 
 NS_IMPL_QUERY_INTERFACE1(nsCategoryManager, nsICategoryManager)
 
-NS_MEMORY_REPORTER_MALLOC_SIZEOF_FUN(CategoryManagerMallocSizeOf,
-                                     "category-manager")
+NS_MEMORY_REPORTER_MALLOC_SIZEOF_FUN(CategoryManagerMallocSizeOf)
 
 NS_MEMORY_REPORTER_IMPLEMENT(CategoryManager,
     "explicit/xpcom/category-manager",
@@ -513,14 +512,7 @@ nsCategoryManager::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf)
 {
   size_t n = aMallocSizeOf(this);
 
-  // The first PLArena is within the PLArenaPool, i.e. within |this|, so we
-  // don't measure it.  Subsequent PLArenas are by themselves and must be
-  // measured.
-  const PLArena *arena = mArena.first.next;
-  while (arena) {
-    n += aMallocSizeOf(arena);
-    arena = arena->next;
-  }
+  n += PL_SizeOfArenaPoolExcludingPool(&mArena, aMallocSizeOf);
 
   n += mTable.SizeOfExcludingThis(SizeOfCategoryManagerTableEntryExcludingThis,
                                   aMallocSizeOf);

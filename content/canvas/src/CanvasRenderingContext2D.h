@@ -10,20 +10,21 @@
 #include "nsICanvasRenderingContextInternal.h"
 #include "mozilla/RefPtr.h"
 #include "nsColor.h"
-#include "nsHTMLCanvasElement.h"
+#include "mozilla/dom/HTMLCanvasElement.h"
 #include "nsHTMLVideoElement.h"
 #include "CanvasUtils.h"
 #include "gfxFont.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/dom/ImageData.h"
 #include "mozilla/dom/UnionTypes.h"
+#include "mozilla/dom/CanvasRenderingContext2DBinding.h"
 
 #define NS_CANVASGRADIENTAZURE_PRIVATE_IID \
     {0x28425a6a, 0x90e0, 0x4d42, {0x9c, 0x75, 0xff, 0x60, 0x09, 0xb3, 0x10, 0xa8}}
 #define NS_CANVASPATTERNAZURE_PRIVATE_IID \
     {0xc9bacc25, 0x28da, 0x421e, {0x9a, 0x4b, 0xbb, 0xd6, 0x93, 0x05, 0x12, 0xbc}}
 
-class nsIDOMXULElement;
+class nsXULElement;
 
 namespace mozilla {
 namespace gfx {
@@ -141,7 +142,7 @@ public:
   virtual JSObject* WrapObject(JSContext *cx, JSObject *scope,
                                bool *triedToWrap);
 
-  nsHTMLCanvasElement* GetCanvas() const
+  HTMLCanvasElement* GetCanvas() const
   {
     // corresponds to changes to the old bindings made in bug 745025
     return mCanvasElement->GetOriginalCanvas();
@@ -162,10 +163,13 @@ public:
     return CurrentState().globalAlpha;
   }
 
+  // Useful for silencing cast warnings
+  static mozilla::gfx::Float ToFloat(double aValue) { return mozilla::gfx::Float(aValue); }
+
   void SetGlobalAlpha(double globalAlpha)
   {
     if (globalAlpha >= 0.0 && globalAlpha <= 1.0) {
-      CurrentState().globalAlpha = globalAlpha;
+      CurrentState().globalAlpha = ToFloat(globalAlpha);
     }
   }
 
@@ -203,7 +207,7 @@ public:
 
   void SetShadowOffsetX(double shadowOffsetX)
   {
-    CurrentState().shadowOffset.x = shadowOffsetX;
+    CurrentState().shadowOffset.x = ToFloat(shadowOffsetX);
   }
 
   double ShadowOffsetY()
@@ -213,7 +217,7 @@ public:
 
   void SetShadowOffsetY(double shadowOffsetY)
   {
-    CurrentState().shadowOffset.y = shadowOffsetY;
+    CurrentState().shadowOffset.y = ToFloat(shadowOffsetY);
   }
 
   double ShadowBlur()
@@ -224,7 +228,7 @@ public:
   void SetShadowBlur(double shadowBlur)
   {
     if (shadowBlur >= 0.0) {
-      CurrentState().shadowBlur = shadowBlur;
+      CurrentState().shadowBlur = ToFloat(shadowBlur);
     }
   }
 
@@ -238,11 +242,11 @@ public:
   void FillRect(double x, double y, double w, double h);
   void StrokeRect(double x, double y, double w, double h);
   void BeginPath();
-  void Fill();
+  void Fill(const CanvasWindingRule& winding);
   void Stroke();
-  void Clip();
-  bool IsPointInPath(double x, double y);
-  bool MozIsPointInStroke(double x, double y);
+  void Clip(const CanvasWindingRule& winding);
+  bool IsPointInPath(double x, double y, const CanvasWindingRule& winding);
+  bool IsPointInStroke(double x, double y);
   void FillText(const nsAString& text, double x, double y,
                 const mozilla::dom::Optional<double>& maxWidth,
                 mozilla::ErrorResult& error);
@@ -296,7 +300,7 @@ public:
   void SetLineWidth(double width)
   {
     if (width > 0.0) {
-      CurrentState().lineWidth = width;
+      CurrentState().lineWidth = ToFloat(width);
     }
   }
   void GetLineCap(nsAString& linecap);
@@ -312,7 +316,7 @@ public:
   void SetMiterLimit(double miter)
   {
     if (miter > 0.0) {
-      CurrentState().miterLimit = miter;
+      CurrentState().miterLimit = ToFloat(miter);
     }
   }
 
@@ -343,10 +347,10 @@ public:
     EnsureWritablePath();
 
     if (mPathBuilder) {
-      mPathBuilder->MoveTo(mozilla::gfx::Point(x, y));
+      mPathBuilder->MoveTo(mozilla::gfx::Point(ToFloat(x), ToFloat(y)));
     } else {
       mDSPathBuilder->MoveTo(mTarget->GetTransform() *
-                             mozilla::gfx::Point(x, y));
+                             mozilla::gfx::Point(ToFloat(x), ToFloat(y)));
     }
   }
 
@@ -354,7 +358,7 @@ public:
   {
     EnsureWritablePath();
     
-    LineTo(mozilla::gfx::Point(x, y));
+    LineTo(mozilla::gfx::Point(ToFloat(x), ToFloat(y)));
   }
 
   void QuadraticCurveTo(double cpx, double cpy, double x, double y)
@@ -362,14 +366,14 @@ public:
     EnsureWritablePath();
 
     if (mPathBuilder) {
-      mPathBuilder->QuadraticBezierTo(mozilla::gfx::Point(cpx, cpy),
-                                      mozilla::gfx::Point(x, y));
+      mPathBuilder->QuadraticBezierTo(mozilla::gfx::Point(ToFloat(cpx), ToFloat(cpy)),
+                                      mozilla::gfx::Point(ToFloat(x), ToFloat(y)));
     } else {
       mozilla::gfx::Matrix transform = mTarget->GetTransform();
       mDSPathBuilder->QuadraticBezierTo(transform *
-                                        mozilla::gfx::Point(cpx, cpy),
+                                        mozilla::gfx::Point(ToFloat(cpx), ToFloat(cpy)),
                                         transform *
-                                        mozilla::gfx::Point(x, y));
+                                        mozilla::gfx::Point(ToFloat(x), ToFloat(y)));
     }
   }
 
@@ -377,9 +381,9 @@ public:
   {
     EnsureWritablePath();
 
-    BezierTo(mozilla::gfx::Point(cp1x, cp1y),
-             mozilla::gfx::Point(cp2x, cp2y),
-             mozilla::gfx::Point(x, y));
+    BezierTo(mozilla::gfx::Point(ToFloat(cp1x), ToFloat(cp1y)),
+             mozilla::gfx::Point(ToFloat(cp2x), ToFloat(cp2y)),
+             mozilla::gfx::Point(ToFloat(x), ToFloat(y)));
   }
 
   void ArcTo(double x1, double y1, double x2, double y2, double radius,
@@ -434,7 +438,7 @@ public:
   void DrawWindow(nsIDOMWindow* window, double x, double y, double w, double h,
                   const nsAString& bgColor, uint32_t flags,
                   mozilla::ErrorResult& error);
-  void AsyncDrawXULElement(nsIDOMXULElement* elem, double x, double y, double w,
+  void AsyncDrawXULElement(nsXULElement& elem, double x, double y, double w,
                            double h, const nsAString& bgColor, uint32_t flags,
                            mozilla::ErrorResult& error);
 
@@ -575,16 +579,6 @@ protected:
   static void StyleColorToString(const nscolor& aColor, nsAString& aStr);
 
   /**
-    * Creates the unpremultiply lookup table, if it doesn't exist.
-    */
-  void EnsureUnpremultiplyTable();
-
-  /**
-    * Creates the premultiply lookup table, if it doesn't exist.
-    */
-  void EnsurePremultiplyTable();
-
-  /**
    * Creates the error target, if it doesn't exist
    */
   static void EnsureErrorTarget();
@@ -597,7 +591,7 @@ protected:
   void EnsureWritablePath();
 
   // Ensures a path in UserSpace is available.
-  void EnsureUserSpacePath();
+  void EnsureUserSpacePath(const CanvasWindingRule& winding = CanvasWindingRuleValues::Nonzero);
 
   /**
    * Needs to be called before updating the transform. This makes a call to
@@ -722,6 +716,11 @@ protected:
   uint32_t mInvalidateCount;
   static const uint32_t kCanvasMaxInvalidateCount = 100;
 
+
+#ifdef USE_SKIA
+  nsRefPtr<gl::GLContext> mGLContext;
+#endif
+
   /**
     * Returns true if a shadow should be drawn along with a
     * drawing operation.
@@ -754,9 +753,7 @@ protected:
       return mCanvasElement->OwnerDoc()->GetShell();
     }
     if (mDocShell) {
-      nsCOMPtr<nsIPresShell> shell;
-      mDocShell->GetPresShell(getter_AddRefs(shell));
-      return shell.get();
+      return mDocShell->GetPresShell();
     }
     return nullptr;
   }
@@ -910,11 +907,11 @@ protected:
   friend class AdjustedTarget;
 
   // other helpers
-  void GetAppUnitsValues(uint32_t *perDevPixel, uint32_t *perCSSPixel)
+  void GetAppUnitsValues(int32_t *perDevPixel, int32_t *perCSSPixel)
   {
     // If we don't have a canvas element, we just return something generic.
-    uint32_t devPixel = 60;
-    uint32_t cssPixel = 60;
+    int32_t devPixel = 60;
+    int32_t cssPixel = 60;
 
     nsIPresShell *ps = GetPresShell();
     nsPresContext *pc;

@@ -26,18 +26,18 @@ function testSimpleCall() {
       let testScope = gDebugger.DebuggerView.Variables.addScope("test");
       let testVar = testScope.addVar("something");
 
-      testVar._setGrip(1.618);
+      testVar.setGrip(1.618);
 
       is(testVar.target.querySelector(".value").getAttribute("value"), "1.618",
         "The grip information for the variable wasn't set correctly.");
 
-      is(testVar.target.querySelector(".details").childNodes.length, 0,
+      is(testVar.target.querySelector(".variables-view-element-details").childNodes.length, 0,
         "Adding a value property shouldn't add any new tree nodes.");
 
 
-      testVar._setGrip({ "type": "object", "class": "Window" });
+      testVar.setGrip({ "type": "object", "class": "Window" });
 
-      is(testVar.target.querySelector(".details").childNodes.length, 0,
+      is(testVar.target.querySelector(".variables-view-element-details").childNodes.length, 0,
         "Adding type and class properties shouldn't add any new tree nodes.");
 
       is(testVar.target.querySelector(".value").getAttribute("value"), "[object Window]",
@@ -46,20 +46,20 @@ function testSimpleCall() {
 
       testVar.addProperties({ "helloWorld": { "value": "hello world", "enumerable": true } });
 
-      is(testVar.target.querySelector(".details").childNodes.length, 1,
+      is(testVar.target.querySelector(".variables-view-element-details").childNodes.length, 1,
         "A new detail node should have been added in the variable tree.");
 
 
       testVar.addProperties({ "helloWorld": { "value": "hello jupiter", "enumerable": true } });
 
-      is(testVar.target.querySelector(".details").childNodes.length, 1,
+      is(testVar.target.querySelector(".variables-view-element-details").childNodes.length, 1,
         "Shouldn't be able to duplicate nodes added in the variable tree.");
 
 
       testVar.addProperties({ "someProp0": { "value": "random string", "enumerable": true },
                               "someProp1": { "value": "another string", "enumerable": true } });
 
-      is(testVar.target.querySelector(".details").childNodes.length, 3,
+      is(testVar.target.querySelector(".variables-view-element-details").childNodes.length, 3,
         "Two new detail nodes should have been added in the variable tree.");
 
 
@@ -71,7 +71,7 @@ function testSimpleCall() {
                               }
                             });
 
-      is(testVar.target.querySelector(".details").childNodes.length, 6,
+      is(testVar.target.querySelector(".variables-view-element-details").childNodes.length, 6,
         "Three new detail nodes should have been added in the variable tree.");
 
 

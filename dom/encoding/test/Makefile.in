@@ -10,8 +10,6 @@ relativesrcdir = @relativesrcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-TEST_DIRS = unit
-
 XPCSHELL_TESTS = unit
 
 MOCHITEST_FILES = \
@@ -30,6 +28,7 @@ MOCHITEST_FILES = \
   test_stringencoding.html \
   test_submit_euckr.html \
   test_utf16_files.html \
+  worker_helper.js \
   $(NULL)
 
 MOCHITEST_CHROME_FILES = \

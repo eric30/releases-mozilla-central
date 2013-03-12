@@ -128,6 +128,7 @@ static inline mozilla::css::Side operator++(mozilla::css::Side& side, int) {
 // orient
 #define NS_STYLE_ORIENT_HORIZONTAL 0
 #define NS_STYLE_ORIENT_VERTICAL   1
+#define NS_STYLE_ORIENT_AUTO       2
 
 // stack-sizing
 #define NS_STYLE_STACK_SIZING_IGNORE         0
@@ -768,9 +769,6 @@ static inline mozilla::css::Side operator++(mozilla::css::Side& side, int) {
 #define NS_STYLE_TABLE_RULES_COLS               3
 #define NS_STYLE_TABLE_RULES_ALL                4
 
-#define NS_STYLE_TABLE_COLS_NONE                (-1)
-#define NS_STYLE_TABLE_COLS_ALL                 int32_t(1 << 30)
-
 #define NS_STYLE_TABLE_LAYOUT_AUTO              0
 #define NS_STYLE_TABLE_LAYOUT_FIXED             1
 
@@ -858,6 +856,20 @@ static inline mozilla::css::Side operator++(mozilla::css::Side& side, int) {
 #define NS_STYLE_IMAGE_RENDERING_OPTIMIZESPEED    1
 #define NS_STYLE_IMAGE_RENDERING_OPTIMIZEQUALITY  2
 #define NS_STYLE_IMAGE_RENDERING_CRISPEDGES       3
+
+// mask-type
+#define NS_STYLE_MASK_TYPE_LUMINANCE            0
+#define NS_STYLE_MASK_TYPE_ALPHA                1
+
+// paint-order
+#define NS_STYLE_PAINT_ORDER_NORMAL             0
+#define NS_STYLE_PAINT_ORDER_FILL               1
+#define NS_STYLE_PAINT_ORDER_STROKE             2
+#define NS_STYLE_PAINT_ORDER_MARKERS            3
+#define NS_STYLE_PAINT_ORDER_LAST_VALUE NS_STYLE_PAINT_ORDER_MARKERS
+// NS_STYLE_PAINT_ORDER_BITWIDTH is the number of bits required to store
+// a single paint-order component value.
+#define NS_STYLE_PAINT_ORDER_BITWIDTH           2
 
 // shape-rendering
 #define NS_STYLE_SHAPE_RENDERING_AUTO               0

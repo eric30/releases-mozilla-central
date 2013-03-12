@@ -9,9 +9,10 @@ srcdir = @srcdir@
 VPATH = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
+USE_RCS_MK := 1
+include $(topsrcdir)/config/makefiles/rcs.mk
 
 MODULE = telemetry
-XPIDL_MODULE = telemetry
 MODULE_NAME = telemetry
 GRE_MODULE = 1
 
@@ -50,15 +51,20 @@ CPPSRCS = \
   Telemetry.cpp \
   $(NULL)
 
+LOCAL_INCLUDES += -I$(topsrcdir)/xpcom/build
+
 EXTRA_DSO_LDOPTS += \
   $(MOZ_COMPONENT_LIBS) \
   $(MOZ_JS_LIBS) \
   $(NULL)
 
-TEST_DIRS += tests
-
 ifdef MOZILLA_OFFICIAL
 DEFINES += -DMOZILLA_OFFICIAL
+endif
+
+MOZ_HISTOGRAMS_VERSION ?= $(call getSourceRepo)/rev/$(firstword $(shell hg -R $(topsrcdir) parent --template="{node|short}\n" 2>/dev/null))
+ifdef MOZ_HISTOGRAMS_VERSION
+DEFINES += -DHISTOGRAMS_FILE_VERSION="$(MOZ_HISTOGRAMS_VERSION)"
 endif
 
 include $(topsrcdir)/config/config.mk

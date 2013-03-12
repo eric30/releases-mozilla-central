@@ -31,6 +31,7 @@
 #include "nsGUIEvent.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/dom/Element.h"
+#include "nsEventStateManager.h"
 
 using namespace mozilla;
 
@@ -378,6 +379,14 @@ nsXBLWindowKeyHandler::HandleEvent(nsIDOMEvent* aEvent)
   nsCOMPtr<nsIAtom> eventTypeAtom = do_GetAtom(eventType);
   NS_ENSURE_TRUE(eventTypeAtom, NS_ERROR_OUT_OF_MEMORY);
 
+  if (!mWeakPtrForElement) {
+    nsCOMPtr<mozilla::dom::Element> originalTarget =
+      do_QueryInterface(aEvent->GetInternalNSEvent()->originalTarget);
+    if (nsEventStateManager::IsRemoteTarget(originalTarget)) {
+      return NS_OK;
+    }
+  }
+
   return WalkHandlers(keyEvent, eventTypeAtom);
 }
 
@@ -426,7 +435,7 @@ nsXBLWindowKeyHandler::IsEditor()
   nsIDocShell *docShell = piwin->GetDocShell();
   nsCOMPtr<nsIPresShell> presShell;
   if (docShell)
-    docShell->GetPresShell(getter_AddRefs(presShell));
+    presShell = docShell->GetPresShell();
 
   if (presShell) {
     return presShell->GetSelectionFlags() == nsISelectionDisplay::DISPLAY_ALL;

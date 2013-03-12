@@ -28,9 +28,9 @@ public:
   virtual nsStyleContext*
   GetAdditionalStyleContext(int32_t aIndex) const;
 
-  NS_IMETHOD BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                              const nsRect&           aDirtyRect,
-                              const nsDisplayListSet& aLists);
+  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
+                                const nsRect&           aDirtyRect,
+                                const nsDisplayListSet& aLists) MOZ_OVERRIDE;
 
   NS_IMETHOD
   InheritAutomaticData(nsIFrame* aParent) MOZ_OVERRIDE;
@@ -66,8 +66,6 @@ protected:
   nsMathMLmoFrame(nsStyleContext* aContext) : nsMathMLTokenFrame(aContext) {}
   virtual ~nsMathMLmoFrame();
   
-  virtual int GetSkipSides() const MOZ_OVERRIDE { return 0; }
-
   nsMathMLChar     mMathMLChar; // Here is the MathMLChar that will deal with the operator.
   nsOperatorFlags  mFlags;
   float            mMinSize;

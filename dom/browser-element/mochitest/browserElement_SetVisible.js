@@ -22,7 +22,7 @@ function runTest() {
   var mm;
   var numEvents = 0;
   var iframe1 = document.createElement('iframe');
-  iframe1.mozbrowser = true;
+  SpecialPowers.wrap(iframe1).mozbrowser = true;
   iframe1.src = 'data:text/html,1';
 
   document.body.appendChild(iframe1);
@@ -48,6 +48,23 @@ function runTest() {
   }
 
   function iframeLoaded() {
+    testGetVisible();
+  }
+
+  function testGetVisible() {
+    iframe1.setVisible(false);
+    iframe1.getVisible().onsuccess = function(evt) {
+      ok(evt.target.result === false, 'getVisible() responds false after setVisible(false)');
+
+      iframe1.setVisible(true);
+      iframe1.getVisible().onsuccess = function(evt) {
+        ok(evt.target.result === true, 'getVisible() responds true after setVisible(true)');
+        testVisibilityChanges();
+      };
+    };
+  }
+
+  function testVisibilityChanges() {
     mm = SpecialPowers.getBrowserFrameMessageManager(iframe1);
     mm.addMessageListener('test:visibilitychange', recvVisibilityChanged);
     mm.loadFrameScript('data:,(' + iframeScript.toString() + ')();', false);

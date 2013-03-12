@@ -13,6 +13,8 @@
  * limitations under the License.
  */
 
+#include "mozilla/DebugOnly.h"
+
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 
@@ -188,7 +190,7 @@ nsWindow::nsWindow()
         // to know the color depth, which asks our native window.
         // This has to happen after other init has finished.
         gfxPlatform::GetPlatform();
-        sUsingOMTC = UseOffMainThreadCompositing();
+        sUsingOMTC = ShouldUseOffMainThreadCompositing();
         sUsingHwc = Preferences::GetBool("layers.composer2d.enabled", false);
 
         if (sUsingOMTC) {
@@ -220,14 +222,21 @@ nsWindow::DoDraw(void)
     nsIntRegion region = gWindowToRedraw->mDirtyRegion;
     gWindowToRedraw->mDirtyRegion.SetEmpty();
 
+    nsIWidgetListener* listener = gWindowToRedraw->GetWidgetListener();
+    if (listener) {
+        listener->WillPaintWindow(gWindowToRedraw);
+    }
+
     LayerManager* lm = gWindowToRedraw->GetLayerManager();
     if (mozilla::layers::LAYERS_OPENGL == lm->GetBackendType()) {
         LayerManagerOGL* oglm = static_cast<LayerManagerOGL*>(lm);
         oglm->SetClippingRegion(region);
         oglm->SetWorldTransform(sRotationMatrix);
 
-        if (nsIWidgetListener* listener = gWindowToRedraw->GetWidgetListener())
-          listener->PaintWindow(gWindowToRedraw, region, 0);
+        listener = gWindowToRedraw->GetWidgetListener();
+        if (listener) {
+            listener->PaintWindow(gWindowToRedraw, region, 0);
+        }
     } else if (mozilla::layers::LAYERS_BASIC == lm->GetBackendType()) {
         MOZ_ASSERT(sFramebufferOpen || sUsingOMTC);
         nsRefPtr<gfxASurface> targetSurface;
@@ -247,8 +256,10 @@ nsWindow::DoDraw(void)
                 gWindowToRedraw, ctx, mozilla::layers::BUFFER_NONE,
                 ScreenRotation(EffectiveScreenRotation()));
 
-            if (nsIWidgetListener* listener = gWindowToRedraw->GetWidgetListener())
-              listener->PaintWindow(gWindowToRedraw, region, 0);
+            listener = gWindowToRedraw->GetWidgetListener();
+            if (listener) {
+                listener->PaintWindow(gWindowToRedraw, region, 0);
+            }
         }
 
         if (!sUsingOMTC) {
@@ -257,6 +268,11 @@ nsWindow::DoDraw(void)
         }
     } else {
         NS_RUNTIMEABORT("Unexpected layer manager type");
+    }
+
+    listener = gWindowToRedraw->GetWidgetListener();
+    if (listener) {
+        listener->DidPaintWindow();
     }
 }
 
@@ -373,30 +389,31 @@ nsWindow::ConstrainPosition(bool aAllowSlop,
 }
 
 NS_IMETHODIMP
-nsWindow::Move(int32_t aX,
-               int32_t aY)
+nsWindow::Move(double aX,
+               double aY)
 {
     return NS_OK;
 }
 
 NS_IMETHODIMP
-nsWindow::Resize(int32_t aWidth,
-                 int32_t aHeight,
-                 bool    aRepaint)
+nsWindow::Resize(double aWidth,
+                 double aHeight,
+                 bool   aRepaint)
 {
     return Resize(0, 0, aWidth, aHeight, aRepaint);
 }
 
 NS_IMETHODIMP
-nsWindow::Resize(int32_t aX,
-                 int32_t aY,
-                 int32_t aWidth,
-                 int32_t aHeight,
-                 bool    aRepaint)
+nsWindow::Resize(double aX,
+                 double aY,
+                 double aWidth,
+                 double aHeight,
+                 bool   aRepaint)
 {
-    mBounds = nsIntRect(aX, aY, aWidth, aHeight);
+    mBounds = nsIntRect(NSToIntRound(aX), NSToIntRound(aY),
+                        NSToIntRound(aWidth), NSToIntRound(aHeight));
     if (mWidgetListener)
-        mWidgetListener->WindowResized(this, aWidth, aHeight);
+        mWidgetListener->WindowResized(this, mBounds.width, mBounds.height);
 
     if (aRepaint && gWindowToRedraw)
         gWindowToRedraw->Invalidate(sVirtualBounds);

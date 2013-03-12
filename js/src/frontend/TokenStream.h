@@ -10,6 +10,9 @@
 /*
  * JS lexical scanner interface.
  */
+
+#include "mozilla/DebugOnly.h"
+
 #include <stddef.h>
 #include <stdio.h>
 #include <stdarg.h>
@@ -79,23 +82,6 @@ enum TokenKind {
     TOK_THROW,                     /* throw keyword */
     TOK_INSTANCEOF,                /* instanceof keyword */
     TOK_DEBUGGER,                  /* debugger keyword */
-    TOK_XMLSTAGO,                  /* XML start tag open (<) */
-    TOK_XMLETAGO,                  /* XML end tag open (</) */
-    TOK_XMLPTAGC,                  /* XML point tag close (/>) */
-    TOK_XMLTAGC,                   /* XML start or end tag close (>) */
-    TOK_XMLNAME,                   /* XML start-tag non-final fragment */
-    TOK_XMLATTR,                   /* XML quoted attribute value */
-    TOK_XMLSPACE,                  /* XML whitespace */
-    TOK_XMLTEXT,                   /* XML text */
-    TOK_XMLCOMMENT,                /* XML comment */
-    TOK_XMLCDATA,                  /* XML CDATA section */
-    TOK_XMLPI,                     /* XML processing instruction */
-    TOK_AT,                        /* XML attribute op (@) */
-    TOK_DBLCOLON,                  /* namespace qualified name op (::) */
-    TOK_DBLDOT,                    /* XML descendant op (..) */
-    TOK_FILTER,                    /* XML filtering predicate op (.()) */
-    TOK_XMLELEM,                   /* XML element node type (no token) */
-    TOK_XMLLIST,                   /* XML list node type (no token) */
     TOK_YIELD,                     /* yield from generator function */
     TOK_LEXICALSCOPE,              /* block scope AST node label */
     TOK_LET,                       /* let keyword */
@@ -179,41 +165,6 @@ inline bool
 TokenKindIsAssignment(TokenKind tt)
 {
     return TOK_ASSIGNMENT_START <= tt && tt <= TOK_ASSIGNMENT_LAST;
-}
-
-inline bool
-TokenContinuesStringExpression(TokenKind tt)
-{
-    switch (tt) {
-      // comma expression
-      case TOK_COMMA:
-      // conditional expression
-      case TOK_HOOK:
-      // binary expression
-      case TOK_OR:
-      case TOK_AND:
-      case TOK_BITOR:
-      case TOK_BITXOR:
-      case TOK_BITAND:
-      case TOK_PLUS:
-      case TOK_MINUS:
-      case TOK_STAR:
-      case TOK_DIV:
-      case TOK_MOD:
-      case TOK_IN:
-      case TOK_INSTANCEOF:
-      // member expression
-      case TOK_DOT:
-      case TOK_LB:
-      case TOK_LP:
-      case TOK_DBLDOT:
-        return true;
-      default:
-        return TokenKindIsEquality(tt) ||
-               TokenKindIsRelational(tt) ||
-               TokenKindIsShift(tt) ||
-               TokenKindIsAssignment(tt);
-    }
 }
 
 inline bool
@@ -305,6 +256,8 @@ struct TokenPos {
     }
 };
 
+enum DecimalPoint { NoDecimal = false, HasDecimal = true };
+
 struct Token {
     TokenKind           type;           /* char value or above enumerator */
     TokenPos            pos;            /* token position in file */
@@ -322,11 +275,10 @@ struct Token {
 
       private:
         friend struct Token;
-        struct {                        /* pair for <?target data?> XML PI */
-            PropertyName *target;       /* non-empty */
-            JSAtom       *data;         /* maybe empty, never null */
-        } xmlpi;
-        double          number;         /* floating point number */
+        struct {
+            double       value;         /* floating point number */
+            DecimalPoint decimalPoint;  /* literal contains . or exponent */
+        } number;
         RegExpFlag      reflags;        /* regexp flags, use tokenbuf to access
                                            regexp chars */
     } u;
@@ -346,20 +298,10 @@ struct Token {
     }
 
     void setAtom(JSOp op, JSAtom *atom) {
-        JS_ASSERT(op == JSOP_STRING || op == JSOP_XMLCOMMENT || JSOP_XMLCDATA);
+        JS_ASSERT(op == JSOP_STRING);
         JS_ASSERT(!IsPoisonedPtr(atom));
         u.s.op = op;
         u.s.n.atom = atom;
-    }
-
-    void setProcessingInstruction(PropertyName *target, JSAtom *data) {
-        JS_ASSERT(target);
-        JS_ASSERT(data);
-        JS_ASSERT(!target->empty());
-        JS_ASSERT(!IsPoisonedPtr(target));
-        JS_ASSERT(!IsPoisonedPtr(data));
-        u.xmlpi.target = target;
-        u.xmlpi.data = data;
     }
 
     void setRegExpFlags(js::RegExpFlag flags) {
@@ -367,8 +309,9 @@ struct Token {
         u.reflags = flags;
     }
 
-    void setNumber(double n) {
-        u.number = n;
+    void setNumber(double n, DecimalPoint decimalPoint) {
+        u.number.value = n;
+        u.number.decimalPoint = decimalPoint;
     }
 
     /* Type-safe accessors */
@@ -379,23 +322,8 @@ struct Token {
     }
 
     JSAtom *atom() const {
-        JS_ASSERT(type == TOK_STRING ||
-                  type == TOK_XMLNAME ||
-                  type == TOK_XMLATTR ||
-                  type == TOK_XMLTEXT ||
-                  type == TOK_XMLCDATA ||
-                  type == TOK_XMLSPACE ||
-                  type == TOK_XMLCOMMENT);
+        JS_ASSERT(type == TOK_STRING);
         return u.s.n.atom;
-    }
-
-    PropertyName *xmlPITarget() const {
-        JS_ASSERT(type == TOK_XMLPI);
-        return u.xmlpi.target;
-    }
-    JSAtom *xmlPIData() const {
-        JS_ASSERT(type == TOK_XMLPI);
-        return u.xmlpi.data;
     }
 
     js::RegExpFlag regExpFlags() const {
@@ -406,7 +334,12 @@ struct Token {
 
     double number() const {
         JS_ASSERT(type == TOK_NUMBER);
-        return u.number;
+        return u.number.value;
+    }
+
+    DecimalPoint decimalPoint() const {
+        JS_ASSERT(type == TOK_NUMBER);
+        return u.number.decimalPoint;
     }
 };
 
@@ -421,11 +354,8 @@ enum TokenStreamFlags
     TSF_KEYWORD_IS_NAME = 0x20, /* Ignore keywords and return TOK_NAME instead to the parser. */
     TSF_DIRTYLINE = 0x40,       /* non-whitespace since start of line */
     TSF_OWNFILENAME = 0x80,     /* ts->filename is malloc'd */
-    TSF_XMLTAGMODE = 0x100,     /* scanning within an XML tag in E4X */
-    TSF_XMLTEXTMODE = 0x200,    /* scanning XMLText terminal from E4X */
-    TSF_XMLONLYMODE = 0x400,    /* don't scan {expr} within text/tag */
-    TSF_OCTAL_CHAR = 0x800,     /* observed a octal character escape */
-    TSF_HAD_ERROR = 0x1000,     /* returned TOK_ERROR from getToken */
+    TSF_OCTAL_CHAR = 0x100,     /* observed a octal character escape */
+    TSF_HAD_ERROR = 0x200,      /* returned TOK_ERROR from getToken */
 
     /*
      * To handle the hard case of contiguous HTML comments, we want to clear the
@@ -449,15 +379,13 @@ enum TokenStreamFlags
     TSF_IN_HTML_COMMENT = 0x2000
 };
 
-struct Parser;
-
 struct CompileError {
     JSContext *cx;
     JSErrorReport report;
     char *message;
-    bool hasCharArgs;
+    ErrorArgumentsType argumentsType;
     CompileError(JSContext *cx)
-     : cx(cx), message(NULL), hasCharArgs(false)
+      : cx(cx), message(NULL), argumentsType(ArgumentsAreUnicode)
     {
         PodZero(&report);
     }
@@ -465,17 +393,10 @@ struct CompileError {
     void throwError();
 };
 
-/* For an explanation of how these are used, see the comment in the FunctionBox definition. */
-MOZ_BEGIN_ENUM_CLASS(StrictMode, uint8_t)
-    NOTSTRICT,
-    UNKNOWN,
-    STRICT
-MOZ_END_ENUM_CLASS(StrictMode)
-
-inline StrictMode
+inline bool
 StrictModeFromContext(JSContext *cx)
 {
-    return cx->hasRunOption(JSOPTION_STRICT_MODE) ? StrictMode::STRICT : StrictMode::UNKNOWN;
+    return cx->hasOption(JSOPTION_STRICT_MODE);
 }
 
 // Ideally, tokenizing would be entirely independent of context.  But the
@@ -483,19 +404,11 @@ StrictModeFromContext(JSContext *cx)
 // TokenStream needs to see it.
 //
 // This class is a tiny back-channel from TokenStream to the strict mode flag
-// that avoids exposing the rest of SharedContext to TokenStream. get()
-// returns the current strict mode state. The other two methods get and set
-// the queuedStrictModeError member of ParseContext. StrictModeGetter's
-// non-inline methods are implemented in Parser.cpp.
+// that avoids exposing the rest of SharedContext to TokenStream.
 //
 class StrictModeGetter {
-    Parser *parser;
   public:
-    StrictModeGetter(Parser *p) : parser(p) { }
-
-    StrictMode get() const;
-    CompileError *queuedStrictModeError() const;
-    void setQueuedStrictModeError(CompileError *e);
+    virtual bool strictMode() = 0;
 };
 
 class TokenStream
@@ -506,15 +419,16 @@ class TokenStream
         PARA_SEPARATOR = 0x2029
     };
 
-    static const size_t ntokens = 4;                /* 1 current + 3 lookahead, rounded
+    static const size_t ntokens = 4;                /* 1 current + 2 lookahead, rounded
                                                        to power of 2 to avoid divmod by 3 */
+    static const unsigned maxLookahead = 2;
     static const unsigned ntokensMask = ntokens - 1;
 
   public:
     typedef Vector<jschar, 32> CharBuffer;
 
     TokenStream(JSContext *cx, const CompileOptions &options,
-                StableCharPtr base, size_t length, StrictModeGetter *smg);
+                const jschar *base, size_t length, StrictModeGetter *smg);
 
     ~TokenStream();
 
@@ -535,14 +449,8 @@ class TokenStream
     const CharBuffer &getTokenbuf() const { return tokenbuf; }
     const char *getFilename() const { return filename; }
     unsigned getLineno() const { return lineno; }
-    /* Note that the version and hasMoarXML can get out of sync via setMoarXML. */
     JSVersion versionNumber() const { return VersionNumber(version); }
     JSVersion versionWithFlags() const { return version; }
-    // TokenStream::allowsXML() can be true even if Parser::allowsXML() is
-    // false. Read the comment at Parser::allowsXML() to find out why.
-    bool allowsXML() const { return allowXML && strictModeState() != StrictMode::STRICT; }
-    bool hasMoarXML() const { return moarXML || VersionShouldParseXML(versionNumber()); }
-    void setMoarXML(bool enabled) { moarXML = enabled; }
     bool hadError() const { return !!(flags & TSF_HAD_ERROR); }
 
     bool isCurrentTokenEquality() const {
@@ -562,33 +470,32 @@ class TokenStream
     }
 
     /* Flag methods. */
-    void setXMLTagMode(bool enabled = true) { setFlag(enabled, TSF_XMLTAGMODE); }
-    void setXMLOnlyMode(bool enabled = true) { setFlag(enabled, TSF_XMLONLYMODE); }
     void setUnexpectedEOF(bool enabled = true) { setFlag(enabled, TSF_UNEXPECTED_EOF); }
 
-    StrictMode strictModeState() const
-    {
-        return strictModeGetter ? strictModeGetter->get() : StrictMode(StrictMode::NOTSTRICT);
-    }
-    bool isXMLTagMode() const { return !!(flags & TSF_XMLTAGMODE); }
-    bool isXMLOnlyMode() const { return !!(flags & TSF_XMLONLYMODE); }
     bool isUnexpectedEOF() const { return !!(flags & TSF_UNEXPECTED_EOF); }
     bool isEOF() const { return !!(flags & TSF_EOF); }
+    bool sawOctalEscape() const { return !!(flags & TSF_OCTAL_CHAR); }
 
     // TokenStream-specific error reporters.
     bool reportError(unsigned errorNumber, ...);
     bool reportWarning(unsigned errorNumber, ...);
-    bool reportStrictWarning(unsigned errorNumber, ...);
-    bool reportStrictModeError(unsigned errorNumber, ...);
 
     // General-purpose error reporters.  You should avoid calling these
     // directly, and instead use the more succinct alternatives (e.g.
     // reportError()) in TokenStream, Parser, and BytecodeEmitter.
-    bool reportCompileErrorNumberVA(ParseNode *pn, unsigned flags, unsigned errorNumber,
+    bool reportCompileErrorNumberVA(const TokenPos &pos, unsigned flags, unsigned errorNumber,
                                     va_list args);
-    bool reportStrictModeErrorNumberVA(ParseNode *pn, unsigned errorNumber, va_list args);
+    bool reportStrictModeErrorNumberVA(const TokenPos &pos, bool strictMode, unsigned errorNumber,
+                                       va_list args);
+    bool reportStrictWarningErrorNumberVA(const TokenPos &pos, unsigned errorNumber,
+                                          va_list args);
 
   private:
+    // These are private because they should only be called by the tokenizer
+    // while tokenizing not by, for example, BytecodeEmitter.
+    bool reportStrictModeError(unsigned errorNumber, ...);
+    bool strictMode() const { return strictModeGetter && strictModeGetter->strictMode(); }
+
     void onError();
     static JSAtom *atomize(JSContext *cx, CharBuffer &cb);
     bool putIdentInTokenbuf(const jschar *identStart);
@@ -624,7 +531,6 @@ class TokenStream
     TokenKind getToken() {
         /* Check for a pushed-back token resulting from mismatching lookahead. */
         if (lookahead != 0) {
-            JS_ASSERT(!(flags & TSF_XMLTEXTMODE));
             lookahead--;
             cursor = (cursor + 1) & ntokensMask;
             TokenKind tt = currentToken().type;
@@ -652,7 +558,7 @@ class TokenStream
 
     TokenKind peekToken() {
         if (lookahead != 0) {
-            JS_ASSERT(lookahead <= 2);
+            JS_ASSERT(lookahead < maxLookahead);
             return tokens[(cursor + lookahead) & ntokensMask].type;
         }
         TokenKind tt = getTokenInternal();
@@ -670,7 +576,7 @@ class TokenStream
             return TOK_EOL;
 
         if (lookahead != 0) {
-            JS_ASSERT(lookahead <= 2);
+            JS_ASSERT(lookahead < maxLookahead);
             return tokens[(cursor + lookahead) & ntokensMask].type;
         }
 
@@ -707,6 +613,18 @@ class TokenStream
         JS_ALWAYS_TRUE(matchToken(tt));
     }
 
+    class Position {
+        friend class TokenStream;
+        const jschar *buf;
+        unsigned flags;
+        unsigned lineno;
+        const jschar *linebase;
+        const jschar *prevLinebase;
+    };
+
+    void tell(Position *);
+    void seek(const Position &pos);
+    void positionAfterLastFunctionKeyword(Position &pos);
 
     /*
      * Return the offset into the source buffer of the end of the token.
@@ -753,8 +671,10 @@ class TokenStream
      */
     class TokenBuf {
       public:
-        TokenBuf(const jschar *buf, size_t length)
-          : base_(buf), limit_(buf + length), ptr(buf) { }
+        TokenBuf(JSContext *cx, const jschar *buf, size_t length)
+          : base_(buf), limit_(buf + length), ptr(buf),
+            skipBase(cx, &base_), skipLimit(cx, &limit_), skipPtr(cx, &ptr)
+        { }
 
         bool hasRawChars() const {
             return ptr < limit_;
@@ -832,6 +752,9 @@ class TokenStream
         const jschar *base_;            /* base of buffer */
         const jschar *limit_;           /* limit for quick bounds check */
         const jschar *ptr;              /* next char to get */
+
+        // We are not yet moving strings
+        SkipRoot skipBase, skipLimit, skipPtr;
     };
 
     TokenKind getTokenInternal();     /* doesn't check for pushback or error flag. */
@@ -847,10 +770,6 @@ class TokenStream
     bool peekChars(int n, jschar *cp);
     bool getAtLine();
     bool getAtSourceMappingURL();
-
-    bool getXMLEntity();
-    bool getXMLTextOrTag(TokenKind *ttp, Token **tpp);
-    bool getXMLMarkup(TokenKind *ttp, Token **tpp);
 
     bool matchChar(int32_t expect) {
         int32_t c = getChar();
@@ -880,15 +799,12 @@ class TokenStream
     void updateFlagsForEOL();
 
     Token               tokens[ntokens];/* circular token buffer */
-    js::SkipRoot        tokensRoot;     /* prevent overwriting of token buffer */
     unsigned            cursor;         /* index of last parsed token */
     unsigned            lookahead;      /* count of lookahead tokens */
     unsigned            lineno;         /* current line number */
     unsigned            flags;          /* flags -- see above */
     const jschar        *linebase;      /* start of current line;  points into userbuf */
     const jschar        *prevLinebase;  /* start of previous line;  NULL if on the first line */
-    js::SkipRoot        linebaseRoot;
-    js::SkipRoot        prevLinebaseRoot;
     TokenBuf            userbuf;        /* user input buffer */
     const char          *filename;      /* input filename or null */
     jschar              *sourceMap;     /* source map's filename or null */
@@ -898,11 +814,21 @@ class TokenStream
     bool                maybeEOL[256];       /* probabilistic EOL lookup table */
     bool                maybeStrSpecial[256];/* speeds up string scanning */
     JSVersion           version;        /* (i.e. to identify keywords) */
-    bool                allowXML;       /* see JSOPTION_ALLOW_XML */
-    bool                moarXML;        /* see JSOPTION_MOAR_XML */
     JSContext           *const cx;
     JSPrincipals        *const originPrincipals;
     StrictModeGetter    *strictModeGetter; /* used to test for strict mode */
+    Position            lastFunctionKeyword; /* used as a starting point for reparsing strict functions */
+
+    /*
+     * The tokens array stores pointers to JSAtoms. These are rooted by the
+     * atoms table using AutoKeepAtoms in the Parser. This SkipRoot tells the
+     * exact rooting analysis to ignore the atoms in the tokens array.
+     */
+    SkipRoot            tokenSkip;
+
+    // Bug 846011
+    SkipRoot            linebaseSkip;
+    SkipRoot            prevLinebaseSkip;
 };
 
 struct KeywordInfo {

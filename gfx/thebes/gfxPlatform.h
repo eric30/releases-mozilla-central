@@ -37,6 +37,12 @@ class gfxTextRun;
 class nsIURI;
 class nsIAtom;
 
+namespace mozilla {
+namespace gl {
+class GLContext;
+}
+}
+
 extern cairo_user_data_key_t kDrawTarget;
 
 // pref lang id's for font prefs
@@ -217,9 +223,15 @@ public:
       CreateDrawTargetForData(unsigned char* aData, const mozilla::gfx::IntSize& aSize, 
                               int32_t aStride, mozilla::gfx::SurfaceFormat aFormat);
 
+    virtual mozilla::RefPtr<mozilla::gfx::DrawTarget>
+      CreateDrawTargetForFBO(unsigned int aFBOID, mozilla::gl::GLContext* aGLContext,
+                             const mozilla::gfx::IntSize& aSize, mozilla::gfx::SurfaceFormat aFormat);
+
     bool SupportsAzureContent() {
       return GetContentBackend() != mozilla::gfx::BACKEND_NONE;
     }
+
+    virtual bool UseAcceleratedSkiaCanvas();
 
     void GetAzureBackendInfo(mozilla::widget::InfoObject &aObj) {
       aObj.DefineProperty("AzureCanvasBackend", GetBackendName(mPreferredCanvasBackend));
@@ -316,11 +328,6 @@ public:
     bool DownloadableFontsEnabled();
 
     /**
-     * Whether to sanitize downloaded fonts using the OTS library
-     */
-    bool SanitizeDownloadedFonts();
-
-    /**
      * True when hinting should be enabled.  This setting shouldn't
      * change per gecko process, while the process is live.  If so the
      * results are not defined.
@@ -328,6 +335,22 @@ public:
      * NB: this bit is only honored by the FT2 backend, currently.
      */
     virtual bool FontHintingEnabled() { return true; }
+
+    /**
+     * True when zooming should not require reflow, so glyph metrics and
+     * positioning should not be adjusted for device pixels.
+     * If this is TRUE, then FontHintingEnabled() should be FALSE,
+     * but the converse is not necessarily required; in particular,
+     * B2G always has FontHintingEnabled FALSE, but RequiresLinearZoom
+     * is only true for the browser process, not Gaia or other apps.
+     *
+     * Like FontHintingEnabled (above), this setting shouldn't
+     * change per gecko process, while the process is live.  If so the
+     * results are not defined.
+     *
+     * NB: this bit is only honored by the FT2 backend, currently.
+     */
+    virtual bool RequiresLinearZoom() { return false; }
 
     bool UsesSubpixelAATextRendering() {
 #ifdef MOZ_GFX_OPTIMIZE_MOBILE
@@ -341,13 +364,11 @@ public:
      */
     bool UseCmapsDuringSystemFallback();
 
-#ifdef MOZ_GRAPHITE
     /**
      * Whether to use the SIL Graphite rendering engine
      * (for fonts that include Graphite tables)
      */
     bool UseGraphiteShaping();
-#endif
 
     /**
      * Whether to use the harfbuzz shaper (depending on script complexity).
@@ -469,6 +490,8 @@ public:
 
     virtual void FontsPrefsChanged(const char *aPref);
 
+    void OrientationSyncPrefsObserverChanged();
+
     int32_t GetBidiNumeralOption();
 
     /**
@@ -492,6 +515,10 @@ public:
     bool WorkAroundDriverBugs() const { return mWorkAroundDriverBugs; }
 
     virtual int GetScreenDepth() const;
+
+    bool WidgetUpdateFlashing() const { return mWidgetUpdateFlashing; }
+
+    uint32_t GetOrientationSyncMillis() const;
 
 protected:
     gfxPlatform();
@@ -548,10 +575,7 @@ protected:
     }
 
     int8_t  mAllowDownloadableFonts;
-    int8_t  mDownloadableFontsSanitize;
-#ifdef MOZ_GRAPHITE
     int8_t  mGraphiteShapingEnabled;
-#endif
 
     int8_t  mBidiNumeralOption;
 
@@ -574,6 +598,7 @@ private:
     nsTArray<uint32_t> mCJKPrefLangs;
     nsCOMPtr<nsIObserver> mSRGBOverrideObserver;
     nsCOMPtr<nsIObserver> mFontPrefsObserver;
+    nsCOMPtr<nsIObserver> mOrientationSyncPrefsObserver;
 
     // The preferred draw target backend to use for canvas
     mozilla::gfx::BackendType mPreferredCanvasBackend;
@@ -586,6 +611,8 @@ private:
     bool mWorkAroundDriverBugs;
 
     mozilla::RefPtr<mozilla::gfx::DrawEventRecorder> mRecorder;
+    bool mWidgetUpdateFlashing;
+    uint32_t mOrientationSyncMillis;
 };
 
 #endif /* GFX_PLATFORM_H */

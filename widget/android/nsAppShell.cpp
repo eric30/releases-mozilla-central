@@ -69,91 +69,39 @@ nsAppShell *nsAppShell::gAppShell = nullptr;
 
 NS_IMPL_ISUPPORTS_INHERITED1(nsAppShell, nsBaseAppShell, nsIObserver)
 
-class ScreenshotRunnable : public nsRunnable {
+class ThumbnailRunnable : public nsRunnable {
 public:
-    ScreenshotRunnable(nsIAndroidBrowserApp* aBrowserApp, int aTabId,
-                       const nsTArray<nsIntPoint>& aPoints, int aToken,
-                       RefCountedJavaObject* aBuffer):
-        mBrowserApp(aBrowserApp), mPoints(aPoints), mTabId(aTabId), mToken(aToken), mBuffer(aBuffer) {}
+    ThumbnailRunnable(nsIAndroidBrowserApp* aBrowserApp, int aTabId,
+                       const nsTArray<nsIntPoint>& aPoints, RefCountedJavaObject* aBuffer):
+        mBrowserApp(aBrowserApp), mPoints(aPoints), mTabId(aTabId), mBuffer(aBuffer) {}
 
     virtual nsresult Run() {
+        jobject buffer = mBuffer->GetObject();
         nsCOMPtr<nsIDOMWindow> domWindow;
         nsCOMPtr<nsIBrowserTab> tab;
         mBrowserApp->GetBrowserTab(mTabId, getter_AddRefs(tab));
-        if (!tab)
-            return NS_OK;
+        if (!tab) {
+            AndroidBridge::Bridge()->SendThumbnail(buffer, mTabId, false);
+            return NS_ERROR_FAILURE;
+        }
 
         tab->GetWindow(getter_AddRefs(domWindow));
-        if (!domWindow)
-            return NS_OK;
+        if (!domWindow) {
+            AndroidBridge::Bridge()->SendThumbnail(buffer, mTabId, false);
+            return NS_ERROR_FAILURE;
+        }
 
-        NS_ASSERTION(mPoints.Length() == 5, "Screenshot event does not have enough coordinates");
+        NS_ASSERTION(mPoints.Length() == 1, "Thumbnail event does not have enough coordinates");
 
-        AndroidBridge::Bridge()->TakeScreenshot(domWindow, mPoints[0].x, mPoints[0].y, mPoints[1].x, mPoints[1].y, mPoints[2].x, mPoints[2].y, mPoints[3].x, mPoints[3].y, mPoints[4].x, mPoints[4].y, mTabId, mToken, mBuffer->GetObject());
-        return NS_OK;
+        nsresult rv = AndroidBridge::Bridge()->CaptureThumbnail(domWindow, mPoints[0].x, mPoints[0].y, mTabId, buffer);
+        AndroidBridge::Bridge()->SendThumbnail(buffer, mTabId, NS_SUCCEEDED(rv));
+        return rv;
     }
 private:
     nsCOMPtr<nsIAndroidBrowserApp> mBrowserApp;
     nsTArray<nsIntPoint> mPoints;
-    int mTabId, mToken;
+    int mTabId;
     nsRefPtr<RefCountedJavaObject> mBuffer;
-};
-
-class AfterPaintListener : public nsIDOMEventListener {
-  public:
-    NS_DECL_ISUPPORTS
-
-    void Register(nsIDOMWindow* window) {
-        if (mEventTarget)
-            Unregister();
-        nsCOMPtr<nsPIDOMWindow> win = do_QueryInterface(window);
-        if (!win)
-            return;
-        mEventTarget = win->GetChromeEventHandler();
-        if (mEventTarget)
-            mEventTarget->AddEventListener(NS_LITERAL_STRING("MozAfterPaint"), this, false);
-    }
-
-    void Unregister() {
-        if (mEventTarget)
-            mEventTarget->RemoveEventListener(NS_LITERAL_STRING("MozAfterPaint"), this, false);
-        mEventTarget = nullptr;
-    }
-
-    virtual nsresult HandleEvent(nsIDOMEvent* aEvent) {
-        uint32_t generation = nsFrameManager::GetGlobalGenerationNumber();
-        if (mLastGeneration == generation) {
-            // the frame tree has not changed since our last AfterPaint
-            // so we can drop this event.
-            return NS_OK;
-        }
-
-        mLastGeneration = generation;
-
-        nsCOMPtr<nsIDOMNotifyPaintEvent> paintEvent = do_QueryInterface(aEvent);
-        if (!paintEvent)
-            return NS_OK;
-
-        nsCOMPtr<nsIDOMClientRect> rect;
-        paintEvent->GetBoundingClientRect(getter_AddRefs(rect));
-        float top, left, bottom, right;
-        rect->GetTop(&top);
-        rect->GetLeft(&left);
-        rect->GetRight(&right);
-        rect->GetBottom(&bottom);
-        __android_log_print(ANDROID_LOG_INFO, "GeckoScreenshot", "rect: %f, %f, %f, %f", top, left, right, bottom);
-        AndroidBridge::NotifyPaintedRect(top, left, bottom, right);
-        return NS_OK;
-    }
-
-    ~AfterPaintListener() {
-        if (mEventTarget)
-            Unregister();
-    }
-
-  private:
-    uint32_t mLastGeneration;
-    nsCOMPtr<nsIDOMEventTarget> mEventTarget;
 };
 
 class WakeLockListener : public nsIDOMMozWakeLockListener {
@@ -165,9 +113,6 @@ class WakeLockListener : public nsIDOMMozWakeLockListener {
     return NS_OK;
   }
 };
-
-NS_IMPL_ISUPPORTS1(AfterPaintListener, nsIDOMEventListener)
-nsCOMPtr<AfterPaintListener> sAfterPaintListener = nullptr;
 
 NS_IMPL_ISUPPORTS1(WakeLockListener, nsIDOMMozWakeLockListener)
 nsCOMPtr<nsIPowerManagerService> sPowerManagerService = nullptr;
@@ -182,7 +127,6 @@ nsAppShell::nsAppShell()
       mAllowCoalescingNextDraw(false)
 {
     gAppShell = this;
-    sAfterPaintListener = new AfterPaintListener();
 
     if (XRE_GetProcessType() != GeckoProcessType_Default) {
         return;
@@ -201,7 +145,6 @@ nsAppShell::nsAppShell()
 nsAppShell::~nsAppShell()
 {
     gAppShell = nullptr;
-    sAfterPaintListener = nullptr;
 
     if (sPowerManagerService) {
         sPowerManagerService->RemoveWakeLockListener(sWakeLockListener);
@@ -483,22 +426,7 @@ nsAppShell::ProcessNextNativeEvent(bool mayWait)
         break;
     }
 
-    case AndroidGeckoEvent::PAINT_LISTEN_START_EVENT: {
-        nsCOMPtr<nsIDOMWindow> domWindow;
-        nsCOMPtr<nsIBrowserTab> tab;
-        mBrowserApp->GetBrowserTab(curEvent->MetaState(), getter_AddRefs(tab));
-        if (!tab)
-            break;
-
-        tab->GetWindow(getter_AddRefs(domWindow));
-        if (!domWindow)
-            break;
-
-        sAfterPaintListener->Register(domWindow);
-        break;
-    }
-
-    case AndroidGeckoEvent::SCREENSHOT: {
+    case AndroidGeckoEvent::THUMBNAIL: {
         if (!mBrowserApp)
             break;
 
@@ -506,14 +434,11 @@ nsAppShell::ProcessNextNativeEvent(bool mayWait)
         if (!bridge)
             break;
 
-        int32_t token = curEvent->Flags();
         int32_t tabId = curEvent->MetaState();
         const nsTArray<nsIntPoint>& points = curEvent->Points();
         RefCountedJavaObject* buffer = curEvent->ByteBuffer();
-        nsCOMPtr<ScreenshotRunnable> sr = 
-            new ScreenshotRunnable(mBrowserApp, tabId, points, token, buffer);
-        MessageLoop::current()->PostIdleTask(
-            FROM_HERE, NewRunnableMethod(sr.get(), &ScreenshotRunnable::Run));
+        nsCOMPtr<ThumbnailRunnable> sr = new ThumbnailRunnable(mBrowserApp, tabId, points, buffer);
+        MessageLoop::current()->PostIdleTask(FROM_HERE, NewRunnableMethod(sr.get(), &ThumbnailRunnable::Run));
         break;
     }
 
@@ -554,7 +479,7 @@ nsAppShell::ProcessNextNativeEvent(bool mayWait)
             uri,
             flag ? flag : ""
         };
-        nsresult rv = cmdline->Init(4, const_cast<char **>(argv), nullptr, nsICommandLine::STATE_REMOTE_AUTO);
+        nsresult rv = cmdline->Init(4, argv, nullptr, nsICommandLine::STATE_REMOTE_AUTO);
         if (NS_SUCCEEDED(rv))
             cmdline->Run();
         nsMemory::Free(uri);
@@ -727,17 +652,19 @@ nsAppShell::PostEvent(AndroidGeckoEvent *ae)
                 // coalesce this new draw event with the one already in the queue
                 const nsIntRect& oldRect = mQueuedDrawEvent->Rect();
                 const nsIntRect& newRect = ae->Rect();
-                int combinedArea = (oldRect.width * oldRect.height) +
-                                   (newRect.width * newRect.height);
-
                 nsIntRect combinedRect = oldRect.Union(newRect);
+
+#if defined(DEBUG) || defined(FORCE_ALOG)
                 // XXX We may want to consider using regions instead of rectangles.
                 //     Print an error if we're upload a lot more than we would
                 //     if we handled this as two separate events.
+                int combinedArea = (oldRect.width * oldRect.height) +
+                                   (newRect.width * newRect.height);
                 int boundsArea = combinedRect.width * combinedRect.height;
                 if (boundsArea > combinedArea * 8)
                     ALOG("nsAppShell: Area of bounds greatly exceeds combined area: %d > %d",
                          boundsArea, combinedArea);
+#endif
 
                 // coalesce into the new draw event rather than the queued one because
                 // it is not always safe to move draws earlier in the queue; there may

@@ -8,15 +8,11 @@
 
 const TAB_URL = EXAMPLE_URL + "browser_dbg_update-editor-mode.html";
 
-let tempScope = {};
-Cu.import("resource:///modules/source-editor.jsm", tempScope);
-let SourceEditor = tempScope.SourceEditor;
-
 var gPane = null;
 var gTab = null;
 var gDebuggee = null;
 var gDebugger = null;
-var gScripts = null;
+var gSources = null;
 
 function test()
 {
@@ -30,8 +26,10 @@ function test()
     gDebuggee = aDebuggee;
     gPane = aPane;
     gDebugger = gPane.panelWin;
-    gScripts = gDebugger.DebuggerView.Sources._container;
+    gSources = gDebugger.DebuggerView.Sources;
     resumed = true;
+
+    gDebugger.addEventListener("Debugger:SourceShown", onScriptShown);
 
     gDebugger.DebuggerController.activeThread.addOneTimeListener("framesadded", function() {
       framesAdded = true;
@@ -48,12 +46,10 @@ function test()
     executeSoon(startTest);
   }
 
-  window.addEventListener("Debugger:SourceShown", onScriptShown);
-
   function startTest()
   {
     if (scriptShown && framesAdded && resumed && !testStarted) {
-      window.removeEventListener("Debugger:SourceShown", onScriptShown);
+      gDebugger.removeEventListener("Debugger:SourceShown", onScriptShown);
       testStarted = true;
       Services.tm.currentThread.dispatch({ run: testScriptsDisplay }, 0);
     }
@@ -64,7 +60,7 @@ function testScriptsDisplay() {
   is(gDebugger.DebuggerController.activeThread.state, "paused",
     "Should only be getting stack frames while paused.");
 
-  is(gScripts.itemCount, 3,
+  is(gSources.itemCount, 3,
     "Found the expected number of scripts.");
 
   is(gDebugger.editor.getMode(), SourceEditor.MODES.TEXT,
@@ -73,10 +69,10 @@ function testScriptsDisplay() {
   ok(gDebugger.editor.getText().search(/debugger/) != -1,
     "The correct script was loaded initially.");
 
-  window.addEventListener("Debugger:SourceShown", function _onEvent(aEvent) {
+  gDebugger.addEventListener("Debugger:SourceShown", function _onEvent(aEvent) {
     let url = aEvent.detail.url;
     if (url.indexOf("switching-01.js") != -1) {
-      window.removeEventListener(aEvent.type, _onEvent);
+      gDebugger.removeEventListener(aEvent.type, _onEvent);
       testSwitchPaused1();
     }
   });
@@ -90,7 +86,7 @@ function testSwitchPaused1()
   is(gDebugger.DebuggerController.activeThread.state, "paused",
     "Should only be getting stack frames while paused.");
 
-  is(gScripts.itemCount, 3,
+  is(gSources.itemCount, 3,
     "Found the expected number of scripts.");
 
   ok(gDebugger.editor.getText().search(/debugger/) == -1,
@@ -102,10 +98,10 @@ function testSwitchPaused1()
   is(gDebugger.editor.getMode(), SourceEditor.MODES.JAVASCRIPT,
      "Found the expected editor mode.");
 
-  window.addEventListener("Debugger:SourceShown", function _onEvent(aEvent) {
+  gDebugger.addEventListener("Debugger:SourceShown", function _onEvent(aEvent) {
     let url = aEvent.detail.url;
     if (url.indexOf("update-editor-mode") != -1) {
-      window.removeEventListener(aEvent.type, _onEvent);
+      gDebugger.removeEventListener(aEvent.type, _onEvent);
       testSwitchPaused2();
     }
   });
@@ -119,7 +115,7 @@ function testSwitchPaused2()
   is(gDebugger.DebuggerController.activeThread.state, "paused",
     "Should only be getting stack frames while paused.");
 
-  is(gScripts.itemCount, 3,
+  is(gSources.itemCount, 3,
     "Found the expected number of scripts.");
 
   ok(gDebugger.editor.getText().search(/firstCall/) == -1,
@@ -145,5 +141,5 @@ registerCleanupFunction(function() {
   gTab = null;
   gDebuggee = null;
   gDebugger = null;
-  gScripts = null;
+  gSources = null;
 });

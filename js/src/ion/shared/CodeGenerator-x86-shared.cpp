@@ -5,6 +5,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/DebugOnly.h"
+
 #include "jscntxt.h"
 #include "jscompartment.h"
 #include "jsmath.h"
@@ -13,36 +15,13 @@
 #include "ion/IonFrames.h"
 #include "ion/MoveEmitter.h"
 #include "ion/IonCompartment.h"
+#include "ion/ParallelFunctions.h"
 
 using namespace js;
 using namespace js::ion;
 
 namespace js {
 namespace ion {
-
-class DeferredJumpTable : public DeferredData
-{
-    MTableSwitch *mswitch;
-
-  public:
-    DeferredJumpTable(MTableSwitch *mswitch)
-      : mswitch(mswitch)
-    { }
-
-    void copy(IonCode *code, uint8_t *buffer) const {
-        void **jumpData = (void **)buffer;
-
-        // For every case write the pointer to the start in the table
-        for (size_t j = 0; j < mswitch->numCases(); j++) {
-            LBlock *caseblock = mswitch->getCase(j)->lir();
-            Label *caseheader = caseblock->label();
-
-            uint32_t offset = caseheader->offset();
-            *jumpData = (void *)(code->raw() + offset);
-            jumpData++;
-        }
-    }
-};
 
 CodeGeneratorX86Shared::CodeGeneratorX86Shared(MIRGenerator *gen, LIRGraph *graph)
   : CodeGeneratorShared(gen, graph),
@@ -88,42 +67,16 @@ OutOfLineBailout::accept(CodeGeneratorX86Shared *codegen)
     return codegen->visitOutOfLineBailout(this);
 }
 
-static inline NaNCond
-NaNCondFromDoubleCondition(Assembler::DoubleCondition cond)
-{
-    switch (cond) {
-      case Assembler::DoubleOrdered:
-      case Assembler::DoubleEqual:
-      case Assembler::DoubleNotEqual:
-      case Assembler::DoubleGreaterThan:
-      case Assembler::DoubleGreaterThanOrEqual:
-      case Assembler::DoubleLessThan:
-      case Assembler::DoubleLessThanOrEqual:
-        return NaN_IsFalse;
-      case Assembler::DoubleUnordered:
-      case Assembler::DoubleEqualOrUnordered:
-      case Assembler::DoubleNotEqualOrUnordered:
-      case Assembler::DoubleGreaterThanOrUnordered:
-      case Assembler::DoubleGreaterThanOrEqualOrUnordered:
-      case Assembler::DoubleLessThanOrUnordered:
-      case Assembler::DoubleLessThanOrEqualOrUnordered:
-        return NaN_IsTrue;
-    }
-
-    JS_NOT_REACHED("Unknown double condition");
-    return NaN_Unexpected;
-}
-
 void
 CodeGeneratorX86Shared::emitBranch(Assembler::Condition cond, MBasicBlock *mirTrue,
-                                   MBasicBlock *mirFalse, NaNCond ifNaN)
+                                   MBasicBlock *mirFalse, Assembler::NaNCond ifNaN)
 {
     LBlock *ifTrue = mirTrue->lir();
     LBlock *ifFalse = mirFalse->lir();
 
-    if (ifNaN == NaN_IsFalse)
+    if (ifNaN == Assembler::NaN_IsFalse)
         masm.j(Assembler::Parity, ifFalse->label());
-    else if (ifNaN == NaN_IsTrue)
+    else if (ifNaN == Assembler::NaN_IsTrue)
         masm.j(Assembler::Parity, ifTrue->label());
 
     if (isNextBlock(ifFalse)) {
@@ -133,6 +86,14 @@ CodeGeneratorX86Shared::emitBranch(Assembler::Condition cond, MBasicBlock *mirTr
         if (!isNextBlock(ifTrue))
             masm.jmp(ifTrue->label());
     }
+}
+
+bool
+CodeGeneratorX86Shared::visitDouble(LDouble *ins)
+{
+    const LDefinition *out = ins->getDef(0);
+    masm.loadConstantDouble(ins->getDouble(), ToFloatRegister(out));
+    return true;
 }
 
 bool
@@ -153,7 +114,7 @@ CodeGeneratorX86Shared::visitTestDAndBranch(LTestDAndBranch *test)
 
     // ucomisd flags:
     //             Z  P  C
-    //            --------- 
+    //            ---------
     //      NaN    1  1  1
     //        >    0  0  0
     //        <    0  0  1
@@ -168,45 +129,10 @@ CodeGeneratorX86Shared::visitTestDAndBranch(LTestDAndBranch *test)
 }
 
 void
-CodeGeneratorX86Shared::emitSet(Assembler::Condition cond, const Register &dest, NaNCond ifNaN)
-{
-    if (GeneralRegisterSet(Registers::SingleByteRegs).has(dest)) {
-        // If the register we're defining is a single byte register,
-        // take advantage of the setCC instruction
-        masm.setCC(cond, dest);
-        masm.movzxbl(dest, dest);
-
-        if (ifNaN != NaN_Unexpected) {
-            Label noNaN;
-            masm.j(Assembler::NoParity, &noNaN);
-            if (ifNaN == NaN_IsTrue)
-                masm.movl(Imm32(1), dest);
-            else
-                masm.xorl(dest, dest);
-            masm.bind(&noNaN);
-        }
-    } else {
-        Label end;
-        Label ifFalse;
-
-        if (ifNaN == NaN_IsFalse)
-            masm.j(Assembler::Parity, &ifFalse);
-        masm.movl(Imm32(1), dest);
-        masm.j(cond, &end);
-        if (ifNaN == NaN_IsTrue)
-            masm.j(Assembler::Parity, &end);
-        masm.bind(&ifFalse);
-        masm.xorl(dest, dest);
-
-        masm.bind(&end);
-    }
-}
-
-void
-CodeGeneratorX86Shared::emitCompare(MIRType type, const LAllocation *left, const LAllocation *right)
+CodeGeneratorX86Shared::emitCompare(MCompare::CompareType type, const LAllocation *left, const LAllocation *right)
 {
 #ifdef JS_CPU_X64
-    if (type == MIRType_Object) {
+    if (type == MCompare::Compare_Object) {
         masm.cmpq(ToRegister(left), ToOperand(right));
         return;
     }
@@ -221,15 +147,15 @@ CodeGeneratorX86Shared::emitCompare(MIRType type, const LAllocation *left, const
 bool
 CodeGeneratorX86Shared::visitCompare(LCompare *comp)
 {
-    emitCompare(comp->mir()->specialization(), comp->left(), comp->right());
-    emitSet(JSOpToCondition(comp->jsop()), ToRegister(comp->output()));
+    emitCompare(comp->mir()->compareType(), comp->left(), comp->right());
+    masm.emitSet(JSOpToCondition(comp->jsop()), ToRegister(comp->output()));
     return true;
 }
 
 bool
 CodeGeneratorX86Shared::visitCompareAndBranch(LCompareAndBranch *comp)
 {
-    emitCompare(comp->mir()->specialization(), comp->left(), comp->right());
+    emitCompare(comp->mir()->compareType(), comp->left(), comp->right());
     Assembler::Condition cond = JSOpToCondition(comp->jsop());
     emitBranch(cond, comp->ifTrue(), comp->ifFalse());
     return true;
@@ -243,8 +169,8 @@ CodeGeneratorX86Shared::visitCompareD(LCompareD *comp)
 
     Assembler::DoubleCondition cond = JSOpToDoubleCondition(comp->mir()->jsop());
     masm.compareDouble(cond, lhs, rhs);
-    emitSet(Assembler::ConditionFromDoubleCondition(cond), ToRegister(comp->output()),
-            NaNCondFromDoubleCondition(cond));
+    masm.emitSet(Assembler::ConditionFromDoubleCondition(cond), ToRegister(comp->output()),
+            Assembler::NaNCondFromDoubleCondition(cond));
     return true;
 }
 
@@ -252,7 +178,7 @@ bool
 CodeGeneratorX86Shared::visitNotI(LNotI *ins)
 {
     masm.cmpl(ToRegister(ins->input()), Imm32(0));
-    emitSet(Assembler::Equal, ToRegister(ins->output()));
+    masm.emitSet(Assembler::Equal, ToRegister(ins->output()));
     return true;
 }
 
@@ -263,7 +189,7 @@ CodeGeneratorX86Shared::visitNotD(LNotD *ins)
 
     masm.xorpd(ScratchFloatReg, ScratchFloatReg);
     masm.compareDouble(Assembler::DoubleEqualOrUnordered, opd, ScratchFloatReg);
-    emitSet(Assembler::Equal, ToRegister(ins->output()), NaN_IsTrue);
+    masm.emitSet(Assembler::Equal, ToRegister(ins->output()), Assembler::NaN_IsTrue);
     return true;
 }
 
@@ -276,7 +202,7 @@ CodeGeneratorX86Shared::visitCompareDAndBranch(LCompareDAndBranch *comp)
     Assembler::DoubleCondition cond = JSOpToDoubleCondition(comp->mir()->jsop());
     masm.compareDouble(cond, lhs, rhs);
     emitBranch(Assembler::ConditionFromDoubleCondition(cond), comp->ifTrue(), comp->ifFalse(),
-               NaNCondFromDoubleCondition(cond));
+               Assembler::NaNCondFromDoubleCondition(cond));
     return true;
 }
 
@@ -289,7 +215,7 @@ CodeGeneratorX86Shared::generateOutOfLineCode()
     if (deoptLabel_) {
         // All non-table-based bailouts will go here.
         masm.bind(deoptLabel_);
-        
+
         // Push the frame size, so the handler can recover the IonScript.
         masm.push(Imm32(frameSize()));
 
@@ -337,6 +263,20 @@ class BailoutLabel {
 template <typename T> bool
 CodeGeneratorX86Shared::bailout(const T &binder, LSnapshot *snapshot)
 {
+    CompileInfo &info = snapshot->mir()->block()->info();
+    switch (info.executionMode()) {
+      case ParallelExecution: {
+        // in parallel mode, make no attempt to recover, just signal an error.
+        Label *ool;
+        if (!ensureOutOfLineParallelAbort(&ool))
+            return false;
+        binder(masm, ool);
+        return true;
+      }
+
+      case SequentialExecution: break;
+    }
+
     if (!encode(snapshot))
         return false;
 
@@ -440,21 +380,6 @@ CodeGeneratorX86Shared::visitMinMaxD(LMinMaxD *ins)
     masm.movsd(second, output);
 
     masm.bind(&done);
-    return true;
-}
-
-bool
-CodeGeneratorX86Shared::visitNegD(LNegD *ins)
-{
-    // XOR the float in a float register with -0.0.
-    FloatRegister input = ToFloatRegister(ins->input());
-    JS_ASSERT(input == ToFloatRegister(ins->output()));
-
-    // From MacroAssemblerX86Shared::maybeInlineDouble
-    masm.pcmpeqw(ScratchFloatReg, ScratchFloatReg);
-    masm.psllq(Imm32(63), ScratchFloatReg);
-
-    masm.xorpd(ScratchFloatReg, input); // s ^ 0x80000000000000
     return true;
 }
 
@@ -626,6 +551,7 @@ CodeGeneratorX86Shared::visitMulI(LMulI *ins)
     const LAllocation *lhs = ins->lhs();
     const LAllocation *rhs = ins->rhs();
     MMul *mul = ins->mir();
+    JS_ASSERT_IF(mul->mode() == MMul::Integer, !mul->canBeNegativeZero() && !mul->canOverflow());
 
     if (rhs->isConstant()) {
         // Bailout on -0.0
@@ -714,32 +640,53 @@ CodeGeneratorX86Shared::visitDivI(LDivI *ins)
     Register remainder = ToRegister(ins->remainder());
     Register lhs = ToRegister(ins->lhs());
     Register rhs = ToRegister(ins->rhs());
+    Register output = ToRegister(ins->output());
 
     MDiv *mir = ins->mir();
 
     JS_ASSERT(remainder == edx);
     JS_ASSERT(lhs == eax);
+    JS_ASSERT(output == eax);
 
-    // Prevent divide by zero.
+    Label done;
+
+    // Handle divide by zero.
     if (mir->canBeDivideByZero()) {
         masm.testl(rhs, rhs);
-        if (!bailoutIf(Assembler::Zero, ins->snapshot()))
-            return false;
+        if (mir->isTruncated()) {
+            // Truncated division by zero is zero (Infinity|0 == 0)
+            Label notzero;
+            masm.j(Assembler::NonZero, &notzero);
+            masm.xorl(output, output);
+            masm.jmp(&done);
+            masm.bind(&notzero);
+        } else {
+            JS_ASSERT(mir->fallible());
+            if (!bailoutIf(Assembler::Zero, ins->snapshot()))
+                return false;
+        }
     }
 
-    // Prevent an integer overflow exception from -2147483648 / -1.
+    // Handle an integer overflow exception from -2147483648 / -1.
     if (mir->canBeNegativeOverflow()) {
         Label notmin;
-        masm.cmpl(lhs, Imm32(INT_MIN));
+        masm.cmpl(lhs, Imm32(INT32_MIN));
         masm.j(Assembler::NotEqual, &notmin);
         masm.cmpl(rhs, Imm32(-1));
-        if (!bailoutIf(Assembler::Equal, ins->snapshot()))
-            return false;
+        if (mir->isTruncated()) {
+            // (-INT32_MIN)|0 == INT32_MIN and INT32_MIN is already in the
+            // output register (lhs == eax).
+            masm.j(Assembler::Equal, &done);
+        } else {
+            JS_ASSERT(mir->fallible());
+            if (!bailoutIf(Assembler::Equal, ins->snapshot()))
+                return false;
+        }
         masm.bind(&notmin);
     }
 
-    // Prevent negative 0.
-    if (mir->canBeNegativeZero()) {
+    // Handle negative 0.
+    if (!mir->isTruncated() && mir->canBeNegativeZero()) {
         Label nonzero;
         masm.testl(lhs, lhs);
         masm.j(Assembler::NonZero, &nonzero);
@@ -760,6 +707,8 @@ CodeGeneratorX86Shared::visitDivI(LDivI *ins)
             return false;
     }
 
+    masm.bind(&done);
+
     return true;
 }
 
@@ -768,13 +717,14 @@ CodeGeneratorX86Shared::visitModPowTwoI(LModPowTwoI *ins)
 {
     Register lhs = ToRegister(ins->getOperand(0));
     int32_t shift = ins->shift();
-    Label negative, join;
+
+    Label negative, done;
     // Switch based on sign of the lhs.
     // Positive numbers are just a bitmask
     masm.branchTest32(Assembler::Signed, lhs, lhs, &negative);
     {
         masm.andl(Imm32((1 << shift) - 1), lhs);
-        masm.jump(&join);
+        masm.jump(&done);
     }
     // Negative numbers need a negate, bitmask, negate
     {
@@ -784,10 +734,10 @@ CodeGeneratorX86Shared::visitModPowTwoI(LModPowTwoI *ins)
         masm.negl(lhs);
         masm.andl(Imm32((1 << shift) - 1), lhs);
         masm.negl(lhs);
-        if (!bailoutIf(Assembler::Zero, ins->snapshot()))
+        if (!ins->mir()->isTruncated() && !bailoutIf(Assembler::Zero, ins->snapshot()))
             return false;
     }
-    masm.bind(&join);
+    masm.bind(&done);
     return true;
 
 }
@@ -798,49 +748,75 @@ CodeGeneratorX86Shared::visitModI(LModI *ins)
     Register remainder = ToRegister(ins->remainder());
     Register lhs = ToRegister(ins->lhs());
     Register rhs = ToRegister(ins->rhs());
+    Register temp = ToRegister(ins->getTemp(0));
 
     // Required to use idiv.
     JS_ASSERT(remainder == edx);
-    JS_ASSERT(lhs == eax);
+    JS_ASSERT(temp == eax);
 
-    // If rhs == 0, bailout, since result must be a double (NaN).
+    if (lhs != temp) {
+        masm.mov(lhs, temp);
+        lhs = temp;
+    }
+
+    Label done;
+
+    // Prevent divide by zero
     masm.testl(rhs, rhs);
-    if (!bailoutIf(Assembler::Zero, ins->snapshot()))
-        return false;
+    if (ins->mir()->isTruncated()) {
+        Label notzero;
+        masm.j(Assembler::NonZero, &notzero);
+        masm.xorl(edx, edx);
+        masm.jmp(&done);
+        masm.bind(&notzero);
+    } else {
+        if (!bailoutIf(Assembler::Zero, ins->snapshot()))
+            return false;
+    }
 
-    Label negative, join;
-
-    // Since the lhs will be made positive before reaching an idiv, instead of
-    // sign extending eax into edx to 64-bit (edx:eax), we can simply zero it.
-    masm.xorl(edx, edx);
+    Label negative;
 
     // Switch based on sign of the lhs.
     masm.branchTest32(Assembler::Signed, lhs, lhs, &negative);
     // If lhs >= 0 then remainder = lhs % rhs. The remainder must be positive.
     {
+        // Since lhs >= 0, the sign-extension will be 0
+        masm.xorl(edx, edx);
         masm.idiv(rhs);
-        masm.jump(&join);
+        masm.jump(&done);
     }
 
-    // If lhs < 0 then remainder = -(-lhs % rhs).
+    // Otherwise, we have to beware of two special cases:
     {
         masm.bind(&negative);
-        masm.negl(lhs);
-        if (!bailoutIf(Assembler::Overflow, ins->snapshot()))
-            return false;
 
+        // Prevent an integer overflow exception from -2147483648 % -1
+        Label notmin;
+        masm.cmpl(lhs, Imm32(INT32_MIN));
+        masm.j(Assembler::NotEqual, &notmin);
+        masm.cmpl(rhs, Imm32(-1));
+        if (ins->mir()->isTruncated()) {
+            masm.j(Assembler::NotEqual, &notmin);
+            masm.xorl(edx, edx);
+            masm.jmp(&done);
+        } else {
+            if (!bailoutIf(Assembler::Equal, ins->snapshot()))
+                return false;
+        }
+        masm.bind(&notmin);
+
+        masm.cdq();
         masm.idiv(rhs);
 
-        // A remainder of 0 means that the rval must be -0, which is a double.
-        masm.testl(remainder, remainder);
-        if (!bailoutIf(Assembler::Zero, ins->snapshot()))
-            return false; 
-
-        // Cannot overflow.
-        masm.negl(remainder);
+        if (!ins->mir()->isTruncated()) {
+            // A remainder of 0 means that the rval must be -0, which is a double.
+            masm.testl(remainder, remainder);
+            if (!bailoutIf(Assembler::Zero, ins->snapshot()))
+                return false;
+        }
     }
 
-    masm.bind(&join);
+    masm.bind(&done);
     return true;
 }
 
@@ -1013,6 +989,56 @@ CodeGeneratorX86Shared::visitMoveGroup(LMoveGroup *group)
     return true;
 }
 
+class OutOfLineTableSwitch : public OutOfLineCodeBase<CodeGeneratorX86Shared>
+{
+    MTableSwitch *mir_;
+    CodeLabel jumpLabel_;
+
+    bool accept(CodeGeneratorX86Shared *codegen) {
+        return codegen->visitOutOfLineTableSwitch(this);
+    }
+
+  public:
+    OutOfLineTableSwitch(MTableSwitch *mir)
+      : mir_(mir)
+    {}
+
+    MTableSwitch *mir() const {
+        return mir_;
+    }
+
+    CodeLabel *jumpLabel() {
+        return &jumpLabel_;
+    }
+};
+
+bool
+CodeGeneratorX86Shared::visitOutOfLineTableSwitch(OutOfLineTableSwitch *ool)
+{
+    MTableSwitch *mir = ool->mir();
+
+    masm.align(sizeof(void*));
+    masm.bind(ool->jumpLabel()->src());
+    if (!masm.addCodeLabel(*ool->jumpLabel()))
+        return false;
+
+    for (size_t i = 0; i < mir->numCases(); i++) {
+        LBlock *caseblock = mir->getCase(i)->lir();
+        Label *caseheader = caseblock->label();
+        uint32_t caseoffset = caseheader->offset();
+
+        // The entries of the jump table need to be absolute addresses and thus
+        // must be patched after codegen is finished.
+        CodeLabel cl;
+        masm.writeCodePointer(cl.dest());
+        cl.src()->bind(caseoffset);
+        if (!masm.addCodeLabel(cl))
+            return false;
+    }
+
+    return true;
+}
+
 bool
 CodeGeneratorX86Shared::emitTableSwitchDispatch(MTableSwitch *mir, const Register &index,
                                                 const Register &base)
@@ -1028,13 +1054,15 @@ CodeGeneratorX86Shared::emitTableSwitchDispatch(MTableSwitch *mir, const Registe
     masm.cmpl(index, Imm32(cases));
     masm.j(AssemblerX86Shared::AboveOrEqual, defaultcase);
 
-    // Create a JumpTable that during linking will get written.
-    DeferredJumpTable *d = new DeferredJumpTable(mir);
-    if (!masm.addDeferredData(d, (1 << ScalePointer) * cases))
+    // To fill in the CodeLabels for the case entries, we need to first
+    // generate the case entries (we don't yet know their offsets in the
+    // instruction stream).
+    OutOfLineTableSwitch *ool = new OutOfLineTableSwitch(mir);
+    if (!addOutOfLineCode(ool))
         return false;
 
     // Compute the position where a pointer to the right case stands.
-    masm.mov(d->label(), base);
+    masm.mov(ool->jumpLabel()->dest(), base);
     Operand pointer = Operand(base, index, ScalePointer);
 
     // Jump to the right case
@@ -1122,7 +1150,7 @@ CodeGeneratorX86Shared::visitFloor(LFloor *lir)
             masm.cmp32(output, Imm32(INT_MIN));
             if (!bailoutIf(Assembler::Equal, lir->snapshot()))
                 return false;
-        
+
             // Test whether the input double was integer-valued.
             masm.cvtsi2sd(output, scratch);
             masm.branchDouble(Assembler::DoubleEqualOrUnordered, input, scratch, &end);
@@ -1245,47 +1273,11 @@ CodeGeneratorX86Shared::visitGuardClass(LGuardClass *guard)
     Register obj = ToRegister(guard->input());
     Register tmp = ToRegister(guard->tempInt());
 
-    masm.loadBaseShape(obj, tmp);
-    masm.cmpPtr(Operand(tmp, BaseShape::offsetOfClass()), ImmWord(guard->mir()->getClass()));
+    masm.loadPtr(Address(obj, JSObject::offsetOfType()), tmp);
+    masm.cmpPtr(Operand(tmp, offsetof(types::TypeObject, clasp)), ImmWord(guard->mir()->getClass()));
     if (!bailoutIf(Assembler::NotEqual, guard->snapshot()))
         return false;
     return true;
-}
-
-// Checks whether a double is representable as a 32-bit integer. If so, the
-// integer is written to the output register. Otherwise, a bailout is taken to
-// the given snapshot. This function overwrites the scratch float register.
-void
-CodeGeneratorX86Shared::emitDoubleToInt32(const FloatRegister &src, const Register &dest, Label *fail, bool negativeZeroCheck)
-{
-    // Note that we don't specify the destination width for the truncated
-    // conversion to integer. x64 will use the native width (quadword) which
-    // sign-extends the top bits, preserving a little sanity.
-    masm.cvttsd2s(src, dest);
-    masm.cvtsi2sd(dest, ScratchFloatReg);
-    masm.ucomisd(src, ScratchFloatReg);
-    masm.j(Assembler::Parity, fail);
-    masm.j(Assembler::NotEqual, fail);
-
-    // Check for -0
-    if (negativeZeroCheck) {
-        Label notZero;
-        masm.testl(dest, dest);
-        masm.j(Assembler::NonZero, &notZero);
-
-        if (Assembler::HasSSE41()) {
-            masm.ptest(src, src);
-            masm.j(Assembler::NonZero, fail);
-        } else {
-            // bit 0 = sign of low double
-            // bit 1 = sign of high double
-            masm.movmskpd(src, dest);
-            masm.andl(Imm32(1), dest);
-            masm.j(Assembler::NonZero, fail);
-        }
-
-        masm.bind(&notZero);
-    }
 }
 
 class OutOfLineTruncate : public OutOfLineCodeBase<CodeGeneratorX86Shared>

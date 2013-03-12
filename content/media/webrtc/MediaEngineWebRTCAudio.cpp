@@ -47,53 +47,122 @@ MediaEngineWebRTCAudioSource::GetUUID(nsAString& aUUID)
 }
 
 nsresult
-MediaEngineWebRTCAudioSource::Allocate()
+MediaEngineWebRTCAudioSource::Config(bool aEchoOn, uint32_t aEcho,
+                                     bool aAgcOn, uint32_t aAGC,
+                                     bool aNoiseOn, uint32_t aNoise)
 {
-  if (mState != kReleased) {
-    return NS_ERROR_FAILURE;
+  LOG(("Audio config: aec: %d, agc: %d, noise: %d",
+       aEchoOn ? aEcho : -1,
+       aAgcOn ? aAGC : -1,
+       aNoiseOn ? aNoise : -1));
+
+  bool update_agc = (mAgcOn == aAgcOn);
+  bool update_noise = (mNoiseOn == aNoiseOn);
+  mAgcOn = aAgcOn;
+  mNoiseOn = aNoiseOn;
+
+  if ((webrtc::AgcModes) aAGC != webrtc::kAgcUnchanged) {
+    if (mAGC != (webrtc::AgcModes) aAGC) {
+      update_agc = true;
+      mAGC = (webrtc::AgcModes) aAGC;
+    }
+  }
+  if ((webrtc::NsModes) aNoise != webrtc::kNsUnchanged) {
+    if (mNoiseSuppress != (webrtc::NsModes) aNoise) {
+      update_noise = true;
+      mNoiseSuppress = (webrtc::NsModes) aNoise;
+    }
   }
 
-  webrtc::VoEHardware* ptrVoEHw = webrtc::VoEHardware::GetInterface(mVoiceEngine);
-  int res = ptrVoEHw->SetRecordingDevice(mCapIndex);
-  ptrVoEHw->Release();
-  if (res) {
-    return NS_ERROR_FAILURE;
-  }
+  if (mInitDone) {
+    int error;
+#if 0
+    // Until we can support feeding our full output audio from the browser
+    // through the MediaStream, this won't work.  Or we need to move AEC to
+    // below audio input and output, perhaps invoked from here.
+    mEchoOn = aEchoOn;
+    if ((webrtc::EcModes) aEcho != webrtc::kEcUnchanged)
+      mEchoCancel = (webrtc::EcModes) aEcho;
+    mVoEProcessing->SetEcStatus(mEchoOn, aEcho);
+#else
+    (void) aEcho; (void) aEchoOn; (void) mEchoCancel; // suppress warnings
+#endif
 
-  LOG(("Audio device %d allocated", mCapIndex));
-  mState = kAllocated;
+    if (update_agc &&
+      0 != (error = mVoEProcessing->SetAgcStatus(mAgcOn, (webrtc::AgcModes) aAGC))) {
+      LOG(("%s Error setting AGC Status: %d ",__FUNCTION__, error));
+    }
+    if (update_noise &&
+      0 != (error = mVoEProcessing->SetNsStatus(mNoiseOn, (webrtc::NsModes) aNoise))) {
+      LOG(("%s Error setting NoiseSuppression Status: %d ",__FUNCTION__, error));
+    }
+  }
+  return NS_OK;
+}
+
+nsresult
+MediaEngineWebRTCAudioSource::Allocate(const MediaEnginePrefs &aPrefs)
+{
+  if (mState == kReleased && mInitDone) {
+    webrtc::VoEHardware* ptrVoEHw = webrtc::VoEHardware::GetInterface(mVoiceEngine);
+    int res = ptrVoEHw->SetRecordingDevice(mCapIndex);
+    ptrVoEHw->Release();
+    if (res) {
+      return NS_ERROR_FAILURE;
+    }
+    mState = kAllocated;
+    LOG(("Audio device %d allocated", mCapIndex));
+  } else if (mSources.IsEmpty()) {
+    LOG(("Audio device %d reallocated", mCapIndex));
+  } else {
+    LOG(("Audio device %d allocated shared", mCapIndex));
+  }
   return NS_OK;
 }
 
 nsresult
 MediaEngineWebRTCAudioSource::Deallocate()
 {
-  if (mState != kStopped && mState != kAllocated) {
-    return NS_ERROR_FAILURE;
-  }
+  if (mSources.IsEmpty()) {
+    if (mState != kStopped && mState != kAllocated) {
+      return NS_ERROR_FAILURE;
+    }
 
-  mState = kReleased;
+    mState = kReleased;
+    LOG(("Audio device %d deallocated", mCapIndex));
+  } else {
+    LOG(("Audio device %d deallocated but still in use", mCapIndex));
+  }
   return NS_OK;
 }
 
 nsresult
 MediaEngineWebRTCAudioSource::Start(SourceMediaStream* aStream, TrackID aID)
 {
-  if (!mInitDone || mState != kAllocated) {
-    return NS_ERROR_FAILURE;
-  }
-  if (!aStream) {
+  if (!mInitDone || !aStream) {
     return NS_ERROR_FAILURE;
   }
 
-  mSource = aStream;
+  {
+    ReentrantMonitorAutoEnter enter(mMonitor);
+    mSources.AppendElement(aStream);
+  }
 
   AudioSegment* segment = new AudioSegment();
-  segment->Init(CHANNELS);
-  mSource->AddTrack(aID, SAMPLE_FREQUENCY, 0, segment);
-  mSource->AdvanceKnownTracksTime(STREAM_TIME_MAX);
+  aStream->AddTrack(aID, SAMPLE_FREQUENCY, 0, segment);
+  aStream->AdvanceKnownTracksTime(STREAM_TIME_MAX);
   LOG(("Initial audio"));
   mTrackID = aID;
+
+  if (mState == kStarted) {
+    return NS_OK;
+  }
+  mState = kStarted;
+
+  // Configure audio processing in webrtc code
+  Config(mEchoOn, webrtc::kEcUnchanged,
+         mAgcOn, webrtc::kAgcUnchanged,
+         mNoiseOn, webrtc::kNsUnchanged);
 
   if (mVoEBase->StartReceive(mChannel)) {
     return NS_ERROR_FAILURE;
@@ -105,18 +174,31 @@ MediaEngineWebRTCAudioSource::Start(SourceMediaStream* aStream, TrackID aID)
   // Attach external media processor, so this::Process will be called.
   mVoERender->RegisterExternalMediaProcessing(mChannel, webrtc::kRecordingPerChannel, *this);
 
-  mState = kStarted;
   return NS_OK;
 }
 
 nsresult
-MediaEngineWebRTCAudioSource::Stop()
+MediaEngineWebRTCAudioSource::Stop(SourceMediaStream *aSource, TrackID aID)
 {
-  if (mState != kStarted) {
-    return NS_ERROR_FAILURE;
-  }
-  if (!mVoEBase) {
-    return NS_ERROR_FAILURE;
+  {
+    ReentrantMonitorAutoEnter enter(mMonitor);
+
+    if (!mSources.RemoveElement(aSource)) {
+      // Already stopped - this is allowed
+      return NS_OK;
+    }
+    if (!mSources.IsEmpty()) {
+      return NS_OK;
+    }
+    if (mState != kStarted) {
+      return NS_ERROR_FAILURE;
+    }
+    if (!mVoEBase) {
+      return NS_ERROR_FAILURE;
+    }
+
+    mState = kStopped;
+    aSource->EndTrack(aID);
   }
 
   mVoERender->DeRegisterExternalMediaProcessing(mChannel, webrtc::kRecordingPerChannel);
@@ -127,27 +209,22 @@ MediaEngineWebRTCAudioSource::Stop()
   if (mVoEBase->StopReceive(mChannel)) {
     return NS_ERROR_FAILURE;
   }
-
-  {
-    ReentrantMonitorAutoEnter enter(mMonitor);
-    mState = kStopped;
-    mSource->EndTrack(mTrackID);
-  }
-
   return NS_OK;
 }
 
 void
 MediaEngineWebRTCAudioSource::NotifyPull(MediaStreamGraph* aGraph,
-                                         StreamTime aDesiredTime)
+                                         SourceMediaStream *aSource,
+                                         TrackID aID,
+                                         StreamTime aDesiredTime,
+                                         TrackTicks &aLastEndTime)
 {
   // Ignore - we push audio data
 #ifdef DEBUG
-  static TrackTicks mLastEndTime = 0;
   TrackTicks target = TimeToTicksRoundUp(SAMPLE_FREQUENCY, aDesiredTime);
-  TrackTicks delta = target - mLastEndTime;
-  LOG(("Audio:NotifyPull: target %lu, delta %lu",(uint32_t) target, (uint32_t) delta));
-  mLastEndTime = target;
+  TrackTicks delta = target - aLastEndTime;
+  LOG(("Audio: NotifyPull: aDesiredTime %ld, target %ld, delta %ld",(int64_t) aDesiredTime, (int64_t) target, (int64_t) delta));
+  aLastEndTime = target;
 #endif
 }
 
@@ -170,6 +247,11 @@ MediaEngineWebRTCAudioSource::Init()
   }
   mVoENetwork = webrtc::VoENetwork::GetInterface(mVoiceEngine);
   if (!mVoENetwork) {
+    return;
+  }
+
+  mVoEProcessing = webrtc::VoEAudioProcessing::GetInterface(mVoiceEngine);
+  if (!mVoEProcessing) {
     return;
   }
 
@@ -235,10 +317,13 @@ MediaEngineWebRTCAudioSource::Shutdown()
   }
 
   if (mState == kStarted) {
-    Stop();
+    while (!mSources.IsEmpty()) {
+      Stop(mSources[0], kAudioTrack); // XXX change to support multiple tracks
+    }
+    MOZ_ASSERT(mState == kStopped);
   }
 
-  if (mState == kAllocated) {
+  if (mState == kAllocated || mState == kStopped) {
     Deallocate();
   }
 
@@ -269,17 +354,25 @@ MediaEngineWebRTCAudioSource::Process(const int channel,
   if (mState != kStarted)
     return;
 
-  nsRefPtr<SharedBuffer> buffer = SharedBuffer::Create(length * sizeof(sample));
+  uint32_t len = mSources.Length();
+  for (uint32_t i = 0; i < len; i++) {
+    nsRefPtr<SharedBuffer> buffer = SharedBuffer::Create(length * sizeof(sample));
 
-  sample* dest = static_cast<sample*>(buffer->Data());
-  memcpy(dest, audio10ms, length * sizeof(sample));
+    sample* dest = static_cast<sample*>(buffer->Data());
+    memcpy(dest, audio10ms, length * sizeof(sample));
 
-  AudioSegment segment;
-  segment.Init(CHANNELS);
-  segment.AppendFrames(
-    buffer.forget(), length, 0, length, AUDIO_FORMAT_S16
-  );
-  mSource->AppendToTrack(mTrackID, &segment);
+    AudioSegment segment;
+    nsAutoTArray<const sample*,1> channels;
+    channels.AppendElement(dest);
+    segment.AppendFrames(buffer.forget(), channels, length);
+
+    SourceMediaStream *source = mSources[i];
+    if (source) {
+      // This is safe from any thread, and is safe if the track is Finished
+      // or Destroyed
+      source->AppendToTrack(mTrackID, &segment);
+    }
+  }
 
   return;
 }

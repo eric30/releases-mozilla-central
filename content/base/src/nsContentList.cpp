@@ -21,8 +21,10 @@
 #include "nsGkAtoms.h"
 #include "mozilla/dom/HTMLCollectionBinding.h"
 #include "mozilla/dom/NodeListBinding.h"
+#include "mozilla/dom/BindingUtils.h"
 #include "mozilla/Likely.h"
 #include "nsGenericHTMLElement.h"
+#include <algorithm>
 
 // Form related includes
 #include "nsIDOMHTMLFormElement.h"
@@ -42,7 +44,6 @@ nsBaseContentList::~nsBaseContentList()
 {
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsBaseContentList)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsBaseContentList)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mElements)
   NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
@@ -84,17 +85,11 @@ NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_THIS_END
     NS_INTERFACE_TABLE_ENTRY(_class, nsINodeList)                             \
     NS_INTERFACE_TABLE_ENTRY(_class, nsIDOMNodeList)
 
-DOMCI_DATA(NodeList, nsBaseContentList)
-
 // QueryInterface implementation for nsBaseContentList
 NS_INTERFACE_TABLE_HEAD(nsBaseContentList)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
-  NS_NODELIST_OFFSET_AND_INTERFACE_TABLE_BEGIN(nsBaseContentList)
-    NS_CONTENT_LIST_INTERFACES(nsBaseContentList)
-  NS_OFFSET_AND_INTERFACE_TABLE_END
-  NS_OFFSET_AND_INTERFACE_TABLE_TO_MAP_SEGUE
-  NS_INTERFACE_MAP_ENTRIES_CYCLE_COLLECTION(nsBaseContentList)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(NodeList)
+  NS_INTERFACE_TABLE2(nsBaseContentList, nsINodeList, nsIDOMNodeList)
+  NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(nsBaseContentList)
 NS_INTERFACE_MAP_END
 
 
@@ -143,7 +138,6 @@ nsBaseContentList::IndexOf(nsIContent* aContent)
   return IndexOf(aContent, true);
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsSimpleContentList)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsSimpleContentList,
                                                   nsBaseContentList)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRoot)
@@ -527,23 +521,9 @@ nsContentList::WrapObject(JSContext *cx, JSObject *scope, bool *triedToWrap)
   return HTMLCollectionBinding::Wrap(cx, scope, this, triedToWrap);
 }
 
-DOMCI_DATA(ContentList, nsContentList)
-
-// QueryInterface implementation for nsContentList
-NS_INTERFACE_TABLE_HEAD(nsContentList)
-  NS_NODELIST_OFFSET_AND_INTERFACE_TABLE_BEGIN(nsContentList)
-    NS_CONTENT_LIST_INTERFACES(nsContentList)
-    NS_INTERFACE_TABLE_ENTRY(nsContentList, nsIHTMLCollection)
-    NS_INTERFACE_TABLE_ENTRY(nsContentList, nsIDOMHTMLCollection)
-    NS_INTERFACE_TABLE_ENTRY(nsContentList, nsIMutationObserver)
-  NS_OFFSET_AND_INTERFACE_TABLE_END
-  NS_OFFSET_AND_INTERFACE_TABLE_TO_MAP_SEGUE
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(ContentList)
-NS_INTERFACE_MAP_END_INHERITING(nsBaseContentList)
-
-
-NS_IMPL_ADDREF_INHERITED(nsContentList, nsBaseContentList)
-NS_IMPL_RELEASE_INHERITED(nsContentList, nsBaseContentList)
+NS_IMPL_ISUPPORTS_INHERITED3(nsContentList, nsBaseContentList,
+                             nsIHTMLCollection, nsIDOMHTMLCollection,
+                             nsIMutationObserver)
 
 uint32_t
 nsContentList::Length(bool aDoFlush)
@@ -566,7 +546,7 @@ nsContentList::Item(uint32_t aIndex, bool aDoFlush)
   }
 
   if (mState != LIST_UP_TO_DATE)
-    PopulateSelf(NS_MIN(aIndex, UINT32_MAX - 1) + 1);
+    PopulateSelf(std::min(aIndex, UINT32_MAX - 1) + 1);
 
   ASSERT_IN_SYNC;
   NS_ASSERTION(!mRootNode || mState != LIST_DIRTY,

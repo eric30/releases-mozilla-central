@@ -10,6 +10,7 @@
 #define nsCSSStyleSheet_h_
 
 #include "mozilla/Attributes.h"
+#include "mozilla/dom/Element.h"
 
 #include "nscore.h"
 #include "nsCOMPtr.h"
@@ -31,7 +32,6 @@ class nsMediaList;
 class nsMediaQueryResultCacheKey;
 class nsCSSStyleSheet;
 class nsPresContext;
-template<class E, class A> class nsTArray;
 
 namespace mozilla {
 namespace css {
@@ -94,7 +94,6 @@ private:
 //
 
 class CSSRuleListImpl;
-struct ChildSheetListBuilder;
 
 // CID for the nsCSSStyleSheet class
 // ca926f30-2a7e-477e-8467-803fb32af20a
@@ -248,6 +247,12 @@ public:
   // Get this style sheet's CORS mode
   mozilla::CORSMode GetCORSMode() const { return mInner->mCORSMode; }
 
+  mozilla::dom::Element* GetScopeElement() const { return mScopeElement; }
+  void SetScopeElement(mozilla::dom::Element* aScopeElement)
+  {
+    mScopeElement = aScopeElement;
+  }
+
 private:
   nsCSSStyleSheet(const nsCSSStyleSheet& aCopy,
                   nsCSSStyleSheet* aParentToUse,
@@ -298,6 +303,7 @@ protected:
   nsIDOMNode*           mOwningNode; // weak ref
   bool                  mDisabled;
   bool                  mDirty; // has been modified 
+  nsRefPtr<mozilla::dom::Element> mScopeElement;
 
   nsCSSStyleSheetInner* mInner;
 

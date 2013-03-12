@@ -12,7 +12,7 @@
 #include "nsIFrame.h"
 #include "nsIPresShell.h"
 #include "nsIContent.h"
-#include "nsIViewManager.h"
+#include "nsViewManager.h"
 #include "nsINameSpaceManager.h"
 #include "nsGfxCIID.h"
 #include "nsTransform2D.h"
@@ -29,6 +29,7 @@
 #include "gfxContext.h"
 #include "gfxPlatformGtk.h"
 #include "gfxGdkNativeRenderer.h"
+#include <algorithm>
 
 NS_IMPL_ISUPPORTS_INHERITED2(nsNativeThemeGTK, nsNativeTheme, nsITheme,
                                                               nsIObserver)
@@ -75,7 +76,7 @@ nsNativeThemeGTK::RefreshWidgetWindow(nsIFrame* aFrame)
   if (!shell)
     return;
 
-  nsIViewManager* vm = shell->GetViewManager();
+  nsViewManager* vm = shell->GetViewManager();
   if (!vm)
     return;
  
@@ -130,7 +131,7 @@ static GtkTextDirection GetTextDirection(nsIFrame* aFrame)
   if (!aFrame)
     return GTK_TEXT_DIR_NONE;
 
-  switch (aFrame->GetStyleVisibility()->mDirection) {
+  switch (aFrame->StyleVisibility()->mDirection) {
     case NS_STYLE_DIRECTION_RTL:
       return GTK_TEXT_DIR_RTL;
     case NS_STYLE_DIRECTION_LTR:
@@ -148,8 +149,8 @@ nsNativeThemeGTK::GetTabMarginPixels(nsIFrame* aFrame)
     IsBottomTab(aFrame) ? aFrame->GetUsedMargin().top
     : aFrame->GetUsedMargin().bottom;
 
-  return NS_MIN<gint>(MOZ_GTK_TAB_MARGIN_MASK,
-                NS_MAX(0,
+  return std::min<gint>(MOZ_GTK_TAB_MARGIN_MASK,
+                std::max(0,
                        aFrame->PresContext()->AppUnitsToDevPixels(-margin)));
 }
 
@@ -533,7 +534,7 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
       nsEventStates eventStates = GetContentState(stateFrame, aWidgetType);
 
       aGtkWidgetType = IsIndeterminateProgress(stateFrame, eventStates)
-                         ? (stateFrame->GetStyleDisplay()->mOrient == NS_STYLE_ORIENT_VERTICAL)
+                         ? (stateFrame->StyleDisplay()->mOrient == NS_STYLE_ORIENT_VERTICAL)
                            ? MOZ_GTK_PROGRESS_CHUNK_VERTICAL_INDETERMINATE
                            : MOZ_GTK_PROGRESS_CHUNK_INDETERMINATE
                          : MOZ_GTK_PROGRESS_CHUNK;
@@ -611,6 +612,7 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
   return true;
 }
 
+#if defined(MOZ_WIDGET_GTK2)
 class ThemeRenderer : public gfxGdkNativeRenderer {
 public:
   ThemeRenderer(GtkWidgetState aState, GtkThemeWidgetType aGTKWidgetType,
@@ -653,6 +655,7 @@ ThemeRenderer::DrawWithGDK(GdkDrawable * drawable, gint offsetX,
 
   return NS_OK;
 }
+#endif
 
 bool
 nsNativeThemeGTK::GetExtraSizeForWidget(nsIFrame* aFrame, uint8_t aWidgetType,
@@ -781,23 +784,8 @@ nsNativeThemeGTK::DrawWidgetBackground(nsRenderingContext* aContext,
 
   // gdk rectangles are wrt the drawing rect.
 
-  // The gdk_clip is just advisory here, meaning "you don't
-  // need to draw outside this rect if you don't feel like it!"
-  GdkRectangle gdk_clip = {0, 0, drawingRect.width, drawingRect.height};
-
   GdkRectangle gdk_rect = {-drawingRect.x, -drawingRect.y,
                            widgetRect.width, widgetRect.height};
-
-  ThemeRenderer renderer(state, gtkWidgetType, flags, direction,
-                         gdk_rect, gdk_clip);
-
-  // Some themes (e.g. Clearlooks) just don't clip properly to any
-  // clip rect we provide, so we cannot advertise support for clipping within
-  // the widget bounds.
-  uint32_t rendererFlags = 0;
-  if (GetWidgetTransparency(aFrame, aWidgetType) == eOpaque) {
-    rendererFlags |= gfxGdkNativeRenderer::DRAW_IS_OPAQUE;
-  }
 
   // translate everything so (0,0) is the top left of the drawingRect
   gfxContextAutoSaveRestore autoSR(ctx);
@@ -816,11 +804,31 @@ nsNativeThemeGTK::DrawWidgetBackground(nsRenderingContext* aContext,
     gdk_error_trap_push ();
   }
 
+#if defined(MOZ_WIDGET_GTK2)
+  // The gdk_clip is just advisory here, meaning "you don't
+  // need to draw outside this rect if you don't feel like it!"
+  GdkRectangle gdk_clip = {0, 0, drawingRect.width, drawingRect.height};
+
+  ThemeRenderer renderer(state, gtkWidgetType, flags, direction,
+                         gdk_rect, gdk_clip);
+
+  // Some themes (e.g. Clearlooks) just don't clip properly to any
+  // clip rect we provide, so we cannot advertise support for clipping within
+  // the widget bounds.
+  uint32_t rendererFlags = 0;
+  if (GetWidgetTransparency(aFrame, aWidgetType) == eOpaque) {
+    rendererFlags |= gfxGdkNativeRenderer::DRAW_IS_OPAQUE;
+  }
+
   // GtkStyles (used by the widget drawing backend) are created for a
   // particular colormap/visual.
   GdkColormap* colormap = moz_gtk_widget_get_colormap();
 
   renderer.Draw(ctx, drawingRect.Size(), rendererFlags, colormap);
+#else 
+  moz_gtk_widget_paint(gtkWidgetType, ctx->GetCairo(), &gdk_rect, 
+                       &state, flags, direction);
+#endif
 
   if (!safeState) {
     gdk_flush();
@@ -977,17 +985,15 @@ nsNativeThemeGTK::GetWidgetOverflow(nsDeviceContext* aContext,
                                     nsIFrame* aFrame, uint8_t aWidgetType,
                                     nsRect* aOverflowRect)
 {
-  nsMargin m;
-  int32_t p2a;
   nsIntMargin extraSize;
   if (!GetExtraSizeForWidget(aFrame, aWidgetType, &extraSize))
     return false;
 
-  p2a = aContext->AppUnitsPerDevPixel();
-  m = nsMargin(NSIntPixelsToAppUnits(extraSize.left, p2a),
-               NSIntPixelsToAppUnits(extraSize.top, p2a),
-               NSIntPixelsToAppUnits(extraSize.right, p2a),
-               NSIntPixelsToAppUnits(extraSize.bottom, p2a));
+  int32_t p2a = aContext->AppUnitsPerDevPixel();
+  nsMargin m(NSIntPixelsToAppUnits(extraSize.top, p2a),
+             NSIntPixelsToAppUnits(extraSize.right, p2a),
+             NSIntPixelsToAppUnits(extraSize.bottom, p2a),
+             NSIntPixelsToAppUnits(extraSize.left, p2a));
 
   aOverflowRect->Inflate(m);
   return true;
@@ -1051,9 +1057,9 @@ nsNativeThemeGTK::GetMinimumWidgetSize(nsRenderingContext* aContext,
       moz_gtk_get_scrollbar_metrics(&metrics);
 
       if (aWidgetType == NS_THEME_SCROLLBAR_TRACK_VERTICAL)
-        aResult->width = metrics.slider_width;
+        aResult->width = metrics.slider_width + 2 * metrics.trough_border;
       else
-        aResult->height = metrics.slider_width;
+        aResult->height = metrics.slider_width + 2 * metrics.trough_border;
 
       *aIsOverridable = false;
     }
@@ -1079,11 +1085,11 @@ nsNativeThemeGTK::GetMinimumWidgetSize(nsRenderingContext* aContext,
 
         if (aWidgetType == NS_THEME_SCROLLBAR_THUMB_VERTICAL) {
           aResult->width = metrics.slider_width;
-          aResult->height = NS_MIN(NSAppUnitsToIntPixels(rect.height, p2a),
+          aResult->height = std::min(NSAppUnitsToIntPixels(rect.height, p2a),
                                    metrics.min_slider_size);
         } else {
           aResult->height = metrics.slider_width;
-          aResult->width = NS_MIN(NSAppUnitsToIntPixels(rect.width, p2a),
+          aResult->width = std::min(NSAppUnitsToIntPixels(rect.width, p2a),
                                   metrics.min_slider_size);
         }
 

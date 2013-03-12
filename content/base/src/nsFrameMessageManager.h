@@ -1,4 +1,4 @@
-/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: c++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -26,7 +26,9 @@ namespace mozilla {
 namespace dom {
 
 class ContentParent;
+class ContentChild;
 struct StructuredCloneData;
+class ClonedMessageData;
 
 namespace ipc {
 
@@ -66,7 +68,28 @@ public:
   {
     return false;
   }
+
+  virtual bool CheckManifestURL(const nsAString& aManifestURL)
+  {
+    return false;
+  }
+
+  virtual bool CheckAppHasPermission(const nsAString& aPermission)
+  {
+    return false;
+  }
+
+protected:
+  bool BuildClonedMessageDataForParent(ContentParent* aParent,
+				       const StructuredCloneData& aData,
+				       ClonedMessageData& aClonedData);
+  bool BuildClonedMessageDataForChild(ContentChild* aChild,
+				      const StructuredCloneData& aData,
+				      ClonedMessageData& aClonedData);
 };
+
+StructuredCloneData UnpackClonedMessageDataForParent(const ClonedMessageData& aData);
+StructuredCloneData UnpackClonedMessageDataForChild(const ClonedMessageData& aData);
 
 } // namespace ipc
 } // namespace dom
@@ -74,7 +97,7 @@ public:
 
 class nsAXPCNativeCallContext;
 struct JSContext;
-struct JSObject;
+class JSObject;
 
 struct nsMessageListenerInfo
 {
@@ -86,7 +109,7 @@ struct nsMessageListenerInfo
 class nsFrameMessageManager MOZ_FINAL : public nsIContentFrameMessageManager,
                                         public nsIMessageBroadcaster,
                                         public nsIFrameScriptLoader,
-                                        public nsIPermissionChecker
+                                        public nsIProcessChecker
 {
   typedef mozilla::dom::StructuredCloneData StructuredCloneData;
 public:
@@ -152,7 +175,7 @@ public:
   NS_DECL_NSISYNCMESSAGESENDER
   NS_DECL_NSICONTENTFRAMEMESSAGEMANAGER
   NS_DECL_NSIFRAMESCRIPTLOADER
-  NS_DECL_NSIPERMISSIONCHECKER
+  NS_DECL_NSIPROCESSCHECKER
 
   static nsFrameMessageManager*
   NewProcessMessageManager(mozilla::dom::ContentParent* aProcess);
@@ -226,6 +249,15 @@ public:
   static nsFrameMessageManager* sChildProcessManager;
   static nsFrameMessageManager* sSameProcessParentManager;
   static nsTArray<nsCOMPtr<nsIRunnable> >* sPendingSameProcessAsyncMessages;
+private:
+  enum ProcessCheckerType {
+    PROCESS_CHECKER_PERMISSION,
+    PROCESS_CHECKER_MANIFEST_URL,
+    ASSERT_APP_HAS_PERMISSION
+  };
+  nsresult AssertProcessInternal(ProcessCheckerType aType,
+                                 const nsAString& aCapability,
+                                 bool* aValid);
 };
 
 void
@@ -262,9 +294,10 @@ protected:
   enum CacheFailedBehavior { EXECUTE_IF_CANT_CACHE, DONT_EXECUTE };
   void TryCacheLoadAndCompileScript(const nsAString& aURL,
                                     CacheFailedBehavior aBehavior = DONT_EXECUTE);
-  bool InitTabChildGlobalInternal(nsISupports* aScope);
+  bool InitTabChildGlobalInternal(nsISupports* aScope, const nsACString& aID);
   static void Traverse(nsFrameScriptExecutor *tmp,
                        nsCycleCollectionTraversalCallback &cb);
+  static void Unlink(nsFrameScriptExecutor* aTmp);
   nsCOMPtr<nsIXPConnectJSObjectHolder> mGlobal;
   JSContext* mCx;
   uint32_t mCxStackRefCnt;

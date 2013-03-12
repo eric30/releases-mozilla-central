@@ -203,7 +203,8 @@ endif
 profiledbuild::
 	$(MAKE) -f $(TOPSRCDIR)/client.mk realbuild MOZ_PROFILE_GENERATE=1 MOZ_PGO_INSTRUMENTED=1
 	$(MAKE) -C $(PGO_OBJDIR) package MOZ_PGO_INSTRUMENTED=1 MOZ_INTERNAL_SIGNING_FORMAT= MOZ_EXTERNAL_SIGNING_FORMAT=
-	MOZ_PGO_INSTRUMENTED=1 OBJDIR=${PGO_OBJDIR} JARLOG_DIR=${PGO_OBJDIR}/jarlog/en-US $(PROFILE_GEN_SCRIPT)
+	rm -f ${PGO_OBJDIR}/jarlog/en-US.log
+	MOZ_PGO_INSTRUMENTED=1 OBJDIR=${PGO_OBJDIR} JARLOG_FILE=${PGO_OBJDIR}/jarlog/en-US.log $(PROFILE_GEN_SCRIPT)
 	$(MAKE) -f $(TOPSRCDIR)/client.mk maybe_clobber_profiledbuild
 	$(MAKE) -f $(TOPSRCDIR)/client.mk realbuild MOZ_PROFILE_USE=1
 
@@ -278,7 +279,6 @@ $(CONFIGURES): %: %.in $(EXTRA_CONFIG_DEPS)
 CONFIG_STATUS_DEPS := \
   $(wildcard $(TOPSRCDIR)/*/confvars.sh) \
   $(CONFIGURES) \
-  $(TOPSRCDIR)/allmakefiles.sh \
   $(TOPSRCDIR)/CLOBBER \
   $(TOPSRCDIR)/nsprpub/configure \
   $(TOPSRCDIR)/config/milestone.txt \
@@ -286,6 +286,7 @@ CONFIG_STATUS_DEPS := \
   $(TOPSRCDIR)/browser/config/version.txt \
   $(TOPSRCDIR)/build/virtualenv/packages.txt \
   $(TOPSRCDIR)/build/virtualenv/populate_virtualenv.py \
+  $(TOPSRCDIR)/testing/mozbase/packages.txt \
   $(NULL)
 
 CONFIGURE_ENV_ARGS += \

@@ -92,8 +92,8 @@ typedef nsEventStatus (* EVENT_CALLBACK)(nsGUIEvent *event);
 #endif
 
 #define NS_IWIDGET_IID \
-  { 0xdb9b0931, 0xebf9, 0x4e0d, \
-    { 0xb2, 0x0a, 0xf7, 0x5f, 0xcb, 0x17, 0xe6, 0xe1 } }
+  { 0x48568C1E, 0xAF56, 0x4F73, \
+    { 0x94, 0x6D, 0xAA, 0x43, 0xD8, 0x96, 0x78, 0x6B } }
 
 /*
  * Window shadow styles
@@ -188,11 +188,12 @@ enum nsTopLevelWidgetZPlacement { // for PlaceBehind()
  * Preference for receiving IME updates
  *
  * If mWantUpdates is true, nsTextStateManager will observe text change and
- * selection change and call nsIWidget::OnIMETextChange() and
- * nsIWidget::OnIMESelectionChange(). The observing cost is very expensive.
+ * selection change and call nsIWidget::NotifyIMEOfTextChange() and
+ * nsIWidget::NotifyIME(NOTIFY_IME_OF_SELECTION_CHANGE). The observing cost is
+ * very expensive.
  * If the IME implementation on a particular platform doesn't care about
- * OnIMETextChange and OnIMESelectionChange, they should set mWantUpdates to
- * false to avoid the cost.
+ * NotifyIMEOfTextChange and NotifyIME(NOTIFY_IME_OF_SELECTION_CHANGE), they
+ * should set mWantUpdates to false to avoid the cost.
  *
  * If mWantHints is true, PuppetWidget will forward the content of text fields
  * to the chrome process to be cached. This way we return the cached content
@@ -419,6 +420,7 @@ class nsIWidget : public nsISupports {
     typedef mozilla::layers::LayerManager LayerManager;
     typedef mozilla::layers::LayersBackend LayersBackend;
     typedef mozilla::layers::PLayersChild PLayersChild;
+    typedef mozilla::widget::NotificationToIME NotificationToIME;
     typedef mozilla::widget::IMEState IMEState;
     typedef mozilla::widget::InputContext InputContext;
     typedef mozilla::widget::InputContextAction InputContextAction;
@@ -524,7 +526,7 @@ class nsIWidget : public nsISupports {
 
     /**
      * Accessor functions to get and set the attached listener. Used by
-     * nsIView in connection with AttachViewToTopLevel above.
+     * nsView in connection with AttachViewToTopLevel above.
      */
     virtual void SetAttachedWidgetListener(nsIWidgetListener* aListener) = 0;
     virtual nsIWidgetListener* GetAttachedWidgetListener() = 0;
@@ -697,8 +699,14 @@ class nsIWidget : public nsISupports {
      * case with mixed hi-dpi and lo-dpi displays). This applies to all the
      * following Move and Resize widget APIs.
      *
-     * Currently, only Mac OS X implements a display-/device-pixel distinction;
-     * this may change in future, however.
+     * The display-/device-pixel distinction becomes important for (at least)
+     * Mac OS X with Hi-DPI (retina) displays, and Windows when the UI scale
+     * factor is set to other than 100%.
+     *
+     * The Move and Resize methods take floating-point parameters, rather than
+     * integer ones. This is important when manipulating top-level widgets,
+     * where the coordinate system may not be an integral multiple of the
+     * device-pixel space.
      **/
 
     /**
@@ -711,7 +719,7 @@ class nsIWidget : public nsISupports {
      * @param aY the new y position expressed in the parent's coordinate system
      *
      **/
-    NS_IMETHOD Move(int32_t aX, int32_t aY) = 0;
+    NS_IMETHOD Move(double aX, double aY) = 0;
 
     /**
      * Reposition this widget so that the client area has the given offset.
@@ -726,7 +734,7 @@ class nsIWidget : public nsISupports {
      *                 screen coordinates)
      *
      **/
-    NS_IMETHOD MoveClient(int32_t aX, int32_t aY) = 0;
+    NS_IMETHOD MoveClient(double aX, double aY) = 0;
 
     /**
      * Resize this widget. Any size constraints set for the window by a
@@ -737,9 +745,9 @@ class nsIWidget : public nsISupports {
      * @param aRepaint whether the widget should be repainted
      *
      */
-    NS_IMETHOD Resize(int32_t aWidth,
-                      int32_t aHeight,
-                      bool     aRepaint) = 0;
+    NS_IMETHOD Resize(double aWidth,
+                      double aHeight,
+                      bool   aRepaint) = 0;
 
     /**
      * Move or resize this widget. Any size constraints set for the window by
@@ -752,11 +760,11 @@ class nsIWidget : public nsISupports {
      * @param aRepaint whether the widget should be repainted if the size changes
      *
      */
-    NS_IMETHOD Resize(int32_t aX,
-                      int32_t aY,
-                      int32_t aWidth,
-                      int32_t aHeight,
-                      bool     aRepaint) = 0;
+    NS_IMETHOD Resize(double aX,
+                      double aY,
+                      double aWidth,
+                      double aHeight,
+                      bool   aRepaint) = 0;
 
     /**
      * Resize the widget so that the inner client area has the given size.
@@ -766,9 +774,9 @@ class nsIWidget : public nsISupports {
      * @param aRepaint whether the widget should be repainted
      *
      */
-    NS_IMETHOD ResizeClient(int32_t aWidth,
-                            int32_t aHeight,
-                            bool  aRepaint) = 0;
+    NS_IMETHOD ResizeClient(double aWidth,
+                            double aHeight,
+                            bool   aRepaint) = 0;
 
     /**
      * Resize and reposition the widget so tht inner client area has the given
@@ -787,11 +795,11 @@ class nsIWidget : public nsISupports {
      * @param aRepaint whether the widget should be repainted
      *
      */
-    NS_IMETHOD ResizeClient(int32_t aX,
-                            int32_t aY,
-                            int32_t aWidth,
-                            int32_t aHeight,
-                            bool    aRepaint) = 0;
+    NS_IMETHOD ResizeClient(double aX,
+                            double aY,
+                            double aWidth,
+                            double aHeight,
+                            bool   aRepaint) = 0;
 
     /**
      * Sets the widget's z-index.
@@ -1480,25 +1488,10 @@ class nsIWidget : public nsISupports {
      */
     virtual nsresult ForceUpdateNativeMenuAt(const nsAString& indexString) = 0;
 
-    /*
-     * Force Input Method Editor to commit the uncommitted input
+    /**
+     * Notify IME of the specified notification.
      */
-    NS_IMETHOD ResetInputState()=0;
-
-    /*
-     * Following methods relates to IME 'Opened'/'Closed' state.
-     * 'Opened' means the user can input any character. I.e., users can input Japanese  
-     * and other characters. The user can change the state to 'Closed'.
-     * 'Closed' means the user can input ASCII characters only. This is the same as a
-     * non-IME environment. The user can change the state to 'Opened'.
-     * For more information is here.
-     * http://bugzilla.mozilla.org/show_bug.cgi?id=16940#c48
-     */
-
-    /*
-     * Destruct and don't commit the IME composition string.
-     */
-    NS_IMETHOD CancelIMEComposition() = 0;
+    NS_IMETHOD NotifyIME(NotificationToIME aNotification) = 0;
 
     /*
      * Notifies the input context changes.
@@ -1528,27 +1521,14 @@ class nsIWidget : public nsISupports {
     NS_IMETHOD GetToggledKeyState(uint32_t aKeyCode, bool* aLEDState) = 0;
 
     /*
-     * An editable node (i.e. input/textarea/design mode document)
-     *  is receiving or giving up focus
-     * aFocus is true if node is receiving focus
-     * aFocus is false if node is giving up focus (blur)
-     */
-    NS_IMETHOD OnIMEFocusChange(bool aFocus) = 0;
-
-    /*
      * Text content of the focused node has changed
      * aStart is the starting offset of the change
      * aOldEnd is the ending offset of the change
      * aNewEnd is the caret offset after the change
      */
-    NS_IMETHOD OnIMETextChange(uint32_t aStart,
-                               uint32_t aOldEnd,
-                               uint32_t aNewEnd) = 0;
-
-    /*
-     * Selection has changed in the focused node
-     */
-    NS_IMETHOD OnIMESelectionChange(void) = 0;
+    NS_IMETHOD NotifyIMEOfTextChange(uint32_t aStart,
+                                     uint32_t aOldEnd,
+                                     uint32_t aNewEnd) = 0;
 
     /*
      * Retrieves preference for IME updates
@@ -1635,8 +1615,22 @@ class nsIWidget : public nsISupports {
     virtual bool WidgetPaintsBackground() { return false; }
 
     virtual bool NeedsPaint() {
-      return true;
+       if (!IsVisible()) {
+           return false;
+       }
+       nsIntRect bounds;
+       nsresult rv = GetBounds(bounds);
+       NS_ENSURE_SUCCESS(rv, false);
+       return !bounds.IsEmpty();
     }
+
+    /**
+     * This function is called by nsViewManager right before the retained layer 
+     * tree for this widget is about to be updated, and any required
+     * ThebesLayer painting occurs.
+     */
+    virtual void WillPaint() { }
+
     /**
      * Get the natural bounds of this widget.  This method is only
      * meaningful for widgets for which Gecko implements screen

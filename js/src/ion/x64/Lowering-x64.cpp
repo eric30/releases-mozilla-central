@@ -37,25 +37,6 @@ LIRGeneratorX64::useBoxFixed(LInstruction *lir, size_t n, MDefinition *mir, Regi
 }
 
 bool
-LIRGeneratorX64::lowerConstantDouble(double d, MInstruction *mir)
-{
-    return define(new LDouble(d), mir);
-}
-
-bool
-LIRGeneratorX64::visitConstant(MConstant *ins)
-{
-    if (ins->type() == MIRType_Double)
-        return lowerConstantDouble(ins->value().toDouble(), ins);
-
-    // Emit non-double constants at their uses.
-    if (ins->canEmitAtUses())
-        return emitAtUses(ins);
-
-    return LIRGeneratorShared::visitConstant(ins);
-}
-
-bool
 LIRGeneratorX64::visitBox(MBox *box)
 {
     MDefinition *opd = box->getOperand(0);
@@ -146,13 +127,6 @@ void
 LIRGeneratorX64::lowerUntypedPhiInput(MPhi *phi, uint32_t inputPosition, LBlock *block, size_t lirIndex)
 {
     lowerTypedPhiInput(phi, inputPosition, block, lirIndex);
-}
-
-bool
-LIRGeneratorX64::lowerDivI(MDiv *div)
-{
-    LDivI *lir = new LDivI(useFixed(div->lhs(), rax), useRegister(div->rhs()), tempFixed(rdx));
-    return assignSnapshot(lir) && defineFixed(lir, div, LAllocation(AnyRegister(rax)));
 }
 
 bool

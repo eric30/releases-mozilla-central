@@ -7,6 +7,7 @@
 
 #include "gfxAndroidPlatform.h"
 #include "mozilla/gfx/2D.h"
+#include "mozilla/Preferences.h"
 
 #include "gfxFT2FontList.h"
 #include "gfxImageSurface.h"
@@ -27,8 +28,6 @@ using namespace mozilla::gfx;
 
 static FT_Library gPlatformFTLibrary = NULL;
 
-#define LOG(args...)  __android_log_print(ANDROID_LOG_INFO, "GeckoFonts" , ## args)
-
 static int64_t sFreetypeMemoryUsed;
 static FT_MemoryRec_ sFreetypeMemoryRecord;
 
@@ -46,34 +45,34 @@ NS_MEMORY_REPORTER_IMPLEMENT(Freetype,
     "Memory used by Freetype."
 )
 
-NS_MEMORY_REPORTER_MALLOC_SIZEOF_FUN(FreetypeMallocSizeOfForCounterInc, "freetype")
-NS_MEMORY_REPORTER_MALLOC_SIZEOF_FUN_UN(FreetypeMallocSizeOfForCounterDec)
+NS_MEMORY_REPORTER_MALLOC_SIZEOF_ON_ALLOC_FUN(FreetypeMallocSizeOfOnAlloc)
+NS_MEMORY_REPORTER_MALLOC_SIZEOF_ON_FREE_FUN(FreetypeMallocSizeOfOnFree)
 
 static void*
 CountingAlloc(FT_Memory memory, long size)
 {
     void *p = malloc(size);
-    sFreetypeMemoryUsed += FreetypeMallocSizeOfForCounterInc(p);
+    sFreetypeMemoryUsed += FreetypeMallocSizeOfOnAlloc(p);
     return p;
 }
 
 static void
 CountingFree(FT_Memory memory, void* p)
 {
-    sFreetypeMemoryUsed -= FreetypeMallocSizeOfForCounterDec(p);
+    sFreetypeMemoryUsed -= FreetypeMallocSizeOfOnFree(p);
     free(p);
 }
 
 static void*
 CountingRealloc(FT_Memory memory, long cur_size, long new_size, void* p)
 {
-    sFreetypeMemoryUsed -= FreetypeMallocSizeOfForCounterDec(p);
+    sFreetypeMemoryUsed -= FreetypeMallocSizeOfOnFree(p);
     void *pnew = realloc(p, new_size);
     if (pnew) {
-        sFreetypeMemoryUsed += FreetypeMallocSizeOfForCounterInc(pnew);
+        sFreetypeMemoryUsed += FreetypeMallocSizeOfOnAlloc(pnew);
     } else {
         // realloc failed;  undo the decrement from above
-        sFreetypeMemoryUsed += FreetypeMallocSizeOfForCounterInc(p);
+        sFreetypeMemoryUsed += FreetypeMallocSizeOfOnAlloc(p);
     }
     return pnew;
 }
@@ -102,6 +101,11 @@ gfxAndroidPlatform::gfxAndroidPlatform()
     mOffscreenFormat = mScreenDepth == 16
                        ? gfxASurface::ImageFormatRGB16_565
                        : gfxASurface::ImageFormatRGB24;
+
+    if (Preferences::GetBool("gfx.android.rgb16.force", false)) {
+        mOffscreenFormat = gfxASurface::ImageFormatRGB16_565;
+    }
+
 }
 
 gfxAndroidPlatform::~gfxAndroidPlatform()
@@ -120,6 +124,54 @@ gfxAndroidPlatform::CreateOffscreenSurface(const gfxIntSize& size,
     newSurface = new gfxImageSurface(size, OptimalFormatForContent(contentType));
 
     return newSurface.forget();
+}
+
+void
+gfxAndroidPlatform::GetCommonFallbackFonts(const uint32_t aCh,
+                                           int32_t aRunScript,
+                                           nsTArray<const char*>& aFontList)
+{
+    static const char kDroidSansJapanese[] = "Droid Sans Japanese";
+
+    if (IS_IN_BMP(aCh)) {
+        // try language-specific "Droid Sans *" fonts for certain blocks,
+        // as most devices probably have these
+        uint8_t block = (aCh >> 8) & 0xff;
+        switch (block) {
+        case 0x05:
+            aFontList.AppendElement("Droid Sans Hebrew");
+            aFontList.AppendElement("Droid Sans Armenian");
+            break;
+        case 0x06:
+            aFontList.AppendElement("Droid Sans Arabic");
+            break;
+        case 0x09:
+            aFontList.AppendElement("Droid Sans Devanagari");
+            break;
+        case 0x0b:
+            aFontList.AppendElement("Droid Sans Tamil");
+            break;
+        case 0x0e:
+            aFontList.AppendElement("Droid Sans Thai");
+            break;
+        case 0x10: case 0x2d:
+            aFontList.AppendElement("Droid Sans Georgian");
+            break;
+        case 0x12: case 0x13:
+            aFontList.AppendElement("Droid Sans Ethiopic");
+            break;
+        case 0xf9: case 0xfa:
+            aFontList.AppendElement(kDroidSansJapanese);
+            break;
+        default:
+            if (block >= 0x2e && block <= 0x9f) {
+                aFontList.AppendElement(kDroidSansJapanese);
+            }
+            break;
+        }
+    }
+    // and try Droid Sans Fallback as a last resort
+    aFontList.AppendElement("Droid Sans Fallback");
 }
 
 nsresult
@@ -247,20 +299,53 @@ gfxAndroidPlatform::FontHintingEnabled()
 {
     // In "mobile" builds, we sometimes use non-reflow-zoom, so we
     // might not want hinting.  Let's see.
+
 #ifdef MOZ_USING_ANDROID_JAVA_WIDGETS
     // On android-java, we currently only use gecko to render web
     // content that can always be be non-reflow-zoomed.  So turn off
     // hinting.
     // 
-    // XXX when gecko-android-java is used as an "app runtime", we'll
-    // want to re-enable hinting.
+    // XXX when gecko-android-java is used as an "app runtime", we may
+    // want to re-enable hinting for non-browser processes there.
     return false;
-#else
-    // Otherwise, enable hinting unless we're in a content process
-    // that might be used for non-reflowing zoom.
-    return XRE_GetProcessType() != GeckoProcessType_Content ||
-           ContentChild::GetSingleton()->HasOwnApp();
 #endif //  MOZ_USING_ANDROID_JAVA_WIDGETS
+
+#ifdef MOZ_WIDGET_GONK
+    // On B2G, the UX preference is currently to keep hinting disabled
+    // for all text (see bug 829523).
+    return false;
+#endif
+
+    // Currently, we don't have any other targets, but if/when we do,
+    // decide how to handle them here.
+
+    NS_NOTREACHED("oops, what platform is this?");
+    return gfxPlatform::FontHintingEnabled();
+}
+
+bool
+gfxAndroidPlatform::RequiresLinearZoom()
+{
+#ifdef MOZ_USING_ANDROID_JAVA_WIDGETS
+    // On android-java, we currently only use gecko to render web
+    // content that can always be be non-reflow-zoomed.
+    //
+    // XXX when gecko-android-java is used as an "app runtime", we may
+    // want to treat it like B2G and use linear zoom only for the web
+    // browser process, not other apps.
+    return true;
+#endif
+
+#ifdef MOZ_WIDGET_GONK
+    // On B2G, we need linear zoom for the browser, but otherwise prefer
+    // the improved glyph spacing that results from respecting the device
+    // pixel resolution for glyph layout (see bug 816614).
+    return XRE_GetProcessType() == GeckoProcessType_Content &&
+           ContentChild::GetSingleton()->IsForBrowser();
+#endif
+
+    NS_NOTREACHED("oops, what platform is this?");
+    return gfxPlatform::RequiresLinearZoom();
 }
 
 int

@@ -32,7 +32,6 @@
 #endif
 
 #include "mozilla/StandardInteger.h"
-#include "mozilla/Scoped.h"
 
 using namespace std;
 
@@ -269,6 +268,7 @@ namespace CData {
                             JSBool strict, MutableHandleValue vp);
   static JSBool Address(JSContext* cx, unsigned argc, jsval* vp);
   static JSBool ReadString(JSContext* cx, unsigned argc, jsval* vp);
+  static JSBool ReadStringReplaceMalformed(JSContext* cx, unsigned argc, jsval* vp);
   static JSBool ToSource(JSContext* cx, unsigned argc, jsval* vp);
   static JSString *GetSourceString(JSContext *cx, JSHandleObject typeObj,
                                    void *data);
@@ -572,6 +572,7 @@ static JSPropertySpec sCDataProps[] = {
 static JSFunctionSpec sCDataFunctions[] = {
   JS_FN("address", CData::Address, 0, CDATAFN_FLAGS),
   JS_FN("readString", CData::ReadString, 0, CDATAFN_FLAGS),
+  JS_FN("readStringReplaceMalformed", CData::ReadStringReplaceMalformed, 0, CDATAFN_FLAGS),
   JS_FN("toSource", CData::ToSource, 0, CDATAFN_FLAGS),
   JS_FN("toString", CData::ToSource, 0, CDATAFN_FLAGS),
   JS_FS_END
@@ -804,7 +805,7 @@ TypeError(JSContext* cx, const char* expected, jsval actual)
   
   const char* src;
   if (str) {
-    src = bytes.encode(cx, str);
+    src = bytes.encodeLatin1(cx, str);
     if (!src)
       return false;
   } else {
@@ -1330,6 +1331,28 @@ JS_SetCTypesCallbacks(JSRawObject ctypesObj, JSCTypesCallbacks* callbacks)
 }
 
 namespace js {
+
+JS_FRIEND_API(size_t)
+SizeOfDataIfCDataObject(JSMallocSizeOfFun mallocSizeOf, JSObject *obj)
+{
+    if (!CData::IsCData(obj))
+        return 0;
+
+    size_t n = 0;
+    jsval slot = JS_GetReservedSlot(obj, ctypes::SLOT_OWNS);
+    if (!JSVAL_IS_VOID(slot)) {
+        JSBool owns = JSVAL_TO_BOOLEAN(slot);
+        slot = JS_GetReservedSlot(obj, ctypes::SLOT_DATA);
+        if (!JSVAL_IS_VOID(slot)) {
+            char** buffer = static_cast<char**>(JSVAL_TO_PRIVATE(slot));
+            n += mallocSizeOf(buffer);
+            if (owns)
+                n += mallocSizeOf(*buffer);
+        }
+    }
+    return n;
+}
+
 namespace ctypes {
 
 /*******************************************************************************
@@ -2116,7 +2139,7 @@ bool CanConvertTypedArrayItemTo(JSObject *baseType, JSObject *valObj, JSContext 
     return true;
   }
   TypeCode elementTypeCode;
-  switch (JS_GetTypedArrayType(valObj)) {
+  switch (JS_GetArrayBufferViewType(valObj)) {
   case TypedArray::TYPE_INT8:
     elementTypeCode = TYPE_int8_t;
     break;
@@ -5767,6 +5790,9 @@ FunctionType::Call(JSContext* cx,
     return false;
   }
 
+  // Let the runtime callback know that we are about to call into C.
+  js::AutoCTypesActivityCallback autoCallback(cx, js::CTYPES_CALL_BEGIN, js::CTYPES_CALL_END);
+
   uintptr_t fn = *reinterpret_cast<uintptr_t*>(CData::GetData(obj));
 
 #if defined(XP_WIN)
@@ -5793,6 +5819,9 @@ FunctionType::Call(JSContext* cx,
 #endif // defined(XP_WIN)
 
   errno = savedErrno;
+
+  // We're no longer calling into C.
+  autoCallback.DoEndCallback();
 
   // Store the error value for later consultation with |ctypes.getStatus|
   JSObject *objCTypes = CType::GetGlobalCTypes(cx, typeObj);
@@ -6075,6 +6104,12 @@ CClosure::ClosureStub(ffi_cif* cif, void* result, void** args, void* userData)
   // Retrieve the essentials from our closure object.
   ClosureInfo* cinfo = static_cast<ClosureInfo*>(userData);
   JSContext* cx = cinfo->cx;
+
+  // Let the runtime callback know that we are about to call into JS again. The end callback will
+  // fire automatically when we exit this function.
+  js::AutoCTypesActivityCallback autoCallback(cx, js::CTYPES_CALLBACK_BEGIN,
+                                              js::CTYPES_CALLBACK_END);
+
   RootedObject typeObj(cx, cinfo->typeObj);
   RootedObject thisObj(cx, cinfo->thisObj);
   RootedObject jsfnObj(cx, cinfo->jsfnObj);
@@ -6486,8 +6521,12 @@ CData::GetRuntime(JSContext* cx, unsigned argc, jsval* vp)
   return JS_TRUE;
 }
 
-JSBool
-CData::ReadString(JSContext* cx, unsigned argc, jsval* vp)
+typedef bool (*InflateUTF8Method)(JSContext *, const char *, size_t,
+                                  jschar *, size_t *);
+
+template <InflateUTF8Method InflateUTF8>
+static JSBool
+ReadStringCommon(JSContext* cx, unsigned argc, jsval* vp)
 {
   if (argc != 0) {
     JS_ReportError(cx, "readString takes zero arguments");
@@ -6495,7 +6534,7 @@ CData::ReadString(JSContext* cx, unsigned argc, jsval* vp)
   }
 
   JSObject* obj = CDataFinalizer::GetCData(cx, JS_THIS_OBJECT(cx, vp));
-  if (!obj || !IsCData(obj)) {
+  if (!obj || !CData::IsCData(obj)) {
     JS_ReportError(cx, "not a CData");
     return JS_FALSE;
   }
@@ -6503,14 +6542,14 @@ CData::ReadString(JSContext* cx, unsigned argc, jsval* vp)
   // Make sure we are a pointer to, or an array of, an 8-bit or 16-bit
   // character or integer type.
   JSObject* baseType;
-  JSObject* typeObj = GetCType(obj);
+  JSObject* typeObj = CData::GetCType(obj);
   TypeCode typeCode = CType::GetTypeCode(typeObj);
   void* data;
   size_t maxLength = -1;
   switch (typeCode) {
   case TYPE_pointer:
     baseType = PointerType::GetBaseType(typeObj);
-    data = *static_cast<void**>(GetData(obj));
+    data = *static_cast<void**>(CData::GetData(obj));
     if (data == NULL) {
       JS_ReportError(cx, "cannot read contents of null pointer");
       return JS_FALSE;
@@ -6518,7 +6557,7 @@ CData::ReadString(JSContext* cx, unsigned argc, jsval* vp)
     break;
   case TYPE_array:
     baseType = ArrayType::GetBaseType(typeObj);
-    data = GetData(obj);
+    data = CData::GetData(obj);
     maxLength = ArrayType::GetLength(typeObj);
     break;
   default:
@@ -6540,7 +6579,7 @@ CData::ReadString(JSContext* cx, unsigned argc, jsval* vp)
 
     // Determine the length.
     size_t dstlen;
-    if (!InflateUTF8StringToBuffer(cx, bytes, length, NULL, &dstlen))
+    if (!InflateUTF8(cx, bytes, length, NULL, &dstlen))
       return JS_FALSE;
 
     jschar* dst =
@@ -6548,7 +6587,7 @@ CData::ReadString(JSContext* cx, unsigned argc, jsval* vp)
     if (!dst)
       return JS_FALSE;
 
-    ASSERT_OK(InflateUTF8StringToBuffer(cx, bytes, length, dst, &dstlen));
+    ASSERT_OK(InflateUTF8(cx, bytes, length, dst, &dstlen));
     dst[dstlen] = 0;
 
     result = JS_NewUCString(cx, dst, dstlen);
@@ -6575,6 +6614,18 @@ CData::ReadString(JSContext* cx, unsigned argc, jsval* vp)
 
   JS_SET_RVAL(cx, vp, STRING_TO_JSVAL(result));
   return JS_TRUE;
+}
+
+JSBool
+CData::ReadString(JSContext* cx, unsigned argc, jsval* vp)
+{
+  return ReadStringCommon<InflateUTF8StringToBuffer>(cx, argc, vp);
+}
+
+JSBool
+CData::ReadStringReplaceMalformed(JSContext* cx, unsigned argc, jsval* vp)
+{
+  return ReadStringCommon<InflateUTF8StringToBufferReplaceInvalid>(cx, argc, vp);
 }
 
 JSString *
@@ -6905,7 +6956,7 @@ CDataFinalizer::Construct(JSContext* cx, unsigned argc, jsval *vp)
     return TypeError(cx, "(an object with known size)", valData);
   }
 
-  ScopedFreePtr<void> cargs(malloc(sizeArg));
+  ScopedJSFreePtr<void> cargs(malloc(sizeArg));
 
   if (!ImplicitConvert(cx, valData, objArgType, cargs.get(),
                        false, &freePointer)) {
@@ -6920,7 +6971,7 @@ CDataFinalizer::Construct(JSContext* cx, unsigned argc, jsval *vp)
 
   // 4. Prepare buffer for holding return value
 
-  ScopedFreePtr<void> rvalue;
+  ScopedJSFreePtr<void> rvalue;
   if (CType::GetTypeCode(returnType) != TYPE_void_t) {
     rvalue = malloc(Align(CType::GetSize(returnType),
                           sizeof(ffi_arg)));
@@ -6976,7 +7027,7 @@ CDataFinalizer::Construct(JSContext* cx, unsigned argc, jsval *vp)
   }
 
   // 7. Store C information as private
-  ScopedFreePtr<CDataFinalizer::Private>
+  ScopedJSFreePtr<CDataFinalizer::Private>
     p((CDataFinalizer::Private*)malloc(sizeof(CDataFinalizer::Private)));
 
   memmove(&p->CIF, &funInfoFinalizer->mCIF, sizeof(ffi_cif));

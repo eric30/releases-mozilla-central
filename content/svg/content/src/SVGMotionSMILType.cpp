@@ -8,12 +8,10 @@
 #include "SVGMotionSMILType.h"
 #include "nsSMILValue.h"
 #include "nsDebug.h"
-#include "nsSVGAngle.h"
-#include "nsIDOMSVGAngle.h"
-#include "nsSVGPathElement.h"
-#include "nsIDOMSVGPathSeg.h"
-#include "nsIDOMSVGPathSegList.h"
 #include "nsMathUtils.h"
+#include "nsISupportsUtils.h"
+#include "gfxPath.h"
+#include "nsTArray.h"
 #include <math.h>
 
 namespace mozilla {

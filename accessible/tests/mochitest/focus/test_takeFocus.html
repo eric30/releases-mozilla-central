@@ -60,8 +60,13 @@
       gQueue.invoke(); // Will call SimpleTest.finish();
     }
 
+    function waitForPlugin()
+    {
+      window.setTimeout((isAccessible("plugin") ? doTest : waitForPlugin), 0);
+    }
+
     SimpleTest.waitForExplicitFinish();
-    addA11yLoadEvent(doTest);
+    addA11yLoadEvent(waitForPlugin);
   </script>
 </head>
 
@@ -95,7 +100,7 @@
   <span id="aria-link" role="link" tabindex="0">link</span>
   <span id="aria-link2" role="link" tabindex="0">link</span>
 
-  <a id="link" href="">link</span>
+  <a id="link" href="">link</a>
 
   <div role="listbox" aria-activedescendant="item1" id="container" tabindex="1">
     <div role="option" id="item1">item1</div>

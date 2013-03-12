@@ -22,6 +22,9 @@
 #include "nsNativeCharsetUtils.h"
 #include "nsError.h"
 #include "nsIUnicodeDecoder.h"
+#include "mozilla/dom/EncodingUtils.h"
+
+using mozilla::dom::EncodingUtils;
 
 // static functions declared below are moved from mailnews/mime/src/comi18n.cpp
   
@@ -29,6 +32,8 @@ static char *DecodeQ(const char *, uint32_t);
 static bool Is7bitNonAsciiString(const char *, uint32_t);
 static void CopyRawHeader(const char *, uint32_t, const char *, nsACString &);
 static nsresult DecodeRFC2047Str(const char *, const char *, bool, nsACString&);
+static nsresult internalDecodeParameter(const nsACString&, const char*,
+                                        const char*, bool, bool, nsACString&);
 
 // XXX The chance of UTF-7 being used in the message header is really
 // low, but in theory it's possible. 
@@ -46,18 +51,18 @@ nsMIMEHeaderParamImpl::GetParameter(const nsACString& aHeaderVal,
                                     bool aTryLocaleCharset, 
                                     char **aLang, nsAString& aResult)
 {
-  return DoGetParameter(aHeaderVal, aParamName, RFC_2231_DECODING,
+  return DoGetParameter(aHeaderVal, aParamName, MIME_FIELD_ENCODING,
                         aFallbackCharset, aTryLocaleCharset, aLang, aResult);
 }
 
 NS_IMETHODIMP 
-nsMIMEHeaderParamImpl::GetParameter5987(const nsACString& aHeaderVal, 
+nsMIMEHeaderParamImpl::GetParameterHTTP(const nsACString& aHeaderVal, 
                                         const char *aParamName,
                                         const nsACString& aFallbackCharset, 
                                         bool aTryLocaleCharset, 
                                         char **aLang, nsAString& aResult)
 {
-  return DoGetParameter(aHeaderVal, aParamName, RFC_5987_DECODING,
+  return DoGetParameter(aHeaderVal, aParamName, HTTP_FIELD_ENCODING,
                         aFallbackCharset, aTryLocaleCharset, aLang, aResult);
 }
 
@@ -87,17 +92,21 @@ nsMIMEHeaderParamImpl::DoGetParameter(const nsACString& aHeaderVal,
     // if necessary.
     
     nsAutoCString str1;
-    rv = DecodeParameter(med, charset.get(), nullptr, false, str1);
+    rv = internalDecodeParameter(med, charset.get(), nullptr, false,
+                                 aDecoding == MIME_FIELD_ENCODING, str1);
     NS_ENSURE_SUCCESS(rv, rv);
 
     if (!aFallbackCharset.IsEmpty())
     {
+        nsAutoCString charset;
+        EncodingUtils::FindEncodingForLabel(aFallbackCharset, charset);
         nsAutoCString str2;
         nsCOMPtr<nsIUTF8ConverterService> 
           cvtUTF8(do_GetService(NS_UTF8CONVERTERSERVICE_CONTRACTID));
         if (cvtUTF8 &&
             NS_SUCCEEDED(cvtUTF8->ConvertStringToUTF8(str1, 
-                PromiseFlatCString(aFallbackCharset).get(), false, true,
+                PromiseFlatCString(aFallbackCharset).get(), false,
+                                   !charset.EqualsLiteral("UTF-8"),
                                    1, str2))) {
           CopyUTF8toUTF16(str2, aResult);
           return NS_OK;
@@ -341,7 +350,7 @@ nsMIMEHeaderParamImpl::GetParameterInternal(const char *aHeaderValue,
                                             char **aLang,
                                             char **aResult)
 {
-  return DoParameterInternal(aHeaderValue, aParamName, RFC_2231_DECODING,
+  return DoParameterInternal(aHeaderValue, aParamName, MIME_FIELD_ENCODING,
                              aCharset, aLang, aResult);
 }
 
@@ -365,7 +374,9 @@ nsMIMEHeaderParamImpl::DoParameterInternal(const char *aHeaderValue,
 
   nsAutoCString charset;
 
-  bool acceptContinuations = (aDecoding != RFC_5987_DECODING);
+  // change to (aDecoding != HTTP_FIELD_ENCODING) when we want to disable
+  // them for HTTP header fields later on, see bug 776324
+  bool acceptContinuations = true;
 
   const char *str = aHeaderValue;
 
@@ -716,13 +727,10 @@ increment_str:
   return *aResult ? NS_OK : NS_ERROR_INVALID_ARG;
 }
 
-
-NS_IMETHODIMP
-nsMIMEHeaderParamImpl::DecodeRFC2047Header(const char* aHeaderVal, 
-                                           const char* aDefaultCharset, 
-                                           bool aOverrideCharset, 
-                                           bool aEatContinuations,
-                                           nsACString& aResult)
+nsresult
+internalDecodeRFC2047Header(const char* aHeaderVal, const char* aDefaultCharset,
+                            bool aOverrideCharset, bool aEatContinuations,
+                            nsACString& aResult)
 {
   aResult.Truncate();
   if (!aHeaderVal)
@@ -755,6 +763,18 @@ nsMIMEHeaderParamImpl::DecodeRFC2047Header(const char* aHeaderVal,
   }
 
   return NS_OK;
+}
+
+NS_IMETHODIMP
+nsMIMEHeaderParamImpl::DecodeRFC2047Header(const char* aHeaderVal, 
+                                           const char* aDefaultCharset, 
+                                           bool aOverrideCharset, 
+                                           bool aEatContinuations,
+                                           nsACString& aResult)
+{
+  return internalDecodeRFC2047Header(aHeaderVal, aDefaultCharset,
+                                     aOverrideCharset, aEatContinuations,
+                                     aResult);
 }
 
 // true if the character is allowed in a RFC 5987 value
@@ -876,12 +896,10 @@ nsMIMEHeaderParamImpl::DecodeRFC5987Param(const nsACString& aParamVal,
   return NS_OK;
 }
 
-NS_IMETHODIMP 
-nsMIMEHeaderParamImpl::DecodeParameter(const nsACString& aParamValue,
-                                       const char* aCharset,
-                                       const char* aDefaultCharset,
-                                       bool aOverrideCharset, 
-                                       nsACString& aResult)
+nsresult 
+internalDecodeParameter(const nsACString& aParamValue, const char* aCharset,
+                        const char* aDefaultCharset, bool aOverrideCharset,
+                        bool aDecode2047, nsACString& aResult)
 {
   aResult.Truncate();
   // If aCharset is given, aParamValue was obtained from RFC2231/5987 
@@ -915,17 +933,31 @@ nsMIMEHeaderParamImpl::DecodeParameter(const nsACString& aParamValue,
   }
 
   aResult = unQuoted;
+  nsresult rv = NS_OK;
   
-  nsAutoCString decoded;
+  if (aDecode2047) {
+    nsAutoCString decoded;
 
-  // Try RFC 2047 encoding, instead.
-  nsresult rv = DecodeRFC2047Header(unQuoted.get(), aDefaultCharset, 
-                                    aOverrideCharset, true, decoded);
-  
-  if (NS_SUCCEEDED(rv) && !decoded.IsEmpty())
-    aResult = decoded;
-  
+    // Try RFC 2047 encoding, instead.
+    rv = internalDecodeRFC2047Header(unQuoted.get(), aDefaultCharset,
+                                     aOverrideCharset, true, decoded);
+
+    if (NS_SUCCEEDED(rv) && !decoded.IsEmpty())
+      aResult = decoded;
+  }
+    
   return rv;
+}
+
+NS_IMETHODIMP
+nsMIMEHeaderParamImpl::DecodeParameter(const nsACString& aParamValue,
+                                       const char* aCharset,
+                                       const char* aDefaultCharset,
+                                       bool aOverrideCharset,
+                                       nsACString& aResult)
+{
+  return internalDecodeParameter(aParamValue, aCharset, aDefaultCharset,
+                                 aOverrideCharset, true, aResult);
 }
 
 #define ISHEXCHAR(c) \
@@ -1085,6 +1117,43 @@ void CopyRawHeader(const char *aInput, uint32_t aLen,
   }
 }
 
+nsresult DecodeQOrBase64Str(const char *aEncoded, size_t aLen, char aQOrBase64,
+                            const char *aCharset, nsACString &aResult)
+{
+  char *decodedText;
+  NS_ASSERTION(aQOrBase64 == 'Q' || aQOrBase64 == 'B', "Should be 'Q' or 'B'");
+  if(aQOrBase64 == 'Q')
+    decodedText = DecodeQ(aEncoded, aLen);
+  else if (aQOrBase64 == 'B') {
+    decodedText = PL_Base64Decode(aEncoded, aLen, nullptr);
+  } else {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  if (!decodedText) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  nsresult rv;
+  nsCOMPtr<nsIUTF8ConverterService>
+    cvtUTF8(do_GetService(NS_UTF8CONVERTERSERVICE_CONTRACTID, &rv));
+  nsAutoCString utf8Text;
+  if (NS_SUCCEEDED(rv)) {
+    // skip ASCIIness/UTF8ness test if aCharset is 7bit non-ascii charset.
+    rv = cvtUTF8->ConvertStringToUTF8(nsDependentCString(decodedText),
+                                      aCharset,
+                                      IS_7BIT_NON_ASCII_CHARSET(aCharset),
+                                      true, 1, utf8Text);
+  }
+  PR_Free(decodedText);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  aResult.Append(utf8Text);
+
+  return NS_OK;
+}
+
 static const char especials[] = "()<>@,;:\\\"/[]?.=";
 
 // |decode_mime_part2_str| taken from comi18n.c
@@ -1097,14 +1166,13 @@ nsresult DecodeRFC2047Str(const char *aHeader, const char *aDefaultCharset,
                           bool aOverrideCharset, nsACString &aResult)
 {
   const char *p, *q = nullptr, *r;
-  char *decodedText;
   const char *begin; // tracking pointer for where we are in the input buffer
   int32_t isLastEncodedWord = 0;
   const char *charsetStart, *charsetEnd;
-  char charset[80];
-
-  // initialize charset name to an empty string
-  charset[0] = '\0';
+  nsAutoCString prevCharset, curCharset;
+  nsAutoCString encodedText;
+  char prevEncoding = '\0', curEncoding;
+  nsresult rv;
 
   begin = aHeader;
 
@@ -1125,6 +1193,16 @@ nsresult DecodeRFC2047Str(const char *aHeader, const char *aDefaultCharset,
     }
 
     if (!isLastEncodedWord || q < p) {
+      if (!encodedText.IsEmpty()) {
+        rv = DecodeQOrBase64Str(encodedText.get(), encodedText.Length(),
+                                prevEncoding, prevCharset.get(), aResult);
+        if (NS_FAILED(rv)) {
+          aResult.Append(encodedText);
+        }
+        encodedText.Truncate();
+        prevCharset.Truncate();
+        prevEncoding = '\0';
+      }
       // copy the part before the encoded-word
       CopyRawHeader(begin, p - begin, aDefaultCharset, aResult);
       begin = p;
@@ -1149,15 +1227,9 @@ nsresult DecodeRFC2047Str(const char *aHeader, const char *aDefaultCharset,
       charsetEnd = q;
     }
 
-    // Check for too-long charset name
-    if (uint32_t(charsetEnd - charsetStart) >= sizeof(charset)) 
-      goto badsyntax;
-    
-    memcpy(charset, charsetStart, charsetEnd - charsetStart);
-    charset[charsetEnd - charsetStart] = 0;
-
     q++;
-    if (*q != 'Q' && *q != 'q' && *q != 'B' && *q != 'b')
+    curEncoding = nsCRT::ToUpper(*q);
+    if (curEncoding != 'Q' && curEncoding != 'B')
       goto badsyntax;
 
     if (q[1] != '?')
@@ -1176,53 +1248,87 @@ nsresult DecodeRFC2047Str(const char *aHeader, const char *aDefaultCharset,
         continue;
     }
 
-    if(*q == 'Q' || *q == 'q')
-      decodedText = DecodeQ(q + 2, r - (q + 2));
-    else {
+    curCharset.Assign(charsetStart, charsetEnd - charsetStart);
+    // Override charset if requested.  Never override labeled UTF-8.
+    // Use default charset instead of UNKNOWN-8BIT
+    if ((aOverrideCharset && 0 != nsCRT::strcasecmp(curCharset.get(), "UTF-8"))
+    || (aDefaultCharset && 0 == nsCRT::strcasecmp(curCharset.get(), "UNKNOWN-8BIT"))
+    ) {
+      curCharset = aDefaultCharset;
+    }
+
+    const char *R;
+    R = r;
+    if (curEncoding == 'B') {
       // bug 227290. ignore an extraneous '=' at the end.
       // (# of characters in B-encoded part has to be a multiple of 4)
       int32_t n = r - (q + 2);
-      n -= (n % 4 == 1 && !PL_strncmp(r - 3, "===", 3)) ? 1 : 0;
-      decodedText = PL_Base64Decode(q + 2, n, nullptr);
+      R -= (n % 4 == 1 && !PL_strncmp(r - 3, "===", 3)) ? 1 : 0;
+    }
+    // Bug 493544. Don't decode the encoded text until it ends
+    if (R[-1] != '='
+      && (prevCharset.IsEmpty()
+        || (curCharset == prevCharset && curEncoding == prevEncoding))
+    ) {
+      encodedText.Append(q + 2, R - (q + 2));
+      prevCharset = curCharset;
+      prevEncoding = curEncoding;
+
+      begin = r + 2;
+      isLastEncodedWord = 1;
+      continue;
     }
 
-    if (decodedText == nullptr)
-      goto badsyntax;
-
-    // Override charset if requested.  Never override labeled UTF-8.
-    // Use default charset instead of UNKNOWN-8BIT
-    if ((aOverrideCharset && 0 != nsCRT::strcasecmp(charset, "UTF-8")) ||
-        (aDefaultCharset && 0 == nsCRT::strcasecmp(charset, "UNKNOWN-8BIT"))) {
-      PL_strncpy(charset, aDefaultCharset, sizeof(charset) - 1);
-      charset[sizeof(charset) - 1] = '\0';
+    bool bDecoded; // If the current line has been decoded.
+    bDecoded = false;
+    if (!encodedText.IsEmpty()) {
+      if (curCharset == prevCharset && curEncoding == prevEncoding) {
+        encodedText.Append(q + 2, R - (q + 2));
+        bDecoded = true;
+      }
+      rv = DecodeQOrBase64Str(encodedText.get(), encodedText.Length(),
+                              prevEncoding, prevCharset.get(), aResult);
+      if (NS_FAILED(rv)) {
+        aResult.Append(encodedText);
+      }
+      encodedText.Truncate();
+      prevCharset.Truncate();
+      prevEncoding = '\0';
     }
-
-    {
-      nsCOMPtr<nsIUTF8ConverterService> 
-        cvtUTF8(do_GetService(NS_UTF8CONVERTERSERVICE_CONTRACTID));
-      nsAutoCString utf8Text;
-      // skip ASCIIness/UTF8ness test if aCharset is 7bit non-ascii charset.
-      if (cvtUTF8 &&
-          NS_SUCCEEDED(
-            cvtUTF8->ConvertStringToUTF8(nsDependentCString(decodedText),
-                                         charset,
-                                         IS_7BIT_NON_ASCII_CHARSET(charset),
-                                         true, 1, utf8Text))) {
-        aResult.Append(utf8Text);
-      } else {
-        aResult.Append(REPLACEMENT_CHAR);
+    if (!bDecoded) {
+      rv = DecodeQOrBase64Str(q + 2, R - (q + 2), curEncoding,
+                              curCharset.get(), aResult);
+      if (NS_FAILED(rv)) {
+        aResult.Append(encodedText);
       }
     }
-    PR_Free(decodedText);
+
     begin = r + 2;
     isLastEncodedWord = 1;
     continue;
 
   badsyntax:
+    if (!encodedText.IsEmpty()) {
+      rv = DecodeQOrBase64Str(encodedText.get(), encodedText.Length(),
+                              prevEncoding, prevCharset.get(), aResult);
+      if (NS_FAILED(rv)) {
+        aResult.Append(encodedText);
+      }
+      encodedText.Truncate();
+      prevCharset.Truncate();
+    }
     // copy the part before the encoded-word
     aResult.Append(begin, p - begin);
     begin = p;
     isLastEncodedWord = 0;
+  }
+
+  if (!encodedText.IsEmpty()) {
+    rv = DecodeQOrBase64Str(encodedText.get(), encodedText.Length(),
+                            prevEncoding, prevCharset.get(), aResult);
+    if (NS_FAILED(rv)) {
+      aResult.Append(encodedText);
+    }
   }
 
   // put the tail back

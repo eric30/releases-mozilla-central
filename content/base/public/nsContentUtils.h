@@ -34,8 +34,6 @@
 #include "nsThreadUtils.h"
 #include "nsIContent.h"
 #include "nsCharSeparatedTokenizer.h"
-#include "gfxContext.h"
-#include "gfxFont.h"
 #include "nsContentList.h"
 
 #include "mozilla/AutoRestore.h"
@@ -65,7 +63,7 @@ class nsIIOService;
 class nsIURI;
 class imgIContainer;
 class imgINotificationObserver;
-class imgIRequest;
+class imgRequestProxy;
 class imgLoader;
 class imgICache;
 class nsIImageLoadingContent;
@@ -102,7 +100,8 @@ struct nsIntMargin;
 class nsPIDOMWindow;
 class nsIDocumentLoaderFactory;
 class nsIDOMHTMLInputElement;
-class gfxTextObjectPaint;
+
+class nsViewportInfo;
 
 namespace mozilla {
 
@@ -131,40 +130,6 @@ enum EventNameType {
 
   EventNameType_HTMLXUL = 0x0003,
   EventNameType_All = 0xFFFF
-};
-
-/**
- * Information retrieved from the <meta name="viewport"> tag. See
- * GetViewportInfo for more information on this functionality.
- */
-struct ViewportInfo
-{
-    // Default zoom indicates the level at which the display is 'zoomed in'
-    // initially for the user, upon loading of the page.
-    double defaultZoom;
-
-    // The minimum zoom level permitted by the page.
-    double minZoom;
-
-    // The maximum zoom level permitted by the page.
-    double maxZoom;
-
-    // The width of the viewport, specified by the <meta name="viewport"> tag,
-    // in CSS pixels.
-    uint32_t width;
-
-    // The height of the viewport, specified by the <meta name="viewport"> tag,
-    // in CSS pixels.
-    uint32_t height;
-
-    // Whether or not we should automatically size the viewport to the device's
-    // width. This is true if the document has been optimized for mobile, and
-    // the width property of a specified <meta name="viewport"> tag is either
-    // not specified, or is set to the special value 'device-width'.
-    bool autoSize;
-
-    // Whether or not the user can zoom in and out on the page. Default is true.
-    bool allowZoom;
 };
 
 struct EventNameMapping
@@ -199,8 +164,14 @@ public:
   static JSContext* GetContextFromDocument(nsIDocument *aDocument);
 
   static bool     IsCallerChrome();
+  static bool     IsCallerXBL();
 
   static bool     IsImageSrcSetDisabled();
+
+  static bool LookupBindingMember(JSContext* aCx, nsIContent *aContent,
+                                  JS::HandleId aId, JSPropertyDescriptor* aDesc);
+  static bool IsBindingField(JSContext* aCx, nsIContent* aContent,
+                             JS::HandleId aId);
 
   /**
    * Returns the parent node of aChild crossing document boundaries.
@@ -388,10 +359,10 @@ public:
   /**
    * Checks whether two nodes come from the same origin.
    */
-  static nsresult CheckSameOrigin(nsINode* aTrustedNode,
+  static nsresult CheckSameOrigin(const nsINode* aTrustedNode,
                                   nsIDOMNode* aUnTrustedNode);
-  static nsresult CheckSameOrigin(nsINode* aTrustedNode,
-                                  nsINode* unTrustedNode);
+  static nsresult CheckSameOrigin(const nsINode* aTrustedNode,
+                                  const nsINode* unTrustedNode);
 
   // Check if the (JS) caller can access aNode.
   static bool CanCallerAccess(nsIDOMNode *aNode);
@@ -471,6 +442,13 @@ public:
   // Returns the subject principal. Guaranteed to return non-null. May only
   // be called when nsContentUtils is initialized.
   static nsIPrincipal* GetSubjectPrincipal();
+
+  // Returns the principal of the given JS object. This should never be null
+  // for any object in the XPConnect runtime.
+  //
+  // In general, being interested in the principal of an object is enough to
+  // guarantee that the return value is non-null.
+  static nsIPrincipal* GetObjectPrincipal(JSObject* aObj);
 
   static nsresult GenerateStateKey(nsIContent* aContent,
                                    const nsIDocument* aDocument,
@@ -642,7 +620,7 @@ public:
                             nsIURI* aReferrer,
                             imgINotificationObserver* aObserver,
                             int32_t aLoadFlags,
-                            imgIRequest** aRequest);
+                            imgRequestProxy** aRequest);
 
   /**
    * Obtain an image loader that respects the given document/channel's privacy status.
@@ -668,7 +646,7 @@ public:
   /**
    * Helper method to call imgIRequest::GetStaticRequest.
    */
-  static already_AddRefed<imgIRequest> GetStaticRequest(imgIRequest* aRequest);
+  static already_AddRefed<imgRequestProxy> GetStaticRequest(imgRequestProxy* aRequest);
 
   /**
    * Method that decides whether a content node is draggable
@@ -799,6 +777,7 @@ public:
     eSVG_PROPERTIES,
     eBRAND_PROPERTIES,
     eCOMMON_DIALOG_PROPERTIES,
+    eMATHML_PROPERTIES,
     PropertiesFile_COUNT
   };
   static nsresult ReportToConsole(uint32_t aErrorFlags,
@@ -1182,34 +1161,6 @@ public:
                                      uint32_t aWrapCol);
 
   /**
-   * Creates a new XML document, which is marked to be loaded as data.
-   *
-   * @param aNamespaceURI Namespace for the root element to create and insert in
-   *                      the document. Only used if aQualifiedName is not
-   *                      empty.
-   * @param aQualifiedName Qualified name for the root element to create and
-   *                       insert in the document. If empty no root element will
-   *                       be created.
-   * @param aDoctype Doctype node to insert in the document.
-   * @param aDocumentURI URI of the document. Must not be null.
-   * @param aBaseURI Base URI of the document. Must not be null.
-   * @param aPrincipal Prinicpal of the document. Must not be null.
-   * @param aScriptObject The object from which the context for event handling
-   *                      can be got.
-   * @param aFlavor Select the kind of document to create.
-   * @param aResult [out] The document that was created.
-   */
-  static nsresult CreateDocument(const nsAString& aNamespaceURI, 
-                                 const nsAString& aQualifiedName, 
-                                 nsIDOMDocumentType* aDoctype,
-                                 nsIURI* aDocumentURI,
-                                 nsIURI* aBaseURI,
-                                 nsIPrincipal* aPrincipal,
-                                 nsIScriptGlobalObject* aScriptObject,
-                                 DocumentFlavor aFlavor,
-                                 nsIDOMDocument** aResult);
-
-  /**
    * Sets the text contents of a node by replacing all existing children
    * with a single text child.
    *
@@ -1579,16 +1530,9 @@ public:
    * NOTE: If the site is optimized for mobile (via the doctype), this
    * will return viewport information that specifies default information.
    */
-  static ViewportInfo GetViewportInfo(nsIDocument* aDocument,
-                                      uint32_t aDisplayWidth,
-                                      uint32_t aDisplayHeight);
-
-  /**
-   * Constrain the viewport calculations from the GetViewportInfo() function
-   * in order to always return sane minimum/maximum values. This modifies the
-   * ViewportInfo struct passed as an input parameter, in place.
-   */
-  static void ConstrainViewportValues(ViewportInfo& aViewInfo);
+  static nsViewportInfo GetViewportInfo(nsIDocument* aDocument,
+                                        uint32_t aDisplayWidth,
+                                        uint32_t aDisplayHeight);
 
   /**
    * The device-pixel-to-CSS-px ratio used to adjust meta viewport values.
@@ -1625,42 +1569,6 @@ public:
    */
   static bool EqualsIgnoreASCIICase(const nsAString& aStr1,
                                     const nsAString& aStr2);
-
-  /**
-   * Case insensitive comparison between a string and an ASCII literal.
-   * This must ONLY be applied to an actual literal string. Do not attempt
-   * to use it with a regular char* pointer, or with a char array variable.
-   * The template trick to acquire the array length at compile time without
-   * using a macro is due to Corey Kosak, which much thanks.
-   */
-  static bool EqualsLiteralIgnoreASCIICase(const nsAString& aStr1,
-                                           const char* aStr2,
-                                           const uint32_t len);
-#ifdef NS_DISABLE_LITERAL_TEMPLATE
-  static inline bool
-  EqualsLiteralIgnoreASCIICase(const nsAString& aStr1,
-                               const char* aStr2)
-  {
-    uint32_t len = strlen(aStr2);
-    return EqualsLiteralIgnoreASCIICase(aStr1, aStr2, len);
-  }
-#else
-  template<int N>
-  static inline bool
-  EqualsLiteralIgnoreASCIICase(const nsAString& aStr1,
-                               const char (&aStr2)[N])
-  {
-    return EqualsLiteralIgnoreASCIICase(aStr1, aStr2, N-1);
-  }
-  template<int N>
-  static inline bool
-  EqualsLiteralIgnoreASCIICase(const nsAString& aStr1,
-                               char (&aStr2)[N])
-  {
-    const char* s = aStr2;
-    return EqualsLiteralIgnoreASCIICase(aStr1, s, N-1);
-  }
-#endif
 
   /**
    * Convert ASCII A-Z to a-z.
@@ -1903,6 +1811,32 @@ public:
   static bool IsRequestFullScreenAllowed();
 
   /**
+   * Returns true if the DOM fullscreen API is restricted to content only.
+   * This mirrors the pref "full-screen-api.content-only". If this is true,
+   * fullscreen requests in chrome are denied, and fullscreen requests in
+   * content stop percolating upwards before they reach chrome documents.
+   * That is, when an element in content requests fullscreen, only its
+   * containing frames that are in content are also made fullscreen, not
+   * the containing frame in the chrome document.
+   *
+   * Note if the fullscreen API is running in content only mode then multiple
+   * branches of a doctree can be fullscreen at the same time, but no fullscreen
+   * document will have a common ancestor with another fullscreen document
+   * that is also fullscreen (since the only common ancestor they can have
+   * is the chrome document, and that can't be fullscreen). i.e. multiple
+   * child documents of the chrome document can be fullscreen, but the chrome
+   * document won't be fullscreen.
+   *
+   * Making the fullscreen API content only is useful on platforms where we
+   * still want chrome to be visible or accessible while content is
+   * fullscreen, like on Windows 8 in Metro mode.
+   *
+   * Note that if the fullscreen API is content only, chrome can still go
+   * fullscreen by setting the "fullScreen" attribute on its XUL window.
+   */
+  static bool IsFullscreenApiContentOnly();
+
+  /**
    * Returns true if the idle observers API is enabled.
    */
   static bool IsIdleObserverAPIEnabled() { return sIsIdleObserverAPIEnabled; }
@@ -1924,10 +1858,12 @@ public:
   static bool HasPluginWithUncontrolledEventDispatch(nsIContent* aContent);
 
   /**
-   * Returns the root document in a document hierarchy. Normally this will
-   * be the chrome document.
+   * Returns the document that is the closest ancestor to aDoc that is
+   * fullscreen. If aDoc is fullscreen this returns aDoc. If aDoc is not
+   * fullscreen and none of aDoc's ancestors are fullscreen this returns
+   * nullptr.
    */
-  static nsIDocument* GetRootDocument(nsIDocument* aDoc);
+  static nsIDocument* GetFullscreenAncestor(nsIDocument* aDoc);
 
   /**
    * Returns the time limit on handling user input before
@@ -2076,7 +2012,7 @@ public:
    * Returns true if the language name is a version of JavaScript and
    * false otherwise
    */
-  static bool IsJavaScriptLanguage(const nsString& aName, uint32_t *aVerFlags);
+  static bool IsJavaScriptLanguage(const nsString& aName);
 
   /**
    * Returns the JSVersion for a string of the form '1.n', n = 0, ..., 8, and
@@ -2149,13 +2085,6 @@ public:
                                         int32_t& aOutEndOffset);
 
   static nsIEditor* GetHTMLEditor(nsPresContext* aPresContext);
-
-  static bool PaintSVGGlyph(Element *aElement, gfxContext *aContext,
-                            gfxFont::DrawMode aDrawMode,
-                            gfxTextObjectPaint *aObjectPaint);
-
-  static bool GetSVGGlyphExtents(Element *aElement, const gfxMatrix& aSVGToAppSpace,
-                                 gfxRect *aResult);
 
   /**
    * Check whether a spec feature/version is supported.
@@ -2260,6 +2189,7 @@ private:
   static bool sAllowXULXBL_for_file;
   static bool sIsFullScreenApiEnabled;
   static bool sTrustedFullScreenOnly;
+  static bool sFullscreenApiIsContentOnly;
   static uint32_t sHandlingInputTimeout;
   static bool sIsIdleObserverAPIEnabled;
 
@@ -2304,9 +2234,9 @@ public:
   bool RePush(nsIDOMEventTarget *aCurrentTarget);
   // If a null JSContext is passed to Push(), that will cause no
   // push to happen and false to be returned.
-  bool Push(JSContext *cx, bool aRequiresScriptContext = true);
+  void Push(JSContext *cx);
   // Explicitly push a null JSContext on the the stack
-  bool PushNull();
+  void PushNull();
 
   // Pop() will be a no-op if Push() or PushNull() fail
   void Pop();
@@ -2314,13 +2244,14 @@ public:
   nsIScriptContext* GetCurrentScriptContext() { return mScx; }
 private:
   // Combined code for PushNull() and Push(JSContext*)
-  bool DoPush(JSContext* cx);
+  void DoPush(JSContext* cx);
 
   nsCOMPtr<nsIScriptContext> mScx;
   bool mScriptIsRunning;
   bool mPushedSomething;
 #ifdef DEBUG
   JSContext* mPushedContext;
+  unsigned mCompartmentDepthOnEntry;
 #endif
 };
 
@@ -2365,6 +2296,70 @@ public:
   }
 };
 
+namespace mozilla {
+
+/**
+ * Use AutoJSContext when you need a JS context on the stack but don't have one
+ * passed as a parameter. AutoJSContext will take care of finding the most
+ * appropriate JS context and release it when leaving the stack.
+ */
+class NS_STACK_CLASS AutoJSContext {
+public:
+  AutoJSContext(MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM);
+  operator JSContext*();
+
+protected:
+  AutoJSContext(bool aSafe MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
+
+private:
+  // We need this Init() method because we can't use delegating constructor for
+  // the moment. It is a C++11 feature and we do not require C++11 to be
+  // supported to be able to compile Gecko.
+  void Init(bool aSafe MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
+
+  JSContext* mCx;
+  nsCxPusher mPusher;
+  MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
+};
+
+/**
+ * SafeAutoJSContext is similar to AutoJSContext but will only return the safe
+ * JS context. That means it will never call ::GetCurrentJSContext().
+ */
+class NS_STACK_CLASS SafeAutoJSContext : public AutoJSContext {
+public:
+  SafeAutoJSContext(MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM);
+};
+
+/**
+ * Use AutoPushJSContext when you want to use a specific JSContext that may or
+ * may not be already on the stack. This differs from nsCxPusher in that it only
+ * pushes in the case that the given cx is not the active cx on the JSContext
+ * stack, which avoids an expensive JS_SaveFrameChain in the common case.
+ *
+ * Most consumers of this should probably just use AutoJSContext. But the goal
+ * here is to preserve the existing behavior while ensure proper cx-stack
+ * semantics in edge cases where the context being used doesn't match the active
+ * context.
+ *
+ * NB: This will not push a null cx even if aCx is null. Make sure you know what
+ * you're doing.
+ */
+class NS_STACK_CLASS AutoPushJSContext {
+  nsCxPusher mPusher;
+  JSContext* mCx;
+
+public:
+    AutoPushJSContext(JSContext* aCx) : mCx(aCx) {
+      if (mCx && mCx != nsContentUtils::GetCurrentJSContext()) {
+        mPusher.Push(mCx);
+      }
+    }
+    operator JSContext*() { return mCx; }
+};
+
+} // namespace mozilla
+
 #define NS_INTERFACE_MAP_ENTRY_TEAROFF(_interface, _allocator)                \
   if (aIID.Equals(NS_GET_IID(_interface))) {                                  \
     foundInterface = static_cast<_interface *>(_allocator);                   \
@@ -2386,11 +2381,6 @@ public:
 
 #define NS_ENSURE_FINITE2(f1, f2, rv)                                         \
   if (!NS_finite((f1)+(f2))) {                                                \
-    return (rv);                                                              \
-  }
-
-#define NS_ENSURE_FINITE3(f1, f2, f3, rv)                                     \
-  if (!NS_finite((f1)+(f2)+(f3))) {                                           \
     return (rv);                                                              \
   }
 

@@ -44,7 +44,13 @@ void reportError(JSContext *cx, const char *message, JSErrorReport *report)
 
 // prolog.py sets a breakpoint on this function; test functions can call it
 // to easily return control to GDB where desired.
-void breakpoint() {}
+void breakpoint() {
+    // If we leave this function empty, the linker will unify it with other
+    // empty functions throughout SpiderMonkey. If we then set a GDB
+    // breakpoint on it, that breakpoint will hit at all sorts of random
+    // times. So make it perform a distinctive side effect.
+    fprintf(stderr, "Called " __FILE__ ":breakpoint\n");
+}
 
 GDBFragment *GDBFragment::allFragments = NULL;
 
@@ -62,7 +68,7 @@ main (int argc, const char **argv)
     JSAutoRequest ar(cx);
 
     /* Create the global object. */
-    js::RootedObject global(cx, checkPtr(JS_NewGlobalObject(cx, &global_class, NULL)));
+    RootedObject global(cx, checkPtr(JS_NewGlobalObject(cx, &global_class, NULL)));
     JS_SetGlobalObject(cx, global);
 
     JSAutoCompartment ac(cx, global);

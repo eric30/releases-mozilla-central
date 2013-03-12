@@ -5,6 +5,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/MathAlgorithms.h"
+
 #include "methodjit/Compiler.h"
 #include "methodjit/LoopState.h"
 #include "methodjit/FrameState-inl.h"
@@ -16,6 +18,8 @@ using namespace js;
 using namespace js::mjit;
 using namespace js::analyze;
 using namespace js::types;
+
+using mozilla::Abs;
 
 LoopState::LoopState(JSContext *cx, analyze::CrossScriptSSA *ssa,
                      mjit::Compiler *cc, FrameState *frame)
@@ -788,7 +792,7 @@ LoopState::invariantLength(const CrossSSAValue &obj)
         return NULL;
 
     /* Hoist 'length' access on typed arrays. */
-    if (!objTypes->hasObjectFlags(cx, OBJECT_FLAG_NON_TYPED_ARRAY)) {
+    if (objTypes->getTypedArrayType() != TypedArray::TYPE_MAX) {
         uint32_t which = frame.allocTemporary();
         if (which == UINT32_MAX)
             return NULL;
@@ -806,7 +810,10 @@ LoopState::invariantLength(const CrossSSAValue &obj)
         return fe;
     }
 
-    if (objTypes->hasObjectFlags(cx, OBJECT_FLAG_NON_DENSE_ARRAY))
+    if (objTypes->getKnownClass() != &ArrayClass)
+        return NULL;
+    if (objTypes->hasObjectFlags(cx, types::OBJECT_FLAG_SPARSE_INDEXES |
+                                 types::OBJECT_FLAG_LENGTH_OVERFLOW))
         return NULL;
 
     /*
@@ -842,7 +849,7 @@ LoopState::invariantLength(const CrossSSAValue &obj)
 }
 
 FrameEntry *
-LoopState::invariantProperty(const CrossSSAValue &obj, jsid id)
+LoopState::invariantProperty(const CrossSSAValue &obj, RawId id)
 {
     if (skipAnalysis)
         return NULL;
@@ -872,7 +879,7 @@ LoopState::invariantProperty(const CrossSSAValue &obj, jsid id)
     if (objTypes->unknownObject() || objTypes->getObjectCount() != 1)
         return NULL;
     TypeObject *object = objTypes->getTypeObject(0);
-    if (!object || object->unknownProperties() || hasModifiedProperty(object, id) || id != MakeTypeId(cx, id))
+    if (!object || object->unknownProperties() || hasModifiedProperty(object, id) || id != IdToTypeId(id))
         return NULL;
     HeapTypeSet *propertyTypes = object->getProperty(cx, id, false);
     if (!propertyTypes)
@@ -1432,7 +1439,10 @@ LoopState::definiteArrayAccess(const SSAValue &obj, const SSAValue &index)
         return false;
     }
 
-    if (objTypes->hasObjectFlags(cx, OBJECT_FLAG_NON_DENSE_ARRAY))
+    if (objTypes->getKnownClass() != &ArrayClass)
+        return false;
+    if (objTypes->hasObjectFlags(cx, types::OBJECT_FLAG_SPARSE_INDEXES |
+                                 types::OBJECT_FLAG_LENGTH_OVERFLOW))
         return false;
 
     RootedScript rOuterScript(cx, outerScript);
@@ -1589,7 +1599,7 @@ LoopState::analyzeLoopBody(unsigned frame)
 
           case JSOP_SETPROP: {
             PropertyName *name = script->getName(GET_UINT32_INDEX(pc));
-            jsid id = MakeTypeId(cx, NameToId(name));
+            RawId id = IdToTypeId(NameToId(name));
 
             TypeSet *objTypes = analysis->poppedTypes(pc, 1);
             if (objTypes->unknownObject()) {
@@ -1743,7 +1753,7 @@ LoopState::hasModifiedProperty(TypeObject *object, jsid id)
 {
     if (unknownModset)
         return true;
-    id = MakeTypeId(cx, id);
+    id = IdToTypeId(id);
     for (unsigned i = 0; i < modifiedProperties.length(); i++) {
         if (modifiedProperties[i].object == object && modifiedProperties[i].id == id)
             return true;
@@ -2019,7 +2029,7 @@ LoopState::computeInterval(const CrossSSAValue &cv, int32_t *pmin, int32_t *pmax
         if (!computeInterval(rhsv, &rhsmin, &rhsmax) || rhsmin != rhsmax)
             return false;
 
-        int32_t rhs = abs(rhsmax);
+        int32_t rhs = Abs(rhsmax);
         *pmin = -(rhs - 1);
         *pmax = rhs - 1;
         return true;
@@ -2049,8 +2059,8 @@ LoopState::computeInterval(const CrossSSAValue &cv, int32_t *pmin, int32_t *pmax
         CrossSSAValue rhsv(cv.frame, analysis->poppedValue(pc, 0));
         if (!computeInterval(lhsv, &lhsmin, &lhsmax) || !computeInterval(rhsv, &rhsmin, &rhsmax))
             return false;
-        int32_t nlhs = Max(abs(lhsmin), abs(lhsmax));
-        int32_t nrhs = Max(abs(rhsmin), abs(rhsmax));
+        int32_t nlhs = Max(Abs(lhsmin), Abs(lhsmax));
+        int32_t nrhs = Max(Abs(rhsmin), Abs(rhsmax));
 
         if (!SafeMul(nlhs, nrhs, pmax))
             return false;

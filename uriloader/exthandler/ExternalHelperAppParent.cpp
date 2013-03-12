@@ -4,6 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/DebugOnly.h"
+
 #include "ExternalHelperAppParent.h"
 #include "nsIContent.h"
 #include "nsCExternalHandlerService.h"
@@ -14,7 +16,6 @@
 #include "mozilla/ipc/URIUtils.h"
 
 #include "mozilla/unused.h"
-#include "mozilla/Util.h" // for DebugOnly
 
 using namespace mozilla::ipc;
 
@@ -110,6 +111,10 @@ ExternalHelperAppParent::~ExternalHelperAppParent()
 NS_IMETHODIMP
 ExternalHelperAppParent::GetName(nsACString& aResult)
 {
+  if (!mURI) {
+    aResult.Truncate();
+    return NS_ERROR_NOT_AVAILABLE;
+  }
   mURI->GetAsciiSpec(aResult);
   return NS_OK;
 }

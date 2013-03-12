@@ -10,7 +10,6 @@
 
 #include "LiveRangeAllocator.h"
 #include "BitSet.h"
-#include "StackSlotAllocator.h"
 
 #include "js/Vector.h"
 
@@ -79,9 +78,6 @@ class LinearScanAllocator : public LiveRangeAllocator<LinearScanVirtualRegister>
         LiveInterval *dequeue();
     };
 
-    // Allocation state
-    StackSlotAllocator stackSlotAllocator;
-
     typedef Vector<LiveInterval *, 0, SystemAllocPolicy> SlotList;
     SlotList finishedSlots_;
     SlotList finishedDoubleSlots_;
@@ -112,13 +108,8 @@ class LinearScanAllocator : public LiveRangeAllocator<LinearScanVirtualRegister>
     AnyRegister::Code findBestFreeRegister(CodePosition *freeUntil);
     AnyRegister::Code findBestBlockedRegister(CodePosition *nextUsed);
     bool canCoexist(LiveInterval *a, LiveInterval *b);
-    bool addMove(LMoveGroup *moves, LiveInterval *from, LiveInterval *to);
-    bool moveInput(CodePosition pos, LiveInterval *from, LiveInterval *to);
     bool moveInputAlloc(CodePosition pos, LAllocation *from, LAllocation *to);
-    bool moveAfter(CodePosition pos, LiveInterval *from, LiveInterval *to);
     void setIntervalRequirement(LiveInterval *interval);
-    size_t findFirstSafepoint(LiveInterval *interval, size_t firstSafepoint);
-    size_t findFirstNonCallSafepoint(CodePosition from);
     bool isSpilledAt(LiveInterval *interval, CodePosition pos);
 
 #ifdef DEBUG
@@ -129,13 +120,9 @@ class LinearScanAllocator : public LiveRangeAllocator<LinearScanVirtualRegister>
     inline void validateAllocations() { }
 #endif
 
-#ifdef JS_NUNBOX32
-    LinearScanVirtualRegister *otherHalfOfNunbox(VirtualRegister *vreg);
-#endif
-
   public:
     LinearScanAllocator(MIRGenerator *mir, LIRGenerator *lir, LIRGraph &graph)
-      : LiveRangeAllocator<LinearScanVirtualRegister>(mir, lir, graph)
+      : LiveRangeAllocator<LinearScanVirtualRegister>(mir, lir, graph, /* forLSRA = */ true)
     {
     }
 

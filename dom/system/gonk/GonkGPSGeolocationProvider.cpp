@@ -390,11 +390,7 @@ GonkGPSGeolocationProvider::ReleaseDataConnection()
     return;
   }
 
-  if (mCid.IsEmpty()) {
-    // We didn't request data call or the data call failed, bail out.
-    return;
-  }
-  mRIL->DeactivateDataCall(mCid, NS_LITERAL_STRING("Close SUPL session"));
+  mRIL->DeactivateDataCallByType(NS_LITERAL_STRING("supl"));
 }
 
 void
@@ -412,21 +408,23 @@ GonkGPSGeolocationProvider::RequestSetID(uint32_t flags)
   mRIL->GetRilContext(getter_AddRefs(rilCtx));
 
   if (rilCtx) {
-    nsCOMPtr<nsIICCRecords> icc;
-    rilCtx->GetIcc(getter_AddRefs(icc));
-    if (icc) {
-      nsAutoString id;
-      if (flags & AGPS_RIL_REQUEST_SETID_IMSI) {
-        type = AGPS_SETID_TYPE_IMSI;
-        icc->GetImsi(id);
-      }
-      if (flags & AGPS_RIL_REQUEST_SETID_MSISDN) {
-        type = AGPS_SETID_TYPE_MSISDN;
-        icc->GetMsisdn(id);
-      }
-      NS_ConvertUTF16toUTF8 idBytes(id);
-      mAGpsRilInterface->set_set_id(type, idBytes.get());
+    nsAutoString id;
+    if (flags & AGPS_RIL_REQUEST_SETID_IMSI) {
+      type = AGPS_SETID_TYPE_IMSI;
+      rilCtx->GetImsi(id);
     }
+
+    if (flags & AGPS_RIL_REQUEST_SETID_MSISDN) {
+      nsCOMPtr<nsIDOMMozMobileICCInfo> iccInfo;
+      rilCtx->GetIccInfo(getter_AddRefs(iccInfo));
+      if (iccInfo) {
+        type = AGPS_SETID_TYPE_MSISDN;
+        iccInfo->GetMsisdn(id);
+      }
+    }
+
+    NS_ConvertUTF16toUTF8 idBytes(id);
+    mAGpsRilInterface->set_set_id(type, idBytes.get());
   }
 }
 
@@ -448,11 +446,11 @@ GonkGPSGeolocationProvider::SetReferenceLocation()
   location.type = AGPS_REF_LOCATION_TYPE_UMTS_CELLID;
 
   if (rilCtx) {
-    nsCOMPtr<nsIICCRecords> icc;
-    rilCtx->GetIcc(getter_AddRefs(icc));
-    if (icc) {
-      icc->GetMcc(&location.u.cellID.mcc);
-      icc->GetMnc(&location.u.cellID.mnc);
+    nsCOMPtr<nsIDOMMozMobileICCInfo> iccInfo;
+    rilCtx->GetIccInfo(getter_AddRefs(iccInfo));
+    if (iccInfo) {
+      iccInfo->GetMcc(&location.u.cellID.mcc);
+      iccInfo->GetMnc(&location.u.cellID.mnc);
     }
     nsCOMPtr<nsIDOMMozMobileConnectionInfo> voice;
     rilCtx->GetVoice(getter_AddRefs(voice));
@@ -552,12 +550,9 @@ GonkGPSGeolocationProvider::SetupAGPS()
   }
 
   // Setup network state listener
-  nsIInterfaceRequestor* ireq = dom::gonk::SystemWorkerManager::GetInterfaceRequestor();
-  if (ireq) {
-    mRIL = do_GetInterface(ireq);
-    if (mRIL) {
-      mRIL->RegisterDataCallCallback(this);
-    }
+  mRIL = do_GetService("@mozilla.org/ril;1");
+  if (mRIL) {
+    mRIL->RegisterDataCallCallback(this);
   }
 
   return;
@@ -597,7 +592,6 @@ NS_IMETHODIMP
 GonkGPSGeolocationProvider::Shutdown()
 {
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(mInitThread);
 
   if (!mStarted) {
     return NS_OK;
@@ -623,8 +617,6 @@ GonkGPSGeolocationProvider::ShutdownGPS()
     mGpsInterface->stop();
     mGpsInterface->cleanup();
   }
-
-  mInitThread = nullptr;
 }
 
 NS_IMETHODIMP

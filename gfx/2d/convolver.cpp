@@ -155,6 +155,12 @@ class CircularRowBuffer {
 // Convolves horizontally along a single row. The row data is given in
 // |src_data| and continues for the num_values() of the filter.
 template<bool has_alpha>
+// This function is miscompiled with gcc 4.5 with pgo. See bug 827946.
+#if defined(__GNUC__) && defined(MOZ_GCC_VERSION_AT_LEAST)
+#if MOZ_GCC_VERSION_AT_LEAST(4, 5, 0) && !MOZ_GCC_VERSION_AT_LEAST(4, 6, 0)
+__attribute__((optimize("-O1")))
+#endif
+#endif
 void ConvolveHorizontally(const unsigned char* src_data,
                           const ConvolutionFilter1D& filter,
                           unsigned char* out_row) {
@@ -254,8 +260,8 @@ void ConvolveVertically(const ConvolutionFilter1D::Fixed* filter_values,
       // values) when the resulting bitmap is drawn to the screen.
       //
       // We only need to do this when generating the final output row (here).
-      int max_color_channel = NS_MAX(out_row[byte_offset + R_OFFSET_IDX],
-          NS_MAX(out_row[byte_offset + G_OFFSET_IDX], out_row[byte_offset + B_OFFSET_IDX]));
+      int max_color_channel = std::max(out_row[byte_offset + R_OFFSET_IDX],
+          std::max(out_row[byte_offset + G_OFFSET_IDX], out_row[byte_offset + B_OFFSET_IDX]));
       if (alpha < max_color_channel)
         out_row[byte_offset + A_OFFSET_IDX] = max_color_channel;
       else
@@ -756,7 +762,7 @@ void ConvolutionFilter1D::AddFilter(int filter_offset,
   instance.length = filter_length;
   filters_.push_back(instance);
 
-  max_filter_ = NS_MAX(max_filter_, filter_length);
+  max_filter_ = std::max(max_filter_, filter_length);
 }
 
 void BGRAConvolve2D(const unsigned char* source_data,

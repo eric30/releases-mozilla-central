@@ -13,8 +13,9 @@
 #include "nsStyleContext.h"
 
 #include "imgIRequest.h"
-#include "imgIDecoderObserver.h"
 #include "imgINotificationObserver.h"
+
+class imgRequestProxy;
 
 #define BULLET_FRAME_IMAGE_LOADING NS_FRAME_STATE_BIT(63)
 #define BULLET_FRAME_HAS_FONT_INFLATION NS_FRAME_STATE_BIT(62)
@@ -54,9 +55,9 @@ public:
 
   // nsIFrame
   virtual void DestroyFrom(nsIFrame* aDestructRoot);
-  NS_IMETHOD BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                              const nsRect&           aDirtyRect,
-                              const nsDisplayListSet& aLists);
+  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
+                                const nsRect&           aDirtyRect,
+                                const nsDisplayListSet& aLists) MOZ_OVERRIDE;
   virtual nsIAtom* GetType() const MOZ_OVERRIDE;
   virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext) MOZ_OVERRIDE;
 #ifdef DEBUG
@@ -90,13 +91,15 @@ public:
   
   virtual bool IsEmpty() MOZ_OVERRIDE;
   virtual bool IsSelfEmpty() MOZ_OVERRIDE;
-  virtual nscoord GetBaseline() const;
+  virtual nscoord GetBaseline() const MOZ_OVERRIDE;
 
   float GetFontSizeInflation() const;
   bool HasFontSizeInflation() const {
     return (GetStateBits() & BULLET_FRAME_HAS_FONT_INFLATION) != 0;
   }
   void SetFontSizeInflation(float aInflation);
+
+  int32_t GetOrdinal() { return mOrdinal; }
 
 protected:
   nsresult OnStartContainer(imgIRequest *aRequest, imgIContainer *aImage);
@@ -109,7 +112,7 @@ protected:
   void GetLoadGroup(nsPresContext *aPresContext, nsILoadGroup **aLoadGroup);
 
   nsMargin mPadding;
-  nsCOMPtr<imgIRequest> mImageRequest;
+  nsRefPtr<imgRequestProxy> mImageRequest;
   nsRefPtr<nsBulletListener> mListener;
 
   nsSize mIntrinsicSize;

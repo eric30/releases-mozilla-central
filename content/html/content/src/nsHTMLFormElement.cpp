@@ -52,6 +52,7 @@
 
 #include "nsIDOMHTMLButtonElement.h"
 #include "mozilla/dom/HTMLCollectionBinding.h"
+#include "mozilla/dom/BindingUtils.h"
 #include "nsSandboxFlags.h"
 
 using namespace mozilla::dom;
@@ -183,6 +184,9 @@ ShouldBeInElements(nsIFormControl* aFormControl)
   case NS_FORM_INPUT_TEL :
   case NS_FORM_INPUT_URL :
   case NS_FORM_INPUT_NUMBER :
+  case NS_FORM_INPUT_RANGE :
+  case NS_FORM_INPUT_DATE :
+  case NS_FORM_INPUT_TIME :
   case NS_FORM_SELECT :
   case NS_FORM_TEXTAREA :
   case NS_FORM_FIELDSET :
@@ -283,7 +287,6 @@ ElementTraverser(const nsAString& key, nsIDOMHTMLInputElement* element,
   return PL_DHASH_NEXT;
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsHTMLFormElement)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsHTMLFormElement,
                                                   nsGenericHTMLElement)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mControls)
@@ -582,9 +585,9 @@ nsHTMLFormElement::WillHandleEvent(nsEventChainPostVisitor& aVisitor)
   // for this form too.
   if ((aVisitor.mEvent->message == NS_FORM_SUBMIT ||
        aVisitor.mEvent->message == NS_FORM_RESET) &&
-      aVisitor.mEvent->flags & NS_EVENT_FLAG_BUBBLE &&
+      aVisitor.mEvent->mFlags.mInBubblingPhase &&
       aVisitor.mEvent->originalTarget != static_cast<nsIContent*>(this)) {
-    aVisitor.mEvent->flags |= NS_EVENT_FLAG_STOP_DISPATCH;
+    aVisitor.mEvent->mFlags.mPropagationStopped = true;
   }
   return NS_OK;
 }
@@ -2177,7 +2180,6 @@ ControlTraverser(const nsAString& key, nsISupports* control, void* userArg)
   return PL_DHASH_NEXT;
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsFormControlList)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsFormControlList)
   tmp->Clear();
   NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
@@ -2190,8 +2192,6 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(nsFormControlList)
   NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
-DOMCI_DATA(HTMLCollection, nsFormControlList)
-
 // XPConnect interface list for nsFormControlList
 NS_INTERFACE_TABLE_HEAD(nsFormControlList)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
@@ -2199,7 +2199,6 @@ NS_INTERFACE_TABLE_HEAD(nsFormControlList)
                       nsIHTMLCollection,
                       nsIDOMHTMLCollection)
   NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(nsFormControlList)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(HTMLCollection)
 NS_INTERFACE_MAP_END
 
 

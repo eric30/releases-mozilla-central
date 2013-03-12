@@ -15,7 +15,7 @@ dnl = Defaults
 dnl ========================================================
 MOD_MAJOR_VERSION=4
 MOD_MINOR_VERSION=9
-MOD_PATCH_VERSION=4
+MOD_PATCH_VERSION=6
 NSPR_MODNAME=nspr20
 _HAVE_PTHREADS=
 USE_PTHREADS=
@@ -111,11 +111,20 @@ AC_ARG_WITH(android-toolchain,
                           location of the Android toolchain],
     android_toolchain=$withval)
 
+dnl The default android_version is different for each target cpu.
+case "$target_cpu" in
+arm)
+    android_version=5
+    ;;
+i?86|mipsel)
+    android_version=9
+    ;;
+esac
+
 AC_ARG_WITH(android-version,
 [  --with-android-version=VER
-                          Android platform version, default 5],
-    android_version=$withval,
-    android_version=5)
+                          Android platform version, default 5 for arm, 9 for x86/mips],
+    android_version=$withval)
 
 AC_ARG_WITH(android-platform,
 [  --with-android-platform=DIR
@@ -127,7 +136,7 @@ arm-linux*-android*|*-linuxandroid*)
     android_tool_prefix="arm-linux-androideabi"
     ;;
 i?86-*android*)
-    android_tool_prefix="i686-android-linux"
+    android_tool_prefix="i686-linux-android"
     ;;
 mipsel-*android*)
     android_tool_prefix="mipsel-linux-android"
@@ -220,6 +229,17 @@ case "$target" in
             AC_MSG_ERROR([not found. You have to specify --with-android-platform=/path/to/ndk/platform.])
         fi
     fi
+
+    dnl Old NDK support. If minimum requirement is changed to NDK r8b,
+    dnl please remove this.
+    case "$target_cpu" in
+    i?86)
+        if ! test -e "$android_toolchain"/bin/"$android_tool_prefix"-gcc; then
+            dnl Old NDK toolchain name
+            android_tool_prefix="i686-android-linux"
+        fi
+        ;;
+    esac
 
     dnl set up compilers
     AS="$android_toolchain"/bin/"$android_tool_prefix"-as
@@ -2568,7 +2588,7 @@ dnl ========================================================
 AC_PROG_GCC_TRADITIONAL
 _SAVE_LIBS="$LIBS"
 LIBS="$LIBS $OS_LIBS"
-AC_CHECK_FUNCS(lchown strerror dladdr)
+AC_CHECK_FUNCS(dladdr gettid lchown setpriority strerror syscall)
 LIBS="$_SAVE_LIBS"
 
 dnl AC_FUNC_MEMCMP

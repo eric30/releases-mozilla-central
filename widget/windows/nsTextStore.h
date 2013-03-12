@@ -11,10 +11,18 @@
 #include "nsCOMPtr.h"
 #include "nsITimer.h"
 #include "nsIWidget.h"
+#include "nsWindowBase.h"
 #include "mozilla/Attributes.h"
 
 #include <msctf.h>
 #include <textstor.h>
+
+// GUID_PROP_INPUTSCOPE is declared in inputscope.h using INIT_GUID.
+// With initguid.h, we get its instance instead of extern declaration.
+#ifdef INPUTSCOPE_INIT_GUID
+#include <initguid.h>
+#endif
+#include <inputscope.h>
 
 struct ITfThreadMgr;
 struct ITfDocumentMgr;
@@ -22,6 +30,9 @@ struct ITfDisplayAttributeMgr;
 struct ITfCategoryMgr;
 class nsWindow;
 class nsTextEvent;
+#ifdef MOZ_METRO
+class MetroWidget;
+#endif
 
 // It doesn't work well when we notify TSF of text change
 // during a mutation observer call because things get broken.
@@ -90,29 +101,31 @@ public:
 
   static void     CommitComposition(bool aDiscard)
   {
-    if (!sTsfTextStore) return;
+    NS_ENSURE_TRUE_VOID(sTsfTextStore);
     sTsfTextStore->CommitCompositionInternal(aDiscard);
   }
 
   static void     SetInputContext(const InputContext& aContext)
   {
-    if (!sTsfTextStore) return;
+    NS_ENSURE_TRUE_VOID(sTsfTextStore);
+    sTsfTextStore->SetInputScope(aContext.mHTMLInputType);
     sTsfTextStore->SetInputContextInternal(aContext.mIMEState.mEnabled);
   }
 
-  static nsresult OnFocusChange(bool, nsWindow*, IMEState::Enabled);
-
+  static nsresult OnFocusChange(bool aGotFocus,
+                                nsWindowBase* aFocusedWidget,
+                                IMEState::Enabled aIMEEnabled);
   static nsresult OnTextChange(uint32_t aStart,
                                uint32_t aOldEnd,
                                uint32_t aNewEnd)
   {
-    if (!sTsfTextStore) return NS_OK;
+    NS_ENSURE_TRUE(sTsfTextStore, NS_ERROR_NOT_AVAILABLE);
     return sTsfTextStore->OnTextChangeInternal(aStart, aOldEnd, aNewEnd);
   }
 
   static void     OnTextChangeMsg(void)
   {
-    if (!sTsfTextStore) return;
+    NS_ENSURE_TRUE_VOID(sTsfTextStore);
     // Notify TSF text change
     // (see comments on WM_USER_TSF_TEXTCHANGE in nsTextStore.h)
     sTsfTextStore->OnTextChangeMsgInternal();
@@ -120,7 +133,7 @@ public:
 
   static nsresult OnSelectionChange(void)
   {
-    if (!sTsfTextStore) return NS_OK;
+    NS_ENSURE_TRUE(sTsfTextStore, NS_ERROR_NOT_AVAILABLE);
     return sTsfTextStore->OnSelectionChangeInternal();
   }
 
@@ -132,29 +145,65 @@ public:
     ts->OnCompositionTimer();
   }
 
+  static bool CanOptimizeKeyAndIMEMessages()
+  {
+    // TODO: We need to implement this for ATOK.
+    return true;
+  }
+
   // Returns the address of the pointer so that the TSF automatic test can
   // replace the system object with a custom implementation for testing.
-  static void*    GetThreadMgr(void)
+  static void* GetNativeData(uint32_t aDataType)
   {
-    Initialize(); // Apply any previous changes
-    return (void*) & sTsfThreadMgr;
+    switch (aDataType) {
+      case NS_NATIVE_TSF_THREAD_MGR:
+        Initialize(); // Apply any previous changes
+        return static_cast<void*>(&sTsfThreadMgr);
+      case NS_NATIVE_TSF_CATEGORY_MGR:
+        return static_cast<void*>(&sCategoryMgr);
+      case NS_NATIVE_TSF_DISPLAY_ATTR_MGR:
+        return static_cast<void*>(&sDisplayAttrMgr);
+      default:
+        return nullptr;
+    }
   }
 
-  static void*    GetCategoryMgr(void)
+  static void*    GetTextStore()
   {
-    return (void*) & sCategoryMgr;
+    return static_cast<void*>(sTsfTextStore);
   }
 
-  static void*    GetDisplayAttrMgr(void)
+  static bool     ThinksHavingFocus()
   {
-    return (void*) & sDisplayAttrMgr;
+    return (sTsfTextStore && sTsfTextStore->mContext);
   }
+
+  static bool     IsInTSFMode()
+  {
+    return sTsfThreadMgr != nullptr;
+  }
+
+  static bool     IsComposing()
+  {
+    return (sTsfTextStore && sTsfTextStore->mCompositionView != nullptr);
+  }
+
+  static bool     IsComposingOn(nsWindowBase* aWidget)
+  {
+    return (IsComposing() && sTsfTextStore->mWidget == aWidget);
+  }
+
+#ifdef DEBUG
+  // Returns true when keyboard layout has IME (TIP).
+  static bool     CurrentKeyboardLayoutHasIME();
+#endif // #ifdef DEBUG
 
 protected:
   nsTextStore();
   ~nsTextStore();
 
-  bool     Create(nsWindow*, IMEState::Enabled);
+  bool     Create(nsWindowBase* aWidget,
+                  IMEState::Enabled aIMEEnabled);
   bool     Destroy(void);
 
   bool     IsReadLock(DWORD aLock) const
@@ -191,7 +240,13 @@ protected:
   HRESULT  SendTextEventForCompositionString();
   HRESULT  SaveTextEvent(const nsTextEvent* aEvent);
   nsresult OnCompositionTimer();
+  HRESULT  ProcessScopeRequest(DWORD dwFlags,
+                               ULONG cFilterAttrs,
+                               const TS_ATTRID *paFilterAttrs);
+  void     SetInputScope(const nsString& aHTMLInputType);
 
+  // Holds the pointer to our current win32 or metro widget
+  nsRefPtr<nsWindowBase>       mWidget;
   // Document manager for the currently focused editor
   nsRefPtr<ITfDocumentMgr>     mDocumentMgr;
   // Edit cookie associated with the current editing context
@@ -202,8 +257,6 @@ protected:
   nsRefPtr<ITextStoreACPSink>  mSink;
   // TS_AS_* mask of what events to notify
   DWORD                        mSinkMask;
-  // Window containing the focused editor
-  nsWindow*                    mWindow;
   // 0 if not locked, otherwise TS_LF_* indicating the current lock
   DWORD                        mLock;
   // 0 if no lock is queued, otherwise TS_LF_* indicating the queue lock
@@ -236,6 +289,10 @@ protected:
   // Timer for calling ITextStoreACPSink::OnLayoutChange. This is only used
   // during composing.
   nsCOMPtr<nsITimer>           mCompositionTimer;
+  // The input scopes for this context, defaults to IS_DEFAULT.
+  nsTArray<InputScope>         mInputScopes;
+  bool                         mInputScopeDetected;
+  bool                         mInputScopeRequested;
 
   // TSF thread manager object for the current application
   static ITfThreadMgr*  sTsfThreadMgr;

@@ -10,8 +10,11 @@
  * liability, trademark and document use rules apply.
  */
 
+callback DecodeSuccessCallback = void (AudioBuffer decodedData);
+callback DecodeErrorCallback = void ();
+
 [Constructor, PrefControlled]
-interface mozAudioContext {
+interface AudioContext {
 
     readonly attribute AudioDestinationNode destination;
     readonly attribute float sampleRate;
@@ -22,6 +25,10 @@ interface mozAudioContext {
 
     // [Creator, Throws]
     // AudioBuffer createBuffer(ArrayBuffer buffer, boolean mixToMono);
+
+    void decodeAudioData(ArrayBuffer audioData,
+                         DecodeSuccessCallback successCallback,
+                         optional DecodeErrorCallback errorCallback);
 
     // AudioNode creation 
     [Creator]
@@ -40,6 +47,4 @@ interface mozAudioContext {
     DynamicsCompressorNode createDynamicsCompressor();
 
 };
-
-typedef mozAudioContext AudioContext;
 

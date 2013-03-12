@@ -47,14 +47,22 @@ EXPORTS_NAMESPACES = mozilla/dom
 EXPORTS_mozilla/dom = \
   Comment.h \
   DocumentFragment.h \
+  DocumentType.h \
   DOMImplementation.h \
+  EventSource.h \
   Link.h \
+  NodeIterator.h \
+  Text.h \
+  TreeWalker.h \
   $(NULL)
 
 CPPSRCS		= \
 		Comment.cpp \
 		DirectionalityUtils.cpp \
+		DocumentType.cpp \
 		DOMImplementation.cpp \
+		EventSource.cpp \
+		FileIOObject.cpp \
 		nsAtomListUtils.cpp \
 		nsAttrAndChildArray.cpp \
 		nsAttrValue.cpp \
@@ -74,7 +82,7 @@ CPPSRCS		= \
 		nsDOMAttribute.cpp \
 		nsDOMAttributeMap.cpp \
 		nsDOMBlobBuilder.cpp \
-		nsDOMDocumentType.cpp \
+		nsDOMCaretPosition.cpp \
 		nsDOMFile.cpp \
 		nsDOMFileReader.cpp \
 		nsDOMLists.cpp \
@@ -101,7 +109,7 @@ CPPSRCS		= \
 		nsNoDataProtocolContentPolicy.cpp \
 		nsNodeInfo.cpp \
 		nsNodeInfoManager.cpp \
-		nsNodeIterator.cpp \
+		NodeIterator.cpp \
 		nsNodeUtils.cpp \
 		nsObjectLoadingContent.cpp \
 		nsPlainTextSerializer.cpp \
@@ -115,11 +123,13 @@ CPPSRCS		= \
 		nsStyledElement.cpp \
 		nsStyleLinkElement.cpp \
 		nsSyncLoadService.cpp \
+		Text.cpp \
 		nsTextFragment.cpp \
 		nsTextNode.cpp \
 		nsTraversal.cpp \
 		nsTreeSanitizer.cpp \
-		nsTreeWalker.cpp \
+		TreeWalker.cpp \
+                nsViewportInfo.cpp \
 		WebSocket.cpp \
 		nsXHTMLContentSerializer.cpp \
 		nsXMLContentSerializer.cpp \
@@ -132,8 +142,6 @@ CPPSRCS		= \
 		nsFrameMessageManager.cpp \
 		nsInProcessTabChildGlobal.cpp \
 		ThirdPartyUtil.cpp \
-		nsEventSource.cpp \
-		FileIOObject.cpp \
 		nsDOMMutationObserver.cpp \
 		nsMixedContentBlocker.cpp \
 		$(NULL)
@@ -159,14 +167,15 @@ GQI_SRCS = contentbase.gqi
 FORCE_STATIC_LIB = 1
 
 EXTRA_COMPONENTS = \
-		$(srcdir)/nsBadCertHandler.js \
-		nsBadCertHandler.manifest \
-		contentSecurityPolicy.js \
 		contentSecurityPolicy.manifest \
 		contentAreaDropListener.js \
 		contentAreaDropListener.manifest \
 		messageWakeupService.js \
 		messageWakeupService.manifest \
+		$(NULL)
+
+EXTRA_PP_COMPONENTS = \
+		contentSecurityPolicy.js \
 		$(NULL)
 
 EXTRA_JS_MODULES = \
@@ -181,6 +190,7 @@ LOCAL_INCLUDES += \
   -I$(topsrcdir)/caps/include \
   -I$(topsrcdir)/content/events/src \
   -I$(topsrcdir)/content/html/content/src \
+  -I$(topsrcdir)/content/html/document/src \
   -I$(topsrcdir)/content/xbl/src \
   -I$(topsrcdir)/content/xml/content/src \
   -I$(topsrcdir)/content/xml/document/src \
@@ -196,6 +206,7 @@ LOCAL_INCLUDES += \
   -I$(topsrcdir)/layout/svg \
   -I$(topsrcdir)/layout/xul/base/src \
   -I$(topsrcdir)/netwerk/base/src \
+  -I$(topsrcdir)/js/xpconnect/wrappers \
   $(NULL)
 
 DEFINES += -D_IMPL_NS_LAYOUT

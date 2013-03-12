@@ -11,8 +11,6 @@ FAIL_ON_WARNINGS = 1
 
 include $(DEPTH)/config/autoconf.mk
 
-TEST_DIRS += tests
-
 MODULE		= editor
 LIBRARY_NAME	= htmleditor_s
 LIBXUL_LIBRARY	= 1
@@ -60,3 +58,9 @@ INCLUDES        += -I$(topsrcdir)/editor/libeditor/base \
                    -I$(topsrcdir)/content/base/src \
                    -I$(topsrcdir)/layout/style \
                    $(NULL)
+
+LOCAL_INCLUDES += \
+  -I$(topsrcdir)/layout/generic \
+  -I$(topsrcdir)/layout/tables \
+  -I$(topsrcdir)/layout/xul/base/src \
+  $(null)

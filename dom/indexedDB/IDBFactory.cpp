@@ -42,6 +42,7 @@
 #include "Key.h"
 
 #include "ipc/IndexedDBChild.h"
+#include <algorithm>
 
 USING_INDEXEDDB_NAMESPACE
 
@@ -213,15 +214,7 @@ IDBFactory::Create(ContentParent* aContentParent,
     do_CreateInstance("@mozilla.org/nullprincipal;1");
   NS_ENSURE_TRUE(principal, NS_ERROR_FAILURE);
 
-  JSContext* cx = nsContentUtils::GetSafeJSContext();
-  NS_ENSURE_TRUE(cx, NS_ERROR_FAILURE);
-
-  nsCxPusher pusher;
-  if (!pusher.Push(cx)) {
-    NS_WARNING("Failed to push safe JS context!");
-    return NS_ERROR_FAILURE;
-  }
-
+  SafeAutoJSContext cx;
   JSAutoRequest ar(cx);
 
   nsIXPConnect* xpc = nsContentUtils::XPConnect();
@@ -253,8 +246,26 @@ IDBFactory::Create(ContentParent* aContentParent,
 }
 
 // static
+already_AddRefed<nsIFileURL>
+IDBFactory::GetDatabaseFileURL(nsIFile* aDatabaseFile, const nsACString& aOrigin)
+{
+  nsCOMPtr<nsIURI> uri;
+  nsresult rv = NS_NewFileURI(getter_AddRefs(uri), aDatabaseFile);
+  NS_ENSURE_SUCCESS(rv, nullptr);
+
+  nsCOMPtr<nsIFileURL> fileUrl = do_QueryInterface(uri);
+  NS_ASSERTION(fileUrl, "This should always succeed!");
+
+  rv = fileUrl->SetQuery(NS_LITERAL_CSTRING("origin=") + aOrigin);
+  NS_ENSURE_SUCCESS(rv, nullptr);
+
+  return fileUrl.forget();
+}
+
+// static
 already_AddRefed<mozIStorageConnection>
-IDBFactory::GetConnection(const nsAString& aDatabaseFilePath)
+IDBFactory::GetConnection(const nsAString& aDatabaseFilePath,
+                          const nsACString& aOrigin)
 {
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
   NS_ASSERTION(StringEndsWith(aDatabaseFilePath, NS_LITERAL_STRING(".sqlite")),
@@ -271,13 +282,15 @@ IDBFactory::GetConnection(const nsAString& aDatabaseFilePath)
   NS_ENSURE_SUCCESS(rv, nullptr);
   NS_ENSURE_TRUE(exists, nullptr);
 
-  nsCOMPtr<mozIStorageServiceQuotaManagement> ss =
+  nsCOMPtr<nsIFileURL> dbFileUrl = GetDatabaseFileURL(dbFile, aOrigin);
+  NS_ENSURE_TRUE(dbFileUrl, nullptr);
+
+  nsCOMPtr<mozIStorageService> ss =
     do_GetService(MOZ_STORAGE_SERVICE_CONTRACTID);
   NS_ENSURE_TRUE(ss, nullptr);
 
   nsCOMPtr<mozIStorageConnection> connection;
-  rv = ss->OpenDatabaseWithVFS(dbFile, NS_LITERAL_CSTRING("quota"),
-                               getter_AddRefs(connection));
+  rv = ss->OpenDatabaseWithFileURL(dbFileUrl, getter_AddRefs(connection));
   NS_ENSURE_SUCCESS(rv, nullptr);
 
   // Turn on foreign key constraints and recursive triggers.
@@ -425,7 +438,7 @@ IDBFactory::LoadDatabaseInformation(mozIStorageConnection* aConnection,
   int64_t version = 0;
   rv = stmt->GetInt64(0, &version);
 
-  *aVersion = NS_MAX<int64_t>(version, 0);
+  *aVersion = std::max<int64_t>(version, 0);
 
   return rv;
 }
@@ -463,8 +476,6 @@ IDBFactory::SetDatabaseMetadata(DatabaseInfo* aDatabaseInfo,
 
   return NS_OK;
 }
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(IDBFactory)
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(IDBFactory)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(IDBFactory)

@@ -101,7 +101,7 @@ int nr_stun_client_start(nr_stun_client_ctx *ctx, int mode, NR_async_cb finished
 
     if (ctx->state != NR_STUN_CLIENT_STATE_INITTED)
         ABORT(R_NOT_PERMITTED);
-    
+
     ctx->mode=mode;
 
     ctx->state=NR_STUN_CLIENT_STATE_RUNNING;
@@ -137,7 +137,7 @@ int nr_stun_client_restart(nr_stun_client_ctx *ctx)
 
     if (ctx->state != NR_STUN_CLIENT_STATE_RUNNING)
         ABORT(R_NOT_PERMITTED);
- 
+
     assert(ctx->retry_ct <= 2);
     if (ctx->retry_ct > 2)
         ABORT(R_NOT_PERMITTED);
@@ -237,7 +237,7 @@ static void nr_stun_client_timer_expired_cb(NR_SOCKET s, int b, void *cb_arg)
         }
 
         if (ctx->finished_cb) {
-            NR_async_cb finished_cb = ctx->finished_cb; 
+            NR_async_cb finished_cb = ctx->finished_cb;
             ctx->finished_cb = 0;  /* prevent 2nd call */
             /* finished_cb call must be absolutely last thing in function
              * because as a side effect this ctx may be operated on in the
@@ -364,7 +364,7 @@ static int nr_stun_client_send_request(nr_stun_client_ctx *ctx)
 
     if(r=nr_socket_sendto(ctx->sock, ctx->request->buffer, ctx->request->length, 0, &ctx->peer_addr))
       ABORT(r);
-    
+
     ctx->request_ct++;
 
     if (NR_STUN_GET_TYPE_CLASS(ctx->request->header.type) == NR_CLASS_INDICATION) {
@@ -386,7 +386,7 @@ static int nr_stun_client_send_request(nr_stun_client_ctx *ctx)
 
         NR_ASYNC_TIMER_SET(ctx->timeout_ms, nr_stun_client_timer_expired_cb, ctx, &ctx->timer_handle);
     }
-   
+
     _status=0;
   abort:
     if (_status) {
@@ -478,11 +478,18 @@ int nr_stun_client_process_response(nr_stun_client_ctx *ctx, UCHAR *msg, int len
     if ((r=nr_stun_message_create2(&ctx->response, msg, len)))
         ABORT(r);
 
-    if ((r=nr_stun_decode_message(ctx->response, nr_stun_client_get_password, password)))
+    if ((r=nr_stun_decode_message(ctx->response, nr_stun_client_get_password, password))) {
+        r_log(NR_LOG_STUN,LOG_DEBUG,"STUN-CLIENT(%s): error decoding message",ctx->label);
         ABORT(r);
+    }
 
-    if ((r=nr_stun_receive_message(ctx->request, ctx->response)))
+    if ((r=nr_stun_receive_message(ctx->request, ctx->response))) {
+        r_log(NR_LOG_STUN,LOG_DEBUG,"STUN-CLIENT(%s): error receiving message",ctx->label);
         ABORT(r);
+    }
+
+    r_log(NR_LOG_STUN,LOG_DEBUG,
+          "STUN-CLIENT(%s): successfully received message; processing",ctx->label);
 
 /* TODO: !nn! currently using password!=0 to mean that auth is required,
  * TODO: !nn! but we should probably pass that in explicitly via the
@@ -511,6 +518,8 @@ int nr_stun_client_process_response(nr_stun_client_ctx *ctx, UCHAR *msg, int len
             ABORT(R_FAILED);
         }
     }
+
+    r_log(NR_LOG_STUN,LOG_DEBUG,"STUN-CLIENT(%s): Successfully parsed mode=%d",ctx->label,ctx->mode);
 
 /* TODO: !nn! this should be moved to individual message receive/processing sections */
     switch (ctx->mode) {
@@ -624,7 +633,7 @@ int nr_stun_client_process_response(nr_stun_client_ctx *ctx, UCHAR *msg, int len
         }
         else
             ABORT(R_BAD_DATA);
- 
+
         r_log(NR_LOG_STUN,LOG_DEBUG,"STUN-CLIENT(%s): Received mapped address: %s", ctx->label, mapped_addr->as_string);
     }
 
@@ -641,7 +650,7 @@ int nr_stun_client_process_response(nr_stun_client_ctx *ctx, UCHAR *msg, int len
 
         /* Fire the callback */
         if (ctx->finished_cb) {
-            NR_async_cb finished_cb = ctx->finished_cb; 
+            NR_async_cb finished_cb = ctx->finished_cb;
             ctx->finished_cb = 0;  /* prevent 2nd call */
             /* finished_cb call must be absolutely last thing in function
              * because as a side effect this ctx may be operated on in the
@@ -659,8 +668,9 @@ int nr_stun_client_ctx_destroy(nr_stun_client_ctx **ctxp)
 
     if(!ctxp || !*ctxp)
       return(0);
-    
+
     ctx=*ctxp;
+    *ctxp=0;
 
     nr_stun_client_reset(ctx);
 
@@ -669,7 +679,7 @@ int nr_stun_client_ctx_destroy(nr_stun_client_ctx **ctxp)
 
     RFREE(ctx->label);
     RFREE(ctx);
-    
+
     return(0);
   }
 
@@ -684,6 +694,6 @@ int nr_stun_client_cancel(nr_stun_client_ctx *ctx)
 
     /* Mark cancelled so we ignore any returned messsages */
     ctx->state=NR_STUN_CLIENT_STATE_CANCELLED;
-    
+
     return(0);
   }

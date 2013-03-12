@@ -104,6 +104,7 @@ public:
   NS_IMETHOD SaveState();
   virtual bool RestoreState(nsPresState* aState);
   virtual bool AllowDrop();
+  virtual bool IsDisabledForEvents(uint32_t aMessage);
 
   virtual void FieldSetDisabledChanged(bool aNotify);
 
@@ -121,6 +122,11 @@ public:
 
   virtual nsresult PreHandleEvent(nsEventChainPreVisitor& aVisitor);
   virtual nsresult PostHandleEvent(nsEventChainPostVisitor& aVisitor);
+  void PostHandleEventForRangeThumb(nsEventChainPostVisitor& aVisitor);
+  void StartRangeThumbDrag(nsGUIEvent* aEvent);
+  void FinishRangeThumbDrag(nsGUIEvent* aEvent = nullptr);
+  void CancelRangeThumbDrag();
+  void SetValueOfRangeForUserEvent(double aValue);
 
   virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
                               nsIContent* aBindingParent,
@@ -141,7 +147,6 @@ public:
   NS_IMETHOD_(int32_t) GetCols();
   NS_IMETHOD_(int32_t) GetWrapCols();
   NS_IMETHOD_(int32_t) GetRows();
-  NS_IMETHOD_(void) GetDefaultValueFromContent(nsAString& aValue);
   NS_IMETHOD_(bool) ValueChanged() const;
   NS_IMETHOD_(void) GetTextEditorValue(nsAString& aValue, bool aIgnoreWrap) const;
   NS_IMETHOD_(nsIEditor*) GetTextEditor();
@@ -283,6 +288,34 @@ public:
    */
   void FireChangeEventIfNeeded();
 
+  /**
+   * Returns the input element's value as a double-precision float.
+   * Returns NaN if the current element's value is not a floating point number.
+   *
+   * @return the input element's value as a double-precision float.
+   */
+  double GetValueAsDouble() const;
+
+  /**
+   * Returns the input's "minimum" (as defined by the HTML5 spec) as a double.
+   * Note this takes account of any default minimum that the type may have.
+   * Returns NaN if the min attribute isn't a valid floating point number and
+   * the input's type does not have a default minimum.
+   *
+   * NOTE: Only call this if you know DoesMinMaxApply() returns true.
+   */
+  double GetMinimum() const;
+
+  /**
+   * Returns the input's "maximum" (as defined by the HTML5 spec) as a double.
+   * Note this takes account of any default maximum that the type may have.
+   * Returns NaN if the max attribute isn't a valid floating point number and
+   * the input's type does not have a default maximum.
+   *
+   * NOTE:Only call this if you know DoesMinMaxApply() returns true.
+   */
+  double GetMaximum() const;
+
 protected:
   // Pull IsSingleLineTextControl into our scope, otherwise it'd be hidden
   // by the nsITextControlElement version.
@@ -332,6 +365,23 @@ protected:
    * @result        whether the given string is a valid email address list.
    */
   static bool IsValidEmailAddressList(const nsAString& aValue);
+
+  /**
+   * This helper method convert a sub-string that contains only digits to a
+   * number (unsigned int given that it can't contain a minus sign).
+   * This method will return whether the sub-string is correctly formatted
+   * (ie. contains only digit) and it can be successfuly parsed to generate a
+   * number).
+   * If the method returns true, |aResult| will contained the parsed number.
+   *
+   * @param aValue  the string on which the sub-string will be extracted and parsed.
+   * @param aStart  the beginning of the sub-string in aValue.
+   * @param aLen    the length of the sub-string.
+   * @param aResult the parsed number.
+   * @return whether the sub-string has been parsed successfully.
+   */
+  static bool DigitSubStringToNumber(const nsAString& aValue, uint32_t aStart,
+                                     uint32_t aLen, uint32_t* aResult);
 
   // Helper method
   nsresult SetValueInternal(const nsAString& aValue,
@@ -502,7 +552,7 @@ protected:
   /**
    * Returns whether the placeholder attribute applies for the current type.
    */
-  bool PlaceholderApplies() const { return IsSingleLineTextControl(false, mType); }
+  bool PlaceholderApplies() const;
 
   /**
    * Set the current default value to the value of the input element.
@@ -553,12 +603,74 @@ protected:
   nsIRadioGroupContainer* GetRadioGroupContainer() const;
 
   /**
-   * Returns the input element's value as a double-precision float.
-   * Returns NaN if the current element's value is not a floating point number.
-   *
-   * @return the input element's value as a double-precision float.
+   * Convert a string to a number in a type specific way,
+   * http://www.whatwg.org/specs/web-apps/current-work/multipage/the-input-element.html#concept-input-value-string-number
+   * ie parse a date string to a timestamp if type=date,
+   * or parse a number string to its value if type=number.
+   * @param aValue the string to be parsed.
+   * @param aResultValue the timestamp as a double.
+   * @result whether the parsing was successful.
    */
-  double GetValueAsDouble() const;
+  bool ConvertStringToNumber(nsAString& aValue, double& aResultValue) const;
+
+  /**
+   * Convert a double to a string in a type specific way, ie convert a timestamp
+   * to a date string if type=date or append the number string representing the
+   * value if type=number.
+   *
+   * @param aValue the double to be converted
+   * @param aResultString [out] the string representing the double
+   * @return whether the function succeded, it will fail if the current input's
+   *         type is not supported or the number can't be converted to a string
+   *         as expected by the type.
+   */
+  bool ConvertNumberToString(double aValue, nsAString& aResultString) const;
+
+  /**
+   * Parse a date string of the form yyyy-mm-dd
+   * @param the string to be parsed.
+   * @return whether the string is a valid date.
+   * Note : this function does not consider the empty string as valid.
+   */
+  bool IsValidDate(const nsAString& aValue) const;
+
+  /**
+   * Parse a date string of the form yyyy-mm-dd
+   * @param the string to be parsed.
+   * @return the date in aYear, aMonth, aDay.
+   * @return whether the parsing was successful.
+   */
+  bool GetValueAsDate(const nsAString& aValue,
+                      uint32_t* aYear,
+                      uint32_t* aMonth,
+                      uint32_t* aDay) const;
+
+  /**
+   * This methods returns the number of days in a given month, for a given year.
+   */
+  uint32_t NumberOfDaysInMonth(uint32_t aMonth, uint32_t aYear) const;
+
+  /**
+   * Returns whether aValue is a valid time as described by HTML specifications:
+   * http://www.whatwg.org/specs/web-apps/current-work/multipage/common-microsyntaxes.html#valid-time-string
+   *
+   * @param aValue the string to be tested.
+   * @return Whether the string is a valid time per HTML specifications.
+   */
+  bool IsValidTime(const nsAString& aValue) const;
+
+  /**
+   * Returns the time expressed in milliseconds of |aValue| being parsed as a
+   * time following the HTML specifications:
+   * http://www.whatwg.org/specs/web-apps/current-work/#parse-a-time-string
+   *
+   * Note: |aResult| can be null.
+   *
+   * @param aValue  the string to be parsed.
+   * @param aResult the time expressed in milliseconds representing the time [out]
+   * @return Whether the parsing was successful.
+   */
+  static bool ParseTime(const nsAString& aValue, uint32_t* aResult);
 
   /**
    * Sets the value of the element to the string representation of the double.
@@ -572,17 +684,12 @@ protected:
    */
   void UpdateHasRange();
 
-  /**
-   * Returns the min attribute as a double.
-   * Returns NaN if the min attribute isn't a valid floating point number.
-   */
-  double GetMinAsDouble() const;
-
-  /**
-   * Returns the max attribute as a double.
-   * Returns NaN if the max attribute isn't a valid floating point number.
-   */
-  double GetMaxAsDouble() const;
+   /**
+    * Get the step scale value for the current type.
+    * See:
+    * http://www.whatwg.org/specs/web-apps/current-work/multipage/common-input-element-attributes.html#concept-input-step-scale
+    */
+  double GetStepScaleFactor() const;
 
   /**
    * Returns the current step value.
@@ -601,12 +708,27 @@ protected:
   double GetStepBase() const;
 
   /**
+   * Returns the default step for the current type.
+   * @return the default step for the current type.
+   */
+  double GetDefaultStep() const;
+
+  /**
    * Apply a step change from stepUp or stepDown by multiplying aStep by the
    * current step value.
    *
    * @param aStep The value used to be multiplied against the step value.
    */
   nsresult ApplyStep(int32_t aStep);
+
+  /**
+   * Returns if the current type is an experimental mobile type.
+   */
+  static bool IsExperimentalMobileType(uint8_t aType)
+  {
+    return aType == NS_FORM_INPUT_NUMBER || aType == NS_FORM_INPUT_DATE ||
+           aType == NS_FORM_INPUT_TIME;
+  }
 
   nsCOMPtr<nsIControllers> mControllers;
 
@@ -622,7 +744,7 @@ protected:
     /**
      * The current value of the input if it has been changed from the default
      */
-    char*                    mValue;
+    PRUnichar*               mValue;
     /**
      * The state of the text editor associated with the text/password input
      */
@@ -653,9 +775,26 @@ protected:
    */
   nsString mFocusedValue;  
 
+  /**
+   * If mIsDraggingRange is true, this is the value that the input had before
+   * the drag started. Used to reset the input to its old value if the drag is
+   * canceled.
+   */
+  double mRangeThumbDragStartValue;
+
+  // Step scale factor values, for input types that have one.
+  static const double kStepScaleFactorDate;
+  static const double kStepScaleFactorNumberRange;
+  static const double kStepScaleFactorTime;
+
   // Default step base value when a type do not have specific one.
   static const double kDefaultStepBase;
-  // Float alue returned by GetStep() when the step attribute is set to 'any'.
+
+  // Default step used when there is no specified step.
+  static const double kDefaultStep;
+  static const double kDefaultStepTime;
+
+  // Float value returned by GetStep() when the step attribute is set to 'any'.
   static const double kStepAny;
 
   /**
@@ -677,6 +816,7 @@ protected:
   bool                     mCanShowValidUI      : 1;
   bool                     mCanShowInvalidUI    : 1;
   bool                     mHasRange            : 1;
+  bool                     mIsDraggingRange     : 1;
 
 private:
   struct nsFilePickerFilter {

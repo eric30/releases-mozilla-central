@@ -10,6 +10,9 @@
 #include "nsWrapperCache.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/dom/XMLSerializerBinding.h"
+#include "nsAutoPtr.h"
+
+class nsINode;
 
 class nsDOMSerializer MOZ_FINAL : public nsIDOMSerializer,
                                   public nsWrapperCache
@@ -26,9 +29,10 @@ public:
 
   // WebIDL API
   static already_AddRefed<nsDOMSerializer>
-  Constructor(nsISupports* aOwner, mozilla::ErrorResult& rv)
+  Constructor(const mozilla::dom::GlobalObject& aOwner,
+              mozilla::ErrorResult& rv)
   {
-    nsRefPtr<nsDOMSerializer> domSerializer = new nsDOMSerializer(aOwner);
+    nsRefPtr<nsDOMSerializer> domSerializer = new nsDOMSerializer(aOwner.Get());
     return domSerializer.forget();
   }
 

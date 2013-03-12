@@ -117,7 +117,7 @@ PR_STATIC_ASSERT((NS_VK_HOME == NS_VK_END + 1) &&
 extern const nsNavigationDirection DirectionFromKeyCodeTable[2][6];
 
 #define NS_DIRECTION_FROM_KEY_CODE(frame, keycode)                     \
-  (DirectionFromKeyCodeTable[frame->GetStyleVisibility()->mDirection]  \
+  (DirectionFromKeyCodeTable[frame->StyleVisibility()->mDirection]  \
                             [keycode - NS_VK_END])
 
 // nsMenuChainItem holds info about an open popup. Items are stored in a
@@ -288,6 +288,7 @@ public:
   // nsIRollupListener
   virtual bool Rollup(uint32_t aCount, nsIContent** aLastRolledUp);
   virtual bool ShouldRollupOnMouseWheelEvent();
+  virtual bool ShouldConsumeOnMouseWheelEvent();
   virtual bool ShouldRollupOnMouseActivate();
   virtual uint32_t GetSubmenuWidgetChain(nsTArray<nsIWidget*> *aWidgetChain);
   virtual void NotifyGeometryChange() {}

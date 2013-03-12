@@ -222,12 +222,12 @@ namespace mozilla {
 typedef mozilla::dom::Element Element;
 
 /**
- * Returns true if aNode is one of the elements whose text content should not
+ * Returns true if aElement is one of the elements whose text content should not
  * affect its own direction, nor the direction of ancestors with dir=auto.
  *
  * Note that this does not include <bdi>, whose content does affect its own
  * direction when it has dir=auto (which it has by default), so one needs to
- * test for it separately.
+ * test for it separately, e.g. with DoesNotAffectDirectionOfAncestors.
  * It *does* include textarea, because even if a textarea has dir=auto, it has
  * unicode-bidi: plaintext and is handled automatically in bidi resolution.
  */
@@ -235,10 +235,34 @@ static bool
 DoesNotParticipateInAutoDirection(const Element* aElement)
 {
   nsINodeInfo* nodeInfo = aElement->NodeInfo();
-  return (aElement->IsHTML() &&
-          (nodeInfo->Equals(nsGkAtoms::script) ||
-           nodeInfo->Equals(nsGkAtoms::style) ||
-           nodeInfo->Equals(nsGkAtoms::textarea)));
+  return (!aElement->IsHTML() ||
+          nodeInfo->Equals(nsGkAtoms::script) ||
+          nodeInfo->Equals(nsGkAtoms::style) ||
+          nodeInfo->Equals(nsGkAtoms::textarea) ||
+          aElement->IsInAnonymousSubtree());
+}
+
+static inline bool
+IsBdiWithoutDirAuto(const Element* aElement)
+{
+  // We are testing for bdi elements without explicit dir="auto", so we can't
+  // use the HasDirAuto() flag, since that will return true for bdi element with
+  // no dir attribute or an invalid dir attribute
+  return (aElement->IsHTML(nsGkAtoms::bdi) &&
+          (!aElement->HasValidDir() || aElement->HasFixedDir()));
+}
+
+/**
+ * Returns true if aElement is one of the element whose text content should not
+ * affect the direction of ancestors with dir=auto (though it may affect its own
+ * direction, e.g. <bdi>)
+ */
+static bool
+DoesNotAffectDirectionOfAncestors(const Element* aElement)
+{
+  return (DoesNotParticipateInAutoDirection(aElement) ||
+          IsBdiWithoutDirAuto(aElement) ||
+          aElement->HasFixedDir());
 }
 
 /**
@@ -262,7 +286,7 @@ GetDirectionFromChar(uint32_t ch)
 
 inline static bool NodeAffectsDirAutoAncestor(nsINode* aTextNode)
 {
-  Element* parent = aTextNode->GetElementParent();
+  Element* parent = aTextNode->GetParentElement();
   return (parent &&
           !DoesNotParticipateInAutoDirection(parent) &&
           parent->NodeOrAncestorHasDirAuto());
@@ -273,7 +297,7 @@ inline static bool NodeAffectsDirAutoAncestor(nsINode* aTextNode)
  * first-strong algorithm defined in http://unicode.org/reports/tr9/#P2
  *
  * @param[out] aFirstStrong the offset to the first character in the string with
- *             strong directionality, or PR_UINT32_MAX if there is none (return
+ *             strong directionality, or UINT32_MAX if there is none (return
                value is eDir_NotSet).
  * @return the directionality of the string
  */
@@ -304,7 +328,7 @@ GetDirectionFromText(const PRUnichar* aText, const uint32_t aLength,
   }
 
   if (aFirstStrong) {
-    *aFirstStrong = PR_UINT32_MAX;
+    *aFirstStrong = UINT32_MAX;
   }
   return eDir_NotSet;
 }
@@ -330,7 +354,7 @@ GetDirectionFromText(const char* aText, const uint32_t aLength,
   }
 
   if (aFirstStrong) {
-    *aFirstStrong = PR_UINT32_MAX;
+    *aFirstStrong = UINT32_MAX;
   }
   return eDir_NotSet;
 }
@@ -352,46 +376,30 @@ GetDirectionFromText(const nsTextFragment* aFrag,
  * Set the directionality of a node with dir=auto as defined in
  * http://www.whatwg.org/specs/web-apps/current-work/multipage/elements.html#the-directionality
  *
- * @param[in] aStartAfterNode as an optimization, a caller may pass in a node
- *            from which to begin walking the descendants of aElement, if it is
- *            known that all text nodes before this node do not contain any
- *            strong directional characters
+ * @param[in] changedNode If we call this method because the content of a text
+ *            node is about to change, pass in the changed node, so that we
+ *            know not to return it
  * @return the text node containing the character that determined the direction
  */
 static nsINode*
 WalkDescendantsSetDirectionFromText(Element* aElement, bool aNotify = true,
-                                       nsINode* aStartAfterNode = nullptr)
+                                    nsINode* aChangedNode = nullptr)
 {
   MOZ_ASSERT(aElement, "aElement is null");
-
-  nsIContent* child;
-  if (aStartAfterNode &&
-      nsContentUtils::ContentIsDescendantOf(aStartAfterNode, aElement)) {
-#ifdef DEBUG
-    child = aElement->GetFirstChild();
-    while (child && child != aStartAfterNode) {
-      if (child->NodeType() == nsIDOMNode::TEXT_NODE) {
-        MOZ_ASSERT(GetDirectionFromText(child->GetText()) == eDir_NotSet,
-                   "Strong directional characters before aStartAfterNode");
-      }
-      child = child->GetNextNode(aElement);
-    }
-#endif
-    child = aStartAfterNode->GetNextNode(aElement);
-  } else {
-    child = aElement->GetFirstChild();
+  if (DoesNotParticipateInAutoDirection(aElement)) {
+    return nullptr;
   }
 
+  nsIContent* child = aElement->GetFirstChild();
   while (child) {
     if (child->IsElement() &&
-        (DoesNotParticipateInAutoDirection(child->AsElement()) ||
-         child->NodeInfo()->Equals(nsGkAtoms::bdi) ||
-         child->HasFixedDir())) {
+        DoesNotAffectDirectionOfAncestors(child->AsElement())) {
       child = child->GetNextNonChildNode(aElement);
       continue;
     }
 
-    if (child->NodeType() == nsIDOMNode::TEXT_NODE) {
+    if (child->NodeType() == nsIDOMNode::TEXT_NODE &&
+        child != aChangedNode) {
       Directionality textNodeDir = GetDirectionFromText(child->GetText());
       if (textNodeDir != eDir_NotSet) {
         // We found a descendant text node with strong directional characters.
@@ -415,6 +423,9 @@ class nsTextNodeDirectionalityMap
   nsTextNodeDirectionalityMapDtor(void *aObject, nsIAtom* aPropertyName,
                                   void *aPropertyValue, void* aData)
   {
+    nsINode* textNode = static_cast<nsINode * >(aObject);
+    textNode->ClearHasTextNodeDirectionalityMap();
+
     nsTextNodeDirectionalityMap* map =
       reinterpret_cast<nsTextNodeDirectionalityMap * >(aPropertyValue);
     delete map;
@@ -484,12 +495,15 @@ private:
     MOZ_ASSERT(aEntry->GetKey()->IsElement(), "Must be an Element");
     // run the downward propagation algorithm
     // and remove the text node from the map
-    nsINode* startAfterNode = static_cast<Element*>(aData);
+    nsINode* oldTextNode = static_cast<Element*>(aData);
     Element* rootNode = aEntry->GetKey();
-    nsINode* textNode = WalkDescendantsSetDirectionFromText(rootNode, true,
-                                                            startAfterNode);
-    if (textNode) {
-      nsTextNodeDirectionalityMap::AddEntryToMap(textNode, rootNode);
+    nsINode* newTextNode = WalkDescendantsSetDirectionFromText(rootNode, true,
+                                                               oldTextNode);
+    if (newTextNode) {
+      nsTextNodeDirectionalityMap::AddEntryToMap(newTextNode, rootNode);
+    } else {
+      rootNode->ClearHasDirAutoSet();
+      rootNode->UnsetProperty(nsGkAtoms::dirAutoSetBy);
     }
     return PL_DHASH_REMOVE;
   }
@@ -500,9 +514,9 @@ public:
     mElements.EnumerateEntries(SetNodeDirection, &aDir);
   }
 
-  void ResetAutoDirection(nsINode* aTextNode, nsINode* aStartAfterNode)
+  void ResetAutoDirection(nsINode* aTextNode)
   {
-    mElements.EnumerateEntries(ResetNodeDirection, aStartAfterNode);
+    mElements.EnumerateEntries(ResetNodeDirection, aTextNode);
   }
 
   static void RemoveElementFromMap(nsINode* aTextNode, Element* aElement)
@@ -529,13 +543,11 @@ public:
     GetDirectionalityMap(aTextNode)->UpdateAutoDirection(aDir);
   }
 
-  static void ResetTextNodeDirection(nsINode* aTextNode,
-                                     nsINode* aStartAfterNode = nullptr)
+  static void ResetTextNodeDirection(nsINode* aTextNode)
   {
     MOZ_ASSERT(aTextNode->HasTextNodeDirectionalityMap(),
                "Map missing in ResetTextNodeDirection");
-    GetDirectionalityMap(aTextNode)->ResetAutoDirection(aTextNode,
-                                                        aStartAfterNode);
+    GetDirectionalityMap(aTextNode)->ResetAutoDirection(aTextNode);
   }
 };
 
@@ -544,20 +556,13 @@ RecomputeDirectionality(Element* aElement, bool aNotify)
 {
   MOZ_ASSERT(!aElement->HasDirAuto(),
              "RecomputeDirectionality called with dir=auto");
-  if (aElement->HasDirAutoSet()) {
-    nsINode* setByNode =
-      static_cast<nsINode*>(aElement->GetProperty(nsGkAtoms::dirAutoSetBy));
-    if (setByNode) {
-      nsTextNodeDirectionalityMap::RemoveElementFromMap(setByNode, aElement);
-    }
-  }
 
   Directionality dir = eDir_LTR;
 
   if (aElement->HasValidDir()) {
     dir = aElement->GetDirectionality();
   } else {
-    Element* parent = aElement->GetElementParent();
+    Element* parent = aElement->GetParentElement();
     if (parent) {
       // If the element doesn't have an explicit dir attribute with a valid
       // value, the directionality is the same as the parent element (but
@@ -601,11 +606,16 @@ SetDirectionalityOnDescendants(Element* aElement, Directionality aDir,
   }
 }
 
+/**
+ * Walk the parent chain of a text node whose dir attribute has been removed and
+ * reset the direction of any of its ancestors which have dir=auto and whose
+ * directionality is determined by a text node descendant.
+ */
 void
 WalkAncestorsResetAutoDirection(Element* aElement, bool aNotify)
 {
   nsINode* setByNode;
-  Element* parent = aElement->GetElementParent();
+  Element* parent = aElement->GetParentElement();
 
   while (parent && parent->NodeOrAncestorHasDirAuto()) {
     if (parent->HasDirAutoSet()) {
@@ -626,7 +636,7 @@ WalkAncestorsResetAutoDirection(Element* aElement, bool aNotify)
       }
       break;
     }
-    parent = parent->GetElementParent();
+    parent = parent->GetParentElement();
   }
 }
 
@@ -641,7 +651,7 @@ WalkDescendantsResetAutoDirection(Element* aElement)
     }
 
     if (child->HasTextNodeDirectionalityMap()) {
-      nsTextNodeDirectionalityMap::ResetTextNodeDirection(child, child);
+      nsTextNodeDirectionalityMap::ResetTextNodeDirection(child);
     }
     child = child->GetNextNode(aElement);
   }
@@ -650,21 +660,31 @@ WalkDescendantsResetAutoDirection(Element* aElement)
 void
 WalkDescendantsSetDirAuto(Element* aElement, bool aNotify)
 {
-  bool setAncestorDirAutoFlag =
+  if (!DoesNotParticipateInAutoDirection(aElement) &&
+      !IsBdiWithoutDirAuto(aElement)) {
+
+    bool setAncestorDirAutoFlag =
 #ifdef DEBUG
-    true;
+      true;
 #else
-    !aElement->AncestorHasDirAuto();
+      !aElement->AncestorHasDirAuto();
 #endif
 
-  if (setAncestorDirAutoFlag) {
-    nsIContent* child = aElement->GetFirstChild();
-    while (child) {
-      MOZ_ASSERT(!aElement->AncestorHasDirAuto() ||
-                 child->AncestorHasDirAuto(),
-                 "AncestorHasDirAuto set on node but not its children");
-      child->SetHasDirAuto();
-      child = child->GetNextNode(aElement);
+    if (setAncestorDirAutoFlag) {
+      nsIContent* child = aElement->GetFirstChild();
+      while (child) {
+        if (child->IsElement() &&
+            DoesNotAffectDirectionOfAncestors(child->AsElement())) {
+          child = child->GetNextNonChildNode(aElement);
+          continue;
+        }
+
+        MOZ_ASSERT(!aElement->AncestorHasDirAuto() ||
+                   child->AncestorHasDirAuto(),
+                   "AncestorHasDirAuto set on node but not its children");
+        child->SetHasDirAuto();
+        child = child->GetNextNode(aElement);
+      }
     }
   }
 
@@ -695,7 +715,7 @@ void SetAncestorDirectionIfAuto(nsINode* aTextNode, Directionality aDir,
   MOZ_ASSERT(aTextNode->NodeType() == nsIDOMNode::TEXT_NODE,
              "Must be a text node");
 
-  Element* parent = aTextNode->GetElementParent();
+  Element* parent = aTextNode->GetParentElement();
   while (parent && parent->NodeOrAncestorHasDirAuto()) {
     if (DoesNotParticipateInAutoDirection(parent) || parent->HasFixedDir()) {
       break;
@@ -721,9 +741,7 @@ void SetAncestorDirectionIfAuto(nsINode* aTextNode, Directionality aDir,
           nsIContent* child = aTextNode->GetNextNode(parent);
           while (child) {
             if (child->IsElement() &&
-                (DoesNotParticipateInAutoDirection(child->AsElement()) ||
-                 child->NodeInfo()->Equals(nsGkAtoms::bdi) ||
-                 child->HasFixedDir())) {
+                DoesNotAffectDirectionOfAncestors(child->AsElement())) {
               child = child->GetNextNonChildNode(parent);
               continue;
             }
@@ -754,7 +772,7 @@ void SetAncestorDirectionIfAuto(nsINode* aTextNode, Directionality aDir,
       // any of its descendants.
       return;
     }
-    parent = parent->GetElementParent();
+    parent = parent->GetParentElement();
   }
 }
 
@@ -799,10 +817,15 @@ SetDirectionFromChangedTextNode(nsIContent* aTextNode, uint32_t aOffset,
 }
 
 void
-SetDirectionFromNewTextNode(nsTextNode* aTextNode)
+SetDirectionFromNewTextNode(nsIContent* aTextNode)
 {
   if (!NodeAffectsDirAutoAncestor(aTextNode)) {
     return;
+  }
+
+  Element* parent = aTextNode->GetParentElement();
+  if (parent && parent->NodeOrAncestorHasDirAuto()) {
+    aTextNode->SetAncestorHasDirAuto();
   }
 
   Directionality dir = GetDirectionFromText(aTextNode->GetText());
@@ -839,9 +862,9 @@ SetDirectionalityFromValue(Element* aElement, const nsAString& value,
 
 void
 OnSetDirAttr(Element* aElement, const nsAttrValue* aNewValue,
-             bool hadValidDir, bool aNotify)
+             bool hadValidDir, bool hadDirAuto, bool aNotify)
 {
-  if (aElement->IsHTML() && aElement->NodeInfo()->Equals(nsGkAtoms::input)) {
+  if (aElement->IsHTML(nsGkAtoms::input)) {
     return;
   }
 
@@ -860,6 +883,20 @@ OnSetDirAttr(Element* aElement, const nsAttrValue* aNewValue,
       // determined by a text node descendant
       WalkAncestorsResetAutoDirection(aElement, aNotify);
     }
+  } else if (hadDirAuto && !aElement->HasDirAuto()) {
+    // The element isn't a descendant of an element with dir = auto, and is
+    // having its dir attribute set to something other than auto.
+    // Walk the descendant tree and clear the AncestorHasDirAuto flag.
+    //
+    // N.B: For elements other than <bdi> it would be enough to test that the
+    //      current value of dir was "auto" in BeforeSetAttr to know that we
+    //      were unsetting dir="auto". For <bdi> things are more complicated,
+    //      since it behaves like dir="auto" whenever the dir attribute is
+    //      empty or invalid, so we would have to check whether the old value
+    //      was not either "ltr" or "rtl", and the new value was either "ltr"
+    //      or "rtl". Element::HasDirAuto() encapsulates all that, so doing it
+    //      here is simpler.
+    WalkDescendantsClearAncestorDirAuto(aElement);
   }
 
   if (aElement->HasDirAuto()) {
@@ -868,6 +905,58 @@ OnSetDirAttr(Element* aElement, const nsAttrValue* aNewValue,
     SetDirectionalityOnDescendants(aElement,
                                    RecomputeDirectionality(aElement, aNotify),
                                    aNotify);
+  }
+}
+
+void
+SetDirOnBind(mozilla::dom::Element* aElement, nsIContent* aParent)
+{
+  // Set the AncestorHasDirAuto flag, unless this element shouldn't affect
+  // ancestors that have dir=auto
+  if (!DoesNotParticipateInAutoDirection(aElement) &&
+      !aElement->IsHTML(nsGkAtoms::bdi) &&
+      aParent && aParent->NodeOrAncestorHasDirAuto()) {
+    aElement->SetAncestorHasDirAuto();
+
+    nsIContent* child = aElement->GetFirstChild();
+    if (child) {
+      // If we are binding an element to the tree that already has descendants,
+      // and the parent has NodeHasDirAuto or NodeAncestorHasDirAuto, we need
+      // to set NodeAncestorHasDirAuto on all the element's descendants, except
+      // for nodes that don't affect the direction of their ancestors.
+      do {
+        if (child->IsElement() &&
+            DoesNotAffectDirectionOfAncestors(child->AsElement())) {
+          child = child->GetNextNonChildNode(aElement);
+          continue;
+        }
+
+        child->SetAncestorHasDirAuto();
+        child = child->GetNextNode(aElement);
+      } while (child);
+
+      // We may also need to reset the direction of an ancestor with dir=auto
+      WalkAncestorsResetAutoDirection(aElement, true);
+    }
+  }
+
+  if (!aElement->HasDirAuto()) {
+    // if the element doesn't have dir=auto, set its own directionality from
+    // the dir attribute or by inheriting from its ancestors.
+    RecomputeDirectionality(aElement, false);
+  }
+}
+
+void ResetDir(mozilla::dom::Element* aElement)
+{
+  if (aElement->HasDirAutoSet()) {
+    nsINode* setByNode =
+      static_cast<nsINode*>(aElement->GetProperty(nsGkAtoms::dirAutoSetBy));
+    nsTextNodeDirectionalityMap::RemoveElementFromMap(setByNode, aElement);
+  }
+
+  if (!aElement->HasDirAuto()) {
+    RecomputeDirectionality(aElement, false);
   }
 }
 

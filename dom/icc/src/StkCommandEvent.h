@@ -24,7 +24,7 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(StkCommandEvent, nsDOMEvent)
 
   static already_AddRefed<StkCommandEvent>
-  Create(nsAString& aMessage);
+  Create(mozilla::dom::EventTarget* aOwner, const nsAString& aMessage);
 
   nsresult
   Dispatch(nsIDOMEventTarget* aTarget, const nsAString& aEventType)
@@ -35,11 +35,9 @@ public:
     nsresult rv = InitEvent(aEventType, false, false);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    rv = SetTrusted(true);
-    NS_ENSURE_SUCCESS(rv, rv);
+    SetTrusted(true);
 
-    nsIDOMEvent* thisEvent =
-      static_cast<nsDOMEvent*>(const_cast<StkCommandEvent*>(this));
+    nsDOMEvent* thisEvent = this;
 
     bool dummy;
     rv = aTarget->DispatchEvent(thisEvent, &dummy);
@@ -49,8 +47,8 @@ public:
   }
 
 private:
-  StkCommandEvent()
-  : nsDOMEvent(nullptr, nullptr)
+  StkCommandEvent(mozilla::dom::EventTarget* aOwner)
+  : nsDOMEvent(aOwner, nullptr, nullptr)
   { }
 
   ~StkCommandEvent()

@@ -14,11 +14,7 @@
 #include "nsFontFaceLoader.h"
 
 #include "nsError.h"
-#include "nsIFile.h"
-#include "nsIStreamListener.h"
 #include "nsNetUtil.h"
-#include "nsIChannelEventSink.h"
-#include "nsIInterfaceRequestor.h"
 #include "nsContentUtils.h"
 #include "mozilla/Preferences.h"
 
@@ -27,13 +23,10 @@
 #include "nsIPrincipal.h"
 #include "nsIScriptSecurityManager.h"
 
-#include "nsDirectoryServiceUtils.h"
-#include "nsDirectoryServiceDefs.h"
 #include "nsIContentPolicy.h"
 #include "nsContentPolicyUtils.h"
 #include "nsCrossSiteListenerProxy.h"
 #include "nsIContentSecurityPolicy.h"
-#include "nsIChannelPolicy.h"
 #include "nsChannelPolicy.h"
 
 #include "nsIConsoleService.h"
@@ -58,12 +51,17 @@ GetFontDownloaderLog()
 #define LOG_ENABLED() PR_LOG_TEST(GetFontDownloaderLog(), PR_LOG_DEBUG)
 
 
-nsFontFaceLoader::nsFontFaceLoader(gfxProxyFontEntry *aProxy, nsIURI *aFontURI,
-                                   nsUserFontSet *aFontSet, nsIChannel *aChannel)
-  : mFontEntry(aProxy), mFontURI(aFontURI), mFontSet(aFontSet),
+nsFontFaceLoader::nsFontFaceLoader(gfxMixedFontFamily *aFontFamily,
+                                   gfxProxyFontEntry *aProxy,
+                                   nsIURI *aFontURI,
+                                   nsUserFontSet *aFontSet,
+                                   nsIChannel *aChannel)
+  : mFontFamily(aFontFamily),
+    mFontEntry(aProxy),
+    mFontURI(aFontURI),
+    mFontSet(aFontSet),
     mChannel(aChannel)
 {
-  mFontFamily = aProxy->Family();
 }
 
 nsFontFaceLoader::~nsFontFaceLoader()
@@ -214,9 +212,10 @@ nsFontFaceLoader::OnStreamComplete(nsIStreamLoader* aLoader,
   // This is called even in the case of a failed download (HTTP 404, etc),
   // as there may still be data to be freed (e.g. an error page),
   // and we need the fontSet to initiate loading the next source.
-  bool fontUpdate = userFontSet->OnLoadComplete(mFontEntry,
-                                                  aString, aStringLen,
-                                                  aStatus);
+  bool fontUpdate = userFontSet->OnLoadComplete(mFontFamily,
+                                                mFontEntry,
+                                                aString, aStringLen,
+                                                aStatus);
 
   // when new font loaded, need to reflow
   if (fontUpdate) {
@@ -312,7 +311,8 @@ nsUserFontSet::RemoveLoader(nsFontFaceLoader *aLoader)
 }
 
 nsresult
-nsUserFontSet::StartLoad(gfxProxyFontEntry *aProxy,
+nsUserFontSet::StartLoad(gfxMixedFontFamily *aFamily,
+                         gfxProxyFontEntry *aProxy,
                          const gfxFontFaceSrc *aFontFaceSrc)
 {
   nsresult rv;
@@ -346,7 +346,7 @@ nsUserFontSet::StartLoad(gfxProxyFontEntry *aProxy,
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsRefPtr<nsFontFaceLoader> fontLoader =
-    new nsFontFaceLoader(aProxy, aFontFaceSrc->mURI, this, channel);
+    new nsFontFaceLoader(aFamily, aProxy, aFontFaceSrc->mURI, this, channel);
 
   if (!fontLoader)
     return NS_ERROR_OUT_OF_MEMORY;
@@ -663,7 +663,8 @@ nsUserFontSet::InsertRule(nsCSSFontFaceRule *aRule, uint8_t aSheetType,
 }
 
 void
-nsUserFontSet::ReplaceFontEntry(gfxProxyFontEntry *aProxy,
+nsUserFontSet::ReplaceFontEntry(gfxMixedFontFamily *aFamily,
+                                gfxProxyFontEntry *aProxy,
                                 gfxFontEntry *aFontEntry)
 {
   for (uint32_t i = 0; i < mRules.Length(); ++i) {
@@ -672,11 +673,7 @@ nsUserFontSet::ReplaceFontEntry(gfxProxyFontEntry *aProxy,
       break;
     }
   }
-  gfxMixedFontFamily *family =
-    static_cast<gfxMixedFontFamily*>(aProxy->Family());
-  if (family) {
-    family->ReplaceFontEntry(aProxy, aFontEntry);
-  }
+  aFamily->ReplaceFontEntry(aProxy, aFontEntry);
 }
 
 nsCSSFontFaceRule*
@@ -691,7 +688,8 @@ nsUserFontSet::FindRuleForEntry(gfxFontEntry *aFontEntry)
 }
 
 nsresult
-nsUserFontSet::LogMessage(gfxProxyFontEntry *aProxy,
+nsUserFontSet::LogMessage(gfxMixedFontFamily *aFamily,
+                          gfxProxyFontEntry *aProxy,
                           const char        *aMessage,
                           uint32_t          aFlags,
                           nsresult          aStatus)
@@ -702,7 +700,7 @@ nsUserFontSet::LogMessage(gfxProxyFontEntry *aProxy,
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  NS_ConvertUTF16toUTF8 familyName(aProxy->FamilyName());
+  NS_ConvertUTF16toUTF8 familyName(aFamily->Name());
   nsAutoCString fontURI;
   if (aProxy->mSrcIndex == aProxy->mSrcList.Length()) {
     fontURI.AppendLiteral("(end of source list)");
@@ -726,8 +724,8 @@ nsUserFontSet::LogMessage(gfxProxyFontEntry *aProxy,
     weightKeyword = weightKeywordBuf;
   }
 
-  nsPrintfCString
-    msg("downloadable font: %s "
+  nsPrintfCString message
+       ("downloadable font: %s "
         "(font-family: \"%s\" style:%s weight:%s stretch:%s src index:%d)",
         aMessage,
         familyName.get(),
@@ -738,27 +736,27 @@ nsUserFontSet::LogMessage(gfxProxyFontEntry *aProxy,
         aProxy->mSrcIndex);
 
   if (NS_FAILED(aStatus)) {
-    msg.Append(": ");
+    message.Append(": ");
     switch (aStatus) {
     case NS_ERROR_DOM_BAD_URI:
-      msg.Append("bad URI or cross-site access not allowed");
+      message.Append("bad URI or cross-site access not allowed");
       break;
     case NS_ERROR_CONTENT_BLOCKED:
-      msg.Append("content blocked");
+      message.Append("content blocked");
       break;
     default:
-      msg.Append("status=");
-      msg.AppendInt(static_cast<uint32_t>(aStatus));
+      message.Append("status=");
+      message.AppendInt(static_cast<uint32_t>(aStatus));
       break;
     }
   }
-  msg.Append("\nsource: ");
-  msg.Append(fontURI);
+  message.Append("\nsource: ");
+  message.Append(fontURI);
 
 #ifdef PR_LOGGING
   if (PR_LOG_TEST(GetUserFontsLog(), PR_LOG_DEBUG)) {
     PR_LOG(GetUserFontsLog(), PR_LOG_DEBUG,
-           ("userfonts (%p) %s", this, msg.get()));
+           ("userfonts (%p) %s", this, message.get()));
   }
 #endif
 
@@ -782,7 +780,7 @@ nsUserFontSet::LogMessage(gfxProxyFontEntry *aProxy,
   NS_ENSURE_SUCCESS(rv, rv);
 
   uint64_t innerWindowID = GetPresContext()->Document()->InnerWindowID();
-  rv = scriptError->InitWithWindowID(NS_ConvertUTF8toUTF16(msg),
+  rv = scriptError->InitWithWindowID(NS_ConvertUTF8toUTF16(message),
                                      href,         // file
                                      text,         // src line
                                      0, 0,         // line & column number

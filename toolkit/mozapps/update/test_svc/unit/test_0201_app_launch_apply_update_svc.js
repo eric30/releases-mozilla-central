@@ -26,7 +26,7 @@ const MAX_TIMEOUT_RUNS = 300;
 
 // Maximum number of milliseconds the process that is launched can run before
 // the test will try to kill it.
-const APP_TIMER_TIMEOUT = 15000;
+const APP_TIMER_TIMEOUT = 120000;
 
 let gAppTimer;
 let gProcess;
@@ -168,6 +168,17 @@ function run_test() {
 
   setEnvironment();
 
+  // Backup the updater.ini if it exists by moving it. This prevents the post
+  // update executable from being launched if it is specified.
+//XXX disabled until bug 820933 and bug 820934 are fixed
+if (0) {
+  let updaterIni = processDir.clone();
+  updaterIni.append(FILE_UPDATER_INI);
+  if (updaterIni.exists()) {
+    updaterIni.moveTo(processDir, FILE_UPDATER_INI_BAK);
+  }
+}
+
   let updateSettingsIni = processDir.clone();
   updateSettingsIni.append(UPDATE_SETTINGS_INI_FILE);
   writeFile(updateSettingsIni, UPDATE_SETTINGS_CONTENTS);
@@ -215,6 +226,14 @@ function end_test() {
   }
 
   resetEnvironment();
+
+  let processDir = getAppDir();
+  // Restore the backup of the updater.ini if it exists
+  let updaterIni = processDir.clone();
+  updaterIni.append(FILE_UPDATER_INI_BAK);
+  if (updaterIni.exists()) {
+    updaterIni.moveTo(processDir, FILE_UPDATER_INI);
+  }
 
   // Remove the files added by the update.
   let updateTestDir = getUpdateTestDir();
@@ -290,7 +309,7 @@ function adjustPathsOnWindows() {
   tmpDir.append("ExecutableDir.tmp");
   tmpDir.createUnique(tmpDir.DIRECTORY_TYPE, 0755);
   let procDir = getCurrentProcessDir();
-  procDir.copyTo(tmpDir, "bin");
+  copyDirRecursive(procDir, tmpDir, "bin");
   let newDir = tmpDir.clone();
   newDir.append("bin");
   gWindowsBinDir = newDir;
@@ -347,7 +366,9 @@ function checkUpdateApplied() {
   // Don't proceed until the update has been applied.
   if (gUpdateManager.activeUpdate.state != STATE_APPLIED_PLATFORM) {
     if (gTimeoutRuns > MAX_TIMEOUT_RUNS)
-      do_throw("Exceeded MAX_TIMEOUT_RUNS whilst waiting for update to be applied, current state is: " + gUpdateManager.activeUpdate.state);
+      do_throw("Exceeded MAX_TIMEOUT_RUNS whilst waiting for update to be " +
+               "applied, current state is: " +
+               gUpdateManager.activeUpdate.state);
     else
       do_timeout(CHECK_TIMEOUT_MILLI, checkUpdateApplied);
     return;
@@ -365,7 +386,8 @@ function checkUpdateApplied() {
   log.append(FILE_LAST_LOG);
   if (!log.exists()) {
     if (gTimeoutRuns > MAX_TIMEOUT_RUNS)
-      do_throw("Exceeded MAX_TIMEOUT_RUNS whilst waiting for update log to be created");
+      do_throw("Exceeded MAX_TIMEOUT_RUNS whilst waiting for update log to " +
+               "be created");
     else
       do_timeout(CHECK_TIMEOUT_MILLI, checkUpdateApplied);
     return;
@@ -460,7 +482,8 @@ function checkUpdateFinished() {
     let status = readStatusFile();
     if (status != STATE_SUCCEEDED) {
       if (gTimeoutRuns > MAX_TIMEOUT_RUNS)
-        do_throw("Exceeded MAX_TIMEOUT_RUNS whilst waiting for state to change to succeeded, current status: " + status);
+        do_throw("Exceeded MAX_TIMEOUT_RUNS whilst waiting for state to " +
+                 "change to succeeded, current status: " + status);
       else
         do_timeout(CHECK_TIMEOUT_MILLI, checkUpdateFinished);
       return;
@@ -543,6 +566,5 @@ function checkUpdateFinished() {
   logTestInfo("testing " + updatesDir.path + " should exist");
   do_check_true(updatesDir.exists());
 
-  // Give the callback app time to close before trying to delete it.
-  do_timeout(TEST_HELPER_TIMEOUT, removeCallbackCopy);
+  waitForFilesInUse();
 }

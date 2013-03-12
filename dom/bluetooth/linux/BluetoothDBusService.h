@@ -42,11 +42,6 @@ public:
                                          BluetoothReplyRunnable* aRunnable);
 
   virtual nsresult
-  GetProperties(BluetoothObjectType aType,
-                const nsAString& aPath,
-                BluetoothReplyRunnable* aRunnable);
-
-  virtual nsresult
   GetDevicePropertiesInternal(const BluetoothSignal& aSignal);
 
   virtual nsresult
@@ -172,6 +167,8 @@ private:
   nsresult SendSetPropertyMessage(const nsString& aPath, const char* aInterface,
                                   const BluetoothNamedValue& aValue,
                                   BluetoothReplyRunnable* aRunnable);
+
+  void DisconnectAllAcls(const nsAString& aAdapterPath);
 };
 
 END_BLUETOOTH_NAMESPACE

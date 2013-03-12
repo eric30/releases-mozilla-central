@@ -25,26 +25,13 @@ function test()
 
 function testFrameParameters()
 {
-  dump("Started testFrameParameters!\n");
-
   gDebugger.addEventListener("Debugger:FetchedVariables", function test() {
-    dump("Entered Debugger:FetchedVariables!\n");
-
     gDebugger.removeEventListener("Debugger:FetchedVariables", test, false);
     Services.tm.currentThread.dispatch({ run: function() {
 
-      dump("After currentThread.dispatch!\n");
-
       var frames = gDebugger.DebuggerView.StackFrames._container._list,
-          childNodes = frames.childNodes,
-          localScope = gDebugger.DebuggerView.Variables._list.querySelector(".scope"),
-          localNodes = localScope.querySelector(".details").childNodes;
-
-      dump("Got our variables:\n");
-      dump("frames     - " + frames.constructor + "\n");
-      dump("childNodes - " + childNodes.constructor + "\n");
-      dump("localScope - " + localScope.constructor + "\n");
-      dump("localNodes - " + localNodes.constructor + "\n");
+          localScope = gDebugger.DebuggerView.Variables._list.querySelector(".variables-view-scope"),
+          localNodes = localScope.querySelector(".variables-view-element-details").childNodes;
 
       is(gDebugger.DebuggerController.activeThread.state, "paused",
         "Should only be getting stack frames while paused.");
@@ -52,7 +39,7 @@ function testFrameParameters()
       is(frames.querySelectorAll(".dbg-stackframe").length, 3,
         "Should have three frames.");
 
-      is(localNodes.length, 11,
+      is(localNodes.length, 12,
         "The localScope should contain all the created variable elements.");
 
       is(localNodes[0].querySelector(".value").getAttribute("value"), "[object Proxy]",

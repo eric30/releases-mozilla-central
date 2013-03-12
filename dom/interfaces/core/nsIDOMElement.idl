@@ -13,7 +13,7 @@
  * http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#interface-element
  */
 
-[scriptable, uuid(f1465e67-577f-4546-a7a3-bb1293c0dd15)]
+[scriptable, uuid(9387fd9b-46e9-4a1e-997f-713c0123c7f8)]
 interface nsIDOMElement : nsIDOMNode
 {
   readonly attribute DOMString        tagName;
@@ -21,7 +21,7 @@ interface nsIDOMElement : nsIDOMNode
   /**
    * Returns a DOMTokenList object reflecting the class attribute.
    */
-  readonly attribute nsIDOMDOMTokenList classList;
+  readonly attribute nsISupports classList;
 
   DOMString          getAttribute(in DOMString name);
   DOMString          getAttributeNS(in DOMString namespaceURI, 

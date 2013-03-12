@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsError.h"
+#include "nsSVGAttrTearoffTable.h"
 #include "nsSVGNumber2.h"
 #include "nsTextFormatter.h"
 #include "prdtoa.h"
@@ -56,6 +57,9 @@ NS_INTERFACE_MAP_BEGIN(DOMSVGNumber)
 NS_INTERFACE_MAP_END
 
 /* Implementation */
+
+static nsSVGAttrTearoffTable<nsSVGNumber2, nsSVGNumber2::DOMAnimatedNumber>
+  sSVGAnimatedNumberTearoffTable;
 
 static nsresult
 GetValueFromString(const nsAString &aValueAsString,
@@ -147,16 +151,30 @@ nsSVGNumber2::SetAnimValue(float aValue, nsSVGElement *aSVGElement)
   aSVGElement->DidAnimateNumber(mAttrEnum);
 }
 
+already_AddRefed<nsIDOMSVGAnimatedNumber>
+nsSVGNumber2::ToDOMAnimatedNumber(nsSVGElement* aSVGElement)
+{
+  nsRefPtr<DOMAnimatedNumber> domAnimatedNumber =
+    sSVGAnimatedNumberTearoffTable.GetTearoff(this);
+  if (!domAnimatedNumber) {
+    domAnimatedNumber = new DOMAnimatedNumber(this, aSVGElement);
+    sSVGAnimatedNumberTearoffTable.AddTearoff(this, domAnimatedNumber);
+  }
+
+  return domAnimatedNumber.forget();
+}
+
 nsresult
 nsSVGNumber2::ToDOMAnimatedNumber(nsIDOMSVGAnimatedNumber **aResult,
                                   nsSVGElement *aSVGElement)
 {
-  *aResult = new DOMAnimatedNumber(this, aSVGElement);
-  if (!*aResult)
-    return NS_ERROR_OUT_OF_MEMORY;
-
-  NS_ADDREF(*aResult);
+  *aResult = ToDOMAnimatedNumber(aSVGElement).get();
   return NS_OK;
+}
+
+nsSVGNumber2::DOMAnimatedNumber::~DOMAnimatedNumber()
+{
+  sSVGAnimatedNumberTearoffTable.RemoveTearoff(mVal);
 }
 
 nsISMILAttr*

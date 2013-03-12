@@ -98,8 +98,8 @@ public:
 
   bool Initialised() { return mInitialised; }
 
-protected:
   virtual nsIntPoint GetOriginOffset() = 0;
+protected:
 
   GLContext* gl() const { return mOGLLayer->gl(); }
 
@@ -343,7 +343,6 @@ public:
     return mTexImage ? mTexImage->GetBackingSurface() : nullptr;
   }
 
-protected:
   virtual nsIntPoint GetOriginOffset() {
     return BufferRect().TopLeft() - BufferRotation();
   }
@@ -366,6 +365,10 @@ public:
 
   virtual PaintState BeginPaint(ContentType aContentType,
                                 uint32_t aFlags);
+  virtual nsIntPoint GetOriginOffset() {
+    return mBufferRect.TopLeft() - mBufferRotation;
+  }
+
 
 protected:
   enum XSide {
@@ -375,10 +378,6 @@ protected:
     TOP, BOTTOM
   };
   nsIntRect GetQuadrantRectangle(XSide aXSide, YSide aYSide);
-
-  virtual nsIntPoint GetOriginOffset() {
-    return mBufferRect.TopLeft() - mBufferRotation;
-  }
 
 private:
   nsIntRect mBufferRect;
@@ -734,25 +733,29 @@ BasicBufferOGL::BeginPaint(ContentType aContentType,
     nsIntRegion drawRegionCopy = result.mRegionToDraw;
     gfxASurface *onBlack = mTexImage->BeginUpdate(drawRegionCopy);
     gfxASurface *onWhite = mTexImageOnWhite->BeginUpdate(result.mRegionToDraw);
-    NS_ASSERTION(result.mRegionToDraw == drawRegionCopy,
-                 "BeginUpdate should always modify the draw region in the same way!");
-    FillSurface(onBlack, result.mRegionToDraw, nsIntPoint(0,0), gfxRGBA(0.0, 0.0, 0.0, 1.0));
-    FillSurface(onWhite, result.mRegionToDraw, nsIntPoint(0,0), gfxRGBA(1.0, 1.0, 1.0, 1.0));
-    gfxASurface* surfaces[2] = { onBlack, onWhite };
-    nsRefPtr<gfxTeeSurface> surf = new gfxTeeSurface(surfaces, ArrayLength(surfaces));
+    if (onBlack && onWhite) {
+      NS_ASSERTION(result.mRegionToDraw == drawRegionCopy,
+          "BeginUpdate should always modify the draw region in the same way!");
+      FillSurface(onBlack, result.mRegionToDraw, nsIntPoint(0,0), gfxRGBA(0.0, 0.0, 0.0, 1.0));
+      FillSurface(onWhite, result.mRegionToDraw, nsIntPoint(0,0), gfxRGBA(1.0, 1.0, 1.0, 1.0));
+      gfxASurface* surfaces[2] = { onBlack, onWhite };
+      nsRefPtr<gfxTeeSurface> surf = new gfxTeeSurface(surfaces, ArrayLength(surfaces));
 
-    // XXX If the device offset is set on the individual surfaces instead of on
-    // the tee surface, we render in the wrong place. Why?
-    gfxPoint deviceOffset = onBlack->GetDeviceOffset();
-    onBlack->SetDeviceOffset(gfxPoint(0, 0));
-    onWhite->SetDeviceOffset(gfxPoint(0, 0));
-    surf->SetDeviceOffset(deviceOffset);
+      // XXX If the device offset is set on the individual surfaces instead of on
+      // the tee surface, we render in the wrong place. Why?
+      gfxPoint deviceOffset = onBlack->GetDeviceOffset();
+      onBlack->SetDeviceOffset(gfxPoint(0, 0));
+      onWhite->SetDeviceOffset(gfxPoint(0, 0));
+      surf->SetDeviceOffset(deviceOffset);
 
-    // Using this surface as a source will likely go horribly wrong, since
-    // only the onBlack surface will really be used, so alpha information will
-    // be incorrect.
-    surf->SetAllowUseAsSource(false);
-    result.mContext = new gfxContext(surf);
+      // Using this surface as a source will likely go horribly wrong, since
+      // only the onBlack surface will really be used, so alpha information will
+      // be incorrect.
+      surf->SetAllowUseAsSource(false);
+      result.mContext = new gfxContext(surf);
+    } else {
+      result.mContext = nullptr;
+    }
   } else {
     result.mContext = new gfxContext(mTexImage->BeginUpdate(result.mRegionToDraw));
     if (mTexImage->GetContentType() == gfxASurface::CONTENT_COLOR_ALPHA) {
@@ -857,12 +860,7 @@ ThebesLayerOGL::RenderLayer(int aPreviousFrameBuffer,
 
   uint32_t flags = 0;
 #ifndef MOZ_GFX_OPTIMIZE_MOBILE
-  gfxMatrix transform2d;
-  if (GetEffectiveTransform().Is2D(&transform2d)) {
-    if (transform2d.HasNonIntegerTranslation()) {
-      flags |= ThebesLayerBufferOGL::PAINT_WILL_RESAMPLE;
-    }
-  } else {
+  if (MayResample()) {
     flags |= ThebesLayerBufferOGL::PAINT_WILL_RESAMPLE;
   }
 #endif
@@ -952,7 +950,6 @@ public:
     return mBufferRotation;
   }
 
-protected:
   virtual nsIntPoint GetOriginOffset() {
     return mBufferRect.TopLeft() - mBufferRotation;
   }
@@ -1161,7 +1158,7 @@ ShadowThebesLayerOGL::GetRenderState()
   }
   uint32_t flags = (mBuffer->Rotation() != nsIntPoint()) ?
                    LAYER_RENDER_STATE_BUFFER_ROTATION : 0;
-  return LayerRenderState(&mBufferDescriptor, flags);
+  return LayerRenderState(&mBufferDescriptor, mBuffer->GetOriginOffset(), flags);
 }
 
 bool

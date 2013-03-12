@@ -10,15 +10,34 @@ relativesrcdir = @relativesrcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-# Bug 814718 and bug 818466 prevent us from running the following tests:
-#  test_getUserMedia_basicVideo.html
-#  test_getUserMedia_basicAudio.html
-#  test_getUserMedia_basicVideoAudio.html
-
 MOCHITEST_FILES = \
   test_getUserMedia_exceptions.html \
+  test_getUserMedia_basicAudio.html \
+  test_getUserMedia_basicVideo.html \
+  test_getUserMedia_basicVideoAudio.html \
+  test_getUserMedia_gumWithinGum.html \
+  test_getUserMedia_playAudioTwice.html \
+  test_getUserMedia_playVideoTwice.html \
+  test_getUserMedia_playVideoAudioTwice.html \
+  test_getUserMedia_stopAudioStream.html \
+  test_getUserMedia_stopAudioStreamWithFollowupAudio.html \
+  test_getUserMedia_stopVideoStreamWithFollowupVideo.html \
+  test_getUserMedia_stopVideoAudioStreamWithFollowupVideoAudio.html \
+  test_getUserMedia_stopVideoStream.html \
+  test_getUserMedia_stopVideoAudioStream.html \
+  test_peerConnection_basicAudio.html \
+  test_peerConnection_basicAudioVideo.html \
+  test_peerConnection_basicAudioVideoCombined.html \
+  test_peerConnection_basicVideo.html \
+  test_peerConnection_bug822674.html \
+  test_peerConnection_bug827843.html \
+  test_peerConnection_bug825703.html \
+  test_peerConnection_bug834153.html \
+  test_peerConnection_bug835370.html \
+  test_peerConnection_bug840344.html \
   head.js \
   mediaStreamPlayback.js \
+  pc.js \
   $(NULL)
 
 # The following tests are leaking and cannot be run by default yet

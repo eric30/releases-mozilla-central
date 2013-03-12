@@ -32,43 +32,9 @@ function bindDOMWindowUtils(aWindow) {
   if (!aWindow)
     return
 
-  var util = aWindow.QueryInterface(Components.interfaces.nsIInterfaceRequestor)
-                   .getInterface(Components.interfaces.nsIDOMWindowUtils);
-  // This bit of magic brought to you by the letters
-  // B Z, and E, S and the number 5.
-  //
-  // Take all of the properties on the nsIDOMWindowUtils-implementing
-  // object, and rebind them onto a new object with a stub that uses
-  // apply to call them from this privileged scope. This way we don't
-  // have to explicitly stub out new methods that appear on
-  // nsIDOMWindowUtils.
-  //
-  // Note that this will be a chrome object that is (possibly) exposed to
-  // content. Make sure to define __exposedProps__ for each property to make
-  // sure that it gets through the security membrane.
-  var proto = Object.getPrototypeOf(util);
-  var target = { __exposedProps__: {} };
-  function rebind(desc, prop) {
-    if (prop in desc && typeof(desc[prop]) == "function") {
-      var oldval = desc[prop];
-      try {
-        desc[prop] = function() {
-          return oldval.apply(util, arguments);
-        };
-      } catch (ex) {
-        dump("WARNING: Special Powers failed to rebind function: " + desc + "::" + prop + "\n");
-      }
-    }
-  }
-  for (var i in proto) {
-    var desc = Object.getOwnPropertyDescriptor(proto, i);
-    rebind(desc, "get");
-    rebind(desc, "set");
-    rebind(desc, "value");
-    Object.defineProperty(target, i, desc);
-    target.__exposedProps__[i] = 'rw';
-  }
-  return target;
+   var util = aWindow.QueryInterface(Ci.nsIInterfaceRequestor)
+                     .getInterface(Ci.nsIDOMWindowUtils);
+   return wrapPrivileged(util);
 }
 
 function getRawComponents(aWindow) {
@@ -90,13 +56,7 @@ function unwrapIfWrapped(x) {
 };
 
 function isXrayWrapper(x) {
-  try {
-    return /XrayWrapper/.exec(x.toString());
-  } catch(e) {
-    // The toString() implementation could theoretically throw. But it never
-    // throws for Xray, so we can just assume non-xray in that case.
-    return false;
-  }
+  return Cu.isXrayWrapper(x);
 }
 
 function callGetOwnPropertyDescriptor(obj, name) {
@@ -511,7 +471,7 @@ SpecialPowersAPI.prototype = {
     if (aExpectingProcessCrash) {
       var message = {
         op: "delete-crash-dump-files",
-        filenames: this._encounteredCrashDumpFiles 
+        filenames: this._encounteredCrashDumpFiles
       };
       if (!this._sendSyncMessage("SPProcessCrashService", message)[0]) {
         success = false;
@@ -602,7 +562,7 @@ SpecialPowersAPI.prototype = {
           if (aPref.length == 3) {
             prefType = "COMPLEX";
           } else if (aPref.length == 2) {
-            if (typeof(prefValue) == "boolean") 
+            if (typeof(prefValue) == "boolean")
               prefType = "BOOL";
             else if (typeof(prefValue) == "number")
               prefType = "INT";
@@ -663,7 +623,7 @@ SpecialPowersAPI.prototype = {
         }
         content.window.setTimeout(delayAgain, 0);
       }
-      let cb = callback ? delayedCallback : null; 
+      let cb = callback ? delayedCallback : null;
       /* Each pop will have a valid block of preferences */
       this._pendingPrefs.push([this._prefEnvUndoStack.pop(), cb]);
       this._applyPrefs();
@@ -680,7 +640,7 @@ SpecialPowersAPI.prototype = {
   },
 
   /*
-    Iterate through one atomic set of pref actions and perform sets/clears as appropriate. 
+    Iterate through one atomic set of pref actions and perform sets/clears as appropriate.
     All actions performed must modify the relevant pref.
   */
   _applyPrefs: function() {
@@ -719,6 +679,14 @@ SpecialPowersAPI.prototype = {
     }
   },
 
+  // Disables the app install prompt for the duration of this test. There is
+  // no need to re-enable the prompt at the end of the test.
+  //
+  // The provided callback is invoked once the prompt is disabled.
+  autoConfirmAppInstall: function(cb) {
+    this.pushPrefEnv({set: [['dom.mozApps.auto_confirm_install', true]]}, cb);
+  },
+
   addObserver: function(obs, notification, weak) {
     var obsvc = Cc['@mozilla.org/observer-service;1']
                    .getService(Ci.nsIObserverService);
@@ -729,12 +697,12 @@ SpecialPowersAPI.prototype = {
                    .getService(Ci.nsIObserverService);
     obsvc.removeObserver(obs, notification);
   },
-   
+
   can_QI: function(obj) {
     return obj.QueryInterface !== undefined;
   },
   do_QueryInterface: function(obj, iface) {
-    return obj.QueryInterface(Ci[iface]); 
+    return obj.QueryInterface(Ci[iface]);
   },
 
   call_Instanceof: function (obj1, obj2) {
@@ -1034,7 +1002,7 @@ SpecialPowersAPI.prototype = {
     var serv = Cc["@mozilla.org/dom/dom-request-service;1"].
       getService(Ci.nsIDOMRequestService);
     var res = { __exposedProps__: {} };
-    var props = ["createRequest", "fireError", "fireSuccess"];
+    var props = ["createRequest", "createCursor", "fireError", "fireSuccess", "fireDone"];
     for (i in props) {
       let prop = props[i];
       res[prop] = function() { return serv[prop].apply(serv, arguments) };
@@ -1109,7 +1077,7 @@ SpecialPowersAPI.prototype = {
   },
 
   getFocusedElementForWindow: function(targetWindow, aDeep, childTargetWindow) {
-    this.focusManager.getFocusedElementForWindow(targetWindow, aDeep, childTargetWindow);
+    return this.focusManager.getFocusedElementForWindow(targetWindow, aDeep, childTargetWindow);
   },
 
   activeWindow: function() {
@@ -1123,8 +1091,8 @@ SpecialPowersAPI.prototype = {
   focus: function(window) {
     window.focus();
   },
-  
-  getClipboardData: function(flavor) {  
+
+  getClipboardData: function(flavor) {
     if (this._cb == null)
       this._cb = Components.classes["@mozilla.org/widget/clipboard;1"].
                             getService(Components.interfaces.nsIClipboard);
@@ -1142,7 +1110,7 @@ SpecialPowersAPI.prototype = {
     data = data.value || null;
     if (data == null)
       return "";
-      
+
     return data.QueryInterface(Components.interfaces.nsISupportsString).data;
   },
 
@@ -1160,12 +1128,12 @@ SpecialPowersAPI.prototype = {
     return this._cb.supportsSelectionClipboard();
   },
 
-  swapFactoryRegistration: function(cid, contractID, newFactory, oldFactory) {  
+  swapFactoryRegistration: function(cid, contractID, newFactory, oldFactory) {
     var componentRegistrar = Components.manager.QueryInterface(Components.interfaces.nsIComponentRegistrar);
 
     var unregisterFactory = newFactory;
     var registerFactory = oldFactory;
-    
+
     if (cid == null) {
       if (contractID != null) {
         cid = componentRegistrar.contractIDToCID(contractID);
@@ -1188,12 +1156,12 @@ SpecialPowersAPI.prototype = {
                                        registerFactory);
     return {'cid':cid, 'originalFactory':oldFactory};
   },
-  
+
   _getElement: function(aWindow, id) {
     return ((typeof(id) == "string") ?
-        aWindow.document.getElementById(id) : id); 
+        aWindow.document.getElementById(id) : id);
   },
-  
+
   dispatchEvent: function(aWindow, target, event) {
     var el = this._getElement(aWindow, target);
     return el.dispatchEvent(event);
@@ -1204,6 +1172,10 @@ SpecialPowersAPI.prototype = {
     var debug = Cc["@mozilla.org/xpcom/debug;1"].getService(Ci.nsIDebug2);
     return this.isDebugBuild = debug.isDebugBuild;
   },
+  assertionCount: function() {
+    var debugsvc = Cc['@mozilla.org/xpcom/debug;1'].getService(Ci.nsIDebug2);
+    return debugsvc.assertionCount;
+  },
 
   /**
    * Get the message manager associated with an <iframe mozbrowser>.
@@ -1213,7 +1185,7 @@ SpecialPowersAPI.prototype = {
                                   .frameLoader
                                   .messageManager);
   },
-  
+
   setFullscreenAllowed: function(document) {
     var pm = Cc["@mozilla.org/permissionmanager;1"].getService(Ci.nsIPermissionManager);
     pm.addFromPrincipal(document.nodePrincipal, "fullscreen", Ci.nsIPermissionManager.ALLOW_ACTION);
@@ -1221,7 +1193,7 @@ SpecialPowersAPI.prototype = {
                    .getService(Ci.nsIObserverService);
     obsvc.notifyObservers(document, "fullscreen-approved", null);
   },
-  
+
   removeFullscreenAllowed: function(document) {
     var pm = Cc["@mozilla.org/permissionmanager;1"].getService(Ci.nsIPermissionManager);
     pm.removeFromPrincipal(document.nodePrincipal, "fullscreen");
@@ -1240,15 +1212,15 @@ SpecialPowersAPI.prototype = {
               .spec;
     } else if (arg.manifestURL) {
       // It's a thing representing an app.
-      let tmp = {};
-      Cu.import("resource://gre/modules/Webapps.jsm", tmp);
+      let appsSvc = Cc["@mozilla.org/AppsService;1"]
+                      .getService(Ci.nsIAppsService)
+      let app = appsSvc.getAppByManifestURL(arg.manifestURL);
 
-      let app = tmp.DOMApplicationRegistry.getAppByManifestURL(arg.manifestURL);
       if (!app) {
         throw "No app for this manifest!";
       }
 
-      appId = app.localId;
+      appId = appsSvc.getAppLocalIdByManifestURL(arg.manifestURL);
       url = app.origin;
       isInBrowserElement = arg.isInBrowserElement || false;
     } else if (arg.nodePrincipal) {
@@ -1272,7 +1244,7 @@ SpecialPowersAPI.prototype = {
                            : Ci.nsIPermissionManager.DENY_ACTION;
 
     var msg = {
-      'op': "add",
+      'op': 'add',
       'type': type,
       'permission': permission,
       'url': url,
@@ -1287,7 +1259,7 @@ SpecialPowersAPI.prototype = {
     let [url, appId, isInBrowserElement] = this._getInfoFromPermissionArg(arg);
 
     var msg = {
-      'op': "remove",
+      'op': 'remove',
       'type': type,
       'url': url,
       'appId': appId,
@@ -1295,6 +1267,33 @@ SpecialPowersAPI.prototype = {
     };
 
     this._sendSyncMessage('SPPermissionManager', msg);
+  },
+
+  hasPermission: function (type, arg) {
+   let [url, appId, isInBrowserElement] = this._getInfoFromPermissionArg(arg);
+
+    var msg = {
+      'op': 'has',
+      'type': type,
+      'url': url,
+      'appId': appId,
+      'isInBrowserElement': isInBrowserElement
+    };
+
+    return this._sendSyncMessage('SPPermissionManager', msg)[0];
+  },
+  testPermission: function (type, value, arg) {
+   let [url, appId, isInBrowserElement] = this._getInfoFromPermissionArg(arg);
+
+    var msg = {
+      'op': 'test',
+      'type': type,
+      'value': value, 
+      'url': url,
+      'appId': appId,
+      'isInBrowserElement': isInBrowserElement
+    };
+    return this._sendSyncMessage('SPPermissionManager', msg)[0];
   },
 
   getMozFullPath: function(file) {

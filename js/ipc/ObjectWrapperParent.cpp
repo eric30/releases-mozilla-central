@@ -5,6 +5,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/GuardObjects.h"
+
 #include "mozilla/jsipc/ObjectWrapperParent.h"
 #include "mozilla/jsipc/ContextWrapperParent.h"
 #include "mozilla/jsipc/CPOWTypes.h"
@@ -28,7 +30,7 @@ namespace {
     {
         JSObject* mObj;
         unsigned mOldFlags;
-        JS_DECL_USE_GUARD_OBJECT_NOTIFIER
+        MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 
         static unsigned GetFlags(JSObject* obj) {
             jsval v = JS_GetReservedSlot(obj, sFlagsSlot);
@@ -45,11 +47,11 @@ namespace {
     public:
 
         AutoResolveFlag(JSObject* obj
-                        JS_GUARD_OBJECT_NOTIFIER_PARAM)
+                        MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
             : mObj(obj)
             , mOldFlags(SetFlags(obj, GetFlags(obj) | CPOW_FLAG_RESOLVING))
         {
-            JS_GUARD_OBJECT_NOTIFIER_INIT;
+            MOZ_GUARD_OBJECT_NOTIFIER_INIT;
         }
 
         ~AutoResolveFlag() {
@@ -76,14 +78,14 @@ namespace {
 
     class AutoCheckOperation : public ACOBase
     {
-        JS_DECL_USE_GUARD_OBJECT_NOTIFIER
+        MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
     public:
         AutoCheckOperation(JSContext* cx,
                            ObjectWrapperParent* owp
-                           JS_GUARD_OBJECT_NOTIFIER_PARAM)
+                           MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
             : ACOBase(cx, owp)
         {
-            JS_GUARD_OBJECT_NOTIFIER_INIT;
+            MOZ_GUARD_OBJECT_NOTIFIER_INIT;
         }
     };
 
@@ -143,14 +145,7 @@ const js::Class ObjectWrapperParent::sCPOW_JSClass = {
       ObjectWrapperParent::CPOW_Call,
       ObjectWrapperParent::CPOW_HasInstance,
       ObjectWrapperParent::CPOW_Construct,
-      nullptr, // trace
-      {
-          ObjectWrapperParent::CPOW_Equality,
-          nullptr, // outerObject
-          nullptr, // innerObject
-          nullptr, // iteratorObject
-          nullptr, // wrappedObject
-    }
+      nullptr // trace
 };
 
 void
@@ -242,8 +237,6 @@ ObjectWrapperParent::jsval_to_JSVariant(JSContext* cx, jsval from,
     case JSTYPE_BOOLEAN:
         *to = !!JSVAL_TO_BOOLEAN(from);
         return true;
-    case JSTYPE_XML:
-        return with_error(cx, false, "CPOWs currently cannot handle JSTYPE_XML");
     default:
         return with_error(cx, false, "Bad jsval type");
     }
@@ -316,7 +309,7 @@ jsval_from_PObjectWrapperParent(JSContext* cx,
                                 const PObjectWrapperParent* from,
                                 jsval* to)
 {
-    js::RootedObject obj(cx);
+    JS::RootedObject obj(cx);
     if (!JSObject_from_PObjectWrapperParent(cx, from, &obj))
         return false;
     *to = OBJECT_TO_JSVAL(obj);
@@ -573,7 +566,7 @@ ObjectWrapperParent::CPOW_NewResolve(JSContext *cx, JSHandleObject obj, JSHandle
 
     if (objp) {
         AutoResolveFlag arf(objp);
-        js::RootedObject obj2(cx, objp);
+        JS::RootedObject obj2(cx, objp);
         JS_DefinePropertyById(cx, obj2, id, JSVAL_VOID, NULL, NULL,
                               JSPROP_ENUMERATE);
     }
@@ -698,28 +691,4 @@ ObjectWrapperParent::CPOW_HasInstance(JSContext *cx, JSHandleObject obj, JSMutab
             self->CallHasInstance(in_v,
                                   aco.StatusPtr(), bp) &&
             aco.Ok());
-}
-
-/*static*/ JSBool
-ObjectWrapperParent::CPOW_Equality(JSContext *cx, JSHandleObject obj, JSHandleValue v,
-                                   JSBool *bp)
-{
-    CPOW_LOG(("Calling CPOW_Equality..."));
-
-    *bp = JS_FALSE;
-    
-    ObjectWrapperParent* self = Unwrap(cx, obj);
-    if (!self)
-        return with_error(cx, JS_FALSE, "Unwrapping failed in CPOW_Equality");
-
-    if (JSVAL_IS_PRIMITIVE(v))
-        return JS_TRUE;
-
-    ObjectWrapperParent* other = Unwrap(cx, JSVAL_TO_OBJECT(v));
-    if (!other)
-        return JS_TRUE;
-
-    *bp = (self == other);
-    
-    return JS_TRUE;
 }

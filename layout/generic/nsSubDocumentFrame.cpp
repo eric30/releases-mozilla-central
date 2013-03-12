@@ -29,8 +29,8 @@
 #include "nsIURL.h"
 #include "nsNetUtil.h"
 #include "nsIDocument.h"
-#include "nsIView.h"
-#include "nsIViewManager.h"
+#include "nsView.h"
+#include "nsViewManager.h"
 #include "nsGkAtoms.h"
 #include "nsStyleCoord.h"
 #include "nsStyleContext.h"
@@ -61,7 +61,7 @@ using namespace mozilla;
 using mozilla::layout::RenderFrameParent;
 
 static nsIDocument*
-GetDocumentFromView(nsIView* aView)
+GetDocumentFromView(nsView* aView)
 {
   NS_PRECONDITION(aView, "");
 
@@ -85,7 +85,7 @@ nsSubDocumentFrame::nsSubDocumentFrame(nsStyleContext* aContext)
 a11y::AccType
 nsSubDocumentFrame::AccessibleType()
 {
-  return a11y::eOuterDocAccessible;
+  return a11y::eOuterDocType;
 }
 #endif
 
@@ -109,10 +109,10 @@ private:
 };
 
 static void
-InsertViewsInReverseOrder(nsIView* aSibling, nsIView* aParent);
+InsertViewsInReverseOrder(nsView* aSibling, nsView* aParent);
 
 static void
-EndSwapDocShellsForViews(nsIView* aView);
+EndSwapDocShellsForViews(nsView* aView);
 
 NS_IMETHODIMP
 nsSubDocumentFrame::Init(nsIContent*     aContent,
@@ -154,7 +154,7 @@ nsSubDocumentFrame::Init(nsIContent*     aContent,
   nsRefPtr<nsFrameLoader> frameloader = FrameLoader();
   if (frameloader) {
     nsCOMPtr<nsIDocument> oldContainerDoc;
-    nsIView* detachedViews =
+    nsView* detachedViews =
       frameloader->GetDetachedSubdocView(getter_AddRefs(oldContainerDoc));
     if (detachedViews) {
       if (oldContainerDoc == aContent->OwnerDoc()) {
@@ -204,7 +204,7 @@ nsSubDocumentFrame::ShowViewer()
     nsRefPtr<nsFrameLoader> frameloader = FrameLoader();
     if (frameloader) {
       nsIntSize margin = GetMarginAttributes();
-      const nsStyleDisplay* disp = GetStyleDisplay();
+      const nsStyleDisplay* disp = StyleDisplay();
       nsWeakFrame weakThis(this);
       mCallingShow = true;
       bool didCreateDoc =
@@ -221,25 +221,53 @@ nsSubDocumentFrame::ShowViewer()
   }
 }
 
-int
-nsSubDocumentFrame::GetSkipSides() const
-{
-  return 0;
-}
-
 nsIFrame*
 nsSubDocumentFrame::GetSubdocumentRootFrame()
 {
   if (!mInnerView)
     return nullptr;
-  nsIView* subdocView = mInnerView->GetFirstChild();
+  nsView* subdocView = mInnerView->GetFirstChild();
   return subdocView ? subdocView->GetFrame() : nullptr;
+}
+
+nsIntSize
+nsSubDocumentFrame::GetSubdocumentSize()
+{
+  if (GetStateBits() & NS_FRAME_FIRST_REFLOW) {
+    nsRefPtr<nsFrameLoader> frameloader = FrameLoader();
+    if (frameloader) {
+      nsCOMPtr<nsIDocument> oldContainerDoc;
+      nsView* detachedViews =
+        frameloader->GetDetachedSubdocView(getter_AddRefs(oldContainerDoc));
+      if (detachedViews) {
+        nsSize size = detachedViews->GetBounds().Size();
+        nsPresContext* presContext = detachedViews->GetFrame()->PresContext();
+        return nsIntSize(presContext->AppUnitsToDevPixels(size.width),
+                         presContext->AppUnitsToDevPixels(size.height));
+      }
+    }
+    // Pick some default size for now.  Using 10x10 because that's what the
+    // code used to do.
+    return nsIntSize(10, 10);
+  } else {
+    nsSize docSizeAppUnits;
+    nsPresContext* presContext = PresContext();
+    nsCOMPtr<nsIDOMHTMLFrameElement> frameElem =
+      do_QueryInterface(GetContent());
+    if (frameElem) {
+      docSizeAppUnits = GetSize();
+    } else {
+      docSizeAppUnits = GetContentRect().Size();
+    }
+    return nsIntSize(presContext->AppUnitsToDevPixels(docSizeAppUnits.width),
+                     presContext->AppUnitsToDevPixels(docSizeAppUnits.height));
+  }
 }
 
 bool
 nsSubDocumentFrame::PassPointerEventsToChildren()
 {
-  if (GetStyleVisibility()->mPointerEvents != NS_STYLE_POINTER_EVENTS_NONE) {
+  if (StyleVisibility()->mPointerEvents != NS_STYLE_POINTER_EVENTS_NONE) {
     return true;
   }
   // Limit use of mozpasspointerevents to documents with embedded:apps/chrome
@@ -266,36 +294,36 @@ nsSubDocumentFrame::PassPointerEventsToChildren()
   return false;
 }
 
-NS_IMETHODIMP
+void
 nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                      const nsRect&           aDirtyRect,
                                      const nsDisplayListSet& aLists)
 {
   if (!IsVisibleForPainting(aBuilder))
-    return NS_OK;
+    return;
 
   // If mozpasspointerevents is set, then we should allow subdocument content
   // to handle events even if we're pointer-events:none.
   if (aBuilder->IsForEventDelivery() && !PassPointerEventsToChildren())
-    return NS_OK;
+    return;
 
-  nsresult rv = DisplayBorderBackgroundOutline(aBuilder, aLists);
-  NS_ENSURE_SUCCESS(rv, rv);
+  DisplayBorderBackgroundOutline(aBuilder, aLists);
 
   if (!mInnerView)
-    return NS_OK;
+    return;
 
   nsFrameLoader* frameLoader = FrameLoader();
   if (frameLoader) {
     RenderFrameParent* rfp = frameLoader->GetCurrentRemoteFrame();
     if (rfp) {
-      return rfp->BuildDisplayList(aBuilder, this, aDirtyRect, aLists);
+      rfp->BuildDisplayList(aBuilder, this, aDirtyRect, aLists);
+      return;
     }
   }
 
-  nsIView* subdocView = mInnerView->GetFirstChild();
+  nsView* subdocView = mInnerView->GetFirstChild();
   if (!subdocView)
-    return NS_OK;
+    return;
 
   nsCOMPtr<nsIPresShell> presShell = nullptr;
 
@@ -310,7 +338,7 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     // During page transition mInnerView will sometimes have two children, the
     // first being the new page that may not have any frame, and the second
     // being the old page that will probably have a frame.
-    nsIView* nextView = subdocView->GetNextSibling();
+    nsView* nextView = subdocView->GetNextSibling();
     nsIFrame* frame = nullptr;
     if (nextView) {
       frame = nextView->GetFrame();
@@ -326,14 +354,14 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     if (!presShell) {
       // If we don't have a frame we use this roundabout way to get the pres shell.
       if (!mFrameLoader)
-        return NS_OK;
+        return;
       nsCOMPtr<nsIDocShell> docShell;
       mFrameLoader->GetDocShell(getter_AddRefs(docShell));
       if (!docShell)
-        return NS_OK;
-      docShell->GetPresShell(getter_AddRefs(presShell));
+        return;
+      presShell = docShell->GetPresShell();
       if (!presShell)
-        return NS_OK;
+        return;
     }
   }
 
@@ -365,8 +393,8 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     mInnerView->GetBounds() + aBuilder->ToReferenceFrame(this);
 
   if (subdocRootFrame) {
-    rv = subdocRootFrame->
-           BuildDisplayListForStackingContext(aBuilder, dirty, &childItems);
+    subdocRootFrame->
+      BuildDisplayListForStackingContext(aBuilder, dirty, &childItems);
   }
 
   if (!aBuilder->IsForEventDelivery()) {
@@ -385,17 +413,17 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     // background behind the page, not the canvas color. The canvas color gets
     // painted on the page itself.
     if (nsLayoutUtils::NeedsPrintPreviewBackground(presContext)) {
-      rv = presShell->AddPrintPreviewBackgroundItem(
-             *aBuilder, childItems, subdocRootFrame ? subdocRootFrame : this,
-             bounds);
+      presShell->AddPrintPreviewBackgroundItem(
+        *aBuilder, childItems, subdocRootFrame ? subdocRootFrame : this,
+        bounds);
     } else {
       // Add the canvas background color to the bottom of the list. This
       // happens after we've built the list so that AddCanvasBackgroundColorItem
       // can monkey with the contents if necessary.
       uint32_t flags = nsIPresShell::FORCE_DRAW;
-      rv = presShell->AddCanvasBackgroundColorItem(
-             *aBuilder, childItems, subdocRootFrame ? subdocRootFrame : this,
-             bounds, NS_RGBA(0,0,0,0), flags);
+      presShell->AddCanvasBackgroundColorItem(
+        *aBuilder, childItems, subdocRootFrame ? subdocRootFrame : this,
+        bounds, NS_RGBA(0,0,0,0), flags);
     }
   }
 
@@ -437,16 +465,19 @@ nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     childItems.AppendToTop(item);
   }
 
-  if (mIsInline) {
-    WrapReplacedContentForBorderRadius(aBuilder, &childItems, aLists);
+  if (aBuilder->IsForImageVisibility()) {
+    // We don't add the childItems to the return list as we're dealing with them here.
+    presShell->RebuildImageVisibility(childItems);
   } else {
-    aLists.Content()->AppendToTop(&childItems);
+    if (mIsInline) {
+      WrapReplacedContentForBorderRadius(aBuilder, &childItems, aLists);
+    } else {
+      aLists.Content()->AppendToTop(&childItems);
+    }
   }
 
   // delete childItems in case of OOM
   childItems.DeleteAll();
-
-  return rv;
 }
 
 nscoord
@@ -674,7 +705,7 @@ nsSubDocumentFrame::Reflow(nsPresContext*           aPresContext,
   }
 
   if (mInnerView) {
-    nsIViewManager* vm = mInnerView->GetViewManager();
+    nsViewManager* vm = mInnerView->GetViewManager();
     vm->MoveViewTo(mInnerView, offset.x, offset.y);
     vm->ResizeView(mInnerView, nsRect(nsPoint(0, 0), innerSize), true);
   }
@@ -827,8 +858,8 @@ private:
   bool mHideViewerIfFrameless;
 };
 
-static nsIView*
-BeginSwapDocShellsForViews(nsIView* aSibling);
+static nsView*
+BeginSwapDocShellsForViews(nsView* aSibling);
 
 void
 nsSubDocumentFrame::DestroyFrom(nsIFrame* aDestructRoot)
@@ -843,7 +874,7 @@ nsSubDocumentFrame::DestroyFrom(nsIFrame* aDestructRoot)
   // the frame has been made position:fixed).
   nsFrameLoader* frameloader = FrameLoader();
   if (frameloader) {
-    nsIView* detachedViews = ::BeginSwapDocShellsForViews(mInnerView->GetFirstChild());
+    nsView* detachedViews = ::BeginSwapDocShellsForViews(mInnerView->GetFirstChild());
     frameloader->SetDetachedSubdocView(detachedViews, mContent->OwnerDoc());
 
     // We call nsFrameLoader::HideViewer() in a script runner so that we can
@@ -933,17 +964,17 @@ BeginSwapDocShellsForDocument(nsIDocument* aDocument, void*)
   return true;
 }
 
-static nsIView*
-BeginSwapDocShellsForViews(nsIView* aSibling)
+static nsView*
+BeginSwapDocShellsForViews(nsView* aSibling)
 {
   // Collect the removed sibling views in reverse order in 'removedViews'.
-  nsIView* removedViews = nullptr;
+  nsView* removedViews = nullptr;
   while (aSibling) {
     nsIDocument* doc = ::GetDocumentFromView(aSibling);
     if (doc) {
       ::BeginSwapDocShellsForDocument(doc, nullptr);
     }
-    nsIView* next = aSibling->GetNextSibling();
+    nsView* next = aSibling->GetNextSibling();
     aSibling->GetViewManager()->RemoveChild(aSibling);
     aSibling->SetNextSibling(removedViews);
     removedViews = aSibling;
@@ -953,14 +984,14 @@ BeginSwapDocShellsForViews(nsIView* aSibling)
 }
 
 static void
-InsertViewsInReverseOrder(nsIView* aSibling, nsIView* aParent)
+InsertViewsInReverseOrder(nsView* aSibling, nsView* aParent)
 {
   NS_PRECONDITION(aParent, "");
   NS_PRECONDITION(!aParent->GetFirstChild(), "inserting into non-empty list");
 
-  nsIViewManager* vm = aParent->GetViewManager();
+  nsViewManager* vm = aParent->GetViewManager();
   while (aSibling) {
-    nsIView* next = aSibling->GetNextSibling();
+    nsView* next = aSibling->GetNextSibling();
     aSibling->SetNextSibling(nullptr);
     // true means 'after' in document order which is 'before' in view order,
     // so this call prepends the child, thus reversing the siblings as we go.
@@ -982,14 +1013,11 @@ nsSubDocumentFrame::BeginSwapDocShells(nsIFrame* aOther)
     return NS_ERROR_NOT_IMPLEMENTED;
   }
 
-  NS_ASSERTION(HasAnyStateBits(NS_FRAME_IN_POPUP) == other->HasAnyStateBits(NS_FRAME_IN_POPUP),
-               "Can't swap doc shells when only one is within a popup!");
-
   if (mInnerView && other->mInnerView) {
-    nsIView* ourSubdocViews = mInnerView->GetFirstChild();
-    nsIView* ourRemovedViews = ::BeginSwapDocShellsForViews(ourSubdocViews);
-    nsIView* otherSubdocViews = other->mInnerView->GetFirstChild();
-    nsIView* otherRemovedViews = ::BeginSwapDocShellsForViews(otherSubdocViews);
+    nsView* ourSubdocViews = mInnerView->GetFirstChild();
+    nsView* ourRemovedViews = ::BeginSwapDocShellsForViews(ourSubdocViews);
+    nsView* otherSubdocViews = other->mInnerView->GetFirstChild();
+    nsView* otherRemovedViews = ::BeginSwapDocShellsForViews(otherSubdocViews);
 
     ::InsertViewsInReverseOrder(ourRemovedViews, other->mInnerView);
     ::InsertViewsInReverseOrder(otherRemovedViews, mInnerView);
@@ -1016,7 +1044,7 @@ EndSwapDocShellsForDocument(nsIDocument* aDocument, void*)
       cv->GetPresContext(getter_AddRefs(pc));
       nsDeviceContext* dc = pc ? pc->DeviceContext() : nullptr;
       if (dc) {
-        nsIView* v = cv->FindContainerView();
+        nsView* v = cv->FindContainerView();
         dc->Init(v ? v->GetNearestWidget(nullptr) : nullptr);
       }
       nsCOMPtr<nsIContentViewer> prev;
@@ -1032,7 +1060,7 @@ EndSwapDocShellsForDocument(nsIDocument* aDocument, void*)
 }
 
 static void
-EndSwapDocShellsForViews(nsIView* aSibling)
+EndSwapDocShellsForViews(nsView* aSibling)
 {
   for ( ; aSibling; aSibling = aSibling->GetNextSibling()) {
     nsIDocument* doc = ::GetDocumentFromView(aSibling);
@@ -1040,11 +1068,18 @@ EndSwapDocShellsForViews(nsIView* aSibling)
       ::EndSwapDocShellsForDocument(doc, nullptr);
     }
     nsIFrame *frame = aSibling->GetFrame();
-    if (frame && frame->HasInvalidFrameInSubtree()) {
-      nsIFrame *parent = nsLayoutUtils::GetCrossDocParentFrame(frame);
-      while (parent && !parent->HasAnyStateBits(NS_FRAME_DESCENDANT_NEEDS_PAINT)) {
-        parent->AddStateBits(NS_FRAME_DESCENDANT_NEEDS_PAINT);
-        parent = nsLayoutUtils::GetCrossDocParentFrame(parent);
+    if (frame) {
+      nsIFrame* parent = nsLayoutUtils::GetCrossDocParentFrame(frame);
+      if (parent->HasAnyStateBits(NS_FRAME_IN_POPUP)) {
+        nsIFrame::AddInPopupStateBitToDescendants(frame);
+      } else {
+        nsIFrame::RemoveInPopupStateBitFromDescendants(frame);
+      }
+      if (frame->HasInvalidFrameInSubtree()) {
+        while (parent && !parent->HasAnyStateBits(NS_FRAME_DESCENDANT_NEEDS_PAINT)) {
+          parent->AddStateBits(NS_FRAME_DESCENDANT_NEEDS_PAINT);
+          parent = nsLayoutUtils::GetCrossDocParentFrame(parent);
+        }
       }
     }
   }
@@ -1080,7 +1115,7 @@ nsSubDocumentFrame::EndSwapDocShells(nsIFrame* aOther)
   }
 }
 
-nsIView*
+nsView*
 nsSubDocumentFrame::EnsureInnerView()
 {
   if (mInnerView) {
@@ -1088,12 +1123,12 @@ nsSubDocumentFrame::EnsureInnerView()
   }
 
   // create, init, set the parent of the view
-  nsIView* outerView = GetView();
+  nsView* outerView = GetView();
   NS_ASSERTION(outerView, "Must have an outer view already");
   nsRect viewBounds(0, 0, 0, 0); // size will be fixed during reflow
 
-  nsIViewManager* viewMan = outerView->GetViewManager();
-  nsIView* innerView = viewMan->CreateView(viewBounds, outerView);
+  nsViewManager* viewMan = outerView->GetViewManager();
+  nsView* innerView = viewMan->CreateView(viewBounds, outerView);
   if (!innerView) {
     NS_ERROR("Could not create inner view");
     return nullptr;
@@ -1117,8 +1152,7 @@ nsSubDocumentFrame::ObtainIntrinsicSizeFrame()
     nsCOMPtr<nsIDocShell> docShell;
     GetDocShell(getter_AddRefs(docShell));
     if (docShell) {
-      nsCOMPtr<nsIPresShell> presShell;
-      docShell->GetPresShell(getter_AddRefs(presShell));
+      nsCOMPtr<nsIPresShell> presShell = docShell->GetPresShell();
       if (presShell) {
         nsIScrollableFrame* scrollable = presShell->GetRootScrollFrameAsScrollable();
         if (scrollable) {

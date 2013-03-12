@@ -3,11 +3,15 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 const Cu = Components.utils;
+const Ci = Components.interfaces;
+const Cc = Components.classes;
 let tempScope = {};
 Cu.import("resource:///modules/devtools/LayoutHelpers.jsm", tempScope);
 let LayoutHelpers = tempScope.LayoutHelpers;
 Cu.import("resource:///modules/devtools/Target.jsm", tempScope);
 let TargetFactory = tempScope.TargetFactory;
+Components.utils.import("resource://gre/modules/devtools/Console.jsm", tempScope);
+let console = tempScope.console;
 
 // Import the GCLI test helper
 let testDir = gTestPath.substr(0, gTestPath.lastIndexOf("/"));
@@ -16,23 +20,15 @@ Services.scriptloader.loadSubScript(testDir + "/helpers.js", this);
 function openInspector(callback)
 {
   let target = TargetFactory.forTab(gBrowser.selectedTab);
-
-  let inspector = gDevTools.getPanelForTarget("inspector", target);
-  if (inspector && inspector.isReady) {
-    callback(inspector);
-  } else {
-    let toolbox = gDevTools.openToolboxForTab(target, "inspector");
-    toolbox.once("inspector-ready", function(event, panel) {
-      let inspector = gDevTools.getPanelForTarget("inspector", target);
-      callback(inspector);
-    });
-  }
+  gDevTools.showToolbox(target, "inspector").then(function(toolbox) {
+    callback(toolbox.getCurrentPanel(), toolbox);
+  }).then(null, console.error);
 }
 
 function getActiveInspector()
 {
   let target = TargetFactory.forTab(gBrowser.selectedTab);
-  return gDevTools.getPanelForTarget("inspector", target);
+  return gDevTools.getToolbox(target).getPanel("inspector");
 }
 
 function isHighlighting()
@@ -115,5 +111,38 @@ function synthesizeKeyFromKeyTag(aKeyId) {
     accelKey: modifiersAttr.match("accel")
   }
 
+  EventUtils.synthesizeKey(name, modifiers);
+}
+
+function focusSearchBoxUsingShortcut(panelWin, callback) {
+  panelWin.focus();
+  let key = panelWin.document.getElementById("nodeSearchKey");
+  isnot(key, null, "Successfully retrieved the <key> node");
+
+  let modifiersAttr = key.getAttribute("modifiers");
+
+  let name = null;
+
+  if (key.getAttribute("keycode")) {
+    name = key.getAttribute("keycode");
+  } else if (key.getAttribute("key")) {
+    name = key.getAttribute("key");
+  }
+
+  isnot(name, null, "Successfully retrieved keycode/key");
+
+  let modifiers = {
+    shiftKey: modifiersAttr.match("shift"),
+    ctrlKey: modifiersAttr.match("ctrl"),
+    altKey: modifiersAttr.match("alt"),
+    metaKey: modifiersAttr.match("meta"),
+    accelKey: modifiersAttr.match("accel")
+  }
+
+  let searchBox = panelWin.document.getElementById("inspector-searchbox");
+  searchBox.addEventListener("focus", function onFocus() {
+    searchBox.removeEventListener("focus", onFocus, false);
+    callback && callback();
+  }, false);
   EventUtils.synthesizeKey(name, modifiers);
 }

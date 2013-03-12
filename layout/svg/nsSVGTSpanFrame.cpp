@@ -7,8 +7,6 @@
 #include "nsSVGTSpanFrame.h"
 
 // Keep others in (case-insensitive) order:
-#include "nsIDOMSVGTSpanElement.h"
-#include "nsIDOMSVGAltGlyphElement.h"
 #include "nsSVGIntegrationUtils.h"
 #include "nsSVGUtils.h"
 
@@ -60,9 +58,9 @@ nsSVGTSpanFrame::Init(nsIContent* aContent,
                  "trying to construct an SVGTSpanFrame for an invalid "
                  "container");
 
-    nsCOMPtr<nsIDOMSVGTSpanElement> tspan = do_QueryInterface(aContent);
-    nsCOMPtr<nsIDOMSVGAltGlyphElement> altGlyph = do_QueryInterface(aContent);
-    NS_ASSERTION(tspan || altGlyph, "Content is not an SVG tspan or altGlyph");
+    NS_ASSERTION(aContent->IsSVG() && (aContent->Tag() == nsGkAtoms::altGlyph ||
+                                       aContent->Tag() == nsGkAtoms::tspan),
+                 "Content is not an SVG tspan or altGlyph");
   }
 
   return nsSVGTSpanFrameBase::Init(aContent, aParent, aPrevInFlow);
@@ -80,7 +78,8 @@ nsSVGTSpanFrame::AttributeChanged(int32_t         aNameSpaceID,
        aAttribute == nsGkAtoms::dx ||
        aAttribute == nsGkAtoms::dy ||
        aAttribute == nsGkAtoms::rotate)) {
-    nsSVGUtils::InvalidateAndScheduleReflowSVG(this);
+    nsSVGUtils::InvalidateBounds(this, false);
+    nsSVGUtils::ScheduleReflowSVG(this);
     NotifyGlyphMetricsChange();
   }
 
@@ -125,7 +124,7 @@ nsSVGTSpanFrame::GetSubStringLength(uint32_t charnum, uint32_t nchars)
 }
 
 int32_t
-nsSVGTSpanFrame::GetCharNumAtPosition(nsIDOMSVGPoint *point)
+nsSVGTSpanFrame::GetCharNumAtPosition(mozilla::nsISVGPoint *point)
 {
   return nsSVGTSpanFrameBase::GetCharNumAtPosition(point);
 }

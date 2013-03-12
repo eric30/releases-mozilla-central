@@ -1155,6 +1155,37 @@ ne_get_timecode_scale(nestegg * ctx)
   return scale;
 }
 
+static int
+ne_map_track_number_to_index(nestegg * ctx,
+                             unsigned int track_number,
+                             unsigned int * track_index)
+{
+  struct ebml_list_node * node;
+  struct track_entry * t_entry;
+  uint64_t t_number = 0;
+
+  if (!track_index)
+    return -1;
+  *track_index = 0;
+
+  if (track_number == 0)
+    return -1;
+
+  node = ctx->segment.tracks.track_entry.head;
+  while (node) {
+    assert(node->id == ID_TRACK_ENTRY);
+    t_entry = node->data;
+    if (ne_get_uint(t_entry->number, &t_number) != 0)
+      return -1;
+    if (t_number == track_number)
+      return 0;
+    *track_index += 1;
+    node = node->next;
+  }
+
+  return -1;
+}
+
 static struct track_entry *
 ne_find_track_entry(nestegg * ctx, unsigned int track)
 {
@@ -1183,8 +1214,8 @@ ne_read_block(nestegg * ctx, uint64_t block_id, uint64_t block_size, nestegg_pac
   struct frame * f, * last;
   struct track_entry * entry;
   double track_scale;
-  uint64_t track, length, frame_sizes[256], cluster_tc, flags, frames, tc_scale, total;
-  unsigned int i, lacing;
+  uint64_t track_number, length, frame_sizes[256], cluster_tc, flags, frames, tc_scale, total;
+  unsigned int i, lacing, track;
   size_t consumed = 0;
 
   *data = NULL;
@@ -1192,11 +1223,11 @@ ne_read_block(nestegg * ctx, uint64_t block_id, uint64_t block_size, nestegg_pac
   if (block_size > LIMIT_BLOCK)
     return -1;
 
-  r = ne_read_vint(ctx->io, &track, &length);
+  r = ne_read_vint(ctx->io, &track_number, &length);
   if (r != 1)
     return r;
 
-  if (track == 0 || track > ctx->track_count)
+  if (track_number == 0)
     return -1;
 
   consumed += length;
@@ -1269,7 +1300,10 @@ ne_read_block(nestegg * ctx, uint64_t block_id, uint64_t block_size, nestegg_pac
   if (total > block_size)
     return -1;
 
-  entry = ne_find_track_entry(ctx, track - 1);
+  if (ne_map_track_number_to_index(ctx, track_number, &track) != 0)
+    return -1;
+
+  entry = ne_find_track_entry(ctx, track);
   if (!entry)
     return -1;
 
@@ -1287,7 +1321,7 @@ ne_read_block(nestegg * ctx, uint64_t block_id, uint64_t block_size, nestegg_pac
     return -1;
 
   pkt = ne_alloc(sizeof(*pkt));
-  pkt->track = track - 1;
+  pkt->track = track;
   pkt->timecode = abs_timecode * tc_scale * track_scale;
 
   ctx->log(ctx, NESTEGG_LOG_DEBUG, "%sblock t %lld pts %f f %llx frames: %llu",
@@ -1466,6 +1500,112 @@ ne_init_cue_points(nestegg * ctx, int64_t max_offset)
   return 0;
 }
 
+
+/* Three functions that implement the nestegg_io interface, operating on a
+ * sniff_buffer. */
+struct sniff_buffer {
+  unsigned char const * buffer;
+  size_t length;
+  int64_t offset;
+};
+
+static int
+ne_buffer_read(void * buffer, size_t length, void * user_data)
+{
+  struct sniff_buffer * sb = user_data;
+
+  int rv = 1;
+  size_t available = sb->length - sb->offset;
+
+  if (available < length) {
+    return 0;
+  }
+  memcpy(buffer, sb->buffer + sb->offset, length);
+  sb->offset += length;
+
+  return rv;
+}
+
+static int
+ne_buffer_seek(int64_t offset, int whence, void * user_data)
+{
+  struct sniff_buffer * sb = user_data;
+  int64_t o = sb->offset;
+
+  switch(whence) {
+    case NESTEGG_SEEK_SET:
+      o = offset;
+      break;
+    case NESTEGG_SEEK_CUR:
+      o += offset;
+      break;
+    case NESTEGG_SEEK_END:
+      o = sb->length + offset;
+      break;
+  }
+
+  if (o < 0 || o > (int64_t) sb->length) {
+    return -1;
+  }
+
+  sb->offset = o;
+  return 0;
+}
+
+static int64_t
+ne_buffer_tell(void * user_data)
+{
+  struct sniff_buffer * sb = user_data;
+  return sb->offset;
+}
+
+static int
+ne_match_webm(nestegg_io io, int64_t max_offset)
+{
+  int r;
+  uint64_t id;
+  char * doctype;
+  nestegg * ctx;
+
+  if (!(io.read && io.seek && io.tell))
+    return -1;
+
+  ctx = ne_alloc(sizeof(*ctx));
+
+  ctx->io = ne_alloc(sizeof(*ctx->io));
+  *ctx->io = io;
+  ctx->alloc_pool = ne_pool_init();
+  ctx->log = ne_null_log_callback;
+
+  r = ne_peek_element(ctx, &id, NULL);
+  if (r != 1) {
+    nestegg_destroy(ctx);
+    return 0;
+  }
+
+  if (id != ID_EBML) {
+    nestegg_destroy(ctx);
+    return 0;
+  }
+
+  ne_ctx_push(ctx, ne_top_level_elements, ctx);
+
+  /* we don't check the return value of ne_parse, that might fail because
+   * max_offset is not on a valid element end point. We only want to check
+   * the EBML ID and that the doctype is "webm". */
+  ne_parse(ctx, NULL, max_offset);
+
+  if (ne_get_string(ctx->ebml.doctype, &doctype) != 0 ||
+      strcmp(doctype, "webm") != 0) {
+    nestegg_destroy(ctx);
+    return 0;
+  }
+
+  nestegg_destroy(ctx);
+
+  return 1;
+}
+
 int
 nestegg_init(nestegg ** context, nestegg_io io, nestegg_log callback, int64_t max_offset)
 {
@@ -1590,23 +1730,24 @@ nestegg_track_count(nestegg * ctx, unsigned int * tracks)
 
 int
 nestegg_get_cue_point(nestegg * ctx, unsigned int cluster_num, int64_t max_offset,
-                      int64_t * start_pos, int64_t * end_pos)
+                      int64_t * start_pos, int64_t * end_pos, uint64_t * tstamp)
 {
   int range_obtained = 0;
   unsigned int cluster_count = 0;
   struct cue_point * cue_point;
   struct cue_track_positions * pos;
-  uint64_t seek_pos, t;
+  uint64_t seek_pos, track_number, tc_scale, time;
   struct ebml_list_node * cues_node = ctx->segment.cues.cue_point.head;
   struct ebml_list_node * cue_pos_node = NULL;
-  unsigned int track = 0, track_count = 0;
+  unsigned int track = 0, track_count = 0, track_index;
 
-  if (!start_pos || !end_pos)
+  if (!start_pos || !end_pos || !tstamp)
     return -1;
 
   /* Initialise return values */
   *start_pos = -1;
-  *end_pos   = -1;
+  *end_pos = -1;
+  *tstamp = 0;
 
   if (!cues_node) {
     ne_init_cue_points(ctx, max_offset);
@@ -1618,6 +1759,8 @@ nestegg_get_cue_point(nestegg * ctx, unsigned int cluster_num, int64_t max_offse
 
   nestegg_track_count(ctx, &track_count);
 
+  tc_scale = ne_get_timecode_scale(ctx);
+
   while (cues_node && !range_obtained) {
     assert(cues_node->id == ID_CUE_POINT);
     cue_point = cues_node->data;
@@ -1626,11 +1769,20 @@ nestegg_get_cue_point(nestegg * ctx, unsigned int cluster_num, int64_t max_offse
       assert(cue_pos_node->id == ID_CUE_TRACK_POSITIONS);
       pos = cue_pos_node->data;
       for (track = 0; track < track_count; track++) {
-        if (ne_get_uint(pos->track, &t) == 0 && t - 1 == track) {
+        if (ne_get_uint(pos->track, &track_number) != 0)
+          return -1;
+
+        if (ne_map_track_number_to_index(ctx, track_number, &track_index) != 0)
+          return -1;
+
+        if (track_index == track) {
           if (ne_get_uint(pos->cluster_position, &seek_pos) != 0)
             return -1;
           if (cluster_count == cluster_num) {
             *start_pos = ctx->segment_offset+seek_pos;
+            if (ne_get_uint(cue_point->time, &time) != 0)
+              return -1;
+            *tstamp = time * tc_scale;
           } else if (cluster_count == cluster_num+1) {
             *end_pos = (ctx->segment_offset+seek_pos)-1;
             range_obtained = 1;
@@ -1674,7 +1826,8 @@ nestegg_track_seek(nestegg * ctx, unsigned int track, uint64_t tstamp)
   int r;
   struct cue_point * cue_point;
   struct cue_track_positions * pos;
-  uint64_t seek_pos, tc_scale, t;
+  uint64_t seek_pos, tc_scale, track_number;
+  unsigned int t;
   struct ebml_list_node * node = ctx->segment.cues.cue_point.head;
 
   /* If there are no cues loaded, check for cues element in the seek head
@@ -1703,7 +1856,13 @@ nestegg_track_seek(nestegg * ctx, unsigned int track, uint64_t tstamp)
   while (node) {
     assert(node->id == ID_CUE_TRACK_POSITIONS);
     pos = node->data;
-    if (ne_get_uint(pos->track, &t) == 0 && t - 1 == track) {
+    if (ne_get_uint(pos->track, &track_number) != 0)
+      return -1;
+
+    if (ne_map_track_number_to_index(ctx, track_number, &t) != 0)
+      return -1;
+
+    if (t == track) {
       if (ne_get_uint(pos->cluster_position, &seek_pos) != 0)
         return -1;
       break;
@@ -2035,3 +2194,28 @@ nestegg_packet_data(nestegg_packet * pkt, unsigned int item,
 
   return -1;
 }
+
+int
+nestegg_has_cues(nestegg * ctx)
+{
+  return ctx->segment.cues.cue_point.head ||
+         ne_find_seek_for_id(ctx->segment.seek_head.head, ID_CUES);
+}
+
+int
+nestegg_sniff(unsigned char const * buffer, size_t length)
+{
+  nestegg_io io;
+  struct sniff_buffer user_data;
+
+  user_data.buffer = buffer;
+  user_data.length = length;
+  user_data.offset = 0;
+
+  io.read = ne_buffer_read;
+  io.seek = ne_buffer_seek;
+  io.tell = ne_buffer_tell;
+  io.userdata = &user_data;
+  return ne_match_webm(io, length);
+}
+

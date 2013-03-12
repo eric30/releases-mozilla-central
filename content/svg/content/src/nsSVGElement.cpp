@@ -3,11 +3,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsSVGElement.h"
-
+#include "mozilla/DebugOnly.h"
 #include "mozilla/Util.h"
 
-#include "nsSVGSVGElement.h"
+#include "nsSVGElement.h"
+
+#include "mozilla/dom/SVGSVGElement.h"
+#include "mozilla/dom/SVGTests.h"
 #include "nsIDocument.h"
 #include "nsRange.h"
 #include "nsIDOMAttr.h"
@@ -47,8 +49,6 @@
 #include "SVGAnimatedPathSegList.h"
 #include "SVGAnimatedTransformList.h"
 #include "SVGContentUtils.h"
-#include "DOMSVGTests.h"
-#include "nsIDOMSVGUnitTypes.h"
 #include "nsSVGRect.h"
 #include "nsIFrame.h"
 #include "prdtoa.h"
@@ -57,6 +57,8 @@
 #include "SVGMotionSMILAttr.h"
 #include "nsAttrValueOrString.h"
 #include "nsSMILAnimationController.h"
+#include "nsDOMCSSDeclaration.h"
+#include "mozilla/dom/SVGElementBinding.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -69,14 +71,57 @@ PR_STATIC_ASSERT(sizeof(void*) == sizeof(nullptr));
 
 
 nsSVGEnumMapping nsSVGElement::sSVGUnitTypesMap[] = {
-  {&nsGkAtoms::userSpaceOnUse, nsIDOMSVGUnitTypes::SVG_UNIT_TYPE_USERSPACEONUSE},
-  {&nsGkAtoms::objectBoundingBox, nsIDOMSVGUnitTypes::SVG_UNIT_TYPE_OBJECTBOUNDINGBOX},
+  {&nsGkAtoms::userSpaceOnUse, SVG_UNIT_TYPE_USERSPACEONUSE},
+  {&nsGkAtoms::objectBoundingBox, SVG_UNIT_TYPE_OBJECTBOUNDINGBOX},
   {nullptr, 0}
 };
 
 nsSVGElement::nsSVGElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : nsSVGElementBase(aNodeInfo)
 {
+}
+
+JSObject*
+nsSVGElement::WrapNode(JSContext *aCx, JSObject *aScope, bool *aTriedToWrap)
+{
+  return SVGElementBinding::Wrap(aCx, aScope, this, aTriedToWrap);
+}
+
+//----------------------------------------------------------------------
+
+/* readonly attribute nsIDOMSVGAnimatedString className; */
+NS_IMETHODIMP
+nsSVGElement::GetClassName(nsIDOMSVGAnimatedString** aClassName)
+{
+  *aClassName = ClassName().get();
+  return NS_OK;
+}
+
+/* readonly attribute nsIDOMCSSStyleDeclaration style; */
+NS_IMETHODIMP
+nsSVGElement::GetStyle(nsIDOMCSSStyleDeclaration** aStyle)
+{
+  NS_ADDREF(*aStyle = Style());
+  return NS_OK;
+}
+
+//----------------------------------------------------------------------
+// nsSVGElement methods
+
+void
+nsSVGElement::DidAnimateClass()
+{
+  nsAutoString src;
+  mClassAttribute.GetAnimValue(src, this);
+  if (!mClassAnimAttr) {
+    mClassAnimAttr = new nsAttrValue();
+  }
+  mClassAnimAttr->ParseAtomArray(src);
+
+  nsIPresShell* shell = OwnerDoc()->GetShell();
+  if (shell) {
+    shell->RestyleForAnimation(this, eRestyle_Self);
+  }
 }
 
 nsresult
@@ -191,6 +236,15 @@ NS_INTERFACE_MAP_END_INHERITING(nsSVGElementBase)
 //----------------------------------------------------------------------
 // nsIContent methods
 
+const nsAttrValue*
+nsSVGElement::DoGetClasses() const
+{
+  if (mClassAttribute.IsAnimated()) {
+    return mClassAnimAttr;
+  }
+  return nsSVGElementBase::DoGetClasses();
+}
+
 nsresult
 nsSVGElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
                          nsIContent* aBindingParent,
@@ -249,7 +303,7 @@ nsSVGElement::AfterSetAttr(int32_t aNamespaceID, nsIAtom* aName,
     mContentStyleRule = nullptr;
   }
 
-  if (IsEventName(aName) && aValue) {
+  if (IsEventAttributeName(aName) && aValue) {
     NS_ABORT_IF_FALSE(aValue->Type() == nsAttrValue::eString,
       "Expected string value for script body");
     nsresult rv = SetEventHandler(GetEventNameForAttr(aName),
@@ -271,7 +325,6 @@ nsSVGElement::ParseAttribute(int32_t aNamespaceID,
   bool didSetResult = false;
 
   if (aNamespaceID == kNameSpaceID_None) {
-
     // Check for nsSVGLength2 attribute
     LengthAttributesInfo lengthInfo = GetLengthInfo();
 
@@ -492,7 +545,7 @@ nsSVGElement::ParseAttribute(int32_t aNamespaceID,
 
     if (!foundMatch) {
       // Check for conditional processing attributes
-      nsCOMPtr<DOMSVGTests> tests(do_QueryInterface(this));
+      nsCOMPtr<SVGTests> tests(do_QueryInterface(this));
       if (tests && tests->ParseConditionalProcessingAttribute(
                             aAttribute, aValue, aResult)) {
         foundMatch = true;
@@ -561,6 +614,12 @@ nsSVGElement::ParseAttribute(int32_t aNamespaceID,
         foundMatch = true;
       }
     }
+
+    if (aAttribute == nsGkAtoms::_class) {
+      mClassAttribute.SetBaseValue(aValue, this, false);
+      aResult.ParseAtomArray(aValue);
+      return true;
+    }
   }
 
   if (!foundMatch) {
@@ -603,7 +662,7 @@ nsSVGElement::UnsetAttrInternal(int32_t aNamespaceID, nsIAtom* aName,
     if (IsAttributeMapped(aName))
       mContentStyleRule = nullptr;
 
-    if (IsEventName(aName)) {
+    if (IsEventAttributeName(aName)) {
       nsEventListenerManager* manager = GetListenerManager(false);
       if (manager) {
         nsIAtom* eventName = GetEventNameForAttr(aName);
@@ -770,7 +829,7 @@ nsSVGElement::UnsetAttrInternal(int32_t aNamespaceID, nsIAtom* aName,
     }
 
     // Check for conditional processing attributes
-    nsCOMPtr<DOMSVGTests> tests(do_QueryInterface(this));
+    nsCOMPtr<SVGTests> tests(do_QueryInterface(this));
     if (tests && tests->IsConditionalProcessingAttribute(aName)) {
       MaybeSerializeAttrBeforeRemoval(aName, aNotify);
       tests->UnsetAttr(aName);
@@ -786,6 +845,11 @@ nsSVGElement::UnsetAttrInternal(int32_t aNamespaceID, nsIAtom* aName,
         stringListInfo.Reset(i);
         return;
       }
+    }
+
+    if (aName == nsGkAtoms::_class) {
+      mClassAttribute.Init();
+      return;
     }
   }
 
@@ -816,10 +880,10 @@ nsSVGElement::GetAttributeChangeHint(const nsIAtom* aAttribute,
   nsChangeHint retval =
     nsSVGElementBase::GetAttributeChangeHint(aAttribute, aModType);
 
-  nsCOMPtr<DOMSVGTests> tests(do_QueryInterface(const_cast<nsSVGElement*>(this)));
+  nsCOMPtr<SVGTests> tests(do_QueryInterface(const_cast<nsSVGElement*>(this)));
   if (tests && tests->IsConditionalProcessingAttribute(aAttribute)) {
     // It would be nice to only reconstruct the frame if the value returned by
-    // DOMSVGTests::PassesConditionalProcessingTests has changed, but we don't
+    // SVGTests::PassesConditionalProcessingTests has changed, but we don't
     // know that
     NS_UpdateHint(retval, nsChangeHint_ReconstructFrame);
   }
@@ -893,6 +957,7 @@ nsSVGElement::sFillStrokeMap[] = {
   { &nsGkAtoms::fill },
   { &nsGkAtoms::fill_opacity },
   { &nsGkAtoms::fill_rule },
+  { &nsGkAtoms::paint_order },
   { &nsGkAtoms::stroke },
   { &nsGkAtoms::stroke_dasharray },
   { &nsGkAtoms::stroke_dashoffset },
@@ -1010,6 +1075,13 @@ nsSVGElement::sLightingEffectsMap[] = {
   { nullptr }
 };
 
+// PresentationAttributes-mask
+/* static */ const Element::MappedAttributeEntry
+nsSVGElement::sMaskMap[] = {
+  { &nsGkAtoms::mask_type },
+  { nullptr }
+};
+
 //----------------------------------------------------------------------
 // nsIDOMNode methods
 
@@ -1044,24 +1116,47 @@ NS_IMETHODIMP nsSVGElement::SetId(const nsAString & aId)
 
 /* readonly attribute nsIDOMSVGSVGElement ownerSVGElement; */
 NS_IMETHODIMP
-nsSVGElement::GetOwnerSVGElement(nsIDOMSVGSVGElement * *aOwnerSVGElement)
+nsSVGElement::GetOwnerSVGElement(nsIDOMSVGElement * *aOwnerSVGElement)
 {
-  NS_IF_ADDREF(*aOwnerSVGElement = GetCtx());
+  ErrorResult rv;
+  NS_IF_ADDREF(*aOwnerSVGElement = GetOwnerSVGElement(rv));
+  return rv.ErrorCode();
+}
 
-  if (*aOwnerSVGElement || Tag() == nsGkAtoms::svg) {
-    // If we found something or we're the outermost SVG element, that's OK.
-    return NS_OK;
+SVGSVGElement*
+nsSVGElement::GetOwnerSVGElement(ErrorResult& rv)
+{
+  SVGSVGElement* ownerSVGElement = GetCtx();
+
+  // If we didn't find anything and we're not the outermost SVG element,
+  // we've got an invalid structure
+  if (!ownerSVGElement && Tag() != nsGkAtoms::svg) {
+    rv.Throw(NS_ERROR_FAILURE);
   }
-  // Otherwise, we've got an invalid structure
-  return NS_ERROR_FAILURE;
+
+  return ownerSVGElement;
 }
 
 /* readonly attribute nsIDOMSVGElement viewportElement; */
 NS_IMETHODIMP
 nsSVGElement::GetViewportElement(nsIDOMSVGElement * *aViewportElement)
 {
-  *aViewportElement = SVGContentUtils::GetNearestViewportElement(this).get();
+  nsSVGElement* elem = GetViewportElement();
+  nsCOMPtr<nsIDOMSVGElement> svgElem = do_QueryInterface(elem);
+  svgElem.forget(aViewportElement);
   return NS_OK;
+}
+
+nsSVGElement*
+nsSVGElement::GetViewportElement()
+{
+  return SVGContentUtils::GetNearestViewportElement(this);
+}
+
+already_AddRefed<nsIDOMSVGAnimatedString>
+nsSVGElement::ClassName()
+{
+  return mClassAttribute.ToDOMAnimatedString(this);
 }
 
 //------------------------------------------------------------------------
@@ -1166,12 +1261,6 @@ MappedAttrParser::CreateStyleRule()
 //----------------------------------------------------------------------
 // Implementation Helpers:
 
-bool
-nsSVGElement::IsEventName(nsIAtom* aName)
-{
-  return false;
-}
-
 void
 nsSVGElement::UpdateContentStyleRule()
 {
@@ -1206,7 +1295,7 @@ nsSVGElement::UpdateContentStyleRule()
       // Special case: we don't want <svg> 'width'/'height' mapped into style
       // if the attribute value isn't a valid <length> according to SVG (which
       // only supports a subset of the CSS <length> values). We don't enforce
-      // this by checking the attribute value in nsSVGSVGElement::
+      // this by checking the attribute value in SVGSVGElement::
       // IsAttributeMapped since we don't want that method to depend on the
       // value of the attribute that is being checked. Rather we just prevent
       // the actual mapping here, as necessary.
@@ -1464,7 +1553,7 @@ nsIAtom* nsSVGElement::GetEventNameForAttr(nsIAtom* aAttr)
   return aAttr;
 }
 
-nsSVGSVGElement *
+SVGSVGElement *
 nsSVGElement::GetCtx() const
 {
   nsIContent* ancestor = GetFlattenedTreeParent();
@@ -1475,7 +1564,7 @@ nsSVGElement::GetCtx() const
       return nullptr;
     }
     if (tag == nsGkAtoms::svg) {
-      return static_cast<nsSVGSVGElement*>(ancestor);
+      return static_cast<SVGSVGElement*>(ancestor);
     }
     ancestor = ancestor->GetFlattenedTreeParent();
   }
@@ -1578,7 +1667,7 @@ nsSVGElement::GetAnimatedLengthValues(float *aFirst, ...)
   NS_ASSERTION(info.mLengthCount > 0,
                "GetAnimatedLengthValues on element with no length attribs");
 
-  nsSVGSVGElement *ctx = nullptr;
+  SVGSVGElement *ctx = nullptr;
 
   float *f = aFirst;
   uint32_t i = 0;
@@ -2358,7 +2447,7 @@ nsSVGElement::WillChangeStringList(bool aIsConditionalProcessingAttribute,
 {
   nsIAtom* name;
   if (aIsConditionalProcessingAttribute) {
-    nsCOMPtr<DOMSVGTests> tests(do_QueryInterface(this));
+    nsCOMPtr<SVGTests> tests(do_QueryInterface(this));
     name = tests->GetAttrName(aAttrEnum);
   } else {
     name = *GetStringListInfo().mStringListInfo[aAttrEnum].mName;
@@ -2373,7 +2462,7 @@ nsSVGElement::DidChangeStringList(bool aIsConditionalProcessingAttribute,
 {
   nsIAtom* name;
   nsAttrValue newValue;
-  nsCOMPtr<DOMSVGTests> tests;
+  nsCOMPtr<SVGTests> tests;
 
   if (aIsConditionalProcessingAttribute) {
     tests = do_QueryInterface(this);
@@ -2430,7 +2519,7 @@ nsSVGElement::RecompileScriptEventListeners()
     }
 
     nsIAtom *attr = name->Atom();
-    if (!IsEventName(attr)) {
+    if (!IsEventAttributeName(attr)) {
       continue;
     }
 
@@ -2609,6 +2698,10 @@ nsSVGElement::GetAnimatedAttr(int32_t aNamespaceID, nsIAtom* aName)
           return segList->ToSMILAttr(this);
         }
       }
+    }
+
+    if (aName == nsGkAtoms::_class) {
+      return mClassAttribute.ToSMILAttr(this);
     }
   }
 

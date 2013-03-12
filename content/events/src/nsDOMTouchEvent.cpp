@@ -138,11 +138,10 @@ nsDOMTouch::Equals(nsIDOMTouch* aTouch)
 nsDOMTouchList::nsDOMTouchList(nsTArray<nsCOMPtr<nsIDOMTouch> > &aTouches)
 {
   mPoints.AppendElements(aTouches);
+  nsJSContext::LikelyShortLivingObjectCreated();
 }
 
 DOMCI_DATA(TouchList, nsDOMTouchList)
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsDOMTouchList)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsDOMTouchList)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
@@ -150,12 +149,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsDOMTouchList)
   NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(TouchList)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsDOMTouchList)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPoints)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsDOMTouchList)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mPoints)
-NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+NS_IMPL_CYCLE_COLLECTION_1(nsDOMTouchList, mPoints)
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsDOMTouchList)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsDOMTouchList)
@@ -192,10 +186,11 @@ nsDOMTouchList::IdentifiedTouch(int32_t aIdentifier, nsIDOMTouch** aRetVal)
 
 // TouchEvent
 
-nsDOMTouchEvent::nsDOMTouchEvent(nsPresContext* aPresContext,
+nsDOMTouchEvent::nsDOMTouchEvent(mozilla::dom::EventTarget* aOwner,
+                                 nsPresContext* aPresContext,
                                  nsTouchEvent* aEvent)
-  : nsDOMUIEvent(aPresContext, aEvent ? aEvent :
-                                        new nsTouchEvent(false, 0, nullptr))
+  : nsDOMUIEvent(aOwner, aPresContext,
+                 aEvent ? aEvent : new nsTouchEvent(false, 0, nullptr))
 {
   if (aEvent) {
     mEventIsInternal = false;
@@ -218,8 +213,6 @@ nsDOMTouchEvent::~nsDOMTouchEvent()
     mEvent = nullptr;
   }
 }
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsDOMTouchEvent)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsDOMTouchEvent, nsDOMUIEvent)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mTouches)
@@ -418,10 +411,10 @@ nsDOMTouchEvent::PrefEnabled()
 
 nsresult
 NS_NewDOMTouchEvent(nsIDOMEvent** aInstancePtrResult,
+                    mozilla::dom::EventTarget* aOwner,
                     nsPresContext* aPresContext,
                     nsTouchEvent *aEvent)
 {
-  nsDOMTouchEvent* it = new nsDOMTouchEvent(aPresContext, aEvent);
-
+  nsDOMTouchEvent* it = new nsDOMTouchEvent(aOwner, aPresContext, aEvent);
   return CallQueryInterface(it, aInstancePtrResult);
 }

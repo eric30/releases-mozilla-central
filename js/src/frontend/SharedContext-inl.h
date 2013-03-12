@@ -15,43 +15,42 @@ namespace js {
 namespace frontend {
 
 inline
-SharedContext::SharedContext(JSContext *cx, bool isFun, StrictMode sms)
+SharedContext::SharedContext(JSContext *cx, bool strict)
   : context(cx),
-    isFunction(isFun),
     anyCxFlags(),
-    strictModeState(sms)
+    strict(strict)
 {
-}
-
-inline bool
-SharedContext::inStrictMode()
-{
-    JS_ASSERT(strictModeState != StrictMode::UNKNOWN);
-    return strictModeState == StrictMode::STRICT;
 }
 
 inline bool
 SharedContext::needStrictChecks()
 {
-    return context->hasStrictOption() || strictModeState != StrictMode::NOTSTRICT;
+    return context->hasStrictOption() || strict;
 }
 
 inline GlobalSharedContext *
-SharedContext::asGlobal()
+SharedContext::asGlobalSharedContext()
 {
-    JS_ASSERT(!isFunction);
+    JS_ASSERT(isGlobalSharedContext());
     return static_cast<GlobalSharedContext*>(this);
 }
 
-inline FunctionBox *
-SharedContext::asFunbox()
+inline ModuleBox *
+SharedContext::asModuleBox()
 {
-    JS_ASSERT(isFunction);
+    JS_ASSERT(isModuleBox());
+    return static_cast<ModuleBox*>(this);
+}
+
+inline FunctionBox *
+SharedContext::asFunctionBox()
+{
+    JS_ASSERT(isFunctionBox());
     return static_cast<FunctionBox*>(this);
 }
 
-GlobalSharedContext::GlobalSharedContext(JSContext *cx, JSObject *scopeChain, StrictMode sms)
-  : SharedContext(cx, /* isFunction = */ false, sms),
+GlobalSharedContext::GlobalSharedContext(JSContext *cx, JSObject *scopeChain, bool strict)
+  : SharedContext(cx, strict),
     scopeChain_(cx, scopeChain)
 {
 }
@@ -114,6 +113,8 @@ template <class ContextT>
 typename ContextT::StmtInfo *
 frontend::LexicalLookup(ContextT *ct, HandleAtom atom, int *slotp, typename ContextT::StmtInfo *stmt)
 {
+    RootedId id(ct->sc->context, AtomToId(atom));
+
     if (!stmt)
         stmt = ct->topScopeStmt;
     for (; stmt; stmt = stmt->downScope) {
@@ -130,7 +131,7 @@ frontend::LexicalLookup(ContextT *ct, HandleAtom atom, int *slotp, typename Cont
             continue;
 
         StaticBlockObject &blockObj = *stmt->blockObj;
-        Shape *shape = blockObj.nativeLookup(ct->sc->context, AtomToId(atom));
+        RawShape shape = blockObj.nativeLookup(ct->sc->context, id);
         if (shape) {
             JS_ASSERT(shape->hasShortID());
 

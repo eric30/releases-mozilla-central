@@ -9,10 +9,15 @@
 #include <errno.h>
 #include <unistd.h>
 #include <sys/resource.h>
+#include "thread_monitor.h"
+#include "prtypes.h"
+#include "mozilla/Assertions.h"
+
 
 #define LINUX_MIN_THREAD_PRIORITY (-20)	/* tbd: check MV linux: current val from Larry port */
 #define LINUX_MAX_THREAD_PRIORITY (+19)	/* tbd: check MV linux. current val from Larry port */
 
+void CSFLogRegisterThread(const cprThread_t thread);
 
 /**
  * cprCreateThread
@@ -52,34 +57,32 @@ cprCreateThread (const char *name,
     CPR_INFO("%s: creating '%s' thread\n", fname, name);
 
     /* Malloc memory for a new thread */
-    threadPtr = (cpr_thread_t *)cpr_malloc(sizeof(cpr_thread_t));
+    threadPtr = cpr_malloc(sizeof(cpr_thread_t));
     if (threadPtr != NULL) {
         if (pthread_attr_init(&attr) != 0) {
 
             CPR_ERROR("%s - Failed to init attribute for thread %s\n",
                       fname, name);
             cpr_free(threadPtr);
-            return (cprThread_t)NULL;
+            return NULL;
         }
 
         if (pthread_attr_setstacksize(&attr, stackSize) != 0) {
             CPR_ERROR("%s - Invalid stacksize %d specified for thread %s\n",
                       fname, stackSize, name);
             cpr_free(threadPtr);
-            return (cprThread_t)NULL;
+            return NULL;
         }
 
         if (pthread_create(&threadId, &attr, startRoutine, data) != 0) {
             CPR_ERROR("%s - Creation of thread %s failed: %d\n",
                       fname, name, errno);
             cpr_free(threadPtr);
-            return (cprThread_t)NULL;
+            return NULL;
         }
 
         /* Assign name to CPR if one was passed in */
-        if (name != NULL) {
-            threadPtr->name = name;
-        }
+        threadPtr->name = name;
 
         /*
          * TODO - It would be nice for CPR to keep a linked
@@ -88,17 +91,31 @@ cprCreateThread (const char *name,
          * that an application does not attempt to create
          * the same thread twice.
          */
-        threadPtr->u.handleInt = (uint64_t)threadId;
+        threadPtr->u.handlePtr = threadId;
         threadPtr->threadId = ++id;
-        return (cprThread_t)threadPtr;
+        CSFLogRegisterThread(threadPtr);
+        return threadPtr;
     }
 
     /* Malloc failed */
     CPR_ERROR("%s - Malloc for thread %s failed.\n", fname, name);
     errno = ENOMEM;
-    return (cprThread_t)NULL;
+    return NULL;
 }
 
+/*
+ * cprJoinThread
+ *
+ * wait for thread termination
+ */
+void cprJoinThread(cprThread_t thread)
+{
+    cpr_thread_t *cprThreadPtr;
+
+    cprThreadPtr = (cpr_thread_t *) thread;
+    MOZ_ASSERT(cprThreadPtr);
+    pthread_join(cprThreadPtr->u.handlePtr, NULL);
+}
 
 /**
  * cprDestroyThread
@@ -118,29 +135,28 @@ cprCreateThread (const char *name,
 cprRC_t
 cprDestroyThread (cprThread_t thread)
 {
-    static const char fname[] = "cprDestroyThread";
     cpr_thread_t *cprThreadPtr;
 
     cprThreadPtr = (cpr_thread_t *) thread;
-    if (cprThreadPtr != NULL) {
+    if (cprThreadPtr) {
         /*
          * Make sure thread is trying to destroy itself.
          */
-        if (cprThreadPtr->u.handlePtr == (void*) pthread_self()) {
-            cprThreadPtr->threadId = 0;
-            cpr_free(cprThreadPtr);
+        if (cprThreadPtr->u.handlePtr == pthread_self()) {
+            CPR_INFO("%s: Destroying Thread %d", __FUNCTION__, cprThreadPtr->threadId);
             pthread_exit(NULL);
             return CPR_SUCCESS;
         }
 
-        CPR_ERROR("%s: Thread attempted to destroy another thread, not itself.\n",
-                  fname);
+        CPR_ERROR("%s: Thread attempted to destroy another thread, not itself.",
+                  __FUNCTION__);
+        MOZ_ASSERT(PR_FALSE);
         errno = EINVAL;
         return CPR_FAILURE;
     }
 
-    /* Bad application! */
-    CPR_ERROR("%s - NULL pointer passed in.\n", fname);
+    CPR_ERROR("%s - NULL pointer passed in.", __FUNCTION__);
+    MOZ_ASSERT(PR_FALSE);
     errno = EINVAL;
     return CPR_FAILURE;
 }
@@ -193,8 +209,7 @@ pthread_t
 cprGetThreadId (cprThread_t thread)
 {
     if (thread) {
-        return (pthread_t)(long) ((cpr_thread_t *)thread)->u.handleInt;
+        return ((cpr_thread_t *)thread)->u.handlePtr;
     }
     return 0;
 }
-

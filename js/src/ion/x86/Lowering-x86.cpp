@@ -41,35 +41,6 @@ LIRGeneratorX86::useBoxFixed(LInstruction *lir, size_t n, MDefinition *mir, Regi
 }
 
 bool
-LIRGeneratorX86::lowerConstantDouble(double d, MInstruction *mir)
-{
-    uint32_t index;
-    if (!lirGraph_.addConstantToPool(DoubleValue(d), &index))
-        return false;
-
-    LDouble *lir = new LDouble(LConstantIndex::FromIndex(index));
-    return define(lir, mir);
-}
-
-bool
-LIRGeneratorX86::visitConstant(MConstant *ins)
-{
-    if (ins->type() == MIRType_Double) {
-        uint32_t index;
-        if (!lirGraph_.addConstantToPool(ins->value(), &index))
-            return false;
-        LDouble *lir = new LDouble(LConstantIndex::FromIndex(index));
-        return define(lir, ins);
-    }
-
-    // Emit non-double constants at their uses.
-    if (ins->canEmitAtUses())
-        return emitAtUses(ins);
-
-    return LIRGeneratorShared::visitConstant(ins);
-}
-
-bool
 LIRGeneratorX86::visitBox(MBox *box)
 {
     MDefinition *inner = box->getOperand(0);
@@ -225,14 +196,6 @@ LIRGeneratorX86::lowerUntypedPhiInput(MPhi *phi, uint32_t inputPosition, LBlock 
     type->setOperand(inputPosition, LUse(operand->virtualRegister() + VREG_TYPE_OFFSET, LUse::ANY));
     payload->setOperand(inputPosition, LUse(VirtualRegisterOfPayload(operand), LUse::ANY));
 }
-
-bool
-LIRGeneratorX86::lowerDivI(MDiv *div)
-{
-    LDivI *lir = new LDivI(useFixed(div->lhs(), eax), useRegister(div->rhs()), tempFixed(edx));
-    return assignSnapshot(lir) && defineFixed(lir, div, LAllocation(AnyRegister(eax)));
-}
-
 
 bool
 LIRGeneratorX86::visitStoreTypedArrayElement(MStoreTypedArrayElement *ins)

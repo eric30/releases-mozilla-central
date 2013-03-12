@@ -1,6 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
-/* vim:expandtab:shiftwidth=4:tabstop=4:
- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set ts=4 et sw=4 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -295,13 +294,13 @@ nsGtkIMModule::PrepareToDestroyContext(GtkIMContext *aContext)
         static gpointer gtk_xim_context_class =
             g_type_class_ref(slaveType);
         // Mute unused variable warning:
-        gtk_xim_context_class = gtk_xim_context_class;
+        (void)gtk_xim_context_class;
     } else if (strcmp(im_type_name, "GtkIMContextIIIM") == 0) {
         // Add a reference to prevent the IIIM module from being unloaded
         static gpointer gtk_iiim_context_class =
             g_type_class_ref(slaveType);
         // Mute unused variable warning:
-        gtk_iiim_context_class = gtk_iiim_context_class;
+        (void)gtk_iiim_context_class;
     }
 }
 
@@ -456,14 +455,15 @@ nsGtkIMModule::ResetIME()
 }
 
 nsresult
-nsGtkIMModule::ResetInputState(nsWindow* aCaller)
+nsGtkIMModule::CommitIMEComposition(nsWindow* aCaller)
 {
     if (MOZ_UNLIKELY(IsDestroyed())) {
         return NS_OK;
     }
 
     PR_LOG(gGtkIMLog, PR_LOG_ALWAYS,
-        ("GtkIMModule(%p): ResetInputState, aCaller=%p, mCompositionState=%s",
+        ("GtkIMModule(%p): CommitIMEComposition, aCaller=%p, "
+         "mCompositionState=%s",
          this, aCaller, GetCompositionStateName()));
 
     if (aCaller != mLastFocusedWindow) {
@@ -559,7 +559,7 @@ nsGtkIMModule::SetInputContext(nsWindow* aCaller,
 
     // Release current IME focus if IME is enabled.
     if (changingEnabledState && IsEditable()) {
-        ResetInputState(mLastFocusedWindow);
+        CommitIMEComposition(mLastFocusedWindow);
         Blur();
     }
 

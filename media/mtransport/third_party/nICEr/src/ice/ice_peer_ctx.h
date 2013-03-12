@@ -56,6 +56,9 @@ struct nr_ice_peer_ctx_ {
   int active_streams;
   int waiting_pairs;
 
+  void *done_cb_timer;
+  UCHAR reported_done;
+
   STAILQ_ENTRY(nr_ice_peer_ctx_) entry;
 };
 

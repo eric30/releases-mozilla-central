@@ -115,9 +115,15 @@ static DllBlockInfo sWindowsDllBlocklist[] = {
 
   {"sprotector.dll", ALL_VERSIONS, DllBlockInfo::BLOCK_WIN8PLUS_ONLY },
 
+  // Topcrash with Websense Endpoint, bug 828184
+  {"qipcap.dll", MAKE_VERSION(7, 6, 815, 1)},
+
   // leave these two in always for tests
   { "mozdllblockingtest.dll", ALL_VERSIONS },
   { "mozdllblockingtest_versioned.dll", 0x0000000400000000ULL },
+
+  // Windows Media Foundation FLAC decoder and type sniffer (bug 839031).
+  { "mfflac.dll", ALL_VERSIONS },
 
   { NULL, 0 }
 };
@@ -432,8 +438,6 @@ continue_loading:
 #ifdef DEBUG_very_verbose
   printf_stderr("LdrLoadDll: continuing load... ('%S')\n", moduleFileName->Buffer);
 #endif
-
-  NS_SetHasLoadedNewDLLs();
 
   if (gInXPCOMLoadOnMainThread && NS_IsMainThread()) {
     // Check to ensure that the DLL has ASLR.

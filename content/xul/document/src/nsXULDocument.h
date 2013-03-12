@@ -40,8 +40,9 @@ class nsIXULPrototypeScript;
 #endif
 #include "nsURIHashKey.h"
 #include "nsInterfaceHashtable.h"
- 
-struct JSObject;
+
+class JSObject;
+struct JSTracer;
 struct PRLogModuleInfo;
 
 class nsRefMapEntry : public nsStringHashKey
@@ -140,6 +141,13 @@ public:
 
     // nsIDOMDocument interface
     NS_FORWARD_NSIDOMDOCUMENT(nsXMLDocument::)
+    // And explicitly import the things from nsDocument that we just shadowed
+    using nsDocument::GetImplementation;
+    using nsDocument::GetTitle;
+    using nsDocument::SetTitle;
+    using nsDocument::GetLastStyleSheetSet;
+    using nsDocument::MozSetImageElement;
+    using nsDocument::GetMozFullScreenElement;
 
     // nsDocument interface overrides
     virtual mozilla::dom::Element* GetElementById(const nsAString & elementId);
@@ -171,6 +179,9 @@ public:
     NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(nsXULDocument, nsXMLDocument)
 
     virtual nsXPCClassInfo* GetClassInfo();
+
+    void TraceProtos(JSTracer* aTrc, uint32_t aGCNumber);
+
 protected:
     // Implementation methods
     friend nsresult
@@ -366,7 +377,8 @@ protected:
      * Note that the resulting content node is not bound to any tree
      */
     nsresult CreateElementFromPrototype(nsXULPrototypeElement* aPrototype,
-                                        mozilla::dom::Element** aResult);
+                                        mozilla::dom::Element** aResult,
+                                        bool aIsRoot);
 
     /**
      * Create a hook-up element to which content nodes can be attached for

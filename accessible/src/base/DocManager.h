@@ -60,19 +60,12 @@ public:
   Accessible* FindAccessibleInCache(nsINode* aNode) const;
 
   /**
-   * Return document accessible from the cache. Convenient method for testing.
-   */
-  inline DocAccessible* GetDocAccessibleFromCache(nsIDocument* aDocument) const
-  {
-    return mDocAccessibleCache.GetWeak(aDocument);
-  }
-
-  /**
    * Called by document accessible when it gets shutdown.
    */
   inline void NotifyOfDocumentShutdown(nsIDocument* aDocument)
   {
     mDocAccessibleCache.Remove(aDocument);
+    RemoveListeners(aDocument);
   }
 
 #ifdef DEBUG
@@ -109,9 +102,10 @@ private:
                              uint32_t aLoadEventType);
 
   /**
-   * Add 'pagehide' and 'DOMContentLoaded' event listeners.
+   * Add/remove 'pagehide' and 'DOMContentLoaded' event listeners.
    */
   void AddListeners(nsIDocument *aDocument, bool aAddPageShowListener);
+  void RemoveListeners(nsIDocument* aDocument);
 
   /**
    * Create document or root accessible.
@@ -153,6 +147,18 @@ private:
 
   DocAccessibleHashtable mDocAccessibleCache;
 };
+
+/**
+ * Return the existing document accessible for the document if any.
+ * Note this returns the doc accessible for the primary pres shell if there is
+ * more than one.
+ */
+inline DocAccessible*
+GetExistingDocAccessible(const nsIDocument* aDocument)
+{
+  nsIPresShell* ps = aDocument->GetShell();
+  return ps ? ps->GetDocAccessible() : nullptr;
+}
 
 } // namespace a11y
 } // namespace mozilla

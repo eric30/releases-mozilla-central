@@ -82,7 +82,6 @@ public:
     NS_IMETHOD SetWWWCredentials(const nsACString & aCredentials);
     NS_IMETHOD OnAuthAvailable();
     NS_IMETHOD OnAuthCancelled(bool userCancel);
-    NS_IMETHOD GetAsciiHostForAuth(nsACString &aHost);
     // Functions we implement from nsIHttpAuthenticableChannel but are
     // declared in HttpBaseChannel must be implemented in this class. We
     // just call the HttpBaseChannel:: impls.
@@ -182,12 +181,14 @@ private:
 
     // redirection specific methods
     void     HandleAsyncRedirect();
+    void     HandleAsyncAPIRedirect();
     nsresult ContinueHandleAsyncRedirect(nsresult);
     void     HandleAsyncNotModified();
     void     HandleAsyncFallback();
     nsresult ContinueHandleAsyncFallback(nsresult);
     nsresult PromptTempRedirect();
-    virtual nsresult SetupReplacementChannel(nsIURI *, nsIChannel *, bool preserveMethod);
+    nsresult StartRedirectChannelToURI(nsIURI *);
+    virtual  nsresult SetupReplacementChannel(nsIURI *, nsIChannel *, bool preserveMethod);
 
     // proxy specific methods
     nsresult ProxyFailover();
@@ -242,8 +243,8 @@ private:
     nsresult DoAuthRetry(nsAHttpConnection *);
 
     void     HandleAsyncRedirectChannelToHttps();
-    nsresult AsyncRedirectChannelToHttps();
-    nsresult ContinueAsyncRedirectChannelToHttps(nsresult rv);
+    nsresult StartRedirectChannelToHttps();
+    nsresult ContinueAsyncRedirectChannelToURI(nsresult rv);
     nsresult OpenRedirectChannel(nsresult rv);
 
     /**
@@ -331,6 +332,7 @@ private:
     uint32_t                          mCachedContentIsPartial   : 1;
     uint32_t                          mTransactionReplaced      : 1;
     uint32_t                          mAuthRetryPending         : 1;
+    uint32_t                          mProxyAuthPending         : 1;
     uint32_t                          mResuming                 : 1;
     uint32_t                          mInitedCacheEntry         : 1;
     // True if we are loading a fallback cache entry from the

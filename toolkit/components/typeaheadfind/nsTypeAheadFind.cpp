@@ -9,12 +9,12 @@
 #include "mozilla/ModuleUtils.h"
 #include "nsIWebBrowserChrome.h"
 #include "nsCURILoader.h"
+#include "nsCycleCollectionParticipant.h"
 #include "nsNetUtil.h"
 #include "nsIURL.h"
 #include "nsIURI.h"
 #include "nsIDocShell.h"
 #include "nsIDocShellTreeOwner.h"
-#include "nsIEditorDocShell.h"
 #include "nsISimpleEnumerator.h"
 #include "nsPIDOMWindow.h"
 #include "nsIPrefBranch.h"
@@ -53,15 +53,20 @@
 
 #include "nsTypeAheadFind.h"
 
-NS_INTERFACE_MAP_BEGIN(nsTypeAheadFind)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsTypeAheadFind)
   NS_INTERFACE_MAP_ENTRY(nsITypeAheadFind)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsITypeAheadFind)
   NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
   NS_INTERFACE_MAP_ENTRY(nsIObserver)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_ADDREF(nsTypeAheadFind)
-NS_IMPL_RELEASE(nsTypeAheadFind)
+NS_IMPL_CYCLE_COLLECTING_ADDREF(nsTypeAheadFind)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(nsTypeAheadFind)
+
+NS_IMPL_CYCLE_COLLECTION_9(nsTypeAheadFind, mFoundLink, mFoundEditable,
+                           mCurrentWindow, mStartFindRange, mSearchRange,
+                           mStartPointRange, mEndPointRange, mSoundInterface,
+                           mFind)
 
 static NS_DEFINE_CID(kFrameTraversalCID, NS_FRAMETRAVERSAL_CID);
 
@@ -160,7 +165,7 @@ nsTypeAheadFind::SetDocShell(nsIDocShell* aDocShell)
   NS_ENSURE_TRUE(mWebBrowserFind, NS_ERROR_FAILURE);
 
   nsCOMPtr<nsIPresShell> presShell;
-  aDocShell->GetPresShell(getter_AddRefs(presShell));
+  presShell = aDocShell->GetPresShell();
   mPresShell = do_GetWeakReference(presShell);      
 
   mStartFindRange = nullptr;
@@ -275,7 +280,7 @@ nsTypeAheadFind::FindItNow(nsIPresShell *aPresShell, bool aIsLinksOnly,
     nsCOMPtr<nsIDocShell> ds = do_QueryReferent(mDocShell);
     NS_ENSURE_TRUE(ds, NS_ERROR_FAILURE);
 
-    ds->GetPresShell(getter_AddRefs(startingPresShell));
+    startingPresShell = ds->GetPresShell();
     mPresShell = do_GetWeakReference(startingPresShell);    
   }  
 
@@ -683,8 +688,7 @@ nsTypeAheadFind::GetSearchContainers(nsISupports *aContainer,
   if (!docShell)
     return NS_ERROR_FAILURE;
 
-  nsCOMPtr<nsIPresShell> presShell;
-  docShell->GetPresShell(getter_AddRefs(presShell));
+  nsCOMPtr<nsIPresShell> presShell = docShell->GetPresShell();
 
   nsRefPtr<nsPresContext> presContext;
   docShell->GetPresContext(getter_AddRefs(presContext));
@@ -898,7 +902,7 @@ nsTypeAheadFind::Find(const nsAString& aSearchString, bool aLinksOnly,
     nsCOMPtr<nsIDocShell> ds (do_QueryReferent(mDocShell));
     NS_ENSURE_TRUE(ds, NS_ERROR_FAILURE);
 
-    ds->GetPresShell(getter_AddRefs(presShell));
+    presShell = ds->GetPresShell();
     mPresShell = do_GetWeakReference(presShell);    
   }  
   nsCOMPtr<nsISelection> selection;
@@ -1094,7 +1098,7 @@ nsTypeAheadFind::IsRangeVisible(nsIPresShell *aPresShell,
   if (!frame)    
     return false;  // No frame! Not visible then.
 
-  if (!frame->GetStyleVisibility()->IsVisible())
+  if (!frame->StyleVisibility()->IsVisible())
     return false;
 
   // Detect if we are _inside_ a text control, or something else with its own

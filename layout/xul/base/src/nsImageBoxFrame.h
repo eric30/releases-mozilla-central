@@ -13,6 +13,7 @@
 #include "imgIContainer.h"
 #include "imgINotificationObserver.h"
 
+class imgRequestProxy;
 class nsImageBoxFrame;
 
 class nsDisplayXULImage;
@@ -79,9 +80,9 @@ public:
    */
   void UpdateLoadFlags();
 
-  NS_IMETHOD BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                              const nsRect&           aDirtyRect,
-                              const nsDisplayListSet& aLists) MOZ_OVERRIDE;
+  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
+                                const nsRect&           aDirtyRect,
+                                const nsDisplayListSet& aLists) MOZ_OVERRIDE;
 
   virtual ~nsImageBoxFrame();
 
@@ -110,7 +111,7 @@ private:
   // registered with the refresh driver.
   bool mRequestRegistered;
 
-  nsCOMPtr<imgIRequest> mImageRequest;
+  nsRefPtr<imgRequestProxy> mImageRequest;
   nsCOMPtr<imgINotificationObserver> mListener;
 
   int32_t mLoadFlags;

@@ -23,8 +23,9 @@
 
 using namespace mozilla;
 
-nsDOMUIEvent::nsDOMUIEvent(nsPresContext* aPresContext, nsGUIEvent* aEvent)
-  : nsDOMEvent(aPresContext, aEvent ?
+nsDOMUIEvent::nsDOMUIEvent(mozilla::dom::EventTarget* aOwner,
+                           nsPresContext* aPresContext, nsGUIEvent* aEvent)
+  : nsDOMEvent(aOwner, aPresContext, aEvent ?
                static_cast<nsEvent *>(aEvent) :
                static_cast<nsEvent *>(new nsUIEvent(false, 0, 0)))
   , mClientPoint(0, 0), mLayerPoint(0, 0), mPagePoint(0, 0), mMovementPoint(0, 0)
@@ -74,8 +75,6 @@ nsDOMUIEvent::nsDOMUIEvent(nsPresContext* aPresContext, nsGUIEvent* aEvent)
     }
   }
 }
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsDOMUIEvent)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsDOMUIEvent, nsDOMEvent)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mView)
@@ -174,7 +173,7 @@ nsresult
 nsDOMUIEvent::InitFromCtor(const nsAString& aType,
                            JSContext* aCx, jsval* aVal)
 {
-  mozilla::dom::UIEventInit d;
+  mozilla::idl::UIEventInit d;
   nsresult rv = d.Init(aCx, aVal);
   NS_ENSURE_SUCCESS(rv, rv);
   return InitUIEvent(aType, d.bubbles, d.cancelable, d.view, d.detail);
@@ -292,19 +291,14 @@ NS_IMETHODIMP
 nsDOMUIEvent::GetCancelBubble(bool* aCancelBubble)
 {
   NS_ENSURE_ARG_POINTER(aCancelBubble);
-  *aCancelBubble =
-    (mEvent->flags & NS_EVENT_FLAG_STOP_DISPATCH) ? true : false;
+  *aCancelBubble = mEvent->mFlags.mPropagationStopped;
   return NS_OK;
 }
 
 NS_IMETHODIMP
 nsDOMUIEvent::SetCancelBubble(bool aCancelBubble)
 {
-  if (aCancelBubble) {
-    mEvent->flags |= NS_EVENT_FLAG_STOP_DISPATCH;
-  } else {
-    mEvent->flags &= ~NS_EVENT_FLAG_STOP_DISPATCH;
-  }
+  mEvent->mFlags.mPropagationStopped = aCancelBubble;
   return NS_OK;
 }
 
@@ -512,9 +506,10 @@ nsDOMUIEvent::GetModifierStateInternal(const nsAString& aKey)
 
 
 nsresult NS_NewDOMUIEvent(nsIDOMEvent** aInstancePtrResult,
+                          mozilla::dom::EventTarget* aOwner,
                           nsPresContext* aPresContext,
                           nsGUIEvent *aEvent) 
 {
-  nsDOMUIEvent* it = new nsDOMUIEvent(aPresContext, aEvent);
+  nsDOMUIEvent* it = new nsDOMUIEvent(aOwner, aPresContext, aEvent);
   return CallQueryInterface(it, aInstancePtrResult);
 }

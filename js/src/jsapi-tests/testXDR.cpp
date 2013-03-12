@@ -11,6 +11,8 @@
 #include "jsstr.h"
 #include "jsfriendapi.h"
 
+#include "jsscriptinlines.h"
+
 static JSScript *
 CompileScriptForPrincipalsVersionOrigin(JSContext *cx, JS::HandleObject obj,
                                         JSPrincipals *principals, JSPrincipals *originPrincipals,
@@ -45,7 +47,7 @@ FreezeThaw(JSContext *cx, JSScript *script)
         return NULL;
 
     // thaw
-    script = JS_DecodeScript(cx, memory, nbytes, script->principals, script->originPrincipals);
+    script = JS_DecodeScript(cx, memory, nbytes, script->principals(), script->originPrincipals);
     js_free(memory);
     return script;
 }
@@ -68,7 +70,8 @@ FreezeThaw(JSContext *cx, JS::HandleObject funobj)
     // thaw
     JSScript *script = GetScript(cx, funobj);
     JSObject *funobj2 = JS_DecodeInterpretedFunction(cx, memory, nbytes,
-                                          script->principals, script->originPrincipals);
+                                                     script->principals(),
+                                                     script->originPrincipals);
     js_free(memory);
     return funobj2;
 }
@@ -83,19 +86,8 @@ BEGIN_TEST(testXDR_principals)
     JSScript *script;
     JSCompartment *compartment = js::GetContextCompartment(cx);
     for (int i = TEST_FIRST; i != TEST_END; ++i) {
-        script = createScriptViaXDR(NULL, NULL, i);
-        CHECK(script);
-        CHECK(!JS_GetScriptPrincipals(script));
-        CHECK(!JS_GetScriptOriginPrincipals(script));
-
-        script = createScriptViaXDR(NULL, NULL, i);
-        CHECK(script);
-        CHECK(!JS_GetScriptPrincipals(script));
-        CHECK(!JS_GetScriptOriginPrincipals(script));
-
         // Appease the new JSAPI assertions. The stuff being tested here is
         // going away anyway.
-        JSPrincipals *old = JS_GetCompartmentPrincipals(compartment);
         JS_SetCompartmentPrincipals(compartment, &testPrincipals[0]);
         script = createScriptViaXDR(&testPrincipals[0], NULL, i);
         CHECK(script);
@@ -111,12 +103,6 @@ BEGIN_TEST(testXDR_principals)
         CHECK(script);
         CHECK(JS_GetScriptPrincipals(script) == &testPrincipals[0]);
         CHECK(JS_GetScriptOriginPrincipals(script) == &testPrincipals[1]);
-
-        script = createScriptViaXDR(NULL, &testPrincipals[1], i);
-        CHECK(script);
-        CHECK(!JS_GetScriptPrincipals(script));
-        CHECK(JS_GetScriptOriginPrincipals(script) == &testPrincipals[1]);
-        JS_SetCompartmentPrincipals(compartment, old);
     }
 
     return true;
@@ -136,7 +122,7 @@ JSScript *createScriptViaXDR(JSPrincipals *prin, JSPrincipals *orig, int testCas
         "function f() { return 1; }\n"
         "f;\n";
 
-    js::RootedObject global(cx, JS_GetGlobalObject(cx));
+    JS::RootedObject global(cx, JS_GetGlobalObject(cx));
     JSScript *script = CompileScriptForPrincipalsVersionOrigin(cx, global, prin, orig,
                                                                src, strlen(src), "test", 1,
                                                                JSVERSION_DEFAULT);
@@ -151,11 +137,11 @@ JSScript *createScriptViaXDR(JSPrincipals *prin, JSPrincipals *orig, int testCas
             return script;
     }
 
-    JS::Value v;
-    JSBool ok = JS_ExecuteScript(cx, global, script, &v);
+    JS::RootedValue v(cx);
+    JSBool ok = JS_ExecuteScript(cx, global, script, v.address());
     if (!ok || !v.isObject())
         return NULL;
-    js::RootedObject funobj(cx, &v.toObject());
+    JS::RootedObject funobj(cx, &v.toObject());
     if (testCase == TEST_FUNCTION) {
         funobj = FreezeThaw(cx, funobj);
         if (!funobj)
@@ -182,12 +168,12 @@ BEGIN_TEST(testXDR_atline)
     CHECK(script = FreezeThaw(cx, script));
     CHECK(!strcmp("bar", JS_GetScriptFilename(cx, script)));
 
-    JS::Value v;
-    JSBool ok = JS_ExecuteScript(cx, global, script, &v);
+    JS::RootedValue v(cx);
+    JSBool ok = JS_ExecuteScript(cx, global, script, v.address());
     CHECK(ok);
     CHECK(v.isObject());
 
-    js::RootedObject funobj(cx, &v.toObject());
+    JS::RootedObject funobj(cx, &v.toObject());
     script = JS_GetFunctionScript(cx, JS_GetObjectFunction(funobj));
     CHECK(!strcmp("foo", JS_GetScriptFilename(cx, script)));
 
@@ -214,7 +200,7 @@ BEGIN_TEST(testXDR_bug506491)
     CHECK(script);
 
     // execute
-    js::RootedValue v2(cx);
+    JS::RootedValue v2(cx);
     CHECK(JS_ExecuteScript(cx, global, script, v2.address()));
 
     // try to break the Block object that is the parent of f
@@ -222,7 +208,7 @@ BEGIN_TEST(testXDR_bug506491)
 
     // confirm
     EVAL("f() === 'ok';\n", v2.address());
-    js::RootedValue trueval(cx, JSVAL_TRUE);
+    JS::RootedValue trueval(cx, JSVAL_TRUE);
     CHECK_SAME(v2, trueval);
     return true;
 }
@@ -273,8 +259,9 @@ BEGIN_TEST(testXDR_sourceMap)
         "file:///var/source-map.json",
         NULL
     };
+    JS::RootedScript script(cx);
     for (const char **sm = sourceMaps; *sm; sm++) {
-        JSScript *script = JS_CompileScript(cx, global, "", 0, __FILE__, __LINE__);
+        script = JS_CompileScript(cx, global, "", 0, __FILE__, __LINE__);
         CHECK(script);
 
         size_t len = strlen(*sm);

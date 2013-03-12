@@ -5,7 +5,7 @@
 
 // Keep in (case-insensitive) order:
 #include "gfxMatrix.h"
-#include "nsSVGAElement.h"
+#include "mozilla/dom/SVGAElement.h"
 #include "nsSVGIntegrationUtils.h"
 #include "nsSVGTSpanFrame.h"
 #include "nsSVGUtils.h"
@@ -91,8 +91,7 @@ nsSVGAFrame::Init(nsIContent* aContent,
                   nsIFrame* aParent,
                   nsIFrame* aPrevInFlow)
 {
-  nsCOMPtr<nsIDOMSVGAElement> elem = do_QueryInterface(aContent);
-  NS_ASSERTION(elem,
+  NS_ASSERTION(aContent->IsSVG(nsGkAtoms::a),
                "Trying to construct an SVGAFrame for a "
                "content element that doesn't support the right interfaces");
 
@@ -107,7 +106,8 @@ nsSVGAFrame::AttributeChanged(int32_t         aNameSpaceID,
 {
   if (aNameSpaceID == kNameSpaceID_None &&
       aAttribute == nsGkAtoms::transform) {
-    nsSVGUtils::InvalidateAndScheduleReflowSVG(this);
+    nsSVGUtils::InvalidateBounds(this, false);
+    nsSVGUtils::ScheduleReflowSVG(this);
     NotifySVGChanged(TRANSFORM_CHANGED);
   }
 
@@ -153,7 +153,7 @@ nsSVGAFrame::GetCanvasTM(uint32_t aFor)
     NS_ASSERTION(mParent, "null parent");
 
     nsSVGContainerFrame *parent = static_cast<nsSVGContainerFrame*>(mParent);
-    nsSVGAElement *content = static_cast<nsSVGAElement*>(mContent);
+    dom::SVGAElement *content = static_cast<dom::SVGAElement*>(mContent);
 
     gfxMatrix tm = content->PrependLocalTransformsTo(parent->GetCanvasTM(aFor));
 

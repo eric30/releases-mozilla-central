@@ -12,6 +12,9 @@ VPATH     = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
+USE_RCS_MK=1
+include $(topsrcdir)/config/makefiles/makeutils.mk
+
 milestone_txt = $(topsrcdir)/config/milestone.txt
 
 MODULE = xulapp
@@ -129,6 +132,17 @@ SHARED_LIBRARY_LIBS += $(DEPTH)/toolkit/crashreporter/$(LIB_PREFIX)exception_han
 ifeq ($(OS_ARCH),WINNT)
 SHARED_LIBRARY_LIBS += \
   $(DEPTH)/toolkit/crashreporter/breakpad-windows-libxul/$(LIB_PREFIX)google_breakpad_libxul_s.$(LIB_SUFFIX)
+ifdef MOZ_ENABLE_PROFILER_SPS
+SHARED_LIBRARY_LIBS += \
+  $(DEPTH)/toolkit/crashreporter/google-breakpad/src/common/$(LIB_PREFIX)breakpad_common_s.$(LIB_SUFFIX) \
+  $(NULL)
+endif
+endif
+
+ifdef MOZ_ENABLE_PROFILER_SPS
+SHARED_LIBRARY_LIBS += \
+  $(DEPTH)/toolkit/crashreporter/google-breakpad/src/processor/$(LIB_PREFIX)breakpad_sps_common_s.$(LIB_SUFFIX) \
+  $(NULL)
 endif
 
 ifeq ($(OS_ARCH),Darwin)
@@ -161,13 +175,12 @@ SHARED_LIBRARY_LIBS += \
 endif
 endif
 
-TEST_DIRS += test
-
 include $(topsrcdir)/config/config.mk
 include $(topsrcdir)/ipc/chromium/chromium-config.mk
 include $(topsrcdir)/config/rules.mk
 
 LOCAL_INCLUDES += \
+  -I$(topsrcdir)/testing/gtest/mozilla \
   -I$(srcdir)/../profile \
   -I$(topsrcdir)/dom/ipc \
   -I$(topsrcdir)/toolkit/crashreporter \
@@ -215,20 +228,11 @@ ifdef MOZ_SOURCE_STAMP
 
   INIARGS = --sourcestamp=$(MOZ_SOURCE_STAMP)
 
-  # strip a trailing slash from the repo URL because it's not always present,
-  # and we want to construct a working URL in buildconfig.html
-  SOURCE_REPO := $(firstword $(shell hg --repository $(topsrcdir) showconfig paths.default 2>/dev/null))
-  SOURCE_REPO := $(strip $(SOURCE_REPO))
-  SOURCE_REPO := $(patsubst ssh://%,http://%,$(SOURCE_REPO))
-  SOURCE_REPO := $(patsubst %/,%,$(SOURCE_REPO))
-
-  # command set should change based on revision control use.
-  # warn for now in case (git, bzr, ...) is in use.
-  $(call warnIfEmpty,SOURCE_REPO) 
+  source_repo := $(call getSourceRepo)
 
   # extra sanity check for old versions of hg, no showconfig support
-  ifeq (http,$(patsubst http%,http,$(SOURCE_REPO)))
-    INIARGS += --sourcerepo=$(SOURCE_REPO)
+  ifneq (,$(filter http%,$(source_repo)))
+    INIARGS += --sourcerepo=$(source_repo)
   endif
 
 endif # MOZ_SOURCE_STAMP

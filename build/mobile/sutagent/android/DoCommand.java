@@ -107,7 +107,7 @@ public class DoCommand {
     String ffxProvider = "org.mozilla.ffxcp";
     String fenProvider = "org.mozilla.fencp";
 
-    private final String prgVersion = "SUTAgentAndroid Version 1.15";
+    private final String prgVersion = "SUTAgentAndroid Version 1.16";
 
     public enum Command
         {
@@ -131,6 +131,7 @@ public class DoCommand {
         MEMORY ("memory"),
         POWER ("power"),
         PROCESS ("process"),
+        SUTUSERINFO ("sutuserinfo"),
         GETAPPROOT ("getapproot"),
         TESTROOT ("testroot"),
         ALRT ("alrt"),
@@ -435,6 +436,8 @@ public class DoCommand {
                     strReturn += GetPowerInfo();
                     strReturn += "\n";
                     strReturn += GetProcessInfo();
+                    strReturn += "\n";
+                    strReturn += GetSutUserInfo();
                     }
                 else
                     {
@@ -479,6 +482,10 @@ public class DoCommand {
 
                         case POWER:
                             strReturn += GetPowerInfo();
+                            break;
+
+                        case SUTUSERINFO:
+                            strReturn += GetSutUserInfo();
                             break;
 
                         default:
@@ -2607,6 +2614,28 @@ private void CancelNotification()
         return (sRet);
         }
 
+    public String GetSutUserInfo()
+        {
+        String sRet = "";
+        try {
+            // based on patch in https://bugzilla.mozilla.org/show_bug.cgi?id=811763
+            Context context = contextWrapper.getApplicationContext();
+            Object userManager = context.getSystemService("user");
+            if (userManager != null) {
+                // if userManager is non-null that means we're running on 4.2+ and so the rest of this
+                // should just work
+                Object userHandle = android.os.Process.class.getMethod("myUserHandle", (Class[])null).invoke(null);
+                Object userSerial = userManager.getClass().getMethod("getSerialNumberForUser", userHandle.getClass()).invoke(userManager, userHandle);
+                sRet += "User Serial:" + userSerial.toString();
+            }
+        } catch (Exception e) {
+            // Guard against any unexpected failures
+            e.printStackTrace();
+        }
+
+        return sRet;
+        }
+
     // todo
     public String GetDiskInfo(String sPath)
         {
@@ -3414,7 +3443,7 @@ private void CancelNotification()
             else
                 prgIntent.setAction(Intent.ACTION_MAIN);
 
-            if (sArgs[0].contains("fennec"))
+            if (sArgs[0].contains("fennec") || sArgs[0].contains("firefox"))
                 {
                 sArgList = "";
                 sUrl = "";

@@ -196,7 +196,7 @@ nsAbsoluteContainingBlock::FrameDependsOnContainer(nsIFrame* f,
                                                    bool aCBWidthChanged,
                                                    bool aCBHeightChanged)
 {
-  const nsStylePosition* pos = f->GetStylePosition();
+  const nsStylePosition* pos = f->StylePosition();
   // See if f's position might have changed because it depends on a
   // placeholder's position
   // This can happen in the following cases:
@@ -218,8 +218,8 @@ nsAbsoluteContainingBlock::FrameDependsOnContainer(nsIFrame* f,
     // skip getting style data
     return false;
   }
-  const nsStylePadding* padding = f->GetStylePadding();
-  const nsStyleMargin* margin = f->GetStyleMargin();
+  const nsStylePadding* padding = f->StylePadding();
+  const nsStyleMargin* margin = f->StyleMargin();
   if (aCBWidthChanged) {
     // See if f's width might have changed.
     // If border-left, border-right, padding-left, padding-right,
@@ -242,7 +242,7 @@ nsAbsoluteContainingBlock::FrameDependsOnContainer(nsIFrame* f,
         !IsFixedMarginSize(margin->mMargin.GetRight())) {
       return true;
     }
-    if (f->GetStyleVisibility()->mDirection == NS_STYLE_DIRECTION_RTL) {
+    if (f->StyleVisibility()->mDirection == NS_STYLE_DIRECTION_RTL) {
       // Note that even if 'left' is a length, our position can
       // still depend on the containing block width, because if
       // 'right' is also a length we will discard 'left' and be
@@ -366,7 +366,17 @@ nsAbsoluteContainingBlock::ReflowAbsoluteFrame(nsIFrame*                aDelegat
 
   nsresult  rv;
   // Get the border values
-  const nsMargin& border = aReflowState.mStyleBorder->GetComputedBorder();
+  nsMargin border = aReflowState.mStyleBorder->GetComputedBorder();
+
+  // Respect fixed position margins.
+  if (aDelegatingFrame->GetAbsoluteListID() == nsIFrame::kFixedList) {
+    const nsMargin& fixedMargins = aPresContext->PresShell()->
+      GetContentDocumentFixedPositionMargins();
+
+    border += fixedMargins;
+    aContainingBlockWidth -= fixedMargins.left + fixedMargins.right;
+    aContainingBlockHeight -= fixedMargins.top + fixedMargins.bottom;
+  }
 
   nscoord availWidth = aContainingBlockWidth;
   if (availWidth == -1) {
@@ -440,7 +450,7 @@ nsAbsoluteContainingBlock::ReflowAbsoluteFrame(nsIFrame*                aDelegat
                kidDesiredSize.width, kidDesiredSize.height);
   aKidFrame->SetRect(rect);
 
-  nsIView* view = aKidFrame->GetView();
+  nsView* view = aKidFrame->GetView();
   if (view) {
     // Size and position the view and set its opacity, visibility, content
     // transparency, and clip

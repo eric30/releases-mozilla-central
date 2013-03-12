@@ -15,6 +15,7 @@
 #include "nsJSUtils.h"
 #include "prnetdb.h"
 #include "nsITimer.h"
+#include "mozilla/net/DNS.h"
 
 namespace mozilla {
 namespace net {
@@ -313,7 +314,7 @@ PACErrorReporter(JSContext *cx, const char *message, JSErrorReport *report)
 // timeout of 0 means the normal necko timeout strategy, otherwise the dns request
 // will be canceled after aTimeout milliseconds
 static
-JSBool PACResolve(const nsCString &aHostName, PRNetAddr *aNetAddr,
+JSBool PACResolve(const nsCString &aHostName, NetAddr *aNetAddr,
                   unsigned int aTimeout)
 {
   if (!sRunning) {
@@ -326,7 +327,7 @@ JSBool PACResolve(const nsCString &aHostName, PRNetAddr *aNetAddr,
 
 bool
 ProxyAutoConfig::ResolveAddress(const nsCString &aHostName,
-                                PRNetAddr *aNetAddr,
+                                NetAddr *aNetAddr,
                                 unsigned int aTimeout)
 {
   nsCOMPtr<nsIDNSService> dns = do_GetService(NS_DNSSERVICE_CONTRACTID);
@@ -366,12 +367,12 @@ bool PACResolveToString(const nsCString &aHostName,
                         nsCString &aDottedDecimal,
                         unsigned int aTimeout)
 {
-  PRNetAddr netAddr;
+  NetAddr netAddr;
   if (!PACResolve(aHostName, &netAddr, aTimeout))
     return false;
 
   char dottedDecimal[128];
-  if (PR_NetAddrToString(&netAddr, dottedDecimal, sizeof(dottedDecimal)) != PR_SUCCESS)
+  if (!NetAddrToString(&netAddr, dottedDecimal, sizeof(dottedDecimal)))
     return false;
 
   aDottedDecimal.Assign(dottedDecimal);
@@ -380,7 +381,7 @@ bool PACResolveToString(const nsCString &aHostName,
 
 // dnsResolve(host) javascript implementation
 static
-JSBool PACDnsResolve(JSContext *cx, unsigned int argc, jsval *vp)
+JSBool PACDnsResolve(JSContext *cx, unsigned int argc, JS::Value *vp)
 {
   if (NS_IsMainThread()) {
     NS_WARNING("DNS Resolution From PAC on Main Thread. How did that happen?");
@@ -409,7 +410,7 @@ JSBool PACDnsResolve(JSContext *cx, unsigned int argc, jsval *vp)
 
 // myIpAddress() javascript implementation
 static
-JSBool PACMyIpAddress(JSContext *cx, unsigned int argc, jsval *vp)
+JSBool PACMyIpAddress(JSContext *cx, unsigned int argc, JS::Value *vp)
 {
   if (NS_IsMainThread()) {
     NS_WARNING("DNS Resolution From PAC on Main Thread. How did that happen?");
@@ -426,7 +427,7 @@ JSBool PACMyIpAddress(JSContext *cx, unsigned int argc, jsval *vp)
 
 // proxyAlert(msg) javascript implementation
 static
-JSBool PACProxyAlert(JSContext *cx, unsigned int argc, jsval *vp)
+JSBool PACProxyAlert(JSContext *cx, unsigned int argc, JS::Value *vp)
 {
   JSString *arg1 = nullptr;
   if (!JS_ConvertArguments(cx, argc, JS_ARGV(cx, vp), "S", &arg1))
@@ -585,6 +586,7 @@ ProxyAutoConfig::SetupJS()
 
   JSAutoRequest ar(mJSRuntime->Context());
 
+  sRunning = this;
   JSScript *script = JS_CompileScript(mJSRuntime->Context(),
                                       mJSRuntime->Global(),
                                       mPACScript.get(), mPACScript.Length(),
@@ -594,8 +596,10 @@ ProxyAutoConfig::SetupJS()
     nsString alertMessage(NS_LITERAL_STRING("PAC file failed to install from "));
     alertMessage += NS_ConvertUTF8toUTF16(mPACURI);
     PACLogToConsole(alertMessage);
+    sRunning = nullptr;
     return NS_ERROR_FAILURE;
   }
+  sRunning = nullptr;
 
   mJSRuntime->SetOK();
   nsString alertMessage(NS_LITERAL_STRING("PAC file installed from "));
@@ -629,15 +633,15 @@ ProxyAutoConfig::GetProxyForURI(const nsCString &aTestURI,
   mRunningHost = aTestHost;
 
   nsresult rv = NS_ERROR_FAILURE;
-  js::RootedString uriString(cx, JS_NewStringCopyZ(cx, aTestURI.get()));
-  js::RootedString hostString(cx, JS_NewStringCopyZ(cx, aTestHost.get()));
+  JS::RootedString uriString(cx, JS_NewStringCopyZ(cx, aTestURI.get()));
+  JS::RootedString hostString(cx, JS_NewStringCopyZ(cx, aTestHost.get()));
 
   if (uriString && hostString) {
-    js::RootedValue uriValue(cx, STRING_TO_JSVAL(uriString));
-    js::RootedValue hostValue(cx, STRING_TO_JSVAL(hostString));
+    JS::RootedValue uriValue(cx, STRING_TO_JSVAL(uriString));
+    JS::RootedValue hostValue(cx, STRING_TO_JSVAL(hostString));
 
-    jsval argv[2] = { uriValue, hostValue };
-    jsval rval;
+    JS::Value argv[2] = { uriValue, hostValue };
+    JS::Value rval;
     JSBool ok = JS_CallFunctionName(cx, mJSRuntime->Global(),
                                     "FindProxyForURL", 2, argv, &rval);
 
@@ -686,14 +690,16 @@ ProxyAutoConfig::Shutdown()
 }
 
 bool
-ProxyAutoConfig::SrcAddress(const PRNetAddr *remoteAddress, nsCString &localAddress)
+ProxyAutoConfig::SrcAddress(const NetAddr *remoteAddress, nsCString &localAddress)
 {
   PRFileDesc *fd;
   fd = PR_OpenUDPSocket(remoteAddress->raw.family);
   if (!fd)
     return false;
 
-  if (PR_Connect(fd, remoteAddress, 0) != PR_SUCCESS) {
+  PRNetAddr prRemoteAddress;
+  NetAddrToPRNetAddr(remoteAddress, &prRemoteAddress);
+  if (PR_Connect(fd, &prRemoteAddress, 0) != PR_SUCCESS) {
     PR_Close(fd);
     return false;
   }
@@ -722,9 +728,9 @@ ProxyAutoConfig::SrcAddress(const PRNetAddr *remoteAddress, nsCString &localAddr
 bool
 ProxyAutoConfig::MyIPAddressTryHost(const nsCString &hostName,
                                     unsigned int timeout,
-                                    jsval *vp)
+                                    JS::Value *vp)
 {
-  PRNetAddr remoteAddress;
+  NetAddr remoteAddress;
   nsAutoCString localDottedDecimal;
   JSContext *cx = mJSRuntime->Context();
 
@@ -739,7 +745,7 @@ ProxyAutoConfig::MyIPAddressTryHost(const nsCString &hostName,
 }
 
 bool
-ProxyAutoConfig::MyIPAddress(jsval *vp)
+ProxyAutoConfig::MyIPAddress(JS::Value *vp)
 {
   nsAutoCString remoteDottedDecimal;
   nsAutoCString localDottedDecimal;

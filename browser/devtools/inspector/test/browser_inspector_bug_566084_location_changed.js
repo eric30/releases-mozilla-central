@@ -24,8 +24,8 @@ function test() {
     inspector.markDirty();
 
     let target = TargetFactory.forTab(gBrowser.selectedTab);
-    let toolbox = gDevTools.getToolboxForTarget(target);
-    notificationBox = toolbox.getNotificationBox();
+    let toolbox = gDevTools.getToolbox(target);
+    notificationBox = gBrowser.getNotificationBox();
     notificationBox.addEventListener("AlertActive", alertActive1, false);
 
     ok(toolbox, "We have access to the notificationBox");
@@ -59,7 +59,7 @@ function test() {
     is(para.textContent, "init", "paragraph content is correct");
 
     let target = TargetFactory.forTab(gBrowser.selectedTab);
-    let inspector = gDevTools.getPanelForTarget("inspector", target);
+    let inspector = gDevTools.getToolbox(target).getPanel("inspector");
     ok(inspector, "Inspector still alive");
 
     notificationBox.addEventListener("AlertActive", alertActive2, false);
@@ -104,7 +104,7 @@ function test() {
     is(para.textContent, "test2", "paragraph content is correct");
 
     let root = content.document.documentElement;
-    ok(inspector.selection.node, root, "Selection is the root of the new page.");
+    is(inspector.selection.node, root, "Selection is the root of the new page.");
 
     ok(alertActive1_called, "first notification box has been showed");
     ok(alertActive2_called, "second notification box has been showed");

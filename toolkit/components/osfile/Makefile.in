@@ -1,4 +1,3 @@
-# ***** BEGIN LICENSE BLOCK *****
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this file,
 # You can obtain one at http://mozilla.org/MPL/2.0/.
@@ -19,10 +18,6 @@ EXTRA_PP_JS_MODULES = \
    osfile.jsm \
    $(NULL)
 
-ifdef ENABLE_TESTS
-DIRS += tests
-endif
-
 include $(topsrcdir)/config/rules.mk
 
 libs::
@@ -38,3 +33,4 @@ libs::
 	$(NSINSTALL) $(srcdir)/osfile_async_front.jsm $(FINAL_TARGET)/modules/osfile
 	$(NSINSTALL) $(srcdir)/osfile_async_worker.js $(FINAL_TARGET)/modules/osfile
 	$(NSINSTALL) $(srcdir)/osfile_shared_front.jsm $(FINAL_TARGET)/modules/osfile
+	$(NSINSTALL) $(srcdir)/_PromiseWorker.jsm $(FINAL_TARGET)/modules/osfile

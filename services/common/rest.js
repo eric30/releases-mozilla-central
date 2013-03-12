@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifndef MERGED_COMPARTMENT
+
 const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
 this.EXPORTED_SYMBOLS = [
@@ -10,12 +12,16 @@ this.EXPORTED_SYMBOLS = [
   "TokenAuthenticatedRESTRequest"
 ];
 
+#endif
+
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://services-crypto/utils.js");
 Cu.import("resource://services-common/log4moz.js");
 Cu.import("resource://services-common/preferences.js");
 Cu.import("resource://services-common/utils.js");
+
+XPCOMUtils.defineLazyModuleGetter(this, "CryptoUtils",
+                                  "resource://services-crypto/utils.js");
 
 const Prefs = new Preferences("services.common.rest.");
 
@@ -324,7 +330,13 @@ RESTRequest.prototype = {
     channel.contentCharset = this.charset;
 
     // Blast off!
-    channel.asyncOpen(this, null);
+    try {
+      channel.asyncOpen(this, null);
+    } catch (ex) {
+      // asyncOpen can throw in a bunch of cases -- e.g., a forbidden port.
+      this._log.warn("Caught an error in asyncOpen: " + CommonUtils.exceptionStr(ex));
+      CommonUtils.nextTick(onComplete.bind(this, ex));
+    }
     this.status = this.SENT;
     this.delayTimeout();
     return this;

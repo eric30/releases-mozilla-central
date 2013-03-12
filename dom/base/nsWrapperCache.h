@@ -7,8 +7,9 @@
 #define nsWrapperCache_h___
 
 #include "nsCycleCollectionParticipant.h"
+#include "mozilla/Assertions.h"
 
-struct JSObject;
+class JSObject;
 struct JSContext;
 class XPCWrappedNativeScope;
 
@@ -67,8 +68,8 @@ public:
   }
   ~nsWrapperCache()
   {
-    NS_ASSERTION(!PreservingWrapper(),
-                 "Destroying cache with a preserved wrapper!");
+    MOZ_ASSERT(!PreservingWrapper(),
+               "Destroying cache with a preserved wrapper!");
   }
 
   /**
@@ -96,8 +97,8 @@ public:
 
   void SetWrapper(JSObject* aWrapper)
   {
-    NS_ASSERTION(!PreservingWrapper(), "Clearing a preserved wrapper!");
-    NS_ASSERTION(aWrapper, "Use ClearWrapper!");
+    MOZ_ASSERT(!PreservingWrapper(), "Clearing a preserved wrapper!");
+    MOZ_ASSERT(aWrapper, "Use ClearWrapper!");
 
     SetWrapperBits(aWrapper);
   }
@@ -108,7 +109,7 @@ public:
    */
   void ClearWrapper()
   {
-    NS_ASSERTION(!PreservingWrapper(), "Clearing a preserved wrapper!");
+    MOZ_ASSERT(!PreservingWrapper(), "Clearing a preserved wrapper!");
 
     SetWrapperBits(NULL);
   }
@@ -120,15 +121,9 @@ public:
 
   void SetIsDOMBinding()
   {
-    NS_ASSERTION(!mWrapperPtrBits,
-                 "This flag should be set before creating any wrappers.");
+    MOZ_ASSERT(!mWrapperPtrBits,
+               "This flag should be set before creating any wrappers.");
     mWrapperPtrBits = WRAPPER_IS_DOM_BINDING;
-  }
-  void ClearIsDOMBinding()
-  {
-    NS_ASSERTION(!mWrapperPtrBits || mWrapperPtrBits == WRAPPER_IS_DOM_BINDING,
-                 "This flag should be cleared before creating any wrappers.");
-    mWrapperPtrBits = 0;
   }
 
   bool IsDOMBinding() const
@@ -136,6 +131,19 @@ public:
     return (mWrapperPtrBits & WRAPPER_IS_DOM_BINDING) != 0;
   }
 
+  void SetHasSystemOnlyWrapper()
+  {
+    MOZ_ASSERT(GetWrapperPreserveColor(),
+               "This flag should be set after wrapper creation.");
+    MOZ_ASSERT(IsDOMBinding(),
+               "This flag should only be set for DOM bindings.");
+    mWrapperPtrBits |= WRAPPER_HAS_SOW;
+  }
+
+  bool HasSystemOnlyWrapper() const
+  {
+    return (mWrapperPtrBits & WRAPPER_HAS_SOW) != 0;
+  }
 
   /**
    * Wrap the object corresponding to this wrapper cache. If non-null is
@@ -148,6 +156,7 @@ public:
   virtual JSObject* WrapObject(JSContext *cx, JSObject *scope,
                                bool *triedToWrap)
   {
+    MOZ_ASSERT(!IsDOMBinding(), "Someone forgot to override WrapObject");
     *triedToWrap = false;
     return nullptr;
   }
@@ -204,7 +213,15 @@ private:
    */
   enum { WRAPPER_IS_DOM_BINDING = 1 << 1 };
 
-  enum { kWrapperBitMask = (WRAPPER_BIT_PRESERVED | WRAPPER_IS_DOM_BINDING) };
+  /**
+   * If this bit is set then the wrapper for the native object is a DOM binding
+   * (regular JS object or proxy) that has a system only wrapper for same-origin
+   * access.
+   */
+  enum { WRAPPER_HAS_SOW = 1 << 2 };
+
+  enum { kWrapperBitMask = (WRAPPER_BIT_PRESERVED | WRAPPER_IS_DOM_BINDING |
+                            WRAPPER_HAS_SOW) };
 
   uintptr_t mWrapperPtrBits;
 };
@@ -232,7 +249,6 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsWrapperCache, NS_WRAPPERCACHE_IID)
   NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 #define NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_0(_class) \
-  NS_IMPL_CYCLE_COLLECTION_CLASS(_class)                \
   NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(_class)         \
     NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER   \
   NS_IMPL_CYCLE_COLLECTION_UNLINK_END                   \
@@ -242,7 +258,6 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsWrapperCache, NS_WRAPPERCACHE_IID)
   NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(_class)
 
 #define NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(_class, _field) \
-  NS_IMPL_CYCLE_COLLECTION_CLASS(_class)                        \
   NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(_class)                 \
     NS_IMPL_CYCLE_COLLECTION_UNLINK(_field)                     \
     NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER           \
@@ -255,7 +270,6 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsWrapperCache, NS_WRAPPERCACHE_IID)
 
 #define NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_2(_class, _field1,\
                                                 _field2)        \
-  NS_IMPL_CYCLE_COLLECTION_CLASS(_class)                        \
   NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(_class)                 \
     NS_IMPL_CYCLE_COLLECTION_UNLINK(_field1)                    \
     NS_IMPL_CYCLE_COLLECTION_UNLINK(_field2)                    \
@@ -271,7 +285,6 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsWrapperCache, NS_WRAPPERCACHE_IID)
 #define NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_3(_class, _field1,\
                                                 _field2,        \
                                                 _field3)        \
-  NS_IMPL_CYCLE_COLLECTION_CLASS(_class)                        \
   NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(_class)                 \
     NS_IMPL_CYCLE_COLLECTION_UNLINK(_field1)                    \
     NS_IMPL_CYCLE_COLLECTION_UNLINK(_field2)                    \
@@ -290,7 +303,6 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsWrapperCache, NS_WRAPPERCACHE_IID)
                                                 _field2,        \
                                                 _field3,        \
                                                 _field4)        \
-  NS_IMPL_CYCLE_COLLECTION_CLASS(_class)                        \
   NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(_class)                 \
     NS_IMPL_CYCLE_COLLECTION_UNLINK(_field1)                    \
     NS_IMPL_CYCLE_COLLECTION_UNLINK(_field2)                    \
@@ -312,7 +324,6 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsWrapperCache, NS_WRAPPERCACHE_IID)
                                                 _field3,        \
                                                 _field4,        \
                                                 _field5)        \
-  NS_IMPL_CYCLE_COLLECTION_CLASS(_class)                        \
   NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(_class)                 \
     NS_IMPL_CYCLE_COLLECTION_UNLINK(_field1)                    \
     NS_IMPL_CYCLE_COLLECTION_UNLINK(_field2)                    \
@@ -337,7 +348,6 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsWrapperCache, NS_WRAPPERCACHE_IID)
                                                 _field4,        \
                                                 _field5,        \
                                                 _field6)        \
-  NS_IMPL_CYCLE_COLLECTION_CLASS(_class)                        \
   NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(_class)                 \
     NS_IMPL_CYCLE_COLLECTION_UNLINK(_field1)                    \
     NS_IMPL_CYCLE_COLLECTION_UNLINK(_field2)                    \
@@ -365,7 +375,6 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsWrapperCache, NS_WRAPPERCACHE_IID)
                                                 _field5,        \
                                                 _field6,        \
                                                 _field7)        \
-  NS_IMPL_CYCLE_COLLECTION_CLASS(_class)                        \
   NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(_class)                 \
     NS_IMPL_CYCLE_COLLECTION_UNLINK(_field1)                    \
     NS_IMPL_CYCLE_COLLECTION_UNLINK(_field2)                    \
@@ -396,7 +405,6 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsWrapperCache, NS_WRAPPERCACHE_IID)
                                                 _field6,        \
                                                 _field7,        \
                                                 _field8)        \
-  NS_IMPL_CYCLE_COLLECTION_CLASS(_class)                        \
   NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(_class)                 \
     NS_IMPL_CYCLE_COLLECTION_UNLINK(_field1)                    \
     NS_IMPL_CYCLE_COLLECTION_UNLINK(_field2)                    \
@@ -430,7 +438,6 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsWrapperCache, NS_WRAPPERCACHE_IID)
                                                 _field7,        \
                                                 _field8,        \
                                                 _field9)        \
-  NS_IMPL_CYCLE_COLLECTION_CLASS(_class)                        \
   NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(_class)                 \
     NS_IMPL_CYCLE_COLLECTION_UNLINK(_field1)                    \
     NS_IMPL_CYCLE_COLLECTION_UNLINK(_field2)                    \
@@ -467,7 +474,6 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsWrapperCache, NS_WRAPPERCACHE_IID)
                                                  _field8,       \
                                                  _field9,       \
                                                  _field10)      \
-  NS_IMPL_CYCLE_COLLECTION_CLASS(_class)                        \
   NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(_class)                 \
     NS_IMPL_CYCLE_COLLECTION_UNLINK(_field1)                    \
     NS_IMPL_CYCLE_COLLECTION_UNLINK(_field2)                    \

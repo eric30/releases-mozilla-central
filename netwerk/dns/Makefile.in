@@ -7,7 +7,6 @@ DEPTH     = @DEPTH@
 topsrcdir = @top_srcdir@
 srcdir    = @srcdir@
 VPATH     = @srcdir@
-FAIL_ON_WARNINGS := 1
 
 include $(DEPTH)/config/autoconf.mk
 
@@ -16,6 +15,7 @@ LIBRARY_NAME   = neckodns_s
 LIBXUL_LIBRARY = 1
 XPIDL_MODULE   = necko_dns
 GRE_MODULE     = 1
+FAIL_ON_WARNINGS := 1
 
 XPIDLSRCS = \
   nsIDNSListener.idl \
@@ -27,9 +27,10 @@ XPIDLSRCS = \
   $(NULL)
 
 CPPSRCS = \
+  DNS.cpp \
   nsIDNService.cpp \
-  nsDNSService2.cpp \
   nsHostResolver.cpp \
+  nsDNSService2.cpp \
   nsEffectiveTLDService.cpp \
   $(NULL)
 
@@ -38,6 +39,12 @@ CSRCS = \
   nameprep.c \
   punycode.c \
   $(NULL)
+
+EXPORTS_NAMESPACES = mozilla/net
+
+EXPORTS_mozilla/net = \
+  DNS.h \
+  $(null)
 
 # we don't want the shared lib, but we want to force the creation of a
 # static lib.
@@ -51,7 +58,9 @@ LOCAL_INCLUDES = \
 
 include $(topsrcdir)/config/rules.mk
 
-DEFINES += -DIMPL_NS_NET
+DEFINES += -DIMPL_NS_NET \
+           -DHB_DONT_DEFINE_STDINT \
+           $(NULL)
 
 # Generate the include file containing compact, static definitions
 # for effective TLD data.

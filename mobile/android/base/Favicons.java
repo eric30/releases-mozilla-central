@@ -6,25 +6,21 @@
 package org.mozilla.gecko;
 
 import org.mozilla.gecko.db.BrowserDB;
+import org.mozilla.gecko.util.UiAsyncTask;
 import org.mozilla.gecko.util.GeckoJarReader;
 
 import org.apache.http.HttpEntity;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.entity.BufferedHttpEntity;
 
+import android.app.Activity;
 import android.content.ContentResolver;
-import android.content.ContentValues;
 import android.content.Context;
-import android.database.Cursor;
-import android.database.sqlite.SQLiteDatabase;
-import android.database.sqlite.SQLiteOpenHelper;
-import android.database.sqlite.SQLiteQueryBuilder;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.drawable.BitmapDrawable;
-import android.graphics.drawable.Drawable;
 import android.net.http.AndroidHttpClient;
-import android.os.AsyncTask;
+import android.os.Handler;
 import android.support.v4.util.LruCache;
 import android.util.Log;
 
@@ -43,6 +39,9 @@ public class Favicons {
     private static final String LOGTAG = "GeckoFavicons";
 
     public static final long NOT_LOADING = 0;
+
+    private static int sFaviconSmallSize = -1;
+    private static int sFaviconLargeSize = -1;
 
     private Context mContext;
 
@@ -86,6 +85,7 @@ public class Favicons {
 
         // We want to always run the listener on UI thread
         GeckoAppShell.getMainHandler().post(new Runnable() {
+            @Override
             public void run() {
                 if (listener != null)
                     listener.onFaviconLoaded(pageUrl, image);
@@ -113,7 +113,7 @@ public class Favicons {
             return -1;
         }
 
-        LoadFaviconTask task = new LoadFaviconTask(pageUrl, faviconUrl, persist, listener);
+        LoadFaviconTask task = new LoadFaviconTask(GeckoAppShell.getHandler(), pageUrl, faviconUrl, persist, listener);
 
         long taskId = task.getId();
         mLoadTasks.put(taskId, task);
@@ -175,19 +175,43 @@ public class Favicons {
        return Favicons.FaviconsInstanceHolder.INSTANCE;
     }
 
-    public void attachToContext(Context context) {
-        mContext = context;
+    public boolean isLargeFavicon(Bitmap image) {
+        return image.getWidth() > sFaviconSmallSize || image.getHeight() > sFaviconSmallSize;
     }
 
-    private class LoadFaviconTask extends AsyncTask<Void, Void, Bitmap> {
+    public Bitmap scaleImage(Bitmap image) {
+        // If the icon is larger than 16px, scale it to sFaviconLargeSize.
+        // Otherwise, scale it to sFaviconSmallSize.
+        if (isLargeFavicon(image)) {
+            image = Bitmap.createScaledBitmap(image, sFaviconLargeSize, sFaviconLargeSize, false);
+        } else {
+            image = Bitmap.createScaledBitmap(image, sFaviconSmallSize, sFaviconSmallSize, false);
+        }
+        return image;
+    }
+
+    public void attachToContext(Context context) {
+        mContext = context;
+        if (sFaviconSmallSize < 0) {
+            sFaviconSmallSize = Math.round(mContext.getResources().getDimension(R.dimen.awesomebar_row_favicon_size_small));
+        }
+        if (sFaviconLargeSize < 0) {
+            sFaviconLargeSize = Math.round(mContext.getResources().getDimension(R.dimen.awesomebar_row_favicon_size_large));
+        }
+    }
+
+    private class LoadFaviconTask extends UiAsyncTask<Void, Void, Bitmap> {
         private long mId;
         private String mPageUrl;
         private String mFaviconUrl;
         private OnFaviconLoadedListener mListener;
         private boolean mPersist;
 
-        public LoadFaviconTask(String pageUrl, String faviconUrl, boolean persist,
-                OnFaviconLoadedListener listener) {
+        public LoadFaviconTask(Handler backgroundThreadHandler,
+                               String pageUrl, String faviconUrl, boolean persist,
+                               OnFaviconLoadedListener listener) {
+            super(backgroundThreadHandler);
+
             synchronized(this) {
                 mId = ++mNextFaviconLoadId;
             }
@@ -205,24 +229,19 @@ public class Favicons {
         }
 
         // Runs in background thread
-        private void saveFaviconToDb(Bitmap favicon) {
+        private void saveFaviconToDb(final Bitmap favicon) {
             if (!mPersist) {
                 return;
             }
 
-            // since the Async task can run this on any number of threads in the
-            // pool, we need to protect against inserting the same url twice
-            synchronized(Favicons.this) {
-                ContentResolver resolver = mContext.getContentResolver();
-                BrowserDB.updateFaviconForUrl(resolver, mPageUrl, favicon, mFaviconUrl);
-            }
+            ContentResolver resolver = mContext.getContentResolver();
+            BrowserDB.updateFaviconForUrl(resolver, mPageUrl, favicon, mFaviconUrl);
         }
 
         // Runs in background thread
         private Bitmap downloadFavicon(URL faviconUrl) {
             if (mFaviconUrl.startsWith("jar:jar:")) {
-                BitmapDrawable d = GeckoJarReader.getBitmapDrawable(mContext.getResources(), mFaviconUrl);
-                return d.getBitmap();
+                return GeckoJarReader.getBitmap(mContext.getResources(), mFaviconUrl);
             }
 
             URI uri;
@@ -287,8 +306,8 @@ public class Favicons {
             String storedFaviconUrl = getFaviconUrlForPageUrl(mPageUrl);
             if (storedFaviconUrl != null && storedFaviconUrl.equals(mFaviconUrl)) {
                 image = loadFaviconFromDb();
-                if (image != null)
-                    return image;
+                if (image != null && image.getWidth() > 0 && image.getHeight() > 0)
+                    return scaleImage(image);
             }
 
             if (isCancelled())
@@ -298,6 +317,7 @@ public class Favicons {
 
             if (image != null && image.getWidth() > 0 && image.getHeight() > 0) {
                 saveFaviconToDb(image);
+                image = scaleImage(image);
             } else {
                 image = null;
             }

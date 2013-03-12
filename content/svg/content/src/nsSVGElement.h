@@ -20,9 +20,9 @@
 #include "mozilla/dom/Element.h"
 #include "nsISupportsImpl.h"
 #include "nsStyledElement.h"
+#include "nsSVGClass.h"
+#include "nsIDOMSVGElement.h"
 
-class nsIDOMSVGElement;
-class nsIDOMSVGSVGElement;
 class nsSVGAngle;
 class nsSVGBoolean;
 class nsSVGEnum;
@@ -32,10 +32,19 @@ class nsSVGLength2;
 class nsSVGNumber2;
 class nsSVGNumberPair;
 class nsSVGString;
-class nsSVGSVGElement;
 class nsSVGViewBox;
 
 namespace mozilla {
+namespace dom {
+class CSSValue;
+class SVGSVGElement;
+
+static const unsigned short SVG_UNIT_TYPE_UNKNOWN           = 0;
+static const unsigned short SVG_UNIT_TYPE_USERSPACEONUSE    = 1;
+static const unsigned short SVG_UNIT_TYPE_OBJECTBOUNDINGBOX = 2;
+
+}
+
 class SVGAnimatedNumberList;
 class SVGNumberList;
 class SVGAnimatedLengthList;
@@ -74,6 +83,9 @@ public:
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
 
+  virtual const nsAttrValue* DoGetClasses() const;
+  void DidAnimateClass();
+
   // nsIContent interface methods
 
   virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
@@ -103,6 +115,7 @@ public:
   static const MappedAttributeEntry sFiltersMap[];
   static const MappedAttributeEntry sFEFloodMap[];
   static const MappedAttributeEntry sLightingEffectsMap[];
+  static const MappedAttributeEntry sMaskMap[];
 
   // nsIDOMNode
   NS_IMETHOD IsSupported(const nsAString& aFeature, const nsAString& aVersion,
@@ -111,13 +124,15 @@ public:
   // nsIDOMSVGElement
   NS_IMETHOD GetId(nsAString & aId);
   NS_IMETHOD SetId(const nsAString & aId);
-  NS_IMETHOD GetOwnerSVGElement(nsIDOMSVGSVGElement** aOwnerSVGElement);
+  NS_IMETHOD GetOwnerSVGElement(nsIDOMSVGElement** aOwnerSVGElement);
   NS_IMETHOD GetViewportElement(nsIDOMSVGElement** aViewportElement);
+  NS_IMETHOD GetClassName(nsIDOMSVGAnimatedString** aClassName);
+  NS_IMETHOD GetStyle(nsIDOMCSSStyleDeclaration** aStyle);
 
   // Gets the element that establishes the rectangular viewport against which
   // we should resolve percentage lengths (our "coordinate context"). Returns
   // nullptr for outer <svg> or SVG without an <svg> parent (invalid SVG).
-  nsSVGSVGElement* GetCtx() const;
+  mozilla::dom::SVGSVGElement* GetCtx() const;
 
   enum TransformTypes {
      eAllTransforms
@@ -286,7 +301,14 @@ public:
     return nullptr;
   }
 
+  // WebIDL
+  mozilla::dom::SVGSVGElement* GetOwnerSVGElement(mozilla::ErrorResult& rv);
+  nsSVGElement* GetViewportElement();
+  already_AddRefed<nsIDOMSVGAnimatedString> ClassName();
+  already_AddRefed<mozilla::dom::CSSValue> GetPresentationAttribute(const nsAString& aName, mozilla::ErrorResult& rv);
 protected:
+  virtual JSObject* WrapNode(JSContext *cx, JSObject *scope, bool *triedToWrap);
+
 #ifdef DEBUG
   // We define BeforeSetAttr here and mark it MOZ_FINAL to ensure it is NOT used
   // by SVG elements.
@@ -304,9 +326,6 @@ protected:
   static nsresult ReportAttributeParseFailure(nsIDocument* aDocument,
                                               nsIAtom* aAttribute,
                                               const nsAString& aValue);
-
-  // Hooks for subclasses
-  virtual bool IsEventName(nsIAtom* aName);
 
   void UpdateContentStyleRule();
   void UpdateAnimatedContentStyleRule();
@@ -596,6 +615,8 @@ private:
   void UnsetAttrInternal(int32_t aNameSpaceID, nsIAtom* aAttribute,
                          bool aNotify);
 
+  nsSVGClass mClassAttribute;
+  nsAutoPtr<nsAttrValue> mClassAnimAttr;
   nsRefPtr<mozilla::css::StyleRule> mContentStyleRule;
 };
 
@@ -621,14 +642,13 @@ NS_NewSVG##_elementName##Element(nsIContent **aResult,                       \
   return rv;                                                                 \
 }
 
-#define NS_IMPL_NS_NEW_SVG_ELEMENT_CHECK_PARSER(_elementName)                \
+#define NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(_elementName)                  \
 nsresult                                                                     \
 NS_NewSVG##_elementName##Element(nsIContent **aResult,                       \
-                                 already_AddRefed<nsINodeInfo> aNodeInfo,    \
-                                 FromParser aFromParser)                     \
+                                 already_AddRefed<nsINodeInfo> aNodeInfo)    \
 {                                                                            \
-  nsRefPtr<nsSVG##_elementName##Element> it =                                \
-    new nsSVG##_elementName##Element(aNodeInfo, aFromParser);                \
+  nsRefPtr<mozilla::dom::SVG##_elementName##Element> it =                    \
+    new mozilla::dom::SVG##_elementName##Element(aNodeInfo);                 \
                                                                              \
   nsresult rv = it->Init();                                                  \
                                                                              \
@@ -641,14 +661,44 @@ NS_NewSVG##_elementName##Element(nsIContent **aResult,                       \
   return rv;                                                                 \
 }
 
- // No unlinking, we'd need to null out the value pointer (the object it
+#define NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT_CHECK_PARSER(_elementName)     \
+nsresult                                                                     \
+NS_NewSVG##_elementName##Element(nsIContent **aResult,                       \
+                                 already_AddRefed<nsINodeInfo> aNodeInfo,    \
+                                 mozilla::dom::FromParser aFromParser)       \
+{                                                                            \
+  nsRefPtr<mozilla::dom::SVG##_elementName##Element> it =                    \
+    new mozilla::dom::SVG##_elementName##Element(aNodeInfo, aFromParser);    \
+                                                                             \
+  nsresult rv = it->Init();                                                  \
+                                                                             \
+  if (NS_FAILED(rv)) {                                                       \
+    return rv;                                                               \
+  }                                                                          \
+                                                                             \
+  it.forget(aResult);                                                        \
+                                                                             \
+  return rv;                                                                 \
+}
+
+// No unlinking, we'd need to null out the value pointer (the object it
 // points to is held by the element) and null-check it everywhere.
 #define NS_SVG_VAL_IMPL_CYCLE_COLLECTION(_val, _element)                     \
-NS_IMPL_CYCLE_COLLECTION_CLASS(_val)                                         \
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(_val)                                \
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_element) \
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END                                        \
 NS_IMPL_CYCLE_COLLECTION_UNLINK_0(_val)
 
+#define NS_SVG_VAL_IMPL_CYCLE_COLLECTION_WRAPPERCACHED(_val, _element)       \
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(_val)                                  \
+NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER                            \
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END                                          \
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(_val)                                \
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(_element)                                \
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS                           \
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END                                        \
+NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(_val)                                   \
+NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER                             \
+NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 #endif // __NS_SVGELEMENT_H__

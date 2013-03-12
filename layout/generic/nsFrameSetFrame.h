@@ -29,7 +29,7 @@ class  nsHTMLFramesetFrame;
 
 #define NO_COLOR 0xFFFFFFFA
 
-// defined at nsHTMLFrameSetElement.h
+// defined at HTMLFrameSetElement.h
 struct nsFramesetSpec;
 
 struct nsBorderColor 
@@ -100,9 +100,9 @@ public:
   NS_IMETHOD GetCursor(const nsPoint&    aPoint,
                        nsIFrame::Cursor& aCursor) MOZ_OVERRIDE;
 
-  NS_IMETHOD BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                              const nsRect&           aDirtyRect,
-                              const nsDisplayListSet& aLists) MOZ_OVERRIDE;
+  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
+                                const nsRect&           aDirtyRect,
+                                const nsDisplayListSet& aLists) MOZ_OVERRIDE;
 
   NS_IMETHOD Reflow(nsPresContext*          aPresContext,
                     nsHTMLReflowMetrics&     aDesiredSize,
@@ -178,8 +178,6 @@ protected:
 
   bool GetNoResize(nsIFrame* aChildFrame); 
   
-  virtual int GetSkipSides() const;
-
   void ReflowPlaceChild(nsIFrame*                aChild,
                         nsPresContext*          aPresContext,
                         const nsHTMLReflowState& aReflowState,

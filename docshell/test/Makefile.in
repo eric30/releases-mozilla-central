@@ -11,11 +11,6 @@ relativesrcdir  = @relativesrcdir@
 
 MODULE = test_docshell
 
-DIRS += chrome \
-	navigation \
-	browser \
-	$(NULL)
-
 include $(DEPTH)/config/autoconf.mk
 
 XPCSHELL_TESTS = unit
@@ -25,8 +20,6 @@ XPCSHELL_TESTS += unit_ipc
 endif
 
 MOCHITEST_FILES = \
-		test_bug94514.html \
-		bug94514-postpage.html \
 		test_bug123696.html \
 		bug123696-subframe.html \
 		test_bug344861.html \

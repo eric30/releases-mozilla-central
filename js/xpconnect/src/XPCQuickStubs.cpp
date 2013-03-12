@@ -155,7 +155,7 @@ LookupGetterOrSetter(JSContext *cx, JSBool wantGetter, unsigned argc, jsval *vp)
     jsid id;
     JSPropertyDescriptor desc;
     if (!JS_ValueToId(cx, idval, &id) ||
-        !JS_GetPropertyDescriptorById(cx, obj, id, JSRESOLVE_QUALIFIED, &desc))
+        !JS_GetPropertyDescriptorById(cx, obj, id, 0, &desc))
         return false;
 
     // No property at all means no getters or setters possible.
@@ -238,8 +238,7 @@ DefineGetterOrSetter(JSContext *cx, unsigned argc, JSBool wantGetter, jsval *vp)
         return forward(cx, argc, vp);
 
     if (!JS_ValueToId(cx, idval, &id) ||
-        !JS_LookupPropertyWithFlagsById(cx, obj, id,
-                                        JSRESOLVE_QUALIFIED, &obj2, &v) ||
+        !JS_LookupPropertyWithFlagsById(cx, obj, id, 0, &obj2, &v) ||
         (obj2 &&
          !JS_GetPropertyAttrsGetterAndSetterById(cx, obj2, id, &attrs,
                                                  &found, &getter, &setter)))
@@ -437,7 +436,7 @@ ThrowCallFailed(JSContext *cx, nsresult rv,
     JSAutoByteString memberNameBytes;
     if (!memberName) {
         memberName = JSID_IS_STRING(memberId)
-                     ? memberNameBytes.encode(cx, JSID_TO_STRING(memberId))
+                     ? memberNameBytes.encodeLatin1(cx, JSID_TO_STRING(memberId))
                      : "unknown";
     }
     if (nsXPCException::NameAndFormatForNSResult(rv, &name, nullptr)
@@ -507,7 +506,7 @@ ThrowBadArg(JSContext *cx, nsresult rv, const char *ifaceName,
     JSAutoByteString memberNameBytes;
     if (!memberName) {
         memberName = JSID_IS_STRING(memberId)
-                     ? memberNameBytes.encode(cx, JSID_TO_STRING(memberId))
+                     ? memberNameBytes.encodeLatin1(cx, JSID_TO_STRING(memberId))
                      : "unknown";
     }
     sz = JS_smprintf("%s arg %u [%s.%s]",
@@ -829,14 +828,6 @@ xpc_qsUnwrapArgImpl(JSContext *cx,
     // else...
     // Slow path.
 
-    // XXX E4X breaks the world. Don't try wrapping E4X objects!
-    // This hack can be removed (or changed accordingly) when the
-    // DOM <-> E4X bindings are complete, see bug 270553
-    if (JS_TypeOfValue(cx, OBJECT_TO_JSVAL(src)) == JSTYPE_XML) {
-        *ppArgRef = nullptr;
-        return NS_ERROR_XPC_BAD_CONVERT_JS;
-    }
-
     // Try to unwrap a slim wrapper.
     nsISupports *iface;
     if (XPCConvert::GetISupportsFromJSObject(src, &iface)) {
@@ -890,7 +881,7 @@ xpc_qsJsvalToCharStr(JSContext *cx, jsval v, JSAutoByteString *bytes)
         if (!(str = JS_ValueToString(cx, v)))
             return false;
     }
-    return !!bytes->encode(cx, str);
+    return !!bytes->encodeLatin1(cx, str);
 }
 
 JSBool
@@ -1021,5 +1012,13 @@ xpc_qsAssertContextOK(JSContext *cx)
 
     // This is what we're actually trying to assert here.
     NS_ASSERTION(cx == topJSContext, "wrong context on XPCJSContextStack!");
+}
+
+void
+xpcObjectHelper::AssertGetClassInfoResult()
+{
+    MOZ_ASSERT(mXPCClassInfo ||
+               static_cast<nsINode*>(GetCanonical())->IsDOMBinding(),
+               "GetClassInfo() should only return null for new DOM bindings!");
 }
 #endif

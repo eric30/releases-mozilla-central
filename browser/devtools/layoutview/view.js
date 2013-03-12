@@ -35,7 +35,6 @@ LayoutView.prototype = {
     this.update = this.update.bind(this);
     this.onNewNode = this.onNewNode.bind(this);
     this.onHighlighterLocked = this.onHighlighterLocked.bind(this);
-    this.inspector.selection.on("detached", this.onNewNode);
     this.inspector.selection.on("new-node", this.onNewNode);
     this.inspector.sidebar.on("layoutview-selected", this.onNewNode);
     if (this.inspector.highlighter) {
@@ -101,12 +100,11 @@ LayoutView.prototype = {
   destroy: function LV_destroy() {
     this.inspector.sidebar.off("layoutview-selected", this.onNewNode);
     this.inspector.selection.off("new-node", this.onNewNode);
-    this.inspector.selection.off("detached", this.onNewNode);
     if (this.browser) {
       this.browser.removeEventListener("MozAfterPaint", this.update, true);
     }
     if (this.inspector.highlighter) {
-      this.inspector.highlighter.on("locked", this.onHighlighterLocked);
+      this.inspector.highlighter.off("locked", this.onHighlighterLocked);
     }
     this.sizeHeadingLabel = null;
     this.sizeLabel = null;
@@ -124,10 +122,10 @@ LayoutView.prototype = {
         this.inspector.selection.reason != "highlighter") {
       this.cssLogic.highlight(this.inspector.selection.node);
       this.undim();
-      this.update();
     } else {
       this.dim();
     }
+    this.update();
   },
 
   /**

@@ -10,10 +10,6 @@ VPATH = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-ifdef GNU_CC
-OS_CFLAGS := $(filter-out -pedantic,$(OS_CFLAGS))
-endif
-
 DEFINES += -DHAVE_CONFIG_H=vpx_config.h
 
 MODULE = vpx
@@ -289,11 +285,11 @@ DEFINES += -D__linux__
 
 # For cpu-features.h
 LOCAL_INCLUDES += -I$(ANDROID_NDK)/sources/android/cpufeatures
+ifndef MOZ_WEBRTC
 # For cpu-features.c
 VPATH += $(ANDROID_NDK)/sources/android/cpufeatures
-
 CSRCS += cpu-features.c
-
+endif
 endif
 
 CSRCS += \

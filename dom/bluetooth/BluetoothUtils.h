@@ -10,7 +10,7 @@
 #include "BluetoothCommon.h"
 
 struct JSContext;
-struct JSObject;
+class JSObject;
 
 BEGIN_BLUETOOTH_NAMESPACE
 
@@ -20,8 +20,8 @@ class BluetoothReplyRunnable;
 
 bool
 SetJsObject(JSContext* aContext,
-            JSObject* aObj,
-            const InfallibleTArray<BluetoothNamedValue>& aData);
+            const BluetoothValue& aValue,
+            JSObject* aObj);
 
 nsString
 GetObjectPathFromAddress(const nsAString& aAdapterPath,
@@ -38,6 +38,10 @@ void
 DispatchBluetoothReply(BluetoothReplyRunnable* aRunnable,
                        const BluetoothValue& aValue,
                        const nsAString& aErrorStr);
+
+void
+ParseAtCommand(const nsACString& aAtCommand, const int aStart,
+               nsTArray<nsCString>& aRetValues);
 
 END_BLUETOOTH_NAMESPACE
 

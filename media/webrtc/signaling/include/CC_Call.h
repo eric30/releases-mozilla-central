@@ -6,6 +6,7 @@
 
 #include "CC_Common.h"
 #include "ECC_Types.h"
+#include "mozilla/RefPtr.h"
 
 extern "C"
 {
@@ -16,6 +17,9 @@ namespace CSF
 {
     class ECC_API CC_Call
     {
+    public:
+        NS_INLINE_DECL_THREADSAFE_REFCOUNTING(CC_Call)
+
     protected:
         CC_Call () { }
 
@@ -268,9 +272,9 @@ namespace CSF
           */
         virtual void originateP2PCall (cc_sdp_direction_t video_pref, const std::string & digits, const std::string & ip) = 0;
 
-        virtual void createOffer (const cc_media_constraints_t* constraints) = 0;
+        virtual void createOffer (cc_media_constraints_t* constraints) = 0;
 
-        virtual void createAnswer(const cc_media_constraints_t* constraints) = 0;
+        virtual void createAnswer(cc_media_constraints_t* constraints) = 0;
 
         virtual void setLocalDescription(cc_jsep_action_t action, const std::string & sdp) = 0;
 
@@ -285,6 +289,7 @@ namespace CSF
         virtual const std::string& getPeerConnection() const = 0;
 
         virtual void addICECandidate(const std::string & candidate, const std::string & mid, unsigned short level) = 0;
+
     };
 }
 

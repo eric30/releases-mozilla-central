@@ -17,7 +17,6 @@
 #include "nsStyleLinkElement.h"
 #include "nsIDocShell.h"
 #include "nsILoadContext.h"
-#include "nsIDocShellTreeItem.h"
 #include "nsCPrefetchService.h"
 #include "nsIURI.h"
 #include "nsNetUtil.h"
@@ -25,7 +24,7 @@
 #include "nsIContent.h"
 #include "nsIPresShell.h"
 #include "nsPresContext.h"
-#include "nsIViewManager.h"
+#include "nsViewManager.h"
 #include "nsIAtom.h"
 #include "nsGkAtoms.h"
 #include "nsIDOMWindow.h"
@@ -67,7 +66,6 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsContentSink)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDocumentObserver)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsContentSink)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsContentSink)
   if (tmp->mDocument) {
     tmp->mDocument->RemoveObserver(tmp);
@@ -808,22 +806,18 @@ nsContentSink::PrefetchHref(const nsAString &aHref,
 
   nsCOMPtr<nsIDocShell> docshell = mDocShell;
 
-  nsCOMPtr<nsIDocShellTreeItem> treeItem, parentItem;
+  nsCOMPtr<nsIDocShellTreeItem> parentItem;
   do {
     uint32_t appType = 0;
     nsresult rv = docshell->GetAppType(&appType);
     if (NS_FAILED(rv) || appType == nsIDocShell::APP_TYPE_MAIL)
       return; // do not prefetch from mailnews
-    treeItem = do_QueryInterface(docshell);
-    if (treeItem) {
-      treeItem->GetParent(getter_AddRefs(parentItem));
-      if (parentItem) {
-        treeItem = parentItem;
-        docshell = do_QueryInterface(treeItem);
-        if (!docshell) {
-          NS_ERROR("cannot get a docshell from a treeItem!");
-          return;
-        }
+    docshell->GetParent(getter_AddRefs(parentItem));
+    if (parentItem) {
+      docshell = do_QueryInterface(parentItem);
+      if (!docshell) {
+        NS_ERROR("cannot get a docshell from a treeItem!");
+        return;
       }
     }
   } while (parentItem);
@@ -1371,7 +1365,7 @@ nsContentSink::DidProcessATokenImpl()
   // Check if there's a pending event
   if (sPendingEventMode != 0 && !mHasPendingEvent &&
       (mDeflectedCount % sEventProbeRate) == 0) {
-    nsIViewManager* vm = shell->GetViewManager();
+    nsViewManager* vm = shell->GetViewManager();
     NS_ENSURE_TRUE(vm, NS_ERROR_FAILURE);
     nsCOMPtr<nsIWidget> widget;
     vm->GetRootWidget(getter_AddRefs(widget));
@@ -1518,7 +1512,7 @@ nsContentSink::WillParseImpl(void)
   uint32_t currentTime = PR_IntervalToMicroseconds(PR_IntervalNow());
 
   if (sEnablePerfMode == 0) {
-    nsIViewManager* vm = shell->GetViewManager();
+    nsViewManager* vm = shell->GetViewManager();
     NS_ENSURE_TRUE(vm, NS_ERROR_FAILURE);
     uint32_t lastEventTime;
     vm->GetLastUserEventTime(lastEventTime);

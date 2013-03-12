@@ -2,28 +2,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-ifndef LIBXUL_SDK
-include $(topsrcdir)/toolkit/toolkit-tiers.mk
-endif
-
-TIERS += app
-
-ifdef MOZ_EXTENSIONS
-tier_app_dirs += extensions
-endif
-
-tier_app_dirs += $(MOZ_BRANDING_DIRECTORY)
-
-tier_app_dirs += services
-
-ifdef MOZ_WEBAPP_RUNTIME
-tier_app_dirs += webapprt
-endif
-
-tier_app_dirs += browser
-# Never add other tier_app_dirs after browser. They won't get packaged
-# properly on mac.
-
 ################################################
 # Parallel build on Windows with GNU make check
 
@@ -86,4 +64,10 @@ mochitest-browser-chrome:
 mochitest:: mochitest-browser-chrome
 
 .PHONY: mochitest-browser-chrome
+
+mochitest-metro-chrome:
+	$(RUN_MOCHITEST) --metro-immersive --browser-chrome
+	$(CHECK_TEST_ERROR)
+
+
 endif

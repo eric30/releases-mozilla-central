@@ -14,6 +14,13 @@ const Cr = Components.results;
 Cu.import('resource://gre/modules/XPCOMUtils.jsm');
 Cu.import('resource://gre/modules/Services.jsm');
 
+#ifdef MOZ_WIDGET_GONK
+XPCOMUtils.defineLazyGetter(this, "libcutils", function () {
+  Cu.import("resource://gre/modules/systemlibs.js");
+  return libcutils;
+});
+#endif
+
 // Once Bug 731746 - Allow chrome JS object to implement nsIDOMEventTarget
 // is resolved this helper could be removed.
 var SettingsListener = {
@@ -70,7 +77,7 @@ if ("nsIAudioManager" in Ci) {
   const nsIAudioManager = Ci.nsIAudioManager;
   audioChannelSettings = [
     // settings name, max value, apply to stream types
-    ['audio.volume.content', 15, [nsIAudioManager.STREAM_TYPE_SYSTEM, nsIAudioManager.STREAM_TYPE_MUSIC, nsIAudioManager.STREAM_TYPE_FM]],
+    ['audio.volume.content', 15, [nsIAudioManager.STREAM_TYPE_SYSTEM, nsIAudioManager.STREAM_TYPE_MUSIC]],
     ['audio.volume.notification', 15, [nsIAudioManager.STREAM_TYPE_RING, nsIAudioManager.STREAM_TYPE_NOTIFICATION]],
     ['audio.volume.alarm', 15, [nsIAudioManager.STREAM_TYPE_ALARM]],
     ['audio.volume.telephony', 5, [nsIAudioManager.STREAM_TYPE_VOICE_CALL]],
@@ -96,6 +103,7 @@ for each (let [setting, maxValue, streamTypes] in audioChannelSettings) {
 
 SettingsListener.observe('debug.console.enabled', true, function(value) {
   Services.prefs.setBoolPref('consoleservice.enabled', value);
+  Services.prefs.setBoolPref('layout.css.report_errors', value);
 });
 
 // =================== Languages ====================
@@ -113,9 +121,17 @@ SettingsListener.observe('language.current', 'en-US', function(value) {
                                           Ci.nsIPrefLocalizedString).data;
   } catch(e) {}
 
+  // Bug 830782 - Homescreen is in English instead of selected locale after
+  // the first run experience.
+  // In order to ensure the current intl value is reflected on the child
+  // process let's always write a user value, even if this one match the
+  // current localized pref value.
   if (!((new RegExp('^' + value + '[^a-z-_] *[,;]?', 'i')).test(intl))) {
-    Services.prefs.setCharPref(prefName, value + ', ' + intl);
+    value = value + ', ' + intl;
+  } else {
+    value = intl;
   }
+  Services.prefs.setCharPref(prefName, value);
 
   if (shell.hasStarted() == false) {
     shell.start();
@@ -137,6 +153,11 @@ SettingsListener.observe('language.current', 'en-US', function(value) {
         Services.prefs.setIntPref(key, value);
       }
     });
+  });
+
+  SettingsListener.observe('ril.mms.retrieval_mode', 'manual',
+    function(value) {
+      Services.prefs.setCharPref('dom.mms.retrieval_mode', value);
   });
 
   SettingsListener.observe('ril.sms.strict7BitEncoding.enabled', false,
@@ -173,27 +194,10 @@ Components.utils.import('resource://gre/modules/ctypes.jsm');
   // Get the hardware info and firmware revision from device properties.
   let hardware_info = null;
   let firmware_revision = null;
-  try {
-    let cutils = ctypes.open('libcutils.so');
-    let cbuf = ctypes.char.array(128)();
-    let c_property_get = cutils.declare('property_get', ctypes.default_abi,
-                                        ctypes.int,       // return value: length
-                                        ctypes.char.ptr,  // key
-                                        ctypes.char.ptr,  // value
-                                        ctypes.char.ptr); // default
-    let property_get = function (key, defaultValue) {
-      if (defaultValue === undefined) {
-        defaultValue = null;
-      }
-      c_property_get(key, cbuf, defaultValue);
-      return cbuf.readString();
-    }
-    hardware_info = property_get('ro.hardware');
-    firmware_revision = property_get('ro.firmware_revision');
-    cutils.close();
-  } catch(e) {
-    // Error.
-  }
+#ifdef MOZ_WIDGET_GONK
+    hardware_info = libcutils.property_get('ro.hardware');
+    firmware_revision = libcutils.property_get('ro.firmware_revision');
+#endif
   lock.set('deviceinfo.hardware', hardware_info, null, null);
   lock.set('deviceinfo.firmware_revision', firmware_revision, null, null);
 })();
@@ -203,15 +207,53 @@ SettingsListener.observe('devtools.debugger.remote-enabled', false, function(val
   Services.prefs.setBoolPref('devtools.debugger.remote-enabled', value);
   // This preference is consulted during startup
   Services.prefs.savePrefFile(null);
-  value ? startDebugger() : stopDebugger();
+  value ? RemoteDebugger.start() : RemoteDebugger.stop();
+
+#ifdef MOZ_WIDGET_GONK
+  let enableAdb = value;
+
+  try {
+    if (Services.prefs.getBoolPref('marionette.defaultPrefs.enabled')) {
+      // Marionette is enabled. Force adb on, since marionette requires remote
+      // debugging to be disabled (we don't want adb to track the remote debugger
+      // setting).
+
+      enableAdb = true;
+    }
+  } catch (e) {
+    // This means that the pref doesn't exist. Which is fine. We just leave
+    // enableAdb alone.
+  }
+
+  // Configure adb.
+  try {
+    let currentConfig = libcutils.property_get("persist.sys.usb.config");
+    let configFuncs = currentConfig.split(",");
+    let adbIndex = configFuncs.indexOf("adb");
+
+    if (enableAdb) {
+      // Add adb to the list of functions, if not already present
+      if (adbIndex < 0) {
+        configFuncs.push("adb");
+      }
+    } else {
+      // Remove adb from the list of functions, if present
+      if (adbIndex >= 0) {
+        configFuncs.splice(adbIndex,1);
+      }
+    }
+    let newConfig = configFuncs.join(",");
+    if (newConfig != currentConfig) {
+      libcutils.property_set("persist.sys.usb.config", newConfig);
+    }
+  } catch(e) {
+    dump("Error configuring adb: " + e);
+  }
+#endif
 });
 
 SettingsListener.observe('debug.log-animations.enabled', false, function(value) {
   Services.prefs.setBoolPref('layers.offmainthreadcomposition.log-animations', value);
-});
-
-SettingsListener.observe('debug.dev-mode', false, function(value) {
-  Services.prefs.setBoolPref('dom.mozApps.dev_mode', value);
 });
 
 // =================== Privacy ====================

@@ -107,7 +107,7 @@ nsresult NrIceMediaStream::ParseAttributes(std::vector<std::string>&
   for (size_t i=0; i<attributes.size(); ++i) {
     attributes_in.push_back(const_cast<char *>(attributes[i].c_str()));
   }
-  
+
   // Still need to call nr_ice_ctx_parse_stream_attributes.
   int r = nr_ice_peer_ctx_parse_stream_attributes(ctx_->peer(),
                                                   stream_,
@@ -127,12 +127,14 @@ nsresult NrIceMediaStream::ParseAttributes(std::vector<std::string>&
 nsresult NrIceMediaStream::ParseTrickleCandidate(const std::string& candidate) {
   int r;
 
-  MOZ_MTLOG(PR_LOG_DEBUG, "NrIceCtx(" << ctx_->name() << "): parsing trickle candidate " << candidate);
+  MOZ_MTLOG(PR_LOG_DEBUG, "NrIceCtx(" << ctx_->name() << ")/STREAM(" <<
+            name() << ") : parsing trickle candidate " << candidate);
 
   r = nr_ice_peer_ctx_parse_trickle_candidate(ctx_->peer(),
                                               stream_,
                                               const_cast<char *>(
-                                                  candidate.c_str()));
+                                                candidate.c_str())
+                                              );
   if (r) {
     if (r == R_ALREADY) {
       MOZ_MTLOG(PR_LOG_ERROR, "Trickle candidates are redundant for stream '"
@@ -143,11 +145,6 @@ nsresult NrIceMediaStream::ParseTrickleCandidate(const std::string& candidate) {
          << name_ << "'");
       return NS_ERROR_FAILURE;
     }
-  }
-
-  if (ctx_->state() == NrIceCtx::ICE_CTX_GATHERED) {
-    // Try to start checks if they are not already started
-    return ctx_->StartChecks();
   }
 
   return NS_OK;

@@ -31,7 +31,7 @@ function test() {
   {
     node.normalize();
     let iter = node.ownerDocument.createNodeIterator(node, NodeFilter.SHOW_TEXT + NodeFilter.SHOW_COMMENT,
-      null, false);
+      null);
 
     while ((node = iter.nextNode())) {
       node.nodeValue = node.nodeValue.replace(/\s+/g, '');
@@ -146,9 +146,8 @@ function test() {
 
   function setupTest() {
     var target = TargetFactory.forTab(gBrowser.selectedTab);
-    let toolbox = gDevTools.openToolboxForTab(target, "inspector");
-    toolbox.once("inspector-selected", function BIMMT_selected(id, aInspector) {
-      inspector = aInspector;
+    gDevTools.showToolbox(target, "inspector").then(function(toolbox) {
+      inspector = toolbox.getCurrentPanel();
       startTests();
     });
   }

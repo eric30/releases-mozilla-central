@@ -22,6 +22,7 @@
 #include "nsStreamListenerWrapper.h"
 
 #include "prnetdb.h"
+#include <algorithm>
 
 namespace mozilla {
 namespace net {
@@ -1104,7 +1105,7 @@ HttpBaseChannel::SetRedirectionLimit(uint32_t value)
 {
   ENSURE_CALLED_BEFORE_CONNECT();
 
-  mRedirectionLimit = NS_MIN<uint32_t>(value, 0xff);
+  mRedirectionLimit = std::min<uint32_t>(value, 0xff);
   return NS_OK;
 }
 
@@ -1153,6 +1154,18 @@ HttpBaseChannel::GetRequestSucceeded(bool *aValue)
     return NS_ERROR_NOT_AVAILABLE;
   uint32_t status = mResponseHead->Status();
   *aValue = (status / 100 == 2);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpBaseChannel::RedirectTo(nsIURI *newURI)
+{
+  // We can only redirect unopened channels
+  ENSURE_CALLED_BEFORE_CONNECT();
+
+  // The redirect is stored internally for use in AsyncOpen
+  mAPIRedirectToURI = newURI;
+
   return NS_OK;
 }
 
@@ -1274,8 +1287,8 @@ HttpBaseChannel::GetLocalAddress(nsACString& addr)
   if (mSelfAddr.raw.family == PR_AF_UNSPEC)
     return NS_ERROR_NOT_AVAILABLE;
 
-  addr.SetCapacity(64);
-  PR_NetAddrToString(&mSelfAddr, addr.BeginWriting(), 64);
+  addr.SetCapacity(kIPv6CStrBufSize);
+  NetAddrToString(&mSelfAddr, addr.BeginWriting(), kIPv6CStrBufSize);
   addr.SetLength(strlen(addr.BeginReading()));
 
   return NS_OK;
@@ -1287,10 +1300,10 @@ HttpBaseChannel::GetLocalPort(int32_t* port)
   NS_ENSURE_ARG_POINTER(port);
 
   if (mSelfAddr.raw.family == PR_AF_INET) {
-    *port = (int32_t)PR_ntohs(mSelfAddr.inet.port);
+    *port = (int32_t)ntohs(mSelfAddr.inet.port);
   }
   else if (mSelfAddr.raw.family == PR_AF_INET6) {
-    *port = (int32_t)PR_ntohs(mSelfAddr.ipv6.port);
+    *port = (int32_t)ntohs(mSelfAddr.inet6.port);
   }
   else
     return NS_ERROR_NOT_AVAILABLE;
@@ -1304,8 +1317,8 @@ HttpBaseChannel::GetRemoteAddress(nsACString& addr)
   if (mPeerAddr.raw.family == PR_AF_UNSPEC)
     return NS_ERROR_NOT_AVAILABLE;
 
-  addr.SetCapacity(64);
-  PR_NetAddrToString(&mPeerAddr, addr.BeginWriting(), 64);
+  addr.SetCapacity(kIPv6CStrBufSize);
+  NetAddrToString(&mPeerAddr, addr.BeginWriting(), kIPv6CStrBufSize);
   addr.SetLength(strlen(addr.BeginReading()));
 
   return NS_OK;
@@ -1317,10 +1330,10 @@ HttpBaseChannel::GetRemotePort(int32_t* port)
   NS_ENSURE_ARG_POINTER(port);
 
   if (mPeerAddr.raw.family == PR_AF_INET) {
-    *port = (int32_t)PR_ntohs(mPeerAddr.inet.port);
+    *port = (int32_t)ntohs(mPeerAddr.inet.port);
   }
   else if (mPeerAddr.raw.family == PR_AF_INET6) {
-    *port = (int32_t)PR_ntohs(mPeerAddr.ipv6.port);
+    *port = (int32_t)ntohs(mPeerAddr.inet6.port);
   }
   else
     return NS_ERROR_NOT_AVAILABLE;

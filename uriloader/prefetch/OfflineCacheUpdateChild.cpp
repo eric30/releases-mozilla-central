@@ -8,6 +8,7 @@
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/ipc/URIUtils.h"
+#include "mozilla/net/NeckoCommon.h"
 
 #include "nsIApplicationCacheContainer.h"
 #include "nsIApplicationCacheChannel.h"
@@ -31,6 +32,8 @@
 #include "nsIAsyncVerifyRedirectCallback.h"
 
 using namespace mozilla::ipc;
+using namespace mozilla::net;
+using mozilla::dom::TabChild;
 
 #if defined(PR_LOGGING)
 //
@@ -325,6 +328,12 @@ OfflineCacheUpdateChild::AddDynamicURI(nsIURI *aURI)
 }
 
 NS_IMETHODIMP
+OfflineCacheUpdateChild::Cancel()
+{
+    return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
 OfflineCacheUpdateChild::AddObserver(nsIOfflineCacheUpdateObserver *aObserver,
                                   bool aHoldWeak)
 {
@@ -400,8 +409,11 @@ OfflineCacheUpdateChild::Schedule()
     item->GetTreeOwner(getter_AddRefs(owner));
 
     nsCOMPtr<nsITabChild> tabchild = do_GetInterface(owner);
-    if (!tabchild) {
-      NS_WARNING("tab is null");
+    // because owner implements nsITabChild, we can assume that it is
+    // the one and only TabChild.
+    TabChild* child = tabchild ? static_cast<TabChild*>(tabchild.get()) : nullptr;
+
+    if (MissingRequiredTabChild(child, "offlinecacheupdate")) {
       return NS_ERROR_FAILURE;
     }
 
@@ -409,10 +421,6 @@ OfflineCacheUpdateChild::Schedule()
     SerializeURI(mManifestURI, manifestURI);
     SerializeURI(mDocumentURI, documentURI);
 
-    // because owner implements nsITabChild, we can assume that it is
-    // the one and only TabChild.
-    mozilla::dom::TabChild* child = static_cast<mozilla::dom::TabChild*>(tabchild.get());
-    
     nsCOMPtr<nsIObserverService> observerService =
       mozilla::services::GetObserverService();
     if (observerService) {
@@ -435,7 +443,6 @@ OfflineCacheUpdateChild::Schedule()
     // a reference to us. Will be released in RecvFinish() that identifies 
     // the work has been done.
     child->SendPOfflineCacheUpdateConstructor(this, manifestURI, documentURI,
-                                              mInBrowser, mAppID,
                                               stickDocument);
 
     mIPCActivated = true;

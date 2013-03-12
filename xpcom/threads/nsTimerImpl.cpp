@@ -61,7 +61,7 @@ namespace {
 // to avoid the default allocator lock contention when firing timer events.
 // It is a thread-safe wrapper around nsFixedSizeAllocator.  The thread-safety
 // is required because nsTimerEvent objects are allocated on the timer thread,
-// and freed on the main thread.  Since this is a TimerEventAllocator specific
+// and freed on another thread.  Since this is a TimerEventAllocator specific
 // lock, the lock contention issue is only limited to the allocation and
 // deallocation of nsTimerEvent objects.
 class TimerEventAllocator : public nsFixedSizeAllocator {
@@ -96,6 +96,11 @@ public:
     : mTimer(timer), mGeneration(generation) {
     // timer is already addref'd for us
     MOZ_COUNT_CTOR(nsTimerEvent);
+
+    MOZ_ASSERT(gThread->IsOnTimerThread(),
+               "nsTimer must always be allocated on the timer thread");
+
+    PR_ATOMIC_INCREMENT(&sAllocatorUsers);
   }
 
 #ifdef DEBUG_TIMERS
@@ -104,30 +109,41 @@ public:
 
   static void Init();
   static void Shutdown();
+  static void DeleteAllocatorIfNeeded();
 
   static void* operator new(size_t size) CPP_THROW_NEW {
     return sAllocator->Alloc(size);
   }
   void operator delete(void* p) {
     sAllocator->Free(p, sizeof(nsTimerEvent));
+    DeleteAllocatorIfNeeded();
   }
 
 private:
+  nsTimerEvent(); // Not implemented
   ~nsTimerEvent() {
 #ifdef DEBUG
     if (mTimer)
       NS_WARNING("leaking reference to nsTimerImpl");
 #endif
     MOZ_COUNT_DTOR(nsTimerEvent);
+
+    MOZ_ASSERT(!sCanDeleteAllocator || sAllocatorUsers > 0,
+               "This will result in us attempting to deallocate the nsTimerEvent allocator twice");
+    PR_ATOMIC_DECREMENT(&sAllocatorUsers);
   }
 
   nsTimerImpl *mTimer;
   int32_t      mGeneration;
 
   static TimerEventAllocator* sAllocator;
+  static int32_t sAllocatorUsers;
+  static bool sCanDeleteAllocator;
 };
 
 TimerEventAllocator* nsTimerEvent::sAllocator = nullptr;
+int32_t nsTimerEvent::sAllocatorUsers = 0;
+bool nsTimerEvent::sCanDeleteAllocator = false;
 
 NS_IMPL_THREADSAFE_QUERY_INTERFACE1(nsTimerImpl, nsITimer)
 NS_IMPL_THREADSAFE_ADDREF(nsTimerImpl)
@@ -136,7 +152,7 @@ NS_IMETHODIMP_(nsrefcnt) nsTimerImpl::Release(void)
 {
   nsrefcnt count;
 
-  NS_PRECONDITION(0 != mRefCnt, "dup release");
+  MOZ_ASSERT(int32_t(mRefCnt) > 0, "dup release");
   count = NS_AtomicDecrementRefcnt(mRefCnt);
   NS_LOG_RELEASE(this, count, "nsTimerImpl");
   if (count == 0) {
@@ -180,7 +196,7 @@ NS_IMETHODIMP_(nsrefcnt) nsTimerImpl::Release(void)
   if (count == 1 && mArmed) {
     mCanceled = true;
 
-    NS_ASSERTION(gThread, "An armed timer exists after the thread timer stopped.");
+    MOZ_ASSERT(gThread, "Armed timer exists after the thread timer stopped.");
     if (NS_SUCCEEDED(gThread->RemoveTimer(this)))
       return 0;
   }
@@ -535,14 +551,22 @@ void nsTimerEvent::Init()
   sAllocator = new TimerEventAllocator();
   static const size_t kBucketSizes[] = {sizeof(nsTimerEvent)};
   static const int32_t kNumBuckets = mozilla::ArrayLength(kBucketSizes);
-  static const int32_t kInitialPoolSize = 1024 * sizeof(nsTimerEvent);
+  static const int32_t kInitialPoolSize = 4096;
   sAllocator->Init("TimerEventPool", kBucketSizes, kNumBuckets, kInitialPoolSize);
 }
 
 void nsTimerEvent::Shutdown()
 {
-  delete sAllocator;
-  sAllocator = nullptr;
+  sCanDeleteAllocator = true;
+  DeleteAllocatorIfNeeded();
+}
+
+void nsTimerEvent::DeleteAllocatorIfNeeded()
+{
+  if (sCanDeleteAllocator && sAllocatorUsers == 0) {
+    delete sAllocator;
+    sAllocator = nullptr;
+  }
 }
 
 NS_IMETHODIMP nsTimerEvent::Run()

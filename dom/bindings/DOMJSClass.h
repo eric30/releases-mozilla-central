@@ -23,6 +23,12 @@ class nsCycleCollectionParticipant;
 // bindings.
 #define DOM_XRAY_EXPANDO_SLOT 1
 
+// We use slot 2 for holding either a JS::ObjectValue which points to the cached
+// SOW or JS::UndefinedValue if this class doesn't need SOWs. This is not safe
+// for globals until bug 760095 is fixed, so that bug blocks converting Window
+// to new bindings.
+#define DOM_OBJECT_SLOT_SOW 2
+
 // All DOM globals must have a slot at DOM_PROTOTYPE_SLOT.
 #define DOM_PROTOTYPE_SLOT JSCLASS_GLOBAL_SLOT_COUNT
 
@@ -35,6 +41,10 @@ class nsCycleCollectionParticipant;
 // changes.
 #define DOM_PROTO_INSTANCE_CLASS_SLOT 0
 
+// Interface objects store a number of reserved slots equal to
+// DOM_INTERFACE_BASE_SLOTS + number of named constructors.
+#define DOM_INTERFACE_SLOTS_BASE (DOM_XRAY_EXPANDO_SLOT + 1)
+
 MOZ_STATIC_ASSERT(DOM_PROTO_INSTANCE_CLASS_SLOT != DOM_XRAY_EXPANDO_SLOT,
                   "Interface prototype object use both of these, so they must "
                   "not be the same slot.");
@@ -44,7 +54,7 @@ namespace dom {
 
 typedef bool
 (* ResolveOwnProperty)(JSContext* cx, JSObject* wrapper, JSObject* obj, jsid id,
-                       bool set, JSPropertyDescriptor* desc);
+                       JSPropertyDescriptor* desc, unsigned flags);
 
 typedef bool
 (* EnumerateOwnProperties)(JSContext* cx, JSObject* wrapper, JSObject* obj,
@@ -56,10 +66,22 @@ struct ConstantSpec
   JS::Value value;
 };
 
+typedef bool (*PropertyEnabled)(JSContext* cx, JSObject* global);
+
 template<typename T>
 struct Prefable {
+  inline bool isEnabled(JSContext* cx, JSObject* obj) {
+    return enabled &&
+      (!enabledFunc ||
+       enabledFunc(cx, js::GetGlobalForObjectCrossCompartment(obj)));
+  }
+
   // A boolean indicating whether this set of specs is enabled
   bool enabled;
+  // A function pointer to a function that can say the property is disabled
+  // even if "enabled" is set to true.  If the pointer is null the value of
+  // "enabled" is used as-is.
+  PropertyEnabled enabledFunc;
   // Array of specs, terminated in whatever way is customary for T.
   // Null to indicate a end-of-array for Prefable, when such an
   // indicator is needed.
@@ -129,11 +151,14 @@ enum DOMObjectType {
   eInterfacePrototype
 };
 
+typedef JSObject* (*ParentGetter)(JSContext* aCx, JSObject* aObj);
+typedef JSObject* (*ProtoGetter)(JSContext* aCx, JSObject* aGlobal);
+
 struct DOMClass
 {
   // A list of interfaces that this object implements, in order of decreasing
   // derivedness.
-  const prototypes::ID mInterfaceChain[prototypes::id::_ID_Count];
+  const prototypes::ID mInterfaceChain[MAX_PROTOTYPE_CHAIN_LENGTH];
 
   // We store the DOM object in reserved slot with index DOM_OBJECT_SLOT or in
   // the proxy private if we use a proxy object.
@@ -142,6 +167,9 @@ struct DOMClass
   const bool mDOMObjectIsISupports;
 
   const NativePropertyHooks* mNativeHooks;
+
+  ParentGetter mGetParent;
+  ProtoGetter mGetProto;
 
   // This stores the CC participant for the native, null if this class is for a
   // worker or for a native inheriting from nsISupports (we can get the CC
@@ -191,6 +219,13 @@ struct DOMIfaceAndProtoJSClass
   DOMObjectType mType;
 
   const NativePropertyHooks* mNativeHooks;
+
+  // The value to return for toString() on this interface or interface prototype
+  // object.
+  const char* mToString;
+
+  const prototypes::ID mPrototypeID;
+  const uint32_t mDepth;
 
   static const DOMIfaceAndProtoJSClass* FromJSClass(const JSClass* base) {
     MOZ_ASSERT(base->flags & JSCLASS_IS_DOMIFACEANDPROTOJSCLASS);

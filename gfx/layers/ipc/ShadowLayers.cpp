@@ -25,6 +25,7 @@
 
 using namespace mozilla::ipc;
 using namespace mozilla::gl;
+using namespace mozilla::dom;
 
 namespace mozilla {
 namespace layers {
@@ -37,19 +38,27 @@ class Transaction
 {
 public:
   Transaction()
-    : mSwapRequired(false)
+    : mTargetRotation(ROTATION_0)
+    , mSwapRequired(false)
     , mOpen(false)
     , mRotationChanged(false)
   {}
 
-  void Begin(const nsIntRect& aTargetBounds, ScreenRotation aRotation)
+  void Begin(const nsIntRect& aTargetBounds, ScreenRotation aRotation,
+             const nsIntRect& aClientBounds, ScreenOrientation aOrientation)
   {
     mOpen = true;
     mTargetBounds = aTargetBounds;
     if (aRotation != mTargetRotation) {
-        mRotationChanged = true;
+      // the first time this is called, mRotationChanged will be false if
+      // aRotation is 0, but we should be OK because for the first transaction
+      // we should only compose if it is non-empty. See the caller(s) of
+      // RotationChanged.
+      mRotationChanged = true;
     }
     mTargetRotation = aRotation;
+    mClientBounds = aClientBounds;
+    mTargetOrientation = aOrientation;
   }
 
   void AddEdit(const Edit& aEdit)
@@ -107,6 +116,8 @@ public:
   ShadowableLayerSet mMutants;
   nsIntRect mTargetBounds;
   ScreenRotation mTargetRotation;
+  nsIntRect mClientBounds;
+  ScreenOrientation mTargetOrientation;
   bool mSwapRequired;
 
 private:
@@ -140,11 +151,13 @@ ShadowLayerForwarder::~ShadowLayerForwarder()
 
 void
 ShadowLayerForwarder::BeginTransaction(const nsIntRect& aTargetBounds,
-                                       ScreenRotation aRotation)
+                                       ScreenRotation aRotation,
+                                       const nsIntRect& aClientBounds,
+                                       ScreenOrientation aOrientation)
 {
   NS_ABORT_IF_FALSE(HasShadowManager(), "no manager to forward to");
   NS_ABORT_IF_FALSE(mTxn->Finished(), "uncommitted txn?");
-  mTxn->Begin(aTargetBounds, aRotation);
+  mTxn->Begin(aTargetBounds, aRotation, aClientBounds, aOrientation);
 }
 
 static PLayerChild*
@@ -331,6 +344,7 @@ ShadowLayerForwarder::EndTransaction(InfallibleTArray<EditReply>* aReplies)
                          *mutant->GetClipRect() : nsIntRect());
     common.isFixedPosition() = mutant->GetIsFixedPosition();
     common.fixedPositionAnchor() = mutant->GetFixedPositionAnchor();
+    common.fixedPositionMargin() = mutant->GetFixedPositionMargins();
     if (Layer* maskLayer = mutant->GetMaskLayer()) {
       common.maskLayerChild() = Shadow(maskLayer->AsShadowableLayer());
     } else {
@@ -358,7 +372,7 @@ ShadowLayerForwarder::EndTransaction(InfallibleTArray<EditReply>* aReplies)
     cset.AppendElements(&mTxn->mPaints.front(), mTxn->mPaints.size());
   }
 
-  TargetConfig targetConfig(mTxn->mTargetBounds, mTxn->mTargetRotation);
+  TargetConfig targetConfig(mTxn->mTargetBounds, mTxn->mTargetRotation, mTxn->mClientBounds, mTxn->mTargetOrientation);
 
   MOZ_LAYERS_LOG(("[LayersForwarder] syncing before send..."));
   PlatformSyncBeforeUpdate();

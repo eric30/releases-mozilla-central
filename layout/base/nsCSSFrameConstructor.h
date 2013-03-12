@@ -232,13 +232,16 @@ public:
   // as a result of a change to the :hover content state.
   uint32_t GetHoverGeneration() const { return mHoverGeneration; }
 
+  // Get a counter that increments on every style change, that we use to
+  // track whether off-main-thread animations are up-to-date.
+  uint64_t GetAnimationGeneration() const { return mAnimationGeneration; }
+
   // Note: It's the caller's responsibility to make sure to wrap a
   // ProcessRestyledFrames call in a view update batch and a script blocker.
   // This function does not call ProcessAttachedQueue() on the binding manager.
   // If the caller wants that to happen synchronously, it needs to handle that
   // itself.
-  nsresult ProcessRestyledFrames(nsStyleChangeList& aRestyleArray,
-                                 OverflowChangedTracker& aTracker);
+  nsresult ProcessRestyledFrames(nsStyleChangeList& aRestyleArray);
 
 private:
 
@@ -302,6 +305,12 @@ public:
   {
     PostRestyleEventCommon(aElement, aRestyleHint, aMinChangeHint, true);
   }
+
+  void FlushOverflowChangedTracker() 
+  {
+    mOverflowChangedTracker.Flush();
+  }
+
 private:
   /**
    * Notify the frame constructor that an element needs to have its
@@ -392,8 +401,7 @@ private:
                       nsIFrame*       aPrimaryFrame,
                       nsChangeHint    aMinHint,
                       RestyleTracker& aRestyleTracker,
-                      bool            aRestyleDescendants,
-                      OverflowChangedTracker& aTracker);
+                      bool            aRestyleDescendants);
 
   nsresult InitAndRestoreFrame (const nsFrameConstructorState& aState,
                                 nsIContent*                    aContent,
@@ -1042,7 +1050,7 @@ private:
       mIsText(false), mIsGeneratedContent(false),
       mIsRootPopupgroup(false), mIsAllInline(false), mIsBlock(false),
       mHasInlineEnds(false), mIsPopup(false),
-      mIsLineParticipant(false)
+      mIsLineParticipant(false), mIsForSVGAElement(false)
     {}
     ~FrameConstructionItem() {
       if (mIsGeneratedContent) {
@@ -1120,6 +1128,8 @@ private:
     bool mIsPopup;
     // Whether this item should be treated as a line participant
     bool mIsLineParticipant;
+    // Whether this item is for an SVG <a> element
+    bool mIsForSVGAElement;
 
     // Child frame construction items.
     FrameConstructionItemList mChildItems;
@@ -1269,6 +1279,10 @@ private:
 #define ITEM_ALLOW_PAGE_BREAK 0x2
   /* The item is a generated content item. */
 #define ITEM_IS_GENERATED_CONTENT 0x4
+  /* The item is within an SVG text block frame. */
+#define ITEM_IS_WITHIN_SVG_TEXT 0x8
+  /* The item allows items to be created for SVG <textPath> children. */
+#define ITEM_ALLOWS_TEXT_PATH_CHILD 0x10
   // The guts of AddFrameConstructionItems
   // aParentFrame might be null.  If it is, that means it was an
   // inline frame.
@@ -1378,6 +1392,8 @@ private:
                                                   nsIAtom* aTag,
                                                   int32_t aNameSpaceID,
                                                   nsIFrame* aParentFrame,
+                                                  bool aIsWithinSVGText,
+                                                  bool aAllowsTextPathChild,
                                                   nsStyleContext* aStyleContext);
 
   /* Not static because it does PropagateScrollToViewport.  If this
@@ -1458,10 +1474,14 @@ private:
    * corresponding logic in these functions.
    */
 public:
-  nsIFrame* GetAbsoluteContainingBlock(nsIFrame* aFrame);
-private:
+  enum ContainingBlockType {
+    ABS_POS,
+    FIXED_POS
+  };
+  nsIFrame* GetAbsoluteContainingBlock(nsIFrame* aFrame, ContainingBlockType aType);
   nsIFrame* GetFloatContainingBlock(nsIFrame* aFrame);
 
+private:
   nsIContent* PropagateScrollToViewport();
 
   // Build a scroll frame: 
@@ -1627,7 +1647,9 @@ private:
    * FrameConstructionItems and set its mIsAllInline flag appropriately.
    */
   void BuildInlineChildItems(nsFrameConstructorState& aState,
-                             FrameConstructionItem& aParentItem);
+                             FrameConstructionItem& aParentItem,
+                             bool aItemIsWithinSVGText,
+                             bool aItemAllowsTextPathChild);
 
   // Determine whether we need to wipe out what we just did and start over
   // because we're doing something like adding block kids to an inline frame
@@ -1885,6 +1907,12 @@ private:
   nsChangeHint        mRebuildAllExtraHint;
 
   nsCOMPtr<nsILayoutHistoryState> mTempFrameTreeState;
+
+  OverflowChangedTracker mOverflowChangedTracker;
+
+  // The total number of animation flushes by this frame constructor.
+  // Used to keep the layer and animation manager in sync.
+  uint64_t mAnimationGeneration;
 
   RestyleTracker mPendingRestyles;
   RestyleTracker mPendingAnimationRestyles;

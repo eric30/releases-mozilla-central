@@ -6,21 +6,25 @@
 #if !defined(MediaOmxReader_h_)
 #define MediaOmxReader_h_
 
-#include "base/basictypes.h"
 #include "MediaResource.h"
 #include "MediaDecoderReader.h"
-#include "OmxDecoder.h"
 
-#include "MPAPI.h"
+namespace android {
+class OmxDecoder;
+}
 
 namespace mozilla {
+
+namespace dom {
+  class TimeRanges;
+}
 
 class AbstractMediaDecoder;
 
 class MediaOmxReader : public MediaDecoderReader
 {
   nsCString mType;
-  android::OmxDecoder *mOmxDecoder;
+  android::sp<android::OmxDecoder> mOmxDecoder;
   bool mHasVideo;
   bool mHasAudio;
   nsIntRect mPicture;
@@ -53,7 +57,7 @@ public:
   virtual nsresult ReadMetadata(VideoInfo* aInfo,
                                 MetadataTags** aTags);
   virtual nsresult Seek(int64_t aTime, int64_t aStartTime, int64_t aEndTime, int64_t aCurrentTime);
-  virtual nsresult GetBuffered(nsTimeRanges* aBuffered, int64_t aStartTime);
+  virtual nsresult GetBuffered(mozilla::dom::TimeRanges* aBuffered, int64_t aStartTime);
 };
 
 } // namespace mozilla

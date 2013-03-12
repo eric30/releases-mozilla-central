@@ -4,10 +4,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "DOMSVGStringList.h"
-#include "DOMSVGTests.h"
+#include "mozilla/dom/SVGTests.h"
 #include "nsError.h"
 #include "nsCOMPtr.h"
 #include "nsSVGAttrTearoffTable.h"
+#include <algorithm>
 
 // See the architecture comment in this file's header.
 
@@ -114,7 +115,7 @@ DOMSVGStringList::InsertItemBefore(const nsAString & newItem,
   if (newItem.IsEmpty()) { // takes care of DOMStringIsNull too
     return NS_ERROR_DOM_SYNTAX_ERR;
   }
-  index = NS_MIN(index, InternalList().Length());
+  index = std::min(index, InternalList().Length());
 
   // Ensure we have enough memory so we can avoid complex error handling below:
   if (!InternalList().SetCapacity(InternalList().Length() + 1)) {
@@ -184,7 +185,7 @@ SVGStringList &
 DOMSVGStringList::InternalList()
 {
   if (mIsConditionalProcessingAttribute) {
-    nsCOMPtr<DOMSVGTests> tests = do_QueryInterface(mElement);
+    nsCOMPtr<dom::SVGTests> tests = do_QueryInterface(mElement);
     return tests->mStringListAttributes[mAttrEnum];
   }
   return mElement->GetStringListInfo().mStringLists[mAttrEnum];

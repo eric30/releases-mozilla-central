@@ -24,9 +24,11 @@
 #include "mozilla/StandardInteger.h"
 #include "mozilla/Util.h"
 #include "mozilla/Likely.h"
+#include <algorithm>
 
 using namespace xpc;
 using namespace mozilla;
+using namespace mozilla::dom;
 
 bool
 xpc_OkToHandOutWrapper(nsWrapperCache *cache)
@@ -40,8 +42,6 @@ xpc_OkToHandOutWrapper(nsWrapperCache *cache)
 }
 
 /***************************************************************************/
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(XPCWrappedNative)
 
 NS_IMETHODIMP
 NS_CYCLE_COLLECTION_CLASSNAME(XPCWrappedNative)::UnlinkImpl(void *p)
@@ -511,7 +511,7 @@ XPCWrappedNative::GetNewOrUsed(XPCCallContext& ccx,
 
     if (sciWrapper.GetFlags().WantPreCreate()) {
         // PreCreate may touch dead compartments.
-        js::AutoMaybeTouchDeadCompartments agc(parent);
+        js::AutoMaybeTouchDeadZones agc(parent);
 
         JSObject* plannedParent = parent;
         nsresult rv = sciWrapper.GetCallback()->PreCreate(identity, ccx,
@@ -944,7 +944,7 @@ XPCWrappedNative::Destroy()
      */
     if (XPCJSRuntime *rt = GetRuntime()) {
         if (js::IsIncrementalBarrierNeeded(rt->GetJSRuntime()))
-            js::IncrementalReferenceBarrier(GetWrapperPreserveColor());
+            js::IncrementalObjectBarrier(GetWrapperPreserveColor());
         mWrapperWord = WRAPPER_WORD_POISON;
     } else {
         MOZ_ASSERT(mWrapperWord == WRAPPER_WORD_POISON);
@@ -1582,8 +1582,9 @@ XPCWrappedNative::ReparentWrapperIfFound(XPCCallContext& ccx,
                     wrapper->UpdateScriptableInfo(newProto->GetScriptableInfo());
                 }
 
-                NS_ASSERTION(!newMap->Find(wrapper->GetIdentityObject()),
-                             "wrapper already in new scope!");
+                // Crash if the wrapper is already in the new scope.
+                if (newMap->Find(wrapper->GetIdentityObject()))
+                    MOZ_CRASH();
 
                 if (!newMap->Add(wrapper))
                     MOZ_CRASH();
@@ -1665,26 +1666,8 @@ XPCWrappedNative::ReparentWrapperIfFound(XPCCallContext& ccx,
 //
 // See bug 751995 for more information.
 
-bool
-XPCWrappedNative::IsOrphan()
-{
-    JSObject *parent = js::GetObjectParent(mFlatJSObject);
-
-    // If there's no parent, we've presumably got a global, which can't be an
-    // orphan by definition.
-    if (!parent)
-        return false;
-
-    // If our parent is a cross-compartment wrapper, it has left us behind.
-    return js::IsCrossCompartmentWrapper(parent);
-}
-
-// Recursively fix up orphans on the parent chain of a wrapper. Note that this
-// can cause a wrapper to move even if IsOrphan() is false, since its parent
-// might be an orphan, and fixing the parent causes this wrapper to become an
-// orphan.
-nsresult
-XPCWrappedNative::RescueOrphans(XPCCallContext& ccx)
+static nsresult
+RescueOrphans(XPCCallContext& ccx, JSObject* obj)
 {
     //
     // Even if we're not an orphan at the moment, one of our ancestors might
@@ -1698,52 +1681,73 @@ XPCWrappedNative::RescueOrphans(XPCCallContext& ccx)
     // NB: We pass stopAtOuter=false during the unwrap because Location objects
     // are parented to outer window proxies.
     nsresult rv;
-    JSObject *parentObj = js::GetObjectParent(mFlatJSObject);
+    JSObject *parentObj = js::GetObjectParent(obj);
     if (!parentObj)
         return NS_OK; // Global object. We're done.
     parentObj = js::UnwrapObject(parentObj, /* stopAtOuter = */ false);
 
     // PreCreate may touch dead compartments.
-    js::AutoMaybeTouchDeadCompartments agc(parentObj);
+    js::AutoMaybeTouchDeadZones agc(parentObj);
+
+    bool isWN = IS_WRAPPER_CLASS(js::GetObjectClass(obj));
 
     // There's one little nasty twist here. For reasons described in bug 752764,
     // we nuke SOW-ed objects after transplanting them. This means that nodes
     // parented to an element (such as XUL elements), can end up with a nuked proxy
     // in the parent chain, depending on the order of fixup. Because the proxy is
     // nuked, we can't follow it anywhere. But we _can_ find the new wrapper for
-    // the underlying native parent, which is exactly what PreCreate does.
-    // So do that here.
+    // the underlying native parent.
     if (MOZ_UNLIKELY(JS_IsDeadWrapper(parentObj))) {
-        rv = mScriptableInfo->GetCallback()->PreCreate(mIdentity, ccx,
-                                                       GetScope()->GetGlobalJSObject(),
-                                                       &parentObj);
-        NS_ENSURE_SUCCESS(rv, rv);
+        if (isWN) {
+            XPCWrappedNative *wn =
+                static_cast<XPCWrappedNative*>(js::GetObjectPrivate(obj));
+            rv = wn->GetScriptableInfo()->GetCallback()->PreCreate(wn->GetIdentityObject(), ccx,
+                                                           wn->GetScope()->GetGlobalJSObject(),
+                                                           &parentObj);
+            NS_ENSURE_SUCCESS(rv, rv);
+        } else {
+            MOZ_ASSERT(IsDOMObject(obj));
+            const DOMClass* domClass = GetDOMClass(obj);
+            parentObj = domClass->mGetParent(ccx, obj);
+        }
     }
 
     // Morph any slim wrappers, lest they confuse us.
-    MOZ_ASSERT(IS_WRAPPER_CLASS(js::GetObjectClass(parentObj)));
-    if (IS_SLIM_WRAPPER_OBJECT(parentObj)) {
+    if (IS_SLIM_WRAPPER(parentObj)) {
         bool ok = MorphSlimWrapper(ccx, parentObj);
         NS_ENSURE_TRUE(ok, NS_ERROR_FAILURE);
     }
 
-    // Get the WN corresponding to the parent, and recursively fix it up.
-    XPCWrappedNative *parentWrapper =
-      static_cast<XPCWrappedNative*>(js::GetObjectPrivate(parentObj));
-    rv = parentWrapper->RescueOrphans(ccx);
+    // Recursively fix up orphans on the parent chain.
+    rv = RescueOrphans(ccx, parentObj);
     NS_ENSURE_SUCCESS(rv, rv);
 
     // Now that we know our parent is in the right place, determine if we've
     // been orphaned. If not, we have nothing to do.
-    if (!IsOrphan())
+    if (!js::IsCrossCompartmentWrapper(parentObj))
         return NS_OK;
 
     // We've been orphaned. Find where our parent went, and follow it.
-    JSObject *parentGhost = js::GetObjectParent(mFlatJSObject);
-    JSObject *realParent = js::UnwrapObject(parentGhost);
-    return ReparentWrapperIfFound(ccx, GetObjectScope(parentGhost),
-                                  GetObjectScope(realParent),
-                                  realParent, mIdentity);
+    if (isWN) {
+        JSObject *realParent = js::UnwrapObject(parentObj);
+        XPCWrappedNative *wn =
+            static_cast<XPCWrappedNative*>(js::GetObjectPrivate(obj));
+        return wn->ReparentWrapperIfFound(ccx, GetObjectScope(parentObj),
+                                          GetObjectScope(realParent),
+                                          realParent, wn->GetIdentityObject());
+    }
+
+    return ReparentWrapper(ccx, obj);
+}
+
+// Recursively fix up orphans on the parent chain of a wrapper. Note that this
+// can cause a wrapper to move even if it is not an orphan, since its parent
+// might be an orphan and fixing the parent causes this wrapper to become an
+// orphan.
+nsresult
+XPCWrappedNative::RescueOrphans(XPCCallContext& ccx)
+{
+    return ::RescueOrphans(ccx, mFlatJSObject);
 }
 
 #define IS_TEAROFF_CLASS(clazz)                                               \
@@ -2749,7 +2753,7 @@ CallMethodHelper::InitializeDispatchParams()
     if (wantsOptArgc) {
         nsXPTCVariant* dp = &mDispatchParams[mOptArgcIndex];
         dp->type = nsXPTType::T_U8;
-        dp->val.u8 = NS_MIN<uint32_t>(mArgc, paramCount) - requiredArgs;
+        dp->val.u8 = std::min<uint32_t>(mArgc, paramCount) - requiredArgs;
     }
 
     return true;
@@ -3754,6 +3758,11 @@ ConstructSlimWrapper(XPCCallContext &ccx,
     nsISupports *identityObj = aHelper.GetCanonical();
     nsXPCClassInfo *classInfoHelper = aHelper.GetXPCClassInfo();
 
+    if (!classInfoHelper) {
+        SLIM_LOG_NOT_CREATED(ccx, identityObj, "No classinfo helper");
+        return false;
+    }
+
     XPCNativeScriptableFlags flags(classInfoHelper->GetScriptableFlags());
 
     NS_ASSERTION(flags.DontAskInstanceForScriptable(),
@@ -3768,7 +3777,7 @@ ConstructSlimWrapper(XPCCallContext &ccx,
     }
 
     // PreCreate may touch dead compartments.
-    js::AutoMaybeTouchDeadCompartments agc(parent);
+    js::AutoMaybeTouchDeadZones agc(parent);
 
     JSObject* plannedParent = parent;
     nsresult rv = classInfoHelper->PreCreate(identityObj, ccx, parent, &parent);

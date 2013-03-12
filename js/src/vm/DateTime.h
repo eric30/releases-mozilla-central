@@ -8,6 +8,7 @@
 #define DateTime_h___
 
 #include "mozilla/FloatingPoint.h"
+#include "mozilla/MathAlgorithms.h"
 #include "mozilla/StandardInteger.h"
 
 #include <math.h>
@@ -41,7 +42,7 @@ inline double
 TimeClip(double time)
 {
     /* Steps 1-2. */
-    if (!MOZ_DOUBLE_IS_FINITE(time) || fabs(time) > 8.64e15)
+    if (!MOZ_DOUBLE_IS_FINITE(time) || mozilla::Abs(time) > 8.64e15)
         return js_NaN;
 
     /* Step 3. */
@@ -98,15 +99,21 @@ class DateTimeInfo
 {
   public:
     DateTimeInfo();
-    int64_t getDSTOffsetMilliseconds(int64_t localTimeMilliseconds);
+
+    /*
+     * Get the DST offset in milliseconds at a UTC time.  This is usually
+     * either 0 or |msPerSecond * SecondsPerHour|, but at least one exotic time
+     * zone (Lord Howe Island, Australia) has a fractional-hour offset, just to
+     * keep things interesting.
+     */
+    int64_t getDSTOffsetMilliseconds(int64_t utcMilliseconds);
+
     void updateTimeZoneAdjustment();
 
     /* ES5 15.9.1.7. */
     double localTZA() { return localTZA_; }
 
   private:
-    int64_t computeDSTOffsetMilliseconds(int64_t localTimeSeconds);
-
     /*
      * The current local time zone adjustment, cached because retrieving this
      * dynamically is Slow, and a certain venerable benchmark which shall not
@@ -119,11 +126,19 @@ class DateTimeInfo
      */
     double localTZA_;
 
+    /*
+     * Compute the DST offset at the given UTC time in seconds from the epoch.
+     * (getDSTOffsetMilliseconds attempts to return a cached value, but in case
+     * of a cache miss it calls this method.  The cache is represented through
+     * the offset* and *{Start,End}Seconds fields below.)
+     */
+    int64_t computeDSTOffsetMilliseconds(int64_t utcSeconds);
+
     int64_t offsetMilliseconds;
-    int64_t rangeStartSeconds, rangeEndSeconds;
+    int64_t rangeStartSeconds, rangeEndSeconds; // UTC-based
 
     int64_t oldOffsetMilliseconds;
-    int64_t oldRangeStartSeconds, oldRangeEndSeconds;
+    int64_t oldRangeStartSeconds, oldRangeEndSeconds; // UTC-based
 
     static const int64_t MaxUnixTimeT = 2145859200; /* time_t 12/31/2037 */
 

@@ -11,7 +11,7 @@
 #include "jsapi.h"
 #include "nsString.h"
 #include "nsIServiceManager.h"
-#include "nsContentUtils.h"
+#include "nsContentUtils.h" // For NS_CONTENT_DELETE_LIST_MEMBER.
 #include "nsCycleCollectionParticipant.h"
 
 class nsIContent;
@@ -70,12 +70,10 @@ public:
 
   nsXBLProtoImplMember* GetNext() { return mNext; }
   void SetNext(nsXBLProtoImplMember* aNext) { mNext = aNext; }
+  const PRUnichar* GetName() { return mName; }
 
-  virtual nsresult InstallMember(nsIScriptContext* aContext,
-                                 nsIContent* aBoundElement, 
-                                 JSObject* aScriptObject, // Unused
-                                 JSObject* aTargetClassObject,
-                                 const nsCString& aClassStr) = 0;
+  virtual nsresult InstallMember(JSContext* aCx,
+                                 JSObject* aTargetClassObject) = 0;
   virtual nsresult CompileMember(nsIScriptContext* aContext,
                                  const nsCString& aClassStr,
                                  JSObject* aClassObject) = 0;

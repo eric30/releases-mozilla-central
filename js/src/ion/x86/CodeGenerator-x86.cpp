@@ -5,13 +5,18 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/DebugOnly.h"
+
+#include "jsnum.h"
+
 #include "CodeGenerator-x86.h"
-#include "ion/shared/CodeGenerator-shared-inl.h"
 #include "ion/MIR.h"
 #include "ion/MIRGraph.h"
-#include "jsnum.h"
-#include "jsscope.h"
+#include "ion/shared/CodeGenerator-shared-inl.h"
+#include "vm/Shape.h"
+
 #include "jsscriptinlines.h"
+#include "ion/ExecutionModeInlines.h"
 
 using namespace js;
 using namespace js::ion;
@@ -134,43 +139,6 @@ CodeGeneratorX86::visitUnbox(LUnbox *unbox)
     return true;
 }
 
-void
-CodeGeneratorX86::linkAbsoluteLabels()
-{
-    JSScript *script = gen->info().script();
-    IonCode *method = script->ion->method();
-
-    for (size_t i = 0; i < deferredDoubles_.length(); i++) {
-        DeferredDouble *d = deferredDoubles_[i];
-        const Value &v = script->ion->getConstant(d->index());
-        MacroAssembler::Bind(method, d->label(), &v);
-    }
-}
-
-bool
-CodeGeneratorX86::visitDouble(LDouble *ins)
-{
-    const LDefinition *out = ins->getDef(0);
-    const LConstantIndex *cindex = ins->getOperand(0)->toConstantIndex();
-    const Value &v = graph.getConstant(cindex->index());
-
-    union DoublePun {
-        uint64_t u;
-        double d;
-    } dpun;
-    dpun.d = v.toDouble();
-
-    if (masm.maybeInlineDouble(dpun.u, ToFloatRegister(out)))
-        return true;
-
-    DeferredDouble *d = new DeferredDouble(cindex->index());
-    if (!deferredDoubles_.append(d))
-        return false;
-
-    masm.movsd(d->label(), ToFloatRegister(out));
-    return true;
-}
-
 bool
 CodeGeneratorX86::visitLoadSlotV(LLoadSlotV *load)
 {
@@ -236,10 +204,19 @@ CodeGeneratorX86::visitLoadElementT(LLoadElementT *load)
             return false;
     }
 
-    if (load->mir()->type() == MIRType_Double)
-        masm.loadInt32OrDouble(source, ToFloatRegister(load->output()));
-    else
+    if (load->mir()->type() == MIRType_Double) {
+        FloatRegister fpreg = ToFloatRegister(load->output());
+        if (load->mir()->loadDoubles()) {
+            if (source.kind() == Operand::REG_DISP)
+                masm.loadDouble(source.toAddress(), fpreg);
+            else
+                masm.loadDouble(source.toBaseIndex(), fpreg);
+        } else {
+            masm.loadInt32OrDouble(source, fpreg);
+        }
+    } else {
         masm.movl(masm.ToPayload(source), ToRegister(load->output()));
+    }
 
     return true;
 }
@@ -335,7 +312,7 @@ CodeGeneratorX86::visitCompareB(LCompareB *lir)
             masm.cmp32(lhs.payloadReg(), Imm32(rhs->toConstant()->toBoolean()));
         else
             masm.cmp32(lhs.payloadReg(), ToRegister(rhs));
-        emitSet(JSOpToCondition(mir->jsop()), output);
+        masm.emitSet(JSOpToCondition(mir->jsop()), output);
         masm.jump(&done);
     }
     masm.bind(&notBoolean);
@@ -366,5 +343,58 @@ CodeGeneratorX86::visitCompareBAndBranch(LCompareBAndBranch *lir)
     else
         masm.cmp32(lhs.payloadReg(), ToRegister(rhs));
     emitBranch(JSOpToCondition(mir->jsop()), lir->ifTrue(), lir->ifFalse());
+    return true;
+}
+
+bool
+CodeGeneratorX86::visitCompareV(LCompareV *lir)
+{
+    MCompare *mir = lir->mir();
+    Assembler::Condition cond = JSOpToCondition(mir->jsop());
+    const ValueOperand lhs = ToValue(lir, LCompareV::LhsInput);
+    const ValueOperand rhs = ToValue(lir, LCompareV::RhsInput);
+    const Register output = ToRegister(lir->output());
+
+    JS_ASSERT(IsEqualityOp(mir->jsop()));
+
+    Label notEqual, done;
+    masm.cmp32(lhs.typeReg(), rhs.typeReg());
+    masm.j(Assembler::NotEqual, &notEqual);
+    {
+        masm.cmp32(lhs.payloadReg(), rhs.payloadReg());
+        masm.emitSet(cond, output);
+        masm.jump(&done);
+    }
+    masm.bind(&notEqual);
+    {
+        masm.move32(Imm32(cond == Assembler::NotEqual), output);
+    }
+
+    masm.bind(&done);
+    return true;
+}
+
+bool
+CodeGeneratorX86::visitCompareVAndBranch(LCompareVAndBranch *lir)
+{
+    MCompare *mir = lir->mir();
+    Assembler::Condition cond = JSOpToCondition(mir->jsop());
+    const ValueOperand lhs = ToValue(lir, LCompareVAndBranch::LhsInput);
+    const ValueOperand rhs = ToValue(lir, LCompareVAndBranch::RhsInput);
+
+    JS_ASSERT(mir->jsop() == JSOP_EQ || mir->jsop() == JSOP_STRICTEQ ||
+              mir->jsop() == JSOP_NE || mir->jsop() == JSOP_STRICTNE);
+
+    Label *notEqual;
+    if (cond == Assembler::Equal)
+        notEqual = lir->ifFalse()->lir()->label();
+    else
+        notEqual = lir->ifTrue()->lir()->label();
+
+    masm.cmp32(lhs.typeReg(), rhs.typeReg());
+    masm.j(Assembler::NotEqual, notEqual);
+    masm.cmp32(lhs.payloadReg(), rhs.payloadReg());
+    emitBranch(cond, lir->ifTrue(), lir->ifFalse());
+
     return true;
 }

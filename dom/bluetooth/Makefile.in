@@ -44,7 +44,6 @@ CPPSRCS += \
   BluetoothManager.cpp \
   BluetoothAdapter.cpp \
   BluetoothDevice.cpp \
-  BluetoothPropertyEvent.cpp \
   BluetoothReplyRunnable.cpp \
   BluetoothPropertyContainer.cpp \
   BluetoothUtils.cpp \
@@ -60,7 +59,7 @@ CPPSRCS += \
   $(NULL)
 
 ifdef MOZ_B2G_RIL
-CPPSRCS += BluetoothRilListener.cpp
+CPPSRCS += BluetoothTelephonyListener.cpp
 endif
 
 XPIDLSRCS = \
@@ -70,7 +69,6 @@ XPIDLSRCS = \
   nsIDOMBluetoothDevice.idl \
   nsIDOMBluetoothDeviceEvent.idl \
   nsIDOMBluetoothDeviceAddressEvent.idl \
-  nsIDOMBluetoothPropertyEvent.idl \
   $(NULL)
 
 ifeq (gonk,$(MOZ_WIDGET_TOOLKIT))

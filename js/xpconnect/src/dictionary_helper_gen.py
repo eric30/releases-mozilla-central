@@ -5,11 +5,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-import sys, os, xpidl
-
-# --makedepend-output support.
-make_dependencies = []
-make_targets = []
+import sys, os, xpidl, makeutils
 
 def strip_begin(text, suffix):
     if not text.startswith(suffix):
@@ -20,24 +16,6 @@ def strip_end(text, suffix):
     if not text.endswith(suffix):
         return text
     return text[:-len(suffix)]
-
-# Copied from dombindingsgen.py
-def makeQuote(filename):
-    return filename.replace(' ', '\\ ')  # enjoy!
-
-def writeMakeDependOutput(filename):
-    print "Creating makedepend file", filename
-    f = open(filename, 'w')
-    try:
-        if len(make_targets) > 0:
-            f.write("%s:" % makeQuote(make_targets[0]))
-            for filename in make_dependencies:
-                f.write(' \\\n\t\t%s' % makeQuote(filename))
-            f.write('\n\n')
-            for filename in make_targets[1:]:
-                f.write('%s: %s\n' % (makeQuote(filename), makeQuote(make_targets[0])))
-    finally:
-        f.close()
 
 def findIDL(includePath, interfaceFileName):
     for d in includePath:
@@ -52,8 +30,8 @@ def findIDL(includePath, interfaceFileName):
 
 def loadIDL(parser, includePath, filename):
     idlFile = findIDL(includePath, filename)
-    if not idlFile in make_dependencies:
-        make_dependencies.append(idlFile)
+    if not idlFile in makeutils.dependencies:
+        makeutils.dependencies.append(idlFile)
     idl = p.parse(open(idlFile).read(), idlFile)
     idl.resolve(includePath, p)
     return idl
@@ -132,7 +110,7 @@ def print_header_file(fd, conf):
 
     fd.write("\n"
              "namespace mozilla {\n"
-             "namespace dom {\n\n")
+             "namespace idl {\n\n")
 
     dicts = []
     for d in conf.dictionaries:
@@ -215,7 +193,7 @@ def print_cpp_file(fd, conf):
       if not c in conf.exclude_automatic_type_include:
             fd.write("#include \"%s.h\"\n" % c)
 
-    fd.write("\nusing namespace mozilla::dom;\n\n")
+    fd.write("\nusing namespace mozilla::idl;\n\n")
 
     for a in attrnames:
         fd.write("static jsid %s = JSID_VOID;\n"% get_jsid(a))
@@ -265,18 +243,23 @@ def init_value(attribute):
             return "JSVAL_VOID"
         return "0"
     else:
+        if realtype.count("double") and attribute.defvalue == "Infinity":
+            return "MOZ_DOUBLE_POSITIVE_INFINITY()"
+        if realtype.count("double") and attribute.defvalue == "-Infinity":
+            return "MOZ_DOUBLE_NEGATIVE_INFINITY()"
         if realtype.count("nsAString"):
             return "NS_LITERAL_STRING(\"%s\")" % attribute.defvalue
         if realtype.count("nsACString"):
             return "NS_LITERAL_CSTRING(\"%s\")" % attribute.defvalue
-        raise xpidl.IDLError("Default value is not supported for type %s" % realtype)
+        raise xpidl.IDLError("Default value of %s is not supported for type %s" %
+                             (attribute.defvalue, realtype), attribute.location)
 
 def write_header(iface, fd):
     attributes = []
     for member in iface.members:
         if isinstance(member, xpidl.Attribute):
             attributes.append(member)
-    
+
     fd.write("class %s" % iface.name)
     if iface.base is not None:
         fd.write(" : public %s" % iface.base)
@@ -287,7 +270,7 @@ def write_header(iface, fd):
     fd.write("  // If aCx or aVal is null, NS_OK is returned and \n"
              "  // dictionary will use the default values. \n"
              "  nsresult Init(JSContext* aCx, const jsval* aVal);\n")
-    
+
     fd.write("\n")
 
     for member in attributes:
@@ -423,7 +406,7 @@ def write_cpp(iface, fd):
              "  }\n\n"
              "  JSObject* obj = &aVal->toObject();\n"
              "  nsCxPusher pusher;\n"
-             "  NS_ENSURE_STATE(pusher.Push(aCx, false));\n"
+             "  pusher.Push(aCx);\n"
              "  JSAutoRequest ar(aCx);\n"
              "  JSAutoCompartment ac(aCx, obj);\n")
 
@@ -475,10 +458,10 @@ if __name__ == '__main__':
         print_header_file(outfd, conf)
         outfd.close()
     if options.stub_output is not None:
-        make_targets.append(options.stub_output)
+        makeutils.targets.append(options.stub_output)
         outfd = open(options.stub_output, 'w')
         print_cpp_file(outfd, conf)
         outfd.close()
         if options.makedepend_output is not None:
-            writeMakeDependOutput(options.makedepend_output)
+            makeutils.writeMakeDependOutput(options.makedepend_output)
 

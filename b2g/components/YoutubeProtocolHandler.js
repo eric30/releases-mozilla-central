@@ -16,17 +16,6 @@ XPCOMUtils.defineLazyGetter(this, "cpmm", function() {
            .getService(Ci.nsIMessageSender);
 });
 
-// Splits parameters in a query string.
-function extractParameters(aQuery) {
-  let params = aQuery.split("&");
-  let res = {};
-  params.forEach(function(aParam) {
-    let obj = aParam.split("=");
-    res[obj[0]] = decodeURIComponent(obj[1]);
-  });
-  return res;
-}
-
 function YoutubeProtocolHandler() {
 }
 
@@ -42,84 +31,27 @@ YoutubeProtocolHandler.prototype = {
 
   // Sample URL:
   // vnd.youtube:iNuKL2Gy_QM?vndapp=youtube_mobile&vndclient=mv-google&vndel=watch&vnddnc=1
+  // Note that there is no hostname, so we use URLTYPE_NO_AUTHORITY
   newURI: function yt_phNewURI(aSpec, aOriginCharset, aBaseURI) {
     let uri = Cc["@mozilla.org/network/standard-url;1"]
               .createInstance(Ci.nsIStandardURL);
-    let id = aSpec.substring(this.scheme.length + 1);
-    id = id.substring(0, id.indexOf('?'));
-    uri.init(Ci.nsIStandardURL.URLTYPE_STANDARD, -1, this.scheme + "://dummy_host/" + id, aOriginCharset,
-             aBaseURI);
+    uri.init(Ci.nsIStandardURL.URLTYPE_NO_AUTHORITY, this.defaultPort,
+             aSpec, aOriginCharset, aBaseURI);
     return uri.QueryInterface(Ci.nsIURI);
   },
 
   newChannel: function yt_phNewChannel(aURI) {
-    // Get a list of streams for this video id.
-    let infoURI = "http://www.youtube.com/get_video_info?&video_id=" +
-                  aURI.path.substring(1);
-
-    let xhr = Cc["@mozilla.org/xmlextras/xmlhttprequest;1"]
-                .createInstance(Ci.nsIXMLHttpRequest);
-    xhr.open("GET", infoURI, true);
-    xhr.addEventListener("load", function() {
-      // Youtube sends the response as a double wrapped url answer:
-      // we first extract the url_encoded_fmt_stream_map parameter,
-      // and from each comma-separated entry in this value, we extract
-      // other parameters (url and type).
-      let key = "url_encoded_fmt_stream_map=";
-      let pos = xhr.responseText.indexOf(key);
-      if (pos == -1) {
-        return;
-      }
-      let streams = decodeURIComponent(xhr.responseText
-                                       .substring(pos + key.length)).split(",");
-      let uri;
-      let mimeType;
-
-      // itag is an undocumented value which maps to resolution and mimetype
-      // see https://en.wikipedia.org/wiki/YouTube#Quality_and_codecs
-      // Ordered from least to most preferred
-      let recognizedItags = [
-        "17", // 144p 3GP
-        "36", // 240p 3GP
-        "43", // 360p WebM
-#ifdef MOZ_WIDGET_GONK
-        "18", // 360p H.264
-#endif
-      ];
-
-      let bestItag = -1;
-
-      let extras = { }
-
-      streams.forEach(function(aStream) {
-        let params = extractParameters(aStream);
-        let url = params["url"];
-        let type = params["type"] ? params["type"].split(";")[0] : null;
-        let itag = params["itag"];
-
-        let index;
-        if (url && type && ((index = recognizedItags.indexOf(itag)) != -1) &&
-            index > bestItag) {
-          uri = url + '&signature=' + (params["sig"] ? params['sig'] : '');
-          mimeType = type;
-          bestItag = index;
-        }
-        for (let param in params) {
-          if (["thumbnail_url", "length_seconds", "title"].indexOf(param) != -1) {
-            extras[param] = decodeURIComponent(params[param]);
-          }
-        }
-      });
-
-      if (uri && mimeType) {
-        cpmm.sendAsyncMessage("content-handler", {
-          url: uri,
-          type: mimeType,
-          extras: extras
-        });
-      }
+    /*
+     * This isn't a real protocol handler. Instead of creating a channel
+     * we just send a message and throw an exception. This 'content-handler'
+     * message is handled in b2g/chrome/content/shell.js where it starts
+     * an activity request that will open the Video app. The video app
+     * includes code to handle this fake 'video/youtube' mime type
+     */
+    cpmm.sendAsyncMessage("content-handler", {
+      type: 'video/youtube', // A fake MIME type for the activity handler
+      url: aURI.spec         // The path component of this URL is the video id
     });
-    xhr.send(null);
 
     throw Components.results.NS_ERROR_ILLEGAL_VALUE;
   },

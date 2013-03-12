@@ -6,14 +6,14 @@
 #include "nsDOMDataContainerEvent.h"
 #include "nsDOMClassInfoID.h"
 
-nsDOMDataContainerEvent::nsDOMDataContainerEvent(nsPresContext *aPresContext,
-                                                 nsEvent *aEvent)
-  : nsDOMEvent(aPresContext, aEvent)
+nsDOMDataContainerEvent::nsDOMDataContainerEvent(
+                                             mozilla::dom::EventTarget* aOwner,
+                                             nsPresContext* aPresContext,
+                                             nsEvent* aEvent)
+  : nsDOMEvent(aOwner, aPresContext, aEvent)
 {
   mData.Init();
 }
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsDOMDataContainerEvent)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsDOMDataContainerEvent,
                                                 nsDOMEvent)
@@ -53,7 +53,7 @@ nsDOMDataContainerEvent::SetData(const nsAString& aKey, nsIVariant *aData)
   NS_ENSURE_ARG(aData);
 
   // Make sure this event isn't already being dispatched.
-  NS_ENSURE_STATE(!(NS_IS_EVENT_IN_DISPATCH(mEvent)));
+  NS_ENSURE_STATE(!mEvent->mFlags.mIsBeingDispatched);
   NS_ENSURE_STATE(mData.IsInitialized());
   mData.Put(aKey, aData);
   return NS_OK;
@@ -61,11 +61,12 @@ nsDOMDataContainerEvent::SetData(const nsAString& aKey, nsIVariant *aData)
 
 nsresult
 NS_NewDOMDataContainerEvent(nsIDOMEvent** aInstancePtrResult,
-                   nsPresContext* aPresContext,
-                   nsEvent* aEvent)
+                            mozilla::dom::EventTarget* aOwner,
+                            nsPresContext* aPresContext,
+                            nsEvent* aEvent)
 {
   nsDOMDataContainerEvent* it =
-    new nsDOMDataContainerEvent(aPresContext, aEvent);
+    new nsDOMDataContainerEvent(aOwner, aPresContext, aEvent);
   NS_ENSURE_TRUE(it, NS_ERROR_OUT_OF_MEMORY);
 
   return CallQueryInterface(it, aInstancePtrResult);

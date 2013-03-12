@@ -9,17 +9,19 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-DIRS		= xbl-marquee
-
-ifdef ENABLE_TESTS
-TOOL_DIRS	= test
-endif
-
 MODULE		= layout
 LIBRARY_NAME	= gkstyle_s
 LIBXUL_LIBRARY	= 1
+ifndef _MSC_VER
+FAIL_ON_WARNINGS = 1
+endif # !_MSC_VER
 
-EXPORTS_NAMESPACES = mozilla/css
+ifdef GNU_CC
+OS_CFLAGS := $(OS_CFLAGS) -Wshadow
+OS_CXXFLAGS := $(OS_CXXFLAGS) -Wshadow
+endif
+
+EXPORTS_NAMESPACES = mozilla/css mozilla/dom
 
 EXPORTS		= \
 		AnimationCommon.h \
@@ -43,6 +45,7 @@ EXPORTS		= \
 		nsCSSValue.h \
 		nsDOMCSSAttrDeclaration.h \
 		nsDOMCSSDeclaration.h \
+		nsDOMCSSRGBColor.h \
 		nsDOMMediaQueryList.h \
 		nsICSSDeclaration.h \
 		nsICSSLoaderObserver.h \
@@ -81,8 +84,14 @@ EXPORTS_mozilla/css = \
 		StyleRule.h \
 		$(NULL)
 
+EXPORTS_mozilla/dom = \
+		CSS.h \
+		CSSValue.h \
+		$(NULL)
+
 CPPSRCS		= \
 		AnimationCommon.cpp \
+		CSS.cpp \
 		nsCSSAnonBoxes.cpp \
 		nsCSSDataBlock.cpp \
 		Declaration.cpp \
@@ -135,6 +144,7 @@ include $(topsrcdir)/ipc/chromium/chromium-config.mk
 
 LOCAL_INCLUDES	+= \
 		-I$(srcdir)/../base \
+		-I$(topsrcdir)/dom/base \
 		-I$(srcdir)/../generic \
 		-I$(srcdir)/../xul/base/src \
 		-I$(srcdir)/../../content/base/src \

@@ -65,7 +65,7 @@ EnableLogging(const char* aModulesStr)
     size_t tokenLen = strcspn(token, ",");
     for (unsigned int idx = 0; idx < ArrayLength(sModuleMap); idx++) {
       if (strncmp(token, sModuleMap[idx].mStr, tokenLen) == 0) {
-#if !defined(MOZ_PROFILING) && (!defined(MOZ_DEBUG) || defined(MOZ_OPTIMIZE))
+#if !defined(MOZ_PROFILING) && (!defined(DEBUG) || defined(MOZ_OPTIMIZE))
         // Stack tracing on profiling enabled or debug not optimized builds.
         if (strncmp(token, "stack", tokenLen) == 0)
           break;
@@ -273,6 +273,9 @@ LogShellLoadType(nsIDocShell* aDocShell)
     case LOAD_RELOAD_BYPASS_PROXY_AND_CACHE:
       printf("reload bypass proxy and cache; ");
       break;
+    case LOAD_RELOAD_ALLOW_MIXED_CONTENT:
+      printf("reload allow mixed content; ");
+      break;
     case LOAD_LINK:
       printf("link; ");
       break;
@@ -400,8 +403,7 @@ logging::DocLoad(const char* aMsg, nsIWebProgress* aWebProgress,
   }
 
   nsCOMPtr<nsIDocument> documentNode(do_QueryInterface(DOMDocument));
-  DocAccessible* document =
-    GetAccService()->GetDocAccessibleFromCache(documentNode);
+  DocAccessible* document = GetExistingDocAccessible(documentNode);
 
   LogDocInfo(documentNode, document);
 
@@ -425,8 +427,7 @@ logging::DocLoad(const char* aMsg, nsIDocument* aDocumentNode)
 {
   MsgBegin(sDocLoadTitle, aMsg);
 
-  DocAccessible* document =
-    GetAccService()->GetDocAccessibleFromCache(aDocumentNode);
+  DocAccessible* document = GetExistingDocAccessible(aDocumentNode);
   LogDocInfo(aDocumentNode, document);
 
   MsgEnd();
@@ -486,7 +487,7 @@ logging::DocCreate(const char* aMsg, nsIDocument* aDocumentNode,
                    DocAccessible* aDocument)
 {
   DocAccessible* document = aDocument ?
-    aDocument : GetAccService()->GetDocAccessibleFromCache(aDocumentNode);
+    aDocument : GetExistingDocAccessible(aDocumentNode);
 
   MsgBegin(sDocCreateTitle, aMsg);
   LogDocInfo(aDocumentNode, document);
@@ -498,7 +499,7 @@ logging::DocDestroy(const char* aMsg, nsIDocument* aDocumentNode,
                     DocAccessible* aDocument)
 {
   DocAccessible* document = aDocument ?
-    aDocument : GetAccService()->GetDocAccessibleFromCache(aDocumentNode);
+    aDocument : GetExistingDocAccessible(aDocumentNode);
 
   MsgBegin(sDocDestroyTitle, aMsg);
   LogDocInfo(aDocumentNode, document);

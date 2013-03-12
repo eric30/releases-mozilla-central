@@ -25,6 +25,8 @@ nestegg_track_seek
 nestegg_track_type
 nestegg_track_video_params
 nestegg_tstamp_scale
+nestegg_has_cues
+nestegg_sniff
 #endif
 #ifdef MOZ_VP8
 #ifndef MOZ_NATIVE_LIBVPX
@@ -42,6 +44,7 @@ vpx_codec_enc_init_ver
 vpx_codec_vp8_cx
 #endif
 vpx_img_set_rect
+vpx_img_wrap
 vpx_codec_get_cx_data
 vpx_codec_enc_config_default
 vpx_img_alloc
@@ -564,3 +567,18 @@ hb_unicode_funcs_set_eastasian_width_func
 hb_unicode_funcs_set_general_category_func
 hb_unicode_funcs_set_mirroring_func
 hb_unicode_funcs_set_script_func
+#ifdef MOZ_ENABLE_SKIA
+#ifdef HAVE_64BIT_OS
+?insert@SkString@@QEAAX_KQEBD@Z
+??0SkString@@QEAA@XZ
+??1SkString@@QEAA@XZ
+?Create@GrContext@@SAPEAV1@W4GrEngine@@_J@Z
+??0GrGLInterface@@QEAA@XZ
+#else
+?insert@SkString@@QAEXIQBD@Z
+??0SkString@@QAE@XZ
+??1SkString@@QAE@XZ
+?Create@GrContext@@SAPAV1@W4GrEngine@@H@Z
+??0GrGLInterface@@QAE@XZ
+#endif
+#endif

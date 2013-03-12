@@ -7,6 +7,7 @@
 const Cu = Components.utils;
 
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/commonjs/sdk/core/promise.js");
 Cu.import("resource:///modules/devtools/EventEmitter.jsm");
 
 this.EXPORTED_SYMBOLS = [ "Hosts" ];
@@ -16,7 +17,7 @@ this.EXPORTED_SYMBOLS = [ "Hosts" ];
  * sidebar or a separate window). Any host object should implement the
  * following functions:
  *
- * open() - create the UI and emit a 'ready' event when the UI is ready to use
+ * create() - create the UI and emit a 'ready' event when the UI is ready to use
  * destroy() - destroy the host's UI
  */
 
@@ -32,7 +33,7 @@ this.Hosts = {
 function BottomHost(hostTab) {
   this.hostTab = hostTab;
 
-  new EventEmitter(this);
+  EventEmitter.decorate(this);
 }
 
 BottomHost.prototype = {
@@ -43,7 +44,9 @@ BottomHost.prototype = {
   /**
    * Create a box at the bottom of the host tab.
    */
-  open: function BH_open() {
+  create: function BH_create() {
+    let deferred = Promise.defer();
+
     let gBrowser = this.hostTab.ownerDocument.defaultView.gBrowser;
     let ownerDocument = gBrowser.ownerDocument;
 
@@ -51,7 +54,7 @@ BottomHost.prototype = {
     this._splitter.setAttribute("class", "devtools-horizontal-splitter");
 
     this.frame = ownerDocument.createElement("iframe");
-    this.frame.id = "devtools-toolbox-bottom-iframe";
+    this.frame.className = "devtools-toolbox-bottom-iframe";
     this.frame.height = Services.prefs.getIntPref(this.heightPref);
 
     this._nbox = gBrowser.getNotificationBox(this.hostTab.linkedBrowser);
@@ -61,6 +64,8 @@ BottomHost.prototype = {
     let frameLoad = function() {
       this.frame.removeEventListener("DOMContentLoaded", frameLoad, true);
       this.emit("ready", this.frame);
+
+      deferred.resolve(this.frame);
     }.bind(this);
 
     this.frame.addEventListener("DOMContentLoaded", frameLoad, true);
@@ -69,20 +74,37 @@ BottomHost.prototype = {
     this.frame.setAttribute("src", "about:blank");
 
     focusTab(this.hostTab);
+
+    return deferred.promise;
+  },
+
+  /**
+   * Raise the host.
+   */
+  raise: function BH_raise() {
+    focusTab(this.hostTab);
+  },
+
+  /**
+   * Set the toolbox title.
+   */
+  setTitle: function BH_setTitle(title) {
+    // Nothing to do for this host type.
   },
 
   /**
    * Destroy the bottom dock.
    */
   destroy: function BH_destroy() {
-    if (this._destroyed) {
-      return;
-    }
-    this._destroyed = true;
-    Services.prefs.setIntPref(this.heightPref, this.frame.height);
+    if (!this._destroyed) {
+      this._destroyed = true;
 
-    this._nbox.removeChild(this._splitter);
-    this._nbox.removeChild(this.frame);
+      Services.prefs.setIntPref(this.heightPref, this.frame.height);
+      this._nbox.removeChild(this._splitter);
+      this._nbox.removeChild(this.frame);
+    }
+
+    return Promise.resolve(null);
   }
 }
 
@@ -93,7 +115,7 @@ BottomHost.prototype = {
 function SidebarHost(hostTab) {
   this.hostTab = hostTab;
 
-  new EventEmitter(this);
+  EventEmitter.decorate(this);
 }
 
 SidebarHost.prototype = {
@@ -104,7 +126,9 @@ SidebarHost.prototype = {
   /**
    * Create a box in the sidebar of the host tab.
    */
-  open: function RH_open() {
+  create: function SH_create() {
+    let deferred = Promise.defer();
+
     let gBrowser = this.hostTab.ownerDocument.defaultView.gBrowser;
     let ownerDocument = gBrowser.ownerDocument;
 
@@ -112,7 +136,7 @@ SidebarHost.prototype = {
     this._splitter.setAttribute("class", "devtools-side-splitter");
 
     this.frame = ownerDocument.createElement("iframe");
-    this.frame.id = "devtools-toolbox-side-iframe";
+    this.frame.className = "devtools-toolbox-side-iframe";
     this.frame.width = Services.prefs.getIntPref(this.widthPref);
 
     this._sidebar = gBrowser.getSidebarContainer(this.hostTab.linkedBrowser);
@@ -122,22 +146,45 @@ SidebarHost.prototype = {
     let frameLoad = function() {
       this.frame.removeEventListener("DOMContentLoaded", frameLoad, true);
       this.emit("ready", this.frame);
+
+      deferred.resolve(this.frame);
     }.bind(this);
 
     this.frame.addEventListener("DOMContentLoaded", frameLoad, true);
     this.frame.setAttribute("src", "about:blank");
 
     focusTab(this.hostTab);
+
+    return deferred.promise;
+  },
+
+  /**
+   * Raise the host.
+   */
+  raise: function SH_raise() {
+    focusTab(this.hostTab);
+  },
+
+  /**
+   * Set the toolbox title.
+   */
+  setTitle: function SH_setTitle(title) {
+    // Nothing to do for this host type.
   },
 
   /**
    * Destroy the sidebar.
    */
-  destroy: function RH_destroy() {
-    Services.prefs.setIntPref(this.widthPref, this.frame.width);
+  destroy: function SH_destroy() {
+    if (!this._destroyed) {
+      this._destroyed = true;
 
-    this._sidebar.removeChild(this._splitter);
-    this._sidebar.removeChild(this.frame);
+      Services.prefs.setIntPref(this.widthPref, this.frame.width);
+      this._sidebar.removeChild(this._splitter);
+      this._sidebar.removeChild(this.frame);
+    }
+
+    return Promise.resolve(null);
   }
 }
 
@@ -147,7 +194,7 @@ SidebarHost.prototype = {
 function WindowHost() {
   this._boundUnload = this._boundUnload.bind(this);
 
-  new EventEmitter(this);
+  EventEmitter.decorate(this);
 }
 
 WindowHost.prototype = {
@@ -158,7 +205,9 @@ WindowHost.prototype = {
   /**
    * Create a new xul window to contain the toolbox.
    */
-  open: function WH_open() {
+  create: function WH_create() {
+    let deferred = Promise.defer();
+
     let flags = "chrome,centerscreen,resizable,dialog=no";
     let win = Services.ww.openWindow(null, this.WINDOW_URL, "_blank",
                                      flags, null);
@@ -167,6 +216,8 @@ WindowHost.prototype = {
       win.removeEventListener("load", frameLoad, true);
       this.frame = win.document.getElementById("toolbox-iframe");
       this.emit("ready", this.frame);
+
+      deferred.resolve(this.frame);
     }.bind(this);
 
     win.addEventListener("load", frameLoad, true);
@@ -175,6 +226,8 @@ WindowHost.prototype = {
     win.focus();
 
     this._window = win;
+
+    return deferred.promise;
   },
 
   /**
@@ -190,11 +243,31 @@ WindowHost.prototype = {
   },
 
   /**
+   * Raise the host.
+   */
+  raise: function RH_raise() {
+    this._window.focus();
+  },
+
+  /**
+   * Set the toolbox title.
+   */
+  setTitle: function WH_setTitle(title) {
+    this._window.document.title = title;
+  },
+
+  /**
    * Destroy the window.
    */
   destroy: function WH_destroy() {
-    this._window.removeEventListener("unload", this._boundUnload);
-    this._window.close();
+    if (!this._destroyed) {
+      this._destroyed = true;
+
+      this._window.removeEventListener("unload", this._boundUnload);
+      this._window.close();
+    }
+
+    return Promise.resolve(null);
   }
 }
 

@@ -534,7 +534,7 @@ nsHTMLEditUtils::SupportsAlignAttr(nsIDOMNode* aNode)
 
 // address, applet, article, aside, blockquote, button, center, del, dir, div,
 // dl, fieldset, figure, footer, form, h1, h2, h3, h4, h5, h6, header, hgroup,
-// hr, iframe, ins, map, menu, nav, noframes, noscript, object, ol, p,
+// hr, iframe, ins, main, map, menu, nav, noframes, noscript, object, ol, p,
 // pre, table, section, ul
 #define GROUP_BLOCK            (1 << 7)
 
@@ -646,6 +646,7 @@ static const nsElementInfo kElements[eHTMLTag_userdefined] = {
   ELEM(col, false, false, GROUP_TABLE_CONTENT | GROUP_COLGROUP_CONTENT,
        GROUP_NONE),
   ELEM(colgroup, true, false, GROUP_NONE, GROUP_COLGROUP_CONTENT),
+  ELEM(data, true, false, GROUP_PHRASE, GROUP_INLINE_ELEMENT),
   ELEM(datalist, true, false, GROUP_PHRASE,
        GROUP_OPTIONS | GROUP_INLINE_ELEMENT),
   ELEM(dd, true, false, GROUP_DL_CONTENT, GROUP_FLOW_ELEMENT),
@@ -697,6 +698,7 @@ static const nsElementInfo kElements[eHTMLTag_userdefined] = {
   ELEM(li, true, false, GROUP_LI, GROUP_FLOW_ELEMENT),
   ELEM(link, false, false, GROUP_HEAD_CONTENT, GROUP_NONE),
   ELEM(listing, false, false, GROUP_NONE, GROUP_NONE),
+  ELEM(main, true, true, GROUP_BLOCK, GROUP_FLOW_ELEMENT),
   ELEM(map, true, true, GROUP_SPECIAL, GROUP_BLOCK | GROUP_MAP_CONTENT),
   ELEM(mark, true, true, GROUP_PHRASE, GROUP_INLINE_ELEMENT),
   ELEM(marquee, false, false, GROUP_NONE, GROUP_NONE),
@@ -749,6 +751,7 @@ static const nsElementInfo kElements[eHTMLTag_userdefined] = {
   ELEM(tfoot, true, false, GROUP_NONE, GROUP_TBODY_CONTENT),
   ELEM(th, true, false, GROUP_TR_CONTENT, GROUP_FLOW_ELEMENT),
   ELEM(thead, true, false, GROUP_NONE, GROUP_TBODY_CONTENT),
+  ELEM(time, true, false, GROUP_PHRASE, GROUP_INLINE_ELEMENT),
   ELEM(title, true, false, GROUP_HEAD_CONTENT, GROUP_LEAF),
   ELEM(tr, true, false, GROUP_TBODY_CONTENT, GROUP_TR_CONTENT),
   ELEM(tt, true, true, GROUP_FONTSTYLE, GROUP_INLINE_ELEMENT),

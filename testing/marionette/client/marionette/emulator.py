@@ -2,6 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+from b2ginstance import B2GInstance
 import datetime
 from errors import *
 from mozdevice import devicemanagerADB, DMError
@@ -41,9 +42,10 @@ class LogcatProc(ProcessHandlerMixin):
 class Emulator(object):
 
     deviceRe = re.compile(r"^emulator-(\d+)(\s*)(.*)$")
+    _default_res = '320x480'
 
     def __init__(self, homedir=None, noWindow=False, logcat_dir=None,
-                 arch="x86", emulatorBinary=None, res='480x800', sdcard=None,
+                 arch="x86", emulatorBinary=None, res=None, sdcard=None,
                  userdata=None):
         self.port = None
         self.dm = None
@@ -59,7 +61,7 @@ class Emulator(object):
         self.logcat_proc = None
         self.arch = arch
         self.binary = emulatorBinary
-        self.res = res
+        self.res = res or self._default_res
         self.battery = EmulatorBattery(self)
         self.geo = EmulatorGeo(self)
         self.screen = EmulatorScreen(self)
@@ -72,15 +74,9 @@ class Emulator(object):
         self.copy_userdata = self.dataImg is None
 
     def _check_for_b2g(self):
-        if self.homedir is None:
-            self.homedir = os.getenv('B2G_HOME')
-        if self.homedir is None:
-            raise Exception('Must define B2G_HOME or pass the homedir parameter')
-        self._check_file(self.homedir)
-
-        oldstyle_homedir = os.path.join(self.homedir, 'glue', 'gonk-ics')
-        if os.access(oldstyle_homedir, os.F_OK):
-            self.homedir = oldstyle_homedir
+        self.b2g = B2GInstance(homedir=self.homedir)
+        self.adb = self.b2g.adb_path
+        self.homedir = self.b2g.homedir
 
         if self.arch not in ("x86", "arm"):
             raise Exception("Emulator architecture must be one of x86, arm, got: %s" %
@@ -103,7 +99,6 @@ class Emulator(object):
             sysdir = "out/target/product/generic"
             self.tail_args = ["-cpu", "cortex-a8"]
 
-        self._check_for_adb()
         if(self.sdcard):
             self.mksdcard = os.path.join(self.homedir, host_bin_dir, "mksdcard")
             self.create_sdcard(self.sdcard)
@@ -111,28 +106,22 @@ class Emulator(object):
         if not self.binary:
             self.binary = os.path.join(self.homedir, binary)
 
-        self._check_file(self.binary)
+        self.b2g.check_file(self.binary)
 
         self.kernelImg = os.path.join(self.homedir, kernel)
-        self._check_file(self.kernelImg)
+        self.b2g.check_file(self.kernelImg)
 
         self.sysDir = os.path.join(self.homedir, sysdir)
-        self._check_file(self.sysDir)
+        self.b2g.check_file(self.sysDir)
 
         if not self.dataImg:
             self.dataImg = os.path.join(self.sysDir, 'userdata.img')
-        self._check_file(self.dataImg)
+        self.b2g.check_file(self.dataImg)
 
     def __del__(self):
         if self.telnet:
             self.telnet.write('exit\n')
             self.telnet.read_all()
-
-    def _check_file(self, filePath):
-        if not os.access(filePath, os.F_OK):
-            raise Exception(('File not found: %s; did you pass the B2G home '
-                             'directory as the homedir parameter, or set '
-                             'B2G_HOME correctly?') % filePath)
 
     @property
     def args(self):
@@ -182,27 +171,6 @@ class Emulator(object):
             raise Exception('unable to create sdcard : exit code %d: %s'
                             % (retcode, sd.stdout.read()))
         return None
-
-    def _check_for_adb(self):
-        host_dir = "linux-x86"
-        if platform.system() == "Darwin":
-            host_dir = "darwin-x86"
-        adb = subprocess.Popen(['which', 'adb'],
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT)
-        if adb.wait() == 0:
-            self.adb = adb.stdout.read().strip()  # remove trailing newline
-            return
-        adb_paths = [os.path.join(self.homedir, 'glue', 'gonk', 'out', 'host',
-                                  host_dir, 'bin', 'adb'),
-                     os.path.join(self.homedir, 'out', 'host', host_dir,
-                                  'bin', 'adb'),
-                     os.path.join(self.homedir, 'bin', 'adb')]
-        for option in adb_paths:
-            if os.path.exists(option):
-                self.adb = option
-                return
-        raise Exception('adb not found!')
 
     def _run_adb(self, args):
         args.insert(0, self.adb)
@@ -269,13 +237,6 @@ class Emulator(object):
                     online.add(m.group(1))
         return (online, offline)
 
-    def restart(self, port):
-        if not self._emulator_launched:
-            return
-        self.close()
-        self.start()
-        return self.setup_port_forwarding(port)
-
     def start_adb(self):
         result = self._run_adb(['start-server'])
         # We keep track of whether we've started adb or not, so we know
@@ -313,7 +274,7 @@ waitFor(
         marionette.delete_session()
 
     def connect(self):
-        self._check_for_adb()
+        self.adb = B2GInstance.check_adb(self.homedir)
         self.start_adb()
 
         online, offline = self._get_adb_devices()
@@ -328,9 +289,7 @@ waitFor(
         self.dm = devicemanagerADB.DeviceManagerADB(adbPath=self.adb,
                                                     deviceSerial='emulator-%d' % self.port)
 
-    def add_prefs_to_profile(self, prefs=None):
-        if not prefs:
-            prefs = ['user_pref("marionette.loadearly", true);']
+    def add_prefs_to_profile(self, prefs=()):
         local_user_js = tempfile.mktemp(prefix='localuserjs')
         self.dm.getFile(self.remote_user_js, local_user_js)
         with open(local_user_js, 'a') as f:
@@ -378,23 +337,14 @@ waitFor(
         # setup DNS fix for networking
         self._run_adb(['shell', 'setprop', 'net.dns1', '10.0.2.3'])
 
-    def setup(self, marionette, gecko_path=None, load_early=False):
-        if gecko_path:
-            if load_early:
-                # Inject prefs into the profile now, since we have to restart
-                # B2G after installing a new gecko anyway.
-                self.add_prefs_to_profile()
-            self.install_gecko(gecko_path, marionette)
-        elif load_early:
-            self.add_prefs_to_profile()
-            self.restart_b2g()
+    def setup(self, marionette, gecko_path=None, busybox=None):
+        if busybox:
+            self.install_busybox(busybox)
 
-        if load_early:
-            # If we're loading early, we have to wait for the
-            # system-message-listener-ready event again after restarting B2G.
-            # If we're not loading early, we skip this because Marionette
-            # doesn't load until after this event has fired.
-            self.wait_for_system_message(marionette)
+        if gecko_path:
+            self.install_gecko(gecko_path, marionette)
+
+        self.wait_for_system_message(marionette)
 
     def restart_b2g(self):
         print 'restarting B2G'
@@ -414,27 +364,28 @@ waitFor(
         # gecko in order to avoid an adb bug in which adb will sometimes
         # hang indefinitely while copying large files to the system
         # partition.
-        push_attempts = 10
-
         print 'installing gecko binaries...'
 
         # see bug 809437 for the path that lead to this madness
         try:
             # need to remount so we can write to /system/b2g
             self._run_adb(['remount'])
+            self.dm.removeDir('/data/local/b2g')
+            self.dm.mkDir('/data/local/b2g')
+            self.dm.pushDir(gecko_path, '/data/local/b2g', retryLimit=10)
+
+            self.dm.shellCheckOutput(['stop', 'b2g'])
+
             for root, dirs, files in os.walk(gecko_path):
                 for filename in files:
                     rel_path = os.path.relpath(os.path.join(root, filename), gecko_path)
+                    data_local_file = os.path.join('/data/local/b2g', rel_path)
                     system_b2g_file = os.path.join('/system/b2g', rel_path)
-                    for retry in range(1, push_attempts + 1):
-                        print 'pushing', system_b2g_file, '(attempt %s of %s)' % (retry, push_attempts)
-                        try:
-                            self.dm.pushFile(os.path.join(root, filename), system_b2g_file)
-                            break
-                        except DMError:
-                            if retry == push_attempts:
-                                raise
 
+                    print 'copying', data_local_file, 'to', system_b2g_file
+                    self.dm.shellCheckOutput(['dd',
+                                              'if=%s' % data_local_file,
+                                              'of=%s' % system_b2g_file])
             self.restart_b2g()
 
         except (DMError, MarionetteException):
@@ -451,16 +402,9 @@ waitFor(
     def install_busybox(self, busybox):
         self._run_adb(['remount'])
 
-        push_attempts = 10
         remote_file = "/system/bin/busybox"
-        for retry in range(1, push_attempts+1):
-            print 'pushing', remote_file, '(attempt %s of %s)' % (retry, push_attempts)
-            try:
-                self.dm.pushFile(busybox, remote_file)
-                break
-            except DMError:
-                if retry == push_attempts:
-                    raise
+        print 'pushing %s' % remote_file
+        self.dm.pushFile(busybox, remote_file, retryLimit=10)
         self._run_adb(['shell', 'cd /system/bin; chmod 555 busybox; for x in `./busybox --list`; do ln -s ./busybox $x; done'])
         self.dm._verifyZip()
 

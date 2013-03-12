@@ -12,6 +12,7 @@
 #include "mozilla/dom/PBrowserParent.h"
 #include "mozilla/net/PHttpChannelParent.h"
 #include "mozilla/net/NeckoCommon.h"
+#include "mozilla/net/NeckoParent.h"
 #include "nsIParentRedirectingChannel.h"
 #include "nsIProgressEventSink.h"
 #include "nsHttpChannel.h"
@@ -44,7 +45,8 @@ public:
   NS_DECL_NSIINTERFACEREQUESTOR
 
   HttpChannelParent(mozilla::dom::PBrowserParent* iframeEmbedding,
-                    const IPC::SerializedLoadContext& loadContext);
+                    nsILoadContext* aLoadContext,
+                    PBOverrideStatus aStatus);
   virtual ~HttpChannelParent();
 
 protected:
@@ -52,6 +54,7 @@ protected:
                              const OptionalURIParams&   originalUri,
                              const OptionalURIParams&   docUri,
                              const OptionalURIParams&   referrerUri,
+                             const OptionalURIParams&   internalRedirectUri,
                              const uint32_t&            loadFlags,
                              const RequestHeaderTuples& requestHeaders,
                              const nsHttpAtom&          requestMethod,
@@ -75,7 +78,8 @@ protected:
   virtual bool RecvResume();
   virtual bool RecvCancel(const nsresult& status);
   virtual bool RecvRedirect2Verify(const nsresult& result,
-                                   const RequestHeaderTuples& changedHeaders);
+                                   const RequestHeaderTuples& changedHeaders,
+                                   const OptionalURIParams&   apiRedirectUri);
   virtual bool RecvUpdateAssociatedContentSecurity(const int32_t& broken,
                                                    const int32_t& no);
   virtual bool RecvDocumentChannelCleanup();
@@ -108,12 +112,6 @@ private:
   bool mSentRedirect1BeginFailed    : 1;
   bool mReceivedRedirect2Verify     : 1;
 
-  // Used to override channel Private Browsing status if needed.
-  enum PBOverrideStatus {
-    kPBOverride_Unset = 0,
-    kPBOverride_Private,
-    kPBOverride_NotPrivate
-  };
   PBOverrideStatus mPBOverride;
 
   nsCOMPtr<nsILoadContext> mLoadContext;

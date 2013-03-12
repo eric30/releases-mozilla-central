@@ -73,7 +73,7 @@ FileRequest::NotifyHelperCompleted(FileHelper* aFileHelper)
   nsIScriptContext* sc = GetContextForEventHandlers(&rv);
   NS_ENSURE_STATE(sc);
 
-  JSContext* cx = sc->GetNativeContext();
+  AutoPushJSContext cx(sc->GetNativeContext());
   NS_ASSERTION(cx, "Failed to get a context!");
 
   JSObject* global = sc->GetNativeGlobal();
@@ -131,7 +131,8 @@ FileRequest::FireProgressEvent(uint64_t aLoaded, uint64_t aTotal)
   }
 
   nsCOMPtr<nsIDOMEvent> event;
-  nsresult rv = NS_NewDOMProgressEvent(getter_AddRefs(event), nullptr, nullptr);
+  nsresult rv = NS_NewDOMProgressEvent(getter_AddRefs(event), this,
+                                       nullptr, nullptr);
   if (NS_FAILED(rv)) {
     return;
   }

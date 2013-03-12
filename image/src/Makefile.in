@@ -21,10 +21,12 @@ FAIL_ON_WARNINGS = 1
 
 EXPORTS		=  imgLoader.h \
 		   imgRequest.h \
+		   imgRequestProxy.h \
 		   $(NULL)
 
 CPPSRCS		= \
 			Image.cpp \
+			ImageFactory.cpp \
 			Decoder.cpp \
 			DiscardTracker.cpp \
 			RasterImage.cpp \
@@ -42,7 +44,10 @@ CPPSRCS		= \
 # We need to instantiate the decoders
 LOCAL_INCLUDES += -I$(topsrcdir)/image/decoders
 
-# Because SVGDocumentWrapper.cpp includes "nsSVGSVGElement.h"
+# For URI-related functionality
+LOCAL_INCLUDES += -I$(topsrcdir)/netwerk/base/src
+
+# Because SVGDocumentWrapper.cpp includes "mozilla/dom/SVGSVGElement.h"
 LOCAL_INCLUDES += \
 			-I$(topsrcdir)/content/svg/content/src \
 			-I$(topsrcdir)/content/base/src \

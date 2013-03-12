@@ -91,7 +91,6 @@ private:
 
   enum stateType {
     GENERATING_SYN_STREAM,
-    SENDING_SYN_STREAM,
     GENERATING_REQUEST_BODY,
     SENDING_REQUEST_BODY,
     SENDING_FIN_STREAM,
@@ -104,7 +103,7 @@ private:
 
   void     ChangeState(enum stateType);
   nsresult ParseHttpRequestHeaders(const char *, uint32_t, uint32_t *);
-  nsresult TransmitFrame(const char *, uint32_t *);
+  nsresult TransmitFrame(const char *, uint32_t *, bool forceCommitment);
   void     GenerateDataFrameHeader(uint32_t, bool);
 
   void     CompressToFrame(const nsACString &);
@@ -174,7 +173,7 @@ private:
 
   // The InlineFrame and associated data is used for composing control
   // frames and data frame headers.
-  nsAutoArrayPtr<char>         mTxInlineFrame;
+  nsAutoArrayPtr<uint8_t>      mTxInlineFrame;
   uint32_t                     mTxInlineFrameSize;
   uint32_t                     mTxInlineFrameUsed;
 

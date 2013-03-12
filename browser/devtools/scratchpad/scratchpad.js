@@ -28,6 +28,7 @@ Cu.import("resource:///modules/devtools/scratchpad-manager.jsm");
 Cu.import("resource://gre/modules/jsdebugger.jsm");
 Cu.import("resource:///modules/devtools/gDevTools.jsm");
 Cu.import("resource:///modules/devtools/Target.jsm");
+Cu.import("resource://gre/modules/osfile.jsm")
 
 const SCRATCHPAD_CONTEXT_CONTENT = 1;
 const SCRATCHPAD_CONTEXT_BROWSER = 2;
@@ -45,6 +46,41 @@ const BUTTON_POSITION_REVERT=0;
 var Scratchpad = {
   _instanceId: null,
   _initialWindowTitle: document.title,
+
+  /**
+   * Check if provided string is a mode-line and, if it is, return an
+   * object with its values.
+   *
+   * @param string aLine
+   * @return string
+   */
+  _scanModeLine: function SP__scanModeLine(aLine="")
+  {
+    aLine = aLine.trim();
+
+    let obj = {};
+    let ch1 = aLine.charAt(0);
+    let ch2 = aLine.charAt(1);
+
+    if (ch1 !== "/" || (ch2 !== "*" && ch2 !== "/")) {
+      return obj;
+    }
+
+    aLine = aLine
+      .replace(/^\/\//, "")
+      .replace(/^\/\*/, "")
+      .replace(/\*\/$/, "");
+
+    aLine.split(",").forEach(function (pair) {
+      let [key, val] = pair.split(":");
+
+      if (key && val) {
+        obj[key.trim()] = val.trim();
+      }
+    });
+
+    return obj;
+  },
 
   /**
    * The script execution context. This tells Scratchpad in which context the
@@ -607,26 +643,22 @@ var Scratchpad = {
       return;
     }
 
-    let fs = Cc["@mozilla.org/network/file-output-stream;1"].
-             createInstance(Ci.nsIFileOutputStream);
-    let modeFlags = 0x02 | 0x08 | 0x20;
-    fs.init(aFile, modeFlags, 420 /* 0644 */, fs.DEFER_OPEN);
-
-    let converter = Cc["@mozilla.org/intl/scriptableunicodeconverter"].
-                    createInstance(Ci.nsIScriptableUnicodeConverter);
-    converter.charset = "UTF-8";
-    let input = converter.convertToInputStream(this.getText());
-
-    let self = this;
-    NetUtil.asyncCopy(input, fs, function(aStatus) {
-      if (!aSilentError && !Components.isSuccessCode(aStatus)) {
-        window.alert(self.strings.GetStringFromName("saveFile.failed"));
-      }
-
+    let encoder = new TextEncoder();
+    let buffer = encoder.encode(this.getText());
+    let promise = OS.File.writeAtomic(aFile.path, buffer,{tmpPath: aFile.path + ".tmp"});
+    promise.then(function success(value) {
       if (aCallback) {
-        aCallback.call(self, aStatus);
+        aCallback.call(this, Components.results.NS_OK);
       }
-    });
+    }.bind(this), function failure(reason) {
+      if (!aSilentError) {
+        window.alert(this.strings.GetStringFromName("saveFile.failed"));
+      }
+      if (aCallback) {
+        aCallback.call(this, Components.results.NS_ERROR_UNEXPECTED);
+      }
+    }.bind(this));
+
   },
 
   /**
@@ -660,6 +692,16 @@ var Scratchpad = {
         content = NetUtil.readInputStreamToString(aInputStream,
                                                   aInputStream.available());
         content = converter.ConvertToUnicode(content);
+
+        // Check to see if the first line is a mode-line comment.
+        let line = content.split("\n")[0];
+        let modeline = self._scanModeLine(line);
+        let chrome = Services.prefs.getBoolPref(DEVTOOLS_CHROME_ENABLED);
+
+        if (chrome && modeline["-sp-context"] === "browser") {
+          self.setBrowserContext();
+        }
+
         self.setText(content);
         self.editor.resetUndo();
       }
@@ -1056,7 +1098,7 @@ var Scratchpad = {
   openWebConsole: function SP_openWebConsole()
   {
     let target = TargetFactory.forTab(this.gBrowser.selectedTab);
-    gDevTools.openToolboxForTab(target, "webconsole");
+    gDevTools.showToolbox(target, "webconsole");
     this.browserWindow.focus();
   },
 

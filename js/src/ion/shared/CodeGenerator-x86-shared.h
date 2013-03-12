@@ -17,12 +17,7 @@ class OutOfLineBailout;
 class OutOfLineUndoALUOperation;
 class MulNegativeZeroCheck;
 class OutOfLineTruncate;
-
-enum NaNCond {
-    NaN_Unexpected,
-    NaN_IsTrue,
-    NaN_IsFalse
-};
+class OutOfLineTableSwitch;
 
 class CodeGeneratorX86Shared : public CodeGeneratorShared
 {
@@ -65,20 +60,14 @@ class CodeGeneratorX86Shared : public CodeGeneratorShared
     bool generateEpilogue();
     bool generateOutOfLineCode();
 
-    void emitDoubleToInt32(const FloatRegister &src, const Register &dest, Label *fail, bool negativeZeroCheck = true);
-
     Operand createArrayElementOperand(Register elements, const LAllocation *index);
 
-    void emitCompare(MIRType type, const LAllocation *left, const LAllocation *right);
-
-    // Emits a conditional set.
-    void emitSet(Assembler::Condition cond, const Register &dest, NaNCond ifNaN = NaN_Unexpected);
-    void emitSet(Assembler::DoubleCondition cond, const Register &dest);
+    void emitCompare(MCompare::CompareType type, const LAllocation *left, const LAllocation *right);
 
     // Emits a branch that directs control flow to the true block if |cond| is
     // true, and the false block if |cond| is false.
     void emitBranch(Assembler::Condition cond, MBasicBlock *ifTrue, MBasicBlock *ifFalse,
-                    NaNCond ifNaN = NaN_Unexpected);
+                    Assembler::NaNCond ifNaN = Assembler::NaN_Unexpected);
     void emitBranch(Assembler::DoubleCondition cond, MBasicBlock *ifTrue, MBasicBlock *ifFalse);
 
     bool emitTableSwitchDispatch(MTableSwitch *mir, const Register &index, const Register &base);
@@ -88,8 +77,8 @@ class CodeGeneratorX86Shared : public CodeGeneratorShared
 
   public:
     // Instruction visitors.
+    virtual bool visitDouble(LDouble *ins);
     virtual bool visitMinMaxD(LMinMaxD *ins);
-    virtual bool visitNegD(LNegD *ins);
     virtual bool visitAbsD(LAbsD *ins);
     virtual bool visitSqrtD(LSqrtD *ins);
     virtual bool visitPowHalfD(LPowHalfD *ins);
@@ -124,6 +113,7 @@ class CodeGeneratorX86Shared : public CodeGeneratorShared
     bool visitOutOfLineUndoALUOperation(OutOfLineUndoALUOperation *ool);
     bool visitMulNegativeZeroCheck(MulNegativeZeroCheck *ool);
     bool visitOutOfLineTruncate(OutOfLineTruncate *ool);
+    bool visitOutOfLineTableSwitch(OutOfLineTableSwitch *ool);
     bool generateInvalidateEpilogue();
 };
 

@@ -101,7 +101,7 @@ grab_token(char **str, char **out)
     if (!tmp)
         ABORT(R_NO_MEMORY);
 
-    strncpy(tmp, *str, len);
+    memcpy(tmp, *str, len);
     tmp[len] = '\0';
 
     *str = c;
@@ -238,6 +238,10 @@ nr_ice_peer_candidate_from_attribute(nr_ice_ctx *ctx,char *orig,nr_ice_media_str
         ABORT(R_BAD_DATA);
 
     assert(nr_ice_candidate_type_names[0] == 0);
+#if __STDC_VERSION__ >= 201112L
+    _Static_assert(nr_ice_candidate_type_names[0] == 0,"Candidate name array is misformatted");
+#endif
+
     for (i = 1; nr_ice_candidate_type_names[i]; ++i) {
         if(!strncasecmp(nr_ice_candidate_type_names[i], str, strlen(nr_ice_candidate_type_names[i]))) {
             cand->type=i;
@@ -319,19 +323,23 @@ nr_ice_peer_candidate_from_attribute(nr_ice_ctx *ctx,char *orig,nr_ice_media_str
 
     skip_whitespace(&str);
 
+    /* Ignore extensions per RFC 5245 S 15.1 */
+#if 0
     /* This used to be an assert, but we don't want to exit on invalid
        remote data */
     if (strlen(str) != 0) {
       ABORT(R_BAD_DATA);
     }
-      
+#endif
+
     *candp=cand;
 
     _status=0;
   abort:
-    /* TODO(ekr@rtfm.com): Fix memory leak if we have a parse error */
-    if (_status)
+    if (_status){
         r_log(LOG_ICE,LOG_WARNING,"ICE(%s): Error parsing attribute: %s",ctx->label,orig);
+        nr_ice_candidate_destroy(&cand);
+    }
 
     RFREE(connection_address);
     RFREE(rel_addr);
@@ -377,9 +385,12 @@ nr_ice_peer_ctx_parse_media_stream_attribute(nr_ice_peer_ctx *pctx, nr_ice_media
     }
 
     skip_whitespace(&str);
-    /* it's expected to be at EOD at this point */
 
-    assert(strlen(str) == 0);
+    /* RFC 5245 grammar doesn't have an extension point for ice-pwd or
+       ice-ufrag: if there's anything left on the line, we treat it as bad. */
+    if (str[0] != '\0') {
+      ABORT(R_BAD_DATA);
+    }
 
     _status=0;
   abort:
@@ -403,7 +414,7 @@ nr_ice_peer_ctx_parse_global_attributes(nr_ice_peer_ctx *pctx, char **attrs, int
     unsigned int port;
     in_addr_t addr;
     char *ice_option_tag = 0;
-    
+
     for(i=0;i<attr_ct;i++){
         orig = str = attrs[i];
 
@@ -481,6 +492,8 @@ nr_ice_peer_ctx_parse_global_attributes(nr_ice_peer_ctx *pctx, char **attrs, int
             if (*str == '\0')
                 ABORT(R_BAD_DATA);
 
+            RFREE(pctx->peer_ufrag);
+            pctx->peer_ufrag = 0;
             if ((r=grab_token(&str, &pctx->peer_ufrag)))
                 ABORT(r);
         }
@@ -493,6 +506,8 @@ nr_ice_peer_ctx_parse_global_attributes(nr_ice_peer_ctx *pctx, char **attrs, int
             if (*str == '\0')
                 ABORT(R_BAD_DATA);
 
+            RFREE(pctx->peer_pwd);
+            pctx->peer_pwd = 0;
             if ((r=grab_token(&str, &pctx->peer_pwd)))
                 ABORT(r);
         }
@@ -506,9 +521,9 @@ nr_ice_peer_ctx_parse_global_attributes(nr_ice_peer_ctx *pctx, char **attrs, int
 
                 skip_whitespace(&str);
 
-#if 0
-//TODO: !nn! for now, just drop on the floor, later put somewhere
-#endif
+                //TODO: for now, just throw away; later put somewhere
+                RFREE(ice_option_tag);
+
                 ice_option_tag = 0;  /* prevent free */
             }
         }
@@ -517,9 +532,13 @@ nr_ice_peer_ctx_parse_global_attributes(nr_ice_peer_ctx *pctx, char **attrs, int
         }
 
         skip_whitespace(&str);
-        /* it's expected to be at EOD at this point */
 
-        assert(strlen(str) == 0);
+      /* RFC 5245 grammar doesn't have an extension point for any of the
+         preceding attributes: if there's anything left on the line, we
+         treat it as bad data. */
+      if (str[0] != '\0') {
+        ABORT(R_BAD_DATA);
+      }
     }
 
     _status=0;

@@ -11,18 +11,6 @@ relativesrcdir = @relativesrcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-# This extra subdirectory is needed due to the nature of this test.
-# With the bug, the test loads the base URL of the bug649134/file_*.sjs
-# files, and the mochitest server responds with the contents of index.html if
-# it exists in that case, which we use to detect failure.
-# We can't have index.html in this directory because it would prevent
-# running the tests here.
-TEST_DIRS += bug649134
-
-# For form-related test suite.
-TEST_DIRS += forms
-
-
 MOCHITEST_FILES = \
 		test_hidden.html \
 		test_bug589.html \
@@ -159,8 +147,6 @@ MOCHITEST_FILES = \
 		test_bug567938-4.html \
 		test_bug569955.html \
 		test_bug573969.html \
-		test_bug549475.html \
-		test_bug585508.html \
 		test_bug561640.html \
 		test_bug566064.html \
 		test_bug582412-1.html \
@@ -243,6 +229,7 @@ MOCHITEST_FILES = \
 		test_bug677463.html \
 		test_bug682886.html \
 		test_bug717819.html \
+		test_undoManager.html \
 		file_fullscreen-utils.js \
 		file_fullscreen-api.html \
 		file_fullscreen-api-keys.html \
@@ -256,8 +243,18 @@ MOCHITEST_FILES = \
 		file_fullscreen-esc-exit-inner.html \
 		file_fullscreen-rollback.html \
 		file_fullscreen-svg-element.html \
+		file_fullscreen-multiple.html \
+		file_fullscreen-multiple-inner.html \
 		test_li_attributes_reflection.html \
+		test_link_attributes_reflection.html \
 		test_ol_attributes_reflection.html \
+		test_dl_attributes_reflection.html \
+		test_ul_attributes_reflection.html \
+		test_param_attributes_reflection.html \
+		test_base_attributes_reflection.html \
+		test_dir_attributes_reflection.html \
+		test_q_attributes_reflection.html \
+		test_html_attributes_reflection.html \
 		test_bug651956.html \
 		test_bug694503.html \
 		test_object_plugin_nav.html \
@@ -267,9 +264,14 @@ MOCHITEST_FILES = \
 		test_input_file_picker.html \
 		test_bug763626.html \
 		test_bug780993.html \
-		test_bug786564.html \
 		test_bug797113.html \
 		test_bug787134.html \
+		test_bug803677.html \
+		test_bug827126.html \
+		test_bug827426.html \
+		test_bug838582.html \
+		test_bug839913.html \
+		test_bug841466.html \
 		test_iframe_sandbox_inheritance.html \
 		file_iframe_sandbox_a_if1.html \
 		file_iframe_sandbox_a_if2.html \
@@ -334,7 +336,14 @@ MOCHITEST_FILES = \
 		test_htmlcollection.html \
 		test_formelements.html \
 		test_rowscollection.html \
+		test_map_attributes_reflection.html \
+		test_meta_attributes_reflection.html \
+		test_mod_attributes_reflection.html \
 		test_mozaudiochannel.html \
+		test_style_attributes_reflection.html \
+		test_bug629801.html \
+		test_bug839371.html \
+		test_formData.html \
 		$(NULL)
 
 

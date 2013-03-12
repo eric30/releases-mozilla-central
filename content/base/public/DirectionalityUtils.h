@@ -7,8 +7,7 @@
 #ifndef DirectionalityUtils_h___
 #define DirectionalityUtils_h___
 
-#include "prtypes.h"
-#include "mozilla/StandardInteger.h"
+#include "nscore.h"
 
 class nsIContent;
 class nsIDocument;
@@ -80,14 +79,6 @@ void WalkDescendantsSetDirAuto(mozilla::dom::Element* aElement,
 void WalkDescendantsClearAncestorDirAuto(mozilla::dom::Element* aElement);
 
 /**
- * Walk the parent chain of a text node whose dir attribute has been removed and
- * reset the direction of any of its ancestors which have dir=auto and whose
- * directionality is determined by a text node descendant.
- */
-void WalkAncestorsResetAutoDirection(mozilla::dom::Element* aElement,
-                                     bool aNotify = true);
-
-/**
  * When the contents of a text node have changed, deal with any elements whose
  * directionality needs to change
  */
@@ -99,7 +90,7 @@ void SetDirectionFromChangedTextNode(nsIContent* aTextNode, uint32_t aOffset,
  * When a text node is appended to an element, find any ancestors with dir=auto
  * whose directionality will be determined by the text node
  */
-void SetDirectionFromNewTextNode(nsTextNode* aTextNode);
+void SetDirectionFromNewTextNode(nsIContent* aTextNode);
 
 /**
  * When a text node is removed from a document, find any ancestors whose
@@ -126,8 +117,22 @@ void SetDirectionalityFromValue(mozilla::dom::Element* aElement,
 void OnSetDirAttr(mozilla::dom::Element* aElement,
                   const nsAttrValue* aNewValue,
                   bool hadValidDir,
+                  bool hadDirAuto,
                   bool aNotify);
 
+/**
+ * Called when binding a new element to the tree, to set the
+ * NodeAncestorHasDirAuto flag and set the direction of the element and its
+ * ancestors if necessary
+ */
+void SetDirOnBind(mozilla::dom::Element* aElement, nsIContent* aParent);
+
+/**
+ * Called when unbinding an element from the tree, to recompute the
+ * directionality of the element if it doesn't have autodirection, and to
+ * clean up any entries in nsTextDirectionalityMap that refer to it.
+ */
+void ResetDir(mozilla::dom::Element* aElement);
 } // end namespace mozilla
 
 #endif /* DirectionalityUtils_h___ */

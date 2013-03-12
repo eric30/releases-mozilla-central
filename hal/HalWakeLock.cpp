@@ -7,6 +7,7 @@
 #include "mozilla/HalWakeLock.h"
 #include "mozilla/Services.h"
 #include "mozilla/StaticPtr.h"
+#include "mozilla/dom/ContentParent.h"
 #include "nsClassHashtable.h"
 #include "nsDataHashtable.h"
 #include "nsHashKeys.h"
@@ -44,6 +45,7 @@ struct LockCount {
   {}
   uint32_t numLocks;
   uint32_t numHidden;
+  nsTArray<uint64_t> processes;
 };
 typedef nsDataHashtable<nsUint64HashKey, LockCount> ProcessLockTable;
 typedef nsClassHashtable<nsStringHashKey, ProcessLockTable> LockTable;
@@ -62,14 +64,21 @@ CountWakeLocks(const uint64_t& aKey, LockCount aCount, void* aUserArg)
   totalCount->numLocks += aCount.numLocks;
   totalCount->numHidden += aCount.numHidden;
 
+  // This is linear in the number of processes, but that should be small.
+  if (!totalCount->processes.Contains(aKey)) {
+    totalCount->processes.AppendElement(aKey);
+  }
+
   return PL_DHASH_NEXT;
 }
 
 static PLDHashOperator
-RemoveChildFromList(const nsAString& aKey, ProcessLockTable* aTable, void* aUserArg)
+RemoveChildFromList(const nsAString& aKey, nsAutoPtr<ProcessLockTable>& aTable,
+                    void* aUserArg)
 {
   MOZ_ASSERT(aUserArg);
 
+  PLDHashOperator op = PL_DHASH_NEXT;
   uint64_t childID = *static_cast<uint64_t*>(aUserArg);
   if (aTable->Get(childID, NULL)) {
     aTable->Remove(childID);
@@ -78,7 +87,7 @@ RemoveChildFromList(const nsAString& aKey, ProcessLockTable* aTable, void* aUser
       WakeLockInformation info;
       aTable->EnumerateRead(CountWakeLocks, &totalCount);
       if (!totalCount.numLocks) {
-        sLockTable->Remove(aKey);
+        op = PL_DHASH_REMOVE;
       }
       info.numLocks() = totalCount.numLocks;
       info.numHidden() = totalCount.numHidden;
@@ -87,7 +96,7 @@ RemoveChildFromList(const nsAString& aKey, ProcessLockTable* aTable, void* aUser
     }
   }
 
-  return PL_DHASH_NEXT;
+  return op;
 }
 
 class ClearHashtableOnShutdown MOZ_FINAL : public nsIObserver {
@@ -136,7 +145,7 @@ CleanupOnContentShutdown::Observe(nsISupports* aSubject, const char* aTopic, con
   nsresult rv = props->GetPropertyAsUint64(NS_LITERAL_STRING("childID"),
                                            &childID);
   if (NS_SUCCEEDED(rv)) {
-    sLockTable->EnumerateRead(RemoveChildFromList, &childID);
+    sLockTable->Enumerate(RemoveChildFromList, &childID);
   } else {
     NS_WARNING("ipc:content-shutdown message without childID property");
   }
@@ -171,12 +180,13 @@ DisableWakeLockNotifications()
 }
 
 void
-ModifyWakeLockInternal(const nsAString& aTopic,
-                       hal::WakeLockControl aLockAdjust,
-                       hal::WakeLockControl aHiddenAdjust,
-                       uint64_t aProcessID)
+ModifyWakeLock(const nsAString& aTopic,
+               hal::WakeLockControl aLockAdjust,
+               hal::WakeLockControl aHiddenAdjust,
+               uint64_t aProcessID)
 {
   MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aProcessID != CONTENT_PROCESS_ID_UNKNOWN);
 
   if (sIsShuttingDown) {
     return;
@@ -225,9 +235,7 @@ ModifyWakeLockInternal(const nsAString& aTopic,
 
   if (sActiveListeners && oldState != newState) {
     WakeLockInformation info;
-    info.numLocks() = totalCount.numLocks;
-    info.numHidden() = totalCount.numHidden;
-    info.topic() = aTopic;
+    GetWakeLockInfo(aTopic, &info);
     NotifyWakeLockChange(info);
   }
 }
@@ -254,6 +262,7 @@ GetWakeLockInfo(const nsAString& aTopic, WakeLockInformation* aWakeLockInfo)
   table->EnumerateRead(CountWakeLocks, &totalCount);
   aWakeLockInfo->numLocks() = totalCount.numLocks;
   aWakeLockInfo->numHidden() = totalCount.numHidden;
+  aWakeLockInfo->lockingProcesses() = totalCount.processes;
   aWakeLockInfo->topic() = aTopic;
 }
 

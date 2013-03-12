@@ -46,22 +46,31 @@ class MediaDecoder;
 class MediaChannelStatistics {
 public:
   MediaChannelStatistics() { Reset(); }
+
+  MediaChannelStatistics(MediaChannelStatistics * aCopyFrom)
+  {
+    MOZ_ASSERT(aCopyFrom);
+    *this = *aCopyFrom;
+  }
+
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(MediaChannelStatistics)
+
   void Reset() {
     mLastStartTime = TimeStamp();
     mAccumulatedTime = TimeDuration(0);
     mAccumulatedBytes = 0;
     mIsStarted = false;
   }
-  void Start(TimeStamp aNow) {
+  void Start() {
     if (mIsStarted)
       return;
-    mLastStartTime = aNow;
+    mLastStartTime = TimeStamp::Now();
     mIsStarted = true;
   }
-  void Stop(TimeStamp aNow) {
+  void Stop() {
     if (!mIsStarted)
       return;
-    mAccumulatedTime += aNow - mLastStartTime;
+    mAccumulatedTime += TimeStamp::Now() - mLastStartTime;
     mIsStarted = false;
   }
   void AddBytes(int64_t aBytes) {
@@ -79,10 +88,10 @@ public:
       return 0.0;
     return static_cast<double>(mAccumulatedBytes)/seconds;
   }
-  double GetRate(TimeStamp aNow, bool* aReliable) {
+  double GetRate(bool* aReliable) {
     TimeDuration time = mAccumulatedTime;
     if (mIsStarted) {
-      time += aNow - mLastStartTime;
+      time += TimeStamp::Now() - mLastStartTime;
     }
     double seconds = time.ToSeconds();
     *aReliable = seconds >= 3.0;
@@ -97,6 +106,9 @@ private:
   bool         mIsStarted;
 };
 
+// Forward declaration for use in MediaByteRange.
+class TimestampedMediaByteRange;
+
 // Represents a section of contiguous media, with a start and end offset.
 // Used to denote ranges of data which are cached.
 class MediaByteRange {
@@ -108,6 +120,8 @@ public:
   {
     NS_ASSERTION(mStart < mEnd, "Range should end after start!");
   }
+
+  MediaByteRange(TimestampedMediaByteRange& aByteRange);
 
   bool IsNull() const {
     return mStart == 0 && mEnd == 0;
@@ -121,6 +135,39 @@ public:
 
   int64_t mStart, mEnd;
 };
+
+// Represents a section of contiguous media, with a start and end offset, and
+// a timestamp representing the start time.
+class TimestampedMediaByteRange : public MediaByteRange {
+public:
+  TimestampedMediaByteRange() : MediaByteRange(), mStartTime(-1) {}
+
+  TimestampedMediaByteRange(int64_t aStart, int64_t aEnd, int64_t aStartTime)
+    : MediaByteRange(aStart, aEnd), mStartTime(aStartTime)
+  {
+    NS_ASSERTION(aStartTime >= 0, "Start time should not be negative!");
+  }
+
+  bool IsNull() const {
+    return MediaByteRange::IsNull() && mStartTime == -1;
+  }
+
+  // Clears byte range values.
+  void Clear() {
+    MediaByteRange::Clear();
+    mStartTime = -1;
+  }
+
+  // In usecs.
+  int64_t mStartTime;
+};
+
+inline MediaByteRange::MediaByteRange(TimestampedMediaByteRange& aByteRange)
+  : mStart(aByteRange.mStart), mEnd(aByteRange.mEnd)
+{
+  NS_ASSERTION(mStart < mEnd, "Range should end after start!");
+}
+
 
 /**
  * Provides a thread-safe, seek/read interface to resources
@@ -146,6 +193,9 @@ public:
 class MediaResource
 {
 public:
+
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(MediaResource)
+
   virtual ~MediaResource() {}
 
   // The following can be called on the main thread only:
@@ -175,6 +225,8 @@ public:
   // with a new channel. Any cached data associated with the original
   // stream should be accessible in the new stream too.
   virtual MediaResource* CloneData(MediaDecoder* aDecoder) = 0;
+  // Set statistics to be recorded to the object passed in.
+  virtual void RecordStatisticsTo(MediaChannelStatistics *aStatistics) { }
 
   // These methods are called off the main thread.
   // The mode is initially MODE_PLAYBACK.
@@ -274,6 +326,10 @@ public:
   virtual nsresult ReadFromCache(char* aBuffer,
                                  int64_t aOffset,
                                  uint32_t aCount) = 0;
+  // Returns true if the resource can be seeked to unbuffered ranges, i.e.
+  // for an HTTP network stream this returns true if HTTP1.1 Byte Range
+  // requests are supported by the connection/server.
+  virtual bool IsTransportSeekable() = 0;
 
   /**
    * Create a resource, reading data from the channel. Call on main thread only.
@@ -311,6 +367,11 @@ public:
 
   // Notify that the last data byte range was loaded.
   virtual void NotifyLastByteRange() { }
+
+  // Returns the content type of the resource. This is copied from the
+  // nsIChannel when the MediaResource is created. Safe to call from
+  // any thread.
+  virtual const nsCString& GetContentType() const = 0;
 };
 
 class BaseMediaResource : public MediaResource {
@@ -319,17 +380,27 @@ public:
   virtual void MoveLoadsToBackground();
 
 protected:
-  BaseMediaResource(MediaDecoder* aDecoder, nsIChannel* aChannel, nsIURI* aURI) :
+  BaseMediaResource(MediaDecoder* aDecoder,
+                    nsIChannel* aChannel,
+                    nsIURI* aURI,
+                    const nsACString& aContentType) :
     mDecoder(aDecoder),
     mChannel(aChannel),
     mURI(aURI),
+    mContentType(aContentType),
     mLoadInBackground(false)
   {
     MOZ_COUNT_CTOR(BaseMediaResource);
+    NS_ASSERTION(!mContentType.IsEmpty(), "Must know content type");
   }
   virtual ~BaseMediaResource()
   {
     MOZ_COUNT_DTOR(BaseMediaResource);
+  }
+
+  virtual const nsCString& GetContentType() const MOZ_OVERRIDE
+  {
+    return mContentType;
   }
 
   // Set the request's load flags to aFlags.  If the request is part of a
@@ -350,6 +421,11 @@ protected:
   // main thread only.
   nsCOMPtr<nsIURI> mURI;
 
+  // Content-Type of the channel. This is copied from the nsIChannel when the
+  // MediaResource is created. This is constant, so accessing from any thread
+  // is safe.
+  const nsAutoCString mContentType;
+
   // True if MoveLoadsToBackground() has been called, i.e. the load event
   // has been fired, and all channel loads will be in the background.
   bool mLoadInBackground;
@@ -366,7 +442,10 @@ protected:
 class ChannelMediaResource : public BaseMediaResource
 {
 public:
-  ChannelMediaResource(MediaDecoder* aDecoder, nsIChannel* aChannel, nsIURI* aURI);
+  ChannelMediaResource(MediaDecoder* aDecoder,
+                       nsIChannel* aChannel,
+                       nsIURI* aURI,
+                       const nsACString& aContentType);
   ~ChannelMediaResource();
 
   // These are called on the main thread by MediaCache. These must
@@ -414,6 +493,15 @@ public:
   bool IsClosed() const { return mCacheStream.IsClosed(); }
   virtual bool     CanClone();
   virtual MediaResource* CloneData(MediaDecoder* aDecoder);
+  // Set statistics to be recorded to the object passed in. If not called,
+  // |ChannelMediaResource| will create it's own statistics objects in |Open|.
+  void RecordStatisticsTo(MediaChannelStatistics *aStatistics) MOZ_OVERRIDE {
+    NS_ASSERTION(aStatistics, "Statistics param cannot be null!");
+    MutexAutoLock lock(mLock);
+    if (!mChannelStatistics) {
+      mChannelStatistics = aStatistics;
+    }
+  }
   virtual nsresult ReadFromCache(char* aBuffer, int64_t aOffset, uint32_t aCount);
   virtual void     EnsureCacheUpToDate();
 
@@ -436,6 +524,7 @@ public:
   virtual bool    IsDataCachedToEndOfResource(int64_t aOffset);
   virtual bool    IsSuspendedByCache(MediaResource** aActiveResource);
   virtual bool    IsSuspended();
+  virtual bool    IsTransportSeekable() MOZ_OVERRIDE;
 
   class Listener MOZ_FINAL : public nsIStreamListener,
                              public nsIInterfaceRequestor,
@@ -443,6 +532,7 @@ public:
   {
   public:
     Listener(ChannelMediaResource* aResource) : mResource(aResource) {}
+    ~Listener() {}
 
     NS_DECL_ISUPPORTS
     NS_DECL_NSIREQUESTOBSERVER
@@ -521,7 +611,7 @@ protected:
 
   // This lock protects mChannelStatistics
   Mutex               mLock;
-  MediaChannelStatistics mChannelStatistics;
+  nsRefPtr<MediaChannelStatistics> mChannelStatistics;
 
   // True if we couldn't suspend the stream and we therefore don't want
   // to resume later. This is usually due to the channel not being in the
@@ -539,6 +629,10 @@ protected:
 
   // Set to false once first byte range request has been made.
   bool mByteRangeFirstOpen;
+
+  // True if the stream can seek into unbuffered ranged, i.e. if the
+  // connection supports byte range requests.
+  bool mIsTransportSeekable;
 
   // For byte range requests, set to the offset requested in |Seek|.
   // Used in |CacheClientSeek| to find the originally requested byte range.

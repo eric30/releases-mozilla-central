@@ -6,17 +6,18 @@
 #ifndef _CANVASUTILS_H_
 #define _CANVASUTILS_H_
 
-#include "prtypes.h"
-
 #include "mozilla/CheckedInt.h"
 
-class nsHTMLCanvasElement;
 class nsIPrincipal;
 
 namespace mozilla {
 
 namespace gfx {
 class Matrix;
+}
+
+namespace dom {
+class HTMLCanvasElement;
 }
 
 namespace CanvasUtils {
@@ -39,7 +40,7 @@ inline bool CheckSaneSubrectSize(int32_t x, int32_t y, int32_t w, int32_t h,
 // Flag aCanvasElement as write-only if drawing an image with aPrincipal
 // onto it would make it such.
 
-void DoDrawImageSecurityCheck(nsHTMLCanvasElement *aCanvasElement,
+void DoDrawImageSecurityCheck(dom::HTMLCanvasElement *aCanvasElement,
                               nsIPrincipal *aPrincipal,
                               bool forceWriteOnly,
                               bool CORSUsed);

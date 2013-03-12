@@ -9,13 +9,11 @@
 
 #include "nsCOMPtr.h"
 #include "mozilla/dom/Element.h" // DOMCI_NODE_DATA
-#include "Comment.h"
+#include "mozilla/dom/Comment.h"
+#include "mozilla/dom/CommentBinding.h"
 
 using namespace mozilla;
 using namespace dom;
-
-// DOMCI_NODE_DATA needs to be outside our namespaces
-DOMCI_NODE_DATA(Comment, Comment)
 
 nsresult
 NS_NewCommentNode(nsIContent** aInstancePtrResult,
@@ -41,28 +39,12 @@ NS_NewCommentNode(nsIContent** aInstancePtrResult,
 namespace mozilla {
 namespace dom {
 
-Comment::Comment(already_AddRefed<nsINodeInfo> aNodeInfo)
-  : nsGenericDOMDataNode(aNodeInfo)
-{
-  NS_ABORT_IF_FALSE(mNodeInfo->NodeType() == nsIDOMNode::COMMENT_NODE,
-                    "Bad NodeType in aNodeInfo");
-}
-
 Comment::~Comment()
 {
 }
 
-// QueryInterface implementation for Comment
-NS_INTERFACE_TABLE_HEAD(Comment)
-  NS_NODE_INTERFACE_TABLE3(Comment, nsIDOMNode, nsIDOMCharacterData,
-                           nsIDOMComment)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(Comment)
-NS_INTERFACE_MAP_END_INHERITING(nsGenericDOMDataNode)
-
-
-NS_IMPL_ADDREF_INHERITED(Comment, nsGenericDOMDataNode)
-NS_IMPL_RELEASE_INHERITED(Comment, nsGenericDOMDataNode)
-
+NS_IMPL_ISUPPORTS_INHERITED3(Comment, nsGenericDOMDataNode, nsIDOMNode,
+                             nsIDOMCharacterData, nsIDOMComment)
 
 bool
 Comment::IsNodeOfType(uint32_t aFlags) const
@@ -98,6 +80,12 @@ Comment::List(FILE* out, int32_t aIndent) const
   fputs("-->\n", out);
 }
 #endif
+
+JSObject*
+Comment::WrapNode(JSContext *aCx, JSObject *aScope, bool *aTriedToWrap)
+{
+  return CommentBinding::Wrap(aCx, aScope, this, aTriedToWrap);
+}
 
 } // namespace dom
 } // namespace mozilla

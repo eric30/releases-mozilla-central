@@ -127,7 +127,7 @@ NS_OpenAnonymousTemporaryFile(PRFileDesc** aOutFileDesc)
 // idle observer and its timer on shutdown. Note: the observer and idle
 // services hold references to instances of this object, and those references
 // are what keep this object alive.
-class nsAnonTempFileRemover : public nsIObserver {
+class nsAnonTempFileRemover MOZ_FINAL : public nsIObserver {
 public:
   NS_DECL_ISUPPORTS
 
@@ -211,12 +211,12 @@ public:
   void RemoveAnonTempFileFiles() {
     nsCOMPtr<nsIFile> tmpDir;
     nsresult rv = GetTempDir(getter_AddRefs(tmpDir));
-    NS_ENSURE_SUCCESS(rv,);
+    NS_ENSURE_SUCCESS_VOID(rv);
 
-    // Remove the directory recursively.  
+    // Remove the directory recursively.
     tmpDir->Remove(true);
   }
-  
+
 private:
   nsCOMPtr<nsITimer> mTimer;
 };

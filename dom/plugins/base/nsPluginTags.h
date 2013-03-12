@@ -12,7 +12,6 @@
 #include "nsCOMArray.h"
 #include "nsIPluginTag.h"
 #include "nsNPAPIPluginInstance.h"
-#include "nsISupportsArray.h"
 #include "nsITimer.h"
 #include "nsIDOMMimeType.h"
 
@@ -60,6 +59,7 @@ public:
   uint32_t Flags();
   bool HasSameNameAndMimes(const nsPluginTag *aPluginTag) const;
   bool IsEnabled();
+  nsCString GetNiceFileName();
   
   nsRefPtr<nsPluginTag> mNext;
   nsPluginHost *mPluginHost;
@@ -79,6 +79,7 @@ public:
   nsCOMPtr<nsITimer> mUnloadTimer;
 private:
   uint32_t      mFlags;
+  nsCString     mNiceFileName; // UTF-8
 
   void InitMime(const char* const* aMimeTypes,
                 const char* const* aMimeDescriptions,

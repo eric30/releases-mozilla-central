@@ -16,11 +16,9 @@ import java.lang.reflect.Method;
 import android.content.ContentResolver;
 
 public class testBookmark extends PixelTest  {
-    private static final int MAX_WAIT_MS = 3000; 
     private static final String ABOUT_HOME_URL = "about:firefox";
     private static String BOOKMARK_URL = "/robocop/robocop_blank_01.html";
     private static String BOOKMARK_TITLE = "Browser Blank Page 01";
-
     private ClassLoader mClassLoader;
     private Method mAddBookmark;
     private Method mRemoveBookmark;
@@ -28,7 +26,7 @@ public class testBookmark extends PixelTest  {
     private String[] defaultBookmarks = new String[] {
         "about:firefox",
         "about:home",
-        "http://support.mozilla.org/en-US/mobile",
+        "http://support.mozilla.org/en-US/products/mobile",
         "https://addons.mozilla.org/en-US/android/"
     };
 
@@ -78,30 +76,13 @@ public class testBookmark extends PixelTest  {
         blockForGeckoReady();
 
         // Open the bookmark list and check the root folder view
-        ListView bookmarksList = openBookmarksList();
+        ListView bookmarksList = getBookmarksList(ABOUT_HOME_URL, 4);
 
-        // Clear VKB so that list is not obscured
-        mActions.sendSpecialKey(Actions.SpecialKey.BACK);
-
-        // Wait for bookmark to appear in list
-        mSolo.waitForText(ABOUT_HOME_URL);
-
-        mAsserter.ok(bookmarksList != null, "checking that bookmarks list exists", "bookmarks list exists");
-
-        if (bookmarksList.getChildCount() != 4) {
-            mAsserter.dumpLog("Unexpected child count; dumping bookmarks...");
-            for (int i = 0; i < bookmarksList.getChildCount(); i++) {
-                Cursor c = (Cursor)bookmarksList.getItemAtPosition(i);
-                String url = c.getString(c.getColumnIndexOrThrow("url"));
-                mAsserter.dumpLog(url);
-            }
-        }
+        mAsserter.ok(bookmarksList != null, "checking that bookmarks list exists", "bookmarks list exists and has 4 children (the default bookmarks)");
 
         // No folders should be visible if no desktop bookmarks exist
-        mAsserter.is(bookmarksList.getChildCount(), 4,
-            "bookmarks list has 4 children (the default bookmarks)");
-
-        for (int i = 0; i < bookmarksList.getChildCount(); i++) {
+        int count = bookmarksList.getAdapter().getCount();
+        for (int i = 0; i < count; i++) {
             Cursor c = (Cursor)bookmarksList.getItemAtPosition(i);
             String url = c.getString(c.getColumnIndexOrThrow("url"));
             mAsserter.ok(Arrays.binarySearch(defaultBookmarks, url) > -1,
@@ -109,9 +90,9 @@ public class testBookmark extends PixelTest  {
         }
 
         insertOneBookmark();
-        mSolo.waitForText(BOOKMARK_TITLE);
+        waitForText(BOOKMARK_TITLE);
 
-        mAsserter.is(bookmarksList.getChildCount(), 5,
+        mAsserter.is(bookmarksList.getAdapter().getCount(), 5,
             "bookmarks list has 5 children (the default bookmarks and the new one)");
  
         // Click on the bookmark we created and wait for the bookmarked page to load
@@ -126,6 +107,7 @@ public class testBookmark extends PixelTest  {
 
     private boolean waitForBookmarked(final boolean isBookmarked) {
         waitForTest(new BooleanTest() {
+            @Override
             public boolean test() {
                 try {
                    return isBookmarked == (Boolean)mIsBookmarked.invoke(null, getActivity().getContentResolver(), BOOKMARK_URL);
@@ -168,25 +150,11 @@ public class testBookmark extends PixelTest  {
         }
     }
 
-    private ListView openBookmarksList() {
-        Activity awesomeBarActivity = clickOnAwesomeBar();
-
-        // Click the "Bookmarks" tab to switch to bookmarks list
-        mSolo.clickOnText("Bookmarks");
-
-        ArrayList<ListView> views = mSolo.getCurrentListViews();
-        for (ListView view : views) {
-            if (view.getTag() == "bookmarks")
-                return view;
-        }
-        return null;
-    }
-
     // This method opens the menu and selects the "Bookmark" menu item
     private void toggleBookmark() {
         getInstrumentation().waitForIdleSync();
         mActions.sendSpecialKey(Actions.SpecialKey.MENU);
-        mSolo.waitForText("Bookmark");
+        waitForText("Bookmark");
         mSolo.clickOnText("Bookmark");
     }
 

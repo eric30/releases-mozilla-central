@@ -10,6 +10,7 @@
 
 #include "mozilla/CheckedInt.h"
 #include "mozilla/Attributes.h"
+#include <algorithm>
 
 class nsDOMMultipartFile : public nsDOMFile,
                            public nsIJSNativeInitializer
@@ -54,10 +55,13 @@ public:
                         jsval* aArgv);
 
   typedef nsIDOMBlob* (*UnwrapFuncPtr)(JSContext*, JSObject*);
-  nsresult InitInternal(JSContext* aCx,
-                        uint32_t aArgc,
-                        jsval* aArgv,
-                        UnwrapFuncPtr aUnwrapFunc);
+  nsresult InitBlob(JSContext* aCx,
+                    uint32_t aArgc,
+                    jsval* aArgv,
+                    UnwrapFuncPtr aUnwrapFunc);
+  nsresult InitFile(JSContext* aCx,
+                    uint32_t aArgc,
+                    jsval* aArgv);
 
   already_AddRefed<nsIDOMBlob>
   CreateSlice(uint64_t aStart, uint64_t aLength, const nsAString& aContentType);
@@ -71,6 +75,16 @@ public:
   // DOMClassInfo constructor (for Blob([b1, "foo"], { type: "image/png" }))
   static nsresult
   NewBlob(nsISupports* *aNewObject);
+
+  // DOMClassInfo constructor (for File([b1, "foo"], { type: "image/png",
+  //                                                   name: "foo.png" }))
+  inline static nsresult
+  NewFile(nsISupports* *aNewObject)
+  {
+    // Initialization will set the filename, so we can pass in an empty string
+    // for now.
+    return NewFile(EmptyString(), aNewObject);
+  }
 
   virtual const nsTArray<nsCOMPtr<nsIDOMBlob> >*
   GetSubBlobs() const { return &mBlobs; }
@@ -112,15 +126,15 @@ protected:
     }
 
     // Start at 1 or we'll loop forever.
-    CheckedUint32 bufferLen = NS_MAX<uint32_t>(mDataBufferLen, 1);
+    CheckedUint32 bufferLen =
+      std::max<uint32_t>(static_cast<uint32_t>(mDataBufferLen), 1);
     while (bufferLen.isValid() && bufferLen.value() < mDataLen + aSize)
       bufferLen *= 2;
 
     if (!bufferLen.isValid())
       return false;
 
-    // PR_ memory functions are still fallible
-    void* data = PR_Realloc(mData, bufferLen.value());
+    void* data = moz_realloc(mData, bufferLen.value());
     if (!data)
       return false;
 

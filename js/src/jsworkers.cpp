@@ -4,6 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/DebugOnly.h"
+
 #include "jsworkers.h"
 
 #if JS_ION
@@ -16,12 +18,6 @@ using namespace js;
 using mozilla::DebugOnly;
 
 #ifdef JS_PARALLEL_COMPILATION
-
-bool
-js::OffThreadCompilationAvailable(JSContext *cx)
-{
-    return cx->runtime->useHelperThreads();
-}
 
 bool
 js::StartOffThreadIonCompile(JSContext *cx, ion::IonBuilder *builder)
@@ -76,8 +72,6 @@ CompiledScriptMatches(JSCompartment *compartment, JSScript *script, JSScript *ta
 void
 js::CancelOffThreadIonCompile(JSCompartment *compartment, JSScript *script)
 {
-    AutoAssertNoGC nogc;
-
     if (!compartment->rt->workerThreadState)
         return;
 
@@ -356,12 +350,6 @@ js::StartOffThreadIonCompile(JSContext *cx, ion::IonBuilder *builder)
 void
 js::CancelOffThreadIonCompile(JSCompartment *compartment, JSScript *script)
 {
-}
-
-bool
-js::OffThreadCompilationAvailable(JSContext *cx)
-{
-    return false;
 }
 
 #endif /* JS_PARALLEL_COMPILATION */

@@ -5,7 +5,9 @@
 
 package org.mozilla.gecko;
 
-import org.mozilla.gecko.sync.setup.SyncAccounts;
+import org.mozilla.gecko.widget.IconTabWidget;
+
+import org.mozilla.gecko.widget.TwoWayView;
 
 import android.content.Context;
 import android.content.res.Resources;
@@ -13,8 +15,6 @@ import android.content.res.TypedArray;
 import android.graphics.Color;
 import android.graphics.Rect;
 import android.graphics.drawable.ColorDrawable;
-import android.graphics.drawable.Drawable;
-import android.graphics.drawable.LayerDrawable;
 import android.util.AttributeSet;
 import android.view.LayoutInflater;
 import android.view.Menu;
@@ -22,18 +22,19 @@ import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
-import android.widget.TextView;
 
 public class TabsPanel extends LinearLayout
-                       implements GeckoPopupMenu.OnMenuItemClickListener,
-                                  LightweightTheme.OnChangeListener {
+                       implements LightweightTheme.OnChangeListener,
+                                  IconTabWidget.OnTabChangedListener {
     private static final String LOGTAG = "GeckoTabsPanel";
 
     public static enum Panel {
-        LOCAL_TABS,
+        NORMAL_TABS,
+        PRIVATE_TABS,
         REMOTE_TABS
     }
 
@@ -42,6 +43,7 @@ public class TabsPanel extends LinearLayout
         public void setTabsPanel(TabsPanel panel);
         public void show();
         public void hide();
+        public boolean shouldExpand();
     }
 
     public static interface TabsLayoutChangeListener {
@@ -50,155 +52,115 @@ public class TabsPanel extends LinearLayout
 
     private Context mContext;
     private GeckoApp mActivity;
+    private TabsListContainer mTabsContainer;
     private PanelView mPanel;
-    private TabsPanelToolbar mToolbar;
-    private TabsListContainer mListContainer;
+    private PanelView mPanelNormal;
+    private PanelView mPanelPrivate;
+    private PanelView mPanelRemote;
+    private RelativeLayout mFooter;
     private TabsLayoutChangeListener mLayoutChangeListener;
 
-    private static ImageButton mMenuButton;
+    private IconTabWidget mTabWidget;
     private static ImageButton mAddTab;
-    private static ImageButton mRemoteTabs;
-    private TextView mTitle;
 
     private Panel mCurrentPanel;
     private boolean mIsSideBar;
     private boolean mVisible;
-
-    private GeckoPopupMenu mPopupMenu;
-    private Menu mMenu;
-
-    private static final int REMOTE_TABS_HIDDEN = 1;
-    private static final int REMOTE_TABS_SHOWN = 2;
 
     public TabsPanel(Context context, AttributeSet attrs) {
         super(context, attrs);
         mContext = context;
         mActivity = (GeckoApp) context;
 
+        setLayoutParams(new LinearLayout.LayoutParams(LinearLayout.LayoutParams.FILL_PARENT,
+                                                      LinearLayout.LayoutParams.FILL_PARENT));
         setOrientation(LinearLayout.VERTICAL);
-        LayoutInflater.from(context).inflate(R.layout.tabs_panel, this);
 
-        mCurrentPanel = Panel.LOCAL_TABS;
+        mCurrentPanel = Panel.NORMAL_TABS;
         mVisible = false;
 
-        TypedArray a = context.obtainStyledAttributes(attrs, R.styleable.TabsPanel);
-        mIsSideBar = a.getBoolean(R.styleable.TabsPanel_sidebar, false);
-        a.recycle();
+        mIsSideBar = false;
 
-        mToolbar = (TabsPanelToolbar) findViewById(R.id.toolbar);
-        mListContainer = (TabsListContainer) findViewById(R.id.list_container);
-
-        mPopupMenu = new GeckoPopupMenu(context);
-        mPopupMenu.inflate(R.menu.tabs_menu);
-        mPopupMenu.setOnMenuItemClickListener(this);
-        mMenu = mPopupMenu.getMenu();
-
-        initToolbar();
+        LayoutInflater.from(context).inflate(R.layout.tabs_panel, this);
+        initialize();
     }
 
-    void initToolbar() {
-        mTitle = (TextView) mToolbar.findViewById(R.id.title);
-        mAddTab = (ImageButton) mToolbar.findViewById(R.id.add_tab);
+    private void initialize() {
+        mTabsContainer = (TabsListContainer) findViewById(R.id.tabs_container);
+
+        mPanelNormal = (TabsTray) findViewById(R.id.normal_tabs);
+        mPanelNormal.setTabsPanel(this);
+
+        mPanelPrivate = (TabsTray) findViewById(R.id.private_tabs);
+        mPanelPrivate.setTabsPanel(this);
+
+        mPanelRemote = (RemoteTabs) findViewById(R.id.synced_tabs);
+        mPanelRemote.setTabsPanel(this);
+
+        mFooter = (RelativeLayout) findViewById(R.id.tabs_panel_footer);
+
+        mAddTab = (ImageButton) findViewById(R.id.add_tab);
         mAddTab.setOnClickListener(new Button.OnClickListener() {
-            public void onClick(View v) {
-                mActivity.addTab();
-                mActivity.autoHideTabs();
-            }
-        });
-
-        mRemoteTabs = (ImageButton) mToolbar.findViewById(R.id.remote_tabs);
-        mRemoteTabs.setOnClickListener(new Button.OnClickListener() {
-            public void onClick(View v) {
-                if (mRemoteTabs.getDrawable().getLevel() == REMOTE_TABS_SHOWN)
-                    mActivity.showLocalTabs();
-                else
-                    mActivity.showRemoteTabs();
-            }
-        });
-
-        mMenuButton = (ImageButton) mToolbar.findViewById(R.id.menu);
-        mMenuButton.setOnClickListener(new Button.OnClickListener() {
-            public void onClick(View view) {
-                TabsPanel.this.openTabsMenu();
-            }
-        });
-
-        // Set a touch delegate to Add-Tab button, so the touch events on its tail
-        // are passed to the menu button.
-        if (!GeckoApp.mAppContext.isTablet()) {
-            post(new Runnable() {
-                @Override
-                public void run() {
-                    int height = mAddTab.getHeight();
-                    int width = mAddTab.getWidth();
-                    int tail = (int) (height * 1.125) / 2;
-                    Rect bounds = new Rect(width - tail, 0, width, height);
-                    mAddTab.setTouchDelegate(new TailTouchDelegate(bounds, mMenuButton));
-                }
-            });
-        }
-
-        mPopupMenu.setAnchor(mMenuButton);
-    }
-
-    public void openTabsMenu() {
-        if (mCurrentPanel == Panel.REMOTE_TABS)
-            mMenu.findItem(R.id.close_all_tabs).setEnabled(false);
-        else
-            mMenu.findItem(R.id.close_all_tabs).setEnabled(true); 
-
-        mPopupMenu.show();
-
-        final Context context = mContext;
-        new SyncAccounts.AccountsExistTask() {
             @Override
-            protected void onPostExecute(Boolean result) {
-                if (!result.booleanValue()) {
-                    return;
-                }
-                TabsAccessor.areClientsAvailable(context, new TabsAccessor.OnClientsAvailableListener() {
-                    @Override
-                    public void areAvailable(boolean available) {
-                        TabsPanel.this.enableRemoteTabs(available);
-                    }
-                });
+            public void onClick(View v) {
+                TabsPanel.this.addTab();
             }
-        }.execute(context);
+        });
+
+        ImageButton button;
+        Resources resources = getContext().getResources();
+
+        mTabWidget = (IconTabWidget) findViewById(R.id.tab_widget);
+
+        button = mTabWidget.addTab(R.drawable.tabs_normal);
+        button.setContentDescription(resources.getString(R.string.tabs_normal));
+
+        button = mTabWidget.addTab(R.drawable.tabs_private);
+        button.setContentDescription(resources.getString(R.string.tabs_private));
+
+        button = mTabWidget.addTab(R.drawable.tabs_synced);
+        button.setContentDescription(resources.getString(R.string.tabs_synced));
+
+        mTabWidget.setTabSelectionListener(this);
     }
 
-    public void enableRemoteTabs(boolean enable) {
-        mMenu.findItem(R.id.synced_tabs).setEnabled(enable);
+    public void addTab() {
+        if (mCurrentPanel == Panel.NORMAL_TABS)
+           mActivity.addTab();
+        else
+           mActivity.addPrivateTab();
+
+        mActivity.autoHideTabs();
     }
 
     @Override
-    public boolean onMenuItemClick(MenuItem item) {
-        switch (item.getItemId()) {
-            case R.id.synced_tabs:
-                show(Panel.REMOTE_TABS);
-                return true;
-            case R.id.close_all_tabs:
-                for (Tab tab : Tabs.getInstance().getTabsInOrder()) {
-                    Tabs.getInstance().closeTab(tab);
-                }
-                return true;
-            case R.id.new_tab:
-            case R.id.new_private_tab:
-                hide();
-            // fall through
-            default:
-                return mActivity.onOptionsItemSelected(item);
-        }
-    }  
+    public void onTabChanged(int index) {
+        if (index == 0)
+            show(Panel.NORMAL_TABS, false);
+        else if (index == 1)
+            show(Panel.PRIVATE_TABS, false);
+        else
+            show(Panel.REMOTE_TABS, false);
+    }
 
-    private static int getTabContainerHeight(View view) {
-        Context context = view.getContext();
+    private static int getTabContainerHeight(TabsListContainer listContainer) {
+        Context context = listContainer.getContext();
+
+        PanelView panelView = listContainer.getCurrentPanelView();
+        if (panelView != null && !panelView.shouldExpand()) {
+            final View v = (View) panelView;
+            final int sizeSpec = MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED);
+            v.measure(sizeSpec, sizeSpec);
+            return v.getMeasuredHeight();
+        }
 
         int actionBarHeight = context.getResources().getDimensionPixelSize(R.dimen.browser_toolbar_height);
         int screenHeight = context.getResources().getDisplayMetrics().heightPixels;
 
         Rect windowRect = new Rect();
-        view.getWindowVisibleDisplayFrame(windowRect);
+        listContainer.getWindowVisibleDisplayFrame(windowRect);
         int windowHeight = windowRect.bottom - windowRect.top;
+
 
         // The web content area should have at least 1.5x the height of the action bar.
         // The tabs panel shouldn't take less than 50% of the screen height and can take
@@ -221,19 +183,18 @@ public class TabsPanel extends LinearLayout
     
     @Override
     public void onLightweightThemeChanged() {
-        Drawable drawable = mActivity.getLightweightTheme().getDrawableWithAlpha(this, 255, 0);
+        int background = mActivity.getResources().getColor(R.color.background_tabs_light);
+        LightweightThemeDrawable drawable = mActivity.getLightweightTheme().getColorDrawable(this, background, true);
         if (drawable == null)
             return;
 
-        drawable.setAlpha(30);
-
-        LayerDrawable layers = new LayerDrawable(new Drawable[] { mContext.getResources().getDrawable(R.drawable.tabs_tray_bg_repeat), drawable });
-        setBackgroundDrawable(layers);
+        drawable.setAlpha(34, 0);
+        setBackgroundDrawable(drawable);
     }
 
     @Override
     public void onLightweightThemeReset() {
-        setBackgroundResource(R.drawable.tabs_tray_bg_repeat);
+        setBackgroundColor(getContext().getResources().getColor(R.color.background_tabs_light));
     }
 
     @Override
@@ -243,7 +204,7 @@ public class TabsPanel extends LinearLayout
     }
 
     // Tabs List Container holds the ListView
-    public static class TabsListContainer extends LinearLayout {
+    public static class TabsListContainer extends FrameLayout {
         private Context mContext;
 
         public TabsListContainer(Context context, AttributeSet attrs) {
@@ -251,10 +212,24 @@ public class TabsPanel extends LinearLayout
             mContext = context;
         }
 
+        public PanelView getCurrentPanelView() {
+            final int childCount = getChildCount();
+            for (int i = 0; i < childCount; i++) {
+                View child = getChildAt(i);
+                if (!(child instanceof PanelView))
+                    continue;
+
+                if (child.getVisibility() == View.VISIBLE)
+                    return (PanelView) child;
+            }
+
+            return null;
+        }
+
         @Override
         protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
             if (!GeckoApp.mAppContext.hasTabsSideBar()) {
-                int heightSpec = MeasureSpec.makeMeasureSpec(getTabContainerHeight(this), MeasureSpec.EXACTLY);
+                int heightSpec = MeasureSpec.makeMeasureSpec(getTabContainerHeight(TabsListContainer.this), MeasureSpec.EXACTLY);
                 super.onMeasure(widthMeasureSpec, heightSpec);
             } else {
                 super.onMeasure(widthMeasureSpec, heightMeasureSpec);
@@ -263,7 +238,7 @@ public class TabsPanel extends LinearLayout
     }
 
     // Tabs Panel Toolbar contains the Buttons
-    public static class TabsPanelToolbar extends RelativeLayout 
+    public static class TabsPanelToolbar extends LinearLayout 
                                          implements LightweightTheme.OnChangeListener {
         private BrowserApp mActivity;
 
@@ -274,7 +249,7 @@ public class TabsPanel extends LinearLayout
             setLayoutParams(new LinearLayout.LayoutParams(LinearLayout.LayoutParams.FILL_PARENT,
                                                           (int) context.getResources().getDimension(R.dimen.browser_toolbar_height)));
 
-            LayoutInflater.from(context).inflate(R.layout.tabs_panel_toolbar_menu, this);
+            setOrientation(LinearLayout.HORIZONTAL);
         }
 
         @Override
@@ -291,18 +266,18 @@ public class TabsPanel extends LinearLayout
     
         @Override
         public void onLightweightThemeChanged() {
-            Drawable drawable = mActivity.getLightweightTheme().getDrawableWithAlpha(this, 34);
+            int background = mActivity.getResources().getColor(R.color.background_tabs_dark);
+            LightweightThemeDrawable drawable = mActivity.getLightweightTheme().getColorDrawable(this, background);
             if (drawable == null)
                 return;
 
-            Resources resources = this.getContext().getResources();
-            LayerDrawable layers = new LayerDrawable(new Drawable[] { resources.getDrawable(R.drawable.tabs_tray_bg_repeat), drawable }); 
-            setBackgroundDrawable(layers);
+            drawable.setAlpha(34, 34);
+            setBackgroundDrawable(drawable);
         }
 
         @Override
         public void onLightweightThemeReset() {
-            setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            setBackgroundColor(getContext().getResources().getColor(R.color.background_tabs_dark));
         }
 
         @Override
@@ -313,76 +288,77 @@ public class TabsPanel extends LinearLayout
     }
 
     public void show(Panel panel) {
+        show(panel, true);
+    }
+
+    public void show(Panel panel, boolean shouldResize) {
+        if (!isShown())
+            setVisibility(View.VISIBLE);
+
         if (mPanel != null) {
-            // Remove the old panel.
+            // Hide the old panel.
             mPanel.hide();
-            mListContainer.removeAllViews();
         }
 
         final boolean showAnimation = !mVisible;
         mVisible = true;
         mCurrentPanel = panel;
 
-        if (panel == Panel.LOCAL_TABS) {
-            mPanel = new TabsTray(mContext, null);
-            mTitle.setText("");
-            mRemoteTabs.setImageLevel(REMOTE_TABS_HIDDEN);
+        int index = panel.ordinal();
+        mTabWidget.setCurrentTab(index);
+
+        if (index == 0) {
+            mPanel = mPanelNormal;
+        } else if (index == 1) {
+            mPanel = mPanelPrivate;
         } else {
-            mPanel = new RemoteTabs(mContext, null);
-            mTitle.setText(R.string.remote_tabs);
-            mRemoteTabs.setVisibility(View.VISIBLE);
-            mRemoteTabs.setImageLevel(REMOTE_TABS_SHOWN);
+            mPanel = mPanelRemote;
         }
 
-        mPanel.setTabsPanel(this);
         mPanel.show();
-        mListContainer.addView(mPanel.getLayout());
 
-        if (isSideBar()) {
-            if (showAnimation)
-                dispatchLayoutChange(getWidth(), getHeight());
+        if (mCurrentPanel == Panel.REMOTE_TABS) {
+            if (mFooter != null)
+                mFooter.setVisibility(View.GONE);
+
+            mAddTab.setVisibility(View.INVISIBLE);
         } else {
-            int actionBarHeight = mContext.getResources().getDimensionPixelSize(R.dimen.browser_toolbar_height);
-            int height = actionBarHeight + getTabContainerHeight(mListContainer);
-            dispatchLayoutChange(getWidth(), height);
+            if (mFooter != null)
+                mFooter.setVisibility(View.VISIBLE);
+
+            mAddTab.setVisibility(View.VISIBLE);
+            mAddTab.setImageLevel(index);
         }
 
-        // If Sync is set up, query the database for remote clients.
-        final Context context = mContext;
-        new SyncAccounts.AccountsExistTask() {
-            @Override
-            protected void onPostExecute(Boolean result) {
-                if (!result.booleanValue()) {
-                    return;
-                }
-                TabsAccessor.areClientsAvailable(context, new TabsAccessor.OnClientsAvailableListener() {
-                    @Override
-                    public void areAvailable(boolean available) {
-                        final int visibility = available ? View.VISIBLE : View.GONE;
-                        mRemoteTabs.setVisibility(visibility);
-                    }
-                });
+        if (shouldResize) {
+            if (isSideBar()) {
+                if (showAnimation)
+                    dispatchLayoutChange(getWidth(), getHeight());
+            } else {
+                int actionBarHeight = mContext.getResources().getDimensionPixelSize(R.dimen.browser_toolbar_height);
+                int height = actionBarHeight + getTabContainerHeight(mTabsContainer);
+                dispatchLayoutChange(getWidth(), height);
             }
-        }.execute(context);
+        }
     }
 
     public void hide() {
         if (mVisible) {
             mVisible = false;
-            mPopupMenu.dismiss();
             dispatchLayoutChange(0, 0);
+
+            if (mPanel != null) {
+                mPanel.hide();
+                mPanel = null;
+            }
         }
     }
 
     public void refresh() {
-        mListContainer.forceLayout();
+        removeAllViews();
 
-        int index = indexOfChild(mToolbar);
-        removeViewAt(index);
-
-        mToolbar = new TabsPanelToolbar(mContext, null);
-        addView(mToolbar, index);
-        initToolbar();
+        LayoutInflater.from(mContext).inflate(R.layout.tabs_panel, this);
+        initialize();
 
         if (mVisible)
             show(mCurrentPanel);
@@ -399,6 +375,14 @@ public class TabsPanel extends LinearLayout
 
     public boolean isSideBar() {
         return mIsSideBar;
+    }
+
+    public void setIsSideBar(boolean isSideBar) {
+        mIsSideBar = isSideBar;
+    }
+
+    public Panel getCurrentPanel() {
+        return mCurrentPanel;
     }
 
     public void setTabsLayoutChangeListener(TabsLayoutChangeListener listener) {

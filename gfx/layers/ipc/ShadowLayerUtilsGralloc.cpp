@@ -5,6 +5,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/DebugOnly.h"
+
 #include "mozilla/layers/PGrallocBufferChild.h"
 #include "mozilla/layers/PGrallocBufferParent.h"
 #include "mozilla/layers/PLayersChild.h"
@@ -292,6 +294,13 @@ ShadowLayerForwarder::PlatformAllocBuffer(const gfxIntSize& aSize,
                                           uint32_t aCaps,
                                           SurfaceDescriptor* aBuffer)
 {
+  // Some GL implementations fail to render gralloc textures with
+  // width < 64.  There's not much point in gralloc'ing buffers that
+  // small anyway, so fall back on shared memory plus a texture
+  // upload.
+  if (aSize.width < 64) {
+    return false;
+  }
   SAMPLE_LABEL("ShadowLayerForwarder", "PlatformAllocBuffer");
   // Gralloc buffers are efficiently mappable as gfxImageSurface, so
   // no need to check |aCaps & MAP_AS_IMAGE_SURFACE|.

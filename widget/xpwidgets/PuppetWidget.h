@@ -73,17 +73,17 @@ public:
   { *aX = kMaxDimension;  *aY = kMaxDimension;  return NS_OK; }
 
   // We're always at <0, 0>, and so ignore move requests.
-  NS_IMETHOD Move(int32_t aX, int32_t aY)
+  NS_IMETHOD Move(double aX, double aY)
   { return NS_OK; }
 
-  NS_IMETHOD Resize(int32_t aWidth,
-                    int32_t aHeight,
-                    bool    aRepaint);
-  NS_IMETHOD Resize(int32_t aX,
-                    int32_t aY,
-                    int32_t aWidth,
-                    int32_t aHeight,
-                    bool    aRepaint)
+  NS_IMETHOD Resize(double aWidth,
+                    double aHeight,
+                    bool   aRepaint);
+  NS_IMETHOD Resize(double aX,
+                    double aY,
+                    double aWidth,
+                    double aHeight,
+                    bool   aRepaint)
   // (we're always at <0, 0>)
   { return Resize(aWidth, aHeight, aRepaint); }
 
@@ -149,15 +149,12 @@ public:
                   bool* aAllowRetaining = nullptr);
   virtual gfxASurface*      GetThebesSurface();
 
-  NS_IMETHOD ResetInputState();
+  NS_IMETHOD NotifyIME(NotificationToIME aNotification) MOZ_OVERRIDE;
   NS_IMETHOD_(void) SetInputContext(const InputContext& aContext,
                                     const InputContextAction& aAction);
   NS_IMETHOD_(InputContext) GetInputContext();
-  NS_IMETHOD CancelComposition();
-  NS_IMETHOD OnIMEFocusChange(bool aFocus);
-  NS_IMETHOD OnIMETextChange(uint32_t aOffset, uint32_t aEnd,
-                             uint32_t aNewEnd);
-  NS_IMETHOD OnIMESelectionChange(void);
+  NS_IMETHOD NotifyIMEOfTextChange(uint32_t aOffset, uint32_t aEnd,
+                                   uint32_t aNewEnd) MOZ_OVERRIDE;
   virtual nsIMEUpdatePreference GetIMEUpdatePreference();
 
   NS_IMETHOD SetCursor(nsCursor aCursor);
@@ -183,6 +180,8 @@ private:
   void SetChild(PuppetWidget* aChild);
 
   nsresult IMEEndComposition(bool aCancel);
+  nsresult NotifyIMEOfFocusChange(bool aFocus);
+  nsresult NotifyIMEOfSelectionChange();
 
   class PaintTask : public nsRunnable {
   public:

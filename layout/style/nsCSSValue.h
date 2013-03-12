@@ -16,14 +16,14 @@
 #include "nsCSSProperty.h"
 #include "nsColor.h"
 #include "nsCoord.h"
-#include "nsInterfaceHashtable.h"
+#include "nsRefPtrHashtable.h"
 #include "nsString.h"
 #include "nsStringBuffer.h"
 #include "nsTArray.h"
 #include "nsStyleConsts.h"
 #include "mozilla/FloatingPoint.h"
 
-class imgIRequest;
+class imgRequestProxy;
 class nsIDocument;
 class nsIPrincipal;
 class nsPresContext;
@@ -35,12 +35,12 @@ class nsPtrHashKey;
 #define NS_CSS_DELETE_LIST_MEMBER(type_, ptr_, member_)                        \
   {                                                                            \
     type_ *cur = (ptr_)->member_;                                              \
-    (ptr_)->member_ = nullptr;                                                  \
+    (ptr_)->member_ = nullptr;                                                 \
     while (cur) {                                                              \
-      type_ *next = cur->member_;                                              \
-      cur->member_ = nullptr;                                                   \
+      type_ *dlm_next = cur->member_;                                          \
+      cur->member_ = nullptr;                                                  \
       delete cur;                                                              \
-      cur = next;                                                              \
+      cur = dlm_next;                                                          \
     }                                                                          \
   }
 
@@ -50,15 +50,15 @@ class nsPtrHashKey;
 #define NS_CSS_CLONE_LIST_MEMBER(type_, from_, member_, to_, args_)            \
   {                                                                            \
     type_ *dest = (to_);                                                       \
-    (to_)->member_ = nullptr;                                                   \
+    (to_)->member_ = nullptr;                                                  \
     for (const type_ *src = (from_)->member_; src; src = src->member_) {       \
-      type_ *clone = src->Clone args_;                                         \
-      if (!clone) {                                                            \
+      type_ *clm_clone = src->Clone args_;                                     \
+      if (!clm_clone) {                                                        \
         delete (to_);                                                          \
-        return nullptr;                                                         \
+        return nullptr;                                                        \
       }                                                                        \
-      dest->member_ = clone;                                                   \
-      dest = clone;                                                            \
+      dest->member_ = clm_clone;                                               \
+      dest = clm_clone;                                                        \
     }                                                                          \
   }
 
@@ -125,7 +125,7 @@ struct ImageValue : public URLValue {
 
   // Inherit operator== from URLValue
 
-  nsInterfaceHashtable<nsISupportsHashKey, imgIRequest> mRequests; 
+  nsRefPtrHashtable<nsPtrHashKey<nsISupports>, imgRequestProxy> mRequests; 
 
   // Override AddRef and Release to not only log ourselves correctly, but
   // also so that we delete correctly without a virtual destructor
@@ -454,7 +454,7 @@ public:
   // Not making this inline because that would force us to include
   // imgIRequest.h, which leads to REQUIRES hell, since this header is included
   // all over.
-  imgIRequest* GetImageValue(nsIDocument* aDocument) const;
+  imgRequestProxy* GetImageValue(nsIDocument* aDocument) const;
 
   nscoord GetFixedLength(nsPresContext* aPresContext) const;
   nscoord GetPixelLength() const;

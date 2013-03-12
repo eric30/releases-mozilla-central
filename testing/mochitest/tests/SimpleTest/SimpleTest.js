@@ -286,8 +286,10 @@ SimpleTest._logResult = function(test, passString, failString) {
         } else {
             parentRunner.log(msg);
         }
-    } else {
+    } else if (typeof dump === "function") {
         dump(msg + "\n");
+    } else {
+        // Non-Mozilla browser?  Just do nothing.
     }
 };
 
@@ -466,6 +468,44 @@ SimpleTest.requestLongerTimeout = function (factor) {
     }
 }
 
+/**
+ * Note that the given range of assertions is to be expected.  When
+ * this function is not called, 0 assertions are expected.  When only
+ * one argument is given, that number of assertions are expected.
+ *
+ * A test where we expect to have assertions (which should largely be a
+ * transitional mechanism to get assertion counts down from our current
+ * situation) can call the SimpleTest.expectAssertions() function, with
+ * either one or two arguments:  one argument gives an exact number
+ * expected, and two arguments give a range.  For example, a test might do
+ * one of the following:
+ *
+ *   // Currently triggers two assertions (bug NNNNNN).
+ *   SimpleTest.expectAssertions(2);
+ *
+ *   // Currently triggers one assertion on Mac (bug NNNNNN).
+ *   if (navigator.platform.indexOf("Mac") == 0) {
+ *     SimpleTest.expectAssertions(1);
+ *   }
+ *
+ *   // Currently triggers two assertions on all platforms (bug NNNNNN),
+ *   // but intermittently triggers two additional assertions (bug NNNNNN)
+ *   // on Windows.
+ *   if (navigator.platform.indexOf("Win") == 0) {
+ *     SimpleTest.expectAssertions(2, 4);
+ *   } else {
+ *     SimpleTest.expectAssertions(2);
+ *   }
+ *
+ *   // Intermittently triggers up to three assertions (bug NNNNNN).
+ *   SimpleTest.expectAssertions(0, 3);
+ */
+SimpleTest.expectAssertions = function(min, max) {
+    if (parentRunner) {
+        parentRunner.expectAssertions(min, max);
+    }
+}
+
 SimpleTest.waitForFocus_started = false;
 SimpleTest.waitForFocus_loaded = false;
 SimpleTest.waitForFocus_focused = false;
@@ -600,7 +640,7 @@ SimpleTest.waitForClipboard = function(aExpectedStringOrValidatorFn, aSetupFn,
 
     // Build a default validator function for common string input.
     var inputValidatorFn = typeof(aExpectedStringOrValidatorFn) == "string"
-        ? function(aData) aData == aExpectedStringOrValidatorFn
+        ? function(aData) { return aData == aExpectedStringOrValidatorFn; }
         : aExpectedStringOrValidatorFn;
 
     // reset for the next use
@@ -628,7 +668,7 @@ SimpleTest.waitForClipboard = function(aExpectedStringOrValidatorFn, aSetupFn,
             reset();
             successFn();
         } else {
-            setTimeout(function() wait(validatorFn, successFn, failureFn, flavor), 100);
+            setTimeout(function() { return wait(validatorFn, successFn, failureFn, flavor); }, 100);
         }
     }
 
@@ -636,7 +676,7 @@ SimpleTest.waitForClipboard = function(aExpectedStringOrValidatorFn, aSetupFn,
     var preExpectedVal = SimpleTest._waitForClipboardMonotonicCounter +
                          "-waitForClipboard-known-value";
     SpecialPowers.clipboardCopyString(preExpectedVal);
-    wait(function(aData) aData  == preExpectedVal,
+    wait(function(aData) { return aData  == preExpectedVal; },
          function() {
            // Call the original setup fn
            aSetupFn();

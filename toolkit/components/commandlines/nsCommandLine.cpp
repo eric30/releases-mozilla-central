@@ -442,10 +442,9 @@ nsCommandLine::resolveShortcutURL(nsIFile* aFile, nsACString& outURL)
 }
 
 NS_IMETHODIMP
-nsCommandLine::Init(int32_t argc, char** argv, nsIFile* aWorkingDir,
+nsCommandLine::Init(int32_t argc, const char* const* argv, nsIFile* aWorkingDir,
                     uint32_t aState)
 {
-  NS_ENSURE_ARG_MIN(aState, 0);
   NS_ENSURE_ARG_MAX(aState, 2);
 
   int32_t i;

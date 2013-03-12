@@ -300,7 +300,7 @@ Load(JSContext *cx,
         options.setUTF8(true)
                .setFileAndLine(filename.ptr(), 1)
                .setPrincipals(Environment(cx)->GetPrincipal());
-        js::RootedObject rootedObj(cx, obj);
+        JS::RootedObject rootedObj(cx, obj);
         JSScript *script = JS::Compile(cx, rootedObj, options, file);
         fclose(file);
         if (!script)
@@ -427,7 +427,7 @@ DumpHeap(JSContext *cx,
         if (!str)
             return JS_FALSE;
         *vp = STRING_TO_JSVAL(str);
-        if (!fileName.encode(cx, str))
+        if (!fileName.encodeLatin1(cx, str))
             return JS_FALSE;
     }
 
@@ -568,7 +568,7 @@ ProcessFile(JSContext *cx,
         options.setUTF8(true)
                .setFileAndLine(filename, 1)
                .setPrincipals(env->GetPrincipal());
-        js::RootedObject rootedObj(cx, obj);
+        JS::RootedObject rootedObj(cx, obj);
         JSScript* script = JS::Compile(cx, rootedObj, options, file);
         if (script && !env->ShouldCompileOnly())
             (void)JS_ExecuteScript(cx, obj, script, &result);
@@ -618,7 +618,7 @@ ProcessFile(JSContext *cx,
                     str = JS_ValueToString(cx, result);
                     JSAutoByteString bytes;
                     if (str)
-                        bytes.encode(cx, str);
+                        bytes.encodeLatin1(cx, str);
                     JS_SetErrorReporter(cx, older);
 
                     if (!!bytes)
@@ -1003,8 +1003,6 @@ XPCShellEnvironment::Init()
         NS_ERROR("failed to get nsXPConnect service!");
         return false;
     }
-
-    xpc_LocalizeContext(cx);
 
     nsRefPtr<FullTrustSecMan> secman(new FullTrustSecMan());
     xpc->SetSecurityManagerForJSContext(cx, secman, 0xFFFF);

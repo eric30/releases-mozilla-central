@@ -3,6 +3,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/DebugOnly.h"
+
 #include "IPCMessageUtils.h"
 
 #include "nsSimpleURI.h"
@@ -18,7 +20,6 @@
 #include "nsEscape.h"
 #include "nsError.h"
 #include "nsIProgrammingLanguage.h"
-#include "mozilla/Util.h" // for DebugOnly
 #include "nsIIPCSerializableURI.h"
 #include "mozilla/ipc/URIUtils.h"
 
@@ -61,13 +62,9 @@ nsSimpleURI::Read(nsIObjectInputStream* aStream)
 {
     nsresult rv;
 
-    bool isMutable; // (because ReadBoolean doesn't support bool*)
+    bool isMutable;
     rv = aStream->ReadBoolean(&isMutable);
     if (NS_FAILED(rv)) return rv;
-    if (isMutable != true && isMutable != false) {
-        NS_WARNING("Unexpected boolean value");
-        return NS_ERROR_UNEXPECTED;
-    }
     mMutable = isMutable;
 
     rv = aStream->ReadCString(mScheme);
@@ -79,10 +76,6 @@ nsSimpleURI::Read(nsIObjectInputStream* aStream)
     bool isRefValid;
     rv = aStream->ReadBoolean(&isRefValid);
     if (NS_FAILED(rv)) return rv;
-    if (isRefValid != true && isRefValid != false) {
-        NS_WARNING("Unexpected boolean value");
-        return NS_ERROR_UNEXPECTED;
-    }
     mIsRefValid = isRefValid;
 
     if (isRefValid) {

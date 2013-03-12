@@ -14,8 +14,6 @@ LIBRARY_NAME    = mozcairo
 LIBXUL_LIBRARY = 1
 
 ifdef GNU_CC
-OS_CFLAGS := $(filter-out -pedantic,$(OX_CFLAGS))
-OS_CXXFLAGS := $(filter-out -pedantic,$(OS_CXXFLAGS))
 ifeq ($(OS_TARGET),Android)
 MODULE_OPTIMIZE_FLAGS = -O2
 endif
@@ -240,5 +238,3 @@ ifdef MOZ_TREE_FREETYPE
 DEFINES += -DHAVE_FT_LIBRARY_SETLCDFILTER -DFT_LCD_FILTER_H="$(topsrcdir)/modules/freetype2/include/freetype/ftlcdfil.h"
 endif
 
-cairo-features.h: $(srcdir)/cairo-features.h.in $(GLOBAL_DEPS)
-	$(PYTHON) $(DEPTH)/config.status -n --file=$@

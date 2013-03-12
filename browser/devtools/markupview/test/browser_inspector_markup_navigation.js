@@ -30,6 +30,14 @@ function test() {
     ["right", "node7"],
     ["down", "*text*"],
     ["down", "node8"],
+    ["left", "node7"],
+    ["left", "node7"],
+    ["right", "node7"],
+    ["right", "*text*"],
+    ["right", "*text*"],
+    ["down", "node8"],
+    ["right", "node8"],
+    ["left", "node8"],
     ["down", "node9"],
     ["down", "node10"],
     ["down", "node11"],
@@ -74,9 +82,8 @@ function test() {
 
   function setupTest() {
     var target = TargetFactory.forTab(gBrowser.selectedTab);
-    let toolbox = gDevTools.openToolboxForTab(target, "inspector");
-    toolbox.once("inspector-selected", function BIMNT_selected(id, aInspector) {
-      inspector = aInspector;
+    gDevTools.showToolbox(target, "inspector").then(function(toolbox) {
+      inspector = toolbox.getCurrentPanel();
       startNavigation();
     });
   }

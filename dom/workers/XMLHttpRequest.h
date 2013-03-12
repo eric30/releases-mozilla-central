@@ -54,7 +54,6 @@ private:
   uint32_t mTimeout;
 
   bool mJSObjectRooted;
-  bool mMultipart;
   bool mBackgroundRequest;
   bool mWithCredentials;
   bool mCanceled;
@@ -74,22 +73,22 @@ public:
   _finalize(JSFreeOp* aFop) MOZ_OVERRIDE;
 
   static XMLHttpRequest*
-  Constructor(JSContext* aCx, JSObject* aGlobal,
+  Constructor(const WorkerGlobalObject& aGlobal,
               const MozXMLHttpRequestParametersWorkers& aParams,
               ErrorResult& aRv);
 
   static XMLHttpRequest*
-  Constructor(JSContext* aCx, JSObject* aGlobal,
-              const nsAString& ignored, ErrorResult& aRv)
+  Constructor(const WorkerGlobalObject& aGlobal, const nsAString& ignored,
+              ErrorResult& aRv)
   {
     // Pretend like someone passed null, so we can pick up the default values
     MozXMLHttpRequestParametersWorkers params;
-    if (!params.Init(aCx, nullptr, JS::NullValue())) {
+    if (!params.Init(aGlobal.GetContext(), nullptr, JS::NullValue())) {
       aRv.Throw(NS_ERROR_UNEXPECTED);
       return nullptr;
     }
 
-    return Constructor(aCx, aGlobal, params, aRv);
+    return Constructor(aGlobal, params, aRv);
   }
 
   void
@@ -149,15 +148,6 @@ public:
   SetWithCredentials(bool aWithCredentials, ErrorResult& aRv);
 
   bool
-  Multipart() const
-  {
-    return mMultipart;
-  }
-
-  void
-  SetMultipart(bool aMultipart, ErrorResult& aRv);
-
-  bool
   MozBackgroundRequest() const
   {
     return mBackgroundRequest;
@@ -179,7 +169,18 @@ public:
   Send(JSObject* aBody, ErrorResult& aRv);
 
   void
+  Send(JSObject& aBody, ErrorResult& aRv)
+  {
+    Send(&aBody, aRv);
+  }
+
+  void
   Send(ArrayBuffer& aBody, ErrorResult& aRv) {
+    return Send(aBody.Obj(), aRv);
+  }
+
+  void
+  Send(ArrayBufferView& aBody, ErrorResult& aRv) {
     return Send(aBody.Obj(), aRv);
   }
 

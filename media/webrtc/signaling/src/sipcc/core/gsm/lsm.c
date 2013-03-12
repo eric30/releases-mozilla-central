@@ -49,8 +49,6 @@
 
 static cc_rcs_t lsm_stop_tone (lsm_lcb_t *lcb, cc_action_data_tone_t *data);
 
-extern cc_media_cap_table_t g_media_table;
-
 static lsm_lcb_t *lsm_lcbs;
 static uint32_t lsm_call_perline[MAX_REG_LINES];
 boolean lsm_mnc_reached[MAX_REG_LINES]; // maxnumcalls reached
@@ -638,16 +636,16 @@ lsm_open_rx (lsm_lcb_t *lcb, cc_action_data_open_rcv_t *data,
           char **candidates;
           int candidate_ct;
           char *default_addr;
+          short status;
 
-          vcmRxAllocICE(media->cap_index, dcb->group_id, media->refid,
+          status = vcmRxAllocICE(media->cap_index, dcb->group_id, media->refid,
             lsm_get_ms_ui_call_handle(lcb->line, lcb->call_id, lcb->ui_id),
             dcb->peerconnection,
             media->level,
             &default_addr, &port_allocated,
             &candidates, &candidate_ct);
 
-          // Check that we got a valid address and port
-          if (default_addr && (strlen(default_addr) > 0) && (port_allocated != -1)) {
+          if (!status) {
             sstrncpy(dcb->ice_default_candidate_addr, default_addr, sizeof(dcb->ice_default_candidate_addr));
 
             data->port = (uint16_t)port_allocated;
@@ -659,8 +657,10 @@ lsm_open_rx (lsm_lcb_t *lcb, cc_action_data_open_rcv_t *data,
       }
     }
 
-    LSM_DEBUG(get_debug_string(LSM_DBG_INT1), lcb->call_id, lcb->line, fname,
-              "allocated port", port_allocated);
+    if (rc == CC_RC_SUCCESS) {
+      LSM_DEBUG(get_debug_string(LSM_DBG_INT1), lcb->call_id, lcb->line, fname,
+                "allocated port", port_allocated);
+    }
 
     return (rc);
 }
@@ -975,10 +975,15 @@ lsm_rx_start (lsm_lcb_t *lcb, const char *fname, fsmdef_media_t *media)
                     media->src_port = open_rcv.port;
                 }
 
-                /* TODO(ekr@rtfm.com): Needs changing for when we have > 2 streams */
+                /* TODO(ekr@rtfm.com): Needs changing for when we
+                   have > 2 streams. (adam@nostrum.com): For now,
+                   we use all the same stream so pc_stream_id == 0
+                   and the tracks are assigned in order and are
+                   equal to the level in the media objects */
                 if ( media->cap_index == CC_VIDEO_1 ) {
                     attrs.video.opaque = media->video;
-                    pc_stream_id = 1;
+                    pc_stream_id = 0;
+                    pc_track_id = media->level;
                 } else {
                     attrs.audio.packetization_period = media->packetization_period;
                     attrs.audio.max_packetization_period = media->max_packetization_period;
@@ -986,8 +991,8 @@ lsm_rx_start (lsm_lcb_t *lcb, const char *fname, fsmdef_media_t *media)
                     attrs.audio.mixing_mode = mix_mode;
                     attrs.audio.mixing_party = mix_party;
                     pc_stream_id = 0;
+                    pc_track_id = media->level;
                 }
-                pc_track_id = 0;
                 dcb->cur_video_avail &= ~CC_ATTRIB_CAST;
 
                 config_get_value(CFGID_SDPMODE, &sdpmode, sizeof(sdpmode));
@@ -3996,7 +4001,8 @@ lsm_connected (lsm_lcb_t *lcb, cc_state_data_connected_t *data)
 
     /* Start ICE */
     if (start_ice) {
-      short res = vcmStartIceChecks(dcb->peerconnection);
+      short res = vcmStartIceChecks(dcb->peerconnection, !dcb->inbound);
+
       /* TODO(emannion): Set state to dead here. */
       if (res)
         return CC_RC_SUCCESS;
@@ -4994,14 +5000,14 @@ lsm_init (void)
      */
     lsm_tmr_tones = cprCreateTimer("lsm_tmr_tones",
                                    GSM_MULTIPART_TONES_TIMER,
-                                   TIMER_EXPIRATION, gsm_msg_queue);
+                                   TIMER_EXPIRATION, gsm_msgq);
     lsm_continuous_tmr_tones = cprCreateTimer("lsm_continuous_tmr_tones",
                                               GSM_CONTINUOUS_TONES_TIMER,
                                               TIMER_EXPIRATION,
-                                              gsm_msg_queue);
+                                              gsm_msgq);
     lsm_tone_duration_tmr = cprCreateTimer("lsm_tone_duration_tmr",
                                    		   GSM_TONE_DURATION_TIMER,
-                                   		   TIMER_EXPIRATION, gsm_msg_queue);
+                                   		   TIMER_EXPIRATION, gsm_msgq);
     lsm_init_config();
 
     for (i=0 ; i<MAX_REG_LINES; i++) {

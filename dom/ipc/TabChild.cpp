@@ -18,6 +18,7 @@
 #include "mozilla/dom/PContentChild.h"
 #include "mozilla/dom/PContentDialogChild.h"
 #include "mozilla/ipc/DocumentRendererChild.h"
+#include "mozilla/ipc/FileDescriptorUtils.h"
 #include "mozilla/layers/AsyncPanZoomController.h"
 #include "mozilla/layers/CompositorChild.h"
 #include "mozilla/layers/PLayersChild.h"
@@ -30,17 +31,22 @@
 #include "nsContentUtils.h"
 #include "nsEmbedCID.h"
 #include "nsEventListenerManager.h"
+#include <algorithm>
+#ifdef MOZ_CRASHREPORTER
+#include "nsExceptionHandler.h"
+#endif
 #include "mozilla/dom/Element.h"
 #include "nsIAppsService.h"
 #include "nsIBaseWindow.h"
+#include "nsICachedFileDescriptorListener.h"
 #include "nsIComponentManager.h"
+#include "nsIDocumentInlines.h"
 #include "nsIDOMClassInfo.h"
 #include "nsIDOMElement.h"
 #include "nsIDOMEvent.h"
 #include "nsIDOMWindow.h"
 #include "nsIDOMWindowUtils.h"
 #include "nsIDocShell.h"
-#include "nsIDocShellTreeItem.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIJSContextStack.h"
@@ -55,7 +61,7 @@
 #include "nsIURI.h"
 #include "nsIURIFixup.h"
 #include "nsCDefaultURIFixup.h"
-#include "nsIView.h"
+#include "nsView.h"
 #include "nsIWebBrowser.h"
 #include "nsIWebBrowserFocus.h"
 #include "nsIWebBrowserSetup.h"
@@ -75,6 +81,7 @@
 #include "PuppetWidget.h"
 #include "StructuredCloneUtils.h"
 #include "xpcpublic.h"
+#include "nsViewportInfo.h"
 
 #define BROWSER_ELEMENT_CHILD_SCRIPT \
     NS_LITERAL_STRING("chrome://global/content/BrowserElementChild.js")
@@ -96,6 +103,7 @@ static const nsIntSize kDefaultViewportSize(980, 480);
 static const char CANCEL_DEFAULT_PAN_ZOOM[] = "cancel-default-pan-zoom";
 static const char BROWSER_ZOOM_TO_RECT[] = "browser-zoom-to-rect";
 static const char BEFORE_FIRST_PAINT[] = "before-first-paint";
+static const char DETECT_SCROLLABLE_SUBFRAME[] = "detect-scrollable-subframe";
 
 NS_IMETHODIMP
 ContentListener::HandleEvent(nsIDOMEvent* aEvent)
@@ -114,6 +122,98 @@ public:
                               const InfallibleTArray<nsString>& aStringParams);
 };
 
+class TabChild::CachedFileDescriptorInfo
+{
+    struct PathOnlyComparatorHelper
+    {
+        bool Equals(const nsAutoPtr<CachedFileDescriptorInfo>& a,
+                    const CachedFileDescriptorInfo& b) const
+        {
+            return a->mPath == b.mPath;
+        }
+    };
+
+    struct PathAndCallbackComparatorHelper
+    {
+        bool Equals(const nsAutoPtr<CachedFileDescriptorInfo>& a,
+                    const CachedFileDescriptorInfo& b) const
+        {
+            return a->mPath == b.mPath &&
+                   a->mCallback == b.mCallback;
+        }
+    };
+
+public:
+    nsString mPath;
+    FileDescriptor mFileDescriptor;
+    nsCOMPtr<nsICachedFileDescriptorListener> mCallback;
+    bool mCanceled;
+
+    CachedFileDescriptorInfo(const nsAString& aPath)
+      : mPath(aPath), mCanceled(false)
+    { }
+
+    CachedFileDescriptorInfo(const nsAString& aPath,
+                             const FileDescriptor& aFileDescriptor)
+      : mPath(aPath), mFileDescriptor(aFileDescriptor), mCanceled(false)
+    { }
+
+    CachedFileDescriptorInfo(const nsAString& aPath,
+                             nsICachedFileDescriptorListener* aCallback)
+      : mPath(aPath), mCallback(aCallback), mCanceled(false)
+    { }
+
+    PathOnlyComparatorHelper PathOnlyComparator() const
+    {
+        return PathOnlyComparatorHelper();
+    }
+
+    PathAndCallbackComparatorHelper PathAndCallbackComparator() const
+    {
+        return PathAndCallbackComparatorHelper();
+    }
+
+    void FireCallback() const
+    {
+        mCallback->OnCachedFileDescriptor(mPath, mFileDescriptor);
+    }
+};
+
+class TabChild::CachedFileDescriptorCallbackRunnable : public nsRunnable
+{
+    typedef TabChild::CachedFileDescriptorInfo CachedFileDescriptorInfo;
+
+    nsAutoPtr<CachedFileDescriptorInfo> mInfo;
+
+public:
+    CachedFileDescriptorCallbackRunnable(CachedFileDescriptorInfo* aInfo)
+      : mInfo(aInfo)
+    {
+        MOZ_ASSERT(NS_IsMainThread());
+        MOZ_ASSERT(aInfo);
+        MOZ_ASSERT(!aInfo->mPath.IsEmpty());
+        MOZ_ASSERT(aInfo->mCallback);
+    }
+
+    void Dispatch()
+    {
+        MOZ_ASSERT(NS_IsMainThread());
+
+        nsresult rv = NS_DispatchToCurrentThread(this);
+        NS_ENSURE_SUCCESS_VOID(rv);
+    }
+
+private:
+    NS_IMETHOD Run()
+    {
+        MOZ_ASSERT(NS_IsMainThread());
+        MOZ_ASSERT(mInfo);
+
+        mInfo->FireCallback();
+        return NS_OK;
+    }
+};
+
 StaticRefPtr<TabChild> sPreallocatedTab;
 
 /*static*/ void
@@ -126,7 +226,23 @@ TabChild::PreloadSlowThings()
         !tab->InitTabChildGlobal(DONT_LOAD_SCRIPTS)) {
         return;
     }
+    // Just load and compile these scripts, but don't run them.
     tab->TryCacheLoadAndCompileScript(BROWSER_ELEMENT_CHILD_SCRIPT);
+    // Load, compile, and run these scripts.
+    tab->RecvLoadRemoteScript(
+        NS_LITERAL_STRING("chrome://global/content/preload.js"));
+
+    nsCOMPtr<nsIDocShell> docShell = do_GetInterface(tab->mWebNav);
+    if (nsIPresShell* presShell = docShell->GetPresShell()) {
+        // Initialize and do an initial reflow of the about:blank
+        // PresShell to let it preload some things for us.
+        presShell->Initialize(0, 0);
+        nsIDocument* doc = presShell->GetDocument();
+        doc->FlushPendingNotifications(Flush_Layout);
+        // ... but after it's done, make sure it doesn't do any more
+        // work.
+        presShell->MakeZombie();
+    }
 
     sPreallocatedTab = tab;
     ClearOnShutdown(&sPreallocatedTab);
@@ -161,12 +277,15 @@ TabChild::TabChild(const TabContext& aContext, uint32_t aChromeFlags)
   , mChromeFlags(aChromeFlags)
   , mOuterRect(0, 0, 0, 0)
   , mInnerSize(0, 0)
+  , mActivePointerId(-1)
+  , mTapHoldTimer(nullptr)
   , mOldViewportWidth(0.0f)
   , mLastBackgroundColor(NS_RGB(255, 255, 255))
   , mDidFakeShow(false)
   , mNotified(false)
   , mContentDocumentIsDisplayed(false)
   , mTriedBrowserInit(false)
+  , mOrientation(eScreenOrientation_PortraitPrimary)
 {
     printf("creating %d!\n", NS_IsMainThread());
 }
@@ -240,6 +359,12 @@ TabChild::Observe(nsISupports *aSubject,
 
         HandlePossibleViewportChange();
       }
+    }
+  } else if (!strcmp(aTopic, DETECT_SCROLLABLE_SUBFRAME)) {
+    nsCOMPtr<nsIDocShell> docShell(do_QueryInterface(aSubject));
+    nsCOMPtr<nsITabChild> tabChild(GetTabChildFrom(docShell));
+    if (tabChild == this) {
+      mRemoteFrame->DetectScrollableSubframe();
     }
   }
 
@@ -367,16 +492,16 @@ TabChild::HandlePossibleViewportChange()
 
   nsCOMPtr<nsIDOMWindowUtils> utils(GetDOMWindowUtils());
 
-  ViewportInfo viewportInfo =
+  nsViewportInfo viewportInfo =
     nsContentUtils::GetViewportInfo(document, mInnerSize.width, mInnerSize.height);
-  SendUpdateZoomConstraints(viewportInfo.allowZoom,
-                            viewportInfo.minZoom,
-                            viewportInfo.maxZoom);
+  SendUpdateZoomConstraints(viewportInfo.IsZoomAllowed(),
+                            viewportInfo.GetMinZoom(),
+                            viewportInfo.GetMaxZoom());
 
   float screenW = mInnerSize.width;
   float screenH = mInnerSize.height;
-  float viewportW = viewportInfo.width;
-  float viewportH = viewportInfo.height;
+  float viewportW = viewportInfo.GetWidth();
+  float viewportH = viewportInfo.GetHeight();
 
   // We're not being displayed in any way; don't bother doing anything because
   // that will just confuse future adjustments.
@@ -390,8 +515,8 @@ TabChild::HandlePossibleViewportChange()
   // we have to call SetCSSViewport twice - once to set the width, and the
   // second time to figure out the height based on the layout at that width.
   float oldBrowserWidth = mOldViewportWidth;
-  mLastMetrics.mViewport.width = viewportInfo.width;
-  mLastMetrics.mViewport.height = viewportInfo.height;
+  mLastMetrics.mViewport.width = viewportW;
+  mLastMetrics.mViewport.height = viewportH;
   if (!oldBrowserWidth) {
     oldBrowserWidth = kDefaultViewportSize.width;
   }
@@ -413,7 +538,7 @@ TabChild::HandlePossibleViewportChange()
   float minScale = 1.0f;
 
   nsCOMPtr<nsIDOMElement> htmlDOMElement = do_QueryInterface(document->GetHtmlElement());
-  nsCOMPtr<nsIDOMElement> bodyDOMElement = do_QueryInterface(document->GetBodyElement());
+  HTMLBodyElement* bodyDOMElement = document->GetBodyElement();
 
   int32_t htmlWidth = 0, htmlHeight = 0;
   if (htmlDOMElement) {
@@ -422,14 +547,14 @@ TabChild::HandlePossibleViewportChange()
   }
   int32_t bodyWidth = 0, bodyHeight = 0;
   if (bodyDOMElement) {
-    bodyDOMElement->GetScrollWidth(&bodyWidth);
-    bodyDOMElement->GetScrollHeight(&bodyHeight);
+    bodyWidth = bodyDOMElement->ScrollWidth();
+    bodyHeight = bodyDOMElement->ScrollHeight();
   }
 
   float pageWidth, pageHeight;
   if (htmlDOMElement || bodyDOMElement) {
-    pageWidth = NS_MAX(htmlWidth, bodyWidth);
-    pageHeight = NS_MAX(htmlHeight, bodyHeight);
+    pageWidth = std::max(htmlWidth, bodyWidth);
+    pageHeight = std::max(htmlHeight, bodyHeight);
   } else {
     // For non-HTML content (e.g. SVG), just assume page size == viewport size.
     pageWidth = viewportW;
@@ -438,10 +563,11 @@ TabChild::HandlePossibleViewportChange()
   NS_ENSURE_TRUE_VOID(pageWidth); // (return early rather than divide by 0)
 
   minScale = mInnerSize.width / pageWidth;
-  minScale = clamped((double)minScale, viewportInfo.minZoom, viewportInfo.maxZoom);
+  minScale = clamped((double)minScale, viewportInfo.GetMinZoom(),
+                     viewportInfo.GetMaxZoom());
   NS_ENSURE_TRUE_VOID(minScale); // (return early rather than divide by 0)
 
-  viewportH = NS_MAX(viewportH, screenH / minScale);
+  viewportH = std::max(viewportH, screenH / minScale);
   SetCSSViewport(viewportW, viewportH);
 
   // This change to the zoom accounts for all types of changes I can conceive:
@@ -477,15 +603,17 @@ TabChild::HandlePossibleViewportChange()
     // FIXME/bug 799585(?): GetViewportInfo() returns a defaultZoom of
     // 0.0 to mean "did not calculate a zoom".  In that case, we default
     // it to the intrinsic scale.
-    if (viewportInfo.defaultZoom < 0.01f) {
-      viewportInfo.defaultZoom = intrinsicScale.width;
+    if (viewportInfo.GetDefaultZoom() < 0.01f) {
+      viewportInfo.SetDefaultZoom(intrinsicScale.width);
     }
-    MOZ_ASSERT(viewportInfo.minZoom <= viewportInfo.defaultZoom &&
-               viewportInfo.defaultZoom <= viewportInfo.maxZoom);
+
+    double defaultZoom = viewportInfo.GetDefaultZoom();
+    MOZ_ASSERT(viewportInfo.GetMinZoom() <= defaultZoom &&
+               defaultZoom <= viewportInfo.GetMaxZoom());
     // GetViewportInfo() returns a resolution-dependent scale factor.
     // Convert that to a resolution-indepedent zoom.
-    metrics.mZoom = gfxSize(viewportInfo.defaultZoom / intrinsicScale.width,
-                            viewportInfo.defaultZoom / intrinsicScale.height);
+    metrics.mZoom = gfxSize(defaultZoom / intrinsicScale.width,
+                            defaultZoom / intrinsicScale.height);
   }
 
   metrics.mDisplayPort = AsyncPanZoomController::CalculatePendingDisplayPort(
@@ -1075,7 +1203,135 @@ TabChild::RecvLoadURL(const nsCString& uri)
         NS_WARNING("mWebNav->LoadURI failed. Eating exception, what else can I do?");
     }
 
+#ifdef MOZ_CRASHREPORTER
+    CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("URL"), uri);
+#endif
+
     return true;
+}
+
+bool
+TabChild::RecvCacheFileDescriptor(const nsString& aPath,
+                                  const FileDescriptor& aFileDescriptor)
+{
+    MOZ_ASSERT(NS_IsMainThread());
+    MOZ_ASSERT(!aPath.IsEmpty());
+
+    // aFileDescriptor may be invalid here, but the callback will choose how to
+    // handle it.
+
+    // First see if we already have a request for this path.
+    const CachedFileDescriptorInfo search(aPath);
+    uint32_t index =
+        mCachedFileDescriptorInfos.IndexOf(search, 0,
+                                           search.PathOnlyComparator());
+    if (index == mCachedFileDescriptorInfos.NoIndex) {
+        // We haven't had any requests for this path yet. Assume that we will
+        // in a little while and save the file descriptor here.
+        mCachedFileDescriptorInfos.AppendElement(
+            new CachedFileDescriptorInfo(aPath, aFileDescriptor));
+        return true;
+    }
+
+    nsAutoPtr<CachedFileDescriptorInfo>& info =
+        mCachedFileDescriptorInfos[index];
+
+    MOZ_ASSERT(info);
+    MOZ_ASSERT(info->mPath == aPath);
+    MOZ_ASSERT(!info->mFileDescriptor.IsValid());
+    MOZ_ASSERT(info->mCallback);
+
+    // If this callback has been canceled then we can simply close the file
+    // descriptor and forget about the callback.
+    if (info->mCanceled) {
+        // Only close if this is a valid file descriptor.
+        if (aFileDescriptor.IsValid()) {
+            nsRefPtr<CloseFileRunnable> runnable =
+                new CloseFileRunnable(aFileDescriptor);
+            runnable->Dispatch();
+        }
+    } else {
+        // Not canceled so fire the callback.
+        info->mFileDescriptor = aFileDescriptor;
+
+        // We don't need a runnable here because we should already be at the top
+        // of the event loop. Just fire immediately.
+        info->FireCallback();
+    }
+
+    mCachedFileDescriptorInfos.RemoveElementAt(index);
+    return true;
+}
+
+bool
+TabChild::GetCachedFileDescriptor(const nsAString& aPath,
+                                  nsICachedFileDescriptorListener* aCallback)
+{
+    MOZ_ASSERT(NS_IsMainThread());
+    MOZ_ASSERT(!aPath.IsEmpty());
+    MOZ_ASSERT(aCallback);
+
+    // First see if we've already received a cached file descriptor for this
+    // path.
+    const CachedFileDescriptorInfo search(aPath);
+    uint32_t index =
+        mCachedFileDescriptorInfos.IndexOf(search, 0,
+                                           search.PathOnlyComparator());
+    if (index == mCachedFileDescriptorInfos.NoIndex) {
+        // We haven't received a file descriptor for this path yet. Assume that
+        // we will in a little while and save the request here.
+        mCachedFileDescriptorInfos.AppendElement(
+            new CachedFileDescriptorInfo(aPath, aCallback));
+        return false;
+    }
+
+    nsAutoPtr<CachedFileDescriptorInfo>& info =
+        mCachedFileDescriptorInfos[index];
+
+    MOZ_ASSERT(info);
+    MOZ_ASSERT(info->mPath == aPath);
+    MOZ_ASSERT(!info->mCallback);
+    MOZ_ASSERT(!info->mCanceled);
+
+    info->mCallback = aCallback;
+
+    nsRefPtr<CachedFileDescriptorCallbackRunnable> runnable =
+        new CachedFileDescriptorCallbackRunnable(info.forget());
+    runnable->Dispatch();
+
+    mCachedFileDescriptorInfos.RemoveElementAt(index);
+    return true;
+}
+
+void
+TabChild::CancelCachedFileDescriptorCallback(
+                                     const nsAString& aPath,
+                                     nsICachedFileDescriptorListener* aCallback)
+{
+    MOZ_ASSERT(NS_IsMainThread());
+    MOZ_ASSERT(!aPath.IsEmpty());
+    MOZ_ASSERT(aCallback);
+
+    const CachedFileDescriptorInfo search(aPath, aCallback);
+    uint32_t index =
+        mCachedFileDescriptorInfos.IndexOf(search, 0,
+                                           search.PathAndCallbackComparator());
+    if (index == mCachedFileDescriptorInfos.NoIndex) {
+        // Nothing to do here.
+        return;
+    }
+
+    nsAutoPtr<CachedFileDescriptorInfo>& info =
+        mCachedFileDescriptorInfos[index];
+
+    MOZ_ASSERT(info);
+    MOZ_ASSERT(info->mPath == aPath);
+    MOZ_ASSERT(!info->mFileDescriptor.IsValid());
+    MOZ_ASSERT(info->mCallback == aCallback);
+    MOZ_ASSERT(!info->mCanceled);
+
+    // Set this flag so that we will close the file descriptor when it arrives.
+    info->mCanceled = true;
 }
 
 void
@@ -1115,7 +1371,7 @@ TabChild::RecvShow(const nsIntSize& size)
 }
 
 bool
-TabChild::RecvUpdateDimensions(const nsRect& rect, const nsIntSize& size)
+TabChild::RecvUpdateDimensions(const nsRect& rect, const nsIntSize& size, const ScreenOrientation& orientation)
 {
     if (!mRemoteFrame) {
         return true;
@@ -1126,6 +1382,7 @@ TabChild::RecvUpdateDimensions(const nsRect& rect, const nsIntSize& size)
     mOuterRect.width = rect.width;
     mOuterRect.height = rect.height;
 
+    mOrientation = orientation;
     mInnerSize = size;
     mWidget->Resize(0, 0, size.width, size.height,
                     true);
@@ -1321,8 +1578,9 @@ TabChild::RecvMouseEvent(const nsString& aType,
 {
   nsCOMPtr<nsIDOMWindowUtils> utils(GetDOMWindowUtils());
   NS_ENSURE_TRUE(utils, true);
+  bool ignored = false;
   utils->SendMouseEvent(aType, aX, aY, aButton, aClickCount, aModifiers,
-                        aIgnoreRootScrollFrame, 0, 0);
+                        aIgnoreRootScrollFrame, 0, 0, &ignored);
   return true;
 }
 
@@ -1343,40 +1601,134 @@ TabChild::RecvMouseWheelEvent(const WheelEvent& event)
 }
 
 void
-TabChild::DispatchSynthesizedMouseEvent(const nsTouchEvent& aEvent)
+TabChild::DispatchSynthesizedMouseEvent(uint32_t aMsg, uint64_t aTime,
+                                        const nsIntPoint& aRefPoint)
 {
-  // Synthesize a phony mouse event.
-  uint32_t msg;
-  switch (aEvent.message) {
-    case NS_TOUCH_START:
-      msg = NS_MOUSE_BUTTON_DOWN;
-      break;
-    case NS_TOUCH_MOVE:
-      msg = NS_MOUSE_MOVE;
-      break;
-    case NS_TOUCH_END:
-    case NS_TOUCH_CANCEL:
-      msg = NS_MOUSE_BUTTON_UP;
-      break;
-    default:
-      MOZ_NOT_REACHED("Unknown touch event message");
-  }
+  MOZ_ASSERT(aMsg == NS_MOUSE_MOVE || aMsg == NS_MOUSE_BUTTON_DOWN ||
+             aMsg == NS_MOUSE_BUTTON_UP);
 
-  nsIntPoint refPoint(0, 0);
-  if (aEvent.touches.Length()) {
-    refPoint = aEvent.touches[0]->mRefPoint;
-  }
-
-  nsMouseEvent event(true, msg, NULL,
+  nsMouseEvent event(true, aMsg, NULL,
       nsMouseEvent::eReal, nsMouseEvent::eNormal);
-  event.refPoint = refPoint;
-  event.time = aEvent.time;
+  event.refPoint = aRefPoint;
+  event.time = aTime;
   event.button = nsMouseEvent::eLeftButton;
-  if (msg != NS_MOUSE_MOVE) {
+  event.inputSource = nsIDOMMouseEvent::MOZ_SOURCE_TOUCH;
+  if (aMsg != NS_MOUSE_MOVE) {
     event.clickCount = 1;
   }
 
   DispatchWidgetEvent(event);
+}
+
+static nsDOMTouch*
+GetTouchForIdentifier(const nsTouchEvent& aEvent, int32_t aId)
+{
+  for (uint32_t i = 0; i < aEvent.touches.Length(); ++i) {
+    nsDOMTouch* touch = static_cast<nsDOMTouch*>(aEvent.touches[i].get());
+    if (touch->mIdentifier == aId) {
+      return touch;
+    }
+  }
+  return nullptr;
+}
+
+void
+TabChild::UpdateTapState(const nsTouchEvent& aEvent, nsEventStatus aStatus)
+{
+  static bool sHavePrefs;
+  static bool sClickHoldContextMenusEnabled;
+  static nsIntSize sDragThreshold;
+  static int32_t sContextMenuDelayMs;
+  if (!sHavePrefs) {
+    sHavePrefs = true;
+    Preferences::AddBoolVarCache(&sClickHoldContextMenusEnabled,
+                                 "ui.click_hold_context_menus", true);
+    Preferences::AddIntVarCache(&sDragThreshold.width,
+                                "ui.dragThresholdX", 25);
+    Preferences::AddIntVarCache(&sDragThreshold.height,
+                                "ui.dragThresholdY", 25);
+    Preferences::AddIntVarCache(&sContextMenuDelayMs,
+                                "ui.click_hold_context_menus.delay", 500);
+  }
+
+  bool currentlyTrackingTouch = (mActivePointerId >= 0);
+  if (aEvent.message == NS_TOUCH_START) {
+    if (currentlyTrackingTouch || aEvent.touches.Length() > 1) {
+      // We're tracking a possible tap for another point, or we saw a
+      // touchstart for a later pointer after we canceled tracking of
+      // the first point.  Ignore this one.
+      return;
+    }
+    if (aStatus == nsEventStatus_eConsumeNoDefault ||
+        nsIPresShell::gPreventMouseEvents) {
+      return;
+    }
+
+    nsDOMTouch* touch = static_cast<nsDOMTouch*>(aEvent.touches[0].get());
+    mGestureDownPoint = touch->mRefPoint;
+    mActivePointerId = touch->mIdentifier;
+    if (sClickHoldContextMenusEnabled) {
+      MOZ_ASSERT(!mTapHoldTimer);
+      mTapHoldTimer = NewRunnableMethod(this,
+                                        &TabChild::FireContextMenuEvent);
+      MessageLoop::current()->PostDelayedTask(FROM_HERE, mTapHoldTimer,
+                                              sContextMenuDelayMs);
+    }
+    return;
+  }
+
+  // If we're not tracking a touch or this event doesn't include the
+  // one we care about, bail.
+  if (!currentlyTrackingTouch) {
+    return;
+  }
+  nsDOMTouch* trackedTouch = GetTouchForIdentifier(aEvent, mActivePointerId);
+  if (!trackedTouch) {
+    return;
+  }
+
+  nsIntPoint currentPoint = trackedTouch->mRefPoint;
+  int64_t time = aEvent.time;
+  switch (aEvent.message) {
+  case NS_TOUCH_MOVE:
+    if (abs(currentPoint.x - mGestureDownPoint.x) > sDragThreshold.width ||
+        abs(currentPoint.y - mGestureDownPoint.y) > sDragThreshold.height) {
+      CancelTapTracking();
+    }
+    return;
+
+  case NS_TOUCH_END:
+    if (!nsIPresShell::gPreventMouseEvents) {
+      DispatchSynthesizedMouseEvent(NS_MOUSE_MOVE, time, currentPoint);
+      DispatchSynthesizedMouseEvent(NS_MOUSE_BUTTON_DOWN, time, currentPoint);
+      DispatchSynthesizedMouseEvent(NS_MOUSE_BUTTON_UP, time, currentPoint);
+    }
+    // fall through
+  case NS_TOUCH_CANCEL:
+    CancelTapTracking();
+    return;
+
+  default:
+    NS_WARNING("Unknown touch event type");
+  }
+}
+
+void
+TabChild::FireContextMenuEvent()
+{
+  MOZ_ASSERT(mTapHoldTimer && mActivePointerId >= 0);
+  RecvHandleLongTap(mGestureDownPoint);
+  CancelTapTracking();
+}
+
+void
+TabChild::CancelTapTracking()
+{
+  mActivePointerId = -1;
+  if (mTapHoldTimer) {
+    mTapHoldTimer->Cancel();
+  }
+  mTapHoldTimer = nullptr;
 }
 
 bool
@@ -1392,8 +1744,8 @@ TabChild::RecvRealTouchEvent(const nsTouchEvent& aEvent)
     if (innerWindow && innerWindow->HasTouchEventListeners()) {
       SendContentReceivedTouch(nsIPresShell::gPreventMouseEvents);
     }
-  } else if (status != nsEventStatus_eConsumeNoDefault) {
-    DispatchSynthesizedMouseEvent(aEvent);
+  } else {
+    UpdateTapState(aEvent, status);
   }
 
   return true;
@@ -1570,8 +1922,6 @@ TabChild::RecvActivateFrameEvent(const nsString& aType, const bool& capture)
 POfflineCacheUpdateChild*
 TabChild::AllocPOfflineCacheUpdate(const URIParams& manifestURI,
                                    const URIParams& documentURI,
-                                   const bool& isInBrowserElement,
-                                   const uint32_t& appId,
                                    const bool& stickDocument)
 {
   NS_RUNTIMEABORT("unused");
@@ -1604,28 +1954,7 @@ TabChild::RecvAsyncMessage(const nsString& aMessage,
 {
   if (mTabChildGlobal) {
     nsFrameScriptCx cx(static_cast<nsIWebBrowserChrome*>(this), this);
-
-    const SerializedStructuredCloneBuffer& buffer = aData.data();
-    const InfallibleTArray<PBlobChild*>& blobChildList = aData.blobsChild();
-
-    StructuredCloneData cloneData;
-    cloneData.mData = buffer.data;
-    cloneData.mDataLength = buffer.dataLength;
-
-    if (!blobChildList.IsEmpty()) {
-      uint32_t length = blobChildList.Length();
-      cloneData.mClosure.mBlobs.SetCapacity(length);
-      for (uint32_t i = 0; i < length; ++i) {
-        BlobChild* blobChild = static_cast<BlobChild*>(blobChildList[i]);
-        MOZ_ASSERT(blobChild);
-
-        nsCOMPtr<nsIDOMBlob> blob = blobChild->GetBlob();
-        MOZ_ASSERT(blob);
-
-        cloneData.mClosure.mBlobs.AppendElement(blob);
-      }
-    }
-
+    StructuredCloneData cloneData = UnpackClonedMessageDataForChild(aData);
     nsRefPtr<nsFrameMessageManager> mm =
       static_cast<nsFrameMessageManager*>(mTabChildGlobal->mMessageManager.get());
     mm->ReceiveMessage(static_cast<nsIDOMEventTarget*>(mTabChildGlobal),
@@ -1644,7 +1973,7 @@ public:
   NS_IMETHOD Run()
   {
     nsCOMPtr<nsIDOMEvent> event;
-    NS_NewDOMEvent(getter_AddRefs(event), nullptr, nullptr);
+    NS_NewDOMEvent(getter_AddRefs(event), mTabChildGlobal, nullptr, nullptr);
     if (event) {
       event->InitEvent(NS_LITERAL_STRING("unload"), false, false);
       event->SetTrusted(true);
@@ -1676,6 +2005,7 @@ TabChild::RecvDestroy()
   observerService->RemoveObserver(this, CANCEL_DEFAULT_PAN_ZOOM);
   observerService->RemoveObserver(this, BROWSER_ZOOM_TO_RECT);
   observerService->RemoveObserver(this, BEFORE_FIRST_PAINT);
+  observerService->RemoveObserver(this, DETECT_SCROLLABLE_SUBFRAME);
 
   const InfallibleTArray<PIndexedDBChild*>& idbActors =
     ManagedPIndexedDBChild();
@@ -1687,6 +2017,14 @@ TabChild::RecvDestroy()
   DestroyWindow();
 
   return Send__delete__(this);
+}
+
+/* virtual */ bool
+TabChild::RecvSetAppType(const nsString& aAppType)
+{
+  MOZ_ASSERT_IF(!aAppType.IsEmpty(), HasOwnApp());
+  mAppType = aAppType;
+  return true;
 }
 
 PRenderFrameChild*
@@ -1722,7 +2060,8 @@ TabChild::InitTabChildGlobal(FrameScriptLoading aScriptLoading)
 
     nsISupports* scopeSupports = NS_ISUPPORTS_CAST(nsIDOMEventTarget*, scope);
 
-    NS_ENSURE_TRUE(InitTabChildGlobalInternal(scopeSupports), false); 
+    NS_NAMED_LITERAL_CSTRING(globalId, "outOfProcessTabChildGlobal");
+    NS_ENSURE_TRUE(InitTabChildGlobalInternal(scopeSupports, globalId), false);
 
     scope->Init();
 
@@ -1802,6 +2141,9 @@ TabChild::InitRenderingState()
                                      false);
         observerService->AddObserver(this,
                                      BEFORE_FIRST_PAINT,
+                                     false);
+        observerService->AddObserver(this,
+                                     DETECT_SCROLLABLE_SUBFRAME,
                                      false);
     }
 
@@ -1891,22 +2233,8 @@ TabChild::DoSendSyncMessage(const nsAString& aMessage,
 {
   ContentChild* cc = static_cast<ContentChild*>(Manager());
   ClonedMessageData data;
-  SerializedStructuredCloneBuffer& buffer = data.data();
-  buffer.data = aData.mData;
-  buffer.dataLength = aData.mDataLength;
-
-  const nsTArray<nsCOMPtr<nsIDOMBlob> >& blobs = aData.mClosure.mBlobs;
-  if (!blobs.IsEmpty()) {
-    InfallibleTArray<PBlobChild*>& blobChildList = data.blobsChild();
-    uint32_t length = blobs.Length();
-    blobChildList.SetCapacity(length);
-    for (uint32_t i = 0; i < length; ++i) {
-      BlobChild* blobChild = cc->GetOrCreateActorForBlob(blobs[i]);
-      if (!blobChild) {
-        return false;
-      }
-      blobChildList.AppendElement(blobChild);
-    }
+  if (!BuildClonedMessageDataForChild(cc, aData, data)) {
+    return false;
   }
   return SendSyncMessage(nsString(aMessage), data, aJSONRetVal);
 }
@@ -1917,24 +2245,9 @@ TabChild::DoSendAsyncMessage(const nsAString& aMessage,
 {
   ContentChild* cc = static_cast<ContentChild*>(Manager());
   ClonedMessageData data;
-  SerializedStructuredCloneBuffer& buffer = data.data();
-  buffer.data = aData.mData;
-  buffer.dataLength = aData.mDataLength;
-
-  const nsTArray<nsCOMPtr<nsIDOMBlob> >& blobs = aData.mClosure.mBlobs;
-  if (!blobs.IsEmpty()) {
-    InfallibleTArray<PBlobChild*>& blobChildList = data.blobsChild();
-    uint32_t length = blobs.Length();
-    blobChildList.SetCapacity(length);
-    for (uint32_t i = 0; i < length; ++i) {
-      BlobChild* blobChild = cc->GetOrCreateActorForBlob(blobs[i]);
-      if (!blobChild) {
-        return false;
-      }
-      blobChildList.AppendElement(blobChild);
-    }
+  if (!BuildClonedMessageDataForChild(cc, aData, data)) {
+    return false;
   }
-
   return SendAsyncMessage(nsString(aMessage), data);
 }
 
@@ -1953,8 +2266,6 @@ TabChildGlobal::Init()
                                               mTabChild->GetJSContext(),
                                               MM_CHILD);
 }
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(TabChildGlobal)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(TabChildGlobal,
                                                 nsDOMEventTargetHelper)

@@ -529,7 +529,23 @@ public:
 
         OPERATOR_XOR,
         OPERATOR_ADD,
-        OPERATOR_SATURATE
+        OPERATOR_SATURATE,
+
+        OPERATOR_MULTIPLY,
+        OPERATOR_SCREEN,
+        OPERATOR_OVERLAY,
+        OPERATOR_DARKEN,
+        OPERATOR_LIGHTEN,
+        OPERATOR_COLOR_DODGE,
+        OPERATOR_COLOR_BURN,
+        OPERATOR_HARD_LIGHT,
+        OPERATOR_SOFT_LIGHT,
+        OPERATOR_DIFFERENCE,
+        OPERATOR_EXCLUSION,
+        OPERATOR_HUE,
+        OPERATOR_SATURATION,
+        OPERATOR_COLOR,
+        OPERATOR_LUMINOSITY
     };
     /**
      * Sets the operator used for all further drawing. The operator affects
@@ -668,6 +684,9 @@ public:
 
     bool IsCairo() const { return !mDT; }
 
+    // Work out whether cairo will snap inter-glyph spacing to pixels.
+    void GetRoundOffsetsToPixels(bool *aRoundX, bool *aRoundY);
+
 #ifdef MOZ_DUMP_PAINTING
     /**
      * Debug functions to encode the current surface as a PNG and export it.
@@ -749,7 +768,7 @@ private:
   void FillAzure(mozilla::gfx::Float aOpacity);
   void PushClipsToDT(mozilla::gfx::DrawTarget *aDT);
   CompositionOp GetOp();
-  void ChangeTransform(const mozilla::gfx::Matrix &aNewMatrix);
+  void ChangeTransform(const mozilla::gfx::Matrix &aNewMatrix, bool aUpdatePatternTransform = true);
   Rect GetAzureDeviceSpaceClipBounds();
   Matrix GetDeviceTransform() const;
   Matrix GetDTTransform() const;

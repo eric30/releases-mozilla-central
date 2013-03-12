@@ -17,8 +17,6 @@ function test()
   // Disable the default gestures support during the test
   gGestureSupport.init(false);
 
-  // Enable privileges so we can use nsIDOMWindowUtils interface
-  netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
   test_utils = window.QueryInterface(Components.interfaces.nsIInterfaceRequestor).
     getInterface(Components.interfaces.nsIDOMWindowUtils);
 
@@ -35,7 +33,7 @@ function test()
   test_commandset = document.getElementById("mainCommandSet");
   test_swipeGestures();
   test_latchedGesture("pinch", "out", "in", "MozMagnifyGesture");
-  test_latchedGesture("twist", "right", "left", "MozRotateGesture");
+  // We don't latch the rotate event (see bug 833511)
   test_thresholdGesture("pinch", "out", "in", "MozMagnifyGesture");
   test_thresholdGesture("twist", "right", "left", "MozRotateGesture");
 }

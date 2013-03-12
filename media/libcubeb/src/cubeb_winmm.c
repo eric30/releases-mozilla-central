@@ -362,9 +362,7 @@ cubeb_stream_init(cubeb * context, cubeb_stream ** stream, char const * stream_n
 
   wfx.Format.nBlockAlign = (wfx.Format.wBitsPerSample * wfx.Format.nChannels) / 8;
   wfx.Format.nAvgBytesPerSec = wfx.Format.nSamplesPerSec * wfx.Format.nBlockAlign;
-  wfx.Samples.wValidBitsPerSample = 0;
-  wfx.Samples.wSamplesPerBlock = 0;
-  wfx.Samples.wReserved = 0;
+  wfx.Samples.wValidBitsPerSample = wfx.Format.wBitsPerSample;
 
   EnterCriticalSection(&context->lock);
   /* CUBEB_STREAM_MAX is a horrible hack to avoid a situation where, when

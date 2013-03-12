@@ -5,7 +5,7 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "Hal.h"
-#include "mozilla/AppProcessPermissions.h"
+#include "mozilla/AppProcessChecker.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/hal_sandbox/PHalChild.h"
 #include "mozilla/hal_sandbox/PHalParent.h"
@@ -25,12 +25,12 @@ using namespace mozilla::hal;
 namespace mozilla {
 namespace hal_sandbox {
 
-static bool sHalChildIsLive = false;
+static bool sHalChildDestroyed = false;
 
 bool
-IsHalChildLive()
+HalChildDestroyed()
 {
-  return sHalChildIsLive;
+  return sHalChildDestroyed;
 }
 
 static PHalChild* sHal;
@@ -276,11 +276,12 @@ DisableWakeLockNotifications()
 }
 
 void
-ModifyWakeLockInternal(const nsAString &aTopic,
-                       WakeLockControl aLockAdjust,
-                       WakeLockControl aHiddenAdjust,
-                       uint64_t aProcessID)
+ModifyWakeLock(const nsAString &aTopic,
+               WakeLockControl aLockAdjust,
+               WakeLockControl aHiddenAdjust,
+               uint64_t aProcessID)
 {
+  MOZ_ASSERT(aProcessID != CONTENT_PROCESS_ID_UNKNOWN);
   Hal()->SendModifyWakeLock(nsString(aTopic), aLockAdjust, aHiddenAdjust, aProcessID);
 }
 
@@ -425,6 +426,10 @@ public:
     hal::UnregisterWakeLockObserver(this);
     hal::UnregisterSystemClockChangeObserver(this);
     hal::UnregisterSystemTimezoneChangeObserver(this);
+    for (int32_t switchDevice = SWITCH_DEVICE_UNKNOWN + 1;
+         switchDevice < NUM_SWITCH_DEVICE; ++switchDevice) {
+      hal::UnregisterSwitchObserver(SwitchDevice(switchDevice), this);
+    }
   }
 
   virtual bool
@@ -437,8 +442,7 @@ public:
     nsCOMPtr<nsIDOMWindow> window =
       do_QueryInterface(tabParent->GetBrowserDOMWindow());
     WindowIdentifier newID(id, window);
-    // Have to copy, because Vibrate doesn't take a compatible array type
-    hal::Vibrate(nsTArray<uint32_t>(pattern), newID);
+    hal::Vibrate(pattern, newID);
     return true;
   }
 
@@ -709,8 +713,10 @@ public:
                      const WakeLockControl& aHiddenAdjust,
                      const uint64_t& aProcessID) MOZ_OVERRIDE
   {
+    MOZ_ASSERT(aProcessID != CONTENT_PROCESS_ID_UNKNOWN);
+
     // We allow arbitrary content to use wake locks.
-    hal::ModifyWakeLockInternal(aTopic, aLockAdjust, aHiddenAdjust, aProcessID);
+    hal::ModifyWakeLock(aTopic, aLockAdjust, aHiddenAdjust, aProcessID);
     return true;
   }
 
@@ -732,9 +738,6 @@ public:
   virtual bool
   RecvGetWakeLockInfo(const nsString &aTopic, WakeLockInformation *aWakeLockInfo) MOZ_OVERRIDE
   {
-    if (!AssertAppProcessPermission(this, "power")) {
-      return false;
-    }
     hal::GetWakeLockInfo(aTopic, aWakeLockInfo);
     return true;
   }
@@ -807,7 +810,7 @@ public:
   virtual void
   ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE
   {
-    sHalChildIsLive = true;
+    sHalChildDestroyed = true;
   }
 
   virtual bool

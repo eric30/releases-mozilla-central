@@ -27,9 +27,11 @@
 #include "gfxCrashReporterUtils.h"
 #ifdef MOZ_METRO
 #include "DXGI1_2.h"
+#include "nsWindowsHelpers.h"
 #endif
 
 using namespace std;
+using namespace mozilla::dom;
 using namespace mozilla::gfx;
 
 namespace mozilla {
@@ -215,7 +217,7 @@ LayerManagerD3D10::Initialize(bool force)
   dxgiDevice->GetAdapter(getter_AddRefs(dxgiAdapter));
   
 #ifdef MOZ_METRO
-  if (gfxWindowsPlatform::IsRunningInWindows8Metro()) {
+  if (IsRunningInWindowsMetro()) {
     nsRefPtr<IDXGIFactory2> dxgiFactory;
     dxgiAdapter->GetParent(IID_PPV_ARGS(dxgiFactory.StartAssignment()));
 
@@ -653,10 +655,12 @@ LayerManagerD3D10::VerifyBufferSize()
       mSwapChain->ResizeBuffers(1, rect.width, rect.height,
                                 DXGI_FORMAT_B8G8R8A8_UNORM,
                                 0);
-    } else if (gfxWindowsPlatform::IsRunningInWindows8Metro()) {
+#ifdef MOZ_METRO
+    } else if (IsRunningInWindowsMetro()) {
       mSwapChain->ResizeBuffers(2, rect.width, rect.height,
                                 DXGI_FORMAT_B8G8R8A8_UNORM,
                                 0);
+#endif
     } else {
       mSwapChain->ResizeBuffers(1, rect.width, rect.height,
                                 DXGI_FORMAT_B8G8R8A8_UNORM,
@@ -755,7 +759,9 @@ LayerManagerD3D10::Render(EndTransactionFlags aFlags)
     PaintToTarget();
   } else if (mBackBuffer) {
     ShadowLayerForwarder::BeginTransaction(mWidget->GetNaturalBounds(),
-                                           ROTATION_0);
+                                           ROTATION_0,
+                                           mWidget->GetNaturalBounds(),
+                                           eScreenOrientation_LandscapePrimary);
     
     nsIntRect contentRect = nsIntRect(0, 0, rect.width, rect.height);
     if (!mRootForShadowTree) {

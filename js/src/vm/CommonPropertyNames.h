@@ -13,23 +13,6 @@
 #include "jsprototypes.h"
 #include "jsversion.h"
 
-#if JS_HAS_XML_SUPPORT
-#define FOR_EACH_XML_ONLY_NAME(macro) \
-    macro(etago, etago, "</") \
-    macro(functionNamespaceURI, functionNamespaceURI, "@mozilla.org/js/function") \
-    macro(namespace, namespace_, "namespace") \
-    macro(ptagc, ptagc, "/>") \
-    macro(qualifier, qualifier, "::") \
-    macro(space, space, " ") \
-    macro(stago, stago, "<") \
-    macro(star, star, "*") \
-    macro(starQualifier, starQualifier, "*::") \
-    macro(tagc, tagc, ">") \
-    macro(XMLList, XMLList, "XMLList")
-#else
-#define FOR_EACH_XML_ONLY_NAME(macro) /* nothing */
-#endif /* JS_HAS_XML_SUPPORT */
-
 #define FOR_EACH_COMMON_PROPERTYNAME(macro) \
     macro(anonymous, anonymous, "anonymous") \
     macro(apply, apply, "apply") \
@@ -42,14 +25,17 @@
     macro(call, call, "call") \
     macro(callee, callee, "callee") \
     macro(caller, caller, "caller") \
-    macro(_CallFunction, _CallFunction, "_CallFunction") \
+    macro(callFunction, callFunction, "callFunction") \
     macro(classPrototype, classPrototype, "prototype") \
     macro(Collator, Collator, "Collator") \
+    macro(CollatorCompareGet, CollatorCompareGet, "Intl_Collator_compare_get") \
     macro(columnNumber, columnNumber, "columnNumber") \
+    macro(compare, compare, "compare") \
     macro(configurable, configurable, "configurable") \
     macro(construct, construct, "construct") \
     macro(constructor, constructor, "constructor") \
     macro(DateTimeFormat, DateTimeFormat, "DateTimeFormat") \
+    macro(DateTimeFormatFormatGet, DateTimeFormatFormatGet, "Intl_DateTimeFormat_format_get") \
     macro(decodeURI, decodeURI, "decodeURI") \
     macro(decodeURIComponent, decodeURIComponent, "decodeURIComponent") \
     macro(defineProperty, defineProperty, "defineProperty") \
@@ -68,6 +54,7 @@
     macro(false, false_, "false") \
     macro(fileName, fileName, "fileName") \
     macro(fix, fix, "fix") \
+    macro(format, format, "format") \
     macro(get, get, "get") \
     macro(getOwnPropertyDescriptor, getOwnPropertyDescriptor, "getOwnPropertyDescriptor") \
     macro(getOwnPropertyNames, getOwnPropertyNames, "getOwnPropertyNames") \
@@ -78,15 +65,14 @@
     macro(hasOwnProperty, hasOwnProperty, "hasOwnProperty") \
     macro(ignoreCase, ignoreCase, "ignoreCase") \
     macro(index, index, "index") \
-    macro(InitializeCollator, InitializeCollator, "intl_InitializeCollator") \
-    macro(InitializeDateTimeFormat, InitializeDateTimeFormat, "intl_InitializeDateTimeFormat") \
-    macro(InitializeNumberFormat, InitializeNumberFormat, "intl_InitializeNumberFormat") \
+    macro(InitializeCollator, InitializeCollator, "InitializeCollator") \
+    macro(InitializeDateTimeFormat, InitializeDateTimeFormat, "InitializeDateTimeFormat") \
+    macro(InitializeNumberFormat, InitializeNumberFormat, "InitializeNumberFormat") \
     macro(innermost, innermost, "innermost") \
     macro(input, input, "input") \
     macro(isFinite, isFinite, "isFinite") \
     macro(isNaN, isNaN, "isNaN") \
     macro(isPrototypeOf, isPrototypeOf, "isPrototypeOf") \
-    macro(isXMLName, isXMLName, "isXMLName") \
     macro(iterate, iterate, "iterate") \
     macro(Infinity, Infinity, "Infinity") \
     macro(iterator, iterator, "iterator") \
@@ -101,15 +87,18 @@
     macro(lookupGetter, lookupGetter, "__lookupGetter__") \
     macro(lookupSetter, lookupSetter, "__lookupSetter__") \
     macro(message, message, "message") \
+    macro(module, module, "module") \
     macro(multiline, multiline, "multiline") \
     macro(name, name, "name") \
     macro(NaN, NaN, "NaN") \
     macro(next, next, "next") \
     macro(noSuchMethod, noSuchMethod, "__noSuchMethod__") \
     macro(NumberFormat, NumberFormat, "NumberFormat") \
+    macro(NumberFormatFormatGet, NumberFormatFormatGet, "Intl_NumberFormat_format_get") \
     macro(objectNull, objectNull, "[object Null]") \
     macro(objectUndefined, objectUndefined, "[object Undefined]") \
     macro(of, of, "of") \
+    macro(offset, offset, "offset") \
     macro(parseFloat, parseFloat, "parseFloat") \
     macro(parseInt, parseInt, "parseInt") \
     macro(propertyIsEnumerable, propertyIsEnumerable, "propertyIsEnumerable") \
@@ -148,8 +137,6 @@
     macro(string, string, "string") \
     macro(number, number, "number") \
     macro(boolean, boolean, "boolean") \
-    macro(null, null, "null") \
-    macro(xml, xml, "xml") \
-    FOR_EACH_XML_ONLY_NAME(macro)
+    macro(null, null, "null")
 
 #endif /* CommonPropertyNames_h__ */

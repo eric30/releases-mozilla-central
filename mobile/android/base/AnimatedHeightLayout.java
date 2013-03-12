@@ -6,7 +6,6 @@ package org.mozilla.gecko;
 
 import android.content.Context;
 import android.util.AttributeSet;
-import android.util.Log;
 import android.view.animation.Animation;
 import android.view.animation.DecelerateInterpolator;
 import android.widget.RelativeLayout;
@@ -35,10 +34,14 @@ public class AnimatedHeightLayout extends RelativeLayout {
             anim.setDuration(ANIMATION_DURATION);
             anim.setInterpolator(new DecelerateInterpolator());
             anim.setAnimationListener(new Animation.AnimationListener() {
+                @Override
                 public void onAnimationStart(Animation animation) {}
+                @Override
                 public void onAnimationRepeat(Animation animation) {}
+                @Override
                 public void onAnimationEnd(Animation animation) {
                     post(new Runnable() {
+                        @Override
                         public void run() {
                             finishAnimation();
                         }

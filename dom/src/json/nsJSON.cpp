@@ -21,6 +21,7 @@
 #include "nsCRTGlue.h"
 #include "nsAutoPtr.h"
 #include "nsIScriptSecurityManager.h"
+#include <algorithm>
 
 static const char kXPConnectServiceCID[] = "@mozilla.org/js/xpc/XPConnect;1";
 
@@ -238,9 +239,9 @@ nsJSON::EncodeInternal(JSContext* cx, const JS::Value& aValue, nsJSONWriter* wri
     return NS_OK;
 
   // Backward compatibility:
-  // function/xml shall not pass, just "plain" objects and arrays
+  // function shall not pass, just "plain" objects and arrays
   JSType type = JS_TypeOfValue(cx, val);
-  if (type == JSTYPE_FUNCTION || type == JSTYPE_XML)
+  if (type == JSTYPE_FUNCTION)
     return NS_ERROR_INVALID_ARG;
 
   // We're good now; try to stringify
@@ -500,7 +501,7 @@ nsJSON::LegacyDecodeToJSVal(const nsAString &str, JSContext *cx, jsval *result)
 {
   JSAutoRequest ar(cx);
 
-  js::RootedValue reviver(cx, JS::NullValue()), value(cx);
+  JS::RootedValue reviver(cx, JS::NullValue()), value(cx);
 
   JS::StableCharPtr chars(static_cast<const jschar*>(PromiseFlatString(str).get()),
                           str.Length());
@@ -571,7 +572,7 @@ nsJSONListener::OnStopRequest(nsIRequest *aRequest, nsISupports *aContext,
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
-  js::RootedValue reviver(mCx, JS::NullValue()), value(mCx);
+  JS::RootedValue reviver(mCx, JS::NullValue()), value(mCx);
 
   JS::StableCharPtr chars(reinterpret_cast<const jschar*>(mBufferedChars.Elements()),
                           mBufferedChars.Length());
@@ -606,7 +607,7 @@ nsJSONListener::OnDataAvailable(nsIRequest *aRequest, nsISupports *aContext,
   while (bytesRemaining) {
     unsigned int bytesRead;
     rv = aStream->Read(buffer,
-                       NS_MIN((unsigned long)sizeof(buffer), bytesRemaining),
+                       std::min((unsigned long)sizeof(buffer), bytesRemaining),
                        &bytesRead);
     NS_ENSURE_SUCCESS(rv, rv);
     rv = ProcessBytes(buffer, bytesRead);

@@ -188,11 +188,12 @@ int nestegg_track_count(nestegg * context, unsigned int * tracks);
     @param start_pos   Starting offset of the cluster. -1 means non-existant.
     @param end_pos     Starting offset of the cluster. -1 means non-existant or
                        final cluster.
+    @param tstamp      Starting timestamp of the cluster.
     @retval  0 Success.
     @retval -1 Error. */
 int nestegg_get_cue_point(nestegg * context, unsigned int cluster_num,
                           int64_t max_offset, int64_t * start_pos,
-                          int64_t * end_pos);
+                          int64_t * end_pos, uint64_t * tstamp);
 
 /** Seek to @a offset.  Stream will seek directly to offset.
     Should be used to seek to the start of a resync point, i.e. cluster; the
@@ -317,6 +318,21 @@ int nestegg_packet_count(nestegg_packet * packet, unsigned int * count);
     @retval -1 Error. */
 int nestegg_packet_data(nestegg_packet * packet, unsigned int item,
                         unsigned char ** data, size_t * length);
+
+/** Query the presence of cues.
+    @param context  Stream context initialized by #nestegg_init.
+    @retval 0 The media has no cues.
+    @retval 1 The media has cues. */
+int nestegg_has_cues(nestegg * context);
+
+/**
+ * Try to determine if the buffer looks like the beginning of a WebM file.
+ *
+ * @param buffer A buffer containing the beginning of a media file.
+ * @param length The size of the buffer.
+ * @retval 0 The file is not a WebM file.
+ * @retval 1 The file is a WebM file. */
+int nestegg_sniff(unsigned char const * buffer, size_t length);
 
 #ifdef __cplusplus
 }

@@ -3,6 +3,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/DebugOnly.h"
+
 #ifdef MOZ_WIDGET_ANDROID
 // For ScreenOrientation.h and Hal.h
 #include "base/basictypes.h"
@@ -23,6 +25,7 @@
 #include "nsPluginInstanceOwner.h"
 
 #include "nsIDocument.h"
+#include "nsIDocShell.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIScriptContext.h"
 #include "nsDirectoryServiceDefs.h"
@@ -51,7 +54,6 @@ using namespace mozilla;
 
 using namespace mozilla::gl;
 
-typedef nsNPAPIPluginInstance::TextureInfo TextureInfo;
 typedef nsNPAPIPluginInstance::VideoInfo VideoInfo;
 
 class PluginEventRunnable : public nsRunnable
@@ -81,7 +83,9 @@ static nsRefPtr<GLContext> sPluginContext = nullptr;
 static bool EnsureGLContext()
 {
   if (!sPluginContext) {
-    sPluginContext = GLContextProvider::CreateOffscreen(gfxIntSize(16, 16));
+    gfxIntSize dummySize(16, 16);
+    GLContext::SurfaceCaps dummyCaps;
+    sPluginContext = GLContextProvider::CreateOffscreen(dummySize, dummyCaps);
   }
 
   return sPluginContext != nullptr;
@@ -99,7 +103,7 @@ public:
   {
   }
 
-  TextureInfo Lock()
+  nsNPAPIPluginInstance::TextureInfo Lock()
   {
     if (!EnsureGLContext()) {
       mTextureInfo.mTexture = 0;
@@ -114,7 +118,7 @@ public:
     return mTextureInfo;
   }
 
-  void Release(TextureInfo& aTextureInfo)
+  void Release(nsNPAPIPluginInstance::TextureInfo& aTextureInfo)
   { 
     mTextureInfo = aTextureInfo;
     mLock.Unlock();
@@ -144,10 +148,12 @@ public:
   }
 
 private:
-  TextureInfo mTextureInfo;
+  nsNPAPIPluginInstance::TextureInfo mTextureInfo;
  
   Mutex mLock;
 };
+
+static std::map<NPP, nsNPAPIPluginInstance*> sPluginNPPMap;
 
 #endif
 
@@ -188,11 +194,19 @@ nsNPAPIPluginInstance::nsNPAPIPluginInstance()
   mNPP.ndata = this;
 
   PLUGIN_LOG(PLUGIN_LOG_BASIC, ("nsNPAPIPluginInstance ctor: this=%p\n",this));
+
+#ifdef MOZ_WIDGET_ANDROID
+  sPluginNPPMap[&mNPP] = this;
+#endif
 }
 
 nsNPAPIPluginInstance::~nsNPAPIPluginInstance()
 {
   PLUGIN_LOG(PLUGIN_LOG_BASIC, ("nsNPAPIPluginInstance dtor: this=%p\n",this));
+
+#ifdef MOZ_WIDGET_ANDROID
+  sPluginNPPMap.erase(&mNPP);
+#endif
 
   if (mMIMEType) {
     PR_Free((void *)mMIMEType);
@@ -200,7 +214,7 @@ nsNPAPIPluginInstance::~nsNPAPIPluginInstance()
   }
 }
 
-uint32_t nsNPAPIPluginInstance::gInPluginCalls = 0;
+uint32_t nsNPAPIPluginInstance::gInUnsafePluginCalls = 0;
 
 void
 nsNPAPIPluginInstance::Destroy()
@@ -304,7 +318,8 @@ nsresult nsNPAPIPluginInstance::Stop()
   if (pluginFunctions->destroy) {
     NPSavedData *sdata = 0;
 
-    NS_TRY_SAFE_CALL_RETURN(error, (*pluginFunctions->destroy)(&mNPP, &sdata), this);
+    NS_TRY_SAFE_CALL_RETURN(error, (*pluginFunctions->destroy)(&mNPP, &sdata), this,
+                            NS_PLUGIN_CALL_UNSAFE_TO_REENTER_GECKO);
 
     NPP_PLUGIN_LOG(PLUGIN_LOG_NORMAL,
                    ("NPP Destroy called: this=%p, npp=%p, return=%d\n", this, &mNPP, error));
@@ -519,19 +534,6 @@ nsNPAPIPluginInstance::Start()
   // before returning. If the plugin returns failure, we'll clear it out below.
   mRunning = RUNNING;
 
-#if MOZ_WIDGET_ANDROID
-  // Flash creates some local JNI references during initialization (NPP_New). It does not
-  // remove these references later, so essentially they are leaked. AutoLocalJNIFrame
-  // prevents this by pushing a JNI frame. As a result, all local references created
-  // by Flash are contained in this frame. AutoLocalJNIFrame pops the frame once we
-  // go out of scope and the local references are deleted, preventing the leak.
-  JNIEnv* env = AndroidBridge::GetJNIEnv();
-  if (!env)
-    return NS_ERROR_FAILURE;
-
-  mozilla::AutoLocalJNIFrame frame(env);
-#endif
-
   nsresult newResult = library->NPP_New((char*)mimetype, &mNPP, (uint16_t)mode, count, (char**)names, (char**)values, NULL, &error);
   mInPluginInitCall = oldVal;
 
@@ -582,7 +584,8 @@ nsresult nsNPAPIPluginInstance::SetWindow(NPWindow* window)
     NPPAutoPusher nppPusher(&mNPP);
 
     DebugOnly<NPError> error;
-    NS_TRY_SAFE_CALL_RETURN(error, (*pluginFunctions->setwindow)(&mNPP, (NPWindow*)window), this);
+    NS_TRY_SAFE_CALL_RETURN(error, (*pluginFunctions->setwindow)(&mNPP, (NPWindow*)window), this,
+                            NS_PLUGIN_CALL_UNSAFE_TO_REENTER_GECKO);
 
     mInPluginInitCall = oldVal;
 
@@ -650,7 +653,8 @@ nsresult nsNPAPIPluginInstance::Print(NPPrint* platformPrint)
   }
 
   if (pluginFunctions->print)
-      NS_TRY_SAFE_CALL_VOID((*pluginFunctions->print)(&mNPP, thePrint), this);
+      NS_TRY_SAFE_CALL_VOID((*pluginFunctions->print)(&mNPP, thePrint), this,
+                            NS_PLUGIN_CALL_UNSAFE_TO_REENTER_GECKO);
 
   NPP_PLUGIN_LOG(PLUGIN_LOG_NORMAL,
   ("NPP PrintProc called: this=%p, pDC=%p, [x=%d,y=%d,w=%d,h=%d], clip[t=%d,b=%d,l=%d,r=%d]\n",
@@ -668,7 +672,8 @@ nsresult nsNPAPIPluginInstance::Print(NPPrint* platformPrint)
   return NS_OK;
 }
 
-nsresult nsNPAPIPluginInstance::HandleEvent(void* event, int16_t* result)
+nsresult nsNPAPIPluginInstance::HandleEvent(void* event, int16_t* result,
+                                            NSPluginCallReentry aSafeToReenterGecko)
 {
   if (RUNNING != mRunning)
     return NS_OK;
@@ -688,8 +693,10 @@ nsresult nsNPAPIPluginInstance::HandleEvent(void* event, int16_t* result)
   if (pluginFunctions->event) {
     mCurrentPluginEvent = event;
 #if defined(XP_WIN) || defined(XP_OS2)
-    NS_TRY_SAFE_CALL_RETURN(tmpResult, (*pluginFunctions->event)(&mNPP, event), this);
+    NS_TRY_SAFE_CALL_RETURN(tmpResult, (*pluginFunctions->event)(&mNPP, event), this,
+                            aSafeToReenterGecko);
 #else
+    MAIN_THREAD_JNI_REF_GUARD;
     tmpResult = (*pluginFunctions->event)(&mNPP, event);
 #endif
     NPP_PLUGIN_LOG(PLUGIN_LOG_NOISY,
@@ -717,7 +724,8 @@ nsresult nsNPAPIPluginInstance::GetValueFromPlugin(NPPVariable variable, void* v
     PluginDestructionGuard guard(this);
 
     NPError pluginError = NPERR_GENERIC_ERROR;
-    NS_TRY_SAFE_CALL_RETURN(pluginError, (*pluginFunctions->getvalue)(&mNPP, variable, value), this);
+    NS_TRY_SAFE_CALL_RETURN(pluginError, (*pluginFunctions->getvalue)(&mNPP, variable, value), this,
+                            NS_PLUGIN_CALL_UNSAFE_TO_REENTER_GECKO);
     NPP_PLUGIN_LOG(PLUGIN_LOG_NORMAL,
     ("NPP GetValue called: this=%p, npp=%p, var=%d, value=%d, return=%d\n", 
     this, &mNPP, variable, value, pluginError));
@@ -952,13 +960,13 @@ GLContext* nsNPAPIPluginInstance::GLContext()
   return sPluginContext;
 }
 
-TextureInfo nsNPAPIPluginInstance::LockContentTexture()
+nsNPAPIPluginInstance::TextureInfo nsNPAPIPluginInstance::LockContentTexture()
 {
   EnsureSharedTexture();
   return mContentTexture->Lock();
 }
 
-void nsNPAPIPluginInstance::ReleaseContentTexture(TextureInfo& aTextureInfo)
+void nsNPAPIPluginInstance::ReleaseContentTexture(nsNPAPIPluginInstance::TextureInfo& aTextureInfo)
 {
   EnsureSharedTexture();
   mContentTexture->Release(aTextureInfo);
@@ -1060,6 +1068,17 @@ void nsNPAPIPluginInstance::SetInverted(bool aInverted)
     return;
 
   mInverted = aInverted;
+}
+
+nsNPAPIPluginInstance* nsNPAPIPluginInstance::GetFromNPP(NPP npp)
+{
+  std::map<NPP, nsNPAPIPluginInstance*>::iterator it;
+
+  it = sPluginNPPMap.find(npp);
+  if (it == sPluginNPPMap.end())
+    return nullptr;
+
+  return it->second;
 }
 
 #endif
@@ -1389,34 +1408,32 @@ nsNPAPIPluginInstance::PrivateModeStateChanged(bool enabled)
     return NS_ERROR_FAILURE;
 
   PluginDestructionGuard guard(this);
-    
+
   NPError error;
   NPBool value = static_cast<NPBool>(enabled);
-  NS_TRY_SAFE_CALL_RETURN(error, (*pluginFunctions->setvalue)(&mNPP, NPNVprivateModeBool, &value), this);
+  NS_TRY_SAFE_CALL_RETURN(error, (*pluginFunctions->setvalue)(&mNPP, NPNVprivateModeBool, &value), this,
+                          NS_PLUGIN_CALL_UNSAFE_TO_REENTER_GECKO);
   return (error == NPERR_NO_ERROR) ? NS_OK : NS_ERROR_FAILURE;
 }
 
-class DelayUnscheduleEvent : public nsRunnable {
-public:
-  nsRefPtr<nsNPAPIPluginInstance> mInstance;
-  uint32_t mTimerID;
-  DelayUnscheduleEvent(nsNPAPIPluginInstance* aInstance, uint32_t aTimerId)
-    : mInstance(aInstance)
-    , mTimerID(aTimerId)
-  {}
-
-  ~DelayUnscheduleEvent() {}
-
-  NS_IMETHOD Run();
-};
-
-NS_IMETHODIMP
-DelayUnscheduleEvent::Run()
+nsresult
+nsNPAPIPluginInstance::IsPrivateBrowsing(bool* aEnabled)
 {
-  mInstance->UnscheduleTimer(mTimerID);
+  if (!mOwner)
+    return NS_ERROR_FAILURE;
+
+  nsCOMPtr<nsIDocument> doc;
+  mOwner->GetDocument(getter_AddRefs(doc));
+  NS_ENSURE_TRUE(doc, NS_ERROR_FAILURE);
+
+  nsCOMPtr<nsPIDOMWindow> domwindow = doc->GetWindow();
+  NS_ENSURE_TRUE(domwindow, NS_ERROR_FAILURE);
+
+  nsCOMPtr<nsIDocShell> docShell = domwindow->GetDocShell();
+  nsCOMPtr<nsILoadContext> loadContext = do_QueryInterface(docShell);
+  *aEnabled = (loadContext && loadContext->UsePrivateBrowsing());
   return NS_OK;
 }
-
 
 static void
 PluginTimerCallback(nsITimer *aTimer, void *aClosure)
@@ -1425,6 +1442,9 @@ PluginTimerCallback(nsITimer *aTimer, void *aClosure)
   NPP npp = t->npp;
   uint32_t id = t->id;
 
+  PLUGIN_LOG(PLUGIN_LOG_NOISY, ("nsNPAPIPluginInstance running plugin timer callback this=%p\n", npp->ndata));
+
+  MAIN_THREAD_JNI_REF_GUARD;
   // Some plugins (Flash on Android) calls unscheduletimer
   // from this callback.
   t->inCallback = true;
@@ -1440,8 +1460,8 @@ PluginTimerCallback(nsITimer *aTimer, void *aClosure)
   // use UnscheduleTimer to clean up if this is a one-shot timer
   uint32_t timerType;
   t->timer->GetType(&timerType);
-  if (timerType == nsITimer::TYPE_ONE_SHOT)
-      inst->UnscheduleTimer(id);
+  if (t->needUnschedule || timerType == nsITimer::TYPE_ONE_SHOT)
+    inst->UnscheduleTimer(id);
 }
 
 nsNPAPITimer*
@@ -1466,7 +1486,7 @@ nsNPAPIPluginInstance::ScheduleTimer(uint32_t interval, NPBool repeat, void (*ti
 
   nsNPAPITimer *newTimer = new nsNPAPITimer();
 
-  newTimer->inCallback = false;
+  newTimer->inCallback = newTimer->needUnschedule = false;
   newTimer->npp = &mNPP;
 
   // generate ID that is unique to this instance
@@ -1505,8 +1525,7 @@ nsNPAPIPluginInstance::UnscheduleTimer(uint32_t timerID)
     return;
 
   if (t->inCallback) {
-    nsCOMPtr<nsIRunnable> e = new DelayUnscheduleEvent(this, timerID);
-    NS_DispatchToCurrentThread(e);
+    t->needUnschedule = true;
     return;
   }
 

@@ -31,22 +31,13 @@ XPCOMUtils.defineLazyModuleGetter(this, "DownloadsCommon",
 XPCOMUtils.defineLazyServiceGetter(this, "gSessionStartup",
                                    "@mozilla.org/browser/sessionstartup;1",
                                    "nsISessionStartup");
-#ifndef MOZ_PER_WINDOW_PRIVATE_BROWSING
-XPCOMUtils.defineLazyServiceGetter(this, "gPrivateBrowsingService",
-                                   "@mozilla.org/privatebrowsing;1",
-                                   "nsIPrivateBrowsingService");
-#endif
 
 const kObservedTopics = [
   "sessionstore-windows-restored",
   "sessionstore-browser-state-restored",
   "download-manager-initialized",
   "download-manager-change-retention",
-#ifdef MOZ_PER_WINDOW_PRIVATE_BROWSING
   "last-pb-context-exited",
-#else
-  "private-browsing-transition-complete",
-#endif
   "browser-lastwindow-close-granted",
   "quit-application",
   "profile-change-teardown",
@@ -132,26 +123,12 @@ DownloadsStartup.prototype = {
         break;
 
       case "download-manager-change-retention":
-        // When the panel interface is enabled, we use a different preference to
-        // determine whether downloads should be removed from view as soon as
-        // they are finished.  We do this to allow proper migration to the new
-        // feature when using the same profile on multiple versions of the
-        // product (bug 697678).
+        // If we're using the Downloads Panel, we override the retention
+        // preference to always retain downloads on completion.
         if (!DownloadsCommon.useToolkitUI) {
-          let removeFinishedDownloads = Services.prefs.getBoolPref(
-                            "browser.download.panel.removeFinishedDownloads");
-          aSubject.QueryInterface(Ci.nsISupportsPRInt32)
-                  .data = removeFinishedDownloads ? 0 : 2;
+          aSubject.QueryInterface(Ci.nsISupportsPRInt32).data = 2;
         }
         break;
-
-#ifndef MOZ_PER_WINDOW_PRIVATE_BROWSING
-      case "private-browsing-transition-complete":
-        // Ensure that persistent data is reloaded only when the database
-        // connection is available again.
-        this._ensureDataLoaded();
-        break;
-#endif
 
       case "browser-lastwindow-close-granted":
         // When using the panel interface, downloads that are already completed
@@ -166,7 +143,6 @@ DownloadsStartup.prototype = {
         }
         break;
 
-#ifdef MOZ_PER_WINDOW_PRIVATE_BROWSING
       case "last-pb-context-exited":
         // Similar to the above notification, but for private downloads.
         if (this._downloadsServiceInitialized &&
@@ -174,7 +150,6 @@ DownloadsStartup.prototype = {
           Services.downloads.cleanUpPrivate();
         }
         break;
-#endif
 
       case "quit-application":
         // When the application is shutting down, we must free all resources in
@@ -276,11 +251,7 @@ DownloadsStartup.prototype = {
    */
   _ensureDataLoaded: function DS_ensureDataLoaded()
   {
-    if (!this._downloadsServiceInitialized
-#ifndef MOZ_PER_WINDOW_PRIVATE_BROWSING
-        || gPrivateBrowsingService.privateBrowsingEnabled
-#endif
-       ) {
+    if (!this._downloadsServiceInitialized) {
       return;
     }
 

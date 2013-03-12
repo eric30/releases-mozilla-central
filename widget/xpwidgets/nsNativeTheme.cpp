@@ -14,6 +14,7 @@
 #include "nsString.h"
 #include "nsINameSpaceManager.h"
 #include "nsIDOMHTMLInputElement.h"
+#include "nsIDOMHTMLProgressElement.h"
 #include "nsIDOMXULMenuListElement.h"
 #include "nsThemeConstants.h"
 #include "nsIComponentManager.h"
@@ -22,6 +23,7 @@
 #include "nsMeterFrame.h"
 #include "nsMenuFrame.h"
 #include "mozilla/dom/Element.h"
+#include <algorithm>
 
 nsNativeTheme::nsNativeTheme()
 : mAnimatedContentTimeout(UINT32_MAX)
@@ -36,9 +38,9 @@ nsNativeTheme::GetPresShell(nsIFrame* aFrame)
   if (!aFrame)
     return nullptr;
 
-  // this is a workaround for the egcs 1.1.2 not inliningg
-  // aFrame->GetPresContext(), which causes an undefined symbol
-  nsPresContext *context = aFrame->GetStyleContext()->GetRuleNode()->GetPresContext();
+  // this is a workaround for the egcs 1.1.2 not inlining
+  // aFrame->PresContext(), which causes an undefined symbol
+  nsPresContext *context = aFrame->StyleContext()->RuleNode()->PresContext();
   return context ? context->GetPresShell() : nullptr;
 }
 
@@ -100,6 +102,7 @@ nsNativeTheme::GetContentState(nsIFrame* aFrame, uint8_t aWidgetType)
   return flags;
 }
 
+/* static */
 bool
 nsNativeTheme::CheckBooleanAttr(nsIFrame* aFrame, nsIAtom* aAtom)
 {
@@ -120,6 +123,7 @@ nsNativeTheme::CheckBooleanAttr(nsIFrame* aFrame, nsIAtom* aAtom)
                               NS_LITERAL_STRING("true"), eCaseMatters);
 }
 
+/* static */
 int32_t
 nsNativeTheme::CheckIntAttr(nsIFrame* aFrame, nsIAtom* aAtom, int32_t defaultValue)
 {
@@ -134,6 +138,44 @@ nsNativeTheme::CheckIntAttr(nsIFrame* aFrame, nsIAtom* aAtom, int32_t defaultVal
     return defaultValue;
 
   return value;
+}
+
+/* static */
+double
+nsNativeTheme::GetProgressValue(nsIFrame* aFrame)
+{
+  // When we are using the HTML progress element,
+  // we can get the value from the IDL property.
+  if (aFrame) {
+    nsCOMPtr<nsIDOMHTMLProgressElement> progress =
+      do_QueryInterface(aFrame->GetContent());
+    if (progress) {
+      double value;
+      progress->GetValue(&value);
+      return value;
+    }
+  }
+
+  return (double)nsNativeTheme::CheckIntAttr(aFrame, nsGkAtoms::value, 0);
+}
+
+/* static */
+double
+nsNativeTheme::GetProgressMaxValue(nsIFrame* aFrame)
+{
+  // When we are using the HTML progress element,
+  // we can get the max from the IDL property.
+  if (aFrame) {
+    nsCOMPtr<nsIDOMHTMLProgressElement> progress =
+      do_QueryInterface(aFrame->GetContent());
+    if (progress) {
+      double max;
+      progress->GetMax(&max);
+      return max;
+    }
+  }
+
+  return (double)std::max(nsNativeTheme::CheckIntAttr(aFrame, nsGkAtoms::max, 100), 1);
 }
 
 bool
@@ -231,7 +273,7 @@ nsNativeTheme::IsWidgetStyled(nsPresContext* aPresContext, nsIFrame* aFrame,
       parentFrame = parentFrame->GetParent();
       if (parentFrame) {
         return IsWidgetStyled(aPresContext, parentFrame,
-                              parentFrame->GetStyleDisplay()->mAppearance);
+                              parentFrame->StyleDisplay()->mAppearance);
       }
     }
   }
@@ -299,8 +341,19 @@ nsNativeTheme::IsDisabled(nsIFrame* aFrame, nsEventStates aEventStates)
 bool
 nsNativeTheme::IsFrameRTL(nsIFrame* aFrame)
 {
-  return aFrame && aFrame->GetStyleVisibility()->mDirection == NS_STYLE_DIRECTION_RTL;
+  return aFrame && aFrame->StyleVisibility()->mDirection == NS_STYLE_DIRECTION_RTL;
 }
+
+bool
+nsNativeTheme::IsHTMLContent(nsIFrame *aFrame)
+{
+  if (!aFrame) {
+    return false;
+  }
+  nsIContent* content = aFrame->GetContent();
+  return content && content->IsHTML();
+}
+
 
 // scrollbar button:
 int32_t
@@ -460,14 +513,14 @@ bool
 nsNativeTheme::IsVerticalProgress(nsIFrame* aFrame)
 {
   return aFrame &&
-         aFrame->GetStyleDisplay()->mOrient == NS_STYLE_ORIENT_VERTICAL;
+         aFrame->StyleDisplay()->mOrient == NS_STYLE_ORIENT_VERTICAL;
 }
 
 bool
 nsNativeTheme::IsVerticalMeter(nsIFrame* aFrame)
 {
   NS_PRECONDITION(aFrame, "You have to pass a non-null aFrame");
-  return aFrame->GetStyleDisplay()->mOrient == NS_STYLE_ORIENT_VERTICAL;
+  return aFrame->StyleDisplay()->mOrient == NS_STYLE_ORIENT_VERTICAL;
 }
 
 // menupopup:
@@ -525,7 +578,7 @@ nsNativeTheme::QueueAnimatedContentForRefresh(nsIContent* aContent,
                "aMinimumFrameRate must be less than 1000!");
 
   uint32_t timeout = 1000 / aMinimumFrameRate;
-  timeout = NS_MIN(mAnimatedContentTimeout, timeout);
+  timeout = std::min(mAnimatedContentTimeout, timeout);
 
   if (!mAnimatedContentTimer) {
     mAnimatedContentTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
@@ -590,7 +643,7 @@ nsNativeTheme::GetAdjacentSiblingFrameWithSameAppearance(nsIFrame* aFrame,
 
   // Check same appearance and adjacency.
   if (!sibling ||
-      sibling->GetStyleDisplay()->mAppearance != aFrame->GetStyleDisplay()->mAppearance ||
+      sibling->StyleDisplay()->mAppearance != aFrame->StyleDisplay()->mAppearance ||
       (sibling->GetRect().XMost() != aFrame->GetRect().x &&
        aFrame->GetRect().XMost() != sibling->GetRect().x))
     return nullptr;

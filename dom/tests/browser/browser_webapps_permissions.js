@@ -27,18 +27,24 @@ const TEST_ORIGIN_URL = "http://mochi.test:8888";
 const installedPermsToTest = {
   "geolocation": "prompt",
   "alarms": "allow",
-  "contacts-write": "prompt",
-  "contacts-read": "prompt",
-  "device-storage:apps-read": "deny",
-  "device-storage:apps-write": "unknown"
+  "fmradio": "allow",
+  "desktop-notification": "allow",
+  "audio-channel-normal": "allow"
 };
 
 const uninstalledPermsToTest = {
   "geolocation": "unknown",
   "alarms": "unknown",
-  "contacts-read": "unknown",
-  "device-storage:apps-read": "unknown",
+  "fmradio": "unknown",
+  "desktop-notification": "unknown",
+  "audio-channel-normal": "unknown"
 };
+
+var permManager = Cc["@mozilla.org/permissionmanager;1"]
+                    .getService(Ci.nsIPermissionManager);
+permManager.addFromPrincipal(window.document.nodePrincipal,
+                             "webapps-manage",
+                             Ci.nsIPermissionManager.ALLOW_ACTION);
 
 var gWindow, gNavigator;
 
@@ -59,10 +65,10 @@ function test() {
     browser.removeEventListener("DOMContentLoaded", onLoad, false);
     gWindow = browser.contentWindow;
 
-    SpecialPowers.setBoolPref("dom.mozApps.dev_mode", true);
     SpecialPowers.setBoolPref("dom.mozPermissionSettings.enabled", true);
     SpecialPowers.addPermission("permissions", true, browser.contentWindow.document);
     SpecialPowers.addPermission("permissions", true, browser.contentDocument);
+    SpecialPowers.addPermission("webapps-manage", true, browser.contentWindow.document);
 
     executeSoon(function (){
       gWindow.focus();
@@ -113,7 +119,7 @@ function uninstallApp()
       var app = m[i];
 
       function uninstall() {
-        var pendingUninstall = app.uninstall();
+        var pendingUninstall = nav.mozApps.mgmt.uninstall(app);
 
         pendingUninstall.onsuccess = function(r) {
           // test to make sure all permissions have been removed

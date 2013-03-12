@@ -133,10 +133,10 @@ nsImageControlFrame::AccessibleType()
 {
   if (mContent->Tag() == nsGkAtoms::button ||
       mContent->Tag() == nsGkAtoms::input) {
-    return a11y::eHTMLButtonAccessible;
+    return a11y::eHTMLButtonType;
   }
 
-  return a11y::eNoAccessible;
+  return a11y::eNoType;
 }
 #endif
 
@@ -173,7 +173,7 @@ nsImageControlFrame::HandleEvent(nsPresContext* aPresContext,
   }
 
   // do we have user-input style?
-  const nsStyleUserInterface* uiStyle = GetStyleUserInterface();
+  const nsStyleUserInterface* uiStyle = StyleUserInterface();
   if (uiStyle->mUserInput == NS_STYLE_USER_INPUT_NONE || uiStyle->mUserInput == NS_STYLE_USER_INPUT_DISABLED)
     return nsFrame::HandleEvent(aPresContext, aEvent, aEventStatus);
 
@@ -212,7 +212,7 @@ nsImageControlFrame::GetCursor(const nsPoint&    aPoint,
 {
   // Use style defined cursor if one is provided, otherwise when
   // the cursor style is "auto" we use the pointer cursor.
-  FillCursorInformationFromStyle(GetStyleUserInterface(), aCursor);
+  FillCursorInformationFromStyle(StyleUserInterface(), aCursor);
 
   if (NS_STYLE_CURSOR_AUTO == aCursor.mCursor) {
     aCursor.mCursor = NS_STYLE_CURSOR_POINTER;

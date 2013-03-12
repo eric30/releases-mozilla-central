@@ -44,6 +44,7 @@
 #include "prnetdb.h"
 #include "prbit.h"
 #include "zlib.h"
+#include <algorithm>
 
 // rather than slurp up all of nsIWebSocket.idl, which lives outside necko, just
 // dupe one constant we need from it
@@ -124,7 +125,8 @@ public:
     mLastFailure = TimeStamp::Now();
     // We use a truncated exponential backoff as suggested by RFC 6455,
     // but multiply by 1.5 instead of 2 to be more gradual.
-    mNextDelay = NS_MIN<double>(kWSReconnectMaxDelay, mNextDelay * 1.5);
+    mNextDelay = static_cast<uint32_t>(
+      std::min<double>(kWSReconnectMaxDelay, mNextDelay * 1.5));
     LOG(("WebSocket: FailedAgain: host=%s, port=%d: incremented delay to %lu",
          mAddress.get(), mPort, mNextDelay));
   }
@@ -912,6 +914,8 @@ private:
 // WebSocketChannel
 //-----------------------------------------------------------------------------
 
+uint32_t WebSocketChannel::sSerialSeed = 0;
+
 WebSocketChannel::WebSocketChannel() :
   mPort(0),
   mCloseTimeout(20000),
@@ -949,7 +953,8 @@ WebSocketChannel::WebSocketChannel() :
   mCurrentOutSent(0),
   mCompressor(nullptr),
   mDynamicOutputSize(0),
-  mDynamicOutput(nullptr)
+  mDynamicOutput(nullptr),
+  mConnectionLogService(nullptr)
 {
   NS_ABORT_IF_FALSE(NS_IsMainThread(), "not main thread");
 
@@ -959,6 +964,13 @@ WebSocketChannel::WebSocketChannel() :
     sWebSocketAdmissions = new nsWSAdmissionManager();
 
   mFramePtr = mBuffer = static_cast<uint8_t *>(moz_xmalloc(mBufferSize));
+
+  nsresult rv;
+  mConnectionLogService = do_GetService("@mozilla.org/network/dashboard;1",&rv);
+  if (NS_FAILED(rv))
+    LOG(("Failed to initiate dashboard service."));
+
+  mSerial = sSerialSeed++;
 }
 
 WebSocketChannel::~WebSocketChannel()
@@ -1168,26 +1180,26 @@ WebSocketChannel::ProcessInput(uint8_t *buffer, uint32_t count)
   uint32_t totalAvail = avail;
 
   while (avail >= 2) {
-    int64_t payloadLength = mFramePtr[1] & 0x7F;
-    uint8_t finBit        = mFramePtr[0] & kFinalFragBit;
-    uint8_t rsvBits       = mFramePtr[0] & 0x70;
-    uint8_t maskBit       = mFramePtr[1] & kMaskBit;
-    uint8_t opcode        = mFramePtr[0] & 0x0F;
+    int64_t payloadLength64 = mFramePtr[1] & 0x7F;
+    uint8_t finBit  = mFramePtr[0] & kFinalFragBit;
+    uint8_t rsvBits = mFramePtr[0] & 0x70;
+    uint8_t maskBit = mFramePtr[1] & kMaskBit;
+    uint8_t opcode  = mFramePtr[0] & 0x0F;
 
     uint32_t framingLength = 2;
     if (maskBit)
       framingLength += 4;
 
-    if (payloadLength < 126) {
+    if (payloadLength64 < 126) {
       if (avail < framingLength)
         break;
-    } else if (payloadLength == 126) {
+    } else if (payloadLength64 == 126) {
       // 16 bit length field
       framingLength += 2;
       if (avail < framingLength)
         break;
 
-      payloadLength = mFramePtr[2] << 8 | mFramePtr[3];
+      payloadLength64 = mFramePtr[2] << 8 | mFramePtr[3];
     } else {
       // 64 bit length
       framingLength += 8;
@@ -1204,18 +1216,19 @@ WebSocketChannel::ProcessInput(uint8_t *buffer, uint32_t count)
       // copy this in case it is unaligned
       uint64_t tempLen;
       memcpy(&tempLen, mFramePtr + 2, 8);
-      payloadLength = PR_ntohll(tempLen);
+      payloadLength64 = PR_ntohll(tempLen);
     }
 
     payload = mFramePtr + framingLength;
     avail -= framingLength;
 
     LOG(("WebSocketChannel::ProcessInput: payload %lld avail %lu\n",
-         payloadLength, avail));
+         payloadLength64, avail));
 
-    if (payloadLength + mFragmentAccumulator > mMaxMessageSize) {
+    if (payloadLength64 + mFragmentAccumulator > mMaxMessageSize) {
       return NS_ERROR_FILE_TOO_BIG;
     }
+    uint32_t payloadLength = static_cast<uint32_t>(payloadLength64);
 
     if (avail < payloadLength)
       break;
@@ -1255,7 +1268,7 @@ WebSocketChannel::ProcessInput(uint8_t *buffer, uint32_t count)
         return NS_ERROR_ILLEGAL_VALUE;
       }
 
-      LOG(("WebSocketChannel:: Accumulating Fragment %lld\n", payloadLength));
+      LOG(("WebSocketChannel:: Accumulating Fragment %ld\n", payloadLength));
 
       if (opcode == kContinuation) {
 
@@ -1320,6 +1333,15 @@ WebSocketChannel::ProcessInput(uint8_t *buffer, uint32_t count)
         }
 
         NS_DispatchToMainThread(new CallOnMessageAvailable(this, utf8Data, -1));
+        nsresult rv;
+        if (mConnectionLogService) {
+          nsAutoCString host;
+          rv = mURI->GetHostPort(host);
+          if (NS_SUCCEEDED(rv)) {
+            mConnectionLogService->NewMsgReceived(host, mSerial, count);
+            LOG(("Added new msg received for %s",host.get()));
+          }
+        }
       }
     } else if (opcode & kControlFrameMask) {
       // control frames
@@ -1338,7 +1360,7 @@ WebSocketChannel::ProcessInput(uint8_t *buffer, uint32_t count)
           memcpy(&mServerCloseCode, payload, 2);
           mServerCloseCode = PR_ntohs(mServerCloseCode);
           LOG(("WebSocketChannel:: close recvd code %u\n", mServerCloseCode));
-          uint16_t msglen = payloadLength - 2;
+          uint16_t msglen = static_cast<uint16_t>(payloadLength - 2);
           if (msglen > 0) {
             mServerCloseReason.SetLength(msglen);
             memcpy(mServerCloseReason.BeginWriting(),
@@ -1401,6 +1423,16 @@ WebSocketChannel::ProcessInput(uint8_t *buffer, uint32_t count)
         nsCString binaryData((const char *)payload, payloadLength);
         NS_DispatchToMainThread(new CallOnMessageAvailable(this, binaryData,
                                                            payloadLength));
+        // To add the header to 'Networking Dashboard' log
+        nsresult rv;
+        if (mConnectionLogService) {
+          nsAutoCString host;
+          rv = mURI->GetHostPort(host);
+          if (NS_SUCCEEDED(rv)) {
+            mConnectionLogService->NewMsgReceived(host, mSerial, count);
+            LOG(("Added new received msg for %s",host.get()));
+          }
+        }
       }
     } else if (opcode != kContinuation) {
       /* unknown opcode */
@@ -1812,6 +1844,14 @@ WebSocketChannel::CleanupConnection()
     mTransport->SetEventSink(nullptr, nullptr);
     mTransport->Close(NS_BASE_STREAM_CLOSED);
     mTransport = nullptr;
+  }
+
+  nsresult rv;
+  if (mConnectionLogService) {
+    nsAutoCString host;
+    rv = mURI->GetHostPort(host);
+    if (NS_SUCCEEDED(rv))
+      mConnectionLogService->RemoveHost(host, mSerial);
   }
 
   DecrementSessionCount();
@@ -2638,6 +2678,14 @@ WebSocketChannel::AsyncOpen(nsIURI *aURI,
   if (NS_FAILED(rv))
     return rv;
 
+  if (mConnectionLogService) {
+    nsAutoCString host;
+    rv = mURI->GetHostPort(host);
+    if (NS_SUCCEEDED(rv)) {
+      mConnectionLogService->AddHost(host, mSerial, BaseWebSocketChannel::mEncrypted);
+    }
+  }
+
   rv = ApplyForAdmission();
   if (NS_FAILED(rv))
     return rv;
@@ -2732,6 +2780,16 @@ WebSocketChannel::SendMsgCommon(const nsACString *aMsg, bool aIsBinary,
   if (aLength > static_cast<uint32_t>(mMaxMessageSize)) {
     LOG(("WebSocketChannel:: Error: message too big\n"));
     return NS_ERROR_FILE_TOO_BIG;
+  }
+
+  nsresult rv;
+  if (mConnectionLogService) {
+    nsAutoCString host;
+    rv = mURI->GetHostPort(host);
+    if (NS_SUCCEEDED(rv)) {
+      mConnectionLogService->NewMsgSent(host, mSerial, aLength);
+      LOG(("Added new msg sent for %s",host.get()));
+    }
   }
 
   return mSocketThread->Dispatch(
@@ -3116,7 +3174,7 @@ WebSocketChannel::OnDataAvailable(nsIRequest *aRequest,
       if (mStopped)
         return NS_BASE_STREAM_CLOSED;
 
-      maxRead = NS_MIN(2048U, aCount);
+      maxRead = std::min(2048U, aCount);
       rv = aInputStream->Read((char *)buffer, maxRead, &count);
       LOG(("WebSocketChannel::OnDataAvailable: InflateRead read %u rv %x\n",
            count, rv));
@@ -3146,7 +3204,7 @@ WebSocketChannel::OnDataAvailable(nsIRequest *aRequest,
       if (mStopped)
         return NS_BASE_STREAM_CLOSED;
 
-      maxRead = NS_MIN(2048U, aCount);
+      maxRead = std::min(2048U, aCount);
       EnsureHdrOut(mHdrOutToSend + aCount);
       rv = aInputStream->Read((char *)mHdrOut + mHdrOutToSend, maxRead, &count);
       LOG(("WebSocketChannel::OnDataAvailable: DeflateWrite read %u rv %x\n", 

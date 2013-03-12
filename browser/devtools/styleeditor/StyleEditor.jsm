@@ -130,7 +130,7 @@ StyleEditor.prototype = {
   {
     let document = this.contentDocument;
     if (this._styleSheetIndex == -1) {
-      for (let i = 0; i < document.styleSheets.length; ++i) {
+      for (let i = 0; i < document.styleSheets.length; i++) {
         if (document.styleSheets[i] == this.styleSheet) {
           this._styleSheetIndex = i;
           break;
@@ -660,7 +660,7 @@ StyleEditor.prototype = {
     // Use a ref count to make sure we do not add it multiple times.. and remove
     // it only when all pending StyleEditor-generated transitions ended.
     if (!this._transitionRefCount) {
-      this._styleSheet.insertRule(TRANSITION_RULE, 0);
+      this.styleSheet.insertRule(TRANSITION_RULE, this.styleSheet.cssRules.length);
       content.documentElement.classList.add(TRANSITION_CLASS);
     }
 
@@ -682,7 +682,7 @@ StyleEditor.prototype = {
   {
     if (--this._transitionRefCount == 0) {
       this.contentDocument.documentElement.classList.remove(TRANSITION_CLASS);
-      this.styleSheet.deleteRule(0);
+      this.styleSheet.deleteRule(this.styleSheet.cssRules.length - 1);
     }
 
     this._triggerAction("Commit");
@@ -809,8 +809,8 @@ StyleEditor.prototype = {
         }
       }
 
-      if (sheet.ownerNode) {
-        // step 3: see <link charset="…">
+      // step 3: charset attribute of <link> or <style> element, if it exists
+      if (sheet.ownerNode && sheet.ownerNode.getAttribute) {
         let linkCharset = sheet.ownerNode.getAttribute("charset");
         if (linkCharset != null) {
           return this._convertToUnicode(aString, linkCharset);
@@ -952,7 +952,7 @@ StyleEditor.prototype = {
   {
     let document = this.contentDocument;
     let parent = document.documentElement;
-    let style = document.createElement("style");
+    let style = document.createElementNS("http://www.w3.org/1999/xhtml", "style");
     style.setAttribute("type", "text/css");
     if (aText) {
       style.appendChild(document.createTextNode(aText));
@@ -1004,8 +1004,9 @@ StyleEditor.prototype = {
 
     // copy the list of listeners to allow adding/removing listeners in handlers
     let listeners = this._actionListeners.concat();
+
     // trigger all listeners that have this action handler
-    for (let i = 0; i < listeners.length; ++i) {
+    for (let i = 0; i < listeners.length; i++) {
       let listener = listeners[i];
       let actionHandler = listener["on" + aName];
       if (actionHandler) {

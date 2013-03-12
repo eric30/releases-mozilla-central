@@ -78,20 +78,11 @@ const RIL_IPC_MSG_NAMES = [
   "RIL:SetCallForwardingOption",
   "RIL:GetCallForwardingOption",
   "RIL:CellBroadcastReceived",
+  "RIL:CfStateChanged",
   "RIL:IccOpenChannel",
   "RIL:IccCloseChannel",
   "RIL:IccExchangeAPDU"
 ];
-
-const kVoiceChangedTopic     = "mobile-connection-voice-changed";
-const kDataChangedTopic      = "mobile-connection-data-changed";
-const kCardStateChangedTopic = "mobile-connection-cardstate-changed";
-const kIccInfoChangedTopic   = "mobile-connection-iccinfo-changed";
-const kUssdReceivedTopic     = "mobile-connection-ussd-received";
-const kStkCommandTopic       = "icc-manager-stk-command";
-const kStkSessionEndTopic    = "icc-manager-stk-session-end";
-const kDataErrorTopic        = "mobile-connection-data-error";
-const kIccCardLockErrorTopic = "mobile-connection-icccardlock-error";
 
 XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
                                    "@mozilla.org/childprocessmessagemanager;1",
@@ -114,7 +105,8 @@ MobileICCCardLockResult.prototype = {
                       success: 'r'}
 };
 
-function MobileICCInfo() {}
+function MobileICCInfo() {
+};
 MobileICCInfo.prototype = {
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIDOMMozMobileICCInfo]),
   classID:        MOBILEICCINFO_CID,
@@ -134,8 +126,8 @@ MobileICCInfo.prototype = {
   msisdn: null
 };
 
-function MobileVoicemailInfo() {}
-MobileVoicemailInfo.prototype = {
+function VoicemailInfo() {}
+VoicemailInfo.prototype = {
   number: null,
   displayName: null
 };
@@ -158,6 +150,7 @@ MobileConnectionInfo.prototype = {
   emergencyCallsOnly: false,
   roaming: false,
   network: null,
+  lastKnownMcc: 0,
   cell: null,
   type: null,
   signalStrength: null,
@@ -314,48 +307,39 @@ CellBroadcastEtwsInfo.prototype = {
 };
 
 function RILContentHelper() {
-  this.iccInfo = new MobileICCInfo();
-  this.voiceConnectionInfo = new MobileConnectionInfo();
-  this.dataConnectionInfo = new MobileConnectionInfo();
-  this.voicemailInfo = new MobileVoicemailInfo();
+  this.rilContext = {
+    cardState:            RIL.GECKO_CARDSTATE_UNKNOWN,
+    iccInfo:              new MobileICCInfo(),
+    voiceConnectionInfo:  new MobileConnectionInfo(),
+    dataConnectionInfo:   new MobileConnectionInfo()
+  };
+  this.voicemailInfo = new VoicemailInfo();
 
   this.initRequests();
   this.initMessageListener(RIL_IPC_MSG_NAMES);
   Services.obs.addObserver(this, "xpcom-shutdown", false);
-
-  // Request initial context.
-  let rilContext = cpmm.sendSyncMessage("RIL:GetRilContext")[0];
-
-  if (!rilContext) {
-    debug("Received null rilContext from chrome process.");
-    return;
-  }
-  this.cardState = rilContext.cardState;
-  this.updateICCInfo(rilContext.icc, this.iccInfo);
-  this.updateConnectionInfo(rilContext.voice, this.voiceConnectionInfo);
-  this.updateConnectionInfo(rilContext.data, this.dataConnectionInfo);
-  this.updateVoicemailInfo(rilContext.voicemail, this.voicemailInfo);
 }
 
 RILContentHelper.prototype = {
   __proto__: DOMRequestIpcHelper.prototype,
 
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIMobileConnectionProvider,
-                                         Ci.nsIRILContentHelper,
+                                         Ci.nsICellBroadcastProvider,
+                                         Ci.nsIVoicemailProvider,
+                                         Ci.nsITelephonyProvider,
+                                         Ci.nsIIccProvider,
                                          Ci.nsIObserver]),
   classID:   RILCONTENTHELPER_CID,
   classInfo: XPCOMUtils.generateCI({classID: RILCONTENTHELPER_CID,
                                     classDescription: "RILContentHelper",
                                     interfaces: [Ci.nsIMobileConnectionProvider,
-                                                 Ci.nsIRILContentHelper]}),
+                                                 Ci.nsICellBroadcastProvider,
+                                                 Ci.nsIVoicemailProvider,
+                                                 Ci.nsITelephonyProvider,
+                                                 Ci.nsIIccProvider]}),
 
-  updateVoicemailInfo: function updateVoicemailInfo(srcInfo, destInfo) {
-    for (let key in srcInfo) {
-      destInfo[key] = srcInfo[key];
-    }
-  },
-
-  updateICCInfo: function updateICCInfo(srcInfo, destInfo) {
+  // An utility function to copy objects.
+  updateInfo: function updateInfo(srcInfo, destInfo) {
     for (let key in srcInfo) {
       destInfo[key] = srcInfo[key];
     }
@@ -392,19 +376,51 @@ RILContentHelper.prototype = {
       network = destInfo.network = new MobileNetworkInfo();
     }
 
-    network.longName = srcNetwork.longName;
-    network.shortName = srcNetwork.shortName;
-    network.mnc = srcNetwork.mnc;
-    network.mcc = srcNetwork.mcc;
-  },
+    this.updateInfo(srcNetwork, network);
+ },
 
   // nsIRILContentHelper
 
-  cardState:            RIL.GECKO_CARDSTATE_UNAVAILABLE,
-  iccInfo:              null,
-  voiceConnectionInfo:  null,
-  dataConnectionInfo:   null,
   networkSelectionMode: RIL.GECKO_NETWORK_SELECTION_UNKNOWN,
+
+  rilContext: null,
+
+  getRilContext: function getRilContext() {
+    // Update ril context by sending IPC message to chrome only when the first
+    // time we require it. The information will be updated by following info
+    // changed messages.
+    this.getRilContext = function getRilContext() {
+      return this.rilContext;
+    };
+
+    let rilContext = cpmm.sendSyncMessage("RIL:GetRilContext")[0];
+    if (!rilContext) {
+      debug("Received null rilContext from chrome process.");
+      return;
+    }
+    this.rilContext.cardState = rilContext.cardState;
+    this.updateInfo(rilContext.iccInfo, this.rilContext.iccInfo);
+    this.updateConnectionInfo(rilContext.voice, this.rilContext.voiceConnectionInfo);
+    this.updateConnectionInfo(rilContext.data, this.rilContext.dataConnectionInfo);
+
+    return this.rilContext;
+  },
+
+  get iccInfo() {
+    return this.getRilContext().iccInfo;
+  },
+
+  get voiceConnectionInfo() {
+    return this.getRilContext().voiceConnectionInfo;
+  },
+
+  get dataConnectionInfo() {
+    return this.getRilContext().dataConnectionInfo;
+  },
+
+  get cardState() {
+    return this.getRilContext().cardState;
+  },
 
   /**
    * The network that is currently trying to be selected (or "automatic").
@@ -453,7 +469,7 @@ RILContentHelper.prototype = {
     let requestId = this.getRequestId(request);
 
     if (this.networkSelectionMode == RIL.GECKO_NETWORK_SELECTION_MANUAL
-        && this.voiceConnectionInfo.network === network) {
+        && this.rilContext.voiceConnectionInfo.network === network) {
 
       // Already manually selected this network, so schedule
       // onsuccess to be fired on the next tick
@@ -575,6 +591,15 @@ RILContentHelper.prototype = {
                                                        helpRequested: helpRequested});
   },
 
+  sendStkTimerExpiration: function sendStkTimerExpiration(window,
+                                                          timer) {
+    if (window == null) {
+      throw Components.Exception("Can't get window object",
+                                  Cr.NS_ERROR_UNEXPECTED);
+    }
+    cpmm.sendAsyncMessage("RIL:SendStkTimerExpiration", {timer: timer});
+  },
+
   sendStkEventDownload: function sendStkEventDownload(window,
                                                       event) {
     if (window == null) {
@@ -584,7 +609,8 @@ RILContentHelper.prototype = {
     cpmm.sendAsyncMessage("RIL:SendStkEventDownload", {event: event});
   },
 
-  iccOpenChannel: function iccOpenChannel(window, aid) {
+  iccOpenChannel: function iccOpenChannel(window,
+                                          aid) {
     if (window == null) {
       throw Components.Exception("Can't get window object",
                                   Cr.NS_ERROR_UNEXPECTED);
@@ -593,11 +619,14 @@ RILContentHelper.prototype = {
     let request = Services.DOMRequest.createRequest(window);
     let requestId = this.getRequestId(request);
 
-    cpmm.sendAsyncMessage("RIL:IccOpenChannel", {requestId: requestId, aid: aid});
+    cpmm.sendAsyncMessage("RIL:IccOpenChannel", {requestId: requestId,
+                                                           aid: aid});
     return request;
   },
 
-  iccExchangeAPDU: function iccExchangeAPDU(window, channel, apdu) {
+  iccExchangeAPDU: function iccExchangeAPDU(window,
+                                            channel,
+                                            apdu) {
     if (window == null) {
       throw Components.Exception("Can't get window object",
                                   Cr.NS_ERROR_UNEXPECTED);
@@ -607,11 +636,14 @@ RILContentHelper.prototype = {
     let requestId = this.getRequestId(request);
 
     //Potentially you need serialization here and can't pass the jsval through
-    cpmm.sendAsyncMessage("RIL:IccExchangeAPDU", {requestId: requestId, channel: channel, apdu: apdu});
+    cpmm.sendAsyncMessage("RIL:IccExchangeAPDU", {requestId: requestId,
+                                                      channel: channel,
+                                                          apdu: apdu});
     return request;
   },
 
-  iccCloseChannel: function iccCloseChannel(window, channel) {
+  iccCloseChannel: function iccCloseChannel(window,
+                                            channel) {
     if (window == null) {
       throw Components.Exception("Can't get window object",
                                   Cr.NS_ERROR_UNEXPECTED);
@@ -620,7 +652,8 @@ RILContentHelper.prototype = {
     let request = Services.DOMRequest.createRequest(window);
     let requestId = this.getRequestId(request);
 
-    cpmm.sendAsyncMessage("RIL:IccCloseChannel", {requestId: requestId, channel: channel});
+    cpmm.sendAsyncMessage("RIL:IccCloseChannel", {requestId: requestId,
+                                                    channel: channel});
     return request;
   },
 
@@ -672,87 +705,118 @@ RILContentHelper.prototype = {
     return request;
   },
 
-  _telephonyCallbacks: null,
-  _voicemailCallbacks: null,
+  _mobileConnectionListeners: null,
+  _telephonyListeners: null,
+  _cellBroadcastListeners: null,
+  _voicemailListeners: null,
+  _iccListeners: null,
   _enumerateTelephonyCallbacks: null,
 
   voicemailStatus: null,
+
+  getVoicemailInfo: function getVoicemailInfo() {
+    // Get voicemail infomation by IPC only on first time.
+    this.getVoicemailInfo = function getVoicemailInfo() {
+      return this.voicemailInfo;
+    };
+
+    let voicemailInfo = cpmm.sendSyncMessage("RIL:GetVoicemailInfo")[0];
+    if (voicemailInfo) {
+      this.updateInfo(voicemailInfo, this.voicemailInfo);
+    }
+
+    return this.voicemailInfo;
+  },
   get voicemailNumber() {
-    return this.voicemailInfo.number;
+    return this.getVoicemailInfo().number;
   },
   get voicemailDisplayName() {
-    return this.voicemailInfo.displayName;
+    return this.getVoicemailInfo().displayName;
   },
 
-  registerCallback: function registerCallback(callbackType, callback) {
-    let callbacks = this[callbackType];
-    if (!callbacks) {
-      callbacks = this[callbackType] = [];
+  registerListener: function registerListener(listenerType, listener) {
+    let listeners = this[listenerType];
+    if (!listeners) {
+      listeners = this[listenerType] = [];
     }
 
-    if (callbacks.indexOf(callback) != -1) {
-      throw new Error("Already registered this callback!");
+    if (listeners.indexOf(listener) != -1) {
+      throw new Error("Already registered this listener!");
     }
 
-    callbacks.push(callback);
-    if (DEBUG) debug("Registered " + callbackType + " callback: " + callback);
+    listeners.push(listener);
+    if (DEBUG) debug("Registered " + listenerType + " listener: " + listener);
   },
 
-  unregisterCallback: function unregisterCallback(callbackType, callback) {
-    let callbacks = this[callbackType];
-    if (!callbacks) {
+  unregisterListener: function unregisterListener(listenerType, listener) {
+    let listeners = this[listenerType];
+    if (!listeners) {
       return;
     }
 
-    let index = callbacks.indexOf(callback);
+    let index = listeners.indexOf(listener);
     if (index != -1) {
-      callbacks.splice(index, 1);
-      if (DEBUG) debug("Unregistered telephony callback: " + callback);
+      listeners.splice(index, 1);
+      if (DEBUG) debug("Unregistered listener: " + listener);
     }
   },
 
-  registerTelephonyCallback: function registerTelephonyCallback(callback) {
-    this.registerCallback("_telephonyCallbacks", callback);
-  },
-
-  unregisterTelephonyCallback: function unregisteTelephonyCallback(callback) {
-    this.unregisterCallback("_telephonyCallbacks", callback);
-  },
-
-  registerVoicemailCallback: function registerVoicemailCallback(callback) {
-    this.registerCallback("_voicemailCallbacks", callback);
-  },
-
-  unregisterVoicemailCallback: function unregisteVoicemailCallback(callback) {
-    this.unregisterCallback("_voicemailCallbacks", callback);
-  },
-
-  registerCellBroadcastCallback: function registerCellBroadcastCallback(callback) {
-    this.registerCallback("_cellBroadcastCallbacks", callback);
-  },
-
-  unregisterCellBroadcastCallback: function unregisterCellBroadcastCallback(callback) {
-    this.unregisterCallback("_cellBroadcastCallbacks", callback);
-  },
-
-  registerTelephonyMsg: function registerTelephonyMsg() {
-    debug("Registering for telephony-related messages");
-    cpmm.sendAsyncMessage("RIL:RegisterTelephonyMsg");
-  },
-
-  registerMobileConnectionMsg: function registerMobileConnectionMsg() {
-    debug("Registering for mobile connection-related messages");
+  registerMobileConnectionMsg: function registerMobileConnectionMsg(listener) {
+    debug("Registering for mobile connection related messages");
+    this.registerListener("_mobileConnectionListeners", listener);
     cpmm.sendAsyncMessage("RIL:RegisterMobileConnectionMsg");
   },
 
-  registerVoicemailMsg: function registerVoicemailMsg() {
+  unregisterMobileConnectionMsg: function unregisteMobileConnectionMsg(listener) {
+    this.unregisterListener("_mobileConnectionListeners", listener);
+  },
+
+  registerTelephonyMsg: function registerTelephonyMsg(listener) {
+    debug("Registering for telephony-related messages");
+    this.registerListener("_telephonyListeners", listener);
+    cpmm.sendAsyncMessage("RIL:RegisterTelephonyMsg");
+  },
+
+  unregisterTelephonyMsg: function unregisteTelephonyMsg(listener) {
+    this.unregisterListener("_telephonyListeners", listener);
+
+    // We also need to make sure the listener is removed from
+    // _enumerateTelephonyCallbacks.
+    let index = this._enumerateTelephonyCallbacks.indexOf(listener);
+    if (index != -1) {
+      this._enumerateTelephonyCallbacks.splice(index, 1);
+      if (DEBUG) debug("Unregistered enumerateTelephony callback: " + listener);
+    }
+  },
+
+  registerVoicemailMsg: function registerVoicemailMsg(listener) {
     debug("Registering for voicemail-related messages");
+    this.registerListener("_voicemailListeners", listener);
     cpmm.sendAsyncMessage("RIL:RegisterVoicemailMsg");
   },
 
-  registerCellBroadcastMsg: function registerCellBroadcastMsg() {
+  unregisterVoicemailMsg: function unregisteVoicemailMsg(listener) {
+    this.unregisterListener("_voicemailListeners", listener);
+  },
+
+  registerCellBroadcastMsg: function registerCellBroadcastMsg(listener) {
     debug("Registering for Cell Broadcast related messages");
+    this.registerListener("_cellBroadcastListeners", listener);
     cpmm.sendAsyncMessage("RIL:RegisterCellBroadcastMsg");
+  },
+
+  unregisterCellBroadcastMsg: function unregisterCellBroadcastMsg(listener) {
+    this.unregisterListener("_cellBroadcastListeners", listener);
+  },
+
+  registerIccMsg: function registerIccMsg(listener) {
+    debug("Registering for ICC related messages");
+    this.registerListener("_iccListeners", listener);
+    cpmm.sendAsyncMessage("RIL:RegisterIccMsg");
+  },
+
+  unregisterIccMsg: function unregisterIccMsg(listener) {
+    this.unregisterListener("_iccListeners", listener);
   },
 
   enumerateCalls: function enumerateCalls(callback) {
@@ -889,22 +953,29 @@ RILContentHelper.prototype = {
     debug("Received message '" + msg.name + "': " + JSON.stringify(msg.json));
     switch (msg.name) {
       case "RIL:CardStateChanged":
-        if (this.cardState != msg.json.cardState) {
-          this.cardState = msg.json.cardState;
-          Services.obs.notifyObservers(null, kCardStateChangedTopic, null);
+        if (this.rilContext.cardState != msg.json.cardState) {
+          this.rilContext.cardState = msg.json.cardState;
+          this._deliverEvent("_mobileConnectionListeners",
+                             "notifyCardStateChanged",
+                             null);
         }
         break;
       case "RIL:IccInfoChanged":
-        this.updateICCInfo(msg.json, this.iccInfo);
-        Services.obs.notifyObservers(null, kIccInfoChangedTopic, null);
+        this.updateInfo(msg.json, this.rilContext.iccInfo);
+        this._deliverEvent("_mobileConnectionListeners",
+                           "notifyIccInfoChanged", null);
         break;
       case "RIL:VoiceInfoChanged":
-        this.updateConnectionInfo(msg.json, this.voiceConnectionInfo);
-        Services.obs.notifyObservers(null, kVoiceChangedTopic, null);
+        this.updateConnectionInfo(msg.json, this.rilContext.voiceConnectionInfo);
+        this._deliverEvent("_mobileConnectionListeners",
+                           "notifyVoiceChanged",
+                           null);
         break;
       case "RIL:DataInfoChanged":
-        this.updateConnectionInfo(msg.json, this.dataConnectionInfo);
-        Services.obs.notifyObservers(null, kDataChangedTopic, null);
+        this.updateConnectionInfo(msg.json, this.rilContext.dataConnectionInfo);
+        this._deliverEvent("_mobileConnectionListeners",
+                           "notifyDataChanged",
+                           null);
         break;
       case "RIL:EnumerateCalls":
         this.handleEnumerateCalls(msg.json.calls);
@@ -924,22 +995,21 @@ RILContentHelper.prototype = {
                                  RIL.GECKO_NETWORK_SELECTION_AUTOMATIC);
         break;
       case "RIL:CallStateChanged":
-        this._deliverCallback("_telephonyCallbacks",
-                              "callStateChanged",
-                              [msg.json.callIndex, msg.json.state,
-                               msg.json.number, msg.json.isActive]);
+        this._deliverEvent("_telephonyListeners",
+                           "callStateChanged",
+                           [msg.json.callIndex, msg.json.state,
+                            msg.json.number, msg.json.isActive]);
         break;
       case "RIL:CallError":
-        this._deliverCallback("_telephonyCallbacks",
-                              "notifyError",
-                              [msg.json.callIndex,
-                               msg.json.error]);
+        this._deliverEvent("_telephonyListeners",
+                           "notifyError",
+                           [msg.json.callIndex, msg.json.error]);
         break;
       case "RIL:VoicemailNotification":
         this.handleVoicemailNotification(msg.json);
         break;
       case "RIL:VoicemailInfoChanged":
-        this.updateVoicemailInfo(msg.json, this.voicemailInfo);
+        this.updateInfo(msg.json, this.voicemailInfo);
         break;
       case "RIL:CardLockResult":
         if (msg.json.success) {
@@ -948,10 +1018,9 @@ RILContentHelper.prototype = {
         } else {
           if (msg.json.rilMessageType == "iccSetCardLock" ||
               msg.json.rilMessageType == "iccUnlockCardLock") {
-            let result = JSON.stringify({lockType: msg.json.lockType,
-                                         retryCount: msg.json.retryCount});
-            Services.obs.notifyObservers(null, kIccCardLockErrorTopic,
-                                         result);
+            this._deliverEvent("_mobileConnectionListeners",
+                               "notifyIccCardLockError",
+                               [msg.json.lockType, msg.json.retryCount]);
           }
           this.fireRequestError(msg.json.requestId, msg.json.errorMsg);
         }
@@ -959,7 +1028,9 @@ RILContentHelper.prototype = {
       case "RIL:USSDReceived":
         let res = JSON.stringify({message: msg.json.message,
                                   sessionEnded: msg.json.sessionEnded});
-        Services.obs.notifyObservers(null, kUssdReceivedTopic, res);
+        this._deliverEvent("_mobileConnectionListeners",
+                           "notifyUssdReceived",
+                           [msg.json.message, msg.json.sessionEnded]);
         break;
       case "RIL:SendMMI:Return:OK":
       case "RIL:CancelMMI:Return:OK":
@@ -973,11 +1044,11 @@ RILContentHelper.prototype = {
         }
         break;
       case "RIL:StkCommand":
-        let jsonString = JSON.stringify(msg.json);
-        Services.obs.notifyObservers(null, kStkCommandTopic, jsonString);
+        this._deliverEvent("_iccListeners", "notifyStkCommand",
+                           [JSON.stringify(msg.json)]);
         break;
       case "RIL:StkSessionEnd":
-        Services.obs.notifyObservers(null, kStkSessionEndTopic, null);
+        this._deliverEvent("_iccListeners", "notifyStkSessionEnd", null);
         break;
       case "RIL:IccOpenChannel":
         this.handleIccOpenChannel(msg.json);
@@ -989,8 +1060,9 @@ RILContentHelper.prototype = {
         this.handleIccExchangeAPDU(msg.json);
         break;
       case "RIL:DataError":
-        this.updateConnectionInfo(msg.json, this.dataConnectionInfo);
-        Services.obs.notifyObservers(null, kDataErrorTopic, msg.json.error);
+        this.updateConnectionInfo(msg.json, this.rilContext.dataConnectionInfo);
+        this._deliverEvent("_mobileConnectionListeners", "notifyDataError",
+                           [msg.json.error]);
         break;
       case "RIL:GetCallForwardingOption":
         this.handleGetCallForwardingOption(msg.json);
@@ -998,11 +1070,18 @@ RILContentHelper.prototype = {
       case "RIL:SetCallForwardingOption":
         this.handleSetCallForwardingOption(msg.json);
         break;
+      case "RIL:CfStateChanged":
+        this._deliverEvent("_mobileConnectionListeners",
+                           "notifyCFStateChange",
+                           [msg.json.success, msg.json.action,
+                            msg.json.reason, msg.json.number,
+                            msg.json.timeSeconds, msg.json.serviceClass]);
+        break;
       case "RIL:CellBroadcastReceived":
         let message = new CellBroadcastMessage(msg.json);
-        this._deliverCallback("_cellBroadcastCallbacks",
-                              "notifyMessageReceived",
-                              [message]);
+        this._deliverEvent("_cellBroadcastListeners",
+                           "notifyMessageReceived",
+                           [message]);
         break;
     }
   },
@@ -1048,11 +1127,7 @@ RILContentHelper.prototype = {
     for (let i = 0; i < networks.length; i++) {
       let network = networks[i];
       let info = new MobileNetworkInfo();
-
-      for (let key in network) {
-        info[key] = network[key];
-      }
-
+      this.updateInfo(network, info);
       networks[i] = info;
     }
 
@@ -1095,7 +1170,6 @@ RILContentHelper.prototype = {
     }
   },
 
-
   handleVoicemailNotification: function handleVoicemailNotification(message) {
     let changed = false;
     if (!this.voicemailStatus) {
@@ -1123,9 +1197,9 @@ RILContentHelper.prototype = {
     }
 
     if (changed) {
-      this._deliverCallback("_voicemailCallbacks",
-                            "voicemailNotification",
-                            [this.voicemailStatus]);
+      this._deliverEvent("_voicemailListeners",
+                         "voicemailNotification",
+                         [this.voicemailStatus]);
     }
   },
 
@@ -1133,11 +1207,7 @@ RILContentHelper.prototype = {
     for (let i = 0; i < rules.length; i++) {
       let rule = rules[i];
       let info = new MobileCFInfo();
-
-      for (let key in rule) {
-        info[key] = rule[key];
-      }
-
+      this.updateInfo(rule, info);
       rules[i] = info;
     }
   },
@@ -1193,25 +1263,25 @@ RILContentHelper.prototype = {
     return gUUIDGenerator.generateUUID().toString();
   },
 
-  _deliverCallback: function _deliverCallback(callbackType, name, args) {
-    let thisCallbacks = this[callbackType];
-    if (!thisCallbacks) {
+  _deliverEvent: function _deliverEvent(listenerType, name, args) {
+    let thisListeners = this[listenerType];
+    if (!thisListeners) {
       return;
     }
 
-    let callbacks = thisCallbacks.slice();
-    for each (let callback in callbacks) {
-      if (thisCallbacks.indexOf(callback) == -1) {
+    let listeners = thisListeners.slice();
+    for each (let listener in listeners) {
+      if (thisListeners.indexOf(listener) == -1) {
         continue;
       }
-      let handler = callback[name];
+      let handler = listener[name];
       if (typeof handler != "function") {
         throw new Error("No handler for " + name);
       }
       try {
-        handler.apply(callback, args);
+        handler.apply(listener, args);
       } catch (e) {
-        debug("callback handler for " + name + " threw an exception: " + e);
+        debug("listener for " + name + " threw an exception: " + e);
       }
     }
   },

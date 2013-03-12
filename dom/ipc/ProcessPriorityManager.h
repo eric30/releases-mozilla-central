@@ -26,6 +26,25 @@ namespace ipc {
  */
 void InitProcessPriorityManager();
 
+/**
+ * True iff the current process has foreground or higher priority as
+ * computed by DOM visibility.  The returned answer may not match the
+ * actual OS process priority, for short intervals.
+ */
+bool CurrentProcessIsForeground();
+
+/**
+ * Calling this function prevents us from changing this process's priority
+ * for a few seconds, if that change in priority would not have taken effect
+ * immediately to begin with.
+ *
+ * In practice, this prevents foreground --> background transitions, but not
+ * background --> foreground transitions.  It also does not prevent
+ * transitions from an unknown priority (as happens immediately after we're
+ * constructed) to a foreground priority.
+ */
+void TemporarilyLockProcessPriority();
+
 } // namespace ipc
 } // namespace dom
 } // namespace mozilla

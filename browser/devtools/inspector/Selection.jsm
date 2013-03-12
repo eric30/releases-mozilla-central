@@ -42,6 +42,7 @@ this.EXPORTED_SYMBOLS = ["Selection"];
  *
  * Events:
  *   "new-node" when the inner node changed
+ *   "before-new-node" when the inner node is set to change
  *   "attribute-changed" when an attribute is changed (only if tracked)
  *   "detached" when the node (or one of its parents) is removed from the document (only if tracked)
  *   "reparented" when the node (or one of its parents) is moved under a different node (only if tracked)
@@ -58,7 +59,7 @@ this.EXPORTED_SYMBOLS = ["Selection"];
  *
  */
 this.Selection = function Selection(node=null, track={attributes:true,detached:true}) {
-  new EventEmitter(this);
+  EventEmitter.decorate(this);
   this._onMutations = this._onMutations.bind(this);
   this.track = track;
   this.setNode(node);
@@ -70,12 +71,14 @@ Selection.prototype = {
   _onMutations: function(mutations) {
     let attributeChange = false;
     let detached = false;
+    let parentNode = null;
     for (let m of mutations) {
       if (!attributeChange && m.type == "attributes") {
         attributeChange = true;
       }
       if (m.type == "childList") {
         if (!detached && !this.isConnected()) {
+          parentNode = m.target;
           detached = true;
         }
       }
@@ -84,7 +87,7 @@ Selection.prototype = {
     if (attributeChange)
       this.emit("attribute-changed");
     if (detached)
-      this.emit("detached");
+      this.emit("detached", parentNode);
   },
 
   _attachEvents: function SN__attachEvents() {
@@ -124,6 +127,7 @@ Selection.prototype = {
   setNode: function SN_setNode(value, reason="unknown") {
     this.reason = reason;
     if (value !== this._node) {
+      this.emit("before-new-node", value, reason);
       let previousNode = this._node;
       this._detachEvents();
       this._node = value;

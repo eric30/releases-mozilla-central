@@ -29,7 +29,7 @@ static ssize_t getline(char **lineptr, size_t *n, FILE *stream)
 }
 #endif
 
-#if !defined(MOZ_OLD_LINKER) && !defined(MOZ_WIDGET_GONK)
+#if !defined(MOZ_WIDGET_GONK)
 // TODO fix me with proper include
 #include "nsDebug.h"
 #ifdef ANDROID
@@ -70,7 +70,7 @@ int dl_iterate_callback(struct dl_phdr_info *dl_info, size_t size, void *data)
     if (end > libEnd)
       libEnd = end;
   }
-  SharedLibrary shlib(libStart, libEnd, 0, dl_info->dlpi_name);
+  SharedLibrary shlib(libStart, libEnd, 0, "", dl_info->dlpi_name);
   info.AddSharedLibrary(shlib);
 
   return 0;
@@ -81,7 +81,7 @@ SharedLibraryInfo SharedLibraryInfo::GetInfoForSelf()
 {
   SharedLibraryInfo info;
 
-#if !defined(MOZ_OLD_LINKER) && !defined(MOZ_WIDGET_GONK)
+#if !defined(MOZ_WIDGET_GONK)
   dl_iterate_phdr(dl_iterate_callback, &info);
 #ifndef ANDROID
   return info;
@@ -114,13 +114,13 @@ SharedLibraryInfo SharedLibraryInfo::GetInfoForSelf()
       LOG("Get maps line failed");
       continue;
     }
-#if defined(ANDROID) && !defined(MOZ_OLD_LINKER) && !defined(MOZ_WIDGET_GONK)
+#if defined(ANDROID) && !defined(MOZ_WIDGET_GONK)
     // Use proc/pid/maps to get the dalvik-jit section since it has
     // no associated phdrs
     if (strcmp(name, "/dev/ashmem/dalvik-jit-code-cache") != 0)
       continue;
 #endif
-    SharedLibrary shlib(start, end, offset, name);
+    SharedLibrary shlib(start, end, offset, "", name);
     info.AddSharedLibrary(shlib);
     if (count > 10000) {
       LOG("Get maps failed");

@@ -536,7 +536,7 @@ function run() {
     function idset(ids) { // takes an array of ids
         return function idset_filter(doc) {
             var result = [];
-            for each (var id in ids)
+            for (var id of ids)
                 result.push(doc.getElementById(id));
             return result;
         }
@@ -979,6 +979,9 @@ function run() {
     test_balanced_unparseable("div\\\n p");
     test_balanced_unparseable("div \\\np");
     test_balanced_unparseable("div\\\np");
+
+    // Test that :-moz-placeholder is parsable.
+    test_parseable(":-moz-placeholder");
 
     run_deferred_tests();
 }

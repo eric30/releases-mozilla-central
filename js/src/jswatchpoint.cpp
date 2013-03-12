@@ -50,17 +50,17 @@ WatchpointMap::init()
 }
 
 static void
-WatchpointWriteBarrierPost(JSCompartment *comp, WatchpointMap::Map *map, const WatchKey &key,
+WatchpointWriteBarrierPost(JSRuntime *rt, WatchpointMap::Map *map, const WatchKey &key,
                            const Watchpoint &val)
 {
 #ifdef JSGC_GENERATIONAL
-    if ((JSID_IS_OBJECT(key.id) && comp->gcNursery.isInside(JSID_TO_OBJECT(key.id))) ||
-        (JSID_IS_STRING(key.id) && comp->gcNursery.isInside(JSID_TO_STRING(key.id))) ||
-        comp->gcNursery.isInside(key.object) ||
-        comp->gcNursery.isInside(val.closure))
+    if ((JSID_IS_OBJECT(key.id) && rt->gcNursery.isInside(JSID_TO_OBJECT(key.id))) ||
+        (JSID_IS_STRING(key.id) && rt->gcNursery.isInside(JSID_TO_STRING(key.id))) ||
+        rt->gcNursery.isInside(key.object) ||
+        rt->gcNursery.isInside(val.closure))
     {
         typedef HashKeyRef<WatchpointMap::Map, WatchKey> WatchKeyRef;
-        comp->gcStoreBuffer.putGeneric(WatchKeyRef(map, key));
+        rt->gcStoreBuffer.putGeneric(WatchKeyRef(map, key));
     }
 #endif
 }
@@ -82,7 +82,7 @@ WatchpointMap::watch(JSContext *cx, HandleObject obj, HandleId id,
         js_ReportOutOfMemory(cx);
         return false;
     }
-    WatchpointWriteBarrierPost(obj->compartment(), &map, WatchKey(obj, id), w);
+    WatchpointWriteBarrierPost(cx->runtime, &map, WatchKey(obj, id), w);
     return true;
 }
 
@@ -93,8 +93,12 @@ WatchpointMap::unwatch(JSObject *obj, jsid id,
     if (Map::Ptr p = map.lookup(WatchKey(obj, id))) {
         if (handlerp)
             *handlerp = p->value.handler;
-        if (closurep)
+        if (closurep) {
+            // Read barrier to prevent an incorrectly gray closure from escaping the
+            // watchpoint. See the comment before UnmarkGrayChildren in gc/Marking.cpp
+            ExposeGCThingToActiveJS(p->value.closure, JSTRACE_OBJECT);
             *closurep = p->value.closure;
+        }
         map.remove(p);
     }
 }
@@ -132,11 +136,15 @@ WatchpointMap::triggerWatchpoint(JSContext *cx, HandleObject obj, HandleId id, M
     Value old;
     old.setUndefined();
     if (obj->isNative()) {
-        if (Shape *shape = obj->nativeLookup(cx, id)) {
+        if (RawShape shape = obj->nativeLookup(cx, id)) {
             if (shape->hasSlot())
                 old = obj->nativeGetSlot(shape->slot());
         }
     }
+
+    // Read barrier to prevent an incorrectly gray closure from escaping the
+    // watchpoint. See the comment before UnmarkGrayChildren in gc/Marking.cpp
+    ExposeGCThingToActiveJS(closure, JSTRACE_OBJECT);
 
     /* Call the handler. */
     return handler(cx, obj, id, old, vp.address(), closure);

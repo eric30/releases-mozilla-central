@@ -261,7 +261,7 @@ function testDecodeABVOption(data, expectedString)
     msg: "text decoding ABV empty string test."});
 
   // null for Array Buffer
-  testCharset({encoding: "iso-8859-11", input: null, expected: "",
+  testCharset({encoding: "iso-8859-11", input: null, error: "TypeError",
     msg: "text decoding ABV null test."});
 }
 
@@ -342,7 +342,8 @@ function testDecoderGetEncoding()
     {encoding: "gbk", labels: ["chinese", "csgb2312", "csiso58gb231280", "gb2312", "gb_2312", "gb_2312-80", "gbk", "iso-ir-58", "x-gbk"]},
     {encoding: "gb18030", labels: ["gb18030"]},
     {encoding: "hz-gb-2312", labels: ["hz-gb-2312"]},
-    {encoding: "big5", labels: ["big5", "big5-hkscs", "cn-big5", "csbig5", "x-x-big5"]},
+    {encoding: "big5", labels: ["big5", "cn-big5", "csbig5", "x-x-big5"]},
+    {encoding: "big5-hkscs", labels: ["big5-hkscs"]},
     {encoding: "euc-jp", labels: ["cseucpkdfmtjapanese", "euc-jp", "x-euc-jp"]},
     {encoding: "iso-2022-jp", labels: ["csiso2022jp", "iso-2022-jp"]},
     {encoding: "shift_jis", labels: ["csshiftjis", "ms_kanji", "shift-jis", "shift_jis", "sjis", "windows-31j", "x-sjis"]},

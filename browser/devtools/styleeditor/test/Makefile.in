@@ -22,15 +22,18 @@ _BROWSER_TEST_FILES = \
                  browser_styleeditor_new.js \
                  browser_styleeditor_passedinsheet.js \
                  browser_styleeditor_pretty.js \
+                 browser_styleeditor_private_perwindowpb.js \
                  browser_styleeditor_readonly.js \
-                 $(filter disabled-for-intermittent-failures--bug-707891, browser_styleeditor_reopen.js) \
+                 browser_styleeditor_reopen.js \
                  browser_styleeditor_sv_keynav.js \
                  browser_styleeditor_sv_resize.js \
+                 browser_styleeditor_bug_826982_location_changed.js \
                  head.js \
                  helpers.js \
                  four.html \
                  head.js \
                  helpers.js \
+                 longload.html \
                  media.html \
                  media-small.css \
                  minified.html \
@@ -45,16 +48,6 @@ _BROWSER_TEST_FILES = \
                  test_private.html \
                  test_private.css \
                  $(NULL)
-
-ifndef MOZ_PER_WINDOW_PRIVATE_BROWSING
-_BROWSER_TEST_FILES += \
-                 browser_styleeditor_private.js \
-                 $(NULL)
-else
-_BROWSER_TEST_FILES += \
-                 browser_styleeditor_private_perwindowpb.js \
-                 $(NULL)
-endif
 
 libs::	$(_BROWSER_TEST_FILES)
 	$(INSTALL) $(foreach f,$^,"$f") $(DEPTH)/_tests/testing/mochitest/browser/$(relativesrcdir)

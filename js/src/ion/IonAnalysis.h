@@ -22,8 +22,13 @@ class MIRGraph;
 bool
 SplitCriticalEdges(MIRGraph &graph);
 
+enum Observability {
+    ConservativeObservability,
+    AggressiveObservability
+};
+
 bool
-EliminatePhis(MIRGenerator *mir, MIRGraph &graph);
+EliminatePhis(MIRGenerator *mir, MIRGraph &graph, Observability observe);
 
 bool
 EliminateDeadResumePointOperands(MIRGenerator *mir, MIRGraph &graph);
@@ -46,8 +51,11 @@ BuildPhiReverseMapping(MIRGraph &graph);
 void
 AssertGraphCoherency(MIRGraph &graph);
 
+void
+AssertExtendedGraphCoherency(MIRGraph &graph);
+
 bool
-EliminateRedundantBoundsChecks(MIRGraph &graph);
+EliminateRedundantChecks(MIRGraph &graph);
 
 class MDefinition;
 

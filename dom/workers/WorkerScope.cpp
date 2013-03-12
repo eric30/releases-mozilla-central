@@ -13,8 +13,11 @@
 #include "mozilla/dom/EventTargetBinding.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/FileReaderSyncBinding.h"
+#include "mozilla/dom/TextDecoderBinding.h"
+#include "mozilla/dom/TextEncoderBinding.h"
 #include "mozilla/dom/XMLHttpRequestBinding.h"
 #include "mozilla/dom/XMLHttpRequestUploadBinding.h"
+#include "mozilla/dom/URLBinding.h"
 #include "mozilla/OSFileConstants.h"
 #include "nsTraceRefcnt.h"
 #include "xpcpublic.h"
@@ -961,14 +964,12 @@ CreateDedicatedWorkerGlobalScope(JSContext* aCx)
     return NULL;
   }
 
-  if (worker->IsChromeWorker() &&
-      (!chromeworker::InitClass(aCx, global, workerProto, false) ||
-       !DefineChromeWorkerFunctions(aCx, global))) {
-    return NULL;
-  }
-
-  if (!DefineOSFileConstants(aCx, global)) {
-    return NULL;
+  if (worker->IsChromeWorker()) {
+    if (!chromeworker::InitClass(aCx, global, workerProto, false) ||
+        !DefineChromeWorkerFunctions(aCx, global) ||
+        !DefineOSFileConstants(aCx, global)) {
+      return NULL;
+    }
   }
 
   // Init other classes we care about.
@@ -983,8 +984,11 @@ CreateDedicatedWorkerGlobalScope(JSContext* aCx)
 
   // Init other paris-bindings.
   if (!FileReaderSyncBinding_workers::GetConstructorObject(aCx, global) ||
+      !TextDecoderBinding_workers::GetConstructorObject(aCx, global) ||
+      !TextEncoderBinding_workers::GetConstructorObject(aCx, global) ||
       !XMLHttpRequestBinding_workers::GetConstructorObject(aCx, global) ||
-      !XMLHttpRequestUploadBinding_workers::GetConstructorObject(aCx, global)) {
+      !XMLHttpRequestUploadBinding_workers::GetConstructorObject(aCx, global) ||
+      !URLBinding_workers::GetConstructorObject(aCx, global)) {
     return NULL;
   }
 

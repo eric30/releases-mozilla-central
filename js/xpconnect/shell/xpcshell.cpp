@@ -104,10 +104,14 @@ public:
     // The app executable
     void SetAppFile(nsIFile *appFile);
     void ClearAppFile() { mAppFile = nullptr; }
+    // An additional custom plugin dir if specified
+    void SetPluginDir(nsIFile* pluginDir);
+    void ClearPluginDir() { mPluginDir = nullptr; }
 
 private:
     nsCOMPtr<nsIFile> mGREDir;
     nsCOMPtr<nsIFile> mAppDir;
+    nsCOMPtr<nsIFile> mPluginDir;
     nsCOMPtr<nsIFile> mAppFile;
 };
 
@@ -469,7 +473,7 @@ Load(JSContext *cx, unsigned argc, jsval *vp)
         options.setUTF8(true)
                .setFileAndLine(filename.ptr(), 1)
                .setPrincipals(gJSPrincipals);
-        js::RootedObject rootedObj(cx, obj);
+        JS::RootedObject rootedObj(cx, obj);
         JSScript *script = JS::Compile(cx, rootedObj, options, file);
         fclose(file);
         if (!script)
@@ -580,7 +584,7 @@ DumpHeap(JSContext *cx, unsigned argc, jsval *vp)
         if (!str)
             return false;
         *vp = STRING_TO_JSVAL(str);
-        if (!fileName.encode(cx, str))
+        if (!fileName.encodeLatin1(cx, str))
             return false;
     }
 
@@ -698,8 +702,6 @@ static const struct JSOption {
     {"atline",          JSOPTION_ATLINE},
     {"strict",          JSOPTION_STRICT},
     {"werror",          JSOPTION_WERROR},
-    {"allow_xml",       JSOPTION_ALLOW_XML},
-    {"moar_xml",        JSOPTION_MOAR_XML},
     {"strict_mode",     JSOPTION_STRICT_MODE},
 };
 
@@ -941,9 +943,6 @@ env_resolve(JSContext *cx, JSHandleObject obj, JSHandleId id, unsigned flags,
 {
     JSString *idstr, *valstr;
 
-    if (flags & JSRESOLVE_ASSIGNING)
-        return true;
-
     jsval idval;
     if (!JS_IdToValue(cx, id, &idval))
         return false;
@@ -1042,7 +1041,7 @@ ProcessFile(JSContext *cx, JSObject *obj, const char *filename, FILE *file,
         options.setUTF8(true)
                .setFileAndLine(filename, 1)
                .setPrincipals(gJSPrincipals);
-        js::RootedObject rootedObj(cx, obj);
+        JS::RootedObject rootedObj(cx, obj);
         script = JS::Compile(cx, rootedObj, options, file);
         if (script && !compileOnly)
             (void)JS_ExecuteScript(cx, obj, script, &result);
@@ -1090,7 +1089,7 @@ ProcessFile(JSContext *cx, JSObject *obj, const char *filename, FILE *file,
                     str = JS_ValueToString(cx, result);
                     JS_SetErrorReporter(cx, older);
                     JSAutoByteString bytes;
-                    if (str && bytes.encode(cx, str))
+                    if (str && bytes.encodeLatin1(cx, str))
                         fprintf(gOutFile, "%s\n", bytes.ptr());
                     else
                         ok = false;
@@ -1130,7 +1129,7 @@ static int
 usage(void)
 {
     fprintf(gErrFile, "%s\n", JS_GetImplementationVersion());
-    fprintf(gErrFile, "usage: xpcshell [-g gredir] [-a appdir] [-r manifest]... [-PsSwWxCijmIn] [-v version] [-f scriptfile] [-e script] [scriptfile] [scriptarg...]\n");
+    fprintf(gErrFile, "usage: xpcshell [-g gredir] [-a appdir] [-r manifest]... [-PsSwWCijmIn] [-v version] [-f scriptfile] [-e script] [scriptfile] [scriptarg...]\n");
     return 2;
 }
 
@@ -1155,9 +1154,6 @@ ProcessArgsForCompartment(JSContext *cx, char **argv, int argc)
         case 's':
             JS_ToggleOptions(cx, JSOPTION_STRICT);
             break;
-        case 'x':
-            JS_ToggleOptions(cx, JSOPTION_MOAR_XML);
-            break;
         case 'm':
             JS_ToggleOptions(cx, JSOPTION_METHODJIT);
             break;
@@ -1173,7 +1169,7 @@ ProcessArgsForCompartment(JSContext *cx, char **argv, int argc)
 }
 
 static int
-ProcessArgs(JSContext *cx, JSObject *obj, char **argv, int argc)
+ProcessArgs(JSContext *cx, JSObject *obj, char **argv, int argc, XPCShellDirProvider* aDirProvider)
 {
     const char rcfilename[] = "xpcshell.js";
     FILE *rcfile;
@@ -1297,6 +1293,18 @@ ProcessArgs(JSContext *cx, JSObject *obj, char **argv, int argc)
         case 'n':
             // These options are processed in ProcessArgsForCompartment.
             break;
+        case 'p':
+        {
+          // plugins path
+          char *pluginPath = argv[++i];
+          nsCOMPtr<nsIFile> pluginsDir;
+          if (NS_FAILED(XRE_GetFileFromPath(pluginPath, getter_AddRefs(pluginsDir)))) {
+              fprintf(gErrFile, "Couldn't use given plugins dir.\n");
+              return usage();
+          }
+          aDirProvider->SetPluginDir(pluginsDir);
+          break;
+        }
         default:
             return usage();
         }
@@ -1817,9 +1825,6 @@ main(int argc, char **argv, char **envp)
         argv++;
         ProcessArgsForCompartment(cx, argv, argc);
 
-        JS_SetOptions(cx, JS_GetOptions(cx) | JSOPTION_ALLOW_XML);
-        xpc_LocalizeContext(cx);
-
         nsCOMPtr<nsIXPConnect> xpc = do_GetService(nsIXPConnect::GetCID());
         if (!xpc) {
             printf("failed to get nsXPConnect service!\n");
@@ -1929,7 +1934,7 @@ main(int argc, char **argv, char **envp)
             JS_DefineProperty(cx, glob, "__LOCATION__", JSVAL_VOID,
                               GetLocationProperty, NULL, 0);
 
-            result = ProcessArgs(cx, glob, argv, argc);
+            result = ProcessArgs(cx, glob, argv, argc, &dirprovider);
 
 
 //#define TEST_CALL_ON_WRAPPED_JS_AFTER_SHUTDOWN 1
@@ -1978,6 +1983,7 @@ main(int argc, char **argv, char **envp)
     appFile = nullptr;
     dirprovider.ClearGREDir();
     dirprovider.ClearAppDir();
+    dirprovider.ClearPluginDir();
     dirprovider.ClearAppFile();
 
 #ifdef MOZ_CRASHREPORTER
@@ -2014,6 +2020,12 @@ void
 XPCShellDirProvider::SetAppDir(nsIFile* appDir)
 {
     mAppDir = appDir;
+}
+
+void
+XPCShellDirProvider::SetPluginDir(nsIFile* pluginDir)
+{
+    mPluginDir = pluginDir;
 }
 
 NS_IMETHODIMP_(nsrefcnt)
@@ -2087,9 +2099,7 @@ XPCShellDirProvider::GetFile(const char *prop, bool *persistent,
 #endif
         return localFile->Clone(result);
 #else
-        // Fail on non-Windows platforms, the caller is supposed to fal back on
-        // the app dir.
-        return NS_ERROR_FAILURE;
+        return mAppFile->GetParent(result);
 #endif
     }
 
@@ -2126,12 +2136,26 @@ XPCShellDirProvider::GetFiles(const char *prop, nsISimpleEnumerator* *result)
             return NS_NewArrayEnumerator(result, dirs);
         }
         return NS_ERROR_FAILURE;
-    } else if (mGREDir && !strcmp(prop, NS_APP_PLUGINS_DIR_LIST)) {
+    } else if (!strcmp(prop, NS_APP_PLUGINS_DIR_LIST)) {
         nsCOMPtr<nsIFile> file;
-        mGREDir->Clone(getter_AddRefs(file));
-        file->AppendNative(NS_LITERAL_CSTRING("plugins"));
         nsCOMArray<nsIFile> dirs;
-        dirs.AppendObject(file);
+        bool exists;
+        // We have to add this path, buildbot copies the test plugin directory
+        // to (app)/bin when unpacking test zips.
+        if (mGREDir) {
+            mGREDir->Clone(getter_AddRefs(file));
+            if (NS_SUCCEEDED(mGREDir->Clone(getter_AddRefs(file)))) {
+                file->AppendNative(NS_LITERAL_CSTRING("plugins"));
+                if (NS_SUCCEEDED(file->Exists(&exists)) && exists) {
+                    dirs.AppendObject(file);
+                }
+            }
+        }
+        // Add the test plugin location passed in by the caller or through
+        // runxpcshelltests.
+        if (mPluginDir) {
+            dirs.AppendObject(mPluginDir);
+        }
         return NS_NewArrayEnumerator(result, dirs);
     }
     return NS_ERROR_FAILURE;

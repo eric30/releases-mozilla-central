@@ -39,6 +39,7 @@
 #include "nsAgg.h"
 #include "nsCOMPtr.h"
 #include "nscore.h"
+#include "nsArrayEnumerator.h"
 #include "nsIOutputStream.h"
 #include "nsIRDFDataSource.h"
 #include "nsIRDFLiteral.h"
@@ -739,8 +740,8 @@ InMemoryArcsEnumeratorImpl::HasMoreElements(bool* aResult)
         if (NS_FAILED(rv = mHashArcs->Count(&itemCount)))   return(rv);
         if (itemCount > 0) {
             --itemCount;
-            mCurrent = static_cast<nsIRDFResource *>
-                                  (mHashArcs->ElementAt(itemCount));
+            nsCOMPtr<nsIRDFResource> tmp = do_QueryElementAt(mHashArcs, itemCount);
+            tmp.forget(&mCurrent);
             mHashArcs->RemoveElementAt(itemCount);
             *aResult = true;
             return NS_OK;
@@ -945,7 +946,6 @@ InMemoryDataSource::DeleteForwardArcsEntry(PLDHashTable* aTable, PLDHashEntryHdr
 
 ////////////////////////////////////////////////////////////////////////
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(InMemoryDataSource)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(InMemoryDataSource)
     NS_IMPL_CYCLE_COLLECTION_UNLINK(mObservers)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
@@ -1750,9 +1750,7 @@ InMemoryDataSource::ResourceEnumerator(PLDHashTable* aTable,
                                        uint32_t aNumber, void* aArg)
 {
     Entry* entry = reinterpret_cast<Entry*>(aHdr);
-    nsISupportsArray* resources = static_cast<nsISupportsArray*>(aArg);
-
-    resources->AppendElement(entry->mNode);
+    static_cast<nsCOMArray<nsIRDFNode>*>(aArg)->AppendObject(entry->mNode);
     return PL_DHASH_NEXT;
 }
 
@@ -1760,16 +1758,15 @@ InMemoryDataSource::ResourceEnumerator(PLDHashTable* aTable,
 NS_IMETHODIMP
 InMemoryDataSource::GetAllResources(nsISimpleEnumerator** aResult)
 {
-    nsresult rv;
+    nsCOMArray<nsIRDFNode> nodes;
+    if (!nodes.SetCapacity(mForwardArcs.entryCount)) {
+      return NS_ERROR_OUT_OF_MEMORY;
+    }
 
-    nsCOMPtr<nsISupportsArray> values;
-    rv = NS_NewISupportsArray(getter_AddRefs(values));
-    if (NS_FAILED(rv)) return rv;
+    // Enumerate all of our entries into an nsCOMArray
+    PL_DHashTableEnumerate(&mForwardArcs, ResourceEnumerator, &nodes);
 
-    // Enumerate all of our entries into an nsISupportsArray.
-    PL_DHashTableEnumerate(&mForwardArcs, ResourceEnumerator, values.get());
-
-    return NS_NewArrayEnumerator(aResult, values);
+    return NS_NewArrayEnumerator(aResult, nodes);
 }
 
 NS_IMETHODIMP

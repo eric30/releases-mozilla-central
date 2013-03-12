@@ -40,9 +40,7 @@
 #include "gfxUserFontSet.h"
 #include "nsUnicodeProperties.h"
 #include "harfbuzz/hb.h"
-#ifdef MOZ_GRAPHITE
 #include "gfxGraphiteShaper.h"
-#endif
 
 #include "nsUnicodeRange.h"
 #include "nsServiceManagerUtils.h"
@@ -63,6 +61,12 @@
 
 #ifdef MOZ_WIDGET_ANDROID
 #include "TexturePoolOGL.h"
+#endif
+
+#ifdef USE_SKIA
+#include "skia/GrContext.h"
+#include "skia/GrGLInterface.h"
+#include "GLContextSkia.h"
 #endif
 
 #include "mozilla/Preferences.h"
@@ -129,7 +133,6 @@ SRGBOverrideObserver::Observe(nsISupports *aSubject,
 }
 
 #define GFX_DOWNLOADABLE_FONTS_ENABLED "gfx.downloadable_fonts.enabled"
-#define GFX_DOWNLOADABLE_FONTS_SANITIZE "gfx.downloadable_fonts.sanitize"
 
 #define GFX_PREF_HARFBUZZ_SCRIPTS "gfx.font_rendering.harfbuzz.scripts"
 #define HARFBUZZ_SCRIPTS_DEFAULT  mozilla::unicode::SHAPING_DEFAULT
@@ -137,9 +140,7 @@ SRGBOverrideObserver::Observe(nsISupports *aSubject,
 
 #define GFX_PREF_OPENTYPE_SVG "gfx.font_rendering.opentype_svg.enabled"
 
-#ifdef MOZ_GRAPHITE
 #define GFX_PREF_GRAPHITE_SHAPING "gfx.font_rendering.graphite.enabled"
-#endif
 
 #define BIDI_NUMERAL_PREF "bidi.numeral"
 
@@ -174,7 +175,29 @@ FontPrefsObserver::Observe(nsISupports *aSubject,
     return NS_OK;
 }
 
+class OrientationSyncPrefsObserver MOZ_FINAL : public nsIObserver
+{
+public:
+    NS_DECL_ISUPPORTS
+    NS_DECL_NSIOBSERVER
+};
 
+NS_IMPL_ISUPPORTS1(OrientationSyncPrefsObserver, nsIObserver)
+
+NS_IMETHODIMP
+OrientationSyncPrefsObserver::Observe(nsISupports *aSubject,
+                                      const char *aTopic,
+                                      const PRUnichar *someData)
+{
+    if (!someData) {
+        NS_ERROR("orientation sync pref observer broken");
+        return NS_ERROR_UNEXPECTED;
+    }
+    NS_ASSERTION(gfxPlatform::GetPlatform(), "the singleton instance has gone");
+    gfxPlatform::GetPlatform()->OrientationSyncPrefsObserverChanged();
+
+    return NS_OK;
+}
 
 // this needs to match the list of pref font.default.xx entries listed in all.js!
 // the order *must* match the order in eFontPrefLang
@@ -218,12 +241,9 @@ gfxPlatform::gfxPlatform()
 {
     mUseHarfBuzzScripts = UNINITIALIZED_VALUE;
     mAllowDownloadableFonts = UNINITIALIZED_VALUE;
-    mDownloadableFontsSanitize = UNINITIALIZED_VALUE;
     mFallbackUsesCmaps = UNINITIALIZED_VALUE;
 
-#ifdef MOZ_GRAPHITE
     mGraphiteShapingEnabled = UNINITIALIZED_VALUE;
-#endif
     mBidiNumeralOption = UNINITIALIZED_VALUE;
 
     uint32_t canvasMask = (1 << BACKEND_CAIRO) | (1 << BACKEND_SKIA);
@@ -338,7 +358,13 @@ gfxPlatform::Init()
     gPlatform->mFontPrefsObserver = new FontPrefsObserver();
     Preferences::AddStrongObservers(gPlatform->mFontPrefsObserver, kObservedPrefs);
 
+    gPlatform->mOrientationSyncPrefsObserver = new OrientationSyncPrefsObserver();
+    Preferences::AddStrongObserver(gPlatform->mOrientationSyncPrefsObserver, "layers.orientation.sync.timeout");
+
     gPlatform->mWorkAroundDriverBugs = Preferences::GetBool("gfx.work-around-driver-bugs", true);
+
+    mozilla::Preferences::AddBoolVarCache(&gPlatform->mWidgetUpdateFlashing,
+                                          "nglayout.debug.widget_update_flashing");
 
     mozilla::gl::GLContext::PlatformStartup();
 
@@ -356,6 +382,8 @@ gfxPlatform::Init()
       gPlatform->mRecorder = Factory::CreateEventRecorderForFile("browserrecording.aer");
       Factory::SetGlobalEventRecorder(gPlatform->mRecorder);
     }
+
+    gPlatform->mOrientationSyncMillis = Preferences::GetUint("layers.orientation.sync.timeout", (uint32_t)0);
 }
 
 void
@@ -365,9 +393,7 @@ gfxPlatform::Shutdown()
     // started up. That's OK, they can handle it.
     gfxFontCache::Shutdown();
     gfxFontGroup::Shutdown();
-#ifdef MOZ_GRAPHITE
     gfxGraphiteShaper::Shutdown();
-#endif
 #if defined(XP_MACOSX) || defined(XP_WIN) // temporary, until this is implemented on others
     gfxPlatformFontList::Shutdown();
 #endif
@@ -668,6 +694,13 @@ DataDrawTargetDestroy(void *aTarget)
   static_cast<DrawTarget*>(aTarget)->Release();
 }
 
+bool
+gfxPlatform::UseAcceleratedSkiaCanvas()
+{
+  return Preferences::GetBool("gfx.canvas.azure.accelerated", false) &&
+         mPreferredCanvasBackend == BACKEND_SKIA;
+}
+
 already_AddRefed<gfxASurface>
 gfxPlatform::GetThebesSurfaceForDrawTarget(DrawTarget *aTarget)
 {
@@ -750,6 +783,27 @@ gfxPlatform::CreateDrawTargetForData(unsigned char* aData, const IntSize& aSize,
   return Factory::CreateDrawTargetForData(mPreferredCanvasBackend, aData, aSize, aStride, aFormat);
 }
 
+RefPtr<DrawTarget>
+gfxPlatform::CreateDrawTargetForFBO(unsigned int aFBOID, mozilla::gl::GLContext* aGLContext, const IntSize& aSize, SurfaceFormat aFormat)
+{
+  NS_ASSERTION(mPreferredCanvasBackend, "No backend.");
+#ifdef USE_SKIA
+  if (mPreferredCanvasBackend == BACKEND_SKIA) {
+    static uint8_t sGrContextKey;
+    GrContext* ctx = reinterpret_cast<GrContext*>(aGLContext->GetUserData(&sGrContextKey));
+    if (!ctx) {
+      GrGLInterface* grInterface = CreateGrInterfaceFromGLContext(aGLContext);
+      ctx = GrContext::Create(kOpenGL_Shaders_GrEngine, (GrPlatform3DContext)grInterface);
+      aGLContext->SetUserData(&sGrContextKey, ctx);
+    }
+
+    // Unfortunately Factory can't depend on GLContext, so it needs to be passed a GrContext instead
+    return Factory::CreateSkiaDrawTargetForFBO(aFBOID, ctx, aSize, aFormat);
+  }
+#endif
+  return nullptr;
+}
+
 /* static */ BackendType
 gfxPlatform::BackendTypeForName(const nsCString& aName)
 {
@@ -790,17 +844,6 @@ gfxPlatform::DownloadableFontsEnabled()
 }
 
 bool
-gfxPlatform::SanitizeDownloadedFonts()
-{
-    if (mDownloadableFontsSanitize == UNINITIALIZED_VALUE) {
-        mDownloadableFontsSanitize =
-            Preferences::GetBool(GFX_DOWNLOADABLE_FONTS_SANITIZE, true);
-    }
-
-    return mDownloadableFontsSanitize;
-}
-
-bool
 gfxPlatform::UseCmapsDuringSystemFallback()
 {
     if (mFallbackUsesCmaps == UNINITIALIZED_VALUE) {
@@ -811,7 +854,6 @@ gfxPlatform::UseCmapsDuringSystemFallback()
     return mFallbackUsesCmaps;
 }
 
-#ifdef MOZ_GRAPHITE
 bool
 gfxPlatform::UseGraphiteShaping()
 {
@@ -822,7 +864,6 @@ gfxPlatform::UseGraphiteShaping()
 
     return mGraphiteShapingEnabled;
 }
-#endif
 
 bool
 gfxPlatform::UseHarfBuzzForScript(int32_t aScriptCode)
@@ -1326,13 +1367,6 @@ gfxPlatform::GetCMSMode()
     return gCMSMode;
 }
 
-/* Chris Murphy (CM consultant) suggests this as a default in the event that we
-cannot reproduce relative + Black Point Compensation.  BPC brings an
-unacceptable performance overhead, so we go with perceptual. */
-#define INTENT_DEFAULT QCMS_INTENT_PERCEPTUAL
-#define INTENT_MIN 0
-#define INTENT_MAX 3
-
 int
 gfxPlatform::GetRenderingIntent()
 {
@@ -1342,7 +1376,7 @@ gfxPlatform::GetRenderingIntent()
         int32_t pIntent;
         if (NS_SUCCEEDED(Preferences::GetInt("gfx.color_management.rendering_intent", &pIntent))) {
             /* If the pref is within range, use it as an override. */
-            if ((pIntent >= INTENT_MIN) && (pIntent <= INTENT_MAX)) {
+            if ((pIntent >= QCMS_INTENT_MIN) && (pIntent <= QCMS_INTENT_MAX)) {
                 gCMSIntent = pIntent;
             }
             /* If the pref is out of range, use embedded profile. */
@@ -1352,7 +1386,7 @@ gfxPlatform::GetRenderingIntent()
         }
         /* If we didn't get a valid intent from prefs, use the default. */
         else {
-            gCMSIntent = INTENT_DEFAULT;
+            gCMSIntent = QCMS_INTENT_DEFAULT;
         }
     }
     return gCMSIntent;
@@ -1571,8 +1605,7 @@ gfxPlatform::SetupClusterBoundaries(gfxTextRun *aTextRun, const PRUnichar *aStri
         return;
     }
 
-    gfxShapedWord::SetupClusterBoundaries(aTextRun->GetCharacterGlyphs(),
-                                          aString, aTextRun->GetLength());
+    aTextRun->SetupClusterBoundaries(0, aString, aTextRun->GetLength());
 }
 
 int32_t
@@ -1590,11 +1623,8 @@ gfxPlatform::FontsPrefsChanged(const char *aPref)
     NS_ASSERTION(aPref != nullptr, "null preference");
     if (!strcmp(GFX_DOWNLOADABLE_FONTS_ENABLED, aPref)) {
         mAllowDownloadableFonts = UNINITIALIZED_VALUE;
-    } else if (!strcmp(GFX_DOWNLOADABLE_FONTS_SANITIZE, aPref)) {
-        mDownloadableFontsSanitize = UNINITIALIZED_VALUE;
     } else if (!strcmp(GFX_PREF_FALLBACK_USE_CMAPS, aPref)) {
         mFallbackUsesCmaps = UNINITIALIZED_VALUE;
-#ifdef MOZ_GRAPHITE
     } else if (!strcmp(GFX_PREF_GRAPHITE_SHAPING, aPref)) {
         mGraphiteShapingEnabled = UNINITIALIZED_VALUE;
         gfxFontCache *fontCache = gfxFontCache::GetCache();
@@ -1602,7 +1632,6 @@ gfxPlatform::FontsPrefsChanged(const char *aPref)
             fontCache->AgeAllGenerations();
             fontCache->FlushShapedWordCaches();
         }
-#endif
     } else if (!strcmp(GFX_PREF_HARFBUZZ_SCRIPTS, aPref)) {
         mUseHarfBuzzScripts = UNINITIALIZED_VALUE;
         gfxFontCache *fontCache = gfxFontCache::GetCache();
@@ -1695,4 +1724,16 @@ gfxPlatform::OptimalFormatForContent(gfxASurface::gfxContentType aContent)
     NS_NOTREACHED("unknown gfxContentType");
     return gfxASurface::ImageFormatARGB32;
   }
+}
+
+void
+gfxPlatform::OrientationSyncPrefsObserverChanged()
+{
+  mOrientationSyncMillis = Preferences::GetUint("layers.orientation.sync.timeout", (uint32_t)0);
+}
+
+uint32_t
+gfxPlatform::GetOrientationSyncMillis() const
+{
+  return mOrientationSyncMillis;
 }

@@ -22,6 +22,7 @@
 #include "mozilla/dom/StorageChild.h"
 #include "mozilla/Hal.h"
 #include "mozilla/hal_sandbox/PHalChild.h"
+#include "mozilla/ipc/GeckoChildProcessHost.h"
 #include "mozilla/ipc/TestShellChild.h"
 #include "mozilla/ipc/XPCShellEnvironment.h"
 #include "mozilla/jsipc/PContextWrapperChild.h"
@@ -30,9 +31,11 @@
 #include "mozilla/layers/PCompositorChild.h"
 #include "mozilla/net/NeckoChild.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/unused.h"
 
 #include "nsIMemoryReporter.h"
 #include "nsIMemoryInfoDumper.h"
+#include "nsIMutable.h"
 #include "nsIObserverService.h"
 #include "nsTObserverArray.h"
 #include "nsIObserver.h"
@@ -85,9 +88,10 @@
 #endif
 
 #include "mozilla/dom/indexedDB/PIndexedDBChild.h"
-#include "mozilla/dom/sms/SmsChild.h"
+#include "mozilla/dom/mobilemessage/SmsChild.h"
 #include "mozilla/dom/devicestorage/DeviceStorageRequestChild.h"
 #include "mozilla/dom/bluetooth/PBluetoothChild.h"
+#include "mozilla/ipc/InputStreamUtils.h"
 
 #include "nsDOMFile.h"
 #include "nsIRemoteBlob.h"
@@ -99,12 +103,15 @@
 #include "nsIPrincipal.h"
 #include "nsDeviceStorage.h"
 #include "AudioChannelService.h"
+#include "ProcessPriorityManager.h"
 
 using namespace base;
+using namespace mozilla;
 using namespace mozilla::docshell;
 using namespace mozilla::dom::bluetooth;
 using namespace mozilla::dom::devicestorage;
-using namespace mozilla::dom::sms;
+using namespace mozilla::dom::ipc;
+using namespace mozilla::dom::mobilemessage;
 using namespace mozilla::dom::indexedDB;
 using namespace mozilla::hal_sandbox;
 using namespace mozilla::ipc;
@@ -223,11 +230,43 @@ ConsoleListener::Observe(nsIConsoleMessage* aMessage)
     return NS_OK;
 }
 
+class SystemMessageHandledObserver MOZ_FINAL : public nsIObserver
+{
+public:
+    NS_DECL_ISUPPORTS
+    NS_DECL_NSIOBSERVER
+
+    void Init();
+};
+
+void SystemMessageHandledObserver::Init()
+{
+    nsCOMPtr<nsIObserverService> os =
+        mozilla::services::GetObserverService();
+
+    if (os) {
+        os->AddObserver(this, "SystemMessageManager:HandleMessageDone",
+                        /* ownsWeak */ false);
+    }
+}
+
+NS_IMETHODIMP
+SystemMessageHandledObserver::Observe(nsISupports* aSubject,
+                                      const char* aTopic,
+                                      const PRUnichar* aData)
+{
+    if (ContentChild::GetSingleton()) {
+        ContentChild::GetSingleton()->SendSystemMessageHandled();
+    }
+    return NS_OK;
+}
+
+NS_IMPL_ISUPPORTS1(SystemMessageHandledObserver, nsIObserver)
+
 ContentChild* ContentChild::sSingleton;
 
 ContentChild::ContentChild()
- : TabContext()
- , mID(uint64_t(-1))
+ : mID(uint64_t(-1))
 #ifdef ANDROID
    ,mScreenSize(0, 0)
 #endif
@@ -286,13 +325,8 @@ ContentChild::Init(MessageLoop* aIOLoop,
 #endif
 #endif
 
-    bool startBackground = true;
-    SendGetProcessAttributes(&mID, &startBackground,
-                             &mIsForApp, &mIsForBrowser);
-    hal::SetProcessPriority(
-        GetCurrentProcId(),
-        startBackground ? hal::PROCESS_PRIORITY_BACKGROUND:
-                          hal::PROCESS_PRIORITY_FOREGROUND);
+    SendGetProcessAttributes(&mID, &mIsForApp, &mIsForBrowser);
+
     if (mIsForApp && !mIsForBrowser) {
         SetProcessName(NS_LITERAL_STRING("(Preallocated app)"));
     } else {
@@ -305,6 +339,18 @@ ContentChild::Init(MessageLoop* aIOLoop,
 void
 ContentChild::SetProcessName(const nsAString& aName)
 {
+    char* name;
+    if ((name = PR_GetEnv("MOZ_DEBUG_APP_PROCESS")) &&
+        aName.EqualsASCII(name)) {
+#ifdef OS_POSIX
+        printf_stderr("\n\nCHILDCHILDCHILDCHILD\n  [%s] debug me @%d\n\n", name, getpid());
+        sleep(30);
+#elif defined(OS_WIN)
+        printf_stderr("\n\nCHILDCHILDCHILDCHILD\n  [%s] debug me @%d\n\n", name, _getpid());
+        Sleep(30000);
+#endif
+    }
+
     mProcessName = aName;
     mozilla::ipc::SetThisProcessName(NS_LossyConvertUTF16toASCII(aName).get());
 }
@@ -331,6 +377,14 @@ ContentChild::InitXPCOM()
     bool isOffline;
     SendGetXPCOMProcessAttributes(&isOffline);
     RecvSetOffline(isOffline);
+
+    DebugOnly<FileUpdateDispatcher*> observer = FileUpdateDispatcher::GetSingleton();
+    NS_ASSERTION(observer, "FileUpdateDispatcher is null");
+
+    // This object is held alive by the observer service.
+    nsRefPtr<SystemMessageHandledObserver> sysMsgObserver =
+        new SystemMessageHandledObserver();
+    sysMsgObserver->Init();
 }
 
 PMemoryReportRequestChild*
@@ -487,6 +541,17 @@ ContentChild::AllocPImageBridge(mozilla::ipc::Transport* aTransport,
     return ImageBridgeChild::StartUpInChildProcess(aTransport, aOtherProcess);
 }
 
+bool
+ContentChild::RecvSetProcessPrivileges(const ChildPrivileges& aPrivs)
+{
+  ChildPrivileges privs = (aPrivs == PRIVILEGES_DEFAULT) ?
+                          GeckoChildProcessHost::DefaultChildPrivileges() :
+                          aPrivs;
+  // If this fails, we die.
+  SetCurrentProcessPrivileges(privs);
+  return true;
+}
+
 static CancelableTask* sFirstIdleTask;
 
 static void FirstIdle(void)
@@ -500,23 +565,56 @@ PBrowserChild*
 ContentChild::AllocPBrowser(const IPCTabContext& aContext,
                             const uint32_t& aChromeFlags)
 {
-    static bool firstIdleTaskPosted = false;
-    if (!firstIdleTaskPosted) {
-        MOZ_ASSERT(!sFirstIdleTask);
-        sFirstIdleTask = NewRunnableFunction(FirstIdle);
-        MessageLoop::current()->PostIdleTask(FROM_HERE, sFirstIdleTask);
-        firstIdleTaskPosted = true;
-    }
-
     // We'll happily accept any kind of IPCTabContext here; we don't need to
     // check that it's of a certain type for security purposes, because we
     // believe whatever the parent process tells us.
 
     nsRefPtr<TabChild> child = TabChild::Create(TabContext(aContext), aChromeFlags);
 
-    // The ref here is released below.
+    // The ref here is released in DeallocPBrowser.
     return child.forget().get();
 }
+
+bool
+ContentChild::RecvPBrowserConstructor(PBrowserChild* actor,
+                                      const IPCTabContext& context,
+                                      const uint32_t& chromeFlags)
+{
+    // This runs after AllocPBrowser() returns and the IPC machinery for this
+    // PBrowserChild has been set up.
+    //
+    // We have to NotifyObservers("tab-child-created") before we
+    // TemporarilyLockProcessPriority because the NotifyObservers call may cause
+    // us to initialize the ProcessPriorityManager, and
+    // TemporarilyLockProcessPriority only works after the
+    // ProcessPriorityManager has been initialized.
+
+    nsCOMPtr<nsIObserverService> os = services::GetObserverService();
+    if (os) {
+        nsITabChild* tc =
+            static_cast<nsITabChild*>(static_cast<TabChild*>(actor));
+        os->NotifyObservers(tc, "tab-child-created", nullptr);
+    }
+
+    static bool hasRunOnce = false;
+    if (!hasRunOnce) {
+        hasRunOnce = true;
+
+        MOZ_ASSERT(!sFirstIdleTask);
+        sFirstIdleTask = NewRunnableFunction(FirstIdle);
+        MessageLoop::current()->PostIdleTask(FROM_HERE, sFirstIdleTask);
+
+        // We are either a brand-new process loading its first PBrowser, or we
+        // are the preallocated process transforming into a particular
+        // app/browser.  Either way, our parent has already set our process
+        // priority, and we want to leave it there for a few seconds while we
+        // start up.
+        TemporarilyLockProcessPriority();
+    }
+
+    return true;
+}
+
 
 bool
 ContentChild::DeallocPBrowser(PBrowserChild* iframe)
@@ -545,6 +643,18 @@ ContentChild::GetOrCreateActorForBlob(nsIDOMBlob* aBlob)
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
   NS_ASSERTION(aBlob, "Null pointer!");
 
+  // XXX This is only safe so long as all blob implementations in our tree
+  //     inherit nsDOMFileBase. If that ever changes then this will need to grow
+  //     a real interface or something.
+  const nsDOMFileBase* blob = static_cast<nsDOMFileBase*>(aBlob);
+
+  // All blobs shared between processes must be immutable.
+  nsCOMPtr<nsIMutable> mutableBlob = do_QueryInterface(aBlob);
+  if (!mutableBlob || NS_FAILED(mutableBlob->SetMutable(false))) {
+    NS_WARNING("Failed to make blob immutable!");
+    return nullptr;
+  }
+
   nsCOMPtr<nsIRemoteBlob> remoteBlob = do_QueryInterface(aBlob);
   if (remoteBlob) {
     BlobChild* actor =
@@ -554,19 +664,15 @@ ContentChild::GetOrCreateActorForBlob(nsIDOMBlob* aBlob)
     return actor;
   }
 
-  // XXX This is only safe so long as all blob implementations in our tree
-  //     inherit nsDOMFileBase. If that ever changes then this will need to grow
-  //     a real interface or something.
-  const nsDOMFileBase* blob = static_cast<nsDOMFileBase*>(aBlob);
-
-  BlobConstructorParams params;
+  ParentBlobConstructorParams params;
 
   if (blob->IsSizeUnknown() || blob->IsDateUnknown()) {
     // We don't want to call GetSize or GetLastModifiedDate
     // yet since that may stat a file on the main thread
     // here. Instead we'll learn the size lazily from the
     // other process.
-    params = MysteryBlobConstructorParams();
+    params.blobParams() = MysteryBlobConstructorParams();
+    params.optionalInputStreamParams() = void_t();
   }
   else {
     nsString contentType;
@@ -576,6 +682,15 @@ ContentChild::GetOrCreateActorForBlob(nsIDOMBlob* aBlob)
     uint64_t length;
     rv = aBlob->GetSize(&length);
     NS_ENSURE_SUCCESS(rv, nullptr);
+
+    nsCOMPtr<nsIInputStream> stream;
+    rv = aBlob->GetInternalStream(getter_AddRefs(stream));
+    NS_ENSURE_SUCCESS(rv, nullptr);
+
+    InputStreamParams inputStreamParams;
+    SerializeInputStream(stream, inputStreamParams);
+
+    params.optionalInputStreamParams() = inputStreamParams;
 
     nsCOMPtr<nsIDOMFile> file = do_QueryInterface(aBlob);
     if (file) {
@@ -590,21 +705,21 @@ ContentChild::GetOrCreateActorForBlob(nsIDOMBlob* aBlob)
       fileParams.contentType() = contentType;
       fileParams.length() = length;
 
-      params = fileParams;
+      params.blobParams() = fileParams;
     } else {
       NormalBlobConstructorParams blobParams;
       blobParams.contentType() = contentType;
       blobParams.length() = length;
-      params = blobParams;
+      params.blobParams() = blobParams;
     }
-  }
+    }
 
   BlobChild* actor = BlobChild::Create(aBlob);
   NS_ENSURE_TRUE(actor, nullptr);
 
   if (!SendPBlobConstructor(actor, params)) {
-    return nullptr;
-  }
+        return nullptr;
+      }
 
   return actor;
 }
@@ -909,22 +1024,7 @@ ContentChild::RecvAsyncMessage(const nsString& aMsg,
 {
   nsRefPtr<nsFrameMessageManager> cpm = nsFrameMessageManager::sChildProcessManager;
   if (cpm) {
-    const SerializedStructuredCloneBuffer& buffer = aData.data();
-    const InfallibleTArray<PBlobChild*>& blobChildList = aData.blobsChild();
-    StructuredCloneData cloneData;
-    cloneData.mData = buffer.data;
-    cloneData.mDataLength = buffer.dataLength;
-    if (!blobChildList.IsEmpty()) {
-      uint32_t length = blobChildList.Length();
-      cloneData.mClosure.mBlobs.SetCapacity(length);
-      for (uint32_t i = 0; i < length; ++i) {
-        BlobChild* blobChild = static_cast<BlobChild*>(blobChildList[i]);
-        MOZ_ASSERT(blobChild);
-        nsCOMPtr<nsIDOMBlob> blob = blobChild->GetBlob();
-        MOZ_ASSERT(blob);
-        cloneData.mClosure.mBlobs.AppendElement(blob);
-      }
-    }
+    StructuredCloneData cloneData = ipc::UnpackClonedMessageDataForChild(aData);
     cpm->ReceiveMessage(static_cast<nsIContentFrameMessageManager*>(cpm.get()),
                         aMsg, false, &cloneData, nullptr, nullptr);
   }
@@ -998,7 +1098,7 @@ ContentChild::RecvFlushMemory(const nsString& reason)
         mozilla::services::GetObserverService();
     if (os)
         os->NotifyObservers(nullptr, "memory-pressure", reason.get());
-  return true;
+    return true;
 }
 
 bool
@@ -1042,8 +1142,15 @@ ContentChild::RecvAppInfo(const nsCString& version, const nsCString& buildID)
 {
     mAppInfo.version.Assign(version);
     mAppInfo.buildID.Assign(buildID);
-
-    PreloadSlowThings();
+    // If we're part of the mozbrowser machinery, go ahead and start
+    // preloading things.  We can only do this for mozbrowser because
+    // PreloadSlowThings() may set the docshell of the first TabChild
+    // inactive, and we can only safely restore it to active from
+    // BrowserElementChild.js.
+    if ((mIsForApp || mIsForBrowser) &&
+        Preferences::GetBool("dom.ipc.processPrelaunch.enabled", false)) {
+        PreloadSlowThings();
+    }
     return true;
 }
 
@@ -1071,14 +1178,24 @@ ContentChild::RecvFilePathUpdate(const nsString& type, const nsString& path, con
 }
 
 bool
-ContentChild::RecvFileSystemUpdate(const nsString& aFsName, const nsString& aName, const int32_t &aState)
+ContentChild::RecvFileSystemUpdate(const nsString& aFsName,
+                                   const nsString& aName,
+                                   const int32_t& aState,
+                                   const int32_t& aMountGeneration)
 {
 #ifdef MOZ_WIDGET_GONK
-    nsRefPtr<nsVolume> volume = new nsVolume(aFsName, aName, aState);
+    nsRefPtr<nsVolume> volume = new nsVolume(aFsName, aName, aState,
+                                             aMountGeneration);
 
     nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-    nsString stateStr(NS_ConvertUTF8toUTF16(volume->StateStr()));
+    NS_ConvertUTF8toUTF16 stateStr(volume->StateStr());
     obs->NotifyObservers(volume, NS_VOLUME_STATE_CHANGED, stateStr.get());
+#else
+    // Remove warnings about unused arguments
+    unused << aFsName;
+    unused << aName;
+    unused << aState;
+    unused << aMountGeneration;
 #endif
     return true;
 }

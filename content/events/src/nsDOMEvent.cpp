@@ -22,6 +22,7 @@
 #include "nsGkAtoms.h"
 #include "nsMutationEvent.h"
 #include "nsContentUtils.h"
+#include "nsJSEnvironment.h"
 #include "nsIURI.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsIScriptError.h"
@@ -31,14 +32,19 @@
 #include "nsLayoutUtils.h"
 #include "nsIScrollableFrame.h"
 #include "nsDOMClassInfoID.h"
+#include "nsDOMEventTargetHelper.h"
+#include "nsPIWindowRoot.h"
 
 using namespace mozilla;
 
 static char *sPopupAllowedEvents;
 
 
-nsDOMEvent::nsDOMEvent(nsPresContext* aPresContext, nsEvent* aEvent)
+nsDOMEvent::nsDOMEvent(mozilla::dom::EventTarget* aOwner,
+                       nsPresContext* aPresContext, nsEvent* aEvent)
 {
+  SetOwner(aOwner);
+
   mPrivateDataDuplicated = false;
 
   if (aEvent) {
@@ -76,6 +82,7 @@ nsDOMEvent::nsDOMEvent(nsPresContext* aPresContext, nsEvent* aEvent)
   }
 
   InitPresContextData(aPresContext);
+  nsJSContext::LikelyShortLivingObjectCreated();
 }
 
 void
@@ -101,11 +108,10 @@ nsDOMEvent::~nsDOMEvent()
   }
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsDOMEvent)
-
 DOMCI_DATA(Event, nsDOMEvent)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsDOMEvent)
+  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDOMEvent)
   NS_INTERFACE_MAP_ENTRY(nsIDOMEvent)
   NS_INTERFACE_MAP_ENTRY(nsIJSNativeInitializer)
@@ -114,6 +120,10 @@ NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsDOMEvent)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsDOMEvent)
+
+NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(nsDOMEvent)
+  NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER
+NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsDOMEvent)
   if (tmp->mEventIsInternal) {
@@ -140,6 +150,8 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsDOMEvent)
   }
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mPresContext);
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mExplicitOriginalTarget);
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mOwner);
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsDOMEvent)
@@ -175,6 +187,8 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsDOMEvent)
   }
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPresContext)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mExplicitOriginalTarget)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mOwner)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 // nsIDOMEventInterface
@@ -264,16 +278,10 @@ nsDOMEvent::GetOriginalTarget(nsIDOMEventTarget** aOriginalTarget)
   return GetTarget(aOriginalTarget);
 }
 
-NS_IMETHODIMP
+NS_IMETHODIMP_(void)
 nsDOMEvent::SetTrusted(bool aTrusted)
 {
-  if (aTrusted) {
-    mEvent->flags |= NS_EVENT_FLAG_TRUSTED;
-  } else {
-    mEvent->flags &= ~NS_EVENT_FLAG_TRUSTED;
-  }
-
-  return NS_OK;
+  mEvent->mFlags.mIsTrusted = aTrusted;
 }
 
 NS_IMETHODIMP
@@ -293,6 +301,10 @@ nsDOMEvent::Initialize(nsISupports* aOwner, JSContext* aCx, JSObject* aObj,
         InitPresContextData(s->GetPresContext());
       }
     }
+  }
+
+  if (!mOwner) {
+    mOwner = w;
   }
 
   JSAutoRequest ar(aCx);
@@ -317,10 +329,37 @@ nsresult
 nsDOMEvent::InitFromCtor(const nsAString& aType,
                          JSContext* aCx, jsval* aVal)
 {
-  mozilla::dom::EventInit d;
+  mozilla::idl::EventInit d;
   nsresult rv = d.Init(aCx, aVal);
   NS_ENSURE_SUCCESS(rv, rv);
   return InitEvent(aType, d.bubbles, d.cancelable);
+}
+
+//static
+already_AddRefed<nsDOMEvent>
+nsDOMEvent::Constructor(const mozilla::dom::GlobalObject& aGlobal,
+                        const nsAString& aType,
+                        const mozilla::dom::EventInit& aParam,
+                        mozilla::ErrorResult& aRv)
+{
+  nsCOMPtr<mozilla::dom::EventTarget> t = do_QueryInterface(aGlobal.Get());
+  nsRefPtr<nsDOMEvent> e = nsDOMEvent::CreateEvent(t, nullptr, nullptr);
+
+  bool trusted = false;
+  nsCOMPtr<nsPIDOMWindow> w = do_QueryInterface(t);
+  if (w) {
+    nsCOMPtr<nsIDocument> d = do_QueryInterface(w->GetExtantDocument());
+    if (d) {
+      trusted = nsContentUtils::IsChromeDoc(d);
+      nsIPresShell* s = d->GetShell();
+      if (s) {
+        e->InitPresContextData(s->GetPresContext());
+      }
+    }
+  }
+  aRv = e->InitEvent(aType, aParam.mBubbles, aParam.mCancelable);
+  e->SetTrusted(trusted);
+  return e.forget();
 }
 
 NS_IMETHODIMP
@@ -330,12 +369,11 @@ nsDOMEvent::GetEventPhase(uint16_t* aEventPhase)
   // if or when Bug 235441 is fixed.
   if ((mEvent->currentTarget &&
        mEvent->currentTarget == mEvent->target) ||
-      ((mEvent->flags & NS_EVENT_FLAG_CAPTURE) &&
-       (mEvent->flags & NS_EVENT_FLAG_BUBBLE))) {
+       mEvent->mFlags.InTargetPhase()) {
     *aEventPhase = nsIDOMEvent::AT_TARGET;
-  } else if (mEvent->flags & NS_EVENT_FLAG_CAPTURE) {
+  } else if (mEvent->mFlags.mInCapturePhase) {
     *aEventPhase = nsIDOMEvent::CAPTURING_PHASE;
-  } else if (mEvent->flags & NS_EVENT_FLAG_BUBBLE) {
+  } else if (mEvent->mFlags.mInBubblingPhase) {
     *aEventPhase = nsIDOMEvent::BUBBLING_PHASE;
   } else {
     *aEventPhase = nsIDOMEvent::NONE;
@@ -346,14 +384,14 @@ nsDOMEvent::GetEventPhase(uint16_t* aEventPhase)
 NS_IMETHODIMP
 nsDOMEvent::GetBubbles(bool* aBubbles)
 {
-  *aBubbles = !(mEvent->flags & NS_EVENT_FLAG_CANT_BUBBLE);
+  *aBubbles = mEvent->mFlags.mBubbles;
   return NS_OK;
 }
 
 NS_IMETHODIMP
 nsDOMEvent::GetCancelable(bool* aCancelable)
 {
-  *aCancelable = !(mEvent->flags & NS_EVENT_FLAG_CANT_CANCEL);
+  *aCancelable = mEvent->mFlags.mCancelable;
   return NS_OK;
 }
 
@@ -367,15 +405,15 @@ nsDOMEvent::GetTimeStamp(uint64_t* aTimeStamp)
 NS_IMETHODIMP
 nsDOMEvent::StopPropagation()
 {
-  mEvent->flags |= NS_EVENT_FLAG_STOP_DISPATCH;
+  mEvent->mFlags.mPropagationStopped = true;
   return NS_OK;
 }
 
 NS_IMETHODIMP
 nsDOMEvent::StopImmediatePropagation()
 {
-  mEvent->flags |=
-    (NS_EVENT_FLAG_STOP_DISPATCH_IMMEDIATELY | NS_EVENT_FLAG_STOP_DISPATCH);
+  mEvent->mFlags.mPropagationStopped = true;
+  mEvent->mFlags.mImmediatePropagationStopped = true;
   return NS_OK;
 }
 
@@ -426,20 +464,18 @@ nsDOMEvent::PreventCapture()
 NS_IMETHODIMP
 nsDOMEvent::GetIsTrusted(bool *aIsTrusted)
 {
-  *aIsTrusted = NS_IS_TRUSTED_EVENT(mEvent);
-
+  *aIsTrusted = mEvent->mFlags.mIsTrusted;
   return NS_OK;
 }
 
 NS_IMETHODIMP
 nsDOMEvent::PreventDefault()
 {
-  if (!(mEvent->flags & NS_EVENT_FLAG_CANT_CANCEL)) {
-    mEvent->flags |= NS_EVENT_FLAG_NO_DEFAULT;
+  if (mEvent->mFlags.mCancelable) {
+    mEvent->mFlags.mDefaultPrevented = true;
 
     // Need to set an extra flag for drag events.
-    if (mEvent->eventStructType == NS_DRAG_EVENT &&
-        NS_IS_TRUSTED_EVENT(mEvent)) {
+    if (mEvent->eventStructType == NS_DRAG_EVENT && mEvent->mFlags.mIsTrusted) {
       nsCOMPtr<nsINode> node = do_QueryInterface(mEvent->currentTarget);
       if (!node) {
         nsCOMPtr<nsPIDOMWindow> win = do_QueryInterface(mEvent->currentTarget);
@@ -448,7 +484,7 @@ nsDOMEvent::PreventDefault()
         }
       }
       if (node && !nsContentUtils::IsChromeDoc(node->OwnerDoc())) {
-        mEvent->flags |= NS_EVENT_FLAG_NO_DEFAULT_CALLED_IN_CONTENT;
+        mEvent->mFlags.mDefaultPreventedByContent = true;
       }
     }
   }
@@ -468,9 +504,9 @@ NS_IMETHODIMP
 nsDOMEvent::InitEvent(const nsAString& aEventTypeArg, bool aCanBubbleArg, bool aCancelableArg)
 {
   // Make sure this event isn't already being dispatched.
-  NS_ENSURE_TRUE(!NS_IS_EVENT_IN_DISPATCH(mEvent), NS_OK);
+  NS_ENSURE_TRUE(!mEvent->mFlags.mIsBeingDispatched, NS_OK);
 
-  if (NS_IS_TRUSTED_EVENT(mEvent)) {
+  if (mEvent->mFlags.mIsTrusted) {
     // Ensure the caller is permitted to dispatch trusted DOM events.
     if (!nsContentUtils::IsCallerChrome()) {
       SetTrusted(false);
@@ -479,17 +515,8 @@ nsDOMEvent::InitEvent(const nsAString& aEventTypeArg, bool aCanBubbleArg, bool a
 
   SetEventType(aEventTypeArg);
 
-  if (aCanBubbleArg) {
-    mEvent->flags &= ~NS_EVENT_FLAG_CANT_BUBBLE;
-  } else {
-    mEvent->flags |= NS_EVENT_FLAG_CANT_BUBBLE;
-  }
-
-  if (aCancelableArg) {
-    mEvent->flags &= ~NS_EVENT_FLAG_CANT_CANCEL;
-  } else {
-    mEvent->flags |= NS_EVENT_FLAG_CANT_CANCEL;
-  }
+  mEvent->mFlags.mBubbles = aCanBubbleArg;
+  mEvent->mFlags.mCancelable = aCancelableArg;
 
   // Clearing the old targets, so that the event is targeted correctly when
   // re-dispatching it.
@@ -797,7 +824,7 @@ nsDOMEvent::DuplicatePrivateData()
   newEvent->target                 = mEvent->target;
   newEvent->currentTarget          = mEvent->currentTarget;
   newEvent->originalTarget         = mEvent->originalTarget;
-  newEvent->flags                  = mEvent->flags;
+  newEvent->mFlags                 = mEvent->mFlags;
   newEvent->time                   = mEvent->time;
   newEvent->refPoint               = mEvent->refPoint;
   newEvent->userType               = mEvent->userType;
@@ -829,13 +856,19 @@ nsDOMEvent::SetTarget(nsIDOMEventTarget* aTarget)
 NS_IMETHODIMP_(bool)
 nsDOMEvent::IsDispatchStopped()
 {
-  return !!(mEvent->flags & NS_EVENT_FLAG_STOP_DISPATCH);
+  return mEvent->mFlags.mPropagationStopped;
 }
 
 NS_IMETHODIMP_(nsEvent*)
 nsDOMEvent::GetInternalNSEvent()
 {
   return mEvent;
+}
+
+NS_IMETHODIMP_(nsDOMEvent*)
+nsDOMEvent::InternalDOMEvent()
+{
+  return this;
 }
 
 // return true if eventName is contained within events, delimited by
@@ -934,7 +967,7 @@ nsDOMEvent::GetEventPopupControlState(nsEvent *aEvent)
     }
     break;
   case NS_KEY_EVENT :
-    if (NS_IS_TRUSTED_EVENT(aEvent)) {
+    if (aEvent->mFlags.mIsTrusted) {
       uint32_t key = static_cast<nsKeyEvent *>(aEvent)->keyCode;
       switch(aEvent->message) {
       case NS_KEY_PRESS :
@@ -959,7 +992,7 @@ nsDOMEvent::GetEventPopupControlState(nsEvent *aEvent)
     }
     break;
   case NS_MOUSE_EVENT :
-    if (NS_IS_TRUSTED_EVENT(aEvent) &&
+    if (aEvent->mFlags.mIsTrusted &&
         static_cast<nsMouseEvent*>(aEvent)->button == nsMouseEvent::eLeftButton) {
       switch(aEvent->message) {
       case NS_MOUSE_BUTTON_UP :
@@ -1159,7 +1192,7 @@ NS_IMETHODIMP
 nsDOMEvent::GetPreventDefault(bool* aReturn)
 {
   NS_ENSURE_ARG_POINTER(aReturn);
-  *aReturn = mEvent && (mEvent->flags & NS_EVENT_FLAG_NO_DEFAULT);
+  *aReturn = mEvent && mEvent->mFlags.mDefaultPrevented;
   return NS_OK;
 }
 
@@ -1217,15 +1250,49 @@ nsDOMEvent::Deserialize(const IPC::Message* aMsg, void** aIter)
   return true;
 }
 
+NS_IMETHODIMP_(void)
+nsDOMEvent::SetOwner(mozilla::dom::EventTarget* aOwner)
+{
+  mOwner = nullptr;
+
+  if (!aOwner) {
+    return;
+  }
+
+  nsCOMPtr<nsINode> n = do_QueryInterface(aOwner);
+  if (n) {
+    mOwner = do_QueryInterface(n->OwnerDoc()->GetScopeObject());
+    return;
+  }
+
+  nsCOMPtr<nsPIDOMWindow> w = do_QueryInterface(aOwner);
+  if (w) {
+    if (w->IsOuterWindow()) {
+      mOwner = w->GetCurrentInnerWindow();
+    } else {
+      mOwner.swap(w);
+    }
+    return;
+  }
+
+  nsCOMPtr<nsDOMEventTargetHelper> eth = do_QueryInterface(aOwner);
+  if (eth) {
+    mOwner = eth->GetOwner();
+    return;
+  }
+
+#ifdef DEBUG
+  nsCOMPtr<nsPIWindowRoot> root = do_QueryInterface(aOwner);
+  MOZ_ASSERT(root, "Unexpected EventTarget!");
+#endif
+}
 
 nsresult NS_NewDOMEvent(nsIDOMEvent** aInstancePtrResult,
+                        mozilla::dom::EventTarget* aOwner,
                         nsPresContext* aPresContext,
                         nsEvent *aEvent) 
 {
-  nsDOMEvent* it = new nsDOMEvent(aPresContext, aEvent);
-  if (nullptr == it) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-
+  nsRefPtr<nsDOMEvent> it =
+    nsDOMEvent::CreateEvent(aOwner, aPresContext, aEvent);
   return CallQueryInterface(it, aInstancePtrResult);
 }

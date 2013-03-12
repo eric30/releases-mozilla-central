@@ -36,7 +36,7 @@
 #include "nsISelectionPrivate.h"
 #include "nsISupportsBase.h"
 #include "nsLiteralString.h"
-#include "nsNodeIterator.h"
+#include "mozilla/dom/NodeIterator.h"
 #include "nsTextEditRules.h"
 #include "nsTextEditUtils.h"
 #include "nsUnicharUtils.h"
@@ -449,7 +449,8 @@ GetTextNode(nsISelection *selection, nsEditor *editor) {
     // if node is null, return it to indicate there's no text
     NS_ENSURE_TRUE(node, nullptr);
     // This should be the root node, walk the tree looking for text nodes
-    nsNodeIterator iter(node, nsIDOMNodeFilter::SHOW_TEXT, nullptr);
+    mozilla::dom::NodeFilterHolder filter;
+    mozilla::dom::NodeIterator iter(node, nsIDOMNodeFilter::SHOW_TEXT, filter);
     while (!editor->IsTextNode(selNode)) {
       if (NS_FAILED(res = iter.NextNode(getter_AddRefs(selNode))) || !selNode) {
         return nullptr;
@@ -514,22 +515,25 @@ nsTextEditRules::HandleNewLines(nsString &aString,
     break;
   case nsIPlaintextEditor::eNewlinesStripSurroundingWhitespace:
     {
-      // find each newline, and strip all the whitespace before
-      // and after it
-      int32_t firstCRLF = aString.FindCharInSet(CRLF);
-      while (firstCRLF >= 0)
+      nsString result;
+      uint32_t offset = 0;
+      while (offset < aString.Length())
       {
-        uint32_t wsBegin = firstCRLF, wsEnd = firstCRLF + 1;
+        int32_t nextCRLF = aString.FindCharInSet(CRLF, offset);
+        if (nextCRLF < 0) {
+          result.Append(nsDependentSubstring(aString, offset));
+          break;
+        }
+        uint32_t wsBegin = nextCRLF;
         // look backwards for the first non-whitespace char
-        while (wsBegin > 0 && NS_IS_SPACE(aString[wsBegin - 1]))
+        while (wsBegin > offset && NS_IS_SPACE(aString[wsBegin - 1]))
           --wsBegin;
-        while (wsEnd < aString.Length() && NS_IS_SPACE(aString[wsEnd]))
-          ++wsEnd;
-        // now cut this range out of the string
-        aString.Cut(wsBegin, wsEnd - wsBegin);
-        // look for another CR or LF
-        firstCRLF = aString.FindCharInSet(CRLF);
+        result.Append(nsDependentSubstring(aString, offset, wsBegin - offset));
+        offset = nextCRLF + 1;
+        while (offset < aString.Length() && NS_IS_SPACE(aString[offset]))
+          ++offset;
       }
+      aString = result;
     }
     break;
   case nsIPlaintextEditor::eNewlinesPasteIntact:
@@ -773,6 +777,7 @@ nsTextEditRules::WillDeleteSelection(Selection* aSelection,
   }
 
   nsresult res = NS_OK;
+  nsAutoScriptBlocker scriptBlocker;
 
   if (IsPasswordEditor())
   {

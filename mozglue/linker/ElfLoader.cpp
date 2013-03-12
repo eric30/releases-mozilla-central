@@ -166,12 +166,12 @@ SystemElf::Load(const char *path, int flags)
   /* The Android linker returns a handle when the file name matches an
    * already loaded library, even when the full path doesn't exist */
   if (path && path[0] == '/' && (access(path, F_OK) == -1)){
-    debug("dlopen(\"%s\", %x) = %p", path, flags, (void *)NULL);
+    debug("dlopen(\"%s\", 0x%x) = %p", path, flags, (void *)NULL);
     return NULL;
   }
 
   void *handle = dlopen(path, flags);
-  debug("dlopen(\"%s\", %x) = %p", path, flags, handle);
+  debug("dlopen(\"%s\", 0x%x) = %p", path, flags, handle);
   ElfLoader::Singleton.lastError = dlerror();
   if (handle) {
     SystemElf *elf = new SystemElf(path, handle);
@@ -234,7 +234,9 @@ ElfLoader::Load(const char *path, int flags, LibHandle *parent)
   }
 
   char *abs_path = NULL;
+#ifdef MOZ_DEBUG_LINKER
   const char *requested_path = path;
+#endif
 
   /* When the path is not absolute and the library is being loaded for
    * another, first try to load the library from the directory containing
@@ -258,7 +260,7 @@ ElfLoader::Load(const char *path, int flags, LibHandle *parent)
   if ((subpath = strchr(path, '!'))) {
     char *zip_path = strndup(path, subpath - path);
     while (*(++subpath) == '/') { }
-    zip = zips.GetZip(zip_path);
+    zip = ZipCollection::GetZip(zip_path);
     Zip::Stream s;
     if (zip && zip->GetStream(subpath, &s)) {
       /* When the MOZ_LINKER_EXTRACT environment variable is set to "1",
@@ -574,7 +576,7 @@ ElfLoader::DebuggerHelper::DebuggerHelper(): dbg(NULL)
       break;
     }
   }
-  debug("DT_DEBUG points at %p", dbg);
+  debug("DT_DEBUG points at %p", static_cast<void *>(dbg));
 }
 
 /**
@@ -741,9 +743,8 @@ void SEGVHandler::handler(int signum, siginfo_t *info, void *context)
   /* Check whether we segfaulted in the address space of a CustomElf. We're
    * only expecting that to happen as an access error. */
   if (info->si_code == SEGV_ACCERR) {
-    /* We may segfault when running destructors in CustomElf::~CustomElf, so we
-     * can't hold a RefPtr on the handle. */
-    LibHandle *handle = ElfLoader::Singleton.GetHandleByPtr(info->si_addr).drop();
+    mozilla::RefPtr<LibHandle> handle =
+      ElfLoader::Singleton.GetHandleByPtr(info->si_addr);
     if (handle && !handle->IsSystemElf()) {
       debug("Within the address space of a CustomElf");
       CustomElf *elf = static_cast<CustomElf *>(static_cast<LibHandle *>(handle));
@@ -755,7 +756,8 @@ void SEGVHandler::handler(int signum, siginfo_t *info, void *context)
   /* Redispatch to the registered handler */
   SEGVHandler &that = ElfLoader::Singleton;
   if (that.action.sa_flags & SA_SIGINFO) {
-    debug("Redispatching to registered handler @%p", that.action.sa_sigaction);
+    debug("Redispatching to registered handler @%p",
+          FunctionPtr(that.action.sa_sigaction));
     that.action.sa_sigaction(signum, info, context);
   } else if (that.action.sa_handler == SIG_DFL) {
     debug("Redispatching to default handler");
@@ -763,7 +765,8 @@ void SEGVHandler::handler(int signum, siginfo_t *info, void *context)
     sigaction(signum, &that.action, NULL);
     raise(signum);
   } else if (that.action.sa_handler != SIG_IGN) {
-    debug("Redispatching to registered handler @%p", that.action.sa_handler);
+    debug("Redispatching to registered handler @%p",
+          FunctionPtr(that.action.sa_handler));
     that.action.sa_handler(signum);
   } else {
     debug("Ignoring");

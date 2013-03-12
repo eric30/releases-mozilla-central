@@ -13,7 +13,7 @@ var SelectHelper = {
   handleClick: function(aTarget) {
     // if we're busy looking at a select we want to eat any clicks that
     // come to us, but not to process them
-    if (this._uiBusy || !this._isMenu(aTarget))
+    if (this._uiBusy || !this._isMenu(aTarget) || aTarget.disabled)
         return;
 
     this._uiBusy = true;
@@ -23,7 +23,7 @@ var SelectHelper = {
 
   show: function(aElement) {
     let list = this.getListForElement(aElement);
-    let data = JSON.parse(sendMessageToJava({ gecko: list }));
+    let data = JSON.parse(sendMessageToJava(list));
     let selected = data.button;
     if (selected == -1)
         return;
@@ -66,7 +66,7 @@ var SelectHelper = {
 
     if (aElement.multiple) {
       result.buttons = [
-        { label: Strings.browser.GetStringFromName("selectHelper.closeMultipleSelectDialog") },
+        Strings.browser.GetStringFromName("selectHelper.closeMultipleSelectDialog")
       ];
     }
 

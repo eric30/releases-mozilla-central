@@ -25,6 +25,9 @@
 #define NS_FRAME_INVALIDATE_ON_MOVE   0x0010 
 
 class nsOverflowContinuationTracker;
+namespace mozilla {
+class FramePropertyTable;
+}
 
 // Some macros for container classes to do sanity checking on
 // width/height/x/y values computed during reflow.
@@ -134,7 +137,7 @@ public:
   // NS_FRAME_NO_SIZE_VIEW - don't size the view
   static void SyncFrameViewAfterReflow(nsPresContext* aPresContext,
                                        nsIFrame*       aFrame,
-                                       nsIView*        aView,
+                                       nsView*        aView,
                                        const nsRect&   aVisualOverflowArea,
                                        uint32_t        aFlags = 0);
 
@@ -142,7 +145,7 @@ public:
   // shadow.
   static void SyncWindowProperties(nsPresContext*       aPresContext,
                                    nsIFrame*            aFrame,
-                                   nsIView*             aView,
+                                   nsView*             aView,
                                    nsRenderingContext*  aRC = nullptr);
 
   // Sets the view's attributes from the frame style.
@@ -154,7 +157,7 @@ public:
   static void SyncFrameViewProperties(nsPresContext*  aPresContext,
                                       nsIFrame*        aFrame,
                                       nsStyleContext*  aStyleContext,
-                                      nsIView*         aView,
+                                      nsView*         aView,
                                       uint32_t         aFlags = 0);
 
   /**
@@ -351,9 +354,9 @@ public:
    * probably be avoided and eventually removed. It's currently here
    * to emulate what nsContainerFrame::Paint did.
    */
-  NS_IMETHOD BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                              const nsRect&           aDirtyRect,
-                              const nsDisplayListSet& aLists);
+  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
+                                const nsRect&           aDirtyRect,
+                                const nsDisplayListSet& aLists) MOZ_OVERRIDE;
 
   // Destructor function for the proptable-stored framelists
   static void DestroyFrameList(void* aPropertyValue)
@@ -388,24 +391,21 @@ protected:
    * so its background and all other display items (except for positioned
    * display items) go into the Content() list.
    */
-  nsresult BuildDisplayListForNonBlockChildren(nsDisplayListBuilder*   aBuilder,
-                                               const nsRect&           aDirtyRect,
-                                               const nsDisplayListSet& aLists,
-                                               uint32_t                aFlags = 0);
+  void BuildDisplayListForNonBlockChildren(nsDisplayListBuilder*   aBuilder,
+                                           const nsRect&           aDirtyRect,
+                                           const nsDisplayListSet& aLists,
+                                           uint32_t                aFlags = 0);
 
   /**
    * A version of BuildDisplayList that use DISPLAY_CHILD_INLINE.
    * Intended as a convenience for derived classes.
    */
-  nsresult BuildDisplayListForInline(nsDisplayListBuilder*   aBuilder,
-                                     const nsRect&           aDirtyRect,
-                                     const nsDisplayListSet& aLists) {
-    nsresult rv = DisplayBorderBackgroundOutline(aBuilder, aLists);
-    NS_ENSURE_SUCCESS(rv, rv);
-    rv = BuildDisplayListForNonBlockChildren(aBuilder, aDirtyRect, aLists,
-                                             DISPLAY_CHILD_INLINE);
-    NS_ENSURE_SUCCESS(rv, rv);
-    return rv;
+  void BuildDisplayListForInline(nsDisplayListBuilder*   aBuilder,
+                                 const nsRect&           aDirtyRect,
+                                 const nsDisplayListSet& aLists) {
+    DisplayBorderBackgroundOutline(aBuilder, aLists);
+    BuildDisplayListForNonBlockChildren(aBuilder, aDirtyRect, aLists,
+                                        DISPLAY_CHILD_INLINE);
   }
 
 
@@ -498,22 +498,22 @@ protected:
                                      const FramePropertyDescriptor* aProperty);
 
   /**
-   * Remove aFrame from the PresContext-stored nsFrameList named aPropID
-   * for this frame, deleting the list if it is now empty.
-   * Return true if the aFrame was successfully removed,
-   * Return false otherwise.
-   */
-  bool RemovePropTableFrame(nsPresContext*                 aPresContext,
-                              nsIFrame*                      aFrame,
-                              const FramePropertyDescriptor* aProperty);
-
-  /**
    * Set the PresContext-stored nsFrameList named aPropID for this frame
    * to the given aFrameList, which must not be null.
    */
   nsresult SetPropTableFrames(nsPresContext*                 aPresContext,
                               nsFrameList*                   aFrameList,
                               const FramePropertyDescriptor* aProperty);
+
+  /**
+   * Safely destroy the frames on the nsFrameList stored on aProp for this
+   * frame then remove the property and delete the frame list.
+   * Nothing happens if the property doesn't exist.
+   */
+  void SafelyDestroyFrameListProp(nsIFrame* aDestructRoot,
+                                  mozilla::FramePropertyTable* aPropTable,
+                                  const FramePropertyDescriptor* aProp);
+
   // ==========================================================================
 
   nsFrameList mFrames;

@@ -20,9 +20,6 @@
 #include "nsNetCID.h"
 #include "nsNetUtil.h"
 
-#include "plbase64.h"
-#include "prmem.h"
-
 #include "nsLayoutCID.h"
 #include "nsXPIDLString.h"
 #include "nsReadableUtils.h"
@@ -39,6 +36,7 @@
 #include "nsLayoutStatics.h"
 #include "nsIScriptObjectPrincipal.h"
 #include "nsHostObjectProtocolHandler.h"
+#include "mozilla/Base64.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/dom/EncodingUtils.h"
 #include "xpcpublic.h"
@@ -56,8 +54,6 @@ using namespace mozilla;
 
 using mozilla::dom::EncodingUtils;
 using mozilla::dom::FileIOObject;
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsDOMFileReader)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsDOMFileReader,
                                                   FileIOObject)
@@ -319,7 +315,7 @@ nsDOMFileReader::DoOnDataAvailable(nsIRequest *aRequest,
       // PR_Realloc doesn't support over 4GB memory size even if 64-bit OS
       return NS_ERROR_OUT_OF_MEMORY;
     }
-    mFileData = (char *)PR_Realloc(mFileData, aOffset + aCount);
+    mFileData = (char *)moz_realloc(mFileData, aOffset + aCount);
     NS_ENSURE_TRUE(mFileData, NS_ERROR_OUT_OF_MEMORY);
 
     uint32_t bytesRead = 0;
@@ -491,26 +487,11 @@ nsDOMFileReader::GetAsDataURL(nsIDOMBlob *aFile,
   }
   aResult.AppendLiteral(";base64,");
 
-  uint32_t totalRead = 0;
-  while (aDataLen > totalRead) {
-    uint32_t numEncode = 4096;
-    uint32_t amtRemaining = aDataLen - totalRead;
-    if (numEncode > amtRemaining)
-      numEncode = amtRemaining;
+  nsCString encodedData;
+  rv = Base64Encode(Substring(aFileData, aDataLen), encodedData);
+  NS_ENSURE_SUCCESS(rv, rv);
 
-    //Unless this is the end of the file, encode in multiples of 3
-    if (numEncode > 3) {
-      uint32_t leftOver = numEncode % 3;
-      numEncode -= leftOver;
-    }
-
-    //Out buffer should be at least 4/3rds the read buf, plus a terminator
-    char *base64 = PL_Base64Encode(aFileData + totalRead, numEncode, nullptr);
-    AppendASCIItoUTF16(nsDependentCString(base64), aResult);
-    PR_Free(base64);
-
-    totalRead += numEncode;
-  }
+  AppendASCIItoUTF16(encodedData, aResult);
 
   return NS_OK;
 }

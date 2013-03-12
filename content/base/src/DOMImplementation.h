@@ -5,7 +5,6 @@
 #ifndef mozilla_dom_DOMImplementation_h
 #define mozilla_dom_DOMImplementation_h
 
-#include "nsIDOMDOMImplementation.h"
 #include "nsWrapperCache.h"
 
 #include "mozilla/Attributes.h"
@@ -19,12 +18,12 @@
 #include "nsStringGlue.h"
 
 class nsIDOMDocument;
-class nsIDOMDocumentType;
 
 namespace mozilla {
 namespace dom {
+class DocumentType;
 
-class DOMImplementation MOZ_FINAL : public nsIDOMDOMImplementation
+class DOMImplementation MOZ_FINAL : public nsISupports
                                   , public nsWrapperCache
 {
 public:
@@ -56,12 +55,9 @@ public:
   virtual JSObject* WrapObject(JSContext* aCx, JSObject* aScope,
                                bool* aTriedToWrap) MOZ_OVERRIDE;
 
-  // nsIDOMDOMImplementation
-  NS_DECL_NSIDOMDOMIMPLEMENTATION
-
   bool HasFeature(const nsAString& aFeature, const nsAString& aVersion);
 
-  already_AddRefed<nsIDOMDocumentType>
+  already_AddRefed<DocumentType>
   CreateDocumentType(const nsAString& aQualifiedName,
                      const nsAString& aPublicId,
                      const nsAString& aSystemId,

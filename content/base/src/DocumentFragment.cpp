@@ -16,6 +16,7 @@
 #include "nsGkAtoms.h"
 #include "nsDOMString.h"
 #include "nsContentUtils.h"
+#include "mozilla/dom/DocumentFragmentBinding.h"
 
 nsresult
 NS_NewDocumentFragment(nsIDOMDocumentFragment** aInstancePtrResult,
@@ -37,8 +38,6 @@ NS_NewDocumentFragment(nsIDOMDocumentFragment** aInstancePtrResult,
   return NS_OK;
 }
 
-DOMCI_NODE_DATA(DocumentFragment, mozilla::dom::DocumentFragment)
-
 namespace mozilla {
 namespace dom {
 
@@ -50,6 +49,14 @@ DocumentFragment::DocumentFragment(already_AddRefed<nsINodeInfo> aNodeInfo)
                     mNodeInfo->Equals(nsGkAtoms::documentFragmentNodeName,
                                       kNameSpaceID_None),
                     "Bad NodeType in aNodeInfo");
+
+  SetIsDOMBinding();
+}
+
+JSObject*
+DocumentFragment::WrapNode(JSContext *aCx, JSObject *aScope, bool *aTriedToWrap)
+{
+  return DocumentFragmentBinding::Wrap(aCx, aScope, this, aTriedToWrap);
 }
 
 bool
@@ -141,6 +148,7 @@ NS_INTERFACE_MAP_BEGIN(DocumentFragment)
   NS_INTERFACE_MAP_ENTRY(nsIDOMDocumentFragment)
   NS_INTERFACE_MAP_ENTRY(nsIDOMNode)
   NS_INTERFACE_MAP_ENTRY(nsIDOMEventTarget)
+  NS_INTERFACE_MAP_ENTRY(mozilla::dom::EventTarget)
   NS_INTERFACE_MAP_ENTRY_TEAROFF(nsISupportsWeakReference,
                                  new nsNodeSupportsWeakRefTearoff(this))
   NS_INTERFACE_MAP_ENTRY_TEAROFF(nsIDOMNodeSelector,
@@ -150,7 +158,6 @@ NS_INTERFACE_MAP_BEGIN(DocumentFragment)
   // below line, make sure nsNodeSH::PreCreate() still does the right
   // thing!
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIContent)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(DocumentFragment)
 NS_INTERFACE_MAP_END
 
 NS_IMPL_ADDREF_INHERITED(DocumentFragment, FragmentOrElement)

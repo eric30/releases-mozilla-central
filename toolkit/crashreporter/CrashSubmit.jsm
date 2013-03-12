@@ -100,7 +100,6 @@ function getAllPendingMinidumpsIDs() {
   while (entries.hasMoreElements()) {
     let entry = entries.getNext().QueryInterface(Ci.nsIFile);
     if (entry.isFile()) {
-      entry.leafName
       let matches = entry.leafName.match(/(.+)\.extra$/);
       if (matches)
         minidumps.push(matches[1]);
@@ -108,6 +107,48 @@ function getAllPendingMinidumpsIDs() {
   }
 
   return minidumps;
+}
+
+function pruneSavedDumps() {
+  const KEEP = 10;
+
+  let pendingDir = getPendingDir();
+  if (!(pendingDir.exists() && pendingDir.isDirectory()))
+    return;
+  let entries = pendingDir.directoryEntries;
+  let entriesArray = [];
+
+  while (entries.hasMoreElements()) {
+    let entry = entries.getNext().QueryInterface(Ci.nsIFile);
+    if (entry.isFile()) {
+      let matches = entry.leafName.match(/(.+)\.extra$/);
+      if (matches)
+	entriesArray.push(entry);
+    }
+  }
+
+  entriesArray.sort(function(a,b) {
+    let dateA = a.lastModifiedTime;
+    let dateB = b.lastModifiedTime;
+    if (dateA < dateB)
+      return -1;
+    if (dateB < dateA)
+      return 1;
+    return 0;
+  });
+
+  if (entriesArray.length > KEEP) {
+    for (let i = 0; i < entriesArray.length - KEEP; ++i) {
+      let extra = entriesArray[i];
+      let matches = extra.leafName.match(/(.+)\.extra$/);
+      if (matches) {
+        let dump = extra.clone();
+        dump.leafName = matches[1] + '.dmp';
+        dump.remove(false);
+        extra.remove(false);
+      }
+    }
+  }
 }
 
 function addFormEntry(doc, form, name, value) {
@@ -145,12 +186,14 @@ function writeSubmittedReport(crashID, viewURL) {
 }
 
 // the Submitter class represents an individual submission.
-function Submitter(id, submitSuccess, submitError, noThrottle) {
+function Submitter(id, submitSuccess, submitError, noThrottle,
+                   extraExtraKeyVals) {
   this.id = id;
   this.successCallback = submitSuccess;
   this.errorCallback = submitError;
   this.noThrottle = noThrottle;
   this.additionalDumps = [];
+  this.extraKeyVals = extraExtraKeyVals || {};
 }
 
 Submitter.prototype = {
@@ -197,13 +240,10 @@ Submitter.prototype = {
 
   submitForm: function Submitter_submitForm()
   {
-    let reportData = parseKeyValuePairsFromFile(this.extra);
-    if (!('ServerURL' in reportData)) {
+    if (!('ServerURL' in this.extraKeyVals)) {
       return false;
     }
-
-    let serverURL = reportData.ServerURL;
-    delete reportData.ServerURL;
+    let serverURL = this.extraKeyVals.ServerURL;
 
     // Override the submission URL from the environment or prefs.
 
@@ -212,7 +252,7 @@ Submitter.prototype = {
     if (envOverride != '') {
       serverURL = envOverride;
     }
-    else if ('PluginHang' in reportData) {
+    else if ('PluginHang' in this.extraKeyVals) {
       try {
         serverURL = Services.prefs.
           getCharPref("toolkit.crashreporter.pluginHangSubmitURL");
@@ -225,9 +265,11 @@ Submitter.prototype = {
 
     let formData = Cc["@mozilla.org/files/formdata;1"]
                    .createInstance(Ci.nsIDOMFormData);
-    // add the other data
-    for (let [name, value] in Iterator(reportData)) {
-      formData.append(name, value);
+    // add the data
+    for (let [name, value] in Iterator(this.extraKeyVals)) {
+      if (name != "ServerURL") {
+        formData.append(name, value);
+      }
     }
     if (this.noThrottle) {
       // tell the server not to throttle this, since it was manually submitted
@@ -270,6 +312,13 @@ Submitter.prototype = {
       propBag.setPropertyAsAString("serverCrashID", ret.CrashID);
     }
 
+    let extraKeyValsBag = Cc["@mozilla.org/hash-property-bag;1"].
+                          createInstance(Ci.nsIWritablePropertyBag2);
+    for (let key in this.extraKeyVals) {
+      extraKeyValsBag.setPropertyAsAString(key, this.extraKeyVals[key]);
+    }
+    propBag.setPropertyAsInterface("extra", extraKeyValsBag);
+
     Services.obs.notifyObservers(propBag, "crash-report-status", status);
 
     switch (status) {
@@ -295,10 +344,16 @@ Submitter.prototype = {
       return false;
     }
 
-    let reportData = parseKeyValuePairsFromFile(extra);
+    let extraKeyVals = parseKeyValuePairsFromFile(extra);
+    for (let key in extraKeyVals) {
+      if (!(key in this.extraKeyVals)) {
+        this.extraKeyVals[key] = extraKeyVals[key];
+      }
+    }
+
     let additionalDumps = [];
-    if ("additional_minidumps" in reportData) {
-      let names = reportData.additional_minidumps.split(',');
+    if ("additional_minidumps" in this.extraKeyVals) {
+      let names = this.extraKeyVals.additional_minidumps.split(',');
       for (let name of names) {
         let [dump, extra] = getPendingMinidump(this.id + "-" + name);
         if (!dump.exists()) {
@@ -350,6 +405,11 @@ this.CrashSubmit = {
    *          it should be processed right away. This should be set
    *          when the report is being submitted and the user expects
    *          to see the results immediately. Defaults to false.
+   *        - extraExtraKeyVals
+   *          An object whose key-value pairs will be merged with the data from
+   *          the ".extra" file submitted with the report.  The properties of
+   *          this object will override properties of the same name in the
+   *          .extra file.
    *
    * @return true if the submission began successfully, or false if
    *         it failed for some reason. (If the dump file does not
@@ -361,6 +421,7 @@ this.CrashSubmit = {
     let submitSuccess = null;
     let submitError = null;
     let noThrottle = false;
+    let extraExtraKeyVals = null;
 
     if ('submitSuccess' in params)
       submitSuccess = params.submitSuccess;
@@ -368,11 +429,14 @@ this.CrashSubmit = {
       submitError = params.submitError;
     if ('noThrottle' in params)
       noThrottle = params.noThrottle;
+    if ('extraExtraKeyVals' in params)
+      extraExtraKeyVals = params.extraExtraKeyVals;
 
     let submitter = new Submitter(id,
                                   submitSuccess,
                                   submitError,
-                                  noThrottle);
+                                  noThrottle,
+                                  extraExtraKeyVals);
     CrashSubmit._activeSubmissions.push(submitter);
     return submitter.submit();
   },
@@ -385,6 +449,13 @@ this.CrashSubmit = {
    */
   pendingIDs: function CrashSubmit_pendingIDs() {
     return getAllPendingMinidumpsIDs();
+  },
+
+  /**
+   * Prune the saved dumps.
+   */
+  pruneSavedDumps: function CrashSubmit_pruneSavedDumps() {
+    pruneSavedDumps();
   },
 
   // List of currently active submit objects

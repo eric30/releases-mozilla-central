@@ -10,6 +10,7 @@
 #include "nsGtkKeyUtils.h"
 
 #include <gdk/gdkkeysyms.h>
+#include <algorithm>
 #ifndef GDK_Sleep
 #define GDK_Sleep 0x1008ff2f
 #endif
@@ -164,6 +165,14 @@ static const KeyPair kKeyPairs[] = {
     // x86 keyboards, located between right 'Windows' key and right Ctrl key
     { NS_VK_CONTEXT_MENU, GDK_Menu },
     { NS_VK_SLEEP,      GDK_Sleep },
+
+    { NS_VK_ATTN,       GDK_3270_Attn },
+    { NS_VK_CRSEL,      GDK_3270_CursorSelect },
+    { NS_VK_EXSEL,      GDK_3270_ExSelect },
+    { NS_VK_EREOF,      GDK_3270_EraseEOF },
+    { NS_VK_PLAY,       GDK_3270_Play },
+    //{ NS_VK_ZOOM,       GDK_XXX },
+    { NS_VK_PA1,        GDK_3270_PA1 },
 };
 
 // map Sun Keyboard special keysyms on to NS_VK keys
@@ -453,7 +462,7 @@ KeymapWrapper::InitBySystemSettings()
                     // If new modifier is more important than stored value,
                     // we should overwrite it with new modifier.
                     if (j == foundLevel[modIndex]) {
-                        mod[modIndex] = NS_MIN(modifier, mod[modIndex]);
+                        mod[modIndex] = std::min(modifier, mod[modIndex]);
                         break;
                     }
                     foundLevel[modIndex] = j;
@@ -1188,7 +1197,7 @@ void
 KeymapWrapper::InitKeypressEvent(nsKeyEvent& aKeyEvent,
                                  GdkEventKey* aGdkKeyEvent)
 {
-    NS_ENSURE_TRUE(aKeyEvent.message == NS_KEY_PRESS, );
+    NS_ENSURE_TRUE_VOID(aKeyEvent.message == NS_KEY_PRESS);
 
     aKeyEvent.charCode = GetCharCodeFor(aGdkKeyEvent);
     if (!aKeyEvent.charCode) {

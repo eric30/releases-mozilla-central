@@ -42,12 +42,12 @@ mailing address.
 
 #include "nsGIFDecoder2.h"
 #include "nsIInputStream.h"
-#include "imgIContainerObserver.h"
 #include "RasterImage.h"
 
 #include "gfxColor.h"
 #include "gfxPlatform.h"
 #include "qcms.h"
+#include <algorithm>
 
 namespace mozilla {
 namespace image {
@@ -72,7 +72,7 @@ namespace image {
 //////////////////////////////////////////////////////////////////////
 // GIF Decoder Implementation
 
-nsGIFDecoder2::nsGIFDecoder2(RasterImage &aImage, imgIDecoderObserver* aObserver)
+nsGIFDecoder2::nsGIFDecoder2(RasterImage &aImage, imgDecoderObserver* aObserver)
   : Decoder(aImage, aObserver)
   , mCurrentRow(-1)
   , mLastFlushedRow(-1)
@@ -219,9 +219,7 @@ nsresult nsGIFDecoder2::BeginImageFrame(uint16_t aDepth)
     // Otherwise, the area may never be refreshed and the placeholder will remain
     // on the screen. (Bug 37589)
     if (mGIFStruct.y_offset > 0) {
-      int32_t imgWidth;
-      mImage.GetWidth(&imgWidth);
-      nsIntRect r(0, 0, imgWidth, mGIFStruct.y_offset);
+      nsIntRect r(0, 0, mGIFStruct.screen_width, mGIFStruct.y_offset);
       PostInvalidation(r);
     }
   }
@@ -598,7 +596,7 @@ nsGIFDecoder2::WriteInternal(const char *aBuffer, uint32_t aCount)
                (mGIFStruct.bytes_in_hold) ? mGIFStruct.hold : nullptr;
   if (p) {
     // Add what we have sofar to the block
-    uint32_t l = NS_MIN(len, mGIFStruct.bytes_to_consume);
+    uint32_t l = std::min(len, mGIFStruct.bytes_to_consume);
     memcpy(p+mGIFStruct.bytes_in_hold, buf, l);
 
     if (l < mGIFStruct.bytes_to_consume) {
@@ -764,39 +762,30 @@ nsGIFDecoder2::WriteInternal(const char *aBuffer, uint32_t aCount)
       break;
 
     case gif_extension:
-      // Comment taken directly from WebKit's GIFImageReader.cpp.
-      //
-      // The GIF spec mandates lengths for three of the extensions below.
-      // However, it's possible for GIFs in the wild to deviate. For example,
-      // some GIFs that embed ICC color profiles using gif_application_extension
-      // violate the spec and treat this extension block like a sort of
-      // "extension + data" block, giving a size greater than 11 and filling the
-      // remaining bytes with data (then following with more data blocks as
-      // needed), instead of placing a true data block just after the 11 byte
-      // extension block.
-      //
-      // Accordingly, if the specified length is larger than the required value,
-      // we use it. If it's smaller, then we enforce the spec value, because the
-      // parsers for these extensions expect to have the specified number of
-      // bytes available, and if we don't ensure that, they could read off the
-      // end of the heap buffer. (In this case, it's likely the GIF is corrupt
-      // and we'll soon fail to decode anyway.)
       mGIFStruct.bytes_to_consume = q[1];
       if (mGIFStruct.bytes_to_consume) {
         switch (*q) {
         case GIF_GRAPHIC_CONTROL_LABEL:
+          // The GIF spec mandates that the GIFControlExtension header block length is 4 bytes,
+          // and the parser for this block reads 4 bytes, so we must enforce that the buffer
+          // contains at least this many bytes. If the GIF specifies a different length, we
+          // allow that, so long as it's larger; the additional data will simply be ignored.
           mGIFStruct.state = gif_control_extension;
-          mGIFStruct.bytes_to_consume = NS_MAX(mGIFStruct.bytes_to_consume, 4u);
+          mGIFStruct.bytes_to_consume = std::max(mGIFStruct.bytes_to_consume, 4u);
           break;
 
+        // The GIF spec also specifies the lengths of the following two extensions' headers
+        // (as 12 and 11 bytes, respectively). Because we ignore the plain text extension entirely
+        // and sanity-check the actual length of the application extension header before reading it,
+        // we allow GIFs to deviate from these values in either direction. This is important for
+        // real-world compatibility, as GIFs in the wild exist with application extension headers
+        // that are both shorter and longer than 11 bytes.
         case GIF_APPLICATION_EXTENSION_LABEL:
           mGIFStruct.state = gif_application_extension;
-          mGIFStruct.bytes_to_consume = NS_MAX(mGIFStruct.bytes_to_consume, 11u);
           break;
 
         case GIF_PLAIN_TEXT_LABEL:
           mGIFStruct.state = gif_skip_block;
-          mGIFStruct.bytes_to_consume = NS_MAX(mGIFStruct.bytes_to_consume, 12u);
           break;
 
         case GIF_COMMENT_LABEL:
@@ -847,8 +836,9 @@ nsGIFDecoder2::WriteInternal(const char *aBuffer, uint32_t aCount)
 
     case gif_application_extension:
       /* Check for netscape application extension */
-      if (!strncmp((char*)q, "NETSCAPE2.0", 11) ||
-        !strncmp((char*)q, "ANIMEXTS1.0", 11))
+      if (mGIFStruct.bytes_to_consume == 11 &&
+          (!strncmp((char*)q, "NETSCAPE2.0", 11) ||
+           !strncmp((char*)q, "ANIMEXTS1.0", 11)))
         GETN(1, gif_netscape_extension_block);
       else
         GETN(1, gif_consume_block);

@@ -7,17 +7,17 @@
 
 /******
 
-  This file contains the list of all HTML tags 
-  See nsHTMLTags.h for access to the enum values for tags
+  This file contains the list of all HTML tags.
+  See nsHTMLTags.h for access to the enum values for tags.
 
   It is designed to be used as inline input to nsHTMLTags.cpp and
   nsHTMLContentSink *only* through the magic of C preprocessing.
 
   All entries must be enclosed in the macro HTML_TAG which will have cruel
-  and unusual things done to it
+  and unusual things done to it.
 
   It is recommended (but not strictly necessary) to keep all entries
-  in alphabetical order
+  in alphabetical order.
 
   The first argument to HTML_TAG is both the enum identifier of the
   property and the string value. The second argument is the "creator"
@@ -64,6 +64,7 @@ HTML_HTMLELEMENT_TAG(cite)
 HTML_HTMLELEMENT_TAG(code)
 HTML_TAG(col, TableCol)
 HTML_TAG(colgroup, TableCol)
+HTML_TAG(data, Data)
 HTML_TAG(datalist, DataList)
 HTML_HTMLELEMENT_TAG(dd)
 HTML_TAG(del, Mod)
@@ -106,6 +107,7 @@ HTML_TAG(legend, Legend)
 HTML_TAG(li, LI)
 HTML_TAG(link, Link)
 HTML_HTMLELEMENT_TAG(listing)
+HTML_HTMLELEMENT_TAG(main)
 HTML_TAG(map, Map)
 HTML_HTMLELEMENT_TAG(mark)
 HTML_TAG(marquee, Div)
@@ -152,6 +154,7 @@ HTML_TAG(textarea, TextArea)
 HTML_TAG(tfoot, TableSection)
 HTML_TAG(th, TableCell)
 HTML_TAG(thead, TableSection)
+HTML_TAG(time, Time)
 HTML_TAG(title, Title)
 HTML_TAG(tr, TableRow)
 HTML_HTMLELEMENT_TAG(tt)

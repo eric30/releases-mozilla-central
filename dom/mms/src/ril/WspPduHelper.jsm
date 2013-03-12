@@ -867,12 +867,14 @@ this.UintVar = {
 /**
  * This encoding is used for token values, which have no well-known binary
  * encoding, or when the assigned number of the well-known encoding is small
- * enough to fit into Short-Integer.
+ * enough to fit into Short-Integer. We change Extension-Media from 
+ * NullTerminatedTexts to TextString because of Bug 823816. 
  *
  *   Constrained-encoding = Extension-Media | Short-integer
- *   Extension-Media = *TEXT End-of-string
+ *   Extension-Media = TextString
  *
  * @see WAP-230-WSP-20010705-a clause 8.4.2.1
+ * @see https://bugzilla.mozilla.org/show_bug.cgi?id=823816
  */
 this.ConstrainedEncoding = {
   /**
@@ -882,7 +884,7 @@ this.ConstrainedEncoding = {
    * @return Decode integer value or string.
    */
   decode: function decode(data) {
-    return decodeAlternatives(data, null, NullTerminatedTexts, ShortInteger);
+    return decodeAlternatives(data, null, TextString, ShortInteger);
   },
 
   /**
@@ -895,7 +897,7 @@ this.ConstrainedEncoding = {
     if (typeof value == "number") {
       ShortInteger.encode(data, value);
     } else {
-      NullTerminatedTexts.encode(data, value);
+      TextString.encode(data, value);
     }
   },
 };
@@ -1277,9 +1279,9 @@ this.TypeValue = {
   encode: function encode(data, type) {
     let entry = WSP_WELL_KNOWN_CONTENT_TYPES[type.toLowerCase()];
     if (entry) {
-      ShortInteger.encode(data, entry.number);
+      ConstrainedEncoding.encode(data, entry.number);
     } else {
-      NullTerminatedTexts.encode(data, type);
+      ConstrainedEncoding.encode(data, type);
     }
   },
 };
@@ -2141,6 +2143,58 @@ this.ApplicationIdValue = {
 
 this.PduHelper = {
   /**
+   * @param data
+   *        A UInt8Array of data for decode.
+   * @param charset
+   *        charset for decode
+   *
+   * @return Decoded string.
+   */
+  decodeStringContent: function decodeStringContent(data, charset) {
+      let conv = Cc["@mozilla.org/intl/scriptableunicodeconverter"]
+                 .createInstance(Ci.nsIScriptableUnicodeConverter);
+
+      let entry;
+      if (charset) {
+        entry = WSP_WELL_KNOWN_CHARSETS[charset];
+      }
+      // Set converter to default one if (entry && entry.converter) is null.
+      // @see OMA-TS-MMS-CONF-V1_3-20050526-D 7.1.9
+      conv.charset = (entry && entry.converter) || "UTF-8";
+      try {
+        return conv.convertFromByteArray(data, data.length);
+      } catch (e) {
+      }
+      return null;
+  },
+
+  /**
+  * @param strContent
+  *        Decoded string content.
+  * @param charset
+  *        Charset for encode.
+  *
+  * @return An encoded UInt8Array of string content.
+  */
+  encodeStringContent: function encodeStringContent(strContent, charset) {
+    let conv = Cc["@mozilla.org/intl/scriptableunicodeconverter"]
+               .createInstance(Ci.nsIScriptableUnicodeConverter);
+
+    let entry;
+    if (charset) {
+      entry = WSP_WELL_KNOWN_CHARSETS[charset];
+    }
+    // Set converter to default one if (entry && entry.converter) is null.
+    // @see OMA-TS-MMS-CONF-V1_3-20050526-D 7.1.9
+    conv.charset = (entry && entry.converter) || "UTF-8";
+    try {
+      return conv.convertToByteArray(strContent);
+    } catch (e) {
+    }
+    return null;
+  },
+
+  /**
    * Parse multiple header fields with end mark.
    *
    * @param data
@@ -2235,7 +2289,18 @@ this.PduHelper = {
 
         headers = this.parseHeaders(data, headersEnd, headers);
 
-        let content = Octet.decodeMultiple(data, contentEnd);
+        let octetArray = Octet.decodeMultiple(data, contentEnd);
+        let content = null;
+        if (octetArray) {
+          if (headers["content-type"].media.indexOf("text/") === 0) {
+            content = this.decodeStringContent(octetArray,
+              headers["content-type"].params.charset["charset"]);
+          }
+          if (!content) {
+            content = new Blob([octetArray],
+              {"type" : headers["content-type"].media});
+          }
+        }
 
         parts[i] = {
           index: i,
@@ -2359,7 +2424,19 @@ this.PduHelper = {
       // Encode headersLen, DataLen
       let headersLen = data.offset;
       UintVar.encode(data, headersLen);
-      UintVar.encode(data, part.content.length);
+      if (typeof part.content === "string") {
+        let charset;
+        if (contentType && contentType.params && contentType.params.charset &&
+          contentType.params.charset.charset) {
+          charset = contentType.params.charset.charset;
+        }
+        part.content = this.encodeStringContent(part.content, charset);
+        UintVar.encode(data, part.content.length);
+      } else if (part.content instanceof Uint8Array) {
+        UintVar.encode(data, part.content.length);
+      } else {
+        throw new TypeError();
+      }
 
       // Move them to the beginning of encoded octet array.
       let slice1 = data.array.slice(headersLen);
@@ -2669,9 +2746,33 @@ this.WSP_WELL_KNOWN_CHARSETS = (function () {
     charsets[name] = charsets[number] = entry;
   }
 
-  add("ansi_x3.4-1968",     3, null);
-  add("iso_8859-1:1987",    4, "ISO-8859-1");
+  add("us-ascii",           3, null);
+  add("iso-8859-1",         4, "ISO-8859-1");
+  add("iso-8859-2",         5, "ISO-8859-2");
+  add("iso-8859-3",         6, "ISO-8859-3");
+  add("iso-8859-4",         7, "ISO-8859-4");
+  add("iso-8859-5",         8, "ISO-8859-5");
+  add("iso-8859-6",         9, "ISO-8859-6");
+  add("iso-8859-7",        10, "ISO-8859-7");
+  add("iso-8859-8",        11, "ISO-8859-8");
+  add("iso-8859-9",        12, "ISO-8859-9");
+  add("iso-8859-10",       13, "ISO-8859-10");
+  add("shift_jis",         17, "Shift_JIS");
+  add("euc-jp",            18, "EUC-JP");
+  add("iso-2022-kr",       37, "ISO-2022-KR");
+  add("euc-kr",            38, "EUC-KR");
+  add("iso-2022-jp",       39, "ISO-2022-JP");
+  add("iso-2022-jp-2",     40, "iso-2022-jp-2");
+  add("iso-8859-6-e",      81, "ISO-8859-6-E");
+  add("iso-8859-6-i",      82, "ISO-8859-6-I");
+  add("iso-8859-8-e",      84, "ISO-8859-8-E");
+  add("iso-8859-8-i",      85, "ISO-8859-8-I");
   add("utf-8",            106, "UTF-8");
+  add("iso-10646-ucs-2", 1000, "iso-10646-ucs-2");
+  add("utf-16",          1015, "UTF-16");
+  add("gb2312",          2025, "GB2312");
+  add("big5",            2026, "Big5");
+  add("koi8-r",          2084, "KOI8-R");
   add("windows-1252",    2252, "windows-1252");
 
   return charsets;

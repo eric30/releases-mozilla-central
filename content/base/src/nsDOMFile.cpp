@@ -36,8 +36,6 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/Attributes.h"
 
-#include "plbase64.h"
-#include "prmem.h"
 #include "mozilla/dom/FileListBinding.h"
 
 using namespace mozilla;
@@ -180,6 +178,9 @@ NS_IMETHODIMP
 nsDOMFileBase::GetMozLastModifiedDate(uint64_t* aLastModifiedDate)
 {
   NS_ASSERTION(mIsFile, "Should only be called on files");
+  if (IsDateUnknown()) {
+    mLastModificationDate = PR_Now();
+  }
   *aLastModifiedDate = mLastModificationDate;
   return NS_OK;
 }
@@ -452,7 +453,10 @@ NS_IMPL_THREADSAFE_RELEASE(nsDOMFile)
 ////////////////////////////////////////////////////////////////////////////
 // nsDOMFileCC implementation
 
-NS_IMPL_CYCLE_COLLECTION_0(nsDOMFileCC)
+NS_IMPL_CYCLE_COLLECTION_UNLINK_0(nsDOMFileCC)
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsDOMFileCC)
+  // We don't have anything to traverse, but some of our subclasses do.
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsDOMFileCC)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDOMFile)
@@ -470,23 +474,12 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(nsDOMFileCC)
 ////////////////////////////////////////////////////////////////////////////
 // nsDOMFileFile implementation
 
-NS_IMPL_ISUPPORTS_INHERITED1(nsDOMFileFile, nsDOMFile,
-                             nsIJSNativeInitializer)
-
 already_AddRefed<nsIDOMBlob>
 nsDOMFileFile::CreateSlice(uint64_t aStart, uint64_t aLength,
                            const nsAString& aContentType)
 {
   nsCOMPtr<nsIDOMBlob> t = new nsDOMFileFile(this, aStart, aLength, aContentType);
   return t.forget();
-}
-
-/* static */ nsresult
-nsDOMFileFile::NewFile(nsISupports* *aNewObject)
-{
-  nsCOMPtr<nsISupports> file = do_QueryObject(new nsDOMFileFile());
-  file.forget(aNewObject);
-  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -502,7 +495,6 @@ nsDOMFileFile::GetLastModifiedDate(JSContext* cx, JS::Value* aLastModifiedDate)
   NS_ASSERTION(mIsFile, "Should only be called on files");
 
   PRTime msecs;
-  mFile->GetLastModifiedTime(&msecs);
   if (IsDateUnknown()) {
     nsresult rv = mFile->GetLastModifiedTime(&msecs);
     NS_ENSURE_SUCCESS(rv, rv);
@@ -575,6 +567,12 @@ NS_IMETHODIMP
 nsDOMFileFile::GetMozLastModifiedDate(uint64_t* aLastModifiedDate)
 {
   NS_ASSERTION(mIsFile, "Should only be called on files");
+  if (IsDateUnknown()) {
+    PRTime msecs;
+    nsresult rv = mFile->GetLastModifiedTime(&msecs);
+    NS_ENSURE_SUCCESS(rv, rv);
+    mLastModificationDate = msecs;
+  }
   *aLastModifiedDate = mLastModificationDate;
   return NS_OK;
 }
@@ -591,71 +589,6 @@ nsDOMFileFile::GetInternalStream(nsIInputStream **aStream)
     NS_NewLocalFileInputStream(aStream, mFile, -1, -1, sFileStreamFlags) :
     NS_NewPartialLocalFileInputStream(aStream, mFile, mStart, mLength,
                                       -1, -1, sFileStreamFlags);
-}
-
-NS_IMETHODIMP
-nsDOMFileFile::Initialize(nsISupports* aOwner,
-                          JSContext* aCx,
-                          JSObject* aObj,
-                          uint32_t aArgc,
-                          JS::Value* aArgv)
-{
-  nsresult rv;
-
-  NS_ASSERTION(!mImmutable, "Something went wrong ...");
-  NS_ENSURE_TRUE(!mImmutable, NS_ERROR_UNEXPECTED);
-
-  if (!nsContentUtils::IsCallerChrome()) {
-    return NS_ERROR_DOM_SECURITY_ERR; // Real short trip
-  }
-
-  NS_ENSURE_TRUE(aArgc > 0, NS_ERROR_UNEXPECTED);
-
-  // We expect to get a path to represent as a File object,
-  // or an nsIFile
-  nsCOMPtr<nsIFile> file;
-  if (!aArgv[0].isString()) {
-    // Lets see if it's an nsIFile
-    if (!aArgv[0].isObject()) {
-      return NS_ERROR_UNEXPECTED; // We're not interested
-    }
-
-    JSObject* obj = &aArgv[0].toObject();
-
-    // Is it an nsIFile
-    file = do_QueryInterface(
-      nsContentUtils::XPConnect()->
-        GetNativeOfWrapper(aCx, obj));
-    if (!file)
-      return NS_ERROR_UNEXPECTED;
-  } else {
-    // It's a string
-    JSString* str = JS_ValueToString(aCx, aArgv[0]);
-    NS_ENSURE_TRUE(str, NS_ERROR_XPC_BAD_CONVERT_JS);
-
-    nsDependentJSString xpcomStr;
-    if (!xpcomStr.init(aCx, str)) {
-      return NS_ERROR_XPC_BAD_CONVERT_JS;
-    }
-
-    rv = NS_NewLocalFile(xpcomStr, false, getter_AddRefs(file));
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
-
-  bool exists;
-  rv = file->Exists(&exists);
-  NS_ENSURE_SUCCESS(rv, rv);
-  NS_ENSURE_TRUE(exists, NS_ERROR_FILE_NOT_FOUND);
-
-  bool isDir;
-  rv = file->IsDirectory(&isDir);
-  NS_ENSURE_SUCCESS(rv, rv);
-  NS_ENSURE_FALSE(isDir, NS_ERROR_FILE_IS_DIRECTORY);
-
-  mFile = file;
-  file->GetLeafName(mName);
-
-  return NS_OK;
 }
 
 ////////////////////////////////////////////////////////////////////////////
@@ -685,8 +618,7 @@ nsDOMMemoryFile::DataOwner::sDataOwners;
 /* static */ bool
 nsDOMMemoryFile::DataOwner::sMemoryReporterRegistered;
 
-NS_MEMORY_REPORTER_MALLOC_SIZEOF_FUN(DOMMemoryFileDataOwnerSizeOf,
-                                     "memory-file-data");
+NS_MEMORY_REPORTER_MALLOC_SIZEOF_FUN(DOMMemoryFileDataOwnerMallocSizeOf)
 
 class nsDOMMemoryFileDataOwnerMemoryReporter MOZ_FINAL
   : public nsIMemoryMultiReporter
@@ -721,7 +653,7 @@ class nsDOMMemoryFileDataOwnerMemoryReporter MOZ_FINAL
     for (DataOwner *owner = DataOwner::sDataOwners->getFirst();
          owner; owner = owner->getNext()) {
 
-      size_t size = DOMMemoryFileDataOwnerSizeOf(owner->mData);
+      size_t size = DOMMemoryFileDataOwnerMallocSizeOf(owner->mData);
 
       if (size < LARGE_OBJECT_MIN_SIZE) {
         smallObjectsTotal += size;
@@ -778,7 +710,7 @@ class nsDOMMemoryFileDataOwnerMemoryReporter MOZ_FINAL
 };
 
 NS_IMPL_ISUPPORTS1(nsDOMMemoryFileDataOwnerMemoryReporter,
-                   nsIMemoryMultiReporter);
+                   nsIMemoryMultiReporter)
 
 /* static */ void
 nsDOMMemoryFile::DataOwner::EnsureMemoryReporterRegistered()
@@ -797,15 +729,12 @@ nsDOMMemoryFile::DataOwner::EnsureMemoryReporterRegistered()
 ////////////////////////////////////////////////////////////////////////////
 // nsDOMFileList implementation
 
-DOMCI_DATA(FileList, nsDOMFileList)
-
 NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_0(nsDOMFileList)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsDOMFileList)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDOMFileList)
   NS_INTERFACE_MAP_ENTRY(nsIDOMFileList)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(FileList)
 NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsDOMFileList)

@@ -71,6 +71,7 @@
 #include "nsContentUtils.h"
 
 using namespace mozilla::dom;
+using namespace mozilla;
 
 //----------------------------------------------------------------------
 
@@ -236,7 +237,6 @@ TraverseMatchList(nsISupports* aKey, nsTemplateMatch* aMatch, void* aContext)
     return PL_DHASH_NEXT;
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsXULTemplateBuilder)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsXULTemplateBuilder)
     NS_IMPL_CYCLE_COLLECTION_UNLINK(mDataSource)
     NS_IMPL_CYCLE_COLLECTION_UNLINK(mDB)
@@ -1388,7 +1388,7 @@ nsXULTemplateBuilder::InitHTMLTemplateRoot()
     if (! context)
         return NS_ERROR_UNEXPECTED;
 
-    JSContext* jscontext = context->GetNativeContext();
+    AutoPushJSContext jscontext(context->GetNativeContext());
     NS_ASSERTION(context != nullptr, "no jscontext");
     if (! jscontext)
         return NS_ERROR_UNEXPECTED;

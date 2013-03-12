@@ -12,11 +12,12 @@
 #include "mozilla/ErrorResult.h"
 #include "mozilla/dom/Nullable.h"
 #include "nsIDOMEvent.h"
+class nsDOMEvent;
 
 namespace mozilla {
 namespace dom {
 
-// IID for the dom::Element interface
+// IID for the dom::EventTarget interface
 #define NS_EVENTTARGET_IID \
 { 0x0a5aed21, 0x0bab, 0x48b3, \
  { 0xbe, 0x4b, 0xd4, 0xf9, 0xd4, 0xea, 0xc7, 0xdb } }
@@ -46,12 +47,7 @@ public:
   {
     aRv = RemoveEventListener(aType, aCallback, aCapture);
   }
-  bool DispatchEvent(nsIDOMEvent* aEvent, mozilla::ErrorResult& aRv)
-  {
-    bool result = false;
-    aRv = DispatchEvent(aEvent, &result);
-    return result;
-  }
+  bool DispatchEvent(nsDOMEvent& aEvent, ErrorResult& aRv);
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(EventTarget, NS_EVENTTARGET_IID)

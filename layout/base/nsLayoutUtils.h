@@ -18,16 +18,14 @@ class nsDisplayItem;
 class nsFontMetrics;
 class nsClientRectList;
 class nsFontFaceList;
-class nsHTMLCanvasElement;
 class nsHTMLVideoElement;
 class nsIImageLoadingContent;
-class nsHTMLImageElement;
 
 #include "nsChangeHint.h"
 #include "nsStyleContext.h"
 #include "nsAutoPtr.h"
 #include "nsStyleSet.h"
-#include "nsIView.h"
+#include "nsView.h"
 #include "nsIFrame.h"
 #include "nsThreadUtils.h"
 #include "nsIPresShell.h"
@@ -40,13 +38,17 @@ class nsHTMLImageElement;
 #include "FrameMetrics.h"
 
 #include <limits>
+#include <algorithm>
 
 class nsBlockFrame;
 class gfxDrawable;
 
 namespace mozilla {
+class SVGImageContext;
 namespace dom {
 class Element;
+class HTMLImageElement;
+class HTMLCanvasElement;
 } // namespace dom
 } // namespace mozilla
 
@@ -272,7 +274,7 @@ public:
    * corresponding content is before aFrame's content (view siblings
    * are in reverse content order).
    */
-  static nsIView* FindSiblingViewFor(nsIView* aParentView, nsIFrame* aFrame);
+  static nsView* FindSiblingViewFor(nsView* aParentView, nsIFrame* aFrame);
 
   /**
    * Get the parent of aFrame. If aFrame is the root frame for a document,
@@ -374,6 +376,17 @@ public:
   static nsIScrollableFrame* GetNearestScrollableFrame(nsIFrame* aFrame);
 
   /**
+   * GetScrolledRect returns the range of allowable scroll offsets
+   * for aScrolledFrame, assuming the scrollable overflow area is
+   * aScrolledFrameOverflowArea and the scrollport size is aScrollPortSize.
+   * aDirection is either NS_STYLE_DIRECTION_LTR or NS_STYLE_DIRECTION_RTL.
+   */
+  static nsRect GetScrolledRect(nsIFrame* aScrolledFrame,
+                                const nsRect& aScrolledFrameOverflowArea,
+                                const nsSize& aScrollPortSize,
+                                uint8_t aDirection);
+
+  /**
    * HasPseudoStyle returns true if aContent (whose primary style
    * context is aStyleContext) has the aPseudoElement pseudo-style
    * attached to it; returns false otherwise.
@@ -461,7 +474,7 @@ public:
   static nsIFrame* GetPopupFrameForEventCoordinates(nsPresContext* aPresContext,
                                                     const nsEvent* aEvent);
 
-/**
+  /**
    * Translate from widget coordinates to the view's coordinates
    * @param aPresContext the PresContext for the view
    * @param aWidget the widget
@@ -471,7 +484,7 @@ public:
    */
   static nsPoint TranslateWidgetToView(nsPresContext* aPresContext,
                                        nsIWidget* aWidget, nsIntPoint aPt,
-                                       nsIView* aView);
+                                       nsView* aView);
 
   /**
    * Given a matrix and a point, let T be the transformation matrix translating points
@@ -576,7 +589,18 @@ public:
    * @return aPoint, expressed in aFrame's canonical coordinate space.
    */
   static nsPoint TransformRootPointToFrame(nsIFrame* aFrame,
-                                           const nsPoint &aPt);
+                                           const nsPoint &aPoint)
+  {
+    return TransformAncestorPointToFrame(aFrame, aPoint, nullptr);
+  }
+
+  /**
+   * Transform aPoint relative to aAncestor down to the coordinate system of
+   * aFrame.
+   */
+  static nsPoint TransformAncestorPointToFrame(nsIFrame* aFrame,
+                                               const nsPoint& aPoint,
+                                               nsIFrame* aAncestor);
 
   /**
    * Helper function that, given a rectangle and a matrix, returns the smallest
@@ -643,7 +667,8 @@ public:
     PAINT_ALL_CONTINUATIONS = 0x40,
     PAINT_TO_WINDOW = 0x80,
     PAINT_EXISTING_TRANSACTION = 0x100,
-    PAINT_NO_COMPOSITE = 0x200
+    PAINT_NO_COMPOSITE = 0x200,
+    PAINT_NO_CLEAR_INVALIDATIONS = 0x400
   };
 
   /**
@@ -967,7 +992,7 @@ public:
     nscoord result =
       nsRuleNode::ComputeCoordPercentCalc(aCoord, aContainingBlockHeight);
     // Clamp calc(), and the subtraction for box-sizing.
-    return NS_MAX(0, result - aContentEdgeToBoxSizingBoxEdge);
+    return std::max(0, result - aContentEdgeToBoxSizingBoxEdge);
   }
 
   static bool IsAutoHeight(const nsStyleCoord &aCoord, nscoord aCBHeight)
@@ -1262,19 +1287,25 @@ public:
    *   @param aImage            The image.
    *   @param aDest             The area that the image should fill
    *   @param aDirty            Pixels outside this area may be skipped.
+   *   @param aSVGContext       If non-null, SVG-related rendering context
+   *                            such as overridden attributes on the image
+   *                            document's root <svg> node. Ignored for
+   *                            raster images.
+   *   @param aImageFlags       Image flags of the imgIContainer::FLAG_*
+   *                            variety.
    *   @param aSourceArea       If non-null, this area is extracted from
    *                            the image and drawn in aDest. It's
    *                            in appunits. For best results it should
    *                            be aligned with image pixels.
-   *   @param aImageFlags       Image flags of the imgIContainer::FLAG_* variety
    */
-  static nsresult DrawSingleImage(nsRenderingContext* aRenderingContext,
-                                  imgIContainer*       aImage,
-                                  GraphicsFilter       aGraphicsFilter,
-                                  const nsRect&        aDest,
-                                  const nsRect&        aDirty,
-                                  uint32_t             aImageFlags,
-                                  const nsRect*        aSourceArea = nullptr);
+  static nsresult DrawSingleImage(nsRenderingContext*    aRenderingContext,
+                                  imgIContainer*         aImage,
+                                  GraphicsFilter         aGraphicsFilter,
+                                  const nsRect&          aDest,
+                                  const nsRect&          aDirty,
+                                  const mozilla::SVGImageContext* aSVGContext,
+                                  uint32_t               aImageFlags,
+                                  const nsRect*          aSourceArea = nullptr);
 
   /**
    * Given an imgIContainer, this method attempts to obtain an intrinsic
@@ -1471,12 +1502,12 @@ public:
                                                      uint32_t aSurfaceFlags = 0);
   static SurfaceFromElementResult SurfaceFromElement(nsIImageLoadingContent *aElement,
                                                      uint32_t aSurfaceFlags = 0);
-  // Need an nsHTMLImageElement overload, because otherwise the
+  // Need an HTMLImageElement overload, because otherwise the
   // nsIImageLoadingContent and mozilla::dom::Element overloads are ambiguous
-  // for nsHTMLImageElement.
-  static SurfaceFromElementResult SurfaceFromElement(nsHTMLImageElement *aElement,
+  // for HTMLImageElement.
+  static SurfaceFromElementResult SurfaceFromElement(mozilla::dom::HTMLImageElement *aElement,
                                                      uint32_t aSurfaceFlags = 0);
-  static SurfaceFromElementResult SurfaceFromElement(nsHTMLCanvasElement *aElement,
+  static SurfaceFromElementResult SurfaceFromElement(mozilla::dom::HTMLCanvasElement *aElement,
                                                      uint32_t aSurfaceFlags = 0);
   static SurfaceFromElementResult SurfaceFromElement(nsHTMLVideoElement *aElement,
                                                      uint32_t aSurfaceFlags = 0);
@@ -1570,6 +1601,13 @@ public:
    * Checks if we should warn about animations that can't be async
    */
   static bool IsAnimationLoggingEnabled();
+
+  /**
+   * Find the maximum scale for an element (aContent) over the course of any
+   * animations and transitions on the element. Will return 1,1 if there is no
+   * animated scaling.
+   */
+  static gfxSize GetMaximumAnimatedScale(nsIContent* aContent);
 
   /**
    * Checks if we should forcibly use nearest pixel filtering for the
@@ -1766,6 +1804,14 @@ public:
   static bool PointIsCloserToRect(PointType aPoint, const RectType& aRect,
                                   CoordType& aClosestXDistance,
                                   CoordType& aClosestYDistance);
+  /**
+   * Computes the box shadow rect for the frame, or returns an empty rect if
+   * there are no shadows.
+   *
+   * @param aFrame Frame to compute shadows for.
+   * @param aFrameSize Size of aFrame (in case it hasn't been set yet).
+   */
+  static nsRect GetBoxShadowRectForFrame(nsIFrame* aFrame, const nsSize& aFrameSize);
 
 #ifdef DEBUG
   /**
@@ -1947,7 +1993,7 @@ nsLayoutUtils::PointIsCloserToRect(PointType aPoint, const RectType& aRect,
   if (fromLeft >= 0 && fromRight <= 0) {
     xDistance = 0;
   } else {
-    xDistance = NS_MIN(abs(fromLeft), abs(fromRight));
+    xDistance = std::min(abs(fromLeft), abs(fromRight));
   }
 
   if (xDistance <= aClosestXDistance) {
@@ -1962,7 +2008,7 @@ nsLayoutUtils::PointIsCloserToRect(PointType aPoint, const RectType& aRect,
     if (fromTop >= 0 && fromBottom <= 0) {
       yDistance = 0;
     } else {
-      yDistance = NS_MIN(abs(fromTop), abs(fromBottom));
+      yDistance = std::min(abs(fromTop), abs(fromBottom));
     }
 
     if (yDistance < aClosestYDistance) {

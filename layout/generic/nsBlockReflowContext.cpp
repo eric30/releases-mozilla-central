@@ -16,8 +16,6 @@
 #include "nsContainerFrame.h"
 #include "nsBlockFrame.h"
 #include "nsLineBox.h"
-#include "nsIDOMHTMLTableCellElement.h"
-#include "nsIDOMHTMLBodyElement.h"
 #include "nsGkAtoms.h"
 #include "nsCOMPtr.h"
 #include "nsLayoutUtils.h"
@@ -158,7 +156,7 @@ nsBlockReflowContext::ComputeCollapsedTopMargin(const nsHTMLReflowState& aRS,
                                                availSpace);
             // Record that we're being optimistic by assuming the kid
             // has no clearance
-            if (kid->GetStyleDisplay()->mBreakType != NS_STYLE_CLEAR_NONE) {
+            if (kid->StyleDisplay()->mBreakType != NS_STYLE_CLEAR_NONE) {
               *aMayNeedRetry = true;
             }
             if (ComputeCollapsedTopMargin(innerReflowState, aMargin, aClearanceFrame, aMayNeedRetry, &isEmpty)) {
@@ -400,7 +398,7 @@ nsBlockReflowContext::PlaceBlock(const nsHTMLReflowState& aReflowState,
                          mMetrics.width, mMetrics.height);
   
   // Apply CSS relative positioning
-  const nsStyleDisplay* styleDisp = mFrame->GetStyleDisplay();
+  const nsStyleDisplay* styleDisp = mFrame->StyleDisplay();
   if (NS_STYLE_POSITION_RELATIVE == styleDisp->mPosition) {
     x += aReflowState.mComputedOffsets.left;
     y += aReflowState.mComputedOffsets.top;

@@ -14,9 +14,17 @@
 #include "nsJSUtils.h"
 #include "AudioSampleFormat.h"
 #include "AudioChannelCommon.h"
+#include <algorithm>
+#include "mozilla/Preferences.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
+
+static bool
+IsAudioAPIEnabled()
+{
+  return Preferences::GetBool("media.audio_data.enabled", true);
+}
 
 nsGenericHTMLElement*
 NS_NewHTMLAudioElement(already_AddRefed<nsINodeInfo> aNodeInfo,
@@ -100,6 +108,10 @@ nsHTMLAudioElement::Initialize(nsISupports* aOwner, JSContext* aContext,
 NS_IMETHODIMP
 nsHTMLAudioElement::MozSetup(uint32_t aChannels, uint32_t aRate)
 {
+  if (!IsAudioAPIEnabled()) {
+    return NS_ERROR_DOM_NOT_SUPPORTED_ERR;
+  }
+
   // If there is already a src provided, don't setup another stream
   if (mDecoder) {
     return NS_ERROR_FAILURE;
@@ -122,7 +134,7 @@ nsHTMLAudioElement::MozSetup(uint32_t aChannels, uint32_t aRate)
     return rv;
   }
 
-  MetadataLoaded(aChannels, aRate, true, nullptr);
+  MetadataLoaded(aChannels, aRate, true, false, nullptr);
   mAudioStream->SetVolume(mVolume);
 
   return NS_OK;
@@ -131,6 +143,10 @@ nsHTMLAudioElement::MozSetup(uint32_t aChannels, uint32_t aRate)
 NS_IMETHODIMP
 nsHTMLAudioElement::MozWriteAudio(const JS::Value& aData, JSContext* aCx, uint32_t* aRetVal)
 {
+  if (!IsAudioAPIEnabled()) {
+    return NS_ERROR_DOM_NOT_SUPPORTED_ERR;
+  }
+
   if (!mAudioStream) {
     return NS_ERROR_DOM_INVALID_STATE_ERR;
   }
@@ -166,7 +182,7 @@ nsHTMLAudioElement::MozWriteAudio(const JS::Value& aData, JSContext* aCx, uint32
   }
 
   // Don't write more than can be written without blocking.
-  uint32_t writeLen = NS_MIN(mAudioStream->Available(), dataLength / mChannels);
+  uint32_t writeLen = std::min(mAudioStream->Available(), dataLength / mChannels);
 
   float* frames = JS_GetFloat32ArrayData(tsrc);
   // Convert the samples back to integers as we are using fixed point audio in
@@ -176,10 +192,10 @@ nsHTMLAudioElement::MozWriteAudio(const JS::Value& aData, JSContext* aCx, uint32
   nsAutoArrayPtr<AudioDataValue> audioData(new AudioDataValue[writeLen * mChannels]);
   ConvertAudioSamples(frames, audioData.get(), writeLen * mChannels);
   nsresult rv = mAudioStream->Write(audioData.get(), writeLen);
-
   if (NS_FAILED(rv)) {
     return rv;
   }
+  mAudioStream->Start();
 
   // Return the actual amount written.
   *aRetVal = writeLen * mChannels;
@@ -189,6 +205,10 @@ nsHTMLAudioElement::MozWriteAudio(const JS::Value& aData, JSContext* aCx, uint32
 NS_IMETHODIMP
 nsHTMLAudioElement::MozCurrentSampleOffset(uint64_t *aRetVal)
 {
+  if (!IsAudioAPIEnabled()) {
+    return NS_ERROR_DOM_NOT_SUPPORTED_ERR;
+  }
+
   if (!mAudioStream) {
     return NS_ERROR_DOM_INVALID_STATE_ERR;
   }

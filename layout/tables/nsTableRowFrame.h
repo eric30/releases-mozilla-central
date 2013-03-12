@@ -67,9 +67,9 @@ public:
   virtual nsMargin GetUsedBorder() const;
   virtual nsMargin GetUsedPadding() const;
 
-  NS_IMETHOD BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                              const nsRect&           aDirtyRect,
-                              const nsDisplayListSet& aLists) MOZ_OVERRIDE;
+  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
+                                const nsRect&           aDirtyRect,
+                                const nsDisplayListSet& aLists) MOZ_OVERRIDE;
 
   nsTableCellFrame* GetFirstCell() ;
 
@@ -224,6 +224,11 @@ public:
   void SetContinuousBCBorderWidth(uint8_t     aForSide,
                                   BCPixelSize aPixelValue);
 
+  virtual bool IsFrameOfType(uint32_t aFlags) const
+  {
+    return nsContainerFrame::IsFrameOfType(aFlags & ~(nsIFrame::eTablePart));
+  }
+
   virtual void InvalidateFrame(uint32_t aDisplayItemKey = 0) MOZ_OVERRIDE;
   virtual void InvalidateFrameWithRect(const nsRect& aRect, uint32_t aDisplayItemKey = 0) MOZ_OVERRIDE;
   virtual void InvalidateFrameForRemoval() MOZ_OVERRIDE { InvalidateFrameSubtree(); }
@@ -244,8 +249,7 @@ protected:
                             bool                    aBorderCollapse,
                             nsTableCellReflowState& aReflowState);
   
-  /** implement abstract method on nsContainerFrame */
-  virtual int GetSkipSides() const;
+  virtual int GetSkipSides() const MOZ_OVERRIDE;
 
   // row-specific methods
 

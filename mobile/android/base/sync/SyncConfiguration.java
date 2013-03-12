@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 
+import org.mozilla.gecko.background.common.log.Logger;
 import org.mozilla.gecko.sync.crypto.KeyBundle;
 import org.mozilla.gecko.sync.crypto.PersistedCrypto5Keys;
 import org.mozilla.gecko.sync.stage.GlobalSyncStage.Stage;
@@ -464,9 +465,18 @@ public class SyncConfiguration implements CredentialsSource {
     return serverURL + "user/1.0/" + userPart;
   }
 
-  public String infoURL() {
-    return clusterURL + GlobalSession.API_VERSION + "/" + username + "/info/collections";
+  protected String infoBaseURL() {
+    return clusterURL + GlobalSession.API_VERSION + "/" + username + "/info/";
   }
+
+  public String infoCollectionsURL() {
+    return infoBaseURL() + "collections";
+  }
+
+  public String infoCollectionCountsURL() {
+    return infoBaseURL() + "collection_counts";
+  }
+
   public String metaURL() {
     return clusterURL + GlobalSession.API_VERSION + "/" + username + "/storage/meta/global";
   }

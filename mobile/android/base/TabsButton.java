@@ -11,16 +11,12 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
-import android.graphics.PorterDuffXfermode;
 import android.graphics.PorterDuff.Mode;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
-import android.graphics.drawable.LayerDrawable;
 import android.graphics.drawable.LevelListDrawable;
 import android.graphics.drawable.StateListDrawable;
 import android.util.AttributeSet;
-import android.view.Gravity;
-import android.view.View;
 
 public class TabsButton extends ShapedButton { 
     private Paint mPaint;
@@ -39,9 +35,7 @@ public class TabsButton extends ShapedButton {
         mCropped = a.getBoolean(R.styleable.TabsButton_cropped, false);
         a.recycle();
 
-        a = context.obtainStyledAttributes(attrs, R.styleable.TabsPanel);
-        mSideBar = a.getBoolean(R.styleable.TabsPanel_sidebar, false);
-        a.recycle();
+        mSideBar = false;
 
         // Paint to draw the background.
         mPaint = new Paint();
@@ -63,7 +57,7 @@ public class TabsButton extends ShapedButton {
 
         int width = getMeasuredWidth();
         int height = getMeasuredHeight();
-        float curve = height * 1.125f;
+        int curve = (int) (height * 1.125f);
 
         // The bounds for the rectangle to carve the curves.
         float left;
@@ -164,25 +158,33 @@ public class TabsButton extends ShapedButton {
     // The drawable is constructed as per @drawable/tabs_button.
     @Override
     public void onLightweightThemeChanged() {
-        Drawable drawable = mActivity.getLightweightTheme().getDrawableWithAlpha(this, 34);
-        if (drawable == null)
+        int background1 = mActivity.getResources().getColor(R.color.background_tabs_light);
+        LightweightThemeDrawable lightWeight1 = mActivity.getLightweightTheme().getColorDrawable(this, background1);
+        int background2 = mActivity.getResources().getColor(R.color.background_tabs_dark);
+        LightweightThemeDrawable lightWeight2 = mActivity.getLightweightTheme().getColorDrawable(this, background2);
+        if (lightWeight1 == null || lightWeight2 == null)
             return;
 
-        Resources resources = this.getContext().getResources();
-        LayerDrawable layers = new LayerDrawable(new Drawable[] { resources.getDrawable(R.drawable.tabs_tray_bg_repeat), drawable }); 
+        lightWeight1.setAlpha(34, 34);
+        lightWeight2.setAlpha(34, 34);
 
-        StateListDrawable stateList = new StateListDrawable();
-        stateList.addState(new int[] { R.attr.state_private, android.R.attr.state_pressed }, resources.getDrawable(R.drawable.highlight));
-        stateList.addState(new int[] { R.attr.state_private }, resources.getDrawable(R.drawable.tabs_tray_bg_pb_repeat));
-        stateList.addState(new int[] { android.R.attr.state_pressed }, resources.getDrawable(R.drawable.highlight));
-        stateList.addState(new int[] {}, layers);
+        Resources resources = this.getContext().getResources();
+        StateListDrawable stateList1 = new StateListDrawable();
+        stateList1.addState(new int[] { android.R.attr.state_pressed }, resources.getDrawable(R.drawable.highlight));
+        stateList1.addState(new int[] { R.attr.state_private }, new ColorDrawable(resources.getColor(R.color.background_tabs_light)));
+        stateList1.addState(new int[] {}, lightWeight1);
+
+        StateListDrawable stateList2 = new StateListDrawable();
+        stateList2.addState(new int[] { android.R.attr.state_pressed }, resources.getDrawable(R.drawable.highlight));
+        stateList2.addState(new int[] { R.attr.state_private }, new ColorDrawable(resources.getColor(R.color.background_tabs_dark)));
+        stateList2.addState(new int[] {}, lightWeight2);
 
         LevelListDrawable levelList = new LevelListDrawable();
-        levelList.addLevel(0, 1, stateList);
+        levelList.addLevel(0, 1, stateList1);
 
         // If there is a side bar, the expanded state will have a filled button.
         if (mSideBar)
-            levelList.addLevel(2, 2, stateList);
+            levelList.addLevel(2, 2, stateList2);
         else
             levelList.addLevel(2, 2, new ColorDrawable(Color.TRANSPARENT));
 
@@ -192,5 +194,13 @@ public class TabsButton extends ShapedButton {
     @Override
     public void onLightweightThemeReset() {
         setBackgroundResource(R.drawable.tabs_button);
+    }
+
+    public void setIsSideBar(boolean isSideBar) {
+        if (mSideBar == isSideBar)
+            return;
+
+        mSideBar = isSideBar;
+        requestLayout();
     }
 }

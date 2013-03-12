@@ -18,7 +18,7 @@ namespace JSC {
     class ExecutablePool;
 }
 
-struct JSScript;
+class JSScript;
 
 namespace js {
 namespace ion {
@@ -45,8 +45,14 @@ class IonCode : public gc::Cell
     uint32_t dataSize_;               // Size of the read-only data area.
     uint32_t jumpRelocTableBytes_;    // Size of the jump relocation table.
     uint32_t dataRelocTableBytes_;    // Size of the data relocation table.
+    uint32_t preBarrierTableBytes_;   // Size of the prebarrier table.
     JSBool invalidated_;            // Whether the code object has been invalidated.
                                     // This is necessary to prevent GC tracing.
+
+#if JS_BITS_PER_WORD == 32
+    // Ensure IonCode is gc::Cell aligned.
+    uint32_t padding_;
+#endif
 
     IonCode()
       : code_(NULL),
@@ -60,6 +66,7 @@ class IonCode : public gc::Cell
         dataSize_(0),
         jumpRelocTableBytes_(0),
         dataRelocTableBytes_(0),
+        preBarrierTableBytes_(0),
         invalidated_(false)
     { }
 
@@ -71,6 +78,9 @@ class IonCode : public gc::Cell
     }
     uint32_t dataRelocTableOffset() const {
         return jumpRelocTableOffset() + jumpRelocTableBytes_;
+    }
+    uint32_t preBarrierTableOffset() const {
+        return dataRelocTableOffset() + dataRelocTableBytes_;
     }
 
   public:
@@ -85,6 +95,8 @@ class IonCode : public gc::Cell
     void setInvalidated() {
         invalidated_ = true;
     }
+
+    void togglePreBarriers(bool enabled);
 
     // If this IonCode object has been, effectively, corrupted due to
     // invalidation patching, then we have to remember this so we don't try and
@@ -122,6 +134,7 @@ class IonCode : public gc::Cell
     static void readBarrier(IonCode *code);
     static void writeBarrierPre(IonCode *code);
     static void writeBarrierPost(IonCode *code, void *addr);
+    static inline ThingRootKind rootKind() { return THING_ROOT_ION_CODE; }
 };
 
 class SnapshotWriter;
@@ -159,21 +172,24 @@ struct IonScript
     // Flag set when we bailout, to avoid frequent bailouts.
     bool bailoutExpected_;
 
-    // Offset from the start of the code buffer to its snapshot buffer.
-    uint32_t snapshots_;
-    uint32_t snapshotsSize_;
+    // Any kind of data needed by the runtime, these can be either cache
+    // information or profiling info.
+    uint32_t runtimeData_;
+    uint32_t runtimeSize_;
 
-    // Table mapping bailout IDs to snapshot offsets.
-    uint32_t bailoutTable_;
-    uint32_t bailoutEntries_;
-
-    // Constant table for constants stored in snapshots.
-    uint32_t constantTable_;
-    uint32_t constantEntries_;
+    // State for polymorphic caches in the compiled code. All caches are stored
+    // in the runtimeData buffer and indexed by the cacheIndex which give a
+    // relative offset in the runtimeData array.
+    uint32_t cacheIndex_;
+    uint32_t cacheEntries_;
 
     // Map code displacement to safepoint / OSI-patch-delta.
     uint32_t safepointIndexOffset_;
     uint32_t safepointIndexEntries_;
+
+    // Offset to and length of the safepoint table in bytes.
+    uint32_t safepointsStart_;
+    uint32_t safepointsSize_;
 
     // Number of STACK_SLOT_SIZE-length slots this function reserves on the
     // stack.
@@ -183,61 +199,85 @@ struct IonScript
     // with the frame prefix to get a valid IonJSFrameLayout.
     uint32_t frameSize_;
 
+    // Table mapping bailout IDs to snapshot offsets.
+    uint32_t bailoutTable_;
+    uint32_t bailoutEntries_;
+
     // Map OSI-point displacement to snapshot.
     uint32_t osiIndexOffset_;
     uint32_t osiIndexEntries_;
 
-    // State for polymorphic caches in the compiled code.
-    uint32_t cacheList_;
-    uint32_t cacheEntries_;
+    // Offset from the start of the code buffer to its snapshot buffer.
+    uint32_t snapshots_;
+    uint32_t snapshotsSize_;
 
-    // Offset list for patchable pre-barriers.
-    uint32_t prebarrierList_;
-    uint32_t prebarrierEntries_;
-
-    // Offset to and length of the safepoint table in bytes.
-    uint32_t safepointsStart_;
-    uint32_t safepointsSize_;
+    // Constant table for constants stored in snapshots.
+    uint32_t constantTable_;
+    uint32_t constantEntries_;
 
     // List of compiled/inlined JSScript's.
     uint32_t scriptList_;
     uint32_t scriptEntries_;
 
+    // In parallel mode, list of scripts that we call that were invalidated
+    // last time this script bailed out. These will be recompiled (or tried to
+    // be) upon next parallel entry of this script.
+    //
+    // For non-parallel IonScripts, this is NULL.
+    //
+    // For parallel IonScripts, there are as many entries as there are slices,
+    // since for any single parallel execution, we can only get a single
+    // invalidation per slice.
+    uint32_t parallelInvalidatedScriptList_;
+    uint32_t parallelInvalidatedScriptEntries_;
+
     // Number of references from invalidation records.
     size_t refcount_;
 
+    // Identifier of the compilation which produced this code.
     types::RecompileInfo recompileInfo_;
+
+  private:
+    inline uint8_t *bottomBuffer() {
+        return reinterpret_cast<uint8_t *>(this);
+    }
+    inline const uint8_t *bottomBuffer() const {
+        return reinterpret_cast<const uint8_t *>(this);
+    }
 
   public:
     // Number of times this function has tried to call a non-IM compileable function
     uint32_t slowCallCount;
 
     SnapshotOffset *bailoutTable() {
-        return (SnapshotOffset *)(reinterpret_cast<uint8_t *>(this) + bailoutTable_);
+        return (SnapshotOffset *) &bottomBuffer()[bailoutTable_];
     }
     HeapValue *constants() {
-        return (HeapValue *)(reinterpret_cast<uint8_t *>(this) + constantTable_);
+        return (HeapValue *) &bottomBuffer()[constantTable_];
     }
     const SafepointIndex *safepointIndices() const {
         return const_cast<IonScript *>(this)->safepointIndices();
     }
     SafepointIndex *safepointIndices() {
-        return (SafepointIndex *)(reinterpret_cast<uint8_t *>(this) + safepointIndexOffset_);
+        return (SafepointIndex *) &bottomBuffer()[safepointIndexOffset_];
     }
     const OsiIndex *osiIndices() const {
         return const_cast<IonScript *>(this)->osiIndices();
     }
     OsiIndex *osiIndices() {
-        return (OsiIndex *)(reinterpret_cast<uint8_t *>(this) + osiIndexOffset_);
+        return (OsiIndex *) &bottomBuffer()[osiIndexOffset_];
     }
-    IonCache *cacheList() {
-        return (IonCache *)(reinterpret_cast<uint8_t *>(this) + cacheList_);
+    uint32_t *cacheIndex() {
+        return (uint32_t *) &bottomBuffer()[cacheIndex_];
     }
-    CodeOffsetLabel *prebarrierList() {
-        return (CodeOffsetLabel *)(reinterpret_cast<uint8_t *>(this) + prebarrierList_);
+    uint8_t *runtimeData() {
+        return  &bottomBuffer()[runtimeData_];
     }
     JSScript **scriptList() const {
-        return (JSScript **)(reinterpret_cast<const uint8_t *>(this) + scriptList_);
+        return (JSScript **) &bottomBuffer()[scriptList_];
+    }
+    JSScript **parallelInvalidatedScriptList() {
+        return (JSScript **) &bottomBuffer()[parallelInvalidatedScriptList_];
     }
 
   private:
@@ -250,8 +290,9 @@ struct IonScript
     static IonScript *New(JSContext *cx, uint32_t frameLocals, uint32_t frameSize,
                           size_t snapshotsSize, size_t snapshotEntries,
                           size_t constants, size_t safepointIndexEntries, size_t osiIndexEntries,
-                          size_t cacheEntries, size_t prebarrierEntries, size_t safepointsSize,
-                          size_t scriptEntries);
+                          size_t cacheEntries, size_t runtimeSize,
+                          size_t safepointsSize, size_t scriptEntries,
+                          size_t parallelInvalidatedScriptEntries);
     static void Trace(JSTracer *trc, IonScript *script);
     static void Destroy(FreeOp *fop, IonScript *script);
 
@@ -328,12 +369,21 @@ struct IonScript
     size_t safepointsSize() const {
         return safepointsSize_;
     }
-    JSScript *getScript(size_t i) const {
+    RawScript getScript(size_t i) const {
         JS_ASSERT(i < scriptEntries_);
         return scriptList()[i];
     }
     size_t scriptEntries() const {
         return scriptEntries_;
+    }
+    size_t parallelInvalidatedScriptEntries() const {
+        return parallelInvalidatedScriptEntries_;
+    }
+    RawScript getAndZeroParallelInvalidatedScript(uint32_t i) {
+        JS_ASSERT(i < parallelInvalidatedScriptEntries_);
+        RawScript script = parallelInvalidatedScriptList()[i];
+        parallelInvalidatedScriptList()[i] = NULL;
+        return script;
     }
     size_t sizeOfIncludingThis(JSMallocSizeOfFun mallocSizeOf) const {
         return mallocSizeOf(this);
@@ -362,13 +412,17 @@ struct IonScript
     }
     const OsiIndex *getOsiIndex(uint32_t disp) const;
     const OsiIndex *getOsiIndex(uint8_t *retAddr) const;
-    inline IonCache &getCache(size_t index);
+    inline IonCache &getCache(uint32_t index) {
+        JS_ASSERT(index < cacheEntries_);
+        uint32_t offset = cacheIndex()[index];
+        JS_ASSERT(offset < runtimeSize_);
+        return *(IonCache *) &runtimeData()[offset];
+    }
     size_t numCaches() const {
         return cacheEntries_;
     }
-    inline CodeOffsetLabel &getPrebarrier(size_t index);
-    size_t numPrebarriers() const {
-        return prebarrierEntries_;
+    size_t runtimeSize() const {
+        return runtimeSize_;
     }
     void toggleBarriers(bool enabled);
     void purgeCaches(JSCompartment *c);
@@ -377,10 +431,11 @@ struct IonScript
     void copyConstants(const HeapValue *vp);
     void copySafepointIndices(const SafepointIndex *firstSafepointIndex, MacroAssembler &masm);
     void copyOsiIndices(const OsiIndex *firstOsiIndex, MacroAssembler &masm);
-    void copyCacheEntries(const IonCache *caches, MacroAssembler &masm);
-    void copyPrebarrierEntries(const CodeOffsetLabel *barriers, MacroAssembler &masm);
+    void copyRuntimeData(const uint8_t *data);
+    void copyCacheEntries(const uint32_t *caches, MacroAssembler &masm);
     void copySafepoints(const SafepointWriter *writer);
     void copyScriptEntries(JSScript **scripts);
+    void zeroParallelInvalidatedScripts();
 
     bool invalidated() const {
         return refcount_ != 0;

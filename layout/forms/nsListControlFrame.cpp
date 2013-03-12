@@ -17,7 +17,7 @@
 #include "nsIDOMHTMLSelectElement.h"
 #include "nsIDOMHTMLOptionElement.h"
 #include "nsComboboxControlFrame.h"
-#include "nsIViewManager.h"
+#include "nsViewManager.h"
 #include "nsIDOMHTMLOptGroupElement.h"
 #include "nsWidgetsCID.h"
 #include "nsIPresShell.h"
@@ -45,6 +45,7 @@
 #include "nsContentUtils.h"
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/Attributes.h"
+#include <algorithm>
 
 using namespace mozilla;
 
@@ -155,7 +156,7 @@ nsListControlFrame::DestroyFrom(nsIFrame* aDestructRoot)
   nsHTMLScrollFrame::DestroyFrom(aDestructRoot);
 }
 
-NS_IMETHODIMP
+void
 nsListControlFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                      const nsRect&           aDirtyRect,
                                      const nsDisplayListSet& aLists)
@@ -166,7 +167,7 @@ nsListControlFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   // XXX why do we need this here? we should never reach this. Maybe
   // because these can have widgets? Hmm
   if (aBuilder->IsBackgroundOnly())
-    return NS_OK;
+    return;
 
   DO_GLOBAL_REFLOW_COUNT_DSP("nsListControlFrame");
 
@@ -182,12 +183,7 @@ nsListControlFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
         mLastDropdownBackstopColor));
   }
 
-  // REVIEW: The selection visibility code that used to be here is what
-  // we already do by default.
-  // REVIEW: There was code here to paint the theme background. But as far
-  // as I can tell, we'd just paint the theme background twice because
-  // it was redundant with nsCSSRendering::PaintBackground
-  return nsHTMLScrollFrame::BuildDisplayList(aBuilder, aDirtyRect, aLists);
+  nsHTMLScrollFrame::BuildDisplayList(aBuilder, aDirtyRect, aLists);
 }
 
 /**
@@ -267,7 +263,7 @@ NS_QUERYFRAME_TAIL_INHERITING(nsHTMLScrollFrame)
 a11y::AccType
 nsListControlFrame::AccessibleType()
 {
-  return a11y::eHTMLSelectListAccessible;
+  return a11y::eHTMLSelectListType;
 }
 #endif
 
@@ -439,7 +435,7 @@ nsListControlFrame::Reflow(nsPresContext*           aPresContext,
         // Just pick something
         mNumDisplayRows = 1;
       } else {
-        mNumDisplayRows = NS_MAX(1, state.ComputedHeight() / rowHeight);
+        mNumDisplayRows = std::max(1, state.ComputedHeight() / rowHeight);
       }
     }
 
@@ -570,7 +566,7 @@ nsListControlFrame::ReflowAsDropdown(nsPresContext*           aPresContext,
       mDropdownCanGrow = GetNumberOfRows() > 1;
     } else {
       nscoord bp = aReflowState.mComputedBorderPadding.TopBottom();
-      nscoord availableHeight = NS_MAX(above, below) - bp;
+      nscoord availableHeight = std::max(above, below) - bp;
       nscoord newHeight;
       uint32_t rows;
       if (visibleHeight <= availableHeight) {
@@ -934,7 +930,7 @@ nsListControlFrame::HandleEvent(nsPresContext* aPresContext,
 
   // do we have style that affects how we are selected?
   // do we have user-input style?
-  const nsStyleUserInterface* uiStyle = GetStyleUserInterface();
+  const nsStyleUserInterface* uiStyle = StyleUserInterface();
   if (uiStyle->mUserInput == NS_STYLE_USER_INPUT_NONE || uiStyle->mUserInput == NS_STYLE_USER_INPUT_DISABLED)
     return nsFrame::HandleEvent(aPresContext, aEvent, aEventStatus);
 
@@ -1020,7 +1016,9 @@ nsListControlFrame::Init(nsIContent*     aContent,
 
   mLastDropdownBackstopColor = PresContext()->DefaultBackgroundColor();
 
-  AddStateBits(NS_FRAME_IN_POPUP);
+  if (IsInDropDownMode()) {
+    AddStateBits(NS_FRAME_IN_POPUP);
+  }
 
   return result;
 }
@@ -1114,13 +1112,6 @@ nsListControlFrame::OnOptionSelected(int32_t aIndex, bool aSelected)
     ScrollToIndex(aIndex);
   }
   return NS_OK;
-}
-
-int
-nsListControlFrame::GetSkipSides() const
-{    
-    // Don't skip any sides during border rendering
-  return 0;
 }
 
 void
@@ -1378,7 +1369,7 @@ nsListControlFrame::AddOption(int32_t aIndex)
 static int32_t
 DecrementAndClamp(int32_t aSelectionIndex, int32_t aLength)
 {
-  return aLength == 0 ? kNothingSelected : NS_MAX(0, aSelectionIndex - 1);
+  return aLength == 0 ? kNothingSelected : std::max(0, aSelectionIndex - 1);
 }
 
 NS_IMETHODIMP
@@ -1627,11 +1618,11 @@ nsListControlFrame::AboutToDropDown()
   // which is always opaque, in case we don't end up with an opaque color.
   // This gives us a very poor approximation of translucency.
   nsIFrame* comboboxFrame = do_QueryFrame(mComboboxFrame);
-  nsStyleContext* context = comboboxFrame->GetStyleContext()->GetParent();
+  nsStyleContext* context = comboboxFrame->StyleContext()->GetParent();
   mLastDropdownBackstopColor = NS_RGBA(0,0,0,0);
   while (NS_GET_A(mLastDropdownBackstopColor) < 255 && context) {
     mLastDropdownBackstopColor =
-      NS_ComposeColors(context->GetStyleBackground()->mBackgroundColor,
+      NS_ComposeColors(context->StyleBackground()->mBackgroundColor,
                        mLastDropdownBackstopColor);
     context = context->GetParent();
   }
@@ -1816,7 +1807,7 @@ nsListControlFrame::MouseUp(nsIDOMEvent* aMouseEvent)
     }
   }
 
-  const nsStyleVisibility* vis = GetStyleVisibility();
+  const nsStyleVisibility* vis = StyleVisibility();
       
   if (!vis->IsVisible()) {
     return NS_OK;
@@ -2385,13 +2376,13 @@ nsListControlFrame::KeyPress(nsIDOMEvent* aKeyEvent)
     case nsIDOMKeyEvent::DOM_VK_PAGE_UP: {
       AdjustIndexForDisabledOpt(mEndSelectionIndex, newIndex,
                                 (int32_t)numOptions,
-                                -NS_MAX(1, int32_t(mNumDisplayRows-1)), -1);
+                                -std::max(1, int32_t(mNumDisplayRows-1)), -1);
       } break;
 
     case nsIDOMKeyEvent::DOM_VK_PAGE_DOWN: {
       AdjustIndexForDisabledOpt(mEndSelectionIndex, newIndex,
                                 (int32_t)numOptions,
-                                NS_MAX(1, int32_t(mNumDisplayRows-1)), 1);
+                                std::max(1, int32_t(mNumDisplayRows-1)), 1);
       } break;
 
     case nsIDOMKeyEvent::DOM_VK_HOME: {

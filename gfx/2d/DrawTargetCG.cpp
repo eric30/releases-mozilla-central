@@ -65,6 +65,51 @@ CGBlendMode ToBlendMode(CompositionOp op)
     case OP_XOR:
       mode = kCGBlendModeXOR;
       break;
+    case OP_MULTIPLY:
+      mode = kCGBlendModeMultiply;
+      break;
+    case OP_SCREEN:
+      mode = kCGBlendModeScreen;
+      break;
+    case OP_OVERLAY:
+      mode = kCGBlendModeOverlay;
+      break;
+    case OP_DARKEN:
+      mode = kCGBlendModeDarken;
+      break;
+    case OP_LIGHTEN:
+      mode = kCGBlendModeLighten;
+      break;
+    case OP_COLOR_DODGE:
+      mode = kCGBlendModeColorDodge;
+      break;
+    case OP_COLOR_BURN:
+      mode = kCGBlendModeColorBurn;
+      break;
+    case OP_HARD_LIGHT:
+      mode = kCGBlendModeHardLight;
+      break;
+    case OP_SOFT_LIGHT:
+      mode = kCGBlendModeSoftLight;
+      break;
+    case OP_DIFFERENCE:
+      mode = kCGBlendModeDifference;
+      break;
+    case OP_EXCLUSION:
+      mode = kCGBlendModeExclusion;
+      break;
+    case OP_HUE:
+      mode = kCGBlendModeHue;
+      break;
+    case OP_SATURATION:
+      mode = kCGBlendModeSaturation;
+      break;
+    case OP_COLOR:
+      mode = kCGBlendModeColor;
+      break;
+    case OP_LUMINOSITY:
+      mode = kCGBlendModeLuminosity;
+      break;
       /*
     case OP_CLEAR:
       mode = kCGBlendModeClear;
@@ -77,7 +122,7 @@ CGBlendMode ToBlendMode(CompositionOp op)
 
 
 
-DrawTargetCG::DrawTargetCG() : mSnapshot(nullptr)
+DrawTargetCG::DrawTargetCG() : mCg(nullptr), mSnapshot(nullptr)
 {
 }
 
@@ -984,8 +1029,8 @@ DrawTargetCG::CreatePathBuilder(FillRule aFillRule) const
 void*
 DrawTargetCG::GetNativeSurface(NativeSurfaceType aType)
 {
-  if (aType == NATIVE_SURFACE_CGCONTEXT && GetContextType(mCg) == CG_CONTEXT_TYPE_BITMAP ||
-      aType == NATIVE_SURFACE_CGCONTEXT_ACCELERATED && GetContextType(mCg) == CG_CONTEXT_TYPE_IOSURFACE) {
+  if ((aType == NATIVE_SURFACE_CGCONTEXT && GetContextType(mCg) == CG_CONTEXT_TYPE_BITMAP) ||
+      (aType == NATIVE_SURFACE_CGCONTEXT_ACCELERATED && GetContextType(mCg) == CG_CONTEXT_TYPE_IOSURFACE)) {
     return mCg;
   } else {
     return nullptr;

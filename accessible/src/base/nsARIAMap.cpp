@@ -110,7 +110,7 @@ static nsRoleMapEntry sWAIRoleMaps[] =
     eNoValue,
     eSortAction,
     eNoLiveAttr,
-    Accessible::eTableCellAccessible,
+    eTableCell,
     kNoReqStates,
     eARIASelectable,
     eARIAReadonly
@@ -144,7 +144,7 @@ static nsRoleMapEntry sWAIRoleMaps[] =
     eNoValue,
     eNoAction,
     eNoLiveAttr,
-    Accessible::eListAccessible,
+    eList,
     kNoReqStates
   },
   { // document
@@ -175,10 +175,10 @@ static nsRoleMapEntry sWAIRoleMaps[] =
     eNoValue,
     eNoAction,
     eNoLiveAttr,
-    Accessible::eSelectAccessible | Accessible::eTableAccessible,
+    eSelect | eTable,
     states::FOCUSABLE,
     eARIAMultiSelectable,
-    eARIAReadonly
+    eARIAReadonlyOrEditable
   },
   { // gridcell
     &nsGkAtoms::gridcell,
@@ -187,10 +187,10 @@ static nsRoleMapEntry sWAIRoleMaps[] =
     eNoValue,
     eNoAction,
     eNoLiveAttr,
-    Accessible::eTableCellAccessible,
+    eTableCell,
     kNoReqStates,
     eARIASelectable,
-    eARIAReadonly
+    eARIAReadonlyOrEditableIfDefined
   },
   { // group
     &nsGkAtoms::group,
@@ -239,7 +239,7 @@ static nsRoleMapEntry sWAIRoleMaps[] =
     eNoValue,
     eNoAction,
     eNoLiveAttr,
-    Accessible::eListAccessible,
+    eList,
     states::READONLY
   },
   { // listbox
@@ -249,7 +249,7 @@ static nsRoleMapEntry sWAIRoleMaps[] =
     eNoValue,
     eNoAction,
     eNoLiveAttr,
-    Accessible::eSelectAccessible,
+    eListControl | eSelect,
     kNoReqStates,
     eARIAMultiSelectable,
     eARIAReadonly
@@ -429,7 +429,7 @@ static nsRoleMapEntry sWAIRoleMaps[] =
     eNoValue,
     eNoAction,
     eNoLiveAttr,
-    Accessible::eTableRowAccessible,
+    eTableRow,
     kNoReqStates,
     eARIASelectable
   },
@@ -450,7 +450,7 @@ static nsRoleMapEntry sWAIRoleMaps[] =
     eNoValue,
     eSortAction,
     eNoLiveAttr,
-    Accessible::eTableCellAccessible,
+    eTableCell,
     kNoReqStates,
     eARIASelectable,
     eARIAReadonly
@@ -529,7 +529,7 @@ static nsRoleMapEntry sWAIRoleMaps[] =
     eNoValue,
     eNoAction,
     ePoliteLiveAttr,
-    Accessible::eSelectAccessible,
+    eSelect,
     kNoReqStates
   },
   { // tabpanel
@@ -591,7 +591,7 @@ static nsRoleMapEntry sWAIRoleMaps[] =
     eNoValue,
     eNoAction,
     eNoLiveAttr,
-    Accessible::eSelectAccessible,
+    eSelect,
     kNoReqStates,
     eARIAReadonly,
     eARIAMultiSelectable
@@ -603,7 +603,7 @@ static nsRoleMapEntry sWAIRoleMaps[] =
     eNoValue,
     eNoAction,
     eNoLiveAttr,
-    Accessible::eSelectAccessible | Accessible::eTableAccessible,
+    eSelect | eTable,
     kNoReqStates,
     eARIAReadonly,
     eARIAMultiSelectable
@@ -679,7 +679,7 @@ nsAttributeCharacteristics nsARIAMap::gWAIUnivAttrMap[] = {
   {&nsGkAtoms::aria_flowto,            ATTR_BYPASSOBJ                 | ATTR_GLOBAL },
   {&nsGkAtoms::aria_grabbed,                            ATTR_VALTOKEN | ATTR_GLOBAL },
   {&nsGkAtoms::aria_haspopup,          ATTR_BYPASSOBJ | ATTR_VALTOKEN | ATTR_GLOBAL },
-  {&nsGkAtoms::aria_hidden,                             ATTR_VALTOKEN | ATTR_GLOBAL },/* always expose obj attr */
+  {&nsGkAtoms::aria_hidden,   ATTR_BYPASSOBJ_IF_FALSE | ATTR_VALTOKEN | ATTR_GLOBAL },
   {&nsGkAtoms::aria_invalid,           ATTR_BYPASSOBJ | ATTR_VALTOKEN | ATTR_GLOBAL },
   {&nsGkAtoms::aria_label,             ATTR_BYPASSOBJ                 | ATTR_GLOBAL },
   {&nsGkAtoms::aria_labelledby,        ATTR_BYPASSOBJ                 | ATTR_GLOBAL },
@@ -775,6 +775,12 @@ AttrIterator::Next(nsAString& aAttrName, nsAString& aAttrValue)
       if ((attrFlags & ATTR_VALTOKEN) &&
            !nsAccUtils::HasDefinedARIAToken(mContent, attrAtom))
         continue; // only expose token based attributes if they are defined
+
+      if ((attrFlags & ATTR_BYPASSOBJ_IF_FALSE) &&
+          mContent->AttrValueIs(kNameSpaceID_None, attrAtom,
+                                nsGkAtoms::_false, eCaseMatters)) {
+        continue; // only expose token based attribute if value is not 'false'.
+      }
 
       nsAutoString value;
       if (mContent->GetAttr(kNameSpaceID_None, attrAtom, value)) {

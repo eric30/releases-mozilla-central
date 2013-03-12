@@ -68,11 +68,9 @@ void
 BluetoothScoManager::NotifyAudioManager(const nsAString& aAddress) {
   MOZ_ASSERT(NS_IsMainThread());
 
-  nsCOMPtr<nsIObserverService> obs = do_GetService("@mozilla.org/observer-service;1");
-  if (!obs) {
-    NS_WARNING("Failed to get observser service!");
-    return;
-  }
+  nsCOMPtr<nsIObserverService> obs =
+    do_GetService("@mozilla.org/observer-service;1");
+  NS_ENSURE_TRUE_VOID(obs);
 
   if (aAddress.IsEmpty()) {
     if (NS_FAILED(obs->NotifyObservers(nullptr, BLUETOOTH_SCO_STATUS_CHANGED, nullptr))) {
@@ -86,11 +84,9 @@ BluetoothScoManager::NotifyAudioManager(const nsAString& aAddress) {
     }
   }
 
-  nsCOMPtr<nsIAudioManager> am = do_GetService("@mozilla.org/telephony/audiomanager;1");
-  if (!am) {
-    NS_WARNING("Failed to get AudioManager service!");
-    return;
-  }
+  nsCOMPtr<nsIAudioManager> am =
+    do_GetService("@mozilla.org/telephony/audiomanager;1");
+  NS_ENSURE_TRUE_VOID(am);
   am->SetForceForUse(am->USE_COMMUNICATION, am->FORCE_BT_SCO);
 }
 
@@ -126,7 +122,7 @@ BluetoothScoManager::Init()
   mSocketStatus = GetConnectionStatus();
 
   sScoObserver = new BluetoothScoManagerObserver();
-  if (sScoObserver->Init()) {
+  if (!sScoObserver->Init()) {
     NS_WARNING("Cannot set up SCO observers!");
   }
   return true;
@@ -175,7 +171,7 @@ BluetoothScoManager::Get()
 
 // Virtual function of class SocketConsumer
 void
-BluetoothScoManager::ReceiveSocketData(mozilla::ipc::UnixSocketRawData* aMessage)
+BluetoothScoManager::ReceiveSocketData(nsAutoPtr<UnixSocketRawData>& aMessage)
 {
   // SCO socket do nothing here
   MOZ_NOT_REACHED("This should never be called!");

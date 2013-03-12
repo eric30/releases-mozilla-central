@@ -9,6 +9,8 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
+STANDALONE_MAKEFILE := 1
+
 include $(topsrcdir)/config/rules.mk
 
 MOZ_PKG_REMOVALS = $(srcdir)/removed-files.in
@@ -60,15 +62,10 @@ ifdef _MSC_VER
 DEFINES += -D_MSC_VER=$(_MSC_VER)
 endif
 
-ifeq ($(MOZ_CHROME_FILE_FORMAT),jar)
-DEFINES += -DJAREXT=.jar
-else
 DEFINES += -DJAREXT=
-endif
 
 ifdef MOZ_ANGLE_RENDERER
 DEFINES += -DMOZ_ANGLE_RENDERER=$(MOZ_ANGLE_RENDERER)
-DEFINES += -DMOZ_D3DX9_DLL=$(MOZ_D3DX9_DLL)
 DEFINES += -DMOZ_D3DCOMPILER_DLL=$(MOZ_D3DCOMPILER_DLL)
 endif
 
@@ -80,7 +77,7 @@ ifdef WIN32_REDIST_DIR
 DEFINES += -DMOZ_MSVC_REDIST=$(_MSC_VER)
 endif
 
-ifneq (,$(filter aurora beta,$(MOZ_UPDATE_CHANNEL)))
+ifneq (,$(filter beta,$(MOZ_UPDATE_CHANNEL)))
 DEFINES += -DSHIP_FEEDBACK=1
 endif
 
@@ -152,7 +149,7 @@ ifdef MOZ_PKG_MANIFEST_P
 	rm -f $(DIST)/pack-list.txt $(DIST)/bin-list.txt
 endif
 
-installer:: removed-files
+installer::
 ifdef INSTALLER_DIR
 	$(MAKE) -C $(INSTALLER_DIR)
 endif

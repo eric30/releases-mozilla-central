@@ -13,6 +13,7 @@
 #ifdef MOZ_ENABLE_D3D9_LAYER
 # include "LayerManagerD3D9.h"
 #endif //MOZ_ENABLE_D3D9_LAYER
+#include "mozilla/BrowserElementParent.h"
 #include "mozilla/dom/TabParent.h"
 #include "mozilla/layers/AsyncPanZoomController.h"
 #include "mozilla/layers/CompositorParent.h"
@@ -165,7 +166,7 @@ ComputeShadowTreeTransform(nsIFrame* aContainerFrame,
   nsIntPoint scrollOffset =
     aConfig.mScrollOffset.ToNearestPixels(auPerDevPixel);
   // metricsScrollOffset is in layer coordinates.
-  gfx::Point metricsScrollOffset = aMetrics->GetScrollOffsetInLayerPixels();
+  gfxPoint metricsScrollOffset = aMetrics->GetScrollOffsetInLayerPixels();
   nsIntPoint roundedMetricsScrollOffset =
     nsIntPoint(NS_lround(metricsScrollOffset.x), NS_lround(metricsScrollOffset.y));
 
@@ -550,6 +551,29 @@ public:
 
   void ClearRenderFrame() { mRenderFrame = nullptr; }
 
+  virtual void SendAsyncScrollDOMEvent(const gfx::Rect& aContentRect,
+                                       const gfx::Size& aContentSize) MOZ_OVERRIDE
+  {
+    if (MessageLoop::current() != mUILoop) {
+      mUILoop->PostTask(
+        FROM_HERE,
+        NewRunnableMethod(this,
+                          &RemoteContentController::SendAsyncScrollDOMEvent,
+                          aContentRect, aContentSize));
+      return;
+    }
+    if (mRenderFrame) {
+      TabParent* browser = static_cast<TabParent*>(mRenderFrame->Manager());
+      BrowserElementParent::DispatchAsyncScrollEvent(browser, aContentRect,
+                                                     aContentSize);
+    }
+  }
+
+  virtual void PostDelayedTask(Task* aTask, int aDelayMs) MOZ_OVERRIDE
+  {
+    MessageLoop::current()->PostDelayedTask(FROM_HERE, aTask, aDelayMs);
+  }
+
 private:
   void DoRequestContentRepaint(const FrameMetrics& aFrameMetrics)
   {
@@ -581,8 +605,11 @@ RenderFrameParent::RenderFrameParent(nsFrameLoader* aFrameLoader,
   *aId = 0;
 
   nsRefPtr<LayerManager> lm = GetFrom(mFrameLoader);
-  *aBackendType = lm->GetBackendType();
-  *aMaxTextureSize = lm->GetMaxTextureSize();
+  // Perhaps the document containing this frame currently has no presentation?
+  if (lm) {
+    *aBackendType = lm->GetBackendType();
+    *aMaxTextureSize = lm->GetMaxTextureSize();
+  }
 
   if (CompositorParent::CompositorLoop()) {
     // Our remote frame will push layers updates to the compositor,
@@ -706,6 +733,7 @@ RenderFrameParent::BuildLayer(nsDisplayListBuilder* aBuilder,
     ClearContainer(mContainer);
     mContainer->SetPreScale(1.0f, 1.0f);
     mContainer->SetPostScale(1.0f, 1.0f);
+    mContainer->SetInheritedScale(1.0f, 1.0f);
   }
 
   ContainerLayer* shadowRoot = GetRootLayer();
@@ -779,6 +807,7 @@ RenderFrameParent::ActorDestroy(ActorDestroyReason why)
       // Stop our content controller from requesting repaints of our
       // content.
       mContentController->ClearRenderFrame();
+      mPanZoomController->Destroy();
     }
   }
 
@@ -806,6 +835,15 @@ RenderFrameParent::RecvCancelDefaultPanZoom()
 {
   if (mPanZoomController) {
     mPanZoomController->CancelDefaultPanZoom();
+  }
+  return true;
+}
+
+bool
+RenderFrameParent::RecvDetectScrollableSubframe()
+{
+  if (mPanZoomController) {
+    mPanZoomController->DetectScrollableSubframe();
   }
   return true;
 }
@@ -902,7 +940,7 @@ RenderFrameParent::GetRootLayer() const
   return shadowLayers ? shadowLayers->GetRoot() : nullptr;
 }
 
-NS_IMETHODIMP
+void
 RenderFrameParent::BuildDisplayList(nsDisplayListBuilder* aBuilder,
                                     nsSubDocumentFrame* aFrame,
                                     const nsRect& aDirtyRect,
@@ -926,7 +964,7 @@ RenderFrameParent::BuildDisplayList(nsDisplayListBuilder* aBuilder,
   nsPoint offset = aBuilder->ToReferenceFrame(aFrame);
   nsRect bounds = aFrame->EnsureInnerView()->GetBounds() + offset;
 
-  return aLists.Content()->AppendNewToTop(
+  aLists.Content()->AppendNewToTop(
     new (aBuilder) nsDisplayClip(aBuilder, aFrame, &shadowTree,
                                  bounds));
 }

@@ -3,12 +3,11 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/layers/PLayersChild.h"
+#include "mozilla/MathAlgorithms.h"
 #include "BasicTiledThebesLayer.h"
 #include "gfxImageSurface.h"
 #include "sampler.h"
 #include "gfxPlatform.h"
-#include <cstdlib> // for std::abs(int/long)
-#include <cmath> // for std::abs(float/double)
 
 #ifdef GFX_TILEDLAYER_DEBUG_OVERLAY
 #include "cairo.h"
@@ -377,7 +376,7 @@ BasicTiledThebesLayer::ComputeProgressiveUpdateRegion(BasicTiledLayerBuffer& aTi
     if (!aRegionToPaint.IsEmpty()) {
       break;
     }
-    if (std::abs(scrollDiffY) >= std::abs(scrollDiffX)) {
+    if (Abs(scrollDiffY) >= Abs(scrollDiffX)) {
       tileBounds.x += incX;
     } else {
       tileBounds.y += incY;
@@ -421,6 +420,7 @@ BasicTiledThebesLayer::ProgressiveUpdate(BasicTiledLayerBuffer& aTiledBuffer,
                                          void* aCallbackData)
 {
   bool repeat = false;
+  bool isBufferChanged = false;
   do {
     // Compute the region that should be updated. Repeat as many times as
     // is required.
@@ -435,15 +435,12 @@ BasicTiledThebesLayer::ProgressiveUpdate(BasicTiledLayerBuffer& aTiledBuffer,
                                             aResolution,
                                             repeat);
 
-    // There's no further work to be done, return if nothing has been
-    // drawn, or give what has been drawn to the shadow layer to upload.
+    // There's no further work to be done.
     if (regionToPaint.IsEmpty()) {
-      if (repeat) {
-        break;
-      } else {
-        return false;
-      }
+      break;
     }
+
+    isBufferChanged |= true;
 
     // Keep track of what we're about to refresh.
     aValidRegion.Or(aValidRegion, regionToPaint);
@@ -459,7 +456,9 @@ BasicTiledThebesLayer::ProgressiveUpdate(BasicTiledLayerBuffer& aTiledBuffer,
     aInvalidRegion.Sub(aInvalidRegion, regionToPaint);
   } while (repeat);
 
-  return true;
+  // Return false if nothing has been drawn, or give what has been drawn
+  // to the shadow layer to upload.
+  return isBufferChanged;
 }
 
 void

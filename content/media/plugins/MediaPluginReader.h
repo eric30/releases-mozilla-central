@@ -8,7 +8,9 @@
 
 #include "MediaResource.h"
 #include "MediaDecoderReader.h"
-
+#include "ImageContainer.h"
+#include "mozilla/layers/SharedRGBImage.h"
+ 
 #include "MPAPI.h"
 
 class nsACString;
@@ -17,6 +19,14 @@ namespace mozilla {
 
 class AbstractMediaDecoder;
 
+namespace layers {
+class ImageContainer;
+}
+
+namespace dom {
+class TimeRanges;
+}
+ 
 class MediaPluginReader : public MediaDecoderReader
 {
   nsCString mType;
@@ -53,7 +63,18 @@ public:
   virtual nsresult ReadMetadata(VideoInfo* aInfo,
                                 MetadataTags** aTags);
   virtual nsresult Seek(int64_t aTime, int64_t aStartTime, int64_t aEndTime, int64_t aCurrentTime);
-  virtual nsresult GetBuffered(nsTimeRanges* aBuffered, int64_t aStartTime);
+  virtual nsresult GetBuffered(mozilla::dom::TimeRanges* aBuffered, int64_t aStartTime);
+  class ImageBufferCallback : public MPAPI::BufferCallback {
+    typedef mozilla::layers::Image Image;
+  public:
+    ImageBufferCallback(mozilla::layers::ImageContainer *aImageContainer);
+    void *operator()(size_t aWidth, size_t aHeight,
+                     MPAPI::ColorFormat aColorFormat);
+    already_AddRefed<Image> GetImage();
+  private:
+    mozilla::layers::ImageContainer *mImageContainer;
+    nsRefPtr<Image> mImage;
+  };
 };
 
 } // namespace mozilla

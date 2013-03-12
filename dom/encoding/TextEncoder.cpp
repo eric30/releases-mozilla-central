@@ -12,8 +12,7 @@ namespace mozilla {
 namespace dom {
 
 void
-TextEncoder::Init(const nsAString& aEncoding,
-                  ErrorResult& aRv)
+TextEncoderBase::Init(const nsAString& aEncoding, ErrorResult& aRv)
 {
   nsAutoString label(aEncoding);
   EncodingUtils::TrimSpaceCharacters(label);
@@ -49,10 +48,10 @@ TextEncoder::Init(const nsAString& aEncoding,
 }
 
 JSObject*
-TextEncoder::Encode(JSContext* aCx,
-                    const nsAString& aString,
-                    const TextEncodeOptions& aOptions,
-                    ErrorResult& aRv)
+TextEncoderBase::Encode(JSContext* aCx,
+                        const nsAString& aString,
+                        const bool aStream,
+                        ErrorResult& aRv)
 {
   // Run the steps of the encoding algorithm.
   int32_t srcLen = aString.Length();
@@ -77,7 +76,7 @@ TextEncoder::Encode(JSContext* aCx,
 
   // If the internal streaming flag is not set, then reset
   // the encoding algorithm state to the default values for encoding.
-  if (!aOptions.stream) {
+  if (!aStream) {
     int32_t finishLen = maxLen - dstLen;
     rv = mEncoder->Finish(buf + dstLen, &finishLen);
     if (NS_SUCCEEDED(rv)) {
@@ -88,8 +87,11 @@ TextEncoder::Encode(JSContext* aCx,
   JSObject* outView = nullptr;
   if (NS_SUCCEEDED(rv)) {
     buf[dstLen] = '\0';
-    outView = Uint8Array::Create(aCx, this, dstLen,
-                                 reinterpret_cast<uint8_t*>(buf.get()));
+    outView = CreateUint8Array(aCx, buf, dstLen);
+    if (!outView) {
+      aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
+      return nullptr;
+    }
   }
 
   if (NS_FAILED(rv)) {
@@ -99,18 +101,14 @@ TextEncoder::Encode(JSContext* aCx,
 }
 
 void
-TextEncoder::GetEncoding(nsAString& aEncoding)
+TextEncoderBase::GetEncoding(nsAString& aEncoding)
 {
   CopyASCIItoUTF16(mEncoding, aEncoding);
   nsContentUtils::ASCIIToLower(aEncoding);
 }
 
-NS_IMPL_CYCLE_COLLECTING_ADDREF(TextEncoder)
-NS_IMPL_CYCLE_COLLECTING_RELEASE(TextEncoder)
-
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(TextEncoder)
-  NS_INTERFACE_MAP_ENTRY(nsISupports)
-NS_INTERFACE_MAP_END
+NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(TextEncoder, AddRef)
+NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(TextEncoder, Release)
 
 NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(TextEncoder, mGlobal)
 

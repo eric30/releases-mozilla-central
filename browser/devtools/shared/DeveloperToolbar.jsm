@@ -22,16 +22,23 @@ XPCOMUtils.defineLazyModuleGetter(this, "gcli",
                                   "resource:///modules/devtools/gcli.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "CmdCommands",
-                                  "resource:///modules/devtools/CmdCmd.jsm");
+                                  "resource:///modules/devtools/BuiltinCommands.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "PageErrorListener",
                                   "resource://gre/modules/devtools/WebConsoleUtils.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "PluralForm",
+                                  "resource://gre/modules/PluralForm.jsm");
+
 XPCOMUtils.defineLazyGetter(this, "prefBranch", function() {
-  var prefService = Components.classes["@mozilla.org/preferences-service;1"]
+  let prefService = Components.classes["@mozilla.org/preferences-service;1"]
           .getService(Components.interfaces.nsIPrefService);
   return prefService.getBranch(null)
           .QueryInterface(Components.interfaces.nsIPrefBranch2);
+});
+
+XPCOMUtils.defineLazyGetter(this, "toolboxStrings", function () {
+  return Services.strings.createBundle("chrome://browser/locale/devtools/toolbox.properties");
 });
 
 /**
@@ -51,12 +58,16 @@ this.CommandUtils = {
   /**
    * A toolbarSpec is an array of buttonSpecs. A buttonSpec is an array of
    * strings each of which is a GCLI command (including args if needed).
+   *
+   * Warning: this method uses the unload event of the window that owns the
+   * buttons that are of type checkbox. this means that we don't properly
+   * unregister event handlers until the window is destroyed.
    */
-  createButtons: function CU_createButtons(toolbarSpec, document, requisition) {
-    var reply = [];
+  createButtons: function CU_createButtons(toolbarSpec, target, document, requisition) {
+    let reply = [];
 
     toolbarSpec.forEach(function(buttonSpec) {
-      var button = document.createElement("toolbarbutton");
+      let button = document.createElement("toolbarbutton");
       reply.push(button);
 
       if (typeof buttonSpec == "string") {
@@ -66,7 +77,7 @@ this.CommandUtils = {
       requisition.update(buttonSpec.typed);
 
       // Ignore invalid commands
-      var command = requisition.commandAssignment.value;
+      let command = requisition.commandAssignment.value;
       if (command == null) {
         // TODO: Have a broken icon
         // button.icon = 'Broken';
@@ -80,6 +91,12 @@ this.CommandUtils = {
         }
         if (command.buttonClass != null) {
           button.className = command.buttonClass;
+        }
+        if (command.tooltipText != null) {
+          button.setAttribute("tooltiptext", command.tooltipText);
+        }
+        else if (command.description != null) {
+          button.setAttribute("tooltiptext", command.description);
         }
 
         button.addEventListener("click", function() {
@@ -95,15 +112,24 @@ this.CommandUtils = {
         }, false);
 
         // Allow the command button to be toggleable
-        /*
-        if (command.checkedState) {
-          button.setAttribute("type", "checkbox");
-          button.setAttribute("checked", command.checkedState.get() ? "true" : "false");
-          command.checkedState.on("change", function() {
-            button.checked = command.checkedState.get();
-          });
+        if (command.state) {
+          button.setAttribute("autocheck", false);
+          let onChange = function(event, eventTab) {
+            if (eventTab == target.tab) {
+              if (command.state.isChecked(target)) {
+                button.setAttribute("checked", true);
+              }
+              else if (button.hasAttribute("checked")) {
+                button.removeAttribute("checked");
+              }
+            }
+          };
+          command.state.onChange(target, onChange);
+          onChange(null, target.tab);
+          document.defaultView.addEventListener("unload", function() {
+            command.state.offChange(target, onChange);
+          }, false);
         }
-        */
       }
     });
 
@@ -144,9 +170,12 @@ this.DeveloperToolbar = function DeveloperToolbar(aChromeWindow, aToolbarElement
   this._pendingShowCallback = undefined;
   this._pendingHide = false;
   this._errorsCount = {};
+  this._warningsCount = {};
   this._errorListeners = {};
   this._errorCounterButton = this._doc
                              .getElementById("developer-toolbar-toolbox-button");
+  this._errorCounterButton._defaultTooltipText =
+    this._errorCounterButton.getAttribute("tooltiptext");
 
   try {
     CmdCommands.refreshAutoCommands(aChromeWindow);
@@ -186,7 +215,7 @@ Object.defineProperty(DeveloperToolbar.prototype, 'visible', {
   enumerable: true
 });
 
-var _gSequenceId = 0;
+let _gSequenceId = 0;
 
 /**
  * Getter for a unique ID.
@@ -233,8 +262,8 @@ DeveloperToolbar.prototype.focusToggle = function DT_focusToggle()
   if (this.visible) {
     // If we have focus then the active element is the HTML input contained
     // inside the xul input element
-    var active = this._chromeWindow.document.activeElement;
-    var position = this._input.compareDocumentPosition(active);
+    let active = this._chromeWindow.document.activeElement;
+    let position = this._input.compareDocumentPosition(active);
     if (position & Node.DOCUMENT_POSITION_CONTAINED_BY) {
       this.hide();
     }
@@ -378,6 +407,7 @@ DeveloperToolbar.prototype._initErrorsCount = function DT__initErrorsCount(aTab)
 
   this._errorListeners[tabId] = listener;
   this._errorsCount[tabId] = 0;
+  this._warningsCount[tabId] = 0;
 
   let messages = listener.getCachedMessages();
   messages.forEach(this._onPageError.bind(this, tabId));
@@ -396,7 +426,7 @@ DeveloperToolbar.prototype._initErrorsCount = function DT__initErrorsCount(aTab)
 DeveloperToolbar.prototype._stopErrorsCount = function DT__stopErrorsCount(aTab)
 {
   let tabId = aTab.linkedPanel;
-  if (!(tabId in this._errorsCount)) {
+  if (!(tabId in this._errorsCount) || !(tabId in this._warningsCount)) {
     this._updateErrorsCount();
     return;
   }
@@ -404,6 +434,7 @@ DeveloperToolbar.prototype._stopErrorsCount = function DT__stopErrorsCount(aTab)
   this._errorListeners[tabId].destroy();
   delete this._errorListeners[tabId];
   delete this._errorsCount[tabId];
+  delete this._warningsCount[tabId];
 
   this._updateErrorsCount();
 };
@@ -437,7 +468,12 @@ DeveloperToolbar.prototype.hide = function DT_hide()
  */
 DeveloperToolbar.prototype.destroy = function DT_destroy()
 {
+  if (this._lastState == NOTIFICATIONS.HIDE) {
+    return;
+  }
+
   this._chromeWindow.getBrowser().tabContainer.removeEventListener("TabSelect", this, false);
+  this._chromeWindow.getBrowser().tabContainer.removeEventListener("TabClose", this, false);
   this._chromeWindow.getBrowser().removeEventListener("load", this, true); 
   this._chromeWindow.getBrowser().removeEventListener("beforeunload", this, true);
 
@@ -464,6 +500,8 @@ DeveloperToolbar.prototype.destroy = function DT_destroy()
   delete this.outputPanel;
   delete this.tooltipPanel;
   */
+
+  this._lastState = NOTIFICATIONS.HIDE;
 };
 
 /**
@@ -524,13 +562,15 @@ DeveloperToolbar.prototype._onPageError =
 function DT__onPageError(aTabId, aPageError)
 {
   if (aPageError.category == "CSS Parser" ||
-      aPageError.category == "CSS Loader" ||
-      (aPageError.flags & aPageError.warningFlag) ||
-      (aPageError.flags & aPageError.strictFlag)) {
-    return; // just a CSS or JS warning
+      aPageError.category == "CSS Loader") {
+    return;
   }
-
-  this._errorsCount[aTabId]++;
+  if ((aPageError.flags & aPageError.warningFlag) ||
+      (aPageError.flags & aPageError.strictFlag)) {
+    this._warningsCount[aTabId]++;
+  } else {
+    this._errorsCount[aTabId]++;
+  }
   this._updateErrorsCount(aTabId);
 };
 
@@ -553,8 +593,9 @@ function DT__onPageBeforeUnload(aEvent)
   Array.prototype.some.call(tabs, function(aTab) {
     if (aTab.linkedBrowser.contentWindow === window) {
       let tabId = aTab.linkedPanel;
-      if (tabId in this._errorsCount) {
+      if (tabId in this._errorsCount || tabId in this._warningsCount) {
         this._errorsCount[tabId] = 0;
+        this._warningsCount[tabId] = 0;
         this._updateErrorsCount(tabId);
       }
       return true;
@@ -581,11 +622,26 @@ function DT__updateErrorsCount(aChangedTabId)
   }
 
   let errors = this._errorsCount[tabId];
-
+  let warnings = this._warningsCount[tabId];
+  let btn = this._errorCounterButton;
   if (errors) {
-    this._errorCounterButton.setAttribute("error-count", errors);
+    let errorsText = toolboxStrings
+                     .GetStringFromName("toolboxToggleButton.errors");
+    errorsText = PluralForm.get(errors, errorsText).replace("#1", errors);
+
+    let warningsText = toolboxStrings
+                       .GetStringFromName("toolboxToggleButton.warnings");
+    warningsText = PluralForm.get(warnings, warningsText).replace("#1", warnings);
+
+    let tooltiptext = toolboxStrings
+                      .formatStringFromName("toolboxToggleButton.tooltip",
+                                            [errorsText, warningsText], 2);
+
+    btn.setAttribute("error-count", errors);
+    btn.setAttribute("tooltiptext", tooltiptext);
   } else {
-    this._errorCounterButton.removeAttribute("error-count");
+    btn.removeAttribute("error-count");
+    btn.setAttribute("tooltiptext", btn._defaultTooltipText);
   }
 };
 
@@ -599,8 +655,9 @@ DeveloperToolbar.prototype.resetErrorsCount =
 function DT_resetErrorsCount(aTab)
 {
   let tabId = aTab.linkedPanel;
-  if (tabId in this._errorsCount) {
+  if (tabId in this._errorsCount || tabId in this._warningsCount) {
     this._errorsCount[tabId] = 0;
+    this._warningsCount[tabId] = 0;
     this._updateErrorsCount(tabId);
   }
 };

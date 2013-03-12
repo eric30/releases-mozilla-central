@@ -10,6 +10,37 @@ ifndef topsrcdir
 $(error topsrcdir was not set))
 endif
 
+# Integrate with mozbuild-generated make files. We first verify that no
+# variables provided by the automatically generated .mk files are
+# present. If they are, this is a violation of the separation of
+# responsibility between Makefile.in and mozbuild files.
+_MOZBUILD_EXTERNAL_VARIABLES := \
+  DIRS \
+  PARALLEL_DIRS \
+  TEST_DIRS \
+  TIERS \
+  TOOL_DIRS \
+  $(NULL)
+
+ifndef EXTERNALLY_MANAGED_MAKE_FILE
+$(foreach var,$(_MOZBUILD_EXTERNAL_VARIABLES),$(if $($(var)),\
+    $(error Variable $(var) is defined in Makefile. It should only be defined in moz.build files),\
+    ))
+
+# Import the automatically generated backend file. If this file doesn't exist,
+# the backend hasn't been properly configured. We want this to be a fatal
+# error, hence not using "-include".
+ifndef STANDALONE_MAKEFILE
+GLOBAL_DEPS += backend.mk
+include backend.mk
+endif
+endif
+
+ifdef TIERS
+DIRS += $(foreach tier,$(TIERS),$(tier_$(tier)_dirs))
+STATIC_DIRS += $(foreach tier,$(TIERS),$(tier_$(tier)_staticdirs))
+endif
+
 ifndef MOZILLA_DIR
 MOZILLA_DIR = $(topsrcdir)
 endif
@@ -95,6 +126,20 @@ ifndef INCLUDED_TESTS_MOCHITEST_MK #{
   include $(topsrcdir)/config/makefiles/mochitest.mk
 endif #}
 
+ifdef MOZ_ENABLE_GTEST
+ifdef GTEST_CPPSRCS
+CPPSRCS += $(GTEST_CPPSRCS)
+endif
+
+ifdef GTEST_CSRCS
+CSRCS += $(GTEST_CSRCS)
+endif
+
+ifdef GTEST_CMMSRCS
+CMMSRCS += $(GTEST_CMMSRCS)
+endif
+endif
+
 ifdef CPP_UNIT_TESTS
 
 # Compile the tests to $(DIST)/bin.  Make lots of niceties available by default
@@ -108,9 +153,35 @@ LIBS += $(XPCOM_GLUE_LDOPTS) $(NSPR_LIBS) $(MOZ_JS_LIBS) $(if $(JS_SHARED_LIBRAR
 check::
 	@$(PYTHON) $(topsrcdir)/testing/runcppunittests.py --xre-path=$(DIST)/bin --symbols-path=$(DIST)/crashreporter-symbols $(subst .cpp,$(BIN_SUFFIX),$(CPP_UNIT_TESTS))
 
+cppunittests-remote: DM_TRANS?=adb
+cppunittests-remote:
+	@if [ "${TEST_DEVICE}" != "" -o "$(DM_TRANS)" = "adb" ]; then \
+		$(PYTHON) -u $(topsrcdir)/testing/remotecppunittests.py \
+			--xre-path=$(DEPTH)/dist/bin \
+			--localLib=$(DEPTH)/dist/$(MOZ_APP_NAME) \
+			--dm_trans=$(DM_TRANS) \
+			--deviceIP=${TEST_DEVICE} \
+			$(subst .cpp,$(BIN_SUFFIX),$(CPP_UNIT_TESTS)) $(EXTRA_TEST_ARGS); \
+	else \
+		echo "please prepare your host with environment variables for TEST_DEVICE"; \
+	fi
+
 endif # CPP_UNIT_TESTS
 
 .PHONY: check
+
+ifdef PYTHON_UNIT_TESTS
+
+RUN_PYTHON_UNIT_TESTS := $(addprefix run-,$(PYTHON_UNIT_TESTS))
+
+.PHONY: $(RUN_PYTHON_UNIT_TESTS)
+
+check:: $(RUN_PYTHON_UNIT_TESTS)
+
+$(RUN_PYTHON_UNIT_TESTS): run-%: %
+	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) $<
+
+endif # PYTHON_UNIT_TESTS
 
 endif # ENABLE_TESTS
 
@@ -1074,6 +1145,10 @@ else
 normalizepath = $(1)
 endif
 
+ifneq (,$(value JAVAFILES)$(value RESFILES))
+  include $(topsrcdir)/config/makefiles/java-build.mk
+endif
+
 _srcdir = $(call normalizepath,$(srcdir))
 ifdef JAVA_SOURCEPATH
 SP = $(subst $(SPACE),$(SEP),$(call normalizepath,$(strip $(JAVA_SOURCEPATH))))
@@ -1103,8 +1178,28 @@ $(JAVA_LIBRARY): $(addprefix $(_JAVA_DIR)/,$(JAVA_SRCS:.java=.class)) $(GLOBAL_D
 GARBAGE_DIRS += $(_JAVA_DIR)
 
 ###############################################################################
-# Update Makefiles
+# Update Files Managed by Build Backend
 ###############################################################################
+
+ifdef MOZBUILD_DERIVED
+
+# If this Makefile is derived from moz.build files, substitution for all .in
+# files is handled by SUBSTITUTE_FILES. This includes Makefile.in.
+ifneq ($(SUBSTITUTE_FILES),,)
+$(SUBSTITUTE_FILES): % : $(srcdir)/%.in $(DEPTH)/config/autoconf.mk
+	@$(PYTHON) $(DEPTH)/config.status -n --file=$@
+	@$(TOUCH) $@
+endif
+
+# Detect when the backend.mk needs rebuilt. This will cause a full scan and
+# rebuild. While relatively expensive, it should only occur once per recursion.
+ifneq ($(BACKEND_INPUT_FILES),,)
+backend.mk: $(BACKEND_INPUT_FILES)
+	@$(PYTHON) $(DEPTH)/config.status -n
+	@$(TOUCH) $@
+endif
+
+endif # MOZBUILD_DERIVED
 
 ifndef NO_MAKEFILE_RULE
 Makefile: Makefile.in
@@ -1177,12 +1272,18 @@ ifneq (,$(DIST_SUBDIR)$(XPI_NAME)$(LIBXUL_SDK))
 PREF_DIR = defaults/preferences
 endif
 
-ifneq ($(PREF_JS_EXPORTS),)
 # on win32, pref files need CRLF line endings... see bug 206029
 ifeq (WINNT,$(OS_ARCH))
-PREF_PPFLAGS = --line-endings=crlf
+PREF_PPFLAGS += --line-endings=crlf
 endif
 
+# Set a flag that can be used in pref files to disable features if
+# we are not building for Aurora or Nightly.
+ifeq (,$(findstring a,$(GRE_MILESTONE)))
+PREF_PPFLAGS += -DRELEASE_BUILD
+endif
+
+ifneq ($(PREF_JS_EXPORTS),)
 ifndef NO_DIST_INSTALL
 PREF_JS_EXPORTS_PATH := $(FINAL_TARGET)/$(PREF_DIR)
 PREF_JS_EXPORTS_FLAGS := $(PREF_PPFLAGS)
@@ -1405,11 +1506,30 @@ $(FINAL_TARGET)/chrome: $(call mkdir_deps,$(FINAL_TARGET)/chrome)
 
 ifneq (,$(wildcard $(JAR_MANIFEST)))
 ifndef NO_DIST_INSTALL
+
+ifdef XPI_NAME
+ifdef XPI_ROOT_APPID
+# For add-on packaging we may specify that an application
+# sub-dir should be added to the root chrome manifest with
+# a specific application id.
+MAKE_JARS_FLAGS += --root-manifest-entry-appid="$(XPI_ROOT_APPID)"
+endif
+
+# if DIST_SUBDIR is defined but XPI_ROOT_APPID is not there's
+# no way langpacks will get packaged right, so error out.
+ifneq (,$(DIST_SUBDIR))
+ifndef XPI_ROOT_APPID
+$(error XPI_ROOT_APPID is not defined - langpacks will break.)
+endif
+endif
+endif
+
 libs realchrome:: $(CHROME_DEPS) $(FINAL_TARGET)/chrome
 	$(PYTHON) $(MOZILLA_DIR)/config/JarMaker.py \
 	  $(QUIET) -j $(FINAL_TARGET)/chrome \
 	  $(MAKE_JARS_FLAGS) $(XULPPFLAGS) $(DEFINES) $(ACDEFINES) \
 	  $(JAR_MANIFEST)
+
 endif
 endif
 
@@ -1466,9 +1586,9 @@ $(error XPI_NAME must be set for INSTALL_EXTENSION_ID)
 endif
 
 libs::
-	$(RM) -r "$(DIST)/bin/extensions/$(INSTALL_EXTENSION_ID)"
-	$(NSINSTALL) -D "$(DIST)/bin/extensions/$(INSTALL_EXTENSION_ID)"
-	cd $(FINAL_TARGET) && tar $(TAR_CREATE_FLAGS) - . | (cd "../../bin/extensions/$(INSTALL_EXTENSION_ID)" && tar -xf -)
+	$(RM) -r "$(DIST)/bin$(DIST_SUBDIR:%=/%)/extensions/$(INSTALL_EXTENSION_ID)"
+	$(NSINSTALL) -D "$(DIST)/bin$(DIST_SUBDIR:%=/%)/extensions/$(INSTALL_EXTENSION_ID)"
+	$(call copy_dir,$(FINAL_TARGET),$(DIST)/bin$(DIST_SUBDIR:%=/%)/extensions/$(INSTALL_EXTENSION_ID))
 
 endif
 
@@ -1533,18 +1653,20 @@ endif
 
 # If we're using binary nsinstall and it's not built yet, fallback to python nsinstall.
 ifneq (,$(filter $(CONFIG_TOOLS)/nsinstall$(HOST_BIN_SUFFIX),$(install_cmd)))
-nsinstall_is_usable = $(if $(wildcard $(CONFIG_TOOLS)/nsinstall$(HOST_BIN_SUFFIX)),$(eval nsinstall_is_usable := yes)yes)
+ifeq (,$(wildcard $(CONFIG_TOOLS)/nsinstall$(HOST_BIN_SUFFIX)))
+nsinstall_is_usable = $(if $(wildcard $(CONFIG_TOOLS)/nsinstall$(HOST_BIN_SUFFIX)),yes)
 
 define install_cmd_override
 $(1): install_cmd = $$(if $$(nsinstall_is_usable),$$(INSTALL),$$(NSINSTALL_PY)) $$(1)
 endef
 endif
+endif
 
 define install_file_template
 $(or $(3),libs):: $(2)/$(notdir $(1))
 $(call install_cmd_override,$(2)/$(notdir $(1)))
-$(2)/$(notdir $(1)): $(1) $$(call mkdir_deps,$(2))
-	$$(call install_cmd,$(4) $$< $${@D})
+$(2)/$(notdir $(1)): $(1)
+	$$(call install_cmd,$(4) "$$<" "$${@D}")
 endef
 $(foreach category,$(INSTALL_TARGETS),\
   $(if $($(category)_DEST),,$(error Missing $(category)_DEST))\
@@ -1590,9 +1712,9 @@ $(foreach category,$(INSTALL_TARGETS),\
 # $(call preprocess_file_template, source_file, output_file,
 #                                  makefile_target, extra_flags)
 define preprocess_file_template
-$(2): $(1) $$(call mkdir_deps,$(dir $(2))) $$(GLOBAL_DEPS)
-	$$(RM) $$@
-	$$(PYTHON) $$(topsrcdir)/config/Preprocessor.py $(4) $$(DEFINES) $$(ACDEFINES) $$(XULPPFLAGS) $$< > $$@
+$(2): $(1) $$(GLOBAL_DEPS)
+	$$(RM) "$$@"
+	$$(PYTHON) $$(topsrcdir)/config/Preprocessor.py $(4) $$(DEFINES) $$(ACDEFINES) $$(XULPPFLAGS) "$$<" -o "$$@"
 $(3):: $(2)
 endef
 
@@ -1684,8 +1806,17 @@ CHECK_FROZEN_VARIABLES = $(foreach var,$(FREEZE_VARIABLES), \
 libs export::
 	$(CHECK_FROZEN_VARIABLES)
 
-default all::
-	if test -d $(DIST)/bin ; then touch $(DIST)/bin/.purgecaches ; fi
+PURGECACHES_DIRS ?= $(DIST)/bin
+ifdef MOZ_WEBAPP_RUNTIME
+PURGECACHES_DIRS += $(DIST)/bin/webapprt
+endif
+
+PURGECACHES_FILES = $(addsuffix /.purgecaches,$(PURGECACHES_DIRS))
+
+default all:: $(PURGECACHES_FILES)
+
+$(PURGECACHES_FILES):
+	if test -d $(@D) ; then touch $@ ; fi
 
 .DEFAULT_GOAL ?= default
 

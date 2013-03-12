@@ -115,6 +115,9 @@ const DB_MIGRATE_METADATA= ["installDate", "userDisabled", "softDisabled",
 const STATIC_BLOCKLIST_PATTERNS = [
   { creator: "Mozilla Corp.",
     level: Ci.nsIBlocklistService.STATE_BLOCKED,
+    blockID: "i162" },
+  { creator: "Mozilla.org",
+    level: Ci.nsIBlocklistService.STATE_BLOCKED,
     blockID: "i162" }
 ];
 
@@ -887,7 +890,7 @@ function loadManifestFromDir(aDir) {
     let size = 0;
     let entries = aFile.directoryEntries.QueryInterface(Ci.nsIDirectoryEnumerator);
     let entry;
-    while (entry = entries.nextFile)
+    while ((entry = entries.nextFile))
       size += getFileSize(entry);
     entries.close();
     return size;
@@ -1312,7 +1315,7 @@ function recursiveLastModifiedTime(aFile) {
     let entries = aFile.directoryEntries.QueryInterface(Ci.nsIDirectoryEnumerator);
     let entry, time;
     let maxTime = aFile.lastModifiedTime;
-    while (entry = entries.nextFile) {
+    while ((entry = entries.nextFile)) {
       time = recursiveLastModifiedTime(entry);
       maxTime = Math.max(time, maxTime);
     }
@@ -1500,6 +1503,8 @@ var XPIProvider = {
   enabledAddons: null,
   // An array of add-on IDs of add-ons that were inactive during startup
   inactiveAddonIDs: [],
+  // Count of unpacked add-ons
+  unpackedAddons: 0,
 
   /**
    * Starts the XPI provider initializes the install locations and prefs.
@@ -1522,6 +1527,8 @@ var XPIProvider = {
     this.installs = [];
     this.installLocations = [];
     this.installLocationsByName = {};
+
+    AddonManagerPrivate.recordTimestamp("XPI_startup_begin");
 
     function addDirectoryInstallLocation(aName, aKey, aPaths, aScope, aLocked) {
       try {
@@ -1660,6 +1667,7 @@ var XPIProvider = {
       this.addAddonsToCrashReporter();
     }
 
+    AddonManagerPrivate.recordTimestamp("XPI_bootstrap_addons_begin");
     for (let id in this.bootstrappedAddons) {
       let file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
       file.persistentDescriptor = this.bootstrappedAddons[id].descriptor;
@@ -1667,6 +1675,7 @@ var XPIProvider = {
                                this.bootstrappedAddons[id].type, file,
                                "startup", BOOTSTRAP_REASONS.APP_STARTUP);
     }
+    AddonManagerPrivate.recordTimestamp("XPI_bootstrap_addons_end");
 
     // Let these shutdown a little earlier when they still have access to most
     // of XPCOM
@@ -1684,6 +1693,8 @@ var XPIProvider = {
         Services.obs.removeObserver(this, "quit-application-granted");
       }
     }, "quit-application-granted", false);
+
+    AddonManagerPrivate.recordTimestamp("XPI_startup_end");
 
     this.extensionsActive = true;
   },
@@ -1825,7 +1836,15 @@ var XPIProvider = {
         descriptor: file.persistentDescriptor,
         mtime: recursiveLastModifiedTime(file)
       };
-    });
+      try {
+        // get the install.rdf update time, if any
+        file.append(FILE_INSTALL_MANIFEST);
+        let rdfTime = file.lastModifiedTime;
+        addonStates[id].rdfTime = rdfTime;
+        this.unpackedAddons += 1;
+      }
+      catch (e) { }
+    }, this);
 
     return addonStates;
   },
@@ -1841,6 +1860,7 @@ var XPIProvider = {
    */
   getInstallLocationStates: function XPI_getInstallLocationStates() {
     let states = [];
+    this.unpackedAddons = 0;
     this.installLocations.forEach(function(aLocation) {
       let addons = aLocation.addonLocations;
       if (addons.length == 0)
@@ -2171,7 +2191,7 @@ var XPIProvider = {
     let entries = distroDir.directoryEntries
                            .QueryInterface(Ci.nsIDirectoryEnumerator);
     let entry;
-    while (entry = entries.nextFile) {
+    while ((entry = entries.nextFile)) {
 
       let id = entry.leafName;
 
@@ -2805,6 +2825,11 @@ var XPIProvider = {
     let changed = false;
     let knownLocations = XPIDatabase.getInstallLocations();
 
+    // Gather stats for addon telemetry
+    let modifiedUnpacked = 0;
+    let modifiedExManifest = 0;
+    let modifiedXPI = 0;
+
     // The install locations are iterated in reverse order of priority so when
     // there are multiple add-ons installed with the same ID the one that
     // should be visible is the first one encountered.
@@ -2839,6 +2864,17 @@ var XPIProvider = {
             // Remember add-ons that were inactive during startup
             if (aOldAddon.visible && !aOldAddon.active)
               XPIProvider.inactiveAddonIDs.push(aOldAddon.id);
+
+            // Check if the add-on is unpacked, and has had other files changed
+            // on disk without the install.rdf manifest being changed
+            if ((addonState.rdfTime) && (aOldAddon.updateDate != addonState.mtime)) {
+              modifiedUnpacked += 1;
+              if (aOldAddon.updateDate >= addonState.rdfTime)
+                modifiedExManifest += 1;
+            }
+            else if (aOldAddon.updateDate != addonState.mtime) {
+              modifiedXPI += 1;
+            }
 
             // The add-on has changed if the modification time has changed, or
             // we have an updated manifest for it. Also reload the metadata for
@@ -2890,6 +2926,12 @@ var XPIProvider = {
         changed = removeMetadata(aLocation, aOldAddon) || changed;
       }, this);
     }, this);
+
+    // Tell Telemetry what we found
+    AddonManagerPrivate.recordSimpleMeasure("modifiedUnpacked", modifiedUnpacked);
+    if (modifiedUnpacked > 0)
+      AddonManagerPrivate.recordSimpleMeasure("modifiedExceptInstallRDF", modifiedExManifest);
+    AddonManagerPrivate.recordSimpleMeasure("modifiedXPI", modifiedXPI);
 
     // Cache the new install location states
     let cache = JSON.stringify(this.getInstallLocationStates());
@@ -3046,6 +3088,7 @@ var XPIProvider = {
           ERROR("Error processing file changes", e);
         }
       }
+      AddonManagerPrivate.recordSimpleMeasure("installedUnpacked", this.unpackedAddons);
 
       if (aAppChanged) {
         // When upgrading the app and using a custom skin make sure it is still
@@ -3623,10 +3666,11 @@ var XPIProvider = {
    *         The nsIFile for the add-on
    * @param  aVersion
    *         The add-on's version
+   * @param  aType
+   *         The type for the add-on
    * @return a JavaScript scope
    */
   loadBootstrapScope: function XPI_loadBootstrapScope(aId, aFile, aVersion, aType) {
-    LOG("Loading bootstrap scope from " + aFile.path);
     // Mark the add-on as active for the crash reporter before loading
     this.bootstrappedAddons[aId] = {
       version: aVersion,
@@ -3634,6 +3678,14 @@ var XPIProvider = {
       descriptor: aFile.persistentDescriptor
     };
     this.addAddonsToCrashReporter();
+
+    // Locales only contain chrome and can't have bootstrap scripts
+    if (aType == "locale") {
+      this.bootstrapScopes[aId] = null;
+      return;
+    }
+
+    LOG("Loading bootstrap scope from " + aFile.path);
 
     let principal = Cc["@mozilla.org/systemprincipal;1"].
                     createInstance(Ci.nsIPrincipal);
@@ -3721,14 +3773,13 @@ var XPIProvider = {
       Components.manager.addBootstrappedManifestLocation(aFile);
 
     try {
-      // Don't call bootstrap.js methods for language packs,
-      // they only contain chrome.
-      if (aType == "locale")
-         return;
-
       // Load the scope if it hasn't already been loaded
       if (!(aId in this.bootstrapScopes))
         this.loadBootstrapScope(aId, aFile, aVersion, aType);
+
+      // Nothing to call for locales
+      if (aType == "locale")
+        return;
 
       if (!(aMethod in this.bootstrapScopes[aId])) {
         WARN("Add-on " + aId + " is missing bootstrap method " + aMethod);

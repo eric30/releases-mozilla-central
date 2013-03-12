@@ -8,9 +8,9 @@
 
 #include "nsCSSStyleSheet.h"
 
-#include "nsCRT.h"
 #include "nsIAtom.h"
 #include "nsCSSRuleProcessor.h"
+#include "mozilla/dom/Element.h"
 #include "mozilla/css/NameSpaceRule.h"
 #include "mozilla/css/GroupRule.h"
 #include "mozilla/css/ImportRule.h"
@@ -34,13 +34,13 @@
 #include "nsContentUtils.h"
 #include "nsIScriptSecurityManager.h"
 #include "mozAutoDocUpdate.h"
-#include "mozilla/css/Declaration.h"
 #include "nsRuleNode.h"
 #include "nsMediaFeatures.h"
 #include "nsDOMClassInfoID.h"
 #include "mozilla/Likely.h"
 
 using namespace mozilla;
+using namespace mozilla::dom;
 
 
 // -------------------------------
@@ -1033,6 +1033,7 @@ nsCSSStyleSheet::nsCSSStyleSheet(CORSMode aCORSMode)
     mOwningNode(nullptr),
     mDisabled(false),
     mDirty(false),
+    mScopeElement(nullptr),
     mRuleProcessors(nullptr)
 {
 
@@ -1051,6 +1052,7 @@ nsCSSStyleSheet::nsCSSStyleSheet(const nsCSSStyleSheet& aCopy,
     mOwningNode(aOwningNodeToUse),
     mDisabled(aCopy.mDisabled),
     mDirty(aCopy.mDirty),
+    mScopeElement(nullptr),
     mInner(aCopy.mInner),
     mRuleProcessors(nullptr)
 {
@@ -1188,7 +1190,6 @@ NS_INTERFACE_MAP_END
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsCSSStyleSheet)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsCSSStyleSheet)
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsCSSStyleSheet)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsCSSStyleSheet)
   tmp->DropMedia();
   // We do not unlink mNext; our parent will handle that.  If we
@@ -1197,12 +1198,14 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsCSSStyleSheet)
   // unlinked before it does.
   tmp->DropRuleCollection();
   tmp->UnlinkInner();
+  tmp->mScopeElement = nullptr;
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsCSSStyleSheet)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMedia)
   // We do not traverse mNext; our parent will handle that.  See
   // comments in Unlink for why.
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRuleCollection)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mScopeElement)
   tmp->TraverseInner(cb);
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
@@ -1895,11 +1898,6 @@ nsCSSStyleSheet::InsertRuleInternal(const nsAString& aRule,
     return NS_ERROR_DOM_INVALID_ACCESS_ERR;
   }
 
-  if (aRule.IsEmpty()) {
-    // Nothing to do here
-    return NS_OK;
-  }
-  
   nsresult result;
   result = WillDirty();
   if (NS_FAILED(result))
@@ -1923,20 +1921,15 @@ nsCSSStyleSheet::InsertRuleInternal(const nsAString& aRule,
 
   mozAutoDocUpdate updateBatch(mDocument, UPDATE_STYLE, true);
 
-  nsCOMArray<css::Rule> rules;
+  nsRefPtr<css::Rule> rule;
   result = css.ParseRule(aRule, mInner->mSheetURI, mInner->mBaseURI,
-                         mInner->mPrincipal, rules);
+                         mInner->mPrincipal, getter_AddRefs(rule));
   if (NS_FAILED(result))
     return result;
 
-  int32_t rulecount = rules.Count();
-  if (rulecount == 0) {
-    // Since we know aRule was not an empty string, just throw
-    return NS_ERROR_DOM_SYNTAX_ERR;
-  }
-  
-  // Hierarchy checking.  Just check the first and last rule in the list.
-  
+  // Hierarchy checking.
+  int32_t newType = rule->GetType();
+
   // check that we're not inserting before a charset rule
   css::Rule* nextRule = mInner->mOrderedRules.SafeObjectAt(aIndex);
   if (nextRule) {
@@ -1945,74 +1938,63 @@ nsCSSStyleSheet::InsertRuleInternal(const nsAString& aRule,
       return NS_ERROR_DOM_HIERARCHY_REQUEST_ERR;
     }
 
-    // check last rule in list
-    css::Rule* lastRule = rules.ObjectAt(rulecount - 1);
-    int32_t lastType = lastRule->GetType();
-
     if (nextType == css::Rule::IMPORT_RULE &&
-        lastType != css::Rule::CHARSET_RULE &&
-        lastType != css::Rule::IMPORT_RULE) {
+        newType != css::Rule::CHARSET_RULE &&
+        newType != css::Rule::IMPORT_RULE) {
       return NS_ERROR_DOM_HIERARCHY_REQUEST_ERR;
     }
-    
+
     if (nextType == css::Rule::NAMESPACE_RULE &&
-        lastType != css::Rule::CHARSET_RULE &&
-        lastType != css::Rule::IMPORT_RULE &&
-        lastType != css::Rule::NAMESPACE_RULE) {
-      return NS_ERROR_DOM_HIERARCHY_REQUEST_ERR;
-    } 
-  }
-  
-  // check first rule in list
-  css::Rule* firstRule = rules.ObjectAt(0);
-  int32_t firstType = firstRule->GetType();
-  if (aIndex != 0) {
-    if (firstType == css::Rule::CHARSET_RULE) { // no inserting charset at nonzero position
+        newType != css::Rule::CHARSET_RULE &&
+        newType != css::Rule::IMPORT_RULE &&
+        newType != css::Rule::NAMESPACE_RULE) {
       return NS_ERROR_DOM_HIERARCHY_REQUEST_ERR;
     }
-  
+  }
+
+  if (aIndex != 0) {
+    // no inserting charset at nonzero position
+    if (newType == css::Rule::CHARSET_RULE) {
+      return NS_ERROR_DOM_HIERARCHY_REQUEST_ERR;
+    }
+
     css::Rule* prevRule = mInner->mOrderedRules.SafeObjectAt(aIndex - 1);
     int32_t prevType = prevRule->GetType();
 
-    if (firstType == css::Rule::IMPORT_RULE &&
+    if (newType == css::Rule::IMPORT_RULE &&
         prevType != css::Rule::CHARSET_RULE &&
         prevType != css::Rule::IMPORT_RULE) {
       return NS_ERROR_DOM_HIERARCHY_REQUEST_ERR;
     }
 
-    if (firstType == css::Rule::NAMESPACE_RULE &&
+    if (newType == css::Rule::NAMESPACE_RULE &&
         prevType != css::Rule::CHARSET_RULE &&
         prevType != css::Rule::IMPORT_RULE &&
         prevType != css::Rule::NAMESPACE_RULE) {
       return NS_ERROR_DOM_HIERARCHY_REQUEST_ERR;
     }
   }
-  
-  bool insertResult = mInner->mOrderedRules.InsertObjectsAt(rules, aIndex);
+
+  bool insertResult = mInner->mOrderedRules.InsertObjectAt(rule, aIndex);
   NS_ENSURE_TRUE(insertResult, NS_ERROR_OUT_OF_MEMORY);
   DidDirty();
 
-  for (int32_t counter = 0; counter < rulecount; counter++) {
-    css::Rule* cssRule = rules.ObjectAt(counter);
-    cssRule->SetStyleSheet(this);
+  rule->SetStyleSheet(this);
 
-    int32_t type = cssRule->GetType();
-    if (type == css::Rule::NAMESPACE_RULE) {
-      // XXXbz does this screw up when inserting a namespace rule before
-      // another namespace rule that binds the same prefix to a different
-      // namespace?
-      result = RegisterNamespaceRule(cssRule);
-      NS_ENSURE_SUCCESS(result, result);
-    }
+  int32_t type = rule->GetType();
+  if (type == css::Rule::NAMESPACE_RULE) {
+    // XXXbz does this screw up when inserting a namespace rule before
+    // another namespace rule that binds the same prefix to a different
+    // namespace?
+    result = RegisterNamespaceRule(rule);
+    NS_ENSURE_SUCCESS(result, result);
+  }
 
-    if (type == css::Rule::IMPORT_RULE && RuleHasPendingChildSheet(cssRule)) {
-      // We don't notify immediately for @import rules, but rather when
-      // the sheet the rule is importing is loaded (see StyleSheetLoaded)
-      continue;
-    }
-    if (mDocument) {
-      mDocument->StyleRuleAdded(this, cssRule);
-    }
+  // We don't notify immediately for @import rules, but rather when
+  // the sheet the rule is importing is loaded (see StyleSheetLoaded)
+  if ((type != css::Rule::IMPORT_RULE || !RuleHasPendingChildSheet(rule)) &&
+      mDocument) {
+    mDocument->StyleRuleAdded(this, rule);
   }
 
   *aReturn = aIndex;
@@ -2107,11 +2089,6 @@ nsCSSStyleSheet::InsertRuleIntoGroup(const nsAString & aRule,
     return NS_ERROR_INVALID_ARG;
   }
 
-  if (aRule.IsEmpty()) {
-    // Nothing to do here
-    return NS_OK;
-  }
-
   // Hold strong ref to the CSSLoader in case the document update
   // kills the document
   nsRefPtr<css::Loader> loader;
@@ -2128,51 +2105,38 @@ nsCSSStyleSheet::InsertRuleIntoGroup(const nsAString & aRule,
   result = WillDirty();
   NS_ENSURE_SUCCESS(result, result);
 
-  nsCOMArray<css::Rule> rules;
+  nsRefPtr<css::Rule> rule;
   result = css.ParseRule(aRule, mInner->mSheetURI, mInner->mBaseURI,
-                         mInner->mPrincipal, rules);
-  NS_ENSURE_SUCCESS(result, result);
+                         mInner->mPrincipal, getter_AddRefs(rule));
+  if (NS_FAILED(result))
+    return result;
 
-  int32_t rulecount = rules.Count();
-  if (rulecount == 0) {
-    // Since we know aRule was not an empty string, just throw
-    return NS_ERROR_DOM_SYNTAX_ERR;
+  switch (rule->GetType()) {
+    case css::Rule::STYLE_RULE:
+    case css::Rule::MEDIA_RULE:
+    case css::Rule::FONT_FACE_RULE:
+    case css::Rule::PAGE_RULE:
+    case css::Rule::KEYFRAMES_RULE:
+    case css::Rule::DOCUMENT_RULE:
+    case css::Rule::SUPPORTS_RULE:
+      // these types are OK to insert into a group
+      break;
+    case css::Rule::CHARSET_RULE:
+    case css::Rule::IMPORT_RULE:
+    case css::Rule::NAMESPACE_RULE:
+      // these aren't
+      return NS_ERROR_DOM_HIERARCHY_REQUEST_ERR;
+    default:
+      NS_NOTREACHED("unexpected rule type");
+      return NS_ERROR_DOM_HIERARCHY_REQUEST_ERR;
   }
 
-  int32_t counter;
-  css::Rule* rule;
-  for (counter = 0; counter < rulecount; counter++) {
-    rule = rules.ObjectAt(counter);
-    switch (rule->GetType()) {
-      case css::Rule::STYLE_RULE:
-      case css::Rule::MEDIA_RULE:
-      case css::Rule::FONT_FACE_RULE:
-      case css::Rule::PAGE_RULE:
-      case css::Rule::KEYFRAMES_RULE:
-      case css::Rule::DOCUMENT_RULE:
-      case css::Rule::SUPPORTS_RULE:
-        // these types are OK to insert into a group
-        break;
-      case css::Rule::CHARSET_RULE:
-      case css::Rule::IMPORT_RULE:
-      case css::Rule::NAMESPACE_RULE:
-        // these aren't
-        return NS_ERROR_DOM_HIERARCHY_REQUEST_ERR;
-      default:
-        NS_NOTREACHED("unexpected rule type");
-        return NS_ERROR_DOM_HIERARCHY_REQUEST_ERR;
-    }
-  }
-  
-  result = aGroup->InsertStyleRulesAt(aIndex, rules);
+  result = aGroup->InsertStyleRuleAt(aIndex, rule);
   NS_ENSURE_SUCCESS(result, result);
   DidDirty();
-  for (counter = 0; counter < rulecount; counter++) {
-    rule = rules.ObjectAt(counter);
-  
-    if (mDocument) {
-      mDocument->StyleRuleAdded(this, rule);
-    }
+
+  if (mDocument) {
+    mDocument->StyleRuleAdded(this, rule);
   }
 
   *_retval = aIndex;

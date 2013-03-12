@@ -25,15 +25,19 @@ namespace ion {
 class OutOfLineCode;
 class CodeGenerator;
 class MacroAssembler;
+class IonCache;
+class OutOfLineParallelAbort;
 
 template <class ArgSeq, class StoreOutputTo>
 class OutOfLineCallVM;
+
 class OutOfLineTruncateSlow;
 
 class CodeGeneratorShared : public LInstructionVisitor
 {
     js::Vector<OutOfLineCode *, 0, SystemAllocPolicy> outOfLineCode_;
     OutOfLineCode *oolIns;
+    OutOfLineParallelAbort *oolParallelAbort_;
 
   public:
     MacroAssembler masm;
@@ -58,11 +62,11 @@ class CodeGeneratorShared : public LInstructionVisitor
     // Mapping from bailout table ID to an offset in the snapshot buffer.
     js::Vector<SnapshotOffset, 0, SystemAllocPolicy> bailouts_;
 
-    // Vector of information about generated polymorphic inline caches.
-    js::Vector<IonCache, 0, SystemAllocPolicy> cacheList_;
+    // Allocated data space needed at runtime.
+    js::Vector<uint8_t, 0, SystemAllocPolicy> runtimeData_;
 
-    // Vector of all patchable write pre-barrier offsets.
-    js::Vector<CodeOffsetLabel, 0, SystemAllocPolicy> barrierOffsets_;
+    // Vector of information about generated polymorphic inline caches.
+    js::Vector<uint32_t, 0, SystemAllocPolicy> cacheList_;
 
     // List of stack slots that have been pushed as arguments to an MCall.
     js::Vector<uint32_t, 0, SystemAllocPolicy> pushedArgumentSlots_;
@@ -155,15 +159,36 @@ class CodeGeneratorShared : public LInstructionVisitor
     }
 
   protected:
-
-    size_t allocateCache(const IonCache &cache) {
+    // Ensure the cache is an IonCache while expecting the size of the derived
+    // class.
+    size_t allocateCache(const IonCache &, size_t size) {
+        size_t dataOffset = allocateData(size);
         size_t index = cacheList_.length();
-        masm.reportMemory(cacheList_.append(cache));
+        masm.propagateOOM(cacheList_.append(dataOffset));
         return index;
     }
 
-    void addPreBarrierOffset(CodeOffsetLabel offset) {
-        masm.reportMemory(barrierOffsets_.append(offset));
+    // This is needed by addCache to update the cache with the jump
+    // informations provided by the out-of-line path.
+    IonCache *getCache(size_t index) {
+        return reinterpret_cast<IonCache *>(&runtimeData_[cacheList_[index]]);
+    }
+
+  protected:
+
+    size_t allocateData(size_t size) {
+        JS_ASSERT(size % sizeof(void *) == 0);
+        size_t dataOffset = runtimeData_.length();
+        masm.propagateOOM(runtimeData_.appendN(0, size));
+        return dataOffset;
+    }
+
+    template <typename T>
+    inline size_t allocateCache(const T &cache) {
+        size_t index = allocateCache(cache, sizeof(mozilla::AlignedStorage2<T>));
+        // Use the copy constructor on the allocated space.
+        new (&runtimeData_[cacheList_.back()]) T(cache);
+        return index;
     }
 
   protected:
@@ -209,6 +234,15 @@ class CodeGeneratorShared : public LInstructionVisitor
     }
 
   public:
+    // Save and restore all volatile registers to/from the stack, excluding the
+    // specified register(s), before a function call made using callWithABI and
+    // after storing the function call's return value to an output register.
+    // (The only registers that don't need to be saved/restored are 1) the
+    // temporary register used to store the return value of the function call,
+    // if there is one [otherwise that stored value would be overwritten]; and
+    // 2) temporary registers whose values aren't needed in the rest of the LIR
+    // instruction [this is purely an optimization].  All other volatiles must
+    // be saved and restored in case future LIR instructions need those values.)
     void saveVolatile(Register output) {
         RegisterSet regs = RegisterSet::Volatile();
         regs.maybeTake(output);
@@ -273,12 +307,11 @@ class CodeGeneratorShared : public LInstructionVisitor
     inline OutOfLineCode *oolCallVM(const VMFunction &fun, LInstruction *ins, const ArgSeq &args,
                                     const StoreOutputTo &out);
 
+    bool addCache(LInstruction *lir, size_t cacheIndex);
+
   protected:
     bool addOutOfLineCode(OutOfLineCode *code);
     bool generateOutOfLineCode();
-
-    void linkAbsoluteLabels() {
-    }
 
   private:
     void generateInvalidateEpilogue();
@@ -291,6 +324,15 @@ class CodeGeneratorShared : public LInstructionVisitor
     bool visitOutOfLineCallVM(OutOfLineCallVM<ArgSeq, StoreOutputTo> *ool);
 
     bool visitOutOfLineTruncateSlow(OutOfLineTruncateSlow *ool);
+
+  public:
+    // When compiling parallel code, all bailouts just abort funnel to
+    // this same point and hence abort execution altogether:
+    virtual bool visitOutOfLineParallelAbort(OutOfLineParallelAbort *ool) = 0;
+    bool callTraceLIR(uint32_t blockIndex, LInstruction *lir, const char *bailoutName = NULL);
+
+  protected:
+    bool ensureOutOfLineParallelAbort(Label **result);
 };
 
 // Wrapper around Label, on the heap, to avoid a bogus assert with OOM.
@@ -333,14 +375,14 @@ class OutOfLineCode : public TempObject
     uint32_t framePushed() const {
         return framePushed_;
     }
-    void setSource(JSScript *script, jsbytecode *pc) {
+    void setSource(RawScript script, jsbytecode *pc) {
         script_ = script;
         pc_ = pc;
     }
     jsbytecode *pc() {
         return pc_;
     }
-    JSScript *script() {
+    RawScript script() {
         return script_;
     }
 };
@@ -360,7 +402,7 @@ class OutOfLineCodeBase : public OutOfLineCode
 
 // ArgSeq store arguments for OutOfLineCallVM.
 //
-// OutOfLineCallVM are created with "oolCallVM" function. The last argument of
+// OutOfLineCallVM are created with "oolCallVM" function. The third argument of
 // this function is an instance of a class which provides a "generate" function
 // to call the "pushArg" needed by the VMFunction call.  The list of argument
 // can be created by using the ArgList function which create an empty list of
@@ -399,6 +441,7 @@ class ArgSeq : public SeqType
     }
 };
 
+// Mark the end of an argument list.
 template <>
 class ArgSeq<void, void>
 {
@@ -526,7 +569,6 @@ template <class ArgSeq, class StoreOutputTo>
 bool
 CodeGeneratorShared::visitOutOfLineCallVM(OutOfLineCallVM<ArgSeq, StoreOutputTo> *ool)
 {
-    AssertCanGC();
     LInstruction *lir = ool->lir();
 
     saveLive(lir);
@@ -538,6 +580,17 @@ CodeGeneratorShared::visitOutOfLineCallVM(OutOfLineCallVM<ArgSeq, StoreOutputTo>
     masm.jump(ool->rejoin());
     return true;
 }
+
+
+// An out-of-line parallel abort thunk.
+class OutOfLineParallelAbort : public OutOfLineCode
+{
+  public:
+    OutOfLineParallelAbort()
+    { }
+
+    bool generate(CodeGeneratorShared *codegen);
+};
 
 } // namespace ion
 } // namespace js

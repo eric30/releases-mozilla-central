@@ -30,6 +30,7 @@ class nsPresContext;
 class nsImageFrame;
 class nsTransform2D;
 class nsImageLoadingContent;
+class imgRequestProxy;
 
 namespace mozilla {
 namespace layers {
@@ -76,9 +77,9 @@ public:
   NS_IMETHOD Init(nsIContent*      aContent,
                   nsIFrame*        aParent,
                   nsIFrame*        aPrevInFlow);
-  NS_IMETHOD BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                              const nsRect&           aDirtyRect,
-                              const nsDisplayListSet& aLists);
+  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
+                                const nsRect&           aDirtyRect,
+                                const nsDisplayListSet& aLists) MOZ_OVERRIDE;
   virtual nscoord GetMinWidth(nsRenderingContext *aRenderingContext);
   virtual nscoord GetPrefWidth(nsRenderingContext *aRenderingContext);
   virtual IntrinsicSize GetIntrinsicSize();
@@ -115,7 +116,7 @@ public:
   NS_IMETHOD List(FILE* out, int32_t aIndent, uint32_t aFlags = 0) const;
 #endif
 
-  virtual int GetSkipSides() const;
+  virtual int GetSkipSides() const MOZ_OVERRIDE;
 
   nsresult GetIntrinsicImageSize(nsSize& aSize);
 
@@ -298,7 +299,7 @@ private:
   // loading / broken images
   nsresult LoadIcons(nsPresContext *aPresContext);
   nsresult LoadIcon(const nsAString& aSpec, nsPresContext *aPresContext,
-                    imgIRequest **aRequest);
+                    imgRequestProxy **aRequest);
 
   class IconLoad MOZ_FINAL : public nsIObserver,
                              public imgINotificationObserver {
@@ -333,8 +334,8 @@ private:
 
 
   public:
-    nsCOMPtr<imgIRequest> mLoadingImage;
-    nsCOMPtr<imgIRequest> mBrokenImage;
+    nsRefPtr<imgRequestProxy> mLoadingImage;
+    nsRefPtr<imgRequestProxy> mBrokenImage;
     bool             mPrefForceInlineAltText;
     bool             mPrefShowPlaceholders;
   };

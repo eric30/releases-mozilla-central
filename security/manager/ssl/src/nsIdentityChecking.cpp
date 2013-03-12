@@ -4,6 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/RefPtr.h"
 #include "nsAppDirectoryServiceDefs.h"
 #include "nsStreamUtils.h"
 #include "nsNetUtil.h"
@@ -1195,17 +1196,12 @@ nsNSSCertificate::hasValidEVOidTag(SECOidTag &resultOidTag, bool &validEV)
     return nrv;
   nssComponent->EnsureIdentityInfoLoaded();
 
+  RefPtr<nsCERTValInParamWrapper> certVal;
+  nrv = nssComponent->GetDefaultCERTValInParam(certVal);
+  NS_ENSURE_SUCCESS(nrv, nrv);
+
   validEV = false;
   resultOidTag = SEC_OID_UNKNOWN;
-
-  bool isOCSPEnabled = false;
-  nsCOMPtr<nsIX509CertDB> certdb;
-  certdb = do_GetService(NS_X509CERTDB_CONTRACTID);
-  if (certdb)
-    certdb->GetIsOcspOn(&isOCSPEnabled);
-  // No OCSP, no EV
-  if (!isOCSPEnabled)
-    return NS_OK;
 
   SECOidTag oid_tag;
   SECStatus rv = getFirstEVPolicy(mCert, oid_tag);
@@ -1223,7 +1219,8 @@ nsNSSCertificate::hasValidEVOidTag(SECOidTag &resultOidTag, bool &validEV)
 
   uint64_t revMethodFlags = 
     CERT_REV_M_TEST_USING_THIS_METHOD
-    | CERT_REV_M_ALLOW_NETWORK_FETCHING
+    | (certVal->IsOCSPDownloadEnabled() ? CERT_REV_M_ALLOW_NETWORK_FETCHING
+                                        : CERT_REV_M_FORBID_NETWORK_FETCHING)
     | CERT_REV_M_ALLOW_IMPLICIT_DEFAULT_SOURCE
     | CERT_REV_M_REQUIRE_INFO_ON_MISSING_SOURCE
     | CERT_REV_M_IGNORE_MISSING_FRESH_INFO
@@ -1233,10 +1230,7 @@ nsNSSCertificate::hasValidEVOidTag(SECOidTag &resultOidTag, bool &validEV)
     CERT_REV_MI_TEST_ALL_LOCAL_INFORMATION_FIRST
     | CERT_REV_MI_REQUIRE_SOME_FRESH_INFO_AVAILABLE;
 
-  // We need a PRUint64 here instead of a nice int64_t (until bug 634793 is
-  // fixed) to match the type used in security/nss/lib/certdb/certt.h for
-  // cert_rev_flags_per_method.
-  PRUint64 methodFlags[2];
+  uint64_t methodFlags[2];
   methodFlags[cert_revocation_method_crl] = revMethodFlags;
   methodFlags[cert_revocation_method_ocsp] = revMethodFlags;
 

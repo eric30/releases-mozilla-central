@@ -40,7 +40,7 @@ class AutoInflatedString {
 template<size_t N> JSFlatString *
 NewString(JSContext *cx, const jschar (&chars)[N])
 {
-    return js_NewStringCopyN(cx, chars, N);
+    return js_NewStringCopyN<CanGC>(cx, chars, N);
 }
 
 BEGIN_TEST(testParseJSON_success)
@@ -57,10 +57,10 @@ BEGIN_TEST(testParseJSON_success)
     CHECK(TryParse(cx, "9e9", DOUBLE_TO_JSVAL(9e9)));
     CHECK(TryParse(cx, "9e99999", DOUBLE_TO_JSVAL(std::numeric_limits<double>::infinity())));
 
-    js::Rooted<JSFlatString*> str(cx);
+    JS::Rooted<JSFlatString*> str(cx);
 
     const jschar emptystr[] = { '\0' };
-    str = js_NewStringCopyN(cx, emptystr, 0);
+    str = js_NewStringCopyN<CanGC>(cx, emptystr, 0);
     CHECK(str);
     CHECK(TryParse(cx, "\"\"", STRING_TO_JSVAL(str)));
 
@@ -83,8 +83,8 @@ BEGIN_TEST(testParseJSON_success)
 
 
     // Arrays
-    js::RootedValue v(cx), v2(cx);
-    js::RootedObject obj(cx);
+    JS::RootedValue v(cx), v2(cx);
+    JS::RootedObject obj(cx);
 
     CHECK(Parse(cx, "[]", v.address()));
     CHECK(!JSVAL_IS_PRIMITIVE(v));
@@ -132,10 +132,10 @@ template<size_t N> inline bool
 TryParse(JSContext *cx, const char (&input)[N], const jsval &expectedArg)
 {
     AutoInflatedString str(cx);
-    js::RootedValue expected(cx, expectedArg);
-    jsval v;
+    JS::RootedValue expected(cx, expectedArg);
+    RootedValue v(cx);
     str = input;
-    CHECK(JS_ParseJSON(cx, str.chars(), str.length(), &v));
+    CHECK(JS_ParseJSON(cx, str.chars(), str.length(), v.address()));
     CHECK_SAME(v, expected);
     return true;
 }
@@ -215,7 +215,7 @@ BEGIN_TEST(testParseJSON_reviver)
     JSFunction *fun = JS_NewFunction(cx, Censor, 0, 0, global, "censor");
     CHECK(fun);
 
-    js::RootedValue filter(cx, OBJECT_TO_JSVAL(JS_GetFunctionObject(fun)));
+    JS::RootedValue filter(cx, OBJECT_TO_JSVAL(JS_GetFunctionObject(fun)));
 
     CHECK(TryParse(cx, "true", filter));
     CHECK(TryParse(cx, "false", filter));
@@ -232,7 +232,7 @@ template<size_t N> inline bool
 TryParse(JSContext *cx, const char (&input)[N], JS::HandleValue filter)
 {
     AutoInflatedString str(cx);
-    js::RootedValue v(cx);
+    JS::RootedValue v(cx);
     str = input;
     CHECK(JS_ParseJSONWithReviver(cx, str.chars(), str.length(), filter, v.address()));
     CHECK_SAME(v, JSVAL_NULL);

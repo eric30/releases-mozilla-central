@@ -6,6 +6,7 @@
 #include "WebGLContext.h"
 #include "WebGLFramebuffer.h"
 #include "mozilla/dom/WebGLRenderingContextBinding.h"
+#include "nsContentUtils.h"
 
 using namespace mozilla;
 
@@ -351,7 +352,7 @@ WebGLFramebuffer::CheckAndInitializeRenderbuffers()
         mask |= LOCAL_GL_STENCIL_BUFFER_BIT;
     }
 
-    mContext->ForceClearFramebufferWithDefaultValues(mask, nsIntRect(0, 0, rect->Width(), rect->Height()));
+    mContext->ForceClearFramebufferWithDefaultValues(mask);
 
     if (mColorAttachment.HasUninitializedRenderbuffer())
         mColorAttachment.Renderbuffer()->SetInitialized(true);

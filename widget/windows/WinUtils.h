@@ -43,9 +43,9 @@ public:
     WIN2K3_VERSION    = 0x502,
     VISTA_VERSION     = 0x600,
     // WIN2K8_VERSION    = VISTA_VERSION,
-    WIN7_VERSION      = 0x601
+    WIN7_VERSION      = 0x601,
     // WIN2K8R2_VERSION  = WIN7_VERSION
-    // WIN8_VERSION      = 0x602
+    WIN8_VERSION      = 0x602
   };
   static WinVersion GetWindowsVersion();
 
@@ -190,12 +190,19 @@ public:
 
   /**
    * SHCreateItemFromParsingName() calls native SHCreateItemFromParsingName()
-   * API.  Note that you must call VistaCreateItemFromParsingNameInit() before
-   * calling this.  And the result must be TRUE.  Otherwise, returns E_FAIL.
+   * API which is available on Vista and up.
    */
   static HRESULT SHCreateItemFromParsingName(PCWSTR pszPath, IBindCtx *pbc,
                                              REFIID riid, void **ppv);
 
+  /**
+   * SHGetKnownFolderPath() calls native SHGetKnownFolderPath()
+   * API which is available on Vista and up.
+   */
+  static HRESULT SHGetKnownFolderPath(REFKNOWNFOLDERID rfid,
+                                      DWORD dwFlags,
+                                      HANDLE hToken,
+                                      PWSTR *ppszPath);
   /**
    * GetShellItemPath return the file or directory path of a shell item.
    * Internally calls IShellItem's GetDisplayName.
@@ -229,13 +236,11 @@ private:
                                                             REFIID riid,
                                                             void **ppv);
   static SHCreateItemFromParsingNamePtr sCreateItemFromParsingName;
-
-  /**
-   * VistaCreateItemFromParsingNameInit() initializes the static pointer for
-   * SHCreateItemFromParsingName() API which is usable only on Vista and later.
-   * This returns TRUE if the API is available.  Otherwise, FALSE.
-   */
-  static bool VistaCreateItemFromParsingNameInit();
+  typedef HRESULT (WINAPI * SHGetKnownFolderPathPtr)(REFKNOWNFOLDERID rfid,
+                                                     DWORD dwFlags,
+                                                     HANDLE hToken,
+                                                     PWSTR *ppszPath);
+  static SHGetKnownFolderPathPtr sGetKnownFolderPath;
 };
 
 #ifdef MOZ_PLACES

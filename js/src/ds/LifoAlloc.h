@@ -9,6 +9,10 @@
 #define LifoAlloc_h__
 
 #include "mozilla/Attributes.h"
+#include "mozilla/DebugOnly.h"
+#include "mozilla/GuardObjects.h"
+#include "mozilla/MemoryChecking.h"
+#include "mozilla/TypeTraits.h"
 
 /*
  * This data structure supports stacky LIFO allocation (mark/release and
@@ -64,7 +68,9 @@ class BumpChunk
     void setBump(void *ptr) {
         JS_ASSERT(bumpBase() <= ptr);
         JS_ASSERT(ptr <= limit);
-        mozilla::DebugOnly<char *> prevBump = bump;
+#if defined(DEBUG) || defined(MOZ_HAVE_MEM_CHECKS)
+        char* prevBump = bump;
+#endif
         bump = static_cast<char *>(ptr);
 #ifdef DEBUG
         JS_ASSERT(contains(prevBump));
@@ -72,6 +78,14 @@ class BumpChunk
         /* Clobber the now-free space. */
         if (prevBump > bump)
             memset(bump, 0xcd, prevBump - bump);
+#endif
+
+        /* Poison/Unpoison memory that we just free'd/allocated */
+#if defined(MOZ_HAVE_MEM_CHECKS)
+        if (prevBump > bump)
+            MOZ_MAKE_MEM_NOACCESS(bump, prevBump - bump);
+        else if (bump > prevBump)
+            MOZ_MAKE_MEM_UNDEFINED(prevBump, bump - prevBump);
 #endif
     }
 
@@ -180,8 +194,6 @@ class LifoAlloc
         last = end;
     }
 
-    bool ensureUnusedApproximateSlow(size_t n);
-
   public:
     explicit LifoAlloc(size_t defaultChunkSize) { reset(defaultChunkSize); }
 
@@ -244,7 +256,12 @@ class LifoAlloc
                 return true;
             chunk = chunk->next();
         }
-        return ensureUnusedApproximateSlow(n);
+        BumpChunk *latestBefore = latest;
+        if (!getOrCreateChunk(n))
+            return false;
+        if (latestBefore)
+            latest = latestBefore;
+        return true;
     }
 
     template <typename T>
@@ -252,7 +269,7 @@ class LifoAlloc
         void *mem = alloc(sizeof(T) * count);
         if (!mem)
             return NULL;
-        JS_STATIC_ASSERT(tl::IsPodType<T>::result);
+        JS_STATIC_ASSERT(mozilla::IsPod<T>::value);
         return (T *) mem;
     }
 
@@ -348,13 +365,14 @@ class LifoAllocScope
     LifoAlloc   *lifoAlloc;
     void        *mark;
     bool        shouldRelease;
-    JS_DECL_USE_GUARD_OBJECT_NOTIFIER
+    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 
   public:
     explicit LifoAllocScope(LifoAlloc *lifoAlloc
-                            JS_GUARD_OBJECT_NOTIFIER_PARAM)
-      : lifoAlloc(lifoAlloc), shouldRelease(true) {
-        JS_GUARD_OBJECT_NOTIFIER_INIT;
+                            MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+      : lifoAlloc(lifoAlloc), shouldRelease(true)
+    {
+        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
         mark = lifoAlloc->mark();
     }
 

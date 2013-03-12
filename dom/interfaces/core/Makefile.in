@@ -20,16 +20,16 @@ SDK_XPIDLSRCS =                                 \
 	nsIDOMCharacterData.idl			\
 	nsIDOMComment.idl			\
 	nsIDOMDOMException.idl			\
-	nsIDOMDOMImplementation.idl		\
 	nsIDOMDocument.idl			\
 	nsIDOMDocumentFragment.idl		\
 	nsIDOMDocumentType.idl			\
 	nsIDOMElement.idl			\
-	nsIDOMNamedNodeMap.idl			\
+	nsIDOMMozNamedAttrMap.idl		\
 	nsIDOMNode.idl				\
 	nsIDOMNodeList.idl			\
 	nsIDOMProcessingInstruction.idl		\
 	nsIDOMText.idl				\
+	nsIDocumentRegister.idl		\
 	$(NULL)
 XPIDLSRCS =                                     \
 	nsIDOMDOMStringList.idl			\
@@ -37,10 +37,7 @@ XPIDLSRCS =                                     \
 	nsIDOMUserDataHandler.idl		\
 	nsIDOMNSEditableElement.idl		\
 	nsIDOMNodeSelector.idl			\
-	nsIDOMDOMTokenList.idl			\
-	nsIDOMDOMSettableTokenList.idl	\
 	nsIInlineEventHandlers.idl              \
-	nsIDOMMutationObserver.idl              \
 	$(NULL)
 
 include $(topsrcdir)/config/rules.mk

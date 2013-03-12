@@ -8,18 +8,17 @@
 #include "Nfc.h"
 #include "NfcNdefEvent.h"
 
+DOMCI_DATA(MozStkCommandEvent, mozilla::dom::nfc::NfcNdefEvent)
+
 using namespace mozilla::dom::nfc;
 
 // static
 already_AddRefed<nsDOMEvent>
-NfcNdefEvent::Create(const JS::Value& aNdefMessages)
+NfcNdefEvent::Create(mozilla::dom::EventTarget* aOwner, const JS::Value& aNdefMessages)
 {
-  nsRefPtr<nsDOMEvent> event = new NfcNdefEvent(aNdefMessages);
-
+  nsRefPtr<NfcNdefEvent> event = new NfcNdefEvent(aOwner, aNdefMessages);
   return event.forget();
 }
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(NfcNdefEvent)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(NfcNdefEvent,
                                                   nsDOMEvent)
@@ -29,13 +28,13 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(NfcNdefEvent,
                                                 nsDOMEvent)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(NfcNdefEvent)
+NS_IMPL_ADDREF_INHERITED(NfcNdefEvent, nsDOMEvent)
+NS_IMPL_RELEASE_INHERITED(NfcNdefEvent, nsDOMEvent)
+
+NS_INTERFACE_MAP_BEGIN(NfcNdefEvent)
   NS_INTERFACE_MAP_ENTRY(nsIDOMNfcNdefEvent)
   NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(NfcNdefEvent)
 NS_INTERFACE_MAP_END_INHERITING(nsDOMEvent)
-
-NS_IMPL_ADDREF_INHERITED(NfcNdefEvent, nsDOMEvent)
-NS_IMPL_RELEASE_INHERITED(NfcNdefEvent, nsDOMEvent)
 
 DOMCI_DATA(NfcNdefEvent, NfcNdefEvent)
 

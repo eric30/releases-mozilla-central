@@ -165,6 +165,7 @@ static CGEventRef EventTapCallback(CGEventTapProxy proxy, CGEventType type, CGEv
     return event;
 
   nsIRollupListener* rollupListener = nsBaseWidget::GetActiveRollupListener();
+  NS_ENSURE_TRUE(rollupListener, event);
   nsCOMPtr<nsIWidget> rollupWidget = rollupListener->GetRollupWidget();
   if (!rollupWidget)
     return event;
@@ -201,6 +202,9 @@ void
 nsToolkit::RegisterForAllProcessMouseEvents()
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
+
+  if (getenv("MOZ_DEBUG"))
+    return;
 
   // Don't do this for apps that (like Camino) use native context menus.
 #ifdef MOZ_USE_NATIVE_POPUP_WINDOWS

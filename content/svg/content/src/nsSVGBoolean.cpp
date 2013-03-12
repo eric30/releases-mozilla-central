@@ -4,26 +4,19 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsError.h"
+#include "nsSVGAttrTearoffTable.h"
 #include "nsSVGBoolean.h"
 #include "nsSMILValue.h"
 #include "SMILBoolType.h"
+#include "SVGAnimatedBoolean.h"
 
 using namespace mozilla;
-
-NS_SVG_VAL_IMPL_CYCLE_COLLECTION(nsSVGBoolean::DOMAnimatedBoolean, mSVGElement)
-
-NS_IMPL_CYCLE_COLLECTING_ADDREF(nsSVGBoolean::DOMAnimatedBoolean)
-NS_IMPL_CYCLE_COLLECTING_RELEASE(nsSVGBoolean::DOMAnimatedBoolean)
-
-DOMCI_DATA(SVGAnimatedBoolean, nsSVGBoolean::DOMAnimatedBoolean)
-
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsSVGBoolean::DOMAnimatedBoolean)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMSVGAnimatedBoolean)
-  NS_INTERFACE_MAP_ENTRY(nsISupports)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(SVGAnimatedBoolean)
-NS_INTERFACE_MAP_END
+using namespace mozilla::dom;
 
 /* Implementation */
+
+static nsSVGAttrTearoffTable<nsSVGBoolean, SVGAnimatedBoolean>
+  sSVGAnimatedBooleanTearoffTable;
 
 static nsresult
 GetValueFromString(const nsAString &aValueAsString,
@@ -87,8 +80,6 @@ nsSVGBoolean::GetBaseValueAtom() const
 void
 nsSVGBoolean::SetBaseValue(bool aValue, nsSVGElement *aSVGElement)
 {
-  NS_PRECONDITION(aValue == true || aValue == false, "Boolean out of range");
-
   if (aValue == mBaseVal) {
     return;
   }
@@ -114,15 +105,23 @@ nsSVGBoolean::SetAnimValue(bool aValue, nsSVGElement *aSVGElement)
 }
 
 nsresult
-nsSVGBoolean::ToDOMAnimatedBoolean(nsIDOMSVGAnimatedBoolean **aResult,
+nsSVGBoolean::ToDOMAnimatedBoolean(nsISupports **aResult,
                                    nsSVGElement *aSVGElement)
 {
-  *aResult = new DOMAnimatedBoolean(this, aSVGElement);
-  if (!*aResult)
-    return NS_ERROR_OUT_OF_MEMORY;
+  nsRefPtr<SVGAnimatedBoolean> domAnimatedBoolean =
+    sSVGAnimatedBooleanTearoffTable.GetTearoff(this);
+  if (!domAnimatedBoolean) {
+    domAnimatedBoolean = new SVGAnimatedBoolean(this, aSVGElement);
+    sSVGAnimatedBooleanTearoffTable.AddTearoff(this, domAnimatedBoolean);
+  }
 
-  NS_ADDREF(*aResult);
+  domAnimatedBoolean.forget(aResult);
   return NS_OK;
+}
+
+SVGAnimatedBoolean::~SVGAnimatedBoolean()
+{
+  sSVGAnimatedBooleanTearoffTable.RemoveTearoff(mVal);
 }
 
 nsISMILAttr*

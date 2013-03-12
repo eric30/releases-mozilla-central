@@ -10,10 +10,7 @@
 #include "gfxPoint.h"
 #include "nsIIdleServiceInternal.h"
 #include "nsTArray.h"
-
-#ifdef MOZ_ANDROID_OMTC
 #include "AndroidJavaWrappers.h"
-#endif
 
 class gfxASurface;
 
@@ -79,15 +76,15 @@ public:
     NS_IMETHOD ConstrainPosition(bool aAllowSlop,
                                  int32_t *aX,
                                  int32_t *aY);
-    NS_IMETHOD Move(int32_t aX,
-                    int32_t aY);
-    NS_IMETHOD Resize(int32_t aWidth,
-                      int32_t aHeight,
-                      bool    aRepaint);
-    NS_IMETHOD Resize(int32_t aX,
-                      int32_t aY,
-                      int32_t aWidth,
-                      int32_t aHeight,
+    NS_IMETHOD Move(double aX,
+                    double aY);
+    NS_IMETHOD Resize(double aWidth,
+                      double aHeight,
+                      bool   aRepaint);
+    NS_IMETHOD Resize(double aX,
+                      double aY,
+                      double aWidth,
+                      double aHeight,
                       bool aRepaint);
     NS_IMETHOD SetZIndex(int32_t aZIndex);
     NS_IMETHOD PlaceBehind(nsTopLevelWidgetZPlacement aPlacement,
@@ -127,38 +124,37 @@ public:
     NS_IMETHOD GetAttention(int32_t aCycleCount) { return NS_ERROR_NOT_IMPLEMENTED; }
     NS_IMETHOD BeginResizeDrag(nsGUIEvent* aEvent, int32_t aHorizontal, int32_t aVertical) { return NS_ERROR_NOT_IMPLEMENTED; }
 
-    NS_IMETHOD ResetInputState();
+    NS_IMETHOD NotifyIME(NotificationToIME aNotification) MOZ_OVERRIDE;
     NS_IMETHOD_(void) SetInputContext(const InputContext& aContext,
                                       const InputContextAction& aAction);
     NS_IMETHOD_(InputContext) GetInputContext();
-    NS_IMETHOD CancelIMEComposition();
 
-    NS_IMETHOD OnIMEFocusChange(bool aFocus);
-    NS_IMETHOD OnIMETextChange(uint32_t aStart, uint32_t aOldEnd, uint32_t aNewEnd);
-    NS_IMETHOD OnIMESelectionChange(void);
+    NS_IMETHOD NotifyIMEOfTextChange(uint32_t aStart,
+                                     uint32_t aOldEnd,
+                                     uint32_t aNewEnd) MOZ_OVERRIDE;
     virtual nsIMEUpdatePreference GetIMEUpdatePreference();
 
     LayerManager* GetLayerManager (PLayersChild* aShadowManager = nullptr,
                                    LayersBackend aBackendHint = mozilla::layers::LAYERS_NONE,
                                    LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT,
                                    bool* aAllowRetaining = nullptr);
+    void CreateLayerManager();
 
     NS_IMETHOD ReparentNativeWidget(nsIWidget* aNewParent);
 
-#ifdef MOZ_ANDROID_OMTC
     virtual bool NeedsPaint();
     virtual void DrawWindowUnderlay(LayerManager* aManager, nsIntRect aRect);
     virtual void DrawWindowOverlay(LayerManager* aManager, nsIntRect aRect);
 
-    static void SetCompositor(mozilla::layers::CompositorParent* aCompositorParent,
+    static void SetCompositor(mozilla::layers::LayerManager* aLayerManager,
+                              mozilla::layers::CompositorParent* aCompositorParent,
                               mozilla::layers::CompositorChild* aCompositorChild);
     static void ScheduleComposite();
-    static void SchedulePauseComposition();
     static void ScheduleResumeComposition(int width, int height);
+    static void ForceIsFirstPaint();
     static float ComputeRenderIntegrity();
 
     virtual bool WidgetPaintsBackground();
-#endif
 
 protected:
     void BringToFront();
@@ -189,6 +185,7 @@ protected:
     int32_t mIMEMaskEventsCount; // Mask events when > 0
     nsString mIMEComposingText;
     nsAutoTArray<nsTextRange, 4> mIMERanges;
+    bool mIMEUpdatingContext;
 
     struct IMEChange {
         int32_t mStart, mOldEnd, mNewEnd;
@@ -201,21 +198,13 @@ protected:
             mStart(start), mOldEnd(oldEnd), mNewEnd(newEnd)
         {
         }
-        IMEChange(int32_t start, int32_t end) :
-            mStart(start), mOldEnd(end), mNewEnd(-1)
-        {
-        }
         bool IsEmpty()
         {
             return mStart < 0;
         }
-        bool IsTextChange()
-        {
-            return mNewEnd >= 0;
-        }
     };
     nsAutoTArray<IMEChange, 4> mIMETextChanges;
-    IMEChange mIMESelectionChange;
+    bool mIMESelectionChanged;
 
     InputContext mInputContext;
 
@@ -236,13 +225,12 @@ private:
     void HandleSpecialKey(mozilla::AndroidGeckoEvent *ae);
     void RedrawAll();
 
-#ifdef MOZ_ANDROID_OMTC
     mozilla::AndroidLayerRendererFrame mLayerRendererFrame;
 
+    static nsRefPtr<mozilla::layers::LayerManager> sLayerManager;
     static nsRefPtr<mozilla::layers::CompositorParent> sCompositorParent;
     static nsRefPtr<mozilla::layers::CompositorChild> sCompositorChild;
     static bool sCompositorPaused;
-#endif
 };
 
 #endif /* NSWINDOW_H_ */

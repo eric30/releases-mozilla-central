@@ -57,6 +57,120 @@ function testLocalInfoLanguage(cmd) {
   runNextTest();
 }
 
+function isFirstMenuItemNull(cmd) {
+  return (cmd.options.items.length == 1 && !(cmd.options.items[0]));
+}
+
+function testInitialSetupMenu(cmd) {
+  log("STK CMD " + JSON.stringify(cmd));
+  is(cmd.typeOfCommand, icc.STK_CMD_SET_UP_MENU);
+  is(isFirstMenuItemNull(cmd), false);
+
+  runNextTest();
+}
+function testRemoveSetupMenu(cmd) {
+  log("STK CMD " + JSON.stringify(cmd));
+  is(cmd.typeOfCommand, icc.STK_CMD_SET_UP_MENU);
+  is(isFirstMenuItemNull(cmd), true);
+
+  runNextTest();
+}
+
+function testPollingOff(cmd) {
+  log("STK CMD " + JSON.stringify(cmd));
+  is(cmd.typeOfCommand, icc.STK_CMD_POLL_OFF);
+  is(cmd.commandNumber, 0x01);
+  is(cmd.commandQualifier, 0x00);
+  is(cmd.options, null);
+
+  runNextTest();
+}
+
+function testRefresh(cmd) {
+  log("STK CMD " + JSON.stringify(cmd));
+  is(cmd.typeOfCommand, icc.STK_CMD_REFRESH);
+  is(cmd.commandNumber, 0x01);
+  is(cmd.commandQualifier, 0x01);
+  is(cmd.options, null);
+
+  runNextTest();
+}
+
+function testTimerManagementStart(cmd) {
+  log("STK CMD " + JSON.stringify(cmd));
+  is(cmd.typeOfCommand, icc.STK_CMD_TIMER_MANAGEMENT);
+  is(cmd.commandNumber, 0x01);
+  is(cmd.commandQualifier, icc.STK_TIMER_START);
+  is(cmd.options.timerAction, icc.STK_TIMER_START);
+  is(cmd.options.timerId, 0x01);
+  is(cmd.options.timerValue, (0x01 * 60 * 60) + (0x02 * 60) + 0x03);
+
+  runNextTest();
+}
+
+function testTimerManagementDeactivate(cmd) {
+  log("STK CMD " + JSON.stringify(cmd));
+  is(cmd.typeOfCommand, icc.STK_CMD_TIMER_MANAGEMENT);
+  is(cmd.commandNumber, 0x01);
+  is(cmd.commandQualifier, icc.STK_TIMER_DEACTIVATE);
+  is(cmd.options.timerAction, icc.STK_TIMER_DEACTIVATE);
+  is(cmd.options.timerId, 0x04);
+
+  runNextTest();
+}
+
+function testTimerManagementGetCurrentValue(cmd) {
+  log("STK CMD " + JSON.stringify(cmd));
+  is(cmd.typeOfCommand, icc.STK_CMD_TIMER_MANAGEMENT);
+  is(cmd.commandNumber, 0x01);
+  is(cmd.commandQualifier, icc.STK_TIMER_GET_CURRENT_VALUE);
+  is(cmd.options.timerAction, icc.STK_TIMER_GET_CURRENT_VALUE);
+  is(cmd.options.timerId, 0x08);
+
+  runNextTest();
+}
+
+function testGetInKeyVariableTimeout(cmd) {
+  log("STK CMD " + JSON.stringify(cmd));
+  is(cmd.typeOfCommand, icc.STK_CMD_GET_INKEY);
+  is(cmd.options.duration.timeUnit, 0x01);
+  is(cmd.options.duration.timeInterval, 0x0A);
+
+  runNextTest();
+}
+
+function testSetupCall(cmd) {
+  log("STK CMD " + JSON.stringify(cmd));
+  is(cmd.typeOfCommand, icc.STK_CMD_SET_UP_CALL);
+  is(cmd.commandNumber, 0x01);
+  is(cmd.commandQualifier, 0x04);
+  is(cmd.options.address, "012340123456,1,2");
+  is(cmd.options.confirmMessage, "Disconnect");
+  is(cmd.options.callMessage, "Message");
+
+  runNextTest();
+}
+
+function testDisplayTextVariableTimeOut(cmd) {
+  log("STK CMD " + JSON.stringify(cmd));
+  is(cmd.typeOfCommand, icc.STK_CMD_DISPLAY_TEXT);
+  is(cmd.commandNumber, 0x01);
+  is(cmd.options.duration.timeUnit, icc.STK_TIME_UNIT_SECOND);
+  is(cmd.options.duration.timeInterval, 0x0A);
+
+  runNextTest();
+}
+
+function testSetUpCallVariableTimeOut(cmd) {
+  log("STK CMD " + JSON.stringify(cmd));
+  is(cmd.typeOfCommand, icc.STK_CMD_SET_UP_CALL);
+  is(cmd.commandNumber, 0x01);
+  is(cmd.options.duration.timeUnit, icc.STK_TIME_UNIT_SECOND);
+  is(cmd.options.duration.timeInterval, 0x0A);
+
+  runNextTest();
+}
+
 let tests = [
   {command: "d0288103012180820281020d1d00d3309bfc06c95c301aa8e80259c3ec34b9ac07c9602f58ed159bb940",
    func: testDisplayTextGsm7BitEncoding},
@@ -68,6 +182,28 @@ let tests = [
    func: testLocalInfoDate},
   {command: "d009810301260482028182",
    func: testLocalInfoLanguage},
+  {command: "D00D81030125008202818285008F00",
+   func: testRemoveSetupMenu},
+  {command:"D03B810301250082028182850C546F6F6C6B6974204D656E758F07014974656D20318F07024974656D20328F07034974656D20338F07044974656D2034",
+   func: testInitialSetupMenu},
+  {command: "d009810301040082028182",
+   func: testPollingOff},
+  {command: "d0108103010101820281829205013f002fe2",
+   func: testRefresh},
+  {command: "d011810301270082028182a40101a503102030",
+   func: testTimerManagementStart},
+  {command: "d00c810301270182028182a40104",
+   func: testTimerManagementDeactivate},
+  {command: "d00c810301270282028182a40108",
+   func: testTimerManagementGetCurrentValue},
+  {command: "d029810301100482028182050a446973636f6e6e6563748609811032042143651c2c05074d657373616765",
+   func: testSetupCall},
+  {command: "D0198103012200820281828D0A04456E74657220222B228402010A",
+   func: testGetInKeyVariableTimeout},
+  {command: "d0198103012180820281028D0A043130205365636F6E648402010A",
+   func: testDisplayTextVariableTimeOut},
+  {command: "d02281030110008202818385084E6F7420627573798609911032042143651C2C8402010A",
+   func: testSetUpCallVariableTimeOut},
 ];
 
 let pendingEmulatorCmdCount = 0;

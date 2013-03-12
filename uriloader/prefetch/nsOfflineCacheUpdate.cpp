@@ -476,6 +476,18 @@ nsOfflineCacheUpdateItem::OnStopRequest(nsIRequest *aRequest,
         mUpdate->OnByteProgress(mBytesRead);
     }
 
+    if (NS_FAILED(aStatus)) {
+        nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(mChannel);
+        if (httpChannel) {
+            bool isNoStore;
+            if (NS_SUCCEEDED(httpChannel->IsNoStoreResponse(&isNoStore))
+                && isNoStore) {
+                LogToConsole("Offline cache manifest item has Cache-control: no-store header",
+                             this);
+            }
+        }
+    }
+
     // We need to notify the update that the load is complete, but we
     // want to give the channel a chance to close the cache entries.
     NS_DispatchToCurrentThread(this);
@@ -1123,18 +1135,6 @@ nsOfflineManifestItem::OnStartRequest(nsIRequest *aRequest,
         return NS_ERROR_ABORT;
     }
 
-    nsAutoCString contentType;
-    rv = channel->GetContentType(contentType);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    if (!contentType.EqualsLiteral("text/cache-manifest")) {
-        LOG(("Rejected cache manifest with Content-Type %s (expecting text/cache-manifest)",
-             contentType.get()));
-        LogToConsole("Offline cache manifest not served with text/cache-manifest", this);
-        mParserState = PARSE_ERROR;
-        return NS_ERROR_ABORT;
-    }
-
     rv = GetOldManifestContentHash(aRequest);
     NS_ENSURE_SUCCESS(rv, rv);
 
@@ -1171,18 +1171,18 @@ nsOfflineManifestItem::OnStopRequest(nsIRequest *aRequest,
                                      nsISupports *aContext,
                                      nsresult aStatus)
 {
-    // handle any leftover manifest data
-    nsCString::const_iterator begin, end;
-    mReadBuf.BeginReading(begin);
-    mReadBuf.EndReading(end);
-    nsresult rv = HandleManifestLine(begin, end);
-    NS_ENSURE_SUCCESS(rv, rv);
-
     if (mBytesRead == 0) {
-        // we didn't need to read (because LOAD_ONLY_IF_MODIFIED was
-        // specified.)
+        // We didn't need to read (because LOAD_ONLY_IF_MODIFIED was
+        // specified).
         mNeedsUpdate = false;
     } else {
+        // Handle any leftover manifest data.
+        nsCString::const_iterator begin, end;
+        mReadBuf.BeginReading(begin);
+        mReadBuf.EndReading(end);
+        nsresult rv = HandleManifestLine(begin, end);
+        NS_ENSURE_SUCCESS(rv, rv);
+
         rv = CheckNewManifestContentHash(aRequest);
         NS_ENSURE_SUCCESS(rv, rv);
     }
@@ -1550,6 +1550,7 @@ nsOfflineCacheUpdate::LoadCompleted(nsOfflineCacheUpdateItem *aItem)
     nsCOMPtr<nsIOfflineCacheUpdate> kungFuDeathGrip(this);
 
     if (mState == STATE_CANCELLED) {
+        NotifyState(nsIOfflineCacheUpdateObserver::STATE_ERROR);
         Finish();
         return;
     }
@@ -1807,25 +1808,6 @@ nsOfflineCacheUpdate::Begin()
     return NS_OK;
 }
 
-nsresult
-nsOfflineCacheUpdate::Cancel()
-{
-    LOG(("nsOfflineCacheUpdate::Cancel [%p]", this));
-
-    mState = STATE_CANCELLED;
-    mSucceeded = false;
-
-    // Cancel all running downloads
-    for (uint32_t i = 0; i < mItems.Length(); ++i) {
-        nsOfflineCacheUpdateItem * item = mItems[i];
-
-        if (item->IsInProgress())
-            item->Cancel();
-    }
-
-    return NS_OK;
-}
-
 //-----------------------------------------------------------------------------
 // nsOfflineCacheUpdate <private>
 //-----------------------------------------------------------------------------
@@ -1882,9 +1864,6 @@ nsOfflineCacheUpdate::ProcessNextURI()
 
     LOG(("nsOfflineCacheUpdate::ProcessNextURI [%p, inprogress=%d, numItems=%d]",
          this, mItemsInProgress, mItems.Length()));
-
-    NS_ASSERTION(mState == STATE_DOWNLOADING,
-                 "ProcessNextURI should only be called from the DOWNLOADING state");
 
     if (mState != STATE_DOWNLOADING) {
         LOG(("  should only be called from the DOWNLOADING state, ignoring"));
@@ -2322,10 +2301,10 @@ nsOfflineCacheUpdate::AddURI(nsIURI *aURI, uint32_t aType)
     }
 
     nsRefPtr<nsOfflineCacheUpdateItem> item =
-        new nsOfflineCacheUpdateItem(aURI, 
+        new nsOfflineCacheUpdateItem(aURI,
                                      mDocumentURI,
                                      mApplicationCache,
-                                     mPreviousApplicationCache, 
+                                     mPreviousApplicationCache,
                                      aType);
     if (!item) return NS_ERROR_OUT_OF_MEMORY;
 
@@ -2359,6 +2338,29 @@ nsOfflineCacheUpdate::AddDynamicURI(nsIURI *aURI)
     }
 
     return AddURI(aURI, nsIApplicationCache::ITEM_DYNAMIC);
+}
+
+NS_IMETHODIMP
+nsOfflineCacheUpdate::Cancel()
+{
+    LOG(("nsOfflineCacheUpdate::Cancel [%p]", this));
+
+    if ((mState == STATE_FINISHED) || (mState == STATE_CANCELLED)) {
+      return NS_ERROR_NOT_AVAILABLE;
+    }
+
+    mState = STATE_CANCELLED;
+    mSucceeded = false;
+
+    // Cancel all running downloads
+    for (uint32_t i = 0; i < mItems.Length(); ++i) {
+        nsOfflineCacheUpdateItem * item = mItems[i];
+
+        if (item->IsInProgress())
+            item->Cancel();
+    }
+
+    return NS_OK;
 }
 
 NS_IMETHODIMP

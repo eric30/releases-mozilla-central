@@ -32,6 +32,13 @@ LIBS += \
   $(NULL)
 endif
 
+ifeq (gonk,$(MOZ_WIDGET_TOOLKIT))
+LIBS += \
+  -lbinder \
+  -lutils \
+  $(NULL)
+endif
+
 LOCAL_INCLUDES += -I$(topsrcdir)/toolkit/xre
 LOCAL_INCLUDES += -I$(topsrcdir)/xpcom/base
 
@@ -77,10 +84,6 @@ ifeq ($(OS_ARCH),WINNT) #{
 #
 ifndef GNU_CC #{
 LDFLAGS += /HEAP:0x40000
-ifeq ($(OS_TEST),x86_64) #{
-# set stack to 2MB on x64 build.  See bug 582910
-LDFLAGS += -STACK:2097152
-endif #}
 endif #}
 endif #}
 

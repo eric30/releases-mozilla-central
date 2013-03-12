@@ -22,7 +22,6 @@
 #include "nsIDOMMozCSSKeyframeRule.h"
 #include "nsIDOMMozCSSKeyframesRule.h"
 #include "nsIDOMCSSStyleDeclaration.h"
-#include "nsICSSRuleList.h"
 #include "nsAutoPtr.h"
 #include "nsCSSProperty.h"
 #include "nsCSSValue.h"
@@ -36,6 +35,9 @@
 class nsMediaList;
 
 namespace mozilla {
+
+class ErrorResult;
+
 namespace css {
 
 class MediaRule MOZ_FINAL : public GroupRule,
@@ -183,8 +185,12 @@ class nsCSSFontFaceStyleDecl : public nsICSSDeclaration
 {
 public:
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_NSIDOMCSSSTYLEDECLARATION
+  NS_DECL_NSIDOMCSSSTYLEDECLARATION_HELPER
   NS_DECL_NSICSSDECLARATION
+  virtual already_AddRefed<mozilla::dom::CSSValue>
+  GetPropertyCSSValue(const nsAString& aProp, mozilla::ErrorResult& aRv)
+    MOZ_OVERRIDE;
+  using nsICSSDeclaration::GetPropertyCSSValue;
 
   nsCSSFontFaceStyleDecl()
   {
@@ -364,7 +370,8 @@ private:
   nsCSSKeyframeRule(const nsCSSKeyframeRule& aCopy);
   ~nsCSSKeyframeRule();
 public:
-  NS_DECL_ISUPPORTS
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+  NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(nsCSSKeyframeRule, nsIStyleRule)
 
   // nsIStyleRule methods
 #ifdef DEBUG

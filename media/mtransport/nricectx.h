@@ -54,6 +54,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "sigslot.h"
 
+#include "prnetdb.h"
+
 #include "mozilla/RefPtr.h"
 #include "mozilla/Scoped.h"
 #include "nsAutoPtr.h"
@@ -62,17 +64,75 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "m_cpp_utils.h"
 
-namespace mozilla {
-
-typedef void* NR_SOCKET;
 typedef struct nr_ice_ctx_ nr_ice_ctx;
 typedef struct nr_ice_peer_ctx_ nr_ice_peer_ctx;
 typedef struct nr_ice_media_stream_ nr_ice_media_stream;
 typedef struct nr_ice_handler_ nr_ice_handler;
 typedef struct nr_ice_handler_vtbl_ nr_ice_handler_vtbl;
 typedef struct nr_ice_cand_pair_ nr_ice_cand_pair;
+typedef struct nr_ice_stun_server_ nr_ice_stun_server;
+typedef struct nr_resolver_ nr_resolver;
+
+namespace mozilla {
+
+typedef void* NR_SOCKET;
 
 class NrIceMediaStream;
+
+struct NrIceStunServer {
+ public:
+  NrIceStunServer(const PRNetAddr& addr) : has_addr_(true) {
+    memcpy(&addr_, &addr, sizeof(addr));
+  }
+
+   // The main function to use. Will take either an address or a hostname.
+  static NrIceStunServer* Create(const std::string& addr, uint16_t port) {
+    ScopedDeletePtr<NrIceStunServer> server(
+        new NrIceStunServer());
+
+    nsresult rv = server->Init(addr, port);
+    if (NS_FAILED(rv))
+      return nullptr;
+
+    return server.forget();
+  }
+
+  nsresult ToNicerStruct(nr_ice_stun_server *server) const;
+
+ private:
+  NrIceStunServer() : addr_() {}
+
+  nsresult Init(const std::string& addr, uint16_t port) {
+    PRStatus status = PR_StringToNetAddr(addr.c_str(), &addr_);
+    if (status == PR_SUCCESS) {
+      // Parseable as an address
+      addr_.inet.port = PR_htons(port);
+      port_ = port;
+      has_addr_ = true;
+      return NS_OK;
+    }
+    else if (host_.size() < 256) {
+      // Apparently this is a hostname.
+      host_ = addr;
+      port_ = port;
+      has_addr_ = false;
+      return NS_OK;
+    }
+
+    return NS_ERROR_FAILURE;
+  }
+
+  bool has_addr_;
+  std::string host_;
+  uint16_t port_;
+  PRNetAddr addr_;
+};
+
+struct NrIceTurnServer {
+  PRNetAddr addr;
+  std::string username;
+  std::string password;
+};
 
 class NrIceCtx {
  public:
@@ -84,9 +144,13 @@ class NrIceCtx {
                ICE_CTX_FAILED
   };
 
+  enum Controlling { ICE_CONTROLLING,
+                     ICE_CONTROLLED
+  };
+
   static RefPtr<NrIceCtx> Create(const std::string& name,
-                                          bool offerer,
-                                          bool set_interface_priorities = true);
+                                 bool offerer,
+                                 bool set_interface_priorities = true);
   virtual ~NrIceCtx();
 
   nr_ice_ctx *ctx() { return ctx_; }
@@ -111,6 +175,17 @@ class NrIceCtx {
   // Set the other side's global attributes
   nsresult ParseGlobalAttributes(std::vector<std::string> attrs);
 
+  // Set whether we are controlling or not.
+  nsresult SetControlling(Controlling controlling);
+
+  // Set the STUN servers. Must be called before StartGathering
+  // (if at all).
+  nsresult SetStunServers(const std::vector<NrIceStunServer>& stun_servers);
+
+  // Provide the resolution provider. Must be called before
+  // StartGathering.
+  nsresult SetResolver(nr_resolver *resolver);
+
   // Start ICE gathering
   nsresult StartGathering();
 
@@ -132,15 +207,20 @@ class NrIceCtx {
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(NrIceCtx)
 
  private:
-  NrIceCtx(const std::string& name, bool offerer)
-      : state_(ICE_CTX_INIT),
-      name_(name),
-      offerer_(offerer),
-      streams_(),
-      ctx_(nullptr),
-      peer_(nullptr),
-      ice_handler_vtbl_(nullptr),
-      ice_handler_(nullptr) {}
+  NrIceCtx(const std::string& name,
+           bool offerer)
+  : state_(ICE_CTX_INIT),
+    name_(name),
+    offerer_(offerer),
+    streams_(),
+    ctx_(nullptr),
+    peer_(nullptr),
+    ice_handler_vtbl_(nullptr),
+    ice_handler_(nullptr)
+  {
+    // XXX: offerer_ will be used eventually;  placate clang in the meantime.
+    (void)offerer_;
+  }
 
   DISALLOW_COPY_ASSIGN(NrIceCtx);
 

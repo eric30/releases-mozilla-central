@@ -25,8 +25,6 @@
 #include "nsIDOMRange.h"
 #include "nsIHTMLDocument.h"
 #include "nsIDocShell.h"
-#include "nsIEditorDocShell.h"
-#include "nsIDocShellTreeItem.h"
 #include "nsIDocShellTreeOwner.h"
 #include "nsLayoutUtils.h"
 #include "nsIPresShell.h"
@@ -39,7 +37,7 @@
 #include "nsIWebNavigation.h"
 #include "nsCaret.h"
 #include "nsIBaseWindow.h"
-#include "nsIViewManager.h"
+#include "nsViewManager.h"
 #include "nsFrameSelection.h"
 #include "mozilla/Selection.h"
 #include "nsXULPopupManager.h"
@@ -54,6 +52,7 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/Preferences.h"
+#include <algorithm>
 
 #ifdef MOZ_XUL
 #include "nsIDOMXULTextboxElement.h"
@@ -606,20 +605,16 @@ nsFocusManager::MoveCaretToFocus(nsIDOMWindow* aWindow)
   if (dsti) {
     dsti->GetItemType(&itemType);
     if (itemType != nsIDocShellTreeItem::typeChrome) {
-      // don't move the caret for editable documents
-      nsCOMPtr<nsIEditorDocShell> editorDocShell(do_QueryInterface(dsti));
-      if (editorDocShell) {
-        bool isEditable;
-        editorDocShell->GetEditable(&isEditable);
-        if (isEditable)
-          return NS_OK;
-      }
-
       nsCOMPtr<nsIDocShell> docShell = do_QueryInterface(dsti);
       NS_ENSURE_TRUE(docShell, NS_ERROR_FAILURE);
 
-      nsCOMPtr<nsIPresShell> presShell;
-      docShell->GetPresShell(getter_AddRefs(presShell));
+      // don't move the caret for editable documents
+      bool isEditable;
+      docShell->GetEditable(&isEditable);
+      if (isEditable)
+        return NS_OK;
+
+      nsCOMPtr<nsIPresShell> presShell = docShell->GetPresShell();
       NS_ENSURE_TRUE(presShell, NS_ERROR_FAILURE);
 
       nsCOMPtr<nsPIDOMWindow> window(do_QueryInterface(aWindow));
@@ -716,8 +711,7 @@ nsFocusManager::WindowRaised(nsIDOMWindow* aWindow)
 
   nsCOMPtr<nsIDocShell> currentDocShell = currentWindow->GetDocShell();
 
-  nsCOMPtr<nsIPresShell> presShell;
-  currentDocShell->GetPresShell(getter_AddRefs(presShell));
+  nsCOMPtr<nsIPresShell> presShell = currentDocShell->GetPresShell();
   if (presShell) {
     // disable selection mousedown state on activation
     // XXXndeakin P3 not sure if this is necessary, but it doesn't hurt
@@ -927,8 +921,7 @@ nsFocusManager::WindowHidden(nsIDOMWindow* aWindow)
   nsCOMPtr<nsIContent> oldFocusedContent = mFocusedContent.forget();
 
   nsCOMPtr<nsIDocShell> focusedDocShell = mFocusedWindow->GetDocShell();
-  nsCOMPtr<nsIPresShell> presShell;
-  focusedDocShell->GetPresShell(getter_AddRefs(presShell));
+  nsCOMPtr<nsIPresShell> presShell = focusedDocShell->GetPresShell();
 
   if (oldFocusedContent && oldFocusedContent->IsInDoc()) {
     NotifyFocusStateChange(oldFocusedContent,
@@ -1056,10 +1049,9 @@ nsFocusManager::EnsureCurrentWidgetFocused()
   // platform knows that this widget is focused.
   nsCOMPtr<nsIDocShell> docShell = mFocusedWindow->GetDocShell();
   if (docShell) {
-    nsCOMPtr<nsIPresShell> presShell;
-    docShell->GetPresShell(getter_AddRefs(presShell));
+    nsCOMPtr<nsIPresShell> presShell = docShell->GetPresShell();
     if (presShell) {
-      nsIViewManager* vm = presShell->GetViewManager();
+      nsViewManager* vm = presShell->GetViewManager();
       if (vm) {
         nsCOMPtr<nsIWidget> widget;
         vm->GetRootWidget(getter_AddRefs(widget));
@@ -1118,9 +1110,8 @@ nsFocusManager::SetFocusInner(nsIContent* aNewContent, int32_t aFlags,
     if (beingDestroyed)
       return;
 
-    nsCOMPtr<nsIDocShellTreeItem> dsti = do_QueryInterface(docShell);
     nsCOMPtr<nsIDocShellTreeItem> parentDsti;
-    dsti->GetParent(getter_AddRefs(parentDsti));
+    docShell->GetParent(getter_AddRefs(parentDsti));
     docShell = do_QueryInterface(parentDsti);
   }
 
@@ -1161,21 +1152,22 @@ nsFocusManager::SetFocusInner(nsIContent* aNewContent, int32_t aFlags,
     isElementInActiveWindow = (mActiveWindow && newRootWindow == mActiveWindow);
   }
 
-  // Exit full-screen if we're focusing a windowed plugin on a non-MacOSX
+  // Exit fullscreen if we're focusing a windowed plugin on a non-MacOSX
   // system. We don't control event dispatch to windowed plugins on non-MacOSX,
-  // so we can't display the "Press ESC to leave full-screen mode" warning on
-  // key input if a windowed plugin is focused, so just exit full-screen
+  // so we can't display the "Press ESC to leave fullscreen mode" warning on
+  // key input if a windowed plugin is focused, so just exit fullscreen
   // to guard against phishing.
 #ifndef XP_MACOSX
+  nsIDocument* fullscreenAncestor;
   if (contentToFocus &&
-      nsContentUtils::GetRootDocument(contentToFocus->OwnerDoc())->IsFullScreenDoc() &&
+      (fullscreenAncestor = nsContentUtils::GetFullscreenAncestor(contentToFocus->OwnerDoc())) &&
       nsContentUtils::HasPluginWithUncontrolledEventDispatch(contentToFocus)) {
     nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
                                     "DOM",
                                     contentToFocus->OwnerDoc(),
                                     nsContentUtils::eDOM_PROPERTIES,
                                     "FocusedWindowedPluginWhileFullScreen");
-    nsIDocument::ExitFullScreen(true);
+    nsIDocument::ExitFullscreen(fullscreenAncestor, /* async */ true);
   }
 #endif
 
@@ -1262,8 +1254,7 @@ nsFocusManager::SetFocusInner(nsIContent* aNewContent, int32_t aFlags,
     if (aFocusChanged) {
       nsCOMPtr<nsIDocShell> docShell = newWindow->GetDocShell();
 
-      nsCOMPtr<nsIPresShell> presShell;
-      docShell->GetPresShell(getter_AddRefs(presShell));
+      nsCOMPtr<nsIPresShell> presShell = docShell->GetPresShell();
       if (presShell)
         ScrollIntoView(presShell, contentToFocus, aFlags);
     }
@@ -1328,7 +1319,7 @@ nsFocusManager::GetCommonAncestor(nsPIDOMWindow* aWindow1,
   uint32_t pos2 = parents2.Length();
   nsIDocShellTreeItem* parent = nullptr;
   uint32_t len;
-  for (len = NS_MIN(pos1, pos2); len > 0; --len) {
+  for (len = std::min(pos1, pos2); len > 0; --len) {
     nsIDocShellTreeItem* child1 = parents1.ElementAt(--pos1);
     nsIDocShellTreeItem* child2 = parents2.ElementAt(--pos2);
     if (child1 != child2) {
@@ -1470,7 +1461,7 @@ nsFocusManager::CheckIfFocusable(nsIContent* aContent, uint32_t aFlags)
   // offscreen browsers can still be focused.
   nsIDocument* subdoc = doc->GetSubDocumentFor(aContent);
   if (subdoc && IsWindowVisible(subdoc->GetWindow())) {
-    const nsStyleUserInterface* ui = frame->GetStyleUserInterface();
+    const nsStyleUserInterface* ui = frame->StyleUserInterface();
     int32_t tabIndex = (ui->mUserFocus == NS_STYLE_USER_FOCUS_IGNORE ||
                         ui->mUserFocus == NS_STYLE_USER_FOCUS_NONE) ? -1 : 0;
     return aContent->IsFocusable(&tabIndex, aFlags & FLAG_BYMOUSE) ? aContent : nullptr;
@@ -1513,8 +1504,7 @@ nsFocusManager::Blur(nsPIDOMWindow* aWindowToClear,
 
   // Keep a ref to presShell since dispatching the DOM event may cause
   // the document to be destroyed.
-  nsCOMPtr<nsIPresShell> presShell;
-  docShell->GetPresShell(getter_AddRefs(presShell));
+  nsCOMPtr<nsIPresShell> presShell = docShell->GetPresShell();
   if (!presShell) {
     mFocusedContent = nullptr;
     return true;
@@ -1558,7 +1548,7 @@ nsFocusManager::Blur(nsPIDOMWindow* aWindowToClear,
       if (aAdjustWidgets && objectFrame && !sTestMode) {
         // note that the presshell's widget is being retrieved here, not the one
         // for the object frame.
-        nsIViewManager* vm = presShell->GetViewManager();
+        nsViewManager* vm = presShell->GetViewManager();
         if (vm) {
           nsCOMPtr<nsIWidget> widget;
           vm->GetRootWidget(getter_AddRefs(widget));
@@ -1664,8 +1654,7 @@ nsFocusManager::Focus(nsPIDOMWindow* aWindow,
   if (!docShell)
     return;
 
-  nsCOMPtr<nsIPresShell> presShell;
-  docShell->GetPresShell(getter_AddRefs(presShell));
+  nsCOMPtr<nsIPresShell> presShell = docShell->GetPresShell();
   if (!presShell)
     return;
 
@@ -1733,7 +1722,7 @@ nsFocusManager::Focus(nsPIDOMWindow* aWindow,
       objectFrameWidget = objectFrame->GetWidget();
   }
   if (aAdjustWidgets && !objectFrameWidget && !sTestMode) {
-    nsIViewManager* vm = presShell->GetViewManager();
+    nsViewManager* vm = presShell->GetViewManager();
     if (vm) {
       nsCOMPtr<nsIWidget> widget;
       vm->GetRootWidget(getter_AddRefs(widget));
@@ -1745,9 +1734,14 @@ nsFocusManager::Focus(nsPIDOMWindow* aWindow,
   // if switching to a new document, first fire the focus event on the
   // document and then the window.
   if (aIsNewDocument) {
-    nsIMEStateManager::OnChangeFocus(presShell->GetPresContext(), nullptr,
-                                     GetFocusMoveActionCause(aFlags));
     nsIDocument* doc = aWindow->GetExtantDoc();
+    // The focus change should be notified to nsIMEStateManager from here if
+    // the focused content is a designMode editor since any content won't
+    // receive focus event.
+    if (doc && doc->HasFlag(NODE_IS_EDITABLE)) {
+      nsIMEStateManager::OnChangeFocus(presShell->GetPresContext(), nullptr,
+                                       GetFocusMoveActionCause(aFlags));
+    }
     if (doc)
       SendFocusOrBlurEvent(NS_FOCUS_CONTENT, presShell, doc,
                            doc, aFlags & FOCUSMETHOD_MASK, aWindowRaised);
@@ -1819,7 +1813,7 @@ nsFocusManager::Focus(nsPIDOMWindow* aWindow,
     if (aAdjustWidgets && objectFrameWidget &&
         mFocusedWindow == aWindow && mFocusedContent == nullptr &&
         !sTestMode) {
-      nsIViewManager* vm = presShell->GetViewManager();
+      nsViewManager* vm = presShell->GetViewManager();
       if (vm) {
         nsCOMPtr<nsIWidget> widget;
         vm->GetRootWidget(getter_AddRefs(widget));
@@ -1862,7 +1856,7 @@ public:
   NS_IMETHOD Run()
   {
     nsFocusEvent event(true, mType);
-    event.flags |= NS_EVENT_FLAG_CANT_BUBBLE;
+    event.mFlags.mBubbles = false;
     event.fromRaise = mWindowRaised;
     event.isRefocus = mIsRefocus;
     return nsEventDispatcher::Dispatch(mTarget, mContext, &event);
@@ -1977,12 +1971,11 @@ nsFocusManager::RaiseWindow(nsPIDOMWindow* aWindow)
   if (!docShell)
     return;
 
-  nsCOMPtr<nsIPresShell> presShell;
-  docShell->GetPresShell(getter_AddRefs(presShell));
+  nsCOMPtr<nsIPresShell> presShell = docShell->GetPresShell();
   if (!presShell)
     return;
 
-  nsIViewManager* vm = presShell->GetViewManager();
+  nsViewManager* vm = presShell->GetViewManager();
   if (vm) {
     nsCOMPtr<nsIWidget> widget;
     vm->GetRootWidget(getter_AddRefs(widget));
@@ -2026,8 +2019,7 @@ nsFocusManager::UpdateCaret(bool aMoveCaretToFocus,
   bool browseWithCaret =
     Preferences::GetBool("accessibility.browsewithcaret");
 
-  nsCOMPtr<nsIPresShell> presShell;
-  focusedDocShell->GetPresShell(getter_AddRefs(presShell));
+  nsCOMPtr<nsIPresShell> presShell = focusedDocShell->GetPresShell();
   if (!presShell)
     return;
 
@@ -2035,22 +2027,19 @@ nsFocusManager::UpdateCaret(bool aMoveCaretToFocus,
   // contentEditable document and the node to focus is contentEditable,
   // return, so that we don't mess with caret visibility.
   bool isEditable = false;
-  nsCOMPtr<nsIEditorDocShell> editorDocShell(do_QueryInterface(dsti));
-  if (editorDocShell) {
-    editorDocShell->GetEditable(&isEditable);
+  focusedDocShell->GetEditable(&isEditable);
 
-    if (isEditable) {
-      nsCOMPtr<nsIHTMLDocument> doc =
-        do_QueryInterface(presShell->GetDocument());
+  if (isEditable) {
+    nsCOMPtr<nsIHTMLDocument> doc =
+      do_QueryInterface(presShell->GetDocument());
 
-      bool isContentEditableDoc =
-        doc && doc->GetEditingState() == nsIHTMLDocument::eContentEditable;
+    bool isContentEditableDoc =
+      doc && doc->GetEditingState() == nsIHTMLDocument::eContentEditable;
 
-      bool isFocusEditable =
-        aContent && aContent->HasFlag(NODE_IS_EDITABLE);
-      if (!isContentEditableDoc || isFocusEditable)
-        return;
-    }
+    bool isFocusEditable =
+      aContent && aContent->HasFlag(NODE_IS_EDITABLE);
+    if (!isContentEditableDoc || isFocusEditable)
+      return;
   }
 
   if (!isEditable && aMoveCaretToFocus)
@@ -2452,8 +2441,7 @@ nsFocusManager::DetermineElementToMoveFocus(nsPIDOMWindow* aWindow,
     else {
       // Otherwise, for content shells, start from the location of the caret.
       int32_t itemType;
-      nsCOMPtr<nsIDocShellTreeItem> shellItem = do_QueryInterface(docShell);
-      shellItem->GetItemType(&itemType);
+      docShell->GetItemType(&itemType);
       if (itemType != nsIDocShellTreeItem::typeChrome) {
         nsCOMPtr<nsIContent> endSelectionContent;
         GetSelectionLocation(doc, presShell,
@@ -2556,10 +2544,8 @@ nsFocusManager::DetermineElementToMoveFocus(nsPIDOMWindow* aWindow,
 
     // reached the beginning or end of the document. Traverse up to the parent
     // document and try again.
-    nsCOMPtr<nsIDocShellTreeItem> dsti = do_QueryInterface(docShell);
-
     nsCOMPtr<nsIDocShellTreeItem> docShellParent;
-    dsti->GetParent(getter_AddRefs(docShellParent));
+    docShell->GetParent(getter_AddRefs(docShellParent));
     if (docShellParent) {
       // move up to the parent shell and try again from there.
 
@@ -2972,8 +2958,8 @@ nsFocusManager::GetRootForFocus(nsPIDOMWindow* aWindow,
   }
   else  {
     int32_t itemType;
-    nsCOMPtr<nsIDocShellTreeItem> shellItem = do_QueryInterface(aWindow->GetDocShell());
-    shellItem->GetItemType(&itemType);
+    nsCOMPtr<nsIDocShell> docShell = aWindow->GetDocShell();
+    docShell->GetItemType(&itemType);
 
     if (itemType == nsIDocShellTreeItem::typeChrome)
       return nullptr;
@@ -3148,12 +3134,12 @@ nsFocusManager::GetNextTabbableDocument(nsIContent* aStartContent, bool aForward
   // If currentPopup is set, then the starting content is in a panel.
   nsIFrame* currentPopup = nullptr;
   nsCOMPtr<nsIDocument> doc;
-  nsCOMPtr<nsIDocShellTreeItem> startItem;
+  nsCOMPtr<nsIDocShell> startDocShell;
 
   if (aStartContent) {
     doc = aStartContent->GetCurrentDoc();
     if (doc) {
-      startItem = do_QueryInterface(doc->GetWindow()->GetDocShell());
+      startDocShell = doc->GetWindow()->GetDocShell();
     }
 
     // Check if the starting content is inside a panel. Document navigation
@@ -3168,25 +3154,25 @@ nsFocusManager::GetNextTabbableDocument(nsIContent* aStartContent, bool aForward
     }
   }
   else if (mFocusedWindow) {
-    startItem = do_QueryInterface(mFocusedWindow->GetDocShell());
+    startDocShell = mFocusedWindow->GetDocShell();
     doc = mFocusedWindow->GetExtantDoc();
   }
   else {
     nsCOMPtr<nsIWebNavigation> webnav = do_GetInterface(mActiveWindow);
-    startItem = do_QueryInterface(webnav);
+    startDocShell = do_QueryInterface(webnav);
 
     if (mActiveWindow) {
       doc = mActiveWindow->GetExtantDoc();
     }
   }
 
-  if (!startItem)
+  if (!startDocShell)
     return nullptr;
 
   // perform a depth first search (preorder) of the docshell tree
   // looking for an HTML Frame or a chrome document
   nsIContent* content = aStartContent;
-  nsCOMPtr<nsIDocShellTreeItem> curItem = startItem;
+  nsCOMPtr<nsIDocShellTreeItem> curItem = startDocShell.get();
   nsCOMPtr<nsIDocShellTreeItem> nextItem;
   do {
     // If moving forward, check for a panel in the starting document. If one
@@ -3219,7 +3205,7 @@ nsFocusManager::GetNextTabbableDocument(nsIContent* aStartContent, bool aForward
         GetNextDocShell(curItem, getter_AddRefs(nextItem));
         if (!nextItem) {
           // wrap around to the beginning, which is the top of the tree
-          startItem->GetRootTreeItem(getter_AddRefs(nextItem));
+          startDocShell->GetRootTreeItem(getter_AddRefs(nextItem));
         }
       }
       else {
@@ -3227,7 +3213,7 @@ nsFocusManager::GetNextTabbableDocument(nsIContent* aStartContent, bool aForward
         if (!nextItem) {
           // wrap around to the end, which is the last item in the tree
           nsCOMPtr<nsIDocShellTreeItem> rootItem;
-          startItem->GetRootTreeItem(getter_AddRefs(rootItem));
+          startDocShell->GetRootTreeItem(getter_AddRefs(rootItem));
           GetLastDocShell(rootItem, getter_AddRefs(nextItem));
         }
 

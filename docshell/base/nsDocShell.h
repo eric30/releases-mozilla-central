@@ -26,7 +26,6 @@
 
 #include "nsDocLoader.h"
 #include "nsIURILoader.h"
-#include "nsIEditorDocShell.h"
 
 #include "nsWeakReference.h"
 
@@ -131,7 +130,6 @@ typedef enum {
 
 class nsDocShell : public nsDocLoader,
                    public nsIDocShell,
-                   public nsIDocShellTreeItem, 
                    public nsIDocShellHistory,
                    public nsIWebNavigation,
                    public nsIBaseWindow, 
@@ -142,7 +140,6 @@ class nsDocShell : public nsDocLoader,
                    public nsIScriptGlobalObjectOwner,
                    public nsIRefreshURI,
                    public nsIWebProgressListener,
-                   public nsIEditorDocShell,
                    public nsIWebPageDescriptor,
                    public nsIAuthPromptProvider,
                    public nsIObserver,
@@ -176,7 +173,6 @@ public:
     NS_DECL_NSIWEBPROGRESSLISTENER
     NS_DECL_NSIREFRESHURI
     NS_DECL_NSICONTENTVIEWERCONTAINER
-    NS_DECL_NSIEDITORDOCSHELL
     NS_DECL_NSIWEBPAGEDESCRIPTOR
     NS_DECL_NSIAUTHPROMPTPROVIDER
     NS_DECL_NSIOBSERVER
@@ -675,6 +671,8 @@ protected:
 
     FrameType GetInheritedFrameType();
 
+    bool HasUnloadedParent();
+
     // hash of session storages, keyed by domain
     nsInterfaceHashtable<nsCStringHashKey, nsIDOMStorage> mStorages;
 
@@ -742,6 +740,10 @@ protected:
     nsCOMPtr<nsIURI>           mFailedURI;
     nsCOMPtr<nsIChannel>       mFailedChannel;
     uint32_t                   mFailedLoadType;
+
+    // Set in DoURILoad when the LOAD_RELOAD_ALLOW_MIXED_CONTENT flag is set.
+    // Checked in nsMixedContentBlocker, to see if the channels match.
+    nsCOMPtr<nsIChannel>       mMixedContentChannel;
 
     // WEAK REFERENCES BELOW HERE.
     // Note these are intentionally not addrefd.  Doing so will create a cycle.
@@ -840,6 +842,7 @@ protected:
 #ifdef DEBUG
     bool                       mInEnsureScriptEnv;
 #endif
+    bool                       mAffectPrivateSessionLifetime;
     uint64_t                   mHistoryID;
 
     static nsIURIFixup *sURIFixup;

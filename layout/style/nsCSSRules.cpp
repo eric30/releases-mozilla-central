@@ -14,7 +14,6 @@
 
 #include "nsString.h"
 #include "nsIAtom.h"
-#include "nsIURL.h"
 
 #include "nsCSSProps.h"
 #include "nsCSSStyleSheet.h"
@@ -25,10 +24,8 @@
 #include "nsICSSRuleList.h"
 #include "nsIDocument.h"
 #include "nsPresContext.h"
-#include "nsRuleNode.h"
 
 #include "nsContentUtils.h"
-#include "nsStyleConsts.h"
 #include "nsError.h"
 #include "nsStyleUtil.h"
 #include "mozilla/css/Declaration.h"
@@ -38,7 +35,7 @@
 #include "mozilla/dom/CSSStyleDeclarationBinding.h"
 #include "StyleRule.h"
 
-namespace css = mozilla::css;
+using namespace mozilla;
 
 #define IMPL_STYLE_RULE_INHERIT_GET_DOM_RULE_WEAK(class_, super_) \
   /* virtual */ nsIDOMCSSRule* class_::GetDOMRule()               \
@@ -565,7 +562,6 @@ GroupRule::~GroupRule()
   }
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(GroupRule)
 NS_IMPL_CYCLE_COLLECTING_ADDREF(GroupRule)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(GroupRule)
 
@@ -663,7 +659,7 @@ GroupRule::EnumerateRulesForwards(RuleEnumFunc aFunc, void * aData) const
 }
 
 /*
- * The next two methods (DeleteStyleRuleAt and InsertStyleRulesAt)
+ * The next two methods (DeleteStyleRuleAt and InsertStyleRuleAt)
  * should never be called unless you have first called WillDirty() on
  * the parents stylesheet.  After they are called, DidDirty() needs to
  * be called on the sheet
@@ -680,12 +676,11 @@ GroupRule::DeleteStyleRuleAt(uint32_t aIndex)
 }
 
 nsresult
-GroupRule::InsertStyleRulesAt(uint32_t aIndex,
-                              nsCOMArray<Rule>& aRules)
+GroupRule::InsertStyleRuleAt(uint32_t aIndex, Rule* aRule)
 {
-  aRules.EnumerateForwards(SetStyleSheetReference, GetStyleSheet());
-  aRules.EnumerateForwards(SetParentRuleReference, this);
-  if (! mRules.InsertObjectsAt(aRules, aIndex)) {
+  aRule->SetStyleSheet(GetStyleSheet());
+  aRule->SetParentRule(this);
+  if (! mRules.InsertObjectAt(aRule, aIndex)) {
     return NS_ERROR_FAILURE;
   }
   return NS_OK;
@@ -1619,12 +1614,13 @@ nsCSSFontFaceStyleDecl::GetPropertyValue(const nsAString & propertyName,
 }
 
 // nsIDOMCSSValue getPropertyCSSValue (in DOMString propertyName);
-NS_IMETHODIMP
+already_AddRefed<dom::CSSValue>
 nsCSSFontFaceStyleDecl::GetPropertyCSSValue(const nsAString & propertyName,
-                                            nsIDOMCSSValue **aResult)
+                                            ErrorResult& aRv)
 {
   // ??? nsDOMCSSDeclaration returns null/NS_OK, but that seems wrong.
-  return NS_ERROR_NOT_IMPLEMENTED;
+  aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
+  return nullptr;
 }
 
 // DOMString removeProperty (in DOMString propertyName) raises (DOMException);
@@ -1766,8 +1762,6 @@ nsCSSFontFaceRule::Clone() const
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsCSSFontFaceRule)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsCSSFontFaceRule)
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsCSSFontFaceRule)
 
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(nsCSSFontFaceRule)
   // Trace the wrapper for our declaration.  This just expands out
@@ -2012,13 +2006,24 @@ nsCSSKeyframeRule::Clone() const
   return clone.forget();
 }
 
-NS_IMPL_ADDREF(nsCSSKeyframeRule)
-NS_IMPL_RELEASE(nsCSSKeyframeRule)
+NS_IMPL_CYCLE_COLLECTING_ADDREF(nsCSSKeyframeRule)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(nsCSSKeyframeRule)
+
+
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsCSSKeyframeRule)
+  if (tmp->mDOMDeclaration) {
+    tmp->mDOMDeclaration->DropReference();
+    ImplCycleCollectionUnlink(tmp->mDOMDeclaration);
+  }
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsCSSKeyframeRule)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDOMDeclaration)
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 DOMCI_DATA(MozCSSKeyframeRule, nsCSSKeyframeRule)
 
 // QueryInterface implementation for nsCSSKeyframeRule
-NS_INTERFACE_MAP_BEGIN(nsCSSKeyframeRule)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsCSSKeyframeRule)
   NS_INTERFACE_MAP_ENTRY(nsIStyleRule)
   NS_INTERFACE_MAP_ENTRY(nsIDOMMozCSSKeyframeRule)
   NS_INTERFACE_MAP_ENTRY(nsIDOMCSSRule)
@@ -2307,7 +2312,7 @@ nsCSSKeyframesRule::GetCssRules(nsIDOMCSSRuleList* *aRuleList)
 }
 
 NS_IMETHODIMP
-nsCSSKeyframesRule::InsertRule(const nsAString& aRule)
+nsCSSKeyframesRule::AppendRule(const nsAString& aRule)
 {
   // The spec is confusing, and I think we should just append the rule,
   // which also turns out to match WebKit:
@@ -2594,7 +2599,11 @@ void
 nsCSSPageRule::ChangeDeclaration(css::Declaration* aDeclaration)
 {
   mImportantRule = nullptr;
-  mDeclaration = aDeclaration;
+  // Be careful to not assign to an nsAutoPtr if we would be assigning
+  // the thing it already holds.
+  if (aDeclaration != mDeclaration) {
+    mDeclaration = aDeclaration;
+  }
 
   nsCSSStyleSheet* sheet = GetStyleSheet();
   if (sheet) {

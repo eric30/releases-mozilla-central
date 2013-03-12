@@ -5,13 +5,14 @@
 
 /* a presentation of a document, part 1 */
 
+#include "mozilla/DebugOnly.h"
+
 #include "base/basictypes.h"
 
 #include "nsCOMPtr.h"
 #include "nsPresContext.h"
 #include "nsIPresShell.h"
 #include "nsILinkHandler.h"
-#include "nsIDocShellTreeItem.h"
 #include "nsIDocShell.h"
 #include "nsIContentViewer.h"
 #include "nsPIDOMWindow.h"
@@ -41,7 +42,7 @@
 #include "nsThreadUtils.h"
 #include "nsFrameManager.h"
 #include "nsLayoutUtils.h"
-#include "nsIViewManager.h"
+#include "nsViewManager.h"
 #include "nsCSSFrameConstructor.h"
 #include "nsCSSRuleProcessor.h"
 #include "nsStyleChangeList.h"
@@ -312,8 +313,6 @@ nsPresContext::~nsPresContext()
                                   "layout.css.devPixelsPerPx",
                                   this);
 }
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsPresContext)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsPresContext)
    NS_INTERFACE_MAP_ENTRY(nsISupports)
@@ -811,6 +810,8 @@ nsPresContext::AppUnitsPerDevPixelChanged()
     // All cached style data must be recomputed.
     MediaFeatureValuesChanged(eAlwaysRebuildStyle, NS_STYLE_HINT_REFLOW);
   }
+
+  mCurAppUnitsPerDevPixel = AppUnitsPerDevPixel();
 }
 
 void
@@ -824,7 +825,7 @@ nsPresContext::PreferenceChanged(const char* aPrefName)
       // Re-fetch the view manager's window dimensions in case there's a deferred
       // resize which hasn't affected our mVisibleArea yet
       nscoord oldWidthAppUnits, oldHeightAppUnits;
-      nsIViewManager* vm = mShell->GetViewManager();
+      nsViewManager* vm = mShell->GetViewManager();
       vm->GetWindowDimensions(&oldWidthAppUnits, &oldHeightAppUnits);
       float oldWidthDevPixels = oldWidthAppUnits/oldAppUnitsPerDevPixel;
       float oldHeightDevPixels = oldHeightAppUnits/oldAppUnitsPerDevPixel;
@@ -947,7 +948,14 @@ nsPresContext::Init(nsDeviceContext* aDeviceContext)
         nsCOMPtr<nsIDocShellTreeItem> parentItem;
         ourItem->GetSameTypeParent(getter_AddRefs(parentItem));
         if (parentItem) {
-          mRefreshDriver = parent->GetShell()->GetPresContext()->RefreshDriver();
+          Element* containingElement =
+            parent->FindContentForSubDocument(mDocument);
+          if (!containingElement->IsXUL() ||
+              !containingElement->
+                HasAttr(kNameSpaceID_None,
+                        nsGkAtoms::forceOwnRefreshDriver)) {
+            mRefreshDriver = parent->GetShell()->GetPresContext()->RefreshDriver();
+          }
         }
       }
     }
@@ -956,6 +964,10 @@ nsPresContext::Init(nsDeviceContext* aDeviceContext)
       mRefreshDriver = new nsRefreshDriver(this);
     }
   }
+
+  // Initialise refresh tick counters for OMTA
+  mLastStyleUpdateForAllAnimations =
+    mLastUpdateThrottledStyle = mRefreshDriver->MostRecentRefresh();
 
   mLangService = do_GetService(NS_LANGUAGEATOMSERVICE_CONTRACTID);
 
@@ -1147,11 +1159,21 @@ nsPresContext::GetParentPresContext()
 {
   nsIPresShell* shell = GetPresShell();
   if (shell) {
-    nsIFrame* rootFrame = shell->FrameManager()->GetRootFrame();
-    if (rootFrame) {
-      nsIFrame* f = nsLayoutUtils::GetCrossDocParentFrame(rootFrame);
-      if (f)
-        return f->PresContext();
+    nsViewManager* viewManager = shell->GetViewManager();
+    if (viewManager) {
+      nsView* view = viewManager->GetRootView();
+      if (view) {
+        view = view->GetParent(); // anonymous inner view
+        if (view) {
+          view = view->GetParent(); // subdocumentframe's view
+          if (view) {
+            nsIFrame* f = view->GetFrame();
+            if (f) {
+              return f->PresContext();
+            }
+          }
+        }
+      }
     }
   }
   return nullptr;
@@ -1178,6 +1200,19 @@ nsPresContext::GetNearestWidget(nsPoint* aOffset)
   nsIFrame* frame = mShell->GetRootFrame();
   NS_ENSURE_TRUE(frame, nullptr);
   return frame->GetView()->GetNearestWidget(aOffset);
+}
+
+nsIWidget*
+nsPresContext::GetRootWidget()
+{
+  NS_ENSURE_TRUE(mShell, nullptr);
+  nsViewManager* vm = mShell->GetViewManager();
+  if (!vm) {
+    return nullptr;
+  }
+  nsCOMPtr<nsIWidget> widget;
+  vm->GetRootWidget(getter_AddRefs(widget));
+  return widget.get();
 }
 
 // We may want to replace this with something faster, maybe caching the root prescontext
@@ -1386,8 +1421,6 @@ nsPresContext::SetFullZoom(float aZoom)
   AppUnitsPerDevPixelChanged();
 
   mSupressResizeReflow = false;
-
-  mCurAppUnitsPerDevPixel = AppUnitsPerDevPixel();
 }
 
 float
@@ -1643,7 +1676,8 @@ nsPresContext::UIResolutionChangedInternal()
 {
   mPendingUIResolutionChanged = false;
 
-  if (mDeviceContext->CheckDPIChange()) {
+  mDeviceContext->CheckDPIChange();
+  if (mCurAppUnitsPerDevPixel != AppUnitsPerDevPixel()) {
     AppUnitsPerDevPixelChanged();
   }
 
@@ -1873,7 +1907,7 @@ nsPresContext::InvalidateIsChromeCacheExternal()
 nsPresContext::HasAuthorSpecifiedRules(nsIFrame *aFrame, uint32_t ruleTypeMask) const
 {
   return
-    nsRuleNode::HasAuthorSpecifiedRules(aFrame->GetStyleContext(),
+    nsRuleNode::HasAuthorSpecifiedRules(aFrame->StyleContext(),
                                         ruleTypeMask,
                                         UseDocumentColors());
 }
@@ -2044,8 +2078,8 @@ nsPresContext::FireDOMPaintEvent(nsInvalidateRequestList* aList)
   if (!ourWindow)
     return;
 
-  nsCOMPtr<nsIDOMEventTarget> dispatchTarget = do_QueryInterface(ourWindow);
-  nsCOMPtr<nsIDOMEventTarget> eventTarget = dispatchTarget;
+  nsCOMPtr<EventTarget> dispatchTarget = do_QueryInterface(ourWindow);
+  nsCOMPtr<EventTarget> eventTarget = dispatchTarget;
   if (!IsChrome() && !mSendAfterPaintToContent) {
     // Don't tell the window about this event, it should not know that
     // something happened in a subdocument. Tell only the chrome event handler.
@@ -2062,7 +2096,7 @@ nsPresContext::FireDOMPaintEvent(nsInvalidateRequestList* aList)
   // This will empty our list in case dispatching the event causes more damage
   // (hopefully it won't, or we're likely to get an infinite loop! At least
   // it won't be blocking app execution though).
-  NS_NewDOMNotifyPaintEvent(getter_AddRefs(event), this, nullptr,
+  NS_NewDOMNotifyPaintEvent(getter_AddRefs(event), eventTarget, this, nullptr,
                             NS_AFTERPAINT, aList);
   if (!event) {
     return;
@@ -2332,9 +2366,11 @@ enum InterruptMode {
 // "random" (except on Windows) or "counter".  If neither is used, the mode is
 // ModeEvent.
 static InterruptMode sInterruptMode = ModeEvent;
+#ifndef XP_WIN
 // Used for the "random" mode.  Controlled by the GECKO_REFLOW_INTERRUPT_SEED
 // env var.
 static uint32_t sInterruptSeed = 1;
+#endif
 // Used for the "counter" mode.  This is the number of unskipped interrupt
 // checks that have to happen before we interrupt.  Controlled by the
 // GECKO_REFLOW_INTERRUPT_FREQUENCY env var.
@@ -2512,7 +2548,7 @@ nsPresContext::IsRootContentDocument()
     return false;
   }
   // We may not have a root frame, so use views.
-  nsIView* view = PresShell()->GetViewManager()->GetRootView();
+  nsView* view = PresShell()->GetViewManager()->GetRootView();
   if (!view) {
     return false;
   }

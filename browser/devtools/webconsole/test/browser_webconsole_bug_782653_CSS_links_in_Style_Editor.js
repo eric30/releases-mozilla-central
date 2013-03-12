@@ -40,7 +40,7 @@ function testViewSource(aHud)
       is(nodes.length, 2, "correct number of css messages");
 
       let target = TargetFactory.forTab(gBrowser.selectedTab);
-      let toolbox = gDevTools.getToolboxForTarget(target);
+      let toolbox = gDevTools.getToolbox(target);
       toolbox.once("styleeditor-selected", onStyleEditorReady);
 
       EventUtils.sendMouseEvent({ type: "click" }, nodes[0]);
@@ -67,6 +67,7 @@ function onStyleEditorReady(aEvent, aPanel)
         return sheet;
       }
     }
+    return null;
   }
 
   waitForFocus(function() {
@@ -81,17 +82,17 @@ function onStyleEditorReady(aEvent, aPanel)
       info("first check done");
 
       let target = TargetFactory.forTab(gBrowser.selectedTab);
-      let toolbox = gDevTools.getToolboxForTarget(target);
+      let toolbox = gDevTools.getToolbox(target);
 
       let sheet = sheetForNode(nodes[1]);
       ok(sheet, "sheet found");
       let line = nodes[1].sourceLine;
       ok(line, "found source line");
 
-      toolbox.once("webconsole-selected", function(aEvent) {
-        info(aEvent + " event fired");
+      toolbox.selectTool("webconsole").then(function() {
+        info("webconsole selected");
 
-        toolbox.once("styleeditor-selected", function() {
+        toolbox.once("styleeditor-selected", function(aEvent) {
           info(aEvent + " event fired");
 
           checkStyleEditorForSheetAndLine(sheet, line - 1, function() {
@@ -102,8 +103,6 @@ function onStyleEditorReady(aEvent, aPanel)
 
         EventUtils.sendMouseEvent({ type: "click" }, nodes[1]);
       });
-
-      toolbox.selectTool("webconsole");
     });
   }, win);
 }

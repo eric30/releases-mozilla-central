@@ -193,7 +193,8 @@ public:
 };
 
 AudioManager::AudioManager() : mPhoneState(PHONE_STATE_CURRENT),
-                 mObserver(new HeadphoneSwitchObserver())
+                 mObserver(new HeadphoneSwitchObserver()),
+                 mFMChannelIsMuted(0)
 {
   RegisterSwitchObserver(SWITCH_HEADPHONES, mObserver);
 
@@ -209,6 +210,9 @@ AudioManager::AudioManager() : mPhoneState(PHONE_STATE_CURRENT),
     AudioSystem::initStreamVolume(static_cast<audio_stream_type_t>(loop), 0,
                                   sMaxStreamVolumeTbl[loop]);
   }
+  // Force publicnotification to output at maximal volume
+  AudioSystem::setStreamVolumeIndex(static_cast<audio_stream_type_t>(AUDIO_STREAM_ENFORCED_AUDIBLE),
+                                    sMaxStreamVolumeTbl[AUDIO_STREAM_ENFORCED_AUDIBLE]);
 }
 
 AudioManager::~AudioManager() {
@@ -294,17 +298,36 @@ AudioManager::GetPhoneState(int32_t* aState)
 NS_IMETHODIMP
 AudioManager::SetPhoneState(int32_t aState)
 {
+  if (mPhoneState == aState) {
+    return NS_OK;
+  }
+
   if (AudioSystem::setPhoneState(aState)) {
     return NS_ERROR_FAILURE;
   }
 
   mPhoneState = aState;
 
-  nsRefPtr<AudioChannelService> audioChannelService = AudioChannelService::GetAudioChannelService();
-  if (!audioChannelService) {
-    return NS_ERROR_FAILURE;
+  if (mPhoneAudioAgent) {
+    mPhoneAudioAgent->StopPlaying();
+    mPhoneAudioAgent = nullptr;
   }
-  audioChannelService->SetPhoneInCall(aState == nsIAudioManager::PHONE_STATE_IN_CALL);
+
+  if (aState == PHONE_STATE_IN_CALL || aState == PHONE_STATE_RINGTONE) {
+    mPhoneAudioAgent = do_CreateInstance("@mozilla.org/audiochannelagent;1");
+    MOZ_ASSERT(mPhoneAudioAgent);
+    if (aState == PHONE_STATE_IN_CALL) {
+      // Telephony doesn't be paused by any other channels.
+      mPhoneAudioAgent->Init(AUDIO_CHANNEL_TELEPHONY, nullptr);
+    } else {
+      mPhoneAudioAgent->Init(AUDIO_CHANNEL_RINGER, nullptr);
+    }
+
+    // Telephony can always play.
+    bool canPlay;
+    mPhoneAudioAgent->StartPlaying(&canPlay);
+  }
+
   return NS_OK;
 }
 
@@ -393,10 +416,16 @@ NS_IMETHODIMP
 AudioManager::SetStreamVolumeIndex(int32_t aStream, int32_t aIndex) {
   status_t status =
     AudioSystem::setStreamVolumeIndex(static_cast<audio_stream_type_t>(aStream), aIndex);
-  // sync the fm stream volume with music volume
-  if (aStream == AUDIO_STREAM_MUSIC && IsDeviceOn(AUDIO_DEVICE_OUT_FM)) {
+
+  // sync the fm stream volume with music volume, except set fm volume by audioChannelServices
+  if (aStream == AUDIO_STREAM_FM && IsDeviceOn(AUDIO_DEVICE_OUT_FM)) {
+    mFMChannelIsMuted = aIndex == 0;
+  }
+  // sync fm volume with music stream type
+  if (aStream == AUDIO_STREAM_MUSIC && IsDeviceOn(AUDIO_DEVICE_OUT_FM) && !mFMChannelIsMuted) {
     AudioSystem::setStreamVolumeIndex(static_cast<audio_stream_type_t>(AUDIO_STREAM_FM), aIndex);
   }
+
   return status ? NS_ERROR_FAILURE : NS_OK;
 }
 

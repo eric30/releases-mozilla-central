@@ -6,11 +6,9 @@
 #ifndef nsError_h__
 #define nsError_h__
 
-#ifndef nscore_h___
-#include "nscore.h"  /* needed for nsresult */
-#endif
-#include "mozilla/Attributes.h"
 #include "mozilla/Likely.h"
+#include "mozilla/StandardInteger.h"
+#include "mozilla/TypedEnum.h"
 
 /*
  * To add error code to your module, you need to do the following:
@@ -117,18 +115,10 @@
  *   return foo ? F() : NS_ERROR_FAILURE;
  * to fail, because nsresult and nsresult::Enum are two distinct types and
  * either can be converted to the other, so it's ambiguous.  So we have to fall
- * back to a regular enum.  Fortunately, we need to support that anyway for the
- * sake of C, so it's not a big deal.
+ * back to a regular enum.
  */
-#if defined(__cplusplus) && defined(MOZ_HAVE_CXX11_STRONG_ENUMS)
+#if defined(MOZ_HAVE_CXX11_STRONG_ENUMS)
   typedef enum class tag_nsresult : uint32_t
-#elif defined(__cplusplus) && defined(MOZ_HAVE_CXX11_ENUM_TYPE)
-  /* Need underlying type for workaround of Microsoft compiler (Bug 794734) */
-  typedef enum tag_nsresult : uint32_t
-#else
-  /* C, or no strong enums */
-  typedef enum tag_nsresult
-#endif
   {
     #undef ERROR
     #define ERROR(key, val) key = val
@@ -136,10 +126,43 @@
     #undef ERROR
   } nsresult;
 
-#if defined(__cplusplus) && defined(MOZ_HAVE_CXX11_STRONG_ENUMS)
-  /* We're using enum classes, so we need #define's to put the constants in
-   * global scope for compatibility with old code. */
-  #include "ErrorListDefines.h"
+  /*
+   * enum classes don't place their initializers in the global scope, so we need
+   * #define's for compatibility with old code.
+   */
+  #include "ErrorListCxxDefines.h"
+#elif defined(MOZ_HAVE_CXX11_ENUM_TYPE)
+  typedef enum tag_nsresult : uint32_t
+  {
+    #undef ERROR
+    #define ERROR(key, val) key = val
+    #include "ErrorList.h"
+    #undef ERROR
+  } nsresult;
+#elif defined(__cplusplus)
+  /*
+   * We're C++ in an old compiler lacking enum classes *and* typed enums (likely
+   * gcc < 4.5.1 as clang/MSVC have long supported one or both), or compiler
+   * support is unknown.  Yet nsresult must have unsigned 32-bit representation.
+   * So just make it a typedef, and implement the constants with global consts.
+   */
+  typedef uint32_t nsresult;
+
+  const nsresult
+  #undef ERROR
+  #define ERROR(key, val) key = val
+  #include "ErrorList.h"
+  #undef ERROR
+    ;
+#else
+  /*
+   * C doesn't have any way to fix the type underlying an enum, and enum
+   * initializers can't have values outside the range of 'int'.  So typedef
+   * nsresult to the correct unsigned type, and fall back to using #defines for
+   * all error constants.
+   */
+  typedef uint32_t nsresult;
+  #include "ErrorListCDefines.h"
 #endif
 
 #undef SUCCESS_OR_FAILURE
@@ -214,11 +237,6 @@ inline bool NS_ERROR_GET_SEVERITY(nsresult err) {
 #ifdef _MSC_VER
 #pragma warning(disable: 4251) /* 'nsCOMPtr<class nsIInputStream>' needs to have dll-interface to be used by clients of class 'nsInputStream' */
 #pragma warning(disable: 4275) /* non dll-interface class 'nsISupports' used as base for dll-interface class 'nsIRDFNode' */
-#endif
-
-#if defined(XP_WIN) && defined(__cplusplus)
-extern bool sXPCOMHasLoadedNewDLLs;
-NS_EXPORT void NS_SetHasLoadedNewDLLs();
 #endif
 
 #endif

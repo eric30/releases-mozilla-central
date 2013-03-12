@@ -4,7 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsSVGClass.h"
-#include "nsSVGStylableElement.h"
+#include "nsSVGElement.h"
 #include "nsSMILValue.h"
 #include "SMILStringType.h"
 
@@ -27,7 +27,7 @@ NS_INTERFACE_MAP_END
 
 void
 nsSVGClass::SetBaseValue(const nsAString& aValue,
-                         nsSVGStylableElement *aSVGElement,
+                         nsSVGElement *aSVGElement,
                          bool aDoSetAttr)
 {
   NS_ASSERTION(aSVGElement, "Null element passed to SetBaseValue");
@@ -42,13 +42,13 @@ nsSVGClass::SetBaseValue(const nsAString& aValue,
 }
 
 void
-nsSVGClass::GetBaseValue(nsAString& aValue, const nsSVGStylableElement *aSVGElement) const
+nsSVGClass::GetBaseValue(nsAString& aValue, const nsSVGElement *aSVGElement) const
 {
   aSVGElement->GetAttr(kNameSpaceID_None, nsGkAtoms::_class, aValue);
 }
 
 void
-nsSVGClass::GetAnimValue(nsAString& aResult, const nsSVGStylableElement *aSVGElement) const
+nsSVGClass::GetAnimValue(nsAString& aResult, const nsSVGElement *aSVGElement) const
 {
   if (mAnimVal) {
     aResult = *mAnimVal;
@@ -59,7 +59,7 @@ nsSVGClass::GetAnimValue(nsAString& aResult, const nsSVGStylableElement *aSVGEle
 }
 
 void
-nsSVGClass::SetAnimValue(const nsAString& aValue, nsSVGStylableElement *aSVGElement)
+nsSVGClass::SetAnimValue(const nsAString& aValue, nsSVGElement *aSVGElement)
 {
   if (mAnimVal && mAnimVal->Equals(aValue)) {
     return;
@@ -72,15 +72,6 @@ nsSVGClass::SetAnimValue(const nsAString& aValue, nsSVGStylableElement *aSVGElem
   aSVGElement->DidAnimateClass();
 }
 
-nsresult
-nsSVGClass::ToDOMAnimatedString(nsIDOMSVGAnimatedString **aResult,
-                                nsSVGStylableElement *aSVGElement)
-{
-  *aResult = new DOMAnimatedString(this, aSVGElement);
-  NS_ADDREF(*aResult);
-  return NS_OK;
-}
-
 NS_IMETHODIMP
 nsSVGClass::DOMAnimatedString::GetAnimVal(nsAString& aResult)
 { 
@@ -90,7 +81,7 @@ nsSVGClass::DOMAnimatedString::GetAnimVal(nsAString& aResult)
 }
 
 nsISMILAttr*
-nsSVGClass::ToSMILAttr(nsSVGStylableElement *aSVGElement)
+nsSVGClass::ToSMILAttr(nsSVGElement *aSVGElement)
 {
   return new SMILString(this, aSVGElement);
 }

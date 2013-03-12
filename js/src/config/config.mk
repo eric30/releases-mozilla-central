@@ -76,9 +76,9 @@ LIBXUL_DIST ?= $(DIST)
 # build products (typelibs, components, chrome).
 #
 # If XPI_NAME is set, the files will be shipped to $(DIST)/xpi-stage/$(XPI_NAME)
-# If DIST_SUBDIR is set, the files will be shipped to $(DIST)/$(DIST_SUBDIR)
-# Otherwise, the default $(DIST)/bin will be used.
-FINAL_TARGET = $(if $(XPI_NAME),$(DIST)/xpi-stage/$(XPI_NAME),$(if $(DIST_SUBDIR),$(DIST)/bin/$(DIST_SUBDIR),$(DIST)/bin))
+# instead of $(DIST)/bin. In both cases, if DIST_SUBDIR is set, the files will be
+# shipped to a $(DIST_SUBDIR) subdirectory.
+FINAL_TARGET = $(if $(XPI_NAME),$(DIST)/xpi-stage/$(XPI_NAME),$(DIST)/bin)$(DIST_SUBDIR:%=/%)
 
 ifdef XPI_NAME
 DEFINES += -DXPI_NAME=$(XPI_NAME)
@@ -199,17 +199,17 @@ endif
 endif
 
 #
-# Handle trace-malloc in optimized builds.
+# Handle trace-malloc and DMD in optimized builds.
 # No opt to give sane callstacks.
 #
-ifdef NS_TRACE_MALLOC
+ifneq (,$(NS_TRACE_MALLOC)$(MOZ_DMD))
 MOZ_OPTIMIZE_FLAGS=-Zi -Od -UDEBUG -DNDEBUG
 ifdef HAVE_64BIT_OS
-OS_LDFLAGS = -DEBUG -PDB:NONE -OPT:REF,ICF
+OS_LDFLAGS = -DEBUG -OPT:REF,ICF
 else
-OS_LDFLAGS = -DEBUG -PDB:NONE -OPT:REF
+OS_LDFLAGS = -DEBUG -OPT:REF
 endif
-endif # NS_TRACE_MALLOC
+endif # NS_TRACE_MALLOC || MOZ_DMD
 
 endif # MOZ_DEBUG
 
@@ -468,20 +468,20 @@ ifeq ($(OS_ARCH)_$(GNU_CC),WINNT_)
 #//------------------------------------------------------------------------
 ifdef USE_STATIC_LIBS
 RTL_FLAGS=-MT          # Statically linked multithreaded RTL
-ifneq (,$(MOZ_DEBUG)$(NS_TRACE_MALLOC))
+ifneq (,$(MOZ_DEBUG)$(NS_TRACE_MALLOC)$(MOZ_DMD))
 ifndef MOZ_NO_DEBUG_RTL
 RTL_FLAGS=-MTd         # Statically linked multithreaded MSVC4.0 debug RTL
 endif
-endif # MOZ_DEBUG || NS_TRACE_MALLOC
+endif # MOZ_DEBUG || NS_TRACE_MALLOC || MOZ_DMD
 
 else # !USE_STATIC_LIBS
 
 RTL_FLAGS=-MD          # Dynamically linked, multithreaded RTL
-ifneq (,$(MOZ_DEBUG)$(NS_TRACE_MALLOC))
+ifneq (,$(MOZ_DEBUG)$(NS_TRACE_MALLOC)$(MOZ_DMD))
 ifndef MOZ_NO_DEBUG_RTL
 RTL_FLAGS=-MDd         # Dynamically linked, multithreaded MSVC4.0 debug RTL
 endif
-endif # MOZ_DEBUG || NS_TRACE_MALLOC
+endif # MOZ_DEBUG || NS_TRACE_MALLOC || MOZ_DMD
 endif # USE_STATIC_LIBS
 endif # WINNT && !GNU_CC
 
@@ -552,29 +552,9 @@ endif
 endif
 endif
 
-ifeq ($(OS_ARCH),Darwin)
-ifdef NEXT_ROOT
-export NEXT_ROOT
-PBBUILD = NEXT_ROOT= $(PBBUILD_BIN)
-else # NEXT_ROOT
-PBBUILD = $(PBBUILD_BIN)
-endif # NEXT_ROOT
-PBBUILD_SETTINGS = GCC_VERSION="$(GCC_VERSION)" SYMROOT=build ARCHS="$(OS_TEST)"
-ifdef MACOS_SDK_DIR
-PBBUILD_SETTINGS += SDKROOT="$(MACOS_SDK_DIR)"
-endif # MACOS_SDK_DIR
 ifdef MACOSX_DEPLOYMENT_TARGET
 export MACOSX_DEPLOYMENT_TARGET
-PBBUILD_SETTINGS += MACOSX_DEPLOYMENT_TARGET="$(MACOSX_DEPLOYMENT_TARGET)"
 endif # MACOSX_DEPLOYMENT_TARGET
-
-ifdef MOZ_OPTIMIZE
-ifeq (2,$(MOZ_OPTIMIZE))
-# Only override project defaults if the config specified explicit settings
-PBBUILD_SETTINGS += GCC_MODEL_TUNING= OPTIMIZATION_CFLAGS="$(MOZ_OPTIMIZE_FLAGS)"
-endif # MOZ_OPTIMIZE=2
-endif # MOZ_OPTIMIZE
-endif # OS_ARCH=Darwin
 
 ifdef MOZ_USING_CCACHE
 ifdef CLANG_CXX
@@ -606,6 +586,13 @@ else
 WIN32_EXE_LDFLAGS	+= -SUBSYSTEM:WINDOWS
 endif
 endif
+endif
+endif
+
+ifdef _MSC_VER
+ifeq ($(CPU_ARCH),x86_64)
+# set stack to 2MB on x64 build.  See bug 582910
+WIN32_EXE_LDFLAGS	+= -STACK:2097152
 endif
 endif
 
@@ -746,20 +733,13 @@ ifdef MOZ_DEBUG
 JAVAC_FLAGS += -g
 endif
 
-ifdef TIERS
-DIRS += $(foreach tier,$(TIERS),$(tier_$(tier)_dirs))
-STATIC_DIRS += $(foreach tier,$(TIERS),$(tier_$(tier)_staticdirs))
-endif
-
-OPTIMIZE_JARS_CMD = $(PYTHON) $(call core_abspath,$(topsrcdir)/config/optimizejars.py)
-
 CREATE_PRECOMPLETE_CMD = $(PYTHON) $(call core_abspath,$(topsrcdir)/config/createprecomplete.py)
 
 # MDDEPDIR is the subdirectory where dependency files are stored
 MDDEPDIR := .deps
 
-EXPAND_LIBS_EXEC = $(PYTHON) $(topsrcdir)/config/pythonpath.py -I$(DEPTH)/config $(topsrcdir)/config/expandlibs_exec.py $(if $@,--depend $(MDDEPDIR)/$(@F).pp --target $@)
-EXPAND_LIBS_GEN = $(PYTHON) $(topsrcdir)/config/pythonpath.py -I$(DEPTH)/config $(topsrcdir)/config/expandlibs_gen.py $(if $@,--depend $(MDDEPDIR)/$(@F).pp)
+EXPAND_LIBS_EXEC = $(PYTHON) $(topsrcdir)/config/expandlibs_exec.py $(if $@,--depend $(MDDEPDIR)/$(@F).pp --target $@)
+EXPAND_LIBS_GEN = $(PYTHON) $(topsrcdir)/config/expandlibs_gen.py $(if $@,--depend $(MDDEPDIR)/$(@F).pp)
 EXPAND_AR = $(EXPAND_LIBS_EXEC) --extract -- $(AR)
 EXPAND_CC = $(EXPAND_LIBS_EXEC) --uselist -- $(CC)
 EXPAND_CCC = $(EXPAND_LIBS_EXEC) --uselist -- $(CCC)

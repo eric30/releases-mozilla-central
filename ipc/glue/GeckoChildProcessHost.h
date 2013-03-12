@@ -29,6 +29,8 @@ public:
   typedef base::ChildPrivileges ChildPrivileges;
   typedef base::ProcessHandle ProcessHandle;
 
+  static ChildPrivileges DefaultChildPrivileges();
+
   GeckoChildProcessHost(GeckoProcessType aProcessType,
                         ChildPrivileges aPrivileges=base::PRIVILEGES_DEFAULT);
 
@@ -96,6 +98,11 @@ public:
   }
 #endif
 
+  /**
+   * Must run on the IO thread.  Cause the OS process to exit and
+   * ensure its OS resources are cleaned up.
+   */
+  void Join();
 
 protected:
   GeckoProcessType mProcessType;

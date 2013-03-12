@@ -1,14 +1,17 @@
-#include <OMX.h>
-#include <stagefright/MediaSource.h>
 #include <stagefright/DataSource.h>
-
+#include <stagefright/MediaSource.h>
 #include <utils/RefBase.h>
 
 #include "GonkNativeWindow.h"
+#include "GonkNativeWindowClient.h"
 #include "GonkIOSurfaceImage.h"
 #include "MPAPI.h"
 #include "MediaResource.h"
 #include "AbstractMediaDecoder.h"
+
+namespace android {
+class OmxDecoder;
+};
 
 namespace mozilla {
 namespace layers {
@@ -16,8 +19,10 @@ namespace layers {
 class VideoGraphicBuffer : public GraphicBufferLocked {
   // XXX change this to an actual smart pointer at some point
   android::MediaBuffer *mMediaBuffer;
+  android::wp<android::OmxDecoder> mOmxDecoder;
   public:
-    VideoGraphicBuffer(android::MediaBuffer *aBuffer,
+    VideoGraphicBuffer(const android::wp<android::OmxDecoder> aOmxDecoder,
+                       android::MediaBuffer *aBuffer,
                        SurfaceDescriptor *aDescriptor);
     ~VideoGraphicBuffer();
     void Unlock();
@@ -62,19 +67,22 @@ private:
   MediaStreamSource &operator=(const MediaStreamSource &);
 };
 
-class OmxDecoder {
+class OmxDecoder : public RefBase {
   typedef MPAPI::AudioFrame AudioFrame;
   typedef MPAPI::VideoFrame VideoFrame;
   typedef mozilla::MediaResource MediaResource;
   typedef mozilla::AbstractMediaDecoder AbstractMediaDecoder;
 
   enum {
-    kPreferSoftwareCodecs = 1
+    kPreferSoftwareCodecs = 1,
+    kSoftwareCodecsOnly = 8,
+    kHardwareCodecsOnly = 16,
   };
 
   AbstractMediaDecoder *mDecoder;
   MediaResource *mResource;
   sp<GonkNativeWindow> mNativeWindow;
+  sp<GonkNativeWindowClient> mNativeWindowClient;
   sp<MediaSource> mVideoTrack;
   sp<MediaSource> mVideoSource;
   sp<MediaSource> mAudioTrack;
@@ -96,11 +104,26 @@ class OmxDecoder {
   MediaBuffer *mVideoBuffer;
   MediaBuffer *mAudioBuffer;
 
+  // Hold video's MediaBuffers that are released during video seeking.
+  // The holded MediaBuffers are released soon after seek completion.
+  // OMXCodec does not accept MediaBuffer during seeking. If MediaBuffer is
+  //  returned to OMXCodec during seeking, OMXCodec calls assert.
+  Vector<MediaBuffer *> mPendingVideoBuffers;
+  // Show if OMXCodec is seeking.
+  bool mIsVideoSeeking;
+  // The lock protects video MediaBuffer release()'s pending operations called
+  //  from multiple threads. The pending operations happen only during video
+  //  seeking. Holding mSeekLock long time could affect to video rendering.
+  // Holding time should be minimum.
+  Mutex mSeekLock;
+
   // 'true' if a read from the audio stream was done while reading the metadata
   bool mAudioMetadataRead;
 
   void ReleaseVideoBuffer();
   void ReleaseAudioBuffer();
+  // Call with mSeekLock held.
+  void ReleaseAllPendingVideoBuffersLocked();
 
   void PlanarYUV420Frame(VideoFrame *aFrame, int64_t aTimeUs, void *aData, size_t aSize, bool aKeyFrame);
   void CbYCrYFrame(VideoFrame *aFrame, int64_t aTimeUs, void *aData, size_t aSize, bool aKeyFrame);
@@ -147,6 +170,8 @@ public:
   MediaResource *GetResource() {
     return mResource;
   }
+
+  bool ReleaseVideoBuffer(MediaBuffer *aBuffer);
 };
 
 }

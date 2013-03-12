@@ -5,14 +5,20 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "DOMSVGTransform.h"
-#include "DOMSVGMatrix.h"
+#include "mozilla/dom/SVGMatrix.h"
 #include "SVGAnimatedTransformList.h"
 #include "nsError.h"
 #include <math.h>
 #include "nsContentUtils.h"
 #include "nsAttrValueInlines.h"
+#include "nsSVGAttrTearoffTable.h"
+#include "mozilla/dom/SVGTransformBinding.h"
 
 namespace mozilla {
+
+using namespace dom;
+
+static nsSVGAttrTearoffTable<DOMSVGTransform, SVGMatrix> sSVGMatrixTearoffTable;
 
 //----------------------------------------------------------------------
 // nsISupports methods:
@@ -21,32 +27,42 @@ namespace mozilla {
 // clear our list's weak ref to us to be safe. (The other option would be to
 // not unlink and rely on the breaking of the other edges in the cycle, as
 // NS_SVG_VAL_IMPL_CYCLE_COLLECTION does.)
-NS_IMPL_CYCLE_COLLECTION_CLASS(DOMSVGTransform)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(DOMSVGTransform)
   // We may not belong to a list, so we must null check tmp->mList.
   if (tmp->mList) {
     tmp->mList->mItems[tmp->mListIndex] = nullptr;
   }
 NS_IMPL_CYCLE_COLLECTION_UNLINK(mList)
+NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(DOMSVGTransform)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mList)
+  SVGMatrix* matrix =
+    sSVGMatrixTearoffTable.GetTearoff(tmp);
+  CycleCollectionNoteChild(cb, matrix, "matrix");
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+
+NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(DOMSVGTransform)
+NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER
+NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(DOMSVGTransform)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(DOMSVGTransform)
 
-} // namespace mozilla
-DOMCI_DATA(SVGTransform, mozilla::DOMSVGTransform)
-namespace mozilla {
-
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DOMSVGTransform)
+  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
   NS_INTERFACE_MAP_ENTRY(mozilla::DOMSVGTransform)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMSVGTransform)
-  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDOMSVGTransform)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(SVGTransform)
+  NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
+
+JSObject*
+DOMSVGTransform::WrapObject(JSContext* aCx, JSObject* aScope, bool* aTriedToWrap)
+{
+  return mozilla::dom::SVGTransformBinding::Wrap(aCx, aScope, this, aTriedToWrap);
+}
 
 //----------------------------------------------------------------------
 // Ctors:
@@ -58,8 +74,8 @@ DOMSVGTransform::DOMSVGTransform(DOMSVGTransformList *aList,
   , mListIndex(aListIndex)
   , mIsAnimValItem(aIsAnimValItem)
   , mTransform(nullptr)
-  , mMatrixTearoff(nullptr)
 {
+  SetIsDOMBinding();
   // These shifts are in sync with the members in the header.
   NS_ABORT_IF_FALSE(aList &&
                     aListIndex <= MaxListIndex(), "bad arg");
@@ -74,8 +90,8 @@ DOMSVGTransform::DOMSVGTransform()
   , mTransform(new SVGTransform()) // Default ctor for objects not in a list
                                    // initialises to matrix type with identity
                                    // matrix
-  , mMatrixTearoff(nullptr)
 {
+  SetIsDOMBinding();
 }
 
 DOMSVGTransform::DOMSVGTransform(const gfxMatrix &aMatrix)
@@ -83,8 +99,8 @@ DOMSVGTransform::DOMSVGTransform(const gfxMatrix &aMatrix)
   , mListIndex(0)
   , mIsAnimValItem(false)
   , mTransform(new SVGTransform(aMatrix))
-  , mMatrixTearoff(nullptr)
 {
+  SetIsDOMBinding();
 }
 
 DOMSVGTransform::DOMSVGTransform(const SVGTransform &aTransform)
@@ -92,169 +108,158 @@ DOMSVGTransform::DOMSVGTransform(const SVGTransform &aTransform)
   , mListIndex(0)
   , mIsAnimValItem(false)
   , mTransform(new SVGTransform(aTransform))
-  , mMatrixTearoff(nullptr)
 {
+  SetIsDOMBinding();
 }
 
-
-//----------------------------------------------------------------------
-// nsIDOMSVGTransform methods:
-
-/* readonly attribute unsigned short type; */
-NS_IMETHODIMP
-DOMSVGTransform::GetType(uint16_t *aType)
+DOMSVGTransform::~DOMSVGTransform()
 {
-  *aType = Transform().Type();
-  return NS_OK;
-}
-
-/* readonly attribute nsIDOMSVGMatrix matrix; */
-NS_IMETHODIMP
-DOMSVGTransform::GetMatrix(nsIDOMSVGMatrix * *aMatrix)
-{
-  if (!mMatrixTearoff) {
-    mMatrixTearoff = new DOMSVGMatrix(*this);
+  SVGMatrix* matrix = sSVGMatrixTearoffTable.GetTearoff(this);
+  if (matrix) {
+    sSVGMatrixTearoffTable.RemoveTearoff(this);
+    NS_RELEASE(matrix);
   }
-
-  NS_ADDREF(*aMatrix = mMatrixTearoff);
-  return NS_OK;
+  // Our mList's weak ref to us must be nulled out when we die. If GC has
+  // unlinked us using the cycle collector code, then that has already
+  // happened, and mList is null.
+  if (mList) {
+    mList->mItems[mListIndex] = nullptr;
+  }
 }
 
-/* readonly attribute float angle; */
-NS_IMETHODIMP
-DOMSVGTransform::GetAngle(float *aAngle)
+uint16_t
+DOMSVGTransform::Type() const
 {
-  *aAngle = Transform().Angle();
-  return NS_OK;
+  return Transform().Type();
 }
 
-/* void setMatrix (in nsIDOMSVGMatrix matrix); */
-NS_IMETHODIMP
-DOMSVGTransform::SetMatrix(nsIDOMSVGMatrix *matrix)
+SVGMatrix*
+DOMSVGTransform::Matrix()
 {
-  if (mIsAnimValItem)
-    return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR;
-
-  nsCOMPtr<DOMSVGMatrix> domMatrix = do_QueryInterface(matrix);
-  if (!domMatrix)
-    return NS_ERROR_DOM_SVG_WRONG_TYPE_ERR;
-
-  SetMatrix(domMatrix->Matrix());
-  return NS_OK;
+  SVGMatrix* wrapper =
+    sSVGMatrixTearoffTable.GetTearoff(this);
+  if (!wrapper) {
+    NS_ADDREF(wrapper = new SVGMatrix(*this));
+    sSVGMatrixTearoffTable.AddTearoff(this, wrapper);
+  }
+  return wrapper;
 }
 
-/* void setTranslate (in float tx, in float ty); */
-NS_IMETHODIMP
-DOMSVGTransform::SetTranslate(float tx, float ty)
+float
+DOMSVGTransform::Angle() const
+{
+  return Transform().Angle();
+}
+
+void
+DOMSVGTransform::SetMatrix(SVGMatrix& aMatrix, ErrorResult& rv)
 {
   if (mIsAnimValItem) {
-    return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR;
+    rv.Throw(NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR);
+    return;
   }
-  NS_ENSURE_FINITE2(tx, ty, NS_ERROR_ILLEGAL_VALUE);
+  SetMatrix(aMatrix.Matrix());
+}
 
-  if (Transform().Type() == nsIDOMSVGTransform::SVG_TRANSFORM_TRANSLATE &&
-      Matrix().x0 == tx && Matrix().y0 == ty) {
-    return NS_OK;
+void
+DOMSVGTransform::SetTranslate(float tx, float ty, ErrorResult& rv)
+{
+  if (mIsAnimValItem) {
+    rv.Throw(NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR);
+    return;
+  }
+
+  if (Transform().Type() == SVG_TRANSFORM_TRANSLATE &&
+      Matrixgfx().x0 == tx && Matrixgfx().y0 == ty) {
+    return;
   }
 
   nsAttrValue emptyOrOldValue = NotifyElementWillChange();
   Transform().SetTranslate(tx, ty);
   NotifyElementDidChange(emptyOrOldValue);
-
-  return NS_OK;
 }
 
-/* void setScale (in float sx, in float sy); */
-NS_IMETHODIMP
-DOMSVGTransform::SetScale(float sx, float sy)
+void
+DOMSVGTransform::SetScale(float sx, float sy, ErrorResult& rv)
 {
   if (mIsAnimValItem) {
-    return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR;
-  }
-  NS_ENSURE_FINITE2(sx, sy, NS_ERROR_ILLEGAL_VALUE);
-
-  if (Transform().Type() == nsIDOMSVGTransform::SVG_TRANSFORM_SCALE &&
-      Matrix().xx == sx && Matrix().yy == sy) {
-    return NS_OK;
+    rv.Throw(NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR);
+    return;
   }
 
+  if (Transform().Type() == SVG_TRANSFORM_SCALE &&
+      Matrixgfx().xx == sx && Matrixgfx().yy == sy) {
+    return;
+  }
   nsAttrValue emptyOrOldValue = NotifyElementWillChange();
   Transform().SetScale(sx, sy);
   NotifyElementDidChange(emptyOrOldValue);
-
-  return NS_OK;
 }
 
-/* void setRotate (in float angle, in float cx, in float cy); */
-NS_IMETHODIMP
-DOMSVGTransform::SetRotate(float angle, float cx, float cy)
+void
+DOMSVGTransform::SetRotate(float angle, float cx, float cy, ErrorResult& rv)
 {
   if (mIsAnimValItem) {
-    return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR;
+    rv.Throw(NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR);
+    return;
   }
-  NS_ENSURE_FINITE3(angle, cx, cy, NS_ERROR_ILLEGAL_VALUE);
 
-  if (Transform().Type() == nsIDOMSVGTransform::SVG_TRANSFORM_ROTATE) {
+  if (Transform().Type() == SVG_TRANSFORM_ROTATE) {
     float currentCx, currentCy;
     Transform().GetRotationOrigin(currentCx, currentCy);
     if (Transform().Angle() == angle && currentCx == cx && currentCy == cy) {
-      return NS_OK;
+      return;
     }
   }
 
   nsAttrValue emptyOrOldValue = NotifyElementWillChange();
   Transform().SetRotate(angle, cx, cy);
   NotifyElementDidChange(emptyOrOldValue);
-
-  return NS_OK;
 }
 
-/* void setSkewX (in float angle); */
-NS_IMETHODIMP
-DOMSVGTransform::SetSkewX(float angle)
+void
+DOMSVGTransform::SetSkewX(float angle, ErrorResult& rv)
 {
   if (mIsAnimValItem) {
-    return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR;
+    rv.Throw(NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR);
+    return;
   }
-  NS_ENSURE_FINITE(angle, NS_ERROR_ILLEGAL_VALUE);
 
-  if (Transform().Type() == nsIDOMSVGTransform::SVG_TRANSFORM_SKEWX &&
+  if (Transform().Type() == SVG_TRANSFORM_SKEWX &&
       Transform().Angle() == angle) {
-    return NS_OK;
+    return;
   }
 
   nsAttrValue emptyOrOldValue = NotifyElementWillChange();
-  nsresult rv = Transform().SetSkewX(angle);
-  if (NS_FAILED(rv))
-    return rv;
+  nsresult result = Transform().SetSkewX(angle);
+  if (NS_FAILED(result)) {
+    rv.Throw(result);
+    return;
+  }
   NotifyElementDidChange(emptyOrOldValue);
-
-  return NS_OK;
 }
 
-/* void setSkewY (in float angle); */
-NS_IMETHODIMP
-DOMSVGTransform::SetSkewY(float angle)
+void
+DOMSVGTransform::SetSkewY(float angle, ErrorResult& rv)
 {
   if (mIsAnimValItem) {
-    return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR;
+    rv.Throw(NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR);
+    return;
   }
-  NS_ENSURE_FINITE(angle, NS_ERROR_ILLEGAL_VALUE);
 
-  if (Transform().Type() == nsIDOMSVGTransform::SVG_TRANSFORM_SKEWY &&
+  if (Transform().Type() == SVG_TRANSFORM_SKEWY &&
       Transform().Angle() == angle) {
-    return NS_OK;
+    return;
   }
 
   nsAttrValue emptyOrOldValue = NotifyElementWillChange();
-  nsresult rv = Transform().SetSkewY(angle);
-  if (NS_FAILED(rv))
-    return rv;
+  nsresult result = Transform().SetSkewY(angle);
+  if (NS_FAILED(result)) {
+    rv.Throw(result);
+    return;
+  }
   NotifyElementDidChange(emptyOrOldValue);
-
-  return NS_OK;
 }
-
 
 //----------------------------------------------------------------------
 // List management methods:
@@ -314,7 +319,7 @@ DOMSVGTransform::IndexIsValid()
 
 
 //----------------------------------------------------------------------
-// Interface for DOMSVGMatrix's use
+// Interface for SVGMatrix's use
 
 void
 DOMSVGTransform::SetMatrix(const gfxMatrix& aMatrix)
@@ -322,8 +327,8 @@ DOMSVGTransform::SetMatrix(const gfxMatrix& aMatrix)
   NS_ABORT_IF_FALSE(!mIsAnimValItem,
       "Attempting to modify read-only transform");
 
-  if (Transform().Type() == nsIDOMSVGTransform::SVG_TRANSFORM_MATRIX &&
-      SVGTransform::MatricesEqual(Matrix(), aMatrix)) {
+  if (Transform().Type() == SVG_TRANSFORM_MATRIX &&
+      SVGTransform::MatricesEqual(Matrixgfx(), aMatrix)) {
     return;
   }
 
@@ -331,15 +336,6 @@ DOMSVGTransform::SetMatrix(const gfxMatrix& aMatrix)
   Transform().SetMatrix(aMatrix);
   NotifyElementDidChange(emptyOrOldValue);
 }
-
-void
-DOMSVGTransform::ClearMatrixTearoff(DOMSVGMatrix* aMatrix)
-{
-  NS_ABORT_IF_FALSE(mMatrixTearoff == aMatrix,
-      "Unexpected matrix pointer to be cleared");
-  mMatrixTearoff = nullptr;
-}
-
 
 //----------------------------------------------------------------------
 // Implementation helpers

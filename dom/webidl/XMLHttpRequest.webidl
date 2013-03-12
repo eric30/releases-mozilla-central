@@ -10,9 +10,7 @@
  * liability, trademark and document use rules apply.
  */
 
-interface Document;
 interface Blob;
-interface FormData;
 interface InputStream;
 interface MozChannel;
 interface IID;
@@ -92,6 +90,8 @@ interface XMLHttpRequest : XMLHttpRequestEventTarget {
   [Throws]
   void send(ArrayBuffer data);
   [Throws]
+  void send(ArrayBufferView data);
+  [Throws]
   void send(Blob data);
   [Throws]
   void send(Document data);
@@ -130,8 +130,6 @@ interface XMLHttpRequest : XMLHttpRequestEventTarget {
   readonly attribute Document? responseXML;
 
   // Mozilla-specific stuff
-  [SetterThrows=Workers]
-  attribute boolean multipart;
 
   [SetterThrows=Workers]
   attribute boolean mozBackgroundRequest;

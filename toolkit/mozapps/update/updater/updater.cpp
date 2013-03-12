@@ -82,6 +82,20 @@ void LaunchMacPostProcess(const char* aAppExe);
 
 #if defined(MOZ_WIDGET_GONK)
 # include "automounter_gonk.h"
+# include <unistd.h>
+# include <android/log.h>
+# include <linux/ioprio.h>
+# include <sys/resource.h>
+
+// The only header file in bionic which has a function prototype for ioprio_set
+// is libc/include/sys/linux-unistd.h. However, linux-unistd.h conflicts
+// badly with unistd.h, so we declare the prototype for ioprio_set directly.
+extern "C" int ioprio_set(int which, int who, int ioprio);
+
+# define MAYBE_USE_HARD_LINKS 1
+static bool sUseHardLinks = true;
+#else
+# define MAYBE_USE_HARD_LINKS 0
 #endif
 
 #ifdef XP_WIN
@@ -603,6 +617,25 @@ static int ensure_copy_symlink(const NS_tchar *path, const NS_tchar *dest)
 }
 #endif
 
+#if MAYBE_USE_HARD_LINKS
+/*
+ * Creates a hardlink (destFilename) which points to the existing file
+ * (srcFilename).
+ *
+ * @return 0 if successful, an error otherwise
+ */
+
+static int
+create_hard_link(const NS_tchar *srcFilename, const NS_tchar *destFilename)
+{
+  if (link(srcFilename, destFilename) < 0) {
+    LOG(("link(%s, %s) failed errno = %d", srcFilename, destFilename, errno));
+    return WRITE_ERROR;
+  }
+  return OK;
+}
+#endif
+
 // Copy the file named path onto a new file named dest.
 static int ensure_copy(const NS_tchar *path, const NS_tchar *dest)
 {
@@ -627,6 +660,16 @@ static int ensure_copy(const NS_tchar *path, const NS_tchar *dest)
 #ifdef XP_UNIX
   if (S_ISLNK(ss.st_mode)) {
     return ensure_copy_symlink(path, dest);
+  }
+#endif
+
+#if MAYBE_USE_HARD_LINKS
+  if (sUseHardLinks) {
+    if (!create_hard_link(path, dest)) {
+      return OK;
+    }
+    // Since we failed to create the hard link, fall through and copy the file.
+    sUseHardLinks = false;
   }
 #endif
 
@@ -2051,6 +2094,49 @@ ReadMARChannelIDs(const NS_tchar *path, MARChannelStringTable *results)
 }
 #endif
 
+static int
+GetUpdateFileName(NS_tchar *fileName, int maxChars)
+{
+#if defined(MOZ_WIDGET_GONK)  // If an update.link file exists, then it will contain the name
+  // of the update file (terminated by a newline).
+
+  NS_tchar linkFileName[MAXPATHLEN];
+  NS_tsnprintf(linkFileName, sizeof(linkFileName)/sizeof(linkFileName[0]),
+               NS_T("%s/update.link"), gSourcePath);
+  AutoFile linkFile = NS_tfopen(linkFileName, NS_T("rb"));
+  if (linkFile == NULL) {
+    NS_tsnprintf(fileName, maxChars,
+                 NS_T("%s/update.mar"), gSourcePath);
+    return OK;
+  }
+
+  char dataFileName[MAXPATHLEN];
+  size_t bytesRead;
+
+  if ((bytesRead = fread(dataFileName, 1, sizeof(dataFileName)-1, linkFile)) <= 0) {
+    *fileName = NS_T('\0');
+    return READ_ERROR;
+  }
+  if (dataFileName[bytesRead-1] == '\n') {
+    // Strip trailing newline (for \n and \r\n)
+    bytesRead--;
+  }
+  if (dataFileName[bytesRead-1] == '\r') {
+    // Strip trailing CR (for \r, \r\n)
+    bytesRead--;
+  }
+  dataFileName[bytesRead] = '\0';
+
+  strncpy(fileName, dataFileName, maxChars-1);
+  fileName[maxChars-1] = '\0';
+#else
+  // We currently only support update.link files under GONK
+  NS_tsnprintf(fileName, maxChars,
+               NS_T("%s/update.mar"), gSourcePath);
+#endif
+  return OK;
+}
+
 static void
 UpdateThreadFunc(void *param)
 {
@@ -2060,10 +2146,10 @@ UpdateThreadFunc(void *param)
     rv = ProcessReplaceRequest();
   } else {
     NS_tchar dataFile[MAXPATHLEN];
-    NS_tsnprintf(dataFile, sizeof(dataFile)/sizeof(dataFile[0]),
-                 NS_T("%s/update.mar"), gSourcePath);
-
-    rv = gArchiveReader.Open(dataFile);
+    rv = GetUpdateFileName(dataFile, sizeof(dataFile)/sizeof(dataFile[0]));
+    if (rv == OK) {
+      rv = gArchiveReader.Open(dataFile);
+    }
 
 #ifdef MOZ_VERIFY_MAR_SIGNATURE
     if (rv == OK) {
@@ -2173,6 +2259,23 @@ UpdateThreadFunc(void *param)
 
 int NS_main(int argc, NS_tchar **argv)
 {
+#if defined(MOZ_WIDGET_GONK)
+  if (getenv("LD_PRELOAD")) {
+    // If the updater is launched with LD_PRELOAD set, then we wind up
+    // preloading libmozglue.so. Under some circumstances, this can cause
+    // the remount of /system to fail when going from rw to ro, so if we
+    // detect LD_PRELOAD we unsetenv it and relaunch ourselves without it.
+    // This will cause the offending preloaded library to be closed.
+    //
+    // For a variety of reasons, this is really hard to do in a safe manner
+    // in the parent process, so we do it here.
+    unsetenv("LD_PRELOAD");
+    execv(argv[0], argv);
+    __android_log_print(ANDROID_LOG_INFO, "updater",
+                        "execve failed: errno: %d. Exiting...", errno);
+    _exit(1);
+  }
+#endif
   InitProgressUI(&argc, &argv);
 
   // To process an update the updater command line must at a minimum have the
@@ -2305,6 +2408,35 @@ int NS_main(int argc, NS_tchar **argv)
   } else if (sReplaceRequest) {
     LOG(("Performing a replace request"));
   }
+
+#ifdef MOZ_WIDGET_GONK
+  const char *prioEnv = getenv("MOZ_UPDATER_PRIO");
+  if (prioEnv) {
+    int32_t prioVal;
+    int32_t oomScoreAdj;
+    int32_t ioprioClass;
+    int32_t ioprioLevel;
+    if (sscanf(prioEnv, "%d/%d/%d/%d",
+               &prioVal, &oomScoreAdj, &ioprioClass, &ioprioLevel) == 4) {
+      LOG(("MOZ_UPDATER_PRIO=%s", prioEnv));
+      if (setpriority(PRIO_PROCESS, 0, prioVal)) {
+        LOG(("setpriority(%d) failed, errno = %d", prioVal, errno));
+      }
+      if (ioprio_set(IOPRIO_WHO_PROCESS, 0,
+                     IOPRIO_PRIO_VALUE(ioprioClass, ioprioLevel))) {
+        LOG(("ioprio_set(%d,%d) failed: errno = %d",
+             ioprioClass, ioprioLevel, errno));
+      }
+      FILE *fs = fopen("/proc/self/oom_score_adj", "w");
+      if (fs) {
+        fprintf(fs, "%d", oomScoreAdj);
+        fclose(fs);
+      } else {
+        LOG(("Unable to open /proc/self/oom_score_adj for writing, errno = %d", errno));
+      }
+    }
+  }
+#endif
 
 #ifdef XP_WIN
   int possibleWriteError; // Variable holding one of the errors 46-48

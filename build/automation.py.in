@@ -53,6 +53,7 @@ _IS_CYGWIN = False
 #expand _IS_TEST_BUILD = __IS_TEST_BUILD__
 #expand _IS_DEBUG_BUILD = __IS_DEBUG_BUILD__
 #expand _CRASHREPORTER = __CRASHREPORTER__ == 1
+#expand _IS_ASAN = __IS_ASAN__ == 1
 
 
 if _IS_WIN32:
@@ -121,6 +122,7 @@ class Automation(object):
   IS_TEST_BUILD = _IS_TEST_BUILD
   IS_DEBUG_BUILD = _IS_DEBUG_BUILD
   CRASHREPORTER = _CRASHREPORTER
+  IS_ASAN = _IS_ASAN
 
   # timeout, in seconds
   DEFAULT_TIMEOUT = 60.0
@@ -274,38 +276,37 @@ class Automation(object):
     cursor.execute("PRAGMA user_version=3");
 
     # SQL copied from nsPermissionManager.cpp
-    cursor.execute("""CREATE TABLE moz_hosts (
-       id INTEGER PRIMARY KEY,
-       host TEXT,
-       type TEXT,
-       permission INTEGER,
-       expireType INTEGER,
-       expireTime INTEGER,
-       appId INTEGER,
-       isInBrowserElement INTEGER)""")
+    cursor.execute("""CREATE TABLE IF NOT EXISTS moz_hosts (
+      id INTEGER PRIMARY KEY,
+      host TEXT,
+      type TEXT,
+      permission INTEGER,
+      expireType INTEGER,
+      expireTime INTEGER,
+      appId INTEGER,
+      isInBrowserElement INTEGER)""")
 
     # Insert desired permissions
-    c = 0
     for perm in permissions.keys():
       for host,allow in permissions[perm]:
-        c += 1
-        cursor.execute("INSERT INTO moz_hosts values(?, ?, ?, ?, 0, 0, 0, 0)",
-                       (c, host, perm, 1 if allow else 2))
+        cursor.execute("INSERT INTO moz_hosts values(NULL, ?, ?, ?, 0, 0, 0, 0)",
+                       (host, perm, 1 if allow else 2))
 
     # Commit and close
     permDB.commit()
     cursor.close()
 
   def setupTestApps(self, profileDir, apps):
-    webappJSONTemplate = Template(""""$name": {
-"origin": "$origin",
-"installOrigin": "$origin",
-"receipt": null,
-"installTime": 132333986000,
-"manifestURL": "$manifestURL",
-"localId": $localId,
-"appStatus": $appStatus,
-"csp": "$csp"
+    webappJSONTemplate = Template(""""$id": {
+  "origin": "$origin",
+  "installOrigin": "$origin",
+  "receipt": null,
+  "installTime": 132333986000,
+  "manifestURL": "$manifestURL",
+  "localId": $localId,
+  "id": "$id",
+  "appStatus": $appStatus,
+  "csp": "$csp"
 }""")
 
     manifestTemplate = Template("""{
@@ -333,16 +334,73 @@ class Automation(object):
 
     # Create webapps/webapps.json
     webappsDir = os.path.join(profileDir, "webapps")
-    os.mkdir(webappsDir);
+    if not os.access(webappsDir, os.F_OK):
+      os.mkdir(webappsDir)
 
+    lineRe = re.compile(r'(.*?)"(.*?)": (.*)')
+
+    webappsJSONFilename = os.path.join(webappsDir, "webapps.json")
     webappsJSON = []
-    for localId, app in enumerate(apps):
-      app['localId'] = localId + 1 # Has to be 1..n
-      webappsJSON.append(webappJSONTemplate.substitute(app))
-    webappsJSON = '{\n' + ',\n'.join(webappsJSON) + '\n}\n'
+    if os.access(webappsJSONFilename, os.F_OK):
+      # If there is an existing webapps.json file (which will be the case for
+      # b2g), we parse the data in the existing file before appending test
+      # test apps to it.
+      startId = 1
+      webappsJSONFile = open(webappsJSONFilename, "r")
+      contents = webappsJSONFile.read()
 
-    webappsJSONFile = open(os.path.join(webappsDir, "webapps.json"), "a")
-    webappsJSONFile.write(webappsJSON)
+      for app_content in contents.split('},'):
+        app = {}
+        # ghetto json parser needed due to lack of json/simplejson on test slaves
+        for line in app_content.split('\n'):
+          m = lineRe.match(line)
+          if m:
+            value = m.groups()[2]
+            # remove any trailing commas
+            if value[-1:] == ',':
+              value = value[:-1]
+            # set the app name from a line that looks like this:
+            # "name.gaiamobile.org": {
+            if value == '{':
+              app['id'] = m.groups()[1]
+            # parse string, None, bool and int types
+            elif value[0:1] == '"':
+              app[m.groups()[1]] = value[1:-1]
+            elif value == "null":
+              app[m.groups()[1]] = None
+            elif value == "true":
+              app[m.groups()[1]] = True
+            elif value == "false":
+              app[m.groups()[1]] = False
+            else:
+              app[m.groups()[1]] = int(value)
+        if app:
+          webappsJSON.append(app)
+
+      webappsJSONFile.close()
+
+    startId = 1
+    for app in webappsJSON:
+      if app['localId'] >= startId:
+        startId = app['localId'] + 1
+      if not app.get('csp'):
+        app['csp'] = ''
+      if not app.get('appStatus'):
+        app['appStatus'] = 3
+
+    for localId, app in enumerate(apps):
+      app['localId'] = localId + startId # localId must be from 1..N
+      if not app.get('id'):
+        app['id'] = app['name']
+      webappsJSON.append(app)
+
+    contents = []
+    for app in webappsJSON:
+      contents.append(webappJSONTemplate.substitute(app))
+    contents = '{\n' + ',\n'.join(contents) + '\n}\n'
+
+    webappsJSONFile = open(webappsJSONFilename, "w")
+    webappsJSONFile.write(contents)
     webappsJSONFile.close()
 
     # Create manifest file for each app.
@@ -356,13 +414,19 @@ class Automation(object):
       manifestFile.write(manifest)
       manifestFile.close()
 
-  def initializeProfile(self, profileDir, extraPrefs = [], useServerLocations = False):
+  def initializeProfile(self, profileDir, extraPrefs=[],
+                        useServerLocations=False,
+                        initialProfile=None):
     " Sets up the standard testing profile."
 
     prefs = []
     # Start with a clean slate.
     shutil.rmtree(profileDir, True)
-    os.mkdir(profileDir)
+
+    if initialProfile:
+      shutil.copytree(initialProfile, profileDir)
+    else:
+      os.mkdir(profileDir)
 
     # Set up permissions database
     locations = self.readLocations()
@@ -370,7 +434,6 @@ class Automation(object):
       {'allowXULXBL':[(l.host, 'noxul' not in l.options) for l in locations]});
 
     part = """\
-user_pref("social.skipLoadingProviders", true);
 user_pref("browser.console.showInPanel", true);
 user_pref("browser.dom.window.dump.enabled", true);
 user_pref("browser.firstrun.show.localepicker", false);
@@ -379,6 +442,8 @@ user_pref("browser.startup.page", 0); // use about:blank, not browser.startup.ho
 user_pref("browser.ui.layout.tablet", 0); // force tablet UI off
 user_pref("dom.allow_scripts_to_close_windows", true);
 user_pref("dom.disable_open_during_load", false);
+user_pref("dom.experimental_forms", true); // on for testing
+user_pref("dom.experimental_forms_range", true); // on for testing
 user_pref("dom.max_script_run_time", 0); // no slow script dialogs
 user_pref("hangmonitor.timeout", 0); // no hang monitor
 user_pref("dom.max_chrome_script_run_time", 0);
@@ -392,6 +457,7 @@ user_pref("browser.warnOnQuit", false);
 user_pref("accessibility.typeaheadfind.autostart", false);
 user_pref("javascript.options.showInConsole", true);
 user_pref("devtools.errorconsole.enabled", true);
+user_pref("devtools.debugger.remote-port", 6023);
 user_pref("layout.debug.enable_data_xbl", true);
 user_pref("browser.EULA.override", true);
 user_pref("javascript.options.jit_hardening", true);
@@ -407,7 +473,11 @@ user_pref("app.update.enabled", false);
 user_pref("app.update.staging.enabled", false);
 user_pref("browser.panorama.experienced_first_run", true); // Assume experienced
 user_pref("dom.w3c_touch_events.enabled", 1);
-user_pref("toolkit.telemetry.prompted", 2);
+user_pref("dom.undo_manager.enabled", true);
+user_pref("dom.webcomponents.enabled", true);
+// Set a future policy version to avoid the telemetry prompt.
+user_pref("toolkit.telemetry.prompted", 999);
+user_pref("toolkit.telemetry.notifiedOptOut", 999);
 // Existing tests assume there is no font size inflation.
 user_pref("font.size.inflation.emPerLine", 0);
 user_pref("font.size.inflation.minTwips", 0);
@@ -421,6 +491,7 @@ user_pref("extensions.getAddons.cache.enabled", false);
 user_pref("extensions.installDistroAddons", false);
 
 user_pref("extensions.testpilot.runStudies", false);
+user_pref("extensions.testpilot.alreadyCustomizedToolbar", true);
 
 user_pref("geo.wifi.uri", "http://%(server)s/tests/dom/tests/mochitest/geolocation/network_geolocation.sjs");
 user_pref("geo.wifi.testing", true);
@@ -449,12 +520,27 @@ user_pref("extensions.getAddons.get.url", "http://%(server)s/extensions-dummy/re
 user_pref("extensions.getAddons.getWithPerformance.url", "http://%(server)s/extensions-dummy/repositoryGetWithPerformanceURL");
 user_pref("extensions.getAddons.search.browseURL", "http://%(server)s/extensions-dummy/repositoryBrowseURL");
 user_pref("extensions.getAddons.search.url", "http://%(server)s/extensions-dummy/repositorySearchURL");
+// Make sure that opening the plugins check page won't hit the network
+user_pref("plugins.update.url", "http://%(server)s/plugins-dummy/updateCheckURL");
+
+// Existing tests don't wait for the notification button security delay
+user_pref("security.notification_enable_delay", 0);
 
 // Make enablePrivilege continue to work for test code. :-(
 user_pref("security.turn_off_all_security_so_that_viruses_can_take_over_this_computer", true);
 
 // Get network events.
 user_pref("network.activity.blipIntervalMilliseconds", 250);
+
+// Don't allow the Data Reporting service to prompt for policy acceptance.
+user_pref("datareporting.policy.dataSubmissionPolicyBypassAcceptance", true);
+
+// Point Firefox Health Report at a local server. We don't care if it actually
+// works. It just can't hit the default production endpoint.
+user_pref("datareporting.healthreport.documentServerURI", "http://%(server)s/healthreport/");
+
+// Make sure CSS error reporting is enabled for tests
+user_pref("layout.css.report_errors", true);
 """ % { "server" : self.webServer + ":" + str(self.httpPort) }
     prefs.append(part)
 
@@ -592,7 +678,7 @@ user_pref("camino.use_system_proxy_settings", false); // Camino-only, harmless t
         'manifestURL': 'https://example.com/manifest_csp_cert.webapp',
         'description': 'https://example.com Certified App with manifest policy',
         'appStatus': _APP_STATUS_CERTIFIED
-      }, 
+      },
       {
         'name': 'https_example_csp_installed',
         'csp': "default-src *; script-src 'self'; object-src 'none'; style-src 'self' 'unsafe-inline'",
@@ -600,7 +686,7 @@ user_pref("camino.use_system_proxy_settings", false); // Camino-only, harmless t
         'manifestURL': 'https://example.com/manifest_csp_inst.webapp',
         'description': 'https://example.com Installed App with manifest policy',
         'appStatus': _APP_STATUS_INSTALLED
-      }, 
+      },
       {
         'name': 'https_example_csp_privileged',
         'csp': "default-src *; script-src 'self'; object-src 'none'; style-src 'self' 'unsafe-inline'",
@@ -608,7 +694,23 @@ user_pref("camino.use_system_proxy_settings", false); // Camino-only, harmless t
         'manifestURL': 'https://example.com/manifest_csp_priv.webapp',
         'description': 'https://example.com Privileged App with manifest policy',
         'appStatus': _APP_STATUS_PRIVILEGED
-      }, 
+      },
+      {
+        'name': 'https_a_domain_certified',
+        'csp': "",
+        'origin': 'https://acertified.com',
+        'manifestURL': 'https://acertified.com/manifest.webapp',
+        'description': 'https://acertified.com Certified App',
+        'appStatus': _APP_STATUS_CERTIFIED
+      },
+      {
+        'name': 'https_a_domain_privileged',
+        'csp': "",
+        'origin': 'https://aprivileged.com',
+        'manifestURL': 'https://aprivileged.com/manifest.webapp',
+        'description': 'https://aprivileged.com Privileged App ',
+        'appStatus': _APP_STATUS_PRIVILEGED
+      },
     ];
     self.setupTestApps(profileDir, apps)
 
@@ -723,6 +825,31 @@ user_pref("camino.use_system_proxy_settings", false); // Camino-only, harmless t
     env['GNOME_DISABLE_CRASH_DIALOG'] = '1'
     env['XRE_NO_WINDOWS_CRASH_DIALOG'] = '1'
     env['NS_TRACE_MALLOC_DISABLE_STACKS'] = '1'
+
+    # Additional temporary logging while we try to debug some intermittent
+    # WebRTC conditions. This is necessary to troubleshoot bugs 841496,
+    # 841150, and 839677 (at least)
+    env['NSPR_LOG_MODULES'] = 'signaling:5,mtransport:3'
+    env['R_LOG_LEVEL'] = '5'
+    env['R_LOG_DESTINATION'] = 'stderr'
+    env['R_LOG_VERBOSE'] = '1'
+
+    # ASan specific environment stuff
+    if self.IS_ASAN and (self.IS_LINUX or self.IS_MAC):
+      try:
+        totalMemory = int(os.popen("free").readlines()[1].split()[1])
+
+        # Only 2 GB RAM or less available? Use custom ASan options to reduce
+        # the amount of resources required to do the tests. Standard options 
+        # will otherwise lead to OOM conditions on the current test slaves.
+        if totalMemory <= 1024 * 1024 * 2:
+          self.log.info("INFO | automation.py | ASan running in low-memory configuration")
+          env["ASAN_OPTIONS"] = "quarantine_size=50331648:redzone=64"
+      except OSError,err:
+        self.log.info("Failed determine available memory, disabling ASan low-memory configuration: %s", err.strerror)
+      except:
+        self.log.info("Failed determine available memory, disabling ASan low-memory configuration")
+
     return env
 
   if IS_WIN32:
@@ -1009,7 +1136,7 @@ user_pref("camino.use_system_proxy_settings", false); // Camino-only, harmless t
              runSSLTunnel = False, utilityPath = None,
              xrePath = None, certPath = None,
              debuggerInfo = None, symbolsPath = None,
-             timeout = -1, maxTime = None):
+             timeout = -1, maxTime = None, onLaunch = None):
     """
     Run the app, log the duration it took to execute, return the status code.
     Kills the app if it runs for longer than |maxTime| seconds, or outputs nothing for |timeout| seconds.
@@ -1065,6 +1192,11 @@ user_pref("camino.use_system_proxy_settings", false); // Camino-only, harmless t
                  stdout = outputPipe,
                  stderr = subprocess.STDOUT)
     self.log.info("INFO | automation.py | Application pid: %d", proc.pid)
+
+    if onLaunch is not None:
+      # Allow callers to specify an onLaunch callback to be fired after the
+      # app is launched.
+      onLaunch()
 
     status = self.waitForFinish(proc, utilityPath, timeout, maxTime, startTime, debuggerInfo, symbolsPath)
     self.log.info("INFO | automation.py | Application ran for: %s", str(datetime.now() - startTime))
@@ -1169,3 +1301,8 @@ user_pref("camino.use_system_proxy_settings", false); // Camino-only, harmless t
 
     else:
       self.log.info("INFO | automation.py | Cannot install extension, invalid extensionSource at: %s", extensionSource)
+
+  def elf_arm(self, filename):
+    data = open(filename, 'rb').read(20)
+    return data[:4] == "\x7fELF" and ord(data[18]) == 40 # EM_ARM
+

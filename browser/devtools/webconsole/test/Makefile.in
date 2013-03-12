@@ -104,7 +104,8 @@ MOCHITEST_BROWSER_FILES = \
 	browser_webconsole_bug_622303_persistent_filters.js \
 	browser_webconsole_bug_770099_bad_policyuri.js \
 	browser_webconsole_bug_770099_violation.js \
-	$(filter disabled-temporarily--bug-808264, browser_webconsole_bug_782653_CSS_links_in_Style_Editor.js) \
+	browser_webconsole_bug_766001_JS_Console_in_Debugger.js \
+	browser_webconsole_bug_782653_CSS_links_in_Style_Editor.js \
 	browser_cached_messages.js \
 	browser_bug664688_sandbox_update_after_navigation.js \
 	browser_result_format_as_string.js \
@@ -114,13 +115,20 @@ MOCHITEST_BROWSER_FILES = \
 	browser_bug_638949_copy_link_location.js \
 	browser_output_longstring_expand.js \
 	browser_netpanel_longstring_expand.js \
+	browser_repeated_messages_accuracy.js \
 	head.js \
 	$(NULL)
 
-ifndef MOZ_PER_WINDOW_PRIVATE_BROWSING
+ifeq ($(OS_ARCH), Darwin)
 MOCHITEST_BROWSER_FILES += \
-        browser_webconsole_bug_618311_private_browsing.js \
+        browser_webconsole_bug_804845_ctrl_key_nav.js \
         $(NULL)
+endif
+
+ifeq ($(OS_ARCH),WINNT)
+MOCHITEST_BROWSER_FILES += \
+		browser_webconsole_bug_623749_ctrl_a_select_all_winnt.js \
+		$(NULL)
 endif
 
 MOCHITEST_BROWSER_FILES += \
@@ -202,6 +210,10 @@ MOCHITEST_BROWSER_FILES += \
 	test_bug_770099_bad_policy_uri.html^headers^ \
 	test-result-format-as-string.html \
 	test-bug-737873-mixedcontent.html \
+	test-repeated-messages.html \
+	test-bug-766001-console-log.js \
+	test-bug-766001-js-console-links.html \
+	test-bug-766001-js-errors.js \
 	$(NULL)
 
 include $(topsrcdir)/config/rules.mk

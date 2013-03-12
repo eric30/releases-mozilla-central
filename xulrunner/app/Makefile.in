@@ -10,8 +10,6 @@ VPATH = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-DIRS = profile
-
 PREF_JS_EXPORTS = $(srcdir)/xulrunner.js
 GARBAGE += $(addprefix $(DIST)/bin/defaults/pref/,xulrunner.js)
 
@@ -105,10 +103,6 @@ ifeq ($(OS_ARCH),WINNT)
 #
 ifndef GNU_CC
 LDFLAGS += /HEAP:0x40000
-ifeq ($(OS_TEST),x86_64)
-# set stack to 2MB on x64 build.  See bug 582910
-LDFLAGS += -STACK:2097152
-endif
 endif
 endif
 

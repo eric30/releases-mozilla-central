@@ -25,6 +25,8 @@
 #include <time.h>
 #include <asm/page.h>
 
+#include "mozilla/DebugOnly.h"
+
 #include "android/log.h"
 #include "cutils/properties.h"
 #include "hardware/hardware.h"
@@ -56,6 +58,7 @@
 #include "nsXULAppAPI.h"
 #include "OrientationObserver.h"
 #include "UeventPoller.h"
+#include <algorithm>
 
 #define LOG(args...)  __android_log_print(ANDROID_LOG_INFO, "Gonk", args)
 #define NsecPerMsec  1000000LL
@@ -352,58 +355,129 @@ DisableBatteryNotifications()
       NewRunnableFunction(UnregisterBatteryObserverIOThread));
 }
 
-void
-GetCurrentBatteryInformation(hal::BatteryInformation *aBatteryInfo)
+// See bug 819016 about moving the ReadSysFile functions to a
+// central location.
+static bool
+ReadSysFile(const char *aFilename, char *aBuf, size_t aBufSize,
+            size_t *aBytesRead = NULL)
+{
+  int fd = TEMP_FAILURE_RETRY(open(aFilename, O_RDONLY));
+  if (fd < 0) {
+    HAL_LOG(("Unable to open file '%s' for reading", aFilename));
+    return false;
+  }
+  ScopedClose autoClose(fd);
+  ssize_t bytesRead = TEMP_FAILURE_RETRY(read(fd, aBuf, aBufSize - 1));
+  if (bytesRead < 0) {
+    HAL_LOG(("Unable to read from file '%s'", aFilename));
+    return false;
+  }
+  if (bytesRead && (aBuf[bytesRead - 1] == '\n')) {
+    bytesRead--;
+  }
+  aBuf[bytesRead] = '\0';
+  if (aBytesRead) {
+    *aBytesRead = bytesRead;
+  }
+  return true;
+}
+
+static bool
+ReadSysFile(const char *aFilename, int *aVal)
+{
+  char valBuf[20];
+  if (!ReadSysFile(aFilename, valBuf, sizeof(valBuf))) {
+    return false;
+  }
+  return sscanf(valBuf, "%d", aVal) == 1;
+}
+
+static bool
+GetCurrentBatteryCharge(int* aCharge)
+{
+  bool success = ReadSysFile("/sys/class/power_supply/battery/capacity",
+                             aCharge);
+  if (!success) {
+    return false;
+  }
+
+  #ifdef DEBUG
+  if ((*aCharge < 0) || (*aCharge > 100)) {
+    HAL_LOG(("charge level containes unknown value: %d", *aCharge));
+  }
+  #endif
+
+  return (*aCharge >= 0) && (*aCharge <= 100);
+}
+
+static bool
+GetCurrentBatteryCharging(int* aCharging)
 {
   static const int BATTERY_NOT_CHARGING = 0;
   static const int BATTERY_CHARGING_USB = 1;
   static const int BATTERY_CHARGING_AC  = 2;
 
-  FILE *capacityFile = fopen("/sys/class/power_supply/battery/capacity", "r");
-  double capacity = dom::battery::kDefaultLevel * 100;
-  if (capacityFile) {
-    fscanf(capacityFile, "%lf", &capacity);
-    fclose(capacityFile);
-  }
+  // Generic device support
 
-  FILE *chargingFile = fopen("/sys/class/power_supply/battery/charging_source", "r");
-  int chargingSrc = BATTERY_CHARGING_USB;
-  bool done = false;
-  if (chargingFile) {
-    fscanf(chargingFile, "%d", &chargingSrc);
-    fclose(chargingFile);
-    done = true;
-  }
+  int chargingSrc;
+  bool success =
+    ReadSysFile("/sys/class/power_supply/battery/charging_source", &chargingSrc);
 
-  if (!done) {
-    // toro devices support
-    chargingFile = fopen("/sys/class/power_supply/battery/status", "r");
-    if (chargingFile) {
-      char status[16];
-      char *str = fgets(status, sizeof(status), chargingFile);
-      if (str && (!strcmp(str, "Charging\n") || !strcmp(str, "Full\n"))) {
-        // no way here to know if we're charging from USB or AC.
-        chargingSrc = BATTERY_CHARGING_USB;
-      } else {
-        chargingSrc = BATTERY_NOT_CHARGING;
-      }
-      fclose(chargingFile);
-      done = true;
+  if (success) {
+    #ifdef DEBUG
+    if (chargingSrc != BATTERY_NOT_CHARGING &&
+        chargingSrc != BATTERY_CHARGING_USB &&
+        chargingSrc != BATTERY_CHARGING_AC) {
+      HAL_LOG(("charging_source contained unknown value: %d", chargingSrc));
     }
+    #endif
+
+    *aCharging = (chargingSrc == BATTERY_CHARGING_USB ||
+                  chargingSrc == BATTERY_CHARGING_AC);
+    return true;
   }
 
-  #ifdef DEBUG
-  if (chargingSrc != BATTERY_NOT_CHARGING &&
-      chargingSrc != BATTERY_CHARGING_USB &&
-      chargingSrc != BATTERY_CHARGING_AC) {
-    HAL_LOG(("charging_source contained unknown value: %d", chargingSrc));
-  }
-  #endif
+  // Otoro device support
 
-  aBatteryInfo->level() = capacity / 100;
-  aBatteryInfo->charging() = (chargingSrc == BATTERY_CHARGING_USB ||
-                              chargingSrc == BATTERY_CHARGING_AC);
-  aBatteryInfo->remainingTime() = dom::battery::kUnknownRemainingTime;
+  char chargingSrcString[16];
+  size_t chargingSrcLen;
+
+  success = ReadSysFile("/sys/class/power_supply/battery/status",
+                        chargingSrcString, sizeof(chargingSrcString),
+                        &chargingSrcLen);
+  if (success) {
+    *aCharging = !memcmp(chargingSrcString, "Charging", chargingSrcLen) ||
+                 !memcmp(chargingSrcString, "Full", chargingSrcLen);
+    return true;
+  }
+
+  return false;
+}
+
+void
+GetCurrentBatteryInformation(hal::BatteryInformation* aBatteryInfo)
+{
+  int charge;
+
+  if (GetCurrentBatteryCharge(&charge)) {
+    aBatteryInfo->level() = (double)charge / 100.0;
+  } else {
+    aBatteryInfo->level() = dom::battery::kDefaultLevel;
+  }
+
+  int charging;
+
+  if (GetCurrentBatteryCharging(&charging)) {
+    aBatteryInfo->charging() = charging;
+  } else {
+    aBatteryInfo->charging() = true;
+  }
+
+  if (aBatteryInfo->charging() && (aBatteryInfo->level() < 1.0)) {
+    aBatteryInfo->remainingTime() = dom::battery::kUnknownRemainingTime;
+  } else {
+    aBatteryInfo->remainingTime() = dom::battery::kDefaultRemainingTime;
+  }
 }
 
 namespace {
@@ -430,7 +504,7 @@ bool ReadFromFile(const char *filename, char (&buf)[n])
     return false;
   }
 
-  buf[NS_MIN(numRead, n - 1)] = '\0';
+  buf[std::min(numRead, n - 1)] = '\0';
   return true;
 }
 
@@ -973,20 +1047,30 @@ EnsureKernelLowMemKillerParamsSet()
   nsAutoCString adjParams;
   nsAutoCString minfreeParams;
 
-  const char* priorityClasses[] = {"master", "foreground", "background"};
+  const char* priorityClasses[] = {
+    "master",
+    "foregroundHigh",
+    "foreground",
+    "backgroundPerceivable",
+    "backgroundHomescreen",
+    "background"
+  };
   for (size_t i = 0; i < NS_ARRAY_LENGTH(priorityClasses); i++) {
+    // The system doesn't function correctly if we're missing these prefs, so
+    // crash loudly.
+
     int32_t oomScoreAdj;
     if (!NS_SUCCEEDED(Preferences::GetInt(nsPrintfCString(
           "hal.processPriorityManager.gonk.%sOomScoreAdjust",
           priorityClasses[i]).get(), &oomScoreAdj))) {
-      continue;
+      MOZ_CRASH();
     }
 
     int32_t killUnderMB;
     if (!NS_SUCCEEDED(Preferences::GetInt(nsPrintfCString(
           "hal.processPriorityManager.gonk.%sKillUnderMB",
           priorityClasses[i]).get(), &killUnderMB))) {
-      continue;
+      MOZ_CRASH();
     }
 
     // adj is in oom_adj units.
@@ -1035,14 +1119,26 @@ SetProcessPriority(int aPid, ProcessPriority aPriority)
   case PROCESS_PRIORITY_BACKGROUND:
     priorityStr = "background";
     break;
+  case PROCESS_PRIORITY_BACKGROUND_HOMESCREEN:
+    priorityStr = "backgroundHomescreen";
+    break;
+  case PROCESS_PRIORITY_BACKGROUND_PERCEIVABLE:
+    priorityStr = "backgroundPerceivable";
+    break;
   case PROCESS_PRIORITY_FOREGROUND:
     priorityStr = "foreground";
+    break;
+  case PROCESS_PRIORITY_FOREGROUND_HIGH:
+    priorityStr = "foregroundHigh";
     break;
   case PROCESS_PRIORITY_MASTER:
     priorityStr = "master";
     break;
   default:
-    MOZ_NOT_REACHED();
+    // PROCESS_PRIORITY_UNKNOWN ends up in this branch, along with invalid enum
+    // values.
+    NS_ERROR("Invalid process priority!");
+    return;
   }
 
   // Notice that you can disable oom_adj and renice by deleting the prefs

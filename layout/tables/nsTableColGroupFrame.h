@@ -9,8 +9,8 @@
 #include "nscore.h"
 #include "nsContainerFrame.h"
 #include "nsTableColFrame.h"
-#include "nsTablePainter.h"
 
+class nsTableFrame;
 class nsTableColFrame;
 
 enum nsTableColGroupType {
@@ -48,9 +48,9 @@ public:
   /**
    * ColGroups never paint anything, nor receive events.
    */
-  NS_IMETHOD BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                              const nsRect&           aDirtyRect,
-                              const nsDisplayListSet& aLists) { return NS_OK; }
+  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
+                                const nsRect&           aDirtyRect,
+                                const nsDisplayListSet& aLists) MOZ_OVERRIDE {}
 
   /** A colgroup can be caused by three things:
     * 1)	An element with table-column-group display
@@ -196,6 +196,11 @@ public:
    */
   void SetContinuousBCBorderWidth(uint8_t     aForSide,
                                   BCPixelSize aPixelValue);
+
+  virtual bool IsFrameOfType(uint32_t aFlags) const
+  {
+    return nsContainerFrame::IsFrameOfType(aFlags & ~(nsIFrame::eTablePart));
+  }
   
   virtual void InvalidateFrame(uint32_t aDisplayItemKey = 0) MOZ_OVERRIDE;
   virtual void InvalidateFrameWithRect(const nsRect& aRect, uint32_t aDisplayItemKey = 0) MOZ_OVERRIDE;
@@ -207,8 +212,7 @@ protected:
   void InsertColsReflow(int32_t                   aColIndex,
                         const nsFrameList::Slice& aCols);
 
-  /** implement abstract method on nsContainerFrame */
-  virtual int GetSkipSides() const;
+  virtual int GetSkipSides() const MOZ_OVERRIDE;
 
   // data members
   int32_t mColCount;

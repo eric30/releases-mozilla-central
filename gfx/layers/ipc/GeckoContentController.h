@@ -10,6 +10,8 @@
 #include "FrameMetrics.h"
 #include "nsISupportsImpl.h"
 
+class Task;
+
 namespace mozilla {
 namespace layers {
 
@@ -43,6 +45,20 @@ public:
    * current scroll offset.
    */
   virtual void HandleLongTap(const nsIntPoint& aPoint) = 0;
+
+  /**
+   * Requests sending a mozbrowserasyncscroll domevent to embedder.
+   * |aContentRect| is in CSS pixels, relative to the current cssPage.
+   * |aScrollableSize| is the current content width/height in CSS pixels.
+   */
+  virtual void SendAsyncScrollDOMEvent(const gfx::Rect &aContentRect,
+                                       const gfx::Size &aScrollableSize) = 0;
+
+  /**
+   * Schedules a runnable to run on the controller/UI thread at some time
+   * in the future.
+   */
+  virtual void PostDelayedTask(Task* aTask, int aDelayMs) = 0;
 
   GeckoContentController() {}
   virtual ~GeckoContentController() {}

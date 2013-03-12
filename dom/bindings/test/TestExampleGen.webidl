@@ -7,8 +7,10 @@
  Constructor(DOMString str),
  Constructor(unsigned long num, boolean? boolArg),
  Constructor(TestInterface? iface),
- Constructor(TestNonCastableInterface iface)
- // , Constructor(long arg1, long arg2, (TestInterface or OnlyForUseInConstructor) arg3)
+ Constructor(long arg1, IndirectlyImplementedInterface iface),
+ // Constructor(long arg1, long arg2, (TestInterface or OnlyForUseInConstructor) arg3),
+ NamedConstructor=Example,
+ NamedConstructor=Example(DOMString str)
  ]
 interface TestExampleInterface {
   // Integer types
@@ -21,6 +23,7 @@ interface TestExampleInterface {
   void passOptionalByteWithDefault(optional byte arg = 0);
   void passNullableByte(byte? arg);
   void passOptionalNullableByte(optional byte? arg);
+  void passVariadicByte(byte... arg);
 
   readonly attribute short readonlyShort;
   attribute short writableShort;
@@ -138,21 +141,21 @@ interface TestExampleInterface {
   sequence<TestNonWrapperCacheInterface?>? receiveNullableNonWrapperCacheInterfaceNullableSequence();
 
   // Non-castable interface types
-  TestNonCastableInterface receiveOther();
-  TestNonCastableInterface? receiveNullableOther();
-  TestNonCastableInterface receiveWeakOther();
-  TestNonCastableInterface? receiveWeakNullableOther();
-  // A verstion to test for casting to TestNonCastableInterface&
-  void passOther(TestNonCastableInterface arg);
+  IndirectlyImplementedInterface receiveOther();
+  IndirectlyImplementedInterface? receiveNullableOther();
+  IndirectlyImplementedInterface receiveWeakOther();
+  IndirectlyImplementedInterface? receiveWeakNullableOther();
+  // A verstion to test for casting to IndirectlyImplementedInterface&
+  void passOther(IndirectlyImplementedInterface arg);
   // A version we can use to test for the exact type passed in
-  void passOther2(TestNonCastableInterface arg);
-  void passNullableOther(TestNonCastableInterface? arg);
-  attribute TestNonCastableInterface nonNullOther;
-  attribute TestNonCastableInterface? nullableOther;
+  void passOther2(IndirectlyImplementedInterface arg);
+  void passNullableOther(IndirectlyImplementedInterface? arg);
+  attribute IndirectlyImplementedInterface nonNullOther;
+  attribute IndirectlyImplementedInterface? nullableOther;
   // Optional arguments
-  void passOptionalOther(optional TestNonCastableInterface? arg);
-  void passOptionalNonNullOther(optional TestNonCastableInterface arg);
-  void passOptionalOtherWithDefault(optional TestNonCastableInterface? arg = null);
+  void passOptionalOther(optional IndirectlyImplementedInterface? arg);
+  void passOptionalNonNullOther(optional IndirectlyImplementedInterface arg);
+  void passOptionalOtherWithDefault(optional IndirectlyImplementedInterface? arg = null);
 
   // External interface types
   TestExternalInterface receiveExternal();
@@ -229,6 +232,8 @@ interface TestExampleInterface {
   sequence<any> receiveAnySequence();
   sequence<any>? receiveNullableAnySequence();
 
+  void passSequenceOfSequences(sequence<sequence<long>> arg);
+
   // Typed array types
   void passArrayBuffer(ArrayBuffer arg);
   void passNullableArrayBuffer(ArrayBuffer? arg);
@@ -254,6 +259,7 @@ interface TestExampleInterface {
   void passOptionalStringWithDefaultValue(optional DOMString arg = "abc");
   void passOptionalNullableString(optional DOMString? arg);
   void passOptionalNullableStringWithDefaultValue(optional DOMString? arg = null);
+  void passVariadicString(DOMString... arg);
 
   // Enumerated types
   void passEnum(TestEnum arg);
@@ -344,6 +350,64 @@ interface TestExampleInterface {
   // Static methods and attributes
   static attribute boolean staticAttribute;
   static void staticMethod(boolean arg);
+  static void staticMethodWithContext(any arg);
+
+  // Overload resolution tests
+  //void overload1(DOMString... strs);
+  boolean overload1(TestInterface arg);
+  TestInterface overload1(DOMString strs, TestInterface arg);
+  void overload2(TestInterface arg);
+  void overload2(optional Dict arg);
+  void overload2(DOMString arg);
+  void overload3(TestInterface arg);
+  void overload3(TestCallback arg);
+  void overload3(DOMString arg);
+  void overload4(TestInterface arg);
+  void overload4(TestCallbackInterface arg);
+  void overload4(DOMString arg);
+
+  // Variadic handling
+  void passVariadicThirdArg(DOMString arg1, long arg2, TestInterface... arg3);
+
+  // Conditionally exposed methods/attributes
+  [Pref="abc.def"]
+  readonly attribute boolean prefable1;
+  [Pref="abc.def"]
+  readonly attribute boolean prefable2;
+  [Pref="ghi.jkl"]
+  readonly attribute boolean prefable3;
+  [Pref="ghi.jkl"]
+  readonly attribute boolean prefable4;
+  [Pref="abc.def"]
+  readonly attribute boolean prefable5;
+  [Pref="abc.def", Func="nsGenericHTMLElement::TouchEventsEnabled"]
+  readonly attribute boolean prefable6;
+  [Pref="abc.def", Func="nsGenericHTMLElement::TouchEventsEnabled"]
+  readonly attribute boolean prefable7;
+  [Pref="ghi.jkl", Func="nsGenericHTMLElement::TouchEventsEnabled"]
+  readonly attribute boolean prefable8;
+  [Pref="abc.def", Func="nsGenericHTMLElement::TouchEventsEnabled"]
+  readonly attribute boolean prefable9;
+  [Pref="abc.def"]
+  void prefable10();
+  [Pref="abc.def", Func="nsGenericHTMLElement::TouchEventsEnabled"]
+  void prefable11();
+  [Pref="abc.def", Func="TestFuncControlledMember"]
+  readonly attribute boolean prefable12;
+  [Pref="abc.def", Func="nsGenericHTMLElement::TouchEventsEnabled"]
+  void prefable13();
+  [Pref="abc.def", Func="TestFuncControlledMember"]
+  readonly attribute boolean prefable14;
+  [Func="TestFuncControlledMember"]
+  readonly attribute boolean prefable15;
+  [Func="TestFuncControlledMember"]
+  readonly attribute boolean prefable16;
+  [Pref="abc.def", Func="TestFuncControlledMember"]
+  void prefable17();
+  [Func="TestFuncControlledMember"]
+  void prefable18();
+  [Func="TestFuncControlledMember"]
+  void prefable19();
 
   // Miscellania
   [LenientThis] attribute long attrWithLenientThis;
@@ -358,6 +422,7 @@ interface TestExampleInterface {
   [Throws] attribute boolean throwingAttr;
   [GetterThrows] attribute boolean throwingGetterAttr;
   [SetterThrows] attribute boolean throwingSetterAttr;
+  legacycaller short(unsigned long arg1, TestInterface arg2);
 
   // If you add things here, add them to TestCodeGen as well
 };

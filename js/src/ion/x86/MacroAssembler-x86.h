@@ -28,6 +28,16 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
     bool dynamicAlignment_;
     bool enoughMemory_;
 
+    struct Double {
+        double value;
+        AbsoluteLabel uses;
+        Double(double value) : value(value) {}
+    };
+    Vector<Double, 0, SystemAllocPolicy> doubles_;
+
+    typedef HashMap<double, size_t, DefaultHasher<double>, SystemAllocPolicy> DoubleMap;
+    DoubleMap doubleMap_;
+
   protected:
     MoveResolver moveResolver_;
 
@@ -61,6 +71,10 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         enoughMemory_(true)
     {
     }
+
+    // The buffer is about to be linked, make sure any constant pools or excess
+    // bookkeeping has been flushed to the instruction stream.
+    void finish();
 
     bool oom() const {
         return MacroAssemblerX86Shared::oom() || !enoughMemory_;
@@ -328,6 +342,13 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
     }
 
     void branchTestValue(Condition cond, const ValueOperand &value, const Value &v, Label *label);
+    void branchTestValue(Condition cond, const Address &valaddr, const ValueOperand &value,
+                         Label *label)
+    {
+        JS_ASSERT(cond == Equal || cond == NotEqual);
+        branchPtr(cond, tagOf(valaddr), value.typeReg(), label);
+        branchPtr(cond, payloadOf(valaddr), value.payloadReg(), label);
+    }
 
     void cmpPtr(Register lhs, const ImmWord rhs) {
         cmpl(lhs, Imm32(rhs.value));
@@ -339,6 +360,9 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         cmpl(lhs, rhs);
     }
     void cmpPtr(const Operand &lhs, const ImmGCPtr rhs) {
+        cmpl(lhs, rhs);
+    }
+    void cmpPtr(const Operand &lhs, const Imm32 rhs) {
         cmpl(lhs, rhs);
     }
     void cmpPtr(const Address &lhs, Register rhs) {
@@ -386,8 +410,17 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
     void addPtr(Imm32 imm, const Address &dest) {
         addl(imm, Operand(dest));
     }
+    void addPtr(const Address &src, const Register &dest) {
+        addl(Operand(src), dest);
+    }
     void subPtr(Imm32 imm, const Register &dest) {
         subl(imm, dest);
+    }
+    void subPtr(const Register &src, const Register &dest) {
+        subl(src, dest);
+    }
+    void subPtr(const Address &addr, const Register &dest) {
+        subl(Operand(addr), dest);
     }
 
     template <typename T, typename S>
@@ -620,6 +653,7 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         cvtsi2sd(operand.payloadReg(), dest);
     }
 
+    void loadConstantDouble(double d, const FloatRegister &dest);
     void loadStaticDouble(const double *dp, const FloatRegister &dest) {
         movsd(dp, dest);
     }
@@ -666,8 +700,17 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
     void lshiftPtr(Imm32 imm, Register dest) {
         shll(imm, dest);
     }
+    void xorPtr(Imm32 imm, Register dest) {
+        xorl(imm, dest);
+    }
     void orPtr(Imm32 imm, Register dest) {
         orl(imm, dest);
+    }
+    void orPtr(Register src, Register dest) {
+        orl(src, dest);
+    }
+    void andPtr(Imm32 imm, Register dest) {
+        andl(imm, dest);
     }
 
     void loadInstructionPointerAfterCall(const Register &dest) {
@@ -719,8 +762,14 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
     void passABIArg(const Register &reg);
     void passABIArg(const FloatRegister &reg);
 
+  private:
+    void callWithABIPre(uint32_t *stackAdjust);
+    void callWithABIPost(uint32_t stackAdjust, Result result);
+
+  public:
     // Emits a call to a C/C++ function, resolving all argument moves.
     void callWithABI(void *fun, Result result = GENERAL);
+    void callWithABI(const Address &fun, Result result = GENERAL);
 
     // Used from within an Exit frame to handle a pending exception.
     void handleException();
@@ -734,7 +783,7 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
     // ThreadData::ionTop.
     void linkExitFrame() {
         JSCompartment *compartment = GetIonContext()->compartment;
-        movl(StackPointer, Operand(&compartment->rt->ionTop));
+        movl(StackPointer, Operand(&compartment->rt->mainThread.ionTop));
     }
 
     void callWithExitFrame(IonCode *target, Register dynStack) {

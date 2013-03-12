@@ -35,13 +35,13 @@ function testSimpleCall() {
       let localVar4 = localScope.addVar("localVar4");
       let localVar5 = localScope.addVar("localVar5");
 
-      localVar0._setGrip(42);
-      localVar1._setGrip(true);
-      localVar2._setGrip("nasu");
+      localVar0.setGrip(42);
+      localVar1.setGrip(true);
+      localVar2.setGrip("nasu");
 
-      localVar3._setGrip({ "type": "undefined" });
-      localVar4._setGrip({ "type": "null" });
-      localVar5._setGrip({ "type": "object", "class": "Object" });
+      localVar3.setGrip({ "type": "undefined" });
+      localVar4.setGrip({ "type": "null" });
+      localVar5.setGrip({ "type": "object", "class": "Object" });
 
       localVar5.addProperties({ "someProp0": { "value": 42, "enumerable": true },
                                 "someProp1": { "value": true , "enumerable": true},
@@ -63,10 +63,10 @@ function testSimpleCall() {
                                                                    "set": { "type": "undefined" },
                                                                    "enumerable": true } });
 
-      windowVar._setGrip({ "type": "object", "class": "Window" });
+      windowVar.setGrip({ "type": "object", "class": "Window" });
       windowVar.addProperties({ "helloWorld": { "value": "hello world" } });
 
-      documentVar._setGrip({ "type": "object", "class": "HTMLDocument" });
+      documentVar.setGrip({ "type": "object", "class": "HTMLDocument" });
       documentVar.addProperties({ "onload": { "value": { "type": "null" } },
                                   "onunload": { "value": { "type": "null" } },
                                   "onfocus": { "value": { "type": "null" } },
@@ -98,10 +98,10 @@ function testSimpleCall() {
         "The localScope doesn't contain all the created variable elements.");
 
 
-      is(localVar5.target.querySelector(".details").childNodes.length, 6,
+      is(localVar5.target.querySelector(".variables-view-element-details").childNodes.length, 6,
         "The localVar5 doesn't contain all the created properties.");
 
-      is(localVar5.get("someProp5").target.querySelector(".details").childNodes.length, 6,
+      is(localVar5.get("someProp5").target.querySelector(".variables-view-element-details").childNodes.length, 6,
         "The localVar5.someProp5 doesn't contain all the created properties.");
 
 

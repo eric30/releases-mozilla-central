@@ -3,10 +3,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "MediaStreamGraph.h"
+#include "MediaStreamGraphImpl.h"
 
-#include "mozilla/Monitor.h"
-#include "mozilla/TimeStamp.h"
 #include "AudioSegment.h"
 #include "VideoSegment.h"
 #include "nsContentUtils.h"
@@ -21,6 +19,9 @@
 #include "TrackUnionStream.h"
 #include "ImageContainer.h"
 #include "AudioChannelCommon.h"
+#include "AudioNodeEngine.h"
+#include "AudioNodeStream.h"
+#include <algorithm>
 
 using namespace mozilla::layers;
 using namespace mozilla::dom;
@@ -29,485 +30,7 @@ namespace mozilla {
 
 #ifdef PR_LOGGING
 PRLogModuleInfo* gMediaStreamGraphLog;
-#define LOG(type, msg) PR_LOG(gMediaStreamGraphLog, type, msg)
-#else
-#define LOG(type, msg)
 #endif
-
-namespace {
-
-/**
- * Assume we can run an iteration of the MediaStreamGraph loop in this much time
- * or less.
- * We try to run the control loop at this rate.
- */
-const int MEDIA_GRAPH_TARGET_PERIOD_MS = 10;
-
-/**
- * Assume that we might miss our scheduled wakeup of the MediaStreamGraph by
- * this much.
- */
-const int SCHEDULE_SAFETY_MARGIN_MS = 10;
-
-/**
- * Try have this much audio buffered in streams and queued to the hardware.
- * The maximum delay to the end of the next control loop
- * is 2*MEDIA_GRAPH_TARGET_PERIOD_MS + SCHEDULE_SAFETY_MARGIN_MS.
- * There is no point in buffering more audio than this in a stream at any
- * given time (until we add processing).
- * This is not optimal yet.
- */
-const int AUDIO_TARGET_MS = 2*MEDIA_GRAPH_TARGET_PERIOD_MS +
-    SCHEDULE_SAFETY_MARGIN_MS;
-
-/**
- * Try have this much video buffered. Video frames are set
- * near the end of the iteration of the control loop. The maximum delay
- * to the setting of the next video frame is 2*MEDIA_GRAPH_TARGET_PERIOD_MS +
- * SCHEDULE_SAFETY_MARGIN_MS. This is not optimal yet.
- */
-const int VIDEO_TARGET_MS = 2*MEDIA_GRAPH_TARGET_PERIOD_MS +
-    SCHEDULE_SAFETY_MARGIN_MS;
-
-/**
- * A per-stream update message passed from the media graph thread to the
- * main thread.
- */
-struct StreamUpdate {
-  int64_t mGraphUpdateIndex;
-  nsRefPtr<MediaStream> mStream;
-  StreamTime mNextMainThreadCurrentTime;
-  bool mNextMainThreadFinished;
-};
-
-/**
- * This represents a message passed from the main thread to the graph thread.
- * A ControlMessage always references a particular affected stream.
- */
-class ControlMessage {
-public:
-  ControlMessage(MediaStream* aStream) : mStream(aStream)
-  {
-    MOZ_COUNT_CTOR(ControlMessage);
-  }
-  // All these run on the graph thread
-  virtual ~ControlMessage()
-  {
-    MOZ_COUNT_DTOR(ControlMessage);
-  }
-  // Do the action of this message on the MediaStreamGraph thread. Any actions
-  // affecting graph processing should take effect at mStateComputedTime.
-  // All stream data for times < mStateComputedTime has already been
-  // computed.
-  virtual void Run() = 0;
-  // When we're shutting down the application, most messages are ignored but
-  // some cleanup messages should still be processed (on the main thread).
-  virtual void RunDuringShutdown() {}
-  MediaStream* GetStream() { return mStream; }
-
-protected:
-  // We do not hold a reference to mStream. The graph will be holding
-  // a reference to the stream until the Destroy message is processed. The
-  // last message referencing a stream is the Destroy message for that stream.
-  MediaStream* mStream;
-};
-
-}
-
-/**
- * The implementation of a media stream graph. This class is private to this
- * file. It's not in the anonymous namespace because MediaStream needs to
- * be able to friend it.
- *
- * Currently we only have one per process.
- */
-class MediaStreamGraphImpl : public MediaStreamGraph {
-public:
-  MediaStreamGraphImpl();
-  ~MediaStreamGraphImpl()
-  {
-    NS_ASSERTION(IsEmpty(),
-                 "All streams should have been destroyed by messages from the main thread");
-    LOG(PR_LOG_DEBUG, ("MediaStreamGraph %p destroyed", this));
-  }
-
-  // Main thread only.
-  /**
-   * This runs every time we need to sync state from the media graph thread
-   * to the main thread while the main thread is not in the middle
-   * of a script. It runs during a "stable state" (per HTML5) or during
-   * an event posted to the main thread.
-   */
-  void RunInStableState();
-  /**
-   * Ensure a runnable to run RunInStableState is posted to the appshell to
-   * run at the next stable state (per HTML5).
-   * See EnsureStableStateEventPosted.
-   */
-  void EnsureRunInStableState();
-  /**
-   * Called to apply a StreamUpdate to its stream.
-   */
-  void ApplyStreamUpdate(StreamUpdate* aUpdate);
-  /**
-   * Append a ControlMessage to the message queue. This queue is drained
-   * during RunInStableState; the messages will run on the graph thread.
-   */
-  void AppendMessage(ControlMessage* aMessage);
-  /**
-   * Make this MediaStreamGraph enter forced-shutdown state. This state
-   * will be noticed by the media graph thread, which will shut down all streams
-   * and other state controlled by the media graph thread.
-   * This is called during application shutdown.
-   */
-  void ForceShutDown();
-  /**
-   * Shutdown() this MediaStreamGraph's threads and return when they've shut down.
-   */
-  void ShutdownThreads();
-
-  // The following methods run on the graph thread (or possibly the main thread if
-  // mLifecycleState > LIFECYCLE_RUNNING)
-  /**
-   * Runs main control loop on the graph thread. Normally a single invocation
-   * of this runs for the entire lifetime of the graph thread.
-   */
-  void RunThread();
-  /**
-   * Call this to indicate that another iteration of the control loop is
-   * required on its regular schedule. The monitor must not be held.
-   */
-  void EnsureNextIteration();
-  /**
-   * As above, but with the monitor already held.
-   */
-  void EnsureNextIterationLocked(MonitorAutoLock& aLock);
-  /**
-   * Call this to indicate that another iteration of the control loop is
-   * required immediately. The monitor must already be held.
-   */
-  void EnsureImmediateWakeUpLocked(MonitorAutoLock& aLock);
-  /**
-   * Ensure there is an event posted to the main thread to run RunInStableState.
-   * mMonitor must be held.
-   * See EnsureRunInStableState
-   */
-  void EnsureStableStateEventPosted();
-  /**
-   * Generate messages to the main thread to update it for all state changes.
-   * mMonitor must be held.
-   */
-  void PrepareUpdatesToMainThreadState();
-  // The following methods are the various stages of RunThread processing.
-  /**
-   * Compute a new current time for the graph and advance all on-graph-thread
-   * state to the new current time.
-   */
-  void UpdateCurrentTime();
-  /**
-   * Update the consumption state of aStream to reflect whether its data
-   * is needed or not.
-   */
-  void UpdateConsumptionState(SourceMediaStream* aStream);
-  /**
-   * Extract any state updates pending in aStream, and apply them.
-   */
-  void ExtractPendingInput(SourceMediaStream* aStream,
-                           GraphTime aDesiredUpToTime,
-                           bool* aEnsureNextIteration);
-  /**
-   * Update "have enough data" flags in aStream.
-   */
-  void UpdateBufferSufficiencyState(SourceMediaStream* aStream);
-  /*
-   * If aStream hasn't already been ordered, push it onto aStack and order
-   * its children.
-   */
-  void UpdateStreamOrderForStream(nsTArray<MediaStream*>* aStack,
-                                  already_AddRefed<MediaStream> aStream);
-  /**
-   * Mark aStream and all its inputs (recursively) as consumed.
-   */
-  static void MarkConsumed(MediaStream* aStream);
-  /**
-   * Sort mStreams so that every stream not in a cycle is after any streams
-   * it depends on, and every stream in a cycle is marked as being in a cycle.
-   * Also sets mIsConsumed on every stream.
-   */
-  void UpdateStreamOrder();
-  /**
-   * Compute the blocking states of streams from mStateComputedTime
-   * until the desired future time aEndBlockingDecisions.
-   * Updates mStateComputedTime and sets MediaStream::mBlocked
-   * for all streams.
-   */
-  void RecomputeBlocking(GraphTime aEndBlockingDecisions);
-  // The following methods are used to help RecomputeBlocking.
-  /**
-   * If aStream isn't already in aStreams, add it and recursively call
-   * AddBlockingRelatedStreamsToSet on all the streams whose blocking
-   * status could depend on or affect the state of aStream.
-   */
-  void AddBlockingRelatedStreamsToSet(nsTArray<MediaStream*>* aStreams,
-                                      MediaStream* aStream);
-  /**
-   * Mark a stream blocked at time aTime. If this results in decisions that need
-   * to be revisited at some point in the future, *aEnd will be reduced to the
-   * first time in the future to recompute those decisions.
-   */
-  void MarkStreamBlocking(MediaStream* aStream);
-  /**
-   * Recompute blocking for the streams in aStreams for the interval starting at aTime.
-   * If this results in decisions that need to be revisited at some point
-   * in the future, *aEnd will be reduced to the first time in the future to
-   * recompute those decisions.
-   */
-  void RecomputeBlockingAt(const nsTArray<MediaStream*>& aStreams,
-                           GraphTime aTime, GraphTime aEndBlockingDecisions,
-                           GraphTime* aEnd);
-  /**
-   * Returns true if aStream will underrun at aTime for its own playback.
-   * aEndBlockingDecisions is when we plan to stop making blocking decisions.
-   * *aEnd will be reduced to the first time in the future to recompute these
-   * decisions.
-   */
-  bool WillUnderrun(MediaStream* aStream, GraphTime aTime,
-                    GraphTime aEndBlockingDecisions, GraphTime* aEnd);
-  /**
-   * Given a graph time aTime, convert it to a stream time taking into
-   * account the time during which aStream is scheduled to be blocked.
-   */
-  StreamTime GraphTimeToStreamTime(MediaStream* aStream, GraphTime aTime);
-  enum {
-    INCLUDE_TRAILING_BLOCKED_INTERVAL = 0x01
-  };
-  /**
-   * Given a stream time aTime, convert it to a graph time taking into
-   * account the time during which aStream is scheduled to be blocked.
-   * aTime must be <= mStateComputedTime since blocking decisions
-   * are only known up to that point.
-   * If aTime is exactly at the start of a blocked interval, then the blocked
-   * interval is included in the time returned if and only if
-   * aFlags includes INCLUDE_TRAILING_BLOCKED_INTERVAL.
-   */
-  GraphTime StreamTimeToGraphTime(MediaStream* aStream, StreamTime aTime,
-                                  uint32_t aFlags = 0);
-  /**
-   * Get the current audio position of the stream's audio output.
-   */
-  GraphTime GetAudioPosition(MediaStream* aStream);
-  /**
-   * Call NotifyHaveCurrentData on aStream's listeners.
-   */
-  void NotifyHasCurrentData(MediaStream* aStream);
-  /**
-   * If aStream needs an audio stream but doesn't have one, create it.
-   * If aStream doesn't need an audio stream but has one, destroy it.
-   */
-  void CreateOrDestroyAudioStreams(GraphTime aAudioOutputStartTime,
-                                   MediaStream* aStream);
-  /**
-   * Queue audio (mix of stream audio and silence for blocked intervals)
-   * to the audio output stream.
-   */
-  void PlayAudio(MediaStream* aStream, GraphTime aFrom, GraphTime aTo);
-  /**
-   * Set the correct current video frame for stream aStream.
-   */
-  void PlayVideo(MediaStream* aStream);
-  /**
-   * No more data will be forthcoming for aStream. The stream will end
-   * at the current buffer end point. The StreamBuffer's tracks must be
-   * explicitly set to finished by the caller.
-   */
-  void FinishStream(MediaStream* aStream);
-  /**
-   * Compute how much stream data we would like to buffer for aStream.
-   */
-  StreamTime GetDesiredBufferEnd(MediaStream* aStream);
-  /**
-   * Returns true when there are no active streams.
-   */
-  bool IsEmpty() { return mStreams.IsEmpty() && mPortCount == 0; }
-
-  // For use by control messages
-  /**
-   * Identify which graph update index we are currently processing.
-   */
-  int64_t GetProcessingGraphUpdateIndex() { return mProcessingGraphUpdateIndex; }
-  /**
-   * Add aStream to the graph and initializes its graph-specific state.
-   */
-  void AddStream(MediaStream* aStream);
-  /**
-   * Remove aStream from the graph. Ensures that pending messages about the
-   * stream back to the main thread are flushed.
-   */
-  void RemoveStream(MediaStream* aStream);
-  /**
-   * Remove aPort from the graph and release it.
-   */
-  void DestroyPort(MediaInputPort* aPort);
-
-  // Data members
-
-  /**
-   * Media graph thread.
-   * Readonly after initialization on the main thread.
-   */
-  nsCOMPtr<nsIThread> mThread;
-
-  // The following state is managed on the graph thread only, unless
-  // mLifecycleState > LIFECYCLE_RUNNING in which case the graph thread
-  // is not running and this state can be used from the main thread.
-
-  nsTArray<nsRefPtr<MediaStream> > mStreams;
-  /**
-   * The current graph time for the current iteration of the RunThread control
-   * loop.
-   */
-  GraphTime mCurrentTime;
-  /**
-   * Blocking decisions and all stream contents have been computed up to this
-   * time. The next batch of updates from the main thread will be processed
-   * at this time. Always >= mCurrentTime.
-   */
-  GraphTime mStateComputedTime;
-  /**
-   * This is only used for logging.
-   */
-  TimeStamp mInitialTimeStamp;
-  /**
-   * The real timestamp of the latest run of UpdateCurrentTime.
-   */
-  TimeStamp mCurrentTimeStamp;
-  /**
-   * Which update batch we are currently processing.
-   */
-  int64_t mProcessingGraphUpdateIndex;
-  /**
-   * Number of active MediaInputPorts
-   */
-  int32_t mPortCount;
-
-  // mMonitor guards the data below.
-  // MediaStreamGraph normally does its work without holding mMonitor, so it is
-  // not safe to just grab mMonitor from some thread and start monkeying with
-  // the graph. Instead, communicate with the graph thread using provided
-  // mechanisms such as the ControlMessage queue.
-  Monitor mMonitor;
-
-  // Data guarded by mMonitor (must always be accessed with mMonitor held,
-  // regardless of the value of mLifecycleState.
-
-  /**
-   * State to copy to main thread
-   */
-  nsTArray<StreamUpdate> mStreamUpdates;
-  /**
-   * Runnables to run after the next update to main thread state.
-   */
-  nsTArray<nsCOMPtr<nsIRunnable> > mUpdateRunnables;
-  struct MessageBlock {
-    int64_t mGraphUpdateIndex;
-    nsTArray<nsAutoPtr<ControlMessage> > mMessages;
-  };
-  /**
-   * A list of batches of messages to process. Each batch is processed
-   * as an atomic unit.
-   */
-  nsTArray<MessageBlock> mMessageQueue;
-  /**
-   * This enum specifies where this graph is in its lifecycle. This is used
-   * to control shutdown.
-   * Shutdown is tricky because it can happen in two different ways:
-   * 1) Shutdown due to inactivity. RunThread() detects that it has no
-   * pending messages and no streams, and exits. The next RunInStableState()
-   * checks if there are new pending messages from the main thread (true only
-   * if new stream creation raced with shutdown); if there are, it revives
-   * RunThread(), otherwise it commits to shutting down the graph. New stream
-   * creation after this point will create a new graph. An async event is
-   * dispatched to Shutdown() the graph's threads and then delete the graph
-   * object.
-   * 2) Forced shutdown at application shutdown. A flag is set, RunThread()
-   * detects the flag and exits, the next RunInStableState() detects the flag,
-   * and dispatches the async event to Shutdown() the graph's threads. However
-   * the graph object is not deleted. New messages for the graph are processed
-   * synchronously on the main thread if necessary. When the last stream is
-   * destroyed, the graph object is deleted.
-   */
-  enum LifecycleState {
-    // The graph thread hasn't started yet.
-    LIFECYCLE_THREAD_NOT_STARTED,
-    // RunThread() is running normally.
-    LIFECYCLE_RUNNING,
-    // In the following states, the graph thread is not running so
-    // all "graph thread only" state in this class can be used safely
-    // on the main thread.
-    // RunThread() has exited and we're waiting for the next
-    // RunInStableState(), at which point we can clean up the main-thread
-    // side of the graph.
-    LIFECYCLE_WAITING_FOR_MAIN_THREAD_CLEANUP,
-    // RunInStableState() posted a ShutdownRunnable, and we're waiting for it
-    // to shut down the graph thread(s).
-    LIFECYCLE_WAITING_FOR_THREAD_SHUTDOWN,
-    // Graph threads have shut down but we're waiting for remaining streams
-    // to be destroyed. Only happens during application shutdown since normally
-    // we'd only shut down a graph when it has no streams.
-    LIFECYCLE_WAITING_FOR_STREAM_DESTRUCTION
-  };
-  LifecycleState mLifecycleState;
-  /**
-   * This enum specifies the wait state of the graph thread.
-   */
-  enum WaitState {
-    // RunThread() is running normally
-    WAITSTATE_RUNNING,
-    // RunThread() is paused waiting for its next iteration, which will
-    // happen soon
-    WAITSTATE_WAITING_FOR_NEXT_ITERATION,
-    // RunThread() is paused indefinitely waiting for something to change
-    WAITSTATE_WAITING_INDEFINITELY,
-    // Something has signaled RunThread() to wake up immediately,
-    // but it hasn't done so yet
-    WAITSTATE_WAKING_UP
-  };
-  WaitState mWaitState;
-  /**
-   * True when another iteration of the control loop is required.
-   */
-  bool mNeedAnotherIteration;
-  /**
-   * True when we need to do a forced shutdown during application shutdown.
-   */
-  bool mForceShutDown;
-  /**
-   * True when we have posted an event to the main thread to run
-   * RunInStableState() and the event hasn't run yet.
-   */
-  bool mPostedRunInStableStateEvent;
-
-  // Main thread only
-
-  /**
-   * Messages posted by the current event loop task. These are forwarded to
-   * the media graph thread during RunInStableState. We can't forward them
-   * immediately because we want all messages between stable states to be
-   * processed as an atomic batch.
-   */
-  nsTArray<nsAutoPtr<ControlMessage> > mCurrentTaskMessageQueue;
-  /**
-   * True when RunInStableState has determined that mLifecycleState is >
-   * LIFECYCLE_RUNNING. Since only the main thread can reset mLifecycleState to
-   * LIFECYCLE_RUNNING, this can be relied on to not change unexpectedly.
-   */
-  bool mDetectedNotRunning;
-  /**
-   * True when a stable state runner has been posted to the appshell to run
-   * RunInStableState at the next stable state.
-   */
-  bool mPostedRunInStableState;
-};
 
 /**
  * The singleton graph instance.
@@ -519,7 +42,7 @@ MediaStreamGraphImpl::GetDesiredBufferEnd(MediaStream* aStream)
 {
   StreamTime current = mCurrentTime - aStream->mBufferStartTime;
   return current +
-      MillisecondsToMediaTime(NS_MAX(AUDIO_TARGET_MS, VIDEO_TARGET_MS));
+      MillisecondsToMediaTime(std::max(AUDIO_TARGET_MS, VIDEO_TARGET_MS));
 }
 
 void
@@ -595,8 +118,19 @@ MediaStreamGraphImpl::ExtractPendingInput(SourceMediaStream* aStream,
       StreamTime t =
         GraphTimeToStreamTime(aStream, mStateComputedTime) +
         (aDesiredUpToTime - mStateComputedTime);
+      LOG(PR_LOG_DEBUG, ("Calling NotifyPull aStream=%p t=%f current end=%f", aStream,
+                         MediaTimeToSeconds(t),
+                         MediaTimeToSeconds(aStream->mBuffer.GetEnd())));
       if (t > aStream->mBuffer.GetEnd()) {
         *aEnsureNextIteration = true;
+#ifdef DEBUG
+        if (aStream->mListeners.Length() == 0) {
+          LOG(PR_LOG_ERROR, ("No listeners in NotifyPull aStream=%p desired=%f current end=%f",
+                             aStream, MediaTimeToSeconds(t),
+                             MediaTimeToSeconds(aStream->mBuffer.GetEnd())));
+          aStream->DumpTrackInfo();
+        }
+#endif
         for (uint32_t j = 0; j < aStream->mListeners.Length(); ++j) {
           MediaStreamListener* l = aStream->mListeners[j];
           {
@@ -691,19 +225,28 @@ MediaStreamGraphImpl::GraphTimeToStreamTime(MediaStream* aStream,
   NS_ASSERTION(aTime <= mStateComputedTime,
                "Don't ask about times where we haven't made blocking decisions yet");
   if (aTime <= mCurrentTime) {
-    return NS_MAX<StreamTime>(0, aTime - aStream->mBufferStartTime);
+    return std::max<StreamTime>(0, aTime - aStream->mBufferStartTime);
   }
   GraphTime t = mCurrentTime;
   StreamTime s = t - aStream->mBufferStartTime;
   while (t < aTime) {
     GraphTime end;
     if (!aStream->mBlocked.GetAt(t, &end)) {
-      s += NS_MIN(aTime, end) - t;
+      s += std::min(aTime, end) - t;
     }
     t = end;
   }
-  return NS_MAX<StreamTime>(0, s);
-}  
+  return std::max<StreamTime>(0, s);
+}
+
+StreamTime
+MediaStreamGraphImpl::GraphTimeToStreamTimeOptimistic(MediaStream* aStream,
+                                                      GraphTime aTime)
+{
+  GraphTime computedUpToTime = std::min(mStateComputedTime, aTime);
+  StreamTime s = GraphTimeToStreamTime(aStream, computedUpToTime);
+  return s + (aTime - computedUpToTime);
+}
 
 GraphTime
 MediaStreamGraphImpl::StreamTimeToGraphTime(MediaStream* aStream,
@@ -727,7 +270,7 @@ MediaStreamGraphImpl::StreamTimeToGraphTime(MediaStream* aStream,
     GraphTime end;
     if (t < mStateComputedTime) {
       blocked = aStream->mBlocked.GetAt(t, &end);
-      end = NS_MIN(end, mStateComputedTime);
+      end = std::min(end, mStateComputedTime);
     } else {
       blocked = false;
       end = GRAPH_TIME_MAX;
@@ -739,7 +282,7 @@ MediaStreamGraphImpl::StreamTimeToGraphTime(MediaStream* aStream,
         // No more stream time to consume at time t, so we're done.
         break;
       }
-      MediaTime consume = NS_MIN(end - t, streamAmount);
+      MediaTime consume = std::min(end - t, streamAmount);
       streamAmount -= consume;
       t += consume;
     }
@@ -771,15 +314,7 @@ MediaStreamGraphImpl::UpdateCurrentTime()
     SecondsToMediaTime((now - mCurrentTimeStamp).ToSeconds()) + mCurrentTime;
   if (mStateComputedTime < nextCurrentTime) {
     LOG(PR_LOG_WARNING, ("Media graph global underrun detected"));
-    LOG(PR_LOG_DEBUG, ("Advancing mStateComputedTime from %f to %f",
-                       MediaTimeToSeconds(mStateComputedTime),
-                       MediaTimeToSeconds(nextCurrentTime)));
-    // Advance mStateComputedTime to nextCurrentTime by
-    // adding blocked time to all streams starting at mStateComputedTime
-    for (uint32_t i = 0; i < mStreams.Length(); ++i) {
-      mStreams[i]->mBlocked.SetAtAndAfter(mStateComputedTime, true);
-    }
-    mStateComputedTime = nextCurrentTime;
+    nextCurrentTime = mStateComputedTime;
   }
   mCurrentTimeStamp = now;
 
@@ -802,21 +337,19 @@ MediaStreamGraphImpl::UpdateCurrentTime()
     // Calculate blocked time and fire Blocked/Unblocked events
     GraphTime blockedTime = 0;
     GraphTime t = prevCurrentTime;
-    // Save current blocked status
-    bool wasBlocked = stream->mBlocked.GetAt(prevCurrentTime);
     while (t < nextCurrentTime) {
       GraphTime end;
       bool blocked = stream->mBlocked.GetAt(t, &end);
       if (blocked) {
-        blockedTime += NS_MIN(end, nextCurrentTime) - t;
+        blockedTime += std::min(end, nextCurrentTime) - t;
       }
-      if (blocked != wasBlocked) {
+      if (blocked != stream->mNotifiedBlocked) {
         for (uint32_t j = 0; j < stream->mListeners.Length(); ++j) {
           MediaStreamListener* l = stream->mListeners[j];
           l->NotifyBlockingChanged(this,
               blocked ? MediaStreamListener::BLOCKED : MediaStreamListener::UNBLOCKED);
         }
-        wasBlocked = blocked;
+        stream->mNotifiedBlocked = blocked;
       }
       t = end;
     }
@@ -864,7 +397,16 @@ MediaStreamGraphImpl::WillUnderrun(MediaStream* aStream, GraphTime aTime,
   GraphTime bufferEnd =
     StreamTimeToGraphTime(aStream, aStream->GetBufferEnd(),
                           INCLUDE_TRAILING_BLOCKED_INTERVAL);
-  NS_ASSERTION(bufferEnd >= mCurrentTime, "Buffer underran");
+#ifdef DEBUG
+  if (bufferEnd < mCurrentTime) {
+    LOG(PR_LOG_ERROR, ("MediaStream %p underrun, "
+                       "bufferEnd %f < mCurrentTime %f (%lld < %lld), Streamtime %lld",
+                       aStream, MediaTimeToSeconds(bufferEnd), MediaTimeToSeconds(mCurrentTime),
+                       bufferEnd, mCurrentTime, aStream->GetBufferEnd()));
+    aStream->DumpTrackInfo();
+    NS_ASSERTION(bufferEnd >= mCurrentTime, "Buffer underran");
+  }
+#endif
   // We should block after bufferEnd.
   if (bufferEnd <= aTime) {
     LOG(PR_LOG_DEBUG, ("MediaStream %p will block due to data underrun, "
@@ -884,7 +426,7 @@ MediaStreamGraphImpl::WillUnderrun(MediaStream* aStream, GraphTime aTime,
     return true;
   }
   // Reconsider decisions at bufferEnd
-  *aEnd = NS_MIN(*aEnd, bufferEnd);
+  *aEnd = std::min(*aEnd, bufferEnd);
   return false;
 }
 
@@ -1085,13 +627,13 @@ MediaStreamGraphImpl::RecomputeBlockingAt(const nsTArray<MediaStream*>& aStreams
         LOG(PR_LOG_DEBUG, ("MediaStream %p is finished, but not blocked yet (end at %f, with blocking at %f)",
                            stream, MediaTimeToSeconds(stream->GetBufferEnd()),
                            MediaTimeToSeconds(endTime)));
-        *aEnd = NS_MIN(*aEnd, endTime);
+        *aEnd = std::min(*aEnd, endTime);
       }
     }
 
     GraphTime end;
     bool explicitBlock = stream->mExplicitBlockerCount.GetAt(aTime, &end) > 0;
-    *aEnd = NS_MIN(*aEnd, end);
+    *aEnd = std::min(*aEnd, end);
     if (explicitBlock) {
       LOG(PR_LOG_DEBUG, ("MediaStream %p is blocked due to explicit blocker", stream));
       MarkStreamBlocking(stream);
@@ -1159,14 +701,14 @@ MediaStreamGraphImpl::CreateOrDestroyAudioStreams(GraphTime aAudioOutputStartTim
         // XXX allocating a AudioStream could be slow so we're going to have to do
         // something here ... preallocation, async allocation, multiplexing onto a single
         // stream ...
-        AudioSegment* audio = tracks->Get<AudioSegment>();
         MediaStream::AudioOutputStream* audioOutputStream =
           aStream->mAudioOutputStreams.AppendElement();
         audioOutputStream->mAudioPlaybackStartTime = aAudioOutputStartTime;
         audioOutputStream->mBlockedAudioTime = 0;
         audioOutputStream->mStream = AudioStream::AllocateStream();
-        audioOutputStream->mStream->Init(audio->GetChannels(),
-                                         tracks->GetRate(), AUDIO_CHANNEL_NORMAL);
+        // XXX for now, allocate stereo output. But we need to fix this to
+        // match the system's ideal channel configuration.
+        audioOutputStream->mStream->Init(2, tracks->GetRate(), AUDIO_CHANNEL_NORMAL);
         audioOutputStream->mTrackID = tracks->GetID();
       }
     }
@@ -1209,10 +751,9 @@ MediaStreamGraphImpl::PlayAudio(MediaStream* aStream,
     while (t < aTo) {
       GraphTime end;
       bool blocked = aStream->mBlocked.GetAt(t, &end);
-      end = NS_MIN(end, aTo);
+      end = std::min(end, aTo);
 
       AudioSegment output;
-      output.InitFrom(*audio);
       if (blocked) {
         // Track total blocked time in aStream->mBlockedAudioTime so that
         // the amount of silent samples we've inserted for blocking never gets
@@ -1236,7 +777,7 @@ MediaStreamGraphImpl::PlayAudio(MediaStream* aStream,
         // will just be silence, which is fine here. But if endTicks is after
         // the track end, then 'audio' won't be long enough, so we'll need
         // to explicitly play silence.
-        TrackTicks sliceEnd = NS_MIN(endTicks, audio->GetDuration());
+        TrackTicks sliceEnd = std::min(endTicks, audio->GetDuration());
         if (sliceEnd > startTicks) {
           output.AppendSlice(*audio, startTicks, sliceEnd);
         }
@@ -1355,6 +896,40 @@ MediaStreamGraphImpl::EnsureNextIterationLocked(MonitorAutoLock& aLock)
   }
 }
 
+static GraphTime
+RoundUpToAudioBlock(GraphTime aTime)
+{
+  TrackRate rate = IdealAudioRate();
+  int64_t ticksAtIdealRate = (aTime*rate) >> MEDIA_TIME_FRAC_BITS;
+  // Round up to nearest block boundary
+  int64_t blocksAtIdealRate =
+    (ticksAtIdealRate + (WEBAUDIO_BLOCK_SIZE - 1)) >>
+    WEBAUDIO_BLOCK_SIZE_BITS;
+  // Round up to nearest MediaTime unit
+  return
+    ((((blocksAtIdealRate + 1)*WEBAUDIO_BLOCK_SIZE) << MEDIA_TIME_FRAC_BITS)
+     + rate - 1)/rate;
+}
+
+void
+MediaStreamGraphImpl::ProduceDataForStreamsBlockByBlock(uint32_t aStreamIndex,
+                                                        GraphTime aFrom,
+                                                        GraphTime aTo)
+{
+  GraphTime t = aFrom;
+  while (t < aTo) {
+    GraphTime next = RoundUpToAudioBlock(t + 1);
+    for (uint32_t i = aStreamIndex; i < mStreams.Length(); ++i) {
+      ProcessedMediaStream* ps = mStreams[i]->AsProcessedStream();
+      if (ps) {
+        ps->ProduceOutput(t, next);
+      }
+    }
+    t = next;
+  }
+  NS_ASSERTION(t == aTo, "Something went wrong with rounding to block boundaries");
+}
+
 void
 MediaStreamGraphImpl::RunThread()
 {
@@ -1386,9 +961,8 @@ MediaStreamGraphImpl::RunThread()
 
     UpdateStreamOrder();
 
-    int32_t writeAudioUpTo = AUDIO_TARGET_MS;
     GraphTime endBlockingDecisions =
-      mCurrentTime + MillisecondsToMediaTime(writeAudioUpTo);
+      RoundUpToAudioBlock(mCurrentTime + MillisecondsToMediaTime(AUDIO_TARGET_MS));
     bool ensureNextIteration = false;
 
     // Grab pending stream input.
@@ -1407,15 +981,27 @@ MediaStreamGraphImpl::RunThread()
     // Play stream contents.
     uint32_t audioStreamsActive = 0;
     bool allBlockedForever = true;
+    // True when we've done ProduceOutput for all processed streams.
+    bool doneAllProducing = false;
     // Figure out what each stream wants to do
     for (uint32_t i = 0; i < mStreams.Length(); ++i) {
       MediaStream* stream = mStreams[i];
-      ProcessedMediaStream* ps = stream->AsProcessedStream();
-      if (ps && !ps->mFinished) {
-        ps->ProduceOutput(prevComputedTime, mStateComputedTime);
-        NS_ASSERTION(stream->mBuffer.GetEnd() >=
-                     GraphTimeToStreamTime(stream, mStateComputedTime),
-                     "Stream did not produce enough data");
+      if (!doneAllProducing && !stream->IsFinishedOnGraphThread()) {
+        ProcessedMediaStream* ps = stream->AsProcessedStream();
+        if (ps) {
+          AudioNodeStream* n = stream->AsAudioNodeStream();
+          if (n) {
+            // Since an AudioNodeStream is present, go ahead and
+            // produce audio block by block for all the rest of the streams.
+            ProduceDataForStreamsBlockByBlock(i, prevComputedTime, mStateComputedTime);
+            doneAllProducing = true;
+          } else {
+            ps->ProduceOutput(prevComputedTime, mStateComputedTime);
+            NS_ASSERTION(stream->mBuffer.GetEnd() >=
+                         GraphTimeToStreamTime(stream, mStateComputedTime),
+                       "Stream did not produce enough data");
+          }
+        }
       }
       NotifyHasCurrentData(stream);
       CreateOrDestroyAudioStreams(prevComputedTime, stream);
@@ -1460,7 +1046,7 @@ MediaStreamGraphImpl::RunThread()
           int64_t((now - mCurrentTimeStamp).ToMilliseconds());
         // Make sure timeoutMS doesn't overflow 32 bits by waking up at
         // least once a minute, if we need to wake up at all
-        timeoutMS = NS_MAX<int64_t>(0, NS_MIN<int64_t>(timeoutMS, 60*1000));
+        timeoutMS = std::max<int64_t>(0, std::min<int64_t>(timeoutMS, 60*1000));
         timeout = PR_MillisecondsToInterval(uint32_t(timeoutMS));
         LOG(PR_LOG_DEBUG, ("Waiting for next iteration; at %f, timeout=%f",
                            (now - mInitialTimeStamp).ToSeconds(), timeoutMS/1000.0));
@@ -1526,11 +1112,17 @@ namespace {
 
 class MediaStreamGraphThreadRunnable : public nsRunnable {
 public:
+  explicit MediaStreamGraphThreadRunnable(MediaStreamGraphImpl* aGraph)
+    : mGraph(aGraph)
+  {
+  }
   NS_IMETHOD Run()
   {
-    gGraph->RunThread();
+    mGraph->RunThread();
     return NS_OK;
   }
+private:
+  MediaStreamGraphImpl* mGraph;
 };
 
 class MediaStreamGraphShutDownRunnable : public nsRunnable {
@@ -1559,13 +1151,19 @@ private:
 
 class MediaStreamGraphStableStateRunnable : public nsRunnable {
 public:
+  explicit MediaStreamGraphStableStateRunnable(MediaStreamGraphImpl* aGraph)
+    : mGraph(aGraph)
+  {
+  }
   NS_IMETHOD Run()
   {
-    if (gGraph) {
-      gGraph->RunInStableState();
+    if (mGraph) {
+      mGraph->RunInStableState();
     }
     return NS_OK;
   }
+private:
+  MediaStreamGraphImpl* mGraph;
 };
 
 /*
@@ -1634,17 +1232,19 @@ MediaStreamGraphImpl::RunInStableState()
       // Start the thread now. We couldn't start it earlier because
       // the graph might exit immediately on finding it has no streams. The
       // first message for a new graph must create a stream.
-      nsCOMPtr<nsIRunnable> event = new MediaStreamGraphThreadRunnable();
-      NS_NewThread(getter_AddRefs(mThread), event);
+      nsCOMPtr<nsIRunnable> event = new MediaStreamGraphThreadRunnable(this);
+      NS_NewNamedThread("MediaStreamGrph", getter_AddRefs(mThread), event);
     }
 
     if (mCurrentTaskMessageQueue.IsEmpty()) {
       if (mLifecycleState == LIFECYCLE_WAITING_FOR_MAIN_THREAD_CLEANUP && IsEmpty()) {
-        NS_ASSERTION(gGraph == this, "Not current graph??");
         // Complete shutdown. First, ensure that this graph is no longer used.
         // A new graph graph will be created if one is needed.
-        LOG(PR_LOG_DEBUG, ("Disconnecting MediaStreamGraph %p", gGraph));
-        gGraph = nullptr;
+        LOG(PR_LOG_DEBUG, ("Disconnecting MediaStreamGraph %p", this));
+        if (this == gGraph) {
+          // null out gGraph if that's the graph being shut down
+          gGraph = nullptr;
+        }
         // Asynchronously clean up old graph. We don't want to do this
         // synchronously because it spins the event loop waiting for threads
         // to shut down, and we don't want to do that in a stable state handler.
@@ -1666,7 +1266,7 @@ MediaStreamGraphImpl::RunInStableState()
         // Revive the MediaStreamGraph since we have more messages going to it.
         // Note that we need to put messages into its queue before reviving it,
         // or it might exit immediately.
-        nsCOMPtr<nsIRunnable> event = new MediaStreamGraphThreadRunnable();
+        nsCOMPtr<nsIRunnable> event = new MediaStreamGraphThreadRunnable(this);
         mThread->Dispatch(event, 0);
       }
     }
@@ -1695,7 +1295,7 @@ MediaStreamGraphImpl::EnsureRunInStableState()
   if (mPostedRunInStableState)
     return;
   mPostedRunInStableState = true;
-  nsCOMPtr<nsIRunnable> event = new MediaStreamGraphStableStateRunnable();
+  nsCOMPtr<nsIRunnable> event = new MediaStreamGraphStableStateRunnable(this);
   nsCOMPtr<nsIAppShell> appShell = do_GetService(kAppShellCID);
   if (appShell) {
     appShell->RunInStableState(event);
@@ -1712,7 +1312,7 @@ MediaStreamGraphImpl::EnsureStableStateEventPosted()
   if (mPostedRunInStableStateEvent)
     return;
   mPostedRunInStableStateEvent = true;
-  nsCOMPtr<nsIRunnable> event = new MediaStreamGraphStableStateRunnable();
+  nsCOMPtr<nsIRunnable> event = new MediaStreamGraphStableStateRunnable(this);
   NS_DispatchToMainThread(event);
 }
 
@@ -1734,9 +1334,10 @@ MediaStreamGraphImpl::AppendMessage(ControlMessage* aMessage)
     aMessage->RunDuringShutdown();
     delete aMessage;
     if (IsEmpty()) {
-      NS_ASSERTION(gGraph == this, "Switched managers during forced shutdown?");
-      gGraph = nullptr;
-      delete this;
+      if (gGraph == this) {
+        gGraph = nullptr;
+        delete this;
+      }
     }
     return;
   }
@@ -1757,19 +1358,38 @@ MediaStream::Init()
 MediaStreamGraphImpl*
 MediaStream::GraphImpl()
 {
-  return gGraph;
+  return mGraph;
 }
 
 MediaStreamGraph*
 MediaStream::Graph()
 {
-  return gGraph;
+  return mGraph;
+}
+
+void
+MediaStream::SetGraphImpl(MediaStreamGraphImpl* aGraph)
+{
+  MOZ_ASSERT(!mGraph, "Should only be called once");
+  mGraph = aGraph;
 }
 
 StreamTime
 MediaStream::GraphTimeToStreamTime(GraphTime aTime)
 {
   return GraphImpl()->GraphTimeToStreamTime(this, aTime);
+}
+
+StreamTime
+MediaStream::GraphTimeToStreamTimeOptimistic(GraphTime aTime)
+{
+  return GraphImpl()->GraphTimeToStreamTimeOptimistic(this, aTime);
+}
+
+GraphTime
+MediaStream::StreamTimeToGraphTime(StreamTime aTime)
+{
+  return GraphImpl()->StreamTimeToGraphTime(this, aTime, 0);
 }
 
 void
@@ -1779,8 +1399,20 @@ MediaStream::FinishOnGraphThread()
 }
 
 void
+MediaStream::RemoveAllListenersImpl()
+{
+  for (int32_t i = mListeners.Length() - 1; i >= 0; --i) {
+    nsRefPtr<MediaStreamListener> listener = mListeners[i].forget();
+    listener->NotifyRemoved(GraphImpl());
+  }
+  mListeners.Clear();
+}
+
+void
 MediaStream::DestroyImpl()
 {
+  RemoveAllListenersImpl();
+
   for (int32_t i = mConsumers.Length() - 1; i >= 0; --i) {
     mConsumers[i]->Disconnect();
   }
@@ -1941,7 +1573,7 @@ MediaStream::AddListenerImpl(already_AddRefed<MediaStreamListener> aListener)
 {
   MediaStreamListener* listener = *mListeners.AppendElement() = aListener;
   listener->NotifyBlockingChanged(GraphImpl(),
-    mBlocked.GetAt(GraphImpl()->mCurrentTime) ? MediaStreamListener::BLOCKED : MediaStreamListener::UNBLOCKED);
+    mNotifiedBlocked ? MediaStreamListener::BLOCKED : MediaStreamListener::UNBLOCKED);
   if (mNotifiedFinished) {
     listener->NotifyFinished(GraphImpl());
   }
@@ -1964,6 +1596,15 @@ MediaStream::AddListener(MediaStreamListener* aListener)
 }
 
 void
+MediaStream::RemoveListenerImpl(MediaStreamListener* aListener)
+{ 
+  // wouldn't need this if we could do it in the opposite order
+  nsRefPtr<MediaStreamListener> listener(aListener);
+  mListeners.RemoveElement(aListener);
+  listener->NotifyRemoved(GraphImpl());
+}
+
+void
 MediaStream::RemoveListener(MediaStreamListener* aListener)
 {
   class Message : public ControlMessage {
@@ -1976,7 +1617,11 @@ MediaStream::RemoveListener(MediaStreamListener* aListener)
     }
     nsRefPtr<MediaStreamListener> mListener;
   };
-  GraphImpl()->AppendMessage(new Message(this, aListener));
+  // If the stream is destroyed the Listeners have or will be
+  // removed.
+  if (!IsDestroyed()) {
+    GraphImpl()->AppendMessage(new Message(this, aListener));
+  }
 }
 
 void
@@ -2016,22 +1661,25 @@ SourceMediaStream::AddTrack(TrackID aID, TrackRate aRate, TrackTicks aStart,
   }
 }
 
-void
+bool
 SourceMediaStream::AppendToTrack(TrackID aID, MediaSegment* aSegment)
 {
   MutexAutoLock lock(mMutex);
   // ::EndAllTrackAndFinished() can end these before the sources notice
+  bool appended = false;
   if (!mFinished) {
     TrackData *track = FindDataForTrack(aID);
     if (track) {
       track->mData->AppendFrom(aSegment);
+      appended = true;
     } else {
-      NS_ERROR("Append to non-existent track!");
+      aSegment->Clear();
     }
   }
   if (!mDestroyed) {
     GraphImpl()->EnsureNextIteration();
   }
+  return appended;
 }
 
 bool
@@ -2042,8 +1690,7 @@ SourceMediaStream::HaveEnoughBuffered(TrackID aID)
   if (track) {
     return track->mHaveEnough;
   }
-  NS_ERROR("No track in HaveEnoughBuffered!");
-  return true;
+  return false;
 }
 
 void
@@ -2053,7 +1700,7 @@ SourceMediaStream::DispatchWhenNotEnoughBuffered(TrackID aID,
   MutexAutoLock lock(mMutex);
   TrackData* data = FindDataForTrack(aID);
   if (!data) {
-    NS_ERROR("No track in DispatchWhenNotEnoughBuffered");
+    aSignalThread->Dispatch(aSignalRunnable, 0);
     return;
   }
 
@@ -2073,8 +1720,6 @@ SourceMediaStream::EndTrack(TrackID aID)
     TrackData *track = FindDataForTrack(aID);
     if (track) {
       track->mCommands |= TRACK_END;
-    } else {
-      NS_ERROR("End of non-existant track");
     }
   }
   if (!mDestroyed) {
@@ -2156,7 +1801,7 @@ MediaInputPort::GetNextInputInterval(GraphTime aTime)
   result.mStart = t;
   GraphTime sourceEnd;
   result.mInputIsBlocked = mSource->mBlocked.GetAt(t, &sourceEnd);
-  result.mEnd = NS_MIN(end, sourceEnd);
+  result.mEnd = std::min(end, sourceEnd);
   return result;
 }
 
@@ -2188,18 +1833,27 @@ MediaInputPort::Destroy()
 MediaStreamGraphImpl*
 MediaInputPort::GraphImpl()
 {
-  return gGraph;
+  return mGraph;
 }
 
 MediaStreamGraph*
 MediaInputPort::Graph()
 {
-  return gGraph;
+  return mGraph;
 }
 
-MediaInputPort*
+void
+MediaInputPort::SetGraphImpl(MediaStreamGraphImpl* aGraph)
+{
+  MOZ_ASSERT(!mGraph, "Should only be called once");
+  mGraph = aGraph;
+}
+
+already_AddRefed<MediaInputPort>
 ProcessedMediaStream::AllocateInputPort(MediaStream* aStream, uint32_t aFlags)
 {
+  // This method creates two references to the MediaInputPort: one for
+  // the main thread, and one for the MediaStreamGraph.
   class Message : public ControlMessage {
   public:
     Message(MediaInputPort* aPort)
@@ -2208,13 +1862,15 @@ ProcessedMediaStream::AllocateInputPort(MediaStream* aStream, uint32_t aFlags)
     virtual void Run()
     {
       mPort->Init();
+      // The graph holds its reference implicitly
+      mPort.forget();
     }
-    MediaInputPort* mPort;
+    nsRefPtr<MediaInputPort> mPort;
   };
-  MediaInputPort* port = new MediaInputPort(aStream, this, aFlags);
-  NS_ADDREF(port);
+  nsRefPtr<MediaInputPort> port = new MediaInputPort(aStream, this, aFlags);
+  port->SetGraphImpl(GraphImpl());
   GraphImpl()->AppendMessage(new Message(port));
-  return port;
+  return port.forget();
 }
 
 void
@@ -2241,7 +1897,7 @@ ProcessedMediaStream::SetAutofinish(bool aAutofinish)
       : ControlMessage(aStream), mAutofinish(aAutofinish) {}
     virtual void Run()
     {
-      mStream->AsProcessedStream()->SetAutofinishImpl(mAutofinish);
+      static_cast<ProcessedMediaStream*>(mStream)->SetAutofinishImpl(mAutofinish);
     }
     bool mAutofinish;
   };
@@ -2324,20 +1980,35 @@ MediaStreamGraph::GetInstance()
 }
 
 SourceMediaStream*
-MediaStreamGraph::CreateSourceStream(nsDOMMediaStream* aWrapper)
+MediaStreamGraph::CreateSourceStream(DOMMediaStream* aWrapper)
 {
   SourceMediaStream* stream = new SourceMediaStream(aWrapper);
   NS_ADDREF(stream);
-  static_cast<MediaStreamGraphImpl*>(this)->AppendMessage(new CreateMessage(stream));
+  MediaStreamGraphImpl* graph = static_cast<MediaStreamGraphImpl*>(this);
+  stream->SetGraphImpl(graph);
+  graph->AppendMessage(new CreateMessage(stream));
   return stream;
 }
 
 ProcessedMediaStream*
-MediaStreamGraph::CreateTrackUnionStream(nsDOMMediaStream* aWrapper)
+MediaStreamGraph::CreateTrackUnionStream(DOMMediaStream* aWrapper)
 {
   TrackUnionStream* stream = new TrackUnionStream(aWrapper);
   NS_ADDREF(stream);
-  static_cast<MediaStreamGraphImpl*>(this)->AppendMessage(new CreateMessage(stream));
+  MediaStreamGraphImpl* graph = static_cast<MediaStreamGraphImpl*>(this);
+  stream->SetGraphImpl(graph);
+  graph->AppendMessage(new CreateMessage(stream));
+  return stream;
+}
+
+AudioNodeStream*
+MediaStreamGraph::CreateAudioNodeStream(AudioNodeEngine* aEngine)
+{
+  AudioNodeStream* stream = new AudioNodeStream(aEngine);
+  NS_ADDREF(stream);
+  MediaStreamGraphImpl* graph = static_cast<MediaStreamGraphImpl*>(this);
+  stream->SetGraphImpl(graph);
+  graph->AppendMessage(new CreateMessage(stream));
   return stream;
 }
 

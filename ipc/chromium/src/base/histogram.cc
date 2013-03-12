@@ -559,7 +559,8 @@ const std::string Histogram::GetAsciiBucketRange(size_t i) const {
 // Update histogram data with new sample.
 void Histogram::Accumulate(Sample value, Count count, size_t index) {
   // Note locking not done in this version!!!
-  sample_.AccumulateWithExponentialStats(value, count, index);
+  sample_.AccumulateWithExponentialStats(value, count, index,
+					 flags_ & kExtendedStatisticsFlag);
 }
 
 void Histogram::SetBucketRange(size_t i, Sample value) {
@@ -723,29 +724,35 @@ void Histogram::SampleSet::CheckSize(const Histogram& histogram) const {
   DCHECK_EQ(histogram.bucket_count(), counts_.size());
 }
 
-
-void Histogram::SampleSet::AccumulateWithLinearStats(Sample value,
-                                                     Count count,
-                                                     size_t index) {
+void Histogram::SampleSet::Accumulate(Sample value, Count count,
+				      size_t index) {
   DCHECK(count == 1 || count == -1);
   counts_[index] += count;
-  int64_t amount = static_cast<int64_t>(count) * value;
-  sum_ += amount;
-  sum_squares_ += amount * value;
   redundant_count_ += count;
+  sum_ += static_cast<int64_t>(count) * value;
   DCHECK_GE(counts_[index], 0);
   DCHECK_GE(sum_, 0);
   DCHECK_GE(redundant_count_, 0);
 }
 
+void Histogram::SampleSet::AccumulateWithLinearStats(Sample value,
+                                                     Count count,
+                                                     size_t index) {
+  Accumulate(value, count, index);
+  sum_squares_ += static_cast<int64_t>(count) * value * value;
+}
+
 void Histogram::SampleSet::AccumulateWithExponentialStats(Sample value,
                                                           Count count,
-                                                          size_t index) {
-  AccumulateWithLinearStats(value, count, index);
-  DCHECK_GE(value, 0);
-  double value_log = log(static_cast<double>(value) + 1);
-  log_sum_ += count * value_log;
-  log_sum_squares_ += count * value_log * value_log;
+                                                          size_t index,
+							  bool computeExtendedStatistics) {
+  Accumulate(value, count, index);
+  if (computeExtendedStatistics) {
+    DCHECK_GE(value, 0);
+    float value_log = logf(static_cast<float>(value) + 1.0f);
+    log_sum_ += count * value_log;
+    log_sum_squares_ += count * value_log * value_log;
+  }
 }
 
 Count Histogram::SampleSet::TotalCount() const {
@@ -964,6 +971,14 @@ void BooleanHistogram::AddBoolean(bool value) {
 
 BooleanHistogram::BooleanHistogram(const std::string& name)
     : LinearHistogram(name, 1, 2, 3) {
+}
+
+void
+BooleanHistogram::Accumulate(Sample value, Count count, size_t index)
+{
+  // Callers will have computed index based on the non-booleanified value.
+  // So we need to adjust the index manually.
+  LinearHistogram::Accumulate(!!value, count, value ? 1 : 0);
 }
 
 //------------------------------------------------------------------------------

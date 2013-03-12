@@ -15,6 +15,7 @@ namespace js {
 namespace ion {
 
 class OutOfLineBailout;
+class OutOfLineTableSwitch;
 
 class CodeGeneratorARM : public CodeGeneratorShared
 {
@@ -54,11 +55,7 @@ class CodeGeneratorARM : public CodeGeneratorShared
     bool generateEpilogue();
     bool generateOutOfLineCode();
 
-    void emitDoubleToInt32(const FloatRegister &src, const Register &dest, Label *fail, bool negativeZeroCheck = true);
     void emitRoundDouble(const FloatRegister &src, const Register &dest, Label *fail);
-
-    // Emits a conditional set.
-    void emitSet(Assembler::Condition cond, const Register &dest);
 
     // Emits a branch that directs control flow to the true block if |cond| is
     // true, and the false block if |cond| is false.
@@ -69,7 +66,6 @@ class CodeGeneratorARM : public CodeGeneratorShared
   public:
     // Instruction visitors.
     virtual bool visitMinMaxD(LMinMaxD *ins);
-    virtual bool visitNegD(LNegD *ins);
     virtual bool visitAbsD(LAbsD *ins);
     virtual bool visitSqrtD(LSqrtD *ins);
     virtual bool visitAddI(LAddI *ins);
@@ -96,6 +92,8 @@ class CodeGeneratorARM : public CodeGeneratorShared
     virtual bool visitCompareDAndBranch(LCompareDAndBranch *comp);
     virtual bool visitCompareB(LCompareB *lir);
     virtual bool visitCompareBAndBranch(LCompareBAndBranch *lir);
+    virtual bool visitCompareV(LCompareV *lir);
+    virtual bool visitCompareVAndBranch(LCompareVAndBranch *lir);
     virtual bool visitNotI(LNotI *ins);
     virtual bool visitNotD(LNotD *ins);
 
@@ -106,6 +104,7 @@ class CodeGeneratorARM : public CodeGeneratorShared
 
     // Out of line visitors.
     bool visitOutOfLineBailout(OutOfLineBailout *ool);
+    bool visitOutOfLineTableSwitch(OutOfLineTableSwitch *ool);
 
   protected:
     ValueOperand ToValue(LInstruction *ins, size_t pos);
@@ -117,9 +116,6 @@ class CodeGeneratorARM : public CodeGeneratorShared
 
     void storeElementTyped(const LAllocation *value, MIRType valueType, MIRType elementType,
                            const Register &elements, const LAllocation *index);
-
-  protected:
-    void linkAbsoluteLabels();
 
   public:
     CodeGeneratorARM(MIRGenerator *gen, LIRGraph *graph);

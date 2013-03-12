@@ -13,9 +13,9 @@
 #include "jsfriendapi.h"
 #include "jsinterp.h"
 #include "jsprobes.h"
-#include "jsxml.h"
 #include "jsgc.h"
 
+#include "builtin/Object.h" // For js::obj_construct
 #include "frontend/ParseMaps.h"
 #include "vm/RegExpObject.h"
 
@@ -100,14 +100,14 @@ NewObjectCache::fillType(EntryIndex entry, Class *clasp, js::types::TypeObject *
 }
 
 inline JSObject *
-NewObjectCache::newObjectFromHit(JSContext *cx, EntryIndex entry_)
+NewObjectCache::newObjectFromHit(JSContext *cx, EntryIndex entry_, js::gc::InitialHeap heap)
 {
     JS_ASSERT(unsigned(entry_) < mozilla::ArrayLength(entries));
     Entry *entry = &entries[entry_];
 
-    JSObject *obj = js_TryNewGCObject(cx, entry->kind);
+    JSObject *obj = js_NewGCObject<NoGC>(cx, entry->kind, heap);
     if (obj) {
-        copyCachedToObject(obj, reinterpret_cast<JSObject *>(&entry->templateObject));
+        copyCachedToObject(obj, reinterpret_cast<JSObject *>(&entry->templateObject), entry->kind);
         Probes::createObject(cx, obj);
         return obj;
     }
@@ -134,57 +134,7 @@ struct PreserveRegsGuard
     FrameRegs &regs_;
 };
 
-#if JS_HAS_XML_SUPPORT
-
-class AutoNamespaceArray : protected AutoGCRooter {
-  public:
-    AutoNamespaceArray(JSContext *cx)
-        : AutoGCRooter(cx, NAMESPACES), context(cx) {
-        array.init();
-    }
-
-    ~AutoNamespaceArray() {
-        array.finish(context->runtime->defaultFreeOp());
-    }
-
-    uint32_t length() const { return array.length; }
-
-  private:
-    JSContext *context;
-    friend void AutoGCRooter::trace(JSTracer *trc);
-
-  public:
-    JSXMLArray<JSObject> array;
-};
-
-#endif /* JS_HAS_XML_SUPPORT */
-
-template <typename T>
-class AutoPtr
-{
-    JSContext *cx;
-    T *value;
-
-    AutoPtr(const AutoPtr &other) MOZ_DELETE;
-
-  public:
-    explicit AutoPtr(JSContext *cx) : cx(cx), value(NULL) {}
-    ~AutoPtr() {
-        js_delete<T>(value);
-    }
-
-    void operator=(T *ptr) { value = ptr; }
-
-    typedef void ***** ConvertibleToBool;
-    operator ConvertibleToBool() const { return (ConvertibleToBool) value; }
-
-    const T *operator->() const { return value; }
-    T *operator->() { return value; }
-
-    T *get() { return value; }
-};
-
-#ifdef DEBUG
+#ifdef JS_CRASH_DIAGNOSTICS
 class CompartmentChecker
 {
     JSContext *context;
@@ -201,7 +151,7 @@ class CompartmentChecker
      */
     static void fail(JSCompartment *c1, JSCompartment *c2) {
         printf("*** Compartment mismatch %p vs. %p\n", (void *) c1, (void *) c2);
-        JS_NOT_REACHED("compartment mismatched");
+        MOZ_CRASH();
     }
 
     /* Note: should only be used when neither c1 nor c2 may be the default compartment. */
@@ -281,9 +231,13 @@ class CompartmentChecker
         if (fp)
             check(fp->scopeChain());
     }
-};
 
-#endif
+    void check(AbstractFramePtr frame) {
+        if (frame)
+            check(frame.scopeChain());
+    }
+};
+#endif /* JS_CRASH_DIAGNOSTICS */
 
 /*
  * Don't perform these checks when called from a finalizer. The checking
@@ -297,6 +251,15 @@ class CompartmentChecker
 template <class T1> inline void
 assertSameCompartment(JSContext *cx, const T1 &t1)
 {
+#ifdef JS_CRASH_DIAGNOSTICS
+    START_ASSERT_SAME_COMPARTMENT();
+    c.check(t1);
+#endif
+}
+
+template <class T1> inline void
+assertSameCompartmentDebugOnly(JSContext *cx, const T1 &t1)
+{
 #ifdef DEBUG
     START_ASSERT_SAME_COMPARTMENT();
     c.check(t1);
@@ -306,7 +269,7 @@ assertSameCompartment(JSContext *cx, const T1 &t1)
 template <class T1, class T2> inline void
 assertSameCompartment(JSContext *cx, const T1 &t1, const T2 &t2)
 {
-#ifdef DEBUG
+#ifdef JS_CRASH_DIAGNOSTICS
     START_ASSERT_SAME_COMPARTMENT();
     c.check(t1);
     c.check(t2);
@@ -316,7 +279,7 @@ assertSameCompartment(JSContext *cx, const T1 &t1, const T2 &t2)
 template <class T1, class T2, class T3> inline void
 assertSameCompartment(JSContext *cx, const T1 &t1, const T2 &t2, const T3 &t3)
 {
-#ifdef DEBUG
+#ifdef JS_CRASH_DIAGNOSTICS
     START_ASSERT_SAME_COMPARTMENT();
     c.check(t1);
     c.check(t2);
@@ -327,7 +290,7 @@ assertSameCompartment(JSContext *cx, const T1 &t1, const T2 &t2, const T3 &t3)
 template <class T1, class T2, class T3, class T4> inline void
 assertSameCompartment(JSContext *cx, const T1 &t1, const T2 &t2, const T3 &t3, const T4 &t4)
 {
-#ifdef DEBUG
+#ifdef JS_CRASH_DIAGNOSTICS
     START_ASSERT_SAME_COMPARTMENT();
     c.check(t1);
     c.check(t2);
@@ -339,7 +302,7 @@ assertSameCompartment(JSContext *cx, const T1 &t1, const T2 &t2, const T3 &t3, c
 template <class T1, class T2, class T3, class T4, class T5> inline void
 assertSameCompartment(JSContext *cx, const T1 &t1, const T2 &t2, const T3 &t3, const T4 &t4, const T5 &t5)
 {
-#ifdef DEBUG
+#ifdef JS_CRASH_DIAGNOSTICS
     START_ASSERT_SAME_COMPARTMENT();
     c.check(t1);
     c.check(t2);
@@ -420,7 +383,7 @@ CallJSNativeConstructor(JSContext *cx, Native native, const CallArgs &args)
     JS_ASSERT_IF(native != FunctionProxyClass.construct &&
                  native != js::CallOrConstructBoundFunction &&
                  native != js::IteratorConstructor &&
-                 (!callee->isFunction() || callee->toFunction()->native() != js_Object),
+                 (!callee->isFunction() || callee->toFunction()->native() != obj_construct),
                  !args.rval().isPrimitive() && callee != &args.rval().toObject());
 
     return true;
@@ -474,8 +437,8 @@ JSContext::findVersion() const
     if (hasVersionOverride)
         return versionOverride;
 
-    if (stack.hasfp())
-        return fp()->script()->getVersion();
+    if (JSScript *script = stack.currentScript(NULL, js::ContextStack::ALLOW_CROSS_COMPARTMENT))
+        return script->getVersion();
 
     return defaultVersion;
 }
@@ -503,23 +466,6 @@ JSContext::maybeOverrideVersion(JSVersion newVersion)
     }
     overrideVersion(newVersion);
     return true;
-}
-
-inline unsigned
-JSContext::getCompileOptions() const { return js::VersionFlagsToOptions(findVersion()); }
-
-inline unsigned
-JSContext::allOptions() const { return getRunOptions() | getCompileOptions(); }
-
-inline void
-JSContext::setCompileOptions(unsigned newcopts)
-{
-    JS_ASSERT((newcopts & JSCOMPILEOPTION_MASK) == newcopts);
-    if (JS_LIKELY(getCompileOptions() == newcopts))
-        return;
-    JSVersion version = findVersion();
-    JSVersion newVersion = js::OptionFlagsToVersion(newcopts, version);
-    maybeOverrideVersion(newVersion);
 }
 
 inline js::LifoAlloc &
@@ -616,6 +562,18 @@ JSContext::leaveCompartment(JSCompartment *oldCompartment)
 
     if (throwing)
         wrapPendingException();
+}
+
+inline JS::Zone *
+JSContext::zone()
+{
+    return compartment->zone();
+}
+
+inline void
+JSContext::updateMallocCounter(size_t nbytes)
+{
+    runtime->updateMallocCounter(zone(), nbytes);
 }
 
 #endif /* jscntxtinlines_h___ */

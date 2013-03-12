@@ -29,6 +29,7 @@ class DASHReader : public MediaDecoderReader
 public:
   DASHReader(AbstractMediaDecoder* aDecoder);
   ~DASHReader();
+  nsresult ResetDecode() MOZ_OVERRIDE;
 
   // Adds a pointer to a audio/video reader for a media |Representation|.
   // Called on the main thread only.
@@ -38,7 +39,7 @@ public:
   // Waits for metadata bytes to be downloaded, then reads and parses them.
   // Called on the decode thread only.
   nsresult ReadMetadata(VideoInfo* aInfo,
-                        MetadataTags** aTags);
+                        MetadataTags** aTags) MOZ_OVERRIDE;
 
   // Waits for |ReadyToReadMetadata| or |NotifyDecoderShuttingDown|
   // notification, whichever comes first. Ensures no attempt to read metadata
@@ -79,8 +80,8 @@ public:
 
   // Audio/video status are dependent on the presence of audio/video readers.
   // Call on decode thread only.
-  bool HasAudio();
-  bool HasVideo();
+  bool HasAudio() MOZ_OVERRIDE;
+  bool HasVideo() MOZ_OVERRIDE;
 
   // Returns references to the audio/video queues of sub-readers. Called on
   // decode, state machine and audio threads.
@@ -88,11 +89,11 @@ public:
   MediaQueue<VideoData>& VideoQueue() MOZ_OVERRIDE;
 
   // Called from MediaDecoderStateMachine on the main thread.
-  nsresult Init(MediaDecoderReader* aCloneDonor);
+  nsresult Init(MediaDecoderReader* aCloneDonor) MOZ_OVERRIDE;
 
   // Used by |MediaMemoryReporter|.
-  int64_t VideoQueueMemoryInUse();
-  int64_t AudioQueueMemoryInUse();
+  int64_t VideoQueueMemoryInUse() MOZ_OVERRIDE;
+  int64_t AudioQueueMemoryInUse() MOZ_OVERRIDE;
 
   // Called on the decode thread, at the start of the decode loop, before
   // |DecodeVideoFrame|.  Carries out video reader switch if previously
@@ -100,20 +101,20 @@ public:
   void PrepareToDecode() MOZ_OVERRIDE;
 
   // Called on the decode thread.
-  bool DecodeVideoFrame(bool &aKeyframeSkip, int64_t aTimeThreshold);
-  bool DecodeAudioData();
+  bool DecodeVideoFrame(bool &aKeyframeSkip, int64_t aTimeThreshold) MOZ_OVERRIDE;
+  bool DecodeAudioData() MOZ_OVERRIDE;
 
   // Converts seek time to byte offset. Called on the decode thread only.
   nsresult Seek(int64_t aTime,
                 int64_t aStartTime,
                 int64_t aEndTime,
-                int64_t aCurrentTime);
+                int64_t aCurrentTime) MOZ_OVERRIDE;
 
   // Called by state machine on multiple threads.
-  nsresult GetBuffered(nsTimeRanges* aBuffered, int64_t aStartTime);
+  nsresult GetBuffered(mozilla::dom::TimeRanges* aBuffered, int64_t aStartTime) MOZ_OVERRIDE;
 
   // Called on the state machine or decode threads.
-  VideoData* FindStartTime(int64_t& aOutStartTime);
+  VideoData* FindStartTime(int64_t& aOutStartTime) MOZ_OVERRIDE;
 
   // Prepares for an upcoming switch of video readers. Called by
   // |DASHDecoder| when it has switched download streams. Sets the index of
@@ -123,6 +124,10 @@ public:
   void RequestVideoReaderSwitch(uint32_t aFromReaderIdx,
                                 uint32_t aToReaderIdx,
                                 uint32_t aSubsegmentIdx);
+
+  // Returns a pointer to the reader which should be used for the specified
+  // subsegment. Called on the decode thread only.
+  DASHRepReader* GetReaderForSubsegment(uint32_t aSubsegmentIdx);
 
 private:
   // Switches video subreaders if a stream-switch flag has been set, and the
@@ -235,6 +240,16 @@ private:
       return mSubReaderList.Length();
     }
 
+    // Returns true if |mSubReaderList| is empty. Will assert that threads
+    // other than the decode thread are "in monitor".
+    bool IsEmpty() const
+    {
+      NS_ASSERTION(mReader->GetDecoder(), "Decoder is null!");
+      if (!mReader->GetDecoder()->OnDecodeThread()) {
+        mReader->GetDecoder()->GetReentrantMonitor().AssertCurrentThreadIn();
+      }
+      return mSubReaderList.IsEmpty();
+    }
     // Override '[]' to assert threads other than the decode thread are "in
     // monitor" for accessing individual elems. Note: elems returned do not
     // have monitor assertions builtin like |MonitoredSubReader| objects.

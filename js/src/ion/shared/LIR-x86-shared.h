@@ -35,13 +35,17 @@ class LModI : public LBinaryMath<1>
   public:
     LIR_HEADER(ModI)
 
-    LModI(const LAllocation &lhs, const LAllocation &rhs) {
+    LModI(const LAllocation &lhs, const LAllocation &rhs, const LDefinition &temp) {
         setOperand(0, lhs);
         setOperand(1, rhs);
+        setTemp(0, temp);
     }
 
     const LDefinition *remainder() {
         return getDef(0);
+    }
+    MMod *mir() const {
+        return mir_->toMod();
     }
 };
 
@@ -63,6 +67,9 @@ class LModPowTwoI : public LInstructionHelper<1,1,0>
     }
     const LDefinition *remainder() {
         return getDef(0);
+    }
+    MMod *mir() const {
+        return mir_->toMod();
     }
 };
 
@@ -195,6 +202,23 @@ class LMulI : public LBinaryMath<0, 1>
     }
     const LAllocation *lhsCopy() {
         return this->getOperand(2);
+    }
+};
+
+// Constant double.
+class LDouble : public LInstructionHelper<1, 0, 0>
+{
+    double d_;
+
+  public:
+    LIR_HEADER(Double)
+
+    LDouble(double d)
+      : d_(d)
+    { }
+
+    double getDouble() const {
+        return d_;
     }
 };
 

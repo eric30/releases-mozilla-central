@@ -21,6 +21,11 @@
 #include "gfxPlatform.h"
 #include "gfxTeeSurface.h"
 #include "sampler.h"
+#include <algorithm>
+
+#if CAIRO_HAS_DWRITE_FONT
+#include "gfxWindowsPlatform.h"
+#endif
 
 using namespace mozilla;
 using namespace mozilla::gfx;
@@ -207,18 +212,9 @@ gfxContext::Restore()
 
     mStateStack.RemoveElementAt(mStateStack.Length() - 1);
 
-    if ((mPathBuilder || mPath || mPathIsRect) && !mTransformChanged) {
-      // Support here isn't fully correct if the path is continued -after-
-      // the restore. We don't currently have users that do this and we should
-      // make sure there will not be any. Sadly we can't assert this easily.
-      mTransformChanged = true;
-      mPathTransform = mTransform;
-    }
-
     mDT = CurrentState().drawTarget;
 
-    mTransform = CurrentState().transform;
-    mDT->SetTransform(GetDTTransform());
+    ChangeTransform(CurrentState().transform, false);
   }
 }
 
@@ -290,6 +286,8 @@ gfxContext::Stroke()
   } else {
     AzureState &state = CurrentState();
     if (mPathIsRect) {
+      MOZ_ASSERT(!mTransformChanged);
+
       mDT->StrokeRect(mRect, GeneralPattern(this),
                       state.strokeOptions,
                       DrawOptions(1.0f, GetOp(), state.aaMode));
@@ -474,10 +472,10 @@ gfxContext::Rectangle(const gfxRect& rect, bool snapToPixels)
       mPathIsRect = true;
       mRect = rec;
       return;
-    } else if (!mPathBuilder) {
-      EnsurePathBuilder();
     }
-    
+
+    EnsurePathBuilder();
+
     mPathBuilder->MoveTo(rec.TopLeft());
     mPathBuilder->LineTo(rec.TopRight());
     mPathBuilder->LineTo(rec.BottomRight());
@@ -752,10 +750,10 @@ gfxContext::UserToDevice(const gfxRect& rect) const
     ymax = ymin;
     for (int i = 0; i < 3; i++) {
         cairo_user_to_device(mCairo, &x[i], &y[i]);
-        xmin = NS_MIN(xmin, x[i]);
-        xmax = NS_MAX(xmax, x[i]);
-        ymin = NS_MIN(ymin, y[i]);
-        ymax = NS_MAX(ymax, y[i]);
+        xmin = std::min(xmin, x[i]);
+        xmax = std::max(xmax, x[i]);
+        ymin = std::min(ymin, y[i]);
+        ymax = std::max(ymax, y[i]);
     }
 
     return gfxRect(xmin, ymin, xmax - xmin, ymax - ymin);
@@ -806,9 +804,9 @@ gfxContext::UserToDevicePixelSnapped(gfxRect& rect, bool ignoreScale) const
       p1.Round();
       p3.Round();
 
-      rect.MoveTo(gfxPoint(NS_MIN(p1.x, p3.x), NS_MIN(p1.y, p3.y)));
-      rect.SizeTo(gfxSize(NS_MAX(p1.x, p3.x) - rect.X(),
-                          NS_MAX(p1.y, p3.y) - rect.Y()));
+      rect.MoveTo(gfxPoint(std::min(p1.x, p3.x), std::min(p1.y, p3.y)));
+      rect.SizeTo(gfxSize(std::max(p1.x, p3.x) - rect.X(),
+                          std::max(p1.y, p3.y) - rect.Y()));
       return true;
   }
 
@@ -1138,7 +1136,9 @@ gfxContext::Clip()
   if (mCairo) {
     cairo_clip_preserve(mCairo);
   } else {
-    if (mPathIsRect && !mTransformChanged) {
+    if (mPathIsRect) {
+      MOZ_ASSERT(!mTransformChanged);
+
       AzureState::PushedClip clip = { NULL, mRect, mTransform };
       CurrentState().pushedClips.AppendElement(clip);
       mDT->PushClipRect(mRect);
@@ -1269,7 +1269,9 @@ gfxContext::SetColor(const gfxRGBA& c)
     if (gfxPlatform::GetCMSMode() == eCMSMode_All) {
 
         gfxRGBA cms;
-        gfxPlatform::TransformPixel(c, cms, gfxPlatform::GetCMSRGBTransform());
+        qcms_transform *transform = gfxPlatform::GetCMSRGBTransform();
+        if (transform)
+          gfxPlatform::TransformPixel(c, cms, transform);
 
         // Use the original alpha to avoid unnecessary float->byte->float
         // conversion errors
@@ -1285,7 +1287,9 @@ gfxContext::SetColor(const gfxRGBA& c)
     if (gfxPlatform::GetCMSMode() == eCMSMode_All) {
 
         gfxRGBA cms;
-        gfxPlatform::TransformPixel(c, cms, gfxPlatform::GetCMSRGBTransform());
+        qcms_transform *transform = gfxPlatform::GetCMSRGBTransform();
+        if (transform)
+          gfxPlatform::TransformPixel(c, cms, transform);
 
         // Use the original alpha to avoid unnecessary float->byte->float
         // conversion errors
@@ -1950,33 +1954,50 @@ gfxContext::EnsurePath()
 void
 gfxContext::EnsurePathBuilder()
 {
-  if (mPathBuilder) {
+  if (mPathBuilder && !mTransformChanged) {
     return;
   }
 
   if (mPath) {
-    mPathBuilder = mPath->CopyToBuilder(CurrentState().fillRule);
-    mPath = NULL;
+    if (!mTransformChanged) {
+      mPathBuilder = mPath->CopyToBuilder(CurrentState().fillRule);
+      mPath = NULL;
+    } else {
+      Matrix invTransform = mTransform;
+      invTransform.Invert();
+      Matrix toNewUS = mPathTransform * invTransform;
+      mPathBuilder = mPath->TransformedCopyToBuilder(toNewUS, CurrentState().fillRule);
+    }
+    return;
   }
 
-  mPathBuilder = mDT->CreatePathBuilder(CurrentState().fillRule);
+  DebugOnly<PathBuilder*> oldPath = mPathBuilder.get();
 
-  if (mPathIsRect && !mTransformChanged) {
-    mPathBuilder->MoveTo(mRect.TopLeft());
-    mPathBuilder->LineTo(mRect.TopRight());
-    mPathBuilder->LineTo(mRect.BottomRight());
-    mPathBuilder->LineTo(mRect.BottomLeft());
-    mPathBuilder->Close();
-  } else if (mPathIsRect) {
-    mTransformChanged = false;
-    Matrix mat = mTransform;
-    mat.Invert();
-    mat = mPathTransform * mat;
-    mPathBuilder->MoveTo(mat * mRect.TopLeft());
-    mPathBuilder->LineTo(mat * mRect.TopRight());
-    mPathBuilder->LineTo(mat * mRect.BottomRight());
-    mPathBuilder->LineTo(mat * mRect.BottomLeft());
-    mPathBuilder->Close();
+  if (!mPathBuilder) {
+    mPathBuilder = mDT->CreatePathBuilder(CurrentState().fillRule);
+
+    if (mPathIsRect) {
+      mPathBuilder->MoveTo(mRect.TopLeft());
+      mPathBuilder->LineTo(mRect.TopRight());
+      mPathBuilder->LineTo(mRect.BottomRight());
+      mPathBuilder->LineTo(mRect.BottomLeft());
+      mPathBuilder->Close();
+    }
+  }
+
+  if (mTransformChanged) {
+    // This could be an else if since this should never happen when
+    // mPathBuilder is NULL and mPath is NULL. But this way we can assert
+    // if all the state is as expected.
+    MOZ_ASSERT(oldPath);
+    MOZ_ASSERT(!mPathIsRect);
+
+    Matrix invTransform = mTransform;
+    invTransform.Invert();
+    Matrix toNewUS = mPathTransform * invTransform;
+
+    RefPtr<Path> path = mPathBuilder->Finish();
+    mPathBuilder = path->TransformedCopyToBuilder(toNewUS, CurrentState().fillRule);
   }
 
   mPathIsRect = false;
@@ -1989,7 +2010,9 @@ gfxContext::FillAzure(Float aOpacity)
 
   CompositionOp op = GetOp();
 
-  if (mPathIsRect && !mTransformChanged) {
+  if (mPathIsRect) {
+    MOZ_ASSERT(!mTransformChanged);
+
     if (state.opIsClear) {
       mDT->ClearRect(mRect);
     } else if (op == OP_SOURCE) {
@@ -2069,31 +2092,36 @@ gfxContext::GetOp()
 /* SVG font code can change the transform after having set the pattern on the
  * context. When the pattern is set it is in user space, if the transform is
  * changed after doing so the pattern needs to be converted back into userspace.
- * We just store the old pattern here so that we only do the work needed here
- * if the pattern is actually used.
+ * We just store the old pattern transform here so that we only do the work
+ * needed here if the pattern is actually used.
+ * We need to avoid doing this when this ChangeTransform comes from a restore,
+ * since the current pattern and the current transform are both part of the
+ * state we know the new CurrentState()'s values are valid. But if we assume
+ * a change they might become invalid since patternTransformChanged is part of
+ * the state and might be false for the restored AzureState.
  */
 void
-gfxContext::ChangeTransform(const Matrix &aNewMatrix)
+gfxContext::ChangeTransform(const Matrix &aNewMatrix, bool aUpdatePatternTransform)
 {
   AzureState &state = CurrentState();
 
-  if ((state.pattern || state.sourceSurface)
+  if (aUpdatePatternTransform && (state.pattern || state.sourceSurface)
       && !state.patternTransformChanged) {
     state.patternTransform = mTransform;
     state.patternTransformChanged = true;
   }
 
-  if (mPathBuilder || mPathIsRect) {
+  if (mPathIsRect) {
     Matrix invMatrix = aNewMatrix;
     
     invMatrix.Invert();
 
     Matrix toNewUS = mTransform * invMatrix;
 
-    if (toNewUS.IsRectilinear() && mPathIsRect) {
+    if (toNewUS.IsRectilinear()) {
       mRect = toNewUS.TransformBounds(mRect);
       mRect.NudgeToIntegers();
-    } else if (mPathIsRect) {
+    } else {
       mPathBuilder = mDT->CreatePathBuilder(CurrentState().fillRule);
       
       mPathBuilder->MoveTo(toNewUS * mRect.TopLeft());
@@ -2101,13 +2129,15 @@ gfxContext::ChangeTransform(const Matrix &aNewMatrix)
       mPathBuilder->LineTo(toNewUS * mRect.BottomRight());
       mPathBuilder->LineTo(toNewUS * mRect.BottomLeft());
       mPathBuilder->Close();
-    } else {
-      RefPtr<Path> path = mPathBuilder->Finish();
-      // Create path in device space.
-      mPathBuilder = path->TransformedCopyToBuilder(toNewUS);
+
+      mPathIsRect = false;
     }
+
     // No need to consider the transform changed now!
     mTransformChanged = false;
+  } else if ((mPath || mPathBuilder) && !mTransformChanged) {
+    mTransformChanged = true;
+    mPathTransform = mTransform;
   }
 
   mTransform = aNewMatrix;
@@ -2165,8 +2195,8 @@ gfxContext::PushNewDT(gfxASurface::gfxContentType content)
   Rect clipBounds = GetAzureDeviceSpaceClipBounds();
   clipBounds.RoundOut();
 
-  clipBounds.width = NS_MAX(1.0f, clipBounds.width);
-  clipBounds.height = NS_MAX(1.0f, clipBounds.height);
+  clipBounds.width = std::max(1.0f, clipBounds.width);
+  clipBounds.height = std::max(1.0f, clipBounds.height);
 
   RefPtr<DrawTarget> newDT =
     mDT->CreateSimilarDrawTarget(IntSize(int32_t(clipBounds.width), int32_t(clipBounds.height)),
@@ -2178,4 +2208,78 @@ gfxContext::PushNewDT(gfxASurface::gfxContentType content)
   CurrentState().deviceOffset = clipBounds.TopLeft();
 
   mDT = newDT;
+}
+
+/**
+ * Work out whether cairo will snap inter-glyph spacing to pixels.
+ *
+ * Layout does not align text to pixel boundaries, so, with font drawing
+ * backends that snap glyph positions to pixels, it is important that
+ * inter-glyph spacing within words is always an integer number of pixels.
+ * This ensures that the drawing backend snaps all of the word's glyphs in the
+ * same direction and so inter-glyph spacing remains the same.
+ */
+void
+gfxContext::GetRoundOffsetsToPixels(bool *aRoundX, bool *aRoundY)
+{
+    *aRoundX = false;
+    // Could do something fancy here for ScaleFactors of
+    // AxisAlignedTransforms, but we leave things simple.
+    // Not much point rounding if a matrix will mess things up anyway.
+    // Also return false for non-cairo contexts.
+    if (CurrentMatrix().HasNonTranslation() || mDT) {
+        *aRoundY = false;
+        return;
+    }
+
+    // All raster backends snap glyphs to pixels vertically.
+    // Print backends set CAIRO_HINT_METRICS_OFF.
+    *aRoundY = true;
+
+    cairo_t *cr = GetCairo();
+    cairo_scaled_font_t *scaled_font = cairo_get_scaled_font(cr);
+    // Sometimes hint metrics gets set for us, most notably for printing.
+    cairo_font_options_t *font_options = cairo_font_options_create();
+    cairo_scaled_font_get_font_options(scaled_font, font_options);
+    cairo_hint_metrics_t hint_metrics =
+        cairo_font_options_get_hint_metrics(font_options);
+    cairo_font_options_destroy(font_options);
+
+    switch (hint_metrics) {
+    case CAIRO_HINT_METRICS_OFF:
+        *aRoundY = false;
+        return;
+    case CAIRO_HINT_METRICS_DEFAULT:
+        // Here we mimic what cairo surface/font backends do.  Printing
+        // surfaces have already been handled by hint_metrics.  The
+        // fallback show_glyphs implementation composites pixel-aligned
+        // glyph surfaces, so we just pick surface/font combinations that
+        // override this.
+        switch (cairo_scaled_font_get_type(scaled_font)) {
+#if CAIRO_HAS_DWRITE_FONT // dwrite backend is not in std cairo releases yet
+        case CAIRO_FONT_TYPE_DWRITE:
+            // show_glyphs is implemented on the font and so is used for
+            // all surface types; however, it may pixel-snap depending on
+            // the dwrite rendering mode
+            if (!cairo_dwrite_scaled_font_get_force_GDI_classic(scaled_font) &&
+                gfxWindowsPlatform::GetPlatform()->DWriteMeasuringMode() ==
+                    DWRITE_MEASURING_MODE_NATURAL) {
+                return;
+            }
+#endif
+        case CAIRO_FONT_TYPE_QUARTZ:
+            // Quartz surfaces implement show_glyphs for Quartz fonts
+            if (cairo_surface_get_type(cairo_get_target(cr)) ==
+                CAIRO_SURFACE_TYPE_QUARTZ) {
+                return;
+            }
+        default:
+            break;
+        }
+        // fall through:
+    case CAIRO_HINT_METRICS_ON:
+        break;
+    }
+    *aRoundX = true;
+    return;
 }

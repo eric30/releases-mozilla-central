@@ -12,8 +12,8 @@
 #include "IonCode.h"
 #include "SnapshotReader.h"
 
-struct JSFunction;
-struct JSScript;
+class JSFunction;
+class JSScript;
 
 namespace js {
 namespace ion {
@@ -32,13 +32,14 @@ enum FrameType
     // mismatches in calls.
     IonFrame_Rectifier,
 
-    // A bailed JS frame is a JS frame signalling that its callee has been
-    // bailed out.
-    IonFrame_Bailed_JS,
+    // An unwound JS frame is a JS frame signalling that its callee frame has been
+    // turned into an exit frame (see EnsureExitFrame). Used by Ion bailouts and
+    // Baseline exception unwinding.
+    IonFrame_Unwound_OptimizedJS,
 
-    // A bailed rectifier frame is a rectifier frame signalling that its callee
-    // has been bailed out.
-    IonFrame_Bailed_Rectifier,
+    // An unwound rectifier frame is a rectifier frame signalling that its callee
+    // frame has been turned into an exit frame (see EnsureExitFrame).
+    IonFrame_Unwound_Rectifier,
 
     // An exit frame is necessary for transitioning from a JS frame into C++.
     // From within C++, an exit frame is always the last frame in any
@@ -129,7 +130,7 @@ class IonFrameIterator
     JSFunction *callee() const;
     JSFunction *maybeCallee() const;
     unsigned numActualArgs() const;
-    JSScript *script() const;
+    RawScript script() const;
     Value *nativeVp() const;
     Value *actualArgs() const;
 
@@ -238,7 +239,7 @@ class SnapshotIterator : public SnapshotReader
     }
 
     template <class Op>
-    inline void readFrameArgs(Op op, const Value *argv, Value *scopeChain, Value *thisv,
+    inline void readFrameArgs(Op &op, const Value *argv, Value *scopeChain, Value *thisv,
                               unsigned start, unsigned formalEnd, unsigned iterEnd);
 
     Value maybeReadSlotByIndex(size_t index) {
@@ -264,8 +265,8 @@ class InlineFrameIterator
     SnapshotIterator start_;
     SnapshotIterator si_;
     unsigned framesRead_;
-    HeapPtr<JSFunction> callee_;
-    HeapPtr<JSScript> script_;
+    RootedFunction callee_;
+    RootedScript script_;
     jsbytecode *pc_;
     uint32_t numActualArgs_;
 
@@ -273,8 +274,9 @@ class InlineFrameIterator
     void findNextFrame();
 
   public:
-    InlineFrameIterator(const IonFrameIterator *iter);
-    InlineFrameIterator(const IonBailoutIterator *iter);
+    InlineFrameIterator(JSContext *cx, const IonFrameIterator *iter);
+    InlineFrameIterator(JSContext *cx, const IonBailoutIterator *iter);
+    InlineFrameIterator(JSContext *cx, const InlineFrameIterator *iter);
 
     bool more() const {
         return frame_ && framesRead_ < start_.frameCount();
@@ -289,9 +291,9 @@ class InlineFrameIterator
     unsigned numActualArgs() const;
 
     template <class Op>
-    inline void forEachCanonicalActualArg(Op op, unsigned start, unsigned count) const;
+    inline void forEachCanonicalActualArg(JSContext *cx, Op op, unsigned start, unsigned count) const;
 
-    JSScript *script() const {
+    RawScript script() const {
         return script_;
     }
     jsbytecode *pc() const {
@@ -304,9 +306,15 @@ class InlineFrameIterator
     bool isConstructing() const;
     JSObject *scopeChain() const;
     JSObject *thisObject() const;
-    InlineFrameIterator operator++();
+    InlineFrameIterator &operator++();
 
     void dump() const;
+
+    void resetOn(const IonFrameIterator *iter);
+
+  private:
+    InlineFrameIterator() MOZ_DELETE;
+    InlineFrameIterator(const InlineFrameIterator &iter) MOZ_DELETE;
 };
 
 } // namespace ion

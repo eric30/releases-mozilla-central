@@ -4,6 +4,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/DebugOnly.h"
+#include "mozilla/Likely.h"
+
 #include "nsError.h"
 #include "nsHtml5TreeOpExecutor.h"
 #include "nsScriptLoader.h"
@@ -25,13 +28,11 @@
 #include "nsHtml5TreeBuilder.h"
 #include "nsHtml5StreamParser.h"
 #include "mozilla/css/Loader.h"
-#include "mozilla/Util.h" // DebugOnly
 #include "sampler.h"
 #include "nsIScriptError.h"
 #include "nsIScriptContext.h"
 #include "mozilla/Preferences.h"
 #include "nsIHTMLDocument.h"
-#include "mozilla/Likely.h"
 
 using namespace mozilla;
 
@@ -234,13 +235,11 @@ nsHtml5TreeOpExecutor::SetDocumentCharsetAndSource(nsACString& aCharset, int32_t
       // in this block of code, if we get an error result, we return
       // it but if we get a null pointer, that's perfectly legal for
       // parent and parentContentViewer
-      nsCOMPtr<nsIDocShellTreeItem> docShellAsItem =
-        do_QueryInterface(mDocShell);
-      if (!docShellAsItem) {
+      if (!mDocShell) {
     	  return;
       }
       nsCOMPtr<nsIDocShellTreeItem> parentAsItem;
-      docShellAsItem->GetSameTypeParent(getter_AddRefs(parentAsItem));
+      mDocShell->GetSameTypeParent(getter_AddRefs(parentAsItem));
       nsCOMPtr<nsIDocShell> parent(do_QueryInterface(parentAsItem));
       if (parent) {
         nsCOMPtr<nsIContentViewer> parentContentViewer;
@@ -879,9 +878,8 @@ nsHtml5TreeOpExecutor::MaybeComplainAboutCharset(const char* aMsgId,
   // the embedded different-origin pages anyway and can't fix problems even
   // if alerted about them.
   if (!strcmp(aMsgId, "EncNoDeclaration") && mDocShell) {
-    nsCOMPtr<nsIDocShellTreeItem> treeItem = do_QueryInterface(mDocShell);
     nsCOMPtr<nsIDocShellTreeItem> parent;
-    treeItem->GetSameTypeParent(getter_AddRefs(parent));
+    mDocShell->GetSameTypeParent(getter_AddRefs(parent));
     if (parent) {
       return;
     }

@@ -36,7 +36,7 @@
 #include "gtest_utils.h"
 
 using namespace mozilla;
-MOZ_MTLOG_MODULE("mediapipeline");
+MOZ_MTLOG_MODULE("mediapipeline")
 
 MtransportTestUtils *test_utils;
 
@@ -47,8 +47,8 @@ class TestAgent {
       audio_flow_(new TransportFlow()),
       audio_prsock_(new TransportLayerPrsock()),
       audio_dtls_(new TransportLayerDtls()),
-      audio_config_(109, "opus", 48000, 480, 1, 64000),
-      audio_conduit_(mozilla::AudioSessionConduit::Create()),
+      audio_config_(109, "opus", 48000, 960, 2, 64000),
+      audio_conduit_(mozilla::AudioSessionConduit::Create(NULL)),
       audio_(),
       audio_pipeline_(),
       video_flow_(new TransportFlow()),
@@ -96,6 +96,10 @@ class TestAgent {
     audio_->GetStream()->Stop();
     audio_flow_ = NULL;
     video_flow_ = NULL;
+    if (audio_pipeline_)
+      audio_pipeline_->Shutdown();
+    if (video_pipeline_)
+      video_pipeline_->Shutdown();
     audio_pipeline_ = NULL;
     video_pipeline_ = NULL;
   }
@@ -117,31 +121,37 @@ class TestAgent {
   TransportLayerDtls *audio_dtls_;
   mozilla::AudioCodecConfig audio_config_;
   mozilla::RefPtr<mozilla::MediaSessionConduit> audio_conduit_;
-  nsRefPtr<nsDOMMediaStream> audio_;
+  nsRefPtr<DOMMediaStream> audio_;
   mozilla::RefPtr<mozilla::MediaPipeline> audio_pipeline_;
   mozilla::RefPtr<TransportFlow> video_flow_;
   TransportLayerPrsock *video_prsock_;
   mozilla::VideoCodecConfig video_config_;
   mozilla::RefPtr<mozilla::MediaSessionConduit> video_conduit_;
-  nsRefPtr<nsDOMMediaStream> video_;
+  nsRefPtr<DOMMediaStream> video_;
   mozilla::RefPtr<mozilla::MediaPipeline> video_pipeline_;
 };
 
 class TestAgentSend : public TestAgent {
  public:
   TestAgentSend() {
-    audio_ = new Fake_nsDOMMediaStream(new Fake_AudioStreamSource());
+    audio_ = new Fake_DOMMediaStream(new Fake_AudioStreamSource());
 
     mozilla::MediaConduitErrorCode err =
         static_cast<mozilla::AudioSessionConduit *>(audio_conduit_.get())->
         ConfigureSendMediaCodec(&audio_config_);
     EXPECT_EQ(mozilla::kMediaConduitNoError, err);
 
-    audio_pipeline_ = new mozilla::MediaPipelineTransmit(NULL,
-      test_utils->sts_target(),
-      audio_, audio_conduit_, audio_flow_, NULL);
+    std::string test_pc("PC");
 
-//    video_ = new Fake_nsDOMMediaStream(new Fake_VideoStreamSource());
+    audio_pipeline_ = new mozilla::MediaPipelineTransmit(
+        test_pc,
+        NULL,
+        test_utils->sts_target(),
+        audio_->GetStream(), 1, audio_conduit_, audio_flow_, NULL);
+
+    audio_pipeline_->Init();
+
+//    video_ = new Fake_DOMMediaStream(new Fake_VideoStreamSource());
 //    video_pipeline_ = new mozilla::MediaPipelineTransmit(video_, video_conduit_, &video_flow_, &video_flow_);
   }
 
@@ -156,11 +166,10 @@ class TestAgentReceive : public TestAgent {
     audio->SetPullEnabled(true);
 
     mozilla::AudioSegment* segment= new mozilla::AudioSegment();
-    segment->Init(1);
     audio->AddTrack(0, 100, 0, segment);
     audio->AdvanceKnownTracksTime(mozilla::STREAM_TIME_MAX);
 
-    audio_ = new Fake_nsDOMMediaStream(audio);
+    audio_ = new Fake_DOMMediaStream(audio);
 
     std::vector<mozilla::AudioCodecConfig *> codecs;
     codecs.push_back(&audio_config_);
@@ -170,11 +179,16 @@ class TestAgentReceive : public TestAgent {
         ConfigureRecvMediaCodecs(codecs);
     EXPECT_EQ(mozilla::kMediaConduitNoError, err);
 
-    audio_pipeline_ = new mozilla::MediaPipelineReceiveAudio(NULL,
-      test_utils->sts_target(),
-      audio_,
-      static_cast<mozilla::AudioSessionConduit *>(audio_conduit_.get()),
-      audio_flow_, NULL);
+    std::string test_pc("PC");
+    audio_pipeline_ = new mozilla::MediaPipelineReceiveAudio(
+        test_pc,
+        NULL,
+        test_utils->sts_target(),
+        audio_->GetStream(), 1,
+        static_cast<mozilla::AudioSessionConduit *>(audio_conduit_.get()),
+        audio_flow_, NULL);
+
+    audio_pipeline_->Init();
   }
 
  private:

@@ -22,6 +22,7 @@ CPPSRCS = \
   Filters.cpp \
   ARIAStateMap.cpp \
   DocManager.cpp \
+  EventQueue.cpp \
   FocusManager.cpp \
   NotificationController.cpp \
   nsAccessNode.cpp \
@@ -31,9 +32,9 @@ CPPSRCS = \
   nsAccessibilityService.cpp \
   nsAccessiblePivot.cpp \
   nsEventShell.cpp \
-  nsCaretAccessible.cpp \
   nsTextEquivUtils.cpp \
   RoleAsserts.cpp \
+  SelectionManager.cpp \
   StyleInfo.cpp \
   TextAttrs.cpp \
   TextUpdater.cpp \
@@ -60,6 +61,7 @@ EXPORTS_mozilla/a11y = \
   AccTypes.h \
   Platform.h \
   States.h \
+  SelectionManager.h \
   Role.h \
   $(NULL)
 
@@ -82,6 +84,7 @@ LOCAL_INCLUDES += \
   -I$(srcdir)/../xul \
   -I$(srcdir)/../../../layout/generic \
   -I$(srcdir)/../../../layout/style \
+  -I$(srcdir)/../../../layout/svg \
   -I$(srcdir)/../../../layout/xul/base/src \
   $(NULL)
 
@@ -92,7 +95,7 @@ LOCAL_INCLUDES += \
 else
 ifeq ($(MOZ_WIDGET_TOOLKIT),windows)
 LOCAL_INCLUDES += \
-  -I$(srcdir)/../msaa \
+  -I$(srcdir)/../windows/msaa \
   -I$(srcdir)/../windows/ia2 \
   $(NULL)
 else

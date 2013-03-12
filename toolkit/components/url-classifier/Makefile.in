@@ -1,4 +1,3 @@
-#
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
@@ -13,17 +12,9 @@ include $(DEPTH)/config/autoconf.mk
 
 MODULE = url-classifier
 LIBRARY_NAME = urlclassifier_s
-XPIDL_MODULE = url-classifier
 LIBXUL_LIBRARY = 1
 FORCE_STATIC_LIB = 1
-
-# Normally the "client ID" sent in updates is appinfo.name, but for
-# official Firefox releases from Mozilla we use a special identifier.
-ifdef MOZILLA_OFFICIAL
-ifdef MOZ_PHOENIX
-DEFINES += -DUSE_HISTORIC_SAFEBROWSING_ID=1
-endif
-endif
+FAIL_ON_WARNINGS = 1
 
 XPIDLSRCS = \
   nsIUrlClassifierDBService.idl \
@@ -64,12 +55,8 @@ EXTRA_PP_COMPONENTS = \
   nsUrlClassifierListManager.js \
   $(NULL)
 
-EXTRA_PP_JS_MODULES = \
+EXTRA_JS_MODULES = \
   SafeBrowsing.jsm \
   $(NULL)
-
-ifdef ENABLE_TESTS
-TOOL_DIRS += tests
-endif
 
 include $(topsrcdir)/config/rules.mk

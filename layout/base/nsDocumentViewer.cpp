@@ -39,11 +39,11 @@
 #include "nsContentUtils.h"
 #include "nsLayoutStylesheetCache.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/dom/EncodingUtils.h"
 
-#include "nsViewsCID.h"
 #include "nsIDeviceContextSpec.h"
-#include "nsIViewManager.h"
-#include "nsIView.h"
+#include "nsViewManager.h"
+#include "nsView.h"
 
 #include "nsIPageSequenceFrame.h"
 #include "nsIURL.h"
@@ -54,8 +54,6 @@
 #include "nsIMarkupDocumentViewer.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIInterfaceRequestorUtils.h"
-#include "nsIDocShellTreeItem.h"
-#include "nsIDocShellTreeNode.h"
 #include "nsIDocShellTreeOwner.h"
 #include "nsIDocShell.h"
 #include "nsIBaseWindow.h"
@@ -158,6 +156,7 @@ static const char sPrintOptionsContractID[]         = "@mozilla.org/gfx/printset
 #include "jsfriendapi.h"
 
 using namespace mozilla;
+using namespace mozilla::dom;
 
 #ifdef DEBUG
 
@@ -323,12 +322,12 @@ private:
    * @param aContainerView the container view to hook our root view up
    * to as a child, or null if this will be the root view manager
    */
-  nsresult MakeWindow(const nsSize& aSize, nsIView* aContainerView);
+  nsresult MakeWindow(const nsSize& aSize, nsView* aContainerView);
 
   /**
    * Create our device context
    */
-  nsresult CreateDeviceContext(nsIView* aContainerView);
+  nsresult CreateDeviceContext(nsView* aContainerView);
 
   /**
    * If aDoCreation is true, this creates the device context, creates a
@@ -379,7 +378,7 @@ protected:
   // These return the current shell/prescontext etc.
   nsIPresShell* GetPresShell();
   nsPresContext* GetPresContext();
-  nsIViewManager* GetViewManager();
+  nsViewManager* GetViewManager();
 
   void DetachFromTopLevelWidget();
 
@@ -397,7 +396,7 @@ protected:
   // so they will be destroyed in the reverse order (pinkerton, scc)
   nsCOMPtr<nsIDocument>    mDocument;
   nsCOMPtr<nsIWidget>      mWindow;      // may be null
-  nsCOMPtr<nsIViewManager> mViewManager;
+  nsRefPtr<nsViewManager> mViewManager;
   nsRefPtr<nsPresContext>  mPresContext;
   nsCOMPtr<nsIPresShell>   mPresShell;
 
@@ -497,8 +496,6 @@ private:
 //------------------------------------------------------------------
 // nsDocumentViewer
 //------------------------------------------------------------------
-// Class IDs
-static NS_DEFINE_CID(kViewManagerCID,       NS_VIEW_MANAGER_CID);
 
 //------------------------------------------------------------------
 nsresult
@@ -806,7 +803,7 @@ nsDocumentViewer::InitPresentationStuff(bool aDoInitialReflow)
 static nsPresContext*
 CreatePresContext(nsIDocument* aDocument,
                   nsPresContext::nsPresContextType aType,
-                  nsIView* aContainerView)
+                  nsView* aContainerView)
 {
   if (aContainerView)
     return new nsPresContext(aDocument, aType);
@@ -842,7 +839,7 @@ nsDocumentViewer::InitInternal(nsIWidget* aParentWidget,
   nsresult rv = NS_OK;
   NS_ENSURE_TRUE(mDocument, NS_ERROR_NULL_POINTER);
 
-  nsIView* containerView = FindContainerView();
+  nsView* containerView = FindContainerView();
 
   bool makeCX = false;
   if (aDoCreation) {
@@ -994,7 +991,7 @@ nsDocumentViewer::LoadComplete(nsresult aStatus)
   NS_ENSURE_TRUE(mDocument, NS_ERROR_NOT_AVAILABLE);
 
   // First, get the window from the document...
-  nsPIDOMWindow *window = mDocument->GetWindow();
+  nsCOMPtr<nsPIDOMWindow> window = mDocument->GetWindow();
 
   mLoaded = true;
 
@@ -1008,7 +1005,7 @@ nsDocumentViewer::LoadComplete(nsresult aStatus)
      (NS_SUCCEEDED(aStatus) || aStatus == NS_ERROR_PARSED_DATA_CACHED)) {
     nsEventStatus status = nsEventStatus_eIgnore;
     nsEvent event(true, NS_LOAD);
-    event.flags |= NS_EVENT_FLAG_CANT_BUBBLE;
+    event.mFlags.mBubbles = false;
      // XXX Dispatching to |window|, but using |document| as the target.
     event.target = mDocument;
 
@@ -1030,9 +1027,10 @@ nsDocumentViewer::LoadComplete(nsresult aStatus)
                     nsIDocument::READYSTATE_UNINITIALIZED &&
                   NS_IsAboutBlank(mDocument->GetDocumentURI())),
                  "Bad readystate");
+      nsCOMPtr<nsIDocument> d = mDocument;
       mDocument->SetReadyStateInternal(nsIDocument::READYSTATE_COMPLETE);
 
-      nsRefPtr<nsDOMNavigationTiming> timing(mDocument->GetNavigationTiming());
+      nsRefPtr<nsDOMNavigationTiming> timing(d->GetNavigationTiming());
       if (timing) {
         timing->NotifyLoadEventStart();
       }
@@ -1143,7 +1141,7 @@ nsDocumentViewer::PermitUnload(bool aCallerClosesWindow, bool *aPermitUnload)
   nsCOMPtr<nsIDocShellTreeNode> docShellNode(do_QueryReferent(mContainer));
   nsAutoString text;
   beforeUnload->GetReturnValue(text);
-  if (event->GetInternalNSEvent()->flags & NS_EVENT_FLAG_NO_DEFAULT ||
+  if (event->GetInternalNSEvent()->mFlags.mDefaultPrevented ||
       !text.IsEmpty()) {
     // Ask the user if it's ok to unload the current page
 
@@ -1289,7 +1287,7 @@ nsDocumentViewer::PageHide(bool aIsUnload)
     // Now, fire an Unload event to the document...
     nsEventStatus status = nsEventStatus_eIgnore;
     nsEvent event(true, NS_PAGE_UNLOAD);
-    event.flags |= NS_EVENT_FLAG_CANT_BUBBLE;
+    event.mFlags.mBubbles = false;
     // XXX Dispatching to |window|, but using |document| as the target.
     event.target = mDocument;
 
@@ -1333,14 +1331,11 @@ AttachContainerRecurse(nsIDocShell* aShell)
   }
 
   // Now recurse through the children
-  nsCOMPtr<nsIDocShellTreeNode> node = do_QueryInterface(aShell);
-  NS_ASSERTION(node, "docshells must implement nsIDocShellTreeNode");
-
   int32_t childCount;
-  node->GetChildCount(&childCount);
+  aShell->GetChildCount(&childCount);
   for (int32_t i = 0; i < childCount; ++i) {
     nsCOMPtr<nsIDocShellTreeItem> childItem;
-    node->GetChildAt(i, getter_AddRefs(childItem));
+    aShell->GetChildAt(i, getter_AddRefs(childItem));
     AttachContainerRecurse(nsCOMPtr<nsIDocShell>(do_QueryInterface(childItem)));
   }
 }
@@ -1399,9 +1394,9 @@ nsDocumentViewer::Open(nsISupports *aState, nsISHEntry *aSHEntry)
     // If the old view is already attached to our parent, detach
     DetachFromTopLevelWidget();
 
-    nsIViewManager *vm = GetViewManager();
+    nsViewManager *vm = GetViewManager();
     NS_ABORT_IF_FALSE(vm, "no view manager");
-    nsIView* v = vm->GetRootView();
+    nsView* v = vm->GetRootView();
     NS_ABORT_IF_FALSE(v, "no root view");
     NS_ABORT_IF_FALSE(mParentWidget, "no mParentWidget to set");
     v->AttachToTopLevelWidget(mParentWidget);
@@ -1490,14 +1485,11 @@ DetachContainerRecurse(nsIDocShell *aShell)
   }
 
   // Now recurse through the children
-  nsCOMPtr<nsIDocShellTreeNode> node = do_QueryInterface(aShell);
-  NS_ASSERTION(node, "docshells must implement nsIDocShellTreeNode");
-
   int32_t childCount;
-  node->GetChildCount(&childCount);
+  aShell->GetChildCount(&childCount);
   for (int32_t i = 0; i < childCount; ++i) {
     nsCOMPtr<nsIDocShellTreeItem> childItem;
-    node->GetChildAt(i, getter_AddRefs(childItem));
+    aShell->GetChildAt(i, getter_AddRefs(childItem));
     DetachContainerRecurse(nsCOMPtr<nsIDocShell>(do_QueryInterface(childItem)));
   }
 }
@@ -1542,13 +1534,13 @@ nsDocumentViewer::Destroy()
     mSHEntry->SetSticky(mIsSticky);
     mIsSticky = true;
 
-    bool savePresentation = true;
+    bool savePresentation = mDocument ? mDocument->IsBFCachingAllowed() : true;
 
     // Remove our root view from the view hierarchy.
     if (mPresShell) {
-      nsIViewManager *vm = mPresShell->GetViewManager();
+      nsViewManager *vm = mPresShell->GetViewManager();
       if (vm) {
-        nsIView *rootView = vm->GetRootView();
+        nsView *rootView = vm->GetRootView();
 
         if (rootView) {
           // The invalidate that removing this view causes is dropped because
@@ -1557,9 +1549,9 @@ nsDocumentViewer::Destroy()
           vm->InvalidateViewNoSuppression(rootView,
             rootView->GetBounds() - rootView->GetPosition());
 
-          nsIView *rootViewParent = rootView->GetParent();
+          nsView *rootViewParent = rootView->GetParent();
           if (rootViewParent) {
-            nsIViewManager *parentVM = rootViewParent->GetViewManager();
+            nsViewManager *parentVM = rootViewParent->GetViewManager();
             if (parentVM) {
               parentVM->RemoveChild(rootView);
             }
@@ -1627,6 +1619,9 @@ nsDocumentViewer::Destroy()
 
   // The document was not put in the bfcache
 
+  if (mPresShell) {
+    DestroyPresShell();
+  }
   if (mDocument) {
     mDocument->Destroy();
     mDocument = nullptr;
@@ -1659,10 +1654,6 @@ nsDocumentViewer::Destroy()
   }
 
   mDeviceContext = nullptr;
-
-  if (mPresShell) {
-    DestroyPresShell();
-  }
 
   if (mPresContext) {
     DestroyPresContext();
@@ -1806,7 +1797,7 @@ nsDocumentViewer::GetPresContext()
   return mPresContext;
 }
 
-nsIViewManager*
+nsViewManager*
 nsDocumentViewer::GetViewManager()
 {
   return mViewManager;
@@ -1982,7 +1973,7 @@ nsDocumentViewer::Show(void)
       }
     }
 
-    nsIView* containerView = FindContainerView();
+    nsView* containerView = FindContainerView();
 
     nsresult rv = CreateDeviceContext(containerView);
     NS_ENSURE_SUCCESS(rv, rv);
@@ -2260,7 +2251,7 @@ nsDocumentViewer::ClearHistoryEntry()
 //-------------------------------------------------------
 
 nsresult
-nsDocumentViewer::MakeWindow(const nsSize& aSize, nsIView* aContainerView)
+nsDocumentViewer::MakeWindow(const nsSize& aSize, nsView* aContainerView)
 {
   if (GetIsPrintPreview())
     return NS_OK;
@@ -2272,21 +2263,18 @@ nsDocumentViewer::MakeWindow(const nsSize& aSize, nsIView* aContainerView)
     DetachFromTopLevelWidget();
   }
 
-  nsresult rv;
-  mViewManager = do_CreateInstance(kViewManagerCID, &rv);
-  if (NS_FAILED(rv))
-    return rv;
+  mViewManager = new nsViewManager();
 
   nsDeviceContext *dx = mPresContext->DeviceContext();
 
-  rv = mViewManager->Init(dx);
+  nsresult rv = mViewManager->Init(dx);
   if (NS_FAILED(rv))
     return rv;
 
   // The root view is always at 0,0.
   nsRect tbounds(nsPoint(0, 0), aSize);
   // Create a view
-  nsIView* view = mViewManager->CreateView(tbounds, aContainerView);
+  nsView* view = mViewManager->CreateView(tbounds, aContainerView);
   if (!view)
     return NS_ERROR_OUT_OF_MEMORY;
 
@@ -2342,7 +2330,7 @@ void
 nsDocumentViewer::DetachFromTopLevelWidget()
 {
   if (mViewManager) {
-    nsIView* oldView = mViewManager->GetRootView();
+    nsView* oldView = mViewManager->GetRootView();
     if (oldView && oldView->IsAttachedToTopLevel()) {
       oldView->DetachFromTopLevelWidget();
     }
@@ -2350,10 +2338,10 @@ nsDocumentViewer::DetachFromTopLevelWidget()
   mAttachedToParent = false;
 }
 
-nsIView*
+nsView*
 nsDocumentViewer::FindContainerView()
 {
-  nsIView* containerView = nullptr;
+  nsView* containerView = nullptr;
 
   if (mContainer) {
     nsCOMPtr<nsIDocShellTreeItem> docShellItem = do_QueryReferent(mContainer);
@@ -2369,7 +2357,7 @@ nsDocumentViewer::FindContainerView()
         docShellItem->GetParent(getter_AddRefs(parentDocShellItem));
         if (parentDocShellItem) {
           nsCOMPtr<nsIDocShell> parentDocShell = do_QueryInterface(parentDocShellItem);
-          parentDocShell->GetPresShell(getter_AddRefs(parentPresShell));
+          parentPresShell = parentDocShell->GetPresShell();
         }
       }
       if (!parentPresShell) {
@@ -2390,7 +2378,7 @@ nsDocumentViewer::FindContainerView()
           // displayed.
           if (subdocFrame->GetType() == nsGkAtoms::subDocumentFrame) {
             NS_ASSERTION(subdocFrame->GetView(), "Subdoc frames must have views");
-            nsIView* innerView =
+            nsView* innerView =
               static_cast<nsSubDocumentFrame*>(subdocFrame)->EnsureInnerView();
             containerView = innerView;
           } else {
@@ -2407,7 +2395,7 @@ nsDocumentViewer::FindContainerView()
 }
 
 nsresult
-nsDocumentViewer::CreateDeviceContext(nsIView* aContainerView)
+nsDocumentViewer::CreateDeviceContext(nsView* aContainerView)
 {
   NS_PRECONDITION(!mPresShell && !mWindow,
                   "This will screw up our existing presentation");
@@ -2984,10 +2972,14 @@ nsDocumentViewer::GetDefaultCharacterSet(nsACString& aDefaultCharacterSet)
     const nsAdoptingCString& defCharset =
       Preferences::GetLocalizedCString("intl.charset.default");
 
-    if (!defCharset.IsEmpty()) {
-      mDefaultCharacterSet = defCharset;
+    // Don't let the user break things by setting intl.charset.default to
+    // not a rough ASCII superset
+    nsAutoCString canonical;
+    if (EncodingUtils::FindEncodingForLabel(defCharset, canonical) &&
+        EncodingUtils::IsAsciiCompatible(canonical)) {
+      mDefaultCharacterSet = canonical;
     } else {
-      mDefaultCharacterSet.AssignLiteral("ISO-8859-1");
+      mDefaultCharacterSet.AssignLiteral("windows-1252");
     }
   }
   aDefaultCharacterSet = mDefaultCharacterSet;
@@ -3663,6 +3655,13 @@ nsDocumentViewer::Print(nsIPrintSettings*       aPrintSettings,
   if (mPrintEngine->HasPrintCallbackCanvas()) {
     mBeforeAndAfterPrint = beforeAndAfterPrint;
   }
+  dom::Element* root = mDocument->GetRootElement();
+  if (root && root->HasAttr(kNameSpaceID_None, nsGkAtoms::mozdisallowselectionprint)) {
+    mPrintEngine->SetDisallowSelectionPrint(true);
+  }
+  if (root && root->HasAttr(kNameSpaceID_None, nsGkAtoms::moznomarginboxes)) {
+    mPrintEngine->SetNoMarginBoxes(true);
+  }
   rv = mPrintEngine->Print(aPrintSettings, aWebProgressListener);
   if (NS_FAILED(rv)) {
     OnDonePrinting();
@@ -4269,11 +4268,12 @@ nsDocumentViewer::OnDonePrinting()
 {
 #if defined(NS_PRINTING) && defined(NS_PRINT_PREVIEW)
   if (mPrintEngine) {
+    nsRefPtr<nsPrintEngine> pe = mPrintEngine;
     if (GetIsPrintPreview()) {
-      mPrintEngine->DestroyPrintingData();
+      pe->DestroyPrintingData();
     } else {
-      mPrintEngine->Destroy();
       mPrintEngine = nullptr;
+      pe->Destroy();
     }
 
     // We are done printing, now cleanup 
@@ -4388,7 +4388,7 @@ nsDocumentViewer::InitializeForPrintPreview()
 }
 
 void
-nsDocumentViewer::SetPrintPreviewPresentation(nsIViewManager* aViewManager,
+nsDocumentViewer::SetPrintPreviewPresentation(nsViewManager* aViewManager,
                                                 nsPresContext* aPresContext,
                                                 nsIPresShell* aPresShell)
 {

@@ -6,7 +6,6 @@
 // This defines a common base class for nsITheme implementations, to reduce
 // code duplication.
 
-#include "prtypes.h"
 #include "nsAlgorithm.h"
 #include "nsIAtom.h"
 #include "nsCOMPtr.h"
@@ -60,6 +59,8 @@ class nsNativeTheme : public nsITimerCallback
   // RTL chrome direction
   bool IsFrameRTL(nsIFrame* aFrame);
 
+  bool IsHTMLContent(nsIFrame *aFrame);
+  
   // button:
   bool IsDefaultButton(nsIFrame* aFrame) {
     return CheckBooleanAttr(aFrame, nsGkAtoms::_default);
@@ -76,11 +77,11 @@ class nsNativeTheme : public nsITimerCallback
   bool IsSelected(nsIFrame* aFrame) {
     return GetCheckedOrSelected(aFrame, true);
   }
-  
+
   bool IsFocused(nsIFrame* aFrame) {
     return CheckBooleanAttr(aFrame, nsGkAtoms::focused);
   }
-  
+
   // scrollbar button:
   int32_t GetScrollbarButtonType(nsIFrame* aFrame);
 
@@ -154,8 +155,12 @@ class nsNativeTheme : public nsITimerCallback
   bool IsMenuListEditable(nsIFrame *aFrame);
 
   nsIPresShell *GetPresShell(nsIFrame* aFrame);
-  int32_t CheckIntAttr(nsIFrame* aFrame, nsIAtom* aAtom, int32_t defaultValue);
-  bool CheckBooleanAttr(nsIFrame* aFrame, nsIAtom* aAtom);
+  static bool CheckBooleanAttr(nsIFrame* aFrame, nsIAtom* aAtom);
+  static int32_t CheckIntAttr(nsIFrame* aFrame, nsIAtom* aAtom, int32_t defaultValue);
+
+  // Helpers for progressbar.
+  static double GetProgressValue(nsIFrame* aFrame);
+  static double GetProgressMaxValue(nsIFrame* aFrame);
 
   bool GetCheckedOrSelected(nsIFrame* aFrame, bool aCheckSelected);
   bool GetIndeterminate(nsIFrame* aFrame);

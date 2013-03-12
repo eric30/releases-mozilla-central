@@ -13,11 +13,12 @@ MODULE		= mozgnome
 LIBRARY_NAME	= mozgnome
 FORCE_SHARED_LIB = 1
 IS_COMPONENT	= 1
+FAIL_ON_WARNINGS = 1
 
 
 CPPSRCS = \
   nsGnomeModule.cpp \
-  nsAlertsService.cpp \
+  nsSystemAlertsService.cpp \
   nsAlertsIconListener.cpp \
   $(NULL)
 

@@ -15,6 +15,7 @@
 #include "jsprvtd.h"
 #include "jspubtd.h"
 
+#include "builtin/Module.h"
 #include "frontend/ParseMaps.h"
 #include "frontend/ParseNode.h"
 #include "vm/ScopeObject.h"
@@ -54,10 +55,16 @@ class AnyContextFlags
     //
     bool            bindingsAccessedDynamically:1;
 
+    // Whether this script, or any of its inner scripts contains a debugger
+    // statement which could potentially read or write anywhere along the
+    // scope chain.
+    bool            hasDebuggerStatement:1;
+
   public:
     AnyContextFlags()
      :  hasExplicitUseStrict(false),
-        bindingsAccessedDynamically(false)
+        bindingsAccessedDynamically(false),
+        hasDebuggerStatement(false)
     { }
 };
 
@@ -137,46 +144,32 @@ class GlobalSharedContext;
 class SharedContext
 {
   public:
-    JSContext       *const context;
-
-    const bool isFunction;          /* true for function code, false for
-                                       global code */
+    JSContext *const context;
     AnyContextFlags anyCxFlags;
-
-    // strictModeState tracks the strictness of this context. Normally, it
-    // should be STRICT or NOTSTRICT. However, it can be UNKNOWN when parsing
-    // code for which the strictness has not yet been determined. This happens
-    // when parsing the defaults of a functions and non-"use strict" directive
-    // prologue strings.
-    //
-    // Unless its parent is strict, a context starts out in the UNKNOWN
-    // state. Parser::setStrictMode() should be called when a context has been
-    // determined to be strict or it cannot possibly become strict through the
-    // directive prologue.
-    //
-    // When parsing is done, no contexts can be in the UNKNOWN state, with the
-    // exception of functions defined in default expressions.  Any such context
-    // subsequently inherits its parent's state when it starts being used in
-    // BytecodeEmitter (see EmitFunc()).
-    //
-    StrictMode strictModeState;
+    bool strict;
 
     // If it's function code, funbox must be non-NULL and scopeChain must be NULL.
     // If it's global code, funbox must be NULL.
-    inline SharedContext(JSContext *cx, bool isFun, StrictMode sms);
+    inline SharedContext(JSContext *cx, bool strict);
 
-    inline GlobalSharedContext *asGlobal();
-    inline FunctionBox *asFunbox();
+    virtual ObjectBox *toObjectBox() = 0;
+    inline bool isGlobalSharedContext() { return toObjectBox() == NULL; }
+    inline bool isModuleBox() { return toObjectBox() && toObjectBox()->isModuleBox(); }
+    inline bool isFunctionBox() { return toObjectBox() && toObjectBox()->isFunctionBox(); }
+    inline GlobalSharedContext *asGlobalSharedContext();
+    inline ModuleBox *asModuleBox();
+    inline FunctionBox *asFunctionBox();
 
     bool hasExplicitUseStrict()        const { return anyCxFlags.hasExplicitUseStrict; }
     bool bindingsAccessedDynamically() const { return anyCxFlags.bindingsAccessedDynamically; }
+    bool hasDebuggerStatement()        const { return anyCxFlags.hasDebuggerStatement; }
 
     void setExplicitUseStrict()           { anyCxFlags.hasExplicitUseStrict        = true; }
     void setBindingsAccessedDynamically() { anyCxFlags.bindingsAccessedDynamically = true; }
+    void setHasDebuggerStatement()        { anyCxFlags.hasDebuggerStatement        = true; }
 
     // JSOPTION_STRICT warnings or strict mode errors.
     inline bool needStrictChecks();
-    inline bool inStrictMode();
 };
 
 class GlobalSharedContext : public SharedContext
@@ -185,9 +178,21 @@ class GlobalSharedContext : public SharedContext
     const RootedObject scopeChain_; /* scope chain object for the script */
 
   public:
-    inline GlobalSharedContext(JSContext *cx, JSObject *scopeChain, StrictMode sms);
+    inline GlobalSharedContext(JSContext *cx, JSObject *scopeChain, bool strict);
 
+    ObjectBox *toObjectBox() { return NULL; }
     JSObject *scopeChain() const { return scopeChain_; }
+};
+
+
+class ModuleBox : public ObjectBox, public SharedContext {
+public:
+    Bindings bindings;
+
+    ModuleBox(JSContext *cx, ObjectBox *traceListHead, Module *module,
+              ParseContext<FullParseHandler> *pc);
+    ObjectBox *toObjectBox() { return this; }
+    Module *module() const { return &object->asModule(); }
 };
 
 class FunctionBox : public ObjectBox, public SharedContext
@@ -197,15 +202,16 @@ class FunctionBox : public ObjectBox, public SharedContext
     size_t          bufStart;
     size_t          bufEnd;
     uint16_t        ndefaults;
-    bool            inWith:1;               /* some enclosing scope is a with-statement
-                                               or E4X filter-expression */
+    bool            inWith:1;               /* some enclosing scope is a with-statement */
     bool            inGenexpLambda:1;       /* lambda from generator expression */
 
     FunctionContextFlags funCxFlags;
 
-    FunctionBox(JSContext *cx, ObjectBox* traceListHead, JSFunction *fun, ParseContext *pc,
-                StrictMode sms);
+    template <typename ParseHandler>
+    FunctionBox(JSContext *cx, ObjectBox* traceListHead, JSFunction *fun, ParseContext<ParseHandler> *pc,
+                bool strict);
 
+    ObjectBox *toObjectBox() { return this; }
     JSFunction *function() const { return object->toFunction(); }
 
     bool isGenerator()              const { return funCxFlags.isGenerator; }

@@ -34,6 +34,7 @@
 #include "nsJSEnvironment.h"
 #include "nsXMLHttpRequest.h"
 #include "mozilla/Telemetry.h"
+#include "nsDOMClassInfoID.h"
 
 using namespace mozilla;
 using namespace js;
@@ -319,7 +320,7 @@ nsXPCComponents_Interfaces::NewResolve(nsIXPConnectWrappedNative *wrapper,
     JSAutoByteString name;
     if (mManager &&
         JSID_IS_STRING(id) &&
-        name.encode(cx, JSID_TO_STRING(id)) &&
+        name.encodeLatin1(cx, JSID_TO_STRING(id)) &&
         name.ptr()[0] != '{') { // we only allow interfaces by name here
         nsCOMPtr<nsIInterfaceInfo> info;
         mManager->GetInfoForName(name.ptr(), getter_AddRefs(info));
@@ -915,7 +916,7 @@ nsXPCComponents_Classes::NewResolve(nsIXPConnectWrappedNative *wrapper,
     JSAutoByteString name;
 
     if (JSID_IS_STRING(id) &&
-        name.encode(cx, JSID_TO_STRING(id)) &&
+        name.encodeLatin1(cx, JSID_TO_STRING(id)) &&
         name.ptr()[0] != '{') { // we only allow contractids here
         nsCOMPtr<nsIJSCID> nsid =
             dont_AddRef(static_cast<nsIJSCID*>(nsJSCID::NewID(name.ptr())));
@@ -1171,7 +1172,7 @@ nsXPCComponents_ClassesByID::NewResolve(nsIXPConnectWrappedNative *wrapper,
     JSAutoByteString name;
 
     if (JSID_IS_STRING(id) &&
-        name.encode(cx, JSID_TO_STRING(id)) &&
+        name.encodeLatin1(cx, JSID_TO_STRING(id)) &&
         name.ptr()[0] == '{' &&
         IsRegisteredCLSID(name.ptr())) { // we only allow canonical CLSIDs here
         nsCOMPtr<nsIJSCID> nsid =
@@ -1397,7 +1398,7 @@ nsXPCComponents_Results::NewResolve(nsIXPConnectWrappedNative *wrapper,
 {
     JSAutoByteString name;
 
-    if (JSID_IS_STRING(id) && name.encode(cx, JSID_TO_STRING(id))) {
+    if (JSID_IS_STRING(id) && name.encodeLatin1(cx, JSID_TO_STRING(id))) {
         const char* rv_name;
         void* iter = nullptr;
         nsresult rv;
@@ -1617,7 +1618,7 @@ nsXPCComponents_ID::CallOrConstruct(nsIXPConnectWrappedNative *wrapper,
     nsID id;
 
     if (!(jsstr = JS_ValueToString(cx, argv[0])) ||
-        !bytes.encode(cx, jsstr) ||
+        !bytes.encodeLatin1(cx, jsstr) ||
         !id.Parse(bytes.ptr())) {
         return ThrowAndFail(NS_ERROR_XPC_BAD_ID_STRING, cx, _retval);
     }
@@ -1871,7 +1872,7 @@ struct NS_STACK_CLASS ExceptionArgParser
         JSString *str = JS_ValueToString(cx, v);
         if (!str)
            return false;
-        eMsg = messageBytes.encode(cx, str);
+        eMsg = messageBytes.encodeLatin1(cx, str);
         return !!eMsg;
     }
 
@@ -2495,7 +2496,7 @@ nsXPCComponents_Constructor::CallOrConstruct(nsIXPConnectWrappedNative *wrapper,
     if (argc >= 3) {
         // argv[2] is an initializer function or property name
         JSString* str = JS_ValueToString(cx, argv[2]);
-        if (!str || !(cInitializer = cInitializerBytes.encode(cx, str)))
+        if (!str || !(cInitializer = cInitializerBytes.encodeLatin1(cx, str)))
             return ThrowAndFail(NS_ERROR_XPC_BAD_CONVERT_JS, cx, _retval);
     }
 
@@ -2699,7 +2700,7 @@ nsXPCComponents_Utils::LookupMethod(const JS::Value& object,
     // first param must be a JSObject
     if (!object.isObject())
         return NS_ERROR_XPC_BAD_CONVERT_JS;
-    js::RootedObject obj(cx, &object.toObject());
+    JS::RootedObject obj(cx, &object.toObject());
 
     // second param must be a string.
     if (!JSVAL_IS_STRING(name))
@@ -3044,14 +3045,6 @@ NS_IMPL_THREADSAFE_RELEASE(nsXPCComponents_utils_Sandbox)
 #define XPC_MAP_FLAGS               0
 #include "xpc_map_end.h" /* This #undef's the above. */
 
-static bool
-WrapForSandbox(JSContext *cx, bool wantXrays, jsval *vp)
-{
-    return wantXrays
-           ? JS_WrapValue(cx, vp)
-           : xpc::WrapperFactory::WaiveXrayAndWrap(cx, vp);
-}
-
 xpc::SandboxProxyHandler xpc::sandboxProxyHandler;
 
 bool
@@ -3143,18 +3136,16 @@ XPC_WN_Helper_SetProperty(JSContext *cx, JSHandleObject obj, JSHandleId id, JSBo
 
 bool
 xpc::SandboxProxyHandler::getPropertyDescriptor(JSContext *cx, JSObject *proxy,
-                                                jsid id_, bool set,
-                                                PropertyDescriptor *desc)
+                                                jsid id_,
+                                                PropertyDescriptor *desc,
+                                                unsigned flags)
 {
-    js::RootedObject obj(cx, wrappedObject(proxy));
-    js::RootedId id(cx, id_);
+    JS::RootedObject obj(cx, wrappedObject(proxy));
+    JS::RootedId id(cx, id_);
 
     MOZ_ASSERT(js::GetObjectCompartment(obj) == js::GetObjectCompartment(proxy));
-    // XXXbz Not sure about the JSRESOLVE_QUALIFIED here, but we have
-    // no way to tell for sure whether to use it.
     if (!JS_GetPropertyDescriptorById(cx, obj, id,
-                                      (set ? JSRESOLVE_ASSIGNING : 0) | JSRESOLVE_QUALIFIED,
-                                      desc))
+                                      flags, desc))
         return false;
 
     if (!desc->obj)
@@ -3194,10 +3185,11 @@ xpc::SandboxProxyHandler::getPropertyDescriptor(JSContext *cx, JSObject *proxy,
 bool
 xpc::SandboxProxyHandler::getOwnPropertyDescriptor(JSContext *cx,
                                                    JSObject *proxy,
-                                                   jsid id, bool set,
-                                                   PropertyDescriptor *desc)
+                                                   jsid id,
+                                                   PropertyDescriptor *desc,
+                                                   unsigned flags)
 {
-    if (!getPropertyDescriptor(cx, proxy, id, set, desc))
+    if (!getPropertyDescriptor(cx, proxy, id, desc, flags))
         return false;
 
     if (desc->obj != wrappedObject(proxy))
@@ -3291,7 +3283,18 @@ xpc_CreateSandboxObject(JSContext *cx, jsval *vp, nsISupports *prinOrSop, Sandbo
     sandbox = xpc::CreateGlobalObject(cx, &SandboxClass, principal);
     if (!sandbox)
         return NS_ERROR_FAILURE;
-    xpc::GetCompartmentPrivate(sandbox)->wantXrays = options.wantXrays;
+
+    // Set up the wantXrays flag, which indicates whether xrays are desired even
+    // for same-origin access.
+    //
+    // This flag has historically been ignored for chrome sandboxes due to
+    // quirks in the wrapping implementation that have now been removed. Indeed,
+    // same-origin Xrays for chrome->chrome access seems a bit superfluous.
+    // Arguably we should just flip the default for chrome and still honor the
+    // flag, but such a change would break code in subtle ways for minimal
+    // benefit. So we just switch it off here.
+    xpc::GetCompartmentPrivate(sandbox)->wantXrays =
+      AccessCheck::isChrome(sandbox) ? false : options.wantXrays;
 
     JS::AutoObjectRooter tvr(cx, sandbox);
 
@@ -3355,10 +3358,14 @@ xpc_CreateSandboxObject(JSContext *cx, jsval *vp, nsISupports *prinOrSop, Sandbo
     }
 
     if (vp) {
+        // We have this crazy behavior where wantXrays=false also implies that the
+        // returned sandbox is implicitly waived. We've stopped advertising it, but
+        // keep supporting it for now.
         *vp = OBJECT_TO_JSVAL(sandbox);
-        if (!WrapForSandbox(cx, options.wantXrays, vp)) {
+        if (options.wantXrays && !JS_WrapValue(cx, vp))
             return NS_ERROR_UNEXPECTED;
-        }
+        if (!options.wantXrays && !xpc::WrapperFactory::WaiveXrayAndWrap(cx, vp))
+            return NS_ERROR_UNEXPECTED;
     }
 
     // Set the location information for the new global, so that tools like
@@ -3756,16 +3763,12 @@ ContextHolder::ContextHolder(JSContext *aOuterCx,
         DebugOnly<nsresult> rv = XPCWrapper::GetSecurityManager()->
                                    IsSystemPrincipal(mPrincipal, &isChrome);
         MOZ_ASSERT(NS_SUCCEEDED(rv));
-        bool allowXML = Preferences::GetBool(isChrome ?
-                                             "javascript.options.xml.chrome" :
-                                             "javascript.options.xml.content");
 
         JSAutoRequest ar(mJSContext);
         JS_SetOptions(mJSContext,
                       JS_GetOptions(mJSContext) |
                       JSOPTION_DONT_REPORT_UNCAUGHT |
-                      JSOPTION_PRIVATE_IS_NSISUPPORTS |
-                      (allowXML ? JSOPTION_ALLOW_XML : 0));
+                      JSOPTION_PRIVATE_IS_NSISUPPORTS);
         JS_SetGlobalObject(mJSContext, aSandbox);
         JS_SetContextPrivate(mJSContext, this);
         JS_SetOperationCallback(mJSContext, ContextHolderOperationCallback);
@@ -3835,7 +3838,7 @@ nsXPCComponents_Utils::EvalInSandbox(const nsAString& source,
             return NS_ERROR_INVALID_ARG;
 
         JSAutoByteString filenameBytes;
-        if (!filenameBytes.encode(cx, filenameStr))
+        if (!filenameBytes.encodeLatin1(cx, filenameStr))
             return NS_ERROR_INVALID_ARG;
         filename = filenameBytes.ptr();
     } else {
@@ -3862,7 +3865,10 @@ xpc_EvalInSandbox(JSContext *cx, JSObject *sandbox, const nsAString& source,
                   JSVersion jsVersion, bool returnStringOnly, jsval *rval)
 {
     JS_AbortIfWrongThread(JS_GetRuntime(cx));
+    JSAutoRequest ar(cx);
+    *rval = JS::UndefinedValue();
 
+    bool waiveXray = xpc::WrapperFactory::HasWaiveXrayFlag(sandbox);
     sandbox = js::UnwrapObjectChecked(sandbox);
     if (!sandbox || js::GetObjectJSClass(sandbox) != &SandboxClass) {
         return NS_ERROR_INVALID_ARG;
@@ -3872,10 +3878,7 @@ xpc_EvalInSandbox(JSContext *cx, JSObject *sandbox, const nsAString& source,
         (nsIScriptObjectPrincipal*)xpc_GetJSPrivate(sandbox);
     NS_ASSERTION(sop, "Invalid sandbox passed");
     nsCOMPtr<nsIPrincipal> prin = sop->GetPrincipal();
-
-    if (!prin) {
-        return NS_ERROR_FAILURE;
-    }
+    NS_ENSURE_TRUE(prin, NS_ERROR_FAILURE);
 
     nsAutoCString filenameBuf;
     if (!filename) {
@@ -3885,113 +3888,81 @@ xpc_EvalInSandbox(JSContext *cx, JSObject *sandbox, const nsAString& source,
         lineNo = 1;
     }
 
-    JSObject *callingScope;
+    // We create a separate cx to do the sandbox evaluation. Scope it.
+    JS::Value v = JS::UndefinedValue();
+    JS::Value exn = JS::UndefinedValue();
+    bool ok = true;
     {
-        JSAutoRequest req(cx);
-
-        callingScope = JS_GetGlobalForScopeChain(cx);
-        if (!callingScope) {
-            return NS_ERROR_FAILURE;
+        // Make a special cx for the sandbox and push it.
+        // NB: As soon as the RefPtr goes away, the cx goes away. So declare
+        // it first so that it disappears last.
+        nsRefPtr<ContextHolder> sandcxHolder = new ContextHolder(cx, sandbox, prin);
+        JSContext *sandcx = sandcxHolder->GetJSContext();
+        if (!sandcx) {
+            JS_ReportError(cx, "Can't prepare context for evalInSandbox");
+            return NS_ERROR_OUT_OF_MEMORY;
         }
-    }
+        nsCxPusher pusher;
+        pusher.Push(sandcx);
 
-    nsRefPtr<ContextHolder> sandcx = new ContextHolder(cx, sandbox, prin);
-    if (!sandcx || !sandcx->GetJSContext()) {
-        JS_ReportError(cx, "Can't prepare context for evalInSandbox");
-        return NS_ERROR_OUT_OF_MEMORY;
-    }
+        JSAutoRequest req(sandcx);
+        JSAutoCompartment ac(sandcx, sandbox);
 
-    if (jsVersion != JSVERSION_DEFAULT)
-        JS_SetVersion(sandcx->GetJSContext(), jsVersion);
+        if (jsVersion != JSVERSION_DEFAULT)
+            JS_SetVersion(sandcx, jsVersion);
 
-    XPCJSContextStack *stack = XPCJSRuntime::Get()->GetJSContextStack();
-    MOZ_ASSERT(stack);
-    if (!stack->Push(sandcx->GetJSContext())) {
-        JS_ReportError(cx, "Unable to initialize XPConnect with the sandbox context");
-        return NS_ERROR_FAILURE;
-    }
-
-    nsresult rv = NS_OK;
-
-    {
-        JSAutoRequest req(sandcx->GetJSContext());
-        JSAutoCompartment ac(sandcx->GetJSContext(), sandbox);
-
-        jsval v;
-        JSString *str = nullptr;
-        JS::CompileOptions options(sandcx->GetJSContext());
+        JS::CompileOptions options(sandcx);
         options.setPrincipals(nsJSPrincipals::get(prin))
                .setFileAndLine(filename, lineNo);
-        js::RootedObject rootedSandbox(sandcx->GetJSContext(), sandbox);
-        bool ok = JS::Evaluate(sandcx->GetJSContext(), rootedSandbox, options,
-                               PromiseFlatString(source).get(), source.Length(), &v);
+        JS::RootedObject rootedSandbox(sandcx, sandbox);
+        ok = JS::Evaluate(sandcx, rootedSandbox, options,
+                          PromiseFlatString(source).get(), source.Length(), &v);
         if (ok && returnStringOnly && !(JSVAL_IS_VOID(v))) {
-            ok = !!(str = JS_ValueToString(sandcx->GetJSContext(), v));
+            JSString *str = JS_ValueToString(sandcx, v);
+            ok = !!str;
+            v = ok ? JS::StringValue(str) : JS::UndefinedValue();
         }
 
-        if (!ok) {
-            // The sandbox threw an exception, convert it to a string (if
-            // asked) or convert it to a SJOW.
-
-            jsval exn;
-            if (JS_GetPendingException(sandcx->GetJSContext(), &exn)) {
-                JS_ClearPendingException(sandcx->GetJSContext());
-
-                if (returnStringOnly) {
-                    // The caller asked for strings only, convert the
-                    // exception into a string.
-                    str = JS_ValueToString(sandcx->GetJSContext(), exn);
-
-                    if (str) {
-                        // We converted the exception to a string. Use that
-                        // as the value exception.
-                        exn = STRING_TO_JSVAL(str);
-                        if (JS_WrapValue(cx, &exn)) {
-                            JS_SetPendingException(cx, exn);
-                        } else {
-                            JS_ClearPendingException(cx);
-                            rv = NS_ERROR_FAILURE;
-                        }
-                    } else {
-                        JS_ClearPendingException(cx);
-                        rv = NS_ERROR_FAILURE;
-                    }
-                } else {
-                    if (JS_WrapValue(cx, &exn)) {
-                        JS_SetPendingException(cx, exn);
-                    }
-                }
-
-
-                // Clear str so we don't confuse callers.
-                str = nullptr;
-            } else {
-                rv = NS_ERROR_OUT_OF_MEMORY;
-            }
-        } else {
-            // Convert the result into something safe for our caller.
-            JSAutoRequest req(cx);
-            JSAutoCompartment ac(cx, callingScope);
-
-            if (str) {
-                v = STRING_TO_JSVAL(str);
-            }
-
-            CompartmentPrivate *sandboxdata = GetCompartmentPrivate(sandbox);
-            if (!WrapForSandbox(cx, sandboxdata->wantXrays, &v)) {
-                rv = NS_ERROR_FAILURE;
-            }
-
-            if (NS_SUCCEEDED(rv)) {
-                *rval = v;
+        // If the sandbox threw an exception, grab it off the context.
+        if (JS_GetPendingException(sandcx, &exn)) {
+            MOZ_ASSERT(!ok);
+            JS_ClearPendingException(sandcx);
+            if (returnStringOnly) {
+                // The caller asked for strings only, convert the
+                // exception into a string.
+                JSString *str = JS_ValueToString(sandcx, exn);
+                exn = str ? JS::StringValue(str) : JS::UndefinedValue();
             }
         }
     }
 
-    if (stack)
-        unused << stack->Pop();
+    //
+    // Alright, we're back on the caller's cx. If an error occured, try to
+    // wrap and set the exception. Otherwise, wrap the return value.
+    //
 
-    return rv;
+    if (!ok) {
+        // If we end up without an exception, it was probably due to OOM along
+        // the way, in which case we thow. Otherwise, wrap it.
+        if (exn.isUndefined() || !JS_WrapValue(cx, &exn))
+            return NS_ERROR_OUT_OF_MEMORY;
+
+        // Set the exception on our caller's cx.
+        JS_SetPendingException(cx, exn);
+        return NS_OK;
+    }
+
+    // Transitively apply Xray waivers if |sb| was waived.
+    if (waiveXray) {
+        ok = xpc::WrapperFactory::WaiveXrayAndWrap(cx, &v);
+    } else {
+        ok = JS_WrapValue(cx, &v);
+    }
+    NS_ENSURE_TRUE(ok, NS_ERROR_FAILURE);
+
+    // Whew!
+    *rval = v;
+    return NS_OK;
 }
 
 /* JSObject import (in AUTF8String registryLocation,
@@ -4049,7 +4020,7 @@ nsXPCComponents_Utils::ForceGC()
 NS_IMETHODIMP
 nsXPCComponents_Utils::ForceCC()
 {
-    nsJSContext::CycleCollectNow(nullptr, 0);
+    nsJSContext::CycleCollectNow();
     return NS_OK;
 }
 
@@ -4156,7 +4127,7 @@ nsXPCComponents_Utils::GetGlobalForObject(const JS::Value& object,
   // a wrapper for the foreign global. So we need to unwrap before getting the
   // parent, enter the compartment for the duration of the call, and wrap the
   // result.
-  js::Rooted<JSObject*> obj(cx, JSVAL_TO_OBJECT(object));
+  JS::Rooted<JSObject*> obj(cx, JSVAL_TO_OBJECT(object));
   obj = js::UnwrapObject(obj);
   {
     JSAutoCompartment ac(cx, obj);
@@ -4214,6 +4185,34 @@ nsXPCComponents_Utils::CreateArrayIn(const jsval &vobj, JSContext *cx, jsval *rv
     {
         JSAutoCompartment ac(cx, scope);
         obj =  JS_NewArrayObject(cx, 0, NULL);
+        if (!obj)
+            return NS_ERROR_FAILURE;
+    }
+
+    if (!JS_WrapObject(cx, &obj))
+        return NS_ERROR_FAILURE;
+    *rval = OBJECT_TO_JSVAL(obj);
+    return NS_OK;
+}
+
+/* jsval createDateIn(in jsval vobj, in long long msec); */
+NS_IMETHODIMP
+nsXPCComponents_Utils::CreateDateIn(const jsval &vobj,
+                                    int64_t msec,
+                                    JSContext *cx, jsval *rval)
+{
+    if (!cx)
+        return NS_ERROR_FAILURE;
+
+    // first argument must be an object
+    if (JSVAL_IS_PRIMITIVE(vobj))
+        return NS_ERROR_XPC_BAD_CONVERT_JS;
+
+    JSObject *scope = js::UnwrapObject(JSVAL_TO_OBJECT(vobj));
+    JSObject *obj;
+    {
+        JSAutoCompartment ac(cx, scope);
+        obj =  JS_NewDateObjectMsec(cx, msec);
         if (!obj)
             return NS_ERROR_FAILURE;
     }
@@ -4439,7 +4438,7 @@ SetBoolOption(JSContext* cx, uint32_t aOption, bool aValue)
     } else {
         options &= ~aOption;
     }
-    JS_SetOptions(cx, options & JSALLOPTION_MASK);
+    JS_SetOptions(cx, options & JSOPTION_MASK);
     return NS_OK;
 }
 
@@ -4458,7 +4457,6 @@ SetBoolOption(JSContext* cx, uint32_t aOption, bool aValue)
 GENERATE_JSOPTION_GETTER_SETTER(Strict, JSOPTION_STRICT)
 GENERATE_JSOPTION_GETTER_SETTER(Werror, JSOPTION_WERROR)
 GENERATE_JSOPTION_GETTER_SETTER(Atline, JSOPTION_ATLINE)
-GENERATE_JSOPTION_GETTER_SETTER(Xml, JSOPTION_MOAR_XML)
 GENERATE_JSOPTION_GETTER_SETTER(Methodjit, JSOPTION_METHODJIT)
 GENERATE_JSOPTION_GETTER_SETTER(Methodjit_always, JSOPTION_METHODJIT_ALWAYS)
 GENERATE_JSOPTION_GETTER_SETTER(Strict_mode, JSOPTION_STRICT_MODE)
@@ -4487,6 +4485,30 @@ nsXPCComponents_Utils::NukeSandbox(const JS::Value &obj, JSContext *cx)
                                  SingleCompartment(GetObjectCompartment(sb)),
                                  NukeWindowReferences);
     return NS_OK;
+}
+
+NS_IMETHODIMP
+nsXPCComponents_Utils::IsXrayWrapper(const JS::Value &obj, bool* aRetval)
+{
+    *aRetval =
+        obj.isObject() && xpc::WrapperFactory::IsXrayWrapper(&obj.toObject());
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsXPCComponents_Utils::GetDOMClassInfo(const nsAString& aClassName,
+                                       nsIClassInfo** aClassInfo)
+{
+#ifdef MOZ_WEBRTC
+    if (aClassName.EqualsLiteral("RTCPeerConnection")) {
+        NS_ADDREF(*aClassInfo =
+                  NS_GetDOMClassInfoInstance(eDOMClassInfo_RTCPeerConnection_id));
+        return NS_OK;
+    }
+#endif
+
+    *aClassInfo = nullptr;
+    return NS_ERROR_NOT_AVAILABLE;
 }
 
 /***************************************************************************/
@@ -4792,7 +4814,7 @@ ContentComponentsGetterOp(JSContext *cx, JSHandleObject obj, JSHandleId id,
         return true;
 
     // If the caller is XBL, this is ok.
-    if (AccessCheck::callerIsXBL(cx))
+    if (nsContentUtils::IsCallerXBL())
         return true;
 
     // Do Telemetry on how often this happens.
@@ -4881,7 +4903,7 @@ nsXPCComponents::CanCallMethod(const nsIID * iid, const PRUnichar *methodName, c
     *_retval = xpc_CheckAccessList(methodName, allowed);
     if (*_retval &&
         methodName[0] == 'l' &&
-        !AccessCheck::callerIsXBL(nsContentUtils::GetCurrentJSContext()))
+        !nsContentUtils::IsCallerXBL())
     {
         Telemetry::Accumulate(Telemetry::COMPONENTS_LOOKUPMETHOD_ACCESSED_BY_CONTENT, true);
     }
@@ -4896,7 +4918,7 @@ nsXPCComponents::CanGetProperty(const nsIID * iid, const PRUnichar *propertyName
     *_retval = xpc_CheckAccessList(propertyName, allowed);
     if (*_retval &&
         propertyName[0] == 'i' &&
-        !AccessCheck::callerIsXBL(nsContentUtils::GetCurrentJSContext()))
+        !nsContentUtils::IsCallerXBL())
     {
         Telemetry::Accumulate(Telemetry::COMPONENTS_INTERFACES_ACCESSED_BY_CONTENT, true);
     }

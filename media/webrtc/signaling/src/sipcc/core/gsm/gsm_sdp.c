@@ -83,6 +83,14 @@ static fsmdef_media_t *
 gsmsdp_add_media_line(fsmdef_dcb_t *dcb_p, const cc_media_cap_t *media_cap,
                       uint8_t cap_index, uint16_t level,
                       cpr_ip_type addr_type, boolean offer);
+static boolean
+gsmsdp_add_remote_stream(uint16_t idx, int pc_stream_id,
+                         fsmdef_dcb_t *dcb_p);
+
+static boolean
+gsmsdp_add_remote_track(uint16_t idx, uint16_t track,
+                         fsmdef_dcb_t *dcb_p, fsmdef_media_t *media);
+
 
 
 extern cc_media_cap_table_t g_media_table;
@@ -112,7 +120,7 @@ static const cc_media_cap_table_t *gsmsdp_get_media_capability (fsmdef_dcb_t *dc
     config_get_value(CFGID_SDPMODE, &sdpmode, sizeof(sdpmode));
 
     if ( dcb_p->media_cap_tbl == NULL ) {
-         dcb_p->media_cap_tbl = (cc_media_cap_table_t*) cpr_malloc(sizeof(cc_media_cap_table_t));
+         dcb_p->media_cap_tbl = (cc_media_cap_table_t*) cpr_calloc(1, sizeof(cc_media_cap_table_t));
          if ( dcb_p->media_cap_tbl == NULL ) {
              GSM_ERR_MSG(GSM_L_C_F_PREFIX"media table malloc failed.\n",
                     dcb_p->line, dcb_p->call_id, fname);
@@ -120,19 +128,56 @@ static const cc_media_cap_table_t *gsmsdp_get_media_capability (fsmdef_dcb_t *dc
          }
     }
 
-    *(dcb_p->media_cap_tbl) = g_media_table;
-
-    /*
-     * Turn off two default streams, this is temporary
-     * until we can handle multiple streams properly
-     */
     if (sdpmode) {
-        dcb_p->media_cap_tbl->cap[CC_AUDIO_1].enabled = TRUE;
-        dcb_p->media_cap_tbl->cap[CC_VIDEO_1].enabled = TRUE;
-        dcb_p->media_cap_tbl->cap[CC_AUDIO_1].support_direction = SDP_DIRECTION_RECVONLY;
-        dcb_p->media_cap_tbl->cap[CC_VIDEO_1].support_direction = SDP_DIRECTION_RECVONLY;
+        /* Here we are copying only what we need from the g_media_table
+           in order to avoid a data race with its values being set in
+           media_cap_tbl.c */
+        dcb_p->media_cap_tbl->id = g_media_table.id;
+
+        /* This needs to change when we handle more than one stream
+           of each media type at a time. */
+
+        dcb_p->media_cap_tbl->cap[CC_AUDIO_1].name = CC_AUDIO_1;
+        dcb_p->media_cap_tbl->cap[CC_VIDEO_1].name = CC_VIDEO_1;
+        dcb_p->media_cap_tbl->cap[CC_DATACHANNEL_1].name = CC_DATACHANNEL_1;
+
+        dcb_p->media_cap_tbl->cap[CC_AUDIO_1].type = SDP_MEDIA_AUDIO;
+        dcb_p->media_cap_tbl->cap[CC_VIDEO_1].type = SDP_MEDIA_VIDEO;
+        dcb_p->media_cap_tbl->cap[CC_DATACHANNEL_1].type = SDP_MEDIA_APPLICATION;
+
+        dcb_p->media_cap_tbl->cap[CC_AUDIO_1].enabled = FALSE;
+        dcb_p->media_cap_tbl->cap[CC_VIDEO_1].enabled = FALSE;
+        /*
+         * This really should be set to FALSE unless we have added
+         * a data channel using createDataChannel(). Right now,
+         * though, those operations are not queued (and, in fact,
+         * the W3C hasn't specified the proper behavior here anyway, so
+         * we would only be implementing speculatively) -- so we'll
+         * always offer data channels until the standard is
+         * a bit more set.
+         */
         dcb_p->media_cap_tbl->cap[CC_DATACHANNEL_1].enabled = TRUE;
+
+        dcb_p->media_cap_tbl->cap[CC_AUDIO_1].support_security = TRUE;
+        dcb_p->media_cap_tbl->cap[CC_VIDEO_1].support_security = TRUE;
+        dcb_p->media_cap_tbl->cap[CC_DATACHANNEL_1].support_security = TRUE;
+
+        /* We initialize as RECVONLY to allow the application to
+           display incoming media streams, even if it doesn't
+           plan to send media for those streams. This will be
+           upgraded to SENDRECV when and if a stream is added. */
+
+        dcb_p->media_cap_tbl->cap[CC_AUDIO_1].support_direction =
+          SDP_DIRECTION_RECVONLY;
+
+        dcb_p->media_cap_tbl->cap[CC_VIDEO_1].support_direction =
+          SDP_DIRECTION_RECVONLY;
+
+        dcb_p->media_cap_tbl->cap[CC_DATACHANNEL_1].support_direction =
+          SDP_DIRECTION_SENDRECV;
     } else {
+        *(dcb_p->media_cap_tbl) = g_media_table;
+
         dcb_p->media_cap_tbl->cap[CC_DATACHANNEL_1].enabled = FALSE;
 
         if ( dcb_p->video_pref == SDP_DIRECTION_INACTIVE) {
@@ -182,6 +227,7 @@ void gsmsdp_process_cap_constraint(cc_media_cap_t *cap,
     cap->support_direction &= ~SDP_DIRECTION_FLAG_RECV;
   } else if (constraint[0] == 'T') {
     cap->support_direction |= SDP_DIRECTION_FLAG_RECV;
+    cap->enabled = TRUE;
   }
 }
 
@@ -190,7 +236,7 @@ void gsmsdp_process_cap_constraint(cc_media_cap_t *cap,
  * OfferToReceiveAudio, OfferToReceiveVideo
  */
 void gsmsdp_process_cap_constraints(fsmdef_dcb_t *dcb,
-                                    const cc_media_constraints_t* constraints) {
+                                    cc_media_constraints_t* constraints) {
   int i = 0;
 
   for (i=0; i<constraints->constraint_count; i++) {
@@ -202,6 +248,12 @@ void gsmsdp_process_cap_constraints(fsmdef_dcb_t *dcb,
                constraints->constraints[i]->name) == 0) {
       gsmsdp_process_cap_constraint(&dcb->media_cap_tbl->cap[CC_VIDEO_1],
                                     constraints->constraints[i]->value);
+    } else if (strcmp(constraints_table[MozDontOfferDataChannel].name,
+               constraints->constraints[i]->name) == 0) {
+      /* Hack to suppress data channel */
+      if (constraints->constraints[i]->value[0] == 'T') {
+        dcb->media_cap_tbl->cap[CC_DATACHANNEL_1].enabled = FALSE;
+      }
     }
   }
 }
@@ -279,16 +331,15 @@ static const cc_media_remote_stream_table_t *gsmsdp_get_media_stream_table (fsmd
 {
     static const char *fname = "gsmsdp_get_media_stream_table";
     if ( dcb_p->remote_media_stream_tbl == NULL ) {
-        dcb_p->remote_media_stream_tbl = (cc_media_remote_stream_table_t*) cpr_malloc(sizeof(cc_media_remote_stream_table_t));
-        memset(dcb_p->remote_media_stream_tbl, 0, sizeof(cc_media_remote_stream_table_t));
-
-        if ( dcb_p->remote_media_stream_tbl == NULL ) {
-
-             GSM_ERR_MSG(GSM_L_C_F_PREFIX"media track table malloc failed.\n",
+      dcb_p->remote_media_stream_tbl = (cc_media_remote_stream_table_t*) cpr_malloc(sizeof(cc_media_remote_stream_table_t));
+      if ( dcb_p->remote_media_stream_tbl == NULL ) {
+        GSM_ERR_MSG(GSM_L_C_F_PREFIX"media track table malloc failed.\n",
                     dcb_p->line, dcb_p->call_id, fname);
-             return NULL;
-         }
+        return NULL;
+      }
     }
+
+    memset(dcb_p->remote_media_stream_tbl, 0, sizeof(cc_media_remote_stream_table_t));
 
     return (dcb_p->remote_media_stream_tbl);
 }
@@ -1562,7 +1613,7 @@ gsmsdp_get_ice_attributes (sdp_attr_e sdp_attr, uint16_t level, void *sdp_p, cha
 }
 
 /*
- * gsmsdp_set_attributes
+ * gsmsdp_set_ice_attribute
  *
  * Description:
  *
@@ -1575,7 +1626,7 @@ gsmsdp_get_ice_attributes (sdp_attr_e sdp_attr, uint16_t level, void *sdp_p, cha
  * sdp_p        - Pointer to the SDP to set the ice candidate attribute against.
  * ice_attrib   - ice attribute to set
  */
-static void
+void
 gsmsdp_set_ice_attribute (sdp_attr_e sdp_attr, uint16_t level, void *sdp_p, char *ice_attrib)
 {
     uint16_t      a_instance = 0;
@@ -1754,6 +1805,8 @@ gsmsdp_get_remote_sdp_direction (fsmdef_dcb_t *dcb_p, uint16_t level,
     cc_sdp_t       *sdp_p = dcb_p->sdp;
     uint16_t       media_attr;
     uint16_t       i;
+    uint32         port;
+    int            sdpmode = 0;
     static const sdp_attr_e  dir_attr_array[] = {
         SDP_ATTR_INACTIVE,
         SDP_ATTR_RECVONLY,
@@ -1765,6 +1818,8 @@ gsmsdp_get_remote_sdp_direction (fsmdef_dcb_t *dcb_p, uint16_t level,
     if (!sdp_p->dest_sdp) {
         return direction;
     }
+
+    config_get_value(CFGID_SDPMODE, &sdpmode, sizeof(sdpmode));
 
     media_attr = 0; /* media level attr. count */
     /*
@@ -1816,6 +1871,17 @@ gsmsdp_get_remote_sdp_direction (fsmdef_dcb_t *dcb_p, uint16_t level,
      */
     if (dest_addr->type == CPR_IP_ADDR_IPV4 &&
         dest_addr->u.ip4 == 0) {
+
+        /*
+         * For WebRTC, we allow active media sections with IP=0.0.0.0, iff
+         * port != 0. This is to allow interop with existing Trickle ICE
+         * implementations. TODO: This may need to be updated to match the
+         * spec once the Trickle ICE spec is finalized.
+         */
+        port = sdp_get_media_portnum(sdp_p->dest_sdp, level);
+        if (sdpmode && port != 0) {
+            return direction;
+        }
 
         direction = SDP_DIRECTION_INACTIVE;
     } else {
@@ -2947,7 +3013,7 @@ gsmsdp_negotiate_codec (fsmdef_dcb_t *dcb_p, cc_sdp_t *sdp_p,
                 codec = slave_list_p[j];
                 payload_info = &(media->payloads[media->num_payloads]);
 
-                if (master_list_p == remote_payload_types) {
+                if (master_list_p == remote_codecs) {
                     remote_pt = remote_payload_types[i];
                 } else {
                     remote_pt = remote_payload_types[j];
@@ -3090,7 +3156,7 @@ gsmsdp_negotiate_codec (fsmdef_dcb_t *dcb_p, cc_sdp_t *sdp_p,
 
                             /* Copied from media/webrtc/trunk/src/modules/
                                audio_coding/main/source/acm_codec_database.cc */
-                            payload_info->audio.frequency = 32000;
+                            payload_info->audio.frequency = 48000;
                             payload_info->audio.packet_size = 960;
                             payload_info->audio.bitrate = 32000;
                             break;
@@ -4232,6 +4298,7 @@ gsmsdp_negotiate_media_lines (fsm_fcb_t *fcb_p, cc_sdp_t *sdp_p, boolean initial
     int             rtcpmux = 0;
     tinybool        rtcp_mux = FALSE;
     sdp_result_e    sdp_res;
+    boolean         created_media_stream = FALSE;
 
     config_get_value(CFGID_SDPMODE, &sdpmode, sizeof(sdpmode));
 
@@ -4531,24 +4598,55 @@ gsmsdp_negotiate_media_lines (fsm_fcb_t *fcb_p, cc_sdp_t *sdp_p, boolean initial
 
                   config_get_value(CFGID_RTCPMUX, &rtcpmux, sizeof(rtcpmux));
                   if (rtcpmux) {
-                    gsmsdp_set_rtcp_mux_attribute (SDP_ATTR_RTCP_MUX, media->level, sdp_p->src_sdp, TRUE);
+                    gsmsdp_set_rtcp_mux_attribute (SDP_ATTR_RTCP_MUX, media->level,
+                                                   sdp_p->src_sdp, TRUE);
                   }
 
                   if (notify_stream_added) {
-                    /*
-                     * Add track to remote streams in dcb
-                     */
-                     int pc_stream_id = 0;
+                      /*
+                       * Add track to remote streams in dcb
+                       */
+                      if (SDP_MEDIA_APPLICATION != media_type) {
+                          int pc_stream_id = -1;
 
-                     if (SDP_MEDIA_APPLICATION != media_type) {
-                         lsm_add_remote_stream (dcb_p->line, dcb_p->call_id, media, &pc_stream_id);
-                         gsmsdp_add_remote_stream(i-1, pc_stream_id, dcb_p, media);
-                     } else {
-                         /*
-                          * Inform VCM that a Data Channel has been negotiated
-                          */
-                         lsm_data_channel_negotiated(dcb_p->line, dcb_p->call_id, media, &pc_stream_id);
-                     }
+                          /* This is a hack to keep all the media in a single
+                             stream.
+                             TODO(ekr@rtfm.com): revisit when we have media
+                             assigned to streams in the SDP */
+                          if (!created_media_stream){
+                              lsm_add_remote_stream (dcb_p->line,
+                                                     dcb_p->call_id,
+                                                     media,
+                                                     &pc_stream_id);
+                              MOZ_ASSERT(pc_stream_id == 0);
+                              /* Use index 0 because we only have one stream */
+                              result = gsmsdp_add_remote_stream(0,
+                                                                pc_stream_id,
+                                                                dcb_p);
+                              MOZ_ASSERT(result);  /* TODO(ekr@rtfm.com)
+                                                      add real error checking,
+                                                      but this "can't fail" */
+                              created_media_stream = TRUE;
+                          }
+
+                          /* Now add the track to the single media stream.
+                             use index 0 because we only have one stream */
+                          result = gsmsdp_add_remote_track(0, i, dcb_p, media);
+                          MOZ_ASSERT(result);  /* TODO(ekr@rtfm.com) add real
+                                                 error checking, but this
+                                                 "can't fail" */
+                      } else {
+                          /*
+                           * Inform VCM that a Data Channel has been negotiated
+                           */
+                          int pc_stream_id; /* Set but unused. Provided to
+                                                fulfill the API contract
+                                                TODO(adam@nostrum.com):
+                                                use or remove */
+
+                          lsm_data_channel_negotiated(dcb_p->line, dcb_p->call_id,
+                                                      media, &pc_stream_id);
+                      }
                   }
               }
             }
@@ -4635,13 +4733,21 @@ gsmsdp_negotiate_media_lines (fsm_fcb_t *fcb_p, cc_sdp_t *sdp_p, boolean initial
              */
             if (notify_stream_added) {
                 for (j=0; j < CC_MAX_STREAMS; j++ ) {
-                    /* If this stream has been created it should have > 0 tracks. */
-                    if (dcb_p->remote_media_stream_tbl->streams[j].num_tracks) {
-                        ui_on_remote_stream_added(evOnRemoteStreamAdd, dcb_p->line, dcb_p->call_id,
-                           dcb_p->caller_id.call_instance_id, dcb_p->remote_media_stream_tbl->streams[j]);
+                    if (dcb_p->remote_media_stream_tbl->streams[j].
+                        num_tracks &&
+                        (!dcb_p->remote_media_stream_tbl->streams[j].
+                         num_tracks_notified)) {
+                        /* Note that we only notify when the number of tracks
+                           changes from 0 -> !0 (i.e. on creation).
+                           TODO(adam@nostrum.com): Figure out how to notify
+                           when streams gain tracks */
+                        ui_on_remote_stream_added(evOnRemoteStreamAdd,
+                            dcb_p->line, dcb_p->call_id,
+                            dcb_p->caller_id.call_instance_id,
+                            dcb_p->remote_media_stream_tbl->streams[j]);
 
-                        /* Setting num_tracks == 0 indicates stream not set */
-                        dcb_p->remote_media_stream_tbl->streams[j].num_tracks = 0;
+                        dcb_p->remote_media_stream_tbl->streams[j].num_tracks_notified =
+                            dcb_p->remote_media_stream_tbl->streams[j].num_tracks;
                     }
                 }
             }
@@ -5882,12 +5988,12 @@ gsmsdp_encode_sdp (cc_sdp_t *sdp_p, cc_msgbody_info_t *msg_body)
     cc_msgbody_t   *part;
     uint32_t        body_length;
 
-    if (msg_body == NULL) {
+    if (!msg_body || !sdp_p) {
         return CC_CAUSE_ERROR;
     }
 
     /* Support single SDP encoding for now */
-    sdp_body = sipsdp_write_to_buf(sdp_p, &body_length);
+    sdp_body = sipsdp_write_to_buf(sdp_p->src_sdp, &body_length);
 
     if (sdp_body == NULL) {
         return CC_CAUSE_ERROR;
@@ -6559,33 +6665,74 @@ gsmsdp_sdp_differs_from_previous_sdp (boolean rcv_only, fsmdef_media_t *media)
  *
  * Description:
  *
- * For each remote media stream add a track to the dcb for the
+ * Add a media stream with no tracks to the dcb for the
  * current session.
  *
  * Parameters:
  *
  * idx   - Stream index
  * pc_stream_id - stream id from vcm layer, will be set as stream id
- *
  * dcb_p - Pointer to the DCB whose SDP is to be manipulated.
- * media - Pointer to the fsmdef_media_t for the current media entry.
+ *
+ * returns TRUE for success and FALSE for failure
  */
-void gsmsdp_add_remote_stream(uint16_t idx, int pc_stream_id, fsmdef_dcb_t *dcb_p, fsmdef_media_t *media) {
-
- /*
-  * This function is in its infancy, but when complete will create a list
-  * of streams, each with its list of tracks and associated data.
-  * Currently this just creates 1 track per 1 stream.
-  */
-
+static boolean gsmsdp_add_remote_stream(uint16_t idx, int pc_stream_id, fsmdef_dcb_t *dcb_p) {
   PR_ASSERT(idx < CC_MAX_STREAMS);
+  if (idx >= CC_MAX_STREAMS)
+    return FALSE;
 
-  if (idx < CC_MAX_STREAMS) {
-    dcb_p->remote_media_stream_tbl->streams[idx].num_tracks = 1;
-    dcb_p->remote_media_stream_tbl->streams[idx].media_stream_id = pc_stream_id;
-    dcb_p->remote_media_stream_tbl->streams[idx].track[0].media_stream_track_id = idx+1;
-    dcb_p->remote_media_stream_tbl->streams[idx].track[0].video = (media->type == 0 ? FALSE : TRUE);
-  }
+  PR_ASSERT(!dcb_p->remote_media_stream_tbl->streams[idx].created);
+  if (dcb_p->remote_media_stream_tbl->streams[idx].created)
+    return FALSE;
+
+  dcb_p->remote_media_stream_tbl->streams[idx].media_stream_id = pc_stream_id;
+  dcb_p->remote_media_stream_tbl->streams[idx].created = TRUE;
+
+  return TRUE;
+}
+
+
+/*
+ * gsmsdp_add_remote_track
+ *
+ * Description:
+ *
+ * Add a track to a media stream
+ *
+ * Parameters:
+ *
+ * idx   - Stream index
+ * track - the track id
+ * dcb_p - Pointer to the DCB whose SDP is to be manipulated.
+ * media - the media object to add.
+ *
+ * returns TRUE for success and FALSE for failure
+ */
+static boolean gsmsdp_add_remote_track(uint16_t idx, uint16_t track,
+                                       fsmdef_dcb_t *dcb_p,
+                                       fsmdef_media_t *media) {
+  cc_media_remote_track_table_t *stream;
+  PR_ASSERT(idx < CC_MAX_STREAMS);
+  if (idx >= CC_MAX_STREAMS)
+    return FALSE;
+
+  stream = &dcb_p->remote_media_stream_tbl->streams[idx];
+
+  PR_ASSERT(stream->created);
+  if (!stream->created)
+    return FALSE;
+
+  PR_ASSERT(stream->num_tracks < (CC_MAX_TRACKS - 1));
+  if (stream->num_tracks > (CC_MAX_TRACKS - 1))
+    return FALSE;
+
+  stream->track[stream->num_tracks].media_stream_track_id = track;
+  stream->track[stream->num_tracks].video =
+      (media->type == SDP_MEDIA_VIDEO) ? TRUE : FALSE;
+
+  ++stream->num_tracks;
+
+  return TRUE;
 }
 
 cc_causes_t

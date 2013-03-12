@@ -31,7 +31,8 @@
 #include "nsAlgorithm.h"
 #include "mozilla/layout/FrameChildList.h"
 #include "FramePropertyTable.h"
-#include "mozilla/Attributes.h"
+#include "mozilla/TypedEnum.h"
+#include <algorithm>
 
 #ifdef ACCESSIBILITY
 #include "mozilla/a11y/AccTypes.h"
@@ -62,7 +63,7 @@ class nsIAtom;
 class nsPresContext;
 class nsIPresShell;
 class nsRenderingContext;
-class nsIView;
+class nsView;
 class nsIWidget;
 class nsIDOMRange;
 class nsISelectionController;
@@ -565,7 +566,7 @@ public:
   NS_DECL_QUERYFRAME_TARGET(nsIFrame)
 
   nsPresContext* PresContext() const {
-    return GetStyleContext()->GetRuleNode()->GetPresContext();
+    return StyleContext()->RuleNode()->PresContext();
   }
 
   /**
@@ -617,6 +618,7 @@ protected:
   virtual void DestroyFrom(nsIFrame* aDestructRoot) = 0;
   friend class nsFrameList; // needed to pass aDestructRoot through to children
   friend class nsLineBox;   // needed to pass aDestructRoot through to children
+  friend class nsContainerFrame; // needed to pass aDestructRoot through to children
 public:
 
   /**
@@ -739,9 +741,8 @@ public:
 
   /**
    * Get the style context associated with this frame.
-   *
    */
-  nsStyleContext* GetStyleContext() const { return mStyleContext; }
+  nsStyleContext* StyleContext() const { return mStyleContext; }
   void SetStyleContext(nsStyleContext* aContext)
   { 
     if (aContext != mStyleContext) {
@@ -777,32 +778,32 @@ public:
   /**
    * Get the style data associated with this frame.  This returns a
    * const style struct pointer that should never be modified.  See
-   * |nsIStyleContext::GetStyleData| for more information.
+   * |nsStyleContext::StyleData| for more information.
    *
    * The use of the typesafe functions below is preferred to direct use
    * of this function.
    */
-  virtual const void* GetStyleDataExternal(nsStyleStructID aSID) const = 0;
+  virtual const void* StyleDataExternal(nsStyleStructID aSID) const = 0;
 
   /**
    * Define typesafe getter functions for each style struct by
    * preprocessing the list of style structs.  These functions are the
    * preferred way to get style data.  The macro creates functions like:
-   *   const nsStyleBorder* GetStyleBorder();
-   *   const nsStyleColor* GetStyleColor();
+   *   const nsStyleBorder* StyleBorder();
+   *   const nsStyleColor* StyleColor();
    */
 
 #ifdef _IMPL_NS_LAYOUT
   #define STYLE_STRUCT(name_, checkdata_cb_, ctor_args_)                      \
-    const nsStyle##name_ * GetStyle##name_ () const {                         \
+    const nsStyle##name_ * Style##name_ () const {                            \
       NS_ASSERTION(mStyleContext, "No style context found!");                 \
-      return mStyleContext->GetStyle##name_ ();                               \
+      return mStyleContext->Style##name_ ();                                  \
     }
 #else
   #define STYLE_STRUCT(name_, checkdata_cb_, ctor_args_)                      \
-    const nsStyle##name_ * GetStyle##name_ () const {                         \
+    const nsStyle##name_ * Style##name_ () const {                            \
       return static_cast<const nsStyle##name_*>(                              \
-                            GetStyleDataExternal(eStyleStruct_##name_));      \
+                            StyleDataExternal(eStyleStruct_##name_));         \
     }
 #endif
   #include "nsStyleStructList.h"
@@ -976,9 +977,9 @@ public:
    * its rect) and the padding edge of the frame. Like GetRect(), returns
    * the dimensions as of the most recent reflow.
    *
-   * Note that this differs from GetStyleBorder()->GetBorder() in that
+   * Note that this differs from StyleBorder()->GetBorder() in that
    * this describes region of the frame's box, and
-   * GetStyleBorder()->GetBorder() describes a border.  They differ only
+   * StyleBorder()->GetBorder() describes a border.  They differ only
    * for tables, particularly border-collapse tables.
    */
   virtual nsMargin GetUsedBorder() const;
@@ -1155,18 +1156,18 @@ public:
    * @param aDirtyRect content outside this rectangle can be ignored; the
    * rectangle is in frame coordinates
    */
-  NS_IMETHOD BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                              const nsRect&           aDirtyRect,
-                              const nsDisplayListSet& aLists) { return NS_OK; }
+  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
+                                const nsRect&           aDirtyRect,
+                                const nsDisplayListSet& aLists) {}
   /**
    * Displays the caret onto the given display list builder. The caret is
    * painted on top of the rest of the display list items.
    *
    * @param aDirtyRect is the dirty rectangle that we're repainting.
    */
-  nsresult DisplayCaret(nsDisplayListBuilder*       aBuilder,
-                        const nsRect&               aDirtyRect,
-                        nsDisplayList*              aList);
+  void DisplayCaret(nsDisplayListBuilder* aBuilder,
+                    const nsRect&         aDirtyRect,
+                    nsDisplayList*        aList);
 
   /**
    * Get the preferred caret color at the offset.
@@ -1177,7 +1178,7 @@ public:
 
  
   bool IsThemed(nsITheme::Transparency* aTransparencyState = nullptr) const {
-    return IsThemed(GetStyleDisplay(), aTransparencyState);
+    return IsThemed(StyleDisplay(), aTransparencyState);
   }
   bool IsThemed(const nsStyleDisplay* aDisp,
                   nsITheme::Transparency* aTransparencyState = nullptr) const {
@@ -1202,9 +1203,9 @@ public:
    * @param aDirtyRect content outside this rectangle can be ignored; the
    * rectangle is in frame coordinates
    */
-  nsresult BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
-                                              const nsRect&         aDirtyRect,
-                                              nsDisplayList*        aList);
+  void BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
+                                          const nsRect&         aDirtyRect,
+                                          nsDisplayList*        aList);
 
   /**
    * Clips the display items of aFromSet, putting the results in aToSet.
@@ -1239,11 +1240,11 @@ public:
    * @param aFlags combination of DISPLAY_CHILD_FORCE_PSEUDO_STACKING_CONTEXT,
    *    DISPLAY_CHILD_FORCE_STACKING_CONTEXT and DISPLAY_CHILD_INLINE
    */
-  nsresult BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
-                                    nsIFrame*               aChild,
-                                    const nsRect&           aDirtyRect,
-                                    const nsDisplayListSet& aLists,
-                                    uint32_t                aFlags = 0);
+  void BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
+                                nsIFrame*               aChild,
+                                const nsRect&           aDirtyRect,
+                                const nsDisplayListSet& aLists,
+                                uint32_t                aFlags = 0);
 
   /**
    * A helper for replaced elements that want to clip their content to a
@@ -1358,8 +1359,8 @@ public:
     int32_t secondaryOffset;
     // Helpers for places that need the ends of the offsets and expect them in
     // numerical order, as opposed to wanting the primary and secondary offsets
-    int32_t StartOffset() { return NS_MIN(offset, secondaryOffset); }
-    int32_t EndOffset() { return NS_MAX(offset, secondaryOffset); }
+    int32_t StartOffset() { return std::min(offset, secondaryOffset); }
+    int32_t EndOffset() { return std::max(offset, secondaryOffset); }
     // This boolean indicates whether the associated content is before or after
     // the offset; the most visible use is to allow the caret to know which line
     // to display on.
@@ -1949,16 +1950,16 @@ public:
    * GetView returns non-null if and only if |HasView| returns true.
    */
   bool HasView() const { return !!(mState & NS_FRAME_HAS_VIEW); }
-  nsIView* GetView() const;
-  virtual nsIView* GetViewExternal() const;
-  nsresult SetView(nsIView* aView);
+  nsView* GetView() const;
+  virtual nsView* GetViewExternal() const;
+  nsresult SetView(nsView* aView);
 
   /**
    * Find the closest view (on |this| or an ancestor).
    * If aOffset is non-null, it will be set to the offset of |this|
    * from the returned view.
    */
-  nsIView* GetClosestView(nsPoint* aOffset = nullptr) const;
+  nsView* GetClosestView(nsPoint* aOffset = nullptr) const;
 
   /**
    * Find the closest ancestor (excluding |this| !) that has a view
@@ -2026,7 +2027,7 @@ public:
    * has a view. Also returns the containing view or null in case of error
    */
   NS_IMETHOD  GetOffsetFromView(nsPoint&  aOffset,
-                                nsIView** aView) const = 0;
+                                nsView** aView) const = 0;
 
   /**
    * Returns the nearest widget containing this frame. If this frame has a
@@ -2093,11 +2094,12 @@ public:
     eXULBox =                           1 << 10,
     eCanContainOverflowContainers =     1 << 11,
     eBlockFrame =                       1 << 12,
+    eTablePart =                        1 << 13,
     // If this bit is set, the frame doesn't allow ignorable whitespace as
     // children. For example, the whitespace between <table>\n<tr>\n<td>
     // will be excluded during the construction of children. 
-    eExcludesIgnorableWhitespace =      1 << 13,
-    eSupportsCSSTransforms =            1 << 14,
+    eExcludesIgnorableWhitespace =      1 << 14,
+    eSupportsCSSTransforms =            1 << 15,
 
     // These are to allow nsFrame::Init to assert that IsFrameOfType
     // implementations all call the base class method.  They are only
@@ -2132,6 +2134,9 @@ public:
    *
    * The algorithm is defined in
    * http://www.w3.org/TR/CSS2/visudet.html#containing-block-details.
+   *
+   * NOTE: This is guaranteed to return a non-null pointer when invoked on any
+   * frame other than the root frame.
    */
   nsIFrame* GetContainingBlock() const;
 
@@ -2572,7 +2577,7 @@ public:
    * XXX maybe check IsTransformed()?
    */
   bool IsPseudoStackingContextFromStyle() {
-    const nsStyleDisplay* disp = GetStyleDisplay();
+    const nsStyleDisplay* disp = StyleDisplay();
     return disp->mOpacity != 1.0f ||
            disp->IsPositioned(this) ||
            disp->IsFloating(this);
@@ -2898,6 +2903,36 @@ NS_PTR_TO_INT32(frame->Properties().Get(nsIFrame::ParagraphDepthProperty()))
   };
   bool IsVisibleConsideringAncestors(uint32_t aFlags = 0) const;
 
+  struct FrameWithDistance
+  {
+    nsIFrame* mFrame;
+    nscoord mXDistance;
+    nscoord mYDistance;
+  };
+
+  /**
+   * Finds a frame that is closer to a specified point than a current
+   * distance.  Distance is measured as for text selection -- a closer x
+   * distance beats a closer y distance.
+   *
+   * Normally, this function will only check the distance between this
+   * frame's rectangle and the specified point.  nsSVGTextFrame2 overrides
+   * this so that it can manage all of its descendant frames and take
+   * into account any SVG text layout.
+   *
+   * If aPoint is closer to this frame's rectangle than aCurrentBestFrame
+   * indicates, then aCurrentBestFrame is updated with the distance between
+   * aPoint and this frame's rectangle, and with a pointer to this frame.
+   * If aPoint is not closer, then aCurrentBestFrame is left unchanged.
+   *
+   * @param aPoint The point to check for its distance to this frame.
+   * @param aCurrentBestFrame Pointer to a struct that will be updated with
+   *   a pointer to this frame and its distance to aPoint, if this frame
+   *   is indeed closer than the current distance in aCurrentBestFrame.
+   */
+  virtual void FindCloserFrameForSelection(nsPoint aPoint,
+                                           FrameWithDistance* aCurrentBestFrame);
+
   inline bool IsBlockInside() const;
   inline bool IsBlockOutside() const;
   inline bool IsInlineOutside() const;
@@ -2920,6 +2955,18 @@ NS_PTR_TO_INT32(frame->Properties().Get(nsIFrame::ParagraphDepthProperty()))
   bool IsSVGText() const { return mState & NS_FRAME_IS_SVG_TEXT; }
 
   void CreateOwnLayerIfNeeded(nsDisplayListBuilder* aBuilder, nsDisplayList* aList);
+
+  /**
+   * Adds the NS_FRAME_IN_POPUP state bit to aFrame, and
+   * all descendant frames (including cross-doc ones).
+   */
+  static void AddInPopupStateBitToDescendants(nsIFrame* aFrame);
+  /**
+   * Removes the NS_FRAME_IN_POPUP state bit from aFrame and
+   * all descendant frames (including cross-doc ones), unless
+   * the frame is a popup itself.
+   */
+  static void RemoveInPopupStateBitFromDescendants(nsIFrame* aFrame);
 
 protected:
   // Members
@@ -3213,6 +3260,44 @@ private:
   nsIFrame*     mFrame;
 };
 
+inline bool
+nsFrameList::ContinueRemoveFrame(nsIFrame* aFrame)
+{
+  MOZ_ASSERT(!aFrame->GetPrevSibling() || !aFrame->GetNextSibling(),
+             "Forgot to call StartRemoveFrame?");
+  if (aFrame == mLastChild) {
+    MOZ_ASSERT(!aFrame->GetNextSibling(), "broken frame list");
+    nsIFrame* prevSibling = aFrame->GetPrevSibling();
+    if (!prevSibling) {
+      MOZ_ASSERT(aFrame == mFirstChild, "broken frame list");
+      mFirstChild = mLastChild = nullptr;
+      return true;
+    }
+    MOZ_ASSERT(prevSibling->GetNextSibling() == aFrame, "Broken frame linkage");
+    prevSibling->SetNextSibling(nullptr);
+    mLastChild = prevSibling;
+    return true;
+  }
+  if (aFrame == mFirstChild) {
+    MOZ_ASSERT(!aFrame->GetPrevSibling(), "broken frame list");
+    mFirstChild = aFrame->GetNextSibling();
+    aFrame->SetNextSibling(nullptr);
+    MOZ_ASSERT(mFirstChild, "broken frame list");
+    return true;
+  }
+  return false;
+}
+
+inline bool
+nsFrameList::StartRemoveFrame(nsIFrame* aFrame)
+{
+  if (aFrame->GetPrevSibling() && aFrame->GetNextSibling()) {
+    UnhookFrameFromSiblings(aFrame);
+    return true;
+  }
+  return ContinueRemoveFrame(aFrame);
+}
+
 inline void
 nsFrameList::Enumerator::Next()
 {
@@ -3234,49 +3319,49 @@ FrameLinkEnumerator(const nsFrameList& aList, nsIFrame* aPrevFrame)
 bool
 nsIFrame::IsFloating() const
 {
-  return GetStyleDisplay()->IsFloating(this);
+  return StyleDisplay()->IsFloating(this);
 }
 
 bool
 nsIFrame::IsPositioned() const
 {
-  return GetStyleDisplay()->IsPositioned(this);
+  return StyleDisplay()->IsPositioned(this);
 }
 
 bool
 nsIFrame::IsRelativelyPositioned() const
 {
-  return GetStyleDisplay()->IsRelativelyPositioned(this);
+  return StyleDisplay()->IsRelativelyPositioned(this);
 }
 
 bool
 nsIFrame::IsAbsolutelyPositioned() const
 {
-  return GetStyleDisplay()->IsAbsolutelyPositioned(this);
+  return StyleDisplay()->IsAbsolutelyPositioned(this);
 }
 
 bool
 nsIFrame::IsBlockInside() const
 {
-  return GetStyleDisplay()->IsBlockInside(this);
+  return StyleDisplay()->IsBlockInside(this);
 }
 
 bool
 nsIFrame::IsBlockOutside() const
 {
-  return GetStyleDisplay()->IsBlockOutside(this);
+  return StyleDisplay()->IsBlockOutside(this);
 }
 
 bool
 nsIFrame::IsInlineOutside() const
 {
-  return GetStyleDisplay()->IsInlineOutside(this);
+  return StyleDisplay()->IsInlineOutside(this);
 }
 
 uint8_t
 nsIFrame::GetDisplay() const
 {
-  return GetStyleDisplay()->GetDisplay(this);
+  return StyleDisplay()->GetDisplay(this);
 }
 
 #endif /* nsIFrame_h___ */

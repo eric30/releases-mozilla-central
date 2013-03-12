@@ -24,7 +24,6 @@ class RemoteOptions(ReftestOptions):
         defaults = {}
         defaults["logFile"] = "reftest.log"
         # app, xrePath and utilityPath variables are set in main function
-        defaults["remoteTestRoot"] = None
         defaults["app"] = ""
         defaults["xrePath"] = ""
         defaults["utilityPath"] = ""
@@ -87,13 +86,19 @@ class RemoteOptions(ReftestOptions):
                     help = "the transport to use to communicate with device: [adb|sut]; default=sut")
         defaults["dm_trans"] = "sut"
 
+        self.add_option("--remoteTestRoot", action = "store",
+                    type = "string", dest = "remoteTestRoot",
+                    help = "remote directory to use as test root (eg. /mnt/sdcard/tests or /data/local/tests)")
+        defaults["remoteTestRoot"] = None
+
         defaults["localLogName"] = None
 
         self.set_defaults(**defaults)
 
     def verifyRemoteOptions(self, options):
         # Ensure our defaults are set properly for everything we can infer
-        options.remoteTestRoot = self._automation._devicemanager.getDeviceRoot() + '/reftest'
+        if not options.remoteTestRoot:
+            options.remoteTestRoot = self._automation._devicemanager.getDeviceRoot() + '/reftest'
         options.remoteProfile = options.remoteTestRoot + "/profile"
 
         # Verify that our remotewebserver is set properly
@@ -184,6 +189,14 @@ class ReftestServer:
 
         xpcshell = os.path.join(self._utilityPath,
                                 "xpcshell" + self._automation.BIN_SUFFIX)
+
+        if not os.access(xpcshell, os.F_OK):
+            raise Exception('xpcshell not found at %s' % xpcshell)
+        if self._automation.elf_arm(xpcshell):
+            raise Exception('xpcshell at %s is an ARM binary; please use '
+                            'the --utility-path argument to specify the path '
+                            'to a desktop version.' % xpcshell)
+
         self._process = self._automation.Process([xpcshell] + args, env = env)
         pid = self._process.pid
         if pid < 0:
@@ -315,8 +328,11 @@ user_pref("browser.firstrun.show.localepicker", false);
 user_pref("font.size.inflation.emPerLine", 0);
 user_pref("font.size.inflation.minTwips", 0);
 user_pref("reftest.remote", true);
-user_pref("toolkit.telemetry.prompted", true);
+// Set a future policy version to avoid the telemetry prompt.
+user_pref("toolkit.telemetry.prompted", 999);
+user_pref("toolkit.telemetry.notifiedOptOut", 999);
 user_pref("reftest.uri", "%s");
+user_pref("datareporting.policy.dataSubmissionPolicyBypassAcceptance", true);
 """ % reftestlist)
 
         #workaround for jsreftests.
@@ -376,11 +392,11 @@ def main(args):
     try:
         if (options.dm_trans == "adb"):
             if (options.deviceIP):
-                dm = devicemanagerADB.DeviceManagerADB(options.deviceIP, options.devicePort)
+                dm = devicemanagerADB.DeviceManagerADB(options.deviceIP, options.devicePort, deviceRoot=options.remoteTestRoot)
             else:
-                dm = devicemanagerADB.DeviceManagerADB(None, None)
+                dm = devicemanagerADB.DeviceManagerADB(None, None, deviceRoot=options.remoteTestRoot)
         else:
-            dm = devicemanagerSUT.DeviceManagerSUT(options.deviceIP, options.devicePort)
+            dm = devicemanagerSUT.DeviceManagerSUT(options.deviceIP, options.devicePort, deviceRoot=options.remoteTestRoot)
     except devicemanager.DMError:
         print "Error: exception while initializing devicemanager.  Most likely the device is not in a testable state."
         return 1
@@ -408,6 +424,7 @@ def main(args):
     automation.setRemoteProfile(options.remoteProfile)
     automation.setRemoteLog(options.remoteLogFile)
     reftest = RemoteReftest(automation, dm, options, SCRIPT_DIRECTORY)
+    options = parser.verifyCommonOptions(options, reftest)
 
     # Hack in a symbolic link for jsreftest
     os.system("ln -s ../jsreftest " + str(os.path.join(SCRIPT_DIRECTORY, "jsreftest")))

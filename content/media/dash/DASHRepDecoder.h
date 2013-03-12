@@ -81,12 +81,19 @@ public:
   // thread only.
   void LoadNextByteRange();
 
+  // Returns true if the subsegment is already in the media cache.
+  bool IsSubsegmentCached(int32_t aSubsegmentIdx);
+
   // Calls from DASHRepDecoder. Called on the main thread only.
   void SetReader(WebMReader* aReader);
 
   // Called if the media file encounters a network error. Call on the main
   // thread only.
   void NetworkError();
+
+  // Called from reader during ReadMetadata. This should be ignored here, and
+  // instead, duration should be set following MPD parsing.
+  void SetMediaDuration(int64_t aDuration) MOZ_OVERRIDE { };
 
   // Set the duration of the media resource in units of seconds.
   // This is called via a channel listener if it can pick up the duration
@@ -119,11 +126,22 @@ public:
   // Called on the main thread only.
   void NotifyDownloadEnded(nsresult aStatus);
 
+  // Called asynchronously by |LoadNextByteRange| if the data is already in the
+  // media cache. This will call NotifyDownloadEnded on the main thread with
+  // |aStatus| of NS_OK.
+  void DoNotifyDownloadEnded();
+
   // Called by MediaResource when the "cache suspended" status changes.
   // If MediaResource::IsSuspendedByCache returns true, then the decoder
   // should stop buffering or otherwise waiting for download progress and
   // start consuming data, if possible, because the cache is full.
   void NotifySuspendedStatusChanged();
+
+  // Increments the parsed and decoded frame counters by the passed in counts.
+  // Can be called on any thread.
+  void NotifyDecodedFrames(uint32_t aParsed, uint32_t aDecoded) MOZ_OVERRIDE {
+    if (mMainDecoder) {mMainDecoder->NotifyDecodedFrames(aParsed, aDecoded); }
+  }
 
   // Gets a byte range containing the byte offset. Call on main thread only.
   nsresult GetByteRangeForSeek(int64_t const aOffset,
@@ -138,27 +156,39 @@ public:
   void PrepareForSwitch();
 
   // Returns true if the current thread is the state machine thread.
-  bool OnStateMachineThread() const;
+  bool OnStateMachineThread() const MOZ_OVERRIDE;
 
   // Returns true if the current thread is the decode thread.
-  bool OnDecodeThread() const;
+  bool OnDecodeThread() const MOZ_OVERRIDE;
 
   // Returns main decoder's monitor for synchronised access.
   ReentrantMonitor& GetReentrantMonitor() MOZ_OVERRIDE;
 
   // Called on the decode thread from WebMReader.
-  ImageContainer* GetImageContainer();
+  ImageContainer* GetImageContainer() MOZ_OVERRIDE;
 
   // Called when Metadata has been read; notifies that index data is read.
   // Called on the decode thread only.
   void OnReadMetadataCompleted() MOZ_OVERRIDE;
 
+  // Stop updating the bytes downloaded for progress notifications. Called
+  // when seeking to prevent wild changes to the progress notification.
+  // Must be called with the decoder monitor held.
+  void StopProgressUpdates() MOZ_OVERRIDE;
+
+  // Allow updating the bytes downloaded for progress notifications. Must
+  // be called with the decoder monitor held.
+  void StartProgressUpdates() MOZ_OVERRIDE;
+
   // Overridden to cleanup ref to |DASHDecoder|. Called on main thread only.
   void Shutdown() {
     NS_ASSERTION(NS_IsMainThread(), "Should be on main thread.");
+    // Remove ref to state machine before |MediaDecoder|::|Shutdown|, since
+    // |DASHDecoder| is responsible for its shutdown.
+    mDecoderStateMachine = nullptr;
     // Call parent class shutdown.
     MediaDecoder::Shutdown();
-    NS_ENSURE_TRUE(mShuttingDown, );
+    NS_ENSURE_TRUE_VOID(mShuttingDown);
     // Cleanup ref to main decoder.
     mMainDecoder = nullptr;
   }

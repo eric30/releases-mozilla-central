@@ -7,7 +7,7 @@ load 56746-1.html
 load 89101-1.html
 load 89358-1.html
 load 90205-1.html
-skip-if(isDebugBuild&&(OSX==10.7||OSX==10.8)) load 99776-1.html # 10.7 and 10.8 leaks are bug 705570
+load 99776-1.html
 load 118931-1.html
 load 121533-1.html
 load 123049-1.html
@@ -41,7 +41,7 @@ load 265736-1.html
 load 265736-2.html
 load 265899-1.html
 load 265973-1.html
-asserts(6-12) skip-if(isDebugBuild&&(OSX==10.7||OSX==10.8)) load 265986-1.html # Bug 512405 for assertions, bug 705570 for 10.7 and 10.8 leaks
+asserts(6-12) load 265986-1.html # Bug 512405
 load 265999-1.html
 load 266222-1.html
 asserts(3-7) load 266360-1.html # bug 575011 / bug 576358
@@ -93,6 +93,8 @@ load 337476-1.xul
 load 338703-1.html
 load 339651-1.html
 load 340093-1.xul
+load 341382-1.html
+load 341382-2.html
 asserts-if(browserIsRemote,1) load 341858-1.html # bug 622188
 load 342145-1.xhtml
 load 343293-1.xhtml
@@ -120,6 +122,9 @@ load 356325-1.xul
 load 358729-1.xhtml
 load 360339-1.xul
 load 360339-2.xul
+load 363729-1.html
+load 363729-2.html
+load 363729-3.html
 load 364427-1.html
 load 365909-1.xhtml
 load 365909-2.xhtml
@@ -134,11 +139,14 @@ load 371681-1.xhtml
 load 372237-1.html
 load 372475-1.xhtml
 load 372550-1.html
+load 372576.xul
+load 373628-1.html
 load 374193-1.xhtml
 load 374297-1.html
 load 374297-2.html
 load 376223-1.xhtml
 asserts(0-99) load 378325-1.html # bug 531589
+load 378682.html
 asserts(0-3) load 379105-1.xhtml # bug 570215, bug 479160
 load 379419-1.xhtml
 load 379768-1.html
@@ -154,6 +162,7 @@ load 384344-1.html
 load 384392-1.xhtml
 load 384392-2.svg
 load 384649-1.xhtml
+load 385354.html
 load 385866-1.xhtml
 load 385880-1.xhtml
 load 386266-1.html
@@ -170,6 +179,8 @@ asserts(0-1) load 394014-2.html # bug 429586
 load 394150-1.xhtml
 load 397011-1.xhtml
 load 398510-1.xhtml
+load 398733-1.html
+load 398733-2.html
 load 399132-1.xhtml
 load 399219-1.xhtml
 load 399365-1.html
@@ -183,6 +194,7 @@ load 400185-1.xul
 load 400445-1.xhtml
 load 400904-1.xhtml
 load 401589-1.xul
+needs-focus pref(accessibility.browsewithcaret,true) load 403048.html
 skip load 403175-1.html # times out occasionally, bug 473680
 load 403245-1.html
 load 403569-1.xhtml
@@ -212,6 +224,8 @@ load 420213-1.html
 load 420219-1.html
 load 420651-1.xhtml
 load 421203-1.xul
+asserts(0-1) load 421432.html # bug 844525
+load 422276.html
 load 423107-1.xhtml
 load 425981-1.html
 load 428138-1.html
@@ -226,11 +240,15 @@ load 432752-1.svg
 load 433450-1.html
 load 436982-1.html
 load 437142-1.html
+asserts(1) load 439343.html # bug 575011
 load 444863-1.html
 load 444925-1.xul
 load 444967-1.html
 load 446328.html
 load 448488-1.html
+load 448543-1.html
+load 448543-2.html
+load 448543-3.html
 load 450319-1.xhtml
 asserts(3) load 453894-1.xhtml # Bug 575011
 load 454751-1.xul
@@ -240,6 +258,7 @@ load 455063-3.html
 load 455171-4.html
 load 455623-1.html
 load 457362-1.xhtml
+load 457514.html
 asserts(0-1) load 460389-1.html # Bug 780985
 load 466763-1.html
 load 467881-1.html
@@ -362,7 +381,7 @@ load 727601.html
 # content process when it gets into an unexpected state, it's just
 # that the reftest harness can't handle restarting crashed content
 # processes so we time out.)
-skip-if(Android||browserIsRemote) asserts(0-2) pref(dom.disable_open_during_load,false) load 735943.html # the assertion is bug 735966, for android bug 760271
+skip-if(Android||B2G||browserIsRemote) asserts(0-2) pref(dom.disable_open_during_load,false) load 735943.html # the assertion is bug 735966, for android bug 760271, for b2g bug 833371
 asserts(0-2) load 736389-1.xhtml # sometimes the above assertions are delayed and is reported on this test instead
 asserts-if(winWidget,0-2) load 736924-1.html # bug 738803
 load 749816-1.html
@@ -371,3 +390,4 @@ test-pref(font.size.inflation.emPerLine,15) test-pref(font.size.inflation.lineTh
 load 770381-1.html
 load 795646.html
 load 813372-1.html
+load 836990-1.html

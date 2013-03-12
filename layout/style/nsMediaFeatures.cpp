@@ -5,16 +5,12 @@
 
 /* the features that media queries can test */
 
-#include "mozilla/Util.h"
-
 #include "nsMediaFeatures.h"
 #include "nsGkAtoms.h"
 #include "nsCSSKeywords.h"
 #include "nsStyleConsts.h"
 #include "nsPresContext.h"
 #include "nsCSSValue.h"
-#include "nsIDocShell.h"
-#include "nsLayoutUtils.h"
 #include "mozilla/LookAndFeel.h"
 #include "nsCSSRuleProcessor.h"
 
@@ -545,6 +541,13 @@ nsMediaFeatures::features[] = {
         nsMediaFeature::eMinMaxNotAllowed,
         nsMediaFeature::eBoolInteger,
         { &nsGkAtoms::windows_classic },
+        GetSystemMetric
+    },
+    {
+        &nsGkAtoms::_moz_windows_glass,
+        nsMediaFeature::eMinMaxNotAllowed,
+        nsMediaFeature::eBoolInteger,
+        { &nsGkAtoms::windows_glass },
         GetSystemMetric
     },
     {

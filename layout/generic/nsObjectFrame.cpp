@@ -13,8 +13,8 @@
 #include "nsPresContext.h"
 #include "nsIPresShell.h"
 #include "nsWidgetsCID.h"
-#include "nsIView.h"
-#include "nsIViewManager.h"
+#include "nsView.h"
+#include "nsViewManager.h"
 #include "nsIDOMEventListener.h"
 #include "nsIDOMDragEvent.h"
 #include "nsPluginHost.h"
@@ -68,6 +68,7 @@
 #include "nsIScrollableFrame.h"
 #include "mozilla/Preferences.h"
 #include "sampler.h"
+#include <algorithm>
 
 // headers for plugin scriptability
 #include "nsIScriptGlobalObject.h"
@@ -275,7 +276,7 @@ NS_QUERYFRAME_TAIL_INHERITING(nsObjectFrameSuper)
 a11y::AccType
 nsObjectFrame::AccessibleType()
 {
-  return a11y::eHTMLObjectFrameAccessible;
+  return a11y::ePluginType;
 }
 
 #ifdef XP_WIN
@@ -328,8 +329,8 @@ nsObjectFrame::DestroyFrom(nsIFrame* aDestructRoot)
 nsObjectFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
 {
   if (HasView()) {
-    nsIView* view = GetView();
-    nsIViewManager* vm = view->GetViewManager();
+    nsView* view = GetView();
+    nsViewManager* vm = view->GetViewManager();
     if (vm) {
       nsViewVisibility visibility = 
         IsHidden() ? nsViewVisibility_kHide : nsViewVisibility_kShow;
@@ -359,13 +360,13 @@ nsObjectFrame::PrepForDrawing(nsIWidget *aWidget)
 {
   mWidget = aWidget;
 
-  nsIView* view = GetView();
+  nsView* view = GetView();
   NS_ASSERTION(view, "Object frames must have views");  
   if (!view) {
     return NS_ERROR_FAILURE;
   }
 
-  nsIViewManager* viewMan = view->GetViewManager();
+  nsViewManager* viewMan = view->GetViewManager();
   // mark the view as hidden since we don't know the (x,y) until Paint
   // XXX is the above comment correct?
   viewMan->SetViewVisibility(view, nsViewVisibility_kHide);
@@ -374,7 +375,7 @@ nsObjectFrame::PrepForDrawing(nsIWidget *aWidget)
   // Position and size view relative to its parent, not relative to our
   // parent frame (our parent frame may not have a view).
   
-  nsIView* parentWithView;
+  nsView* parentWithView;
   nsPoint origin;
   nsRect r(0, 0, mRect.width, mRect.height);
 
@@ -530,8 +531,8 @@ nsObjectFrame::GetDesiredSize(nsPresContext* aPresContext,
     // exceed the maximum size of X coordinates.  See bug #225357 for
     // more information.  In theory Gtk2 can handle large coordinates,
     // but underlying plugins can't.
-    aMetrics.height = NS_MIN(aPresContext->DevPixelsToAppUnits(INT16_MAX), aMetrics.height);
-    aMetrics.width = NS_MIN(aPresContext->DevPixelsToAppUnits(INT16_MAX), aMetrics.width);
+    aMetrics.height = std::min(aPresContext->DevPixelsToAppUnits(INT16_MAX), aMetrics.height);
+    aMetrics.width = std::min(aPresContext->DevPixelsToAppUnits(INT16_MAX), aMetrics.width);
 #endif
   }
 
@@ -593,7 +594,7 @@ nsObjectFrame::Reflow(nsPresContext*           aPresContext,
   r.Deflate(aReflowState.mComputedBorderPadding);
 
   if (mInnerView) {
-    nsIViewManager* vm = mInnerView->GetViewManager();
+    nsViewManager* vm = mInnerView->GetViewManager();
     vm->MoveViewTo(mInnerView, r.x, r.y);
     vm->ResizeView(mInnerView, nsRect(nsPoint(0, 0), r.Size()), true);
   }
@@ -637,7 +638,7 @@ nsObjectFrame::FixupWindow(const nsSize& aSize)
   NPWindow *window;
   mInstanceOwner->GetWindow(window);
 
-  NS_ENSURE_TRUE(window, /**/);
+  NS_ENSURE_TRUE_VOID(window);
 
 #ifdef XP_MACOSX
   nsWeakFrame weakFrame(this);
@@ -815,7 +816,7 @@ bool
 nsObjectFrame::IsHidden(bool aCheckVisibilityStyle) const
 {
   if (aCheckVisibilityStyle) {
-    if (!GetStyleVisibility()->IsVisibleOrCollapsed())
+    if (!StyleVisibility()->IsVisibleOrCollapsed())
       return true;    
   }
 
@@ -843,7 +844,7 @@ nsObjectFrame::IsHidden(bool aCheckVisibilityStyle) const
 
 nsIntPoint nsObjectFrame::GetWindowOriginInPixels(bool aWindowless)
 {
-  nsIView * parentWithView;
+  nsView * parentWithView;
   nsPoint origin(0,0);
 
   GetOffsetFromView(origin, &parentWithView);
@@ -883,8 +884,8 @@ nsObjectFrame::DidReflow(nsPresContext*            aPresContext,
     return rv;
 
   if (HasView()) {
-    nsIView* view = GetView();
-    nsIViewManager* vm = view->GetViewManager();
+    nsView* view = GetView();
+    nsViewManager* vm = view->GetViewManager();
     if (vm)
       vm->SetViewVisibility(view, IsHidden() ? nsViewVisibility_kHide : nsViewVisibility_kShow);
   }
@@ -1207,30 +1208,29 @@ nsObjectFrame::IsTransparentMode() const
 #endif
 }
 
-NS_IMETHODIMP
+void
 nsObjectFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                 const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists)
 {
   // XXX why are we painting collapsed object frames?
   if (!IsVisibleOrCollapsedForPainting(aBuilder))
-    return NS_OK;
+    return;
 
-  nsresult rv = DisplayBorderBackgroundOutline(aBuilder, aLists);
-  NS_ENSURE_SUCCESS(rv, rv);
+  DisplayBorderBackgroundOutline(aBuilder, aLists);
 
   nsPresContext::nsPresContextType type = PresContext()->Type();
 
   // If we are painting in Print Preview do nothing....
   if (type == nsPresContext::eContext_PrintPreview)
-    return NS_OK;
+    return;
 
   DO_GLOBAL_REFLOW_COUNT_DSP("nsObjectFrame");
 
 #ifndef XP_MACOSX
   if (mWidget && aBuilder->IsInTransform()) {
     // Windowed plugins should not be rendered inside a transform.
-    return NS_OK;
+    return;
   }
 #endif
 
@@ -1251,9 +1251,9 @@ nsObjectFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 
   // determine if we are printing
   if (type == nsPresContext::eContext_Print) {
-    rv = replacedContent.AppendNewToTop(new (aBuilder)
-        nsDisplayGeneric(aBuilder, this, PaintPrintPlugin, "PrintPlugin",
-                         nsDisplayItem::TYPE_PRINT_PLUGIN));
+    replacedContent.AppendNewToTop(new (aBuilder)
+      nsDisplayGeneric(aBuilder, this, PaintPrintPlugin, "PrintPlugin",
+                       nsDisplayItem::TYPE_PRINT_PLUGIN));
   } else {
     LayerState state = GetLayerState(aBuilder, nullptr);
     if (state == LAYER_INACTIVE &&
@@ -1265,9 +1265,8 @@ nsObjectFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     if (aBuilder->IsPaintingToWindow() &&
         state == LAYER_ACTIVE &&
         IsTransparentMode()) {
-      rv = replacedContent.AppendNewToTop(new (aBuilder)
-          nsDisplayPluginReadback(aBuilder, this));
-      NS_ENSURE_SUCCESS(rv, rv);
+      replacedContent.AppendNewToTop(new (aBuilder)
+        nsDisplayPluginReadback(aBuilder, this));
     }
 #endif
 
@@ -1279,21 +1278,17 @@ nsObjectFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       mInstanceOwner->GetVideos(videos);
 
       for (uint32_t i = 0; i < videos.Length(); i++) {
-        rv = replacedContent.AppendNewToTop(new (aBuilder)
+        replacedContent.AppendNewToTop(new (aBuilder)
           nsDisplayPluginVideo(aBuilder, this, videos[i]));
-        NS_ENSURE_SUCCESS(rv, rv);
       }
     }
 #endif
 
-    rv = replacedContent.AppendNewToTop(new (aBuilder)
-        nsDisplayPlugin(aBuilder, this));
+    replacedContent.AppendNewToTop(new (aBuilder)
+      nsDisplayPlugin(aBuilder, this));
   }
-  NS_ENSURE_SUCCESS(rv, rv);
 
   WrapReplacedContentForBorderRadius(aBuilder, &replacedContent, aLists);
-
-  return NS_OK;
 }
 
 #ifdef XP_OS2
@@ -1984,8 +1979,8 @@ nsObjectFrame::PaintPlugin(nsDisplayListBuilder* aBuilder,
         return;
       }
 
-      origin.x = NSToIntRound(float(ctxMatrix.GetTranslation().x));
-      origin.y = NSToIntRound(float(ctxMatrix.GetTranslation().y));
+      origin.x = NSToIntRound(ctxMatrix.GetTranslation().x);
+      origin.y = NSToIntRound(ctxMatrix.GetTranslation().y);
 
       /* Need to force the clip to be set */
       ctx->UpdateSurfaceClip();
@@ -2076,6 +2071,8 @@ nsObjectFrame::HandleEvent(nsPresContext* aPresContext,
   if (mInstanceOwner->SendNativeEvents() &&
       NS_IS_PLUGIN_EVENT(anEvent)) {
     *anEventStatus = mInstanceOwner->ProcessEvent(*anEvent);
+    // Due to plugin code reentering Gecko, this frame may be dead at this
+    // point.
     return rv;
   }
 
@@ -2090,6 +2087,8 @@ nsObjectFrame::HandleEvent(nsPresContext* aPresContext,
        anEvent->message == NS_WHEEL_WHEEL) &&
       mInstanceOwner->GetEventModel() == NPEventModelCocoa) {
     *anEventStatus = mInstanceOwner->ProcessEvent(*anEvent);
+    // Due to plugin code reentering Gecko, this frame may be dead at this
+    // point.
     return rv;
   }
 #endif
@@ -2214,11 +2213,20 @@ nsObjectFrame::EndSwapDocShells(nsIContent* aContent, void*)
     nsIWidget* parent =
       rootPC->PresShell()->GetRootFrame()->GetNearestWidget();
     widget->SetParent(parent);
+    nsWeakFrame weakFrame(objectFrame);
     objectFrame->CallSetWindow();
+    if (!weakFrame.IsAlive()) {
+      return;
+    }
+  }
 
-    // Register for geometry updates and make a request.
+#ifdef XP_MACOSX
+  if (objectFrame->mWidget) {
     objectFrame->RegisterPluginForGeometryUpdates();
   }
+#else
+  objectFrame->RegisterPluginForGeometryUpdates();
+#endif
 }
 
 nsIFrame*

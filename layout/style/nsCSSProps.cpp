@@ -575,8 +575,8 @@ const int32_t nsCSSProps::kAppearanceKTable[] = {
   eCSSKeyword_tab,                    NS_THEME_TAB,
   eCSSKeyword_tabpanels,              NS_THEME_TAB_PANELS,
   eCSSKeyword_tabpanel,               NS_THEME_TAB_PANEL,
-  eCSSKeyword_tabscrollarrow_back,    NS_THEME_TAB_SCROLLARROW_BACK,
-  eCSSKeyword_tabscrollarrow_forward, NS_THEME_TAB_SCROLLARROW_FORWARD,
+  eCSSKeyword_tab_scroll_arrow_back,  NS_THEME_TAB_SCROLLARROW_BACK,
+  eCSSKeyword_tab_scroll_arrow_forward, NS_THEME_TAB_SCROLLARROW_FORWARD,
   eCSSKeyword_tooltip,                NS_THEME_TOOLTIP,
   eCSSKeyword_spinner,                NS_THEME_SPINNER,
   eCSSKeyword_spinner_upbutton,       NS_THEME_SPINNER_UP_BUTTON,
@@ -597,9 +597,9 @@ const int32_t nsCSSProps::kAppearanceKTable[] = {
   eCSSKeyword_caret,                  NS_THEME_TEXTFIELD_CARET,
   eCSSKeyword_searchfield,            NS_THEME_SEARCHFIELD,
   eCSSKeyword_menulist,               NS_THEME_DROPDOWN,
-  eCSSKeyword_menulistbutton,         NS_THEME_DROPDOWN_BUTTON,
-  eCSSKeyword_menulisttext,           NS_THEME_DROPDOWN_TEXT,
-  eCSSKeyword_menulisttextfield,      NS_THEME_DROPDOWN_TEXTFIELD,
+  eCSSKeyword_menulist_button,        NS_THEME_DROPDOWN_BUTTON,
+  eCSSKeyword_menulist_text,          NS_THEME_DROPDOWN_TEXT,
+  eCSSKeyword_menulist_textfield,     NS_THEME_DROPDOWN_TEXTFIELD,
   eCSSKeyword_scale_horizontal,       NS_THEME_SCALE_HORIZONTAL,
   eCSSKeyword_scale_vertical,         NS_THEME_SCALE_VERTICAL,
   eCSSKeyword_scalethumb_horizontal,  NS_THEME_SCALE_THUMB_HORIZONTAL,
@@ -608,11 +608,11 @@ const int32_t nsCSSProps::kAppearanceKTable[] = {
   eCSSKeyword_scalethumbend,          NS_THEME_SCALE_THUMB_END,
   eCSSKeyword_scalethumbtick,         NS_THEME_SCALE_TICK,
   eCSSKeyword_groupbox,               NS_THEME_GROUPBOX,
-  eCSSKeyword_checkboxcontainer,      NS_THEME_CHECKBOX_CONTAINER,
-  eCSSKeyword_radiocontainer,         NS_THEME_RADIO_CONTAINER,
-  eCSSKeyword_checkboxlabel,          NS_THEME_CHECKBOX_LABEL,
-  eCSSKeyword_radiolabel,             NS_THEME_RADIO_LABEL,
-  eCSSKeyword_buttonfocus,            NS_THEME_BUTTON_FOCUS,
+  eCSSKeyword_checkbox_container,     NS_THEME_CHECKBOX_CONTAINER,
+  eCSSKeyword_radio_container,        NS_THEME_RADIO_CONTAINER,
+  eCSSKeyword_checkbox_label,         NS_THEME_CHECKBOX_LABEL,
+  eCSSKeyword_radio_label,            NS_THEME_RADIO_LABEL,
+  eCSSKeyword_button_focus,           NS_THEME_BUTTON_FOCUS,
   eCSSKeyword_window,                 NS_THEME_WINDOW,
   eCSSKeyword_dialog,                 NS_THEME_DIALOG,
   eCSSKeyword_menubar,                NS_THEME_MENUBAR,
@@ -1188,6 +1188,7 @@ const int32_t nsCSSProps::kObjectPatternKTable[] = {
 const int32_t nsCSSProps::kOrientKTable[] = {
   eCSSKeyword_horizontal, NS_STYLE_ORIENT_HORIZONTAL,
   eCSSKeyword_vertical,   NS_STYLE_ORIENT_VERTICAL,
+  eCSSKeyword_auto,       NS_STYLE_ORIENT_AUTO,
   eCSSKeyword_UNKNOWN,    -1
 };
 
@@ -1451,7 +1452,7 @@ const int32_t nsCSSProps::kUserSelectKTable[] = {
   eCSSKeyword_toggle,     NS_STYLE_USER_SELECT_TOGGLE,
   eCSSKeyword_tri_state,  NS_STYLE_USER_SELECT_TRI_STATE,
   eCSSKeyword__moz_all,   NS_STYLE_USER_SELECT_MOZ_ALL,
-  eCSSKeyword__moz_none,  NS_STYLE_USER_SELECT_MOZ_NONE,
+  eCSSKeyword__moz_none,  NS_STYLE_USER_SELECT_NONE,
   eCSSKeyword_UNKNOWN,-1
 };
 
@@ -1583,6 +1584,12 @@ const int32_t nsCSSProps::kImageRenderingKTable[] = {
   eCSSKeyword_optimizespeed, NS_STYLE_IMAGE_RENDERING_OPTIMIZESPEED,
   eCSSKeyword_optimizequality, NS_STYLE_IMAGE_RENDERING_OPTIMIZEQUALITY,
   eCSSKeyword__moz_crisp_edges, NS_STYLE_IMAGE_RENDERING_CRISPEDGES,
+  eCSSKeyword_UNKNOWN, -1
+};
+
+const int32_t nsCSSProps::kMaskTypeKTable[] = {
+  eCSSKeyword_luminance, NS_STYLE_MASK_TYPE_LUMINANCE,
+  eCSSKeyword_alpha, NS_STYLE_MASK_TYPE_ALPHA,
   eCSSKeyword_UNKNOWN, -1
 };
 

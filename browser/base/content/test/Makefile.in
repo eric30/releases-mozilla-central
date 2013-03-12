@@ -8,14 +8,10 @@ srcdir		= @srcdir@
 VPATH		= @srcdir@
 relativesrcdir  = @relativesrcdir@
 
-DIRS += \
-		newtab \
-		$(NULL)
-
 include $(DEPTH)/config/autoconf.mk
 
 MOCHITEST_FILES = \
-		head.js \
+		head_plain.js \
 		test_feed_discovery.html \
 		feed_discovery.html \
 		test_bug395533.html \
@@ -49,12 +45,8 @@ MOCHITEST_FILES += \
 		audio.ogg \
 		test_contextmenu.html \
 		subtst_contextmenu.html \
-		$(NULL)
-ifdef MOZ_PER_WINDOW_PRIVATE_BROWSING
-MOCHITEST_FILES += \
 		privateBrowsingMode.js \
 		$(NULL)
-endif
 endif
 
 # The following tests are disabled because they are unreliable:
@@ -69,13 +61,10 @@ endif
 
 # browser_bug321000.js is disabled because newline handling is shaky (bug 592528)
 
-# browser_pageInfo.js + feed_tab.html is disabled for leaking (bug 767896)
-
 _BROWSER_FILES = \
                  head.js \
                  browser_typeAheadFind.js \
                  browser_keywordSearch.js \
-                 browser_allTabsPanel.js \
                  browser_alltabslistener.js \
                  browser_bug304198.js \
                  title_test.svg \
@@ -99,7 +88,6 @@ _BROWSER_FILES = \
                  browser_bug435035.js \
                  browser_bug435325.js \
                  browser_bug441778.js \
-                 browser_popupNotification.js \
                  browser_bug455852.js \
                  browser_bug460146.js \
                  browser_bug462673.js \
@@ -122,6 +110,7 @@ _BROWSER_FILES = \
                  browser_bug555767.js \
                  browser_bug556061.js \
                  browser_bug559991.js \
+                 browser_bug561636.js \
                  browser_bug561623.js \
                  browser_bug562649.js \
                  browser_bug563588.js \
@@ -162,8 +151,14 @@ _BROWSER_FILES = \
                  browser_bug735471.js \
                  browser_bug743421.js \
                  browser_bug749738.js \
+                 browser_bug763468_perwindowpb.js \
+                 browser_bug767836_perwindowpb.js \
                  browser_bug783614.js \
                  browser_bug797677.js \
+                 browser_bug816527.js \
+                 browser_bug817947.js \
+                 browser_bug822367.js \
+                 browser_bug832435.js \
                  browser_canonizeURL.js \
                  browser_customize.js \
                  browser_findbarClose.js \
@@ -175,6 +170,8 @@ _BROWSER_FILES = \
                  browser_disablechrome.js \
                  browser_discovery.js \
                  browser_duplicateIDs.js \
+                 browser_fullscreen-window-open.js \
+                 file_fullscreen-window-open.html \
                  browser_gestureSupport.js \
                  browser_getshortcutoruri.js \
                  browser_hide_removing.js \
@@ -185,8 +182,11 @@ _BROWSER_FILES = \
                  browser_pinnedTabs.js \
                  browser_plainTextLinks.js \
                  browser_pluginnotification.js \
-                 browser_clickToPlayPluginScriptAccessPopup.js \
+                 browser_plugins_added_dynamically.js \
+                 browser_CTPScriptPlugin.js \
                  browser_pluginplaypreview.js \
+                 browser_pluginplaypreview2.js \
+                 browser_private_browsing_window.js \
                  browser_relatedTabs.js \
                  browser_sanitize-passwordDisabledHosts.js \
                  browser_sanitize-sitepermissions.js \
@@ -196,7 +196,11 @@ _BROWSER_FILES = \
                  browser_clearplugindata_noage.html \
                  browser_popupUI.js \
                  browser_sanitizeDialog.js \
+                 browser_save_link-perwindowpb.js \
+                 browser_save_private_link_perwindowpb.js \
                  browser_save_video.js \
+                 browser_tabMatchesInAwesomebar_perwindowpb.js \
+                 browser_tab_drag_drop_perwindow.js \
                  bug564387.html \
                  bug564387_video1.ogv \
                  bug564387_video1.ogv^headers^ \
@@ -218,6 +222,7 @@ _BROWSER_FILES = \
                  browser_urlbarRevert.js \
                  browser_urlbarStop.js \
                  browser_urlbarTrimURLs.js \
+                 browser_urlbar_search_healthreport.js \
                  browser_urlHighlight.js \
                  browser_visibleFindSelection.js \
                  browser_visibleTabs.js \
@@ -229,6 +234,15 @@ _BROWSER_FILES = \
                  disablechrome.html \
                  discovery.html \
                  domplate_test.js \
+                 file_bug822367_1.html \
+                 file_bug822367_1.js \
+                 file_bug822367_2.html \
+                 file_bug822367_3.html \
+                 file_bug822367_4.html \
+                 file_bug822367_4.js \
+                 file_bug822367_4B.html \
+                 file_bug822367_5.html \
+                 file_bug822367_6.html \
                  moz.png \
                  video.ogg \
                  test_bug435035.html \
@@ -248,12 +262,14 @@ _BROWSER_FILES = \
                  plugin_alternate_content.html \
                  plugin_both.html \
                  plugin_both2.html \
-                 plugin_bug743421.html \
+                 plugin_add_dynamically.html \
                  plugin_clickToPlayAllow.html \
                  plugin_clickToPlayDeny.html \
+                 plugin_bug744745.html \
                  plugin_bug749455.html \
                  plugin_bug797677.html \
                  plugin_bug818009.html \
+                 plugin_bug820497.html \
                  plugin_hidden_to_visible.html \
                  plugin_two_types.html \
                  alltabslistener.html \
@@ -279,31 +295,33 @@ _BROWSER_FILES = \
                  browser_tabDrop.js \
                  browser_lastAccessedTab.js \
                  browser_bug734076.js \
+                 browser_bug744745.js \
                  browser_bug812562.js \
                  browser_bug818009.js \
                  browser_bug818118.js \
+                 browser_bug820497.js \
                  blockPluginVulnerableUpdatable.xml \
                  blockPluginVulnerableNoUpdate.xml \
                  blockNoPlugins.xml \
                  browser_utilityOverlay.js \
-                 browser_social.js \
-                 browser_social_toolbar.js \
-                 browser_social_shareButton.js \
-                 browser_social_sidebar.js \
-                 browser_social_flyout.js \
-                 browser_social_mozSocial_API.js \
-                 browser_social_isVisible.js \
-                 browser_social_chatwindow.js \
-                 social_panel.html \
-                 social_share_image.png \
-                 social_sidebar.html \
-                 social_chat.html \
-                 social_flyout.html \
-                 social_window.html \
-                 social_worker.js \
                  browser_bug676619.js \
                  download_page.html \
+                 browser_URLBarSetURI.js \
+                 browser_bookmark_titles.js \
+                 browser_pageInfo_plugins.js \
+                 browser_pageInfo.js \
+                 feed_tab.html \
+                 browser_pluginCrashCommentAndURL.js \
+                 pluginCrashCommentAndURL.html \
+                 browser_private_no_prompt.js \
                  $(NULL)
+
+# Disable test on Windows due to frequent failures (bug 841341)
+ifneq (windows,$(MOZ_WIDGET_TOOLKIT))
+_BROWSER_FILES += \
+                browser_popupNotification.js \
+                $(NULL)
+endif
 
 ifneq (cocoa,$(MOZ_WIDGET_TOOLKIT))
 _BROWSER_FILES += \
@@ -315,34 +333,6 @@ _BROWSER_FILES += \
 		$(NULL)
 # TODO: Activate after carbon test plugin lands, bug 628651
 # 		browser_maconly_carbon_mismatch_plugin.js
-endif
-
-# bug 766546, disable browser_bug561636.js on Windows
-ifneq ($(OS_ARCH),WINNT)
-_BROWSER_FILES += \
-                 browser_bug561636.js \
-                 $(NULL)
-endif
-
-ifdef MOZ_PER_WINDOW_PRIVATE_BROWSING
-_BROWSER_FILES += \
-                browser_bug763468_perwindowpb.js \
-                browser_bug767836_perwindowpb.js \
-                browser_bug816527.js \
-                browser_private_browsing_window.js \
-                browser_save_link-perwindowpb.js \
-                browser_save_private_link_perwindowpb.js \
-                browser_tabMatchesInAwesomebar_perwindowpb.js \
-                browser_tab_drag_drop_perwindow.js \
-                $(NULL)
-else
-_BROWSER_FILES += \
-                browser_bug763468.js \
-                browser_bug767836.js \
-                browser_save_link.js \
-                browser_save_private_link.js \
-                browser_tabMatchesInAwesomebar.js \
-                $(NULL)
 endif
 
 include $(topsrcdir)/config/rules.mk

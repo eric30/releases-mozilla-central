@@ -17,13 +17,14 @@
 #include <pthread.h>
 #include <stdio.h>
 
+#include "mozilla/DebugOnly.h"
+
 #include "base/basictypes.h"
 #include "base/thread.h"
 
 #include "Hal.h"
 #include "HalSensor.h"
 #include "hardware/sensors.h"
-#include "mozilla/Util.h"
 
 #undef LOG
 
@@ -181,16 +182,19 @@ PollSensors()
       if (buffer[i].type == SENSOR_TYPE_MAGNETIC_FIELD)
         continue;
 
-      if (buffer[i].sensor >= size) {
-        LOGW("buffer type is hal sensor type SENSOR_UNKNOWN, and buffer sensor is not in a valid range");
-        continue;
-      }
-
       if (HardwareSensorToHalSensor(buffer[i].type) == SENSOR_UNKNOWN) {
         // Emulator is broken and gives us events without types set
-        if (HardwareSensorToHalSensor(sensors[buffer[i].sensor].type) != SENSOR_UNKNOWN) {
-          buffer[i].type = sensors[buffer[i].sensor].type;
+        int index;
+        for (index = 0; index < size; index++) {
+          if (sensors[index].handle == buffer[i].sensor) {
+            break;
+          }
+        }
+        if (index < size &&
+            HardwareSensorToHalSensor(sensors[index].type) != SENSOR_UNKNOWN) {
+          buffer[i].type = sensors[index].type;
         } else {
+          LOGW("Could not determine sensor type of event");
           continue;
         }
       }

@@ -3,6 +3,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/DebugOnly.h"          // for DebugOnly
+
 #include <stdio.h>                      // for NULL, stdout
 #include <string.h>                     // for strcmp
 
@@ -25,7 +27,6 @@
 #include "mozilla/Preferences.h"        // for Preferences
 #include "mozilla/Selection.h"          // for Selection, etc
 #include "mozilla/Services.h"           // for GetObserverService
-#include "mozilla/Util.h"               // for DebugOnly
 #include "mozilla/dom/Element.h"        // for Element, nsINode::AsElement
 #include "mozilla/mozalloc.h"           // for operator new, etc
 #include "nsAString.h"                  // for nsAString_internal::Length, etc
@@ -60,8 +61,8 @@
 #include "nsIDOMEventTarget.h"          // for nsIDOMEventTarget
 #include "nsIDOMHTMLElement.h"          // for nsIDOMHTMLElement
 #include "nsIDOMKeyEvent.h"             // for nsIDOMKeyEvent, etc
+#include "nsIDOMMozNamedAttrMap.h"      // for nsIDOMMozNamedAttrMap
 #include "nsIDOMMouseEvent.h"           // for nsIDOMMouseEvent
-#include "nsIDOMNamedNodeMap.h"         // for nsIDOMNamedNodeMap
 #include "nsIDOMNode.h"                 // for nsIDOMNode, etc
 #include "nsIDOMNodeList.h"             // for nsIDOMNodeList
 #include "nsIDOMRange.h"                // for nsIDOMRange
@@ -71,7 +72,6 @@
 #include "nsIEditActionListener.h"      // for nsIEditActionListener
 #include "nsIEditorObserver.h"          // for nsIEditorObserver
 #include "nsIEditorSpellCheck.h"        // for nsIEditorSpellCheck
-#include "nsIEnumerator.h"              // for nsIEnumerator, etc
 #include "nsIFrame.h"                   // for nsIFrame
 #include "nsIInlineSpellChecker.h"      // for nsIInlineSpellChecker, etc
 #include "nsIMEStateManager.h"          // for nsIMEStateManager
@@ -101,7 +101,7 @@
 #include "nsStyleContext.h"             // for nsStyleContext
 #include "nsStyleSheetTxns.h"           // for AddStyleSheetTxn, etc
 #include "nsStyleStruct.h"              // for nsStyleDisplay, nsStyleText, etc
-#include "nsStyleStructFwd.h"           // for nsIFrame::GetStyleUIReset, etc
+#include "nsStyleStructFwd.h"           // for nsIFrame::StyleUIReset, etc
 #include "nsTextEditUtils.h"            // for nsTextEditUtils
 #include "nsThreadUtils.h"              // for nsRunnable
 #include "nsTransactionManager.h"       // for nsTransactionManager
@@ -120,6 +120,7 @@ static bool gNoisy = false;
 #endif
 
 using namespace mozilla;
+using namespace mozilla::dom;
 using namespace mozilla::widget;
 
 // Defined in nsEditorRegistration.cpp
@@ -140,7 +141,6 @@ nsEditor::nsEditor()
 ,  mUpdateCount(0)
 ,  mPlaceHolderBatch(0)
 ,  mAction(EditAction::none)
-,  mHandlingActionCount(0)
 ,  mIMETextOffset(0)
 ,  mIMEBufferLength(0)
 ,  mDirection(eNone)
@@ -151,7 +151,6 @@ nsEditor::nsEditor()
 ,  mShouldTxnSetSelection(true)
 ,  mDidPreDestroy(false)
 ,  mDidPostCreate(false)
-,  mHandlingTrustedAction(false)
 ,  mDispatchInputEvent(true)
 {
 }
@@ -164,8 +163,6 @@ nsEditor::~nsEditor()
 
   delete mPhonetic;
 }
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsEditor)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsEditor)
  NS_IMPL_CYCLE_COLLECTION_UNLINK(mRootElement)
@@ -632,14 +629,7 @@ nsEditor::GetSelection()
   nsresult res = GetSelection(getter_AddRefs(sel));
   NS_ENSURE_SUCCESS(res, nullptr);
 
-  nsCOMPtr<nsISelectionPrivate> selPrivate = do_QueryInterface(sel);
-  NS_ENSURE_TRUE(selPrivate, nullptr);
-
-  nsRefPtr<nsFrameSelection> frameSel;
-  res = selPrivate->GetFrameSelection(getter_AddRefs(frameSel));
-  NS_ENSURE_SUCCESS(res, nullptr);
-
-  return frameSel->GetSelection(nsISelectionController::SELECTION_NORMAL);
+  return static_cast<Selection*>(sel.get());
 }
 
 NS_IMETHODIMP
@@ -868,7 +858,7 @@ nsEditor::BeginTransaction()
   BeginUpdateViewBatch();
 
   if (mTxnMgr) {
-    mTxnMgr->BeginBatch();
+    mTxnMgr->BeginBatch(nullptr);
   }
 
   return NS_OK;
@@ -878,7 +868,7 @@ NS_IMETHODIMP
 nsEditor::EndTransaction()
 {
   if (mTxnMgr) {
-    mTxnMgr->EndBatch();
+    mTxnMgr->EndBatch(false);
   }
 
   EndUpdateViewBatch();
@@ -1176,14 +1166,15 @@ nsEditor::CanPasteTransferable(nsITransferable *aTransferable, bool *aCanPaste)
   return NS_ERROR_NOT_IMPLEMENTED; 
 }
 
-NS_IMETHODIMP 
+NS_IMETHODIMP
 nsEditor::SetAttribute(nsIDOMElement *aElement, const nsAString & aAttribute, const nsAString & aValue)
 {
   nsRefPtr<ChangeAttributeTxn> txn;
-  nsresult result = CreateTxnForSetAttribute(aElement, aAttribute, aValue,
+  nsCOMPtr<Element> element = do_QueryInterface(aElement);
+  nsresult result = CreateTxnForSetAttribute(element, aAttribute, aValue,
                                              getter_AddRefs(txn));
   if (NS_SUCCEEDED(result))  {
-    result = DoTransaction(txn);  
+    result = DoTransaction(txn);
   }
   return result;
 }
@@ -1209,14 +1200,15 @@ nsEditor::GetAttributeValue(nsIDOMElement *aElement,
   return rv;
 }
 
-NS_IMETHODIMP 
+NS_IMETHODIMP
 nsEditor::RemoveAttribute(nsIDOMElement *aElement, const nsAString& aAttribute)
 {
   nsRefPtr<ChangeAttributeTxn> txn;
-  nsresult result = CreateTxnForRemoveAttribute(aElement, aAttribute,
+  nsCOMPtr<Element> element = do_QueryInterface(aElement);
+  nsresult result = CreateTxnForRemoveAttribute(element, aAttribute,
                                                 getter_AddRefs(txn));
   if (NS_SUCCEEDED(result))  {
-    result = DoTransaction(txn);  
+    result = DoTransaction(txn);
   }
   return result;
 }
@@ -1234,15 +1226,21 @@ nsEditor::OutputsMozDirty()
 
 NS_IMETHODIMP
 nsEditor::MarkNodeDirty(nsIDOMNode* aNode)
-{  
+{
+  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
+  return MarkNodeDirty(node);
+}
+
+nsresult
+nsEditor::MarkNodeDirty(nsINode* aNode)
+{
   // Mark the node dirty, but not for webpages (bug 599983)
   if (!OutputsMozDirty()) {
     return NS_OK;
   }
-  nsCOMPtr<dom::Element> element = do_QueryInterface(aNode);
-  if (element) {
-    element->SetAttr(kNameSpaceID_None, nsEditProperty::mozdirty,
-                     EmptyString(), false);
+  if (aNode->IsElement()) {
+    aNode->AsElement()->SetAttr(kNameSpaceID_None, nsEditProperty::mozdirty,
+                                EmptyString(), false);
   }
   return NS_OK;
 }
@@ -1345,25 +1343,28 @@ NS_IMETHODIMP nsEditor::CreateNode(const nsAString& aTag,
   int32_t i;
 
   nsAutoRules beginRulesSniffing(this, EditAction::createNode, nsIEditor::eNext);
-  
+
   for (i = 0; i < mActionListeners.Count(); i++)
     mActionListeners[i]->WillCreateNode(aTag, aParent, aPosition);
 
   nsRefPtr<CreateElementTxn> txn;
-  nsresult result = CreateTxnForCreateElement(aTag, aParent, aPosition,
+  nsCOMPtr<nsINode> parent = do_QueryInterface(aParent);
+  nsresult result = CreateTxnForCreateElement(aTag, parent, aPosition,
                                               getter_AddRefs(txn));
-  if (NS_SUCCEEDED(result)) 
+  if (NS_SUCCEEDED(result))
   {
-    result = DoTransaction(txn);  
-    if (NS_SUCCEEDED(result)) 
+    result = DoTransaction(txn);
+    if (NS_SUCCEEDED(result))
     {
-      result = txn->GetNewNode(aNewNode);
+      nsCOMPtr<nsINode> newNode;
+      result = txn->GetNewNode(getter_AddRefs(newNode));
+      CallQueryInterface(newNode, aNewNode);
       NS_ASSERTION((NS_SUCCEEDED(result)), "GetNewNode can't fail if txn::DoTransaction succeeded.");
     }
   }
-  
+
   mRangeUpdater.SelAdjCreateNode(aParent, aPosition);
-  
+
   for (i = 0; i < mActionListeners.Count(); i++)
     mActionListeners[i]->DidCreateNode(aTag, *aNewNode, aParent, aPosition, result);
 
@@ -1382,10 +1383,12 @@ NS_IMETHODIMP nsEditor::InsertNode(nsIDOMNode * aNode,
     mActionListeners[i]->WillInsertNode(aNode, aParent, aPosition);
 
   nsRefPtr<InsertElementTxn> txn;
-  nsresult result = CreateTxnForInsertElement(aNode, aParent, aPosition,
+  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
+  nsCOMPtr<nsINode> parent = do_QueryInterface(aParent);
+  nsresult result = CreateTxnForInsertElement(node, parent, aPosition,
                                               getter_AddRefs(txn));
   if (NS_SUCCEEDED(result))  {
-    result = DoTransaction(txn);  
+    result = DoTransaction(txn);
   }
 
   mRangeUpdater.SelAdjInsertNode(aParent, aPosition);
@@ -1409,13 +1412,16 @@ nsEditor::SplitNode(nsIDOMNode * aNode,
     mActionListeners[i]->WillSplitNode(aNode, aOffset);
 
   nsRefPtr<SplitElementTxn> txn;
-  nsresult result = CreateTxnForSplitNode(aNode, aOffset, getter_AddRefs(txn));
-  if (NS_SUCCEEDED(result))  
+  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
+  nsresult result = CreateTxnForSplitNode(node, aOffset, getter_AddRefs(txn));
+  if (NS_SUCCEEDED(result))
   {
     result = DoTransaction(txn);
     if (NS_SUCCEEDED(result))
     {
-      result = txn->GetNewNode(aNewLeftNode);
+      nsCOMPtr<nsINode> leftNode;
+      result = txn->GetNewNode(getter_AddRefs(leftNode));
+      CallQueryInterface(leftNode, aNewLeftNode);
       NS_ASSERTION((NS_SUCCEEDED(result)), "result must succeeded for GetNewNode");
     }
   }
@@ -1466,13 +1472,15 @@ nsEditor::JoinNodes(nsIDOMNode * aLeftNode,
     mActionListeners[i]->WillJoinNodes(aLeftNode, aRightNode, aParent);
 
   nsRefPtr<JoinElementTxn> txn;
-  result = CreateTxnForJoinNode(aLeftNode, aRightNode, getter_AddRefs(txn));
+  nsCOMPtr<nsINode> leftNode = do_QueryInterface(aLeftNode);
+  nsCOMPtr<nsINode> rightNode = do_QueryInterface(aRightNode);
+  result = CreateTxnForJoinNode(leftNode, rightNode, getter_AddRefs(txn));
   if (NS_SUCCEEDED(result))  {
-    result = DoTransaction(txn);  
+    result = DoTransaction(txn);
   }
 
   mRangeUpdater.SelAdjJoinNodes(aLeftNode, aRightNode, aParent, offset, (int32_t)oldLeftNodeLen);
-  
+
   for (i = 0; i < mActionListeners.Count(); i++)
     mActionListeners[i]->DidJoinNodes(aLeftNode, aRightNode, aParent, result);
 
@@ -1797,9 +1805,8 @@ class EditorInputEventDispatcher : public nsRunnable
 {
 public:
   EditorInputEventDispatcher(nsEditor* aEditor,
-                             bool aIsTrusted,
                              nsIContent* aTarget) :
-    mEditor(aEditor), mTarget(aTarget), mIsTrusted(aIsTrusted)
+    mEditor(aEditor), mTarget(aTarget)
   {
   }
 
@@ -1817,8 +1824,10 @@ public:
       return NS_OK;
     }
 
-    nsEvent inputEvent(mIsTrusted, NS_FORM_INPUT);
-    inputEvent.flags |= NS_EVENT_FLAG_CANT_CANCEL;
+    // Even if the change is caused by untrusted event, we need to dispatch
+    // trusted input event since it's a fact.
+    nsEvent inputEvent(true, NS_FORM_INPUT);
+    inputEvent.mFlags.mCancelable = false;
     inputEvent.time = static_cast<uint64_t>(PR_Now() / 1000);
     nsEventStatus status = nsEventStatus_eIgnore;
     nsresult rv =
@@ -1830,7 +1839,6 @@ public:
 private:
   nsRefPtr<nsEditor> mEditor;
   nsCOMPtr<nsIContent> mTarget;
-  bool mIsTrusted;
 };
 
 void nsEditor::NotifyEditorObservers(void)
@@ -1852,7 +1860,7 @@ void nsEditor::NotifyEditorObservers(void)
   NS_ENSURE_TRUE_VOID(target);
 
   nsContentUtils::AddScriptRunner(
-    new EditorInputEventDispatcher(this, mHandlingTrustedAction, target));
+    new EditorInputEventDispatcher(this, target));
 }
 
 NS_IMETHODIMP
@@ -2092,7 +2100,7 @@ nsEditor::GetPreferredIMEState(IMEState *aState)
   nsIFrame* frame = content->GetPrimaryFrame();
   NS_ENSURE_TRUE(frame, NS_ERROR_FAILURE);
 
-  switch (frame->GetStyleUIReset()->mIMEMode) {
+  switch (frame->StyleUIReset()->mIMEMode) {
     case NS_STYLE_IME_MODE_AUTO:
       if (IsPasswordEditor())
         aState->mEnabled = IMEState::PASSWORD;
@@ -2190,9 +2198,9 @@ nsEditor::CloneAttributes(nsIDOMNode *aDestNode, nsIDOMNode *aSourceNode)
   nsCOMPtr<nsIDOMElement> sourceElement = do_QueryInterface(aSourceNode);
   NS_ENSURE_TRUE(destElement && sourceElement, NS_ERROR_NO_INTERFACE);
 
-  nsCOMPtr<nsIDOMNamedNodeMap> sourceAttributes;
+  nsCOMPtr<nsIDOMMozNamedAttrMap> sourceAttributes;
   sourceElement->GetAttributes(getter_AddRefs(sourceAttributes));
-  nsCOMPtr<nsIDOMNamedNodeMap> destAttributes;
+  nsCOMPtr<nsIDOMMozNamedAttrMap> destAttributes;
   destElement->GetAttributes(getter_AddRefs(destAttributes));
   NS_ENSURE_TRUE(sourceAttributes && destAttributes, NS_ERROR_FAILURE);
 
@@ -2217,26 +2225,20 @@ nsEditor::CloneAttributes(nsIDOMNode *aDestNode, nsIDOMNode *aSourceNode)
 
   uint32_t sourceCount;
   sourceAttributes->GetLength(&sourceCount);
-  uint32_t i, destCount;
+  uint32_t destCount;
   destAttributes->GetLength(&destCount);
-  nsCOMPtr<nsIDOMNode> attrNode;
+  nsCOMPtr<nsIDOMAttr> attr;
 
   // Clear existing attributes
-  for (i = 0; i < destCount; i++)
-  {
+  for (uint32_t i = 0; i < destCount; i++) {
     // always remove item number 0 (first item in list)
-    if( NS_SUCCEEDED(destAttributes->Item(0, getter_AddRefs(attrNode))) && attrNode)
-    {
-      nsCOMPtr<nsIDOMAttr> destAttribute = do_QueryInterface(attrNode);
-      if (destAttribute)
-      {
-        nsAutoString str;
-        if (NS_SUCCEEDED(destAttribute->GetName(str)))
-        {
-          if (destInBody)
-            RemoveAttribute(destElement, str);
-          else
-            destElement->RemoveAttribute(str);
+    if (NS_SUCCEEDED(destAttributes->Item(0, getter_AddRefs(attr))) && attr) {
+      nsString str;
+      if (NS_SUCCEEDED(attr->GetName(str))) {
+        if (destInBody) {
+          RemoveAttribute(destElement, str);
+        } else {
+          destElement->RemoveAttribute(str);
         }
       }
     }
@@ -2245,38 +2247,29 @@ nsEditor::CloneAttributes(nsIDOMNode *aDestNode, nsIDOMNode *aSourceNode)
   nsresult result = NS_OK;
 
   // Set just the attributes that the source element has
-  for (i = 0; i < sourceCount; i++)
+  for (uint32_t i = 0; i < sourceCount; i++)
   {
-    if( NS_SUCCEEDED(sourceAttributes->Item(i, getter_AddRefs(attrNode))) && attrNode)
-    {
-      nsCOMPtr<nsIDOMAttr> sourceAttribute = do_QueryInterface(attrNode);
-      if (sourceAttribute)
-      {
-        nsAutoString sourceAttrName;
-        if (NS_SUCCEEDED(sourceAttribute->GetName(sourceAttrName)))
-        {
-          nsAutoString sourceAttrValue;
-          /*
-          Presence of an attribute in the named node map indicates that it was set on the 
-          element even if it has no value.
-          */
-          if (NS_SUCCEEDED(sourceAttribute->GetValue(sourceAttrValue)))
-          {
-            if (destInBody) {
-              result = SetAttributeOrEquivalent(destElement, sourceAttrName, sourceAttrValue, false);
-            }
-            else {
-              // the element is not inserted in the document yet, we don't want to put a
-              // transaction on the UndoStack
-              result = SetAttributeOrEquivalent(destElement, sourceAttrName, sourceAttrValue, true);
-            }
+    if (NS_SUCCEEDED(sourceAttributes->Item(i, getter_AddRefs(attr))) && attr) {
+      nsString sourceAttrName;
+      if (NS_SUCCEEDED(attr->GetName(sourceAttrName))) {
+        nsString sourceAttrValue;
+        /* Presence of an attribute in the named node map indicates that it was
+         * set on the element even if it has no value.
+         */
+        if (NS_SUCCEEDED(attr->GetValue(sourceAttrValue))) {
+          if (destInBody) {
+            result = SetAttributeOrEquivalent(destElement, sourceAttrName, sourceAttrValue, false);
           } else {
-            // Do we ever get here?
-#if DEBUG_cmanske
-            printf("Attribute in sourceAttribute has empty value in nsEditor::CloneAttributes()\n");
-#endif
+            // the element is not inserted in the document yet, we don't want to put a
+            // transaction on the UndoStack
+            result = SetAttributeOrEquivalent(destElement, sourceAttrName, sourceAttrValue, true);
           }
-        }        
+        } else {
+          // Do we ever get here?
+#if DEBUG_cmanske
+          printf("Attribute in sourceAttribute has empty value in nsEditor::CloneAttributes()\n");
+#endif
+        }
       }
     }
   }
@@ -2605,18 +2598,18 @@ nsEditor::NotifyDocumentListeners(TDocumentListenerNotification aNotificationTyp
           break;
       }
       break;
-  
+
     case eDocumentStateChanged:
       {
         bool docIsDirty;
         rv = GetDocumentModified(&docIsDirty);
         NS_ENSURE_SUCCESS(rv, rv);
-        
-        if (docIsDirty == mDocDirtyState)
+
+        if (static_cast<int8_t>(docIsDirty) == mDocDirtyState)
           return NS_OK;
-        
-        mDocDirtyState = (int8_t)docIsDirty;
-        
+
+        mDocDirtyState = docIsDirty;
+
         for (i = 0; i < numListeners;i++)
         {
           rv = listeners[i]->NotifyDocumentStateChanged(mDocDirtyState);
@@ -2698,7 +2691,7 @@ nsEditor::CreateTxnForDeleteText(nsIDOMCharacterData* aElement,
 
 
 
-NS_IMETHODIMP nsEditor::CreateTxnForSplitNode(nsIDOMNode *aNode,
+NS_IMETHODIMP nsEditor::CreateTxnForSplitNode(nsINode *aNode,
                                          uint32_t    aOffset,
                                          SplitElementTxn **aTxn)
 {
@@ -2715,8 +2708,8 @@ NS_IMETHODIMP nsEditor::CreateTxnForSplitNode(nsIDOMNode *aNode,
   return rv;
 }
 
-NS_IMETHODIMP nsEditor::CreateTxnForJoinNode(nsIDOMNode  *aLeftNode,
-                                             nsIDOMNode  *aRightNode,
+NS_IMETHODIMP nsEditor::CreateTxnForJoinNode(nsINode  *aLeftNode,
+                                             nsINode  *aRightNode,
                                              JoinElementTxn **aTxn)
 {
   NS_ENSURE_TRUE(aLeftNode && aRightNode, NS_ERROR_NULL_POINTER);
@@ -3638,7 +3631,7 @@ IsElementVisible(dom::Element* aElement)
     nsComputedDOMStyle::GetStyleContextForElementNoFlush(aElement,
                                                          nullptr, nullptr);
   if (styleContext) {
-    return styleContext->GetStyleDisplay()->mDisplay != NS_STYLE_DISPLAY_NONE;
+    return styleContext->StyleDisplay()->mDisplay != NS_STYLE_DISPLAY_NONE;
   }
   return false;
 }
@@ -3876,21 +3869,13 @@ nsEditor::GetStartNodeAndOffset(nsISelection *aSelection,
   *outStartNode = nullptr;
   *outStartOffset = 0;
 
-  nsCOMPtr<nsISelectionPrivate>selPrivate(do_QueryInterface(aSelection));
-  nsCOMPtr<nsIEnumerator> enumerator;
-  nsresult result = selPrivate->GetEnumerator(getter_AddRefs(enumerator));
-  NS_ENSURE_SUCCESS(result, result);
-  NS_ENSURE_TRUE(enumerator, NS_ERROR_FAILURE);
+  Selection* selection = static_cast<Selection*>(aSelection);
+  NS_ENSURE_TRUE(selection->GetRangeCount(), NS_ERROR_FAILURE);
 
-  enumerator->First(); 
-  nsCOMPtr<nsISupports> currentItem;
-  result = enumerator->CurrentItem(getter_AddRefs(currentItem));
-  NS_ENSURE_SUCCESS(result, result);
-
-  nsCOMPtr<nsIDOMRange> range( do_QueryInterface(currentItem) );
+  nsRange* range = selection->GetRangeAt(0);
   NS_ENSURE_TRUE(range, NS_ERROR_FAILURE);
 
-  result = range->GetStartContainer(outStartNode);
+  nsresult result = range->GetStartContainer(outStartNode);
   NS_ENSURE_SUCCESS(result, result);
 
   result = range->GetStartOffset(outStartOffset);
@@ -3912,18 +3897,11 @@ nsEditor::GetEndNodeAndOffset(nsISelection *aSelection,
 
   *outEndNode = nullptr;
     
-  nsCOMPtr<nsISelectionPrivate>selPrivate(do_QueryInterface(aSelection));
-  nsCOMPtr<nsIEnumerator> enumerator;
-  nsresult result = selPrivate->GetEnumerator(getter_AddRefs(enumerator));
-  if (NS_FAILED(result) || !enumerator)
-    return NS_ERROR_FAILURE;
-    
-  enumerator->First(); 
-  nsCOMPtr<nsISupports> currentItem;
-  if (NS_FAILED(enumerator->CurrentItem(getter_AddRefs(currentItem))))
-    return NS_ERROR_FAILURE;
+  Selection* selection = static_cast<Selection*>(aSelection);
+  NS_ENSURE_TRUE(selection, NS_ERROR_FAILURE);
+  NS_ENSURE_TRUE(selection->GetRangeCount(), NS_ERROR_FAILURE);
 
-  nsCOMPtr<nsIDOMRange> range( do_QueryInterface(currentItem) );
+  nsRange* range = selection->GetRangeAt(0);
   NS_ENSURE_TRUE(range, NS_ERROR_FAILURE);
     
   if (NS_FAILED(range->GetEndContainer(outEndNode)))
@@ -3955,9 +3933,9 @@ nsEditor::IsPreformatted(nsIDOMNode *aNode, bool *aResult)
     content = content->GetParent();
   }
   if (content && content->IsElement()) {
-    elementStyle = nsComputedDOMStyle::GetStyleContextForElement(content->AsElement(),
-                                                                 nullptr,
-                                                                 ps);
+    elementStyle = nsComputedDOMStyle::GetStyleContextForElementNoFlush(content->AsElement(),
+                                                                        nullptr,
+                                                                        ps);
   }
 
   if (!elementStyle)
@@ -3969,7 +3947,7 @@ nsEditor::IsPreformatted(nsIDOMNode *aNode, bool *aResult)
     return NS_OK;
   }
 
-  const nsStyleText* styleText = elementStyle->GetStyleText();
+  const nsStyleText* styleText = elementStyle->StyleText();
 
   *aResult = styleText->WhiteSpaceIsSignificant();
   return NS_OK;
@@ -4405,9 +4383,9 @@ nsEditor::DoAfterRedoTransaction()
     IncrementModificationCount(1)));
 }
 
-NS_IMETHODIMP 
-nsEditor::CreateTxnForSetAttribute(nsIDOMElement *aElement, 
-                                   const nsAString& aAttribute, 
+NS_IMETHODIMP
+nsEditor::CreateTxnForSetAttribute(Element *aElement,
+                                   const nsAString& aAttribute,
                                    const nsAString& aValue,
                                    ChangeAttributeTxn ** aTxn)
 {
@@ -4425,8 +4403,8 @@ nsEditor::CreateTxnForSetAttribute(nsIDOMElement *aElement,
 }
 
 
-NS_IMETHODIMP 
-nsEditor::CreateTxnForRemoveAttribute(nsIDOMElement *aElement, 
+NS_IMETHODIMP
+nsEditor::CreateTxnForRemoveAttribute(Element *aElement,
                                       const nsAString& aAttribute,
                                       ChangeAttributeTxn ** aTxn)
 {
@@ -4445,7 +4423,7 @@ nsEditor::CreateTxnForRemoveAttribute(nsIDOMElement *aElement,
 
 
 NS_IMETHODIMP nsEditor::CreateTxnForCreateElement(const nsAString& aTag,
-                                                  nsIDOMNode     *aParent,
+                                                  nsINode        *aParent,
                                                   int32_t         aPosition,
                                                   CreateElementTxn ** aTxn)
 {
@@ -4463,8 +4441,8 @@ NS_IMETHODIMP nsEditor::CreateTxnForCreateElement(const nsAString& aTag,
 }
 
 
-NS_IMETHODIMP nsEditor::CreateTxnForInsertElement(nsIDOMNode * aNode,
-                                                  nsIDOMNode * aParent,
+NS_IMETHODIMP nsEditor::CreateTxnForInsertElement(nsINode    * aNode,
+                                                  nsINode    * aParent,
                                                   int32_t      aPosition,
                                                   InsertElementTxn ** aTxn)
 {
@@ -4566,9 +4544,8 @@ nsEditor::CreateTxnForDeleteSelection(EDirection aAction,
   // allocate the out-param transaction
   nsRefPtr<EditAggregateTxn> aggTxn = new EditAggregateTxn();
 
-  nsSelectionIterator iter(selection);
-  for (iter.First(); iter.IsDone() != NS_OK; iter.Next()) {
-    nsRefPtr<nsRange> range = iter.CurrentItem();
+  for (int32_t rangeIdx = 0; rangeIdx < selection->GetRangeCount(); ++rangeIdx) {
+    nsRefPtr<nsRange> range = selection->GetRangeAt(rangeIdx);
     NS_ENSURE_STATE(range);
 
     // Same with range as with selection; if it is collapsed and action
@@ -5056,7 +5033,7 @@ nsEditor::DetermineCurrentDirection()
 
     // Set the flag here, to enable us to use the same code path below.
     // It will be flipped before returning from the function.
-    if (frame->GetStyleVisibility()->mDirection == NS_STYLE_DIRECTION_RTL) {
+    if (frame->StyleVisibility()->mDirection == NS_STYLE_DIRECTION_RTL) {
       mFlags |= nsIPlaintextEditor::eEditorRightToLeft;
     } else {
       mFlags |= nsIPlaintextEditor::eEditorLeftToRight;
@@ -5287,14 +5264,4 @@ nsEditor::SetSuppressDispatchingInputEvent(bool aSuppress)
 {
   mDispatchInputEvent = !aSuppress;
   return NS_OK;
-}
-
-nsEditor::HandlingTrustedAction::HandlingTrustedAction(nsEditor* aSelf,
-                                                       nsIDOMEvent* aEvent)
-{
-  MOZ_ASSERT(aEvent);
-
-  bool isTrusted = false;
-  aEvent->GetIsTrusted(&isTrusted);
-  Init(aSelf, isTrusted);
 }

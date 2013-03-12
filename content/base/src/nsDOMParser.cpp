@@ -13,6 +13,7 @@
 #include "nsDOMJSUtils.h"
 #include "nsError.h"
 #include "nsPIDOMWindow.h"
+#include "mozilla/dom/BindingUtils.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -352,7 +353,7 @@ nsDOMParser::Init(nsIPrincipal* principal, nsIURI* documentURI,
 }
 
 /*static */already_AddRefed<nsDOMParser>
-nsDOMParser::Constructor(nsISupports* aOwner, nsIPrincipal* aPrincipal,
+nsDOMParser::Constructor(const GlobalObject& aOwner, nsIPrincipal* aPrincipal,
                          nsIURI* aDocumentURI, nsIURI* aBaseURI,
                          ErrorResult& rv)
 {
@@ -360,8 +361,9 @@ nsDOMParser::Constructor(nsISupports* aOwner, nsIPrincipal* aPrincipal,
     rv.Throw(NS_ERROR_DOM_SECURITY_ERR);
     return nullptr;
   }
-  nsRefPtr<nsDOMParser> domParser = new nsDOMParser(aOwner);
-  rv = domParser->InitInternal(aOwner, aPrincipal, aDocumentURI, aBaseURI);
+  nsRefPtr<nsDOMParser> domParser = new nsDOMParser(aOwner.Get());
+  rv = domParser->InitInternal(aOwner.Get(), aPrincipal, aDocumentURI,
+                               aBaseURI);
   if (rv.Failed()) {
     return nullptr;
   }
@@ -369,7 +371,7 @@ nsDOMParser::Constructor(nsISupports* aOwner, nsIPrincipal* aPrincipal,
 }
 
 /*static */already_AddRefed<nsDOMParser>
-nsDOMParser::Constructor(nsISupports* aOwner, mozilla::ErrorResult& rv)
+nsDOMParser::Constructor(const GlobalObject& aOwner, ErrorResult& rv)
 {
   nsCOMPtr<nsIPrincipal> prin;
   nsCOMPtr<nsIURI> documentURI;
@@ -392,8 +394,8 @@ nsDOMParser::Constructor(nsISupports* aOwner, mozilla::ErrorResult& rv)
     return nullptr;
   }
 
-  nsRefPtr<nsDOMParser> domParser = new nsDOMParser(aOwner);
-  rv = domParser->InitInternal(aOwner, prin, documentURI, baseURI);
+  nsRefPtr<nsDOMParser> domParser = new nsDOMParser(aOwner.Get());
+  rv = domParser->InitInternal(aOwner.Get(), prin, documentURI, baseURI);
   if (rv.Failed()) {
     return nullptr;
   }
@@ -418,19 +420,16 @@ nsDOMParser::InitInternal(nsISupports* aOwner, nsIPrincipal* prin,
     // while GetDocumentFromCaller() gives us the window that the DOMParser()
     // call was made on.
 
-    nsCOMPtr<nsIDocument> doc;
     nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aOwner);
-    if (aOwner) {
-      nsCOMPtr<nsIDOMDocument> domdoc = window->GetExtantDocument();
-      doc = do_QueryInterface(domdoc);
-    }
-
-    if (!doc) {
+    if (!window) {
       return NS_ERROR_UNEXPECTED;
     }
 
-    baseURI = doc->GetDocBaseURI();
-    documentURI = doc->GetDocumentURI();
+    baseURI = window->GetDocBaseURI();
+    documentURI = window->GetDocumentURI();
+    if (!documentURI) {
+      return NS_ERROR_UNEXPECTED;
+    }
   }
 
   nsCOMPtr<nsIScriptGlobalObject> scriptglobal = do_QueryInterface(aOwner);
@@ -501,10 +500,10 @@ nsDOMParser::SetUpDocument(DocumentFlavor aFlavor, nsIDOMDocument** aResult)
   // work if the document has a null principal, so use
   // mOriginalPrincipal when creating the document, then reset the
   // principal.
-  return nsContentUtils::CreateDocument(EmptyString(), EmptyString(), nullptr,
-                                        mDocumentURI, mBaseURI,
-                                        mOriginalPrincipal,
-                                        scriptHandlingObject,
-                                        aFlavor,
-                                        aResult);
+  return NS_NewDOMDocument(aResult, EmptyString(), EmptyString(), nullptr,
+                           mDocumentURI, mBaseURI,
+                           mOriginalPrincipal,
+                           true,
+                           scriptHandlingObject,
+                           aFlavor);
 }

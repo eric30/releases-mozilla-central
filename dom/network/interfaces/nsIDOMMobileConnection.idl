@@ -13,7 +13,7 @@ interface nsIDOMMozMobileCellInfo;
 interface nsIDOMMozIccManager;
 interface nsIDOMMozMobileCFInfo;
 
-[scriptable, builtinclass, uuid(cc4947eb-aa39-4c25-878d-618dc4d4d2bc)]
+[scriptable, builtinclass, uuid(4175a903-61e6-4fa7-af0d-1e41632ee2dd)]
 interface nsIDOMMozMobileConnection : nsIDOMEventTarget
 {
   const long ICC_SERVICE_CLASS_VOICE = (1 << 0);
@@ -29,7 +29,7 @@ interface nsIDOMMozMobileConnection : nsIDOMEventTarget
   /**
    * Indicates the state of the device's ICC card.
    *
-   * Possible values: null, 'absent', 'pinRequired', 'pukRequired',
+   * Possible values: null, 'unknown', 'absent', 'pinRequired', 'pukRequired',
    * 'networkLocked', 'ready'.
    */
   readonly attribute DOMString cardState;
@@ -104,7 +104,8 @@ interface nsIDOMMozMobileConnection : nsIDOMEventTarget
    * Find out about the status of an ICC lock (e.g. the PIN lock).
    *
    * @param lockType
-   *        Identifies the lock type, e.g. "pin" for the PIN lock.
+   *        Identifies the lock type, e.g. "pin" for the PIN lock, "fdn" for
+   *        the FDN lock.
    *
    * @return a DOM Request.
    *         The request's result will be an object containing
@@ -151,7 +152,7 @@ interface nsIDOMMozMobileConnection : nsIDOMEventTarget
    *
    *     {
    *       lockType:   "pin",
-   *       result:     false,
+   *       success:    false,
    *       retryCount: 2
    *     }
    *
@@ -159,7 +160,7 @@ interface nsIDOMMozMobileConnection : nsIDOMEventTarget
    *
    *     {
    *       lockType:  "pin",
-   *       result:    true
+   *       success:   true
    *     }
    */
   nsIDOMDOMRequest unlockCardLock(in jsval info);
@@ -176,10 +177,16 @@ interface nsIDOMMozMobileConnection : nsIDOMEventTarget
    *
    * Examples:
    *
-   * (1) Disabling the PIN lock:
+   * (1a) Disabling the PIN lock:
    *
    *   setCardLock({lockType: "pin",
    *                pin: "...",
+   *                enabled: false});
+   *
+   * (1b) Disabling the FDN lock:
+   *
+   *   setCardLock({lockType: "fdn",
+   *                pin2: "...",
    *                enabled: false});
    *
    * (2) Changing the PIN:
@@ -198,7 +205,7 @@ interface nsIDOMMozMobileConnection : nsIDOMEventTarget
    *
    *     {
    *       lockType: "pin",
-   *       result: false,
+   *       success: false,
    *       retryCount: 2
    *     }
    *
@@ -206,7 +213,7 @@ interface nsIDOMMozMobileConnection : nsIDOMEventTarget
    *
    *     {
    *       lockType: "pin",
-   *       result: true
+   *       success: true
    *     }
    */
   nsIDOMDOMRequest setCardLock(in jsval info);
@@ -308,9 +315,15 @@ interface nsIDOMMozMobileConnection : nsIDOMEventTarget
    * 'setCardLock' fails.
    */
   [implicit_jscontext] attribute jsval onicccardlockerror;
+
+  /**
+   * The 'oncfstatechange' event is notified whenever the call forwarding
+   * state changes.
+   */
+  [implicit_jscontext] attribute jsval oncfstatechange;
 };
 
-[scriptable, uuid(5ea0e4a9-4684-40da-9930-8ebb61d187f3)]
+[scriptable, uuid(21a20166-a9b4-4386-b151-49e6cfb9401b)]
 interface nsIDOMMozMobileConnectionInfo : nsISupports
 {
   /**
@@ -344,6 +357,11 @@ interface nsIDOMMozMobileConnectionInfo : nsISupports
    * Network operator
    */
   readonly attribute nsIDOMMozMobileNetworkInfo network;
+
+  /**
+   * Mobile Country Code (MCC) of last known network operator.
+   */
+  readonly attribute unsigned short lastKnownMcc;
 
   /**
    * Type of connection.
@@ -416,7 +434,7 @@ interface nsIDOMMozMobileCellInfo: nsISupports
   readonly attribute unsigned long gsmCellId;
 };
 
-[scriptable, uuid(352e7f1a-c09f-44ed-8fde-a138b09a0ea9)]
+[scriptable, uuid(b794bfcd-4ba4-46f2-8bf3-b4ed1b8d2b40)]
 interface nsIDOMMozMobileICCInfo : nsISupports
 {
    /**

@@ -10,6 +10,7 @@
 #include "cairo.h"
 #include "mozilla/gfx/2D.h"
 #include "gfx2DGlue.h"
+#include <algorithm>
 
 using namespace mozilla::gfx;
 
@@ -190,6 +191,12 @@ gfxImageSurface::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
 }
 
+bool
+gfxImageSurface::SizeOfIsMeasured() const
+{
+    return true;
+}
+
 // helper function for the CopyFrom methods
 static void
 CopyForStride(unsigned char* aDest, unsigned char* aSrc, const gfxIntSize& aSize, long aDestStride, long aSrcStride)
@@ -197,7 +204,7 @@ CopyForStride(unsigned char* aDest, unsigned char* aSrc, const gfxIntSize& aSize
     if (aDestStride == aSrcStride) {
         memcpy (aDest, aSrc, aSrcStride * aSize.height);
     } else {
-        int lineSize = NS_MIN(aDestStride, aSrcStride);
+        int lineSize = std::min(aDestStride, aSrcStride);
         for (int i = 0; i < aSize.height; i++) {
             unsigned char* src = aSrc + aSrcStride * i;
             unsigned char* dst = aDest + aDestStride * i;

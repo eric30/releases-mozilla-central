@@ -160,9 +160,7 @@ BasicThebesLayer::PaintThebes(gfxContext* aContext,
       flags |= ThebesLayerBuffer::PAINT_WILL_RESAMPLE;
     }
     if (!(flags & ThebesLayerBuffer::PAINT_WILL_RESAMPLE)) {
-      gfxMatrix transform;
-      if (!GetEffectiveTransform().CanDraw2D(&transform) ||
-          transform.HasNonIntegerTranslation()) {
+      if (MayResample()) {
         flags |= ThebesLayerBuffer::PAINT_WILL_RESAMPLE;
       }
     }
@@ -399,6 +397,10 @@ BasicShadowableThebesLayer::PaintBuffer(gfxContext* aContext,
                                         LayerManager::DrawThebesLayerCallback aCallback,
                                         void* aCallbackData)
 {
+  // NB: this just throws away the entire valid region if there are
+  // too many rects.
+  mValidRegion.SimplifyInward(8);
+
   Base::PaintBuffer(aContext,
                     aRegionToDraw, aExtendedRegionToDraw, aRegionToInvalidate,
                     aDidSelfCopy,

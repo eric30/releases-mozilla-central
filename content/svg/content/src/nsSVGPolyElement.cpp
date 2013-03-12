@@ -19,7 +19,6 @@ NS_IMPL_ADDREF_INHERITED(nsSVGPolyElement,nsSVGPolyElementBase)
 NS_IMPL_RELEASE_INHERITED(nsSVGPolyElement,nsSVGPolyElementBase)
 
 NS_INTERFACE_MAP_BEGIN(nsSVGPolyElement)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMSVGAnimatedPoints)
 NS_INTERFACE_MAP_END_INHERITING(nsSVGPolyElementBase)
 
 //----------------------------------------------------------------------
@@ -28,29 +27,25 @@ NS_INTERFACE_MAP_END_INHERITING(nsSVGPolyElementBase)
 nsSVGPolyElement::nsSVGPolyElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : nsSVGPolyElementBase(aNodeInfo)
 {
-
+  SetIsDOMBinding();
 }
 
-//----------------------------------------------------------------------
-// nsIDOMSGAnimatedPoints methods:
-
-/* readonly attribute nsIDOMSVGPointList points; */
-NS_IMETHODIMP 
-nsSVGPolyElement::GetPoints(nsIDOMSVGPointList * *aPoints)
+already_AddRefed<DOMSVGPointList>
+nsSVGPolyElement::Points()
 {
   void *key = mPoints.GetBaseValKey();
-  *aPoints = DOMSVGPointList::GetDOMWrapper(key, this, false).get();
-  return NS_OK;
+  nsRefPtr<DOMSVGPointList> points = DOMSVGPointList::GetDOMWrapper(key, this, false);
+  return points.forget();
 }
 
-/* readonly attribute nsIDOMSVGPointList animatedPoints; */
-NS_IMETHODIMP 
-nsSVGPolyElement::GetAnimatedPoints(nsIDOMSVGPointList * *aAnimatedPoints)
+already_AddRefed<DOMSVGPointList>
+nsSVGPolyElement::AnimatedPoints()
 {
   void *key = mPoints.GetAnimValKey();
-  *aAnimatedPoints = DOMSVGPointList::GetDOMWrapper(key, this, true).get();
-  return NS_OK;
+  nsRefPtr<DOMSVGPointList> points = DOMSVGPointList::GetDOMWrapper(key, this, true);
+  return points.forget();
 }
+
 
 //----------------------------------------------------------------------
 // nsIContent methods

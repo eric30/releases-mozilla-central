@@ -21,7 +21,6 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.ImageView;
-import android.widget.TabHost.TabContentFactory;
 import android.widget.TextView;
 
 abstract public class AwesomeBarTab {
@@ -41,17 +40,9 @@ abstract public class AwesomeBarTab {
     // FIXME: This value should probably come from a prefs key
     public static final int MAX_RESULTS = 100;
     protected Context mContext = null;
-    private static int sFaviconSmallSize = -1;
-    private static int sFaviconLargeSize = -1;
 
     public AwesomeBarTab(Context context) {
         mContext = context;
-        if (sFaviconSmallSize < 0) {
-            sFaviconSmallSize = Math.round(mContext.getResources().getDimension(R.dimen.awesomebar_row_favicon_size_small));
-        }
-        if (sFaviconLargeSize < 0) {
-            sFaviconLargeSize = Math.round(mContext.getResources().getDimension(R.dimen.awesomebar_row_favicon_size_large));
-        }
     }
 
     public void setListTouchListener(View.OnTouchListener listener) {
@@ -98,25 +89,24 @@ abstract public class AwesomeBarTab {
 
     protected void updateFavicon(ImageView faviconView, Cursor cursor) {
         byte[] b = cursor.getBlob(cursor.getColumnIndexOrThrow(URLColumns.FAVICON));
-        if (b == null) {
-            faviconView.setImageDrawable(null);
-        } else {
+        Bitmap favicon = null;
+        if (b != null) {
             Bitmap bitmap = BitmapFactory.decodeByteArray(b, 0, b.length);
-            updateFavicon(faviconView, bitmap);
+            if (bitmap != null && bitmap.getWidth() > 0 && bitmap.getHeight() > 0) {
+                favicon = Favicons.getInstance().scaleImage(bitmap);
+            }
         }
+        updateFavicon(faviconView, favicon);
     }
 
     protected void updateFavicon(ImageView faviconView, Bitmap bitmap) {
         if (bitmap == null) {
             faviconView.setImageDrawable(null);
-        } else if (bitmap.getWidth() > 16 || bitmap.getHeight() > 16) {
-            // If the icon is larger than 16px, scale it to sFaviconLargeSize and hide the background
-            bitmap = Bitmap.createScaledBitmap(bitmap, sFaviconLargeSize, sFaviconLargeSize, false);
+        } else if (Favicons.getInstance().isLargeFavicon(bitmap)) {
+            // If the icon is large, hide the background
             faviconView.setImageBitmap(bitmap);
             faviconView.setBackgroundResource(0);
         } else {
-            // If the icon is 16px or smaller, don't scale it up to full size
-            bitmap = Bitmap.createScaledBitmap(bitmap, sFaviconSmallSize, sFaviconSmallSize, false);
             faviconView.setImageBitmap(bitmap);
             faviconView.setBackgroundResource(R.drawable.awesomebar_row_favicon_bg);
         }

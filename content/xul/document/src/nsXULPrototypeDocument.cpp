@@ -33,6 +33,7 @@
 #include "mozilla/dom/BindingUtils.h"
 
 using mozilla::dom::DestroyProtoAndIfaceCache;
+using mozilla::AutoPushJSContext;
 
 static NS_DEFINE_CID(kDOMScriptObjectFactoryCID,
                      NS_DOM_SCRIPT_OBJECT_FACTORY_CID);
@@ -127,7 +128,8 @@ JSClass nsXULPDGlobalObject::gSharedGlobalClass = {
 nsXULPrototypeDocument::nsXULPrototypeDocument()
     : mRoot(nullptr),
       mLoaded(false),
-      mCCGeneration(0)
+      mCCGeneration(0),
+      mGCNumber(0)
 {
     ++gRefCnt;
 }
@@ -158,7 +160,6 @@ nsXULPrototypeDocument::~nsXULPrototypeDocument()
     }
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsXULPrototypeDocument)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsXULPrototypeDocument)
     tmp->mPrototypeWaiters.Clear();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
@@ -478,10 +479,7 @@ nsXULPrototypeDocument::Write(nsIObjectOutputStream* aStream)
         NS_ENSURE_TRUE(nodeInfo, NS_ERROR_FAILURE);
 
         nsAutoString namespaceURI;
-        tmp = nodeInfo->GetNamespaceURI(namespaceURI);
-        if (NS_FAILED(tmp)) {
-          rv = tmp;
-        }
+        nodeInfo->GetNamespaceURI(namespaceURI);
         tmp = aStream->WriteWStringZ(namespaceURI.get());
         if (NS_FAILED(tmp)) {
           rv = tmp;
@@ -678,6 +676,20 @@ nsXULPrototypeDocument::NotifyLoadDone()
     return rv;
 }
 
+void
+nsXULPrototypeDocument::TraceProtos(JSTracer* aTrc, uint32_t aGCNumber)
+{
+  // Only trace the protos once per GC.
+  if (mGCNumber == aGCNumber) {
+    return;
+  }
+
+  mGCNumber = aGCNumber;
+  if (mRoot) {
+    mRoot->TraceAllScripts(aTrc);
+  }
+}
+
 //----------------------------------------------------------------------
 //
 // nsIScriptGlobalObjectOwner methods
@@ -708,7 +720,6 @@ nsXULPDGlobalObject::~nsXULPDGlobalObject()
 {
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsXULPDGlobalObject)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_0(nsXULPDGlobalObject)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsXULPDGlobalObject)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mContext)
@@ -747,7 +758,7 @@ nsXULPDGlobalObject::EnsureScriptEnvironment()
   // attach it as the global for this context.  Then, we
   // will re-fetch the global and set it up in our language globals array.
   {
-    JSContext *cx = ctxNew->GetNativeContext();
+    AutoPushJSContext cx(ctxNew->GetNativeContext());
     JSAutoRequest ar(cx);
 
     JSObject *newGlob = JS_NewGlobalObject(cx, &gSharedGlobalClass,

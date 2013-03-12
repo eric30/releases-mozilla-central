@@ -16,14 +16,12 @@
 <pre id="test">
 <script class="testbody" type="application/javascript;version=1.8">
 
-const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = SpecialPowers.wrap(Components);
-
 const APP_URL = "http://example.org";
 const APP_MANIFEST = "http://example.org/manifest.webapp";
 const CHILD_PROCESS_SHUTDOWN_MESSAGE = "child-process-shutdown";
 
-let ppmm = Cc["@mozilla.org/parentprocessmessagemanager;1"]
-             .getService(Ci.nsIMessageBroadcaster);
+let ppmm = SpecialPowers.Cc["@mozilla.org/parentprocessmessagemanager;1"]
+                        .getService(SpecialPowers.Ci.nsIMessageBroadcaster);
 
 /**
  * Load the example.org site in an <iframe mozbrowser>
@@ -36,7 +34,7 @@ function loadBrowser(isApp, callback) {
   if (isApp) {
     iframe.setAttribute("mozapp", APP_MANIFEST);
   }
-  iframe.mozbrowser = true;
+  SpecialPowers.wrap(iframe).mozbrowser = true;
   iframe.src = APP_URL;
   document.getElementById("content").appendChild(iframe);
 
@@ -112,6 +110,10 @@ function setUp() {
   SpecialPowers.setBoolPref("dom.ipc.browser_frames.oop_by_default", true);
   SpecialPowers.addPermission("browser", true, window.document);
   SpecialPowers.addPermission("embed-apps", true, window.document);
+
+  // TODO: remove in bug 820712
+  SpecialPowers.setBoolPref("network.disable.ipc.security", true);
+
   runNextTest();
 }
 
@@ -136,6 +138,10 @@ function makeKillTest(isApp) function testKill() {
 function tearDown() {
   SpecialPowers.clearUserPref("dom.mozBrowserFramesEnabled");
   SpecialPowers.clearUserPref("dom.ipc.browser_frames.oop_by_default");
+
+  // TODO: remove in bug 820712
+  SpecialPowers.clearUserPref("network.disable.ipc.security");
+
   SimpleTest.finish();
 }
 

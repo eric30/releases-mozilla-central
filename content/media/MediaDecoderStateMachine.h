@@ -237,7 +237,7 @@ public:
     return mState == DECODER_STATE_SEEKING;
   }
 
-  nsresult GetBuffered(nsTimeRanges* aBuffered);
+  nsresult GetBuffered(TimeRanges* aBuffered);
 
   void SetPlaybackRate(double aPlaybackRate);
   void SetPreservesPitch(bool aPreservesPitch);
@@ -280,12 +280,6 @@ public:
   // Returns the shared state machine thread.
   static nsIThread* GetStateMachineThread();
 
-  // Schedules the shared state machine thread to run the state machine.
-  // If the state machine thread is the currently running the state machine,
-  // we wait until that has completely finished before running the state
-  // machine again.
-  nsresult ScheduleStateMachine();
-
   // Calls ScheduleStateMachine() after taking the decoder lock. Also
   // notifies the decoder thread in case it's waiting on the decoder lock.
   void ScheduleStateMachineWithLockAndWakeDecoder();
@@ -293,7 +287,7 @@ public:
   // Schedules the shared state machine thread to run the state machine
   // in aUsecs microseconds from now, if it's not already scheduled to run
   // earlier, in which case the request is discarded.
-  nsresult ScheduleStateMachine(int64_t aUsecs);
+  nsresult ScheduleStateMachine(int64_t aUsecs = 0);
 
   // Creates and starts a new decode thread. Don't call this directly,
   // request a new decode thread by calling
@@ -325,7 +319,7 @@ public:
   // shutting down. The decoder monitor must be held while calling this.
   bool IsShutdown();
 
-  void QueueMetadata(int64_t aPublishTime, int aChannels, int aRate, bool aHasAudio, MetadataTags* aTags);
+  void QueueMetadata(int64_t aPublishTime, int aChannels, int aRate, bool aHasAudio, bool aHasVideo, MetadataTags* aTags);
 
 protected:
   virtual uint32_t GetAmpleVideoFrames() { return mAmpleVideoFrames; }
@@ -702,7 +696,8 @@ private:
   // been consumed by the play state machine thread.
   uint32_t mAmpleVideoFrames;
   // True if we shouldn't play our audio (but still write it to any capturing
-  // streams).
+  // streams). When this is true, mStopAudioThread is always true and
+  // the audio thread will never start again after it has stopped.
   bool mAudioCaptured;
 
   // True if the media resource can be seeked on a transport level. Accessed
@@ -796,6 +791,8 @@ private:
   VideoInfo mInfo;
 
   mozilla::MediaMetadataManager mMetadataManager;
+
+  MediaDecoderOwner::NextFrameStatus mLastFrameStatus;
 };
 
 } // namespace mozilla;

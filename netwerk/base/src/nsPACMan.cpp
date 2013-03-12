@@ -368,6 +368,8 @@ nsPACMan::LoadPACFromURI(const nsCString &spec)
   mLoader = loader;
   if (!spec.IsEmpty()) {
     mPACURISpec = spec;
+    mPACURIRedirectSpec.Truncate();
+    mNormalPACURISpec.Truncate(); // set at load time
     mLoadFailureCount = 0;  // reset
   }
 
@@ -398,6 +400,7 @@ nsPACMan::StartLoading()
 
       // NOTE: This results in GetProxyForURI being called
       if (pacURI) {
+        pacURI->GetSpec(mNormalPACURISpec);
         ios->NewChannelFromURI(pacURI, getter_AddRefs(channel));
       }
       else {
@@ -658,9 +661,19 @@ nsPACMan::AsyncOnChannelRedirect(nsIChannel *oldChannel, nsIChannel *newChannel,
   nsCOMPtr<nsIURI> pacURI;
   if (NS_FAILED((rv = newChannel->GetURI(getter_AddRefs(pacURI)))))
       return rv;
-  rv = pacURI->GetSpec(mPACURISpec);
+
+  rv = pacURI->GetSpec(mPACURIRedirectSpec);
   if (NS_FAILED(rv))
       return rv;
+
+  LOG(("nsPACMan redirect from original %s to redirected %s\n",
+       mPACURISpec.get(), mPACURIRedirectSpec.get()));
+
+  // do not update mPACURISpec - that needs to stay as the
+  // configured URI so that we can determine when the config changes.
+  // However do track the most recent URI in the redirect change
+  // as mPACURIRedirectSpec so that URI can be allowed to bypass
+  // the proxy and actually fetch the pac file.
 
   callback->OnRedirectVerifyCallback(NS_OK);
   return NS_OK;

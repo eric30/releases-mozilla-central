@@ -4,6 +4,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/Attributes.h"
+#include "mozilla/DebugOnly.h"
+#include "mozilla/Likely.h"
 
 #ifdef MOZ_LOGGING
 // this next define has to appear before the include of prlog.h
@@ -42,13 +45,11 @@
 #include "nsNetUtil.h"
 #include "nsNetCID.h"
 #include "nsAppDirectoryServiceDefs.h"
-#include "nsIPrivateBrowsingService.h"
 #include "nsNetCID.h"
 #include "mozilla/storage.h"
-#include "mozilla/Util.h" // for DebugOnly
-#include "mozilla/Attributes.h"
 #include "mozilla/AutoRestore.h"
-#include "mozilla/Likely.h"
+#include "mozilla/FileUtils.h"
+#include "mozilla/Telemetry.h"
 #include "nsIAppsService.h"
 #include "mozIApplication.h"
 
@@ -86,7 +87,7 @@ static const char kOldCookieFileName[] = "cookies.txt";
 #define LIMIT(x, low, high, default) ((x) >= (low) && (x) <= (high) ? (x) : (default))
 
 #undef  ADD_TEN_PERCENT
-#define ADD_TEN_PERCENT(i) ((i) + (i)/10)
+#define ADD_TEN_PERCENT(i) static_cast<uint32_t>((i) + (i)/10)
 
 // default limits for the cookie list. these can be tuned by the
 // network.cookie.maxNumber and network.cookie.maxPerHost prefs respectively.
@@ -96,9 +97,11 @@ static const uint32_t kMaxBytesPerCookie  = 4096;
 static const uint32_t kMaxBytesPerPath    = 1024;
 
 // behavior pref constants
-static const uint32_t BEHAVIOR_ACCEPT        = 0;
-static const uint32_t BEHAVIOR_REJECTFOREIGN = 1;
-static const uint32_t BEHAVIOR_REJECT        = 2;
+static const uint32_t BEHAVIOR_ACCEPT        = 0; // allow all cookies
+static const uint32_t BEHAVIOR_REJECTFOREIGN = 1; // reject all third-party cookies
+static const uint32_t BEHAVIOR_REJECT        = 2; // reject all cookies
+static const uint32_t BEHAVIOR_LIMITFOREIGN  = 3; // reject third-party cookies unless the
+                                                  // eTLD already has at least one cookie
 
 // pref string constants
 static const char kPrefCookieBehavior[]     = "network.cookie.cookieBehavior";
@@ -778,12 +781,23 @@ nsCookieService::TryInitDB(bool aRecreateDB)
     NS_ENSURE_SUCCESS(rv, RESULT_FAILURE);
   }
 
+  Telemetry::ID histID;
+  TimeStamp start = TimeStamp::Now();
+  // rand() is being used here as a poor-man's solution for a/b testing
+  if (rand() % 2) {
+    histID = Telemetry::MOZ_SQLITE_COOKIES_OPEN_READAHEAD_MS;
+    ReadAheadFile(mDefaultDBState->cookieFile);
+  } else {
+    histID = Telemetry::MOZ_SQLITE_COOKIES_OPEN_MS;
+  }
+
   // open a connection to the cookie database, and only cache our connection
   // and statements upon success. The connection is opened unshared to eliminate
   // cache contention between the main and background threads.
   rv = mStorageService->OpenUnsharedDatabase(mDefaultDBState->cookieFile,
     getter_AddRefs(mDefaultDBState->dbConn));
   NS_ENSURE_SUCCESS(rv, RESULT_RETRY);
+  Telemetry::AccumulateDelta_impl<Telemetry::Millisecond>::compute(histID, start);
 
   // Set up our listeners.
   mDefaultDBState->insertListener = new InsertCookieDBListener(mDefaultDBState);
@@ -1670,8 +1684,10 @@ void
 nsCookieService::NotifyChanged(nsISupports     *aSubject,
                                const PRUnichar *aData)
 {
+  const char* topic = mDBState == mPrivateDBState ?
+      "private-cookie-changed" : "cookie-changed";
   if (mObserverService)
-    mObserverService->NotifyObservers(aSubject, "cookie-changed", aData);
+    mObserverService->NotifyObservers(aSubject, topic, aData);
 }
 
 already_AddRefed<nsIArray>
@@ -1693,7 +1709,7 @@ nsCookieService::PrefChanged(nsIPrefBranch *aPrefBranch)
 {
   int32_t val;
   if (NS_SUCCEEDED(aPrefBranch->GetIntPref(kPrefCookieBehavior, &val)))
-    mCookieBehavior = (uint8_t) LIMIT(val, 0, 2, 0);
+    mCookieBehavior = (uint8_t) LIMIT(val, 0, 3, 0);
 
   if (NS_SUCCEEDED(aPrefBranch->GetIntPref(kPrefMaxNumberOfCookies, &val)))
     mMaxNumberOfCookies = (uint16_t) LIMIT(val, 1, 0xFFFF, kMaxNumberOfCookies);
@@ -3243,6 +3259,20 @@ nsCookieService::CheckPrefs(nsIURI          *aHostURI,
         }
         return STATUS_ACCEPTED;
 
+      case nsICookiePermission::ACCESS_LIMIT_THIRD_PARTY:
+        if (!aIsForeign)
+          return STATUS_ACCEPTED;
+        uint32_t priorCookieCount = 0;
+        nsAutoCString hostFromURI;
+        aHostURI->GetHost(hostFromURI);
+        CountCookiesFromHost(hostFromURI, &priorCookieCount);
+        if (priorCookieCount == 0) {
+          COOKIE_LOGFAILURE(aCookieHeader ? SET_COOKIE : GET_COOKIE, aHostURI,
+                            aCookieHeader, "third party cookies are blocked "
+                            "for this site");
+          return STATUS_REJECTED;
+        }
+        return STATUS_ACCEPTED;
       }
     }
   }
@@ -3261,6 +3291,19 @@ nsCookieService::CheckPrefs(nsIURI          *aHostURI,
     if (mCookieBehavior == BEHAVIOR_REJECTFOREIGN) {
       COOKIE_LOGFAILURE(aCookieHeader ? SET_COOKIE : GET_COOKIE, aHostURI, aCookieHeader, "context is third party");
       return STATUS_REJECTED;
+    }
+
+    if (mCookieBehavior == BEHAVIOR_LIMITFOREIGN) {
+      uint32_t priorCookieCount = 0;
+      nsAutoCString hostFromURI;
+      aHostURI->GetHost(hostFromURI);
+      CountCookiesFromHost(hostFromURI, &priorCookieCount);
+      if (priorCookieCount == 0) {
+        COOKIE_LOGFAILURE(aCookieHeader ? SET_COOKIE : GET_COOKIE, aHostURI, aCookieHeader, "context is third party");
+        return STATUS_REJECTED;
+      }
+      if (mThirdPartySession)
+        return STATUS_ACCEPT_SESSION;
     }
   }
 

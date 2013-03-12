@@ -160,10 +160,14 @@ ia2AccessibleRelation::get_target(long aTargetIndex, IUnknown **aTarget)
 {
   A11Y_TRYBLOCK_BEGIN
 
-  if (aTargetIndex < 0 || aTargetIndex >= mTargets.Length() || !aTarget)
+  if (aTargetIndex < 0 || (uint32_t)aTargetIndex >= mTargets.Length() || !aTarget)
     return E_INVALIDARG;
 
-  mTargets[aTargetIndex]->QueryNativeInterface(IID_IUnknown, (void**) aTarget);
+  AccessibleWrap* target =
+    static_cast<AccessibleWrap*>(mTargets[aTargetIndex].get());
+  *aTarget = static_cast<IAccessible*>(target);
+  (*aTarget)->AddRef();
+
   return S_OK;
 
   A11Y_TRYBLOCK_END
@@ -179,11 +183,11 @@ ia2AccessibleRelation::get_targets(long aMaxTargets, IUnknown **aTargets,
     return E_INVALIDARG;
 
   *aNTargets = 0;
-  uint32_t maxTargets = mTargets.Length();
+  long maxTargets = mTargets.Length();
   if (maxTargets > aMaxTargets)
     maxTargets = aMaxTargets;
 
-  for (uint32_t idx = 0; idx < maxTargets; idx++)
+  for (long idx = 0; idx < maxTargets; idx++)
     get_target(idx, aTargets + idx);
 
   *aNTargets = maxTargets;

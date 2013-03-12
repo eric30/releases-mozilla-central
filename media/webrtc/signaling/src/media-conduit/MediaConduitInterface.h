@@ -5,9 +5,6 @@
 #ifndef MEDIA_CONDUIT_ABSTRACTION_
 #define MEDIA_CONDUIT_ABSTRACTION_
 
-#include "nspr.h"
-#include "prerror.h"
-
 #include "nsISupportsImpl.h"
 #include "nsXPCOM.h"
 #include "mozilla/RefPtr.h"
@@ -226,7 +223,7 @@ public:
     * return: Concrete VideoSessionConduitObject or NULL in the case
     *         of failure
     */
-  static mozilla::RefPtr<AudioSessionConduit> Create();
+  static mozilla::RefPtr<AudioSessionConduit> Create(AudioSessionConduit *aOther);
 
   virtual ~AudioSessionConduit() {}
 

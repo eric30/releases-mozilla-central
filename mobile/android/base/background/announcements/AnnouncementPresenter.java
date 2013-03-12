@@ -7,7 +7,7 @@ package org.mozilla.gecko.background.announcements;
 import java.net.URI;
 
 import org.mozilla.gecko.R;
-import org.mozilla.gecko.sync.GlobalConstants;
+import org.mozilla.gecko.background.common.GlobalConstants;
 
 import android.app.Notification;
 import android.app.NotificationManager;
@@ -50,7 +50,7 @@ public class AnnouncementPresenter {
     intent.setClassName(GlobalConstants.BROWSER_INTENT_PACKAGE, GlobalConstants.BROWSER_INTENT_CLASS);
     PendingIntent contentIntent = PendingIntent.getActivity(context, 0, intent, 0);
 
-    final int icon = R.drawable.icon;
+    final int icon = R.drawable.ic_status_logo;
 
     // Deprecated approach to building a notification.
     final long when = System.currentTimeMillis();

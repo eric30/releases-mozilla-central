@@ -84,11 +84,15 @@
     <command id="cmd_fullZoomEnlarge" oncommand="FullZoom.enlarge()"/>
     <command id="cmd_fullZoomReset"   oncommand="FullZoom.reset()"/>
     <command id="cmd_fullZoomToggle"  oncommand="ZoomManager.toggleZoom();"/>
+    <command id="cmd_gestureRotateLeft" oncommand="gGestureSupport.rotate(event.sourceEvent)"/>
+    <command id="cmd_gestureRotateRight" oncommand="gGestureSupport.rotate(event.sourceEvent)"/>
+    <command id="cmd_gestureRotateEnd" oncommand="gGestureSupport.rotateEnd()"/>
     <command id="Browser:OpenLocation" oncommand="openLocation();"/>
+    <command id="Browser:RestoreLastSession" oncommand="restoreLastSession();" disabled="true"/>
 
     <command id="Tools:Search" oncommand="BrowserSearch.webSearch();"/>
     <command id="Tools:Downloads" oncommand="BrowserDownloadsUI();"/>
-    <command id="Tools:DevToolbox" oncommand="gDevTools.toggleToolboxCommand(gBrowser);"/>
+    <command id="Tools:DevToolbox" oncommand="gDevToolsBrowser.toggleToolboxCommand(gBrowser);"/>
     <command id="Tools:DevToolbar" oncommand="DeveloperToolbar.toggle();" disabled="true" hidden="true"/>
     <command id="Tools:DevToolbarFocus" oncommand="DeveloperToolbar.focusToggle();" disabled="true"/>
     <command id="Tools:ChromeDebugger" oncommand="DebuggerUI.toggleChromeDebugger();" disabled="true" hidden="true"/>
@@ -96,25 +100,21 @@
     <command id="Tools:ResponsiveUI" oncommand="ResponsiveUI.toggle();" disabled="true" hidden="true"/>
     <command id="Tools:Addons" oncommand="BrowserOpenAddonsMgr();"/>
     <command id="Tools:ErrorConsole" oncommand="toJavaScriptConsole()" disabled="true" hidden="true"/>
-    <command id="Tools:DevToolsConnect" oncommand="DevToolsXULCommands.openConnectScreen(gBrowser)"/>
+    <command id="Tools:DevToolsConnect" oncommand="gDevToolsBrowser.openConnectScreen(gBrowser)" disabled="true" hidden="true"/>
     <command id="Tools:Sanitize"
      oncommand="Cc['@mozilla.org/browser/browserglue;1'].getService(Ci.nsIBrowserGlue).sanitize(window);"/>
     <command id="Tools:PrivateBrowsing"
-#ifdef MOZ_PER_WINDOW_PRIVATE_BROWSING
       oncommand="OpenBrowserWindow({private: true});"/>
-#else
-      oncommand="gPrivateBrowsingUI.toggleMode();"/>
-#endif
     <command id="History:UndoCloseTab" oncommand="undoCloseTab();"/>
     <command id="History:UndoCloseWindow" oncommand="undoCloseWindow();"/>
     <command id="Browser:ToggleAddonBar" oncommand="toggleAddonBar();"/>
     <command id="Social:SharePage" oncommand="SocialShareButton.sharePage();" disabled="true"/>
     <command id="Social:UnsharePage" oncommand="SocialShareButton.unsharePage();"/>
     <command id="Social:ToggleSidebar" oncommand="Social.toggleSidebar();"/>
-    <command id="Social:ToggleNotifications" oncommand="Social.toggleNotifications();"/>
+    <command id="Social:ToggleNotifications" oncommand="Social.toggleNotifications();" hidden="true"/>
     <command id="Social:FocusChat" oncommand="SocialChatBar.focus();" hidden="true" disabled="true"/>
     <command id="Social:Toggle" oncommand="Social.toggle();" hidden="true"/>
-    <command id="Social:Remove" oncommand="SocialUI.disableWithConfirmation();"/>
+    <command id="Social:Addons" oncommand="BrowserOpenAddonsMgr('addons://list/service');"/>
   </commandset>
 
   <commandset id="placesCommands">
@@ -173,7 +173,7 @@
 
     <!-- DevTools broadcasters -->
     <broadcaster id="devtoolsMenuBroadcaster_DevToolbox"
-                 label="&devToolbarToolsButton.label;"
+                 label="&devToolboxMenuItem.label;"
                  type="checkbox" autocheck="false"
                  command="Tools:DevToolbox"/>
     <broadcaster id="devtoolsMenuBroadcaster_DevToolbar"
@@ -350,12 +350,10 @@
     <key id="sharePage" key="&sharePageCmd.commandkey;" command="Social:SharePage" modifiers="accel,shift"/>
     <key id="focusChatBar" key="&social.chatBar.commandkey;" command="Social:FocusChat" modifiers="accel,shift"/>
 
-# don't use |command="Browser:Stop"|, ESC is being used to freeze animated gifs,
-# even if the stop button and menuitem are disabled (see Bug 284140)
-    <key id="key_stop" keycode="VK_ESCAPE" oncommand="BrowserStop();"/>
+    <key id="key_stop" keycode="VK_ESCAPE" command="Browser:Stop"/>
 
 #ifdef XP_MACOSX
-    <key id="key_stop_mac" modifiers="accel" key="&stopCmd.macCommandKey;" oncommand="BrowserStop();"/>
+    <key id="key_stop_mac" modifiers="accel" key="&stopCmd.macCommandKey;" command="Browser:Stop"/>
 #endif
 
     <key id="key_gotoHistory"

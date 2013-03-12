@@ -26,6 +26,7 @@
 #include "nsIDOMGeoPositionCallback.h"
 #include "nsIDOMGeoPositionErrorCallback.h"
 #include "nsIDOMNavigatorGeolocation.h"
+#include "nsIGeolocation.h"
 
 #include "nsPIDOMWindow.h"
 
@@ -53,9 +54,9 @@ class nsGeolocationRequest
   nsGeolocationRequest(nsGeolocation* locator,
                        nsIDOMGeoPositionCallback* callback,
                        nsIDOMGeoPositionErrorCallback* errorCallback,
+                       mozilla::idl::GeoPositionOptions* aOptions,
                        bool watchPositionRequest = false,
                        int32_t watchId = 0);
-  nsresult Init(JSContext* aCx, const jsval& aOptions);
   void Shutdown();
 
   // Called by the geolocation device to notify that a location has changed.
@@ -64,9 +65,11 @@ class nsGeolocationRequest
 
   void SendLocation(nsIDOMGeoPosition* location);
   void MarkCleared();
+  bool WantsHighAccuracy() {return mOptions && mOptions->enableHighAccuracy;}
   bool IsActive() {return !mCleared;}
   bool Allowed() {return mAllowed;}
   void SetTimeoutTimer();
+  nsIPrincipal* GetPrincipal();
 
   ~nsGeolocationRequest();
 
@@ -74,7 +77,6 @@ class nsGeolocationRequest
   void IPDLRelease() { Release(); }
 
   int32_t WatchId() { return mWatchId; }
-
  private:
 
   void NotifyError(int16_t errorCode);
@@ -86,7 +88,7 @@ class nsGeolocationRequest
   nsCOMPtr<nsITimer> mTimeoutTimer;
   nsCOMPtr<nsIDOMGeoPositionCallback> mCallback;
   nsCOMPtr<nsIDOMGeoPositionErrorCallback> mErrorCallback;
-  nsAutoPtr<mozilla::dom::GeoPositionOptions> mOptions;
+  nsAutoPtr<mozilla::idl::GeoPositionOptions> mOptions;
 
   nsRefPtr<nsGeolocation> mLocator;
 
@@ -125,7 +127,7 @@ public:
   PRBool IsBetterPosition(nsIDOMGeoPosition *aSomewhere);
 
   // Find and startup a geolocation device (gps, nmea, etc.)
-  nsresult StartDevice(bool aRequestPrivate);
+  nsresult StartDevice(nsIPrincipal* aPrincipal, bool aRequestPrivate);
 
   // Stop the started geolocation device (gps, nmea, etc.)
   void     StopDevice();
@@ -135,6 +137,7 @@ public:
 
   // request higher accuracy, if possible
   void     SetHigherAccuracy(bool aEnable);
+  bool     HighAccuracyRequested();
 
 private:
 
@@ -164,14 +167,16 @@ private:
 /**
  * Can return a geolocation info
  */
-class nsGeolocation MOZ_FINAL : public nsIDOMGeoGeolocation
+class nsGeolocation MOZ_FINAL : public nsIDOMGeoGeolocation,
+                                public nsIGeolocation
 {
 public:
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_NSIDOMGEOGEOLOCATION
+  NS_DECL_NSIGEOLOCATION
 
-  NS_DECL_CYCLE_COLLECTION_CLASS(nsGeolocation)
+  NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(nsGeolocation, nsIDOMGeoGeolocation)
 
   nsGeolocation();
 
@@ -197,6 +202,9 @@ public:
 
   // Check to see if the widnow still exists
   bool WindowOwnerStillExists();
+
+  // Check to see if any active request requires high accuracy
+  bool HighAccuracyRequested();
 
   // Notification from the service:
   void ServiceReady();

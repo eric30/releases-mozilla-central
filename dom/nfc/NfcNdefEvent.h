@@ -27,7 +27,7 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(NfcNdefEvent, nsDOMEvent)
 
   static already_AddRefed<nsDOMEvent>
-  Create(const JS::Value& aNdefMessages);
+  Create(mozilla::dom::EventTarget* aOwner, const JS::Value& aNdefMessages);
 
   nsresult
   Dispatch(nsIDOMEventTarget* aTarget, const nsAString& aEventType)
@@ -38,8 +38,7 @@ public:
     nsresult rv = InitEvent(aEventType, false, false);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    rv = SetTrusted(true);
-    NS_ENSURE_SUCCESS(rv, rv);
+    SetTrusted(true);
 
     nsIDOMEvent* thisEvent =
       static_cast<nsDOMEvent*>(const_cast<NfcNdefEvent*>(this));
@@ -52,8 +51,8 @@ public:
   }
 
 private:
-  NfcNdefEvent(const JS::Value& aNdefMessages)
-  : nsDOMEvent(nullptr, nullptr), mNdefMessages(aNdefMessages)
+  NfcNdefEvent(mozilla::dom::EventTarget* aOwner, const JS::Value& aNdefMessages)
+  : nsDOMEvent(aOwner, nullptr, nullptr), mNdefMessages(aNdefMessages)
   { }
 
   ~NfcNdefEvent()

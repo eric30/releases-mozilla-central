@@ -2,9 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "CC_Common.h"
+#include "CSFLog.h"
 
-#include "CSFLogStream.h"
+#include "CC_Common.h"
 
 #include "CSFMediaProvider.h"
 #include "CSFAudioTermination.h"
@@ -28,6 +28,7 @@
 #include <stdio.h>
 #include <ssl.h>
 #include <sslproto.h>
+#include <algorithm>
 
 extern "C" {
 #include "ccsdp.h"
@@ -60,9 +61,10 @@ typedef enum {
 
 using namespace CSF;
 
-VcmSIPCCBinding * VcmSIPCCBinding::_pSelf = NULL;
-int VcmSIPCCBinding::mAudioCodecMask = 0;
-int VcmSIPCCBinding::mVideoCodecMask = 0;
+VcmSIPCCBinding * VcmSIPCCBinding::gSelf = NULL;
+int VcmSIPCCBinding::gAudioCodecMask = 0;
+int VcmSIPCCBinding::gVideoCodecMask = 0;
+nsIThread *VcmSIPCCBinding::gMainThread = NULL;
 
 static mozilla::RefPtr<TransportFlow> vcmCreateTransportFlow(sipcc::PeerConnectionImpl *pc,
                                                              int level, bool rtcp,
@@ -70,17 +72,27 @@ static mozilla::RefPtr<TransportFlow> vcmCreateTransportFlow(sipcc::PeerConnecti
                                                              const char *fingerprint
                                                              );
 
+// Convenience macro to acquire PC
+
+#define ENSURE_PC(pc, errval) \
+  do { \
+    if (!pc.impl()) {                                                 \
+      CSFLogDebug(logTag, "%s: couldn't acquire peerconnection %s", __FUNCTION__, peerconnection); \
+      return errval; \
+    }         \
+  } while(0)
+
 VcmSIPCCBinding::VcmSIPCCBinding ()
   : streamObserver(NULL)
 {
-    delete _pSelf;//delete is NULL safe, so I don't need to check if it's NULL
-    _pSelf = this;
+    delete gSelf;//delete is NULL safe, so I don't need to check if it's NULL
+    gSelf = this;
 }
 
 VcmSIPCCBinding::~VcmSIPCCBinding ()
 {
-    assert(_pSelf != NULL);
-    _pSelf = NULL;
+    assert(gSelf);
+    gSelf = NULL;
 }
 
 void VcmSIPCCBinding::setStreamObserver(StreamObserver* obs)
@@ -91,8 +103,8 @@ void VcmSIPCCBinding::setStreamObserver(StreamObserver* obs)
 /* static */
 StreamObserver * VcmSIPCCBinding::getStreamObserver()
 {
-    if (_pSelf != NULL)
-    	return _pSelf->streamObserver;
+    if (gSelf != NULL)
+    	return gSelf->streamObserver;
 
     return NULL;
 }
@@ -105,34 +117,43 @@ void VcmSIPCCBinding::setMediaProviderObserver(MediaProviderObserver* obs)
 
 MediaProviderObserver * VcmSIPCCBinding::getMediaProviderObserver()
 {
-    if (_pSelf != NULL)
-    	return _pSelf->mediaProviderObserver;
+    if (gSelf != NULL)
+    	return gSelf->mediaProviderObserver;
 
     return NULL;
 }
 
 void VcmSIPCCBinding::setAudioCodecs(int codecMask)
 {
-  CSFLogDebugS(logTag, "SETTING AUDIO: " << codecMask);
-  VcmSIPCCBinding::mAudioCodecMask = codecMask;
+  CSFLogDebug(logTag, "SETTING AUDIO: %d", codecMask);
+  VcmSIPCCBinding::gAudioCodecMask = codecMask;
 }
 
 void VcmSIPCCBinding::setVideoCodecs(int codecMask)
 {
-  CSFLogDebugS(logTag, "SETTING VIDEO: " << codecMask);
-  VcmSIPCCBinding::mVideoCodecMask = codecMask;
+  CSFLogDebug(logTag, "SETTING VIDEO: %d", codecMask);
+  VcmSIPCCBinding::gVideoCodecMask = codecMask;
 }
 
 int VcmSIPCCBinding::getAudioCodecs()
 {
-  return VcmSIPCCBinding::mAudioCodecMask;
+  return VcmSIPCCBinding::gAudioCodecMask;
 }
 
 int VcmSIPCCBinding::getVideoCodecs()
 {
-  return VcmSIPCCBinding::mVideoCodecMask;
+  return VcmSIPCCBinding::gVideoCodecMask;
 }
 
+void VcmSIPCCBinding::setMainThread(nsIThread *thread)
+{
+  gMainThread = thread;
+}
+
+nsIThread* VcmSIPCCBinding::getMainThread()
+{
+  return gMainThread;
+}
 
 /* static */
 AudioTermination * VcmSIPCCBinding::getAudioTermination()
@@ -349,6 +370,7 @@ void vcmRxAllocPort(cc_mcapid_t mcap_id,
                     cc_uint16_t port_requested,
                     int *port_allocated)
 {
+    *port_allocated = -1;
     CSFLogDebug( logTag, "vcmRxAllocPort(): group_id=%d stream_id=%d call_handle=%d port_requested = %d",
         group_id, stream_id, call_handle, port_requested);
 
@@ -390,22 +412,25 @@ void vcmRxAllocPort(cc_mcapid_t mcap_id,
  *  @param[out] candidatesp - the ICE candidate array
  *  @param[out] candidate_ctp length of the array
  *
- *  @return    void
+ *  @return 0 for success; VCM_ERROR for failure
  *
  */
-void vcmRxAllocICE(cc_mcapid_t mcap_id,
-        cc_groupid_t group_id,
-        cc_streamid_t stream_id,
-        cc_call_handle_t  call_handle,
-        const char *peerconnection,
-        uint16_t level,
-        char **default_addrp, /* Out */
-        int *default_portp, /* Out */
-        char ***candidatesp, /* Out */
-        int *candidate_ctp /* Out */
+static short vcmRxAllocICE_m(cc_mcapid_t mcap_id,
+                             cc_groupid_t group_id,
+                             cc_streamid_t stream_id,
+                             cc_call_handle_t  call_handle,
+                             const char *peerconnection,
+                             uint16_t level,
+                             char **default_addrp, /* Out */
+                             int *default_portp, /* Out */
+                             char ***candidatesp, /* Out */
+                             int *candidate_ctp /* Out */
 )
 {
+  *default_addrp = NULL;
   *default_portp = -1;
+  *candidatesp = NULL;
+  *candidate_ctp = 0;
 
   CSFLogDebug( logTag, "%s: group_id=%d stream_id=%d call_handle=%d PC = %s",
     __FUNCTION__, group_id, stream_id, call_handle, peerconnection);
@@ -413,21 +438,15 @@ void vcmRxAllocICE(cc_mcapid_t mcap_id,
   // Note: we don't acquire any media resources here, and we assume that the
   // ICE streams already exist, so we're just acquiring them. Any logic
   // to make them on demand is elsewhere.
-  CSFLogDebug( logTag, "%s: acquiring peerconnection %s", __FUNCTION__, peerconnection);
-  mozilla::ScopedDeletePtr<sipcc::PeerConnectionWrapper> pc(
-      sipcc::PeerConnectionImpl::AcquireInstance(peerconnection));
-  MOZ_ASSERT(pc);
-  if (!pc) {
-    CSFLogError(logTag, "%s: AcquireInstance returned NULL", __FUNCTION__);
-    return;
-  }
+  sipcc::PeerConnectionWrapper pc(peerconnection);
+  ENSURE_PC(pc, VCM_ERROR);
 
   CSFLogDebug( logTag, "%s: Getting stream %d", __FUNCTION__, level);
-  mozilla::RefPtr<NrIceMediaStream> stream = pc->impl()->media()->
+  mozilla::RefPtr<NrIceMediaStream> stream = pc.impl()->media()->
     ice_media_stream(level-1);
   MOZ_ASSERT(stream);
   if (!stream) {
-    return;
+    return VCM_ERROR;
   }
 
   std::vector<std::string> candidates = stream->GetCandidates();
@@ -439,7 +458,7 @@ void vcmRxAllocICE(cc_mcapid_t mcap_id,
   nsresult res = stream->GetDefaultCandidate(1, &default_addr, &default_port);
   MOZ_ASSERT(NS_SUCCEEDED(res));
   if (!NS_SUCCEEDED(res)) {
-    return;
+    return VCM_ERROR;
   }
 
   CSFLogDebug( logTag, "%s: Got default candidates %s:%d", __FUNCTION__,
@@ -448,7 +467,7 @@ void vcmRxAllocICE(cc_mcapid_t mcap_id,
   // Note: this leaks memory if we are out of memory. Oh well.
   *candidatesp = (char **) cpr_malloc(candidates.size() * sizeof(char *));
   if (!(*candidatesp))
-    return;
+    return VCM_ERROR;
 
   for (size_t i=0; i<candidates.size(); i++) {
     (*candidatesp)[i] = (char *) cpr_malloc(candidates[i].size() + 1);
@@ -459,20 +478,70 @@ void vcmRxAllocICE(cc_mcapid_t mcap_id,
   // Copy the default address
   *default_addrp = (char *) cpr_malloc(default_addr.size() + 1);
   if (!*default_addrp)
-    return;
+    return VCM_ERROR;
   sstrncpy(*default_addrp, default_addr.c_str(), default_addr.size() + 1);
   *default_portp = default_port; /* This is the signal that things are cool */
+  return 0;
 }
 
+
+/**
+ *  Gets the ICE parameters for a stream. Called "alloc" for style consistency
+ *
+ *  This is a thunk to vcmRxAllocICE_m
+ *
+ *  @param[in]  group_id - group identifier to which stream belongs.
+ *  @param[in]  stream_id - stream identifier
+ *  @param[in]  call_handle  - call identifier
+ *  @param[in]  peerconnection - the peerconnection in use
+ *  @param[out] default_addrp - the ICE default addr
+ *  @param[out] port_allocatedp - the ICE default port
+ *  @param[out] candidatesp - the ICE candidate array
+ *  @param[out] candidate_ctp length of the array
+ *
+ *  @return 0 for success; VCM_ERROR for failure
+ *
+ */
+short vcmRxAllocICE(cc_mcapid_t mcap_id,
+                   cc_groupid_t group_id,
+                   cc_streamid_t stream_id,
+                   cc_call_handle_t  call_handle,
+                   const char *peerconnection,
+                   uint16_t level,
+                   char **default_addrp, /* Out */
+                   int *default_portp, /* Out */
+                   char ***candidatesp, /* Out */
+                   int *candidate_ctp /* Out */
+                   )
+{
+  int ret;
+  VcmSIPCCBinding::getMainThread()->Dispatch(
+      WrapRunnableNMRet(&vcmRxAllocICE_m,
+                        mcap_id,
+                        group_id,
+                        stream_id,
+                        call_handle,
+                        peerconnection,
+                        level,
+                        default_addrp,
+                        default_portp,
+                        candidatesp,
+                        candidate_ctp,
+                        &ret),
+          NS_DISPATCH_SYNC);
+  return ret;
+}
 
 /* Get ICE global parameters (ufrag and pwd)
  *  @param[in]  peerconnection - the peerconnection in use
  *  @param[out] ufragp - where to put the ufrag
  *  @param[out] pwdp - where to put the pwd
  *
- *  @return void
+ *  @return 0 for success; VCM_ERROR for failure
  */
-void vcmGetIceParams(const char *peerconnection, char **ufragp, char **pwdp)
+static short vcmGetIceParams_m(const char *peerconnection,
+                               char **ufragp,
+                               char **pwdp)
 {
   CSFLogDebug( logTag, "%s: PC = %s", __FUNCTION__, peerconnection);
 
@@ -481,15 +550,10 @@ void vcmGetIceParams(const char *peerconnection, char **ufragp, char **pwdp)
  // Note: we don't acquire any media resources here, and we assume that the
   // ICE streams already exist, so we're just acquiring them. Any logic
   // to make them on demand is elsewhere.
-  CSFLogDebug( logTag, "%s: acquiring peerconnection %s", __FUNCTION__, peerconnection);
-  mozilla::ScopedDeletePtr<sipcc::PeerConnectionWrapper> pc(
-      sipcc::PeerConnectionImpl::AcquireInstance(peerconnection));
-  MOZ_ASSERT(pc);
-  if (!pc) {
-    return;
-  }
+  sipcc::PeerConnectionWrapper pc(peerconnection);
+  ENSURE_PC(pc, VCM_ERROR);
 
-  std::vector<std::string> attrs = pc->impl()->media()->
+  std::vector<std::string> attrs = pc.impl()->media()->
     ice_ctx()->GetGlobalAttributes();
 
   // Now fish through these looking for a ufrag and passwd
@@ -501,7 +565,7 @@ void vcmGetIceParams(const char *peerconnection, char **ufragp, char **pwdp)
       if (!ufrag) {
         ufrag = (char *) cpr_malloc(attrs[i].size() + 1);
         if (!ufrag)
-          return;
+          return VCM_ERROR;
         sstrncpy(ufrag, attrs[i].c_str(), attrs[i].size() + 1);
         ufrag[attrs[i].size()] = 0;
       }
@@ -510,7 +574,7 @@ void vcmGetIceParams(const char *peerconnection, char **ufragp, char **pwdp)
     if (attrs[i].compare(0, strlen("ice-pwd:"), "ice-pwd:") == 0) {
       pwd = (char *) cpr_malloc(attrs[i].size() + 1);
       if (!pwd)
-        return;
+        return VCM_ERROR;
       sstrncpy(pwd, attrs[i].c_str(), attrs[i].size() + 1);
       pwd[attrs[i].size()] = 0;
     }
@@ -521,15 +585,39 @@ void vcmGetIceParams(const char *peerconnection, char **ufragp, char **pwdp)
     cpr_free(ufrag);
     cpr_free(pwd);
     CSFLogDebug( logTag, "%s: no ufrag or password", __FUNCTION__);
-    return;
+    return VCM_ERROR;
   }
 
   *ufragp = ufrag;
   *pwdp = pwd;
 
-  return;
+  return 0;
 }
 
+/* Get ICE global parameters (ufrag and pwd)
+ *
+ * This is a thunk to vcmGetIceParams_m.
+ *
+ *  @param[in]  peerconnection - the peerconnection in use
+ *  @param[out] ufragp - where to put the ufrag
+ *  @param[out] pwdp - where to put the pwd
+ *
+ *  @return 0 for success; VCM_ERROR for failure
+ */
+short vcmGetIceParams(const char *peerconnection,
+                     char **ufragp,
+                     char **pwdp)
+{
+  int ret;
+  VcmSIPCCBinding::getMainThread()->Dispatch(
+      WrapRunnableNMRet(&vcmGetIceParams_m,
+                        peerconnection,
+                        ufragp,
+                        pwdp,
+                        &ret),
+      NS_DISPATCH_SYNC);
+  return ret;
+}
 
 
 /* Set remote ICE global parameters.
@@ -538,19 +626,16 @@ void vcmGetIceParams(const char *peerconnection, char **ufragp, char **pwdp)
  *  @param[in]  ufrag - the ufrag
  *  @param[in]  pwd - the pwd
  *
- *  @return 0 success, error failure
+ *  @return 0 for success; VCM_ERROR for failure
  */
-short vcmSetIceSessionParams(const char *peerconnection, char *ufrag, char *pwd)
+static short vcmSetIceSessionParams_m(const char *peerconnection,
+                                      char *ufrag,
+                                      char *pwd)
 {
   CSFLogDebug( logTag, "%s: PC = %s", __FUNCTION__, peerconnection);
 
-  CSFLogDebug( logTag, "%s: acquiring peerconnection %s", __FUNCTION__, peerconnection);
-  mozilla::ScopedDeletePtr<sipcc::PeerConnectionWrapper> pc(
-      sipcc::PeerConnectionImpl::AcquireInstance(peerconnection));
-  MOZ_ASSERT(pc);
-  if (!pc) {
-    return VCM_ERROR;
-  }
+  sipcc::PeerConnectionWrapper pc(peerconnection);
+  ENSURE_PC(pc, VCM_ERROR);
 
   std::vector<std::string> attributes;
 
@@ -559,7 +644,7 @@ short vcmSetIceSessionParams(const char *peerconnection, char *ufrag, char *pwd)
   if (pwd)
     attributes.push_back(pwd);
 
-  nsresult res = pc->impl()->media()->ice_ctx()->
+  nsresult res = pc.impl()->media()->ice_ctx()->
     ParseGlobalAttributes(attributes);
 
   if (!NS_SUCCEEDED(res)) {
@@ -570,6 +655,33 @@ short vcmSetIceSessionParams(const char *peerconnection, char *ufrag, char *pwd)
   return 0;
 }
 
+/* Set remote ICE global parameters.
+ *
+ * This is a thunk to vcmSetIceSessionParams_m.
+ *
+ *  @param[in]  peerconnection - the peerconnection in use
+ *  @param[in]  ufrag - the ufrag
+ *  @param[in]  pwd - the pwd
+ *
+ *  @return 0 success, error failure
+ */
+short vcmSetIceSessionParams(const char *peerconnection,
+                             char *ufrag,
+                             char *pwd)
+{
+  short ret;
+
+  VcmSIPCCBinding::getMainThread()->Dispatch(
+      WrapRunnableNMRet(&vcmSetIceSessionParams_m,
+                        peerconnection,
+                        ufrag,
+                        pwd,
+                        &ret),
+      NS_DISPATCH_SYNC);
+
+  return ret;
+}
+
 /* Set ice candidate for trickle ICE.
  *
  *  @param[in]  peerconnection - the peerconnection in use
@@ -578,26 +690,23 @@ short vcmSetIceSessionParams(const char *peerconnection, char *ufrag, char *pwd)
  *
  *  @return 0 success, error failure
  */
-short vcmSetIceCandidate(const char *peerconnection, const char *icecandidate, uint16_t level)
+static short vcmSetIceCandidate_m(const char *peerconnection,
+                                  const char *icecandidate,
+                                  uint16_t level)
 {
   CSFLogDebug( logTag, "%s: PC = %s", __FUNCTION__, peerconnection);
 
-  CSFLogDebug( logTag, "%s: acquiring peerconnection %s", __FUNCTION__, peerconnection);
-  mozilla::ScopedDeletePtr<sipcc::PeerConnectionWrapper> pc(
-      sipcc::PeerConnectionImpl::AcquireInstance(peerconnection));
-  MOZ_ASSERT(pc);
-  if (!pc) {
-    return VCM_ERROR;
-  }
+  sipcc::PeerConnectionWrapper pc(peerconnection);
+  ENSURE_PC(pc, VCM_ERROR);
 
   CSFLogDebug( logTag, "%s(): Getting stream %d", __FUNCTION__, level);
-  mozilla::RefPtr<NrIceMediaStream> stream = pc->impl()->media()->
+  mozilla::RefPtr<NrIceMediaStream> stream = pc.impl()->media()->
     ice_media_stream(level-1);
   if (!stream)
     return VCM_ERROR;
 
   nsresult res;
-  nsresult rv = pc->impl()->media()->ice_ctx()->thread()->Dispatch(
+  nsresult rv = pc.impl()->media()->ice_ctx()->thread()->Dispatch(
     WrapRunnableRet(stream, &NrIceMediaStream::ParseTrickleCandidate, icecandidate, &res),
     NS_DISPATCH_SYNC);
 
@@ -614,40 +723,88 @@ short vcmSetIceCandidate(const char *peerconnection, const char *icecandidate, u
   return 0;
 }
 
+/* Set ice candidate for trickle ICE.
+ *
+ * This is a thunk to vcmSetIceCandidate_m
+ *
+ *  @param[in]  peerconnection - the peerconnection in use
+ *  @param[in]  icecandidate - the icecandidate
+ *  @param[in]  level - the m line level
+ *
+ *  @return 0 success, error failure
+ */
+short vcmSetIceCandidate(const char *peerconnection,
+                         const char *icecandidate,
+                         uint16_t level)
+{
+  short ret;
+
+  VcmSIPCCBinding::getMainThread()->Dispatch(
+      WrapRunnableNMRet(&vcmSetIceCandidate_m,
+                        peerconnection,
+                        icecandidate,
+                        level,
+                        &ret),
+      NS_DISPATCH_SYNC);
+
+  return ret;
+}
+
+
 /* Start ICE checks
  *  @param[in]  peerconnection - the peerconnection in use
  *  @return 0 success, error failure
  */
-short vcmStartIceChecks(const char *peerconnection)
+static short vcmStartIceChecks_m(const char *peerconnection, cc_boolean isControlling)
 {
   CSFLogDebug( logTag, "%s: PC = %s", __FUNCTION__, peerconnection);
 
-  CSFLogDebug( logTag, "%s: acquiring peerconnection %s", __FUNCTION__, peerconnection);
-  mozilla::ScopedDeletePtr<sipcc::PeerConnectionWrapper> pc(
-      sipcc::PeerConnectionImpl::AcquireInstance(peerconnection));
-  MOZ_ASSERT(pc);
-  if (!pc) {
-    return VCM_ERROR;
-  }
+  sipcc::PeerConnectionWrapper pc(peerconnection);
+  ENSURE_PC(pc, VCM_ERROR);
 
   nsresult res;
-  nsresult rv = pc->impl()->media()->ice_ctx()->thread()->Dispatch(
-    WrapRunnableRet(pc->impl()->media()->ice_ctx(), &NrIceCtx::StartChecks, &res),
+  res = pc.impl()->media()->ice_ctx()->SetControlling(
+      isControlling ? NrIceCtx::ICE_CONTROLLING : NrIceCtx::ICE_CONTROLLED);
+  if (!NS_SUCCEEDED(res)) {
+    CSFLogError( logTag, "%s: couldn't set controlling", __FUNCTION__ );
+    return VCM_ERROR;
+  }
+  nsresult rv = pc.impl()->media()->ice_ctx()->thread()->Dispatch(
+    WrapRunnableRet(pc.impl()->media()->ice_ctx(), &NrIceCtx::StartChecks, &res),
       NS_DISPATCH_SYNC);
 
   if (!NS_SUCCEEDED(rv)) {
     CSFLogError( logTag, "%s(): Could not dispatch to ICE thread", __FUNCTION__);
     return VCM_ERROR;
   }
-
   if (!NS_SUCCEEDED(res)) {
     CSFLogError( logTag, "%s: couldn't start ICE checks", __FUNCTION__ );
     return VCM_ERROR;
   }
-
   return 0;
 }
 
+
+/* Start ICE checks
+ *
+ * This is a thunk to vcmStartIceChecks_m
+ *
+ *  @param[in]  peerconnection - the peerconnection in use
+ *  @return 0 success, error failure
+ */
+short vcmStartIceChecks(const char *peerconnection, cc_boolean isControlling)
+{
+  short ret;
+
+  VcmSIPCCBinding::getMainThread()->Dispatch(
+      WrapRunnableNMRet(&vcmStartIceChecks_m,
+                        peerconnection,
+                        isControlling,
+                        &ret),
+      NS_DISPATCH_SYNC);
+
+  return ret;
+}
 
 /* Set remote ICE media-level parameters.
  *
@@ -656,24 +813,23 @@ short vcmStartIceChecks(const char *peerconnection)
  *  @param[in]  ufrag - the ufrag
  *  @param[in]  pwd - the pwd
  *  @param[in]  candidates - the candidates
- *  @param[i]   candidate_ct - the number of candidates
+ *  @param[in]  candidate_ct - the number of candidates
  *  @return 0 success, error failure
  */
-short vcmSetIceMediaParams(const char *peerconnection, int level, char *ufrag, char *pwd,
-                      char **candidates, int candidate_ct)
+static short vcmSetIceMediaParams_m(const char *peerconnection,
+                                    int level,
+                                    char *ufrag,
+                                    char *pwd,
+                                    char **candidates,
+                                    int candidate_ct)
 {
   CSFLogDebug( logTag, "%s: PC = %s", __FUNCTION__, peerconnection);
 
-  CSFLogDebug( logTag, "%s: acquiring peerconnection %s", __FUNCTION__, peerconnection);
-  mozilla::ScopedDeletePtr<sipcc::PeerConnectionWrapper> pc(
-      sipcc::PeerConnectionImpl::AcquireInstance(peerconnection));
-  MOZ_ASSERT(pc);
-  if (!pc) {
-    return VCM_ERROR;
-  }
+  sipcc::PeerConnectionWrapper pc(peerconnection);
+  ENSURE_PC(pc, VCM_ERROR);
 
   CSFLogDebug( logTag, "%s(): Getting stream %d", __FUNCTION__, level);
-  mozilla::RefPtr<NrIceMediaStream> stream = pc->impl()->media()->
+  mozilla::RefPtr<NrIceMediaStream> stream = pc.impl()->media()->
     ice_media_stream(level-1);
   if (!stream)
     return VCM_ERROR;
@@ -699,6 +855,42 @@ short vcmSetIceMediaParams(const char *peerconnection, int level, char *ufrag, c
   return 0;
 }
 
+/* Set remote ICE media-level parameters.
+ *
+ * This is a thunk to vcmSetIceMediaParams_w
+ *
+ *  @param[in]  peerconnection - the peerconnection in use
+ *  @param[in]  level - the m-line
+ *  @param[in]  ufrag - the ufrag
+ *  @param[in]  pwd - the pwd
+ *  @param[in]  candidates - the candidates
+ *  @param[in]   candidate_ct - the number of candidates
+ *  @return 0 success, error failure
+ */
+short vcmSetIceMediaParams(const char *peerconnection,
+                           int level,
+                           char *ufrag,
+                           char *pwd,
+                           char **candidates,
+                           int candidate_ct)
+{
+  short ret;
+
+  VcmSIPCCBinding::getMainThread()->Dispatch(
+      WrapRunnableNMRet(&vcmSetIceMediaParams_m,
+                     peerconnection,
+                     level,
+                     ufrag,
+                     pwd,
+                     candidates,
+                     candidate_ct,
+                     &ret),
+      NS_DISPATCH_SYNC);
+
+  return ret;
+}
+
+
 /*
  * Create a remote stream
  *
@@ -711,58 +903,64 @@ short vcmSetIceMediaParams(const char *peerconnection, int level, char *ufrag, c
  *
  *  Returns: zero(0) for success; otherwise, ERROR for failure
  */
-short vcmCreateRemoteStream(
+static short vcmCreateRemoteStream_m(
   cc_mcapid_t mcap_id,
   const char *peerconnection,
   int *pc_stream_id) {
-  uint32_t hints = 0;
   nsresult res;
 
+  *pc_stream_id = -1;
+
   CSFLogDebug( logTag, "%s", __FUNCTION__);
+  sipcc::PeerConnectionWrapper pc(peerconnection);
+  ENSURE_PC(pc, VCM_ERROR);
 
-  mozilla::ScopedDeletePtr<sipcc::PeerConnectionWrapper> pc(
-      sipcc::PeerConnectionImpl::AcquireInstance(peerconnection));
-  MOZ_ASSERT(pc);
-  if (!pc) {
-    return VCM_ERROR;
-  }
-
-  if (CC_IS_AUDIO(mcap_id)) {
-    hints |= nsDOMMediaStream::HINT_CONTENTS_AUDIO;
-  }
-  if (CC_IS_VIDEO(mcap_id)) {
-    hints |= nsDOMMediaStream::HINT_CONTENTS_VIDEO;
-  }
-
-  sipcc::RemoteSourceStreamInfo* info;
-  res = pc->impl()->CreateRemoteSourceStreamInfo(hints, &info);
+  nsRefPtr<sipcc::RemoteSourceStreamInfo> info;
+  res = pc.impl()->CreateRemoteSourceStreamInfo(&info);
   if (NS_FAILED(res)) {
     return VCM_ERROR;
   }
 
-  res = pc->impl()->media()->AddRemoteStream(info, pc_stream_id);
+  res = pc.impl()->media()->AddRemoteStream(info, pc_stream_id);
   if (NS_FAILED(res)) {
     return VCM_ERROR;
   }
 
-  if (CC_IS_AUDIO(mcap_id)) {
-    mozilla::AudioSegment *segment = new mozilla::AudioSegment();
-    segment->Init(1); // 1 Channel
-    // TODO(ekr@rtfm.com): Clean up Track IDs
-    info->GetMediaStream()->GetStream()->AsSourceStream()->AddTrack(1, 16000, 0, segment);
-
-    // We aren't going to add any more tracks
-    info->GetMediaStream()->GetStream()->AsSourceStream()->
-        AdvanceKnownTracksTime(mozilla::STREAM_TIME_MAX);
-  }
-  if (CC_IS_VIDEO(mcap_id)) {
-    // AddTrack takes ownership of segment
-  }
-
-  CSFLogDebug( logTag, "%s: created remote stream with index %d hints=%d",
-    __FUNCTION__, *pc_stream_id, hints);
+  CSFLogDebug( logTag, "%s: created remote stream with index %d",
+    __FUNCTION__, *pc_stream_id);
 
   return 0;
+}
+
+/*
+ * Create a remote stream
+ *
+ * This is a thunk to vcmCreateRemoteStream_m
+ *
+ *  @param[in] mcap_id - group identifier to which stream belongs.
+ *  @param[in]  peerconnection - the peerconnection in use
+ *  @param[out] pc_stream_id - the id of the allocated stream
+ *
+ *  TODO(ekr@rtfm.com): Revise along with everything else for the
+ *  new stream model.
+ *
+ *  Returns: zero(0) for success; otherwise, ERROR for failure
+ */
+short vcmCreateRemoteStream(cc_mcapid_t mcap_id,
+                            const char *peerconnection,
+                            int *pc_stream_id)
+{
+  short ret;
+
+  VcmSIPCCBinding::getMainThread()->Dispatch(
+      WrapRunnableNMRet(&vcmCreateRemoteStream_m,
+                        mcap_id,
+                        peerconnection,
+                        pc_stream_id,
+                        &ret),
+      NS_DISPATCH_SYNC);
+
+  return ret;
 }
 
 
@@ -777,25 +975,29 @@ short vcmCreateRemoteStream(
  *
  *  Returns: zero(0) for success; otherwise, ERROR for failure
  */
-short vcmGetDtlsIdentity(const char *peerconnection,
-                char *digest_algp,
-                size_t max_digest_alg_len,
-                char *digestp,
-                size_t max_digest_len) {
-  CSFLogDebug( logTag, "%s: acquiring peerconnection %s", __FUNCTION__, peerconnection);
-  mozilla::ScopedDeletePtr<sipcc::PeerConnectionWrapper> pc(
-      sipcc::PeerConnectionImpl::AcquireInstance(peerconnection));
-  MOZ_ASSERT(pc);
-  if (!pc) {
-    return VCM_ERROR;
-  }
+static short vcmGetDtlsIdentity_m(const char *peerconnection,
+                                  char *digest_algp,
+                                  size_t max_digest_alg_len,
+                                  char *digestp,
+                                  size_t max_digest_len) {
+
+  digest_algp[0]='\0';
+  digestp[0]='\0';
+
+  sipcc::PeerConnectionWrapper pc(peerconnection);
+  ENSURE_PC(pc, VCM_ERROR);
 
   unsigned char digest[TransportLayerDtls::kMaxDigestLength];
   size_t digest_len;
 
-  nsresult res = pc->impl()->GetIdentity()->ComputeFingerprint("sha-256", digest,
-                                                               sizeof(digest),
-                                                               &digest_len);
+  mozilla::RefPtr<DtlsIdentity> id = pc.impl()->GetIdentity();
+
+  if (!id) {
+    return VCM_ERROR;
+  }
+
+  nsresult res = id->ComputeFingerprint("sha-256", digest, sizeof(digest),
+                                        &digest_len);
   if (!NS_SUCCEEDED(res)) {
     CSFLogError( logTag, "%s: Could not compute identity fingerprint", __FUNCTION__);
     return VCM_ERROR;
@@ -816,6 +1018,39 @@ short vcmGetDtlsIdentity(const char *peerconnection,
   return 0;
 }
 
+/*
+ * Get DTLS key data
+ *
+ * This is a thunk to vcmGetDtlsIdentity_m
+ *
+ *  @param[in]  peerconnection - the peerconnection in use
+ *  @param[out] digest_algp    - the digest algorithm e.g. 'SHA-1'
+ *  @param[in] max_digest_alg_len - length of string
+ *  @param[out] digestp        - the digest string
+ *  @param[in] max_digest_len - length of string
+ *
+ *  Returns: zero(0) for success; otherwise, ERROR for failure
+ */
+short vcmGetDtlsIdentity(const char *peerconnection,
+                         char *digest_algp,
+                         size_t max_digest_alg_len,
+                         char *digestp,
+                         size_t max_digest_len) {
+  short ret;
+
+  VcmSIPCCBinding::getMainThread()->Dispatch(
+      WrapRunnableNMRet(&vcmGetDtlsIdentity_m,
+                        peerconnection,
+                        digest_algp,
+                        max_digest_alg_len,
+                        digestp,
+                        max_digest_len,
+                        &ret),
+      NS_DISPATCH_SYNC);
+
+  return ret;
+}
+
 /* Set negotiated DataChannel parameters.
  *
  *  @param[in]  peerconnection - the peerconnection in use
@@ -828,15 +1063,6 @@ short vcmGetDtlsIdentity(const char *peerconnection,
 short vcmSetDataChannelParameters(const char *peerconnection, cc_uint16_t streams, int sctp_port, const char* protocol)
 {
   CSFLogDebug( logTag, "%s: PC = %s", __FUNCTION__, peerconnection);
-
-  CSFLogDebug( logTag, "%s: acquiring peerconnection %s", __FUNCTION__, peerconnection);
-  mozilla::ScopedDeletePtr<sipcc::PeerConnectionWrapper> pc(
-      sipcc::PeerConnectionImpl::AcquireInstance(peerconnection));
-  PR_ASSERT(pc);
-  if (!pc) {
-    return VCM_ERROR;
-  }
-
 
   return 0;
 }
@@ -853,7 +1079,7 @@ short vcmSetDataChannelParameters(const char *peerconnection, cc_uint16_t stream
  *  @param[in]     port_requested   - requested port.
  *  @param[in]     listen_ip        - local IP for listening
  *  @param[in]     is_multicast     - multicast stream?
- *  @param[in,out] port_allocated   - allocated(reserved) port
+ *  @param[out]    port_allocated   - allocated(reserved) port
  *
  *  tbd need to see if we can deprecate this API
  *
@@ -873,6 +1099,7 @@ short vcmRxOpen(cc_mcapid_t mcap_id,
     char fname[] = "vcmRxOpen";
 
     char dottedIP[20] = "";
+    *port_allocated = -1;
     if(listen_ip)
     {
     	csf_sprintf(dottedIP, sizeof(dottedIP), "%u.%u.%u.%u",
@@ -1018,7 +1245,7 @@ int vcmRxStart(cc_mcapid_t mcap_id,
  *  @param[in]   stream_id    - stream id of the given media type.
  *  @param[in]   level        - the m-line index
  *  @param[in]   pc_stream_id - the media stream index (from PC.addStream())
- *  @param[i]n   pc_track_id  - the track within the media stream
+ *  @param[in]   pc_track_id  - the track within the media stream
  *  @param[in]   call_handle  - call handle
  *  @param[in]   peerconnection - the peerconnection in use
  *  @param[in]   num_payloads   - number of negotiated payloads
@@ -1030,7 +1257,7 @@ int vcmRxStart(cc_mcapid_t mcap_id,
  *  Returns: zero(0) for success; otherwise, ERROR for failure
  */
 
-int vcmRxStartICE(cc_mcapid_t mcap_id,
+static int vcmRxStartICE_m(cc_mcapid_t mcap_id,
         cc_groupid_t group_id,
         cc_streamid_t stream_id,
         int level,
@@ -1046,13 +1273,9 @@ int vcmRxStartICE(cc_mcapid_t mcap_id,
 {
   CSFLogDebug( logTag, "%s(%s)", __FUNCTION__, peerconnection);
 
-  // Find the PC and get the stream
-  mozilla::ScopedDeletePtr<sipcc::PeerConnectionWrapper> pc(
-      sipcc::PeerConnectionImpl::AcquireInstance(peerconnection));
-  PR_ASSERT(pc);
-  if (!pc) {
-    return VCM_ERROR;
-  }
+  // Find the PC.
+  sipcc::PeerConnectionWrapper pc(peerconnection);
+  ENSURE_PC(pc, VCM_ERROR);
 
   if(!payloads) {
       CSFLogError( logTag, "Unitialized payload list");
@@ -1061,7 +1284,7 @@ int vcmRxStartICE(cc_mcapid_t mcap_id,
 
   // Find the stream we need
   nsRefPtr<sipcc::RemoteSourceStreamInfo> stream =
-    pc->impl()->media()->GetRemoteStream(pc_stream_id);
+    pc.impl()->media()->GetRemoteStream(pc_stream_id);
   if (!stream) {
     // This should never happen
     PR_ASSERT(PR_FALSE);
@@ -1069,14 +1292,14 @@ int vcmRxStartICE(cc_mcapid_t mcap_id,
   }
   // Create the transport flows
   mozilla::RefPtr<TransportFlow> rtp_flow =
-      vcmCreateTransportFlow(pc->impl(), level, false,
+      vcmCreateTransportFlow(pc.impl(), level, false,
                              fingerprint_alg, fingerprint);
   if (!rtp_flow) {
       CSFLogError( logTag, "Could not create RTP flow");
       return VCM_ERROR;
   }
   mozilla::RefPtr<TransportFlow> rtcp_flow =
-      vcmCreateTransportFlow(pc->impl(), level, true,
+      vcmCreateTransportFlow(pc.impl(), level, true,
                              fingerprint_alg, fingerprint);
   if (!rtcp_flow) {
       CSFLogError( logTag, "Could not create RTCP flow");
@@ -1085,11 +1308,17 @@ int vcmRxStartICE(cc_mcapid_t mcap_id,
 
   if (CC_IS_AUDIO(mcap_id)) {
     std::vector<mozilla::AudioCodecConfig *> configs;
+
     // Instantiate an appropriate conduit
+    mozilla::RefPtr<mozilla::AudioSessionConduit> tx_conduit =
+      pc.impl()->media()->GetConduit(level, false);
+
     mozilla::RefPtr<mozilla::AudioSessionConduit> conduit =
-                    mozilla::AudioSessionConduit::Create();
+                    mozilla::AudioSessionConduit::Create(tx_conduit);
     if(!conduit)
       return VCM_ERROR;
+
+    pc.impl()->media()->AddConduit(level, true, conduit);
 
     mozilla::AudioCodecConfig *config_raw;
 
@@ -1108,14 +1337,27 @@ int vcmRxStartICE(cc_mcapid_t mcap_id,
     if (conduit->ConfigureRecvMediaCodecs(configs))
       return VCM_ERROR;
 
-    // Now we have all the pieces, create the pipeline
-    stream->StorePipeline(pc_track_id,
-      new mozilla::MediaPipelineReceiveAudio(
-        pc->impl()->GetMainThread().get(),
-        pc->impl()->GetSTSThread(),
-        stream->GetMediaStream(),
-        conduit, rtp_flow, rtcp_flow));
 
+    // Now we have all the pieces, create the pipeline
+    mozilla::RefPtr<mozilla::MediaPipeline> pipeline =
+      new mozilla::MediaPipelineReceiveAudio(
+        pc.impl()->GetHandle(),
+        pc.impl()->GetMainThread().get(),
+        pc.impl()->GetSTSThread(),
+        stream->GetMediaStream()->GetStream(),
+        pc_track_id,
+        conduit, rtp_flow, rtcp_flow);
+
+    nsresult res = pipeline->Init();
+    if (NS_FAILED(res)) {
+      CSFLogError(logTag, "Failure initializing audio pipeline");
+      return VCM_ERROR;
+    }
+
+    CSFLogDebug(logTag, "Created audio pipeline %p, conduit=%p, pc_stream=%d pc_track=%d",
+                pipeline.get(), conduit.get(), pc_stream_id, pc_track_id);
+
+    stream->StorePipeline(pc_track_id, false, pipeline);
   } else if (CC_IS_VIDEO(mcap_id)) {
 
     std::vector<mozilla::VideoCodecConfig *> configs;
@@ -1141,13 +1383,25 @@ int vcmRxStartICE(cc_mcapid_t mcap_id,
       return VCM_ERROR;
 
     // Now we have all the pieces, create the pipeline
-    stream->StorePipeline(pc_track_id,
-      new mozilla::MediaPipelineReceiveVideo(
-        pc->impl()->GetMainThread().get(),
-        pc->impl()->GetSTSThread(),
-        stream->GetMediaStream(),
-        conduit, rtp_flow, rtcp_flow));
+    mozilla::RefPtr<mozilla::MediaPipeline> pipeline =
+        new mozilla::MediaPipelineReceiveVideo(
+            pc.impl()->GetHandle(),
+            pc.impl()->GetMainThread().get(),
+            pc.impl()->GetSTSThread(),
+            stream->GetMediaStream()->GetStream(),
+            pc_track_id,
+            conduit, rtp_flow, rtcp_flow);
 
+    nsresult res = pipeline->Init();
+    if (NS_FAILED(res)) {
+      CSFLogError(logTag, "Failure initializing video pipeline");
+      return VCM_ERROR;
+    }
+
+    CSFLogDebug(logTag, "Created video pipeline %p, conduit=%p, pc_stream=%d pc_track=%d",
+                pipeline.get(), conduit.get(), pc_stream_id, pc_track_id);
+
+    stream->StorePipeline(pc_track_id, true, pipeline);
   } else {
     CSFLogError(logTag, "%s: mcap_id unrecognized", __FUNCTION__);
     return VCM_ERROR;
@@ -1159,6 +1413,67 @@ int vcmRxStartICE(cc_mcapid_t mcap_id,
 
 
 /**
+ *  start rx stream
+ *  Same concept as vcmRxStart but for ICE/PeerConnection-based flows
+ *
+ *  This is a thunk to vcmRxStartICE_m
+ *
+ *  @param[in]   mcap_id      - media cap id
+ *  @param[in]   group_id     - group identifier to which the stream belongs
+ *  @param[in]   stream_id    - stream id of the given media type.
+ *  @param[in]   level        - the m-line index
+ *  @param[in]   pc_stream_id - the media stream index (from PC.addStream())
+ *  @param[i]n   pc_track_id  - the track within the media stream
+ *  @param[in]   call_handle  - call handle
+ *  @param[in]  peerconnection - the peerconnection in use
+ *  @param[in]  num_payloads   - number of negotiated payloads
+ *  @param[in]  payloads       - negotiated codec details list
+ *  @param[in]   fingerprint_alg - the DTLS fingerprint algorithm
+ *  @param[in]   fingerprint  - the DTLS fingerprint
+ *  @param[in]   attrs        - media attributes
+ *
+ *  Returns: zero(0) for success; otherwise, ERROR for failure
+ */
+
+int vcmRxStartICE(cc_mcapid_t mcap_id,
+                  cc_groupid_t group_id,
+                  cc_streamid_t stream_id,
+                  int level,
+                  int pc_stream_id,
+                  int pc_track_id,
+                  cc_call_handle_t  call_handle,
+                  const char *peerconnection,
+                  int num_payloads,
+                  const vcm_payload_info_t* payloads,
+                  const char *fingerprint_alg,
+                  const char *fingerprint,
+                  vcm_mediaAttrs_t *attrs)
+{
+  int ret;
+
+  VcmSIPCCBinding::getMainThread()->Dispatch(
+      WrapRunnableNMRet(&vcmRxStartICE_m,
+                        mcap_id,
+                        group_id,
+                        stream_id,
+                        level,
+                        pc_stream_id,
+                        pc_track_id,
+                        call_handle,
+                        peerconnection,
+                        num_payloads,
+                        payloads,
+                        fingerprint_alg,
+                        fingerprint,
+                        attrs,
+                        &ret),
+      NS_DISPATCH_SYNC);
+
+  return ret;
+}
+
+
+/**
  *  Close the receive stream.
  *
  *  @param[in]    mcap_id - Media Capability ID
@@ -1166,11 +1481,11 @@ int vcmRxStartICE(cc_mcapid_t mcap_id,
  *  @param[in]    stream_id - stream id of the given media type.
  *  @param[in]    call_handle  - call identifier
  *
- *  @return   None
+ *  @return 0 for success; VCM_ERROR for failure
  *
  */
 
-void vcmRxClose(cc_mcapid_t mcap_id,
+short vcmRxClose(cc_mcapid_t mcap_id,
         cc_groupid_t group_id,
         cc_streamid_t stream_id,
         cc_call_handle_t  call_handle)
@@ -1180,9 +1495,9 @@ void vcmRxClose(cc_mcapid_t mcap_id,
     CSFLogDebug( logTag, "%s: group_id=%d call_handle=%d", fname, group_id, call_handle);
 
     if (call_handle == CC_NO_CALL_ID) {
-        CSFLogDebugS( logTag, "No CALL ID");
+        CSFLogDebug( logTag, "No CALL ID");
         /* no operation when no call ID */
-        return;
+        return VCM_ERROR;
     }
     switch ( mcap_id )
     {
@@ -1199,6 +1514,7 @@ void vcmRxClose(cc_mcapid_t mcap_id,
     default:
         break;
     }
+    return 0;
 }
 
 /**
@@ -1301,7 +1617,7 @@ map_tone_type( vcm_tones_t tone )
     case VCM_SECUREWARNING_TONE:
         return ToneType_SECUREWARNING_TONE;
     default:
-        CSFLogDebugS( logTag, "map_tone_type(): WARNING..tone type not mapped.");
+        CSFLogDebug( logTag, "map_tone_type(): WARNING..tone type not mapped.");
         return ToneType_NO_TONE;
     }
 }
@@ -1596,7 +1912,7 @@ int vcmTxStart(cc_mcapid_t mcap_id,
  */
 #define EXTRACT_DYNAMIC_PAYLOAD_TYPE(PTYPE) ((PTYPE)>>16)
 
-int vcmTxStartICE(cc_mcapid_t mcap_id,
+static int vcmTxStartICE_m(cc_mcapid_t mcap_id,
         cc_groupid_t group_id,
         cc_streamid_t stream_id,
         int level,
@@ -1613,25 +1929,21 @@ int vcmTxStartICE(cc_mcapid_t mcap_id,
   CSFLogDebug( logTag, "%s(%s)", __FUNCTION__, peerconnection);
 
   // Find the PC and get the stream
-  mozilla::ScopedDeletePtr<sipcc::PeerConnectionWrapper> pc(
-      sipcc::PeerConnectionImpl::AcquireInstance(peerconnection));
-  PR_ASSERT(pc);
-  if (!pc) {
-    return VCM_ERROR;
-  }
-  nsRefPtr<sipcc::LocalSourceStreamInfo> stream = pc->impl()->media()->
+  sipcc::PeerConnectionWrapper pc(peerconnection);
+  ENSURE_PC(pc, VCM_ERROR);
+  nsRefPtr<sipcc::LocalSourceStreamInfo> stream = pc.impl()->media()->
     GetLocalStream(pc_stream_id);
 
   // Create the transport flows
   mozilla::RefPtr<TransportFlow> rtp_flow =
-      vcmCreateTransportFlow(pc->impl(), level, false,
+      vcmCreateTransportFlow(pc.impl(), level, false,
                              fingerprint_alg, fingerprint);
   if (!rtp_flow) {
       CSFLogError( logTag, "Could not create RTP flow");
       return VCM_ERROR;
   }
   mozilla::RefPtr<TransportFlow> rtcp_flow =
-      vcmCreateTransportFlow(pc->impl(), level, true,
+      vcmCreateTransportFlow(pc.impl(), level, true,
                              fingerprint_alg, fingerprint);
   if (!rtcp_flow) {
       CSFLogError( logTag, "Could not create RTCP flow");
@@ -1652,21 +1964,34 @@ int vcmTxStartICE(cc_mcapid_t mcap_id,
     mozilla::ScopedDeletePtr<mozilla::AudioCodecConfig> config(config_raw);
 
     // Instantiate an appropriate conduit
+    mozilla::RefPtr<mozilla::AudioSessionConduit> rx_conduit =
+      pc.impl()->media()->GetConduit(level, true);
+
     mozilla::RefPtr<mozilla::AudioSessionConduit> conduit =
-      mozilla::AudioSessionConduit::Create();
+      mozilla::AudioSessionConduit::Create(rx_conduit);
 
     if (!conduit || conduit->ConfigureSendMediaCodec(config))
       return VCM_ERROR;
 
-    mozilla::RefPtr<mozilla::MediaPipelineTransmit> pipeline =
-      new mozilla::MediaPipelineTransmit(
-        pc->impl()->GetMainThread().get(),
-        pc->impl()->GetSTSThread(),
-        stream->GetMediaStream(),
-        conduit, rtp_flow, rtcp_flow);
+    pc.impl()->media()->AddConduit(level, false, conduit);
 
+    mozilla::RefPtr<mozilla::MediaPipeline> pipeline =
+        new mozilla::MediaPipelineTransmit(
+            pc.impl()->GetHandle(),
+            pc.impl()->GetMainThread().get(),
+            pc.impl()->GetSTSThread(),
+            stream->GetMediaStream()->GetStream(),
+            pc_track_id,
+            conduit, rtp_flow, rtcp_flow);
+
+    nsresult res = pipeline->Init();
+    if (NS_FAILED(res)) {
+      CSFLogError(logTag, "Failure initializing audio pipeline");
+      return VCM_ERROR;
+    }
     CSFLogDebug(logTag, "Created audio pipeline %p, conduit=%p, pc_stream=%d pc_track=%d",
                 pipeline.get(), conduit.get(), pc_stream_id, pc_track_id);
+
 
     // Now we have all the pieces, create the pipeline
     stream->StorePipeline(pc_track_id, pipeline);
@@ -1690,18 +2015,25 @@ int vcmTxStartICE(cc_mcapid_t mcap_id,
     if (!conduit || conduit->ConfigureSendMediaCodec(config))
       return VCM_ERROR;
 
-    // Create the pipeline
+    // Now we have all the pieces, create the pipeline
     mozilla::RefPtr<mozilla::MediaPipeline> pipeline =
         new mozilla::MediaPipelineTransmit(
-          pc->impl()->GetMainThread().get(),
-          pc->impl()->GetSTSThread(),
-          stream->GetMediaStream(),
-          conduit, rtp_flow, rtcp_flow);
+            pc.impl()->GetHandle(),
+            pc.impl()->GetMainThread().get(),
+            pc.impl()->GetSTSThread(),
+            stream->GetMediaStream()->GetStream(),
+            pc_track_id,
+            conduit, rtp_flow, rtcp_flow);
+
+    nsresult res = pipeline->Init();
+    if (NS_FAILED(res)) {
+      CSFLogError(logTag, "Failure initializing video pipeline");
+      return VCM_ERROR;
+    }
 
     CSFLogDebug(logTag, "Created video pipeline %p, conduit=%p, pc_stream=%d pc_track=%d",
                 pipeline.get(), conduit.get(), pc_stream_id, pc_track_id);
 
-    // Now we have all the pieces, create the pipeline
     stream->StorePipeline(pc_track_id, pipeline);
   } else {
     CSFLogError(logTag, "%s: mcap_id unrecognized", __FUNCTION__);
@@ -1710,6 +2042,68 @@ int vcmTxStartICE(cc_mcapid_t mcap_id,
 
   CSFLogDebug( logTag, "%s success", __FUNCTION__);
   return 0;
+}
+
+/**
+ *  start tx stream
+ *  Same concept as vcmTxStart but for ICE/PeerConnection-based flows
+ *
+ *  This is a thunk to vcmTxStartICE_m
+ *
+ *  @param[in]   mcap_id      - media cap id
+ *  @param[in]   group_id     - group identifier to which the stream belongs
+ *  @param[in]   stream_id    - stream id of the given media type.
+ *  @param[in]   level        - the m-line index
+ *  @param[in]   pc_stream_id - the media stream index (from PC.addStream())
+ *  @param[i]n   pc_track_id  - the track within the media stream
+ *  @param[in]   call_handle  - call handle
+ *  @param[in]  peerconnection - the peerconnection in use
+ *  @param[in]   payload      - payload type
+ *  @param[in]   tos          - bit marking
+ *  @param[in]   fingerprint_alg - the DTLS fingerprint algorithm
+ *  @param[in]   fingerprint  - the DTLS fingerprint
+ *  @param[in]   attrs        - media attributes
+ *
+ *  Returns: zero(0) for success; otherwise, ERROR for failure
+ *
+ */
+#define EXTRACT_DYNAMIC_PAYLOAD_TYPE(PTYPE) ((PTYPE)>>16)
+
+int vcmTxStartICE(cc_mcapid_t mcap_id,
+                  cc_groupid_t group_id,
+                  cc_streamid_t stream_id,
+                  int level,
+                  int pc_stream_id,
+                  int pc_track_id,
+                  cc_call_handle_t  call_handle,
+                  const char *peerconnection,
+                  const vcm_payload_info_t *payload,
+                  short tos,
+                  const char *fingerprint_alg,
+                  const char *fingerprint,
+                  vcm_mediaAttrs_t *attrs)
+{
+  int ret;
+
+  VcmSIPCCBinding::getMainThread()->Dispatch(
+      WrapRunnableNMRet(&vcmTxStartICE_m,
+                        mcap_id,
+                        group_id,
+                        stream_id,
+                        level,
+                        pc_stream_id,
+                        pc_track_id,
+                        call_handle,
+                        peerconnection,
+                        payload,
+                        tos,
+                        fingerprint_alg,
+                        fingerprint,
+                        attrs,
+                        &ret),
+      NS_DISPATCH_SYNC);
+
+  return ret;
 }
 
 
@@ -1721,10 +2115,10 @@ int vcmTxStartICE(cc_mcapid_t mcap_id,
  *  @param[in] stream_id - stream id of the given media type.
  *  @param[in] call_handle  - call identifier
  *
- *  @return     void
+ *  @return 0 for success; VCM_ERROR for failure
  */
 
-void vcmTxClose(cc_mcapid_t mcap_id,
+short vcmTxClose(cc_mcapid_t mcap_id,
         cc_groupid_t group_id,
         cc_streamid_t stream_id,
         cc_call_handle_t  call_handle)
@@ -1735,7 +2129,7 @@ void vcmTxClose(cc_mcapid_t mcap_id,
 
     if (call_handle == CC_NO_CALL_ID) {
         /* no operation when no call ID */
-        return;
+        return VCM_ERROR;
     }
 
     switch ( mcap_id )
@@ -1753,6 +2147,7 @@ void vcmTxClose(cc_mcapid_t mcap_id,
     default:
         break;
     }
+    return 0;
 }
 
 #if 0
@@ -1911,6 +2306,8 @@ int vcmGetRtpStats(cc_mcapid_t mcap_id,
         char *rx_stats,
         char *tx_stats)
 {
+    rx_stats[0] = '\0';
+    tx_stats[0] = '\0';
     return 0;
 }
 
@@ -2026,7 +2423,7 @@ cc_boolean vcmCheckAttribs(cc_uint32_t media_type, void *sdp_p, int level, void 
         rcap = (struct h264_video *) cpr_malloc( sizeof(struct h264_video) );
         if ( rcap == NULL )
         {
-            CSFLogDebugS( logTag, "vcmCheckAttribs(): Malloc Failed for rcap");
+            CSFLogDebug( logTag, "vcmCheckAttribs(): Malloc Failed for rcap");
             return FALSE;
         }
         memset( rcap, 0, sizeof(struct h264_video) );
@@ -2226,9 +2623,33 @@ vcmCreateTransportFlow(sipcc::PeerConnectionImpl *pc, int level, bool rtcp,
                               rtcp ? 2 : 1));
 
     ScopedDeletePtr<TransportLayerDtls> dtls(new TransportLayerDtls());
+
+    // RFC 5763 says:
+    //
+    //   The endpoint MUST use the setup attribute defined in [RFC4145].
+    //   The endpoint that is the offerer MUST use the setup attribute
+    //   value of setup:actpass and be prepared to receive a client_hello
+    //   before it receives the answer.  The answerer MUST use either a
+    //   setup attribute value of setup:active or setup:passive.  Note that
+    //   if the answerer uses setup:passive, then the DTLS handshake will
+    //   not begin until the answerer is received, which adds additional
+    //   latency. setup:active allows the answer and the DTLS handshake to
+    //   occur in parallel.  Thus, setup:active is RECOMMENDED.  Whichever
+    //   party is active MUST initiate a DTLS handshake by sending a
+    //   ClientHello over each flow (host/port quartet).
+    //
+    // Currently we just hardwire the roles to be that the offerer is the
+    // server, which is what you would expect from the "recommended"
+    // behavior above.
+    //
+    // TODO(ekr@rtfm.com): implement the actpass logic above.
     dtls->SetRole(pc->GetRole() == sipcc::PeerConnectionImpl::kRoleOfferer ?
-                  TransportLayerDtls::CLIENT : TransportLayerDtls::SERVER);
-    dtls->SetIdentity(pc->GetIdentity());
+                  TransportLayerDtls::SERVER : TransportLayerDtls::CLIENT);
+    mozilla::RefPtr<DtlsIdentity> pcid = pc->GetIdentity();
+    if (!pcid) {
+      return nullptr;
+    }
+    dtls->SetIdentity(pcid);
 
     unsigned char remote_digest[TransportLayerDtls::kMaxDigestLength];
     size_t digest_len;
@@ -2241,7 +2662,12 @@ vcmCreateTransportFlow(sipcc::PeerConnectionImpl *pc, int level, bool rtcp,
       CSFLogError(logTag, "Could not convert fingerprint");
       return NULL;
     }
-    res = dtls->SetVerificationDigest(fingerprint_alg, remote_digest, digest_len);
+
+    std::string fingerprint_str(fingerprint_alg);
+    // Downcase because SDP is case-insensitive.
+    std::transform(fingerprint_str.begin(), fingerprint_str.end(),
+                   fingerprint_str.begin(), ::tolower);
+    res = dtls->SetVerificationDigest(fingerprint_str, remote_digest, digest_len);
     if (!NS_SUCCEEDED(res)) {
       CSFLogError(logTag, "Could not set remote DTLS digest");
       return NULL;
@@ -2267,12 +2693,10 @@ vcmCreateTransportFlow(sipcc::PeerConnectionImpl *pc, int level, bool rtcp,
         WrapRunnableRet(flow, &TransportFlow::PushLayers, layers, &res),
         NS_DISPATCH_SYNC);
 
-    if (NS_FAILED(rv) || NS_FAILED(res)) {
+    if (NS_FAILED(rv) || NS_FAILED(res) || !pc->media().get()) { // SYNC re-check
       return NULL;
     }
-
     pc->media()->AddTransportFlow(level, rtcp, flow);
   }
-
   return flow;
 }

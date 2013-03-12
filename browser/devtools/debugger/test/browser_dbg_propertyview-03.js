@@ -57,7 +57,7 @@ function testSimpleCall() {
       is(testVar.target.querySelector(".name").getAttribute("value"), "something",
         "Any new variable should have the designated title.");
 
-      is(testVar.target.querySelector(".details").childNodes.length, 0,
+      is(testVar.target.querySelector(".variables-view-element-details").childNodes.length, 0,
         "Any new variable should have a details container with no child nodes.");
 
 
@@ -139,8 +139,8 @@ function testSimpleCall() {
         testVar.target.querySelector(".title"),
         gDebugger);
 
-      ok(!testVar.expanded,
-        "Clicking the testVar title div shouldn't expand it.");
+      ok(testVar.expanded,
+        "Clicking the testVar title div should expand it again.");
 
 
       testScope.show();
@@ -185,8 +185,8 @@ function testSimpleCall() {
         testVar.get("child").target.querySelector(".title"),
         gDebugger);
 
-      ok(!testVar.get("child").expanded,
-        "Clicking the testVar child property title div shouldn't expand it.");
+      ok(testVar.get("child").expanded,
+        "Clicking the testVar child property title div should expand it again.");
 
 
       gDebugger.DebuggerView.Variables.empty();

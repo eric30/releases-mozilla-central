@@ -22,12 +22,13 @@ struct nsSVGViewBoxRect
 {
   float x, y;
   float width, height;
+  bool none;
 
-  nsSVGViewBoxRect() : x(0), y(0), width(0), height(0) {}
+  nsSVGViewBoxRect() : none(true) {}
   nsSVGViewBoxRect(float aX, float aY, float aWidth, float aHeight) :
-    x(aX), y(aY), width(aWidth), height(aHeight) {}
+    x(aX), y(aY), width(aWidth), height(aHeight), none(false) {}
   nsSVGViewBoxRect(const nsSVGViewBoxRect& rhs) :
-    x(rhs.x), y(rhs.y), width(rhs.width), height(rhs.height) {}
+    x(rhs.x), y(rhs.y), width(rhs.width), height(rhs.height), none(rhs.none) {}
   bool operator==(const nsSVGViewBoxRect& aOther) const;
 };
 
@@ -48,19 +49,24 @@ public:
    * positive, so callers must check whether the viewBox rect is valid where
    * necessary!
    */
+  bool HasRect() const
+    { return (mAnimVal && !mAnimVal->none) ||
+             (!mAnimVal && mHasBaseVal && !mBaseVal.none); }
+
+  /**
+   * Returns true if the corresponding "viewBox" attribute either defined a
+   * rectangle with finite values or the special "none" value.
+   */
   bool IsExplicitlySet() const
-    { return (mHasBaseVal || mAnimVal); }
+    { return mAnimVal || mHasBaseVal; }
 
   const nsSVGViewBoxRect& GetBaseValue() const
     { return mBaseVal; }
   void SetBaseValue(const nsSVGViewBoxRect& aRect,
                     nsSVGElement *aSVGElement);
-  void SetBaseValue(float aX, float aY, float aWidth, float aHeight,
-                    nsSVGElement *aSVGElement)
-    { SetBaseValue(nsSVGViewBoxRect(aX, aY, aWidth, aHeight), aSVGElement); }
   const nsSVGViewBoxRect& GetAnimValue() const
     { return mAnimVal ? *mAnimVal : mBaseVal; }
-  void SetAnimValue(float aX, float aY, float aWidth, float aHeight,
+  void SetAnimValue(const nsSVGViewBoxRect& aRect,
                     nsSVGElement *aSVGElement);
 
   nsresult SetBaseValueString(const nsAString& aValue,
@@ -70,6 +76,8 @@ public:
 
   nsresult ToDOMAnimatedRect(nsIDOMSVGAnimatedRect **aResult,
                              nsSVGElement *aSVGElement);
+  nsresult ToDOMBaseVal(nsIDOMSVGRect **aResult, nsSVGElement* aSVGElement);
+  nsresult ToDOMAnimVal(nsIDOMSVGRect **aResult, nsSVGElement* aSVGElement);
   // Returns a new nsISMILAttr object that the caller must delete
   nsISMILAttr* ToSMILAttr(nsSVGElement* aSVGElement);
 
@@ -79,6 +87,7 @@ private:
   nsAutoPtr<nsSVGViewBoxRect> mAnimVal;
   bool mHasBaseVal;
 
+public:
   struct DOMBaseVal MOZ_FINAL : public nsIDOMSVGRect
   {
     NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -86,6 +95,7 @@ private:
 
     DOMBaseVal(nsSVGViewBox *aVal, nsSVGElement *aSVGElement)
       : mVal(aVal), mSVGElement(aSVGElement) {}
+    virtual ~DOMBaseVal();
 
     nsSVGViewBox* mVal; // kept alive because it belongs to content
     nsRefPtr<nsSVGElement> mSVGElement;
@@ -112,6 +122,7 @@ private:
 
     DOMAnimVal(nsSVGViewBox *aVal, nsSVGElement *aSVGElement)
       : mVal(aVal), mSVGElement(aSVGElement) {}
+    virtual ~DOMAnimVal();
 
     nsSVGViewBox* mVal; // kept alive because it belongs to content
     nsRefPtr<nsSVGElement> mSVGElement;
@@ -153,7 +164,6 @@ private:
       { return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR; }
   };
 
-public:
   struct DOMAnimatedRect MOZ_FINAL : public nsIDOMSVGAnimatedRect
   {
     NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -161,12 +171,16 @@ public:
 
     DOMAnimatedRect(nsSVGViewBox *aVal, nsSVGElement *aSVGElement)
       : mVal(aVal), mSVGElement(aSVGElement) {}
+    virtual ~DOMAnimatedRect();
 
     nsSVGViewBox* mVal; // kept alive because it belongs to content
     nsRefPtr<nsSVGElement> mSVGElement;
 
-    NS_IMETHOD GetBaseVal(nsIDOMSVGRect **aResult);
-    NS_IMETHOD GetAnimVal(nsIDOMSVGRect **aResult);
+    NS_IMETHOD GetBaseVal(nsIDOMSVGRect **aBaseVal)
+      { return mVal->ToDOMBaseVal(aBaseVal, mSVGElement); }
+
+    NS_IMETHOD GetAnimVal(nsIDOMSVGRect **aAnimVal)
+      { return mVal->ToDOMAnimVal(aAnimVal, mSVGElement); }
   };
 
   struct SMILViewBox : public nsISMILAttr

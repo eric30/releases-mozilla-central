@@ -28,12 +28,10 @@
                 label="&openLinkCmd.label;"
                 accesskey="&openLinkCmd.accesskey;"
                 oncommand="gContextMenu.openLink();"/>
-#ifdef MOZ_PER_WINDOW_PRIVATE_BROWSING
       <menuitem id="context-openlinkprivate"
                 label="&openLinkInPrivateWindowCmd.label;"
                 accesskey="&openLinkInPrivateWindowCmd.accesskey;"
                 oncommand="gContextMenu.openLinkInPrivateWindow();"/>
-#endif
       <menuseparator id="context-sep-open"/>
       <menuitem id="context-bookmarklink"
                 label="&bookmarkThisLinkCmd.label;"
@@ -68,6 +66,35 @@
                 label="&mediaUnmute.label;"
                 accesskey="&mediaUnmute.accesskey;"
                 oncommand="gContextMenu.mediaCommand('unmute');"/>
+      <menu id="context-media-playbackrate" label="&mediaPlaybackRate.label;" accesskey="&mediaPlaybackRate.accesskey;">
+        <menupopup>
+          <menuitem id="context-media-playbackrate-050x"
+                    label="&mediaPlaybackRate050x.label;"
+                    accesskey="&mediaPlaybackRate050x.accesskey;"
+                    type="radio"
+                    name="playbackrate"
+                    oncommand="gContextMenu.mediaCommand('playbackRate', 0.5);"/>
+          <menuitem id="context-media-playbackrate-100x"
+                    label="&mediaPlaybackRate100x.label;"
+                    accesskey="&mediaPlaybackRate100x.accesskey;"
+                    type="radio"
+                    name="playbackrate"
+                    checked="true"
+                    oncommand="gContextMenu.mediaCommand('playbackRate', 1.0);"/>
+          <menuitem id="context-media-playbackrate-150x"
+                    label="&mediaPlaybackRate150x.label;"
+                    accesskey="&mediaPlaybackRate150x.accesskey;"
+                    type="radio"
+                    name="playbackrate"
+                    oncommand="gContextMenu.mediaCommand('playbackRate', 1.5);"/>
+          <menuitem id="context-media-playbackrate-200x"
+                    label="&mediaPlaybackRate200x.label;"
+                    accesskey="&mediaPlaybackRate200x.accesskey;"
+                    type="radio"
+                    name="playbackrate"
+                    oncommand="gContextMenu.mediaCommand('playbackRate', 2.0);"/>
+        </menupopup>
+      </menu>
       <menuitem id="context-media-showcontrols"
                 label="&mediaShowControls.label;"
                 accesskey="&mediaShowControls.accesskey;"
@@ -162,6 +189,15 @@
                 label="&emailAudioCmd.label;"
                 accesskey="&emailAudioCmd.accesskey;"
                 oncommand="gContextMenu.sendMedia();"/>
+      <menuitem id="context-ctp-play"
+                label="&playPluginCmd.label;"
+                accesskey="&playPluginCmd.accesskey;"
+                oncommand="gContextMenu.playPlugin();"/>
+      <menuitem id="context-ctp-hide"
+                label="&hidePluginCmd.label;"
+                accesskey="&hidePluginCmd.accesskey;"
+                oncommand="gContextMenu.hidePlugin();"/>
+      <menuseparator id="context-sep-ctp"/>
       <menuitem id="context-back"
                 label="&backCmd.label;"
                 accesskey="&backCmd.accesskey;"
@@ -175,7 +211,7 @@
       <menuitem id="context-reload"
                 label="&reloadCmd.label;"
                 accesskey="&reloadCmd.accesskey;"
-                command="Browser:ReloadOrDuplicate"
+                oncommand="gContextMenu.reload(event);"
                 onclick="checkForMiddleClick(this, event);"/>
       <menuitem id="context-stop"
                 label="&stopCmd.label;"
@@ -228,8 +264,7 @@
                 accesskey="&keywordfield.accesskey;"
                 oncommand="AddKeywordForSearchField();"/>
       <menuitem id="context-searchselect"
-                oncommand="BrowserSearch.loadSearch(getBrowserSelection(), true,
-                                                    'application/x-moz-contextsearch');"/>
+                oncommand="BrowserSearch.loadSearchFromContext(getBrowserSelection());"/>
       <menuseparator id="frame-sep"/>
       <menu id="frame" label="&thisFrameMenu.label;" accesskey="&thisFrameMenu.accesskey;">
         <menupopup>

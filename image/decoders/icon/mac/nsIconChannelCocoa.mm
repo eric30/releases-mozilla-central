@@ -233,7 +233,7 @@ nsresult nsIconChannel::MakeInputStream(nsIInputStream** _retval, bool nonBlocki
 
   // if we don't have an icon yet try to get one by extension
   if (!iconImage && !fileExt.IsEmpty()) {
-    NSString* fileExtension = [NSString stringWithUTF8String:PromiseFlatCString(fileExt).get()];
+    NSString* fileExtension = [NSString stringWithUTF8String:fileExt.get()];
     iconImage = [[NSWorkspace sharedWorkspace] iconForFileType:fileExtension];
   }
 
@@ -345,7 +345,7 @@ NS_IMETHODIMP nsIconChannel::SetLoadFlags(uint32_t aLoadAttributes)
 
 NS_IMETHODIMP nsIconChannel::GetContentType(nsACString &aContentType) 
 {
-  aContentType.AssignLiteral("image/icon");
+  aContentType.AssignLiteral(IMAGE_ICON_MS);
   return NS_OK;
 }
 
@@ -359,7 +359,7 @@ nsIconChannel::SetContentType(const nsACString &aContentType)
 
 NS_IMETHODIMP nsIconChannel::GetContentCharset(nsACString &aContentCharset) 
 {
-  aContentCharset.AssignLiteral("image/icon");
+  aContentCharset.AssignLiteral(IMAGE_ICON_MS);
   return NS_OK;
 }
 

@@ -42,9 +42,6 @@ public class testSearchSuggestions extends BaseTest {
         final int suggestionLayoutId = mDriver.findElement(getActivity(), "suggestion_layout").getId();
         final int suggestionTextId = mDriver.findElement(getActivity(), "suggestion_text").getId();
 
-        // workaround for bug 769524
-        mSolo.sleep(5000);
-
         Actions.EventExpecter enginesEventExpecter = mActions.expectGeckoEvent("SearchEngines:Data");
         final Activity awesomeBarActivity = clickOnAwesomeBar();
         enginesEventExpecter.blockForEvent();
@@ -55,6 +52,7 @@ public class testSearchSuggestions extends BaseTest {
 
             final String query = TEST_QUERY.substring(0, i+1);
             boolean success = waitForTest(new BooleanTest() {
+                @Override
                 public boolean test() {
                     // get the first suggestion row
                     ViewGroup suggestionGroup = (ViewGroup) awesomeBarActivity.findViewById(suggestionLayoutId);
@@ -117,6 +115,7 @@ public class testSearchSuggestions extends BaseTest {
             final Object allPagesTab = getAllPagesTabMethod.invoke(awesomeBarTabs);
             suggestClientField.setAccessible(true);
             waitForTest(new BooleanTest() {
+                @Override
                 public boolean test() {
                     // wait for mSuggestClient to be set before we replace it
                     try {

@@ -69,10 +69,9 @@
 !endif
 
 ; When including WinVer.nsh check if ___WINVER__NSH___ is defined to prevent
-; loading the file a second time. NSIS versions prior to 2.21 didn't include
-; WinVer.nsh so include it with the /NOFATAL option.
+; loading the file a second time.
 !ifndef ___WINVER__NSH___
-  !include /NONFATAL WinVer.nsh
+  !include WinVer.nsh
 !endif
 
 !include x64.nsh
@@ -1506,6 +1505,7 @@
       WriteRegStr SHCTX "$R3\$R5\DefaultIcon" "" "$R7"
 
       ; Main command handler for the app
+      WriteRegStr SHCTX "$R3\$R5\shell" "" "open"
       WriteRegStr SHCTX "$R3\$R5\shell\open\command" "" "$R6"
 
       ; Drop support for DDE (bug 491947), and remove old dde entries if

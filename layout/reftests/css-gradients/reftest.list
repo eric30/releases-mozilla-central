@@ -50,9 +50,9 @@ fuzzy-if(!contentSameGfxBackendAsCanvas,1,88500) fails-if(Android) == linear-ver
 == linear-zero-length-1c.html linear-zero-length-1-ref.html
 == nostops.html about:blank
 == onestop.html about:blank
-fuzzy-if(!contentSameGfxBackendAsCanvas,1,5884) fails-if(Android) random-if(d2d) == radial-1a.html radial-1-ref.html
-fuzzy-if(!contentSameGfxBackendAsCanvas,1,5884) fails-if(Android) random-if(d2d) == radial-1b.html radial-1-ref.html
-fuzzy-if(!contentSameGfxBackendAsCanvas,1,5884) fails-if(Android) random-if(d2d) == radial-1c.html radial-1-ref.html
+fuzzy-if(!contentSameGfxBackendAsCanvas,1,5884) fuzzy-if(cocoaWidget,9,51018) fails-if(Android) random-if(d2d) == radial-1a.html radial-1-ref.html
+fuzzy-if(!contentSameGfxBackendAsCanvas,1,5884) fuzzy-if(cocoaWidget,9,51018) fails-if(Android) random-if(d2d) == radial-1b.html radial-1-ref.html
+fuzzy-if(!contentSameGfxBackendAsCanvas,1,5884) fuzzy-if(cocoaWidget,9,51018) fails-if(Android) random-if(d2d) == radial-1c.html radial-1-ref.html
 fuzzy-if(!contentSameGfxBackendAsCanvas,3,7860) fails-if(Android) == radial-2a.html radial-2-ref.html
 fuzzy-if(!contentSameGfxBackendAsCanvas,3,7860) fails-if(Android) == radial-2b.html radial-2-ref.html
 fuzzy-if(!contentSameGfxBackendAsCanvas,3,7860) fails-if(Android) == radial-2c.html radial-2-ref.html
@@ -123,9 +123,9 @@ fuzzy-if(!contentSameGfxBackendAsCanvas,2,20000) fails-if(Android) == aja-linear
 fuzzy-if(!contentSameGfxBackendAsCanvas,2,20000) fails-if(Android) == aja-linear-5a.html aja-linear-5-ref.html
 fuzzy-if(!contentSameGfxBackendAsCanvas,2,16477) fails-if(Android) == aja-linear-6a.html aja-linear-6-ref.html # bug 526708
 fails == aja-linear-6b.html aja-linear-6-ref.html # bug 522607
-== height-dependence-1.html height-dependence-1-ref.html
-== height-dependence-2.html height-dependence-2-ref.html
-== height-dependence-3.html height-dependence-3-ref.html
+skip-if(B2G) == height-dependence-1.html height-dependence-1-ref.html
+skip-if(B2G) fuzzy-if(cocoaWidget,1,40000) == height-dependence-2.html height-dependence-2-ref.html
+skip-if(B2G) == height-dependence-3.html height-dependence-3-ref.html
 
 fails-if(d2d) == linear-onestopposition-1.html linear-onestopposition-1-ref.html # bug 638664
 == linear-onestopposition-1.html linear-onestopposition-1-ref2.html

@@ -47,7 +47,7 @@ var gContainingWindow = null;
 var gFilter = null;
 
 // "<!--CLEAR-->"
-const BLANK_URL_FOR_CLEARING = "data:text/html,%3C%21%2D%2DCLEAR%2D%2D%3E";
+const BLANK_URL_FOR_CLEARING = "data:text/html;charset=UTF-8,%3C%21%2D%2DCLEAR%2D%2D%3E";
 
 var gBrowser;
 // Are we testing web content loaded in a separate process?
@@ -450,9 +450,9 @@ function StartTests()
         ReadTopManifest(uri);
         BuildUseCounts();
 
-        // We need to filter the tests which will be skipped during this test run, so when we chunk,
-        // we have a more even distribution
-        var tURL = new Array();
+        // Filter tests which will be skipped to get a more even distribution when chunking
+        // tURLs is a temporary array containing all active tests
+        var tURLs = new Array();
         for (var i = 0; i < gURLs.length; ++i) {
             if (gURLs[i].expected == EXPECTED_DEATH)
                 continue;
@@ -463,18 +463,25 @@ function StartTests()
             if (gURLs[i].slow && !gRunSlowTests)
                 continue;
 
-            tURL.push(gURLs[i]);
+            tURLs.push(gURLs[i]);
         }
 
-        gDumpLog("REFTEST INFO | Discovered " + gURLs.length + " tests, after filtering SKIP tests, we have " + tURL.length + "\n");
-        gURLs = tURL;
+        gDumpLog("REFTEST INFO | Discovered " + gURLs.length + " tests, after filtering SKIP tests, we have " + tURLs.length + "\n");
 
         if (gTotalChunks > 0 && gThisChunk > 0) {
-            var testsPerChunk = gURLs.length / gTotalChunks;
+            // Calculate start and end indices of this chunk if tURLs array were
+            // divided evenly
+            var testsPerChunk = tURLs.length / gTotalChunks;
             var start = Math.round((gThisChunk-1) * testsPerChunk);
             var end = Math.round(gThisChunk * testsPerChunk);
+
+            // Map these indices onto the gURLs array. This avoids modifying the
+            // gURLs array which prevents skipped tests from showing up in the log
+            start = gThisChunk == 1 ? 0 : gURLs.indexOf(tURLs[start]);
+            end = gThisChunk == gTotalChunks ? gURLs.length : gURLs.indexOf(tURLs[end + 1]) - 1;
             gURLs = gURLs.slice(start, end);
-            gDumpLog("REFTEST INFO | Running chunk " + gThisChunk + " out of " + gTotalChunks + " chunks.  ")
+
+            gDumpLog("REFTEST INFO | Running chunk " + gThisChunk + " out of " + gTotalChunks + " chunks.  ");
             gDumpLog("tests " + (start+1) + "-" + end + "/" + gURLs.length + "\n");
         }
         gTotalTests = gURLs.length;
@@ -567,6 +574,12 @@ function BuildConditionSandbox(aURL) {
     sandbox.gtk2Widget = xr.widgetToolkit == "gtk2";
     sandbox.qtWidget = xr.widgetToolkit == "qt";
     sandbox.winWidget = xr.widgetToolkit == "windows";
+
+#if MOZ_ASAN
+    sandbox.AddressSanitizer = true;
+#else
+    sandbox.AddressSanitizer = false;
+#endif
 
     var hh = CC[NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX + "http"].
                  getService(CI.nsIHttpProtocolHandler);
@@ -1097,11 +1110,13 @@ function Focus()
 
     var fm = CC["@mozilla.org/focus-manager;1"].getService(CI.nsIFocusManager);
     fm.focusedWindow = gContainingWindow;
+#ifdef XP_MACOSX
     try {
         var dock = CC["@mozilla.org/widget/macdocksupport;1"].getService(CI.nsIMacDockSupport);
         dock.activateApplication(true);
     } catch(ex) {
     }
+#endif // XP_MACOSX
     return true;
 }
 

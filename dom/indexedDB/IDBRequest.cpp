@@ -57,10 +57,7 @@ IDBRequest::Create(nsISupports* aSource,
   request->mSource = aSource;
   request->mTransaction = aTransaction;
   request->BindToOwner(aOwnerCache);
-  if (!request->SetScriptOwner(aOwnerCache->GetScriptOwner())) {
-    return nullptr;
-  }
-
+  request->SetScriptOwner(aOwnerCache->GetScriptOwner());
   request->CaptureCaller(aCallingCx);
 
   return request.forget();
@@ -99,7 +96,7 @@ IDBRequest::NotifyHelperCompleted(HelperBase* aHelper)
   }
 
   // Otherwise we need to get the result from the helper.
-  JSContext* cx = GetJSContext();
+  AutoPushJSContext cx(GetJSContext());
   if (!cx) {
     NS_WARNING("Failed to get safe JSContext!");
     rv = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
@@ -290,8 +287,6 @@ IDBRequest::GetError(nsIDOMDOMError** aError)
   return NS_OK;
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(IDBRequest)
-
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(IDBRequest, IDBWrapperCache)
   // Don't need NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS because
   // nsDOMEventTargetHelper does it for us.
@@ -352,10 +347,7 @@ IDBOpenDBRequest::Create(IDBFactory* aFactory,
   nsRefPtr<IDBOpenDBRequest> request = new IDBOpenDBRequest();
 
   request->BindToOwner(aOwner);
-  if (!request->SetScriptOwner(aScriptOwner)) {
-    return nullptr;
-  }
-
+  request->SetScriptOwner(aScriptOwner);
   request->CaptureCaller(aCallingCx);
   request->mFactory = aFactory;
 
@@ -372,8 +364,6 @@ IDBOpenDBRequest::SetTransaction(IDBTransaction* aTransaction)
 
   mTransaction = aTransaction;
 }
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(IDBOpenDBRequest)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(IDBOpenDBRequest,
                                                   IDBRequest)

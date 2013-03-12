@@ -32,12 +32,14 @@
 #include "nsISupportsUtils.h"
 #include "nsITableCellLayout.h" // For efficient access to table cell
 #include "nsITableEditor.h"
-#include "nsITableLayout.h"     //  data owned by the table and cell frames
 #include "nsLiteralString.h"
 #include "nsQueryFrame.h"
 #include "nsString.h"
 #include "nsTArray.h"
+#include "nsTableCellFrame.h"
+#include "nsTableOuterFrame.h"
 #include "nscore.h"
+#include <algorithm>
 
 using namespace mozilla;
 
@@ -1033,7 +1035,7 @@ nsHTMLEditor::DeleteTableColumn(int32_t aNumber)
     return DeleteTable2(table, selection);
 
   // Check for counts too high
-  aNumber = NS_MIN(aNumber,(colCount-startColIndex));
+  aNumber = std::min(aNumber,(colCount-startColIndex));
 
   nsAutoEditBatch beginBatching(this);
   // Prevent rules testing until we're done
@@ -1267,7 +1269,7 @@ nsHTMLEditor::DeleteTableRow(int32_t aNumber)
   else
   {
     // Check for counts too high
-    aNumber = NS_MIN(aNumber,(rowCount-startRowIndex));
+    aNumber = std::min(aNumber,(rowCount-startRowIndex));
 
     for (int32_t i = 0; i < aNumber; i++)
     {
@@ -1333,7 +1335,7 @@ nsHTMLEditor::DeleteRow(nsIDOMElement *aTable, int32_t aRowIndex)
           // We can't do it now since it upsets cell map,
           //  so we will do it after deleting the row
           spanCellList.AppendElement(cell);
-          newSpanList.AppendElement(NS_MAX((aRowIndex - startRowIndex), actualRowSpan-1));
+          newSpanList.AppendElement(std::max((aRowIndex - startRowIndex), actualRowSpan-1));
         }
       }
       else 
@@ -1456,10 +1458,10 @@ nsHTMLEditor::SelectBlockOfCells(nsIDOMElement *aStartCell, nsIDOMElement *aEndC
 
   // Examine all cell nodes in current selection and 
   //  remove those outside the new block cell region
-  int32_t minColumn = NS_MIN(startColIndex, endColIndex);
-  int32_t minRow    = NS_MIN(startRowIndex, endRowIndex);
-  int32_t maxColumn   = NS_MAX(startColIndex, endColIndex);
-  int32_t maxRow      = NS_MAX(startRowIndex, endRowIndex);
+  int32_t minColumn = std::min(startColIndex, endColIndex);
+  int32_t minRow    = std::min(startRowIndex, endRowIndex);
+  int32_t maxColumn   = std::max(startColIndex, endColIndex);
+  int32_t maxRow      = std::max(startRowIndex, endRowIndex);
 
   nsCOMPtr<nsIDOMElement> cell;
   int32_t currentRowIndex, currentColIndex;
@@ -1488,7 +1490,7 @@ nsHTMLEditor::SelectBlockOfCells(nsIDOMElement *aStartCell, nsIDOMElement *aEndC
   bool    isSelected;
   for (int32_t row = minRow; row <= maxRow; row++)
   {
-    for(int32_t col = minColumn; col <= maxColumn; col += NS_MAX(actualColSpan, 1))
+    for(int32_t col = minColumn; col <= maxColumn; col += std::max(actualColSpan, 1))
     {
       res = GetCellDataAt(table, row, col, getter_AddRefs(cell),
                           &currentRowIndex, &currentColIndex,
@@ -1547,7 +1549,7 @@ nsHTMLEditor::SelectAllTableCells()
   bool    isSelected;
   for(int32_t row = 0; row < rowCount; row++)
   {
-    for(int32_t col = 0; col < colCount; col += NS_MAX(actualColSpan, 1))
+    for(int32_t col = 0; col < colCount; col += std::max(actualColSpan, 1))
     {
       res = GetCellDataAt(table, row, col, getter_AddRefs(cell),
                           &currentRowIndex, &currentColIndex,
@@ -1615,7 +1617,7 @@ nsHTMLEditor::SelectTableRow()
   bool cellSelected = false;
   int32_t rowSpan, colSpan, actualRowSpan, actualColSpan, currentRowIndex, currentColIndex;
   bool    isSelected;
-  for(int32_t col = 0; col < colCount; col += NS_MAX(actualColSpan, 1))
+  for(int32_t col = 0; col < colCount; col += std::max(actualColSpan, 1))
   {
     res = GetCellDataAt(table, startRowIndex, col, getter_AddRefs(cell),
                         &currentRowIndex, &currentColIndex, &rowSpan, &colSpan, 
@@ -1678,7 +1680,7 @@ nsHTMLEditor::SelectTableColumn()
   bool cellSelected = false;
   int32_t rowSpan, colSpan, actualRowSpan, actualColSpan, currentRowIndex, currentColIndex;
   bool    isSelected;
-  for(int32_t row = 0; row < rowCount; row += NS_MAX(actualRowSpan, 1))
+  for(int32_t row = 0; row < rowCount; row += std::max(actualRowSpan, 1))
   {
     res = GetCellDataAt(table, row, startColIndex, getter_AddRefs(cell),
                         &currentRowIndex, &currentColIndex, &rowSpan, &colSpan, 
@@ -1896,7 +1898,7 @@ nsHTMLEditor::SplitCellIntoRows(nsIDOMElement *aTable, int32_t aRowIndex, int32_
       lastCellFound = cell2;
     }
     // Skip to next available cellmap location
-    colIndex += NS_MAX(actualColSpan2, 1);
+    colIndex += std::max(actualColSpan2, 1);
 
     // Done when past end of total number of columns
     if (colIndex > colCount)
@@ -2059,7 +2061,7 @@ nsHTMLEditor::JoinTableCells(bool aMergeNonContiguousContents)
       bool lastRowIsSet = false;
       int32_t lastColInRow = 0;
       int32_t firstColInRow = firstColIndex;
-      for (colIndex = firstColIndex; colIndex < colCount; colIndex += NS_MAX(actualColSpan2, 1))
+      for (colIndex = firstColIndex; colIndex < colCount; colIndex += std::max(actualColSpan2, 1))
       {
         res = GetCellDataAt(table, rowIndex, colIndex, getter_AddRefs(cell2),
                             &startRowIndex2, &startColIndex2,
@@ -2081,7 +2083,7 @@ nsHTMLEditor::JoinTableCells(bool aMergeNonContiguousContents)
             // and keep previous lastColIndex
             //TODO: We could try to find the Maximum firstColInRow
             //      so our block can still extend down more rows?
-            lastRowIndex = NS_MAX(0,rowIndex - 1);
+            lastRowIndex = std::max(0,rowIndex - 1);
             lastRowIsSet = true;
             break;
           }
@@ -2097,7 +2099,7 @@ nsHTMLEditor::JoinTableCells(bool aMergeNonContiguousContents)
           {
             // Cell is in a column less than current right border in 
             //  the third or higher selected row, so stop block at the previous row
-            lastRowIndex = NS_MAX(0,rowIndex - 1);
+            lastRowIndex = std::max(0,rowIndex - 1);
             lastRowIsSet = true;
           }
           // We're done with this row
@@ -2122,7 +2124,7 @@ nsHTMLEditor::JoinTableCells(bool aMergeNonContiguousContents)
             // (don't think we ever get here?)
             // Cell is in a column less than current right boundary,
             //  so stop block at the previous row
-            lastRowIndex = NS_MAX(0,rowIndex - 1);
+            lastRowIndex = std::max(0,rowIndex - 1);
           }
           else
           {
@@ -2131,13 +2133,13 @@ nsHTMLEditor::JoinTableCells(bool aMergeNonContiguousContents)
           }
         }
         // Use the minimum col we found so far for right boundary
-        lastColIndex = NS_MIN(lastColIndex, lastColInRow);
+        lastColIndex = std::min(lastColIndex, lastColInRow);
       }
       else
       {
         // No selected cells in this row -- stop at row above
         //  and leave last column at its previous value
-        lastRowIndex = NS_MAX(0,rowIndex - 1);
+        lastRowIndex = std::max(0,rowIndex - 1);
       }
     }
   
@@ -2147,7 +2149,7 @@ nsHTMLEditor::JoinTableCells(bool aMergeNonContiguousContents)
     // 2nd pass: Do the joining and merging
     for (rowIndex = 0; rowIndex < rowCount; rowIndex++)
     {
-      for (colIndex = 0; colIndex < colCount; colIndex += NS_MAX(actualColSpan2, 1))
+      for (colIndex = 0; colIndex < colCount; colIndex += std::max(actualColSpan2, 1))
       {
         res = GetCellDataAt(table, rowIndex, colIndex, getter_AddRefs(cell2),
                             &startRowIndex2, &startColIndex2,
@@ -2384,7 +2386,7 @@ nsHTMLEditor::FixBadRowSpan(nsIDOMElement *aTable, int32_t aRowIndex, int32_t& a
   int32_t minRowSpan = -1;
   int32_t colIndex;
   
-  for( colIndex = 0; colIndex < colCount; colIndex += NS_MAX(actualColSpan, 1))
+  for( colIndex = 0; colIndex < colCount; colIndex += std::max(actualColSpan, 1))
   {
     res = GetCellDataAt(aTable, aRowIndex, colIndex, getter_AddRefs(cell),
                         &startRowIndex, &startColIndex, &rowSpan, &colSpan, 
@@ -2406,7 +2408,7 @@ nsHTMLEditor::FixBadRowSpan(nsIDOMElement *aTable, int32_t aRowIndex, int32_t& a
     // The amount to reduce everyone's rowspan
     // so at least one cell has rowspan = 1
     int32_t rowsReduced = minRowSpan - 1;
-    for(colIndex = 0; colIndex < colCount; colIndex += NS_MAX(actualColSpan, 1))
+    for(colIndex = 0; colIndex < colCount; colIndex += std::max(actualColSpan, 1))
     {
       res = GetCellDataAt(aTable, aRowIndex, colIndex, getter_AddRefs(cell),
                           &startRowIndex, &startColIndex, &rowSpan, &colSpan, 
@@ -2442,7 +2444,7 @@ nsHTMLEditor::FixBadColSpan(nsIDOMElement *aTable, int32_t aColIndex, int32_t& a
   int32_t minColSpan = -1;
   int32_t rowIndex;
   
-  for( rowIndex = 0; rowIndex < rowCount; rowIndex += NS_MAX(actualRowSpan, 1))
+  for( rowIndex = 0; rowIndex < rowCount; rowIndex += std::max(actualRowSpan, 1))
   {
     res = GetCellDataAt(aTable, rowIndex, aColIndex, getter_AddRefs(cell),
                         &startRowIndex, &startColIndex, &rowSpan, &colSpan, 
@@ -2464,7 +2466,7 @@ nsHTMLEditor::FixBadColSpan(nsIDOMElement *aTable, int32_t aColIndex, int32_t& a
     // The amount to reduce everyone's colspan
     // so at least one cell has colspan = 1
     int32_t colsReduced = minColSpan - 1;
-    for(rowIndex = 0; rowIndex < rowCount; rowIndex += NS_MAX(actualRowSpan, 1))
+    for(rowIndex = 0; rowIndex < rowCount; rowIndex += std::max(actualRowSpan, 1))
     {
       res = GetCellDataAt(aTable, rowIndex, aColIndex, getter_AddRefs(cell),
                           &startRowIndex, &startColIndex, &rowSpan, &colSpan, 
@@ -2607,23 +2609,14 @@ nsHTMLEditor::GetCellIndexes(nsIDOMElement *aCell,
   return cellLayoutObject->GetCellIndexes(*aRowIndex, *aColIndex);
 }
 
-NS_IMETHODIMP
-nsHTMLEditor::GetTableLayoutObject(nsIDOMElement* aTable, nsITableLayout **tableLayoutObject)
+nsTableOuterFrame*
+nsHTMLEditor::GetTableFrame(nsIDOMElement* aTable)
 {
-  *tableLayoutObject = nullptr;
-  NS_ENSURE_TRUE(aTable, NS_ERROR_NOT_INITIALIZED);
-  NS_ENSURE_TRUE(mDocWeak, NS_ERROR_NOT_INITIALIZED);
-  nsCOMPtr<nsIPresShell> ps = GetPresShell();
-  NS_ENSURE_TRUE(ps, NS_ERROR_NOT_INITIALIZED);
+  NS_ENSURE_TRUE(aTable, nullptr);
 
   nsCOMPtr<nsIContent> nodeAsContent( do_QueryInterface(aTable) );
-  NS_ENSURE_TRUE(nodeAsContent, NS_ERROR_FAILURE);
-  // frames are not ref counted, so don't use an nsCOMPtr
-  nsIFrame *layoutObject = nodeAsContent->GetPrimaryFrame();
-  NS_ENSURE_TRUE(layoutObject, NS_ERROR_FAILURE);
-
-  *tableLayoutObject = do_QueryFrame(layoutObject);
-  return *tableLayoutObject ? NS_OK : NS_NOINTERFACE;
+  NS_ENSURE_TRUE(nodeAsContent, nullptr);
+  return do_QueryFrame(nodeAsContent->GetPrimaryFrame());
 }
 
 //Return actual number of cells (a cell with colspan > 1 counts as just 1)
@@ -2675,13 +2668,13 @@ nsHTMLEditor::GetTableSize(nsIDOMElement *aTable,
   NS_ENSURE_SUCCESS(res, res);
   NS_ENSURE_TRUE(table, NS_ERROR_FAILURE);
   
-  // frames are not ref counted, so don't use an nsCOMPtr
-  nsITableLayout *tableLayoutObject;
-  res = GetTableLayoutObject(table.get(), &tableLayoutObject);
-  NS_ENSURE_SUCCESS(res, res);
-  NS_ENSURE_TRUE(tableLayoutObject, NS_ERROR_FAILURE);
+  nsTableOuterFrame* tableFrame = GetTableFrame(table.get());
+  NS_ENSURE_TRUE(tableFrame, NS_ERROR_FAILURE);
 
-  return tableLayoutObject->GetTableSize(*aRowCount, *aColCount); 
+  *aRowCount = tableFrame->GetRowCount();
+  *aColCount = tableFrame->GetColCount();
+
+  return NS_OK;
 }
 
 NS_IMETHODIMP 
@@ -2724,40 +2717,43 @@ nsHTMLEditor::GetCellDataAt(nsIDOMElement* aTable, int32_t aRowIndex,
       return NS_ERROR_FAILURE;
   }
   
-  // frames are not ref counted, so don't use an nsCOMPtr
-  nsITableLayout *tableLayoutObject;
-  res = GetTableLayoutObject(aTable, &tableLayoutObject);
-  NS_ENSURE_SUCCESS(res, res);
-  NS_ENSURE_TRUE(tableLayoutObject, NS_ERROR_FAILURE);
+  nsTableOuterFrame* tableFrame = GetTableFrame(aTable);
+  NS_ENSURE_TRUE(tableFrame, NS_ERROR_FAILURE);
 
-  // Note that this returns NS_TABLELAYOUT_CELL_NOT_FOUND when
-  //  the index(es) are out of bounds
-  nsCOMPtr<nsIDOMElement> cell;
-  res = tableLayoutObject->GetCellDataAt(aRowIndex, aColIndex,
-                                         *getter_AddRefs(cell), 
-                                         *aStartRowIndex, *aStartColIndex,
-                                         *aRowSpan, *aColSpan, 
-                                         *aActualRowSpan, *aActualColSpan, 
-                                         *aIsSelected);
-  if (cell)
-  {
-    *aCell = cell.get();
-    NS_ADDREF(*aCell);
-  }
-  // Convert to editor's generic "not found" return value
-  if (res == NS_TABLELAYOUT_CELL_NOT_FOUND) res = NS_EDITOR_ELEMENT_NOT_FOUND;
-  return res;
+  nsTableCellFrame* cellFrame =
+    tableFrame->GetCellFrameAt(aRowIndex, aColIndex);
+  if (!cellFrame)
+    return NS_ERROR_FAILURE;
+
+  *aIsSelected = cellFrame->IsSelected();
+  cellFrame->GetRowIndex(*aStartRowIndex);
+  cellFrame->GetColIndex(*aStartColIndex);
+  *aRowSpan = cellFrame->GetRowSpan();
+  *aColSpan = cellFrame->GetColSpan();
+  *aActualRowSpan = tableFrame->GetEffectiveRowSpanAt(aRowIndex, aColIndex);
+  *aActualColSpan = tableFrame->GetEffectiveColSpanAt(aRowIndex, aColIndex);
+  nsCOMPtr<nsIDOMElement> domCell = do_QueryInterface(cellFrame->GetContent());
+  domCell.forget(aCell);
+
+  return NS_OK;
 }
 
 // When all you want is the cell
 NS_IMETHODIMP 
 nsHTMLEditor::GetCellAt(nsIDOMElement* aTable, int32_t aRowIndex, int32_t aColIndex, nsIDOMElement **aCell)
 {
-  int32_t startRowIndex, startColIndex, rowSpan, colSpan, actualRowSpan, actualColSpan;
-  bool    isSelected;
-  return GetCellDataAt(aTable, aRowIndex, aColIndex, aCell, 
-                       &startRowIndex, &startColIndex, &rowSpan, &colSpan, 
-                       &actualRowSpan, &actualColSpan, &isSelected);
+  NS_ENSURE_ARG_POINTER(aCell);
+  *aCell = nullptr;
+
+  nsTableOuterFrame* tableFrame = GetTableFrame(aTable);
+  if (!tableFrame)
+    return NS_ERROR_FAILURE;
+
+  nsCOMPtr<nsIDOMElement> domCell =
+    do_QueryInterface(tableFrame->GetCellAt(aRowIndex, aColIndex));
+  domCell.forget(aCell);
+
+  return NS_OK;
 }
 
 // When all you want are the rowspan and colspan (not exposed in nsITableEditor)
@@ -2765,12 +2761,14 @@ NS_IMETHODIMP
 nsHTMLEditor::GetCellSpansAt(nsIDOMElement* aTable, int32_t aRowIndex, int32_t aColIndex, 
                              int32_t& aActualRowSpan, int32_t& aActualColSpan)
 {
-  nsCOMPtr<nsIDOMElement> cell;    
-  int32_t startRowIndex, startColIndex, rowSpan, colSpan;
-  bool    isSelected;
-  return GetCellDataAt(aTable, aRowIndex, aColIndex, getter_AddRefs(cell), 
-                       &startRowIndex, &startColIndex, &rowSpan, &colSpan, 
-                       &aActualRowSpan, &aActualColSpan, &isSelected);
+  nsTableOuterFrame* tableFrame = GetTableFrame(aTable);
+  if (!tableFrame)
+    return NS_ERROR_FAILURE;
+
+  aActualRowSpan = tableFrame->GetEffectiveRowSpanAt(aRowIndex, aColIndex);
+  aActualColSpan = tableFrame->GetEffectiveColSpanAt(aRowIndex, aColIndex);
+
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -3344,7 +3342,7 @@ nsHTMLEditor::AllCellsInRowSelected(nsIDOMElement *aTable, int32_t aRowIndex, in
   int32_t curStartRowIndex, curStartColIndex, rowSpan, colSpan, actualRowSpan, actualColSpan;
   bool    isSelected;
 
-  for( int32_t col = 0; col < aNumberOfColumns; col += NS_MAX(actualColSpan, 1))
+  for( int32_t col = 0; col < aNumberOfColumns; col += std::max(actualColSpan, 1))
   {
     nsCOMPtr<nsIDOMElement> cell;    
     nsresult res = GetCellDataAt(aTable, aRowIndex, col, getter_AddRefs(cell),
@@ -3373,7 +3371,7 @@ nsHTMLEditor::AllCellsInColumnSelected(nsIDOMElement *aTable, int32_t aColIndex,
   int32_t curStartRowIndex, curStartColIndex, rowSpan, colSpan, actualRowSpan, actualColSpan;
   bool    isSelected;
 
-  for( int32_t row = 0; row < aNumberOfRows; row += NS_MAX(actualRowSpan, 1))
+  for( int32_t row = 0; row < aNumberOfRows; row += std::max(actualRowSpan, 1))
   {
     nsCOMPtr<nsIDOMElement> cell;    
     nsresult res = GetCellDataAt(aTable, row, aColIndex, getter_AddRefs(cell),

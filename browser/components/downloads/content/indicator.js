@@ -349,8 +349,11 @@ const DownloadsIndicatorView = {
   /**
    * If the status indicator is visible in its assigned position, shows for a
    * brief time a visual notification of a relevant event, like a new download.
+   *
+   * @param aType
+   *        Set to "start" for new downloads, "finish" for completed downloads.
    */
-  showEventNotification: function DIV_showEventNotification()
+  showEventNotification: function DIV_showEventNotification(aType)
   {
     if (!this._initialized) {
       return;
@@ -366,7 +369,7 @@ const DownloadsIndicatorView = {
       DownloadsButton.updatePosition();
 
       let indicator = this.indicator;
-      indicator.setAttribute("notification", "true");
+      indicator.setAttribute("notification", aType);
       this._notificationTimeout = setTimeout(
         function () indicator.removeAttribute("notification"), 1000);
     }
@@ -486,7 +489,7 @@ const DownloadsIndicatorView = {
     if (this._attention != aValue) {
       this._attention = aValue;
       if (aValue) {
-        this.indicator.setAttribute("attention", "true")
+        this.indicator.setAttribute("attention", "true");
       } else {
         this.indicator.removeAttribute("attention");
       }
@@ -535,7 +538,8 @@ const DownloadsIndicatorView = {
     let name = {};
     let url = browserDragAndDrop.drop(aEvent, name);
     if (url) {
-      saveURL(url, name.value, null, true, true);
+      let sourceDoc = dt.mozSourceNode ? dt.mozSourceNode.ownerDocument : document;
+      saveURL(url, name.value, null, true, true, null, sourceDoc);
       aEvent.preventDefault();
     }
   },

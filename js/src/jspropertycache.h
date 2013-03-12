@@ -84,7 +84,7 @@ class PropertyCache
 {
   private:
     enum {
-        SIZE_LOG2 = 12,
+        SIZE_LOG2 = 8,
         SIZE = JS_BIT(SIZE_LOG2),
         MASK = JS_BITMASK(SIZE_LOG2)
     };
@@ -155,8 +155,8 @@ class PropertyCache
 
   public:
     JS_ALWAYS_INLINE void test(JSContext *cx, jsbytecode *pc,
-                               JSObject *&obj, JSObject *&pobj,
-                               PropertyCacheEntry *&entry, PropertyName *&name);
+                               JSObject **obj, JSObject **pobj,
+                               PropertyCacheEntry **entry, PropertyName **name);
 
     /*
      * Test for cached information about a property set on *objp at pc.

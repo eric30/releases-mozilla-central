@@ -18,14 +18,14 @@ FAIL_ON_WARNINGS := 1
 
 include $(topsrcdir)/dom/dom-config.mk
 
-TEST_DIRS += mochitest
-
 XPIDLSRCS = \
   nsIOpenWindowEventDetail.idl \
+  nsIAsyncScrollEventDetail.idl \
   $(NULL)
 
 EXPORTS = \
   nsOpenWindowEventDetail.h \
+  nsAsyncScrollEventDetail.h \
   $(NULL)
 
 EXPORTS_NAMESPACES = mozilla
@@ -35,6 +35,7 @@ EXPORTS_mozilla = \
 
 CPPSRCS = \
   nsOpenWindowEventDetail.cpp \
+  nsAsyncScrollEventDetail.cpp \
   BrowserElementParent.cpp \
   $(NULL)
 
@@ -45,6 +46,7 @@ EXTRA_COMPONENTS = \
 
 EXTRA_JS_MODULES = \
   BrowserElementPromptService.jsm \
+  BrowserElementParent.jsm \
   $(NULL)
 
 include $(topsrcdir)/config/config.mk

@@ -123,7 +123,11 @@ DebuggerTransport.prototype = {
                                                         aStream.available());
       while (this._processIncoming()) {};
     } catch(e) {
-      dumpn("Unexpected error reading from debugging connection: " + e + " - " + e.stack);
+      let msg = "Unexpected error reading from debugging connection: " + e + " - " + e.stack;
+      if (Cu.reportError) {
+        Cu.reportError(msg);
+      }
+      dump(msg + "\n");
       this.close();
       return;
     }
@@ -158,7 +162,11 @@ DebuggerTransport.prototype = {
       packet = this._converter.ConvertToUnicode(packet);
       var parsed = JSON.parse(packet);
     } catch(e) {
-      dumpn("Error parsing incoming packet: " + packet + " (" + e + " - " + e.stack + ")");
+      let msg = "Error parsing incoming packet: " + packet + " (" + e + " - " + e.stack + ")";
+      if (Cu.reportError) {
+        Cu.reportError(msg);
+      }
+      dump(msg + "\n");
       return true;
     }
 
@@ -169,7 +177,11 @@ DebuggerTransport.prototype = {
         self.hooks.onPacket(parsed);
       }}, 0);
     } catch(e) {
-      dumpn("Error handling incoming packet: " + e + " - " + e.stack);
+      let msg = "Error handling incoming packet: " + e + " - " + e.stack;
+      if (Cu.reportError) {
+        Cu.reportError(msg);
+      }
+      dump(msg + "\n");
       dumpn("Packet was: " + packet);
     }
 
@@ -207,13 +219,17 @@ LocalDebuggerTransport.prototype = {
         dumpn("Got: " + JSON.stringify(aPacket, null, 2));
       }
       this._deepFreeze(aPacket);
-      let self = this;
+      let other = this.other;
       Services.tm.currentThread.dispatch({run: function() {
-        self.other.hooks.onPacket(aPacket);
+        other.hooks.onPacket(aPacket);
       }}, 0);
     } catch(e) {
-      dumpn("Error handling incoming packet: " + e + " - " + e.stack);
-      dumpn("Packet was: " + aPacket);
+      let msg = "Error handling incoming packet: " + e + " - " + e.stack;
+      if (Cu.reportError) {
+        Cu.reportError(msg);
+      }
+      dump(msg + "\n");
+      dumpn("Packet was: " + aPacket + "\n");
     }
   },
 

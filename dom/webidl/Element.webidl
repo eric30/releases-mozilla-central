@@ -14,7 +14,6 @@
  */
 
 interface Attr;
-interface NamedNodeMap;
 
 interface Element : Node {
 /*
@@ -25,13 +24,17 @@ interface Element : Node {
   readonly attribute DOMString? prefix;
   readonly attribute DOMString localName;
 */
+  // Not [Constant] because it depends on which document we're in
+  [Pure]
   readonly attribute DOMString tagName;
 
+  [Pure]
            attribute DOMString id;
 /*
   FIXME Bug 810677 Move className from HTMLElement to Element
            attribute DOMString className;
 */
+  [Constant]
   readonly attribute DOMTokenList? classList;
 
   //readonly attribute Attr[] attributes;
@@ -53,11 +56,17 @@ interface Element : Node {
   HTMLCollection getElementsByTagNameNS(DOMString? namespace, DOMString localName);
   HTMLCollection getElementsByClassName(DOMString classNames);
 
+  [Constant]
   readonly attribute HTMLCollection children;
+  [Pure]
   readonly attribute Element? firstElementChild;
+  [Pure]
   readonly attribute Element? lastElementChild;
+  [Pure]
   readonly attribute Element? previousElementSibling;
+  [Pure]
   readonly attribute Element? nextElementSibling;
+  [Pure]
   readonly attribute unsigned long childElementCount;
 
   // NEW
@@ -135,18 +144,17 @@ interface Element : Node {
   Attr getAttributeNodeNS(DOMString? namespaceURI, DOMString localName);
   [Throws]
   Attr setAttributeNodeNS(Attr newAttr);
-/*
 };
 
 // http://dev.w3.org/csswg/cssom-view/#extensions-to-the-element-interface
 partial interface Element {
-*/
   [Throws]
   ClientRectList getClientRects();
   ClientRect getBoundingClientRect();
 
   // scrolling
   void scrollIntoView(optional boolean top = true);
+  // None of the CSSOM attributes are [Pure], because they flush
            attribute long scrollTop;   // scroll on setting
            attribute long scrollLeft;  // scroll on setting
   readonly attribute long scrollWidth;
@@ -163,29 +171,28 @@ partial interface Element {
      set to arbitrarily large values. */
   readonly attribute long scrollTopMax;
   readonly attribute long scrollLeftMax;
-/*
 };
 
-enum insertAdjacentHTMLPosition {
-  "beforebegin",
-  "afterbegin",
-  "beforeend",
-  "afterend"
+// http://dvcs.w3.org/hg/undomanager/raw-file/tip/undomanager.html
+partial interface Element {
+  [Pref="dom.undo_manager.enabled"]
+  readonly attribute UndoManager? undoManager;
+  [SetterThrows,Pref="dom.undo_manager.enabled"]
+  attribute boolean undoScope;
 };
 
 // http://domparsing.spec.whatwg.org/#extensions-to-the-element-interface
 partial interface Element {
-  [Throws]
+  [Throws,TreatNullAs=EmptyString]
   attribute DOMString innerHTML;
-  [Throws]
+  [Throws,TreatNullAs=EmptyString]
   attribute DOMString outerHTML;
   [Throws]
-  void insertAdjacentHTML(insertAdjacentHTMLPosition position, DOMString text);
+  void insertAdjacentHTML(DOMString position, DOMString text);
 };
 
 // http://www.w3.org/TR/selectors-api/#interface-definitions
 partial interface Element {
-*/
   [Throws]
   Element?  querySelector(DOMString selectors);
   [Throws]

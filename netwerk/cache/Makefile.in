@@ -7,7 +7,6 @@ DEPTH     = @DEPTH@
 topsrcdir = @top_srcdir@
 srcdir    = @srcdir@
 VPATH     = @srcdir@
-FAIL_ON_WARNINGS := 1
 
 include $(DEPTH)/config/autoconf.mk
 
@@ -16,6 +15,7 @@ LIBRARY_NAME   = nkcache_s
 LIBXUL_LIBRARY = 1
 XPIDL_MODULE   = necko_cache
 GRE_MODULE     = 1
+FAIL_ON_WARNINGS := 1
 
 FORCE_STATIC_LIB = 1
 
@@ -26,7 +26,6 @@ XPIDLSRCS = \
   nsICacheService.idl \
   nsICacheSession.idl \
   nsICacheVisitor.idl \
-  nsIDiskCacheStreamInternal.idl \
   $(NULL)
 
 EXPORTS = \

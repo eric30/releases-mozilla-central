@@ -9,6 +9,25 @@ const Cu = Components.utils;
 
 const CACHE_MAX_GROUP_ENTRIES = 100;
 
+
+// We have a whitelist for getting/setting. This is because
+// there are potential privacy issues with a compromised
+// content process checking the user's content preferences
+// and using that to discover all the websites visited, etc.
+// Also there are both potential race conditions (if two processes
+// set more than one value in succession, and the values
+// only make sense together), as well as security issues, if
+// a compromised content process can send arbitrary setPref
+// messages. The whitelist contains only those settings that
+// are not at risk for either.
+// We currently whitelist saving/reading the last directory of file
+// uploads, and the last current spellchecker dictionary which are so far
+// the only need we have identified.
+const REMOTE_WHITELIST = [
+  "browser.upload.lastDir",
+  "spellcheck.lang",
+];
+
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 /**
@@ -26,25 +45,15 @@ function electrolify(service) {
       Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT) {
     // Parent process
 
+    service.messageManager = Cc["@mozilla.org/parentprocessmessagemanager;1"].
+                             getService(Ci.nsIMessageBroadcaster);
+
     // Setup listener for child messages. We don't need to call
     // addMessageListener as the wakeup service will do that for us.
     service.receiveMessage = function(aMessage) {
       var json = aMessage.json;
-      // We have a whitelist for getting/setting. This is because
-      // there are potential privacy issues with a compromised
-      // content process checking the user's content preferences
-      // and using that to discover all the websites visited, etc.
-      // Also there are both potential race conditions (if two processes
-      // set more than one value in succession, and the values
-      // only make sense together), as well as security issues, if
-      // a compromised content process can send arbitrary setPref
-      // messages. The whitelist contains only those settings that
-      // are not at risk for either.
-      // We currently whitelist saving/reading the last directory of file
-      // uploads, and the last current spellchecker dictionary which are so far
-      // the only need we have identified.
-      const NAME_WHITELIST = ["browser.upload.lastDir", "spellcheck.lang"];
-      if (NAME_WHITELIST.indexOf(json.name) == -1)
+
+      if (REMOTE_WHITELIST.indexOf(json.name) == -1)
         return { succeeded: false };
 
       switch (aMessage.name) {
@@ -88,6 +97,19 @@ function electrolify(service) {
         return ret.value;
       };
     });
+
+    // Listen to preference change notifications from the parent and notify
+    // observers in the child process according to the change
+    service.messageManager.addMessageListener("ContentPref:notifyPrefSet",
+      function(aMessage) {
+        var json = aMessage.json;
+        service._notifyPrefSet(json.group, json.name, json.value);
+      });
+    service.messageManager.addMessageListener("ContentPref:notifyPrefRemoved",
+      function(aMessage) {
+        var json = aMessage.json;
+        service._notifyPrefRemoved(json.group, json.name);
+      });
   }
 }
 
@@ -106,61 +128,48 @@ function ContentPrefService() {
   this._observerSvc.addObserver(this, "xpcom-shutdown", false);
 }
 
-var inMemoryPrefsProto = {
-  getPref: function(aName, aGroup) {
-    aGroup = aGroup || "__GlobalPrefs__";
-
-    if (this._prefCache[aGroup] && this._prefCache[aGroup].has(aName)) {
-      let value = this._prefCache[aGroup].get(aName);
-      return [true, value];
-    }
-    return [false, undefined];
-  },
-
-  setPref: function(aName, aValue, aGroup) {
-    if (typeof aValue == "boolean")
-      aValue = aValue ? 1 : 0;
-    else if (aValue === undefined)
-      aValue = null;
-
-    this.cachePref(aName, aValue, aGroup);
-  },
-
-  removePref: function(aName, aGroup) {
-    aGroup = aGroup || "__GlobalPrefs__";
-
-    if (this._prefCache[aGroup].has(aName)) {
-      this._prefCache[aGroup].delete(aName);
-      if (this._prefCache[aGroup].size == 0) {
-        // remove empty group
-        delete this._prefCache[aGroup];
-      }
-    }
-  },
-
-  invalidate: function(aKeepGlobal) {
-    if (!aKeepGlobal) {
-      this._prefCache = {};
-      return;
-    }
-
-    if (this._prefCache.hasOwnProperty("__GlobalPrefs__")) {
-      let globals = this._prefCache["__GlobalPrefs__"];
-      this._prefCache = {"__GlobalPrefs__": globals};
-    } else {
-      this._prefCache = {};
+Cu.import("resource://gre/modules/ContentPrefStore.jsm");
+const cache = new ContentPrefStore();
+cache.set = function CPS_cache_set(group, name, val) {
+  Object.getPrototypeOf(this).set.apply(this, arguments);
+  let groupCount = Object.keys(this._groups).length;
+  if (groupCount >= CACHE_MAX_GROUP_ENTRIES) {
+    // Clean half of the entries
+    for (let [group, name, ] in this) {
+      this.remove(group, name);
+      groupCount--;
+      if (groupCount < CACHE_MAX_GROUP_ENTRIES / 2)
+        break;
     }
   }
 };
+
+const privModeStorage = new ContentPrefStore();
 
 ContentPrefService.prototype = {
   //**************************************************************************//
   // XPCOM Plumbing
 
-  classID:          Components.ID("{e3f772f3-023f-4b32-b074-36cf0fd5d414}"),
-  QueryInterface:   XPCOMUtils.generateQI([Ci.nsIContentPrefService,
-                                           Ci.nsIMessageListener]),
+  classID: Components.ID("{e3f772f3-023f-4b32-b074-36cf0fd5d414}"),
 
+  QueryInterface: function CPS_QueryInterface(iid) {
+    let supportedIIDs = [
+      Ci.nsIContentPrefService,
+      Ci.nsIFrameMessageListener,
+      Ci.nsISupports,
+    ];
+    if (supportedIIDs.some(function (i) iid.equals(i)))
+      return this;
+    if (iid.equals(Ci.nsIContentPrefService2)) {
+      if (!this._contentPrefService2) {
+        let s = {};
+        Cu.import("resource://gre/modules/ContentPrefService2.jsm", s);
+        this._contentPrefService2 = new s.ContentPrefService2(this);
+      }
+      return this._contentPrefService2;
+    }
+    throw Cr.NS_ERROR_NO_INTERFACE;
+  },
 
   //**************************************************************************//
   // Convenience Getters
@@ -263,6 +272,9 @@ ContentPrefService.prototype = {
       this.__stmtUpdatePref = null;
     }
 
+    if (this._contentPrefService2)
+      this._contentPrefService2.destroy();
+
     this._dbConnection.asyncClose();
 
     // Delete references to XPCOM components to make sure we don't leak them
@@ -286,94 +298,17 @@ ContentPrefService.prototype = {
         this._destroy();
         break;
       case "last-pb-context-exited":
-        this._privModeStorage.invalidate();
+        this._privModeStorage.removeAll();
         break;
     }
   },
 
 
   //**************************************************************************//
-  // Prefs cache
-  _cache: Object.create(inMemoryPrefsProto, {
-    _prefCache: { 
-      value: {}, configurable: true, writable: true, enumerable: true
-    },
+  // in-memory cache and private-browsing stores
 
-    cachePref: { value:
-      function(aName, aValue, aGroup) {
-        aGroup = aGroup || "__GlobalPrefs__";
-
-        if (!this._prefCache[aGroup]) {
-          this._possiblyCleanCache();
-          this._prefCache[aGroup] = new Map();
-        }
-
-        this._prefCache[aGroup].set(aName, aValue);
-      }
-    },
-
-    _possiblyCleanCache: { value:
-      function() {
-        let groupCount = Object.keys(this._prefCache).length;
-
-        if (groupCount >= CACHE_MAX_GROUP_ENTRIES) {
-          // Clean half of the entries
-          for (let entry in this._prefCache) {
-            delete this._prefCache[entry];
-            groupCount--;
-
-            if (groupCount < CACHE_MAX_GROUP_ENTRIES / 2)
-              break;
-          }
-        }
-      }
-    }
-  }),
-
-  //**************************************************************************//
-  // Private mode storage
-  _privModeStorage: Object.create(inMemoryPrefsProto, {
-    _prefCache: { 
-      value: {}, configurable: true, writable: true, enumerable: true
-    },
-
-    cachePref: { value: 
-      function(aName, aValue, aGroup) {
-        aGroup = aGroup || "__GlobalPrefs__";
-
-        if (!this._prefCache[aGroup]) {
-          this._prefCache[aGroup] = new Map();
-        }
-
-        this._prefCache[aGroup].set(aName, aValue);
-      }
-    },
-
-    getPrefs: { value: 
-      function(aGroup) {
-        aGroup = aGroup || "__GlobalPrefs__";
-        if (this._prefCache[aGroup]) {
-          return [true, this._prefCache[aGroup]];
-        }
-        return [false, undefined];
-      }
-    },
-
-    groupsForName: { value: 
-      function(aName) {
-        var res = [];
-        for (let entry in this._prefCache) {
-          if (this._prefCache[entry]) {
-            if (entry === "__GlobalPrefs__") {
-              entry = null;
-            }
-            res.push(entry);
-          }
-        }
-        return res;
-      }
-    }
-  }),
+  _cache: cache,
+  _privModeStorage: privModeStorage,
 
   //**************************************************************************//
   // nsIContentPrefService
@@ -386,8 +321,8 @@ ContentPrefService.prototype = {
     var group = this._parseGroupParam(aGroup);
 
     if (aContext && aContext.usePrivateBrowsing) {
-      let [haspref, value] = this._privModeStorage.getPref(aName, group);
-      if (haspref) {
+      if (this._privModeStorage.has(group, aName)) {
+        let value = this._privModeStorage.get(group, aName);
         if (aCallback) {
           this._scheduleCallback(function(){aCallback.onResult(value);});
           return;
@@ -414,8 +349,8 @@ ContentPrefService.prototype = {
     var group = this._parseGroupParam(aGroup);
 
     if (aContext && aContext.usePrivateBrowsing) {
-      this._privModeStorage.setPref(aName, aValue, group);
-      this._notifyPrefSet(group, aName, aValue);
+      this._privModeStorage.setWithCast(group, aName, aValue);
+      this._broadcastPrefSet(group, aName, aValue);
       return;
     }
 
@@ -436,9 +371,8 @@ ContentPrefService.prototype = {
     else
       this._insertPref(groupID, settingID, aValue);
 
-    this._cache.setPref(aName, aValue, group);
-
-    this._notifyPrefSet(group, aName, aValue);
+    this._cache.setWithCast(group, aName, aValue);
+    this._broadcastPrefSet(group, aName, aValue);
   },
 
   hasPref: function ContentPrefService_hasPref(aGroup, aName, aContext) {
@@ -454,8 +388,7 @@ ContentPrefService.prototype = {
 
     let group = this._parseGroupParam(aGroup);
     let storage = aContext && aContext.usePrivateBrowsing ? this._privModeStorage: this._cache;
-    let [cached,] = storage.getPref(aName, group);
-    return cached;
+    return storage.has(group, aName);
   },
 
   removePref: function ContentPrefService_removePref(aGroup, aName, aContext) {
@@ -466,8 +399,8 @@ ContentPrefService.prototype = {
     var group = this._parseGroupParam(aGroup);
 
     if (aContext && aContext.usePrivateBrowsing) {
-      this._privModeStorage.removePref(aName, group);
-      this._notifyPrefRemoved(group, aName);
+      this._privModeStorage.remove(group, aName);
+      this._broadcastPrefRemoved(group, aName);
       return;
     }
 
@@ -489,17 +422,17 @@ ContentPrefService.prototype = {
     if (groupID)
       this._deleteGroupIfUnused(groupID);
 
-    this._cache.removePref(aName, group);
-    this._notifyPrefRemoved(group, aName);
+    this._cache.remove(group, aName);
+    this._broadcastPrefRemoved(group, aName);
   },
 
   removeGroupedPrefs: function ContentPrefService_removeGroupedPrefs(aContext) {
     // will not delete global preferences
     if (aContext && aContext.usePrivateBrowsing) {
         // keep only global prefs
-        this._privModeStorage.invalidate(true);
+        this._privModeStorage.removeGrouped();
     }
-    this._cache.invalidate(true);
+    this._cache.removeGrouped();
     this._dbConnection.beginTransaction();
     try {
       this._dbConnection.executeSimpleSQL("DELETE FROM prefs WHERE groupID IS NOT NULL");
@@ -522,11 +455,11 @@ ContentPrefService.prototype = {
                                  Cr.NS_ERROR_ILLEGAL_VALUE);
 
     if (aContext && aContext.usePrivateBrowsing) {
-      let groupNames = this._privModeStorage.groupsForName(aName);
-      for (var i = 0; i < groupNames.length; i++) {
-        let groupName = groupNames[i];
-        this._privModeStorage.removePref(aName, groupName);
-        this._notifyPrefRemoved(groupName, aName);
+      for (let [group, name, ] in this._privModeStorage) {
+        if (name === aName) {
+          this._privModeStorage.remove(group, aName);
+          this._broadcastPrefRemoved(group, aName);
+        }
       }
     }
 
@@ -563,11 +496,11 @@ ContentPrefService.prototype = {
     this._dbConnection.executeSimpleSQL("DELETE FROM settings WHERE id = " + settingID);
 
     for (var i = 0; i < groupNames.length; i++) {
-      this._cache.removePref(aName, groupNames[i]);
+      this._cache.remove(groupNames[i], aName);
       if (groupNames[i]) // ie. not null, which will be last (and i == groupIDs.length)
         this._deleteGroupIfUnused(groupIDs[i]);
       if (!aContext || !aContext.usePrivateBrowsing) {
-        this._notifyPrefRemoved(groupNames[i], aName);
+        this._broadcastPrefRemoved(groupNames[i], aName);
       }
     }
   },
@@ -577,9 +510,9 @@ ContentPrefService.prototype = {
     if (aContext && aContext.usePrivateBrowsing) {
         let prefs = Cc["@mozilla.org/hash-property-bag;1"].
                     createInstance(Ci.nsIWritablePropertyBag);
-        let [hasbranch,properties] = this._privModeStorage.getPrefs(group);
-        for (let [entry, value] of properties) {
-          prefs.setProperty(entry, value);
+        for (let [sgroup, sname, sval] in this._privModeStorage) {
+          if (sgroup === group)
+            prefs.setProperty(sname, sval);
         }
         return prefs;
     }
@@ -597,11 +530,9 @@ ContentPrefService.prototype = {
     if (aContext && aContext.usePrivateBrowsing) {
       let prefs = Cc["@mozilla.org/hash-property-bag;1"].
                   createInstance(Ci.nsIWritablePropertyBag);
-      let groupNames = this._privModeStorage.groupsForName(aName);
-      for (var i = 0; i < groupNames.length; i++) {
-        let groupName = groupNames[i];
-        prefs.setProperty(groupName,
-                          this._privModeStorage.getPref(aName, groupName)[1]);
+      for (let [sgroup, sname, sval] in this._privModeStorage) {
+        if (sname === aName)
+          prefs.setProperty(sgroup, sval);
       }
       return prefs;
     }
@@ -659,7 +590,10 @@ ContentPrefService.prototype = {
 
     return observers;
   },
-  
+
+  /**
+   * Notify all observers about the removal of a preference.
+   */
   _notifyPrefRemoved: function ContentPrefService__notifyPrefRemoved(aGroup, aName) {
     for each (var observer in this._getObservers(aName)) {
       try {
@@ -671,6 +605,9 @@ ContentPrefService.prototype = {
     }
   },
 
+  /**
+   * Notify all observers about a preference change.
+   */
   _notifyPrefSet: function ContentPrefService__notifyPrefSet(aGroup, aName, aValue) {
     for each (var observer in this._getObservers(aName)) {
       try {
@@ -679,6 +616,38 @@ ContentPrefService.prototype = {
       catch(ex) {
         Cu.reportError(ex);
       }
+    }
+  },
+
+  /**
+   * Notify all observers in the current process about the removal of a
+   * preference and send a message to all other processes so that they can in
+   * turn notify their observers about the change. This is meant to be called
+   * only in the parent process. Only whitelisted preferences are broadcast to
+   * the child processes.
+   */
+  _broadcastPrefRemoved: function ContentPrefService__broadcastPrefRemoved(aGroup, aName) {
+    this._notifyPrefRemoved(aGroup, aName);
+
+    if (REMOTE_WHITELIST.indexOf(aName) != -1) {
+      this.messageManager.broadcastAsyncMessage('ContentPref:notifyPrefRemoved',
+        { "group": aGroup, "name": aName } );
+    }
+  },
+
+  /**
+   * Notify all observers in the current process about a preference change and
+   * send a message to all other processes so that they can in turn notify
+   * their observers about the change. This is meant to be called only in the
+   * parent process. Only whitelisted preferences are broadcast to the child
+   * processes.
+   */
+  _broadcastPrefSet: function ContentPrefService__broadcastPrefSet(aGroup, aName, aValue) {
+    this._notifyPrefSet(aGroup, aName, aValue);
+
+    if (REMOTE_WHITELIST.indexOf(aName) != -1) {
+      this.messageManager.broadcastAsyncMessage('ContentPref:notifyPrefSet',
+        { "group": aGroup, "name": aName, "value": aValue } );
     }
   },
 
@@ -719,8 +688,9 @@ ContentPrefService.prototype = {
   },
 
   _selectPref: function ContentPrefService__selectPref(aGroup, aSetting, aCallback) {
-    let [cached, value] = this._cache.getPref(aSetting, aGroup);
-    if (cached) {
+    let value = undefined;
+    if (this._cache.has(aGroup, aSetting)) {
+      value = this._cache.get(aGroup, aSetting);
       if (aCallback) {
         this._scheduleCallback(function(){aCallback.onResult(value);});
         return;
@@ -735,7 +705,7 @@ ContentPrefService.prototype = {
       if (aCallback) {
         let cache = this._cache;
         new AsyncStatement(this._stmtSelectPref).execute({onResult: function(aResult) {
-          cache.cachePref(aSetting, aResult, aGroup);
+          cache.set(aGroup, aSetting, aResult);
           aCallback.onResult(aResult);
         }});
       }
@@ -743,7 +713,7 @@ ContentPrefService.prototype = {
         if (this._stmtSelectPref.executeStep()) {
           value = this._stmtSelectPref.row["value"];
         }
-        this._cache.cachePref(aSetting, value, aGroup);
+        this._cache.set(aGroup, aSetting, value);
       }
     }
     finally {
@@ -768,8 +738,9 @@ ContentPrefService.prototype = {
   },
 
   _selectGlobalPref: function ContentPrefService__selectGlobalPref(aName, aCallback) {
-    let [cached, value] = this._cache.getPref(aName, null);
-    if (cached) {
+    let value = undefined;
+    if (this._cache.has(null, aName)) {
+      value = this._cache.get(null, aName);
       if (aCallback) {
         this._scheduleCallback(function(){aCallback.onResult(value);});
         return;
@@ -783,7 +754,7 @@ ContentPrefService.prototype = {
       if (aCallback) {
         let cache = this._cache;
         new AsyncStatement(this._stmtSelectGlobalPref).execute({onResult: function(aResult) {
-          cache.cachePref(aName, aResult);
+          cache.set(null, aName, aResult);
           aCallback.onResult(aResult);
         }});
       }
@@ -791,7 +762,7 @@ ContentPrefService.prototype = {
         if (this._stmtSelectGlobalPref.executeStep()) {
           value = this._stmtSelectGlobalPref.row["value"];
         }
-        this._cache.cachePref(aName, value);
+        this._cache.set(null, aName, value);
       }
     }
     finally {

@@ -13,8 +13,6 @@
 #include "nsCOMPtr.h"
 #include "mozilla/dom/CSS2PropertiesBinding.h"
 
-class nsCSSParser;
-class nsIURI;
 class nsIPrincipal;
 class nsIDocument;
 
@@ -48,8 +46,10 @@ public:
   NS_IMETHOD SetCssText(const nsAString & aCssText) MOZ_OVERRIDE;
   NS_IMETHOD GetPropertyValue(const nsAString & propertyName,
                               nsAString & _retval) MOZ_OVERRIDE;
-  NS_IMETHOD GetPropertyCSSValue(const nsAString & propertyName,
-                                 nsIDOMCSSValue **_retval) MOZ_OVERRIDE;
+  virtual already_AddRefed<mozilla::dom::CSSValue>
+    GetPropertyCSSValue(const nsAString & propertyName,
+                        mozilla::ErrorResult& aRv) MOZ_OVERRIDE;
+  using nsICSSDeclaration::GetPropertyCSSValue;
   NS_IMETHOD RemoveProperty(const nsAString & propertyName,
                             nsAString & _retval);
   NS_IMETHOD GetPropertyPriority(const nsAString & propertyName,

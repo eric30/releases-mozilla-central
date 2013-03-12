@@ -109,7 +109,11 @@ class B2GOptions(ReftestOptions):
                         type="string", dest="logcat_dir",
                         help="directory to store logcat dump files")
         defaults["logcat_dir"] = None
-        defaults["remoteTestRoot"] = None
+        self.add_option('--busybox', action='store',
+                        type='string', dest='busybox',
+                        help="Path to busybox binary to install on device")
+        defaults['busybox'] = None
+        defaults["remoteTestRoot"] = "/data/local/tests"
         defaults["logFile"] = "reftest.log"
         defaults["autorun"] = True
         defaults["closeWhenDone"] = True
@@ -118,7 +122,8 @@ class B2GOptions(ReftestOptions):
         self.set_defaults(**defaults)
 
     def verifyRemoteOptions(self, options):
-        options.remoteTestRoot = self._automation._devicemanager.getDeviceRoot() + "/reftest"
+        if not options.remoteTestRoot:
+            options.remoteTestRoot = self._automation._devicemanager.getDeviceRoot() + "/reftest"
         options.remoteProfile = options.remoteTestRoot + "/profile"
 
         productRoot = options.remoteTestRoot + "/" + self._automation._product
@@ -217,7 +222,6 @@ class B2GReftest(RefTest):
         self.remoteLogFile = options.remoteLogFile
         self.bundlesDir = '/system/b2g/distribution/bundles'
         self.userJS = '/data/local/user.js'
-        self.testDir = '/data/local/tests'
         self.remoteMozillaPath = '/data/b2g/mozilla'
         self.remoteProfilesIniPath = os.path.join(self.remoteMozillaPath, 'profiles.ini')
         self.originalProfilesIni = None
@@ -260,10 +264,7 @@ class B2GReftest(RefTest):
 
             # Restore the original user.js.
             self._devicemanager._checkCmdAs(['shell', 'rm', '-f', self.userJS])
-            if self._devicemanager._useDDCopy:
-                self._devicemanager._checkCmdAs(['shell', 'dd', 'if=%s.orig' % self.userJS, 'of=%s' % self.userJS])
-            else:
-                self._devicemanager._checkCmdAs(['shell', 'cp', '%s.orig' % self.userJS, self.userJS])
+            self._devicemanager._checkCmdAs(['shell', 'dd', 'if=%s.orig' % self.userJS, 'of=%s' % self.userJS])
 
             # We've restored the original profile, so reboot the device so that
             # it gets picked up.
@@ -327,6 +328,12 @@ class B2GReftest(RefTest):
         if options.utilityPath == None:
             print "ERROR: unable to find utility path for %s, please specify with --utility-path" % (os.name)
             sys.exit(1)
+
+        xpcshell = os.path.join(options.utilityPath, xpcshell)
+        if self._automation.elf_arm(xpcshell):
+            raise Exception('xpcshell at %s is an ARM binary; please use '
+                            'the --utility-path argument to specify the path '
+                            'to a desktop version.' % xpcshell)
 
         options.serverProfilePath = tempfile.mkdtemp()
         self.server = ReftestServer(localAutomation, options, self.scriptDir)
@@ -402,11 +409,12 @@ user_pref("dom.mozBrowserFramesWhitelist","app://system.gaiamobile.org");\n
 user_pref("network.dns.localDomains","app://system.gaiamobile.org");\n
 user_pref("font.size.inflation.emPerLine", 0);
 user_pref("font.size.inflation.minTwips", 0);
-user_pref("reftest.browser.iframe.enabled", true);
+user_pref("reftest.browser.iframe.enabled", false);
 user_pref("reftest.remote", true);
 user_pref("reftest.uri", "%s");
-user_pref("toolkit.telemetry.prompted", true);
-user_pref("marionette.loadearly", true);
+// Set a future policy version to avoid the telemetry prompt.
+user_pref("toolkit.telemetry.prompted", 999);
+user_pref("toolkit.telemetry.notifiedOptOut", 999);
 """ % reftestlist)
 
         #workaround for jsreftests.
@@ -482,6 +490,8 @@ def main(args=sys.argv[1:]):
             kwargs['gecko_path'] = options.geckoPath
         if options.logcat_dir:
             kwargs['logcat_dir'] = options.logcat_dir
+        if options.busybox:
+            kwargs['busybox'] = options.busybox
     if options.emulator_res:
         kwargs['emulator_res'] = options.emulator_res
     if options.b2gPath:
@@ -494,7 +504,8 @@ def main(args=sys.argv[1:]):
     auto.marionette = marionette
 
     # create the DeviceManager
-    kwargs = {'adbPath': options.adbPath}
+    kwargs = {'adbPath': options.adbPath,
+              'deviceRoot': options.remoteTestRoot}
     if options.deviceIP:
         kwargs.update({'host': options.deviceIP,
                        'port': options.devicePort})
@@ -502,6 +513,7 @@ def main(args=sys.argv[1:]):
     auto.setDeviceManager(dm)
 
     options = parser.verifyRemoteOptions(options)
+
     if (options == None):
         print "ERROR: Invalid options specified, use --help for a list of valid options"
         sys.exit(1)
@@ -521,9 +533,7 @@ def main(args=sys.argv[1:]):
     auto.logFinish = "REFTEST TEST-START | Shutdown"
 
     reftest = B2GReftest(auto, dm, options, SCRIPT_DIRECTORY)
-    # Create /data/local/tests, to force its use by DeviceManagerADB;
-    # B2G won't run correctly with the profile installed to /mnt/sdcard.
-    dm.mkDirs(reftest.testDir)
+    options = parser.verifyCommonOptions(options, reftest)
 
     logParent = os.path.dirname(options.remoteLogFile)
     dm.mkDir(logParent);

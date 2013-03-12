@@ -10,13 +10,14 @@
 #include "nsContentUtils.h" // NS_DROP_JS_OBJECTS
 #include "jsfriendapi.h"
 
-nsDOMNotifyAudioAvailableEvent::nsDOMNotifyAudioAvailableEvent(nsPresContext* aPresContext,
+nsDOMNotifyAudioAvailableEvent::nsDOMNotifyAudioAvailableEvent(mozilla::dom::EventTarget* aOwner,
+                                                               nsPresContext* aPresContext,
                                                                nsEvent* aEvent,
                                                                uint32_t aEventType,
                                                                float* aFrameBuffer,
                                                                uint32_t aFrameBufferLength,
                                                                float aTime)
-  : nsDOMEvent(aPresContext, aEvent),
+  : nsDOMEvent(aOwner, aPresContext, aEvent),
     mFrameBuffer(aFrameBuffer),
     mFrameBufferLength(aFrameBufferLength),
     mTime(aTime),
@@ -31,8 +32,6 @@ nsDOMNotifyAudioAvailableEvent::nsDOMNotifyAudioAvailableEvent(nsPresContext* aP
 
 DOMCI_DATA(NotifyAudioAvailableEvent, nsDOMNotifyAudioAvailableEvent)
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsDOMNotifyAudioAvailableEvent)
-
 NS_IMPL_ADDREF_INHERITED(nsDOMNotifyAudioAvailableEvent, nsDOMEvent)
 NS_IMPL_RELEASE_INHERITED(nsDOMNotifyAudioAvailableEvent, nsDOMEvent)
 
@@ -44,10 +43,9 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsDOMNotifyAudioAvailableEvent, 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsDOMNotifyAudioAvailableEvent, nsDOMEvent)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
-NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(nsDOMNotifyAudioAvailableEvent)
+NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN_INHERITED(nsDOMNotifyAudioAvailableEvent, nsDOMEvent)
   NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mCachedArray)
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
@@ -123,6 +121,7 @@ nsDOMNotifyAudioAvailableEvent::InitAudioAvailableEvent(const nsAString& aType,
 }
 
 nsresult NS_NewDOMAudioAvailableEvent(nsIDOMEvent** aInstancePtrResult,
+                                      mozilla::dom::EventTarget* aOwner,
                                       nsPresContext* aPresContext,
                                       nsEvent *aEvent,
                                       uint32_t aEventType,
@@ -131,7 +130,7 @@ nsresult NS_NewDOMAudioAvailableEvent(nsIDOMEvent** aInstancePtrResult,
                                       float aTime)
 {
   nsDOMNotifyAudioAvailableEvent* it =
-    new nsDOMNotifyAudioAvailableEvent(aPresContext, aEvent, aEventType,
+    new nsDOMNotifyAudioAvailableEvent(aOwner, aPresContext, aEvent, aEventType,
                                        aFrameBuffer, aFrameBufferLength, aTime);
   return CallQueryInterface(it, aInstancePtrResult);
 }

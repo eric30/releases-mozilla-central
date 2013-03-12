@@ -25,6 +25,7 @@
 #include "nsRefPtrHashtable.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsChangeHint.h"
+#include <algorithm>
 // This also pulls in gfxTypes.h, which we cannot include directly.
 #include "gfxRect.h"
 #include "nsTArray.h"
@@ -33,6 +34,7 @@
 #include "mozilla/TimeStamp.h"
 #include "prclist.h"
 #include "Layers.h"
+#include "nsRefreshDriver.h"
 
 #ifdef IBMBIDI
 class nsBidiPresUtils;
@@ -66,7 +68,6 @@ struct nsFontFaceRuleContainer;
 class nsObjectFrame;
 class nsTransitionManager;
 class nsAnimationManager;
-class nsRefreshDriver;
 class imgIContainer;
 class nsIDOMMediaQueryList;
 
@@ -211,6 +212,12 @@ public:
    *                    aOffset.
    */
   nsIWidget* GetNearestWidget(nsPoint* aOffset = nullptr);
+
+  /**
+   * Returns the root widget for this.
+   * Note that the widget is a mediater with IME.
+   */
+  nsIWidget* GetRootWidget();
 
   /**
    * Return the presentation context for the root of the view manager
@@ -510,7 +517,7 @@ public:
    */
   int32_t MinFontSize(nsIAtom *aLanguage) const {
     const LangGroupFontPrefs *prefs = GetFontPrefsForLang(aLanguage);
-    return NS_MAX(mMinFontSize, prefs->mMinimumFontSize);
+    return std::max(mMinFontSize, prefs->mMinimumFontSize);
   }
 
   void SetMinFontSize(int32_t aMinFontSize) {
@@ -544,7 +551,7 @@ public:
   float ScreenWidthInchesForFontInflation(bool* aChanged = nullptr);
 
   static int32_t AppUnitsPerCSSPixel() { return nsDeviceContext::AppUnitsPerCSSPixel(); }
-  uint32_t AppUnitsPerDevPixel() const  { return mDeviceContext->AppUnitsPerDevPixel(); }
+  int32_t AppUnitsPerDevPixel() const  { return mDeviceContext->AppUnitsPerDevPixel(); }
   static int32_t AppUnitsPerCSSInch() { return nsDeviceContext::AppUnitsPerCSSInch(); }
 
   static nscoord CSSPixelsToAppUnits(int32_t aPixels)
@@ -605,10 +612,10 @@ public:
 
   // Margin-specific version, since they often need TwipsToAppUnits
   static nsMargin CSSTwipsToAppUnits(const nsIntMargin &marginInTwips)
-  { return nsMargin(CSSTwipsToAppUnits(float(marginInTwips.left)), 
-                    CSSTwipsToAppUnits(float(marginInTwips.top)),
+  { return nsMargin(CSSTwipsToAppUnits(float(marginInTwips.top)),
                     CSSTwipsToAppUnits(float(marginInTwips.right)),
-                    CSSTwipsToAppUnits(float(marginInTwips.bottom))); }
+                    CSSTwipsToAppUnits(float(marginInTwips.bottom)),
+                    CSSTwipsToAppUnits(float(marginInTwips.left))); }
 
   static nscoord CSSPointsToAppUnits(float aPoints)
   { return NSToCoordRound(aPoints * nsDeviceContext::AppUnitsPerCSSInch() /
@@ -653,6 +660,22 @@ public:
   void   SetBackgroundColorDraw(bool aCanDraw)
   {
     mDrawColorBackground = aCanDraw;
+  }
+  
+  /**
+   * Getter and setter for OMTA time counters
+   */
+  bool ThrottledStyleIsUpToDate() const {
+    return mLastUpdateThrottledStyle == mRefreshDriver->MostRecentRefresh();
+  }
+  void TickLastUpdateThrottledStyle() {
+    mLastUpdateThrottledStyle = mRefreshDriver->MostRecentRefresh();
+  }
+  bool StyleUpdateForAllAnimationsIsUpToDate() const {
+    return mLastStyleUpdateForAllAnimations == mRefreshDriver->MostRecentRefresh();
+  }
+  void TickLastStyleUpdateForAllAnimations() {
+    mLastStyleUpdateForAllAnimations = mRefreshDriver->MostRecentRefresh();
   }
 
 #ifdef IBMBIDI
@@ -971,6 +994,17 @@ public:
     mUsesViewportUnits = aValue;
   }
 
+  // true if there are OMTA transition updates for the current document which
+  // have been throttled, and therefore some style information may not be up
+  // to date
+  bool ExistThrottledUpdates() const {
+    return mExistThrottledUpdates;
+  }
+
+  void SetExistThrottledUpdates(bool aExistThrottledUpdates) {
+    mExistThrottledUpdates = aExistThrottledUpdates;
+  }
+
 protected:
   friend class nsRunnableMethod<nsPresContext>;
   NS_HIDDEN_(void) ThemeChangedInternal();
@@ -1182,6 +1216,8 @@ protected:
   ScrollbarStyles       mViewportStyleOverflow;
   uint8_t               mFocusRingWidth;
 
+  bool mExistThrottledUpdates;
+
   uint16_t              mImageAnimationMode;
   uint16_t              mImageAnimationModePref;
 
@@ -1192,6 +1228,11 @@ protected:
   uint32_t              mInterruptChecksToSkip;
 
   mozilla::TimeStamp    mReflowStartTime;
+
+  // last time animations/transition styles were flushed to their primary frames
+  mozilla::TimeStamp    mLastUpdateThrottledStyle;
+  // last time we did a full style flush
+  mozilla::TimeStamp    mLastStyleUpdateForAllAnimations;
 
   unsigned              mHasPendingInterrupt : 1;
   unsigned              mInterruptsEnabled : 1;

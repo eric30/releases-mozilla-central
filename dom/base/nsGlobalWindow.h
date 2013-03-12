@@ -41,9 +41,6 @@
 #include "nsIScriptSecurityManager.h"
 #include "nsEventListenerManager.h"
 #include "nsIDOMDocument.h"
-#ifndef MOZ_DISABLE_DOMCRYPTO
-#include "nsIDOMCrypto.h"
-#endif
 #include "nsIPrincipal.h"
 #include "nsIXPCScriptable.h"
 #include "nsPoint.h"
@@ -66,6 +63,8 @@
 #include "nsWrapperCacheInlines.h"
 #include "nsIIdleObserver.h"
 #include "nsIDOMWakeLock.h"
+
+#include "mozilla/dom/EventTarget.h"
 
 // JS includes
 #include "jsapi.h"
@@ -94,6 +93,7 @@
 class nsIDOMBarProp;
 class nsIDocument;
 class nsPresContext;
+class nsIDOMCrypto;
 class nsIDOMEvent;
 class nsIScrollableFrame;
 class nsIControllers;
@@ -102,7 +102,6 @@ class nsBarProp;
 class nsLocation;
 class nsScreen;
 class nsHistory;
-class nsPerformance;
 class nsIDocShellLoadInfo;
 class WindowStateHolder;
 class nsGlobalWindowObserver;
@@ -113,10 +112,6 @@ class nsDOMEventTargetHelper;
 class nsDOMOfflineResourceList;
 class nsDOMWindowUtils;
 class nsIIdleService;
-
-#ifdef MOZ_DISABLE_DOMCRYPTO
-class nsIDOMCrypto;
-#endif
 
 class nsWindowSizes;
 
@@ -148,8 +143,9 @@ struct nsTimeout : mozilla::LinkedListElement<nsTimeout>
   nsrefcnt Release();
   nsrefcnt AddRef();
 
-  nsresult InitTimer(nsTimerCallbackFunc aFunc, uint64_t delay) {
-    return mTimer->InitWithFuncCallback(aFunc, this, delay,
+  nsresult InitTimer(nsTimerCallbackFunc aFunc, uint32_t aDelay)
+  {
+    return mTimer->InitWithFuncCallback(aFunc, this, aDelay,
                                         nsITimer::TYPE_ONE_SHOT);
   }
 
@@ -253,20 +249,18 @@ struct IdleObserverHolder
 // belonging to the same outer window, but that's an unimportant
 // side effect of inheriting PRCList).
 
-class nsGlobalWindow : public nsPIDOMWindow,
+class nsGlobalWindow : public mozilla::dom::EventTarget,
+                       public nsPIDOMWindow,
                        public nsIScriptGlobalObject,
                        public nsIDOMJSWindow,
                        public nsIScriptObjectPrincipal,
-                       public nsIDOMEventTarget,
                        public nsIDOMStorageIndexedDB,
                        public nsSupportsWeakReference,
                        public nsIInterfaceRequestor,
-                       public nsWrapperCache,
                        public PRCListStr,
                        public nsIDOMWindowPerformance,
                        public nsITouchEventReceiver,
-                       public nsIInlineEventHandlers,
-                       public nsIWindowCrypto
+                       public nsIInlineEventHandlers
 #ifdef MOZ_B2G
                      , public nsIDOMWindowB2G
 #endif // MOZ_B2G
@@ -337,9 +331,6 @@ public:
   // nsIInlineEventHandlers
   NS_DECL_NSIINLINEEVENTHANDLERS
 
-  // nsIWindowCrypto
-  NS_DECL_NSIWINDOWCRYPTO
-
   // nsPIDOMWindow
   virtual NS_HIDDEN_(nsPIDOMWindow*) GetPrivateRoot();
   virtual NS_HIDDEN_(void) ActivateOrDeactivate(bool aActivate);
@@ -405,12 +396,12 @@ public:
   static nsGlobalWindow *FromSupports(nsISupports *supports)
   {
     // Make sure this matches the casts we do in QueryInterface().
-    return (nsGlobalWindow *)(nsIScriptGlobalObject *)supports;
+    return (nsGlobalWindow *)(nsIDOMEventTarget *)supports;
   }
   static nsISupports *ToSupports(nsGlobalWindow *win)
   {
     // Make sure this matches the casts we do in QueryInterface().
-    return (nsISupports *)(nsIScriptGlobalObject *)win;
+    return (nsISupports *)(nsIDOMEventTarget *)win;
   }
   static nsGlobalWindow *FromWrapper(nsIXPConnectWrappedNative *wrapper)
   {
@@ -529,7 +520,7 @@ public:
   friend class WindowStateHolder;
 
   NS_DECL_CYCLE_COLLECTION_SKIPPABLE_SCRIPT_HOLDER_CLASS_AMBIGUOUS(nsGlobalWindow,
-                                                                   nsIScriptGlobalObject)
+                                                                   nsIDOMEventTarget)
 
   virtual NS_HIDDEN_(JSObject*)
     GetCachedXBLPrototypeHandler(nsXBLPrototypeHandler* aKey);
@@ -595,8 +586,6 @@ public:
   }
 
   static bool HasIndexedDBSupport();
-
-  static bool HasPerformanceSupport();
 
   static WindowByIdTable* GetWindowsTable() {
     return sWindowsById;
@@ -980,9 +969,6 @@ protected:
   // Implements Get{Real,Scriptable}Top.
   nsresult GetTopImpl(nsIDOMWindow **aWindow, bool aScriptable);
 
-  // Helper for creating performance objects.
-  void CreatePerformanceObjectIfNeeded();
-
   // Outer windows only.
   nsDOMWindowList* GetWindowList();
 
@@ -1072,8 +1058,6 @@ protected:
   nsCOMPtr<nsIPrincipal>        mArgumentsOrigin;
   nsRefPtr<Navigator>           mNavigator;
   nsRefPtr<nsScreen>            mScreen;
-  // mPerformance is only used on inner windows.
-  nsRefPtr<nsPerformance>       mPerformance;
   nsRefPtr<nsDOMWindowList>     mFrames;
   nsRefPtr<nsBarProp>           mMenubar;
   nsRefPtr<nsBarProp>           mToolbar;
@@ -1086,9 +1070,8 @@ protected:
   nsString                      mDefaultStatus;
   // index 0->language_id 1, so index MAX-1 == language_id MAX
   nsGlobalWindowObserver*       mObserver;
-#ifndef MOZ_DISABLE_DOMCRYPTO
   nsCOMPtr<nsIDOMCrypto>        mCrypto;
-#endif
+
   nsCOMPtr<nsIDOMStorage>      mLocalStorage;
   nsCOMPtr<nsIDOMStorage>      mSessionStorage;
 

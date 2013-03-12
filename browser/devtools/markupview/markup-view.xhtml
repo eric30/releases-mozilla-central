@@ -16,6 +16,8 @@
   <div id="templates" style="display:none">
     <ul>
       <li id="template-container" save="${elt}" class="container"><span save="${expander}" class="expander"></span><span save="${codeBox}" class="codebox"><ul save="${children}" class="children"></ul></span></li>
+
+      <li id="template-more-nodes" class="more-nodes devtools-class-comment" save="${elt}"><span>${showing}</span> <button href="#" onclick="${allButtonClick}">${showAll}</button></li>
     </ul>
 
     <span id="template-element" save="${elt}" class="editor"><span>&lt;</span><span save="${tag}" class="tagname devtools-theme-tagname"></span><span save="${attrList}"></span><span save="${newAttr}" class="newattr" tabindex="0"></span>&gt;</span>
@@ -29,6 +31,8 @@
     <span id="template-comment" save="${elt}" class="editor comment devtools-theme-comment">
       <span>&lt;!--</span><pre save="${value}" style="display:inline-block;" tabindex="0"></pre><span>--&gt;</span>
     </span>
+
+    <span id="template-elementContentSummary" save="${summaryElt}" class="summary"> … </span>
 
     <span id="template-elementClose" save="${closeElt}">&lt;/<span save="${closeTag}" class="tagname devtools-theme-tagname"></span>&gt;</span>
    </div>

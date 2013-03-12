@@ -34,9 +34,6 @@ let observer = {
   _itemAddedIndex: null,
   _itemAddedType: null,
 
-  onBeforeItemRemoved: function(id) {
-  },
-
   onItemRemoved: function(id, folder, index, itemType) {
     this._itemRemovedId = id;
     this._itemRemovedFolder = folder;
@@ -119,8 +116,8 @@ add_test(function test_create_folder_with_description() {
 
   // This checks that calling undoTransaction on an "empty batch" doesn't
   // undo the previous transaction (getItemTitle will fail)
-  txnManager.beginBatch();
-  txnManager.endBatch();
+  txnManager.beginBatch(null);
+  txnManager.endBatch(false);
   txnManager.undoTransaction();
 
   let folderId = observer._itemAddedId;
@@ -639,7 +636,7 @@ add_test(function test_edit_item_last_modified() {
 add_test(function test_generic_page_annotation() {
   const TEST_ANNO = "testAnno/testInt";
   let testURI = NetUtil.newURI("http://www.mozilla.org/");
-  addVisits(testURI, function () {
+  promiseAddVisits(testURI).then(function () {
     let pageAnnoObj = { name: TEST_ANNO,
                         type: Ci.nsIAnnotationService.TYPE_INT32,
                         flags: 0,

@@ -58,6 +58,21 @@ AppsService.prototype = {
     return DOMApplicationRegistry.getAppFromObserverMessage(aMessage);
   },
 
+  getCoreAppsBasePath: function getCoreAppsBasePath() {
+    debug("getCoreAppsBasePath()");
+    return DOMApplicationRegistry.getCoreAppsBasePath();
+  },
+
+  getWebAppsBasePath: function getWebAppsBasePath() {
+    debug("getWebAppsBasePath()");
+    return DOMApplicationRegistry.getWebAppsBasePath();
+  },
+
+  getAppInfo: function getAppInfo(aAppId) {
+    debug("getAppInfo()");
+    return DOMApplicationRegistry.getAppInfo(aAppId);
+  },
+
   classID : APPS_SERVICE_CID,
   QueryInterface : XPCOMUtils.generateQI([Ci.nsIAppsService])
 }

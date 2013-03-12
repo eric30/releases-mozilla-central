@@ -11,12 +11,6 @@ relativesrcdir  = @relativesrcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-PARALLEL_DIRS = \
-	MochiKit-1.4.2 \
-	SimpleTest \
-	browser \
-	$(NULL)
-
 include $(topsrcdir)/config/rules.mk
 
 _TEST_FILES = \
@@ -27,6 +21,7 @@ _TEST_FILES = \
   test_SpecialPowersExtension.html \
   test_SpecialPowersExtension2.html \
   file_SpecialPowersFrame1.html \
+  test_bug816847.html \
   $(NULL)
 
 ifneq ($(OS_TARGET),Android)

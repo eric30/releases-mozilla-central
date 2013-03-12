@@ -287,7 +287,7 @@ nsHttpConnection::EnsureNPNComplete()
     if (NS_SUCCEEDED(rv))
         StartSpdy(spdyVersion);
 
-    Telemetry::Accumulate(Telemetry::SPDY_NPN_CONNECT, mUsingSpdyVersion);
+    Telemetry::Accumulate(Telemetry::SPDY_NPN_CONNECT, UsingSpdy());
 
 npnComplete:
     LOG(("nsHttpConnection::EnsureNPNComplete setting complete to true"));
@@ -1446,6 +1446,10 @@ nsHttpConnection::SetupProxyConnect()
     request.SetVersion(gHttpHandler->HttpVersion());
     request.SetRequestURI(buf);
     request.SetHeader(nsHttp::User_Agent, gHttpHandler->UserAgent());
+
+    // a CONNECT is always persistent
+    request.SetHeader(nsHttp::Proxy_Connection, NS_LITERAL_CSTRING("keep-alive"));
+    request.SetHeader(nsHttp::Connection, NS_LITERAL_CSTRING("keep-alive"));
 
     val = mTransaction->RequestHead()->PeekHeader(nsHttp::Host);
     if (val) {

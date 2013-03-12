@@ -51,9 +51,9 @@ MOCHITEST_FILES = \
 		test_pointer-events.xhtml \
 		test_pointer-events-2.xhtml \
 		test_pointer-events-3.xhtml \
+		test_pointer-events-4.xhtml \
 		test_scientific.html \
 		scientific-helper.svg \
-		test_SVGAnimatedImageSMILDisabled.html \
 		animated-svg-image-helper.html \
 		animated-svg-image-helper.svg \
 		test_stroke-linecap-hit-testing.xhtml \
@@ -72,7 +72,13 @@ MOCHITEST_FILES = \
 		test_SVGxxxListIndexing.xhtml \
 		test_switch.xhtml \
 		switch-helper.svg \
+		test_text.html \
+		test_text_2.html \
+		test_text_scaled.html \
+		test_text_selection.html \
 		text-helper.svg \
+		text-helper-scaled.svg \
+		text-helper-selection.svg \
 		test_transform.xhtml \
 		test_valueAsString.xhtml \
 		test_valueLeaks.xhtml \

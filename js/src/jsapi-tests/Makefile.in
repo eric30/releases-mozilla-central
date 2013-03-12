@@ -34,13 +34,12 @@ CPPSRCS = \
   testDefineProperty.cpp \
   testEnclosingFunction.cpp \
   testErrorCopying.cpp \
-  testExtendedEq.cpp \
   testExternalStrings.cpp \
   testFindSCCs.cpp \
   testFuncCallback.cpp \
   testFunctionProperties.cpp \
+  testGCFinalizeCallback.cpp \
   testGCOutOfMemory.cpp \
-  testOOM.cpp \
   testGetPropertyDefault.cpp \
   testHashTable.cpp \
   testIndexToString.cpp \
@@ -51,6 +50,8 @@ CPPSRCS = \
   testLookup.cpp \
   testLooselyEqual.cpp \
   testNewObject.cpp \
+  testObjectEmulatingUndefined.cpp \
+  testOOM.cpp \
   testOps.cpp \
   testOriginPrincipals.cpp \
   testParseJSON.cpp \
@@ -66,6 +67,7 @@ CPPSRCS = \
   testStringBuffer.cpp \
   testTrap.cpp \
   testTypedArrays.cpp \
+  testUTF8.cpp \
   testVersion.cpp \
   testXDR.cpp \
   $(NULL)

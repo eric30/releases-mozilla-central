@@ -56,7 +56,11 @@ function reflectString(aParameters)
 
   element[idlAttr] = null;
   // TODO: remove this ugly hack when null stringification will work as expected.
-  if (element.localName == "textarea" && idlAttr == "wrap") {
+  var todoAttrs = {
+    form: [ "acceptCharset", "name", "target" ],
+    input: [ "accept", "alt", "formTarget", "max", "min", "name", "pattern", "placeholder", "step", "defaultValue" ]
+  };
+  if (!(element.localName in todoAttrs) || todoAttrs[element.localName].indexOf(idlAttr) == -1) {
     is(element.getAttribute(contentAttr), "null",
        "null should have been stringified to 'null'");
     is(element[idlAttr], "null", "null should have been stringified to 'null'");
@@ -156,7 +160,7 @@ function reflectUnsignedInt(aParameters)
 
   var values = [ 1, 3, 42, 2147483647 ];
 
-  for each (var value in values) {
+  for (var value of values) {
     element[attr] = value;
     is(element[attr], value, "." + attr + " should be equals " + value);
     is(element.getAttribute(attr), value,
@@ -188,7 +192,7 @@ function reflectUnsignedInt(aParameters)
     [ 3147483647,  3147483647 ],
   ];
 
-  for each (var values in nonValidValues) {
+  for (var values of nonValidValues) {
     element[attr] = values[0];
     is(element.getAttribute(attr), values[1],
        "@" + attr + " should be equals to " + values[1]);
@@ -196,7 +200,7 @@ function reflectUnsignedInt(aParameters)
        "." + attr + " should be equals to " + defaultValue);
   }
 
-  for each (var values in nonValidValues) {
+  for (var values of nonValidValues) {
     element.setAttribute(attr, values[0]);
     is(element.getAttribute(attr), values[0],
        "@" + attr + " should be equals to " + values[0]);
@@ -235,15 +239,17 @@ function reflectUnsignedInt(aParameters)
  * Checks that a given attribute is correctly reflected as limited to known
  * values enumerated attribute.
  *
- * @param aParameters    Object    object containing the parameters, which are:
- *  - element            Element   node to test on
- *  - attribute          String    name of the attribute
+ * @param aParameters     Object   object containing the parameters, which are:
+ *  - element             Element  node to test on
+ *  - attribute           String   name of the attribute
  *     OR
- *    attribute          Object    object containing two attributes, 'content' and 'idl'
- *  - validValues        Array     valid values we support
- *  - invalidValues      Array     invalid values
- *  - defaultValue       String    [optional] default value when no valid value is set
- *  - unsupportedValues  Array     [optional] valid values we do not support
+ *    attribute           Object   object containing two attributes, 'content' and 'idl'
+ *  - validValues         Array    valid values we support
+ *  - invalidValues       Array    invalid values
+ *  - defaultValue        String   [optional] default value when no valid value is set
+ *     OR
+ *    defaultValue        Object   [optional] object containing two attributes, 'invalid' and 'missing'
+ *  - unsupportedValues   Array    [optional] valid values we do not support
  */
 function reflectLimitedEnumerated(aParameters)
 {
@@ -254,8 +260,12 @@ function reflectLimitedEnumerated(aParameters)
                   ? aParameters.attribute : aParameters.attribute.idl;
   var validValues = aParameters.validValues;
   var invalidValues = aParameters.invalidValues;
-  var defaultValue = aParameters.defaultValue !== undefined
-                       ? aParameters.defaultValue : "";
+  var defaultValueInvalid = aParameters.defaultValue === undefined
+                               ? "" : typeof aParameters.defaultValue === "string"
+                                   ? aParameters.defaultValue : aParameters.defaultValue.invalid
+  var defaultValueMissing = aParameters.defaultValue === undefined
+                                ? "" : typeof aParameters.defaultValue === "string"
+                                    ? aParameters.defaultValue : aParameters.defaultValue.missing
   var unsupportedValues = aParameters.unsupportedValues !== undefined
                             ? aParameters.unsupportedValues : [];
 
@@ -264,7 +274,7 @@ function reflectLimitedEnumerated(aParameters)
 
   // Explicitly check the default value.
   element.removeAttribute(contentAttr);
-  is(element[idlAttr], defaultValue,
+  is(element[idlAttr], defaultValueMissing,
      "When no attribute is set, the value should be the default value.");
 
   // Check valid values.
@@ -301,14 +311,14 @@ function reflectLimitedEnumerated(aParameters)
   // Check invalid values.
   invalidValues.forEach(function (v) {
     element.setAttribute(contentAttr, v);
-    is(element[idlAttr], defaultValue,
+    is(element[idlAttr], defaultValueInvalid,
        "When the content attribute is set to an invalid value, the default value should be returned.");
     is(element.getAttribute(contentAttr), v,
        "Content attribute should not have been changed.");
     element.removeAttribute(contentAttr);
 
     element[idlAttr] = v;
-    is(element[idlAttr], defaultValue,
+    is(element[idlAttr], defaultValueInvalid,
        "When the value is set to an invalid value, the default value should be returned.");
     is(element.getAttribute(contentAttr), v,
        "Content attribute should not have been changed.");
@@ -573,4 +583,25 @@ function reflectInt(aParameters)
      "When not set, the content attribute should be null.");
   is(element[attr], defaultValue,
      "When not set, the IDL attribute should return default value.");
+}
+
+/**
+ * Checks that a given attribute is correctly reflected as a url.
+ *
+ * @param aParameters   Object    object containing the parameters, which are:
+ *  - element           Element   node to test
+ *  - attribute         String    name of the attribute
+ *     OR
+ *    attribute         Object    object containing two attributes, 'content' and 'idl'
+ */
+function reflectURL(aParameters)
+{
+  var element = aParameters.element;
+  var contentAttr = typeof aParameters.attribute === "string"
+	              ? aParameters.attribute : aParameters.attribute.content;
+  var idlAttr = typeof aParameters.attribute === "string"
+                  ? aParameters.attribute : aParameters.attribute.idl;
+
+  element[idlAttr] = "";
+  is(element[idlAttr], document.URL, "Empty string should resolve to document URL");
 }

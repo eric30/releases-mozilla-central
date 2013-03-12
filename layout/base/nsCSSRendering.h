@@ -243,9 +243,8 @@ struct nsCSSRendering {
    * backgrounds between BODY, the root element, and the canvas.
    * @return true if there is some meaningful background.
    */
-  static bool FindBackground(nsPresContext* aPresContext,
-                               nsIFrame* aForFrame,
-                               nsStyleContext** aBackgroundSC);
+  static bool FindBackground(nsIFrame* aForFrame,
+                             nsStyleContext** aBackgroundSC);
 
   /**
    * As FindBackground, but the passed-in frame is known to be a root frame
@@ -275,7 +274,7 @@ struct nsCSSRendering {
     // This should always give transparent, so we'll fill it in with the
     // default color if needed.  This seems to happen a bit while a page is
     // being loaded.
-    return aForFrame->GetStyleContext();
+    return aForFrame->StyleContext();
   }
 
   /**
@@ -390,6 +389,7 @@ struct nsCSSRendering {
   static nsRect GetBackgroundLayerRect(nsPresContext* aPresContext,
                                        nsIFrame* aForFrame,
                                        const nsRect& aBorderArea,
+                                       const nsRect& aClipRect,
                                        const nsStyleBackground& aBackground,
                                        const nsStyleBackground::Layer& aLayer);
 

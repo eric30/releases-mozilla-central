@@ -10,7 +10,6 @@
 #include "TelephonyCommon.h"
 
 #include "nsIDOMTelephonyCall.h"
-#include "nsIRadioInterfaceLayer.h"
 
 class nsPIDOMWindow;
 
@@ -90,16 +89,17 @@ public:
   NotifyError(const nsAString& aError);
 
 private:
-  TelephonyCall()
-  : mCallIndex(kOutgoingPlaceholderCallIndex),
-    mCallState(nsIRadioInterfaceLayer::CALL_STATE_UNKNOWN), mLive(false), mOutgoing(false)
-  { }
+  TelephonyCall();
 
   ~TelephonyCall()
   { }
 
   void
   ChangeStateInternal(uint16_t aCallState, bool aFireEvents);
+
+  nsresult
+  DispatchCallEvent(const nsAString& aType,
+                    nsIDOMTelephonyCall* aCall);
 };
 
 END_TELEPHONY_NAMESPACE

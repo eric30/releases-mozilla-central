@@ -5,12 +5,8 @@
 
 const modules = [
   "healthreporter.jsm",
-  "policy.jsm",
+  "profile.jsm",
   "providers.jsm",
-];
-
-const test_modules = [
-  "mocks.jsm",
 ];
 
 function run_test() {
@@ -19,9 +15,6 @@ function run_test() {
     Components.utils.import(resource, {});
   }
 
-  for (let m of test_modules) {
-    let resource = "resource://testing-common/services/healthreport/" + m;
-    Components.utils.import(resource, {});
-  }
+  Components.utils.import("resource://gre/modules/HealthReport.jsm", {});
 }
 

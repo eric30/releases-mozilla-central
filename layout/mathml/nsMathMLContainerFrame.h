@@ -82,8 +82,6 @@ public:
               ~(nsIFrame::eMathML | nsIFrame::eExcludesIgnorableWhitespace));
   }
 
-  virtual int GetSkipSides() const { return 0; }
-
   NS_IMETHOD
   AppendFrames(ChildListID     aListID,
                nsFrameList&    aFrameList);
@@ -132,9 +130,9 @@ public:
     return nsContainerFrame::DidReflow(aPresContext, aReflowState, aStatus);
   }
 
-  NS_IMETHOD BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                              const nsRect&           aDirtyRect,
-                              const nsDisplayListSet& aLists) MOZ_OVERRIDE;
+  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
+                                const nsRect&           aDirtyRect,
+                                const nsDisplayListSet& aLists) MOZ_OVERRIDE;
 
   virtual bool UpdateOverflow();
 
@@ -243,6 +241,31 @@ public:
   nsresult
   ReflowError(nsRenderingContext& aRenderingContext,
               nsHTMLReflowMetrics& aDesiredSize);
+  /*
+   * Helper to call ReportErrorToConsole for parse errors involving 
+   * attribute/value pairs.
+   * @param aAttribute The attribute for which the parse error occured.
+   * @param aValue The value for which the parse error occured.
+   */
+  nsresult
+  ReportParseError(const PRUnichar*           aAttribute,
+                   const PRUnichar*           aValue);
+
+  /*
+   * Helper to call ReportErrorToConsole when certain tags
+   * have more than the expected amount of children.
+   */
+  nsresult
+  ReportChildCountError();
+
+  /*
+   * Helper to call ReportToConsole when an error occurs.
+   * @param aParams see nsContentUtils::ReportToConsole
+   */
+  nsresult
+  ReportErrorToConsole(const char*       aErrorMsgId,
+                       const PRUnichar** aParams = nullptr,
+                       uint32_t          aParamCount = 0);
 
   // helper method to reflow a child frame. We are inline frames, and we don't
   // know our positions until reflow is finished. That's why we ask the

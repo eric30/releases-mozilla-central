@@ -57,7 +57,10 @@ public:
   nsresult ToDOMAnimatedInteger(nsIDOMSVGAnimatedInteger **aResult,
                                 PairIndex aIndex,
                                 nsSVGElement* aSVGElement);
-  // Returns a new nsISMILAttr object that the caller must delete
+  already_AddRefed<nsIDOMSVGAnimatedInteger>
+    ToDOMAnimatedInteger(PairIndex aIndex,
+                         nsSVGElement* aSVGElement);
+   // Returns a new nsISMILAttr object that the caller must delete
   nsISMILAttr* ToSMILAttr(nsSVGElement* aSVGElement);
 
 private:
@@ -76,6 +79,7 @@ public:
 
     DOMAnimatedInteger(nsSVGIntegerPair* aVal, PairIndex aIndex, nsSVGElement *aSVGElement)
       : mVal(aVal), mSVGElement(aSVGElement), mIndex(aIndex) {}
+    virtual ~DOMAnimatedInteger();
 
     nsSVGIntegerPair* mVal; // kept alive because it belongs to content
     nsRefPtr<nsSVGElement> mSVGElement;

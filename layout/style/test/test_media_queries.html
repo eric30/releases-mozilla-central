@@ -233,6 +233,14 @@ function run() {
                  (Math.ceil(value/em_size) + 1) + "em)");
     should_not_apply("all and (max-" + feature + ": " +
                      (Math.floor(value/em_size) - 1) + "em)");
+    should_not_apply("all and (min-" + feature + ": " +
+                     (Math.ceil(value/em_size) + 1) + "rem)");
+    should_apply("all and (min-" + feature + ": " +
+                 (Math.floor(value/em_size) - 1) + "rem)");
+    should_apply("all and (max-" + feature + ": " +
+                 (Math.ceil(value/em_size) + 1) + "rem)");
+    should_not_apply("all and (max-" + feature + ": " +
+                     (Math.floor(value/em_size) - 1) + "rem)");
   }
 
   change_state(function() {
@@ -558,6 +566,7 @@ function run() {
   expression_should_be_parseable("-moz-mac-lion-theme");
   expression_should_be_parseable("-moz-windows-compositor");
   expression_should_be_parseable("-moz-windows-classic");
+  expression_should_be_parseable("-moz-windows-glass");
   expression_should_be_parseable("-moz-touch-enabled");
   expression_should_be_parseable("-moz-maemo-classic");
 
@@ -573,6 +582,7 @@ function run() {
   expression_should_be_parseable("-moz-mac-lion-theme: 0");
   expression_should_be_parseable("-moz-windows-compositor: 0");
   expression_should_be_parseable("-moz-windows-classic: 0");
+  expression_should_be_parseable("-moz-windows-glass: 0");
   expression_should_be_parseable("-moz-touch-enabled: 0");
   expression_should_be_parseable("-moz-maemo-classic: 0");
 
@@ -588,6 +598,7 @@ function run() {
   expression_should_be_parseable("-moz-mac-lion-theme: 1");
   expression_should_be_parseable("-moz-windows-compositor: 1");
   expression_should_be_parseable("-moz-windows-classic: 1");
+  expression_should_be_parseable("-moz-windows-glass: 1");
   expression_should_be_parseable("-moz-touch-enabled: 1");
   expression_should_be_parseable("-moz-maemo-classic: 1");
 
@@ -603,6 +614,7 @@ function run() {
   expression_should_not_be_parseable("-moz-mac-lion-theme: -1");
   expression_should_not_be_parseable("-moz-windows-compositor: -1");
   expression_should_not_be_parseable("-moz-windows-classic: -1");
+  expression_should_not_be_parseable("-moz-windows-glass: -1");
   expression_should_not_be_parseable("-moz-touch-enabled: -1");
   expression_should_not_be_parseable("-moz-maemo-classic: -1");
 
@@ -618,6 +630,7 @@ function run() {
   expression_should_not_be_parseable("-moz-mac-lion-theme: true");
   expression_should_not_be_parseable("-moz-windows-compositor: true");
   expression_should_not_be_parseable("-moz-windows-classic: true");
+  expression_should_not_be_parseable("-moz-windows-glass: true");
   expression_should_not_be_parseable("-moz-touch-enabled: true");
   expression_should_not_be_parseable("-moz-maemo-classic: true");
 

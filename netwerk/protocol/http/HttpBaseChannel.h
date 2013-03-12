@@ -17,6 +17,7 @@
 #include "nsHttpConnectionInfo.h"
 #include "nsIEncodedChannel.h"
 #include "nsIHttpChannel.h"
+#include "nsHttpHandler.h"
 #include "nsIHttpChannelInternal.h"
 #include "nsIUploadChannel.h"
 #include "nsIUploadChannel2.h"
@@ -31,6 +32,7 @@
 #include "mozilla/net/NeckoCommon.h"
 #include "nsThreadUtils.h"
 #include "PrivateBrowsingChannel.h"
+#include "mozilla/net/DNS.h"
 
 namespace mozilla {
 namespace net {
@@ -123,6 +125,7 @@ public:
   NS_IMETHOD GetResponseStatus(uint32_t *aValue);
   NS_IMETHOD GetResponseStatusText(nsACString& aValue);
   NS_IMETHOD GetRequestSucceeded(bool *aValue);
+  NS_IMETHOD RedirectTo(nsIURI *newURI);
 
   // nsIHttpChannelInternal
   NS_IMETHOD GetDocumentURI(nsIURI **aDocumentURI);
@@ -188,8 +191,8 @@ public:
     nsHttpResponseHead * GetResponseHead() const { return mResponseHead; }
     nsHttpRequestHead * GetRequestHead() { return &mRequestHead; }
 
-    const PRNetAddr& GetSelfAddr() { return mSelfAddr; }
-    const PRNetAddr& GetPeerAddr() { return mPeerAddr; }
+    const NetAddr& GetSelfAddr() { return mSelfAddr; }
+    const NetAddr& GetPeerAddr() { return mPeerAddr; }
 
 public: /* Necko internal use only... */
 
@@ -208,6 +211,12 @@ protected:
   virtual nsresult SetupReplacementChannel(nsIURI *,
                                            nsIChannel *,
                                            bool preserveMethod);
+
+  // bundle calling OMR observers and marking flag into one function
+  inline void CallOnModifyRequestObservers() {
+    gHttpHandler->OnModifyRequest(this);
+    mRequestObserversCalled = true;
+  }
 
   // Helper function to simplify getting notification callbacks.
   template <class T>
@@ -243,8 +252,8 @@ protected:
   nsCString                         mContentCharsetHint;
   nsCString                         mUserSetCookieHeader;
 
-  PRNetAddr                         mSelfAddr;
-  PRNetAddr                         mPeerAddr;
+  NetAddr                           mSelfAddr;
+  NetAddr                           mPeerAddr;
 
   // HTTP Upgrade Data
   nsCString                        mUpgradeProtocol;
@@ -284,6 +293,7 @@ protected:
   // Current suspension depth for this channel object
   uint32_t                          mSuspendCount;
 
+  nsCOMPtr<nsIURI>                  mAPIRedirectToURI;
   nsAutoPtr<nsTArray<nsCString> >   mRedirectedCachekeys;
 
   uint32_t                          mProxyResolveFlags;

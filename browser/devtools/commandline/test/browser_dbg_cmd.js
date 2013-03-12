@@ -18,11 +18,16 @@ function test() {
 function testCommands(dbg, cmd) {
   // Wait for the initial resume...
   dbg._controller.activeThread.addOneTimeListener("resumed", function () {
-    info("Starting tests.");
+    info("Starting tests");
 
     let contentDoc = content.window.document;
     let output = contentDoc.querySelector("input[type=text]");
     let btnDoit = contentDoc.querySelector("input[type=button]");
+
+    DeveloperToolbarTest.exec({
+      typed: "dbg list",
+      outputMatch: /browser_dbg_cmd.html/
+    });
 
     cmd("dbg interrupt", function() {
       ok(true, "debugger is paused");
@@ -42,13 +47,21 @@ function testCommands(dbg, cmd) {
                         is(output.value, "dbg continue", "debugger continued");
                         DeveloperToolbarTest.exec({
                           typed: "dbg close",
+                          completed: false,
                           blankOutput: true
                         });
 
                         let target = TargetFactory.forTab(gBrowser.selectedTab);
-                        ok(!gDevTools.getToolboxForTarget(target),
-                          "Debugger was closed.");
-                        finish();
+                        let toolbox = gDevTools.getToolbox(target);
+                        if (!toolbox) {
+                          ok(true, "Debugger was closed.");
+                          finish();
+                        } else {
+                          toolbox.on("destroyed", function () {
+                            ok(true, "Debugger was closed.");
+                            finish();
+                          });
+                        }
                       });
                     });
                   });
@@ -68,16 +81,22 @@ function testCommands(dbg, cmd) {
 }
 
 function testDbgCmd() {
-  DeveloperToolbarTest.exec({
+  let output = DeveloperToolbarTest.exec({
     typed: "dbg open",
-    blankOutput: true
+    blankOutput: true,
+    completed: false,
   });
 
-  let target = TargetFactory.forTab(gBrowser.selectedTab);
-  let toolbox = gDevTools.getToolboxForTarget(target);
+  output.onChange.add(onOpenComplete);
+}
 
-  toolbox.once("jsdebugger-ready", function dbgReady() {
-    let dbg = gDevTools.getPanelForTarget("jsdebugger", target);
+function onOpenComplete(ev) {
+  let output = ev.output;
+  output.onChange.remove(onOpenComplete);
+
+  let target = TargetFactory.forTab(gBrowser.selectedTab);
+  gDevTools.showToolbox(target, "jsdebugger").then(function(toolbox) {
+    let dbg = toolbox.getCurrentPanel();
     ok(dbg, "DebuggerPanel exists");
 
     function cmd(aTyped, aCallback) {

@@ -245,8 +245,6 @@ nsParser::Cleanup()
   NS_ASSERTION(!(mFlags & NS_PARSER_FLAG_PENDING_CONTINUE_EVENT), "bad");
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsParser)
-
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsParser)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mDTD)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mSink)
@@ -1753,8 +1751,8 @@ ExtractCharsetFromXmlDeclaration(const unsigned char* aBytes, int32_t aLen,
               if (q && q == qi) {
                 int32_t count = i - encStart;
                 // encoding value is invalid if it is UTF-16
-                if (count > 0 && (0 != PL_strcmp("UTF-16",
-                    (char*) (aBytes + encStart)))) {
+                if (count > 0 && PL_strncasecmp("UTF-16",
+                    (char*) (aBytes + encStart), count)) {
                   oCharset.Assign((char*) (aBytes + encStart), count);
                 }
                 encodingFound = true;

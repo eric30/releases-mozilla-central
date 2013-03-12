@@ -6,9 +6,8 @@
 #include "gfxDWriteFonts.h"
 #include "gfxDWriteShaper.h"
 #include "gfxHarfBuzzShaper.h"
-#ifdef MOZ_GRAPHITE
+#include <algorithm>
 #include "gfxGraphiteShaper.h"
-#endif
 #include "gfxDWriteFontList.h"
 #include "gfxContext.h"
 #include <dwrite.h>
@@ -107,11 +106,9 @@ gfxDWriteFont::gfxDWriteFont(gfxFontEntry *aFontEntry,
 
     ComputeMetrics(anAAOption);
 
-#ifdef MOZ_GRAPHITE
     if (FontCanSupportGraphite()) {
         mGraphiteShaper = new gfxGraphiteShaper(this);
     }
-#endif
 
     if (FontCanSupportHarfBuzz()) {
         mHarfBuzzShaper = new gfxHarfBuzzShaper(this);
@@ -154,7 +151,10 @@ gfxDWriteFont::GetFakeMetricsForArialBlack(DWRITE_FONT_METRICS *aFontMetrics)
     gfxFontStyle style(mStyle);
     style.weight = 700;
     bool needsBold;
-    gfxFontEntry *fe = mFontEntry->Family()->FindFontForStyle(style, needsBold);
+
+    gfxFontEntry* fe =
+        gfxPlatformFontList::PlatformFontList()->
+            FindFontForFamily(NS_LITERAL_STRING("Arial"), &style, needsBold);
     if (!fe || fe == mFontEntry) {
         return false;
     }
@@ -172,7 +172,7 @@ gfxDWriteFont::ComputeMetrics(AntialiasOption anAAOption)
     DWRITE_FONT_METRICS fontMetrics;
     if (!(mFontEntry->Weight() == 900 &&
           !mFontEntry->IsUserFont() &&
-          mFontEntry->FamilyName().EqualsLiteral("Arial") &&
+          mFontEntry->Name().EqualsLiteral("Arial Black") &&
           GetFakeMetricsForArialBlack(&fontMetrics)))
     {
         mFontFace->GetMetrics(&fontMetrics);
@@ -249,7 +249,7 @@ gfxDWriteFont::ComputeMetrics(AntialiasOption anAAOption)
         mFontFace->ReleaseFontTable(tableContext);
     }
 
-    mMetrics->internalLeading = NS_MAX(mMetrics->maxHeight - mMetrics->emHeight, 0.0);
+    mMetrics->internalLeading = std::max(mMetrics->maxHeight - mMetrics->emHeight, 0.0);
     mMetrics->externalLeading = ceil(fontMetrics.lineGap * mFUnitsConvFactor);
 
     UINT16 glyph = (uint16_t)GetSpaceGlyph();

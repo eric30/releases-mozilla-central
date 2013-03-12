@@ -91,8 +91,6 @@ nsPlaintextEditor::~nsPlaintextEditor()
     mRules->DetachEditor();
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsPlaintextEditor)
-
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsPlaintextEditor, nsEditor)
   if (tmp->mRules)
     tmp->mRules->DetachEditor();
@@ -640,8 +638,6 @@ nsPlaintextEditor::DeleteSelection(EDirection aAction,
 
   nsresult result;
 
-  HandlingTrustedAction trusted(this, aAction != eNone);
-
   // delete placeholder txns merge.
   nsAutoPlaceHolderBatch batch(this, nsGkAtoms::DeleteTxnName);
   nsAutoRules beginRulesSniffing(this, EditAction::deleteSelection, aAction);
@@ -1080,8 +1076,6 @@ nsPlaintextEditor::Undo(uint32_t aCount)
   // Protect the edit rules object from dying
   nsCOMPtr<nsIEditRules> kungFuDeathGrip(mRules);
 
-  HandlingTrustedAction trusted(this);
-
   nsAutoUpdateViewBatch beginViewBatching(this);
 
   ForceCompositionEnd();
@@ -1108,8 +1102,6 @@ nsPlaintextEditor::Redo(uint32_t aCount)
 {
   // Protect the edit rules object from dying
   nsCOMPtr<nsIEditRules> kungFuDeathGrip(mRules);
-
-  HandlingTrustedAction trusted(this);
 
   nsAutoUpdateViewBatch beginViewBatching(this);
 
@@ -1165,8 +1157,6 @@ nsPlaintextEditor::FireClipboardEvent(int32_t aType)
 
 NS_IMETHODIMP nsPlaintextEditor::Cut()
 {
-  HandlingTrustedAction trusted(this);
-
   if (FireClipboardEvent(NS_CUT))
     return DeleteSelection(eNone, eStrip);
   return NS_OK;
@@ -1329,13 +1319,11 @@ nsPlaintextEditor::PasteAsQuotation(int32_t aSelectionType)
   nsCOMPtr<nsIClipboard> clipboard(do_GetService("@mozilla.org/widget/clipboard;1", &rv));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  // Create generic Transferable for getting the data
-  nsCOMPtr<nsITransferable> trans = do_CreateInstance("@mozilla.org/widget/transferable;1", &rv);
+  // Get the nsITransferable interface for getting the data from the clipboard
+  nsCOMPtr<nsITransferable> trans;
+  rv = PrepareTransferable(getter_AddRefs(trans));
   if (NS_SUCCEEDED(rv) && trans)
   {
-    // We only handle plaintext pastes here
-    trans->AddDataFlavor(kUnicodeMime);
-
     // Get the Data from the clipboard
     clipboard->GetData(trans, aSelectionType);
 
@@ -1357,7 +1345,8 @@ nsPlaintextEditor::PasteAsQuotation(int32_t aSelectionType)
 #ifdef DEBUG_clipboard
     printf("Got flavor [%s]\n", flav);
 #endif
-    if (0 == nsCRT::strcmp(flav, kUnicodeMime))
+    if (0 == nsCRT::strcmp(flav, kUnicodeMime) ||
+        0 == nsCRT::strcmp(flav, kMozTextInternal))
     {
       nsCOMPtr<nsISupportsString> textDataObj ( do_QueryInterface(genericDataObj) );
       if (textDataObj && len > 0)

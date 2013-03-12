@@ -31,6 +31,9 @@
 #include "nsIPrompt.h"
 #include "nsThreadUtils.h"
 #include "ScopedNSSTypes.h"
+#include "nsIObserverService.h"
+#include "nsRecentBadCerts.h"
+#include "SharedSSLState.h"
 
 #include "nspr.h"
 #include "certdb.h"
@@ -43,6 +46,7 @@
 #include "plbase64.h"
 
 using namespace mozilla;
+using mozilla::psm::SharedSSLState;
 
 #ifdef PR_LOGGING
 extern PRLogModuleInfo* gPIPNSSLog;
@@ -54,7 +58,9 @@ static NS_DEFINE_CID(kNSSComponentCID, NS_NSSCOMPONENT_CID);
 NS_IMPL_THREADSAFE_ISUPPORTS2(nsNSSCertificateDB, nsIX509CertDB, nsIX509CertDB2)
 
 nsNSSCertificateDB::nsNSSCertificateDB()
+: mBadCertsLock("nsNSSCertificateDB::mBadCertsLock")
 {
+  SharedSSLState::NoteCertDBServiceInstantiated();
 }
 
 nsNSSCertificateDB::~nsNSSCertificateDB()
@@ -104,7 +110,6 @@ nsNSSCertificateDB::FindCertByDBKey(const char *aDBkey, nsISupports *aToken,
 {
   NS_ENSURE_ARG_POINTER(aDBkey);
   NS_ENSURE_ARG(aDBkey[0]);
-  NS_ENSURE_ARG_POINTER(aToken);
   NS_ENSURE_ARG_POINTER(_cert);
   *_cert = nullptr;
 
@@ -1250,20 +1255,6 @@ finish:
   *_certNames = tmpArray;
 }
 
-/* somewhat follows logic of cert_list_include_cert from PSM 1.x */
-
-
-NS_IMETHODIMP 
-nsNSSCertificateDB::GetIsOcspOn(bool *aOcspOn)
-{
-  nsCOMPtr<nsIPrefBranch> pref = do_GetService(NS_PREFSERVICE_CONTRACTID);
-
-  int32_t ocspEnabled;
-  pref->GetIntPref("security.OCSP.enabled", &ocspEnabled);
-  *aOcspOn = ( ocspEnabled == 0 ) ? false : true; 
-  return NS_OK;
-}
-
 /* nsIX509Cert getDefaultEmailEncryptionCert (); */
 NS_IMETHODIMP
 nsNSSCertificateDB::FindEmailEncryptionCert(const nsAString &aNickname, nsIX509Cert **_retval)
@@ -1642,5 +1633,23 @@ nsNSSCertificateDB::GetCerts(nsIX509CertList **_retval)
 
   *_retval = nssCertList;
   NS_ADDREF(*_retval);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsNSSCertificateDB::GetRecentBadCerts(bool isPrivate, nsIRecentBadCerts** result)
+{
+  MutexAutoLock lock(mBadCertsLock);
+  if (isPrivate) {
+    if (!mPrivateRecentBadCerts) {
+      mPrivateRecentBadCerts = new nsRecentBadCerts;
+    }
+    NS_ADDREF(*result = mPrivateRecentBadCerts);
+  } else {
+    if (!mPublicRecentBadCerts) {
+      mPublicRecentBadCerts = new nsRecentBadCerts;
+    }
+    NS_ADDREF(*result = mPublicRecentBadCerts);
+  }
   return NS_OK;
 }

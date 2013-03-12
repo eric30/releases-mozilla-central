@@ -259,14 +259,14 @@ PluginInstanceChild::InternalGetNPObjectForValue(NPNVariable aValue,
                                                            &currentResult);
                 break;
             default:
-                NS_NOTREACHED("Don't know what to do with this value type!");
+                MOZ_ASSERT(false);
         }
 
         // Make sure that the current actor returned by the parent matches our
         // cached actor!
-        NS_ASSERTION(static_cast<PluginScriptableObjectChild*>(currentActor) ==
+        NS_ASSERTION(!currentActor ||
+                     static_cast<PluginScriptableObjectChild*>(currentActor) ==
                      actor, "Cached actor is out of date!");
-        NS_ASSERTION(currentResult == result, "Results don't match?!");
     }
 #endif
 
@@ -415,6 +415,11 @@ PluginInstanceChild::NPN_GetValue(NPNVariable aVar,
         return NPERR_NO_ERROR;
     }
 
+    case NPNVsupportsCompositingCoreAnimationPluginsBool: {
+        *((NPBool*)aValue) = true;
+        return NPERR_NO_ERROR;
+    }
+
     case NPNVsupportsCocoaBool: {
         *((NPBool*)aValue) = true;
         return NPERR_NO_ERROR;
@@ -437,12 +442,12 @@ PluginInstanceChild::NPN_GetValue(NPNVariable aVar,
         *((NPBool*)aValue) = false;
         return NPERR_NO_ERROR;
     }
+#endif /* NP_NO_QUICKDRAW */
 
     case NPNVcontentsScaleFactor: {
         *static_cast<double*>(aValue) = mContentsScaleFactor;
         return NPERR_NO_ERROR;
     }
-#endif /* NP_NO_QUICKDRAW */
 #endif /* XP_MACOSX */
 
 #ifdef DEBUG
@@ -2659,8 +2664,6 @@ PluginInstanceChild::NPN_SetCurrentAsyncSurface(NPAsyncSurface *surface, NPRect 
 #ifdef XP_WIN
         case NPDrawingModelAsyncWindowsDXGISurface:
             {
-                AsyncBitmapData *bitmapData;
-              
                 CrossProcessMutexAutoLock autoLock(*mRemoteImageDataMutex);
                 data->mType = RemoteImageData::DXGI_TEXTURE_HANDLE;
                 data->mSize = gfxIntSize(surface->size.width, surface->size.height);
@@ -3047,7 +3050,11 @@ PluginInstanceChild::EnsureCurrentBuffer(void)
         void *caLayer = nullptr;
         if (mDrawingModel == NPDrawingModelCoreGraphics) {
             if (!mCGLayer) {
-                caLayer = mozilla::plugins::PluginUtilsOSX::GetCGLayer(CallCGDraw, this);
+                bool avoidCGCrashes = !nsCocoaFeatures::OnMountainLionOrLater() &&
+                  (GetQuirks() & PluginModuleChild::QUIRK_FLASH_AVOID_CGMODE_CRASHES);
+                caLayer = mozilla::plugins::PluginUtilsOSX::GetCGLayer(CallCGDraw, this,
+                                                                       avoidCGCrashes,
+                                                                       mContentsScaleFactor);
 
                 if (!caLayer) {
                     PLUGIN_LOG_DEBUG(("GetCGLayer failed."));
@@ -3329,7 +3336,7 @@ PluginInstanceChild::PaintRectToSurface(const nsIntRect& aRect,
     if (mIsTransparent && !CanPaintOnBackground()) {
        // Clear surface content for transparent rendering
        nsRefPtr<gfxContext> ctx = new gfxContext(renderSurface);
-       ctx->SetColor(aColor);
+       ctx->SetDeviceColor(aColor);
        ctx->SetOperator(gfxContext::OPERATOR_SOURCE);
        ctx->Rectangle(GfxFromNsRect(plPaintRect));
        ctx->Fill();

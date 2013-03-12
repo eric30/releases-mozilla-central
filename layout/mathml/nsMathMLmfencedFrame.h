@@ -39,9 +39,9 @@ public:
          const nsHTMLReflowState& aReflowState,
          nsReflowStatus&          aStatus) MOZ_OVERRIDE;
 
-  NS_IMETHOD BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                              const nsRect&           aDirtyRect,
-                              const nsDisplayListSet& aLists) MOZ_OVERRIDE;
+  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
+                                const nsRect&           aDirtyRect,
+                                const nsDisplayListSet& aLists) MOZ_OVERRIDE;
 
   virtual nscoord
   GetIntrinsicWidth(nsRenderingContext* aRenderingContext) MOZ_OVERRIDE;
@@ -84,8 +84,6 @@ protected:
   nsMathMLmfencedFrame(nsStyleContext* aContext) : nsMathMLContainerFrame(aContext) {}
   virtual ~nsMathMLmfencedFrame();
   
-  virtual int GetSkipSides() const { return 0; }
-
   nsMathMLChar* mOpenChar;
   nsMathMLChar* mCloseChar;
   nsMathMLChar* mSeparatorsChar;

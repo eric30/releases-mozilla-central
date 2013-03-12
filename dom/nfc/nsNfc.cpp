@@ -63,8 +63,6 @@ nsNfc::Create(nsPIDOMWindow* aOwner, nsINfcContentHelper* aNfc)
   return nfc.forget();
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsNfc)
-
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsNfc,
                                                   nsDOMEventTargetHelper)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
@@ -113,7 +111,7 @@ nsNfc::NdefDiscovered(const nsAString &aNdefRecords)
   }
 
   // Dispatch incoming event.
-  nsRefPtr<nsDOMEvent> event = NfcNdefEvent::Create(result);
+  nsRefPtr<nsDOMEvent> event = NfcNdefEvent::Create(this, result);
   NS_ASSERTION(event, "This should never fail!");
 
   rv = event->InitEvent(NS_LITERAL_STRING("ndefdiscovered"), false, false);
@@ -141,7 +139,7 @@ nsNfc::NdefDisconnected(const nsAString &aNfcHandle) {
   }
 
   // Dispatch incoming event.
-  nsRefPtr<nsDOMEvent> event = NfcNdefEvent::Create(result);
+  nsRefPtr<nsDOMEvent> event = NfcNdefEvent::Create(this, result);
   NS_ASSERTION(event, "This should never fail!");
 
   rv = event->InitEvent(NS_LITERAL_STRING("ndefdisconnected"), false, false);
@@ -251,7 +249,7 @@ nsNfc::SecureElementActivated(const nsAString& aSEMessage) {
   }
 
   // Dispatch incoming event.
-  nsRefPtr<nsDOMEvent> event = NfcNdefEvent::Create(result);
+  nsRefPtr<nsDOMEvent> event = NfcNdefEvent::Create(this, result);
   NS_ASSERTION(event, "This should never fail!");
   rv = event->InitEvent(NS_LITERAL_STRING("secureelementactivated"), false, false);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -277,7 +275,7 @@ nsNfc::SecureElementDeactivated(const nsAString& aSEMessage) {
   }
 
   // Dispatch incoming event.
-  nsRefPtr<nsDOMEvent> event = NfcNdefEvent::Create(result);
+  nsRefPtr<nsDOMEvent> event = NfcNdefEvent::Create(this, result);
   NS_ASSERTION(event, "This should never fail!");
 
   rv = event->InitEvent(NS_LITERAL_STRING("secureelementdeactivated"), false, false);
@@ -306,7 +304,7 @@ nsNfc::SecureElementTransaction(const nsAString& aSETransactionMessage)
   }
 
   // Dispatch incoming event.
-  nsRefPtr<nsDOMEvent> event = NfcNdefEvent::Create(result);
+  nsRefPtr<nsDOMEvent> event = NfcNdefEvent::Create(this, result);
   NS_ASSERTION(event, "This should never fail!");
 
   rv = event->InitEvent(NS_LITERAL_STRING("secureelementtransaction"), false, false);

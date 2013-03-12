@@ -31,7 +31,7 @@ using namespace js::ion;
 // Snapshot body, repeated "frame count" times, from oldest frame to newest frame.
 // Note that the first frame doesn't have the "parent PC" field.
 //
-//   [ptr] Debug only: JSScript *
+//   [ptr] Debug only: RawScript
 //   [vwu] pc offset
 //   [vwu] # of slots, including nargs
 // [slot*] N slot entries, where N = nargs + nfixed + stackDepth
@@ -133,16 +133,6 @@ SnapshotReader::readFrameHeader()
 {
     JS_ASSERT(moreFrames());
     JS_ASSERT(slotsRead_ == slotCount_);
-
-#ifdef DEBUG
-    union {
-        JSScript *script;
-        uint8_t bytes[sizeof(JSScript *)];
-    } u;
-    for (size_t i = 0; i < sizeof(JSScript *); i++)
-        u.bytes[i] = reader_.readByte();
-    script_ = u.script;
-#endif
 
     pcOffset_ = reader_.readUnsigned();
     slotCount_ = reader_.readUnsigned();
@@ -307,7 +297,7 @@ SnapshotWriter::startSnapshot(uint32_t frameCount, BailoutKind kind, bool resume
 }
 
 void
-SnapshotWriter::startFrame(JSFunction *fun, JSScript *script, jsbytecode *pc, uint32_t exprStack)
+SnapshotWriter::startFrame(JSFunction *fun, RawScript script, jsbytecode *pc, uint32_t exprStack)
 {
     JS_ASSERT(CountArgSlots(fun) < SNAPSHOT_MAX_NARGS);
     JS_ASSERT(exprStack < SNAPSHOT_MAX_STACK);
@@ -319,16 +309,6 @@ SnapshotWriter::startFrame(JSFunction *fun, JSScript *script, jsbytecode *pc, ui
 
     IonSpew(IonSpew_Snapshots, "Starting frame; formals %u, fixed %u, exprs %u",
             formalArgs, script->nfixed, exprStack);
-
-#ifdef DEBUG
-    union {
-        JSScript *script;
-        uint8_t bytes[sizeof(JSScript *)];
-    } u;
-    u.script = script;
-    for (size_t i = 0; i < sizeof(JSScript *); i++)
-        writer_.writeByte(u.bytes[i]);
-#endif
 
     JS_ASSERT(script->code <= pc && pc <= script->code + script->length);
 

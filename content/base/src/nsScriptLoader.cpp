@@ -22,6 +22,7 @@
 #include "nsIScriptRuntime.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsIPrincipal.h"
+#include "nsJSPrincipals.h"
 #include "nsContentPolicyUtils.h"
 #include "nsIHttpChannel.h"
 #include "nsIHttpChannelInternal.h"
@@ -397,20 +398,6 @@ ParseTypeAttribute(const nsAString& aType, JSVersion* aVersion)
     return false;
   }
 
-  nsAutoString value;
-  rv = parser.GetParameter("e4x", value);
-  if (NS_SUCCEEDED(rv)) {
-    if (value.Length() == 1 && value[0] == '1') {
-      // This happens in about 2 web pages. Enable E4X no matter what JS
-      // version number was selected.  We do this by turning on the "moar
-      // XML" version bit.  This is OK even if version has
-      // JSVERSION_UNKNOWN (-1).
-      *aVersion = js::VersionSetMoarXML(*aVersion, true);
-    }
-  } else if (rv != NS_ERROR_INVALID_ARG) {
-    return false;
-  }
-
   return true;
 }
 
@@ -471,14 +458,7 @@ nsScriptLoader::ProcessScriptElement(nsIScriptElement *aElement)
       nsAutoString language;
       scriptContent->GetAttr(kNameSpaceID_None, nsGkAtoms::language, language);
       if (!language.IsEmpty()) {
-        // IE, Opera, etc. do not respect language version, so neither should
-        // we at this late date in the browser wars saga.  Note that this change
-        // affects HTML but not XUL or SVG (but note also that XUL has its own
-        // code to check nsContentUtils::IsJavaScriptLanguage -- that's probably
-        // a separate bug, one we may not be able to fix short of XUL2).  See
-        // bug 255895 (https://bugzilla.mozilla.org/show_bug.cgi?id=255895).
-        uint32_t dummy;
-        if (!nsContentUtils::IsJavaScriptLanguage(language, &dummy)) {
+        if (!nsContentUtils::IsJavaScriptLanguage(language)) {
           return false;
         }
       }
@@ -842,6 +822,10 @@ nsScriptLoader::EvaluateScript(nsScriptLoadRequest* aRequest,
   if (!context) {
     return NS_ERROR_FAILURE;
   }
+  AutoPushJSContext cx(context->GetNativeContext());
+
+  bool oldProcessingScriptTag = context->GetProcessingScriptTag();
+  context->SetProcessingScriptTag(true);
 
   // Update our current script.
   nsCOMPtr<nsIScriptElement> oldCurrent = mCurrentScript;
@@ -852,17 +836,23 @@ nsScriptLoader::EvaluateScript(nsScriptLoadRequest* aRequest,
   nsAutoCString url;
   nsContentUtils::GetWrapperSafeScriptFilename(mDocument, aRequest->mURI, url);
 
-  bool isUndefined;
-  rv = context->EvaluateString(aScript, globalObject->GetGlobalJSObject(),
-                               mDocument->NodePrincipal(),
-                               aRequest->mOriginPrincipal,
-                               url.get(), aRequest->mLineNo,
-                               JSVersion(aRequest->mJSVersion), nullptr,
-                               &isUndefined);
+  JSVersion version = JSVersion(aRequest->mJSVersion);
+  if (version != JSVERSION_UNKNOWN) {
+    JS::CompileOptions options(cx);
+    options.setFileAndLine(url.get(), aRequest->mLineNo)
+           .setVersion(JSVersion(aRequest->mJSVersion));
+    if (aRequest->mOriginPrincipal) {
+      options.setOriginPrincipals(nsJSPrincipals::get(aRequest->mOriginPrincipal));
+    }
+    rv = context->EvaluateString(aScript, *globalObject->GetGlobalJSObject(),
+                                 options, /* aCoerceToString = */ false, nullptr);
+  }
 
   // Put the old script back in case it wants to do anything else.
   mCurrentScript = oldCurrent;
 
+  JSAutoRequest ar(cx);
+  context->SetProcessingScriptTag(oldProcessingScriptTag);
   return rv;
 }
 
@@ -1034,7 +1024,8 @@ nsScriptLoader::ConvertToUTF16(nsIChannel* aChannel, const uint8_t* aData,
 
   if (!unicodeDecoder &&
       aChannel &&
-      NS_SUCCEEDED(aChannel->GetContentCharset(charset))) {
+      NS_SUCCEEDED(aChannel->GetContentCharset(charset)) &&
+      !charset.IsEmpty()) {
     charsetConv->GetUnicodeDecoder(charset.get(),
                                    getter_AddRefs(unicodeDecoder));
   }
@@ -1073,31 +1064,11 @@ nsScriptLoader::ConvertToUTF16(nsIChannel* aChannel, const uint8_t* aData,
 
   PRUnichar *ustr = aString.BeginWriting();
 
-  int32_t consumedLength = 0;
-  int32_t originalLength = aLength;
-  int32_t convertedLength = 0;
-  int32_t bufferLength = unicodeLength;
-  do {
-    rv = unicodeDecoder->Convert(reinterpret_cast<const char*>(aData),
-                                 (int32_t *) &aLength, ustr,
-                                 &unicodeLength);
-    if (NS_FAILED(rv)) {
-      // if we failed, we consume one byte, replace it with U+FFFD
-      // and try the conversion again.
-      ustr[unicodeLength++] = (PRUnichar)0xFFFD;
-      ustr += unicodeLength;
-
-      unicodeDecoder->Reset();
-    }
-    aData += ++aLength;
-    consumedLength += aLength;
-    aLength = originalLength - consumedLength;
-    convertedLength += unicodeLength;
-    unicodeLength = bufferLength - convertedLength;
-  } while (NS_FAILED(rv) &&
-           (originalLength > consumedLength) &&
-           (bufferLength > convertedLength));
-  aString.SetLength(convertedLength);
+  rv = unicodeDecoder->Convert(reinterpret_cast<const char*>(aData),
+                               (int32_t *) &aLength, ustr,
+                               &unicodeLength);
+  MOZ_ASSERT(NS_SUCCEEDED(rv));
+  aString.SetLength(unicodeLength);
   return rv;
 }
 

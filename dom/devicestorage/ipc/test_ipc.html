@@ -89,7 +89,7 @@
 
     function runTests() {
       let iframe = document.createElement("iframe");
-      iframe.mozbrowser = true;
+      SpecialPowers.wrap(iframe).mozbrowser = true;
       iframe.id = "iframe";
       iframe.style.width = "100%";
       iframe.style.height = "1000px";
@@ -152,6 +152,9 @@
           ["device.storage.enabled", true],
           ["device.storage.testing", true],
           ["device.storage.prompt.testing", true],
+
+          // TODO: remove this as part of bug 820712
+          ["network.disable.ipc.security", true],
 
           ["dom.ipc.browser_frames.oop_by_default", true],
           ["dom.mozBrowserFramesEnabled", true],

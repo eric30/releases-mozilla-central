@@ -244,7 +244,7 @@ double nsCSSValue::GetAngleValueInRadians() const
   }
 }
 
-imgIRequest* nsCSSValue::GetImageValue(nsIDocument* aDocument) const
+imgRequestProxy* nsCSSValue::GetImageValue(nsIDocument* aDocument) const
 {
   NS_ABORT_IF_FALSE(mUnit == eCSSUnit_Image, "not an Image value");
   return mValue.mImage->mRequests.GetWeak(aDocument);
@@ -833,6 +833,13 @@ nsCSSValue::AppendToString(nsCSSProperty aProperty, nsAString& aResult) const
                                            NS_STYLE_PAGE_MARKS_REGISTER,
                                            aResult);
       }
+    }
+    else if (eCSSProperty_paint_order == aProperty) {
+      MOZ_STATIC_ASSERT
+        (NS_STYLE_PAINT_ORDER_BITWIDTH * NS_STYLE_PAINT_ORDER_LAST_VALUE <= 8,
+         "SVGStyleStruct::mPaintOrder and the following cast not big enough");
+      nsStyleUtil::AppendPaintOrderValue(static_cast<uint8_t>(GetIntValue()),
+                                         aResult);
     }
     else {
       const nsAFlatCString& name = nsCSSProps::LookupPropertyValue(aProperty, GetIntValue());
@@ -1714,18 +1721,26 @@ css::ImageValue::ImageValue(nsIURI* aURI, nsStringBuffer* aString,
                             nsIDocument* aDocument)
   : URLValue(aURI, aString, aReferrer, aOriginPrincipal)
 {
-  if (aDocument->GetOriginalDocument()) {
-    aDocument = aDocument->GetOriginalDocument();
+  // NB: If aDocument is not the original document, we may not be able to load
+  // images from aDocument.  Instead we do the image load from the original doc
+  // and clone it to aDocument.
+  nsIDocument* loadingDoc = aDocument->GetOriginalDocument();
+  if (!loadingDoc) {
+    loadingDoc = aDocument;
   }
 
   mRequests.Init();
 
-  aDocument->StyleImageLoader()->LoadImage(aURI, aOriginPrincipal, aReferrer,
-                                           this);
+  loadingDoc->StyleImageLoader()->LoadImage(aURI, aOriginPrincipal, aReferrer,
+                                            this);
+
+  if (loadingDoc != aDocument) {
+    aDocument->StyleImageLoader()->MaybeRegisterCSSImage(this);
+  }
 }
 
 static PLDHashOperator
-ClearRequestHashtable(nsISupports* aKey, nsCOMPtr<imgIRequest>& aValue,
+ClearRequestHashtable(nsISupports* aKey, nsRefPtr<imgRequestProxy>& aValue,
                       void* aClosure)
 {
   mozilla::css::ImageValue* image =

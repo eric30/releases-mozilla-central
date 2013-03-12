@@ -167,8 +167,8 @@ js_InitBooleanClass(JSContext *cx, HandleObject obj)
 
     Handle<PropertyName*> valueOfName = cx->names().valueOf;
     RootedFunction
-        valueOf(cx, js_NewFunction(cx, NullPtr(), bool_valueOf, 0, JSFunction::NATIVE_FUN,
-                                   global, valueOfName));
+        valueOf(cx, NewFunction(cx, NullPtr(), bool_valueOf, 0, JSFunction::NATIVE_FUN,
+                                global, valueOfName));
     if (!valueOf)
         return NULL;
 
@@ -196,18 +196,21 @@ js_BooleanToString(JSContext *cx, JSBool b)
 JS_PUBLIC_API(bool)
 js::ToBooleanSlow(const Value &v)
 {
-    JS_ASSERT(v.isString());
-    return v.toString()->length() != 0;
+    if (v.isString())
+        return v.toString()->length() != 0;
+
+    JS_ASSERT(v.isObject());
+    return !EmulatesUndefined(&v.toObject());
 }
 
 bool
-js::BooleanGetPrimitiveValueSlow(JSContext *cx, JSObject &obj, Value *vp)
+js::BooleanGetPrimitiveValueSlow(JSContext *cx, HandleObject obj, Value *vp)
 {
     InvokeArgsGuard ag;
     if (!cx->stack.pushInvokeArgs(cx, 0, &ag))
         return false;
     ag.setCallee(cx->compartment->maybeGlobal()->booleanValueOf());
-    ag.setThis(ObjectValue(obj));
+    ag.setThis(ObjectValue(*obj));
     if (!Invoke(cx, ag))
         return false;
     *vp = ag.rval();

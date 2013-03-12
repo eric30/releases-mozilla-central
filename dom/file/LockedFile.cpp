@@ -197,15 +197,16 @@ private:
   nsCOMPtr<nsIInputStream> mStream;
 };
 
-already_AddRefed<nsDOMEvent>
-CreateGenericEvent(const nsAString& aType, bool aBubbles, bool aCancelable)
+already_AddRefed<nsIDOMEvent>
+CreateGenericEvent(mozilla::dom::EventTarget* aEventOwner,
+                   const nsAString& aType, bool aBubbles, bool aCancelable)
 {
-  nsRefPtr<nsDOMEvent> event(new nsDOMEvent(nullptr, nullptr));
+  nsCOMPtr<nsIDOMEvent> event;
+  NS_NewDOMEvent(getter_AddRefs(event), aEventOwner, nullptr, nullptr);
   nsresult rv = event->InitEvent(aType, aBubbles, aCancelable);
   NS_ENSURE_SUCCESS(rv, nullptr);
 
-  rv = event->SetTrusted(true);
-  NS_ENSURE_SUCCESS(rv, nullptr);
+  event->SetTrusted(true);
 
   return event.forget();
 }
@@ -930,10 +931,12 @@ FinishHelper::Run()
 
     nsCOMPtr<nsIDOMEvent> event;
     if (mAborted) {
-      event = CreateGenericEvent(NS_LITERAL_STRING("abort"), true, false);
+      event = CreateGenericEvent(mLockedFile, NS_LITERAL_STRING("abort"),
+                                 true, false);
     }
     else {
-      event = CreateGenericEvent(NS_LITERAL_STRING("complete"), false, false);
+      event = CreateGenericEvent(mLockedFile, NS_LITERAL_STRING("complete"),
+                                 false, false);
     }
     NS_ENSURE_TRUE(event, NS_ERROR_DOM_FILEHANDLE_UNKNOWN_ERR);
 
@@ -953,10 +956,10 @@ FinishHelper::Run()
   }
 
   for (uint32_t index = 0; index < mParallelStreams.Length(); index++) {
-    nsCOMPtr<nsIOutputStream> ostream =
+    nsCOMPtr<nsIInputStream> stream =
       do_QueryInterface(mParallelStreams[index]);
 
-    if (NS_FAILED(ostream->Close())) {
+    if (NS_FAILED(stream->Close())) {
       NS_WARNING("Failed to close stream!");
     }
 
@@ -964,9 +967,9 @@ FinishHelper::Run()
   }
 
   if (mStream) {
-    nsCOMPtr<nsIOutputStream> ostream = do_QueryInterface(mStream);
+    nsCOMPtr<nsIInputStream> stream = do_QueryInterface(mStream);
 
-    if (NS_FAILED(ostream->Close())) {
+    if (NS_FAILED(stream->Close())) {
       NS_WARNING("Failed to close stream!");
     }
 

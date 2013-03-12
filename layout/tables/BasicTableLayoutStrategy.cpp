@@ -15,6 +15,7 @@
 #include "nsLayoutUtils.h"
 #include "nsGkAtoms.h"
 #include "SpanningCellSorter.h"
+#include <algorithm>
 
 using namespace mozilla;
 using namespace mozilla::layout;
@@ -80,7 +81,7 @@ GetWidthInfo(nsRenderingContext *aRenderingContext,
              nsIFrame *aFrame, bool aIsCell)
 {
     nscoord minCoord, prefCoord;
-    const nsStylePosition *stylePos = aFrame->GetStylePosition();
+    const nsStylePosition *stylePos = aFrame->StylePosition();
     bool isQuirks = aFrame->PresContext()->CompatibilityMode() ==
                     eCompatibility_NavQuirks;
     nscoord boxSizingToBorderEdge = 0;
@@ -159,7 +160,7 @@ GetWidthInfo(nsRenderingContext *aRenderingContext,
                                           nsGkAtoms::nowrap)) {
             minCoord = w;
         }
-        prefCoord = NS_MAX(w, minCoord);
+        prefCoord = std::max(w, minCoord);
     } else if (unit == eStyleUnit_Percent) {
         prefPercent = width.GetPercentValue();
     } else if (unit == eStyleUnit_Enumerated && aIsCell) {
@@ -561,6 +562,7 @@ BasicTableLayoutStrategy::DistributePctWidthToColumns(float aSpanPrefPct,
     // and to reduce aSpanPrefPct by columns that already have % width
 
     int32_t scol, scol_end;
+    nsTableCellMap *cellMap = mTableFrame->GetCellMap();
     for (scol = aFirstCol, scol_end = aFirstCol + aColCount;
          scol < scol_end; ++scol) {
         nsTableColFrame *scolFrame = mTableFrame->GetColFrame(scol);
@@ -571,7 +573,9 @@ BasicTableLayoutStrategy::DistributePctWidthToColumns(float aSpanPrefPct,
         float scolPct = scolFrame->GetPrefPercent();
         if (scolPct == 0.0f) {
             nonPctTotalPrefWidth += scolFrame->GetPrefCoord();
-            ++nonPctColCount;
+            if (cellMap->GetNumCellsOriginatingInCol(scol) > 0) {
+                ++nonPctColCount;
+            }
         } else {
             aSpanPrefPct -= scolPct;
         }
@@ -608,18 +612,22 @@ BasicTableLayoutStrategy::DistributePctWidthToColumns(float aSpanPrefPct,
                 allocatedPct = aSpanPrefPct *
                     (float(scolFrame->GetPrefCoord()) /
                      float(nonPctTotalPrefWidth));
-            } else {
+            } else if (cellMap->GetNumCellsOriginatingInCol(scol) > 0) {
                 // distribute equally when all pref widths are 0
                 allocatedPct = aSpanPrefPct / float(nonPctColCount);
+            } else {
+                allocatedPct = 0.0f;
             }
             // Allocate the percent
             scolFrame->AddSpanPrefPercent(allocatedPct);
-            
+
             // To avoid accumulating rounding error from division,
             // subtract this column's values from the totals.
             aSpanPrefPct -= allocatedPct;
             nonPctTotalPrefWidth -= scolFrame->GetPrefCoord();
-            --nonPctColCount;
+            if (cellMap->GetNumCellsOriginatingInCol(scol) > 0) {
+                --nonPctColCount;
+            }
 
             if (!aSpanPrefPct) {
                 // No more span-percent-width to distribute --> we're done.

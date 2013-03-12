@@ -31,6 +31,7 @@ XPIDLSRCS =					\
 	nsIDOMMutationEvent.idl			\
 	nsIDOMDragEvent.idl  			\
 	nsIDOMDataTransfer.idl  			\
+	nsIDOMDOMTransactionEvent.idl  			\
 	nsIDOMPopupBlockedEvent.idl		\
 	nsIDOMBeforeUnloadEvent.idl		\
 	nsIDOMSmartCardEvent.idl                \
@@ -47,6 +48,7 @@ XPIDLSRCS =					\
 	nsIDOMUserProximityEvent.idl            \
 	nsIDOMDeviceOrientationEvent.idl        \
 	nsIDOMDeviceMotionEvent.idl		\
+	nsIDOMElementReplaceEvent.idl		\
 	nsIDOMScrollAreaEvent.idl		\
 	nsIDOMTransitionEvent.idl		\
 	nsIDOMAnimationEvent.idl		\
@@ -57,6 +59,7 @@ XPIDLSRCS =					\
 	nsIDOMCustomEvent.idl			\
 	nsIDOMCompositionEvent.idl		\
 	nsIDOMWheelEvent.idl			\
+	nsIDOMBlobEvent.idl			\
 	$(NULL)
 
 include $(topsrcdir)/config/rules.mk

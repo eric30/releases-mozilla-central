@@ -14,13 +14,100 @@ this.PhoneNumber = (function (dataBase) {
   // Use strict in our context only - users might not want it
   'use strict';
 
+  // The minimum length of the national significant number.
+  const MIN_LENGTH_FOR_NSN = 2;
+
+  const STAR_SIGN = "*";
   const UNICODE_DIGITS = /[\uFF10-\uFF19\u0660-\u0669\u06F0-\u06F9]/g;
-  const ALPHA_CHARS = /[a-zA-Z]/g;
   const NON_ALPHA_CHARS = /[^a-zA-Z]/g;
   const NON_DIALABLE_CHARS = /[^,#+\*\d]/g;
-  const PLUS_CHARS = /^[+\uFF0B]+/g;
+  const PLUS_CHARS = "+\uFF0B";
   const BACKSLASH = /\\/g;
   const SPLIT_FIRST_GROUP = /^(\d+)(.*)$/;
+
+  /**
+   * Regular expression of acceptable punctuation found in phone numbers. This
+   * excludes punctuation found as a leading character only. This consists of
+   * dash characters, white space characters, full stops, slashes, square
+   * brackets, parentheses and tildes. It also includes the letter 'x' as that
+   * is found as a placeholder for carrier information in some phone numbers.
+   * Full-width variants are also present.
+   */
+  const VALID_PUNCTUATION = "-x\u2010-\u2015\u2212\u30FC\uFF0D-\uFF0F \u00A0"
+                          + "\u200B\u2060\u3000()\uFF08\uFF09\uFF3B\uFF3D."
+                          + "\\[\\]/~\u2053\u223C\uFF5E";
+  const VALID_DIGITS = "0-9\uFF10-\uFF19\u0660-\u0669\u06F0-\u06F9";
+  const VALID_ALPHA = "a-zA-Z";
+
+  /**
+   * Regular expression of viable phone numbers. This is location independent.
+   * Checks we have at least three leading digits, and only valid punctuation,
+   * alpha characters and digits in the phone number. Does not include extension
+   * data. The symbol 'x' is allowed here as valid punctuation since it is often
+   * used as a placeholder for carrier codes, for example in Brazilian phone
+   * numbers. We also allow multiple '+' characters at the start.
+   * Corresponds to the following:
+   * [digits]{minLengthNsn}|
+   * plus_sign*
+   * (([punctuation]|[star])*[digits]){3,}([punctuation]|[star]|[digits]|[alpha])*
+   *
+   * The first reg-ex is to allow short numbers (two digits long) to be parsed
+   * if they are entered as "15" etc, but only if there is no punctuation in
+   * them. The second expression restricts the number of digits to three or
+   * more, but then allows them to be in international form, and to have
+   * alpha-characters and punctuation. We split up the two reg-exes here and
+   * combine them when creating the reg-ex VALID_PHONE_NUMBER_PATTERN itself so
+   * we can prefix it with ^ and append $ to each branch.
+   *
+   * Note VALID_PUNCTUATION starts with a -, so must be the first in the range.
+   */
+  const MIN_LENGTH_PHONE_NUMBER
+    = "[" + VALID_DIGITS + "]{" + MIN_LENGTH_FOR_NSN + "}";
+  const VALID_PHONE_NUMBER
+    = "[" + PLUS_CHARS + "]*"
+    + "(?:[" + VALID_PUNCTUATION + STAR_SIGN + "]*" + "[" + VALID_DIGITS + "]){3,}"
+    + "[" + VALID_PUNCTUATION + STAR_SIGN + VALID_ALPHA + VALID_DIGITS + "]*";
+
+  /**
+   * Pattern to capture digits used in an extension.
+   * Places a maximum length of '7' for an extension.
+   */
+  const CAPTURING_EXTN_DIGITS = "([" + VALID_DIGITS + "]{1,7})";
+
+  /**
+   * Regexp of all possible ways to write extensions, for use when parsing. This
+   * will be run as a case-insensitive regexp match. Wide character versions are
+   * also provided after each ASCII version. There are three regular expressions
+   * here. The first covers RFC 3966 format, where the extension is added using
+   * ';ext='. The second more generic one starts with optional white space and
+   * ends with an optional full stop (.), followed by zero or more spaces/tabs and
+   * then the numbers themselves. The other one covers the special case of
+   * American numbers where the extension is written with a hash at the end, such
+   * as '- 503#'. Note that the only capturing groups should be around the digits
+   * that you want to capture as part of the extension, or else parsing will fail!
+   * We allow two options for representing the accented o - the character itself,
+   * and one in the unicode decomposed form with the combining acute accent.
+   */
+  const EXTN_PATTERNS_FOR_PARSING
+    = ";ext=" + CAPTURING_EXTN_DIGITS + "|" + "[ \u00A0\\t,]*"
+    + "(?:e?xt(?:ensi(?:o\u0301?|\u00F3))?n?|\uFF45?\uFF58\uFF54\uFF4E?|"
+    + "[,x\uFF58#\uFF03~\uFF5E]|int|anexo|\uFF49\uFF4E\uFF54)"
+    + "[:\\.\uFF0E]?[ \u00A0\\t,-]*" + CAPTURING_EXTN_DIGITS + "#?|"
+    + "[- ]+([" + VALID_DIGITS + "]{1,5})#";
+
+  const VALID_ALPHA_PATTERN = new RegExp("[" + VALID_ALPHA + "]", "g");
+  const LEADING_PLUS_CHARS_PATTERN = new RegExp("^[" + PLUS_CHARS + "]+", "g");
+
+  // Bug 845539 - viable phone number in Venezuela.
+  const VENEZUELA_SHORT_NUMBER = "\\*[" + VALID_DIGITS + "]";
+
+  // We append optionally the extension pattern to the end here, as a valid
+  // phone number may have an extension prefix appended, followed by 1 or more
+  // digits.
+  const VALID_PHONE_NUMBER_PATTERN =
+    new RegExp("^" + MIN_LENGTH_PHONE_NUMBER + "$|"
+               + "^" + VENEZUELA_SHORT_NUMBER + "$|"
+               + "^" + VALID_PHONE_NUMBER + "(?:" + EXTN_PATTERNS_FOR_PARSING + ")?$", "i");
 
   // Format of the string encoded meta data. If the name contains "^" or "$"
   // we will generate a regular expression from the value, with those special
@@ -110,14 +197,14 @@ this.PhoneNumber = (function (dataBase) {
               // Only the first entry has the formats field set.
               // Parse the main country if we haven't already and use
               // the formats field from the main country.
-              if (typeof entry[0] == "string" && entry[0].substr(2,2) == region)
+              if (typeof entry[0] == "string")
                 entry[0] = ParseMetaData(countryCode, entry[0]);
               let formats = entry[0].formats;
               let current = ParseMetaData(countryCode, entry[n]);
               current.formats = formats;
               return entry[n] = current;
             }
-            
+
             entry[n] = ParseMetaData(countryCode, entry[n]);
             return entry[n];
           }
@@ -215,6 +302,18 @@ this.PhoneNumber = (function (dataBase) {
     }
   };
 
+  // Map letters to numbers according to the ITU E.161 standard
+  var E161 = {
+    'a': 2, 'b': 2, 'c': 2,
+    'd': 3, 'e': 3, 'f': 3,
+    'g': 4, 'h': 4, 'i': 4,
+    'j': 5, 'k': 5, 'l': 5,
+    'm': 6, 'n': 6, 'o': 6,
+    'p': 7, 'q': 7, 'r': 7, 's': 7,
+    't': 8, 'u': 8, 'v': 8,
+    'w': 9, 'x': 9, 'y': 9, 'z': 9
+  };
+
   // Normalize a number by converting unicode numbers and symbols to their
   // ASCII equivalents and removing all non-dialable characters.
   function NormalizeNumber(number) {
@@ -222,11 +321,11 @@ this.PhoneNumber = (function (dataBase) {
                             function (ch) {
                               return String.fromCharCode(48 + (ch.charCodeAt(0) & 0xf));
                             });
-    number = number.replace(ALPHA_CHARS,
+    number = number.replace(VALID_ALPHA_PATTERN,
                             function (ch) {
-                              return (ch.toLowerCase().charCodeAt(0) - 97)/3+2 | 0;
+                              return String(E161[ch.toLowerCase()] || 0);
                             });
-    number = number.replace(PLUS_CHARS, "+");
+    number = number.replace(LEADING_PLUS_CHARS_PATTERN, "+");
     number = number.replace(NON_DIALABLE_CHARS, "");
     return number;
   }
@@ -270,7 +369,8 @@ this.PhoneNumber = (function (dataBase) {
       for (var n = 0; n < entry.length; ++n) {
         if (typeof entry[n] == "string")
           entry[n] = ParseMetaData(countryCode, entry[n]);
-        if (ret = ParseNationalNumber(number, entry[n]))
+        ret = ParseNationalNumber(number, entry[n])
+        if (ret)
           return ret;
       }
       return null;
@@ -300,9 +400,13 @@ this.PhoneNumber = (function (dataBase) {
     // Remove formating characters and whitespace.
     number = NormalizeNumber(number);
 
+    // If there is no defaultRegion, we can't parse international access codes.
+    if (!defaultRegion && number[0] !== '+')
+      return null;
+
     // Detect and strip leading '+'.
     if (number[0] === '+')
-      return ParseInternationalNumber(number.replace(PLUS_CHARS, ""));
+      return ParseInternationalNumber(number.replace(LEADING_PLUS_CHARS_PATTERN, ""));
 
     // Lookup the meta data for the given region.
     var md = FindMetaDataForRegion(defaultRegion.toUpperCase());
@@ -312,7 +416,8 @@ this.PhoneNumber = (function (dataBase) {
     // prefix and flag the number as international.
     if (md.internationalPrefix.test(number)) {
       var possibleNumber = number.replace(md.internationalPrefix, "");
-      if (ret = ParseInternationalNumber(possibleNumber))
+      ret = ParseInternationalNumber(possibleNumber)
+      if (ret)
         return ret;
     }
 
@@ -323,7 +428,8 @@ this.PhoneNumber = (function (dataBase) {
       // Some regions have specific national prefix parse rules. Apply those.
       var withoutPrefix = number.replace(md.nationalPrefixForParsing,
                                          md.nationalPrefixTransformRule);
-      if (ret = ParseNationalNumber(withoutPrefix, md))
+      ret = ParseNationalNumber(withoutPrefix, md)
+      if (ret)
         return ret;
     } else {
       // If there is no specific national prefix rule, just strip off the
@@ -334,7 +440,8 @@ this.PhoneNumber = (function (dataBase) {
         return ret;
       }
     }
-    if (ret = ParseNationalNumber(number, md))
+    ret = ParseNationalNumber(number, md)
+    if (ret)
       return ret;
 
     // If the number matches the possible numbers of the current region,
@@ -344,14 +451,29 @@ this.PhoneNumber = (function (dataBase) {
 
     // Now lets see if maybe its an international number after all, but
     // without '+' or the international prefix.
-    if (ret = ParseInternationalNumber(number))
+    ret = ParseInternationalNumber(number)
+    if (ret)
       return ret;
 
     // We couldn't parse the number at all.
     return null;
   }
 
+  function IsViablePhoneNumber(number) {
+    if (number == null || number.length < MIN_LENGTH_FOR_NSN) {
+      return false;
+    }
+
+    let matchedGroups = number.match(VALID_PHONE_NUMBER_PATTERN);
+    if (matchedGroups && matchedGroups[0].length == number.length) {
+      return true;
+    }
+
+    return false;
+  }
+
   return {
+    IsViable: IsViablePhoneNumber,
     Parse: ParseNumber,
     Normalize: NormalizeNumber
   };

@@ -12,7 +12,6 @@
 #include "nsPresContext.h"
 #include "nsSVGEffects.h"
 #include "nsSVGPaintServerFrame.h"
-#include "nsSVGPathElement.h"
 #include "nsSVGUtils.h"
 
 NS_IMPL_FRAMEARENA_HELPERS(nsSVGGeometryFrame)
@@ -36,7 +35,7 @@ nsSVGGeometryFrame::Init(nsIContent* aContent,
 uint16_t
 nsSVGGeometryFrame::GetClipRule()
 {
-  return GetStyleSVG()->mClipRule;
+  return StyleSVG()->mClipRule;
 }
 
 uint16_t

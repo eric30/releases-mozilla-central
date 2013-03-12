@@ -90,7 +90,6 @@ public class GeckoAppShell
     public static native void notifyBatteryChange(double aLevel, boolean aCharging, double aRemainingTime);
 
     public static native void notifySmsReceived(String aSender, String aBody, int aMessageClass, long aTimestamp);
-    public static native int  saveMessageInSentbox(String aReceiver, String aBody, long aTimestamp);
     public static native void notifySmsSent(int aId, String aReceiver, String aBody, long aTimestamp, int aRequestId);
     public static native void notifySmsDelivery(int aId, int aDeliveryStatus, String aReceiver, String aBody, long aTimestamp);
     public static native void notifySmsSendFailed(int aError, int aRequestId);
@@ -1661,15 +1660,13 @@ public class GeckoAppShell
     }
 
     public static String handleGeckoMessage(String message) {
-        //        
-        //        {"gecko": {
-        //                "type": "value",
-        //                "event_specific": "value",
-        //                ....
+        // {
+        //   "type": "value",
+        //   "event_specific": "value",
+        //   ...
         try {
             JSONObject json = new JSONObject(message);
-            final JSONObject geckoObject = json.getJSONObject("gecko");
-            String type = geckoObject.getString("type");
+            String type = json.getString("type");
             
             if (type.equals("Gecko:Ready")) {
                 onAppShellReady();
@@ -1692,28 +1689,12 @@ public class GeckoAppShell
     /*
      * WebSMS related methods.
      */
-    public static int getNumberOfMessagesForText(String aText) {
-        if (SmsManager.getInstance() == null) {
-            return 0;
-        }
-
-        return SmsManager.getInstance().getNumberOfMessagesForText(aText);
-    }
-
     public static void sendMessage(String aNumber, String aMessage, int aRequestId) {
         if (SmsManager.getInstance() == null) {
             return;
         }
 
         SmsManager.getInstance().send(aNumber, aMessage, aRequestId);
-    }
-
-    public static int saveSentMessage(String aRecipient, String aBody, long aDate) {
-        if (SmsManager.getInstance() == null) {
-            return -1;
-        }
-
-        return SmsManager.getInstance().saveSentMessage(aRecipient, aBody, aDate);
     }
 
     public static void getMessage(int aMessageId, int aRequestId) {

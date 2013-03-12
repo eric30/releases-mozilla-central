@@ -22,6 +22,7 @@
 #include "WindowIdentifier.h"
 #include "mozilla/dom/ScreenOrientation.h"
 #include "mozilla/dom/ContentChild.h"
+#include "mozilla/dom/ContentParent.h"
 
 #ifdef XP_WIN
 #include <process.h>
@@ -29,11 +30,12 @@
 #endif
 
 using namespace mozilla::services;
+using namespace mozilla::dom;
 
 #define PROXY_IF_SANDBOXED(_call)                 \
   do {                                            \
     if (InSandbox()) {                            \
-      if (!hal_sandbox::IsHalChildLive()) {  \
+      if (!hal_sandbox::HalChildDestroyed()) {    \
         hal_sandbox::_call;                       \
       }                                           \
     } else {                                      \
@@ -44,7 +46,7 @@ using namespace mozilla::services;
 #define RETURN_PROXY_IF_SANDBOXED(_call, defValue)\
   do {                                            \
     if (InSandbox()) {                            \
-      if (hal_sandbox::IsHalChildLive()) {   \
+      if (hal_sandbox::HalChildDestroyed()) {     \
         return defValue;                          \
       }                                           \
       return hal_sandbox::_call;                  \
@@ -644,23 +646,18 @@ UnregisterWakeLockObserver(WakeLockObserver* aObserver)
 void
 ModifyWakeLock(const nsAString& aTopic,
                WakeLockControl aLockAdjust,
-               WakeLockControl aHiddenAdjust)
+               WakeLockControl aHiddenAdjust,
+               uint64_t aProcessID /* = CONTENT_PROCESS_ID_UNKNOWN */)
 {
   AssertMainThread();
-  uint64_t processID = InSandbox() ? dom::ContentChild::GetSingleton()->GetID() : 0;
-  PROXY_IF_SANDBOXED(ModifyWakeLockInternal(aTopic, aLockAdjust, aHiddenAdjust, processID));
-}
 
-void
-ModifyWakeLockInternal(const nsAString& aTopic,
-                       WakeLockControl aLockAdjust,
-                       WakeLockControl aHiddenAdjust,
-                       uint64_t aProcessID)
-{
-  AssertMainThread();
-  // TODO: Bug 812403 - support wake locks in nested content processes.
-  AssertMainProcess();
-  PROXY_IF_SANDBOXED(ModifyWakeLockInternal(aTopic, aLockAdjust, aHiddenAdjust, aProcessID));
+  if (aProcessID == CONTENT_PROCESS_ID_UNKNOWN) {
+    aProcessID = InSandbox() ? ContentChild::GetSingleton()->GetID() :
+                               CONTENT_PROCESS_ID_MAIN;
+  }
+
+  PROXY_IF_SANDBOXED(ModifyWakeLock(aTopic, aLockAdjust,
+                                    aHiddenAdjust, aProcessID));
 }
 
 void
@@ -844,6 +841,31 @@ void
 SetProcessPriority(int aPid, ProcessPriority aPriority)
 {
   PROXY_IF_SANDBOXED(SetProcessPriority(aPid, aPriority));
+}
+
+// From HalTypes.h.
+const char*
+ProcessPriorityToString(ProcessPriority aPriority)
+{
+  switch (aPriority) {
+  case PROCESS_PRIORITY_MASTER:
+    return "MASTER";
+  case PROCESS_PRIORITY_FOREGROUND_HIGH:
+    return "FOREGROUND_HIGH";
+  case PROCESS_PRIORITY_FOREGROUND:
+    return "FOREGROUND";
+  case PROCESS_PRIORITY_BACKGROUND_PERCEIVABLE:
+    return "BACKGROUND_PERCEIVABLE";
+  case PROCESS_PRIORITY_BACKGROUND_HOMESCREEN:
+    return "BACKGROUND_HOMESCREEN";
+  case PROCESS_PRIORITY_BACKGROUND:
+    return "BACKGROUND";
+  case PROCESS_PRIORITY_UNKNOWN:
+    return "UNKNOWN";
+  default:
+    MOZ_ASSERT(false);
+    return "???";
+  }
 }
 
 static StaticAutoPtr<ObserverList<FMRadioOperationInformation> > sFMRadioObservers;

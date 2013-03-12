@@ -49,6 +49,11 @@ browser.jar:
         content/browser/abouthome/restore-large@2x.png (content/abouthome/restore-large@2x.png)
         content/browser/abouthome/mozilla@2x.png       (content/abouthome/mozilla@2x.png)
 #endif
+#ifdef MOZ_SERVICES_HEALTHREPORT
+        content/browser/abouthealthreport/abouthealth.xhtml   (content/abouthealthreport/abouthealth.xhtml)
+        content/browser/abouthealthreport/abouthealth.js      (content/abouthealthreport/abouthealth.js)
+        content/browser/abouthealthreport/abouthealth.css     (content/abouthealthreport/abouthealth.css)
+#endif
         content/browser/aboutRobots-icon.png          (content/aboutRobots-icon.png)
         content/browser/aboutRobots-widget-left.png   (content/aboutRobots-widget-left.png)
         content/browser/aboutSocialError.xhtml        (content/aboutSocialError.xhtml)
@@ -117,7 +122,6 @@ browser.jar:
 #ifdef XP_WIN
         content/browser/win6BrowserOverlay.xul        (content/win6BrowserOverlay.xul)
 #endif
-        content/browser/social-icon.png               (content/social-icon.png)
         content/browser/socialchat.xml                (content/socialchat.xml)
 # the following files are browser-specific overrides
 *       content/browser/license.html                  (/toolkit/content/license.html)

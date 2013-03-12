@@ -11,7 +11,7 @@
 #include "nsIPrintSettings.h"
 #include "nsIPrintOptions.h"
 #include "nsIDateTimeFormat.h"
-#include "nsHTMLCanvasElement.h"
+#include "mozilla/dom/HTMLCanvasElement.h"
 
 //-----------------------------------------------
 // This class maintains all the data that 
@@ -58,9 +58,9 @@ public:
                      const nsHTMLReflowState& aMaxSize,
                      nsReflowStatus&      aStatus);
 
-  NS_IMETHOD  BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                               const nsRect&           aDirtyRect,
-                               const nsDisplayListSet& aLists);
+  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
+                                const nsRect&           aDirtyRect,
+                                const nsDisplayListSet& aLists) MOZ_OVERRIDE;
 
   // nsIPageSequenceFrame
   NS_IMETHOD SetPageNo(int32_t aPageNo) { return NS_OK;}
@@ -135,7 +135,7 @@ protected:
   int32_t      mFromPageNum;
   int32_t      mToPageNum;
   nsTArray<int32_t> mPageRanges;
-  nsTArray<nsRefPtr<nsHTMLCanvasElement> > mCurrentCanvasList;
+  nsTArray<nsRefPtr<mozilla::dom::HTMLCanvasElement> > mCurrentCanvasList;
 
   // Selection Printing Info
   nscoord      mSelectionHeight;

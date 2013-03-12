@@ -10,12 +10,10 @@
 
 #include "mozilla/Attributes.h"
 
-#include "nsAString.h"
 #include "nsCSSProperty.h"
-#include "nsColor.h"
-#include "nsCOMArray.h"
 #include "nsCOMPtr.h"
-#include "nsTArray.h"
+#include "nsStringFwd.h"
+#include "nsTArrayForwardDeclare.h"
 
 class nsCSSStyleSheet;
 class nsIPrincipal;
@@ -108,7 +106,7 @@ public:
                      nsIURI*                 aSheetURL,
                      nsIURI*                 aBaseURL,
                      nsIPrincipal*           aSheetPrincipal,
-                     nsCOMArray<mozilla::css::Rule>& aResult);
+                     mozilla::css::Rule**    aResult);
 
   // Parse the value of a single CSS property, and add or replace that
   // property in aDeclaration.
@@ -179,6 +177,25 @@ public:
                                    nsIURI*            aURL,
                                    uint32_t           aLineNumber,
                                    InfallibleTArray<float>& aSelectorList);
+
+  /**
+   * Parse a property and value and return whether the property/value pair
+   * is supported.
+   */
+  bool EvaluateSupportsDeclaration(const nsAString& aProperty,
+                                   const nsAString& aValue,
+                                   nsIURI* aDocURL,
+                                   nsIURI* aBaseURL,
+                                   nsIPrincipal* aDocPrincipal);
+
+  /**
+   * Parse an @supports condition and returns the result of evaluating the
+   * condition.
+   */
+  bool EvaluateSupportsCondition(const nsAString& aCondition,
+                                 nsIURI* aDocURL,
+                                 nsIURI* aBaseURL,
+                                 nsIPrincipal* aDocPrincipal);
 
 protected:
   // This is a CSSParserImpl*, but if we expose that type name in this

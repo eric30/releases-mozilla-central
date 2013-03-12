@@ -12,9 +12,10 @@
 
 using namespace mozilla;
 
-nsDOMMouseEvent::nsDOMMouseEvent(nsPresContext* aPresContext,
+nsDOMMouseEvent::nsDOMMouseEvent(mozilla::dom::EventTarget* aOwner,
+                                 nsPresContext* aPresContext,
                                  nsInputEvent* aEvent)
-  : nsDOMUIEvent(aPresContext, aEvent ? aEvent :
+  : nsDOMUIEvent(aOwner, aPresContext, aEvent ? aEvent :
                  new nsMouseEvent(false, 0, nullptr,
                                   nsMouseEvent::eReal))
 {
@@ -154,7 +155,7 @@ nsresult
 nsDOMMouseEvent::InitFromCtor(const nsAString& aType,
                               JSContext* aCx, jsval* aVal)
 {
-  mozilla::dom::MouseEventInit d;
+  mozilla::idl::MouseEventInit d;
   nsresult rv = d.Init(aCx, aVal);
   NS_ENSURE_SUCCESS(rv, rv);
   rv = InitMouseEvent(aType, d.bubbles, d.cancelable,
@@ -403,9 +404,10 @@ nsDOMMouseEvent::GetMozInputSource(uint16_t* aInputSource)
 }
 
 nsresult NS_NewDOMMouseEvent(nsIDOMEvent** aInstancePtrResult,
+                             mozilla::dom::EventTarget* aOwner,
                              nsPresContext* aPresContext,
-                             nsInputEvent *aEvent) 
+                             nsInputEvent *aEvent)
 {
-  nsDOMMouseEvent* it = new nsDOMMouseEvent(aPresContext, aEvent);
+  nsDOMMouseEvent* it = new nsDOMMouseEvent(aOwner, aPresContext, aEvent);
   return CallQueryInterface(it, aInstancePtrResult);
 }

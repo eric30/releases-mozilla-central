@@ -12,11 +12,12 @@
  *
  * see DASHDecoder.cpp for info on DASH interaction with the media engine.*/
 
-#include "nsTimeRanges.h"
+#include "mozilla/dom/TimeRanges.h"
 #include "VideoFrameContainer.h"
 #include "AbstractMediaDecoder.h"
 #include "DASHReader.h"
 #include "DASHDecoder.h"
+#include <algorithm>
 
 namespace mozilla {
 
@@ -57,6 +58,22 @@ DASHReader::~DASHReader()
 }
 
 nsresult
+DASHReader::ResetDecode()
+{
+  MediaDecoderReader::ResetDecode();
+  nsresult rv;
+  for (uint i = 0; i < mAudioReaders.Length(); i++) {
+    rv = mAudioReaders[i]->ResetDecode();
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+  for (uint i = 0; i < mVideoReaders.Length(); i++) {
+    rv = mVideoReaders[i]->ResetDecode();
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+  return NS_OK;
+}
+
+nsresult
 DASHReader::Init(MediaDecoderReader* aCloneDonor)
 {
   NS_ASSERTION(NS_IsMainThread(), "Should be on main thread.");
@@ -81,7 +98,7 @@ void
 DASHReader::AddAudioReader(DASHRepReader* aAudioReader)
 {
   NS_ASSERTION(NS_IsMainThread(), "Should be on main thread.");
-  NS_ENSURE_TRUE(aAudioReader, );
+  NS_ENSURE_TRUE_VOID(aAudioReader);
 
   ReentrantMonitorAutoEnter mon(mDecoder->GetReentrantMonitor());
 
@@ -95,7 +112,7 @@ void
 DASHReader::AddVideoReader(DASHRepReader* aVideoReader)
 {
   NS_ASSERTION(NS_IsMainThread(), "Should be on main thread.");
-  NS_ENSURE_TRUE(aVideoReader, );
+  NS_ENSURE_TRUE_VOID(aVideoReader);
 
   ReentrantMonitorAutoEnter mon(mDecoder->GetReentrantMonitor());
 
@@ -137,7 +154,7 @@ DASHReader::AudioQueueMemoryInUse()
 
 bool
 DASHReader::DecodeVideoFrame(bool &aKeyframeSkip,
-                               int64_t aTimeThreshold)
+                             int64_t aTimeThreshold)
 {
   NS_ASSERTION(mDecoder->OnDecodeThread(), "Should be on decode thread.");
   if (mVideoReader) {
@@ -207,71 +224,223 @@ DASHReader::ReadMetadata(VideoInfo* aInfo,
 
 nsresult
 DASHReader::Seek(int64_t aTime,
-                   int64_t aStartTime,
-                   int64_t aEndTime,
-                   int64_t aCurrentTime)
+                 int64_t aStartTime,
+                 int64_t aEndTime,
+                 int64_t aCurrentTime)
 {
   NS_ASSERTION(mDecoder->OnDecodeThread(), "Should be on decode thread.");
 
+  NS_ENSURE_SUCCESS(ResetDecode(), NS_ERROR_FAILURE);
+
+  LOG("Seeking to [%.2fs]", aTime/1000000.0);
+
   nsresult rv;
+  DASHDecoder* dashDecoder = static_cast<DASHDecoder*>(mDecoder);
 
   if (mAudioReader) {
+    int64_t subsegmentIdx = -1;
+    {
+      ReentrantMonitorAutoEnter mon(mDecoder->GetReentrantMonitor());
+      subsegmentIdx = mAudioReader->GetSubsegmentForSeekTime(aTime);
+      NS_ENSURE_TRUE(0 <= subsegmentIdx, NS_ERROR_ILLEGAL_VALUE);
+    }
+    dashDecoder->NotifySeekInAudioSubsegment(subsegmentIdx);
+
     rv = mAudioReader->Seek(aTime, aStartTime, aEndTime, aCurrentTime);
     NS_ENSURE_SUCCESS(rv, rv);
   }
+
   if (mVideoReader) {
-    rv = mVideoReader->Seek(aTime, aStartTime, aEndTime, aCurrentTime);
-    NS_ENSURE_SUCCESS(rv, rv);
+    // Determine the video subsegment we're seeking to.
+    int32_t subsegmentIdx = -1;
+    {
+      ReentrantMonitorAutoEnter mon(mDecoder->GetReentrantMonitor());
+      subsegmentIdx = mVideoReader->GetSubsegmentForSeekTime(aTime);
+      NS_ENSURE_TRUE(0 <= subsegmentIdx, NS_ERROR_ILLEGAL_VALUE);
+    }
+
+    LOG("Seek to [%.2fs] found in video subsegment [%d]",
+        aTime/1000000.0, subsegmentIdx);
+
+    // Determine if/which video reader previously downloaded this subsegment.
+    int32_t readerIdx = dashDecoder->GetRepIdxForVideoSubsegmentLoad(subsegmentIdx);
+
+    dashDecoder->NotifySeekInVideoSubsegment(readerIdx, subsegmentIdx);
+
+    if (0 <= readerIdx) {
+      NS_ENSURE_TRUE(readerIdx < mVideoReaders.Length(),
+                     NS_ERROR_ILLEGAL_VALUE);
+      // Switch to this reader and do the Seek.
+      DASHRepReader* fromReader = mVideoReader;
+      DASHRepReader* toReader = mVideoReaders[readerIdx];
+
+      {
+        ReentrantMonitorAutoEnter mon(mDecoder->GetReentrantMonitor());
+        if (fromReader != toReader) {
+          LOG("Switching video readers now from [%p] to [%p] for a seek to "
+              "[%.2fs] in subsegment [%d]",
+              fromReader, toReader, aTime/1000000.0, subsegmentIdx);
+
+          mVideoReader = toReader;
+        }
+      }
+
+      rv = mVideoReader->Seek(aTime, aStartTime, aEndTime, aCurrentTime);
+      if (NS_FAILED(rv)) {
+        NS_ENSURE_SUCCESS(rv, rv);
+      }
+
+      // Go back to the appropriate count in the switching history, and setup
+      // this main reader and the sub readers for the next switch (if any).
+      {
+        ReentrantMonitorAutoEnter mon(mDecoder->GetReentrantMonitor());
+        mSwitchCount = dashDecoder->GetSwitchCountAtVideoSubsegment(subsegmentIdx);
+        LOG("After mVideoReader->Seek() mSwitchCount %d", mSwitchCount);
+        NS_ENSURE_TRUE(0 <= mSwitchCount, NS_ERROR_ILLEGAL_VALUE);
+        NS_ENSURE_TRUE(mSwitchCount <= subsegmentIdx, NS_ERROR_ILLEGAL_VALUE);
+      }
+    } else {
+      LOG("Error getting rep idx for video subsegment [%d]",
+          subsegmentIdx);
+    }
   }
   return NS_OK;
 }
 
 nsresult
-DASHReader::GetBuffered(nsTimeRanges* aBuffered,
-                          int64_t aStartTime)
+DASHReader::GetBuffered(TimeRanges* aBuffered,
+                        int64_t aStartTime)
 {
   NS_ENSURE_ARG(aBuffered);
 
   MediaResource* resource = nullptr;
   AbstractMediaDecoder* decoder = nullptr;
 
-  // Need to find intersect of |nsTimeRanges| for audio and video.
-  nsTimeRanges audioBuffered, videoBuffered;
-  uint32_t audioRangeCount, videoRangeCount;
+  TimeRanges audioBuffered, videoBuffered;
+  uint32_t audioRangeCount = 0, videoRangeCount = 0;
+  bool audioCachedAtEnd = false, videoCachedAtEnd = false;
 
   nsresult rv = NS_OK;
 
-  // First, get buffered ranges for sub-readers.
+  // Get all audio and video buffered ranges. Include inactive streams, since
+  // we may have carried out a seek and future subsegments may be in currently
+  // inactive decoders.
   ReentrantMonitorConditionallyEnter mon(!mDecoder->OnDecodeThread(),
                                          mDecoder->GetReentrantMonitor());
-  if (mAudioReader) {
-    decoder = mAudioReader->GetDecoder();
+  for (uint32_t i = 0; i < mAudioReaders.Length(); i++) {
+    decoder = mAudioReaders[i]->GetDecoder();
     NS_ENSURE_TRUE(decoder, NS_ERROR_NULL_POINTER);
     resource = decoder->GetResource();
     NS_ENSURE_TRUE(resource, NS_ERROR_NULL_POINTER);
     resource->Pin();
-    rv = mAudioReader->GetBuffered(&audioBuffered, aStartTime);
+    rv = mAudioReaders[i]->GetBuffered(&audioBuffered, aStartTime);
     NS_ENSURE_SUCCESS(rv, rv);
+    // If data was cached at the end, then the final timestamp refers to the
+    // end of the data. Use this later to extend end time if necessary.
+    if (!audioCachedAtEnd) {
+      audioCachedAtEnd = mAudioReaders[i]->IsDataCachedAtEndOfSubsegments();
+    }
     resource->Unpin();
-    rv = audioBuffered.GetLength(&audioRangeCount);
-    NS_ENSURE_SUCCESS(rv, rv);
   }
-  if (mVideoReader) {
-    decoder = mVideoReader->GetDecoder();
+  for (uint32_t i = 0; i < mVideoReaders.Length(); i++) {
+    decoder = mVideoReaders[i]->GetDecoder();
     NS_ENSURE_TRUE(decoder, NS_ERROR_NULL_POINTER);
     resource = decoder->GetResource();
     NS_ENSURE_TRUE(resource, NS_ERROR_NULL_POINTER);
     resource->Pin();
-    rv = mVideoReader->GetBuffered(&videoBuffered, aStartTime);
+    rv = mVideoReaders[i]->GetBuffered(&videoBuffered, aStartTime);
     NS_ENSURE_SUCCESS(rv, rv);
+    // If data was cached at the end, then the final timestamp refers to the
+    // end of the data. Use this later to extend end time if necessary.
+    if (!videoCachedAtEnd) {
+      videoCachedAtEnd = mVideoReaders[i]->IsDataCachedAtEndOfSubsegments();
+    }
     resource->Unpin();
-    rv = videoBuffered.GetLength(&videoRangeCount);
-    NS_ENSURE_SUCCESS(rv, rv);
   }
 
-  // Now determine buffered data for available sub-readers.
-  if (mAudioReader && mVideoReader) {
-    // Calculate intersecting ranges.
+  audioBuffered.Normalize();
+  videoBuffered.Normalize();
+
+  rv = audioBuffered.GetLength(&audioRangeCount);
+  NS_ENSURE_SUCCESS(rv, rv);
+  rv = videoBuffered.GetLength(&videoRangeCount);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+#ifdef PR_LOGGING
+  double start = 0, end = 0;
+  for (uint32_t i = 0; i < audioRangeCount; i++) {
+    rv = audioBuffered.Start(i, &start);
+    NS_ENSURE_SUCCESS(rv, rv);
+    rv = audioBuffered.End(i, &end);
+    NS_ENSURE_SUCCESS(rv, rv);
+    LOG("audioBuffered[%d] = (%f, %f)",
+        i, start, end);
+  }
+  for (uint32_t i = 0; i < videoRangeCount; i++) {
+    rv = videoBuffered.Start(i, &start);
+    NS_ENSURE_SUCCESS(rv, rv);
+    rv = videoBuffered.End(i, &end);
+    NS_ENSURE_SUCCESS(rv, rv);
+    LOG("videoBuffered[%d] = (%f, %f)",
+        i, start, end);
+  }
+#endif
+
+  // If audio and video are cached to the end of their subsegments, extend the
+  // end time of the shorter of the two. Presentation of the shorter stream
+  // will stop at the end, while the other continues until the combined
+  // playback is complete.
+  // Note: Only in cases where the shorter stream is fully cached, and the
+  // longer stream is partially cached, but with more time buffered than the
+  // shorter stream.
+  //
+  // Audio ========|
+  //               20
+  // Video ============|----|
+  //                   30   40
+  // Combo ============|      <----- End time EXTENDED.
+  //
+  // For example, audio is fully cached to 20s, but video is partially cached
+  // to 30s, full duration 40s. In this case, the buffered end time should be
+  // extended to the video's end time.
+  //
+  // Audio =================|
+  //                        40
+  // Video ========|----|
+  //               20   30
+  // Combo ========|          <------ End time NOT EXTENDED.
+  //
+  // Conversely, if the longer stream is fully cached, but the shorter one is
+  // not, no extension of end time should occur - we should consider the
+  // partially cached, shorter end time to be the end time of the combined
+  // stream
+
+  if (audioCachedAtEnd || videoCachedAtEnd) {
+    NS_ENSURE_TRUE(audioRangeCount, NS_ERROR_FAILURE);
+    NS_ENSURE_TRUE(videoRangeCount, NS_ERROR_FAILURE);
+
+    double audioEndTime = 0, videoEndTime = 0;
+    // Get end time of the last range of buffered audio.
+    audioEndTime = audioBuffered.GetFinalEndTime();
+    NS_ENSURE_TRUE(audioEndTime > 0, NS_ERROR_ILLEGAL_VALUE);
+    // Get end time of the last range of buffered video.
+    videoEndTime = videoBuffered.GetFinalEndTime();
+    NS_ENSURE_TRUE(videoEndTime > 0, NS_ERROR_ILLEGAL_VALUE);
+
+    // API for TimeRanges requires extending through adding and normalizing.
+    if (videoCachedAtEnd && audioEndTime > videoEndTime) {
+      videoBuffered.Add(videoEndTime, audioEndTime);
+      videoBuffered.Normalize();
+      LOG("videoBuffered extended to %f", audioEndTime);
+    } else if (audioCachedAtEnd && videoEndTime > audioEndTime) {
+      audioBuffered.Add(audioEndTime, videoEndTime);
+      audioBuffered.Normalize();
+      LOG("audioBuffered extended to %f", videoEndTime);
+    }
+  }
+
+  // Calculate intersecting ranges for video and audio.
+  if (!mAudioReaders.IsEmpty() && !mVideoReaders.IsEmpty()) {
     for (uint32_t i = 0; i < audioRangeCount; i++) {
       // |A|udio, |V|ideo, |I|ntersect.
       double startA, startV, startI;
@@ -301,9 +470,9 @@ DASHReader::GetBuffered(nsTimeRanges* aBuffered,
         aBuffered->Add(startI, endI);
       }
     }
-  } else if (mAudioReader) {
+  } else if (!mAudioReaders.IsEmpty()) {
     *aBuffered = audioBuffered;
-  } else if (mVideoReader) {
+  } else if (!mVideoReaders.IsEmpty()) {
     *aBuffered = videoBuffered;
   } else {
     return NS_ERROR_NOT_INITIALIZED;
@@ -341,7 +510,7 @@ DASHReader::FindStartTime(int64_t& aOutStartTime)
     }
   }
 
-  int64_t startTime = NS_MIN(videoStartTime, audioStartTime);
+  int64_t startTime = std::min(videoStartTime, audioStartTime);
   if (startTime != INT64_MAX) {
     aOutStartTime = startTime;
   }
@@ -369,8 +538,8 @@ DASHReader::VideoQueue()
 
 void
 DASHReader::RequestVideoReaderSwitch(uint32_t aFromReaderIdx,
-                                       uint32_t aToReaderIdx,
-                                       uint32_t aSubsegmentIdx)
+                                     uint32_t aToReaderIdx,
+                                     uint32_t aSubsegmentIdx)
 {
   NS_ASSERTION(NS_IsMainThread(), "Should be on main thread.");
   NS_ASSERTION(aFromReaderIdx < mVideoReaders.Length(),
@@ -393,6 +562,14 @@ DASHReader::RequestVideoReaderSwitch(uint32_t aFromReaderIdx,
       aFromReaderIdx, fromReader, aToReaderIdx, toReader, aSubsegmentIdx);
 
   // Append the subsegment index to the list of pending switches.
+  for (uint32_t i = 0; i < mSwitchToVideoSubsegmentIndexes.Length(); i++) {
+    if (mSwitchToVideoSubsegmentIndexes[i] == aSubsegmentIdx) {
+      // A backwards |Seek| has changed the switching history; delete from
+      // this point on.
+      mSwitchToVideoSubsegmentIndexes.TruncateLength(i);
+      break;
+    }
+  }
   mSwitchToVideoSubsegmentIndexes.AppendElement(aSubsegmentIdx);
 
   // Tell the SWITCH FROM reader when it should stop reading.
@@ -416,8 +593,8 @@ DASHReader::PossiblySwitchVideoReaders()
   }
 
   // Only switch if we reached a switch access point.
-  NS_ENSURE_TRUE(0 <= mSwitchCount, );
-  NS_ENSURE_TRUE((uint32_t)mSwitchCount < mSwitchToVideoSubsegmentIndexes.Length(), );
+  NS_ENSURE_TRUE_VOID(0 <= mSwitchCount);
+  NS_ENSURE_TRUE_VOID((uint32_t)mSwitchCount < mSwitchToVideoSubsegmentIndexes.Length());
   uint32_t switchIdx = mSwitchToVideoSubsegmentIndexes[mSwitchCount];
   if (!mVideoReader->HasReachedSubsegment(switchIdx)) {
     return;
@@ -426,12 +603,12 @@ DASHReader::PossiblySwitchVideoReaders()
   // Get Representation index to switch to.
   DASHDecoder* dashDecoder = static_cast<DASHDecoder*>(mDecoder);
   int32_t toReaderIdx = dashDecoder->GetRepIdxForVideoSubsegmentLoad(switchIdx);
-  NS_ENSURE_TRUE(0 <= toReaderIdx, );
-  NS_ENSURE_TRUE((uint32_t)toReaderIdx < mVideoReaders.Length(), );
+  NS_ENSURE_TRUE_VOID(0 <= toReaderIdx);
+  NS_ENSURE_TRUE_VOID((uint32_t)toReaderIdx < mVideoReaders.Length());
 
   DASHRepReader* fromReader = mVideoReader;
   DASHRepReader* toReader = mVideoReaders[toReaderIdx];
-  NS_ENSURE_TRUE(fromReader != toReader, );
+  NS_ENSURE_TRUE_VOID(fromReader != toReader);
 
   LOG("Switching video readers now from [%p] to [%p] at subsegment [%d]: "
       "mSwitchCount [%d].",
@@ -450,8 +627,8 @@ DASHReader::PossiblySwitchVideoReaders()
     fromReader = toReader;
     toReaderIdx = dashDecoder->GetRepIdxForVideoSubsegmentLoad(switchIdx);
     toReader = mVideoReaders[toReaderIdx];
-    NS_ENSURE_TRUE((uint32_t)toReaderIdx < mVideoReaders.Length(), );
-    NS_ENSURE_TRUE(fromReader != toReader, );
+    NS_ENSURE_TRUE_VOID((uint32_t)toReaderIdx < mVideoReaders.Length());
+    NS_ENSURE_TRUE_VOID(fromReader != toReader);
 
     // Tell the SWITCH FROM reader when it should stop reading.
     fromReader->RequestSwitchAtSubsegment(switchIdx, toReader);
@@ -483,5 +660,19 @@ DASHReader::PrepareToDecode()
   }
 }
 
-} // namespace mozilla
+DASHRepReader*
+DASHReader::GetReaderForSubsegment(uint32_t aSubsegmentIdx)
+{
+  NS_ASSERTION(mDecoder->OnDecodeThread(), "Should be on decode thread.");
+  DASHDecoder* dashDecoder = static_cast<DASHDecoder*>(mDecoder);
+  int32_t repIdx =
+    dashDecoder->GetRepIdxForVideoSubsegmentLoadAfterSeek((int32_t)aSubsegmentIdx);
+  if (0 <= repIdx && repIdx < mVideoReaders.Length()) {
+    return mVideoReaders[repIdx];
+  } else {
+    return nullptr;
+  }
+}
 
+
+} // namespace mozilla

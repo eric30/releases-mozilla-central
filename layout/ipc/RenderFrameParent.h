@@ -76,10 +76,10 @@ public:
                                    const TargetConfig& aTargetConfig,
                                    bool isFirstPaint) MOZ_OVERRIDE;
 
-  NS_IMETHOD BuildDisplayList(nsDisplayListBuilder* aBuilder,
-                              nsSubDocumentFrame* aFrame,
-                              const nsRect& aDirtyRect,
-                              const nsDisplayListSet& aLists);
+  void BuildDisplayList(nsDisplayListBuilder* aBuilder,
+                        nsSubDocumentFrame* aFrame,
+                        const nsRect& aDirtyRect,
+                        const nsDisplayListSet& aLists);
 
   already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
                                      nsIFrame* aFrame,
@@ -109,6 +109,7 @@ protected:
   virtual bool RecvNotifyCompositorTransaction() MOZ_OVERRIDE;
 
   virtual bool RecvCancelDefaultPanZoom() MOZ_OVERRIDE;
+  virtual bool RecvDetectScrollableSubframe() MOZ_OVERRIDE;
 
   virtual PLayersParent* AllocPLayers() MOZ_OVERRIDE;
   virtual bool DeallocPLayers(PLayersParent* aLayers) MOZ_OVERRIDE;

@@ -106,17 +106,17 @@ public:
                                          int32_t *aX,
                                          int32_t *aY);
     virtual void       SetSizeConstraints(const SizeConstraints& aConstraints);
-    NS_IMETHOD         Move(int32_t aX,
-                            int32_t aY);
+    NS_IMETHOD         Move(double aX,
+                            double aY);
     NS_IMETHOD         Show             (bool aState);
-    NS_IMETHOD         Resize           (int32_t aWidth,
-                                         int32_t aHeight,
-                                         bool    aRepaint);
-    NS_IMETHOD         Resize           (int32_t aX,
-                                         int32_t aY,
-                                         int32_t aWidth,
-                                         int32_t aHeight,
-                                         bool     aRepaint);
+    NS_IMETHOD         Resize           (double aWidth,
+                                         double aHeight,
+                                         bool   aRepaint);
+    NS_IMETHOD         Resize           (double aX,
+                                         double aY,
+                                         double aWidth,
+                                         double aHeight,
+                                         bool   aRepaint);
     virtual bool       IsEnabled() const;
 
 
@@ -255,12 +255,10 @@ public:
     bool               DispatchKeyDownEvent(GdkEventKey *aEvent,
                                             bool *aIsCancelled);
 
-    NS_IMETHOD ResetInputState();
+    NS_IMETHOD NotifyIME(NotificationToIME aNotification) MOZ_OVERRIDE;
     NS_IMETHOD_(void) SetInputContext(const InputContext& aContext,
                                       const InputContextAction& aAction);
     NS_IMETHOD_(InputContext) GetInputContext();
-    NS_IMETHOD CancelIMEComposition();
-    NS_IMETHOD OnIMEFocusChange(bool aFocus);
     NS_IMETHOD GetToggledKeyState(uint32_t aKeyCode, bool* aLEDState);
 
     // These methods are for toplevel windows only.
@@ -347,12 +345,9 @@ private:
     MozContainer       *mContainer;
     GdkWindow          *mGdkWindow;
 
-    GtkWindowGroup     *mWindowGroup;
-
     uint32_t            mHasMappedToplevel : 1,
                         mIsFullyObscured : 1,
                         mRetryPointerGrab : 1;
-    GtkWindow          *mTransientParent;
     nsSizeMode          mSizeState;
     PluginType          mPluginType;
 

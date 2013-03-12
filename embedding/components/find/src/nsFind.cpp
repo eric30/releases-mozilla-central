@@ -27,6 +27,9 @@
 #include "nsCRT.h"
 #include "nsRange.h"
 #include "nsContentUtils.h"
+#include "mozilla/DebugOnly.h"
+
+using namespace mozilla;
 
 // Yikes!  Casting a char to unichar can fill with ones!
 #define CHAR_TO_UNICHAR(c) ((PRUnichar)(const unsigned char)c)
@@ -84,7 +87,8 @@ public:
   }
 
   // nsISupports
-  NS_DECL_ISUPPORTS
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+    NS_DECL_CYCLE_COLLECTION_CLASS(nsFindContentIterator)
 
   // nsIContentIterator
   virtual nsresult Init(nsINode* aRoot)
@@ -127,7 +131,17 @@ private:
   void SetupInnerIterator(nsIContent* aContent);
 };
 
-NS_IMPL_ISUPPORTS1(nsFindContentIterator, nsIContentIterator)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsFindContentIterator)
+  NS_INTERFACE_MAP_ENTRY(nsIContentIterator)
+  NS_INTERFACE_MAP_ENTRY(nsISupports)
+NS_INTERFACE_MAP_END
+
+NS_IMPL_CYCLE_COLLECTING_ADDREF(nsFindContentIterator)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(nsFindContentIterator)
+
+NS_IMPL_CYCLE_COLLECTION_6(nsFindContentIterator, mOuterIterator, mInnerIterator,
+                           mStartOuterContent, mEndOuterContent, mEndNode, mStartNode)
+
 
 nsresult
 nsFindContentIterator::Init(nsIDOMNode* aStartNode, int32_t aStartOffset,
@@ -422,7 +436,15 @@ NS_NewFindContentIterator(bool aFindBackward,
 }
 // --------------------------------------------------------------------
 
-NS_IMPL_ISUPPORTS1(nsFind, nsIFind)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsFind)
+  NS_INTERFACE_MAP_ENTRY(nsIFind)
+  NS_INTERFACE_MAP_ENTRY(nsISupports)
+NS_INTERFACE_MAP_END
+
+NS_IMPL_CYCLE_COLLECTING_ADDREF(nsFind)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(nsFind)
+
+  NS_IMPL_CYCLE_COLLECTION_3(nsFind, mLastBlockParent, mIterNode, mIterator)
 
 nsFind::nsFind()
   : mFindBackward(false)
@@ -739,7 +761,7 @@ bool nsFind::IsVisibleNode(nsIDOMNode *aDOMNode)
     return false;
   }
 
-  return frame->GetStyleVisibility()->IsVisible();
+  return frame->StyleVisibility()->IsVisible();
 }
 
 bool nsFind::SkipNode(nsIContent* aContent)
@@ -1202,7 +1224,7 @@ nsFind::Find(const PRUnichar *aPatText, nsIDOMRange* aSearchRange,
       if (matchAnchorNode != mIterNode)
       {
         nsCOMPtr<nsIContent> content (do_QueryInterface(matchAnchorNode));
-        nsresult rv = NS_ERROR_UNEXPECTED;
+        DebugOnly<nsresult> rv = NS_ERROR_UNEXPECTED;
         if (content)
           rv = mIterator->PositionAt(content);
         frag = 0;

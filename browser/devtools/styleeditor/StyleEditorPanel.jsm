@@ -4,46 +4,56 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const Cu = Components.utils;
+const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 
 this.EXPORTED_SYMBOLS = ["StyleEditorPanel"];
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/commonjs/sdk/core/promise.js");
 Cu.import("resource:///modules/devtools/EventEmitter.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "StyleEditorChrome",
-  "resource:///modules/devtools/StyleEditorChrome.jsm");
+                        "resource:///modules/devtools/StyleEditorChrome.jsm");
 
 this.StyleEditorPanel = function StyleEditorPanel(panelWin, toolbox) {
-  new EventEmitter(this);
+  EventEmitter.decorate(this);
 
   this._toolbox = toolbox;
   this._target = toolbox.target;
 
-  this.reset = this.reset.bind(this);
   this.newPage = this.newPage.bind(this);
   this.destroy = this.destroy.bind(this);
+  this.beforeNavigate = this.beforeNavigate.bind(this);
 
-  this._target.on("will-navigate", this.reset);
+  this._target.on("will-navigate", this.beforeNavigate);
   this._target.on("navigate", this.newPage);
   this._target.on("close", this.destroy);
 
   this._panelWin = panelWin;
   this._panelDoc = panelWin.document;
-
-  let contentWin = toolbox.target.tab.linkedBrowser.contentWindow;
-  this.setPage(contentWin);
-
-  this.isReady = true;
 }
 
 StyleEditorPanel.prototype = {
   /**
+   * open is effectively an asynchronous constructor
+   */
+  open: function StyleEditor_open() {
+    let contentWin = this._toolbox.target.window;
+    let deferred = Promise.defer();
+
+    this.setPage(contentWin).then(function() {
+      this.isReady = true;
+      deferred.resolve(this);
+    }.bind(this));
+
+    return deferred.promise;
+  },
+
+  /**
    * Target getter.
    */
-  get target() {
-    return this._target;
-  },
+  get target() this._target,
 
   /**
    * Panel window getter.
@@ -61,20 +71,102 @@ StyleEditorPanel.prototype = {
   setPage: function StyleEditor_setPage(contentWindow) {
     if (this._panelWin.styleEditorChrome) {
       this._panelWin.styleEditorChrome.contentWindow = contentWindow;
+      this.selectStyleSheet(null, null, null);
     } else {
       let chromeRoot = this._panelDoc.getElementById("style-editor-chrome");
       let chrome = new StyleEditorChrome(chromeRoot, contentWindow);
+      let promise = chrome.open();
+
       this._panelWin.styleEditorChrome = chrome;
+      this.selectStyleSheet(null, null, null);
+      return promise;
     }
-    this.selectStyleSheet(null, null, null);
   },
 
   /**
    * Navigated to a new page.
    */
   newPage: function StyleEditor_newPage(event, window) {
+    this.reset();
     this.setPage(window);
   },
+
+  /**
+   * Before navigating to a new page or reloading the page.
+   */
+  beforeNavigate: function StyleEditor_beforeNavigate(event, request) {
+    if (this.styleEditorChrome.isDirty) {
+      this.preventNavigate(request);
+    }
+  },
+
+  /**
+   * Show a notificiation about losing unsaved changes.
+   */
+  preventNavigate: function StyleEditor_preventNavigate(request) {
+    request.suspend();
+
+    let notificationBox = null;
+    if (this.target.isLocalTab) {
+      let gBrowser = this.target.tab.ownerDocument.defaultView.gBrowser;
+      notificationBox = gBrowser.getNotificationBox();
+    }
+    else {
+      notificationBox = this._toolbox.getNotificationBox();
+    }
+
+    let notification = notificationBox.
+      getNotificationWithValue("styleeditor-page-navigation");
+
+    if (notification) {
+      notificationBox.removeNotification(notification, true);
+    }
+
+    let cancelRequest = function onCancelRequest() {
+      if (request) {
+        request.cancel(Cr.NS_BINDING_ABORTED);
+        request.resume(); // needed to allow the connection to be cancelled.
+        request = null;
+      }
+    };
+
+    let eventCallback = function onNotificationCallback(event) {
+      if (event == "removed") {
+        cancelRequest();
+      }
+    };
+
+    let buttons = [
+      {
+        id: "styleeditor.confirmNavigationAway.buttonLeave",
+        label: this.strings.GetStringFromName("confirmNavigationAway.buttonLeave"),
+        accessKey: this.strings.GetStringFromName("confirmNavigationAway.buttonLeaveAccesskey"),
+        callback: function onButtonLeave() {
+          if (request) {
+            request.resume();
+            request = null;
+          }
+        }.bind(this),
+      },
+      {
+        id: "styleeditor.confirmNavigationAway.buttonStay",
+        label: this.strings.GetStringFromName("confirmNavigationAway.buttonStay"),
+        accessKey: this.strings.GetStringFromName("confirmNavigationAway.buttonStayAccesskey"),
+        callback: cancelRequest
+      },
+    ];
+
+    let message = this.strings.GetStringFromName("confirmNavigationAway.message");
+
+    notification = notificationBox.appendNotification(message,
+      "styleeditor-page-navigation", "chrome://browser/skin/Info.png",
+      notificationBox.PRIORITY_WARNING_HIGH, buttons, eventCallback);
+
+    // Make sure this not a transient notification, to avoid the automatic
+    // transient notification removal.
+    notification.persistence = -1;
+  },
+
 
   /**
    * No window available anymore.
@@ -94,17 +186,24 @@ StyleEditorPanel.prototype = {
    * Destroy StyleEditor
    */
   destroy: function StyleEditor_destroy() {
-    if (this._destroyed) {
-      return;
-    }
-    this._destroyed = true;
+    if (!this._destroyed) {
+      this._destroyed = true;
 
-    this._target.off("will-navigate", this.reset);
-    this._target.off("navigate", this.newPage);
-    this._target.off("close", this.destroy);
-    this._target = null;
-    this._toolbox = null;
-    this._panelWin = null;
-    this._panelDoc = null;
+      this._target.off("will-navigate", this.beforeNavigate);
+      this._target.off("navigate", this.newPage);
+      this._target.off("close", this.destroy);
+      this._target = null;
+      this._toolbox = null;
+      this._panelWin = null;
+      this._panelDoc = null;
+    }
+
+    return Promise.resolve(null);
   },
 }
+
+XPCOMUtils.defineLazyGetter(StyleEditorPanel.prototype, "strings",
+  function () {
+    return Services.strings.createBundle(
+            "chrome://browser/locale/devtools/styleeditor.properties");
+  });

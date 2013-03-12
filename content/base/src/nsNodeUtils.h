@@ -11,7 +11,7 @@
 
 struct CharacterDataChangeInfo;
 struct JSContext;
-struct JSObject;
+class JSObject;
 class nsIVariant;
 class nsIDOMNode;
 class nsIDOMUserDataHandler;
@@ -154,6 +154,16 @@ public:
   {
     return CloneAndAdopt(aNode, true, aDeep, aNewNodeInfoManager, nullptr,
                          nullptr, aNodesWithProperties, nullptr, aResult);
+  }
+
+  /**
+   * Clones aNode, its attributes and, if aDeep is true, its descendant nodes
+   */
+  static nsresult Clone(nsINode *aNode, bool aDeep, nsINode **aResult)
+  {
+    nsCOMArray<nsINode> dummyNodeWithProperties;
+    return CloneAndAdopt(aNode, true, aDeep, nullptr, nullptr, nullptr,
+                         dummyNodeWithProperties, aNode->GetParent(), aResult);
   }
 
   /**

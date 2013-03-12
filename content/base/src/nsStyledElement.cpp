@@ -19,7 +19,6 @@
 #include "mozilla/css/Loader.h"
 #include "nsIDOMMutationEvent.h"
 #include "nsXULElement.h"
-#include "nsIDOMSVGStylable.h"
 #include "nsContentUtils.h"
 
 namespace css = mozilla::css;
@@ -192,7 +191,7 @@ nsStyledElementNotElementCSSInlineStyle::GetInlineStyleRule()
 // Others and helpers
 
 nsICSSDeclaration*
-nsStyledElementNotElementCSSInlineStyle::GetStyle(nsresult* retval)
+nsStyledElementNotElementCSSInlineStyle::Style()
 {
   Element::nsDOMSlots *slots = DOMSlots();
 
@@ -204,7 +203,6 @@ nsStyledElementNotElementCSSInlineStyle::GetStyle(nsresult* retval)
     SetMayHaveStyle();
   }
 
-  *retval = NS_OK;
   return slots->mStyle;
 }
 

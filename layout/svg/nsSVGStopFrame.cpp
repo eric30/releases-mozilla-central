@@ -6,7 +6,6 @@
 // Keep in (case-insensitive) order:
 #include "nsFrame.h"
 #include "nsGkAtoms.h"
-#include "nsIDOMSVGStopElement.h"
 #include "nsStyleContext.h"
 #include "nsSVGEffects.h"
 
@@ -21,7 +20,11 @@ class nsSVGStopFrame : public nsSVGStopFrameBase
   friend nsIFrame*
   NS_NewSVGStopFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 protected:
-  nsSVGStopFrame(nsStyleContext* aContext) : nsSVGStopFrameBase(aContext) {}
+  nsSVGStopFrame(nsStyleContext* aContext)
+    : nsSVGStopFrameBase(aContext)
+  {
+    AddStateBits(NS_STATE_SVG_NONDISPLAY_CHILD);
+  }
 
 public:
   NS_DECL_FRAMEARENA_HELPERS
@@ -33,11 +36,9 @@ public:
                   nsIFrame*        aPrevInFlow);
 #endif
 
-  NS_IMETHOD BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                              const nsRect&           aDirtyRect,
-                              const nsDisplayListSet& aLists) {
-    return NS_OK;
-  }
+  void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
+                        const nsRect&           aDirtyRect,
+                        const nsDisplayListSet& aLists) MOZ_OVERRIDE {}
 
   virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext);
 
@@ -79,8 +80,7 @@ nsSVGStopFrame::Init(nsIContent* aContent,
                      nsIFrame* aParent,
                      nsIFrame* aPrevInFlow)
 {
-  nsCOMPtr<nsIDOMSVGStopElement> grad = do_QueryInterface(aContent);
-  NS_ASSERTION(grad, "Content doesn't support nsIDOMSVGStopElement");
+  NS_ASSERTION(aContent->IsSVG(nsGkAtoms::stop), "Content is not a stop element");
 
   return nsSVGStopFrameBase::Init(aContent, aParent, aPrevInFlow);
 }

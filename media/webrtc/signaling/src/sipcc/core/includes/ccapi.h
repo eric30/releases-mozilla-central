@@ -5,7 +5,9 @@
 #ifndef _CCAPI_H_
 #define _CCAPI_H_
 
-#include "prtypes.h"
+#include "mozilla/Assertions.h"
+#include "mozilla/Util.h"
+
 #include "cpr_types.h"
 #include "cpr_memory.h"
 #include "phone_types.h"
@@ -91,8 +93,6 @@ typedef enum {
     CC_FEATURE_CREATEANSWER,
     CC_FEATURE_SETLOCALDESC,
     CC_FEATURE_SETREMOTEDESC,
-    CC_FEATURE_LOCALDESC,
-    CC_FEATURE_REMOTEDESC,
     CC_FEATURE_SETPEERCONNECTION,
     CC_FEATURE_ADDSTREAM,
     CC_FEATURE_REMOVESTREAM,
@@ -106,7 +106,7 @@ typedef enum {
 /* please update the following cc_feature_names whenever this feature list is changed */
 
 #ifdef __CC_FEATURE_STRINGS__
-static const char *cc_feature_names[] = {
+static const char *const cc_feature_names[] = {
     "NONE",
     "HOLD",
     "RESUME",
@@ -158,8 +158,6 @@ static const char *cc_feature_names[] = {
     "CREATEANSWER",
     "SETLOCALDESC",
     "SETREMOTEDESC",
-    "LOCALDESC",
-    "REMOTEDESC",
     "SETPEERCONNECTION",
     "ADDSTREAM",
     "REMOVESTREAM",
@@ -170,7 +168,8 @@ static const char *cc_feature_names[] = {
 /* This checks at compile-time that the cc_feature_names list
  * is the same size as the cc_group_feature_t enum
  */
-PR_STATIC_ASSERT(PR_ARRAY_SIZE(cc_feature_names) == CC_FEATURE_MAX + 1);
+MOZ_STATIC_ASSERT(MOZ_ARRAY_LENGTH(cc_feature_names) == CC_FEATURE_MAX + 1,
+                  "cc_feature_names size == cc_group_feature_t size?");
 
 #endif
 
@@ -232,8 +231,6 @@ typedef enum cc_msgs_t_ {
     CC_MSG_CREATEANSWER,
     CC_MSG_SETLOCALDESC,
     CC_MSG_SETREMOTEDESC,
-    CC_MSG_REMOTEDESC,
-    CC_MSG_LOCALDESC,
     CC_MSG_SETPEERCONNECTION,
     CC_MSG_ADDSTREAM,
     CC_MSG_REMOVESTREAM,
@@ -250,7 +247,7 @@ typedef enum cc_msgs_t_ {
 } cc_msgs_t;
 
 #ifdef __CC_MESSAGES_STRINGS__
-static const char *cc_msg_names[] = {
+static const char *const cc_msg_names[] = {
     "SETUP",
     "SETUP_ACK",
     "PROCEEDING",
@@ -273,8 +270,6 @@ static const char *cc_msg_names[] = {
     "CREATEANSWER",
     "SETLOCALDESC",
     "SETREMOTEDESC",
-    "REMOTEDESC",
-    "LOCALDESC",
     "SETPEERCONNECTION",
     "ADDSTREAM",
     "REMOVESTREAM",
@@ -292,7 +287,8 @@ static const char *cc_msg_names[] = {
 /* This checks at compile-time that the cc_msg_names list
  * is the same size as the cc_msgs_t enum
  */
-PR_STATIC_ASSERT(PR_ARRAY_SIZE(cc_msg_names) == CC_MSG_MAX + 1);
+MOZ_STATIC_ASSERT(MOZ_ARRAY_LENGTH(cc_msg_names) == CC_MSG_MAX + 1,
+                  "cc_msg_names size == cc_msgs_t size?");
 
 #endif //__CC_MESSAGES_STRINGS__
 
@@ -786,7 +782,9 @@ typedef struct cc_media_track_t_ {
 } cc_media_track_t;
 
 typedef struct cc_media_remote_track_table_t_ {
+    boolean           created;
     uint32_t          num_tracks;
+    uint32_t          num_tracks_notified;
     uint32_t          media_stream_id;
     cc_media_track_t  track[CC_MAX_TRACKS];
 } cc_media_remote_track_table_t;
@@ -835,8 +833,7 @@ typedef struct cc_feature_candidate_t_ {
 } cc_feature_candidate_t;
 
 typedef struct cc_feature_session_t_ {
-  unsigned int  sessionid;
-  cc_boolean    has_constraints;
+  cc_media_constraints_t    *constraints;
 } cc_feature_session_t;
 
 
@@ -1190,12 +1187,6 @@ void cc_setlocaldesc (cc_srcs_t src_id, cc_srcs_t dst_id, callid_t call_id, line
 
 void cc_setremotedesc (cc_srcs_t src_id, cc_srcs_t dst_id, callid_t call_id, line_t line,
                     cc_features_t feature_id, cc_jsep_action_t action, string_t sdp, cc_feature_data_t *data);
-
-void cc_localdesc (cc_srcs_t src_id, cc_srcs_t dst_id, callid_t call_id, line_t line,
-                    cc_features_t feature_id, cc_feature_data_t *data);
-
-void cc_remotedesc (cc_srcs_t src_id, cc_srcs_t dst_id, callid_t call_id, line_t line,
-                    cc_features_t feature_id, cc_feature_data_t *data);
 
 void cc_int_feature_ack(cc_srcs_t src_id, cc_srcs_t dst_id, callid_t call_id,
                         line_t line, cc_features_t feature_id,

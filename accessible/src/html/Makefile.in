@@ -39,6 +39,7 @@ LOCAL_INCLUDES = \
   -I$(srcdir)/../../../content/base/src \
   -I$(srcdir)/../../../content/html/content/src \
   -I$(srcdir)/../../../layout/generic \
+  -I$(srcdir)/../../../layout/tables \
   -I$(srcdir)/../../../layout/xul/base/src \
   $(NULL)
 
@@ -49,7 +50,7 @@ LOCAL_INCLUDES += \
 else
 ifeq ($(MOZ_WIDGET_TOOLKIT),windows)
 LOCAL_INCLUDES += \
-  -I$(srcdir)/../msaa \
+  -I$(srcdir)/../windows/msaa \
   -I$(srcdir)/../windows/ia2 \
   $(NULL)
 else

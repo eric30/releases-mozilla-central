@@ -61,7 +61,7 @@ RootAccessible::
                  nsIPresShell* aPresShell) :
   DocAccessibleWrap(aDocument, aRootContent, aPresShell)
 {
-  mFlags |= eRootAccessible;
+  mType = eRootType;
 }
 
 RootAccessible::~RootAccessible()
@@ -108,11 +108,10 @@ RootAccessible::GetChromeFlags()
   // Return the flag set for the top level window as defined 
   // by nsIWebBrowserChrome::CHROME_WINDOW_[FLAGNAME]
   // Not simple: nsIXULWindow is not just a QI from nsIDOMWindow
-  nsCOMPtr<nsIDocShellTreeItem> treeItem =
-    nsCoreUtils::GetDocShellTreeItemFor(mDocumentNode);
-  NS_ENSURE_TRUE(treeItem, 0);
+  nsCOMPtr<nsIDocShell> docShell = nsCoreUtils::GetDocShellFor(mDocumentNode);
+  NS_ENSURE_TRUE(docShell, 0);
   nsCOMPtr<nsIDocShellTreeOwner> treeOwner;
-  treeItem->GetTreeOwner(getter_AddRefs(treeOwner));
+  docShell->GetTreeOwner(getter_AddRefs(treeOwner));
   NS_ENSURE_TRUE(treeOwner, 0);
   nsCOMPtr<nsIXULWindow> xulWin(do_GetInterface(treeOwner));
   if (!xulWin) {
@@ -198,10 +197,6 @@ RootAccessible::AddEventListeners()
     }
   }
 
-  if (!mCaretAccessible) {
-    mCaretAccessible = new nsCaretAccessible(this);
-  }
-
   return DocAccessible::AddEventListeners();
 }
 
@@ -221,23 +216,11 @@ RootAccessible::RemoveEventListeners()
   // Do this before removing clearing caret accessible, so that it can use
   // shutdown the caret accessible's selection listener
   DocAccessible::RemoveEventListeners();
-
-  if (mCaretAccessible) {
-    mCaretAccessible->Shutdown();
-    mCaretAccessible = nullptr;
-  }
-
   return NS_OK;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // public
-
-nsCaretAccessible*
-RootAccessible::GetCaretAccessible()
-{
-  return mCaretAccessible;
-}
 
 void
 RootAccessible::DocumentActivated(DocAccessible* aDocument)

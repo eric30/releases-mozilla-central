@@ -41,7 +41,6 @@ class CodeGeneratorX64 : public CodeGeneratorX86Shared
     bool visitOsrValue(LOsrValue *value);
     bool visitBox(LBox *box);
     bool visitUnbox(LUnbox *unbox);
-    bool visitDouble(LDouble *ins);
     bool visitLoadSlotV(LLoadSlotV *ins);
     bool visitLoadSlotT(LLoadSlotT *load);
     bool visitStoreSlotT(LStoreSlotT *store);
@@ -51,6 +50,8 @@ class CodeGeneratorX64 : public CodeGeneratorX86Shared
     bool visitInterruptCheck(LInterruptCheck *lir);
     bool visitCompareB(LCompareB *lir);
     bool visitCompareBAndBranch(LCompareBAndBranch *lir);
+    bool visitCompareV(LCompareV *lir);
+    bool visitCompareVAndBranch(LCompareVAndBranch *lir);
 };
 
 typedef CodeGeneratorX64 CodeGeneratorSpecific;

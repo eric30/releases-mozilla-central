@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set ts=4 et sw=4 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -439,12 +440,10 @@ private:
     // Returns null if a principal cannot be found.  Note that rv can be NS_OK
     // when this happens -- this means that there was no script associated
     // with the function object, and no global object associated with the scope
-    // of obj (the last object on its parent chain).  If the caller is walking
-    // the JS stack, fp must point to the current frame in the stack iteration.
-    // Callers MUST pass in a non-null rv here.
+    // of obj (the last object on its parent chain). Callers MUST pass in a
+    // non-null rv here.
     static nsIPrincipal*
-    GetFunctionObjectPrincipal(JSContext* cx, JSObject* obj, JSStackFrame *fp,
-                               nsresult* rv);
+    GetFunctionObjectPrincipal(JSContext* cx, JSObject* obj, nsresult* rv);
 
     /**
      * Check capability levels for an |aObj| that implements
@@ -518,7 +517,6 @@ private:
     nsCOMPtr<nsIPrincipal> mSystemPrincipal;
     bool mPrefInitialized;
     bool mIsJavaScriptEnabled;
-    bool mIsWritingPrefs;
     bool mPolicyPrefsChanged;
 
     static bool sStrictFileOriginPolicy;

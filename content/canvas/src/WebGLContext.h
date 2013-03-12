@@ -28,7 +28,7 @@
 
 #include "nsIDOMWebGLRenderingContext.h"
 #include "nsICanvasRenderingContextInternal.h"
-#include "nsHTMLCanvasElement.h"
+#include "mozilla/dom/HTMLCanvasElement.h"
 #include "nsIDOMHTMLElement.h"
 #include "nsIMemoryReporter.h"
 #include "nsIJSNativeInitializer.h"
@@ -84,10 +84,6 @@ struct WebGLContextAttributesInitializer;
 
 struct VertexAttrib0Status {
     enum { Default, EmulatedUninitializedArray, EmulatedInitializedArray };
-};
-
-struct BackbufferClearingStatus {
-    enum { NotClearedSinceLastPresented, ClearedToDefaultValues, HasBeenDrawnTo };
 };
 
 namespace WebGLTexelConversions {
@@ -261,7 +257,20 @@ public:
     already_AddRefed<CanvasLayer> GetCanvasLayer(nsDisplayListBuilder* aBuilder,
                                                  CanvasLayer *aOldLayer,
                                                  LayerManager *aManager);
+
+    // Note that 'clean' here refers to its invalidation state, not the
+    // contents of the buffer.
     void MarkContextClean() { mInvalidated = false; }
+
+    gl::GLContext* GL() const {
+        return gl;
+    }
+
+    bool IsPremultAlpha() const {
+        return mOptions.premultipliedAlpha;
+    }
+
+    bool PresentScreenBuffer();
 
     // a number that increments every time we have an event that causes
     // all context resources to be lost.
@@ -269,15 +278,14 @@ public:
 
     const WebGLRectangleObject *FramebufferRectangleObject() const;
 
-    // this is similar to GLContext::ClearSafely, but is more comprehensive
-    // (takes care of scissor, stencil write mask, dithering, viewport...)
-    // WebGL has more complex needs than GLContext as content controls GL state.
-    void ForceClearFramebufferWithDefaultValues(uint32_t mask, const nsIntRect& viewportRect);
+    // This is similar to GLContext::ClearSafely, but tries to minimize the
+    // amount of work it does.
+    // It only clears the buffers we specify, and can reset its state without
+    // first having to query anything, as WebGL knows its state at all times.
+    void ForceClearFramebufferWithDefaultValues(GLbitfield mask);
 
-    // if the preserveDrawingBuffer context option is false, we need to clear the back buffer
-    // after it's been presented to the compositor. This function does that if needed.
-    // See section 2.2 in the WebGL spec.
-    void EnsureBackbufferClearedAsNeeded();
+    // Calls ForceClearFramebufferWithDefaultValues() for the Context's 'screen'.
+    void ClearScreen();
 
     // checks for GL errors, clears any pending GL error, stores the current GL error in currentGLError,
     // and copies it into mWebGLError if it doesn't already have an error set
@@ -332,7 +340,7 @@ public:
     }
 
     // WebIDL WebGLRenderingContext API
-    nsHTMLCanvasElement* GetCanvas() const {
+    dom::HTMLCanvasElement* GetCanvas() const {
         return mCanvasElement;
     }
     WebGLsizei DrawingBufferWidth() const {
@@ -550,7 +558,7 @@ public:
     template<class ElementType>
     void TexImage2D(WebGLenum target, WebGLint level,
                     WebGLenum internalformat, WebGLenum format, WebGLenum type,
-                    ElementType* elt, ErrorResult& rv) {
+                    const ElementType& elt, ErrorResult& rv) {
         if (!IsContextStable())
             return;
         nsRefPtr<gfxImageSurface> isurf;
@@ -587,7 +595,7 @@ public:
     template<class ElementType>
     void TexSubImage2D(WebGLenum target, WebGLint level,
                        WebGLint xoffset, WebGLint yoffset, WebGLenum format,
-                       WebGLenum type, ElementType* elt, ErrorResult& rv) {
+                       WebGLenum type, const ElementType& elt, ErrorResult& rv) {
         if (!IsContextStable())
             return;
         nsRefPtr<gfxImageSurface> isurf;
@@ -756,6 +764,9 @@ public:
     bool ValidateUniformSetter(const char* name, WebGLUniformLocation *location_object, GLint& location);
     void ValidateProgram(WebGLProgram *prog);
     bool ValidateUniformLocation(const char* info, WebGLUniformLocation *location_object);
+    bool ValidateSamplerUniformSetter(const char* info,
+                                    WebGLUniformLocation *location,
+                                    WebGLint value);
 
     void VertexAttrib1f(WebGLuint index, WebGLfloat x0);
     void VertexAttrib2f(WebGLuint index, WebGLfloat x0, WebGLfloat x1);
@@ -843,6 +854,9 @@ protected:
     bool mHasRobustness;
     bool mIsMesa;
     bool mLoseContextOnHeapMinimize;
+    bool mCanLoseContextInForeground;
+    bool mShouldPresent;
+    bool mIsScreenCleared;
 
     template<typename WebGLObjectType>
     void DeleteWebGLObjectsArray(nsTArray<WebGLObjectType>& array);
@@ -858,6 +872,7 @@ protected:
     int32_t mGLMaxTextureUnits;
     int32_t mGLMaxTextureSize;
     int32_t mGLMaxCubeMapTextureSize;
+    int32_t mGLMaxRenderbufferSize;
     int32_t mGLMaxTextureImageUnits;
     int32_t mGLMaxVertexTextureImageUnits;
     int32_t mGLMaxVaryingVectors;
@@ -977,7 +992,6 @@ protected:
     nsLayoutUtils::SurfaceFromElementResult SurfaceFromElement(ElementType* aElement) {
         MOZ_ASSERT(aElement);
         uint32_t flags =
-            nsLayoutUtils::SFE_WANT_NEW_SURFACE |
             nsLayoutUtils::SFE_WANT_IMAGE_SURFACE;
 
         if (mPixelStoreColorspaceConversion == LOCAL_GL_NONE)
@@ -985,6 +999,10 @@ protected:
         if (!mPixelStorePremultiplyAlpha)
             flags |= nsLayoutUtils::SFE_NO_PREMULTIPLY_ALPHA;
         return nsLayoutUtils::SurfaceFromElement(aElement, flags);
+    }
+    template<class ElementType>
+    nsLayoutUtils::SurfaceFromElementResult SurfaceFromElement(const dom::NonNull<ElementType>& aElement) {
+      return SurfaceFromElement(aElement.get());
     }
 
     nsresult SurfaceFromElementResultToImageSurface(nsLayoutUtils::SurfaceFromElementResult& res,
@@ -1101,8 +1119,6 @@ protected:
     WebGLint mStencilClearValue;
     WebGLfloat mDepthClearValue;
 
-    int mBackbufferClearingStatus;
-
     nsCOMPtr<nsITimer> mContextRestorer;
     bool mAllowRestore;
     bool mContextLossTimerRunning;
@@ -1126,6 +1142,8 @@ protected:
     JS::Value WebGLObjectAsJSValue(JSContext *cx, const WebGLObjectType *, ErrorResult& rv) const;
     template <typename WebGLObjectType>
     JSObject* WebGLObjectAsJSObject(JSContext *cx, const WebGLObjectType *, ErrorResult& rv) const;
+
+    void ReattachTextureToAnyFramebufferToWorkAroundBugs(WebGLTexture *tex, WebGLint level);
 
 #ifdef XP_MACOSX
     // see bug 713305. This RAII helper guarantees that we're on the discrete GPU, during its lifetime

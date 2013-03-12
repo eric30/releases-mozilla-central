@@ -8,6 +8,7 @@
 
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/FileUtils.h"
+#include "mozilla/Preferences.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/unused.h"
 #include "mozilla/dom/ContentParent.h"
@@ -28,16 +29,27 @@
 
 #ifdef XP_LINUX
 #include <fcntl.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 #endif
 
 #ifdef ANDROID
-#include <sys/stat.h>
+#include "android/log.h"
+#endif
+
+#ifdef LOG
+#undef LOG
+#endif
+
+#ifdef ANDROID
+#define LOG(...) __android_log_print(ANDROID_LOG_INFO, "Gecko:MemoryInfoDumper", ## __VA_ARGS__)
+#else
+#define LOG(...)
 #endif
 
 using namespace mozilla;
 using namespace mozilla::dom;
 
-namespace mozilla {
 namespace {
 
 class DumpMemoryReportsRunnable : public nsRunnable
@@ -125,7 +137,7 @@ static int sGCAndCCDumpSignum;             // SIGRTMIN + 2
 
 // This is the write-end of a pipe that we use to notice when a
 // dump-about-memory signal occurs.
-static int sDumpAboutMemoryPipeWriteFd;
+static int sDumpAboutMemoryPipeWriteFd = -1;
 
 void
 DumpAboutMemorySignalHandler(int aSignum)
@@ -133,36 +145,132 @@ DumpAboutMemorySignalHandler(int aSignum)
   // This is a signal handler, so everything in here needs to be
   // async-signal-safe.  Be careful!
 
-  if (sDumpAboutMemoryPipeWriteFd != 0) {
+  if (sDumpAboutMemoryPipeWriteFd != -1) {
     uint8_t signum = static_cast<int>(aSignum);
     write(sDumpAboutMemoryPipeWriteFd, &signum, sizeof(signum));
   }
 }
 
-class SignalPipeWatcher : public MessageLoopForIO::Watcher
+/**
+ * Abstract base class for something which watches an fd and takes action when
+ * we can read from it without blocking.
+ */
+class FdWatcher : public MessageLoopForIO::Watcher
+                , public nsIObserver
 {
+protected:
+  MessageLoopForIO::FileDescriptorWatcher mReadWatcher;
+  int mFd;
+
 public:
-  SignalPipeWatcher()
-  {}
-
-  ~SignalPipeWatcher()
+  FdWatcher()
+    : mFd(-1)
   {
-    // This is somewhat paranoid, but we want to avoid the race condition where
-    // we close sDumpAboutMemoryPipeWriteFd before setting it to 0, then we
-    // reuse that fd for some other file, and then the signal handler runs.
-    int pipeWriteFd = sDumpAboutMemoryPipeWriteFd;
-    PR_ATOMIC_SET(&sDumpAboutMemoryPipeWriteFd, 0);
-
-    // Stop watching the pipe's file descriptor /before/ we close it!
-    mReadWatcher.StopWatchingFileDescriptor();
-
-    close(pipeWriteFd);
-    close(mPipeReadFd);
+    MOZ_ASSERT(NS_IsMainThread());
   }
 
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SignalPipeWatcher)
+  virtual ~FdWatcher()
+  {
+    // StopWatching should have run.
+    MOZ_ASSERT(mFd == -1);
+  }
 
-  bool Start()
+  /**
+   * Open the fd to watch.  If we encounter an error, return -1.
+   */
+  virtual int OpenFd() = 0;
+
+  /**
+   * Called when you can read() from the fd without blocking.  Note that this
+   * function is also called when you're at eof (read() returns 0 in this case).
+   */
+  virtual void OnFileCanReadWithoutBlocking(int aFd) = 0;
+  virtual void OnFileCanWriteWithoutBlocking(int Afd) {};
+
+  NS_DECL_ISUPPORTS
+
+  /**
+   * Initialize this object.  This should be called right after the object is
+   * constructed.  (This would go in the constructor, except we interact with
+   * XPCOM, which we can't do from a constructor because our refcount is 0 at
+   * that point.)
+   */
+  void Init()
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+
+    nsCOMPtr<nsIObserverService> os = services::GetObserverService();
+    os->AddObserver(this, "xpcom-shutdown", /* ownsWeak = */ false);
+
+    XRE_GetIOMessageLoop()->PostTask(
+        FROM_HERE,
+        NewRunnableMethod(this, &FdWatcher::StartWatching));
+  }
+
+  // Implementations may call this function multiple times if they ensure that
+  // it's safe to call OpenFd() multiple times and they call StopWatching()
+  // first.
+  virtual void StartWatching()
+  {
+    MOZ_ASSERT(XRE_GetIOMessageLoop() == MessageLoopForIO::current());
+    MOZ_ASSERT(mFd == -1);
+
+    mFd = OpenFd();
+    if (mFd == -1) {
+      LOG("FdWatcher: OpenFd failed.");
+      return;
+    }
+
+    MessageLoopForIO::current()->WatchFileDescriptor(
+      mFd, /* persistent = */ true,
+      MessageLoopForIO::WATCH_READ,
+      &mReadWatcher, this);
+  }
+
+  // Since implementations can call StartWatching() multiple times, they can of
+  // course call StopWatching() multiple times.
+  virtual void StopWatching()
+  {
+    MOZ_ASSERT(XRE_GetIOMessageLoop() == MessageLoopForIO::current());
+
+    mReadWatcher.StopWatchingFileDescriptor();
+    if (mFd != -1) {
+      close(mFd);
+      mFd = -1;
+    }
+  }
+
+  NS_IMETHOD Observe(nsISupports* aSubject, const char* aTopic,
+                     const PRUnichar* aData)
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+    MOZ_ASSERT(!strcmp(aTopic, "xpcom-shutdown"));
+
+    XRE_GetIOMessageLoop()->PostTask(
+        FROM_HERE,
+        NewRunnableMethod(this, &FdWatcher::StopWatching));
+
+    return NS_OK;
+  }
+};
+
+NS_IMPL_THREADSAFE_ISUPPORTS1(FdWatcher, nsIObserver);
+
+class SignalPipeWatcher : public FdWatcher
+{
+public:
+  static void Create()
+  {
+    nsRefPtr<SignalPipeWatcher> sw = new SignalPipeWatcher();
+    sw->Init();
+  }
+
+  virtual ~SignalPipeWatcher()
+  {
+    MOZ_ASSERT(sDumpAboutMemoryPipeWriteFd == -1);
+  }
+
+  virtual int OpenFd()
   {
     MOZ_ASSERT(XRE_GetIOMessageLoop() == MessageLoopForIO::current());
 
@@ -174,15 +282,15 @@ public:
     // write the signum to the write-end of this pipe.
     int pipeFds[2];
     if (pipe(pipeFds)) {
-      NS_WARNING("Failed to create pipe.");
-      return false;
+      LOG("SignalPipeWatcher failed to create pipe.");
+      return -1;
     }
 
     // Close this pipe on calls to exec().
     fcntl(pipeFds[0], F_SETFD, FD_CLOEXEC);
     fcntl(pipeFds[1], F_SETFD, FD_CLOEXEC);
 
-    mPipeReadFd = pipeFds[0];
+    int readFd = pipeFds[0];
     sDumpAboutMemoryPipeWriteFd = pipeFds[1];
 
     struct sigaction action;
@@ -191,20 +299,36 @@ public:
     action.sa_handler = DumpAboutMemorySignalHandler;
 
     if (sigaction(sDumpAboutMemorySignum, &action, nullptr)) {
-      NS_WARNING("Failed to register about:memory dump signal handler.");
+      LOG("SignalPipeWatcher failed to register about:memory "
+          "dump signal handler.");
     }
     if (sigaction(sDumpAboutMemoryAfterMMUSignum, &action, nullptr)) {
-      NS_WARNING("Failed to register about:memory dump after MMU signal handler.");
+      LOG("SignalPipeWatcher failed to register about:memory "
+          "dump after MMU signal handler.");
     }
     if (sigaction(sGCAndCCDumpSignum, &action, nullptr)) {
-      NS_WARNING("Failed to register GC+CC dump signal handler.");
+      LOG("Failed to register GC+CC dump signal handler.");
     }
 
-    // Start watching the read end of the pipe on the IO thread.
-    return MessageLoopForIO::current()->WatchFileDescriptor(
-      mPipeReadFd, /* persistent = */ true,
-      MessageLoopForIO::WATCH_READ,
-      &mReadWatcher, this);
+    return readFd;
+  }
+
+  virtual void StopWatching()
+  {
+    MOZ_ASSERT(XRE_GetIOMessageLoop() == MessageLoopForIO::current());
+
+    // Close sDumpAboutMemoryPipeWriteFd /after/ setting the fd to -1.
+    // Otherwise we have the (admittedly far-fetched) race where we
+    //
+    //  1) close sDumpAboutMemoryPipeWriteFd
+    //  2) open a new fd with the same number as sDumpAboutMemoryPipeWriteFd
+    //     had.
+    //  3) receive a signal, then write to the fd.
+    int pipeWriteFd = sDumpAboutMemoryPipeWriteFd;
+    PR_ATOMIC_SET(&sDumpAboutMemoryPipeWriteFd, -1);
+    close(pipeWriteFd);
+
+    FdWatcher::StopWatching();
   }
 
   virtual void OnFileCanReadWithoutBlocking(int aFd)
@@ -214,8 +338,8 @@ public:
     uint8_t signum;
     ssize_t numReceived = read(aFd, &signum, sizeof(signum));
     if (numReceived != sizeof(signum)) {
-      NS_WARNING("Error reading from buffer in "
-                 "SignalPipeWatcher::OnFileCanReadWithoutBlocking.");
+      LOG("Error reading from buffer in "
+          "SignalPipeWatcher::OnFileCanReadWithoutBlocking.");
       return;
     }
 
@@ -239,39 +363,170 @@ public:
       NS_DispatchToMainThread(runnable);
     }
     else {
-      NS_WARNING("Got unexpected signum.");
+      LOG("SignalPipeWatcher got unexpected signum.");
     }
   }
-
-  virtual void OnFileCanWriteWithoutBlocking(int aFd)
-  {}
-
-private:
-  int mPipeReadFd;
-  MessageLoopForIO::FileDescriptorWatcher mReadWatcher;
 };
 
-StaticRefPtr<SignalPipeWatcher> sSignalPipeWatcher;
-
-void
-InitializeSignalWatcher()
+class FifoWatcher : public FdWatcher
 {
-  MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(!sSignalPipeWatcher);
+public:
+  static void MaybeCreate()
+  {
+    MOZ_ASSERT(NS_IsMainThread());
 
-  sSignalPipeWatcher = new SignalPipeWatcher();
-  ClearOnShutdown(&sSignalPipeWatcher);
+    if (XRE_GetProcessType() != GeckoProcessType_Default) {
+      // We want this to be main-process only, since two processes can't listen
+      // to the same fifo.
+      return;
+    }
 
-  XRE_GetIOMessageLoop()->PostTask(
-      FROM_HERE,
-      NewRunnableMethod(sSignalPipeWatcher.get(),
-                        &SignalPipeWatcher::Start));
-}
+    if (!Preferences::GetBool("memory_info_dumper.watch_fifo.enabled", false)) {
+      LOG("Fifo watcher disabled via pref.");
+      return;
+    }
+
+    // The FifoWatcher is held alive by the observer service.
+    nsRefPtr<FifoWatcher> fw = new FifoWatcher();
+    fw->Init();
+  }
+
+  virtual int OpenFd()
+  {
+    // If the memory_info_dumper.directory pref is specified, put the fifo
+    // there.  Otherwise, put it into the system's tmp directory.
+
+    nsCOMPtr<nsIFile> file;
+    nsAutoCString dirPath;
+    nsresult rv = Preferences::GetCString(
+      "memory_info_dumper.watch_fifo.directory", &dirPath);
+
+    if (NS_SUCCEEDED(rv)) {
+      rv = XRE_GetFileFromPath(dirPath.get(), getter_AddRefs(file));
+      if (NS_FAILED(rv)) {
+        LOG("FifoWatcher failed to open file \"%s\"", dirPath.get());
+        return -1;
+      }
+    } else {
+      rv = NS_GetSpecialDirectory(NS_OS_TEMP_DIR, getter_AddRefs(file));
+      NS_ENSURE_SUCCESS(rv, -1);
+    }
+
+    rv = file->AppendNative(NS_LITERAL_CSTRING("debug_info_trigger"));
+    NS_ENSURE_SUCCESS(rv, -1);
+
+    nsAutoCString path;
+    rv = file->GetNativePath(path);
+    NS_ENSURE_SUCCESS(rv, -1);
+
+    // unlink might fail because the file doesn't exist, or for other reasons.
+    // But we don't care it fails; any problems will be detected later, when we
+    // try to mkfifo or open the file.
+    if (unlink(path.get())) {
+      LOG("FifoWatcher::OpenFifo unlink failed; errno=%d.  "
+          "Continuing despite error.", errno);
+    }
+
+    if (mkfifo(path.get(), 0766)) {
+      LOG("FifoWatcher::OpenFifo mkfifo failed; errno=%d", errno);
+      return -1;
+    }
+
+#ifdef ANDROID
+    // Android runs with a umask, so we need to chmod our fifo to make it
+    // world-writable.
+    chmod(path.get(), 0666);
+#endif
+
+    int fd;
+    do {
+      // The fifo will block until someone else has written to it.  In
+      // particular, open() will block until someone else has opened it for
+      // writing!  We want open() to succeed and read() to block, so we open
+      // with NONBLOCK and then fcntl that away.
+      fd = open(path.get(), O_RDONLY | O_NONBLOCK);
+    } while (fd == -1 && errno == EINTR);
+
+    if (fd == -1) {
+      LOG("FifoWatcher::OpenFifo open failed; errno=%d", errno);
+      return -1;
+    }
+
+    // Make fd blocking now that we've opened it.
+    if (fcntl(fd, F_SETFL, 0)) {
+      close(fd);
+      return -1;
+    }
+
+    return fd;
+  }
+
+  virtual void OnFileCanReadWithoutBlocking(int aFd)
+  {
+    MOZ_ASSERT(XRE_GetIOMessageLoop() == MessageLoopForIO::current());
+
+    char buf[1024];
+    int nread;
+    do {
+      // sizeof(buf) - 1 to leave space for the null-terminator.
+      nread = read(aFd, buf, sizeof(buf));
+    } while(nread == -1 && errno == EINTR);
+
+    if (nread == -1) {
+      // We want to avoid getting into a situation where
+      // OnFileCanReadWithoutBlocking is called in an infinite loop, so when
+      // something goes wrong, stop watching the fifo altogether.
+      LOG("FifoWatcher hit an error (%d) and is quitting.", errno);
+      StopWatching();
+      return;
+    }
+
+    if (nread == 0) {
+      // If we get EOF, that means that the other side closed the fifo.  We need
+      // to close and re-open the fifo; if we don't,
+      // OnFileCanWriteWithoutBlocking will be called in an infinite loop.
+
+      LOG("FifoWatcher closing and re-opening fifo.");
+      StopWatching();
+      StartWatching();
+      return;
+    }
+
+    nsAutoCString inputStr;
+    inputStr.Append(buf, nread);
+
+    // Trimming whitespace is important because if you do
+    //   |echo "foo" >> debug_info_trigger|,
+    // it'll actually write "foo\n" to the fifo.
+    inputStr.Trim("\b\t\r\n");
+
+    bool doMemoryReport = inputStr == NS_LITERAL_CSTRING("memory report");
+    bool doMMUMemoryReport = inputStr == NS_LITERAL_CSTRING("minimize memory report");
+    bool doGCCCDump = inputStr == NS_LITERAL_CSTRING("gc log");
+
+    if (doMemoryReport || doMMUMemoryReport) {
+      LOG("FifoWatcher dispatching memory report runnable.");
+      nsRefPtr<DumpMemoryReportsRunnable> runnable =
+        new DumpMemoryReportsRunnable(
+          /* identifier = */ EmptyString(),
+          doMMUMemoryReport,
+          /* dumpChildProcesses = */ true);
+      NS_DispatchToMainThread(runnable);
+    } else if (doGCCCDump) {
+      LOG("FifoWatcher dispatching GC/CC log runnable.");
+      nsRefPtr<GCAndCCLogDumpRunnable> runnable =
+        new GCAndCCLogDumpRunnable(
+            /* identifier = */ EmptyString(),
+            /* dumpChildProcesses = */ true);
+      NS_DispatchToMainThread(runnable);
+    } else {
+      LOG("Got unexpected value from fifo; ignoring it.");
+    }
+  }
+};
 
 } // anonymous namespace
-#endif // } XP_LINUX
-
-} // namespace mozilla
+#endif // XP_LINUX }
 
 NS_IMPL_ISUPPORTS1(nsMemoryInfoDumper, nsIMemoryInfoDumper)
 
@@ -287,7 +542,8 @@ nsMemoryInfoDumper::~nsMemoryInfoDumper()
 nsMemoryInfoDumper::Initialize()
 {
 #ifdef XP_LINUX
-  InitializeSignalWatcher();
+  SignalPipeWatcher::Create();
+  FifoWatcher::MaybeCreate();
 #endif
 }
 
@@ -336,7 +592,8 @@ nsMemoryInfoDumper::DumpMemoryReportsToFile(
     nsCOMPtr<nsIMemoryReporterManager> mgr =
       do_GetService("@mozilla.org/memory-reporter-manager;1");
     NS_ENSURE_TRUE(mgr, NS_ERROR_FAILURE);
-    mgr->MinimizeMemoryUsage(callback);
+    nsCOMPtr<nsICancelableRunnable> runnable;
+    mgr->MinimizeMemoryUsage(callback, getter_AddRefs(runnable));
     return NS_OK;
   }
 
@@ -469,13 +726,74 @@ NS_IMPL_ISUPPORTS1(
 
 } // namespace mozilla
 
+static void
+MakeFilename(const char *aPrefix, const nsAString &aIdentifier,
+             const char *aSuffix, nsACString &aResult)
+{
+  aResult = nsPrintfCString("%s-%s-%d.%s",
+                            aPrefix,
+                            NS_ConvertUTF16toUTF8(aIdentifier).get(),
+                            getpid(), aSuffix);
+}
+
+/* static */ nsresult
+nsMemoryInfoDumper::OpenTempFile(const nsACString &aFilename, nsIFile* *aFile)
+{
+#ifdef ANDROID
+  // For Android, first try the downloads directory which is world-readable
+  // rather than the temp directory which is not.
+  if (!*aFile) {
+    char *env = PR_GetEnv("DOWNLOADS_DIRECTORY");
+    if (env) {
+      NS_NewNativeLocalFile(nsCString(env), /* followLinks = */ true, aFile);
+    }
+  }
+#endif
+  nsresult rv;
+  if (!*aFile) {
+    rv = NS_GetSpecialDirectory(NS_OS_TEMP_DIR, aFile);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+
+  nsCOMPtr<nsIFile> file(*aFile);
+
+  rv = file->AppendNative(aFilename);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  rv = file->CreateUnique(nsIFile::NORMAL_FILE_TYPE, 0644);
+  NS_ENSURE_SUCCESS(rv, rv);
+  return NS_OK;
+}
+
+#ifdef MOZ_DMD
+struct DMDWriteState
+{
+  static const size_t kBufSize = 4096;
+  char mBuf[kBufSize];
+  nsRefPtr<nsGZFileWriter> mGZWriter;
+
+  DMDWriteState(nsGZFileWriter *aGZWriter)
+    : mGZWriter(aGZWriter)
+  {}
+};
+
+static void DMDWrite(void* aState, const char* aFmt, va_list ap)
+{
+  DMDWriteState *state = (DMDWriteState*)aState;
+  vsnprintf(state->mBuf, state->kBufSize, aFmt, ap);
+  unused << state->mGZWriter->Write(state->mBuf);
+}
+#endif
+
 /* static */ nsresult
 nsMemoryInfoDumper::DumpMemoryReportsToFileImpl(
   const nsAString& aIdentifier)
 {
+  MOZ_ASSERT(!aIdentifier.IsEmpty());
+
   // Open a new file named something like
   //
-  //   incomplete-memory-report-<-identifier>-<pid>-42.json.gz
+  //   incomplete-memory-report-<identifier>-<pid>.json.gz
   //
   // in NS_OS_TEMP_DIR for writing.  When we're finished writing the report,
   // we'll rename this file and get rid of the "incomplete-" prefix.
@@ -484,48 +802,34 @@ nsMemoryInfoDumper::DumpMemoryReportsToFileImpl(
   // looking for memory report dumps to grab a file before we're finished
   // writing to it.
 
-  nsCOMPtr<nsIFile> tmpFile;
-  nsresult rv = NS_GetSpecialDirectory(NS_OS_TEMP_DIR,
-                                       getter_AddRefs(tmpFile));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Note that |filename| is missing the "incomplete-" prefix; we'll tack
+  // Note that |mrFilename| is missing the "incomplete-" prefix; we'll tack
   // that on in a moment.
-  nsAutoCString filename;
-  filename.AppendLiteral("memory-report");
-  if (!aIdentifier.IsEmpty()) {
-    filename.AppendLiteral("-");
-    filename.Append(NS_ConvertUTF16toUTF8(aIdentifier));
-  }
-  filename.AppendLiteral("-");
-  filename.AppendInt(getpid());
-  filename.AppendLiteral(".json.gz");
+  nsCString mrFilename;
+  MakeFilename("memory-report", aIdentifier, "json.gz", mrFilename);
 
-  rv = tmpFile->AppendNative(NS_LITERAL_CSTRING("incomplete-") + filename);
+  nsCOMPtr<nsIFile> mrTmpFile;
+  nsresult rv;
+  rv = OpenTempFile(NS_LITERAL_CSTRING("incomplete-") + mrFilename,
+                    getter_AddRefs(mrTmpFile));
   NS_ENSURE_SUCCESS(rv, rv);
-
-  rv = tmpFile->CreateUnique(nsIFile::NORMAL_FILE_TYPE, 0644);
-  NS_ENSURE_SUCCESS(rv, rv);
-#ifdef ANDROID
-  {
-    // On android the default system umask is 0077 which makes these files
-    // unreadable to the shell user. In order to pull the dumps off a non-rooted
-    // device we need to chmod them to something world-readable.
-    nsAutoCString path;
-    rv = tmpFile->GetNativePath(path);
-    if (NS_SUCCEEDED(rv)) {
-      chmod(PromiseFlatCString(path).get(), 0644);
-    }
-  }
-#endif
 
   nsRefPtr<nsGZFileWriter> writer = new nsGZFileWriter();
-  rv = writer->Init(tmpFile);
+  rv = writer->Init(mrTmpFile);
   NS_ENSURE_SUCCESS(rv, rv);
+
+  // Clear DMD's reportedness state before running the reporters, to avoid
+  // spurious twice-reported warnings.
+#ifdef MOZ_DMD
+  dmd::ClearReports();
+#endif
 
   // Dump the memory reports to the file.
 
   // Increment this number if the format changes.
+  //
+  // This is the first write to the file, and it causes |writer| to allocate
+  // over 200 KiB of memory.
+  //
   DUMP(writer, "{\n  \"version\": 1,\n");
 
   DUMP(writer, "  \"hasMozMallocUsableSize\": ");
@@ -590,27 +894,63 @@ nsMemoryInfoDumper::DumpMemoryReportsToFileImpl(
 
   DUMP(writer, "\n  ]\n}");
 
+#ifdef MOZ_DMD
+  // Open a new file named something like
+  //
+  //   dmd-<identifier>-<pid>.txt.gz
+  //
+  // in NS_OS_TEMP_DIR for writing, and dump DMD output to it.  This must occur
+  // after the memory reporters have been run (above), but before the
+  // memory-reports file has been renamed (so scripts can detect the DMD file,
+  // if present).
+
+  nsCString dmdFilename;
+  MakeFilename("dmd", aIdentifier, "txt.gz", dmdFilename);
+
+  nsCOMPtr<nsIFile> dmdFile;
+  rv = OpenTempFile(dmdFilename, getter_AddRefs(dmdFile));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  nsRefPtr<nsGZFileWriter> dmdWriter = new nsGZFileWriter();
+  rv = dmdWriter->Init(dmdFile);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  // Dump DMD output to the file.
+
+  DMDWriteState state(dmdWriter);
+  dmd::Writer w(DMDWrite, &state);
+  dmd::Dump(w);
+
+  rv = dmdWriter->Finish();
+  NS_ENSURE_SUCCESS(rv, rv);
+#endif  // MOZ_DMD
+
+  // The call to Finish() deallocates the memory allocated by the first DUMP()
+  // above.  Because that memory was live while the memory reporters ran and
+  // thus measured by them -- by "heap-allocated" if nothing else -- we want
+  // DMD to see it as well.  So we deliberately don't call Finish() until after
+  // DMD finishes.
   rv = writer->Finish();
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Rename the file, now that we're done dumping the report.  The file's
   // ultimate destination is "memory-report<-identifier>-<pid>.json.gz".
 
-  nsCOMPtr<nsIFile> dstFile;
-  rv = NS_GetSpecialDirectory(NS_OS_TEMP_DIR, getter_AddRefs(dstFile));
+  nsCOMPtr<nsIFile> mrFinalFile;
+  rv = NS_GetSpecialDirectory(NS_OS_TEMP_DIR, getter_AddRefs(mrFinalFile));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  rv = dstFile->AppendNative(filename);
+  rv = mrFinalFile->AppendNative(mrFilename);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  rv = dstFile->CreateUnique(nsIFile::NORMAL_FILE_TYPE, 0600);
+  rv = mrFinalFile->CreateUnique(nsIFile::NORMAL_FILE_TYPE, 0600);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsAutoString dstFileName;
-  rv = dstFile->GetLeafName(dstFileName);
+  nsAutoString mrActualFinalFilename;
+  rv = mrFinalFile->GetLeafName(mrActualFinalFilename);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  rv = tmpFile->MoveTo(/* directory */ nullptr, dstFileName);
+  rv = mrTmpFile->MoveTo(/* directory */ nullptr, mrActualFinalFilename);
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsCOMPtr<nsIConsoleService> cs =
@@ -618,7 +958,7 @@ nsMemoryInfoDumper::DumpMemoryReportsToFileImpl(
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsString path;
-  tmpFile->GetPath(path);
+  mrTmpFile->GetPath(path);
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsString msg = NS_LITERAL_STRING(

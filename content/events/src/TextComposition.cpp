@@ -25,8 +25,7 @@ TextComposition::TextComposition(nsPresContext* aPresContext,
                                  nsGUIEvent* aEvent) :
   mPresContext(aPresContext), mNode(aNode),
   mNativeContext(aEvent->widget->GetInputContext().mNativeIMEContext),
-  mIsSynthesizedForTests(
-    (aEvent->flags & NS_EVENT_FLAG_SYNTHETIC_TEST_EVENT) != 0)
+  mIsSynthesizedForTests(aEvent->mFlags.mIsSynthesizedForTests)
 {
 }
 
@@ -107,7 +106,7 @@ TextComposition::CompositionEventDispatcher::CompositionEventDispatcher(
   mPresContext(aPresContext), mEventTarget(aEventTarget),
   mEventMessage(aEventMessage), mData(aData)
 {
-  mWidget = mPresContext->GetNearestWidget();
+  mWidget = mPresContext->GetRootWidget();
 }
 
 NS_IMETHODIMP

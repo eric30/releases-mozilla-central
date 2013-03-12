@@ -7,16 +7,16 @@
 #include "nsIconDecoder.h"
 #include "nsIInputStream.h"
 #include "RasterImage.h"
-#include "imgIContainerObserver.h"
 #include "nspr.h"
 #include "nsRect.h"
 
 #include "nsError.h"
+#include <algorithm>
 
 namespace mozilla {
 namespace image {
 
-nsIconDecoder::nsIconDecoder(RasterImage &aImage, imgIDecoderObserver* aObserver)
+nsIconDecoder::nsIconDecoder(RasterImage &aImage, imgDecoderObserver* aObserver)
  : Decoder(aImage, aObserver),
    mWidth(-1),
    mHeight(-1),
@@ -99,7 +99,7 @@ nsIconDecoder::WriteInternal(const char *aBuffer, uint32_t aCount)
       case iconStateReadPixels:
 
         // How many bytes are we reading?
-        bytesToRead = NS_MIN(aCount, mPixBytesTotal - mPixBytesRead);
+        bytesToRead = std::min(aCount, mPixBytesTotal - mPixBytesRead);
 
         // Copy the bytes
         memcpy(mImageData + mPixBytesRead, aBuffer, bytesToRead);

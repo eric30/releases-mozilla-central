@@ -13,6 +13,7 @@
 
 #include "mozilla/mozalloc.h"
 #include "mozilla/StandardInteger.h"
+#include <algorithm>
 
 namespace mozilla {
 
@@ -240,6 +241,26 @@ VideoData* VideoData::Create(VideoInfo& aInfo,
   return v.forget();
 }
 
+VideoData* VideoData::CreateFromImage(VideoInfo& aInfo,
+                                      ImageContainer* aContainer,
+                                      int64_t aOffset,
+                                      int64_t aTime,
+                                      int64_t aEndTime,
+                                      const nsRefPtr<Image>& aImage,
+                                      bool aKeyframe,
+                                      int64_t aTimecode,
+                                      nsIntRect aPicture)
+{
+  nsAutoPtr<VideoData> v(new VideoData(aOffset,
+                                       aTime,
+                                       aEndTime,
+                                       aKeyframe,
+                                       aTimecode,
+                                       aInfo.mDisplay));
+  v->mImage = aImage;
+  return v.forget();
+}
+
 #ifdef MOZ_WIDGET_GONK
 VideoData* VideoData::Create(VideoInfo& aInfo,
                              ImageContainer* aContainer,
@@ -400,7 +421,7 @@ VideoData* MediaDecoderReader::FindStartTime(int64_t& aOutStartTime)
     }
   }
 
-  int64_t startTime = NS_MIN(videoStartTime, audioStartTime);
+  int64_t startTime = std::min(videoStartTime, audioStartTime);
   if (startTime != INT64_MAX) {
     aOutStartTime = startTime;
   }

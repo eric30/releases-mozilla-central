@@ -9,9 +9,10 @@
 //----------------------------------------------------------------------
 // Implementation
 
-nsDOMSVGEvent::nsDOMSVGEvent(nsPresContext* aPresContext,
+nsDOMSVGEvent::nsDOMSVGEvent(mozilla::dom::EventTarget* aOwner,
+                             nsPresContext* aPresContext,
                              nsEvent* aEvent)
-  : nsDOMEvent(aPresContext,
+  : nsDOMEvent(aOwner, aPresContext,
                aEvent ? aEvent : new nsEvent(false, 0))
 {
   if (aEvent) {
@@ -23,10 +24,9 @@ nsDOMSVGEvent::nsDOMSVGEvent(nsPresContext* aPresContext,
     mEvent->time = PR_Now();
   }
 
-  mEvent->flags |= NS_EVENT_FLAG_CANT_CANCEL;
-  if (mEvent->message == NS_SVG_LOAD || mEvent->message == NS_SVG_UNLOAD) {
-    mEvent->flags |= NS_EVENT_FLAG_CANT_BUBBLE;
-  }
+  mEvent->mFlags.mCancelable = false;
+  mEvent->mFlags.mBubbles =
+    (mEvent->message != NS_SVG_LOAD && mEvent->message != NS_SVG_UNLOAD);
 }
 
 //----------------------------------------------------------------------
@@ -48,12 +48,10 @@ NS_INTERFACE_MAP_END_INHERITING(nsDOMEvent)
 
 nsresult
 NS_NewDOMSVGEvent(nsIDOMEvent** aInstancePtrResult,
+                  mozilla::dom::EventTarget* aOwner,
                   nsPresContext* aPresContext,
                   nsEvent *aEvent)
 {
-  nsDOMSVGEvent* it = new nsDOMSVGEvent(aPresContext, aEvent);
-  if (!it)
-    return NS_ERROR_OUT_OF_MEMORY;
-
+  nsDOMSVGEvent* it = new nsDOMSVGEvent(aOwner, aPresContext, aEvent);
   return CallQueryInterface(it, aInstancePtrResult);
 }

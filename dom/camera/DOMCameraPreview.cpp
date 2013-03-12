@@ -7,6 +7,8 @@
 #include "VideoUtils.h"
 #include "DOMCameraPreview.h"
 #include "CameraCommon.h"
+#include "nsGlobalWindow.h"
+#include "nsPIDOMWindow.h"
 
 using namespace mozilla;
 using namespace mozilla::layers;
@@ -138,8 +140,11 @@ protected:
   DOMCameraPreview* mDOMPreview;
 };
 
-DOMCameraPreview::DOMCameraPreview(ICameraControl* aCameraControl, uint32_t aWidth, uint32_t aHeight, uint32_t aFrameRate)
-  : nsDOMMediaStream()
+DOMCameraPreview::DOMCameraPreview(nsGlobalWindow* aWindow,
+                                   ICameraControl* aCameraControl,
+                                   uint32_t aWidth, uint32_t aHeight,
+                                   uint32_t aFrameRate)
+  : DOMMediaStream()
   , mState(STOPPED)
   , mWidth(aWidth)
   , mHeight(aHeight)
@@ -152,6 +157,7 @@ DOMCameraPreview::DOMCameraPreview(ICameraControl* aCameraControl, uint32_t aWid
   mImageContainer = LayerManager::CreateImageContainer();
   MediaStreamGraph* gm = MediaStreamGraph::GetInstance();
   mStream = gm->CreateSourceStream(this);
+  mWindow = aWindow;
   mInput = GetStream()->AsSourceStream();
 
   mListener = new DOMCameraPreviewListener(this);
@@ -159,6 +165,10 @@ DOMCameraPreview::DOMCameraPreview(ICameraControl* aCameraControl, uint32_t aWid
 
   mInput->AddTrack(TRACK_VIDEO, mFramesPerSecond, 0, new VideoSegment());
   mInput->AdvanceKnownTracksTime(MEDIA_TIME_MAX);
+
+  if (aWindow->GetExtantDoc()) {
+    CombineWithPrincipal(aWindow->GetExtantDoc()->NodePrincipal());
+  }
 }
 
 DOMCameraPreview::~DOMCameraPreview()
@@ -212,7 +222,7 @@ DOMCameraPreview::Start()
    * This reference is removed in SetStateStopped().
    */
   NS_ADDREF_THIS();
-  mState = STARTING;
+  DOM_CAMERA_SETSTATE(STARTING);
   mCameraControl->StartPreview(this);
 }
 
@@ -221,7 +231,7 @@ DOMCameraPreview::SetStateStarted()
 {
   NS_ASSERTION(NS_IsMainThread(), "SetStateStarted() not called from main thread");
 
-  mState = STARTED;
+  DOM_CAMERA_SETSTATE(STARTED);
   DOM_CAMERA_LOGI("Preview stream started\n");
 }
 
@@ -249,7 +259,7 @@ DOMCameraPreview::StopPreview()
   }
 
   DOM_CAMERA_LOGI("Stopping preview stream\n");
-  mState = STOPPING;
+  DOM_CAMERA_SETSTATE(STOPPING);
   mCameraControl->StopPreview();
   mInput->EndTrack(TRACK_VIDEO);
   mInput->Finish();
@@ -265,7 +275,7 @@ DOMCameraPreview::SetStateStopped()
     mInput->EndTrack(TRACK_VIDEO);
     mInput->Finish();
   }
-  mState = STOPPED;
+  DOM_CAMERA_SETSTATE(STOPPED);
   DOM_CAMERA_LOGI("Preview stream stopped\n");
 
   /**

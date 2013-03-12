@@ -61,6 +61,7 @@
     </string-array>
     <string-array name="pref_private_data_entries">
         <item>@string/pref_private_data_history</item>
+        <item>@string/pref_private_data_downloadFiles</item>
         <item>@string/pref_private_data_formdata</item>
         <item>@string/pref_private_data_cookies2</item>
         <item>@string/pref_private_data_passwords</item>
@@ -76,9 +77,11 @@
         <item>true</item>
         <item>true</item>
         <item>true</item>
+        <item>true</item>
     </string-array>
     <string-array name="pref_private_data_keys">
         <item>private.data.history_downloads</item>
+        <item>private.data.downloadFiles</item>
         <item>private.data.formdata</item>
         <item>private.data.cookies_sessions</item>
         <item>private.data.passwords</item>
@@ -95,5 +98,10 @@
         <item>enabled</item>
         <item>wifi</item>
         <item>disabled</item>
+    </string-array>
+    <string-array name="tabs_panel_spinner">
+        <item>@string/tabs_normal</item>
+        <item>@string/tabs_private</item>
+        <item>@string/tabs_synced</item>
     </string-array>
 </resources>

@@ -8,7 +8,7 @@
 html {
   font-family: Roboto,"Droid Sans",helvetica,arial,clean,sans-serif;
   font-size: 18px;
-  background-image: url("chrome://browser/skin/images/about-bg-lightblue.png");
+  background-color: #ced7de;
   -moz-text-size-adjust: none;
 }
 
@@ -46,7 +46,7 @@ ul {
 
 li {
   color: black;
-  background-image: url("chrome://browser/skin/images/row-bg-normal.png");
+  background-color: #e6e9eb;
   border-bottom: 2px solid;
   -moz-border-bottom-colors: #ffffff #bac2ac;
   position: relative;
@@ -54,18 +54,35 @@ li {
   list-style-image: none;
   margin: 0px;
   padding: 0px;
-  color: black;
   height: 86px;
   font-size: 18px !important;
+}
+
+#private-downloads-list li {
+  background-image: none;
+  background-color: #080a0b;
+  color: #ddd;
+}
+
+div.details {
+  background-color: #eef2f5;
+}
+
+#private-downloads-list div.details {
+  background-image: none;
+  background-color: #393e43;
 }
 
 li:active {
   background-color: @color_background_highlight_overlay@;
   background-image: none;
+  color: #000;
 }
 
-li:active .details {
+li:active div.details,
+#private-downloads-list li:active div.details {
   background-image: none;
+  background-color: transparent;
 }
 
 .icon {
@@ -81,7 +98,6 @@ li:active .details {
   margin-left: 86px;
   padding: 10px;
   min-height: 66px;
-  background-image: url("chrome://browser/skin/images/row-bg-light.png");
 }
 
 .row {
@@ -119,7 +135,7 @@ li:active .details {
   display: none;
 }
 
-#downloads-list:empty + #no-downloads-indicator {
+#private-downloads-list:empty + #normal-downloads-list:empty + #no-downloads-indicator {
   display: block;
   text-align: center;
   padding-top: 70px;

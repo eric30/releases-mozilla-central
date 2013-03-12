@@ -5,24 +5,25 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "MethodJIT.h"
-#include "Logging.h"
-#include "assembler/jit/ExecutableAllocator.h"
-#include "assembler/assembler/RepatchBuffer.h"
-#include "gc/Marking.h"
-#include "js/MemoryMetrics.h"
 #include "BaseAssembler.h"
 #include "Compiler.h"
-#include "MonoIC.h"
-#include "PolyIC.h"
-#include "TrampolineCompiler.h"
 #include "jscntxtinlines.h"
 #include "jscompartment.h"
-#include "jsscope.h"
+#include "Logging.h"
+#include "MethodJIT.h"
+#include "MonoIC.h"
+#include "PolyIC.h"
+#include "Retcon.h"
+#include "TrampolineCompiler.h"
+
+#include "assembler/assembler/RepatchBuffer.h"
+#include "assembler/jit/ExecutableAllocator.h"
+#include "gc/Marking.h"
 #include "ion/Ion.h"
 #include "ion/IonCode.h"
 #include "ion/IonCompartment.h"
-#include "methodjit/Retcon.h"
+#include "js/MemoryMetrics.h"
+#include "vm/Shape.h"
 
 #include "jsgcinlines.h"
 #include "jsinterpinlines.h"
@@ -633,8 +634,10 @@ JS_STATIC_ASSERT(JSReturnReg_Data == JSC::ARMRegisters::r4);
   ".align 2\n" \
   ".thumb\n" \
   ".thumb_func\n"
+#define BRANCH_AND_LINK(x) "blx " x
 #else
 #define FUNCTION_HEADER_EXTRA
+#define BRANCH_AND_LINK(x) "bl " x
 #endif
 
 asm (
@@ -693,7 +696,7 @@ SYMBOL_STRING(JaegerTrampoline) ":"         "\n"
 "   mov     r10, r1"                            "\n"
 
 "   mov     r0, sp"                             "\n"
-"   blx  " SYMBOL_STRING_VMFRAME(PushActiveVMFrame)"\n"
+"   " BRANCH_AND_LINK(SYMBOL_STRING_VMFRAME(PushActiveVMFrame)) "\n"
 
     /* Call the compiled JavaScript function. */
 "   bx     r4"                                  "\n"
@@ -708,7 +711,7 @@ SYMBOL_STRING(JaegerTrampolineReturn) ":"         "\n"
 
     /* Tidy up. */
 "   mov     r0, sp"                         "\n"
-"   blx  " SYMBOL_STRING_VMFRAME(PopActiveVMFrame) "\n"
+"   " BRANCH_AND_LINK(SYMBOL_STRING_VMFRAME(PopActiveVMFrame)) "\n"
 
     /* Skip past the parameters we pushed (such as cx and the like). */
 "   add     sp, sp, #(4*7 + 4*6)"           "\n"
@@ -727,7 +730,7 @@ SYMBOL_STRING(JaegerThrowpoline) ":"        "\n"
 "   mov     r0, sp"                         "\n"
 
     /* Call the utility function that sets up the internal throw routine. */
-"   blx  " SYMBOL_STRING_RELOC(js_InternalThrow) "\n"
+"   " BRANCH_AND_LINK(SYMBOL_STRING_RELOC(js_InternalThrow)) "\n"
 
     /* If js_InternalThrow found a scripted handler, jump to it. Otherwise, tidy
      * up and return. */
@@ -737,7 +740,7 @@ SYMBOL_STRING(JaegerThrowpoline) ":"        "\n"
 
     /* Tidy up, then return '0' to represent an unhandled exception. */
 "   mov     r0, sp"                         "\n"
-"   blx  " SYMBOL_STRING_VMFRAME(PopActiveVMFrame) "\n"
+"   " BRANCH_AND_LINK(SYMBOL_STRING_VMFRAME(PopActiveVMFrame)) "\n"
 "   add     sp, sp, #(4*7 + 4*6)"           "\n"
 "   mov     r0, #0"                         "\n"
 "   pop     {r4-r11,pc}"                    "\n"
@@ -761,7 +764,7 @@ SYMBOL_STRING(JaegerInterpoline) ":"        "\n"
 "   mov     r2, r0"                         "\n"    /* returnReg */
 "   mov     r1, r5"                         "\n"    /* returnType */
 "   mov     r0, r4"                         "\n"    /* returnData */
-"   blx  " SYMBOL_STRING_RELOC(js_InternalInterpret) "\n"
+"   " BRANCH_AND_LINK(SYMBOL_STRING_RELOC(js_InternalInterpret)) "\n"
 "   cmp     r0, #0"                         "\n"
 "   ldr     r10, [sp, #(4*7)]"              "\n"    /* Load (StackFrame*)f->regs->fp_ */
 "   ldrd    r4, r5, [r10, #(4*6)]"          "\n"    /* Load rval payload and type. */
@@ -770,7 +773,7 @@ SYMBOL_STRING(JaegerInterpoline) ":"        "\n"
 "   bxne    r0"                             "\n"
     /* Tidy up, then return 0. */
 "   mov     r0, sp"                         "\n"
-"   blx  " SYMBOL_STRING_VMFRAME(PopActiveVMFrame) "\n"
+"   " BRANCH_AND_LINK(SYMBOL_STRING_VMFRAME(PopActiveVMFrame)) "\n"
 "   add     sp, sp, #(4*7 + 4*6)"           "\n"
 "   mov     r0, #0"                         "\n"
 "   pop     {r4-r11,pc}"                    "\n"
@@ -1101,7 +1104,7 @@ JaegerStatus
 mjit::JaegerShot(JSContext *cx, bool partial)
 {
     StackFrame *fp = cx->fp();
-    JITScript *jit = fp->script()->getJIT(fp->isConstructing(), cx->compartment->compileBarriers());
+    JITScript *jit = fp->script()->getJIT(fp->isConstructing(), cx->zone()->compileBarriers());
 
     JS_ASSERT(cx->regs().pc == fp->script()->code);
 
@@ -1331,8 +1334,8 @@ JITScript::destroyChunk(FreeOp *fop, unsigned chunkIndex, bool resetUses)
          * Write barrier: Before we destroy the chunk, trace through the objects
          * it holds.
          */
-        if (script->compartment()->needsBarrier())
-            desc.chunk->trace(script->compartment()->barrierTracer());
+        if (script->zone()->needsBarrier())
+            desc.chunk->trace(script->zone()->barrierTracer());
 
         Probes::discardMJITCode(fop, this, desc.chunk, desc.chunk->code.m_code.executableAddress());
         fop->delete_(desc.chunk);
@@ -1383,7 +1386,7 @@ JITScript::trace(JSTracer *trc)
 static ic::PICInfo *
 GetPIC(JSContext *cx, JSScript *script, jsbytecode *pc, bool constructing)
 {
-    JITScript *jit = script->getJIT(constructing, cx->compartment->needsBarrier());
+    JITScript *jit = script->getJIT(constructing, cx->zone()->needsBarrier());
     if (!jit)
         return NULL;
 
@@ -1400,7 +1403,7 @@ GetPIC(JSContext *cx, JSScript *script, jsbytecode *pc, bool constructing)
     return NULL;
 }
 
-Shape *
+RawShape
 mjit::GetPICSingleShape(JSContext *cx, JSScript *script, jsbytecode *pc, bool constructing)
 {
     ic::PICInfo *pic = GetPIC(cx, script, pc, constructing);
@@ -1657,6 +1660,11 @@ JITChunk::trace(JSTracer *trc)
         /* We use a manual write barrier in destroyChunk. */
         MarkObjectUnbarriered(trc, &rootedTemplates_[i], "jitchunk_template");
     }
+
+    /* RegExpShared objects require the RegExp source string. */
+    RegExpShared **rootedRegExps_ = rootedRegExps();
+    for (size_t i = 0; i < nRootedRegExps; i++)
+        rootedRegExps_[i]->trace(trc);
 }
 
 void

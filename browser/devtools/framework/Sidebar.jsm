@@ -4,12 +4,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const Cc = Components.classes;
-const Cu = Components.utils;
-const Ci = Components.interfaces;
+const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 
 this.EXPORTED_SYMBOLS = ["ToolSidebar"];
 
+Cu.import("resource://gre/modules/commonjs/sdk/core/promise.js");
 Cu.import("resource:///modules/devtools/EventEmitter.jsm");
 
 const XULNS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
@@ -27,7 +26,7 @@ const XULNS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
  */
 this.ToolSidebar = function ToolSidebar(tabbox, panel, showTabstripe=true)
 {
-  new EventEmitter(this);
+  EventEmitter.decorate(this);
 
   this._tabbox = tabbox;
   this._panelDoc = this._tabbox.ownerDocument;
@@ -57,6 +56,7 @@ ToolSidebar.prototype = {
     iframe.setAttribute("src", url);
 
     let tab = this._tabbox.tabs.appendItem();
+    tab.setAttribute("label", ""); // Avoid showing "undefined" while the tab is loading
 
     let onIFrameLoaded = function() {
       tab.setAttribute("label", iframe.contentDocument.title);
@@ -116,6 +116,16 @@ ToolSidebar.prototype = {
   },
 
   /**
+   * Returns the requested tab based on the id.
+   *
+   * @param String id
+   *        unique id of the requested tab.
+   */
+  getTab: function ToolSidebar_getTab(id) {
+    return this._tabbox.tabpanels.querySelector("#sidebar-panel-" + id);
+  },
+
+  /**
    * Event handler.
    */
   handleEvent: function ToolSidebar_eventHandler(event) {
@@ -130,7 +140,6 @@ ToolSidebar.prototype = {
       this.emit("select", this._currentTool);
     }
   },
-
 
   /**
    * Toggle sidebar's visibility state.
@@ -173,7 +182,12 @@ ToolSidebar.prototype = {
    * Clean-up.
    */
   destroy: function ToolSidebar_destroy() {
-    this._tabbox.removeEventListener("select", this, true);
+    if (this._destroyed) {
+      return Promise.resolve(null);
+    }
+    this._destroyed = true;
+
+    this._tabbox.tabpanels.removeEventListener("select", this, true);
 
     while (this._tabbox.tabpanels.hasChildNodes()) {
       this._tabbox.tabpanels.removeChild(this._tabbox.tabpanels.firstChild);
@@ -187,5 +201,7 @@ ToolSidebar.prototype = {
     this._tabbox = null;
     this._panelDoc = null;
     this._toolPanel = null;
+
+    return Promise.resolve(null);
   },
 }

@@ -6,21 +6,15 @@
 /* base class for DOM objects for element.style and cssStyleRule.style */
 
 #include "nsDOMCSSDeclaration.h"
-#include "nsIDOMCSSRule.h"
 #include "nsCSSParser.h"
-#include "mozilla/css/Loader.h"
 #include "nsCSSStyleSheet.h"
-#include "nsIStyleRule.h"
 #include "mozilla/css/Rule.h"
 #include "mozilla/css/Declaration.h"
 #include "nsCSSProps.h"
 #include "nsCOMPtr.h"
-#include "nsIURL.h"
-#include "nsReadableUtils.h"
-#include "nsIPrincipal.h"
 #include "mozAutoDocUpdate.h"
 
-namespace css = mozilla::css;
+using namespace mozilla;
 
 nsDOMCSSDeclaration::~nsDOMCSSDeclaration()
 {
@@ -127,16 +121,12 @@ nsDOMCSSDeclaration::GetLength(uint32_t* aLength)
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsDOMCSSDeclaration::GetPropertyCSSValue(const nsAString& aPropertyName,
-                                         nsIDOMCSSValue** aReturn)
+already_AddRefed<dom::CSSValue>
+nsDOMCSSDeclaration::GetPropertyCSSValue(const nsAString& aPropertyName, ErrorResult& aRv)
 {
-  NS_ENSURE_ARG_POINTER(aReturn);
-
   // We don't support CSSValue yet so we'll just return null...
-  *aReturn = nullptr;
 
-  return NS_OK;
+  return nullptr;
 }
 
 void

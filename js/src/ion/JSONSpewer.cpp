@@ -178,7 +178,7 @@ JSONSpewer::init(const char *path)
 }
 
 void
-JSONSpewer::beginFunction(JSScript *script)
+JSONSpewer::beginFunction(RawScript script)
 {
     if (inFunction_)
         endFunction();
@@ -256,13 +256,17 @@ JSONSpewer::spewMDef(MDefinition *def)
         integerValue(use.def()->id());
     endList();
 
+    bool isTruncated = false;
+    if (def->isAdd() || def->isSub() || def->isMod() || def->isMul() || def->isDiv())
+        isTruncated = static_cast<MBinaryArithInstruction*>(def)->isTruncated();
+
     if (def->range()) {
         Sprinter sp(GetIonContext()->cx);
         sp.init();
         def->range()->print(sp);
-        stringProperty("type", "%s : %s", sp.string());
+        stringProperty("type", "%s : %s%s", sp.string(), StringFromMIRType(def->type()), (isTruncated ? " (t)" : ""));
     } else {
-        stringProperty("type", "%s", StringFromMIRType(def->type()));
+        stringProperty("type", "%s%s", StringFromMIRType(def->type()), (isTruncated ? " (t)" : ""));
     }
 
     if (def->isInstruction()) {
@@ -405,9 +409,7 @@ JSONSpewer::spewIntervals(LinearScanAllocator *regalloc)
                     if (live->numRanges()) {
                         beginObject();
                         property("allocation");
-                        fprintf(fp_, "\"");
-                        LAllocation::PrintAllocation(fp_, live->getAllocation());
-                        fprintf(fp_, "\"");
+                        fprintf(fp_, "\"%s\"", live->getAllocation()->toString());
                         beginListProperty("ranges");
 
                         for (size_t j = 0; j < live->numRanges(); j++) {

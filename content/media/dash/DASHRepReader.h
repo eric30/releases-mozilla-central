@@ -41,6 +41,9 @@ public:
   // Sets range for index frame bytes; used by DASH.
   virtual void SetIndexByteRange(MediaByteRange &aByteRange) = 0;
 
+  // Returns the index of the subsegment which contains the seek time (usecs).
+  virtual int64_t GetSubsegmentForSeekTime(int64_t aSeekToTime) = 0;
+
   // Returns list of ranges for index frame start/end offsets. Used by DASH.
   virtual nsresult GetSubsegmentByteRanges(nsTArray<MediaByteRange>& aByteRanges) = 0;
 
@@ -55,6 +58,9 @@ public:
   // Should be implemented by a sub-reader, e.g. |nsDASHWebMReader|.
   virtual void RequestSwitchAtSubsegment(int32_t aCluster,
                                          MediaDecoderReader* aNextReader) = 0;
+
+  // Returns true if data at the end of the final subsegment has been cached.
+  virtual bool IsDataCachedAtEndOfSubsegments() = 0;
 };
 
 }// namespace mozilla

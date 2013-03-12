@@ -8,6 +8,7 @@
 
 #include "AsyncConnectionHelper.h"
 
+#include "mozilla/dom/quota/QuotaManager.h"
 #include "mozilla/storage.h"
 #include "nsComponentManagerUtils.h"
 #include "nsContentUtils.h"
@@ -24,6 +25,7 @@
 #include "ipc/IndexedDBParent.h"
 
 USING_INDEXEDDB_NAMESPACE
+using mozilla::dom::quota::QuotaManager;
 
 namespace {
 
@@ -287,7 +289,7 @@ AsyncConnectionHelper::Run()
   if (NS_SUCCEEDED(rv)) {
     bool hasSavepoint = false;
     if (mDatabase) {
-      IndexedDatabaseManager::SetCurrentWindow(mDatabase->GetOwner());
+      QuotaManager::SetCurrentWindow(mDatabase->GetOwner());
 
       // Make the first savepoint.
       if (mTransaction) {
@@ -313,7 +315,7 @@ AsyncConnectionHelper::Run()
 
       // Don't unset this until we're sure that all SQLite activity has
       // completed!
-      IndexedDatabaseManager::SetCurrentWindow(nullptr);
+      QuotaManager::SetCurrentWindow(nullptr);
     }
   }
   else {
@@ -418,10 +420,10 @@ AsyncConnectionHelper::Init()
   return NS_OK;
 }
 
-already_AddRefed<nsDOMEvent>
-AsyncConnectionHelper::CreateSuccessEvent()
+already_AddRefed<nsIDOMEvent>
+AsyncConnectionHelper::CreateSuccessEvent(mozilla::dom::EventTarget* aOwner)
 {
-  return CreateGenericEvent(NS_LITERAL_STRING(SUCCESS_EVT_STR),
+  return CreateGenericEvent(mRequest, NS_LITERAL_STRING(SUCCESS_EVT_STR),
                             eDoesNotBubble, eNotCancelable);
 }
 
@@ -431,7 +433,7 @@ AsyncConnectionHelper::OnSuccess()
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
   NS_ASSERTION(mRequest, "Null request!");
 
-  nsRefPtr<nsDOMEvent> event = CreateSuccessEvent();
+  nsRefPtr<nsIDOMEvent> event = CreateSuccessEvent(mRequest);
   if (!event) {
     NS_ERROR("Failed to create event!");
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
@@ -449,7 +451,7 @@ AsyncConnectionHelper::OnSuccess()
                mTransaction->IsAborted(),
                "How else can this be closed?!");
 
-  if ((internalEvent->flags & NS_EVENT_FLAG_EXCEPTION_THROWN) &&
+  if (internalEvent->mFlags.mExceptionHasBeenRisen &&
       mTransaction &&
       mTransaction->IsOpen()) {
     rv = mTransaction->Abort(NS_ERROR_DOM_INDEXEDDB_ABORT_ERR);
@@ -466,8 +468,8 @@ AsyncConnectionHelper::OnError()
   NS_ASSERTION(mRequest, "Null request!");
 
   // Make an error event and fire it at the target.
-  nsRefPtr<nsDOMEvent> event =
-    CreateGenericEvent(NS_LITERAL_STRING(ERROR_EVT_STR), eDoesBubble,
+  nsRefPtr<nsIDOMEvent> event =
+    CreateGenericEvent(mRequest, NS_LITERAL_STRING(ERROR_EVT_STR), eDoesBubble,
                        eCancelable);
   if (!event) {
     NS_ERROR("Failed to create event!");
@@ -485,7 +487,7 @@ AsyncConnectionHelper::OnError()
     nsEvent* internalEvent = event->GetInternalNSEvent();
     NS_ASSERTION(internalEvent, "This should never be null!");
 
-    if ((internalEvent->flags & NS_EVENT_FLAG_EXCEPTION_THROWN) &&
+    if (internalEvent->mFlags.mExceptionHasBeenRisen &&
         mTransaction &&
         mTransaction->IsOpen() &&
         NS_FAILED(mTransaction->Abort(NS_ERROR_DOM_INDEXEDDB_ABORT_ERR))) {
@@ -577,7 +579,7 @@ AsyncConnectionHelper::OnParentProcessRequestComplete(
 
 // static
 nsresult
-AsyncConnectionHelper::ConvertCloneReadInfosToArray(
+AsyncConnectionHelper::ConvertToArrayAndCleanup(
                                   JSContext* aCx,
                                   nsTArray<StructuredCloneReadInfo>& aReadInfos,
                                   jsval* aResult)

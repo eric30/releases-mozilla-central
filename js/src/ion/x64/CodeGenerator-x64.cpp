@@ -5,13 +5,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "jsnum.h"
+
 #include "CodeGenerator-x64.h"
-#include "ion/shared/CodeGenerator-shared-inl.h"
 #include "ion/MIR.h"
 #include "ion/MIRGraph.h"
-#include "jsnum.h"
-#include "jsscope.h"
-#include "jsscopeinlines.h"
+#include "ion/shared/CodeGenerator-shared-inl.h"
+#include "vm/Shape.h"
+
+#include "vm/Shape-inl.h"
 
 using namespace js;
 using namespace js::ion;
@@ -37,14 +39,6 @@ ValueOperand
 CodeGeneratorX64::ToTempValue(LInstruction *ins, size_t pos)
 {
     return ValueOperand(ToRegister(ins->getTemp(pos)));
-}
-
-bool
-CodeGeneratorX64::visitDouble(LDouble *ins)
-{
-    const LDefinition *out = ins->output();
-    masm.loadConstantDouble(ins->getDouble(), ToFloatRegister(out));
-    return true;
 }
 
 FrameSizeClass
@@ -249,7 +243,16 @@ bool
 CodeGeneratorX64::visitLoadElementT(LLoadElementT *load)
 {
     Operand source = createArrayElementOperand(ToRegister(load->elements()), load->index());
-    loadUnboxedValue(source, load->mir()->type(), load->output());
+
+    if (load->mir()->loadDoubles()) {
+        FloatRegister fpreg = ToFloatRegister(load->output());
+        if (source.kind() == Operand::REG_DISP)
+            masm.loadDouble(source.toAddress(), fpreg);
+        else
+            masm.loadDouble(source.toBaseIndex(), fpreg);
+    } else {
+        loadUnboxedValue(source, load->mir()->type(), load->output());
+    }
 
     JS_ASSERT(!load->mir()->needsHoleCheck());
     return true;
@@ -336,7 +339,7 @@ CodeGeneratorX64::visitCompareB(LCompareB *lir)
 
     // Perform the comparison.
     masm.cmpq(lhs.valueReg(), ScratchReg);
-    emitSet(JSOpToCondition(mir->jsop()), output);
+    masm.emitSet(JSOpToCondition(mir->jsop()), output);
     return true;
 }
 
@@ -358,6 +361,36 @@ CodeGeneratorX64::visitCompareBAndBranch(LCompareBAndBranch *lir)
 
     // Perform the comparison.
     masm.cmpq(lhs.valueReg(), ScratchReg);
+    emitBranch(JSOpToCondition(mir->jsop()), lir->ifTrue(), lir->ifFalse());
+    return true;
+}
+bool
+CodeGeneratorX64::visitCompareV(LCompareV *lir)
+{
+    MCompare *mir = lir->mir();
+    const ValueOperand lhs = ToValue(lir, LCompareV::LhsInput);
+    const ValueOperand rhs = ToValue(lir, LCompareV::RhsInput);
+    const Register output = ToRegister(lir->output());
+
+    JS_ASSERT(IsEqualityOp(mir->jsop()));
+
+    masm.cmpq(lhs.valueReg(), rhs.valueReg());
+    masm.emitSet(JSOpToCondition(mir->jsop()), output);
+    return true;
+}
+
+bool
+CodeGeneratorX64::visitCompareVAndBranch(LCompareVAndBranch *lir)
+{
+    MCompare *mir = lir->mir();
+
+    const ValueOperand lhs = ToValue(lir, LCompareVAndBranch::LhsInput);
+    const ValueOperand rhs = ToValue(lir, LCompareVAndBranch::RhsInput);
+
+    JS_ASSERT(mir->jsop() == JSOP_EQ || mir->jsop() == JSOP_STRICTEQ ||
+              mir->jsop() == JSOP_NE || mir->jsop() == JSOP_STRICTNE);
+
+    masm.cmpq(lhs.valueReg(), rhs.valueReg());
     emitBranch(JSOpToCondition(mir->jsop()), lir->ifTrue(), lir->ifFalse());
     return true;
 }

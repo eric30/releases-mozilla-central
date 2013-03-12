@@ -9,6 +9,7 @@
 #define _nsARIAMap_H_
 
 #include "ARIAStateMap.h"
+#include "mozilla/a11y/AccTypes.h"
 #include "mozilla/a11y/Role.h"
 
 #include "nsIAtom.h"
@@ -97,18 +98,19 @@ const bool kUseNativeRole = false;
  * that it should, but is already handled in other code.
  */
 const uint8_t ATTR_BYPASSOBJ = 0x1 << 0;
+const uint8_t ATTR_BYPASSOBJ_IF_FALSE = 0x1 << 1;
 
 /**
  * This mask indicates the attribute is expected to have an NMTOKEN or bool value.
  * (See for example usage in Accessible::Attributes())
  */
-const uint8_t ATTR_VALTOKEN = 0x1 << 1;
+const uint8_t ATTR_VALTOKEN = 0x1 << 2;
 
 /**
  * Indicate the attribute is global state or property (refer to
  * http://www.w3.org/TR/wai-aria/states_and_properties#global_states).
  */
-const uint8_t ATTR_GLOBAL = 0x1 << 2;
+const uint8_t ATTR_GLOBAL = 0x1 << 3;
 
 /**
  * Small footprint storage of persistent aria attribute characteristics.
@@ -148,6 +150,12 @@ struct nsRoleMapEntry
    */
   bool Is(nsIAtom* aARIARole) const
     { return *roleAtom == aARIARole; }
+
+  /**
+   * Return true if ARIA role has the given accessible type.
+   */
+  bool IsOfType(mozilla::a11y::AccGenericType aType) const
+    { return accTypes & aType; }
 
   /**
    * Return ARIA role.

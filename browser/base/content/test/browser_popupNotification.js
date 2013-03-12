@@ -18,21 +18,24 @@ function cleanUp() {
     Services.obs.removeObserver(gActiveObservers[topic], topic);
   for (var eventName in gActiveListeners)
     PopupNotifications.panel.removeEventListener(eventName, gActiveListeners[eventName], false);
+  PopupNotifications.buttonDelay = PREF_SECURITY_DELAY_INITIAL;
 }
+
+const PREF_SECURITY_DELAY_INITIAL = Services.prefs.getIntPref("security.notification_enable_delay");
 
 var gActiveListeners = {};
 var gActiveObservers = {};
 var gShownState = {};
 
+function goNext() {
+  if (++gTestIndex == tests.length)
+    executeSoon(finish);
+  else
+    executeSoon(runNextTest);
+}
+
 function runNextTest() {
   let nextTest = tests[gTestIndex];
-
-  function goNext() {
-    if (++gTestIndex == tests.length)
-      executeSoon(finish);
-    else
-      executeSoon(runNextTest);
-  }
 
   function addObserver(topic) {
     function observer() {
@@ -51,7 +54,7 @@ function runNextTest() {
     addObserver("backgroundShow");
   } else if (nextTest.updateNotShowing) {
     addObserver("updateNotShowing");
-  } else {
+  } else if (nextTest.onShown) {
     doOnPopupEvent("popupshowing", function () {
       info("[Test #" + gTestIndex + "] popup showing");
     });
@@ -675,6 +678,118 @@ var tests = [
         this.notificationOld.remove();
       }
     ]
+  },
+  { // Test #23 - test security delay - too early
+    run: function () {
+      // Set the security delay to 100s
+      PopupNotifications.buttonDelay = 100000;
+
+      this.notifyObj = new basicNotification();
+      showNotification(this.notifyObj);
+    },
+    onShown: function (popup) {
+      checkPopup(popup, this.notifyObj);
+      triggerMainCommand(popup);
+
+      // Wait to see if the main command worked
+      executeSoon(function delayedDismissal() {
+        dismissNotification(popup);
+      });
+
+    },
+    onHidden: function (popup) {
+      ok(!this.notifyObj.mainActionClicked, "mainAction was not clicked because it was too soon");
+      ok(this.notifyObj.dismissalCallbackTriggered, "dismissal callback was triggered");
+    },
+  },
+  { // Test #24  - test security delay - after delay
+    run: function () {
+      // Set the security delay to 10ms
+      PopupNotifications.buttonDelay = 10;
+
+      this.notifyObj = new basicNotification();
+      showNotification(this.notifyObj);
+    },
+    onShown: function (popup) {
+      checkPopup(popup, this.notifyObj);
+
+      // Wait until after the delay to trigger the main action
+      setTimeout(function delayedDismissal() {
+        triggerMainCommand(popup);
+      }, 500);
+
+    },
+    onHidden: function (popup) {
+      ok(this.notifyObj.mainActionClicked, "mainAction was clicked after the delay");
+      ok(!this.notifyObj.dismissalCallbackTriggered, "dismissal callback was not triggered");
+      PopupNotifications.buttonDelay = PREF_SECURITY_DELAY_INITIAL;
+    },
+  },
+  { // Test #25 - location change in background tab removes notification
+    run: function () {
+      let oldSelectedTab = gBrowser.selectedTab;
+      let newTab = gBrowser.addTab("about:blank");
+      gBrowser.selectedTab = newTab;
+
+      loadURI("http://example.com/", function() {
+        gBrowser.selectedTab = oldSelectedTab;
+        let browser = gBrowser.getBrowserForTab(newTab);
+
+        let notifyObj = new basicNotification();
+        notifyObj.browser = browser;
+        notifyObj.options.eventCallback = function (eventName) {
+          if (eventName == "removed") {
+            ok(true, "Notification removed in background tab after reloading");
+            executeSoon(function () {
+              gBrowser.removeTab(newTab);
+              goNext();
+            });
+          }
+        };
+        showNotification(notifyObj);
+        executeSoon(function () {
+          browser.reload();
+        });
+      });
+    }
+  },
+  { // Test #26 -  Popup notification anchor shouldn't disappear when a notification with the same ID is re-added in a background tab
+    run: function () {
+      loadURI("http://example.com/", function () {
+        let originalTab = gBrowser.selectedTab;
+        let bgTab = gBrowser.addTab("about:blank");
+        gBrowser.selectedTab = bgTab;
+        loadURI("http://example.com/", function () {
+          let anchor = document.createElement("box");
+          anchor.id = "test26-anchor";
+          anchor.className = "notification-anchor-icon";
+          PopupNotifications.iconBox.appendChild(anchor);
+
+          gBrowser.selectedTab = originalTab;
+
+          let fgNotifyObj = new basicNotification();
+          fgNotifyObj.anchorID = anchor.id;
+          fgNotifyObj.options.dismissed = true;
+          let fgNotification = showNotification(fgNotifyObj);
+
+          let bgNotifyObj = new basicNotification();
+          bgNotifyObj.anchorID = anchor.id;
+          bgNotifyObj.browser = gBrowser.getBrowserForTab(bgTab);
+          // show the notification in the background tab ...
+          let bgNotification = showNotification(bgNotifyObj);
+          // ... and re-show it
+          bgNotification = showNotification(bgNotifyObj);
+
+          ok(fgNotification.id, "notification has id");
+          is(fgNotification.id, bgNotification.id, "notification ids are the same");
+          is(anchor.getAttribute("showing"), "true", "anchor still showing");
+
+          fgNotification.remove();
+          gBrowser.removeTab(bgTab);
+          goNext();
+        });
+      });
+    }
   }
 ];
 
@@ -707,13 +822,12 @@ function checkPopup(popup, notificationObj) {
     is(notification.getAttribute("buttonlabel"), notificationObj.mainAction.label, "main action label matches");
     is(notification.getAttribute("buttonaccesskey"), notificationObj.mainAction.accessKey, "main action accesskey matches");
   }
-  let actualSecondaryActions = notification.childNodes;
+  let actualSecondaryActions = Array.filter(notification.childNodes,
+                                            function (child) child.nodeName == "menuitem");
   let secondaryActions = notificationObj.secondaryActions || [];
   let actualSecondaryActionsCount = actualSecondaryActions.length;
   if (secondaryActions.length) {
-    let lastChild = actualSecondaryActions.item(actualSecondaryActions.length - 1);
-    is(lastChild.tagName, "menuseparator", "menuseparator exists");
-    actualSecondaryActionsCount--;
+    is(notification.lastChild.tagName, "menuseparator", "menuseparator exists");
   }
   is(actualSecondaryActionsCount, secondaryActions.length, actualSecondaryActions.length + " secondary actions");
   secondaryActions.forEach(function (a, i) {

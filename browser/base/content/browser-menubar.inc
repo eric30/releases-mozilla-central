@@ -22,13 +22,11 @@
                           accesskey="&newNavigatorCmd.accesskey;"
                           key="key_newNavigator"
                           command="cmd_newNavigator"/>
-#ifdef MOZ_PER_WINDOW_PRIVATE_BROWSING
                 <menuitem id="menu_newPrivateWindow"
                           label="&newPrivateWindow.label;"
                           accesskey="&newPrivateWindow.accesskey;"
                           command="Tools:PrivateBrowsing"
                           key="key_privatebrowsing"/>
-#endif
                 <menuitem id="menu_openLocation"
                           class="show-only-for-keyboard"
                           label="&openLocationCmd.label;"
@@ -180,7 +178,8 @@
 
             <menu id="view-menu" label="&viewMenu.label;"
                   accesskey="&viewMenu.accesskey;">
-              <menupopup id="menu_viewPopup">
+              <menupopup id="menu_viewPopup"
+                         onpopupshowing="updateCharacterEncodingMenuState();">
                 <menu id="viewToolbarsMenu"
                       label="&viewToolbarsMenu.label;"
                       accesskey="&viewToolbarsMenu.accesskey;">
@@ -367,7 +366,11 @@
                           key="showAllHistoryKb"
 #endif
                           command="Browser:ShowAllHistory"/>
-                <menuseparator id="showAllHistorySeparator"/>
+                <menuitem id="sanitizeItem"
+                          label="&clearRecentHistory.label;"
+                          key="key_sanitize"
+                          command="Tools:Sanitize"/>
+                <menuseparator id="sanitizeSeparator"/>
 #ifdef MOZ_SERVICES_SYNC
                 <menuitem id="sync-tabs-menuitem"
                           class="syncTabsMenuItem"
@@ -376,10 +379,8 @@
                           disabled="true"/>
 #endif
                 <menuitem id="historyRestoreLastSession"
-                          class="restoreLastSession"
                           label="&historyRestoreLastSession.label;"
-                          oncommand="restoreLastSession();"
-                          disabled="true"/>
+                          command="Browser:RestoreLastSession"/>
                 <menu id="historyUndoMenu"
                       class="recentlyClosedTabsMenu"
                       label="&historyUndoMenu.label;"
@@ -542,8 +543,10 @@
                             command="Social:FocusChat"
                             class="show-only-for-keyboard"/>
                   <menuseparator class="social-statusarea-separator"/>
+                  <menuseparator class="social-provider-menu" hidden="true"/>
                   <menuitem class="social-toggle-menuitem" command="Social:Toggle"/>
-                  <menuitem class="social-remove-menuitem" command="Social:Remove"/>
+                  <menuitem class="social-addons-menuitem" command="Social:Addons"
+                            label="&social.addons.label;"/>
                 </menupopup>
               </menu>
 #ifdef MOZ_SERVICES_SYNC
@@ -566,7 +569,7 @@
                 <menupopup id="menuWebDeveloperPopup">
                   <menuitem id="menu_devToolbox"
                             observes="devtoolsMenuBroadcaster_DevToolbox"
-                            accesskey="&devToolbox.accesskey;"/>
+                            accesskey="&devToolboxMenuItem.accesskey;"/>
                   <menuseparator id="menu_devtools_separator"/>
                   <menuitem id="menu_devToolbar"
                             observes="devtoolsMenuBroadcaster_DevToolbar"
@@ -585,7 +588,6 @@
                   <menuitem id="javascriptConsole"
                             observes="devtoolsMenuBroadcaster_ErrorConsole"
                             accesskey="&errorConsoleCmd.accesskey;"/>
-                  <menuseparator id="menu_devToolsConnectSeparator"/>
                   <menuitem id="menu_devtools_connect"
                             observes="devtoolsMenuBroadcaster_connect"/>
                   <menuseparator id="devToolsEndSeparator"/>
@@ -601,23 +603,6 @@
                         key="key_viewInfo"
 #endif
                         command="View:PageInfo"/>
-              <menuseparator id="sanitizeSeparator"/>
-#ifndef MOZ_PER_WINDOW_PRIVATE_BROWSING
-              <menuitem id="privateBrowsingItem"
-                        label="&privateBrowsingCmd.start.label;"
-                        accesskey="&privateBrowsingCmd.start.accesskey;"
-                        startlabel="&privateBrowsingCmd.start.label;"
-                        startaccesskey="&privateBrowsingCmd.start.accesskey;"
-                        stoplabel="&privateBrowsingCmd.stop.label;"
-                        stopaccesskey="&privateBrowsingCmd.stop.accesskey;"
-                        key="key_privatebrowsing"
-                        command="Tools:PrivateBrowsing"/>
-#endif
-              <menuitem id="sanitizeItem"
-                        accesskey="&clearRecentHistory.accesskey;"
-                        label="&clearRecentHistory.label;"
-                        key="key_sanitize"
-                        command="Tools:Sanitize"/>
 #ifndef XP_UNIX
               <menuseparator id="prefSep"/>
               <menuitem id="menu_preferences"

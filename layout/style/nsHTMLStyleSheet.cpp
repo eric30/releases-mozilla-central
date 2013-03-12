@@ -18,19 +18,13 @@
  */
 
 #include "nsHTMLStyleSheet.h"
-#include "nsINameSpaceManager.h"
-#include "nsIAtom.h"
-#include "nsIURL.h"
 #include "nsMappedAttributes.h"
-#include "nsILink.h"
-#include "nsStyleContext.h"
 #include "nsGkAtoms.h"
 #include "nsPresContext.h"
 #include "nsEventStates.h"
 #include "nsIDocument.h"
 #include "nsIPresShell.h"
 #include "nsStyleConsts.h"
-#include "nsCSSAnonBoxes.h"
 #include "nsRuleWalker.h"
 #include "nsRuleData.h"
 #include "nsError.h"
@@ -464,7 +458,7 @@ nsHTMLStyleSheet::UniqueMappedAttributes(nsMappedAttributes* aMapped)
 void
 nsHTMLStyleSheet::DropMappedAttributes(nsMappedAttributes* aMapped)
 {
-  NS_ENSURE_TRUE(aMapped, /**/);
+  NS_ENSURE_TRUE_VOID(aMapped);
 
   NS_ASSERTION(mMappedAttrTable.ops, "table uninitialized");
 #ifdef DEBUG

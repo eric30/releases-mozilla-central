@@ -28,14 +28,10 @@ public:
 
   NS_FORWARD_NSIDOMEVENTTARGET(nsDOMEventTargetHelper::)
 
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(BluetoothManager,
-                                           nsDOMEventTargetHelper)
-
   static already_AddRefed<BluetoothManager>
   Create(nsPIDOMWindow* aWindow);
   void Notify(const BluetoothSignal& aData);
   virtual void SetPropertyByValue(const BluetoothNamedValue& aValue);
-  nsresult FireEnabledDisabledEvent(bool aEnabled);
 private:
   BluetoothManager(nsPIDOMWindow* aWindow);
   ~BluetoothManager();

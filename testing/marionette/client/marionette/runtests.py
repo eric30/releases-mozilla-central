@@ -13,10 +13,11 @@ import socket
 import sys
 import time
 import platform
+import moznetwork
 import xml.dom.minidom as dom
 
 from manifestparser import TestManifest
-from mozhttpd import iface, MozHttpd
+from mozhttpd import MozHttpd
 
 from marionette import Marionette
 from marionette_test import MarionetteJSTestCase, MarionetteTestCase
@@ -185,7 +186,7 @@ class MarionetteTestRunner(object):
                  es_server=None, rest_server=None, logger=None,
                  testgroup="marionette", noWindow=False, logcat_dir=None,
                  xml_output=None, repeat=0, perf=False, perfserv=None,
-                 gecko_path=None, testvars=None, tree=None, load_early=False):
+                 gecko_path=None, testvars=None, tree=None, device=None):
         self.address = address
         self.emulator = emulator
         self.emulatorBinary = emulatorBinary
@@ -211,11 +212,11 @@ class MarionetteTestRunner(object):
         self.perf = perf
         self.perfserv = perfserv
         self.gecko_path = gecko_path
-        self.testvars = None
+        self.testvars = {}
         self.tree = tree
-        self.load_early = load_early
+        self.device = device
 
-        if testvars is not None:
+        if testvars:
             if not os.path.exists(testvars):
                 raise Exception('--testvars file does not exist')
 
@@ -239,6 +240,7 @@ class MarionetteTestRunner(object):
                 os.mkdir(self.logcat_dir)
 
         # for XML output
+        self.testvars['xml_output'] = self.xml_output
         self.results = []
 
     def reset_test_stats(self):
@@ -249,7 +251,7 @@ class MarionetteTestRunner(object):
         self.perfrequest = None
 
     def start_httpd(self):
-        host = iface.get_lan_ip()
+        host = moznetwork.get_ip()
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.bind(("",0))
         port = s.getsockname()[1]
@@ -296,8 +298,7 @@ class MarionetteTestRunner(object):
                                          baseurl=self.baseurl,
                                          noWindow=self.noWindow,
                                          logcat_dir=self.logcat_dir,
-                                         gecko_path=self.gecko_path,
-                                         load_early=self.load_early)
+                                         gecko_path=self.gecko_path)
         else:
             raise Exception("must specify binary, address or emulator")
 
@@ -365,6 +366,9 @@ class MarionetteTestRunner(object):
                 print e
 
         if self.xml_output:
+            xml_dir = os.path.dirname(os.path.abspath(self.xml_output))
+            if not os.path.exists(xml_dir):
+                os.makedirs(xml_dir)
             with open(self.xml_output, 'w') as f:
                 f.write(self.generate_xml(self.results))
 
@@ -490,6 +494,7 @@ class MarionetteTestRunner(object):
             testcase = doc.createElement('testcase')
             testcase.setAttribute('classname', cls_name)
             testcase.setAttribute('name', unicode(test).split()[0])
+            testcase.setAttribute('time', str(test.duration))
             testsuite.appendChild(testcase)
 
             if result in ['failure', 'error', 'skipped']:
@@ -502,8 +507,7 @@ class MarionetteTestRunner(object):
 
         testsuite = doc.createElement('testsuite')
         testsuite.setAttribute('name', 'Marionette')
-        # convert elapsedtime to integer milliseconds
-        testsuite.setAttribute('time', str(int(self.elapsedtime.total_seconds() * 1000)))
+        testsuite.setAttribute('time', str(self.elapsedtime.total_seconds()))
         testsuite.setAttribute('tests', str(sum([results.testsRun for
                                                  results in results_list])))
 
@@ -580,7 +584,7 @@ def parse_options():
                       help = "Use a specific image file instead of a fresh one")
     parser.add_option('--emulator-res',
                       action = 'store', dest = 'emulator_res',
-                      default = '480x800', type= 'str',
+                      default = None, type= 'str',
                       help = 'Set a custom resolution for the emulator. '
                       'Example: "480x800"')
     parser.add_option("--no-window",
@@ -592,6 +596,8 @@ def parse_options():
                       help='directory to store logcat dump files')
     parser.add_option('--address', dest='address', action='store',
                       help='host:port of running Gecko instance to connect to')
+    parser.add_option('--device', dest='device', action='store',
+                      help='serial ID of a device to use for adb / fastboot')
     parser.add_option('--type', dest='type', action='store',
                       default='browser+b2g',
                       help = "The type of test to run, can be a combination "
@@ -630,11 +636,6 @@ def parse_options():
     parser.add_option('--tree', dest='tree', action='store',
                       default='b2g',
                       help='the tree that the revsion parameter refers to')
-    parser.add_option('--load-early', dest='load_early', action='store_true',
-                      default=False,
-                      help='on an emulator, causes Marionette to load earlier '
-                      'in the startup process than it otherwise would; needed '
-                      'for testing WebAPIs')
 
     options, tests = parser.parse_args()
 
@@ -647,11 +648,6 @@ def parse_options():
         print "must specify --binary, --emulator or --address"
         parser.exit()
 
-    if options.load_early and not options.emulator:
-        parser.print_usage()
-        print "must specify --load-early on when using --emulator"
-        parser.exit()
-
     # default to storing logcat output for emulator runs
     if options.emulator and not options.logcat_dir:
         options.logcat_dir = 'logcat'
@@ -661,11 +657,12 @@ def parse_options():
 
     # check for valid resolution string, strip whitespaces
     try:
-        dims = options.emulator_res.split('x')
-        assert len(dims) == 2
-        width = str(int(dims[0]))
-        height = str(int(dims[1]))
-        options.emulator_res = 'x'.join([width, height])
+        if options.emulator_res:
+            dims = options.emulator_res.split('x')
+            assert len(dims) == 2
+            width = str(int(dims[0]))
+            height = str(int(dims[1]))
+            options.emulator_res = 'x'.join([width, height])
     except:
         raise ValueError('Invalid emulator resolution format. '
                          'Should be like "480x800".')
@@ -693,7 +690,7 @@ def startTestRunner(runner_class, options, tests):
                           perfserv=options.perfserv,
                           gecko_path=options.gecko_path,
                           testvars=options.testvars,
-                          load_early=options.load_early)
+                          device=options.device)
     runner.run_tests(tests, testtype=options.type)
     return runner
 

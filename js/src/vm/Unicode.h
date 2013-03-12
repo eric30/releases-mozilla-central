@@ -60,9 +60,6 @@ namespace unicode {
  *
  * NO_DELTA
  *   See comment in CharacterInfo
- *
- * ENCLOSING_MARK / COMBINING_SPACING_MARK
- *   Something for E4X....
  */
 
 struct CharFlag {
@@ -70,9 +67,7 @@ struct CharFlag {
         SPACE  = 1 << 0,
         LETTER = 1 << 1,
         IDENTIFIER_PART = 1 << 2,
-        NO_DELTA = 1 << 3,
-        ENCLOSING_MARK = 1 << 4,
-        COMBINING_SPACING_MARK = 1 << 5
+        NO_DELTA = 1 << 3
     };
 };
 
@@ -116,14 +111,6 @@ class CharacterInfo {
     inline bool isIdentifierPart() const {
         return flags & (CharFlag::IDENTIFIER_PART | CharFlag::LETTER);
     }
-
-    inline bool isEnclosingMark() const {
-        return flags & CharFlag::ENCLOSING_MARK;
-    }
-
-    inline bool isCombiningSpacingMark() const {
-        return flags & CharFlag::COMBINING_SPACING_MARK;
-    }
 };
 
 extern const uint8_t index1[];
@@ -133,8 +120,9 @@ extern const CharacterInfo js_charinfo[];
 inline const CharacterInfo&
 CharInfo(jschar code)
 {
-    size_t index = index1[code >> 6];
-    index = index2[(index << 6) + (code & 0x3f)];
+    const size_t shift = 5;
+    size_t index = index1[code >> shift];
+    index = index2[(index << shift) + (code & ((1 << shift) - 1))];
 
     return js_charinfo[index];
 }
@@ -236,51 +224,6 @@ ToLowerCase(jschar ch)
 
     return uint16_t(ch) + info.lowerCase;
 }
-
-/* XML support functions */
-
-inline bool
-IsXMLSpace(jschar ch)
-{
-    return ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n';
-}
-
-inline bool
-IsXMLNamespaceStart(jschar ch)
-{
-    if (ch == '_')
-        return true;
-
-    return CharInfo(ch).isCombiningSpacingMark() || IsIdentifierStart(ch);
-}
-
-inline bool
-IsXMLNamespacePart(jschar ch)
-{
-    if (ch == '.' || ch == '-' || ch == '_')
-        return true;
-
-    return CharInfo(ch).isEnclosingMark() || IsIdentifierPart(ch);
-}
-
-inline bool
-IsXMLNameStart(jschar ch)
-{
-    if (ch == '_' || ch == ':')
-        return true;
-
-    return CharInfo(ch).isCombiningSpacingMark() || IsIdentifierStart(ch);
-}
-
-inline bool
-IsXMLNamePart(jschar ch)
-{
-    if (ch == '.' || ch == '-' || ch == '_' || ch == ':')
-        return true;
-
-    return CharInfo(ch).isEnclosingMark() || IsIdentifierPart(ch);
-}
-
 
 } /* namespace unicode */
 } /* namespace js */

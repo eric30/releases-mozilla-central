@@ -74,11 +74,11 @@ ArchiveRequest::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
 }
 
 NS_IMETHODIMP
-ArchiveRequest::GetReader(nsIDOMArchiveReader** aArchiveReader)
+ArchiveRequest::GetReader(nsISupports** aArchiveReader)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
-  nsCOMPtr<nsIDOMArchiveReader> archiveReader(mArchiveReader);
+  nsCOMPtr<nsISupports> archiveReader(mArchiveReader);
   archiveReader.forget(aArchiveReader);
   return NS_OK;
 }
@@ -129,7 +129,7 @@ ArchiveRequest::ReaderReady(nsTArray<nsCOMPtr<nsIDOMFile> >& aFileList,
   nsIScriptContext* sc = GetContextForEventHandlers(&rv);
   NS_ENSURE_STATE(sc);
 
-  JSContext* cx = sc->GetNativeContext();
+  AutoPushJSContext cx(sc->GetNativeContext());
   NS_ASSERTION(cx, "Failed to get a context!");
 
   JSObject* global = sc->GetNativeGlobal();

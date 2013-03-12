@@ -23,26 +23,20 @@
 #include "nsIUnicharStreamLoader.h"
 #include "nsSyncLoadService.h"
 #include "nsCOMPtr.h"
-#include "nsCOMArray.h"
 #include "nsString.h"
 #include "nsIContent.h"
 #include "nsIDocument.h"
 #include "nsIDOMNode.h"
 #include "nsIDOMDocument.h"
-#include "nsIDOMWindow.h"
-#include "nsHashtable.h"
 #include "nsIURI.h"
-#include "nsIServiceManager.h"
 #include "nsNetUtil.h"
 #include "nsContentUtils.h"
-#include "nsCRT.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsContentPolicyUtils.h"
 #include "nsIHttpChannel.h"
 #include "nsIHttpChannelInternal.h"
 #include "nsIScriptError.h"
 #include "nsMimeTypes.h"
-#include "nsIAtom.h"
 #include "nsCSSStyleSheet.h"
 #include "nsIStyleSheetLinkingElement.h"
 #include "nsICSSLoaderObserver.h"
@@ -50,7 +44,6 @@
 #include "mozilla/css/ImportRule.h"
 #include "nsThreadUtils.h"
 #include "nsGkAtoms.h"
-#include "nsDocShellCID.h"
 #include "nsIThreadInternal.h"
 #include "nsCrossSiteListenerProxy.h"
 
@@ -60,7 +53,6 @@
 
 #include "nsIMediaList.h"
 #include "nsIDOMStyleSheet.h"
-#include "nsIDOMCSSStyleSheet.h"
 #include "nsError.h"
 
 #include "nsIChannelPolicy.h"
@@ -69,6 +61,8 @@
 
 #include "mozilla/dom/EncodingUtils.h"
 using mozilla::dom::EncodingUtils;
+
+using namespace mozilla::dom;
 
 /**
  * OVERALL ARCHITECTURE
@@ -1136,7 +1130,7 @@ Loader::CreateSheet(nsIURI* aURI,
       // Then alternate sheets
       if (!sheet) {
         aSheetState = eSheetPending;
-        SheetLoadData* loadData = nullptr;
+        loadData = nullptr;
         mPendingDatas.Get(&key, &loadData);
         if (loadData) {
           sheet = loadData->mSheet;
@@ -1206,6 +1200,7 @@ Loader::PrepareSheet(nsCSSStyleSheet* aSheet,
                      const nsSubstring& aTitle,
                      const nsSubstring& aMediaString,
                      nsMediaList* aMediaList,
+                     Element* aScopeElement,
                      bool isAlternate)
 {
   NS_PRECONDITION(aSheet, "Must have a sheet!");
@@ -1232,6 +1227,7 @@ Loader::PrepareSheet(nsCSSStyleSheet* aSheet,
 
   aSheet->SetTitle(aTitle);
   aSheet->SetEnabled(! isAlternate);
+  aSheet->SetScopeElement(aScopeElement);
   return NS_OK;
 }
 
@@ -1794,6 +1790,7 @@ Loader::LoadInlineStyle(nsIContent* aElement,
                         uint32_t aLineNumber,
                         const nsAString& aTitle,
                         const nsAString& aMedia,
+                        Element* aScopeElement,
                         nsICSSLoaderObserver* aObserver,
                         bool* aCompleted,
                         bool* aIsAlternate)
@@ -1826,7 +1823,8 @@ Loader::LoadInlineStyle(nsIContent* aElement,
 
   LOG(("  Sheet is alternate: %d", *aIsAlternate));
 
-  rv = PrepareSheet(sheet, aTitle, aMedia, nullptr, *aIsAlternate);
+  rv = PrepareSheet(sheet, aTitle, aMedia, nullptr, aScopeElement,
+                    *aIsAlternate);
   NS_ENSURE_SUCCESS(rv, rv);
 
   rv = InsertSheetInDoc(sheet, aElement, mDocument);
@@ -1899,7 +1897,7 @@ Loader::LoadStyleLink(nsIContent* aElement,
 
   LOG(("  Sheet is alternate: %d", *aIsAlternate));
 
-  rv = PrepareSheet(sheet, aTitle, aMedia, nullptr, *aIsAlternate);
+  rv = PrepareSheet(sheet, aTitle, aMedia, nullptr, nullptr, *aIsAlternate);
   NS_ENSURE_SUCCESS(rv, rv);
 
   rv = InsertSheetInDoc(sheet, aElement, mDocument);
@@ -2057,7 +2055,7 @@ Loader::LoadChildSheet(nsCSSStyleSheet* aParentSheet,
                    false, empty, state, &isAlternate, getter_AddRefs(sheet));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  rv = PrepareSheet(sheet, empty, empty, aMedia, isAlternate);
+  rv = PrepareSheet(sheet, empty, empty, aMedia, nullptr, isAlternate);
   NS_ENSURE_SUCCESS(rv, rv);
 
   rv = InsertChildSheet(sheet, aParentSheet, aParentRule);
@@ -2168,7 +2166,7 @@ Loader::InternalLoadNonDocumentSheet(nsIURI* aURL,
                    empty, state, &isAlternate, getter_AddRefs(sheet));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  rv = PrepareSheet(sheet, empty, empty, nullptr, isAlternate);
+  rv = PrepareSheet(sheet, empty, empty, nullptr, nullptr, isAlternate);
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (state == eSheetComplete) {

@@ -16,6 +16,7 @@
 #include "nsCOMPtr.h"
 #include "prlog.h"
 #include "sampler.h"
+#include <algorithm>
 
 static NS_DEFINE_CID(kStreamTransportServiceCID, NS_STREAMTRANSPORTSERVICE_CID);
 
@@ -105,7 +106,7 @@ nsInputStreamPump::PeekStream(PeekSegmentFun callback, void* closure)
   nsresult rv = mAsyncStream->Available(&dummy64);
   if (NS_FAILED(rv))
     return rv;
-  uint32_t dummy = (uint32_t)NS_MIN(dummy64, (uint64_t)UINT32_MAX);
+  uint32_t dummy = (uint32_t)std::min(dummy64, (uint64_t)UINT32_MAX);
 
   PeekData data(callback, closure);
   return mAsyncStream->ReadSegments(CallPeekFunc,
@@ -525,6 +526,8 @@ nsInputStreamPump::OnStateTransfer()
             rv = mAsyncStream->Available(&avail);
             if (NS_SUCCEEDED(rv))
                 return STATE_TRANSFER;
+            if (rv != NS_BASE_STREAM_CLOSED)
+                mStatus = rv;
         }
     }
     return STATE_STOP;

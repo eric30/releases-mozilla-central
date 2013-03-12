@@ -5,7 +5,7 @@
 /*
  * Private header defining OCSP types.
  *
- * $Id: ocspti.h,v 1.8 2012/04/25 14:49:27 gerv%gerv.net Exp $
+ * $Id: ocspti.h,v 1.11 2013/01/23 23:05:51 kaie%kuix.de Exp $
  */
 
 #ifndef _OCSPTI_H_
@@ -189,6 +189,7 @@ struct CERTOCSPCertIDStr {
  * }
  */
 typedef enum {
+    ocspResponse_min = 0,
     ocspResponse_successful = 0,
     ocspResponse_malformedRequest = 1,
     ocspResponse_internalError = 2,
@@ -196,7 +197,10 @@ typedef enum {
     ocspResponse_unused = 4,
     ocspResponse_sigRequired = 5,
     ocspResponse_unauthorized = 6,
-    ocspResponse_other			/* unknown/unrecognized value */
+    ocspResponse_max = 6 /* Please update max when adding values.
+                          * Remember to also update arrays, e.g.
+                          * "responseStatusNames" in ocspclnt.c
+                          * and potentially other places. */
 } ocspResponseStatus;
 
 /*
@@ -266,28 +270,8 @@ struct ocspResponseDataStr {
     CERTCertExtension **responseExtensions;
 };
 
-/*
- * A ResponderID identifies the responder -- or more correctly, the
- * signer of the response.  The ASN.1 definition of a ResponderID is:
- *
- * ResponderID	::=	CHOICE {
- *	byName			[1] EXPLICIT Name,
- *	byKey			[2] EXPLICIT KeyHash }
- *
- * Because it is CHOICE, the type of identification used and the
- * identification itself are actually encoded together.  To represent
- * this same information internally, we explicitly define a type and
- * save it, along with the value, into a data structure.
- */
-
-typedef enum {
-    ocspResponderID_byName,
-    ocspResponderID_byKey,
-    ocspResponderID_other		/* unknown kind of responderID */
-} ocspResponderIDType;
-
 struct ocspResponderIDStr {
-    ocspResponderIDType responderIDType;/* local; not part of encoding */
+    CERTOCSPResponderIDType responderIDType;/* local; not part of encoding */
     union {
 	CERTName name;			/* when ocspResponderID_byName */
 	SECItem keyHash;		/* when ocspResponderID_byKey */

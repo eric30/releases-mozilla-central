@@ -13,6 +13,7 @@
 %}
 
 interface xpcIJSWeakReference;
+interface nsIClassInfo;
 
 /**
 * interface of Components.interfacesByID
@@ -118,7 +119,7 @@ interface ScheduledGCCallback : nsISupports
 /**
 * interface of Components.utils
 */
-[scriptable, uuid(b3290d8e-b010-4693-a261-10bbf006b8f0)]
+[scriptable, uuid(5b62c98f-5ff8-41f9-bcb8-a24d1b4255d4)]
 interface nsIXPCComponents_Utils : nsISupports
 {
 
@@ -303,6 +304,14 @@ interface nsIXPCComponents_Utils : nsISupports
     /*
      * To be called from JS only.
      *
+     * Returns a date given timestamp |msec| created in |vobj|'s compartment.
+     */
+    [implicit_jscontext]
+    jsval createDateIn(in jsval vobj, in long long msec);
+
+    /*
+     * To be called from JS only.
+     *
      * Ensures that all functions come from vobj's scope (and aren't cross
      * compartment wrappers).
      */
@@ -377,9 +386,6 @@ interface nsIXPCComponents_Utils : nsISupports
     attribute boolean atline;
 
     [implicit_jscontext]
-    attribute boolean xml;
-
-    [implicit_jscontext]
     attribute boolean methodjit;
 
     [implicit_jscontext]
@@ -396,6 +402,17 @@ interface nsIXPCComponents_Utils : nsISupports
 
     [implicit_jscontext]
     void nukeSandbox(in jsval obj);
+
+    /**
+     * Check whether the given object is an XrayWrapper.
+     */
+    bool isXrayWrapper(in jsval obj);
+
+    /**
+     * Get a DOM classinfo for the given classname.  Only some class
+     * names are supported.
+     */
+    nsIClassInfo getDOMClassInfo(in AString aClassName);
 };
 
 /**

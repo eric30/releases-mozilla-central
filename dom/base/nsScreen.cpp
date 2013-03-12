@@ -24,13 +24,12 @@ namespace {
 bool
 IsChromeType(nsIDocShell *aDocShell)
 {
-  nsCOMPtr<nsIDocShellTreeItem> ds = do_QueryInterface(aDocShell);
-  if (!ds) {
+  if (!aDocShell) {
     return false;
   }
 
   int32_t itemType;
-  ds->GetItemType(&itemType);
+  aDocShell->GetItemType(&itemType);
   return itemType == nsIDocShellTreeItem::typeChrome;
 }
 
@@ -89,15 +88,9 @@ nsScreen::~nsScreen()
 }
 
 
-DOMCI_DATA(Screen, nsScreen)
-
-NS_IMPL_CYCLE_COLLECTION_INHERITED_0(nsScreen, nsDOMEventTargetHelper)
-
 // QueryInterface implementation for nsScreen
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(nsScreen)
+NS_INTERFACE_MAP_BEGIN(nsScreen)
   NS_INTERFACE_MAP_ENTRY(nsIDOMScreen)
-  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDOMScreen)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(Screen)
 NS_INTERFACE_MAP_END_INHERITING(nsDOMEventTargetHelper)
 
 NS_IMPL_ADDREF_INHERITED(nsScreen, nsDOMEventTargetHelper)
@@ -290,7 +283,7 @@ nsScreen::MozLockOrientation(const JS::Value& aOrientation, JSContext* aCx,
         return NS_ERROR_FAILURE;
       }
 
-      js::RootedString jsString(aCx, JS_ValueToString(aCx, temp));
+      JS::RootedString jsString(aCx, JS_ValueToString(aCx, temp));
       if (!jsString) {
         return NS_ERROR_FAILURE;
       }
@@ -308,7 +301,7 @@ nsScreen::MozLockOrientation(const JS::Value& aOrientation, JSContext* aCx,
     return rv.ErrorCode();
   }
 
-  js::RootedString jsString(aCx, JS_ValueToString(aCx, aOrientation));
+  JS::RootedString jsString(aCx, JS_ValueToString(aCx, aOrientation));
   if (!jsString) {
     return NS_ERROR_FAILURE;
   }

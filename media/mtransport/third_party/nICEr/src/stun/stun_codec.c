@@ -90,7 +90,7 @@ nr_stun_encode_htons(UINT2 data, int buflen, UCHAR *buf, int *offset)
    UINT2 d = htons(data);
 
    if (*offset + sizeof(d) >= buflen) {
-      r_log(NR_LOG_STUN, LOG_WARNING, "Attempted buffer overrun: %d + %d >= %d", *offset, sizeof(d), buflen);
+      r_log(NR_LOG_STUN, LOG_WARNING, "Attempted buffer overrun: %d + %zd >= %d", *offset, sizeof(d), buflen);
       return R_BAD_DATA;
    }
 
@@ -106,7 +106,7 @@ nr_stun_encode_htonl(UINT4 data, int buflen, UCHAR *buf, int *offset)
    UINT4 d = htonl(data);
 
    if (*offset + sizeof(d) > buflen) {
-      r_log(NR_LOG_STUN, LOG_WARNING, "Attempted buffer overrun: %d + %d > %d", *offset, sizeof(d), buflen);
+      r_log(NR_LOG_STUN, LOG_WARNING, "Attempted buffer overrun: %d + %zd > %d", *offset, sizeof(d), buflen);
       return R_BAD_DATA;
    }
 
@@ -122,7 +122,7 @@ nr_stun_encode_htonll(UINT8 data, int buflen, UCHAR *buf, int *offset)
    UINT8 d = htonll(data);
 
    if (*offset + sizeof(d) > buflen) {
-      r_log(NR_LOG_STUN, LOG_WARNING, "Attempted buffer overrun: %d + %d > %d", *offset, sizeof(d), buflen);
+      r_log(NR_LOG_STUN, LOG_WARNING, "Attempted buffer overrun: %d + %zd > %d", *offset, sizeof(d), buflen);
       return R_BAD_DATA;
    }
 
@@ -153,7 +153,7 @@ nr_stun_decode_htons(UCHAR *buf, int buflen, int *offset, UINT2 *data)
    UINT2 d;
 
    if (*offset + sizeof(d) > buflen) {
-      r_log(NR_LOG_STUN, LOG_WARNING, "Attempted buffer overrun: %d + %d > %d", *offset, sizeof(d), buflen);
+      r_log(NR_LOG_STUN, LOG_WARNING, "Attempted buffer overrun: %d + %zd > %d", *offset, sizeof(d), buflen);
       return R_BAD_DATA;
    }
 
@@ -170,7 +170,7 @@ nr_stun_decode_htonl(UCHAR *buf, int buflen, int *offset, UINT4 *data)
    UINT4 d;
 
    if (*offset + sizeof(d) > buflen) {
-      r_log(NR_LOG_STUN, LOG_WARNING, "Attempted buffer overrun: %d + %d > %d", *offset, sizeof(d), buflen);
+      r_log(NR_LOG_STUN, LOG_WARNING, "Attempted buffer overrun: %d + %zd > %d", *offset, sizeof(d), buflen);
       return R_BAD_DATA;
    }
 
@@ -187,7 +187,7 @@ nr_stun_decode_htonll(UCHAR *buf, int buflen, int *offset, UINT8 *data)
    UINT8 d;
 
    if (*offset + sizeof(d) > buflen) {
-      r_log(NR_LOG_STUN, LOG_WARNING, "Attempted buffer overrun: %d + %d > %d", *offset, sizeof(d), buflen);
+      r_log(NR_LOG_STUN, LOG_WARNING, "Attempted buffer overrun: %d + %zd > %d", *offset, sizeof(d), buflen);
       return R_BAD_DATA;
    }
 
@@ -229,7 +229,7 @@ nr_stun_attr_string_illegal(nr_stun_attr_info *attr_info, int len, void *data, i
             /* who knows what to do, just assume everything is working ok */
         }
         else if (nchars > max_chars) {
-            r_log(NR_LOG_STUN, LOG_WARNING, "%s is too large: %d characters", attr_info->name, nchars);
+            r_log(NR_LOG_STUN, LOG_WARNING, "%s is too large: %zd characters", attr_info->name, nchars);
             ABORT(R_FAILED);
         }
     }
@@ -397,7 +397,8 @@ nr_stun_attr_codec_addr_encode(nr_stun_attr_info *attr_info, void *data, int off
         break;
 
     case NR_IPV6:
-        UNIMPLEMENTED;
+        assert(0);
+        ABORT(R_INTERNAL);
         break;
     default:
         assert(0);
@@ -920,7 +921,7 @@ nr_stun_attr_codec_string_decode(nr_stun_attr_info *attr_info, int attrlen, UCHA
         /* stund 0.96 sends a final null in the Server attribute, so
          * only error if the null appears anywhere else in a string */
         if (strlen(result) != attrlen-1) {
-            r_log(NR_LOG_STUN, LOG_WARNING, "Error in string: %d/%d", strlen(result), attrlen);
+            r_log(NR_LOG_STUN, LOG_WARNING, "Error in string: %zd/%d", strlen(result), attrlen);
             ABORT(R_FAILED);
         }
     }
@@ -999,7 +1000,7 @@ nr_stun_attr_codec_unknown_attributes_decode(nr_stun_attr_info *attr_info, int a
     }
 
     unknown_attributes->num_attributes = attrlen / 2;
- 
+
     if (unknown_attributes->num_attributes > NR_STUN_MAX_UNKNOWN_ATTRIBUTES) {
         r_log(NR_LOG_STUN, LOG_WARNING, "Too many UNKNOWN-ATTRIBUTES: %d", unknown_attributes->num_attributes);
         ABORT(R_REJECTED);
@@ -1051,7 +1052,7 @@ nr_stun_attr_codec_xor_mapped_address_encode(nr_stun_attr_info *attr_info, void 
 
     nr_stun_xor_mapped_address(magic_cookie, &xor_mapped_address->unmasked, &xor_mapped_address->masked);
 
-    r_log(NR_LOG_STUN, LOG_DEBUG, "Masked XOR-MAPPED-ADDRESS = %s", &xor_mapped_address->masked.as_string);
+    r_log(NR_LOG_STUN, LOG_DEBUG, "Masked XOR-MAPPED-ADDRESS = %s", xor_mapped_address->masked.as_string);
 
     if (nr_stun_attr_codec_addr.encode(attr_info, &xor_mapped_address->masked, offset, buflen, buf, attrlen))
         return R_FAILED;
@@ -1200,6 +1201,8 @@ static void sanity_check_encoding_stuff(nr_stun_message *msg)
     nr_stun_message_attribute *attr = 0;
     int padding_bytes;
     int l;
+
+    r_log(NR_LOG_STUN, LOG_DEBUG, "Starting to sanity check encoding");
 
     l = 0;
     TAILQ_FOREACH(attr, &msg->attributes, entry) {
@@ -1362,6 +1365,8 @@ nr_stun_decode_message(nr_stun_message *msg, int (*get_password)(void *arg, nr_s
     offset = sizeof(msg->header);
 
     while (size > 0) {
+        r_log(NR_LOG_STUN, LOG_DEBUG, "size = %d", size);
+
         if (size < 4) {
            r_log(NR_LOG_STUN, LOG_WARNING, "Illegal message length: %d", size);
            ABORT(R_FAILED);
@@ -1430,10 +1435,14 @@ nr_stun_decode_message(nr_stun_message *msg, int (*get_password)(void *arg, nr_s
                 attr_info->codec->print(attr_info, "Parsed", &attr->u);
 
 #ifdef USE_STUN_PEDANTIC
+                r_log(NR_LOG_STUN, LOG_DEBUG, "Before pedantic attr_info checks");
                 if (attr_info->illegal) {
-                    if ((r=attr_info->illegal(attr_info, attr->length, &attr->u)))
+                    if ((r=attr_info->illegal(attr_info, attr->length, &attr->u))) {
+                        r_log(NR_LOG_STUN, LOG_DEBUG, "Failed pedantic attr_info checks");
                         ABORT(r);
+                    }
                 }
+                r_log(NR_LOG_STUN, LOG_DEBUG, "After pedantic attr_info checks");
 #endif /* USE_STUN_PEDANTIC */
             }
         }

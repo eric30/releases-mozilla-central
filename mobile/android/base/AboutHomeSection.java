@@ -13,7 +13,7 @@ import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-public class AboutHomeSection extends LinearLayout {
+public class AboutHomeSection extends GeckoLinearLayout {
     private static final String LOGTAG = "GeckoAboutHomeSection";
 
     private TextView mTitle;
@@ -77,6 +77,7 @@ public class AboutHomeSection extends LinearLayout {
 
     public void addItem(View item) {
         mItemsContainer.addView(item);
+        mItemsContainer.addView(new Divider(getContext(), null));
     }
 
     public void clear() {
@@ -97,5 +98,15 @@ public class AboutHomeSection extends LinearLayout {
 
     public void hideMoreText() {
         mMoreText.setVisibility(View.GONE);
+    }
+
+    private class Divider extends View {
+        public Divider(Context context, AttributeSet attrs) {
+            super(context, attrs);
+
+            setLayoutParams(new LinearLayout.LayoutParams(LinearLayout.LayoutParams.FILL_PARENT,
+                                                          (int) context.getResources().getDisplayMetrics().density));
+            setBackgroundColor(0x3460666E);
+        }
     }
 }

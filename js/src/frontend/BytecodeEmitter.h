@@ -18,6 +18,7 @@
 #include "jsprvtd.h"
 #include "jspubtd.h"
 
+#include "frontend/BytecodeCompiler.h"
 #include "frontend/Parser.h"
 #include "frontend/ParseMaps.h"
 #include "frontend/SharedContext.h"
@@ -58,6 +59,11 @@ class CGConstList {
 
 struct StmtInfoBCE;
 
+// Use zero inline elements because these go on the stack and affect how many
+// nested functions are possible.
+typedef Vector<jsbytecode, 0> BytecodeVector;
+typedef Vector<jssrcnote, 0> SrcNotesVector;
+
 struct BytecodeEmitter
 {
     typedef StmtInfoBCE StmtInfo;
@@ -68,22 +74,29 @@ struct BytecodeEmitter
 
     Rooted<JSScript*> script;       /* the JSScript we're ultimately producing */
 
-    struct {
-        jsbytecode  *base;          /* base of JS bytecode vector */
-        jsbytecode  *limit;         /* one byte beyond end of bytecode */
-        jsbytecode  *next;          /* pointer to next free bytecode */
-        jssrcnote   *notes;         /* source notes, see below */
-        unsigned    noteCount;      /* number of source notes so far */
-        unsigned    noteLimit;      /* limit number for source notes in notePool */
+    struct EmitSection {
+        BytecodeVector code;        /* bytecode */
+        SrcNotesVector notes;       /* source notes, see below */
         ptrdiff_t   lastNoteOffset; /* code offset for last source note */
         unsigned    currentLine;    /* line number for tree-based srcnote gen */
         unsigned    lastColumn;     /* zero-based column index on currentLine of
                                        last SRC_COLSPAN-annotated opcode */
-    } prolog, main, *current;
 
-    Parser          *const parser;  /* the parser */
+        EmitSection(JSContext *cx, unsigned lineno)
+          : code(cx), notes(cx), lastNoteOffset(0), currentLine(lineno), lastColumn(0)
+        {
+            // Start them off moderately large, to avoid repeated resizings
+            // early on.
+            code.reserve(1024);
+            notes.reserve(1024);
+        }
+    };
+    EmitSection prolog, main, *current;
 
-    StackFrame      *const callerFrame; /* scripted caller frame for eval and dbgapi */
+    /* the parser */
+    Parser<FullParseHandler> *const parser;
+
+    HandleScript    evalCaller;     /* scripted caller info for eval and dbgapi */
 
     StmtInfoBCE     *topStmt;       /* top of statement info stack */
     StmtInfoBCE     *topScopeStmt;  /* top lexical scope statement */
@@ -114,6 +127,9 @@ struct BytecodeEmitter
 
     bool            emittingForInit:1;  /* true while emitting init expr of for; exclude 'in' */
 
+    bool            emittingRunOnceLambda:1; /* true while emitting a lambda which is only
+                                                expected to run once. */
+
     const bool      hasGlobalScope:1;   /* frontend::CompileScript's scope chain is the
                                            global object */
 
@@ -122,17 +138,17 @@ struct BytecodeEmitter
                                            don't ever get emitted. See the comment for
                                            the field |selfHostingMode| in Parser.h for details. */
 
-    BytecodeEmitter(BytecodeEmitter *parent, Parser *parser, SharedContext *sc,
-                    HandleScript script, StackFrame *callerFrame, bool hasGlobalScope,
-                    unsigned lineno, bool selfHostingMode = false);
-    bool init();
-
     /*
      * Note that BytecodeEmitters are magic: they own the arena "top-of-stack"
      * space above their tempMark points. This means that you cannot alloc from
      * tempLifoAlloc and save the pointer beyond the next BytecodeEmitter
-     * destructor call.
+     * destruction.
      */
+    BytecodeEmitter(BytecodeEmitter *parent, Parser<FullParseHandler> *parser, SharedContext *sc,
+                    HandleScript script, HandleScript evalCaller, bool hasGlobalScope,
+                    unsigned lineno, bool selfHostingMode = false);
+    bool init();
+
     ~BytecodeEmitter();
 
     bool isAliasedName(ParseNode *pn);
@@ -153,6 +169,7 @@ struct BytecodeEmitter
         return true;
     }
 
+    bool isInLoop();
     bool checkSingletonContext();
 
     bool needsImplicitThis();
@@ -161,19 +178,14 @@ struct BytecodeEmitter
 
     TokenStream *tokenStream() { return &parser->tokenStream; }
 
-    jsbytecode *base() const { return current->base; }
-    jsbytecode *limit() const { return current->limit; }
-    jsbytecode *next() const { return current->next; }
-    jsbytecode *code(ptrdiff_t offset) const { return base() + offset; }
-    ptrdiff_t offset() const { return next() - base(); }
-    jsbytecode *prologBase() const { return prolog.base; }
-    ptrdiff_t prologOffset() const { return prolog.next - prolog.base; }
+    BytecodeVector &code() const { return current->code; }
+    jsbytecode *code(ptrdiff_t offset) const { return current->code.begin() + offset; }
+    ptrdiff_t offset() const { return current->code.end() - current->code.begin(); }
+    ptrdiff_t prologOffset() const { return prolog.code.end() - prolog.code.begin(); }
     void switchToMain() { current = &main; }
     void switchToProlog() { current = &prolog; }
 
-    jssrcnote *notes() const { return current->notes; }
-    unsigned noteCount() const { return current->noteCount; }
-    unsigned noteLimit() const { return current->noteLimit; }
+    SrcNotesVector &notes() const { return current->notes; }
     ptrdiff_t lastNoteOffset() const { return current->lastNoteOffset; }
     unsigned currentLine() const { return current->currentLine; }
     unsigned lastColumn() const { return current->lastColumn; }
@@ -242,78 +254,57 @@ EmitFunctionScript(JSContext *cx, BytecodeEmitter *bce, ParseNode *body);
  * NB: the js_SrcNoteSpec array in BytecodeEmitter.cpp is indexed by this
  * enum, so its initializers need to match the order here.
  *
- * Note on adding new source notes: every pair of bytecodes (A, B) where A and
- * B have disjoint sets of source notes that could apply to each bytecode may
- * reuse the same note type value for two notes (snA, snB) that have the same
- * arity in JSSrcNoteSpec. This is why SRC_IF and SRC_INITPROP have the same
- * value below.
- *
  * Don't forget to update XDR_BYTECODE_VERSION in vm/Xdr.h for all such
  * incompatible source note or other bytecode changes.
  */
 enum SrcNoteType {
     SRC_NULL        = 0,        /* terminates a note vector */
+
     SRC_IF          = 1,        /* JSOP_IFEQ bytecode is from an if-then */
-    SRC_BREAK       = 1,        /* JSOP_GOTO is a break */
-    SRC_INITPROP    = 1,        /* disjoint meaning applied to JSOP_INITELEM or
-                                   to an index label in a regular (structuring)
-                                   or a destructuring object initialiser */
-    SRC_GENEXP      = 1,        /* JSOP_LAMBDA from generator expression */
     SRC_IF_ELSE     = 2,        /* JSOP_IFEQ bytecode is from an if-then-else */
-    SRC_FOR_IN      = 2,        /* JSOP_GOTO to for-in loop condition from
-                                   before loop (same arity as SRC_IF_ELSE) */
-    SRC_FOR         = 3,        /* JSOP_NOP or JSOP_POP in for(;;) loop head */
-    SRC_WHILE       = 4,        /* JSOP_GOTO to for or while loop condition
+    SRC_COND        = 3,        /* JSOP_IFEQ is from conditional ?: operator */
+
+    SRC_FOR         = 4,        /* JSOP_NOP or JSOP_POP in for(;;) loop head */
+
+    SRC_WHILE       = 5,        /* JSOP_GOTO to for or while loop condition
                                    from before loop, else JSOP_NOP at top of
                                    do-while loop */
-    SRC_CONTINUE    = 5,        /* JSOP_GOTO is a continue, not a break;
-                                   JSOP_ENDINIT needs extra comma at end of
-                                   array literal: [1,2,,];
-                                   JSOP_DUP continuing destructuring pattern;
-                                   JSOP_POP at end of for-in */
-    SRC_DECL        = 6,        /* type of a declaration (var, const, let*) */
-    SRC_DESTRUCT    = 6,        /* JSOP_DUP starting a destructuring assignment
-                                   operation, with SRC_DECL_* offset operand */
-    SRC_PCDELTA     = 7,        /* distance forward from comma-operator to
+    SRC_FOR_IN      = 6,        /* JSOP_GOTO to for-in loop condition from
+                                   before loop */
+    SRC_CONTINUE    = 7,        /* JSOP_GOTO is a continue */
+    SRC_BREAK       = 8,        /* JSOP_GOTO is a break */
+    SRC_BREAK2LABEL = 9,        /* JSOP_GOTO for 'break label' */
+    SRC_SWITCHBREAK = 10,       /* JSOP_GOTO is a break in a switch */
+
+    SRC_TABLESWITCH = 11,       /* JSOP_TABLESWITCH, offset points to end of
+                                   switch */
+    SRC_CONDSWITCH  = 12,       /* JSOP_CONDSWITCH, 1st offset points to end of
+                                   switch, 2nd points to first JSOP_CASE */
+
+    SRC_PCDELTA     = 13,       /* distance forward from comma-operator to
                                    next POP, or from CONDSWITCH to first CASE
                                    opcode, etc. -- always a forward delta */
-    SRC_GROUPASSIGN = 7,        /* SRC_DESTRUCT variant for [a, b] = [c, d] */
-    SRC_DESTRUCTLET = 7,        /* JSOP_DUP starting a destructuring let
-                                   operation, with offset to JSOP_ENTERLET0 */
-    SRC_ASSIGNOP    = 8,        /* += or another assign-op follows */
-    SRC_COND        = 9,        /* JSOP_IFEQ is from conditional ?: operator */
-    SRC_BRACE       = 10,       /* mandatory brace, for scope or to avoid
-                                   dangling else */
-    SRC_HIDDEN      = 11,       /* opcode shouldn't be decompiled */
-    SRC_PCBASE      = 12,       /* distance back from annotated getprop or
-                                   setprop op to left-most obj.prop.subprop
-                                   bytecode -- always a backward delta */
-    SRC_LABEL       = 13,       /* JSOP_LABEL for label: with atomid immediate */
-    SRC_LABELBRACE  = 14,       /* JSOP_LABEL for label: {...} begin brace */
-    SRC_ENDBRACE    = 15,       /* JSOP_NOP for label: {...} end brace */
-    SRC_BREAK2LABEL = 16,       /* JSOP_GOTO for 'break label' with atomid */
-    SRC_CONT2LABEL  = 17,       /* JSOP_GOTO for 'continue label' with atomid */
-    SRC_SWITCH      = 18,       /* JSOP_*SWITCH with offset to end of switch,
-                                   2nd off to first JSOP_CASE if condswitch */
-    SRC_SWITCHBREAK = 18,       /* JSOP_GOTO is a break in a switch */
-    SRC_FUNCDEF     = 19,       /* JSOP_NOP for function f() with atomid */
-    SRC_CATCH       = 20,       /* catch block has guard */
-    SRC_COLSPAN     = 21,       /* number of columns this opcode spans */
-    SRC_NEWLINE     = 22,       /* bytecode follows a source newline */
-    SRC_SETLINE     = 23,       /* a file-absolute source line number note */
+
+    SRC_ASSIGNOP    = 14,       /* += or another assign-op follows */
+
+    SRC_HIDDEN      = 15,       /* opcode shouldn't be decompiled */
+
+    SRC_CATCH       = 16,       /* catch block has guard */
+
+    /* All notes below here are "gettable".  See SN_IS_GETTABLE below. */
+    SRC_LAST_GETTABLE = SRC_CATCH,
+
+    SRC_COLSPAN     = 17,       /* number of columns this opcode spans */
+    SRC_NEWLINE     = 18,       /* bytecode follows a source newline */
+    SRC_SETLINE     = 19,       /* a file-absolute source line number note */
+
+    SRC_UNUSED20    = 20,
+    SRC_UNUSED21    = 21,
+    SRC_UNUSED22    = 22,
+    SRC_UNUSED23    = 23,
+
     SRC_XDELTA      = 24        /* 24-31 are for extended delta notes */
 };
-
-/*
- * Constants for the SRC_DECL source note.
- *
- * NB: the var_prefix array in jsopcode.c depends on these dense indexes from
- * SRC_DECL_VAR through SRC_DECL_LET.
- */
-#define SRC_DECL_VAR            0
-#define SRC_DECL_CONST          1
-#define SRC_DECL_LET            2
-#define SRC_DECL_NONE           3
 
 #define SN_TYPE_BITS            5
 #define SN_DELTA_BITS           3
@@ -334,7 +325,7 @@ enum SrcNoteType {
                                                    ? SRC_XDELTA               \
                                                    : *(sn) >> SN_DELTA_BITS))
 #define SN_SET_TYPE(sn,type)    SN_MAKE_NOTE(sn, type, SN_DELTA(sn))
-#define SN_IS_GETTABLE(sn)      (SN_TYPE(sn) < SRC_COLSPAN)
+#define SN_IS_GETTABLE(sn)      (SN_TYPE(sn) <= SRC_LAST_GETTABLE)
 
 #define SN_DELTA(sn)            ((ptrdiff_t)(SN_IS_XDELTA(sn)                 \
                                              ? *(sn) & SN_XDELTA_MASK         \
@@ -395,10 +386,8 @@ int
 NewSrcNote3(JSContext *cx, BytecodeEmitter *bce, SrcNoteType type, ptrdiff_t offset1,
                ptrdiff_t offset2);
 
-/*
- * NB: this function can add at most one extra extended delta note.
- */
-jssrcnote *
+/* NB: this function can add at most one extra extended delta note. */
+bool
 AddToSrcNoteDelta(JSContext *cx, BytecodeEmitter *bce, jssrcnote *sn, ptrdiff_t delta);
 
 bool
@@ -418,14 +407,14 @@ inline ptrdiff_t
 BytecodeEmitter::countFinalSourceNotes()
 {
     ptrdiff_t diff = prologOffset() - prolog.lastNoteOffset;
-    ptrdiff_t cnt = prolog.noteCount + main.noteCount + 1;
-    if (prolog.noteCount && prolog.currentLine != firstLine) {
+    ptrdiff_t cnt = prolog.notes.length() + main.notes.length() + 1;
+    if (prolog.notes.length() && prolog.currentLine != firstLine) {
         if (diff > SN_DELTA_MASK)
             cnt += JS_HOWMANY(diff - SN_DELTA_MASK, SN_XDELTA_MASK);
         cnt += 2 + ((firstLine > SN_3BYTE_OFFSET_MASK) << 1);
     } else if (diff > 0) {
-        if (main.noteCount) {
-            jssrcnote *sn = main.notes;
+        if (main.notes.length()) {
+            jssrcnote *sn = main.notes.begin();
             diff -= SN_IS_XDELTA(sn)
                     ? SN_XDELTA_MASK - (*sn & SN_XDELTA_MASK)
                     : SN_DELTA_MASK - (*sn & SN_DELTA_MASK);
@@ -434,28 +423,6 @@ BytecodeEmitter::countFinalSourceNotes()
             cnt += JS_HOWMANY(diff, SN_XDELTA_MASK);
     }
     return cnt;
-}
-
-/*
- * To avoid offending js_SrcNoteSpec[SRC_DECL].arity, pack the two data needed
- * to decompile let into one ptrdiff_t:
- *   offset: offset to the LEAVEBLOCK(EXPR) op (not including ENTER/LEAVE)
- *   groupAssign: whether this was an optimized group assign ([x,y] = [a,b])
- */
-inline ptrdiff_t PackLetData(size_t offset, bool groupAssign)
-{
-    JS_ASSERT(offset <= (size_t(-1) >> 1));
-    return ptrdiff_t(offset << 1) | ptrdiff_t(groupAssign);
-}
-
-inline size_t LetDataToOffset(ptrdiff_t w)
-{
-    return size_t(w) >> 1;
-}
-
-inline bool LetDataToGroupAssign(ptrdiff_t w)
-{
-    return size_t(w) & 1;
 }
 
 } /* namespace frontend */

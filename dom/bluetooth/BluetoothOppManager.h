@@ -10,6 +10,7 @@
 #include "BluetoothCommon.h"
 #include "mozilla/dom/ipc/Blob.h"
 #include "mozilla/ipc/UnixSocket.h"
+#include "DeviceStorage.h"
 
 class nsIOutputStream;
 class nsIInputStream;
@@ -32,7 +33,7 @@ public:
 
   ~BluetoothOppManager();
   static BluetoothOppManager* Get();
-  void ReceiveSocketData(mozilla::ipc::UnixSocketRawData* aMessage)
+  void ReceiveSocketData(nsAutoPtr<mozilla::ipc::UnixSocketRawData>& aMessage)
     MOZ_OVERRIDE;
   void ClientDataHandler(mozilla::ipc::UnixSocketRawData* aMessage);
   void ServerDataHandler(mozilla::ipc::UnixSocketRawData* aMessage);
@@ -59,14 +60,18 @@ public:
 
   void SendConnectRequest();
   void SendPutHeaderRequest(const nsAString& aFileName, int aFileSize);
-  void SendPutRequest(uint8_t* aFileBody, int aFileBodyLength,
-                      bool aFinal);
+  void SendPutRequest(uint8_t* aFileBody, int aFileBodyLength);
+  void SendPutFinalRequest();
   void SendDisconnectRequest();
   void SendAbortRequest();
 
   void ExtractPacketHeaders(const ObexHeaderSet& aHeader);
   bool ExtractBlobHeaders();
   nsresult HandleShutdown();
+
+  // Return true if there is an ongoing file-transfer session, please see
+  // Bug 827267 for more information.
+  bool IsTransferring();
 private:
   BluetoothOppManager();
   void StartFileTransfer();
@@ -82,6 +87,9 @@ private:
   void AfterOppConnected();
   void AfterFirstPut();
   void AfterOppDisconnected();
+  void ValidateFileName();
+  bool IsReservedChar(PRUnichar c);
+
   virtual void OnConnectSuccess() MOZ_OVERRIDE;
   virtual void OnConnectError() MOZ_OVERRIDE;
   virtual void OnDisconnect() MOZ_OVERRIDE;
@@ -96,7 +104,6 @@ private:
    * Set when OBEX session is established.
    */
   bool mConnected;
-  int mConnectionId;
   nsString mConnectedDeviceAddress;
 
   /**
@@ -156,8 +163,8 @@ private:
    */
   bool mWaitingForConfirmationFlag;
 
-  nsAutoPtr<uint8_t> mBodySegment;
-  nsAutoPtr<uint8_t> mReceivedDataBuffer;
+  nsAutoArrayPtr<uint8_t> mBodySegment;
+  nsAutoArrayPtr<uint8_t> mReceivedDataBuffer;
 
   nsCOMPtr<nsIDOMBlob> mBlob;
   nsCOMPtr<nsIThread> mReadFileThread;
@@ -165,6 +172,7 @@ private:
   nsCOMPtr<nsIInputStream> mInputStream;
 
   nsRefPtr<BluetoothReplyRunnable> mRunnable;
+  nsRefPtr<DeviceStorageFile> mDsFile;
 };
 
 END_BLUETOOTH_NAMESPACE

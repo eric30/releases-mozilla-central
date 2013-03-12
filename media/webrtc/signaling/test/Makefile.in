@@ -26,17 +26,47 @@ LIBS = \
   $(DEPTH)/netwerk/srtp/src/$(LIB_PREFIX)nksrtp_s.$(LIB_SUFFIX) \
   $(NULL)
 
-ifdef MOZ_SYDNEYAUDIO
-ifeq ($(OS_ARCH),Linux)
+ifneq (,$(MOZ_CUBEB)$(MOZ_SYDNEYAUDIO))
+ifdef MOZ_ALSA
 LIBS += \
   $(MOZ_ALSA_LIBS) \
   $(NULL)
 endif
+ifdef MOZ_PULSEAUDIO
+LIBS += \
+  $(MOZ_PULSEAUDIO_LIBS) \
+  $(NULL)
+endif
+endif
+
+ifeq ($(OS_TARGET),Android)
+LIBS += \
+  $(STLPORT_LDFLAGS) \
+  $(STLPORT_LIBS) \
+  $(NULL)
+CPPFLAGS += \
+  $(STLPORT_CPPFLAGS) \
+  $(NULL)
+DEFINES += \
+  -DGTEST_USE_OWN_TR1_TUPLE=1 \
+   $(NULL)
+endif
+
+ifdef MOZ_NATIVE_JPEG
+LIBS += \
+  $(MOZ_JPEG_LIBS) \
+  $(NULL)
 endif
 
 ifdef MOZ_NATIVE_LIBVPX
 LIBS += \
   $(MOZ_LIBVPX_LIBS) \
+  $(NULL)
+endif
+
+ifndef MOZ_TREE_PIXMAN
+LIBS += \
+  $(MOZ_PIXMAN_LIBS) \
   $(NULL)
 endif
 
@@ -56,13 +86,13 @@ LIBS += \
   $(NULL)
 endif
 
-ifeq ($(OS_ARCH),Linux)
+ifeq ($(OS_TARGET),Linux)
 LIBS += \
   $(MOZ_CAIRO_OSLIBS) \
   $(NULL)
 endif
 
-ifeq ($(OS_ARCH),Darwin)
+ifeq ($(OS_TARGET),Darwin)
 LIBS += \
   -framework AudioToolbox \
   -framework AudioUnit \
@@ -79,7 +109,7 @@ LIBS += \
   $(NULL)
 endif
 
-ifeq ($(OS_ARCH),WINNT)
+ifeq ($(OS_TARGET),WINNT)
 LIBS += \
   $(DEPTH)/staticlib/components/$(LIB_PREFIX)windowsproxy.$(LIB_SUFFIX) \
   $(NULL)
@@ -89,7 +119,7 @@ DEFINES += \
   -DUSE_FAKE_MEDIA_STREAMS \
   $(NULL)
 
-ifeq ($(OS_ARCH),Darwin)
+ifeq ($(OS_TARGET),Darwin)
 DEFINES += \
   -DGTEST_USE_OWN_TR1_TUPLE=1 \
   $(NULL)
@@ -108,6 +138,7 @@ LOCAL_INCLUDES += \
  -I$(topsrcdir)/media/webrtc/signaling/src/peerconnection \
  -I$(topsrcdir)/media/webrtc/signaling/media-conduit\
  -I$(topsrcdir)/media/webrtc/trunk/third_party/libjingle/source/ \
+ -I$(topsrcdir)/xpcom/base/ \
  $(NULL)
 
 ifneq ($(OS_TARGET),WINNT)

@@ -141,7 +141,7 @@ GetJSValFromKeyPathString(JSContext* aCx,
         // If the property doesn't exist, fall into below path of starting
         // to define properties, if allowed.
         if (aOptions == DoNotCreateProperties) {
-          return NS_OK;
+          return NS_ERROR_DOM_INDEXEDDB_DATA_ERR;
         }
 
         targetObject = obj;
@@ -348,7 +348,7 @@ KeyPath::ExtractKeyAsJSVal(JSContext* aCx, const JS::Value& aValue,
   }
  
   const uint32_t len = mStrings.Length();
-  js::RootedObject arrayObj(aCx, JS_NewArrayObject(aCx, len, nullptr));
+  JS::RootedObject arrayObj(aCx, JS_NewArrayObject(aCx, len, nullptr));
   if (!arrayObj) {
     return NS_ERROR_OUT_OF_MEMORY;
   }

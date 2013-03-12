@@ -29,9 +29,8 @@ nsTransactionItem::~nsTransactionItem()
 NS_IMPL_CYCLE_COLLECTING_NATIVE_ADDREF(nsTransactionItem)
 NS_IMPL_CYCLE_COLLECTING_NATIVE_RELEASE(nsTransactionItem)
 
-NS_IMPL_CYCLE_COLLECTION_NATIVE_CLASS(nsTransactionItem)
-
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsTransactionItem)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mData)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mTransaction)
   if (tmp->mRedoStack) {
     tmp->mRedoStack->DoUnlink();
@@ -42,6 +41,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsTransactionItem)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsTransactionItem)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mData)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTransaction)
   if (tmp->mRedoStack) {
     tmp->mRedoStack->DoTraverse(cb);

@@ -10,6 +10,7 @@
 #define _USE_MATH_DEFINES
 #include <math.h>
 
+#include "gfxFont.h"
 #include "gfxMatrix.h"
 #include "gfxPoint.h"
 #include "gfxRect.h"
@@ -24,6 +25,7 @@
 #include "nsRect.h"
 #include "nsStyleStruct.h"
 #include "mozilla/Constants.h"
+#include <algorithm>
 
 class gfxASurface;
 class gfxContext;
@@ -92,10 +94,6 @@ class Element;
 #define SVG_HIT_TEST_STROKE      0x02
 #define SVG_HIT_TEST_CHECK_MRECT 0x04
 
-/*
- * Checks the smil enabled preference.
- */
-bool NS_SMILEnabled();
 
 bool NS_SVGDisplayListHitTestingEnabled();
 bool NS_SVGDisplayListPaintingEnabled();
@@ -203,6 +201,7 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsISVGFilterProperty, NS_ISVGFILTERPROPERTY_IID)
 class nsSVGUtils
 {
 public:
+  typedef mozilla::dom::Element Element;
 
   static void Init();
 
@@ -230,6 +229,30 @@ public:
   static void ConvertImageDataFromLinearRGB(uint8_t *data, 
                                             int32_t stride, 
                                             const nsIntRect &rect);
+
+  /*
+   * Converts image data from sRGB to luminance
+   */
+  static void ComputesRGBLuminanceMask(uint8_t *aData,
+                                       int32_t aStride,
+                                       const nsIntRect &aRect,
+                                       float aOpacity);
+
+  /*
+   * Converts image data from sRGB to luminance assuming
+   * Linear RGB Interpolation
+   */
+  static void ComputeLinearRGBLuminanceMask(uint8_t *aData,
+                                            int32_t aStride,
+                                            const nsIntRect &aRect,
+                                            float aOpacity);
+  /*
+   * Converts image data to luminance using the value of alpha as luminance
+   */
+  static void ComputeAlphaMask(uint8_t *aData,
+                               int32_t aStride,
+                               const nsIntRect &aRect,
+                               float aOpacity);
 
   /*
    * Converts a nsStyleCoord into a userspace value.  Handles units
@@ -299,13 +322,6 @@ public:
    * descending into NS_STATE_SVG_NONDISPLAY_CHILD frames.
    */
   static void ScheduleReflowSVG(nsIFrame *aFrame);
-
-  /**
-   * Invalidates the area that the frame last painted to, then schedules an
-   * update of the frame's bounds (which will in turn invalidate the new area
-   * that the frame should paint to).
-   */
-  static void InvalidateAndScheduleReflowSVG(nsIFrame *aFrame);
 
   /**
    * Returns true if the frame or any of its children need ReflowSVG
@@ -562,8 +578,8 @@ public:
    */
   static int32_t ClampToInt(double aVal)
   {
-    return NS_lround(NS_MAX(double(INT32_MIN),
-                            NS_MIN(double(INT32_MAX), aVal)));
+    return NS_lround(std::max(double(INT32_MIN),
+                            std::min(double(INT32_MAX), aVal)));
   }
 
   static nscolor GetFallbackOrPaintColor(gfxContext *aContext,
@@ -631,6 +647,38 @@ public:
    * property on the element.
    */
   static uint16_t GetGeometryHitTestFlags(nsIFrame* aFrame);
+
+  /**
+   * Render a SVG glyph.
+   * @param aElement the SVG glyph element to render
+   * @param aContext the thebes aContext to draw to
+   * @param aDrawMode fill or stroke or both (see gfxFont::DrawMode)
+   * @return true if rendering succeeded
+   */
+  static bool PaintSVGGlyph(Element* aElement, gfxContext* aContext,
+                            gfxFont::DrawMode aDrawMode,
+                            gfxTextObjectPaint* aObjectPaint);
+  /**
+   * Get the extents of a SVG glyph.
+   * @param aElement the SVG glyph element
+   * @param aSVGToAppSpace the matrix mapping the SVG glyph space to the
+   *   target context space
+   * @param aResult the result (valid when true is returned)
+   * @return true if calculating the extents succeeded
+   */
+  static bool GetSVGGlyphExtents(Element* aElement,
+                                 const gfxMatrix& aSVGToAppSpace,
+                                 gfxRect* aResult);
+
+  /**
+   * Returns the app unit canvas bounds of a userspace rect.
+   *
+   * @param aToCanvas Transform from userspace to canvas device space.
+   */
+  static nsRect
+  ToCanvasBounds(const gfxRect &aUserspaceRect,
+                 const gfxMatrix &aToCanvas,
+                 const nsPresContext *presContext);
 };
 
 #endif

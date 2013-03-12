@@ -4,6 +4,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "prtypes.h"
+#include "nsIConsoleService.h"
+#include "nsIScriptError.h"
+
+#ifndef __FUNCTION__
+#define __FUNCTION__ __func__
+#endif
 
 // Call a method on each observer in a category cache, then call the same
 // method on the observer array.
@@ -38,8 +44,18 @@
     return _sInstance;                                                         \
   }
 
-#if !defined(MOZ_PER_WINDOW_PRIVATE_BROWSING) || !defined(DEBUG)
-#  define ENSURE_NOT_PRIVATE_BROWSING /* nothing */
-#else
-#  define ENSURE_NOT_PRIVATE_BROWSING EnsureNotGlobalPrivateBrowsing()
-#endif
+#define PLACES_WARN_DEPRECATED()                                               \
+  PR_BEGIN_MACRO                                                               \
+  nsCString msg = NS_LITERAL_CSTRING(__FUNCTION__);                            \
+  msg.AppendLiteral(" is deprecated and will be removed in the next version.");\
+  NS_WARNING(msg.get());                                                       \
+  nsCOMPtr<nsIConsoleService> cs = do_GetService(NS_CONSOLESERVICE_CONTRACTID);\
+  if (cs) {                                                                    \
+    nsCOMPtr<nsIScriptError> e = do_CreateInstance(NS_SCRIPTERROR_CONTRACTID); \
+    if (e && NS_SUCCEEDED(e->Init(NS_ConvertUTF8toUTF16(msg), EmptyString(),   \
+                                  EmptyString(), 0, 0,                         \
+                                  nsIScriptError::errorFlag, "Places"))) {     \
+      cs->LogMessage(e);                                                       \
+    }                                                                          \
+  }                                                                            \
+  PR_END_MACRO

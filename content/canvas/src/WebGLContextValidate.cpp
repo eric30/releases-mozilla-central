@@ -33,7 +33,7 @@ WebGLProgram::UpdateInfo()
     mAttribMaxNameLength = 0;
 
     for (size_t i = 0; i < mAttachedShaders.Length(); i++)
-        mAttribMaxNameLength = NS_MAX(mAttribMaxNameLength, mAttachedShaders[i]->mAttribMaxNameLength);
+        mAttribMaxNameLength = std::max(mAttribMaxNameLength, mAttachedShaders[i]->mAttribMaxNameLength);
 
     GLint attribCount;
     mContext->gl->fGetProgramiv(mGLName, LOCAL_GL_ACTIVE_ATTRIBUTES, &attribCount);
@@ -339,6 +339,16 @@ bool WebGLContext::ValidateGLSLVariableName(const nsAString& name, const char *i
         return false;
     }
 
+    nsString prefix1 = NS_LITERAL_STRING("webgl_");
+    nsString prefix2 = NS_LITERAL_STRING("_webgl_");
+
+    if (Substring(name, 0, prefix1.Length()).Equals(prefix1) ||
+        Substring(name, 0, prefix2.Length()).Equals(prefix2))
+    {
+        ErrorInvalidOperation("%s: string contains a reserved GLSL prefix", info);
+        return false;
+    }
+
     return true;
 }
 
@@ -411,13 +421,13 @@ bool WebGLContext::ValidateCompressedTextureSize(WebGLenum target, WebGLint leve
         case LOCAL_GL_COMPRESSED_RGB_PVRTC_4BPPV1:
         case LOCAL_GL_COMPRESSED_RGBA_PVRTC_4BPPV1:
         {
-            required_byteLength = CheckedUint32(NS_MAX(width, 8)) * CheckedUint32(NS_MAX(height, 8)) / 2;
+            required_byteLength = CheckedUint32(std::max(width, 8)) * CheckedUint32(std::max(height, 8)) / 2;
             break;
         }
         case LOCAL_GL_COMPRESSED_RGB_PVRTC_2BPPV1:
         case LOCAL_GL_COMPRESSED_RGBA_PVRTC_2BPPV1:
         {
-            required_byteLength = CheckedUint32(NS_MAX(width, 16)) * CheckedUint32(NS_MAX(height, 8)) / 4;
+            required_byteLength = CheckedUint32(std::max(width, 16)) * CheckedUint32(std::max(height, 8)) / 4;
             break;
         }
     }
@@ -689,6 +699,23 @@ WebGLContext::ValidateUniformLocation(const char* info, WebGLUniformLocation *lo
 }
 
 bool
+WebGLContext::ValidateSamplerUniformSetter(const char* info, WebGLUniformLocation *location, WebGLint value)
+{
+    if (location->Info().type != SH_SAMPLER_2D &&
+        location->Info().type != SH_SAMPLER_CUBE)
+    {
+        return true;
+    }
+
+    if (value >= 0 && value < mGLMaxTextureUnits)
+        return true;
+
+    ErrorInvalidValue("%s: this uniform location is a sampler, but %d is not a valid texture unit",
+                      info, value);
+    return false;
+}
+
+bool
 WebGLContext::ValidateAttribArraySetter(const char* name, uint32_t cnt, uint32_t arrayLength)
 {
     if (!IsContextStable()) {
@@ -707,10 +734,7 @@ WebGLContext::ValidateUniformArraySetter(const char* name, uint32_t expectedElem
 {
     if (!IsContextStable())
         return false;
-    nsCString nameString(name);
-    nsCString suffix = NS_LITERAL_CSTRING(": location");
-    nsCString concatenated = nameString + suffix;
-    if (!ValidateUniformLocation(concatenated.get(), location_object))
+    if (!ValidateUniformLocation(name, location_object))
         return false;
     location = location_object->Location();
     uint32_t uniformElemSize = location_object->ElementSize();
@@ -721,7 +745,6 @@ WebGLContext::ValidateUniformArraySetter(const char* name, uint32_t expectedElem
                               uniformElemSize);
         return false;
     }
-    const WebGLUniformInfo& info = location_object->Info();
     if (arrayLength == 0 ||
         arrayLength % expectedElemSize)
     {
@@ -731,6 +754,7 @@ WebGLContext::ValidateUniformArraySetter(const char* name, uint32_t expectedElem
                           arrayLength);
         return false;
     }
+    const WebGLUniformInfo& info = location_object->Info();
     if (!info.isArray &&
         arrayLength != expectedElemSize) {
         ErrorInvalidOperation("%s: expected an array of length exactly"
@@ -741,7 +765,7 @@ WebGLContext::ValidateUniformArraySetter(const char* name, uint32_t expectedElem
         return false;
     }
     numElementsToUpload =
-        NS_MIN(info.arraySize, arrayLength / expectedElemSize);
+        std::min(info.arraySize, arrayLength / expectedElemSize);
     return true;
 }
 
@@ -753,10 +777,7 @@ WebGLContext::ValidateUniformMatrixArraySetter(const char* name, int dim, WebGLU
     uint32_t expectedElemSize = (dim)*(dim);
     if (!IsContextStable())
         return false;
-    nsCString nameString(name);
-    nsCString suffix = NS_LITERAL_CSTRING(": location");
-    nsCString concatenated = nameString + suffix;
-    if (!ValidateUniformLocation(concatenated.get(), location_object))
+    if (!ValidateUniformLocation(name, location_object))
         return false;
     location = location_object->Location();
     uint32_t uniformElemSize = location_object->ElementSize();
@@ -767,7 +788,6 @@ WebGLContext::ValidateUniformMatrixArraySetter(const char* name, int dim, WebGLU
                               uniformElemSize);
         return false;
     }
-    const WebGLUniformInfo& info = location_object->Info();
     if (arrayLength == 0 ||
         arrayLength % expectedElemSize)
     {
@@ -777,6 +797,7 @@ WebGLContext::ValidateUniformMatrixArraySetter(const char* name, int dim, WebGLU
                           arrayLength);
         return false;
     }
+    const WebGLUniformInfo& info = location_object->Info();
     if (!info.isArray &&
         arrayLength != expectedElemSize) {
         ErrorInvalidOperation("%s: expected an array of length exactly"
@@ -792,7 +813,7 @@ WebGLContext::ValidateUniformMatrixArraySetter(const char* name, int dim, WebGLU
         return false;
     }
     numElementsToUpload =
-        NS_MIN(info.arraySize, arrayLength / (expectedElemSize));
+        std::min(info.arraySize, arrayLength / (expectedElemSize));
     return true;
 }
 
@@ -801,10 +822,7 @@ WebGLContext::ValidateUniformSetter(const char* name, WebGLUniformLocation *loca
 {
     if (!IsContextStable())
         return false;
-    nsCString nameString(name);
-    nsCString suffix = NS_LITERAL_CSTRING(": location");
-    nsCString concatenated = nameString + suffix;
-    if (!ValidateUniformLocation(concatenated.get(), location_object))
+    if (!ValidateUniformLocation(name, location_object))
         return false;
     location = location_object->Location();
     return true;
@@ -858,6 +876,7 @@ WebGLContext::InitAndValidateGL()
     mMinCapability = Preferences::GetBool("webgl.min_capability_mode", false);
     mDisableExtensions = Preferences::GetBool("webgl.disable-extensions", false);
     mLoseContextOnHeapMinimize = Preferences::GetBool("webgl.lose-context-on-heap-minimize", false);
+    mCanLoseContextInForeground = Preferences::GetBool("webgl.can-lose-context-in-foreground", true);
 
     mActiveTexture = 0;
     mWebGLError = LOCAL_GL_NO_ERROR;
@@ -912,11 +931,13 @@ WebGLContext::InitAndValidateGL()
     if (MinCapabilityMode()) {
         mGLMaxTextureSize = MINVALUE_GL_MAX_TEXTURE_SIZE;
         mGLMaxCubeMapTextureSize = MINVALUE_GL_MAX_CUBE_MAP_TEXTURE_SIZE;
+        mGLMaxRenderbufferSize = MINVALUE_GL_MAX_RENDERBUFFER_SIZE;
         mGLMaxTextureImageUnits = MINVALUE_GL_MAX_TEXTURE_IMAGE_UNITS;
         mGLMaxVertexTextureImageUnits = MINVALUE_GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS;
     } else {
         gl->fGetIntegerv(LOCAL_GL_MAX_TEXTURE_SIZE, &mGLMaxTextureSize);
         gl->fGetIntegerv(LOCAL_GL_MAX_CUBE_MAP_TEXTURE_SIZE, &mGLMaxCubeMapTextureSize);
+        gl->fGetIntegerv(LOCAL_GL_MAX_RENDERBUFFER_SIZE, &mGLMaxRenderbufferSize);
         gl->fGetIntegerv(LOCAL_GL_MAX_TEXTURE_IMAGE_UNITS, &mGLMaxTextureImageUnits);
         gl->fGetIntegerv(LOCAL_GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS, &mGLMaxVertexTextureImageUnits);
     }
@@ -957,7 +978,7 @@ WebGLContext::InitAndValidateGL()
             error = gl->GetAndClearError();
             switch (error) {
                 case LOCAL_GL_NO_ERROR:
-                    mGLMaxVaryingVectors = NS_MIN(maxVertexOutputComponents, minFragmentInputComponents) / 4;
+                    mGLMaxVaryingVectors = std::min(maxVertexOutputComponents, minFragmentInputComponents) / 4;
                     break;
                 case LOCAL_GL_INVALID_ENUM:
                     mGLMaxVaryingVectors = 16; // = 64/4, 64 is the min value for maxVertexOutputComponents in OpenGL 3.2 spec

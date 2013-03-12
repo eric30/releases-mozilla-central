@@ -12,6 +12,7 @@
 #include "prio.h"
 #include "nsITimer.h"
 #include "nsAutoPtr.h"
+#include "mozilla/net/DNS.h"
 
 namespace mozilla { namespace net {
 
@@ -36,9 +37,9 @@ public:
                 const nsCString &aPACScript);
   void     Shutdown();
   void     GC();
-  bool     MyIPAddress(jsval *vp);
+  bool     MyIPAddress(JS::Value *vp);
   bool     ResolveAddress(const nsCString &aHostName,
-                          PRNetAddr *aNetAddr, unsigned int aTimeout);
+                          NetAddr *aNetAddr, unsigned int aTimeout);
 
   /**
    * Get the proxy string for the specified URI.  The proxy string is
@@ -84,9 +85,9 @@ private:
   // used to compile the PAC file and setup the execution context
   nsresult SetupJS();
 
-  bool SrcAddress(const PRNetAddr *remoteAddress, nsCString &localAddress);
+  bool SrcAddress(const NetAddr *remoteAddress, nsCString &localAddress);
   bool MyIPAddressTryHost(const nsCString &hostName, unsigned int timeout,
-                          jsval *vp);
+                          JS::Value *vp);
 
   JSRuntimeWrapper *mJSRuntime;
   bool              mJSNeedsSetup;

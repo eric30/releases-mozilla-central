@@ -4,7 +4,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsRuleData.h"
-#include "nsCSSProps.h"
 #include "nsPresArena.h"
 
 #include "mozilla/StandardInteger.h"
@@ -32,7 +31,6 @@ nsRuleData::nsRuleData(uint32_t aSIDs, nsCSSValue* aValueStorage,
     mCanStoreInRuleTree(true),
     mPresContext(aContext),
     mStyleContext(aStyleContext),
-    mPostResolveCallback(nullptr),
     mValueStorage(aValueStorage)
 {
 #ifndef MOZ_VALGRIND

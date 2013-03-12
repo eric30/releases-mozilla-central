@@ -66,7 +66,6 @@ function QI_node(aNode, aIID) {
   return result;
 }
 function asVisit(aNode) QI_node(aNode, Ci.nsINavHistoryVisitResultNode);
-function asFullVisit(aNode) QI_node(aNode, Ci.nsINavHistoryFullVisitResultNode);
 function asContainer(aNode) QI_node(aNode, Ci.nsINavHistoryContainerResultNode);
 function asQuery(aNode) QI_node(aNode, Ci.nsINavHistoryQueryResultNode);
 
@@ -104,7 +103,6 @@ this.PlacesUtils = {
   TOPIC_BOOKMARKS_RESTORE_FAILED: "bookmarks-restore-failed",
 
   asVisit: function(aNode) asVisit(aNode),
-  asFullVisit: function(aNode) asFullVisit(aNode),
   asContainer: function(aNode) asContainer(aNode),
   asQuery: function(aNode) asQuery(aNode),
 
@@ -182,8 +180,7 @@ this.PlacesUtils = {
    */
   nodeIsVisit: function PU_nodeIsVisit(aNode) {
     var type = aNode.type;
-    return type == Ci.nsINavHistoryResultNode.RESULT_TYPE_VISIT ||
-           type == Ci.nsINavHistoryResultNode.RESULT_TYPE_FULL_VISIT;
+    return type == Ci.nsINavHistoryResultNode.RESULT_TYPE_VISIT;
   },
 
   /**
@@ -193,8 +190,7 @@ this.PlacesUtils = {
    * @returns true if the node is a URL item, false otherwise
    */
   uriTypes: [Ci.nsINavHistoryResultNode.RESULT_TYPE_URI,
-             Ci.nsINavHistoryResultNode.RESULT_TYPE_VISIT,
-             Ci.nsINavHistoryResultNode.RESULT_TYPE_FULL_VISIT],
+             Ci.nsINavHistoryResultNode.RESULT_TYPE_VISIT],
   nodeIsURI: function PU_nodeIsURI(aNode) {
     return this.uriTypes.indexOf(aNode.type) != -1;
   },
@@ -445,49 +441,6 @@ this.PlacesUtils = {
             resultType == Ci.nsINavHistoryQueryOptions.RESULTS_AS_SITE_QUERY ||
             this.nodeIsDay(aNode) ||
             this.nodeIsHost(aNode));
-  },
-
-  /**
-   * Determines if a container item id is a livemark.
-   * @param aItemId
-   *        The id of the potential livemark.
-   * @returns true if the item is a livemark.
-   * @deprecated see the new API in mozIAsyncLivemarks.
-   */
-  itemIsLivemark: function PU_itemIsLivemark(aItemId) {
-    Cu.reportError("Synchronous livemarks methods and PlacesUtils livemarks " +
-                   "utils (itemIsLivemark, nodeIsLivemarkContainer, " +
-                   "nodeIsLivemarkItem) are deprecated and will be removed " +
-                   "in a future release.");
-    // If the Livemark service hasn't yet been initialized then
-    // use the annotations service directly to avoid instanciating
-    // it on startup. (bug 398300)
-    if (Object.getOwnPropertyDescriptor(this, "livemarks").value === undefined)
-      return this.annotations.itemHasAnnotation(aItemId, this.LMANNO_FEEDURI);
-    // If the livemark service has already been instanciated, use it.
-    return this.livemarks.isLivemark(aItemId);
-  },
-
-  /**
-   * Determines whether a result node is a livemark container.
-   * @param aNode
-   *        A result Node
-   * @returns true if the node is a livemark container item
-   * @deprecated see the new API in mozIAsyncLivemarks.
-   */
-  nodeIsLivemarkContainer: function PU_nodeIsLivemarkContainer(aNode) {
-    return this.nodeIsFolder(aNode) && this.itemIsLivemark(aNode.itemId);
-  },
-
- /**
-  * Determines whether a result node is a livemark item
-  * @param aNode
-  *        A result node
-  * @returns true if the node is a livemark container item
-   * @deprecated see the new API in mozIAsyncLivemarks.
-  */
-  nodeIsLivemarkItem: function PU_nodeIsLivemarkItem(aNode) {
-    return aNode.parent && this.nodeIsLivemarkContainer(aNode.parent);
   },
 
   /**
@@ -2195,8 +2148,7 @@ XPCOMUtils.defineLazyServiceGetter(PlacesUtils, "tagging",
 
 XPCOMUtils.defineLazyGetter(PlacesUtils, "livemarks", function() {
   return Cc["@mozilla.org/browser/livemark-service;2"].
-         getService(Ci.nsILivemarkService).
-         QueryInterface(Ci.mozIAsyncLivemarks);
+         getService(Ci.mozIAsyncLivemarks);
 });
 
 XPCOMUtils.defineLazyGetter(PlacesUtils, "transactionManager", function() {

@@ -8,6 +8,8 @@
  * nsIDOMCDATASection, and nsIDOMProcessingInstruction nodes.
  */
 
+#include "mozilla/DebugOnly.h"
+
 #include "nsGenericDOMDataNode.h"
 #include "mozilla/dom/Element.h"
 #include "nsIDocument.h"
@@ -60,8 +62,6 @@ nsGenericDOMDataNode::~nsGenericDOMDataNode()
   }
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsGenericDOMDataNode)
-
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(nsGenericDOMDataNode)
   nsINode::Trace(tmp, aCallback, aClosure);
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
@@ -100,6 +100,7 @@ NS_INTERFACE_MAP_BEGIN(nsGenericDOMDataNode)
   NS_INTERFACE_MAP_ENTRY(nsIContent)
   NS_INTERFACE_MAP_ENTRY(nsINode)
   NS_INTERFACE_MAP_ENTRY(nsIDOMEventTarget)
+  NS_INTERFACE_MAP_ENTRY(mozilla::dom::EventTarget)
   NS_INTERFACE_MAP_ENTRY_TEAROFF(nsISupportsWeakReference,
                                  new nsNodeSupportsWeakRefTearoff(this))
   NS_INTERFACE_MAP_ENTRY_TEAROFF(nsIDOMXPathNSResolver,
@@ -174,11 +175,21 @@ nsresult
 nsGenericDOMDataNode::SubstringData(uint32_t aStart, uint32_t aCount,
                                     nsAString& aReturn)
 {
+  ErrorResult rv;
+  SubstringData(aStart, aCount, aReturn, rv);
+  return rv.ErrorCode();
+}
+
+void
+nsGenericDOMDataNode::SubstringData(uint32_t aStart, uint32_t aCount,
+                                    nsAString& aReturn, ErrorResult& rv)
+{
   aReturn.Truncate();
 
   uint32_t textLength = mText.GetLength();
   if (aStart > textLength) {
-    return NS_ERROR_DOM_INDEX_SIZE_ERR;
+    rv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
+    return;
   }
 
   uint32_t amount = aCount;
@@ -195,8 +206,6 @@ nsGenericDOMDataNode::SubstringData(uint32_t aStart, uint32_t aCount,
     const char *data = mText.Get1b() + aStart;
     CopyASCIItoUTF16(Substring(data, data + amount), aReturn);
   }
-
-  return NS_OK;
 }
 
 //----------------------------------------------------------------------
@@ -566,21 +575,6 @@ nsGenericDOMDataNode::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttr,
                                 bool aNotify)
 {
   return NS_OK;
-}
-
-bool
-nsGenericDOMDataNode::GetAttr(int32_t aNameSpaceID, nsIAtom *aAttr,
-                              nsAString& aResult) const
-{
-  aResult.Truncate();
-
-  return false;
-}
-
-bool
-nsGenericDOMDataNode::HasAttr(int32_t aNameSpaceID, nsIAtom *aAttribute) const
-{
-  return false;
 }
 
 const nsAttrName*

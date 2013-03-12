@@ -11,6 +11,9 @@
     locale/browser/aboutPrivateBrowsing.dtd        (%chrome/browser/aboutPrivateBrowsing.dtd)
     locale/browser/aboutRobots.dtd                 (%chrome/browser/aboutRobots.dtd)
     locale/browser/aboutHome.dtd                   (%chrome/browser/aboutHome.dtd)
+#ifdef MOZ_SERVICES_HEALTHREPORT
+    locale/browser/aboutHealthReport.dtd           (%chrome/browser/aboutHealthReport.dtd)
+#endif
     locale/browser/aboutSessionRestore.dtd         (%chrome/browser/aboutSessionRestore.dtd)
 #ifdef MOZ_SERVICES_SYNC
     locale/browser/syncProgress.dtd                (%chrome/browser/syncProgress.dtd)
@@ -35,11 +38,16 @@
     locale/browser/devtools/webConsole.dtd            (%chrome/browser/devtools/webConsole.dtd)
     locale/browser/devtools/sourceeditor.properties   (%chrome/browser/devtools/sourceeditor.properties)
     locale/browser/devtools/sourceeditor.dtd          (%chrome/browser/devtools/sourceeditor.dtd)
+    locale/browser/devtools/profiler.dtd              (%chrome/browser/devtools/profiler.dtd)
+    locale/browser/devtools/profiler.properties       (%chrome/browser/devtools/profiler.properties)
     locale/browser/devtools/layoutview.dtd            (%chrome/browser/devtools/layoutview.dtd)
     locale/browser/devtools/responsiveUI.properties   (%chrome/browser/devtools/responsiveUI.properties)
     locale/browser/devtools/toolbox.dtd            (%chrome/browser/devtools/toolbox.dtd)
+    locale/browser/devtools/toolbox.properties     (%chrome/browser/devtools/toolbox.properties)
     locale/browser/devtools/inspector.dtd          (%chrome/browser/devtools/inspector.dtd)
     locale/browser/devtools/connection-screen.dtd  (%chrome/browser/devtools/connection-screen.dtd)
+    locale/browser/devtools/connection-screen.properties (%chrome/browser/devtools/connection-screen.properties)
+    locale/browser/devtools/font-inspector.dtd     (%chrome/browser/devtools/font-inspector.dtd)
     locale/browser/newTab.dtd                      (%chrome/browser/newTab.dtd)
     locale/browser/newTab.properties               (%chrome/browser/newTab.properties)
     locale/browser/openLocation.dtd                (%chrome/browser/openLocation.dtd)
@@ -123,7 +131,7 @@
     locale/pdfviewer/viewer.properties             (%pdfviewer/viewer.properties)
     locale/pdfviewer/chrome.properties             (%pdfviewer/chrome.properties)
 #ifdef MOZ_WEBAPP_RUNTIME
-../webapprt/chrome/@AB_CD@.jar:
+../../webapprt/chrome/@AB_CD@.jar:
 % locale webapprt @AB_CD@ %locale/webapprt/
     locale/webapprt/webapp.dtd                     (%webapprt/webapp.dtd)
     locale/webapprt/webapp.properties              (%webapprt/webapp.properties)

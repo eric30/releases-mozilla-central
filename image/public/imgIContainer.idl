@@ -6,8 +6,6 @@
 
 #include "nsISupports.idl"
 
-interface imgIDecoderObserver;
-
 %{C++
 #include "gfxImageSurface.h"
 #include "gfxContext.h"
@@ -30,6 +28,7 @@ class nsIFrame;
 
 namespace mozilla {
 class TimeStamp;
+class SVGImageContext;
 }
 
 %}
@@ -43,10 +42,12 @@ native gfxImageFormat(gfxASurface::gfxImageFormat);
 native gfxGraphicsFilter(gfxPattern::GraphicsFilter);
 [ref] native nsIntRect(nsIntRect);
 [ref] native nsIntSize(nsIntSize);
+native nsSize(nsSize);
 [ptr] native nsIFrame(nsIFrame);
 [ptr] native ImageContainer(mozilla::layers::ImageContainer);
 [ptr] native LayerManager(mozilla::layers::LayerManager);
 [ref] native TimeStamp(mozilla::TimeStamp);
+[ptr] native SVGImageContext(mozilla::SVGImageContext);
 
 
 /**
@@ -57,7 +58,7 @@ native gfxGraphicsFilter(gfxPattern::GraphicsFilter);
  *
  * Internally, imgIContainer also manages animation of images.
  */
-[scriptable, uuid(01e12ac9-7d9f-40d9-9ec1-70b64c53ce7a)]
+[scriptable, builtinclass, uuid(01c4f92f-f883-4837-a127-d8f30920e374)]
 interface imgIContainer : nsISupports
 {
   /**
@@ -71,6 +72,19 @@ interface imgIContainer : nsISupports
    * zero is returned, and an exception will be thrown.
    */
   readonly attribute int32_t height;
+
+  /**
+   * The intrinsic size of this image in appunits. If the image has no intrinsic
+   * size in a dimension, -1 will be returned for that dimension. In the case of
+   * any error, an exception will be thrown.
+   */
+  [noscript] readonly attribute nsSize intrinsicSize;
+
+  /**
+   * The (dimensionless) intrinsic ratio of this image. In the case of any error,
+   * an exception will be thrown.
+   */
+  [noscript] readonly attribute nsSize intrinsicRatio;
 
   /**
     * Enumerated values for the 'type' attribute (below).
@@ -95,12 +109,6 @@ interface imgIContainer : nsISupports
    * @throws NS_ERROR_NOT_AVAILABLE if the animated state cannot be determined.
    */
   readonly attribute boolean animated;
-
-  /**
-   * Whether the current frame is opaque; that is, needs the background painted
-   * behind it.
-   */
-  readonly attribute boolean currentFrameIsOpaque;
 
   /**
    * Flags for imgIContainer operations.
@@ -146,7 +154,9 @@ interface imgIContainer : nsISupports
 
   /**
    * Get a surface for the given frame. This may be a platform-native,
-   * optimized surface, so you cannot inspect its pixel data.
+   * optimized surface, so you cannot inspect its pixel data. If you
+   * need that, use gfxASurface::GetAsReadableARGB32ImageSurface or
+   * gfxASurface::CopyToARGB32ImageSurface.
    *
    * @param aWhichFrame Frame specifier of the FRAME_* variety.
    * @param aFlags Flags of the FLAG_* variety
@@ -155,20 +165,18 @@ interface imgIContainer : nsISupports
                                   in uint32_t aFlags);
 
   /**
+   * Whether the given frame is opaque; that is, needs the background painted
+   * behind it.
+   *
+   * @param aWhichFrame Frame specifier of the FRAME_* variety.
+   */
+  [notxpcom] boolean frameIsOpaque(in uint32_t aWhichFrame);
+
+  /**
    * Attempts to create an ImageContainer (and Image) containing the current
    * frame. Only valid for RASTER type images.
    */
   [noscript] ImageContainer getImageContainer(in LayerManager aManager);
-
-  /**
-   * Create and return a new copy of the given frame that you can write to
-   * and otherwise inspect the pixels of.
-   *
-   * @param aWhichFrame Frame specifier of the FRAME_* variety.
-   * @param aFlags Flags of the FLAG_* variety
-   */
-  [noscript] gfxImageSurface copyFrame(in uint32_t aWhichFrame,
-                                       in uint32_t aFlags);
 
   /**
    * Create a new imgContainer that contains only a single frame, which itself
@@ -203,6 +211,9 @@ interface imgIContainer : nsISupports
    *          might be restricted by aSubimage -- but we still need the full
    *          image's viewport-size in order for SVG images with the "viewBox"
    *          attribute to position their content correctly.)
+   * @param aSVGContext If non-null, SVG-related rendering context such as
+   *                    overridden attributes on the image document's root <svg>
+   *                    node. Ignored for raster images.
    * @param aFlags Flags of the FLAG_* variety
    */
   [noscript] void draw(in gfxContext aContext,
@@ -211,17 +222,8 @@ interface imgIContainer : nsISupports
                        [const] in gfxRect aFill,
                        [const] in nsIntRect aSubimage,
                        [const] in nsIntSize aViewportSize,
+                       [const] in SVGImageContext aSVGContext,
                        in uint32_t aFlags);
-
-  /**
-   * If this image is TYPE_VECTOR, i.e. is really an embedded SVG document,
-   * this method returns a pointer to the root nsIFrame of that document. If
-   * not (or if the root nsIFrame isn't available for some reason), this method
-   * returns nullptr.
-   *
-   * "notxpcom" for convenience, since we have no need for nsresult return-val.
-   */
-  [notxpcom] nsIFrame GetRootLayoutFrame();
 
   /*
    * Ensures that an image is decoding. Calling this function guarantees that

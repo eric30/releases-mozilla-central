@@ -16,9 +16,9 @@ Cu.import("resource://gre/modules/PhoneNumber.jsm");
 Cu.import("resource://gre/modules/mcc_iso3166_table.jsm");
 
 #ifdef MOZ_B2G_RIL
-XPCOMUtils.defineLazyServiceGetter(this, "ril",
+XPCOMUtils.defineLazyServiceGetter(this, "mobileConnection",
                                    "@mozilla.org/ril/content-helper;1",
-                                   "nsIRILContentHelper");
+                                   "nsIMobileConnectionProvider");
 #endif
 
 this.PhoneNumberUtils = {
@@ -35,24 +35,37 @@ this.PhoneNumberUtils = {
     let countryName;
 
 #ifdef MOZ_B2G_RIL
-    // Get network mcc.
-    if (ril.voiceConnectionInfo && ril.voiceConnectionInfo.network)
-      mcc = ril.voiceConnectionInfo.network.mcc;
+    // Get network mcc
+    if (mobileConnection.voiceConnectionInfo &&
+        mobileConnection.voiceConnectionInfo.network) {
+      mcc = mobileConnection.voiceConnectionInfo.network.mcc;
+    }
 
-    // Get SIM mcc or set it to mcc for Brasil
-    if (!mcc)
-      mcc = ril.iccInfo.mcc || this._mcc;
+    // Get SIM mcc
+    if (!mcc) {
+      mcc = mobileConnection.iccInfo.mcc;
+    }
+
+    // Get previous mcc
+    if (!mcc && mobileConnection.voiceConnectionInfo) {
+      mcc = mobileConnection.voiceConnectionInfo.lastKnownMcc;
+    }
+
+    // Set to default mcc
+    if (!mcc) {
+      mcc = this._mcc;
+    }
 #else
     mcc = this._mcc;
 #endif
 
     countryName = MCC_ISO3166_TABLE[mcc];
-    debug("MCC: " + mcc + "countryName: " + countryName);
+    if (DEBUG) debug("MCC: " + mcc + "countryName: " + countryName);
     return countryName;
   },
 
   parse: function(aNumber) {
-    debug("call parse: " + aNumber);
+    if (DEBUG) debug("call parse: " + aNumber);
     let result = PhoneNumber.Parse(aNumber, this._getCountryName());
     if (DEBUG) {
       if (result) {
@@ -69,7 +82,13 @@ this.PhoneNumberUtils = {
 
   parseWithMCC: function(aNumber, aMCC) {
     let countryName = MCC_ISO3166_TABLE[aMCC];
-    debug("found country name: " + countryName);
+    if (DEBUG) debug("found country name: " + countryName);
     return PhoneNumber.Parse(aNumber, countryName);
+  },
+
+  isViablePhoneNumber: function IsViablePhoneNumber(aNumber) {
+    let viable = PhoneNumber.IsViable(aNumber);
+    if (DEBUG) debug("IsViable(" + aNumber + "): " + viable);
+    return viable;
   }
 };

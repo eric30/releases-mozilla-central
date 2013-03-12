@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #include "nsTableOuterFrame.h"
 #include "nsTableFrame.h"
+#include "nsTableCellFrame.h"
 #include "nsStyleContext.h"
 #include "nsStyleConsts.h"
 #include "nsPresContext.h"
@@ -17,6 +18,7 @@
 #include "nsIDOMNode.h"
 #include "nsDisplayList.h"
 #include "nsLayoutUtils.h"
+#include <algorithm>
 
 using namespace mozilla;
 using namespace mozilla::layout;
@@ -69,7 +71,7 @@ nsTableCaptionFrame::ComputeAutoSize(nsRenderingContext *aRenderingContext,
   // wrapping inside of us should not apply font size inflation.
   AutoMaybeDisableFontInflation an(this);
 
-  uint8_t captionSide = GetStyleTableBorder()->mCaptionSide;
+  uint8_t captionSide = StyleTableBorder()->mCaptionSide;
   if (captionSide == NS_STYLE_CAPTION_SIDE_LEFT ||
       captionSide == NS_STYLE_CAPTION_SIDE_RIGHT) {
     result.width = GetMinWidth(aRenderingContext);
@@ -102,7 +104,7 @@ nsTableCaptionFrame::GetParentStyleContextFrame() const
     nsIFrame* innerFrame = outerFrame->GetFirstPrincipalChild();
     if (innerFrame) {
       return nsFrame::CorrectStyleParentFrame(innerFrame,
-                                              GetStyleContext()->GetPseudo());
+                                              StyleContext()->GetPseudo());
     }
   }
 
@@ -115,10 +117,10 @@ a11y::AccType
 nsTableCaptionFrame::AccessibleType()
 {
   if (!GetRect().IsEmpty()) {
-    return a11y::eHTMLCaptionAccessible;
+    return a11y::eHTMLCaptionType;
   }
 
-  return a11y::eNoAccessible;
+  return a11y::eNoType;
 }
 #endif
 
@@ -150,14 +152,14 @@ nsTableOuterFrame::~nsTableOuterFrame()
 }
 
 NS_QUERYFRAME_HEAD(nsTableOuterFrame)
-  NS_QUERYFRAME_ENTRY(nsITableLayout)
+  NS_QUERYFRAME_ENTRY(nsTableOuterFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 #ifdef ACCESSIBILITY
 a11y::AccType
 nsTableOuterFrame::AccessibleType()
 {
-  return a11y::eHTMLTableAccessible;
+  return a11y::eHTMLTableType;
 }
 #endif
 
@@ -285,7 +287,7 @@ nsTableOuterFrame::RemoveFrame(ChildListID     aListID,
   return NS_OK;
 }
 
-NS_METHOD 
+void
 nsTableOuterFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                     const nsRect&           aDirtyRect,
                                     const nsDisplayListSet& aLists)
@@ -295,26 +297,25 @@ nsTableOuterFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 
   // If there's no caption, take a short cut to avoid having to create
   // the special display list set and then sort it.
-  if (mCaptionFrames.IsEmpty())
-    return BuildDisplayListForInnerTable(aBuilder, aDirtyRect, aLists);
-    
+  if (mCaptionFrames.IsEmpty()) {
+    BuildDisplayListForInnerTable(aBuilder, aDirtyRect, aLists);
+    return;
+  }
+
   nsDisplayListCollection set;
-  nsresult rv = BuildDisplayListForInnerTable(aBuilder, aDirtyRect, set);
-  NS_ENSURE_SUCCESS(rv, rv);
+  BuildDisplayListForInnerTable(aBuilder, aDirtyRect, set);
   
   nsDisplayListSet captionSet(set, set.BlockBorderBackgrounds());
-  rv = BuildDisplayListForChild(aBuilder, mCaptionFrames.FirstChild(),
-                                aDirtyRect, captionSet);
-  NS_ENSURE_SUCCESS(rv, rv);
+  BuildDisplayListForChild(aBuilder, mCaptionFrames.FirstChild(),
+                           aDirtyRect, captionSet);
   
   // Now we have to sort everything by content order, since the caption
   // may be somewhere inside the table
   set.SortAllByContentOrder(aBuilder, GetContent());
   set.MoveTo(aLists);
-  return NS_OK;
 }
 
-nsresult
+void
 nsTableOuterFrame::BuildDisplayListForInnerTable(nsDisplayListBuilder*   aBuilder,
                                                  const nsRect&           aDirtyRect,
                                                  const nsDisplayListSet& aLists)
@@ -324,11 +325,9 @@ nsTableOuterFrame::BuildDisplayListForInnerTable(nsDisplayListBuilder*   aBuilde
   nsIFrame* kid = mFrames.FirstChild();
   // The children should be in content order
   while (kid) {
-    nsresult rv = BuildDisplayListForChild(aBuilder, kid, aDirtyRect, aLists);
-    NS_ENSURE_SUCCESS(rv, rv);
+    BuildDisplayListForChild(aBuilder, kid, aDirtyRect, aLists);
     kid = kid->GetNextSibling();
   }
-  return NS_OK;
 }
 
 nsIFrame*
@@ -470,7 +469,7 @@ nsTableOuterFrame::GetPrefWidth(nsRenderingContext *aRenderingContext)
           nsLayoutUtils::IntrinsicForContainer(aRenderingContext,
                                                mCaptionFrames.FirstChild(),
                                                iwt);
-        maxWidth = NS_MAX(maxWidth, capPref);
+        maxWidth = std::max(maxWidth, capPref);
       }
       break;
     }
@@ -567,7 +566,7 @@ uint8_t
 nsTableOuterFrame::GetCaptionSide()
 {
   if (mCaptionFrames.NotEmpty()) {
-    return mCaptionFrames.FirstChild()->GetStyleTableBorder()->mCaptionSide;
+    return mCaptionFrames.FirstChild()->StyleTableBorder()->mCaptionSide;
   }
   else {
     return NO_SIDE; // no caption
@@ -578,7 +577,7 @@ uint8_t
 nsTableOuterFrame::GetCaptionVerticalAlign()
 {
   const nsStyleCoord& va =
-    mCaptionFrames.FirstChild()->GetStyleTextReset()->mVerticalAlign;
+    mCaptionFrames.FirstChild()->StyleTextReset()->mVerticalAlign;
   return (va.GetUnit() == eStyleUnit_Enumerated)
            ? va.GetIntValue()
            : NS_STYLE_VERTICAL_ALIGN_TOP;
@@ -604,23 +603,23 @@ nsTableOuterFrame::SetDesiredSize(uint8_t         aCaptionSide,
   }
   switch(aCaptionSide) {
     case NS_STYLE_CAPTION_SIDE_LEFT:
-      aWidth = NS_MAX(aInnerMargin.left, aCaptionMargin.left + captionWidth + aCaptionMargin.right) +
+      aWidth = std::max(aInnerMargin.left, aCaptionMargin.left + captionWidth + aCaptionMargin.right) +
                innerWidth + aInnerMargin.right;
       break;
     case NS_STYLE_CAPTION_SIDE_RIGHT:
-      aWidth = NS_MAX(aInnerMargin.right, aCaptionMargin.left + captionWidth + aCaptionMargin.right) +
+      aWidth = std::max(aInnerMargin.right, aCaptionMargin.left + captionWidth + aCaptionMargin.right) +
                innerWidth + aInnerMargin.left;
       break;
     default:
       aWidth = aInnerMargin.left + innerWidth + aInnerMargin.right;
-      aWidth = NS_MAX(aWidth, captionRect.XMost() + aCaptionMargin.right);
+      aWidth = std::max(aWidth, captionRect.XMost() + aCaptionMargin.right);
   }
   aHeight = innerRect.YMost() + aInnerMargin.bottom;
   if (NS_STYLE_CAPTION_SIDE_BOTTOM != aCaptionSide) {
-    aHeight = NS_MAX(aHeight, captionRect.YMost() + aCaptionMargin.bottom);
+    aHeight = std::max(aHeight, captionRect.YMost() + aCaptionMargin.bottom);
   }
   else {
-    aHeight = NS_MAX(aHeight, captionRect.YMost() + aCaptionMargin.bottom +
+    aHeight = std::max(aHeight, captionRect.YMost() + aCaptionMargin.bottom +
                               aInnerMargin.bottom);
   }
 
@@ -687,10 +686,10 @@ nsTableOuterFrame::GetCaptionOrigin(uint32_t         aCaptionSide,
       aOrigin.y = aInnerMargin.top;
       switch (GetCaptionVerticalAlign()) {
         case NS_STYLE_VERTICAL_ALIGN_MIDDLE:
-          aOrigin.y = NS_MAX(0, aInnerMargin.top + ((aInnerSize.height - aCaptionSize.height) / 2));
+          aOrigin.y = std::max(0, aInnerMargin.top + ((aInnerSize.height - aCaptionSize.height) / 2));
           break;
         case NS_STYLE_VERTICAL_ALIGN_BOTTOM:
-          aOrigin.y = NS_MAX(0, aInnerMargin.top + aInnerSize.height - aCaptionSize.height);
+          aOrigin.y = std::max(0, aInnerMargin.top + aInnerSize.height - aCaptionSize.height);
           break;
         default:
           break;
@@ -745,7 +744,7 @@ nsTableOuterFrame::GetInnerOrigin(uint32_t         aCaptionSide,
     if (aInnerMargin.left < minCapWidth) {
       // shift the inner table to get some place for the caption
       aInnerMargin.right += aInnerMargin.left - minCapWidth;
-      aInnerMargin.right  = NS_MAX(0, aInnerMargin.right);
+      aInnerMargin.right  = std::max(0, aInnerMargin.right);
       aInnerMargin.left   = minCapWidth;
     }
     aOrigin.x = aInnerMargin.left;
@@ -773,10 +772,10 @@ nsTableOuterFrame::GetInnerOrigin(uint32_t         aCaptionSide,
       aOrigin.y = aInnerMargin.top;
       switch (GetCaptionVerticalAlign()) {
         case NS_STYLE_VERTICAL_ALIGN_MIDDLE:
-          aOrigin.y = NS_MAX(aInnerMargin.top, (aCaptionSize.height - aInnerSize.height) / 2);
+          aOrigin.y = std::max(aInnerMargin.top, (aCaptionSize.height - aInnerSize.height) / 2);
           break;
         case NS_STYLE_VERTICAL_ALIGN_BOTTOM:
-          aOrigin.y = NS_MAX(aInnerMargin.top, aCaptionSize.height - aInnerSize.height);
+          aOrigin.y = std::max(aInnerMargin.top, aCaptionSize.height - aInnerSize.height);
           break;
         default:
           break;
@@ -995,7 +994,7 @@ NS_METHOD nsTableOuterFrame::Reflow(nsPresContext*           aPresContext,
         }
       }
       innerRS->availableHeight =
-        NS_MAX(0, innerRS->availableHeight - captionHeight);
+        std::max(0, innerRS->availableHeight - captionHeight);
     }
   } else {
     captionSize.SizeTo(0,0);
@@ -1064,45 +1063,21 @@ nsTableOuterFrame::GetType() const
 
 /* ----- global methods ----- */
 
-/*------------------ nsITableLayout methods ------------------------------*/
-NS_IMETHODIMP 
-nsTableOuterFrame::GetCellDataAt(int32_t aRowIndex, int32_t aColIndex, 
-                                 nsIDOMElement* &aCell,   //out params
-                                 int32_t& aStartRowIndex, int32_t& aStartColIndex, 
-                                 int32_t& aRowSpan, int32_t& aColSpan,
-                                 int32_t& aActualRowSpan, int32_t& aActualColSpan,
-                                 bool& aIsSelected)
+nsIContent*
+nsTableOuterFrame::GetCellAt(uint32_t aRowIdx, uint32_t aColIdx) const
 {
-  return InnerTableFrame()->GetCellDataAt(aRowIndex, aColIndex, aCell,
-                                          aStartRowIndex, aStartColIndex, 
-                                          aRowSpan, aColSpan, aActualRowSpan,
-                                          aActualColSpan, aIsSelected);
-}
+  nsTableCellMap* cellMap = InnerTableFrame()->GetCellMap();
+  if (!cellMap) {
+    return nullptr;
+  }
 
-NS_IMETHODIMP
-nsTableOuterFrame::GetTableSize(int32_t& aRowCount, int32_t& aColCount)
-{
-  return InnerTableFrame()->GetTableSize(aRowCount, aColCount);
-}
+  nsTableCellFrame* cell = cellMap->GetCellInfoAt(aRowIdx, aColIdx);
+  if (!cell) {
+    return nullptr;
+  }
 
-NS_IMETHODIMP
-nsTableOuterFrame::GetIndexByRowAndColumn(int32_t aRow, int32_t aColumn,
-                                          int32_t *aIndex)
-{
-  NS_ENSURE_ARG_POINTER(aIndex);
-  return InnerTableFrame()->GetIndexByRowAndColumn(aRow, aColumn, aIndex);
+  return cell->GetContent();
 }
-
-NS_IMETHODIMP
-nsTableOuterFrame::GetRowAndColumnByIndex(int32_t aIndex,
-                                          int32_t *aRow, int32_t *aColumn)
-{
-  NS_ENSURE_ARG_POINTER(aRow);
-  NS_ENSURE_ARG_POINTER(aColumn);
-  return InnerTableFrame()->GetRowAndColumnByIndex(aIndex, aRow, aColumn);
-}
-
-/*---------------- end of nsITableLayout implementation ------------------*/
 
 
 nsIFrame*

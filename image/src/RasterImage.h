@@ -23,7 +23,7 @@
 #include "imgIContainer.h"
 #include "nsIProperties.h"
 #include "nsITimer.h"
-#include "nsWeakReference.h"
+#include "nsIRequest.h"
 #include "nsTArray.h"
 #include "imgFrame.h"
 #include "nsThreadUtils.h"
@@ -38,8 +38,6 @@
   #include "imgIContainerDebug.h"
 #endif
 
-class imgIDecoder;
-class imgIContainerObserver;
 class nsIInputStream;
 
 #define NS_RASTERIMAGE_CID \
@@ -120,9 +118,8 @@ class nsIInputStream;
  * it's not allocated until the second frame is added.
  *
  * @note
- * mAnimationMode, mLoopCount and mObserver are not in the mAnim structure
- * because the first two have public setters and the observer we only get
- * in Init().
+ * mAnimationMode and mLoopCount are not in the mAnim structure because
+ * they have public setters.
  */
 
 class ScaleRequest;
@@ -137,7 +134,7 @@ namespace image {
 
 class Decoder;
 
-class RasterImage : public Image
+class RasterImage : public ImageResource
                   , public nsIProperties
                   , public SupportsWeakPtr<RasterImage>
 #ifdef DEBUG
@@ -152,18 +149,16 @@ public:
   NS_DECL_IMGICONTAINERDEBUG
 #endif
 
-  RasterImage(imgStatusTracker* aStatusTracker = nullptr);
+  // (no public constructor - use ImageFactory)
   virtual ~RasterImage();
 
   virtual nsresult StartAnimation();
   virtual nsresult StopAnimation();
 
   // Methods inherited from Image
-  nsresult Init(imgIDecoderObserver* aObserver,
-                const char* aMimeType,
-                const char* aURIString,
+  nsresult Init(const char* aMimeType,
                 uint32_t aFlags);
-  void     GetCurrentFrameRect(nsIntRect& aRect);
+  virtual nsIntRect FrameRect(uint32_t aWhichFrame) MOZ_OVERRIDE;
 
   // Raster-specific methods
   static NS_METHOD WriteToRasterImage(nsIInputStream* aIn, void* aClosure,
@@ -249,11 +244,16 @@ public:
    */
   nsresult AddSourceData(const char *aBuffer, uint32_t aCount);
 
-  /* Called after the all the source data has been added with addSourceData. */
-  nsresult SourceDataComplete();
-
-  /* Called for multipart images when there's a new source image to add. */
-  nsresult NewSourceData();
+  virtual nsresult OnImageDataAvailable(nsIRequest* aRequest,
+                                        nsISupports* aContext,
+                                        nsIInputStream* aInStr,
+                                        uint64_t aSourceOffset,
+                                        uint32_t aCount) MOZ_OVERRIDE;
+  virtual nsresult OnImageDataComplete(nsIRequest* aRequest,
+                                       nsISupports* aContext,
+                                       nsresult aStatus,
+                                       bool aLastPart) MOZ_OVERRIDE;
+  virtual nsresult OnNewSourceData() MOZ_OVERRIDE;
 
   /**
    * A hint of the number of bytes of source data that the image contains. If
@@ -289,7 +289,13 @@ public:
     kDisposeRestorePrevious // Restore the previous (composited) frame
   };
 
-  const char* GetURIString() { return mURIString.get();}
+  nsCString GetURIString() {
+    nsCString spec;
+    if (GetURI()) {
+      GetURI()->GetSpec(spec);
+    }
+    return spec;
+  }
 
   // Called from module startup. Sets up RasterImage to be used.
   static void Initialize();
@@ -314,7 +320,7 @@ public:
   // Decoder shutdown
   enum eShutdownIntent {
     eShutdownIntent_Done        = 0,
-    eShutdownIntent_Interrupted = 1,
+    eShutdownIntent_NotNeeded   = 1,
     eShutdownIntent_Error       = 2,
     eShutdownIntent_AllCount    = 3
   };
@@ -485,6 +491,9 @@ private:
                                     const gfxRect &aFill,
                                     const nsIntRect &aSubimage);
 
+  nsresult CopyFrame(uint32_t aWhichFrame,
+                     uint32_t aFlags,
+                     gfxImageSurface **_retval);
   /**
    * Advances the animation. Typically, this will advance a single frame, but it
    * may advance multiple frames. This may happen if we have infrequently
@@ -594,6 +603,8 @@ private:
                             uint8_t **imageData, uint32_t *imageLength,
                             uint32_t **paletteData, uint32_t *paletteLength);
 
+  nsresult DoImageDataComplete();
+
   bool ApplyDecodeFlags(uint32_t aNewFlags);
 
   already_AddRefed<layers::Image> GetCurrentImage();
@@ -637,9 +648,6 @@ private: // data
   //! # loops remaining before animation stops (-1 no stop)
   int32_t                    mLoopCount;
   
-  //! imgIDecoderObserver
-  nsWeakPtr                  mObserver;
-
   // Discard members
   uint32_t                   mLockCount;
   DiscardTracker::Node       mDiscardTrackerNode;
@@ -647,7 +655,6 @@ private: // data
   // Source data members
   FallibleTArray<char>       mSourceData;
   nsCString                  mSourceDataMimeType;
-  nsCString                  mURIString;
 
   friend class DiscardTracker;
 
@@ -728,7 +735,11 @@ private: // data
   bool StoringSourceData() const;
 
 protected:
+  RasterImage(imgStatusTracker* aStatusTracker = nullptr, nsIURI* aURI = nullptr);
+
   bool ShouldAnimate();
+
+  friend class ImageFactory;
 };
 
 inline NS_IMETHODIMP RasterImage::GetAnimationMode(uint16_t *aAnimationMode) {

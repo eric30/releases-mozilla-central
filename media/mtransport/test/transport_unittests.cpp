@@ -112,6 +112,12 @@ class TransportTestPeer : public sigslot::has_slots<> {
         peer_(nullptr),
         gathering_complete_(false)
  {
+    std::vector<NrIceStunServer> stun_servers;
+    ScopedDeletePtr<NrIceStunServer> server(NrIceStunServer::Create(
+        std::string((char *)"216.93.246.14"), 3478));
+    stun_servers.push_back(*server);
+    EXPECT_TRUE(NS_SUCCEEDED(ice_ctx_->SetStunServers(stun_servers)));
+
     dtls_->SetIdentity(identity_);
     dtls_->SetRole(name == "P2" ?
                    TransportLayerDtls::CLIENT :
@@ -122,7 +128,7 @@ class TransportTestPeer : public sigslot::has_slots<> {
                                              sizeof(fingerprint_),
                                              &fingerprint_len_);
     EXPECT_TRUE(NS_SUCCEEDED(res));
-    EXPECT_EQ(20, fingerprint_len_);
+    EXPECT_EQ(20u, fingerprint_len_);
   }
 
   ~TransportTestPeer() {
@@ -134,6 +140,7 @@ class TransportTestPeer : public sigslot::has_slots<> {
   void DestroyFlow() {
     loopback_->Disconnect();
     flow_ = nullptr;
+    ice_ctx_ = nullptr;
   }
 
   void SetDtlsAllowAll() {

@@ -12,42 +12,39 @@ let Toolbox = temp.Toolbox;
 Cu.import("resource:///modules/devtools/Target.jsm", temp);
 let TargetFactory = temp.TargetFactory;
 
-let toolbox;
+let toolbox, target;
 
 function test()
 {
   waitForExplicitFinish();
 
   gBrowser.selectedTab = gBrowser.addTab();
+  target = TargetFactory.forTab(gBrowser.selectedTab);
+
   gBrowser.selectedBrowser.addEventListener("load", function onLoad(evt) {
     gBrowser.selectedBrowser.removeEventListener(evt.type, onLoad, true);
-    openToolbox(testBottomHost);
+    gDevTools.showToolbox(target)
+             .then(testBottomHost, console.error)
+             .then(null, console.error);
   }, true);
 
   content.location = "data:text/html,test for opening toolbox in different hosts";
 }
 
-function openToolbox(callback)
+function testBottomHost(aToolbox)
 {
-  let target = TargetFactory.forTab(gBrowser.selectedTab);
-  gDevTools.toggleToolboxForTarget(target);
+  toolbox = aToolbox;
 
-  toolbox = gDevTools.getToolboxForTarget(target);
-  toolbox.once("ready", callback);
-}
-
-function testBottomHost()
-{
   checkHostType(Toolbox.HostType.BOTTOM);
 
   // test UI presence
-  let iframe = document.getElementById("devtools-toolbox-bottom-iframe");
+  let nbox = gBrowser.getNotificationBox();
+  let iframe = document.getAnonymousElementByAttribute(nbox, "class", "devtools-toolbox-bottom-iframe");
   ok(iframe, "toolbox bottom iframe exists");
 
   checkToolboxLoaded(iframe);
 
-  toolbox.once("host-changed", testSidebarHost);
-  toolbox.hostType = Toolbox.HostType.SIDE;
+  toolbox.switchHost(Toolbox.HostType.SIDE).then(testSidebarHost);
 }
 
 function testSidebarHost()
@@ -55,23 +52,24 @@ function testSidebarHost()
   checkHostType(Toolbox.HostType.SIDE);
 
   // test UI presence
-  let bottom = document.getElementById("devtools-toolbox-bottom-iframe");
+  let nbox = gBrowser.getNotificationBox();
+  let bottom = document.getAnonymousElementByAttribute(nbox, "class", "devtools-toolbox-bottom-iframe");
   ok(!bottom, "toolbox bottom iframe doesn't exist");
 
-  let iframe = document.getElementById("devtools-toolbox-side-iframe");
+  let iframe = document.getAnonymousElementByAttribute(nbox, "class", "devtools-toolbox-side-iframe");
   ok(iframe, "toolbox side iframe exists");
 
   checkToolboxLoaded(iframe);
 
-  toolbox.once("host-changed", testWindowHost);
-  toolbox.hostType = Toolbox.HostType.WINDOW;
+  toolbox.switchHost(Toolbox.HostType.WINDOW).then(testWindowHost);
 }
 
 function testWindowHost()
 {
   checkHostType(Toolbox.HostType.WINDOW);
 
-  let sidebar = document.getElementById("devtools-toolbox-side-iframe");
+  let nbox = gBrowser.getNotificationBox();
+  let sidebar = document.getAnonymousElementByAttribute(nbox, "class", "devtools-toolbox-side-iframe");
   ok(!sidebar, "toolbox sidebar iframe doesn't exist");
 
   let win = Services.wm.getMostRecentWindow("devtools:toolbox");
@@ -86,21 +84,20 @@ function testWindowHost()
 function testToolSelect()
 {
   // make sure we can load a tool after switching hosts
-  toolbox.once("inspector-ready", testDestroy);
-  toolbox.selectTool("inspector");
+  toolbox.selectTool("inspector").then(testDestroy);
 }
 
 function testDestroy()
 {
-  toolbox.once("destroyed", function() {
-    openToolbox(testRememberHost);
+  toolbox.destroy().then(function() {
+    target = TargetFactory.forTab(gBrowser.selectedTab);
+    gDevTools.showToolbox(target).then(testRememberHost);
   });
-
-  toolbox.destroy();
 }
 
-function testRememberHost()
+function testRememberHost(aToolbox)
 {
+  toolbox = aToolbox;
   // last host was the window - make sure it's the same when re-opening
   is(toolbox.hostType, Toolbox.HostType.WINDOW, "host remembered");
 
@@ -128,8 +125,9 @@ function cleanup()
 {
   Services.prefs.setCharPref("devtools.toolbox.host", Toolbox.HostType.BOTTOM);
 
-  toolbox.destroy();
-  DevTools = Toolbox = toolbox = null;
-  gBrowser.removeCurrentTab();
-  finish();
-}
+  toolbox.destroy().then(function() {
+    DevTools = Toolbox = toolbox = target = null;
+    gBrowser.removeCurrentTab();
+    finish();
+  });
+ }

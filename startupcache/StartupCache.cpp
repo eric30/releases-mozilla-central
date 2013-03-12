@@ -66,7 +66,7 @@ NS_MEMORY_REPORTER_IMPLEMENT(StartupCacheMapping,
     "Memory used to hold the mapping of the startup cache from file.  This "
     "memory is likely to be swapped out shortly after start-up.")
 
-NS_MEMORY_REPORTER_MALLOC_SIZEOF_FUN(StartupCacheDataMallocSizeOf, "startup-cache/data")
+NS_MEMORY_REPORTER_MALLOC_SIZEOF_FUN(StartupCacheDataMallocSizeOf)
 
 static int64_t
 GetStartupCacheDataSize()
@@ -139,7 +139,15 @@ StartupCache::~StartupCache()
   // but an early shutdown means either mTimer didn't run 
   // or the write thread is still running.
   WaitOnWriteThread();
-  WriteToDisk();
+
+  // If we shutdown quickly timer wont have fired. Instead of writing
+  // it on the main thread and block the shutdown we simply wont update
+  // the startup cache. Always do this if the file doesn't exist since
+  // we use it part of the packge step.
+  if (!mArchive) {
+    WriteToDisk();
+  }
+
   gStartupCache = nullptr;
   (void)::NS_UnregisterMemoryReporter(mMappingMemoryReporter);
   (void)::NS_UnregisterMemoryReporter(mDataMemoryReporter);
@@ -171,6 +179,20 @@ StartupCache::Init()
     if (NS_FAILED(rv)) {
       // return silently, this will fail in mochitests's xpcshell process.
       return rv;
+    }
+
+    nsCOMPtr<nsIFile> profDir;
+    NS_GetSpecialDirectory("ProfDS", getter_AddRefs(profDir));
+    if (profDir) {
+      bool same;
+      if (NS_SUCCEEDED(profDir->Equals(file, &same)) && !same) {
+        // We no longer store the startup cache in the main profile
+        // directory, so we should cleanup the old one.
+        if (NS_SUCCEEDED(
+              profDir->AppendNative(NS_LITERAL_CSTRING("startupCache")))) {
+          profDir->Remove(true);
+        }
+      }
     }
 
     rv = file->AppendNative(NS_LITERAL_CSTRING("startupCache"));

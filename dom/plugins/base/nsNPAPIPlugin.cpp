@@ -186,9 +186,9 @@ enum eNPPStreamTypeInternal {
 
 static NS_DEFINE_IID(kMemoryCID, NS_MEMORY_CID);
 
-PRIntervalTime NS_NotifyBeginPluginCall()
+PRIntervalTime NS_NotifyBeginPluginCall(NSPluginCallReentry aReentryState)
 {
-  nsNPAPIPluginInstance::BeginPluginCall();
+  nsNPAPIPluginInstance::BeginPluginCall(aReentryState);
   return PR_IntervalNow();
 }
 
@@ -196,9 +196,9 @@ PRIntervalTime NS_NotifyBeginPluginCall()
 // registered to listen to the "experimental-notify-plugin-call" subject.
 // Each "experimental-notify-plugin-call" notification carries with it the run
 // time value in milliseconds that the call took to execute.
-void NS_NotifyPluginCall(PRIntervalTime startTime) 
+void NS_NotifyPluginCall(PRIntervalTime startTime, NSPluginCallReentry aReentryState)
 {
-  nsNPAPIPluginInstance::EndPluginCall();
+  nsNPAPIPluginInstance::EndPluginCall(aReentryState);
 
   PRIntervalTime endTime = PR_IntervalNow() - startTime;
   nsCOMPtr<nsIObserverService> notifyUIService =
@@ -663,20 +663,6 @@ GetJSContextFromNPP(NPP npp)
   return GetJSContextFromDoc(doc);
 }
 
-static nsresult
-GetPrivacyFromNPP(NPP npp, bool* aPrivate)
-{
-  nsCOMPtr<nsIDocument> doc = GetDocumentFromNPP(npp);
-  NS_ENSURE_TRUE(doc, NS_ERROR_FAILURE);
-  nsCOMPtr<nsPIDOMWindow> domwindow = doc->GetWindow();
-  NS_ENSURE_TRUE(domwindow, NS_ERROR_FAILURE);
-
-  nsCOMPtr<nsIDocShell> docShell = domwindow->GetDocShell();
-  nsCOMPtr<nsILoadContext> loadContext = do_QueryInterface(docShell);
-  *aPrivate = loadContext && loadContext->UsePrivateBrowsing();
-  return NS_OK;
-}
-
 static already_AddRefed<nsIChannel>
 GetChannelFromNPP(NPP npp)
 {
@@ -789,7 +775,8 @@ nsPluginThreadRunnable::Run()
   if (mFunc) {
     PluginDestructionGuard guard(mInstance);
 
-    NS_TRY_SAFE_CALL_VOID(mFunc(mUserData), nullptr);
+    NS_TRY_SAFE_CALL_VOID(mFunc(mUserData), nullptr,
+                          NS_PLUGIN_CALL_UNSAFE_TO_REENTER_GECKO);
   }
 
   return NS_OK;
@@ -1221,7 +1208,7 @@ _getwindowobject(NPP npp)
     NPN_PLUGIN_LOG(PLUGIN_LOG_ALWAYS,("NPN_getwindowobject called from the wrong thread\n"));
     return nullptr;
   }
-  JSContext *cx = GetJSContextFromNPP(npp);
+  AutoPushJSContext cx(GetJSContextFromNPP(npp));
   NS_ENSURE_TRUE(cx, nullptr);
 
   // Using ::JS_GetGlobalObject(cx) is ok here since the window we
@@ -1248,7 +1235,7 @@ _getpluginelement(NPP npp)
   if (!element)
     return nullptr;
 
-  JSContext *cx = GetJSContextFromNPP(npp);
+  AutoPushJSContext cx(GetJSContextFromNPP(npp));
   NS_ENSURE_TRUE(cx, nullptr);
 
   nsCOMPtr<nsIXPConnect> xpc(do_GetService(nsIXPConnect::GetCID()));
@@ -1519,7 +1506,7 @@ _evaluate(NPP npp, NPObject* npobj, NPString *script, NPVariant *result)
   nsIDocument *doc = GetDocumentFromNPP(npp);
   NS_ENSURE_TRUE(doc, false);
 
-  JSContext *cx = GetJSContextFromDoc(doc);
+  AutoPushJSContext cx(GetJSContextFromDoc(doc));
   NS_ENSURE_TRUE(cx, false);
 
   nsCOMPtr<nsIScriptContext> scx = GetScriptContextFromJSContext(cx);
@@ -1592,8 +1579,12 @@ _evaluate(NPP npp, NPObject* npobj, NPString *script, NPVariant *result)
                  ("NPN_Evaluate(npp %p, npobj %p, script <<<%s>>>) called\n",
                   npp, npobj, script->UTF8Characters));
 
-  nsresult rv = scx->EvaluateStringWithValue(utf16script, obj, principal,
-                                             spec, 0, 0, rval, nullptr);
+  JS::CompileOptions options(cx);
+  options.setFileAndLine(spec, 0)
+         .setVersion(JSVERSION_DEFAULT);
+  nsresult rv = scx->EvaluateString(utf16script, *obj, options,
+                                    /* aCoerceToString = */ false,
+                                    rval);
 
   return NS_SUCCEEDED(rv) &&
          (!result || JSValToNPVariant(npp, cx, *rval, result));
@@ -2070,7 +2061,11 @@ _getvalue(NPP npp, NPNVariable variable, void *result)
 
   case NPNVprivateModeBool: {
     bool privacy;
-    nsresult rv = GetPrivacyFromNPP(npp, &privacy);
+    nsNPAPIPluginInstance *inst = static_cast<nsNPAPIPluginInstance*>(npp->ndata);
+    if (!inst)
+      return NPERR_GENERIC_ERROR;
+
+    nsresult rv = inst->IsPrivateBrowsing(&privacy);
     if (NS_FAILED(rv))
       return NPERR_GENERIC_ERROR;
     *(NPBool*)result = (NPBool)privacy;
@@ -2147,18 +2142,23 @@ _getvalue(NPP npp, NPNVariable variable, void *result)
     return NPERR_NO_ERROR;
   }
 
-   case NPNVsupportsCoreAnimationBool: {
-     *(NPBool*)result = nsCocoaFeatures::SupportCoreAnimationPlugins();
+  case NPNVsupportsCoreAnimationBool: {
+    *(NPBool*)result = nsCocoaFeatures::SupportCoreAnimationPlugins();
 
-     return NPERR_NO_ERROR;
-   }
+    return NPERR_NO_ERROR;
+  }
 
-   case NPNVsupportsInvalidatingCoreAnimationBool: {
-     *(NPBool*)result = nsCocoaFeatures::SupportCoreAnimationPlugins();
+  case NPNVsupportsInvalidatingCoreAnimationBool: {
+    *(NPBool*)result = nsCocoaFeatures::SupportCoreAnimationPlugins();
 
-     return NPERR_NO_ERROR;
-   }
+    return NPERR_NO_ERROR;
+  }
 
+  case NPNVsupportsCompositingCoreAnimationPluginsBool: {
+    *(NPBool*)result = PR_TRUE;
+
+    return NPERR_NO_ERROR;
+  }
 
 #ifndef NP_NO_CARBON
   case NPNVsupportsCarbonBool: {
@@ -2768,15 +2768,24 @@ _getauthenticationinfo(NPP instance, const char *protocol, const char *host,
   if (!authManager)
     return NPERR_GENERIC_ERROR;
 
+  nsNPAPIPluginInstance *inst = static_cast<nsNPAPIPluginInstance*>(instance->ndata);
+  if (!inst)
+    return NPERR_GENERIC_ERROR;
+
   bool authPrivate = false;
-  GetPrivacyFromNPP(instance, &authPrivate);
+  if (NS_FAILED(inst->IsPrivateBrowsing(&authPrivate)))
+    return NPERR_GENERIC_ERROR;
+
+  nsIDocument *doc = GetDocumentFromNPP(instance);
+  NS_ENSURE_TRUE(doc, NPERR_GENERIC_ERROR);
+  nsIPrincipal *principal = doc->NodePrincipal();
 
   nsAutoString unused, uname16, pwd16;
   if (NS_FAILED(authManager->GetAuthIdentity(proto, nsDependentCString(host),
                                              port, nsDependentCString(scheme),
                                              nsDependentCString(realm),
                                              EmptyCString(), unused, uname16,
-                                             pwd16, authPrivate))) {
+                                             pwd16, authPrivate, principal))) {
     return NPERR_GENERIC_ERROR;
   }
 
@@ -2805,7 +2814,13 @@ _scheduletimer(NPP instance, uint32_t interval, NPBool repeat, PluginTimerFunc t
 void NP_CALLBACK
 _unscheduletimer(NPP instance, uint32_t timerID)
 {
+#ifdef MOZ_WIDGET_ANDROID
+  // Sometimes Flash calls this with a dead NPP instance. Ensure the one we have
+  // here is valid and maps to a nsNPAPIPluginInstance.
+  nsNPAPIPluginInstance *inst = nsNPAPIPluginInstance::GetFromNPP(instance);
+#else
   nsNPAPIPluginInstance *inst = (nsNPAPIPluginInstance *)instance->ndata;
+#endif
   if (!inst)
     return;
 

@@ -35,7 +35,7 @@
 #include "nsIDOMEventListener.h"
 #include "nsThreadUtils.h"
 
-class nsIView;
+class nsView;
 class nsStyleContext;
 class nsIListControlFrame;
 class nsComboboxDisplayFrame;
@@ -81,9 +81,9 @@ public:
                          nsGUIEvent* aEvent,
                          nsEventStatus* aEventStatus);
 
-  NS_IMETHOD BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                              const nsRect&           aDirtyRect,
-                              const nsDisplayListSet& aLists) MOZ_OVERRIDE;
+  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
+                                const nsRect&           aDirtyRect,
+                                const nsDisplayListSet& aLists) MOZ_OVERRIDE;
 
   void PaintFocus(nsRenderingContext& aRenderingContext, nsPoint aPt);
 
@@ -177,6 +177,9 @@ public:
    */
   virtual bool ShouldRollupOnMouseWheelEvent()
     { return true; }
+
+  virtual bool ShouldConsumeOnMouseWheelEvent()
+    { return false; }
 
   /**
    * A combobox should not roll up if activated by a mouse activate message

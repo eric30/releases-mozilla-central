@@ -19,7 +19,7 @@
 #ifdef USE_FAKE_MEDIA_STREAMS
 #include "FakeMediaStreams.h"
 #else
-#include "nsDOMMediaStream.h"
+#include "DOMMediaStream.h"
 #include "MediaSegment.h"
 #endif
 
@@ -37,6 +37,7 @@ namespace mozilla {
 #endif
 
 #include "nricectx.h"
+#include "nriceresolver.h"
 #include "nricemediastream.h"
 #include "MediaPipeline.h"
 
@@ -47,13 +48,14 @@ class PeerConnectionImpl;
 /* Temporary for providing audio data */
 class Fake_AudioGenerator {
  public:
-Fake_AudioGenerator(nsDOMMediaStream* aStream) : mStream(aStream), mCount(0) {
+  typedef mozilla::DOMMediaStream DOMMediaStream;
+
+Fake_AudioGenerator(DOMMediaStream* aStream) : mStream(aStream), mCount(0) {
     mTimer = do_CreateInstance("@mozilla.org/timer;1");
-    PR_ASSERT(mTimer);
+    MOZ_ASSERT(mTimer);
 
     // Make a track
     mozilla::AudioSegment *segment = new mozilla::AudioSegment();
-    segment->Init(1); // 1 Channel
     mStream->GetStream()->AsSourceStream()->AddTrack(1, 16000, 0, segment);
 
     // Set the timer
@@ -63,23 +65,23 @@ Fake_AudioGenerator(nsDOMMediaStream* aStream) : mStream(aStream), mCount(0) {
   static void Callback(nsITimer* timer, void *arg) {
     Fake_AudioGenerator* gen = static_cast<Fake_AudioGenerator*>(arg);
 
-    nsRefPtr<mozilla::SharedBuffer> samples = mozilla::SharedBuffer::Create(1600 * 2 * sizeof(int16_t));
-    for (int i=0; i<1600*2; i++) {
-      reinterpret_cast<int16_t *>(samples->Data())[i] = ((gen->mCount % 8) * 4000) - (7*4000)/2;
+    nsRefPtr<mozilla::SharedBuffer> samples = mozilla::SharedBuffer::Create(1600 * sizeof(int16_t));
+    int16_t* data = static_cast<int16_t*>(samples->Data());
+    for (int i=0; i<1600; i++) {
+      data[i] = ((gen->mCount % 8) * 4000) - (7*4000)/2;
       ++gen->mCount;
     }
 
     mozilla::AudioSegment segment;
-    segment.Init(1);
-    segment.AppendFrames(samples.forget(), 1600,
-                         0, 1600, mozilla::AUDIO_FORMAT_S16);
-
+    nsAutoTArray<const int16_t*,1> channelData;
+    channelData.AppendElement(data);
+    segment.AppendFrames(samples.forget(), channelData, 1600);
     gen->mStream->GetStream()->AsSourceStream()->AppendToTrack(1, &segment);
   }
 
  private:
   nsCOMPtr<nsITimer> mTimer;
-  nsRefPtr<nsDOMMediaStream> mStream;
+  nsRefPtr<DOMMediaStream> mStream;
   int mCount;
 };
 
@@ -87,11 +89,13 @@ Fake_AudioGenerator(nsDOMMediaStream* aStream) : mStream(aStream), mCount(0) {
 #ifdef MOZILLA_INTERNAL_API
 class Fake_VideoGenerator {
  public:
-  Fake_VideoGenerator(nsDOMMediaStream* aStream) {
+  typedef mozilla::DOMMediaStream DOMMediaStream;
+
+  Fake_VideoGenerator(DOMMediaStream* aStream) {
     mStream = aStream;
     mCount = 0;
     mTimer = do_CreateInstance("@mozilla.org/timer;1");
-    PR_ASSERT(mTimer);
+    MOZ_ASSERT(mTimer);
 
     // Make a track
     mozilla::VideoSegment *segment = new mozilla::VideoSegment();
@@ -152,38 +156,24 @@ class Fake_VideoGenerator {
 
  private:
   nsCOMPtr<nsITimer> mTimer;
-  nsRefPtr<nsDOMMediaStream> mStream;
+  nsRefPtr<DOMMediaStream> mStream;
   int mCount;
 };
 #endif
 
-class LocalSourceStreamInfo : public mozilla::MediaStreamListener {
+class LocalSourceStreamInfo {
 public:
-  LocalSourceStreamInfo(nsDOMMediaStream* aMediaStream)
-    : mMediaStream(aMediaStream) {}
+  typedef mozilla::DOMMediaStream DOMMediaStream;
+
+  LocalSourceStreamInfo(DOMMediaStream* aMediaStream)
+    : mMediaStream(aMediaStream) {
+      MOZ_ASSERT(aMediaStream);
+    }
   ~LocalSourceStreamInfo() {
     mMediaStream = NULL;
   }
 
-  /**
-   * Notify that changes to one of the stream tracks have been queued.
-   * aTrackEvents can be any combination of TRACK_EVENT_CREATED and
-   * TRACK_EVENT_ENDED. aQueuedMedia is the data being added to the track
-   * at aTrackOffset (relative to the start of the stream).
-   */
-  virtual void NotifyQueuedTrackChanges(
-    mozilla::MediaStreamGraph* aGraph,
-    mozilla::TrackID aID,
-    mozilla::TrackRate aTrackRate,
-    mozilla::TrackTicks aTrackOffset,
-    uint32_t aTrackEvents,
-    const mozilla::MediaSegment& aQueuedMedia
-  );
-
-  virtual void NotifyPull(mozilla::MediaStreamGraph* aGraph,
-    mozilla::StreamTime aDesiredTime) {}
-
-  nsDOMMediaStream* GetMediaStream() {
+  DOMMediaStream* GetMediaStream() {
     return mMediaStream;
   }
   void StorePipeline(int aTrack, mozilla::RefPtr<mozilla::MediaPipeline> aPipeline);
@@ -194,65 +184,68 @@ public:
   unsigned VideoTrackCount();
 
   void Detach() {
-    // Disconnect my own listener
-    GetMediaStream()->GetStream()->RemoveListener(this);
-
     // walk through all the MediaPipelines and disconnect them.
     for (std::map<int, mozilla::RefPtr<mozilla::MediaPipeline> >::iterator it =
            mPipelines.begin(); it != mPipelines.end();
          ++it) {
-      it->second->DetachMediaStream();
+      it->second->Shutdown();
     }
     mMediaStream = NULL;
   }
 
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(LocalSourceStreamInfo)
 private:
   std::map<int, mozilla::RefPtr<mozilla::MediaPipeline> > mPipelines;
-  nsRefPtr<nsDOMMediaStream> mMediaStream;
+  nsRefPtr<DOMMediaStream> mMediaStream;
   nsTArray<mozilla::TrackID> mAudioTracks;
   nsTArray<mozilla::TrackID> mVideoTracks;
 };
 
 class RemoteSourceStreamInfo {
  public:
-  RemoteSourceStreamInfo(nsDOMMediaStream* aMediaStream) :
-    mMediaStream(already_AddRefed<nsDOMMediaStream>(aMediaStream)),
-    mPipelines() {}
+  typedef mozilla::DOMMediaStream DOMMediaStream;
 
-  nsDOMMediaStream* GetMediaStream() {
+  RemoteSourceStreamInfo(DOMMediaStream* aMediaStream) :
+    mMediaStream(already_AddRefed<DOMMediaStream>(aMediaStream)),
+    mPipelines() {
+      MOZ_ASSERT(aMediaStream);
+    }
+
+  DOMMediaStream* GetMediaStream() {
     return mMediaStream;
   }
-  void StorePipeline(int aTrack, mozilla::RefPtr<mozilla::MediaPipeline> aPipeline);
+  void StorePipeline(int aTrack, bool aIsVideo,
+                     mozilla::RefPtr<mozilla::MediaPipeline> aPipeline);
 
   void Detach() {
     // walk through all the MediaPipelines and disconnect them.
+    // XXX we should clear the mTypes map
     for (std::map<int, mozilla::RefPtr<mozilla::MediaPipeline> >::iterator it =
            mPipelines.begin(); it != mPipelines.end();
          ++it) {
-      it->second->DetachMediaStream();
+      it->second->Shutdown();
     }
     mMediaStream = NULL;
   }
 
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(RemoteSourceStreamInfo)
  private:
-  nsRefPtr<nsDOMMediaStream> mMediaStream;
+  nsRefPtr<DOMMediaStream> mMediaStream;
   std::map<int, mozilla::RefPtr<mozilla::MediaPipeline> > mPipelines;
+  std::map<int, bool> mTypes;
 };
 
 class PeerConnectionMedia : public sigslot::has_slots<> {
  public:
   PeerConnectionMedia(PeerConnectionImpl *parent)
       : mParent(parent),
-      mLocalSourceStreamsLock(PR_NewLock()),
-      mIceCtx(NULL) {}
+      mLocalSourceStreamsLock("PeerConnectionMedia.mLocalSourceStreamsLock"),
+      mIceCtx(NULL),
+      mDNSResolver(new mozilla::NrIceResolver()) {}
 
-  ~PeerConnectionMedia() {
-    PR_DestroyLock(mLocalSourceStreamsLock);
-  }
+  ~PeerConnectionMedia() {}
 
-  nsresult Init();
-
+  nsresult Init(const std::vector<mozilla::NrIceStunServer>& stun_servers);
   // WARNING: This destroys the object!
   void SelfDestruct();
 
@@ -308,7 +301,26 @@ class PeerConnectionMedia : public sigslot::has_slots<> {
                         mozilla::RefPtr<mozilla::TransportFlow> aFlow) {
     int index_inner = aIndex * 2 + (aRtcp ? 1 : 0);
 
+    MOZ_ASSERT(!mTransportFlows[index_inner]);
     mTransportFlows[index_inner] = aFlow;
+  }
+
+  mozilla::RefPtr<mozilla::AudioSessionConduit> GetConduit(int aStreamIndex, bool aReceive) {
+    int index_inner = aStreamIndex * 2 + (aReceive ? 0 : 1);
+
+    if (mAudioConduits.find(index_inner) == mAudioConduits.end())
+      return NULL;
+
+    return mAudioConduits[index_inner];
+  }
+
+  // Add a conduit
+  void AddConduit(int aIndex, bool aReceive,
+                  const mozilla::RefPtr<mozilla::AudioSessionConduit> &aConduit) {
+    int index_inner = aIndex * 2 + (aReceive ? 0 : 1);
+
+    MOZ_ASSERT(!mAudioConduits[index_inner]);
+    mAudioConduits[index_inner] = aConduit;
   }
 
   // ICE state signals
@@ -332,19 +344,25 @@ class PeerConnectionMedia : public sigslot::has_slots<> {
   PeerConnectionImpl *mParent;
 
   // A list of streams returned from GetUserMedia
-  PRLock *mLocalSourceStreamsLock;
+  mozilla::Mutex mLocalSourceStreamsLock;
   nsTArray<nsRefPtr<LocalSourceStreamInfo> > mLocalSourceStreams;
 
   // A list of streams provided by the other side
-  PRLock *mRemoteSourceStreamsLock;
   nsTArray<nsRefPtr<RemoteSourceStreamInfo> > mRemoteSourceStreams;
 
   // ICE objects
   mozilla::RefPtr<mozilla::NrIceCtx> mIceCtx;
   std::vector<mozilla::RefPtr<mozilla::NrIceMediaStream> > mIceStreams;
 
+  // DNS
+  nsRefPtr<mozilla::NrIceResolver> mDNSResolver;
+
   // Transport flows: even is RTP, odd is RTCP
   std::map<int, mozilla::RefPtr<mozilla::TransportFlow> > mTransportFlows;
+
+  // Conduits: even is receive, odd is transmit (for easier correlation with
+  // flows)
+  std::map<int, mozilla::RefPtr<mozilla::AudioSessionConduit> > mAudioConduits;
 
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(PeerConnectionMedia)
 };

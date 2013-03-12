@@ -34,13 +34,18 @@ CPPSRCS += \
   $(NULL)
 endif
 
+ifeq ($(OS_ARCH),WINNT)
+OS_CXXFLAGS += -DNOMINMAX
+endif
+
 FORCE_STATIC_LIB = 1
 
 include $(topsrcdir)/config/rules.mk
 
 ifdef MOZ_WEBRTC
 LOCAL_INCLUDES += \
-  -I$(topsrcdir)/media/webrtc/trunk/src \
+  -I$(topsrcdir)/media/webrtc/trunk/webrtc \
   -I$(topsrcdir)/media/webrtc/signaling/src/common \
+  -I$(topsrcdir)/media/webrtc/signaling/src/common/browser_logging \
   $(NULL)
 endif

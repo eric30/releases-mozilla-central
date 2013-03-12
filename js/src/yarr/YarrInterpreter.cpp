@@ -740,7 +740,11 @@ public:
                     // inputPosition, but for repeats other than fixed these values should be
                     // the same anyway! (We don't pre-check for greedy or non-greedy matches.)
                     ASSERT((&term - term.atom.parenthesesWidth)->type == ByteTerm::TypeParenthesesSubpatternOnceBegin);
+
+		    // Disabled, see bug 808478
+#if 0
                     ASSERT((&term - term.atom.parenthesesWidth)->inputPosition == term.inputPosition);
+#endif
                     unsigned subpatternId = term.atom.subpatternId;
                     output[subpatternId << 1] = input.getPos() + term.inputPosition;
                 }
@@ -1116,6 +1120,10 @@ public:
     matchAgain:
         ASSERT(context->term < static_cast<int>(disjunction->terms.size()));
 
+        // Prevent jank resulting from getting stuck in Yarr for a long time.
+        if (!JS_CHECK_OPERATION_LIMIT(this->cx))
+            return JSRegExpErrorInternal;
+
         switch (currentTerm().type) {
         case ByteTerm::TypeSubpatternBegin:
             MATCH_NEXT();
@@ -1273,6 +1281,10 @@ public:
 
     backtrack:
         ASSERT(context->term < static_cast<int>(disjunction->terms.size()));
+
+        // Prevent jank resulting from getting stuck in Yarr for a long time.
+        if (!JS_CHECK_OPERATION_LIMIT(this->cx))
+            return JSRegExpErrorInternal;
 
         switch (currentTerm().type) {
         case ByteTerm::TypeSubpatternBegin:
@@ -1440,8 +1452,9 @@ public:
         return output[0];
     }
 
-    Interpreter(BytecodePattern* pattern, unsigned* output, const CharType* input, unsigned length, unsigned start)
-        : pattern(pattern)
+    Interpreter(JSContext *cx, BytecodePattern* pattern, unsigned* output, const CharType* input, unsigned length, unsigned start)
+        : cx(cx)
+        , pattern(pattern)
         , output(output)
         , input(input, start, length)
         , allocatorPool(0)
@@ -1450,6 +1463,7 @@ public:
     }
 
 private:
+    JSContext *cx;
     BytecodePattern* pattern;
     unsigned* output;
     InputStream input;
@@ -1934,23 +1948,23 @@ PassOwnPtr<BytecodePattern> byteCompile(YarrPattern& pattern, BumpPointerAllocat
     return ByteCompiler(pattern).compile(allocator);
 }
 
-unsigned interpret(BytecodePattern* bytecode, const String& input, unsigned start, unsigned* output)
+unsigned interpret(JSContext *cx, BytecodePattern* bytecode, const String& input, unsigned start, unsigned* output)
 {
 #if YARR_8BIT_CHAR_SUPPORT
     if (input.is8Bit())
-        return Interpreter<LChar>(bytecode, output, input.characters8(), input.length(), start).interpret();
+        return Interpreter<LChar>(cx, bytecode, output, input.characters8(), input.length(), start).interpret();
 #endif
-    return Interpreter<UChar>(bytecode, output, input.chars(), input.length(), start).interpret();
+    return Interpreter<UChar>(cx, bytecode, output, input.chars(), input.length(), start).interpret();
 }
 
-unsigned interpret(BytecodePattern* bytecode, const LChar* input, unsigned length, unsigned start, unsigned* output)
+unsigned interpret(JSContext *cx, BytecodePattern* bytecode, const LChar* input, unsigned length, unsigned start, unsigned* output)
 {
-    return Interpreter<LChar>(bytecode, output, input, length, start).interpret();
+    return Interpreter<LChar>(cx, bytecode, output, input, length, start).interpret();
 }
 
-unsigned interpret(BytecodePattern* bytecode, const UChar* input, unsigned length, unsigned start, unsigned* output)
+unsigned interpret(JSContext *cx, BytecodePattern* bytecode, const UChar* input, unsigned length, unsigned start, unsigned* output)
 {
-    return Interpreter<UChar>(bytecode, output, input, length, start).interpret();
+    return Interpreter<UChar>(cx, bytecode, output, input, length, start).interpret();
 }
 
 // These should be the same for both UChar & LChar.

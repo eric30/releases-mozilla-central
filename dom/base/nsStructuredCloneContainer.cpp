@@ -50,12 +50,10 @@ nsStructuredCloneContainer::InitFromVariant(nsIVariant *aData, JSContext *aCx)
   NS_ENSURE_SUCCESS(rv, NS_ERROR_UNEXPECTED);
 
   // Make sure that we serialize in the right context.
+  MOZ_ASSERT(aCx == nsContentUtils::GetCurrentJSContext());
   JSAutoRequest ar(aCx);
   JSAutoCompartment ac(aCx, JS_GetGlobalObject(aCx));
   JS_WrapValue(aCx, &jsData);
-
-  nsCxPusher cxPusher;
-  cxPusher.Push(aCx);
 
   uint64_t* jsBytes = nullptr;
   bool success = JS_WriteStructuredClone(aCx, jsData, &jsBytes, &mSize,
@@ -116,7 +114,7 @@ nsStructuredCloneContainer::DeserializeToVariant(JSContext *aCx,
 
   // Deserialize to a jsval.
   jsval jsStateObj;
-  JSBool hasTransferable;
+  JSBool hasTransferable = false;
   bool success = JS_ReadStructuredClone(aCx, mData, mSize, mVersion,
                                           &jsStateObj, nullptr, nullptr) &&
                  JS_StructuredCloneHasTransferables(mData, mSize,

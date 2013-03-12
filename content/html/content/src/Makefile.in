@@ -13,16 +13,72 @@ include $(DEPTH)/config/autoconf.mk
 MODULE		= content
 LIBRARY_NAME	= gkconhtmlcon_s
 LIBXUL_LIBRARY	= 1
+ifndef _MSC_VER
 FAIL_ON_WARNINGS = 1
+endif # !_MSC_VER
 
 
 EXPORTS		= \
 		HTMLPropertiesCollection.h \
 		nsGenericHTMLElement.h \
-		nsHTMLIFrameElement.h \
 		nsClientRect.h \
 		nsHTMLDNSPrefetch.h \
-		nsTimeRanges.h \
+		$(NULL)
+
+EXPORTS_NAMESPACES = mozilla/dom
+
+EXPORTS_mozilla/dom = \
+		HTMLAnchorElement.h \
+		HTMLAreaElement.h \
+		HTMLBodyElement.h \
+		HTMLBRElement.h \
+		HTMLButtonElement.h \
+		HTMLDataElement.h \
+		HTMLDataListElement.h \
+		HTMLDivElement.h \
+		HTMLFieldSetElement.h \
+		HTMLFontElement.h \
+		HTMLFrameElement.h \
+		HTMLFrameSetElement.h \
+		HTMLHeadingElement.h \
+		HTMLHRElement.h \
+		HTMLIFrameElement.h \
+		HTMLImageElement.h \
+		HTMLLabelElement.h \
+		HTMLLegendElement.h \
+		HTMLLIElement.h \
+		HTMLLinkElement.h \
+		HTMLMapElement.h \
+		HTMLMenuElement.h \
+		HTMLMenuItemElement.h \
+		HTMLMetaElement.h \
+		HTMLMeterElement.h \
+		HTMLModElement.h \
+		HTMLObjectElement.h \
+		HTMLOptionElement.h \
+		HTMLOptGroupElement.h \
+		HTMLOutputElement.h \
+		HTMLParagraphElement.h \
+		HTMLPreElement.h \
+		HTMLProgressElement.h \
+		HTMLScriptElement.h \
+		HTMLSharedElement.h \
+		HTMLSharedListElement.h \
+		HTMLSpanElement.h \
+		HTMLStyleElement.h \
+		HTMLTableCaptionElement.h \
+		HTMLTableCellElement.h \
+		HTMLTableColElement.h \
+		HTMLTableElement.h \
+		HTMLTableRowElement.h \
+		HTMLTableSectionElement.h \
+		HTMLTextAreaElement.h \
+		HTMLTimeElement.h \
+		HTMLTitleElement.h \
+		HTMLUnknownElement.h \
+		TimeRanges.h \
+		UndoManager.h \
+		ValidityState.h \
 		$(NULL)
 
 CPPSRCS		= \
@@ -33,72 +89,80 @@ CPPSRCS		= \
 		nsGenericHTMLFrameElement.cpp \
 		nsFormSubmission.cpp \
 		nsTextEditorState.cpp \
-		nsHTMLElement.cpp \
-		nsHTMLAnchorElement.cpp \
-		nsHTMLAreaElement.cpp \
-		nsHTMLBRElement.cpp \
-		nsHTMLBodyElement.cpp \
-		nsHTMLButtonElement.cpp \
-		nsHTMLCanvasElement.cpp \
-		nsHTMLDataListElement.cpp \
-		nsHTMLDivElement.cpp \
-		nsHTMLFieldSetElement.cpp \
-		nsHTMLFontElement.cpp \
+		HTMLElement.cpp \
+		HTMLAnchorElement.cpp \
+		HTMLAreaElement.cpp \
+		HTMLBRElement.cpp \
+		HTMLBodyElement.cpp \
+		HTMLButtonElement.cpp \
+		HTMLCanvasElement.cpp \
+		HTMLDataElement.cpp \
+		HTMLDataListElement.cpp \
+		HTMLDivElement.cpp \
+		HTMLFieldSetElement.cpp \
+		HTMLFontElement.cpp \
 		nsHTMLFormElement.cpp \
-		nsHTMLFrameElement.cpp \
-		nsHTMLFrameSetElement.cpp \
-		nsHTMLHRElement.cpp \
-		nsHTMLHeadingElement.cpp \
-		nsHTMLIFrameElement.cpp \
-		nsHTMLImageElement.cpp \
+		HTMLFrameElement.cpp \
+		HTMLFrameSetElement.cpp \
+		HTMLHRElement.cpp \
+		HTMLHeadingElement.cpp \
+		HTMLIFrameElement.cpp \
+		HTMLImageElement.cpp \
 		nsHTMLInputElement.cpp \
-		nsHTMLLIElement.cpp \
-		nsHTMLLabelElement.cpp \
-		nsHTMLLegendElement.cpp \
-		nsHTMLLinkElement.cpp \
-		nsHTMLMapElement.cpp \
-		nsHTMLMenuElement.cpp \
-		nsHTMLMenuItemElement.cpp \
-		nsHTMLMetaElement.cpp \
-		nsHTMLMeterElement.cpp \
-		nsHTMLModElement.cpp \
-		nsHTMLObjectElement.cpp \
-		nsHTMLOListElement.cpp \
+		HTMLLIElement.cpp \
+		HTMLLabelElement.cpp \
+		HTMLLegendElement.cpp \
+		HTMLLinkElement.cpp \
+		HTMLMapElement.cpp \
+		HTMLMenuElement.cpp \
+		HTMLMenuItemElement.cpp \
+		HTMLMetaElement.cpp \
+		HTMLMeterElement.cpp \
+		HTMLModElement.cpp \
+		HTMLObjectElement.cpp \
 		nsHTMLSharedObjectElement.cpp \
-		nsHTMLOptionElement.cpp \
-		nsHTMLOptGroupElement.cpp \
-		nsHTMLOutputElement.cpp \
-		nsHTMLParagraphElement.cpp \
-		nsHTMLPreElement.cpp \
-		nsHTMLProgressElement.cpp \
-		nsHTMLScriptElement.cpp \
+		HTMLOptionElement.cpp \
+		HTMLOptGroupElement.cpp \
+		HTMLOutputElement.cpp \
+		HTMLParagraphElement.cpp \
+		HTMLPreElement.cpp \
+		HTMLProgressElement.cpp \
+		HTMLScriptElement.cpp \
 		nsHTMLSelectElement.cpp \
-		nsHTMLSharedElement.cpp \
-		nsHTMLSpanElement.cpp \
-		nsHTMLStyleElement.cpp \
-		nsHTMLTableElement.cpp \
-		nsHTMLTableCaptionElement.cpp \
-		nsHTMLTableCellElement.cpp \
-		nsHTMLTableColElement.cpp \
-		nsHTMLTableRowElement.cpp \
-		nsHTMLTableSectionElement.cpp \
-		nsHTMLTextAreaElement.cpp \
-		nsHTMLTitleElement.cpp \
-		nsHTMLUnknownElement.cpp \
-		nsDOMValidityState.cpp \
+		HTMLSharedElement.cpp \
+		HTMLSharedListElement.cpp \
+		HTMLSpanElement.cpp \
+		HTMLStyleElement.cpp \
+		HTMLTableElement.cpp \
+		HTMLTableCaptionElement.cpp \
+		HTMLTableCellElement.cpp \
+		HTMLTableColElement.cpp \
+		HTMLTableRowElement.cpp \
+		HTMLTableSectionElement.cpp \
+		HTMLTextAreaElement.cpp \
+		HTMLTimeElement.cpp \
+		HTMLTitleElement.cpp \
+		HTMLUnknownElement.cpp \
+		ValidityState.cpp \
 		nsIConstraintValidation.cpp \
 		nsRadioVisitor.cpp \
 		nsDOMStringMap.cpp \
+		UndoManager.cpp \
 		$(NULL)
 
 ifdef MOZ_MEDIA
+EXPORTS_mozilla/dom += \
+		HTMLSourceElement.h \
+		MediaError.h \
+		$(NULL)
+
 CPPSRCS		+= \
 		nsHTMLAudioElement.cpp \
 		nsHTMLMediaElement.cpp \
-		nsMediaError.cpp \
+		MediaError.cpp \
 		nsMediaFragmentURIParser.cpp \
-		nsHTMLSourceElement.cpp \
-		nsTimeRanges.cpp \
+		HTMLSourceElement.cpp \
+		TimeRanges.cpp \
 		nsHTMLVideoElement.cpp \
 		$(NULL)
 endif

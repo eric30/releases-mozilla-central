@@ -139,10 +139,8 @@ PlacesController.prototype = {
       // Otherwise fallback to cmd_delete check.
     case "cmd_delete":
     case "placesCmd_delete":
-      return this._hasRemovableSelection(false);
     case "placesCmd_deleteDataHost":
-      return this._hasRemovableSelection(false) &&
-        !PlacesUIUtils.privateBrowsing.privateBrowsingEnabled;
+      return this._hasRemovableSelection(false);
     case "placesCmd_moveBookmarks":
       return this._hasRemovableSelection(true);
     case "cmd_copy":
@@ -462,7 +460,6 @@ PlacesController.prototype = {
           break;
         case Ci.nsINavHistoryResultNode.RESULT_TYPE_URI:
         case Ci.nsINavHistoryResultNode.RESULT_TYPE_VISIT:
-        case Ci.nsINavHistoryResultNode.RESULT_TYPE_FULL_VISIT:
           nodeData["link"] = true;
           uri = NetUtil.newURI(node.uri);
           if (PlacesUtils.nodeIsBookmark(node)) {
@@ -601,10 +598,7 @@ PlacesController.prototype = {
         // We allow pasting into tag containers, so special case that.
         var hideIfNoIP = item.getAttribute("hideifnoinsertionpoint") == "true" &&
                          noIp && !(ip && ip.isTag && item.id == "placesContext_paste");
-        var hideIfPB = item.getAttribute("hideifprivatebrowsing") == "true" &&
-                       PlacesUIUtils.privateBrowsing.privateBrowsingEnabled;
-        item.hidden = hideIfNoIP || hideIfPB ||
-                      !this._shouldShowMenuItem(item, metadata);
+        item.hidden = hideIfNoIP || !this._shouldShowMenuItem(item, metadata);
 
         if (!item.hidden) {
           visibleItemsBeforeSep = true;
@@ -1607,11 +1601,9 @@ XPCOMUtils.defineLazyServiceGetter(PlacesControllerDragHelper, "dragService",
 function goUpdatePlacesCommands() {
   // Get the controller for one of the places commands.
   var placesController = doGetPlacesControllerForCommand("placesCmd_open");
-  if (!placesController)
-    return;
-
   function updatePlacesCommand(aCommand) {
-    goSetCommandEnabled(aCommand, placesController.isCommandEnabled(aCommand));
+    goSetCommandEnabled(aCommand, placesController &&
+                                  placesController.isCommandEnabled(aCommand));
   }
 
   updatePlacesCommand("placesCmd_open");

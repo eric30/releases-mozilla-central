@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set ts=8 sts=4 et sw=4 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -30,7 +31,7 @@
 #include "nsIScriptGlobalObject.h"
 #include "nsIServiceManager.h"
 #include "nsIURL.h"
-#include "nsIViewManager.h"
+#include "nsViewManager.h"
 #include "nsIXULDocument.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsLayoutCID.h"
@@ -530,7 +531,7 @@ XULContentSinkImpl::HandleEndElement(const PRUnichar *aName)
             static_cast<nsXULPrototypeScript*>(node.get());
 
         // If given a src= attribute, we must ignore script tag content.
-        if (! script->mSrcURI && ! script->mScriptObject.mObject) {
+        if (!script->mSrcURI && !script->GetScriptObject()) {
             nsCOMPtr<nsIDocument> doc = do_QueryReferent(mDocument);
 
             script->mOutOfLine = false;
@@ -840,7 +841,7 @@ XULContentSinkImpl::OpenScript(const PRUnichar** aAttributes,
                                const uint32_t aLineNumber)
 {
   uint32_t langID = nsIProgrammingLanguage::JAVASCRIPT;
-  uint32_t version = 0;
+  uint32_t version = JSVERSION_LATEST;
   nsresult rv;
 
   // Look for SRC attribute and look for a LANGUAGE attribute
@@ -873,30 +874,14 @@ XULContentSinkImpl::OpenScript(const PRUnichar** aAttributes,
           }
 
           if (langID != nsIProgrammingLanguage::UNKNOWN) {
-            // Get the version string, and ensure the language supports it.
-            nsAutoString versionName;
-            rv = parser.GetParameter("version", versionName);
+              // Get the version string, and ensure the language supports it.
+              nsAutoString versionName;
+              rv = parser.GetParameter("version", versionName);
 
-            if (NS_SUCCEEDED(rv)) {
-              version = nsContentUtils::ParseJavascriptVersion(versionName);
-            } else if (rv != NS_ERROR_INVALID_ARG) {
-              return rv;
-            }
-          }
-          // Some js specifics yet to be abstracted.
-          if (langID == nsIProgrammingLanguage::JAVASCRIPT) {
-              // By default scripts in XUL documents have E4X turned on. This
-              // is still OK if version is JSVERSION_UNKNOWN (-1),
-              version = js::VersionSetMoarXML(JSVersion(version), true);
-
-              nsAutoString value;
-              rv = parser.GetParameter("e4x", value);
-              if (NS_FAILED(rv)) {
-                  if (rv != NS_ERROR_INVALID_ARG)
-                      return rv;
-              } else {
-                  if (value.Length() == 1 && value[0] == '0')
-                    version = js::VersionSetMoarXML(JSVersion(version), false);
+              if (NS_SUCCEEDED(rv)) {
+                  version = nsContentUtils::ParseJavascriptVersion(versionName);
+              } else if (rv != NS_ERROR_INVALID_ARG) {
+                  return rv;
               }
           }
       }
@@ -905,12 +890,9 @@ XULContentSinkImpl::OpenScript(const PRUnichar** aAttributes,
           // various version strings anyway.  So we make no attempt to support
           // languages other than JS for language=
           nsAutoString lang(aAttributes[1]);
-          if (nsContentUtils::IsJavaScriptLanguage(lang, &version)) {
+          if (nsContentUtils::IsJavaScriptLanguage(lang)) {
+              version = JSVERSION_DEFAULT;
               langID = nsIProgrammingLanguage::JAVASCRIPT;
-
-              // Even when JS version < 1.6 is specified, E4X is
-              // turned on in XUL.
-              version = js::VersionSetMoarXML(JSVersion(version), true);
           }
       }
       aAttributes += 2;

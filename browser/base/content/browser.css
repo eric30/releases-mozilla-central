@@ -52,6 +52,14 @@ tabbrowser {
               opacity 50ms ease-out 180ms /* hide the tab for the last 20ms of the max-width transition */;
 }
 
+.tabbrowser-tabs[dontresize] > .tabbrowser-tab[fadein]:not([pinned]) {
+  /* controlled in tabbrowser.xml */
+}
+
+.tabbrowser-tabs[dontanimate] > .tabbrowser-tab {
+  transition: none !important;
+}
+
 .tab-throbber:not([fadein]):not([pinned]),
 .tab-label:not([fadein]):not([pinned]),
 .tab-icon-image:not([fadein]):not([pinned]),
@@ -221,8 +229,6 @@ splitmenu {
   -moz-binding: url(chrome://browser/content/urlbarBindings.xml#urlbar);
 }
 
-.uri-element-right-align:-moz-locale-dir(rtl),
-html|input.uri-element-right-align:-moz-locale-dir(rtl),
 .ac-url-text:-moz-locale-dir(rtl),
 .ac-title:-moz-locale-dir(rtl) > description {
   direction: ltr !important;
@@ -391,6 +397,14 @@ window[chromehidden~="toolbar"] toolbar:not(.toolbar-primary):not(.chromeclass-m
   opacity: 0.0;
 }
 
+/* When the modal fullscreen approval UI is showing, don't allow interaction
+   with the page, but when we're just showing the warning upon entering
+   fullscreen on an already approved page, do allow interaction with the page.
+ */
+#full-screen-warning-container:not([obscure-browser]) {
+  pointer-events: none;
+}
+
 #full-screen-warning-message {
   /* We must specify a max-width, otherwise word-wrap:break-word doesn't
      work in descendant <description> and <label> elements. Bug 630864. */
@@ -412,21 +426,17 @@ window[chromehidden~="toolbar"] toolbar:not(.toolbar-primary):not(.chromeclass-m
   display: none;
 }
 
-/* ::::: Keyboard UI Panel ::::: */
-.KUI-panel-closebutton {
-  -moz-binding: url("chrome://global/content/bindings/toolbarbutton.xml#toolbarbutton-image");
-}
+/* ::::: Ctrl-Tab Panel ::::: */
 
-:-moz-any(.ctrlTab-preview, .allTabs-preview) > html|img,
-:-moz-any(.ctrlTab-preview, .allTabs-preview) > html|canvas {
+.ctrlTab-preview > html|img,
+.ctrlTab-preview > html|canvas {
   min-width: inherit;
   max-width: inherit;
   min-height: inherit;
   max-height: inherit;
 }
 
-.ctrlTab-favicon-container,
-.allTabs-favicon-container {
+.ctrlTab-favicon-container {
   -moz-box-align: start;
 %ifdef XP_MACOSX
   -moz-box-pack: end;
@@ -435,25 +445,13 @@ window[chromehidden~="toolbar"] toolbar:not(.toolbar-primary):not(.chromeclass-m
 %endif
 }
 
-.ctrlTab-favicon,
-.allTabs-favicon {
+.ctrlTab-favicon {
   width: 16px;
   height: 16px;
 }
 
-/* ::::: Ctrl-Tab Panel ::::: */
 .ctrlTab-preview {
   -moz-binding: url("chrome://browser/content/browser-tabPreviews.xml#ctrlTab-preview");
-}
-
-/* ::::: All Tabs Panel ::::: */
-.allTabs-preview {
-  -moz-binding: url("chrome://browser/content/browser-tabPreviews.xml#allTabs-preview");
-}
-
-#allTabs-tab-close-button {
-  -moz-binding: url("chrome://global/content/bindings/toolbarbutton.xml#toolbarbutton-image");
-  margin: 0;
 }
 
 
@@ -474,10 +472,6 @@ window[chromehidden~="toolbar"] toolbar:not(.toolbar-primary):not(.chromeclass-m
 
 #invalid-form-popup > description {
   max-width: 280px;
-}
-
-#geolocation-notification {
-  -moz-binding: url("chrome://browser/content/urlbarBindings.xml#geolocation-notification");
 }
 
 #addon-progress-notification {
@@ -622,6 +616,10 @@ html|*#gcli-output-frame,
   transition: none;
 }
 
+.social-notification-container > .toolbarbutton-1[badge]:not([badge=""])::after {
+  content: attr(badge);
+}
+
 chatbox {
   -moz-binding: url("chrome://browser/content/socialchat.xml#chatbox");
 }
@@ -629,4 +627,5 @@ chatbox {
 chatbar {
   -moz-binding: url("chrome://browser/content/socialchat.xml#chatbar");
   height: 0;
+  max-height: 0;
 }

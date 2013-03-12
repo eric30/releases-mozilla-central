@@ -19,7 +19,7 @@
   <title>&pageTitle;</title>
   <meta name="viewport" content="width=device-width; user-scalable=0" />
   <link rel="stylesheet" href="chrome://browser/skin/aboutFeedback.css" type="text/css"/>
-  <link rel="icon" type="image/png" href="chrome://branding/content/favicon32.png" />
+  <link rel="icon" type="image/png" sizes="64x64" href="chrome://branding/content/favicon64.png" />
 </head>
 
 <body dir="&locale.dir;" onload="init();" onunload="uninit();">
@@ -120,11 +120,7 @@
         document.getElementById("last-url").value = aData;
       }, "Feedback:LastUrl", false);
 
-      sendMessageToJava({
-        gecko: {
-          type: "Feedback:LastUrl"
-        }
-      });
+      sendMessageToJava({ type: "Feedback:LastUrl" });
     }
 
     function uninit() {
@@ -142,11 +138,7 @@
     }
 
     function openPlayStore() {
-      sendMessageToJava({
-        gecko: {
-          type: "Feedback:OpenPlayStore"
-        }
-      });
+      sendMessageToJava({ type: "Feedback:OpenPlayStore" });
 
       window.close();
     }
@@ -154,11 +146,7 @@
     function maybeLater() {
       window.close();
 
-      sendMessageToJava({
-        gecko: {
-          type: "Feedback:MaybeLater"
-        }
-      });
+      sendMessageToJava({ type: "Feedback:MaybeLater" });
     }
 
     function sendFeedback(aEvent) {

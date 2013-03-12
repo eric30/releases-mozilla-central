@@ -112,10 +112,12 @@ final class ThumbnailHelper {
             }
             try {
                 mBuffer = DirectBufferAllocator.allocate(capacity);
+            } catch (IllegalArgumentException iae) {
+                Log.w(LOGTAG, iae.toString());
             } catch (OutOfMemoryError oom) {
                 Log.w(LOGTAG, "Unable to allocate thumbnail buffer of capacity " + capacity);
-                // At this point mBuffer will be pointing to null, so we are in a sane state.
             }
+            // If we hit an error above, mBuffer will be pointing to null, so we are in a sane state.
         }
     }
 
@@ -135,29 +137,24 @@ final class ThumbnailHelper {
             return;
         }
 
-        GeckoEvent e = GeckoEvent.createScreenshotEvent(
-                tab.getId(),
-                0, 0, 0, 0, // sx, sy, sw, sh
-                0, 0, mWidth, mHeight, // dx, dy, dw, dh
-                mWidth, mHeight, // bw, bh
-                ScreenshotHandler.SCREENSHOT_THUMBNAIL,
-                mBuffer);
+        GeckoEvent e = GeckoEvent.createThumbnailEvent(tab.getId(), mWidth, mHeight, mBuffer);
         GeckoAppShell.sendEventToGecko(e);
     }
 
-    /* This method is invoked by Gecko once the thumbnail data is ready. */
-    void handleThumbnailData(Tab tab, ByteBuffer data) {
-        if (data != mBuffer) {
-            // This should never happen, but log it and recover gracefully
-            Log.e(LOGTAG, "handleThumbnailData called with an unexpected ByteBuffer!");
+    /* This method is invoked by JNI once the thumbnail data is ready. */
+    public static void notifyThumbnail(ByteBuffer data, int tabId, boolean success) {
+        Tab tab = Tabs.getInstance().getTab(tabId);
+        ThumbnailHelper helper = ThumbnailHelper.getInstance();
+        if (success && tab != null) {
+            helper.handleThumbnailData(tab, data);
         }
+        helper.processNextThumbnail(tab);
+    }
 
-        if (shouldUpdateThumbnail(tab)) {
-            processThumbnailData(tab, data);
-        }
+    private void processNextThumbnail(Tab tab) {
         Tab nextTab = null;
         synchronized (mPendingThumbnails) {
-            if (tab != mPendingThumbnails.peek()) {
+            if (tab != null && tab != mPendingThumbnails.peek()) {
                 Log.e(LOGTAG, "handleThumbnailData called with unexpected tab's data!");
                 // This should never happen, but recover gracefully by processing the
                 // unexpected tab that we found in the queue
@@ -168,6 +165,17 @@ final class ThumbnailHelper {
         }
         if (nextTab != null) {
             requestThumbnailFor(nextTab);
+        }
+    }
+
+    private void handleThumbnailData(Tab tab, ByteBuffer data) {
+        if (data != mBuffer) {
+            // This should never happen, but log it and recover gracefully
+            Log.e(LOGTAG, "handleThumbnailData called with an unexpected ByteBuffer!");
+        }
+
+        if (shouldUpdateThumbnail(tab)) {
+            processThumbnailData(tab, data);
         }
     }
 

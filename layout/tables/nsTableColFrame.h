@@ -6,9 +6,9 @@
 #define nsTableColFrame_h__
 
 #include "mozilla/Attributes.h"
+#include "celldata.h"
 #include "nscore.h"
 #include "nsContainerFrame.h"
-#include "nsTablePainter.h"
 #include "nsTArray.h"
 
 class nsTableCellFrame;
@@ -56,9 +56,9 @@ public:
   /**
    * Table columns never paint anything, nor receive events.
    */
-  NS_IMETHOD BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                              const nsRect&           aDirtyRect,
-                              const nsDisplayListSet& aLists) { return NS_OK; }
+  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
+                                const nsRect&           aDirtyRect,
+                                const nsDisplayListSet& aLists) MOZ_OVERRIDE {}
 
   /**
    * Get the "type" of the frame
@@ -263,6 +263,11 @@ public:
   nscoord GetFinalWidth() {
     return mFinalWidth;
   }
+
+  virtual bool IsFrameOfType(uint32_t aFlags) const
+  {
+    return nsSplittableFrame::IsFrameOfType(aFlags & ~(nsIFrame::eTablePart));
+  }
   
   virtual void InvalidateFrame(uint32_t aDisplayItemKey = 0) MOZ_OVERRIDE;
   virtual void InvalidateFrameWithRect(const nsRect& aRect, uint32_t aDisplayItemKey = 0) MOZ_OVERRIDE;
@@ -285,10 +290,10 @@ protected:
   // when colspans were present).
   nscoord mFinalWidth;
 
-  // the index of the column with respect to the whole tabble (starting at 0) 
+  // the index of the column with respect to the whole table (starting at 0) 
   // it should never be smaller then the start column index of the parent 
   // colgroup
-  uint32_t mColIndex:        16;
+  uint32_t mColIndex;
   
   // border width in pixels of the inner half of the border only
   BCPixelSize mLeftBorderWidth;

@@ -17,12 +17,13 @@
 
 #include "gc/Barrier.h"
 
-ForwardDeclareJS(Script);
+ForwardDeclareJS(Atom);
 
 namespace js { class FunctionExtended; }
 
-struct JSFunction : public JSObject
+class JSFunction : public JSObject
 {
+  public:
     enum Flags {
         INTERPRETED      = 0x0001,  /* function has a JSScript and environment. */
         NATIVE_CTOR      = 0x0002,  /* native that can be called as a constructor */
@@ -58,7 +59,7 @@ struct JSFunction : public JSObject
     uint16_t        flags;        /* bitfield composed of the above Flags enum */
     union U {
         class Native {
-            friend struct JSFunction;
+            friend class JSFunction;
             js::Native          native;       /* native method pointer or null */
             const JSJitInfo     *jitinfo;     /* Information about this function to be
                                                  used by the JIT;
@@ -75,7 +76,6 @@ struct JSFunction : public JSObject
   private:
     js::HeapPtrAtom  atom_;       /* name for diagnostics and decompiling */
 
-    bool initializeLazyScript(JSContext *cx);
   public:
 
     /* A function can be classified as either native (C++) or interpreted (JS): */
@@ -111,20 +111,21 @@ struct JSFunction : public JSObject
     }
 
     /* Returns the strictness of this function, which must be interpreted. */
-    inline bool inStrictMode() const;
+    inline bool strict() const;
 
+    // Can be called multiple times by the parser.
     void setArgCount(uint16_t nargs) {
-        JS_ASSERT(this->nargs == 0);
+        JS_ASSERT(this->nargs == 0 || this->nargs == nargs);
         this->nargs = nargs;
     }
 
+    // Can be called multiple times by the parser.
     void setHasRest() {
-        JS_ASSERT(!hasRest());
         flags |= HAS_REST;
     }
 
+    // Can be called multiple times by the parser.
     void setHasDefaults() {
-        JS_ASSERT(!hasDefaults());
         flags |= HAS_DEFAULTS;
     }
 
@@ -147,8 +148,8 @@ struct JSFunction : public JSObject
         flags |= HEAVYWEIGHT;
     }
 
+    // Can be called multiple times by the parser.
     void setIsExprClosure() {
-        JS_ASSERT(!isExprClosure());
         flags |= EXPR_CLOSURE;
     }
 
@@ -163,7 +164,7 @@ struct JSFunction : public JSObject
     inline void initAtom(JSAtom *atom);
     JSAtom *displayAtom() const { return atom_; }
 
-    inline void setGuessedAtom(JSAtom *atom);
+    inline void setGuessedAtom(js::RawAtom atom);
 
     /* uint16_t representation bounds number of call object dynamic slots. */
     enum { MAX_ARGS_AND_VARS = 2 * ((1U << 16) - 1) };
@@ -179,34 +180,39 @@ struct JSFunction : public JSObject
     static inline size_t offsetOfEnvironment() { return offsetof(JSFunction, u.i.env_); }
     static inline size_t offsetOfAtom() { return offsetof(JSFunction, atom_); }
 
-    js::UnrootedScript getOrCreateScript(JSContext *cx) {
+    bool initializeLazyScript(JSContext *cx);
+
+    js::RawScript getOrCreateScript(JSContext *cx) {
         JS_ASSERT(isInterpreted());
         if (isInterpretedLazy()) {
-            js::RootedFunction self(cx, this);
+            JS::RootedFunction self(cx, this);
             js::MaybeCheckStackRoots(cx);
-            if (!initializeLazyScript(cx))
-                return js::UnrootedScript(NULL);
+            if (!self->initializeLazyScript(cx))
+                return NULL;
+            return self->u.i.script_;
         }
         JS_ASSERT(hasScript());
-        return JS::HandleScript::fromMarkedLocation(&u.i.script_);
+        return u.i.script_;
     }
 
-    bool maybeGetOrCreateScript(JSContext *cx, js::MutableHandle<JSScript*> script) {
-        if (isNative()) {
+    static bool maybeGetOrCreateScript(JSContext *cx, js::HandleFunction fun,
+                                       js::MutableHandle<JSScript*> script)
+    {
+        if (fun->isNative()) {
             script.set(NULL);
             return true;
         }
-        script.set(getOrCreateScript(cx));
-        return hasScript();
+        script.set(fun->getOrCreateScript(cx));
+        return fun->hasScript();
     }
 
-    js::UnrootedScript nonLazyScript() const {
+    js::RawScript nonLazyScript() const {
         JS_ASSERT(hasScript());
         return JS::HandleScript::fromMarkedLocation(&u.i.script_);
     }
 
-    js::UnrootedScript maybeNonLazyScript() const {
-        return isInterpreted() ? nonLazyScript() : js::UnrootedScript(NULL);
+    js::RawScript maybeNonLazyScript() const {
+        return isInterpreted() ? nonLazyScript() : NULL;
     }
 
     js::HeapPtrScript &mutableScript() {
@@ -310,22 +316,19 @@ JSAPIToJSFunctionFlags(unsigned flags)
            : JSFunction::NATIVE_FUN;
 }
 
-extern JSFunction *
-js_NewFunction(JSContext *cx, js::HandleObject funobj, JSNative native, unsigned nargs,
-               JSFunction::Flags flags, js::HandleObject parent, js::HandleAtom atom,
-               js::gc::AllocKind kind = JSFunction::FinalizeKind);
-
-extern JSFunction * JS_FASTCALL
-js_CloneFunctionObject(JSContext *cx, js::HandleFunction fun,
-                       js::HandleObject parent, js::HandleObject proto,
-                       js::gc::AllocKind kind = JSFunction::FinalizeKind);
-
-extern JSFunction *
-js_DefineFunction(JSContext *cx, js::HandleObject obj, js::HandleId id, JSNative native,
-                  unsigned nargs, unsigned flags,
-                  js::gc::AllocKind kind = JSFunction::FinalizeKind);
-
 namespace js {
+
+extern JSFunction *
+NewFunction(JSContext *cx, HandleObject funobj, JSNative native, unsigned nargs,
+            JSFunction::Flags flags, HandleObject parent, HandleAtom atom,
+            gc::AllocKind allocKind = JSFunction::FinalizeKind,
+            NewObjectKind newKind = GenericObject);
+
+extern JSFunction *
+DefineFunction(JSContext *cx, HandleObject obj, HandleId id, JSNative native,
+               unsigned nargs, unsigned flags,
+               gc::AllocKind allocKind = JSFunction::FinalizeKind,
+               NewObjectKind newKind = GenericObject);
 
 /*
  * Function extended with reserved slots for use by various kinds of functions.
@@ -334,11 +337,15 @@ namespace js {
  */
 class FunctionExtended : public JSFunction
 {
-    friend struct JSFunction;
+    friend class JSFunction;
 
     /* Reserved slots available for storage by particular native functions. */
     HeapValue extendedSlots[2];
 };
+
+extern JSFunction *
+CloneFunctionObject(JSContext *cx, HandleFunction fun, HandleObject parent,
+                    gc::AllocKind kind = JSFunction::FinalizeKind);
 
 } // namespace js
 

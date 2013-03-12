@@ -15,6 +15,14 @@
 #include "nsAgg.h"
 #include "nsTArray.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/ErrorResult.h"
+
+namespace mozilla {
+namespace dom {
+class GlobalObject;
+}
+}
+class nsINode;
 
 /**
  * A class for evaluating an XPath expression string
@@ -42,6 +50,21 @@ public:
                                 nsCOMArray<nsISupports> *aState,
                                 nsIDOMXPathExpression **aResult);
 
+    // WebIDL API
+    JSObject* WrapObject(JSContext* aCx, JSObject* aScope);
+    static already_AddRefed<nsXPathEvaluator>
+        Constructor(const mozilla::dom::GlobalObject& aGlobal,
+                    mozilla::ErrorResult& rv);
+    already_AddRefed<nsIDOMXPathExpression>
+        CreateExpression(const nsAString& aExpression,
+                         nsIDOMXPathNSResolver* aResolver,
+                         mozilla::ErrorResult& rv);
+    already_AddRefed<nsIDOMXPathNSResolver>
+        CreateNSResolver(nsINode* aNodeResolver, mozilla::ErrorResult& rv);
+    already_AddRefed<nsISupports>
+        Evaluate(const nsAString& aExpression, nsINode* aContextNode,
+                 nsIDOMXPathNSResolver* aResolver, uint16_t aType,
+                 nsISupports* aResult, mozilla::ErrorResult& rv);
 private:
     nsresult CreateExpression(const nsAString & aExpression,
                               nsIDOMXPathNSResolver *aResolver,

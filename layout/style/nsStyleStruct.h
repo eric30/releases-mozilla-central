@@ -26,17 +26,13 @@
 #include "nsCOMArray.h"
 #include "nsTArray.h"
 #include "nsIAtom.h"
-#include "nsIURI.h"
 #include "nsCSSValue.h"
-#include "nsStyleTransformMatrix.h"
-#include "nsAlgorithm.h"
-#include "imgIRequest.h"
-#include "gfxRect.h"
+#include "imgRequestProxy.h"
+#include <algorithm>
 
 class nsIFrame;
-class imgIRequest;
+class nsIURI;
 class imgIContainer;
-struct nsCSSValueList;
 
 // Includes nsStyleStructID.
 #include "nsStyleStructFwd.h"
@@ -712,14 +708,14 @@ class nsCSSShadowArray {
 // but values between zero and one device pixels are always rounded up to
 // one device pixel.
 #define NS_ROUND_BORDER_TO_PIXELS(l,tpp) \
-  ((l) == 0) ? 0 : NS_MAX((tpp), (l) / (tpp) * (tpp))
+  ((l) == 0) ? 0 : std::max((tpp), (l) / (tpp) * (tpp))
 // Outline offset is rounded to the nearest integer number of pixels, but values
 // between zero and one device pixels are always rounded up to one device pixel.
 // Note that the offset can be negative.
 #define NS_ROUND_OFFSET_TO_PIXELS(l,tpp) \
   (((l) == 0) ? 0 : \
-    ((l) > 0) ? NS_MAX( (tpp), ((l) + ((tpp) / 2)) / (tpp) * (tpp)) : \
-                NS_MIN(-(tpp), ((l) - ((tpp) / 2)) / (tpp) * (tpp)))
+    ((l) > 0) ? std::max( (tpp), ((l) + ((tpp) / 2)) / (tpp) * (tpp)) : \
+                std::min(-(tpp), ((l) - ((tpp) / 2)) / (tpp) * (tpp)))
 
 // Returns if the given border style type is visible or not
 static bool IsVisibleBorderStyle(uint8_t aStyle)
@@ -840,8 +836,8 @@ struct nsStyleBorder {
   }
 
   // These are defined in nsStyleStructInlines.h
-  inline void SetBorderImage(imgIRequest* aImage);
-  inline imgIRequest* GetBorderImage() const;
+  inline void SetBorderImage(imgRequestProxy* aImage);
+  inline imgRequestProxy* GetBorderImage() const;
 
   bool HasBorderImage() {return !!mBorderImageSource;}
 
@@ -894,7 +890,7 @@ public:
 #endif
 
 protected:
-  nsCOMPtr<imgIRequest> mBorderImageSource; // [reset]
+  nsRefPtr<imgRequestProxy> mBorderImageSource; // [reset]
 
 public:
   nsStyleCorners mBorderRadius;       // [reset] coord, percent
@@ -1049,8 +1045,8 @@ struct nsStyleList {
     return NS_STYLE_HINT_FRAMECHANGE;
   }
 
-  imgIRequest* GetListStyleImage() const { return mListStyleImage; }
-  void SetListStyleImage(imgIRequest* aReq)
+  imgRequestProxy* GetListStyleImage() const { return mListStyleImage; }
+  void SetListStyleImage(imgRequestProxy* aReq)
   {
     if (mListStyleImage)
       mListStyleImage->UnlockImage();
@@ -1062,7 +1058,7 @@ struct nsStyleList {
   uint8_t   mListStyleType;             // [inherited] See nsStyleConsts.h
   uint8_t   mListStylePosition;         // [inherited]
 private:
-  nsCOMPtr<imgIRequest> mListStyleImage; // [inherited]
+  nsRefPtr<imgRequestProxy> mListStyleImage; // [inherited]
   nsStyleList& operator=(const nsStyleList& aOther) MOZ_DELETE;
 public:
   nsRect        mImageRegion;           // [inherited] the rect to use within an image
@@ -1693,8 +1689,9 @@ struct nsStyleDisplay {
            mOverflowX != NS_STYLE_OVERFLOW_CLIP;
   }
 
-  /* Returns whether the element has the -moz-transform property. */
-  bool HasTransform() const {
+  /* Returns whether the element has the -moz-transform property
+   * or a related property. */
+  bool HasTransformStyle() const {
     return mSpecifiedTransform != nullptr || 
            mTransformStyle == NS_STYLE_TRANSFORM_STYLE_PRESERVE_3D ||
            mBackfaceVisibility == NS_STYLE_BACKFACE_VISIBILITY_HIDDEN;
@@ -1710,6 +1707,9 @@ struct nsStyleDisplay {
   inline bool IsPositioned(const nsIFrame* aFrame) const;
   inline bool IsRelativelyPositioned(const nsIFrame* aFrame) const;
   inline bool IsAbsolutelyPositioned(const nsIFrame* aFrame) const;
+  /* Returns whether the element has the -moz-transform property
+   * or a related property, and supports CSS transforms. */
+  inline bool HasTransform(const nsIFrame* aFrame) const;
 };
 
 struct nsStyleTable {
@@ -1733,7 +1733,6 @@ struct nsStyleTable {
   uint8_t       mLayoutStrategy;// [reset] see nsStyleConsts.h NS_STYLE_TABLE_LAYOUT_*
   uint8_t       mFrame;         // [reset] see nsStyleConsts.h NS_STYLE_TABLE_FRAME_*
   uint8_t       mRules;         // [reset] see nsStyleConsts.h NS_STYLE_TABLE_RULES_*
-  int32_t       mCols;          // [reset] an integer if set, or see nsStyleConsts.h NS_STYLE_TABLE_COLS_*
   int32_t       mSpan;          // [reset] the number of columns spanned by a colgroup or col
 };
 
@@ -1779,7 +1778,7 @@ struct nsStyleContentData {
   nsStyleContentType  mType;
   union {
     PRUnichar *mString;
-    imgIRequest *mImage;
+    imgRequestProxy *mImage;
     nsCSSValue::Array* mCounters;
   } mContent;
 #ifdef DEBUG
@@ -1804,7 +1803,7 @@ struct nsStyleContentData {
   void TrackImage(nsPresContext* aContext);
   void UntrackImage(nsPresContext* aContext);
 
-  void SetImage(imgIRequest* aRequest)
+  void SetImage(imgRequestProxy* aRequest)
   {
     NS_ABORT_IF_FALSE(!mImageTracked,
                       "Setting a new image without untracking the old one!");
@@ -2229,6 +2228,7 @@ struct nsStyleSVG {
   uint8_t          mColorInterpolationFilters; // [inherited] see nsStyleConsts.h
   uint8_t          mFillRule;         // [inherited] see nsStyleConsts.h
   uint8_t          mImageRendering;   // [inherited] see nsStyleConsts.h
+  uint8_t          mPaintOrder;       // [inherited] see nsStyleConsts.h
   uint8_t          mShapeRendering;   // [inherited] see nsStyleConsts.h
   uint8_t          mStrokeLinecap;    // [inherited] see nsStyleConsts.h
   uint8_t          mStrokeLinejoin;   // [inherited] see nsStyleConsts.h
@@ -2262,9 +2262,7 @@ struct nsStyleSVGReset {
 
   nsChangeHint CalcDifference(const nsStyleSVGReset& aOther) const;
   static nsChangeHint MaxDifference() {
-    return NS_CombineHint(NS_CombineHint(nsChangeHint_UpdateEffects,
-                                         nsChangeHint_AllReflowHints),
-                                         nsChangeHint_RepaintFrame);
+    return NS_CombineHint(nsChangeHint_UpdateEffects, NS_STYLE_HINT_REFLOW);
   }
 
   nsCOMPtr<nsIURI> mClipPath;         // [reset]
@@ -2279,6 +2277,7 @@ struct nsStyleSVGReset {
 
   uint8_t          mDominantBaseline; // [reset] see nsStyleConsts.h
   uint8_t          mVectorEffect;     // [reset] see nsStyleConsts.h
+  uint8_t          mMaskType;         // [reset] see nsStyleConsts.h
 };
 
 #endif /* nsStyleStruct_h___ */

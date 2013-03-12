@@ -293,7 +293,7 @@ nsTArray_base<Alloc>::IsAutoArrayRestorer::~IsAutoArrayRestorer() {
     mArray.mHdr = mArray.GetAutoArrayBufferUnsafe(mElemAlign);
     mArray.mHdr->mLength = 0;
   }
-  else {
+  else if (mArray.mHdr != mArray.EmptyHdr()) {
     mArray.mHdr->mIsAutoArray = mIsAuto;
   }
 }
@@ -353,8 +353,8 @@ nsTArray_base<Alloc>::SwapArrayElements(nsTArray_base<Allocator>& other,
                     other.UsesAutoArrayBuffer(),
                     "One of the arrays should be using its auto buffer.");
 
-  size_type smallerLength = NS_MIN(Length(), other.Length());
-  size_type largerLength = NS_MAX(Length(), other.Length());
+  size_type smallerLength = XPCOM_MIN(Length(), other.Length());
+  size_type largerLength = XPCOM_MAX(Length(), other.Length());
   void *smallerElements, *largerElements;
   if (Length() <= other.Length()) {
     smallerElements = Hdr() + 1;
@@ -370,7 +370,7 @@ nsTArray_base<Alloc>::SwapArrayElements(nsTArray_base<Allocator>& other,
   // job for AutoTArray!  (One of the two arrays we're swapping is using an
   // auto buffer, so we're likely not allocating a lot of space here.  But one
   // could, in theory, allocate a huge AutoTArray on the heap.)
-  nsAutoTArray<uint8_t, 64, Alloc> temp;
+  nsAutoArrayBase<nsTArray_Impl<uint8_t, Alloc>, 64> temp;
   if (!temp.SetCapacity(smallerLength * elemSize)) {
     return false;
   }

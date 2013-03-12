@@ -12,4 +12,10 @@ interface nsIDOMPermissionSettings : nsISupports
   DOMString get(in DOMString permission, in DOMString manifestURI, in DOMString origin, in bool browserFlag);
 
   void set(in DOMString permission, in DOMString value, in DOMString manifestURI, in DOMString origin, in bool browserFlag);
+
+  bool isExplicit(in DOMString permission, in DOMString manifestURI, in DOMString origin, in bool browserFlag);
+
+  // Removing a permission is only allowed for pages with a different origin than the app
+  // and pages that have browserFlag=true, so remove() doesn't have a browserFlag parameter.
+  void remove(in DOMString permission, in DOMString manifestURI, in DOMString origin);
 };

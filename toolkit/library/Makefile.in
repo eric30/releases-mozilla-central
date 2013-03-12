@@ -17,12 +17,6 @@ LIBRARY_NAME = xul
 FORCE_SHARED_LIB = 1
 MOZILLA_INTERNAL_API = 1
 
-ifdef MOZ_METRO
-ifeq ($(OS_ARCH),WINNT)
-DIRS += winvccorlib
-endif
-endif
-
 ifeq ($(MOZ_WIDGET_TOOLKIT),cocoa)
 # This is going to be a framework named "XUL", not an ordinary library named
 # "libxul.dylib"
@@ -113,7 +107,11 @@ STATIC_LIBS += mozril_s
 endif #}
 
 ifdef MOZ_B2G_BT #{
-STATIC_LIBS += mozdbus_s mozipcunixsocket_s
+STATIC_LIBS += mozdbus_s
+endif #}
+
+ifneq ($(strip $(MOZ_B2G_RIL)$(MOZ_B2G_BT)),) #{
+STATIC_LIBS += mozipcunixsocket_s
 endif #}
 
 ifeq (gonk,$(MOZ_WIDGET_TOOLKIT))
@@ -302,6 +300,10 @@ endif
 
 STATIC_LIBS += thebes gl ycbcr
 
+ifdef MOZ_ENABLE_GTEST
+COMPONENT_LIBS += gtest
+endif
+
 ifdef MOZ_ENABLE_PROFILER_SPS
 COMPONENT_LIBS += profiler
 endif
@@ -398,6 +400,10 @@ ifndef MOZ_TREE_PIXMAN
 EXTRA_DSO_LDOPTS += $(MOZ_PIXMAN_LIBS)
 endif
 
+ifdef MOZ_DMD
+EXTRA_DSO_LDOPTS += $(call EXPAND_LIBNAME_PATH,dmd,$(DIST)/lib)
+endif
+
 EXTRA_DSO_LDOPTS += $(call EXPAND_LIBNAME_PATH,gkmedias,$(DIST)/lib)
 
 ifdef MOZ_WEBRTC
@@ -451,13 +457,17 @@ OS_LIBS += \
   -lcutils \
   -lsysutils \
   -lcamera_client \
-  -lbinder \
   -lsensorservice \
   -ldbus \
   -lstagefright \
   -lstagefright_omx \
   -lbinder \
+  -lgui \
   $(NULL)
+endif
+
+ifdef MOZ_WMF
+OS_LIBS += $(call EXPAND_LIBNAME,mfuuid wmcodecdspuuid)
 endif
 
 EXTRA_DEPS += \
@@ -598,7 +608,7 @@ ifdef ACCESSIBILITY
 OS_LIBS += $(call EXPAND_LIBNAME,oleacc)
 endif
 ifdef MOZ_METRO
-OS_LIBS += $(call EXPAND_LIBNAME,uiautomationcore)
+OS_LIBS += $(call EXPAND_LIBNAME,uiautomationcore runtimeobject)
 endif
 ifdef _MSC_VER
 OS_LIBS += $(call EXPAND_LIBNAME,delayimp)
@@ -641,6 +651,17 @@ endif
 
 ifdef MOZ_GSTREAMER
 EXTRA_DSO_LDOPTS += $(GSTREAMER_LIBS)
+endif
+
+# Generate GDB pretty printer-autoload files only on Linux. OSX's GDB is
+# too old to support Python pretty-printers; if this changes, we could make
+# this 'ifdef GNU_CC'.
+ifeq (Linux,$(OS_ARCH))
+# Create a GDB Python auto-load file alongside the libxul shared library in
+# the build directory.
+PP_TARGETS += LIBXUL_AUTOLOAD
+LIBXUL_AUTOLOAD = libxul.so-gdb.py.in
+LIBXUL_AUTOLOAD_FLAGS := -Dtopsrcdir=$(abspath $(topsrcdir))
 endif
 
 include $(topsrcdir)/config/rules.mk

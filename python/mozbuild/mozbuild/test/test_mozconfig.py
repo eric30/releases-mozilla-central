@@ -12,8 +12,11 @@ from shutil import rmtree
 from tempfile import (
     gettempdir,
     mkdtemp,
-    NamedTemporaryFile,
 )
+
+from mozfile.mozfile import NamedTemporaryFile
+
+from mozunit import main
 
 from mozbuild.mozconfig import (
     MozconfigFindException,
@@ -25,6 +28,9 @@ from mozbuild.mozconfig import (
 class TestMozconfigLoader(unittest.TestCase):
     def setUp(self):
         self._old_env = dict(os.environ)
+        os.environ.pop('MOZCONFIG', None)
+        os.environ.pop('CC', None)
+        os.environ.pop('CXX', None)
         self._temp_dirs = set()
 
     def tearDown(self):
@@ -314,3 +320,6 @@ class TestMozconfigLoader(unittest.TestCase):
                 mozconfig.name.replace(os.sep, '/'))
             self.assertEquals(e.exception.output, ['hello world'])
 
+
+if __name__ == '__main__':
+    main()

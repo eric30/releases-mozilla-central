@@ -6,6 +6,7 @@
 #include "LayerManagerOGL.h"
 
 #include "mozilla/layers/PLayers.h"
+#include <algorithm>
 
 /* This must occur *after* layers/PLayers.h to avoid typedefs conflicts. */
 #include "mozilla/Util.h"
@@ -62,7 +63,10 @@ LayerManagerOGL::Initialize(bool force)
 int32_t
 LayerManagerOGL::GetMaxTextureSize() const
 {
-  return mGLContext->GetMaxTextureSize();
+  int32_t maxSize;
+  mGLContext->MakeCurrent();
+  mGLContext->fGetIntegerv(LOCAL_GL_MAX_TEXTURE_SIZE, &maxSize);
+  return maxSize;
 }
 
 void
@@ -174,7 +178,7 @@ private:
       const TimeStamp& frame = mFrames[i];
       if (!frame.IsNull() && frame > beginningOfWindow) {
         ++numFramesDrawnInWindow;
-        earliestFrameInWindow = NS_MIN(earliestFrameInWindow, frame);
+        earliestFrameInWindow = std::min(earliestFrameInWindow, frame);
       }
     }
     double realWindowSecs = (aNow - earliestFrameInWindow).ToSeconds();
@@ -518,6 +522,9 @@ LayerManagerOGL::Initialize(nsRefPtr<GLContext> aContext, bool force)
 
   // initialise a common shader to check that we can actually compile a shader
   if (!mPrograms[gl::RGBALayerProgramType].mVariations[MaskNone]->Initialize()) {
+#ifdef MOZ_WIDGET_ANDROID
+    NS_RUNTIMEABORT("Shader initialization failed");
+#endif
     return false;
   }
 
@@ -588,6 +595,9 @@ LayerManagerOGL::Initialize(nsRefPtr<GLContext> aContext, bool force)
 
     if (mFBOTextureTarget == LOCAL_GL_NONE) {
       /* Unable to find a texture target that works with FBOs and NPOT textures */
+#ifdef MOZ_WIDGET_ANDROID
+      NS_RUNTIMEABORT("No texture target");
+#endif
       return false;
     }
   } else {
@@ -605,6 +615,9 @@ LayerManagerOGL::Initialize(nsRefPtr<GLContext> aContext, bool force)
      * texture2DRect).
      */
     if (!mGLContext->IsExtensionSupported(gl::GLContext::ARB_texture_rectangle))
+#ifdef MOZ_WIDGET_ANDROID
+      NS_RUNTIMEABORT("No texture rectangle");
+#endif
       return false;
   }
 
@@ -1035,10 +1048,14 @@ LayerManagerOGL::Render()
   if (mIsRenderingToEGLSurface) {
     rect = nsIntRect(0, 0, mSurfaceSize.width, mSurfaceSize.height);
   } else {
-    // FIXME/bug XXXXXX this races with rotation changes on the main
-    // thread, and undoes all the care we take with layers txns being
-    // sent atomically with rotation changes
-    mWidget->GetClientBounds(rect);
+    rect = mRenderBounds;
+    // If render bounds is not updated explicitly, try to infer it from widget
+    if (rect.width == 0 || rect.height == 0) {
+      // FIXME/bug XXXXXX this races with rotation changes on the main
+      // thread, and undoes all the care we take with layers txns being
+      // sent atomically with rotation changes
+      mWidget->GetClientBounds(rect);
+    }
   }
   WorldTransformRect(rect);
 
@@ -1261,6 +1278,12 @@ LayerManagerOGL::WorldTransformRect(nsIntRect& aRect)
   gfxRect grect(aRect.x, aRect.y, aRect.width, aRect.height);
   grect = mWorldMatrix.TransformBounds(grect);
   aRect.SetRect(grect.X(), grect.Y(), grect.Width(), grect.Height());
+}
+
+void
+LayerManagerOGL::UpdateRenderBounds(const nsIntRect& aRect)
+{
+  mRenderBounds = aRect;
 }
 
 void

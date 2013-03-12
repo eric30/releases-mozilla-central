@@ -15,6 +15,7 @@
 #include "nsMathMLmencloseFrame.h"
 #include "nsDisplayList.h"
 #include "gfxContext.h"
+#include <algorithm>
 
 //
 // <menclose> -- enclose content with a stretching symbol such
@@ -179,112 +180,94 @@ nsMathMLmencloseFrame::TransmitAutomaticData()
   return NS_OK;
 }
 
-NS_IMETHODIMP
+void
 nsMathMLmencloseFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                         const nsRect&           aDirtyRect,
                                         const nsDisplayListSet& aLists)
 {
   /////////////
   // paint the menclosed content
-  nsresult rv = nsMathMLContainerFrame::BuildDisplayList(aBuilder, aDirtyRect,
-                                                         aLists);
-
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsMathMLContainerFrame::BuildDisplayList(aBuilder, aDirtyRect, aLists);
 
   if (NS_MATHML_HAS_ERROR(mPresentationData.flags))
-    return rv;
+    return;
 
   nsRect mencloseRect = nsIFrame::GetRect();
   mencloseRect.x = mencloseRect.y = 0;
 
   if (IsToDraw(NOTATION_RADICAL)) {
-    rv = mMathMLChar[mRadicalCharIndex].Display(aBuilder, this, aLists, 0);
-    NS_ENSURE_SUCCESS(rv, rv);
+    mMathMLChar[mRadicalCharIndex].Display(aBuilder, this, aLists, 0);
 
     nsRect rect;
     mMathMLChar[mRadicalCharIndex].GetRect(rect);
     rect.MoveBy(NS_MATHML_IS_RTL(mPresentationData.flags) ?
                 -mContentWidth : rect.width, 0);
     rect.SizeTo(mContentWidth, mRuleThickness);
-    rv = DisplayBar(aBuilder, this, rect, aLists);
-    NS_ENSURE_SUCCESS(rv, rv);
+    DisplayBar(aBuilder, this, rect, aLists);
   }
 
   if (IsToDraw(NOTATION_LONGDIV)) {
-    rv = mMathMLChar[mLongDivCharIndex].Display(aBuilder, this, aLists, 1);
-    NS_ENSURE_SUCCESS(rv, rv);
+    mMathMLChar[mLongDivCharIndex].Display(aBuilder, this, aLists, 1);
 
     nsRect rect;
     mMathMLChar[mLongDivCharIndex].GetRect(rect);
     rect.SizeTo(rect.width + mContentWidth, mRuleThickness);
-    rv = DisplayBar(aBuilder, this, rect, aLists);
-    NS_ENSURE_SUCCESS(rv, rv);
+    DisplayBar(aBuilder, this, rect, aLists);
   }
 
   if (IsToDraw(NOTATION_TOP)) {
     nsRect rect(0, 0, mencloseRect.width, mRuleThickness);
-    rv = DisplayBar(aBuilder, this, rect, aLists);
-    NS_ENSURE_SUCCESS(rv, rv);
+    DisplayBar(aBuilder, this, rect, aLists);
   }
 
   if (IsToDraw(NOTATION_BOTTOM)) {
     nsRect rect(0, mencloseRect.height - mRuleThickness,
                 mencloseRect.width, mRuleThickness);
-    rv = DisplayBar(aBuilder, this, rect, aLists);
-    NS_ENSURE_SUCCESS(rv, rv);
+    DisplayBar(aBuilder, this, rect, aLists);
   }
 
   if (IsToDraw(NOTATION_LEFT)) {
     nsRect rect(0, 0, mRuleThickness, mencloseRect.height);
-    rv = DisplayBar(aBuilder, this, rect, aLists);
-    NS_ENSURE_SUCCESS(rv, rv);
+    DisplayBar(aBuilder, this, rect, aLists);
   }
 
   if (IsToDraw(NOTATION_RIGHT)) {
     nsRect rect(mencloseRect.width - mRuleThickness, 0,
                 mRuleThickness, mencloseRect.height);
-    rv = DisplayBar(aBuilder, this, rect, aLists);
-    NS_ENSURE_SUCCESS(rv, rv);
+    DisplayBar(aBuilder, this, rect, aLists);
   }
 
   if (IsToDraw(NOTATION_ROUNDEDBOX)) {
-    rv = DisplayNotation(aBuilder, this, mencloseRect, aLists,
-                         mRuleThickness, NOTATION_ROUNDEDBOX);
-    NS_ENSURE_SUCCESS(rv, rv);
+    DisplayNotation(aBuilder, this, mencloseRect, aLists,
+                    mRuleThickness, NOTATION_ROUNDEDBOX);
   }
 
   if (IsToDraw(NOTATION_CIRCLE)) {
-    rv = DisplayNotation(aBuilder, this, mencloseRect, aLists,
-                         mRuleThickness, NOTATION_CIRCLE);
-    NS_ENSURE_SUCCESS(rv, rv);
+    DisplayNotation(aBuilder, this, mencloseRect, aLists,
+                    mRuleThickness, NOTATION_CIRCLE);
   }
 
   if (IsToDraw(NOTATION_UPDIAGONALSTRIKE)) {
-    rv = DisplayNotation(aBuilder, this, mencloseRect, aLists,
-                         mRuleThickness, NOTATION_UPDIAGONALSTRIKE);
-    NS_ENSURE_SUCCESS(rv, rv);
+    DisplayNotation(aBuilder, this, mencloseRect, aLists,
+                    mRuleThickness, NOTATION_UPDIAGONALSTRIKE);
   }
 
   if (IsToDraw(NOTATION_DOWNDIAGONALSTRIKE)) {
-    rv = DisplayNotation(aBuilder, this, mencloseRect, aLists,
-                         mRuleThickness, NOTATION_DOWNDIAGONALSTRIKE);
-    NS_ENSURE_SUCCESS(rv, rv);
+    DisplayNotation(aBuilder, this, mencloseRect, aLists,
+                    mRuleThickness, NOTATION_DOWNDIAGONALSTRIKE);
   }
 
   if (IsToDraw(NOTATION_HORIZONTALSTRIKE)) {
     nsRect rect(0, mencloseRect.height / 2 - mRuleThickness / 2,
                 mencloseRect.width, mRuleThickness);
-    rv = DisplayBar(aBuilder, this, rect, aLists);
-    NS_ENSURE_SUCCESS(rv, rv);
+    DisplayBar(aBuilder, this, rect, aLists);
   }
 
   if (IsToDraw(NOTATION_VERTICALSTRIKE)) {
     nsRect rect(mencloseRect.width / 2 - mRuleThickness / 2, 0,
                 mRuleThickness, mencloseRect.height);
-    rv = DisplayBar(aBuilder, this, rect, aLists);
-    NS_ENSURE_SUCCESS(rv, rv);
+    DisplayBar(aBuilder, this, rect, aLists);
   }
-  return rv;
 }
 
 /* virtual */ nsresult
@@ -395,8 +378,8 @@ nsMathMLmencloseFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
       IsToDraw(NOTATION_RADICAL) ||
       IsToDraw(NOTATION_LONGDIV)) {
       // set a minimal value for the base height
-      bmBase.ascent = NS_MAX(bmOne.ascent, bmBase.ascent);
-      bmBase.descent = NS_MAX(0, bmBase.descent);
+      bmBase.ascent = std::max(bmOne.ascent, bmBase.ascent);
+      bmBase.descent = std::max(0, bmBase.descent);
   }
 
   mBoundingMetrics.ascent = bmBase.ascent;
@@ -427,15 +410,15 @@ nsMathMLmencloseFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
     // Update horizontal parameters
     padding2 = ratio * bmBase.width;
 
-    dx_left = NS_MAX(dx_left, padding2);
-    dx_right = NS_MAX(dx_right, padding2);
+    dx_left = std::max(dx_left, padding2);
+    dx_right = std::max(dx_right, padding2);
 
     // Update vertical parameters
     padding2 = ratio * (bmBase.ascent + bmBase.descent);
 
-    mBoundingMetrics.ascent = NS_MAX(mBoundingMetrics.ascent,
+    mBoundingMetrics.ascent = std::max(mBoundingMetrics.ascent,
                                      bmBase.ascent + padding2);
-    mBoundingMetrics.descent = NS_MAX(mBoundingMetrics.descent,
+    mBoundingMetrics.descent = std::max(mBoundingMetrics.descent,
                                       bmBase.descent + padding2);
   }
 
@@ -447,7 +430,7 @@ nsMathMLmencloseFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
           GetMaxWidth(PresContext(), aRenderingContext);
 
         // Update horizontal parameters
-        dx_left = NS_MAX(dx_left, longdiv_width);
+        dx_left = std::max(dx_left, longdiv_width);
     } else {
       // Stretch the parenthesis to the appropriate height if it is not
       // big enough.
@@ -463,17 +446,17 @@ nsMathMLmencloseFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
       mMathMLChar[mLongDivCharIndex].GetBoundingMetrics(bmLongdivChar);
 
       // Update horizontal parameters
-      dx_left = NS_MAX(dx_left, bmLongdivChar.width);
+      dx_left = std::max(dx_left, bmLongdivChar.width);
 
       // Update vertical parameters
       longdivAscent = bmBase.ascent + psi + mRuleThickness;
-      longdivDescent = NS_MAX(bmBase.descent,
+      longdivDescent = std::max(bmBase.descent,
                               (bmLongdivChar.ascent + bmLongdivChar.descent -
                                longdivAscent));
 
-      mBoundingMetrics.ascent = NS_MAX(mBoundingMetrics.ascent,
+      mBoundingMetrics.ascent = std::max(mBoundingMetrics.ascent,
                                        longdivAscent);
-      mBoundingMetrics.descent = NS_MAX(mBoundingMetrics.descent,
+      mBoundingMetrics.descent = std::max(mBoundingMetrics.descent,
                                         longdivDescent);
     }
   }
@@ -489,7 +472,7 @@ nsMathMLmencloseFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
         GetMaxWidth(PresContext(), aRenderingContext);
       
       // Update horizontal parameters
-      *dx_leading = NS_MAX(*dx_leading, radical_width);
+      *dx_leading = std::max(*dx_leading, radical_width);
     } else {
       // Stretch the radical symbol to the appropriate height if it is not
       // big enough.
@@ -506,17 +489,17 @@ nsMathMLmencloseFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
       mMathMLChar[mRadicalCharIndex].GetBoundingMetrics(bmRadicalChar);
 
       // Update horizontal parameters
-      *dx_leading = NS_MAX(*dx_leading, bmRadicalChar.width);
+      *dx_leading = std::max(*dx_leading, bmRadicalChar.width);
 
       // Update vertical parameters
       radicalAscent = bmBase.ascent + psi + mRuleThickness;
-      radicalDescent = NS_MAX(bmBase.descent,
+      radicalDescent = std::max(bmBase.descent,
                               (bmRadicalChar.ascent + bmRadicalChar.descent -
                                radicalAscent));
 
-      mBoundingMetrics.ascent = NS_MAX(mBoundingMetrics.ascent,
+      mBoundingMetrics.ascent = std::max(mBoundingMetrics.ascent,
                                        radicalAscent);
-      mBoundingMetrics.descent = NS_MAX(mBoundingMetrics.descent,
+      mBoundingMetrics.descent = std::max(mBoundingMetrics.descent,
                                         radicalDescent);
     }
   }
@@ -527,22 +510,22 @@ nsMathMLmencloseFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
       IsToDraw(NOTATION_ROUNDEDBOX) ||
       (IsToDraw(NOTATION_LEFT) && IsToDraw(NOTATION_RIGHT))) {
     // center the menclose around the content (horizontally)
-    dx_left = dx_right = NS_MAX(dx_left, dx_right);
+    dx_left = dx_right = std::max(dx_left, dx_right);
   }
 
   ///////////////
   // The maximum size is now computed: set the remaining parameters
   mBoundingMetrics.width = dx_left + bmBase.width + dx_right;
 
-  mBoundingMetrics.leftBearing = NS_MIN(0, dx_left + bmBase.leftBearing);
+  mBoundingMetrics.leftBearing = std::min(0, dx_left + bmBase.leftBearing);
   mBoundingMetrics.rightBearing =
-    NS_MAX(mBoundingMetrics.width, dx_left + bmBase.rightBearing);
+    std::max(mBoundingMetrics.width, dx_left + bmBase.rightBearing);
   
   aDesiredSize.width = mBoundingMetrics.width;
 
-  aDesiredSize.ascent = NS_MAX(mBoundingMetrics.ascent, baseSize.ascent);
+  aDesiredSize.ascent = std::max(mBoundingMetrics.ascent, baseSize.ascent);
   aDesiredSize.height = aDesiredSize.ascent +
-    NS_MAX(mBoundingMetrics.descent, baseSize.height - baseSize.ascent);
+    std::max(mBoundingMetrics.descent, baseSize.height - baseSize.ascent);
 
   if (IsToDraw(NOTATION_LONGDIV) || IsToDraw(NOTATION_RADICAL)) {
     // get the leading to be left at the top of the resulting frame
@@ -553,16 +536,16 @@ nsMathMLmencloseFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
     nscoord desiredSizeDescent = aDesiredSize.height - aDesiredSize.ascent;
     
     if (IsToDraw(NOTATION_LONGDIV)) {
-      desiredSizeAscent = NS_MAX(desiredSizeAscent,
+      desiredSizeAscent = std::max(desiredSizeAscent,
                                  longdivAscent + leading);
-      desiredSizeDescent = NS_MAX(desiredSizeDescent,
+      desiredSizeDescent = std::max(desiredSizeDescent,
                                   longdivDescent + mRuleThickness);
     }
     
     if (IsToDraw(NOTATION_RADICAL)) {
-      desiredSizeAscent = NS_MAX(desiredSizeAscent,
+      desiredSizeAscent = std::max(desiredSizeAscent,
                                  radicalAscent + leading);
-      desiredSizeDescent = NS_MAX(desiredSizeDescent,
+      desiredSizeDescent = std::max(desiredSizeDescent,
                                   radicalDescent + mRuleThickness);
     }
 
@@ -574,7 +557,7 @@ nsMathMLmencloseFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
       IsToDraw(NOTATION_ROUNDEDBOX) ||
       (IsToDraw(NOTATION_TOP) && IsToDraw(NOTATION_BOTTOM))) {
     // center the menclose around the content (vertically)
-    nscoord dy = NS_MAX(aDesiredSize.ascent - bmBase.ascent,
+    nscoord dy = std::max(aDesiredSize.ascent - bmBase.ascent,
                         aDesiredSize.height - aDesiredSize.ascent -
                         bmBase.descent);
 
@@ -770,17 +753,17 @@ void nsDisplayNotation::Paint(nsDisplayListBuilder* aBuilder,
   gfxCtx->SetLineWidth(currentLineWidth);
 }
 
-nsresult
+void
 nsMathMLmencloseFrame::DisplayNotation(nsDisplayListBuilder* aBuilder,
                                        nsIFrame* aFrame, const nsRect& aRect,
                                        const nsDisplayListSet& aLists,
                                        nscoord aThickness,
                                        nsMencloseNotation aType)
 {
-  if (!aFrame->GetStyleVisibility()->IsVisible() || aRect.IsEmpty() ||
+  if (!aFrame->StyleVisibility()->IsVisible() || aRect.IsEmpty() ||
       aThickness <= 0)
-    return NS_OK;
+    return;
 
-  return aLists.Content()->AppendNewToTop(new (aBuilder)
-      nsDisplayNotation(aBuilder, aFrame, aRect, aThickness, aType));
+  aLists.Content()->AppendNewToTop(new (aBuilder)
+    nsDisplayNotation(aBuilder, aFrame, aRect, aThickness, aType));
 }
