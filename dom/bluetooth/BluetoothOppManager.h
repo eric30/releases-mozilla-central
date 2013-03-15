@@ -8,6 +8,8 @@
 #define mozilla_dom_bluetooth_bluetoothoppmanager_h__
 
 #include "BluetoothCommon.h"
+#include "BluetoothSocket.h"
+#include "BluetoothSocketObserver.h"
 #include "mozilla/dom/ipc/Blob.h"
 #include "mozilla/ipc/UnixSocket.h"
 #include "DeviceStorage.h"
@@ -17,10 +19,11 @@ class nsIInputStream;
 
 BEGIN_BLUETOOTH_NAMESPACE
 
+class BluetoothSocket;
 class BluetoothReplyRunnable;
 class ObexHeaderSet;
 
-class BluetoothOppManager : public mozilla::ipc::UnixSocketConsumer
+class BluetoothOppManager : public BluetoothSocketObserver
 {
 public:
   /*
@@ -33,8 +36,6 @@ public:
 
   ~BluetoothOppManager();
   static BluetoothOppManager* Get();
-  void ReceiveSocketData(nsAutoPtr<mozilla::ipc::UnixSocketRawData>& aMessage)
-    MOZ_OVERRIDE;
   void ClientDataHandler(mozilla::ipc::UnixSocketRawData* aMessage);
   void ServerDataHandler(mozilla::ipc::UnixSocketRawData* aMessage);
 
@@ -72,6 +73,16 @@ public:
   // Return true if there is an ongoing file-transfer session, please see
   // Bug 827267 for more information.
   bool IsTransferring();
+
+  // Implement interface BluetoothSocketObserver
+  void ReceiveSocketData(nsAutoPtr<mozilla::ipc::UnixSocketRawData>& aMessage)
+    MOZ_OVERRIDE;
+  void OnConnectSuccess() MOZ_OVERRIDE;
+  void OnConnectError() MOZ_OVERRIDE;
+  void OnDisconnect() MOZ_OVERRIDE;
+
+  RefPtr<BluetoothSocket> mSocket;
+
 private:
   BluetoothOppManager();
   void StartFileTransfer();
@@ -90,14 +101,10 @@ private:
   void ValidateFileName();
   bool IsReservedChar(PRUnichar c);
 
-  virtual void OnConnectSuccess() MOZ_OVERRIDE;
-  virtual void OnConnectError() MOZ_OVERRIDE;
-  virtual void OnDisconnect() MOZ_OVERRIDE;
-
   /**
    * RFCOMM socket status.
    */
-  enum mozilla::ipc::SocketConnectionStatus mSocketStatus;
+  enum BluetoothSocketState mSocketStatus;
 
   /**
    * OBEX session status.

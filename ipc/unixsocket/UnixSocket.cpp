@@ -774,6 +774,7 @@ UnixSocketConsumer::ConnectSocket(UnixSocketConnector* aConnector,
   MOZ_ASSERT(NS_IsMainThread());
   if (mImpl) {
     NS_WARNING("Socket already connecting/connected!");
+    delete aConnector;
     return false;
   }
   nsCString addr(aAddress);
@@ -795,6 +796,7 @@ UnixSocketConsumer::ListenSocket(UnixSocketConnector* aConnector)
   MOZ_ASSERT(NS_IsMainThread());
   if (mImpl) {
     NS_WARNING("Socket already connecting/connected!");
+    delete aConnector;
     return false;
   }
   mImpl = new UnixSocketImpl(this, aConnector, EmptyCString());
