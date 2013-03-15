@@ -8,6 +8,8 @@
 #define mozilla_dom_bluetooth_bluetoothhfpmanager_h__
 
 #include "BluetoothCommon.h"
+#include "BluetoothSocket.h"
+#include "BluetoothSocketObserver.h"
 #include "BluetoothTelephonyListener.h"
 #include "mozilla/ipc/UnixSocket.h"
 #include "nsIObserver.h"
@@ -48,12 +50,17 @@ enum BluetoothCmeError {
   NETWORK_NOT_ALLOWED = 32
 };
 
-class BluetoothHfpManager : public mozilla::ipc::UnixSocketConsumer
+class BluetoothHfpManager : public BluetoothSocketObserver
 {
 public:
+  ~BluetoothHfpManager();
   static BluetoothHfpManager* Get();
-  virtual void ReceiveSocketData(nsAutoPtr<mozilla::ipc::UnixSocketRawData>& aMessage)
+
+  void ReceiveSocketData(nsAutoPtr<mozilla::ipc::UnixSocketRawData>& aMessage)
     MOZ_OVERRIDE;
+  void OnConnectSuccess() MOZ_OVERRIDE;
+  void OnConnectError() MOZ_OVERRIDE;
+  void OnDisconnect() MOZ_OVERRIDE;
 
   bool Connect(const nsAString& aDeviceObjectPath,
                const bool aIsHandsfree,
@@ -66,14 +73,19 @@ public:
    */
   void HandleCallStateChanged(uint32_t aCallIndex, uint16_t aCallState,
                               const nsAString& aNumber, bool aSend);
+  bool IsConnected();
+
+  RefPtr<BluetoothSocket> mSocket;
 
 private:
   class GetVolumeTask;
+  class SendRingIndicatorTask;
+
   friend class GetVolumeTask;
+  friend class SendRingIndicatorTask;
   friend class BluetoothHfpManagerObserver;
 
   BluetoothHfpManager();
-  ~BluetoothHfpManager();
   nsresult HandleIccInfoChanged();
   nsresult HandleShutdown();
   nsresult HandleVolumeChanged(const nsAString& aData);
@@ -91,10 +103,6 @@ private:
   bool SendLine(const char* aMessage);
   void UpdateCIND(uint8_t aType, uint8_t aValue, bool aSend);
 
-  virtual void OnConnectSuccess() MOZ_OVERRIDE;
-  virtual void OnConnectError() MOZ_OVERRIDE;
-  virtual void OnDisconnect() MOZ_OVERRIDE;
-
   int mCurrentVgs;
   int mCurrentVgm;
   uint32_t mCurrentCallIndex;
@@ -107,7 +115,7 @@ private:
   nsString mDevicePath;
   nsString mMsisdn;
   nsString mOperatorName;
-  enum mozilla::ipc::SocketConnectionStatus mSocketStatus;
+  BluetoothSocketState mSocketStatus;
 
   nsTArray<Call> mCurrentCallArray;
   nsAutoPtr<BluetoothTelephonyListener> mListener;
