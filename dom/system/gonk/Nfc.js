@@ -35,6 +35,9 @@ const NFC_IPC_MSG_NAMES = [
 XPCOMUtils.defineLazyServiceGetter(this, "ppmm",
                                    "@mozilla.org/parentprocessmessagemanager;1",
                                    "nsIMessageBroadcaster");
+XPCOMUtils.defineLazyServiceGetter(this, "gSystemMessenger",
+                                   "@mozilla.org/system-message-internal;1",
+                                   "nsISystemMessagesInternal");
 
 function Nfc() {
   this.worker = new ChromeWorker("resource://gre/modules/nfc_worker.js");
@@ -74,21 +77,27 @@ Nfc.prototype = {
     switch (message.type) {
       case "ndefDiscovered":
         ppmm.broadcastAsyncMessage("NFC:NdefDiscovered", message);
+        gSystemMessenger.broadcastMessage("nfc-ndef-discovered", message);
         break;
       case "ndefDisconnected":
         ppmm.broadcastAsyncMessage("NFC:NdefDisconnected", message);
+        gSystemMessenger.broadcastMessage("nfc-disconnected", message);
         break;
       case "requestStatus":
         ppmm.broadcastAsyncMessage("NFC:RequestStatus", message);
+        gSystemMessenger.broadcastMessage("nfc-request-status", message);
         break;
       case "secureElementActivated":
         ppmm.broadcastAsyncMessage("NFC:SecureElementActivated", message);
+        gSystemMessenger.broadcastMessage("secureelement-activated", message);
         break;
       case "secureElementDeactivated":
         ppmm.broadcastAsyncMessage("NFC:SecureElementDeactivated", message);
+        gSystemMessenger.broadcastMessage("secureelement-deactivated", message);
         break;
       case "secureElementTransaction":
         ppmm.broadcastAsyncMessage("NFC:SecureElementTransaction", message);
+        gSystemMessenger.broadcastMessage("secureelement-transaction", message);
         break;
       default:
         throw new Error("Don't know about this message type: " + message.type);

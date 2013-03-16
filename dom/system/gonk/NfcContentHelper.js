@@ -246,7 +246,7 @@ NfcContentHelper.prototype = {
   },
 
   handleNdefDisconnected: function handleNdefDisconnected(message) {
-     this._deliverCallback("_nfcCallbacks", "ndefDisconnected", [JSON.stringify(message)]);
+    this._deliverCallback("_nfcCallbacks", "ndefDisconnected", [JSON.stringify(message)]);
   },
 
   handleRequestStatus: function handleRequestStatus(message) {

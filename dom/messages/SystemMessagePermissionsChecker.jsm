@@ -88,6 +88,24 @@ this.SystemMessagePermissionsTable = {
   },
   "ussd-received": {
     "mobileconnection": []
+  },
+  "nfc-ndef-discovered": {
+    "nfc": []
+  },
+  "nfc-disconnected": {
+    "nfc": []
+  },
+  "nfc-request-status": {
+    "nfc": []
+  },
+  "nfc-secure-element-activated": {
+    "nfc": []
+  },
+  "nfc-secure-element-transaction": {
+    "nfc": []
+  },
+  "nfc-secure-element-deactivated": {
+    "nfc": []
   }
 };
 

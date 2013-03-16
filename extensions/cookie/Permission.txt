@@ -108,6 +108,7 @@ permissions
 
 nfc
 {}
+WebNFC
 Near Field Communications
 
 telephony
