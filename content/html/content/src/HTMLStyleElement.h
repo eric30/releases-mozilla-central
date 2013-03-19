@@ -74,7 +74,7 @@ public:
   NS_DECL_NSIMUTATIONOBSERVER_CONTENTREMOVED
 
   bool Disabled();
-  void SetDisabled(bool aDisabled, ErrorResult& aError);
+  void SetDisabled(bool aDisabled);
   void SetMedia(const nsAString& aMedia, ErrorResult& aError)
   {
     SetHTMLAttr(nsGkAtoms::media, aMedia, aError);
@@ -92,8 +92,7 @@ public:
     SetHTMLBoolAttr(nsGkAtoms::scoped, aScoped, aError);
   }
 
-  virtual JSObject* WrapNode(JSContext *aCx, JSObject *aScope,
-                             bool *aTriedToWrap);
+  virtual JSObject* WrapNode(JSContext *aCx, JSObject *aScope) MOZ_OVERRIDE;
 
   virtual nsIDOMNode* AsDOMNode() { return this; }
 protected:

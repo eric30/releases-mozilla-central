@@ -9,7 +9,6 @@
 #include "nsGkAtoms.h"
 #include "mozilla/dom/SVGMaskElement.h"
 #include "mozilla/dom/SVGMaskElementBinding.h"
-#include "mozilla/dom/SVGAnimatedLength.h"
 
 NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(Mask)
 
@@ -17,9 +16,9 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGMaskElement::WrapNode(JSContext *aCx, JSObject *aScope, bool *aTriedToWrap)
+SVGMaskElement::WrapNode(JSContext *aCx, JSObject *aScope)
 {
-  return SVGMaskElementBinding::Wrap(aCx, aScope, this, aTriedToWrap);
+  return SVGMaskElementBinding::Wrap(aCx, aScope, this);
 }
 
 //--------------------- Masks ------------------------
@@ -47,9 +46,9 @@ nsSVGElement::EnumInfo SVGMaskElement::sEnumInfo[2] =
 //----------------------------------------------------------------------
 // nsISupports methods
 
-NS_IMPL_ISUPPORTS_INHERITED3(SVGMaskElement, SVGMaskElementBase,
+NS_IMPL_ISUPPORTS_INHERITED4(SVGMaskElement, SVGMaskElementBase,
                              nsIDOMNode, nsIDOMElement,
-                             nsIDOMSVGElement)
+                             nsIDOMSVGElement, nsIDOMSVGUnitTypes)
 
 //----------------------------------------------------------------------
 // Implementation

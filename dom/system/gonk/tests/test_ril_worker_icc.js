@@ -554,8 +554,8 @@ add_test(function test_write_location_info_tlv() {
 
   // Test with 2-digit mnc, and gsmCellId obtained from UMTS network.
   let loc = {
-    mcc: 466,
-    mnc: 92,
+    mcc: "466",
+    mnc: "92",
     gsmLocationAreaCode : 10291,
     gsmCellId: 19072823
   };
@@ -582,8 +582,8 @@ add_test(function test_write_location_info_tlv() {
 
   // Test with 1-digit mnc, and gsmCellId obtained from GSM network.
   loc = {
-    mcc: 466,
-    mnc: 2,
+    mcc: "466",
+    mnc: "02",
     gsmLocationAreaCode : 10291,
     gsmCellId: 65534
   };
@@ -607,8 +607,8 @@ add_test(function test_write_location_info_tlv() {
 
   // Test with 3-digit mnc, and gsmCellId obtained from GSM network.
   loc = {
-    mcc: 466,
-    mnc: 222,
+    mcc: "466",
+    mnc: "222",
     gsmLocationAreaCode : 10291,
     gsmCellId: 65534
   };
@@ -1538,8 +1538,8 @@ add_test(function test_stk_event_download_location_status() {
     eventType: STK_EVENT_TYPE_LOCATION_STATUS,
     locationStatus: STK_SERVICE_STATE_NORMAL,
     locationInfo: {
-      mcc: 123,
-      mnc: 456,
+      mcc: "123",
+      mnc: "456",
       gsmLocationAreaCode: 0,
       gsmCellId: 0
     }
@@ -2076,6 +2076,86 @@ add_test(function test_update_icc_contact() {
   let contact = {recordId: 1, alphaId: "test", number: "123456"};
   do_test(contact, "ADN", ICC_EF_ADN);
   do_test(contact, "FDN", ICC_EF_FDN, "1111");
+
+  run_next_test();
+});
+
+/**
+ * Verify cardState 'corporateLocked'.
+ */
+add_test(function test_card_state_corporateLocked() {
+  let worker = newUint8Worker();
+  let ril = worker.RIL;
+  let iccStatus = {
+    gsmUmtsSubscriptionAppIndex: 0,
+    apps: [
+      {
+        app_state: CARD_APPSTATE_SUBSCRIPTION_PERSO,
+        perso_substate: CARD_PERSOSUBSTATE_SIM_CORPORATE
+      }],
+  };
+
+  ril._processICCStatus(iccStatus);
+  do_check_eq(ril.cardState, GECKO_CARDSTATE_CORPORATE_LOCKED);
+
+  run_next_test();
+});
+
+/**
+ * Verify cardState 'serviceProviderLocked'.
+ */
+add_test(function test_card_state_serviceProviderLocked() {
+  let worker = newUint8Worker();
+  let ril = worker.RIL;
+  let iccStatus = {
+    gsmUmtsSubscriptionAppIndex: 0,
+    apps: [
+      {
+        app_state: CARD_APPSTATE_SUBSCRIPTION_PERSO,
+        perso_substate: CARD_PERSOSUBSTATE_SIM_SERVICE_PROVIDER
+      }],
+  };
+
+  ril._processICCStatus(iccStatus);
+  do_check_eq(ril.cardState, GECKO_CARDSTATE_SERVICE_PROVIDER_LOCKED);
+
+  run_next_test();
+});
+
+/**
+ * Verify iccUnlockCardLock with lockType is "cck" and "spck".
+ */
+add_test(function test_unlock_card_lock_corporateLocked() {
+  let worker = newUint8Worker();
+  let ril = worker.RIL;
+  let buf = worker.Buf;
+  const pin = "12345678";
+
+  function do_test(aLock, aPin) {
+    buf.sendParcel = function fakeSendParcel () {
+      // Request Type.
+      do_check_eq(this.readUint32(), REQUEST_ENTER_NETWORK_DEPERSONALIZATION_CODE);
+
+      // Token : we don't care
+      this.readUint32();
+
+      let lockType = aLock === "cck" ?
+                     CARD_PERSOSUBSTATE_SIM_CORPORATE :
+                     CARD_PERSOSUBSTATE_SIM_SERVICE_PROVIDER;
+
+      // Lock Type
+      do_check_eq(this.readUint32(), lockType);
+
+      // Pin.
+      do_check_eq(this.readString(), aPin);
+    };
+
+    ril.iccUnlockCardLock({lockType: aLock,
+                           pin: aPin});
+  }
+
+  do_test("cck", pin);
+  do_test("spck", pin);
 
   run_next_test();
 });

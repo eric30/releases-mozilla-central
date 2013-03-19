@@ -334,7 +334,7 @@ js_DisassembleAtPC(JSContext *cx, JSScript *scriptArg, JSBool lines,
     unsigned len;
 
     if (showAll)
-        Sprint(sp, "%s:%u\n", script->filename, script->lineno);
+        Sprint(sp, "%s:%u\n", script->filename(), script->lineno);
 
     if (pc != NULL)
         sp->put("    ");
@@ -475,8 +475,7 @@ ToDisassemblySource(JSContext *cx, jsval v, JSAutoByteString *bytes)
             if (!source)
                 return false;
 
-            Shape::Range r = obj->lastProperty()->all();
-            Shape::Range::AutoRooter root(cx, &r);
+            Shape::Range<CanGC> r(cx, obj->lastProperty());
 
             while (!r.empty()) {
                 Rooted<Shape*> shape(cx, &r.front());
@@ -1429,7 +1428,7 @@ ExpressionDecompiler::findLetVar(jsbytecode *pc, unsigned depth)
             uint32_t blockDepth = block.stackDepth();
             uint32_t blockCount = block.slotCount();
             if (uint32_t(depth - blockDepth) < uint32_t(blockCount)) {
-                for (Shape::Range r(block.lastProperty()); !r.empty(); r.popFront()) {
+                for (Shape::Range<NoGC> r(block.lastProperty()); !r.empty(); r.popFront()) {
                     const Shape &shape = r.front();
                     if (shape.shortid() == int(depth - blockDepth))
                         return JSID_TO_ATOM(shape.propid());
@@ -1651,7 +1650,7 @@ DecompileArgumentFromStack(JSContext *cx, int formalIndex, char **res)
         return true;
 
     /* Don't handle getters, setters or calls from fun.call/fun.apply. */
-    if (JSOp(*current) != JSOP_CALL || formalIndex >= GET_ARGC(current))
+    if (JSOp(*current) != JSOP_CALL || static_cast<unsigned>(formalIndex) >= GET_ARGC(current))
         return true;
 
     PCStack pcStack;
@@ -2144,7 +2143,7 @@ js::GetPCCountScriptSummary(JSContext *cx, size_t index)
     buf.append('{');
 
     AppendJSONProperty(buf, "file", NO_COMMA);
-    JSString *str = JS_NewStringCopyZ(cx, script->filename);
+    JSString *str = JS_NewStringCopyZ(cx, script->filename());
     if (!str || !(str = ValueToSource(cx, StringValue(str))))
         return NULL;
     buf.append(str);

@@ -25,6 +25,7 @@
 #include "nsBMPDecoder.h"
 #include "nsICODecoder.h"
 #include "nsIconDecoder.h"
+#include "nsWBMPDecoder.h"
 
 #include "gfxContext.h"
 
@@ -2608,6 +2609,9 @@ RasterImage::InitDecoder(bool aDoSizeDecode)
     case eDecoderType_icon:
       mDecoder = new nsIconDecoder(*this, observer);
       break;
+    case eDecoderType_wbmp:
+      mDecoder = new nsWBMPDecoder(*this, observer);
+      break;
     default:
       NS_ABORT_IF_FALSE(0, "Shouldn't get here!");
   }
@@ -3061,6 +3065,7 @@ RasterImage::DrawWithPreDownscaleIfNeeded(imgFrame *aFrame,
  *                      [const] in nsIntRect aSubimage,
  *                      [const] in nsIntSize aViewportSize,
  *                      [const] in SVGImageContext aSVGContext,
+ *                      in uint32_t aWhichFrame,
  *                      in uint32_t aFlags); */
 NS_IMETHODIMP
 RasterImage::Draw(gfxContext *aContext,
@@ -3070,8 +3075,12 @@ RasterImage::Draw(gfxContext *aContext,
                   const nsIntRect &aSubimage,
                   const nsIntSize& /*aViewportSize - ignored*/,
                   const SVGImageContext* /*aSVGContext - ignored*/,
+                  uint32_t aWhichFrame,
                   uint32_t aFlags)
 {
+  if (aWhichFrame > FRAME_MAX_VALUE)
+    return NS_ERROR_INVALID_ARG;
+
   if (mError)
     return NS_ERROR_FAILURE;
 
@@ -3130,7 +3139,9 @@ RasterImage::Draw(gfxContext *aContext,
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
-  imgFrame *frame = GetCurrentDrawableImgFrame();
+  uint32_t frameIndex = aWhichFrame == FRAME_FIRST ? 0
+                                                   : GetCurrentImgFrameIndex();
+  imgFrame *frame = GetDrawableImgFrame(frameIndex);
   if (!frame) {
     return NS_OK; // Getting the frame (above) touches the image and kicks off decoding
   }

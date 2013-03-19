@@ -217,6 +217,10 @@ struct ParseContext                 /* tree context for semantic checks */
     //   if (cond) { function f3() { if (cond) { function f4() { } } } }
     //
     bool atBodyLevel();
+
+    inline bool useAsmOrInsideUseAsm() const {
+        return sc->isFunctionBox() && sc->asFunctionBox()->useAsmOrInsideUseAsm();
+    }
 };
 
 template <typename ParseHandler>
@@ -402,7 +406,8 @@ struct Parser : private AutoGCRooter, public StrictModeGetter
     Node letStatement();
 #endif
     Node expressionStatement();
-    Node variables(ParseNodeKind kind, StaticBlockObject *blockObj = NULL,
+    Node variables(ParseNodeKind kind, bool *psimple = NULL,
+                   StaticBlockObject *blockObj = NULL,
                    VarContext varContext = HoistVars);
     Node expr();
     Node assignExpr();
@@ -527,13 +532,23 @@ struct Parser : private AutoGCRooter, public StrictModeGetter
     friend struct BindData<ParseHandler>;
 };
 
+/* Declare some required template specializations. */
+
 template <>
 ParseNode *
 Parser<FullParseHandler>::expr();
 
 template <>
+SyntaxParseHandler::Node
+Parser<SyntaxParseHandler>::expr();
+
+template <>
 bool
 Parser<FullParseHandler>::setAssignmentLhsOps(ParseNode *pn, JSOp op);
+
+template <>
+bool
+Parser<SyntaxParseHandler>::setAssignmentLhsOps(Node pn, JSOp op);
 
 } /* namespace frontend */
 } /* namespace js */

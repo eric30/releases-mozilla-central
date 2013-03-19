@@ -706,7 +706,6 @@ Debugger::wrapDebuggeeValue(JSContext *cx, MutableHandleValue vp)
                 js_ReportOutOfMemory(cx);
                 return false;
             }
-            HashTableWriteBarrierPost(cx->runtime, &objects, obj);
 
             if (obj->compartment() != object->compartment()) {
                 CrossCompartmentKey key(CrossCompartmentKey::DebuggerObject, object, obj);
@@ -1089,6 +1088,9 @@ AddNewScriptRecipients(GlobalObject::DebuggerVector *src, AutoValueVector *dest)
 void
 Debugger::slowPathOnNewScript(JSContext *cx, HandleScript script, GlobalObject *compileAndGoGlobal_)
 {
+    if (script->selfHosted)
+        return;
+
     Rooted<GlobalObject*> compileAndGoGlobal(cx, compileAndGoGlobal_);
 
     JS_ASSERT(script->compileAndGo == !!compileAndGoGlobal);
@@ -1567,9 +1569,9 @@ Debugger::sweepAll(FreeOp *fop)
         }
     }
 
-    for (JSCompartment **c = rt->compartments.begin(); c != rt->compartments.end(); c++) {
+    for (CompartmentsIter comp(rt); !comp.done(); comp.next()) {
         /* For each debuggee being GC'd, detach it from all its debuggers. */
-        GlobalObjectSet &debuggees = (*c)->getDebuggees();
+        GlobalObjectSet &debuggees = comp->getDebuggees();
         for (GlobalObjectSet::Enum e(debuggees); !e.empty(); e.popFront()) {
             GlobalObject *global = e.front();
             if (IsObjectAboutToBeFinalized(&global))
@@ -2351,12 +2353,10 @@ class Debugger::ScriptQuery {
         /* Search each compartment for debuggee scripts. */
         vector = v;
         oom = false;
-        for (CompartmentSet::Range r = compartments.all(); !r.empty(); r.popFront()) {
-            IterateCells(cx->runtime, r.front(), gc::FINALIZE_SCRIPT, this, considerCell);
-            if (oom) {
-                js_ReportOutOfMemory(cx);
-                return false;
-            }
+        IterateScripts(cx->runtime, NULL, this, considerScript);
+        if (oom) {
+            js_ReportOutOfMemory(cx);
+            return false;
         }
 
         /*
@@ -2463,10 +2463,9 @@ class Debugger::ScriptQuery {
         return true;
     }
 
-    static void considerCell(JSRuntime *rt, void *data, void *thing,
-                             JSGCTraceKind traceKind, size_t thingSize) {
+    static void considerScript(JSRuntime *rt, void *data, JSScript *script) {
         ScriptQuery *self = static_cast<ScriptQuery *>(data);
-        self->consider(static_cast<JSScript *>(thing));
+        self->consider(script);
     }
 
     /*
@@ -2475,13 +2474,13 @@ class Debugger::ScriptQuery {
      * condition occurred.
      */
     void consider(JSScript *script) {
-        if (oom)
+        if (oom || script->selfHosted)
             return;
         JSCompartment *compartment = script->compartment();
         if (!compartments.has(compartment))
             return;
         if (urlCString.ptr()) {
-            if (!script->filename || strcmp(script->filename, urlCString.ptr()) != 0)
+            if (!script->filename() || strcmp(script->filename(), urlCString.ptr()) != 0)
                 return;
         }
         if (hasLine) {
@@ -2766,8 +2765,8 @@ DebuggerScript_getUrl(JSContext *cx, unsigned argc, Value *vp)
 {
     THIS_DEBUGSCRIPT_SCRIPT(cx, argc, vp, "(get url)", args, obj, script);
 
-    if (script->filename) {
-        JSString *str = js_NewStringCopyZ<CanGC>(cx, script->filename);
+    if (script->filename()) {
+        JSString *str = js_NewStringCopyZ<CanGC>(cx, script->filename());
         if (!str)
             return false;
         args.rval().setString(str);
@@ -3290,7 +3289,7 @@ Debugger::observesScript(JSScript *script) const
 {
     if (!enabled)
         return false;
-    return observesGlobal(&script->global());
+    return observesGlobal(&script->global()) && !script->selfHosted;
 }
 
 static JSBool
@@ -4225,7 +4224,7 @@ DebuggerObject_getScript(JSContext *cx, unsigned argc, Value *vp)
     }
 
     RootedFunction fun(cx, obj->toFunction());
-    if (!fun->isInterpreted()) {
+    if (fun->isBuiltin()) {
         args.rval().setUndefined();
         return true;
     }

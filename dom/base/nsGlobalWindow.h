@@ -280,11 +280,10 @@ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
 
   // nsWrapperCache
-  JSObject *WrapObject(JSContext *cx, JSObject *scope, bool *triedToWrap)
+  JSObject *WrapObject(JSContext *cx, JSObject *scope) MOZ_OVERRIDE
   {
     NS_ASSERTION(IsOuterWindow(),
                  "Inner window supports nsWrapperCache, fix WrapObject!");
-    *triedToWrap = true;
     return EnsureInnerWindow() ? GetWrapper() : nullptr;
   }
 
@@ -436,6 +435,8 @@ public:
     }
     return nullptr;
   }
+
+  already_AddRefed<nsIDOMWindow> GetChildWindow(jsid aName);
 
   // Returns true if dialogs need to be prevented from appearings for this
   // window. beingAbused returns whether dialogs are being abused.

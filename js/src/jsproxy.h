@@ -329,13 +329,6 @@ SetProxyHandler(RawObject obj, BaseProxyHandler *handler)
 }
 
 inline void
-SetProxyPrivate(RawObject obj, const Value &value)
-{
-    JS_ASSERT(IsProxy(obj));
-    SetReservedSlot(obj, JSSLOT_PROXY_PRIVATE, value);
-}
-
-inline void
 SetProxyExtra(RawObject obj, size_t n, const Value &extra)
 {
     JS_ASSERT(IsProxy(obj));
@@ -364,7 +357,12 @@ class JS_FRIEND_API(AutoEnterPolicy)
         allow = handler->hasPolicy() ? handler->enter(cx, wrapper, id, act, &rv)
                                      : true;
         recordEnter(cx, wrapper, id);
-        if (!allow && !rv && mayThrow)
+        // We want to throw an exception if all of the following are true:
+        // * The policy disallowed access.
+        // * The policy set rv to false, indicating that we should throw.
+        // * The caller did not instruct us to ignore exceptions.
+        // * The policy did not throw itself.
+        if (!allow && !rv && mayThrow && !JS_IsExceptionPending(cx))
             reportError(cx, id);
     }
 

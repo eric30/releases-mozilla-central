@@ -53,23 +53,27 @@ public class AwesomeBarTabs extends TabHost
             super();
         }
 
+        @Override
         public Object instantiateItem(ViewGroup group, int index) {
             AwesomeBarTab tab = mTabs[index];
             group.addView(tab.getView());
             return tab;
         }
 
+        @Override
         public void destroyItem(ViewGroup group, int index, Object obj) {
             AwesomeBarTab tab = (AwesomeBarTab)obj;
             group.removeView(tab.getView());
         }
 
+        @Override
         public int getCount() {
             if (mSearching)
                 return 1;
             return mTabs.length;
         }
 
+        @Override
         public boolean isViewFromObject(View view, Object object) {
             return getAwesomeBarTabForView(view) == object;
         }
@@ -153,8 +157,11 @@ public class AwesomeBarTabs extends TabHost
         mViewPager.setAdapter(mPagerAdapter);
         mViewPager.setCurrentItem(0);
         mViewPager.setOnPageChangeListener(new ViewPager.OnPageChangeListener() {
+            @Override
             public void onPageScrollStateChanged(int state) { }
+            @Override
             public void onPageScrolled(int position, float positionOffset, int positionOffsetPixels) { }
+            @Override
             public void onPageSelected(int position) {
                 tabWidget.setCurrentTab(position);
                 styleSelectedTab();
@@ -173,7 +180,7 @@ public class AwesomeBarTabs extends TabHost
 
         styleSelectedTab();
 
-        // Initialize "App Pages" list with no filter
+        // Initialize "All Pages" list with no filter
         filter("");
     }
 
@@ -197,6 +204,15 @@ public class AwesomeBarTabs extends TabHost
     @Override
     public void onLightweightThemeReset() {
         styleSelectedTab();
+    }
+
+    public void setCurrentItemByTag(String tag) {
+        for (int i = 0; i < mTabs.length; i++) {
+            if (tag.equals(mTabs[i].getTag())) {
+                mViewPager.setCurrentItem(i);
+                break;
+            }
+        }
     }
 
     private void styleSelectedTab() {

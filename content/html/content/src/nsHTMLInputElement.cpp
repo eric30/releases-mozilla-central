@@ -964,7 +964,7 @@ NS_IMPL_ENUM_ATTR_DEFAULT_MISSING_INVALID_VALUES(nsHTMLInputElement, FormMethod,
                                                  "", kFormDefaultMethod->tag)
 NS_IMPL_BOOL_ATTR(nsHTMLInputElement, FormNoValidate, formnovalidate)
 NS_IMPL_STRING_ATTR(nsHTMLInputElement, FormTarget, formtarget)
-NS_IMPL_ENUM_ATTR_DEFAULT_VALUE(nsHTMLInputElement, Inputmode, inputmode,
+NS_IMPL_ENUM_ATTR_DEFAULT_VALUE(nsHTMLInputElement, InputMode, inputmode,
                                 kInputDefaultInputmode->tag)
 NS_IMPL_BOOL_ATTR(nsHTMLInputElement, Multiple, multiple)
 NS_IMPL_NON_NEGATIVE_INT_ATTR(nsHTMLInputElement, MaxLength, maxlength)
@@ -1218,7 +1218,7 @@ nsHTMLInputElement::SetValue(const nsAString& aValue)
     }
   }
   else {
-    if (IsSingleLineTextControl(false)) {
+    if (MayFireChangeOnBlur()) {
       // If the value has been set by a script, we basically want to keep the
       // current change event state. If the element is ready to fire a change
       // event, we should keep it that way. Otherwise, we should make sure the
@@ -1948,7 +1948,7 @@ nsHTMLInputElement::FireChangeEventIfNeeded()
   nsString value;
   GetValueInternal(value);
 
-  if (!IsSingleLineTextControl(false) || mFocusedValue.Equals(value)) {
+  if (!MayFireChangeOnBlur() || mFocusedValue.Equals(value)) {
     return;
   }
 
@@ -2577,17 +2577,31 @@ nsHTMLInputElement::FinishRangeThumbDrag(nsGUIEvent* aEvent)
     SetValueOfRangeForUserEvent(rangeFrame->GetValueAtEventPoint(aEvent));
   }
   mIsDraggingRange = false;
+  FireChangeEventIfNeeded();
 }
 
 void
-nsHTMLInputElement::CancelRangeThumbDrag()
+nsHTMLInputElement::CancelRangeThumbDrag(bool aIsForUserEvent)
 {
   MOZ_ASSERT(mIsDraggingRange);
 
   if (nsIPresShell::GetCapturingContent() == this) {
     nsIPresShell::SetCapturingContent(nullptr, 0); // cancel capture
   }
-  SetValueOfRangeForUserEvent(mRangeThumbDragStartValue);
+  if (aIsForUserEvent) {
+    SetValueOfRangeForUserEvent(mRangeThumbDragStartValue);
+  } else {
+    // Don't dispatch an 'input' event - at least not using
+    // DispatchTrustedEvent.
+    // TODO: decide what we should do here - bug 851782.
+    nsAutoString val;
+    ConvertNumberToString(mRangeThumbDragStartValue, val);
+    SetValueInternal(val, true, true);
+    nsRangeFrame* frame = do_QueryFrame(GetPrimaryFrame());
+    if (frame) {
+      frame->UpdateThumbPositionForValueChange();
+    }
+  }
   mIsDraggingRange = false;
 }
 
@@ -2599,12 +2613,14 @@ nsHTMLInputElement::SetValueOfRangeForUserEvent(double aValue)
   nsAutoString val;
   ConvertNumberToString(aValue, val);
   SetValueInternal(val, true, true);
-  nsIFrame* frame = GetPrimaryFrame();
+  nsRangeFrame* frame = do_QueryFrame(GetPrimaryFrame());
   if (frame) {
-    // Trigger reflow to update the position of the thumb:
-    frame->PresContext()->GetPresShell()->
-      FrameNeedsReflow(frame, nsIPresShell::eResize, NS_FRAME_IS_DIRTY);
+    frame->UpdateThumbPositionForValueChange();
   }
+  nsContentUtils::DispatchTrustedEvent(OwnerDoc(),
+                                       static_cast<nsIDOMHTMLInputElement*>(this),
+                                       NS_LITERAL_STRING("input"), true,
+                                       false);
 }
 
 static bool
@@ -2646,7 +2662,7 @@ nsHTMLInputElement::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
   if (aVisitor.mEvent->message == NS_FOCUS_CONTENT ||
       aVisitor.mEvent->message == NS_BLUR_CONTENT) {
     if (aVisitor.mEvent->message == NS_FOCUS_CONTENT && 
-        IsSingleLineTextControl(false)) {
+        MayFireChangeOnBlur()) {
       GetValueInternal(mFocusedValue);
     }
 
@@ -3112,9 +3128,6 @@ nsHTMLInputElement::PostHandleEventForRangeThumb(nsEventChainPostVisitor& aVisit
         }
       }
       aVisitor.mEvent->mFlags.mMultipleActionsPrevented = true;
-      // Also set this to tell the native code on Android that it should not
-      // scroll:
-      aVisitor.mEventStatus = nsEventStatus_eConsumeNoDefault;
     } break;
 
     case NS_MOUSE_MOVE:
@@ -3130,9 +3143,6 @@ nsHTMLInputElement::PostHandleEventForRangeThumb(nsEventChainPostVisitor& aVisit
       SetValueOfRangeForUserEvent(rangeFrame->GetValueAtEventPoint(
                                     static_cast<nsInputEvent*>(aVisitor.mEvent)));
       aVisitor.mEvent->mFlags.mMultipleActionsPrevented = true;
-      // Also set this to tell the native code on Android that it should not
-      // scroll:
-      aVisitor.mEventStatus = nsEventStatus_eConsumeNoDefault;
       break;
 
     case NS_MOUSE_BUTTON_UP:
@@ -3256,7 +3266,7 @@ void
 nsHTMLInputElement::HandleTypeChange(uint8_t aNewType)
 {
   if (mType == NS_FORM_INPUT_RANGE && mIsDraggingRange) {
-    CancelRangeThumbDrag();
+    CancelRangeThumbDrag(false);
   }
 
   ValueModeType aOldValueMode = GetValueMode();
@@ -3311,12 +3321,11 @@ nsHTMLInputElement::HandleTypeChange(uint8_t aNewType)
   }
 
   // Updating mFocusedValue in consequence:
-  // If the new type is a single line text control but the previous wasn't, we
-  // should set mFocusedValue to the current value.
-  // Otherwise, if the new type isn't a text control but the previous was, we
-  // should clear out mFocusedValue.
-  if (IsSingleLineTextControl(mType, false) &&
-      !IsSingleLineTextControl(oldType, false)) {
+  // If the new type fires a change event on blur, but the previous type
+  // doesn't, we should set mFocusedValue to the current value.
+  // Otherwise, if the new type doesn't fire a change event on blur, but the
+  // previous type does, we should clear out mFocusedValue.
+  if (MayFireChangeOnBlur(mType) && !MayFireChangeOnBlur(oldType)) {
     GetValueInternal(mFocusedValue);
   } else if (!IsSingleLineTextControl(mType, false) &&
              IsSingleLineTextControl(oldType, false)) {

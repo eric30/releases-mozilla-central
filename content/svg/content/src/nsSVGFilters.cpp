@@ -1,4 +1,4 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* a*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -23,26 +23,25 @@
 #include "nsLayoutUtils.h"
 #include "nsSVGUtils.h"
 #include "nsStyleContext.h"
-#include "nsIDocument.h"
 #include "nsIFrame.h"
 #include "gfxContext.h"
 #include "gfxMatrix.h"
 #include "imgIContainer.h"
 #include "nsNetUtil.h"
-#include "nsIInterfaceRequestorUtils.h"
 #include "mozilla/dom/SVGFilterElement.h"
 #include "nsSVGString.h"
-#include "nsSVGEffects.h"
 #include "gfxUtils.h"
 #include "SVGContentUtils.h"
 #include <algorithm>
 #include "nsContentUtils.h"
 #include "mozilla/dom/SVGAnimatedLength.h"
 #include "mozilla/dom/SVGComponentTransferFunctionElement.h"
+#include "mozilla/dom/SVGFEDistantLightElement.h"
 #include "mozilla/dom/SVGFEFuncAElementBinding.h"
 #include "mozilla/dom/SVGFEFuncBElementBinding.h"
 #include "mozilla/dom/SVGFEFuncGElementBinding.h"
 #include "mozilla/dom/SVGFEFuncRElementBinding.h"
+#include "mozilla/dom/SVGFEPointLightElement.h"
 
 #if defined(XP_WIN) 
 // Prevent Windows redefining LoadImage
@@ -1461,169 +1460,6 @@ nsSVGFECompositeElement::GetStringInfo()
                               ArrayLength(sStringInfo));
 }
 
-//---------------------Component Transfer------------------------
-
-typedef nsSVGFE nsSVGFEComponentTransferElementBase;
-
-class nsSVGFEComponentTransferElement : public nsSVGFEComponentTransferElementBase,
-                                        public nsIDOMSVGFEComponentTransferElement
-{
-  friend nsresult NS_NewSVGFEComponentTransferElement(nsIContent **aResult,
-                                                      already_AddRefed<nsINodeInfo> aNodeInfo);
-protected:
-  nsSVGFEComponentTransferElement(already_AddRefed<nsINodeInfo> aNodeInfo)
-    : nsSVGFEComponentTransferElementBase(aNodeInfo) {}
-
-public:
-  // interfaces:
-  NS_DECL_ISUPPORTS_INHERITED
-
-  // FE Base
-  NS_FORWARD_NSIDOMSVGFILTERPRIMITIVESTANDARDATTRIBUTES(nsSVGFEComponentTransferElementBase::)
-
-  virtual nsresult Filter(nsSVGFilterInstance* aInstance,
-                          const nsTArray<const Image*>& aSources,
-                          const Image* aTarget,
-                          const nsIntRect& aDataRect);
-  virtual bool AttributeAffectsRendering(
-          int32_t aNameSpaceID, nsIAtom* aAttribute) const;
-  virtual nsSVGString& GetResultImageName() { return mStringAttributes[RESULT]; }
-  virtual void GetSourceImageNames(nsTArray<nsSVGStringInfo>& aSources);
-
-  // Component Transfer
-  NS_DECL_NSIDOMSVGFECOMPONENTTRANSFERELEMENT
-
-  NS_FORWARD_NSIDOMSVGELEMENT(nsSVGFEComponentTransferElementBase::)
-
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
-
-  // nsIContent
-  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const;
-
-  virtual nsXPCClassInfo* GetClassInfo();
-
-  virtual nsIDOMNode* AsDOMNode() { return this; }
-protected:
-  virtual bool OperatesOnPremultipledAlpha(int32_t) { return false; }
-
-  virtual StringAttributesInfo GetStringInfo();
-
-  enum { RESULT, IN1 };
-  nsSVGString mStringAttributes[2];
-  static StringInfo sStringInfo[2];
-};
-
-nsSVGElement::StringInfo nsSVGFEComponentTransferElement::sStringInfo[2] =
-{
-  { &nsGkAtoms::result, kNameSpaceID_None, true },
-  { &nsGkAtoms::in, kNameSpaceID_None, true }
-};
-
-NS_IMPL_NS_NEW_SVG_ELEMENT(FEComponentTransfer)
-
-//----------------------------------------------------------------------
-// nsISupports methods
-
-NS_IMPL_ADDREF_INHERITED(nsSVGFEComponentTransferElement,nsSVGFEComponentTransferElementBase)
-NS_IMPL_RELEASE_INHERITED(nsSVGFEComponentTransferElement,nsSVGFEComponentTransferElementBase)
-
-DOMCI_NODE_DATA(SVGFEComponentTransferElement, nsSVGFEComponentTransferElement)
-
-NS_INTERFACE_TABLE_HEAD(nsSVGFEComponentTransferElement)
-  NS_NODE_INTERFACE_TABLE5(nsSVGFEComponentTransferElement, nsIDOMNode,
-                           nsIDOMElement, nsIDOMSVGElement,
-                           nsIDOMSVGFilterPrimitiveStandardAttributes,
-                           nsIDOMSVGFEComponentTransferElement)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(SVGFEComponentTransferElement)
-NS_INTERFACE_MAP_END_INHERITING(nsSVGFEComponentTransferElementBase)
-
-//----------------------------------------------------------------------
-// nsIDOMNode methods
-
-NS_IMPL_ELEMENT_CLONE_WITH_INIT(nsSVGFEComponentTransferElement)
-
-//----------------------------------------------------------------------
-// nsIDOMSVGFEComponentTransferElement methods
-
-/* readonly attribute nsIDOMSVGAnimatedString in1; */
-NS_IMETHODIMP
-nsSVGFEComponentTransferElement::GetIn1(nsIDOMSVGAnimatedString * *aIn)
-{
-  return mStringAttributes[IN1].ToDOMAnimatedString(aIn, this);
-}
-
-//----------------------------------------------------------------------
-// nsSVGElement methods
-
-nsSVGElement::StringAttributesInfo
-nsSVGFEComponentTransferElement::GetStringInfo()
-{
-  return StringAttributesInfo(mStringAttributes, sStringInfo,
-                              ArrayLength(sStringInfo));
-}
-
-//--------------------------------------------
-
-nsresult
-nsSVGFEComponentTransferElement::Filter(nsSVGFilterInstance *instance,
-                                        const nsTArray<const Image*>& aSources,
-                                        const Image* aTarget,
-                                        const nsIntRect& rect)
-{
-  uint8_t* sourceData = aSources[0]->mImage->Data();
-  uint8_t* targetData = aTarget->mImage->Data();
-  uint32_t stride = aTarget->mImage->Stride();
-
-  uint8_t tableR[256], tableG[256], tableB[256], tableA[256];
-  for (int i=0; i<256; i++)
-    tableR[i] = tableG[i] = tableB[i] = tableA[i] = i;
-  uint8_t* tables[] = { tableR, tableG, tableB, tableA };
-  for (nsIContent* childContent = nsINode::GetFirstChild();
-       childContent;
-       childContent = childContent->GetNextSibling()) {
-
-    nsRefPtr<SVGComponentTransferFunctionElement> child;
-    CallQueryInterface(childContent,
-            (SVGComponentTransferFunctionElement**)getter_AddRefs(child));
-    if (child) {
-      if (!child->GenerateLookupTable(tables[child->GetChannel()])) {
-        return NS_ERROR_FAILURE;
-      }
-    }
-  }
-
-  for (int32_t y = rect.y; y < rect.YMost(); y++) {
-    for (int32_t x = rect.x; x < rect.XMost(); x++) {
-      int32_t targIndex = y * stride + x * 4;
-      targetData[targIndex + GFX_ARGB32_OFFSET_B] =
-        tableB[sourceData[targIndex + GFX_ARGB32_OFFSET_B]];
-      targetData[targIndex + GFX_ARGB32_OFFSET_G] =
-        tableG[sourceData[targIndex + GFX_ARGB32_OFFSET_G]];
-      targetData[targIndex + GFX_ARGB32_OFFSET_R] =
-        tableR[sourceData[targIndex + GFX_ARGB32_OFFSET_R]];
-      targetData[targIndex + GFX_ARGB32_OFFSET_A] =
-        tableA[sourceData[targIndex + GFX_ARGB32_OFFSET_A]];
-    }
-  }
-  return NS_OK;
-}
-
-bool
-nsSVGFEComponentTransferElement::AttributeAffectsRendering(int32_t aNameSpaceID,
-                                                           nsIAtom* aAttribute) const
-{
-  return nsSVGFEComponentTransferElementBase::AttributeAffectsRendering(aNameSpaceID, aAttribute) ||
-         (aNameSpaceID == kNameSpaceID_None &&
-          aAttribute == nsGkAtoms::in);
-}
-
-void
-nsSVGFEComponentTransferElement::GetSourceImageNames(nsTArray<nsSVGStringInfo>& aSources)
-{
-  aSources.AppendElement(nsSVGStringInfo(&mStringAttributes[IN1], this));
-}
-
 namespace mozilla {
 namespace dom {
 
@@ -1897,10 +1733,9 @@ NS_IMPL_ISUPPORTS_INHERITED5(SVGFEFuncRElement,
                              nsIDOMSVGFEFuncRElement)
 
 /* virtual */ JSObject*
-SVGFEFuncRElement::WrapNode(JSContext* aCx, JSObject* aScope,
-                            bool* aTriedToWrap)
+SVGFEFuncRElement::WrapNode(JSContext* aCx, JSObject* aScope)
 {
-  return SVGFEFuncRElementBinding::Wrap(aCx, aScope, this, aTriedToWrap);
+  return SVGFEFuncRElementBinding::Wrap(aCx, aScope, this);
 }
 
 } // namespace dom
@@ -1921,10 +1756,9 @@ NS_IMPL_ISUPPORTS_INHERITED5(SVGFEFuncGElement,
                              nsIDOMSVGFEFuncGElement)
 
 /* virtual */ JSObject*
-SVGFEFuncGElement::WrapNode(JSContext* aCx, JSObject* aScope,
-                            bool* aTriedToWrap)
+SVGFEFuncGElement::WrapNode(JSContext* aCx, JSObject* aScope)
 {
-  return SVGFEFuncGElementBinding::Wrap(aCx, aScope, this, aTriedToWrap);
+  return SVGFEFuncGElementBinding::Wrap(aCx, aScope, this);
 }
 
 } // namespace dom
@@ -1945,10 +1779,9 @@ NS_IMPL_ISUPPORTS_INHERITED5(SVGFEFuncBElement,
                              nsIDOMSVGFEFuncBElement)
 
 /* virtual */ JSObject*
-SVGFEFuncBElement::WrapNode(JSContext* aCx, JSObject* aScope,
-                            bool* aTriedToWrap)
+SVGFEFuncBElement::WrapNode(JSContext* aCx, JSObject* aScope)
 {
-  return SVGFEFuncBElementBinding::Wrap(aCx, aScope, this, aTriedToWrap);
+  return SVGFEFuncBElementBinding::Wrap(aCx, aScope, this);
 }
 
 } // namespace dom
@@ -1969,10 +1802,9 @@ NS_IMPL_ISUPPORTS_INHERITED5(SVGFEFuncAElement,
                              nsIDOMSVGFEFuncAElement)
 
 /* virtual */ JSObject*
-SVGFEFuncAElement::WrapNode(JSContext* aCx, JSObject* aScope,
-                            bool* aTriedToWrap)
+SVGFEFuncAElement::WrapNode(JSContext* aCx, JSObject* aScope)
 {
-  return SVGFEFuncAElementBinding::Wrap(aCx, aScope, this, aTriedToWrap);
+  return SVGFEFuncAElementBinding::Wrap(aCx, aScope, this);
 }
 
 } // namespace dom
@@ -2187,499 +2019,6 @@ nsSVGFEOffsetElement::GetNumberInfo()
 
 nsSVGElement::StringAttributesInfo
 nsSVGFEOffsetElement::GetStringInfo()
-{
-  return StringAttributesInfo(mStringAttributes, sStringInfo,
-                              ArrayLength(sStringInfo));
-}
-
-//---------------------Tile------------------------
-
-typedef nsSVGFE nsSVGFETileElementBase;
-
-class nsSVGFETileElement : public nsSVGFETileElementBase,
-                           public nsIDOMSVGFETileElement
-{
-  friend nsresult NS_NewSVGFETileElement(nsIContent **aResult,
-                                         already_AddRefed<nsINodeInfo> aNodeInfo);
-protected:
-  nsSVGFETileElement(already_AddRefed<nsINodeInfo> aNodeInfo)
-    : nsSVGFETileElementBase(aNodeInfo) {}
-
-public:
-  virtual bool SubregionIsUnionOfRegions() { return false; }
-
-  // interfaces:
-  NS_DECL_ISUPPORTS_INHERITED
-
-  // FE Base
-  NS_FORWARD_NSIDOMSVGFILTERPRIMITIVESTANDARDATTRIBUTES(nsSVGFETileElementBase::)
-
-  virtual nsresult Filter(nsSVGFilterInstance* aInstance,
-                          const nsTArray<const Image*>& aSources,
-                          const Image* aTarget,
-                          const nsIntRect& aDataRect);
-  virtual bool AttributeAffectsRendering(
-          int32_t aNameSpaceID, nsIAtom* aAttribute) const;
-  virtual nsSVGString& GetResultImageName() { return mStringAttributes[RESULT]; }
-  virtual void GetSourceImageNames(nsTArray<nsSVGStringInfo>& aSources);
-  virtual nsIntRect ComputeTargetBBox(const nsTArray<nsIntRect>& aSourceBBoxes,
-          const nsSVGFilterInstance& aInstance);
-  virtual void ComputeNeededSourceBBoxes(const nsIntRect& aTargetBBox,
-          nsTArray<nsIntRect>& aSourceBBoxes, const nsSVGFilterInstance& aInstance);
-  virtual nsIntRect ComputeChangeBBox(const nsTArray<nsIntRect>& aSourceChangeBoxes,
-          const nsSVGFilterInstance& aInstance);
-
-  // Tile
-  NS_DECL_NSIDOMSVGFETILEELEMENT
-
-  NS_FORWARD_NSIDOMSVGELEMENT(nsSVGFETileElementBase::)
-
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
-
-  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const;
-
-  virtual nsXPCClassInfo* GetClassInfo();
-
-  virtual nsIDOMNode* AsDOMNode() { return this; }
-protected:
-  virtual StringAttributesInfo GetStringInfo();
-  
-  enum { RESULT, IN1 };
-  nsSVGString mStringAttributes[2];
-  static StringInfo sStringInfo[2];
-};
-
-nsSVGElement::StringInfo nsSVGFETileElement::sStringInfo[2] =
-{
-  { &nsGkAtoms::result, kNameSpaceID_None, true },
-  { &nsGkAtoms::in, kNameSpaceID_None, true }
-};
-
-NS_IMPL_NS_NEW_SVG_ELEMENT(FETile)
-
-//----------------------------------------------------------------------
-// nsISupports methods
-
-NS_IMPL_ADDREF_INHERITED(nsSVGFETileElement,nsSVGFETileElementBase)
-NS_IMPL_RELEASE_INHERITED(nsSVGFETileElement,nsSVGFETileElementBase)
-
-DOMCI_NODE_DATA(SVGFETileElement, nsSVGFETileElement)
-
-NS_INTERFACE_TABLE_HEAD(nsSVGFETileElement)
-  NS_NODE_INTERFACE_TABLE5(nsSVGFETileElement, nsIDOMNode, nsIDOMElement,
-                           nsIDOMSVGElement,
-                           nsIDOMSVGFilterPrimitiveStandardAttributes,
-                           nsIDOMSVGFETileElement)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(SVGFETileElement)
-NS_INTERFACE_MAP_END_INHERITING(nsSVGFETileElementBase)
-
-//----------------------------------------------------------------------
-// nsIDOMNode methods
-
-
-NS_IMPL_ELEMENT_CLONE_WITH_INIT(nsSVGFETileElement)
-
-
-//----------------------------------------------------------------------
-// nsSVGFETileElement methods
-
-/* readonly attribute nsIDOMSVGAnimatedString in1; */
-NS_IMETHODIMP nsSVGFETileElement::GetIn1(nsIDOMSVGAnimatedString * *aIn)
-{
-  return mStringAttributes[IN1].ToDOMAnimatedString(aIn, this);
-}
-
-void
-nsSVGFETileElement::GetSourceImageNames(nsTArray<nsSVGStringInfo>& aSources)
-{
-  aSources.AppendElement(nsSVGStringInfo(&mStringAttributes[IN1], this));
-}
-
-nsIntRect
-nsSVGFETileElement::ComputeTargetBBox(const nsTArray<nsIntRect>& aSourceBBoxes,
-        const nsSVGFilterInstance& aInstance)
-{
-  return GetMaxRect();
-}
-
-void
-nsSVGFETileElement::ComputeNeededSourceBBoxes(const nsIntRect& aTargetBBox,
-          nsTArray<nsIntRect>& aSourceBBoxes, const nsSVGFilterInstance& aInstance)
-{
-  // Just assume we need the entire source bounding box, so do nothing.
-}
-
-nsIntRect
-nsSVGFETileElement::ComputeChangeBBox(const nsTArray<nsIntRect>& aSourceChangeBoxes,
-                                      const nsSVGFilterInstance& aInstance)
-{
-  return GetMaxRect();
-}
-
-static int32_t WrapInterval(int32_t aVal, int32_t aMax)
-{
-  aVal = aVal % aMax;
-  return aVal < 0 ? aMax + aVal : aVal;
-}
-
-//----------------------------------------------------------------------
-// nsSVGElement methods
-
-/*
- * This function computes the size of partial match on either side of the tile.
- * eg: If we are talking about the X-axis direction, then it computes, the 
- * size of the tile that would be copied to the lesser X-axis side (usually
- * left), the higher X-axis side (usualy right) and the centre.
- * This is needed because often, the tile doesn't exactly align to the target
- * region and is partially copied on the edges. This function computes the
- * dimensions of the partially copied regions in one axis.
- *
- * OUTPUT:
- * aLesserSidePartialMatchSize: The size of the partial match on the lesser
- *                              side of the axis being considered.
- *                              eg: for X-axis, usually left side and
- *                                  for Y-axis, usually top
- * aHigherSidePartialMatchSize: The size of the partial match on the higher
- *                              side of the axis being considered.
- *                              eg: for X-axis, usually right side and
- *                                  for Y-axis, usually bottom
- * aCentreSize: The size of the target area where the tile is copied in full.
- *              This lies between the lesser and higher side partial matches.
- *              (the partially matched areas may be of zero width)
- *
- * INPUT:
- * aLesserTargetExtent: Edge of the target area on the axis being considered
- *                      on the lesser side. (eg: usually left on the X-axis)
- * aTargetSize: Size of the target area on the axis being considered (eg:
- *              usually width for X-axis)
- * aLesserTileExtent: Edge of the tile on the axis being considered on the
- *                    lesser side.
- * aTileSize: Size of the tile on the axis being considered.
- */
-static inline void
-ComputePartialTileExtents(int32_t *aLesserSidePartialMatchSize,
-                          int32_t *aHigherSidePartialMatchSize,
-                          int32_t *aCentreSize,
-                          int32_t aLesserTargetExtent,
-                          int32_t aTargetSize,
-                          int32_t aLesserTileExtent,
-                          int32_t aTileSize)
-{
-  int32_t targetExtentMost = aLesserTargetExtent + aTargetSize;
-  int32_t tileExtentMost = aLesserTileExtent + aTileSize;
-
-  int32_t lesserSidePartialMatchSize;
-  if (aLesserTileExtent < aLesserTargetExtent) {
-    lesserSidePartialMatchSize = tileExtentMost - aLesserTargetExtent;
-  } else {
-    lesserSidePartialMatchSize = (aLesserTileExtent - aLesserTargetExtent) %
-                                    aTileSize;
-  }
-
-  int32_t higherSidePartialMatchSize;
-  if (lesserSidePartialMatchSize > aTargetSize) {
-    lesserSidePartialMatchSize = aTargetSize;
-    higherSidePartialMatchSize = 0;
-  } else if (tileExtentMost > targetExtentMost) {
-      higherSidePartialMatchSize = targetExtentMost - aLesserTileExtent;
-  } else {
-    higherSidePartialMatchSize = (targetExtentMost - tileExtentMost) %
-                                    aTileSize;
-  }
-
-  if (lesserSidePartialMatchSize + higherSidePartialMatchSize >
-        aTargetSize) {
-    higherSidePartialMatchSize = aTargetSize - lesserSidePartialMatchSize;
-  }
-
-  /*
-   * To understand the conditon below, let us consider the X-Axis:
-   * Lesser side is left and the Higher side is right.
-   * This implies:
-   * aTargetSize is rect.width.
-   * lesserSidePartialMatchSize would mean leftPartialTileWidth.
-   * higherSidePartialMatchSize would mean rightPartialTileWidth.
-   *
-   * leftPartialTileWidth == rect.width only happens when the tile entirely
-   * overlaps with the target area in the X-axis and exceeds its bounds by at
-   * least one pixel on the lower X-Axis side.
-   *
-   * leftPartialTileWidth + rightPartialTileWidth == rect.width only happens
-   * when the tile overlaps the target area in such a way that the edge of the
-   * tile on the higher X-Axis side cuts through the target area and there is no
-   * space for a complete tile in the X-Axis in the target area on either side
-   * of that edge. In this scenario, centre will be of zero width and the
-   * partial widths on left and right will add up to the width of the rect. In
-   * case the tile is bigger than the rect in the X-axis, it will get clipped
-   * and remain equal to rect.width.
-   *
-   * Therefore, those two conditions are separate cases which lead to centre
-   * being of zero width.
-   *
-   * The condition below is the same logic as above expressed independent of
-   * the axis in consideration.
-   */
-
-  int32_t centreSize;
-  if (lesserSidePartialMatchSize == aTargetSize ||
-        lesserSidePartialMatchSize + higherSidePartialMatchSize ==
-        aTargetSize) {
-    centreSize = 0;
-  } else {
-    centreSize = aTargetSize -
-                   (lesserSidePartialMatchSize + higherSidePartialMatchSize);
-  }
-
-  *aLesserSidePartialMatchSize = lesserSidePartialMatchSize;
-  *aHigherSidePartialMatchSize = higherSidePartialMatchSize;
-  *aCentreSize = centreSize;
-}
-
-static inline void
-TilePixels(uint8_t *aTargetData,
-           const uint8_t *aSourceData,
-           const nsIntRect &targetRegion,
-           const nsIntRect &aTile,
-           uint32_t aStride)
-{
-  if (targetRegion.IsEmpty()) {
-    return;
-  }
-
-  uint32_t tileRowCopyMemSize = aTile.width * 4;
-  uint32_t numTimesToCopyTileRows = targetRegion.width / aTile.width;
-
-  uint8_t *targetFirstRowOffset = aTargetData + 4 * targetRegion.x;
-  const uint8_t *tileFirstRowOffset = aSourceData + 4 * aTile.x;
-
-  int32_t tileYOffset = 0;
-  for (int32_t targetY = targetRegion.y;
-       targetY < targetRegion.YMost();
-       ++targetY) {
-    uint8_t *targetRowOffset = targetFirstRowOffset + aStride * targetY;
-    const uint8_t *tileRowOffset = tileFirstRowOffset +
-                                             aStride * (aTile.y + tileYOffset);
-
-    for (uint32_t i = 0; i < numTimesToCopyTileRows; ++i) {
-      memcpy(targetRowOffset + i * tileRowCopyMemSize,
-             tileRowOffset,
-             tileRowCopyMemSize);
-    }
-
-    tileYOffset = (tileYOffset + 1) % aTile.height;
-  }
-}
-
-nsresult
-nsSVGFETileElement::Filter(nsSVGFilterInstance *instance,
-                           const nsTArray<const Image*>& aSources,
-                           const Image* aTarget,
-                           const nsIntRect& rect)
-{
-  // XXX This code depends on the surface rect containing the filter
-  // primitive subregion. ComputeTargetBBox, ComputeNeededSourceBBoxes
-  // and ComputeChangeBBox are all pessimal, so that will normally be OK,
-  // but nothing clips mFilterPrimitiveSubregion so this should be changed.
-
-  nsIntRect tile;
-  bool res = gfxUtils::GfxRectToIntRect(aSources[0]->mFilterPrimitiveSubregion,
-                                        &tile);
-
-  NS_ENSURE_TRUE(res, NS_ERROR_FAILURE); // asserts on failure (not 
-  if (tile.IsEmpty())
-    return NS_OK;
-
-  const nsIntRect &surfaceRect = instance->GetSurfaceRect();
-  if (!tile.Intersects(surfaceRect)) {
-    // nothing to draw
-    return NS_OK;
-  }
-
-  // clip tile
-  tile = tile.Intersect(surfaceRect);
-
-  // Get it into surface space
-  tile -= surfaceRect.TopLeft();
-
-  uint8_t* sourceData = aSources[0]->mImage->Data();
-  uint8_t* targetData = aTarget->mImage->Data();
-  uint32_t stride = aTarget->mImage->Stride();
-
-  /*
-   * priority: left before right before centre
-   *             and
-   *           top before bottom before centre
-   *
-   * eg: If we have a target area which is 1.5 times the width of a tile,
-   *     then, based on alignment, we get:
-   *       'left and right'
-   *         or
-   *       'left and centre'
-   *
-   */
-
-  int32_t leftPartialTileWidth;
-  int32_t rightPartialTileWidth;
-  int32_t centreWidth;
-  ComputePartialTileExtents(&leftPartialTileWidth,
-                            &rightPartialTileWidth,
-                            &centreWidth,
-                            rect.x,
-                            rect.width,
-                            tile.x,
-                            tile.width);
-
-  int32_t topPartialTileHeight;
-  int32_t bottomPartialTileHeight;
-  int32_t centreHeight;
-  ComputePartialTileExtents(&topPartialTileHeight,
-                            &bottomPartialTileHeight,
-                            &centreHeight,
-                            rect.y,
-                            rect.height,
-                            tile.y,
-                            tile.height);
-
-  /* We have nine regions of the target area which have to be tiled differetly:
-   *
-   * Top Left,    Top Middle,    Top Right,
-   * Left Middle, Centre,        Right Middle,
-   * Bottom Left, Bottom Middle, Bottom Right
-   *
-   * + Centre is tiled by repeating the tiled image in full.
-   * + Top Left, Top Middle and Top Right:
-   *     Some of the rows from the top of the tile will be clipped here.
-   * + Bottom Left, Bottom Middle and Bottom Right:
-   *     Some of the rows from the bottom of the tile will be clipped here.
-   * + Top Left, Left Middle and Bottom left:
-   *     Some of the columns from the Left of the tile will be clipped here.
-   * + Top Right, Right Middle and Bottom Right:
-   *     Some of the columns from the right of the tile will be clipped here.
-   *
-   * If the sizes and positions of the target and tile are such that the tile
-   * aligns exactly on any (or all) of the edges, then some (or all) of the
-   * regions above (except Centre) will be zero sized.
-   */
-
-  nsIntRect targetRects[] = {
-    // Top Left
-    nsIntRect(rect.x, rect.y, leftPartialTileWidth, topPartialTileHeight),
-    // Top Middle
-    nsIntRect(rect.x + leftPartialTileWidth,
-              rect.y,
-              centreWidth,
-              topPartialTileHeight),
-    // Top Right
-    nsIntRect(rect.XMost() - rightPartialTileWidth,
-              rect.y,
-              rightPartialTileWidth,
-              topPartialTileHeight),
-    // Left Middle
-    nsIntRect(rect.x,
-              rect.y + topPartialTileHeight,
-              leftPartialTileWidth,
-              centreHeight),
-    // Centre
-    nsIntRect(rect.x + leftPartialTileWidth,
-              rect.y + topPartialTileHeight,
-              centreWidth,
-              centreHeight),
-    // Right Middle
-    nsIntRect(rect.XMost() - rightPartialTileWidth,
-              rect.y + topPartialTileHeight,
-              rightPartialTileWidth,
-              centreHeight),
-    // Bottom Left
-    nsIntRect(rect.x,
-              rect.YMost() - bottomPartialTileHeight,
-              leftPartialTileWidth,
-              bottomPartialTileHeight),
-    // Bottom Middle
-    nsIntRect(rect.x + leftPartialTileWidth,
-              rect.YMost() - bottomPartialTileHeight,
-              centreWidth,
-              bottomPartialTileHeight),
-    // Bottom Right
-    nsIntRect(rect.XMost() - rightPartialTileWidth,
-              rect.YMost() - bottomPartialTileHeight,
-              rightPartialTileWidth,
-              bottomPartialTileHeight)
-  };
-
-  nsIntRect tileRects[] = {
-    // Top Left
-    nsIntRect(tile.XMost() - leftPartialTileWidth,
-              tile.YMost() - topPartialTileHeight,
-              leftPartialTileWidth,
-              topPartialTileHeight),
-    // Top Middle
-    nsIntRect(tile.x,
-              tile.YMost() - topPartialTileHeight,
-              tile.width,
-              topPartialTileHeight),
-    // Top Right
-    nsIntRect(tile.x,
-              tile.YMost() - topPartialTileHeight,
-              rightPartialTileWidth,
-              topPartialTileHeight),
-    // Left Middle
-    nsIntRect(tile.XMost() - leftPartialTileWidth,
-              tile.y,
-              leftPartialTileWidth,
-              tile.height),
-    // Centre
-    nsIntRect(tile.x,
-              tile.y,
-              tile.width,
-              tile.height),
-    // Right Middle
-    nsIntRect(tile.x,
-              tile.y,
-              rightPartialTileWidth,
-              tile.height),
-    // Bottom Left
-    nsIntRect(tile.XMost() - leftPartialTileWidth,
-              tile.y,
-              leftPartialTileWidth,
-              bottomPartialTileHeight),
-    // Bottom Middle
-    nsIntRect(tile.x,
-              tile.y,
-              tile.width,
-              bottomPartialTileHeight),
-    // Bottom Right
-    nsIntRect(tile.x,
-              tile.y,
-              rightPartialTileWidth,
-              bottomPartialTileHeight)
-  };
-
-  for (uint32_t i = 0; i < ArrayLength(targetRects); ++i) {
-    TilePixels(targetData,
-               sourceData,
-               targetRects[i],
-               tileRects[i],
-               stride);
-  }
-
-  return NS_OK;
-}
-
-bool
-nsSVGFETileElement::AttributeAffectsRendering(int32_t aNameSpaceID,
-                                              nsIAtom* aAttribute) const
-{
-  return nsSVGFETileElementBase::AttributeAffectsRendering(aNameSpaceID, 
-                                                           aAttribute) ||
-           (aNameSpaceID == kNameSpaceID_None && aAttribute == nsGkAtoms::in);
-}
-
-//----------------------------------------------------------------------
-// nsSVGElement methods
-
-nsSVGElement::StringAttributesInfo
-nsSVGFETileElement::GetStringInfo()
 {
   return StringAttributesInfo(mStringAttributes, sStringInfo,
                               ArrayLength(sStringInfo));
@@ -3829,6 +3168,12 @@ static int32_t BoundInterval(int32_t aVal, int32_t aMax)
   return std::min(aVal, aMax - 1);
 }
 
+static int32_t WrapInterval(int32_t aVal, int32_t aMax)
+{
+  aVal = aVal % aMax;
+  return aVal < 0 ? aMax + aVal : aVal;
+}
+
 static void
 ConvolvePixel(const uint8_t *aSourceData,
               uint8_t *aTargetData,
@@ -4056,222 +3401,6 @@ nsSVGFEConvolveMatrixElement::GetNumberListInfo()
 {
   return NumberListAttributesInfo(mNumberListAttributes, sNumberListInfo,
                                   ArrayLength(sNumberListInfo));
-}
-
-//---------------------DistantLight------------------------
-
-typedef SVGFEUnstyledElement nsSVGFEDistantLightElementBase;
-
-class nsSVGFEDistantLightElement : public nsSVGFEDistantLightElementBase,
-                                   public nsIDOMSVGFEDistantLightElement
-{
-  friend nsresult NS_NewSVGFEDistantLightElement(nsIContent **aResult,
-                                                 already_AddRefed<nsINodeInfo> aNodeInfo);
-protected:
-  nsSVGFEDistantLightElement(already_AddRefed<nsINodeInfo> aNodeInfo)
-    : nsSVGFEDistantLightElementBase(aNodeInfo) {}
-
-public:
-  // interfaces:
-  NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_NSIDOMSVGFEDISTANTLIGHTELEMENT
-
-  NS_FORWARD_NSIDOMSVGELEMENT(nsSVGFEDistantLightElementBase::)
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
-
-  virtual bool AttributeAffectsRendering(
-          int32_t aNameSpaceID, nsIAtom* aAttribute) const;
-
-  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const;
-
-  virtual nsXPCClassInfo* GetClassInfo();
-
-  virtual nsIDOMNode* AsDOMNode() { return this; }
-protected:
-  virtual NumberAttributesInfo GetNumberInfo();
-
-  enum { AZIMUTH, ELEVATION };
-  nsSVGNumber2 mNumberAttributes[2];
-  static NumberInfo sNumberInfo[2];
-};
-
-NS_IMPL_NS_NEW_SVG_ELEMENT(FEDistantLight)
-
-nsSVGElement::NumberInfo nsSVGFEDistantLightElement::sNumberInfo[2] =
-{
-  { &nsGkAtoms::azimuth,   0, false },
-  { &nsGkAtoms::elevation, 0, false }
-};
-
-//----------------------------------------------------------------------
-// nsISupports methods
-
-NS_IMPL_ADDREF_INHERITED(nsSVGFEDistantLightElement,nsSVGFEDistantLightElementBase)
-NS_IMPL_RELEASE_INHERITED(nsSVGFEDistantLightElement,nsSVGFEDistantLightElementBase)
-
-DOMCI_NODE_DATA(SVGFEDistantLightElement, nsSVGFEDistantLightElement)
-
-NS_INTERFACE_TABLE_HEAD(nsSVGFEDistantLightElement)
-  NS_NODE_INTERFACE_TABLE4(nsSVGFEDistantLightElement, nsIDOMNode,
-                           nsIDOMElement, nsIDOMSVGElement,
-                           nsIDOMSVGFEDistantLightElement)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(SVGFEDistantLightElement)
-NS_INTERFACE_MAP_END_INHERITING(nsSVGFEDistantLightElementBase)
-
-//----------------------------------------------------------------------
-// nsIDOMNode methods
-
-NS_IMPL_ELEMENT_CLONE_WITH_INIT(nsSVGFEDistantLightElement)
-
-//----------------------------------------------------------------------
-// nsFEUnstyledElement methods
-
-bool
-nsSVGFEDistantLightElement::AttributeAffectsRendering(int32_t aNameSpaceID,
-                                                      nsIAtom* aAttribute) const
-{
-  return aNameSpaceID == kNameSpaceID_None &&
-         (aAttribute == nsGkAtoms::azimuth ||
-          aAttribute == nsGkAtoms::elevation);
-}
-
-//----------------------------------------------------------------------
-// nsIDOMSVGFEDistantLightElement methods
-
-NS_IMETHODIMP
-nsSVGFEDistantLightElement::GetAzimuth(nsIDOMSVGAnimatedNumber **aAzimuth)
-{
-  return mNumberAttributes[AZIMUTH].ToDOMAnimatedNumber(aAzimuth,
-                                                        this);
-}
-
-NS_IMETHODIMP
-nsSVGFEDistantLightElement::GetElevation(nsIDOMSVGAnimatedNumber **aElevation)
-{
-  return mNumberAttributes[ELEVATION].ToDOMAnimatedNumber(aElevation,
-                                                          this);
-}
-
-//----------------------------------------------------------------------
-// nsSVGElement methods
-
-nsSVGElement::NumberAttributesInfo
-nsSVGFEDistantLightElement::GetNumberInfo()
-{
-  return NumberAttributesInfo(mNumberAttributes, sNumberInfo,
-                              ArrayLength(sNumberInfo));
-}
-
-//---------------------PointLight------------------------
-
-typedef SVGFEUnstyledElement nsSVGFEPointLightElementBase;
-
-class nsSVGFEPointLightElement : public nsSVGFEPointLightElementBase,
-                                 public nsIDOMSVGFEPointLightElement
-{
-  friend nsresult NS_NewSVGFEPointLightElement(nsIContent **aResult,
-                                                 already_AddRefed<nsINodeInfo> aNodeInfo);
-protected:
-  nsSVGFEPointLightElement(already_AddRefed<nsINodeInfo> aNodeInfo)
-    : nsSVGFEPointLightElementBase(aNodeInfo) {}
-
-public:
-  // interfaces:
-  NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_NSIDOMSVGFEPOINTLIGHTELEMENT
-
-  NS_FORWARD_NSIDOMSVGELEMENT(nsSVGFEPointLightElementBase::)
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
-
-  virtual bool AttributeAffectsRendering(
-          int32_t aNameSpaceID, nsIAtom* aAttribute) const;
-
-  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const;
-
-  virtual nsXPCClassInfo* GetClassInfo();
-
-  virtual nsIDOMNode* AsDOMNode() { return this; }
-protected:
-  virtual NumberAttributesInfo GetNumberInfo();
-
-  enum { X, Y, Z };
-  nsSVGNumber2 mNumberAttributes[3];
-  static NumberInfo sNumberInfo[3];
-};
-
-NS_IMPL_NS_NEW_SVG_ELEMENT(FEPointLight)
-
-nsSVGElement::NumberInfo nsSVGFEPointLightElement::sNumberInfo[3] =
-{
-  { &nsGkAtoms::x, 0, false },
-  { &nsGkAtoms::y, 0, false },
-  { &nsGkAtoms::z, 0, false }
-};
-
-//----------------------------------------------------------------------
-// nsISupports methods
-
-NS_IMPL_ADDREF_INHERITED(nsSVGFEPointLightElement,nsSVGFEPointLightElementBase)
-NS_IMPL_RELEASE_INHERITED(nsSVGFEPointLightElement,nsSVGFEPointLightElementBase)
-
-DOMCI_NODE_DATA(SVGFEPointLightElement, nsSVGFEPointLightElement)
-
-NS_INTERFACE_TABLE_HEAD(nsSVGFEPointLightElement)
-  NS_NODE_INTERFACE_TABLE4(nsSVGFEPointLightElement, nsIDOMNode,
-                           nsIDOMElement, nsIDOMSVGElement,
-                           nsIDOMSVGFEPointLightElement)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(SVGFEPointLightElement)
-NS_INTERFACE_MAP_END_INHERITING(nsSVGFEPointLightElementBase)
-
-//----------------------------------------------------------------------
-// nsIDOMNode methods
-
-NS_IMPL_ELEMENT_CLONE_WITH_INIT(nsSVGFEPointLightElement)
-
-//----------------------------------------------------------------------
-// nsFEUnstyledElement methods
-
-bool
-nsSVGFEPointLightElement::AttributeAffectsRendering(int32_t aNameSpaceID,
-                                                    nsIAtom* aAttribute) const
-{
-  return aNameSpaceID == kNameSpaceID_None &&
-         (aAttribute == nsGkAtoms::x ||
-          aAttribute == nsGkAtoms::y ||
-          aAttribute == nsGkAtoms::z);
-}
-
-//----------------------------------------------------------------------
-// nsIDOMSVGFEPointLightElement methods
-
-NS_IMETHODIMP
-nsSVGFEPointLightElement::GetX(nsIDOMSVGAnimatedNumber **aX)
-{
-  return mNumberAttributes[X].ToDOMAnimatedNumber(aX, this);
-}
-
-NS_IMETHODIMP
-nsSVGFEPointLightElement::GetY(nsIDOMSVGAnimatedNumber **aY)
-{
-  return mNumberAttributes[Y].ToDOMAnimatedNumber(aY, this);
-}
-
-NS_IMETHODIMP
-nsSVGFEPointLightElement::GetZ(nsIDOMSVGAnimatedNumber **aZ)
-{
-  return mNumberAttributes[Z].ToDOMAnimatedNumber(aZ, this);
-}
-
-//----------------------------------------------------------------------
-// nsSVGElement methods
-
-nsSVGElement::NumberAttributesInfo
-nsSVGFEPointLightElement::GetNumberInfo()
-{
-  return NumberAttributesInfo(mNumberAttributes, sNumberInfo,
-                              ArrayLength(sNumberInfo));
 }
 
 //---------------------SpotLight------------------------
@@ -4688,8 +3817,8 @@ nsSVGFELightingElement::Filter(nsSVGFilterInstance *instance,
   if (!info.mTarget)
     return NS_ERROR_FAILURE;
 
-  nsCOMPtr<nsIDOMSVGFEDistantLightElement> distantLight;
-  nsCOMPtr<nsIDOMSVGFEPointLightElement> pointLight;
+  SVGFEDistantLightElement* distantLight = nullptr;
+  SVGFEPointLightElement* pointLight = nullptr;
   nsCOMPtr<nsIDOMSVGFESpotLightElement> spotLight;
 
   nsIFrame* frame = GetPrimaryFrame();
@@ -4698,12 +3827,14 @@ nsSVGFELightingElement::Filter(nsSVGFilterInstance *instance,
 
   nscolor lightColor = style->StyleSVGReset()->mLightingColor;
 
-  // find specified light  
+  // find specified light
   for (nsCOMPtr<nsIContent> child = nsINode::GetFirstChild();
        child;
        child = child->GetNextSibling()) {
-    distantLight = do_QueryInterface(child);
-    pointLight = do_QueryInterface(child);
+    distantLight = child->IsSVG(nsGkAtoms::feDistantLight) ?
+                     static_cast<SVGFEDistantLightElement*>(child.get()) : nullptr;
+    pointLight = child->IsSVG(nsGkAtoms::fePointLight) ?
+                   static_cast<SVGFEPointLightElement*>(child.get()) : nullptr;
     spotLight = do_QueryInterface(child);
     if (distantLight || pointLight || spotLight)
       break;
@@ -4717,10 +3848,9 @@ nsSVGFELightingElement::Filter(nsSVGFilterInstance *instance,
   float L[3];
   if (distantLight) {
     float azimuth, elevation;
-    static_cast<nsSVGFEDistantLightElement*>
-      (distantLight.get())->GetAnimatedNumberValues(&azimuth,
-                                                    &elevation,
-                                                    nullptr);
+    distantLight->GetAnimatedNumberValues(&azimuth,
+                                          &elevation,
+                                          nullptr);
     L[0] = cos(azimuth * radPerDeg) * cos(elevation * radPerDeg);
     L[1] = sin(azimuth * radPerDeg) * cos(elevation * radPerDeg);
     L[2] = sin(elevation * radPerDeg);
@@ -4728,11 +3858,10 @@ nsSVGFELightingElement::Filter(nsSVGFilterInstance *instance,
   float lightPos[3], pointsAt[3], specularExponent;
   float cosConeAngle = 0;
   if (pointLight) {
-    static_cast<nsSVGFEPointLightElement*>
-      (pointLight.get())->GetAnimatedNumberValues(lightPos,
-                                                  lightPos + 1,
-                                                  lightPos + 2,
-                                                  nullptr);
+    pointLight->GetAnimatedNumberValues(lightPos,
+                                        lightPos + 1,
+                                        lightPos + 2,
+                                        nullptr);
     instance->ConvertLocation(lightPos);
   }
   if (spotLight) {

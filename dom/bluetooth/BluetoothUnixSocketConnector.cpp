@@ -84,6 +84,10 @@ BluetoothUnixSocketConnector::SetUp(int aFd)
     lm |= mAuth ? L2CAP_LM_AUTH : 0;
     lm |= mEncrypt ? L2CAP_LM_ENCRYPT : 0;
     break;
+  case BluetoothSocketType::SCO:
+    break;
+  default:
+    MOZ_NOT_REACHED("Unknown socket type!");
   }
 
   if (lm) {

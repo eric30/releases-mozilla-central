@@ -339,10 +339,9 @@ Element::GetBindingURL(nsIDocument *aDocument, css::URLValue **aResult)
 }
 
 JSObject*
-Element::WrapObject(JSContext *aCx, JSObject *aScope,
-                    bool *aTriedToWrap)
+Element::WrapObject(JSContext *aCx, JSObject *aScope)
 {
-  JSObject* obj = nsINode::WrapObject(aCx, aScope, aTriedToWrap);
+  JSObject* obj = nsINode::WrapObject(aCx, aScope);
   if (!obj) {
     return nullptr;
   }
@@ -655,7 +654,7 @@ Element::GetClientAreaRect()
 already_AddRefed<nsClientRect>
 Element::GetBoundingClientRect()
 {
-  nsRefPtr<nsClientRect> rect = new nsClientRect();
+  nsRefPtr<nsClientRect> rect = new nsClientRect(this);
   
   nsIFrame* frame = GetPrimaryFrame(Flush_Layout);
   if (!frame) {
@@ -671,7 +670,7 @@ Element::GetBoundingClientRect()
 }
 
 already_AddRefed<nsClientRectList>
-Element::GetClientRects(ErrorResult& aError)
+Element::GetClientRects()
 {
   nsRefPtr<nsClientRectList> rectList = new nsClientRectList(this);
 
@@ -685,10 +684,6 @@ Element::GetClientRects(ErrorResult& aError)
   nsLayoutUtils::GetAllInFlowRects(frame,
           nsLayoutUtils::GetContainingBlockForClientRect(frame), &builder,
           nsLayoutUtils::RECTS_ACCOUNT_FOR_TRANSFORMS);
-  if (NS_FAILED(builder.mRV)) {
-    aError.Throw(builder.mRV);
-    return nullptr;
-  }
   return rectList.forget();
 }
 
@@ -1471,13 +1466,6 @@ Element::GetExistingAttrNameFromQName(const nsAString& aStr) const
   }
 
   return nodeInfo;
-}
-
-NS_IMETHODIMP
-Element::GetAttributes(nsIDOMMozNamedAttrMap** aAttributes)
-{
-  NS_ADDREF(*aAttributes = Attributes());
-  return NS_OK;
 }
 
 // static

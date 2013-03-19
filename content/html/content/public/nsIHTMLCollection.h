@@ -12,6 +12,9 @@
 struct JSContext;
 class JSObject;
 class nsINode;
+class nsString;
+template<class> class nsTArray;
+
 namespace mozilla {
 class ErrorResult;
 
@@ -76,8 +79,7 @@ public:
     CallQueryInterface(this, &cache);
     return cache->GetWrapperPreserveColor();
   }
-  virtual JSObject* WrapObject(JSContext *cx, JSObject *scope,
-                               bool *triedToWrap) = 0;
+  virtual JSObject* WrapObject(JSContext *cx, JSObject *scope) = 0;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsIHTMLCollection, NS_IHTMLCOLLECTION_IID)

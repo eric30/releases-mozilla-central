@@ -11,150 +11,168 @@
 #include "AudioParam.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/TypedEnum.h"
+#include "mozilla/dom/PannerNodeBinding.h"
 #include "ThreeDPoint.h"
+#include "mozilla/WeakPtr.h"
 
 namespace mozilla {
 namespace dom {
 
 class AudioContext;
 
-MOZ_BEGIN_ENUM_CLASS(PanningModelEnum, uint16_t)
-  EQUALPOWER = 0,
-  HRTF = 1,
-  SOUNDFIELD = 2,
-  Max = 2
-MOZ_END_ENUM_CLASS(PanningModelEnum)
-MOZ_BEGIN_ENUM_CLASS(DistanceModelEnum, uint16_t)
-  LINEAR_DISTANCE = 0,
-  INVERSE_DISTANCE = 1,
-  EXPONENTIAL_DISTANCE = 2,
-  Max = 2
-MOZ_END_ENUM_CLASS(DistanceModelEnum)
-
-class PannerNode : public AudioNode
+class PannerNode : public AudioNode,
+                   public SupportsWeakPtr<PannerNode>
 {
 public:
   explicit PannerNode(AudioContext* aContext);
+  virtual ~PannerNode();
 
   virtual JSObject* WrapObject(JSContext* aCx, JSObject* aScope);
 
-  uint16_t PanningModel() const
+  virtual bool SupportsMediaStreams() const MOZ_OVERRIDE
   {
-    return static_cast<uint16_t> (mPanningModel);
-  }
-  void SetPanningModel(uint16_t aPanningModel, ErrorResult& aRv)
-  {
-    PanningModelEnum panningModel =
-      static_cast<PanningModelEnum> (aPanningModel);
-    if (panningModel > PanningModelEnum::Max) {
-      aRv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
-    } else {
-      mPanningModel = panningModel;
-    }
+    return true;
   }
 
-  uint16_t DistanceModel() const
+  PanningModelType PanningModel() const
   {
-    return static_cast<uint16_t> (mDistanceModel);
+    return mPanningModel;
   }
-  void SetDistanceModel(uint16_t aDistanceModel, ErrorResult& aRv)
+  void SetPanningModel(PanningModelType aPanningModel)
   {
-    DistanceModelEnum distanceModel =
-      static_cast<DistanceModelEnum> (aDistanceModel);
-    if (distanceModel > DistanceModelEnum::Max) {
-      aRv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
-    } else {
-      mDistanceModel = distanceModel;
-    }
+    mPanningModel = aPanningModel;
+    SendInt32ParameterToStream(PANNING_MODEL, int32_t(mPanningModel));
   }
 
-  void SetPosition(float aX, float aY, float aZ)
+  DistanceModelType DistanceModel() const
+  {
+    return mDistanceModel;
+  }
+  void SetDistanceModel(DistanceModelType aDistanceModel)
+  {
+    mDistanceModel = aDistanceModel;
+    SendInt32ParameterToStream(DISTANCE_MODEL, int32_t(mDistanceModel));
+  }
+
+  void SetPosition(double aX, double aY, double aZ)
   {
     mPosition.x = aX;
     mPosition.y = aY;
     mPosition.z = aZ;
+    SendThreeDPointParameterToStream(POSITION, mPosition);
   }
 
-  void SetOrientation(float aX, float aY, float aZ)
+  void SetOrientation(double aX, double aY, double aZ)
   {
     mOrientation.x = aX;
     mOrientation.y = aY;
     mOrientation.z = aZ;
+    SendThreeDPointParameterToStream(ORIENTATION, mOrientation);
   }
 
-  void SetVelocity(float aX, float aY, float aZ)
+  void SetVelocity(double aX, double aY, double aZ)
   {
     mVelocity.x = aX;
     mVelocity.y = aY;
     mVelocity.z = aZ;
+    SendThreeDPointParameterToStream(VELOCITY, mVelocity);
   }
 
-  float RefDistance() const
+  double RefDistance() const
   {
     return mRefDistance;
   }
-  void SetRefDistance(float aRefDistance)
+  void SetRefDistance(double aRefDistance)
   {
     mRefDistance = aRefDistance;
+    SendDoubleParameterToStream(REF_DISTANCE, mRefDistance);
   }
 
-  float MaxDistance() const
+  double MaxDistance() const
   {
     return mMaxDistance;
   }
-  void SetMaxDistance(float aMaxDistance)
+  void SetMaxDistance(double aMaxDistance)
   {
     mMaxDistance = aMaxDistance;
+    SendDoubleParameterToStream(MAX_DISTANCE, mMaxDistance);
   }
 
-  float RolloffFactor() const
+  double RolloffFactor() const
   {
     return mRolloffFactor;
   }
-  void SetRolloffFactor(float aRolloffFactor)
+  void SetRolloffFactor(double aRolloffFactor)
   {
     mRolloffFactor = aRolloffFactor;
+    SendDoubleParameterToStream(ROLLOFF_FACTOR, mRolloffFactor);
   }
 
-  float ConeInnerAngle() const
+  double ConeInnerAngle() const
   {
     return mConeInnerAngle;
   }
-  void SetConeInnerAngle(float aConeInnerAngle)
+  void SetConeInnerAngle(double aConeInnerAngle)
   {
     mConeInnerAngle = aConeInnerAngle;
+    SendDoubleParameterToStream(CONE_INNER_ANGLE, mConeInnerAngle);
   }
 
-  float ConeOuterAngle() const
+  double ConeOuterAngle() const
   {
     return mConeOuterAngle;
   }
-  void SetConeOuterAngle(float aConeOuterAngle)
+  void SetConeOuterAngle(double aConeOuterAngle)
   {
     mConeOuterAngle = aConeOuterAngle;
+    SendDoubleParameterToStream(CONE_OUTER_ANGLE, mConeOuterAngle);
   }
 
-  float ConeOuterGain() const
+  double ConeOuterGain() const
   {
     return mConeOuterGain;
   }
-  void SetConeOuterGain(float aConeOuterGain)
+  void SetConeOuterGain(double aConeOuterGain)
   {
     mConeOuterGain = aConeOuterGain;
+    SendDoubleParameterToStream(CONE_OUTER_GAIN, mConeOuterGain);
   }
 
 private:
-  PanningModelEnum mPanningModel;
-  DistanceModelEnum mDistanceModel;
+  friend class AudioListener;
+  friend class PannerNodeEngine;
+  enum EngineParameters {
+    LISTENER_POSITION,
+    LISTENER_ORIENTATION,
+    LISTENER_UPVECTOR,
+    LISTENER_VELOCITY,
+    LISTENER_DOPPLER_FACTOR,
+    LISTENER_SPEED_OF_SOUND,
+    PANNING_MODEL,
+    DISTANCE_MODEL,
+    POSITION,
+    ORIENTATION,
+    VELOCITY,
+    REF_DISTANCE,
+    MAX_DISTANCE,
+    ROLLOFF_FACTOR,
+    CONE_INNER_ANGLE,
+    CONE_OUTER_ANGLE,
+    CONE_OUTER_GAIN
+  };
+
+private:
+  PanningModelType mPanningModel;
+  DistanceModelType mDistanceModel;
   ThreeDPoint mPosition;
   ThreeDPoint mOrientation;
   ThreeDPoint mVelocity;
-  float mRefDistance;
-  float mMaxDistance;
-  float mRolloffFactor;
-  float mConeInnerAngle;
-  float mConeOuterAngle;
-  float mConeOuterGain;
+  double mRefDistance;
+  double mMaxDistance;
+  double mRolloffFactor;
+  double mConeInnerAngle;
+  double mConeOuterAngle;
+  double mConeOuterGain;
 };
 
 }

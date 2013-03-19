@@ -7,6 +7,7 @@
 #include "AudioContext.h"
 #include "nsContentUtils.h"
 #include "nsIDOMWindow.h"
+#include "nsPIDOMWindow.h"
 #include "mozilla/ErrorResult.h"
 #include "MediaStreamGraph.h"
 #include "AudioDestinationNode.h"
@@ -45,10 +46,9 @@ AudioContext::~AudioContext()
 }
 
 JSObject*
-AudioContext::WrapObject(JSContext* aCx, JSObject* aScope,
-                         bool* aTriedToWrap)
+AudioContext::WrapObject(JSContext* aCx, JSObject* aScope)
 {
-  return AudioContextBinding::Wrap(aCx, aScope, this, aTriedToWrap);
+  return AudioContextBinding::Wrap(aCx, aScope, this);
 }
 
 /* static */ already_AddRefed<AudioContext>
@@ -60,10 +60,9 @@ AudioContext::Constructor(const GlobalObject& aGlobal, ErrorResult& aRv)
     return nullptr;
   }
 
-  AudioContext* object = new AudioContext(window);
-  NS_ADDREF(object);
+  nsRefPtr<AudioContext> object = new AudioContext(window);
   window->AddAudioContext(object);
-  return object;
+  return object.forget();
 }
 
 already_AddRefed<AudioBufferSourceNode>
@@ -190,6 +189,12 @@ MediaStream*
 AudioContext::DestinationStream() const
 {
   return Destination()->Stream();
+}
+
+double
+AudioContext::CurrentTime() const
+{
+  return MediaTimeToSeconds(Destination()->Stream()->GetCurrentTime());
 }
 
 }

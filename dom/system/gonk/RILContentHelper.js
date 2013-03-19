@@ -81,7 +81,8 @@ const RIL_IPC_MSG_NAMES = [
   "RIL:CfStateChanged",
   "RIL:IccOpenChannel",
   "RIL:IccCloseChannel",
-  "RIL:IccExchangeAPDU"
+  "RIL:IccExchangeAPDU",
+  "RIL:IccUpdateContact"
 ];
 
 XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
@@ -120,8 +121,8 @@ MobileICCInfo.prototype = {
   // nsIDOMMozMobileICCInfo
 
   iccid: null,
-  mcc: 0,
-  mnc: 0,
+  mcc: null,
+  mnc: null,
   spn: null,
   msisdn: null
 };
@@ -150,7 +151,7 @@ MobileConnectionInfo.prototype = {
   emergencyCallsOnly: false,
   roaming: false,
   network: null,
-  lastKnownMcc: 0,
+  lastKnownMcc: null,
   cell: null,
   type: null,
   signalStrength: null,
@@ -178,8 +179,8 @@ MobileNetworkInfo.prototype = {
 
   shortName: null,
   longName: null,
-  mcc: 0,
-  mnc: 0,
+  mcc: null,
+  mnc: null,
   state: null
 };
 
@@ -455,14 +456,12 @@ RILContentHelper.prototype = {
       throw new Error("Invalid network provided: " + network);
     }
 
-    let mnc = network.mnc;
-    if (!mnc) {
-      throw new Error("Invalid network MNC: " + mnc);
+    if (isNaN(parseInt(network.mnc, 10))) {
+      throw new Error("Invalid network MNC: " + network.mnc);
     }
 
-    let mcc = network.mcc;
-    if (!mcc) {
-      throw new Error("Invalid network MCC: " + mcc);
+    if (isNaN(parseInt(network.mcc, 10))) {
+      throw new Error("Invalid network MCC: " + network.mcc);
     }
 
     let request = Services.DOMRequest.createRequest(window);
@@ -481,8 +480,8 @@ RILContentHelper.prototype = {
 
     cpmm.sendAsyncMessage("RIL:SelectNetwork", {
       requestId: requestId,
-      mnc: mnc,
-      mcc: mcc
+      mnc: network.mnc,
+      mcc: network.mcc
     });
 
     return request;
@@ -654,6 +653,34 @@ RILContentHelper.prototype = {
 
     cpmm.sendAsyncMessage("RIL:IccCloseChannel", {requestId: requestId,
                                                     channel: channel});
+    return request;
+  },
+
+  updateContact: function updateContact(window, contactType, contact, pin2) {
+    if (window == null) {
+      throw Components.Exception("Can't get window object",
+                                  Cr.NS_ERROR_UNEXPECTED);
+    }
+
+    let request = Services.DOMRequest.createRequest(window);
+    let requestId = this.getRequestId(request);
+
+    // Parsing nsDOMContact to Icc Contact format
+    let iccContact = {};
+
+    if (contact.name) {
+      iccContact.alphaId = contact.name[0];
+    }
+
+    if (contact.tel) {
+      iccContact.number = contact.tel[0].value;
+    }
+
+    cpmm.sendAsyncMessage("RIL:IccUpdateContact", {requestId: requestId,
+                                                   contactType: contactType,
+                                                   contact: iccContact,
+                                                   pin2: pin2});
+
     return request;
   },
 
@@ -1003,7 +1030,7 @@ RILContentHelper.prototype = {
       case "RIL:CallError":
         this._deliverEvent("_telephonyListeners",
                            "notifyError",
-                           [msg.json.callIndex, msg.json.error]);
+                           [msg.json.callIndex, msg.json.errorMsg]);
         break;
       case "RIL:VoicemailNotification":
         this.handleVoicemailNotification(msg.json);
@@ -1059,10 +1086,13 @@ RILContentHelper.prototype = {
       case "RIL:IccExchangeAPDU":
         this.handleIccExchangeAPDU(msg.json);
         break;
+      case "RIL:IccUpdateContact":
+        this.handleIccUpdateContact(msg.json);
+        break;
       case "RIL:DataError":
         this.updateConnectionInfo(msg.json, this.rilContext.dataConnectionInfo);
         this._deliverEvent("_mobileConnectionListeners", "notifyDataError",
-                           [msg.json.error]);
+                           [msg.json.errorMsg]);
         break;
       case "RIL:GetCallForwardingOption":
         this.handleGetCallForwardingOption(msg.json);
@@ -1117,9 +1147,9 @@ RILContentHelper.prototype = {
       return;
     }
 
-    if (message.error) {
-      debug("Received error from getAvailableNetworks: " + message.error);
-      Services.DOMRequest.fireError(request, message.error);
+    if (message.errorMsg) {
+      debug("Received error from getAvailableNetworks: " + message.errorMsg);
+      Services.DOMRequest.fireError(request, message.errorMsg);
       return;
     }
 
@@ -1138,35 +1168,43 @@ RILContentHelper.prototype = {
     this._selectingNetwork = null;
     this.networkSelectionMode = mode;
 
-    if (message.error) {
-      this.fireRequestError(message.requestId, message.error);
+    if (message.errorMsg) {
+      this.fireRequestError(message.requestId, message.errorMsg);
     } else {
       this.fireRequestSuccess(message.requestId, null);
     }
   },
 
   handleIccOpenChannel: function handleIccOpenChannel(message) {
-    if (message.error) {
-      this.fireRequestError(message.requestId, message.error);
+    if (message.errorMsg) {
+      this.fireRequestError(message.requestId, message.errorMsg);
     } else {
       this.fireRequestSuccess(message.requestId, message.channel);
     }
   },
 
   handleIccCloseChannel: function handleIccCloseChannel(message) {
-    if (message.error) {
-      this.fireRequestError(message.requestId, message.error);
+    if (message.errorMsg) {
+      this.fireRequestError(message.requestId, message.errorMsg);
     } else {
       this.fireRequestSuccess(message.requestId, null);
     }
   },
 
   handleIccExchangeAPDU: function handleIccExchangeAPDU(message) {
-    if (message.error) {
-      this.fireRequestError(message.requestId, message.error);
+    if (message.errorMsg) {
+      this.fireRequestError(message.requestId, message.errorMsg);
     } else {
       var result = [message.sw1, message.sw2, message.simResponse];
       this.fireRequestSuccess(message.requestId, result);
+    }
+  },
+
+  handleIccUpdateContact: function handleIccUpdateContact(message) {
+    if (message.errorMsg) {
+      this.fireRequestError(message.requestId, message.errorMsg);
+    } else {
+      this.fireRequestSuccess(message.requestId, null);
     }
   },
 

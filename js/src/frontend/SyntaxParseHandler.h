@@ -72,7 +72,8 @@ class SyntaxParseHandler
     Node newBinary(ParseNodeKind kind, Node left, Node right, JSOp op = JSOP_NOP) {
         return NodeGeneric;
     }
-    Node newBinaryOrAppend(ParseNodeKind kind, Node left, Node right, JSOp op = JSOP_NOP) {
+    Node newBinaryOrAppend(ParseNodeKind kind, Node left, Node right,
+                           ParseContext<SyntaxParseHandler> *pc, JSOp op = JSOP_NOP) {
         return NodeGeneric;
     }
     void setBinaryRHS(Node pn, Node rhs) {}
@@ -101,6 +102,7 @@ class SyntaxParseHandler
     Node newFunctionDefinition() { return NodeGeneric; }
     void setFunctionBody(Node pn, Node kid) {}
     void setFunctionBox(Node pn, FunctionBox *funbox) {}
+    Node newLexicalScope(ObjectBox *blockbox) { return NodeGeneric; }
     bool isOperationWithoutParens(Node pn, ParseNodeKind kind) {
         // It is OK to return false here, callers should only use this method
         // for reporting strict option warnings and parsing code which the

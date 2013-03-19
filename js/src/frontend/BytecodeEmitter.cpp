@@ -34,6 +34,7 @@
 #include "frontend/BytecodeEmitter.h"
 #include "frontend/Parser.h"
 #include "frontend/TokenStream.h"
+#include "ion/AsmJS.h"
 #include "vm/Debugger.h"
 #include "vm/RegExpObject.h"
 #include "vm/Shape.h"
@@ -123,14 +124,14 @@ BytecodeEmitter::init()
     return atomIndices.ensureMap(sc->context);
 }
 
-BytecodeEmitter::~BytecodeEmitter()
-{
-}
-
 static ptrdiff_t
 EmitCheck(JSContext *cx, BytecodeEmitter *bce, ptrdiff_t delta)
 {
     ptrdiff_t offset = bce->code().length();
+
+    // Start it off moderately large to avoid repeated resizings early on.
+    if (bce->code().capacity() == 0 && !bce->code().reserve(1024))
+        return -1;
 
     jsbytecode dummy = 0;
     if (!bce->code().appendN(dummy, delta)) {
@@ -2499,6 +2500,17 @@ frontend::EmitFunctionScript(JSContext *cx, BytecodeEmitter *bce, ParseNode *bod
         bce->switchToMain();
     }
 
+    if (bce->script->asmJS) {
+        /* asm.js means no funny stuff. */
+        JS_ASSERT(!funbox->argumentsHasLocalBinding());
+        JS_ASSERT(!funbox->isGenerator());
+
+        bce->switchToProlog();
+        if (Emit1(cx, bce, JSOP_LINKASMJS) < 0)
+            return false;
+        bce->switchToMain();
+    }
+
     if (!EmitTree(cx, bce, body))
         return false;
 
@@ -3958,7 +3970,7 @@ EmitLet(JSContext *cx, BytecodeEmitter *bce, ParseNode *pnLet)
     StmtInfoBCE stmtInfo(cx);
     PushBlockScopeBCE(bce, &stmtInfo, *blockObj, bce->offset());
 
-    ptrdiff_t bodyBegin = bce->offset();
+    DebugOnly<ptrdiff_t> bodyBegin = bce->offset();
     if (!EmitEnterBlock(cx, bce, letBody, JSOP_ENTERLET0))
         return false;
 
@@ -3969,7 +3981,7 @@ EmitLet(JSContext *cx, BytecodeEmitter *bce, ParseNode *pnLet)
     JS_ASSERT(leaveOp == JSOP_LEAVEBLOCK || leaveOp == JSOP_LEAVEBLOCKEXPR);
     EMIT_UINT16_IMM_OP(leaveOp, blockObj->slotCount());
 
-    ptrdiff_t bodyEnd = bce->offset();
+    DebugOnly<ptrdiff_t> bodyEnd = bce->offset();
     JS_ASSERT(bodyEnd > bodyBegin);
 
     return PopStatementBCE(cx, bce);
@@ -4367,6 +4379,7 @@ EmitFunc(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
         options.setPrincipals(parent->principals())
                .setOriginPrincipals(parent->originPrincipals)
                .setCompileAndGo(parent->compileAndGo)
+               .setSelfHostingMode(parent->selfHosted)
                .setNoScriptRval(false)
                .setVersion(parent->getVersion())
                .setUserBit(parent->userBit);
@@ -4378,6 +4391,13 @@ EmitFunc(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
             return false;
 
         script->bindings = funbox->bindings;
+
+        // Do asm.js compilation at the beginning of emitting to avoid
+        // compiling twice when JS_BufferIsCompilableUnit and to know whether
+        // to emit JSOP_LINKASMJS. Don't fold constants as this will
+        // misrepresent the source JS as written to the type checker.
+        if (funbox->useAsm && !CompileAsmJS(cx, *bce->tokenStream(), pn, script))
+            return false;
 
         BytecodeEmitter bce2(bce, bce->parser, funbox, script, bce->evalCaller,
                              bce->hasGlobalScope, pn->pn_pos.begin.lineno, bce->selfHostingMode);
@@ -5877,6 +5897,10 @@ frontend::EmitTree(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
 static int
 AllocSrcNote(JSContext *cx, SrcNotesVector &notes)
 {
+    // Start it off moderately large to avoid repeated resizings early on.
+    if (notes.capacity() == 0 && !notes.reserve(1024))
+        return -1;
+
     jssrcnote dummy = 0;
     if (!notes.append(dummy)) {
         js_ReportOutOfMemory(cx);

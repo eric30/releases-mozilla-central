@@ -6,171 +6,170 @@
 
 /* A namespace class for static layout utilities. */
 
-#include "mozilla/DebugOnly.h"
-#include "mozilla/Util.h"
-#include "mozilla/Likely.h"
+#include "nsContentUtils.h"
 
+#include <algorithm>
+#include <math.h>
+
+#include "DecoderTraits.h"
+#include "harfbuzz/hb.h"
+#include "imgICache.h"
+#include "imgIContainer.h"
+#include "imgINotificationObserver.h"
+#include "imgLoader.h"
+#include "imgRequestProxy.h"
 #include "jsapi.h"
 #include "jsdbgapi.h"
 #include "jsfriendapi.h"
-
-#include <math.h>
-
-#include "mozilla/dom/TextDecoderBase.h"
-
+#include "js/Value.h"
 #include "Layers.h"
-#include "nsJSUtils.h"
-#include "nsCOMPtr.h"
-#include "nsAString.h"
-#include "nsPrintfCString.h"
-#include "nsIScriptGlobalObject.h"
-#include "nsIScriptContext.h"
-#include "nsDOMCID.h"
-#include "nsContentUtils.h"
-#include "nsIXPConnect.h"
-#include "nsIContent.h"
+#include "MediaDecoder.h"
+#include "mozAutoDocUpdate.h"
+#include "mozilla/Attributes.h"
+#include "mozilla/Base64.h"
+#include "mozilla/DebugOnly.h"
+#include "mozilla/dom/DocumentFragment.h"
 #include "mozilla/dom/Element.h"
-#include "nsIDocument.h"
-#include "nsINodeInfo.h"
-#include "nsIIdleService.h"
-#include "nsIDOMDocument.h"
-#include "nsIDOMNodeList.h"
-#include "nsIDOMNode.h"
-#include "nsIIOService.h"
-#include "nsNetCID.h"
-#include "nsNetUtil.h"
-#include "nsIScriptSecurityManager.h"
-#include "nsPIDOMWindow.h"
-#include "nsIJSContextStack.h"
-#include "nsIDocShell.h"
-#include "nsParserCIID.h"
-#include "nsIParser.h"
-#include "nsIFragmentContentSink.h"
-#include "nsIContentSink.h"
+#include "mozilla/dom/TextDecoderBase.h"
+#include "mozilla/Likely.h"
+#include "mozilla/Preferences.h"
+#include "mozilla/Selection.h"
+#include "mozilla/Util.h"
+#include "nsAString.h"
+#include "nsAttrName.h"
+#include "nsAttrValue.h"
+#include "nsAttrValueInlines.h"
+#include "nsBindingManager.h"
+#include "nsCCUncollectableMarker.h"
+#include "nsChannelPolicy.h"
+#include "nsCharSeparatedTokenizer.h"
+#include "nsCOMPtr.h"
+#include "nsContentCreatorFunctions.h"
+#include "nsContentDLF.h"
 #include "nsContentList.h"
-#include "nsIHTMLDocument.h"
-#include "nsIDOMHTMLFormElement.h"
-#include "nsIDOMHTMLElement.h"
-#include "nsIForm.h"
-#include "nsIFormControl.h"
-#include "nsGkAtoms.h"
-#include "imgINotificationObserver.h"
-#include "imgRequestProxy.h"
-#include "imgIContainer.h"
-#include "imgLoader.h"
+#include "nsContentPolicyUtils.h"
+#include "nsCPrefetchService.h"
+#include "nsCRT.h"
+#include "nsCycleCollectionParticipant.h"
+#include "nsDataHashtable.h"
 #include "nsDocShellCID.h"
+#include "nsDOMCID.h"
+#include "nsDOMDataTransfer.h"
+#include "nsDOMJSUtils.h"
+#include "nsDOMMutationObserver.h"
+#include "nsDOMTouchEvent.h"
+#include "nsError.h"
+#include "nsEventDispatcher.h"
+#include "nsEventListenerManager.h"
+#include "nsEventStateManager.h"
+#include "nsFocusManager.h"
+#include "nsGenericHTMLElement.h"
+#include "nsGkAtoms.h"
+#include "nsHtml5Module.h"
+#include "nsHtml5StringParser.h"
+#include "nsIAsyncVerifyRedirectCallback.h"
+#include "nsICategoryManager.h"
+#include "nsIChannelEventSink.h"
+#include "nsIChannelPolicy.h"
+#include "nsICharsetConverterManager.h"
+#include "nsICharsetDetectionObserver.h"
+#include "nsICharsetDetector.h"
+#include "nsIChromeRegistry.h"
+#include "nsIConsoleService.h"
+#include "nsIContent.h"
+#include "nsIContentSecurityPolicy.h"
+#include "nsIContentSink.h"
+#include "nsIContentViewer.h"
+#include "nsIDocShell.h"
+#include "nsIDocument.h"
+#include "nsIDOMDocument.h"
+#include "nsIDOMDocumentType.h"
+#include "nsIDOMEvent.h"
+#include "nsIDOMEventTarget.h"
+#include "nsIDOMHTMLElement.h"
+#include "nsIDOMHTMLFormElement.h"
+#include "nsIDOMHTMLInputElement.h"
+#include "nsIDOMNode.h"
+#include "nsIDOMNodeList.h"
+#include "nsIDOMScriptObjectFactory.h"
+#include "nsIDOMUserDataHandler.h"
+#include "nsIDOMXULCommandEvent.h"
+#include "nsIDragService.h"
+#include "nsIEditor.h"
+#include "nsIFormControl.h"
+#include "nsIForm.h"
+#include "nsIFragmentContentSink.h"
+#include "nsIHTMLDocument.h"
+#include "nsIIdleService.h"
 #include "nsIImageLoadingContent.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIInterfaceRequestorUtils.h"
+#include "nsIIOService.h"
+#include "nsIJSContextStack.h"
+#include "nsIJSRuntimeService.h"
+#include "nsILineBreaker.h"
+#include "nsILoadContext.h"
 #include "nsILoadGroup.h"
+#include "nsIMEStateManager.h"
+#include "nsIMIMEService.h"
+#include "nsINativeKeyBindings.h"
+#include "nsINode.h"
+#include "nsINodeInfo.h"
+#include "nsIObjectLoadingContent.h"
 #include "nsIObserver.h"
 #include "nsIObserverService.h"
-#include "nsContentPolicyUtils.h"
-#include "nsNodeInfoManager.h"
-#include "nsCRT.h"
-#include "nsIDOMEvent.h"
-#include "nsIDOMEventTarget.h"
-#include "nsIMIMEService.h"
-#include "nsLWBrkCIID.h"
-#include "nsILineBreaker.h"
-#include "nsIWordBreaker.h"
-#include "nsUnicodeProperties.h"
-#include "harfbuzz/hb.h"
-#include "nsIJSRuntimeService.h"
-#include "nsBindingManager.h"
+#include "nsIOfflineCacheUpdate.h"
+#include "nsIParser.h"
+#include "nsIParserService.h"
+#include "nsIPermissionManager.h"
+#include "nsIPlatformCharset.h"
+#include "nsIPluginHost.h"
+#include "nsIRunnable.h"
+#include "nsIScriptContext.h"
+#include "nsIScriptError.h"
+#include "nsIScriptGlobalObject.h"
+#include "nsIScriptObjectPrincipal.h"
+#include "nsIScriptSecurityManager.h"
+#include "nsIStringBundle.h"
 #include "nsIURI.h"
 #include "nsIURL.h"
-#include "nsICharsetConverterManager.h"
-#include "nsEventListenerManager.h"
-#include "nsAttrName.h"
-#include "nsIDOMUserDataHandler.h"
-#include "nsContentCreatorFunctions.h"
-#include "nsMutationEvent.h"
-#include "nsIMEStateManager.h"
-#include "nsError.h"
-#include "nsUnicharUtilCIID.h"
-#include "nsINativeKeyBindings.h"
-#include "nsXULPopupManager.h"
-#include "nsIPermissionManager.h"
-#include "nsIScriptObjectPrincipal.h"
-#include "nsNullPrincipal.h"
-#include "nsIRunnable.h"
-#include "nsDOMJSUtils.h"
-#include "nsGenericHTMLElement.h"
-#include "nsAttrValue.h"
-#include "nsAttrValueInlines.h"
-#include "nsReferencedElement.h"
-#include "nsIDragService.h"
-#include "nsIChannelEventSink.h"
-#include "nsIAsyncVerifyRedirectCallback.h"
-#include "nsIOfflineCacheUpdate.h"
-#include "nsCPrefetchService.h"
-#include "nsIChromeRegistry.h"
-#include "nsEventDispatcher.h"
-#include "nsIDOMXULCommandEvent.h"
-#include "nsDOMDataTransfer.h"
-#include "nsHtml5Module.h"
-#include "nsPresContext.h"
-#include "nsLayoutStatics.h"
-#include "nsFocusManager.h"
-#include "nsTextEditorState.h"
-#include "nsIPluginHost.h"
-#include "nsICategoryManager.h"
-#include "nsViewManager.h"
-#include "nsEventStateManager.h"
-#include "nsIDOMHTMLInputElement.h"
-#include "nsParserConstants.h"
 #include "nsIWebNavigation.h"
-#include "nsILoadContext.h"
+#include "nsIWordBreaker.h"
+#include "nsIXPConnect.h"
+#include "nsJSUtils.h"
+#include "nsLayoutStatics.h"
+#include "nsLWBrkCIID.h"
+#include "nsMutationEvent.h"
+#include "nsNetCID.h"
+#include "nsNetUtil.h"
+#include "nsNodeInfoManager.h"
+#include "nsNullPrincipal.h"
+#include "nsParserCIID.h"
+#include "nsParserConstants.h"
+#include "nsPIDOMWindow.h"
+#include "nsPresContext.h"
+#include "nsPrintfCString.h"
+#include "nsReferencedElement.h"
+#include "nsSandboxFlags.h"
+#include "nsScriptSecurityManager.h"
+#include "nsSVGFeatures.h"
+#include "nsTextEditorState.h"
 #include "nsTextFragment.h"
-#include "mozilla/Selection.h"
-#include <algorithm>
+#include "nsThreadUtils.h"
+#include "nsUnicharUtilCIID.h"
+#include "nsUnicodeProperties.h"
+#include "nsViewManager.h"
+#include "nsViewportInfo.h"
+#include "nsWrapperCacheInlines.h"
+#include "nsXULPopupManager.h"
+#include "xpcprivate.h" // nsXPConnect
 
 #ifdef IBMBIDI
 #include "nsIBidiKeyboard.h"
 #endif
-#include "nsCycleCollectionParticipant.h"
-
-// for ReportToConsole
-#include "nsIStringBundle.h"
-#include "nsIScriptError.h"
-#include "nsIConsoleService.h"
-
-#include "mozAutoDocUpdate.h"
-#include "imgICache.h"
-#include "imgLoader.h"
-#include "xpcprivate.h" // nsXPConnect
-#include "nsScriptSecurityManager.h"
-#include "nsIChannelPolicy.h"
-#include "nsChannelPolicy.h"
-#include "nsIContentSecurityPolicy.h"
-#include "nsContentDLF.h"
 #ifdef MOZ_MEDIA
 #include "nsHTMLMediaElement.h"
 #endif
-#include "nsDOMTouchEvent.h"
-#include "nsIContentViewer.h"
-#include "nsIObjectLoadingContent.h"
-#include "nsCCUncollectableMarker.h"
-#include "mozilla/Base64.h"
-#include "mozilla/Preferences.h"
-#include "nsDOMMutationObserver.h"
-#include "nsIDOMDocumentType.h"
-#include "nsCharSeparatedTokenizer.h"
-#include "nsICharsetDetector.h"
-#include "nsICharsetDetectionObserver.h"
-#include "nsIPlatformCharset.h"
-#include "nsIEditor.h"
-#include "mozilla/Attributes.h"
-#include "nsIParserService.h"
-#include "nsIDOMScriptObjectFactory.h"
-#include "nsSandboxFlags.h"
-#include "nsSVGFeatures.h"
-#include "MediaDecoder.h"
-#include "DecoderTraits.h"
-
-#include "nsWrapperCacheInlines.h"
-#include "nsViewportInfo.h"
 
 extern "C" int MOZ_XMLTranslateEntity(const char* ptr, const char* end,
                                       const char** next, PRUnichar* result);
@@ -1589,6 +1588,15 @@ nsContentUtils::CanCallerAccess(nsIPrincipal* aSubjectPrincipal,
 bool
 nsContentUtils::CanCallerAccess(nsIDOMNode *aNode)
 {
+  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
+  NS_ENSURE_TRUE(node, false);
+  return CanCallerAccess(node);
+}
+
+// static
+bool
+nsContentUtils::CanCallerAccess(nsINode* aNode)
+{
   // XXXbz why not check the IsCapabilityEnabled thing up front, and not bother
   // with the system principal games?  But really, there should be a simpler
   // API here, dammit.
@@ -1602,10 +1610,7 @@ nsContentUtils::CanCallerAccess(nsIDOMNode *aNode)
     return true;
   }
 
-  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
-  NS_ENSURE_TRUE(node, false);
-
-  return CanCallerAccess(subjectPrincipal, node->NodePrincipal());
+  return CanCallerAccess(subjectPrincipal, aNode->NodePrincipal());
 }
 
 // static
@@ -1967,6 +1972,16 @@ nsContentUtils::GetCommonAncestor(nsINode* aNode1,
   }
 
   return parent;
+}
+
+/* static */
+bool
+nsContentUtils::PositionIsBefore(nsINode* aNode1, nsINode* aNode2)
+{
+  return (aNode2->CompareDocumentPosition(*aNode1) &
+    (nsIDOMNode::DOCUMENT_POSITION_PRECEDING |
+     nsIDOMNode::DOCUMENT_POSITION_DISCONNECTED)) ==
+    nsIDOMNode::DOCUMENT_POSITION_PRECEDING;
 }
 
 /* static */
@@ -2873,6 +2888,21 @@ nsContentUtils::IsDraggableLink(const nsIContent* aContent) {
   nsCOMPtr<nsIURI> absURI;
   return aContent->IsLink(getter_AddRefs(absURI));
 }
+
+// static
+nsresult
+nsContentUtils::NameChanged(nsINodeInfo* aNodeInfo, nsIAtom* aName,
+                            nsINodeInfo** aResult)
+{
+  nsNodeInfoManager *niMgr = aNodeInfo->NodeInfoManager();
+
+  *aResult = niMgr->GetNodeInfo(aName, aNodeInfo->GetPrefixAtom(),
+                                aNodeInfo->NamespaceID(),
+                                aNodeInfo->NodeType(),
+                                aNodeInfo->GetExtraName()).get();
+  return *aResult ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
+}
+
 
 static bool
 TestSitePerm(nsIPrincipal* aPrincipal, const char* aType, uint32_t aPerm, bool aExactHostMatch)
@@ -4045,8 +4075,22 @@ nsContentUtils::CreateContextualFragment(nsINode* aContextNode,
                                          bool aPreventScriptExecution,
                                          nsIDOMDocumentFragment** aReturn)
 {
-  *aReturn = nullptr;
-  NS_ENSURE_ARG(aContextNode);
+  ErrorResult rv;
+  *aReturn = CreateContextualFragment(aContextNode, aFragment,
+                                      aPreventScriptExecution, rv).get();
+  return rv.ErrorCode();
+}
+
+already_AddRefed<DocumentFragment>
+nsContentUtils::CreateContextualFragment(nsINode* aContextNode,
+                                         const nsAString& aFragment,
+                                         bool aPreventScriptExecution,
+                                         ErrorResult& aRv)
+{
+  if (!aContextNode) {
+    aRv.Throw(NS_ERROR_INVALID_ARG);
+    return nullptr;
+  }
 
   // If we don't have a document here, we can't get the right security context
   // for compiling event handlers... so just bail out.
@@ -4058,8 +4102,8 @@ nsContentUtils::CreateContextualFragment(nsINode* aContextNode,
 #endif
 
   if (isHTML) {
-    nsCOMPtr<nsIDOMDocumentFragment> frag;
-    NS_NewDocumentFragment(getter_AddRefs(frag), document->NodeInfoManager());
+    nsRefPtr<DocumentFragment> frag =
+      NS_NewDocumentFragment(document->NodeInfoManager(), aRv);
     
     nsCOMPtr<nsIContent> contextAsContent = do_QueryInterface(aContextNode);
     if (contextAsContent && !contextAsContent->IsElement()) {
@@ -4070,28 +4114,23 @@ nsContentUtils::CreateContextualFragment(nsINode* aContextNode,
       }
     }
     
-    nsresult rv;
-    nsCOMPtr<nsIContent> fragment = do_QueryInterface(frag);
     if (contextAsContent && !contextAsContent->IsHTML(nsGkAtoms::html)) {
-      rv = ParseFragmentHTML(aFragment,
-                             fragment,
-                             contextAsContent->Tag(),
-                             contextAsContent->GetNameSpaceID(),
-                             (document->GetCompatibilityMode() ==
+      aRv = ParseFragmentHTML(aFragment, frag,
+                              contextAsContent->Tag(),
+                              contextAsContent->GetNameSpaceID(),
+                              (document->GetCompatibilityMode() ==
                                eCompatibility_NavQuirks),
-                             aPreventScriptExecution);
+                              aPreventScriptExecution);
     } else {
-      rv = ParseFragmentHTML(aFragment,
-                             fragment,
-                             nsGkAtoms::body,
-                             kNameSpaceID_XHTML,
-                             (document->GetCompatibilityMode() ==
+      aRv = ParseFragmentHTML(aFragment, frag,
+                              nsGkAtoms::body,
+                              kNameSpaceID_XHTML,
+                              (document->GetCompatibilityMode() ==
                                eCompatibility_NavQuirks),
-                             aPreventScriptExecution);
+                              aPreventScriptExecution);
     }
 
-    frag.forget(aReturn);
-    return rv;
+    return frag.forget();
   }
 
   nsAutoTArray<nsString, 32> tagStack;
@@ -4103,7 +4142,10 @@ nsContentUtils::CreateContextualFragment(nsINode* aContextNode,
 
   while (content && content->IsElement()) {
     nsString& tagName = *tagStack.AppendElement();
-    NS_ENSURE_TRUE(&tagName, NS_ERROR_OUT_OF_MEMORY);
+    if (!&tagName) {
+      aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
+      return nullptr;
+    }
 
     tagName = content->NodeInfo()->QualifiedName();
 
@@ -4149,11 +4191,10 @@ nsContentUtils::CreateContextualFragment(nsINode* aContextNode,
     content = content->GetParent();
   }
 
-  return ParseFragmentXML(aFragment,
-                          document,
-                          tagStack,
-                          aPreventScriptExecution,
-                          aReturn);
+  nsCOMPtr<nsIDOMDocumentFragment> frag;
+  aRv = ParseFragmentXML(aFragment, document, tagStack,
+                         aPreventScriptExecution, getter_AddRefs(frag));
+  return static_cast<DocumentFragment*>(frag.forget().get());
 }
 
 /* static */
@@ -5192,8 +5233,8 @@ nsContentUtils::SetDataTransferInEvent(nsDragEvent* aDragEvent)
     // means, for instance calling the drag service directly, or a drag
     // from another application. In either case, a new dataTransfer should
     // be created that reflects the data.
-    initialDataTransfer =
-      new nsDOMDataTransfer(aDragEvent->message);
+    initialDataTransfer = new nsDOMDataTransfer(aDragEvent->message, true);
+
     NS_ENSURE_TRUE(initialDataTransfer, NS_ERROR_OUT_OF_MEMORY);
 
     // now set it in the drag session so we don't need to create it again
@@ -5275,7 +5316,7 @@ bool
 nsContentUtils::CheckForSubFrameDrop(nsIDragSession* aDragSession, nsDragEvent* aDropEvent)
 {
   nsCOMPtr<nsIContent> target = do_QueryInterface(aDropEvent->originalTarget);
-  if (!target && !target->OwnerDoc()) {
+  if (!target) {
     return true;
   }
   

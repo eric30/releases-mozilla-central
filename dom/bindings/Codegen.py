@@ -265,7 +265,6 @@ class CGInterfaceObjectJSClass(CGThing):
         else:
             ctorname = "ThrowingConstructor"
         if NeedsGeneratedHasInstance(self.descriptor):
-            assert self.descriptor.interface.hasInterfacePrototypeObject()
             hasinstance = HASINSTANCE_HOOK_NAME
         elif self.descriptor.interface.hasInterfacePrototypeObject():
             hasinstance = "InterfaceHasInstance"
@@ -497,15 +496,18 @@ class CGHeaders(CGWrapper):
         bindingIncludes = set(self.getDeclarationFilename(d) for d in interfaceDeps)
 
         # Grab all the implementation declaration files we need.
-        implementationIncludes = set(d.headerFile for d in descriptors)
+        implementationIncludes = set(d.headerFile for d in descriptors if d.needsHeaderInclude())
 
         # Grab the includes for the things that involve XPCOM interfaces
         hasInstanceIncludes = set("nsIDOM" + d.interface.identifier.name + ".h" for d
-                                  in descriptors if NeedsGeneratedHasInstance(d))
+                                  in descriptors if
+                                  NeedsGeneratedHasInstance(d) and
+                                  d.interface.hasInterfaceObject())
 
         # Now find all the things we'll need as arguments because we
         # need to wrap or unwrap them.
         bindingHeaders = set()
+        declareIncludes = set(declareIncludes)
         def addHeadersForType(t, descriptor=None, dictionary=None):
             """
             Add the relevant headers for this type.  We use descriptor and
@@ -528,7 +530,19 @@ class CGHeaders(CGWrapper):
                             typeDesc = p.getDescriptor(unrolled.inner.identifier.name)
                         except NoSuchDescriptorError:
                             continue
-                        implementationIncludes.add(typeDesc.headerFile)
+                        if dictionary:
+                            # Dictionaries with interface members rely on the
+                            # actual class definition of that interface member
+                            # being visible in the binding header, because they
+                            # store them in nsRefPtr and have inline
+                            # constructors/destructors.
+                            #
+                            # XXXbz maybe dictionaries with interface members
+                            # should just have out-of-line constructors and
+                            # destructors?
+                            declareIncludes.add(typeDesc.headerFile)
+                        else:
+                            implementationIncludes.add(typeDesc.headerFile)
                         bindingHeaders.add(self.getDeclarationFilename(typeDesc.interface))
             elif unrolled.isDictionary():
                 bindingHeaders.add(self.getDeclarationFilename(unrolled.inner))
@@ -555,7 +569,6 @@ class CGHeaders(CGWrapper):
                     # Strip out the function name and convert "::" to "/"
                     bindingHeaders.add("/".join(func.split("::")[:-1]) + ".h")
 
-        declareIncludes = set(declareIncludes)
         for d in dictionaries:
             if d.parent:
                 declareIncludes.add(self.getDeclarationFilename(d.parent))
@@ -1052,16 +1065,23 @@ class CGClassHasInstanceHook(CGAbstractStaticMethod):
 
     def generate_code(self):
         assert self.descriptor.nativeOwnership == 'nsisupports'
+        if self.descriptor.interface.hasInterfacePrototypeObject():
+            hasInstanceCode = """
+  bool ok = InterfaceHasInstance(cx, obj, instance, bp);
+  if (!ok || *bp) {
+    return ok;
+  }
+        """
+        else:
+            hasInstanceCode = ""
+
         return """  if (!vp.isObject()) {
     *bp = false;
     return true;
   }
 
   JSObject* instance = &vp.toObject();
-  bool ok = InterfaceHasInstance(cx, obj, instance, bp);
-  if (!ok || *bp) {
-    return ok;
-  }
+  %s
 
   // FIXME Limit this to chrome by checking xpc::AccessCheck::isChrome(obj).
   nsISupports* native =
@@ -1069,7 +1089,7 @@ class CGClassHasInstanceHook(CGAbstractStaticMethod):
                                                     js::UnwrapObject(instance));
   nsCOMPtr<nsIDOM%s> qiResult = do_QueryInterface(native);
   *bp = !!qiResult;
-  return true;""" % self.descriptor.interface.identifier.name
+  return true;""" % (hasInstanceCode, self.descriptor.interface.identifier.name)
 
 def isChromeOnly(m):
     return m.getExtendedAttribute("ChromeOnly")
@@ -1853,18 +1873,15 @@ class CGWrapWithCacheMethod(CGAbstractMethod):
         assert descriptor.interface.hasInterfacePrototypeObject()
         args = [Argument('JSContext*', 'aCx'), Argument('JSObject*', 'aScope'),
                 Argument(descriptor.nativeType + '*', 'aObject'),
-                Argument('nsWrapperCache*', 'aCache'),
-                Argument('bool*', 'aTriedToWrap')]
+                Argument('nsWrapperCache*', 'aCache')]
         CGAbstractMethod.__init__(self, descriptor, 'Wrap', 'JSObject*', args)
         self.properties = properties
 
     def definition_body(self):
         if self.descriptor.workers:
-            return """  *aTriedToWrap = true;
-  return aObject->GetJSObject();"""
+            return """  return aObject->GetJSObject();"""
 
         return """%s
-  *aTriedToWrap = true;
 
   JSObject* parent = WrapNativeParent(aCx, aScope, aObject->GetParentObject());
   if (!parent) {
@@ -1901,11 +1918,11 @@ class CGWrapMethod(CGAbstractMethod):
         # XXX can we wrap if we don't have an interface prototype object?
         assert descriptor.interface.hasInterfacePrototypeObject()
         args = [Argument('JSContext*', 'aCx'), Argument('JSObject*', 'aScope'),
-                Argument('T*', 'aObject'), Argument('bool*', 'aTriedToWrap')]
+                Argument('T*', 'aObject')]
         CGAbstractMethod.__init__(self, descriptor, 'Wrap', 'JSObject*', args, inline=True, templateArgs=["class T"])
 
     def definition_body(self):
-        return "  return Wrap(aCx, aScope, aObject, aObject, aTriedToWrap);"
+        return "  return Wrap(aCx, aScope, aObject, aObject);"
 
 class CGWrapNonWrapperCacheMethod(CGAbstractMethod):
     """
@@ -7735,8 +7752,6 @@ class CGExampleClass(CGClass):
 
         wrapArgs = [Argument('JSContext*', 'aCx'),
                     Argument('JSObject*', 'aScope')]
-        if descriptor.wrapperCache:
-            wrapArgs.append(Argument('bool*', 'aTriedToWrap'))
         methodDecls.insert(0,
                            ClassMethod("WrapObject", "JSObject*",
                                        wrapArgs, virtual=descriptor.wrapperCache,
@@ -7788,9 +7803,9 @@ ${ifaceName}::~${ifaceName}()
         if self.descriptor.wrapperCache:
             classImpl += """
 JSObject*
-${ifaceName}::WrapObject(JSContext* aCx, JSObject* aScope, bool* aTriedToWrap)
+${ifaceName}::WrapObject(JSContext* aCx, JSObject* aScope)
 {
-  return ${ifaceName}Binding::Wrap(aCx, aScope, this, aTriedToWrap);
+  return ${ifaceName}Binding::Wrap(aCx, aScope, this);
 }
 
 """

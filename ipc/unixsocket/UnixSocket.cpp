@@ -127,11 +127,11 @@ public:
   void Accept();
 
   /**
-   * Set up nonblocking flags on whatever our current file descriptor is.
+   * Set up flags on whatever our current file descriptor is.
    *
    * @return true if successful, false otherwise
    */
-  bool SetNonblockFlags();
+  bool SetSocketFlags();
 
   void GetSocketAddr(nsAString& aAddrStr)
   {
@@ -450,7 +450,7 @@ UnixSocketImpl::Accept()
       return;
     }
 
-    if (!SetNonblockFlags()) {
+    if (!SetSocketFlags()) {
       return;
     }
 
@@ -508,6 +508,10 @@ UnixSocketImpl::Connect()
     return;
   }
 
+  if (!SetSocketFlags()) {
+    return;
+  }
+
   if (!mConnector->SetUp(mFd)) {
     NS_WARNING("Could not set up socket!");
     return;
@@ -521,7 +525,7 @@ UnixSocketImpl::Connect()
 }
 
 bool
-UnixSocketImpl::SetNonblockFlags()
+UnixSocketImpl::SetSocketFlags()
 {
   // Set socket addr to be reused even if kernel is still waiting to close
   int n = 1;
@@ -671,6 +675,10 @@ UnixSocketImpl::OnFileCanReadWithoutBlocking(int aFd)
     mWriteWatcher.StopWatchingFileDescriptor();
 
     mFd.reset(client_fd);
+    if (!SetSocketFlags()) {
+      return;
+    }
+
     mIOLoop = nullptr;
 
     nsRefPtr<OnSocketEventTask> t =
@@ -772,12 +780,16 @@ UnixSocketConsumer::ConnectSocket(UnixSocketConnector* aConnector,
 {
   MOZ_ASSERT(aConnector);
   MOZ_ASSERT(NS_IsMainThread());
+
+  nsAutoPtr<UnixSocketConnector> connector(aConnector);
+
   if (mImpl) {
     NS_WARNING("Socket already connecting/connected!");
     return false;
   }
+
   nsCString addr(aAddress);
-  mImpl = new UnixSocketImpl(this, aConnector, addr);
+  mImpl = new UnixSocketImpl(this, connector.forget(), addr);
   MessageLoop* ioLoop = XRE_GetIOMessageLoop();
   mConnectionStatus = SOCKET_CONNECTING;
   if (aDelayMs > 0) {
@@ -793,11 +805,15 @@ UnixSocketConsumer::ListenSocket(UnixSocketConnector* aConnector)
 {
   MOZ_ASSERT(aConnector);
   MOZ_ASSERT(NS_IsMainThread());
+
+  nsAutoPtr<UnixSocketConnector> connector(aConnector);
+
   if (mImpl) {
     NS_WARNING("Socket already connecting/connected!");
     return false;
   }
-  mImpl = new UnixSocketImpl(this, aConnector, EmptyCString());
+
+  mImpl = new UnixSocketImpl(this, connector.forget(), EmptyCString());
   mConnectionStatus = SOCKET_LISTENING;
   XRE_GetIOMessageLoop()->PostTask(FROM_HERE,
                                    new SocketAcceptTask(mImpl));

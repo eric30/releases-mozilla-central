@@ -40,6 +40,7 @@ nsDOMMessageEvent::nsDOMMessageEvent(mozilla::dom::EventTarget* aOwner,
     mData(JSVAL_VOID),
     mDataRooted(false)
 {
+  SetIsDOMBinding();
 }
 
 nsDOMMessageEvent::~nsDOMMessageEvent()
@@ -66,7 +67,7 @@ nsDOMMessageEvent::UnrootData()
 }
 
 NS_IMETHODIMP
-nsDOMMessageEvent::GetData(JSContext* aCx, jsval* aData)
+nsDOMMessageEvent::GetData(JSContext* aCx, JS::Value* aData)
 {
   *aData = mData;
   if (!JS_WrapValue(aCx, aData))
@@ -99,7 +100,7 @@ NS_IMETHODIMP
 nsDOMMessageEvent::InitMessageEvent(const nsAString& aType,
                                     bool aCanBubble,
                                     bool aCancelable,
-                                    const jsval& aData,
+                                    const JS::Value& aData,
                                     const nsAString& aOrigin,
                                     const nsAString& aLastEventId,
                                     nsIDOMWindow* aSource)

@@ -2,15 +2,9 @@
 package @ANDROID_PACKAGE_NAME@.tests;
 
 import @ANDROID_PACKAGE_NAME@.*;
-import android.app.Activity;
 import android.database.Cursor;
-import android.view.MenuItem;
 import android.view.View;
-import android.widget.ListAdapter;
 import android.widget.ListView;
-import android.widget.TextView;
-import android.widget.TabHost;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.lang.reflect.Method;
 import android.content.ContentResolver;
@@ -98,6 +92,7 @@ public class testBookmark extends PixelTest  {
         // Click on the bookmark we created and wait for the bookmarked page to load
         Actions.RepeatedEventExpecter paintExpecter = mActions.expectPaint();
         View child = bookmarksList.getChildAt(1);
+        mAsserter.ok(child != null, "list item can be retrieved", child != null ? child.toString() : "null!");
         mSolo.clickOnView(child);
         paintExpecter.blockUntilClear(PAINT_CLEAR_DELAY);
 

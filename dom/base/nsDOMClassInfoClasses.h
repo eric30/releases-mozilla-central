@@ -30,6 +30,7 @@ DOMCI_CLASS(MouseEvent)
 DOMCI_CLASS(MouseScrollEvent)
 DOMCI_CLASS(WheelEvent)
 DOMCI_CLASS(DragEvent)
+DOMCI_CLASS(ClipboardEvent)
 DOMCI_CLASS(KeyboardEvent)
 DOMCI_CLASS(CompositionEvent)
 #define MOZ_GENERATED_EVENT_LIST
@@ -122,19 +123,15 @@ DOMCI_CLASS(SVGDocument)
 // SVG element classes
 DOMCI_CLASS(TimeEvent)
 DOMCI_CLASS(SVGFEColorMatrixElement)
-DOMCI_CLASS(SVGFEComponentTransferElement)
 DOMCI_CLASS(SVGFECompositeElement)
 DOMCI_CLASS(SVGFEConvolveMatrixElement)
 DOMCI_CLASS(SVGFEDiffuseLightingElement)
 DOMCI_CLASS(SVGFEDisplacementMapElement)
-DOMCI_CLASS(SVGFEDistantLightElement)
 DOMCI_CLASS(SVGFEGaussianBlurElement)
 DOMCI_CLASS(SVGFEMorphologyElement)
 DOMCI_CLASS(SVGFEOffsetElement)
-DOMCI_CLASS(SVGFEPointLightElement)
 DOMCI_CLASS(SVGFESpecularLightingElement)
 DOMCI_CLASS(SVGFESpotLightElement)
-DOMCI_CLASS(SVGFETileElement)
 DOMCI_CLASS(SVGFETurbulenceElement)
 DOMCI_CLASS(SVGUnknownElement)
 
@@ -144,7 +141,6 @@ DOMCI_CLASS(SVGAnimatedInteger)
 DOMCI_CLASS(SVGAnimatedNumber)
 DOMCI_CLASS(SVGAnimatedRect)
 DOMCI_CLASS(SVGAnimatedString)
-DOMCI_CLASS(SVGEvent)
 DOMCI_CLASS(SVGLength)
 DOMCI_CLASS(SVGNumber)
 DOMCI_CLASS(SVGRect)
@@ -174,8 +170,6 @@ DOMCI_CLASS(StorageObsolete)
 DOMCI_CLASS(Storage)
 DOMCI_CLASS(StorageItem)
 
-DOMCI_CLASS(ClientRect)
-
 DOMCI_CLASS(XULCommandEvent)
 DOMCI_CLASS(CommandEvent)
 DOMCI_CLASS(OfflineResourceList)
@@ -183,7 +177,6 @@ DOMCI_CLASS(OfflineResourceList)
 DOMCI_CLASS(Blob)
 DOMCI_CLASS(File)
 DOMCI_CLASS(FileReader)
-DOMCI_CLASS(ArchiveRequest)
 
 // DOM modal content window class, almost identical to Window
 DOMCI_CLASS(ModalContentWindow)
@@ -196,7 +189,6 @@ DOMCI_CLASS(DataContainerEvent)
 DOMCI_CLASS(MessageEvent)
 
 DOMCI_CLASS(DeviceStorage)
-DOMCI_CLASS(DeviceStorageCursor)
 
 // Geolocation
 DOMCI_CLASS(GeoGeolocation)
@@ -208,7 +200,9 @@ DOMCI_CLASS(MozPowerManager)
 DOMCI_CLASS(MozWakeLock)
 
 DOMCI_CLASS(MozSmsManager)
+DOMCI_CLASS(MozMobileMessageManager)
 DOMCI_CLASS(MozSmsMessage)
+DOMCI_CLASS(MozMmsMessage)
 DOMCI_CLASS(MozSmsRequest)
 DOMCI_CLASS(MozSmsFilter)
 DOMCI_CLASS(MozSmsCursor)
@@ -313,12 +307,7 @@ DOMCI_CLASS(DOMCursor)
 DOMCI_CLASS(OpenWindowEventDetail)
 DOMCI_CLASS(AsyncScrollEventDetail)
 
-DOMCI_CLASS(FileRequest)
 DOMCI_CLASS(LockedFile)
-
-#ifdef MOZ_SYS_MSG
-DOMCI_CLASS(MozActivity)
-#endif
 
 #ifdef MOZ_TIME_MANAGER
 DOMCI_CLASS(MozTimeManager)

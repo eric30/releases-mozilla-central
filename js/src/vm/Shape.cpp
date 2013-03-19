@@ -62,7 +62,7 @@ ShapeTable::init(JSRuntime *rt, RawShape lastProp)
         return false;
 
     hashShift = HASH_BITS - sizeLog2;
-    for (Shape::Range r = lastProp->all(); !r.empty(); r.popFront()) {
+    for (Shape::Range<NoGC> r(lastProp); !r.empty(); r.popFront()) {
         Shape &shape = r.front();
         Shape **spp = search(shape.propid(), true);
 
@@ -1251,7 +1251,7 @@ EmptyShape::getInitialShape(JSContext *cx, Class *clasp, TaggedProto proto, JSOb
     Rooted<TaggedProto> protoRoot(cx, lookup.proto);
     RootedObject parentRoot(cx, lookup.parent);
 
-    StackBaseShape base(clasp, parent, objectFlags);
+    StackBaseShape base(cx->compartment, clasp, parent, objectFlags);
     Rooted<UnownedBaseShape*> nbase(cx, BaseShape::getUnowned(cx, base));
     if (!nbase)
         return NULL;

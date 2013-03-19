@@ -803,6 +803,11 @@ let RIL = {
     this.cdmaHome = null;
 
     /**
+     * CDMA Subscription information.
+     */
+    this.cdmaSubscription = {};
+
+    /**
      * Application identification for apps in ICC.
      */
     this.aid = null;
@@ -936,7 +941,7 @@ let RIL = {
     Buf.simpleRequest(REQUEST_GET_SIM_STATUS);
   },
 
-   /**
+  /**
    * Helper function for unlocking ICC locks.
    */
   iccUnlockCardLock: function iccUnlockCardLock(options) {
@@ -955,6 +960,14 @@ let RIL = {
         break;
       case "nck":
         options.type = CARD_PERSOSUBSTATE_SIM_NETWORK;
+        this.enterDepersonalization(options);
+        break;
+      case "cck":
+        options.type = CARD_PERSOSUBSTATE_SIM_CORPORATE;
+        this.enterDepersonalization(options);
+        break;
+      case "spck":
+        options.type = CARD_PERSOSUBSTATE_SIM_SERVICE_PROVIDER;
         this.enterDepersonalization(options);
         break;
       default:
@@ -1550,14 +1563,10 @@ let RIL = {
    */
   selectNetwork: function selectNetwork(options) {
     if (DEBUG) {
-      debug("Setting manual network selection: " + options.mcc + options.mnc);
+      debug("Setting manual network selection: " + options.mcc + ", " + options.mnc);
     }
 
-    // TODO: Bug 828307 - B2G RIL: Change to store MNC/MCC values from integer to string
-    let mnc = options.mnc.toString();
-    if (mnc.length == 1)
-      mnc = "0" + mnc;
-    let numeric = options.mcc.toString() + mnc;
+    let numeric = (options.mcc && options.mnc) ? options.mcc + options.mnc : null;
     Buf.newParcel(REQUEST_SET_NETWORK_SELECTION_MANUAL, options);
     Buf.writeString(numeric);
     Buf.sendParcel();
@@ -1611,7 +1620,7 @@ let RIL = {
         // Notify error in establishing the call with an invalid number.
         options.callIndex = -1;
         options.rilMessageType = "callError";
-        options.error =
+        options.errorMsg =
           RIL_CALL_FAILCAUSE_TO_GECKO_CALL_ERROR[CALL_FAIL_UNOBTAINABLE_NUMBER];
         this.sendDOMMessage(options);
         return;
@@ -2857,7 +2866,7 @@ let RIL = {
         newCardState = GECKO_CARDSTATE_PUK_REQUIRED;
         break;
       case CARD_APPSTATE_SUBSCRIPTION_PERSO:
-        newCardState = GECKO_CARDSTATE_NETWORK_LOCKED;
+        newCardState = PERSONSUBSTATE[app.perso_substate];
         break;
       case CARD_APPSTATE_READY:
         newCardState = GECKO_CARDSTATE_READY;
@@ -3054,8 +3063,8 @@ let RIL = {
         baseStationLatitude = baseStationLongitude = null;
       }
       let cssIndicator = RIL.parseInt(state[7]);
-      let systemId = RIL.parseInt(state[8]);
-      let networkId = RIL.parseInt(state[9]);
+      RIL.cdmaSubscription.systemId = RIL.parseInt(state[8]);
+      RIL.cdmaSubscription.networkId = RIL.parseInt(state[9]);
       let roamingIndicator = RIL.parseInt(state[10]);
       let systemIsInPRL = RIL.parseInt(state[11]);
       let defaultRoamingIndicator = RIL.parseInt(state[12]);
@@ -3089,14 +3098,14 @@ let RIL = {
     }
 
     let [longName, shortName, networkTuple] = operatorData;
-    let thisTuple = "" + this.operator.mcc + this.operator.mnc;
+    let thisTuple = this.operator.mcc + this.operator.mnc;
 
     if (this.operator.longName !== longName ||
         this.operator.shortName !== shortName ||
         thisTuple !== networkTuple) {
 
-      this.operator.mcc = 0;
-      this.operator.mnc = 0;
+      this.operator.mcc = null;
+      this.operator.mnc = null;
 
       if (networkTuple) {
         try {
@@ -3227,9 +3236,9 @@ let RIL = {
   _sendDataCallError: function _sendDataCallError(message, errorCode) {
     message.rilMessageType = "datacallerror";
     if (errorCode == ERROR_GENERIC_FAILURE) {
-      message.error = RIL_ERROR_TO_GECKO_ERROR[errorCode];
+      message.errorMsg = RIL_ERROR_TO_GECKO_ERROR[errorCode];
     } else {
-      message.error = RIL_DATACALL_FAILCAUSE_TO_GECKO_DATACALL_ERROR[errorCode];
+      message.errorMsg = RIL_DATACALL_FAILCAUSE_TO_GECKO_DATACALL_ERROR[errorCode];
     }
     this.sendDOMMessage(message);
   },
@@ -3324,7 +3333,8 @@ let RIL = {
       let network = {
         longName: strings[i],
         shortName: strings[i + 1],
-        mcc: 0, mnc: 0,
+        mcc: null,
+        mnc: null,
         state: null
       };
 
@@ -3356,24 +3366,16 @@ let RIL = {
    */
   _processNetworkTuple: function _processNetworkTuple(networkTuple, network) {
     let tupleLen = networkTuple.length;
-    let mcc = 0, mnc = 0;
 
     if (tupleLen == 5 || tupleLen == 6) {
-      mcc = parseInt(networkTuple.substr(0, 3), 10);
-      if (isNaN(mcc)) {
-        throw new Error("MCC could not be parsed from network tuple: " + networkTuple );
-      }
-
-      mnc = parseInt(networkTuple.substr(3), 10);
-      if (isNaN(mnc)) {
-        throw new Error("MNC could not be parsed from network tuple: " + networkTuple);
-      }
+      network.mcc = networkTuple.substr(0, 3);
+      network.mnc = networkTuple.substr(3);
     } else {
+      network.mcc = null;
+      network.mnc = null;
+
       throw new Error("Invalid network tuple (should be 5 or 6 digits): " + networkTuple);
     }
-
-    network.mcc = mcc;
-    network.mnc = mnc;
   },
 
   /**
@@ -3832,7 +3834,7 @@ let RIL = {
           this.sendDOMMessage({
             rilMessageType: "sms-send-failed",
             envelopeId: options.envelopeId,
-            error: options.rilRequestError,
+            errorMsg: options.rilRequestError,
           });
           break;
       }
@@ -4444,7 +4446,7 @@ RIL[REQUEST_LAST_CALL_FAIL_CAUSE] = function REQUEST_LAST_CALL_FAIL_CAUSE(length
       break;
     default:
       options.rilMessageType = "callError";
-      options.error = RIL_CALL_FAILCAUSE_TO_GECKO_CALL_ERROR[failCause];
+      options.errorMsg = RIL_CALL_FAILCAUSE_TO_GECKO_CALL_ERROR[failCause];
       this.sendDOMMessage(options);
       break;
   }
@@ -4545,7 +4547,15 @@ RIL[REQUEST_OPERATOR] = function REQUEST_OPERATOR(length, options) {
   if (DEBUG) debug("Operator: " + operatorData);
   this._processOperator(operatorData);
 };
-RIL[REQUEST_RADIO_POWER] = null;
+RIL[REQUEST_RADIO_POWER] = function REQUEST_RADIO_POWER(length, options) {
+  if (options.rilRequestError) {
+    return;
+  }
+
+  if (this._isInitialRadioState) {
+    this._isInitialRadioState = false;
+  }
+};
 RIL[REQUEST_DTMF] = null;
 RIL[REQUEST_SEND_SMS] = function REQUEST_SEND_SMS(length, options) {
   this._processSmsSendResult(length, options);
@@ -4730,7 +4740,7 @@ RIL[REQUEST_SET_FACILITY_LOCK] = function REQUEST_SET_FACILITY_LOCK(length, opti
 RIL[REQUEST_CHANGE_BARRING_PASSWORD] = null;
 RIL[REQUEST_SIM_OPEN_CHANNEL] = function REQUEST_SIM_OPEN_CHANNEL(length, options) {
   if (options.rilRequestError) {
-    options.error = RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError];
+    options.errorMsg = RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError];
     this.sendDOMMessage(options);
     return;
   }
@@ -4796,7 +4806,7 @@ RIL[REQUEST_QUERY_NETWORK_SELECTION_MODE] = function REQUEST_QUERY_NETWORK_SELEC
 };
 RIL[REQUEST_SET_NETWORK_SELECTION_AUTOMATIC] = function REQUEST_SET_NETWORK_SELECTION_AUTOMATIC(length, options) {
   if (options.rilRequestError) {
-    options.error = RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError];
+    options.errorMsg = RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError];
     this.sendDOMMessage(options);
     return;
   }
@@ -4805,7 +4815,7 @@ RIL[REQUEST_SET_NETWORK_SELECTION_AUTOMATIC] = function REQUEST_SET_NETWORK_SELE
 };
 RIL[REQUEST_SET_NETWORK_SELECTION_MANUAL] = function REQUEST_SET_NETWORK_SELECTION_MANUAL(length, options) {
   if (options.rilRequestError) {
-    options.error = RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError];
+    options.errorMsg = RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError];
     this.sendDOMMessage(options);
     return;
   }
@@ -4814,7 +4824,7 @@ RIL[REQUEST_SET_NETWORK_SELECTION_MANUAL] = function REQUEST_SET_NETWORK_SELECTI
 };
 RIL[REQUEST_QUERY_AVAILABLE_NETWORKS] = function REQUEST_QUERY_AVAILABLE_NETWORKS(length, options) {
   if (options.rilRequestError) {
-    options.error = RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError];
+    options.errorMsg = RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError];
     this.sendDOMMessage(options);
     return;
   }
@@ -5067,11 +5077,9 @@ RIL[UNSOLICITED_RESPONSE_RADIO_STATE_CHANGED] = function UNSOLICITED_RESPONSE_RA
 
   // Ensure radio state at boot time.
   if (this._isInitialRadioState) {
-    this._isInitialRadioState = false;
-    if (radioState != RADIO_STATE_OFF) {
-      this.setRadioPower({on: false});
-      return;
-    }
+    // Even radioState is RADIO_STATE_OFF, we still have to maually turn radio off,
+    // otherwise REQUEST_GET_SIM_STATUS will still report CARD_STATE_PRESENT.
+    this.setRadioPower({on: false});
   }
 
   let newState;
@@ -8163,57 +8171,36 @@ let CdmaPDUHelper = {
     return header;
   },
 
-  /**
-   * User data subparameter decoder : User Data
-   *
-   * @see 3GGP2 C.S0015-B 2.0, 4.5.2 User Data
-   */
-  decodeUserDataMsg: function cdma_decodeUserDataMsg(hasUserHeader) {
-    let result = {},
-        encoding = BitBufferHelper.readBits(5);
-
-    if(encoding === PDU_CDMA_MSG_CODING_IS_91) {
-      let msgType = BitBufferHelper.readBits(8);
-    }
-
-    let msgBodySize = BitBufferHelper.readBits(8);
-    const langTable = PDU_NL_LOCKING_SHIFT_TABLES[PDU_NL_IDENTIFIER_DEFAULT];
-    const langShiftTable = PDU_NL_SINGLE_SHIFT_TABLES[PDU_NL_IDENTIFIER_DEFAULT];
+  getCdmaMsgEncoding: function getCdmaMsgEncoding(encoding) {
     // Determine encoding method
     switch (encoding) {
       case PDU_CDMA_MSG_CODING_7BITS_ASCII:
       case PDU_CDMA_MSG_CODING_IA5:
       case PDU_CDMA_MSG_CODING_7BITS_GSM:
-        result.encoding = PDU_DCS_MSG_CODING_7BITS_ALPHABET;
-        break;
+        return PDU_DCS_MSG_CODING_7BITS_ALPHABET;
       case PDU_CDMA_MSG_CODING_OCTET:
       case PDU_CDMA_MSG_CODING_IS_91:
       case PDU_CDMA_MSG_CODING_LATIN_HEBREW:
       case PDU_CDMA_MSG_CODING_LATIN:
-        result.encoding = PDU_DCS_MSG_CODING_8BITS_ALPHABET;
-        break;
+        return PDU_DCS_MSG_CODING_8BITS_ALPHABET;
       case PDU_CDMA_MSG_CODING_UNICODE:
       case PDU_CDMA_MSG_CODING_SHIFT_JIS:
       case PDU_CDMA_MSG_CODING_KOREAN:
-        result.encoding = PDU_DCS_MSG_CODING_16BITS_ALPHABET;
-        break;
+        return PDU_DCS_MSG_CODING_16BITS_ALPHABET;
     }
+    return null;
+  },
 
-    // For segmented SMS, a user header is included before sms content
-    if (hasUserHeader) {
-      result.header = this.decodeUserDataHeader(result.encoding);
-      // header size is included in body size, they are decoded
-      msgBodySize -= result.header.length;
-    }
-
-    // Decode sms content
-    result.body = "";
+  decodeCdmaPDUMsg: function decodeCdmaPDUMsg(encoding, msgType, msgBodySize) {
+    const langTable = PDU_NL_LOCKING_SHIFT_TABLES[PDU_NL_IDENTIFIER_DEFAULT];
+    const langShiftTable = PDU_NL_SINGLE_SHIFT_TABLES[PDU_NL_IDENTIFIER_DEFAULT];
+    let result = "";
     let msgDigit;
     switch (encoding) {
       case PDU_CDMA_MSG_CODING_OCTET:         // TODO : Require Test
         while(msgBodySize > 0) {
           msgDigit = String.fromCharCode(BitBufferHelper.readBits(8));
-          result.body += msgDigit;
+          result += msgDigit;
           msgBodySize--;
         }
         break;
@@ -8225,7 +8212,7 @@ let CdmaPDUHelper = {
           case PDU_CDMA_MSG_CODING_IS_91_TYPE_VOICEMAIL_STATUS:
             while(msgBodySize > 0) {
               msgDigit = String.fromCharCode(BitBufferHelper.readBits(6) + 0x20);
-              result.body += msgDigit;
+              result += msgDigit;
               msgBodySize--;
             }
             break;
@@ -8240,7 +8227,7 @@ let CdmaPDUHelper = {
             for (let i = 0; i < addrInfo.addrLength; i++) {
               addrInfo.address.push(BitBufferHelper.readBits(4));
             }
-            result.body = this.decodeAddr(addrInfo);
+            result = this.decodeAddr(addrInfo);
             break;
         }
       case PDU_CDMA_MSG_CODING_7BITS_ASCII:
@@ -8258,14 +8245,14 @@ let CdmaPDUHelper = {
               msgDigit = langShiftTable[msgDigit];
             }
           }
-          result.body += msgDigit;
+          result += msgDigit;
           msgBodySize--;
         }
         break;
       case PDU_CDMA_MSG_CODING_UNICODE:
         while(msgBodySize > 0) {
           msgDigit = String.fromCharCode(BitBufferHelper.readBits(16));
-          result.body += msgDigit;
+          result += msgDigit;
           msgBodySize--;
         }
         break;
@@ -8279,7 +8266,7 @@ let CdmaPDUHelper = {
             msgBodySize--;
             msgDigit = langShiftTable[msgDigit];
           }
-          result.body += msgDigit;
+          result += msgDigit;
           msgBodySize--;
         }
         break;
@@ -8287,7 +8274,7 @@ let CdmaPDUHelper = {
         // Reference : http://en.wikipedia.org/wiki/ISO/IEC_8859-1
         while(msgBodySize > 0) {
           msgDigit = String.fromCharCode(BitBufferHelper.readBits(8));
-          result.body += msgDigit;
+          result += msgDigit;
           msgBodySize--;
         }
         break;
@@ -8306,7 +8293,7 @@ let CdmaPDUHelper = {
           } else {
             msgDigit = String.fromCharCode(msgDigit);
           }
-          result.body += msgDigit;
+          result += msgDigit;
           msgBodySize--;
         }
         break;
@@ -8318,6 +8305,35 @@ let CdmaPDUHelper = {
       default:
         break;
     }
+    return result;
+  },
+
+  /**
+   * User data subparameter decoder : User Data
+   *
+   * @see 3GGP2 C.S0015-B 2.0, 4.5.2 User Data
+   */
+  decodeUserDataMsg: function cdma_decodeUserDataMsg(hasUserHeader) {
+    let result = {},
+        encoding = BitBufferHelper.readBits(5),
+        msgType;
+
+    if(encoding === PDU_CDMA_MSG_CODING_IS_91) {
+      msgType = BitBufferHelper.readBits(8);
+    }
+    result.encoding = this.getCdmaMsgEncoding(encoding);
+
+    let msgBodySize = BitBufferHelper.readBits(8);
+
+    // For segmented SMS, a user header is included before sms content
+    if (hasUserHeader) {
+      result.header = this.decodeUserDataHeader(result.encoding);
+      // header size is included in body size, they are decoded
+      msgBodySize -= result.header.length;
+    }
+
+    // Decode sms content
+    result.body = this.decodeCdmaPDUMsg(encoding, msgType, msgBodySize);
 
     return result;
   },
@@ -9362,14 +9378,11 @@ let ComprehensionTlvHelper = {
     // shall be coded as '1111'".
 
     // MCC & MNC, 3 octets
-    let mcc = loc.mcc.toString();
-    let mnc = loc.mnc.toString();
-    if (mnc.length == 1) {
-      mnc = "F0" + mnc;
-    } else if (mnc.length == 2) {
-      mnc = "F" + mnc;
+    let mcc = loc.mcc, mnc;
+    if (loc.mnc.length == 2) {
+      mnc = "F" + loc.mnc;
     } else {
-      mnc = mnc[2] + mnc[0] + mnc[1];
+      mnc = loc.mnc[2] + loc.mnc[0] + loc.mnc[1];
     }
     GsmPDUHelper.writeSwappedNibbleBCD(mcc + mnc);
 
@@ -9634,6 +9647,7 @@ let ICCFileHelper = {
     switch(fileId) {
       case ICC_EF_CSIM_CDMAHOME:
       case ICC_EF_CSIM_CST:
+      case ICC_EF_CSIM_SPN:
         return EF_PATH_MF_SIM + EF_PATH_DF_CDMA;
       default:
         return null;
@@ -10019,9 +10033,9 @@ let ICCRecordHelper = {
       let imsi = RIL.iccInfoPrivate.imsi;
       if (imsi) {
         // MCC is the first 3 digits of IMSI.
-        RIL.iccInfo.mcc = parseInt(imsi.substr(0,3));
+        RIL.iccInfo.mcc = imsi.substr(0,3);
         // The 4th byte of the response is the length of MNC.
-        RIL.iccInfo.mnc = parseInt(imsi.substr(3, ad[3]));
+        RIL.iccInfo.mnc = imsi.substr(3, ad[3]);
         if (DEBUG) debug("MCC: " + RIL.iccInfo.mcc + " MNC: " + RIL.iccInfo.mnc);
         ICCUtilsHelper.handleICCInfoChange();
       }
@@ -10619,11 +10633,11 @@ let ICCRecordHelper = {
           }
           if (i === 2) {
             // 0-2: MCC
-            oplElement.mcc = parseInt(buf);
+            oplElement.mcc = buf;
             buf = "";
           } else if (i === 5) {
             // 3-5: MNC
-            oplElement.mnc = parseInt(buf);
+            oplElement.mnc = buf;
           }
         }
         // LAC/TAC
@@ -10815,11 +10829,11 @@ let ICCRecordHelper = {
             }
             if (i === 2) {
               // 0-2: MCC
-              plmnEntry.mcc = parseInt(buf);
+              plmnEntry.mcc = buf;
               buf = "";
             } else if (i === 5) {
               // 3-5: MNC
-              plmnEntry.mnc = parseInt(buf);
+              plmnEntry.mnc = buf;
             }
           }
           if (DEBUG) debug("readPLMNEntries: PLMN = " + plmnEntry.mcc + ", " + plmnEntry.mnc);
@@ -10927,7 +10941,53 @@ let ICCUtilsHelper = {
     if (!iccSpn) {
       iccInfo.isDisplayNetworkNameRequired = true;
       iccInfo.isDisplaySpnRequired = false;
+    } else if (RIL._isCdma) {
+      // CDMA family display rule.
+      let cdmaHome = RIL.cdmaHome;
+      let sid = RIL.cdmaSubscription.systemId;
+      let nid = RIL.cdmaSubscription.networkId;
+
+      iccInfo.isDisplayNetworkNameRequired = false;
+
+      // If display condition is false, we don't even need to check network id
+      // or system id.
+      if (iccSpn.spnDisplayCondition == false) {
+        iccInfo.isDisplaySpnRequired = false;
+      } else {
+        // CDMA SPN Display condition dosen't specify whenever network name is
+        // reqired.
+        if (!cdmaHome ||
+            !cdmaHome.systemId ||
+            cdmaHome.systemId.length == 0 ||
+            cdmaHome.systemId.length != cdmaHome.networkId.length ||
+            !sid || !nid) {
+          // CDMA Home haven't been ready, or we haven't got the system id and
+          // network id of the network we register to, assuming we are in home
+          // network.
+          iccInfo.isDisplaySpnRequired = true;
+        } else {
+          // Determine if we are registered in the home service area.
+          // System ID and Network ID are described in 3GPP2 C.S0005 Sec. 2.6.5.2.
+          let inHomeArea = false;
+          for (let i = 0; i < cdmaHome.systemId.length; i++) {
+            let homeSid = cdmaHome.systemId[i],
+                homeNid = cdmaHome.networkId[i];
+            if (homeSid == 0 || homeNid == 0 // Reserved system id/network id
+               || homeSid != sid) {
+              continue;
+            }
+            // According to 3GPP2 C.S0005 Sec. 2.6.5.2, NID number 65535 means
+            // all networks in the system should be considered as home.
+            if (homeNid == 65535 || homeNid == nid) {
+              inHomeArea = true;
+              break;
+            }
+          }
+          iccInfo.isDisplaySpnRequired = inHomeArea;
+        }
+      }
     } else {
+      // GSM family display rule.
       let operatorMnc = RIL.operator.mnc;
       let operatorMcc = RIL.operator.mcc;
 
@@ -11522,8 +11582,66 @@ let RuimRecordHelper = {
         }
         debug("CST: " + str);
       }
+
+      if (ICCUtilsHelper.isICCServiceAvailable("SPN")) {
+        if (DEBUG) debug("SPN: SPN is available");
+        this.readSPN();
+      }
     }
     ICCIOHelper.loadTransparentEF({fileId: ICC_EF_CSIM_CST,
+                                   callback: callback.bind(this)});
+  },
+
+  readSPN: function readSPN() {
+    function callback() {
+      let strLen = Buf.readUint32();
+      let octetLen = strLen / 2;
+      let displayCondition = GsmPDUHelper.readHexOctet();
+      let codingScheme = GsmPDUHelper.readHexOctet();
+      // Skip one octet: language indicator.
+      Buf.seekIncoming(PDU_HEX_OCTET_SIZE);
+      let readLen = 3;
+
+      // SPN String ends up with 0xff.
+      let userDataBuffer = [];
+
+      while (readLen < octetLen) {
+        let octet = GsmPDUHelper.readHexOctet();
+        readLen++;
+        if (octet == 0xff) {
+          break;
+        }
+        userDataBuffer.push(octet);
+      }
+
+      BitBufferHelper.startRead(userDataBuffer);
+
+      let msgLen;
+      switch (CdmaPDUHelper.getCdmaMsgEncoding(codingScheme)) {
+      case PDU_DCS_MSG_CODING_7BITS_ALPHABET:
+        msgLen = Math.floor(userDataBuffer.length * 8 / 7);
+        break;
+      case PDU_DCS_MSG_CODING_8BITS_ALPHABET:
+        msgLen = userDataBuffer.length;
+        break;
+      case PDU_DCS_MSG_CODING_16BITS_ALPHABET:
+        msgLen = Math.floor(userDataBuffer.length / 2);
+        break;
+      }
+
+      RIL.iccInfo.spn = CdmaPDUHelper.decodeCdmaPDUMsg(codingScheme, null, msgLen);
+      if (DEBUG) {
+        debug("CDMA SPN: " + RIL.iccInfo.spn +
+              ", Display condition: " + displayCondition);
+      }
+      RIL.iccInfoPrivate.SPN = {
+        spnDisplayCondition: displayCondition
+      };
+      Buf.seekIncoming((octetLen - readLen) * PDU_HEX_OCTET_SIZE);
+      Buf.readStringDelimiter(strLen);
+    }
+
+    ICCIOHelper.loadTransparentEF({fileId: ICC_EF_CSIM_SPN,
                                    callback: callback.bind(this)});
   }
 };

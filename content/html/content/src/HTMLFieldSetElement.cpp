@@ -5,6 +5,7 @@
 
 #include "mozilla/dom/HTMLFieldSetElement.h"
 #include "mozilla/dom/HTMLFieldSetElementBinding.h"
+#include "nsContentList.h"
 #include "nsEventDispatcher.h"
 
 NS_IMPL_NS_NEW_HTML_ELEMENT(FieldSet)
@@ -244,10 +245,9 @@ HTMLFieldSetElement::NotifyElementsForFirstLegendChange(bool aNotify)
 }
 
 JSObject*
-HTMLFieldSetElement::WrapNode(JSContext* aCx, JSObject* aScope,
-                              bool* aTriedToWrap)
+HTMLFieldSetElement::WrapNode(JSContext* aCx, JSObject* aScope)
 {
-  return HTMLFieldSetElementBinding::Wrap(aCx, aScope, this, aTriedToWrap);
+  return HTMLFieldSetElementBinding::Wrap(aCx, aScope, this);
 }
 
 } // namespace dom

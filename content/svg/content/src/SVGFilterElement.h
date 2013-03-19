@@ -6,7 +6,7 @@
 #ifndef mozilla_dom_SVGFilterElement_h
 #define mozilla_dom_SVGFilterElement_h
 
-#include "nsIDOMSVGURIReference.h"
+#include "nsIDOMSVGUnitTypes.h"
 #include "nsSVGEnum.h"
 #include "nsSVGElement.h"
 #include "nsSVGIntegerPair.h"
@@ -27,7 +27,7 @@ class SVGAnimatedLength;
 
 class SVGFilterElement : public SVGFilterElementBase,
                          public nsIDOMSVGElement,
-                         public nsIDOMSVGURIReference
+                         public nsIDOMSVGUnitTypes
 {
   friend class ::nsSVGFilterFrame;
   friend class ::nsAutoFilterInstance;
@@ -36,13 +36,12 @@ protected:
   friend nsresult (::NS_NewSVGFilterElement(nsIContent **aResult,
                                             already_AddRefed<nsINodeInfo> aNodeInfo));
   SVGFilterElement(already_AddRefed<nsINodeInfo> aNodeInfo);
-  virtual JSObject* WrapNode(JSContext *cx, JSObject *scope, bool *triedToWrap) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *cx, JSObject *scope) MOZ_OVERRIDE;
 
 public:
   // interfaces:
 
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_NSIDOMSVGURIREFERENCE
 
   // xxx I wish we could use virtual inheritance
   NS_FORWARD_NSIDOMNODE_TO_NSINODE

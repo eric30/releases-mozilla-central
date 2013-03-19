@@ -120,8 +120,8 @@ class FullParseHandler
         return new_<BinaryNode>(kind, op, pos, left, right);
     }
     ParseNode *newBinaryOrAppend(ParseNodeKind kind, ParseNode *left, ParseNode *right,
-                                 JSOp op = JSOP_NOP) {
-        return ParseNode::newBinaryOrAppend(kind, op, left, right, this, foldConstants);
+                                 ParseContext<FullParseHandler> *pc, JSOp op = JSOP_NOP) {
+        return ParseNode::newBinaryOrAppend(kind, op, left, right, this, pc, foldConstants);
     }
     void setBinaryRHS(ParseNode *pn, ParseNode *rhs) {
         JS_ASSERT(pn->isArity(PN_BINARY));
@@ -166,6 +166,7 @@ class FullParseHandler
     void setFunctionBox(ParseNode *pn, FunctionBox *funbox) {
         pn->pn_funbox = funbox;
     }
+    inline ParseNode *newLexicalScope(ObjectBox *blockbox);
     bool isOperationWithoutParens(ParseNode *pn, ParseNodeKind kind) {
         return pn->isKind(kind) && !pn->isInParens();
     }
@@ -299,6 +300,20 @@ FullParseHandler::newFunctionDefinition()
         return NULL;
     pn->pn_body = NULL;
     pn->pn_funbox = NULL;
+    pn->pn_cookie.makeFree();
+    pn->pn_dflags = 0;
+    return pn;
+}
+
+inline ParseNode *
+FullParseHandler::newLexicalScope(ObjectBox *blockbox)
+{
+    ParseNode *pn = LexicalScopeNode::create(PNK_LEXICALSCOPE, this);
+    if (!pn)
+        return NULL;
+
+    pn->setOp(JSOP_LEAVEBLOCK);
+    pn->pn_objbox = blockbox;
     pn->pn_cookie.makeFree();
     pn->pn_dflags = 0;
     return pn;

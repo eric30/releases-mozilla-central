@@ -59,7 +59,7 @@ public:
   virtual nsresult Clone(nsINodeInfo* aNodeInfo, nsINode** aResult) const;
   virtual nsIDOMNode* AsDOMNode() { return this; }
   virtual JSObject*
-  WrapNode(JSContext* aCx, JSObject* aScope, bool* aTriedToWrap) MOZ_OVERRIDE;
+  WrapNode(JSContext* aCx, JSObject* aScope) MOZ_OVERRIDE;
 
   // nsIContent
   virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
@@ -92,8 +92,8 @@ public:
   void CreateAndDispatchEvent(nsIDocument* aDoc, const nsAString& aEventName);
 
   // WebIDL
-  bool GetDisabled(ErrorResult& aRv);
-  void SetDisabled(bool aDisabled, ErrorResult& aRv);
+  bool Disabled();
+  void SetDisabled(bool aDisabled);
   // XPCOM GetHref is fine.
   void SetHref(const nsAString& aHref, ErrorResult& aRv)
   {

@@ -937,15 +937,19 @@ nsHTMLDocument::SetCompatibilityMode(nsCompatibility aMode)
 //
 // nsIDOMHTMLDocument interface implementation
 //
-void
-nsHTMLDocument::GetDomainURI(nsIURI **aURI)
+already_AddRefed<nsIURI>
+nsHTMLDocument::GetDomainURI()
 {
-  nsIPrincipal *principal = NodePrincipal();
+  nsIPrincipal* principal = NodePrincipal();
 
-  principal->GetDomain(aURI);
-  if (!*aURI) {
-    principal->GetURI(aURI);
+  nsCOMPtr<nsIURI> uri;
+  principal->GetDomain(getter_AddRefs(uri));
+  if (uri) {
+    return uri.forget();
   }
+
+  principal->GetURI(getter_AddRefs(uri));
+  return uri.forget();
 }
 
 
@@ -960,8 +964,7 @@ nsHTMLDocument::GetDomain(nsAString& aDomain)
 void
 nsHTMLDocument::GetDomain(nsAString& aDomain, ErrorResult& rv)
 {
-  nsCOMPtr<nsIURI> uri;
-  GetDomainURI(getter_AddRefs(uri));
+  nsCOMPtr<nsIURI> uri = GetDomainURI();
 
   if (!uri) {
     rv.Throw(NS_ERROR_FAILURE);
@@ -996,8 +999,7 @@ nsHTMLDocument::SetDomain(const nsAString& aDomain, ErrorResult& rv)
   }
 
   // Create new URI
-  nsCOMPtr<nsIURI> uri;
-  GetDomainURI(getter_AddRefs(uri));
+  nsCOMPtr<nsIURI> uri = GetDomainURI();
 
   if (!uri) {
     rv.Throw(NS_ERROR_FAILURE);
@@ -2605,7 +2607,7 @@ nsHTMLDocument::DeferredContentEditableCountChange(nsIContent *aElement)
       nsCOMPtr<nsIEditor> editor;
       docshell->GetEditor(getter_AddRefs(editor));
       if (editor) {
-        nsRefPtr<nsRange> range = new nsRange();
+        nsRefPtr<nsRange> range = new nsRange(aElement);
         rv = range->SelectNode(node);
         if (NS_FAILED(rv)) {
           // The node might be detached from the document at this point,

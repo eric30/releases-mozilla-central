@@ -432,6 +432,8 @@ FunctionBox::FunctionBox(JSContext *cx, ObjectBox* traceListHead, JSFunction *fu
     ndefaults(0),
     inWith(false),                  // initialized below
     inGenexpLambda(false),
+    useAsm(false),
+    insideUseAsm(outerpc && outerpc->useAsmOrInsideUseAsm()),
     funCxFlags()
 {
     if (!outerpc) {
@@ -1285,6 +1287,14 @@ Parser<FullParseHandler>::leaveFunction(ParseNode *fn, HandlePropertyName funNam
                 continue;
             }
 
+            /*
+             * If there are no uses of this placeholder (e.g., it was created
+             * for an identifierName that turned out to be a label), there is
+             * nothing left to do.
+             */
+            if (!dn->dn_uses)
+                continue;
+
             Definition *outer_dn = pc->decls().lookupFirst(atom);
 
             /*
@@ -2112,6 +2122,13 @@ Parser<ParseHandler>::maybeParseDirective(Node pn, bool *cont)
                     pc->sc->strict = true;
                 }
             }
+        } else if (directive == context->names().useAsm) {
+            if (pc->sc->isFunctionBox()) {
+                pc->sc->asFunctionBox()->useAsm = true;
+            } else {
+                if (!report(ParseWarning, false, pn, JSMSG_USE_ASM_DIRECTIVE_FAIL))
+                    return false;
+            }
         }
     }
     return true;
@@ -2340,8 +2357,7 @@ static inline bool
 ForEachLetDef(JSContext *cx, ParseContext<ParseHandler> *pc,
               HandleStaticBlockObject blockObj, Op op)
 {
-    for (Shape::Range r = blockObj->lastProperty()->all(); !r.empty(); r.popFront()) {
-        Shape::Range::AutoRooter rooter(cx, &r);
+    for (Shape::Range<CanGC> r(cx, blockObj->lastProperty()); !r.empty(); r.popFront()) {
         Shape &shape = r.front();
 
         /* Beware the destructuring dummy slots. */
@@ -2873,14 +2889,11 @@ Parser<ParseHandler>::returnOrYield(bool useAssignExpr)
     return pn;
 }
 
-template <>
-ParseNode *
-Parser<FullParseHandler>::pushLexicalScope(HandleStaticBlockObject blockObj, StmtInfoPC *stmt)
+template <typename ParseHandler>
+typename ParseHandler::Node
+Parser<ParseHandler>::pushLexicalScope(HandleStaticBlockObject blockObj, StmtInfoPC *stmt)
 {
     JS_ASSERT(blockObj);
-    ParseNode *pn = LexicalScopeNode::create(PNK_LEXICALSCOPE, &handler);
-    if (!pn)
-        return null();
 
     ObjectBox *blockbox = newObjectBox(blockObj);
     if (!blockbox)
@@ -2890,22 +2903,14 @@ Parser<FullParseHandler>::pushLexicalScope(HandleStaticBlockObject blockObj, Stm
     blockObj->initPrevBlockChainFromParser(pc->blockChain);
     FinishPushBlockScope(pc, stmt, *blockObj.get());
 
-    pn->setOp(JSOP_LEAVEBLOCK);
-    pn->pn_objbox = blockbox;
-    pn->pn_cookie.makeFree();
-    pn->pn_dflags = 0;
+    Node pn = handler.newLexicalScope(blockbox);
+    if (!pn)
+        return null();
+
     if (!GenerateBlockId(pc, stmt->blockid))
         return null();
-    pn->pn_blockid = stmt->blockid;
+    handler.setBlockId(pn, stmt->blockid);
     return pn;
-}
-
-template <>
-SyntaxParseHandler::Node
-Parser<SyntaxParseHandler>::pushLexicalScope(HandleStaticBlockObject blockObj, StmtInfoPC *stmt)
-{
-    setUnknownResult();
-    return SyntaxParseHandler::NodeFailure;
 }
 
 template <typename ParseHandler>
@@ -2983,7 +2988,7 @@ Parser<ParseHandler>::letBlock(LetContext letContext)
 
     MUST_MATCH_TOKEN(TOK_LP, JSMSG_PAREN_BEFORE_LET);
 
-    Node vars = variables(PNK_LET, blockObj, DontHoistVars);
+    Node vars = variables(PNK_LET, NULL, blockObj, DontHoistVars);
     if (!vars)
         return null();
 
@@ -3095,8 +3100,7 @@ template <>
 SyntaxParseHandler::Node
 Parser<SyntaxParseHandler>::newBindingNode(PropertyName *name, VarContext varContext)
 {
-    setUnknownResult();
-    return SyntaxParseHandler::NodeFailure;
+    return SyntaxParseHandler::NodeGeneric;
 }
 
 template <typename ParseHandler>
@@ -3352,7 +3356,7 @@ Parser<FullParseHandler>::forStatement()
                     blockObj = StaticBlockObject::create(context);
                     if (!blockObj)
                         return null();
-                    pn1 = variables(PNK_LET, blockObj, DontHoistVars);
+                    pn1 = variables(PNK_LET, NULL, blockObj, DontHoistVars);
                 }
             }
 #endif
@@ -3627,9 +3631,107 @@ template <>
 SyntaxParseHandler::Node
 Parser<SyntaxParseHandler>::forStatement()
 {
-    // XXX bug 835587 for statement needs a rewrite for syntax parsing.
-    setUnknownResult();
-    return SyntaxParseHandler::NodeFailure;
+    /*
+     * 'for' statement parsing is fantastically complicated and requires being
+     * able to inspect the parse tree for previous parts of the 'for'. Syntax
+     * parsing of 'for' statements is thus done separately, and only handles
+     * the types of 'for' statements likely to be seen in web content.
+     */
+    JS_ASSERT(tokenStream.isCurrentTokenType(TOK_FOR));
+
+    StmtInfoPC forStmt(context);
+    PushStatementPC(pc, &forStmt, STMT_FOR_LOOP);
+
+    MUST_MATCH_TOKEN(TOK_LP, JSMSG_PAREN_AFTER_FOR);
+
+    /* True if we have 'for (var ...)'. */
+    bool forDecl = false;
+    bool simpleForDecl = true;
+
+    /* Set to 'x' in 'for (x ;... ;...)' or 'for (x in ...)'. */
+    Node lhsNode;
+
+    {
+        TokenKind tt = tokenStream.peekToken(TSF_OPERAND);
+        if (tt == TOK_SEMI) {
+            lhsNode = null();
+        } else {
+            /* Set lhsNode to a var list or an initializing expression. */
+            pc->parsingForInit = true;
+            if (tt == TOK_VAR) {
+                forDecl = true;
+                tokenStream.consumeKnownToken(tt);
+                lhsNode = variables(tt == TOK_VAR ? PNK_VAR : PNK_CONST, &simpleForDecl);
+            }
+#if JS_HAS_BLOCK_SCOPE
+            else if (tt == TOK_CONST || tt == TOK_LET) {
+                setUnknownResult();
+                return null();
+            }
+#endif
+            else {
+                lhsNode = expr();
+            }
+            if (!lhsNode)
+                return null();
+            pc->parsingForInit = false;
+        }
+    }
+
+    /*
+     * We can be sure that it's a for/in loop if there's still an 'in'
+     * keyword here, even if JavaScript recognizes 'in' as an operator,
+     * as we've excluded 'in' from being parsed in RelExpr by setting
+     * pc->parsingForInit.
+     */
+    bool forOf;
+    if (lhsNode && matchInOrOf(&forOf)) {
+        /* Parse the rest of the for/in or for/of head. */
+        forStmt.type = STMT_FOR_IN_LOOP;
+
+        /* Check that the left side of the 'in' or 'of' is valid. */
+        if (!forDecl &&
+            lhsNode != SyntaxParseHandler::NodeName &&
+            lhsNode != SyntaxParseHandler::NodeLValue)
+        {
+            setUnknownResult();
+            return null();
+        }
+
+        if (!simpleForDecl) {
+            setUnknownResult();
+            return null();
+        }
+
+        if (!forDecl && !setAssignmentLhsOps(lhsNode, JSOP_NOP))
+            return null();
+
+        if (!expr())
+            return null();
+    } else {
+        /* Parse the loop condition or null. */
+        MUST_MATCH_TOKEN(TOK_SEMI, JSMSG_SEMI_AFTER_FOR_INIT);
+        if (tokenStream.peekToken(TSF_OPERAND) != TOK_SEMI) {
+            if (!expr())
+                return null();
+        }
+
+        /* Parse the update expression or null. */
+        MUST_MATCH_TOKEN(TOK_SEMI, JSMSG_SEMI_AFTER_FOR_COND);
+        if (tokenStream.peekToken(TSF_OPERAND) != TOK_RP) {
+            if (!expr())
+                return null();
+        }
+    }
+
+    MUST_MATCH_TOKEN(TOK_RP, JSMSG_PAREN_AFTER_FOR_CTRL);
+
+    /* Parse the loop body. */
+    if (!statement())
+        return null();
+
+    PopStatementPC(context, pc);
+    return SyntaxParseHandler::NodeGeneric;
 }
 
 template <typename ParseHandler>
@@ -3964,7 +4066,7 @@ Parser<FullParseHandler>::letStatement()
             pc->blockNode = pn1;
         }
 
-        pn = variables(PNK_LET, pc->blockChain, HoistVars);
+        pn = variables(PNK_LET, NULL, pc->blockChain, HoistVars);
         if (!pn)
             return null();
         pn->pn_xflags = PNX_POPVAR;
@@ -4331,7 +4433,8 @@ Parser<ParseHandler>::statement()
  */
 template <typename ParseHandler>
 typename ParseHandler::Node
-Parser<ParseHandler>::variables(ParseNodeKind kind, StaticBlockObject *blockObj, VarContext varContext)
+Parser<ParseHandler>::variables(ParseNodeKind kind, bool *psimple,
+                                StaticBlockObject *blockObj, VarContext varContext)
 {
     /*
      * The four options here are:
@@ -4341,6 +4444,12 @@ Parser<ParseHandler>::variables(ParseNodeKind kind, StaticBlockObject *blockObj,
      * - PNK_CALL:  We are parsing the head of a let block.
      */
     JS_ASSERT(kind == PNK_VAR || kind == PNK_CONST || kind == PNK_LET || kind == PNK_CALL);
+
+    /*
+     * The simple flag is set if the declaration has the form 'var x', with
+     * only one variable declared and no initializer expression.
+     */
+    JS_ASSERT_IF(psimple, *psimple);
 
     JSOp op = blockObj ? JSOP_NOP : kind == PNK_VAR ? JSOP_DEFVAR : JSOP_DEFCONST;
 
@@ -4359,11 +4468,19 @@ Parser<ParseHandler>::variables(ParseNodeKind kind, StaticBlockObject *blockObj,
     else
         data.initVarOrConst(op);
 
+    bool first = true;
     Node pn2;
     do {
+        if (psimple && !first)
+            *psimple = false;
+        first = false;
+
         TokenKind tt = tokenStream.getToken();
 #if JS_HAS_DESTRUCTURING
         if (tt == TOK_LB || tt == TOK_LC) {
+            if (psimple)
+                *psimple = false;
+
             pc->inDeclDestructuring = true;
             pn2 = primaryExpr(tt);
             pc->inDeclDestructuring = false;
@@ -4386,7 +4503,7 @@ Parser<ParseHandler>::variables(ParseNodeKind kind, StaticBlockObject *blockObj,
             if (!init)
                 return null();
 
-            pn2 = handler.newBinaryOrAppend(PNK_ASSIGN, pn2, init);
+            pn2 = handler.newBinaryOrAppend(PNK_ASSIGN, pn2, init, pc);
             if (!pn2)
                 return null();
             handler.addList(pn, pn2);
@@ -4413,6 +4530,9 @@ Parser<ParseHandler>::variables(ParseNodeKind kind, StaticBlockObject *blockObj,
 
         if (tokenStream.matchToken(TOK_ASSIGN)) {
             JS_ASSERT(tokenStream.currentToken().t_op == JSOP_NOP);
+
+            if (psimple)
+                *psimple = false;
 
             Node init = assignExpr();
             if (!init)
@@ -4506,7 +4626,7 @@ BEGIN_EXPR_PARSER(mulExpr1)
                              ? PNK_DIV
                              : PNK_MOD;
         JSOp op = tokenStream.currentToken().t_op;
-        pn = handler.newBinaryOrAppend(kind, pn, unaryExpr(), op);
+        pn = handler.newBinaryOrAppend(kind, pn, unaryExpr(), pc, op);
     }
     return pn;
 }
@@ -4519,7 +4639,7 @@ BEGIN_EXPR_PARSER(addExpr1)
         TokenKind tt = tokenStream.currentToken().type;
         JSOp op = (tt == TOK_PLUS) ? JSOP_ADD : JSOP_SUB;
         ParseNodeKind kind = (tt == TOK_PLUS) ? PNK_ADD : PNK_SUB;
-        pn = handler.newBinaryOrAppend(kind, pn, mulExpr1n(), op);
+        pn = handler.newBinaryOrAppend(kind, pn, mulExpr1n(), pc, op);
     }
     return pn;
 }
@@ -4594,7 +4714,7 @@ BEGIN_EXPR_PARSER(relExpr1)
             tokenStream.isCurrentTokenType(TOK_INSTANCEOF))) {
         ParseNodeKind kind = RelationalTokenToParseNodeKind(tokenStream.currentToken());
         JSOp op = tokenStream.currentToken().t_op;
-        pn = handler.newBinaryOrAppend(kind, pn, shiftExpr1n(), op);
+        pn = handler.newBinaryOrAppend(kind, pn, shiftExpr1n(), pc, op);
     }
     /* Restore previous state of parsingForInit flag. */
     pc->parsingForInit |= oldParsingForInit;
@@ -4638,7 +4758,7 @@ BEGIN_EXPR_PARSER(bitAndExpr1)
 {
     Node pn = eqExpr1i();
     while (pn && tokenStream.isCurrentTokenType(TOK_BITAND))
-        pn = handler.newBinaryOrAppend(PNK_BITAND, pn, eqExpr1n(), JSOP_BITAND);
+        pn = handler.newBinaryOrAppend(PNK_BITAND, pn, eqExpr1n(), pc, JSOP_BITAND);
     return pn;
 }
 END_EXPR_PARSER(bitAndExpr1)
@@ -4647,7 +4767,7 @@ BEGIN_EXPR_PARSER(bitXorExpr1)
 {
     Node pn = bitAndExpr1i();
     while (pn && tokenStream.isCurrentTokenType(TOK_BITXOR))
-        pn = handler.newBinaryOrAppend(PNK_BITXOR, pn, bitAndExpr1n(), JSOP_BITXOR);
+        pn = handler.newBinaryOrAppend(PNK_BITXOR, pn, bitAndExpr1n(), pc, JSOP_BITXOR);
     return pn;
 }
 END_EXPR_PARSER(bitXorExpr1)
@@ -4656,7 +4776,7 @@ BEGIN_EXPR_PARSER(bitOrExpr1)
 {
     Node pn = bitXorExpr1i();
     while (pn && tokenStream.isCurrentTokenType(TOK_BITOR))
-        pn = handler.newBinaryOrAppend(PNK_BITOR, pn, bitXorExpr1n(), JSOP_BITOR);
+        pn = handler.newBinaryOrAppend(PNK_BITOR, pn, bitXorExpr1n(), pc, JSOP_BITOR);
     return pn;
 }
 END_EXPR_PARSER(bitOrExpr1)
@@ -4665,7 +4785,7 @@ BEGIN_EXPR_PARSER(andExpr1)
 {
     Node pn = bitOrExpr1i();
     while (pn && tokenStream.isCurrentTokenType(TOK_AND))
-        pn = handler.newBinaryOrAppend(PNK_AND, pn, bitOrExpr1n(), JSOP_AND);
+        pn = handler.newBinaryOrAppend(PNK_AND, pn, bitOrExpr1n(), pc, JSOP_AND);
     return pn;
 }
 END_EXPR_PARSER(andExpr1)
@@ -4676,7 +4796,7 @@ Parser<ParseHandler>::orExpr1()
 {
     Node pn = andExpr1i();
     while (pn && tokenStream.isCurrentTokenType(TOK_OR))
-        pn = handler.newBinaryOrAppend(PNK_OR, pn, andExpr1n(), JSOP_OR);
+        pn = handler.newBinaryOrAppend(PNK_OR, pn, andExpr1n(), pc, JSOP_OR);
     return pn;
 }
 
@@ -4804,7 +4924,7 @@ Parser<ParseHandler>::assignExpr()
     if (!rhs)
         return null();
 
-    return handler.newBinaryOrAppend(kind, lhs, rhs, op);
+    return handler.newBinaryOrAppend(kind, lhs, rhs, pc, op);
 }
 
 template <> bool

@@ -13,6 +13,7 @@
 #include "nsPoint.h"
 #include "nsRect.h"
 #include "nsString.h"
+#include "nsTArray.h"
 #include "mozilla/gfx/Rect.h"
 
 //#define FORCE_ALOG 1
@@ -593,15 +594,11 @@ class AndroidGeckoEvent : public WrappedJavaObject
 public:
     static void InitGeckoEventClass(JNIEnv *jEnv);
 
-    AndroidGeckoEvent() { }
     AndroidGeckoEvent(int aType) {
         Init(aType);
     }
     AndroidGeckoEvent(int aType, int aAction) {
         Init(aType, aAction);
-    }
-    AndroidGeckoEvent(int x1, int y1, int x2, int y2) {
-        Init(x1, y1, x2, y2);
     }
     AndroidGeckoEvent(int aType, const nsIntRect &aRect) {
         Init(aType, aRect);
@@ -616,12 +613,12 @@ public:
     void Init(JNIEnv *jenv, jobject jobj);
     void Init(int aType);
     void Init(int aType, int aAction);
-    void Init(int x1, int y1, int x2, int y2);
     void Init(int aType, const nsIntRect &aRect);
     void Init(AndroidGeckoEvent *aResizeEvent);
 
     int Action() { return mAction; }
     int Type() { return mType; }
+    bool AckNeeded() { return mAckNeeded; }
     int64_t Time() { return mTime; }
     const nsTArray<nsIntPoint>& Points() { return mPoints; }
     const nsTArray<int>& PointIndicies() { return mPointIndicies; }
@@ -664,6 +661,7 @@ public:
 protected:
     int mAction;
     int mType;
+    bool mAckNeeded;
     int64_t mTime;
     nsTArray<nsIntPoint> mPoints;
     nsTArray<nsIntPoint> mPointRadii;
@@ -708,6 +706,7 @@ protected:
     static jclass jGeckoEventClass;
     static jfieldID jActionField;
     static jfieldID jTypeField;
+    static jfieldID jAckNeededField;
     static jfieldID jTimeField;
     static jfieldID jPoints;
     static jfieldID jPointIndicies;
@@ -764,7 +763,7 @@ public:
         LOAD_URI = 12,
         SURFACE_CREATED = 13,   // used by XUL fennec only
         SURFACE_DESTROYED = 14, // used by XUL fennec only
-        GECKO_EVENT_SYNC = 15,
+        NOOP = 15,
         FORCED_RESIZE = 16, // used internally in nsAppShell/nsWindow
         ACTIVITY_START = 17,
         BROADCAST = 19,

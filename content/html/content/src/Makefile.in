@@ -56,6 +56,7 @@ EXPORTS_mozilla/dom = \
 		HTMLModElement.h \
 		HTMLObjectElement.h \
 		HTMLOptionElement.h \
+		HTMLOptionsCollection.h \
 		HTMLOptGroupElement.h \
 		HTMLOutputElement.h \
 		HTMLParagraphElement.h \
@@ -64,6 +65,7 @@ EXPORTS_mozilla/dom = \
 		HTMLScriptElement.h \
 		HTMLSharedElement.h \
 		HTMLSharedListElement.h \
+		HTMLSharedObjectElement.h \
 		HTMLSpanElement.h \
 		HTMLStyleElement.h \
 		HTMLTableCaptionElement.h \
@@ -120,8 +122,9 @@ CPPSRCS		= \
 		HTMLMeterElement.cpp \
 		HTMLModElement.cpp \
 		HTMLObjectElement.cpp \
-		nsHTMLSharedObjectElement.cpp \
+		HTMLSharedObjectElement.cpp \
 		HTMLOptionElement.cpp \
+		HTMLOptionsCollection.cpp \
 		HTMLOptGroupElement.cpp \
 		HTMLOutputElement.cpp \
 		HTMLParagraphElement.cpp \
@@ -160,7 +163,6 @@ CPPSRCS		+= \
 		nsHTMLAudioElement.cpp \
 		nsHTMLMediaElement.cpp \
 		MediaError.cpp \
-		nsMediaFragmentURIParser.cpp \
 		HTMLSourceElement.cpp \
 		TimeRanges.cpp \
 		nsHTMLVideoElement.cpp \
@@ -188,6 +190,7 @@ INCLUDES	+= \
 		-I$(srcdir)/../../../../editor/libeditor/base \
 		-I$(srcdir)/../../../../editor/libeditor/text \
 		-I$(srcdir)/../../../../editor/txmgr/src \
+		-I$(srcdir)/../../../../netwerk/base/src \
 		-I$(srcdir) \
 		-I$(topsrcdir)/xpcom/ds \
 		$(NULL)

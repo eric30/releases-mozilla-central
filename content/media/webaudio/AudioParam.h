@@ -49,8 +49,7 @@ public:
     return mNode->Context();
   }
 
-  virtual JSObject* WrapObject(JSContext* aCx, JSObject* aScope,
-                               bool* aTriedToWrap);
+  virtual JSObject* WrapObject(JSContext* aCx, JSObject* aScope) MOZ_OVERRIDE;
 
   // We override SetValueCurveAtTime to convert the Float32Array to the wrapper
   // object.
@@ -65,6 +64,10 @@ public:
   // sure that the callback is called every time that this object gets mutated.
   void SetValue(float aValue)
   {
+    // Optimize away setting the same value on an AudioParam
+    if (HasSimpleValue() && fabsf(GetValue() - aValue) < 1e-7) {
+      return;
+    }
     AudioParamTimeline::SetValue(aValue);
     mCallback(mNode);
   }

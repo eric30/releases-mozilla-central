@@ -19,8 +19,6 @@ import android.widget.AdapterView;
 import android.widget.BaseAdapter;
 import android.widget.LinearLayout;
 import android.widget.ListView;
-import android.widget.LinearLayout.LayoutParams;
-
 import java.util.ArrayList;
 import java.util.List;
 
@@ -432,16 +430,6 @@ public class GeckoMenu extends ListView
         private Context mContext;
         private LinearLayout mContainer;
         private List<View> mItems;
-
-        private class Divider extends LinearLayout {
-            public Divider(Context context, AttributeSet attrs) {
-                super(context, attrs);
-
-                setLayoutParams(new LinearLayout.LayoutParams((int) context.getResources().getDisplayMetrics().density,
-                                                              LinearLayout.LayoutParams.FILL_PARENT));
-                setBackgroundColor(0xFFD1D5DA);
-            }
-        }
  
         public DefaultActionItemBarPresenter(Context context, LinearLayout container) {
             mContext = context;
@@ -457,6 +445,8 @@ public class GeckoMenu extends ListView
 
             if (mItems.size() > 0) {
                 Divider divider = new Divider(mContext, null);
+                divider.setOrientation(Divider.Orientation.VERTICAL);
+                divider.setBackgroundColor(0xFFD1D5DA);
                 mContainer.addView(divider);
             }
 

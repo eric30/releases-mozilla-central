@@ -12,6 +12,7 @@
 #include "jsapi.h"
 #include "jscntxt.h"
 #include "jsgc.h"
+#include "jsonparser.h"
 #include "jsprf.h"
 #include "jswatchpoint.h"
 
@@ -538,12 +539,6 @@ AutoGCRooter::trace(JSTracer *trc)
         return;
       }
 
-      case SHAPERANGE: {
-        Shape::Range::AutoRooter *rooter = static_cast<Shape::Range::AutoRooter *>(this);
-        rooter->trace(trc);
-        return;
-      }
-
       case STACKSHAPE: {
         StackShape::AutoRooter *rooter = static_cast<StackShape::AutoRooter *>(this);
         if (rooter->shape->base)
@@ -626,6 +621,10 @@ AutoGCRooter::trace(JSTracer *trc)
             MarkValueUnbarriered(trc, &p->get(), "js::AutoWrapperVector.vector");
         return;
       }
+
+      case JSONPARSER:
+        static_cast<js::JSONParser *>(this)->trace(trc);
+        return;
     }
 
     JS_ASSERT(tag_ >= 0);
@@ -647,13 +646,6 @@ AutoGCRooter::traceAllWrappers(JSTracer *trc)
         if (gcr->tag_ == WRAPVECTOR || gcr->tag_ == WRAPPER)
             gcr->trace(trc);
     }
-}
-
-void
-Shape::Range::AutoRooter::trace(JSTracer *trc)
-{
-    if (r->cursor)
-        MarkShapeRoot(trc, const_cast<Shape**>(&r->cursor), "Shape::Range::AutoRooter");
 }
 
 void
@@ -745,14 +737,23 @@ js::gc::MarkRuntime(JSTracer *trc, bool useSavedRoots)
     for (ContextIter acx(rt); !acx.done(); acx.next())
         acx->mark(trc);
 
-    if (IS_GC_MARKING_TRACER(trc)) {
-        for (ZonesIter zone(rt); !zone.done(); zone.next()) {
-            if (!zone->isCollecting())
-                continue;
+    for (ZonesIter zone(rt); !zone.done(); zone.next()) {
+        if (IS_GC_MARKING_TRACER(trc) && !zone->isCollecting())
+            continue;
 
-            if (zone->isPreservingCode()) {
-                gcstats::AutoPhase ap(rt->gcStats, gcstats::PHASE_MARK_TYPES);
-                zone->markTypes(trc);
+        if (IS_GC_MARKING_TRACER(trc) && zone->isPreservingCode()) {
+            gcstats::AutoPhase ap(rt->gcStats, gcstats::PHASE_MARK_TYPES);
+            zone->markTypes(trc);
+        }
+
+        /* Do not discard scripts with counts while profiling. */
+        if (rt->profilingScripts) {
+            for (CellIterUnderGC i(zone, FINALIZE_SCRIPT); !i.done(); i.next()) {
+                JSScript *script = i.get<JSScript>();
+                if (script->hasScriptCounts) {
+                    MarkScriptRoot(trc, &script, "profilingScripts");
+                    JS_ASSERT(script == i.get<JSScript>());
+                }
             }
         }
     }
@@ -768,17 +769,6 @@ js::gc::MarkRuntime(JSTracer *trc, bool useSavedRoots)
                 c->watchpointMap->markAll(trc);
         }
 
-        /* Do not discard scripts with counts while profiling. */
-        if (rt->profilingScripts) {
-            for (CellIterUnderGC i(c, FINALIZE_SCRIPT); !i.done(); i.next()) {
-                JSScript *script = i.get<JSScript>();
-                if (script->hasScriptCounts) {
-                    MarkScriptRoot(trc, &script, "profilingScripts");
-                    JS_ASSERT(script == i.get<JSScript>());
-                }
-            }
-        }
-
         /* Mark debug scopes, if present */
         if (c->debugScopes)
             c->debugScopes->mark(trc);
@@ -786,8 +776,8 @@ js::gc::MarkRuntime(JSTracer *trc, bool useSavedRoots)
 
 #ifdef JS_METHODJIT
     /* We need to expand inline frames before stack scanning. */
-    for (CompartmentsIter c(rt); !c.done(); c.next())
-        mjit::ExpandInlineFrames(c);
+    for (ZonesIter zone(rt); !zone.done(); zone.next())
+        mjit::ExpandInlineFrames(zone);
 #endif
 
     rt->stackSpace.mark(trc);

@@ -34,7 +34,6 @@ class nsDOMAttributeMap;
 class nsIContent;
 class nsIDocument;
 class nsIDOMElement;
-class nsIDOMMozNamedAttrMap;
 class nsIDOMNodeList;
 class nsIDOMUserDataHandler;
 class nsIEditor;
@@ -379,8 +378,7 @@ public:
    */
   virtual bool IsNodeOfType(uint32_t aFlags) const = 0;
 
-  virtual JSObject* WrapObject(JSContext *aCx, JSObject *aScope,
-                               bool *aTriedToWrap);
+  virtual JSObject* WrapObject(JSContext *aCx, JSObject *aScope) MOZ_OVERRIDE;
 
 protected:
   /**
@@ -388,11 +386,9 @@ protected:
    * does some additional checks and fix-up that's common to all nodes. WrapNode
    * should just call the DOM binding's Wrap function.
    */
-  virtual JSObject* WrapNode(JSContext *aCx, JSObject *aScope,
-                             bool *aTriedToWrap)
+  virtual JSObject* WrapNode(JSContext *aCx, JSObject *aScope)
   {
     MOZ_ASSERT(!IsDOMBinding(), "Someone forgot to override WrapNode");
-    *aTriedToWrap = false;
     return nullptr;
   }
 
@@ -1562,7 +1558,6 @@ public:
   nsINode* RemoveChild(nsINode& aChild, mozilla::ErrorResult& aError);
   already_AddRefed<nsINode> CloneNode(bool aDeep, mozilla::ErrorResult& aError);
   bool IsEqualNode(nsINode* aNode);
-  bool IsSupported(const nsAString& aFeature, const nsAString& aVersion);
   void GetNamespaceURI(nsAString& aNamespaceURI) const
   {
     mNodeInfo->GetNamespaceURI(aNamespaceURI);
@@ -1657,7 +1652,6 @@ protected:
   nsresult GetOwnerDocument(nsIDOMDocument** aOwnerDocument);
   nsresult CompareDocumentPosition(nsIDOMNode* aOther,
                                    uint16_t* aReturn);
-  nsresult GetAttributes(nsIDOMMozNamedAttrMap** aAttributes);
 
   nsresult ReplaceOrInsertBefore(bool aReplace, nsIDOMNode *aNewChild,
                                  nsIDOMNode *aRefChild, nsIDOMNode **aReturn);
@@ -1959,10 +1953,6 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsINode, NS_INODE_IID)
   { \
     return nsINode::GetNextSibling(aNextSibling); \
   } \
-  NS_IMETHOD GetAttributes(nsIDOMMozNamedAttrMap** aAttributes) __VA_ARGS__ \
-  { \
-    return nsINode::GetAttributes(aAttributes); \
-  } \
   NS_IMETHOD GetOwnerDocument(nsIDOMDocument** aOwnerDocument) __VA_ARGS__ \
   { \
     return nsINode::GetOwnerDocument(aOwnerDocument); \
@@ -2004,11 +1994,6 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsINode, NS_INODE_IID)
   NS_IMETHOD Normalize() __VA_ARGS__ \
   { \
     nsINode::Normalize(); \
-    return NS_OK; \
-  } \
-  NS_IMETHOD IsSupported(const nsAString& aFeature, const nsAString& aVersion, bool* aResult) __VA_ARGS__ \
-  { \
-    *aResult = nsINode::IsSupported(aFeature, aVersion); \
     return NS_OK; \
   } \
   NS_IMETHOD GetNamespaceURI(nsAString& aNamespaceURI) __VA_ARGS__ \
