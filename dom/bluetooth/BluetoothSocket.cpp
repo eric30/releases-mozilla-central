@@ -71,28 +71,28 @@ void
 BluetoothSocket::ReceiveSocketData(nsAutoPtr<UnixSocketRawData>& aMessage)
 {
   MOZ_ASSERT(mObserver);
-  mObserver->ReceiveSocketData(aMessage);
+  mObserver->ReceiveSocketData(aMessage, this);
 }
 
 void
 BluetoothSocket::OnConnectSuccess()
 {
   MOZ_ASSERT(mObserver);
-  mObserver->OnConnectSuccess();
+  mObserver->OnConnectSuccess(this);
 }
 
 void
 BluetoothSocket::OnConnectError()
 {
   MOZ_ASSERT(mObserver);
-  mObserver->OnConnectError();
+  mObserver->OnConnectError(this);
 }
 
 void
 BluetoothSocket::OnDisconnect()
 {
   MOZ_ASSERT(mObserver);
-  mObserver->OnDisconnect();
+  mObserver->OnDisconnect(this);
 }
 
 void

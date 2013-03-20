@@ -14,13 +14,16 @@ using namespace mozilla::ipc;
 
 BEGIN_BLUETOOTH_NAMESPACE
 
+class BluetoothSocket;
+
 class BluetoothSocketObserver
 {
 public:
-  virtual void ReceiveSocketData(nsAutoPtr<UnixSocketRawData>& aMessage) = 0;
-  virtual void OnConnectSuccess() = 0;
-  virtual void OnConnectError() = 0;
-  virtual void OnDisconnect() = 0;
+  virtual void ReceiveSocketData(nsAutoPtr<UnixSocketRawData>& aMessage,
+                                 BluetoothSocket* aSocket) = 0;
+  virtual void OnConnectSuccess(BluetoothSocket* aSocket) = 0;
+  virtual void OnConnectError(BluetoothSocket* aSocket) = 0;
+  virtual void OnDisconnect(BluetoothSocket* aSocket) = 0;
 };
 
 END_BLUETOOTH_NAMESPACE
