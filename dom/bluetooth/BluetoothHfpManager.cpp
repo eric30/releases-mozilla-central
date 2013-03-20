@@ -673,7 +673,8 @@ BluetoothHfpManager::HandleShutdown()
 
 // Virtual function of class SocketConsumer
 void
-BluetoothHfpManager::ReceiveSocketData(nsAutoPtr<UnixSocketRawData>& aMessage)
+BluetoothHfpManager::ReceiveSocketData(nsAutoPtr<UnixSocketRawData>& aMessage,
+                                       BluetoothSocket* aSocket)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -1311,7 +1312,7 @@ BluetoothHfpManager::HandleCallStateChanged(uint32_t aCallIndex,
 }
 
 void
-BluetoothHfpManager::OnConnectSuccess()
+BluetoothHfpManager::OnConnectSuccess(BluetoothSocket* aSocket)
 {
   nsCOMPtr<nsITelephonyProvider> provider =
     do_GetService(NS_RILCONTENTHELPER_CONTRACTID);
@@ -1336,7 +1337,7 @@ BluetoothHfpManager::OnConnectSuccess()
 }
 
 void
-BluetoothHfpManager::OnConnectError()
+BluetoothHfpManager::OnConnectError(BluetoothSocket* aSocket)
 {
   // For active connection request, we need to reply the DOMRequest
   if (mRunnable) {
@@ -1353,7 +1354,7 @@ BluetoothHfpManager::OnConnectError()
 }
 
 void
-BluetoothHfpManager::OnDisconnect()
+BluetoothHfpManager::OnDisconnect(BluetoothSocket* aSocket)
 {
   // When we close a connected socket, then restart listening again and
   // notify Settings app.

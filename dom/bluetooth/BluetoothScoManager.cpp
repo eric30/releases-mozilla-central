@@ -175,7 +175,8 @@ BluetoothScoManager::Get()
 
 // Virtual function of class SocketConsumer
 void
-BluetoothScoManager::ReceiveSocketData(nsAutoPtr<UnixSocketRawData>& aMessage)
+BluetoothScoManager::ReceiveSocketData(nsAutoPtr<UnixSocketRawData>& aMessage, 
+                                       BluetoothSocket* aSocket)
 {
   // SCO socket do nothing here
   MOZ_NOT_REACHED("This should never be called!");
@@ -257,7 +258,7 @@ BluetoothScoManager::Disconnect()
 }
 
 void
-BluetoothScoManager::OnConnectSuccess()
+BluetoothScoManager::OnConnectSuccess(BluetoothSocket* aSocket)
 {
   nsString address;
   mSocket->GetAddress(address);
@@ -267,7 +268,7 @@ BluetoothScoManager::OnConnectSuccess()
 }
 
 void
-BluetoothScoManager::OnConnectError()
+BluetoothScoManager::OnConnectError(BluetoothSocket* aSocket)
 {
   mSocket->Disconnect();
   mSocketStatus = mSocket->GetConnectionStatus();
@@ -275,7 +276,7 @@ BluetoothScoManager::OnConnectError()
 }
 
 void
-BluetoothScoManager::OnDisconnect()
+BluetoothScoManager::OnDisconnect(BluetoothSocket* aSocket)
 {
   if (mSocketStatus == SocketConnectionStatus::SOCKET_CONNECTED) {
     Listen();

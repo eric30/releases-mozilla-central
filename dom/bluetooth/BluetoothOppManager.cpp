@@ -925,7 +925,8 @@ BluetoothOppManager::ClientDataHandler(UnixSocketRawData* aMessage)
 
 // Virtual function of class SocketConsumer
 void
-BluetoothOppManager::ReceiveSocketData(nsAutoPtr<UnixSocketRawData>& aMessage)
+BluetoothOppManager::ReceiveSocketData(nsAutoPtr<UnixSocketRawData>& aMessage,
+                                       BluetoothSocket* aSocket)
 {
   if (mLastCommand) {
     ClientDataHandler(aMessage);
@@ -1299,7 +1300,7 @@ BluetoothOppManager::ReceivingFileConfirmation()
 }
 
 void
-BluetoothOppManager::OnConnectSuccess()
+BluetoothOppManager::OnConnectSuccess(BluetoothSocket* aSocket)
 {
   if (mRunnable) {
     BluetoothReply* reply = new BluetoothReply(BluetoothReplySuccess(true));
@@ -1317,7 +1318,7 @@ BluetoothOppManager::OnConnectSuccess()
 }
 
 void
-BluetoothOppManager::OnConnectError()
+BluetoothOppManager::OnConnectError(BluetoothSocket* aSocket)
 {
   if (mRunnable) {
     nsString errorStr;
@@ -1336,7 +1337,7 @@ BluetoothOppManager::OnConnectError()
 }
 
 void
-BluetoothOppManager::OnDisconnect()
+BluetoothOppManager::OnDisconnect(BluetoothSocket* aSocket)
 {
   /**
    * It is valid for a bluetooth device which is transfering file via OPP
