@@ -458,16 +458,12 @@ UnixSocketImpl::Accept()
     }
 
     if (bind(mFd.get(), (struct sockaddr*)&mAddr, mAddrSize)) {
-#ifdef DEBUG
       LOG("...bind(%d) gave errno %d", mFd.get(), errno);
-#endif
       return;
     }
 
     if (listen(mFd.get(), 1)) {
-#ifdef DEBUG
       LOG("...listen(%d) gave errno %d", mFd.get(), errno);
-#endif
       return;
     }
 
@@ -504,9 +500,7 @@ UnixSocketImpl::Connect()
   ret = connect(mFd.get(), (struct sockaddr*)&mAddr, mAddrSize);
 
   if (ret) {
-#if DEBUG
     LOG("Socket connect errno=%d\n", errno);
-#endif
     mFd.reset(-1);
     nsRefPtr<OnSocketEventTask> t =
       new OnSocketEventTask(this, OnSocketEventTask::CONNECT_ERROR);
@@ -666,9 +660,11 @@ UnixSocketImpl::OnFileCanReadWithoutBlocking(int aFd)
   }
 
   if (status == SOCKET_LISTENING) {
+    LOG("Start listening [Event loop]");
     int client_fd = accept(mFd.get(), (struct sockaddr*)&mAddr, &mAddrSize);
 
     if (client_fd < 0) {
+      LOG("terrible");
       return;
     }
 
@@ -760,6 +756,7 @@ UnixSocketConsumer::NotifySuccess()
 {
   MOZ_ASSERT(NS_IsMainThread());
   mConnectionStatus = SOCKET_CONNECTED;
+  LOG("[NotifySuccess] SOCKET_CONNECTED");
   OnConnectSuccess();
 }
 
@@ -768,6 +765,7 @@ UnixSocketConsumer::NotifyError()
 {
   MOZ_ASSERT(NS_IsMainThread());
   mConnectionStatus = SOCKET_DISCONNECTED;
+  LOG("[NotifyError] SOCKET_DISCONNECTED");
   OnConnectError();
 }
 
@@ -776,6 +774,7 @@ UnixSocketConsumer::NotifyDisconnect()
 {
   MOZ_ASSERT(NS_IsMainThread());
   mConnectionStatus = SOCKET_DISCONNECTED;
+  LOG("[NotifyDisconnect] SOCKET_DISCONNECTED");
   OnDisconnect();
 }
 
@@ -798,6 +797,7 @@ UnixSocketConsumer::ConnectSocket(UnixSocketConnector* aConnector,
   mImpl = new UnixSocketImpl(this, connector.forget(), addr);
   MessageLoop* ioLoop = XRE_GetIOMessageLoop();
   mConnectionStatus = SOCKET_CONNECTING;
+  LOG("[ConnectSocket] SOCKET_CONNECTING");
   if (aDelayMs > 0) {
     ioLoop->PostDelayedTask(FROM_HERE, new SocketConnectTask(mImpl), aDelayMs);
   } else {
@@ -821,6 +821,7 @@ UnixSocketConsumer::ListenSocket(UnixSocketConnector* aConnector)
 
   mImpl = new UnixSocketImpl(this, connector.forget(), EmptyCString());
   mConnectionStatus = SOCKET_LISTENING;
+  LOG("[ListenSocket] SOCKET_LISTENING");
   XRE_GetIOMessageLoop()->PostTask(FROM_HERE,
                                    new SocketAcceptTask(mImpl));
   return true;
