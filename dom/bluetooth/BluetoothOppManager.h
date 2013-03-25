@@ -35,8 +35,10 @@ public:
 
   ~BluetoothOppManager();
   static BluetoothOppManager* Get();
-  void ClientDataHandler(mozilla::ipc::UnixSocketRawData* aMessage);
-  void ServerDataHandler(mozilla::ipc::UnixSocketRawData* aMessage);
+  void ClientDataHandler(mozilla::ipc::UnixSocketRawData* aMessage,
+                         BluetoothSocket* aSocket);
+  void ServerDataHandler(mozilla::ipc::UnixSocketRawData* aMessage,
+                         BluetoothSocket* aSocket);
 
   /*
    * If a application wnats to send a file, first, it needs to
@@ -56,14 +58,14 @@ public:
 
   bool SendFile(BlobParent* aBlob);
   bool StopSendingFile();
-  bool ConfirmReceivingFile(bool aConfirm);
+  bool ConfirmReceivingFile(const nsAString& aDeviceAddress, bool aConfirm);
 
-  void SendConnectRequest();
-  void SendPutHeaderRequest(const nsAString& aFileName, int aFileSize);
-  void SendPutRequest(uint8_t* aFileBody, int aFileBodyLength);
-  void SendPutFinalRequest();
-  void SendDisconnectRequest();
-  void SendAbortRequest();
+  void SendConnectRequest(BluetoothSocket* aSocket);
+  void SendPutHeaderRequest(BluetoothSocket* aSocket, const nsAString& aFileName, int aFileSize);
+  void SendPutRequest(BluetoothSocket* aSocket, uint8_t* aFileBody, int aFileBodyLength);
+  void SendPutFinalRequest(BluetoothSocket* aSocket);
+  void SendDisconnectRequest(BluetoothSocket* aSocket);
+  void SendAbortRequest(BluetoothSocket* aSocket);
 
   void ExtractPacketHeaders(const ObexHeaderSet& aHeader);
   bool ExtractBlobHeaders();
@@ -89,9 +91,9 @@ private:
   bool CreateFile();
   bool WriteToFile(const uint8_t* aData, int aDataLength);
   void DeleteReceivedFile();
-  void ReplyToConnect();
-  void ReplyToDisconnect();
-  void ReplyToPut(bool aFinal, bool aContinue);
+  void ReplyToConnect(BluetoothSocket* aSocket);
+  void ReplyToDisconnect(BluetoothSocket* aSocket);
+  void ReplyToPut(BluetoothSocket* aSocket, bool aFinal, bool aContinue);
   void AfterOppConnected();
   void AfterFirstPut();
   void AfterOppDisconnected();
@@ -177,7 +179,11 @@ private:
 
   nsRefPtr<BluetoothReplyRunnable> mRunnable;
   nsRefPtr<DeviceStorageFile> mDsFile;
-  RefPtr<BluetoothSocket> mSocket;
+
+  RefPtr<BluetoothSocket> mRfcommServerSocket;
+  RefPtr<BluetoothSocket> mL2capServerSocket;
+
+  nsTArray<nsRefPtr<BluetoothSocket> > mConnectedSockets;
 };
 
 END_BLUETOOTH_NAMESPACE

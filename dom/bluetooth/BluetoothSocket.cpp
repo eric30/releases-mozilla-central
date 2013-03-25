@@ -19,10 +19,12 @@ BluetoothSocket::BluetoothSocket(BluetoothSocketType aType,
   , mObserver(aObserver)
 {
   MOZ_ASSERT(aObserver);
+  BT_LOG("[BluetoothSocket] ctor");
 }
 
 BluetoothSocket::~BluetoothSocket()
 {
+  BT_LOG("[BluetoothSocket] dtor");
 }
 
 bool
