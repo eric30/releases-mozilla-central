@@ -56,7 +56,7 @@ public:
   void Disconnect();
   bool Listen();
 
-  bool SendFile(BlobParent* aBlob);
+  bool SendFile(const nsAString& aDeviceAddress, BlobParent* aBlob);
   bool StopSendingFile();
   bool ConfirmReceivingFile(const nsAString& aDeviceAddress, bool aConfirm);
 
@@ -68,7 +68,7 @@ public:
   void SendAbortRequest(BluetoothSocket* aSocket);
 
   void ExtractPacketHeaders(const ObexHeaderSet& aHeader);
-  bool ExtractBlobHeaders();
+  bool ExtractBlobHeaders(BluetoothSocket* aSocket);
   nsresult HandleShutdown();
 
   // Return true if there is an ongoing file-transfer session, please see
