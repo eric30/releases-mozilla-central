@@ -39,6 +39,7 @@ using namespace mozilla::ipc;
 USING_BLUETOOTH_NAMESPACE
 
 static const int RFCOMM_SO_SNDBUF = 70 * 1024; // 70 KB send buffer
+static const int L2CAP_MAX_MTU = 65000;
 
 static
 int get_bdaddr(const char *str, bdaddr_t *ba)
@@ -82,6 +83,7 @@ BluetoothUnixSocketConnector::SetUp(int aFd)
     lm |= mEncrypt ? RFCOMM_LM_ENCRYPT : 0;
     break;
   case BluetoothSocketType::L2CAP:
+  case BluetoothSocketType::EL2CAP:
     lm |= mAuth ? L2CAP_LM_AUTH : 0;
     lm |= mEncrypt ? L2CAP_LM_ENCRYPT : 0;
     break;
@@ -92,9 +94,19 @@ BluetoothUnixSocketConnector::SetUp(int aFd)
   }
 
   if (lm) {
-    if (setsockopt(aFd, SOL_RFCOMM, RFCOMM_LM, &lm, sizeof(lm))) {
-      NS_WARNING("setsockopt(RFCOMM_LM) failed, throwing");
-      return false;
+    if (mType == BluetoothSocketType::RFCOMM) {
+      if (setsockopt(aFd, SOL_RFCOMM, RFCOMM_LM, &lm, sizeof(lm))) {
+        BT_LOG("setsockopt(RFCOMM_LM) failed, throwing");
+        //close(fd);
+        return false;
+      }
+    } else if (mType == BluetoothSocketType::L2CAP ||
+        mType == BluetoothSocketType::EL2CAP) {
+      if (setsockopt(aFd, SOL_L2CAP, L2CAP_LM, &lm, sizeof(lm))) {
+        BT_LOG("setsockopt(L2CAP_LM) failed, throwing");
+        //close(fd);
+        return false;
+      }
     }
   }
 
@@ -103,6 +115,26 @@ BluetoothUnixSocketConnector::SetUp(int aFd)
     if (setsockopt(aFd, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf))) {
       NS_WARNING("setsockopt(SO_SNDBUF) failed, throwing");
       return false;
+    }
+  } else if (mType == BluetoothSocketType::L2CAP ||
+             mType == BluetoothSocketType::EL2CAP) {
+    struct l2cap_options opts;
+    int optlen = sizeof(opts), err;
+    err = getsockopt(aFd, SOL_L2CAP, L2CAP_OPTIONS, &opts, &optlen);
+    if (!err) {
+      /* setting MTU for [E]L2CAP */
+      opts.omtu = opts.imtu = L2CAP_MAX_MTU;
+
+      /* Enable ERTM for [E]L2CAP */
+      if (mType == BluetoothSocketType::EL2CAP) {
+        opts.flush_to = 0xffff; /* infinite */
+        opts.mode = L2CAP_MODE_ERTM;
+        opts.fcs = 1;
+        opts.txwin_size = 64;
+        opts.max_tx = 10;
+      }
+
+      err = setsockopt(aFd, SOL_L2CAP, L2CAP_OPTIONS, &opts, optlen);
     }
   }
 
@@ -125,6 +157,9 @@ BluetoothUnixSocketConnector::Create()
   case BluetoothSocketType::L2CAP:
     fd = socket(PF_BLUETOOTH, SOCK_SEQPACKET, BTPROTO_L2CAP);
     break;
+  case BluetoothSocketType::EL2CAP:
+    fd = socket(PF_BLUETOOTH, SOCK_STREAM, BTPROTO_L2CAP);
+    break;
   default:
     MOZ_NOT_REACHED();
   }
@@ -136,7 +171,9 @@ BluetoothUnixSocketConnector::Create()
 
   if (!SetUp(fd)) {
     NS_WARNING("Could not set up socket!");
+    return -1;
   }
+
   return fd;
 }
 
@@ -156,6 +193,9 @@ BluetoothUnixSocketConnector::CreateAddr(bool aIsServer,
     }
   }
 
+  // Initialize
+  memset(&aAddr, 0, sizeof(aAddr));
+
   switch (mType) {
   case BluetoothSocketType::RFCOMM:
     struct sockaddr_rc addr_rc;
@@ -163,6 +203,14 @@ BluetoothUnixSocketConnector::CreateAddr(bool aIsServer,
     aAddr.rc.rc_family = AF_BLUETOOTH;
     aAddr.rc.rc_channel = mChannel;
     memcpy(&aAddr.rc.rc_bdaddr, &bd_address_obj, sizeof(bd_address_obj));
+    break;
+  case BluetoothSocketType::L2CAP:
+  case BluetoothSocketType::EL2CAP:
+    struct sockaddr_l2 addr_l2;
+    aAddrSize = sizeof(addr_l2);
+    aAddr.l2.l2_family = AF_BLUETOOTH;
+    aAddr.l2.l2_psm = mChannel;
+    memcpy(&aAddr.l2.l2_bdaddr, &bd_address_obj, sizeof(bdaddr_t));
     break;
   case BluetoothSocketType::SCO:
     struct sockaddr_sco addr_sco;
@@ -188,6 +236,10 @@ BluetoothUnixSocketConnector::GetSocketAddr(const sockaddr_any& aAddr,
     break;
   case BluetoothSocketType::SCO:
     get_bdaddr_as_string((bdaddr_t*)(&aAddr.sco.sco_bdaddr), addr);
+    break;
+  case BluetoothSocketType::L2CAP:
+  case BluetoothSocketType::EL2CAP:
+    get_bdaddr_as_string((bdaddr_t*)(&aAddr.l2.l2_bdaddr), addr);
     break;
   default:
     MOZ_NOT_REACHED("Socket should be either RFCOMM or SCO!");

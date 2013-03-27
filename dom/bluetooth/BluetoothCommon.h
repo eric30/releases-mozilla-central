@@ -58,7 +58,8 @@ BEGIN_BLUETOOTH_NAMESPACE
 enum BluetoothSocketType {
   RFCOMM = 1,
   SCO = 2,
-  L2CAP = 3
+  L2CAP = 3,
+  EL2CAP = 4
 };
 
 class BluetoothSignal;

@@ -310,7 +310,7 @@ BluetoothOppManager::Listen()
   mRfcommServerSocket = new BluetoothSocket(BluetoothSocketType::RFCOMM,
                                             true, true, this);
 
-  mL2capServerSocket = new BluetoothSocket(BluetoothSocketType::L2CAP,
+  mL2capServerSocket = new BluetoothSocket(BluetoothSocketType::EL2CAP,
                                            true, true, this);
 
   if (!mRfcommServerSocket->Listen(BluetoothReservedChannels::CHANNEL_OPUSH)) {
@@ -318,7 +318,7 @@ BluetoothOppManager::Listen()
     return false;
   }
 
-  if (!mL2capServerSocket->Listen(BluetoothReservedChannels::CHANNEL_OPUSH)) {
+  if (!mL2capServerSocket->Listen(BluetoothReservedChannels::CHANNEL_OPUSH_L2CAP)) {
     BT_LOG("[OPP] Can't listen to L2CAP socket!");
     return false;
   }
@@ -1348,9 +1348,9 @@ BluetoothOppManager::OnConnectSuccess(BluetoothSocket* aSocket)
       BT_LOG("[OPP RFC] Listen on socket successfully");
     }
   } else if (aSocket == mL2capServerSocket) {
-    mL2capServerSocket = new BluetoothSocket(BluetoothSocketType::L2CAP,
+    mL2capServerSocket = new BluetoothSocket(BluetoothSocketType::EL2CAP,
                                              true, true, this);
-    if (!mL2capServerSocket->Listen(BluetoothReservedChannels::CHANNEL_OPUSH)) {
+    if (!mL2capServerSocket->Listen(BluetoothReservedChannels::CHANNEL_OPUSH_L2CAP)) {
       BT_LOG("[OPP L2CAP] Can't listen on socket!");
     } else {
       BT_LOG("[OPP L2CAP] Listen on socket successfully");

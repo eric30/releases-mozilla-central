@@ -13,6 +13,7 @@
 #include <sys/un.h>
 #ifdef MOZ_B2G_BT
 #include <bluetooth/bluetooth.h>
+#include <bluetooth/l2cap.h>
 #include <bluetooth/sco.h>
 #include <bluetooth/rfcomm.h>
 #endif
@@ -32,6 +33,7 @@ union sockaddr_any {
 #ifdef MOZ_B2G_BT
   sockaddr_sco sco;
   sockaddr_rc rc;
+  sockaddr_l2 l2;
 #endif
   // ... others
 };
