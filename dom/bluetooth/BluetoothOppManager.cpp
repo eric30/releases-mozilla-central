@@ -235,10 +235,6 @@ BluetoothOppManager::BluetoothOppManager() : mConnected(false)
                                            , mWaitingForConfirmationFlag(false)
 {
   mConnectedDeviceAddress.AssignLiteral(BLUETOOTH_ADDRESS_NONE);
-
- // mRfcommServerSocket =
- //   new BluetoothSocket(BluetoothSocketType::RFCOMM,
- //                       true, true, this);
 }
 
 BluetoothOppManager::~BluetoothOppManager()
@@ -311,12 +307,19 @@ BluetoothOppManager::Listen()
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  mRfcommServerSocket =
-    new BluetoothSocket(BluetoothSocketType::RFCOMM,
-                        true, true, this);
+  mRfcommServerSocket = new BluetoothSocket(BluetoothSocketType::RFCOMM,
+                                            true, true, this);
+
+  mL2capServerSocket = new BluetoothSocket(BluetoothSocketType::L2CAP,
+                                           true, true, this);
 
   if (!mRfcommServerSocket->Listen(BluetoothReservedChannels::CHANNEL_OPUSH)) {
-    BT_LOG("[OPP] Can't listen on socket!");
+    BT_LOG("[OPP] Can't listen to RFCOMM socket!");
+    return false;
+  }
+
+  if (!mL2capServerSocket->Listen(BluetoothReservedChannels::CHANNEL_OPUSH)) {
+    BT_LOG("[OPP] Can't listen to L2CAP socket!");
     return false;
   }
 
@@ -1333,16 +1336,24 @@ BluetoothOppManager::OnConnectSuccess(BluetoothSocket* aSocket)
 
   // Cache device address since we can't get socket address when a remote
   // device disconnect with us.
-  mRfcommServerSocket->GetAddress(mConnectedDeviceAddress);
+  aSocket->GetAddress(mConnectedDeviceAddress);
+  mConnectedSockets.AppendElement(aSocket);
 
   if (aSocket == mRfcommServerSocket) {
-    mConnectedSockets.AppendElement(mRfcommServerSocket);
     mRfcommServerSocket = new BluetoothSocket(BluetoothSocketType::RFCOMM,
                                               true, true, this);
     if (!mRfcommServerSocket->Listen(BluetoothReservedChannels::CHANNEL_OPUSH)) {
-      BT_LOG("[OPP] Can't listen on socket!");
+      BT_LOG("[OPP RFC] Can't listen on socket!");
     } else {
-      BT_LOG("[OPP] Listen on socket successfully");
+      BT_LOG("[OPP RFC] Listen on socket successfully");
+    }
+  } else if (aSocket == mL2capServerSocket) {
+    mL2capServerSocket = new BluetoothSocket(BluetoothSocketType::L2CAP,
+                                             true, true, this);
+    if (!mL2capServerSocket->Listen(BluetoothReservedChannels::CHANNEL_OPUSH)) {
+      BT_LOG("[OPP L2CAP] Can't listen on socket!");
+    } else {
+      BT_LOG("[OPP L2CAP] Listen on socket successfully");
     }
   }
 }
@@ -1378,7 +1389,8 @@ BluetoothOppManager::OnDisconnect(BluetoothSocket* aSocket)
    * and notify the transfer has been completed (but failed). We also call
    * AfterOppDisconnected here to ensure all variables will be cleaned.
    */
-//  if (mSocketStatus == BluetoothSocketState::CONNECTED) {
+
+  if (aSocket != mRfcommServerSocket && aSocket != mL2capServerSocket) {
     if (mTransferMode) {
       if (!mSuccessFlag) {
         DeleteReceivedFile();
@@ -1396,11 +1408,7 @@ BluetoothOppManager::OnDisconnect(BluetoothSocket* aSocket)
     if (!mSuccessFlag) {
       FileTransferComplete();
     }
-
-//    Listen();
-//  } else if (mSocketStatus == BluetoothSocketState::CONNECTING) {
-//    NS_WARNING("BluetoothOppManager got unexpected socket status!");
-//  }
+  }
 
   AfterOppDisconnected();
   mConnectedDeviceAddress.AssignLiteral(BLUETOOTH_ADDRESS_NONE);
