@@ -31,9 +31,4 @@ interface nsIDOMTelephony : nsIDOMEventTarget
 
   [implicit_jscontext] attribute jsval onincoming;
   [implicit_jscontext] attribute jsval oncallschanged;
-
-  // UICC SE API
-  nsIDOMDOMRequest iccOpenChannel(in DOMString aid);
-  nsIDOMDOMRequest iccExchangeAPDU(in long channel, in jsval apdu);
-  nsIDOMDOMRequest iccCloseChannel(in long channel);
 };
