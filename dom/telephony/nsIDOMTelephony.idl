@@ -8,7 +8,6 @@
 
 interface nsIDOMEventListener;
 interface nsIDOMTelephonyCall;
-interface nsIDOMDOMRequest;
 
 [scriptable, builtinclass, uuid(ec253100-630d-4366-ac77-b67525167960)]
 interface nsIDOMTelephony : nsIDOMEventTarget
