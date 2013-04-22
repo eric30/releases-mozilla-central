@@ -9,11 +9,20 @@
 [scriptable, builtinclass, uuid(c2c01a50-4779-11e1-b86c-0800200c9a66)]
 interface nsIDOMNfc : nsIDOMEventTarget {
 
-  [implicit_jscontext] attribute jsval onndefdiscovered;
-  [implicit_jscontext] attribute jsval onndefdisconnected;
-  [implicit_jscontext] attribute jsval onsecureelementactivated;
-  [implicit_jscontext] attribute jsval onsecureelementdeactivated;
-  [implicit_jscontext] attribute jsval onsecureelementtransaction;
+  [implicit_jscontext]
+  attribute jsval onndefdiscovered;
+
+  [implicit_jscontext]
+  attribute jsval onndefdisconnected;
+
+  [implicit_jscontext]
+  attribute jsval onsecureelementactivated;
+
+  [implicit_jscontext]
+  attribute jsval onsecureelementdeactivated;
+
+  [implicit_jscontext]
+  attribute jsval onsecureelementtransaction;
 
   [implicit_jscontext]
   boolean validateNdefTag(in jsval records);

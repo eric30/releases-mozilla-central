@@ -242,11 +242,11 @@ NfcContentHelper.prototype = {
       records[i].id = atob(records[i].id);
       records[i].payload = atob(records[i].payload);
     }
-    this._deliverCallback("_nfcCallbacks", "ndefDiscovered", [JSON.stringify(records)]);
+    this._deliverCallback("_nfcCallbacks", "ndefDiscovered", [records]);
   },
 
   handleNdefDisconnected: function handleNdefDisconnected(message) {
-    this._deliverCallback("_nfcCallbacks", "ndefDisconnected", [JSON.stringify(message)]);
+    this._deliverCallback("_nfcCallbacks", "ndefDisconnected", [message]);
   },
 
   handleRequestStatus: function handleRequestStatus(message) {
@@ -261,15 +261,15 @@ NfcContentHelper.prototype = {
   },
 
   handleSecureElementActivated: function handleSecureElementActivated(message) {
-    this._deliverCallback("_nfcCallbacks", "secureElementActivated", [JSON.stringify(message)]);
+    this._deliverCallback("_nfcCallbacks", "secureElementActivated", [message]);
   },
 
   handleSecureElementDeactivated: function handleSecureElementDeactivated(message) {
-    this._deliverCallback("_nfcCallbacks", "secureElementDeactivated", [JSON.stringify(message)]);
+    this._deliverCallback("_nfcCallbacks", "secureElementDeactivated", [message]);
   },
 
   handleSecureElementTransaction: function handleSecureElementTransaction(message) {
-    this._deliverCallback("_nfcCallbacks", "secureElementTransaction", [JSON.stringify(message)]);
+    this._deliverCallback("_nfcCallbacks", "secureElementTransaction", [message]);
   },
 
   _deliverCallback: function _deliverCallback(callbackType, name, args) {
