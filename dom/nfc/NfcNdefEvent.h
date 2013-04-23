@@ -18,7 +18,7 @@ namespace nfc {
 class NfcNdefEvent : public nsDOMEvent,
                      public nsIDOMNfcNdefEvent
 {
-  nsString mNdefMessages;
+  const nsString mNdefMessages;
 
 public:
   NS_DECL_ISUPPORTS_INHERITED
