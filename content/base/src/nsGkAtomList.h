@@ -726,8 +726,10 @@ GK_ATOM(onkeyup, "onkeyup")
 GK_ATOM(onlevelchange, "onlevelchange")
 GK_ATOM(onLoad, "onLoad")
 GK_ATOM(onload, "onload")
+#ifdef MOZ_B2G_NFC
 GK_ATOM(onndefdiscovered, "onndefdiscovered")
 GK_ATOM(onndefdisconnected, "onndefdisconnected")
+#endif
 GK_ATOM(onpopstate, "onpopstate")
 GK_ATOM(only, "only")               // this one is not an event
 GK_ATOM(onmessage, "onmessage")

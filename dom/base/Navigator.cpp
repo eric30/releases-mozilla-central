@@ -1405,13 +1405,6 @@ Navigator::GetMozBluetooth(nsIDOMBluetoothManager** aBluetooth)
 //*****************************************************************************
 //    nsNavigator::nsIDOMNavigatorNfc
 //*****************************************************************************
-#if defined(NFC_DEBUG)
-#include <android/log.h>
-#define LOG(args...)  __android_log_print(ANDROID_LOG_INFO, "Gonk NFC", args)
-#else
-#include <android/log.h>
-#define LOG(args...)  __android_log_print(ANDROID_LOG_INFO, "Gonk NFC", args)
-#endif
 NS_IMETHODIMP
 Navigator::GetMozNfc(nsIDOMNfc** aNfc)
 {
@@ -1425,7 +1418,7 @@ Navigator::GetMozNfc(nsIDOMNfc** aNfc)
       return NS_OK;
     }
 
-    LOG("NFC, create: ");
+    NS_WARNING("NFC, create: ");
     nsresult rv = NS_NewNfc(window, getter_AddRefs(mNfc));
     NS_ENSURE_SUCCESS(rv, rv);
 
