@@ -8,7 +8,5 @@ interface nsIDOMNfc;
 
 [scriptable, uuid(c5814d20-4dcf-11e1-b86c-0800200c9a66)]
 interface nsIDOMNavigatorNfc : nsISupports {
-
   readonly attribute nsIDOMNfc mozNfc;
-
 };
