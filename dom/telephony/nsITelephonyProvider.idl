@@ -4,8 +4,6 @@
 
 #include "nsISupports.idl"
 
-interface nsIDOMDOMRequest;
-
 [scriptable, uuid(2ab9abfe-09fb-4fea-985f-acf29fc7376a)]
 interface nsITelephonyListener : nsISupports
 {
