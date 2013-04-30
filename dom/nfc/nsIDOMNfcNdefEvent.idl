@@ -7,6 +7,9 @@
 [scriptable, builtinclass, uuid(41fcd640-4dd4-11e1-b86c-0800200c9a66)]
 interface nsIDOMNfcNdefEvent : nsIDOMEvent
 {
+  /**
+   * An NdefMessage is an array of NdefRecords.
+   */
   [implicit_jscontext]
   readonly attribute jsval ndefMessages;
 };
