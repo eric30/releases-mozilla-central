@@ -1113,7 +1113,7 @@ static nsDOMClassInfoData sClassInfoData[] = {
                            EVENTTARGET_SCRIPTABLE_FLAGS)
   NS_DEFINE_CLASSINFO_DATA(NfcNdefEvent, nsDOMGenericSH,
                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
-  NS_DEFINE_CLASSINFO_DATA(MozNdefRecord, nsDOMGenericSH,
+  NS_DEFINE_CLASSINFO_DATA(NdefRecord, nsDOMGenericSH,
                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
 #endif
 
@@ -1224,7 +1224,7 @@ static const nsConstructorFuncMapData kConstructorFuncMap[] =
   NS_DEFINE_CONSTRUCTOR_FUNC_DATA(FileReader, FileReaderCtor)
   NS_DEFINE_CONSTRUCTOR_FUNC_DATA(XSLTProcessor, XSLTProcessorCtor)
 #ifdef MOZ_B2G_NFC
-  NS_DEFINE_CONSTRUCTOR_FUNC_DATA(MozNdefRecord, nfc::NdefRecord::NewNdefRecord)
+  NS_DEFINE_CONSTRUCTOR_FUNC_DATA(NdefRecord, nfc::NdefRecord::NewNdefRecord)
 #endif
 };
 #undef NS_DEFINE_CONSTRUCTOR_FUNC_DATA
@@ -2795,8 +2795,8 @@ nsDOMClassInfo::Init()
     DOM_CLASSINFO_MAP_ENTRY(nsIDOMEvent)
   DOM_CLASSINFO_MAP_END
 
-  DOM_CLASSINFO_MAP_BEGIN(MozNdefRecord, nsIDOMMozNdefRecord)
-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMMozNdefRecord)
+  DOM_CLASSINFO_MAP_BEGIN(NdefRecord, nsIDOMNdefRecord)
+    DOM_CLASSINFO_MAP_ENTRY(nsIDOMNdefRecord)
   DOM_CLASSINFO_MAP_END
 #endif
 

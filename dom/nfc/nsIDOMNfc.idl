@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsIDOMEventTarget.idl"
-#include "nsIDOMMozNdefRecord.idl"
+#include "nsIDOMNdefRecord.idl"
 #include "nsIDOMDOMRequest.idl"
 
 [scriptable, builtinclass, uuid(c2c01a50-4779-11e1-b86c-0800200c9a66)]

@@ -6,23 +6,15 @@
 #include "NdefRecord.h"
 #include "nsIDOMClassInfo.h"
 
-#if defined(MOZ_WIDGET_GONK)
-#include <android/log.h>
-#define LOG(args...)  __android_log_print(ANDROID_LOG_INFO, "Gonk", args)
-#else
-#define LOG(args...)
-#endif
-
-
 using namespace mozilla::dom::nfc;
 
-DOMCI_DATA(MozNdefRecord, NdefRecord)
+DOMCI_DATA(NdefRecord, NdefRecord)
 
 NS_INTERFACE_MAP_BEGIN(NdefRecord)
-  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDOMMozNdefRecord)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMMozNdefRecord)
+  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDOMNdefRecord)
+  NS_INTERFACE_MAP_ENTRY(nsIDOMNdefRecord)
   NS_INTERFACE_MAP_ENTRY(nsIJSNativeInitializer)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(MozNdefRecord)
+  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(NdefRecord)
 NS_INTERFACE_MAP_END
 
 NS_IMPL_ADDREF(NdefRecord)
@@ -112,7 +104,6 @@ NdefRecord::Initialize(nsISupports* aOwner,
 NS_IMETHODIMP
 NdefRecord::GetTnf(PRUint8* aTnf)
 {
-  LOG("DOM NdefRecord.GetTnf");
   *aTnf = tnf;
   return NS_OK;
 }
@@ -120,7 +111,6 @@ NdefRecord::GetTnf(PRUint8* aTnf)
 NS_IMETHODIMP
 NdefRecord::GetType(nsAString& aType)
 {
-  LOG("DOM NdefRecord.GetType");
   aType = type;
   return NS_OK;
 }
@@ -128,7 +118,6 @@ NdefRecord::GetType(nsAString& aType)
 NS_IMETHODIMP
 NdefRecord::GetId(nsAString& aId)
 {
-  LOG("DOM NdefRecord.GetId");
   aId = id;
   return NS_OK;
 }
@@ -136,7 +125,6 @@ NdefRecord::GetId(nsAString& aId)
 NS_IMETHODIMP
 NdefRecord::GetPayload(JS::Value* aPayload)
 {
-  LOG("DOM NdefRecord.GetPayload");
   *aPayload = payload;
   return NS_OK;
 }

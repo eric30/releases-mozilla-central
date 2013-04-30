@@ -23,14 +23,6 @@
 
 using namespace mozilla::dom::nfc;
 
-#if defined(NFC_DEBUG)
-#include <android/log.h>
-#define LOG(args...)  __android_log_print(ANDROID_LOG_INFO, "Gonk NFC", args)
-#else
-#include <android/log.h>
-#define LOG(args...)  __android_log_print(ANDROID_LOG_INFO, "Gonk NFC", args)
-#endif
-
 nsNfc::nsNfc()
 {
 }
@@ -148,7 +140,7 @@ nsNfc::ValidateNdefTag(const JS::Value& aRecords, JSContext* aCx, bool* result)
   JSObject &obj = aRecords.toObject();
   // Check if array
   if (!JS_IsArrayObject(aCx, &obj)) {
-    LOG("error: MozNdefRecord object array is required.");
+    NS_WARNING("error: NdefRecord object array is required.");
     *result = false;
     return NS_OK;
   }
@@ -166,7 +158,7 @@ nsNfc::ValidateNdefTag(const JS::Value& aRecords, JSContext* aCx, bool* result)
   }
 
   // Check object type (by name), (TODO: by signature)
-  const char *ndefRecordName = "MozNdefRecord";
+  const char *ndefRecordName = "NdefRecord";
   for (uint32_t index = 0; index < length; index++) {
     JS::Value val;
     uint32_t namelen;
@@ -174,7 +166,7 @@ nsNfc::ValidateNdefTag(const JS::Value& aRecords, JSContext* aCx, bool* result)
       const char *name = JS_GetClass(JSVAL_TO_OBJECT(val))->name;
       namelen = strlen(name);
       if (strncmp(ndefRecordName, name, namelen)) {
-        LOG("error: WriteNdefTag requires MozNdefRecord array item(s). Item[%d] is type: (%s)", index, name);
+        NS_WARNING("error: WriteNdefTag requires NdefRecord array item(s).");
         *result = false;
         return NS_OK;
       }
@@ -189,17 +181,16 @@ nsNfc::WriteNdefTag(const JS::Value& aRecords, JSContext* aCx, nsIDOMDOMRequest*
 {
   bool isValid;
 
-  // First parameter needs to be an array, and of type MozNdefRecord
+  // First parameter needs to be an array, and of type NdefRecord
   if (ValidateNdefTag(aRecords, aCx, &isValid) != NS_OK) {
     if (!isValid) {
-      LOG("Error: WriteNdefTag requires an MozNdefRecord array type.");
+      NS_WARNING("Error: WriteNdefTag requires an NdefRecord array type.");
       return NS_ERROR_INVALID_ARG;
     }
   }
 
   // Call to NfcContentHelper.js
   *aRequest = nullptr;
-  LOG("Calling WriteNdefTag");
   nsresult rv = mNfc->WriteNdefTag(GetOwner(), aRecords, aRequest);
   NS_ENSURE_SUCCESS(rv, rv);
   return NS_OK;
@@ -210,17 +201,16 @@ nsNfc::NdefPush(const JS::Value& aRecords, JSContext* aCx, nsIDOMDOMRequest** aR
 {
   bool isValid;
 
-  // First parameter needs to be an array, and of type MozNdefRecord
+  // First parameter needs to be an array, and of type NdefRecord
   if (ValidateNdefTag(aRecords, aCx, &isValid) != NS_OK) {
     if (!isValid) {
-      LOG("Error: WriteNdefTag requires an MozNdefRecord array type.");
+      NS_WARNING("Error: WriteNdefTag requires an NdefRecord array type.");
       return NS_ERROR_INVALID_ARG;
     }
   }
 
   // Call to NfcContentHelper.js
   *aRequest = nullptr;
-  LOG("Calling NdefPush");
   nsresult rv = mNfc->NdefPush(GetOwner(), aRecords, aRequest);
   NS_ENSURE_SUCCESS(rv, rv);
   return NS_OK;

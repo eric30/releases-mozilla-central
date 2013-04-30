@@ -294,7 +294,7 @@ DOMCI_CLASS(BluetoothDevice)
 #ifdef MOZ_B2G_NFC
 DOMCI_CLASS(Nfc)
 DOMCI_CLASS(NfcNdefEvent)
-DOMCI_CLASS(MozNdefRecord)
+DOMCI_CLASS(NdefRecord)
 #endif
 
 DOMCI_CLASS(CameraManager)

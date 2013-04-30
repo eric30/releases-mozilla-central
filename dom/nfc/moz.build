@@ -9,5 +9,5 @@ if CONFIG['MOZ_B2G_NFC']:
         'nsIDOMNfcNdefEvent.idl',
         'nsIDOMNavigatorNfc.idl',
         'nsIDOMNfc.idl',
-        'nsIDOMMozNdefRecord.idl',
+        'nsIDOMNdefRecord.idl',
     ]

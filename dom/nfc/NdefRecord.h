@@ -9,7 +9,7 @@
 #include "mozilla/Attributes.h"
 #include "nsString.h"
 #include "jsapi.h"
-#include "nsIDOMMozNdefRecord.h"
+#include "nsIDOMNdefRecord.h"
 #include "nsIJSNativeInitializer.h"
 
 namespace mozilla {
@@ -19,12 +19,12 @@ namespace nfc {
 /**
  *
  */
-class NdefRecord MOZ_FINAL : public nsIDOMMozNdefRecord,
+class NdefRecord MOZ_FINAL : public nsIDOMNdefRecord,
                              public nsIJSNativeInitializer
 {
 public:
   NS_DECL_ISUPPORTS
-  NS_DECL_NSIDOMMOZNDEFRECORD
+  NS_DECL_NSIDOMNDEFRECORD
 
   NdefRecord();
   static nsresult NewNdefRecord(nsISupports* *aNewRecord);
