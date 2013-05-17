@@ -17,6 +17,8 @@ public:
   virtual void OnGetServiceChannel(const nsAString& aDeviceAddress,
                                    const nsAString& aServiceUuid,
                                    int aChannel) = 0;
+
+  virtual void OnUpdateSdpRecords(const nsAString& aDeviceAddress) = 0;
 };
 
 END_BLUETOOTH_NAMESPACE

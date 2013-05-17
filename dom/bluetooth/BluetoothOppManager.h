@@ -52,7 +52,7 @@ public:
    * either call Disconnect() to close RFCOMM connection or start another
    * file-sending thread via calling SendFile() again.
    */
-  void Connect(const nsAString& aDeviceObjectPath,
+  void Connect(const nsAString& aDeviceAddress,
                BluetoothReplyRunnable* aRunnable);
   void Disconnect();
   bool Listen();
@@ -88,6 +88,7 @@ public:
   virtual void OnGetServiceChannel(const nsAString& aDeviceAddress,
                                    const nsAString& aServiceUuid,
                                    int aChannel) MOZ_OVERRIDE;
+  virtual void OnUpdateSdpRecords(const nsAString& aDeviceAddress) MOZ_OVERRIDE;
 
 private:
   BluetoothOppManager();
@@ -137,6 +138,7 @@ private:
   int mBodySegmentLength;
   int mReceivedDataBufferOffset;
   int mUpdateProgressCounter;
+  int mUpdateSdpRecordsTicket;
 
   /**
    * Set when StopSendingFile() is called.

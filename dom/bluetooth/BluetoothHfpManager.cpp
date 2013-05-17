@@ -988,7 +988,7 @@ respond_with_ok:
 }
 
 void
-BluetoothHfpManager::Connect(const nsAString& aDevicePath,
+BluetoothHfpManager::Connect(const nsAString& aDeviceAddress,
                              const bool aIsHandsfree,
                              BluetoothReplyRunnable* aRunnable)
 {
@@ -996,6 +996,9 @@ BluetoothHfpManager::Connect(const nsAString& aDevicePath,
 
   NS_ENSURE_FALSE_VOID(gInShutdown);
   NS_ENSURE_FALSE_VOID(mSocket);
+
+  mUpdateSdpRecordsTicket = 1;
+  mIsHandsfree = aIsHandsfree;
 
   BluetoothService* bs = BluetoothService::Get();
   NS_ENSURE_TRUE_VOID(bs);
@@ -1007,10 +1010,12 @@ BluetoothHfpManager::Connect(const nsAString& aDevicePath,
     BluetoothUuidHelper::GetString(BluetoothServiceClass::HEADSET, uuid);
   }
 
-  if (NS_FAILED(bs->GetServiceChannel(aDevicePath, uuid, this))) {
+  mUpdateSdpRecordsTicket = 1;
+
+  if (NS_FAILED(bs->GetServiceChannel(aDeviceAddress, uuid, this))) {
     BluetoothValue v;
     DispatchBluetoothReply(aRunnable, v,
-                           NS_LITERAL_STRING("GetServiceChannelError"));
+                           NS_LITERAL_STRING("DeviceChannelRetrievalError"));
     return;
   }
 
@@ -1488,20 +1493,54 @@ BluetoothHfpManager::OnDisconnect(BluetoothSocket* aSocket)
 }
 
 void
+BluetoothHfpManager::OnUpdateSdpRecords(const nsAString& aDeviceAddress)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(!aDeviceAddress.IsEmpty());
+  MOZ_ASSERT(mRunnable);
+
+  BluetoothService* bs = BluetoothService::Get();
+  NS_ENSURE_TRUE_VOID(bs);
+
+  nsString uuid;
+  if (mIsHandsfree) {
+    BluetoothUuidHelper::GetString(BluetoothServiceClass::HANDSFREE, uuid);
+  } else {
+    BluetoothUuidHelper::GetString(BluetoothServiceClass::HEADSET, uuid);
+  }
+
+  if (NS_FAILED(bs->GetServiceChannel(aDeviceAddress, uuid, this))) {
+    BluetoothValue v;
+    DispatchBluetoothReply(mRunnable, v,
+                           NS_LITERAL_STRING("DeviceChannelRetrievalError"));
+    return;
+  }
+}
+
+void
 BluetoothHfpManager::OnGetServiceChannel(const nsAString& aDeviceAddress,
                                          const nsAString& aServiceUuid,
                                          int aChannel)
 {
   MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(!aDeviceAddress.IsEmpty());
   MOZ_ASSERT(mRunnable);
+
+  BluetoothService* bs = BluetoothService::Get();
+  NS_ENSURE_TRUE_VOID(bs);
 
   BluetoothValue v;
 
   if (aChannel < 0) {
-    DispatchBluetoothReply(mRunnable, v,
-                           NS_LITERAL_STRING("DeviceChannelRetrievalError"));
-    mSocket = nullptr;
-    Listen();
+    if (mUpdateSdpRecordsTicket-- > 0) {
+      bs->UpdateSdpRecords(aDeviceAddress, this);
+    } else {
+      DispatchBluetoothReply(mRunnable, v,
+                             NS_LITERAL_STRING("DeviceChannelRetrievalError"));
+      mSocket = nullptr;
+      Listen();
+    }
+
     return;
   }
 
