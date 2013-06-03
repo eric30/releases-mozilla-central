@@ -34,6 +34,7 @@ namespace mozilla {
 
 namespace ipc {
   class RilConsumer;
+  class NfcConsumer;
   class UnixSocketRawData;
 }
 
@@ -62,6 +63,7 @@ public:
   static bool SendRilRawData(unsigned long aClientId,
                              ipc::UnixSocketRawData* aRaw);
 
+  static bool SendNfcRawData(ipc::UnixSocketRawData* aRaw);
 #ifdef MOZ_B2G_NFC
   static bool IsNfcEnabled();
 #endif
@@ -88,6 +90,8 @@ private:
   nsCOMPtr<nsIWorkerHolder> mWifiWorker;
 
   nsTArray<nsRefPtr<ipc::RilConsumer> > mRilConsumers;
+
+  nsRefPtr<ipc::NfcConsumer> mNfcConsumer;
 
   bool mShutdown;
 };

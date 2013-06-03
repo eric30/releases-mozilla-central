@@ -96,7 +96,13 @@ if (!this.debug) {
 }
 
 function onNfcMessage(data) {
-  Nfc.processIncoming(data);
+  let nfcJsonStr = "";
+  // convert uint8 typed array to a string
+  for (var i=0; i<data.byteLength - 1; i++) {
+    nfcJsonStr += String.fromCharCode(data[i]);
+  }
+  debug("onNfcMessage: " + nfcJsonStr);
+  Nfc.processIncoming(nfcJsonStr);
 };
 
 onmessage = function onmessage(event) {

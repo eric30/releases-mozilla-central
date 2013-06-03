@@ -13,4 +13,7 @@ interface nsISystemWorkerManager : nsISupports
   [implicit_jscontext]
   void registerRilWorker(in unsigned long aClientId,
                          in jsval aWorker);
+
+ [implicit_jscontext]
+  void registerNfcWorker(in jsval aWorker);
 };

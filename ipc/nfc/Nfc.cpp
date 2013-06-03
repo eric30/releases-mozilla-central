@@ -5,26 +5,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include <fcntl.h>
-#include <unistd.h>
 #include <limits.h>
 #include <errno.h>
 
-#include <queue>
-
 #include <sys/socket.h>
 #include <sys/un.h>
-#include <sys/select.h>
-#include <sys/types.h>
-
-#include "base/eintr_wrapper.h"
-#include "base/message_loop.h"
-#include "mozilla/FileUtils.h"
-#include "mozilla/Monitor.h"
-#include "mozilla/Util.h"
-#include "nsAutoPtr.h"
-#include "nsIThread.h"
-#include "nsXULAppAPI.h"
-#include "Nfc.h"
 
 #undef LOG
 #if defined(MOZ_WIDGET_GONK)
@@ -34,394 +19,190 @@
 #define LOG(args...)  printf(args);
 #endif
 
-#define NFC_SOCKET_NAME "/dev/socket/nfcd"
+#include "jsfriendapi.h"
+#include "nsThreadUtils.h" // For NS_IsMainThread.
+#include "Nfc.h"
 
-using namespace base;
-using namespace std;
+USING_WORKERS_NAMESPACE
+using namespace mozilla::ipc;
+
+namespace {
+
+const char* NFC_SOCKET_NAME = "/dev/socket/nfcd";
 
 // Network port to connect to for adb forwarded sockets when doing
 // desktop development.
 const uint32_t NFCD_TEST_PORT = 6300;
 
+class DispatchNfcEvent : public WorkerTask
+{
+public:
+  DispatchNfcEvent(UnixSocketRawData* aMessage)
+      : mMessage(aMessage)
+    { }
+  virtual bool RunTask(JSContext *aCx);
+private:
+  nsAutoPtr<UnixSocketRawData> mMessage;
+};
+
+bool
+DispatchNfcEvent::RunTask(JSContext *aCx)
+{
+    JSObject *obj = JS_GetGlobalObject(aCx);
+    JSObject *array = JS_NewUint8Array(aCx, mMessage->mSize);
+    if (!array) {
+        return false;
+    }
+    memcpy(JS_GetArrayBufferViewData(array), mMessage->mData, mMessage->mSize);
+    jsval argv[] = { OBJECT_TO_JSVAL(array) };
+    return JS_CallFunctionName(aCx, obj, "onNfcMessage", NS_ARRAY_LENGTH(argv),
+                               argv, argv);
+}
+
+class NfcConnector : public mozilla::ipc::UnixSocketConnector
+{
+public:
+  virtual ~NfcConnector()
+  {}
+
+ virtual int Create();
+  virtual void CreateAddr(bool aIsServer,
+                          socklen_t& aAddrSize,
+                          struct sockaddr *aAddr,
+                          const char* aAddress);
+  virtual bool SetUp(int aFd);
+  virtual void GetSocketAddr(const sockaddr& aAddr,
+                             nsAString& aAddrStr);
+};
+
+int
+NfcConnector::Create()
+{
+    MOZ_ASSERT(!NS_IsMainThread());
+
+    int fd = -1;
+
+#if defined(MOZ_WIDGET_GONK)
+    fd = socket(AF_LOCAL, SOCK_STREAM, 0);
+#else
+    struct hostent *hp;
+
+    hp = gethostbyname("localhost");
+    if (hp) {
+        fd = socket(hp->h_addrtype, SOCK_STREAM, 0);
+    }
+#endif
+
+    if (fd < 0) {
+        NS_WARNING("Could not open Nfc socket!");
+        return -1;
+    }
+
+    if (!SetUp(fd)) {
+        NS_WARNING("Could not set up socket!");
+    }
+    return fd;
+}
+
+void
+NfcConnector::CreateAddr(bool aIsServer,
+                         socklen_t& aAddrSize,
+                         struct sockaddr *aAddr,
+                         const char* aAddress)
+{
+    // We never open Nfc socket as server.
+    MOZ_ASSERT(!aIsServer);
+
+#if defined(MOZ_WIDGET_GONK)
+    struct sockaddr_un addr_un;
+
+    memset(&addr_un, 0, sizeof(addr_un));
+    strcpy(addr_un.sun_path, aAddress);
+    addr_un.sun_family = AF_LOCAL;
+
+    aAddrSize = strlen(aAddress) + offsetof(struct sockaddr_un, sun_path) + 1;
+    memcpy(aAddr, &addr_un, aAddrSize);
+#else
+    struct hostent *hp;
+    struct sockaddr_in addr_in;
+
+    hp = gethostbyname("localhost");
+    if (!hp) {
+    memset(&addr_in, 0, sizeof(addr_in));
+    addr_in.sin_family = hp->h_addrtype;
+    addr_in.sin_port = htons(Nfc_TEST_PORT);
+    memcpy(&addr_in.sin_addr, hp->h_addr, hp->h_length);
+    aAddrSize = sizeof(addr_in);
+    memcpy(aAddr, &addr_in, aAddrSize);
+    }
+#endif
+}
+
+bool
+NfcConnector::SetUp(int aFd)
+{
+    // Nothing to do here.
+    return true;
+}
+
+void
+NfcConnector::GetSocketAddr(const sockaddr& aAddr,
+                            nsAString& aAddrStr)
+{
+    MOZ_NOT_REACHED("This should never be called!");
+}
+
+} // anonymous namespace
+
+
 namespace mozilla {
 namespace ipc {
 
-struct NfcClient : public RefCounted<NfcClient>,
-           public MessageLoopForIO::Watcher
-
+NfcConsumer::NfcConsumer(WorkerCrossThreadDispatcher* aDispatcher)
+    : mDispatcher(aDispatcher)
+    , mShutdown(false)
 {
-  typedef queue<NfcData*> NfcDataQueue;
-
-  NfcClient() : mSocket(-1)
-        , mMutex("NfcClient.mMutex")
-        , mBlockedOnWrite(false)
-        , mCurrentNfcData(NULL)
-        , mIOLoop(MessageLoopForIO::current())
-  { }
-  virtual ~NfcClient() { }
-
-  bool OpenSocket();
-
-  virtual void OnFileCanReadWithoutBlocking(int fd);
-  virtual void OnFileCanWriteWithoutBlocking(int fd);
-
-  ScopedClose mSocket;
-  MessageLoopForIO::FileDescriptorWatcher mReadWatcher;
-  MessageLoopForIO::FileDescriptorWatcher mWriteWatcher;
-  nsAutoPtr<NfcData> mIncoming;
-  Mutex mMutex;
-  NfcDataQueue mOutgoingQ;
-  bool mBlockedOnWrite;
-  nsAutoPtr<NfcData> mCurrentNfcData;
-  MessageLoopForIO* mIOLoop;
-  size_t mCurrentWriteOffset;
-};
-
-static RefPtr<NfcClient> sClient;
-static RefPtr<NfcConsumer> sConsumer;
-
-//-----------------------------------------------------------------------------
-// This code runs on the IO thread.
-//
-
-class NfcReconnectTask : public CancelableTask {
-  NfcReconnectTask() : mCanceled(false) { }
-
-  virtual void Run();
-  virtual void Cancel() { mCanceled = true; }
-
-  bool mCanceled;
-
-public:
-  static void Enqueue(int aDelayMs = 0) {
-    MessageLoopForIO* ioLoop = MessageLoopForIO::current();
-    MOZ_ASSERT(ioLoop && sClient->mIOLoop == ioLoop);
-    if (sTask) {
-      return;
-    }
-    sTask = new NfcReconnectTask();
-    if (aDelayMs) {
-      ioLoop->PostDelayedTask(FROM_HERE, sTask, aDelayMs);
-    } else {
-      ioLoop->PostTask(FROM_HERE, sTask);
-    }
-  }
-
-  static void CancelIt() {
-    if (!sTask) {
-      return;
-    }
-    sTask->Cancel();
-    sTask = nullptr;
-  }
-
-private:
-  // Can *ONLY* be touched by the IO thread.  The event queue owns
-  // this memory when pointer is nonnull; do *NOT* free it manually.
-  static CancelableTask* sTask;
-};
-CancelableTask* NfcReconnectTask::sTask;
-
-void NfcReconnectTask::Run() {
-  // NB: the order of these two statements is important!  sTask must
-  // always run, whether we've been canceled or not, to avoid
-  // leading a dangling pointer in sTask.
-  sTask = nullptr;
-  if (mCanceled) {
-    return;
-  }
-
-  if (sClient->OpenSocket()) {
-    return;
-  }
-  Enqueue(1000);
-}
-
-class NfcWriteTask : public Task {
-  virtual void Run();
-};
-
-void NfcWriteTask::Run() {
-  sClient->OnFileCanWriteWithoutBlocking(sClient->mSocket.rwget());
-}
-
-static void
-ConnectToNfc(Monitor* aMonitor, bool* aSuccess)
-{
-  MOZ_ASSERT(!sClient);
-
-  sClient = new NfcClient();
-  NfcReconnectTask::Enqueue();
-  *aSuccess = true;
-  {
-    MonitorAutoLock lock(*aMonitor);
-    lock.Notify();
-  }
-  // aMonitor may have gone out of scope by now, don't touch it
-}
-
-bool
-NfcClient::OpenSocket()
-{
-#if defined(MOZ_WIDGET_GONK)
-  // Using a network socket to test basic functionality
-  // before we see how this works on the phone.
-  struct sockaddr_un addr;
-  socklen_t alen;
-  memset(&addr, 0, sizeof(addr));
-  strcpy(addr.sun_path, NFC_SOCKET_NAME);
-  addr.sun_family = AF_LOCAL;
-  mSocket.reset(socket(AF_LOCAL, SOCK_STREAM, 0));
-  alen = strlen(NFC_SOCKET_NAME) + offsetof(struct sockaddr_un, sun_path) + 1;
-#else
-  struct hostent *hp;
-  struct sockaddr_in addr;
-  socklen_t alen;
-
-  hp = gethostbyname("localhost");
-  if (hp == 0) return false;
-
-  memset(&addr, 0, sizeof(addr));
-  addr.sin_family = hp->h_addrtype;
-  addr.sin_port = htons(NFCD_TEST_PORT);
-  memcpy(&addr.sin_addr, hp->h_addr, hp->h_length);
-  mSocket.mFd = socket(hp->h_addrtype, SOCK_STREAM, 0);
-  alen = sizeof(addr);
-#endif
-
-  if (mSocket.get() < 0) {
-    LOG("Cannot create socket for NFC!\n");
-    return false;
-  }
-
-  if (connect(mSocket.get(), (struct sockaddr *) &addr, alen) < 0) {
-#if defined(MOZ_WIDGET_GONK)
-    LOG("Cannot open socket for NFC!\n");
-#endif
-    mSocket.dispose();
-    return false;
-  }
-
-  // Set close-on-exec bit.
-  int flags = fcntl(mSocket.get(), F_GETFD);
-  if (-1 == flags) {
-    return false;
-  }
-
-  flags |= FD_CLOEXEC;
-  if (-1 == fcntl(mSocket.get(), F_SETFD, flags)) {
-    return false;
-  }
-
-  // Select non-blocking IO.
-  if (-1 == fcntl(mSocket.get(), F_SETFL, O_NONBLOCK)) {
-    return false;
-  }
-  if (!mIOLoop->WatchFileDescriptor(mSocket.get(),
-                    true,
-                    MessageLoopForIO::WATCH_READ,
-                    &mReadWatcher,
-                    this)) {
-    return false;
-  }
-  LOG("Socket open for NFC\n");
-  return true;
+    ConnectSocket(new NfcConnector(), NFC_SOCKET_NAME);
 }
 
 void
-NfcClient::OnFileCanReadWithoutBlocking(int fd)
+NfcConsumer::Shutdown()
 {
-  // Keep reading data until either
-  //
-  //   - mIncoming is completely read
-  //   If so, sConsumer->MessageReceived(mIncoming.forget())
-  //
-  //   - mIncoming isn't completely read, but there's no more
-  //   data available on the socket
-  //   If so, break;
-
-  MOZ_ASSERT(fd == mSocket.get());
-
-  size_t byteCount, read_offset;
-  while (true) {
-    if (!mIncoming) {
-      mIncoming = new NfcData();
-      mIncoming->json = NULL;
-
-      ssize_t ret = read(fd, &byteCount, sizeof(size_t));
-      if (ret <= 0) {
-        LOG("Cannot read from network, error %ld\n", ret);
-        goto clean_and_return;
-      }
-      LOG("Reading %d bytes long message", byteCount);
-
-      mIncoming->json = (char *) malloc(byteCount);
-
-      // Read until we reach the byte count
-      read_offset = 0;
-      while(read_offset < byteCount) {
-        int ret = read(fd, mIncoming->json + read_offset,
-                 byteCount - read_offset);
-        if (ret < 0) {
-        LOG("Cannot read from network, error %d (errno: %d)\n", ret, errno);
-        goto clean_and_return;
-        } else {
-        read_offset += ret;
-        }
-      }
-
-      sConsumer->MessageReceived(mIncoming.forget());
-      return;
-    }
-  }
-
-clean_and_return:
-  // At this point, assume that we can't actually access
-  // the socket anymore, and start a reconnect loop.
-  mIncoming.forget();
-  mReadWatcher.StopWatchingFileDescriptor();
-  mWriteWatcher.StopWatchingFileDescriptor();
-  close(mSocket.get());
-  NfcReconnectTask::Enqueue();
-  return;
+    mShutdown = true;
+    CloseSocket();
 }
 
 void
-NfcClient::OnFileCanWriteWithoutBlocking(int fd)
+NfcConsumer::ReceiveSocketData(nsAutoPtr<UnixSocketRawData>& aMessage)
 {
-  // Try to write the bytes of mCurrentNfcData.  If all were written, continue.
-  //
-  // Otherwise, save the byte position of the next byte to write
-  // within mCurrentNfcData, and request another write when the
-  // system won't block.
-  //
-
-  MOZ_ASSERT(fd == mSocket.get());
-
-  while (!mOutgoingQ.empty() || mCurrentNfcData != NULL) {
-    if(!mCurrentNfcData) {
-      mCurrentNfcData = mOutgoingQ.front();
-      mOutgoingQ.pop();
-      mCurrentWriteOffset = 0;
-    }
-    char *toWrite = mCurrentNfcData->json;
-    size_t write_amount = strlen(toWrite) + 1;
-
-    LOG("Writing %d bytes to nfcd (%s)\n", write_amount, toWrite);
-    ssize_t written = write (fd, &write_amount, sizeof(size_t));
-    if(written < 0) {
-        LOG("Cannot write to network, error %ld\n", written);
-        goto clean_and_return;
-    }
-
-    while (mCurrentWriteOffset < write_amount) {
-        written = write (fd, toWrite + mCurrentWriteOffset,
-                     write_amount - mCurrentWriteOffset);
-      if(written < 0) {
-        LOG("Cannot write to network, error %ld\n", written);
-        goto clean_and_return;
-      } else {
-        mCurrentWriteOffset += written;
-      }
-    }
-
-    if(mCurrentWriteOffset != write_amount) {
-      MessageLoopForIO::current()->WatchFileDescriptor(
-        fd,
-        false,
-        MessageLoopForIO::WATCH_WRITE,
-        &mWriteWatcher,
-        this);
-      goto clean_and_return;
-    }
-    free(mCurrentNfcData->json);
-    mCurrentNfcData = NULL;
-  }
-  return;
-
-clean_and_return:
-  free(mCurrentNfcData->json);
-  mCurrentNfcData = NULL;
-  return;
-}
-
-
-static void
-DisconnectFromNfc(Monitor* aMonitor)
-{
-  // Prevent stale reconnect tasks from being run after we've shut
-  // down.
-  NfcReconnectTask::CancelIt();
-  // XXX This might "strand" messages in the outgoing queue.  We'll
-  // assume that's OK for now.
-  sClient = nullptr;
-  {
-    MonitorAutoLock lock(*aMonitor);
-    lock.Notify();
-  }
-}
-
-//-----------------------------------------------------------------------------
-// This code runs on any thread.
-//
-
-bool
-StartNfc(NfcConsumer* aConsumer)
-{
-  MOZ_ASSERT(aConsumer);
-  sConsumer = aConsumer;
-
-  Monitor monitor("StartNfc.monitor");
-  bool success;
-  {
-    MonitorAutoLock lock(monitor);
-
-    XRE_GetIOMessageLoop()->PostTask(
-      FROM_HERE,
-      NewRunnableFunction(ConnectToNfc, &monitor, &success));
-
-    lock.Wait();
-  }
-
-  return success;
-}
-
-bool
-SendNfcData(NfcData** aMessage)
-{
-  if (!sClient) {
-    return false;
-  }
-
-  NfcData *msg = *aMessage;
-  *aMessage = nullptr;
-
-  {
-    MutexAutoLock lock(sClient->mMutex);
-    sClient->mOutgoingQ.push(msg);
-  }
-  sClient->mIOLoop->PostTask(FROM_HERE, new NfcWriteTask());
-
-  return true;
+    MOZ_ASSERT(NS_IsMainThread());
+    LOG("ReceiveSocketData\n");
+    nsRefPtr<DispatchNfcEvent> dre(new DispatchNfcEvent(aMessage.forget()));
+    mDispatcher->PostTask(dre);
 }
 
 void
-StopNfc()
+NfcConsumer::OnConnectSuccess()
 {
-  Monitor monitor("StopNfc.monitor");
-  {
-    MonitorAutoLock lock(monitor);
-
-    XRE_GetIOMessageLoop()->PostTask(
-      FROM_HERE,
-      NewRunnableFunction(DisconnectFromNfc, &monitor));
-
-    lock.Wait();
-  }
-
-  sConsumer = nullptr;
+    // Nothing to do here.
+    LOG("Socket open for Nfc\n");
 }
 
+void
+NfcConsumer::OnConnectError()
+{
+    LOG("%s\n", __FUNCTION__);
+    CloseSocket();
+}
+
+void
+NfcConsumer::OnDisconnect()
+{
+    LOG("%s\n", __FUNCTION__);
+    if (!mShutdown) {
+        ConnectSocket(new NfcConnector(), NFC_SOCKET_NAME, 1000);
+    }
+}
 
 } // namespace ipc
 } // namespace mozilla
