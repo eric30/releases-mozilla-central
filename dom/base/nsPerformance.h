@@ -11,6 +11,7 @@
 #include "mozilla/Attributes.h"
 #include "nsWrapperCache.h"
 #include "nsDOMNavigationTiming.h"
+#include "nsContentUtils.h"
 
 class nsIURI;
 class nsITimedChannel;
@@ -35,25 +36,44 @@ public:
     return mPerformance;
   }
 
-  JSObject* WrapObject(JSContext *cx, JSObject *scope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext *cx,
+                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
   // PerformanceNavigation WebIDL methods
   DOMTimeMilliSec NavigationStart() const {
+    if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+      return 0;
+    }
     return GetDOMTiming()->GetNavigationStart();
   }
   DOMTimeMilliSec UnloadEventStart() {
+    if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+      return 0;
+    }
     return GetDOMTiming()->GetUnloadEventStart();
   }
   DOMTimeMilliSec UnloadEventEnd() {
+    if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+      return 0;
+    }
     return GetDOMTiming()->GetUnloadEventEnd();
   }
   DOMTimeMilliSec RedirectStart() {
+    if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+      return 0;
+    }
     return GetDOMTiming()->GetRedirectStart();
   }
   DOMTimeMilliSec RedirectEnd() {
+    if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+      return 0;
+    }
     return GetDOMTiming()->GetRedirectEnd();
   }
   DOMTimeMilliSec FetchStart() const {
+    if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+      return 0;
+    }
     return GetDOMTiming()->GetFetchStart();
   }
   DOMTimeMilliSec DomainLookupStart() const;
@@ -64,24 +84,45 @@ public:
   DOMTimeMilliSec ResponseStart() const;
   DOMTimeMilliSec ResponseEnd() const;
   DOMTimeMilliSec DomLoading() const {
+    if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+      return 0;
+    }
     return GetDOMTiming()->GetDomLoading();
   }
   DOMTimeMilliSec DomInteractive() const {
+    if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+      return 0;
+    }
     return GetDOMTiming()->GetDomInteractive();
   }
   DOMTimeMilliSec DomContentLoadedEventStart() const {
+    if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+      return 0;
+    }
     return GetDOMTiming()->GetDomContentLoadedEventStart();
   }
   DOMTimeMilliSec DomContentLoadedEventEnd() const {
+    if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+      return 0;
+    }
     return GetDOMTiming()->GetDomContentLoadedEventEnd();
   }
   DOMTimeMilliSec DomComplete() const {
+    if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+      return 0;
+    }
     return GetDOMTiming()->GetDomComplete();
   }
   DOMTimeMilliSec LoadEventStart() const {
+    if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+      return 0;
+    }
     return GetDOMTiming()->GetLoadEventStart();
   }
   DOMTimeMilliSec LoadEventEnd() const {
+    if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+      return 0;
+    }
     return GetDOMTiming()->GetLoadEventEnd();
   }
 
@@ -106,7 +147,8 @@ public:
     return mPerformance;
   }
 
-  JSObject* WrapObject(JSContext *cx, JSObject *scope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext *cx,
+                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
   // PerformanceNavigation WebIDL methods
   uint16_t Type() const {
@@ -148,7 +190,8 @@ public:
     return mWindow.get();
   }
 
-  JSObject* WrapObject(JSContext *cx, JSObject *scope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext *cx,
+                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
   // Performance WebIDL methods
   DOMHighResTimeStamp Now();

@@ -19,6 +19,10 @@ const Cr = Components.results;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "DownloadPaths",
+                                  "resource://gre/modules/DownloadPaths.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "DownloadIntegration",
+                                  "resource://gre/modules/DownloadIntegration.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Downloads",
                                   "resource://gre/modules/Downloads.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
@@ -33,6 +37,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "Services",
                                   "resource://gre/modules/Services.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Task",
                                   "resource://gre/modules/Task.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "OS",
+                                  "resource://gre/modules/osfile.jsm");
 
 const ServerSocket = Components.Constructor(
                                 "@mozilla.org/network/server-socket;1",
@@ -45,6 +51,7 @@ const HTTP_BASE = "http://localhost:" + HTTP_SERVER_PORT;
 const FAKE_SERVER_PORT = 4445;
 const FAKE_BASE = "http://localhost:" + FAKE_SERVER_PORT;
 
+const TEST_REFERRER_URI = NetUtil.newURI(HTTP_BASE + "/referrer.html");
 const TEST_SOURCE_URI = NetUtil.newURI(HTTP_BASE + "/source.txt");
 const TEST_EMPTY_URI = NetUtil.newURI(HTTP_BASE + "/empty.txt");
 const TEST_FAKE_SOURCE_URI = NetUtil.newURI(FAKE_BASE + "/source.txt");
@@ -71,26 +78,42 @@ function run_test()
 ////////////////////////////////////////////////////////////////////////////////
 //// Support functions
 
+// While the previous test file should have deleted all the temporary files it
+// used, on Windows these might still be pending deletion on the physical file
+// system.  Thus, start from a new base number every time, to make a collision
+// with a file that is still pending deletion highly unlikely.
+let gFileCounter = Math.floor(Math.random() * 1000000);
+
 /**
- * Returns a reference to a temporary file.  The file is deleted if it already
- * exists.  If the file is then created by the test suite, it will be removed
- * when tests in this file finish.
+ * Returns a reference to a temporary file, that is guaranteed not to exist, and
+ * to have never been created before.
+ *
+ * @param aLeafName
+ *        Suggested leaf name for the file to be created.
+ *
+ * @return nsIFile pointing to a non-existent file in a temporary directory.
+ *
+ * @note It is not enough to delete the file if it exists, or to delete the file
+ *       after calling nsIFile.createUnique, because on Windows the delete
+ *       operation in the file system may still be pending, preventing a new
+ *       file with the same name to be created.
  */
 function getTempFile(aLeafName)
 {
-  let file = FileUtils.getFile("TmpD", [aLeafName]);
-  function GTF_removeFile()
-  {
+  // Prepend a serial number to the extension in the suggested leaf name.
+  let [base, ext] = DownloadPaths.splitBaseNameAndExtension(aLeafName);
+  let leafName = base + "-" + gFileCounter + ext;
+  gFileCounter++;
+
+  // Get a file reference under the temporary directory for this test file.
+  let file = FileUtils.getFile("TmpD", [leafName]);
+  do_check_false(file.exists());
+
+  do_register_cleanup(function () {
     if (file.exists()) {
       file.remove(false);
     }
-  }
-
-  // Remove the file in case a previous test created it.
-  GTF_removeFile();
-
-  // Remove the file at the end of the test suite.
-  do_register_cleanup(GTF_removeFile);
+  });
 
   return file;
 }
@@ -110,8 +133,21 @@ function promiseExecuteSoon()
 }
 
 /**
- * Creates a new Download object, using TEST_TARGET_FILE_NAME as the target.
- * The target is deleted by getTempFile when this function is called.
+ * Waits for a pending events to be processed after a timeout.
+ *
+ * @return {Promise}
+ * @resolves When pending events have been processed.
+ * @rejects Never.
+ */
+function promiseTimeout(aTime)
+{
+  let deferred = Promise.defer();
+  do_timeout(aTime, deferred.resolve);
+  return deferred.promise;
+}
+
+/**
+ * Creates a new Download object, setting a temporary file as the target.
  *
  * @param aSourceURI
  *        The nsIURI for the download source, or null to use TEST_SOURCE_URI.
@@ -277,6 +313,16 @@ function registerInterruptibleHandler(aPath, aFirstPartFn, aSecondPartFn)
       do_print("Interruptible request aborted.");
     });
   });
+}
+
+/**
+ * Ensure the given date object is valid.
+ *
+ * @param aDate
+ *        The date object to be checked. This value can be null.
+ */
+function isValidDate(aDate) {
+  return aDate && aDate.getTime && !isNaN(aDate.getTime());
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -3,6 +3,13 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 var url = require("sdk/url");
+var { Loader } = require("sdk/test/loader");
+var { pathFor } = require("sdk/system");
+var file = require("sdk/io/file");
+var loader = Loader(module);
+var httpd = loader.require("sdk/test/httpd");
+var port = 8099;
+var tabs = require("sdk/tabs");
 
 exports.testResolve = function(test) {
   test.assertEqual(url.URL("bar", "http://www.foo.com/").toString(),
@@ -33,12 +40,49 @@ exports.testResolve = function(test) {
 };
 
 exports.testParseHttp = function(test) {
-  var info = url.URL("http://foo.com/bar");
+  var aUrl = "http://sub.foo.com/bar?locale=en-US&otherArg=%20x%20#myhash"; 
+  var info = url.URL(aUrl);
   test.assertEqual(info.scheme, "http");
-  test.assertEqual(info.host, "foo.com");
+  test.assertEqual(info.protocol, "http:");
+  test.assertEqual(info.host, "sub.foo.com");
+  test.assertEqual(info.hostname, "sub.foo.com");
   test.assertEqual(info.port, null);
   test.assertEqual(info.userPass, null);
-  test.assertEqual(info.path, "/bar");
+  test.assertEqual(info.path, "/bar?locale=en-US&otherArg=%20x%20#myhash");
+  test.assertEqual(info.pathname, "/bar");
+  test.assertEqual(info.href, aUrl);
+  test.assertEqual(info.hash, "#myhash");
+  test.assertEqual(info.search, "?locale=en-US&otherArg=%20x%20");
+};
+
+exports.testParseHttpSearchAndHash = function (test) {
+  var info = url.URL("https://www.moz.com/some/page.html");
+  test.assertEqual(info.hash, "");
+  test.assertEqual(info.search, "");
+  
+  var hashOnly = url.URL("https://www.sub.moz.com/page.html#justhash");
+  test.assertEqual(hashOnly.search, "");
+  test.assertEqual(hashOnly.hash, "#justhash");
+  
+  var queryOnly = url.URL("https://www.sub.moz.com/page.html?my=query");
+  test.assertEqual(queryOnly.search, "?my=query");
+  test.assertEqual(queryOnly.hash, "");
+
+  var qMark = url.URL("http://www.moz.org?");
+  test.assertEqual(qMark.search, "");
+  test.assertEqual(qMark.hash, "");
+  
+  var hash = url.URL("http://www.moz.org#");
+  test.assertEqual(hash.search, "");
+  test.assertEqual(hash.hash, "");
+  
+  var empty = url.URL("http://www.moz.org?#");
+  test.assertEqual(hash.search, "");
+  test.assertEqual(hash.hash, "");
+
+  var strange = url.URL("http://moz.org?test1#test2?test3");
+  test.assertEqual(strange.search, "?test1");
+  test.assertEqual(strange.hash, "#test2?test3");
 };
 
 exports.testParseHttpWithPort = function(test) {
@@ -163,10 +207,12 @@ exports.testStringInterface = function(test) {
   var a = URL(EM);
 
   // make sure the standard URL properties are enumerable and not the String interface bits
-  test.assertEqual(Object.keys(a), "scheme,userPass,host,port,path", "enumerable key list check for URL.");
+  test.assertEqual(Object.keys(a),
+    "scheme,userPass,host,hostname,port,path,pathname,hash,href,origin,protocol,search",
+    "enumerable key list check for URL.");
   test.assertEqual(
       JSON.stringify(a),
-      "{\"scheme\":\"about\",\"userPass\":null,\"host\":null,\"port\":null,\"path\":\"addons\"}",
+      "{\"scheme\":\"about\",\"userPass\":null,\"host\":null,\"hostname\":null,\"port\":null,\"path\":\"addons\",\"pathname\":\"addons\",\"hash\":\"\",\"href\":\"about:addons\",\"origin\":\"about:\",\"protocol\":\"about:\",\"search\":\"\"}",
       "JSON.stringify should return a object with correct props and vals.");
 
   // make sure that the String interface exists and works as expected
@@ -242,3 +288,173 @@ exports.testDataURLparseBase64 = function (test) {
 
   test.assertEqual(dataURL.toString(), "data:text/plain;base64," + encodeURIComponent(b64text));
 }
+
+exports.testIsValidURI = function (test) {
+  validURIs().forEach(function (aUri) {
+    test.assertEqual(url.isValidURI(aUri), true, aUri + ' is a valid URL');
+  });
+};
+
+exports.testIsInvalidURI = function (test) {
+  invalidURIs().forEach(function (aUri) {
+    test.assertEqual(url.isValidURI(aUri), false, aUri + ' is an invalid URL');
+  });
+};
+
+exports.testURLFromURL = function(test) {
+  let aURL = url.URL('http://mozilla.org');
+  let bURL = url.URL(aURL);
+  test.assertEqual(aURL.toString(), bURL.toString(), 'Making a URL from a URL works');
+};
+
+exports.testTLD = function(test) {
+  let urls = [
+    { url: 'http://my.sub.domains.mozilla.co.uk', tld: 'co.uk' },
+    { url: 'http://my.mozilla.com', tld: 'com' },
+    { url: 'http://my.domains.mozilla.org.hk', tld: 'org.hk' },
+    { url: 'chrome://global/content/blah', tld: 'global' },
+    { url: 'data:text/plain;base64,QXdlc29tZSE=', tld: null },
+    { url: 'https://1.2.3.4', tld: null }
+  ];
+
+  urls.forEach(function (uri) {
+    test.assertEqual(url.getTLD(uri.url), uri.tld);
+    test.assertEqual(url.getTLD(url.URL(uri.url)), uri.tld);
+  });
+}
+
+exports.testWindowLocationMatch = function (test) {
+  let srv = serve();
+  let aUrl = 'http://localhost:' + port + '/index.html?q=aQuery#somehash';
+  let urlObject = url.URL(aUrl);
+  test.waitUntilDone();
+
+  tabs.open({
+    url: aUrl,
+    onReady: function (tab) {
+      tab.attach({
+        onMessage: function (loc) {
+          for (let prop in loc) {
+            test.assertEqual(urlObject[prop], loc[prop], prop + ' matches');
+          }
+          tab.close();
+          srv.stop(test.done.bind(test));
+        },
+        contentScript: '(' + function () {
+          let res = {};
+          // `origin` is `null` in this context???
+          let props = 'hostname,port,pathname,hash,href,protocol,search'.split(',');
+          props.forEach(function (prop) {
+            res[prop] = window.location[prop];
+          });
+          self.postMessage(res);
+        } + ')()'
+      });
+    }
+  })
+};
+
+function validURIs() {
+  return [
+  'http://foo.com/blah_blah',
+  'http://foo.com/blah_blah/',
+  'http://foo.com/blah_blah_(wikipedia)',
+  'http://foo.com/blah_blah_(wikipedia)_(again)',
+  'http://www.example.com/wpstyle/?p=364',
+  'https://www.example.com/foo/?bar=baz&amp;inga=42&amp;quux',
+  'http://✪df.ws/123',
+  'http://userid:password@example.com:8080',
+  'http://userid:password@example.com:8080/',
+  'http://userid@example.com',
+  'http://userid@example.com/',
+  'http://userid@example.com:8080',
+  'http://userid@example.com:8080/',
+  'http://userid:password@example.com',
+  'http://userid:password@example.com/',
+  'http://142.42.1.1/',
+  'http://142.42.1.1:8080/',
+  'http://➡.ws/䨹',
+  'http://⌘.ws',
+  'http://⌘.ws/',
+  'http://foo.com/blah_(wikipedia)#cite-1',
+  'http://foo.com/blah_(wikipedia)_blah#cite-1',
+  'http://foo.com/unicode_(✪)_in_parens',
+  'http://foo.com/(something)?after=parens',
+  'http://☺.damowmow.com/',
+  'http://code.google.com/events/#&amp;product=browser',
+  'http://j.mp',
+  'ftp://foo.bar/baz',
+  'http://foo.bar/?q=Test%20URL-encoded%20stuff',
+  'http://مثال.إختبار',
+  'http://例子.测试',
+  'http://उदाहरण.परीक्षा',
+  'http://-.~_!$&amp;\'()*+,;=:%40:80%2f::::::@example.com',
+  'http://1337.net',
+  'http://a.b-c.de',
+  'http://223.255.255.254',
+  // Also want to validate data-uris, localhost
+  'http://localhost:8432/some-file.js',
+  'data:text/plain;base64,',
+  'data:text/html;charset=US-ASCII,%3Ch1%3EHello!%3C%2Fh1%3E',
+  'data:text/html;charset=utf-8,'
+  ];
+}
+
+// Some invalidURIs are valid according to the regex used,
+// can be improved in the future, but better to pass some
+// invalid URLs than prevent valid URLs
+
+function invalidURIs () {
+  return [
+//  'http://',
+//  'http://.',
+//  'http://..',
+//  'http://../',
+//  'http://?',
+//  'http://??',
+//  'http://??/',
+//  'http://#',
+//  'http://##',
+//  'http://##/',
+//  'http://foo.bar?q=Spaces should be encoded',
+  'not a url',
+  '//',
+  '//a',
+  '///a',
+  '///',
+//  'http:///a',
+  'foo.com',
+  'http:// shouldfail.com',
+  ':// should fail',
+//  'http://foo.bar/foo(bar)baz quux',
+//  'http://-error-.invalid/',
+//  'http://a.b--c.de/',
+//  'http://-a.b.co',
+//  'http://a.b-.co',
+//  'http://0.0.0.0',
+//  'http://10.1.1.0',
+//  'http://10.1.1.255',
+//  'http://224.1.1.1',
+//  'http://1.1.1.1.1',
+//  'http://123.123.123',
+//  'http://3628126748',
+//  'http://.www.foo.bar/',
+//  'http://www.foo.bar./',
+//  'http://.www.foo.bar./',
+//  'http://10.1.1.1',
+//  'http://10.1.1.254'
+  ];
+}
+
+function serve () {
+  let basePath = pathFor("ProfD");
+  let filePath = file.join(basePath, 'index.html');
+  let content = "<html><head></head><body><h1>url tests</h1></body></html>";
+  let fileStream = file.open(filePath, 'w');
+  fileStream.write(content);
+  fileStream.close();
+
+  let srv = httpd.startServerAsync(port, basePath);
+  return srv;
+}
+

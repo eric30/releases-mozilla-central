@@ -33,8 +33,10 @@ public:
   nsDOMStringMap(nsGenericHTMLElement* aElement);
 
   // WebIDL API
-  virtual JSObject* WrapObject(JSContext *cx, JSObject *scope) MOZ_OVERRIDE;
-  void NamedGetter(const nsAString& aProp, bool& found, nsString& aResult) const;
+  virtual JSObject* WrapObject(JSContext *cx,
+                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
+  void NamedGetter(const nsAString& aProp, bool& found,
+                   mozilla::dom::DOMString& aResult) const;
   void NamedSetter(const nsAString& aProp, const nsAString& aValue,
                    mozilla::ErrorResult& rv);
   void NamedDeleter(const nsAString& aProp, bool &found);
@@ -47,8 +49,8 @@ protected:
   nsRefPtr<nsGenericHTMLElement> mElement;
   // Flag to guard against infinite recursion.
   bool mRemovingProp;
-  static bool DataPropToAttr(const nsAString& aProp, nsAString& aResult);
-  static bool AttrToDataProp(const nsAString& aAttr, nsAString& aResult);
+  static bool DataPropToAttr(const nsAString& aProp, nsAutoString& aResult);
+  static bool AttrToDataProp(const nsAString& aAttr, nsAutoString& aResult);
 };
 
 #endif

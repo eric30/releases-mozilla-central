@@ -29,6 +29,12 @@ class nsHttpPipeline;
 
 class nsIHttpUpgradeListener;
 
+namespace mozilla {
+namespace net {
+class EventTokenBucket;
+}
+}
+
 //-----------------------------------------------------------------------------
 
 class nsHttpConnectionMgr : public nsIObserver
@@ -92,8 +98,9 @@ public:
     nsresult PruneDeadConnections();
 
     // Close all idle persistent connections and prevent any active connections
-    // from being reused.
-    nsresult ClosePersistentConnections();
+    // from being reused. Optional connection info resets CI specific
+    // information such as Happy Eyeballs history.
+    nsresult DoShiftReloadConnectionCleanup(nsHttpConnectionInfo *);
 
     // called to get a reference to the socket transport service.  the socket
     // transport service is not available when the connection manager is down.
@@ -108,7 +115,7 @@ public:
     nsresult SpeculativeConnect(nsHttpConnectionInfo *,
                                 nsIInterfaceRequestor *);
 
-    // called when a connection is done processing a transaction.  if the 
+    // called when a connection is done processing a transaction.  if the
     // connection can be reused then it will be added to the idle list, else
     // it will be closed.
     nsresult ReclaimConnection(nsHttpConnection *conn);
@@ -123,6 +130,10 @@ public:
     // called to update a parameter after the connection manager has already
     // been initialized.
     nsresult UpdateParam(nsParamName name, uint16_t value);
+
+    // called from main thread to post a new request token bucket
+    // to the socket thread
+    nsresult UpdateRequestTokenBucket(mozilla::net::EventTokenBucket *aBucket);
 
     // Lookup/Cancel HTTP->SPDY redirections
     bool GetSpdyAlternateProtocol(nsACString &key);
@@ -147,7 +158,7 @@ public:
         // Used when a HTTP Server response header that is on the banned from
         // pipelining list is received
         RedBannedServer = kPipelineInfoTypeRed | kPipelineInfoTypeBad | 0x0002,
-    
+
         // Used when a response is terminated early, when it fails an
         // integrity check such as assoc-req or when a 304 contained a Last-Modified
         // differnet than the entry being validated.
@@ -173,7 +184,7 @@ public:
         // Used when a response is received that is not framed with either chunked
         // encoding or a complete content length.
         BadInsufficientFraming = kPipelineInfoTypeBad | 0x0008,
-        
+
         // Used when a very large response is recevied in a potential pipelining
         // context. Large responses cause head of line blocking.
         BadUnexpectedLarge = kPipelineInfoTypeBad | 0x000B,
@@ -185,7 +196,7 @@ public:
         // Used when a response is received successfully to a pipelined request.
         GoodCompletedOK = kPipelineInfoTypeGood | 0x000A
     };
-    
+
     // called to provide information relevant to the pipelining manager
     // may be called from any thread
     void     PipelineFeedbackInfo(nsHttpConnectionInfo *,
@@ -225,12 +236,12 @@ public:
     // in future sessions to speed up the opening portions of the connection.
     void ReportSpdyCWNDSetting(nsHttpConnectionInfo *host, uint32_t cwndValue);
     uint32_t GetSpdyCWNDSetting(nsHttpConnectionInfo *host);
-    
+
     bool     SupportsPipelining(nsHttpConnectionInfo *);
 
     bool GetConnectionData(nsTArray<mozilla::net::HttpRetParams> *);
 
-    void ResetIPFamillyPreference(nsHttpConnectionInfo *);
+    void ResetIPFamilyPreference(nsHttpConnectionInfo *);
 
 private:
     virtual ~nsHttpConnectionMgr();
@@ -251,7 +262,7 @@ private:
         // other positive experiences will eventually allow it to try again.
         PS_RED
     };
-    
+
     class nsHalfOpenSocket;
 
     // nsConnectionEntry
@@ -283,7 +294,7 @@ private:
         const static uint32_t kPipelineUnlimited  = 1024; // fully open - extended green
         const static uint32_t kPipelineOpen       = 6;    // 6 on each conn - normal green
         const static uint32_t kPipelineRestricted = 2;    // 2 on just 1 conn in yellow
-        
+
         nsHttpConnectionMgr::PipeliningState PipelineState();
         void OnPipelineFeedbackInfo(
             nsHttpConnectionMgr::PipelineFeedbackInfoType info,
@@ -411,7 +422,7 @@ private:
                          nsAHttpTransaction *trans,
                          uint32_t caps);
         ~nsHalfOpenSocket();
-        
+
         nsresult SetupStreams(nsISocketTransport **,
                               nsIAsyncInputStream **,
                               nsIAsyncOutputStream **,
@@ -489,6 +500,7 @@ private:
     static PLDHashOperator PruneDeadConnectionsCB(const nsACString &, nsAutoPtr<nsConnectionEntry> &, void *);
     static PLDHashOperator ShutdownPassCB(const nsACString &, nsAutoPtr<nsConnectionEntry> &, void *);
     static PLDHashOperator PurgeExcessIdleConnectionsCB(const nsACString &, nsAutoPtr<nsConnectionEntry> &, void *);
+    static PLDHashOperator PurgeExcessSpdyConnectionsCB(const nsACString &, nsAutoPtr<nsConnectionEntry> &, void *);
     static PLDHashOperator ClosePersistentConnectionsCB(const nsACString &, nsAutoPtr<nsConnectionEntry> &, void *);
     bool     ProcessPendingQForEntry(nsConnectionEntry *, bool considerAll);
     bool     IsUnderPressure(nsConnectionEntry *ent,
@@ -516,6 +528,7 @@ private:
     nsresult CreateTransport(nsConnectionEntry *, nsAHttpTransaction *,
                              uint32_t, bool);
     void     AddActiveConn(nsHttpConnection *, nsConnectionEntry *);
+    void     DecrementActiveConnCount(nsHttpConnection *);
     void     StartedConnect();
     void     RecvdConnect();
 
@@ -601,9 +614,10 @@ private:
     void OnMsgReclaimConnection    (int32_t, void *);
     void OnMsgCompleteUpgrade      (int32_t, void *);
     void OnMsgUpdateParam          (int32_t, void *);
-    void OnMsgClosePersistentConnections (int32_t, void *);
+    void OnMsgDoShiftReloadConnectionCleanup (int32_t, void *);
     void OnMsgProcessFeedback      (int32_t, void *);
     void OnMsgProcessAllSpdyPendingQ (int32_t, void *);
+    void OnMsgUpdateRequestTokenBucket (int32_t, void *);
 
     // Total number of active connections in all of the ConnectionEntry objects
     // that are accessed from mCT connection table.
@@ -611,11 +625,13 @@ private:
     // Total number of idle connections in all of the ConnectionEntry objects
     // that are accessed from mCT connection table.
     uint16_t mNumIdleConns;
+    // Total number of spdy connections which are a subset of the active conns
+    uint16_t mNumSpdyActiveConns;
     // Total number of connections in mHalfOpens ConnectionEntry objects
     // that are accessed from mCT connection table
     uint32_t mNumHalfOpenConns;
 
-    // Holds time in seconds for next wake-up to prune dead connections. 
+    // Holds time in seconds for next wake-up to prune dead connections.
     uint64_t mTimeOfNextWakeUp;
     // Timer for next pruning of dead connections.
     nsCOMPtr<nsITimer> mTimer;
@@ -630,7 +646,8 @@ private:
     // the connection table
     //
     // this table is indexed by connection key.  each entry is a
-    // nsConnectionEntry object.
+    // nsConnectionEntry object. It is unlocked and therefore must only
+    // be accessed from the socket thread.
     //
     nsClassHashtable<nsCStringHashKey, nsConnectionEntry> mCT;
 

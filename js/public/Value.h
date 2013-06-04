@@ -1,6 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=4 sw=4 et tw=99 ft=cpp:
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -322,6 +321,7 @@ typedef union jsval_layout
             int32_t        i32;
             uint32_t       u32;
             JSWhyMagic     why;
+            uintptr_t      word;
         } payload;
     } s;
     double asDouble;
@@ -924,13 +924,13 @@ class Value
 
     bool setNumber(double d) {
         int32_t i;
-        if (MOZ_DOUBLE_IS_INT32(d, &i)) {
+        if (mozilla::DoubleIsInt32(d, &i)) {
             setInt32(i);
             return true;
-        } else {
-            setDouble(d);
-            return false;
         }
+
+        setDouble(d);
+        return false;
     }
 
     void setObjectOrNull(JSObject *arg) {
@@ -1104,7 +1104,7 @@ class Value
      * Private setters/getters allow the caller to read/write arbitrary types
      * that fit in the 64-bit payload. It is the caller's responsibility, after
      * storing to a value with setPrivateX to read only using getPrivateX.
-     * Privates values are given a type type which ensures they are not marked.
+     * Privates values are given a type which ensures they are not marked.
      */
 
     void setPrivate(void *ptr) {
@@ -1393,20 +1393,32 @@ SameType(const Value &lhs, const Value &rhs)
 
 /************************************************************************/
 
+#ifdef JSGC_GENERATIONAL
+namespace JS {
+JS_PUBLIC_API(void) HeapValuePostBarrier(Value *valuep);
+JS_PUBLIC_API(void) HeapValueRelocate(Value *valuep);
+}
+#endif
+
 namespace js {
 
 template <> struct RootMethods<const JS::Value>
 {
-    static JS::Value initial() { return UndefinedValue(); }
+    static JS::Value initial() { return JS::UndefinedValue(); }
     static ThingRootKind kind() { return THING_ROOT_VALUE; }
-    static bool poisoned(const JS::Value &v) { return IsPoisonedValue(v); }
+    static bool poisoned(const JS::Value &v) { return JS::IsPoisonedValue(v); }
 };
 
 template <> struct RootMethods<JS::Value>
 {
-    static JS::Value initial() { return UndefinedValue(); }
+    static JS::Value initial() { return JS::UndefinedValue(); }
     static ThingRootKind kind() { return THING_ROOT_VALUE; }
-    static bool poisoned(const JS::Value &v) { return IsPoisonedValue(v); }
+    static bool poisoned(const JS::Value &v) { return JS::IsPoisonedValue(v); }
+    static bool needsPostBarrier(const JS::Value &v) { return v.isMarkable(); }
+#ifdef JSGC_GENERATIONAL
+    static void postBarrier(JS::Value *v) { JS::HeapValuePostBarrier(v); }
+    static void relocate(JS::Value *v) { JS::HeapValueRelocate(v); }
+#endif
 };
 
 template <class Outer> class MutableValueOperations;
@@ -1484,15 +1496,28 @@ class MutableValueOperations : public ValueOperations<Outer>
 };
 
 /*
+ * Augment the generic Heap<T> interface when T = Value with type-querying
+ * and value-extracting operations.
+ */
+template <>
+class HeapBase<JS::Value> : public ValueOperations<JS::Heap<JS::Value> >
+{
+    friend class ValueOperations<JS::Heap<JS::Value> >;
+    const JS::Value * extract() const {
+        return static_cast<const JS::Heap<JS::Value>*>(this)->address();
+    }
+};
+
+/*
  * Augment the generic Handle<T> interface when T = Value with type-querying
  * and value-extracting operations.
  */
 template <>
-class HandleBase<JS::Value> : public ValueOperations<Handle<JS::Value> >
+class HandleBase<JS::Value> : public ValueOperations<JS::Handle<JS::Value> >
 {
-    friend class ValueOperations<Handle<JS::Value> >;
+    friend class ValueOperations<JS::Handle<JS::Value> >;
     const JS::Value * extract() const {
-        return static_cast<const Handle<JS::Value>*>(this)->address();
+        return static_cast<const JS::Handle<JS::Value>*>(this)->address();
     }
 };
 
@@ -1501,16 +1526,16 @@ class HandleBase<JS::Value> : public ValueOperations<Handle<JS::Value> >
  * type-querying, value-extracting, and mutating operations.
  */
 template <>
-class MutableHandleBase<JS::Value> : public MutableValueOperations<MutableHandle<JS::Value> >
+class MutableHandleBase<JS::Value> : public MutableValueOperations<JS::MutableHandle<JS::Value> >
 {
-    friend class ValueOperations<MutableHandle<JS::Value> >;
+    friend class ValueOperations<JS::MutableHandle<JS::Value> >;
     const JS::Value * extract() const {
-        return static_cast<const MutableHandle<JS::Value>*>(this)->address();
+        return static_cast<const JS::MutableHandle<JS::Value>*>(this)->address();
     }
 
-    friend class MutableValueOperations<MutableHandle<JS::Value> >;
+    friend class MutableValueOperations<JS::MutableHandle<JS::Value> >;
     JS::Value * extractMutable() {
-        return static_cast<MutableHandle<JS::Value>*>(this)->address();
+        return static_cast<JS::MutableHandle<JS::Value>*>(this)->address();
     }
 };
 
@@ -1519,16 +1544,16 @@ class MutableHandleBase<JS::Value> : public MutableValueOperations<MutableHandle
  * value-extracting, and mutating operations.
  */
 template <>
-class RootedBase<JS::Value> : public MutableValueOperations<Rooted<JS::Value> >
+class RootedBase<JS::Value> : public MutableValueOperations<JS::Rooted<JS::Value> >
 {
-    friend class ValueOperations<Rooted<JS::Value> >;
+    friend class ValueOperations<JS::Rooted<JS::Value> >;
     const JS::Value * extract() const {
-        return static_cast<const Rooted<JS::Value>*>(this)->address();
+        return static_cast<const JS::Rooted<JS::Value>*>(this)->address();
     }
 
-    friend class MutableValueOperations<Rooted<JS::Value> >;
+    friend class MutableValueOperations<JS::Rooted<JS::Value> >;
     JS::Value * extractMutable() {
-        return static_cast<Rooted<JS::Value>*>(this)->address();
+        return static_cast<JS::Rooted<JS::Value>*>(this)->address();
     }
 };
 

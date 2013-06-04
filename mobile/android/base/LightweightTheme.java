@@ -12,29 +12,23 @@ import org.json.JSONObject;
 
 import android.app.Application;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
-import android.graphics.drawable.Drawable;
-import android.graphics.drawable.BitmapDrawable;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.Shader;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.Drawable;
 import android.os.Build;
-import android.os.Looper;
 import android.os.Handler;
+import android.os.Looper;
 import android.util.DisplayMetrics;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewParent;
 
-import java.io.InputStream;
-import java.io.IOException;
-import java.net.MalformedURLException;
-import java.net.URL;
-import java.util.List;
 import java.util.ArrayList;
-
-import android.util.Log;
+import java.util.List;
 
 public class LightweightTheme implements GeckoEventListener {
     private static final String LOGTAG = "GeckoLightweightTheme";
@@ -85,21 +79,15 @@ public class LightweightTheme implements GeckoEventListener {
                 int mark = headerURL.indexOf('?');
                 if (mark != -1)
                     headerURL = headerURL.substring(0, mark);
-                try {
-                    // Get the image and convert it to a bitmap.
-                    URL url = new URL(headerURL);
-                    InputStream stream = url.openStream();
-                    final Bitmap bitmap = BitmapFactory.decodeStream(stream);
-                    stream.close();
-                    mHandler.post(new Runnable() {
-                        @Override
-                        public void run() {
-                            setLightweightTheme(bitmap);
-                        }
-                    });
-                } catch(MalformedURLException e) {
-                } catch(IOException e) {
-                }
+
+                // Get the image and convert it to a bitmap.
+                final Bitmap bitmap = BitmapUtils.decodeUrl(headerURL);
+                mHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        setLightweightTheme(bitmap);
+                    }
+                });
             } else if (event.equals("LightweightTheme:Disable")) {
                 mHandler.post(new Runnable() {
                     @Override

@@ -91,7 +91,7 @@ gfxPlatformGtk::gfxPlatformGtk()
     UpdateFontList();
 #endif
     uint32_t canvasMask = (1 << BACKEND_CAIRO) | (1 << BACKEND_SKIA);
-    uint32_t contentMask = (1 << BACKEND_CAIRO);
+    uint32_t contentMask = 0;
     InitBackendPrefs(canvasMask, contentMask);
 }
 
@@ -480,6 +480,24 @@ gfxPlatformGtk::GetOffscreenFormat()
     return gfxASurface::ImageFormatRGB24;
 }
 
+static int sDepth = 0;
+
+int
+gfxPlatformGtk::GetScreenDepth() const
+{
+    if (!sDepth) {
+        GdkScreen *screen = gdk_screen_get_default();
+        if (screen) {
+            sDepth = gdk_visual_get_depth(gdk_visual_get_system());
+        } else {
+            sDepth = 24;
+        }
+
+    }
+
+    return sDepth;
+}
+
 qcms_profile *
 gfxPlatformGtk::GetPlatformCMSOutputProfile()
 {
@@ -489,6 +507,13 @@ gfxPlatformGtk::GetPlatformCMSOutputProfile()
 
     Atom edidAtom, iccAtom;
     Display *dpy = GDK_DISPLAY_XDISPLAY(gdk_display_get_default());
+    // In xpcshell tests, we never initialize X and hence don't have a Display.
+    // In this case, there's no output colour management to be done, so we just
+    // return NULL.
+    if (!dpy) {
+        return NULL;
+    }
+
     Window root = gdk_x11_get_default_root_xwindow();
 
     Atom retAtom;

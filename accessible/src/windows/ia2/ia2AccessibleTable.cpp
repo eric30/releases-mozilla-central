@@ -12,6 +12,7 @@
 #include "AccessibleTable2_i.c"
 
 #include "AccessibleWrap.h"
+#include "IUnknownImpl.h"
 #include "Statistics.h"
 #include "TableAccessible.h"
 
@@ -25,7 +26,7 @@ using namespace mozilla::a11y;
 STDMETHODIMP
 ia2AccessibleTable::QueryInterface(REFIID iid, void** ppv)
 {
-  *ppv = NULL;
+  *ppv = nullptr;
 
   if (IID_IAccessibleTable == iid) {
     statistics::IAccessibleTableUsed();
@@ -58,7 +59,7 @@ ia2AccessibleTable::get_caption(IUnknown** aAccessible)
 {
   A11Y_TRYBLOCK_BEGIN
 
-  *aAccessible = NULL;
+  *aAccessible = nullptr;
   if (!mTable)
     return CO_E_OBJNOTCONNECTED;
 
@@ -98,7 +99,7 @@ ia2AccessibleTable::get_columnDescription(long aColIdx, BSTR* aDescription)
 {
   A11Y_TRYBLOCK_BEGIN
 
-  *aDescription = NULL;
+  *aDescription = nullptr;
   if (!mTable)
     return CO_E_OBJNOTCONNECTED;
 
@@ -143,7 +144,7 @@ ia2AccessibleTable::get_columnHeader(IAccessibleTable** aAccessibleTable,
 {
   A11Y_TRYBLOCK_BEGIN
 
-  *aAccessibleTable = NULL;
+  *aAccessibleTable = nullptr;
   *aStartingRowIndex = -1;
   return E_NOTIMPL;
 
@@ -241,7 +242,7 @@ ia2AccessibleTable::get_rowDescription(long aRowIdx, BSTR* aDescription)
 {
   A11Y_TRYBLOCK_BEGIN
 
-  *aDescription = NULL;
+  *aDescription = nullptr;
   if (!mTable)
     return CO_E_OBJNOTCONNECTED;
 
@@ -285,7 +286,7 @@ ia2AccessibleTable::get_rowHeader(IAccessibleTable** aAccessibleTable,
 {
   A11Y_TRYBLOCK_BEGIN
 
-  *aAccessibleTable = NULL;
+  *aAccessibleTable = nullptr;
   *aStartingColumnIndex = -1;
   return E_NOTIMPL;
 
@@ -317,7 +318,7 @@ ia2AccessibleTable::get_selectedChildren(long aMaxChildren, long** aChildren,
 {
   A11Y_TRYBLOCK_BEGIN
 
-  *aChildren = NULL;
+  *aChildren = nullptr;
   *aNChildren = 0;
   if (!mTable)
     return CO_E_OBJNOTCONNECTED;
@@ -370,7 +371,7 @@ ia2AccessibleTable::get_summary(IUnknown** aAccessible)
   // in nsIAccessibleTable::summary to get a summary as a string which is not
   // mapped directly to IAccessible2.
 
-  *aAccessible = NULL;
+  *aAccessible = nullptr;
   return S_FALSE;
 
   A11Y_TRYBLOCK_END
@@ -549,7 +550,7 @@ ia2AccessibleTable::get_cellAt(long aRowIdx, long aColIdx, IUnknown** aCell)
 {
   A11Y_TRYBLOCK_BEGIN
 
-  *aCell = NULL;
+  *aCell = nullptr;
 
   if (!mTable)
     return CO_E_OBJNOTCONNECTED;
@@ -585,7 +586,7 @@ ia2AccessibleTable::get_selectedCells(IUnknown*** aCells, long* aNSelectedCells)
 {
   A11Y_TRYBLOCK_BEGIN
 
-  *aCells = NULL;
+  *aCells = nullptr;
   *aNSelectedCells = 0;
   if (!mTable)
     return CO_E_OBJNOTCONNECTED;
@@ -618,7 +619,7 @@ ia2AccessibleTable::get_selectedColumns(long** aColumns, long* aNColumns)
 {
   A11Y_TRYBLOCK_BEGIN
 
-  *aColumns = NULL;
+  *aColumns = nullptr;
   *aNColumns = 0;
   if (!mTable)
     return CO_E_OBJNOTCONNECTED;
@@ -645,7 +646,7 @@ ia2AccessibleTable::get_selectedRows(long** aRows, long* aNRows)
 {
   A11Y_TRYBLOCK_BEGIN
 
-  *aRows = NULL;
+  *aRows = nullptr;
   *aNRows = 0;
   if (!mTable)
     return CO_E_OBJNOTCONNECTED;

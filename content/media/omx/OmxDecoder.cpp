@@ -8,10 +8,12 @@
 
 #include "base/basictypes.h"
 #include <cutils/properties.h>
+#include <stagefright/foundation/AMessage.h>
 #include <stagefright/MediaExtractor.h>
 #include <stagefright/MetaData.h>
 #include <stagefright/OMXClient.h>
 #include <stagefright/OMXCodec.h>
+#include <OMX.h>
 
 #include "mozilla/Preferences.h"
 #include "mozilla/Types.h"
@@ -39,8 +41,8 @@ VideoGraphicBuffer::VideoGraphicBuffer(const android::wp<android::OmxDecoder> aO
                                        android::MediaBuffer *aBuffer,
                                        SurfaceDescriptor *aDescriptor)
   : GraphicBufferLocked(*aDescriptor),
-    mOmxDecoder(aOmxDecoder),
-    mMediaBuffer(aBuffer)
+    mMediaBuffer(aBuffer),
+    mOmxDecoder(aOmxDecoder)
 {
   mMediaBuffer->add_ref();
 }
@@ -57,7 +59,11 @@ VideoGraphicBuffer::Unlock()
 {
   android::sp<android::OmxDecoder> omxDecoder = mOmxDecoder.promote();
   if (omxDecoder.get()) {
-    omxDecoder->ReleaseVideoBuffer(mMediaBuffer);
+    // Post kNotifyPostReleaseVideoBuffer message to OmxDecoder via ALooper.
+    // The message is delivered to OmxDecoder on ALooper thread.
+    // MediaBuffer::release() could take a very long time.
+    // PostReleaseVideoBuffer() prevents long time locking.
+    omxDecoder->PostReleaseVideoBuffer(mMediaBuffer);
   } else {
     NS_WARNING("OmxDecoder is not present");
     if (mMediaBuffer) {
@@ -74,7 +80,7 @@ namespace android {
 
 MediaStreamSource::MediaStreamSource(MediaResource *aResource,
                                      AbstractMediaDecoder *aDecoder) :
-  mDecoder(aDecoder), mResource(aResource)
+  mResource(aResource), mDecoder(aDecoder)
 {
 }
 
@@ -92,6 +98,7 @@ ssize_t MediaStreamSource::readAt(off64_t offset, void *data, size_t size)
   char *ptr = static_cast<char *>(data);
   size_t todo = size;
   while (todo > 0) {
+    Mutex::Autolock autoLock(mLock);
     uint32_t bytesRead;
     if ((offset != mResource->Tell() &&
          NS_FAILED(mResource->Seek(nsISeekableStream::NS_SEEK_SET, offset))) ||
@@ -127,8 +134,8 @@ using namespace android;
 
 OmxDecoder::OmxDecoder(MediaResource *aResource,
                        AbstractMediaDecoder *aDecoder) :
-  mResource(aResource),
   mDecoder(aDecoder),
+  mResource(aResource),
   mVideoWidth(0),
   mVideoHeight(0),
   mVideoColorFormat(0),
@@ -141,12 +148,27 @@ OmxDecoder::OmxDecoder(MediaResource *aResource,
   mVideoBuffer(nullptr),
   mAudioBuffer(nullptr),
   mIsVideoSeeking(false),
-  mAudioMetadataRead(false)
+  mAudioMetadataRead(false),
+  mPaused(false)
 {
+  mLooper = new ALooper;
+  mLooper->setName("OmxDecoder");
+
+  mReflector = new AHandlerReflector<OmxDecoder>(this);
+  // Register AMessage handler to ALooper.
+  mLooper->registerHandler(mReflector);
+  // Start ALooper thread.
+  mLooper->start();
 }
 
 OmxDecoder::~OmxDecoder()
 {
+  {
+    // Free all pending video buffers.
+    Mutex::Autolock autoLock(mSeekLock);
+    ReleaseAllPendingVideoBuffersLocked();
+  }
+
   ReleaseVideoBuffer();
   ReleaseAudioBuffer();
 
@@ -157,6 +179,11 @@ OmxDecoder::~OmxDecoder()
   if (mAudioSource.get()) {
     mAudioSource->stop();
   }
+
+  // unregister AMessage handler from ALooper.
+  mLooper->unregisterHandler(mReflector->id());
+  // Stop ALooper thread.
+  mLooper->stop();
 }
 
 class AutoStopMediaSource {
@@ -169,6 +196,14 @@ public:
     mMediaSource->stop();
   }
 };
+
+static sp<IOMX> sOMX = nullptr;
+static sp<IOMX> GetOMX() {
+  if(sOMX.get() == nullptr) {
+    sOMX = new OMX;
+    }
+  return sOMX;
+}
 
 bool OmxDecoder::Init() {
 #ifdef PR_LOGGING
@@ -233,7 +268,7 @@ bool OmxDecoder::Init() {
   // OMXClient::connect() always returns OK and abort's fatally if
   // it can't connect.
   OMXClient client;
-  status_t err = client.connect();
+  DebugOnly<status_t> err = client.connect();
   NS_ASSERTION(err == OK, "Failed to connect to OMX in mediaserver.");
   sp<IOMX> omx = client.interface();
 
@@ -246,6 +281,13 @@ bool OmxDecoder::Init() {
     // for (h.264).  So if we don't get a hardware decoder, just give
     // up.
     int flags = kHardwareCodecsOnly;
+
+    char propQemu[PROPERTY_VALUE_MAX];
+    property_get("ro.kernel.qemu", propQemu, "");
+    if (!strncmp(propQemu, "1", 1)) {
+      // If we are in emulator, allow to fall back to software.
+      flags = 0;
+    }
     videoSource = OMXCodec::Create(omx,
                                    videoTrack->getFormat(),
                                    false, // decoder
@@ -296,14 +338,28 @@ bool OmxDecoder::Init() {
     if (!strcasecmp(audioMime, "audio/raw")) {
       audioSource = audioTrack;
     } else {
+      // try to load hardware codec in mediaserver process.
+      int flags = kHardwareCodecsOnly;
       audioSource = OMXCodec::Create(omx,
                                      audioTrack->getFormat(),
                                      false, // decoder
-                                     audioTrack);
+                                     audioTrack,
+                                     nullptr,
+                                     flags);
     }
     if (audioSource == nullptr) {
-      NS_WARNING("Couldn't create OMX audio source");
-      return false;
+      // try to load software codec in this process.
+      int flags = kSoftwareCodecsOnly;
+      audioSource = OMXCodec::Create(GetOMX(),
+                                     audioTrack->getFormat(),
+                                     false, // decoder
+                                     audioTrack,
+                                     nullptr,
+                                     flags);
+      if (audioSource == nullptr) {
+        NS_WARNING("Couldn't create OMX audio source");
+        return false;
+      }
     }
     if (audioSource->start() != OK) {
       NS_WARNING("Couldn't start OMX audio source");
@@ -332,7 +388,12 @@ bool OmxDecoder::Init() {
   // To reliably get the channel and sample rate data we need to read from the
   // audio source until we get a INFO_FORMAT_CHANGE status
   if (mAudioSource.get()) {
-    if (mAudioSource->read(&mAudioBuffer) != INFO_FORMAT_CHANGED) {
+    status_t err = mAudioSource->read(&mAudioBuffer);
+    if (err != INFO_FORMAT_CHANGED) {
+      if (err != OK) {
+        NS_WARNING("Couldn't read audio buffer from OMX decoder");
+        return false;
+      }
       sp<MetaData> meta = mAudioSource->getFormat();
       if (!meta->findInt32(kKeyChannelCount, &mAudioChannels) ||
           !meta->findInt32(kKeySampleRate, &mAudioSampleRate)) {
@@ -506,7 +567,6 @@ bool OmxDecoder::ReadVideo(VideoFrame *aFrame, int64_t aTimeUs,
 
   if (err == OK && mVideoBuffer->range_length() > 0) {
     int64_t timeUs;
-    int64_t durationUs;
     int32_t unreadable;
     int32_t keyFrame;
 
@@ -529,10 +589,16 @@ bool OmxDecoder::ReadVideo(VideoFrame *aFrame, int64_t aTimeUs,
     }
 
     if (descriptor) {
-      aFrame->mGraphicBuffer = new mozilla::layers::VideoGraphicBuffer(this, mVideoBuffer, descriptor);
+      // Change the descriptor's size to video's size. There are cases that
+      // GraphicBuffer's size and actual video size is different.
+      // See Bug 850566.
+      const mozilla::layers::SurfaceDescriptorGralloc& grallocDesc = descriptor->get_SurfaceDescriptorGralloc();
+      mozilla::layers::SurfaceDescriptor newDescriptor = mozilla::layers::SurfaceDescriptorGralloc(grallocDesc.bufferParent(),
+                                                               grallocDesc.bufferChild(), nsIntSize(mVideoWidth, mVideoHeight), grallocDesc.external());
+
+      aFrame->mGraphicBuffer = new mozilla::layers::VideoGraphicBuffer(this, mVideoBuffer, &newDescriptor);
       aFrame->mRotation = mVideoRotation;
       aFrame->mTimeUs = timeUs;
-      aFrame->mEndTimeUs = timeUs + durationUs;
       aFrame->mKeyFrame = keyFrame;
       aFrame->Y.mWidth = mVideoWidth;
       aFrame->Y.mHeight = mVideoHeight;
@@ -547,8 +613,6 @@ bool OmxDecoder::ReadVideo(VideoFrame *aFrame, int64_t aTimeUs,
       if (!ToVideoFrame(aFrame, timeUs, data, length, keyFrame)) {
         return false;
       }
-
-      aFrame->mEndTimeUs = timeUs + durationUs;
     }
 
     if (aKeyframeSkip && timeUs < aTimeUs) {
@@ -570,6 +634,9 @@ bool OmxDecoder::ReadVideo(VideoFrame *aFrame, int64_t aTimeUs,
   else if (err == UNKNOWN_ERROR) {
     // This sometimes is used to mean "out of memory", but regardless,
     // don't keep trying to decode if the decoder doesn't want to.
+    return false;
+  }
+  else if (err != OK && err != -ETIMEDOUT) {
     return false;
   }
 
@@ -625,32 +692,87 @@ bool OmxDecoder::ReadAudio(AudioFrame *aFrame, int64_t aSeekTimeUs)
   else if (err == UNKNOWN_ERROR) {
     return false;
   }
+  else if (err != OK && err != -ETIMEDOUT) {
+    return false;
+  }
 
   return true;
 }
 
-bool OmxDecoder::ReleaseVideoBuffer(MediaBuffer *aBuffer)
+nsresult OmxDecoder::Play() {
+  if (!mPaused) {
+    return NS_OK;
+  }
+  if (mVideoSource.get() && mVideoSource->start() != OK) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
+  if (mAudioSource.get()&& mAudioSource->start() != OK) {
+    return NS_ERROR_UNEXPECTED;
+  }
+  mPaused = false;
+  return NS_OK;
+}
+
+void OmxDecoder::Pause() {
+  if (mPaused) {
+    return;
+  }
+  if (mVideoSource.get()) {
+    mVideoSource->pause();
+  }
+
+  if (mAudioSource.get()) {
+    mAudioSource->pause();
+  }
+  mPaused = true;
+}
+
+// Called on ALooper thread.
+void OmxDecoder::onMessageReceived(const sp<AMessage> &msg)
 {
   Mutex::Autolock autoLock(mSeekLock);
 
-  if (!aBuffer) {
-    return false;
+  // Free pending video buffers when OmxDecoder is not seeking video.
+  // If OmxDecoder is in seeking video, the buffers are freed on seek exit. 
+  if (mIsVideoSeeking != true) {
+    ReleaseAllPendingVideoBuffersLocked();
+  }
+}
+
+void OmxDecoder::PostReleaseVideoBuffer(MediaBuffer *aBuffer)
+{
+  {
+    Mutex::Autolock autoLock(mPendingVideoBuffersLock);
+    mPendingVideoBuffers.push(aBuffer);
   }
 
-  if (mIsVideoSeeking == true) {
-    mPendingVideoBuffers.push(aBuffer);
-  } else {
-    aBuffer->release();
-  }
-  return true;
+  sp<AMessage> notify =
+            new AMessage(kNotifyPostReleaseVideoBuffer, mReflector->id());
+  // post AMessage to OmxDecoder via ALooper.
+  notify->post();
 }
 
 void OmxDecoder::ReleaseAllPendingVideoBuffersLocked()
 {
-  int size = mPendingVideoBuffers.size();
+  Vector<MediaBuffer *> releasingVideoBuffers;
+  {
+    Mutex::Autolock autoLock(mPendingVideoBuffersLock);
+
+    int size = mPendingVideoBuffers.size();
+    for (int i = 0; i < size; i++) {
+      MediaBuffer *buffer = mPendingVideoBuffers[i];
+      releasingVideoBuffers.push(buffer);
+    }
+    mPendingVideoBuffers.clear();
+  }
+  // Free all pending video buffers without holding mPendingVideoBuffersLock.
+  int size = releasingVideoBuffers.size();
   for (int i = 0; i < size; i++) {
-    MediaBuffer *buffer = mPendingVideoBuffers[i];
+    MediaBuffer *buffer;
+    buffer = releasingVideoBuffers[i];
     buffer->release();
   }
-  mPendingVideoBuffers.clear();
+  releasingVideoBuffers.clear();
 }
+

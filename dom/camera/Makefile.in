@@ -9,56 +9,12 @@ VPATH            = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE           = dom
 LIBRARY_NAME     = domcamera_s
 LIBXUL_LIBRARY   = 1
 FORCE_STATIC_LIB = 1
 FAIL_ON_WARNINGS := 1
 
 include $(topsrcdir)/dom/dom-config.mk
-
-CPPSRCS = \
-  DOMCameraManager.cpp \
-  DOMCameraControl.cpp \
-  DOMCameraPreview.cpp \
-  DOMCameraCapabilities.cpp \
-  CameraControlImpl.cpp \
-  CameraRecorderProfiles.cpp \
-  $(NULL)
-
-ifeq ($(MOZ_B2G_CAMERA),1)
-CPPSRCS += \
-  GonkCameraManager.cpp \
-  GonkCameraControl.cpp \
-  GonkCameraHwMgr.cpp \
-  GonkNativeWindow.cpp \
-  GonkNativeWindowClient.cpp \
-  GonkRecorder.cpp \
-  GonkCameraSource.cpp \
-  AudioParameter.cpp \
-  GonkRecorderProfiles.cpp \
-  $(NULL)
-else ifeq (gonk,$(MOZ_WIDGET_TOOLKIT))
-CPPSRCS += \
-  FallbackCameraManager.cpp \
-  FallbackCameraControl.cpp \
-  GonkNativeWindow.cpp \
-  GonkNativeWindowClient.cpp \
-  $(NULL)
-else
-CPPSRCS += \
-  FallbackCameraManager.cpp \
-  FallbackCameraControl.cpp \
-  $(NULL)
-endif
-
-EXPORTS = \
-  CameraCommon.h \
-  DOMCameraManager.h \
-  GonkNativeWindow.h \
-  GonkNativeWindowClient.h \
-  $(NULL)
-
 include $(topsrcdir)/config/rules.mk
 include $(topsrcdir)/ipc/chromium/chromium-config.mk
 

@@ -7,7 +7,7 @@
 #ifndef AudioParam_h_
 #define AudioParam_h_
 
-#include "AudioEventTimeline.h"
+#include "AudioParamTimeline.h"
 #include "nsWrapperCache.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsCOMPtr.h"
@@ -16,7 +16,7 @@
 #include "AudioNode.h"
 #include "mozilla/dom/TypedArray.h"
 #include "mozilla/Util.h"
-#include "mozilla/ErrorResult.h"
+#include "WebAudioUtils.h"
 
 struct JSContext;
 class nsIDOMWindow;
@@ -24,8 +24,6 @@ class nsIDOMWindow;
 namespace mozilla {
 
 namespace dom {
-
-typedef AudioEventTimeline<ErrorResult> AudioParamTimeline;
 
 class AudioParam MOZ_FINAL : public nsWrapperCache,
                              public EnableWebAudioCheck,
@@ -36,12 +34,11 @@ public:
 
   AudioParam(AudioNode* aNode,
              CallbackType aCallback,
-             float aDefaultValue,
-             float aMinValue,
-             float aMaxValue);
+             float aDefaultValue);
   virtual ~AudioParam();
 
-  NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(AudioParam)
+  NS_IMETHOD_(nsrefcnt) AddRef(void);
+  NS_IMETHOD_(nsrefcnt) Release(void);
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(AudioParam)
 
   AudioContext* GetParentObject() const
@@ -49,12 +46,17 @@ public:
     return mNode->Context();
   }
 
-  virtual JSObject* WrapObject(JSContext* aCx, JSObject* aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx,
+                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
   // We override SetValueCurveAtTime to convert the Float32Array to the wrapper
   // object.
-  void SetValueCurveAtTime(JSContext* cx, const Float32Array& aValues, double aStartTime, double aDuration, ErrorResult& aRv)
+  void SetValueCurveAtTime(const Float32Array& aValues, double aStartTime, double aDuration, ErrorResult& aRv)
   {
+    if (!WebAudioUtils::IsTimeValid(aStartTime)) {
+      aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
+      return;
+    }
     AudioParamTimeline::SetValueCurveAtTime(aValues.Data(), aValues.Length(),
                                             aStartTime, aDuration, aRv);
     mCallback(mNode);
@@ -65,7 +67,8 @@ public:
   void SetValue(float aValue)
   {
     // Optimize away setting the same value on an AudioParam
-    if (HasSimpleValue() && fabsf(GetValue() - aValue) < 1e-7) {
+    if (HasSimpleValue() &&
+        WebAudioUtils::FuzzyEqual(GetValue(), aValue)) {
       return;
     }
     AudioParamTimeline::SetValue(aValue);
@@ -73,38 +76,53 @@ public:
   }
   void SetValueAtTime(float aValue, double aStartTime, ErrorResult& aRv)
   {
+    if (!WebAudioUtils::IsTimeValid(aStartTime)) {
+      aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
+      return;
+    }
     AudioParamTimeline::SetValueAtTime(aValue, aStartTime, aRv);
     mCallback(mNode);
   }
   void LinearRampToValueAtTime(float aValue, double aEndTime, ErrorResult& aRv)
   {
+    if (!WebAudioUtils::IsTimeValid(aEndTime)) {
+      aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
+      return;
+    }
     AudioParamTimeline::LinearRampToValueAtTime(aValue, aEndTime, aRv);
     mCallback(mNode);
   }
   void ExponentialRampToValueAtTime(float aValue, double aEndTime, ErrorResult& aRv)
   {
+    if (!WebAudioUtils::IsTimeValid(aEndTime)) {
+      aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
+      return;
+    }
     AudioParamTimeline::ExponentialRampToValueAtTime(aValue, aEndTime, aRv);
     mCallback(mNode);
   }
   void SetTargetAtTime(float aTarget, double aStartTime, double aTimeConstant, ErrorResult& aRv)
   {
+    if (!WebAudioUtils::IsTimeValid(aStartTime) ||
+        !WebAudioUtils::IsTimeValid(aTimeConstant)) {
+      aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
+      return;
+    }
     AudioParamTimeline::SetTargetAtTime(aTarget, aStartTime, aTimeConstant, aRv);
     mCallback(mNode);
   }
-  void CancelScheduledValues(double aStartTime)
+  void SetTargetValueAtTime(float aTarget, double aStartTime, double aTimeConstant, ErrorResult& aRv)
   {
+    SetTargetAtTime(aTarget, aStartTime, aTimeConstant, aRv);
+  }
+  void CancelScheduledValues(double aStartTime, ErrorResult& aRv)
+  {
+    if (!WebAudioUtils::IsTimeValid(aStartTime)) {
+      aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
+      return;
+    }
     AudioParamTimeline::CancelScheduledValues(aStartTime);
     mCallback(mNode);
-  }
-
-  float MinValue() const
-  {
-    return mMinValue;
-  }
-
-  float MaxValue() const
-  {
-    return mMaxValue;
   }
 
   float DefaultValue() const
@@ -112,12 +130,44 @@ public:
     return mDefaultValue;
   }
 
+  AudioNode* Node() const
+  {
+    return mNode;
+  }
+
+  const nsTArray<AudioNode::InputNode>& InputNodes() const
+  {
+    return mInputNodes;
+  }
+
+  void RemoveInputNode(uint32_t aIndex)
+  {
+    mInputNodes.RemoveElementAt(aIndex);
+  }
+
+  AudioNode::InputNode* AppendInputNode()
+  {
+    return mInputNodes.AppendElement();
+  }
+
+  void DisconnectFromGraphAndDestroyStream();
+
+  // May create the stream if it doesn't exist
+  MediaStream* Stream();
+
+protected:
+  nsCycleCollectingAutoRefCnt mRefCnt;
+  NS_DECL_OWNINGTHREAD
+
 private:
   nsRefPtr<AudioNode> mNode;
+  // For every InputNode, there is a corresponding entry in mOutputParams of the
+  // InputNode's mInputNode.
+  nsTArray<AudioNode::InputNode> mInputNodes;
   CallbackType mCallback;
   const float mDefaultValue;
-  const float mMinValue;
-  const float mMaxValue;
+  // The input port used to connect the AudioParam's stream to its node's stream
+  nsRefPtr<MediaInputPort> mNodeStreamPort;
 };
 
 }

@@ -5,10 +5,9 @@
 #ifndef nsIContent_h___
 #define nsIContent_h___
 
+#include "mozilla/Attributes.h"
 #include "nsCaseTreatment.h" // for enum, cannot be forward-declared
-#include "nsCOMPtr.h"        // for already_AddRefed in constructor
-#include "nsIDocument.h"     // for use in inline function (IsInHTMLDocument)
-#include "nsINode.h"         // for base class
+#include "nsIDocument.h"
 
 // Forward declarations
 class nsAString;
@@ -429,7 +428,7 @@ public:
    * @param aNameSpaceID The namespace ID of the attribute.  Must not
    *                     be kNameSpaceID_Unknown.
    * @param aName The name atom of the attribute.  Must not be null.
-   * @param aValues a NULL-terminated array of pointers to atom values to test
+   * @param aValues a nullptr-terminated array of pointers to atom values to test
    *                against.
    * @param aCaseSensitive Whether to do a case-sensitive compare on the values.
    * @return ATTR_MISSING, ATTR_VALUE_NO_MATCH or the non-negative index
@@ -673,7 +672,7 @@ public:
    * If you also need to determine whether the parser is the one creating your
    * element (through createElement() or cloneNode() generally) then add a
    * uint32_t aFromParser to the NS_NewXXX() constructor for your element and
-   * have the parser pass the appropriate flags. See nsHTMLInputElement.cpp and
+   * have the parser pass the appropriate flags. See HTMLInputElement.cpp and
    * nsHTMLContentSink::MakeContentObject().
    *
    * DO NOT USE THIS METHOD to get around the fact that it's hard to deal with
@@ -709,7 +708,7 @@ public:
    * If you also need to determine whether the parser is the one creating your
    * element (through createElement() or cloneNode() generally) then add a
    * boolean aFromParser to the NS_NewXXX() constructor for your element and
-   * have the parser pass true.  See nsHTMLInputElement.cpp and
+   * have the parser pass true.  See HTMLInputElement.cpp and
    * nsHTMLContentSink::MakeContentObject().
    *
    * @param aHaveNotified Whether there has been a
@@ -848,9 +847,9 @@ public:
   }
 
   // Overloaded from nsINode
-  virtual already_AddRefed<nsIURI> GetBaseURI() const;
+  virtual already_AddRefed<nsIURI> GetBaseURI() const MOZ_OVERRIDE;
 
-  virtual nsresult PreHandleEvent(nsEventChainPreVisitor& aVisitor);
+  virtual nsresult PreHandleEvent(nsEventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
 
   virtual bool IsPurple() = 0;
   virtual void RemovePurple() = 0;

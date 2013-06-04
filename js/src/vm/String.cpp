@@ -1,10 +1,10 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=4 sw=4 et tw=79 ft=cpp:
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/PodOperations.h"
 #include "mozilla/RangedPtr.h"
 
 #include "gc/Marking.h"
@@ -16,6 +16,7 @@
 
 using namespace js;
 
+using mozilla::PodCopy;
 using mozilla::RangedPtr;
 
 bool
@@ -203,15 +204,36 @@ JSRope::flattenInternal(JSContext *maybecx)
     jschar *pos;
     JSRuntime *rt = runtime();
 
-    if (this->leftChild()->isExtensible()) {
-        JSExtensibleString &left = this->leftChild()->asExtensible();
+    /* Find the left most string, containing the first string. */
+    JSRope *leftMostRope = this;
+    while (leftMostRope->leftChild()->isRope())
+        leftMostRope = &leftMostRope->leftChild()->asRope();
+
+    if (leftMostRope->leftChild()->isExtensible()) {
+        JSExtensibleString &left = leftMostRope->leftChild()->asExtensible();
         size_t capacity = left.capacity();
         if (capacity >= wholeLength) {
-            if (b == WithIncrementalBarrier) {
-                JSString::writeBarrierPre(d.u1.left);
-                JSString::writeBarrierPre(d.s.u2.right);
+            /*
+             * Simulate a left-most traversal from the root to leftMost->leftChild()
+             * via first_visit_node
+             */
+            while (str != leftMostRope) {
+                JS_ASSERT(str->isRope());
+                if (b == WithIncrementalBarrier) {
+                    JSString::writeBarrierPre(str->d.u1.left);
+                    JSString::writeBarrierPre(str->d.s.u2.right);
+                }
+                JSString *child = str->d.u1.left;
+                str->d.u1.chars = left.chars();
+                child->d.s.u3.parent = str;
+                child->d.lengthAndFlags = 0x200;
+                str = child;
             }
-
+            if (b == WithIncrementalBarrier) {
+                JSString::writeBarrierPre(str->d.u1.left);
+                JSString::writeBarrierPre(str->d.s.u2.right);
+            }
+            str->d.u1.chars = left.chars();
             wholeCapacity = capacity;
             wholeChars = const_cast<jschar *>(left.chars());
             size_t bits = left.d.lengthAndFlags;

@@ -13,7 +13,6 @@ CC_WRAPPER =
 CXX_WRAPPER =
 
 ifdef MOZ_FOLD_LIBS
-MODULE = nss
 # TODO: The library name can be changed when bug 845217 is fixed.
 LIBRARY_NAME = nss3
 FORCE_SHARED_LIB = 1
@@ -59,7 +58,8 @@ ifeq ($(OS_ARCH), HP-UX)
 ifneq ($(OS_TEST), ia64)
 ifndef HAVE_64BIT_OS
 HAVE_FREEBL_LIBS =
-HAVE_FREEBL_LIBS_32 = 1
+HAVE_FREEBL_LIBS_32INT32 = 1
+HAVE_FREEBL_LIBS_32FPU = 1
 endif
 endif
 endif
@@ -72,7 +72,7 @@ HAVE_FREEBL_LIBS =
 HAVE_FREEBL_LIBS_64 = 1
 else
 HAVE_FREEBL_LIBS =
-HAVE_FREEBL_LIBS_32 = 1
+HAVE_FREEBL_LIBS_32FPU = 1
 HAVE_FREEBL_LIBS_32INT64 = 1
 endif
 endif
@@ -81,8 +81,10 @@ endif
 ifdef HAVE_FREEBL_LIBS
 NSS_EXTRA_DLLS += freebl3
 endif
-ifdef HAVE_FREEBL_LIBS_32
+ifdef HAVE_FREEBL_LIBS_32INT32
 NSS_EXTRA_DLLS += freebl_32int_3
+endif
+ifdef HAVE_FREEBL_LIBS_32FPU
 NSS_EXTRA_DLLS += freebl_32fpu_3
 endif
 ifdef HAVE_FREEBL_LIBS_32INT64
@@ -138,6 +140,9 @@ DEFAULT_GMAKE_FLAGS += NSS_ENABLE_ECC=1
 DEFAULT_GMAKE_FLAGS += NSINSTALL="$(NSINSTALL)"
 ifeq ($(OS_ARCH),WINNT)
 DEFAULT_GMAKE_FLAGS += INSTALL="$(NSINSTALL) -t"
+endif
+ifeq ($(OS_ARCH)_$(GNU_CC),WINNT_1)
+DEFAULT_GMAKE_FLAGS += OS_DLLFLAGS="-static-libgcc"
 endif
 ifndef MOZ_NATIVE_SQLITE
 ifdef MOZ_FOLD_LIBS
@@ -299,11 +304,12 @@ NSS_SRCDIR = $(topsrcdir)
 endif
 
 NSS_DIRS =
-ifndef NSS_DISABLE_DBM
-NSS_DIRS += dbm
-endif
 ifndef MOZ_FOLD_LIBS
 NSS_DIRS += nss/lib
+else
+ifndef NSS_DISABLE_DBM
+NSS_DIRS += nss/lib/dbm
+endif
 endif
 NSS_DIRS += \
   nss/cmd/lib \
@@ -441,7 +447,7 @@ libs-nss/lib/ckfw: libs-nss/lib/nss/../base $(NSPR_IMPORT_LIBS)
 libs-nss/lib/softoken: $(NSPR_IMPORT_LIBS) $(SQLITE_IMPORT_LIB)
 libs-nss/lib/softoken: libs-nss/lib/freebl
 ifndef NSS_DISABLE_DBM
-libs-nss/lib/softoken: libs-dbm
+libs-nss/lib/softoken: libs-nss/lib/dbm
 endif
 libs-nss/lib/softoken: $(DIST)/lib/$(IMPORT_PREFIX)nssutil3$(IMPORT_SUFFIX)
 libs-nss/lib/freebl: $(DIST)/lib/$(IMPORT_PREFIX)nssutil3$(IMPORT_SUFFIX) $(NSPR_IMPORT_LIBS)
@@ -490,10 +496,6 @@ else
 $(NSS_CMD_TARGETS): libs-nss/lib libs-nss/cmd/lib
 endif # MOZ_FOLD_LIBS
 
-ifndef NSS_DISABLE_DBM
-libs-nss/lib: libs-dbm
-endif
-
 # Work around NSS build system race condition creating certdata.c in
 # security/nss/lib/ckfw/builtins. See bug #836220.
-libs-nss/lib: $(call mkdir_deps,../nss/lib/ckfw/builtins)
+libs-nss/lib$(if $(MOZ_FOLD_LIBS),/ckfw): $(call mkdir_deps,../nss/lib/ckfw/builtins)

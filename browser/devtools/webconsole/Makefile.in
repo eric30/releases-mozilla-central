@@ -11,9 +11,11 @@ include $(DEPTH)/config/autoconf.mk
 
 EXTRA_JS_MODULES = \
 		HUDService.jsm \
-		PropertyPanel.jsm \
 		NetworkPanel.jsm \
 		WebConsolePanel.jsm \
 		$(NULL)
 
 include $(topsrcdir)/config/rules.mk
+
+libs::
+	$(NSINSTALL) $(srcdir)/*.js $(FINAL_TARGET)/modules/devtools/framework

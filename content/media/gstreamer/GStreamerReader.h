@@ -8,7 +8,10 @@
 #include <gst/gst.h>
 #include <gst/app/gstappsrc.h>
 #include <gst/app/gstappsink.h>
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wreserved-user-defined-literal"
 #include <gst/video/video.h>
+#pragma GCC diagnostic pop
 #include <map>
 #include "MediaDecoderReader.h"
 
@@ -50,9 +53,13 @@ public:
 private:
 
   void ReadAndPushData(guint aLength);
-  bool WaitForDecodedData(int* counter);
   void NotifyBytesConsumed();
   int64_t QueryDuration();
+
+  /* Called once the pipeline is setup to check that the stream only contains
+   * supported formats
+   */
+  nsresult CheckSupportedFormats();
 
   /* Gst callbacks */
 
@@ -146,21 +153,6 @@ private:
   gint64 mLastReportedByteOffset;
   int fpsNum;
   int fpsDen;
-};
-
-class BufferData {
-  public:
-    BufferData(layers::PlanarYCbCrImage* aImage) : mImage(aImage) {}
-
-    static void* Copy(void* aData) {
-      return new BufferData(reinterpret_cast<BufferData*>(aData)->mImage);
-    }
-
-    static void Free(void* aData) {
-      delete reinterpret_cast<BufferData*>(aData);
-    }
-
-    nsRefPtr<layers::PlanarYCbCrImage> mImage;
 };
 
 } // namespace mozilla

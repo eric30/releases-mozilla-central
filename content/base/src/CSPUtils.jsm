@@ -181,6 +181,9 @@ this.CSPRep = function CSPRep(aSpecCompliant) {
   // Is this a 1.0 spec compliant CSPRep ?
   // Default to false if not specified.
   this._specCompliant = (aSpecCompliant !== undefined) ? aSpecCompliant : false;
+
+  // Only CSP 1.0 spec compliant policies block inline styles by default.
+  this._allowInlineStyles = !aSpecCompliant;
 }
 
 // Source directives for our original CSP implementation.
@@ -302,7 +305,7 @@ CSPRep.fromString = function(aStr, self, docRequest, csp) {
     // parse "allow" as equivalent to "default-src", at least until the spec
     // stabilizes, at which time we can stop parsing "allow"
     if (dirname === CSPRep.ALLOW_DIRECTIVE) {
-      cspWarn(aCSPR, CSPLocalizer.getStr("allowDirectiveDeprecated"));
+      cspWarn(aCSPR, CSPLocalizer.getStr("allowDirectiveIsDeprecated"));
       if (aCSPR._directives.hasOwnProperty(SD.DEFAULT_SRC)) {
         // Check for duplicate default-src and allow directives
         cspError(aCSPR, CSPLocalizer.getFormatStr("duplicateDirective",
@@ -717,7 +720,8 @@ CSPRep.prototype = {
       }
     }
     return (this.allowsInlineScripts === that.allowsInlineScripts)
-        && (this.allowsEvalInScripts === that.allowsEvalInScripts);
+        && (this.allowsEvalInScripts === that.allowsEvalInScripts)
+        && (this.allowsInlineStyles === that.allowsInlineStyles);
   },
 
   /**
@@ -812,6 +816,9 @@ CSPRep.prototype = {
     newRep._allowInlineScripts = this.allowsInlineScripts
                            && aCSPRep.allowsInlineScripts;
 
+    newRep._allowInlineStyles = this.allowsInlineStyles
+                           && aCSPRep.allowsInlineStyles;
+
     newRep._innerWindowID = this._innerWindowID ?
                               this._innerWindowID : aCSPRep._innerWindowID;
 
@@ -870,6 +877,14 @@ CSPRep.prototype = {
    */
   get allowsInlineScripts () {
     return this._allowInlineScripts;
+  },
+
+  /**
+   * Returns true if inline styles are enabled through the "inline-style"
+   * keyword.
+   */
+  get allowsInlineStyles () {
+    return this._allowInlineStyles;
   },
 
   /**
@@ -1909,7 +1924,14 @@ CSPViolationReportListener.prototype = {
   function(request, context) { },
 
   onDataAvailable:
-  function(request, context, inputStream, offset, count) { },
+  function(request, context, inputStream, offset, count) {
+    // We MUST read equal to count from the inputStream to avoid an assertion.
+    var input = Components.classes['@mozilla.org/scriptableinputstream;1']
+                .createInstance(Ci.nsIScriptableInputStream);
+
+    input.init(inputStream);
+    input.read(count);
+  },
 
 };
 

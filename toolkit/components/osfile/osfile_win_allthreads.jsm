@@ -38,9 +38,13 @@ if (typeof Components != "undefined") {
   let LOG = OS.Shared.LOG.bind(OS.Shared, "Win", "allthreads");
 
   // Open libc
-  let libc = ctypes.open("kernel32.dll");
-  if (!libc) {
-    throw new Error("Could not open kernel32.dll");
+  let libc;
+  try {
+    libc = ctypes.open("kernel32.dll");
+  } catch (ex) {
+    // Note: If you change the string here, please adapt consumers and
+    // tests accordingly
+    throw new Error("Could not open system library: " + ex.message);
   }
   exports.OS.Shared.Win.libc = libc;
 
@@ -144,7 +148,7 @@ if (typeof Components != "undefined") {
    */
   Object.defineProperty(OSError.prototype, "becauseClosed", {
     get: function becauseClosed() {
-      return this.winLastError == exports.OS.Constants.Win.INVALID_HANDLE_VALUE;
+      return this.winLastError == exports.OS.Constants.Win.ERROR_INVALID_HANDLE;
     }
   });
 
@@ -155,7 +159,7 @@ if (typeof Components != "undefined") {
   OSError.toMsg = function toMsg(error) {
     return {
       operation: error.operation,
-     winLastError: error.winLastError
+      winLastError: error.winLastError
     };
   };
 
@@ -332,7 +336,7 @@ if (typeof Components != "undefined") {
 
   // Special constructors that need to be defined on all threads
   OSError.closed = function closed(operation) {
-    return new OSError(operation, exports.OS.Constants.Win.INVALID_HANDLE_VALUE);
+    return new OSError(operation, exports.OS.Constants.Win.ERROR_INVALID_HANDLE);
   };
 
   OSError.exists = function exists(operation) {

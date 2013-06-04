@@ -1,6 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=4 sw=4 et tw=78:
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -8,12 +7,21 @@
 #ifndef FullParseHandler_h__
 #define FullParseHandler_h__
 
+#include "mozilla/PodOperations.h"
+
 #include "ParseNode.h"
 #include "SharedContext.h"
 
 namespace js {
 namespace frontend {
 
+template <typename ParseHandler>
+class Parser;
+
+class SyntaxParseHandler;
+
+// Parse handler used when generating a full parse tree for all code which the
+// parser encounters.
 class FullParseHandler
 {
     ParseNodeAllocator allocator;
@@ -29,24 +37,45 @@ class FullParseHandler
         ParseNode *node = allocParseNode(sizeof(ParseNode));
         if (!node)
             return NULL;
-        PodAssign(node, &other);
+        mozilla::PodAssign(node, &other);
         return node;
     }
 
+    /*
+     * If this is a full parse to construct the bytecode for a function that
+     * was previously lazily parsed, that lazy function and the current index
+     * into its inner functions. We do not want to reparse the inner functions.
+     */
+    LazyScript * const lazyOuterFunction_;
+    size_t lazyInnerFunctionIndex;
+
   public:
+
+    /*
+     * If non-NULL, points to a syntax parser which can be used for inner
+     * functions. Cleared if language features not handled by the syntax parser
+     * are encountered, in which case all future activity will use the full
+     * parser.
+     */
+    Parser<SyntaxParseHandler> *syntaxParser;
+
     /* new_ methods for creating parse nodes. These report OOM on context. */
     JS_DECLARE_NEW_METHODS(new_, allocParseNode, inline)
 
     typedef ParseNode *Node;
     typedef Definition *DefinitionNode;
 
-    FullParseHandler(JSContext *cx, TokenStream &tokenStream, bool foldConstants)
+    FullParseHandler(JSContext *cx, TokenStream &tokenStream, bool foldConstants,
+                     Parser<SyntaxParseHandler> *syntaxParser, LazyScript *lazyOuterFunction)
       : allocator(cx),
         tokenStream(tokenStream),
-        foldConstants(foldConstants)
+        foldConstants(foldConstants),
+        lazyOuterFunction_(lazyOuterFunction),
+        lazyInnerFunctionIndex(0),
+        syntaxParser(syntaxParser)
     {}
 
-    static Definition *null() { return NULL; }
+    static ParseNode *null() { return NULL; }
 
     ParseNode *freeTree(ParseNode *pn) { return allocator.freeTree(pn); }
     void prepareNodeForMutation(ParseNode *pn) { return allocator.prepareNodeForMutation(pn); }
@@ -59,6 +88,16 @@ class FullParseHandler
             return NULL;
         pn->setOp(JSOP_NAME);
         return pn;
+    }
+    Definition *newPlaceholder(JSAtom *atom, ParseContext<FullParseHandler> *pc) {
+        Definition *dn = (Definition *) NameNode::create(PNK_NAME, atom, this, pc);
+        if (!dn)
+            return NULL;
+
+        dn->setOp(JSOP_NOP);
+        dn->setDefn(true);
+        dn->pn_dflags |= PND_PLACEHOLDER;
+        return dn;
     }
     ParseNode *newAtom(ParseNodeKind kind, JSAtom *atom, JSOp op = JSOP_NOP) {
         ParseNode *pn = NullaryNode::create(kind, this);
@@ -135,19 +174,19 @@ class FullParseHandler
         return new_<TernaryNode>(kind, op, first, second, third);
     }
 
-    ParseNode *newBreak(PropertyName *label, const TokenPtr &begin, const TokenPtr &end) {
+    ParseNode *newBreak(PropertyName *label, uint32_t begin, uint32_t end) {
         return new_<BreakStatement>(label, begin, end);
     }
-    ParseNode *newContinue(PropertyName *label, const TokenPtr &begin, const TokenPtr &end) {
+    ParseNode *newContinue(PropertyName *label, uint32_t begin, uint32_t end) {
         return new_<ContinueStatement>(label, begin, end);
     }
     ParseNode *newDebuggerStatement(const TokenPos &pos) {
         return new_<DebuggerStatement>(pos);
     }
-    ParseNode *newPropertyAccess(ParseNode *pn, PropertyName *name, const TokenPtr &end) {
+    ParseNode *newPropertyAccess(ParseNode *pn, PropertyName *name, uint32_t end) {
         return new_<PropertyAccess>(pn, name, pn->pn_pos.begin, end);
     }
-    ParseNode *newPropertyByValue(ParseNode *pn, ParseNode *kid, const TokenPtr &end) {
+    ParseNode *newPropertyByValue(ParseNode *pn, ParseNode *kid, uint32_t end) {
         return new_<PropertyByValue>(pn, kid, pn->pn_pos.begin, end);
     }
 
@@ -166,6 +205,9 @@ class FullParseHandler
     void setFunctionBox(ParseNode *pn, FunctionBox *funbox) {
         pn->pn_funbox = funbox;
     }
+    void addFunctionArgument(ParseNode *pn, ParseNode *argpn) {
+        pn->pn_body->append(argpn);
+    }
     inline ParseNode *newLexicalScope(ObjectBox *blockbox);
     bool isOperationWithoutParens(ParseNode *pn, ParseNodeKind kind) {
         return pn->isKind(kind) && !pn->isInParens();
@@ -177,7 +219,7 @@ class FullParseHandler
     void setBeginPosition(ParseNode *pn, ParseNode *oth) {
         setBeginPosition(pn, oth->pn_pos.begin);
     }
-    void setBeginPosition(ParseNode *pn, const TokenPtr &begin) {
+    void setBeginPosition(ParseNode *pn, uint32_t begin) {
         pn->pn_pos.begin = begin;
         JS_ASSERT(pn->pn_pos.begin <= pn->pn_pos.end);
     }
@@ -185,11 +227,14 @@ class FullParseHandler
     void setEndPosition(ParseNode *pn, ParseNode *oth) {
         setEndPosition(pn, oth->pn_pos.end);
     }
-    void setEndPosition(ParseNode *pn, const TokenPtr &end) {
+    void setEndPosition(ParseNode *pn, uint32_t end) {
         pn->pn_pos.end = end;
         JS_ASSERT(pn->pn_pos.begin <= pn->pn_pos.end);
     }
 
+    void setPosition(ParseNode *pn, const TokenPos &pos) {
+        pn->pn_pos = pos;
+    }
     TokenPos getPosition(ParseNode *pn) {
         return pn->pn_pos;
     }
@@ -252,6 +297,61 @@ class FullParseHandler
     }
 
     inline ParseNode *makeAssignment(ParseNode *pn, ParseNode *rhs);
+
+    static Definition *getDefinitionNode(Definition *dn) {
+        return dn;
+    }
+    static Definition::Kind getDefinitionKind(Definition *dn) {
+        return dn->kind();
+    }
+    void linkUseToDef(ParseNode *pn, Definition *dn)
+    {
+        JS_ASSERT(!pn->isUsed());
+        JS_ASSERT(!pn->isDefn());
+        JS_ASSERT(pn != dn->dn_uses);
+        JS_ASSERT(dn->isDefn());
+        pn->pn_link = dn->dn_uses;
+        dn->dn_uses = pn;
+        dn->pn_dflags |= pn->pn_dflags & PND_USE2DEF_FLAGS;
+        pn->setUsed(true);
+        pn->pn_lexdef = dn;
+    }
+    Definition *resolve(Definition *dn) {
+        return dn->resolve();
+    }
+    void deoptimizeUsesWithin(Definition *dn, const TokenPos &pos)
+    {
+        for (ParseNode *pnu = dn->dn_uses; pnu; pnu = pnu->pn_link) {
+            JS_ASSERT(pnu->isUsed());
+            JS_ASSERT(!pnu->isDefn());
+            if (pnu->pn_pos.begin >= pos.begin && pnu->pn_pos.end <= pos.end)
+                pnu->pn_dflags |= PND_DEOPTIMIZED;
+        }
+    }
+    bool dependencyCovered(ParseNode *pn, unsigned blockid, bool functionScope) {
+        return pn->pn_blockid >= blockid;
+    }
+
+    static uintptr_t definitionToBits(Definition *dn) {
+        return uintptr_t(dn);
+    }
+    static Definition *definitionFromBits(uintptr_t bits) {
+        return (Definition *) bits;
+    }
+    static Definition *nullDefinition() {
+        return NULL;
+    }
+    void disableSyntaxParser() {
+        syntaxParser = NULL;
+    }
+
+    LazyScript *lazyOuterFunction() {
+        return lazyOuterFunction_;
+    }
+    JSFunction *nextLazyInnerFunction() {
+        JS_ASSERT(lazyInnerFunctionIndex < lazyOuterFunction()->numInnerFunctions());
+        return lazyOuterFunction()->innerFunctions()[lazyInnerFunctionIndex++];
+    }
 };
 
 inline bool

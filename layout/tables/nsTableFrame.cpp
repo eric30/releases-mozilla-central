@@ -160,10 +160,7 @@ nsTableFrame::nsTableFrame(nsStyleContext* aContext)
   memset(&mBits, 0, sizeof(mBits));
 }
 
-NS_QUERYFRAME_HEAD(nsTableFrame)
-NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
-
-NS_IMETHODIMP
+void
 nsTableFrame::Init(nsIContent*      aContent,
                    nsIFrame*        aParent,
                    nsIFrame*        aPrevInFlow)
@@ -174,7 +171,7 @@ nsTableFrame::Init(nsIContent*      aContent,
                   "prev-in-flow must be of same type");
 
   // Let the base class do its processing
-  nsresult rv = nsContainerFrame::Init(aContent, aParent, aPrevInFlow);
+  nsContainerFrame::Init(aContent, aParent, aPrevInFlow);
 
   // see if border collapse is on, if so set it
   const nsStyleTableBorder* tableStyle = StyleTableBorder();
@@ -184,8 +181,6 @@ nsTableFrame::Init(nsIContent*      aContent,
   // Create the cell map if this frame is the first-in-flow.
   if (!aPrevInFlow) {
     mCellMap = new nsTableCellMap(*this, borderCollapse);
-    if (!mCellMap)
-      return NS_ERROR_OUT_OF_MEMORY;
   }
 
   if (aPrevInFlow) {
@@ -200,11 +195,7 @@ nsTableFrame::Init(nsIContent*      aContent,
       mTableLayoutStrategy = new BasicTableLayoutStrategy(this);
     else
       mTableLayoutStrategy = new FixedTableLayoutStrategy(this);
-    if (!mTableLayoutStrategy)
-      return NS_ERROR_OUT_OF_MEMORY;
   }
-
-  return rv;
 }
 
 nsTableFrame::~nsTableFrame()
@@ -1087,7 +1078,7 @@ nsDisplayTableBorderBackground::Paint(nsDisplayListBuilder* aBuilder,
 
 static int32_t GetTablePartRank(nsDisplayItem* aItem)
 {
-  nsIAtom* type = aItem->GetUnderlyingFrame()->GetType();
+  nsIAtom* type = aItem->Frame()->GetType();
   if (type == nsGkAtoms::tableFrame)
     return 0;
   if (type == nsGkAtoms::tableRowGroupFrame)
@@ -1542,10 +1533,7 @@ nsTableFrame::AncestorsHaveStyleHeight(const nsHTMLReflowState& aParentReflowSta
     }
     else if (nsGkAtoms::tableFrame == frameType) {
       // we reached the containing table, so always return
-      if (rs->mStylePosition->mHeight.GetUnit() != eStyleUnit_Auto) {
-        return true;
-      }
-      else return false;
+      return rs->mStylePosition->mHeight.GetUnit() != eStyleUnit_Auto;
     }
   }
   return false;
@@ -1792,7 +1780,7 @@ NS_METHOD nsTableFrame::Reflow(nsPresContext*           aPresContext,
   // make sure the table overflow area does include the table rect.
   nsRect tableRect(0, 0, aDesiredSize.width, aDesiredSize.height) ;
 
-  if (!ApplyOverflowClipping(this, aReflowState.mStyleDisplay)) {
+  if (!ShouldApplyOverflowClipping(this, aReflowState.mStyleDisplay)) {
     // collapsed border may leak out
     nsMargin bcMargin = GetExcludedOuterBCBorder();
     tableRect.Inflate(bcMargin);
@@ -1816,7 +1804,7 @@ nsTableFrame::UpdateOverflow()
 
   // As above in Reflow, make sure the table overflow area includes the table
   // rect, and check for collapsed borders leaking out.
-  if (!ApplyOverflowClipping(this, StyleDisplay())) {
+  if (!ShouldApplyOverflowClipping(this, StyleDisplay())) {
     nsMargin bcMargin = GetExcludedOuterBCBorder();
     bounds.Inflate(bcMargin);
   }
@@ -2810,7 +2798,7 @@ nsTableFrame::ReflowChildren(nsTableReflowState& aReflowState,
       // nonzero YMost, then we can't be at the top of the page.
       // We ignore a repeated head row group in this check to avoid causing
       // infinite loops in some circumstances - see bug 344883.
-      if (childX > ((thead && IsRepeatedFrame(thead)) ? 1 : 0) &&
+      if (childX > ((thead && IsRepeatedFrame(thead)) ? 1u : 0u) &&
           (rowGroups[childX - 1]->GetRect().YMost() > 0)) {
         kidReflowState.mFlags.mIsTopOfPage = false;
       }
@@ -2922,12 +2910,8 @@ nsTableFrame::ReflowChildren(nsTableReflowState& aReflowState,
         if (!kidNextInFlow) {
           // The child doesn't have a next-in-flow so create a continuing
           // frame. This hooks the child into the flow
-          rv = presContext->PresShell()->FrameConstructor()->
-            CreateContinuingFrame(presContext, kidFrame, this, &kidNextInFlow);
-          if (NS_FAILED(rv)) {
-            aStatus = NS_FRAME_COMPLETE;
-            break;
-          }
+          kidNextInFlow = presContext->PresShell()->FrameConstructor()->
+            CreateContinuingFrame(presContext, kidFrame, this);
 
           // Insert the kid's new next-in-flow into our sibling list...
           mFrames.InsertFrame(nullptr, kidFrame, kidNextInFlow);

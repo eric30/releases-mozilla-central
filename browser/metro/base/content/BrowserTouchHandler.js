@@ -16,24 +16,28 @@ const BrowserTouchHandler = {
 
     // Messages sent from content.js
     messageManager.addMessageListener("Content:ContextMenu", this);
+    messageManager.addMessageListener("Content:SelectionCaret", this);
   },
 
   // Content forwarding the contextmenu command
-  onContentContextMenu: function onContentContextMenu(aMessage) {
+  _onContentContextMenu: function _onContentContextMenu(aMessage) {
     // Note, target here is the target of the message manager message,
     // usually the browser.
-    let contextInfo = { name: aMessage.name,
-                        json: aMessage.json,
-                        target: aMessage.target };
     // Touch input selection handling
-    if (!InputSourceHelper.isPrecise && !SelectionHelperUI.isActive &&
-        SelectionHelperUI.canHandle(aMessage)) {
-      SelectionHelperUI.openEditSession(aMessage);
+    if (!InputSourceHelper.isPrecise &&
+        !SelectionHelperUI.isActive &&
+        SelectionHelperUI.canHandleContextMenuMsg(aMessage)) {
+      SelectionHelperUI.openEditSession(aMessage.target,
+                                        aMessage.json.xPos,
+                                        aMessage.json.yPos);
       return;
     }
 
     // Check to see if we have context menu item(s) that apply to what
     // was clicked on.
+    let contextInfo = { name: aMessage.name,
+                        json: aMessage.json,
+                        target: aMessage.target };
     if (ContextMenuUI.showContextMenu(contextInfo)) {
       let event = document.createEvent("Events");
       event.initEvent("CancelTouchSequence", true, false);
@@ -42,9 +46,19 @@ const BrowserTouchHandler = {
       // Send the MozEdgeUIGesture to input.js to
       // toggle the context ui.
       let event = document.createEvent("Events");
-      event.initEvent("MozEdgeUIGesture", true, false);
+      event.initEvent("MozEdgeUICompleted", true, false);
       window.dispatchEvent(event);
     }
+  },
+
+  /*
+   * Called when Content wants to initiate selection management
+   * due to a tap in a form input.
+   */
+  _onCaretSelectionStarted: function _onCaretSelectionStarted(aMessage) {
+    SelectionHelperUI.attachToCaret(aMessage.target,
+                                    aMessage.json.xPos,
+                                    aMessage.json.yPos);
   },
 
   /*
@@ -70,7 +84,10 @@ const BrowserTouchHandler = {
     switch (aMessage.name) {
       // Content forwarding the contextmenu command
       case "Content:ContextMenu":
-        this.onContentContextMenu(aMessage);
+        this._onContentContextMenu(aMessage);
+        break;
+      case "Content:SelectionCaret":
+        this._onCaretSelectionStarted(aMessage);
         break;
     }
   },

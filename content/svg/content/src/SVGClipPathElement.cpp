@@ -15,7 +15,7 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGClipPathElement::WrapNode(JSContext *aCx, JSObject *aScope)
+SVGClipPathElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
   return SVGClipPathElementBinding::Wrap(aCx, aScope, this);
 }
@@ -29,19 +29,11 @@ nsSVGElement::EnumInfo SVGClipPathElement::sEnumInfo[1] =
 };
 
 //----------------------------------------------------------------------
-// nsISupports methods
-
-NS_IMPL_ISUPPORTS_INHERITED4(SVGClipPathElement, SVGClipPathElementBase,
-                             nsIDOMNode, nsIDOMElement,
-                             nsIDOMSVGElement, nsIDOMSVGUnitTypes)
-
-//----------------------------------------------------------------------
 // Implementation
 
 SVGClipPathElement::SVGClipPathElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : SVGClipPathElementBase(aNodeInfo)
 {
-  SetIsDOMBinding();
 }
 
 already_AddRefed<nsIDOMSVGAnimatedEnumeration>

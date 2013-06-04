@@ -13,7 +13,7 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGEllipseElement::WrapNode(JSContext *aCx, JSObject *aScope)
+SVGEllipseElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
   return SVGEllipseElementBinding::Wrap(aCx, aScope, this);
 }
@@ -27,19 +27,11 @@ nsSVGElement::LengthInfo SVGEllipseElement::sLengthInfo[4] =
 };
 
 //----------------------------------------------------------------------
-// nsISupports methods
-
-NS_IMPL_ISUPPORTS_INHERITED3(SVGEllipseElement, SVGEllipseElementBase,
-                             nsIDOMNode, nsIDOMElement,
-                             nsIDOMSVGElement)
-
-//----------------------------------------------------------------------
 // Implementation
 
 SVGEllipseElement::SVGEllipseElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : SVGEllipseElementBase(aNodeInfo)
 {
-  SetIsDOMBinding();
 }
 
 //----------------------------------------------------------------------

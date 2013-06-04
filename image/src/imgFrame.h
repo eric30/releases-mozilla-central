@@ -38,8 +38,6 @@ public:
             const nsIntMargin &aPadding, const nsIntRect &aSubimage,
             uint32_t aImageFlags = imgIContainer::FLAG_NONE);
 
-  nsresult Extract(const nsIntRect& aRegion, imgFrame** aResult);
-
   nsresult ImageUpdated(const nsIntRect &aUpdateRect);
 
   nsIntRect GetRect() const;
@@ -69,6 +67,7 @@ public:
 
   nsresult LockImageData();
   nsresult UnlockImageData();
+  void MarkImageDataDirty();
 
   nsresult GetSurface(gfxASurface **aSurface) const
   {

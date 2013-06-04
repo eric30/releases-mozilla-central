@@ -6,7 +6,6 @@
 #ifndef mozilla_dom_SVGClipPathElement_h
 #define mozilla_dom_SVGClipPathElement_h
 
-#include "nsIDOMSVGUnitTypes.h"
 #include "nsSVGEnum.h"
 #include "mozilla/dom/SVGTransformableElement.h"
 
@@ -20,9 +19,7 @@ namespace dom {
 
 typedef SVGTransformableElement SVGClipPathElementBase;
 
-class SVGClipPathElement MOZ_FINAL : public SVGClipPathElementBase,
-                                     public nsIDOMSVGElement,
-                                     public nsIDOMSVGUnitTypes
+class SVGClipPathElement MOZ_FINAL : public SVGClipPathElementBase
 {
   friend class ::nsSVGClipPathFrame;
 
@@ -30,21 +27,11 @@ protected:
   friend nsresult (::NS_NewSVGClipPathElement(nsIContent **aResult,
                                               already_AddRefed<nsINodeInfo> aNodeInfo));
   SVGClipPathElement(already_AddRefed<nsINodeInfo> aNodeInfo);
-  virtual JSObject* WrapNode(JSContext *cx, JSObject *scope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *cx,
+                             JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
 public:
-  // interfaces:
-
-  NS_DECL_ISUPPORTS_INHERITED
-
-  // xxx I wish we could use virtual inheritance
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
-  NS_FORWARD_NSIDOMSVGELEMENT(SVGClipPathElementBase::)
-
-  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const;
-
-  virtual nsIDOMNode* AsDOMNode() { return this; }
+  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
 
   // WebIDL
   already_AddRefed<nsIDOMSVGAnimatedEnumeration> ClipPathUnits();
@@ -55,7 +42,7 @@ protected:
   nsSVGEnum mEnumAttributes[1];
   static EnumInfo sEnumInfo[1];
 
-  virtual EnumAttributesInfo GetEnumInfo();
+  virtual EnumAttributesInfo GetEnumInfo() MOZ_OVERRIDE;
 };
 
 } // namespace dom

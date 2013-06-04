@@ -10,11 +10,7 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= xpcom
-
 SIMPLE_PROGRAMS	= TestInterfaceInfo$(BIN_SUFFIX)
-
-CPPSRCS		= TestInterfaceInfo.cpp
 
 LIBS		= \
 		$(XPCOM_GLUE_LDOPTS) \

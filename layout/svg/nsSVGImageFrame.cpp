@@ -20,6 +20,7 @@
 #include "SVGImageContext.h"
 #include "mozilla/dom/SVGImageElement.h"
 #include "nsContentUtils.h"
+#include "nsCxPusher.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -66,9 +67,9 @@ public:
   NS_IMETHOD  AttributeChanged(int32_t         aNameSpaceID,
                                nsIAtom*        aAttribute,
                                int32_t         aModType);
-  NS_IMETHOD Init(nsIContent*      aContent,
-                  nsIFrame*        aParent,
-                  nsIFrame*        aPrevInFlow);
+  virtual void Init(nsIContent*      aContent,
+                    nsIFrame*        aParent,
+                    nsIFrame*        aPrevInFlow) MOZ_OVERRIDE;
   virtual void DestroyFrom(nsIFrame* aDestructRoot);
 
   /**
@@ -129,7 +130,7 @@ nsSVGImageFrame::~nsSVGImageFrame()
   mListener = nullptr;
 }
 
-NS_IMETHODIMP
+void
 nsSVGImageFrame::Init(nsIContent* aContent,
                       nsIFrame* aParent,
                       nsIFrame* aPrevInFlow)
@@ -137,13 +138,13 @@ nsSVGImageFrame::Init(nsIContent* aContent,
   NS_ASSERTION(aContent->IsSVG(nsGkAtoms::image),
                "Content is not an SVG image!");
 
-  nsresult rv = nsSVGImageFrameBase::Init(aContent, aParent, aPrevInFlow);
-  if (NS_FAILED(rv)) return rv;
+  nsSVGImageFrameBase::Init(aContent, aParent, aPrevInFlow);
 
   mListener = new nsSVGImageListener(this);
-  if (!mListener) return NS_ERROR_OUT_OF_MEMORY;
   nsCOMPtr<nsIImageLoadingContent> imageLoader = do_QueryInterface(mContent);
-  NS_ENSURE_TRUE(imageLoader, NS_ERROR_UNEXPECTED);
+  if (!imageLoader) {
+    NS_RUNTIMEABORT("Why is this not an image loading content?");
+  }
 
   // We should have a PresContext now, so let's notify our image loader that
   // we need to register any image animations with the refresh driver.
@@ -156,8 +157,6 @@ nsSVGImageFrame::Init(nsIContent* aContent,
   pusher.PushNull();
 
   imageLoader->AddObserver(mListener);
-
-  return NS_OK; 
 }
 
 /* virtual */ void
@@ -186,12 +185,13 @@ nsSVGImageFrame::AttributeChanged(int32_t         aNameSpaceID,
         aAttribute == nsGkAtoms::y ||
         aAttribute == nsGkAtoms::width ||
         aAttribute == nsGkAtoms::height) {
-      nsSVGUtils::InvalidateBounds(this, false);
+      nsSVGEffects::InvalidateRenderingObservers(this);
       nsSVGUtils::ScheduleReflowSVG(this);
       return NS_OK;
     }
     else if (aAttribute == nsGkAtoms::preserveAspectRatio) {
-      nsSVGUtils::InvalidateBounds(this);
+      // Don't invalidate (the layers code does that).
+      SchedulePaint();
       return NS_OK;
     }
   }
@@ -561,7 +561,7 @@ nsSVGImageListener::Notify(imgIRequest *aRequest, int32_t aType, const nsIntRect
     return NS_ERROR_FAILURE;
 
   if (aType == imgINotificationObserver::LOAD_COMPLETE) {
-    nsSVGUtils::InvalidateBounds(mFrame, false);
+    nsSVGEffects::InvalidateRenderingObservers(mFrame);
     nsSVGUtils::ScheduleReflowSVG(mFrame);
   }
 
@@ -569,13 +569,12 @@ nsSVGImageListener::Notify(imgIRequest *aRequest, int32_t aType, const nsIntRect
     // No new dimensions, so we don't need to call
     // nsSVGUtils::InvalidateAndScheduleBoundsUpdate.
     nsSVGEffects::InvalidateRenderingObservers(mFrame);
-    nsSVGUtils::InvalidateBounds(mFrame);
   }
 
   if (aType == imgINotificationObserver::SIZE_AVAILABLE) {
     // Called once the resource's dimensions have been obtained.
     aRequest->GetImage(getter_AddRefs(mFrame->mImageContainer));
-    nsSVGUtils::InvalidateBounds(mFrame, false);
+    nsSVGEffects::InvalidateRenderingObservers(mFrame);
     nsSVGUtils::ScheduleReflowSVG(mFrame);
   }
 

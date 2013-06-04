@@ -44,21 +44,7 @@ nsBaseContentList::~nsBaseContentList()
 {
 }
 
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsBaseContentList)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mElements)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
-NS_IMPL_CYCLE_COLLECTION_UNLINK_END
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsBaseContentList)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
-  if (nsCCUncollectableMarker::sGeneration && tmp->IsBlack() &&
-      MOZ_LIKELY(!cb.WantAllTraces())) {
-    return NS_SUCCESS_INTERRUPTED_TRAVERSE;
-  }
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mElements)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
-NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(nsBaseContentList)
-  NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER
-NS_IMPL_CYCLE_COLLECTION_TRACE_END
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(nsBaseContentList, mElements)
 
 NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_BEGIN(nsBaseContentList)
   if (nsCCUncollectableMarker::sGeneration && tmp->IsBlack()) {
@@ -138,14 +124,8 @@ nsBaseContentList::IndexOf(nsIContent* aContent)
   return IndexOf(aContent, true);
 }
 
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsSimpleContentList,
-                                                  nsBaseContentList)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRoot)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsSimpleContentList,
-                                                nsBaseContentList)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mRoot)
-NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+NS_IMPL_CYCLE_COLLECTION_INHERITED_1(nsSimpleContentList, nsBaseContentList,
+                                     mRoot)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(nsSimpleContentList)
 NS_INTERFACE_MAP_END_INHERITING(nsBaseContentList)
@@ -155,7 +135,7 @@ NS_IMPL_ADDREF_INHERITED(nsSimpleContentList, nsBaseContentList)
 NS_IMPL_RELEASE_INHERITED(nsSimpleContentList, nsBaseContentList)
 
 JSObject*
-nsSimpleContentList::WrapObject(JSContext *cx, JSObject *scope)
+nsSimpleContentList::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
 {
   return NodeListBinding::Wrap(cx, scope, this);
 }
@@ -216,7 +196,7 @@ NS_GetContentList(nsINode* aRootNode,
 {
   NS_ASSERTION(aRootNode, "content list has to have a root");
 
-  nsContentList* list = nullptr;
+  nsRefPtr<nsContentList> list;
 
   static PLDHashTableOps hash_table_ops =
   {
@@ -275,9 +255,7 @@ NS_GetContentList(nsINode* aRootNode,
     }
   }
 
-  NS_ADDREF(list);
-
-  return list;
+  return list.forget();
 }
 
 #ifdef DEBUG
@@ -288,14 +266,14 @@ const nsCacheableFuncStringContentList::ContentListType
 #endif
 
 JSObject*
-nsCacheableFuncStringNodeList::WrapObject(JSContext *cx, JSObject *scope)
+nsCacheableFuncStringNodeList::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
 {
   return NodeListBinding::Wrap(cx, scope, this);
 }
 
 
 JSObject*
-nsCacheableFuncStringHTMLCollection::WrapObject(JSContext *cx, JSObject *scope)
+nsCacheableFuncStringHTMLCollection::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
 {
   return HTMLCollectionBinding::Wrap(cx, scope, this);
 }
@@ -339,7 +317,7 @@ GetFuncStringContentList(nsINode* aRootNode,
 {
   NS_ASSERTION(aRootNode, "content list has to have a root");
 
-  nsCacheableFuncStringContentList* list = nullptr;
+  nsRefPtr<nsCacheableFuncStringContentList> list;
 
   static PLDHashTableOps hash_table_ops =
   {
@@ -393,11 +371,9 @@ GetFuncStringContentList(nsINode* aRootNode,
     }
   }
 
-  NS_ADDREF(list);
-
   // Don't cache these lists globally
 
-  return list;
+  return list.forget();
 }
 
 already_AddRefed<nsContentList>
@@ -513,7 +489,7 @@ nsContentList::~nsContentList()
 }
 
 JSObject*
-nsContentList::WrapObject(JSContext *cx, JSObject *scope)
+nsContentList::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
 {
   return HTMLCollectionBinding::Wrap(cx, scope, this);
 }
@@ -556,7 +532,7 @@ nsIContent *
 nsContentList::NamedItem(const nsAString& aName, bool aDoFlush)
 {
   BringSelfUpToDate(aDoFlush);
-    
+
   uint32_t i, count = mElements.Length();
 
   // Typically IDs and names are atomized
@@ -697,10 +673,10 @@ nsContentList::NamedItem(JSContext* cx, const nsAString& name,
   if (!item) {
     return nullptr;
   }
-  JSObject* wrapper = GetWrapper();
+  JS::Rooted<JSObject*> wrapper(cx, GetWrapper());
   JSAutoCompartment ac(cx, wrapper);
-  JS::Value v;
-  if (!mozilla::dom::WrapObject(cx, wrapper, item, item, nullptr, &v)) {
+  JS::Rooted<JS::Value> v(cx);
+  if (!mozilla::dom::WrapObject(cx, wrapper, item, item, nullptr, v.address())) {
     error.Throw(NS_ERROR_FAILURE);
     return nullptr;
   }

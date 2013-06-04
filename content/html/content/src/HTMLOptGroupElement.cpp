@@ -5,7 +5,7 @@
 
 #include "mozilla/dom/HTMLOptGroupElement.h"
 #include "mozilla/dom/HTMLOptGroupElementBinding.h"
-#include "nsIDOMEventTarget.h"
+#include "mozilla/dom/HTMLSelectElement.h" // SafeOptionListMutation
 #include "nsGkAtoms.h"
 #include "nsStyleConsts.h"
 #include "nsIFrame.h"
@@ -13,7 +13,6 @@
 #include "nsEventStates.h"
 
 #include "nsEventDispatcher.h"
-#include "nsHTMLSelectElement.h"
 
 NS_IMPL_NS_NEW_HTML_ELEMENT(OptGroup)
 
@@ -104,7 +103,7 @@ HTMLOptGroupElement::InsertChildAt(nsIContent* aKid,
                                    uint32_t aIndex,
                                    bool aNotify)
 {
-  nsSafeOptionListMutation safeMutation(GetSelect(), this, aKid, aIndex, aNotify);
+  SafeOptionListMutation safeMutation(GetSelect(), this, aKid, aIndex, aNotify);
   nsresult rv = nsGenericHTMLElement::InsertChildAt(aKid, aIndex, aNotify);
   if (NS_FAILED(rv)) {
     safeMutation.MutationFailed();
@@ -115,8 +114,8 @@ HTMLOptGroupElement::InsertChildAt(nsIContent* aKid,
 void
 HTMLOptGroupElement::RemoveChildAt(uint32_t aIndex, bool aNotify)
 {
-  nsSafeOptionListMutation safeMutation(GetSelect(), this, nullptr, aIndex,
-                                        aNotify);
+  SafeOptionListMutation safeMutation(GetSelect(), this, nullptr, aIndex,
+                                      aNotify);
   nsGenericHTMLElement::RemoveChildAt(aIndex, aNotify);
 }
 
@@ -157,7 +156,7 @@ HTMLOptGroupElement::IntrinsicState() const
 }
 
 JSObject*
-HTMLOptGroupElement::WrapNode(JSContext* aCx, JSObject* aScope)
+HTMLOptGroupElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
   return HTMLOptGroupElementBinding::Wrap(aCx, aScope, this);
 }

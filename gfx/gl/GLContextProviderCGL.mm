@@ -16,7 +16,8 @@
 #include "gfxFailure.h"
 #include "prenv.h"
 #include "mozilla/Preferences.h"
-#include "sampler.h"
+#include "GeckoProfiler.h"
+#include "mozilla/gfx/MacIOSurface.h"
 
 using namespace mozilla::gfx;
 
@@ -162,7 +163,7 @@ public:
 
     bool SwapBuffers()
     {
-      SAMPLE_LABEL("GLContext", "SwapBuffers");
+      PROFILER_LABEL("GLContext", "SwapBuffers");
       [mContext flushBuffer];
       return true;
     }
@@ -170,15 +171,58 @@ public:
     bool ResizeOffscreen(const gfxIntSize& aNewSize);
 
     virtual already_AddRefed<TextureImage>
-    CreateBasicTextureImage(GLuint aTexture,
-                            const nsIntSize& aSize,
-                            GLenum aWrapMode,
-                            TextureImage::ContentType aContentType,
-                            GLContext* aContext,
-                            TextureImage::Flags aFlags = TextureImage::NoFlags);
+    CreateTextureImage(const nsIntSize& aSize,
+                       TextureImage::ContentType aContentType,
+                       GLenum aWrapMode,
+                       TextureImage::Flags aFlags = TextureImage::NoFlags) MOZ_OVERRIDE;
+
+    virtual already_AddRefed<TextureImage>
+    TileGenFunc(const nsIntSize& aSize,
+                TextureImage::ContentType aContentType,
+                TextureImage::Flags aFlags = TextureImage::NoFlags) MOZ_OVERRIDE;
+
+    virtual SharedTextureHandle CreateSharedHandle(SharedTextureShareType shareType,
+                                                   void* buffer,
+                                                   SharedTextureBufferType bufferType)
+    {
+        return GLContextProviderCGL::CreateSharedHandle(shareType, buffer, bufferType);
+    }
+
+    virtual void ReleaseSharedHandle(SharedTextureShareType shareType,
+                                     SharedTextureHandle sharedHandle)
+    {
+        if (sharedHandle) {
+            reinterpret_cast<MacIOSurface*>(sharedHandle)->Release();
+        }
+    }
+
+    virtual bool GetSharedHandleDetails(SharedTextureShareType shareType,
+                                        SharedTextureHandle sharedHandle,
+                                        SharedHandleDetails& details)
+    {
+        details.mTarget = LOCAL_GL_TEXTURE_RECTANGLE_ARB;
+        details.mProgramType = RGBARectLayerProgramType;
+        return true;
+    }
+
+    virtual bool AttachSharedHandle(SharedTextureShareType shareType,
+                                    SharedTextureHandle sharedHandle)
+    {
+        MacIOSurface* surf = reinterpret_cast<MacIOSurface*>(sharedHandle);
+        surf->CGLTexImageIOSurface2D(mContext, LOCAL_GL_RGBA, LOCAL_GL_BGRA,
+                                     LOCAL_GL_UNSIGNED_INT_8_8_8_8_REV, 0);
+        return true;
+    }
 
     NSOpenGLContext *mContext;
     GLuint mTempTextureName;
+
+    already_AddRefed<TextureImage>
+    CreateTextureImageInternal(const nsIntSize& aSize,
+                               TextureImage::ContentType aContentType,
+                               GLenum aWrapMode,
+                               TextureImage::Flags aFlags);
+
 };
 
 bool
@@ -190,12 +234,10 @@ GLContextCGL::ResizeOffscreen(const gfxIntSize& aNewSize)
 class TextureImageCGL : public BasicTextureImage
 {
     friend already_AddRefed<TextureImage>
-    GLContextCGL::CreateBasicTextureImage(GLuint,
-                                          const nsIntSize&,
-                                          GLenum,
-                                          TextureImage::ContentType,
-                                          GLContext*,
-                                          TextureImage::Flags);
+    GLContextCGL::CreateTextureImageInternal(const nsIntSize& aSize,
+                                             TextureImage::ContentType aContentType,
+                                             GLenum aWrapMode,
+                                             TextureImage::Flags aFlags);
 public:
     ~TextureImageCGL()
     {
@@ -295,16 +337,54 @@ private:
 };
 
 already_AddRefed<TextureImage>
-GLContextCGL::CreateBasicTextureImage(GLuint aTexture,
-                                      const nsIntSize& aSize,
-                                      GLenum aWrapMode,
-                                      TextureImage::ContentType aContentType,
-                                      GLContext* aContext,
-                                      TextureImage::Flags aFlags)
+GLContextCGL::CreateTextureImageInternal(const nsIntSize& aSize,
+                                         TextureImage::ContentType aContentType,
+                                         GLenum aWrapMode,
+                                         TextureImage::Flags aFlags)
 {
+    bool useNearestFilter = aFlags & TextureImage::UseNearestFilter;
+    MakeCurrent();
+
+    GLuint texture;
+    fGenTextures(1, &texture);
+
+    fActiveTexture(LOCAL_GL_TEXTURE0);
+    fBindTexture(LOCAL_GL_TEXTURE_2D, texture);
+
+    GLint texfilter = useNearestFilter ? LOCAL_GL_NEAREST : LOCAL_GL_LINEAR;
+    fTexParameteri(LOCAL_GL_TEXTURE_2D, LOCAL_GL_TEXTURE_MIN_FILTER, texfilter);
+    fTexParameteri(LOCAL_GL_TEXTURE_2D, LOCAL_GL_TEXTURE_MAG_FILTER, texfilter);
+    fTexParameteri(LOCAL_GL_TEXTURE_2D, LOCAL_GL_TEXTURE_WRAP_S, aWrapMode);
+    fTexParameteri(LOCAL_GL_TEXTURE_2D, LOCAL_GL_TEXTURE_WRAP_T, aWrapMode);
+
     nsRefPtr<TextureImageCGL> teximage
-        (new TextureImageCGL(aTexture, aSize, aWrapMode, aContentType, aContext, aFlags));
+        (new TextureImageCGL(texture, aSize, aWrapMode, aContentType, this, aFlags));
     return teximage.forget();
+}
+
+already_AddRefed<TextureImage>
+GLContextCGL::CreateTextureImage(const nsIntSize& aSize,
+                                 TextureImage::ContentType aContentType,
+                                 GLenum aWrapMode,
+                                 TextureImage::Flags aFlags)
+{
+    if (!IsOffscreenSizeAllowed(gfxIntSize(aSize.width, aSize.height)) &&
+        gfxPlatform::OffMainThreadCompositingEnabled()) {
+      NS_ASSERTION(aWrapMode == LOCAL_GL_CLAMP_TO_EDGE, "Can't support wrapping with tiles!");
+      nsRefPtr<TextureImage> t = new gl::TiledTextureImage(this, aSize, aContentType, aFlags);
+      return t.forget();
+    }
+
+    return CreateBasicTextureImage(this, aSize, aContentType, aWrapMode, aFlags);
+}
+
+already_AddRefed<TextureImage>
+GLContextCGL::TileGenFunc(const nsIntSize& aSize,
+                          TextureImage::ContentType aContentType,
+                          TextureImage::Flags aFlags)
+{
+    return CreateTextureImageInternal(aSize, aContentType,
+                                      LOCAL_GL_CLAMP_TO_EDGE, aFlags);
 }
 
 static GLContextCGL *
@@ -412,6 +492,47 @@ GLContextProviderCGL::GetGlobalContext(const ContextFlags)
     }
 
     return gGlobalContext;
+}
+
+SharedTextureHandle
+GLContextProviderCGL::CreateSharedHandle(GLContext::SharedTextureShareType shareType,
+                                         void* buffer,
+                                         GLContext::SharedTextureBufferType bufferType)
+{
+    if (shareType != GLContext::SameProcess ||
+        bufferType != GLContext::IOSurface) {
+        return 0;
+    }
+
+    MacIOSurface* surf = static_cast<MacIOSurface*>(buffer);
+    surf->AddRef();
+
+    return (SharedTextureHandle)surf;
+}
+
+already_AddRefed<gfxASurface>
+GLContextProviderCGL::GetSharedHandleAsSurface(GLContext::SharedTextureShareType shareType,
+                                               SharedTextureHandle sharedHandle)
+{
+  MacIOSurface* surf = reinterpret_cast<MacIOSurface*>(sharedHandle);
+  surf->Lock();
+  size_t bytesPerRow = surf->GetBytesPerRow();
+  size_t ioWidth = surf->GetWidth();
+  size_t ioHeight = surf->GetHeight();
+
+  unsigned char* ioData = (unsigned char*)surf->GetBaseAddress();
+
+  nsRefPtr<gfxImageSurface> imgSurface =
+    new gfxImageSurface(gfxIntSize(ioWidth, ioHeight), gfxASurface::ImageFormatARGB32);
+
+  for (size_t i = 0; i < ioHeight; i++) {
+    memcpy(imgSurface->Data() + i * imgSurface->Stride(),
+           ioData + i * bytesPerRow, ioWidth * 4);
+  }
+
+  surf->Unlock();
+
+  return imgSurface.forget();
 }
 
 void

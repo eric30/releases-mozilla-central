@@ -21,7 +21,7 @@
 #include "nsWidgetInitData.h"
 #include "nsTArray.h"
 #include "nsXULAppAPI.h"
-#include "LayersTypes.h"
+#include "mozilla/layers/LayersTypes.h"
 
 // forward declarations
 class   nsFontMetrics;
@@ -45,7 +45,7 @@ namespace layers {
 class Composer2D;
 class CompositorChild;
 class LayerManager;
-class PLayersChild;
+class PLayerTransactionChild;
 }
 }
 
@@ -92,8 +92,8 @@ typedef nsEventStatus (* EVENT_CALLBACK)(nsGUIEvent *event);
 #endif
 
 #define NS_IWIDGET_IID \
-  { 0xdaac8d94, 0x14f3, 0x4bc4, \
-    { 0xa8, 0xc, 0xf0, 0xe6, 0x46, 0x1e, 0xad, 0x40 } }
+{ 0x5b9152, 0x56c8, 0x4a2d, \
+  { 0x94, 0x9e, 0xec, 0xf5, 0x3, 0x83, 0x3d, 0x48 } }
 
 /*
  * Window shadow styles
@@ -306,6 +306,11 @@ struct IMEState {
 struct InputContext {
   InputContext() : mNativeIMEContext(nullptr) {}
 
+  bool IsPasswordEditor() const
+  {
+    return mHTMLInputType.LowerCaseEqualsLiteral("password");
+  }
+
   IMEState mIMEState;
 
   /* The type of the input if the input is a html input field */
@@ -419,7 +424,7 @@ class nsIWidget : public nsISupports {
     typedef mozilla::layers::CompositorChild CompositorChild;
     typedef mozilla::layers::LayerManager LayerManager;
     typedef mozilla::layers::LayersBackend LayersBackend;
-    typedef mozilla::layers::PLayersChild PLayersChild;
+    typedef mozilla::layers::PLayerTransactionChild PLayerTransactionChild;
     typedef mozilla::widget::NotificationToIME NotificationToIME;
     typedef mozilla::widget::IMEState IMEState;
     typedef mozilla::widget::InputContext InputContext;
@@ -606,6 +611,19 @@ class nsIWidget : public nsISupports {
      * overriding the system setting.
      */
     double GetDefaultScale();
+
+    /**
+     * Return the Gecko override of the system default scale, if any;
+     * returns <= 0.0 if the system scale should be used as-is.
+     * nsIWidget::GetDefaultScale() [above] takes this into account.
+     * It is exposed here so that code that wants to check for a
+     * default-scale override without having a widget on hand can
+     * easily access the same value.
+     * Note that any scale override is a browser-wide value, whereas
+     * the default GetDefaultScale value (when no override is present)
+     * may vary between widgets (or screens).
+     */
+    static double DefaultScaleOverride();
 
     /**
      * Return the first child of this widget.  Will return null if
@@ -835,7 +853,7 @@ class nsIWidget : public nsISupports {
      * Return size mode (minimized, maximized, normalized).
      * Returns a value from nsSizeMode (see nsGUIEvent.h)
      */
-    NS_IMETHOD GetSizeMode(int32_t* aMode) = 0;
+    virtual int32_t SizeMode() = 0;
 
     /**
      * Enable or disable this Widget
@@ -1135,24 +1153,42 @@ class nsIWidget : public nsISupports {
      * type |aBackendHint| instead of what would normally be created.
      * LAYERS_NONE means "no hint".
      */
-    virtual LayerManager* GetLayerManager(PLayersChild* aShadowManager,
+    virtual LayerManager* GetLayerManager(PLayerTransactionChild* aShadowManager,
                                           LayersBackend aBackendHint,
                                           LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT,
                                           bool* aAllowRetaining = nullptr) = 0;
 
     /**
+     * Called before each layer manager transaction to allow any preparation
+     * for DrawWindowUnderlay/Overlay that needs to be on the main thread.
+     *
+     * Always called on the main thread.
+     */
+    virtual void PrepareWindowEffects() = 0;
+
+    /**
+     * Called when shutting down the LayerManager to clean-up any cached resources.
+     *
+     * Always called from the compositing thread, which may be the main-thread if
+     * OMTC is not enabled.
+     */
+    virtual void CleanupWindowEffects() = 0;
+
+    virtual void PreRender(LayerManager* aManager) = 0;
+
+    /**
      * Called before the LayerManager draws the layer tree.
      *
-     * @param aManager The drawing LayerManager.
-     * @param aWidgetRect The current widget rect that is being drawn.
+     * Always called from the compositing thread, which may be the main-thread if
+     * OMTC is not enabled.
      */
     virtual void DrawWindowUnderlay(LayerManager* aManager, nsIntRect aRect) = 0;
 
     /**
      * Called after the LayerManager draws the layer tree
      *
-     * @param aManager The drawing LayerManager.
-     * @param aRect Current widget rect that is being drawn.
+     * Always called from the compositing thread, which may be the main-thread if
+     * OMTC is not enabled.
      */
     virtual void DrawWindowOverlay(LayerManager* aManager, nsIntRect aRect) = 0;
 
@@ -1278,24 +1314,6 @@ class nsIWidget : public nsISupports {
      * included, including those not targeted at this nsIwidget instance.
      */
     virtual bool HasPendingInputEvent() = 0;
-
-    /**
-     * Called when when we need to begin secure keyboard input, such as when a password field
-     * gets focus.
-     *
-     * NOTE: Calls to this method may not be nested and you can only enable secure keyboard input
-     * for one widget at a time.
-     */
-    NS_IMETHOD BeginSecureKeyboardInput() = 0;
-
-    /**
-     * Called when when we need to end secure keyboard input, such as when a password field
-     * loses focus.
-     *
-     * NOTE: Calls to this method may not be nested and you can only enable secure keyboard input
-     * for one widget at a time.
-     */
-    NS_IMETHOD EndSecureKeyboardInput() = 0;
 
     /**
      * Set the background color of the window titlebar for this widget. On Mac,
@@ -1626,13 +1644,6 @@ class nsIWidget : public nsISupports {
        NS_ENSURE_SUCCESS(rv, false);
        return !bounds.IsEmpty();
     }
-
-    /**
-     * This function is called by nsViewManager right before the retained layer 
-     * tree for this widget is about to be updated, and any required
-     * ThebesLayer painting occurs.
-     */
-    virtual void WillPaint() { }
 
     /**
      * Get the natural bounds of this widget.  This method is only

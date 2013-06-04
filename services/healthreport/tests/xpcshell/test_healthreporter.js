@@ -6,12 +6,17 @@
 const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
 Cu.import("resource://services-common/observers.js");
-Cu.import("resource://services-common/preferences.js");
+Cu.import("resource://services-common/utils.js");
 Cu.import("resource://gre/modules/commonjs/sdk/core/promise.js");
-Cu.import("resource://gre/modules/services/healthreport/healthreporter.jsm");
+Cu.import("resource://gre/modules/Metrics.jsm");
+Cu.import("resource://gre/modules/osfile.jsm");
+Cu.import("resource://gre/modules/Preferences.jsm");
+let bsp = Cu.import("resource://gre/modules/services/healthreport/healthreporter.jsm");
+Cu.import("resource://gre/modules/services/healthreport/providers.jsm");
 Cu.import("resource://gre/modules/services/datareporting/policy.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/Task.jsm");
+Cu.import("resource://testing-common/httpd.js");
 Cu.import("resource://testing-common/services-common/bagheeraserver.js");
 Cu.import("resource://testing-common/services/metrics/mocks.jsm");
 Cu.import("resource://testing-common/services/healthreport/utils.jsm");
@@ -21,6 +26,8 @@ const SERVER_HOSTNAME = "localhost";
 const SERVER_PORT = 8080;
 const SERVER_URI = "http://" + SERVER_HOSTNAME + ":" + SERVER_PORT;
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
+
+const HealthReporterState = bsp.HealthReporterState;
 
 
 function defineNow(policy, now) {
@@ -56,14 +63,23 @@ function getJustReporter(name, uri=SERVER_URI, inspected=false) {
   });
 
   let type = inspected ? InspectedHealthReporter : HealthReporter;
-  reporter = new type(branch + "healthreport.", policy);
+  // Define per-instance state file so tests don't interfere with each other.
+  reporter = new type(branch + "healthreport.", policy, null,
+                      "state-" + name + ".json");
 
   return reporter;
 }
 
 function getReporter(name, uri, inspected) {
-  let reporter = getJustReporter(name, uri, inspected);
-  return reporter.onInit();
+  return Task.spawn(function init() {
+    let reporter = getJustReporter(name, uri, inspected);
+    yield reporter.init();
+
+    yield reporter._providerManager.registerProviderFromType(
+      HealthReportProvider);
+
+    throw new Task.Result(reporter);
+  });
 }
 
 function getReporterAndServer(name, namespace="test") {
@@ -87,6 +103,26 @@ function shutdownServer(server) {
   return deferred.promise;
 }
 
+function getHealthReportProviderValues(reporter, day=null) {
+  return Task.spawn(function getValues() {
+    let p = reporter.getProvider("org.mozilla.healthreport");
+    do_check_neq(p, null);
+    let m = p.getMeasurement("submissions", 1);
+    do_check_neq(m, null);
+
+    let data = yield reporter._storage.getMeasurementValues(m.id);
+    if (!day) {
+      throw new Task.Result(data);
+    }
+
+    do_check_true(data.days.hasDay(day));
+    let serializer = m.serializer(m.SERIALIZE_JSON)
+    let json = serializer.daily(data.days.getDay(day));
+
+    throw new Task.Result(json);
+  });
+}
+
 function run_test() {
   makeFakeAppDir().then(run_next_test, do_throw);
 }
@@ -97,11 +133,9 @@ add_task(function test_constructor() {
   try {
     do_check_eq(reporter.lastPingDate.getTime(), 0);
     do_check_null(reporter.lastSubmitID);
-
-    reporter.lastSubmitID = "foo";
-    do_check_eq(reporter.lastSubmitID, "foo");
-    reporter.lastSubmitID = null;
-    do_check_null(reporter.lastSubmitID);
+    do_check_eq(typeof(reporter._state), "object");
+    do_check_eq(reporter._state.lastPingDate.getTime(), 0);
+    do_check_eq(reporter._state.remoteIDs.length, 0);
 
     let failed = false;
     try {
@@ -135,6 +169,8 @@ add_task(function test_shutdown_storage_in_progress() {
     reporter._initiateShutdown();
   };
 
+  reporter.init();
+
   reporter._waitForShutdown();
   do_check_eq(reporter.providerManagerShutdownCount, 0);
   do_check_eq(reporter.storageCloseCount, 1);
@@ -151,6 +187,8 @@ add_task(function test_shutdown_provider_manager_in_progress() {
     reporter._initiateShutdown();
   };
 
+  reporter.init();
+
   // This will hang if shutdown logic is busted.
   reporter._waitForShutdown();
   do_check_eq(reporter.providerManagerShutdownCount, 1);
@@ -166,6 +204,8 @@ add_task(function test_shutdown_when_provider_manager_errors() {
     print("Throwing fake error.");
     throw new Error("Fake error during provider manager initialization.");
   };
+
+  reporter.init();
 
   // This will hang if shutdown logic is busted.
   reporter._waitForShutdown();
@@ -188,19 +228,17 @@ add_task(function test_pull_only_providers() {
 
   let reporter = yield getReporter("constant_only_providers");
   try {
-    do_check_eq(reporter._providerManager._providers.size, 0);
+    let initCount = reporter._providerManager.providers.length;
     yield reporter._providerManager.registerProvidersFromCategoryManager(category);
-    do_check_eq(reporter._providerManager._providers.size, 1);
+    do_check_eq(reporter._providerManager._providers.size, initCount + 1);
     do_check_true(reporter._storage.hasProvider("DummyProvider"));
     do_check_false(reporter._storage.hasProvider("DummyConstantProvider"));
     do_check_neq(reporter.getProvider("DummyProvider"), null);
     do_check_null(reporter.getProvider("DummyConstantProvider"));
 
-    yield reporter._providerManager.ensurePullOnlyProvidersRegistered();
     yield reporter.collectMeasurements();
-    yield reporter._providerManager.ensurePullOnlyProvidersUnregistered();
 
-    do_check_eq(reporter._providerManager._providers.size, 1);
+    do_check_eq(reporter._providerManager._providers.size, initCount + 1);
     do_check_true(reporter._storage.hasProvider("DummyConstantProvider"));
 
     let mID = reporter._storage.measurementID("DummyConstantProvider", "DummyMeasurement", 1);
@@ -257,7 +295,8 @@ add_task(function test_json_payload_simple() {
     do_check_eq(Object.keys(original.data.days).length, 0);
     do_check_false("notInitialized" in original);
 
-    reporter.lastPingDate = new Date(now.getTime() - 24 * 60 * 60 * 1000 - 10);
+    yield reporter._state.setLastPingDate(
+      new Date(now.getTime() - 24 * 60 * 60 * 1000 - 10));
 
     original = JSON.parse(yield reporter.getJSONPayload());
     do_check_eq(original.lastPingDate, reporter._formatDate(reporter.lastPingDate));
@@ -325,6 +364,7 @@ add_task(function test_constant_only_providers_in_json_payload() {
 
   let reporter = yield getReporter("constant_only_providers_in_json_payload");
   try {
+    let initCount = reporter._providerManager.providers.length;
     yield reporter._providerManager.registerProvidersFromCategoryManager(category);
 
     let payload = yield reporter.collectAndObtainJSONPayload();
@@ -333,7 +373,7 @@ add_task(function test_constant_only_providers_in_json_payload() {
     do_check_true("DummyConstantProvider.DummyMeasurement" in o.data.last);
 
     let providers = reporter._providerManager.providers;
-    do_check_eq(providers.length, 1);
+    do_check_eq(providers.length, initCount + 1);
 
     // Do it again for good measure.
     payload = yield reporter.collectAndObtainJSONPayload();
@@ -342,7 +382,7 @@ add_task(function test_constant_only_providers_in_json_payload() {
     do_check_true("DummyConstantProvider.DummyMeasurement" in o.data.last);
 
     providers = reporter._providerManager.providers;
-    do_check_eq(providers.length, 1);
+    do_check_eq(providers.length, initCount + 1);
 
     // Ensure throwing getJSONPayload is handled properly.
     Object.defineProperty(reporter, "_getJSONPayload", {
@@ -355,7 +395,7 @@ add_task(function test_constant_only_providers_in_json_payload() {
 
     reporter.collectAndObtainJSONPayload().then(do_throw, function onError() {
       providers = reporter._providerManager.providers;
-      do_check_eq(providers.length, 1);
+      do_check_eq(providers.length, initCount + 1);
       deferred.resolve();
     });
 
@@ -373,16 +413,20 @@ add_task(function test_json_payload_multiple_days() {
     yield reporter._providerManager.registerProvider(provider);
 
     let now = new Date();
+
     let m = provider.getMeasurement("DummyMeasurement", 1);
     for (let i = 0; i < 200; i++) {
       let date = new Date(now.getTime() - i * MILLISECONDS_PER_DAY);
       yield m.incrementDailyCounter("daily-counter", date);
-      yield m.addDailyDiscreteNumeric("daily-discrete-numeric", i, date);
-      yield m.addDailyDiscreteNumeric("daily-discrete-numeric", i + 100, date);
-      yield m.addDailyDiscreteText("daily-discrete-text", "" + i, date);
-      yield m.addDailyDiscreteText("daily-discrete-text", "" + (i + 50), date);
-      yield m.setDailyLastNumeric("daily-last-numeric", date.getTime(), date);
     }
+
+    // This test could fail if we cross a UTC day boundary when running. So,
+    // we ensure this doesn't occur.
+    Object.defineProperty(reporter, "_now", {
+      value: function () {
+        return now;
+      },
+    });
 
     let payload = yield reporter.getJSONPayload();
     print(payload);
@@ -391,6 +435,83 @@ add_task(function test_json_payload_multiple_days() {
     do_check_eq(Object.keys(o.data.days).length, 180);
     let today = reporter._formatDate(now);
     do_check_true(today in o.data.days);
+  } finally {
+    reporter._shutdown();
+  }
+});
+
+add_task(function test_json_payload_newer_version_overwrites() {
+  let reporter = yield getReporter("json_payload_newer_version_overwrites");
+
+  try {
+    let now = new Date();
+    // Instead of hacking up the internals to ensure consistent order in Map
+    // iteration (which would be difficult), we instead opt to generate a lot
+    // of measurements of different versions and verify their iterable order
+    // is not increasing.
+    let versions = [1, 6, 3, 9, 2, 3, 7, 4, 10, 8];
+    let protos = [];
+    for (let version of versions) {
+      let m = function () {
+        Metrics.Measurement.call(this);
+      };
+      m.prototype = {
+        __proto__: DummyMeasurement.prototype,
+        name: "DummyMeasurement",
+        version: version,
+      };
+
+      protos.push(m);
+    }
+
+    let ctor = function () {
+      Metrics.Provider.call(this);
+    };
+    ctor.prototype = {
+      __proto__: DummyProvider.prototype,
+
+      name: "MultiMeasurementProvider",
+      measurementTypes: protos,
+    };
+
+    let provider = new ctor();
+
+    yield reporter._providerManager.registerProvider(provider);
+
+    let haveUnordered = false;
+    let last = -1;
+    let highestVersion = -1;
+    for (let [key, measurement] of provider.measurements) {
+      yield measurement.setDailyLastNumeric("daily-last-numeric",
+                                            measurement.version, now);
+      yield measurement.setLastNumeric("last-numeric",
+                                       measurement.version, now);
+
+      if (measurement.version > highestVersion) {
+        highestVersion = measurement.version;
+      }
+
+      if (measurement.version < last) {
+        haveUnordered = true;
+      }
+
+      last = measurement.version;
+    }
+
+    // Ensure Map traversal isn't ordered. If this ever fails, then we'll need
+    // to monkeypatch.
+    do_check_true(haveUnordered);
+
+    let payload = yield reporter.getJSONPayload();
+    let o = JSON.parse(payload);
+    do_check_true("MultiMeasurementProvider.DummyMeasurement" in o.data.last);
+    do_check_eq(o.data.last["MultiMeasurementProvider.DummyMeasurement"]._v, highestVersion);
+
+    let day = reporter._formatDate(now);
+    do_check_true(day in o.data.days);
+    do_check_true("MultiMeasurementProvider.DummyMeasurement" in o.data.days[day]);
+    do_check_eq(o.data.days[day]["MultiMeasurementProvider.DummyMeasurement"]._v, highestVersion);
+
   } finally {
     reporter._shutdown();
   }
@@ -433,7 +554,41 @@ add_task(function test_data_submission_transport_failure() {
 
     yield deferred.promise;
     do_check_eq(request.state, request.SUBMISSION_FAILURE_SOFT);
+
+    let data = yield getHealthReportProviderValues(reporter, new Date());
+    do_check_eq(data._v, 1);
+    do_check_eq(data.firstDocumentUploadAttempt, 1);
+    do_check_eq(data.uploadTransportFailure, 1);
+    do_check_eq(Object.keys(data).length, 3);
   } finally {
+    reporter._shutdown();
+  }
+});
+
+add_task(function test_data_submission_server_failure() {
+  let [reporter, server] = yield getReporterAndServer("data_submission_server_failure");
+  try {
+    Object.defineProperty(server, "_handleNamespaceSubmitPost", {
+      value: function (ns, id, request, response) {
+        throw HTTP_500;
+      },
+      writable: true,
+    });
+
+    let deferred = Promise.defer();
+    let now = new Date();
+    let request = new DataSubmissionRequest(deferred, now);
+    reporter.requestDataUpload(request);
+    yield deferred.promise;
+    do_check_eq(request.state, request.SUBMISSION_FAILURE_HARD);
+
+    let data = yield getHealthReportProviderValues(reporter, now);
+    do_check_eq(data._v, 1);
+    do_check_eq(data.firstDocumentUploadAttempt, 1);
+    do_check_eq(data.uploadServerFailure, 1);
+    do_check_eq(Object.keys(data).length, 3);
+  } finally {
+    yield shutdownServer(server);
     reporter._shutdown();
   }
 });
@@ -449,7 +604,8 @@ add_task(function test_data_submission_success() {
 
     let deferred = Promise.defer();
 
-    let request = new DataSubmissionRequest(deferred, new Date());
+    let now = new Date();
+    let request = new DataSubmissionRequest(deferred, now);
     reporter.requestDataUpload(request);
     yield deferred.promise;
     do_check_eq(request.state, request.SUBMISSION_SUCCESS);
@@ -457,9 +613,25 @@ add_task(function test_data_submission_success() {
     do_check_true(reporter.haveRemoteData());
 
     // Ensure data from providers made it to payload.
-    let o = yield reporter.getLastPayload();
+    let o = yield reporter.getJSONPayload(true);
     do_check_true("DummyProvider.DummyMeasurement" in o.data.last);
     do_check_true("DummyConstantProvider.DummyMeasurement" in o.data.last);
+
+    let data = yield getHealthReportProviderValues(reporter, now);
+    do_check_eq(data._v, 1);
+    do_check_eq(data.firstDocumentUploadAttempt, 1);
+    do_check_eq(data.uploadSuccess, 1);
+    do_check_eq(Object.keys(data).length, 3);
+
+    let d = reporter.lastPingDate;
+    let id = reporter.lastSubmitID;
+
+    reporter._shutdown();
+
+    // Ensure reloading state works.
+    reporter = yield getReporter("data_submission_success");
+    do_check_eq(reporter.lastSubmitID, id);
+    do_check_eq(reporter.lastPingDate.getTime(), d.getTime());
 
     reporter._shutdown();
   } finally {
@@ -493,6 +665,15 @@ add_task(function test_recurring_daily_pings() {
     do_check_neq(reporter.lastSubmitID, lastID);
     do_check_true(server.hasDocument(reporter.serverNamespace, reporter.lastSubmitID));
     do_check_false(server.hasDocument(reporter.serverNamespace, lastID));
+
+    // now() on the health reporter instance wasn't munged. So, we should see
+    // both requests attributed to the same day.
+    let data = yield getHealthReportProviderValues(reporter, new Date());
+    do_check_eq(data._v, 1);
+    do_check_eq(data.firstDocumentUploadAttempt, 1);
+    do_check_eq(data.continuationUploadAttempt, 1);
+    do_check_eq(data.uploadSuccess, 2);
+    do_check_eq(Object.keys(data).length, 4);
   } finally {
     reporter._shutdown();
     yield shutdownServer(server);
@@ -542,22 +723,6 @@ add_task(function test_policy_accept_reject() {
     policy.recordUserRejection();
     do_check_false(policy.dataSubmissionPolicyAccepted);
     do_check_false(reporter.willUploadData);
-  } finally {
-    reporter._shutdown();
-    yield shutdownServer(server);
-  }
-});
-
-add_task(function test_upload_save_payload() {
-  let [reporter, server] = yield getReporterAndServer("upload_save_payload");
-
-  try {
-    let deferred = Promise.defer();
-    let request = new DataSubmissionRequest(deferred, new Date(), false);
-
-    yield reporter._uploadData(request);
-    let json = yield reporter.getLastPayload();
-    do_check_true("thisPingDate" in json);
   } finally {
     reporter._shutdown();
     yield shutdownServer(server);
@@ -621,8 +786,9 @@ add_task(function test_collect_when_upload_disabled() {
   let name = "healthreport-testing-collect_when_upload_disabled-healthreport-lastDailyCollection";
   let pref = "app.update.lastUpdateTime." + name;
   do_check_false(Services.prefs.prefHasUserValue(pref));
+
   try {
-    yield reporter.onInit();
+    yield reporter.init();
     do_check_true(Services.prefs.prefHasUserValue(pref));
 
     // We would ideally ensure the timer fires and does the right thing.
@@ -675,12 +841,12 @@ add_task(function test_upload_on_init_failure() {
 
   let oldOnResult = reporter._onBagheeraResult;
   Object.defineProperty(reporter, "_onBagheeraResult", {
-    value: function (request, isDelete, result) {
+    value: function (request, isDelete, date, result) {
       do_check_false(isDelete);
       do_check_true(result.transportSuccess);
       do_check_true(result.serverSuccess);
 
-      oldOnResult.call(reporter, request, isDelete, result);
+      oldOnResult.call(reporter, request, isDelete, new Date(), result);
       deferred.resolve();
     },
   });
@@ -688,7 +854,7 @@ add_task(function test_upload_on_init_failure() {
   reporter._policy.recordUserAcceptance();
   let error = false;
   try {
-    yield reporter.onInit();
+    yield reporter.init();
   } catch (ex) {
     error = true;
   } finally {
@@ -710,5 +876,163 @@ add_task(function test_upload_on_init_failure() {
 
   reporter._shutdown();
   yield shutdownServer(server);
+});
+
+add_task(function test_state_prefs_conversion_simple() {
+  let reporter = getJustReporter("state_prefs_conversion");
+  let prefs = reporter._prefs;
+
+  let lastSubmit = new Date();
+  prefs.set("lastSubmitID", "lastID");
+  CommonUtils.setDatePref(prefs, "lastPingTime", lastSubmit);
+
+  try {
+    yield reporter.init();
+
+    do_check_eq(reporter._state.lastSubmitID, "lastID");
+    do_check_eq(reporter._state.remoteIDs.length, 1);
+    do_check_eq(reporter._state.lastPingDate.getTime(), lastSubmit.getTime());
+    do_check_eq(reporter._state.lastPingDate.getTime(), reporter.lastPingDate.getTime());
+    do_check_eq(reporter._state.lastSubmitID, reporter.lastSubmitID);
+    do_check_true(reporter.haveRemoteData());
+
+    // User set preferences should have been wiped out.
+    do_check_false(prefs.isSet("lastSubmitID"));
+    do_check_false(prefs.isSet("lastPingTime"));
+  } finally {
+    reporter._shutdown();
+  }
+});
+
+// If the saved JSON file does not contain an object, we should reset
+// automatically.
+add_task(function test_state_no_json_object() {
+  let reporter = getJustReporter("state_shared");
+  yield CommonUtils.writeJSON("hello", reporter._state._filename);
+
+  try {
+    yield reporter.init();
+
+    do_check_eq(reporter.lastPingDate.getTime(), 0);
+    do_check_null(reporter.lastSubmitID);
+
+    let o = yield CommonUtils.readJSON(reporter._state._filename);
+    do_check_eq(typeof(o), "object");
+    do_check_eq(o.v, 1);
+    do_check_eq(o.lastPingTime, 0);
+    do_check_eq(o.remoteIDs.length, 0);
+  } finally {
+    reporter._shutdown();
+  }
+});
+
+// If we encounter a future version, we reset state to the current version.
+add_task(function test_state_future_version() {
+  let reporter = getJustReporter("state_shared");
+  yield CommonUtils.writeJSON({v: 2, remoteIDs: ["foo"], lastPingTime: 2412},
+                              reporter._state._filename);
+  try {
+    yield reporter.init();
+
+    do_check_eq(reporter.lastPingDate.getTime(), 0);
+    do_check_null(reporter.lastSubmitID);
+
+    // While the object is updated, we don't save the file.
+    let o = yield CommonUtils.readJSON(reporter._state._filename);
+    do_check_eq(o.v, 2);
+    do_check_eq(o.lastPingTime, 2412);
+    do_check_eq(o.remoteIDs.length, 1);
+  } finally {
+    reporter._shutdown();
+  }
+});
+
+// Test recovery if the state file contains invalid JSON.
+add_task(function test_state_invalid_json() {
+  let reporter = getJustReporter("state_shared");
+
+  let encoder = new TextEncoder();
+  let arr = encoder.encode("{foo: bad value, 'bad': as2,}");
+  let path = reporter._state._filename;
+  yield OS.File.writeAtomic(path, arr, {tmpPath: path + ".tmp"});
+
+  try {
+    yield reporter.init();
+
+    do_check_eq(reporter.lastPingDate.getTime(), 0);
+    do_check_null(reporter.lastSubmitID);
+  } finally {
+    reporter._shutdown();
+  }
+});
+
+add_task(function test_state_multiple_remote_ids() {
+  let [reporter, server] = yield getReporterAndServer("state_multiple_remote_ids");
+
+  let now = new Date(Date.now() - 5000);
+
+  server.setDocument(reporter.serverNamespace, "id1", "foo");
+  server.setDocument(reporter.serverNamespace, "id2", "bar");
+
+  try {
+    yield reporter._state.addRemoteID("id1");
+    yield reporter._state.addRemoteID("id2");
+    yield reporter._state.setLastPingDate(now);
+    do_check_eq(reporter._state.remoteIDs.length, 2);
+    do_check_eq(reporter._state.remoteIDs[0], "id1");
+    do_check_eq(reporter._state.remoteIDs[1], "id2");
+    do_check_eq(reporter.lastSubmitID, "id1");
+
+    let deferred = Promise.defer();
+    let request = new DataSubmissionRequest(deferred, now);
+    reporter.requestDataUpload(request);
+    yield deferred.promise;
+
+    do_check_eq(reporter._state.remoteIDs.length, 2);
+    do_check_eq(reporter._state.remoteIDs[0], "id2");
+    do_check_true(reporter.lastPingDate.getTime() > now.getTime());
+    do_check_false(server.hasDocument(reporter.serverNamespace, "id1"));
+    do_check_true(server.hasDocument(reporter.serverNamespace, "id2"));
+
+    let o = CommonUtils.readJSON(reporter._state._filename);
+    do_check_eq(reporter._state.remoteIDs.length, 2);
+    do_check_eq(reporter._state.remoteIDs[0], "id2");
+    do_check_eq(reporter._state.remoteIDs[1], reporter._state.remoteIDs[1]);
+  } finally {
+    yield shutdownServer(server);
+    reporter._shutdown();
+  }
+});
+
+// If we have a state file then downgrade to prefs, the prefs should be
+// reimported and should supplement existing state.
+add_task(function test_state_downgrade_upgrade() {
+  let reporter = getJustReporter("state_shared");
+
+  let now = new Date();
+
+  yield CommonUtils.writeJSON({v: 1, remoteIDs: ["id1", "id2"], lastPingTime: now.getTime()},
+                              reporter._state._filename);
+
+  let prefs = reporter._prefs;
+  prefs.set("lastSubmitID", "prefID");
+  prefs.set("lastPingTime", "" + (now.getTime() + 1000));
+
+  try {
+    yield reporter.init();
+
+    do_check_eq(reporter.lastSubmitID, "id1");
+    do_check_eq(reporter._state.remoteIDs.length, 3);
+    do_check_eq(reporter._state.remoteIDs[2], "prefID");
+    do_check_eq(reporter.lastPingDate.getTime(), now.getTime() + 1000);
+    do_check_false(prefs.isSet("lastSubmitID"));
+    do_check_false(prefs.isSet("lastPingTime"));
+
+    let o = yield CommonUtils.readJSON(reporter._state._filename);
+    do_check_eq(o.remoteIDs.length, 3);
+    do_check_eq(o.lastPingTime, now.getTime() + 1000);
+  } finally {
+    reporter._shutdown();
+  }
 });
 

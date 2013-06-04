@@ -10,7 +10,7 @@
 #include <limits>
 #include "nsNetUtil.h"
 #include "AudioStream.h"
-#include "nsHTMLVideoElement.h"
+#include "mozilla/dom/HTMLVideoElement.h"
 #include "nsIObserver.h"
 #include "nsIObserverService.h"
 #include "nsTArray.h"
@@ -45,7 +45,7 @@ static const uint32_t STALL_MS = 3000;
 // catching up with the download. Having this margin make the
 // MediaDecoder::CanPlayThrough() calculation more stable in the case of
 // fluctuating bitrates.
-static const int64_t CAN_PLAY_THROUGH_MARGIN = 10;
+static const int64_t CAN_PLAY_THROUGH_MARGIN = 1;
 
 #ifdef PR_LOGGING
 PRLogModuleInfo* gMediaDecoderLog;
@@ -409,7 +409,7 @@ MediaDecoder::~MediaDecoder()
 }
 
 nsresult MediaDecoder::OpenResource(MediaResource* aResource,
-                                        nsIStreamListener** aStreamListener)
+                                    nsIStreamListener** aStreamListener)
 {
   MOZ_ASSERT(NS_IsMainThread());
   if (aStreamListener) {
@@ -425,7 +425,6 @@ nsresult MediaDecoder::OpenResource(MediaResource* aResource,
     nsresult rv = aResource->Open(aStreamListener);
     if (NS_FAILED(rv)) {
       LOG(PR_LOG_DEBUG, ("%p Failed to open stream!", this));
-      delete aResource;
       return rv;
     }
 
@@ -948,15 +947,8 @@ void MediaDecoder::NotifySuspendedStatusChanged()
   MOZ_ASSERT(NS_IsMainThread());
   if (!mResource)
     return;
-  MediaResource* activeStream;
-  bool suspended = mResource->IsSuspendedByCache(&activeStream);
-
+  bool suspended = mResource->IsSuspendedByCache();
   if (mOwner) {
-    if (suspended) {
-      // If this is an autoplay element, we need to kick off its autoplaying
-      // now so we consume data and hopefully free up cache space.
-      mOwner->NotifyAutoplayDataReady();
-    }
     mOwner->NotifySuspendedByCache(suspended);
     UpdateReadyStateForData();
   }
@@ -1227,9 +1219,9 @@ void MediaDecoder::DurationChanged()
 void MediaDecoder::SetDuration(double aDuration)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  if (MOZ_DOUBLE_IS_INFINITE(aDuration)) {
+  if (mozilla::IsInfinite(aDuration)) {
     SetInfinite(true);
-  } else if (MOZ_DOUBLE_IS_NaN(aDuration)) {
+  } else if (IsNaN(aDuration)) {
     mDuration = -1;
     SetInfinite(true);
   } else {
@@ -1286,7 +1278,6 @@ bool MediaDecoder::IsMediaSeekable()
 
 nsresult MediaDecoder::GetSeekable(TimeRanges* aSeekable)
 {
-  //TODO : change 0.0 to GetInitialTime() when available
   double initialTime = 0.0;
 
   // We can seek in buffered range if the media is seekable. Also, we can seek
@@ -1666,7 +1657,7 @@ MediaDecoder::IsGStreamerEnabled()
 }
 #endif
 
-#ifdef MOZ_WIDGET_GONK
+#ifdef MOZ_OMX_DECODER
 bool
 MediaDecoder::IsOmxEnabled()
 {
@@ -1697,6 +1688,13 @@ MediaDecoder::IsWMFEnabled()
   return WMFDecoder::IsEnabled();
 }
 #endif
+
+MediaDecoderOwner*
+MediaDecoder::GetOwner()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  return mOwner;
+}
 
 MediaMemoryReporter* MediaMemoryReporter::sUniqueInstance;
 

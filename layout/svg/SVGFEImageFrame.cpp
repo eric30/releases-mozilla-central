@@ -31,9 +31,9 @@ protected:
 public:
   NS_DECL_FRAMEARENA_HELPERS
 
-  NS_IMETHOD Init(nsIContent* aContent,
-                  nsIFrame*   aParent,
-                  nsIFrame*   aPrevInFlow);
+  virtual void Init(nsIContent* aContent,
+                    nsIFrame*   aParent,
+                    nsIFrame*   aPrevInFlow) MOZ_OVERRIDE;
   virtual void DestroyFrom(nsIFrame* aDestructRoot);
 
   virtual bool IsFrameOfType(uint32_t aFlags) const
@@ -47,8 +47,6 @@ public:
     return MakeFrameName(NS_LITERAL_STRING("SVGFEImage"), aResult);
   }
 #endif
-
-  virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext);
 
   /**
    * Get the "type" of the frame
@@ -76,13 +74,6 @@ NS_NewSVGFEImageFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 NS_IMPL_FRAMEARENA_HELPERS(SVGFEImageFrame)
 
 /* virtual */ void
-SVGFEImageFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
-{
-  SVGFEImageFrameBase::DidSetStyleContext(aOldStyleContext);
-  nsSVGEffects::InvalidateRenderingObservers(this);
-}
-
-/* virtual */ void
 SVGFEImageFrame::DestroyFrom(nsIFrame* aDestructRoot)
 {
   nsCOMPtr<nsIImageLoadingContent> imageLoader =
@@ -96,7 +87,7 @@ SVGFEImageFrame::DestroyFrom(nsIFrame* aDestructRoot)
   SVGFEImageFrameBase::DestroyFrom(aDestructRoot);
 }
 
-NS_IMETHODIMP
+void
 SVGFEImageFrame::Init(nsIContent* aContent,
                         nsIFrame* aParent,
                         nsIFrame* aPrevInFlow)
@@ -110,12 +101,12 @@ SVGFEImageFrame::Init(nsIContent* aContent,
     do_QueryInterface(SVGFEImageFrameBase::mContent);
 
   if (imageLoader) {
-    imageLoader->FrameCreated(this);
     // We assume that feImage's are always visible.
+    // Increment the visible count before calling FrameCreated so that
+    // FrameCreated will actually track the image correctly.
     imageLoader->IncrementVisibleCount();
+    imageLoader->FrameCreated(this);
   }
-
-  return NS_OK;
 }
 
 nsIAtom *

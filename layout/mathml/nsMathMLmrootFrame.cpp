@@ -51,12 +51,12 @@ nsMathMLmrootFrame::~nsMathMLmrootFrame()
 {
 }
 
-NS_IMETHODIMP
+void
 nsMathMLmrootFrame::Init(nsIContent*      aContent,
                          nsIFrame*        aParent,
                          nsIFrame*        aPrevInFlow)
 {
-  nsresult rv = nsMathMLContainerFrame::Init(aContent, aParent, aPrevInFlow);
+  nsMathMLContainerFrame::Init(aContent, aParent, aPrevInFlow);
   
   nsPresContext *presContext = PresContext();
 
@@ -66,8 +66,6 @@ nsMathMLmrootFrame::Init(nsIContent*      aContent,
   nsAutoString sqrChar; sqrChar.Assign(kSqrChar);
   mSqrChar.SetData(presContext, sqrChar);
   ResolveMathMLCharStyle(presContext, mContent, mStyleContext, &mSqrChar, true);
-
-  return rv;
 }
 
 NS_IMETHODIMP
@@ -273,7 +271,7 @@ nsMathMLmrootFrame::Reflow(nsPresContext*          aPresContext,
                    NS_STRETCH_DIRECTION_VERTICAL, 
                    contSize, radicalSize,
                    NS_STRETCH_LARGER,
-                   NS_MATHML_IS_RTL(mPresentationData.flags));
+                   StyleVisibility()->mDirection);
   // radicalSize have changed at this point, and should match with
   // the bounding metrics of the char
   mSqrChar.GetBoundingMetrics(bmSqr);

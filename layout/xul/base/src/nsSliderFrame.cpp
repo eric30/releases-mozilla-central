@@ -20,9 +20,7 @@
 #include "nsHTMLParts.h"
 #include "nsIPresShell.h"
 #include "nsCSSRendering.h"
-#include "nsDOMTouchEvent.h"
 #include "nsEventListenerManager.h"
-#include "nsIDOMEventTarget.h"
 #include "nsIDOMMouseEvent.h"
 #include "nsScrollbarButtonFrame.h"
 #include "nsISliderListener.h"
@@ -51,9 +49,8 @@ int32_t nsSliderFrame::gSnapMultiplier;
 static already_AddRefed<nsIContent>
 GetContentOfBox(nsIFrame *aBox)
 {
-  nsIContent* content = aBox->GetContent();
-  NS_IF_ADDREF(content);
-  return content;
+  nsCOMPtr<nsIContent> content = aBox->GetContent();
+  return content.forget();
 }
 
 nsIFrame*
@@ -77,12 +74,12 @@ nsSliderFrame::~nsSliderFrame()
 {
 }
 
-NS_IMETHODIMP
+void
 nsSliderFrame::Init(nsIContent*      aContent,
                     nsIFrame*        aParent,
                     nsIFrame*        aPrevInFlow)
 {
-  nsresult rv = nsBoxFrame::Init(aContent, aParent, aPrevInFlow);
+  nsBoxFrame::Init(aContent, aParent, aPrevInFlow);
 
   static bool gotPrefs = false;
   if (!gotPrefs) {
@@ -93,8 +90,6 @@ nsSliderFrame::Init(nsIContent*      aContent,
   }
 
   mCurPos = GetCurrentPosition(aContent);
-
-  return rv;
 }
 
 NS_IMETHODIMP

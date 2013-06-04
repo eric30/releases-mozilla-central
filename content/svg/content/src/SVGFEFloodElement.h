@@ -16,8 +16,7 @@ namespace dom {
 
 typedef nsSVGFE SVGFEFloodElementBase;
 
-class SVGFEFloodElement : public SVGFEFloodElementBase,
-                          public nsIDOMSVGElement
+class SVGFEFloodElement : public SVGFEFloodElementBase
 {
   friend nsresult (::NS_NewSVGFEFloodElement(nsIContent **aResult,
                                              already_AddRefed<nsINodeInfo> aNodeInfo));
@@ -25,40 +24,31 @@ protected:
   SVGFEFloodElement(already_AddRefed<nsINodeInfo> aNodeInfo)
     : SVGFEFloodElementBase(aNodeInfo)
   {
-    SetIsDOMBinding();
   }
-  virtual JSObject* WrapNode(JSContext *cx, JSObject *scope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *cx,
+                             JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
 public:
-  virtual bool SubregionIsUnionOfRegions() { return false; }
-
-  // interfaces:
-  NS_DECL_ISUPPORTS_INHERITED
+  virtual bool SubregionIsUnionOfRegions() MOZ_OVERRIDE { return false; }
 
   virtual nsresult Filter(nsSVGFilterInstance* aInstance,
                           const nsTArray<const Image*>& aSources,
                           const Image* aTarget,
-                          const nsIntRect& aDataRect);
-  virtual nsSVGString& GetResultImageName() { return mStringAttributes[RESULT]; }
+                          const nsIntRect& aDataRect) MOZ_OVERRIDE;
+  virtual nsSVGString& GetResultImageName() MOZ_OVERRIDE { return mStringAttributes[RESULT]; }
   virtual nsIntRect ComputeTargetBBox(const nsTArray<nsIntRect>& aSourceBBoxes,
-          const nsSVGFilterInstance& aInstance);
-
-  NS_FORWARD_NSIDOMSVGELEMENT(SVGFEFloodElementBase::)
-
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
+          const nsSVGFilterInstance& aInstance) MOZ_OVERRIDE;
 
   // nsIContent interface
-  NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const;
+  NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const MOZ_OVERRIDE;
 
-  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const;
+  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
 
-  virtual nsIDOMNode* AsDOMNode() { return this; }
 protected:
   virtual bool OperatesOnSRGB(nsSVGFilterInstance*,
-                              int32_t, Image*) { return true; }
+                              int32_t, Image*) MOZ_OVERRIDE { return true; }
 
-  virtual StringAttributesInfo GetStringInfo();
+  virtual StringAttributesInfo GetStringInfo() MOZ_OVERRIDE;
 
   enum { RESULT };
   nsSVGString mStringAttributes[1];

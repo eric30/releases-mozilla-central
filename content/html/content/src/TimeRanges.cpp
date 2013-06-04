@@ -6,24 +6,15 @@
 
 #include "mozilla/dom/TimeRanges.h"
 #include "mozilla/dom/TimeRangesBinding.h"
-#include "nsHTMLMediaElement.h"
+#include "mozilla/dom/HTMLMediaElement.h"
 #include "nsContentUtils.h"
 #include "nsDOMClassInfoID.h"
 #include "nsError.h"
 
-DOMCI_DATA(TimeRanges, mozilla::dom::TimeRanges)
-
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_ADDREF(TimeRanges)
-NS_IMPL_RELEASE(TimeRanges)
-
-NS_INTERFACE_MAP_BEGIN(TimeRanges)
-  NS_INTERFACE_MAP_ENTRY(nsISupports)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMTimeRanges)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(TimeRanges)
-NS_INTERFACE_MAP_END
+NS_IMPL_ISUPPORTS1(TimeRanges, nsIDOMTimeRanges)
 
 TimeRanges::TimeRanges()
 {
@@ -130,7 +121,7 @@ TimeRanges::Normalize()
 }
 
 JSObject*
-TimeRanges::WrapObject(JSContext* aCx, JSObject* aScope)
+TimeRanges::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
   return TimeRangesBinding::Wrap(aCx, aScope, this);
 }

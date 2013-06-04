@@ -180,6 +180,10 @@
     "kind": "boolean",
     "description": "Successful telemetry submission"
   },
+  "XUL_CACHE_DISABLED": {
+    "kind": "flag",
+    "description": "XUL cache was disabled"
+  },
   "MEMORY_RESIDENT": {
     "kind": "exponential",
     "low": "32 * 1024",
@@ -209,6 +213,14 @@
     "n_buckets": 50,
     "extended_statistics_ok": true,
     "description": "Total JavaScript compartments used for web pages"
+  },
+  "MEMORY_JS_MAIN_RUNTIME_TEMPORARY_PEAK": {
+    "kind": "exponential",
+    "low": 1024,
+    "high": "16 * 1024 * 1024",
+    "n_buckets": 200,
+    "extended_statistics_ok": true,
+    "description": "Peak memory used by the main JSRuntime to store transient data (KB)"
   },
   "MEMORY_JS_GC_HEAP": {
     "kind": "exponential",
@@ -255,14 +267,6 @@
     "high": "100",
     "n_buckets": 25,
     "description": "Ratio of committed, unused memory to allocated memory in the heap (percentage)."
-  },
-  "MEMORY_EXPLICIT": {
-    "kind": "exponential",
-    "low": 1024,
-    "high": "16 * 1024 * 1024",
-    "n_buckets": 200,
-    "extended_statistics_ok": true,
-    "description": "Explicit memory allocations (KB)"
   },
   "GHOST_WINDOWS": {
     "kind": "exponential",
@@ -835,10 +839,21 @@
     "extended_statistics_ok": true,
     "description": "ms of SSL wait time including TCP and proxy tunneling"
   },
+  "SSL_BYTES_BEFORE_CERT_CALLBACK": {
+    "kind": "exponential",
+    "high": "32000",
+    "n_buckets": 64,
+    "extended_statistics_ok": true,
+    "description": "plaintext bytes read before a server certificate authenticated"
+  },
   "SSL_NPN_TYPE": {
     "kind": "enumerated",
     "n_values": 16,
     "description": "NPN Results (0=none, 1=negotiated, 2=no-overlap)"
+  },
+  "SSL_RESUMED_SESSION": {
+    "kind": "boolean",
+    "description": "complete TLS connect that used TLS Sesison Resumption"
   },
   "CERT_VALIDATION_HTTP_REQUEST_RESULT": {
     "kind": "enumerated",
@@ -1606,6 +1621,12 @@
     "n_buckets": 20,
     "description": "Value of dom.ipc.plugins.hangUITimeoutSecs plus time spent in Plugin Hang UI (ms)"
   },
+  "PLUGIN_LOAD_METADATA": {
+    "kind": "exponential",
+    "high": "5000",
+    "n_buckets": 20,
+    "description": "Time spent loading plugin DLL and obtaining metadata (ms)"
+  },
   "PLUGIN_SHUTDOWN_MS": {
     "kind": "exponential",
     "high": "5000",
@@ -1672,13 +1693,6 @@
     "n_buckets": 10,
     "extended_statistics_ok": true,
     "description": "Time spent on SQLite read() (ms)"
-  },
-  "MOZ_SQLITE_COOKIES_OPEN_MS": {
-    "kind": "exponential",
-    "high": "3000",
-    "n_buckets": 10,
-    "extended_statistics_ok": true,
-    "description": "Time spent on cookie DB open (ms)"
   },
   "MOZ_SQLITE_COOKIES_OPEN_READAHEAD_MS": {
     "kind": "exponential",
@@ -2338,10 +2352,6 @@
     "n_buckets": 20,
     "description": "Firefox: Time in ms spent on switching tabs in response to a tab click"
   },
-  "FX_KEYWORD_URL_USERSET": {
-    "kind": "boolean",
-    "description": "Firefox: keyword.URL has a user-set value"
-  },
   "FX_IDENTITY_POPUP_OPEN_MS": {
     "kind": "exponential",
     "high": "1000",
@@ -2453,9 +2463,23 @@
     "extended_statistics_ok": true,
     "description": "Session restore: Time to write the session data to the file on disk (ms)"
   },
+  "FX_SESSION_RESTORE_WRITE_FILE_LONGEST_OP_MS": {
+    "kind": "exponential",
+    "high": "3000",
+    "n_buckets": 10,
+    "extended_statistics_ok": true,
+    "description": "Session restore: Duration of the longest uninterruptible operation while writing session data (ms)"
+  },
   "FX_SESSION_RESTORE_CORRUPT_FILE": {
     "kind": "boolean",
     "description": "Session restore: Whether the file read on startup contained parse-able JSON"
+  },
+  "FX_SESSION_RESTORE_BACKUP_FILE_MS": {
+    "kind": "exponential",
+    "high": "30000",
+    "n_buckets": 10,
+    "extended_statistics_ok": true,
+    "description": "Session restore: Time to make a backup copy of the session file (ms)"
   },
   "INNERWINDOWS_WITH_MUTATION_LISTENERS": {
     "kind": "boolean",
@@ -2522,12 +2546,65 @@
     "kind": "boolean",
     "description": "DOM: Ranges that are detached on destruction (bug 702948)"
   },
+  "LOCALDOMSTORAGE_INIT_DATABASE_MS": {
+    "kind": "exponential",
+    "high": "3000",
+    "n_buckets": 10,
+    "extended_statistics_ok": true,
+    "description": "Time to open the localStorage database (ms)"
+  },
+  "LOCALDOMSTORAGE_SHUTDOWN_DATABASE_MS": {
+    "kind": "exponential",
+    "high": "3000",
+    "n_buckets": 10,
+    "extended_statistics_ok": true,
+    "description": "Time to flush and close the localStorage database (ms)"
+  },
+  "LOCALDOMSTORAGE_PRELOAD_PENDING_ON_FIRST_ACCESS": {
+    "kind": "boolean",
+    "description": "True when we had to wait for a pending preload on first access to localStorage data, false otherwise"
+  },
   "LOCALDOMSTORAGE_GETALLKEYS_MS": {
     "kind": "exponential",
     "high": "3000",
     "n_buckets": 10,
     "extended_statistics_ok": true,
     "description": "Time to return a list of all keys in domain's LocalStorage (ms)"
+  },
+  "LOCALDOMSTORAGE_GETALLKEYS_BLOCKING_MS": {
+    "kind": "exponential",
+    "high": "3000",
+    "n_buckets": 10,
+    "extended_statistics_ok": true,
+    "description": "Time to block before we return a list of all keys in domain's LocalStorage (ms)"
+  },
+  "LOCALDOMSTORAGE_GETKEY_MS": {
+    "kind": "exponential",
+    "high": "3000",
+    "n_buckets": 10,
+    "extended_statistics_ok": true,
+    "description": "Time to return a key name in domain's LocalStorage (ms)"
+  },
+  "LOCALDOMSTORAGE_GETKEY_BLOCKING_MS": {
+    "kind": "exponential",
+    "high": "3000",
+    "n_buckets": 10,
+    "extended_statistics_ok": true,
+    "description": "Time to block before we return a key name in domain's LocalStorage (ms)"
+  },
+  "LOCALDOMSTORAGE_GETLENGTH_MS": {
+    "kind": "exponential",
+    "high": "3000",
+    "n_buckets": 10,
+    "extended_statistics_ok": true,
+    "description": "Time to return number of keys in domain's LocalStorage (ms)"
+  },
+  "LOCALDOMSTORAGE_GETLENGTH_BLOCKING_MS": {
+    "kind": "exponential",
+    "high": "3000",
+    "n_buckets": 10,
+    "extended_statistics_ok": true,
+    "description": "Time to block before we return number of keys in domain's LocalStorage (ms)"
   },
   "LOCALDOMSTORAGE_GETVALUE_MS": {
     "kind": "exponential",
@@ -2536,12 +2613,26 @@
     "extended_statistics_ok": true,
     "description": "Time to return a value for a key in LocalStorage (ms)"
   },
+  "LOCALDOMSTORAGE_GETVALUE_BLOCKING_MS": {
+    "kind": "exponential",
+    "high": "3000",
+    "n_buckets": 10,
+    "extended_statistics_ok": true,
+    "description": "Time to block before we return a value for a key in LocalStorage (ms)"
+  },
   "LOCALDOMSTORAGE_SETVALUE_MS": {
     "kind": "exponential",
     "high": "3000",
     "n_buckets": 10,
     "extended_statistics_ok": true,
     "description": "Time to set a single key's value in LocalStorage (ms)"
+  },
+  "LOCALDOMSTORAGE_SETVALUE_BLOCKING_MS": {
+    "kind": "exponential",
+    "high": "3000",
+    "n_buckets": 10,
+    "extended_statistics_ok": true,
+    "description": "Time to block before we set a single key's value in LocalStorage (ms)"
   },
   "LOCALDOMSTORAGE_REMOVEKEY_MS": {
     "kind": "exponential",
@@ -2550,33 +2641,40 @@
     "extended_statistics_ok": true,
     "description": "Time to remove a single key from LocalStorage (ms)"
   },
-  "LOCALDOMSTORAGE_REMOVEALL_MS": {
+  "LOCALDOMSTORAGE_REMOVEKEY_BLOCKING_MS": {
+    "kind": "exponential",
+    "high": "3000",
+    "n_buckets": 10,
+    "extended_statistics_ok": true,
+    "description": "Time to block before we remove a single key from LocalStorage (ms)"
+  },
+  "LOCALDOMSTORAGE_CLEAR_MS": {
     "kind": "exponential",
     "high": "3000",
     "n_buckets": 10,
     "extended_statistics_ok": true,
     "description": "Time to clear LocalStorage for all domains (ms)"
   },
-  "LOCALDOMSTORAGE_FETCH_DOMAIN_MS": {
+  "LOCALDOMSTORAGE_CLEAR_BLOCKING_MS": {
     "kind": "exponential",
     "high": "3000",
     "n_buckets": 10,
     "extended_statistics_ok": true,
-    "description": "Time to fetch LocalStorage data for a domain (ms)"
+    "description": "Time to block before we clear LocalStorage for all domains (ms)"
   },
-  "LOCALDOMSTORAGE_FETCH_QUOTA_USE_MS": {
+  "LOCALDOMSTORAGE_UNLOAD_BLOCKING_MS": {
     "kind": "exponential",
     "high": "3000",
     "n_buckets": 10,
     "extended_statistics_ok": true,
-    "description": "Time to fetch quota use stats for a TLD (ms)"
+    "description": "Time to fetch LocalStorage data before we can clean the cache (ms)"
   },
-  "LOCALDOMSTORAGE_TIMER_FLUSH_MS": {
+  "LOCALDOMSTORAGE_SESSIONONLY_PRELOAD_BLOCKING_MS": {
     "kind": "exponential",
     "high": "3000",
     "n_buckets": 10,
     "extended_statistics_ok": true,
-    "description": "Time to flush dirty entries from the cache (ms)"
+    "description": "Time to fetch LocalStorage data before we can expose them as session only data (ms)"
   },
   "LOCALDOMSTORAGE_KEY_SIZE_BYTES": {
     "kind": "exponential",
@@ -2845,6 +2943,10 @@
     "kind": "flag",
     "description": "Whether content ever accesed Components.interfaces in this session"
   },
+  "COMPONENTS_SHIM_ACCESSED_BY_CONTENT": {
+    "kind": "flag",
+    "description": "Whether content ever accesed the Components shim in this session"
+  },
   "CHECK_ADDONS_MODIFIED_MS": {
     "kind": "exponential",
     "high": "5000",
@@ -2951,13 +3053,6 @@
     "extended_statistics_ok": true,
     "description": "Time (ms) it takes to upload the Health Report payload."
   },
-  "HEALTHREPORT_SAVE_LAST_PAYLOAD_MS": {
-    "kind": "exponential",
-    "high": "10000",
-    "n_buckets": 10,
-    "extended_statistics_ok": true,
-    "description": "Time (ms) it takes to persist the last submitted Health Report payload to disk."
-  },
   "HEALTHREPORT_COLLECT_CONSTANT_DATA_MS": {
     "kind": "exponential",
     "high": "20000",
@@ -2976,11 +3071,507 @@
     "n_buckets": 15,
     "description": "Time (ms) it takes FHR to shut down."
   },
+  "HEALTHREPORT_POST_COLLECT_CHECKPOINT_MS": {
+    "kind": "exponential",
+    "high": "20000",
+    "n_buckets": 15,
+    "description": "Time (ms) for a WAL checkpoint after collecting all measurements."
+  },
   "POPUP_NOTIFICATION_MAINACTION_TRIGGERED_MS": {
     "kind": "linear",
     "low": 25,
     "high": "80 * 25",
     "n_buckets": "80 + 1",
     "description": "The time (in milliseconds) after showing a PopupNotification that the mainAction was first triggered"
+  },
+  "DEVTOOLS_DEBUGGER_RDP_LOCAL_DETACH_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'detach' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_REMOTE_DETACH_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'detach' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_LOCAL_RESUME_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'resume' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_REMOTE_RESUME_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'resume' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_LOCAL_INTERRUPT_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took an 'interrupt' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_REMOTE_INTERRUPT_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took an 'interrupt' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_LOCAL_CLIENTEVALUATE_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'clientEvaluate' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_REMOTE_CLIENTEVALUATE_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'clientEvaluate' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_LOCAL_RELEASEMANY_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'releaseMany' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_REMOTE_RELEASEMANY_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'releaseMany' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_LOCAL_THREADGRIPS_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'threadGrips' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_REMOTE_THREADGRIPS_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'threadGrips' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_LOCAL_SOURCES_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'sources' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_REMOTE_SOURCES_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'sources' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_LOCAL_FRAMES_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'frames' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_REMOTE_FRAMES_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'frames' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_LOCAL_PARAMETERNAMES_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'parameterNames' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_REMOTE_PARAMETERNAMES_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'parameterNames' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_LOCAL_OWNPROPERTYNAMES_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'ownPropertyNames' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_REMOTE_OWNPROPERTYNAMES_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'ownPropertyNames' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_LOCAL_PROTOTYPEANDPROPERTIES_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'prototypeAndProperties' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_REMOTE_PROTOTYPEANDPROPERTIES_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'prototypeAndProperties' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_LOCAL_PROPERTY_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'property' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_REMOTE_PROPERTY_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'property' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_LOCAL_PROTOTYPE_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'prototype' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_REMOTE_PROTOTYPE_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'prototype' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_LOCAL_SUBSTRING_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'substring' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_REMOTE_SUBSTRING_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'substring' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_LOCAL_RELEASE_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'release' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_REMOTE_RELEASE_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'release' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_LOCAL_LISTTABS_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'listTabs' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_REMOTE_LISTTABS_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'listTabs' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_LOCAL_DELETE_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'delete' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_REMOTE_DELETE_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'delete' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_LOCAL_THREADDETACH_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'detach' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_REMOTE_THREADDETACH_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'detach' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_LOCAL_TABDETACH_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'detach' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_REMOTE_TABDETACH_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'detach' request to go round trip."
+  },
+  "DEVTOOLS_OPTIONS_OPENED_BOOLEAN": {
+    "kind": "boolean",
+    "description": "How many times has the devtool's Options panel been opened?"
+  },
+  "DEVTOOLS_WEBCONSOLE_OPENED_BOOLEAN": {
+    "kind": "boolean",
+    "description": "How many times has the devtool's Web Console been opened?"
+  },
+  "DEVTOOLS_BROWSERCONSOLE_OPENED_BOOLEAN": {
+    "kind": "boolean",
+    "description": "How many times has the devtool's Browser Console been opened?"
+  },
+  "DEVTOOLS_INSPECTOR_OPENED_BOOLEAN": {
+    "kind": "boolean",
+    "description": "How many times has the devtool's Inspector been opened?"
+  },
+  "DEVTOOLS_RULEVIEW_OPENED_BOOLEAN": {
+    "kind": "boolean",
+    "description": "How many times has the devtool's Rule View been opened?"
+  },
+  "DEVTOOLS_COMPUTEDVIEW_OPENED_BOOLEAN": {
+    "kind": "boolean",
+    "description": "How many times has the devtool's Computed View been opened?"
+  },
+  "DEVTOOLS_LAYOUTVIEW_OPENED_BOOLEAN": {
+    "kind": "boolean",
+    "description": "How many times has the devtool's Layout View been opened?"
+  },
+  "DEVTOOLS_FONTINSPECTOR_OPENED_BOOLEAN": {
+    "kind": "boolean",
+    "description": "How many times has the devtool's Font Inspector been opened?"
+  },
+  "DEVTOOLS_JSDEBUGGER_OPENED_BOOLEAN": {
+    "kind": "boolean",
+    "description": "How many times has the devtool's Debugger been opened?"
+  },
+  "DEVTOOLS_JSBROWSERDEBUGGER_OPENED_BOOLEAN": {
+    "kind": "boolean",
+    "description": "How many times has the devtool's Browser Debugger been opened?"
+  },
+  "DEVTOOLS_STYLEEDITOR_OPENED_BOOLEAN": {
+    "kind": "boolean",
+    "description": "How many times has the devtool's Style Editor been opened?"
+  },
+  "DEVTOOLS_JSPROFILER_OPENED_BOOLEAN": {
+    "kind": "boolean",
+    "description": "How many times has the devtool's JS Profiler been opened?"
+  },
+  "DEVTOOLS_NETMONITOR_OPENED_BOOLEAN": {
+    "kind": "boolean",
+    "description": "How many times has the devtool's Network Monitor been opened?"
+  },
+  "DEVTOOLS_PAINTFLASHING_OPENED_BOOLEAN": {
+    "kind": "boolean",
+    "description": "How many times has the devtool's Paint Flashing been opened via the toolbox button?"
+  },
+  "DEVTOOLS_TILT_OPENED_BOOLEAN": {
+    "kind": "boolean",
+    "description": "How many times has the devtool's Tilt been opened via the toolbox button?"
+  },
+  "DEVTOOLS_SCRATCHPAD_OPENED_BOOLEAN": {
+    "kind": "boolean",
+    "description": "How many times has the devtool's Scratchpad been opened via the toolbox button?"
+  },
+  "DEVTOOLS_RESPONSIVE_OPENED_BOOLEAN": {
+    "kind": "boolean",
+    "description": "How many times has the devtool's Responsive View been opened via the toolbox button?"
+  },
+  "DEVTOOLS_DEVELOPERTOOLBAR_OPENED_BOOLEAN": {
+    "kind": "boolean",
+    "description": "How many times has the devtool's Developer Toolbar been opened via the toolbox button?"
+  },
+  "DEVTOOLS_OPTIONS_OPENED_PER_USER_FLAG": {
+    "kind": "flag",
+    "description": "How many times has the devtool's Options panel been opened?"
+  },
+  "DEVTOOLS_WEBCONSOLE_OPENED_PER_USER_FLAG": {
+    "kind": "flag",
+    "description": "How many users have opened the devtool's Web Console?"
+  },
+  "DEVTOOLS_BROWSERCONSOLE_OPENED_PER_USER_FLAG": {
+    "kind": "flag",
+    "description": "How many users have opened the devtool's Browser Console?"
+  },
+  "DEVTOOLS_INSPECTOR_OPENED_PER_USER_FLAG": {
+    "kind": "flag",
+    "description": "How many users have opened the devtool's Inspector?"
+  },
+  "DEVTOOLS_RULEVIEW_OPENED_PER_USER_FLAG": {
+    "kind": "flag",
+    "description": "How many users have opened the devtool's Rule View?"
+  },
+  "DEVTOOLS_COMPUTEDVIEW_OPENED_PER_USER_FLAG": {
+    "kind": "flag",
+    "description": "How many users have opened the devtool's Computed View?"
+  },
+  "DEVTOOLS_LAYOUTVIEW_OPENED_PER_USER_FLAG": {
+    "kind": "flag",
+    "description": "How many users have opened the devtool's Layout View?"
+  },
+  "DEVTOOLS_FONTINSPECTOR_OPENED_PER_USER_FLAG": {
+    "kind": "flag",
+    "description": "How many users have opened the devtool's Font Inspector?"
+  },
+  "DEVTOOLS_JSDEBUGGER_OPENED_PER_USER_FLAG": {
+    "kind": "flag",
+    "description": "How many users have opened the devtool's Debugger?"
+  },
+  "DEVTOOLS_JSBROWSERDEBUGGER_OPENED_PER_USER_FLAG": {
+    "kind": "flag",
+    "description": "How many users have opened the devtool's Browser Debugger?"
+  },
+  "DEVTOOLS_STYLEEDITOR_OPENED_PER_USER_FLAG": {
+    "kind": "flag",
+    "description": "How many users have opened the devtool's Style Editor?"
+  },
+  "DEVTOOLS_JSPROFILER_OPENED_PER_USER_FLAG": {
+    "kind": "flag",
+    "description": "How many users have opened the devtool's JS Profiler?"
+  },
+  "DEVTOOLS_NETMONITOR_OPENED_PER_USER_FLAG": {
+    "kind": "flag",
+    "description": "How many users have opened the devtool's Network Monitor?"
+  },
+  "DEVTOOLS_PAINTFLASHING_OPENED_PER_USER_FLAG": {
+    "kind": "flag",
+    "description": "How many users have opened the devtool's Paint Flashing been opened via the toolbox button?"
+  },
+  "DEVTOOLS_TILT_OPENED_PER_USER_FLAG": {
+    "kind": "flag",
+    "description": "How many users have opened the devtool's Tilt been opened via the toolbox button?"
+  },
+  "DEVTOOLS_SCRATCHPAD_OPENED_PER_USER_FLAG": {
+    "kind": "flag",
+    "description": "How many users have opened the devtool's Scratchpad been opened via the toolbox button?"
+  },
+  "DEVTOOLS_RESPONSIVE_OPENED_PER_USER_FLAG": {
+    "kind": "flag",
+    "description": "How many users have opened the devtool's Responsive View been opened via the toolbox button?"
+  },
+  "DEVTOOLS_DEVELOPERTOOLBAR_OPENED_PER_USER_FLAG": {
+    "kind": "flag",
+    "description": "How many users have opened the devtool's Developer Toolbar been opened via the toolbox button?"
+  },
+  "DEVTOOLS_TOOLBOX_TIME_ACTIVE_SECONDS": {
+    "kind": "exponential",
+    "high": "10000000",
+    "n_buckets": 100,
+    "description": "How long has the toolbox been active (seconds)"
+  },
+  "DEVTOOLS_OPTIONS_TIME_ACTIVE_SECONDS": {
+    "kind": "exponential",
+    "high": "10000000",
+    "n_buckets": 100,
+    "description": "How long has the options panel been active (seconds)"
+  },
+  "DEVTOOLS_WEBCONSOLE_TIME_ACTIVE_SECONDS": {
+    "kind": "exponential",
+    "high": "10000000",
+    "n_buckets": 100,
+    "description": "How long has the web console been active (seconds)"
+  },
+  "DEVTOOLS_BROWSERCONSOLE_TIME_ACTIVE_SECONDS": {
+    "kind": "exponential",
+    "high": "10000000",
+    "n_buckets": 100,
+    "description": "How long has the browser console been active (seconds)"
+  },
+  "DEVTOOLS_INSPECTOR_TIME_ACTIVE_SECONDS": {
+    "kind": "exponential",
+    "high": "10000000",
+    "n_buckets": 100,
+    "description": "How long has the inspector been active (seconds)"
+  },
+  "DEVTOOLS_RULEVIEW_TIME_ACTIVE_SECONDS": {
+    "kind": "exponential",
+    "high": "10000000",
+    "n_buckets": 100,
+    "description": "How long has the rule view been active (seconds)"
+  },
+  "DEVTOOLS_COMPUTEDVIEW_TIME_ACTIVE_SECONDS": {
+    "kind": "exponential",
+    "high": "10000000",
+    "n_buckets": 100,
+    "description": "How long has the computed view been active (seconds)"
+  },
+  "DEVTOOLS_LAYOUTVIEW_TIME_ACTIVE_SECONDS": {
+    "kind": "exponential",
+    "high": "10000000",
+    "n_buckets": 100,
+    "description": "How long has the layout view been active (seconds)"
+  },
+  "DEVTOOLS_FONTINSPECTOR_TIME_ACTIVE_SECONDS": {
+    "kind": "exponential",
+    "high": "10000000",
+    "n_buckets": 100,
+    "description": "How long has the font inspector been active (seconds)"
+  },
+  "DEVTOOLS_JSDEBUGGER_TIME_ACTIVE_SECONDS": {
+    "kind": "exponential",
+    "high": "10000000",
+    "n_buckets": 100,
+    "description": "How long has the JS debugger been active (seconds)"
+  },
+  "DEVTOOLS_JSBROWSERDEBUGGER_TIME_ACTIVE_SECONDS": {
+    "kind": "exponential",
+    "high": "10000000",
+    "n_buckets": 100,
+    "description": "How long has the JS browser debugger been active (seconds)"
+  },
+  "DEVTOOLS_STYLEEDITOR_TIME_ACTIVE_SECONDS": {
+    "kind": "exponential",
+    "high": "10000000",
+    "n_buckets": 100,
+    "description": "How long has the style editor been active (seconds)"
+  },
+  "DEVTOOLS_JSPROFILER_TIME_ACTIVE_SECONDS": {
+    "kind": "exponential",
+    "high": "10000000",
+    "n_buckets": 100,
+    "description": "How long has the JS profiler been active (seconds)"
+  },
+  "DEVTOOLS_NETMONITOR_TIME_ACTIVE_SECONDS": {
+    "kind": "exponential",
+    "high": "10000000",
+    "n_buckets": 100,
+    "description": "How long has the network monitor been active (seconds)"
+  },
+  "DEVTOOLS_PAINTFLASHING_TIME_ACTIVE_SECONDS": {
+    "kind": "exponential",
+    "high": "10000000",
+    "n_buckets": 100,
+    "description": "How long has paint flashing been active (seconds)"
+  },
+  "DEVTOOLS_TILT_TIME_ACTIVE_SECONDS": {
+    "kind": "exponential",
+    "high": "10000000",
+    "n_buckets": 100,
+    "description": "How long has Tilt been active (seconds)"
+  },
+  "DEVTOOLS_SCRATCHPAD_TIME_ACTIVE_SECONDS": {
+    "kind": "exponential",
+    "high": "10000000",
+    "n_buckets": 100,
+    "description": "How long has Scratchpad been active (seconds)"
+  },
+  "DEVTOOLS_RESPONSIVE_TIME_ACTIVE_SECONDS": {
+    "kind": "exponential",
+    "high": "10000000",
+    "n_buckets": 100,
+    "description": "How long has the responsive view been active (seconds)"
+  },
+  "DEVTOOLS_DEVELOPERTOOLBAR_TIME_ACTIVE_SECONDS": {
+    "kind": "exponential",
+    "high": "10000000",
+    "n_buckets": 100,
+    "description": "How long has the developer toolbar been active (seconds)"
+  },
+  "BROWSER_IS_USER_DEFAULT": {
+    "kind": "boolean",
+    "description": "The result of the startup default desktop browser check."
   }
 }

@@ -38,6 +38,8 @@
 #include "nsContentUtils.h"
 #include "CSSCalc.h"
 #include "nsPrintfCString.h"
+#include "nsRenderingContext.h"
+#include "nsStyleUtil.h"
 
 #include "mozilla/LookAndFeel.h"
 
@@ -133,9 +135,7 @@ nsRuleNode::EnsureBlockDisplay(uint8_t& display)
   case NS_STYLE_DISPLAY_TABLE :
   case NS_STYLE_DISPLAY_BLOCK :
   case NS_STYLE_DISPLAY_LIST_ITEM :
-#ifdef MOZ_FLEXBOX
   case NS_STYLE_DISPLAY_FLEX :
-#endif // MOZ_FLEXBOX
     // do not muck with these at all - already blocks
     // This is equivalent to nsStyleDisplay::IsBlockOutside.  (XXX Maybe we
     // should just call that?)
@@ -148,12 +148,10 @@ nsRuleNode::EnsureBlockDisplay(uint8_t& display)
     display = NS_STYLE_DISPLAY_TABLE;
     break;
 
-#ifdef MOZ_FLEXBOX
   case NS_STYLE_DISPLAY_INLINE_FLEX:
     // make inline flex containers into flex containers
     display = NS_STYLE_DISPLAY_FLEX;
     break;
-#endif // MOZ_FLEXBOX
 
   default :
     // make it a block
@@ -229,6 +227,51 @@ GetMetricsFor(nsPresContext* aPresContext,
   return fm.forget();
 }
 
+
+static nsSize CalcViewportUnitsScale(nsPresContext* aPresContext)
+{
+  // The caller is making use of viewport units, so notify the pres context
+  // that it will need to rebuild the rule tree if the size of the viewport
+  // changes.
+  aPresContext->SetUsesViewportUnits(true);
+
+  // The default (when we have 'overflow: auto' on the root element, or
+  // trivially for 'overflow: hidden' since we never have scrollbars in that
+  // case) is to define the scale of the viewport units without considering
+  // scrollbars.
+  nsSize viewportSize(aPresContext->GetVisibleArea().Size());
+
+  // Check for 'overflow: scroll' styles on the root scroll frame. If we find
+  // any, the standard requires us to take scrollbars into account.
+  nsIScrollableFrame* scrollFrame =
+    aPresContext->PresShell()->GetRootScrollFrameAsScrollable();
+  if (scrollFrame) {
+    nsPresContext::ScrollbarStyles styles(scrollFrame->GetScrollbarStyles());
+
+    if (styles.mHorizontal == NS_STYLE_OVERFLOW_SCROLL ||
+        styles.mVertical == NS_STYLE_OVERFLOW_SCROLL) {
+      // Gather scrollbar size information.
+      nsRefPtr<nsRenderingContext> context =
+        aPresContext->PresShell()->GetReferenceRenderingContext();
+      nsMargin sizes(scrollFrame->GetDesiredScrollbarSizes(aPresContext, context));
+
+      if (styles.mHorizontal == NS_STYLE_OVERFLOW_SCROLL) {
+        // 'overflow-x: scroll' means we must consider the horizontal scrollbar,
+        // which affects the scale of viewport height units.
+        viewportSize.height -= sizes.TopBottom();
+      }
+
+      if (styles.mVertical == NS_STYLE_OVERFLOW_SCROLL) {
+        // 'overflow-y: scroll' means we must consider the vertical scrollbar,
+        // which affects the scale of viewport width units.
+        viewportSize.width -= sizes.LeftRight();
+      }
+    }
+  }
+
+  return viewportSize;
+}
+
 static nscoord CalcLengthWith(const nsCSSValue& aValue,
                               nscoord aFontSize,
                               const nsStyleFont* aStyleFont,
@@ -286,22 +329,18 @@ static nscoord CalcLengthWith(const nsCSSValue& aValue,
     // for an increased cost to dynamic changes to the viewport size
     // when viewport units are in use.
     case eCSSUnit_ViewportWidth: {
-      aPresContext->SetUsesViewportUnits(true);
-      return ScaleCoord(aValue, 0.01f * aPresContext->GetVisibleArea().width);
+      return ScaleCoord(aValue, 0.01f * CalcViewportUnitsScale(aPresContext).width);
     }
     case eCSSUnit_ViewportHeight: {
-      aPresContext->SetUsesViewportUnits(true);
-      return ScaleCoord(aValue, 0.01f * aPresContext->GetVisibleArea().height);
+      return ScaleCoord(aValue, 0.01f * CalcViewportUnitsScale(aPresContext).height);
     }
     case eCSSUnit_ViewportMin: {
-      aPresContext->SetUsesViewportUnits(true);
-      nsSize viewportSize = aPresContext->GetVisibleArea().Size();
-      return ScaleCoord(aValue, 0.01f * min(viewportSize.width, viewportSize.height));
+      nsSize vuScale(CalcViewportUnitsScale(aPresContext));
+      return ScaleCoord(aValue, 0.01f * min(vuScale.width, vuScale.height));
     }
     case eCSSUnit_ViewportMax: {
-      aPresContext->SetUsesViewportUnits(true);
-      nsSize viewportSize = aPresContext->GetVisibleArea().Size();
-      return ScaleCoord(aValue, 0.01f * max(viewportSize.width, viewportSize.height));
+      nsSize vuScale(CalcViewportUnitsScale(aPresContext));
+      return ScaleCoord(aValue, 0.01f * max(vuScale.width, vuScale.height));
     }
     // While we could deal with 'rem' units correctly by simply not
     // caching any data that uses them in the rule tree, it's valuable
@@ -1726,7 +1765,7 @@ static const uint32_t gColumnFlags[] = {
 
 static const uint32_t* gFlagsByStruct[] = {
 
-#define STYLE_STRUCT(name, checkdata_cb, ctor_args) \
+#define STYLE_STRUCT(name, checkdata_cb) \
   g##name##Flags,
 #include "nsStyleStructList.h"
 #undef STYLE_STRUCT
@@ -1735,7 +1774,7 @@ static const uint32_t* gFlagsByStruct[] = {
 
 static const CheckCallbackFn gCheckCallbacks[] = {
 
-#define STYLE_STRUCT(name, checkdata_cb, ctor_args) \
+#define STYLE_STRUCT(name, checkdata_cb) \
   checkdata_cb,
 #include "nsStyleStructList.h"
 #undef STYLE_STRUCT
@@ -2071,7 +2110,7 @@ nsRuleNode::WalkRuleTree(const nsStyleStructID aSID,
   // We need to compute the data from the information that the rules specified.
   const void* res;
 #define STYLE_STRUCT_TEST aSID
-#define STYLE_STRUCT(name, checkdata_cb, ctor_args)                           \
+#define STYLE_STRUCT(name, checkdata_cb)                                      \
   res = Compute##name##Data(startStruct, &ruleData, aContext,                 \
                             highestNode, detail, ruleData.mCanStoreInRuleTree);
 #include "nsStyleStructList.h"
@@ -3231,6 +3270,109 @@ nsRuleNode::SetFont(nsPresContext* aPresContext, nsStyleContext* aContext,
     aFont->mScriptLevel = 0;
   }
 
+  // font-kerning: none, enum, inherit, initial, -moz-system-font
+  SetDiscrete(*aRuleData->ValueForFontKerning(),
+              aFont->mFont.kerning, aCanStoreInRuleTree,
+              SETDSC_ENUMERATED | SETDSC_SYSTEM_FONT,
+              aParentFont->mFont.kerning,
+              defaultVariableFont->kerning,
+              0, 0, 0, systemFont.kerning);
+
+  // font-synthesis: none, enum (bit field), inherit, initial, -moz-system-font
+  SetDiscrete(*aRuleData->ValueForFontSynthesis(),
+              aFont->mFont.synthesis, aCanStoreInRuleTree,
+              SETDSC_NONE | SETDSC_ENUMERATED | SETDSC_SYSTEM_FONT,
+              aParentFont->mFont.synthesis,
+              defaultVariableFont->synthesis,
+              0, 0, 0, systemFont.synthesis);
+
+  // font-variant-alternates: normal, enum (bit field) + functions, inherit,
+  //                          initial, -moz-system-font
+  const nsCSSValue* variantAlternatesValue =
+    aRuleData->ValueForFontVariantAlternates();
+  int32_t variantAlternates = 0;
+
+  switch (variantAlternatesValue->GetUnit()) {
+  case eCSSUnit_Inherit:
+    aFont->mFont.CopyAlternates(aParentFont->mFont);
+    aCanStoreInRuleTree = false;
+    break;
+
+  case eCSSUnit_Initial:
+  case eCSSUnit_Normal:
+    aFont->mFont.variantAlternates = 0;
+    aFont->mFont.alternateValues.Clear();
+    aFont->mFont.featureValueLookup = nullptr;
+    break;
+
+  case eCSSUnit_Pair:
+    NS_ASSERTION(variantAlternatesValue->GetPairValue().mXValue.GetUnit() ==
+                   eCSSUnit_Enumerated, "strange unit for variantAlternates");
+    variantAlternates =
+      variantAlternatesValue->GetPairValue().mXValue.GetIntValue();
+    aFont->mFont.variantAlternates = variantAlternates;
+
+    if (variantAlternates & NS_FONT_VARIANT_ALTERNATES_FUNCTIONAL_MASK) {
+      // fetch the feature lookup object from the styleset
+      aFont->mFont.featureValueLookup =
+        aPresContext->StyleSet()->GetFontFeatureValuesLookup();
+
+      NS_ASSERTION(variantAlternatesValue->GetPairValue().mYValue.GetUnit() ==
+                   eCSSUnit_List, "function list not a list value");
+      nsStyleUtil::ComputeFunctionalAlternates(
+        variantAlternatesValue->GetPairValue().mYValue.GetListValue(),
+        aFont->mFont.alternateValues);
+    }
+    break;
+
+  default:
+    break;
+  }
+
+  // font-variant-caps: normal, enum, inherit, initial, -moz-system-font
+  SetDiscrete(*aRuleData->ValueForFontVariantCaps(),
+              aFont->mFont.variantCaps, aCanStoreInRuleTree,
+              SETDSC_NORMAL | SETDSC_ENUMERATED | SETDSC_SYSTEM_FONT,
+              aParentFont->mFont.variantCaps,
+              defaultVariableFont->variantCaps,
+              0, 0, 0, systemFont.variantCaps);
+
+  // font-variant-east-asian: normal, enum (bit field), inherit, initial,
+  //                          -moz-system-font
+  SetDiscrete(*aRuleData->ValueForFontVariantEastAsian(),
+              aFont->mFont.variantEastAsian, aCanStoreInRuleTree,
+              SETDSC_NORMAL | SETDSC_ENUMERATED | SETDSC_SYSTEM_FONT,
+              aParentFont->mFont.variantEastAsian,
+              defaultVariableFont->variantEastAsian,
+              0, 0, 0, systemFont.variantEastAsian);
+
+  // font-variant-ligatures: normal, enum (bit field), inherit, initial,
+  //                         -moz-system-font
+  SetDiscrete(*aRuleData->ValueForFontVariantLigatures(),
+              aFont->mFont.variantLigatures, aCanStoreInRuleTree,
+              SETDSC_NORMAL | SETDSC_ENUMERATED | SETDSC_SYSTEM_FONT,
+              aParentFont->mFont.variantLigatures,
+              defaultVariableFont->variantLigatures,
+              0, 0, 0, systemFont.variantLigatures);
+
+  // font-variant-numeric: normal, enum (bit field), inherit, initial,
+  //                       -moz-system-font
+  SetDiscrete(*aRuleData->ValueForFontVariantNumeric(),
+              aFont->mFont.variantNumeric, aCanStoreInRuleTree,
+              SETDSC_NORMAL | SETDSC_ENUMERATED | SETDSC_SYSTEM_FONT,
+              aParentFont->mFont.variantNumeric,
+              defaultVariableFont->variantNumeric,
+              0, 0, 0, systemFont.variantNumeric);
+
+  // font-variant-position: normal, enum, inherit, initial,
+  //                        -moz-system-font
+  SetDiscrete(*aRuleData->ValueForFontVariantPosition(),
+              aFont->mFont.variantPosition, aCanStoreInRuleTree,
+              SETDSC_NORMAL | SETDSC_ENUMERATED | SETDSC_SYSTEM_FONT,
+              aParentFont->mFont.variantPosition,
+              defaultVariableFont->variantPosition,
+              0, 0, 0, systemFont.variantPosition);
+
   // font-feature-settings
   const nsCSSValue* featureSettingsValue =
     aRuleData->ValueForFontFeatureSettings();
@@ -3574,7 +3716,8 @@ nsRuleNode::GetShadowData(const nsCSSValueList* aList,
 
   NS_ABORT_IF_FALSE(arrayLength > 0,
                     "Non-null text-shadow list, yet we counted 0 items.");
-  nsCSSShadowArray* shadowList = new(arrayLength) nsCSSShadowArray(arrayLength);
+  nsRefPtr<nsCSSShadowArray> shadowList =
+    new(arrayLength) nsCSSShadowArray(arrayLength);
 
   if (!shadowList)
     return nullptr;
@@ -3640,8 +3783,7 @@ nsRuleNode::GetShadowData(const nsCSSValueList* aList,
     }
   }
 
-  NS_ADDREF(shadowList);
-  return shadowList;
+  return shadowList.forget();
 }
 
 const void*
@@ -4781,7 +4923,7 @@ nsRuleNode::ComputeDisplayData(void* aStartStruct,
               NS_STYLE_PAGE_BREAK_AUTO, 0, 0, 0, 0);
 
   // float: enum, inherit, initial
-  SetDiscrete(*aRuleData->ValueForCssFloat(),
+  SetDiscrete(*aRuleData->ValueForFloat(),
               display->mFloats, canStoreInRuleTree,
               SETDSC_ENUMERATED, parentDisplay->mFloats,
               NS_STYLE_FLOAT_NONE, 0, 0, 0, 0);
@@ -5446,10 +5588,7 @@ SetBackgroundList(nsStyleContext* aStyleContext,
   case eCSSUnit_Inherit:
     aRebuild = true;
     aCanStoreInRuleTree = false;
-    if (!aLayers.EnsureLengthAtLeast(aParentItemCount)) {
-      NS_WARNING("out of memory");
-      aParentItemCount = aLayers.Length();
-    }
+    aLayers.EnsureLengthAtLeast(aParentItemCount);
     aItemCount = aParentItemCount;
     for (uint32_t i = 0; i < aParentItemCount; ++i) {
       aLayers[i].*aResultLocation = aParentLayers[i].*aResultLocation;
@@ -5473,11 +5612,7 @@ SetBackgroundList(nsStyleContext* aStyleContext,
                    item->mValue.GetUnit() != eCSSUnit_Initial,
                    "unexpected unit");
       ++aItemCount;
-      if (!aLayers.EnsureLengthAtLeast(aItemCount)) {
-        NS_WARNING("out of memory");
-        --aItemCount;
-        break;
-      }
+      aLayers.EnsureLengthAtLeast(aItemCount);
       BackgroundItemComputer<nsCSSValueList, ComputedValueItem>
         ::ComputeValue(aStyleContext, item,
                        aLayers[aItemCount-1].*aResultLocation,
@@ -5520,10 +5655,7 @@ SetBackgroundPairList(nsStyleContext* aStyleContext,
   case eCSSUnit_Inherit:
     aRebuild = true;
     aCanStoreInRuleTree = false;
-    if (!aLayers.EnsureLengthAtLeast(aParentItemCount)) {
-      NS_WARNING("out of memory");
-      aParentItemCount = aLayers.Length();
-    }
+    aLayers.EnsureLengthAtLeast(aParentItemCount);
     aItemCount = aParentItemCount;
     for (uint32_t i = 0; i < aParentItemCount; ++i) {
       aLayers[i].*aResultLocation = aParentLayers[i].*aResultLocation;
@@ -5548,11 +5680,7 @@ SetBackgroundPairList(nsStyleContext* aStyleContext,
                    item->mYValue.GetUnit() != eCSSUnit_Initial,
                    "unexpected unit");
       ++aItemCount;
-      if (!aLayers.EnsureLengthAtLeast(aItemCount)) {
-        NS_WARNING("out of memory");
-        --aItemCount;
-        break;
-      }
+      aLayers.EnsureLengthAtLeast(aItemCount);
       BackgroundItemComputer<nsCSSValuePairList, ComputedValueItem>
         ::ComputeValue(aStyleContext, item,
                        aLayers[aItemCount-1].*aResultLocation,
@@ -6477,7 +6605,7 @@ nsRuleNode::ComputePositionData(void* aStartStruct,
            SETCOORD_LPAEH | SETCOORD_INITIAL_AUTO | SETCOORD_STORE_CALC,
            aContext, mPresContext, canStoreInRuleTree);
   SetCoord(*aRuleData->ValueForMinWidth(), pos->mMinWidth, parentPos->mMinWidth,
-           SETCOORD_LPAEH | SETCOORD_INITIAL_AUTO | SETCOORD_STORE_CALC,
+           SETCOORD_LPEH | SETCOORD_INITIAL_ZERO | SETCOORD_STORE_CALC,
            aContext, mPresContext, canStoreInRuleTree);
   SetCoord(*aRuleData->ValueForMaxWidth(), pos->mMaxWidth, parentPos->mMaxWidth,
            SETCOORD_LPOEH | SETCOORD_INITIAL_NONE | SETCOORD_STORE_CALC,
@@ -6487,7 +6615,7 @@ nsRuleNode::ComputePositionData(void* aStartStruct,
            SETCOORD_LPAH | SETCOORD_INITIAL_AUTO | SETCOORD_STORE_CALC,
            aContext, mPresContext, canStoreInRuleTree);
   SetCoord(*aRuleData->ValueForMinHeight(), pos->mMinHeight, parentPos->mMinHeight,
-           SETCOORD_LPAH | SETCOORD_INITIAL_AUTO | SETCOORD_STORE_CALC,
+           SETCOORD_LPH | SETCOORD_INITIAL_ZERO | SETCOORD_STORE_CALC,
            aContext, mPresContext, canStoreInRuleTree);
   SetCoord(*aRuleData->ValueForMaxHeight(), pos->mMaxHeight, parentPos->mMaxHeight,
            SETCOORD_LPOH | SETCOORD_INITIAL_NONE | SETCOORD_STORE_CALC,
@@ -6499,7 +6627,6 @@ nsRuleNode::ComputePositionData(void* aStartStruct,
               SETDSC_ENUMERATED, parentPos->mBoxSizing,
               NS_STYLE_BOX_SIZING_CONTENT, 0, 0, 0, 0);
 
-#ifdef MOZ_FLEXBOX
   // align-items: enum, inherit, initial
   SetDiscrete(*aRuleData->ValueForAlignItems(),
               pos->mAlignItems, canStoreInRuleTree,
@@ -6589,7 +6716,6 @@ nsRuleNode::ComputePositionData(void* aStartStruct,
               pos->mJustifyContent, canStoreInRuleTree,
               SETDSC_ENUMERATED, parentPos->mJustifyContent,
               NS_STYLE_JUSTIFY_CONTENT_FLEX_START, 0, 0, 0, 0);
-#endif // MOZ_FLEXBOX
 
   // z-index
   const nsCSSValue* zIndexValue = aRuleData->ValueForZIndex();
@@ -7075,8 +7201,9 @@ nsRuleNode::ComputeColumnData(void* aStartStruct,
     column->mColumnCount = NS_STYLE_COLUMN_COUNT_AUTO;
   } else if (eCSSUnit_Integer == columnCountValue->GetUnit()) {
     column->mColumnCount = columnCountValue->GetIntValue();
-    // Max 1000 columns - wallpaper for bug 345583.
-    column->mColumnCount = std::min(column->mColumnCount, 1000U);
+    // Max kMaxColumnCount columns - wallpaper for bug 345583.
+    column->mColumnCount = std::min(column->mColumnCount,
+                                    nsStyleColumn::kMaxColumnCount);
   } else if (eCSSUnit_Inherit == columnCountValue->GetUnit()) {
     canStoreInRuleTree = false;
     column->mColumnCount = parent->mColumnCount;
@@ -7681,9 +7808,9 @@ nsRuleNode::GetStyleData(nsStyleStructID aSID,
 
 // See comments above in GetStyleData for an explanation of what the
 // code below does.
-#define STYLE_STRUCT(name_, checkdata_cb_, ctor_args_)                        \
+#define STYLE_STRUCT(name_, checkdata_cb_)                                    \
 const nsStyle##name_*                                                         \
-nsRuleNode::GetStyle##name_(nsStyleContext* aContext, bool aComputeData)    \
+nsRuleNode::GetStyle##name_(nsStyleContext* aContext, bool aComputeData)      \
 {                                                                             \
   NS_ASSERTION(IsUsedDirectly(),                                              \
                "if we ever call this on rule nodes that aren't used "         \

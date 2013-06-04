@@ -26,7 +26,6 @@
 #include "nsGUIEvent.h"
 #include "prprf.h"
 #include "nsIDOMEventListener.h"
-#include "nsIJSContextStack.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsWeakPtr.h"
 #include "nsIScriptGlobalObject.h"
@@ -43,6 +42,7 @@
 #include "nsIStreamConverterService.h"
 #include "nsICachingChannel.h"
 #include "nsContentUtils.h"
+#include "nsCxPusher.h"
 #include "nsEventDispatcher.h"
 #include "nsDOMJSUtils.h"
 #include "nsCOMArray.h"
@@ -69,7 +69,7 @@
 #include "nsIFileChannel.h"
 #include "mozilla/Telemetry.h"
 #include "jsfriendapi.h"
-#include "sampler.h"
+#include "GeckoProfiler.h"
 #include "mozilla/dom/EncodingUtils.h"
 #include "mozilla/dom/XMLHttpRequestBinding.h"
 #include "nsIDOMFormData.h"
@@ -85,6 +85,15 @@
 
 using namespace mozilla;
 using namespace mozilla::dom;
+
+// Maximum size that we'll grow an ArrayBuffer instead of doubling,
+// once doubling reaches this threshold
+#define XML_HTTP_REQUEST_ARRAYBUFFER_MAX_GROWTH (32*1024*1024)
+// start at 32k to avoid lots of doubling right at the start
+#define XML_HTTP_REQUEST_ARRAYBUFFER_MIN_SIZE (32*1024)
+// the maximum Content-Length that we'll preallocate.  1GB.  Must fit
+// in an int32_t!
+#define XML_HTTP_REQUEST_MAX_CONTENT_LENGTH_PREALLOCATE (1*1024*1024*1024LL)
 
 #define LOAD_STR "load"
 #define ERROR_STR "error"
@@ -319,15 +328,17 @@ nsXMLHttpRequest::~nsXMLHttpRequest()
   NS_ABORT_IF_FALSE(!(mState & XML_HTTP_REQUEST_SYNCLOOPING), "we rather crash than hang");
   mState &= ~XML_HTTP_REQUEST_SYNCLOOPING;
 
+  mResultJSON = JSVAL_VOID;
+  mResultArrayBuffer = nullptr;
+  NS_DROP_JS_OBJECTS(this, nsXMLHttpRequest);
+
   nsLayoutStatics::Release();
 }
 
 void
 nsXMLHttpRequest::RootJSResultObjects()
 {
-  nsContentUtils::PreserveWrapper(
-    static_cast<nsIDOMEventTarget*>(
-      static_cast<nsDOMEventTargetHelper*>(this)), this);
+  NS_HOLD_JS_OBJECTS(this, nsXMLHttpRequest);
 }
 
 /**
@@ -342,7 +353,11 @@ nsXMLHttpRequest::Init()
     secMan->GetSystemPrincipal(getter_AddRefs(subjectPrincipal));
   }
   NS_ENSURE_STATE(subjectPrincipal);
-  Construct(subjectPrincipal, nullptr);
+
+  // Instead of grabbing some random global from the context stack,
+  // let's use the default one (junk drawer) for now.
+  // We should move away from this Init...
+  Construct(subjectPrincipal, xpc::GetNativeForGlobal(xpc::GetJunkScope()));
   return NS_OK;
 }
 
@@ -352,15 +367,21 @@ nsXMLHttpRequest::Init()
 NS_IMETHODIMP
 nsXMLHttpRequest::Init(nsIPrincipal* aPrincipal,
                        nsIScriptContext* aScriptContext,
-                       nsPIDOMWindow* aOwnerWindow,
+                       nsIGlobalObject* aGlobalObject,
                        nsIURI* aBaseURI)
 {
-  NS_ASSERTION(!aOwnerWindow || aOwnerWindow->IsOuterWindow(),
-               "Expecting an outer window here!");
   NS_ENSURE_ARG_POINTER(aPrincipal);
-  Construct(aPrincipal,
-            aOwnerWindow ? aOwnerWindow->GetCurrentInnerWindow() : nullptr,
-            aBaseURI);
+  
+  if (nsCOMPtr<nsPIDOMWindow> win = do_QueryInterface(aGlobalObject)) {
+    if (win->IsOuterWindow()) {
+      // Must be bound to inner window, innerize if necessary.
+      nsCOMPtr<nsIGlobalObject> inner = do_QueryInterface(
+        win->GetCurrentInnerWindow());
+      aGlobalObject = inner.get();
+    }
+  }
+
+  Construct(aPrincipal, aGlobalObject, aBaseURI);
   return NS_OK;
 }
 
@@ -380,7 +401,7 @@ nsXMLHttpRequest::InitParameters(bool aAnon, bool aSystem)
   // Chrome is always allowed access, so do the permission check only
   // for non-chrome pages.
   if (!nsContentUtils::IsCallerChrome()) {
-    nsCOMPtr<nsIDocument> doc = do_QueryInterface(window->GetExtantDocument());
+    nsCOMPtr<nsIDocument> doc = window->GetExtantDoc();
     if (!doc) {
       return;
     }
@@ -412,6 +433,7 @@ nsXMLHttpRequest::ResetResponse()
   mDOMFile = nullptr;
   mBlobSet = nullptr;
   mResultArrayBuffer = nullptr;
+  mArrayBufferBuilder.reset();
   mResultJSON = JSVAL_VOID;
   mLoadTransferred = 0;
   mResponseBodyDecodedPos = 0;
@@ -463,6 +485,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsXMLHttpRequest,
                                                 nsXHREventTarget)
   tmp->mResultArrayBuffer = nullptr;
+  tmp->mArrayBufferBuilder.reset();
   tmp->mResultJSON = JSVAL_VOID;
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mContext)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mChannel)
@@ -550,7 +573,7 @@ static void LogMessage(const char* aWarning, nsPIDOMWindow* aWindow)
 {
   nsCOMPtr<nsIDocument> doc;
   if (aWindow) {
-    doc = do_QueryInterface(aWindow->GetExtantDocument());
+    doc = aWindow->GetExtantDoc();
   }
   nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
                                   "DOM", doc,
@@ -592,7 +615,7 @@ nsXMLHttpRequest::GetResponseXML(ErrorResult& aRv)
 }
 
 /*
- * This piece copied from nsXMLDocument, we try to get the charset
+ * This piece copied from XMLDocument, we try to get the charset
  * from HTTP headers.
  */
 nsresult
@@ -760,8 +783,8 @@ nsXMLHttpRequest::CreateResponseParsedJSON(JSContext* aCx)
 
   // The Unicode converter has already zapped the BOM if there was one
   if (!JS_ParseJSON(aCx,
-                    static_cast<const jschar*>(mResponseText.get()),
-                    mResponseText.Length(), &mResultJSON)) {
+                    static_cast<const jschar*>(mResponseText.get()), mResponseText.Length(),
+                    JS::MutableHandle<JS::Value>::fromMarkedLocation(&mResultJSON))) {
     return NS_ERROR_FAILURE;
   }
 
@@ -838,8 +861,8 @@ nsXMLHttpRequest::StaticAssertions()
 {
 #define ASSERT_ENUM_EQUAL(_lc, _uc) \
   MOZ_STATIC_ASSERT(\
-    XMLHttpRequestResponseTypeValues::_lc                \
-    == XMLHttpRequestResponseType(XML_HTTP_RESPONSE_TYPE_ ## _uc), \
+    static_cast<int>(XMLHttpRequestResponseType::_lc)  \
+    == XML_HTTP_RESPONSE_TYPE_ ## _uc, \
     #_uc " should match")
 
   ASSERT_ENUM_EQUAL(_empty, DEFAULT);
@@ -890,7 +913,7 @@ void
 nsXMLHttpRequest::SetResponseType(XMLHttpRequestResponseType aType,
                                   ErrorResult& aRv)
 {
-  SetResponseType(ResponseTypeEnum(aType), aRv);
+  SetResponseType(ResponseTypeEnum(static_cast<int>(aType)), aRv);
 }
 
 void
@@ -927,7 +950,7 @@ nsXMLHttpRequest::SetResponseType(nsXMLHttpRequest::ResponseTypeEnum aResponseTy
 
 /* readonly attribute jsval response; */
 NS_IMETHODIMP
-nsXMLHttpRequest::GetResponse(JSContext *aCx, jsval *aResult)
+nsXMLHttpRequest::GetResponse(JSContext *aCx, JS::Value *aResult)
 {
   ErrorResult rv;
   *aResult = GetResponse(aCx, rv);
@@ -967,9 +990,10 @@ nsXMLHttpRequest::GetResponse(JSContext* aCx, ErrorResult& aRv)
 
     if (!mResultArrayBuffer) {
       RootJSResultObjects();
-      aRv = nsContentUtils::CreateArrayBuffer(aCx, mResponseBody,
-                                              &mResultArrayBuffer);
-      if (aRv.Failed()) {
+
+      mResultArrayBuffer = mArrayBufferBuilder.getArrayBuffer(aCx);
+      if (!mResultArrayBuffer) {
+        aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
         return JSVAL_NULL;
       }
     }
@@ -992,9 +1016,9 @@ nsXMLHttpRequest::GetResponse(JSContext* aCx, ErrorResult& aRv)
       return JSVAL_NULL;
     }
 
-    JS::Value result = JSVAL_NULL;
-    JSObject* scope = JS_GetGlobalForScopeChain(aCx);
-    aRv = nsContentUtils::WrapNative(aCx, scope, mResponseBlob, &result,
+    JS::Rooted<JS::Value> result(aCx, JSVAL_NULL);
+    JS::Rooted<JSObject*> scope(aCx, JS_GetGlobalForScopeChain(aCx));
+    aRv = nsContentUtils::WrapNative(aCx, scope, mResponseBlob, result.address(),
                                      nullptr, true);
     return result;
   }
@@ -1004,9 +1028,9 @@ nsXMLHttpRequest::GetResponse(JSContext* aCx, ErrorResult& aRv)
       return JSVAL_NULL;
     }
 
-    JSObject* scope = JS_GetGlobalForScopeChain(aCx);
-    JS::Value result = JSVAL_NULL;
-    aRv = nsContentUtils::WrapNative(aCx, scope, mResponseXML, &result,
+    JS::Rooted<JSObject*> scope(aCx, JS_GetGlobalForScopeChain(aCx));
+    JS::Rooted<JS::Value> result(aCx, JSVAL_NULL);
+    aRv = nsContentUtils::WrapNative(aCx, scope, mResponseXML, result.address(),
                                      nullptr, true);
     return result;
   }
@@ -1730,16 +1754,17 @@ nsXMLHttpRequest::StreamReaderFunc(nsIInputStream* in,
     if (xmlHttpRequest->mResponseType == XML_HTTP_RESPONSE_TYPE_MOZ_BLOB) {
       xmlHttpRequest->mResponseBlob = nullptr;
     }
-    if (NS_SUCCEEDED(rv)) {
-      *writeCount = count;
-    }
-    return rv;
-  }
+  } else if (xmlHttpRequest->mResponseType == XML_HTTP_RESPONSE_TYPE_ARRAYBUFFER ||
+             xmlHttpRequest->mResponseType == XML_HTTP_RESPONSE_TYPE_CHUNKED_ARRAYBUFFER) {
+    // get the initial capacity to something reasonable to avoid a bunch of reallocs right
+    // at the start
+    if (xmlHttpRequest->mArrayBufferBuilder.capacity() == 0)
+      xmlHttpRequest->mArrayBufferBuilder.setCapacity(PR_MAX(count, XML_HTTP_REQUEST_ARRAYBUFFER_MIN_SIZE));
 
-  if ((xmlHttpRequest->mResponseType == XML_HTTP_RESPONSE_TYPE_DEFAULT &&
-       xmlHttpRequest->mResponseXML) ||
-      xmlHttpRequest->mResponseType == XML_HTTP_RESPONSE_TYPE_ARRAYBUFFER ||
-      xmlHttpRequest->mResponseType == XML_HTTP_RESPONSE_TYPE_CHUNKED_ARRAYBUFFER) {
+    xmlHttpRequest->mArrayBufferBuilder.append(reinterpret_cast<const uint8_t*>(fromRawSegment), count,
+                                               XML_HTTP_REQUEST_ARRAYBUFFER_MAX_GROWTH);
+  } else if (xmlHttpRequest->mResponseType == XML_HTTP_RESPONSE_TYPE_DEFAULT &&
+             xmlHttpRequest->mResponseXML) {
     // Copy for our own use
     uint32_t previousLength = xmlHttpRequest->mResponseBody.Length();
     xmlHttpRequest->mResponseBody.Append(fromRawSegment,count);
@@ -1855,7 +1880,7 @@ nsXMLHttpRequest::OnDataAvailable(nsIRequest *request,
 NS_IMETHODIMP
 nsXMLHttpRequest::OnStartRequest(nsIRequest *request, nsISupports *ctxt)
 {
-  SAMPLE_LABEL("nsXMLHttpRequest", "OnStartRequest");
+  PROFILER_LABEL("nsXMLHttpRequest", "OnStartRequest");
   nsresult rv = NS_OK;
   if (!mFirstStartRequestSeen && mRequestObserver) {
     mFirstStartRequestSeen = true;
@@ -1930,6 +1955,17 @@ nsXMLHttpRequest::OnStartRequest(nsIRequest *request, nsISupports *ctxt)
 
   DetectCharset();
 
+  // Set up arraybuffer
+  if (mResponseType == XML_HTTP_RESPONSE_TYPE_ARRAYBUFFER && NS_SUCCEEDED(status)) {
+    int64_t contentLength;
+    rv = channel->GetContentLength(&contentLength);
+    if (NS_SUCCEEDED(rv) &&
+        contentLength > 0 &&
+        contentLength < XML_HTTP_REQUEST_MAX_CONTENT_LENGTH_PREALLOCATE) {
+      mArrayBufferBuilder.setCapacity(static_cast<int32_t>(contentLength));
+    }
+  }
+
   // Set up responseXML
   bool parseBody = mResponseType == XML_HTTP_RESPONSE_TYPE_DEFAULT ||
                      mResponseType == XML_HTTP_RESPONSE_TYPE_DOCUMENT;
@@ -1990,8 +2026,8 @@ nsXMLHttpRequest::OnStartRequest(nsIRequest *request, nsISupports *ctxt)
     // principal, so use mPrincipal when creating the document, then reset the
     // principal.
     const nsAString& emptyStr = EmptyString();
-    nsCOMPtr<nsIScriptGlobalObject> global = do_QueryInterface(GetOwner());
     nsCOMPtr<nsIDOMDocument> responseDoc;
+    nsIGlobalObject* global = nsDOMEventTargetHelper::GetParentObject();
     rv = NS_NewDOMDocument(getter_AddRefs(responseDoc),
                            emptyStr, emptyStr, nullptr, docURI,
                            baseURI, mPrincipal, true, global,
@@ -2041,7 +2077,7 @@ nsXMLHttpRequest::OnStartRequest(nsIRequest *request, nsISupports *ctxt)
 NS_IMETHODIMP
 nsXMLHttpRequest::OnStopRequest(nsIRequest *request, nsISupports *ctxt, nsresult status)
 {
-  SAMPLE_LABEL("content", "nsXMLHttpRequest::OnStopRequest");
+  PROFILER_LABEL("content", "nsXMLHttpRequest::OnStopRequest");
   if (request != mChannel) {
     // Can this still happen?
     return NS_OK;
@@ -2104,6 +2140,15 @@ nsXMLHttpRequest::OnStopRequest(nsIRequest *request, nsISupports *ctxt, nsresult
     }
     NS_ASSERTION(mResponseBody.IsEmpty(), "mResponseBody should be empty");
     NS_ASSERTION(mResponseText.IsEmpty(), "mResponseText should be empty");
+  } else if (NS_SUCCEEDED(status) &&
+             (mResponseType == XML_HTTP_RESPONSE_TYPE_ARRAYBUFFER ||
+              mResponseType == XML_HTTP_RESPONSE_TYPE_CHUNKED_ARRAYBUFFER)) {
+    // set the capacity down to the actual length, to realloc back
+    // down to the actual size
+    if (!mArrayBufferBuilder.setCapacity(mArrayBufferBuilder.length())) {
+      // this should never happen!
+      status = NS_ERROR_UNEXPECTED;
+    }
   }
 
   nsCOMPtr<nsIChannel> channel(do_QueryInterface(request));
@@ -2139,7 +2184,7 @@ nsXMLHttpRequest::OnStopRequest(nsIRequest *request, nsISupports *ctxt, nsresult
   if (mIsHtml) {
     NS_ASSERTION(!(mState & XML_HTTP_REQUEST_SYNCLOOPING),
       "We weren't supposed to support HTML parsing with XHR!");
-    nsCOMPtr<nsIDOMEventTarget> eventTarget = do_QueryInterface(mResponseXML);
+    nsCOMPtr<EventTarget> eventTarget = do_QueryInterface(mResponseXML);
     nsEventListenerManager* manager = eventTarget->GetListenerManager(true);
     manager->AddEventListenerByType(new nsXHRParseEndListener(this),
                                     NS_LITERAL_STRING("DOMContentLoaded"),
@@ -2274,12 +2319,8 @@ GetRequestBody(nsIDOMDocument* aDoc, nsIInputStream** aResult,
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Make sure to use the encoding we'll send
-  {
-    nsCxPusher pusher;
-    pusher.PushNull();
-    rv = serializer->SerializeToStream(aDoc, output, aCharset);
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
+  rv = serializer->SerializeToStream(aDoc, output, aCharset);
+  NS_ENSURE_SUCCESS(rv, rv);
 
   output->Close();
 
@@ -2396,11 +2437,12 @@ GetRequestBody(nsIVariant* aBody, nsIInputStream** aResult, uint64_t* aContentLe
     }
 
     // ArrayBuffer?
-    jsval realVal;
+    AutoSafeJSContext cx;
+    JS::Rooted<JS::Value> realVal(cx);
 
-    nsresult rv = aBody->GetAsJSVal(&realVal);
+    nsresult rv = aBody->GetAsJSVal(realVal.address());
     if (NS_SUCCEEDED(rv) && !JSVAL_IS_PRIMITIVE(realVal)) {
-      JSObject *obj = JSVAL_TO_OBJECT(realVal);
+      JS::Rooted<JSObject*> obj(cx, JSVAL_TO_OBJECT(realVal));
       if (JS_IsArrayBufferObject(obj)) {
           ArrayBuffer buf(obj);
           return GetRequestBody(buf.Data(), buf.Length(), aResult,
@@ -2618,7 +2660,8 @@ nsXMLHttpRequest::Send(nsIVariant* aVariant, const Nullable<RequestBody>& aBody)
   mLoadLengthComputable = false;
   mLoadTotal = 0;
   if ((aVariant || !aBody.IsNull()) && httpChannel &&
-      !method.EqualsLiteral("GET")) {
+      !method.LowerCaseEqualsLiteral("get") &&
+      !method.LowerCaseEqualsLiteral("head")) {
 
     nsAutoCString charset;
     nsAutoCString defaultContentType;
@@ -2851,7 +2894,7 @@ nsXMLHttpRequest::Send(nsIVariant* aVariant, const Nullable<RequestBody>& aBody)
         nsCOMPtr<nsPIDOMWindow> suspendedWindow(do_QueryInterface(topWindow));
         if (suspendedWindow &&
             (suspendedWindow = suspendedWindow->GetCurrentInnerWindow())) {
-          suspendedDoc = do_QueryInterface(suspendedWindow->GetExtantDocument());
+          suspendedDoc = suspendedWindow->GetExtantDoc();
           if (suspendedDoc) {
             suspendedDoc->SuppressEventHandling();
           }
@@ -3423,6 +3466,7 @@ nsXMLHttpRequest::MaybeDispatchProgressEvents(bool aFinalProgress)
       mResponseBody.Truncate();
       mResponseText.Truncate();
       mResultArrayBuffer = nullptr;
+      mArrayBufferBuilder.reset();
     }
   }
 
@@ -3621,14 +3665,14 @@ nsXMLHttpRequest::GetInterface(JSContext* aCx, nsIJSID* aIID, ErrorResult& aRv)
 {
   const nsID* iid = aIID->GetID();
   nsCOMPtr<nsISupports> result;
-  JS::Value v = JSVAL_NULL;
+  JS::Rooted<JS::Value> v(aCx, JSVAL_NULL);
   aRv = GetInterface(*iid, getter_AddRefs(result));
   NS_ENSURE_FALSE(aRv.Failed(), JSVAL_NULL);
 
-  JSObject* wrapper = GetWrapper();
+  JS::Rooted<JSObject*> wrapper(aCx, GetWrapper());
   JSAutoCompartment ac(aCx, wrapper);
-  JSObject* global = JS_GetGlobalForObject(aCx, wrapper);
-  aRv = nsContentUtils::WrapNative(aCx, global, result, iid, &v);
+  JS::Rooted<JSObject*> global(aCx, JS_GetGlobalForObject(aCx, wrapper));
+  aRv = nsContentUtils::WrapNative(aCx, global, result, iid, v.address());
   return aRv.Failed() ? JSVAL_NULL : v;
 }
 

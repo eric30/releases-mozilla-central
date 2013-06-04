@@ -46,7 +46,7 @@ html|a {
 :-moz-type-unsupported-platform .icon {
   background-image: url(chrome://mozapps/skin/plugins/contentPluginMissing.png);
 }
-:-moz-type-unsupported .icon[status="ready"] {
+:-moz-type-unsupported .icon[installable] {
   background-image: url(chrome://mozapps/skin/plugins/contentPluginDownload.png);
 }
 :-moz-handler-vulnerable-updatable .icon,
@@ -172,7 +172,7 @@ html|a {
   background-repeat: no-repeat;
 }
 
-.closeIcon:-moz-locale-dir(rtl) {
+.mainBox[chromedir="rtl"] .closeIcon {
   right: auto;
   left: 4px;
 }

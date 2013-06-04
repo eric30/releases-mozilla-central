@@ -29,7 +29,6 @@ class CommonTestCase(unittest.TestCase):
     def __init__(self, methodName):
         unittest.TestCase.__init__(self, methodName)
         self.loglines = None
-        self.perfdata = None
         self.duration = 0
 
     @classmethod
@@ -88,12 +87,17 @@ permissions.forEach(function (perm) {
         self.marionette = self._marionette_weakref()
         if self.marionette.session is None:
             self.marionette.start_session()
+        if self.marionette.timeout is not None:
+            self.marionette.timeouts(self.marionette.TIMEOUT_SEARCH, self.marionette.timeout)
+            self.marionette.timeouts(self.marionette.TIMEOUT_SCRIPT, self.marionette.timeout)
+            self.marionette.timeouts(self.marionette.TIMEOUT_PAGE, self.marionette.timeout)
+        else:
+            self.marionette.timeouts(self.marionette.TIMEOUT_PAGE, 30000)
 
     def tearDown(self):
         self.duration = time.time() - self.start_time
         if self.marionette.session is not None:
             self.loglines = self.marionette.get_logs()
-            self.perfdata = self.marionette.get_perf_data()
             self.marionette.delete_session()
         self.marionette = None
 
@@ -112,7 +116,7 @@ class MarionetteTestCase(CommonTestCase):
         CommonTestCase.__init__(self, methodName, **kwargs)
 
     @classmethod
-    def add_tests_to_suite(cls, mod_name, filepath, suite, testloader, marionette, testvars):
+    def add_tests_to_suite(cls, mod_name, filepath, suite, testloader, marionette, testvars, **kwargs):
         test_mod = imp.load_source(mod_name, filepath)
 
         for name in dir(test_mod):
@@ -124,7 +128,8 @@ class MarionetteTestCase(CommonTestCase):
                     suite.addTest(obj(weakref.ref(marionette),
                                   methodName=testname,
                                   filepath=filepath,
-                                  testvars=testvars))
+                                  testvars=testvars,
+                                  **kwargs))
 
     def setUp(self):
         CommonTestCase.setUp(self)
@@ -154,6 +159,15 @@ class MarionetteTestCase(CommonTestCase):
             qemu = self.marionette.extra_emulators[self.extra_emulator_index]
         return qemu
 
+    def wait_for_condition(self, method, timeout=30):
+        timeout = float(timeout) + time.time()
+        while time.time() < timeout:
+            value = method(self.marionette)
+            if value:
+                return value
+            time.sleep(0.5)
+        else:
+            raise TimeoutException("wait_for_condition timed out")
 
 class MarionetteJSTestCase(CommonTestCase):
 
@@ -227,9 +241,8 @@ class MarionetteJSTestCase(CommonTestCase):
                 self.assertEqual(0, results['failed'],
                                  '%d tests failed:\n%s' % (results['failed'], '\n'.join(fails)))
 
-            if not self.perfdata:
-                self.assertTrue(results['passed'] + results['failed'] > 0,
-                                'no tests run')
+            self.assertTrue(results['passed'] + results['failed'] > 0,
+                            'no tests run')
 
         except ScriptTimeoutException:
             if 'timeout' in self.jsFile:

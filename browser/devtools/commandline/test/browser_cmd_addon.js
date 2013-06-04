@@ -16,13 +16,8 @@ function test() {
 tests.gatTest = function(options) {
   let deferred = Promise.defer();
 
-  // hack to reduce stack size as a result of bug 842347
-  let onGatReadyInterjection = function() {
-    executeSoon(onGatReady);
-  };
-
   let onGatReady = function() {
-    Services.obs.removeObserver(onGatReadyInterjection, "gcli_addon_commands_ready", false);
+    Services.obs.removeObserver(onGatReady, "gcli_addon_commands_ready");
     info("gcli_addon_commands_ready notification received, running tests");
 
     let auditDone = helpers.audit(options, [
@@ -33,6 +28,9 @@ tests.gatTest = function(options) {
           hints:                       '',
           markup: 'VVVVVVVVVVVVVVVVVVVVV',
           status: 'VALID'
+        },
+        exec: {
+          output: 'There are no add-ons of that type installed.'
         }
       },
       {
@@ -42,6 +40,9 @@ tests.gatTest = function(options) {
           hints:                      '',
           markup: 'VVVVVVVVVVVVVVVVVVVV',
           status: 'VALID'
+        },
+        exec: {
+          output: [/The following/, /Mochitest/, /Special Powers/]
         }
       },
       {
@@ -51,6 +52,9 @@ tests.gatTest = function(options) {
           hints:                   '',
           markup: 'VVVVVVVVVVVVVVVVV',
           status: 'VALID'
+        },
+        exec: {
+          output: 'There are no add-ons of that type installed.'
         }
       },
       {
@@ -60,6 +64,9 @@ tests.gatTest = function(options) {
           hints:                   '',
           markup: 'VVVVVVVVVVVVVVVVV',
           status: 'VALID'
+        },
+        exec: {
+          output: [/Test Plug-in/, /Second Test Plug-in/]
         }
       },
       {
@@ -69,6 +76,9 @@ tests.gatTest = function(options) {
           hints:                  '',
           markup: 'VVVVVVVVVVVVVVVV',
           status: 'VALID'
+        },
+        exec: {
+          output: [/following themes/, /Default/]
         }
       },
       {
@@ -78,6 +88,10 @@ tests.gatTest = function(options) {
           hints:                '',
           markup: 'VVVVVVVVVVVVVV',
           status: 'VALID'
+        },
+        exec: {
+          output: [/The following/, /Default/, /Mochitest/, /Test Plug-in/,
+                   /Second Test Plug-in/, /Special Powers/]
         }
       },
       {
@@ -87,6 +101,9 @@ tests.gatTest = function(options) {
           hints:                                    '',
           markup: 'VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV',
           status: 'VALID'
+        },
+        exec: {
+          output: 'Test Plug-in 1.0.0.0 disabled.'
         }
       },
       {
@@ -111,7 +128,7 @@ tests.gatTest = function(options) {
           }
         },
         exec: {
-          completed: false
+          output: 'Test Plug-in 1.0.0.0 enabled.'
         }
       }
     ]);
@@ -121,7 +138,7 @@ tests.gatTest = function(options) {
     });
   };
 
-  Services.obs.addObserver(onGatReadyInterjection, "gcli_addon_commands_ready", false);
+  Services.obs.addObserver(onGatReady, "gcli_addon_commands_ready", false);
 
   if (CmdAddonFlags.addonsLoaded) {
     info("The call to AddonManager.getAllAddons in BuiltinCommands.jsm is done.");

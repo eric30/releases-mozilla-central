@@ -16,8 +16,7 @@ namespace dom {
 
 typedef SVGFEUnstyledElement SVGFEMergeNodeElementBase;
 
-class SVGFEMergeNodeElement : public SVGFEMergeNodeElementBase,
-                              public nsIDOMSVGElement
+class SVGFEMergeNodeElement : public SVGFEMergeNodeElementBase
 {
   friend nsresult (::NS_NewSVGFEMergeNodeElement(nsIContent **aResult,
                                                  already_AddRefed<nsINodeInfo> aNodeInfo));
@@ -25,32 +24,23 @@ protected:
   SVGFEMergeNodeElement(already_AddRefed<nsINodeInfo> aNodeInfo)
     : SVGFEMergeNodeElementBase(aNodeInfo)
   {
-    SetIsDOMBinding();
   }
-  virtual JSObject* WrapNode(JSContext* aCx, JSObject* aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext* aCx,
+                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
 public:
-  // interfaces:
-  NS_DECL_ISUPPORTS_INHERITED
-  NS_FORWARD_NSIDOMSVGELEMENT(SVGFEMergeNodeElementBase::)
-
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
-
-  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const;
+  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
 
   virtual bool AttributeAffectsRendering(
-          int32_t aNameSpaceID, nsIAtom* aAttribute) const;
+          int32_t aNameSpaceID, nsIAtom* aAttribute) const MOZ_OVERRIDE;
 
   const nsSVGString* GetIn1() { return &mStringAttributes[IN1]; }
-
-  virtual nsIDOMNode* AsDOMNode() { return this; }
 
   // WebIDL
   already_AddRefed<nsIDOMSVGAnimatedString> In1();
 
 protected:
-  virtual StringAttributesInfo GetStringInfo();
+  virtual StringAttributesInfo GetStringInfo() MOZ_OVERRIDE;
 
   enum { IN1 };
   nsSVGString mStringAttributes[1];

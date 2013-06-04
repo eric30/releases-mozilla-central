@@ -48,12 +48,17 @@ MOCHITEST_FILES = \
 		test_pathAnimInterpolation.xhtml \
 		test_pathSeg.xhtml \
 		test_pointAtLength.xhtml \
-		test_pointer-events.xhtml \
+		test_pointer-events-1a.xhtml \
+		test_pointer-events-1b.xhtml \
+		pointer-events.js \
 		test_pointer-events-2.xhtml \
 		test_pointer-events-3.xhtml \
 		test_pointer-events-4.xhtml \
 		test_scientific.html \
 		scientific-helper.svg \
+		test_selectSubString.xhtml \
+		test_selectSubString2.xhtml \
+		selectSubString-helper.svg \
 		animated-svg-image-helper.html \
 		animated-svg-image-helper.svg \
 		test_stroke-linecap-hit-testing.xhtml \
@@ -77,6 +82,7 @@ MOCHITEST_FILES = \
 		test_text_2.html \
 		test_text_scaled.html \
 		test_text_selection.html \
+		test_text_update.html \
 		text-helper.svg \
 		text-helper-scaled.svg \
 		text-helper-selection.svg \
@@ -87,6 +93,7 @@ MOCHITEST_FILES = \
 		test_viewport.html \
 		zoom-helper.svg \
 		test_zoom.xhtml \
+                test_bug872812.html \
 		$(NULL)
 
 ifneq (android,$(MOZ_WIDGET_TOOLKIT))

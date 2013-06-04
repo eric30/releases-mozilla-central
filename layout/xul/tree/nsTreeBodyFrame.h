@@ -24,9 +24,16 @@
 #include "nsScrollbarFrame.h"
 #include "nsThreadUtils.h"
 #include "mozilla/LookAndFeel.h"
+#include "nsIScrollbarOwner.h"
 
 class nsOverflowChecker;
 class nsTreeImageListener;
+
+namespace mozilla {
+namespace layout {
+class ScrollbarActivity;
+}
+}
 
 // An entry in the tree's image cache
 struct nsTreeImageCacheEntry
@@ -45,8 +52,11 @@ class nsTreeBodyFrame MOZ_FINAL
   , public nsICSSPseudoComparator
   , public nsIScrollbarMediator
   , public nsIReflowCallback
+  , public nsIScrollbarOwner
 {
 public:
+  typedef mozilla::layout::ScrollbarActivity ScrollbarActivity;
+
   nsTreeBodyFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
   ~nsTreeBodyFrame();
 
@@ -60,7 +70,16 @@ public:
   nsresult OnImageIsAnimated(imgIRequest* aRequest);
 
   // non-virtual signatures like nsITreeBodyFrame
-  nsresult GetColumns(nsITreeColumns **aColumns);
+  already_AddRefed<nsTreeColumns> Columns() const
+  {
+    nsRefPtr<nsTreeColumns> cols = mColumns;
+    return cols.forget();
+  }
+  already_AddRefed<nsITreeView> GetExistingView() const
+  {
+    nsCOMPtr<nsITreeView> view = mView;
+    return view.forget();
+  }
   nsresult GetView(nsITreeView **aView);
   nsresult SetView(nsITreeView *aView);
   nsresult GetFocused(bool *aFocused);
@@ -70,9 +89,9 @@ public:
   nsresult GetRowWidth(int32_t *aValue);
   nsresult GetHorizontalPosition(int32_t *aValue);
   nsresult GetSelectionRegion(nsIScriptableRegion **aRegion);
-  nsresult GetFirstVisibleRow(int32_t *aValue);
-  nsresult GetLastVisibleRow(int32_t *aValue);
-  nsresult GetPageLength(int32_t *aValue);
+  int32_t FirstVisibleRow() const { return mTopRowIndex; }
+  int32_t LastVisibleRow() const { return mTopRowIndex + mPageLength; }
+  int32_t PageLength() const { return mPageLength; }
   nsresult EnsureRowIsVisible(int32_t aRow);
   nsresult EnsureCellIsVisible(int32_t aRow, nsITreeColumn *aCol);
   nsresult ScrollToRow(int32_t aRow);
@@ -101,9 +120,9 @@ public:
   nsresult EndUpdateBatch();
   nsresult ClearStyleAndImageCaches();
 
-  virtual nsSize GetMinSize(nsBoxLayoutState& aBoxLayoutState);
+  virtual nsSize GetMinSize(nsBoxLayoutState& aBoxLayoutState) MOZ_OVERRIDE;
   virtual void SetBounds(nsBoxLayoutState& aBoxLayoutState, const nsRect& aRect,
-                         bool aRemoveOverflowArea = false);
+                         bool aRemoveOverflowArea = false) MOZ_OVERRIDE;
 
   // nsIReflowCallback
   virtual bool ReflowFinished() MOZ_OVERRIDE;
@@ -113,28 +132,34 @@ public:
   virtual bool PseudoMatches(nsCSSSelector* aSelector) MOZ_OVERRIDE;
 
   // nsIScrollbarMediator
-  NS_IMETHOD PositionChanged(nsScrollbarFrame* aScrollbar, int32_t aOldIndex, int32_t& aNewIndex);
+  NS_IMETHOD PositionChanged(nsScrollbarFrame* aScrollbar, int32_t aOldIndex, int32_t& aNewIndex) MOZ_OVERRIDE;
   NS_IMETHOD ScrollbarButtonPressed(nsScrollbarFrame* aScrollbar, int32_t aOldIndex, int32_t aNewIndex) MOZ_OVERRIDE;
   NS_IMETHOD VisibilityChanged(bool aVisible) MOZ_OVERRIDE { Invalidate(); return NS_OK; }
 
+  // nsIScrollbarOwner
+  virtual nsIFrame* GetScrollbarBox(bool aVertical) MOZ_OVERRIDE {
+    ScrollParts parts = GetScrollParts();
+    return aVertical ? parts.mVScrollbar : parts.mHScrollbar;
+  }
+
   // Overridden from nsIFrame to cache our pres context.
-  NS_IMETHOD Init(nsIContent*     aContent,
-                  nsIFrame*       aParent,
-                  nsIFrame*       aPrevInFlow) MOZ_OVERRIDE;
-  virtual void DestroyFrom(nsIFrame* aDestructRoot);
+  virtual void Init(nsIContent*     aContent,
+                    nsIFrame*       aParent,
+                    nsIFrame*       aPrevInFlow) MOZ_OVERRIDE;
+  virtual void DestroyFrom(nsIFrame* aDestructRoot) MOZ_OVERRIDE;
 
   NS_IMETHOD GetCursor(const nsPoint& aPoint,
-                       nsIFrame::Cursor& aCursor);
+                       nsIFrame::Cursor& aCursor) MOZ_OVERRIDE;
 
   NS_IMETHOD HandleEvent(nsPresContext* aPresContext,
                          nsGUIEvent* aEvent,
-                         nsEventStatus* aEventStatus);
+                         nsEventStatus* aEventStatus) MOZ_OVERRIDE;
 
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                 const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists) MOZ_OVERRIDE;
 
-  virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext);
+  virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext) MOZ_OVERRIDE;
 
   friend nsIFrame* NS_NewTreeBodyFrame(nsIPresShell* aPresShell);
   friend class nsTreeColumn;
@@ -152,6 +177,9 @@ public:
                      const nsRect& aDirtyRect, nsPoint aPt);
 
   nsITreeBoxObject* GetTreeBoxObject() const { return mTreeBoxObject; }
+
+  // Get the base element, <tree> or <select>
+  nsIContent* GetBaseElement();
 
   bool GetVerticalOverflow() const { return mVerticalOverflow; }
   bool GetHorizontalOverflow() const {return mHorizontalOverflow; }
@@ -252,10 +280,6 @@ protected:
                             const nsRect&        aRect,
                             const nsRect&        aDirtyRect);
 
-
-  int32_t GetLastVisibleRow() {
-    return mTopRowIndex + mPageLength;
-  }
 
   // An internal hit test.  aX and aY are expected to be in twips in the
   // coordinate system of this frame.
@@ -358,9 +382,6 @@ protected:
 
   void EnsureView();
 
-  // Get the base element, <tree> or <select>
-  nsIContent* GetBaseElement();
-
   nsresult GetCellWidth(int32_t aRow, nsTreeColumn* aCol,
                         nsRenderingContext* aRenderingContext,
                         nscoord& aDesiredSize, nscoord& aCurrentSize);
@@ -397,9 +418,8 @@ public:
     if (!aUnknownCol)
       return nullptr;
 
-    nsTreeColumn* col;
-    aUnknownCol->QueryInterface(NS_GET_IID(nsTreeColumn), (void**)&col);
-    return col;
+    nsCOMPtr<nsTreeColumn> col = do_QueryInterface(aUnknownCol);
+    return col.forget();
   }
 
   /**
@@ -521,6 +541,8 @@ protected: // Data Members
 
   nsRevocableEventPtr<ScrollEvent> mScrollEvent;
 
+  nsCOMPtr<ScrollbarActivity> mScrollbarActivity;
+
   // The cached box object parent.
   nsCOMPtr<nsITreeBoxObject> mTreeBoxObject;
 
@@ -544,7 +566,7 @@ protected: // Data Members
   nsDataHashtable<nsStringHashKey, nsTreeImageCacheEntry> mImageCache;
 
   // A scratch array used when looking up cached style contexts.
-  nsCOMPtr<nsISupportsArray> mScratchArray;
+  AtomArray mScratchArray;
 
   // The index of the first visible row and the # of rows visible onscreen.  
   // The tree only examines onscreen rows, starting from

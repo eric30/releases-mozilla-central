@@ -740,6 +740,11 @@ public:
            IsInteractionAllowed();
   }
 
+  bool HasIndependentSelection() const
+  {
+    return !!mSelConWeak;
+  }
+
   // Get the input event target. This might return null.
   virtual already_AddRefed<nsIContent> GetInputEventTargetContent() = 0;
 
@@ -763,7 +768,7 @@ public:
 
   // FindSelectionRoot() returns a selection root of this editor when aNode
   // gets focus.  aNode must be a content node or a document node.  When the
-  // target isn't a part of this editor, returns NULL.  If this is for
+  // target isn't a part of this editor, returns nullptr.  If this is for
   // designMode, you should set the document node to aNode except that an
   // element in the document has focus.
   virtual already_AddRefed<nsIContent> FindSelectionRoot(nsINode* aNode);
@@ -772,6 +777,9 @@ public:
   // a host of the editor, i.e., the editor doesn't get focus, this does
   // nothing.
   nsresult InitializeSelection(nsIDOMEventTarget* aFocusEventTarget);
+
+  // Finalizes selection and caret for the editor.
+  void FinalizeSelection();
 
   // This method has to be called by nsEditorEventListener::Focus.
   // All actions that have to be done when the editor is focused needs to be

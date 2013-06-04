@@ -9,7 +9,9 @@ import subprocess
 import runxpcshelltests as xpcshell
 import tempfile
 from automationutils import replaceBackSlashes
-from mozdevice import devicemanagerADB, devicemanagerSUT, DMError
+import devicemanagerADB, devicemanagerSUT, devicemanager
+from zipfile import ZipFile
+import shutil
 
 here = os.path.dirname(os.path.abspath(__file__))
 
@@ -52,6 +54,8 @@ class XPCShellRemote(xpcshell.XPCShellTests, object):
             print >> sys.stderr, "Couldn't find local xpcshell test directory"
             sys.exit(1)
 
+        if options.localAPK:
+            self.localAPKContents = ZipFile(options.localAPK)
         if options.setup:
             self.setupUtilities()
             self.setupModules()
@@ -67,11 +71,11 @@ class XPCShellRemote(xpcshell.XPCShellTests, object):
         packageName = None
         if self.options.localAPK:
             try:
-                packageName = subprocess.check_output(["unzip", "-p", self.options.localAPK, "package-name.txt"])
+                packageName = self.localAPKContents.read("package-name.txt")
                 if packageName:
                     self.appRoot = self.device.getAppRoot(packageName.strip())
             except Exception as detail:
-                print "unable to determine app root: " + detail
+                print "unable to determine app root: " + str(detail)
                 pass
         return None
 
@@ -129,6 +133,30 @@ class XPCShellRemote(xpcshell.XPCShellTests, object):
         self.pushLibs()
 
     def pushLibs(self):
+        if self.options.localAPK:
+            try:
+                dir = tempfile.mkdtemp()
+                szip = os.path.join(self.localBin, '..', 'host', 'bin', 'szip')
+                if not os.path.exists(szip):
+                    # Tinderbox builds must run szip from the test package
+                    szip = os.path.join(self.localBin, 'host', 'szip')
+                if not os.path.exists(szip):
+                    # If the test package doesn't contain szip, it means files
+                    # are not szipped in the test package.
+                    szip = None
+                for info in self.localAPKContents.infolist():
+                    if info.filename.endswith(".so"):
+                        print >> sys.stderr, "Pushing %s.." % info.filename
+                        remoteFile = self.remoteJoin(self.remoteBinDir, os.path.basename(info.filename))
+                        self.localAPKContents.extract(info, dir)
+                        file = os.path.join(dir, info.filename)
+                        if szip:
+                            out = subprocess.check_output([szip, '-d', file], stderr=subprocess.STDOUT)
+                        self.device.pushFile(os.path.join(dir, info.filename), remoteFile)
+            finally:
+                shutil.rmtree(dir)
+            return
+
         for file in os.listdir(self.localLib):
             if (file.endswith(".so")):
                 print >> sys.stderr, "Pushing %s.." % file
@@ -143,6 +171,7 @@ class XPCShellRemote(xpcshell.XPCShellTests, object):
             for root, dirs, files in os.walk(localArmLib):
                 for file in files:
                     if (file.endswith(".so")):
+                        print >> sys.stderr, "Pushing %s.." % file
                         remoteFile = self.remoteJoin(self.remoteBinDir, file)
                         self.device.pushFile(os.path.join(root, file), remoteFile)
 
@@ -152,7 +181,11 @@ class XPCShellRemote(xpcshell.XPCShellTests, object):
 
     def setupTestDir(self):
         print 'pushing %s' % self.xpcDir
-        self.device.pushDir(self.xpcDir, self.remoteScriptsDir, retryLimit=10)
+        try:
+            self.device.pushDir(self.xpcDir, self.remoteScriptsDir, retryLimit=10)
+        except TypeError:
+            # Foopies have an older mozdevice ver without retryLimit
+            self.device.pushDir(self.xpcDir, self.remoteScriptsDir)
 
     def buildTestList(self):
         xpcshell.XPCShellTests.buildTestList(self)
@@ -419,6 +452,10 @@ class PathMapping:
 
 def main():
 
+    if sys.version_info < (2,7):
+        print >>sys.stderr, "Error: You must use python version 2.7 or newer but less than 3.0"
+        sys.exit(1)
+
     parser = RemoteXPCShellOptions()
     options, args = parser.parse_args()
     if not options.localAPK:
@@ -452,10 +489,6 @@ def main():
 
     if options.interactive and not options.testPath:
         print >>sys.stderr, "Error: You must specify a test filename in interactive mode!"
-        sys.exit(1)
-
-    if not options.objdir:
-        print >>sys.stderr, "Error: You must specify an objdir"
         sys.exit(1)
 
     xpcsh = XPCShellRemote(dm, options, args)

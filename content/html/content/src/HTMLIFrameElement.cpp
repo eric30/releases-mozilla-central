@@ -6,6 +6,7 @@
 #include "mozilla/Util.h"
 
 #include "mozilla/dom/HTMLIFrameElement.h"
+#include "mozilla/dom/HTMLIFrameElementBinding.h"
 #include "nsIDOMSVGDocument.h"
 #include "nsMappedAttributes.h"
 #include "nsAttrValueInlines.h"
@@ -16,8 +17,6 @@
 
 NS_IMPL_NS_NEW_HTML_ELEMENT_CHECK_PARSER(IFrame)
 
-DOMCI_NODE_DATA(HTMLIFrameElement, mozilla::dom::HTMLIFrameElement)
-
 namespace mozilla {
 namespace dom {
 
@@ -25,6 +24,7 @@ HTMLIFrameElement::HTMLIFrameElement(already_AddRefed<nsINodeInfo> aNodeInfo,
                                      FromParser aFromParser)
   : nsGenericHTMLFrameElement(aNodeInfo, aFromParser)
 {
+  SetIsDOMBinding();
 }
 
 HTMLIFrameElement::~HTMLIFrameElement()
@@ -36,13 +36,12 @@ NS_IMPL_RELEASE_INHERITED(HTMLIFrameElement, Element)
 
 // QueryInterface implementation for HTMLIFrameElement
 NS_INTERFACE_TABLE_HEAD(HTMLIFrameElement)
-  NS_HTML_CONTENT_INTERFACE_TABLE_BEGIN(HTMLIFrameElement)
-    NS_INTERFACE_TABLE_ENTRY(HTMLIFrameElement, nsIDOMHTMLIFrameElement)
-    NS_INTERFACE_TABLE_ENTRY(HTMLIFrameElement, nsIDOMGetSVGDocument)
-  NS_OFFSET_AND_INTERFACE_TABLE_END
+  NS_HTML_CONTENT_INTERFACE_TABLE2(HTMLIFrameElement,
+                                   nsIDOMHTMLIFrameElement,
+                                   nsIDOMGetSVGDocument)
   NS_HTML_CONTENT_INTERFACE_TABLE_TO_MAP_SEGUE(HTMLIFrameElement,
                                                nsGenericHTMLFrameElement)
-NS_HTML_CONTENT_INTERFACE_TABLE_TAIL_CLASSINFO(HTMLIFrameElement)
+NS_HTML_CONTENT_INTERFACE_MAP_END
 
 NS_IMPL_ELEMENT_CLONE(HTMLIFrameElement)
 
@@ -220,7 +219,7 @@ HTMLIFrameElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
 
       if (docshell) {
         uint32_t newFlags = 0;
-        // If a NULL aValue is passed in, we want to clear the sandbox flags
+        // If a nullptr aValue is passed in, we want to clear the sandbox flags
         // which we will do by setting them to 0.
         if (aValue) {
           nsAutoString strValue;
@@ -247,6 +246,12 @@ HTMLIFrameElement::GetSandboxFlags()
 
   // No sandbox attribute, no sandbox flags.
   return 0;
+}
+
+JSObject*
+HTMLIFrameElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
+{
+  return HTMLIFrameElementBinding::Wrap(aCx, aScope, this);
 }
 
 } // namespace dom

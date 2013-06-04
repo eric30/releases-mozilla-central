@@ -10,12 +10,37 @@
 #include "WMFUtils.h"
 #include "MediaDecoderStateMachine.h"
 #include "mozilla/Preferences.h"
+#include "WinUtils.h"
+
+using namespace mozilla::widget;
 
 namespace mozilla {
 
 MediaDecoderStateMachine* WMFDecoder::CreateStateMachine()
 {
   return new MediaDecoderStateMachine(this, new WMFReader(this));
+}
+
+/* static */
+bool
+WMFDecoder::IsMP3Supported()
+{
+  MOZ_ASSERT(NS_IsMainThread(), "Must be on main thread.");
+  if (!MediaDecoder::IsWMFEnabled()) {
+    return false;
+  }
+  if (WinUtils::GetWindowsVersion() != WinUtils::WIN7_VERSION) {
+    return true;
+  }
+  // We're on Windows 7. MP3 support is disabled if no service pack
+  // is installed, as it's crashy on Win7 SP0.
+  UINT spMajorVer = 0, spMinorVer = 0;
+  if (!WinUtils::GetWindowsServicePackVersion(spMajorVer, spMinorVer)) {
+    // Um... We can't determine the service pack version... Just block
+    // MP3 as a precaution...
+    return false;
+  }
+  return spMajorVer != 0;
 }
 
 bool
@@ -27,13 +52,15 @@ WMFDecoder::GetSupportedCodecs(const nsACString& aType,
     return false;
 
   // Assume that if LoadDLLs() didn't fail, we can playback the types that
-  // we know should be supported on Windows 7+ using WMF.
+  // we know should be supported by Windows Media Foundation.
   static char const *const mp3AudioCodecs[] = {
     "mp3",
     nullptr
   };
-  if (aType.EqualsASCII("audio/mpeg") ||
-      aType.EqualsASCII("audio/mp3")) {
+  if ((aType.EqualsASCII("audio/mpeg") || aType.EqualsASCII("audio/mp3")) &&
+      IsMP3Supported()) {
+    // Note: We block MP3 playback on Window 7 SP0 since it seems to crash
+    // in some circumstances.
     if (aCodecList) {
       *aCodecList = mp3AudioCodecs;
     }
@@ -86,27 +113,12 @@ WMFDecoder::UnloadDLLs()
   wmf::UnloadDLLs();
 }
 
-bool IsWindows7OrLater()
-{
-  OSVERSIONINFO versionInfo;
-  versionInfo.dwOSVersionInfoSize = sizeof (OSVERSIONINFO);
-  if (!GetVersionEx(&versionInfo)) {
-    return false;
-  }
-  // Note: Win Vista = 6.0
-  //       Win 7     = 6.1
-  //       Win 8     = 6.2
-  return versionInfo.dwMajorVersion > 6 ||
-        (versionInfo.dwMajorVersion == 6 && versionInfo.dwMinorVersion >= 1);
-}
-
 /* static */
 bool
 WMFDecoder::IsEnabled()
 {
-  // We only use WMF on Windows 7 and up, until we can properly test Vista
-  // and how it responds with and without the Platform Update installed.
-  return IsWindows7OrLater() &&
+  // We only use WMF on Windows Vista and up
+  return WinUtils::GetWindowsVersion() >= WinUtils::VISTA_VERSION &&
          Preferences::GetBool("media.windows-media-foundation.enabled");
 }
 

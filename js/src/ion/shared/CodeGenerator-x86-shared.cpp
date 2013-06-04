@@ -1,6 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=4 sw=4 et tw=99:
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -285,14 +284,16 @@ CodeGeneratorX86Shared::bailout(const T &binder, LSnapshot *snapshot)
     switch (info.executionMode()) {
       case ParallelExecution: {
         // in parallel mode, make no attempt to recover, just signal an error.
-        Label *ool;
-        if (!ensureOutOfLineParallelAbort(&ool))
-            return false;
-        binder(masm, ool);
+        OutOfLineParallelAbort *ool = oolParallelAbort(ParallelBailoutUnsupported,
+                                                       snapshot->mir()->block(),
+                                                       snapshot->mir()->pc());
+        binder(masm, ool->entry());
         return true;
       }
-
-      case SequentialExecution: break;
+      case SequentialExecution:
+        break;
+      default:
+        JS_NOT_REACHED("No such execution mode");
     }
 
     if (!encode(snapshot))
@@ -635,10 +636,11 @@ CodeGeneratorX86Shared::visitMulI(LMulI *ins)
 bool
 CodeGeneratorX86Shared::visitAsmJSDivOrMod(LAsmJSDivOrMod *ins)
 {
-    JS_ASSERT(ToRegister(ins->remainder()) == edx);
     JS_ASSERT(ToRegister(ins->lhs()) == eax);
     Register rhs = ToRegister(ins->rhs());
     Register output = ToRegister(ins->output());
+
+    JS_ASSERT_IF(output == eax, ToRegister(ins->remainder()) == edx);
 
     Label afterDiv;
 
@@ -674,6 +676,44 @@ CodeGeneratorX86Shared::visitMulNegativeZeroCheck(MulNegativeZeroCheck *ool)
 
     masm.xorl(result, result);
     masm.jmp(ool->rejoin());
+    return true;
+}
+
+bool
+CodeGeneratorX86Shared::visitDivPowTwoI(LDivPowTwoI *ins)
+{
+    Register lhs = ToRegister(ins->numerator());
+    Register lhsCopy = ToRegister(ins->numeratorCopy());
+    Register output = ToRegister(ins->output());
+    int32_t shift = ins->shift();
+
+    // We use defineReuseInput so these should always be the same, which is
+    // convenient since all of our instructions here are two-address.
+    JS_ASSERT(lhs == output);
+
+    if (shift != 0) {
+        if (!ins->mir()->isTruncated()) {
+            // If the remainder is != 0, bailout since this must be a double.
+            masm.testl(lhs, Imm32(UINT32_MAX >> (32 - shift)));
+            if (!bailoutIf(Assembler::NonZero, ins->snapshot()))
+                return false;
+        }
+
+        // Adjust the value so that shifting produces a correctly rounded result
+        // when the numerator is negative. See 10-1 "Signed Division by a Known
+        // Power of 2" in Henry S. Warren, Jr.'s Hacker's Delight.
+        // Note that we wouldn't need to do this adjustment if we could use
+        // Range Analysis to find cases when the value is never negative. We
+        // wouldn't even need the lhsCopy either in that case.
+        if (shift > 1)
+            masm.sarl(Imm32(31), lhs);
+        masm.shrl(Imm32(32 - shift), lhs);
+        masm.addl(lhsCopy, lhs);
+
+        // Do the shift.
+        masm.sarl(Imm32(shift), lhs);
+    }
+
     return true;
 }
 
@@ -1305,9 +1345,19 @@ CodeGeneratorX86Shared::visitGuardShape(LGuardShape *guard)
 {
     Register obj = ToRegister(guard->input());
     masm.cmpPtr(Operand(obj, JSObject::offsetOfShape()), ImmGCPtr(guard->mir()->shape()));
-    if (!bailoutIf(Assembler::NotEqual, guard->snapshot()))
-        return false;
-    return true;
+
+    return bailoutIf(Assembler::NotEqual, guard->snapshot());
+}
+
+bool
+CodeGeneratorX86Shared::visitGuardObjectType(LGuardObjectType *guard)
+{
+    Register obj = ToRegister(guard->input());
+    masm.cmpPtr(Operand(obj, JSObject::offsetOfType()), ImmGCPtr(guard->mir()->typeObject()));
+
+    Assembler::Condition cond =
+        guard->mir()->bailOnEquality() ? Assembler::Equal : Assembler::NotEqual;
+    return bailoutIf(cond, guard->snapshot());
 }
 
 bool
@@ -1323,38 +1373,6 @@ CodeGeneratorX86Shared::visitGuardClass(LGuardClass *guard)
     return true;
 }
 
-class OutOfLineTruncate : public OutOfLineCodeBase<CodeGeneratorX86Shared>
-{
-    LTruncateDToInt32 *ins_;
-
-  public:
-    OutOfLineTruncate(LTruncateDToInt32 *ins)
-      : ins_(ins)
-    { }
-
-    bool accept(CodeGeneratorX86Shared *codegen) {
-        return codegen->visitOutOfLineTruncate(this);
-    }
-    LTruncateDToInt32 *ins() const {
-        return ins_;
-    }
-};
-
-bool
-CodeGeneratorX86Shared::visitTruncateDToInt32(LTruncateDToInt32 *ins)
-{
-    FloatRegister input = ToFloatRegister(ins->input());
-    Register output = ToRegister(ins->output());
-
-    OutOfLineTruncate *ool = new OutOfLineTruncate(ins);
-    if (!addOutOfLineCode(ool))
-        return false;
-
-    masm.branchTruncateDouble(input, output, ool->entry());
-    masm.bind(ool->rejoin());
-    return true;
-}
-
 bool
 CodeGeneratorX86Shared::visitEffectiveAddress(LEffectiveAddress *ins)
 {
@@ -1363,62 +1381,6 @@ CodeGeneratorX86Shared::visitEffectiveAddress(LEffectiveAddress *ins)
     Register index = ToRegister(ins->index());
     Register output = ToRegister(ins->output());
     masm.leal(Operand(base, index, mir->scale(), mir->displacement()), output);
-    return true;
-}
-
-bool
-CodeGeneratorX86Shared::visitOutOfLineTruncate(OutOfLineTruncate *ool)
-{
-    LTruncateDToInt32 *ins = ool->ins();
-    FloatRegister input = ToFloatRegister(ins->input());
-    FloatRegister temp = ToFloatRegister(ins->tempFloat());
-    Register output = ToRegister(ins->output());
-
-    // Try to convert doubles representing integers within 2^32 of a signed
-    // integer, by adding/subtracting 2^32 and then trying to convert to int32.
-    // This has to be an exact conversion, as otherwise the truncation works
-    // incorrectly on the modified value.
-    Label fail;
-    masm.xorpd(ScratchFloatReg, ScratchFloatReg);
-    masm.ucomisd(input, ScratchFloatReg);
-    masm.j(Assembler::Parity, &fail);
-
-    {
-        Label positive;
-        masm.j(Assembler::Above, &positive);
-
-        static const double shiftNeg = 4294967296.0;
-        masm.loadStaticDouble(&shiftNeg, temp);
-        Label skip;
-        masm.jmp(&skip);
-
-        masm.bind(&positive);
-        static const double shiftPos = -4294967296.0;
-        masm.loadStaticDouble(&shiftPos, temp);
-        masm.bind(&skip);
-    }
-
-    masm.addsd(input, temp);
-    masm.cvttsd2si(temp, output);
-    masm.cvtsi2sd(output, ScratchFloatReg);
-
-    masm.ucomisd(temp, ScratchFloatReg);
-    masm.j(Assembler::Parity, &fail);
-    masm.j(Assembler::Equal, ool->rejoin());
-
-    masm.bind(&fail);
-    {
-        saveVolatile(output);
-
-        masm.setupUnalignedABICall(1, output);
-        masm.passABIArg(input);
-        masm.callWithABI(JS_FUNC_TO_DATA_PTR(void *, js::ToInt32));
-        masm.storeCallResult(output);
-
-        restoreVolatile(output);
-    }
-
-    masm.jump(ool->rejoin());
     return true;
 }
 
@@ -1452,6 +1414,27 @@ CodeGeneratorX86Shared::generateInvalidateEpilogue()
     masm.breakpoint();
     return true;
 }
+
+bool
+CodeGeneratorX86Shared::visitNegI(LNegI *ins)
+{
+    Register input = ToRegister(ins->input());
+    JS_ASSERT(input == ToRegister(ins->output()));
+
+    masm.neg32(input);
+    return true;
+}
+
+bool
+CodeGeneratorX86Shared::visitNegD(LNegD *ins)
+{
+    FloatRegister input = ToFloatRegister(ins->input());
+    JS_ASSERT(input == ToFloatRegister(ins->output()));
+
+    masm.negateDouble(input);
+    return true;
+}
+
 
 } // namespace ion
 } // namespace js

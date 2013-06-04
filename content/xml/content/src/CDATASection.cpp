@@ -6,32 +6,6 @@
 #include "mozilla/dom/CDATASection.h"
 #include "mozilla/dom/CDATASectionBinding.h"
 
-nsresult
-NS_NewXMLCDATASection(nsIContent** aInstancePtrResult,
-                      nsNodeInfoManager *aNodeInfoManager)
-{
-  using mozilla::dom::CDATASection;
-
-  NS_PRECONDITION(aNodeInfoManager, "Missing nodeinfo manager");
-
-  *aInstancePtrResult = nullptr;
-
-  nsCOMPtr<nsINodeInfo> ni;
-  ni = aNodeInfoManager->GetNodeInfo(nsGkAtoms::cdataTagName,
-                                     nullptr, kNameSpaceID_None,
-                                     nsIDOMNode::CDATA_SECTION_NODE);
-  NS_ENSURE_TRUE(ni, NS_ERROR_OUT_OF_MEMORY);
-
-  CDATASection *instance = new CDATASection(ni.forget());
-  if (!instance) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-
-  NS_ADDREF(*aInstancePtrResult = instance);
-
-  return NS_OK;
-}
-
 namespace mozilla {
 namespace dom {
 
@@ -44,7 +18,7 @@ NS_IMPL_ISUPPORTS_INHERITED4(CDATASection, nsGenericDOMDataNode, nsIDOMNode,
                              nsIDOMCDATASection)
 
 JSObject*
-CDATASection::WrapNode(JSContext *aCx, JSObject *aScope)
+CDATASection::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
   return CDATASectionBinding::Wrap(aCx, aScope, this);
 }

@@ -1,6 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=79:
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -78,12 +77,12 @@ struct BytecodeEmitter
         BytecodeVector code;        /* bytecode */
         SrcNotesVector notes;       /* source notes, see below */
         ptrdiff_t   lastNoteOffset; /* code offset for last source note */
-        unsigned    currentLine;    /* line number for tree-based srcnote gen */
-        unsigned    lastColumn;     /* zero-based column index on currentLine of
+        uint32_t    currentLine;    /* line number for tree-based srcnote gen */
+        uint32_t    lastColumn;     /* zero-based column index on currentLine of
                                        last SRC_COLSPAN-annotated opcode */
 
-        EmitSection(JSContext *cx, unsigned lineno)
-          : code(cx), notes(cx), lastNoteOffset(0), currentLine(lineno), lastColumn(0)
+        EmitSection(JSContext *cx, uint32_t lineNum)
+          : code(cx), notes(cx), lastNoteOffset(0), currentLine(lineNum), lastColumn(0)
         {}
     };
     EmitSection prolog, main, *current;
@@ -125,13 +124,30 @@ struct BytecodeEmitter
     bool            emittingRunOnceLambda:1; /* true while emitting a lambda which is only
                                                 expected to run once. */
 
+    bool            insideEval:1;       /* True if compiling an eval-expression or a function
+                                           nested inside an eval. */
+
     const bool      hasGlobalScope:1;   /* frontend::CompileScript's scope chain is the
                                            global object */
 
-    const bool      selfHostingMode:1;  /* Emit JSOP_CALLINTRINSIC instead of JSOP_NAME
-                                           and assert that JSOP_NAME and JSOP_*GNAME
-                                           don't ever get emitted. See the comment for
-                                           the field |selfHostingMode| in Parser.h for details. */
+    enum EmitterMode {
+        Normal,
+
+        /*
+         * Emit JSOP_CALLINTRINSIC instead of JSOP_NAME and assert that
+         * JSOP_NAME and JSOP_*GNAME don't ever get emitted. See the comment
+         * for the field |selfHostingMode| in Parser.h for details.
+         */
+        SelfHosting,
+
+        /*
+         * Check the static scope chain of the root function for resolving free
+         * variable accesses in the script.
+         */
+        LazyFunction
+    };
+
+    const EmitterMode emitterMode;
 
     /*
      * Note that BytecodeEmitters are magic: they own the arena "top-of-stack"
@@ -140,8 +156,8 @@ struct BytecodeEmitter
      * destruction.
      */
     BytecodeEmitter(BytecodeEmitter *parent, Parser<FullParseHandler> *parser, SharedContext *sc,
-                    HandleScript script, HandleScript evalCaller, bool hasGlobalScope,
-                    unsigned lineno, bool selfHostingMode = false);
+                    HandleScript script, bool insideEval, HandleScript evalCaller,
+                    bool hasGlobalScope, uint32_t lineNum, EmitterMode emitterMode = Normal);
     bool init();
 
     bool isAliasedName(ParseNode *pn);
@@ -274,9 +290,8 @@ enum SrcNoteType {
     SRC_CONDSWITCH  = 12,       /* JSOP_CONDSWITCH, 1st offset points to end of
                                    switch, 2nd points to first JSOP_CASE */
 
-    SRC_PCDELTA     = 13,       /* distance forward from comma-operator to
-                                   next POP, or from CONDSWITCH to first CASE
-                                   opcode, etc. -- always a forward delta */
+    SRC_NEXTCASE    = 13,       /* distance forward from one CASE in a
+                                   CONDSWITCH to the next */
 
     SRC_ASSIGNOP    = 14,       /* += or another assign-op follows */
 

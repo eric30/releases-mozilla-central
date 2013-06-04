@@ -218,7 +218,7 @@ Prompt.prototype = {
 
     if (aCheck && aCheck.msg) {
       aDoc.getElementById("prompt-" + aType + "-checkbox").checked = aCheck.value;
-      this.setLabelForNode(aDoc.getElementById("prompt-" + aType + "-checkbox-label"), aCheck.msg);
+      this.setLabelForNode(aDoc.getElementById("prompt-" + aType + "-checkbox"), aCheck.msg);
       aDoc.getElementById("prompt-" + aType + "-checkbox").removeAttribute("collapsed");
     }
   },
@@ -419,7 +419,6 @@ Prompt.prototype = {
 
       if (bTitle) {
         let button = doc.createElement("button");
-        button.className = "prompt-button";
         this.setLabelForNode(button, bTitle);
         if (i == defaultButton) {
           button.setAttribute("command", "cmd_ok");

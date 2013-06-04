@@ -11,6 +11,7 @@
 
 #include "mozilla/Assertions.h"
 #include "mozilla/dom/ContentChild.h"
+#include "mozilla/dom/quota/QuotaManager.h"
 
 #include "AsyncConnectionHelper.h"
 #include "DatabaseInfo.h"
@@ -19,11 +20,11 @@
 #include "IDBIndex.h"
 #include "IDBObjectStore.h"
 #include "IDBTransaction.h"
-#include "IndexedDatabaseManager.h"
 
 USING_INDEXEDDB_NAMESPACE
 
 using namespace mozilla::dom;
+using mozilla::dom::quota::QuotaManager;
 
 namespace {
 
@@ -285,8 +286,7 @@ IndexedDBDatabaseChild::EnsureDatabase(
     databaseId = mDatabase->Id();
   }
   else {
-    databaseId =
-      IndexedDatabaseManager::GetDatabaseId(aDBInfo.origin, aDBInfo.name);
+    databaseId = QuotaManager::GetStorageId(aDBInfo.origin, aDBInfo.name);
   }
   NS_ENSURE_TRUE(databaseId, false);
 
@@ -1296,7 +1296,7 @@ IPCOpenDatabaseHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
 nsresult
 IPCOpenDatabaseHelper::GetSuccessResult(JSContext* aCx, jsval* aVal)
 {
-  return WrapNative(aCx, NS_ISUPPORTS_CAST(nsIDOMEventTarget*, mDatabase),
+  return WrapNative(aCx, NS_ISUPPORTS_CAST(EventTarget*, mDatabase),
                     aVal);
 }
 
@@ -1335,7 +1335,7 @@ IPCSetVersionHelper::GetSuccessResult(JSContext* aCx, jsval* aVal)
 {
   mOpenRequest->SetTransaction(mTransaction);
 
-  return WrapNative(aCx, NS_ISUPPORTS_CAST(nsIDOMEventTarget*, mDatabase),
+  return WrapNative(aCx, NS_ISUPPORTS_CAST(EventTarget*, mDatabase),
                     aVal);
 }
 

@@ -23,6 +23,9 @@ import org.json.JSONObject;
  *   distribution/
  *     preferences.json
  *     bookmarks.json
+ *     searchplugins/
+ *       common/
+ *         engine.xml
  */
 public class testDistribution extends ContentProviderTest {
     private static final String MOCK_PACKAGE = "mock-package.zip";
@@ -46,6 +49,7 @@ public class testDistribution extends ContentProviderTest {
         initDistribution(mockPackagePath);
         checkPreferences();
         checkLocalizedPreferences("en-US");
+        checkSearchPlugin();
 
         // Pre-clear distribution pref, and run es-MX localized preferences Test
         clearDistributionPref();
@@ -66,6 +70,7 @@ public class testDistribution extends ContentProviderTest {
             Actions.EventExpecter distributionSetExpecter = mActions.expectGeckoEvent("Distribution:Set:OK");
             init.invoke(null, mActivity, aPackagePath);
             distributionSetExpecter.blockForEvent();
+            distributionSetExpecter.unregisterListener();
         } catch (Exception e) {
             mAsserter.ok(false, "exception initializing distribution", e.toString());
         }
@@ -104,6 +109,7 @@ public class testDistribution extends ContentProviderTest {
                 data = new JSONObject(eventExpecter.blockForEventData());
                 requestId = data.getString("requestId");
             }
+            eventExpecter.unregisterListener();
 
             JSONArray preferences = data.getJSONArray("preferences");
             for (int i = 0; i < preferences.length(); i++) {
@@ -127,6 +133,29 @@ public class testDistribution extends ContentProviderTest {
 
         } catch (JSONException e) {
             mAsserter.ok(false, "exception getting preferences", e.toString());
+        }
+    }
+
+    private void checkSearchPlugin() {
+        Actions.RepeatedEventExpecter eventExpecter = mActions.expectGeckoEvent("SearchEngines:Data");
+        mActions.sendGeckoEvent("SearchEngines:Get", null);
+
+        try {
+            JSONObject data = new JSONObject(eventExpecter.blockForEventData());
+            eventExpecter.unregisterListener();
+            JSONArray searchEngines = data.getJSONArray("searchEngines");
+            boolean foundEngine = false;
+            for (int i = 0; i < searchEngines.length(); i++) {
+                JSONObject engine = (JSONObject) searchEngines.get(i);
+                String name = engine.getString("name");
+                if (name.equals("Test search engine")) {
+                    foundEngine = true;
+                    break;
+                }
+            }
+            mAsserter.ok(foundEngine, "check search plugin", "found test search plugin");
+        } catch (JSONException e) {
+            mAsserter.ok(false, "exception getting search plugins", e.toString());
         }
     }
 
@@ -161,6 +190,7 @@ public class testDistribution extends ContentProviderTest {
                 data = new JSONObject(eventExpecter.blockForEventData());
                 requestId = data.getString("requestId");
             }
+            eventExpecter.unregisterListener();
 
         } catch (Exception e) {
             mAsserter.ok(false, "exception setting test locale", e.toString());
@@ -194,6 +224,7 @@ public class testDistribution extends ContentProviderTest {
                 data = new JSONObject(eventExpecter.blockForEventData());
                 requestId = data.getString("requestId");
             }
+            eventExpecter.unregisterListener();
 
             JSONArray preferences = data.getJSONArray("preferences");
             for (int i = 0; i < preferences.length(); i++) {
@@ -262,7 +293,17 @@ public class testDistribution extends ContentProviderTest {
     @Override
     public void setUp() throws Exception {
         // TODO: Set up the content provider after setting the distribution.
-        super.setUp("@ANDROID_PACKAGE_NAME@.db.BrowserProvider", "AUTHORITY");
+        super.setUp("org.mozilla.gecko.db.BrowserProvider", "AUTHORITY");
+    }
+
+    private void delete(File file) throws Exception {
+      if (file.isDirectory()) {
+        File[] files = file.listFiles();
+        for (File f : files) {
+          delete(f);
+        }
+      }
+      mAsserter.ok(file.delete(), "clean up distribution files", "deleted " + file.getPath());
     }
 
     @Override
@@ -273,13 +314,9 @@ public class testDistribution extends ContentProviderTest {
         File mockPackage = new File(dataDir, MOCK_PACKAGE);
         mAsserter.ok(mockPackage.delete(), "clean up mock package", "deleted " + mockPackage.getPath());
 
-        // Delete distribution files that Distribution.init copied to data directory.
+        // Recursively delete distribution files that Distribution.init copied to data directory.
         File distDir = new File(dataDir, "distribution");
-        File[] files = distDir.listFiles();
-        for (File f : files) {
-            mAsserter.ok(f.delete(), "clean up distribution files", "deleted " + f.getPath());
-        }
-        mAsserter.ok(distDir.delete(), "clean up distribution directory", "deleted distribution directory");
+        delete(distDir);
 
         clearDistributionPref();
 

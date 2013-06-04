@@ -2,6 +2,8 @@ asserts(0-2) load ownerdiscard.html # bug 804291, bug 807211
 
 load 83804-1.gif
 load 89341-1.gif
+load 463696.bmp
+load 570451.png
 
 load colormap-range.gif
 
@@ -29,6 +31,13 @@ load 256-height.ico
 HTTP load delayedframe.sjs
 
 load 681190.html
-skip-if(Android&&smallScreen) load 694165-1.xhtml # nexus-s Android 2.3.6
+skip-if(Android&&smallScreen) skip-if(B2G) load 694165-1.xhtml # nexus-s Android 2.3.6, bug 876275 for B2G on a VM
 load 732319-1.html
 load 844403-1.html
+
+load truncated-second-frame.png # bug 863975
+
+# Bug 863958
+# This icon's size is such that it leads to multiple writes to the PNG decoder
+# after we've gotten our size.
+load multiple-png-hassize.ico

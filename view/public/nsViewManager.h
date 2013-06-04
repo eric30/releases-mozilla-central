@@ -50,10 +50,10 @@ public:
    *        XXX We should eliminate this parameter!
    * @param aVisibilityFlag initial visibility state of view
    *        XXX We should eliminate this parameter; you can set it after CreateView
-   * @result The new view
+   * @result The new view.  Never null.
    */
   nsView* CreateView(const nsRect& aBounds,
-                     const nsView* aParent,
+                     nsView* aParent,
                      nsViewVisibility aVisibilityFlag = nsViewVisibility_kShow);
 
   /**
@@ -232,9 +232,11 @@ public:
 
   /**
    * Get the device context associated with this manager
-   * @result device context
    */
-  void GetDeviceContext(nsDeviceContext *&aContext);
+  nsDeviceContext* GetDeviceContext() const
+  {
+    return mContext;
+  }
 
   /**
    * A stack class for disallowing changes that would enter painting. For
@@ -248,7 +250,7 @@ public:
    * since popup widget geometry is observable from script and expected to
    * update synchronously.
    */
-  class NS_STACK_CLASS AutoDisableRefresh {
+  class MOZ_STACK_CLASS AutoDisableRefresh {
   public:
     AutoDisableRefresh(nsViewManager* aVM) {
       if (aVM) {
@@ -378,8 +380,7 @@ private:
   bool IsPaintingAllowed() { return RootViewManager()->mRefreshDisableCount == 0; }
 
   void WillPaintWindow(nsIWidget* aWidget);
-  bool PaintWindow(nsIWidget* aWidget, nsIntRegion aRegion,
-                   uint32_t aFlags);
+  bool PaintWindow(nsIWidget* aWidget, nsIntRegion aRegion);
   void DidPaintWindow();
 
   // Call this when you need to let the viewmanager know that it now has

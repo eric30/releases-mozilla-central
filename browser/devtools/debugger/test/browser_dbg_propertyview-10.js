@@ -61,17 +61,20 @@ function testWithFrame()
       is(innerNodes[1].querySelector(".value").getAttribute("value"), "1",
         "Should have the right property value for |one|.");
 
-      is(globalNodes[0].querySelector(".name").getAttribute("value"), "InstallTrigger",
-        "Should have the right property name for |InstallTrigger|.");
+      let globalScopeObject = gDebugger.DebuggerView.Variables.getScopeForNode(globalScope);
+      let documentNode = globalScopeObject.get("document");
 
-      is(globalNodes[0].querySelector(".value").getAttribute("value"), "",
-        "Should have the right property value for |InstallTrigger|.");
+      is(documentNode.target.querySelector(".name").getAttribute("value"), "document",
+        "Should have the right property name for |document|.");
+
+      is(documentNode.target.querySelector(".value").getAttribute("value"), "[object HTMLDocument]",
+        "Should have the right property value for |document|.");
 
       let len = globalNodes.length - 1;
       is(globalNodes[len].querySelector(".name").getAttribute("value"), "window",
         "Should have the right property name for |window|.");
 
-      is(globalNodes[len].querySelector(".value").getAttribute("value"), "[object Proxy]",
+      is(globalNodes[len].querySelector(".value").getAttribute("value"), "[object Window]",
         "Should have the right property value for |window|.");
 
       resumeAndFinish();

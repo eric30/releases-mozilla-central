@@ -16,8 +16,7 @@ namespace dom {
 
 typedef nsSVGFE SVGFEMergeElementBase;
 
-class SVGFEMergeElement : public SVGFEMergeElementBase,
-                          public nsIDOMSVGElement
+class SVGFEMergeElement : public SVGFEMergeElementBase
 {
   friend nsresult (::NS_NewSVGFEMergeElement(nsIContent **aResult,
                                              already_AddRefed<nsINodeInfo> aNodeInfo));
@@ -25,32 +24,22 @@ protected:
   SVGFEMergeElement(already_AddRefed<nsINodeInfo> aNodeInfo)
     : SVGFEMergeElementBase(aNodeInfo)
   {
-    SetIsDOMBinding();
   }
-  virtual JSObject* WrapNode(JSContext *cx, JSObject *scope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *cx,
+                             JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
 public:
-  // interfaces:
-  NS_DECL_ISUPPORTS_INHERITED
-
   virtual nsresult Filter(nsSVGFilterInstance* aInstance,
                           const nsTArray<const Image*>& aSources,
                           const Image* aTarget,
-                          const nsIntRect& aDataRect);
-  virtual nsSVGString& GetResultImageName() { return mStringAttributes[RESULT]; }
-  virtual void GetSourceImageNames(nsTArray<nsSVGStringInfo>& aSources);
-
-  NS_FORWARD_NSIDOMSVGELEMENT(SVGFEMergeElementBase::)
-
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
+                          const nsIntRect& aDataRect) MOZ_OVERRIDE;
+  virtual nsSVGString& GetResultImageName() MOZ_OVERRIDE { return mStringAttributes[RESULT]; }
+  virtual void GetSourceImageNames(nsTArray<nsSVGStringInfo>& aSources) MOZ_OVERRIDE;
 
   // nsIContent
-  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const;
-
-  virtual nsIDOMNode* AsDOMNode() { return this; }
+  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
 protected:
-  virtual StringAttributesInfo GetStringInfo();
+  virtual StringAttributesInfo GetStringInfo() MOZ_OVERRIDE;
 
   enum { RESULT };
   nsSVGString mStringAttributes[1];

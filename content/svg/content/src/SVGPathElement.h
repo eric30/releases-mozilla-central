@@ -24,52 +24,40 @@ class nsISVGPoint;
 
 namespace dom {
 
-class SVGPathElement MOZ_FINAL : public SVGPathElementBase,
-                                 public nsIDOMSVGElement
+class SVGPathElement MOZ_FINAL : public SVGPathElementBase
 {
 friend class nsSVGPathFrame;
 
 protected:
   friend nsresult (::NS_NewSVGPathElement(nsIContent **aResult,
                                           already_AddRefed<nsINodeInfo> aNodeInfo));
-  virtual JSObject* WrapNode(JSContext *cx, JSObject *scope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *cx,
+                             JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
   SVGPathElement(already_AddRefed<nsINodeInfo> aNodeInfo);
 
 public:
-  typedef SVGAnimatedPathSegList SVGAnimatedPathSegList;
-  // interfaces:
-
-  NS_DECL_ISUPPORTS_INHERITED
-
-  // xxx I wish we could use virtual inheritance
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
-  NS_FORWARD_NSIDOMSVGELEMENT(SVGPathElementBase::)
-
   // nsIContent interface
-  NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* name) const;
+  NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* name) const MOZ_OVERRIDE;
 
   // nsSVGSVGElement methods:
-  virtual bool HasValidDimensions() const;
+  virtual bool HasValidDimensions() const MOZ_OVERRIDE;
 
   // nsSVGPathGeometryElement methods:
-  virtual bool AttributeDefinesGeometry(const nsIAtom *aName);
-  virtual bool IsMarkable();
-  virtual void GetMarkPoints(nsTArray<nsSVGMark> *aMarks);
-  virtual void ConstructPath(gfxContext *aCtx);
+  virtual bool AttributeDefinesGeometry(const nsIAtom *aName) MOZ_OVERRIDE;
+  virtual bool IsMarkable() MOZ_OVERRIDE;
+  virtual void GetMarkPoints(nsTArray<nsSVGMark> *aMarks) MOZ_OVERRIDE;
+  virtual void ConstructPath(gfxContext *aCtx) MOZ_OVERRIDE;
 
-  virtual already_AddRefed<gfxFlattenedPath> GetFlattenedPath(const gfxMatrix &aMatrix);
+  virtual already_AddRefed<gfxFlattenedPath> GetFlattenedPath(const gfxMatrix &aMatrix) MOZ_OVERRIDE;
 
   // nsIContent interface
-  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const;
+  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
 
-  virtual nsIDOMNode* AsDOMNode() { return this; }
-
-  virtual SVGAnimatedPathSegList* GetAnimPathSegList() {
+  virtual SVGAnimatedPathSegList* GetAnimPathSegList() MOZ_OVERRIDE {
     return &mD;
   }
 
-  virtual nsIAtom* GetPathDataAttrName() const {
+  virtual nsIAtom* GetPathDataAttrName() const MOZ_OVERRIDE {
     return nsGkAtoms::d;
   }
 
@@ -125,7 +113,7 @@ public:
 protected:
 
   // nsSVGElement method
-  virtual NumberAttributesInfo GetNumberInfo();
+  virtual NumberAttributesInfo GetNumberInfo() MOZ_OVERRIDE;
 
   SVGAnimatedPathSegList mD;
   nsSVGNumber2 mPathLength;

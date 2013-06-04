@@ -6,6 +6,7 @@
 
 #include "nsWindowMemoryReporter.h"
 #include "nsGlobalWindow.h"
+#include "nsIDocument.h"
 #include "nsIEffectiveTLDService.h"
 #include "mozilla/Services.h"
 #include "mozilla/Preferences.h"
@@ -55,9 +56,9 @@ static already_AddRefed<nsIURI>
 GetWindowURI(nsIDOMWindow *aWindow)
 {
   nsCOMPtr<nsPIDOMWindow> pWindow = do_QueryInterface(aWindow);
-  NS_ENSURE_TRUE(pWindow, NULL);
+  NS_ENSURE_TRUE(pWindow, nullptr);
 
-  nsCOMPtr<nsIDocument> doc = do_QueryInterface(pWindow->GetExtantDocument());
+  nsCOMPtr<nsIDocument> doc = pWindow->GetExtantDoc();
   nsCOMPtr<nsIURI> uri;
 
   if (doc) {
@@ -67,7 +68,7 @@ GetWindowURI(nsIDOMWindow *aWindow)
   if (!uri) {
     nsCOMPtr<nsIScriptObjectPrincipal> scriptObjPrincipal =
       do_QueryInterface(aWindow);
-    NS_ENSURE_TRUE(scriptObjPrincipal, NULL);
+    NS_ENSURE_TRUE(scriptObjPrincipal, nullptr);
 
     // GetPrincipal() will print a warning if the window does not have an outer
     // window, so check here for an outer window first.  This code is
@@ -409,14 +410,6 @@ nsWindowMemoryReporter::CollectReports(nsIMemoryMultiReporterCallback* aCb,
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsWindowMemoryReporter::GetExplicitNonHeap(int64_t* aAmount)
-{
-  // This reporter only measures heap memory, so we don't need to report any
-  // bytes for it.  However, the JS multi-reporter needs to be invoked.
-  return xpc::JSMemoryMultiReporter::GetExplicitNonHeap(aAmount);
-}
-
 uint32_t
 nsWindowMemoryReporter::GetGhostTimeout()
 {
@@ -664,14 +657,6 @@ nsWindowMemoryReporter::
 GhostURLsReporter::GetName(nsACString& aName)
 {
   aName.AssignLiteral("ghost-windows");
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsWindowMemoryReporter::
-GhostURLsReporter::GetExplicitNonHeap(int64_t* aOut)
-{
-  *aOut = 0;
   return NS_OK;
 }
 

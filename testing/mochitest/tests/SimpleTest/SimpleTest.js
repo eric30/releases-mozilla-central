@@ -225,6 +225,7 @@ SimpleTest.testPluginIsOOP = function () {
 
 SimpleTest._tests = [];
 SimpleTest._stopOnLoad = true;
+SimpleTest._cleanupFunctions = [];
 
 /**
  * Something like assert.
@@ -257,6 +258,17 @@ SimpleTest.ise = function (a, b, name) {
     var pass = (a === b);
     var diag = pass ? "" : "got " + repr(a) + ", strictly expected " + repr(b)
     SimpleTest.ok(pass, name, diag);
+};
+
+/**
+ * Check that the function call throws an exception.
+ */
+SimpleTest.doesThrow = function(fn, name) {
+    var gotException = false;
+    try {
+      fn();
+    } catch (ex) { gotException = true; }
+    ok(gotException, name);
 };
 
 //  --------------- Test.Builder/Test.More todo() -----------------
@@ -693,7 +705,11 @@ SimpleTest.executeSoon = function(aFunc) {
         return SpecialPowers.executeSoon(aFunc, window);
     }
     setTimeout(aFunc, 0);
-}
+};
+
+SimpleTest.registerCleanupFunction = function(aFunc) {
+    SimpleTest._cleanupFunctions.push(aFunc);
+};
 
 /**
  * Finishes the tests. This is automatically called, except when
@@ -705,6 +721,17 @@ SimpleTest.finish = function () {
     }
 
     SimpleTest._alreadyFinished = true;
+
+    // Execute all of our cleanup functions.
+    var func;
+    while ((func = SimpleTest._cleanupFunctions.pop())) {
+      try {
+        func();
+      }
+      catch (ex) {
+        SimpleTest.ok(false, "Cleanup function threw exception: " + ex);
+      }
+    }
 
     if (SpecialPowers.DOMWindowUtils.isTestControllingRefreshes) {
         SimpleTest.ok(false, "test left refresh driver under test control");

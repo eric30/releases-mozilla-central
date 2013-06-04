@@ -10,7 +10,12 @@ var archiveReaderEnabled = false;
 // and content mochitests (where the |Components| object is accessible only as
 // SpecialPowers.Components). Expose Components if necessary here to make things
 // work everywhere.
-if (typeof Components === 'undefined' && typeof SpecialPowers === 'object')
+//
+// Even if the real |Components| doesn't exist, we might shim in a simple JS
+// placebo for compat. An easy way to differentiate this from the real thing
+// is whether the property is read-only or not.
+var c = Object.getOwnPropertyDescriptor(this, 'Components');
+if ((!c.value || c.writable) && typeof SpecialPowers === 'object')
   Components = SpecialPowers.Components;
 
 function executeSoon(aFun)
@@ -40,18 +45,18 @@ function clearAllDatabases(callback) {
 
   let comp = SpecialPowers.wrap(Components);
 
-  let idbManager =
-    comp.classes["@mozilla.org/dom/indexeddb/manager;1"]
-        .getService(comp.interfaces.nsIIndexedDatabaseManager);
+  let quotaManager =
+    comp.classes["@mozilla.org/dom/quota/manager;1"]
+        .getService(comp.interfaces.nsIQuotaManager);
 
   let uri = SpecialPowers.getDocumentURIObject(document);
 
-  idbManager.clearDatabasesForURI(uri);
-  idbManager.getUsageForURI(uri, function(uri, usage, fileUsage) {
+  quotaManager.clearStoragesForURI(uri);
+  quotaManager.getUsageForURI(uri, function(uri, usage, fileUsage) {
     if (usage) {
       ok(false,
          "getUsageForURI returned non-zero usage after clearing all " +
-         "databases!");
+         "storages!");
     }
     runCallback();
   });
@@ -79,6 +84,8 @@ function finishTest()
 {
   resetUnlimitedQuota();
   resetArchiveReader();
+  SpecialPowers.notifyObserversInParentProcess(null, "disk-space-watcher",
+                                               "free");
 
   SimpleTest.executeSoon(function() {
     testGenerator.close();
@@ -130,6 +137,16 @@ function unexpectedSuccessHandler()
 {
   ok(false, "Got success, but did not expect it!");
   finishTest();
+}
+
+function expectedErrorHandler(name)
+{
+  return function(event) {
+    is(event.type, "error", "Got an error event");
+    is(event.target.error.name, name, "Expected error was thrown.");
+    event.preventDefault();
+    grabEventAndContinueHandler(event);
+  };
 }
 
 function ExpectError(name, preventDefault)

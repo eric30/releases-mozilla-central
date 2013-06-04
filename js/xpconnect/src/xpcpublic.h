@@ -25,11 +25,13 @@
 #include "mozilla/dom/DOMJSClass.h"
 #include "nsMathUtils.h"
 #include "nsStringBuffer.h"
+#include "nsIGlobalObject.h"
 #include "mozilla/dom/BindingDeclarations.h"
 
 class nsIPrincipal;
 class nsIXPConnectWrappedJS;
 class nsScriptNameSpaceManager;
+class nsIGlobalObject;
 
 #ifndef BAD_TLS_INDEX
 #define BAD_TLS_INDEX ((uint32_t) -1)
@@ -49,8 +51,20 @@ TransplantObjectWithWrapper(JSContext *cx,
 //
 // The return value is not wrapped into cx->compartment, so be sure to enter
 // its compartment before doing anything meaningful.
+//
+// Also note that XBL scopes are lazily created, so the return-value should be
+// null-checked unless the caller can ensure that the scope must already
+// exist.
 JSObject *
 GetXBLScope(JSContext *cx, JSObject *contentScope);
+
+// Returns whether XBL scopes have been explicitly disabled for code running
+// in this compartment. See the comment around mAllowXBLScope.
+bool
+AllowXBLScope(JSCompartment *c);
+
+bool
+IsSandboxPrototypeProxy(JSObject *obj);
 
 } /* namespace xpc */
 
@@ -180,7 +194,7 @@ inline JSContext *
 xpc_UnmarkGrayContext(JSContext *cx)
 {
     if (cx) {
-        JSObject *global = JS_GetGlobalObject(cx);
+        JSObject *global = js::GetDefaultGlobalForContext(cx);
         xpc_UnmarkGrayObject(global);
         if (global && JS_IsInRequest(JS_GetRuntime(cx))) {
             JSObject *scope = JS_GetGlobalForScopeChain(cx);
@@ -190,15 +204,6 @@ xpc_UnmarkGrayContext(JSContext *cx)
     }
     return cx;
 }
-
-#ifdef __cplusplus
-class XPCAutoRequest : public JSAutoRequest {
-public:
-    XPCAutoRequest(JSContext *cx) : JSAutoRequest(cx) {
-        xpc_UnmarkGrayContext(cx);
-    }
-};
-#endif
 
 // If aVariant is an XPCVariant, this marks the object to be in aGeneration.
 // This also unmarks the gray JSObject.
@@ -236,7 +241,7 @@ public:
                         JS::Value* rval, bool* sharedBuffer)
     {
         if (buf == sCachedBuffer &&
-            js::GetGCThingZone(sCachedString) == js::GetContextZone(cx))
+            JS::GetGCThingZone(sCachedString) == js::GetContextZone(cx))
         {
             *rval = JS::StringValue(sCachedString);
             *sharedBuffer = false;
@@ -349,6 +354,7 @@ bool StringToJsval(JSContext* cx, mozilla::dom::DOMString& str,
 }
 
 nsIPrincipal *GetCompartmentPrincipal(JSCompartment *compartment);
+nsIPrincipal *GetObjectPrincipal(JSObject *obj);
 
 bool IsXBLScope(JSCompartment *compartment);
 
@@ -378,8 +384,40 @@ bool
 DOM_DefineQuickStubs(JSContext *cx, JSObject *proto, uint32_t flags,
                      uint32_t interfaceCount, const nsIID **interfaceArray);
 
+
+// ReportJSRuntimeExplicitTreeStats will expect this in the |extra| member
+// of JS::ZoneStats.
+class ZoneStatsExtras {
+public:
+    ZoneStatsExtras()
+    {}
+
+    nsAutoCString pathPrefix;
+
+private:
+    ZoneStatsExtras(const ZoneStatsExtras &other) MOZ_DELETE;
+    ZoneStatsExtras& operator=(const ZoneStatsExtras &other) MOZ_DELETE;
+};
+
+// ReportJSRuntimeExplicitTreeStats will expect this in the |extra| member
+// of JS::CompartmentStats.
+class CompartmentStatsExtras {
+public:
+    CompartmentStatsExtras()
+    {}
+
+    nsAutoCString jsPathPrefix;
+    nsAutoCString domPathPrefix;
+
+private:
+    CompartmentStatsExtras(const CompartmentStatsExtras &other) MOZ_DELETE;
+    CompartmentStatsExtras& operator=(const CompartmentStatsExtras &other) MOZ_DELETE;
+};
+
 // This reports all the stats in |rtStats| that belong in the "explicit" tree,
 // (which isn't all of them).
+// @see ZoneStatsExtras
+// @see CompartmentStatsExtras
 nsresult
 ReportJSRuntimeExplicitTreeStats(const JS::RuntimeStats &rtStats,
                                  const nsACString &rtPath,
@@ -387,24 +425,30 @@ ReportJSRuntimeExplicitTreeStats(const JS::RuntimeStats &rtStats,
                                  nsISupports *closure, size_t *rtTotal = NULL);
 
 /**
- * Given an arbitrary object, Unwrap will return the wrapped object if the
- * passed-in object is a wrapper that Unwrap knows about *and* the
- * currently running code has permission to access both the wrapper and
- * wrapped object.
- *
- * Since this is meant to be called from functions like
- * XPCWrappedNative::GetWrappedNativeOfJSObject, it does not set an
- * exception on |cx|.
- */
-JSObject *
-Unwrap(JSContext *cx, JSObject *wrapper, bool stopAtOuter = true);
-
-/**
  * Throws an exception on cx and returns false.
  */
 bool
 Throw(JSContext *cx, nsresult rv);
 
+/**
+ * Every global should hold a native that implements the nsIGlobalObject interface.
+ */
+nsIGlobalObject *
+GetNativeForGlobal(JSObject *global);
+
+/**
+ * In some cases a native object does not really belong to any compartment (XBL,
+ * document created from by XHR of a worker, etc.). But when for some reason we
+ * have to wrap these natives (because of an event for example) instead of just
+ * wrapping them into some random compartment we find on the context stack (like
+ * we did previously) a default compartment is used. This function returns that
+ * compartment's global. It is a singleton on the runtime.
+ * If you find yourself wanting to use this compartment, you're probably doing
+ * something wrong. Callers MUST consult with the XPConnect module owner before
+ * using this compartment. If you don't, bholley will hunt you down.
+ */
+JSObject *
+GetJunkScope();
 } // namespace xpc
 
 nsCycleCollectionParticipant *
@@ -429,7 +473,11 @@ inline bool IsDOMProxy(JSObject *obj)
 }
 
 typedef JSObject*
-(*DefineInterface)(JSContext *cx, JSObject *global, jsid id, bool *enabled);
+(*DefineInterface)(JSContext *cx, JS::Handle<JSObject*> global,
+                   JS::Handle<jsid> id, bool *enabled);
+
+typedef JSObject*
+(*ConstructNavigatorProperty)(JSContext *cx, JS::Handle<JSObject*> naviObj);
 
 typedef bool
 (*PrefEnabled)();
@@ -441,5 +489,15 @@ Register(nsScriptNameSpaceManager* aNameSpaceManager);
 
 } // namespace dom
 } // namespace mozilla
+
+// Called once before the deferred finalization starts. Should hand off the
+// buffer with things to finalize in the return value.
+typedef void* (*DeferredFinalizeStartFunction)();
+
+// Called to finalize a number of objects. Slice is the number of objects
+// to finalize, or if it's UINT32_MAX, all objects should be finalized.
+// data is the pointer returned by DeferredFinalizeStartFunction.
+// Return value indicates whether it finalized all objects in the buffer.
+typedef bool (*DeferredFinalizeFunction)(uint32_t slice, void* data);
 
 #endif

@@ -80,8 +80,6 @@ extern cc_int32_t g_NotifyLineDebug;
 extern int32_t bug_printf(int32_t level, const char *_format, ...);
 extern int32_t nbuginf(const char *_format, ...);
 
-#define logMsg buginf
-
 /* SIP debug macros */
 #define CCSIP_DEBUG_MESSAGE(format,...) if (SipDebugMessage) \
         CSFLogDebug("ccsip_message", format, ## __VA_ARGS__)
@@ -107,9 +105,19 @@ extern int32_t nbuginf(const char *_format, ...);
 #define PHN_DEBUG_SNTP        if (DebugSNTP)
 #define PHN_DEBUG_SNTP_PACKET if (DebugSNTPPacket)
 
-/* TNP adapter debugs */
+/*
+ * TNP debugging has been raised from CSFLogDebug to CSFLogNotice
+ * to help diagnose some intermittent bugs in which the SIPCC
+ * code appears to have cleaned up a call, but the UI layer
+ * (PeerConnectionImpl) is not informed. This is less intrusive
+ * than running all the tests with logging turned all the way
+ * up to debug. This can be reverted back to CSFLogDebug once
+ * the WebRTC intermittent bugs are closed. For a current list
+ * of such bugs, see the results of the following query:
+ * http://tinyurl.com/webrtc-intermittent
+ */
 #define TNP_DEBUG(format,...) if (TNPDebug) \
-        CSFLogDebug("tnp", format, ## __VA_ARGS__)
+        CSFLogNotice("tnp", format, ## __VA_ARGS__)
 
 
 #define DEF_DISPLAY_BUF          128
@@ -275,9 +283,7 @@ extern int32_t nbuginf(const char *_format, ...);
 
 
 #define CAC_L_C_F_PREFIX "CAC : %d/%d : %s : " // requires 3 args: line_id, call_id, fname
-#define CAC_F_PREFIX "CAC : %s : " // requires 1 arg: fname
 #define DCSM_L_C_F_PREFIX "DCSM : %d/%d : %s : " // requires 3 args: line_id, call_id, fname
-#define DCSM_F_PREFIX "DCSM : %s : " // requires 1 arg: fname
 #define CFG_F_PREFIX "CFG : %s : " // requires 1 arg: fname
 #define PLAT_COMMON_F_PREFIX "PLAT_COMMON : %s : " // requires 1 arg: fname
 #define MED_F_PREFIX "MED : %s : "

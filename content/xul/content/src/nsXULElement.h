@@ -13,19 +13,18 @@
 #define nsXULElement_h__
 
 // XXX because nsEventListenerManager has broken includes
+#include "mozilla/Attributes.h"
 #include "nsIDOMEvent.h"
 #include "nsIServiceManager.h"
 #include "nsIAtom.h"
 #include "nsINodeInfo.h"
 #include "nsIControllers.h"
 #include "nsIDOMElement.h"
-#include "nsIDOMEventTarget.h"
 #include "nsIDOMXULElement.h"
 #include "nsIDOMXULMultSelectCntrlEl.h"
 #include "nsEventListenerManager.h"
 #include "nsIRDFCompositeDataSource.h"
 #include "nsIRDFResource.h"
-#include "nsBindingManager.h"
 #include "nsIURI.h"
 #include "nsIXULTemplateBuilder.h"
 #include "nsIBoxObject.h"
@@ -34,7 +33,6 @@
 #include "nsGkAtoms.h"
 #include "nsAutoPtr.h"
 #include "nsStyledElement.h"
-#include "nsDOMScriptObjectHolder.h"
 #include "nsIFrameLoader.h"
 #include "jspubtd.h"
 #include "nsFrameLoader.h"
@@ -161,11 +159,11 @@ public:
     }
 
 #ifdef NS_BUILD_REFCNT_LOGGING
-    virtual const char* ClassName() { return "nsXULPrototypeElement"; }
-    virtual uint32_t ClassSize() { return sizeof(*this); }
+    virtual const char* ClassName() MOZ_OVERRIDE { return "nsXULPrototypeElement"; }
+    virtual uint32_t ClassSize() MOZ_OVERRIDE { return sizeof(*this); }
 #endif
 
-    virtual void ReleaseSubtree()
+    virtual void ReleaseSubtree() MOZ_OVERRIDE
     {
         for (int32_t i = mChildren.Length() - 1; i >= 0; i--) {
             if (mChildren[i].get())
@@ -177,11 +175,11 @@ public:
 
     virtual nsresult Serialize(nsIObjectOutputStream* aStream,
                                nsIScriptGlobalObject* aGlobal,
-                               const nsCOMArray<nsINodeInfo> *aNodeInfos);
+                               const nsCOMArray<nsINodeInfo> *aNodeInfos) MOZ_OVERRIDE;
     virtual nsresult Deserialize(nsIObjectInputStream* aStream,
                                  nsIScriptGlobalObject* aGlobal,
                                  nsIURI* aDocumentURI,
-                                 const nsCOMArray<nsINodeInfo> *aNodeInfos);
+                                 const nsCOMArray<nsINodeInfo> *aNodeInfos) MOZ_OVERRIDE;
 
     nsresult SetAttrAt(uint32_t aPos, const nsAString& aValue, nsIURI* aDocumentURI);
 
@@ -201,7 +199,11 @@ public:
     nsXULPrototypeAttribute* mAttributes;         // [OWNER]
 };
 
-class nsXULDocument;
+namespace mozilla {
+namespace dom {
+class XULDocument;
+} // namespace dom
+} // namespace mozilla
 
 class nsXULPrototypeScript : public nsXULPrototypeNode
 {
@@ -210,19 +212,19 @@ public:
     virtual ~nsXULPrototypeScript();
 
 #ifdef NS_BUILD_REFCNT_LOGGING
-    virtual const char* ClassName() { return "nsXULPrototypeScript"; }
-    virtual uint32_t ClassSize() { return sizeof(*this); }
+    virtual const char* ClassName() MOZ_OVERRIDE { return "nsXULPrototypeScript"; }
+    virtual uint32_t ClassSize() MOZ_OVERRIDE { return sizeof(*this); }
 #endif
 
     virtual nsresult Serialize(nsIObjectOutputStream* aStream,
                                nsIScriptGlobalObject* aGlobal,
-                               const nsCOMArray<nsINodeInfo> *aNodeInfos);
+                               const nsCOMArray<nsINodeInfo> *aNodeInfos) MOZ_OVERRIDE;
     nsresult SerializeOutOfLine(nsIObjectOutputStream* aStream,
                                 nsIScriptGlobalObject* aGlobal);
     virtual nsresult Deserialize(nsIObjectInputStream* aStream,
                                  nsIScriptGlobalObject* aGlobal,
                                  nsIURI* aDocumentURI,
-                                 const nsCOMArray<nsINodeInfo> *aNodeInfos);
+                                 const nsCOMArray<nsINodeInfo> *aNodeInfos) MOZ_OVERRIDE;
     nsresult DeserializeOutOfLine(nsIObjectInputStream* aInput,
                                   nsIScriptGlobalObject* aGlobal);
 
@@ -233,22 +235,36 @@ public:
 
     void UnlinkJSObjects();
 
-    void Set(nsScriptObjectHolder<JSScript>& aHolder)
-    {
-        Set(aHolder.get());
-    }
     void Set(JSScript* aObject);
 
-    JSScript *GetScriptObject()
+    // It's safe to return a handle because we trace mScriptObject, no one ever
+    // uses the handle (or the script object) past the point at which the
+    // nsXULPrototypeScript dies, and we can't get memmoved so the
+    // &mScriptObject pointer can't go stale.
+    JS::Handle<JSScript*> GetScriptObject()
     {
-        return mScriptObject;
+        return JS::Handle<JSScript*>::fromMarkedLocation(&mScriptObject);
+    }
+
+    void TraceScriptObject(JSTracer* aTrc)
+    {
+        if (mScriptObject) {
+            JS_CallScriptTracer(aTrc, &mScriptObject, "active window XUL prototype script");
+        }
+    }
+
+    void Trace(const TraceCallbacks& aCallbacks, void* aClosure)
+    {
+        if (mScriptObject) {
+            aCallbacks.Trace(&mScriptObject, "mScriptObject", aClosure);
+        }
     }
 
     nsCOMPtr<nsIURI>         mSrcURI;
     uint32_t                 mLineNo;
     bool                     mSrcLoading;
     bool                     mOutOfLine;
-    nsXULDocument*           mSrcLoadWaiters;   // [OWNER] but not COMPtr
+    mozilla::dom::XULDocument* mSrcLoadWaiters;   // [OWNER] but not COMPtr
     uint32_t                 mLangVersion;
 private:
     JSScript*                mScriptObject;
@@ -267,17 +283,17 @@ public:
     }
 
 #ifdef NS_BUILD_REFCNT_LOGGING
-    virtual const char* ClassName() { return "nsXULPrototypeText"; }
-    virtual uint32_t ClassSize() { return sizeof(*this); }
+    virtual const char* ClassName() MOZ_OVERRIDE { return "nsXULPrototypeText"; }
+    virtual uint32_t ClassSize() MOZ_OVERRIDE { return sizeof(*this); }
 #endif
 
     virtual nsresult Serialize(nsIObjectOutputStream* aStream,
                                nsIScriptGlobalObject* aGlobal,
-                               const nsCOMArray<nsINodeInfo> *aNodeInfos);
+                               const nsCOMArray<nsINodeInfo> *aNodeInfos) MOZ_OVERRIDE;
     virtual nsresult Deserialize(nsIObjectInputStream* aStream,
                                  nsIScriptGlobalObject* aGlobal,
                                  nsIURI* aDocumentURI,
-                                 const nsCOMArray<nsINodeInfo> *aNodeInfos);
+                                 const nsCOMArray<nsINodeInfo> *aNodeInfos) MOZ_OVERRIDE;
 
     nsString                 mValue;
 };
@@ -295,17 +311,17 @@ public:
     }
 
 #ifdef NS_BUILD_REFCNT_LOGGING
-    virtual const char* ClassName() { return "nsXULPrototypePI"; }
-    virtual uint32_t ClassSize() { return sizeof(*this); }
+    virtual const char* ClassName() MOZ_OVERRIDE { return "nsXULPrototypePI"; }
+    virtual uint32_t ClassSize() MOZ_OVERRIDE { return sizeof(*this); }
 #endif
 
     virtual nsresult Serialize(nsIObjectOutputStream* aStream,
                                nsIScriptGlobalObject* aGlobal,
-                               const nsCOMArray<nsINodeInfo> *aNodeInfos);
+                               const nsCOMArray<nsINodeInfo> *aNodeInfos) MOZ_OVERRIDE;
     virtual nsresult Deserialize(nsIObjectInputStream* aStream,
                                  nsIScriptGlobalObject* aGlobal,
                                  nsIURI* aDocumentURI,
-                                 const nsCOMArray<nsINodeInfo> *aNodeInfos);
+                                 const nsCOMArray<nsINodeInfo> *aNodeInfos) MOZ_OVERRIDE;
 
     nsString                 mTarget;
     nsString                 mData;
@@ -358,30 +374,30 @@ public:
     // nsIContent
     virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
                                 nsIContent* aBindingParent,
-                                bool aCompileEventHandlers);
-    virtual void UnbindFromTree(bool aDeep, bool aNullParent);
-    virtual void RemoveChildAt(uint32_t aIndex, bool aNotify);
-    virtual void DestroyContent();
+                                bool aCompileEventHandlers) MOZ_OVERRIDE;
+    virtual void UnbindFromTree(bool aDeep, bool aNullParent) MOZ_OVERRIDE;
+    virtual void RemoveChildAt(uint32_t aIndex, bool aNotify) MOZ_OVERRIDE;
+    virtual void DestroyContent() MOZ_OVERRIDE;
 
 #ifdef DEBUG
-    virtual void List(FILE* out, int32_t aIndent) const;
-    virtual void DumpContent(FILE* out, int32_t aIndent,bool aDumpAll) const
+    virtual void List(FILE* out, int32_t aIndent) const MOZ_OVERRIDE;
+    virtual void DumpContent(FILE* out, int32_t aIndent,bool aDumpAll) const MOZ_OVERRIDE
     {
     }
 #endif
 
     virtual void PerformAccesskey(bool aKeyCausesActivation,
-                                  bool aIsTrustedEvent);
+                                  bool aIsTrustedEvent) MOZ_OVERRIDE;
     nsresult ClickWithInputSource(uint16_t aInputSource);
 
-    virtual nsIContent *GetBindingParent() const;
-    virtual bool IsNodeOfType(uint32_t aFlags) const;
-    virtual bool IsFocusable(int32_t *aTabIndex = nullptr, bool aWithMouse = false);
+    virtual nsIContent *GetBindingParent() const MOZ_OVERRIDE;
+    virtual bool IsNodeOfType(uint32_t aFlags) const MOZ_OVERRIDE;
+    virtual bool IsFocusable(int32_t *aTabIndex = nullptr, bool aWithMouse = false) MOZ_OVERRIDE;
 
-    NS_IMETHOD WalkContentStyleRules(nsRuleWalker* aRuleWalker);
+    NS_IMETHOD WalkContentStyleRules(nsRuleWalker* aRuleWalker) MOZ_OVERRIDE;
     virtual nsChangeHint GetAttributeChangeHint(const nsIAtom* aAttribute,
-                                                int32_t aModType) const;
-    NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const;
+                                                int32_t aModType) const MOZ_OVERRIDE;
+    NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const MOZ_OVERRIDE;
 
     // XUL element methods
     /**
@@ -404,13 +420,13 @@ public:
     // nsIDOMXULElement
     NS_DECL_NSIDOMXULELEMENT
 
-    virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const;
-    virtual nsEventStates IntrinsicState() const;
+    virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
+    virtual nsEventStates IntrinsicState() const MOZ_OVERRIDE;
 
     nsresult GetFrameLoader(nsIFrameLoader** aFrameLoader);
     nsresult SwapFrameLoaders(nsIFrameLoaderOwner* aOtherOwner);
 
-    virtual void RecompileScriptEventListeners();
+    virtual void RecompileScriptEventListeners() MOZ_OVERRIDE;
 
     // This function should ONLY be used by BindToTree implementations.
     // The function exists solely because XUL elements store the binding
@@ -420,7 +436,7 @@ public:
       mBindingParent = aBindingParent;
     }
 
-    virtual nsIDOMNode* AsDOMNode() { return this; }
+    virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
 
     virtual bool IsEventAttributeName(nsIAtom* aName) MOZ_OVERRIDE;
 
@@ -613,7 +629,7 @@ protected:
         nsRefPtr<nsFrameLoader> mFrameLoader;
     };
 
-    virtual nsINode::nsSlots* CreateSlots();
+    virtual nsINode::nsSlots* CreateSlots() MOZ_OVERRIDE;
 
     nsresult LoadSrc();
 
@@ -630,19 +646,19 @@ protected:
 
     virtual nsresult BeforeSetAttr(int32_t aNamespaceID, nsIAtom* aName,
                                    const nsAttrValueOrString* aValue,
-                                   bool aNotify);
+                                   bool aNotify) MOZ_OVERRIDE;
     virtual nsresult AfterSetAttr(int32_t aNamespaceID, nsIAtom* aName,
-                                  const nsAttrValue* aValue, bool aNotify);
+                                  const nsAttrValue* aValue, bool aNotify) MOZ_OVERRIDE;
 
-    virtual void UpdateEditableState(bool aNotify);
+    virtual void UpdateEditableState(bool aNotify) MOZ_OVERRIDE;
 
     virtual bool ParseAttribute(int32_t aNamespaceID,
                                   nsIAtom* aAttribute,
                                   const nsAString& aValue,
-                                  nsAttrValue& aResult);
+                                  nsAttrValue& aResult) MOZ_OVERRIDE;
 
     virtual nsEventListenerManager*
-      GetEventListenerManagerForAttr(nsIAtom* aAttrName, bool* aDefer);
+      GetEventListenerManagerForAttr(nsIAtom* aAttrName, bool* aDefer) MOZ_OVERRIDE;
   
     /**
      * Add a listener for the specified attribute, if appropriate.
@@ -692,7 +708,8 @@ protected:
             !HasAttr(kNameSpaceID_None, nsGkAtoms::readonly);
     }
 
-    virtual JSObject* WrapNode(JSContext *aCx, JSObject *aScope) MOZ_OVERRIDE;
+    virtual JSObject* WrapNode(JSContext *aCx,
+                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
     void MaybeUpdatePrivateLifetime();
 };

@@ -1,3 +1,4 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # Copyright 2013 Mozilla Foundation and Mozilla contributors
 #
@@ -12,4 +13,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+MODULE = 'omxplugin'
+
+CPP_SOURCES += [
+    'OmxPlugin.cpp',
+]
 

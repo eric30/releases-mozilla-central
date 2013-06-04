@@ -45,7 +45,7 @@ var ContextCommands = {
       if (ContextMenuUI.popupState.string) {
         this.sendCommand("cut");
 
-        SelectionHelperUI.closeEditSessionAndClear();
+        SelectionHelperUI.closeEditSession(true);
       }
     } else {
       // chrome
@@ -66,7 +66,7 @@ var ContextCommands = {
       if (ContextMenuUI.popupState.string) {
         this.sendCommand("copy");
 
-        SelectionHelperUI.closeEditSessionAndClear();
+        SelectionHelperUI.closeEditSession(true);
       }
     } else {
       // chrome
@@ -84,7 +84,7 @@ var ContextCommands = {
       let y = ContextMenuUI.popupState.y;
       let json = {x: x, y: y, command: "paste" };
       target.messageManager.sendAsyncMessage("Browser:ContextCommand", json);
-      SelectionHelperUI.closeEditSessionAndClear();
+      SelectionHelperUI.closeEditSession();
     } else {
       // chrome
       target.editor.paste(Ci.nsIClipboard.kGlobalClipboard);
@@ -100,24 +100,20 @@ var ContextCommands = {
   },
 
   select: function cc_select() {
-    let contextInfo = { name: "",
-                        json: ContextMenuUI.popupState,
-                        target: ContextMenuUI.popupState.target };
-    SelectionHelperUI.openEditSession(contextInfo);
+    SelectionHelperUI.openEditSession(ContextMenuUI.popupState.target,
+                                      ContextMenuUI.popupState.xPos,
+                                      ContextMenuUI.popupState.yPos);
   },
 
   selectAll: function cc_selectAll() {
     let target = ContextMenuUI.popupState.target;
     if (target.localName == "browser") {
       // content
-      let x = ContextMenuUI.popupState.x;
-      let y = ContextMenuUI.popupState.y;
+      let x = ContextMenuUI.popupState.xPos;
+      let y = ContextMenuUI.popupState.yPos;
       let json = {x: x, y: y, command: "select-all" };
       target.messageManager.sendAsyncMessage("Browser:ContextCommand", json);
-      let contextInfo = { name: "",
-                          json: ContextMenuUI.popupState,
-                          target: ContextMenuUI.popupState.target };
-      SelectionHelperUI.attachEditSession(contextInfo);
+      SelectionHelperUI.attachEditSession(target, x, y);
     } else {
       // chrome
       target.editor.selectAll();
@@ -218,11 +214,6 @@ var ContextCommands = {
 
   openVideoInNewTab: function cc_openVideoInNewTab() {
     BrowserUI.newTab(ContextMenuUI.popupState.mediaURL, Browser.selectedTab);
-  },
-
-  openVideoInFullscreen: function cc_openVideoInFullscreen() {
-    // XXX currently isn't working.
-    this.sendCommand('videotab');
   },
 
   // Bookmarks

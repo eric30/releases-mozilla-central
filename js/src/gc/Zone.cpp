@@ -1,6 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=78:
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -14,6 +13,7 @@
 #include "gc/GCInternals.h"
 
 #ifdef JS_ION
+#include "ion/BaselineJIT.h"
 #include "ion/IonCompartment.h"
 #include "ion/Ion.h"
 #endif
@@ -28,10 +28,6 @@ JS::Zone::Zone(JSRuntime *rt)
   : rt(rt),
     allocator(this),
     hold(false),
-#ifdef JSGC_GENERATIONAL
-    gcNursery(),
-    gcStoreBuffer(&gcNursery),
-#endif
     ionUsingBarriers_(false),
     active(false),
     gcScheduled(false),
@@ -70,13 +66,6 @@ Zone::init(JSContext *cx)
 void
 Zone::setNeedsBarrier(bool needs, ShouldUpdateIon updateIon)
 {
-#ifdef JS_METHODJIT
-    /* ClearAllFrames calls compileBarriers() and needs the old value. */
-    bool old = compileBarriers();
-    if (compileBarriers(needs) != old)
-        mjit::ClearAllFrames(this);
-#endif
-
 #ifdef JS_ION
     if (updateIon == UpdateIon && needs != ionUsingBarriers_) {
         ion::ToggleBarriers(this, needs);
@@ -160,31 +149,34 @@ Zone::sweep(FreeOp *fop, bool releaseTypes)
 void
 Zone::discardJitCode(FreeOp *fop, bool discardConstraints)
 {
-#ifdef JS_METHODJIT
-    /*
-     * Kick all frames on the stack into the interpreter, and release all JIT
-     * code in the compartment unless code is being preserved, in which case
-     * purge all caches in the JIT scripts. Even if we are not releasing all
-     * JIT code, we still need to release code for scripts which are in the
-     * middle of a native or getter stub call, as these stubs will have been
-     * redirected to the interpoline.
-     */
-    mjit::ClearAllFrames(this);
-
+#ifdef JS_ION
     if (isPreservingCode()) {
         PurgeJITCaches(this);
     } else {
-# ifdef JS_ION
-        /* Only mark OSI points if code is being discarded. */
-        ion::InvalidateAll(fop, this);
-# endif
+
+# ifdef DEBUG
+        /* Assert no baseline scripts are marked as active. */
         for (CellIterUnderGC i(this, FINALIZE_SCRIPT); !i.done(); i.next()) {
             JSScript *script = i.get<JSScript>();
-
-            mjit::ReleaseScriptCode(fop, script);
-# ifdef JS_ION
-            ion::FinishInvalidation(fop, script);
+            JS_ASSERT_IF(script->hasBaselineScript(), !script->baselineScript()->active());
+        }
 # endif
+
+        /* Mark baseline scripts on the stack as active. */
+        ion::MarkActiveBaselineScripts(this);
+
+        /* Only mark OSI points if code is being discarded. */
+        ion::InvalidateAll(fop, this);
+
+        for (CellIterUnderGC i(this, FINALIZE_SCRIPT); !i.done(); i.next()) {
+            JSScript *script = i.get<JSScript>();
+            ion::FinishInvalidation(fop, script);
+
+            /*
+             * Discard baseline script if it's not marked as active. Note that
+             * this also resets the active flag.
+             */
+            ion::FinishDiscardBaselineScript(fop, script);
 
             /*
              * Use counts for scripts are reset on GC. After discarding code we
@@ -194,8 +186,13 @@ Zone::discardJitCode(FreeOp *fop, bool discardConstraints)
             script->resetUseCount();
         }
 
-        for (CompartmentsInZoneIter comp(this); !comp.done(); comp.next())
+        for (CompartmentsInZoneIter comp(this); !comp.done(); comp.next()) {
+            /* Free optimized baseline stubs. */
+            if (comp->ionCompartment())
+                comp->ionCompartment()->optimizedStubSpace()->free();
+
             comp->types.sweepCompilerOutputs(fop, discardConstraints);
+        }
     }
-#endif /* JS_METHODJIT */
+#endif
 }

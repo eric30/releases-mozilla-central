@@ -30,6 +30,7 @@ class nsMemoryCacheDevice;
 class nsOfflineCacheDevice;
 class nsCacheServiceAutoLock;
 class nsITimer;
+class mozIStorageService;
 
 
 /******************************************************************************
@@ -60,11 +61,12 @@ private:
  *  nsCacheService
  ******************************************************************************/
 
-class nsCacheService : public nsICacheService
+class nsCacheService : public nsICacheServiceInternal
 {
 public:
     NS_DECL_ISUPPORTS
     NS_DECL_NSICACHESERVICE
+    NS_DECL_NSICACHESERVICEINTERNAL
 
     nsCacheService();
     virtual ~nsCacheService();
@@ -238,6 +240,8 @@ private:
 
     static void      Lock(::mozilla::Telemetry::ID mainThreadLockerID);
     static void      Unlock();
+    void             LockAcquired();
+    void             LockReleased();
 
     nsresult         CreateDiskDevice();
     nsresult         CreateOfflineDevice();
@@ -316,10 +320,15 @@ private:
 
     static nsCacheService *         gService;  // there can be only one...
 
+    nsCOMPtr<mozIStorageService>    mStorageService;
+
     nsCacheProfilePrefObserver *    mObserver;
 
     mozilla::Mutex                  mLock;
     mozilla::CondVar                mCondVar;
+
+    mozilla::Mutex                  mTimeStampLock;
+    mozilla::TimeStamp              mLockAcquiredTimeStamp;
 
     nsCOMPtr<nsIThread>             mCacheIOThread;
 

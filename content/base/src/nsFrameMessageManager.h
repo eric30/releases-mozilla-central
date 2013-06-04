@@ -182,7 +182,7 @@ public:
 
   nsresult ReceiveMessage(nsISupports* aTarget, const nsAString& aMessage,
                           bool aSync, const StructuredCloneData* aCloneData,
-                          JSObject* aObjectsArray,
+                          JS::Handle<JSObject*> aObjectsArray,
                           InfallibleTArray<nsString>* aJSONRetVal,
                           JSContext* aContext = nullptr);
 
@@ -202,7 +202,7 @@ public:
   }
 
   nsresult DispatchAsyncMessage(const nsAString& aMessageName,
-                                const jsval& aObject,
+                                const JS::Value& aObject,
                                 JSContext* aCx,
                                 uint8_t aArgc);
   nsresult DispatchAsyncMessageInternal(const nsAString& aMessage,

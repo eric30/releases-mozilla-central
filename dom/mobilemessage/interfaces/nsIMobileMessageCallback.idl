@@ -6,19 +6,20 @@
 
 dictionary SmsThreadListItem
 {
+  unsigned long long id;
   DOMString senderOrReceiver;
   unsigned long long timestamp;
   DOMString body;
   unsigned long long unreadCount;
 };
 
-[scriptable, builtinclass, uuid(edb1de12-8d58-11e2-b382-7bf132b20cb2)]
+[scriptable, builtinclass, uuid(6e20c451-8bae-4b36-be3c-da166fdd10ba)]
 interface nsIMobileMessageCallback : nsISupports
 {
   /**
-   * All SMS related errors that could apply to SmsRequest objects.
+   * All SMS related errors.
    * Make sure to keep this list in sync with the list in:
-   * embedding/android/GeckoSmsManager.java
+   * mobile/android/GeckoSmsManager.java
    */
   const unsigned short SUCCESS_NO_ERROR = 0;
   const unsigned short NO_SIGNAL_ERROR  = 1;
@@ -38,22 +39,10 @@ interface nsIMobileMessageCallback : nsISupports
   void notifyMessageGot(in nsISupports message);
   void notifyGetMessageFailed(in long error);
 
-  void notifyMessageDeleted(in boolean deleted);
+  void notifyMessageDeleted([array, size_is(count)] in boolean deleted,
+                            in uint32_t count);
   void notifyDeleteMessageFailed(in long error);
-
-  /**
-   * |message| can be nsIDOMMoz{Mms,Sms}Message.
-   */
-  void notifyMessageListCreated(in long listId,
-                                in nsISupports message);
-  void notifyReadMessageListFailed(in long error);
-  void notifyNextMessageInListGot(in nsISupports message);
-  void notifyNoMessageInList();
 
   void notifyMessageMarkedRead(in boolean read);
   void notifyMarkMessageReadFailed(in long error);
-
-  [implicit_jscontext]
-  void notifyThreadList(in jsval threadList);
-  void notifyThreadListFailed(in long error);
 };

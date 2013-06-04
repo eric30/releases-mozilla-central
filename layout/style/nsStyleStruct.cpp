@@ -192,6 +192,16 @@ nsChangeHint nsStyleFont::CalcFontDifference(const nsFont& aFont1, const nsFont&
       (aFont1.weight == aFont2.weight) &&
       (aFont1.stretch == aFont2.stretch) &&
       (aFont1.name == aFont2.name) &&
+      (aFont1.kerning == aFont2.kerning) &&
+      (aFont1.synthesis == aFont2.synthesis) &&
+      (aFont1.variantAlternates == aFont2.variantAlternates) &&
+      (aFont1.alternateValues == aFont2.alternateValues) &&
+      (aFont1.featureValueLookup == aFont2.featureValueLookup) &&
+      (aFont1.variantCaps == aFont2.variantCaps) &&
+      (aFont1.variantEastAsian == aFont2.variantEastAsian) &&
+      (aFont1.variantLigatures == aFont2.variantLigatures) &&
+      (aFont1.variantNumeric == aFont2.variantNumeric) &&
+      (aFont1.variantPosition == aFont2.variantPosition) &&
       (aFont1.fontFeatureSettings == aFont2.fontFeatureSettings) &&
       (aFont1.languageOverride == aFont2.languageOverride)) {
     if ((aFont1.decorations == aFont2.decorations)) {
@@ -730,6 +740,8 @@ nsChangeHint nsStyleXUL::CalcDifference(const nsStyleXUL& aOther) const
 // --------------------
 // nsStyleColumn
 //
+/* static */ const uint32_t nsStyleColumn::kMaxColumnCount = 1000;
+
 nsStyleColumn::nsStyleColumn(nsPresContext* aPresContext)
 {
   MOZ_COUNT_CTOR(nsStyleColumn);
@@ -890,17 +902,16 @@ nsChangeHint nsStyleSVG::CalcDifference(const nsStyleSVG& aOther) const
 {
   nsChangeHint hint = nsChangeHint(0);
 
-  if (mTextRendering != aOther.mTextRendering) {
-    NS_UpdateHint(hint, nsChangeHint_RepaintFrame);
-    // May be needed for non-svg frames
-    NS_UpdateHint(hint, nsChangeHint_AllReflowHints);
-  }
-
   if (!EqualURIs(mMarkerEnd, aOther.mMarkerEnd) ||
       !EqualURIs(mMarkerMid, aOther.mMarkerMid) ||
       !EqualURIs(mMarkerStart, aOther.mMarkerStart)) {
-    NS_UpdateHint(hint, nsChangeHint_RepaintFrame);
+    // Markers currently contribute to nsSVGPathGeometryFrame::mRect,
+    // so we need a reflow as well as a repaint. No intrinsic sizes need
+    // to change, so nsChangeHint_NeedReflow is sufficient.
     NS_UpdateHint(hint, nsChangeHint_UpdateEffects);
+    NS_UpdateHint(hint, nsChangeHint_NeedReflow);
+    NS_UpdateHint(hint, nsChangeHint_NeedDirtyReflow); // XXX remove me: bug 876085
+    NS_UpdateHint(hint, nsChangeHint_RepaintFrame);
     return hint;
   }
 
@@ -911,17 +922,33 @@ nsChangeHint nsStyleSVG::CalcDifference(const nsStyleSVG& aOther) const
         PaintURIChanged(mStroke, aOther.mStroke)) {
       NS_UpdateHint(hint, nsChangeHint_UpdateEffects);
     }
-    // Nothing more to do, below we can only set "repaint"
+  }
+
+  // Stroke currently contributes to nsSVGPathGeometryFrame::mRect, so
+  // we need a reflow here. No intrinsic sizes need to change, so
+  // nsChangeHint_NeedReflow is sufficient.
+  // Note that stroke-dashoffset does not affect nsSVGPathGeometryFrame::mRect.
+  // text-anchor and text-rendering changes also require a reflow since they
+  // change frames' rects.
+  if (mStrokeWidth           != aOther.mStrokeWidth           ||
+      mStrokeMiterlimit      != aOther.mStrokeMiterlimit      ||
+      mStrokeLinecap         != aOther.mStrokeLinecap         ||
+      mStrokeLinejoin        != aOther.mStrokeLinejoin        ||
+      mTextAnchor            != aOther.mTextAnchor            ||
+      mTextRendering         != aOther.mTextRendering) {
+    NS_UpdateHint(hint, nsChangeHint_NeedReflow);
+    NS_UpdateHint(hint, nsChangeHint_NeedDirtyReflow); // XXX remove me: bug 876085
+    NS_UpdateHint(hint, nsChangeHint_RepaintFrame);
     return hint;
   }
 
+  if (hint & nsChangeHint_RepaintFrame) {
+    return hint; // we don't add anything else below
+  }
+
   if ( mStrokeDashoffset      != aOther.mStrokeDashoffset      ||
-       mStrokeWidth           != aOther.mStrokeWidth           ||
-
        mFillOpacity           != aOther.mFillOpacity           ||
-       mStrokeMiterlimit      != aOther.mStrokeMiterlimit      ||
        mStrokeOpacity         != aOther.mStrokeOpacity         ||
-
        mClipRule              != aOther.mClipRule              ||
        mColorInterpolation    != aOther.mColorInterpolation    ||
        mColorInterpolationFilters != aOther.mColorInterpolationFilters ||
@@ -930,9 +957,6 @@ nsChangeHint nsStyleSVG::CalcDifference(const nsStyleSVG& aOther) const
        mPaintOrder            != aOther.mPaintOrder            ||
        mShapeRendering        != aOther.mShapeRendering        ||
        mStrokeDasharrayLength != aOther.mStrokeDasharrayLength ||
-       mStrokeLinecap         != aOther.mStrokeLinecap         ||
-       mStrokeLinejoin        != aOther.mStrokeLinejoin        ||
-       mTextAnchor            != aOther.mTextAnchor            ||
        mFillOpacitySource     != aOther.mFillOpacitySource     ||
        mStrokeOpacitySource   != aOther.mStrokeOpacitySource   ||
        mStrokeDasharrayFromObject != aOther.mStrokeDasharrayFromObject ||
@@ -1000,18 +1024,29 @@ nsChangeHint nsStyleSVGReset::CalcDifference(const nsStyleSVGReset& aOther) cons
       !EqualURIs(mFilter, aOther.mFilter)     ||
       !EqualURIs(mMask, aOther.mMask)) {
     NS_UpdateHint(hint, nsChangeHint_UpdateEffects);
-    NS_UpdateHint(hint, nsChangeHint_AllReflowHints);
     NS_UpdateHint(hint, nsChangeHint_RepaintFrame);
-  } else if (mDominantBaseline != aOther.mDominantBaseline) {
+  }
+
+  if (mDominantBaseline != aOther.mDominantBaseline) {
+    // XXXjwatt: why NS_STYLE_HINT_REFLOW? Isn't that excessive?
     NS_UpdateHint(hint, NS_STYLE_HINT_REFLOW);
+  } else if (mVectorEffect  != aOther.mVectorEffect) {
+    // Stroke currently affects nsSVGPathGeometryFrame::mRect, and
+    // vector-effect affect stroke. As a result we need to reflow if
+    // vector-effect changes in order to have nsSVGPathGeometryFrame::
+    // ReflowSVG called to update its mRect. No intrinsic sizes need
+    // to change so nsChangeHint_NeedReflow is sufficient.
+    NS_UpdateHint(hint, nsChangeHint_NeedReflow);
+    NS_UpdateHint(hint, nsChangeHint_NeedDirtyReflow); // XXX remove me: bug 876085
+    NS_UpdateHint(hint, nsChangeHint_RepaintFrame);
   } else if (mStopColor     != aOther.mStopColor     ||
              mFloodColor    != aOther.mFloodColor    ||
              mLightingColor != aOther.mLightingColor ||
              mStopOpacity   != aOther.mStopOpacity   ||
              mFloodOpacity  != aOther.mFloodOpacity  ||
-             mVectorEffect  != aOther.mVectorEffect  ||
-             mMaskType      != aOther.mMaskType)
+             mMaskType      != aOther.mMaskType) {
     NS_UpdateHint(hint, nsChangeHint_RepaintFrame);
+  }
 
   return hint;
 }
@@ -1077,16 +1112,13 @@ nsStylePosition::nsStylePosition(void)
   mOffset.SetRight(autoCoord);
   mOffset.SetBottom(autoCoord);
   mWidth.SetAutoValue();
-  mMinWidth.SetAutoValue();
+  mMinWidth.SetCoordValue(0);
   mMaxWidth.SetNoneValue();
   mHeight.SetAutoValue();
-  mMinHeight.SetAutoValue();
+  mMinHeight.SetCoordValue(0);
   mMaxHeight.SetNoneValue();
-#ifdef MOZ_FLEXBOX
   mFlexBasis.SetAutoValue();
-#endif // MOZ_FLEXBOX
   mBoxSizing = NS_STYLE_BOX_SIZING_CONTENT;
-#ifdef MOZ_FLEXBOX
   mAlignItems = NS_STYLE_ALIGN_ITEMS_INITIAL_VALUE;
   mAlignSelf = NS_STYLE_ALIGN_SELF_AUTO;
   mFlexDirection = NS_STYLE_FLEX_DIRECTION_ROW;
@@ -1094,7 +1126,6 @@ nsStylePosition::nsStylePosition(void)
   mOrder = NS_STYLE_ORDER_INITIAL;
   mFlexGrow = 0.0f;
   mFlexShrink = 1.0f;
-#endif // MOZ_FLEXBOX
   mZIndex.SetAutoValue();
 }
 
@@ -1119,7 +1150,6 @@ nsChangeHint nsStylePosition::CalcDifference(const nsStylePosition& aOther) cons
     return NS_CombineHint(hint, nsChangeHint_AllReflowHints);
   }
 
-#ifdef MOZ_FLEXBOX
   // Properties that apply to flex items:
   // NOTE: Changes to "order" on a flex item may trigger some repositioning.
   // If we're in a multi-line flex container, it also may affect our size
@@ -1147,7 +1177,6 @@ nsChangeHint nsStylePosition::CalcDifference(const nsStylePosition& aOther) cons
   if (mJustifyContent != aOther.mJustifyContent) {
     NS_UpdateHint(hint, nsChangeHint_NeedReflow);
   }
-#endif // MOZ_FLEXBOX
 
   if (mHeight != aOther.mHeight ||
       mMinHeight != aOther.mMinHeight ||
@@ -1189,7 +1218,8 @@ nsChangeHint nsStylePosition::CalcDifference(const nsStylePosition& aOther) cons
 /* static */ bool
 nsStylePosition::WidthCoordDependsOnContainer(const nsStyleCoord &aCoord)
 {
-  return aCoord.HasPercent() ||
+  return aCoord.GetUnit() == eStyleUnit_Auto ||
+         aCoord.HasPercent() ||
          (aCoord.GetUnit() == eStyleUnit_Enumerated &&
           (aCoord.GetIntValue() == NS_STYLE_WIDTH_FIT_CONTENT ||
            aCoord.GetIntValue() == NS_STYLE_WIDTH_AVAILABLE));
@@ -1991,11 +2021,11 @@ void nsTimingFunction::AssignFromKeyword(int32_t aTimingFunctionType)
                     "transition timing function constants not as expected");
 
   static const float timingFunctionValues[5][4] = {
-    { 0.25, 0.10, 0.25, 1.00 }, // ease
-    { 0.00, 0.00, 1.00, 1.00 }, // linear
-    { 0.42, 0.00, 1.00, 1.00 }, // ease-in
-    { 0.00, 0.00, 0.58, 1.00 }, // ease-out
-    { 0.42, 0.00, 0.58, 1.00 }  // ease-in-out
+    { 0.25f, 0.10f, 0.25f, 1.00f }, // ease
+    { 0.00f, 0.00f, 1.00f, 1.00f }, // linear
+    { 0.42f, 0.00f, 1.00f, 1.00f }, // ease-in
+    { 0.00f, 0.00f, 0.58f, 1.00f }, // ease-out
+    { 0.42f, 0.00f, 0.58f, 1.00f }  // ease-in-out
   };
 
   NS_ABORT_IF_FALSE(0 <= aTimingFunctionType && aTimingFunctionType < 5,
@@ -2291,12 +2321,21 @@ nsChangeHint nsStyleVisibility::CalcDifference(const nsStyleVisibility& aOther) 
 
   if (mDirection != aOther.mDirection) {
     NS_UpdateHint(hint, nsChangeHint_ReconstructFrame);
-  } else if (mVisible != aOther.mVisible) {
-    if ((NS_STYLE_VISIBILITY_COLLAPSE == mVisible) ||
-        (NS_STYLE_VISIBILITY_COLLAPSE == aOther.mVisible)) {
-      NS_UpdateHint(hint, NS_STYLE_HINT_REFLOW);
-    } else {
-      NS_UpdateHint(hint, NS_STYLE_HINT_VISUAL);
+  } else {
+    if (mVisible != aOther.mVisible) {
+      if ((NS_STYLE_VISIBILITY_COLLAPSE == mVisible) ||
+          (NS_STYLE_VISIBILITY_COLLAPSE == aOther.mVisible)) {
+        NS_UpdateHint(hint, NS_STYLE_HINT_REFLOW);
+      } else {
+        NS_UpdateHint(hint, NS_STYLE_HINT_VISUAL);
+      }
+    }
+    if (mPointerEvents != aOther.mPointerEvents) {
+      // nsSVGPathGeometryFrame's mRect depends on stroke _and_ on the value
+      // of pointer-events. See nsSVGPathGeometryFrame::ReflowSVG's use of
+      // GetHitTestFlags. (Only a reflow, no visual change.)
+      NS_UpdateHint(hint, nsChangeHint_NeedReflow);
+      NS_UpdateHint(hint, nsChangeHint_NeedDirtyReflow); // XXX remove me: bug 876085
     }
   }
   return hint;
@@ -2654,11 +2693,6 @@ nsChangeHint nsStyleTextReset::CalcDifference(const nsStyleTextReset& aOther) co
 {
   if (mVerticalAlign == aOther.mVerticalAlign
       && mUnicodeBidi == aOther.mUnicodeBidi) {
-    // Reflow for blink changes
-    if (mTextBlink != aOther.mTextBlink) {
-      return NS_STYLE_HINT_REFLOW;
-    }
-
     uint8_t lineStyle = GetDecorationStyle();
     uint8_t otherLineStyle = aOther.GetDecorationStyle();
     if (mTextDecorationLine != aOther.mTextDecorationLine ||

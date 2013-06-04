@@ -93,10 +93,11 @@
 #include "XPCQuickStubs.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/HTMLImageElement.h"
-#include "nsHTMLVideoElement.h"
+#include "mozilla/dom/HTMLVideoElement.h"
 #include "mozilla/dom/CanvasRenderingContext2DBinding.h"
+#include "mozilla/dom/TextMetrics.h"
 
-#ifdef USE_SKIA
+#ifdef USE_SKIA_GPU
 #include "GLContext.h"
 #include "GLContextProvider.h"
 #include "SurfaceTypes.h"
@@ -117,9 +118,6 @@ using namespace mozilla::ipc;
 using namespace mozilla::layers;
 
 namespace mgfx = mozilla::gfx;
-
-#define NS_TEXTMETRICSAZURE_PRIVATE_IID \
-  {0x9793f9e7, 0x9dc1, 0x4e9c, {0x81, 0xc8, 0xfc, 0xa7, 0x14, 0xf4, 0x30, 0x79}}
 
 namespace mozilla {
 namespace dom {
@@ -152,9 +150,10 @@ NS_MEMORY_REPORTER_IMPLEMENT(CanvasAzureMemory,
 class CanvasRadialGradient : public CanvasGradient
 {
 public:
-  CanvasRadialGradient(const Point &aBeginOrigin, Float aBeginRadius,
+  CanvasRadialGradient(CanvasRenderingContext2D* aContext,
+                       const Point &aBeginOrigin, Float aBeginRadius,
                        const Point &aEndOrigin, Float aEndRadius)
-    : CanvasGradient(RADIAL)
+    : CanvasGradient(aContext, RADIAL)
     , mCenter1(aBeginOrigin)
     , mCenter2(aEndOrigin)
     , mRadius1(aBeginRadius)
@@ -171,8 +170,9 @@ public:
 class CanvasLinearGradient : public CanvasGradient
 {
 public:
-  CanvasLinearGradient(const Point &aBegin, const Point &aEnd)
-    : CanvasGradient(LINEAR)
+  CanvasLinearGradient(CanvasRenderingContext2D* aContext,
+                       const Point &aBegin, const Point &aEnd)
+    : CanvasGradient(aContext, LINEAR)
     , mBegin(aBegin)
     , mEnd(aEnd)
   {
@@ -269,7 +269,7 @@ public:
  *
  * aBounds specifies the bounds of the drawing operation that will be
  * drawn to the target, it is given in device space! This function will
- * change aBounds to incorporate shadow bounds. If this is NULL the drawing
+ * change aBounds to incorporate shadow bounds. If this is nullptr the drawing
  * operation will be assumed to cover an infinite rect.
  */
 class AdjustedTarget
@@ -363,22 +363,25 @@ private:
   mgfx::Rect mTempRect;
 };
 
-NS_IMETHODIMP
-CanvasGradient::AddColorStop(float offset, const nsAString& colorstr)
+void
+CanvasGradient::AddColorStop(float offset, const nsAString& colorstr, ErrorResult& rv)
 {
-  if (!FloatValidate(offset) || offset < 0.0 || offset > 1.0) {
-    return NS_ERROR_DOM_INDEX_SIZE_ERR;
+  if (offset < 0.0 || offset > 1.0) {
+    rv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
+    return;
   }
 
   nsCSSValue value;
   nsCSSParser parser;
   if (!parser.ParseColorString(colorstr, nullptr, 0, value)) {
-    return NS_ERROR_DOM_SYNTAX_ERR;
+    rv.Throw(NS_ERROR_DOM_SYNTAX_ERR);
+    return;
   }
 
   nscolor color;
   if (!nsRuleNode::ComputeColor(value, nullptr, nullptr, color)) {
-    return NS_ERROR_DOM_SYNTAX_ERR;
+    rv.Throw(NS_ERROR_DOM_SYNTAX_ERR);
+    return;
   }
 
   mStops = nullptr;
@@ -389,67 +392,31 @@ CanvasGradient::AddColorStop(float offset, const nsAString& colorstr)
   newStop.color = Color::FromABGR(color);
 
   mRawStops.AppendElement(newStop);
-
-  return NS_OK;
 }
 
 NS_DEFINE_STATIC_IID_ACCESSOR(CanvasGradient, NS_CANVASGRADIENTAZURE_PRIVATE_IID)
 
-NS_IMPL_ADDREF(CanvasGradient)
-NS_IMPL_RELEASE(CanvasGradient)
+NS_IMPL_CYCLE_COLLECTING_ADDREF(CanvasGradient)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(CanvasGradient)
 
-NS_INTERFACE_MAP_BEGIN(CanvasGradient)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(CanvasGradient, mContext)
+
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(CanvasGradient)
+  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
   NS_INTERFACE_MAP_ENTRY(mozilla::dom::CanvasGradient)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMCanvasGradient)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(CanvasGradient)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
 NS_DEFINE_STATIC_IID_ACCESSOR(CanvasPattern, NS_CANVASPATTERNAZURE_PRIVATE_IID)
 
-NS_IMPL_ADDREF(CanvasPattern)
-NS_IMPL_RELEASE(CanvasPattern)
+NS_IMPL_CYCLE_COLLECTING_ADDREF(CanvasPattern)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(CanvasPattern)
 
-NS_INTERFACE_MAP_BEGIN(CanvasPattern)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(CanvasPattern, mContext)
+
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(CanvasPattern)
+  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
   NS_INTERFACE_MAP_ENTRY(mozilla::dom::CanvasPattern)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMCanvasPattern)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(CanvasPattern)
-  NS_INTERFACE_MAP_ENTRY(nsISupports)
-NS_INTERFACE_MAP_END
-
-/**
- ** TextMetrics
- **/
-class TextMetrics : public nsIDOMTextMetrics
-{
-public:
-  TextMetrics(float w) : width(w) { }
-
-  virtual ~TextMetrics() { }
-
-  NS_DECLARE_STATIC_IID_ACCESSOR(NS_TEXTMETRICSAZURE_PRIVATE_IID)
-
-  NS_IMETHOD GetWidth(float* w)
-  {
-    *w = width;
-    return NS_OK;
-  }
-
-  NS_DECL_ISUPPORTS
-
-private:
-  float width;
-};
-
-NS_DEFINE_STATIC_IID_ACCESSOR(TextMetrics, NS_TEXTMETRICSAZURE_PRIVATE_IID)
-
-NS_IMPL_ADDREF(TextMetrics)
-NS_IMPL_RELEASE(TextMetrics)
-
-NS_INTERFACE_MAP_BEGIN(TextMetrics)
-  NS_INTERFACE_MAP_ENTRY(mozilla::dom::TextMetrics)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMTextMetrics)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(TextMetrics)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
@@ -467,13 +434,18 @@ public:
     }
   }
 
-#ifdef USE_SKIA
+#ifdef USE_SKIA_GPU
   static void PreTransactionCallback(void* aData)
   {
     CanvasRenderingContext2DUserData* self =
       static_cast<CanvasRenderingContext2DUserData*>(aData);
     CanvasRenderingContext2D* context = self->mContext;
     if (self->mContext && context->mGLContext) {
+      if (self->mContext->mTarget != nullptr) {
+        // Since SkiaGL default to store drawing command until flush
+        // We will have to flush it before present.
+        self->mContext->mTarget->Flush();
+      }
       context->mGLContext->MakeCurrent();
       context->mGLContext->PublishFrame();
     }
@@ -504,7 +476,29 @@ private:
 NS_IMPL_CYCLE_COLLECTING_ADDREF(CanvasRenderingContext2D)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(CanvasRenderingContext2D)
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(CanvasRenderingContext2D, mCanvasElement)
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(CanvasRenderingContext2D)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mCanvasElement)
+  for (uint32_t i = 0; i < tmp->mStyleStack.Length(); i++) {
+    ImplCycleCollectionUnlink(tmp->mStyleStack[i].patternStyles[STYLE_STROKE]);
+    ImplCycleCollectionUnlink(tmp->mStyleStack[i].patternStyles[STYLE_FILL]);
+    ImplCycleCollectionUnlink(tmp->mStyleStack[i].gradientStyles[STYLE_STROKE]);
+    ImplCycleCollectionUnlink(tmp->mStyleStack[i].gradientStyles[STYLE_FILL]);
+  }
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(CanvasRenderingContext2D)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCanvasElement)
+  for (uint32_t i = 0; i < tmp->mStyleStack.Length(); i++) {
+    ImplCycleCollectionTraverse(cb, tmp->mStyleStack[i].patternStyles[STYLE_STROKE], "Stroke CanvasPattern");
+    ImplCycleCollectionTraverse(cb, tmp->mStyleStack[i].patternStyles[STYLE_FILL], "Fill CanvasPattern");
+    ImplCycleCollectionTraverse(cb, tmp->mStyleStack[i].gradientStyles[STYLE_STROKE], "Stroke CanvasGradient");
+    ImplCycleCollectionTraverse(cb, tmp->mStyleStack[i].gradientStyles[STYLE_FILL], "Fill CanvasGradient");
+  }
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+
+NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(CanvasRenderingContext2D)
 
 NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_BEGIN(CanvasRenderingContext2D)
  if (nsCCUncollectableMarker::sGeneration && tmp->IsBlack()) {
@@ -569,7 +563,7 @@ CanvasRenderingContext2D::~CanvasRenderingContext2D()
 }
 
 JSObject*
-CanvasRenderingContext2D::WrapObject(JSContext *cx, JSObject *scope)
+CanvasRenderingContext2D::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
 {
   return CanvasRenderingContext2DBinding::Wrap(cx, scope, this);
 }
@@ -799,13 +793,21 @@ CanvasRenderingContext2D::EnsureTarget()
     }
 
      if (layerManager) {
-#ifdef USE_SKIA
+#ifdef USE_SKIA_GPU
        if (gfxPlatform::GetPlatform()->UseAcceleratedSkiaCanvas()) {
+         SurfaceCaps caps = SurfaceCaps::ForRGBA();
+         caps.preserve = true;
+
          mGLContext = mozilla::gl::GLContextProvider::CreateOffscreen(gfxIntSize(size.width,
                                                                                  size.height),
-                                                                      SurfaceCaps::ForRGBA(),
+                                                                      caps,
                                                                       mozilla::gl::GLContext::ContextFlagsNone);
-         mTarget = gfxPlatform::GetPlatform()->CreateDrawTargetForFBO(0, mGLContext, size, format);
+
+         if (mGLContext) {
+           mTarget = gfxPlatform::GetPlatform()->CreateDrawTargetForFBO(0, mGLContext, size, format);
+         } else {
+           mTarget = layerManager->CreateDrawTarget(size, format);
+         }
        } else
 #endif
          mTarget = layerManager->CreateDrawTarget(size, format);
@@ -1148,7 +1150,7 @@ CanvasRenderingContext2D::SetTransform(double m11, double m12,
 JSObject*
 MatrixToJSObject(JSContext* cx, const Matrix& matrix, ErrorResult& error)
 {
-  jsval elts[] = {
+  JS::Value elts[] = {
     DOUBLE_TO_JSVAL(matrix._11), DOUBLE_TO_JSVAL(matrix._12),
     DOUBLE_TO_JSVAL(matrix._21), DOUBLE_TO_JSVAL(matrix._22),
     DOUBLE_TO_JSVAL(matrix._31), DOUBLE_TO_JSVAL(matrix._32)
@@ -1162,11 +1164,12 @@ MatrixToJSObject(JSContext* cx, const Matrix& matrix, ErrorResult& error)
   return obj;
 }
 
-bool
-ObjectToMatrix(JSContext* cx, JSObject& obj, Matrix& matrix, ErrorResult& error)
+static bool
+ObjectToMatrix(JSContext* cx, JS::Handle<JSObject*> obj, Matrix& matrix,
+               ErrorResult& error)
 {
   uint32_t length;
-  if (!JS_GetArrayLength(cx, &obj, &length) || length != 6) {
+  if (!JS_GetArrayLength(cx, obj, &length) || length != 6) {
     // Not an array-like thing or wrong size
     error.Throw(NS_ERROR_INVALID_ARG);
     return false;
@@ -1175,9 +1178,9 @@ ObjectToMatrix(JSContext* cx, JSObject& obj, Matrix& matrix, ErrorResult& error)
   Float* elts[] = { &matrix._11, &matrix._12, &matrix._21, &matrix._22,
                     &matrix._31, &matrix._32 };
   for (uint32_t i = 0; i < 6; ++i) {
-    jsval elt;
+    JS::Rooted<JS::Value> elt(cx);
     double d;
-    if (!JS_GetElement(cx, &obj, i, &elt)) {
+    if (!JS_GetElement(cx, obj, i, elt.address())) {
       error.Throw(NS_ERROR_FAILURE);
       return false;
     }
@@ -1196,7 +1199,7 @@ ObjectToMatrix(JSContext* cx, JSObject& obj, Matrix& matrix, ErrorResult& error)
 
 void
 CanvasRenderingContext2D::SetMozCurrentTransform(JSContext* cx,
-                                                 JSObject& currentTransform,
+                                                 JS::Handle<JSObject*> currentTransform,
                                                  ErrorResult& error)
 {
   EnsureTarget();
@@ -1220,7 +1223,7 @@ CanvasRenderingContext2D::GetMozCurrentTransform(JSContext* cx,
 
 void
 CanvasRenderingContext2D::SetMozCurrentTransformInverse(JSContext* cx,
-                                                        JSObject& currentTransform,
+                                                        JS::Handle<JSObject*> currentTransform,
                                                         ErrorResult& error)
 {
   EnsureTarget();
@@ -1262,7 +1265,7 @@ CanvasRenderingContext2D::GetMozCurrentTransformInverse(JSContext* cx,
 
 void
 CanvasRenderingContext2D::SetStyleFromJSValue(JSContext* cx,
-                                              JS::Value& value,
+                                              JS::Handle<JS::Value> value,
                                               Style whichStyle)
 {
   if (value.isString()) {
@@ -1277,9 +1280,10 @@ CanvasRenderingContext2D::SetStyleFromJSValue(JSContext* cx,
     nsCOMPtr<nsISupports> holder;
 
     CanvasGradient* gradient;
+    JS::Rooted<JS::Value> rootedVal(cx, value);
     nsresult rv = xpc_qsUnwrapArg<CanvasGradient>(cx, value, &gradient,
                                                   static_cast<nsISupports**>(getter_AddRefs(holder)),
-                                                  &value);
+                                                  rootedVal.address());
     if (NS_SUCCEEDED(rv)) {
       SetStyleFromGradient(gradient, whichStyle);
       return;
@@ -1288,7 +1292,7 @@ CanvasRenderingContext2D::SetStyleFromJSValue(JSContext* cx,
     CanvasPattern* pattern;
     rv = xpc_qsUnwrapArg<CanvasPattern>(cx, value, &pattern,
                                         static_cast<nsISupports**>(getter_AddRefs(holder)),
-                                        &value);
+                                        rootedVal.address());
     if (NS_SUCCEEDED(rv)) {
       SetStyleFromPattern(pattern, whichStyle);
       return;
@@ -1299,22 +1303,23 @@ CanvasRenderingContext2D::SetStyleFromJSValue(JSContext* cx,
 }
 
 static JS::Value
-WrapStyle(JSContext* cx, JSObject* obj,
+WrapStyle(JSContext* cx, JSObject* objArg,
           CanvasRenderingContext2D::CanvasMultiGetterType type,
           nsAString& str, nsISupports* supports, ErrorResult& error)
 {
-  JS::Value v;
+  JS::Rooted<JS::Value> v(cx);
   bool ok;
   switch (type) {
     case CanvasRenderingContext2D::CMG_STYLE_STRING:
     {
-      ok = xpc::StringToJsval(cx, str, &v);
+      ok = xpc::StringToJsval(cx, str, v.address());
       break;
     }
     case CanvasRenderingContext2D::CMG_STYLE_PATTERN:
     case CanvasRenderingContext2D::CMG_STYLE_GRADIENT:
     {
-      ok = dom::WrapObject(cx, obj, supports, &v);
+      JS::Rooted<JSObject*> obj(cx, objArg);
+      ok = dom::WrapObject(cx, obj, supports, v.address());
       break;
     }
     default:
@@ -1375,17 +1380,16 @@ CanvasRenderingContext2D::GetFillRule(nsAString& aString)
 //
 // gradients and patterns
 //
-already_AddRefed<nsIDOMCanvasGradient>
-CanvasRenderingContext2D::CreateLinearGradient(double x0, double y0, double x1, double y1,
-                                               ErrorResult& aError)
+already_AddRefed<CanvasGradient>
+CanvasRenderingContext2D::CreateLinearGradient(double x0, double y0, double x1, double y1)
 {
-  nsRefPtr<nsIDOMCanvasGradient> grad =
-    new CanvasLinearGradient(Point(x0, y0), Point(x1, y1));
+  nsRefPtr<CanvasGradient> grad =
+    new CanvasLinearGradient(this, Point(x0, y0), Point(x1, y1));
 
   return grad.forget();
 }
 
-already_AddRefed<nsIDOMCanvasGradient>
+already_AddRefed<CanvasGradient>
 CanvasRenderingContext2D::CreateRadialGradient(double x0, double y0, double r0,
                                                double x1, double y1, double r1,
                                                ErrorResult& aError)
@@ -1395,13 +1399,13 @@ CanvasRenderingContext2D::CreateRadialGradient(double x0, double y0, double r0,
     return nullptr;
   }
 
-  nsRefPtr<nsIDOMCanvasGradient> grad =
-    new CanvasRadialGradient(Point(x0, y0), r0, Point(x1, y1), r1);
+  nsRefPtr<CanvasGradient> grad =
+    new CanvasRadialGradient(this, Point(x0, y0), r0, Point(x1, y1), r1);
 
   return grad.forget();
 }
 
-already_AddRefed<nsIDOMCanvasPattern>
+already_AddRefed<CanvasPattern>
 CanvasRenderingContext2D::CreatePattern(const HTMLImageOrCanvasOrVideoElement& element,
                                         const nsAString& repeat,
                                         ErrorResult& error)
@@ -1419,18 +1423,18 @@ CanvasRenderingContext2D::CreatePattern(const HTMLImageOrCanvasOrVideoElement& e
     repeatMode = CanvasPattern::NOREPEAT;
   } else {
     error.Throw(NS_ERROR_DOM_SYNTAX_ERR);
-    return NULL;
+    return nullptr;
   }
 
   Element* htmlElement;
   if (element.IsHTMLCanvasElement()) {
-    HTMLCanvasElement* canvas = element.GetAsHTMLCanvasElement();
+    HTMLCanvasElement* canvas = &element.GetAsHTMLCanvasElement();
     htmlElement = canvas;
 
     nsIntSize size = canvas->GetSize();
     if (size.width == 0 || size.height == 0) {
       error.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
-      return NULL;
+      return nullptr;
     }
 
     // Special case for Canvas, which could be an Azure canvas!
@@ -1440,14 +1444,14 @@ CanvasRenderingContext2D::CreatePattern(const HTMLImageOrCanvasOrVideoElement& e
       RefPtr<SourceSurface> srcSurf = srcCanvas->GetSurfaceSnapshot();
 
       nsRefPtr<CanvasPattern> pat =
-        new CanvasPattern(srcSurf, repeatMode, htmlElement->NodePrincipal(), canvas->IsWriteOnly(), false);
+        new CanvasPattern(this, srcSurf, repeatMode, htmlElement->NodePrincipal(), canvas->IsWriteOnly(), false);
 
       return pat.forget();
     }
   } else if (element.IsHTMLImageElement()) {
     htmlElement = &element.GetAsHTMLImageElement();
   } else {
-    htmlElement = element.GetAsHTMLVideoElement();
+    htmlElement = &element.GetAsHTMLVideoElement();
   }
 
   // The canvas spec says that createPattern should use the first frame
@@ -1458,12 +1462,13 @@ CanvasRenderingContext2D::CreatePattern(const HTMLImageOrCanvasOrVideoElement& e
 
   if (!res.mSurface) {
     error.Throw(NS_ERROR_NOT_AVAILABLE);
-    return NULL;
+    return nullptr;
   }
 
   // Ignore nullptr cairo surfaces! See bug 666312.
   if (!res.mSurface->CairoSurface() || res.mSurface->CairoStatus()) {
-    return NULL;
+    error.Throw(NS_ERROR_NOT_AVAILABLE);
+    return nullptr;
   }
 
   EnsureTarget();
@@ -1471,7 +1476,7 @@ CanvasRenderingContext2D::CreatePattern(const HTMLImageOrCanvasOrVideoElement& e
     gfxPlatform::GetPlatform()->GetSourceSurfaceForSurface(mTarget, res.mSurface);
 
   nsRefPtr<CanvasPattern> pat =
-    new CanvasPattern(srcSurf, repeatMode, res.mPrincipal,
+    new CanvasPattern(this, srcSurf, repeatMode, res.mPrincipal,
                              res.mIsWriteOnly, res.mCORSUsed);
 
   return pat.forget();
@@ -1875,7 +1880,7 @@ void
 CanvasRenderingContext2D::EnsureUserSpacePath(const CanvasWindingRule& winding)
 {
   FillRule fillRule = CurrentState().fillRule;
-  if(winding == CanvasWindingRuleValues::Evenodd)
+  if(winding == CanvasWindingRule::Evenodd)
     fillRule = FILL_EVEN_ODD;
 
   if (!mPath && !mPathBuilder && !mDSPathBuilder) {
@@ -2245,7 +2250,7 @@ CanvasRenderingContext2D::StrokeText(const nsAString& text, double x,
   error = DrawOrMeasureText(text, x, y, maxWidth, TEXT_DRAW_OPERATION_STROKE, nullptr);
 }
 
-already_AddRefed<nsIDOMTextMetrics>
+TextMetrics*
 CanvasRenderingContext2D::MeasureText(const nsAString& rawText,
                                       ErrorResult& error)
 {
@@ -2253,18 +2258,16 @@ CanvasRenderingContext2D::MeasureText(const nsAString& rawText,
   Optional<double> maxWidth;
   error = DrawOrMeasureText(rawText, 0, 0, maxWidth, TEXT_DRAW_OPERATION_MEASURE, &width);
   if (error.Failed()) {
-    return NULL;
+    return nullptr;
   }
 
-  nsRefPtr<nsIDOMTextMetrics> textMetrics = new TextMetrics(width);
-
-  return textMetrics.forget();
+  return new TextMetrics(width);
 }
 
 /**
  * Used for nsBidiPresUtils::ProcessText
  */
-struct NS_STACK_CLASS CanvasBidiProcessor : public nsBidiPresUtils::BidiProcessor
+struct MOZ_STACK_CLASS CanvasBidiProcessor : public nsBidiPresUtils::BidiProcessor
 {
   typedef CanvasRenderingContext2D::ContextState ContextState;
 
@@ -2427,19 +2430,27 @@ struct NS_STACK_CLASS CanvasBidiProcessor : public nsBidiPresUtils::BidiProcesso
                        ForStyle(mCtx, CanvasRenderingContext2D::STYLE_FILL, mCtx->mTarget),
                      DrawOptions(mState->globalAlpha, mCtx->UsedOperation()));
       } else if (mOp == CanvasRenderingContext2D::TEXT_DRAW_OPERATION_STROKE) {
-        RefPtr<Path> path = scaledFont->GetPathForGlyphs(buffer, mCtx->mTarget);
-
+        // stroke glyphs one at a time to avoid poor CoreGraphics performance
+        // when stroking a path with a very large number of points
+        buffer.mGlyphs = &glyphBuf.front();
+        buffer.mNumGlyphs = 1;
         const ContextState& state = *mState;
-        AdjustedTarget(mCtx, &bounds)->
-          Stroke(path, CanvasGeneralPattern().
-                   ForStyle(mCtx, CanvasRenderingContext2D::STYLE_STROKE, mCtx->mTarget),
-                 StrokeOptions(state.lineWidth, state.lineJoin,
-                               state.lineCap, state.miterLimit,
-                               state.dash.Length(),
-                               state.dash.Elements(),
-                               state.dashOffset),
-                 DrawOptions(state.globalAlpha, mCtx->UsedOperation()));
+        AdjustedTarget target(mCtx, &bounds);
+        const StrokeOptions strokeOpts(state.lineWidth, state.lineJoin,
+                                       state.lineCap, state.miterLimit,
+                                       state.dash.Length(),
+                                       state.dash.Elements(),
+                                       state.dashOffset);
+        CanvasGeneralPattern cgp;
+        const Pattern& patForStyle
+          (cgp.ForStyle(mCtx, CanvasRenderingContext2D::STYLE_STROKE, mCtx->mTarget));
+        const DrawOptions drawOpts(state.globalAlpha, mCtx->UsedOperation());
 
+        for (unsigned i = glyphBuf.size(); i > 0; --i) {
+          RefPtr<Path> path = scaledFont->GetPathForGlyphs(buffer, mCtx->mTarget);
+          target->Stroke(path, patForStyle, strokeOpts, drawOpts);
+          buffer.mGlyphs++;
+        }
       }
     }
   }
@@ -2812,9 +2823,7 @@ CanvasRenderingContext2D::SetMozDash(JSContext* cx,
 JS::Value
 CanvasRenderingContext2D::GetMozDash(JSContext* cx, ErrorResult& error)
 {
-  JS::Value mozDash;
-  error = DashArrayToJSVal(CurrentState().dash, cx, &mozDash);
-  return mozDash;
+  return DashArrayToJSVal(CurrentState().dash, cx, error);
 }
 
 void
@@ -2906,7 +2915,7 @@ CanvasRenderingContext2D::DrawImage(const HTMLImageOrCanvasOrVideoElement& image
 
   EnsureTarget();
   if (image.IsHTMLCanvasElement()) {
-    HTMLCanvasElement* canvas = image.GetAsHTMLCanvasElement();
+    HTMLCanvasElement* canvas = &image.GetAsHTMLCanvasElement();
     element = canvas;
     nsIntSize size = canvas->GetSize();
     if (size.width == 0 || size.height == 0) {
@@ -2940,7 +2949,7 @@ CanvasRenderingContext2D::DrawImage(const HTMLImageOrCanvasOrVideoElement& image
       HTMLImageElement* img = &image.GetAsHTMLImageElement();
       element = img;
     } else {
-      nsHTMLVideoElement* video = image.GetAsHTMLVideoElement();
+      HTMLVideoElement* video = &image.GetAsHTMLVideoElement();
       element = video;
     }
 
@@ -3203,7 +3212,7 @@ CanvasRenderingContext2D::DrawWindow(nsIDOMWindow* window, double x,
   // save and restore it
   Matrix matrix = mTarget->GetTransform();
   nsRefPtr<gfxContext> thebes;
-  if (gfxPlatform::GetPlatform()->SupportsAzureContent()) {
+  if (gfxPlatform::GetPlatform()->SupportsAzureContentForDrawTarget(mTarget)) {
     thebes = new gfxContext(mTarget);
   } else {
     nsRefPtr<gfxASurface> drawSurf;
@@ -3320,13 +3329,13 @@ CanvasRenderingContext2D::GetImageData(JSContext* aCx, double aSx,
   EnsureTarget();
   if (!IsTargetValid()) {
     error.Throw(NS_ERROR_FAILURE);
-    return NULL;
+    return nullptr;
   }
 
   if (!mCanvasElement && !mDocShell) {
     NS_ERROR("No canvas element and no docshell in GetImageData!!!");
     error.Throw(NS_ERROR_DOM_SECURITY_ERR);
-    return NULL;
+    return nullptr;
   }
 
   // Check only if we have a canvas element; if we were created with a docshell,
@@ -3336,18 +3345,18 @@ CanvasRenderingContext2D::GetImageData(JSContext* aCx, double aSx,
   {
     // XXX ERRMSG we need to report an error to developers here! (bug 329026)
     error.Throw(NS_ERROR_DOM_SECURITY_ERR);
-    return NULL;
+    return nullptr;
   }
 
   if (!NS_finite(aSx) || !NS_finite(aSy) ||
       !NS_finite(aSw) || !NS_finite(aSh)) {
     error.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
-    return NULL;
+    return nullptr;
   }
 
   if (!aSw || !aSh) {
     error.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
-    return NULL;
+    return nullptr;
   }
 
   int32_t x = JS_DoubleToInt32(aSx);
@@ -3378,10 +3387,10 @@ CanvasRenderingContext2D::GetImageData(JSContext* aCx, double aSx,
     h = 1;
   }
 
-  JSObject* array;
-  error = GetImageDataArray(aCx, x, y, w, h, &array);
+  JS::Rooted<JSObject*> array(aCx);
+  error = GetImageDataArray(aCx, x, y, w, h, array.address());
   if (error.Failed()) {
-    return NULL;
+    return nullptr;
   }
   MOZ_ASSERT(array);
 
@@ -3425,7 +3434,7 @@ CanvasRenderingContext2D::GetImageDataArray(JSContext* aCx,
     }
   }
 
-  JSObject* darray = JS_NewUint8ClampedArray(aCx, len.value());
+  JS::Rooted<JSObject*> darray(aCx, JS_NewUint8ClampedArray(aCx, len.value()));
   if (!darray) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
@@ -3689,14 +3698,14 @@ CreateImageData(JSContext* cx, CanvasRenderingContext2D* context,
   CheckedInt<uint32_t> len = CheckedInt<uint32_t>(w) * h * 4;
   if (!len.isValid()) {
     error.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
-    return NULL;
+    return nullptr;
   }
 
   // Create the fast typed array; it's initialized to 0 by default.
   JSObject* darray = Uint8ClampedArray::Create(cx, context, len.value());
   if (!darray) {
     error.Throw(NS_ERROR_OUT_OF_MEMORY);
-    return NULL;
+    return nullptr;
   }
 
   nsRefPtr<mozilla::dom::ImageData> imageData =
@@ -3710,7 +3719,7 @@ CanvasRenderingContext2D::CreateImageData(JSContext* cx, double sw,
 {
   if (!sw || !sh) {
     error.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
-    return NULL;
+    return nullptr;
   }
 
   int32_t wi = JS_DoubleToInt32(sw);
@@ -3755,8 +3764,8 @@ CanvasRenderingContext2D::GetCanvasLayer(nsDisplayListBuilder* aBuilder,
       static_cast<CanvasRenderingContext2DUserData*>(
         aOldLayer->GetUserData(&g2DContextLayerUserData));
     if (userData && userData->IsForContext(this)) {
-      NS_ADDREF(aOldLayer);
-      return aOldLayer;
+      nsRefPtr<CanvasLayer> ret = aOldLayer;
+      return ret.forget();
     }
   }
 
@@ -3786,7 +3795,7 @@ CanvasRenderingContext2D::GetCanvasLayer(nsDisplayListBuilder* aBuilder,
   canvasLayer->SetUserData(&g2DContextLayerUserData, userData);
 
   CanvasLayer::Data data;
-#ifdef USE_SKIA
+#ifdef USE_SKIA_GPU
   if (mGLContext) {
     canvasLayer->SetPreTransactionCallback(
             CanvasRenderingContext2DUserData::PreTransactionCallback, userData);
@@ -3829,8 +3838,5 @@ CanvasRenderingContext2D::ShouldForceInactiveLayer(LayerManager *aManager)
 }
 }
 
-DOMCI_DATA(TextMetrics, mozilla::dom::TextMetrics)
-DOMCI_DATA(CanvasGradient, mozilla::dom::CanvasGradient)
-DOMCI_DATA(CanvasPattern, mozilla::dom::CanvasPattern)
 DOMCI_DATA(CanvasRenderingContext2D, mozilla::dom::CanvasRenderingContext2D)
 

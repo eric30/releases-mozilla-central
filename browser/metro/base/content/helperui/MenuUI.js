@@ -15,10 +15,11 @@ var AutofillMenuUI = {
   get _commands() { return this._popup.childNodes[0]; },
 
   get _menuPopup() {
-    if (!this.__menuPopup)
+    if (!this.__menuPopup) {
       this.__menuPopup = new MenuPopup(this._panel, this._popup);
       this.__menuPopup._wantTypeBehind = true;
-
+      this.__menuPopup.controller = this;
+    }
     return this.__menuPopup;
   },
 
@@ -36,15 +37,15 @@ var AutofillMenuUI = {
   },
 
   _positionOptions: function _positionOptions() {
-    let options = {
-      forcePosition: true
+    return {
+      bottomAligned: false,
+      leftAligned: true,
+      xPos: this._anchorRect.x,
+      yPos: this._anchorRect.y + this._anchorRect.height,
+      maxWidth: this._anchorRect.width,
+      maxHeight: 350,
+      source: Ci.nsIDOMMouseEvent.MOZ_SOURCE_TOUCH
     };
-    options.xPos = this._anchorRect.x;
-    options.yPos = this._anchorRect.y + this._anchorRect.height;
-    options.bottomAligned = false;
-    options.leftAligned = true;
-    options.source = Ci.nsIDOMMouseEvent.MOZ_SOURCE_TOUCH;
-    return options;
   },
 
   show: function show(aAnchorRect, aSuggestionsList) {
@@ -76,7 +77,6 @@ var ContextMenuUI = {
   _popupState: null,
   __menuPopup: null,
   _defaultPositionOptions: {
-    forcePosition: true,
     bottomAligned: true,
     rightAligned: false,
     centerHorizontally: true,
@@ -88,9 +88,10 @@ var ContextMenuUI = {
   get _commands() { return this._popup.childNodes[0]; },
 
   get _menuPopup() {
-    if (!this.__menuPopup)
+    if (!this.__menuPopup) {
       this.__menuPopup = new MenuPopup(this._panel, this._popup);
-
+      this.__menuPopup.controller = this;
+    }
     return this.__menuPopup;
   },
 
@@ -107,7 +108,7 @@ var ContextMenuUI = {
   },
 
   /*
-   * showContextMenu - display a context sensitive menu based 
+   * showContextMenu - display a context sensitive menu based
    * on the data provided in a json data structure.
    *
    * @param aMessage data structure containing information about
@@ -168,7 +169,7 @@ var ContextMenuUI = {
         continue;
 
       for (let i = 0; i < types.length; i++) {
-        // If one of the item's types has '!' before it, treat it as an exclusion rule. 
+        // If one of the item's types has '!' before it, treat it as an exclusion rule.
         if (types[i].charAt(0) == '!' && contentTypes.indexOf(types[i].substring(1)) != -1) {
           break;
         }
@@ -189,9 +190,16 @@ var ContextMenuUI = {
       return false;
     }
 
+    let coords = { x: aMessage.json.xPos, y: aMessage.json.yPos };
+
+    // chrome calls don't need to be translated and as such
+    // don't provide target.
+    if (aMessage.target && aMessage.target.localName === "browser") {
+      coords = aMessage.target.msgBrowserToClient(aMessage, true);
+    }
     this._menuPopup.show(Util.extend({}, this._defaultPositionOptions, {
-      xPos: aMessage.json.xPos,
-      yPos: aMessage.json.yPos,
+      xPos: coords.x,
+      yPos: coords.y,
       source: aMessage.json.source
     }));
     return true;
@@ -216,9 +224,10 @@ var MenuControlUI = {
   get _commands() { return this._popup.childNodes[0]; },
 
   get _menuPopup() {
-    if (!this.__menuPopup)
+    if (!this.__menuPopup) {
       this.__menuPopup = new MenuPopup(this._panel, this._popup);
-
+      this.__menuPopup.controller = this;
+    }
     return this.__menuPopup;
   },
 
@@ -239,9 +248,7 @@ var MenuControlUI = {
     let position = this._currentControl.menupopup.position || "after_start";
     let rect = this._currentControl.getBoundingClientRect();
 
-    let options = {
-      forcePosition: true
-    };
+    let options = {};
 
     // TODO: Detect text direction and flip for RTL.
 
@@ -331,8 +338,9 @@ function MenuPopup(aPanel, aPopup) {
   this._panel = aPanel;
   this._popup = aPopup;
   this._wantTypeBehind = false;
-}
 
+  window.addEventListener('MozAppbarShowing', this, false);
+}
 MenuPopup.prototype = {
   get _visible() { return !this._panel.hidden; },
   get _commands() { return this._popup.childNodes[0]; },
@@ -343,6 +351,7 @@ MenuPopup.prototype = {
 
     window.addEventListener("keypress", this, true);
     window.addEventListener("mousedown", this, true);
+    Elements.stack.addEventListener("PopupChanged", this, false);
 
     this._panel.hidden = false;
     this._position(aPositionOptions || {});
@@ -357,7 +366,7 @@ MenuPopup.prototype = {
       document.dispatchEvent(event);
     });
 
-    let popupFrom = (aPositionOptions.forcePosition && !aPositionOptions.bottomAligned) ? "above" : "below";
+    let popupFrom = !aPositionOptions.bottomAligned ? "above" : "below";
     this._panel.setAttribute("showingfrom", popupFrom);
 
     // Ensure the panel actually gets shifted before getting animated
@@ -372,18 +381,23 @@ MenuPopup.prototype = {
 
     window.removeEventListener("keypress", this, true);
     window.removeEventListener("mousedown", this, true);
+    Elements.stack.removeEventListener("PopupChanged", this, false);
 
     let self = this;
     this._panel.addEventListener("transitionend", function () {
       self._panel.removeEventListener("transitionend", arguments.callee);
+      self._panel.removeAttribute("hiding");
       self._panel.hidden = true;
-      self._popupState = null;
+      self._popup.style.maxWidth = "none";
+      self._popup.style.maxHeight = "none";
+
       let event = document.createEvent("Events");
       event.initEvent("popuphidden", true, false);
       document.dispatchEvent(event);
     });
 
-    this._panel.removeAttribute("showing");
+    this._panel.setAttribute("hiding", "true");
+    setTimeout(()=>this._panel.removeAttribute("showing"), 0);
   },
 
   _position: function _position(aPositionOptions) {
@@ -391,90 +405,67 @@ MenuPopup.prototype = {
     let aY = aPositionOptions.yPos;
     let aSource = aPositionOptions.source;
 
+    // Set these first so they are set when we do misc. calculations below.
+    if (aPositionOptions.maxWidth) {
+      this._popup.style.maxWidth = aPositionOptions.maxWidth + "px";
+    }
+    if (aPositionOptions.maxHeight) {
+      this._popup.style.maxHeight = aPositionOptions.maxHeight + "px";
+    }
+
     let width = this._popup.boxObject.width;
     let height = this._popup.boxObject.height;
     let halfWidth = width / 2;
-    let halfHeight = height / 2;
     let screenWidth = ContentAreaObserver.width;
     let screenHeight = ContentAreaObserver.height;
 
-    if (aPositionOptions.forcePosition) {
-      if (aPositionOptions.rightAligned)
-        aX -= width;
-
-      if (aPositionOptions.bottomAligned)
-        aY -= height;
-
-      if (aPositionOptions.centerHorizontally)
-        aX -= halfWidth;
-    } else {
-      let leftHand = MetroUtils.handPreference == MetroUtils.handPreferenceLeft;
-
-      // Add padding on the side of the menu per the user's hand preference
-      if (aSource && aSource == Ci.nsIDOMMouseEvent.MOZ_SOURCE_TOUCH) {
-        if (leftHand) {
-          this._commands.setAttribute("left-hand", true);
-          this._commands.removeAttribute("right-hand");
-        } else {
-          this._commands.setAttribute("right-hand", true);
-          this._commands.removeAttribute("left-hand");
-        }
-      }
-
-      let hLeft = (aX - halfWidth - width - kPositionPadding) > kPositionPadding;
-      let hRight = (aX + width + kPositionPadding) < screenWidth;
-      let hCenter = (aX - halfWidth - kPositionPadding) > kPositionPadding;
-
-      let vTop = (aY - height - kPositionPadding) > kPositionPadding;
-      let vCenter = (aY - halfHeight - kPositionPadding) > kPositionPadding &&
-                    aY + halfHeight < screenHeight;
-      let vBottom = (aY + height + kPositionPadding) < screenHeight;
-
-      if (leftHand && hLeft && vCenter) {
-        dump('leftHand && hLeft && vCenter\n');
-        aX -= (width + halfWidth);
-        aY -= halfHeight; 
-      } else if (!leftHand && hRight && vCenter) {
-        dump('!leftHand && hRight && vCenter\n');
-        aX += kPositionPadding;
-        aY -= halfHeight; 
-      } else if (vBottom && hCenter) {
-        dump('vBottom && hCenter\n');
-        aX -= halfWidth;
-      } else if (vTop && hCenter) {
-        dump('vTop && hCenter\n');
-        aX -= halfWidth;
-        aY -= height;
-      } else if (hCenter && vCenter) {
-        dump('hCenter && vCenter\n');
-        aX -= halfWidth;
-        aY -= halfHeight;
-      } else {
-        dump('None, left hand: ' + leftHand + '!\n');
-      }
+    // Add padding on the side of the menu per the user's hand preference
+    let leftHand = MetroUtils.handPreference == MetroUtils.handPreferenceLeft;
+    if (aSource && aSource == Ci.nsIDOMMouseEvent.MOZ_SOURCE_TOUCH) {
+      this._commands.setAttribute("left-hand", leftHand);
     }
 
-    if (aX < 0) {
-      aX = 0;
+    if (aPositionOptions.rightAligned)
+      aX -= width;
+
+    if (aPositionOptions.bottomAligned)
+      aY -= height;
+
+    if (aPositionOptions.centerHorizontally)
+      aX -= halfWidth;
+
+    // Always leave some padding.
+    if (aX < kPositionPadding) {
+      aX = kPositionPadding;
     } else if (aX + width + kPositionPadding > screenWidth){
-      aX = screenWidth - width - kPositionPadding;
+      // Don't let the popup overflow to the right.
+      aX = Math.max(screenWidth - width - kPositionPadding, kPositionPadding);
     }
 
-    if (aY < 0 && aPositionOptions.moveBelowToFit) {
+    if (aY < kPositionPadding  && aPositionOptions.moveBelowToFit) {
       // show context menu below when it doesn't fit.
       aY = aPositionOptions.yPos;
-    } else if (aY < 0) {
-      aY = 0;
+    }
+
+    if (aY < kPositionPadding) {
+      aY = kPositionPadding;
+    } else if (aY + height + kPositionPadding > screenHeight){
+      aY = Math.max(screenHeight - height - kPositionPadding, kPositionPadding);
     }
 
     this._panel.left = aX;
     this._panel.top = aY;
 
-    let excessY = (aY + height + kPositionPadding - screenHeight);
-    this._popup.style.maxHeight = (excessY > 0) ? (height - excessY) + "px" : "none";
+    if (!aPositionOptions.maxHeight) {
+      // Make sure it fits in the window.
+      let popupHeight = Math.min(aY + height + kPositionPadding, screenHeight - aY - kPositionPadding);
+      this._popup.style.maxHeight = popupHeight + "px";
+    }
 
-    let excessX = (aX + width + kPositionPadding - screenWidth);
-    this._popup.style.maxWidth = (excessX > 0) ? (width - excessX) + "px" : "none";
+    if (!aPositionOptions.maxWidth) {
+      let popupWidth = Math.min(aX + width + kPositionPadding, screenWidth - aX - kPositionPadding);
+      this._popup.style.maxWidth = popupWidth + "px";
+    }
   },
 
   handleEvent: function handleEvent(aEvent) {
@@ -491,6 +482,18 @@ MenuPopup.prototype = {
       case "mousedown":
         if (!this._popup.contains(aEvent.target)) {
           aEvent.stopPropagation();
+          this.hide();
+        }
+        break;
+      case "PopupChanged":
+        if (aEvent.detail) {
+          this.hide();
+        }
+        break;
+      case "MozAppbarShowing":
+        if (this.controller && this.controller.hide) {
+          this.controller.hide()
+        } else {
           this.hide();
         }
         break;

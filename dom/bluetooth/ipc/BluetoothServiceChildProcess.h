@@ -52,6 +52,10 @@ public:
                                     MOZ_OVERRIDE;
 
   virtual nsresult
+  GetConnectedDevicePropertiesInternal(uint16_t aProfileId,
+                                       BluetoothReplyRunnable* aRunnable)
+                                       MOZ_OVERRIDE;
+  virtual nsresult
   StopDiscoveryInternal(BluetoothReplyRunnable* aRunnable) MOZ_OVERRIDE;
 
   virtual nsresult
@@ -83,20 +87,13 @@ public:
                mozilla::ipc::UnixSocketConsumer* aConsumer) MOZ_OVERRIDE;
 
   virtual nsresult
-  GetSocketViaService(const nsAString& aObjectPath,
-                      const nsAString& aService,
-                      BluetoothSocketType aType,
-                      bool aAuth,
-                      bool aEncrypt,
-                      mozilla::ipc::UnixSocketConsumer* aConsumer,
-                      BluetoothReplyRunnable* aRunnable) MOZ_OVERRIDE;
+  GetServiceChannel(const nsAString& aDeviceAddress,
+                    const nsAString& aServiceUuid,
+                    BluetoothProfileManagerBase* aManager) MOZ_OVERRIDE;
 
-  virtual nsresult
-  ListenSocketViaService(int aChannel,
-                         BluetoothSocketType aType,
-                         bool aAuth,
-                         bool aEncrypt,
-                         mozilla::ipc::UnixSocketConsumer* aConsumer) MOZ_OVERRIDE;
+  virtual bool
+  UpdateSdpRecords(const nsAString& aDeviceAddress,
+                   BluetoothProfileManagerBase* aManager) MOZ_OVERRIDE;
 
   virtual bool
   SetPinCodeInternal(const nsAString& aDeviceAddress,
@@ -145,6 +142,16 @@ public:
   ConfirmReceivingFile(const nsAString& aDeviceAddress,
                        bool aConfirm,
                        BluetoothReplyRunnable* aRunnable) MOZ_OVERRIDE;
+
+  virtual void
+  ConnectSco(BluetoothReplyRunnable* aRunnable) MOZ_OVERRIDE;
+
+  virtual void
+  DisconnectSco(BluetoothReplyRunnable* aRunnable) MOZ_OVERRIDE;
+
+  virtual void
+  IsScoConnected(BluetoothReplyRunnable* aRunnable) MOZ_OVERRIDE;
+
 protected:
   BluetoothServiceChildProcess();
   virtual ~BluetoothServiceChildProcess();
@@ -170,6 +177,10 @@ private:
   virtual nsresult
   StopInternal() MOZ_OVERRIDE;
 
+  // This method should never be called.
+  virtual bool
+  IsEnabledInternal() MOZ_OVERRIDE;
+
   // Should never be called from the child
   virtual nsresult
   GetDevicePropertiesInternal(const BluetoothSignal& aSignal) MOZ_OVERRIDE;
@@ -177,6 +188,11 @@ private:
   // This method should never be called from the child.
   virtual nsresult
   PrepareAdapterInternal() MOZ_OVERRIDE;
+
+  bool
+  IsSignalRegistered(const nsAString& aNodeName) {
+    return !!mBluetoothSignalObserverTable.Get(aNodeName);
+  }
 };
 
 END_BLUETOOTH_NAMESPACE

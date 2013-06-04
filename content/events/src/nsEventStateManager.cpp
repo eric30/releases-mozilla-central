@@ -33,7 +33,6 @@
 #include "nsFrameSelection.h"
 #include "nsPIDOMWindow.h"
 #include "nsPIWindowRoot.h"
-#include "nsIEnumerator.h"
 #include "nsIWebNavigation.h"
 #include "nsIContentViewer.h"
 #include <algorithm>
@@ -55,7 +54,6 @@
 #include "nsIMarkupDocumentViewer.h"
 #include "nsIDOMWheelEvent.h"
 #include "nsIDOMDragEvent.h"
-#include "nsIDOMEventTarget.h"
 #include "nsIDOMUIEvent.h"
 #include "nsDOMDragEvent.h"
 #include "nsIDOMNSEditableElement.h"
@@ -95,7 +93,7 @@
 
 #include "mozilla/Preferences.h"
 #include "mozilla/LookAndFeel.h"
-#include "sampler.h"
+#include "GeckoProfiler.h"
 
 #include "nsIDOMClientRect.h"
 
@@ -266,13 +264,7 @@ static nsIDocument *
 GetDocumentFromWindow(nsIDOMWindow *aWindow)
 {
   nsCOMPtr<nsPIDOMWindow> win = do_QueryInterface(aWindow);
-  nsCOMPtr<nsIDocument> doc;
-
-  if (win) {
-    doc = do_QueryInterface(win->GetExtantDocument());
-  }
-
-  return doc;
+  return win ? win->GetExtantDoc() : nullptr;
 }
 
 static int32_t
@@ -862,45 +854,24 @@ NS_INTERFACE_MAP_END
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsEventStateManager)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsEventStateManager)
 
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsEventStateManager)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCurrentTargetContent);
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mLastMouseOverElement);
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mGestureDownContent);
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mGestureDownFrameOwner);
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mLastLeftMouseDownContent);
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mLastLeftMouseDownContentParent);
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mLastMiddleMouseDownContent);
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mLastMiddleMouseDownContentParent);
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mLastRightMouseDownContent);
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mLastRightMouseDownContentParent);
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mActiveContent);
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mHoverContent);
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mURLTargetContent);
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mFirstMouseOverEventElement);
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mFirstMouseOutEventElement);
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDocument);
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAccessKeys);
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
-
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsEventStateManager)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mCurrentTargetContent);
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mLastMouseOverElement);
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mGestureDownContent);
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mGestureDownFrameOwner);
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mLastLeftMouseDownContent);
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mLastLeftMouseDownContentParent);
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mLastMiddleMouseDownContent);
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mLastMiddleMouseDownContentParent);
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mLastRightMouseDownContent);
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mLastRightMouseDownContentParent);
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mActiveContent);
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mHoverContent);
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mURLTargetContent);
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mFirstMouseOverEventElement);
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mFirstMouseOutEventElement);
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mDocument);
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mAccessKeys);
-NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+NS_IMPL_CYCLE_COLLECTION_17(nsEventStateManager,
+                            mCurrentTargetContent,
+                            mLastMouseOverElement,
+                            mGestureDownContent,
+                            mGestureDownFrameOwner,
+                            mLastLeftMouseDownContent,
+                            mLastLeftMouseDownContentParent,
+                            mLastMiddleMouseDownContent,
+                            mLastMiddleMouseDownContentParent,
+                            mLastRightMouseDownContent,
+                            mLastRightMouseDownContentParent,
+                            mActiveContent,
+                            mHoverContent,
+                            mURLTargetContent,
+                            mFirstMouseOverEventElement,
+                            mFirstMouseOutEventElement,
+                            mDocument,
+                            mAccessKeys)
 
 nsresult
 nsEventStateManager::PreHandleEvent(nsPresContext* aPresContext,
@@ -1554,29 +1525,32 @@ nsEventStateManager::IsRemoteTarget(nsIContent* target) {
   return false;
 }
 
-/*static*/ void
-nsEventStateManager::MapEventCoordinatesForChildProcess(nsFrameLoader* aFrameLoader,
-                                                        nsEvent* aEvent)
+/*static*/ nsIntPoint
+nsEventStateManager::GetChildProcessOffset(nsFrameLoader* aFrameLoader,
+                                           const nsEvent& aEvent)
 {
   // The "toplevel widget" in child processes is always at position
   // 0,0.  Map the event coordinates to match that.
   nsIFrame* targetFrame = aFrameLoader->GetPrimaryFrameOfOwningContent();
   if (!targetFrame) {
-    return;
+    return nsIntPoint();
   }
   nsPresContext* presContext = targetFrame->PresContext();
 
+  // Find out how far we're offset from the nearest widget.
+  nsPoint pt = nsLayoutUtils::GetEventCoordinatesRelativeTo(&aEvent,
+                                                            targetFrame);
+  return pt.ToNearestPixels(presContext->AppUnitsPerDevPixel());
+}
+
+/*static*/ void
+nsEventStateManager::MapEventCoordinatesForChildProcess(
+  const nsIntPoint& aOffset, nsEvent* aEvent)
+{
   if (aEvent->eventStructType != NS_TOUCH_EVENT) {
-    nsPoint pt = nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent,
-                                                              targetFrame);
-    aEvent->refPoint = pt.ToNearestPixels(presContext->AppUnitsPerDevPixel());
+    aEvent->refPoint = aOffset;
   } else {
     aEvent->refPoint = nsIntPoint();
-    // Find out how far we're offset from the nearest widget.
-    nsPoint offset =
-      nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent, targetFrame);
-    nsIntPoint intOffset =
-      offset.ToNearestPixels(presContext->AppUnitsPerDevPixel());
     nsTouchEvent* touchEvent = static_cast<nsTouchEvent*>(aEvent);
     // Then offset all the touch points by that distance, to put them
     // in the space where top-left is 0,0.
@@ -1584,10 +1558,18 @@ nsEventStateManager::MapEventCoordinatesForChildProcess(nsFrameLoader* aFrameLoa
     for (uint32_t i = 0; i < touches.Length(); ++i) {
       nsIDOMTouch* touch = touches[i];
       if (touch) {
-        touch->mRefPoint += intOffset;
+        touch->mRefPoint += aOffset;
       }
     }
   }
+}
+
+/*static*/ void
+nsEventStateManager::MapEventCoordinatesForChildProcess(nsFrameLoader* aFrameLoader,
+                                                        nsEvent* aEvent)
+{
+  nsIntPoint offset = GetChildProcessOffset(aFrameLoader, *aEvent);
+  MapEventCoordinatesForChildProcess(offset, aEvent);
 }
 
 bool
@@ -1666,8 +1648,7 @@ nsEventStateManager::HandleCrossProcessEvent(nsEvent *aEvent,
       if (!touch || !touch->mChanged) {
         continue;
       }
-      nsCOMPtr<nsIDOMEventTarget> targetPtr;
-      touch->GetTarget(getter_AddRefs(targetPtr));
+      nsCOMPtr<EventTarget> targetPtr = touch->GetTarget();
       if (!targetPtr) {
         continue;
       }
@@ -2691,6 +2672,12 @@ nsEventStateManager::ComputeScrollTarget(nsIFrame* aTargetFrame,
       nsIScrollableFrame* frameToScroll =
         lastScrollFrame->GetScrollTargetFrame();
       if (frameToScroll) {
+        nsIFrame* activeRootFrame = nsLayoutUtils::GetActiveScrolledRootFor(
+                                      lastScrollFrame, nullptr);
+        if (!nsLayoutUtils::GetCrossDocParentFrame(activeRootFrame)) {
+          // Record the fact that the scroll occurred on the top-level page.
+          aEvent->viewPortIsScrollTargetParent = true;
+        }
         return frameToScroll;
       }
     }
@@ -2756,7 +2743,14 @@ nsEventStateManager::ComputeScrollTarget(nsIFrame* aTargetFrame,
       aTargetFrame->PresContext()->FrameManager()->GetRootFrame());
   aOptions =
     static_cast<ComputeScrollTargetOptions>(aOptions & ~START_FROM_PARENT);
-  return newFrame ? ComputeScrollTarget(newFrame, aEvent, aOptions) : nullptr;
+  if (newFrame) {
+    return ComputeScrollTarget(newFrame, aEvent, aOptions);
+  }
+
+  // Record the fact that the scroll occurred past the bounds of the top-level
+  // page.
+  aEvent->viewPortIsScrollTargetParent = true;
+  return nullptr;
 }
 
 nsSize
@@ -3267,7 +3261,7 @@ nsEventStateManager::PostHandleEvent(nsPresContext* aPresContext,
             currentWindow->GetTop(getter_AddRefs(currentTop));
             mDocument->GetWindow()->GetTop(getter_AddRefs(newTop));
             nsCOMPtr<nsPIDOMWindow> win = do_QueryInterface(currentWindow);
-            nsCOMPtr<nsIDocument> currentDoc = do_QueryInterface(win->GetExtantDocument());
+            nsCOMPtr<nsIDocument> currentDoc = win->GetExtantDoc();
             if (nsContentUtils::IsChromeDoc(currentDoc) ||
                 (currentTop && newTop && currentTop != newTop)) {
               fm->SetFocusedWindow(mDocument->GetWindow());
@@ -3787,10 +3781,10 @@ nsEventStateManager::SetCursor(int32_t aCursor, imgIContainer* aContainer,
   case NS_STYLE_CURSOR_SPINNING:
     c = eCursor_spinning;
     break;
-  case NS_STYLE_CURSOR_MOZ_ZOOM_IN:
+  case NS_STYLE_CURSOR_ZOOM_IN:
     c = eCursor_zoom_in;
     break;
-  case NS_STYLE_CURSOR_MOZ_ZOOM_OUT:
+  case NS_STYLE_CURSOR_ZOOM_OUT:
     c = eCursor_zoom_out;
     break;
   case NS_STYLE_CURSOR_NOT_ALLOWED:
@@ -3876,7 +3870,7 @@ nsEventStateManager::SetCursor(int32_t aCursor, imgIContainer* aContainer,
   return NS_OK;
 }
 
-class NS_STACK_CLASS nsESMEventCB : public nsDispatchingCallback
+class MOZ_STACK_CLASS nsESMEventCB : public nsDispatchingCallback
 {
 public:
   nsESMEventCB(nsIContent* aTarget) : mTarget(aTarget) {}
@@ -3932,7 +3926,7 @@ nsEventStateManager::DispatchMouseEvent(nsGUIEvent* aEvent, uint32_t aMessage,
     return mPresContext->GetPrimaryFrameFor(content);
   }
 
-  SAMPLE_LABEL("Input", "DispatchMouseEvent");
+  PROFILER_LABEL("Input", "DispatchMouseEvent");
   nsEventStatus status = nsEventStatus_eIgnore;
   nsMouseEvent event(aEvent->mFlags.mIsTrusted, aMessage, aEvent->widget,
                      nsMouseEvent::eReal);
@@ -4572,7 +4566,9 @@ nsEventStateManager::CheckForAndDispatchClick(nsPresContext* aPresContext,
     nsCOMPtr<nsIPresShell> presShell = mPresContext->GetPresShell();
     if (presShell) {
       nsCOMPtr<nsIContent> mouseContent = GetEventTargetContent(aEvent);
-
+      if (!mouseContent && !mCurrentTarget) {
+        return NS_OK;
+      }
       ret = presShell->HandleEventWithTarget(&event, mCurrentTarget,
                                              mouseContent, aStatus);
       if (NS_SUCCEEDED(ret) && aEvent->clickCount == 2) {
@@ -4631,20 +4627,20 @@ nsEventStateManager::GetEventTargetContent(nsEvent* aEvent)
     return content.forget();
   }
 
-  nsIContent *content = nullptr;
+  nsCOMPtr<nsIContent> content;
 
   nsIPresShell *presShell = mPresContext->GetPresShell();
   if (presShell) {
-    content = presShell->GetEventTargetContent(aEvent).get();
+    content = presShell->GetEventTargetContent(aEvent);
   }
 
   // Some events here may set mCurrentTarget but not set the corresponding
   // event target in the PresShell.
   if (!content && mCurrentTarget) {
-    mCurrentTarget->GetContentForEvent(aEvent, &content);
+    mCurrentTarget->GetContentForEvent(aEvent, getter_AddRefs(content));
   }
 
-  return content;
+  return content.forget();
 }
 
 static Element*

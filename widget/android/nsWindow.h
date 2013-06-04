@@ -18,12 +18,12 @@ struct ANPEvent;
 
 namespace mozilla {
     class AndroidGeckoEvent;
-    class AndroidKeyEvent;
 
     namespace layers {
         class CompositorParent;
         class CompositorChild;
         class LayerManager;
+        class AsyncPanZoomController;
     }
 }
 
@@ -134,17 +134,18 @@ public:
                                      uint32_t aNewEnd) MOZ_OVERRIDE;
     virtual nsIMEUpdatePreference GetIMEUpdatePreference();
 
-    LayerManager* GetLayerManager (PLayersChild* aShadowManager = nullptr,
+    LayerManager* GetLayerManager (PLayerTransactionChild* aShadowManager = nullptr,
                                    LayersBackend aBackendHint = mozilla::layers::LAYERS_NONE,
                                    LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT,
                                    bool* aAllowRetaining = nullptr);
-    void CreateLayerManager();
 
     NS_IMETHOD ReparentNativeWidget(nsIWidget* aNewParent);
 
     virtual bool NeedsPaint();
     virtual void DrawWindowUnderlay(LayerManager* aManager, nsIntRect aRect);
     virtual void DrawWindowOverlay(LayerManager* aManager, nsIntRect aRect);
+
+    virtual mozilla::layers::CompositorParent* NewCompositorParent(int aSurfaceWidth, int aSurfaceHeight) MOZ_OVERRIDE;
 
     static void SetCompositor(mozilla::layers::LayerManager* aLayerManager,
                               mozilla::layers::CompositorParent* aCompositorParent,
@@ -153,6 +154,8 @@ public:
     static void ScheduleResumeComposition(int width, int height);
     static void ForceIsFirstPaint();
     static float ComputeRenderIntegrity();
+    static void SetPanZoomController(mozilla::layers::AsyncPanZoomController* apzc);
+    static mozilla::layers::AsyncPanZoomController* GetPanZoomController();
 
     virtual bool WidgetPaintsBackground();
 
@@ -186,6 +189,7 @@ protected:
     nsString mIMEComposingText;
     nsAutoTArray<nsTextRange, 4> mIMERanges;
     bool mIMEUpdatingContext;
+    nsAutoTArray<mozilla::AndroidGeckoEvent, 8> mIMEKeyEvents;
 
     struct IMEChange {
         int32_t mStart, mOldEnd, mNewEnd;
@@ -215,14 +219,13 @@ protected:
 private:
     void InitKeyEvent(nsKeyEvent& event, mozilla::AndroidGeckoEvent& key,
                       ANPEvent* pluginEvent);
-    bool DispatchMultitouchEvent(nsTouchEvent &event,
-                             mozilla::AndroidGeckoEvent *ae);
     void DispatchMotionEvent(nsInputEvent &event,
                              mozilla::AndroidGeckoEvent *ae,
                              const nsIntPoint &refPoint);
     void DispatchGestureEvent(uint32_t msg, uint32_t direction, double delta,
                               const nsIntPoint &refPoint, uint64_t time);
     void HandleSpecialKey(mozilla::AndroidGeckoEvent *ae);
+    void CreateLayerManager(int aCompositorWidth, int aCompositorHeight);
     void RedrawAll();
 
     mozilla::AndroidLayerRendererFrame mLayerRendererFrame;
@@ -231,6 +234,7 @@ private:
     static nsRefPtr<mozilla::layers::CompositorParent> sCompositorParent;
     static nsRefPtr<mozilla::layers::CompositorChild> sCompositorChild;
     static bool sCompositorPaused;
+    static nsRefPtr<mozilla::layers::AsyncPanZoomController> sApzc;
 };
 
 #endif /* NSWINDOW_H_ */

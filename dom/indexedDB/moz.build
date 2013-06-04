@@ -1,3 +1,4 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -10,7 +11,6 @@ XPIDL_SOURCES += [
     'nsIIDBCursor.idl',
     'nsIIDBCursorWithValue.idl',
     'nsIIDBDatabase.idl',
-    'nsIIDBFactory.idl',
     'nsIIDBFileHandle.idl',
     'nsIIDBIndex.idl',
     'nsIIDBKeyRange.idl',
@@ -27,5 +27,54 @@ XPIDL_MODULE = 'dom_indexeddb'
 XPIDL_FLAGS += [
     '-I$(topsrcdir)/dom/interfaces/base',
     '-I$(topsrcdir)/dom/interfaces/events',
+]
+
+MODULE = 'dom'
+
+EXPORTS.mozilla.dom.indexedDB += [
+    'Client.h',
+    'DatabaseInfo.h',
+    'FileInfo.h',
+    'FileManager.h',
+    'IDBCursor.h',
+    'IDBDatabase.h',
+    'IDBEvents.h',
+    'IDBFactory.h',
+    'IDBFileHandle.h',
+    'IDBIndex.h',
+    'IDBKeyRange.h',
+    'IDBObjectStore.h',
+    'IDBRequest.h',
+    'IDBTransaction.h',
+    'IDBWrapperCache.h',
+    'IndexedDatabase.h',
+    'IndexedDatabaseManager.h',
+    'Key.h',
+    'KeyPath.h',
+]
+
+CPP_SOURCES += [
+    'AsyncConnectionHelper.cpp',
+    'CheckPermissionsHelper.cpp',
+    'Client.cpp',
+    'DatabaseInfo.cpp',
+    'FileInfo.cpp',
+    'FileManager.cpp',
+    'IDBCursor.cpp',
+    'IDBDatabase.cpp',
+    'IDBEvents.cpp',
+    'IDBFactory.cpp',
+    'IDBFileHandle.cpp',
+    'IDBIndex.cpp',
+    'IDBKeyRange.cpp',
+    'IDBObjectStore.cpp',
+    'IDBRequest.cpp',
+    'IDBTransaction.cpp',
+    'IDBWrapperCache.cpp',
+    'IndexedDatabaseManager.cpp',
+    'Key.cpp',
+    'KeyPath.cpp',
+    'OpenDatabaseHelper.cpp',
+    'TransactionThreadPool.cpp',
 ]
 

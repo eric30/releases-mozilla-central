@@ -36,9 +36,9 @@
 #include "nsIContentViewer.h"
 #include "nsIXPConnect.h"
 #include "nsContentUtils.h"
+#include "nsCxPusher.h"
 #include "nsJSUtils.h"
 #include "nsThreadUtils.h"
-#include "nsIJSContextStack.h"
 #include "nsIScriptChannel.h"
 #include "nsIDocument.h"
 #include "nsIObjectInputStream.h"
@@ -168,22 +168,27 @@ nsresult nsJSThunk::EvaluateScript(nsIChannel *aChannel,
     rv = principal->GetCsp(getter_AddRefs(csp));
     NS_ENSURE_SUCCESS(rv, rv);
     if (csp) {
-		bool allowsInline;
-		rv = csp->GetAllowsInlineScript(&allowsInline);
-		NS_ENSURE_SUCCESS(rv, rv);
+        bool allowsInline = true;
+        bool reportViolations = false;
+        rv = csp->GetAllowsInlineScript(&reportViolations, &allowsInline);
+        NS_ENSURE_SUCCESS(rv, rv);
 
-      if (!allowsInline) {
-          // gather information to log with violation report
-          nsCOMPtr<nsIURI> uri;
-          principal->GetURI(getter_AddRefs(uri));
-          nsAutoCString asciiSpec;
-          uri->GetAsciiSpec(asciiSpec);
-		  csp->LogViolationDetails(nsIContentSecurityPolicy::VIOLATION_TYPE_INLINE_SCRIPT,
-								   NS_ConvertUTF8toUTF16(asciiSpec),
-								   NS_ConvertUTF8toUTF16(mURL),
-                                   0);
+        if (reportViolations) {
+            // gather information to log with violation report
+            nsCOMPtr<nsIURI> uri;
+            principal->GetURI(getter_AddRefs(uri));
+            nsAutoCString asciiSpec;
+            uri->GetAsciiSpec(asciiSpec);
+            csp->LogViolationDetails(nsIContentSecurityPolicy::VIOLATION_TYPE_INLINE_SCRIPT,
+                                     NS_ConvertUTF8toUTF16(asciiSpec),
+                                     NS_ConvertUTF8toUTF16(mURL),
+                                     0);
+        }
+
+        //return early if inline scripts are not allowed
+        if (!allowsInline) {
           return NS_ERROR_DOM_RETVAL_UNDEFINED;
-      }
+        }
     }
 
     // Get the global object we should be running on.
@@ -213,8 +218,6 @@ nsresult nsJSThunk::EvaluateScript(nsIChannel *aChannel,
 
     nsCOMPtr<nsIScriptGlobalObject> innerGlobal = do_QueryInterface(innerWin);
 
-    JSObject *globalJSObject = innerGlobal->GetGlobalJSObject();
-
     nsCOMPtr<nsIDOMWindow> domWindow(do_QueryInterface(global, &rv));
     if (NS_FAILED(rv)) {
         return NS_ERROR_FAILURE;
@@ -238,6 +241,9 @@ nsresult nsJSThunk::EvaluateScript(nsIChannel *aChannel,
     bool useSandbox =
         (aExecutionPolicy == nsIScriptChannel::EXECUTE_IN_SANDBOX);
 
+    AutoPushJSContext cx(scriptContext->GetNativeContext());
+    JS::Rooted<JSObject*> globalJSObject(cx, innerGlobal->GetGlobalJSObject());
+
     if (!useSandbox) {
         //-- Don't outside a sandbox unless the script principal subsumes the
         //   principal of the context.
@@ -251,11 +257,8 @@ nsresult nsJSThunk::EvaluateScript(nsIChannel *aChannel,
         useSandbox = !subsumes;
     }
 
-    JS::Value v = JS::UndefinedValue();
+    JS::Rooted<JS::Value> v (cx, JS::UndefinedValue());
     // Finally, we have everything needed to evaluate the expression.
-
-    AutoPushJSContext cx(scriptContext->GetNativeContext());
-    JSAutoRequest ar(cx);
     if (useSandbox) {
         // We were asked to use a sandbox, or the channel owner isn't allowed
         // to execute in this context.  Evaluate the javascript URL in a
@@ -286,36 +289,24 @@ nsresult nsJSThunk::EvaluateScript(nsIChannel *aChannel,
         // our current compartment. Because our current context doesn't necessarily
         // subsume that of the sandbox, we want to unwrap and enter the sandbox's
         // compartment. It's a shame that the APIs here are so clunkly. :-(
-        JSObject *sandboxObj;
-        rv = sandbox->GetJSObject(&sandboxObj);
-        NS_ENSURE_SUCCESS(rv, rv);
-        sandboxObj = js::UnwrapObject(sandboxObj);
+        JS::Rooted<JSObject*> sandboxObj(cx, sandbox->GetJSObject());
+        NS_ENSURE_STATE(sandboxObj);
+        sandboxObj = js::UncheckedUnwrap(sandboxObj);
         JSAutoCompartment ac(cx, sandboxObj);
-        rv = xpc->HoldObject(cx, sandboxObj, getter_AddRefs(sandbox));
-        NS_ENSURE_SUCCESS(rv, rv);
 
         // Push our JSContext on the context stack so the JS_ValueToString call (and
         // JS_ReportPendingException, if relevant) will use the principal of cx.
-        // Note that we do this as late as possible to make popping simpler.
-        nsCOMPtr<nsIJSContextStack> stack =
-            do_GetService("@mozilla.org/js/xpc/ContextStack;1", &rv);
-        if (NS_SUCCEEDED(rv)) {
-            rv = stack->Push(cx);
-        }
-        if (NS_FAILED(rv)) {
-            return rv;
-        }
-
-        rv = xpc->EvalInSandboxObject(NS_ConvertUTF8toUTF16(script), cx,
-                                      sandbox, true, &v);
+        nsCxPusher pusher;
+        pusher.Push(cx);
+        rv = xpc->EvalInSandboxObject(NS_ConvertUTF8toUTF16(script),
+                                      /* filename = */ nullptr, cx,
+                                      sandboxObj, true, v.address());
 
         // Propagate and report exceptions that happened in the
         // sandbox.
         if (JS_IsExceptionPending(cx)) {
             JS_ReportPendingException(cx);
         }
-
-        stack->Pop(nullptr);
     } else {
         // No need to use the sandbox, evaluate the script directly in
         // the given scope.
@@ -323,8 +314,9 @@ nsresult nsJSThunk::EvaluateScript(nsIChannel *aChannel,
         options.setFileAndLine(mURL.get(), 1)
                .setVersion(JSVERSION_DEFAULT);
         rv = scriptContext->EvaluateString(NS_ConvertUTF8toUTF16(script),
-                                           *globalJSObject, options,
-                                           /* aCoerceToString = */ true, &v);
+                                           globalJSObject, options,
+                                           /* aCoerceToString = */ true,
+                                           v.address());
 
         // If there's an error on cx as a result of that call, report
         // it now -- either we're just running under the event loop,
@@ -338,7 +330,7 @@ nsresult nsJSThunk::EvaluateScript(nsIChannel *aChannel,
 
     // If we took the sandbox path above, v might be in the sandbox
     // compartment.
-    if (!JS_WrapValue(cx, &v)) {
+    if (!JS_WrapValue(cx, v.address())) {
         return NS_ERROR_OUT_OF_MEMORY;
     }
 
@@ -648,8 +640,7 @@ nsJSChannel::AsyncOpen(nsIStreamListener *aListener, nsISupports *aContext)
         }
     }
 
-    mDocumentOnloadBlockedOn =
-        do_QueryInterface(mOriginalInnerWindow->GetExtantDocument());
+    mDocumentOnloadBlockedOn = mOriginalInnerWindow->GetExtantDoc();
     if (mDocumentOnloadBlockedOn) {
         // If we're a document channel, we need to actually block onload on our
         // _parent_ document.  This is because we don't actually set our
@@ -674,7 +665,7 @@ nsJSChannel::AsyncOpen(nsIStreamListener *aListener, nsISupports *aContext)
     if (mIsAsync) {
         // post an event to do the rest
         method = &nsJSChannel::EvaluateScript;
-    } else {   
+    } else {
         EvaluateScript();
         if (mOpenedStreamChannel) {
             // That will handle notifying things

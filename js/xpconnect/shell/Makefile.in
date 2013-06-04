@@ -10,11 +10,7 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= xpcshell
-PROGRAM		= xpcshell$(BIN_SUFFIX)
 SDK_BINARY	= $(PROGRAM)
-
-CPPSRCS		= xpcshell.cpp
 
 LOCAL_INCLUDES += \
   -I$(topsrcdir)/toolkit/xre \
@@ -70,8 +66,6 @@ DEFINES		+= -DJS_THREADSAFE
 
 ifdef MOZ_SHARK
 DEFINES += -DMOZ_SHARK
-CFLAGS += -F/System/Library/PrivateFrameworks
-LDFLAGS += -F/System/Library/PrivateFrameworks -framework CHUD
 endif
 ifdef MOZ_CALLGRIND
 DEFINES += -DMOZ_CALLGRIND

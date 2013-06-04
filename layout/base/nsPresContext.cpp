@@ -56,7 +56,6 @@
 #include "nsStyleStructInlines.h"
 #include "nsIAppShell.h"
 #include "prenv.h"
-#include "nsIDOMEventTarget.h"
 #include "nsObjectFrame.h"
 #include "nsTransitionManager.h"
 #include "nsAnimationManager.h"
@@ -74,6 +73,7 @@
 #endif // IBMBIDI
 
 #include "nsContentUtils.h"
+#include "nsCxPusher.h"
 #include "nsPIWindowRoot.h"
 #include "mozilla/Preferences.h"
 
@@ -1461,11 +1461,8 @@ nsPresContext::SetContainer(nsISupports* aHandler)
 already_AddRefed<nsISupports>
 nsPresContext::GetContainerInternal() const
 {
-  nsISupports *result = nullptr;
-  if (mContainer)
-    CallQueryReferent(mContainer.get(), &result);
-
-  return result;
+  nsCOMPtr<nsISupports> result = do_QueryReferent(mContainer);
+  return result.forget();
 }
 
 already_AddRefed<nsISupports>
@@ -1768,7 +1765,7 @@ nsPresContext::MediaFeatureValuesChanged(StyleRebuildType aShouldRebuild,
 
     if (!notifyList.IsEmpty()) {
       nsPIDOMWindow *win = mDocument->GetInnerWindow();
-      nsCOMPtr<nsIDOMEventTarget> et = do_QueryInterface(win);
+      nsCOMPtr<EventTarget> et = do_QueryInterface(win);
       nsCxPusher pusher;
 
       for (uint32_t i = 0, i_end = notifyList.Length(); i != i_end; ++i) {
@@ -2136,7 +2133,7 @@ MayHavePaintEventListener(nsPIDOMWindow* aInnerWindow)
   if (aInnerWindow->HasPaintEventListeners())
     return true;
 
-  nsIDOMEventTarget* parentTarget = aInnerWindow->GetParentTarget();
+  EventTarget* parentTarget = aInnerWindow->GetParentTarget();
   if (!parentTarget)
     return false;
 
@@ -2166,7 +2163,7 @@ MayHavePaintEventListener(nsPIDOMWindow* aInnerWindow)
     return MayHavePaintEventListener(window);
 
   nsCOMPtr<nsPIWindowRoot> root = do_QueryInterface(parentTarget);
-  nsIDOMEventTarget* tabChildGlobal;
+  EventTarget* tabChildGlobal;
   return root &&
          (tabChildGlobal = root->GetParentTarget()) &&
          (manager = tabChildGlobal->GetListenerManager(false)) &&

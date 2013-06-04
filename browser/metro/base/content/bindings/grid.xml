@@ -32,15 +32,13 @@
             // as richgrid is adopting multi-select behavior, but select/selected are already being
             // used to describe triggering the default action of a tile
             if (this._selectedItem){
-              this._selectedItem.selected = false;
+              this._selectedItem.removeAttribute("selected");
               this._selectedItem = null;
             }
 
             for (let childItem of this.selectedItems) {
-              childItem.selected = false;
+              childItem.removeAttribute("selected");
             }
-            // reset context actions
-            this._contextActions = null;
           ]]>
         </body>
       </method>
@@ -49,7 +47,13 @@
         <parameter name="anItem"/>
         <body>
           <![CDATA[
-            anItem.selected = !anItem.selected;
+            let wasSelected = anItem.selected;
+            if ("single" == this.getAttribute("seltype")) {
+              this.clearSelection();
+            }
+            this._selectedItem = wasSelected ? null : anItem;
+            anItem.selected = !wasSelected;
+
             this._fireOnSelectionChange();
           ]]>
         </body>
@@ -59,11 +63,20 @@
         <parameter name="anItem"/>
         <body>
           <![CDATA[
-            this.clearSelection();
+            let wasSelected = anItem.selected,
+                isSingleMode = ("single" == this.getAttribute("seltype"));
+            if (isSingleMode) {
+              this.clearSelection();
+            }
             this._selectedItem = anItem;
-            this._selectedItem.selected = true;
-
-            this._fireOnSelect();
+            anItem.selected = true;
+            if (isSingleMode) {
+              if (!wasSelected) {
+                this._fireOnSelect();
+              }
+            } else {
+              this._fireOnSelectionChange();
+            }
           ]]>
         </body>
       </method>
@@ -89,36 +102,20 @@
           ]]>
         </body>
       </method>
-
-      <field name="_contextActions">null</field>
       <property name="contextActions">
         <getter>
           <![CDATA[
             // return the subset of verbs that apply to all selected tiles
-            // use cached list, it'll get cleared out when selection changes
-            if (this._contextActions) {
-              return this._contextActions;
-            }
             let tileNodes = this.selectedItems;
             if (!tileNodes.length) {
               return new Set();
-            }
-
-            function cloneSet(aSet) {
-              let clone = new Set();
-              if (aSet) {
-                for (let item of aSet) {
-                  clone.add(item);
-                }
-              }
-              return clone;
             }
 
             // given one or more sets of values,
             // return a set with only those values present in each
             let initialItem = tileNodes[0];
 
-            let verbSet = cloneSet(initialItem.contextActions);
+            let verbSet = new Set(initialItem.contextActions);
             for (let i=1; i<tileNodes.length; i++){
               let set = tileNodes[i].contextActions;
               for (let item of verbSet) {
@@ -127,10 +124,12 @@
                 }
               }
             }
-
-            this._contextActions = verbSet;
+            // add the clear-selection button if more than one tiles are selected
+            if (tileNodes.length > 1) {
+              verbSet.add('clear');
+            }
             // returns Set
-            return this._contextActions;
+            return verbSet;
           ]]>
         </getter>
       </property>
@@ -178,11 +177,13 @@
       <method name="appendItem">
         <parameter name="aLabel"/>
         <parameter name="aValue"/>
+        <parameter name="aSkipArrange"/>
         <body>
           <![CDATA[
             let addition = this._createItemElement(aLabel, aValue);
             this.appendChild(addition);
-            this.arrangeItems();
+            if (!aSkipArrange)
+              this.arrangeItems();
             return addition;
           ]]>
         </body>
@@ -195,7 +196,6 @@
               this.removeChild(this.firstChild);
             }
             this._grid.style.width = "0px";
-            this._contextActions = null;
           ]]>
         </body>
       </method>
@@ -204,6 +204,7 @@
         <parameter name="anIndex"/>
         <parameter name="aLabel"/>
         <parameter name="aValue"/>
+        <parameter name="aSkipArrange"/>
         <body>
           <![CDATA[
             let existing = this.getItemAtIndex(anIndex);
@@ -213,23 +214,39 @@
             } else {
               this.appendChild(addition);
             }
-            this.arrangeItems();
+            if (!aSkipArrange)
+              this.arrangeItems();
             return addition;
           ]]>
         </body>
       </method>
-
       <method name="removeItemAt">
         <parameter name="anIndex"/>
+        <parameter name="aSkipArrange"/>
         <body>
           <![CDATA[
-            let removal = this.getItemAtIndex(anIndex);
-            this.removeChild(removal);
-            this.arrangeItems();
+            let item = this.getItemAtIndex(anIndex);
+            return item ? this.removeItem(item, aSkipArrange) : null;
+          ]]>
+        </body>
+      </method>
+
+      <method name="removeItem">
+        <parameter name="aItem"/>
+        <parameter name="aSkipArrange"/>
+        <body>
+          <![CDATA[
+            let removal = aItem.parentNode == this && this.removeChild(aItem);
+            if (removal && !aSkipArrange)
+                this.arrangeItems();
+
+            // note that after removal the node is unbound
+            // so none of the richgriditem binding methods & properties are available
             return removal;
           ]]>
         </body>
       </method>
+
 
       <method name="getIndexOfItem">
         <parameter name="anItem"/>
@@ -238,7 +255,7 @@
             if (!anItem)
               return -1;
 
-            return Array.prototype.indexOf.call(this.children, anItem);
+            return Array.indexOf(this.children, anItem);
           ]]>
         </body>
       </method>
@@ -250,6 +267,15 @@
             if (!this._isIndexInBounds(anIndex))
               return null;
             return this.children.item(anIndex);
+          ]]>
+        </body>
+      </method>
+
+      <method name="getItemsByUrl">
+        <parameter name="aUrl"/>
+        <body>
+          <![CDATA[
+            return this.querySelectorAll('richgriditem[value="'+aUrl+'"]');
           ]]>
         </body>
       </method>
@@ -319,15 +345,15 @@
       <field name="_itemHeightRenderThreshold">10</field>
 
       <method name="arrangeItems">
-        <parameter name="aNumRows"/>
-        <parameter name="aNumColumns"/>
         <body>
           <![CDATA[
-            if (this.itemCount <= 0)
+            if (this.itemCount <= 0) {
               return;
+            }
             let item = this.getItemAtIndex(0);
-            if (item == null)
+            if (item == null) {
               return;
+            }
             let gridItemRect = item.getBoundingClientRect();
 
             // cap the number of times we reschedule calling arrangeItems
@@ -370,24 +396,25 @@
               container = this.parentNode.getBoundingClientRect();
 
             // If we don't have valid dimensions we can't arrange yet
-            if (!container.height || !gridItemRect.height)
+            if (!container.height || !gridItemRect.height) {
               return;
+            }
 
             // We favor overflowing horizontally, not vertically
             let maxRowCount = Math.floor(container.height / gridItemRect.height) - 1;
 
-            if (aNumRows) {
-              this._rowCount = aNumRows;
-            } else {
+            this._rowCount = this.getAttribute("rows");
+            this._columnCount = this.getAttribute("columns");
+
+            if (!this._rowCount) {
               this._rowCount = Math.min(this.itemCount, maxRowCount);
             }
-            if (aNumColumns) {
-              this._columnCount = aNumColumns;
-            } else {
+            if (!this._columnCount){
               this._columnCount = Math.ceil(this.itemCount / this._rowCount);
             }
 
             this._grid.style.width = (this._columnCount * gridItemRect.width) + "px";
+
           ]]>
         </body>
       </method>
@@ -398,22 +425,41 @@
       <property name="suppressOnSelect"
                   onget="return this.getAttribute('suppressonselect') == 'true';"
                   onset="this.setAttribute('suppressonselect', val);"/>
+      <property name="crossSlideBoundary"
+          onget="return this.hasAttribute('crossslideboundary')? this.getAttribute('crossslideboundary') : Infinity;"/>
 
     <!-- Internal methods -->
-
+      <field name="_xslideHandler"/>
       <constructor>
         <![CDATA[
           if (this.controller && this.controller.gridBoundCallback != undefined)
             this.controller.gridBoundCallback();
-
+          // set up cross-slide gesture handling for multiple-selection grids
+          if ("undefined" !== typeof CrossSlide && "multiple" == this.getAttribute("seltype")) {
+            this._xslideHandler = new CrossSlide.Handler(this, {
+                  REARRANGESTART: this.crossSlideBoundary
+            });
+            this.addEventListener("touchstart", this._xslideHandler, false);
+            this.addEventListener("touchmove", this._xslideHandler, false);
+            this.addEventListener("touchend", this._xslideHandler, false);
+          }
           // XXX This event was never actually implemented (bug 223411).
           var event = document.createEvent("Events");
           event.initEvent("contentgenerated", true, true);
           this.dispatchEvent(event);
         ]]>
       </constructor>
-
-        <method name="_isIndexInBounds">
+      <destructor>
+        <![CDATA[
+          if (this._xslideHandler) {
+            this.removeEventListener("touchstart", this._xslideHandler);
+            this.removeEventListener("touchmove", this._xslideHandler);
+            this.removeEventListener("touchend", this._xslideHandler);
+            this._xslideHandler = null;
+          }
+        ]]>
+      </destructor>
+      <method name="_isIndexInBounds">
         <parameter name="anIndex"/>
         <body>
           <![CDATA[
@@ -432,11 +478,6 @@
             item.setAttribute("label", aLabel);
             if (aValue)
               item.setAttribute("value", aValue);
-
-            // copy over the richgrid's data-contextactions as each child is created
-            if (this.hasAttribute("data-contextactions")) {
-              item.setAttribute("data-contextactions", this.getAttribute("data-contextactions"));
-            }
             return item;
           ]]>
         </body>
@@ -458,8 +499,6 @@
         <body>
           <![CDATA[
             // flush out selection-related cached properties so they get recalc'd next time
-            this._contextActions = null;
-
             // fire an event?
             if (this.suppressOnSelect || this._suppressOnSelect)
               return;
@@ -470,40 +509,136 @@
           ]]>
         </body>
       </method>
-
     </implementation>
+    <handlers>
+      <handler event="context-action">
+        <![CDATA[
+          // context-action is an event fired by the appbar typically
+          // which directs us to do something to the selected tiles
+          switch (event.action) {
+            case "clear":
+              this.clearSelection();
+              break;
+            default:
+              if (this.controller && this.controller.doActionOnSelectedTiles) {
+                this.controller.doActionOnSelectedTiles(event.action, event);
+              }
+          }
+        ]]>
+      </handler>
+      <handler event="MozCrossSliding">
+        <![CDATA[
+          // MozCrossSliding is swipe gesture across a tile
+          // The tile should follow the drag to reinforce the gesture
+          // (with inertia/speedbump behavior)
+          let state = event.crossSlidingState;
+          let thresholds = this._xslideHandler.thresholds;
+          let transformValue;
+          switch(state) {
+            case "cancelled":
+              // hopefully nothing else is transform-ing the tile
+              event.target.removeAttribute('crosssliding');
+              event.target.style.removeProperty('transform');
+              break;
+            case "dragging":
+            case "selecting":
+              event.target.setAttribute("crosssliding", true);
+              // just track the mouse in the initial phases of the drag gesture
+              transformValue = (event.direction=='x') ?
+                                      'translateX('+event.delta+'px)' :
+                                      'translateY('+event.delta+'px)';
+              event.target.style.transform = transformValue;
+              break;
+            case "selectSpeedBumping":
+            case "speedBumping":
+              event.target.setAttribute('crosssliding', true);
+              // in speed-bump phase, we add inertia to the drag
+              let offset = CrossSlide.speedbump(
+                event.delta,
+                thresholds.SPEEDBUMPSTART,
+                thresholds.SPEEDBUMPEND
+              );
+              transformValue = (event.direction=='x') ?
+                                      'translateX('+offset+'px)' :
+                                      'translateY('+offset+'px)';
+              event.target.style.transform = transformValue;
+              break;
+            // "rearranging" case not used or implemented here
+            case "completed":
+              event.target.removeAttribute('crosssliding');
+              event.target.style.removeProperty('transform');
+              break;
+          }
+        ]]>
+      </handler>
+      <handler event="MozCrossSlideSelect">
+        <![CDATA[
+          this.toggleItemSelection(event.target);
+        ]]>
+      </handler>
+    </handlers>
   </binding>
-
   <binding id="richgrid-item">
     <content>
-      <xul:vbox anonid="anon-richgrid-item" class="richgrid-item-content" xbl:inherits="customImagePresent">
-        <xul:hbox class="richgrid-icon-container" xbl:inherits="customImagePresent">
-          <xul:box class="richgrid-icon-box"><xul:image xbl:inherits="src=iconURI"/></xul:box>
+      <xul:vbox anonid="anon-richgrid-item" class="richgrid-item-content" xbl:inherits="customImage">
+        <xul:hbox class="richgrid-icon-container" xbl:inherits="customImage">
+          <xul:box class="richgrid-icon-box"><xul:image anonid="anon-richgrid-item-icon" xbl:inherits="src=iconURI"/></xul:box>
           <xul:box flex="1" />
         </xul:hbox>
-        <xul:description class="richgrid-item-desc" xbl:inherits="value=label" crop="end"/>
+        <xul:description anonid="anon-richgrid-item-label" class="richgrid-item-desc" xbl:inherits="value=label" crop="end"/>
       </xul:vbox>
     </content>
 
     <implementation>
       <property name="_box" onget="return document.getAnonymousElementByAttribute(this, 'anonid', 'anon-richgrid-item');"/>
-      <property name="color" onset="this._color = val; this.setColor();" onget="return this._color;"/>
-      <property name="backgroundimage"
-                onset="this._backgroundimage = val; this.setBackgroundImage();"
-                onget="return this._backgroundimage;" />
+      <property name="_textbox" onget="return document.getAnonymousElementByAttribute(this, 'class', 'richgrid-item-desc');"/>
+      <property name="_icon" onget="return document.getAnonymousElementByAttribute(this, 'anonid', 'anon-richgrid-item-icon');"/>
+      <property name="_label" onget="return document.getAnonymousElementByAttribute(this, 'anonid', 'anon-richgrid-item-label');"/>
+      <property name="iconSrc"
+                onset="this._icon.src = val; this.setAttribute('iconURI', val);"
+                onget="return this._icon.src;" />
+
       <property name="selected"
-                onget="return this.getAttribute('selected') == 'true';"
-                onset="this.setAttribute('selected', val);"/>
+                onget="return this.hasAttribute('selected');"
+                onset="if (val) this.setAttribute('selected', val); else this.removeAttribute('selected');" />
+      <property name="url"
+                onget="return this.getAttribute('value')"
+                onset="this.setAttribute('value', val);"/>
+      <property name="label"
+                onget="return this._label.getAttribute('value')"
+                onset="this.setAttribute('label', val); this._label.setAttribute('value', val);"/>
+      <property name="pinned"
+                onget="return this.hasAttribute('pinned')"
+                onset="if (val) { this.setAttribute('pinned', val) } else this.removeAttribute('pinned');"/>
 
       <constructor>
         <![CDATA[
-          // Bindings don't get bound until the item is displayed,
-          // so we have to reset the background color/image when we get
-          // created.
-          this.setColor();
-          this.setBackgroundImage();
+            this.refresh();
         ]]>
       </constructor>
+      <method name="refresh">
+        <body>
+          <![CDATA[
+            // Prevent an exception in case binding is not done yet.
+            if (!this._icon)
+              return;
+
+            // Seed the binding properties from bound-node attribute values
+            // Usage: node.refresh()
+            //        - reinitializes all binding properties from their associated attributes
+
+            this.iconSrc = this.getAttribute('iconURI');
+            this.color = this.getAttribute("customColor");
+            this.label = this.getAttribute('label');
+            // url getter just looks directly at attribute
+            // selected getter just looks directly at attribute
+            // pinned getter just looks directly at attribute
+            // value getter just looks directly at attribute
+            this._contextActions = null;
+            this.refreshBackgroundImage();
+          ]]>
+        </body>
+      </method>
 
       <property name="control">
         <getter><![CDATA[
@@ -517,32 +652,32 @@
         ]]></getter>
       </property>
 
-      <method name="setColor">
-        <body>
-          <![CDATA[
-            if (this.color != undefined) {
-              this._box.parentNode.setAttribute("customColorPresent", "true");
-              this._box.style.backgroundColor = this.color;
-            } else {
-              this._box.parentNode.removeAttribute("customColorPresent");
-            }
-          ]]>
-        </body>
-      </method>
+      <property name="color" onget="return this.getAttribute('customColor');">
+        <setter><![CDATA[
+          if (val) {
+            this.setAttribute("customColor", val);
+            this._box.style.backgroundColor = val;
+            this._textbox.style.backgroundColor = val;
+          } else {
+            this.removeAttribute("customColor");
+            this._box.style.removeProperty("background-color");
+            this._textbox.style.removeProperty("background-color");
+          }
+        ]]></setter>
+      </property>
 
-      <method name="setBackgroundImage">
-        <body>
-          <![CDATA[
-            if (this.backgroundImage != undefined) {
-              this._box.parentNode.setAttribute("customImagePresent", "true");
-              this._box.style.backgroundImage = this.backgroundImage;
-            } else {
-              this._box.parentNode.removeAttribute("customImagePresent");
-              this._box.style.removeProperty("background-image");
-            }
-          ]]>
-        </body>
-      </method>
+      <property name="backgroundImage" onget="return this.getAttribute('customImage');">
+        <setter><![CDATA[
+          if (val) {
+            this.setAttribute("customImage", val);
+            this._box.style.backgroundImage = val;
+          } else {
+            this.removeAttribute("customImage");
+            this._box.style.removeProperty("background-image");
+          }
+        ]]></setter>
+      </property>
+
       <method name="refreshBackgroundImage">
         <body><![CDATA[
           if (this.backgroundImage) {
@@ -570,7 +705,6 @@
           ]]>
         </getter>
       </property>
-
     </implementation>
 
     <handlers>
@@ -578,6 +712,9 @@
         <![CDATA[
           // left-click/touch handler
           this.control.handleItemClick(this, event);
+          // Stop this from bubbling, when the richgrid container
+          // receives click events, we blur the nav bar.
+          event.stopPropagation();
         ]]>
       </handler>
       <handler event="contextmenu">

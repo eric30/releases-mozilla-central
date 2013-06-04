@@ -23,6 +23,7 @@ namespace widget {
 #ifdef NS_ENABLE_TSF
 bool IMEHandler::sIsInTSFMode = false;
 bool IMEHandler::sPluginHasFocus = false;
+IMEHandler::SetInputScopesFunc IMEHandler::sSetInputScopes = nullptr;
 #endif // #ifdef NS_ENABLE_TSF
 
 // static
@@ -32,6 +33,17 @@ IMEHandler::Initialize()
 #ifdef NS_ENABLE_TSF
   nsTextStore::Initialize();
   sIsInTSFMode = nsTextStore::IsInTSFMode();
+  if (!sIsInTSFMode) {
+    // When full nsTextStore is not available, try to use SetInputScopes API
+    // to enable at least InputScope. Use GET_MODULE_HANDLE_EX_FLAG_PIN to
+    // ensure that msctf.dll will not be unloaded.
+    HMODULE module = nullptr;
+    if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN, L"msctf.dll",
+                           &module)) {
+      sSetInputScopes = reinterpret_cast<SetInputScopesFunc>(
+        GetProcAddress(module, "SetInputScopes"));
+    }
+  }
 #endif // #ifdef NS_ENABLE_TSF
 
   nsIMM32Handler::Initialize();
@@ -69,34 +81,6 @@ IMEHandler::GetNativeData(uint32_t aDataType)
 #else // #ifdef NS_ENABLE_TSF
   return nullptr;
 #endif // #ifdef NS_ENABLE_TSF #else
-}
-
-// static
-bool
-IMEHandler::CanOptimizeKeyAndIMEMessages()
-{
-#ifdef NS_ENABLE_TSF
-  if (IsTSFAvailable()) {
-    return nsTextStore::CanOptimizeKeyAndIMEMessages();
-  }
-#endif // #ifdef NS_ENABLE_TSF
-
-  return nsIMM32Handler::CanOptimizeKeyAndIMEMessages();
-}
-
-// static
-bool
-IMEHandler::IsIMEEnabled(const InputContext& aInputContext)
-{
-  return IsIMEEnabled(aInputContext.mIMEState.mEnabled);
-}
-
-// static
-bool
-IMEHandler::IsIMEEnabled(IMEState::Enabled aIMEState)
-{
-  return (aIMEState == mozilla::widget::IMEState::ENABLED ||
-          aIMEState == mozilla::widget::IMEState::PLUGIN);
 }
 
 // static
@@ -258,15 +242,24 @@ IMEHandler::GetOpenState(nsWindow* aWindow)
 void
 IMEHandler::OnDestroyWindow(nsWindow* aWindow)
 {
+#ifdef NS_ENABLE_TSF
   // We need to do nothing here for TSF. Just restore the default context
   // if it's been disassociated.
+  if (!sIsInTSFMode) {
+    // MSDN says we need to set IS_DEFAULT to avoid memory leak when we use
+    // SetInputScopes API. Use an empty string to do this.
+    SetInputScopeForIMM32(aWindow, EmptyString());
+  }
+#endif // #ifdef NS_ENABLE_TSF
   nsIMEContext IMEContext(aWindow->GetWindowHandle());
   IMEContext.AssociateDefaultContext();
 }
 
 // static
 void
-IMEHandler::SetInputContext(nsWindow* aWindow, InputContext& aInputContext)
+IMEHandler::SetInputContext(nsWindow* aWindow,
+                            InputContext& aInputContext,
+                            const InputContextAction& aAction)
 {
   // FYI: If there is no composition, this call will do nothing.
   NotifyIME(aWindow, REQUEST_TO_COMMIT_COMPOSITION);
@@ -274,7 +267,7 @@ IMEHandler::SetInputContext(nsWindow* aWindow, InputContext& aInputContext)
   // Assume that SetInputContext() is called only when aWindow has focus.
   sPluginHasFocus = (aInputContext.mIMEState.mEnabled == IMEState::PLUGIN);
 
-  bool enable = IsIMEEnabled(aInputContext);
+  bool enable = WinUtils::IsIMEEnabled(aInputContext);
   bool adjustOpenState = (enable &&
     aInputContext.mIMEState.mOpen != IMEState::DONT_CHANGE_OPEN_STATE);
   bool open = (adjustOpenState &&
@@ -285,12 +278,17 @@ IMEHandler::SetInputContext(nsWindow* aWindow, InputContext& aInputContext)
 #ifdef NS_ENABLE_TSF
   // Note that even while a plugin has focus, we need to notify TSF of that.
   if (sIsInTSFMode) {
-    nsTextStore::SetInputContext(aInputContext);
+    nsTextStore::SetInputContext(aWindow, aInputContext, aAction);
     if (IsTSFAvailable()) {
       aInputContext.mNativeIMEContext = nsTextStore::GetTextStore();
+      if (adjustOpenState) {
+        nsTextStore::SetIMEOpenState(open);
+      }
+      return;
     }
-    // Currently, nsTextStore doesn't set focus to keyboard disabled document.
-    // Therefore, we still need to perform the following legacy code.
+  } else {
+    // Set at least InputScope even when TextStore is not available.
+    SetInputScopeForIMM32(aWindow, aInputContext.mHTMLInputType);
   }
 #endif // #ifdef NS_ENABLE_TSF
 
@@ -311,12 +309,6 @@ IMEHandler::SetInputContext(nsWindow* aWindow, InputContext& aInputContext)
   }
 
   if (adjustOpenState) {
-#ifdef NS_ENABLE_TSF
-    if (IsTSFAvailable()) {
-      nsTextStore::SetIMEOpenState(open);
-      return;
-    }
-#endif // #ifdef NS_ENABLE_TSF
     IMEContext.SetOpenState(open);
   }
 }
@@ -330,7 +322,9 @@ IMEHandler::InitInputContext(nsWindow* aWindow, InputContext& aInputContext)
 
 #ifdef NS_ENABLE_TSF
   if (sIsInTSFMode) {
-    nsTextStore::SetInputContext(aInputContext);
+    nsTextStore::SetInputContext(aWindow, aInputContext,
+      InputContextAction(InputContextAction::CAUSE_UNKNOWN,
+                         InputContextAction::GOT_FOCUS));
     aInputContext.mNativeIMEContext = nsTextStore::GetTextStore();
     MOZ_ASSERT(aInputContext.mNativeIMEContext);
     return;
@@ -364,38 +358,66 @@ IMEHandler::CurrentKeyboardLayoutHasIME()
 #endif // #ifdef DEBUG
 
 // static
-bool
-IMEHandler::IsDoingKakuteiUndo(HWND aWnd)
+void
+IMEHandler::SetInputScopeForIMM32(nsWindow* aWindow,
+                                  const nsAString& aHTMLInputType)
 {
-  // Following message pattern is caused by "Kakutei-Undo" of ATOK or WXG:
-  // ---------------------------------------------------------------------------
-  // WM_KEYDOWN              * n (wParam = VK_BACK, lParam = 0x1)
-  // WM_KEYUP                * 1 (wParam = VK_BACK, lParam = 0xC0000001) # ATOK
-  // WM_IME_STARTCOMPOSITION * 1 (wParam = 0x0, lParam = 0x0)
-  // WM_IME_COMPOSITION      * 1 (wParam = 0x0, lParam = 0x1BF)
-  // WM_CHAR                 * n (wParam = VK_BACK, lParam = 0x1)
-  // WM_KEYUP                * 1 (wParam = VK_BACK, lParam = 0xC00E0001)
-  // ---------------------------------------------------------------------------
-  // This doesn't match usual key message pattern such as:
-  //   WM_KEYDOWN -> WM_CHAR -> WM_KEYDOWN -> WM_CHAR -> ... -> WM_KEYUP
-  // See following bugs for the detail.
-  // https://bugzilla.mozilla.gr.jp/show_bug.cgi?id=2885 (written in Japanese)
-  // https://bugzilla.mozilla.org/show_bug.cgi?id=194559 (written in English)
-  MSG startCompositionMsg, compositionMsg, charMsg;
-  return WinUtils::PeekMessage(&startCompositionMsg, aWnd,
-                               WM_IME_STARTCOMPOSITION, WM_IME_STARTCOMPOSITION,
-                               PM_NOREMOVE | PM_NOYIELD) &&
-         WinUtils::PeekMessage(&compositionMsg, aWnd, WM_IME_COMPOSITION,
-                               WM_IME_COMPOSITION, PM_NOREMOVE | PM_NOYIELD) &&
-         WinUtils::PeekMessage(&charMsg, aWnd, WM_CHAR, WM_CHAR,
-                               PM_NOREMOVE | PM_NOYIELD) &&
-         startCompositionMsg.wParam == 0x0 &&
-         startCompositionMsg.lParam == 0x0 &&
-         compositionMsg.wParam == 0x0 &&
-         compositionMsg.lParam == 0x1BF &&
-         charMsg.wParam == VK_BACK && charMsg.lParam == 0x1 &&
-         startCompositionMsg.time <= compositionMsg.time &&
-         compositionMsg.time <= charMsg.time;
+  if (sIsInTSFMode || !sSetInputScopes || aWindow->Destroyed()) {
+    return;
+  }
+  UINT arraySize = 0;
+  const InputScope* scopes = nullptr;
+  // http://www.whatwg.org/specs/web-apps/current-work/multipage/the-input-element.html
+  if (aHTMLInputType.IsEmpty() || aHTMLInputType.EqualsLiteral("text")) {
+    static const InputScope inputScopes[] = { IS_DEFAULT };
+    scopes = &inputScopes[0];
+    arraySize = ArrayLength(inputScopes);
+  } else if (aHTMLInputType.EqualsLiteral("url")) {
+    static const InputScope inputScopes[] = { IS_URL };
+    scopes = &inputScopes[0];
+    arraySize = ArrayLength(inputScopes);
+  } else if (aHTMLInputType.EqualsLiteral("search")) {
+    static const InputScope inputScopes[] = { IS_SEARCH };
+    scopes = &inputScopes[0];
+    arraySize = ArrayLength(inputScopes);
+  } else if (aHTMLInputType.EqualsLiteral("email")) {
+    static const InputScope inputScopes[] = { IS_EMAIL_SMTPEMAILADDRESS };
+    scopes = &inputScopes[0];
+    arraySize = ArrayLength(inputScopes);
+  } else if (aHTMLInputType.EqualsLiteral("password")) {
+    static const InputScope inputScopes[] = { IS_PASSWORD };
+    scopes = &inputScopes[0];
+    arraySize = ArrayLength(inputScopes);
+  } else if (aHTMLInputType.EqualsLiteral("datetime") ||
+             aHTMLInputType.EqualsLiteral("datetime-local")) {
+    static const InputScope inputScopes[] = {
+      IS_DATE_FULLDATE, IS_TIME_FULLTIME };
+    scopes = &inputScopes[0];
+    arraySize = ArrayLength(inputScopes);
+  } else if (aHTMLInputType.EqualsLiteral("date") ||
+             aHTMLInputType.EqualsLiteral("month") ||
+             aHTMLInputType.EqualsLiteral("week")) {
+    static const InputScope inputScopes[] = { IS_DATE_FULLDATE };
+    scopes = &inputScopes[0];
+    arraySize = ArrayLength(inputScopes);
+  } else if (aHTMLInputType.EqualsLiteral("time")) {
+    static const InputScope inputScopes[] = { IS_TIME_FULLTIME };
+    scopes = &inputScopes[0];
+    arraySize = ArrayLength(inputScopes);
+  } else if (aHTMLInputType.EqualsLiteral("tel")) {
+    static const InputScope inputScopes[] = {
+      IS_TELEPHONE_FULLTELEPHONENUMBER, IS_TELEPHONE_LOCALNUMBER };
+    scopes = &inputScopes[0];
+    arraySize = ArrayLength(inputScopes);
+  } else if (aHTMLInputType.EqualsLiteral("number")) {
+    static const InputScope inputScopes[] = { IS_NUMBER };
+    scopes = &inputScopes[0];
+    arraySize = ArrayLength(inputScopes);
+  }
+  if (scopes && arraySize > 0) {
+    sSetInputScopes(aWindow->GetWindowHandle(), scopes, arraySize, nullptr, 0,
+                    nullptr, nullptr);
+  }
 }
 
 } // namespace widget

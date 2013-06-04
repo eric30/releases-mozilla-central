@@ -76,17 +76,13 @@ if CONFIG['MOZ_OPUS']:
 if CONFIG['MOZ_WEBM']:
     add_tier_dir('platform', 'media/libnestegg')
 
-if CONFIG['MOZ_WEBVTT']:
-    add_tier_dir('platform', 'media/webvtt')
+add_tier_dir('platform', 'media/webvtt')
 
 if CONFIG['MOZ_VP8'] and not CONFIG['MOZ_NATIVE_LIBVPX']:
     add_tier_dir('platform', 'media/libvpx')
 
 if CONFIG['MOZ_OGG']:
     add_tier_dir('platform', ['media/libogg', 'media/libtheora'])
-
-if CONFIG['MOZ_SYDNEYAUDIO']:
-    add_tier_dir('platform', 'media/libsydneyaudio')
 
 if CONFIG['MOZ_WEBRTC']:
     add_tier_dir('platform', [
@@ -121,16 +117,20 @@ if CONFIG['MOZ_OMX_PLUGIN']:
         'media/omx-plugin/lib/hc/libstagefright',
         'media/omx-plugin/hc',
         'media/omx-plugin/sony',
+        'media/omx-plugin/jb-htc',
     ])
 
 if not CONFIG['MOZ_NATIVE_PNG']:
     add_tier_dir('platform', 'media/libpng')
+
+add_tier_dir('platform', 'media/kiss_fft')
 
 if CONFIG['ENABLE_TESTS']:
     add_tier_dir('platform', 'testing/specialpowers')
 
 if CONFIG['MOZ_ENABLE_GTEST']:
     add_tier_dir('platform', 'testing/gtest')
+    add_tier_dir('platform', 'xpcom/glue/tests/gtest')
 
 add_tier_dir('platform', [
     'uriloader',
@@ -209,7 +209,6 @@ add_tier_dir('platform', app_libxul_dirs)
 add_tier_dir('platform', app_libxul_static_dirs, static=True)
 
 add_tier_dir('platform', 'toolkit/library')
-add_tier_dir('platform', 'xpcom/stub')
 
 if CONFIG['MOZ_REPLACE_MALLOC']:
     add_tier_dir('platform', 'memory/replace')
@@ -238,12 +237,13 @@ if CONFIG['ENABLE_TESTS']:
         'testing/xpcshell',
         'testing/tools/screenshot',
         'testing/peptest',
+        'testing/profiles',
         'testing/mozbase',
         'testing/modules',
     ])
 
-    if CONFIG['MOZ_WEBRTC']:
-        add_tier_dir('platform', [
-            'media/webrtc/signaling/test',
-            'media/mtransport/test',
-        ])
+    if CONFIG['MOZ_WEBRTC'] and CONFIG['MOZ_WIDGET_TOOLKIT'] != 'gonk':
+            add_tier_dir('platform', [
+                'media/webrtc/signaling/test',
+                'media/mtransport/test',
+            ])

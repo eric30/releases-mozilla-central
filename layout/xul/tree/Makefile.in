@@ -10,27 +10,9 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= layout
 LIBRARY_NAME	= gkxultree_s
 LIBXUL_LIBRARY  = 1
 FAIL_ON_WARNINGS = 1
-
-CPPSRCS		= \
-		nsTreeBodyFrame.cpp \
-		nsTreeBoxObject.cpp \
-		nsTreeColFrame.cpp \
-		nsTreeColumns.cpp \
-		nsTreeContentView.cpp \
-		nsTreeImageListener.cpp \
-		nsTreeSelection.cpp \
-		nsTreeStyleCache.cpp \
-		nsTreeUtils.cpp \
-		$(NULL)
-
-EXPORTS		= \
-		nsTreeColFrame.h \
-		nsTreeUtils.h \
-		$(NULL)
 
 LOCAL_INCLUDES	= \
 		-I$(srcdir) \

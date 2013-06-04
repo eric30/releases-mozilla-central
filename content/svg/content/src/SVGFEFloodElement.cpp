@@ -12,7 +12,7 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGFEFloodElement::WrapNode(JSContext *aCx, JSObject *aScope)
+SVGFEFloodElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
   return SVGFEFloodElementBinding::Wrap(aCx, aScope, this);
 }
@@ -21,17 +21,6 @@ nsSVGElement::StringInfo SVGFEFloodElement::sStringInfo[1] =
 {
   { &nsGkAtoms::result, kNameSpaceID_None, true }
 };
-
-//----------------------------------------------------------------------
-// nsISupports methods
-
-NS_IMPL_ADDREF_INHERITED(SVGFEFloodElement,SVGFEFloodElementBase)
-NS_IMPL_RELEASE_INHERITED(SVGFEFloodElement,SVGFEFloodElementBase)
-
-NS_INTERFACE_TABLE_HEAD(SVGFEFloodElement)
-  NS_NODE_INTERFACE_TABLE3(SVGFEFloodElement, nsIDOMNode, nsIDOMElement,
-                           nsIDOMSVGElement)
-NS_INTERFACE_MAP_END_INHERITING(SVGFEFloodElementBase)
 
 //----------------------------------------------------------------------
 // nsIDOMNode methods

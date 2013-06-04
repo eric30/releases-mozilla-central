@@ -14,21 +14,12 @@ VPATH     = \
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE         = necko
 LIBRARY_NAME   = nksctp_s
 LIBXUL_LIBRARY = 1
-GRE_MODULE     = 1
 FORCE_STATIC_LIB = 1
+NO_PROFILE_GUIDED_OPTIMIZE = 1 # Don't PGO
 
-EXPORTS_NAMESPACES = mozilla/net
-
-ifeq ($(OS_TARGET),Android)
-CPPSRCS = \
-  ifaddrs_android.cpp \
-  $(NULL)
-endif
-
-CSRCS = \
+DISABLED_CSRCS = \
   user_environment.c \
   user_mbuf.c \
   user_recv_thread.c \
@@ -54,10 +45,6 @@ CSRCS = \
   sctp_usrreq.c \
   sctputil.c \
   sctp6_usrreq.c \
-  $(NULL)
-
-EXPORTS_mozilla/net = \
-  usrsctp.h \
   $(NULL)
 
 LOCAL_INCLUDES = \

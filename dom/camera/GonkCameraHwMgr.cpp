@@ -88,7 +88,11 @@ GonkCameraHardware::postData(int32_t aMsgType, const sp<IMemory>& aDataPtr, came
       break;
 
     case CAMERA_MSG_COMPRESSED_IMAGE:
-      ReceiveImage(mTarget, (uint8_t*)aDataPtr->pointer(), aDataPtr->size());
+      if (aDataPtr != nullptr) {
+        ReceiveImage(mTarget, (uint8_t*)aDataPtr->pointer(), aDataPtr->size());
+      } else {
+        ReceiveImageError(mTarget);
+      }
       break;
 
     default:
@@ -173,6 +177,9 @@ GonkCameraHardware::Init()
   }
   DOM_CAMERA_LOGI("Sensor orientation: base=%d, offset=%d, final=%d\n", info.orientation, offset, mSensorOrientation);
 
+  // Disable shutter sound in android CameraService because gaia camera app will play it
+  mCamera->sendCommand(CAMERA_CMD_ENABLE_SHUTTER_SOUND, 0, 0);
+
   mNativeWindow = new GonkNativeWindow();
   mNativeWindow->setNewFrameCallback(this);
   mCamera->setListener(this);
@@ -214,6 +221,10 @@ GonkCameraHardware::~GonkCameraHardware()
   DOM_CAMERA_LOGT( "%s:%d : this=%p\n", __func__, __LINE__, (void*)this );
   mCamera.clear();
   mNativeWindow.clear();
+
+  if (mClosing) {
+    return;
+  }
 
   /**
    * Trigger the OnClosed event; the upper layers can't do anything

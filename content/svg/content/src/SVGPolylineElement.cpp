@@ -12,17 +12,10 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGPolylineElement::WrapNode(JSContext *aCx, JSObject *aScope)
+SVGPolylineElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
   return SVGPolylineElementBinding::Wrap(aCx, aScope, this);
 }
-
-//----------------------------------------------------------------------
-// nsISupports methods
-
-NS_IMPL_ISUPPORTS_INHERITED3(SVGPolylineElement, SVGPolylineElementBase,
-                             nsIDOMNode, nsIDOMElement,
-                             nsIDOMSVGElement)
 
 //----------------------------------------------------------------------
 // Implementation
@@ -30,7 +23,6 @@ NS_IMPL_ISUPPORTS_INHERITED3(SVGPolylineElement, SVGPolylineElementBase,
 SVGPolylineElement::SVGPolylineElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : SVGPolylineElementBase(aNodeInfo)
 {
-
 }
 
 //----------------------------------------------------------------------

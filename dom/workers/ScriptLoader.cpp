@@ -146,9 +146,7 @@ public:
     aWorkerPrivate->AssertIsOnWorkerThread();
     NS_ASSERTION(!aIsWorkerScript || aLoadInfos.Length() == 1, "Bad args!");
 
-    if (!mLoadInfos.SwapElements(aLoadInfos)) {
-      NS_ERROR("This should never fail!");
-    }
+    mLoadInfos.SwapElements(aLoadInfos);
   }
 
   NS_IMETHOD
@@ -635,7 +633,7 @@ ScriptExecutorRunnable::WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
     }
   }
 
-  JS::RootedObject global(aCx, JS_GetGlobalObject(aCx));
+  JS::RootedObject global(aCx, JS_GetGlobalForScopeChain(aCx));
   NS_ASSERTION(global, "Must have a global by now!");
 
   JSPrincipals* principal = GetWorkerPrincipal();

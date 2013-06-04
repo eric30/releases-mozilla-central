@@ -13,7 +13,7 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGFEBlendElement::WrapNode(JSContext *aCx, JSObject *aScope)
+SVGFEBlendElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
   return SVGFEBlendElementBinding::Wrap(aCx, aScope, this);
 }
@@ -42,12 +42,6 @@ nsSVGElement::StringInfo SVGFEBlendElement::sStringInfo[3] =
   { &nsGkAtoms::in2, kNameSpaceID_None, true }
 };
 
-//----------------------------------------------------------------------
-// nsISupports methods
-
-NS_IMPL_ISUPPORTS_INHERITED3(SVGFEBlendElement, SVGFEBlendElementBase,
-                             nsIDOMNode, nsIDOMElement,
-                             nsIDOMSVGElement)
 //----------------------------------------------------------------------
 // nsIDOMNode methods
 

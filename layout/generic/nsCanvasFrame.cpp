@@ -27,10 +27,9 @@
 #include "nsIScrollableFrame.h"
 #include "nsIDocShell.h"
 
-#ifdef DEBUG_rods
 //#define DEBUG_CANVAS_FOCUS
-#endif
 
+using namespace mozilla::layout;
 
 nsIFrame*
 NS_NewCanvasFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
@@ -221,7 +220,7 @@ nsDisplayCanvasBackgroundImage::Paint(nsDisplayListBuilder* aBuilder,
     // Snap image rectangle to nearest pixel boundaries. This is the right way
     // to snap for this context, because we checked HasNonIntegerTranslation above.
     destRect.Round();
-    surf = static_cast<gfxASurface*>(GetUnderlyingFrame()->Properties().Get(nsIFrame::CachedBackgroundImage()));
+    surf = static_cast<gfxASurface*>(Frame()->Properties().Get(nsIFrame::CachedBackgroundImage()));
     nsRefPtr<gfxASurface> destSurf = dest->CurrentSurface();
     if (surf && surf->GetType() == destSurf->GetType()) {
       BlitSurface(dest, destRect, surf);
@@ -430,7 +429,8 @@ nsCanvasFrame::Reflow(nsPresContext*           aPresContext,
   nsCanvasFrame* prevCanvasFrame = static_cast<nsCanvasFrame*>
                                                (GetPrevInFlow());
   if (prevCanvasFrame) {
-    nsAutoPtr<nsFrameList> overflow(prevCanvasFrame->StealOverflowFrames());
+    AutoFrameListPtr overflow(aPresContext,
+                              prevCanvasFrame->StealOverflowFrames());
     if (overflow) {
       NS_ASSERTION(overflow->OnlyChild(),
                    "must have doc root as canvas frame's only child");
@@ -496,9 +496,8 @@ nsCanvasFrame::Reflow(nsPresContext*           aPresContext,
       NS_ASSERTION(nextFrame || aStatus & NS_FRAME_REFLOW_NEXTINFLOW,
         "If it's incomplete and has no nif yet, it must flag a nif reflow.");
       if (!nextFrame) {
-        nsresult rv = aPresContext->PresShell()->FrameConstructor()->
-          CreateContinuingFrame(aPresContext, kidFrame, this, &nextFrame);
-        NS_ENSURE_SUCCESS(rv, rv);
+        nextFrame = aPresContext->PresShell()->FrameConstructor()->
+          CreateContinuingFrame(aPresContext, kidFrame, this);
         SetOverflowFrames(aPresContext, nsFrameList(nextFrame, nextFrame));
         // Root overflow containers will be normal children of
         // the canvas frame, but that's ok because there

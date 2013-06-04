@@ -1,7 +1,7 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-MARIONETTE_TIMEOUT = 20000;
+MARIONETTE_TIMEOUT = 60000;
 
 SpecialPowers.setBoolPref("dom.sms.enabled", true);
 SpecialPowers.addPermission("sms", true, document);
@@ -36,6 +36,7 @@ function simulateIncomingSms() {
     ok(incomingSms, "incoming sms");
     ok(incomingSms.id, "sms id");
     log("Received SMS (id: " + incomingSms.id + ").");
+    ok(incomingSms.threadId, "thread id");
     is(incomingSms.body.length, msgText.length, "msg body length");
     is(incomingSms.body, msgText, "msg body");
     is(incomingSms.delivery, "received", "delivery");

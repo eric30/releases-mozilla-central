@@ -6,7 +6,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /* TLS extension code moved here from ssl3ecc.c */
-/* $Id: ssl3ext.c,v 1.30 2012/11/13 01:26:40 wtc%google.com Exp $ */
 
 #include "nssrenam.h"
 #include "nss.h"
@@ -61,6 +60,15 @@ static PRInt32 ssl3_SendUseSRTPXtn(sslSocket *ss, PRBool append,
     PRUint32 maxBytes);
 static SECStatus ssl3_HandleUseSRTPXtn(sslSocket * ss, PRUint16 ex_type,
     SECItem *data);
+static SECStatus ssl3_ServerSendStatusRequestXtn(sslSocket * ss,
+    PRBool append, PRUint32 maxBytes);
+static SECStatus ssl3_ServerHandleStatusRequestXtn(sslSocket *ss,
+    PRUint16 ex_type, SECItem *data);
+static SECStatus ssl3_ClientHandleStatusRequestXtn(sslSocket *ss,
+                                                   PRUint16 ex_type,
+                                                   SECItem *data);
+static PRInt32 ssl3_ClientSendStatusRequestXtn(sslSocket * ss, PRBool append,
+                                               PRUint32 maxBytes);
 
 /*
  * Write bytes.  Using this function means the SECItem structure
@@ -88,18 +96,18 @@ static SECStatus
 ssl3_AppendNumberToItem(SECItem *item, PRUint32 num, PRInt32 lenSize)
 {
     SECStatus rv;
-    uint8     b[4];
-    uint8 *   p = b;
+    PRUint8   b[4];
+    PRUint8 * p = b;
 
     switch (lenSize) {
     case 4:
-	*p++ = (uint8) (num >> 24);
+	*p++ = (PRUint8) (num >> 24);
     case 3:
-	*p++ = (uint8) (num >> 16);
+	*p++ = (PRUint8) (num >> 16);
     case 2:
-	*p++ = (uint8) (num >> 8);
+	*p++ = (PRUint8) (num >> 8);
     case 1:
-	*p = (uint8) num;
+	*p = (PRUint8) num;
     }
     rv = ssl3_AppendToItem(item, &b[0], lenSize);
     return rv;
@@ -192,7 +200,7 @@ ssl3_GetSessionTicketKeys(const unsigned char **aes_key,
     PRUint32 *mac_key_length)
 {
     if (PR_CallOnce(&generate_session_keys_once,
-	    ssl3_GenerateSessionTicketKeys) != SECSuccess)
+	    ssl3_GenerateSessionTicketKeys) != PR_SUCCESS)
 	return SECFailure;
 
     if (!session_ticket_keys_initialized)
@@ -222,6 +230,7 @@ static const ssl3HelloExtensionHandler clientHelloHandlers[] = {
     { ssl_renegotiation_info_xtn, &ssl3_HandleRenegotiationInfoXtn },
     { ssl_next_proto_nego_xtn,    &ssl3_ServerHandleNextProtoNegoXtn },
     { ssl_use_srtp_xtn,           &ssl3_HandleUseSRTPXtn },
+    { ssl_cert_status_xtn,        &ssl3_ServerHandleStatusRequestXtn },
     { -1, NULL }
 };
 
@@ -234,6 +243,7 @@ static const ssl3HelloExtensionHandler serverHelloHandlersTLS[] = {
     { ssl_renegotiation_info_xtn, &ssl3_HandleRenegotiationInfoXtn },
     { ssl_next_proto_nego_xtn,    &ssl3_ClientHandleNextProtoNegoXtn },
     { ssl_use_srtp_xtn,           &ssl3_HandleUseSRTPXtn },
+    { ssl_cert_status_xtn,        &ssl3_ClientHandleStatusRequestXtn },
     { -1, NULL }
 };
 
@@ -258,7 +268,8 @@ ssl3HelloExtensionSender clientHelloSendersTLS[SSL_MAX_EXTENSIONS] = {
 #endif
     { ssl_session_ticket_xtn,     &ssl3_SendSessionTicketXtn },
     { ssl_next_proto_nego_xtn,    &ssl3_ClientSendNextProtoNegoXtn },
-    { ssl_use_srtp_xtn,           &ssl3_SendUseSRTPXtn }
+    { ssl_use_srtp_xtn,           &ssl3_SendUseSRTPXtn },
+    { ssl_cert_status_xtn,        &ssl3_ClientSendStatusRequestXtn }
     /* any extra entries will appear as { 0, NULL }    */
 };
 
@@ -648,6 +659,114 @@ loser:
     return -1;
 }
 
+static SECStatus
+ssl3_ClientHandleStatusRequestXtn(sslSocket *ss, PRUint16 ex_type,
+                                 SECItem *data)
+{
+    /* The echoed extension must be empty. */
+    if (data->len != 0)
+       return SECFailure;
+
+    /* Keep track of negotiated extensions. */
+    ss->xtnData.negotiated[ss->xtnData.numNegotiated++] = ex_type;
+
+    return SECSuccess;
+}
+
+static PRInt32
+ssl3_ServerSendStatusRequestXtn(
+			sslSocket * ss,
+			PRBool      append,
+			PRUint32    maxBytes)
+{
+    PRInt32 extension_length;
+    SECStatus rv;
+    int i;
+    PRBool haveStatus = PR_FALSE;
+
+    for (i = kt_null; i < kt_kea_size; i++) {
+	/* TODO: This is a temporary workaround.
+	 *       The correct code needs to see if we have an OCSP response for
+	 *       the server certificate being used, rather than if we have any
+	 *       OCSP response. See also ssl3_SendCertificateStatus.
+	 */
+	if (ss->certStatusArray[i] && ss->certStatusArray[i]->len) {
+	    haveStatus = PR_TRUE;
+	    break;
+	}
+    }
+    if (!haveStatus)
+	return 0;
+
+    extension_length = 2 + 2;
+    if (append && maxBytes >= extension_length) {
+	/* extension_type */
+	rv = ssl3_AppendHandshakeNumber(ss, ssl_cert_status_xtn, 2);
+	if (rv != SECSuccess)
+	    return -1;
+	/* length of extension_data */
+	rv = ssl3_AppendHandshakeNumber(ss, 0, 2);
+	if (rv != SECSuccess)
+	    return -1;
+    }
+
+    return extension_length;
+}
+
+/* ssl3_ClientSendStatusRequestXtn builds the status_request extension on the
+ * client side. See RFC 4366 section 3.6. */
+static PRInt32
+ssl3_ClientSendStatusRequestXtn(sslSocket * ss, PRBool append,
+                               PRUint32 maxBytes)
+{
+    PRInt32 extension_length;
+
+    if (!ss->opt.enableOCSPStapling)
+       return 0;
+
+    /* extension_type (2-bytes) +
+     * length(extension_data) (2-bytes) +
+     * status_type (1) +
+     * responder_id_list length (2) +
+     * request_extensions length (2)
+     */
+    extension_length = 9;
+
+    if (append && maxBytes >= extension_length) {
+       SECStatus rv;
+       TLSExtensionData *xtnData;
+
+       /* extension_type */
+       rv = ssl3_AppendHandshakeNumber(ss, ssl_cert_status_xtn, 2);
+       if (rv != SECSuccess)
+           return -1;
+       rv = ssl3_AppendHandshakeNumber(ss, extension_length - 4, 2);
+       if (rv != SECSuccess)
+           return -1;
+       rv = ssl3_AppendHandshakeNumber(ss, 1 /* status_type ocsp */, 1);
+       if (rv != SECSuccess)
+           return -1;
+       /* A zero length responder_id_list means that the responders are
+        * implicitly known to the server. */
+       rv = ssl3_AppendHandshakeNumber(ss, 0, 2);
+       if (rv != SECSuccess)
+           return -1;
+       /* A zero length request_extensions means that there are no extensions.
+        * Specifically, we don't set the id-pkix-ocsp-nonce extension. This
+        * means that the server can replay a cached OCSP response to us. */
+       rv = ssl3_AppendHandshakeNumber(ss, 0, 2);
+       if (rv != SECSuccess)
+           return -1;
+
+       xtnData = &ss->xtnData;
+       xtnData->advertised[xtnData->numAdvertised++] = ssl_cert_status_xtn;
+    } else if (maxBytes < extension_length) {
+       PORT_Assert(0);
+       return 0;
+    }
+    return extension_length;
+}
+
 /*
  * NewSessionTicket
  * Called from ssl3_HandleFinished
@@ -669,7 +788,7 @@ ssl3_SendNewSessionTicket(sslSocket *ss)
     PRUint32             padding_length;
     PRUint32             message_length;
     PRUint32             cert_length;
-    uint8                length_buf[4];
+    PRUint8              length_buf[4];
     PRUint32             now;
     PK11SymKey          *aes_key_pkcs11;
     PK11SymKey          *mac_key_pkcs11;
@@ -1628,6 +1747,21 @@ ssl3_SendRenegotiationInfoXtn(
 	}
     }
     return needed;
+}
+
+static SECStatus
+ssl3_ServerHandleStatusRequestXtn(sslSocket *ss, PRUint16 ex_type,
+				  SECItem *data)
+{
+    SECStatus rv = SECSuccess;
+
+    /* remember that we got this extension. */
+    ss->xtnData.negotiated[ss->xtnData.numNegotiated++] = ex_type;
+    PORT_Assert(ss->sec.isServer);
+    /* prepare to send back the appropriate response */
+    rv = ssl3_RegisterServerHelloExtensionSender(ss, ex_type,
+					    ssl3_ServerSendStatusRequestXtn);
+    return rv;
 }
 
 /* This function runs in both the client and server.  */

@@ -112,10 +112,10 @@ public:
 
   virtual bool MediumFeaturesChanged(nsPresContext* aPresContext) MOZ_OVERRIDE;
 
-  virtual NS_MUST_OVERRIDE size_t
-    SizeOfExcludingThis(nsMallocSizeOfFun mallocSizeOf) const MOZ_OVERRIDE;
-  virtual NS_MUST_OVERRIDE size_t
-    SizeOfIncludingThis(nsMallocSizeOfFun mallocSizeOf) const MOZ_OVERRIDE;
+  virtual size_t SizeOfExcludingThis(nsMallocSizeOfFun mallocSizeOf)
+    const MOZ_MUST_OVERRIDE MOZ_OVERRIDE;
+  virtual size_t SizeOfIncludingThis(nsMallocSizeOfFun mallocSizeOf)
+    const MOZ_MUST_OVERRIDE MOZ_OVERRIDE;
 
   // Append all the currently-active font face rules to aArray.  Return
   // true for success and false for failure.
@@ -127,6 +127,9 @@ public:
 
   bool AppendPageRules(nsPresContext* aPresContext,
                        nsTArray<nsCSSPageRule*>& aArray);
+
+  bool AppendFontFeatureValuesRules(nsPresContext* aPresContext,
+                              nsTArray<nsCSSFontFeatureValuesRule*>& aArray);
 
   /**
    * Returns the scope element for the scoped style sheets this rule

@@ -12,8 +12,7 @@
  * liability, trademark and document use rules apply.
  */
 
-interface ClientRect;
-
+[Constructor]
 interface Range {
   [Throws]
   readonly attribute Node startContainer;

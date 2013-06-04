@@ -1,6 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=4 sw=4 et tw=99:
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -141,7 +140,7 @@ CodeGeneratorX64::visitUnbox(LUnbox *unbox)
         JS_NOT_REACHED("Given MIRType cannot be unboxed.");
         break;
     }
-    
+
     return true;
 }
 
@@ -285,23 +284,6 @@ CodeGeneratorX64::visitImplicitThis(LImplicitThis *lir)
     return true;
 }
 
-bool
-CodeGeneratorX64::visitRecompileCheck(LRecompileCheck *lir)
-{
-    // Bump the script's use count and bailout if the script is hot. Note that
-    // it's safe to bake in this pointer since scripts are never nursery
-    // allocated and jitcode will be purged before doing a compacting GC.
-    const uint32_t *useCount = gen->info().script()->addressOfUseCount();
-    masm.movq(ImmWord(useCount), ScratchReg);
-
-    Operand addr(ScratchReg, 0);
-    masm.addl(Imm32(1), addr);
-    masm.cmpl(addr, Imm32(lir->mir()->minUses()));
-    if (!bailoutIf(Assembler::AboveOrEqual, lir->snapshot()))
-        return false;
-    return true;
-}
-
 typedef bool (*InterruptCheckFn)(JSContext *);
 static const VMFunction InterruptCheckInfo = FunctionInfo<InterruptCheckFn>(InterruptCheck);
 
@@ -399,6 +381,20 @@ bool
 CodeGeneratorX64::visitUInt32ToDouble(LUInt32ToDouble *lir)
 {
     masm.convertUInt32ToDouble(ToRegister(lir->input()), ToFloatRegister(lir->output()));
+    return true;
+}
+
+bool
+CodeGeneratorX64::visitLoadTypedArrayElementStatic(LLoadTypedArrayElementStatic *ins)
+{
+    JS_NOT_REACHED("NYI");
+    return true;
+}
+
+bool
+CodeGeneratorX64::visitStoreTypedArrayElementStatic(LStoreTypedArrayElementStatic *ins)
+{
+    JS_NOT_REACHED("NYI");
     return true;
 }
 
@@ -533,3 +529,22 @@ CodeGeneratorX64::visitAsmJSLoadFFIFunc(LAsmJSLoadFFIFunc *ins)
     return gen->noteGlobalAccess(label.offset(), mir->globalDataOffset());
 }
 
+void
+ParallelGetPropertyIC::initializeAddCacheState(LInstruction *ins, AddCacheState *addState)
+{
+    // Can always use the scratch register on x64.
+    JS_ASSERT(ins->isGetPropertyCacheV() || ins->isGetPropertyCacheT());
+    addState->dispatchScratch = ScratchReg;
+}
+
+bool
+CodeGeneratorX64::visitTruncateDToInt32(LTruncateDToInt32 *ins)
+{
+    FloatRegister input = ToFloatRegister(ins->input());
+    Register output = ToRegister(ins->output());
+
+    // On x64, branchTruncateDouble uses cvttsd2sq. Unlike the x86
+    // implementation, this should handle most doubles and we can just
+    // call a stub if it fails.
+    return emitTruncateDouble(input, output);
+}

@@ -16,7 +16,6 @@
 #include "nsIDOMNavigatorSms.h"
 #include "nsIDOMNavigatorMobileMessage.h"
 #include "nsIDOMNavigatorNetwork.h"
-#include "nsIObserver.h"
 #ifdef MOZ_AUDIO_CHANNEL_MANAGER
 #include "nsINavigatorAudioChannelManager.h"
 #endif
@@ -24,6 +23,7 @@
 #include "nsINavigatorMobileConnection.h"
 #include "nsINavigatorCellBroadcast.h"
 #include "nsINavigatorVoicemail.h"
+#include "nsINavigatorIccManager.h"
 #endif
 #include "nsAutoPtr.h"
 #include "nsIDOMNavigatorTime.h"
@@ -32,10 +32,14 @@
 
 class nsPluginArray;
 class nsMimeTypeArray;
-class nsGeolocation;
-class nsDesktopNotificationCenter;
 class nsPIDOMWindow;
 class nsIDOMMozConnection;
+
+namespace mozilla {
+namespace dom {
+class Geolocation;
+}
+}
 
 #ifdef MOZ_MEDIA_NAVIGATOR
 #include "nsIDOMNavigatorUserMedia.h"
@@ -70,8 +74,15 @@ namespace battery {
 class BatteryManager;
 } // namespace battery
 
+class DesktopNotificationCenter;
 class SmsManager;
 class MobileMessageManager;
+
+namespace icc {
+#ifdef MOZ_B2G_RIL
+class IccManager;
+#endif
+}
 
 namespace network {
 class Connection;
@@ -102,7 +113,6 @@ class Navigator : public nsIDOMNavigator
                 , public nsINavigatorBattery
                 , public nsIDOMMozNavigatorSms
                 , public nsIDOMMozNavigatorMobileMessage
-                , public nsIObserver
 #ifdef MOZ_MEDIA_NAVIGATOR
                 , public nsINavigatorUserMedia
                 , public nsIDOMNavigatorUserMedia
@@ -115,6 +125,7 @@ class Navigator : public nsIDOMNavigator
                 , public nsIMozNavigatorMobileConnection
                 , public nsIMozNavigatorCellBroadcast
                 , public nsIMozNavigatorVoicemail
+                , public nsIMozNavigatorIccManager
 #endif
 #ifdef MOZ_B2G_BT
                 , public nsIDOMNavigatorBluetooth
@@ -145,7 +156,6 @@ public:
   NS_DECL_NSINAVIGATORBATTERY
   NS_DECL_NSIDOMMOZNAVIGATORSMS
   NS_DECL_NSIDOMMOZNAVIGATORMOBILEMESSAGE
-  NS_DECL_NSIOBSERVER
 #ifdef MOZ_MEDIA_NAVIGATOR
   NS_DECL_NSINAVIGATORUSERMEDIA
   NS_DECL_NSIDOMNAVIGATORUSERMEDIA
@@ -158,6 +168,7 @@ public:
   NS_DECL_NSIMOZNAVIGATORMOBILECONNECTION
   NS_DECL_NSIMOZNAVIGATORCELLBROADCAST
   NS_DECL_NSIMOZNAVIGATORVOICEMAIL
+  NS_DECL_NSIMOZNAVIGATORICCMANAGER
 #endif
 
 #ifdef MOZ_B2G_BT
@@ -195,10 +206,9 @@ public:
    */
   void OnNavigation();
 
-#ifdef MOZ_SYS_MSG
   // Helper to initialize mMessagesManager.
   nsresult EnsureMessagesManager();
-#endif
+
   NS_DECL_NSIDOMNAVIGATORCAMERA
 
 private:
@@ -206,8 +216,8 @@ private:
 
   nsRefPtr<nsMimeTypeArray> mMimeTypes;
   nsRefPtr<nsPluginArray> mPlugins;
-  nsRefPtr<nsGeolocation> mGeolocation;
-  nsRefPtr<nsDesktopNotificationCenter> mNotification;
+  nsRefPtr<Geolocation> mGeolocation;
+  nsRefPtr<DesktopNotificationCenter> mNotification;
   nsRefPtr<battery::BatteryManager> mBatteryManager;
   nsRefPtr<power::PowerManager> mPowerManager;
   nsRefPtr<SmsManager> mSmsManager;
@@ -220,6 +230,7 @@ private:
 #ifdef MOZ_B2G_RIL
   nsRefPtr<network::MobileConnection> mMobileConnection;
   nsCOMPtr<nsIDOMMozCellBroadcast> mCellBroadcast;
+  nsRefPtr<icc::IccManager> mIccManager;
 #endif
 #ifdef MOZ_B2G_BT
   nsCOMPtr<nsIDOMBluetoothManager> mBluetooth;

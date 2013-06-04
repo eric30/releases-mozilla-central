@@ -1,6 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=4 sw=4 et tw=99:
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -10,16 +9,15 @@
 
 #include "jscntxt.h"
 #include "jscompartment.h"
+#include "jsgc.h"
 #include "ion/IonCode.h"
 #include "ion/IonCompartment.h"
 #include "assembler/jit/ExecutableAllocator.h"
 #include "ion/IonMacroAssembler.h"
-#include "jsgcinlines.h"
 
 namespace js {
 namespace ion {
 
-static const int CodeAlignment = 8;
 class Linker
 {
     MacroAssembler &masm;
@@ -29,7 +27,10 @@ class Linker
         return NULL;
     }
 
-    IonCode *newCode(JSContext *cx, IonCompartment *comp) {
+    IonCode *newCode(JSContext *cx, IonCompartment *comp, JSC::CodeKind kind) {
+        JS_ASSERT(kind == JSC::ION_CODE ||
+                  kind == JSC::BASELINE_CODE ||
+                  kind == JSC::OTHER_CODE);
         gc::AutoSuppressGC suppressGC(cx);
         if (masm.oom())
             return fail(cx);
@@ -39,7 +40,7 @@ class Linker
         if (bytesNeeded >= MAX_BUFFER_SIZE)
             return fail(cx);
 
-        uint8_t *result = (uint8_t *)comp->execAlloc()->alloc(bytesNeeded, &pool, JSC::ION_CODE);
+        uint8_t *result = (uint8_t *)comp->execAlloc()->alloc(bytesNeeded, &pool, kind);
         if (!result)
             return fail(cx);
 
@@ -67,8 +68,8 @@ class Linker
         masm.finish();
     }
 
-    IonCode *newCode(JSContext *cx) {
-        return newCode(cx, cx->compartment->ionCompartment());
+    IonCode *newCode(JSContext *cx, JSC::CodeKind kind) {
+        return newCode(cx, cx->compartment->ionCompartment(), kind);
     }
 };
 

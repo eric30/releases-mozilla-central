@@ -43,7 +43,6 @@
 #include "nsIDOMHTMLEmbedElement.h"
 #include "nsIDOMHTMLAppletElement.h"
 #include "nsIDOMWindow.h"
-#include "nsIDOMEventTarget.h"
 #include "nsIDocumentEncoder.h"
 #include "nsXPIDLString.h"
 #include "nsIDOMRange.h"
@@ -67,7 +66,7 @@
 #include "nsIObserverService.h"
 #include "nsIScrollableFrame.h"
 #include "mozilla/Preferences.h"
-#include "sampler.h"
+#include "GeckoProfiler.h"
 #include <algorithm>
 
 // headers for plugin scriptability
@@ -288,7 +287,7 @@ NS_IMETHODIMP nsObjectFrame::GetPluginPort(HWND *aPort)
 #endif
 #endif
 
-NS_IMETHODIMP 
+void
 nsObjectFrame::Init(nsIContent*      aContent,
                     nsIFrame*        aParent,
                     nsIFrame*        aPrevInFlow)
@@ -296,9 +295,7 @@ nsObjectFrame::Init(nsIContent*      aContent,
   PR_LOG(GetObjectFrameLog(), PR_LOG_DEBUG,
          ("Initializing nsObjectFrame %p for content %p\n", this, aContent));
 
-  nsresult rv = nsObjectFrameSuper::Init(aContent, aParent, aPrevInFlow);
-
-  return rv;
+  nsObjectFrameSuper::Init(aContent, aParent, aPrevInFlow);
 }
 
 void
@@ -311,16 +308,18 @@ nsObjectFrame::DestroyFrom(nsIFrame* aDestructRoot)
   // Tell content owner of the instance to disconnect its frame.
   nsCOMPtr<nsIObjectLoadingContent> objContent(do_QueryInterface(mContent));
   NS_ASSERTION(objContent, "Why not an object loading content?");
-  objContent->DisconnectFrame();
+
+  // The content might not have a reference to the instance owner any longer in
+  // the case of re-entry during instantiation or teardown, so make sure we're
+  // dissociated.
+  if (mInstanceOwner) {
+    mInstanceOwner->SetFrame(nullptr);
+  }
+  objContent->HasNewFrame(nullptr);
 
   if (mBackgroundSink) {
     mBackgroundSink->Destroy();
   }
-
-  if (mInstanceOwner) {
-    mInstanceOwner->SetFrame(nullptr);
-  }
-  SetInstanceOwner(nullptr);
 
   nsObjectFrameSuper::DestroyFrom(aDestructRoot);
 }
@@ -421,8 +420,7 @@ nsObjectFrame::PrepForDrawing(nsIWidget *aWidget)
     configuration->mBounds.height = NSAppUnitsToIntPixels(mRect.height, appUnitsPerDevPixel);
     parentWidget->ConfigureChildren(configurations);
 
-    nsRefPtr<nsDeviceContext> dx;
-    viewMan->GetDeviceContext(*getter_AddRefs(dx));
+    nsRefPtr<nsDeviceContext> dx = viewMan->GetDeviceContext();
     mInnerView->AttachWidgetEventHandler(mWidget);
 
 #ifdef XP_MACOSX
@@ -781,6 +779,10 @@ nsObjectFrame::UnregisterPluginForGeometryUpdates()
 void
 nsObjectFrame::SetInstanceOwner(nsPluginInstanceOwner* aOwner)
 {
+  // The ownership model here is historically fuzzy. This should only be called
+  // by nsPluginInstanceOwner when it is given a new frame, and
+  // nsObjectLoadingContent should be arbitrating frame-ownership via its
+  // HasNewFrame callback.
   mInstanceOwner = aOwner;
   if (mInstanceOwner) {
     return;
@@ -880,7 +882,7 @@ nsObjectFrame::DidReflow(nsPresContext*            aPresContext,
 
   // The view is created hidden; once we have reflowed it and it has been
   // positioned then we show it.
-  if (aStatus != nsDidReflowStatus::FINISHED) 
+  if (aStatus != nsDidReflowStatus::FINISHED)
     return rv;
 
   if (HasView()) {
@@ -1063,9 +1065,8 @@ nsDisplayPlugin::ComputeVisibility(nsDisplayListBuilder* aBuilder,
         ReferenceFrame()->PresContext()->AppUnitsPerDevPixel();
       f->mNextConfigurationBounds = rAncestor.ToNearestPixels(appUnitsPerDevPixel);
 
-      bool snap;
       nsRegion visibleRegion;
-      visibleRegion.And(*aVisibleRegion, GetBounds(aBuilder, &snap));
+      visibleRegion.And(*aVisibleRegion, GetClippedBounds(aBuilder));
       // Make visibleRegion relative to f
       visibleRegion.MoveBy(-ToReferenceFrame());
 
@@ -1234,8 +1235,6 @@ nsObjectFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   }
 #endif
 
-  nsDisplayList replacedContent;
-
   if (aBuilder->IsForPainting() && mInstanceOwner && mInstanceOwner->UseAsyncRendering()) {
     NPWindow* window = nullptr;
     mInstanceOwner->GetWindow(window);
@@ -1249,9 +1248,12 @@ nsObjectFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     mInstanceOwner->NotifyPaintWaiter(aBuilder);
   }
 
+  DisplayListClipState::AutoClipContainingBlockDescendantsToContentBox
+    clip(aBuilder, this, DisplayListClipState::ASSUME_DRAWING_RESTRICTED_TO_CONTENT_RECT);
+
   // determine if we are printing
   if (type == nsPresContext::eContext_Print) {
-    replacedContent.AppendNewToTop(new (aBuilder)
+    aLists.Content()->AppendNewToTop(new (aBuilder)
       nsDisplayGeneric(aBuilder, this, PaintPrintPlugin, "PrintPlugin",
                        nsDisplayItem::TYPE_PRINT_PLUGIN));
   } else {
@@ -1265,7 +1267,7 @@ nsObjectFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     if (aBuilder->IsPaintingToWindow() &&
         state == LAYER_ACTIVE &&
         IsTransparentMode()) {
-      replacedContent.AppendNewToTop(new (aBuilder)
+      aLists.Content()->AppendNewToTop(new (aBuilder)
         nsDisplayPluginReadback(aBuilder, this));
     }
 #endif
@@ -1278,17 +1280,15 @@ nsObjectFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       mInstanceOwner->GetVideos(videos);
 
       for (uint32_t i = 0; i < videos.Length(); i++) {
-        replacedContent.AppendNewToTop(new (aBuilder)
+        aLists.Content()->AppendNewToTop(new (aBuilder)
           nsDisplayPluginVideo(aBuilder, this, videos[i]));
       }
     }
 #endif
 
-    replacedContent.AppendNewToTop(new (aBuilder)
+    aLists.Content()->AppendNewToTop(new (aBuilder)
       nsDisplayPlugin(aBuilder, this));
   }
-
-  WrapReplacedContentForBorderRadius(aBuilder, &replacedContent, aLists);
 }
 
 #ifdef XP_OS2
@@ -1541,34 +1541,12 @@ nsObjectFrame::GetPaintedRect(nsDisplayPlugin* aItem)
   return r;
 }
 
-void
-nsObjectFrame::UpdateImageLayer(const gfxRect& aRect)
-{
-  if (!mInstanceOwner) {
-    return;
-  }
-
-#ifdef XP_MACOSX
-  if (!mInstanceOwner->UseAsyncRendering()) {
-    mInstanceOwner->DoCocoaEventDrawRect(aRect, nullptr);
-  }
-#endif
-}
-
 LayerState
 nsObjectFrame::GetLayerState(nsDisplayListBuilder* aBuilder,
                              LayerManager* aManager)
 {
   if (!mInstanceOwner)
     return LAYER_NONE;
-
-#ifdef XP_MACOSX
-  if (!mInstanceOwner->UseAsyncRendering() &&
-      mInstanceOwner->IsRemoteDrawingCoreAnimation() &&
-      mInstanceOwner->GetEventModel() == NPEventModelCocoa) {
-    return LAYER_ACTIVE;
-  }
-#endif
 
 #ifdef MOZ_WIDGET_ANDROID
   // We always want a layer on Honeycomb and later
@@ -1633,7 +1611,11 @@ nsObjectFrame::BuildLayer(nsDisplayListBuilder* aBuilder,
 
     NS_ASSERTION(layer->GetType() == Layer::TYPE_IMAGE, "Bad layer type");
     ImageLayer* imglayer = static_cast<ImageLayer*>(layer.get());
-    UpdateImageLayer(r);
+#ifdef XP_MACOSX
+    if (!mInstanceOwner->UseAsyncRendering()) {
+      mInstanceOwner->DoCocoaEventDrawRect(r, nullptr);
+    }
+#endif
 
     imglayer->SetScaleToSize(size, ImageLayer::SCALE_STRETCH);
     imglayer->SetContainer(container);

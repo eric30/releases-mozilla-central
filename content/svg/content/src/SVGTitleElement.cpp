@@ -12,7 +12,7 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGTitleElement::WrapNode(JSContext *aCx, JSObject *aScope)
+SVGTitleElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
   return SVGTitleElementBinding::Wrap(aCx, aScope, this);
 }
@@ -31,7 +31,6 @@ NS_IMPL_ISUPPORTS_INHERITED4(SVGTitleElement, SVGTitleElementBase,
 SVGTitleElement::SVGTitleElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : SVGTitleElementBase(aNodeInfo)
 {
-  SetIsDOMBinding();
   AddMutationObserver(this);
 }
 

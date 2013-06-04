@@ -7,6 +7,7 @@
 #ifndef VideoUtils_h
 #define VideoUtils_h
 
+#include "mozilla/Attributes.h"
 #include "mozilla/ReentrantMonitor.h"
 #include "mozilla/CheckedInt.h"
 
@@ -35,7 +36,7 @@ namespace mozilla {
  *
  * MUCH PREFERRED to bare calls to ReentrantMonitor.Exit and Enter.
  */ 
-class NS_STACK_CLASS ReentrantMonitorAutoExit
+class MOZ_STACK_CLASS ReentrantMonitorAutoExit
 {
 public:
     /**
@@ -77,7 +78,7 @@ private:
  * E.g. Used to allow unmonitored read access on the decode thread,
  * and monitored access on all other threads.
  */
-class NS_STACK_CLASS ReentrantMonitorConditionallyEnter
+class MOZ_STACK_CLASS ReentrantMonitorConditionallyEnter
 {
 public:
   ReentrantMonitorConditionallyEnter(bool aEnter,
@@ -115,7 +116,7 @@ class ShutdownThreadEvent : public nsRunnable
 public:
   ShutdownThreadEvent(nsIThread* aThread) : mThread(aThread) {}
   ~ShutdownThreadEvent() {}
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() MOZ_OVERRIDE {
     mThread->Shutdown();
     mThread = nullptr;
     return NS_OK;

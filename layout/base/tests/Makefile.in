@@ -15,7 +15,6 @@ MOCHITEST_FILES =	\
 		border_radius_hit_testing_iframe.html \
 		test_preserve3d_sorting_hit_testing.html \
 		preserve3d_sorting_hit_testing_iframe.html \
-		test_image_layers.html \
 		image_rgrg-256x256.png \
 		image_rrgg-256x256.png \
 		bug369950-subframe.xml \
@@ -148,7 +147,17 @@ MOCHITEST_FILES =	\
 		  file_bug842853.html \
 		test_bug849219.html \
 		test_bug851485.html \
+		test_bug851445.html \
+		  bug851445_helper.html \
 		$(NULL)
+
+ifeq (,$(filter gonk,$(MOZ_WIDGET_TOOLKIT)))
+# THESE TESTS (BELOW) DO NOT RUN ON B2G
+MOCHITEST_FILES += \
+		test_bug858459.html \
+		$(NULL)
+# THESE TESTS (ABOVE) DO NOT RUN ON B2G
+endif
 
 # Tests for bugs 441782, 467672 and 570378 don't pass reliably on Windows, because of bug 469208
 ifeq (,$(filter windows,$(MOZ_WIDGET_TOOLKIT)))

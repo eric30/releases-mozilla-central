@@ -12,13 +12,11 @@
 #include "nsCOMPtr.h"
 #include "nsDOMString.h"
 #include "nsWrapperCache.h"
+#include "mozilla/dom/Element.h"
 
 namespace mozilla {
 class ErrorResult;
 
-namespace dom {
-class Element;
-} // namespace dom
 } // namespace mozilla
 
 class nsAttrValue;
@@ -40,7 +38,8 @@ public:
 
   void DropReference();
 
-  virtual JSObject* WrapObject(JSContext *cx, JSObject *scope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext *cx,
+                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
   Element* GetParentObject()
   {

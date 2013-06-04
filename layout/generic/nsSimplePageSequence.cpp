@@ -265,12 +265,8 @@ nsSimplePageSequenceFrame::Reflow(nsPresContext*          aPresContext,
     } else if (!kidNextInFlow) {
       // The page isn't complete and it doesn't have a next-in-flow, so
       // create a continuing page.
-      nsIFrame* continuingPage;
-      nsresult rv = aPresContext->PresShell()->FrameConstructor()->
-        CreateContinuingFrame(aPresContext, kidFrame, this, &continuingPage);
-      if (NS_FAILED(rv)) {
-        break;
-      }
+      nsIFrame* continuingPage = aPresContext->PresShell()->FrameConstructor()->
+        CreateContinuingFrame(aPresContext, kidFrame, this);
 
       // Add it to our child list
       mFrames.InsertFrame(nullptr, kidFrame, continuingPage);
@@ -811,11 +807,19 @@ nsSimplePageSequenceFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   DisplayBorderBackgroundOutline(aBuilder, aLists);
 
   nsDisplayList content;
-  nsIFrame* child = GetFirstPrincipalChild();
-  while (child) {
-    child->BuildDisplayListForStackingContext(aBuilder,
-        child->GetVisualOverflowRectRelativeToSelf(), &content);
-    child = child->GetNextSibling();
+
+  {
+    // Clear clip state while we construct the children of the
+    // nsDisplayTransform, since they'll be in a different coordinate system.
+    DisplayListClipState::AutoSaveRestore clipState(aBuilder);
+    clipState.Clear();
+
+    nsIFrame* child = GetFirstPrincipalChild();
+    while (child) {
+      child->BuildDisplayListForStackingContext(aBuilder,
+          child->GetVisualOverflowRectRelativeToSelf(), &content);
+      child = child->GetNextSibling();
+    }
   }
 
   content.AppendNewToTop(new (aBuilder)

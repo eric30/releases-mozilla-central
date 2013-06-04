@@ -1,6 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=4 sw=4 et tw=99 ft=cpp:
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -32,6 +31,7 @@
 
 #include "mozilla/Assertions.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/TypeTraits.h"
 
 #include "jstypes.h"
 
@@ -44,6 +44,18 @@ class JSObject;
 /* Typedef for native functions called by the JS VM. */
 typedef JSBool
 (* JSNative)(JSContext *cx, unsigned argc, JS::Value *vp);
+
+/*
+ * Compute |this| for the |vp| inside a JSNative, either boxing primitives or
+ * replacing with the global object as necessary.
+ *
+ * This method will go away at some point: instead use |args.thisv()|.  If the
+ * value is an object, no further work is required.  If that value is |null| or
+ * |undefined|, use |JS_GetGlobalForObject| to compute the global object.  If
+ * the value is some other primitive, use |JS_ValueToObject| to box it.
+ */
+extern JS_PUBLIC_API(JS::Value)
+JS_ComputeThis(JSContext *cx, JS::Value *vp);
 
 namespace JS {
 
@@ -66,7 +78,7 @@ namespace JS {
  *
  *       // It's always fine to access thisv().
  *       HandleValue thisv = rec.thisv();
- *       rec.thisv().set(thisv);
+ *       rec.rval().set(thisv);
  *
  *       // As the return value was last set to |this|, returns |this|.
  *       return true;
@@ -81,22 +93,42 @@ namespace JS {
  * public interface are meant to be used by embedders!  See inline comments to
  * for details.
  */
-class CallReceiver
+
+namespace detail {
+
+enum UsedRval { IncludeUsedRval, NoUsedRval };
+
+template<UsedRval WantUsedRval>
+class MOZ_STACK_CLASS UsedRvalBase;
+
+template<>
+class MOZ_STACK_CLASS UsedRvalBase<IncludeUsedRval>
 {
   protected:
-#ifdef DEBUG
     mutable bool usedRval_;
     void setUsedRval() const { usedRval_ = true; }
     void clearUsedRval() const { usedRval_ = false; }
-#else
+};
+
+template<>
+class MOZ_STACK_CLASS UsedRvalBase<NoUsedRval>
+{
+  protected:
     void setUsedRval() const {}
     void clearUsedRval() const {}
+};
+
+template<UsedRval WantUsedRval>
+class MOZ_STACK_CLASS CallReceiverBase : public UsedRvalBase<
+#ifdef DEBUG
+        WantUsedRval
+#else
+        NoUsedRval
 #endif
-
+    >
+{
+  protected:
     Value *argv_;
-
-    friend CallReceiver CallReceiverFromVp(Value *vp);
-    friend CallReceiver CallReceiverFromArgv(Value *argv);
 
   public:
     /*
@@ -104,7 +136,7 @@ class CallReceiver
      * after rval() has been used!
      */
     JSObject &callee() const {
-        MOZ_ASSERT(!usedRval_);
+        MOZ_ASSERT(!this->usedRval_);
         return argv_[-2].toObject();
     }
 
@@ -113,7 +145,7 @@ class CallReceiver
      * rval() has been used!
      */
     HandleValue calleev() const {
-        MOZ_ASSERT(!usedRval_);
+        MOZ_ASSERT(!this->usedRval_);
         return HandleValue::fromMarkedLocation(&argv_[-2]);
     }
 
@@ -130,6 +162,13 @@ class CallReceiver
         return HandleValue::fromMarkedLocation(&argv_[-1]);
     }
 
+    Value computeThis(JSContext *cx) const {
+        if (thisv().isObject())
+            return thisv();
+
+        return JS_ComputeThis(cx, base());
+    }
+
     /*
      * Returns the currently-set return value.  The initial contents of this
      * value are unspecified.  Once this method has been called, callee() and
@@ -142,7 +181,7 @@ class CallReceiver
      * fails.
      */
     MutableHandleValue rval() const {
-        setUsedRval();
+        this->setUsedRval();
         return MutableHandleValue::fromMarkedLocation(&argv_[-2]);
     }
 
@@ -153,7 +192,7 @@ class CallReceiver
     Value *base() const { return argv_ - 2; }
 
     Value *spAfterCall() const {
-        setUsedRval();
+        this->setUsedRval();
         return argv_ - 1;
     }
 
@@ -163,7 +202,7 @@ class CallReceiver
     // it.  You probably don't want to use these!
 
     void setCallee(Value aCalleev) const {
-        clearUsedRval();
+        this->clearUsedRval();
         argv_[-2] = aCalleev;
     }
 
@@ -174,6 +213,15 @@ class CallReceiver
     MutableHandleValue mutableThisv() const {
         return MutableHandleValue::fromMarkedLocation(&argv_[-1]);
     }
+};
+
+} // namespace detail
+
+class MOZ_STACK_CLASS CallReceiver : public detail::CallReceiverBase<detail::IncludeUsedRval>
+{
+  private:
+    friend CallReceiver CallReceiverFromVp(Value *vp);
+    friend CallReceiver CallReceiverFromArgv(Value *argv);
 };
 
 MOZ_ALWAYS_INLINE CallReceiver
@@ -215,11 +263,63 @@ CallReceiverFromVp(Value *vp)
  * public interface are meant to be used by embedders!  See inline comments to
  * for details.
  */
-class CallArgs : public CallReceiver
+namespace detail {
+
+template<UsedRval WantUsedRval>
+class MOZ_STACK_CLASS CallArgsBase :
+        public mozilla::Conditional<WantUsedRval == detail::IncludeUsedRval,
+                                    CallReceiver,
+                                    CallReceiverBase<NoUsedRval> >::Type
 {
   protected:
     unsigned argc_;
 
+  public:
+    /* Returns the number of arguments. */
+    unsigned length() const { return argc_; }
+
+    /* Returns the i-th zero-indexed argument. */
+    Value &operator[](unsigned i) const {
+        MOZ_ASSERT(i < argc_);
+        return this->argv_[i];
+    }
+
+    /* Returns a mutable handle for the i-th zero-indexed argument. */
+    MutableHandleValue handleAt(unsigned i) const {
+        MOZ_ASSERT(i < argc_);
+        return MutableHandleValue::fromMarkedLocation(&this->argv_[i]);
+    }
+
+    /*
+     * Returns the i-th zero-indexed argument, or |undefined| if there's no
+     * such argument.
+     */
+    Value get(unsigned i) const {
+        return i < length() ? this->argv_[i] : UndefinedValue();
+    }
+
+    /*
+     * Returns true if the i-th zero-indexed argument is present and is not
+     * |undefined|.
+     */
+    bool hasDefined(unsigned i) const {
+        return i < argc_ && !this->argv_[i].isUndefined();
+    }
+
+  public:
+    // These methods are publicly exposed, but we're less sure of the interface
+    // here than we'd like (because they're hackish and drop assertions).  Try
+    // to avoid using these if you can.
+
+    Value *array() const { return this->argv_; }
+    Value *end() const { return this->argv_ + argc_; }
+};
+
+} // namespace detail
+
+class MOZ_STACK_CLASS CallArgs : public detail::CallArgsBase<detail::IncludeUsedRval>
+{
+  private:
     friend CallArgs CallArgsFromVp(unsigned argc, Value *vp);
     friend CallArgs CallArgsFromSp(unsigned argc, Value *sp);
 
@@ -231,51 +331,6 @@ class CallArgs : public CallReceiver
         return args;
     }
 
-  public:
-    /* Returns the number of arguments. */
-    unsigned length() const { return argc_; }
-
-    /* Returns the i-th zero-indexed argument. */
-    Value &operator[](unsigned i) const {
-        MOZ_ASSERT(i < argc_);
-        return argv_[i];
-    }
-
-    /* Returns a mutable handle for the i-th zero-indexed argument. */
-    MutableHandleValue handleAt(unsigned i) {
-        MOZ_ASSERT(i < argc_);
-        return MutableHandleValue::fromMarkedLocation(&argv_[i]);
-    }
-
-    /* Returns a Handle for the i-th zero-indexed argument. */
-    HandleValue handleAt(unsigned i) const {
-        MOZ_ASSERT(i < argc_);
-        return HandleValue::fromMarkedLocation(&argv_[i]);
-    }
-
-    /*
-     * Returns the i-th zero-indexed argument, or |undefined| if there's no
-     * such argument.
-     */
-    Value get(unsigned i) const {
-        return i < length() ? argv_[i] : UndefinedValue();
-    }
-
-    /*
-     * Returns true if the i-th zero-indexed argument is present and is not
-     * |undefined|.
-     */
-    bool hasDefined(unsigned i) const {
-        return i < argc_ && !argv_[i].isUndefined();
-    }
-
-  public:
-    // These methods are publicly exposed, but we're less sure of the interface
-    // here than we'd like (because they're hackish and drop assertions).  Try
-    // to avoid using these if you can.
-
-    Value *array() const { return argv_; }
-    Value *end() const { return argv_ + argc_; }
 };
 
 MOZ_ALWAYS_INLINE CallArgs
@@ -294,18 +349,6 @@ CallArgsFromSp(unsigned argc, Value *sp)
 }
 
 } // namespace JS
-
-/*
- * Compute |this| for the |vp| inside a JSNative, either boxing primitives or
- * replacing with the global object as necessary.
- *
- * This method will go away at some point: instead use |args.thisv()|.  If the
- * value is an object, no further work is required.  If that value is |null| or
- * |undefined|, use |JS_GetGlobalForObject| to compute the global object.  If
- * the value is some other primitive, use |JS_ValueToObject| to box it.
- */
-extern JS_PUBLIC_API(JS::Value)
-JS_ComputeThis(JSContext *cx, JS::Value *vp);
 
 /*
  * Macros to hide interpreter stack layout details from a JSNative using its

@@ -103,11 +103,19 @@ protected:
  * file. It's not in the anonymous namespace because MediaStream needs to
  * be able to friend it.
  *
- * Currently we only have one per process.
+ * Currently we have one global instance per process, and one per each
+ * OfflineAudioContext object.
  */
 class MediaStreamGraphImpl : public MediaStreamGraph {
 public:
-  MediaStreamGraphImpl();
+  /**
+   * Set aRealtime to true in order to create a MediaStreamGraph which provides
+   * support for real-time audio and video.  Set it to false in order to create
+   * a non-realtime instance which just churns through its inputs and produces
+   * output.  Those objects currently only support audio, and are used to
+   * implement OfflineAudioContext.  They do not support MediaStream inputs.
+   */
+  explicit MediaStreamGraphImpl(bool aRealtime);
   ~MediaStreamGraphImpl()
   {
     NS_ASSERTION(IsEmpty(),
@@ -253,13 +261,10 @@ public:
    * Produce data for all streams >= aStreamIndex for the given time interval.
    * Advances block by block, each iteration producing data for all streams
    * for a single block.
-   * This is needed if there are WebAudio delay nodes, whose output for a block
-   * may depend on the output of any other node (including itself) for the
-   * previous block. This is probably also more performant due to better memory
-   * locality.
    * This is called whenever we have an AudioNodeStream in the graph.
    */
   void ProduceDataForStreamsBlockByBlock(uint32_t aStreamIndex,
+                                         TrackRate aSampleRate,
                                          GraphTime aFrom,
                                          GraphTime aTo);
   /**
@@ -477,6 +482,10 @@ public:
   };
   WaitState mWaitState;
   /**
+   * How many non-realtime ticks the graph should process.
+   */
+  uint32_t mNonRealtimeTicksToProcess;
+  /**
    * True when another iteration of the control loop is required.
    */
   bool mNeedAnotherIteration;
@@ -489,6 +498,13 @@ public:
    * RunInStableState() and the event hasn't run yet.
    */
   bool mPostedRunInStableStateEvent;
+  /**
+   * True when the non-realtime graph thread is processing, as a result of
+   * a request from the main thread.  When processing is finished, we post
+   * a message to the main thread in order to set mNonRealtimeProcessing
+   * back to false.
+   */
+  bool mNonRealtimeIsRunning;
 
   // Main thread only
 
@@ -510,6 +526,16 @@ public:
    * RunInStableState at the next stable state.
    */
   bool mPostedRunInStableState;
+  /**
+   * True when processing real-time audio/video.  False when processing non-realtime
+   * audio.
+   */
+  bool mRealtime;
+  /**
+   * True when a non-realtime MediaStreamGraph has started to process input.  This
+   * value is only accessed on the main thread.
+   */
+  bool mNonRealtimeProcessing;
 };
 
 }

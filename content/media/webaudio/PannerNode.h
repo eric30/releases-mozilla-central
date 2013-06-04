@@ -14,11 +14,14 @@
 #include "mozilla/dom/PannerNodeBinding.h"
 #include "ThreeDPoint.h"
 #include "mozilla/WeakPtr.h"
+#include "WebAudioUtils.h"
+#include <set>
 
 namespace mozilla {
 namespace dom {
 
 class AudioContext;
+class AudioBufferSourceNode;
 
 class PannerNode : public AudioNode,
                    public SupportsWeakPtr<PannerNode>
@@ -27,12 +30,11 @@ public:
   explicit PannerNode(AudioContext* aContext);
   virtual ~PannerNode();
 
-  virtual JSObject* WrapObject(JSContext* aCx, JSObject* aScope);
+  virtual JSObject* WrapObject(JSContext* aCx,
+                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
-  virtual bool SupportsMediaStreams() const MOZ_OVERRIDE
-  {
-    return true;
-  }
+  NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(PannerNode, AudioNode)
 
   PanningModelType PanningModel() const
   {
@@ -40,6 +42,15 @@ public:
   }
   void SetPanningModel(PanningModelType aPanningModel)
   {
+    // Handle the alternate enum values
+    switch (aPanningModel) {
+    case PanningModelType::_0: aPanningModel = PanningModelType::Equalpower; break;
+    case PanningModelType::_1: aPanningModel = PanningModelType::HRTF; break;
+    default:
+      // Shut up the compiler warning
+      break;
+    }
+
     mPanningModel = aPanningModel;
     SendInt32ParameterToStream(PANNING_MODEL, int32_t(mPanningModel));
   }
@@ -50,12 +61,27 @@ public:
   }
   void SetDistanceModel(DistanceModelType aDistanceModel)
   {
+    // Handle the alternate enum values
+    switch (aDistanceModel) {
+    case DistanceModelType::_0: aDistanceModel = DistanceModelType::Linear; break;
+    case DistanceModelType::_1: aDistanceModel = DistanceModelType::Inverse; break;
+    case DistanceModelType::_2: aDistanceModel = DistanceModelType::Exponential; break;
+    default:
+      // Shut up the compiler warning
+      break;
+    }
+
     mDistanceModel = aDistanceModel;
     SendInt32ParameterToStream(DISTANCE_MODEL, int32_t(mDistanceModel));
   }
 
   void SetPosition(double aX, double aY, double aZ)
   {
+    if (WebAudioUtils::FuzzyEqual(mPosition.x, aX) &&
+        WebAudioUtils::FuzzyEqual(mPosition.y, aY) &&
+        WebAudioUtils::FuzzyEqual(mPosition.z, aZ)) {
+      return;
+    }
     mPosition.x = aX;
     mPosition.y = aY;
     mPosition.z = aZ;
@@ -64,6 +90,11 @@ public:
 
   void SetOrientation(double aX, double aY, double aZ)
   {
+    if (WebAudioUtils::FuzzyEqual(mOrientation.x, aX) &&
+        WebAudioUtils::FuzzyEqual(mOrientation.y, aY) &&
+        WebAudioUtils::FuzzyEqual(mOrientation.z, aZ)) {
+      return;
+    }
     mOrientation.x = aX;
     mOrientation.y = aY;
     mOrientation.z = aZ;
@@ -72,10 +103,16 @@ public:
 
   void SetVelocity(double aX, double aY, double aZ)
   {
+    if (WebAudioUtils::FuzzyEqual(mVelocity.x, aX) &&
+        WebAudioUtils::FuzzyEqual(mVelocity.y, aY) &&
+        WebAudioUtils::FuzzyEqual(mVelocity.z, aZ)) {
+      return;
+    }
     mVelocity.x = aX;
     mVelocity.y = aY;
     mVelocity.z = aZ;
     SendThreeDPointParameterToStream(VELOCITY, mVelocity);
+    SendDopplerToSourcesIfNeeded();
   }
 
   double RefDistance() const
@@ -84,6 +121,9 @@ public:
   }
   void SetRefDistance(double aRefDistance)
   {
+    if (WebAudioUtils::FuzzyEqual(mRefDistance, aRefDistance)) {
+      return;
+    }
     mRefDistance = aRefDistance;
     SendDoubleParameterToStream(REF_DISTANCE, mRefDistance);
   }
@@ -94,6 +134,9 @@ public:
   }
   void SetMaxDistance(double aMaxDistance)
   {
+    if (WebAudioUtils::FuzzyEqual(mMaxDistance, aMaxDistance)) {
+      return;
+    }
     mMaxDistance = aMaxDistance;
     SendDoubleParameterToStream(MAX_DISTANCE, mMaxDistance);
   }
@@ -104,6 +147,9 @@ public:
   }
   void SetRolloffFactor(double aRolloffFactor)
   {
+    if (WebAudioUtils::FuzzyEqual(mRolloffFactor, aRolloffFactor)) {
+      return;
+    }
     mRolloffFactor = aRolloffFactor;
     SendDoubleParameterToStream(ROLLOFF_FACTOR, mRolloffFactor);
   }
@@ -114,6 +160,9 @@ public:
   }
   void SetConeInnerAngle(double aConeInnerAngle)
   {
+    if (WebAudioUtils::FuzzyEqual(mConeInnerAngle, aConeInnerAngle)) {
+      return;
+    }
     mConeInnerAngle = aConeInnerAngle;
     SendDoubleParameterToStream(CONE_INNER_ANGLE, mConeInnerAngle);
   }
@@ -124,6 +173,9 @@ public:
   }
   void SetConeOuterAngle(double aConeOuterAngle)
   {
+    if (WebAudioUtils::FuzzyEqual(mConeOuterAngle, aConeOuterAngle)) {
+      return;
+    }
     mConeOuterAngle = aConeOuterAngle;
     SendDoubleParameterToStream(CONE_OUTER_ANGLE, mConeOuterAngle);
   }
@@ -134,9 +186,17 @@ public:
   }
   void SetConeOuterGain(double aConeOuterGain)
   {
+    if (WebAudioUtils::FuzzyEqual(mConeOuterGain, aConeOuterGain)) {
+      return;
+    }
     mConeOuterGain = aConeOuterGain;
     SendDoubleParameterToStream(CONE_OUTER_GAIN, mConeOuterGain);
   }
+
+  float ComputeDopplerShift();
+  void SendDopplerToSourcesIfNeeded();
+  void FindConnectedSources();
+  void FindConnectedSources(AudioNode* aNode, nsTArray<AudioBufferSourceNode*>& aSources, std::set<AudioNode*>& aSeenNodes);
 
 private:
   friend class AudioListener;
@@ -173,6 +233,10 @@ private:
   double mConeInnerAngle;
   double mConeOuterAngle;
   double mConeOuterGain;
+
+  // An array of all the AudioBufferSourceNode connected directly or indirectly
+  // to this AudioPannerNode.
+  nsTArray<AudioBufferSourceNode*> mSources;
 };
 
 }

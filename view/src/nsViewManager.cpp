@@ -10,11 +10,9 @@
 #include "nsViewManager.h"
 #include "nsGfxCIID.h"
 #include "nsView.h"
-#include "nsISupportsArray.h"
 #include "nsCOMPtr.h"
 #include "nsGUIEvent.h"
 #include "nsRegion.h"
-#include "nsHashtable.h"
 #include "nsCOMArray.h"
 #include "nsIPluginWidget.h"
 #include "nsXULPopupManager.h"
@@ -22,10 +20,11 @@
 #include "nsPresContext.h"
 #include "nsEventStateManager.h"
 #include "mozilla/StartupTimeline.h"
-#include "sampler.h"
+#include "GeckoProfiler.h"
 #include "nsRefreshDriver.h"
 #include "mozilla/Preferences.h"
 #include "nsContentUtils.h"
+#include "nsLayoutUtils.h"
 
 /**
    XXX TODO XXX
@@ -127,16 +126,14 @@ nsViewManager::Init(nsDeviceContext* aContext)
 
 nsView*
 nsViewManager::CreateView(const nsRect& aBounds,
-                          const nsView* aParent,
+                          nsView* aParent,
                           nsViewVisibility aVisibilityFlag)
 {
   nsView *v = new nsView(this, aVisibilityFlag);
-  if (v) {
-    v->SetParent(const_cast<nsView*>(aParent));
-    v->SetPosition(aBounds.x, aBounds.y);
-    nsRect dim(0, 0, aBounds.width, aBounds.height);
-    v->SetDimensions(dim, false);
-  }
+  v->SetParent(aParent);
+  v->SetPosition(aBounds.x, aBounds.y);
+  nsRect dim(0, 0, aBounds.width, aBounds.height);
+  v->SetDimensions(dim, false);
   return v;
 }
 
@@ -328,13 +325,17 @@ void nsViewManager::Refresh(nsView *aView, const nsIntRegion& aRegion)
                  "Widgets that we paint must all be display roots");
 
     if (mPresShell) {
-#ifdef DEBUG_INVALIDATIONS
-      printf("--COMPOSITE-- %p\n", mPresShell);
+#ifdef MOZ_DUMP_PAINTING
+      if (nsLayoutUtils::InvalidationDebuggingIsEnabled()) {
+        printf("--COMPOSITE-- %p\n", mPresShell);
+      }
 #endif
       mPresShell->Paint(aView, damageRegion,
                         nsIPresShell::PAINT_COMPOSITE);
-#ifdef DEBUG_INVALIDATIONS
-      printf("--ENDCOMPOSITE--\n");
+#ifdef MOZ_DUMP_PAINTING
+      if (nsLayoutUtils::InvalidationDebuggingIsEnabled()) {
+        printf("--ENDCOMPOSITE--\n");
+      }
 #endif
       mozilla::StartupTimeline::RecordOnce(mozilla::StartupTimeline::FIRST_PAINT);
     }
@@ -389,17 +390,20 @@ void nsViewManager::ProcessPendingUpdatesForView(nsView* aView,
 
       NS_ASSERTION(aView->HasWidget(), "Must have a widget!");
 
-#ifdef DEBUG_INVALIDATIONS
-      printf("---- PAINT START ----PresShell(%p), nsView(%p), nsIWidget(%p)\n", mPresShell, aView, widget);
+#ifdef MOZ_DUMP_PAINTING
+      if (nsLayoutUtils::InvalidationDebuggingIsEnabled()) {
+        printf("---- PAINT START ----PresShell(%p), nsView(%p), nsIWidget(%p)\n", mPresShell, aView, widget);
+      }
 #endif
       nsAutoScriptBlocker scriptBlocker;
       NS_ASSERTION(aView->HasWidget(), "Must have a widget!");
-      aView->GetWidget()->WillPaint();
       SetPainting(true);
       mPresShell->Paint(aView, nsRegion(),
                         nsIPresShell::PAINT_LAYERS);
-#ifdef DEBUG_INVALIDATIONS
-      printf("---- PAINT END ----\n");
+#ifdef MOZ_DUMP_PAINTING
+      if (nsLayoutUtils::InvalidationDebuggingIsEnabled()) {
+        printf("---- PAINT END ----\n");
+      }
 #endif
       aView->SetForcedRepaint(false);
       SetPainting(false);
@@ -634,8 +638,7 @@ void nsViewManager::WillPaintWindow(nsIWidget* aWidget)
   }
 }
 
-bool nsViewManager::PaintWindow(nsIWidget* aWidget, nsIntRegion aRegion,
-                                uint32_t aFlags)
+bool nsViewManager::PaintWindow(nsIWidget* aWidget, nsIntRegion aRegion)
 {
   if (!aWidget || !mContext)
     return false;
@@ -664,7 +667,7 @@ void nsViewManager::DidPaintWindow()
 void
 nsViewManager::DispatchEvent(nsGUIEvent *aEvent, nsView* aView, nsEventStatus* aStatus)
 {
-  SAMPLE_LABEL("event", "nsViewManager::DispatchEvent");
+  PROFILER_LABEL("event", "nsViewManager::DispatchEvent");
 
   if ((NS_IS_MOUSE_EVENT(aEvent) &&
        // Ignore mouse events that we synthesize.
@@ -1038,13 +1041,6 @@ nsViewManager::SetViewZIndex(nsView *aView, bool aAutoZIndex, int32_t aZIndex, b
       oldIsAuto != aAutoZIndex) {
     InvalidateView(aView);
   }
-}
-
-void
-nsViewManager::GetDeviceContext(nsDeviceContext *&aContext)
-{
-  aContext = mContext;
-  NS_IF_ADDREF(aContext);
 }
 
 nsViewManager*

@@ -4,6 +4,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/dom/SVGSwitchElement.h"
+
+#include "nsSVGEffects.h"
 #include "nsSVGUtils.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/dom/SVGSwitchElementBinding.h"
@@ -16,7 +18,7 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGSwitchElement::WrapNode(JSContext *aCx, JSObject *aScope)
+SVGSwitchElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
   return SVGSwitchElementBinding::Wrap(aCx, aScope, this);
 }
@@ -24,14 +26,8 @@ SVGSwitchElement::WrapNode(JSContext *aCx, JSObject *aScope)
 //----------------------------------------------------------------------
 // nsISupports methods
 
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(SVGSwitchElement,
-                                                  SVGSwitchElementBase)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mActiveChild)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(SVGSwitchElement,
-                                                SVGSwitchElementBase)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mActiveChild)
-NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+NS_IMPL_CYCLE_COLLECTION_INHERITED_1(SVGSwitchElement, SVGSwitchElementBase,
+                                     mActiveChild)
 
 NS_IMPL_ADDREF_INHERITED(SVGSwitchElement,SVGSwitchElementBase)
 NS_IMPL_RELEASE_INHERITED(SVGSwitchElement,SVGSwitchElementBase)
@@ -47,7 +43,6 @@ NS_INTERFACE_MAP_END_INHERITING(SVGSwitchElementBase)
 SVGSwitchElement::SVGSwitchElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : SVGSwitchElementBase(aNodeInfo)
 {
-  SetIsDOMBinding();
 }
 
 void
@@ -65,7 +60,7 @@ SVGSwitchElement::MaybeInvalidate()
 
   nsIFrame *frame = GetPrimaryFrame();
   if (frame) {
-    nsSVGUtils::InvalidateBounds(frame, false);
+    nsSVGEffects::InvalidateRenderingObservers(frame);
     nsSVGUtils::ScheduleReflowSVG(frame);
   }
 

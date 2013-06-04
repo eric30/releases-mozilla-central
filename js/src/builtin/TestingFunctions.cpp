@@ -1,7 +1,8 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this file,
- * You can obtain one at http://mozilla.org/MPL/2.0/. */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "jsapi.h"
 #include "jsbool.h"
@@ -15,7 +16,6 @@
 #include "jswrapper.h"
 
 #include "builtin/TestingFunctions.h"
-#include "methodjit/MethodJIT.h"
 #include "vm/ForkJoin.h"
 
 #include "vm/Stack-inl.h"
@@ -169,12 +169,12 @@ GetBuildConfiguration(JSContext *cx, unsigned argc, jsval *vp)
     if (!JS_SetProperty(cx, info, "oom-backtraces", &value))
         return false;
 
-#ifdef JS_METHODJIT
+#ifdef ENABLE_PARALLEL_JS
     value = BooleanValue(true);
 #else
     value = BooleanValue(false);
 #endif
-    if (!JS_SetProperty(cx, info, "methodjit", &value))
+    if (!JS_SetProperty(cx, info, "parallelJS", &value))
         return false;
 
     *vp = ObjectValue(*info);
@@ -197,7 +197,7 @@ GC(JSContext *cx, unsigned argc, jsval *vp)
             if (!JS_StringEqualsAscii(cx, arg.toString(), "compartment", &compartment))
                 return false;
         } else if (arg.isObject()) {
-            PrepareZoneForGC(UnwrapObject(&arg.toObject())->zone());
+            PrepareZoneForGC(UncheckedUnwrap(&arg.toObject())->zone());
             compartment = true;
         }
     }
@@ -400,7 +400,7 @@ ScheduleGC(JSContext *cx, unsigned argc, jsval *vp)
         JS_ScheduleGC(cx, args[0].toInt32());
     } else if (args[0].isObject()) {
         /* Ensure that |zone| is collected during the next GC. */
-        Zone *zone = UnwrapObject(&args[0].toObject())->zone();
+        Zone *zone = UncheckedUnwrap(&args[0].toObject())->zone();
         PrepareZoneForGC(zone);
     } else if (args[0].isString()) {
         /* This allows us to schedule atomsCompartment for GC. */
@@ -575,8 +575,8 @@ NondeterminsticGetWeakMapKeys(JSContext *cx, unsigned argc, jsval *vp)
                              InformalValueTypeName(args[0]));
         return false;
     }
-    JSObject *arr;
-    if (!JS_NondeterministicGetWeakMapKeys(cx, &args[0].toObject(), &arr))
+    RootedObject arr(cx);
+    if (!JS_NondeterministicGetWeakMapKeys(cx, &args[0].toObject(), arr.address()))
         return false;
     if (!arr) {
         JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_NOT_EXPECTED_TYPE,
@@ -652,8 +652,6 @@ static const struct TraceKindPair {
 static JSBool
 CountHeap(JSContext *cx, unsigned argc, jsval *vp)
 {
-    void* startThing;
-    JSGCTraceKind startTraceKind;
     jsval v;
     int32_t traceKind;
     JSString *str;
@@ -661,13 +659,11 @@ CountHeap(JSContext *cx, unsigned argc, jsval *vp)
     JSCountHeapNode *node;
     size_t counter;
 
-    startThing = NULL;
-    startTraceKind = JSTRACE_OBJECT;
+    RootedValue startValue(cx, UndefinedValue());
     if (argc > 0) {
         v = JS_ARGV(cx, vp)[0];
         if (JSVAL_IS_TRACEABLE(v)) {
-            startThing = JSVAL_TO_TRACEABLE(v);
-            startTraceKind = JSVAL_TRACE_KIND(v);
+            startValue = v;
         } else if (!JSVAL_IS_NULL(v)) {
             JS_ReportError(cx,
                            "the first argument is not null or a heap-allocated "
@@ -707,11 +703,10 @@ CountHeap(JSContext *cx, unsigned argc, jsval *vp)
     countTracer.traceList = NULL;
     countTracer.recycleList = NULL;
 
-    if (!startThing) {
+    if (startValue.isUndefined()) {
         JS_TraceRuntime(&countTracer.base);
     } else {
-        JS_SET_TRACING_NAME(&countTracer.base, "root");
-        JS_CallTracer(&countTracer.base, startThing, startTraceKind);
+        JS_CallValueTracer(&countTracer.base, startValue.address(), "root");
     }
 
     counter = 0;
@@ -736,6 +731,29 @@ CountHeap(JSContext *cx, unsigned argc, jsval *vp)
     return true;
 }
 
+#ifdef DEBUG
+static JSBool
+OOMAfterAllocations(JSContext *cx, unsigned argc, jsval *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    if (args.length() != 1) {
+        JS_ReportError(cx, "count argument required");
+        return false;
+    }
+
+    int32_t count;
+    if (!JS_ValueToInt32(cx, args[0], &count))
+        return false;
+    if (count <= 0) {
+        JS_ReportError(cx, "count argument must be positive");
+        return false;
+    }
+
+    OOM_maxAllocations = OOM_counter + count;
+    return true;
+}
+#endif
+
 static unsigned finalizeCount = 0;
 
 static void
@@ -747,7 +765,7 @@ finalize_counter_finalize(JSFreeOp *fop, JSObject *obj)
 static JSClass FinalizeCounterClass = {
     "FinalizeCounter", JSCLASS_IS_ANONYMOUS,
     JS_PropertyStub,       /* addProperty */
-    JS_PropertyStub,       /* delProperty */
+    JS_DeletePropertyStub, /* delProperty */
     JS_PropertyStub,       /* getProperty */
     JS_StrictPropertyStub, /* setProperty */
     JS_EnumerateStub,
@@ -812,45 +830,6 @@ DumpHeapComplete(JSContext *cx, unsigned argc, jsval *vp)
     return true;
 }
 
-JSBool
-MJitChunkLimit(JSContext *cx, unsigned argc, jsval *vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-
-    if (argc != 1) {
-        RootedObject callee(cx, &args.callee());
-        ReportUsageError(cx, callee, "Wrong number of arguments");
-        return JS_FALSE;
-    }
-
-    if (cx->runtime->alwaysPreserveCode) {
-        JS_ReportError(cx, "Can't change chunk limit after gcPreserveCode()");
-        return JS_FALSE;
-    }
-
-    for (CompartmentsIter c(cx->runtime); !c.done(); c.next()) {
-        if (c->lastAnimationTime != 0) {
-            JS_ReportError(cx, "Can't change chunk limit if code may be preserved");
-            return JS_FALSE;
-        }
-    }
-
-    double t;
-    if (!JS_ValueToNumber(cx, args[0], &t))
-        return JS_FALSE;
-
-#ifdef JS_METHODJIT
-    mjit::SetChunkLimit((uint32_t) t);
-#endif
-
-    // Clear out analysis information which might refer to code compiled with
-    // the previous chunk limit.
-    JS_GC(cx->runtime);
-
-    vp->setUndefined();
-    return true;
-}
-
 static JSBool
 Terminate(JSContext *cx, unsigned arg, jsval *vp)
 {
@@ -880,6 +859,14 @@ EnableSPSProfilingAssertions(JSContext *cx, unsigned argc, jsval *vp)
 }
 
 static JSBool
+DisableSPSProfiling(JSContext *cx, unsigned argc, jsval *vp)
+{
+    if (cx->runtime->spsProfiler.installed())
+        cx->runtime->spsProfiler.enable(false);
+    return true;
+}
+
+static JSBool
 DisplayName(JSContext *cx, unsigned argc, jsval *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -905,6 +892,100 @@ js::testingFunc_inParallelSection(JSContext *cx, unsigned argc, jsval *vp)
     return true;
 }
 
+static JSObject *objectMetadataFunction = NULL;
+
+static JSObject *
+ShellObjectMetadataCallback(JSContext *cx)
+{
+    Value thisv = UndefinedValue();
+
+    Value rval;
+    if (!Invoke(cx, thisv, ObjectValue(*objectMetadataFunction), 0, NULL, &rval)) {
+        cx->clearPendingException();
+        return NULL;
+    }
+
+    return rval.isObject() ? &rval.toObject() : NULL;
+}
+
+static JSBool
+SetObjectMetadataCallback(JSContext *cx, unsigned argc, jsval *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    args.rval().setUndefined();
+
+    if (argc == 0 || !args[0].isObject() || !args[0].toObject().isFunction()) {
+        if (objectMetadataFunction)
+            JS_RemoveObjectRoot(cx, &objectMetadataFunction);
+        objectMetadataFunction = NULL;
+        js::SetObjectMetadataCallback(cx, NULL);
+        return true;
+    }
+
+    if (!objectMetadataFunction && !JS_AddObjectRoot(cx, &objectMetadataFunction))
+        return false;
+
+    objectMetadataFunction = &args[0].toObject();
+    js::SetObjectMetadataCallback(cx, ShellObjectMetadataCallback);
+    return true;
+}
+
+static JSBool
+SetObjectMetadata(JSContext *cx, unsigned argc, jsval *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    if (argc != 2 || !args[0].isObject() || !args[1].isObject()) {
+        JS_ReportError(cx, "Both arguments must be objects");
+        return false;
+    }
+
+    args.rval().setUndefined();
+
+    RootedObject obj(cx, &args[0].toObject());
+    RootedObject metadata(cx, &args[1].toObject());
+    return SetObjectMetadata(cx, obj, metadata);
+}
+
+static JSBool
+GetObjectMetadata(JSContext *cx, unsigned argc, jsval *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    if (argc != 1 || !args[0].isObject()) {
+        JS_ReportError(cx, "Argument must be an object");
+        return false;
+    }
+
+    args.rval().setObjectOrNull(GetObjectMetadata(&args[0].toObject()));
+    return true;
+}
+
+#ifndef JS_ION
+JSBool
+js::IsAsmJSCompilationAvailable(JSContext *cx, unsigned argc, Value *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    args.rval().set(BooleanValue(false));
+    return true;
+}
+
+JSBool
+js::IsAsmJSModule(JSContext *cx, unsigned argc, Value *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    args.rval().set(BooleanValue(false));
+    return true;
+}
+
+JSBool
+js::IsAsmJSFunction(JSContext *cx, unsigned argc, Value *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    args.rval().set(BooleanValue(false));
+    return true;
+}
+#endif
+
 static JSFunctionSpecWithHelp TestingFunctions[] = {
     JS_FN_HELP("gc", ::GC, 0, 0,
 "gc([obj] | 'compartment')",
@@ -928,6 +1009,13 @@ static JSFunctionSpecWithHelp TestingFunctions[] = {
 "  start when it is given and is not null. kind is either 'all' (default) to\n"
 "  count all things or one of 'object', 'double', 'string', 'function'\n"
 "  to count only things of that kind."),
+
+#ifdef DEBUG
+    JS_FN_HELP("oomAfterAllocations", OOMAfterAllocations, 1, 0,
+"oomAfterAllocations(count)",
+"  After 'count' js_malloc memory allocations, fail every following allocation\n"
+"  (return NULL)."),
+#endif
 
     JS_FN_HELP("makeFinalizeObserver", MakeFinalizeObserver, 0, 0,
 "makeFinalizeObserver()",
@@ -1018,10 +1106,6 @@ static JSFunctionSpecWithHelp TestingFunctions[] = {
 "dumpHeapComplete([filename])",
 "  Dump reachable and unreachable objects to a file."),
 
-    JS_FN_HELP("mjitChunkLimit", MJitChunkLimit, 1, 0,
-"mjitChunkLimit(N)",
-"  Specify limit on compiled chunk size during mjit compilation."),
-
     JS_FN_HELP("terminate", Terminate, 0, 0,
 "terminate()",
 "  Terminate JavaScript execution, as if we had run out of\n"
@@ -1034,6 +1118,10 @@ static JSFunctionSpecWithHelp TestingFunctions[] = {
 "  When 'slow' is false, then instrumentation is enabled, but the slow\n"
 "  assertions are disabled."),
 
+    JS_FN_HELP("disableSPSProfiling", DisableSPSProfiling, 1, 0,
+"disableSPSProfiling()",
+"  Disables SPS instrumentation"),
+
     JS_FN_HELP("displayName", DisplayName, 1, 0,
 "displayName(fn)",
 "  Gets the display name for a function, which can possibly be a guessed or\n"
@@ -1045,9 +1133,31 @@ static JSFunctionSpecWithHelp TestingFunctions[] = {
 "  Returns whether asm.js compilation is currently available or whether it is disabled\n"
 "  (e.g., by the debugger)."),
 
+    JS_FN_HELP("isAsmJSModule", IsAsmJSModule, 1, 0,
+"isAsmJSModule(fn)",
+"  Returns whether the given value is a function containing \"use asm\" that has been\n"
+"  validated according to the asm.js spec."),
+
+    JS_FN_HELP("isAsmJSFunction", IsAsmJSFunction, 1, 0,
+"isAsmJSFunction(fn)",
+"  Returns whether the given value is a nested function in an asm.js module that has been\n"
+"  both compile- and link-time validated."),
+
     JS_FN_HELP("inParallelSection", testingFunc_inParallelSection, 0, 0,
 "inParallelSection()",
 "  True if this code is executing within a parallel section."),
+
+    JS_FN_HELP("setObjectMetadataCallback", SetObjectMetadataCallback, 1, 0,
+"setObjectMetadataCallback(fn)",
+"  Specify function to supply metadata for all newly created objects."),
+
+    JS_FN_HELP("setObjectMetadata", SetObjectMetadata, 2, 0,
+"setObjectMetadata(obj, metadataObj)",
+"  Change the metadata for an object."),
+
+    JS_FN_HELP("getObjectMetadata", GetObjectMetadata, 1, 0,
+"getObjectMetadata(obj)",
+"  Get the metadata for an object."),
 
     JS_FS_HELP_END
 };

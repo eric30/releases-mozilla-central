@@ -14,7 +14,7 @@
 #include "nsServiceManagerUtils.h"
 #include "nsIDOMApplicationRegistry.h"
 #include "nsIPermissionManager.h"
-#include "sampler.h"
+#include "GeckoProfiler.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -64,7 +64,13 @@ nsGenericHTMLFrameElement::GetContentDocument()
     return nullptr;
   }
 
-  return win->GetDoc();
+  nsIDocument *doc = win->GetDoc();
+
+  // Return null for cross-origin contentDocument.
+  if (!nsContentUtils::GetSubjectPrincipal()->Subsumes(doc->NodePrincipal())) {
+    return nullptr;
+  }
+  return doc;
 }
 
 nsresult
@@ -185,7 +191,7 @@ nsGenericHTMLFrameElement::BindToTree(nsIDocument* aDocument,
     NS_ASSERTION(!nsContentUtils::IsSafeToRunScript(),
                  "Missing a script blocker!");
 
-    SAMPLE_LABEL("nsGenericHTMLFrameElement", "BindToTree");
+    PROFILER_LABEL("nsGenericHTMLFrameElement", "BindToTree");
 
     // We're in a document now.  Kick off the frame load.
     LoadSrc();
@@ -233,7 +239,7 @@ nsGenericHTMLFrameElement::SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
     nsIDocShell *docShell = mFrameLoader ? mFrameLoader->GetExistingDocShell()
                                          : nullptr;
     if (docShell) {
-      docShell->SetName(PromiseFlatString(aValue).get());
+      docShell->SetName(aValue);
     }
   }
 
@@ -254,7 +260,7 @@ nsGenericHTMLFrameElement::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
     nsIDocShell *docShell = mFrameLoader ? mFrameLoader->GetExistingDocShell()
                                          : nullptr;
     if (docShell) {
-      docShell->SetName(EmptyString().get());
+      docShell->SetName(EmptyString());
     }
   }
 

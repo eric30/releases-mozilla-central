@@ -118,7 +118,8 @@ function BrowserElementParent(frameLoader, hasRemoteFrame) {
     "fullscreen-origin-change": this._remoteFullscreenOriginChange,
     "rollback-fullscreen": this._remoteFrameFullscreenReverted,
     "exit-fullscreen": this._exitFullscreen,
-    "got-visible": this._gotDOMRequestResult
+    "got-visible": this._gotDOMRequestResult,
+    "visibilitychange": this._childVisibilityChange,
   }
 
   this._mm.addMessageListener('browser-element-api:call', function(aMsg) {
@@ -293,7 +294,7 @@ BrowserElementParent.prototype = {
     let evtName = detail.msg_name;
 
     debug('fireCtxMenuEventFromMsg: ' + evtName + ' ' + detail);
-    let evt = this._createEvent(evtName, detail);
+    let evt = this._createEvent(evtName, detail, /* cancellable */ true);
 
     if (detail.contextmenu) {
       var self = this;
@@ -301,10 +302,11 @@ BrowserElementParent.prototype = {
         self._sendAsyncMsg('fire-ctx-callback', {menuitem: id});
       });
     }
+
     // The embedder may have default actions on context menu events, so
     // we fire a context menu event even if the child didn't define a
     // custom context menu
-    this._frameElement.dispatchEvent(evt);
+    return !this._frameElement.dispatchEvent(evt);
   },
 
   /**
@@ -447,6 +449,7 @@ BrowserElementParent.prototype = {
 
   _setVisible: function(visible) {
     this._sendAsyncMsg('set-visible', {visible: visible});
+    this._frameLoader.visible = visible;
   },
 
   _sendMouseEvent: function(type, x, y, button, clickCount, modifiers) {
@@ -560,6 +563,21 @@ BrowserElementParent.prototype = {
   _ownerVisibilityChange: function() {
     this._sendAsyncMsg('owner-visibility-change',
                        {visible: !this._window.document.hidden});
+  },
+
+  /*
+   * Called when the child notices that its visibility has changed.
+   *
+   * This is sometimes redundant; for example, the child's visibility may
+   * change in response to a setVisible request that we made here!  But it's
+   * not always redundant; for example, the child's visibility may change in
+   * response to its parent docshell being hidden.
+   */
+  _childVisibilityChange: function(data) {
+    debug("_childVisibilityChange(" + data.json.visible + ")");
+    this._frameLoader.visible = data.json.visible;
+
+    this._fireEventFromMsg(data);
   },
 
   _exitFullscreen: function() {

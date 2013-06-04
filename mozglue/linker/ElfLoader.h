@@ -44,6 +44,19 @@ extern "C" {
 
   typedef int (*dl_phdr_cb)(struct dl_phdr_info *, size_t, void *);
   int __wrap_dl_iterate_phdr(dl_phdr_cb callback, void *data);
+
+/**
+ * faulty.lib public API
+ */
+MFBT_API size_t
+__dl_get_mappable_length(void *handle);
+
+MFBT_API void *
+__dl_mmap(void *handle, void *addr, size_t length, off_t offset);
+
+MFBT_API void
+__dl_munmap(void *handle, void *addr, size_t length);
+
 }
 
 /**
@@ -55,21 +68,26 @@ extern "C" {
 class LibHandle;
 
 namespace mozilla {
+namespace detail {
 
-template <> inline void RefCounted<LibHandle>::Release();
+template <> inline void RefCounted<LibHandle, AtomicRefCount>::Release();
 
-template <> inline RefCounted<LibHandle>::~RefCounted()
+template <> inline RefCounted<LibHandle, AtomicRefCount>::~RefCounted()
 {
   MOZ_ASSERT(refCnt == 0x7fffdead);
 }
 
+} /* namespace detail */
 } /* namespace mozilla */
+
+/* Forward declaration */
+class Mappable;
 
 /**
  * Abstract class for loaded libraries. Libraries may be loaded through the
  * system linker or this linker, both cases will be derived from this class.
  */
-class LibHandle: public mozilla::RefCounted<LibHandle>
+class LibHandle: public mozilla::AtomicRefCounted<LibHandle>
 {
 public:
   /**
@@ -77,7 +95,7 @@ public:
    * of the leaf name.
    */
   LibHandle(const char *path)
-  : directRefCnt(0), path(path ? strdup(path) : NULL) { }
+  : directRefCnt(0), path(path ? strdup(path) : NULL), mappable(NULL) { }
 
   /**
    * Destructor.
@@ -120,7 +138,7 @@ public:
   void AddDirectRef()
   {
     ++directRefCnt;
-    mozilla::RefCounted<LibHandle>::AddRef();
+    mozilla::AtomicRefCounted<LibHandle>::AddRef();
   }
 
   /**
@@ -131,10 +149,11 @@ public:
   {
     bool ret = false;
     if (directRefCnt) {
-      MOZ_ASSERT(directRefCnt <= mozilla::RefCounted<LibHandle>::refCount());
+      MOZ_ASSERT(directRefCnt <=
+                 mozilla::AtomicRefCounted<LibHandle>::refCount());
       if (--directRefCnt)
         ret = true;
-      mozilla::RefCounted<LibHandle>::Release();
+      mozilla::AtomicRefCounted<LibHandle>::Release();
     }
     return ret;
   }
@@ -147,7 +166,30 @@ public:
     return directRefCnt;
   }
 
+  /**
+   * Returns the complete size of the file or stream behind the library
+   * handle.
+   */
+  size_t GetMappableLength() const;
+
+  /**
+   * Returns a memory mapping of the file or stream behind the library
+   * handle.
+   */
+  void *MappableMMap(void *addr, size_t length, off_t offset) const;
+
+  /**
+   * Unmaps a memory mapping of the file or stream behind the library
+   * handle.
+   */
+  void MappableMUnmap(void *addr, size_t length) const;
+
 protected:
+  /**
+   * Returns a mappable object for use by MappableMMap and related functions.
+   */
+  virtual Mappable *GetMappable() const = 0;
+
   /**
    * Returns whether the handle is a SystemElf or not. (short of a better way
    * to do this without RTTI)
@@ -160,6 +202,9 @@ protected:
 private:
   int directRefCnt;
   char *path;
+
+  /* Mappable object keeping the result of GetMappable() */
+  mutable Mappable *mappable;
 };
 
 /**
@@ -171,8 +216,9 @@ private:
  * would mean too many Releases from within the destructor.
  */
 namespace mozilla {
+namespace detail {
 
-template <> inline void RefCounted<LibHandle>::Release() {
+template <> inline void RefCounted<LibHandle, AtomicRefCount>::Release() {
 #ifdef DEBUG
   if (refCnt > 0x7fff0000)
     MOZ_ASSERT(refCnt > 0x7fffdead);
@@ -190,6 +236,7 @@ template <> inline void RefCounted<LibHandle>::Release() {
   }
 }
 
+} /* namespace detail */
 } /* namespace mozilla */
 
 /**
@@ -212,6 +259,8 @@ public:
   virtual bool Contains(void *addr) const { return false; /* UNIMPLEMENTED */ }
 
 protected:
+  virtual Mappable *GetMappable() const;
+
   /**
    * Returns whether the handle is a SystemElf or not. (short of a better way
    * to do this without RTTI)
@@ -313,6 +362,14 @@ public:
    * implement dladdr().
    */
   mozilla::TemporaryRef<LibHandle> GetHandleByPtr(void *addr);
+
+  /**
+   * Returns a Mappable object for the path. Paths in the form
+   *   /foo/bar/baz/archive!/directory/lib.so
+   * try to load the directory/lib.so in /foo/bar/baz/archive, provided
+   * that file is a Zip archive.
+   */
+  static Mappable *GetMappableFromPath(const char *path);
 
 protected:
   /**

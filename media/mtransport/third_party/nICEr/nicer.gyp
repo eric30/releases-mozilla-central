@@ -6,6 +6,9 @@
 #
 #
 {
+  'variables' : {
+    'build_with_gonk%': 0,
+  },
   'targets' : [
       {
           'target_name' : 'nicer',
@@ -206,8 +209,20 @@
 		 
 		 'sources': [
 		 ],
-              }]
-          ]
+              }],
+              ['moz_widget_toolkit_gonk==1', {
+                'defines' : [
+                  'WEBRTC_GONK',
+                  'NO_REG_RPC',
+                ],
+             }],
+             # Gonk has its own nr_stun_get_addrs implementation.
+             ['build_with_gonk==1', {
+               'defines': [
+                  "USE_PLATFORM_NR_STUN_GET_ADDRS",
+               ]
+             }]
+          ],
       }]
 }
 

@@ -10,31 +10,16 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= webbrwsr
 LIBRARY_NAME	= nsWebBrowser_s
-GRE_MODULE	= 1
 LIBXUL_LIBRARY	= 1
 
 
-
-EXPORTS         = \
-                nsCTooltipTextProvider.h \
-                $(NULL)
 
 LOCAL_INCLUDES	= \
 		-I$(srcdir)/../../../content/base/src \
 		-I$(srcdir)/../../../content/svg/content/src \
 		$(NULL)
 		
-CPPSRCS		= \
-		nsDocShellTreeOwner.cpp		\
-		nsWebBrowser.cpp		\
-		nsCommandHandler.cpp		\
-        nsWebBrowserContentPolicy.cpp   \
-		nsContextMenuInfo.cpp		\
-		nsEmbedStream.cpp		\
-		$(NULL)
-
 # we don't want the shared lib, but we want to force the creation of a
 # static lib.
 FORCE_STATIC_LIB = 1

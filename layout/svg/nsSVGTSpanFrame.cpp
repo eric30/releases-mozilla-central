@@ -7,6 +7,7 @@
 #include "nsSVGTSpanFrame.h"
 
 // Keep others in (case-insensitive) order:
+#include "nsSVGEffects.h"
 #include "nsSVGIntegrationUtils.h"
 #include "nsSVGUtils.h"
 
@@ -38,7 +39,7 @@ NS_QUERYFRAME_TAIL_INHERITING(nsSVGTSpanFrameBase)
 // nsIFrame methods
 
 #ifdef DEBUG
-NS_IMETHODIMP
+void
 nsSVGTSpanFrame::Init(nsIContent* aContent,
                       nsIFrame* aParent,
                       nsIFrame* aPrevInFlow)
@@ -63,7 +64,7 @@ nsSVGTSpanFrame::Init(nsIContent* aContent,
                  "Content is not an SVG tspan or altGlyph");
   }
 
-  return nsSVGTSpanFrameBase::Init(aContent, aParent, aPrevInFlow);
+  nsSVGTSpanFrameBase::Init(aContent, aParent, aPrevInFlow);
 }
 #endif /* DEBUG */
 
@@ -78,7 +79,7 @@ nsSVGTSpanFrame::AttributeChanged(int32_t         aNameSpaceID,
        aAttribute == nsGkAtoms::dx ||
        aAttribute == nsGkAtoms::dy ||
        aAttribute == nsGkAtoms::rotate)) {
-    nsSVGUtils::InvalidateBounds(this, false);
+    nsSVGEffects::InvalidateRenderingObservers(this);
     nsSVGUtils::ScheduleReflowSVG(this);
     NotifyGlyphMetricsChange();
   }

@@ -22,7 +22,6 @@
 #include "nsWidgetsCID.h"
 #include "nsIPresShell.h"
 #include "nsHTMLParts.h"
-#include "nsIDOMEventTarget.h"
 #include "nsEventDispatcher.h"
 #include "nsEventStateManager.h"
 #include "nsEventListenerManager.h"
@@ -36,15 +35,15 @@
 #include "nsGUIEvent.h"
 #include "nsIServiceManager.h"
 #include "nsINodeInfo.h"
-#include "nsHTMLSelectElement.h"
 #include "nsCSSRendering.h"
 #include "nsITheme.h"
 #include "nsIDOMEventListener.h"
 #include "nsLayoutUtils.h"
 #include "nsDisplayList.h"
 #include "nsContentUtils.h"
-#include "mozilla/LookAndFeel.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/dom/HTMLSelectElement.h"
+#include "mozilla/LookAndFeel.h"
 #include <algorithm>
 
 using namespace mozilla;
@@ -984,23 +983,18 @@ nsListControlFrame::GetSizeAttribute(uint32_t *aSize) {
 
 
 //---------------------------------------------------------
-NS_IMETHODIMP  
+void
 nsListControlFrame::Init(nsIContent*     aContent,
                          nsIFrame*       aParent,
                          nsIFrame*       aPrevInFlow)
 {
-  nsresult result = nsHTMLScrollFrame::Init(aContent, aParent, aPrevInFlow);
-
-  // get the receiver interface from the browser button's content node
-  NS_ENSURE_STATE(mContent);
+  nsHTMLScrollFrame::Init(aContent, aParent, aPrevInFlow);
 
   // we shouldn't have to unregister this listener because when
   // our frame goes away all these content node go away as well
   // because our frame is the only one who references them.
   // we need to hook up our listeners before the editor is initialized
   mEventListener = new nsListEventListener(this);
-  if (!mEventListener) 
-    return NS_ERROR_OUT_OF_MEMORY;
 
   mContent->AddEventListener(NS_LITERAL_STRING("keypress"), mEventListener,
                              false, false);
@@ -1019,24 +1013,18 @@ nsListControlFrame::Init(nsIContent*     aContent,
   if (IsInDropDownMode()) {
     AddStateBits(NS_FRAME_IN_POPUP);
   }
-
-  return result;
 }
 
 already_AddRefed<nsIContent> 
 nsListControlFrame::GetOptionAsContent(nsIDOMHTMLOptionsCollection* aCollection, int32_t aIndex) 
 {
-  nsIContent * content = nullptr;
   nsCOMPtr<nsIDOMHTMLOptionElement> optionElement = GetOption(aCollection,
                                                               aIndex);
 
   NS_ASSERTION(optionElement != nullptr, "could not get option element by index!");
 
-  if (optionElement) {
-    CallQueryInterface(optionElement, &content);
-  }
- 
-  return content;
+  nsCOMPtr<nsIContent> content = do_QueryInterface(optionElement);
+  return content.forget();
 }
 
 already_AddRefed<nsIContent> 
@@ -1055,13 +1043,13 @@ nsListControlFrame::GetOptionContent(int32_t aIndex) const
 already_AddRefed<nsIDOMHTMLOptionsCollection>
 nsListControlFrame::GetOptions(nsIContent * aContent)
 {
-  nsIDOMHTMLOptionsCollection* options = nullptr;
+  nsCOMPtr<nsIDOMHTMLOptionsCollection> options;
   nsCOMPtr<nsIDOMHTMLSelectElement> selectElement = do_QueryInterface(aContent);
   if (selectElement) {
-    selectElement->GetOptions(&options);  // AddRefs (1)
+    selectElement->GetOptions(getter_AddRefs(options));
   }
 
-  return options;
+  return options.forget();
 }
 
 already_AddRefed<nsIDOMHTMLOptionElement>
@@ -1073,10 +1061,9 @@ nsListControlFrame::GetOption(nsIDOMHTMLOptionsCollection* aCollection,
     NS_ASSERTION(node,
                  "Item was successful, but node from collection was null!");
     if (node) {
-      nsIDOMHTMLOptionElement* option = nullptr;
-      CallQueryInterface(node, &option);
+      nsCOMPtr<nsIDOMHTMLOptionElement> option = do_QueryInterface(node);
 
-      return option;
+      return option.forget();
     }
   } else {
     NS_ERROR("Couldn't get option by index from collection!");
@@ -1241,8 +1228,8 @@ nsListControlFrame::GetCurrentOption()
     return GetOptionContent(focusedIndex);
   }
 
-  nsRefPtr<nsHTMLSelectElement> selectElement =
-    nsHTMLSelectElement::FromContent(mContent);
+  nsRefPtr<dom::HTMLSelectElement> selectElement =
+    dom::HTMLSelectElement::FromContent(mContent);
   NS_ASSERTION(selectElement, "Can't be null");
 
   // There is no a selected item return the first non-disabled item and skip all
@@ -1417,8 +1404,8 @@ nsListControlFrame::SetOptionsSelectedFromFrame(int32_t aStartIndex,
                                                 bool aValue,
                                                 bool aClearAll)
 {
-  nsRefPtr<nsHTMLSelectElement> selectElement =
-    nsHTMLSelectElement::FromContent(mContent);
+  nsRefPtr<dom::HTMLSelectElement> selectElement =
+    dom::HTMLSelectElement::FromContent(mContent);
   bool wasChanged = false;
 #ifdef DEBUG
   nsresult rv = 
@@ -1455,8 +1442,8 @@ nsListControlFrame::ToggleOptionSelectedFromFrame(int32_t aIndex)
     option->GetSelected(&value);
 
   NS_ASSERTION(NS_SUCCEEDED(rv), "GetSelected failed");
-  nsRefPtr<nsHTMLSelectElement> selectElement =
-    nsHTMLSelectElement::FromContent(mContent);
+  nsRefPtr<dom::HTMLSelectElement> selectElement =
+    dom::HTMLSelectElement::FromContent(mContent);
   bool wasChanged = false;
 #ifdef DEBUG
   rv =
@@ -1579,29 +1566,6 @@ nsListControlFrame::SetFormProperty(nsIAtom* aName,
   return NS_OK;
 }
 
-nsresult 
-nsListControlFrame::GetFormProperty(nsIAtom* aName, nsAString& aValue) const
-{
-  // Get the selected value of option from local cache (optimization vs. widget)
-  if (nsGkAtoms::selected == aName) {
-    nsAutoString val(aValue);
-    nsresult error = NS_OK;
-    bool selected = false;
-    int32_t indx = val.ToInteger(&error, 10); // Get index from aValue
-    if (NS_SUCCEEDED(error))
-       selected = IsContentSelectedByIndex(indx); 
-  
-    aValue.Assign(selected ? NS_LITERAL_STRING("1") : NS_LITERAL_STRING("0"));
-    
-  // For selectedIndex, get the value from the widget
-  } else if (nsGkAtoms::selectedindex == aName) {
-    // You shouldn't be calling me for this!!!
-    return NS_ERROR_INVALID_ARG;
-  }
-
-  return NS_OK;
-}
-
 void
 nsListControlFrame::AboutToDropDown()
 {
@@ -1709,8 +1673,8 @@ nsListControlFrame::GetHeightOfARow()
 nsresult
 nsListControlFrame::IsOptionDisabled(int32_t anIndex, bool &aIsDisabled)
 {
-  nsRefPtr<nsHTMLSelectElement> sel =
-    nsHTMLSelectElement::FromContent(mContent);
+  nsRefPtr<dom::HTMLSelectElement> sel =
+    dom::HTMLSelectElement::FromContent(mContent);
   if (sel) {
     sel->IsOptionDisabled(anIndex, &aIsDisabled);
     return NS_OK;
@@ -2472,28 +2436,32 @@ nsListControlFrame::KeyPress(nsIDOMEvent* aKeyEvent)
         startIndex++;
       }
 
-      uint32_t i;
-      for (i = 0; i < numOptions; i++) {
+      for (uint32_t i = 0; i < numOptions; ++i) {
         uint32_t index = (i + startIndex) % numOptions;
-        nsCOMPtr<nsIDOMHTMLOptionElement> optionElement =
-          GetOption(options, index);
-        if (optionElement) {
-          nsAutoString text;
-          if (NS_OK == optionElement->GetText(text)) {
-            if (StringBeginsWith(text, incrementalString,
-                                 nsCaseInsensitiveStringComparator())) {
-              bool wasChanged = PerformSelection(index, isShift, isControl);
-              if (wasChanged) {
-                // dispatch event, update combobox, etc.
-                if (!UpdateSelection()) {
-                  return NS_OK;
-                }
-              }
-              break;
-            }
-          }
+        nsCOMPtr<nsIDOMHTMLOptionElement> optionElement = GetOption(options, index);
+        if (!optionElement) {
+          continue;
         }
-      } // for
+
+        nsAutoString text;
+        if (NS_FAILED(optionElement->GetText(text)) ||
+            !StringBeginsWith(nsContentUtils::TrimWhitespace<nsContentUtils::IsHTMLWhitespaceOrNBSP>(text, false),
+                              incrementalString,
+                              nsCaseInsensitiveStringComparator())) {
+          continue;
+        }
+
+        if (!PerformSelection(index, isShift, isControl)) {
+          break;
+        }
+
+        // If UpdateSelection() returns false, that means the frame is no longer
+        // alive. We should stop doing anything.
+        if (!UpdateSelection()) {
+          return NS_OK;
+        }
+        break;
+      }
 
     } break;//case
   } // switch

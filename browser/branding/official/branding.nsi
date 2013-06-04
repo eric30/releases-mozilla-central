@@ -10,15 +10,15 @@
 # instead of BrandFullName and typically should not be modified.
 !define BrandFullNameInternal "Mozilla Firefox"
 !define CompanyName           "Mozilla Corporation"
-!define URLInfoAbout          "http://www.mozilla.com/${AB_CD}/"
-!define URLUpdateInfo         "http://www.mozilla.com/${AB_CD}/firefox/"
+!define URLInfoAbout          "https://www.mozilla.org/${AB_CD}/"
+!define URLUpdateInfo         "https://www.mozilla.org/${AB_CD}/firefox/"
 
 ; The OFFICIAL define is a workaround to support different urls for Release and
 ; Beta since they share the same branding when building with other branches that
 ; set the update channel to beta.
 !define OFFICIAL
 !define URLStubDownload "http://download.mozilla.org/?product=firefox-latest&os=win&lang=${AB_CD}"
-!define URLManualDownload "https://www.mozilla.org/firefox/installer-help/?channel=release"
+!define URLManualDownload "https://www.mozilla.org/${AB_CD}/firefox/installer-help/?channel=release&installer_lang=${AB_CD}"
 !define Channel "release"
 
 # The installer's certificate name and issuer expected by the stub installer

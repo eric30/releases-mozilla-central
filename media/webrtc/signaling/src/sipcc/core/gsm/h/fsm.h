@@ -67,7 +67,10 @@ typedef enum {
 
 typedef enum {
     FSMDEF_S_MIN = -1,
+
     FSMDEF_S_IDLE,
+
+    /* SIP States */
     FSMDEF_S_COLLECT_INFO,
     FSMDEF_S_CALL_SENT,
     FSMDEF_S_OUTGOING_PROCEEDING,
@@ -83,6 +86,15 @@ typedef enum {
     FSMDEF_S_HOLDING,
     FSMDEF_S_RESUME_PENDING,
     FSMDEF_S_PRESERVED,
+
+    /* WebRTC States */
+    FSMDEF_S_STABLE,
+    FSMDEF_S_HAVE_LOCAL_OFFER,
+    FSMDEF_S_HAVE_REMOTE_OFFER,
+    FSMDEF_S_HAVE_REMOTE_PRANSWER,
+    FSMDEF_S_HAVE_LOCAL_PRANSWER,
+    FSMDEF_S_CLOSED,
+
     FSMDEF_S_MAX
 } fsmdef_states_t;
 
@@ -230,13 +242,15 @@ typedef struct fsmdef_media_t_ {
     /*
      * port number used in m= data channel line
      */
-    uint16_t       sctp_port;
+    uint16_t       local_datachannel_port;
+    uint16_t       remote_datachannel_port;
 
     /*
      * Data Channel properties
      */
-    uint32         streams;
-    char          *protocol;
+#define WEBRTC_DATACHANNEL_STREAMS_DEFAULT 16
+    uint32         datachannel_streams;
+    char           datachannel_protocol[SDP_MAX_STRING_LEN + 1];
 
     /*
      * This field contains the number of elements in the payloads field.

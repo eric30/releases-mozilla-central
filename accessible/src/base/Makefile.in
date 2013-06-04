@@ -9,67 +9,8 @@ VPATH = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = accessibility
 LIBRARY_NAME = accessibility_base_s
 LIBXUL_LIBRARY = 1
-
-
-CPPSRCS = \
-  AccCollector.cpp \
-  AccEvent.cpp \
-  AccGroupInfo.cpp \
-  AccIterator.cpp \
-  Filters.cpp \
-  ARIAStateMap.cpp \
-  DocManager.cpp \
-  EventQueue.cpp \
-  FocusManager.cpp \
-  NotificationController.cpp \
-  nsAccessNode.cpp \
-  nsARIAMap.cpp \
-  nsCoreUtils.cpp \
-  nsAccUtils.cpp \
-  nsAccessibilityService.cpp \
-  nsAccessiblePivot.cpp \
-  nsEventShell.cpp \
-  nsTextEquivUtils.cpp \
-  RoleAsserts.cpp \
-  SelectionManager.cpp \
-  StyleInfo.cpp \
-  TextAttrs.cpp \
-  TextUpdater.cpp \
-  TreeWalker.cpp \
-  $(NULL)
-
-ifneq ($(A11Y_LOG),0)
-CPPSRCS += \
-  Logging.cpp \
-  $(NULL)
-endif
-
-EXPORTS = \
-  AccEvent.h \
-  nsAccessibilityService.h \
-  nsAccessNode.h \
-  $(NULL)
-
-EXPORTS_NAMESPACES = mozilla/a11y
-
-EXPORTS_mozilla/a11y = \
-  DocManager.h \
-  FocusManager.h \
-  AccTypes.h \
-  Platform.h \
-  States.h \
-  SelectionManager.h \
-  Role.h \
-  $(NULL)
-
-ifdef MOZ_DEBUG
-EXPORTS_mozilla/a11y += \
-  Logging.h \
-  $(NULL)
-endif
 
 # we don't want the shared lib, but we want to force the creation of a static lib.
 FORCE_STATIC_LIB = 1
@@ -86,6 +27,7 @@ LOCAL_INCLUDES += \
   -I$(srcdir)/../../../layout/style \
   -I$(srcdir)/../../../layout/svg \
   -I$(srcdir)/../../../layout/xul/base/src \
+  -I$(srcdir)/../../../layout/xul/tree/ \
   $(NULL)
 
 ifeq ($(MOZ_WIDGET_TOOLKIT),gtk2)

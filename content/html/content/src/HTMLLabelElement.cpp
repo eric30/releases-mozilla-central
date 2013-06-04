@@ -23,7 +23,7 @@ HTMLLabelElement::~HTMLLabelElement()
 }
 
 JSObject*
-HTMLLabelElement::WrapNode(JSContext *aCx, JSObject *aScope)
+HTMLLabelElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
   return HTMLLabelElementBinding::Wrap(aCx, aScope, this);
 }
@@ -184,7 +184,7 @@ HTMLLabelElement::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
           nsIFocusManager* fm = nsFocusManager::GetFocusManager();
           if (fm) {
             // Use FLAG_BYMOVEFOCUS here so that the label is scrolled to.
-            // Also, within nsHTMLInputElement::PostHandleEvent, inputs will
+            // Also, within HTMLInputElement::PostHandleEvent, inputs will
             // be selected only when focused via a key or when the navigation
             // flag is used and we want to select the text on label clicks as
             // well.

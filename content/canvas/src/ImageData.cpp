@@ -44,13 +44,13 @@ void
 ImageData::DropData()
 {
   if (mData) {
-    mData = NULL;
+    mData = nullptr;
     NS_DROP_JS_OBJECTS(this, ImageData);
   }
 }
 
 JSObject*
-ImageData::WrapObject(JSContext* cx, JSObject* scope)
+ImageData::WrapObject(JSContext* cx, JS::Handle<JSObject*> scope)
 {
   return ImageDataBinding::Wrap(cx, scope, this);
 }

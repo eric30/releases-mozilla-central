@@ -397,7 +397,7 @@ bool nsWindow::OnPaint(HDC aDC, uint32_t aNestingLevel)
           {
             AutoLayerManagerSetup
                 setupLayerManager(this, thebesContext, doubleBuffering);
-            result = listener->PaintWindow(this, region, 0);
+            result = listener->PaintWindow(this, region);
           }
 
 #ifdef MOZ_XUL
@@ -512,7 +512,7 @@ bool nsWindow::OnPaint(HDC aDC, uint32_t aNestingLevel)
       case LAYERS_OPENGL:
         static_cast<mozilla::layers::LayerManagerOGL*>(GetLayerManager())->
           SetClippingRegion(region);
-        result = listener->PaintWindow(this, region, 0);
+        result = listener->PaintWindow(this, region);
         break;
 #ifdef MOZ_ENABLE_D3D9_LAYER
       case LAYERS_D3D9:
@@ -520,7 +520,7 @@ bool nsWindow::OnPaint(HDC aDC, uint32_t aNestingLevel)
           nsRefPtr<LayerManagerD3D9> layerManagerD3D9 =
             static_cast<mozilla::layers::LayerManagerD3D9*>(GetLayerManager());
           layerManagerD3D9->SetClippingRegion(region);
-          result = listener->PaintWindow(this, region, 0);
+          result = listener->PaintWindow(this, region);
           if (layerManagerD3D9->DeviceWasRemoved()) {
             mLayerManager->Destroy();
             mLayerManager = nullptr;
@@ -540,11 +540,15 @@ bool nsWindow::OnPaint(HDC aDC, uint32_t aNestingLevel)
           if (layerManagerD3D10->device() != gfxWindowsPlatform::GetPlatform()->GetD3D10Device()) {
             Invalidate();
           } else {
-            result = listener->PaintWindow(this, region, 0);
+            result = listener->PaintWindow(this, region);
           }
         }
         break;
 #endif
+      case LAYERS_CLIENT:
+        // Do nothing, the compositor will handle drawing.
+        break;
+
       default:
         NS_ERROR("Unknown layers backend used!");
         break;
@@ -623,6 +627,8 @@ nsresult nsWindowGfx::CreateIcon(imgIContainer *aContainer,
     return NS_ERROR_FAILURE;
 
   uint8_t *data;
+  nsRefPtr<gfxImageSurface> dest;
+
   if ((aScaledSize.width == 0 && aScaledSize.height == 0) ||
       (aScaledSize.width == width && aScaledSize.height == height)) {
     // We're not scaling the image. The data is simply what's in the frame.
@@ -632,8 +638,7 @@ nsresult nsWindowGfx::CreateIcon(imgIContainer *aContainer,
     NS_ENSURE_ARG(aScaledSize.width > 0);
     NS_ENSURE_ARG(aScaledSize.height > 0);
     // Draw a scaled version of the image to a temporary surface
-    nsRefPtr<gfxImageSurface> dest = new gfxImageSurface(aScaledSize,
-                                                         gfxASurface::ImageFormatARGB32);
+    dest = new gfxImageSurface(aScaledSize, gfxASurface::ImageFormatARGB32);
     if (!dest)
       return NS_ERROR_OUT_OF_MEMORY;
 

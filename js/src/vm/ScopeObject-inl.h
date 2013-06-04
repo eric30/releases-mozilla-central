@@ -1,6 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=78:
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -10,6 +9,7 @@
 
 #include "ScopeObject.h"
 
+#include "jsinferinlines.h"
 #include "jsscriptinlines.h"
 
 namespace js {
@@ -43,11 +43,17 @@ ScopeObject::aliasedVar(ScopeCoordinate sc)
 }
 
 inline void
-ScopeObject::setAliasedVar(ScopeCoordinate sc, const Value &v)
+ScopeObject::setAliasedVar(JSContext *cx, ScopeCoordinate sc, PropertyName *name, const Value &v)
 {
     JS_ASSERT(isCall() || isClonedBlock());
     JS_STATIC_ASSERT(CallObject::RESERVED_SLOTS == BlockObject::RESERVED_SLOTS);
+
+    // name may be null for non-singletons, whose types do not need to be tracked.
+    JS_ASSERT_IF(hasSingletonType(), name);
+
     setSlot(sc.slot, v);
+    if (hasSingletonType())
+        types::AddTypePropertyId(cx, this, NameToId(name), v);
 }
 
 /*static*/ inline size_t
@@ -78,9 +84,12 @@ CallObject::aliasedVar(AliasedFormalIter fi)
 }
 
 inline void
-CallObject::setAliasedVar(AliasedFormalIter fi, const Value &v)
+CallObject::setAliasedVar(JSContext *cx, AliasedFormalIter fi, PropertyName *name, const Value &v)
 {
+    JS_ASSERT(name == fi->name());
     setSlot(fi.scopeSlot(), v);
+    if (hasSingletonType())
+        types::AddTypePropertyId(cx, this, NameToId(name), v);
 }
 
 /*static*/ inline size_t

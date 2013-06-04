@@ -12,24 +12,26 @@
 
 #include "mozilla/Attributes.h"
 
+#include "nsCOMPtr.h"
+#include "nsDataHashtable.h"
 #include "nsIStyleSheet.h"
 #include "nsIStyleRuleProcessor.h"
 
 struct MiscContainer;
 
 class nsHTMLCSSStyleSheet MOZ_FINAL : public nsIStyleSheet,
-                                      public nsIStyleRuleProcessor {
+                                      public nsIStyleRuleProcessor
+{
 public:
-  nsHTMLCSSStyleSheet();
+  nsHTMLCSSStyleSheet(nsIURI* aURL, nsIDocument* aDocument);
   ~nsHTMLCSSStyleSheet();
 
   NS_DECL_ISUPPORTS
 
-  nsresult Init(nsIURI* aURL, nsIDocument* aDocument);
   void Reset(nsIURI* aURL);
 
   // nsIStyleSheet
-  virtual nsIURI* GetSheetURI() const;
+  virtual nsIURI* GetSheetURI() const MOZ_OVERRIDE;
   virtual nsIURI* GetBaseURI() const MOZ_OVERRIDE;
   virtual void GetTitle(nsString& aTitle) const MOZ_OVERRIDE;
   virtual void GetType(nsString& aType) const MOZ_OVERRIDE;
@@ -57,10 +59,10 @@ public:
   virtual nsRestyleHint
     HasAttributeDependentStyle(AttributeRuleProcessorData* aData) MOZ_OVERRIDE;
   virtual bool MediumFeaturesChanged(nsPresContext* aPresContext) MOZ_OVERRIDE;
-  virtual NS_MUST_OVERRIDE size_t
-    SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const MOZ_OVERRIDE;
-  virtual NS_MUST_OVERRIDE size_t
-    SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const MOZ_OVERRIDE;
+  virtual size_t SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf)
+    const MOZ_MUST_OVERRIDE MOZ_OVERRIDE;
+  virtual size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf)
+    const MOZ_MUST_OVERRIDE MOZ_OVERRIDE;
 
   void CacheStyleAttr(const nsAString& aSerialized, MiscContainer* aValue);
   void EvictStyleAttr(const nsAString& aSerialized, MiscContainer* aValue);

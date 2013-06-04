@@ -10,6 +10,7 @@ import re
 import shutil
 import tempfile
 import time
+import traceback
 
 from automation import Automation
 from devicemanager import NetworkTools
@@ -106,25 +107,18 @@ class B2GRemoteAutomation(Automation):
     def checkForCrashes(self, directory, symbolsPath):
         crashed = False
         remote_dump_dir = self._remoteProfile + '/minidumps'
+        print "checking for crashes in '%s'" % remote_dump_dir
         if self._devicemanager.dirExists(remote_dump_dir):
             local_dump_dir = tempfile.mkdtemp()
             self._devicemanager.getDirectory(remote_dump_dir, local_dump_dir)
             try:
                 crashed = mozcrash.check_for_crashes(local_dump_dir, symbolsPath, test_name=self.lastTestSeen)
+            except:
+                traceback.print_exc()
             finally:
                 shutil.rmtree(local_dump_dir)
                 self._devicemanager.removeDir(remote_dump_dir)
         return crashed
-
-    def initializeProfile(self,  profileDir, extraPrefs=[],
-                          useServerLocations=False,
-                          initialProfile=None):
-        # add b2g specific prefs
-        extraPrefs.extend(["browser.manifestURL='dummy (bug 772307)'"])
-        return Automation.initializeProfile(self, profileDir,
-                                            extraPrefs,
-                                            useServerLocations,
-                                            initialProfile)
 
     def buildCommandLine(self, app, debuggerInfo, profileDir, testURL, extraArgs):
         # if remote profile is specified, use that instead
@@ -327,7 +321,7 @@ class B2GRemoteAutomation(Automation):
             self.stdout_proc.run()
             if hasattr(self.stdout_proc, 'processOutput'):
                 self.stdout_proc.processOutput()
-            self.stdout_proc.waitForFinish()
+            self.stdout_proc.wait()
             self.stdout_proc = None
 
         @property

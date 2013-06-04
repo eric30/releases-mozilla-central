@@ -39,7 +39,7 @@ using namespace mozilla;
 NS_IMPL_FRAMEARENA_HELPERS(nsMathMLContainerFrame)
 
 NS_QUERYFRAME_HEAD(nsMathMLContainerFrame)
-  NS_QUERYFRAME_ENTRY(nsMathMLFrame)
+  NS_QUERYFRAME_ENTRY(nsIMathMLFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 // =============================================================================
@@ -416,7 +416,7 @@ nsMathMLContainerFrame::Stretch(nsRenderingContext& aRenderingContext,
           aDesiredStretchSize.width = mBoundingMetrics.width;
           aDesiredStretchSize.mBoundingMetrics.width = mBoundingMetrics.width;
 
-          nscoord dx = (NS_MATHML_IS_RTL(mPresentationData.flags) ?
+          nscoord dx = (StyleVisibility()->mDirection ?
                         coreData.trailingSpace : coreData.leadingSpace);
           if (dx != 0) {
             mBoundingMetrics.leftBearing += dx;
@@ -1173,7 +1173,7 @@ public:
     mX(0),
     mCarrySpace(0),
     mFromFrameType(eMathMLFrameType_UNKNOWN),
-    mRTL(NS_MATHML_IS_RTL(aParentFrame->mPresentationData.flags))
+    mRTL(aParentFrame->StyleVisibility()->mDirection)
   {
     if (!mRTL) {
       mChildFrame = aParentFrame->mFrames.FirstChild();
@@ -1286,7 +1286,7 @@ nsMathMLContainerFrame::Place(nsRenderingContext& aRenderingContext,
   // another math frame
   mBoundingMetrics.width = child.X();
 
-  aDesiredSize.width = mBoundingMetrics.width;
+  aDesiredSize.width = std::max(0, mBoundingMetrics.width);
   aDesiredSize.height = ascent + descent;
   aDesiredSize.ascent = ascent;
   aDesiredSize.mBoundingMetrics = mBoundingMetrics;

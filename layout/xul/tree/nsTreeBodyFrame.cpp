@@ -8,7 +8,6 @@
 #include "mozilla/Likely.h"
 
 #include "nsCOMPtr.h"
-#include "nsISupportsArray.h"
 #include "nsPresContext.h"
 #include "nsINameSpaceManager.h"
 
@@ -61,6 +60,7 @@
 #include "nsRenderingContext.h"
 #include "nsIScriptableRegion.h"
 #include <algorithm>
+#include "ScrollbarActivity.h"
 
 #ifdef ACCESSIBILITY
 #include "nsAccessibilityService.h"
@@ -70,6 +70,7 @@
 #endif
 
 using namespace mozilla;
+using namespace mozilla::layout;
 
 // Enumeration function that cancels all the image requests in our cache
 static PLDHashOperator
@@ -103,6 +104,7 @@ NS_IMPL_FRAMEARENA_HELPERS(nsTreeBodyFrame)
 
 NS_QUERYFRAME_HEAD(nsTreeBodyFrame)
   NS_QUERYFRAME_ENTRY(nsIScrollbarMediator)
+  NS_QUERYFRAME_ENTRY(nsIScrollbarOwner)
   NS_QUERYFRAME_ENTRY(nsTreeBodyFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsLeafBoxFrame)
 
@@ -127,8 +129,7 @@ nsTreeBodyFrame::nsTreeBodyFrame(nsIPresShell* aPresShell, nsStyleContext* aCont
  mHorizontalOverflow(false),
  mReflowCallbackPosted(false)
 {
-  mColumns = new nsTreeColumns(nullptr);
-  NS_NewISupportsArray(getter_AddRefs(mScratchArray));
+  mColumns = new nsTreeColumns(this);
 }
 
 // Destructor
@@ -157,13 +158,12 @@ AdjustForBorderPadding(nsStyleContext* aContext, nsRect& aRect)
   aRect.Deflate(borderPadding);
 }
 
-NS_IMETHODIMP
+void
 nsTreeBodyFrame::Init(nsIContent*     aContent,
                       nsIFrame*       aParent,
                       nsIFrame*       aPrevInFlow)
 {
-  nsresult rv = nsLeafBoxFrame::Init(aContent, aParent, aPrevInFlow);
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsLeafBoxFrame::Init(aContent, aParent, aPrevInFlow);
 
   mIndentation = GetIndentation();
   mRowHeight = GetRowHeight();
@@ -173,7 +173,10 @@ nsTreeBodyFrame::Init(nsIContent*     aContent,
   mImageCache.Init(16);
   EnsureBoxObject();
 
-  return rv;
+  if (LookAndFeel::GetInt(LookAndFeel::eIntID_UseOverlayScrollbars) != 0) {
+    mScrollbarActivity = new ScrollbarActivity(
+                           static_cast<nsIScrollbarOwner*>(this));
+  }
 }
 
 nsSize
@@ -271,6 +274,11 @@ nsTreeBodyFrame::CalcMaxRowWidth()
 void
 nsTreeBodyFrame::DestroyFrom(nsIFrame* aDestructRoot)
 {
+  if (mScrollbarActivity) {
+    mScrollbarActivity->Destroy();
+    mScrollbarActivity = nullptr;
+  }
+
   mScrollEvent.Revoke();
   // Make sure we cancel any posted callbacks. 
   if (mReflowCallbackPosted) {
@@ -318,9 +326,9 @@ nsTreeBodyFrame::EnsureBoxObject()
       nsIDocument* nsDoc = parent->GetDocument();
       if (!nsDoc) // there may be no document, if we're called from Destroy()
         return;
-      nsCOMPtr<nsIBoxObject> box;
-      nsCOMPtr<nsIDOMElement> domElem = do_QueryInterface(parent);
-      nsDoc->GetBoxObjectFor(domElem, getter_AddRefs(box));
+      ErrorResult ignored;
+      nsCOMPtr<nsIBoxObject> box =
+        nsDoc->GetBoxObjectFor(parent->AsElement(), ignored);
       // Ensure that we got a native box object.
       nsCOMPtr<nsPIBoxObject> pBox = do_QueryInterface(box);
       if (pBox) {
@@ -331,7 +339,6 @@ nsTreeBodyFrame::EnsureBoxObject()
               ->GetCachedTreeBody();
           ENSURE_TRUE(!innerTreeBoxObject || innerTreeBoxObject == this);
           mTreeBoxObject = realTreeBoxObject;
-          mColumns->SetTree(mTreeBoxObject);
         }
       }
     }
@@ -553,13 +560,6 @@ nsTreeBodyFrame::GetTreeBody(nsIDOMElement** aElement)
 }
 
 nsresult
-nsTreeBodyFrame::GetColumns(nsITreeColumns** aColumns)
-{
-  NS_IF_ADDREF(*aColumns = mColumns);
-  return NS_OK;
-}
-
-nsresult
 nsTreeBodyFrame::GetRowHeight(int32_t* _retval)
 {
   *_retval = nsPresContext::AppUnitsToIntCSSPixels(mRowHeight);
@@ -574,30 +574,9 @@ nsTreeBodyFrame::GetRowWidth(int32_t *aRowWidth)
 }
 
 nsresult
-nsTreeBodyFrame::GetFirstVisibleRow(int32_t *_retval)
-{
-  *_retval = mTopRowIndex;
-  return NS_OK;
-}
-
-nsresult
-nsTreeBodyFrame::GetLastVisibleRow(int32_t *_retval)
-{
-  *_retval = GetLastVisibleRow();
-  return NS_OK;
-}
-
-nsresult
 nsTreeBodyFrame::GetHorizontalPosition(int32_t *aHorizontalPosition)
 {
   *aHorizontalPosition = nsPresContext::AppUnitsToIntCSSPixels(mHorzPosition); 
-  return NS_OK;
-}
-
-nsresult
-nsTreeBodyFrame::GetPageLength(int32_t *_retval)
-{
-  *_retval = mPageLength;
   return NS_OK;
 }
 
@@ -625,7 +604,7 @@ nsTreeBodyFrame::GetSelectionRegion(nsIScriptableRegion **aRegion)
   int32_t x = nsPresContext::AppUnitsToIntCSSPixels(origin.x);
   int32_t y = nsPresContext::AppUnitsToIntCSSPixels(origin.y);
   int32_t top = y;
-  int32_t end = GetLastVisibleRow();
+  int32_t end = LastVisibleRow();
   int32_t rowHeight = nsPresContext::AppUnitsToIntCSSPixels(mRowHeight);
   for (int32_t i = mTopRowIndex; i <= end; i++) {
     bool isSelected;
@@ -739,7 +718,7 @@ nsTreeBodyFrame::InvalidateRange(int32_t aStart, int32_t aEnd)
   if (aStart == aEnd)
     return InvalidateRow(aStart);
 
-  int32_t last = GetLastVisibleRow();
+  int32_t last = LastVisibleRow();
   if (aStart > aEnd || aEnd < mTopRowIndex || aStart > last)
     return NS_OK;
 
@@ -776,7 +755,7 @@ nsTreeBodyFrame::InvalidateColumnRange(int32_t aStart, int32_t aEnd, nsITreeColu
   if (aStart == aEnd)
     return InvalidateCell(aStart, col);
 
-  int32_t last = GetLastVisibleRow();
+  int32_t last = LastVisibleRow();
   if (aStart > aEnd || aEnd < mTopRowIndex || aStart > last)
     return NS_OK;
 
@@ -871,23 +850,26 @@ nsTreeBodyFrame::UpdateScrollbars(const ScrollParts& aParts)
 {
   nscoord rowHeightAsPixels = nsPresContext::AppUnitsToIntCSSPixels(mRowHeight);
 
+  nsWeakFrame weakFrame(this);
+
   if (aParts.mVScrollbar) {
-    nsWeakFrame self(this);
     nsAutoString curPos;
     curPos.AppendInt(mTopRowIndex*rowHeightAsPixels);
     aParts.mVScrollbarContent->
       SetAttr(kNameSpaceID_None, nsGkAtoms::curpos, curPos, true);
-    if (!self.IsAlive()) {
-      return;
-    }
+    // 'this' might be deleted here
   }
 
-  if (aParts.mHScrollbar) {
+  if (weakFrame.IsAlive() && aParts.mHScrollbar) {
     nsAutoString curPos;
     curPos.AppendInt(mHorzPosition);
     aParts.mHScrollbarContent->
       SetAttr(kNameSpaceID_None, nsGkAtoms::curpos, curPos, true);
     // 'this' might be deleted here
+  }
+
+  if (weakFrame.IsAlive() && mScrollbarActivity) {
+    mScrollbarActivity->ActivityOccurred();
   }
 }
 
@@ -990,6 +972,10 @@ nsTreeBodyFrame::InvalidateScrollbars(const ScrollParts& aParts, nsWeakFrame& aW
     pageStr.AppendInt(nsPresContext::CSSPixelsToAppUnits(16));
     aParts.mHScrollbarContent->
       SetAttr(kNameSpaceID_None, nsGkAtoms::increment, pageStr, true);
+  }
+
+  if (weakFrame.IsAlive() && mScrollbarActivity) {
+    mScrollbarActivity->ActivityOccurred();
   }
 }
 
@@ -1833,8 +1819,8 @@ nsTreeBodyFrame::RowCountChanged(int32_t aIndex, int32_t aCount)
   NS_ASSERTION(rowCount == mRowCount, "row count did not change by the amount suggested, check caller");
 #endif
 
-  int32_t count = DeprecatedAbs(aCount);
-  int32_t last = GetLastVisibleRow();
+  int32_t count = Abs(aCount);
+  int32_t last = LastVisibleRow();
   if (aIndex >= mTopRowIndex && aIndex <= last)
     InvalidateRange(aIndex, last);
     
@@ -1911,25 +1897,25 @@ void
 nsTreeBodyFrame::PrefillPropertyArray(int32_t aRowIndex, nsTreeColumn* aCol)
 {
   NS_PRECONDITION(!aCol || aCol->GetFrame(), "invalid column passed");
-  mScratchArray->Clear();
+  mScratchArray.Clear();
   
   // focus
   if (mFocused)
-    mScratchArray->AppendElement(nsGkAtoms::focus);
+    mScratchArray.AppendElement(nsGkAtoms::focus);
 
   // sort
   bool sorted = false;
   mView->IsSorted(&sorted);
   if (sorted)
-    mScratchArray->AppendElement(nsGkAtoms::sorted);
+    mScratchArray.AppendElement(nsGkAtoms::sorted);
 
   // drag session
   if (mSlots && mSlots->mIsDragging)
-    mScratchArray->AppendElement(nsGkAtoms::dragSession);
+    mScratchArray.AppendElement(nsGkAtoms::dragSession);
 
   if (aRowIndex != -1) {
     if (aRowIndex == mMouseOverRow)
-      mScratchArray->AppendElement(nsGkAtoms::hover);
+      mScratchArray.AppendElement(nsGkAtoms::hover);
   
     nsCOMPtr<nsITreeSelection> selection;
     mView->GetSelection(getter_AddRefs(selection));
@@ -1939,20 +1925,20 @@ nsTreeBodyFrame::PrefillPropertyArray(int32_t aRowIndex, nsTreeColumn* aCol)
       bool isSelected;
       selection->IsSelected(aRowIndex, &isSelected);
       if (isSelected)
-        mScratchArray->AppendElement(nsGkAtoms::selected);
+        mScratchArray.AppendElement(nsGkAtoms::selected);
 
       // current
       int32_t currentIndex;
       selection->GetCurrentIndex(&currentIndex);
       if (aRowIndex == currentIndex)
-        mScratchArray->AppendElement(nsGkAtoms::current);
+        mScratchArray.AppendElement(nsGkAtoms::current);
   
       // active
       if (aCol) {
         nsCOMPtr<nsITreeColumn> currentColumn;
         selection->GetCurrentColumn(getter_AddRefs(currentColumn));
         if (aCol == currentColumn)
-          mScratchArray->AppendElement(nsGkAtoms::active);
+          mScratchArray.AppendElement(nsGkAtoms::active);
       }
     }
 
@@ -1960,71 +1946,71 @@ nsTreeBodyFrame::PrefillPropertyArray(int32_t aRowIndex, nsTreeColumn* aCol)
     bool isContainer = false;
     mView->IsContainer(aRowIndex, &isContainer);
     if (isContainer) {
-      mScratchArray->AppendElement(nsGkAtoms::container);
+      mScratchArray.AppendElement(nsGkAtoms::container);
 
       // open or closed
       bool isOpen = false;
       mView->IsContainerOpen(aRowIndex, &isOpen);
       if (isOpen)
-        mScratchArray->AppendElement(nsGkAtoms::open);
+        mScratchArray.AppendElement(nsGkAtoms::open);
       else
-        mScratchArray->AppendElement(nsGkAtoms::closed);
+        mScratchArray.AppendElement(nsGkAtoms::closed);
     }
     else {
-      mScratchArray->AppendElement(nsGkAtoms::leaf);
+      mScratchArray.AppendElement(nsGkAtoms::leaf);
     }
 
     // drop orientation
     if (mSlots && mSlots->mDropAllowed && mSlots->mDropRow == aRowIndex) {
       if (mSlots->mDropOrient == nsITreeView::DROP_BEFORE)
-        mScratchArray->AppendElement(nsGkAtoms::dropBefore);
+        mScratchArray.AppendElement(nsGkAtoms::dropBefore);
       else if (mSlots->mDropOrient == nsITreeView::DROP_ON)
-        mScratchArray->AppendElement(nsGkAtoms::dropOn);
+        mScratchArray.AppendElement(nsGkAtoms::dropOn);
       else if (mSlots->mDropOrient == nsITreeView::DROP_AFTER)
-        mScratchArray->AppendElement(nsGkAtoms::dropAfter);
+        mScratchArray.AppendElement(nsGkAtoms::dropAfter);
     }
 
     // odd or even
     if (aRowIndex % 2)
-      mScratchArray->AppendElement(nsGkAtoms::odd);
+      mScratchArray.AppendElement(nsGkAtoms::odd);
     else
-      mScratchArray->AppendElement(nsGkAtoms::even);
+      mScratchArray.AppendElement(nsGkAtoms::even);
 
     nsIContent* baseContent = GetBaseElement();
     if (baseContent && baseContent->HasAttr(kNameSpaceID_None, nsGkAtoms::editing))
-      mScratchArray->AppendElement(nsGkAtoms::editing);
+      mScratchArray.AppendElement(nsGkAtoms::editing);
 
     // multiple columns
     if (mColumns->GetColumnAt(1))
-      mScratchArray->AppendElement(nsGkAtoms::multicol);
+      mScratchArray.AppendElement(nsGkAtoms::multicol);
   }
 
   if (aCol) {
-    mScratchArray->AppendElement(aCol->GetAtom());
+    mScratchArray.AppendElement(aCol->GetAtom());
 
     if (aCol->IsPrimary())
-      mScratchArray->AppendElement(nsGkAtoms::primary);
+      mScratchArray.AppendElement(nsGkAtoms::primary);
 
     if (aCol->GetType() == nsITreeColumn::TYPE_CHECKBOX) {
-      mScratchArray->AppendElement(nsGkAtoms::checkbox);
+      mScratchArray.AppendElement(nsGkAtoms::checkbox);
 
       if (aRowIndex != -1) {
         nsAutoString value;
         mView->GetCellValue(aRowIndex, aCol, value);
         if (value.EqualsLiteral("true"))
-          mScratchArray->AppendElement(nsGkAtoms::checked);
+          mScratchArray.AppendElement(nsGkAtoms::checked);
       }
     }
     else if (aCol->GetType() == nsITreeColumn::TYPE_PROGRESSMETER) {
-      mScratchArray->AppendElement(nsGkAtoms::progressmeter);
+      mScratchArray.AppendElement(nsGkAtoms::progressmeter);
 
       if (aRowIndex != -1) {
         int32_t state;
         mView->GetProgressMode(aRowIndex, aCol, &state);
         if (state == nsITreeView::PROGRESS_NORMAL)
-          mScratchArray->AppendElement(nsGkAtoms::progressNormal);
+          mScratchArray.AppendElement(nsGkAtoms::progressNormal);
         else if (state == nsITreeView::PROGRESS_UNDETERMINED)
-          mScratchArray->AppendElement(nsGkAtoms::progressUndetermined);
+          mScratchArray.AppendElement(nsGkAtoms::progressUndetermined);
       }
     }
 
@@ -2032,11 +2018,11 @@ nsTreeBodyFrame::PrefillPropertyArray(int32_t aRowIndex, nsTreeColumn* aCol)
     if (aCol->mContent->AttrValueIs(kNameSpaceID_None,
                                     nsGkAtoms::insertbefore,
                                     nsGkAtoms::_true, eCaseMatters))
-      mScratchArray->AppendElement(nsGkAtoms::insertbefore);
+      mScratchArray.AppendElement(nsGkAtoms::insertbefore);
     if (aCol->mContent->AttrValueIs(kNameSpaceID_None,
                                     nsGkAtoms::insertafter,
                                     nsGkAtoms::_true, eCaseMatters))
-      mScratchArray->AppendElement(nsGkAtoms::insertafter);
+      mScratchArray.AppendElement(nsGkAtoms::insertafter);
   }
 }
 
@@ -2417,7 +2403,7 @@ int32_t nsTreeBodyFrame::GetRowHeight()
 {
   // Look up the correct height.  It is equal to the specified height
   // + the specified margins.
-  mScratchArray->Clear();
+  mScratchArray.Clear();
   nsStyleContext* rowContext = GetPseudoStyleContext(nsCSSAnonBoxes::moztreerow);
   if (rowContext) {
     const nsStylePosition* myPosition = rowContext->StylePosition();
@@ -2455,7 +2441,7 @@ int32_t nsTreeBodyFrame::GetRowHeight()
 int32_t nsTreeBodyFrame::GetIndentation()
 {
   // Look up the correct indentation.  It is equal to the specified indentation width.
-  mScratchArray->Clear();
+  mScratchArray.Clear();
   nsStyleContext* indentContext = GetPseudoStyleContext(nsCSSAnonBoxes::moztreeindentation);
   if (indentContext) {
     const nsStylePosition* myPosition = indentContext->StylePosition();
@@ -4204,11 +4190,8 @@ nsTreeBodyFrame::PseudoMatches(nsCSSSelector* aSelector)
   // present in the scratch array, then we have a match.
   nsAtomList* curr = aSelector->mClassList;
   while (curr) {
-    int32_t index;
-    mScratchArray->GetIndexOf(curr->mAtom, &index);
-    if (index == -1) {
+    if (!mScratchArray.Contains(curr->mAtom))
       return false;
-    }
     curr = curr->mNext;
   }
   return true;

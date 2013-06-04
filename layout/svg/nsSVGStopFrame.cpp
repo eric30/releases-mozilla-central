@@ -31,16 +31,14 @@ public:
 
   // nsIFrame interface:
 #ifdef DEBUG
-  NS_IMETHOD Init(nsIContent*      aContent,
-                  nsIFrame*        aParent,
-                  nsIFrame*        aPrevInFlow);
+  virtual void Init(nsIContent*      aContent,
+                    nsIFrame*        aParent,
+                    nsIFrame*        aPrevInFlow) MOZ_OVERRIDE;
 #endif
 
   void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                         const nsRect&           aDirtyRect,
                         const nsDisplayListSet& aLists) MOZ_OVERRIDE {}
-
-  virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext);
 
   NS_IMETHOD AttributeChanged(int32_t         aNameSpaceID,
                               nsIAtom*        aAttribute,
@@ -75,23 +73,16 @@ NS_IMPL_FRAMEARENA_HELPERS(nsSVGStopFrame)
 // nsIFrame methods:
 
 #ifdef DEBUG
-NS_IMETHODIMP
+void
 nsSVGStopFrame::Init(nsIContent* aContent,
                      nsIFrame* aParent,
                      nsIFrame* aPrevInFlow)
 {
   NS_ASSERTION(aContent->IsSVG(nsGkAtoms::stop), "Content is not a stop element");
 
-  return nsSVGStopFrameBase::Init(aContent, aParent, aPrevInFlow);
+  nsSVGStopFrameBase::Init(aContent, aParent, aPrevInFlow);
 }
 #endif /* DEBUG */
-
-/* virtual */ void
-nsSVGStopFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
-{
-  nsSVGStopFrameBase::DidSetStyleContext(aOldStyleContext);
-  nsSVGEffects::InvalidateRenderingObservers(this);
-}
 
 nsIAtom *
 nsSVGStopFrame::GetType() const

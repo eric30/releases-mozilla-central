@@ -1,9 +1,12 @@
 // Instead of loading ChromeUtils.js into the test scope in browser-test.js for all tests,
 // we only need ChromeUtils.js for a few files which is why we are using loadSubScript.
-var chromeUtils = {};
+var ChromeUtils = {};
 this._scriptLoader = Cc["@mozilla.org/moz/jssubscript-loader;1"].
                      getService(Ci.mozIJSSubScriptLoader);
-this._scriptLoader.loadSubScript("chrome://mochikit/content/tests/SimpleTest/ChromeUtils.js", chromeUtils);
+this._scriptLoader.loadSubScript("chrome://mochikit/content/tests/SimpleTest/ChromeUtils.js", ChromeUtils);
+
+XPCOMUtils.defineLazyModuleGetter(this, "FormHistory",
+  "resource://gre/modules/FormHistory.jsm");
 
 function test() {
   waitForExplicitFinish();
@@ -19,6 +22,8 @@ function test() {
   searchBar.value = "test";
 
   var ss = Services.search;
+
+  let testIterator;
 
   function observer(aSub, aTopic, aData) {
     switch (aData) {
@@ -153,7 +158,7 @@ function test() {
     searchBar.addEventListener("popupshowing", stopPopup, true);
     // drop on the search button so that we don't need to worry about the
     // default handlers for textboxes.
-    chromeUtils.synthesizeDrop(searchBar.searchButton, searchBar.searchButton, [[ {type: "text/plain", data: "Some Text" } ]], "copy", window, EventUtils);
+    ChromeUtils.synthesizeDrop(searchBar.searchButton, searchBar.searchButton, [[ {type: "text/plain", data: "Some Text" } ]], "copy", window);
     doOnloadOnce(function(event) {
       is(searchBar.value, "Some Text", "drop text/plain on searchbar");
       testDropInternalText();
@@ -162,7 +167,7 @@ function test() {
 
   function testDropInternalText() {
     init();
-    chromeUtils.synthesizeDrop(searchBar.searchButton, searchBar.searchButton, [[ {type: "text/x-moz-text-internal", data: "More Text" } ]], "copy", window, EventUtils);
+    ChromeUtils.synthesizeDrop(searchBar.searchButton, searchBar.searchButton, [[ {type: "text/x-moz-text-internal", data: "More Text" } ]], "copy", window);
     doOnloadOnce(function(event) {
       is(searchBar.value, "More Text", "drop text/x-moz-text-internal on searchbar");
       testDropLink();
@@ -171,7 +176,7 @@ function test() {
 
   function testDropLink() {
     init();
-    chromeUtils.synthesizeDrop(searchBar.searchButton, searchBar.searchButton, [[ {type: "text/uri-list", data: "http://www.mozilla.org" } ]], "copy", window, EventUtils);
+    ChromeUtils.synthesizeDrop(searchBar.searchButton, searchBar.searchButton, [[ {type: "text/uri-list", data: "http://www.mozilla.org" } ]], "copy", window);
     is(searchBar.value, "More Text", "drop text/uri-list on searchbar");
     SimpleTest.executeSoon(testRightClick);
   }
@@ -182,31 +187,62 @@ function test() {
     content.location.href = "about:blank";
     simulateClick({ button: 2 }, searchButton);
     setTimeout(function() {
-
       is(gBrowser.tabs.length, preTabNo, "RightClick did not open new tab");
       is(gBrowser.currentURI.spec, "about:blank", "RightClick did nothing");
 
-      testSearchHistory();
+      testIterator = testSearchHistory();
+      testIterator.next();
     }, 5000);
+  }
+
+  function countEntries(name, value, message) {
+    let count = 0;
+    FormHistory.count({ fieldname: name, value: value },
+                      { handleResult: function(result) { count = result; },
+                        handleError: function(error) { throw error; },
+                        handleCompletion: function(reason) {
+                          if (!reason) {
+                            ok(count > 0, message);
+                            testIterator.next();
+                          }
+                        }
+                      });
   }
 
   function testSearchHistory() {
     var textbox = searchBar._textbox;
     for (var i = 0; i < searchEntries.length; i++) {
-      let exists = textbox._formHistSvc.entryExists(textbox.getAttribute("autocompletesearchparam"), searchEntries[i]);
-      ok(exists, "form history entry '" + searchEntries[i] + "' should exist");
+      yield countEntries(textbox.getAttribute("autocompletesearchparam"), searchEntries[i],
+                         "form history entry '" + searchEntries[i] + "' should exist");
     }
     testAutocomplete();
   }
 
   function testAutocomplete() {
     var popup = searchBar.textbox.popup;
-    popup.addEventListener("popupshowing", function testACPopupShowing() {
-      popup.removeEventListener("popupshowing", testACPopupShowing);
+    popup.addEventListener("popupshown", function testACPopupShowing() {
+      popup.removeEventListener("popupshown", testACPopupShowing);
       checkMenuEntries(searchEntries);
-      SimpleTest.executeSoon(finalize);
+      testClearHistory();
     });
     searchBar.textbox.showHistoryPopup();
+  }
+
+  function testClearHistory() {
+    let controller = searchBar.textbox.controllers.getControllerForCommand("cmd_clearhistory")
+    ok(controller.isCommandEnabled("cmd_clearhistory"), "Clear history command enabled");
+    controller.doCommand("cmd_clearhistory");
+    let count = 0;
+    FormHistory.count({ },
+                      { handleResult: function(result) { count = result; },
+                        handleError: function(error) { throw error; },
+                        handleCompletion: function(reason) {
+                          if (!reason) {
+                            ok(count == 0, "History cleared");
+                            finalize();
+                          }
+                        }
+                      });
   }
 
   function finalize() {

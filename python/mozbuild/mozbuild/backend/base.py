@@ -71,8 +71,9 @@ class BackendConsumeSummary(object):
 
     @property
     def total_summary(self):
+        efficiency_value = self.cpu_time / self.wall_time if self.wall_time else 100
         return 'Total wall time: {:.2f}s; CPU time: {:.2f}s; Efficiency: {:.0%}'.format(
-            self.wall_time, self.cpu_time, self.cpu_time / self.wall_time)
+            self.wall_time, self.cpu_time, efficiency_value)
 
     def summaries(self):
         yield self.reader_summary
@@ -102,6 +103,32 @@ class BuildBackend(LoggingMixin):
 
         self.environment = environment
         self.summary = BackendConsumeSummary()
+
+        # Files whose modification should cause a new read and backend
+        # generation.
+        self.backend_input_files = set()
+
+        # Pull in Python files for this package as dependencies so backend
+        # regeneration occurs if any of the code affecting it changes.
+        for name, module in sys.modules.items():
+            if not module or not name.startswith('mozbuild'):
+                continue
+
+            p = module.__file__
+
+            # We need to look at the actual source files as opposed to derived
+            # because there may be nothing loading these modules at build time.
+            # Assuming each .pyc comes from a .py file in the same directory is
+            # not a safe assumption. Hence the assert to catch future changes
+            # in behavior. A better solution likely involves loading all
+            # mozbuild modules at the top of the build to force .pyc
+            # generation.
+            if p.endswith('.pyc'):
+                p = p[0:-1]
+
+            assert os.path.exists(p)
+
+            self.backend_input_files.add((os.path.abspath(p)))
 
         self._environments = {}
         self._environments[environment.topobjdir] = environment
@@ -151,6 +178,9 @@ class BuildBackend(LoggingMixin):
             obj_start = time.time()
             self.consume_object(obj)
             backend_time += time.time() - obj_start
+
+            if isinstance(obj, SandboxDerived):
+                self.backend_input_files |= obj.sandbox_all_paths
 
             if isinstance(obj, ReaderSummary):
                 self.summary.mozbuild_count = obj.total_file_count

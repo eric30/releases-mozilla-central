@@ -1,16 +1,17 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=4 sw=4 et tw=99:
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "jsfriendapi.h"
+
 #include "mozilla/GuardObjects.h"
+#include "mozilla/PodOperations.h"
 #include "mozilla/StandardInteger.h"
 
 #include "jscntxt.h"
 #include "jscompartment.h"
-#include "jsfriendapi.h"
 #include "jsgc.h"
 #include "jswrapper.h"
 #include "jsweakmap.h"
@@ -22,6 +23,8 @@
 
 using namespace js;
 using namespace JS;
+
+using mozilla::PodArrayZero;
 
 // Required by PerThreadDataFriendFields::getMainThread()
 JS_STATIC_ASSERT(offsetof(JSRuntime, mainThread) ==
@@ -59,7 +62,7 @@ JS_GetAnonymousString(JSRuntime *rt)
 }
 
 JS_FRIEND_API(JSObject *)
-JS_FindCompilationScope(JSContext *cx, RawObject objArg)
+JS_FindCompilationScope(JSContext *cx, JSObject *objArg)
 {
     RootedObject obj(cx, objArg);
 
@@ -68,7 +71,7 @@ JS_FindCompilationScope(JSContext *cx, RawObject objArg)
      * asked of us.
      */
     if (obj->isWrapper())
-        obj = UnwrapObject(obj);
+        obj = UncheckedUnwrap(obj);
 
     /*
      * Innerize the target_obj so that we compile in the correct (inner)
@@ -80,7 +83,7 @@ JS_FindCompilationScope(JSContext *cx, RawObject objArg)
 }
 
 JS_FRIEND_API(JSFunction *)
-JS_GetObjectFunction(RawObject obj)
+JS_GetObjectFunction(JSObject *obj)
 {
     if (obj->isFunction())
         return obj->toFunction();
@@ -146,7 +149,7 @@ JS::PrepareForFullGC(JSRuntime *rt)
 JS_FRIEND_API(void)
 JS::PrepareForIncrementalGC(JSRuntime *rt)
 {
-    if (!IsIncrementalGCInProgress(rt))
+    if (!JS::IsIncrementalGCInProgress(rt))
         return;
 
     for (ZonesIter zone(rt); !zone.done(); zone.next()) {
@@ -250,7 +253,7 @@ JS_WrapAutoIdVector(JSContext *cx, js::AutoIdVector &props)
 JS_FRIEND_API(void)
 JS_TraceShapeCycleCollectorChildren(JSTracer *trc, void *shape)
 {
-    MarkCycleCollectorChildren(trc, static_cast<RawShape>(shape));
+    MarkCycleCollectorChildren(trc, static_cast<Shape *>(shape));
 }
 
 static bool
@@ -344,37 +347,43 @@ js::IsAtomsCompartment(JSCompartment *comp)
 }
 
 JS_FRIEND_API(bool)
-js::IsScopeObject(RawObject obj)
+js::IsScopeObject(JSObject *obj)
 {
     return obj->isScope();
 }
 
 JS_FRIEND_API(JSObject *)
-js::GetObjectParentMaybeScope(RawObject obj)
+js::GetObjectParentMaybeScope(JSObject *obj)
 {
     return obj->enclosingScope();
 }
 
 JS_FRIEND_API(JSObject *)
-js::GetGlobalForObjectCrossCompartment(RawObject obj)
+js::GetGlobalForObjectCrossCompartment(JSObject *obj)
 {
     return &obj->global();
 }
 
+JS_FRIEND_API(JSObject *)
+js::GetDefaultGlobalForContext(JSContext *cx)
+{
+    return cx->maybeDefaultCompartmentObject();
+}
+
 JS_FRIEND_API(void)
-js::NotifyAnimationActivity(RawObject obj)
+js::NotifyAnimationActivity(JSObject *obj)
 {
     obj->compartment()->lastAnimationTime = PRMJ_Now();
 }
 
 JS_FRIEND_API(uint32_t)
-js::GetObjectSlotSpan(RawObject obj)
+js::GetObjectSlotSpan(JSObject *obj)
 {
     return obj->slotSpan();
 }
 
 JS_FRIEND_API(bool)
-js::IsObjectInContextCompartment(RawObject obj, const JSContext *cx)
+js::IsObjectInContextCompartment(JSObject *obj, const JSContext *cx)
 {
     return obj->compartment() == cx->compartment;
 }
@@ -460,8 +469,8 @@ js::NewFunctionByIdWithReserved(JSContext *cx, JSNative native, unsigned nargs, 
 JS_FRIEND_API(JSObject *)
 js::InitClassWithReserved(JSContext *cx, JSObject *objArg, JSObject *parent_protoArg,
                           JSClass *clasp, JSNative constructor, unsigned nargs,
-                          JSPropertySpec *ps, JSFunctionSpec *fs,
-                          JSPropertySpec *static_ps, JSFunctionSpec *static_fs)
+                          const JSPropertySpec *ps, const JSFunctionSpec *fs,
+                          const JSPropertySpec *static_ps, const JSFunctionSpec *static_fs)
 {
     RootedObject obj(cx, objArg);
     RootedObject parent_proto(cx, parent_protoArg);
@@ -473,21 +482,21 @@ js::InitClassWithReserved(JSContext *cx, JSObject *objArg, JSObject *parent_prot
 }
 
 JS_FRIEND_API(const Value &)
-js::GetFunctionNativeReserved(RawObject fun, size_t which)
+js::GetFunctionNativeReserved(JSObject *fun, size_t which)
 {
     JS_ASSERT(fun->toFunction()->isNative());
     return fun->toFunction()->getExtendedSlot(which);
 }
 
 JS_FRIEND_API(void)
-js::SetFunctionNativeReserved(RawObject fun, size_t which, const Value &val)
+js::SetFunctionNativeReserved(JSObject *fun, size_t which, const Value &val)
 {
     JS_ASSERT(fun->toFunction()->isNative());
     fun->toFunction()->setExtendedSlot(which, val);
 }
 
 JS_FRIEND_API(void)
-js::SetReservedSlotWithBarrier(RawObject obj, size_t slot, const js::Value &value)
+js::SetReservedSlotWithBarrier(JSObject *obj, size_t slot, const js::Value &value)
 {
     obj->setSlot(slot, value);
 }
@@ -751,12 +760,6 @@ js::CallContextDebugHandler(JSContext *cx, JSScript *script, jsbytecode *bc, Val
 }
 
 #ifdef JS_THREADSAFE
-void *
-js::GetOwnerThread(const JSContext *cx)
-{
-    return cx->runtime->ownerThread();
-}
-
 JS_FRIEND_API(bool)
 js::ContextHasOutstandingRequests(const JSContext *cx)
 {
@@ -783,10 +786,10 @@ js::IsContextRunningJS(JSContext *cx)
     return !cx->stack.empty();
 }
 
-JS_FRIEND_API(GCSliceCallback)
+JS_FRIEND_API(JS::GCSliceCallback)
 JS::SetGCSliceCallback(JSRuntime *rt, GCSliceCallback callback)
 {
-    GCSliceCallback old = rt->gcSliceCallback;
+    JS::GCSliceCallback old = rt->gcSliceCallback;
     rt->gcSliceCallback = callback;
     return old;
 }
@@ -836,8 +839,8 @@ JS::NotifyDidPaint(JSRuntime *rt)
         return;
     }
 
-    if (IsIncrementalGCInProgress(rt) && !rt->gcInterFrameGC) {
-        PrepareForIncrementalGC(rt);
+    if (JS::IsIncrementalGCInProgress(rt) && !rt->gcInterFrameGC) {
+        JS::PrepareForIncrementalGC(rt);
         GCSlice(rt, GC_NORMAL, gcreason::REFRESH_FRAME);
     }
 
@@ -867,6 +870,7 @@ JS::DisableGenerationalGC(JSRuntime *rt)
 {
     rt->gcGenerationalEnabled = false;
 #ifdef JSGC_GENERATIONAL
+    rt->gcNursery.disable();
     rt->gcStoreBuffer.disable();
 #endif
 }
@@ -903,7 +907,9 @@ JS::IncrementalReferenceBarrier(void *ptr, JSGCTraceKind kind)
         return;
 
     gc::Cell *cell = static_cast<gc::Cell *>(ptr);
-    Zone *zone = cell->zone();
+    Zone *zone = kind == JSTRACE_OBJECT
+                 ? static_cast<JSObject *>(cell)->zone()
+                 : cell->tenuredZone();
 
     JS_ASSERT(!zone->rt->isHeapBusy());
 
@@ -915,6 +921,8 @@ JS::IncrementalReferenceBarrier(void *ptr, JSGCTraceKind kind)
         JSString::writeBarrierPre(static_cast<JSString*>(cell));
     else if (kind == JSTRACE_SCRIPT)
         JSScript::writeBarrierPre(static_cast<JSScript*>(cell));
+    else if (kind == JSTRACE_LAZY_SCRIPT)
+        LazyScript::writeBarrierPre(static_cast<LazyScript*>(cell));
     else if (kind == JSTRACE_SHAPE)
         Shape::writeBarrierPre(static_cast<Shape*>(cell));
     else if (kind == JSTRACE_BASE_SHAPE)
@@ -928,7 +936,7 @@ JS::IncrementalReferenceBarrier(void *ptr, JSGCTraceKind kind)
 JS_FRIEND_API(void)
 JS::IncrementalValueBarrier(const Value &v)
 {
-    HeapValue::writeBarrierPre(v);
+    js::HeapValue::writeBarrierPre(v);
 }
 
 JS_FRIEND_API(void)
@@ -998,12 +1006,15 @@ js::GetDOMCallbacks(JSRuntime *rt)
 
 static void *gListBaseHandlerFamily = NULL;
 static uint32_t gListBaseExpandoSlot = 0;
+static ListBaseShadowsCheck gListBaseShadowsCheck;
 
 JS_FRIEND_API(void)
-js::SetListBaseInformation(void *listBaseHandlerFamily, uint32_t listBaseExpandoSlot)
+js::SetListBaseInformation(void *listBaseHandlerFamily, uint32_t listBaseExpandoSlot,
+                           ListBaseShadowsCheck listBaseShadowsCheck)
 {
     gListBaseHandlerFamily = listBaseHandlerFamily;
     gListBaseExpandoSlot = listBaseExpandoSlot;
+    gListBaseShadowsCheck = listBaseShadowsCheck;
 }
 
 void *
@@ -1016,6 +1027,12 @@ uint32_t
 js::GetListBaseExpandoSlot()
 {
     return gListBaseExpandoSlot;
+}
+
+ListBaseShadowsCheck
+js::GetListBaseShadowsCheck()
+{
+    return gListBaseShadowsCheck;
 }
 
 JS_FRIEND_API(void)
@@ -1034,4 +1051,49 @@ js::AutoCTypesActivityCallback::AutoCTypesActivityCallback(JSContext *cx,
 
     if (callback)
         callback(cx, beginType);
+}
+
+JS_FRIEND_API(void)
+js::SetObjectMetadataCallback(JSContext *cx, ObjectMetadataCallback callback)
+{
+    // Clear any jitcode in the runtime, which behaves differently depending on
+    // whether there is a creation callback.
+    ReleaseAllJITCode(cx->runtime->defaultFreeOp());
+
+    cx->compartment->objectMetadataCallback = callback;
+}
+
+JS_FRIEND_API(bool)
+js::SetObjectMetadata(JSContext *cx, JSHandleObject obj, JSHandleObject metadata)
+{
+    return JSObject::setMetadata(cx, obj, metadata);
+}
+
+JS_FRIEND_API(JSObject *)
+js::GetObjectMetadata(JSObject *obj)
+{
+    return obj->getMetadata();
+}
+
+JS_FRIEND_API(JSBool)
+js_DefineOwnProperty(JSContext *cx, JSObject *objArg, jsid idArg,
+                     const js::PropertyDescriptor& descriptor, JSBool *bp)
+{
+    RootedObject obj(cx, objArg);
+    RootedId id(cx, idArg);
+    JS_ASSERT(cx->runtime->heapState == js::Idle);
+    CHECK_REQUEST(cx);
+    assertSameCompartment(cx, obj, id, descriptor.value);
+    if (descriptor.attrs & JSPROP_GETTER)
+        assertSameCompartment(cx, CastAsObjectJsval(descriptor.getter));
+    if (descriptor.attrs & JSPROP_SETTER)
+        assertSameCompartment(cx, CastAsObjectJsval(descriptor.setter));
+
+    return js_DefineOwnProperty(cx, HandleObject(obj), id, descriptor, bp);
+}
+
+JS_FRIEND_API(JSBool)
+js_ReportIsNotFunction(JSContext *cx, const JS::Value& v)
+{
+    return ReportIsNotFunction(cx, v);
 }

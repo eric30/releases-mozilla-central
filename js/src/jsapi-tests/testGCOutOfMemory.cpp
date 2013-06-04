@@ -1,5 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=99:
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  *
  * Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/licenses/publicdomain/
@@ -54,7 +54,7 @@ BEGIN_TEST(testGCOutOfMemory)
 }
 
 virtual JSRuntime * createRuntime() {
-    return JS_NewRuntime(512 * 1024, JS_USE_HELPER_THREADS);
+    return JS_NewRuntime(768 * 1024, JS_USE_HELPER_THREADS);
 }
 
 virtual void destroyRuntime() {

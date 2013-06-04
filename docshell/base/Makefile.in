@@ -10,43 +10,13 @@ VPATH = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE         = docshell
 LIBRARY_NAME   = basedocshell_s
-GRE_MODULE     = 1
+MSVC_ENABLE_PGO := 1
 LIBXUL_LIBRARY = 1
 
 ifdef MOZ_TOOLKIT_SEARCH
 DEFINES += -DMOZ_TOOLKIT_SEARCH
 endif
-
-EXPORTS = \
-  nsDocShellLoadTypes.h \
-  nsILinkHandler.h \
-  nsIWebShellServices.h \
-  SerializedLoadContext.h \
-  $(NULL)
-
-EXPORTS_NAMESPACES = mozilla
-
-EXPORTS_mozilla = \
-  IHistory.h \
-  LoadContext.h \
-  $(NULL)
-
-CPPSRCS = \
-  nsDocShell.cpp \
-  nsDocShellLoadInfo.cpp \
-  nsDocShellEditorData.cpp \
-  nsDocShellTransferableHooks.cpp \
-  nsDocShellEnumerator.cpp \
-  nsDSURIContentListener.cpp \
-  nsDefaultURIFixup.cpp \
-  nsWebNavigationInfo.cpp \
-  nsAboutRedirector.cpp \
-  nsDownloadHistory.cpp \
-  SerializedLoadContext.cpp \
-  LoadContext.cpp \
-  $(NULL)
 
 # we don't want the shared lib, but we want to force the creation of a
 # static lib.

@@ -12,7 +12,7 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGFEPointLightElement::WrapNode(JSContext *aCx, JSObject *aScope)
+SVGFEPointLightElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
   return SVGFEPointLightElementBinding::Wrap(aCx, aScope, this);
 }
@@ -23,17 +23,6 @@ nsSVGElement::NumberInfo SVGFEPointLightElement::sNumberInfo[3] =
   { &nsGkAtoms::y, 0, false },
   { &nsGkAtoms::z, 0, false }
 };
-
-//----------------------------------------------------------------------
-// nsISupports methods
-
-NS_IMPL_ADDREF_INHERITED(SVGFEPointLightElement,SVGFEPointLightElementBase)
-NS_IMPL_RELEASE_INHERITED(SVGFEPointLightElement,SVGFEPointLightElementBase)
-
-NS_INTERFACE_TABLE_HEAD(SVGFEPointLightElement)
-  NS_NODE_INTERFACE_TABLE3(SVGFEPointLightElement, nsIDOMNode,
-                           nsIDOMElement, nsIDOMSVGElement)
-NS_INTERFACE_MAP_END_INHERITING(SVGFEPointLightElementBase)
 
 //----------------------------------------------------------------------
 // nsIDOMNode methods

@@ -75,19 +75,18 @@ private:
     nsSVGOrientType *mVal; // kept alive because it belongs to content
     nsRefPtr<nsSVGElement> mSVGElement;
 
-    NS_IMETHOD GetBaseVal(uint16_t* aResult)
+    NS_IMETHOD GetBaseVal(uint16_t* aResult) MOZ_OVERRIDE
       { *aResult = mVal->GetBaseValue(); return NS_OK; }
-    NS_IMETHOD SetBaseVal(uint16_t aValue)
+    NS_IMETHOD SetBaseVal(uint16_t aValue) MOZ_OVERRIDE
       { return mVal->SetBaseValue(aValue, mSVGElement); }
-    NS_IMETHOD GetAnimVal(uint16_t* aResult)
+    NS_IMETHOD GetAnimVal(uint16_t* aResult) MOZ_OVERRIDE
       { *aResult = mVal->GetAnimValue(); return NS_OK; }
   };
 };
 
 typedef nsSVGElement SVGMarkerElementBase;
 
-class SVGMarkerElement : public SVGMarkerElementBase,
-                         public nsIDOMSVGElement
+class SVGMarkerElement : public SVGMarkerElementBase
 {
   friend class ::nsSVGMarkerFrame;
 
@@ -95,26 +94,18 @@ protected:
   friend nsresult (::NS_NewSVGMarkerElement(nsIContent **aResult,
                                             already_AddRefed<nsINodeInfo> aNodeInfo));
   SVGMarkerElement(already_AddRefed<nsINodeInfo> aNodeInfo);
-  virtual JSObject* WrapNode(JSContext *cx, JSObject *scope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *cx,
+                             JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
 public:
-  // interfaces:
-
-  NS_DECL_ISUPPORTS_INHERITED
-
-  // xxx I wish we could use virtual inheritance
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
-  NS_FORWARD_NSIDOMSVGELEMENT(nsSVGElement::)
-
   // nsIContent interface
-  NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* name) const;
+  NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* name) const MOZ_OVERRIDE;
 
   virtual nsresult UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
-                             bool aNotify);
+                             bool aNotify) MOZ_OVERRIDE;
 
   // nsSVGSVGElement methods:
-  virtual bool HasValidDimensions() const;
+  virtual bool HasValidDimensions() const MOZ_OVERRIDE;
 
   // public helpers
   gfxMatrix GetMarkerTransform(float aStrokeWidth,
@@ -122,14 +113,12 @@ public:
   nsSVGViewBoxRect GetViewBoxRect();
   gfxMatrix GetViewBoxTransform();
 
-  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const;
+  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
 
   nsSVGOrientType* GetOrientType() { return &mOrientType; }
 
-  virtual nsIDOMNode* AsDOMNode() { return this; }
-
   // WebIDL
-  already_AddRefed<nsIDOMSVGAnimatedRect> ViewBox();
+  already_AddRefed<SVGAnimatedRect> ViewBox();
   already_AddRefed<DOMSVGAnimatedPreserveAspectRatio> PreserveAspectRatio();
   already_AddRefed<SVGAnimatedLength> RefX();
   already_AddRefed<SVGAnimatedLength> RefY();
@@ -145,15 +134,15 @@ protected:
 
   virtual bool ParseAttribute(int32_t aNameSpaceID, nsIAtom* aName,
                                 const nsAString& aValue,
-                                nsAttrValue& aResult);
+                                nsAttrValue& aResult) MOZ_OVERRIDE;
 
   void SetParentCoordCtxProvider(SVGSVGElement *aContext);
 
-  virtual LengthAttributesInfo GetLengthInfo();
-  virtual AngleAttributesInfo GetAngleInfo();
-  virtual EnumAttributesInfo GetEnumInfo();
-  virtual nsSVGViewBox *GetViewBox();
-  virtual SVGAnimatedPreserveAspectRatio *GetPreserveAspectRatio();
+  virtual LengthAttributesInfo GetLengthInfo() MOZ_OVERRIDE;
+  virtual AngleAttributesInfo GetAngleInfo() MOZ_OVERRIDE;
+  virtual EnumAttributesInfo GetEnumInfo() MOZ_OVERRIDE;
+  virtual nsSVGViewBox *GetViewBox() MOZ_OVERRIDE;
+  virtual SVGAnimatedPreserveAspectRatio *GetPreserveAspectRatio() MOZ_OVERRIDE;
 
   enum { REFX, REFY, MARKERWIDTH, MARKERHEIGHT };
   nsSVGLength2 mLengthAttributes[4];

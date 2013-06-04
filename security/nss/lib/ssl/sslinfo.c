@@ -1,7 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-/* $Id: sslinfo.c,v 1.31 2012/08/03 23:54:31 wtc%google.com Exp $ */
 #include "ssl.h"
 #include "sslimpl.h"
 #include "sslproto.h"
@@ -350,7 +349,7 @@ SSL_ExportKeyingMaterial(PRFileDesc *fd,
     /* construct PRF arguments */
     valLen = SSL3_RANDOM_LENGTH * 2;
     if (hasContext) {
-	valLen += 2 /* uint16 length */ + contextLen;
+	valLen += 2 /* PRUint16 length */ + contextLen;
     }
     val = PORT_Alloc(valLen);
     if (!val) {

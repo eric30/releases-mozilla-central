@@ -16,7 +16,7 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGFEImageElement::WrapNode(JSContext *aCx, JSObject *aScope)
+SVGFEImageElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
   return SVGFEImageElementBinding::Wrap(aCx, aScope, this);
 }
@@ -46,7 +46,6 @@ NS_INTERFACE_MAP_END_INHERITING(SVGFEImageElementBase)
 SVGFEImageElement::SVGFEImageElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : SVGFEImageElementBase(aNodeInfo)
 {
-  SetIsDOMBinding();
   // We start out broken
   AddStatesSilently(NS_EVENT_STATE_BROKEN);
 }

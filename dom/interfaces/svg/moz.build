@@ -1,3 +1,4 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -9,17 +10,11 @@ XPIDL_SOURCES += [
     'nsIDOMSVGAnimatedInteger.idl',
     'nsIDOMSVGAnimatedLength.idl',
     'nsIDOMSVGAnimatedNumber.idl',
-    'nsIDOMSVGAnimatedRect.idl',
     'nsIDOMSVGAnimatedString.idl',
     'nsIDOMSVGDocument.idl',
     'nsIDOMSVGElement.idl',
-    'nsIDOMSVGFilters.idl',
     'nsIDOMSVGLength.idl',
     'nsIDOMSVGNumber.idl',
-    'nsIDOMSVGRect.idl',
-    'nsIDOMSVGStringList.idl',
-    'nsIDOMSVGUnitTypes.idl',
-    'nsIDOMSVGZoomEvent.idl',
 ]
 
 XPIDL_MODULE = 'dom_svg'
@@ -29,4 +24,6 @@ XPIDL_FLAGS += [
     '-I$(topsrcdir)/dom/interfaces/core',
     '-I$(topsrcdir)/dom/interfaces/events',
 ]
+
+MODULE = 'dom'
 

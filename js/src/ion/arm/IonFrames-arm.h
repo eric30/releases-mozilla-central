@@ -1,6 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=4 sw=4 et tw=99:
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -9,6 +8,7 @@
 #define jsion_ionframes_arm_h__
 
 #include "ion/shared/IonFrames-shared.h"
+//#include "ion/arm/Assembler-arm.h"
 
 namespace js {
 namespace ion {
@@ -46,6 +46,9 @@ class IonCommonFrameLayout
     uint8_t *returnAddress() const {
         return returnAddress_;
     }
+    void setReturnAddress(uint8_t *addr) {
+        returnAddress_ = addr;
+    }
 };
 
 // this is the layout of the frame that is used when we enter Ion code from EABI code
@@ -67,6 +70,9 @@ class IonJSFrameLayout : public IonEntryFrameLayout
     void *calleeToken() const {
         return calleeToken_;
     }
+    void replaceCalleeToken(void *calleeToken) {
+        calleeToken_ = calleeToken;
+    }
 
     static size_t offsetOfCalleeToken() {
         return offsetof(IonJSFrameLayout, calleeToken_);
@@ -74,16 +80,22 @@ class IonJSFrameLayout : public IonEntryFrameLayout
     static size_t offsetOfNumActualArgs() {
         return offsetof(IonJSFrameLayout, numActualArgs_);
     }
-
-    void replaceCalleeToken(void *calleeToken) {
-        calleeToken_ = calleeToken;
+    static size_t offsetOfThis() {
+        IonJSFrameLayout *base = NULL;
+        return reinterpret_cast<size_t>(&base->argv()[0]);
     }
     static size_t offsetOfActualArgs() {
         IonJSFrameLayout *base = NULL;
         // +1 to skip |this|.
         return reinterpret_cast<size_t>(&base->argv()[1]);
     }
+    static size_t offsetOfActualArg(size_t arg) {
+        return offsetOfActualArgs() + arg * sizeof(Value);
+    }
 
+    Value thisv() {
+        return argv()[0];
+    }
     Value *argv() {
         return (Value *)(this + 1);
     }
@@ -155,9 +167,32 @@ class IonOsrFrameLayout : public IonJSFrameLayout
     }
 };
 
+class ICStub;
+
+class IonBaselineStubFrameLayout : public IonCommonFrameLayout
+{
+  public:
+    static inline size_t Size() {
+        return sizeof(IonBaselineStubFrameLayout);
+    }
+
+    static inline int reverseOffsetOfStubPtr() {
+        return -int(sizeof(void *));
+    }
+    static inline int reverseOffsetOfSavedFramePtr() {
+        return -int(2 * sizeof(void *));
+    }
+
+    inline ICStub *maybeStubPtr() {
+        uint8_t *fp = reinterpret_cast<uint8_t *>(this);
+        return *reinterpret_cast<ICStub **>(fp + reverseOffsetOfStubPtr());
+    }
+};
+
 class IonNativeExitFrameLayout;
 class IonOOLNativeGetterExitFrameLayout;
 class IonOOLPropertyOpExitFrameLayout;
+class IonOOLProxyGetExitFrameLayout;
 class IonDOMExitFrameLayout;
 
 // this is the frame layout when we are exiting ion code, and about to enter EABI code
@@ -200,6 +235,9 @@ class IonExitFrameLayout : public IonCommonFrameLayout
     inline bool isOOLPropertyOpExit() {
         return footer()->ionCode() == ION_FRAME_OOL_PROPERTY_OP;
     }
+    inline bool isOOLProxyGetExit() {
+        return footer()->ionCode() == ION_FRAME_OOL_PROXY_GET;
+    }
     inline bool isDomExit() {
         IonCode *code = footer()->ionCode();
         return
@@ -220,6 +258,10 @@ class IonExitFrameLayout : public IonCommonFrameLayout
     inline IonOOLPropertyOpExitFrameLayout *oolPropertyOpExit() {
         JS_ASSERT(isOOLPropertyOpExit());
         return reinterpret_cast<IonOOLPropertyOpExitFrameLayout *>(footer());
+    }
+    inline IonOOLProxyGetExitFrameLayout *oolProxyGetExit() {
+        JS_ASSERT(isOOLProxyGetExit());
+        return reinterpret_cast<IonOOLProxyGetExitFrameLayout *>(footer());
     }
     inline IonDOMExitFrameLayout *DOMExit() {
         JS_ASSERT(isDomExit());
@@ -338,6 +380,57 @@ class IonOOLPropertyOpExitFrameLayout
     }
 };
 
+// Proxy::get(JSContext *cx, HandleObject proxy, HandleObject receiver, HandleId id,
+//            MutableHandleValue vp)
+class IonOOLProxyGetExitFrameLayout
+{
+  protected: // only to silence a clang warning about unused private fields
+    IonExitFooterFrame footer_;
+    IonExitFrameLayout exit_;
+
+    // The proxy object.
+    JSObject *proxy_;
+
+    // Object for JSHandleObject
+    JSObject *receiver_;
+
+    // id for JSHandleId
+    jsid id_;
+
+    // space for JSMutableHandleValue result
+    // use two uint32_t so compiler doesn't align.
+    uint32_t vp0_;
+    uint32_t vp1_;
+
+    // pointer to root the stub's IonCode
+    IonCode *stubCode_;
+
+  public:
+    static inline size_t Size() {
+        return sizeof(IonOOLProxyGetExitFrameLayout);
+    }
+
+    static size_t offsetOfResult() {
+        return offsetof(IonOOLProxyGetExitFrameLayout, vp0_);
+    }
+
+    inline IonCode **stubCode() {
+        return &stubCode_;
+    }
+    inline Value *vp() {
+        return reinterpret_cast<Value*>(&vp0_);
+    }
+    inline jsid *id() {
+        return &id_;
+    }
+    inline JSObject **receiver() {
+        return &receiver_;
+    }
+    inline JSObject **proxy() {
+        return &proxy_;
+    }
+};
+
 class IonDOMExitFrameLayout
 {
     IonExitFooterFrame footer_;
@@ -362,9 +455,6 @@ class IonDOMExitFrameLayout
     }
     inline JSObject **thisObjAddress() {
         return &thisObj;
-    }
-    inline bool isSetterFrame() {
-        return footer_.ionCode() == ION_FRAME_DOMSETTER;
     }
     inline bool isMethodFrame() {
         return footer_.ionCode() == ION_FRAME_DOMMETHOD;

@@ -15,7 +15,7 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGForeignObjectElement::WrapNode(JSContext *aCx, JSObject *aScope)
+SVGForeignObjectElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
   return SVGForeignObjectElementBinding::Wrap(aCx, aScope, this);
 }
@@ -29,19 +29,11 @@ nsSVGElement::LengthInfo SVGForeignObjectElement::sLengthInfo[4] =
 };
 
 //----------------------------------------------------------------------
-// nsISupports methods
-
-NS_IMPL_ISUPPORTS_INHERITED3(SVGForeignObjectElement, SVGGraphicsElement,
-                             nsIDOMNode, nsIDOMElement,
-                             nsIDOMSVGElement)
-
-//----------------------------------------------------------------------
 // Implementation
 
 SVGForeignObjectElement::SVGForeignObjectElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : SVGGraphicsElement(aNodeInfo)
 {
-  SetIsDOMBinding();
 }
 
 //----------------------------------------------------------------------

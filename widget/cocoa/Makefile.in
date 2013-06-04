@@ -10,22 +10,13 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= widget
 LIBRARY_NAME	= widget_mac
 EXPORT_LIBRARY	= 1
 IS_COMPONENT	= 1
 MODULE_NAME	= nsWidgetMacModule
-GRE_MODULE	= 1
 LIBXUL_LIBRARY = 1
 
 
-
-EXPORTS = \
-		mozView.h \
-		nsChangeObserver.h \
-		nsCocoaUtils.h \
-		nsCocoaFeatures.h \
-		$(NULL)
 
 CMMSRCS = \
   nsBidiKeyboard.mm \

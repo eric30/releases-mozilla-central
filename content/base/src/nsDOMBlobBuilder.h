@@ -51,23 +51,22 @@ public:
   NS_IMETHOD Initialize(nsISupports* aOwner,
                         JSContext* aCx,
                         JSObject* aObj,
-                        uint32_t aArgc,
-                        jsval* aArgv);
+                        const JS::CallArgs& aArgs) MOZ_OVERRIDE;
 
   typedef nsIDOMBlob* (*UnwrapFuncPtr)(JSContext*, JSObject*);
   nsresult InitBlob(JSContext* aCx,
                     uint32_t aArgc,
-                    jsval* aArgv,
+                    JS::Value* aArgv,
                     UnwrapFuncPtr aUnwrapFunc);
   nsresult InitFile(JSContext* aCx,
                     uint32_t aArgc,
-                    jsval* aArgv);
+                    JS::Value* aArgv);
 
   already_AddRefed<nsIDOMBlob>
-  CreateSlice(uint64_t aStart, uint64_t aLength, const nsAString& aContentType);
+  CreateSlice(uint64_t aStart, uint64_t aLength, const nsAString& aContentType) MOZ_OVERRIDE;
 
-  NS_IMETHOD GetSize(uint64_t*);
-  NS_IMETHOD GetInternalStream(nsIInputStream**);
+  NS_IMETHOD GetSize(uint64_t*) MOZ_OVERRIDE;
+  NS_IMETHOD GetInternalStream(nsIInputStream**) MOZ_OVERRIDE;
 
   static nsresult
   NewFile(const nsAString& aName, nsISupports* *aNewObject);
@@ -87,7 +86,7 @@ public:
   }
 
   virtual const nsTArray<nsCOMPtr<nsIDOMBlob> >*
-  GetSubBlobs() const { return &mBlobs; }
+  GetSubBlobs() const MOZ_OVERRIDE { return &mBlobs; }
 
 protected:
   nsTArray<nsCOMPtr<nsIDOMBlob> > mBlobs;

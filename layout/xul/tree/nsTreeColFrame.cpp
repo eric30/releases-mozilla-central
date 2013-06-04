@@ -36,14 +36,13 @@ nsTreeColFrame::~nsTreeColFrame()
 {
 }
 
-NS_IMETHODIMP
+void
 nsTreeColFrame::Init(nsIContent*      aContent,
                      nsIFrame*        aParent,
                      nsIFrame*        aPrevInFlow)
 {
-  nsresult rv = nsBoxFrame::Init(aContent, aParent, aPrevInFlow);
+  nsBoxFrame::Init(aContent, aParent, aPrevInFlow);
   InvalidateColumns();
-  return rv;
 }
 
 void
@@ -190,7 +189,7 @@ nsTreeColFrame::InvalidateColumns(bool aCanWalkFrameTree)
     } else {
       nsTreeBodyFrame* body = static_cast<nsTreeBoxObject*>(treeBoxObject)->GetCachedTreeBody();
       if (body) {
-        body->GetColumns(getter_AddRefs(columns));
+        columns = body->Columns();
       }
     }
 

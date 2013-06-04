@@ -2713,18 +2713,16 @@ PluginInstanceChild::RecvAsyncSetWindow(const gfxSurfaceType& aSurfaceType,
         mCurrentAsyncSetWindowTask = nullptr;
     }
 
-    if (mPendingPluginCall) {
-        // We shouldn't process this now. Run it later.
-        mCurrentAsyncSetWindowTask =
-            NewRunnableMethod<PluginInstanceChild,
-                              void (PluginInstanceChild::*)(const gfxSurfaceType&, const NPRemoteWindow&, bool),
-                              gfxSurfaceType, NPRemoteWindow, bool>
-                (this, &PluginInstanceChild::DoAsyncSetWindow,
-                 aSurfaceType, aWindow, true);
-        MessageLoop::current()->PostTask(FROM_HERE, mCurrentAsyncSetWindowTask);
-    } else {
-        DoAsyncSetWindow(aSurfaceType, aWindow, false);
-    }
+    // We shouldn't process this now because it may be received within a nested
+    // RPC call, and both Flash and Java don't expect to receive setwindow calls
+    // at arbitrary times.
+    mCurrentAsyncSetWindowTask =
+        NewRunnableMethod<PluginInstanceChild,
+                          void (PluginInstanceChild::*)(const gfxSurfaceType&, const NPRemoteWindow&, bool),
+                          gfxSurfaceType, NPRemoteWindow, bool>
+        (this, &PluginInstanceChild::DoAsyncSetWindow,
+         aSurfaceType, aWindow, true);
+    MessageLoop::current()->PostTask(FROM_HERE, mCurrentAsyncSetWindowTask);
 
     return true;
 }
@@ -3835,13 +3833,9 @@ PluginInstanceChild::RecvUpdateBackground(const SurfaceDescriptor& aBackground,
     // XXX refactor me
     mAccumulatedInvalidRect.UnionRect(aRect, mAccumulatedInvalidRect);
 
-    // The browser is limping along with a stale copy of our pixels.
-    // Try to repaint ASAP.  This will ClearCurrentBackground() if we
-    // needed it.
-    if (!ShowPluginFrame()) {
-        NS_WARNING("Couldn't immediately repaint plugin instance");
-        AsyncShowPluginFrame();
-    }
+    // This must be asynchronous, because we may be nested within RPC messages
+    // which do not expect to receiving paint events.
+    AsyncShowPluginFrame();
 
     return true;
 }

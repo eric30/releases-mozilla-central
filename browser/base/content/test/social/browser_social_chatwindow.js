@@ -13,7 +13,9 @@ function test() {
     workerURL: "https://example.com/browser/browser/base/content/test/social/social_worker.js",
     iconURL: "https://example.com/browser/browser/base/content/test/moz.png"
   };
-  let oldwidth = window.outerWidth; // we futz with this, so we restore it
+  let oldwidth = window.outerWidth; // we futz with these, so we restore them
+  let oldleft = window.screenX;
+  window.moveTo(0, window.screenY)
   let postSubTest = function(cb) {
     let chats = document.getElementById("pinnedchats");
     ok(chats.children.length == 0, "no chatty children left behind");
@@ -21,6 +23,7 @@ function test() {
   };
   runSocialTestWithProvider(manifest, function (finishcb) {
     runSocialTests(tests, undefined, postSubTest, function() {
+      window.moveTo(oldleft, window.screenY)
       window.resizeTo(oldwidth, window.outerHeight);
       finishcb();
     });
@@ -102,47 +105,6 @@ var tests = {
     }
     port.postMessage({topic: "test-init", data: { id: 1 }});
   },
-  // In this case the *worker* opens a chat (so minimized is specified).
-  // The worker then makes the same call again - as that second call also
-  // specifies "minimized" the chat should *not* be restored.
-  testWorkerChatWindowMinimized: function(next) {
-    const chatUrl = "https://example.com/browser/browser/base/content/test/social/social_chat.html";
-    let port = Social.provider.getWorkerPort();
-    let seen_opened = false;
-    ok(port, "provider has a port");
-    port.postMessage({topic: "test-init"});
-    port.onmessage = function (e) {
-      let topic = e.data.topic;
-      switch (topic) {
-        case "got-chatbox-message":
-          ok(true, "got a chat window opened");
-          let chats = document.getElementById("pinnedchats");
-          if (!seen_opened) {
-            // first time we got the opened message, so minimize the chat then
-            // re-request the same chat to be opened - we should get the
-            // message again and the chat should be restored.
-            ok(chats.selectedChat.minimized, "chatbox from worker opened as minimized");
-            seen_opened = true;
-            port.postMessage({topic: "test-worker-chat", data: chatUrl});
-            // Sadly there is no notification we can use to know the chat was
-            // re-opened :(  So we ask the chat window to "ping" us - by then
-            // the second request should have made it.
-            chats.selectedChat.iframe.contentWindow.wrappedJSObject.pingWorker();
-          } else {
-            // This is the second time we've seen this message - there should
-            // be exactly 1 chat open and it should still be minimized.
-            let chats = document.getElementById("pinnedchats");
-            ok(chats.selectedChat.minimized, "chat still minimized")
-            chats.selectedChat.close();
-            is(chats.selectedChat, null, "should only have been one chat open");
-            port.close();
-            next();
-          }
-          break;
-      }
-    }
-    port.postMessage({topic: "test-worker-chat", data: chatUrl});
-  },
   testManyChats: function(next) {
     // open enough chats to overflow the window, then check
     // if the menupopup is visible
@@ -186,6 +148,7 @@ var tests = {
   },
   testWorkerChatWindow: function(next) {
     const chatUrl = "https://example.com/browser/browser/base/content/test/social/social_chat.html";
+    let chats = document.getElementById("pinnedchats");
     let port = Social.provider.getWorkerPort();
     ok(port, "provider has a port");
     port.postMessage({topic: "test-init"});
@@ -194,8 +157,7 @@ var tests = {
       switch (topic) {
         case "got-chatbox-message":
           ok(true, "got a chat window opened");
-          let chats = document.getElementById("pinnedchats");
-          ok(chats.selectedChat.minimized, "chatbox from worker opened as minimized");
+          ok(chats.selectedChat, "chatbox from worker opened");
           while (chats.selectedChat) {
             chats.selectedChat.close();
           }
@@ -206,6 +168,7 @@ var tests = {
           break;
       }
     }
+    ok(!chats.selectedChat, "chats are all closed");
     port.postMessage({topic: "test-worker-chat", data: chatUrl});
   },
   testCloseSelf: function(next) {
@@ -336,21 +299,23 @@ var tests = {
       ok(popupWidth, "have a popupwidth");
       info("starting resize tests - each chat's width is " + chatWidth +
            " and the popup width is " + popupWidth);
+      // Note that due to a difference between "device", "app" and "css" pixels
+      // we allow use 2 pixels as the minimum size difference.
       resizeAndCheckWidths(first, second, third, [
-        [chatWidth-1, false, false, true, "to < 1 chat width - only last should be visible."],
-        [chatWidth+1, false, false, true, "one pixel more then one fully exposed (not counting popup) - still only 1."],
-        [chatWidth+popupWidth+1, false, false, true, "one pixel more than one fully exposed (including popup) - still only 1."],
-        [chatWidth*2-1, false, false, true, "second not showing by 1 pixel (not counting popup) - only 1 exposed."],
-        [chatWidth*2+popupWidth-1, false, false, true, "second not showing by 1 pixel (including popup) - only 1 exposed."],
-        [chatWidth*2+popupWidth+1, false, true, true, "big enough to fit 2 - nub remains visible as first is still hidden"],
-        [chatWidth*3+popupWidth-1, false, true, true, "one smaller than the size necessary to display all three - first still hidden"],
-        [chatWidth*3+popupWidth+1, true, true, true, "big enough to fit all - all exposed (which removes the nub)"],
-        [chatWidth*3, true, true, true, "now the nub is hidden we can resize back down to chatWidth*3 before overflow."],
-        [chatWidth*3-1, false, true, true, "one pixel less and the first is again collapsed (and the nub re-appears)"],
-        [chatWidth*2+popupWidth+1, false, true, true, "back down to just big enough to fit 2"],
-        [chatWidth*2+popupWidth-1, false, false, true, "back down to just not enough to fit 2"],
-        [chatWidth*3+popupWidth+1, true, true, true, "now a large jump to make all 3 visible (ie, affects 2)"],
-        [chatWidth*1.5, false, false, true, "and a large jump back down to 1 visible (ie, affects 2)"],
+        [chatWidth-2, 1, "to < 1 chat width - only last should be visible."],
+        [chatWidth+2, 1, "2 pixels more then one fully exposed (not counting popup) - still only 1."],
+        [chatWidth+popupWidth+2, 1, "2 pixels more than one fully exposed (including popup) - still only 1."],
+        [chatWidth*2-2, 1, "second not showing by 2 pixels (not counting popup) - only 1 exposed."],
+        [chatWidth*2+popupWidth-2, 1, "second not showing by 2 pixelx (including popup) - only 1 exposed."],
+        [chatWidth*2+popupWidth+2, 2, "big enough to fit 2 - nub remains visible as first is still hidden"],
+        [chatWidth*3+popupWidth-2, 2, "one smaller than the size necessary to display all three - first still hidden"],
+        [chatWidth*3+popupWidth+2, 3, "big enough to fit all - all exposed (which removes the nub)"],
+        [chatWidth*3+2, 3, "now the nub is hidden we can resize back down to chatWidth*3 before overflow."],
+        [chatWidth*3-2, 2, "2 pixels less and the first is again collapsed (and the nub re-appears)"],
+        [chatWidth*2+popupWidth+2, 2, "back down to just big enough to fit 2"],
+        [chatWidth*2+popupWidth-2, 1, "back down to just not enough to fit 2"],
+        [chatWidth*3+popupWidth+2, 3, "now a large jump to make all 3 visible (ie, affects 2)"],
+        [chatWidth*1.5, 1, "and a large jump back down to 1 visible (ie, affects 2)"],
       ], function() {
         closeAllChats();
         port.close();
@@ -636,10 +601,10 @@ function resizeWindowToChatAreaWidth(desired, cb) {
        + current + ".  Screen avail is " + window.screen.availWidth
        + ", current outer width is " + window.outerWidth);
 
-  // WTF?  Some test boxes will resize to fractional values - eg: we
-  // request 660px but actually get 659.5!?
+  // WTF?  Sometimes we will get fractional values due to the - err - magic
+  // of DevPointsPerCSSPixel etc, so we allow a couple of pixels difference.
   let widthDeltaCloseEnough = function(d) {
-    return Math.abs(d) <= 0.5;
+    return Math.abs(d) < 2;
   }
 
   // attempting to resize by (0,0), unsurprisingly, doesn't cause a resize
@@ -658,15 +623,16 @@ function resizeWindowToChatAreaWidth(desired, cb) {
   }
   // Otherwise we request resize and expect a resize event
   window.addEventListener("resize", function resize_handler() {
-    window.removeEventListener("resize", resize_handler);
     // we did resize - but did we get far enough to be able to continue?
     let newSize = window.SocialChatBar.chatbar.getBoundingClientRect().width;
     let sizedOk = widthDeltaCloseEnough(newSize - desired);
     if (!sizedOk) {
-      // not an error...
-      info("skipping this as we can't resize chat area to " + desired + " - got " + newSize);
+      return;
     }
-    cb(sizedOk);
+    window.removeEventListener("resize", resize_handler);
+    executeSoon(function() {
+      cb(sizedOk);
+    });
   });
   window.resizeBy(delta, 0);
 }
@@ -676,15 +642,14 @@ function resizeAndCheckWidths(first, second, third, checks, cb) {
     cb(); // nothing more to check!
     return;
   }
-  let [width, firstVisible, secondVisible, thirdVisible, why] = checks.shift();
+  let [width, numExpectedVisible, why] = checks.shift();
   info("Check: " + why);
-  info("resizing window to " + width + ", expect visibility of " + firstVisible + "/" + secondVisible + "/" + thirdVisible);  
+  info("resizing window to " + width + ", expect " + numExpectedVisible + " visible items");
   resizeWindowToChatAreaWidth(width, function(sizedOk) {
     checkPopup();
     if (sizedOk) {
-      is(!first.collapsed, firstVisible, "first should be " + (firstVisible ? "visible" : "hidden"));
-      is(!second.collapsed, secondVisible, "second should be " + (secondVisible ? "visible" : "hidden"));
-      is(!third.collapsed, thirdVisible, "third should be " + (thirdVisible ? "visible" : "hidden"));
+      let numVisible = [first, second, third].filter(function(item) !item.collapsed).length;
+      is(numVisible, numExpectedVisible, "correct number of chats visible");
     }
     resizeAndCheckWidths(first, second, third, checks, cb);
   });

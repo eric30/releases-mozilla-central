@@ -9,7 +9,7 @@
 #include "MetroUtils.h" // Logging, POINT_CEIL_*, ActivateGenericInstance, etc
 #include "MetroWidget.h" // MetroInput::mWidget
 #include "npapi.h" // NPEvent
-#include "nsDOMTouchEvent.h"  // nsDOMTouch
+#include "mozilla/dom/Touch.h"  // Touch
 #include "nsTArray.h" // Touch lists
 #include "nsIDOMSimpleGestureEvent.h" // Constants for gesture events
 
@@ -23,6 +23,7 @@
 using namespace ABI::Windows; // UI, System, Foundation namespaces
 using namespace Microsoft; // WRL namespace (ComPtr, possibly others)
 using namespace mozilla::widget::winrt;
+using namespace mozilla::dom;
 
 // File-scoped statics (unnamed namespace)
 namespace {
@@ -46,17 +47,17 @@ namespace {
   typedef ABI::Windows::UI::Core::ICoreAcceleratorKeys ICoreAcceleratorKeys;
 
   /**
-   * Creates and returns a new {@link nsDOMTouch} from the given
+   * Creates and returns a new {@link Touch} from the given
    * ABI::Windows::UI::Input::IPointerPoint.  Note that the caller is
-   * responsible for freeing the memory for the nsDOMTouch returned from
+   * responsible for freeing the memory for the Touch returned from
    * this function.
    *
    * @param aPoint the ABI::Windows::UI::Input::IPointerPoint containing the
-   *               metadata from which to create our new {@link nsDOMTouch}
-   * @return a new {@link nsDOMTouch} representing the touch point. The caller
+   *               metadata from which to create our new {@link Touch}
+   * @return a new {@link Touch} representing the touch point. The caller
    *         is responsible for freeing the memory for this touch point.
    */
-  nsDOMTouch*
+  Touch*
   CreateDOMTouch(UI::Input::IPointerPoint* aPoint) {
     WRL::ComPtr<UI::Input::IPointerPointProperties> props;
     Foundation::Point position;
@@ -74,28 +75,28 @@ namespace {
     nsIntPoint touchRadius;
     touchRadius.x = MetroUtils::LogToPhys(contactRect.Width) / 2;
     touchRadius.y = MetroUtils::LogToPhys(contactRect.Height) / 2;
-    return new nsDOMTouch(pointerId,
-                          touchPoint,
-                          // Rotation radius and angle.
-                          // W3C touch events v1 do not use these.
-                          // The draft for W3C touch events v2 explains that
-                          // radius and angle should describe the ellipse that
-                          // most closely circumscribes the touching area.  Since
-                          // Windows gives us a bounding rectangle rather than an
-                          // ellipse, we provide the ellipse that is most closely
-                          // circumscribed by the bounding rectangle that Windows
-                          // gave us.
-                          touchRadius,
-                          0.0f,
-                          // Pressure
-                          // W3C touch events v1 do not use this.
-                          // The current draft for W3C touch events v2 says that
-                          // this should be a value between 0.0 and 1.0, which is
-                          // consistent with what Windows provides us here.
-                          // XXX: Windows defaults to 0.5, but the current W3C
-                          // draft says that the value should be 0.0 if no value
-                          // known.
-                          pressure);
+    return new Touch(pointerId,
+                     touchPoint,
+                     // Rotation radius and angle.
+                     // W3C touch events v1 do not use these.
+                     // The draft for W3C touch events v2 explains that
+                     // radius and angle should describe the ellipse that
+                     // most closely circumscribes the touching area.  Since
+                     // Windows gives us a bounding rectangle rather than an
+                     // ellipse, we provide the ellipse that is most closely
+                     // circumscribed by the bounding rectangle that Windows
+                     // gave us.
+                     touchRadius,
+                     0.0f,
+                     // Pressure
+                     // W3C touch events v1 do not use this.
+                     // The current draft for W3C touch events v2 says that
+                     // this should be a value between 0.0 and 1.0, which is
+                     // consistent with what Windows provides us here.
+                     // XXX: Windows defaults to 0.5, but the current W3C
+                     // draft says that the value should be 0.0 if no value
+                     // known.
+                     pressure);
   }
 
   bool
@@ -130,7 +131,7 @@ namespace {
   /**
    * This function is for use with mTouches.Enumerate.  It will
    * append each element it encounters to the {@link nsTArray}
-   * of {@link nsIDOMTouch}es passed in through the third (void*)
+   * of {@link mozilla::dom::Touch}es passed in through the third (void*)
    * parameter.
    *
    * NOTE: This function will set the `mChanged` member of each
@@ -144,11 +145,11 @@ namespace {
    */
   PLDHashOperator
   AppendToTouchList(const unsigned int& aKey,
-                    nsCOMPtr<nsIDOMTouch>& aData,
+                    nsRefPtr<Touch>& aData,
                     void *aTouchList)
   {
-    nsTArray<nsCOMPtr<nsIDOMTouch> > *touches =
-              static_cast<nsTArray<nsCOMPtr<nsIDOMTouch> > *>(aTouchList);
+    nsTArray<nsRefPtr<Touch> > *touches =
+              static_cast<nsTArray<nsRefPtr<Touch> > *>(aTouchList);
     touches->AppendElement(aData);
     aData->mChanged = false;
     return PL_DHASH_NEXT;
@@ -290,7 +291,9 @@ MetroInput::MetroInput(MetroWidget* aWidget,
   mTokenPointerExited.value = 0;
   mTokenPointerWheelChanged.value = 0;
   mTokenAcceleratorKeyActivated.value = 0;
-  mTokenEdgeGesture.value = 0;
+  mTokenEdgeStarted.value = 0;
+  mTokenEdgeCanceled.value = 0;
+  mTokenEdgeCompleted.value = 0;
   mTokenManipulationStarted.value = 0;
   mTokenManipulationUpdated.value = 0;
   mTokenManipulationCompleted.value = 0;
@@ -342,7 +345,7 @@ MetroInput::OnAcceleratorKeyActivated(UI::Core::ICoreDispatcher* sender,
 
 #ifdef DEBUG_INPUT
   LogFunction();
-  Log(L"Accelerator key! Type: %d Value: %d", type, vkey);
+  Log("Accelerator key! Type: %d Value: %d", type, vkey);
 #endif
 
   switch(type) {
@@ -364,11 +367,75 @@ MetroInput::OnAcceleratorKeyActivated(UI::Core::ICoreDispatcher* sender,
   return S_OK;
 }
 
-// "Edge Gesture" event.  This indicates that the user has swiped in from the
-// top or bottom of the screen and means we should show our context UI.  This
-// event can also be triggered through keyboard input.
-// According to MSDN, this event will only be received through touch
-// (user swipes in from edge) or from keyboard (user presses Win+Z)
+/**
+ * When the user swipes her/his finger in from the top of the screen,
+ * we receive this event.
+ *
+ * @param sender the CoreDispatcher that fired this event
+ * @param aArgs the event-specific args we use when processing this event
+ * @returns S_OK
+ */
+HRESULT
+MetroInput::OnEdgeGestureStarted(UI::Input::IEdgeGesture* sender,
+                                 UI::Input::IEdgeGestureEventArgs* aArgs)
+{
+#ifdef DEBUG_INPUT
+  LogFunction();
+#endif
+  nsSimpleGestureEvent geckoEvent(true,
+                                  NS_SIMPLE_GESTURE_EDGE_STARTED,
+                                  mWidget.Get(),
+                                  0,
+                                  0.0);
+  mModifierKeyState.Update();
+  mModifierKeyState.InitInputEvent(geckoEvent);
+  geckoEvent.time = ::GetMessageTime();
+
+  geckoEvent.inputSource = nsIDOMMouseEvent::MOZ_SOURCE_TOUCH;
+
+  DispatchEventIgnoreStatus(&geckoEvent);
+  return S_OK;
+}
+
+/**
+ * This event can be received if the user swipes her/his finger back to
+ * the top of the screen, or continues moving her/his finger such that
+ * the movement is interpreted as a "grab this window" gesture
+ *
+ * @param sender the CoreDispatcher that fired this event
+ * @param aArgs the event-specific args we use when processing this event
+ * @returns S_OK
+ */
+HRESULT
+MetroInput::OnEdgeGestureCanceled(UI::Input::IEdgeGesture* sender,
+                                  UI::Input::IEdgeGestureEventArgs* aArgs)
+{
+#ifdef DEBUG_INPUT
+  LogFunction();
+#endif
+  nsSimpleGestureEvent geckoEvent(true,
+                                  NS_SIMPLE_GESTURE_EDGE_CANCELED,
+                                  mWidget.Get(),
+                                  0,
+                                  0.0);
+  mModifierKeyState.Update();
+  mModifierKeyState.InitInputEvent(geckoEvent);
+  geckoEvent.time = ::GetMessageTime();
+
+  geckoEvent.inputSource = nsIDOMMouseEvent::MOZ_SOURCE_TOUCH;
+
+  DispatchEventIgnoreStatus(&geckoEvent);
+  return S_OK;
+}
+
+/**
+ * This event is received if the user presses ctrl+Z or lifts her/his
+ * finger after causing an EdgeGestureStarting event to fire.
+ *
+ * @param sender the CoreDispatcher that fired this event
+ * @param aArgs the event-specific args we use when processing this event
+ * @returns S_OK
+ */
 HRESULT
 MetroInput::OnEdgeGestureCompleted(UI::Input::IEdgeGesture* sender,
                                    UI::Input::IEdgeGestureEventArgs* aArgs)
@@ -377,7 +444,7 @@ MetroInput::OnEdgeGestureCompleted(UI::Input::IEdgeGesture* sender,
   LogFunction();
 #endif
   nsSimpleGestureEvent geckoEvent(true,
-                                  NS_SIMPLE_GESTURE_EDGEUI,
+                                  NS_SIMPLE_GESTURE_EDGE_COMPLETED,
                                   mWidget.Get(),
                                   0,
                                   0.0);
@@ -513,6 +580,7 @@ MetroInput::OnCharacterReceived(uint32_t aCharCode,
   keyEvent.time = ::GetMessageTime();
   keyEvent.isChar = true;
   keyEvent.charCode = aCharCode;
+  keyEvent.mKeyNameIndex = KEY_NAME_INDEX_PrintableKey;
 
   NPEvent pluginEvent;
   pluginEvent.event = WM_CHAR;
@@ -556,6 +624,7 @@ MetroInput::OnKeyDown(uint32_t aVKey,
   mModifierKeyState.InitInputEvent(keyEvent);
   keyEvent.time = ::GetMessageTime();
   keyEvent.keyCode = mozKey;
+  keyEvent.mKeyNameIndex = GetDOMKeyNameIndex(aVKey);
 
   NPEvent pluginEvent;
   pluginEvent.event = WM_KEYDOWN;
@@ -618,6 +687,7 @@ MetroInput::OnKeyUp(uint32_t aVKey,
   mModifierKeyState.InitInputEvent(keyEvent);
   keyEvent.time = ::GetMessageTime();
   keyEvent.keyCode = mozKey;
+  keyEvent.mKeyNameIndex = GetDOMKeyNameIndex(aVKey);
 
   NPEvent pluginEvent;
   pluginEvent.event = WM_KEYUP;
@@ -735,7 +805,7 @@ MetroInput::OnPointerPressed(UI::Core::ICoreWindow* aSender,
   // Create the new touch point and add it to our event.
   uint32_t pointerId;
   currentPoint->get_PointerId(&pointerId);
-  nsCOMPtr<nsIDOMTouch> touch = CreateDOMTouch(currentPoint.Get());
+  nsRefPtr<Touch> touch = CreateDOMTouch(currentPoint.Get());
   touch->mChanged = true;
   mTouches.Put(pointerId, touch);
   mTouchEvent.message = NS_TOUCH_START;
@@ -794,7 +864,7 @@ MetroInput::OnPointerReleased(UI::Core::ICoreWindow* aSender,
   // Get the touch associated with this touch point.
   uint32_t pointerId;
   currentPoint->get_PointerId(&pointerId);
-  nsCOMPtr<nsIDOMTouch> touch = mTouches.Get(pointerId);
+  nsRefPtr<Touch> touch = mTouches.Get(pointerId);
 
   // We are about to dispatch a touchend.  Before we do that, we should make
   // sure that we don't have a touchmove or touchstart sitting around for this
@@ -863,7 +933,7 @@ MetroInput::OnPointerMoved(UI::Core::ICoreWindow* aSender,
   // Get the touch associated with this touch point.
   uint32_t pointerId;
   currentPoint->get_PointerId(&pointerId);
-  nsCOMPtr<nsIDOMTouch> touch = mTouches.Get(pointerId);
+  nsRefPtr<Touch> touch = mTouches.Get(pointerId);
 
   // Some old drivers cause us to receive a PointerMoved event for a touchId
   // after we've already received a PointerReleased event for that touchId.
@@ -1265,6 +1335,23 @@ MetroInput::OnTapped(UI::Input::IGestureRecognizer* aSender,
     // Send the mouseup
     mouseEvent.message = NS_MOUSE_BUTTON_UP;
     DispatchEventIgnoreStatus(&mouseEvent);
+
+    // Send one more mousemove to avoid getting a hover state.
+    // In the Metro environment for any application, a tap does not imply a
+    // mouse cursor move.  In desktop environment for any application a tap
+    // does imply a cursor move.
+    POINT point;
+    if (GetCursorPos(&point)) {
+      ScreenToClient((HWND)mWidget->GetNativeData(NS_NATIVE_WINDOW), &point);
+      Foundation::Point oldMousePosition;
+      oldMousePosition.X = static_cast<FLOAT>(point.x);
+      oldMousePosition.Y = static_cast<FLOAT>(point.y);
+      mouseEvent.refPoint = MetroUtils::LogToPhys(oldMousePosition);
+      mouseEvent.message = NS_MOUSE_MOVE;
+      mouseEvent.button = 0;
+
+      DispatchEventIgnoreStatus(&mouseEvent);
+    }
   }
 
   return S_OK;
@@ -1346,7 +1433,9 @@ MetroInput::UnregisterInputEvents() {
       edgeStatics.GetAddressOf()))) {
     WRL::ComPtr<UI::Input::IEdgeGesture> edge;
     if (SUCCEEDED(edgeStatics->GetForCurrentView(edge.GetAddressOf()))) {
-      edge->remove_Completed(mTokenEdgeGesture);
+      edge->remove_Starting(mTokenEdgeStarted);
+      edge->remove_Canceled(mTokenEdgeCanceled);
+      edge->remove_Completed(mTokenEdgeCompleted);
     }
   }
 
@@ -1386,6 +1475,7 @@ bool MetroInput::sIsVirtualKeyMapInitialized = false;
 // References
 //   nsVKList.h - defines NS_VK_*
 //   nsIDOMKeyEvent.idl - defines the values that NS_VK_* are based on
+//   nsDOMKeyNameList.h - defines KeyNameIndex values
 void
 MetroInput::InitializeVirtualKeyMap() {
   sVirtualKeyMap[System::VirtualKey::VirtualKey_Cancel] = NS_VK_CANCEL;
@@ -1393,9 +1483,8 @@ MetroInput::InitializeVirtualKeyMap() {
   sVirtualKeyMap[System::VirtualKey::VirtualKey_Back] = NS_VK_BACK;
   sVirtualKeyMap[System::VirtualKey::VirtualKey_Tab] = NS_VK_TAB;
   sVirtualKeyMap[System::VirtualKey::VirtualKey_Clear] = NS_VK_CLEAR;
-  // XXX: Do we want RETURN or ENTER here?
   sVirtualKeyMap[System::VirtualKey::VirtualKey_Enter] = NS_VK_RETURN;
-  // NS_VK_ENTER
+  // NS_VK_ENTER is never used.
   sVirtualKeyMap[System::VirtualKey::VirtualKey_Shift] = NS_VK_SHIFT;
   sVirtualKeyMap[System::VirtualKey::VirtualKey_Control] = NS_VK_CONTROL;
   sVirtualKeyMap[System::VirtualKey::VirtualKey_Menu] = NS_VK_ALT;
@@ -1565,6 +1654,84 @@ MetroInput::GetMozKeyCode(uint32_t aKey)
   return sVirtualKeyMap[aKey];
 }
 
+KeyNameIndex
+MetroInput::GetDOMKeyNameIndex(uint32_t aVirtualKey)
+{
+  switch (aVirtualKey) {
+
+#define NS_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX(aNativeKey, aKeyNameIndex) \
+    case aNativeKey: return aKeyNameIndex;
+
+#include "NativeKeyToDOMKeyName.h"
+
+#undef NS_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX
+
+    // printable keys:
+    case System::VirtualKey::VirtualKey_Number0:
+    case System::VirtualKey::VirtualKey_Number1:
+    case System::VirtualKey::VirtualKey_Number2:
+    case System::VirtualKey::VirtualKey_Number3:
+    case System::VirtualKey::VirtualKey_Number4:
+    case System::VirtualKey::VirtualKey_Number5:
+    case System::VirtualKey::VirtualKey_Number6:
+    case System::VirtualKey::VirtualKey_Number7:
+    case System::VirtualKey::VirtualKey_Number8:
+    case System::VirtualKey::VirtualKey_Number9:
+    case System::VirtualKey::VirtualKey_A:
+    case System::VirtualKey::VirtualKey_B:
+    case System::VirtualKey::VirtualKey_C:
+    case System::VirtualKey::VirtualKey_D:
+    case System::VirtualKey::VirtualKey_E:
+    case System::VirtualKey::VirtualKey_F:
+    case System::VirtualKey::VirtualKey_G:
+    case System::VirtualKey::VirtualKey_H:
+    case System::VirtualKey::VirtualKey_I:
+    case System::VirtualKey::VirtualKey_J:
+    case System::VirtualKey::VirtualKey_K:
+    case System::VirtualKey::VirtualKey_L:
+    case System::VirtualKey::VirtualKey_M:
+    case System::VirtualKey::VirtualKey_N:
+    case System::VirtualKey::VirtualKey_O:
+    case System::VirtualKey::VirtualKey_P:
+    case System::VirtualKey::VirtualKey_Q:
+    case System::VirtualKey::VirtualKey_R:
+    case System::VirtualKey::VirtualKey_S:
+    case System::VirtualKey::VirtualKey_T:
+    case System::VirtualKey::VirtualKey_U:
+    case System::VirtualKey::VirtualKey_V:
+    case System::VirtualKey::VirtualKey_W:
+    case System::VirtualKey::VirtualKey_X:
+    case System::VirtualKey::VirtualKey_Y:
+    case System::VirtualKey::VirtualKey_Z:
+    case VK_NUMPAD0:
+    case VK_NUMPAD1:
+    case VK_NUMPAD2:
+    case VK_NUMPAD3:
+    case VK_NUMPAD4:
+    case VK_NUMPAD5:
+    case VK_NUMPAD6:
+    case VK_NUMPAD7:
+    case VK_NUMPAD8:
+    case VK_NUMPAD9:
+    case VK_OEM_1:
+    case VK_OEM_PLUS:
+    case VK_OEM_COMMA:
+    case VK_OEM_MINUS:
+    case VK_OEM_PERIOD:
+    case VK_OEM_2:
+    case VK_OEM_3:
+    case VK_OEM_4:
+    case VK_OEM_5:
+    case VK_OEM_6:
+    case VK_OEM_7:
+    case VK_OEM_8:
+    case VK_OEM_102:
+      return KEY_NAME_INDEX_PrintableKey;
+
+    default:
+      return KEY_NAME_INDEX_Unidentified;
+  }
+}
 void
 MetroInput::RegisterInputEvents()
 {
@@ -1595,11 +1762,23 @@ MetroInput::RegisterInputEvents()
   WRL::ComPtr<UI::Input::IEdgeGesture> edge;
   edgeStatics->GetForCurrentView(edge.GetAddressOf());
 
+  edge->add_Starting(
+      WRL::Callback<EdgeGestureHandler>(
+                                  this,
+                                  &MetroInput::OnEdgeGestureStarted).Get(),
+      &mTokenEdgeStarted);
+
+  edge->add_Canceled(
+      WRL::Callback<EdgeGestureHandler>(
+                                  this,
+                                  &MetroInput::OnEdgeGestureCanceled).Get(),
+      &mTokenEdgeCanceled);
+
   edge->add_Completed(
       WRL::Callback<EdgeGestureHandler>(
                                   this,
                                   &MetroInput::OnEdgeGestureCompleted).Get(),
-      &mTokenEdgeGesture);
+      &mTokenEdgeCompleted);
 
   // Set up our Gesture Recognizer to raise events for the gestures we
   // care about

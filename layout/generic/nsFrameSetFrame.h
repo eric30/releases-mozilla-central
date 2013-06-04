@@ -78,12 +78,12 @@ public:
 
   virtual ~nsHTMLFramesetFrame();
 
-  NS_IMETHOD Init(nsIContent*      aContent,
-                  nsIFrame*        aParent,
-                  nsIFrame*        aPrevInFlow) MOZ_OVERRIDE;
+  virtual void Init(nsIContent*      aContent,
+                    nsIFrame*        aParent,
+                    nsIFrame*        aPrevInFlow) MOZ_OVERRIDE;
 
   NS_IMETHOD SetInitialChildList(ChildListID  aListID,
-                                 nsFrameList& aChildList);
+                                 nsFrameList& aChildList) MOZ_OVERRIDE;
 
   static bool    gDragInProgress;
 

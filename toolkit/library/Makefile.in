@@ -12,8 +12,8 @@ include $(DEPTH)/config/autoconf.mk
 include $(topsrcdir)/rdf/util/src/objs.mk
 include $(topsrcdir)/intl/unicharutil/util/objs.mk
 
-MODULE = libxul
 LIBRARY_NAME = xul
+MSVC_ENABLE_PGO := 1
 FORCE_SHARED_LIB = 1
 MOZILLA_INTERNAL_API = 1
 
@@ -29,59 +29,51 @@ endif
 
 VPATH += $(topsrcdir)/build/
 
-ifeq ($(OS_ARCH)_$(GNU_CC),WINNT_)
-CPPSRCS += dlldeps-xul.cpp
-endif
-
-ifeq ($(OS_ARCH),OS2)
-CPPSRCS += dlldeps-xul.cpp
-endif
-
 SHARED_LIBRARY_LIBS += \
+  $(DEPTH)/media/kiss_fft/$(LIB_PREFIX)kiss_fft.$(LIB_SUFFIX) \
   $(DEPTH)/toolkit/components/osfile/$(LIB_PREFIX)osfile_s.$(LIB_SUFFIX) \
   $(DEPTH)/toolkit/xre/$(LIB_PREFIX)xulapp_s.$(LIB_SUFFIX) \
   $(NULL)
+
+ifdef ACCESSIBILITY
+SHARED_LIBRARY_LIBS += \
+  $(DEPTH)/accessible/src/base/$(LIB_PREFIX)accessibility_base_s.$(LIB_SUFFIX) \
+  $(DEPTH)/accessible/src/generic/$(LIB_PREFIX)accessibility_generic_s.$(LIB_SUFFIX) \
+  $(DEPTH)/accessible/src/html/$(LIB_PREFIX)accessibility_html_s.$(LIB_SUFFIX) \
+  $(DEPTH)/accessible/src/xpcom/$(LIB_PREFIX)accessibility_xpcom_s.$(LIB_SUFFIX) \
+  $(NULL)
+
+ifeq ($(MOZ_WIDGET_TOOLKIT),windows)
+SHARED_LIBRARY_LIBS += \
+  $(DEPTH)/accessible/src/windows/msaa/$(LIB_PREFIX)accessibility_toolkit_msaa_s.$(LIB_SUFFIX) \
+  $(DEPTH)/accessible/src/windows/ia2/$(LIB_PREFIX)accessibility_toolkit_ia2_s.$(LIB_SUFFIX) \
+  $(DEPTH)/accessible/src/windows/sdn/$(LIB_PREFIX)accessibility_toolkit_sdn_s.$(LIB_SUFFIX) \
+  $(DEPTH)/accessible/src/windows/uia/$(LIB_PREFIX)accessibility_toolkit_uia_s.$(LIB_SUFFIX) \
+  $(NULL)
+else
+SHARED_LIBRARY_LIBS += \
+  $(DEPTH)/accessible/src/$(LIB_PREFIX)accessibility_toolkit_s.$(LIB_SUFFIX) \
+  $(NULL)
+endif
+
+ifdef MOZ_XUL
+SHARED_LIBRARY_LIBS += $(DEPTH)/accessible/src/xul/$(LIB_PREFIX)accessibility_xul_s.$(LIB_SUFFIX)
+endif
+endif
 
 SHARED_LIBRARY_LIBS += \
   $(foreach component,$(COMPONENT_LIBS),$(DEPTH)/staticlib/components/$(LIB_PREFIX)$(component).$(LIB_SUFFIX)) \
   $(foreach lib,$(STATIC_LIBS),$(DEPTH)/staticlib/$(LIB_PREFIX)$(lib).$(LIB_SUFFIX)) \
   $(NULL)
 
-CPPSRCS += \
-  nsStaticXULComponents.cpp \
-  $(NULL)
-
-ifeq ($(OS_ARCH),WINNT)
-CPPSRCS += \
-  nsDllMain.cpp \
-  $(NULL)
-endif
-
 ifeq ($(OS_ARCH)_$(GNU_CC),WINNT_)
-CPPSRCS += \
-  nsGFXDeps.cpp \
-  $(NULL)
-
 RCINCLUDE = xulrunner.rc
-
-ifndef MOZ_NATIVE_ZLIB
-CPPSRCS += dlldeps-zlib.cpp
-endif
 
 LOCAL_INCLUDES += -I$(topsrcdir)/widget/windows
 LOCAL_INCLUDES += -I$(topsrcdir)/xpcom/base
 endif
 
 ifeq ($(OS_ARCH),OS2)
-
-CPPSRCS += \
-  nsGFXDeps.cpp \
-  $(NULL)
-
-ifndef MOZ_NATIVE_ZLIB
-CPPSRCS += dlldeps-zlib.cpp
-endif
-
 RESFILE = xulrunos2.res
 RCFLAGS += -i $(topsrcdir)/widget/os2
 
@@ -133,6 +125,13 @@ endif
 ifeq (Linux,$(OS_ARCH))
 ifneq (Android,$(OS_TARGET))
 OS_LIBS += -lrt
+EXTRA_DSO_LDOPTS += -Wl,-version-script,symverscript
+
+symverscript: symverscript.in
+	$(PYTHON) $(topsrcdir)/config/Preprocessor.py \
+		-DVERSION="$(LIBRARY_NAME)$(MOZILLA_VERSION)" $< > $@
+
+EXTRA_DEPS += symverscript
 endif
 endif
 
@@ -176,6 +175,7 @@ COMPONENT_LIBS += \
   storagecomps \
   rdf \
   windowds \
+  diskspacewatcher \
   $(NULL)
 
 ifdef BUILD_CTYPES
@@ -301,7 +301,7 @@ endif
 STATIC_LIBS += thebes gl ycbcr
 
 ifdef MOZ_ENABLE_GTEST
-COMPONENT_LIBS += gtest
+COMPONENT_LIBS += gtest xpcom_glue_gtest
 endif
 
 ifdef MOZ_ENABLE_PROFILER_SPS
@@ -322,10 +322,6 @@ COMPONENT_LIBS += widget_mac
 endif
 ifeq (qt,$(MOZ_WIDGET_TOOLKIT))
 COMPONENT_LIBS += widget_qt
-endif
-
-ifdef ACCESSIBILITY
-COMPONENT_LIBS += accessibility
 endif
 
 ifdef MOZ_ENABLE_XREMOTE
@@ -430,7 +426,7 @@ endif
 endif
 
 
-ifneq (,$(MOZ_CUBEB)$(MOZ_SYDNEYAUDIO))
+ifdef MOZ_CUBEB
 ifdef MOZ_ALSA
 EXTRA_DSO_LDOPTS += $(MOZ_ALSA_LIBS)
 endif
@@ -460,6 +456,7 @@ OS_LIBS += \
   -lsensorservice \
   -ldbus \
   -lstagefright \
+  -lstagefright_foundation \
   -lstagefright_omx \
   -lbinder \
   -lgui \
@@ -467,17 +464,12 @@ OS_LIBS += \
 endif
 
 ifdef MOZ_WMF
-OS_LIBS += $(call EXPAND_LIBNAME,mfuuid wmcodecdspuuid)
+OS_LIBS += $(call EXPAND_LIBNAME,mfuuid wmcodecdspuuid strmiids)
 endif
 
 EXTRA_DEPS += \
   $(topsrcdir)/intl/unicharutil/util/objs.mk \
   $(topsrcdir)/rdf/util/src/objs.mk \
-  $(NULL)
-
-CPPSRCS += \
-  $(INTL_UNICHARUTIL_UTIL_LCPPSRCS) \
-  $(RDF_UTIL_SRC_LCPPSRCS) \
   $(NULL)
 
 GARBAGE += \
@@ -522,27 +514,6 @@ OS_LIBS += \
   -F/System/Library/PrivateFrameworks -framework CoreUI \
   $(TK_LIBS) \
   $(NULL)
-endif
-
-ifeq ($(OS_ARCH),Darwin)
-ifdef MOZ_SYDNEYAUDIO
-OS_LIBS += \
-  -framework Carbon \
-  -framework CoreAudio \
-  -framework AudioToolbox \
-  -framework AudioUnit \
-  -framework IOKit \
-  -framework Foundation \
-  -framework AppKit \
-  -framework Security \
-  $(NULL)
-endif
-endif
-
-ifneq (,$(filter NetBSD OpenBSD,$(OS_ARCH)))
-ifdef MOZ_SYDNEYAUDIO
-EXTRA_DSO_LDOPTS += -lossaudio
-endif
 endif
 
 ifeq (OpenBSD,$(OS_ARCH))
@@ -638,6 +609,20 @@ endif
 ifdef ACCESSIBILITY
 EXTRA_DSO_LDOPTS += -DELAYLOAD:oleacc.dll
 endif
+ifdef MOZ_WEBRTC_IN_LIBXUL
+EXTRA_DSO_LDOPTS += -DELAYLOAD:msdmo.dll
+endif
+endif
+ifdef MOZ_GAMEPAD
+ifndef GNU_CC
+DXSDK := $(subst \,/,$(MOZ_DIRECTX_SDK_PATH))/Lib/$(MOZ_DIRECTX_SDK_CPU_SUFFIX)
+OS_LIBS += \
+  "$(DXSDK)/dxguid.lib" \
+  "$(DXSDK)/dinput8.lib" \
+  $(NULL)
+else
+OS_LIBS += $(call EXPAND_LIBNAME,dxguid dinput8)
+endif
 endif
 endif # WINNT
 
@@ -690,11 +675,6 @@ ifeq ($(MOZ_WIDGET_TOOLKIT),windows)
 OS_LIBS += $(call EXPAND_LIBNAME,usp10 oleaut32)
 endif
 
-ifeq ($(OS_ARCH),OpenBSD)
-# Needed by nsAuthGSSAPI
-EXTRA_DSO_LDOPTS += -lkrb5 -lcrypto
-endif
-
 ifdef MOZ_DEBUG
 ifdef ENABLE_TESTS
 DEFINES += -DENABLE_LAYOUTDEBUG
@@ -705,3 +685,8 @@ ifeq (WINNT_1,$(OS_TARGET)_$(MOZ_PROFILE_USE))
 # Wrap linker to measure peak virtual memory usage.
 LD := $(PYTHON) $(topsrcdir)/build/link.py $(CURDIR)/linker-vsize $(LD)
 endif
+
+libs:: $(FINAL_TARGET)/dependentlibs.list
+
+$(FINAL_TARGET)/dependentlibs.list: dependentlibs.py $(SHARED_LIBRARY) $(wildcard $(if $(wildcard $(FINAL_TARGET)/dependentlibs.list),$(addprefix $(FINAL_TARGET)/,$(shell cat $(FINAL_TARGET)/dependentlibs.list))))
+	$(PYTHON) $< $(SHARED_LIBRARY) -L $(FINAL_TARGET) $(if $(TOOLCHAIN_PREFIX),$(addprefix -p ,$(TOOLCHAIN_PREFIX))) > $@

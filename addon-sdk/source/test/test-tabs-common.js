@@ -3,13 +3,16 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 'use strict';
 
-const { Loader } = require('sdk/test/loader');
+const { Loader, LoaderWithHookedConsole } = require("sdk/test/loader");
 const { browserWindows } = require('sdk/windows');
 const tabs = require('sdk/tabs');
 const { isPrivate } = require('sdk/private-browsing');
 const { openDialog } = require('sdk/window/utils');
-const pbUtils = require('sdk/private-browsing/utils');
 const { isWindowPrivate } = require('sdk/window/utils');
+const { setTimeout } = require('sdk/timers');
+const { openWebpage } = require('./private-browsing/helper');
+const { isTabPBSupported, isWindowPBSupported } = require('sdk/private-browsing/utils');
+const app = require("sdk/system/xul-app");
 
 const URL = 'data:text/html;charset=utf-8,<html><head><title>#title#</title></head></html>';
 
@@ -322,33 +325,99 @@ exports.testTabOpenPrivate = function(test) {
 
 // We need permission flag in order to see private window's tabs
 exports.testPrivateAreNotListed = function (test) {
-  test.waitUntilDone();
   let originalTabCount = tabs.length;
 
-  let win = openDialog({
-    private: true
-  });
+  let page = openWebpage("about:blank", true);
+  if (!page) {
+    test.pass("Private browsing isn't supported in this release");
+    return;
+  }
 
-  win.addEventListener("load", function onload() {
-    win.removeEventListener("load", onload);
-
-    // PWPB case
-    if (pbUtils.isWindowPBSupported) {
-      test.assert(isWindowPrivate(win), "window is private");
+  test.waitUntilDone();
+  page.ready.then(function (win) {
+    if (isTabPBSupported || isWindowPBSupported) {
+      test.assert(isWindowPrivate(win), "the window is private");
       test.assertEqual(tabs.length, originalTabCount,
-                       'New private window\'s tab isn\'t visible in tabs list');
+                       'but the tab is *not* visible in tabs list');
     }
     else {
-    // Global case, openDialog didn't opened a private window/tab
-      test.assert(!isWindowPrivate(win), "window is private");
+      test.assert(!isWindowPrivate(win), "the window isn't private");
       test.assertEqual(tabs.length, originalTabCount + 1,
-                       'New non-private window\'s tab is visible in tabs list');
+                       'so that the tab is visible is tabs list');
     }
-
-    win.addEventListener("unload", function onunload() {
-      win.removeEventListener('unload', onunload);
-      test.done();
-    });
-    win.close();
+    page.close().then(test.done.bind(test));
   });
 }
+
+// If we close the tab while being in `onOpen` listener,
+// we end up synchronously consuming TabOpen, closing the tab and still
+// synchronously consuming the related TabClose event before the second
+// loader have a change to process the first TabOpen event!
+exports.testImmediateClosing = function (test) {
+  test.waitUntilDone();
+
+  let tabURL = 'data:text/html,foo';
+
+  let { loader, messages } = LoaderWithHookedConsole(module, onMessage);
+  let concurrentTabs = loader.require("sdk/tabs");
+  concurrentTabs.on("open", function (tab) {
+    // On Firefox, It shouldn't receive such event as the other loader will just
+    // open and destroy the tab without giving a chance to other loader to even
+    // know about the existance of this tab.
+    if (app.is("Firefox")) {
+      test.fail("Concurrent loader received a tabs `open` event");
+    }
+    else {
+      // On mobile, we can still receive an open event,
+      // but not the related ready event
+      tab.on("ready", function () {
+        test.fail("Concurrent loader received a tabs `ready` event");
+      });
+    }
+  });
+  function onMessage(type, msg) {
+    test.fail("Unexpected mesage on concurrent loader: " + msg);
+  }
+
+  tabs.open({
+    url: tabURL,
+    onOpen: function(tab) {
+      tab.close(function () {
+        test.pass("Tab succesfully removed");
+        // Let a chance to the concurrent loader to receive a TabOpen event
+        // on the next event loop turn
+        setTimeout(function () {
+          loader.unload();
+          test.done();
+        }, 0);
+      });
+    }
+  });
+}
+
+// TEST: tab.reload()
+exports.testTabReload = function(test) {
+  test.waitUntilDone();
+
+  let url = "data:text/html;charset=utf-8,<!doctype%20html><title></title>";
+
+  tabs.open({
+    url: url,
+    onReady: function onReady(tab) {
+      tab.removeListener('ready', onReady);
+
+      tab.once(
+        'ready',
+        function onReload() {
+          test.pass("the tab was loaded again");
+          test.assertEqual(tab.url, url, "the tab has the same URL");
+
+          // end test
+          tab.close(function() test.done());
+        }
+      );
+
+      tab.reload();
+    }
+  });
+};

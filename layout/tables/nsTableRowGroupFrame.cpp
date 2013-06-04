@@ -22,6 +22,7 @@
 #include <algorithm>
 
 using namespace mozilla;
+using namespace mozilla::layout;
 
 nsTableRowGroupFrame::nsTableRowGroupFrame(nsStyleContext* aContext):
   nsContainerFrame(aContext)
@@ -853,12 +854,8 @@ nsTableRowGroupFrame::CreateContinuingRowFrame(nsPresContext& aPresContext,
   // XXX what is the row index?
   if (!aContRowFrame) {NS_ASSERTION(false, "bad call"); return;}
   // create the continuing frame which will create continuing cell frames
-  nsresult rv = aPresContext.PresShell()->FrameConstructor()->
-    CreateContinuingFrame(&aPresContext, &aRowFrame, this, aContRowFrame);
-  if (NS_FAILED(rv)) {
-    *aContRowFrame = nullptr;
-    return;
-  }
+  *aContRowFrame = aPresContext.PresShell()->FrameConstructor()->
+    CreateContinuingFrame(&aPresContext, &aRowFrame, this);
 
   // Add the continuing row frame to the child list
   mFrames.InsertFrame(nullptr, &aRowFrame, *aContRowFrame);
@@ -944,10 +941,9 @@ nsTableRowGroupFrame::SplitSpanningCells(nsPresContext&           aPresContext,
             if (row != &aLastRow) {
               // aContRow needs a continuation for cell, since cell spanned into aLastRow 
               // but does not originate there
-              nsTableCellFrame* contCell = nullptr;
-              aPresContext.PresShell()->FrameConstructor()->
-                CreateContinuingFrame(&aPresContext, cell, &aLastRow,
-                                      (nsIFrame**)&contCell);
+              nsTableCellFrame* contCell = static_cast<nsTableCellFrame*>(
+                aPresContext.PresShell()->FrameConstructor()->
+                  CreateContinuingFrame(&aPresContext, cell, &aLastRow));
               int32_t colIndex;
               cell->GetColIndex(colIndex);
               aContRow->InsertCellFrame(contCell, colIndex);
@@ -976,7 +972,7 @@ nsTableRowGroupFrame::UndoContinuedRow(nsPresContext*   aPresContext,
   NS_PRECONDITION(mFrames.ContainsFrame(rowBefore),
                   "rowBefore not in our frame list?");
 
-  nsAutoPtr<nsFrameList> overflows(StealOverflowFrames());
+  AutoFrameListPtr overflows(aPresContext, StealOverflowFrames());
   if (!rowBefore || !overflows || overflows->IsEmpty() ||
       overflows->FirstChild() != aRow) {
     NS_ERROR("invalid continued row");
@@ -987,10 +983,10 @@ nsTableRowGroupFrame::UndoContinuedRow(nsPresContext*   aPresContext,
   // will not have reflowed yet to pick up content from any overflow lines.
   overflows->DestroyFrame(aRow);
 
-  if (overflows->IsEmpty())
-    return;
   // Put the overflow rows into our child list
-  mFrames.InsertFrames(nullptr, rowBefore, *overflows);
+  if (!overflows->IsEmpty()) {
+    mFrames.InsertFrames(nullptr, rowBefore, *overflows);
+  }
 }
 
 static nsTableRowFrame* 
@@ -1327,6 +1323,15 @@ nsTableRowGroupFrame::Reflow(nsPresContext*           aPresContext,
   FinishAndStoreOverflow(&aDesiredSize);
   NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
   return rv;
+}
+
+bool
+nsTableRowGroupFrame::UpdateOverflow()
+{
+  // Row cursor invariants depend on the visual overflow area of the rows,
+  // which may have changed, so we need to clear the cursor now.
+  ClearRowCursor();
+  return nsContainerFrame::UpdateOverflow();
 }
 
 /* virtual */ void

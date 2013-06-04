@@ -42,7 +42,6 @@ MOCHITEST_BROWSER_FILES = \
 	browser_webconsole_jsterm.js \
 	browser_webconsole_null_and_undefined_output.js \
 	browser_webconsole_output_order.js \
-	browser_webconsole_property_panel.js \
 	browser_webconsole_property_provider.js \
 	browser_webconsole_bug_587617_output_copy.js \
 	browser_webconsole_bug_585237_line_limit.js \
@@ -116,19 +115,39 @@ MOCHITEST_BROWSER_FILES = \
 	browser_output_longstring_expand.js \
 	browser_netpanel_longstring_expand.js \
 	browser_repeated_messages_accuracy.js \
+	browser_webconsole_bug_821877_csp_errors.js \
+	browser_eval_in_debugger_stackframe.js \
+	browser_console_variables_view.js \
+	browser_console_variables_view_while_debugging.js \
+	browser_console.js \
+	browser_longstring_hang.js \
+	browser_console_consolejsm_output.js \
+	browser_webconsole_bug_837351_securityerrors.js \
+	browser_bug_865871_variables_view_close_on_esc_key.js \
+	browser_bug_865288_repeat_different_objects.js \
+	browser_jsterm_inspect.js \
+	browser_bug_869003_inspect_cross_domain_object.js \
+	browser_bug_862916_console_dir_and_filter_off.js \
+	browser_console_native_getters.js \
+	browser_bug_871156_ctrlw_close_tab.js \
+	browser_console_private_browsing.js \
+	browser_console_nsiconsolemessage.js \
+	browser_webconsole_bug_817834_add_edited_input_to_history.js \
+	browser_console_addonsdk_loader_exception.js \
+	browser_console_error_source_click.js \
 	head.js \
 	$(NULL)
 
 ifeq ($(OS_ARCH), Darwin)
 MOCHITEST_BROWSER_FILES += \
-        browser_webconsole_bug_804845_ctrl_key_nav.js \
+	browser_webconsole_bug_804845_ctrl_key_nav.js \
         $(NULL)
 endif
 
 ifeq ($(OS_ARCH),WINNT)
 MOCHITEST_BROWSER_FILES += \
-		browser_webconsole_bug_623749_ctrl_a_select_all_winnt.js \
-		$(NULL)
+	browser_webconsole_bug_623749_ctrl_a_select_all_winnt.js \
+	$(NULL)
 endif
 
 MOCHITEST_BROWSER_FILES += \
@@ -150,7 +169,6 @@ MOCHITEST_BROWSER_FILES += \
 	test-bug-593003-iframe-wrong-hud-iframe.html \
 	test-console-replaced-api.html \
 	test-own-console.html \
-	test-bug-595934-dom-events.html \
 	test-bug-595934-css-loader.html \
 	test-bug-595934-css-loader.css \
 	test-bug-595934-css-loader.css^headers^ \
@@ -163,8 +181,6 @@ MOCHITEST_BROWSER_FILES += \
 	test-bug-595934-workers.js \
 	test-bug-595934-dom-html-external.html \
 	test-bug-595934-dom-html-external.js \
-	test-bug-595934-dom-events-external2.html \
-	test-bug-595934-dom-events-external2.js \
 	test-bug-595934-canvas.html \
 	test-bug-595934-canvas.js \
 	test-bug-595934-css-parser.html \
@@ -214,6 +230,13 @@ MOCHITEST_BROWSER_FILES += \
 	test-bug-766001-console-log.js \
 	test-bug-766001-js-console-links.html \
 	test-bug-766001-js-errors.js \
+	test-bug-821877-csperrors.html \
+	test-bug-821877-csperrors.html^headers^ \
+	test-eval-in-stackframe.html \
+	test-bug-859170-longstring-hang.html \
+	test-bug-837351-security-errors.html \
+	test-bug-869003-top-window.html \
+	test-bug-869003-iframe.html \
 	$(NULL)
 
 include $(topsrcdir)/config/rules.mk

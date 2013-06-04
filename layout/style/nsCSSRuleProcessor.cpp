@@ -9,21 +9,19 @@
  * matching and cascading
  */
 
-#include "mozilla/Util.h"
+#define PL_ARENA_CONST_ALIGN_MASK 7
+// We want page-sized arenas so there's no fragmentation involved.
+// Including plarena.h must come first to avoid it being included by some
+// header file thereby making PL_ARENA_CONST_ALIGN_MASK ineffective.
+#define NS_CASCADEENUMDATA_ARENA_BLOCK_SIZE (4096)
+#include "plarena.h"
 
 #include "nsCSSRuleProcessor.h"
 #include "nsRuleProcessorData.h"
 #include <algorithm>
-
-#define PL_ARENA_CONST_ALIGN_MASK 7
-// We want page-sized arenas so there's no fragmentation involved.
-#define NS_CASCADEENUMDATA_ARENA_BLOCK_SIZE (4096)
-#include "plarena.h"
-
 #include "nsCRT.h"
 #include "nsIAtom.h"
 #include "pldhash.h"
-#include "nsHashtable.h"
 #include "nsICSSPseudoComparator.h"
 #include "mozilla/css/StyleRule.h"
 #include "mozilla/css/GroupRule.h"
@@ -61,6 +59,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/Likely.h"
+#include "mozilla/Util.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -650,7 +649,7 @@ void RuleHash::AppendRule(const RuleSelectorPair& aRuleInfo)
     }
     AppendRuleToTagTable(&mTagTable, selector->mLowercaseTag, ruleValue);
     RULE_HASH_STAT_INCREMENT(mTagSelectors);
-    if (selector->mCasedTag && 
+    if (selector->mCasedTag &&
         selector->mCasedTag != selector->mLowercaseTag) {
       AppendRuleToTagTable(&mTagTable, selector->mCasedTag, ruleValue);
       RULE_HASH_STAT_INCREMENT(mTagSelectors);
@@ -979,6 +978,7 @@ struct RuleCascadeData {
 
   nsTArray<nsFontFaceRuleContainer> mFontFaceRules;
   nsTArray<nsCSSKeyframesRule*> mKeyframesRules;
+  nsTArray<nsCSSFontFeatureValuesRule*> mFontFeatureValuesRules;
   nsTArray<nsCSSPageRule*> mPageRules;
 
   // Looks up or creates the appropriate list in |mAttributeSelectors|.
@@ -1030,6 +1030,7 @@ RuleCascadeData::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
 
   n += mFontFaceRules.SizeOfExcludingThis(aMallocSizeOf);
   n += mKeyframesRules.SizeOfExcludingThis(aMallocSizeOf);
+  n += mFontFeatureValuesRules.SizeOfExcludingThis(aMallocSizeOf);
   n += mPageRules.SizeOfExcludingThis(aMallocSizeOf);
 
   return n;
@@ -1135,6 +1136,12 @@ InitSystemMetrics()
   }
 
   metricResult =
+    LookAndFeel::GetInt(LookAndFeel::eIntID_UseOverlayScrollbars);
+  if (metricResult) {
+    sSystemMetrics->AppendElement(nsGkAtoms::overlay_scrollbars);
+  }
+
+  metricResult =
     LookAndFeel::GetInt(LookAndFeel::eIntID_MenuBarDrag);
   if (metricResult) {
     sSystemMetrics->AppendElement(nsGkAtoms::menubar_drag);
@@ -1179,6 +1186,12 @@ InitSystemMetrics()
   rv = LookAndFeel::GetInt(LookAndFeel::eIntID_MaemoClassic, &metricResult);
   if (NS_SUCCEEDED(rv) && metricResult) {
     sSystemMetrics->AppendElement(nsGkAtoms::maemo_classic);
+  }
+
+  rv = LookAndFeel::GetInt(LookAndFeel::eIntID_SwipeAnimationEnabled,
+                           &metricResult);
+  if (NS_SUCCEEDED(rv) && metricResult) {
+    sSystemMetrics->AppendElement(nsGkAtoms::swipe_animation_enabled);
   }
 
 #ifdef XP_WIN
@@ -1426,11 +1439,11 @@ static bool AttrMatchesValue(const nsAttrSelector* aAttrSelector,
                 : static_cast<const nsStringComparator&>(ciComparator);
 
   switch (aAttrSelector->mFunction) {
-    case NS_ATTR_FUNC_EQUALS: 
+    case NS_ATTR_FUNC_EQUALS:
       return aValue.Equals(aAttrSelector->mValue, comparator);
-    case NS_ATTR_FUNC_INCLUDES: 
+    case NS_ATTR_FUNC_INCLUDES:
       return ValueIncludes(aValue, aAttrSelector->mValue, comparator);
-    case NS_ATTR_FUNC_DASHMATCH: 
+    case NS_ATTR_FUNC_DASHMATCH:
       return nsStyleUtil::DashMatchCompare(aValue, aAttrSelector->mValue, comparator);
     case NS_ATTR_FUNC_ENDSMATCH:
       return StringEndsWith(aValue, aAttrSelector->mValue, comparator);
@@ -2738,6 +2751,21 @@ nsCSSRuleProcessor::AppendPageRules(
   return true;
 }
 
+bool
+nsCSSRuleProcessor::AppendFontFeatureValuesRules(
+                              nsPresContext *aPresContext,
+                              nsTArray<nsCSSFontFeatureValuesRule*>& aArray)
+{
+  RuleCascadeData* cascade = GetRuleCascade(aPresContext);
+
+  if (cascade) {
+    if (!aArray.AppendElements(cascade->mFontFeatureValuesRules))
+      return false;
+  }
+
+  return true;
+}
+
 nsresult
 nsCSSRuleProcessor::ClearRuleCascades()
 {
@@ -3036,12 +3064,14 @@ struct CascadeEnumData {
   CascadeEnumData(nsPresContext* aPresContext,
                   nsTArray<nsFontFaceRuleContainer>& aFontFaceRules,
                   nsTArray<nsCSSKeyframesRule*>& aKeyframesRules,
+                  nsTArray<nsCSSFontFeatureValuesRule*>& aFontFeatureValuesRules,
                   nsTArray<nsCSSPageRule*>& aPageRules,
                   nsMediaQueryResultCacheKey& aKey,
                   uint8_t aSheetType)
     : mPresContext(aPresContext),
       mFontFaceRules(aFontFaceRules),
       mKeyframesRules(aKeyframesRules),
+      mFontFeatureValuesRules(aFontFeatureValuesRules),
       mPageRules(aPageRules),
       mCacheKey(aKey),
       mSheetType(aSheetType)
@@ -3065,6 +3095,7 @@ struct CascadeEnumData {
   nsPresContext* mPresContext;
   nsTArray<nsFontFaceRuleContainer>& mFontFaceRules;
   nsTArray<nsCSSKeyframesRule*>& mKeyframesRules;
+  nsTArray<nsCSSFontFeatureValuesRule*>& mFontFeatureValuesRules;
   nsTArray<nsCSSPageRule*>& mPageRules;
   nsMediaQueryResultCacheKey& mCacheKey;
   PLArenaPool mArena;
@@ -3082,7 +3113,9 @@ struct CascadeEnumData {
  *      but kept in order per-weight, and
  *  (2) add any @font-face rules, in order, into data->mFontFaceRules.
  *  (3) add any @keyframes rules, in order, into data->mKeyframesRules.
- *  (4) add any @page rules, in order, into data->mPageRules.
+ *  (4) add any @font-feature-value rules, in order,
+ *      into data->mFontFeatureValuesRules.
+ *  (5) add any @page rules, in order, into data->mPageRules.
  */
 static bool
 CascadeRuleEnumFunc(css::Rule* aRule, void* aData)
@@ -3132,6 +3165,13 @@ CascadeRuleEnumFunc(css::Rule* aRule, void* aData)
     nsCSSKeyframesRule *keyframesRule =
       static_cast<nsCSSKeyframesRule*>(aRule);
     if (!data->mKeyframesRules.AppendElement(keyframesRule)) {
+      return false;
+    }
+  }
+  else if (css::Rule::FONT_FEATURE_VALUES_RULE == type) {
+    nsCSSFontFeatureValuesRule *fontFeatureValuesRule =
+      static_cast<nsCSSFontFeatureValuesRule*>(aRule);
+    if (!data->mFontFeatureValuesRules.AppendElement(fontFeatureValuesRule)) {
       return false;
     }
   }
@@ -3241,6 +3281,7 @@ nsCSSRuleProcessor::RefreshRuleCascade(nsPresContext* aPresContext)
     if (newCascade) {
       CascadeEnumData data(aPresContext, newCascade->mFontFaceRules,
                            newCascade->mKeyframesRules,
+                           newCascade->mFontFeatureValuesRules,
                            newCascade->mPageRules,
                            newCascade->mCacheKey,
                            mSheetType);

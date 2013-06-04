@@ -8,8 +8,6 @@ srcdir		= @srcdir@
 VPATH		= @srcdir@
 
 LIBRARY_NAME	= AccessibleMarshal
-MODULE    = accessibility
-GRE_MODULE   = 1
 DEFFILE = $(win_srcdir)/AccessibleMarshal.def
 
 include $(DEPTH)/config/autoconf.mk
@@ -58,15 +56,6 @@ done_gen: ISimpleDOMNode.idl \
 	$(MIDL) $(MIDL_FLAGS) -Oicf $(srcdir)/ISimpleDOMDocument.idl
 	$(MIDL) $(MIDL_FLAGS) -Oicf $(srcdir)/ISimpleDOMText.idl
 	touch $@
-
-EXPORTS = \
-	ISimpleDOMNode.h \
-	ISimpleDOMNode_i.c \
-	ISimpleDOMDocument.h \
-	ISimpleDOMDocument_i.c \
-	ISimpleDOMText.h \
-	ISimpleDOMText_i.c \
-	$(NULL)
 
 export:: done_gen
 

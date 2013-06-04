@@ -7,8 +7,7 @@
 #include "GainNode.h"
 #include "mozilla/dom/GainNodeBinding.h"
 #include "AudioNodeEngine.h"
-#include "AudioNodeStream.h"
-#include "AudioDestinationNode.h"
+#include "GainProcessor.h"
 
 namespace mozilla {
 namespace dom {
@@ -22,53 +21,26 @@ NS_INTERFACE_MAP_END_INHERITING(AudioNode)
 NS_IMPL_ADDREF_INHERITED(GainNode, AudioNode)
 NS_IMPL_RELEASE_INHERITED(GainNode, AudioNode)
 
-struct ConvertTimeToTickHelper
-{
-  AudioNodeStream* mSourceStream;
-  AudioNodeStream* mDestinationStream;
-
-  static int64_t Convert(double aTime, void* aClosure)
-  {
-    TrackRate sampleRate = IdealAudioRate();
-
-    ConvertTimeToTickHelper* This = static_cast<ConvertTimeToTickHelper*> (aClosure);
-    TrackTicks tick = This->mSourceStream->GetCurrentPosition();
-    StreamTime streamTime = TicksToTimeRoundDown(sampleRate, tick);
-    GraphTime graphTime = This->mSourceStream->StreamTimeToGraphTime(streamTime);
-    StreamTime destinationStreamTime = This->mDestinationStream->GraphTimeToStreamTime(graphTime);
-    return TimeToTicksRoundDown(sampleRate, destinationStreamTime + SecondsToMediaTime(aTime));
-  }
-};
-
-class GainNodeEngine : public AudioNodeEngine
+class GainNodeEngine : public AudioNodeEngine,
+                       public GainProcessor
 {
 public:
-  explicit GainNodeEngine(AudioDestinationNode* aDestination)
-    : mSource(nullptr)
-    , mDestination(static_cast<AudioNodeStream*> (aDestination->Stream()))
-    // Keep the default value in sync with the default value in GainNode::GainNode.
-    , mGain(1.f)
+  GainNodeEngine(AudioNode* aNode, AudioDestinationNode* aDestination)
+    : AudioNodeEngine(aNode)
+    , GainProcessor(aDestination)
   {
-  }
-
-  void SetSourceStream(AudioNodeStream* aSource)
-  {
-    mSource = aSource;
   }
 
   enum Parameters {
     GAIN
   };
-  void SetTimelineParameter(uint32_t aIndex, const AudioParamTimeline& aValue) MOZ_OVERRIDE
+  void SetTimelineParameter(uint32_t aIndex,
+                            const AudioParamTimeline& aValue,
+                            TrackRate aSampleRate) MOZ_OVERRIDE
   {
     switch (aIndex) {
     case GAIN:
-      MOZ_ASSERT(mSource && mDestination);
-      mGain = aValue;
-      ConvertTimeToTickHelper ctth;
-      ctth.mSourceStream = mSource;
-      ctth.mDestinationStream = mDestination;
-      mGain.ConvertEventTimesToTicks(ConvertTimeToTickHelper::Convert, &ctth);
+      SetGainParameter(aValue);
       break;
     default:
       NS_ERROR("Bad GainNodeEngine TimelineParameter");
@@ -82,53 +54,37 @@ public:
   {
     MOZ_ASSERT(mSource == aStream, "Invalid source stream");
 
-    *aOutput = aInput;
-    if (mGain.HasSimpleValue()) {
-      // Optimize the case where we only have a single value set as the volume
-      aOutput->mVolume *= mGain.GetValue();
+    if (aInput.IsNull()) {
+      // If input is silent, so is the output
+      aOutput->SetNull(WEBAUDIO_BLOCK_SIZE);
     } else {
-      // First, compute a vector of gains for each track tick based on the
-      // timeline at hand, and then for each channel, multiply the values
-      // in the buffer with the gain vector.
-
-      // Compute the gain values for the duration of the input AudioChunk
-      // XXX we need to add a method to AudioEventTimeline to compute this buffer directly.
-      float computedGain[WEBAUDIO_BLOCK_SIZE];
-      for (size_t counter = 0; counter < WEBAUDIO_BLOCK_SIZE; ++counter) {
-        TrackTicks tick = aStream->GetCurrentPosition() + counter;
-        computedGain[counter] = mGain.GetValueAtTime<TrackTicks>(tick);
+      if (mGain.HasSimpleValue()) {
+        // Copy the input chunk to the output chunk, since we will only be
+        // changing the mVolume member.
+        *aOutput = aInput;
+      } else {
+        // Create a new output chunk to avoid modifying the input chunk.
+        AllocateAudioBlock(aInput.mChannelData.Length(), aOutput);
       }
-
-      // Apply the gain to the output buffer
-      for (size_t channel = 0; channel < aOutput->mChannelData.Length(); ++channel) {
-        float* buffer = static_cast<float*> (const_cast<void*>
-                          (aOutput->mChannelData[channel]));
-        AudioBlockCopyChannelWithScale(buffer, computedGain, buffer);
-      }
+      ProcessGain(aStream, aInput.mVolume, aInput.mChannelData, aOutput);
     }
   }
-
-  AudioNodeStream* mSource;
-  AudioNodeStream* mDestination;
-  AudioParamTimeline mGain;
 };
 
 GainNode::GainNode(AudioContext* aContext)
-  : AudioNode(aContext)
-  , mGain(new AudioParam(this, SendGainToStream, 1.0f, 0.0f, 1.0f))
+  : AudioNode(aContext,
+              2,
+              ChannelCountMode::Max,
+              ChannelInterpretation::Speakers)
+  , mGain(new AudioParam(this, SendGainToStream, 1.0f))
 {
-  GainNodeEngine* engine = new GainNodeEngine(aContext->Destination());
+  GainNodeEngine* engine = new GainNodeEngine(this, aContext->Destination());
   mStream = aContext->Graph()->CreateAudioNodeStream(engine, MediaStreamGraph::INTERNAL_STREAM);
   engine->SetSourceStream(static_cast<AudioNodeStream*> (mStream.get()));
 }
 
-GainNode::~GainNode()
-{
-  DestroyMediaStream();
-}
-
 JSObject*
-GainNode::WrapObject(JSContext* aCx, JSObject* aScope)
+GainNode::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
   return GainNodeBinding::Wrap(aCx, aScope, this);
 }
@@ -137,8 +93,7 @@ void
 GainNode::SendGainToStream(AudioNode* aNode)
 {
   GainNode* This = static_cast<GainNode*>(aNode);
-  AudioNodeStream* ns = static_cast<AudioNodeStream*>(This->mStream.get());
-  ns->SetTimelineParameter(GainNodeEngine::GAIN, *This->mGain);
+  SendTimelineParameterToStream(This, GainNodeEngine::GAIN, *This->mGain);
 }
 
 }

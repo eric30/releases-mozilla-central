@@ -522,7 +522,7 @@ add_test(function test_icc_get_card_lock_fdn() {
     this.readUint32();
 
     // String Array Length.
-    do_check_eq(this.readUint32(), 4);
+    do_check_eq(this.readUint32(), worker.RILQUIRKS_V5_LEGACY ? 3 : 4);
 
     // Facility.
     do_check_eq(this.readString(), ICC_CB_FACILITY_FDN);
@@ -535,8 +535,10 @@ add_test(function test_icc_get_card_lock_fdn() {
                                     ICC_SERVICE_CLASS_DATA  |
                                     ICC_SERVICE_CLASS_FAX).toString());
 
-    // AID. Ignore because it's from modem.
-    this.readUint32();
+    if (!worker.RILQUIRKS_V5_LEGACY) {
+      // AID. Ignore because it's from modem.
+      this.readUint32();
+    }
 
     run_next_test();
   };
@@ -973,9 +975,7 @@ add_test(function test_spn_display_condition() {
                                 expectedIsDisplayNetworkNameRequired,
                                 expectedIsDisplaySPNRequired,
                                 callback) {
-    RIL.iccInfoPrivate.SPN = {
-      spnDisplayCondition: iccDisplayCondition
-    };
+    RIL.iccInfoPrivate.spnDisplayCondition = iccDisplayCondition;
     RIL.iccInfo = {
       mcc: iccMcc,
       mnc: iccMnc
@@ -1820,9 +1820,100 @@ add_test(function test_read_email() {
 });
 
 /**
+ * Verify ICCRecordHelper.updateEmail
+ */
+add_test(function test_update_email() {
+  const recordSize = 0x20;
+  const recordNumber = 1;
+  const fileId = 0x4f50;
+  const NUM_TESTS = 2;
+  let worker = newUint8Worker();
+  let pduHelper = worker.GsmPDUHelper;
+  let ril = worker.RIL;
+  ril.appType = CARD_APPTYPE_USIM;
+  let recordHelper = worker.ICCRecordHelper;
+  let buf = worker.Buf;
+  let ioHelper = worker.ICCIOHelper;
+  let pbr = {email: {fileId: fileId, fileType: ICC_USIM_TYPE1_TAG},
+             adn: {sfi: 1}};
+  let count = 0;
+
+  // Override.
+  ioHelper.updateLinearFixedEF = function (options) {
+    options.pathId = worker.ICCFileHelper.getEFPath(options.fileId);
+    options.command = ICC_COMMAND_UPDATE_RECORD;
+    options.p1 = options.recordNumber;
+    options.p2 = READ_RECORD_ABSOLUTE_MODE;
+    options.p3 = recordSize;
+    ril.iccIO(options);
+  };
+
+  function do_test(pbr, expectedEmail, expectedAdnRecordId) {
+    buf.sendParcel = function () {
+      count++;
+
+      // Request Type.
+      do_check_eq(this.readUint32(), REQUEST_SIM_IO);
+
+      // Token : we don't care
+      this.readUint32();
+
+      // command.
+      do_check_eq(this.readUint32(), ICC_COMMAND_UPDATE_RECORD);
+
+      // fileId.
+      do_check_eq(this.readUint32(), fileId);
+
+      // pathId.
+      do_check_eq(this.readString(),
+                  EF_PATH_MF_SIM + EF_PATH_DF_TELECOM + EF_PATH_DF_PHONEBOOK);
+
+      // p1.
+      do_check_eq(this.readUint32(), recordNumber);
+
+      // p2.
+      do_check_eq(this.readUint32(), READ_RECORD_ABSOLUTE_MODE);
+
+      // p3.
+      do_check_eq(this.readUint32(), recordSize);
+
+      // data.
+      let strLen = this.readUint32();
+      let email;
+      if (pbr.email.fileType === ICC_USIM_TYPE1_TAG) {
+        email = pduHelper.read8BitUnpackedToString(recordSize);
+      } else {
+        email = pduHelper.read8BitUnpackedToString(recordSize - 2);
+        do_check_eq(pduHelper.readHexOctet(), pbr.adn.sfi);
+        do_check_eq(pduHelper.readHexOctet(), expectedAdnRecordId);
+      }
+      this.readStringDelimiter(strLen);
+      do_check_eq(email, expectedEmail);
+
+      // pin2.
+      do_check_eq(this.readString(), null);
+
+      if (!worker.RILQUIRKS_V5_LEGACY) {
+        // AID. Ignore because it's from modem.
+        this.readUint32();
+      }
+
+      if (count == NUM_TESTS) {
+        run_next_test();
+      }
+    };
+    recordHelper.updateEmail(pbr, recordNumber, expectedEmail, expectedAdnRecordId);
+  }
+
+  do_test(pbr, "test@mail.com");
+  pbr.email.fileType = ICC_USIM_TYPE2_TAG;
+  do_test(pbr, "test@mail.com", 1);
+});
+
+/**
  * Verify ICCRecordHelper.readANR
  */
-add_test(function test_read_email() {
+add_test(function test_read_anr() {
   let worker = newUint8Worker();
   let helper = worker.GsmPDUHelper;
   let record = worker.ICCRecordHelper;
@@ -1867,6 +1958,230 @@ add_test(function test_read_email() {
   do_check_eq(record._anrRecordSize, recordSize);
 
   run_next_test();
+});
+
+/**
+ * Verify ICCRecordHelper.updateANR
+ */
+add_test(function test_update_anr() {
+  const recordSize = 0x20;
+  const recordNumber = 1;
+  const fileId = 0x4f11;
+  const NUM_TESTS = 2;
+  let worker = newUint8Worker();
+  let pduHelper = worker.GsmPDUHelper;
+  let ril = worker.RIL;
+  ril.appType = CARD_APPTYPE_USIM;
+  let recordHelper = worker.ICCRecordHelper;
+  let buf = worker.Buf;
+  let ioHelper = worker.ICCIOHelper;
+  let pbr = {anr0: {fileId: fileId, fileType: ICC_USIM_TYPE1_TAG},
+             adn: {sfi: 1}};
+  let count = 0;
+
+  // Override.
+  ioHelper.updateLinearFixedEF = function (options) {
+    options.pathId = worker.ICCFileHelper.getEFPath(options.fileId);
+    options.command = ICC_COMMAND_UPDATE_RECORD;
+    options.p1 = options.recordNumber;
+    options.p2 = READ_RECORD_ABSOLUTE_MODE;
+    options.p3 = recordSize;
+    ril.iccIO(options);
+  };
+
+  function do_test(pbr, expectedANR, expectedAdnRecordId) {
+    buf.sendParcel = function () {
+      count++;
+
+      // Request Type.
+      do_check_eq(this.readUint32(), REQUEST_SIM_IO);
+
+      // Token : we don't care
+      this.readUint32();
+
+      // command.
+      do_check_eq(this.readUint32(), ICC_COMMAND_UPDATE_RECORD);
+
+      // fileId.
+      do_check_eq(this.readUint32(), fileId);
+
+      // pathId.
+      do_check_eq(this.readString(),
+                  EF_PATH_MF_SIM + EF_PATH_DF_TELECOM + EF_PATH_DF_PHONEBOOK);
+
+      // p1.
+      do_check_eq(this.readUint32(), recordNumber);
+
+      // p2.
+      do_check_eq(this.readUint32(), READ_RECORD_ABSOLUTE_MODE);
+
+      // p3.
+      do_check_eq(this.readUint32(), recordSize);
+
+      // data.
+      let strLen = this.readUint32();
+      // EF_AAS, ignore.
+      pduHelper.readHexOctet();
+      do_check_eq(pduHelper.readNumberWithLength(), expectedANR);
+      // EF_CCP, ignore.
+      pduHelper.readHexOctet();
+      // EF_EXT1, ignore.
+      pduHelper.readHexOctet();
+      if (pbr.anr0.fileType === ICC_USIM_TYPE2_TAG) {
+        do_check_eq(pduHelper.readHexOctet(), pbr.adn.sfi);
+        do_check_eq(pduHelper.readHexOctet(), expectedAdnRecordId);
+      }
+      this.readStringDelimiter(strLen);
+
+      // pin2.
+      do_check_eq(this.readString(), null);
+
+      if (!worker.RILQUIRKS_V5_LEGACY) {
+        // AID. Ignore because it's from modem.
+        this.readUint32();
+      }
+
+      if (count == NUM_TESTS) {
+        run_next_test();
+      }
+    };
+    recordHelper.updateANR(pbr, recordNumber, expectedANR, expectedAdnRecordId);
+  }
+
+  do_test(pbr, "+123456789");
+  pbr.anr0.fileType = ICC_USIM_TYPE2_TAG;
+  do_test(pbr, "123456789", 1);
+});
+
+/**
+ * Verify ICCRecordHelper.readIAP
+ */
+add_test(function test_read_iap() {
+  let worker = newUint8Worker();
+  let helper = worker.GsmPDUHelper;
+  let record = worker.ICCRecordHelper;
+  let buf    = worker.Buf;
+  let io     = worker.ICCIOHelper;
+  let recordSize;
+
+  io.loadLinearFixedEF = function fakeLoadLinearFixedEF(options)  {
+    let iap_1 = [0x01, 0x02];
+
+    // Write data size/
+    buf.writeUint32(iap_1.length * 2);
+
+    // Write iap.
+    for (let i = 0; i < iap_1.length; i++) {
+      helper.writeHexOctet(iap_1[i]);
+    }
+
+    // Write string delimiter.
+    buf.writeStringDelimiter(iap_1.length * 2);
+
+    recordSize = iap_1.length;
+    options.recordSize = recordSize;
+    if (options.callback) {
+      options.callback(options);
+    }
+  };
+
+  function doTestReadIAP(expectedIAP) {
+    const fileId = 0x4f17;
+    const recordNumber = 1;
+
+    let successCb = function successCb(iap) {
+      for (let i = 0; i < iap.length; i++) {
+        do_check_eq(expectedIAP[i], iap[i]);
+      }
+      run_next_test();
+    }.bind(this);
+
+    let errorCb = function errorCb(errorMsg) {
+      do_print(errorMsg);
+      do_check_true(false);
+      run_next_test();
+    }.bind(this);
+
+    record.readIAP(fileId, recordNumber, successCb, errorCb);
+  };
+
+  doTestReadIAP([1, 2]);
+});
+
+/**
+ * Verify ICCRecordHelper.updateIAP
+ */
+add_test(function test_update_iap() {
+  const recordSize = 2;
+  const recordNumber = 1;
+  const fileId = 0x4f17;
+  let worker = newUint8Worker();
+  let pduHelper = worker.GsmPDUHelper;
+  let ril = worker.RIL;
+  ril.appType = CARD_APPTYPE_USIM;
+  let recordHelper = worker.ICCRecordHelper;
+  let buf = worker.Buf;
+  let ioHelper = worker.ICCIOHelper;
+  let count = 0;
+
+  // Override.
+  ioHelper.updateLinearFixedEF = function (options) {
+    options.pathId = worker.ICCFileHelper.getEFPath(options.fileId);
+    options.command = ICC_COMMAND_UPDATE_RECORD;
+    options.p1 = options.recordNumber;
+    options.p2 = READ_RECORD_ABSOLUTE_MODE;
+    options.p3 = recordSize;
+    ril.iccIO(options);
+  };
+
+  function do_test(expectedIAP) {
+    buf.sendParcel = function () {
+      // Request Type.
+      do_check_eq(this.readUint32(), REQUEST_SIM_IO);
+
+      // Token : we don't care
+      this.readUint32();
+
+      // command.
+      do_check_eq(this.readUint32(), ICC_COMMAND_UPDATE_RECORD);
+
+      // fileId.
+      do_check_eq(this.readUint32(), fileId);
+
+      // pathId.
+      do_check_eq(this.readString(),
+                  EF_PATH_MF_SIM + EF_PATH_DF_TELECOM + EF_PATH_DF_PHONEBOOK);
+
+      // p1.
+      do_check_eq(this.readUint32(), recordNumber);
+
+      // p2.
+      do_check_eq(this.readUint32(), READ_RECORD_ABSOLUTE_MODE);
+
+      // p3.
+      do_check_eq(this.readUint32(), recordSize);
+
+      // data.
+      let strLen = this.readUint32();
+      for (let i = 0; i < recordSize; i++) {
+        do_check_eq(expectedIAP[i], pduHelper.readHexOctet());
+      }
+      this.readStringDelimiter(strLen);
+
+      // pin2.
+      do_check_eq(this.readString(), null);
+
+      if (!worker.RILQUIRKS_V5_LEGACY) {
+        // AID. Ignore because it's from modem.
+        this.readUint32();
+      }
+
+      run_next_test();
+    };
+    recordHelper.updateIAP(fileId, recordNumber, expectedIAP);
+  }
+
+  do_test([1, 2]);
 });
 
 /**
@@ -1926,13 +2241,15 @@ add_test(function test_update_adn_like() {
 
     // pin2.
     if (fileId == ICC_EF_ADN) {
-      do_check_eq(this.readString(), "");
+      do_check_eq(this.readString(), null);
     } else {
       do_check_eq(this.readString(), "1111");
     }
 
-    // AID. Ignore because it's from modem.
-    this.readUint32();
+    if (!worker.RILQUIRKS_V5_LEGACY) {
+      // AID. Ignore because it's from modem.
+      this.readUint32();
+    }
 
     if (fileId == ICC_EF_FDN) {
       run_next_test();
@@ -1941,8 +2258,7 @@ add_test(function test_update_adn_like() {
 
   fileId = ICC_EF_ADN;
   record.updateADNLike(fileId,
-                       {recordId: 1, alphaId: "test", number: "123456"},
-                       "");
+                       {recordId: 1, alphaId: "test", number: "123456"});
 
   fileId = ICC_EF_FDN;
   record.updateADNLike(fileId,
@@ -1951,21 +2267,21 @@ add_test(function test_update_adn_like() {
 });
 
 /**
- * Verify ICCRecordHelper.getFreeRecordId.
+ * Verify ICCRecordHelper.findFreeRecordId.
  */
-add_test(function test_get_free_record_id() {
+add_test(function test_find_free_record_id() {
   let worker = newUint8Worker();
-  let helper = worker.GsmPDUHelper;
-  let record = worker.ICCRecordHelper;
-  let buf    = worker.Buf;
-  let io     = worker.ICCIOHelper;
+  let pduHelper = worker.GsmPDUHelper;
+  let recordHelper = worker.ICCRecordHelper;
+  let buf = worker.Buf;
+  let io  = worker.ICCIOHelper;
 
   function writeRecord (record) {
     // Write data size
     buf.writeUint32(record.length * 2);
 
     for (let i = 0; i < record.length; i++) {
-      helper.writeHexOctet(record[i]);
+      pduHelper.writeHexOctet(record[i]);
     }
 
     // Write string delimiter
@@ -1994,7 +2310,7 @@ add_test(function test_get_free_record_id() {
   };
 
   let fileId = 0x0000; // Dummy.
-  record.getFreeRecordId(
+  recordHelper.findFreeRecordId(
     fileId,
     function (recordId) {
       do_check_eq(recordId, 2);
@@ -2021,7 +2337,7 @@ add_test(function test_read_icc_contacts() {
   };
 
   record.readPBR = function readPBR(onsuccess, onerror) {
-    onsuccess({adn:{}, email: {}, anr0: {}});
+    onsuccess([{adn:{}, email: {}, anr0: {}}]);
   };
 
   record.readADNLike = function readADNLike(fileId, onsuccess, onerror) {
@@ -2051,11 +2367,11 @@ add_test(function test_read_icc_contacts() {
     run_next_test();
   };
 
-  contactHelper.readICCContacts(CARD_APPTYPE_USIM, "ADN", successCb, errorCb);
+  contactHelper.readICCContacts(CARD_APPTYPE_USIM, "adn", successCb, errorCb);
 });
 
 /**
- * Verify ICCContactHelper.updateICCContact
+ * Verify ICCContactHelper.updateICCContact with appType is CARD_APPTYPE_SIM.
  */
 add_test(function test_update_icc_contact() {
   let worker = newUint8Worker();
@@ -2074,10 +2390,138 @@ add_test(function test_update_icc_contact() {
   };
 
   let contact = {recordId: 1, alphaId: "test", number: "123456"};
-  do_test(contact, "ADN", ICC_EF_ADN);
-  do_test(contact, "FDN", ICC_EF_FDN, "1111");
+  do_test(contact, "adn", ICC_EF_ADN);
+  do_test(contact, "fdn", ICC_EF_FDN, "1111");
 
   run_next_test();
+});
+
+/**
+ * Verify ICCContactHelper.updateICCContact with appType is CARD_APPTYPE_USIM.
+ */
+add_test(function test_update_icc_contact() {
+  let worker = newUint8Worker();
+  let recordHelper = worker.ICCRecordHelper;
+  let contactHelper = worker.ICCContactHelper;
+  const NUM_TESTS = 2;
+  const ADN_RECORD_ID = 100;
+  const ADN_FILE_ID = 0x4f3a;
+  const ADN_SFI = 1;
+  const IAP_FILE_ID = 0x4f17;
+  const EMAIL_FILE_ID = 0x4f50;
+  const EMAIL_RECORD_ID = 20;
+  const ANR0_FILE_ID = 0x4f11;
+  const ANR0_RECORD_ID = 30;
+  let count = 0;
+  let oldContact = {recordId: ADN_RECORD_ID,
+                    alphaId: "test",
+                    number: "123456",
+                    email: "test@mail.com",
+                    anr: ["+654321"]};
+
+  function do_test(pbrs, onsuccess, onerror) {
+    recordHelper.readPBR = function (onsuccess, onerror) {
+      onsuccess(pbrs) ;
+    };
+
+    recordHelper.updateADNLike = function (fileId, contact, pin2, onsuccess, onerror) {
+      do_check_eq(fileId, ADN_FILE_ID);
+      do_check_eq(contact.alphaId, oldContact.alphaId);
+      do_check_eq(contact.number, oldContact.number);
+      onsuccess();
+    };
+
+    recordHelper.readIAP = function (fileId, recordNumber, onsuccess, onerror) {
+      do_check_eq(fileId, IAP_FILE_ID);
+      do_check_eq(recordNumber, ADN_RECORD_ID);
+      onsuccess([EMAIL_RECORD_ID, ANR0_RECORD_ID]);
+    };
+
+    recordHelper.updateEmail = function (pbr, recordNumber, email, adnRecordId, onsuccess, onerror) {
+      do_check_eq(pbr.email.fileId, EMAIL_FILE_ID);
+      if (pbr.email.fileType === ICC_USIM_TYPE1_TAG) {
+        do_check_eq(recordNumber, ADN_RECORD_ID);
+      } else if (pbr.email.fileType === ICC_USIM_TYPE2_TAG) {
+        do_check_eq(recordNumber, EMAIL_RECORD_ID);
+      }
+      do_check_eq(email, oldContact.email);
+      onsuccess();
+    };
+
+    recordHelper.updateANR = function (pbr, recordNumber, number, adnRecordId, onsuccess, onerror) {
+      do_check_eq(pbr.anr0.fileId, ANR0_FILE_ID);
+      if (pbr.anr0.fileType === ICC_USIM_TYPE1_TAG) {
+        do_check_eq(recordNumber, ADN_RECORD_ID);
+      } else if (pbr.anr0.fileType === ICC_USIM_TYPE2_TAG) {
+        do_check_eq(recordNumber, ANR0_RECORD_ID);
+      }
+      do_check_eq(number, oldContact.anr[0]);
+      onsuccess();
+    };
+
+    contactHelper.updateICCContact(CARD_APPTYPE_USIM, "adn", oldContact, null, onsuccess, onerror);
+  }
+
+  let successCb = function () {
+    count++;
+    if (count == NUM_TESTS) {
+      run_next_test();
+    }
+  }.bind(this);
+
+  let errorCb = function (errorMsg) {
+    do_print("updateICCContact failed " + errorMsg);
+    do_check_true(false);
+    run_next_test();
+  }.bind(this);
+
+  do_test([{adn:{fileId: ADN_FILE_ID},
+            email: {fileId: EMAIL_FILE_ID, fileType: ICC_USIM_TYPE1_TAG},
+            anr0: {fileId: ANR0_FILE_ID, fileType: ICC_USIM_TYPE1_TAG}}],
+          successCb,
+          errorCb);
+
+  do_test([{adn:{fileId: ADN_FILE_ID, sfi: ADN_SFI},
+            iap: {fileId: IAP_FILE_ID},
+            email: {fileId: EMAIL_FILE_ID,
+                    fileType: ICC_USIM_TYPE2_TAG,
+                    indexInIAP: 0},
+            anr0: {fileId: ANR0_FILE_ID,
+                   fileType: ICC_USIM_TYPE2_TAG,
+                   indexInIAP: 1}}],
+          successCb,
+          errorCb);
+
+});
+
+/**
+ * Verify ICCContactHelper.findFreeICCContact
+ */
+add_test(function test_find_free_icc_contact() {
+  let worker = newUint8Worker();
+  let recordHelper = worker.ICCRecordHelper;
+  let contactHelper = worker.ICCContactHelper;
+  const RECORD_ID = 1;
+
+  recordHelper.readPBR = function (onsuccess, onerror) {
+    onsuccess([{adn:{}, email: {}, anr0: {}}]);
+  };
+
+  recordHelper.findFreeRecordId = function (fileId, onsuccess, onerror) {
+    onsuccess(RECORD_ID);
+  };
+
+  let successCb = function (recordId) {
+    do_check_eq(recordId, RECORD_ID);
+    run_next_test();
+  };
+
+  let errorCb = function (errorMsg) {
+    do_check_true(false);
+    run_next_test();
+  };
+
+  contactHelper.findFreeICCContact(CARD_APPTYPE_USIM, "adn", successCb, errorCb);
 });
 
 /**

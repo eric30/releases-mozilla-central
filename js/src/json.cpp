@@ -1,9 +1,10 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=99:
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "json.h"
 
 #include "mozilla/FloatingPoint.h"
 
@@ -11,99 +12,39 @@
 #include "jsapi.h"
 #include "jsarray.h"
 #include "jsatom.h"
-#include "jsbool.h"
 #include "jscntxt.h"
-#include "jsfun.h"
-#include "jsinterp.h"
-#include "jsiter.h"
 #include "jsnum.h"
 #include "jsobj.h"
-#include "json.h"
 #include "jsonparser.h"
-#include "jsprf.h"
 #include "jsstr.h"
 #include "jstypes.h"
 #include "jsutil.h"
 
-#include "frontend/TokenStream.h"
+#include "vm/Interpreter.h"
 #include "vm/StringBuffer.h"
 
 #include "jsatominlines.h"
 #include "jsboolinlines.h"
-#include "jsinferinlines.h"
 #include "jsobjinlines.h"
-
-#include "vm/Stack-inl.h"
 
 using namespace js;
 using namespace js::gc;
 using namespace js::types;
 
+using mozilla::IsFinite;
 using mozilla::Maybe;
 
 Class js::JSONClass = {
     js_JSON_str,
     JSCLASS_HAS_CACHED_PROTO(JSProto_JSON),
     JS_PropertyStub,        /* addProperty */
-    JS_PropertyStub,        /* delProperty */
+    JS_DeletePropertyStub,  /* delProperty */
     JS_PropertyStub,        /* getProperty */
     JS_StrictPropertyStub,  /* setProperty */
     JS_EnumerateStub,
     JS_ResolveStub,
     JS_ConvertStub
 };
-
-/* ES5 15.12.2. */
-JSBool
-js_json_parse(JSContext *cx, unsigned argc, Value *vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-
-    /* Step 1. */
-    JSString *str = (argc >= 1) ? ToString<CanGC>(cx, args[0]) : cx->names().undefined;
-    if (!str)
-        return false;
-
-    JSStableString *stable = str->ensureStable(cx);
-    if (!stable)
-        return false;
-
-    JS::Anchor<JSString *> anchor(stable);
-
-    RootedValue reviver(cx, (argc >= 2) ? args[1] : UndefinedValue());
-
-    /* Steps 2-5. */
-    return ParseJSONWithReviver(cx, stable->chars(), stable->length(), reviver, args.rval());
-}
-
-/* ES5 15.12.3. */
-JSBool
-js_json_stringify(JSContext *cx, unsigned argc, Value *vp)
-{
-    RootedObject replacer(cx, (argc >= 2 && vp[3].isObject())
-                              ? &vp[3].toObject()
-                              : NULL);
-    RootedValue value(cx, (argc >= 1) ? vp[2] : UndefinedValue());
-    RootedValue space(cx, (argc >= 3) ? vp[4] : UndefinedValue());
-
-    StringBuffer sb(cx);
-    if (!js_Stringify(cx, &value, replacer, space, sb))
-        return false;
-
-    // XXX This can never happen to nsJSON.cpp, but the JSON object
-    // needs to support returning undefined. So this is a little awkward
-    // for the API, because we want to support streaming writers.
-    if (!sb.empty()) {
-        JSString *str = sb.finishString();
-        if (!str)
-            return false;
-        vp->setString(str);
-    } else {
-        vp->setUndefined();
-    }
-
-    return true;
-}
 
 static inline bool IsQuoteSpecialCharacter(jschar c)
 {
@@ -277,11 +218,10 @@ PreprocessValue(JSContext *cx, HandleObject holder, KeyType key, MutableHandleVa
     RootedString keyStr(cx);
 
     /* Step 2. */
-    if (vp.get().isObject()) {
+    if (vp.isObject()) {
         RootedValue toJSON(cx);
-        RootedId id(cx, NameToId(cx->names().toJSON));
-        Rooted<JSObject*> obj(cx, &vp.get().toObject());
-        if (!GetMethod(cx, obj, id, 0, &toJSON))
+        RootedObject obj(cx, &vp.toObject());
+        if (!JSObject::getProperty(cx, obj, obj, cx->names().toJSON, &toJSON))
             return false;
 
         if (js_IsCallable(toJSON)) {
@@ -554,7 +494,7 @@ Str(JSContext *cx, const Value &v, StringifyContext *scx)
     /* Step 9. */
     if (v.isNumber()) {
         if (v.isDouble()) {
-            if (!MOZ_DOUBLE_IS_FINITE(v.toDouble()))
+            if (!IsFinite(v.toDouble()))
                 return scx->sb.append("null");
         }
 
@@ -629,8 +569,13 @@ js_Stringify(JSContext *cx, MutableHandleValue vp, JSObject *replacer_, Value sp
             if (replacer->isArray() && !replacer->isIndexed())
                 len = Min(len, replacer->getDenseInitializedLength());
 
+            // Cap the initial size to a moderately small value.  This avoids
+            // ridiculous over-allocation if an array with bogusly-huge length
+            // is passed in.  If we end up having to add elements past this
+            // size, the set will naturally resize to accommodate them.
+            const uint32_t MaxInitialSize = 1024;
             HashSet<jsid, JsidHasher> idSet(cx);
-            if (!idSet.init(len))
+            if (!idSet.init(Min(len, MaxInitialSize)))
                 return false;
 
             /* Step 4b(iii). */
@@ -639,6 +584,9 @@ js_Stringify(JSContext *cx, MutableHandleValue vp, JSObject *replacer_, Value sp
             /* Step 4b(iv). */
             RootedValue v(cx);
             for (; i < len; i++) {
+                if (!JS_CHECK_OPERATION_LIMIT(cx))
+                    return false;
+
                 /* Step 4b(iv)(2). */
                 if (!JSObject::getElement(cx, replacer, replacer, i, &v))
                     return false;
@@ -776,7 +724,8 @@ Walk(JSContext *cx, HandleObject holder, HandleId name, HandleValue reviver, Mut
 
                 if (newElement.isUndefined()) {
                     /* Step 2a(iii)(2). */
-                    if (!JSObject::deleteByValue(cx, obj, IdToValue(id), &newElement, false))
+                    JSBool succeeded;
+                    if (!JSObject::deleteByValue(cx, obj, IdToValue(id), &succeeded))
                         return false;
                 } else {
                     /* Step 2a(iii)(3). */
@@ -804,7 +753,8 @@ Walk(JSContext *cx, HandleObject holder, HandleId name, HandleValue reviver, Mut
 
                 if (newElement.isUndefined()) {
                     /* Step 2b(ii)(2). */
-                    if (!JSObject::deleteByValue(cx, obj, IdToValue(id), &newElement, false))
+                    JSBool succeeded;
+                    if (!JSObject::deleteByValue(cx, obj, IdToValue(id), &succeeded))
                         return false;
                 } else {
                     /* Step 2b(ii)(3). */
@@ -853,13 +803,12 @@ Revive(JSContext *cx, HandleValue reviver, MutableHandleValue vp)
     return Walk(cx, obj, id, reviver, vp);
 }
 
-JSBool
+bool
 js::ParseJSONWithReviver(JSContext *cx, StableCharPtr chars, size_t length, HandleValue reviver,
-                         MutableHandleValue vp, DecodingMode decodingMode /* = STRICT */)
+                         MutableHandleValue vp)
 {
     /* 15.12.2 steps 2-3. */
-    JSONParser parser(cx, chars, length,
-                      decodingMode == STRICT ? JSONParser::StrictJSON : JSONParser::LegacyJSON);
+    JSONParser parser(cx, chars, length);
     if (!parser.parse(vp))
         return false;
 
@@ -878,7 +827,59 @@ json_toSource(JSContext *cx, unsigned argc, Value *vp)
 }
 #endif
 
-static JSFunctionSpec json_static_methods[] = {
+/* ES5 15.12.2. */
+JSBool
+js_json_parse(JSContext *cx, unsigned argc, Value *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    /* Step 1. */
+    JSString *str = (argc >= 1) ? ToString<CanGC>(cx, args[0]) : cx->names().undefined;
+    if (!str)
+        return false;
+
+    JSStableString *stable = str->ensureStable(cx);
+    if (!stable)
+        return false;
+
+    JS::Anchor<JSString *> anchor(stable);
+
+    RootedValue reviver(cx, (argc >= 2) ? args[1] : UndefinedValue());
+
+    /* Steps 2-5. */
+    return ParseJSONWithReviver(cx, stable->chars(), stable->length(), reviver, args.rval());
+}
+
+/* ES5 15.12.3. */
+JSBool
+js_json_stringify(JSContext *cx, unsigned argc, Value *vp)
+{
+    RootedObject replacer(cx, (argc >= 2 && vp[3].isObject())
+                              ? &vp[3].toObject()
+                              : NULL);
+    RootedValue value(cx, (argc >= 1) ? vp[2] : UndefinedValue());
+    RootedValue space(cx, (argc >= 3) ? vp[4] : UndefinedValue());
+
+    StringBuffer sb(cx);
+    if (!js_Stringify(cx, &value, replacer, space, sb))
+        return false;
+
+    // XXX This can never happen to nsJSON.cpp, but the JSON object
+    // needs to support returning undefined. So this is a little awkward
+    // for the API, because we want to support streaming writers.
+    if (!sb.empty()) {
+        JSString *str = sb.finishString();
+        if (!str)
+            return false;
+        vp->setString(str);
+    } else {
+        vp->setUndefined();
+    }
+
+    return true;
+}
+
+static const JSFunctionSpec json_static_methods[] = {
 #if JS_HAS_TOSOURCE
     JS_FN(js_toSource_str,  json_toSource,      0, 0),
 #endif

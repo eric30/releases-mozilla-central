@@ -594,27 +594,6 @@ private:
         return (int64_t) stats.allocated;
     }
 };
-
-// The computation of "explicit" fails if "heap-allocated" isn't available,
-// which is why this is depends on HAVE_JEMALLOC_STATS.
-class ExplicitReporter MOZ_FINAL : public MemoryReporterBase
-{
-public:
-    ExplicitReporter()
-      : MemoryReporterBase("explicit", KIND_OTHER, UNITS_BYTES,
-"This is the same measurement as the root of the 'explicit' tree.  However, "
-"it is measured at a different time and so gives slightly different results.")
-    {}
-
-    NS_IMETHOD GetAmount(int64_t *aAmount)
-    {
-        nsCOMPtr<nsIMemoryReporterManager> mgr = do_GetService("@mozilla.org/memory-reporter-manager;1");
-        if (mgr == nullptr)
-            return NS_ERROR_FAILURE;
-
-        return mgr->GetExplicit(aAmount);
-    }
-};
 #endif  // HAVE_JEMALLOC_STATS
 
 // Why is this here?  At first glance, you'd think it could be defined and
@@ -690,13 +669,6 @@ public:
 
     return NS_OK;
   }
-
-  NS_IMETHOD GetExplicitNonHeap(int64_t *n)
-  {
-    // No non-heap allocations.
-    *n = 0;
-    return NS_OK;
-  }
 };
 
 NS_IMPL_ISUPPORTS1(DMDMultiReporter, nsIMemoryMultiReporter)
@@ -727,7 +699,6 @@ nsMemoryReporterManager::Init()
     RegisterReporter(new HeapCommittedUnusedReporter);
     RegisterReporter(new HeapCommittedUnusedRatioReporter);
     RegisterReporter(new HeapDirtyReporter);
-    RegisterReporter(new ExplicitReporter);
 #endif
 
 #ifdef HAVE_VSIZE_AND_RESIDENT_REPORTERS
@@ -822,7 +793,8 @@ HashtableEnumerator::GetNext(nsISupports** aNext)
 } // anonymous namespace
 
 nsMemoryReporterManager::nsMemoryReporterManager()
-  : mMutex("nsMemoryReporterManager::mMutex")
+  : mMutex("nsMemoryReporterManager::mMutex"),
+    mIsRegistrationBlocked(false)
 {
     mReporters.Init();
     mMultiReporters.Init();
@@ -877,13 +849,14 @@ DebugAssertRefcountIsNonZero(nsISupports* aObj)
 #endif
 }
 
-NS_IMETHODIMP
-nsMemoryReporterManager::RegisterReporter(nsIMemoryReporter *reporter)
+nsresult
+nsMemoryReporterManager::RegisterReporterHelper(
+    nsIMemoryReporter *reporter, bool aForce)
 {
     // This method is thread-safe.
     mozilla::MutexAutoLock autoLock(mMutex);
 
-    if (mReporters.Contains(reporter)) {
+    if ((mIsRegistrationBlocked && !aForce) || mReporters.Contains(reporter)) {
         return NS_ERROR_FAILURE;
     }
 
@@ -908,12 +881,27 @@ nsMemoryReporterManager::RegisterReporter(nsIMemoryReporter *reporter)
 }
 
 NS_IMETHODIMP
-nsMemoryReporterManager::RegisterMultiReporter(nsIMemoryMultiReporter *reporter)
+nsMemoryReporterManager::RegisterReporter(nsIMemoryReporter *reporter)
+{
+    return RegisterReporterHelper(reporter, /* force = */ false);
+}
+
+NS_IMETHODIMP
+nsMemoryReporterManager::RegisterReporterEvenIfBlocked(
+    nsIMemoryReporter *reporter)
+{
+    return RegisterReporterHelper(reporter, /* force = */ true);
+}
+
+nsresult
+nsMemoryReporterManager::RegisterMultiReporterHelper(
+    nsIMemoryMultiReporter *reporter, bool aForce)
 {
     // This method is thread-safe.
     mozilla::MutexAutoLock autoLock(mMutex);
 
-    if (mMultiReporters.Contains(reporter)) {
+    if ((mIsRegistrationBlocked && !aForce) ||
+         mMultiReporters.Contains(reporter)) {
         return NS_ERROR_FAILURE;
     }
 
@@ -925,6 +913,19 @@ nsMemoryReporterManager::RegisterMultiReporter(nsIMemoryMultiReporter *reporter)
     DebugAssertRefcountIsNonZero(reporter);
 
     return NS_OK;
+}
+
+NS_IMETHODIMP
+nsMemoryReporterManager::RegisterMultiReporter(nsIMemoryMultiReporter *reporter)
+{
+    return RegisterMultiReporterHelper(reporter, /* force = */ false);
+}
+
+NS_IMETHODIMP
+nsMemoryReporterManager::RegisterMultiReporterEvenIfBlocked(
+    nsIMemoryMultiReporter *reporter)
+{
+    return RegisterMultiReporterHelper(reporter, /* force = */ true);
 }
 
 NS_IMETHODIMP
@@ -956,6 +957,30 @@ nsMemoryReporterManager::UnregisterMultiReporter(nsIMemoryMultiReporter *reporte
 }
 
 NS_IMETHODIMP
+nsMemoryReporterManager::BlockRegistration()
+{
+    // This method is thread-safe.
+    mozilla::MutexAutoLock autoLock(mMutex);
+    if (mIsRegistrationBlocked) {
+        return NS_ERROR_FAILURE;
+    }
+    mIsRegistrationBlocked = true;
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsMemoryReporterManager::UnblockRegistration()
+{
+    // This method is thread-safe.
+    mozilla::MutexAutoLock autoLock(mMutex);
+    if (!mIsRegistrationBlocked) {
+        return NS_ERROR_FAILURE;
+    }
+    mIsRegistrationBlocked = false;
+    return NS_OK;
+}
+
+NS_IMETHODIMP
 nsMemoryReporterManager::GetResident(int64_t *aResident)
 {
 #ifdef HAVE_VSIZE_AND_RESIDENT_REPORTERS
@@ -966,7 +991,6 @@ nsMemoryReporterManager::GetResident(int64_t *aResident)
 #endif
 }
 
-#if defined(DEBUG) && !defined(MOZ_DMD)
 // This is just a wrapper for int64_t that implements nsISupports, so it can be
 // passed to nsIMemoryMultiReporter::CollectReports.
 class Int64Wrapper MOZ_FINAL : public nsISupports {
@@ -1002,7 +1026,6 @@ NS_IMPL_ISUPPORTS1(
   ExplicitNonHeapCountingCallback
 , nsIMemoryMultiReporterCallback
 )
-#endif  // defined(DEBUG) && !defined(MOZ_DMD)
 
 NS_IMETHODIMP
 nsMemoryReporterManager::GetExplicit(int64_t *aExplicit)
@@ -1053,54 +1076,23 @@ nsMemoryReporterManager::GetExplicit(int64_t *aExplicit)
         }
     }
 
-    // For each multi-reporter we could call CollectReports and filter out the
-    // non-explicit, non-NONHEAP measurements.  But that's lots of wasted work,
-    // so we instead use GetExplicitNonHeap() which exists purely for this
-    // purpose.
-    //
-    // (Actually, in debug builds we also do it the slow way and compare the
-    // result to the result obtained from GetExplicitNonHeap().  This
-    // guarantees the two measurement paths are equivalent.  This is wise
-    // because it's easy for memory reporters to have bugs.  But there's an
-    // exception if DMD is enabled, because that makes DMD think that all the
-    // blocks are double-counted.)
+    // For each multi-reporter we call CollectReports and filter out the
+    // non-explicit, non-NONHEAP measurements.  That's lots of wasted work,
+    // and we used to have a GetExplicitNonHeap() method which did this more
+    // efficiently, but it ended up being more trouble than it was worth.
 
-    int64_t explicitNonHeapMultiSize = 0;
+    nsRefPtr<ExplicitNonHeapCountingCallback> cb =
+      new ExplicitNonHeapCountingCallback();
+    nsRefPtr<Int64Wrapper> wrappedExplicitNonHeapMultiSize =
+      new Int64Wrapper();
     nsCOMPtr<nsISimpleEnumerator> e2;
     EnumerateMultiReporters(getter_AddRefs(e2));
     while (NS_SUCCEEDED(e2->HasMoreElements(&more)) && more) {
       nsCOMPtr<nsIMemoryMultiReporter> r;
       e2->GetNext(getter_AddRefs(r));
-      int64_t n;
-      rv = r->GetExplicitNonHeap(&n);
-      NS_ENSURE_SUCCESS(rv, rv);
-      explicitNonHeapMultiSize += n;
+      r->CollectReports(cb, wrappedExplicitNonHeapMultiSize);
     }
-
-#if defined(DEBUG) && !defined(MOZ_DMD)
-    nsRefPtr<ExplicitNonHeapCountingCallback> cb =
-      new ExplicitNonHeapCountingCallback();
-    nsRefPtr<Int64Wrapper> wrappedExplicitNonHeapMultiSize2 =
-      new Int64Wrapper();
-    nsCOMPtr<nsISimpleEnumerator> e3;
-    EnumerateMultiReporters(getter_AddRefs(e3));
-    while (NS_SUCCEEDED(e3->HasMoreElements(&more)) && more) {
-      nsCOMPtr<nsIMemoryMultiReporter> r;
-      e3->GetNext(getter_AddRefs(r));
-      r->CollectReports(cb, wrappedExplicitNonHeapMultiSize2);
-    }
-    int64_t explicitNonHeapMultiSize2 = wrappedExplicitNonHeapMultiSize2->mValue;
-
-    // Check the two measurements give the same result.  This was an
-    // NS_ASSERTION but they occasionally don't match due to races (bug
-    // 728990).
-    if (explicitNonHeapMultiSize != explicitNonHeapMultiSize2) {
-        NS_WARNING(nsPrintfCString("The two measurements of 'explicit' memory "
-                                   "usage don't match (%lld vs %lld)",
-                                   explicitNonHeapMultiSize,
-                                   explicitNonHeapMultiSize2).get());
-    }
-#endif  // defined(DEBUG) && !defined(MOZ_DMD)
+    int64_t explicitNonHeapMultiSize = wrappedExplicitNonHeapMultiSize->mValue;
 
     *aExplicit = heapAllocated + explicitNonHeapNormalSize + explicitNonHeapMultiSize;
     return NS_OK;

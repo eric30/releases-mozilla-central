@@ -13,9 +13,6 @@
  * liability, trademark and document use rules apply.
  */
 
-interface Attr;
-interface MozNamedAttrMap;
-
 interface Element : Node {
 /*
   We haven't moved these from Node to Element like the spec wants.
@@ -71,18 +68,6 @@ interface Element : Node {
   [Pure]
   readonly attribute unsigned long childElementCount;
 
-  // NEW
-/*
-  FIXME We haven't implemented these yet.
-
-  void prepend((Node or DOMString)... nodes);
-  void append((Node or DOMString)... nodes);
-  void before((Node or DOMString)... nodes);
-  void after((Node or DOMString)... nodes);
-  void replace((Node or DOMString)... nodes);
-  void remove();
-*/
-
   // Mozilla specific stuff
 
   [SetterThrows,LenientThis]
@@ -137,15 +122,14 @@ interface Element : Node {
   void mozRequestPointerLock();
 
   // Obsolete methods.
-  Attr getAttributeNode(DOMString name);
+  Attr? getAttributeNode(DOMString name);
   [Throws]
-  Attr setAttributeNode(Attr newAttr);
+  Attr? setAttributeNode(Attr newAttr);
   [Throws]
-  Attr removeAttributeNode(Attr oldAttr);
+  Attr? removeAttributeNode(Attr oldAttr);
+  Attr? getAttributeNodeNS(DOMString? namespaceURI, DOMString localName);
   [Throws]
-  Attr getAttributeNodeNS(DOMString? namespaceURI, DOMString localName);
-  [Throws]
-  Attr setAttributeNodeNS(Attr newAttr);
+  Attr? setAttributeNodeNS(Attr newAttr);
 };
 
 // http://dev.w3.org/csswg/cssom-view/#extensions-to-the-element-interface
@@ -199,3 +183,5 @@ partial interface Element {
   [Throws]
   NodeList  querySelectorAll(DOMString selectors);
 };
+
+Element implements ChildNode;

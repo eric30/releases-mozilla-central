@@ -1,6 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=78:
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -82,7 +81,7 @@ ArgumentsObject::element(uint32_t i) const
 }
 
 inline void
-ArgumentsObject::setElement(uint32_t i, const Value &v)
+ArgumentsObject::setElement(JSContext *cx, uint32_t i, const Value &v)
 {
     JS_ASSERT(!isElementDeleted(i));
     HeapValue &lhs = data()->args[i];
@@ -90,7 +89,7 @@ ArgumentsObject::setElement(uint32_t i, const Value &v)
         CallObject &callobj = getFixedSlot(MAYBE_CALL_SLOT).toObject().asCall();
         for (AliasedFormalIter fi(callobj.callee().nonLazyScript()); ; fi++) {
             if (fi.frameIndex() == i) {
-                callobj.setAliasedVar(fi, v);
+                callobj.setAliasedVar(cx, fi, fi->name(), v);
                 return;
             }
         }

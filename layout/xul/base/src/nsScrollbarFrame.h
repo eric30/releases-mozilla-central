@@ -26,7 +26,7 @@ public:
   NS_DECL_QUERYFRAME_TARGET(nsScrollbarFrame)
 
 #ifdef DEBUG
-  NS_IMETHOD GetFrameName(nsAString& aResult) const {
+  NS_IMETHOD GetFrameName(nsAString& aResult) const MOZ_OVERRIDE {
     return MakeFrameName(NS_LITERAL_STRING("ScrollbarFrame"), aResult);
   }
 #endif
@@ -56,9 +56,9 @@ public:
                            nsGUIEvent *    aEvent,
                            nsEventStatus*  aEventStatus) MOZ_OVERRIDE;
 
-  NS_IMETHOD Init(nsIContent*      aContent,
-                  nsIFrame*        aParent,
-                  nsIFrame*        aPrevInFlow) MOZ_OVERRIDE;
+  virtual void Init(nsIContent*      aContent,
+                    nsIFrame*        aParent,
+                    nsIFrame*        aPrevInFlow) MOZ_OVERRIDE;
 
   NS_IMETHOD Reflow(nsPresContext*          aPresContext,
                     nsHTMLReflowMetrics&     aDesiredSize,

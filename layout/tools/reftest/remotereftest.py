@@ -14,7 +14,8 @@ SCRIPT_DIRECTORY = os.path.abspath(os.path.realpath(os.path.dirname(sys.argv[0])
 from runreftest import RefTest
 from runreftest import ReftestOptions
 from automation import Automation
-import devicemanager, devicemanagerADB, devicemanagerSUT
+import devicemanager
+import droid
 from remoteautomation import RemoteAutomation, fennecLogcatFilters
 
 class RemoteOptions(ReftestOptions):
@@ -254,6 +255,7 @@ class RemoteReftest(RefTest):
             self.SERVER_STARTUP_TIMEOUT = 180
         else:
             self.SERVER_STARTUP_TIMEOUT = 90
+        self.automation.deleteANRs()
 
     def findPath(self, paths, filename = None):
         for path in paths:
@@ -333,6 +335,29 @@ user_pref("toolkit.telemetry.prompted", 999);
 user_pref("toolkit.telemetry.notifiedOptOut", 999);
 user_pref("reftest.uri", "%s");
 user_pref("datareporting.policy.dataSubmissionPolicyBypassAcceptance", true);
+
+// Point the url-classifier to the local testing server for fast failures
+user_pref("browser.safebrowsing.gethashURL", "http://127.0.0.1:8888/safebrowsing-dummy/gethash");
+user_pref("browser.safebrowsing.keyURL", "http://127.0.0.1:8888/safebrowsing-dummy/newkey");
+user_pref("browser.safebrowsing.updateURL", "http://127.0.0.1:8888/safebrowsing-dummy/update");
+// Point update checks to the local testing server for fast failures
+user_pref("extensions.update.url", "http://127.0.0.1:8888/extensions-dummy/updateURL");
+user_pref("extensions.update.background.url", "http://127.0.0.1:8888/extensions-dummy/updateBackgroundURL");
+user_pref("extensions.blocklist.url", "http://127.0.0.1:8888/extensions-dummy/blocklistURL");
+user_pref("extensions.hotfix.url", "http://127.0.0.1:8888/extensions-dummy/hotfixURL");
+// Turn off extension updates so they don't bother tests
+user_pref("extensions.update.enabled", false);
+// Make sure opening about:addons won't hit the network
+user_pref("extensions.webservice.discoverURL", "http://127.0.0.1:8888/extensions-dummy/discoveryURL");
+// Make sure AddonRepository won't hit the network
+user_pref("extensions.getAddons.maxResults", 0);
+user_pref("extensions.getAddons.get.url", "http://127.0.0.1:8888/extensions-dummy/repositoryGetURL");
+user_pref("extensions.getAddons.getWithPerformance.url", "http://127.0.0.1:8888/extensions-dummy/repositoryGetWithPerformanceURL");
+user_pref("extensions.getAddons.search.browseURL", "http://127.0.0.1:8888/extensions-dummy/repositoryBrowseURL");
+user_pref("extensions.getAddons.search.url", "http://127.0.0.1:8888/extensions-dummy/repositorySearchURL");
+// Make sure that opening the plugins check page won't hit the network
+user_pref("plugins.update.url", "http://127.0.0.1:8888/plugins-dummy/updateCheckURL");
+
 """ % reftestlist)
 
         #workaround for jsreftests.
@@ -392,11 +417,11 @@ def main(args):
     try:
         if (options.dm_trans == "adb"):
             if (options.deviceIP):
-                dm = devicemanagerADB.DeviceManagerADB(options.deviceIP, options.devicePort, deviceRoot=options.remoteTestRoot)
+                dm = droid.DroidADB(options.deviceIP, options.devicePort, deviceRoot=options.remoteTestRoot)
             else:
-                dm = devicemanagerADB.DeviceManagerADB(None, None, deviceRoot=options.remoteTestRoot)
+                dm = droid.DroidADB(None, None, deviceRoot=options.remoteTestRoot)
         else:
-            dm = devicemanagerSUT.DeviceManagerSUT(options.deviceIP, options.devicePort, deviceRoot=options.remoteTestRoot)
+            dm = droid.DroidSUT(options.deviceIP, options.devicePort, deviceRoot=options.remoteTestRoot)
     except devicemanager.DMError:
         print "Error: exception while initializing devicemanager.  Most likely the device is not in a testable state."
         return 1

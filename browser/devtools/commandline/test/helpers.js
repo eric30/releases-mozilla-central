@@ -21,15 +21,17 @@ this.EXPORTED_SYMBOLS = [ 'helpers' ];
 var helpers = {};
 this.helpers = helpers;
 let require = (Cu.import("resource://gre/modules/devtools/Require.jsm", {})).require;
-Components.utils.import("resource:///modules/devtools/gcli.jsm", {});
+Components.utils.import("resource://gre/modules/devtools/gcli.jsm", {});
 
 let console = (Cu.import("resource://gre/modules/devtools/Console.jsm", {})).console;
-let TargetFactory = (Cu.import("resource:///modules/devtools/Target.jsm", {})).TargetFactory;
+let TargetFactory = (Cu.import("resource://gre/modules/devtools/Loader.jsm", {})).devtools.TargetFactory;
 
 let Promise = (Cu.import("resource://gre/modules/commonjs/sdk/core/promise.js", {})).Promise;
 let assert = { ok: ok, is: is, log: info };
 
 var util = require('util/util');
+
+var converters = require('gcli/converters');
 
 /**
  * Warning: For use with Firefox Mochitests only.
@@ -155,6 +157,7 @@ helpers.runTests = function(options, tests) {
   });
 
   var recover = function(error) {
+    ok(false, error);
     console.error(error);
   };
 
@@ -223,7 +226,7 @@ helpers._actual = {
                 .replace(/ $/, '');
     };
 
-    var promisedJoin = util.promised(join);
+    var promisedJoin = Promise.promised(join);
     return promisedJoin(templateData.directTabText,
                         templateData.emptyParameters,
                         templateData.arrowTabText);
@@ -311,12 +314,12 @@ helpers._createDebugCheck = function(options) {
   var hintsPromise = helpers._actual.hints(options);
   var predictionsPromise = helpers._actual.predictions(options);
 
-  return util.all(hintsPromise, predictionsPromise).then(function(values) {
+  return Promise.all(hintsPromise, predictionsPromise).then(function(values) {
     var hints = values[0];
     var predictions = values[1];
     var output = '';
 
-    output += 'helpers.audit(options, [\n';
+    output += 'return helpers.audit(options, [\n';
     output += '  {\n';
 
     if (cursor === input.length) {
@@ -338,7 +341,7 @@ helpers._createDebugCheck = function(options) {
     output += '      current: \'' + helpers._actual.current(options) + '\',\n';
     output += '      status: \'' + helpers._actual.status(options) + '\',\n';
     output += '      options: ' + outputArray(helpers._actual.options(options)) + ',\n';
-    output += '      error: \'' + helpers._actual.message(options) + '\',\n';
+    output += '      message: \'' + helpers._actual.message(options) + '\',\n';
     output += '      predictions: ' + outputArray(predictions) + ',\n';
     output += '      unassigned: ' + outputArray(requisition._unassigned) + ',\n';
     output += '      outputState: \'' + helpers._actual.outputState(options) + '\',\n';
@@ -375,12 +378,14 @@ helpers._createDebugCheck = function(options) {
     output += '    exec: {\n';
     output += '      output: \'\',\n';
     output += '      completed: true,\n';
+    output += '      type: \'string\',\n';
+    output += '      error: false\n';
     output += '    }\n';
     output += '  }\n';
     output += ']);';
 
     return output;
-  }.bind(this), console.error);
+  }.bind(this), util.errorHandler);
 };
 
 /**
@@ -622,12 +627,13 @@ helpers._check = function(options, name, checks) {
     Object.keys(checks.args).forEach(function(paramName) {
       var check = checks.args[paramName];
 
-      var assignment;
-      if (paramName === 'command') {
+      // We allow an 'argument' called 'command' to be the command itself, but
+      // what if the command has a parameter called 'command' (for example, an
+      // 'exec' command)? We default to using the parameter because checking
+      // the command value is less useful
+      var assignment = requisition.getAssignment(paramName);
+      if (assignment == null && paramName === 'command') {
         assignment = requisition.commandAssignment;
-      }
-      else {
-        assignment = requisition.getAssignment(paramName);
       }
 
       if (assignment == null) {
@@ -636,9 +642,19 @@ helpers._check = function(options, name, checks) {
       }
 
       if ('value' in check) {
-        assert.is(assignment.value,
-                  check.value,
-                  'arg.' + paramName + '.value' + suffix);
+        if (typeof check.value === 'function') {
+          try {
+            check.value(assignment.value);
+          }
+          catch (ex) {
+            assert.ok(false, '' + ex);
+          }
+        }
+        else {
+          assert.is(assignment.value,
+                    check.value,
+                    'arg.' + paramName + '.value' + suffix);
+        }
       }
 
       if ('name' in check) {
@@ -684,7 +700,7 @@ helpers._check = function(options, name, checks) {
     });
   }
 
-  return util.all(outstanding).then(function() {
+  return Promise.all(outstanding).then(function() {
     // Ensure the promise resolves to nothing
     return undefined;
   });
@@ -699,10 +715,19 @@ helpers._check = function(options, name, checks) {
  */
 helpers._exec = function(options, name, expected) {
   if (expected == null) {
-    return Promise.resolve();
+    return Promise.resolve({});
   }
 
-  var output = options.display.requisition.exec({ hidden: true });
+  var output;
+  try {
+    output = options.display.requisition.exec({ hidden: true });
+  }
+  catch (ex) {
+    assert.ok(false, 'Failure executing \'' + name + '\': ' + ex);
+    util.errorHandler(ex);
+
+    return Promise.resolve({});
+  }
 
   if ('completed' in expected) {
     assert.is(output.completed,
@@ -712,59 +737,62 @@ helpers._exec = function(options, name, expected) {
 
   if (!options.window.document.createElement) {
     assert.log('skipping output tests (missing doc.createElement) for ' + name);
-    return Promise.resolve();
+    return Promise.resolve({ output: output });
   }
 
   if (!('output' in expected)) {
-    return Promise.resolve();
+    return Promise.resolve({ output: output });
   }
-
-  var deferred = Promise.defer();
 
   var checkOutput = function() {
-    var div = options.window.document.createElement('div');
-    output.toDom(div);
-    var actualOutput = div.textContent.trim();
+    if ('type' in expected) {
+      assert.is(output.type,
+                expected.type,
+                'output.type for: ' + name);
+    }
 
-    var doTest = function(match, against) {
-      if (!match.test(against)) {
-        assert.ok(false, 'html output for ' + name + ' against ' + match.source);
-        log('Actual textContent');
-        log(against);
+    if ('error' in expected) {
+      assert.is(output.error,
+                expected.error,
+                'output.error for: ' + name);
+    }
+
+    var conversionContext = options.display.requisition.conversionContext;
+    var convertPromise = converters.convert(output.data, output.type, 'dom',
+                                            conversionContext);
+    return convertPromise.then(function(node) {
+      var actualOutput = node.textContent.trim();
+
+      var doTest = function(match, against) {
+        if (match.test(against)) {
+          assert.ok(true, 'html output for ' + name + ' should match /' +
+                          match.source + '/');
+        } else {
+          assert.ok(false, 'html output for ' + name + ' should match /' +
+                           match.source +
+                           '/. Actual textContent: "' + against + '"');
+        }
+      };
+
+      if (typeof expected.output === 'string') {
+        assert.is(actualOutput,
+                  expected.output,
+                  'html output for ' + name);
       }
-    };
+      else if (Array.isArray(expected.output)) {
+        expected.output.forEach(function(match) {
+          doTest(match, actualOutput);
+        });
+      }
+      else {
+        doTest(expected.output, actualOutput);
+      }
 
-    if (typeof expected.output === 'string') {
-      assert.is(actualOutput,
-                expected.output,
-                'html output for ' + name);
-    }
-    else if (Array.isArray(expected.output)) {
-      expected.output.forEach(function(match) {
-        doTest(match, actualOutput);
-      });
-    }
-    else {
-      doTest(expected.output, actualOutput);
-    }
-
-    deferred.resolve();
+      return { output: output, text: actualOutput };
+    });
   };
 
-  if (output.completed !== false) {
-    checkOutput();
-  }
-  else {
-    var changed = function() {
-      if (output.completed !== false) {
-        checkOutput();
-        output.onChange.remove(changed);
-      }
-    };
-    output.onChange.add(changed);
-  }
-
-  return deferred.promise;
+  return output.promise.then(checkOutput, checkOutput);
 };
 
 /**
@@ -779,15 +807,15 @@ helpers._setup = function(options, name, action) {
     return Promise.resolve(action());
   }
 
-  return Promise.reject('setup must be a string or a function');
+  return Promise.reject('\'setup\' property must be a string or a function. Is ' + action);
 };
 
 /**
  * Helper to shutdown the test
  */
-helpers._post = function(name, action) {
+helpers._post = function(name, action, data) {
   if (typeof action === 'function') {
-    return Promise.resolve(action());
+    return Promise.resolve(action(data.output, data.text));
   }
   return Promise.resolve(action);
 };
@@ -799,11 +827,13 @@ var totalResponseTime = 0;
 var averageOver = 0;
 var maxResponseTime = 0;
 var maxResponseCulprit = undefined;
+var start = undefined;
 
 /**
  * Restart the stats collection process
  */
 helpers.resetResponseTimes = function() {
+  start = new Date().getTime();
   totalResponseTime = 0;
   averageOver = 0;
   maxResponseTime = 0;
@@ -835,6 +865,20 @@ Object.defineProperty(helpers, 'maxResponseTime', {
  */
 Object.defineProperty(helpers, 'maxResponseCulprit', {
   get: function() { return maxResponseCulprit; },
+  enumerable: true
+});
+
+/**
+ * Quick summary of the times
+ */
+Object.defineProperty(helpers, 'timingSummary', {
+  get: function() {
+    var elapsed = (new Date().getTime() - start) / 1000;
+    return 'Total ' + elapsed + 's, ' +
+           'ave response ' + helpers.averageResponseTime + 'ms, ' +
+           'max response ' + helpers.maxResponseTime + 'ms ' +
+           'from \'' + helpers.maxResponseCulprit + '\'';
+  },
   enumerable: true
 });
 
@@ -933,19 +977,22 @@ helpers.audit = function(options, audits) {
       if (typeof chunkLen !== 'number') {
         chunkLen = 1;
       }
-      var responseTime = (new Date().getTime() - start) / chunkLen;
-      totalResponseTime += responseTime;
-      if (responseTime > maxResponseTime) {
-        maxResponseTime = responseTime;
-        maxResponseCulprit = assert.currentTest + '/' + name;
+
+      if (assert.currentTest) {
+        var responseTime = (new Date().getTime() - start) / chunkLen;
+        totalResponseTime += responseTime;
+        if (responseTime > maxResponseTime) {
+          maxResponseTime = responseTime;
+          maxResponseCulprit = assert.currentTest + '/' + name;
+        }
+        averageOver++;
       }
-      averageOver++;
 
       var checkDone = helpers._check(options, name, audit.check);
       return checkDone.then(function() {
         var execDone = helpers._exec(options, name, audit.exec);
-        return execDone.then(function() {
-          return helpers._post(name, audit.post).then(function() {
+        return execDone.then(function(data) {
+          return helpers._post(name, audit.post, data).then(function() {
             if (assert.testLogging) {
               log('- END \'' + name + '\' in ' + assert.currentTest);
             }
@@ -953,9 +1000,8 @@ helpers.audit = function(options, audits) {
         });
       });
     });
-  }).then(null, function(ex) {
-    console.error(ex.stack);
-    throw(ex);
+  }).then(function() {
+    return options.display.inputter.setInput('');
   });
 };
 

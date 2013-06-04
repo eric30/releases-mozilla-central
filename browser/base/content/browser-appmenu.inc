@@ -149,6 +149,8 @@
                     observes="devtoolsMenuBroadcaster_DevToolbar"/>
           <menuitem id="appmenu_chromeDebugger"
                     observes="devtoolsMenuBroadcaster_ChromeDebugger"/>
+          <menuitem id="appmenu_browserConsole"
+                    observes="devtoolsMenuBroadcaster_BrowserConsole"/>
           <menuitem id="appmenu_responsiveUI"
                     observes="devtoolsMenuBroadcaster_ResponsiveUI"/>
           <menuitem id="appmenu_scratchpad"
@@ -217,7 +219,7 @@
                      openInTabs="children"
                      oncommand="BookmarksEventHandler.onCommand(event, this.parentNode._placesView);"
                      onclick="BookmarksEventHandler.onClick(event, this.parentNode._placesView);"
-                     onpopupshowing="BookmarksMenuButton.onPopupShowing(event);
+                     onpopupshowing="BookmarkingUI.onPopupShowing(event);
                                      if (!this.parentNode._placesView)
                                        new PlacesMenu(event, 'place:folder=BOOKMARKS_MENU');"
                      tooltip="bhTooltip"
@@ -367,7 +369,7 @@
                       onclick="checkForMiddleClick(this, event);"/>
             <menuitem id="appmenu_gettingStarted"
                       label="&appMenuGettingStarted.label;"
-                      oncommand="gBrowser.loadOneTab('http://www.mozilla.com/firefox/central/', {inBackground: false});"
+                      oncommand="gBrowser.loadOneTab('https://www.mozilla.org/firefox/central/', {inBackground: false});"
                       onclick="checkForMiddleClick(this, event);"/>
 #ifdef MOZ_SERVICES_HEALTHREPORT
             <menuitem id="appmenu_healthReport"

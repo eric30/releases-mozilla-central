@@ -17,13 +17,14 @@
 #include "mozilla/dom/TabParent.h"
 #include "mozilla/layers/AsyncPanZoomController.h"
 #include "mozilla/layers/CompositorParent.h"
-#include "mozilla/layers/ShadowLayersParent.h"
+#include "mozilla/layers/LayerTransactionParent.h"
 #include "nsContentUtils.h"
 #include "nsFrameLoader.h"
 #include "nsIObserver.h"
 #include "nsSubDocumentFrame.h"
 #include "nsViewportFrame.h"
 #include "RenderFrameParent.h"
+#include "mozilla/layers/LayerManagerComposite.h"
 
 typedef nsContentView::ViewConfig ViewConfig;
 using namespace mozilla::dom;
@@ -254,7 +255,7 @@ TransformShadowTree(nsDisplayListBuilder* aBuilder, nsFrameLoader* aFrameLoader,
                     float aTempScaleDiffX = 1.0,
                     float aTempScaleDiffY = 1.0)
 {
-  ShadowLayer* shadow = aLayer->AsShadowLayer();
+  LayerComposite* shadow = aLayer->AsLayerComposite();
   shadow->SetShadowClipRect(aLayer->GetClipRect());
   shadow->SetShadowVisibleRegion(aLayer->GetVisibleRegion());
   shadow->SetShadowOpacity(aLayer->GetOpacity());
@@ -435,7 +436,7 @@ BuildBackgroundPatternFor(ContainerLayer* aContainer,
                           LayerManager* aManager,
                           nsIFrame* aFrame)
 {
-  ShadowLayer* shadowRoot = aShadowRoot->AsShadowLayer();
+  LayerComposite* shadowRoot = aShadowRoot->AsLayerComposite();
   gfxMatrix t;
   if (!shadowRoot->GetShadowTransform().Is2D(&t)) {
     return;
@@ -589,8 +590,7 @@ private:
 
 RenderFrameParent::RenderFrameParent(nsFrameLoader* aFrameLoader,
                                      ScrollingBehavior aScrollingBehavior,
-                                     LayersBackend* aBackendType,
-                                     int* aMaxTextureSize,
+                                     TextureFactoryIdentifier* aTextureFactoryIdentifier,
                                      uint64_t* aId)
   : mLayersId(0)
   , mFrameLoader(aFrameLoader)
@@ -600,15 +600,14 @@ RenderFrameParent::RenderFrameParent(nsFrameLoader* aFrameLoader,
   mContentViews[FrameMetrics::ROOT_SCROLL_ID] =
     new nsContentView(aFrameLoader, FrameMetrics::ROOT_SCROLL_ID);
 
-  *aBackendType = mozilla::layers::LAYERS_NONE;
-  *aMaxTextureSize = 0;
   *aId = 0;
 
   nsRefPtr<LayerManager> lm = GetFrom(mFrameLoader);
   // Perhaps the document containing this frame currently has no presentation?
-  if (lm) {
-    *aBackendType = lm->GetBackendType();
-    *aMaxTextureSize = lm->GetMaxTextureSize();
+  if (lm && lm->AsLayerManagerComposite()) {
+    *aTextureFactoryIdentifier = lm->GetTextureFactoryIdentifier();
+  } else {
+    *aTextureFactoryIdentifier = TextureFactoryIdentifier();
   }
 
   if (CompositorParent::CompositorLoop()) {
@@ -631,13 +630,13 @@ RenderFrameParent::~RenderFrameParent()
 void
 RenderFrameParent::Destroy()
 {
-  size_t numChildren = ManagedPLayersParent().Length();
+  size_t numChildren = ManagedPLayerTransactionParent().Length();
   NS_ABORT_IF_FALSE(0 == numChildren || 1 == numChildren,
                     "render frame must only have 0 or 1 layer manager");
 
   if (numChildren) {
-    ShadowLayersParent* layers =
-      static_cast<ShadowLayersParent*>(ManagedPLayersParent()[0]);
+    LayerTransactionParent* layers =
+      static_cast<LayerTransactionParent*>(ManagedPLayerTransactionParent()[0]);
     layers->Destroy();
   }
 
@@ -659,7 +658,7 @@ RenderFrameParent::ContentViewScaleChanged(nsContentView* aView)
 }
 
 void
-RenderFrameParent::ShadowLayersUpdated(ShadowLayersParent* aLayerTree,
+RenderFrameParent::ShadowLayersUpdated(LayerTransactionParent* aLayerTree,
                                        const TargetConfig& aTargetConfig,
                                        bool isFirstPaint)
 {
@@ -713,8 +712,8 @@ RenderFrameParent::BuildLayer(nsDisplayListBuilder* aBuilder,
       return nullptr;
     }
     static_cast<RefLayer*>(layer.get())->SetReferentId(id);
-    layer->SetVisibleRegion(aVisibleRect);
     nsIntPoint offset = GetContentRectLayerOffset(aFrame, aBuilder);
+    layer->SetVisibleRegion(aVisibleRect - offset);
     // We can only have an offset if we're a child of an inactive
     // container, but our display item is LAYER_ACTIVE_FORCE which
     // forces all layers above to be active.
@@ -793,8 +792,9 @@ void
 RenderFrameParent::NotifyDimensionsChanged(int width, int height)
 {
   if (mPanZoomController) {
+    // I don't know what units width/height are in, hence FromUnknownRect
     mPanZoomController->UpdateCompositionBounds(
-      nsIntRect(0, 0, width, height));
+      LayerIntRect::FromUnknownRect(gfx::IntRect(0, 0, width, height)));
   }
 }
 
@@ -848,18 +848,18 @@ RenderFrameParent::RecvDetectScrollableSubframe()
   return true;
 }
 
-PLayersParent*
-RenderFrameParent::AllocPLayers()
+PLayerTransactionParent*
+RenderFrameParent::AllocPLayerTransaction()
 {
   if (!mFrameLoader || mFrameLoaderDestroyed) {
     return nullptr;
   }
   nsRefPtr<LayerManager> lm = GetFrom(mFrameLoader);
-  return new ShadowLayersParent(lm->AsShadowManager(), this, 0);
+  return new LayerTransactionParent(lm->AsLayerManagerComposite(), this, 0);
 }
 
 bool
-RenderFrameParent::DeallocPLayers(PLayersParent* aLayers)
+RenderFrameParent::DeallocPLayerTransaction(PLayerTransactionParent* aLayers)
 {
   delete aLayers;
   return true;
@@ -914,17 +914,17 @@ RenderFrameParent::TriggerRepaint()
     return;
   }
 
-  docFrame->SchedulePaint();
+  docFrame->InvalidateLayer(nsDisplayItem::TYPE_REMOTE);
 }
 
-ShadowLayersParent*
+LayerTransactionParent*
 RenderFrameParent::GetShadowLayers() const
 {
-  const InfallibleTArray<PLayersParent*>& shadowParents = ManagedPLayersParent();
+  const InfallibleTArray<PLayerTransactionParent*>& shadowParents = ManagedPLayerTransactionParent();
   NS_ABORT_IF_FALSE(shadowParents.Length() <= 1,
-                    "can only support at most 1 ShadowLayersParent");
+                    "can only support at most 1 LayerTransactionParent");
   return (shadowParents.Length() == 1) ?
-    static_cast<ShadowLayersParent*>(shadowParents[0]) : nullptr;
+    static_cast<LayerTransactionParent*>(shadowParents[0]) : nullptr;
 }
 
 uint64_t
@@ -936,7 +936,7 @@ RenderFrameParent::GetLayerTreeId() const
 ContainerLayer*
 RenderFrameParent::GetRootLayer() const
 {
-  ShadowLayersParent* shadowLayers = GetShadowLayers();
+  LayerTransactionParent* shadowLayers = GetShadowLayers();
   return shadowLayers ? shadowLayers->GetRoot() : nullptr;
 }
 
@@ -948,25 +948,22 @@ RenderFrameParent::BuildDisplayList(nsDisplayListBuilder* aBuilder,
 {
   // We're the subdoc for <browser remote="true"> and it has
   // painted content.  Display its shadow layer tree.
-  nsDisplayList shadowTree;
+  DisplayListClipState::AutoSaveRestore clipState(aBuilder);
+
+  nsPoint offset = aBuilder->ToReferenceFrame(aFrame);
+  nsRect bounds = aFrame->EnsureInnerView()->GetBounds() + offset;
+  clipState.ClipContentDescendants(bounds);
+
   ContainerLayer* container = GetRootLayer();
   if (aBuilder->IsForEventDelivery() && container) {
     ViewTransform offset =
       ViewTransform(GetContentRectLayerOffset(aFrame, aBuilder), 1, 1);
     BuildListForLayer(container, mFrameLoader, offset,
-                      aBuilder, shadowTree, aFrame);
+                      aBuilder, *aLists.Content(), aFrame);
   } else {
-    shadowTree.AppendToTop(
+    aLists.Content()->AppendToTop(
       new (aBuilder) nsDisplayRemote(aBuilder, aFrame, this));
   }
-
-  // Clip the shadow layers to subdoc bounds
-  nsPoint offset = aBuilder->ToReferenceFrame(aFrame);
-  nsRect bounds = aFrame->EnsureInnerView()->GetBounds() + offset;
-
-  aLists.Content()->AppendNewToTop(
-    new (aBuilder) nsDisplayClip(aBuilder, aFrame, &shadowTree,
-                                 bounds));
 }
 
 void

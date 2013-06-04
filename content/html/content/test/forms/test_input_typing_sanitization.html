@@ -94,7 +94,7 @@ function checkValueSubmittedIsInvalid()
 }
 
 function testSubmissions() {
-  SpecialPowers.focus(input);
+  input.focus();
   sendString(testData[valueIndex]);
   submitMethod();
 }
@@ -170,7 +170,6 @@ function runTest()
     { type: 'month', todo: true },
     { type: 'datetime', todo: true },
     { type: 'datetime-local', todo: true },
-    { type: 'color', todo: true },
   ];
 
   for (test of data) {
@@ -186,7 +185,7 @@ function runTest()
 
     for (data of gValidData) {
       input.value = "";
-      SpecialPowers.focus(input);
+      input.focus();
       sendString(data);
       input.blur();
       is(input.value, data, "valid user input should not be sanitized");
@@ -194,7 +193,7 @@ function runTest()
 
     for (data of gInvalidData) {
       input.value = "";
-      SpecialPowers.focus(input);
+      input.focus();
       sendString(data);
       input.blur();
       is(input.value, "", "invalid user input should be sanitized");

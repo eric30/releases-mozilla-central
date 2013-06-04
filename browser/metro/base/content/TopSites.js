@@ -5,33 +5,163 @@
 'use strict';
  let prefs = Components.classes["@mozilla.org/preferences-service;1"].
       getService(Components.interfaces.nsIPrefBranch);
-
 Cu.import("resource://gre/modules/PageThumbs.jsm");
+Cu.import("resource:///modules/colorUtils.jsm");
 
-// singleton to provide data-level functionality to the views
+/**
+ * singleton to provide data-level functionality to the views
+ */
 let TopSites = {
-  pinSite: function(aId, aSlotIndex) {
-    Util.dumpLn("TopSites.pinSite: " + aId + ", (TODO)");
-    // FIXME: implementation needed
-    return true; // operation was successful
+  _initialized: false,
+
+  Site: Site,
+
+  prepareCache: function(aForce){
+    // front to the NewTabUtils' links cache
+    //  -ensure NewTabUtils.links links are pre-cached
+
+    // avoid re-fetching links data while a fetch is in flight
+    if (this._promisedCache && !aForce) {
+      return this._promisedCache;
+    }
+    let deferred = Promise.defer();
+    this._promisedCache = deferred.promise;
+
+    NewTabUtils.links.populateCache(function () {
+      deferred.resolve();
+      this._promisedCache = null;
+      this._sites = null;  // reset our sites cache so they are built anew
+      this._sitesDirty.clear();
+    }.bind(this), true);
+    return this._promisedCache;
   },
-  unpinSite: function(aId) {
-    Util.dumpLn("TopSites.unpinSite: " + aId + ", (TODO)");
-    // FIXME: implementation needed
-    return true; // operation was successful
+
+  _sites: null,
+  _sitesDirty: new Set(),
+  getSites: function() {
+    if (this._sites) {
+      return this._sites;
+    }
+
+    let links = NewTabUtils.links.getLinks();
+    let sites = links.map(function(aLink){
+      let site = new Site(aLink);
+      return site;
+    });
+
+    // reset state
+    this._sites = sites;
+    this._sitesDirty.clear();
+    return this._sites;
   },
-  hideSite: function(aId) {
-    Util.dumpLn("TopSites.hideSite: " + aId + ", (TODO)");
-    // FIXME: implementation needed
-    return true; // operation was successful
+
+  /**
+   * Get list of top site as in need of update/re-render
+   * @param aSite Optionally add Site arguments to be refreshed/updated
+   */
+  dirty: function() {
+    // add any arguments for more fine-grained updates rather than invalidating the whole collection
+    for (let i=0; i<arguments.length; i++) {
+      this._sitesDirty.add(arguments[i]);
+    }
+    return this._sitesDirty;
   },
-  restoreSite: function(aId) {
-    Util.dumpLn("TopSites.restoreSite: " + aId + ", (TODO)");
-    // FIXME: implementation needed
-    return true; // operation was successful
+
+  /**
+   * Cause update of top sites
+   */
+  update: function() {
+    NewTabUtils.allPages.update();
+    // then clear all the dirty flags
+    this._sitesDirty.clear();
+  },
+
+  /**
+   * Pin top site at a given index
+   * @param aSites array of sites to be pinned
+   * @param aSlotIndices indices corresponding to the site to be pinned
+   */
+  pinSites: function(aSites, aSlotIndices) {
+    if (aSites.length !== aSlotIndices.length)
+        throw new Error("TopSites.pinSites: Mismatched sites/indices arguments");
+
+    for (let i=0; i<aSites.length && i<aSlotIndices.length; i++){
+      let site = aSites[i],
+          idx = aSlotIndices[i];
+      if (!(site && site.url)) {
+        throw Cr.NS_ERROR_INVALID_ARG
+      }
+      // pinned state is a pref, using Storage apis therefore sync
+      NewTabUtils.pinnedLinks.pin(site, idx);
+      this.dirty(site);
+    }
+    this.update();
+  },
+
+  /**
+   * Unpin top sites
+   * @param aSites array of sites to be unpinned
+   */
+  unpinSites: function(aSites) {
+    for (let site of aSites) {
+      if (!(site && site.url)) {
+        throw Cr.NS_ERROR_INVALID_ARG
+      }
+      // pinned state is a pref, using Storage apis therefore sync
+      NewTabUtils.pinnedLinks.unpin(site);
+      this.dirty(site);
+    }
+    this.update();
+  },
+
+  /**
+   * Hide (block) top sites
+   * @param aSites array of sites to be unpinned
+   */
+  hideSites: function(aSites) {
+    for (let site of aSites) {
+      if (!(site && site.url)) {
+        throw Cr.NS_ERROR_INVALID_ARG
+      }
+
+      site._restorePinIndex = NewTabUtils.pinnedLinks._indexOfLink(site);
+      // blocked state is a pref, using Storage apis therefore sync
+      NewTabUtils.blockedLinks.block(site);
+    }
+    // clear out the cache, we'll fetch and re-render
+    this._sites = null;
+    this._sitesDirty.clear();
+    this.update();
+  },
+
+  /**
+   * Un-hide (restore) top sites
+   * @param aSites array of sites to be restored
+   */
+  restoreSites: function(aSites) {
+    for (let site of aSites) {
+      if (!(site && site.url)) {
+        throw Cr.NS_ERROR_INVALID_ARG
+      }
+      NewTabUtils.blockedLinks.unblock(site);
+      let pinIndex = site._restorePinIndex;
+
+      if (!isNaN(pinIndex) && pinIndex > -1) {
+        NewTabUtils.pinnedLinks.pin(site, pinIndex);
+      }
+    }
+    // clear out the cache, we'll fetch and re-render
+    this._sites = null;
+    this._sitesDirty.clear();
+    this.update();
+  },
+  _linkFromNode: function _linkFromNode(aNode) {
+    return {
+      url: aNode.getAttribute("value"),
+      title: aNode.getAttribute("label")
+    };
   }
 };
-
 // The value of useThumbs should not be changed over the lifetime of
 //   the object.
 function TopSitesView(aGrid, aMaxSites, aUseThumbnails) {
@@ -39,10 +169,8 @@ function TopSitesView(aGrid, aMaxSites, aUseThumbnails) {
   this._set.controller = this;
   this._topSitesMax = aMaxSites;
   this._useThumbs = aUseThumbnails;
-
-  // handle selectionchange DOM events from the grid/tile group
-  this._set.addEventListener("context-action", this, false);
-
+  // clean up state when the appbar closes
+  window.addEventListener('MozAppbarDismissing', this, false);
   let history = Cc["@mozilla.org/browser/nav-history-service;1"].
                 getService(Ci.nsINavHistoryService);
   history.addObserver(this, false);
@@ -50,119 +178,166 @@ function TopSitesView(aGrid, aMaxSites, aUseThumbnails) {
     PageThumbs.addExpirationFilter(this);
     Services.obs.addObserver(this, "Metro:RefreshTopsiteThumbnail", false);
   }
+
+  NewTabUtils.allPages.register(this);
+  TopSites.prepareCache().then(function(){
+    this.populateGrid();
+  }.bind(this));
 }
 
 TopSitesView.prototype = {
   _set:null,
   _topSitesMax: null,
+  // _lastSelectedSites used to temporarily store blocked/removed sites for undo/restore-ing
+  _lastSelectedSites: null,
+  // isUpdating used only for testing currently
+  isUpdating: false,
 
   handleItemClick: function tabview_handleItemClick(aItem) {
     let url = aItem.getAttribute("value");
     BrowserUI.goToURI(url);
   },
 
-  doActionOnSelectedTiles: function(aActionName) {
+  doActionOnSelectedTiles: function(aActionName, aEvent) {
     let tileGroup = this._set;
     let selectedTiles = tileGroup.selectedItems;
+    let sites = Array.map(selectedTiles, TopSites._linkFromNode);
+    let nextContextActions = new Set();
 
     switch (aActionName){
       case "delete":
-        Array.forEach(selectedTiles, function(aNode) {
-          let id = aNode.getAttribute("data-itemid");
+        for (let aNode of selectedTiles) {
           // add some class to transition element before deletion?
-          if (TopSites.hideSite(id)) {
-            // success
-            aNode.contextActions.delete('delete');
-            aNode.contextActions.add('restore');
-          }
-          // TODO: we'll use some callback/event to remove the item or re-draw the grid
-        });
+          aNode.contextActions.delete('delete');
+          // we need new context buttons to show (the tile node will go away though)
+        }
+        this._lastSelectedSites = (this._lastSelectedSites || []).concat(sites);
+        nextContextActions.add('restore');
+        TopSites.hideSites(sites);
+        break;
+      case "restore":
+        // usually restore is an undo action, so there's no tiles/selection to act on
+        if (this._lastSelectedSites) {
+          TopSites.restoreSites(this._lastSelectedSites);
+        }
         break;
       case "pin":
+        let pinIndices = [];
         Array.forEach(selectedTiles, function(aNode) {
-          let id = aNode.getAttribute("data-itemid");
-          if (TopSites.pinSite(id)) {
-            // success
-            aNode.contextActions.delete('pin');
-            aNode.contextActions.add('unpin');
-          }
-          // TODO: we'll use some callback/event to add some class to
-          // indicate element is pinned?
+          pinIndices.push( Array.indexOf(aNode.control.children, aNode) );
+          aNode.contextActions.delete('pin');
+          aNode.contextActions.add('unpin');
         });
+        TopSites.pinSites(sites, pinIndices);
         break;
       case "unpin":
         Array.forEach(selectedTiles, function(aNode) {
-          let id = aNode.getAttribute("data-itemid");
-          if (TopSites.unpinSite(id)) {
-            // success
-            aNode.contextActions.delete('unpin');
-            aNode.contextActions.add('pin');
-          }
-          // TODO: we'll use some callback/event to add some class to
-          // indicate element is pinned (or just redraw grid)
+          aNode.contextActions.delete('unpin');
+          aNode.contextActions.add('pin');
         });
+        TopSites.unpinSites(sites);
         break;
       // default: no action
     }
+    if (nextContextActions.size) {
+      // stop the appbar from dismissing
+      aEvent.preventDefault();
+      // at next tick, re-populate the context appbar
+      setTimeout(function(){
+        // fire a MozContextActionsChange event to update the context appbar
+        let event = document.createEvent("Events");
+        event.actions = [...nextContextActions];
+        event.initEvent("MozContextActionsChange", true, false);
+        tileGroup.dispatchEvent(event);
+      },0);
+    }
   },
-
   handleEvent: function(aEvent) {
     switch (aEvent.type){
-      case "context-action":
-        this.doActionOnSelectedTiles(aEvent.action);
-        break;
+      case "MozAppbarDismissing":
+        // clean up when the context appbar is dismissed - we don't remember selections
+        this._lastSelectedSites = null;
+    }
+  },
+
+  update: function() {
+    // called by the NewTabUtils.allPages.update, notifying us of data-change in topsites
+    let grid = this._set,
+        dirtySites = TopSites.dirty();
+
+    if (dirtySites.size) {
+      // we can just do a partial update and refresh the node representing each dirty tile
+      for (let site of dirtySites) {
+        let tileNode = grid.querySelector("[value='"+site.url+"']");
+        if (tileNode) {
+          this.updateTile(tileNode, new Site(site));
+        }
+      }
+    } else {
+        // flush, recreate all
+      this.isUpdating = true;
+      // destroy and recreate all item nodes
+      let item;
+      while ((item = grid.firstChild)){
+        grid.removeChild(item);
+      }
+      this.populateGrid();
+    }
+  },
+
+  updateTile: function(aTileNode, aSite, aArrangeGrid) {
+    PlacesUtils.favicons.getFaviconURLForPage(Util.makeURI(aSite.url), function(iconURLfromSiteURL) {
+      if (!iconURLfromSiteURL) {
+        return;
+      }
+      aTileNode.iconSrc = iconURLfromSiteURL.spec;
+      let faviconURL = (PlacesUtils.favicons.getFaviconLinkForIcon(iconURLfromSiteURL)).spec;
+      let xpFaviconURI = Util.makeURI(faviconURL.replace("moz-anno:favicon:",""));
+      ColorUtils.getForegroundAndBackgroundIconColors(xpFaviconURI, function(foreground, background) {
+        aTileNode.style.color = foreground; //color text
+        aTileNode.setAttribute("customColor", background);
+        if (aTileNode.refresh) {
+          aTileNode.refresh();
+        }
+      });
+    });
+
+    if (this._useThumbs) {
+      aSite.backgroundImage = 'url("'+PageThumbs.getThumbnailURL(aSite.url)+'")';
+    } else {
+      delete aSite.backgroundImage;
+    }
+    aSite.applyToTileNode(aTileNode);
+    if (aArrangeGrid) {
+      this._set.arrangeItems();
     }
   },
 
   populateGrid: function populateGrid() {
-    let query = gHistSvc.getNewQuery();
-    let options = gHistSvc.getNewQueryOptions();
-    options.excludeQueries = true;
-    options.queryType = options.QUERY_TYPE_HISTORY;
-    options.maxResults = this._topSitesMax;
-    options.resultType = options.RESULTS_AS_URI;
-    options.sortingMode = options.SORT_BY_FRECENCY_DESCENDING;
+    this.isUpdating = true;
 
-    let result = gHistSvc.executeQuery(query, options);
-    let rootNode = result.root;
-    rootNode.containerOpen = true;
-    let childCount = rootNode.childCount;
+    let sites = TopSites.getSites();
+    let length = Math.min(sites.length, this._topSitesMax || Infinity);
+    let tileset = this._set;
 
-    // use this property as the data-itemid attribute on the tiles
-    // which identifies the site
-    let identifier = 'uri';
-
-    function isPinned(aNode) {
-      // placeholder condition,
-      // FIXME: do the actual lookup/check
-      return (aNode.uri.indexOf('google') > -1);
+    // if we're updating with a collection that is smaller than previous
+    // remove any extra tiles
+    while (tileset.children.length > length) {
+      tileset.removeChild(tileset.children[tileset.children.length -1]);
     }
 
-    for (let i = 0; i < childCount; i++) {
-      let node = rootNode.getChild(i);
-      let uri = node.uri;
-      let title = node.title || uri;
+    for (let idx=0; idx < length; idx++) {
+      let isNew = !tileset.children[idx],
+          item = tileset.children[idx] || document.createElement("richgriditem"),
+          site = sites[idx];
 
-      let supportedActions = ['delete'];
-      // placeholder condition - check field/property for this site
-      if (isPinned(node)) {
-        supportedActions.push('unpin');
-      } else {
-        supportedActions.push('pin');
-      }
-      let item = this._set.appendItem(title, uri);
-      item.setAttribute("iconURI", node.icon);
-      item.setAttribute("data-itemid", node[identifier]);
-      // here is where we could add verbs based on pinned etc. state
-      item.setAttribute("data-contextactions", supportedActions.join(','));
-
-      if (this._useThumbs) {
-        let thumbnail = PageThumbs.getThumbnailURL(uri);
-        let cssthumbnail = 'url("'+thumbnail+'")';
-        item.backgroundImage = cssthumbnail;
+      this.updateTile(item, site);
+      if (isNew) {
+        tileset.appendChild(item);
       }
     }
-    rootNode.containerOpen = false;
+    tileset.arrangeItems();
+    this.isUpdating = false;
   },
 
   forceReloadOfThumbnail: function forceReloadOfThumbnail(url) {
@@ -184,6 +359,7 @@ TopSitesView.prototype = {
       Services.obs.removeObserver(this, "Metro:RefreshTopsiteThumbnail");
       PageThumbs.removeExpirationFilter(this);
     }
+    window.removeEventListener('MozAppbarDismissing', this, false);
   },
 
   // nsIObservers
@@ -219,7 +395,7 @@ TopSitesView.prototype = {
   onPageChanged: function(aURI, aWhat, aValue) {
   },
 
-  onPageExpired: function(aURI, aVisitTime, aWholeEntry) {
+  onDeleteVisits: function (aURI, aVisitTime, aGUID, aReason, aTransitionType) {
   },
 
   QueryInterface: function(iid) {
@@ -242,23 +418,21 @@ let TopSitesStartView = {
       let topsitesVbox = document.getElementById("start-topsites");
       topsitesVbox.setAttribute("hidden", "true");
     }
-    this._view.populateGrid();
   },
-
   uninit: function uninit() {
     this._view.destruct();
   },
 
   show: function show() {
-    this._grid.arrangeItems(3, 3);
+    this._grid.arrangeItems();
   },
 };
 
 let TopSitesSnappedView = {
-  get _grid() { return document.getElementById("snapped-topsite-grid"); },
+  get _grid() { return document.getElementById("snapped-topsites-grid"); },
 
   show: function show() {
-    this._grid.arrangeItems(1, 8);
+    this._grid.arrangeItems();
   },
 
   init: function() {
@@ -267,10 +441,19 @@ let TopSitesSnappedView = {
       let topsitesVbox = document.getElementById("snapped-topsites");
       topsitesVbox.setAttribute("hidden", "true");
     }
-    this._view.populateGrid();
+    Services.obs.addObserver(this, "metro_viewstate_dom_snapped", false);
   },
 
   uninit: function uninit() {
     this._view.destruct();
+    Services.obs.removeObserver(this, "metro_viewstate_dom_snapped");
+  },
+
+  observe: function(aSubject, aTopic, aData) {
+    switch (aTopic) {
+      case "metro_viewstate_dom_snapped":
+          this._grid.arrangeItems();
+        break;
+    }
   },
 };

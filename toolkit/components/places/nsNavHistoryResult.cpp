@@ -292,28 +292,9 @@ nsNavHistoryResultNode::GetGeneratingOptions()
   return nullptr;
 }
 
-
-NS_IMPL_ISUPPORTS_INHERITED1(nsNavHistoryVisitResultNode,
-                             nsNavHistoryResultNode,
-                             nsINavHistoryVisitResultNode)
-
-nsNavHistoryVisitResultNode::nsNavHistoryVisitResultNode(
-    const nsACString& aURI, const nsACString& aTitle, uint32_t aAccessCount,
-    PRTime aTime, const nsACString& aIconURI, int64_t aSession) :
-  nsNavHistoryResultNode(aURI, aTitle, aAccessCount, aTime, aIconURI),
-  mSessionId(aSession)
-{
-}
-
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsNavHistoryContainerResultNode, nsNavHistoryResultNode)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mResult)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mChildren)
-NS_IMPL_CYCLE_COLLECTION_UNLINK_END 
-
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsNavHistoryContainerResultNode, nsNavHistoryResultNode)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mResult)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mChildren)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+NS_IMPL_CYCLE_COLLECTION_INHERITED_2(nsNavHistoryContainerResultNode, nsNavHistoryResultNode,
+                                     mResult,
+                                     mChildren)
 
 NS_IMPL_ADDREF_INHERITED(nsNavHistoryContainerResultNode, nsNavHistoryResultNode)
 NS_IMPL_RELEASE_INHERITED(nsNavHistoryContainerResultNode, nsNavHistoryResultNode)
@@ -2491,7 +2472,7 @@ nsNavHistoryQueryResultNode::OnVisit(nsIURI* aURI, int64_t aVisitId,
       if (!history->EvaluateQueryForNode(mQueries, mOptions, addition))
         return NS_OK; // don't need to include in our query
 
-      if (addition->IsVisit()) {
+      if (mOptions->ResultType() == nsNavHistoryQueryOptions::RESULTS_AS_VISIT) {
         // If this is a visit type query, just insert the new visit.  We never
         // update visits, only add or remove them.
         rv = InsertSortedChild(addition);
@@ -4630,16 +4611,27 @@ nsNavHistoryResult::OnVisit(nsIURI* aURI, int64_t aVisitId, PRTime aTime,
     // that a matching query either was not expanded or it does not exist.
     uint32_t resultType = mRootNode->mOptions->ResultType();
     if (resultType == nsINavHistoryQueryOptions::RESULTS_AS_DATE_QUERY ||
-        resultType == nsINavHistoryQueryOptions::RESULTS_AS_DATE_SITE_QUERY ||
-        resultType == nsINavHistoryQueryOptions::RESULTS_AS_SITE_QUERY)
-      (void)mRootNode->GetAsQuery()->Refresh();
-    else {
-      // We are result of a folder node, then we should run through history
-      // observers that are containers queries and refresh them.
-      // We use a copy of the observers array since requerying could potentially
-      // cause changes to the array.
-      ENUMERATE_QUERY_OBSERVERS(Refresh(), mHistoryObservers, IsContainersQuery());
+        resultType == nsINavHistoryQueryOptions::RESULTS_AS_DATE_SITE_QUERY) {
+      // If the visit falls into the Today bucket and the bucket exists, it was
+      // just not expanded, thus there's no reason to update.
+      int64_t beginOfToday =
+        nsNavHistory::NormalizeTime(nsINavHistoryQuery::TIME_RELATIVE_TODAY, 0);
+      if (todayIsMissing || aTime < beginOfToday) {
+        (void)mRootNode->GetAsQuery()->Refresh();
+      }
+      return NS_OK;
     }
+
+    if (resultType == nsINavHistoryQueryOptions::RESULTS_AS_SITE_QUERY) {
+      (void)mRootNode->GetAsQuery()->Refresh();
+      return NS_OK;
+    }
+
+    // We are result of a folder node, then we should run through history
+    // observers that are containers queries and refresh them.
+    // We use a copy of the observers array since requerying could potentially
+    // cause changes to the array.
+    ENUMERATE_QUERY_OBSERVERS(Refresh(), mHistoryObservers, IsContainersQuery());
   }
 
   return NS_OK;

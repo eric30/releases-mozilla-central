@@ -10,34 +10,9 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= layout
 LIBRARY_NAME	= gkxulgrid_s
 LIBXUL_LIBRARY  = 1
 FAIL_ON_WARNINGS = 1
-
-CPPSRCS	= \
-        nsGridLayout2.cpp \
-        nsGridRowLayout.cpp \
-        nsGridRowLeafLayout.cpp \
-        nsGridRowLeafFrame.cpp \
-        nsGridRowGroupLayout.cpp \
-        nsGridRowGroupFrame.cpp \
-        nsGrid.cpp \
-        nsGridRow.cpp \
-        nsGridCell.cpp \
-        $(NULL)
-
-EXPORTS = \
-          nsGridLayout2.h       \
-          nsGridRowLayout.h \
-          nsGridRowLeafLayout.h \
-          nsGridRowLeafFrame.h \
-          nsGridRowGroupLayout.h \
-          nsIGridPart.h \
-          nsGrid.h \
-          nsGridRow.h \
-          nsGridCell.h \
-          $(NULL)
 
 LOCAL_INCLUDES	= \
 		-I$(srcdir) \

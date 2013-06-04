@@ -23,7 +23,10 @@
 #include "nsMeterFrame.h"
 #include "nsMenuFrame.h"
 #include "nsRangeFrame.h"
+#include "nsCSSRendering.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/HTMLBodyElement.h"
+#include "nsIDocumentInlines.h"
 #include <algorithm>
 
 nsNativeTheme::nsNativeTheme()
@@ -306,10 +309,15 @@ nsNativeTheme::IsWidgetStyled(nsPresContext* aPresContext, nsIFrame* aFrame,
   }
 
   /**
+   * An nsRangeFrame and its children are treated atomically when it
+   * comes to native theming (either all parts, or no parts, are themed).
    * nsRangeFrame owns the logic and will tell us what we should do.
    */
-  if (aWidgetType == NS_THEME_RANGE) {
-    nsRangeFrame* rangeFrame = do_QueryFrame(aFrame);
+  if (aWidgetType == NS_THEME_RANGE ||
+      aWidgetType == NS_THEME_RANGE_THUMB) {
+    nsRangeFrame* rangeFrame =
+      do_QueryFrame(aWidgetType == NS_THEME_RANGE_THUMB
+                      ? aFrame->GetParent() : aFrame);
     if (rangeFrame) {
       return !rangeFrame->ShouldUseNativeStyle();
     }
@@ -664,7 +672,65 @@ nsNativeTheme::GetAdjacentSiblingFrameWithSameAppearance(nsIFrame* aFrame,
 bool
 nsNativeTheme::IsRangeHorizontal(nsIFrame* aFrame)
 {
-  MOZ_ASSERT(aFrame->GetType() == nsGkAtoms::rangeFrame);
+  nsIFrame* rangeFrame = aFrame;
+  if (rangeFrame->GetType() != nsGkAtoms::rangeFrame) {
+    rangeFrame = aFrame->GetParent();
+  }
+  MOZ_ASSERT(rangeFrame->GetType() == nsGkAtoms::rangeFrame);
 
-  return static_cast<nsRangeFrame*>(aFrame)->IsHorizontal();
+  return static_cast<nsRangeFrame*>(rangeFrame)->IsHorizontal();
+}
+
+static nsIFrame*
+GetBodyFrame(nsIFrame* aCanvasFrame)
+{
+  nsIContent* content = aCanvasFrame->GetContent();
+  if (!content) {
+    return nullptr;
+  }
+  nsIDocument* document = content->OwnerDoc();
+  nsIContent* body = document->GetBodyElement();
+  if (!body) {
+    return nullptr;
+  }
+  return body->GetPrimaryFrame();
+}
+
+bool
+nsNativeTheme::IsDarkBackground(nsIFrame* aFrame)
+{
+  nsIScrollableFrame* scrollFrame = nullptr;
+  while (!scrollFrame && aFrame) {
+    scrollFrame = aFrame->GetScrollTargetFrame();
+    aFrame = aFrame->GetParent();
+  }
+  if (!scrollFrame)
+    return false;
+
+  nsIFrame* frame = scrollFrame->GetScrolledFrame();
+  if (nsCSSRendering::IsCanvasFrame(frame)) {
+    // For canvas frames, prefer to look at the body first, because the body
+    // background color is most likely what will be visible as the background
+    // color of the page, even if the html element has a different background
+    // color which prevents that of the body frame to propagate to the viewport.
+    nsIFrame* bodyFrame = GetBodyFrame(frame);
+    if (bodyFrame) {
+      frame = bodyFrame;
+    }
+  }
+  nsStyleContext* bgSC = nullptr;
+  if (!nsCSSRendering::FindBackground(frame, &bgSC) ||
+      bgSC->StyleBackground()->IsTransparent()) {
+    nsIFrame* backgroundFrame = nsCSSRendering::FindNonTransparentBackgroundFrame(frame, true);
+    nsCSSRendering::FindBackground(backgroundFrame, &bgSC);
+  }
+  if (bgSC) {
+    nscolor bgColor = bgSC->StyleBackground()->mBackgroundColor;
+    // Consider the background color dark if the sum of the r, g and b values is
+    // less than 384 in a semi-transparent document.  This heuristic matches what
+    // WebKit does, and we can improve it later if needed.
+    return NS_GET_A(bgColor) > 127 &&
+           NS_GET_R(bgColor) + NS_GET_G(bgColor) + NS_GET_B(bgColor) < 384;
+  }
+  return false;
 }

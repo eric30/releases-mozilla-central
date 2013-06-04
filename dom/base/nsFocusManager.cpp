@@ -104,7 +104,7 @@ struct nsDelayedBlurOrFocusEvent
   nsDelayedBlurOrFocusEvent(uint32_t aType,
                             nsIPresShell* aPresShell,
                             nsIDocument* aDocument,
-                            nsIDOMEventTarget* aTarget)
+                            EventTarget* aTarget)
    : mType(aType),
      mPresShell(aPresShell),
      mDocument(aDocument),
@@ -119,7 +119,7 @@ struct nsDelayedBlurOrFocusEvent
   uint32_t mType;
   nsCOMPtr<nsIPresShell> mPresShell;
   nsCOMPtr<nsIDocument> mDocument;
-  nsCOMPtr<nsIDOMEventTarget> mTarget;
+  nsCOMPtr<EventTarget> mTarget;
 };
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsFocusManager)
@@ -213,7 +213,7 @@ nsFocusManager::Observe(nsISupports *aSubject,
   if (!nsCRT::strcmp(aTopic, NS_PREFBRANCH_PREFCHANGE_TOPIC_ID)) {
     nsDependentString data(aData);
     if (data.EqualsLiteral("accessibility.browsewithcaret")) {
-      UpdateCaret(false, true, mFocusedContent);
+      UpdateCaretForCaretBrowsingMode();
     }
     else if (data.EqualsLiteral("accessibility.tabfocus_applies_to_xul")) {
       nsIContent::sTabFocusModelAppliesToXUL =
@@ -982,7 +982,7 @@ nsFocusManager::WindowHidden(nsIDOMWindow* aWindow)
         parentWindow->SetFocusedNode(nullptr);
     }
 
-    mFocusedWindow = window;
+    SetFocusedWindowInternal(window);
   }
 
   return NS_OK;
@@ -999,7 +999,7 @@ nsFocusManager::FireDelayedEvents(nsIDocument* aDocument)
     if (mDelayedBlurFocusEvents[i].mDocument == aDocument &&
         !aDocument->EventHandlingSuppressed()) {
       uint32_t type = mDelayedBlurFocusEvents[i].mType;
-      nsCOMPtr<nsIDOMEventTarget> target = mDelayedBlurFocusEvents[i].mTarget;
+      nsCOMPtr<EventTarget> target = mDelayedBlurFocusEvents[i].mTarget;
       nsCOMPtr<nsIPresShell> presShell = mDelayedBlurFocusEvents[i].mPresShell;
       mDelayedBlurFocusEvents.RemoveElementAt(i);
       SendFocusOrBlurEvent(type, presShell, aDocument, target, 0, false);
@@ -1601,7 +1601,7 @@ nsFocusManager::Blur(nsPIDOMWindow* aWindowToClear,
     if (aAncestorWindowToFocus)
       aAncestorWindowToFocus->SetFocusedNode(nullptr, 0, true);
 
-    mFocusedWindow = nullptr;
+    SetFocusedWindowInternal(nullptr);
     mFocusedContent = nullptr;
 
     // pass 1 for the focus method when calling SendFocusOrBlurEvent just so
@@ -1709,7 +1709,7 @@ nsFocusManager::Focus(nsPIDOMWindow* aWindow,
   if (aWindow->TakeFocus(true, focusMethod))
     aIsNewDocument = true;
 
-  mFocusedWindow = aWindow;
+  SetFocusedWindowInternal(aWindow);
 
   // Update the system focus by focusing the root widget.  But avoid this
   // if 1) aAdjustWidgets is false or 2) aContent is a plugin that has its
@@ -1881,7 +1881,7 @@ nsFocusManager::SendFocusOrBlurEvent(uint32_t aType,
   NS_ASSERTION(aType == NS_FOCUS_CONTENT || aType == NS_BLUR_CONTENT,
                "Wrong event type for SendFocusOrBlurEvent");
 
-  nsCOMPtr<nsIDOMEventTarget> eventTarget = do_QueryInterface(aTarget);
+  nsCOMPtr<EventTarget> eventTarget = do_QueryInterface(aTarget);
 
   // for focus events, if this event was from a mouse or key and event
   // handling on the document is suppressed, queue the event and fire it
@@ -1992,6 +1992,12 @@ nsFocusManager::RaiseWindow(nsPIDOMWindow* aWindow)
       widget->SetFocus(true);
   }
 #endif
+}
+
+void
+nsFocusManager::UpdateCaretForCaretBrowsingMode()
+{
+  UpdateCaret(false, true, mFocusedContent);
 }
 
 void
@@ -2139,6 +2145,8 @@ nsFocusManager::SetCaretVisible(nsIPresShell* aPresShell,
       // First, hide the caret to prevent attempting to show it in SetCaretDOMSelection
       caret->SetCaretVisible(false);
 
+      // Caret must blink on non-editable elements
+      caret->SetIgnoreUserModify(true);
       // Tell the caret which selection to use
       caret->SetCaretDOMSelection(domSelection);
 
@@ -2150,6 +2158,7 @@ nsFocusManager::SetCaretVisible(nsIPresShell* aPresShell,
       if (!selCon)
         return NS_ERROR_FAILURE;
 
+      selCon->SetCaretReadOnly(false);
       selCon->SetCaretEnabled(aVisible);
       caret->SetCaretVisible(aVisible);
     }
@@ -3360,6 +3369,57 @@ nsFocusManager::GetFocusInSelection(nsPIDOMWindow* aWindow,
     } while (true);
   }
   while (selectionNode && selectionNode != endSelectionNode);
+}
+
+class PointerUnlocker : public nsRunnable
+{
+public:
+  PointerUnlocker()
+  {
+    MOZ_ASSERT(!PointerUnlocker::sActiveUnlocker);
+    PointerUnlocker::sActiveUnlocker = this;
+  }
+
+  ~PointerUnlocker()
+  {
+    if (PointerUnlocker::sActiveUnlocker == this) {
+      PointerUnlocker::sActiveUnlocker = nullptr;
+    }
+  }
+
+  NS_IMETHOD Run()
+  {
+    if (PointerUnlocker::sActiveUnlocker == this) {
+      PointerUnlocker::sActiveUnlocker = nullptr;
+    }
+    NS_ENSURE_STATE(nsFocusManager::GetFocusManager());
+    nsPIDOMWindow* focused =
+      nsFocusManager::GetFocusManager()->GetFocusedWindow();
+    nsCOMPtr<nsIDocument> pointerLockedDoc =
+      do_QueryReferent(nsEventStateManager::sPointerLockedDoc);
+    if (pointerLockedDoc &&
+        !nsContentUtils::IsInPointerLockContext(focused)) {
+      nsIDocument::UnlockPointer();
+    }
+    return NS_OK;
+  }
+
+  static PointerUnlocker* sActiveUnlocker;
+};
+
+PointerUnlocker*
+PointerUnlocker::sActiveUnlocker = nullptr;
+
+void
+nsFocusManager::SetFocusedWindowInternal(nsPIDOMWindow* aWindow)
+{
+  if (!PointerUnlocker::sActiveUnlocker &&
+      nsContentUtils::IsInPointerLockContext(mFocusedWindow) &&
+      !nsContentUtils::IsInPointerLockContext(aWindow)) {
+    nsCOMPtr<nsIRunnable> runnable = new PointerUnlocker();
+    NS_DispatchToCurrentThread(runnable);
+  }
+  mFocusedWindow = aWindow;
 }
 
 nsresult

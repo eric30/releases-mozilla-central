@@ -116,7 +116,7 @@ public:
     RecvAudioChannelNotify();
 
     virtual bool
-    RecvDumpMemoryReportsToFile(const nsString& aIdentifier,
+    RecvDumpMemoryInfoToTempDir(const nsString& aIdentifier,
                                 const bool& aMinimizeMemoryUsage,
                                 const bool& aDumpChildProcesses);
     virtual bool
@@ -142,11 +142,14 @@ public:
     virtual PSmsChild* AllocPSms();
     virtual bool DeallocPSms(PSmsChild*);
 
-    virtual PStorageChild* AllocPStorage(const StorageConstructData& aData);
+    virtual PStorageChild* AllocPStorage();
     virtual bool DeallocPStorage(PStorageChild* aActor);
 
     virtual PBluetoothChild* AllocPBluetooth();
     virtual bool DeallocPBluetooth(PBluetoothChild* aActor);
+
+    virtual PSpeechSynthesisChild* AllocPSpeechSynthesis();
+    virtual bool DeallocPSpeechSynthesis(PSpeechSynthesisChild* aActor);
 
     virtual bool RecvRegisterChrome(const InfallibleTArray<ChromePackage>& packages,
                                     const InfallibleTArray<ResourceMapping>& resources,
@@ -183,11 +186,18 @@ public:
 
     virtual bool RecvLastPrivateDocShellDestroyed();
 
-    virtual bool RecvFilePathUpdate(const nsString& type, const nsString& path, const nsCString& reason);
+    virtual bool RecvFilePathUpdate(const nsString& aStorageType,
+                                    const nsString& aStorageName,
+                                    const nsString& aPath,
+                                    const nsCString& aReason);
     virtual bool RecvFileSystemUpdate(const nsString& aFsName,
-                                      const nsString& aName,
+                                      const nsString& aVolumeName,
                                       const int32_t& aState,
                                       const int32_t& aMountGeneration);
+
+    virtual bool RecvNotifyProcessPriorityChanged(const hal::ProcessPriority& aPriority);
+    virtual bool RecvMinimizeMemoryUsage();
+    virtual bool RecvCancelMinimizeMemoryUsage();
 
 #ifdef ANDROID
     gfxIntSize GetScreenSize() { return mScreenSize; }
@@ -241,6 +251,7 @@ private:
     bool mIsForApp;
     bool mIsForBrowser;
     nsString mProcessName;
+    nsWeakPtr mMemoryMinimizerRunnable;
 
     static ContentChild* sSingleton;
 

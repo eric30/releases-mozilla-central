@@ -1,17 +1,19 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- */
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this file,
- * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #ifndef gc_heap_h___
 #define gc_heap_h___
 
 #include "mozilla/Attributes.h"
+#include "mozilla/PodOperations.h"
 #include "mozilla/StandardInteger.h"
 
 #include <stddef.h>
 
+#include "jspubtd.h"
 #include "jstypes.h"
 #include "jsutil.h"
 
@@ -60,6 +62,7 @@ enum AllocKind {
     FINALIZE_OBJECT16_BACKGROUND,
     FINALIZE_OBJECT_LAST = FINALIZE_OBJECT16_BACKGROUND,
     FINALIZE_SCRIPT,
+    FINALIZE_LAZY_SCRIPT,
     FINALIZE_SHAPE,
     FINALIZE_BASE_SHAPE,
     FINALIZE_TYPE_OBJECT,
@@ -85,17 +88,17 @@ static const size_t MAX_BACKGROUND_FINALIZE_KINDS = FINALIZE_LIMIT - FINALIZE_OB
 struct Cell
 {
     inline ArenaHeader *arenaHeader() const;
-    inline AllocKind getAllocKind() const;
+    inline AllocKind tenuredGetAllocKind() const;
     MOZ_ALWAYS_INLINE bool isMarked(uint32_t color = BLACK) const;
     MOZ_ALWAYS_INLINE bool markIfUnmarked(uint32_t color = BLACK) const;
     MOZ_ALWAYS_INLINE void unmark(uint32_t color) const;
 
     inline JSRuntime *runtime() const;
-    inline Zone *zone() const;
+    inline Zone *tenuredZone() const;
 
 #ifdef DEBUG
     inline bool isAligned() const;
-    bool isTenured() const;
+    inline bool isTenured() const;
 #endif
 
   protected:
@@ -665,6 +668,13 @@ struct ChunkBitmap
 {
     volatile uintptr_t bitmap[ArenaBitmapWords * ArenasPerChunk];
 
+  public:
+    ChunkBitmap() { }
+    ChunkBitmap(MoveRef<ChunkBitmap> b) {
+        mozilla::PodArrayCopy(bitmap, b->bitmap);
+    }
+
+
     MOZ_ALWAYS_INLINE void getMarkWordAndMask(const Cell *cell, uint32_t color,
                                               uintptr_t **wordp, uintptr_t *maskp)
     {
@@ -825,6 +835,7 @@ struct Chunk
 
 JS_STATIC_ASSERT(sizeof(Chunk) == ChunkSize);
 JS_STATIC_ASSERT(js::gc::ChunkMarkBitmapOffset == offsetof(Chunk, bitmap));
+JS_STATIC_ASSERT(js::gc::ChunkRuntimeOffset == offsetof(Chunk, info) + offsetof(ChunkInfo, runtime));
 
 inline uintptr_t
 ArenaHeader::address() const
@@ -950,7 +961,7 @@ Cell::runtime() const
 }
 
 AllocKind
-Cell::getAllocKind() const
+Cell::tenuredGetAllocKind() const
 {
     return arenaHeader()->getAllocKind();
 }
@@ -981,7 +992,7 @@ Cell::unmark(uint32_t color) const
 }
 
 Zone *
-Cell::zone() const
+Cell::tenuredZone() const
 {
     JS_ASSERT(isTenured());
     return arenaHeader()->zone;
@@ -992,6 +1003,16 @@ bool
 Cell::isAligned() const
 {
     return Arena::isAligned(address(), arenaHeader()->getThingSize());
+}
+
+bool
+Cell::isTenured() const
+{
+#ifdef JSGC_GENERATIONAL
+    JS::shadow::Runtime *rt = js::gc::GetGCThingRuntime(this);
+    return uintptr_t(this) < rt->gcNurseryStart_ || uintptr_t(this) >= rt->gcNurseryEnd_;
+#endif
+    return true;
 }
 #endif
 

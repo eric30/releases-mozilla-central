@@ -5,6 +5,7 @@
 from __future__ import unicode_literals
 
 import os
+import sys
 import unittest
 
 from mozfile.mozfile import NamedTemporaryFile
@@ -19,10 +20,12 @@ from mozbuild.base import (
     PathArgument,
 )
 
+from mozbuild.backend.configenvironment import ConfigEnvironment
+
 
 
 curdir = os.path.dirname(__file__)
-topsrcdir = os.path.normpath(os.path.join(curdir, '..', '..', '..', '..'))
+topsrcdir = os.path.abspath(os.path.join(curdir, '..', '..', '..', '..'))
 log_manager = LoggingManager()
 
 
@@ -39,6 +42,8 @@ class TestMozbuildObject(unittest.TestCase):
             self.assertIsNotNone(base.topobjdir)
             self.assertEqual(len(base.topobjdir.split()), 1)
             self.assertTrue(base.topobjdir.endswith(base._config_guess))
+            self.assertTrue(os.path.isabs(base.topobjdir))
+            self.assertTrue(base.topobjdir.startswith(topsrcdir))
 
         del os.environ[b'MOZCONFIG']
 
@@ -51,6 +56,67 @@ class TestMozbuildObject(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertGreater(len(result), 0)
 
+    @unittest.skip('Failing on buildbot (bug 853954).')
+    def test_config_environment(self):
+        base = self.get_base()
+
+        ce = base.config_environment
+        self.assertIsInstance(ce, ConfigEnvironment)
+
+        self.assertEqual(base.defines, ce.defines)
+        self.assertEqual(base.substs, ce.substs)
+
+        self.assertIsInstance(base.defines, dict)
+        self.assertIsInstance(base.substs, dict)
+
+    @unittest.skip('Failing on buildbot (bug 853954).')
+    def test_get_binary_path(self):
+        base = self.get_base()
+
+        platform = sys.platform
+
+        # We should ideally use the config.status from the build. Let's install
+        # a fake one.
+        substs = [('MOZ_APP_NAME', 'awesomeapp')]
+        if sys.platform.startswith('darwin'):
+            substs.append(('OS_ARCH', 'Darwin'))
+            substs.append(('BIN_SUFFIX', ''))
+            substs.append(('MOZ_MACBUNDLE_NAME', 'Nightly.app'))
+        elif sys.platform.startswith(('win32', 'cygwin')):
+            substs.append(('OS_ARCH', 'WINNT'))
+            substs.append(('BIN_SUFFIX', '.exe'))
+        else:
+            substs.append(('OS_ARCH', 'something'))
+            substs.append(('BIN_SUFFIX', ''))
+
+        base._config_environment = ConfigEnvironment(base.topsrcdir,
+            base.topobjdir, substs=substs)
+
+        p = base.get_binary_path('xpcshell', False)
+        if platform.startswith('darwin'):
+            self.assertTrue(p.endswith('Contents/MacOS/xpcshell'))
+        elif platform.startswith(('win32', 'cygwin')):
+            self.assertTrue(p.endswith('xpcshell.exe'))
+        else:
+            self.assertTrue(p.endswith('dist/bin/xpcshell'))
+
+        p = base.get_binary_path(validate_exists=False)
+        if platform.startswith('darwin'):
+            self.assertTrue(p.endswith('Contents/MacOS/awesomeapp'))
+        elif platform.startswith(('win32', 'cygwin')):
+            self.assertTrue(p.endswith('awesomeapp.exe'))
+        else:
+            self.assertTrue(p.endswith('dist/bin/awesomeapp'))
+
+        p = base.get_binary_path(validate_exists=False, where="staged-package")
+        if platform.startswith('darwin'):
+            self.assertTrue(p.endswith('awesomeapp/Nightly.app/Contents/MacOS/awesomeapp'))
+        elif platform.startswith(('win32', 'cygwin')):
+            self.assertTrue(p.endswith('awesomeapp/awesomeapp.exe'))
+        else:
+            self.assertTrue(p.endswith('awesomeapp/awesomeapp'))
+
+        self.assertRaises(Exception, base.get_binary_path, where="somewhere")
 
 class TestPathArgument(unittest.TestCase):
     def test_path_argument(self):

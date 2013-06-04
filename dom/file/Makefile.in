@@ -9,57 +9,12 @@ VPATH            = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE           = dom
 LIBRARY_NAME     = domfile_s
 LIBXUL_LIBRARY   = 1
 FORCE_STATIC_LIB = 1
-ifndef _MSC_VER
 FAIL_ON_WARNINGS := 1
-endif # !_MSC_VER
 
 include $(topsrcdir)/dom/dom-config.mk
-
-EXPORTS_NAMESPACES = mozilla/dom/file
-
-CPPSRCS = \
-  AsyncHelper.cpp \
-  DOMFileHandle.cpp \
-  DOMFileRequest.cpp \
-  File.cpp \
-  FileHandle.cpp \
-  FileHelper.cpp \
-  FileRequest.cpp \
-  FileService.cpp \
-  FileStreamWrappers.cpp \
-  LockedFile.cpp \
-  MemoryStreams.cpp \
-  MetadataHelper.cpp \
-  ArchiveEvent.cpp \
-  ArchiveZipEvent.cpp \
-  ArchiveZipFile.cpp \
-  ArchiveReader.cpp \
-  ArchiveRequest.cpp \
-  $(NULL)
-
-EXPORTS = \
-  nsIFileStorage.h \
-  $(NULL)
-
-EXPORTS_mozilla/dom/file = \
-  DOMFileHandle.h \
-  DOMFileRequest.h \
-  File.h \
-  FileCommon.h \
-  FileHandle.h \
-  FileHelper.h \
-  FileService.h \
-  LockedFile.h \
-  ArchiveEvent.h \
-  ArchiveZipEvent.h \
-  ArchiveZipFile.h \
-  ArchiveReader.h \
-  ArchiveRequest.h \
-  $(NULL)
 
 include $(topsrcdir)/config/rules.mk
 

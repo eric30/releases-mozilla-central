@@ -7,14 +7,15 @@
 #ifndef AudioBufferSourceNode_h_
 #define AudioBufferSourceNode_h_
 
-#include "AudioSourceNode.h"
+#include "AudioNode.h"
 #include "AudioBuffer.h"
+#include "AudioParam.h"
 #include "mozilla/dom/BindingUtils.h"
 
 namespace mozilla {
 namespace dom {
 
-class AudioBufferSourceNode : public AudioSourceNode,
+class AudioBufferSourceNode : public AudioNode,
                               public MainThreadMediaStreamListener
 {
 public:
@@ -26,31 +27,59 @@ public:
     if (mStream) {
       mStream->RemoveMainThreadListener(this);
     }
-    AudioSourceNode::DestroyMediaStream();
+    AudioNode::DestroyMediaStream();
   }
-  virtual bool SupportsMediaStreams() const MOZ_OVERRIDE
+  virtual uint16_t NumberOfInputs() const MOZ_FINAL MOZ_OVERRIDE
   {
-    return true;
+    return 0;
+  }
+  virtual AudioBufferSourceNode* AsAudioBufferSourceNode() MOZ_OVERRIDE
+  {
+    return this;
+  }
+  NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(AudioBufferSourceNode, AudioNode)
+
+  virtual JSObject* WrapObject(JSContext* aCx,
+                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+
+  void Start(double aWhen, double aOffset,
+             const Optional<double>& aDuration, ErrorResult& aRv);
+  void NoteOn(double aWhen, ErrorResult& aRv)
+  {
+    Start(aWhen, 0.0, Optional<double>(), aRv);
+  }
+  void NoteGrainOn(double aWhen, double aOffset,
+                   double aDuration, ErrorResult& aRv)
+  {
+    Optional<double> duration;
+    duration.Construct(aDuration);
+    Start(aWhen, aOffset, duration, aRv);
+  }
+  void Stop(double aWhen, ErrorResult& aRv, bool aShuttingDown = false);
+  void NoteOff(double aWhen, ErrorResult& aRv)
+  {
+    Stop(aWhen, aRv);
   }
 
-  NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(AudioBufferSourceNode, AudioSourceNode)
-
-  virtual JSObject* WrapObject(JSContext* aCx, JSObject* aScope);
-
-  void Start(JSContext* aCx, double aWhen, double aOffset,
-             const Optional<double>& aDuration, ErrorResult& aRv);
-  void Stop(double aWhen, ErrorResult& aRv);
-
-  AudioBuffer* GetBuffer() const
+  AudioBuffer* GetBuffer(JSContext* aCx) const
   {
     return mBuffer;
   }
-  void SetBuffer(AudioBuffer* aBuffer)
+  void SetBuffer(JSContext* aCx, AudioBuffer* aBuffer)
   {
     mBuffer = aBuffer;
+    SendBufferParameterToStream(aCx);
+    SendLoopParametersToStream();
   }
-
+  AudioParam* PlaybackRate() const
+  {
+    return mPlaybackRate;
+  }
+  AudioParam* Gain() const
+  {
+    return mGain;
+  }
   bool Loop() const
   {
     return mLoop;
@@ -58,6 +87,7 @@ public:
   void SetLoop(bool aLoop)
   {
     mLoop = aLoop;
+    SendLoopParametersToStream();
   }
   double LoopStart() const
   {
@@ -66,6 +96,7 @@ public:
   void SetLoopStart(double aStart)
   {
     mLoopStart = aStart;
+    SendLoopParametersToStream();
   }
   double LoopEnd() const
   {
@@ -74,16 +105,53 @@ public:
   void SetLoopEnd(double aEnd)
   {
     mLoopEnd = aEnd;
+    SendLoopParametersToStream();
   }
+  void SendDopplerShiftToStream(double aDopplerShift);
+
+  IMPL_EVENT_HANDLER(ended)
 
   virtual void NotifyMainThreadStateChanged() MOZ_OVERRIDE;
 
 private:
-  nsRefPtr<AudioBuffer> mBuffer;
+  friend class AudioBufferSourceNodeEngine;
+  // START, OFFSET and DURATION are always set by start() (along with setting
+  // mBuffer to something non-null).
+  // STOP is set by stop().
+  enum EngineParameters {
+    SAMPLE_RATE,
+    START,
+    STOP,
+    OFFSET,
+    DURATION,
+    LOOP,
+    LOOPSTART,
+    LOOPEND,
+    PLAYBACKRATE,
+    GAIN,
+    DOPPLERSHIFT
+  };
+
+  void SendLoopParametersToStream();
+  void SendBufferParameterToStream(JSContext* aCx);
+  void SendOffsetAndDurationParametersToStream(AudioNodeStream* aStream,
+                                               double aOffset,
+                                               double aDuration);
+  static void SendPlaybackRateToStream(AudioNode* aNode);
+  static void SendGainToStream(AudioNode* aNode);
+
+private:
   double mLoopStart;
   double mLoopEnd;
+  double mOffset;
+  double mDuration;
+  nsRefPtr<AudioBuffer> mBuffer;
+  nsRefPtr<AudioParam> mPlaybackRate;
+  nsRefPtr<AudioParam> mGain;
+  SelfReference<AudioBufferSourceNode> mPlayingRef; // a reference to self while playing
   bool mLoop;
   bool mStartCalled;
+  bool mStopped;
 };
 
 }

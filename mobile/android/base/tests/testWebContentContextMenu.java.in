@@ -64,6 +64,8 @@ public class testWebContentContextMenu extends PixelTest {
                 // Wait for the new tab and page to load
                 tabEventExpecter.blockForEvent();
                 contentEventExpecter.blockForEvent();
+                tabEventExpecter.unregisterListener();
+                contentEventExpecter.unregisterListener();
 
                 // See tab count
                 Element tabCount = mDriver.findElement(getActivity(), "tabs_count");
@@ -105,7 +107,6 @@ public class testWebContentContextMenu extends PixelTest {
                         }
                         else {
                             if (opt.equals("Bookmark Link")) {
-                                Device mDevice = new Device();
                                 Navigation nav = new Navigation(mDevice);
 
                                 accessSection(0, opt, urls);

@@ -21,7 +21,7 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGPathElement::WrapNode(JSContext *aCx, JSObject *aScope)
+SVGPathElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
   return SVGPathElementBinding::Wrap(aCx, aScope, this);
 }
@@ -30,19 +30,11 @@ nsSVGElement::NumberInfo SVGPathElement::sNumberInfo =
 { &nsGkAtoms::pathLength, 0, false };
 
 //----------------------------------------------------------------------
-// nsISupports methods
-
-NS_IMPL_ISUPPORTS_INHERITED3(SVGPathElement, SVGPathElementBase,
-                             nsIDOMNode, nsIDOMElement,
-                             nsIDOMSVGElement)
-
-//----------------------------------------------------------------------
 // Implementation
 
 SVGPathElement::SVGPathElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : SVGPathElementBase(aNodeInfo)
 {
-  SetIsDOMBinding();
 }
 
 //----------------------------------------------------------------------

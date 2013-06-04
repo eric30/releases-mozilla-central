@@ -90,6 +90,11 @@ class nsIntervalSet;
 // (including <BR CLEAR="..."> frames)
 #define NS_BLOCK_HAS_CLEAR_CHILDREN         NS_FRAME_STATE_BIT(27)
 
+// This block has had a child marked dirty, so before we reflow we need
+// to look through the lines to find any such children and mark
+// appropriate lines dirty.
+#define NS_BLOCK_LOOK_FOR_DIRTY_FRAMES      NS_FRAME_STATE_BIT(61)
+
 // Are our cached intrinsic widths intrinsic widths for font size
 // inflation?  i.e., what was the current state of
 // GetPresContext()->mInflationDisabledForShrinkWrap at the time they
@@ -135,9 +140,9 @@ public:
   NS_DECL_QUERYFRAME
 
   // nsIFrame
-  NS_IMETHOD Init(nsIContent*      aContent,
-                  nsIFrame*        aParent,
-                  nsIFrame*        aPrevInFlow);
+  virtual void Init(nsIContent*      aContent,
+                    nsIFrame*        aParent,
+                    nsIFrame*        aPrevInFlow) MOZ_OVERRIDE;
   NS_IMETHOD SetInitialChildList(ChildListID     aListID,
                                  nsFrameList&    aChildList);
   NS_IMETHOD  AppendFrames(ChildListID     aListID,
@@ -169,7 +174,7 @@ public:
   virtual void InvalidateFrameWithRect(const nsRect& aRect, uint32_t aDisplayItemKey = 0);
 
 #ifdef DEBUG
-  NS_IMETHOD List(FILE* out, int32_t aIndent, uint32_t aFlags = 0) const;
+  void List(FILE* out, int32_t aIndent, uint32_t aFlags = 0) const;
   NS_IMETHOD_(nsFrameState) GetDebugStateBits() const;
   NS_IMETHOD GetFrameName(nsAString& aResult) const;
 #endif
@@ -384,6 +389,11 @@ protected:
     }
     aLine->Destroy(PresContext()->PresShell());
   }
+  /**
+   * Helper method for StealFrame.
+   */
+  void RemoveFrameFromLine(nsIFrame* aChild, nsLineList::iterator aLine,
+                           nsFrameList& aFrameList, nsLineList& aLineList);
 
   void TryAllLines(nsLineList::iterator* aIterator,
                    nsLineList::iterator* aStartIterator,
@@ -404,24 +414,25 @@ protected:
 
   virtual int GetSkipSides() const MOZ_OVERRIDE;
 
-  virtual void ComputeFinalSize(const nsHTMLReflowState& aReflowState,
-                                nsBlockReflowState&      aState,
-                                nsHTMLReflowMetrics&     aMetrics,
-                                nscoord*                 aBottomEdgeOfChildren);
+  void ComputeFinalSize(const nsHTMLReflowState& aReflowState,
+                        nsBlockReflowState&      aState,
+                        nsHTMLReflowMetrics&     aMetrics,
+                        nscoord*                 aBottomEdgeOfChildren);
 
   void ComputeOverflowAreas(const nsRect&         aBounds,
                             const nsStyleDisplay* aDisplay,
                             nscoord               aBottomEdgeOfChildren,
                             nsOverflowAreas&      aOverflowAreas);
 
-  /** add the frames in aFrameList to this block after aPrevSibling
-    * this block thinks in terms of lines, but the frame construction code
-    * knows nothing about lines at all. So we need to find the line that
-    * contains aPrevSibling and add aFrameList after aPrevSibling on that line.
-    * new lines are created as necessary to handle block data in aFrameList.
-    * This function will clear aFrameList.
-    */
-  virtual nsresult AddFrames(nsFrameList& aFrameList, nsIFrame* aPrevSibling);
+  /**
+   * Add the frames in aFrameList to this block after aPrevSibling.
+   * This block thinks in terms of lines, but the frame construction code
+   * knows nothing about lines at all so we need to find the line that
+   * contains aPrevSibling and add aFrameList after aPrevSibling on that line.
+   * New lines are created as necessary to handle block data in aFrameList.
+   * This function will clear aFrameList.
+   */
+  void AddFrames(nsFrameList& aFrameList, nsIFrame* aPrevSibling);
 
 #ifdef IBMBIDI
   /**
@@ -469,6 +480,33 @@ public:
    */
   static void RecoverFloatsFor(nsIFrame*       aFrame,
                                nsFloatManager& aFloatManager);
+
+  /**
+   * Determine if we have any pushed floats from a previous continuation.
+   *
+   * @returns true, if any of the floats at the beginning of our mFloats list
+   *          have the NS_FRAME_IS_PUSHED_FLOAT bit set; false otherwise.
+   */
+  bool HasPushedFloatsFromPrevContinuation() const {
+    if (!mFloats.IsEmpty()) {
+      // If we have pushed floats, then they should be at the beginning of our
+      // float list.
+      if (mFloats.FirstChild()->GetStateBits() & NS_FRAME_IS_PUSHED_FLOAT) {
+        return true;
+      }
+    }
+
+#ifdef DEBUG
+    // Double-check the above assertion that pushed floats should be at the
+    // beginning of our floats list.
+    for (nsFrameList::Enumerator e(mFloats); !e.AtEnd(); e.Next()) {
+      nsIFrame* f = e.get();
+      NS_ASSERTION(!(f->GetStateBits() & NS_FRAME_IS_PUSHED_FLOAT),
+        "pushed floats must be at the beginning of the float list");
+    }
+#endif
+    return false;
+  }
 
 protected:
 
@@ -572,6 +610,12 @@ protected:
                    nsRect&             aFloatAvailableSpace, /* in-out */
                    nscoord&            aAvailableSpaceHeight, /* in-out */
                    bool*             aKeepReflowGoing);
+
+  /**
+    * If NS_BLOCK_LOOK_FOR_DIRTY_FRAMES is set, call MarkLineDirty
+    * on any line with a child frame that is dirty.
+    */
+  void LazyMarkLinesDirty();
 
   /**
    * Mark |aLine| dirty, and, if necessary because of possible

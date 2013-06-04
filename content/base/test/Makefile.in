@@ -11,23 +11,11 @@ relativesrcdir  = @relativesrcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = content
-
 CPP_UNIT_TESTS = \
                  TestNativeXMLHttpRequest.cpp \
                  TestGetURL.cpp \
                  TestPlainTextSerializer.cpp \
                  $(NULL)
-
-
-XPCSHELL_TESTS = \
-               unit \
-               $(NULL)
-# FIXME/bug 575918: out-of-process xpcshell is broken on OS X
-ifneq ($(OS_ARCH),Darwin)
-XPCSHELL_TESTS += unit_ipc
-endif
-
 
 # Split files arbitrarily in three groups to not run into too-long command lines
 # which break on Windows (see bug 563151 and bug 831989)
@@ -248,6 +236,7 @@ MOCHITEST_FILES_A = \
 		test_meta_viewport4.html \
 		test_meta_viewport5.html \
 		test_meta_viewport6.html \
+			viewport_helpers.js \
 		test_mutationobservers.html \
 		mutationobserver_dialog.html \
 		test_bug744830.html \
@@ -259,6 +248,7 @@ MOCHITEST_FILES_A = \
 		test_bug811701.html \
 		test_bug811701.xhtml \
 		test_bug820909.html \
+		test_bug704063.html \
 		$(NULL)
 
 MOCHITEST_FILES_B = \
@@ -350,6 +340,7 @@ MOCHITEST_FILES_B = \
 		test_viewport_scroll.html \
 		test_CSP.html \
 		file_CSP.sjs \
+		file_CSP.css \
 		file_CSP_main.html \
 		file_CSP_main.html^headers^ \
 		file_CSP_main_spec_compliant.html \
@@ -379,6 +370,13 @@ MOCHITEST_FILES_B = \
 	 	file_CSP_evalscript_main_spec_compliant.html^headers^ \
 		file_CSP_evalscript_main_spec_compliant_allowed.html \
 		file_CSP_evalscript_main_spec_compliant_allowed.html^headers^ \
+		test_CSP_inlinestyle.html \
+		file_CSP_inlinestyle_main.html \
+		file_CSP_inlinestyle_main.html^headers^ \
+		file_CSP_inlinestyle_main_spec_compliant.html \
+		file_CSP_inlinestyle_main_spec_compliant.html^headers^ \
+		file_CSP_inlinestyle_main_spec_compliant_allowed.html \
+		file_CSP_inlinestyle_main_spec_compliant_allowed.html^headers^ \
 		file_csp_bug768029.html \
 		file_csp_bug768029.sjs \
 		file_csp_bug773891.html \
@@ -496,6 +494,8 @@ MOCHITEST_FILES_B = \
 		accesscontrol.resource^headers^ \
 		invalid_accesscontrol.resource \
 		invalid_accesscontrol.resource^headers^ \
+		file_bug869432.eventsource \
+		file_bug869432.eventsource^headers^ \
 		$(NULL)
 
 MOCHITEST_FILES_C= \
@@ -596,10 +596,17 @@ MOCHITEST_FILES_C= \
 		test_mixed_content_blocker.html \
 		file_mixed_content_main.html \
 		file_mixed_content_server.sjs \
-    test_mixed_content_blocker_bug803225.html \
-    file_mixed_content_main_bug803225.html \
-    file_mixed_content_main_bug803225_websocket_wsh.py \
-    bug803225_test_mailto.html \
+		test_mixed_content_blocker_bug803225.html \
+		file_mixed_content_main_bug803225.html \
+		file_mixed_content_main_bug803225_websocket_wsh.py \
+		bug803225_test_mailto.html \
+		test_mixed_content_blocker_frameNavigation.html \
+		file_mixed_content_frameNavigation.html \
+		file_mixed_content_frameNavigation_innermost.html \
+		file_mixed_content_frameNavigation_grandchild.html \
+		file_mixed_content_frameNavigation_secure.html \
+		file_mixed_content_frameNavigation_secure_grandchild.html \
+		file_mixed_content_frameNavigation_blankTarget.html \
 		test_bug789856.html \
 		file_bug804395.jar \
 		test_bug804395.html \
@@ -619,6 +626,11 @@ MOCHITEST_FILES_C= \
 		badMessageEvent2.eventsource \
 		badMessageEvent2.eventsource^headers^ \
 		test_object.html \
+		test_bug869006.html \
+		test_bug868999.html \
+		test_bug869000.html \
+		test_bug869002.html \
+		test_bug876282.html \
 		$(NULL)
 
 # OOP tests don't work on Windows (bug 763081) or native-fennec

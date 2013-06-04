@@ -32,8 +32,8 @@ VPATH     = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE         = ots
 LIBRARY_NAME   = mozots
+MSVC_ENABLE_PGO := 1
 FORCE_STATIC_LIB = 1
 
 ifeq (WINNT,$(OS_TARGET))
@@ -43,45 +43,6 @@ LIBXUL_LIBRARY = 1
 endif
 
 CSRCS =   \
-  $(NULL)
-
-CPPSRCS	= \
-  cff.cc  \
-  cff_type2_charstring.cc \
-  cmap.cc \
-  cvt.cc  \
-  fpgm.cc \
-  gasp.cc \
-  glyf.cc \
-  hdmx.cc \
-  head.cc \
-  hhea.cc \
-  hmtx.cc \
-  kern.cc \
-  layout.cc \
-  loca.cc \
-  ltsh.cc \
-  maxp.cc \
-  metrics.cc \
-  name.cc \
-  os2.cc  \
-  ots.cc  \
-  post.cc \
-  prep.cc \
-  vdmx.cc \
-  vhea.cc \
-  vmtx.cc \
-  vorg.cc \
-  gdef.cc \
-  gpos.cc \
-  gsub.cc \
-  graphite.cc \
-  svg.cc \
-  $(NULL)
-
-EXPORTS = \
-  ../include/opentype-sanitiser.h \
-  ../include/ots-memory-stream.h  \
   $(NULL)
 
 include $(topsrcdir)/config/rules.mk

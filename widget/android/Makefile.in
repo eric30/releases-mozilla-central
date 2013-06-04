@@ -9,12 +9,10 @@ VPATH           = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE          = widget
 LIBRARY_NAME    = widget_android
 EXPORT_LIBRARY  = 1
 IS_COMPONENT    = 1
 MODULE_NAME     = nsWidgetAndroidModule
-GRE_MODULE      = 1
 LIBXUL_LIBRARY  = 1
 FAIL_ON_WARNINGS := 1
 
@@ -24,26 +22,6 @@ endif
 ifdef MOZ_WEBSMS_BACKEND
 DEFINES += -DMOZ_WEBSMS_BACKEND
 endif
-
-CPPSRCS	= \
-	GfxInfo.cpp \
-	nsWidgetFactory.cpp \
-	nsAppShell.cpp \
-	AndroidJavaWrappers.cpp \
-	AndroidBridge.cpp \
-	AndroidDirectTexture.cpp \
-	AndroidGraphicBuffer.cpp \
-	AndroidJNI.cpp \
-	nsWindow.cpp \
-	nsLookAndFeel.cpp \
-	nsScreenManagerAndroid.cpp \
-	nsIdleServiceAndroid.cpp \
-	nsClipboard.cpp \
-	nsFilePicker.cpp \
-	nsIMEPicker.cpp \
-	nsDeviceContextAndroid.cpp \
-	nsPrintOptionsAndroid.cpp \
-	$(NULL)
 
 NOT_THERE_YET_CPPSRCS = \
 	nsQtKeyUtils.cpp \
@@ -55,8 +33,6 @@ NOT_THERE_YET_CPPSRCS = \
 	$(NULL)
 
 SHARED_LIBRARY_LIBS = ../xpwidgets/libxpwidgets_s.a
-
-EXPORTS = AndroidBridge.h AndroidJavaWrappers.h
 
 include $(topsrcdir)/config/rules.mk
 

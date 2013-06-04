@@ -4,6 +4,8 @@
 
 package org.mozilla.gecko;
 
+import org.mozilla.gecko.util.HardwareUtils;
+
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -46,11 +48,12 @@ public class SiteIdentityPopup extends PopupWindow {
     private int mYOffset;
 
     private SiteIdentityPopup() {
-        super(GeckoApp.mAppContext);
+        super(GeckoAppShell.getContext());
 
-        mResources = GeckoApp.mAppContext.getResources();
+        mResources = GeckoAppShell.getContext().getResources();
         mYOffset = mResources.getDimensionPixelSize(R.dimen.menu_popup_offset);
         mInflated = false;
+        setAnimationStyle(R.style.PopupAnimation);
     }
 
     public static synchronized SiteIdentityPopup getInstance() {
@@ -67,10 +70,15 @@ public class SiteIdentityPopup extends PopupWindow {
     private void init() {
         setBackgroundDrawable(new BitmapDrawable());
         setOutsideTouchable(true);
-        setWindowLayoutMode(GeckoApp.mAppContext.isTablet() ? LayoutParams.WRAP_CONTENT : LayoutParams.FILL_PARENT,
+
+        // Make the popup focusable so it doesn't inadvertently trigger click events elsewhere
+        // which may reshow the popup (see bug 785156)
+        setFocusable(true);
+
+        setWindowLayoutMode(HardwareUtils.isTablet() ? LayoutParams.WRAP_CONTENT : LayoutParams.FILL_PARENT,
                 LayoutParams.WRAP_CONTENT);
 
-        LayoutInflater inflater = LayoutInflater.from(GeckoApp.mAppContext);
+        LayoutInflater inflater = LayoutInflater.from(GeckoAppShell.getContext());
         RelativeLayout layout = (RelativeLayout) inflater.inflate(R.layout.site_identity_popup, null);
         setContentView(layout);
 
@@ -153,8 +161,8 @@ public class SiteIdentityPopup extends PopupWindow {
         int leftMargin = anchorLocation[0] + (v.getWidth() - arrowWidth) / 2;
 
         int offset = 0;
-        if (GeckoApp.mAppContext.isTablet()) {
-            int popupWidth = mResources.getDimensionPixelSize(R.dimen.popup_width);
+        if (HardwareUtils.isTablet()) {
+            int popupWidth = mResources.getDimensionPixelSize(R.dimen.doorhanger_width);
             offset = 0 - popupWidth + arrowWidth*3/2 + v.getWidth()/2;
         }
 

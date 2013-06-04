@@ -4,7 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /******
-  This file contains the list of all HTTP atoms 
+  This file contains the list of all HTTP atoms
   See nsHttp.h for access to the atoms.
 
   It is designed to be used as inline input to nsHttp.cpp *only*
@@ -85,6 +85,7 @@ HTTP_ATOM(Vary,                      "Vary")
 HTTP_ATOM(Version,                   "Version")
 HTTP_ATOM(WWW_Authenticate,          "WWW-Authenticate")
 HTTP_ATOM(Warning,                   "Warning")
+HTTP_ATOM(X_Firefox_Spdy,            "X-Firefox-Spdy")
 
 // methods are atoms too.
 //

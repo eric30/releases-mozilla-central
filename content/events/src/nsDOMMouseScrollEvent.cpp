@@ -4,7 +4,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsDOMMouseScrollEvent.h"
-#include "nsDOMClassInfoID.h"
 
 nsDOMMouseScrollEvent::nsDOMMouseScrollEvent(mozilla::dom::EventTarget* aOwner,
                                              nsPresContext* aPresContext,
@@ -24,6 +23,7 @@ nsDOMMouseScrollEvent::nsDOMMouseScrollEvent(mozilla::dom::EventTarget* aOwner,
   if(mEvent->eventStructType == NS_MOUSE_SCROLL_EVENT) {
     mDetail = static_cast<nsMouseScrollEvent*>(mEvent)->delta;
   }
+  SetIsDOMBinding();
 }
 
 nsDOMMouseScrollEvent::~nsDOMMouseScrollEvent()
@@ -45,11 +45,8 @@ nsDOMMouseScrollEvent::~nsDOMMouseScrollEvent()
 NS_IMPL_ADDREF_INHERITED(nsDOMMouseScrollEvent, nsDOMMouseEvent)
 NS_IMPL_RELEASE_INHERITED(nsDOMMouseScrollEvent, nsDOMMouseEvent)
 
-DOMCI_DATA(MouseScrollEvent, nsDOMMouseScrollEvent)
-
 NS_INTERFACE_MAP_BEGIN(nsDOMMouseScrollEvent)
   NS_INTERFACE_MAP_ENTRY(nsIDOMMouseScrollEvent)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(MouseScrollEvent)
 NS_INTERFACE_MAP_END_INHERITING(nsDOMMouseEvent)
 
 NS_IMETHODIMP
@@ -78,15 +75,19 @@ NS_IMETHODIMP
 nsDOMMouseScrollEvent::GetAxis(int32_t* aResult)
 {
   NS_ENSURE_ARG_POINTER(aResult);
-
-  if (mEvent->eventStructType == NS_MOUSE_SCROLL_EVENT) {
-    *aResult = static_cast<nsMouseScrollEvent*>(mEvent)->isHorizontal ?
-                 static_cast<int32_t>(HORIZONTAL_AXIS) :
-                 static_cast<int32_t>(VERTICAL_AXIS);
-  } else {
-    *aResult = 0;
-  }
+  *aResult = Axis();
   return NS_OK;
+}
+
+int32_t
+nsDOMMouseScrollEvent::Axis()
+{
+  if (mEvent->eventStructType == NS_MOUSE_SCROLL_EVENT) {
+    return static_cast<nsMouseScrollEvent*>(mEvent)->isHorizontal ?
+             static_cast<int32_t>(HORIZONTAL_AXIS) :
+             static_cast<int32_t>(VERTICAL_AXIS);
+  }
+  return 0;
 }
 
 nsresult NS_NewDOMMouseScrollEvent(nsIDOMEvent** aInstancePtrResult,

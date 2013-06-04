@@ -10,30 +10,10 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= xpcom
 LIBRARY_NAME	= xpcomcomponents_s
-GRE_MODULE	= 1
+MSVC_ENABLE_PGO := 1
 LIBXUL_LIBRARY = 1
 MOZILLA_INTERNAL_API = 1
-
-EXPORTS_NAMESPACES = mozilla
-
-EXPORTS	= \
-  nsCategoryManagerUtils.h \
-  $(NULL)
-
-EXPORTS_mozilla = \
-  Module.h \
-  ModuleLoader.h \
-  ModuleUtils.h \
-  $(NULL)
-
-CPPSRCS		= \
-		nsCategoryManager.cpp \
-		nsComponentManager.cpp \
-		ManifestParser.cpp \
-		nsNativeComponentLoader.cpp \
-		$(NULL)
 
 LOCAL_INCLUDES	= \
 	-I$(srcdir)/../reflect/xptinfo/src \

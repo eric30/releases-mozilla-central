@@ -1,7 +1,7 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-MARIONETTE_TIMEOUT = 10000;
+MARIONETTE_TIMEOUT = 60000;
 
 SpecialPowers.setBoolPref("dom.sms.enabled", true);
 SpecialPowers.addPermission("sms", true, document);
@@ -32,6 +32,7 @@ function sendSms() {
     ok(sentSms.id, "sms id");
     smsId = sentSms.id;
     log("Sent SMS (id: " + smsId + ").");
+    ok(sentSms.threadId, "thread id");
     is(sentSms.body, msgText, "msg body");
     is(sentSms.delivery, "sent", "delivery");
     is(sentSms.deliveryStatus, "pending", "deliveryStatus");

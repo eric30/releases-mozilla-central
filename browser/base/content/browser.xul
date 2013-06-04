@@ -114,7 +114,7 @@
                onpopupshowing="return FillHistoryMenu(event.target);"
                oncommand="gotoHistoryIndex(event); event.stopPropagation();"
                onclick="checkForMiddleClick(this, event);"/>
-    <tooltip id="aHTMLTooltip" onpopupshowing="return FillInHTMLTooltip(document.tooltipNode);"/>
+    <tooltip id="aHTMLTooltip" page="true"/>
 
     <!-- for search and content formfill/pw manager -->
     <panel type="autocomplete" id="PopupAutoComplete" noautofocus="true" hidden="true"/>
@@ -182,83 +182,40 @@
            hidden="true"
            consumeoutsideclicks="true"
            align="start"
+           orient="horizontal"
            role="alert">
-      <hbox flex="1">
-        <image id="social-activation-icon" class="popup-notification-icon"/>
-        <vbox flex="1">
-          <description id="social-activation-message" class="popup-notification-description"/>
+      <image id="social-activation-icon" class="popup-notification-icon"/>
+      <vbox flex="1">
+        <description id="social-activation-message" class="popup-notification-description">&social.activated.description;</description>
+        <spacer flex="1"/>
+        <hbox pack="start" align="center" class="popup-notification-button-container">
+          <label  id="social-undoactivation-button"
+                  class="text-link"
+                  value="&social.activated.undo.label;"
+                  accesskey="&social.activated.undo.accesskey;"
+                  onclick="SocialUI.undoActivation(this);"/>
           <spacer flex="1"/>
-          <hbox pack="end" align="center" class="popup-notification-button-container">
-#ifdef XP_UNIX
-        <button id="social-undoactivation-button"
-                label="&social.activated.undobutton.label;"
-                accesskey="&social.activated.undobutton.accesskey;"
-                onclick="SocialUI.undoActivation(this);"/>
-        <button default="true"
-                autofocus="autofocus"
-                label="&social.ok.label;"
-                accesskey="&social.ok.accesskey;"
-                oncommand="SocialUI.notificationPanel.hidePopup();"/>
-#else
-        <button default="true"
-                autofocus="autofocus"
-                label="&social.ok.label;"
-                accesskey="&social.ok.accesskey;"
-                oncommand="SocialUI.notificationPanel.hidePopup();"/>
-        <button id="social-undoactivation-button"
-                label="&social.activated.undobutton.label;"
-                accesskey="&social.activated.undobutton.accesskey;"
-                onclick="SocialUI.undoActivation(this);"/>
-#endif
-          </hbox>
-        </vbox>
-      </hbox>
+          <button id="social-activation-button"
+                  default="true"
+                  autofocus="autofocus"
+                  label="&social.ok.label;"
+                  accesskey="&social.ok.accesskey;"
+                  oncommand="SocialUI.activationPanel.hidePopup();"/>
+        </hbox>
+      </vbox>
     </panel>
 
-    <panel id="unsharePopup"
+    <panel id="social-share-panel"
+           class="social-panel"
            type="arrow"
-           orient="vertical"
-           ignorekeys="true"
-           hidden="true"
-           onpopupshown="SocialShareButton.panelShown(event);"
+           orient="horizontal"
+           onpopupshowing="SocialShare.onShowing()"
+           onpopuphidden="SocialShare.onHidden()"
            consumeoutsideclicks="true"
-           level="top">
-      <!-- Note that 'label', 'accesskey', 'value' and 'aria-label' attributes
-           for many of these elements are supplied by the provider and filled
-           in at runtime
-      -->
-      <row id="unsharePopupHeader" align="center">
-        <vbox align="center">
-          <image id="socialUserPortrait" onclick="SocialUI.showProfile();"/>
-        </vbox>
-        <vbox id="unsharePopupText">
-          <button id="socialUserDisplayName" pack="start"
-                  oncommand="SocialUI.showProfile();"/>
-          <spacer flex="1"/>
-          <label id="socialUserRecommendedText"/>
-        </vbox>
-      </row>
-      <hbox id="unsharePopupBottomButtons" pack="end">
-#ifdef XP_UNIX
-        <button id="unsharePopupStopSharingButton"
-                class="unsharePopupBottomButton"
-                command="Social:UnsharePage"/>
-        <button id="unsharePopupContinueSharingButton"
-                class="unsharePopupBottomButton"
-                default="true"
-                autofocus="autofocus"
-                oncommand="SocialShareButton.dismissUnsharePopup();"/>
-#else
-        <button id="unsharePopupContinueSharingButton"
-                class="unsharePopupBottomButton"
-                default="true"
-                autofocus="autofocus"
-                oncommand="SocialShareButton.dismissUnsharePopup();"/>
-        <button id="unsharePopupStopSharingButton"
-                class="unsharePopupBottomButton"
-                command="Social:UnsharePage"/>
-#endif
-      </hbox>
+           hidden="true">
+      <vbox class="social-share-toolbar">
+        <vbox id="social-share-provider-buttons" flex="1"/>
+      </vbox>
     </panel>
 
     <panel id="social-notification-panel"
@@ -273,6 +230,7 @@
            side="right"
            type="arrow"
            hidden="true"
+           flip="slide"
            rolluponmousewheel="true"
            consumeoutsideclicks="false"
            noautofocus="true"
@@ -450,6 +408,20 @@
       </popupnotificationcontent>
     </popupnotification>
 
+    <popupnotification id="servicesInstall-notification" hidden="true">
+      <popupnotificationcontent orient="vertical" align="start">
+        <separator class="thin"/>
+        <label id="servicesInstall-learnmore-link" class="text-link"/>
+      </popupnotificationcontent>
+    </popupnotification>
+
+    <popupnotification id="pointerLock-notification" hidden="true">
+      <popupnotificationcontent orient="vertical" align="start">
+        <separator class="thin"/>
+        <label id="pointerLock-cancel" value="&pointerLock.notification.message;"/>
+      </popupnotificationcontent>
+    </popupnotification>
+
     <popupnotification id="mixed-content-blocked-notification" hidden="true">
       <popupnotificationcontent orient="vertical" align="start">
         <separator/>
@@ -519,7 +491,7 @@
              toolbarname="&navbarCmd.label;" accesskey="&navbarCmd.accesskey;"
              fullscreentoolbar="true" mode="icons" customizable="true"
              iconsize="large"
-             defaultset="unified-back-forward-button,urlbar-container,reload-button,stop-button,search-container,webrtc-status-button,downloads-button,home-button,bookmarks-menu-button-container,window-controls"
+             defaultset="unified-back-forward-button,urlbar-container,reload-button,stop-button,search-container,webrtc-status-button,bookmarks-menu-button,downloads-button,home-button,window-controls"
              context="toolbar-context-menu">
 
       <toolbaritem id="unified-back-forward-button" class="chromeclass-toolbar-additional"
@@ -577,9 +549,12 @@
             <image id="plugins-notification-icon" class="notification-anchor-icon" role="button"/>
             <image id="web-notifications-notification-icon" class="notification-anchor-icon" role="button"/>
             <image id="blocked-plugins-notification-icon" class="notification-anchor-icon" role="button"/>
+            <image id="plugin-install-notification-icon" class="notification-anchor-icon" role="button"/>
             <image id="mixed-content-blocked-notification-icon" class="notification-anchor-icon" role="button"/>
             <image id="webRTC-shareDevices-notification-icon" class="notification-anchor-icon" role="button"/>
             <image id="webRTC-sharingDevices-notification-icon" class="notification-anchor-icon" role="button"/>
+            <image id="pointerLock-notification-icon" class="notification-anchor-icon" role="button"/>
+            <image id="servicesInstall-notification-icon" class="notification-anchor-icon" role="button"/>
           </box>
           <!-- Use onclick instead of normal popup= syntax since the popup
                code fires onmousedown, and hence eats our favicon drag events.
@@ -607,16 +582,9 @@
                    hidden="true"
                    tooltiptext="&pageReportIcon.tooltip;"
                    onclick="gPopupBlockerObserver.onReportButtonClick(event);"/>
-
-            <label id="share-button-status" collapsed="true" role="status"/>
-            <image id="share-button"
-                   class="urlbar-icon"
-                   hidden="true"
-                   onclick="SocialShareButton.onClick(event);"/>
-
             <image id="star-button"
                    class="urlbar-icon"
-                   onclick="PlacesStarButton.onClick(event);"/>
+                   onclick="BookmarkingUI.onCommand(event);"/>
             <image id="go-button"
                    class="urlbar-icon"
                    tooltiptext="&goEndCap.tooltip;"
@@ -667,6 +635,88 @@
                    oncommand="WebrtcIndicator.menuCommand(event.target);"/>
       </toolbarbutton>
 
+      <toolbarbutton id="bookmarks-menu-button"
+                     class="toolbarbutton-1 chromeclass-toolbar-additional"
+                     persist="class"
+                     removable="true"
+                     type="menu"
+                     label="&bookmarksMenuButton.label;"
+                     tooltiptext="&bookmarksMenuButton.tooltip;"
+                     ondragenter="PlacesMenuDNDHandler.onDragEnter(event);"
+                     ondragover="PlacesMenuDNDHandler.onDragOver(event);"
+                     ondragleave="PlacesMenuDNDHandler.onDragLeave(event);"
+                     ondrop="PlacesMenuDNDHandler.onDrop(event);">
+        <menupopup id="BMB_bookmarksPopup"
+                   placespopup="true"
+                   context="placesContext"
+                   openInTabs="children"
+                   oncommand="BookmarksEventHandler.onCommand(event, this.parentNode._placesView);"
+                   onclick="BookmarksEventHandler.onClick(event, this.parentNode._placesView);"
+                   onpopupshowing="BookmarkingUI.onPopupShowing(event);
+                                   if (!this.parentNode._placesView)
+                                     new PlacesMenu(event, 'place:folder=BOOKMARKS_MENU');"
+                   tooltip="bhTooltip" popupsinherittooltip="true">
+          <menuitem id="BMB_viewBookmarksToolbar"
+                    placesanonid="view-toolbar"
+                    toolbarId="PersonalToolbar"
+                    type="checkbox"
+                    oncommand="onViewToolbarCommand(event)"
+                    label="&viewBookmarksToolbar.label;"/>
+          <menuseparator/>
+          <menuitem id="BMB_bookmarksShowAll"
+                    label="&showAllBookmarks2.label;"
+                    command="Browser:ShowAllBookmarks"
+                    key="manBookmarkKb"/>
+          <menuseparator/>
+          <menuitem id="BMB_bookmarkThisPage"
+#ifndef XP_MACOSX
+                    class="menuitem-iconic"
+#endif
+                    label="&bookmarkThisPageCmd.label;"
+                    command="Browser:AddBookmarkAs"
+                    key="addBookmarkAsKb"/>
+          <menuitem id="BMB_subscribeToPageMenuitem"
+#ifndef XP_MACOSX
+                    class="menuitem-iconic"
+#endif
+                    label="&subscribeToPageMenuitem.label;"
+                    oncommand="return FeedHandler.subscribeToFeed(null, event);"
+                    onclick="checkForMiddleClick(this, event);"
+                    observes="singleFeedMenuitemState"/>
+          <menu id="BMB_subscribeToPageMenupopup"
+#ifndef XP_MACOSX
+                class="menu-iconic"
+#endif
+                label="&subscribeToPageMenupopup.label;"
+                observes="multipleFeedsMenuState">
+            <menupopup id="BMB_subscribeToPageSubmenuMenupopup"
+                       onpopupshowing="return FeedHandler.buildFeedList(event.target);"
+                       oncommand="return FeedHandler.subscribeToFeed(null, event);"
+                       onclick="checkForMiddleClick(this, event);"/>
+          </menu>
+          <menuseparator/>
+          <menu id="BMB_bookmarksToolbar"
+                placesanonid="toolbar-autohide"
+                class="menu-iconic bookmark-item"
+                label="&personalbarCmd.label;"
+                container="true">
+            <menupopup id="BMB_bookmarksToolbarPopup"
+                       placespopup="true"
+                       context="placesContext"
+                       onpopupshowing="if (!this.parentNode._placesView)
+                                         new PlacesMenu(event, 'place:folder=TOOLBAR');"/>
+          </menu>
+          <menuseparator/>
+          <!-- Bookmarks menu items -->
+          <menuseparator builder="end"
+                         class="hide-if-empty-places-result"/>
+          <menuitem id="BMB_unsortedBookmarks"
+                    label="&bookmarksMenuButton.unsorted.label;"
+                    oncommand="PlacesCommandHook.showPlacesOrganizer('UnfiledBookmarks');"
+                    class="menuitem-iconic"/>
+        </menupopup>
+      </toolbarbutton>
+
       <toolbarbutton id="home-button" class="toolbarbutton-1 chromeclass-toolbar-additional"
                      persist="class" removable="true"
                      label="&homeButton.label;"
@@ -676,6 +726,13 @@
                      ondragexit="homeButtonObserver.onDragExit(event)"
                      onclick="BrowserGoHome(event);"
                      aboutHomeOverrideTooltip="&abouthome.pageTitle;"/>
+
+      <toolbarbutton id="social-share-button"
+                     class="toolbarbutton-1 chromeclass-toolbar-additional"
+                     hidden="true"
+                     label="&sharePageCmd.label;"
+                     tooltiptext="&sharePageCmd.label;"
+                     command="Social:SharePage"/>
 
       <toolbaritem id="social-toolbar-item"
                    class="chromeclass-toolbar-additional"
@@ -713,98 +770,21 @@
                       command="Social:ToggleNotifications"
                       label="&social.toggleNotifications.label;"
                       accesskey="&social.toggleNotifications.accesskey;"/>
-            <menuseparator class="social-statusarea-separator"/>
-            <menuseparator class="social-provider-menu" hidden="true"/>
             <menuitem class="social-toggle-menuitem" command="Social:Toggle"/>
+            <menuseparator/>
+            <menuseparator class="social-provider-menu" hidden="true"/>
             <menuitem class="social-addons-menuitem" command="Social:Addons"
                       label="&social.addons.label;"/>
+            <menuitem label="&social.learnMore.label;"
+                      accesskey="&social.learnMore.accesskey;"
+                      oncommand="SocialUI.showLearnMore();"/>
           </menupopup>
         </toolbarbutton>
-      </toolbaritem>
-
-      <toolbaritem id="bookmarks-menu-button-container"
-                   class="chromeclass-toolbar-additional"
-                   removable="true"
-                   title="&bookmarksMenuButton.label;">
-        <toolbarbutton id="bookmarks-menu-button"
-                       type="menu"
+        <toolbarbutton id="social-mark-button"
                        class="toolbarbutton-1"
-                       label="&bookmarksMenuButton.label;"
-                       tooltiptext="&bookmarksMenuButton.tooltip;"
-                       ondragenter="PlacesMenuDNDHandler.onDragEnter(event);"
-                       ondragover="PlacesMenuDNDHandler.onDragOver(event);"
-                       ondragexit="PlacesMenuDNDHandler.onDragExit(event);"
-                       ondrop="PlacesMenuDNDHandler.onDrop(event);">
-          <menupopup id="BMB_bookmarksPopup"
-                     placespopup="true"
-                     context="placesContext"
-                     openInTabs="children"
-                     oncommand="BookmarksEventHandler.onCommand(event, this.parentNode._placesView);"
-                     onclick="BookmarksEventHandler.onClick(event, this.parentNode._placesView);"
-                     onpopupshowing="BookmarksMenuButton.onPopupShowing(event);
-                                     if (!this.parentNode._placesView)
-                                       new PlacesMenu(event, 'place:folder=BOOKMARKS_MENU');"
-                     tooltip="bhTooltip" popupsinherittooltip="true">
-            <menuitem id="BMB_viewBookmarksToolbar"
-                      placesanonid="view-toolbar"
-                      toolbarId="PersonalToolbar"
-                      type="checkbox"
-                      oncommand="onViewToolbarCommand(event)"
-                      label="&viewBookmarksToolbar.label;"/>
-            <menuseparator/>
-            <menuitem id="BMB_bookmarksShowAll"
-                      label="&showAllBookmarks2.label;"
-                      command="Browser:ShowAllBookmarks"
-                      key="manBookmarkKb"/>
-            <menuseparator/>
-            <menuitem id="BMB_bookmarkThisPage"
-#ifndef XP_MACOSX
-                      class="menuitem-iconic"
-#endif
-                      label="&bookmarkThisPageCmd.label;"
-                      command="Browser:AddBookmarkAs"
-                      key="addBookmarkAsKb"/>
-            <menuitem id="BMB_subscribeToPageMenuitem"
-#ifndef XP_MACOSX
-                      class="menuitem-iconic"
-#endif
-                      label="&subscribeToPageMenuitem.label;"
-                      oncommand="return FeedHandler.subscribeToFeed(null, event);"
-                      onclick="checkForMiddleClick(this, event);"
-                      observes="singleFeedMenuitemState"/>
-            <menu id="BMB_subscribeToPageMenupopup"
-#ifndef XP_MACOSX
-                  class="menu-iconic"
-#endif
-                  label="&subscribeToPageMenupopup.label;"
-                  observes="multipleFeedsMenuState">
-              <menupopup id="BMB_subscribeToPageSubmenuMenupopup"
-                         onpopupshowing="return FeedHandler.buildFeedList(event.target);"
-                         oncommand="return FeedHandler.subscribeToFeed(null, event);"
-                         onclick="checkForMiddleClick(this, event);"/>
-            </menu>
-            <menuseparator/>
-            <menu id="BMB_bookmarksToolbar"
-                  placesanonid="toolbar-autohide"
-                  class="menu-iconic bookmark-item"
-                  label="&personalbarCmd.label;"
-                  container="true">
-              <menupopup id="BMB_bookmarksToolbarPopup"
-                         placespopup="true"
-                         context="placesContext"
-                         onpopupshowing="if (!this.parentNode._placesView)
-                                           new PlacesMenu(event, 'place:folder=TOOLBAR');"/>
-            </menu>
-            <menuseparator/>
-            <!-- Bookmarks menu items -->
-            <menuseparator builder="end"
-                           class="hide-if-empty-places-result"/>
-            <menuitem id="BMB_unsortedBookmarks"
-                      label="&bookmarksMenuButton.unsorted.label;"
-                      oncommand="PlacesCommandHook.showPlacesOrganizer('UnfiledBookmarks');"
-                      class="menuitem-iconic"/>
-          </menupopup>
-        </toolbarbutton>
+                       hidden="true"
+                       disabled="true"
+                       command="Social:TogglePageMark"/>
       </toolbaritem>
 
       <hbox id="window-controls" hidden="true" pack="end">
@@ -973,7 +953,6 @@
                      ondrop="DownloadsIndicatorView.onDrop(event);"
                      ondragover="DownloadsIndicatorView.onDragOver(event);"
                      ondragenter="DownloadsIndicatorView.onDragOver(event);"
-                     ondragleave="DownloadsIndicatorView.onDragLeave(event);"
                      label="&downloads.label;"
                      tooltiptext="&downloads.tooltip;"/>
 
@@ -1085,8 +1064,7 @@
                   flex="1" contenttooltip="aHTMLTooltip"
                   tabcontainer="tabbrowser-tabs"
                   contentcontextmenu="contentAreaContextMenu"
-                  autocompletepopup="PopupAutoComplete"
-                  onclick="contentAreaClick(event, false);"/>
+                  autocompletepopup="PopupAutoComplete"/>
       <chatbar id="pinnedchats" layer="true" mousethrough="always" hidden="true"/>
       <statuspanel id="statusbar-display" inactive="true"/>
     </vbox>
@@ -1101,6 +1079,7 @@
                type="content"
                context="contentAreaContextMenu"
                disableglobalhistory="true"
+               tooltip="aHTMLTooltip"
                flex="1"
                style="min-width: 14em; width: 18em; max-width: 36em;"/>
     </vbox>

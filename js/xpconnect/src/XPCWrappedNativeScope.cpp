@@ -9,7 +9,9 @@
 #include "XPCWrapper.h"
 #include "jsproxy.h"
 #include "nsContentUtils.h"
+#include "nsCycleCollectionNoteRootCallback.h"
 #include "nsPrincipal.h"
+#include "mozilla/Preferences.h"
 
 #include "mozilla/dom/BindingUtils.h"
 
@@ -84,7 +86,7 @@ XPCWrappedNativeScope* XPCWrappedNativeScope::gDyingScopes = nullptr;
 
 // static
 XPCWrappedNativeScope*
-XPCWrappedNativeScope::GetNewOrUsed(JSContext *cx, JSObject* aGlobal)
+XPCWrappedNativeScope::GetNewOrUsed(JSContext *cx, JS::HandleObject aGlobal)
 {
     XPCWrappedNativeScope* scope = GetObjectScope(aGlobal);
     if (!scope) {
@@ -93,8 +95,31 @@ XPCWrappedNativeScope::GetNewOrUsed(JSContext *cx, JSObject* aGlobal)
     return scope;
 }
 
+static bool
+RemoteXULForbidsXBLScope(nsIPrincipal *aPrincipal)
+{
+  // We end up getting called during SSM bootstrapping to create the
+  // SafeJSContext. In that case, nsContentUtils isn't ready for us.
+  //
+  // Also check for random JSD scopes that don't have a principal.
+  if (!nsContentUtils::IsInitialized() || !aPrincipal)
+      return false;
+
+  // AllowXULXBLForPrincipal will return true for system principal, but we
+  // don't want that here.
+  if (nsContentUtils::IsSystemPrincipal(aPrincipal))
+      return false;
+
+  // If this domain isn't whitelisted, we're done.
+  if (!nsContentUtils::AllowXULXBLForPrincipal(aPrincipal))
+      return false;
+
+  // Check the pref to determine how we should behave.
+  return !Preferences::GetBool("dom.use_xbl_scopes_for_remote_xul", false);
+}
+
 XPCWrappedNativeScope::XPCWrappedNativeScope(JSContext *cx,
-                                             JSObject* aGlobal)
+                                             JS::HandleObject aGlobal)
       : mWrappedNativeMap(Native2WrappedNativeMap::newMap(XPC_NATIVE_MAP_SIZE)),
         mWrappedNativeProtoMap(ClassInfo2WrappedNativeProtoMap::newMap(XPC_NATIVE_PROTO_MAP_SIZE)),
         mMainThreadWrappedNativeProtoMap(ClassInfo2WrappedNativeProtoMap::newMap(XPC_NATIVE_PROTO_MAP_SIZE)),
@@ -105,7 +130,11 @@ XPCWrappedNativeScope::XPCWrappedNativeScope(JSContext *cx,
         mIsXBLScope(false)
 {
     // add ourselves to the scopes list
-    {   // scoped lock
+    {
+        MOZ_ASSERT(aGlobal);
+        MOZ_ASSERT(js::GetObjectClass(aGlobal)->flags & (JSCLASS_PRIVATE_IS_NSISUPPORTS |
+                                                         JSCLASS_HAS_PRIVATE)); 
+        // scoped lock
         XPCAutoLock lock(XPCJSRuntime::Get()->GetMapLock());
 
 #ifdef DEBUG
@@ -128,8 +157,14 @@ XPCWrappedNativeScope::XPCWrappedNativeScope(JSContext *cx,
     CompartmentPrivate *priv = EnsureCompartmentPrivate(aGlobal);
     priv->scope = this;
 
-    // Determine whether to use an XBL scope or not.
-    mUseXBLScope = XPCJSRuntime::Get()->XBLScopesEnabled();
+    // Determine whether we would allow an XBL scope in this situation.
+    // In addition to being pref-controlled, we also disable XBL scopes for
+    // remote XUL domains, _except_ if we have an additional pref override set.
+    nsIPrincipal *principal = GetPrincipal();
+    mAllowXBLScope = !RemoteXULForbidsXBLScope(principal);
+
+    // Determine whether to use an XBL scope.
+    mUseXBLScope = mAllowXBLScope;
     if (mUseXBLScope) {
       js::Class *clasp = js::GetObjectClass(mGlobalJSObject);
       mUseXBLScope = !strcmp(clasp->name, "Window") ||
@@ -137,7 +172,6 @@ XPCWrappedNativeScope::XPCWrappedNativeScope(JSContext *cx,
                      !strcmp(clasp->name, "ModalContentWindow");
     }
     if (mUseXBLScope) {
-      nsIPrincipal *principal = GetPrincipal();
       mUseXBLScope = principal && !nsContentUtils::IsSystemPrincipal(principal);
     }
 }
@@ -173,8 +207,8 @@ XPCWrappedNativeScope::GetComponentsJSObject(XPCCallContext& ccx)
 
     // The call to wrap() here is necessary even though the object is same-
     // compartment, because it applies our security wrapper.
-    JSObject *obj = wrapper->GetFlatJSObject();
-    if (!JS_WrapObject(ccx, &obj))
+    JS::RootedObject obj(ccx, wrapper->GetFlatJSObject());
+    if (!JS_WrapObject(ccx, obj.address()))
         return nullptr;
     return obj;
 }
@@ -182,7 +216,7 @@ XPCWrappedNativeScope::GetComponentsJSObject(XPCCallContext& ccx)
 JSObject*
 XPCWrappedNativeScope::EnsureXBLScope(JSContext *cx)
 {
-    JSObject *global = GetGlobalJSObject();
+    JS::RootedObject global(cx, GetGlobalJSObject());
     MOZ_ASSERT(js::IsObjectInContextCompartment(global, cx));
     MOZ_ASSERT(!mIsXBLScope);
     MOZ_ASSERT(strcmp(js::GetObjectClass(global)->name,
@@ -204,7 +238,7 @@ XPCWrappedNativeScope::EnsureXBLScope(JSContext *cx)
     // However, wantXrays lives a secret double life, and one of its other
     // hobbies is to waive Xray on the returned sandbox when set to false.
     // So make sure to keep this set to true, here.
-    SandboxOptions options;
+    SandboxOptions options(cx);
     options.wantXrays = true;
     options.wantComponents = true;
     options.wantXHRConstructor = false;
@@ -220,27 +254,34 @@ XPCWrappedNativeScope::EnsureXBLScope(JSContext *cx)
     ep = new nsExpandedPrincipal(principalAsArray);
 
     // Create the sandbox.
-    JSAutoRequest ar(cx);
-    JS::Value v = JS::UndefinedValue();
-    nsresult rv = xpc_CreateSandboxObject(cx, &v, ep, options);
+    JS::RootedValue v(cx, JS::UndefinedValue());
+    nsresult rv = xpc_CreateSandboxObject(cx, v.address(), ep, options);
     NS_ENSURE_SUCCESS(rv, nullptr);
     mXBLScope = &v.toObject();
 
     // Tag it.
-    EnsureCompartmentPrivate(js::UnwrapObject(mXBLScope))->scope->mIsXBLScope = true;
+    EnsureCompartmentPrivate(js::UncheckedUnwrap(mXBLScope))->scope->mIsXBLScope = true;
 
     // Good to go!
     return mXBLScope;
 }
 
 namespace xpc {
-JSObject *GetXBLScope(JSContext *cx, JSObject *contentScope)
+JSObject *GetXBLScope(JSContext *cx, JSObject *contentScopeArg)
 {
+    JS::RootedObject contentScope(cx, contentScopeArg);
     JSAutoCompartment ac(cx, contentScope);
     JSObject *scope = EnsureCompartmentPrivate(contentScope)->scope->EnsureXBLScope(cx);
-    scope = js::UnwrapObject(scope);
+    NS_ENSURE_TRUE(scope, nullptr); // See bug 858642.
+    scope = js::UncheckedUnwrap(scope);
     xpc_UnmarkGrayObject(scope);
     return scope;
+}
+
+bool AllowXBLScope(JSCompartment *c)
+{
+  XPCWrappedNativeScope *scope = EnsureCompartmentPrivate(c)->scope;
+  return scope && scope->AllowXBLScope();
 }
 } /* namespace xpc */
 
@@ -259,7 +300,7 @@ js::Class XPC_WN_NoHelper_Proto_JSClass = {
 
     /* Mandatory non-null function pointer members. */
     JS_PropertyStub,                // addProperty;
-    JS_PropertyStub,                // delProperty;
+    JS_DeletePropertyStub,          // delProperty;
     JS_PropertyStub,                // getProperty;
     JS_StrictPropertyStub,          // setProperty;
     JS_EnumerateStub,               // enumerate;
@@ -348,14 +389,6 @@ WrappedNativeJSGCThingTracer(JSDHashTable *table, JSDHashEntryHdr *hdr,
     return JS_DHASH_NEXT;
 }
 
-static PLDHashOperator
-TraceDOMExpandos(nsPtrHashKey<JSObject> *expando, void *aClosure)
-{
-    JS_CALL_OBJECT_TRACER(static_cast<JSTracer *>(aClosure), expando->GetKey(),
-                          "DOM expando object");
-    return PL_DHASH_NEXT;
-}
-
 // static
 void
 XPCWrappedNativeScope::TraceWrappedNativesInAllScopes(JSTracer* trc, XPCJSRuntime* rt)
@@ -368,8 +401,10 @@ XPCWrappedNativeScope::TraceWrappedNativesInAllScopes(JSTracer* trc, XPCJSRuntim
     // well as any DOM expando objects.
     for (XPCWrappedNativeScope* cur = gScopes; cur; cur = cur->mNext) {
         cur->mWrappedNativeMap->Enumerate(WrappedNativeJSGCThingTracer, trc);
-        if (cur->mDOMExpandoMap)
-            cur->mDOMExpandoMap->EnumerateEntries(TraceDOMExpandos, trc);
+        if (cur->mDOMExpandoSet) {
+            for (DOMExpandoSet::Enum e(*cur->mDOMExpandoSet); !e.empty(); e.popFront())
+                JS_CallHashSetObjectTracer(trc, e, e.front(), "DOM expando object");
+        }
     }
 }
 
@@ -380,38 +415,36 @@ WrappedNativeSuspecter(JSDHashTable *table, JSDHashEntryHdr *hdr,
     XPCWrappedNative* wrapper = ((Native2WrappedNativeMap::Entry*)hdr)->value;
 
     if (wrapper->HasExternalReference()) {
-        nsCycleCollectionTraversalCallback *cb =
-            static_cast<nsCycleCollectionTraversalCallback *>(arg);
+        nsCycleCollectionNoteRootCallback *cb =
+            static_cast<nsCycleCollectionNoteRootCallback *>(arg);
         XPCJSRuntime::SuspectWrappedNative(wrapper, *cb);
     }
 
     return JS_DHASH_NEXT;
 }
 
-static PLDHashOperator
-SuspectDOMExpandos(nsPtrHashKey<JSObject> *key, void *arg)
+static void
+SuspectDOMExpandos(JSObject *obj, nsCycleCollectionNoteRootCallback &cb)
 {
-    nsCycleCollectionTraversalCallback *cb =
-      static_cast<nsCycleCollectionTraversalCallback *>(arg);
-    JSObject* obj = key->GetKey();
     const dom::DOMClass* clasp = dom::GetDOMClass(obj);
     MOZ_ASSERT(clasp && clasp->mDOMObjectIsISupports);
     nsISupports* native = dom::UnwrapDOMObject<nsISupports>(obj);
-    cb->NoteXPCOMRoot(native);
-    return PL_DHASH_NEXT;
+    cb.NoteXPCOMRoot(native);
 }
 
 // static
 void
 XPCWrappedNativeScope::SuspectAllWrappers(XPCJSRuntime* rt,
-                                          nsCycleCollectionTraversalCallback& cb)
+                                          nsCycleCollectionNoteRootCallback& cb)
 {
     XPCAutoLock lock(rt->GetMapLock());
 
     for (XPCWrappedNativeScope* cur = gScopes; cur; cur = cur->mNext) {
         cur->mWrappedNativeMap->Enumerate(WrappedNativeSuspecter, &cb);
-        if (cur->mDOMExpandoMap)
-            cur->mDOMExpandoMap->EnumerateEntries(SuspectDOMExpandos, &cb);
+        if (cur->mDOMExpandoSet) {
+            for (DOMExpandoSet::Range r = cur->mDOMExpandoSet->all(); !r.empty(); r.popFront())
+                SuspectDOMExpandos(r.front(), cb);
+        }
     }
 }
 
@@ -439,8 +472,7 @@ XPCWrappedNativeScope::StartFinalizationPhaseOfGC(JSFreeOp *fop, XPCJSRuntime* r
 
         XPCWrappedNativeScope* next = cur->mNext;
 
-        if (cur->mGlobalJSObject &&
-            JS_IsAboutToBeFinalized(cur->mGlobalJSObject)) {
+        if (cur->mGlobalJSObject && cur->mGlobalJSObject.isAboutToBeFinalized()) {
             cur->mGlobalJSObject.finalize(fop->runtime());
             // Move this scope from the live list to the dying list.
             if (prev)
@@ -451,10 +483,8 @@ XPCWrappedNativeScope::StartFinalizationPhaseOfGC(JSFreeOp *fop, XPCJSRuntime* r
             gDyingScopes = cur;
             cur = nullptr;
         } else {
-            if (cur->mPrototypeNoHelper &&
-                JS_IsAboutToBeFinalized(cur->mPrototypeNoHelper)) {
+            if (cur->mPrototypeNoHelper && JS_IsAboutToBeFinalized(&cur->mPrototypeNoHelper))
                 cur->mPrototypeNoHelper = nullptr;
-            }
         }
         if (cur)
             prev = cur;

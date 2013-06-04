@@ -6,16 +6,21 @@
 
 const { Loader, resolveURI, Require,
         unload, override, descriptor  } = require('../loader/cuddlefish');
+const { ensure } = require('../system/unload');
+const addonWindow = require('../addon/window');
 const { PlainTextConsole } = require("sdk/console/plain-text");
 
 function CustomLoader(module, globals, packaging) {
   let options = packaging || require("@loader/options");
   options = override(options, {
-    globals: override(require('../system/globals'), globals || {})
+    globals: override(require('../system/globals'), globals || {}),
+    modules: override(options.modules || {}, {
+      'sdk/addon/window': addonWindow
+     })
   });
 
   let loader = Loader(options);
-  return Object.create(loader, descriptor({
+  let wrapper = Object.create(loader, descriptor({
     require: Require(loader, module),
     sandbox: function(id) {
       let requirement = loader.resolve(id, module.id);
@@ -26,6 +31,8 @@ function CustomLoader(module, globals, packaging) {
       unload(loader, reason);
     }
   }));
+  ensure(wrapper);
+  return wrapper;
 };
 exports.Loader = CustomLoader;
 
@@ -47,7 +54,11 @@ exports.LoaderWithHookedConsole = function (module, callback) {
         warn: hook.bind("warn"),
         error: hook.bind("error"),
         debug: hook.bind("debug"),
-        exception: hook.bind("exception")
+        exception: hook.bind("exception"),
+        __exposedProps__: {
+          log: "rw", info: "rw", warn: "rw", error: "rw", debug: "rw",
+          exception: "rw"
+        }
       }
     }),
     messages: messages

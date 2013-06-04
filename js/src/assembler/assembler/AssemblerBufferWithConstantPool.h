@@ -1,5 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=79:
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  *
  * ***** BEGIN LICENSE BLOCK *****
  * Copyright (C) 2009 University of Szeged
@@ -39,7 +39,6 @@
 #include "assembler/wtf/SegmentedVector.h"
 #include "assembler/wtf/Assertions.h"
 
-#include "methodjit/Logging.h"
 #include "jsnum.h"
 #define ASSEMBLER_HAS_CONSTANT_POOL 1
 
@@ -240,7 +239,7 @@ public:
 
         union DoublePun {
             struct {
-#if defined(IS_LITTLE_ENDIAN) && !defined(FPU_IS_ARM_FPA)
+#if defined(IS_LITTLE_ENDIAN)
                 uint32_t lo, hi;
 #else
                 uint32_t hi, lo;

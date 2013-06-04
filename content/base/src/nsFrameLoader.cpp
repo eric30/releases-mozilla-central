@@ -33,8 +33,8 @@
 #include "nsIDOMApplicationRegistry.h"
 #include "nsIBaseWindow.h"
 #include "nsContentUtils.h"
+#include "nsCxPusher.h"
 #include "nsIXPConnect.h"
-#include "nsIJSContextStack.h"
 #include "nsUnicharUtils.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIScriptSecurityManager.h"
@@ -83,7 +83,7 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/layout/RenderFrameParent.h"
 #include "nsIAppsService.h"
-#include "sampler.h"
+#include "GeckoProfiler.h"
 
 #include "jsapi.h"
 #include "mozilla/dom/HTMLIFrameElement.h"
@@ -256,19 +256,7 @@ nsContentView::GetId(nsContentViewId* aId)
 // we'd need to re-institute a fixed version of bug 98158.
 #define MAX_DEPTH_CONTENT_FRAMES 10
 
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsFrameLoader)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mDocShell)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mMessageManager)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mChildMessageManager)
-NS_IMPL_CYCLE_COLLECTION_UNLINK_END
-
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsFrameLoader)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDocShell)
-  NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "nsFrameLoader::mMessageManager");
-  cb.NoteXPCOMChild(static_cast<nsIContentFrameMessageManager*>(tmp->mMessageManager.get()));
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mChildMessageManager)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
-
+NS_IMPL_CYCLE_COLLECTION_3(nsFrameLoader, mDocShell, mMessageManager, mChildMessageManager)
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsFrameLoader)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsFrameLoader)
 
@@ -297,6 +285,7 @@ nsFrameLoader::nsFrameLoader(Element* aOwner, bool aNetworkCreated)
   , mClampScrollPosition(true)
   , mRemoteBrowserInitialized(false)
   , mObservingOwnerContent(false)
+  , mVisible(true)
   , mCurrentRemoteFrame(nullptr)
   , mRemoteBrowser(nullptr)
   , mRenderMode(RENDER_MODE_DEFAULT)
@@ -410,7 +399,7 @@ nsFrameLoader::ReallyStartLoadingInternal()
 {
   NS_ENSURE_STATE(mURIToLoad && mOwnerContent && mOwnerContent->IsInDoc());
 
-  SAMPLE_LABEL("nsFrameLoader", "ReallyStartLoading");
+  PROFILER_LABEL("nsFrameLoader", "ReallyStartLoading");
 
   nsresult rv = MaybeCreateDocShell();
   if (NS_FAILED(rv)) {
@@ -580,7 +569,7 @@ nsFrameLoader::Finalize()
 
 static void
 FirePageHideEvent(nsIDocShellTreeItem* aItem,
-                  nsIDOMEventTarget* aChromeEventHandler)
+                  EventTarget* aChromeEventHandler)
 {
   nsCOMPtr<nsIDOMDocument> doc = do_GetInterface(aItem);
   nsCOMPtr<nsIDocument> internalDoc = do_QueryInterface(doc);
@@ -608,7 +597,7 @@ FirePageHideEvent(nsIDocShellTreeItem* aItem,
 // loaded.
 static void
 FirePageShowEvent(nsIDocShellTreeItem* aItem,
-                  nsIDOMEventTarget* aChromeEventHandler,
+                  EventTarget* aChromeEventHandler,
                   bool aFireIfShowing)
 {
   int32_t childCount = 0;
@@ -636,7 +625,7 @@ FirePageShowEvent(nsIDocShellTreeItem* aItem,
 static void
 SetTreeOwnerAndChromeEventHandlerOnDocshellTree(nsIDocShellTreeItem* aItem,
                                                 nsIDocShellTreeOwner* aOwner,
-                                                nsIDOMEventTarget* aHandler)
+                                                EventTarget* aHandler)
 {
   NS_PRECONDITION(aItem, "Must have item");
 
@@ -754,7 +743,7 @@ AllDescendantsOfType(nsIDocShellTreeItem* aParentItem, int32_t aType)
  * A class that automatically sets mInShow to false when it goes
  * out of scope.
  */
-class NS_STACK_CLASS AutoResetInShow {
+class MOZ_STACK_CLASS AutoResetInShow {
   private:
     nsFrameLoader* mFrameLoader;
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
@@ -831,6 +820,7 @@ nsFrameLoader::Show(int32_t marginWidth, int32_t marginHeight,
   // "Create"...
   baseWindow->Create();
   baseWindow->SetVisibility(true);
+  NS_ENSURE_TRUE(mDocShell, false);
 
   // Trigger editor re-initialization if midas is turned on in the
   // sub-document. This shouldn't be necessary, but given the way our
@@ -942,7 +932,7 @@ nsFrameLoader::ShowRemoteFrame(const nsIntSize& size,
     nsCOMPtr<nsIObserverService> os = services::GetObserverService();
     if (OwnerIsBrowserOrAppFrame() && os && !mRemoteBrowserInitialized) {
       os->NotifyObservers(NS_ISUPPORTS_CAST(nsIFrameLoader*, this),
-                          "remote-browser-frame-shown", NULL);
+                          "remote-browser-frame-shown", nullptr);
       mRemoteBrowserInitialized = true;
     }
   } else {
@@ -1095,9 +1085,9 @@ nsFrameLoader::SwapWithOtherLoader(nsFrameLoader* aOther,
   nsCOMPtr<nsIDOMElement> otherFrameElement =
     otherWindow->GetFrameElementInternal();
 
-  nsCOMPtr<nsIDOMEventTarget> ourChromeEventHandler =
+  nsCOMPtr<EventTarget> ourChromeEventHandler =
     do_QueryInterface(ourWindow->GetChromeEventHandler());
-  nsCOMPtr<nsIDOMEventTarget> otherChromeEventHandler =
+  nsCOMPtr<EventTarget> otherChromeEventHandler =
     do_QueryInterface(otherWindow->GetChromeEventHandler());
 
   NS_ASSERTION(SameCOMIdentity(ourFrameElement, ourContent) &&
@@ -1106,10 +1096,8 @@ nsFrameLoader::SwapWithOtherLoader(nsFrameLoader* aOther,
                SameCOMIdentity(otherChromeEventHandler, otherContent),
                "How did that happen, exactly?");
 
-  nsCOMPtr<nsIDocument> ourChildDocument =
-    do_QueryInterface(ourWindow->GetExtantDocument());
-  nsCOMPtr<nsIDocument> otherChildDocument =
-    do_QueryInterface(otherWindow->GetExtantDocument());
+  nsCOMPtr<nsIDocument> ourChildDocument = ourWindow->GetExtantDoc();
+  nsCOMPtr<nsIDocument> otherChildDocument = otherWindow ->GetExtantDoc();
   if (!ourChildDocument || !otherChildDocument) {
     // This shouldn't be happening
     return NS_ERROR_NOT_IMPLEMENTED;
@@ -1572,7 +1560,7 @@ nsFrameLoader::MaybeCreateDocShell()
   }
 
   if (!frameName.IsEmpty()) {
-    mDocShell->SetName(frameName.get());
+    mDocShell->SetName(frameName);
   }
 
   // If our container is a web-shell, inform it that it has a new
@@ -1679,7 +1667,7 @@ nsFrameLoader::MaybeCreateDocShell()
     nsCOMPtr<nsIObserverService> os = services::GetObserverService();
     if (os) {
       os->NotifyObservers(NS_ISUPPORTS_CAST(nsIFrameLoader*, this),
-                          "in-process-browser-or-app-frame-shown", NULL);
+                          "in-process-browser-or-app-frame-shown", nullptr);
     }
 
     if (mMessageManager) {
@@ -2024,7 +2012,7 @@ nsFrameLoader::TryRemoteBrowser()
     return false;
   }
 
-  SAMPLE_LABEL("nsFrameLoader", "CreateRemoteBrowser");
+  PROFILER_LABEL("nsFrameLoader", "CreateRemoteBrowser");
 
   MutableTabContext context;
   nsCOMPtr<mozIApplication> ownApp = GetOwnApp();
@@ -2208,7 +2196,7 @@ public:
     nsInProcessTabChildGlobal* tabChild =
       static_cast<nsInProcessTabChildGlobal*>(mFrameLoader->mChildMessageManager.get());
     if (tabChild && tabChild->GetInnerManager()) {
-      nsFrameScriptCx cx(static_cast<nsIDOMEventTarget*>(tabChild), tabChild);
+      nsFrameScriptCx cx(static_cast<EventTarget*>(tabChild), tabChild);
 
       StructuredCloneData data;
       data.mData = mData.data();
@@ -2216,8 +2204,8 @@ public:
       data.mClosure = mClosure;
 
       nsRefPtr<nsFrameMessageManager> mm = tabChild->GetInnerManager();
-      mm->ReceiveMessage(static_cast<nsIDOMEventTarget*>(tabChild), mMessage,
-                         false, &data, nullptr, nullptr, nullptr);
+      mm->ReceiveMessage(static_cast<EventTarget*>(tabChild), mMessage,
+                         false, &data, JS::NullPtr(), nullptr, nullptr);
     }
     return NS_OK;
   }
@@ -2389,7 +2377,7 @@ nsFrameLoader::EnsureMessageManager()
   return NS_OK;
 }
 
-nsIDOMEventTarget*
+EventTarget*
 nsFrameLoader::GetTabChildGlobalAsEventTarget()
 {
   return static_cast<nsInProcessTabChildGlobal*>(mChildMessageManager.get());
@@ -2564,3 +2552,33 @@ nsFrameLoader::ResetPermissionManagerStatus()
   }
 }
 
+/* [infallible] */ NS_IMETHODIMP
+nsFrameLoader::SetVisible(bool aVisible)
+{
+  if (mVisible == aVisible) {
+    return NS_OK;
+  }
+
+  mVisible = aVisible;
+  nsCOMPtr<nsIObserverService> os = services::GetObserverService();
+  if (os) {
+    os->NotifyObservers(NS_ISUPPORTS_CAST(nsIFrameLoader*, this),
+                        "frameloader-visible-changed", nullptr);
+  }
+  return NS_OK;
+}
+
+/* [infallible] */ NS_IMETHODIMP
+nsFrameLoader::GetVisible(bool* aVisible)
+{
+  *aVisible = mVisible;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsFrameLoader::GetTabParent(nsITabParent** aTabParent)
+{
+  nsCOMPtr<nsITabParent> tp = mRemoteBrowser;
+  tp.forget(aTabParent);
+  return NS_OK;
+}

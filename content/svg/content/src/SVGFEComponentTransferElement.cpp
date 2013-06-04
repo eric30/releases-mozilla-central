@@ -14,7 +14,7 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGFEComponentTransferElement::WrapNode(JSContext* aCx, JSObject* aScope)
+SVGFEComponentTransferElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
   return SVGFEComponentTransferElementBinding::Wrap(aCx, aScope, this);
 }
@@ -24,17 +24,6 @@ nsSVGElement::StringInfo SVGFEComponentTransferElement::sStringInfo[2] =
   { &nsGkAtoms::result, kNameSpaceID_None, true },
   { &nsGkAtoms::in, kNameSpaceID_None, true }
 };
-
-//----------------------------------------------------------------------
-// nsISupports methods
-
-NS_IMPL_ADDREF_INHERITED(SVGFEComponentTransferElement,SVGFEComponentTransferElementBase)
-NS_IMPL_RELEASE_INHERITED(SVGFEComponentTransferElement,SVGFEComponentTransferElementBase)
-
-NS_INTERFACE_TABLE_HEAD(SVGFEComponentTransferElement)
-  NS_NODE_INTERFACE_TABLE3(SVGFEComponentTransferElement, nsIDOMNode,
-                           nsIDOMElement, nsIDOMSVGElement)
-NS_INTERFACE_MAP_END_INHERITING(SVGFEComponentTransferElementBase)
 
 //----------------------------------------------------------------------
 // nsIDOMNode methods

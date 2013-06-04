@@ -10,87 +10,10 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= xpcom
 LIBRARY_NAME	= xpcomds_s
-GRE_MODULE	= 1
+MSVC_ENABLE_PGO := 1
 LIBXUL_LIBRARY	= 1
 MOZILLA_INTERNAL_API = 1
-
-
-CPPSRCS		= \
-		nsArray.cpp \
-		nsAtomTable.cpp \
-		nsAtomService.cpp \
-		nsByteBuffer.cpp \
-		nsCRT.cpp \
-		nsHashPropertyBag.cpp \
-		nsHashtable.cpp \
-		nsINIParserImpl.cpp \
-		nsObserverList.cpp \
-		nsObserverService.cpp \
-		nsProperties.cpp \
-		nsPersistentProperties.cpp \
-		nsStaticNameTable.cpp \
-		nsStringEnumerator.cpp \
-		nsSupportsArray.cpp \
-		nsSupportsArrayEnumerator.cpp \
-		nsSupportsPrimitives.cpp \
-		nsUnicharBuffer.cpp \
-		nsVariant.cpp \
-		$(NULL)
-
-ifdef HAVE_CLOCK_MONOTONIC
-CPPSRCS += TimeStamp_posix.cpp
-else ifeq ($(OS_ARCH),Darwin)
-CPPSRCS += TimeStamp_darwin.cpp
-else ifeq ($(OS_ARCH),WINNT)
-CPPSRCS += TimeStamp_windows.cpp
-else
-$(error No TimeStamp implementation on this platform.  Build will not succeed)
-endif
-
-EXPORTS_NAMESPACES = mozilla
-
-EXPORTS_mozilla = \
-  CharTokenizer.h \
-  TimeStamp.h \
-  StringBuilder.h \
-  $(NULL)
-
-ifeq ($(OS_ARCH),WINNT)
-EXPORTS_mozilla += \
-  TimeStamp_windows.h \
-  $(NULL)
-endif
-
-EXPORTS		= \
-		nsArray.h \
-		nsAtomService.h \
-		nsCheapSets.h \
-		nsCppSharedAllocator.h \
-		nsCRT.h \
-		nsExpirationTracker.h \
-		nsHashtable.h \
-		nsIByteBuffer.h \
-		nsIUnicharBuffer.h \
-		nsMathUtils.h \
-		nsObserverList.h \
-		nsObserverService.h \
-		nsStaticNameTable.h \
-		nsStaticAtom.h \
-		nsSupportsArray.h \
-		nsSupportsPrimitives.h \
-		nsVariant.h \
-		nsStringEnumerator.h \
-		nsHashPropertyBag.h \
-		nsWhitespaceTokenizer.h \
-		nsCharSeparatedTokenizer.h \
-		$(NULL)			
-
-ifeq ($(OS_ARCH),WINNT)
-CPPSRCS += nsWindowsRegKey.cpp
-EXPORTS += nsWindowsRegKey.h
-endif
 
 EXTRA_COMPONENTS = \
   nsINIProcessor.js \

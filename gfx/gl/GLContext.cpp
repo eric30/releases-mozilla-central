@@ -80,6 +80,7 @@ static const char *sExtensionNames[] = {
     "GL_OES_EGL_sync",
     "GL_OES_EGL_image_external",
     "GL_EXT_packed_depth_stencil",
+    "GL_OES_element_index_uint",
     nullptr
 };
 
@@ -351,9 +352,11 @@ GLContext::InitWithPrefix(const char *prefix, bool trygl)
         const char *rendererMatchStrings[RendererOther] = {
                 "Adreno 200",
                 "Adreno 205",
+                "Adreno (TM) 205",
                 "Adreno (TM) 320",
                 "PowerVR SGX 530",
-                "PowerVR SGX 540"
+                "PowerVR SGX 540",
+                "NVIDIA Tegra"
         };
 
         mRenderer = RendererOther;
@@ -532,7 +535,7 @@ GLContext::InitWithPrefix(const char *prefix, bool trygl)
                 mSymbols.fEGLImageTargetRenderbufferStorage = nullptr;
             }
         }
-       
+
         // Load developer symbols, don't fail if we can't find them.
         SymLoadStruct auxSymbols[] = {
                 { (PRFuncPtr*) &mSymbols.fGetTexImage, { "GetTexImage", nullptr } },
@@ -696,11 +699,6 @@ GLContext::CanUploadSubTextures()
     if (!mWorkAroundDriverBugs)
         return true;
 
-    // Lock surface feature allows to mmap texture memory and modify it directly
-    // this feature allow us modify texture partially without full upload
-    if (HasLockSurface())
-        return true;
-
     // There are certain GPUs that we don't want to use glTexSubImage2D on
     // because that function can be very slow and/or buggy
     if (Renderer() == RendererAdreno200 || Renderer() == RendererAdreno205)
@@ -782,10 +780,10 @@ GLContext::ListHasExtension(const GLubyte *extensions, const char *extension)
     if (where || *extension == '\0')
         return false;
 
-    /* 
+    /*
      * It takes a bit of care to be fool-proof about parsing the
      * OpenGL extensions string. Don't be fooled by sub-strings,
-     * etc. 
+     * etc.
      */
     start = extensions;
     for (;;) {
@@ -810,35 +808,7 @@ GLContext::CreateTextureImage(const nsIntSize& aSize,
                               GLenum aWrapMode,
                               TextureImage::Flags aFlags)
 {
-    bool useNearestFilter = aFlags & TextureImage::UseNearestFilter;
-    MakeCurrent();
-
-    GLuint texture;
-    fGenTextures(1, &texture);
-
-    fActiveTexture(LOCAL_GL_TEXTURE0);
-    fBindTexture(LOCAL_GL_TEXTURE_2D, texture);
-
-    GLint texfilter = useNearestFilter ? LOCAL_GL_NEAREST : LOCAL_GL_LINEAR;
-    fTexParameteri(LOCAL_GL_TEXTURE_2D, LOCAL_GL_TEXTURE_MIN_FILTER, texfilter);
-    fTexParameteri(LOCAL_GL_TEXTURE_2D, LOCAL_GL_TEXTURE_MAG_FILTER, texfilter);
-    fTexParameteri(LOCAL_GL_TEXTURE_2D, LOCAL_GL_TEXTURE_WRAP_S, aWrapMode);
-    fTexParameteri(LOCAL_GL_TEXTURE_2D, LOCAL_GL_TEXTURE_WRAP_T, aWrapMode);
-
-    return CreateBasicTextureImage(texture, aSize, aWrapMode, aContentType, this, aFlags);
-}
-
-already_AddRefed<TextureImage>
-GLContext::CreateBasicTextureImage(GLuint aTexture,
-                        const nsIntSize& aSize,
-                        GLenum aWrapMode,
-                        TextureImage::ContentType aContentType,
-                        GLContext* aContext,
-                        TextureImage::Flags aFlags)
-{
-    nsRefPtr<BasicTextureImage> teximage(
-        new BasicTextureImage(aTexture, aSize, aWrapMode, aContentType, aContext, aFlags));
-    return teximage.forget();
+    return CreateBasicTextureImage(this, aSize, aContentType, aWrapMode, aFlags);
 }
 
 void GLContext::ApplyFilterToBoundTexture(gfxPattern::GraphicsFilter aFilter)
@@ -902,9 +872,12 @@ GLContext::UpdatePixelFormat()
     PixelBufferFormat format = QueryPixelFormat();
 #ifdef DEBUG
     const SurfaceCaps& caps = Caps();
+    MOZ_ASSERT(!caps.any, "Did you forget to DetermineCaps()?");
+
     MOZ_ASSERT(caps.color == !!format.red);
     MOZ_ASSERT(caps.color == !!format.green);
     MOZ_ASSERT(caps.color == !!format.blue);
+
     MOZ_ASSERT(caps.alpha == !!format.alpha);
     MOZ_ASSERT(caps.depth == !!format.depth);
     MOZ_ASSERT(caps.stencil == !!format.stencil);
@@ -1413,10 +1386,10 @@ GLContext::GetTexImage(GLuint aTexture, bool aYInvert, ShaderProgramType aShader
     gfxIntSize size;
     fGetTexLevelParameteriv(LOCAL_GL_TEXTURE_2D, 0, LOCAL_GL_TEXTURE_WIDTH, &size.width);
     fGetTexLevelParameteriv(LOCAL_GL_TEXTURE_2D, 0, LOCAL_GL_TEXTURE_HEIGHT, &size.height);
-    
+
     nsRefPtr<gfxImageSurface> surf = new gfxImageSurface(size, gfxASurface::ImageFormatARGB32);
     if (!surf || surf->CairoStatus()) {
-        return NULL;
+        return nullptr;
     }
 
     uint32_t currentPackAlignment = 0;
@@ -1428,7 +1401,7 @@ GLContext::GetTexImage(GLuint aTexture, bool aYInvert, ShaderProgramType aShader
     if (currentPackAlignment != 4) {
         fPixelStorei(LOCAL_GL_PACK_ALIGNMENT, currentPackAlignment);
     }
-   
+
     if (aShader == RGBALayerProgramType || aShader == RGBXLayerProgramType) {
       SwapRAndBComponents(surf);
     }
@@ -1816,14 +1789,8 @@ GLContext::BlitTextureImage(TextureImage *aSrc, const nsIntRect& aSrcRect,
     if (aSrcRect.IsEmpty() || aDstRect.IsEmpty())
         return;
 
-    // only save/restore this stuff on Qualcomm Adreno, to work
-    // around an apparent bug
     int savedFb = 0;
-    if (mWorkAroundDriverBugs &&
-        mVendor == VendorQualcomm)
-    {
-        fGetIntegerv(LOCAL_GL_FRAMEBUFFER_BINDING, &savedFb);
-    }
+    fGetIntegerv(LOCAL_GL_FRAMEBUFFER_BINDING, &savedFb);
 
     fDisable(LOCAL_GL_SCISSOR_TEST);
     fDisable(LOCAL_GL_BLEND);
@@ -1872,8 +1839,8 @@ GLContext::BlitTextureImage(TextureImage *aSrc, const nsIntRect& aSrcRect,
             if (srcSubRect.IsEmpty()) {
                 continue;
             }
-            // We now have the intersection of 
-            //     the current source tile 
+            // We now have the intersection of
+            //     the current source tile
             // and the desired source rectangle
             // and the destination tile
             // and the desired destination rectange
@@ -1950,22 +1917,13 @@ GLContext::BlitTextureImage(TextureImage *aSrc, const nsIntRect& aSrcRect,
     // unbind the previous texture from the framebuffer
     SetBlitFramebufferForDestTexture(0);
 
-    // then put back the previous framebuffer, and don't
-    // enable stencil if it wasn't enabled on entry to work
-    // around Adreno 200 bug that causes us to crash if
-    // we enable scissor test while the current FBO is invalid
-    // (which it will be, once we assign texture 0 to the color
-    // attachment)
-    if (mWorkAroundDriverBugs &&
-        mVendor == VendorQualcomm) {
-        fBindFramebuffer(LOCAL_GL_FRAMEBUFFER, savedFb);
-    }
+    fBindFramebuffer(LOCAL_GL_FRAMEBUFFER, savedFb);
 
     fEnable(LOCAL_GL_SCISSOR_TEST);
     fEnable(LOCAL_GL_BLEND);
 }
 
-static unsigned int 
+static unsigned int
 DataOffset(gfxImageSurface *aSurf, const nsIntPoint &aPoint)
 {
   unsigned int data = aPoint.y * aSurf->Stride();
@@ -1973,8 +1931,8 @@ DataOffset(gfxImageSurface *aSurf, const nsIntPoint &aPoint)
   return data;
 }
 
-ShaderProgramType 
-GLContext::UploadSurfaceToTexture(gfxASurface *aSurface, 
+ShaderProgramType
+GLContext::UploadSurfaceToTexture(gfxASurface *aSurface,
                                   const nsIntRegion& aDstRegion,
                                   GLuint& aTexture,
                                   bool aOverwrite,
@@ -1985,21 +1943,21 @@ GLContext::UploadSurfaceToTexture(gfxASurface *aSurface,
     bool textureInited = aOverwrite ? false : true;
     MakeCurrent();
     fActiveTexture(aTextureUnit);
-  
+
     if (!aTexture) {
         fGenTextures(1, &aTexture);
         fBindTexture(LOCAL_GL_TEXTURE_2D, aTexture);
-        fTexParameteri(LOCAL_GL_TEXTURE_2D, 
-                       LOCAL_GL_TEXTURE_MIN_FILTER, 
+        fTexParameteri(LOCAL_GL_TEXTURE_2D,
+                       LOCAL_GL_TEXTURE_MIN_FILTER,
                        LOCAL_GL_LINEAR);
-        fTexParameteri(LOCAL_GL_TEXTURE_2D, 
-                       LOCAL_GL_TEXTURE_MAG_FILTER, 
+        fTexParameteri(LOCAL_GL_TEXTURE_2D,
+                       LOCAL_GL_TEXTURE_MAG_FILTER,
                        LOCAL_GL_LINEAR);
-        fTexParameteri(LOCAL_GL_TEXTURE_2D, 
-                       LOCAL_GL_TEXTURE_WRAP_S, 
+        fTexParameteri(LOCAL_GL_TEXTURE_2D,
+                       LOCAL_GL_TEXTURE_WRAP_S,
                        LOCAL_GL_CLAMP_TO_EDGE);
-        fTexParameteri(LOCAL_GL_TEXTURE_2D, 
-                       LOCAL_GL_TEXTURE_WRAP_T, 
+        fTexParameteri(LOCAL_GL_TEXTURE_2D,
+                       LOCAL_GL_TEXTURE_WRAP_T,
                        LOCAL_GL_CLAMP_TO_EDGE);
         textureInited = false;
     } else {
@@ -2016,17 +1974,17 @@ GLContext::UploadSurfaceToTexture(gfxASurface *aSurface,
     nsRefPtr<gfxImageSurface> imageSurface = aSurface->GetAsImageSurface();
     unsigned char* data = NULL;
 
-    if (!imageSurface || 
+    if (!imageSurface ||
         (imageSurface->Format() != gfxASurface::ImageFormatARGB32 &&
          imageSurface->Format() != gfxASurface::ImageFormatRGB24 &&
          imageSurface->Format() != gfxASurface::ImageFormatRGB16_565 &&
          imageSurface->Format() != gfxASurface::ImageFormatA8)) {
         // We can't get suitable pixel data for the surface, make a copy
         nsIntRect bounds = aDstRegion.GetBounds();
-        imageSurface = 
-          new gfxImageSurface(gfxIntSize(bounds.width, bounds.height), 
+        imageSurface =
+          new gfxImageSurface(gfxIntSize(bounds.width, bounds.height),
                               gfxASurface::ImageFormatARGB32);
-  
+
         nsRefPtr<gfxContext> context = new gfxContext(imageSurface);
 
         context->Translate(-gfxPoint(aSrcPoint.x, aSrcPoint.y));
@@ -2095,10 +2053,10 @@ GLContext::UploadSurfaceToTexture(gfxASurface *aSurface,
         // The inital data pointer is at the top left point of the region's
         // bounding rectangle. We need to find the offset of this rect
         // within the region and adjust the data pointer accordingly.
-        unsigned char *rectData = 
+        unsigned char *rectData =
             data + DataOffset(imageSurface, iterRect->TopLeft() - topLeft);
 
-        NS_ASSERTION(textureInited || (iterRect->x == 0 && iterRect->y == 0), 
+        NS_ASSERTION(textureInited || (iterRect->x == 0 && iterRect->y == 0),
                      "Must be uploading to the origin when we don't have an existing texture");
 
         if (textureInited && CanUploadSubTextures()) {
@@ -2588,7 +2546,7 @@ GLContext::UseBlitProgram()
     shaders[0] = fCreateShader(LOCAL_GL_VERTEX_SHADER);
     shaders[1] = fCreateShader(LOCAL_GL_FRAGMENT_SHADER);
 
-    const char *blitVSSrc = 
+    const char *blitVSSrc =
         "attribute vec2 aVertex;"
         "attribute vec2 aTexCoord;"
         "varying vec2 vTexCoord;"
@@ -2861,8 +2819,10 @@ GLContext::ReportOutstandingNames()
 void
 GLContext::GuaranteeResolve()
 {
-   mScreen->AssureBlitted();
-   fFinish();
+    if (mScreen) {
+        mScreen->AssureBlitted();
+    }
+    fFinish();
 }
 
 const gfxIntSize&
@@ -2879,7 +2839,7 @@ GLContext::CreateScreenBufferImpl(const gfxIntSize& size, const SurfaceCaps& cap
     if (!newScreen)
         return false;
 
-    if (!newScreen->PublishFrame(size)) {
+    if (!newScreen->Resize(size)) {
         delete newScreen;
         return false;
     }
@@ -2901,7 +2861,7 @@ GLContext::ResizeScreenBuffer(const gfxIntSize& size)
     if (!IsOffscreenSizeAllowed(size))
         return false;
 
-    return mScreen->PublishFrame(size);
+    return mScreen->Resize(size);
 }
 
 

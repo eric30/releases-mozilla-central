@@ -14,7 +14,6 @@
 #include "nsIObserverService.h"
 #include "nsIPlatformCharset.h"
 #include "nsIPrincipal.h"
-#include "nsIJSContextStack.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsISupportsPriority.h"
 #include "nsITimer.h"
@@ -26,6 +25,7 @@
 #include "mozilla/dom/EventTargetBinding.h"
 #include "mozilla/Preferences.h"
 #include "nsContentUtils.h"
+#include "nsCxPusher.h"
 #include "nsDOMJSUtils.h"
 #include <Navigator.h>
 #include "nsNetUtil.h"
@@ -41,6 +41,8 @@
 
 #include "OSFileConstants.h"
 #include <algorithm>
+
+#include "GeckoProfiler.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -100,6 +102,7 @@ MOZ_STATIC_ASSERT(MAX_WORKERS_PER_DOMAIN >= 1,
                                                                                \
     if (!workers.IsEmpty()) {                                                  \
       AutoSafeJSContext cx;                                                    \
+      JSAutoRequest ar(cx);                                                    \
       for (uint32_t index = 0; index < workers.Length(); index++) {            \
         workers[index]-> _func (cx, __VA_ARGS__);                              \
       }                                                                        \
@@ -148,11 +151,10 @@ MOZ_STATIC_ASSERT(NS_ARRAY_LENGTH(gStringChars) == ID_COUNT,
 enum {
   PREF_strict = 0,
   PREF_werror,
-  PREF_methodjit,
-  PREF_methodjit_always,
   PREF_typeinference,
   PREF_jit_hardening,
   PREF_mem_max,
+  PREF_baselinejit,
   PREF_ion,
   PREF_asmjs,
   PREF_mem_gc_allocation_threshold_mb,
@@ -169,13 +171,12 @@ enum {
 const char* gPrefsToWatch[] = {
   JS_OPTIONS_DOT_STR "strict",
   JS_OPTIONS_DOT_STR "werror",
-  JS_OPTIONS_DOT_STR "methodjit.content",
-  JS_OPTIONS_DOT_STR "methodjit_always",
   JS_OPTIONS_DOT_STR "typeinference",
   JS_OPTIONS_DOT_STR "jit_hardening",
   JS_OPTIONS_DOT_STR "mem.max",
+  JS_OPTIONS_DOT_STR "baselinejit.content",
   JS_OPTIONS_DOT_STR "ion.content",
-  JS_OPTIONS_DOT_STR "experimental_asmjs",
+  JS_OPTIONS_DOT_STR "asmjs",
   "dom.workers.mem.gc_allocation_threshold_mb"
 
 #ifdef JS_GC_ZEAL
@@ -218,14 +219,11 @@ PrefCallback(const char* aPrefName, void* aClosure)
     if (Preferences::GetBool(gPrefsToWatch[PREF_werror])) {
       newOptions |= JSOPTION_WERROR;
     }
-    if (Preferences::GetBool(gPrefsToWatch[PREF_methodjit])) {
-      newOptions |= JSOPTION_METHODJIT;
-    }
-    if (Preferences::GetBool(gPrefsToWatch[PREF_methodjit_always])) {
-      newOptions |= JSOPTION_METHODJIT_ALWAYS;
-    }
     if (Preferences::GetBool(gPrefsToWatch[PREF_typeinference])) {
       newOptions |= JSOPTION_TYPE_INFERENCE;
+    }
+    if (Preferences::GetBool(gPrefsToWatch[PREF_baselinejit])) {
+      newOptions |= JSOPTION_BASELINE;
     }
     if (Preferences::GetBool(gPrefsToWatch[PREF_ion])) {
       newOptions |= JSOPTION_ION;
@@ -258,6 +256,10 @@ JSBool
 OperationCallback(JSContext* aCx)
 {
   WorkerPrivate* worker = GetWorkerPrivateFromContext(aCx);
+
+  // Now is a good time to turn on profiling if it's pending.
+  profiler_js_operation_callback();
+
   return worker->OperationCallback(aCx);
 }
 
@@ -340,7 +342,7 @@ public:
       NS_NAMED_LITERAL_STRING(scriptSample,
          "Call to eval() or related function blocked by CSP.");
       csp->LogViolationDetails(nsIContentSecurityPolicy::VIOLATION_TYPE_EVAL,
-                                mFileName, scriptSample, mLineNum);
+                               mFileName, scriptSample, mLineNum);
     }
 
     nsRefPtr<LogViolationDetailsResponseRunnable> response =
@@ -359,30 +361,28 @@ ContentSecurityPolicyAllows(JSContext* aCx)
   WorkerPrivate* worker = GetWorkerPrivateFromContext(aCx);
   worker->AssertIsOnWorkerThread();
 
-  if (worker->IsEvalAllowed()) {
-    return true;
+  if (worker->GetReportCSPViolations()) {
+    nsString fileName;
+    uint32_t lineNum = 0;
+
+    JSScript* script;
+    const char* file;
+    if (JS_DescribeScriptedCaller(aCx, &script, &lineNum) &&
+        (file = JS_GetScriptFilename(aCx, script))) {
+      fileName.AssignASCII(file);
+    } else {
+      JS_ReportPendingException(aCx);
+    }
+
+    nsRefPtr<LogViolationDetailsRunnable> runnable =
+        new LogViolationDetailsRunnable(worker, fileName, lineNum);
+
+    if (!runnable->Dispatch(aCx)) {
+      JS_ReportPendingException(aCx);
+    }
   }
 
-  nsString fileName;
-  uint32_t lineNum = 0;
-
-  JSScript* script;
-  const char* file;
-  if (JS_DescribeScriptedCaller(aCx, &script, &lineNum) &&
-      (file = JS_GetScriptFilename(aCx, script))) {
-    fileName.AssignASCII(file);
-  } else {
-    JS_ReportPendingException(aCx);
-  }
-
-  nsRefPtr<LogViolationDetailsRunnable> runnable =
-      new LogViolationDetailsRunnable(worker, fileName, lineNum);
-
-  if (!runnable->Dispatch(aCx)) {
-    JS_ReportPendingException(aCx);
-  }
-
-  return false;
+  return worker->IsEvalAllowed();
 }
 
 void
@@ -512,12 +512,19 @@ public:
       return NS_ERROR_FAILURE;
     }
 
+    JSRuntime* rt = JS_GetRuntime(cx);
+
+    char aLocal;
+    profiler_register_thread("WebWorker", &aLocal);
+#ifdef MOZ_ENABLE_PROFILER_SPS
+    if (PseudoStack* stack = mozilla_get_pseudo_stack())
+      stack->sampleRuntime(rt);
+#endif
+
     {
       JSAutoRequest ar(cx);
       workerPrivate->DoRunLoop(cx);
     }
-
-    JSRuntime* rt = JS_GetRuntime(cx);
 
     // XXX Bug 666963 - CTypes can create another JSContext for use with
     // closures, and then it holds that context in a reserved slot on the CType
@@ -537,9 +544,14 @@ public:
       JS_DestroyContext(cx);
     }
 
+#ifdef MOZ_ENABLE_PROFILER_SPS
+    if (PseudoStack* stack = mozilla_get_pseudo_stack())
+      stack->sampleRuntime(nullptr);
+#endif
     JS_DestroyRuntime(rt);
 
     workerPrivate->ScheduleDeletion(false);
+    profiler_unregister_thread();
     return NS_OK;
   }
 };
@@ -551,7 +563,7 @@ BEGIN_WORKERS_NAMESPACE
 // Entry point for the DOM.
 JSBool
 ResolveWorkerClasses(JSContext* aCx, JSHandleObject aObj, JSHandleId aId, unsigned aFlags,
-                     JSMutableHandleObject aObjp)
+                     JS::MutableHandle<JSObject*> aObjp)
 {
   AssertIsOnMainThread();
 
@@ -1153,6 +1165,7 @@ RuntimeService::Cleanup()
         NS_ASSERTION(currentThread, "This should never be null!");
 
         AutoSafeJSContext cx;
+        JSAutoRequest ar(cx);
 
         for (uint32_t index = 0; index < workers.Length(); index++) {
           if (!workers[index]->Kill(cx)) {
@@ -1281,7 +1294,6 @@ RuntimeService::CancelWorkersForWindow(JSContext* aCx,
   GetWorkersForWindow(aWindow, workers);
 
   if (!workers.IsEmpty()) {
-    AutoSafeJSContext cx(aCx);
     for (uint32_t index = 0; index < workers.Length(); index++) {
       if (!workers[index]->Cancel(aCx)) {
         NS_WARNING("Failed to cancel worker!");
@@ -1300,7 +1312,6 @@ RuntimeService::SuspendWorkersForWindow(JSContext* aCx,
   GetWorkersForWindow(aWindow, workers);
 
   if (!workers.IsEmpty()) {
-    AutoSafeJSContext cx(aCx);
     for (uint32_t index = 0; index < workers.Length(); index++) {
       if (!workers[index]->Suspend(aCx)) {
         NS_WARNING("Failed to cancel worker!");
@@ -1319,7 +1330,6 @@ RuntimeService::ResumeWorkersForWindow(JSContext* aCx,
   GetWorkersForWindow(aWindow, workers);
 
   if (!workers.IsEmpty()) {
-    AutoSafeJSContext cx(aCx);
     for (uint32_t index = 0; index < workers.Length(); index++) {
       if (!workers[index]->Resume(aCx)) {
         NS_WARNING("Failed to cancel worker!");
@@ -1427,64 +1437,4 @@ RuntimeService::Observe(nsISupports* aSubject, const char* aTopic,
 
   NS_NOTREACHED("Unknown observer topic!");
   return NS_OK;
-}
-
-RuntimeService::AutoSafeJSContext::AutoSafeJSContext(JSContext* aCx)
-: mContext(aCx ? aCx : GetSafeContext())
-{
-  AssertIsOnMainThread();
-
-  if (mContext) {
-    nsIThreadJSContextStack* stack = nsContentUtils::ThreadJSContextStack();
-    NS_ASSERTION(stack, "This should never be null!");
-
-    if (NS_FAILED(stack->Push(mContext))) {
-      NS_ERROR("Couldn't push safe JSContext!");
-      mContext = nullptr;
-      return;
-    }
-
-    JS_BeginRequest(mContext);
-  }
-}
-
-RuntimeService::AutoSafeJSContext::~AutoSafeJSContext()
-{
-  AssertIsOnMainThread();
-
-  if (mContext) {
-    JS_ReportPendingException(mContext);
-
-    JS_EndRequest(mContext);
-
-    nsIThreadJSContextStack* stack = nsContentUtils::ThreadJSContextStack();
-    NS_ASSERTION(stack, "This should never be null!");
-
-    JSContext* cx;
-    if (NS_FAILED(stack->Pop(&cx))) {
-      NS_ERROR("Failed to pop safe context!");
-    }
-    if (cx != mContext) {
-      NS_ERROR("Mismatched context!");
-    }
-  }
-}
-
-// static
-JSContext*
-RuntimeService::AutoSafeJSContext::GetSafeContext()
-{
-  AssertIsOnMainThread();
-
-  nsIThreadJSContextStack* stack = nsContentUtils::ThreadJSContextStack();
-  NS_ASSERTION(stack, "This should never be null!");
-
-  JSContext* cx = stack->GetSafeJSContext();
-  if (!cx) {
-    NS_ERROR("Couldn't get safe JSContext!");
-    return nullptr;
-  }
-
-  NS_ASSERTION(!JS_IsExceptionPending(cx), "Already has an exception?!");
-  return cx;
 }

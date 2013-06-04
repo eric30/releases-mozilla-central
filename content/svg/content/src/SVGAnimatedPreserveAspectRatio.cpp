@@ -30,7 +30,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DOMSVGAnimatedPreserveAspectRatio)
 NS_INTERFACE_MAP_END
 
 JSObject*
-DOMSVGAnimatedPreserveAspectRatio::WrapObject(JSContext* aCx, JSObject* aScope)
+DOMSVGAnimatedPreserveAspectRatio::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
   return SVGAnimatedPreserveAspectRatioBinding::Wrap(aCx, aScope, this);
 }
@@ -313,7 +313,7 @@ typedef SVGAnimatedPreserveAspectRatio::SMILPreserveAspectRatio
 
 nsresult
 SMILPreserveAspectRatio::ValueFromString(const nsAString& aStr,
-                                         const nsISMILAnimationElement* /*aSrcElement*/,
+                                         const SVGAnimationElement* /*aSrcElement*/,
                                          nsSMILValue& aValue,
                                          bool& aPreventCachingOfSandwich) const
 {

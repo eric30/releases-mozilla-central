@@ -152,6 +152,7 @@ let test = maketest("Main", function main(test) {
     yield test_exists();
     yield test_debug_test();
     yield test_system_shutdown();
+    yield test_duration();
     info("Test is over");
     SimpleTest.finish();
   });
@@ -410,6 +411,18 @@ let test_read_write_all = maketest("read_write_all", function read_write_all(tes
       test.ok(true, "Without a tmpPath, writeAtomic has failed as expected");
     }
 
+    // Write strings, default encoding
+    let ARBITRARY_STRING = "aeiouyâêîôûçß•";
+    yield OS.File.writeAtomic(pathDest, ARBITRARY_STRING, {tmpPath: tmpPath});
+    let array = yield OS.File.read(pathDest);
+    let IN_STRING = (new TextDecoder()).decode(array);
+    test.is(ARBITRARY_STRING, IN_STRING, "String write + read with default encoding works");
+
+    yield OS.File.writeAtomic(pathDest, ARBITRARY_STRING, {tmpPath: tmpPath, encoding: "utf-16"});
+    array = yield OS.File.read(pathDest);
+    IN_STRING = (new TextDecoder("utf-16")).decode(array);
+    test.is(ARBITRARY_STRING, IN_STRING, "String write + read with utf-16 encoding works");
+
     // Cleanup.
     OS.File.remove(pathDest);
 
@@ -466,6 +479,27 @@ let test_read_write_all = maketest("read_write_all", function read_write_all(tes
     // Cleanup.
     OS.File.remove(pathDest);
 
+    // Check that writeAtomic fails when destination path is undefined
+    try {
+      let path = undefined;
+      let options = {tmpPath: tmpPath};
+      yield OS.File.writeAtomic(path, contents, options);
+      test.fail("With file path undefined, writeAtomic should have failed");
+    } catch (err) {
+      test.ok(err.message == "TypeError: File path should be a (non-empty) string",
+              "With file path undefined, writeAtomic correctly failed");
+    }
+
+    // Check that writeAtomic fails when destination path is an empty string
+    try {
+      let path = "";
+      let options = {tmpPath: tmpPath};
+      yield OS.File.writeAtomic(path, contents, options);
+      test.fail("With file path an empty string, writeAtomic should have failed");
+    } catch (err) {
+      test.ok(err.message == "TypeError: File path should be a (non-empty) string",
+              "With file path an empty string, writeAtomic correctly failed");
+    }
   });
 });
 
@@ -631,6 +665,11 @@ let test_iter = maketest("iter", function iter(test) {
     test.is(referenceEntries.size, allFiles1.length, "All the entries in the directory have been listed");
     for (let entry of allFiles1) {
       test.ok(referenceEntries.has(entry.path), "File " + entry.path + " effectively exists");
+      // Ensure that we have correct isDir and isSymLink
+      // Current directory is {objdir}/_tests/testing/mochitest/, assume it has some dirs and symlinks.
+      var f = new FileUtils.File(entry.path);
+      test.is(entry.isDir, f.isDirectory(), "Get file " + entry.path + " isDir correctly");
+      test.is(entry.isSymLink, f.isSymlink(), "Get file " + entry.path + " isSymLink correctly");
     }
 
     yield iterator.close();
@@ -682,6 +721,7 @@ let test_iter = maketest("iter", function iter(test) {
       }
       return null;
     });
+    yield iterator.close();
 
     // Ensuring that we find new files if they appear
     let file = yield OS.File.open(temporary_file_name, { write: true } );
@@ -801,46 +841,202 @@ let test_system_shutdown = maketest("system_shutdown", function system_shutdown(
   return Task.spawn(function () {
     // Save original DEBUG value.
     let originalDebug = OS.Shared.DEBUG;
+    // Count the number of times the leaks are logged.
+    let logCounter = 0;
     // Create a console listener.
-    function getConsoleListener(resource) {
-      let consoleListener = {
-        observe: function (aMessage) {
-          // Ignore unexpected messages.
-          if (!(aMessage instanceof Components.interfaces.nsIConsoleMessage)) {
-            return;
+    function inDebugTest(resource, f) {
+      return Task.spawn(function task() {
+        let originalDebug = OS.Shared.DEBUG;
+        OS.Shared.TEST = true;
+        OS.Shared.DEBUG = true;
+
+        let waitObservation = Promise.defer();
+        // Unregister a listener, reset DEBUG and TEST both when the promise is
+        // resolved or rejected.
+        let cleanUp = function cleanUp() {
+          Services.console.unregisterListener(listener);
+          OS.Shared.DEBUG = originalDebug;
+          OS.Shared.TEST = false;
+          test.info("Unregistered listener for resource " + resource);
+        };
+        waitObservation.promise.then(cleanUp, cleanUp);
+
+        // Measure how long it takes to receive a log message.
+        let logStart;
+
+        let listener = {
+          observe: function (aMessage) {
+            test.info("Waiting for a console message mentioning resource " + resource);
+            // Ignore unexpected messages.
+            if (!(aMessage instanceof Components.interfaces.nsIConsoleMessage)) {
+              test.info("Not a console message");
+              return;
+            }
+            if (aMessage.message.indexOf("TEST OS Controller WARNING") < 0) {
+              test.info("Not a warning");
+              return;
+            }
+            test.ok(aMessage.message.indexOf("WARNING: File descriptors leaks " +
+              "detected.") >= 0, "Noticing file descriptors leaks, as expected.");
+            let found = aMessage.message.indexOf(resource) >= 0;
+            if (found) {
+              if (++logCounter > 2) {
+                test.fail("test.osfile.web-workers-shutdown observer should only " +
+                  "be activated 2 times.");
+              }
+              test.ok(true, "Leaked resource is correctly listed in the log.");
+              test.info(
+                "It took " + (Date.now() - logStart) + "MS to receive a log message.");
+              setTimeout(function() { waitObservation.resolve(); });
+            } else {
+              test.info("This log didn't list the expected resource: " + resource + "\ngot " + aMessage.message);
+            }
           }
-          if (aMessage.message.indexOf("TEST OS Controller WARNING") < 0) {
-            return;
-          }
-          test.ok(aMessage.message.indexOf("WARNING: File descriptors leaks " +
-            "detected.") >= 0, "File descriptors leaks are logged correctly.");
-          test.ok(aMessage.message.indexOf(resource) >= 0,
-            "Leaked resource is correctly listed in the log.");
-          toggleDebugTest(false, resource, consoleListener);
-        }
-      };
-      return consoleListener;
+        };
+        Services.console.registerListener(listener);
+        logStart = Date.now();
+        f();
+        // If listener does not resolve webObservation in timely manner (1000MS),
+        // reject it.
+        setTimeout(function() {
+          test.info("waitObservation timeout exceeded.");
+          waitObservation.reject();
+        }, 1000);
+        yield waitObservation.promise;
+      });
     }
-    // Set/Unset testing flags and Services.console listener.
-    function toggleDebugTest(startDebug, resource, consoleListener) {
-      Services.console[startDebug ? "registerListener" : "unregisterListener"](
-        consoleListener || getConsoleListener(resource));
-      OS.Shared.TEST = startDebug;
-      // If pref is false, restore DEBUG to its original.
-      OS.Shared.DEBUG = startDebug || originalDebug;
-    }
+
+    // Enable test shutdown observer.
+    Services.prefs.setBoolPref("toolkit.osfile.test.shutdown.observer", true);
 
     let currentDir = yield OS.File.getCurrentDirectory();
+    test.info("Testing for leaks of directory iterator " + currentDir);
     let iterator = new OS.File.DirectoryIterator(currentDir);
-    toggleDebugTest(true, currentDir);
-    Services.obs.notifyObservers(null, "test.osfile.web-workers-shutdown",
-      null);
+    try {
+      yield inDebugTest(currentDir, function() {
+        Services.obs.notifyObservers(null, "test.osfile.web-workers-shutdown",
+          null);
+      });
+      test.ok(true, "Log messages observation promise resolved as expected.");
+    } catch (ex) {
+      test.fail("Log messages observation promise was rejected.");
+    }
     yield iterator.close();
 
-    let openedFile = yield OS.File.open(EXISTING_FILE);
-    toggleDebugTest(true, EXISTING_FILE);
-    Services.obs.notifyObservers(null, "test.osfile.web-workers-shutdown",
-      null);
-    yield openedFile.close();
+    let testFileDescriptorsLeaks = function testFileDescriptorsLeaks(shouldResolve) {
+      return Task.spawn(function task() {
+        let openedFile = yield OS.File.open(EXISTING_FILE);
+        try {
+          yield inDebugTest(EXISTING_FILE, function() {
+            Services.obs.notifyObservers(null, "test.osfile.web-workers-shutdown",
+              null);
+          });
+          test.ok(shouldResolve,
+            "Log message observation promise resolved as expected.");
+        } catch (ex) {
+          test.ok(!shouldResolve,
+            "Log message observation promise was rejected as expected.");
+        }
+        yield openedFile.close();
+      });
+    };
+
+    test.info("Testing for leaks of file " + EXISTING_FILE);
+    yield testFileDescriptorsLeaks(true);
+
+    // Disable test shutdown observer.
+    Services.prefs.clearUserPref("toolkit.osfile.test.shutdown.observer");
+    // Nothing should be logged since the test shutdown observer is unregistered.
+    yield testFileDescriptorsLeaks(false);
+  });
+});
+
+/**
+ * Test optional duration reporting that can be used for telemetry.
+ */
+let test_duration = maketest("duration", function duration(test) {
+  return Task.spawn(function() {
+    // Options structure passed to a OS.File copy method.
+    let copyOptions = {
+      // This field should be overridden with the actual duration
+      // measurement.
+      outExecutionDuration: null
+    };
+    let currentDir = yield OS.File.getCurrentDirectory();
+    let pathSource = OS.Path.join(currentDir, EXISTING_FILE);
+    let copyFile = pathSource + ".bak";
+    let testOptions = function testOptions(options, name) {
+      test.info("Checking outExecutionDuration for operation: " + name);
+      test.info(name + ": Gathered method duration time: " +
+        options.outExecutionDuration + "ms");
+      // Making sure that duration was updated.
+      test.ok(typeof options.outExecutionDuration === "number",
+              name + ": Operation duration is a number");
+      test.ok(options.outExecutionDuration >= 0,
+              name + ": Operation duration time is non-negative.");
+    };
+    // Testing duration of OS.File.copy.
+    yield OS.File.copy(pathSource, copyFile, copyOptions);
+    testOptions(copyOptions, "OS.File.copy");
+    yield OS.File.remove(copyFile);
+
+    // Trying an operation where options are cloned.
+    let pathDest = OS.Path.join(OS.Constants.Path.tmpDir,
+      "osfile async test read writeAtomic.tmp");
+    let tmpPath = pathDest + ".tmp";
+    let readOptions = {
+      outExecutionDuration: null
+    };
+    let contents = yield OS.File.read(pathSource, undefined, readOptions);
+    testOptions(readOptions, "OS.File.read");
+    // Options structure passed to a OS.File writeAtomic method.
+    let writeAtomicOptions = {
+      // This field should be first initialized with the actual
+      // duration measurement then progressively incremented.
+      outExecutionDuration: null,
+      tmpPath: tmpPath
+    };
+    yield OS.File.writeAtomic(pathDest, contents, writeAtomicOptions);
+    testOptions(writeAtomicOptions, "OS.File.writeAtomic");
+    yield OS.File.remove(pathDest);
+
+    test.info("Ensuring that we can use outExecutionDuration to accumulate durations");
+
+    let ARBITRARY_BASE_DURATION = 5;
+    copyOptions = {
+      // This field should now be incremented with the actual duration
+      // measurement.
+      outExecutionDuration: ARBITRARY_BASE_DURATION
+    };
+    let backupDuration = ARBITRARY_BASE_DURATION;
+    // Testing duration of OS.File.copy.
+    yield OS.File.copy(pathSource, copyFile, copyOptions);
+    test.ok(copyOptions.outExecutionDuration >= backupDuration, "duration has increased 1");
+
+    backupDuration = copyOptions.outExecutionDuration;
+    yield OS.File.remove(copyFile, copyOptions);
+    test.ok(copyOptions.outExecutionDuration >= backupDuration, "duration has increased 2");
+
+    // Trying an operation where options are cloned.
+    // Options structure passed to a OS.File writeAtomic method.
+    writeAtomicOptions = {
+      // This field should be overridden with the actual duration
+      // measurement.
+      outExecutionDuration: copyOptions.outExecutionDuration,
+      tmpPath: tmpPath
+    };
+    backupDuration = writeAtomicOptions.outExecutionDuration;
+
+    yield OS.File.writeAtomic(pathDest, contents, writeAtomicOptions);
+    test.ok(copyOptions.outExecutionDuration >= backupDuration, "duration has increased 3");
+    OS.File.remove(pathDest);
+
+    Services.prefs.setBoolPref("toolkit.osfile.log", true);
+    OS.Shared.TEST = true;
+
+    // Testing an operation that doesn't take arguments at all
+    let file = yield OS.File.open(pathSource);
+    yield file.stat();
+    yield file.close();
   });
 });

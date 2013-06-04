@@ -48,7 +48,7 @@ public:
     return principal.forget();
   }
   virtual bool CanClone() { return false; }
-  virtual MediaResource* CloneData(MediaDecoder* aDecoder)
+  virtual already_AddRefed<MediaResource> CloneData(MediaDecoder* aDecoder)
   {
     return nullptr;
   }
@@ -102,7 +102,7 @@ public:
   virtual int64_t GetNextCachedData(int64_t aOffset) { return aOffset; }
   virtual int64_t GetCachedDataEnd(int64_t aOffset) { return mLength; }
   virtual bool IsDataCachedToEndOfResource(int64_t aOffset) { return true; }
-  virtual bool IsSuspendedByCache(MediaResource** aActiveResource) { return false; }
+  virtual bool IsSuspendedByCache() { return false; }
   virtual bool IsSuspended() { return false; }
   virtual nsresult ReadFromCache(char* aBuffer,
                                  int64_t aOffset,
@@ -122,11 +122,13 @@ public:
     return NS_ERROR_FAILURE;
   }
 
+#ifdef MOZ_DASH
   virtual nsresult OpenByteRange(nsIStreamListener** aStreamListener,
                                  MediaByteRange const &aByteRange)
   {
     return NS_ERROR_FAILURE;
   }
+#endif
 
   virtual nsresult GetCachedRanges(nsTArray<MediaByteRange>& aRanges)
   {

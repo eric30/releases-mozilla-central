@@ -53,13 +53,15 @@ extern bool gBluetoothDebugFlag;
 
 // Bluetooth address format: xx:xx:xx:xx:xx:xx (or xx_xx_xx_xx_xx_xx)
 #define BLUETOOTH_ADDRESS_LENGTH 17
+#define BLUETOOTH_ADDRESS_NONE   "00:00:00:00:00:00"
 
 BEGIN_BLUETOOTH_NAMESPACE
 
 enum BluetoothSocketType {
   RFCOMM = 1,
-  SCO = 2,
-  L2CAP = 3
+  SCO    = 2,
+  L2CAP  = 3,
+  EL2CAP = 4
 };
 
 class BluetoothSignal;

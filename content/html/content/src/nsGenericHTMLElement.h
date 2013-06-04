@@ -6,6 +6,7 @@
 #ifndef nsGenericHTMLElement_h___
 #define nsGenericHTMLElement_h___
 
+#include "mozilla/Attributes.h"
 #include "nsMappedAttributeElement.h"
 #include "nsIDOMHTMLElement.h"
 #include "nsINameSpaceManager.h"  // for kNameSpaceID_None
@@ -319,8 +320,8 @@ protected:
 public:
   nsresult SetContentEditable(const nsAString &aContentEditable);
   virtual already_AddRefed<mozilla::dom::UndoManager> GetUndoManager();
-  virtual bool UndoScope();
-  virtual void SetUndoScope(bool aUndoScope, mozilla::ErrorResult& aError);
+  virtual bool UndoScope() MOZ_OVERRIDE;
+  virtual void SetUndoScope(bool aUndoScope, mozilla::ErrorResult& aError) MOZ_OVERRIDE;
   nsresult GetDataset(nsISupports** aDataset);
   // Callback for destructor of of dataset to ensure to null out weak pointer.
   nsresult ClearDataset();
@@ -334,9 +335,9 @@ public:
   // Implementation for nsIContent
   virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
                               nsIContent* aBindingParent,
-                              bool aCompileEventHandlers);
+                              bool aCompileEventHandlers) MOZ_OVERRIDE;
   virtual void UnbindFromTree(bool aDeep = true,
-                              bool aNullParent = true);
+                              bool aNullParent = true) MOZ_OVERRIDE;
   nsresult SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
                    const nsAString& aValue, bool aNotify)
   {
@@ -344,10 +345,10 @@ public:
   }
   virtual nsresult SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
                            nsIAtom* aPrefix, const nsAString& aValue,
-                           bool aNotify);
+                           bool aNotify) MOZ_OVERRIDE;
   virtual nsresult UnsetAttr(int32_t aNameSpaceID, nsIAtom* aName,
-                             bool aNotify);
-  virtual bool IsFocusable(int32_t *aTabIndex = nullptr, bool aWithMouse = false)
+                             bool aNotify) MOZ_OVERRIDE;
+  virtual bool IsFocusable(int32_t *aTabIndex = nullptr, bool aWithMouse = false) MOZ_OVERRIDE
   {
     bool isFocusable = false;
     IsHTMLFocusable(aWithMouse, &isFocusable, aTabIndex);
@@ -361,7 +362,7 @@ public:
                                bool *aIsFocusable,
                                int32_t *aTabIndex);
   virtual void PerformAccesskey(bool aKeyCausesActivation,
-                                bool aIsTrustedEvent);
+                                bool aIsTrustedEvent) MOZ_OVERRIDE;
 
   /**
    * Check if an event for an anchor can be handled
@@ -375,9 +376,9 @@ public:
   // HTML element methods
   void Compact() { mAttrsAndChildren.Compact(); }
 
-  virtual void UpdateEditableState(bool aNotify);
+  virtual void UpdateEditableState(bool aNotify) MOZ_OVERRIDE;
 
-  virtual nsEventStates IntrinsicState() const;
+  virtual nsEventStates IntrinsicState() const MOZ_OVERRIDE;
 
   // Helper for setting our editable flag and notifying
   void DoSetEditableFlag(bool aEditable, bool aNotify) {
@@ -388,15 +389,15 @@ public:
   virtual bool ParseAttribute(int32_t aNamespaceID,
                               nsIAtom* aAttribute,
                               const nsAString& aValue,
-                              nsAttrValue& aResult);
+                              nsAttrValue& aResult) MOZ_OVERRIDE;
 
   bool ParseBackgroundAttribute(int32_t aNamespaceID,
                                 nsIAtom* aAttribute,
                                 const nsAString& aValue,
                                 nsAttrValue& aResult);
 
-  NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const;
-  virtual nsMapRuleToAttributesFunc GetAttributeMappingFunction() const;
+  NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const MOZ_OVERRIDE;
+  virtual nsMapRuleToAttributesFunc GetAttributeMappingFunction() const MOZ_OVERRIDE;
 
   /**
    * Get the base target for any links within this piece
@@ -667,7 +668,7 @@ public:
    */
   nsHTMLFormElement* FindAncestorForm(nsHTMLFormElement* aCurrentForm = nullptr);
 
-  virtual void RecompileScriptEventListeners();
+  virtual void RecompileScriptEventListeners() MOZ_OVERRIDE;
 
   /**
    * See if the document being tested has nav-quirks mode enabled.
@@ -713,9 +714,36 @@ public:
     return HasAttr(kNameSpaceID_None, nsGkAtoms::hidden);
   }
 
-  virtual bool IsLabelable() const;
+  virtual bool IsLabelable() const MOZ_OVERRIDE;
 
   static bool TouchEventsEnabled(JSContext* /* unused */, JSObject* /* unused */);
+
+  static inline bool
+  CanHaveName(nsIAtom* aTag)
+  {
+    return aTag == nsGkAtoms::img ||
+           aTag == nsGkAtoms::form ||
+           aTag == nsGkAtoms::applet ||
+           aTag == nsGkAtoms::embed ||
+           aTag == nsGkAtoms::object;
+  }
+  static inline bool
+  ShouldExposeNameAsHTMLDocumentProperty(Element* aElement)
+  {
+    return aElement->IsHTML() && CanHaveName(aElement->Tag());
+  }
+  static inline bool
+  ShouldExposeIdAsHTMLDocumentProperty(Element* aElement)
+  {
+    if (!aElement->IsHTML()) {
+      return false;
+    }
+    nsIAtom* tag = aElement->Tag();
+    return tag == nsGkAtoms::img ||
+           tag == nsGkAtoms::applet ||
+           tag == nsGkAtoms::embed ||
+           tag == nsGkAtoms::object;
+  }
 
 protected:
   /**
@@ -761,12 +789,19 @@ private:
 
 protected:
   virtual nsresult AfterSetAttr(int32_t aNamespaceID, nsIAtom* aName,
-                                const nsAttrValue* aValue, bool aNotify);
+                                const nsAttrValue* aValue, bool aNotify) MOZ_OVERRIDE;
 
   virtual nsEventListenerManager*
-    GetEventListenerManagerForAttr(nsIAtom* aAttrName, bool* aDefer);
+    GetEventListenerManagerForAttr(nsIAtom* aAttrName, bool* aDefer) MOZ_OVERRIDE;
 
-  virtual const nsAttrName* InternalGetExistingAttrNameFromQName(const nsAString& aStr) const;
+  virtual const nsAttrName* InternalGetExistingAttrNameFromQName(const nsAString& aStr) const MOZ_OVERRIDE;
+
+  /**
+   * Create a URI for the given aURISpec string.
+   * Returns INVALID_STATE_ERR and nulls *aURI if aURISpec is empty
+   * and the document's URI matches the element's base URI.
+   */
+  nsresult NewURIFromString(const nsAutoString& aURISpec, nsIURI** aURI);
 
   void GetHTMLAttr(nsIAtom* aName, nsAString& aResult) const
   {
@@ -783,12 +818,6 @@ protected:
   void GetHTMLURIAttr(nsIAtom* aName, nsAString& aResult) const
   {
     GetURIAttr(aName, nullptr, aResult);
-  }
-  uint32_t GetHTMLUnsignedIntAttr(nsIAtom* aName, uint32_t aDefault)
-  {
-    uint32_t result;
-    GetUnsignedIntAttr(aName, aDefault, &result);
-    return result;
   }
 
   void SetHTMLAttr(nsIAtom* aName, const nsAString& aValue)
@@ -812,13 +841,6 @@ protected:
     }
   }
   void SetHTMLIntAttr(nsIAtom* aName, int32_t aValue, mozilla::ErrorResult& aError)
-  {
-    nsAutoString value;
-    value.AppendInt(aValue);
-
-    SetHTMLAttr(aName, value, aError);
-  }
-  void SetHTMLUnsignedIntAttr(nsIAtom* aName, uint32_t aValue, mozilla::ErrorResult& aError)
   {
     nsAutoString value;
     value.AppendInt(aValue);
@@ -866,10 +888,8 @@ protected:
    *
    * @param aAttr    name of attribute.
    * @param aDefault default-value to return if attribute isn't set.
-   * @param aResult  result value [out]
    */
-  NS_HIDDEN_(nsresult) GetUnsignedIntAttr(nsIAtom* aAttr, uint32_t aDefault,
-                                          uint32_t* aValue);
+  uint32_t GetUnsignedIntAttr(nsIAtom* aAttr, uint32_t aDefault) const;
 
   /**
    * Helper method for NS_IMPL_UINT_ATTR macro.
@@ -879,7 +899,14 @@ protected:
    * @param aAttr    name of attribute.
    * @param aValue   Integer value of attribute.
    */
-  NS_HIDDEN_(nsresult) SetUnsignedIntAttr(nsIAtom* aAttr, uint32_t aValue);
+  void SetUnsignedIntAttr(nsIAtom* aName, uint32_t aValue,
+                          mozilla::ErrorResult& aError)
+  {
+    nsAutoString value;
+    value.AppendInt(aValue);
+
+    SetHTMLAttr(aName, value, aError);
+  }
 
   /**
    * Sets value of attribute to specified double. Only works for attributes
@@ -1051,34 +1078,34 @@ public:
   nsGenericHTMLFormElement(already_AddRefed<nsINodeInfo> aNodeInfo);
   virtual ~nsGenericHTMLFormElement();
 
-  NS_IMETHOD QueryInterface(REFNSIID aIID, void** aInstancePtr);
+  NS_IMETHOD QueryInterface(REFNSIID aIID, void** aInstancePtr) MOZ_OVERRIDE;
 
   nsINode* GetParentObject() const;
 
-  virtual bool IsNodeOfType(uint32_t aFlags) const;
-  virtual void SaveSubtreeState();
+  virtual bool IsNodeOfType(uint32_t aFlags) const MOZ_OVERRIDE;
+  virtual void SaveSubtreeState() MOZ_OVERRIDE;
 
   // nsIFormControl
-  virtual mozilla::dom::Element* GetFormElement();
+  virtual mozilla::dom::Element* GetFormElement() MOZ_OVERRIDE;
   nsHTMLFormElement* GetForm() const
   {
     return mForm;
   }
-  virtual void SetForm(nsIDOMHTMLFormElement* aForm);
-  virtual void ClearForm(bool aRemoveFromForm);
+  virtual void SetForm(nsIDOMHTMLFormElement* aForm) MOZ_OVERRIDE;
+  virtual void ClearForm(bool aRemoveFromForm) MOZ_OVERRIDE;
 
   nsresult GetForm(nsIDOMHTMLFormElement** aForm);
 
-  NS_IMETHOD SaveState()
+  NS_IMETHOD SaveState() MOZ_OVERRIDE
   {
     return NS_OK;
   }
 
-  virtual bool RestoreState(nsPresState* aState)
+  virtual bool RestoreState(nsPresState* aState) MOZ_OVERRIDE
   {
     return false;
   }
-  virtual bool AllowDrop()
+  virtual bool AllowDrop() MOZ_OVERRIDE
   {
     return true;
   }
@@ -1086,15 +1113,15 @@ public:
   // nsIContent
   virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
                               nsIContent* aBindingParent,
-                              bool aCompileEventHandlers);
+                              bool aCompileEventHandlers) MOZ_OVERRIDE;
   virtual void UnbindFromTree(bool aDeep = true,
-                              bool aNullParent = true);
-  virtual IMEState GetDesiredIMEState();
-  virtual nsEventStates IntrinsicState() const;
+                              bool aNullParent = true) MOZ_OVERRIDE;
+  virtual IMEState GetDesiredIMEState() MOZ_OVERRIDE;
+  virtual nsEventStates IntrinsicState() const MOZ_OVERRIDE;
 
-  virtual nsresult PreHandleEvent(nsEventChainPreVisitor& aVisitor);
+  virtual nsresult PreHandleEvent(nsEventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
 
-  virtual bool IsDisabled() const;
+  virtual bool IsDisabled() const MOZ_OVERRIDE;
 
   /**
    * This callback is called by a fieldest on all its elements whenever its
@@ -1126,17 +1153,17 @@ public:
   bool CanBeDisabled() const;
 
   virtual bool IsHTMLFocusable(bool aWithMouse, bool* aIsFocusable,
-                                 int32_t* aTabIndex);
+                                 int32_t* aTabIndex) MOZ_OVERRIDE;
 
-  virtual bool IsLabelable() const;
+  virtual bool IsLabelable() const MOZ_OVERRIDE;
 
 protected:
   virtual nsresult BeforeSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
                                  const nsAttrValueOrString* aValue,
-                                 bool aNotify);
+                                 bool aNotify) MOZ_OVERRIDE;
 
   virtual nsresult AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
-                                const nsAttrValue* aValue, bool aNotify);
+                                const nsAttrValue* aValue, bool aNotify) MOZ_OVERRIDE;
 
   /**
    * This method will update the form owner, using @form or looking to a parent.
@@ -1254,12 +1281,15 @@ protected:
   NS_IMETHODIMP                                                           \
   _class::Get##_method(uint32_t* aValue)                                  \
   {                                                                       \
-    return GetUnsignedIntAttr(nsGkAtoms::_atom, _default, aValue);        \
+    *aValue = GetUnsignedIntAttr(nsGkAtoms::_atom, _default);             \
+    return NS_OK;                                                         \
   }                                                                       \
   NS_IMETHODIMP                                                           \
   _class::Set##_method(uint32_t aValue)                                   \
   {                                                                       \
-    return SetUnsignedIntAttr(nsGkAtoms::_atom, aValue);                  \
+    mozilla::ErrorResult rv;                                              \
+    SetUnsignedIntAttr(nsGkAtoms::_atom, aValue, rv);                     \
+    return rv.ErrorCode();                                                \
   }
 
 /**
@@ -1275,7 +1305,8 @@ protected:
   NS_IMETHODIMP                                                           \
   _class::Get##_method(uint32_t* aValue)                                  \
   {                                                                       \
-    return GetUnsignedIntAttr(nsGkAtoms::_atom, _default, aValue);        \
+    *aValue = GetUnsignedIntAttr(nsGkAtoms::_atom, _default);             \
+    return NS_OK;                                                         \
   }                                                                       \
   NS_IMETHODIMP                                                           \
   _class::Set##_method(uint32_t aValue)                                   \
@@ -1283,7 +1314,9 @@ protected:
     if (aValue == 0) {                                                    \
       return NS_ERROR_DOM_INDEX_SIZE_ERR;                                 \
     }                                                                     \
-    return SetUnsignedIntAttr(nsGkAtoms::_atom, aValue);                  \
+    mozilla::ErrorResult rv;                                              \
+    SetUnsignedIntAttr(nsGkAtoms::_atom, aValue, rv);                     \
+    return rv.ErrorCode();                                                \
   }
 
 /**
@@ -1901,9 +1934,7 @@ NS_DECLARE_NS_NEW_HTML_ELEMENT(SharedObject)
 
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Anchor)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Area)
-#if defined(MOZ_MEDIA)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Audio)
-#endif
 NS_DECLARE_NS_NEW_HTML_ELEMENT(BR)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Body)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Button)
@@ -1942,9 +1973,7 @@ NS_DECLARE_NS_NEW_HTML_ELEMENT(Pre)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Progress)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Script)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Select)
-#if defined(MOZ_MEDIA)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Source)
-#endif
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Span)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Style)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(TableCaption)
@@ -1954,15 +1983,15 @@ NS_DECLARE_NS_NEW_HTML_ELEMENT(Table)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(TableRow)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(TableSection)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Tbody)
+NS_DECLARE_NS_NEW_HTML_ELEMENT(Template)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(TextArea)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Tfoot)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Thead)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Time)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Title)
+NS_DECLARE_NS_NEW_HTML_ELEMENT(Track)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Unknown)
-#if defined(MOZ_MEDIA)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Video)
-#endif
 
 inline nsISupports*
 ToSupports(nsGenericHTMLElement* aHTMLElement)

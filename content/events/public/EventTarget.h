@@ -11,11 +11,16 @@
 #include "nsIDOMEventListener.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/dom/Nullable.h"
-#include "nsIDOMEvent.h"
+#include "nsIAtom.h"
+
 class nsDOMEvent;
+class nsIDOMWindow;
 
 namespace mozilla {
 namespace dom {
+
+class EventListener;
+class EventHandlerNonNull;
 
 // IID for the dom::EventTarget interface
 #define NS_EVENTTARGET_IID \
@@ -32,22 +37,43 @@ public:
   using nsIDOMEventTarget::AddEventListener;
   using nsIDOMEventTarget::RemoveEventListener;
   using nsIDOMEventTarget::DispatchEvent;
-  void AddEventListener(const nsAString& aType,
-                        nsIDOMEventListener* aCallback, // XXX nullable
-                        bool aCapture, const Nullable<bool>& aWantsUntrusted,
-                        mozilla::ErrorResult& aRv)
-  {
-    aRv = AddEventListener(aType, aCallback, aCapture,
-                           !aWantsUntrusted.IsNull() && aWantsUntrusted.Value(),
-                           aWantsUntrusted.IsNull() ? 1 : 2);
-  }
-  void RemoveEventListener(const nsAString& aType,
-                           nsIDOMEventListener* aCallback,
-                           bool aCapture, mozilla::ErrorResult& aRv)
-  {
-    aRv = RemoveEventListener(aType, aCallback, aCapture);
-  }
+  virtual void AddEventListener(const nsAString& aType,
+                                nsIDOMEventListener* aCallback,
+                                bool aCapture,
+                                const Nullable<bool>& aWantsUntrusted,
+                                ErrorResult& aRv) = 0;
+  virtual void RemoveEventListener(const nsAString& aType,
+                                   nsIDOMEventListener* aCallback,
+                                   bool aCapture,
+                                   ErrorResult& aRv);
   bool DispatchEvent(nsDOMEvent& aEvent, ErrorResult& aRv);
+
+  EventHandlerNonNull* GetEventHandler(const nsAString& aType)
+  {
+    nsCOMPtr<nsIAtom> type = do_GetAtom(aType);
+    return GetEventHandler(type);
+  }
+
+  void SetEventHandler(const nsAString& aType, EventHandlerNonNull* aHandler,
+                       ErrorResult& rv)
+  {
+    nsCOMPtr<nsIAtom> type = do_GetAtom(aType);
+    return SetEventHandler(type, aHandler, rv);
+  }
+
+  // Note, for an event 'foo' aType will be 'onfoo'.
+  virtual void EventListenerAdded(nsIAtom* aType) {}
+  virtual void EventListenerRemoved(nsIAtom* aType) {}
+
+  // Returns an outer window that corresponds to the inner window this event
+  // target is associated with.  Will return null if the inner window is not the
+  // current inner or if there is no window around at all.
+  virtual nsIDOMWindow* GetOwnerGlobal() = 0;
+
+protected:
+  EventHandlerNonNull* GetEventHandler(nsIAtom* aType);
+  void SetEventHandler(nsIAtom* aType, EventHandlerNonNull* aHandler,
+                       ErrorResult& rv);
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(EventTarget, NS_EVENTTARGET_IID)

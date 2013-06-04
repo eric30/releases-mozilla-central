@@ -10,6 +10,7 @@
 #include "gfxTypes.h"
 #include "nsRect.h"
 #include "mozilla/gfx/Rect.h"
+#include "Units.h"
 
 namespace mozilla {
 namespace layers {
@@ -20,7 +21,7 @@ namespace layers {
  * useful for shadow layers, because the metrics values are updated
  * atomically with new pixels.
  */
-struct THEBES_API FrameMetrics {
+struct FrameMetrics {
 public:
   // We use IDs to identify frames across processes.
   typedef uint64_t ViewID;
@@ -42,6 +43,7 @@ public:
     , mZoom(1, 1)
     , mDevPixelsPerCSSPixel(1)
     , mMayHaveTouchListeners(false)
+    , mPresShellId(-1)
   {}
 
   // Default copy ctor and operator= are fine
@@ -58,7 +60,8 @@ public:
            mScrollableRect.IsEqualEdges(aOther.mScrollableRect) &&
            mResolution == aOther.mResolution &&
            mDevPixelsPerCSSPixel == aOther.mDevPixelsPerCSSPixel &&
-           mMayHaveTouchListeners == aOther.mMayHaveTouchListeners;
+           mMayHaveTouchListeners == aOther.mMayHaveTouchListeners &&
+           mPresShellId == aOther.mPresShellId;
   }
   bool operator!=(const FrameMetrics& aOther) const
   {
@@ -67,7 +70,10 @@ public:
 
   bool IsDefault() const
   {
-    return (FrameMetrics() == *this);
+    FrameMetrics def;
+
+    def.mPresShellId = mPresShellId;
+    return (def == *this);
   }
 
   bool IsRootScrollable() const
@@ -114,9 +120,9 @@ public:
   //
   // This is only valid on the root layer. Nested iframes do not need this
   // metric as they do not have a displayport set. See bug 775452.
-  nsIntRect mCompositionBounds;
+  LayerIntRect mCompositionBounds;
 
-  // |mScrollableRect|, stored in device pixels. DECPRECATED, DO NOT USE.
+  // |mScrollableRect|, stored in layer pixels. DECPRECATED, DO NOT USE.
   //
   // This is valid on any layer where |mScrollableRect| is, though it may be
   // more lazily maintained than |mScrollableRect|. That is, when
@@ -125,7 +131,7 @@ public:
   //
   // FIXME/bug 785929: Is this really necessary? Can it not be calculated from
   // |mScrollableRect| whenever it's needed?
-  nsIntRect mContentRect;
+  LayerIntRect mContentRect;
 
   // ---------------------------------------------------------------------------
   // The following metrics are all in CSS pixels. They are not in any uniform
@@ -185,7 +191,7 @@ public:
   //
   // This is valid for any layer, but is always relative to this frame and
   // not any parents, regardless of parent transforms.
-  gfx::Point mScrollOffset;
+  mozilla::CSSPoint mScrollOffset;
 
   // A unique ID assigned to each scrollable frame (unless this is
   // ROOT_SCROLL_ID, in which case it is not unique).
@@ -202,7 +208,7 @@ public:
   // window.scrollTo().
   //
   // This is valid on any layer unless it has no content.
-  gfx::Rect mScrollableRect;
+  mozilla::CSSRect mScrollableRect;
 
   // ---------------------------------------------------------------------------
   // The following metrics are dimensionless.
@@ -241,6 +247,8 @@ public:
 
   // Whether or not this frame may have touch listeners.
   bool mMayHaveTouchListeners;
+
+  uint32_t mPresShellId;
 };
 
 }

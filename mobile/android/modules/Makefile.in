@@ -11,15 +11,11 @@ include $(DEPTH)/config/autoconf.mk
 
 EXTRA_JS_MODULES = \
   LightweightThemeConsumer.jsm \
-  LocaleRepository.jsm \
-  linuxTypes.jsm \
-  video.jsm \
   JNI.jsm \
+  OrderedBroadcast.jsm \
   Sanitizer.jsm \
-  $(NULL)
-
-EXTRA_PP_JS_MODULES = \
-  contacts.jsm \
+  SharedPreferences.jsm \
+  Prompt.jsm \
   $(NULL)
 
 include $(topsrcdir)/config/rules.mk

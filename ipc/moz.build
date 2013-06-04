@@ -1,3 +1,4 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -19,9 +20,10 @@ if CONFIG['MOZ_B2G_BT']:
 if CONFIG['MOZ_B2G_NFC']:
     DIRS += ['nfc']
 
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
-    DIRS += ['netd', 'unixsocket']
-elif CONFIG['OS_ARCH'] == 'Linux':
+if CONFIG['MOZ_B2G_RIL'] or CONFIG['MOZ_B2G_BT']:
     DIRS += ['unixsocket']
+
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
+    DIRS += ['netd']
 
 TOOL_DIRS += ['app']

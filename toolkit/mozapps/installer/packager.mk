@@ -70,7 +70,6 @@ JSSHELL_BINS  = \
   $(DIST)/bin/$(DLL_PREFIX)mozglue$(DLL_SUFFIX) \
   $(NULL)
 ifndef MOZ_NATIVE_NSPR
-ifeq ($(OS_ARCH),WINNT)
 ifeq ($(_MSC_VER),1400)
 JSSHELL_BINS += $(DIST)/bin/Microsoft.VC80.CRT.manifest
 JSSHELL_BINS += $(DIST)/bin/msvcr80.dll
@@ -85,7 +84,6 @@ endif
 ifeq ($(_MSC_VER),1700)
 JSSHELL_BINS += $(DIST)/bin/msvcr110.dll
 endif
-else
 ifdef MOZ_FOLD_LIBS
 JSSHELL_BINS += $(DIST)/bin/$(DLL_PREFIX)nss3$(DLL_SUFFIX)
 else
@@ -95,7 +93,6 @@ JSSHELL_BINS += \
   $(DIST)/bin/$(DLL_PREFIX)plc4$(DLL_SUFFIX) \
   $(NULL)
 endif # MOZ_FOLD_LIBS
-endif
 endif # MOZ_NATIVE_NSPR
 MAKE_JSSHELL  = $(ZIP) -9j $(PKG_JSSHELL) $(JSSHELL_BINS)
 endif # LIBXUL_SDK
@@ -259,22 +256,25 @@ endif
 DIST_FILES =
 
 # Place the files in the order they are going to be opened by the linker
-ifdef MOZ_CRASHREPORTER
-DIST_FILES += lib.id
-endif
-
+DIST_FILES += libmozalloc.so
+ifndef MOZ_FOLD_LIBS
 DIST_FILES += \
-  libmozalloc.so \
   libnspr4.so \
   libplc4.so \
   libplds4.so \
   libmozsqlite3.so \
   libnssutil3.so \
-  libnss3.so \
+  $(NULL)
+endif
+DIST_FILES += libnss3.so
+ifndef MOZ_FOLD_LIBS
+DIST_FILES += \
   libssl3.so \
   libsmime3.so \
+  $(NULL)
+endif
+DIST_FILES += \
   libxul.so \
-  libxpcom.so \
   libnssckbi.so \
   libfreebl3.so \
   libsoftokn3.so \
@@ -301,19 +301,11 @@ DIST_FILES += \
   distribution \
   $(NULL)
 
-ifdef MOZ_ENABLE_SZIP
-SZIP_LIBRARIES = \
-  libxul.so \
-  $(NULL)
-endif
-
 NON_DIST_FILES = \
   classes.dex \
   $(NULL)
 
 UPLOAD_EXTRA_FILES += gecko-unsigned-unaligned.apk
-
-include $(MOZILLA_DIR)/ipc/app/defs.mk
 
 DIST_FILES += $(MOZ_CHILD_PROCESS_NAME)
 
@@ -336,33 +328,31 @@ UPLOAD_EXTRA_FILES += robocop.apk
 UPLOAD_EXTRA_FILES += fennec_ids.txt
 ROBOCOP_PATH = $(call core_abspath,$(_ABS_DIST)/../build/mobile/robocop)
 INNER_ROBOCOP_PACKAGE= \
-  $(PYTHON) $(abspath $(topsrcdir)/build/mobile/robocop/parse_ids.py) -i $(call core_abspath,$(DEPTH)/mobile/android/base/R.java) -o $(call core_abspath,$(DEPTH)/build/mobile/robocop/fennec_ids.txt) && \
-  $(NSINSTALL) $(call core_abspath,$(DEPTH)/build/mobile/robocop/fennec_ids.txt) $(_ABS_DIST) && \
-  $(APKBUILDER) $(_ABS_DIST)/robocop-raw.apk -v $(APKBUILDER_FLAGS) -z $(ROBOCOP_PATH)/robocop.ap_ -f $(ROBOCOP_PATH)/classes.dex && \
-  $(JARSIGNER) $(_ABS_DIST)/robocop-raw.apk && \
-  $(ZIPALIGN) -f -v 4 $(_ABS_DIST)/robocop-raw.apk $(_ABS_DIST)/robocop.apk
+  $(NSINSTALL) $(GECKO_APP_AP_PATH)/fennec_ids.txt $(_ABS_DIST) && \
+  cp $(ROBOCOP_PATH)/robocop-debug-signed-unaligned.apk $(_ABS_DIST)/robocop-unaligned.apk && \
+  $(JARSIGNER) $(_ABS_DIST)/robocop-unaligned.apk && \
+  $(ZIPALIGN) -f -v 4 $(_ABS_DIST)/robocop-unaligned.apk $(_ABS_DIST)/robocop.apk
 endif
 else
 INNER_ROBOCOP_PACKAGE=echo 'Testing is disabled - No Robocop for you'
 endif
 
 ifdef MOZ_OMX_PLUGIN
-DIST_FILES += libomxplugin.so libomxplugingb.so libomxplugingb235.so libomxpluginhc.so libomxpluginsony.so libomxpluginfroyo.so
+DIST_FILES += libomxplugin.so libomxplugingb.so libomxplugingb235.so libomxpluginhc.so libomxpluginsony.so libomxpluginfroyo.so libomxpluginjb-htc.so
+endif
+
+ifdef MOZ_ENABLE_SZIP
+SZIP_LIBRARIES := $(filter-out $(MOZ_CHILD_PROCESS_NAME),$(filter %.so,$(DIST_FILES)))
 endif
 
 PKG_SUFFIX      = .apk
 INNER_MAKE_PACKAGE	= \
-  $(foreach lib,$(SZIP_LIBRARIES),host/bin/szip $(STAGEPATH)$(MOZ_PKG_DIR)$(_BINPATH)/$(lib) $(STAGEPATH)$(MOZ_PKG_DIR)$(_BINPATH)/$(lib:.so=.sz) && mv $(STAGEPATH)$(MOZ_PKG_DIR)$(_BINPATH)/$(lib:.so=.sz) $(STAGEPATH)$(MOZ_PKG_DIR)$(_BINPATH)/$(lib) && ) \
+  $(if $(ALREADY_SZIPPED),,$(foreach lib,$(SZIP_LIBRARIES),host/bin/szip $(MOZ_SZIP_FLAGS) $(STAGEPATH)$(MOZ_PKG_DIR)$(_BINPATH)/$(lib) && )) \
   make -C $(GECKO_APP_AP_PATH) gecko.ap_ && \
   cp $(GECKO_APP_AP_PATH)/gecko.ap_ $(_ABS_DIST) && \
   ( cd $(STAGEPATH)$(MOZ_PKG_DIR)$(_BINPATH) && \
     mkdir -p lib/$(ABI_DIR) && \
     mv libmozglue.so $(MOZ_CHILD_PROCESS_NAME) lib/$(ABI_DIR) && \
-    rm -f lib.id && \
-    for SOMELIB in *.so ; \
-    do \
-      printf "`basename $$SOMELIB`:`$(_ABS_DIST)/host/bin/file_id $$SOMELIB`\n" >> lib.id ; \
-    done && \
     unzip -o $(_ABS_DIST)/gecko.ap_ && \
     rm $(_ABS_DIST)/gecko.ap_ && \
     $(if $(SZIP_LIBRARIES),$(ZIP) -0 $(_ABS_DIST)/gecko.ap_ $(SZIP_LIBRARIES) && ) \
@@ -377,12 +367,11 @@ INNER_MAKE_PACKAGE	= \
 
 INNER_UNMAKE_PACKAGE	= \
   mkdir $(MOZ_PKG_DIR) && \
-  pushd $(MOZ_PKG_DIR) && \
+  ( cd $(MOZ_PKG_DIR) && \
   $(UNZIP) $(UNPACKAGE) && \
   mv lib/$(ABI_DIR)/libmozglue.so . && \
   mv lib/$(ABI_DIR)/*plugin-container* $(MOZ_CHILD_PROCESS_NAME) && \
-  rm -rf lib/$(ABI_DIR) && \
-  popd
+  rm -rf lib/$(ABI_DIR) )
 endif
 
 ifeq ($(MOZ_PKG_FORMAT),DMG)
@@ -744,6 +733,11 @@ UPLOAD_FILES= \
   $(call QUOTED_WILDCARD,$(MOZ_BUILDINFO_FILE)) \
   $(call QUOTED_WILDCARD,$(PKG_JSSHELL)) \
   $(if $(UPLOAD_EXTRA_FILES), $(foreach f, $(UPLOAD_EXTRA_FILES), $(wildcard $(DIST)/$(f))))
+
+ifdef MOZ_CRASHREPORTER_UPLOAD_FULL_SYMBOLS
+UPLOAD_FILES += \
+  $(call QUOTED_WILDCARD,$(DIST)/$(PKG_PATH)$(SYMBOL_FULL_ARCHIVE_BASENAME).zip)
+endif
 
 SIGN_CHECKSUM_CMD=
 ifdef MOZ_SIGN_CMD

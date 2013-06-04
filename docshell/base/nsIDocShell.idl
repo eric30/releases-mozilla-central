@@ -4,6 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "domstubs.idl"
 #include "nsIDocShellTreeItem.idl"
 #include "nsIAtom.idl"
 
@@ -39,8 +40,9 @@ interface nsIPrincipal;
 interface nsIWebBrowserPrint;
 interface nsIVariant;
 interface nsIPrivacyTransitionObserver;
+interface nsIReflowObserver;
 
-[scriptable, builtinclass, uuid(4277354d-5069-4278-935a-5d596ce9bfbf)]
+[scriptable, builtinclass, uuid(d15b07e0-c604-11e2-8bdc-651679957a39)]
 interface nsIDocShell : nsIDocShellTreeItem
 {
   /**
@@ -407,6 +409,8 @@ interface nsIDocShell : nsIDocShellTreeItem
   void historyPurged(in long numEntries);
 
   /*
+   * @deprecated, use nsIDocShell.QueryInterface(nsIDOMStorageManager) instead.
+   *
    * Retrieves the WebApps session storage object for the supplied principal.
    *
    * @param principal returns a storage for this principal
@@ -420,25 +424,14 @@ interface nsIDocShell : nsIDocShellTreeItem
                                               in boolean create);
 
   /*
+   * @deprecated, use nsIDocShell.QueryInterface(nsIDOMStorageManager) instead.
+   *
    * Add a WebApps session storage object to the docshell.
    *
    * @param principal the principal the storage object is associated with
    * @param storage the storage object to add
    */
   void addSessionStorage(in nsIPrincipal principal, in nsIDOMStorage storage);
-
-  /**
-   * Clones all session storage objects and attaches them to the given docshell.
-   * Useful when duplicating tabs and their states.
-   *
-   * @param docShell the docshell to clone the sessionstorage objects to
-   */
-  void cloneSessionStoragesTo(in nsIDocShell docShell);
-
-  /**
-   * Removes all WebApps session storage objects attached to the docshell.
-   */
-  void clearSessionStorages();
 
   /**
    * Gets the channel for the currently loaded document, if any. 
@@ -528,10 +521,7 @@ interface nsIDocShell : nsIDocShellTreeItem
   /**
    * Whether this docshell can execute scripts based on its hierarchy.
    * The rule of thumb here is that we disable js if this docshell or any
-   * of its parents disallow scripting, unless the only reason for js being
-   * disabled in this docshell is a parent docshell having a document that
-   * is in design mode.  In that case, we explicitly allow scripting on the
-   * current docshell.
+   * of its parents disallow scripting.
    */
   readonly attribute boolean canExecuteScripts;
 
@@ -609,12 +599,12 @@ interface nsIDocShell : nsIDocShellTreeItem
    *
    * XXX Could this be replaced by a boolean?
    */
-  attribute nsIAtom forcedCharset;
+  attribute ACString forcedCharset;
 
   /**
    * In a child docshell, this is the charset of the parent docshell
    */
-  attribute nsIAtom parentCharset;
+  attribute ACString parentCharset;
 
   /*
    * In a child docshell, this is the source of parentCharset
@@ -627,6 +617,30 @@ interface nsIDocShell : nsIDocShellTreeItem
    * private browsing status is changed. |obs| must support weak references.
    */
   void addWeakPrivacyTransitionObserver(in nsIPrivacyTransitionObserver obs);
+
+  /**
+   * Add an observer to the list of parties to be notified when reflows are
+   * occurring. |obs| must support weak references.
+   */
+  void addWeakReflowObserver(in nsIReflowObserver obs);
+
+  /**
+   * Remove an observer from the list of parties to be notified about reflows.
+   */
+  void removeWeakReflowObserver(in nsIReflowObserver obs);
+
+  /**
+   * Notify all attached observers that a reflow has just occurred.
+   *
+   * @param interruptible if true, the reflow was interruptible.
+   * @param start         timestamp when reflow started, in milliseconds since
+   *                      navigationStart (accurate to 1/1000 of a ms)
+   * @param end           timestamp when reflow ended, in milliseconds since
+   *                      navigationStart (accurate to 1/1000 of a ms)
+   */
+  [noscript] void notifyReflowObservers(in bool interruptible,
+                                        in DOMHighResTimeStamp start,
+                                        in DOMHighResTimeStamp end);
 
   /**
    * Returns true if this docshell corresponds to an <iframe mozbrowser>.

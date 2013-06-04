@@ -12,7 +12,6 @@
 #include "mozilla/dom/SVGTests.h"
 #include "nsICSSDeclaration.h"
 #include "nsIDocument.h"
-#include "nsIDOMEventTarget.h"
 #include "nsIDOMMutationEvent.h"
 #include "nsMutationEvent.h"
 #include "nsError.h"
@@ -24,6 +23,8 @@
 #include "nsCSSProps.h"
 #include "nsCSSParser.h"
 #include "nsEventListenerManager.h"
+#include "nsLayoutUtils.h"
+#include "nsSVGAnimatedTransformList.h"
 #include "nsSVGLength2.h"
 #include "nsSVGNumber2.h"
 #include "nsSVGNumberPair.h"
@@ -38,7 +39,6 @@
 #include "SVGAnimatedLengthList.h"
 #include "SVGAnimatedPointList.h"
 #include "SVGAnimatedPathSegList.h"
-#include "SVGAnimatedTransformList.h"
 #include "SVGContentUtils.h"
 #include "nsIFrame.h"
 #include <stdarg.h>
@@ -57,6 +57,21 @@ using namespace mozilla::dom;
 // See bug 547964 for details:
 PR_STATIC_ASSERT(sizeof(void*) == sizeof(nullptr));
 
+nsresult
+NS_NewSVGElement(nsIContent **aResult, already_AddRefed<nsINodeInfo> aNodeInfo) 
+{
+  nsRefPtr<nsSVGElement> it = new nsSVGElement(aNodeInfo);
+  nsresult rv = it->Init();
+
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
+  it.forget(aResult);
+  return rv;
+}
+
+NS_IMPL_ELEMENT_CLONE_WITH_INIT(nsSVGElement)
 
 nsSVGEnumMapping nsSVGElement::sSVGUnitTypesMap[] = {
   {&nsGkAtoms::userSpaceOnUse, SVG_UNIT_TYPE_USERSPACEONUSE},
@@ -67,10 +82,11 @@ nsSVGEnumMapping nsSVGElement::sSVGUnitTypesMap[] = {
 nsSVGElement::nsSVGElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : nsSVGElementBase(aNodeInfo)
 {
+  SetIsDOMBinding();
 }
 
 JSObject*
-nsSVGElement::WrapNode(JSContext *aCx, JSObject *aScope)
+nsSVGElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
   return SVGElementBinding::Wrap(aCx, aScope, this);
 }
@@ -210,17 +226,13 @@ nsSVGElement::Init()
 //----------------------------------------------------------------------
 // nsISupports methods
 
-NS_IMPL_ADDREF_INHERITED(nsSVGElement, nsSVGElementBase)
-NS_IMPL_RELEASE_INHERITED(nsSVGElement, nsSVGElementBase)
-
-NS_INTERFACE_MAP_BEGIN(nsSVGElement)
-// provided by Element:
-//  NS_INTERFACE_MAP_ENTRY(nsIContent)
-NS_INTERFACE_MAP_END_INHERITING(nsSVGElementBase)
+NS_IMPL_ISUPPORTS_INHERITED3(nsSVGElement, nsSVGElementBase,
+                             nsIDOMNode, nsIDOMElement,
+                             nsIDOMSVGElement)
 
 //----------------------------------------------------------------------
 // Implementation
-  
+
 //----------------------------------------------------------------------
 // nsIContent methods
 
@@ -533,7 +545,7 @@ nsSVGElement::ParseAttribute(int32_t aNamespaceID,
 
     if (!foundMatch) {
       // Check for conditional processing attributes
-      nsCOMPtr<SVGTests> tests(do_QueryInterface(this));
+      nsCOMPtr<SVGTests> tests = do_QueryObject(this);
       if (tests && tests->ParseConditionalProcessingAttribute(
                             aAttribute, aValue, aResult)) {
         foundMatch = true;
@@ -589,8 +601,8 @@ nsSVGElement::ParseAttribute(int32_t aNamespaceID,
       // Check for SVGAnimatedTransformList attribute
       } else if (GetTransformListAttrName() == aAttribute) {
         // The transform attribute is being set, so we must ensure that the
-        // SVGAnimatedTransformList is/has been allocated:
-        SVGAnimatedTransformList *transformList =
+        // nsSVGAnimatedTransformList is/has been allocated:
+        nsSVGAnimatedTransformList *transformList =
           GetAnimatedTransformList(DO_ALLOCATE);
         rv = transformList->SetBaseValueString(aValue);
         if (NS_FAILED(rv)) {
@@ -808,7 +820,7 @@ nsSVGElement::UnsetAttrInternal(int32_t aNamespaceID, nsIAtom* aName,
 
     // Check if this is a transform list attribute going away
     if (GetTransformListAttrName() == aName) {
-      SVGAnimatedTransformList *transformList = GetAnimatedTransformList();
+      nsSVGAnimatedTransformList *transformList = GetAnimatedTransformList();
       if (transformList) {
         MaybeSerializeAttrBeforeRemoval(aName, aNotify);
         transformList->ClearBaseValue();
@@ -817,7 +829,7 @@ nsSVGElement::UnsetAttrInternal(int32_t aNamespaceID, nsIAtom* aName,
     }
 
     // Check for conditional processing attributes
-    nsCOMPtr<SVGTests> tests(do_QueryInterface(this));
+    nsCOMPtr<SVGTests> tests = do_QueryObject(this);
     if (tests && tests->IsConditionalProcessingAttribute(aName)) {
       MaybeSerializeAttrBeforeRemoval(aName, aNotify);
       tests->UnsetAttr(aName);
@@ -868,7 +880,7 @@ nsSVGElement::GetAttributeChangeHint(const nsIAtom* aAttribute,
   nsChangeHint retval =
     nsSVGElementBase::GetAttributeChangeHint(aAttribute, aModType);
 
-  nsCOMPtr<SVGTests> tests(do_QueryInterface(const_cast<nsSVGElement*>(this)));
+  nsCOMPtr<SVGTests> tests = do_QueryObject(const_cast<nsSVGElement*>(this));
   if (tests && tests->IsConditionalProcessingAttribute(aAttribute)) {
     // It would be nice to only reconstruct the frame if the value returned by
     // SVGTests::PassesConditionalProcessingTests has changed, but we don't
@@ -1120,8 +1132,7 @@ NS_IMETHODIMP
 nsSVGElement::GetViewportElement(nsIDOMSVGElement * *aViewportElement)
 {
   nsSVGElement* elem = GetViewportElement();
-  nsCOMPtr<nsIDOMSVGElement> svgElem = do_QueryInterface(elem);
-  svgElem.forget(aViewportElement);
+  NS_ADDREF(*aViewportElement = elem);
   return NS_OK;
 }
 
@@ -1142,7 +1153,7 @@ nsSVGElement::ClassName()
 
 namespace {
 
-class MappedAttrParser {
+class MOZ_STACK_CLASS MappedAttrParser {
 public:
   MappedAttrParser(css::Loader* aLoader,
                    nsIURI* aDocURI,
@@ -2357,9 +2368,23 @@ nsSVGElement::DidAnimateTransformList()
   nsIFrame* frame = GetPrimaryFrame();
 
   if (frame) {
+    nsIAtom *transformAttr = GetTransformListAttrName();
+    int32_t modType = nsIDOMMutationEvent::MODIFICATION;
     frame->AttributeChanged(kNameSpaceID_None,
-                            GetTransformListAttrName(),
-                            nsIDOMMutationEvent::MODIFICATION);
+                            transformAttr,
+                            modType);
+    // When script changes the 'transform' attribute, Element::SetAttrAndNotify
+    // will call nsNodeUtills::AttributeChanged, under which
+    // SVGTransformableElement::GetAttributeChangeHint will be called and an
+    // appropriate change event posted to update our frame's overflow rects.
+    // The SetAttrAndNotify doesn't happen for transform changes caused by
+    // 'animateTransform' though (and sending out the mutation events that
+    // nsNodeUtills::AttributeChanged dispatches would be inappropriate
+    // anyway), so we need to post the change event ourself.
+    nsChangeHint changeHint = GetAttributeChangeHint(transformAttr, modType);
+    if (changeHint) {
+      nsLayoutUtils::PostRestyleEvent(this, nsRestyleHint(0), changeHint);
+    }
   }
 }
 
@@ -2425,7 +2450,7 @@ nsSVGElement::WillChangeStringList(bool aIsConditionalProcessingAttribute,
 {
   nsIAtom* name;
   if (aIsConditionalProcessingAttribute) {
-    nsCOMPtr<SVGTests> tests(do_QueryInterface(this));
+    nsCOMPtr<SVGTests> tests(do_QueryInterface(static_cast<nsIDOMSVGElement*>(this)));
     name = tests->GetAttrName(aAttrEnum);
   } else {
     name = *GetStringListInfo().mStringListInfo[aAttrEnum].mName;
@@ -2443,7 +2468,7 @@ nsSVGElement::DidChangeStringList(bool aIsConditionalProcessingAttribute,
   nsCOMPtr<SVGTests> tests;
 
   if (aIsConditionalProcessingAttribute) {
-    tests = do_QueryInterface(this);
+    tests = do_QueryObject(this);
     name = tests->GetAttrName(aAttrEnum);
     tests->GetAttrValue(aAttrEnum, newValue);
   } else {

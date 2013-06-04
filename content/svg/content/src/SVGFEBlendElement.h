@@ -23,8 +23,7 @@ static const unsigned short SVG_FEBLEND_MODE_LIGHTEN = 5;
 
 typedef nsSVGFE SVGFEBlendElementBase;
 
-class SVGFEBlendElement : public SVGFEBlendElementBase,
-                          public nsIDOMSVGElement
+class SVGFEBlendElement : public SVGFEBlendElementBase
 {
   friend nsresult (::NS_NewSVGFEBlendElement(nsIContent **aResult,
                                              already_AddRefed<nsINodeInfo> aNodeInfo));
@@ -32,31 +31,21 @@ protected:
   SVGFEBlendElement(already_AddRefed<nsINodeInfo> aNodeInfo)
     : SVGFEBlendElementBase(aNodeInfo)
   {
-    SetIsDOMBinding();
   }
-  virtual JSObject* WrapNode(JSContext *cx, JSObject *scope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *cx,
+                             JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
 public:
-  // interfaces:
-  NS_DECL_ISUPPORTS_INHERITED
-
   virtual nsresult Filter(nsSVGFilterInstance* aInstance,
                           const nsTArray<const Image*>& aSources,
                           const Image* aTarget,
-                          const nsIntRect& aDataRect);
+                          const nsIntRect& aDataRect) MOZ_OVERRIDE;
   virtual bool AttributeAffectsRendering(
-          int32_t aNameSpaceID, nsIAtom* aAttribute) const;
-  virtual nsSVGString& GetResultImageName() { return mStringAttributes[RESULT]; }
-  virtual void GetSourceImageNames(nsTArray<nsSVGStringInfo>& aSources);
+          int32_t aNameSpaceID, nsIAtom* aAttribute) const MOZ_OVERRIDE;
+  virtual nsSVGString& GetResultImageName() MOZ_OVERRIDE { return mStringAttributes[RESULT]; }
+  virtual void GetSourceImageNames(nsTArray<nsSVGStringInfo>& aSources) MOZ_OVERRIDE;
 
-  NS_FORWARD_NSIDOMSVGELEMENT(SVGFEBlendElementBase::)
-
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
-
-  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const;
-
-  virtual nsIDOMNode* AsDOMNode() { return this; }
+  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
 
   // WebIDL
   already_AddRefed<nsIDOMSVGAnimatedString> In1();
@@ -65,8 +54,8 @@ public:
 
 protected:
 
-  virtual EnumAttributesInfo GetEnumInfo();
-  virtual StringAttributesInfo GetStringInfo();
+  virtual EnumAttributesInfo GetEnumInfo() MOZ_OVERRIDE;
+  virtual StringAttributesInfo GetStringInfo() MOZ_OVERRIDE;
 
   enum { MODE };
   nsSVGEnum mEnumAttributes[1];

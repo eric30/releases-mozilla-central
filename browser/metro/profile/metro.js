@@ -24,16 +24,6 @@ pref("metro.debug.selection.dumpEvents", false);
 // Enable off main thread compositing
 pref("layers.offmainthreadcomposition.enabled", false);
 
-// Form helper options: 0 = disabled, 1 = enabled, 2 = dynamic depending on screen size
-pref("formhelper.mode", 0);
-// Auto zoom to form elements when they take focus 
-pref("formhelper.autozoom", true);
-// Auto zoom to the caret
-pref("formhelper.autozoom.caret", false);
-
-// form autocomplete service
-pref("browser.formfill.enable", true);
-
 // Enable Microsoft TSF support by default for imes.
 pref("intl.enable_tsf_support", true);
 
@@ -61,13 +51,10 @@ pref("toolkit.browser.cacheRatioHeight", 3000);
 // expires.
 pref("toolkit.browser.contentViewExpire", 3000);
 
+
 pref("toolkit.defaultChromeURI", "chrome://browser/content/browser.xul");
 pref("browser.chromeURL", "chrome://browser/content/");
 
-// When true, always show the tab strip and use desktop-style tabs (no thumbnails)
-pref("browser.tabs.tabsOnly", false);
-
-pref("browser.tabs.warnOnClose", true);
 pref("browser.tabs.remote", false);
 
 // Telemetry
@@ -94,6 +81,8 @@ pref("browser.offline-apps.notify", true);
 pref("network.protocol-handler.warn-external.tel", false);
 pref("network.protocol-handler.warn-external.mailto", false);
 pref("network.protocol-handler.warn-external.vnd.youtube", false);
+pref("network.protocol-handler.warn-external.ms-windows-store", false);
+pref("network.protocol-handler.external.ms-windows-store", true);
 
 /* history max results display */
 pref("browser.display.history.maxresults", 100);
@@ -172,7 +161,6 @@ pref("browser.helperApps.deleteTempFileOnExit", false);
 
 /* password manager */
 pref("signon.rememberSignons", true);
-pref("signon.expireMasterPassword", false);
 pref("signon.SignonFileName", "signons.txt");
 
 /* find helper */
@@ -200,7 +188,7 @@ pref("extensions.update.enabled", false);
 pref("extensions.blocklist.enabled", true);
 pref("extensions.blocklist.interval", 86400);
 pref("extensions.blocklist.url", "https://addons.mozilla.org/blocklist/3/%APP_ID%/%APP_VERSION%/%PRODUCT%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/%PING_COUNT%/%TOTAL_PING_COUNT%/%DAYS_SINCE_LAST_PING%/");
-pref("extensions.blocklist.detailsURL", "https://www.mozilla.com/%LOCALE%/blocklist/");
+pref("extensions.blocklist.detailsURL", "https://www.mozilla.org/%LOCALE%/blocklist/");
 
 /* block popups by default, and notify the user about blocked popups */
 pref("dom.disable_open_during_load", true);
@@ -210,7 +198,6 @@ pref("privacy.popups.showBrowserMessage", true);
 pref("dom.disable_window_open_dialog_feature", true);
 
 pref("keyword.enabled", true);
-pref("keyword.URL", "http://www.bing.com/search?q=");
 
 pref("accessibility.typeaheadfind", false);
 pref("accessibility.typeaheadfind.timeout", 5000);
@@ -393,17 +380,12 @@ pref("dom.ipc.content.nice", 1);
 // product URLs
 // The breakpad report server to link to in about:crashes
 pref("breakpad.reportURL", "https://crash-stats.mozilla.com/report/index/");
-pref("app.releaseNotesURL", "http://www.mozilla.com/%LOCALE%/mobile/%VERSION%/releasenotes/");
+// TODO: This is not the correct article for metro!!!
 pref("app.sync.tutorialURL", "https://support.mozilla.org/kb/sync-firefox-between-desktop-and-mobile");
-pref("app.support.baseURL", "http://support.mozilla.org/1/firefox/%VERSION%/%OS%/%LOCALE%/");
-pref("app.privacyURL", "http://www.mozilla.com/legal/privacy/");
+pref("app.support.baseURL", "https://support.mozilla.org/1/firefox/%VERSION%/%OS%/%LOCALE%/");
+pref("app.privacyURL", "https://www.mozilla.org/legal/privacy/");
 pref("app.creditsURL", "http://www.mozilla.org/credits/");
 pref("app.channelURL", "http://www.mozilla.org/%LOCALE%/firefox/channel/");
-#if MOZ_UPDATE_CHANNEL == beta
-pref("app.faqURL", "http://www.mozilla.com/%LOCALE%/mobile/beta/faq/");
-#else
-pref("app.faqURL", "http://www.mozilla.com/%LOCALE%/mobile/faq/");
-#endif
 
 // Name of alternate about: page for certificate errors (when undefined, defaults to about:neterror)
 pref("security.alternate_certificate_error_page", "certerror");
@@ -412,41 +394,111 @@ pref("security.warn_viewing_mixed", false); // Warning is disabled.  See Bug 616
 
 // Override some named colors to avoid inverse OS themes
 
-#ifdef MOZ_OFFICIAL_BRANDING
-pref("browser.search.param.yahoo-fr", "moz35");
-pref("browser.search.param.yahoo-fr-cjkt", "moz35");
-pref("browser.search.param.yahoo-fr-ja", "mozff");
-#endif
-
 /* app update prefs */
-pref("app.update.timer", 60000); // milliseconds (1 min)
 
 #ifdef MOZ_UPDATER
-// temp
-pref("app.update.enabled", false);
-pref("app.update.timerFirstInterval", 20000); // milliseconds
-pref("app.update.auto", false);
-pref("app.update.channel", "@MOZ_UPDATE_CHANNEL@");
-pref("app.update.mode", 1);
-pref("app.update.silent", false);
-pref("app.update.url", "https://aus2.mozilla.org/update/4/%PRODUCT%/%VERSION%/%BUILD_ID%/%BUILD_TARGET%-xul/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/%PLATFORM_VERSION%/update.xml");
-pref("app.update.promptWaitTime", 43200);
-pref("app.update.idletime", 60);
-pref("app.update.showInstalledUI", false);
-pref("app.update.incompatible.mode", 0);
-pref("app.update.download.backgroundInterval", 0);
 
-// %APP% resolves to metrofirefox, which won't work until bug 845983 is fixed
-#ifdef MOZ_OFFICIAL_BRANDING
-pref("app.update.interval", 86400);
-pref("app.update.url.manual", "https://www.mozilla.org/%LOCALE%/firefox/update/");
-pref("app.update.url.details", "https://www.mozilla.org/%LOCALE%/firefox/releases/");
-#else
-pref("app.update.interval", 28800);
-pref("app.update.url.manual", "https://www.mozilla.org/%LOCALE%/firefox/");
-pref("app.update.url.details", "https://www.mozilla.org/%LOCALE%/firefox/");
+// Whether or not app updates are enabled
+pref("app.update.enabled", true);
+
+// This preference turns on app.update.mode and allows automatic download and
+// install to take place. We use a separate boolean toggle for this to make
+// the UI easier to construct.
+pref("app.update.auto", true);
+
+// Defines how the Application Update Service notifies the user about updates:
+//
+// AUM Set to:        Minor Releases:     Major Releases:
+// 0                  download no prompt  download no prompt
+// 1                  download no prompt  download no prompt if no incompatibilities
+// 2                  download no prompt  prompt
+//
+// See chart in nsUpdateService.js source for more details
+pref("app.update.mode", 0);
+
+// If set to true, the Update Service will present no UI for any event.
+pref("app.update.silent", true);
+
+// If set to true, the Update Service will apply updates in the background
+// when it finishes downloading them.
+pref("app.update.staging.enabled", true);
+
+// Update service URL:
+pref("app.update.url", "https://aus3.mozilla.org/update/3/%PRODUCT%/%VERSION%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/update.xml");
+
+// Show the Update Checking/Ready UI when the user was idle for x seconds
+pref("app.update.idletime", 60);
+
+// Whether or not we show a dialog box informing the user that the update was
+// successfully applied. This is off in Firefox by default since we show a
+// upgrade start page instead! Other apps may wish to show this UI, and supply
+// a whatsNewURL field in their brand.properties that contains a link to a page
+// which tells users what's new in this new update.
+pref("app.update.showInstalledUI", false);
+
+// 0 = suppress prompting for incompatibilities if there are updates available
+//     to newer versions of installed addons that resolve them.
+// 1 = suppress prompting for incompatibilities only if there are VersionInfo
+//     updates available to installed addons that resolve them, not newer
+//     versions.
+pref("app.update.incompatible.mode", 0);
+
+// Whether or not to attempt using the service for updates.
+#ifdef MOZ_MAINTENANCE_SERVICE
+pref("app.update.service.enabled", true);
 #endif
-#endif
+
+// The minimum delay in seconds for the timer to fire.
+// default=2 minutes
+pref("app.update.timerMinimumDelay", 120);
+
+// Enables some extra Application Update Logging (can reduce performance)
+pref("app.update.log", false);
+
+// The number of general background check failures to allow before notifying the
+// user of the failure. User initiated update checks always notify the user of
+// the failure.
+pref("app.update.backgroundMaxErrors", 10);
+
+// When |app.update.cert.requireBuiltIn| is true or not specified the
+// final certificate and all certificates the connection is redirected to before
+// the final certificate for the url specified in the |app.update.url|
+// preference must be built-in.
+pref("app.update.cert.requireBuiltIn", true);
+
+// When |app.update.cert.checkAttributes| is true or not specified the
+// certificate attributes specified in the |app.update.certs.| preference branch
+// are checked against the certificate for the url specified by the
+// |app.update.url| preference.
+pref("app.update.cert.checkAttributes", true);
+
+// The number of certificate attribute check failures to allow for background
+// update checks before notifying the user of the failure. User initiated update
+// checks always notify the user of the certificate attribute check failure.
+pref("app.update.cert.maxErrors", 5);
+
+// The |app.update.certs.| preference branch contains branches that are
+// sequentially numbered starting at 1 that contain attribute name / value
+// pairs for the certificate used by the server that hosts the update xml file
+// as specified in the |app.update.url| preference. When these preferences are
+// present the following conditions apply for a successful update check:
+// 1. the uri scheme must be https
+// 2. the preference name must exist as an attribute name on the certificate and
+//    the value for the name must be the same as the value for the attribute name
+//    on the certificate.
+// If these conditions aren't met it will be treated the same as when there is
+// no update available. This validation will not be performed when the
+// |app.update.url.override| user preference has been set for testing updates or
+// when the |app.update.cert.checkAttributes| preference is set to false. Also,
+// the |app.update.url.override| preference should ONLY be used for testing.
+// IMPORTANT! firefox.js should also be updated for updates to certs.X.issuerName
+pref("app.update.certs.1.issuerName", "OU=Equifax Secure Certificate Authority,O=Equifax,C=US");
+pref("app.update.certs.1.commonName", "aus3.mozilla.org");
+pref("app.update.certs.2.issuerName", "CN=Thawte SSL CA,O=\"Thawte, Inc.\",C=US");
+pref("app.update.certs.2.commonName", "aus3.mozilla.org");
+
+// User-settable override to app.update.url for testing purposes.
+//pref("app.update.url.override", "");
 
 // replace newlines with spaces on paste into single-line text boxes
 pref("editor.singleLine.pasteNewlines", 2);
@@ -454,7 +506,6 @@ pref("editor.singleLine.pasteNewlines", 2);
 #ifdef MOZ_SERVICES_SYNC
 // sync service
 pref("services.sync.registerEngines", "Tab,Bookmarks,Form,History,Password,Prefs");
-pref("services.sync.autoconnectDelay", 5);
 
 // prefs to sync by default
 pref("services.sync.prefs.sync.browser.startup.sessionRestore", true);
@@ -474,12 +525,6 @@ pref("ui.dragThresholdY", 50);
 
 // prevent tooltips from showing up
 pref("browser.chrome.toolbar_tips", false);
-
-//  0: don't show fullscreen keyboard
-//  1: always show fullscreen keyboard
-// -1: show fullscreen keyboard based on threshold pref
-pref("widget.ime.android.landscape_fullscreen", -1);
-pref("widget.ime.android.fullscreen_threshold", 250); // in hundreths of inches
 
 // Completely disable pdf.js as an option to preview pdfs within firefox.
 // Note: if this is not disabled it does not necessarily mean pdf.js is the pdf
@@ -572,7 +617,7 @@ pref("browser.dom.window.dump.enabled", true);
 pref("device.camera.enabled", true);
 pref("media.realtime_decoder.enabled", true);
 
-// Mobile manages state by autodetection
+// Metro manages state by autodetection
 pref("network.manage-offline-status", true);
 
 // Enable HTML fullscreen API in content.

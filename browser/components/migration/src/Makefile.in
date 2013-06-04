@@ -9,7 +9,6 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= migration
 LIBRARY_NAME	= migration_s
 
 FORCE_STATIC_LIB = 1
@@ -25,8 +24,6 @@ EXTRA_PP_COMPONENTS = \
   $(NULL)
 
 ifeq ($(OS_ARCH),WINNT)
-CPPSRCS += nsIEHistoryEnumerator.cpp
-
 EXTRA_COMPONENTS += IEProfileMigrator.js \
                     $(NULL)
 

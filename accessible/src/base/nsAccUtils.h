@@ -6,8 +6,7 @@
 #ifndef nsAccUtils_h_
 #define nsAccUtils_h_
 
-#include "nsIAccessible.h"
-#include "nsIAccessibleRole.h"
+#include "mozilla/a11y/Accessible.h"
 #include "nsIAccessibleText.h"
 
 #include "nsAccessibilityService.h"
@@ -193,27 +192,6 @@ public:
   static nsIntPoint GetScreenCoordsForParent(Accessible* aAccessible);
 
   /**
-   * Return the role of the given accessible.
-   */
-  static uint32_t Role(nsIAccessible *aAcc)
-  {
-    uint32_t role = nsIAccessibleRole::ROLE_NOTHING;
-    if (aAcc)
-      aAcc->GetRole(&role);
-
-    return role;
-  }
-
-  /**
-   * Get the ARIA attribute characteristics for a given ARIA attribute.
-   * 
-   * @param aAtom  ARIA attribute
-   * @return       A bitflag representing the attribute characteristics
-   *               (see nsARIAMap.h for possible bit masks, prefixed "ARIA_")
-   */
-  static uint8_t GetAttributeCharacteristics(nsIAtom* aAtom);
-
-  /**
    * Get the 'live' or 'container-live' object attribute value from the given
    * ELiveAttrRule constant.
    *
@@ -240,12 +218,12 @@ public:
   /**
    * Return true if the given accessible is embedded object.
    */
-  static bool IsEmbeddedObject(nsIAccessible *aAcc)
+  static bool IsEmbeddedObject(Accessible* aAcc)
   {
-    uint32_t role = Role(aAcc);
-    return role != nsIAccessibleRole::ROLE_TEXT_LEAF &&
-           role != nsIAccessibleRole::ROLE_WHITESPACE &&
-           role != nsIAccessibleRole::ROLE_STATICTEXT;
+    uint32_t role = aAcc->Role();
+    return role != roles::TEXT_LEAF &&
+           role != roles::WHITESPACE &&
+           role != roles::STATICTEXT;
   }
 
   /**

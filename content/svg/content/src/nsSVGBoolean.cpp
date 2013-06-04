@@ -104,9 +104,8 @@ nsSVGBoolean::SetAnimValue(bool aValue, nsSVGElement *aSVGElement)
   aSVGElement->DidAnimateBoolean(mAttrEnum);
 }
 
-nsresult
-nsSVGBoolean::ToDOMAnimatedBoolean(nsISupports **aResult,
-                                   nsSVGElement *aSVGElement)
+already_AddRefed<SVGAnimatedBoolean>
+nsSVGBoolean::ToDOMAnimatedBoolean(nsSVGElement* aSVGElement)
 {
   nsRefPtr<SVGAnimatedBoolean> domAnimatedBoolean =
     sSVGAnimatedBooleanTearoffTable.GetTearoff(this);
@@ -115,8 +114,7 @@ nsSVGBoolean::ToDOMAnimatedBoolean(nsISupports **aResult,
     sSVGAnimatedBooleanTearoffTable.AddTearoff(this, domAnimatedBoolean);
   }
 
-  domAnimatedBoolean.forget(aResult);
-  return NS_OK;
+  return domAnimatedBoolean.forget();
 }
 
 SVGAnimatedBoolean::~SVGAnimatedBoolean()
@@ -132,7 +130,7 @@ nsSVGBoolean::ToSMILAttr(nsSVGElement *aSVGElement)
 
 nsresult
 nsSVGBoolean::SMILBool::ValueFromString(const nsAString& aStr,
-                                        const nsISMILAnimationElement* /*aSrcElement*/,
+                                        const SVGAnimationElement* /*aSrcElement*/,
                                         nsSMILValue& aValue,
                                         bool& aPreventCachingOfSandwich) const
 {

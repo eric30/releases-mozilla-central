@@ -122,9 +122,9 @@ BluetoothDevice::SetPropertyByValue(const BluetoothNamedValue& aValue)
     nsIScriptContext* sc = GetContextForEventHandlers(&rv);
     NS_ENSURE_SUCCESS_VOID(rv);
 
-    if (NS_FAILED(nsTArrayToJSArray(sc->GetNativeContext(),
-                                    mUuids,
-                                    &mJsUuids))) {
+    AutoPushJSContext cx(sc->GetNativeContext());
+
+    if (NS_FAILED(nsTArrayToJSArray(cx, mUuids, &mJsUuids))) {
       NS_WARNING("Cannot set JS UUIDs object!");
       return;
     }
@@ -135,9 +135,9 @@ BluetoothDevice::SetPropertyByValue(const BluetoothNamedValue& aValue)
     nsIScriptContext* sc = GetContextForEventHandlers(&rv);
     NS_ENSURE_SUCCESS_VOID(rv);
 
-    if (NS_FAILED(nsTArrayToJSArray(sc->GetNativeContext(),
-                                    mServices,
-                                    &mJsServices))) {
+    AutoPushJSContext cx(sc->GetNativeContext());
+
+    if (NS_FAILED(nsTArrayToJSArray(cx, mServices, &mJsServices))) {
       NS_WARNING("Cannot set JS Services object!");
       return;
     }
@@ -232,7 +232,7 @@ BluetoothDevice::GetConnected(bool* aConnected)
 }
 
 NS_IMETHODIMP
-BluetoothDevice::GetUuids(JSContext* aCx, jsval* aUuids)
+BluetoothDevice::GetUuids(JSContext* aCx, JS::Value* aUuids)
 {
   if (mJsUuids) {
     aUuids->setObject(*mJsUuids);
@@ -244,7 +244,7 @@ BluetoothDevice::GetUuids(JSContext* aCx, jsval* aUuids)
 }
 
 NS_IMETHODIMP
-BluetoothDevice::GetServices(JSContext* aCx, jsval* aServices)
+BluetoothDevice::GetServices(JSContext* aCx, JS::Value* aServices)
 {
   if (mJsServices) {
     aServices->setObject(*mJsServices);
@@ -254,6 +254,3 @@ BluetoothDevice::GetServices(JSContext* aCx, jsval* aServices)
   return NS_OK;
 }
 
-NS_IMPL_EVENT_HANDLER(BluetoothDevice, propertychanged)
-NS_IMPL_EVENT_HANDLER(BluetoothDevice, connected)
-NS_IMPL_EVENT_HANDLER(BluetoothDevice, disconnected)

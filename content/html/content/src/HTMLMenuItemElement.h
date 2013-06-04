@@ -6,6 +6,7 @@
 #ifndef mozilla_dom_HTMLMenuItemElement_h
 #define mozilla_dom_HTMLMenuItemElement_h
 
+#include "mozilla/Attributes.h"
 #include "nsIDOMHTMLMenuItemElement.h"
 #include "nsGenericHTMLElement.h"
 
@@ -44,23 +45,23 @@ public:
   // nsIDOMHTMLMenuItemElement
   NS_DECL_NSIDOMHTMLMENUITEMELEMENT
 
-  virtual nsresult PreHandleEvent(nsEventChainPreVisitor& aVisitor);
-  virtual nsresult PostHandleEvent(nsEventChainPostVisitor& aVisitor);
+  virtual nsresult PreHandleEvent(nsEventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
+  virtual nsresult PostHandleEvent(nsEventChainPostVisitor& aVisitor) MOZ_OVERRIDE;
 
   virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
                               nsIContent* aBindingParent,
-                              bool aCompileEventHandlers);
+                              bool aCompileEventHandlers) MOZ_OVERRIDE;
 
   virtual bool ParseAttribute(int32_t aNamespaceID,
                                 nsIAtom* aAttribute,
                                 const nsAString& aValue,
-                                nsAttrValue& aResult);
+                                nsAttrValue& aResult) MOZ_OVERRIDE;
 
-  virtual void DoneCreatingElement();
+  virtual void DoneCreatingElement() MOZ_OVERRIDE;
 
-  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const;
+  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
 
-  virtual nsIDOMNode* AsDOMNode() { return this; }
+  virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
 
   uint8_t GetType() const { return mType; }
 
@@ -126,12 +127,13 @@ public:
   }
 
 protected:
-  virtual JSObject* WrapNode(JSContext *aCx, JSObject *aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *aCx,
+                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
 
 protected:
   virtual nsresult AfterSetAttr(int32_t aNamespaceID, nsIAtom* aName,
-                                const nsAttrValue* aValue, bool aNotify);
+                                const nsAttrValue* aValue, bool aNotify) MOZ_OVERRIDE;
 
   void WalkRadioGroup(Visitor* aVisitor);
 

@@ -36,7 +36,6 @@ MOCHITEST_FILES = \
 		gZipOfflineChild.html^headers^ \
 		gZipOfflineChild.cacheManifest \
 		gZipOfflineChild.cacheManifest^headers^ \
-		test_bug787619.html \
 		$(NULL)
 
 # test_contextmenu.html is disabled on Linux due to bug 513558
@@ -65,6 +64,9 @@ _BROWSER_FILES = \
                  head.js \
                  browser_typeAheadFind.js \
                  browser_keywordSearch.js \
+                 browser_keywordSearch_postData.js \
+                 POSTSearchEngine.xml \
+                 print_postdata.sjs \
                  browser_alltabslistener.js \
                  browser_bug304198.js \
                  title_test.svg \
@@ -126,6 +128,7 @@ _BROWSER_FILES = \
                  browser_bug581242.js \
                  browser_bug581253.js \
                  browser_bug581947.js \
+                 browser_bug585558.js \
                  browser_bug585785.js \
                  browser_bug585830.js \
                  browser_bug590206.js \
@@ -144,20 +147,26 @@ _BROWSER_FILES = \
                  browser_bug647886.js \
                  browser_bug655584.js \
                  browser_bug664672.js \
+                 browser_bug678392.js \
+                 browser_bug678392-1.html \
+                 browser_bug678392-2.html \
                  browser_bug710878.js \
                  browser_bug719271.js \
                  browser_bug724239.js \
                  browser_bug735471.js \
                  browser_bug743421.js \
                  browser_bug749738.js \
+                 browser_bug752516.js \
                  browser_bug763468_perwindowpb.js \
                  browser_bug767836_perwindowpb.js \
+                 browser_bug771331.js \
                  browser_bug783614.js \
                  browser_bug797677.js \
                  browser_bug816527.js \
                  browser_bug817947.js \
                  browser_bug822367.js \
                  browser_bug832435.js \
+                 browser_bug839103.js \
                  browser_canonizeURL.js \
                  browser_customize.js \
                  browser_findbarClose.js \
@@ -191,6 +200,7 @@ _BROWSER_FILES = \
                  browser_sanitize-passwordDisabledHosts.js \
                  browser_sanitize-sitepermissions.js \
                  browser_sanitize-timespans.js \
+                 browser_tabopen_reflows.js \
                  browser_clearplugindata.js \
                  browser_clearplugindata.html \
                  browser_clearplugindata_noage.html \
@@ -207,6 +217,8 @@ _BROWSER_FILES = \
                  bug792517.html \
                  bug792517-2.html \
                  bug792517.sjs \
+                 test_bug839103.html \
+                 bug839103.css \
                  browser_scope.js \
                  browser_selectTabAtIndex.js \
                  browser_tab_dragdrop.js \
@@ -267,6 +279,8 @@ _BROWSER_FILES = \
                  plugin_clickToPlayDeny.html \
                  plugin_bug744745.html \
                  plugin_bug749455.html \
+                 plugin_bug752516.html \
+                 plugin_bug787619.html \
                  plugin_bug797677.html \
                  plugin_bug818009.html \
                  plugin_bug820497.html \
@@ -296,6 +310,7 @@ _BROWSER_FILES = \
                  browser_lastAccessedTab.js \
                  browser_bug734076.js \
                  browser_bug744745.js \
+                 browser_bug787619.js \
                  browser_bug812562.js \
                  browser_bug818009.js \
                  browser_bug818118.js \
@@ -307,20 +322,23 @@ _BROWSER_FILES = \
                  browser_bug676619.js \
                  download_page.html \
                  browser_URLBarSetURI.js \
-                 browser_bookmark_titles.js \
                  browser_pageInfo_plugins.js \
                  browser_pageInfo.js \
                  feed_tab.html \
                  browser_pluginCrashCommentAndURL.js \
                  pluginCrashCommentAndURL.html \
                  browser_private_no_prompt.js \
+                 browser_blob-channelname.js \
+                 browser_aboutHealthReport.js \
+                 healthreport_testRemoteCommands.html \
                  $(NULL)
 
-# Disable test on Windows due to frequent failures (bug 841341)
+# Disable tests on Windows due to frequent failures (bugs 825739, 841341)
 ifneq (windows,$(MOZ_WIDGET_TOOLKIT))
 _BROWSER_FILES += \
-                browser_popupNotification.js \
-                $(NULL)
+                 browser_bookmark_titles.js \
+                 browser_popupNotification.js \
+                 $(NULL)
 endif
 
 ifneq (cocoa,$(MOZ_WIDGET_TOOLKIT))

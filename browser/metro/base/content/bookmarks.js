@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+'use strict';
+
 /**
  * Utility singleton for manipulating bookmarks.
  */
@@ -17,32 +19,6 @@ var Bookmarks = {
     }
   },
 
-  /*
-   * fixupColorFormat - convert a decimal color value to a valid
-   * css color string of the format '#123456'
-   */ 
-  fixupColorFormat: function bv_fixupColorFormat(aColor) {
-    let color = aColor.toString(16);
-    while (color.length < 6)
-      color = "0" + color;
-    return "#" + color;
-  },
-
-  getFaveIconPrimaryColor: function bh_getFaveIconPrimaryColor(aBookmarkId) {
-    if (PlacesUtils.annotations.itemHasAnnotation(aBookmarkId, 'metro/faveIconColor'))
-      return PlacesUtils.annotations.getItemAnnotation(aBookmarkId, 'metro/faveIconColor');
-    return "";
-  },
-
-  setFaveIconPrimaryColor: function bh_setFaveIconPrimaryColor(aBookmarkId, aColorStr) {
-    var anno = [{ name: "metro/faveIconColor",
-                  type: Ci.nsIAnnotationService.TYPE_STRING,
-                  flags: 0,
-                  value: aColorStr,
-                  expires: Ci.nsIAnnotationService.EXPIRE_NEVER }];
-    PlacesUtils.setAnnotationsForItem(aBookmarkId, anno);
-  },
-
   addForURI: function bh_addForURI(aURI, aTitle, callback) {
     this.isURIBookmarked(aURI, function (isBookmarked) {
       if (isBookmarked)
@@ -54,7 +30,7 @@ var Bookmarks = {
                                                       aURI,
                                                       bookmarkService.DEFAULT_INDEX,
                                                       bookmarkTitle);
-  
+
       // XXX Used for browser-chrome tests
       let event = document.createEvent("Events");
       event.initEvent("BookmarkCreated", true, false);
@@ -93,21 +69,27 @@ var Bookmarks = {
 /**
  * Wraps a list/grid control implementing nsIDOMXULSelectControlElement and
  * fills it with the user's bookmarks.
- * 
+ *
  * @param           aSet    Control implementing nsIDOMXULSelectControlElement.
  * @param {Number}  aLimit  Maximum number of items to show in the view.
  * @param           aRoot   Bookmark root to show in the view.
  */
-function BookmarksView(aSet, aLimit, aRoot) {
+function BookmarksView(aSet, aLimit, aRoot, aFilterUnpinned) {
   this._set = aSet;
   this._set.controller = this;
+  this._inBatch = false; // batch up grid updates to avoid redundant arrangeItems calls
 
   this._limit = aLimit;
+  this._filterUnpinned = aFilterUnpinned;
+  this._bookmarkService = PlacesUtils.bookmarks;
+  this._navHistoryService = gHistSvc;
 
   this._changes = new BookmarkChangeListener(this);
-  PlacesUtils.bookmarks.addObserver(this._changes, false);
+  this._pinHelper = new ItemPinHelper("metro.bookmarks.unpinned");
+  this._bookmarkService.addObserver(this._changes, false);
+  window.addEventListener('MozAppbarDismissing', this, false);
+  window.addEventListener('BookmarksNeedsRefresh', this, false);
 
-  // This also implicitly calls `getBookmarks`
   this.root = aRoot;
 }
 
@@ -117,6 +99,7 @@ BookmarksView.prototype = {
   _changes: null,
   _root: null,
   _sort: 0, // Natural bookmark order.
+  _toRemove: null,
 
   get sort() {
     return this._sort;
@@ -124,6 +107,7 @@ BookmarksView.prototype = {
 
   set sort(aSort) {
     this._sort = aSort;
+    this.clearBookmarks();
     this.getBookmarks();
   },
 
@@ -133,7 +117,6 @@ BookmarksView.prototype = {
 
   set root(aRoot) {
     this._root = aRoot;
-    this.getBookmarks();
   },
 
   handleItemClick: function bv_handleItemClick(aItem) {
@@ -146,7 +129,7 @@ BookmarksView.prototype = {
   },
 
   _getBookmarkIdForItem: function bv__getBookmarkForItem(aItem) {
-    return aItem.getAttribute("bookmarkId");
+    return +aItem.getAttribute("bookmarkId");
   },
 
   _updateItemWithAttrs: function dv__updateItemWithAttrs(anItem, aAttrs) {
@@ -154,85 +137,119 @@ BookmarksView.prototype = {
       anItem.setAttribute(name, aAttrs[name]);
   },
 
-  getBookmarks: function bv_getBookmarks() {
-    let options = gHistSvc.getNewQueryOptions();
+  getBookmarks: function bv_getBookmarks(aRefresh) {
+    let options = this._navHistoryService.getNewQueryOptions();
     options.queryType = options.QUERY_TYPE_BOOKMARKS;
     options.excludeQueries = true; // Don't include "smart folders"
-    options.maxResults = this._limit;
     options.sortingMode = this._sort;
 
-    let query = gHistSvc.getNewQuery();
+    let limit = this._limit || Infinity;
+
+    let query = this._navHistoryService.getNewQuery();
     query.setFolders([Bookmarks.metroRoot], 1);
 
-    let result = gHistSvc.executeQuery(query, options);
+    let result = this._navHistoryService.executeQuery(query, options);
     let rootNode = result.root;
     rootNode.containerOpen = true;
     let childCount = rootNode.childCount;
 
-    for (let i = 0; i < childCount; i++) {
+    this._inBatch = true; // batch up grid updates to avoid redundant arrangeItems calls
+
+    for (let i = 0, addedCount = 0; i < childCount && addedCount < limit; i++) {
       let node = rootNode.getChild(i);
 
       // Ignore folders, separators, undefined item types, etc.
-      if (node.type != node.RESULT_TYPE_URI &&
-          node.type != node.RESULT_TYPE_VISIT &&
-          node.type != node.RESULT_TYPE_FULL_VISIT)
+      if (node.type != node.RESULT_TYPE_URI)
         continue;
 
-      this.addBookmark(node.itemId);
+      // If item is marked for deletion, skip it.
+      if (this._toRemove && this._toRemove.indexOf(node.itemId) !== -1)
+        continue;
+
+      let item = this._getItemForBookmarkId(node.itemId);
+
+      // Item has been unpinned.
+      if (this._filterUnpinned && !this._pinHelper.isPinned(node.itemId)) {
+        if (item)
+          this.removeBookmark(node.itemId);
+
+        continue;
+      }
+
+      if (!aRefresh || !item) {
+        // If we're not refreshing or the item is not in the grid, add it.
+        this.addBookmark(node.itemId, addedCount);
+      } else if (aRefresh && item) {
+        // Update context action in case it changed in another view.
+        this._setContextActions(item);
+      }
+
+      addedCount++;
     }
 
+    // Remove extra items in case a refresh added more than the limit.
+    // This can happen when undoing a delete.
+    if (aRefresh) {
+      while (this._set.itemCount > limit)
+        this._set.removeItemAt(this._set.itemCount - 1, true);
+    }
+    this._set.arrangeItems();
+    this._inBatch = false;
     rootNode.containerOpen = false;
   },
 
-  inCurrentView: function bv_inCurrentView(aParentId, aIndex, aItemType) {
+  inCurrentView: function bv_inCurrentView(aParentId, aItemId) {
     if (this._root && aParentId != this._root)
       return false;
 
-    if (this._limit && aIndex >= this._limit)
-      return false;
-
-    if (aItemType != PlacesUtils.bookmarks.TYPE_BOOKMARK)
-      return false;
-
-    return true;
+    return !!this._getItemForBookmarkId(aItemId);
   },
 
   clearBookmarks: function bv_clearBookmarks() {
     while (this._set.itemCount > 0)
-      this._set.removeItemAt(0);
+      this._set.removeItemAt(0, true);
+    this._set.arrangeItems();
   },
 
-  addBookmark: function bv_addBookmark(aBookmarkId) {
-    let bookmarks = PlacesUtils.bookmarks;
-
-    let index = bookmarks.getItemIndex(aBookmarkId);
-    let uri = bookmarks.getBookmarkURI(aBookmarkId);
-    let title = bookmarks.getItemTitle(aBookmarkId) || uri.spec;
-    let item = this._set.insertItemAt(index, title, uri.spec);
+  addBookmark: function bv_addBookmark(aBookmarkId, aPos) {
+    let index = this._bookmarkService.getItemIndex(aBookmarkId);
+    let uri = this._bookmarkService.getBookmarkURI(aBookmarkId);
+    let title = this._bookmarkService.getItemTitle(aBookmarkId) || uri.spec;
+    let item = this._set.insertItemAt(aPos || index, title, uri.spec, this._inBatch);
     item.setAttribute("bookmarkId", aBookmarkId);
+    this._setContextActions(item);
     this._updateFavicon(aBookmarkId, item, uri);
   },
 
-  _updateFavicon: function _updateFavicon(aBookmarkId, aItem, aUri) {
+  _setContextActions: function bv__setContextActions(aItem) {
+    let itemId = this._getBookmarkIdForItem(aItem);
+    aItem.setAttribute("data-contextactions", "delete," + (this._pinHelper.isPinned(itemId) ? "unpin" : "pin"));
+    if (aItem.refresh) aItem.refresh();
+  },
+
+  _updateFavicon: function bv__updateFavicon(aBookmarkId, aItem, aUri) {
     PlacesUtils.favicons.getFaviconURLForPage(aUri, this._gotIcon.bind(this, aBookmarkId, aItem));
   },
 
-  _gotIcon: function _gotIcon(aBookmarkId, aItem, aIconUri) {
+  _gotIcon: function bv__gotIcon(aBookmarkId, aItem, aIconUri) {
     aItem.setAttribute("iconURI", aIconUri ? aIconUri.spec : "");
-
-    let color = Bookmarks.getFaveIconPrimaryColor(aBookmarkId);
-    if (color) {
-      aItem.color = color;
+    if (!aIconUri) {
       return;
     }
-    let url = Services.io.newURI(aIconUri.spec.replace("moz-anno:favicon:",""), "", null)
-    let ca = Components.classes["@mozilla.org/places/colorAnalyzer;1"]
-                       .getService(Components.interfaces.mozIColorAnalyzer);
-    ca.findRepresentativeColor(url, function (success, color) {
-      let colorStr = Bookmarks.fixupColorFormat(color);
-      Bookmarks.setFaveIconPrimaryColor(aBookmarkId, colorStr);
-      aItem.color = colorStr;
-    }, this);
+    ColorUtils.getForegroundAndBackgroundIconColors(aIconUri, function(foregroundColor, backgroundColor) {
+      aItem.style.color = foregroundColor; //color text
+      aItem.setAttribute("customColor", backgroundColor); //set background
+      if (aItem.refresh) {
+        aItem.refresh();
+      }
+    });
+  },
+
+  _sendNeedsRefresh: function bv__sendNeedsRefresh(){
+    // Event sent when all view instances need to refresh.
+    let event = document.createEvent("Events");
+    event.initEvent("BookmarksNeedsRefresh", true, false);
+    window.dispatchEvent(event);
   },
 
   updateBookmark: function bv_updateBookmark(aBookmarkId) {
@@ -240,10 +257,9 @@ BookmarksView.prototype = {
 
     if (!item)
       return;
-    
-    let bookmarks = PlacesUtils.bookmarks;
+
     let oldIndex = this._set.getIndexOfItem(item);
-    let index = bookmarks.getItemIndex(aBookmarkId);
+    let index = this._bookmarkService.getItemIndex(aBookmarkId);
 
     if (oldIndex != index) {
       this.removeBookmark(aBookmarkId);
@@ -251,8 +267,8 @@ BookmarksView.prototype = {
       return;
     }
 
-    let uri = bookmarks.getBookmarkURI(aBookmarkId);
-    let title = bookmarks.getItemTitle(aBookmarkId) || uri.spec;
+    let uri = this._bookmarkService.getBookmarkURI(aBookmarkId);
+    let title = this._bookmarkService.getItemTitle(aBookmarkId) || uri.spec;
 
     item.setAttribute("value", uri.spec);
     item.setAttribute("label", title);
@@ -263,11 +279,94 @@ BookmarksView.prototype = {
   removeBookmark: function bv_removeBookmark(aBookmarkId) {
     let item = this._getItemForBookmarkId(aBookmarkId);
     let index = this._set.getIndexOfItem(item);
-    this._set.removeItemAt(index);
+    this._set.removeItemAt(index, this._inBatch);
   },
 
   destruct: function bv_destruct() {
-    PlacesUtils.bookmarks.removeObserver(this._changes);
+    this._bookmarkService.removeObserver(this._changes);
+    window.removeEventListener('MozAppbarDismissing', this, false);
+    window.removeEventListener('BookmarksNeedsRefresh', this, false);
+  },
+
+  doActionOnSelectedTiles: function bv_doActionOnSelectedTiles(aActionName, aEvent) {
+    let tileGroup = this._set;
+    let selectedTiles = tileGroup.selectedItems;
+
+    switch (aActionName){
+      case "delete":
+        Array.forEach(selectedTiles, function(aNode) {
+          if (!this._toRemove) {
+            this._toRemove = [];
+          }
+
+          let itemId = this._getBookmarkIdForItem(aNode);
+
+          this._toRemove.push(itemId);
+          this.removeBookmark(itemId);
+        }, this);
+
+        // stop the appbar from dismissing
+        aEvent.preventDefault();
+
+        // at next tick, re-populate the context appbar.
+        setTimeout(function(){
+          // fire a MozContextActionsChange event to update the context appbar
+          let event = document.createEvent("Events");
+          // we need the restore button to show (the tile node will go away though)
+          event.actions = ["restore"];
+          event.initEvent("MozContextActionsChange", true, false);
+          tileGroup.dispatchEvent(event);
+        }, 0);
+        break;
+
+      case "restore":
+        // clear toRemove and let _sendNeedsRefresh update the items.
+        this._toRemove = null;
+        break;
+
+      case "unpin":
+        Array.forEach(selectedTiles, function(aNode) {
+          let itemId = this._getBookmarkIdForItem(aNode);
+
+          if (this._filterUnpinned)
+            this.removeBookmark(itemId);
+
+          this._pinHelper.setUnpinned(itemId);
+        }, this);
+        break;
+
+      case "pin":
+        Array.forEach(selectedTiles, function(aNode) {
+          let itemId = this._getBookmarkIdForItem(aNode);
+
+          this._pinHelper.setPinned(itemId);
+        }, this);
+        break;
+
+      default:
+        return;
+    }
+
+    // Send refresh event so all view are in sync.
+    this._sendNeedsRefresh();
+  },
+
+  handleEvent: function bv_handleEvent(aEvent) {
+    switch (aEvent.type){
+      case "MozAppbarDismissing":
+        // If undo wasn't pressed, time to do definitive actions.
+        if (this._toRemove) {
+          for (let bookmarkId of this._toRemove) {
+            this._bookmarkService.removeItem(bookmarkId);
+          }
+          this._toRemove = null;
+        }
+        break;
+
+      case "BookmarksNeedsRefresh":
+        this.getBookmarks(true);
+        break;
+    }
   }
 };
 
@@ -276,7 +375,8 @@ var BookmarksStartView = {
   get _grid() { return document.getElementById("start-bookmarks-grid"); },
 
   init: function init() {
-    this._view = new BookmarksView(this._grid, StartUI.maxResultsPerSection, Bookmarks.metroRoot);
+    this._view = new BookmarksView(this._grid, StartUI.maxResultsPerSection, Bookmarks.metroRoot, true);
+    this._view.getBookmarks();
   },
 
   uninit: function uninit() {
@@ -299,6 +399,7 @@ var BookmarksPanelView = {
   },
 
   show: function show() {
+    this._view.getBookmarks(true);
     this._grid.arrangeItems();
   },
 
@@ -314,7 +415,7 @@ var BookmarksPanelView = {
  */
 function BookmarkChangeListener(aView) {
   this._view = aView;
-};
+}
 
 BookmarkChangeListener.prototype = {
   //////////////////////////////////////////////////////////////////////////////
@@ -323,37 +424,37 @@ BookmarkChangeListener.prototype = {
   onEndUpdateBatch: function () { },
 
   onItemAdded: function bCL_onItemAdded(aItemId, aParentId, aIndex, aItemType, aURI, aTitle, aDateAdded, aGUID, aParentGUID) {
-    if (!this._view.inCurrentView(aParentId, aIndex, aItemType))
-      return;
-
-    this._view.addBookmark(aItemId);
+    this._view.getBookmarks(true);
   },
 
   onItemChanged: function bCL_onItemChanged(aItemId, aProperty, aIsAnnotationProperty, aNewValue, aLastModified, aItemType, aParentId, aGUID, aParentGUID) {
     let itemIndex = PlacesUtils.bookmarks.getItemIndex(aItemId);
-    if (!this._view.inCurrentView(aParentId, itemIndex, aItemType))
+    if (!this._view.inCurrentView(aParentId, aItemId))
       return;
-    
+
     this._view.updateBookmark(aItemId);
   },
 
   onItemMoved: function bCL_onItemMoved(aItemId, aOldParentId, aOldIndex, aNewParentId, aNewIndex, aItemType, aGUID, aOldParentGUID, aNewParentGUID) {
-    let wasInView = this._view.inCurrentView(aOldParentId, aOldIndex, aItemType);
-    let nowInView = this._view.inCurrentView(aNewParentId, aNewIndex, aItemType);
+    let wasInView = this._view.inCurrentView(aOldParentId, aItemId);
+    let nowInView = this._view.inCurrentView(aNewParentId, aItemId);
 
     if (!wasInView && nowInView)
-      this._view.addBookmark(aItemId, aParentId, aIndex, aItemType, aURI, aTitle, aDateAdded);
+      this._view.addBookmark(aItemId);
 
     if (wasInView && !nowInView)
       this._view.removeBookmark(aItemId);
+
+    this._view.getBookmarks(true);
   },
 
   onBeforeItemRemoved: function (aItemId, aItemType, aParentId, aGUID, aParentGUID) { },
   onItemRemoved: function bCL_onItemRemoved(aItemId, aParentId, aIndex, aItemType, aURI, aGUID, aParentGUID) {
-    if (!this._view.inCurrentView(aParentId, aIndex, aItemType))
+    if (!this._view.inCurrentView(aParentId, aItemId))
       return;
 
     this._view.removeBookmark(aItemId);
+    this._view.getBookmarks(true);
   },
 
   onItemVisited: function(aItemId, aVisitId, aTime, aTransitionType, aURI, aParentId, aGUID, aParentGUID) { },

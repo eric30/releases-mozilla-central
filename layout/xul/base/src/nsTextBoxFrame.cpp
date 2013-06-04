@@ -23,6 +23,7 @@
 #include "nsITheme.h"
 #include "nsUnicharUtils.h"
 #include "nsContentUtils.h"
+#include "nsCxPusher.h"
 #include "nsDisplayList.h"
 #include "nsCSSRendering.h"
 #include "nsIReflowCallback.h"
@@ -107,7 +108,7 @@ nsTextBoxFrame::~nsTextBoxFrame()
 }
 
 
-NS_IMETHODIMP
+void
 nsTextBoxFrame::Init(nsIContent*      aContent,
                      nsIFrame*        aParent,
                      nsIFrame*        aPrevInFlow)
@@ -120,8 +121,6 @@ nsTextBoxFrame::Init(nsIContent*      aContent,
 
     // register access key
     RegUnregAccessKey(true);
-
-    return NS_OK;
 }
 
 void

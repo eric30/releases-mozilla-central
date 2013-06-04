@@ -37,17 +37,8 @@ HTMLFieldSetElement::~HTMLFieldSetElement()
 
 // nsISupports
 
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(HTMLFieldSetElement,
-                                                nsGenericHTMLFormElement)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mValidity)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mElements)
-NS_IMPL_CYCLE_COLLECTION_UNLINK_END
-
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(HTMLFieldSetElement,
-                                                  nsGenericHTMLFormElement)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mValidity)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mElements)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+NS_IMPL_CYCLE_COLLECTION_INHERITED_2(HTMLFieldSetElement, nsGenericHTMLFormElement,
+                                     mValidity, mElements)
 
 NS_IMPL_ADDREF_INHERITED(HTMLFieldSetElement, Element)
 NS_IMPL_RELEASE_INHERITED(HTMLFieldSetElement, Element)
@@ -245,7 +236,7 @@ HTMLFieldSetElement::NotifyElementsForFirstLegendChange(bool aNotify)
 }
 
 JSObject*
-HTMLFieldSetElement::WrapNode(JSContext* aCx, JSObject* aScope)
+HTMLFieldSetElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
   return HTMLFieldSetElementBinding::Wrap(aCx, aScope, this);
 }

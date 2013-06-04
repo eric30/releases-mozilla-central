@@ -13,7 +13,7 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGViewElement::WrapNode(JSContext *aCx, JSObject *aScope)
+SVGViewElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
   return SVGViewElementBinding::Wrap(aCx, aScope, this);
 }
@@ -38,19 +38,11 @@ nsSVGElement::EnumInfo SVGViewElement::sEnumInfo[1] =
 };
 
 //----------------------------------------------------------------------
-// nsISupports methods
-
-NS_IMPL_ISUPPORTS_INHERITED3(SVGViewElement, SVGViewElementBase,
-                             nsIDOMNode, nsIDOMElement,
-                             nsIDOMSVGElement)
-
-//----------------------------------------------------------------------
 // Implementation
 
 SVGViewElement::SVGViewElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : SVGViewElementBase(aNodeInfo)
 {
-  SetIsDOMBinding();
 }
 
 //----------------------------------------------------------------------
@@ -72,12 +64,10 @@ SVGViewElement::SetZoomAndPan(uint16_t aZoomAndPan, ErrorResult& rv)
 
 //----------------------------------------------------------------------
 
-already_AddRefed<nsIDOMSVGAnimatedRect>
+already_AddRefed<SVGAnimatedRect>
 SVGViewElement::ViewBox()
 {
-  nsCOMPtr<nsIDOMSVGAnimatedRect> box;
-  mViewBox.ToDOMAnimatedRect(getter_AddRefs(box), this);
-  return box.forget();
+  return mViewBox.ToSVGAnimatedRect(this);
 }
 
 already_AddRefed<DOMSVGAnimatedPreserveAspectRatio>
@@ -90,7 +80,7 @@ SVGViewElement::PreserveAspectRatio()
 
 //----------------------------------------------------------------------
 
-already_AddRefed<nsIDOMSVGStringList>
+already_AddRefed<DOMSVGStringList>
 SVGViewElement::ViewTarget()
 {
   return DOMSVGStringList::GetDOMWrapper(

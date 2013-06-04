@@ -41,6 +41,66 @@ function sendAsyncMsg(msg, data) {
   sendAsyncMessage('browser-element-api:call', data);
 }
 
+function sendSyncMsg(msg, data) {
+  // Ensure that we don't send any messages before BrowserElementChild.js
+  // finishes loading.
+  if (!BrowserElementIsReady)
+    return;
+
+  if (!data) {
+    data = { };
+  }
+
+  data.msg_name = msg;
+  return sendSyncMessage('browser-element-api:call', data);
+}
+
+let CERTIFICATE_ERROR_PAGE_PREF = 'security.alternate_certificate_error_page';
+
+let NS_ERROR_MODULE_BASE_OFFSET = 0x45;
+let NS_ERROR_MODULE_SECURITY= 21;
+function NS_ERROR_GET_MODULE(err) {
+  return ((((err) >> 16) - NS_ERROR_MODULE_BASE_OFFSET) & 0x1fff) 
+}
+
+function NS_ERROR_GET_CODE(err) {
+  return ((err) & 0xffff);
+}
+
+let SEC_ERROR_BASE = Ci.nsINSSErrorsService.NSS_SEC_ERROR_BASE;
+let SEC_ERROR_UNKNOWN_ISSUER = (SEC_ERROR_BASE + 13);
+let SEC_ERROR_CA_CERT_INVALID =   (SEC_ERROR_BASE + 36);
+let SEC_ERROR_UNTRUSTED_ISSUER = (SEC_ERROR_BASE + 20);
+let SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE = (SEC_ERROR_BASE + 30);
+let SEC_ERROR_UNTRUSTED_CERT = (SEC_ERROR_BASE + 21);
+let SEC_ERROR_INADEQUATE_KEY_USAGE = (SEC_ERROR_BASE + 90);
+let SEC_ERROR_EXPIRED_CERTIFICATE = (SEC_ERROR_BASE + 11);
+let SEC_ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED = (SEC_ERROR_BASE + 176);
+
+let SSL_ERROR_BASE = Ci.nsINSSErrorsService.NSS_SSL_ERROR_BASE;
+let SSL_ERROR_BAD_CERT_DOMAIN = (SSL_ERROR_BASE + 12);
+
+function getErrorClass(errorCode) {
+  let NSPRCode = -1 * NS_ERROR_GET_CODE(errorCode);
+ 
+  switch (NSPRCode) {
+    case SEC_ERROR_UNKNOWN_ISSUER:
+    case SEC_ERROR_CA_CERT_INVALID:
+    case SEC_ERROR_UNTRUSTED_ISSUER:
+    case SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE:
+    case SEC_ERROR_UNTRUSTED_CERT:
+    case SEC_ERROR_INADEQUATE_KEY_USAGE:
+    case SSL_ERROR_BAD_CERT_DOMAIN:
+    case SEC_ERROR_EXPIRED_CERTIFICATE:
+    case SEC_ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED:
+      return Ci.nsINSSErrorsService.ERROR_CLASS_BAD_CERT;
+    default:
+      return Ci.nsINSSErrorsService.ERROR_CLASS_SSL_PROTOCOL;
+  }
+
+  return null;
+}
+
 /**
  * The BrowserElementChild implements one half of <iframe mozbrowser>.
  * (The other half is, unsurprisingly, BrowserElementParent.)
@@ -103,6 +163,8 @@ BrowserElementChild.prototype = {
     // Counter of contextmenu events fired
     this._ctxCounter = 0;
 
+    this._shuttingDown = false;
+
     addEventListener('DOMTitleChanged',
                      this._titleChangedHandler.bind(this),
                      /* useCapture = */ true,
@@ -111,6 +173,16 @@ BrowserElementChild.prototype = {
     addEventListener('DOMLinkAdded',
                      this._iconChangedHandler.bind(this),
                      /* useCapture = */ true,
+                     /* wantsUntrusted = */ false);
+
+    // This listens to unload events from our message manager, but /not/ from
+    // the |content| window.  That's because the window's unload event doesn't
+    // bubble, and we're not using a capturing listener.  If we'd used
+    // useCapture == true, we /would/ hear unload events from the window, which
+    // is not what we want!
+    addEventListener('unload',
+                     this._unloadHandler.bind(this),
+                     /* useCapture = */ false,
                      /* wantsUntrusted = */ false);
 
     // Registers a MozAfterPaint handler for the very first paint.
@@ -185,6 +257,10 @@ BrowserElementChild.prototype = {
     Services.obs.addObserver(this,
                              'ask-parent-to-rollback-fullscreen',
                              /* ownsWeak = */ true);
+
+    Services.obs.addObserver(this,
+                             'xpcom-shutdown',
+                             /* ownsWeak = */ true);
   },
 
   observe: function(subject, topic, data) {
@@ -201,7 +277,18 @@ BrowserElementChild.prototype = {
       case 'ask-parent-to-rollback-fullscreen':
         sendAsyncMsg('rollback-fullscreen');
         break;
+      case 'xpcom-shutdown':
+        this._shuttingDown = true;
+        break;
     }
+  },
+
+  /**
+   * Called when our TabChildGlobal starts to die.  This is not called when the
+   * page inside |content| unloads.
+   */
+  _unloadHandler: function() {
+    this._shuttingDown = true;
   },
 
   _tryGetInnerWindowID: function(win) {
@@ -275,9 +362,10 @@ BrowserElementChild.prototype = {
 
     let thread = Services.tm.currentThread;
     debug("Nested event loop - begin");
-    while (win.modalDepth == origModalDepth) {
+    while (win.modalDepth == origModalDepth && !this._shuttingDown) {
       // Bail out of the loop if the inner window changed; that means the
-      // window navigated.
+      // window navigated.  Bail out when we're shutting down because otherwise
+      // we'll leak our window.
       if (this._tryGetInnerWindowID(win) !== innerWindowID) {
         debug("_waitForResult: Inner window ID changed " +
               "while in nested event loop.");
@@ -298,7 +386,9 @@ BrowserElementChild.prototype = {
     let returnValue = win.modalReturnValue;
     delete win.modalReturnValue;
 
-    utils.leaveModalStateWithWindow(modalStateWin);
+    if (!this._shuttingDown) {
+      utils.leaveModalStateWithWindow(modalStateWin);
+    }
 
     debug("Leaving modal state (outerID=" + outerWindowID + ", " +
                                "innerID=" + innerWindowID + ")");
@@ -448,8 +538,6 @@ BrowserElementChild.prototype = {
       return;
     }
 
-    e.preventDefault();
-
     this._ctxCounter++;
     this._ctxHandlers = {};
 
@@ -478,7 +566,18 @@ BrowserElementChild.prototype = {
         menuData.contextmenu = this._buildMenuObj(menu, '');
       }
     }
-    sendAsyncMsg('contextmenu', menuData);
+
+    // The value returned by the contextmenu sync call is true iff the embedder
+    // called preventDefault() on its contextmenu event.
+    //
+    // We call preventDefault() on our contextmenu event iff the embedder called
+    // preventDefault() on /its/ contextmenu event.  This way, if the embedder
+    // ignored the contextmenu event, TabChild will fire a click.
+    if (sendSyncMsg('contextmenu', menuData)[0]) {
+      e.preventDefault();
+    } else {
+      this._ctxHandlers = {};
+    }
   },
 
   _getSystemCtxMenuData: function(elem) {
@@ -646,13 +745,7 @@ BrowserElementChild.prototype = {
     }
 
     this._forcedVisible = data.json.visible;
-    this._updateDocShellVisibility();
-
-    // Fire a notification to the ProcessPriorityManager to reset this
-    // process's priority now (as opposed to after a brief delay).
-    var os = Cc["@mozilla.org/observer-service;1"].getService(Ci.nsIObserverService);
-    os.notifyObservers(/* subject */ null, 'process-priority:reset-now',
-                       /* data */ null);
+    this._updateVisibility();
   },
 
   _recvVisible: function(data) {
@@ -669,13 +762,14 @@ BrowserElementChild.prototype = {
   _recvOwnerVisibilityChange: function(data) {
     debug("Received ownerVisibilityChange: (" + data.json.visible + ")");
     this._ownerVisible = data.json.visible;
-    this._updateDocShellVisibility();
+    this._updateVisibility();
   },
 
-  _updateDocShellVisibility: function() {
+  _updateVisibility: function() {
     var visible = this._forcedVisible && this._ownerVisible;
     if (docShell.isActive !== visible) {
       docShell.isActive = visible;
+      sendAsyncMsg('visibilitychange', {visible: visible});
     }
   },
 
@@ -800,6 +894,24 @@ BrowserElementChild.prototype = {
         if (status == Cr.NS_OK ||
             status == Cr.NS_BINDING_ABORTED) {
           return;
+        }
+
+        if (NS_ERROR_GET_MODULE(status) == NS_ERROR_MODULE_SECURITY && 
+            getErrorClass(status) == Ci.nsINSSErrorsService.ERROR_CLASS_BAD_CERT) {
+
+          // XXX Is there a point firing the event if the error page is not
+          // certerror? If yes, maybe we should add a property to the
+          // event to to indicate whether there is a custom page. That would
+          // let the embedder have more control over the desired behavior.
+          var errorPage = null;
+          try {
+            errorPage = Services.prefs.getCharPref(CERTIFICATE_ERROR_PAGE_PREF);
+          } catch(e) {}
+
+          if (errorPage == 'certerror') {
+            sendAsyncMsg('error', { type: 'certerror' });
+            return;
+          }
         }
 
         // TODO See nsDocShell::DisplayLoadError for a list of all the error

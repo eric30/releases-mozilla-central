@@ -20,7 +20,9 @@
 #include "nsIServiceManager.h"
 #include "mozilla/Preferences.h"
 #include "BasicLayers.h"
+#include "ClientLayerManager.h"
 #include "LayerManagerOGL.h"
+#include "mozilla/layers/Compositor.h"
 #include "nsIXULRuntime.h"
 #include "nsIXULWindow.h"
 #include "nsIBaseWindow.h"
@@ -34,6 +36,7 @@
 #include "prenv.h"
 #include "mozilla/Attributes.h"
 #include "nsContentUtils.h"
+#include "gfxPlatform.h"
 
 #ifdef ACCESSIBILITY
 #include "nsAccessibilityService.h"
@@ -44,7 +47,6 @@
 
 static void debug_RegisterPrefCallbacks();
 
-static bool debug_InSecureKeyboardInputMode = false;
 #endif
 
 #ifdef NOISY_WIDGET_LEAKS
@@ -122,7 +124,9 @@ nsBaseWidget::nsBaseWidget()
 static void DeferredDestroyCompositor(CompositorParent* aCompositorParent,
                               CompositorChild* aCompositorChild)
 {
-    aCompositorChild->Destroy();
+    // Bug 848949 needs to be fixed before
+    // we can close the channel properly
+    //aCompositorChild->Close();
     aCompositorParent->Release();
     aCompositorChild->Release();
 }
@@ -131,6 +135,7 @@ void nsBaseWidget::DestroyCompositor()
 {
   if (mCompositorChild) {
     mCompositorChild->SendWillStop();
+    mCompositorChild->Destroy();
 
     // The call just made to SendWillStop can result in IPC from the
     // CompositorParent to the CompositorChild (e.g. caused by the destruction
@@ -381,6 +386,18 @@ float nsBaseWidget::GetDPI()
 
 double nsIWidget::GetDefaultScale()
 {
+  double devPixelsPerCSSPixel = DefaultScaleOverride();
+
+  if (devPixelsPerCSSPixel <= 0.0) {
+    devPixelsPerCSSPixel = GetDefaultScaleInternal();
+  }
+
+  return devPixelsPerCSSPixel;
+}
+
+/* static */
+double nsIWidget::DefaultScaleOverride()
+{
   // The number of device pixels per CSS pixel. A value <= 0 means choose
   // automatically based on the DPI. A positive value is used as-is. This effectively
   // controls the size of a CSS "px".
@@ -389,10 +406,6 @@ double nsIWidget::GetDefaultScale()
   nsAdoptingCString prefString = Preferences::GetCString("layout.css.devPixelsPerPx");
   if (!prefString.IsEmpty()) {
     devPixelsPerCSSPixel = PR_strtod(prefString, nullptr);
-  }
-
-  if (devPixelsPerCSSPixel <= 0.0) {
-    devPixelsPerCSSPixel = GetDefaultScaleInternal();
   }
 
   return devPixelsPerCSSPixel;
@@ -545,17 +558,6 @@ NS_IMETHODIMP nsBaseWidget::SetSizeMode(int32_t aMode)
 
 //-------------------------------------------------------------------------
 //
-// Get the size mode (minimized, maximized, that sort of thing...)
-//
-//-------------------------------------------------------------------------
-NS_IMETHODIMP nsBaseWidget::GetSizeMode(int32_t* aMode)
-{
-  *aMode = mSizeMode;
-  return NS_OK;
-}
-
-//-------------------------------------------------------------------------
-//
 // Get the foreground color
 //
 //-------------------------------------------------------------------------
@@ -701,6 +703,12 @@ NS_IMETHODIMP nsBaseWidget::MakeFullScreen(bool aFullScreen)
     if (!mOriginalBounds)
       mOriginalBounds = new nsIntRect();
     GetScreenBounds(*mOriginalBounds);
+    // convert dev pix to display pix for window manipulation 
+    double scale = GetDefaultScale();
+    mOriginalBounds->x = NSToIntRound(mOriginalBounds->x / scale);
+    mOriginalBounds->y = NSToIntRound(mOriginalBounds->y / scale);
+    mOriginalBounds->width = NSToIntRound(mOriginalBounds->width / scale);
+    mOriginalBounds->height = NSToIntRound(mOriginalBounds->height / scale);
 
     // Move to top-left corner of screen and size to the screen dimensions
     nsCOMPtr<nsIScreenManager> screenManager;
@@ -708,16 +716,14 @@ NS_IMETHODIMP nsBaseWidget::MakeFullScreen(bool aFullScreen)
     NS_ASSERTION(screenManager, "Unable to grab screenManager.");
     if (screenManager) {
       nsCOMPtr<nsIScreen> screen;
-      // convert dev pix to display/CSS pix for ScreenForRect
-      double scale = GetDefaultScale();
-      screenManager->ScreenForRect(mOriginalBounds->x / scale,
-                                   mOriginalBounds->y / scale,
-                                   mOriginalBounds->width / scale,
-                                   mOriginalBounds->height / scale,
+      screenManager->ScreenForRect(mOriginalBounds->x,
+                                   mOriginalBounds->y,
+                                   mOriginalBounds->width,
+                                   mOriginalBounds->height,
                                    getter_AddRefs(screen));
       if (screen) {
         int32_t left, top, width, height;
-        if (NS_SUCCEEDED(screen->GetRect(&left, &top, &width, &height))) {
+        if (NS_SUCCEEDED(screen->GetRectDisplayPix(&left, &top, &width, &height))) {
           Resize(left, top, width, height, true);
         }
       }
@@ -803,10 +809,8 @@ nsBaseWidget::ComputeShouldAccelerate(bool aDefault)
   bool isSmallPopup = ((mWindowType == eWindowType_popup) &&
                       (mPopupType != ePopupTypePanel));
   // we should use AddBoolPrefVarCache
-  bool disableAcceleration = isSmallPopup ||
-    Preferences::GetBool("layers.acceleration.disabled", false);
-  mForceLayersAcceleration =
-    Preferences::GetBool("layers.acceleration.force-enabled", false);
+  bool disableAcceleration = isSmallPopup || gfxPlatform::GetPrefLayersAccelerationDisabled() || (mWindowType == eWindowType_invisible);
+  mForceLayersAcceleration = gfxPlatform::GetPrefLayersAccelerationForceEnabled();
 
   const char *acceleratedEnv = PR_GetEnv("MOZ_ACCELERATED");
   accelerateByDefault = accelerateByDefault ||
@@ -842,10 +846,10 @@ nsBaseWidget::ComputeShouldAccelerate(bool aDefault)
     return true;
 
   if (!whitelisted) {
-    NS_WARNING("OpenGL-accelerated layers are not supported on this system.");
+    NS_WARNING("OpenGL-accelerated layers are not supported on this system");
 #ifdef MOZ_ANDROID_OMTC
     NS_RUNTIMEABORT("OpenGL-accelerated layers are a hard requirement on this platform. "
-                    "Cannot continue without support for them.");
+                    "Cannot continue without support for them");
 #endif
     return false;
   }
@@ -857,29 +861,52 @@ nsBaseWidget::ComputeShouldAccelerate(bool aDefault)
   return aDefault;
 }
 
+CompositorParent* nsBaseWidget::NewCompositorParent(int aSurfaceWidth,
+                                                    int aSurfaceHeight)
+{
+  return new CompositorParent(this, false, aSurfaceWidth, aSurfaceHeight);
+}
+
 void nsBaseWidget::CreateCompositor()
 {
-  bool renderToEGLSurface = false;
-#ifdef MOZ_ANDROID_OMTC
-  renderToEGLSurface = true;
-#endif
   nsIntRect rect;
   GetBounds(rect);
-  mCompositorParent =
-    new CompositorParent(this, renderToEGLSurface, rect.width, rect.height);
-  LayerManager* lm = CreateBasicLayerManager();
+  CreateCompositor(rect.width, rect.height);
+}
+
+mozilla::layers::LayersBackend
+nsBaseWidget::GetPreferredCompositorBackend()
+{
+  // We need a separate preference here (instead of using mUseLayersAcceleration)
+  // because we force enable accelerated layers with e10s. Once the BasicCompositor
+  // is stable enough to be used for Ripc/Cipc, then we can remove that and this
+  // pref.
+  if (Preferences::GetBool("layers.offmainthreadcomposition.prefer-basic", false)) {
+    return mozilla::layers::LAYERS_BASIC;
+  }
+
+  return mozilla::layers::LAYERS_OPENGL;
+}
+
+void nsBaseWidget::CreateCompositor(int aWidth, int aHeight)
+{
+  // Recreating this is tricky, as we may still have an old and we need
+  // to make sure it's properly destroyed by calling DestroyCompositor!
+
+  mCompositorParent = NewCompositorParent(aWidth, aHeight);
+  AsyncChannel *parentChannel = mCompositorParent->GetIPCChannel();
+  LayerManager* lm = new ClientLayerManager(this);
   MessageLoop *childMessageLoop = CompositorParent::CompositorLoop();
   mCompositorChild = new CompositorChild(lm);
-  AsyncChannel *parentChannel = mCompositorParent->GetIPCChannel();
   AsyncChannel::Side childSide = mozilla::ipc::AsyncChannel::Child;
   mCompositorChild->Open(parentChannel, childMessageLoop, childSide);
-  int32_t maxTextureSize;
-  PLayersChild* shadowManager;
-  mozilla::layers::LayersBackend backendHint =
-    mUseLayersAcceleration ? mozilla::layers::LAYERS_OPENGL : mozilla::layers::LAYERS_BASIC;
-  mozilla::layers::LayersBackend parentBackend;
-  shadowManager = mCompositorChild->SendPLayersConstructor(
-    backendHint, 0, &parentBackend, &maxTextureSize);
+
+  TextureFactoryIdentifier textureFactoryIdentifier;
+  PLayerTransactionChild* shadowManager;
+  mozilla::layers::LayersBackend backendHint = GetPreferredCompositorBackend();
+
+  shadowManager = mCompositorChild->SendPLayerTransactionConstructor(
+    backendHint, 0, &textureFactoryIdentifier);
 
   if (shadowManager) {
     ShadowLayerForwarder* lf = lm->AsShadowForwarder();
@@ -889,26 +916,27 @@ void nsBaseWidget::CreateCompositor()
       return;
     }
     lf->SetShadowManager(shadowManager);
-    lf->SetParentBackendType(parentBackend);
-    lf->SetMaxTextureSize(maxTextureSize);
+    lf->IdentifyTextureHost(textureFactoryIdentifier);
 
     mLayerManager = lm;
-  } else {
-    // We don't currently want to support not having a LayersChild
-    NS_RUNTIMEABORT("failed to construct LayersChild");
-    delete lm;
-    mCompositorChild = nullptr;
+    return;
   }
+
+  // Failed to create a compositor!
+  NS_WARNING("Failed to create an OMT compositor.");
+  DestroyCompositor();
+  // Compositor child had the only reference to LayerManager and will have
+  // deallocated it when being freed.
 }
 
 bool nsBaseWidget::ShouldUseOffMainThreadCompositing()
 {
   bool isSmallPopup = ((mWindowType == eWindowType_popup) &&
-                      (mPopupType != ePopupTypePanel));
+                      (mPopupType != ePopupTypePanel)) || (mWindowType == eWindowType_invisible);
   return CompositorParent::CompositorLoop() && !isSmallPopup;
 }
 
-LayerManager* nsBaseWidget::GetLayerManager(PLayersChild* aShadowManager,
+LayerManager* nsBaseWidget::GetLayerManager(PLayerTransactionChild* aShadowManager,
                                             LayersBackend aBackendHint,
                                             LayerManagerPersistence aPersistence,
                                             bool* aAllowRetaining)
@@ -958,7 +986,7 @@ LayerManager* nsBaseWidget::GetLayerManager(PLayersChild* aShadowManager,
 
 BasicLayerManager* nsBaseWidget::CreateBasicLayerManager()
 {
-      return new BasicShadowLayerManager(this);
+  return new BasicLayerManager(this);
 }
 
 CompositorChild* nsBaseWidget::GetRemoteRenderer()
@@ -1012,8 +1040,13 @@ NS_METHOD nsBaseWidget::SetWindowClass(const nsAString& xulWinType)
 NS_METHOD nsBaseWidget::MoveClient(double aX, double aY)
 {
   nsIntPoint clientOffset(GetClientOffset());
-  aX -= clientOffset.x;
-  aY -= clientOffset.y;
+
+  // GetClientOffset returns device pixels; scale back to display pixels
+  // if that's what this widget uses for the Move/Resize APIs
+  double scale = BoundsUseDisplayPixels() ? 1.0 / GetDefaultScale() : 1.0;
+  aX -= clientOffset.x * scale;
+  aY -= clientOffset.y * scale;
+
   return Move(aX, aY);
 }
 
@@ -1026,8 +1059,12 @@ NS_METHOD nsBaseWidget::ResizeClient(double aWidth,
 
   nsIntRect clientBounds;
   GetClientBounds(clientBounds);
-  aWidth = mBounds.width + (aWidth - clientBounds.width);
-  aHeight = mBounds.height + (aHeight - clientBounds.height);
+
+  // GetClientBounds and mBounds are device pixels; scale back to display pixels
+  // if that's what this widget uses for the Move/Resize APIs
+  double scale = BoundsUseDisplayPixels() ? 1.0 / GetDefaultScale() : 1.0;
+  aWidth = mBounds.width * scale + (aWidth - clientBounds.width * scale);
+  aHeight = mBounds.height * scale + (aHeight - clientBounds.height * scale);
 
   return Resize(aWidth, aHeight, aRepaint);
 }
@@ -1043,12 +1080,14 @@ NS_METHOD nsBaseWidget::ResizeClient(double aX,
 
   nsIntRect clientBounds;
   GetClientBounds(clientBounds);
-  aWidth = mBounds.width + (aWidth - clientBounds.width);
-  aHeight = mBounds.height + (aHeight - clientBounds.height);
+
+  double scale = BoundsUseDisplayPixels() ? 1.0 / GetDefaultScale() : 1.0;
+  aWidth = mBounds.width * scale + (aWidth - clientBounds.width * scale);
+  aHeight = mBounds.height * scale + (aHeight - clientBounds.height * scale);
 
   nsIntPoint clientOffset(GetClientOffset());
-  aX -= clientOffset.x;
-  aY -= clientOffset.y;
+  aX -= clientOffset.x * scale;
+  aY -= clientOffset.y * scale;
 
   return Resize(aX, aY, aWidth, aHeight, aRepaint);
 }
@@ -1133,26 +1172,6 @@ nsBaseWidget::SetIcon(const nsAString&)
 }
 
 NS_IMETHODIMP
-nsBaseWidget::BeginSecureKeyboardInput()
-{
-#ifdef DEBUG
-  NS_ASSERTION(!debug_InSecureKeyboardInputMode, "Attempting to nest call to BeginSecureKeyboardInput!");
-  debug_InSecureKeyboardInputMode = true;
-#endif
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsBaseWidget::EndSecureKeyboardInput()
-{
-#ifdef DEBUG
-  NS_ASSERTION(debug_InSecureKeyboardInputMode, "Calling EndSecureKeyboardInput when it hasn't been enabled!");
-  debug_InSecureKeyboardInputMode = false;
-#endif
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 nsBaseWidget::SetWindowTitlebarColor(nscolor aColor, bool aActive)
 {
   return NS_ERROR_NOT_IMPLEMENTED;
@@ -1179,11 +1198,10 @@ nsBaseWidget::SetLayersAcceleration(bool aEnabled)
   if (usedAcceleration == mUseLayersAcceleration) {
     return NS_OK;
   }
-
   if (mLayerManager) {
     mLayerManager->Destroy();
   }
-  mLayerManager = NULL;
+  mLayerManager = nullptr;
   return NS_OK;
 }
 
@@ -1413,6 +1431,9 @@ nsBaseWidget::NotifyUIStateChanged(UIStateChangeType aShowAccelerators,
     return;
 
   nsIPresShell* presShell = mWidgetListener->GetPresShell();
+  if (!presShell)
+    return;
+
   nsIDocument* doc = presShell->GetDocument();
   if (doc) {
     nsPIDOMWindow* win = doc->GetWindow();

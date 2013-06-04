@@ -30,7 +30,6 @@ EXTRACSRCS = tmreader.c
 EXTRACPPSRCS = adreader.cpp
 
 ifndef MOZ_PROFILE_GENERATE
-PROGRAM		= spacetrace$(BIN_SUFFIX)
 
 PROGCSRCS = \
   spacetrace.c \
@@ -42,8 +41,6 @@ PROGOBJS = $(PROGCSRCS:.c=.$(OBJ_SUFFIX))
 endif
 
 CSRCS = $(SIMPLECSRCS) $(EXTRACSRCS) $(PROGCSRCS)
-CPPSRCS = $(SIMPLECPPSRCS) $(EXTRACPPSRCS)
-
 ifeq ($(OS_ARCH),WINNT)
 LOCAL_INCLUDES	+= -I$(topsrcdir)/config/os2
 endif

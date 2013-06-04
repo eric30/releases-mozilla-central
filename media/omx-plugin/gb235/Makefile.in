@@ -19,7 +19,6 @@ VPATH   = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = omxplugingb235
 MODULE_NAME = omxplugingb235
 LIBRARY_NAME = omxplugingb235
 FORCE_SHARED_LIB = 1
@@ -33,10 +32,6 @@ USE_STATIC_LIBS = 1
 # Need to custom install OMX media plugin
 NO_DIST_INSTALL = 1
 NO_INSTALL = 1
-
-CPPSRCS = \
-    OmxPlugin235.cpp \
-    $(NULL)
 
 include $(topsrcdir)/config/rules.mk
 

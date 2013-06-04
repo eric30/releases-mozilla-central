@@ -11,6 +11,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=769370
 </head>
 <body>
 <a target="_blank" href="https://bugzilla.mozilla.org/show_bug.cgi?id=769370">Mozilla Bug 769370</a>
+<iframe name="testFrame" style="display: none"></iframe>
 <p id="display"></p>
 <pre id="test">
 <script type="application/javascript">
@@ -43,8 +44,6 @@ var validTypes =
   ["range", false],
   ["date", true],
   ["time", true],
-  // The next types have not been implemented but will fallback to "text"
-  // which has the same value.
   ["color", false],
 ];
 
@@ -134,6 +133,7 @@ function checkGarbageValues()
         var caught = false;
         element.valueAsDate = value;
       } catch(e) {
+        is(e.name, "TypeError", "Exception should be 'TypeError'.");
         caught = true;
       }
       ok(caught, "Assigning " + value + " to .valueAsDate should throw");
@@ -223,6 +223,9 @@ function checkDateSet()
     element.valueAsDate = new Date(data[0]);
     is(element.value, data[1], "valueAsDate should set the value to "
                                 + data[1]);
+    element.valueAsDate = new testFrame.Date(data[0]);
+    is(element.value, data[1], "valueAsDate with other-global date should " +
+                               "set the value to " + data[1]);
   }
 }
 
@@ -329,8 +332,6 @@ function checkWithBustedPrototype()
     var element = document.createElement('input');
     element.type = type;
 
-    var witnessDate = new Date();
-
     var backupPrototype = {};
     backupPrototype.getUTCFullYear = Date.prototype.getUTCFullYear;
     backupPrototype.getUTCMonth = Date.prototype.getUTCMonth;
@@ -346,9 +347,23 @@ function checkWithBustedPrototype()
 
     element.valueAsDate = new Date();
 
-    todo_isnot(element.valueAsDate, null, ".valueAsDate should not return null");
-    // TODO: check the Date object value (UTCFullYear, UTCMonth and UTCDate)
-    // when .valueAsDate will stop returning null.
+    isnot(element.valueAsDate, null, ".valueAsDate should not return null");
+    // The object returned by element.valueAsDate should return a Date object
+    // with the same prototype:
+    is(element.valueAsDate.getUTCFullYear, Date.prototype.getUTCFullYear,
+       "prototype is the same");
+    is(element.valueAsDate.getUTCMonth, Date.prototype.getUTCMonth,
+       "prototype is the same");
+    is(element.valueAsDate.getUTCDate, Date.prototype.getUTCDate,
+       "prototype is the same");
+    is(element.valueAsDate.getTime, Date.prototype.getTime,
+       "prototype is the same");
+    is(element.valueAsDate.setUTCFullYear, Date.prototype.setUTCFullYear,
+       "prototype is the same");
+
+    // However the Date should have the correct information.
+    var witnessDate = new Date(element.valueAsNumber);
+    is(element.valueAsDate.valueOf(), witnessDate.valueOf(), "correct Date");
 
     // Same test as above but using NaN instead of {}.
 
@@ -360,9 +375,23 @@ function checkWithBustedPrototype()
 
     element.valueAsDate = new Date();
 
-    todo_isnot(element.valueAsDate, null, ".valueAsDate should not return null");
-    // TODO: check the Date object value (UTCFullYear, UTCMonth and UTCDate)
-    // when .valueAsDate will stop returning null.
+    isnot(element.valueAsDate, null, ".valueAsDate should not return null");
+    // The object returned by element.valueAsDate should return a Date object
+    // with the same prototype:
+    is(element.valueAsDate.getUTCFullYear, Date.prototype.getUTCFullYear,
+       "prototype is the same");
+    is(element.valueAsDate.getUTCMonth, Date.prototype.getUTCMonth,
+       "prototype is the same");
+    is(element.valueAsDate.getUTCDate, Date.prototype.getUTCDate,
+       "prototype is the same");
+    is(element.valueAsDate.getTime, Date.prototype.getTime,
+       "prototype is the same");
+    is(element.valueAsDate.setUTCFullYear, Date.prototype.setUTCFullYear,
+       "prototype is the same");
+
+    // However the Date should have the correct information.
+    var witnessDate = new Date(element.valueAsNumber);
+    is(element.valueAsDate.valueOf(), witnessDate.valueOf(), "correct Date");
 
     Date.prototype.getUTCFullYear = backupPrototype.getUTCFullYear;
     Date.prototype.getUTCMonth = backupPrototype.getUTCMonth;

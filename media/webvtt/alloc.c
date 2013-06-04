@@ -34,10 +34,10 @@ static void default_free( void *unused, void *ptr );
 
 struct {
   /**
-   * Number of allocated objects. Forbid changing the allocator if this is not 
+   * Number of allocated objects. Forbid changing the allocator if this is not
    * equal to 0 
    */
-  webvtt_uint n_alloc; 
+  webvtt_uint n_alloc;
   webvtt_alloc_fn_ptr alloc;
   webvtt_free_fn_ptr free;
   void *alloc_data;
@@ -46,21 +46,24 @@ struct {
 static void *WEBVTT_CALLBACK
 default_alloc( void *unused, webvtt_uint nb )
 {
+  (void)unused;
   return malloc( nb );
 }
 
 static void WEBVTT_CALLBACK
 default_free( void *unused, void *ptr )
 {
+  (void)unused;
   free( ptr );
 }
 
 WEBVTT_EXPORT void
-webvtt_set_allocator( webvtt_alloc_fn_ptr alloc, webvtt_free_fn_ptr free, void *userdata )
+webvtt_set_allocator( webvtt_alloc_fn_ptr alloc, webvtt_free_fn_ptr free,
+                      void *userdata )
 {
   /**
    * TODO:
-   * This really needs a lock. But then, so does all the allocation/free 
+   * This really needs a lock. But then, so does all the allocation/free
    * functions...
    * that could be a problem.
    */

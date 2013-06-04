@@ -2200,6 +2200,9 @@ this.AddonManager = {
   PERM_CAN_DISABLE: 4,
   // Indicates that the Addon can be upgraded.
   PERM_CAN_UPGRADE: 8,
+  // Indicates that the Addon can be set to be optionally enabled
+  // on a case-by-case basis.
+  PERM_CAN_ASK_TO_ACTIVATE: 16,
 
   // General descriptions of where items are installed.
   // Installed in this profile.
@@ -2217,6 +2220,10 @@ this.AddonManager = {
   VIEW_TYPE_LIST: "list",
 
   TYPE_UI_HIDE_EMPTY: 16,
+  // Indicates that this add-on type supports the ask-to-activate state.
+  // That is, add-ons of this type can be set to be optionally enabled
+  // on a case-by-case basis.
+  TYPE_SUPPORTS_ASK_TO_ACTIVATE: 32,
 
   // Constants for Addon.applyBackgroundUpdates.
   // Indicates that the Addon should not update automatically.
@@ -2234,6 +2241,9 @@ this.AddonManager = {
   OPTIONS_TYPE_INLINE: 2,
   // Options will be displayed in a new tab, if possible
   OPTIONS_TYPE_TAB: 3,
+  // Same as OPTIONS_TYPE_INLINE, but no Preferences button will be shown.
+  // Used to indicate that only non-interactive information will be shown.
+  OPTIONS_TYPE_INLINE_INFO: 4,
 
   // Constants for displayed or hidden options notifications
   // Options notification will be displayed
@@ -2260,6 +2270,12 @@ this.AddonManager = {
   // an application change making an add-on compatible. Doesn't include
   // add-ons that were pending being enabled the last time the application ran.
   STARTUP_CHANGE_ENABLED: "enabled",
+
+  // Constants for the Addon.userDisabled property
+  // Indicates that the userDisabled state of this add-on is currently
+  // ask-to-activate. That is, it can be conditionally enabled on a
+  // case-by-case basis.
+  STATE_ASK_TO_ACTIVATE: "askToActivate",
 
 #ifdef MOZ_EM_DEBUG
   get __AddonManagerInternal__() {

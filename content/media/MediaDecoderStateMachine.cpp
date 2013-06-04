@@ -3,6 +3,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifdef XP_WIN
+// Include Windows headers required for enabling high precision timers.
+#include "windows.h"
+#include "mmsystem.h"
+#endif
+ 
 #include "mozilla/DebugOnly.h"
 #include "mozilla/StandardInteger.h"
 #include "mozilla/Util.h"
@@ -408,7 +414,7 @@ MediaDecoderStateMachine::MediaDecoderStateMachine(MediaDecoder* aDecoder,
   // If we've got more than mAmpleVideoFrames decoded video frames waiting in
   // the video queue, we will not decode any more video frames until some have
   // been consumed by the play state machine thread.
-#if defined(MOZ_WIDGET_GONK) || defined(MOZ_MEDIA_PLUGINS)
+#if defined(MOZ_OMX_DECODER) || defined(MOZ_MEDIA_PLUGINS)
   // On B2G and Android this is decided by a similar value which varies for
   // each OMX decoder |OMX_PARAM_PORTDEFINITIONTYPE::nBufferCountMin|. This
   // number must be less than the OMX equivalent or gecko will think it is
@@ -421,6 +427,14 @@ MediaDecoderStateMachine::MediaDecoderStateMachine(MediaDecoder* aDecoder,
   if (mAmpleVideoFrames < 2) {
     mAmpleVideoFrames = 2;
   }
+#ifdef XP_WIN
+  // Ensure high precision timers are enabled on Windows, otherwise the state
+  // machine thread isn't woken up at reliable intervals to set the next frame,
+  // and we drop frames while painting. Note that multiple calls to this
+  // function per-process is OK, provided each call is matched by a corresponding
+  // timeEndPeriod() call.
+  timeBeginPeriod(1);
+#endif
 }
 
 MediaDecoderStateMachine::~MediaDecoderStateMachine()
@@ -439,6 +453,9 @@ MediaDecoderStateMachine::~MediaDecoderStateMachine()
   mReader = nullptr;
  
   StateMachineTracker::Instance().CleanupGlobalStateMachine();
+#ifdef XP_WIN
+  timeEndPeriod(1);
+#endif
 }
 
 bool MediaDecoderStateMachine::HasFutureAudio() const {
@@ -812,7 +829,9 @@ void MediaDecoderStateMachine::DecodeLoop()
          !mStopDecodeThread &&
          (videoPlaying || audioPlaying))
   {
+#ifdef MOZ_DASH
     mReader->PrepareToDecode();
+#endif
 
     // We don't want to consider skipping to the next keyframe if we've
     // only just started up the decode loop, so wait until we've decoded
@@ -986,7 +1005,6 @@ void MediaDecoderStateMachine::AudioLoop()
   bool setPlaybackRate;
   bool preservesPitch;
   bool setPreservesPitch;
-  int32_t minWriteFrames = -1;
   AudioChannelType audioChannelType;
 
   {
@@ -1089,9 +1107,6 @@ void MediaDecoderStateMachine::AudioLoop()
         NS_WARNING("Setting the pitch preservation failed in AudioLoop.");
       }
     }
-    if (minWriteFrames == -1) {
-      minWriteFrames = mAudioStream->GetMinWriteSize();
-    }
     NS_ASSERTION(mReader->AudioQueue().GetSize() > 0,
                  "Should have data to play");
     // See if there's a gap in the audio. If there is, push silence into the
@@ -1149,23 +1164,6 @@ void MediaDecoderStateMachine::AudioLoop()
       // before the audio thread terminates.
       bool seeking = false;
       {
-        int64_t unplayedFrames = audioDuration % minWriteFrames;
-        if (minWriteFrames > 1 && unplayedFrames > 0) {
-          // Sound is written by libsydneyaudio to the hardware in blocks of
-          // frames of size minWriteFrames. So if the number of frames we've
-          // written isn't an exact multiple of minWriteFrames, we'll have
-          // left over audio data which hasn't yet been written to the hardware,
-          // and so that audio will not start playing. Write silence to ensure
-          // the last block gets pushed to hardware, so that playback starts.
-          int64_t framesToWrite = minWriteFrames - unplayedFrames;
-          if (framesToWrite < UINT32_MAX / channels) {
-            // Write silence manually rather than using PlaySilence(), so that
-            // the AudioAPI doesn't get a copy of the audio frames.
-            ReentrantMonitorAutoExit exit(mDecoder->GetReentrantMonitor());
-            WriteSilence(mAudioStream, framesToWrite);
-          }
-        }
-
         int64_t oldPosition = -1;
         int64_t position = GetMediaTime();
         while (oldPosition != position &&
@@ -1965,8 +1963,9 @@ void MediaDecoderStateMachine::DecodeSeek()
       if (HasVideo()) {
         VideoData* video = mReader->VideoQueue().PeekFront();
         if (video) {
-          NS_ASSERTION(video->mTime <= seekTime && seekTime <= video->mEndTime,
-                        "Seek target should lie inside the first frame after seek");
+          NS_ASSERTION((video->mTime <= seekTime && seekTime <= video->mEndTime) ||
+                        mReader->VideoQueue().IsFinished(),
+            "Seek target should lie inside the first frame after seek, unless it's the last frame.");
           {
             ReentrantMonitorAutoExit exitMon(mDecoder->GetReentrantMonitor());
             RenderVideoFrame(video, TimeStamp::Now());

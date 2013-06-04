@@ -7,7 +7,7 @@
 #include "mozilla/TimeStamp.h"
 #include "mozilla/dom/TimeRanges.h"
 #include "MediaResource.h"
-#include "nsHTMLMediaElement.h"
+#include "mozilla/dom/HTMLMediaElement.h"
 #include "MediaPluginHost.h"
 #include "nsXPCOMStrings.h"
 #include "nsISeekableStream.h"
@@ -164,7 +164,16 @@ static const char* GetOmxLibraryName()
     ALOG("Android Device is: %s", NS_LossyConvertUTF16toASCII(device).get());
   }
 
-  if (version == 15 &&
+  nsAutoString manufacturer;
+  rv = infoService->GetPropertyAsAString(NS_LITERAL_STRING("manufacturer"), manufacturer);
+  if (NS_SUCCEEDED(rv)) {
+    ALOG("Android Manufacturer is: %s", NS_LossyConvertUTF16toASCII(manufacturer).get());
+  }
+
+  if (version >= 16 && manufacturer.Find("HTC") == 0) {
+    return "libomxpluginjb-htc.so";
+  }
+  else if (version == 15 &&
       (device.Find("LT28", false) == 0 ||
        device.Find("LT26", false) == 0 ||
        device.Find("LT22", false) == 0 ||
@@ -264,15 +273,16 @@ bool MediaPluginHost::FindDecoder(const nsACString& aMimeType, const char* const
 
 MPAPI::Decoder *MediaPluginHost::CreateDecoder(MediaResource *aResource, const nsACString& aMimeType)
 {
-  const char *chars;
-  size_t len = NS_CStringGetData(aMimeType, &chars, nullptr);
+  NS_ENSURE_TRUE(aResource, nullptr);
 
-  Decoder *decoder = new Decoder();
+  nsAutoPtr<Decoder> decoder(new Decoder());
   if (!decoder) {
     return nullptr;
   }
   decoder->mResource = aResource;
 
+  const char *chars;
+  size_t len = NS_CStringGetData(aMimeType, &chars, nullptr);
   for (size_t n = 0; n < mPlugins.Length(); ++n) {
     Manifest *plugin = mPlugins[n];
     const char* const *codecs;
@@ -280,7 +290,8 @@ MPAPI::Decoder *MediaPluginHost::CreateDecoder(MediaResource *aResource, const n
       continue;
     }
     if (plugin->CreateDecoder(&sPluginHost, decoder, chars, len)) {
-      return decoder;
+      aResource->AddRef();
+      return decoder.forget();
     }
   }
 
@@ -290,6 +301,12 @@ MPAPI::Decoder *MediaPluginHost::CreateDecoder(MediaResource *aResource, const n
 void MediaPluginHost::DestroyDecoder(Decoder *aDecoder)
 {
   aDecoder->DestroyDecoder(aDecoder);
+  MediaResource* resource = GetResource(aDecoder);
+  if (resource) {
+    // resource *shouldn't* be null, but check anyway just in case the plugin
+    // decoder does something stupid.
+    resource->Release();
+  }
   delete aDecoder;
 }
 

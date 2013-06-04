@@ -14,7 +14,7 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGCircleElement::WrapNode(JSContext *aCx, JSObject *aScope)
+SVGCircleElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
   return SVGCircleElementBinding::Wrap(aCx, aScope, this);
 }
@@ -27,19 +27,11 @@ nsSVGElement::LengthInfo SVGCircleElement::sLengthInfo[3] =
 };
 
 //----------------------------------------------------------------------
-// nsISupports methods
-
-NS_IMPL_ISUPPORTS_INHERITED3(SVGCircleElement, SVGCircleElementBase,
-                             nsIDOMNode, nsIDOMElement,
-                             nsIDOMSVGElement)
-
-//----------------------------------------------------------------------
 // Implementation
 
 SVGCircleElement::SVGCircleElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : SVGCircleElementBase(aNodeInfo)
 {
-  SetIsDOMBinding();
 }
 
 //----------------------------------------------------------------------

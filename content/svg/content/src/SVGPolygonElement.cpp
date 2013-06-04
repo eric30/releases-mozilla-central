@@ -14,17 +14,10 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGPolygonElement::WrapNode(JSContext *aCx, JSObject *aScope)
+SVGPolygonElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
   return SVGPolygonElementBinding::Wrap(aCx, aScope, this);
 }
-
-//----------------------------------------------------------------------
-// nsISupports methods
-
-NS_IMPL_ISUPPORTS_INHERITED3(SVGPolygonElement, SVGPolygonElementBase,
-                             nsIDOMNode, nsIDOMElement,
-                             nsIDOMSVGElement)
 
 //----------------------------------------------------------------------
 // Implementation
@@ -32,7 +25,6 @@ NS_IMPL_ISUPPORTS_INHERITED3(SVGPolygonElement, SVGPolygonElementBase,
 SVGPolygonElement::SVGPolygonElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : SVGPolygonElementBase(aNodeInfo)
 {
-
 }
 
 //----------------------------------------------------------------------

@@ -31,11 +31,12 @@ FilteringWrapper<Base, Policy>::~FilteringWrapper()
 
 template <typename Policy>
 static bool
-Filter(JSContext *cx, JSObject *wrapper, AutoIdVector &props)
+Filter(JSContext *cx, HandleObject wrapper, AutoIdVector &props)
 {
     size_t w = 0;
+    RootedId id(cx);
     for (size_t n = 0; n < props.length(); ++n) {
-        jsid id = props[n];
+        id = props[n];
         if (Policy::check(cx, wrapper, id, Wrapper::GET))
             props[w++] = id;
         else if (JS_IsExceptionPending(cx))
@@ -60,7 +61,8 @@ FilterSetter(JSContext *cx, JSObject *wrapper, jsid id, js::PropertyDescriptor *
 
 template <typename Base, typename Policy>
 bool
-FilteringWrapper<Base, Policy>::getPropertyDescriptor(JSContext *cx, JSObject *wrapper, jsid id,
+FilteringWrapper<Base, Policy>::getPropertyDescriptor(JSContext *cx, HandleObject wrapper,
+                                                      HandleId id,
                                                       js::PropertyDescriptor *desc, unsigned flags)
 {
     assertEnteredPolicy(cx, wrapper, id);
@@ -71,7 +73,8 @@ FilteringWrapper<Base, Policy>::getPropertyDescriptor(JSContext *cx, JSObject *w
 
 template <typename Base, typename Policy>
 bool
-FilteringWrapper<Base, Policy>::getOwnPropertyDescriptor(JSContext *cx, JSObject *wrapper, jsid id,
+FilteringWrapper<Base, Policy>::getOwnPropertyDescriptor(JSContext *cx, HandleObject wrapper,
+                                                         HandleId id,
                                                          js::PropertyDescriptor *desc,
                                                          unsigned flags)
 {
@@ -83,7 +86,8 @@ FilteringWrapper<Base, Policy>::getOwnPropertyDescriptor(JSContext *cx, JSObject
 
 template <typename Base, typename Policy>
 bool
-FilteringWrapper<Base, Policy>::getOwnPropertyNames(JSContext *cx, JSObject *wrapper, AutoIdVector &props)
+FilteringWrapper<Base, Policy>::getOwnPropertyNames(JSContext *cx, HandleObject wrapper,
+                                                    AutoIdVector &props)
 {
     assertEnteredPolicy(cx, wrapper, JSID_VOID);
     return Base::getOwnPropertyNames(cx, wrapper, props) &&
@@ -92,7 +96,8 @@ FilteringWrapper<Base, Policy>::getOwnPropertyNames(JSContext *cx, JSObject *wra
 
 template <typename Base, typename Policy>
 bool
-FilteringWrapper<Base, Policy>::enumerate(JSContext *cx, JSObject *wrapper, AutoIdVector &props)
+FilteringWrapper<Base, Policy>::enumerate(JSContext *cx, HandleObject wrapper,
+                                          AutoIdVector &props)
 {
     assertEnteredPolicy(cx, wrapper, JSID_VOID);
     return Base::enumerate(cx, wrapper, props) &&
@@ -101,7 +106,8 @@ FilteringWrapper<Base, Policy>::enumerate(JSContext *cx, JSObject *wrapper, Auto
 
 template <typename Base, typename Policy>
 bool
-FilteringWrapper<Base, Policy>::keys(JSContext *cx, JSObject *wrapper, AutoIdVector &props)
+FilteringWrapper<Base, Policy>::keys(JSContext *cx, HandleObject wrapper,
+                                     AutoIdVector &props)
 {
     assertEnteredPolicy(cx, wrapper, JSID_VOID);
     return Base::keys(cx, wrapper, props) &&
@@ -110,7 +116,8 @@ FilteringWrapper<Base, Policy>::keys(JSContext *cx, JSObject *wrapper, AutoIdVec
 
 template <typename Base, typename Policy>
 bool
-FilteringWrapper<Base, Policy>::iterate(JSContext *cx, JSObject *wrapper, unsigned flags, Value *vp)
+FilteringWrapper<Base, Policy>::iterate(JSContext *cx, HandleObject wrapper,
+                                        unsigned flags, MutableHandleValue vp)
 {
     assertEnteredPolicy(cx, wrapper, JSID_VOID);
     // We refuse to trigger the iterator hook across chrome wrappers because
@@ -132,8 +139,32 @@ FilteringWrapper<Base, Policy>::nativeCall(JSContext *cx, JS::IsAcceptableThis t
 
 template <typename Base, typename Policy>
 bool
-FilteringWrapper<Base, Policy>::enter(JSContext *cx, JSObject *wrapper, jsid id,
-                                      Wrapper::Action act, bool *bp)
+FilteringWrapper<Base, Policy>::defaultValue(JSContext *cx, HandleObject obj,
+                                             JSType hint, MutableHandleValue vp)
+{
+    return Base::defaultValue(cx, obj, hint, vp);
+}
+
+// With our entirely-opaque wrapper, the DefaultValue algorithm throws,
+// causing spurious exceptions. Manually implement something benign.
+template<>
+bool
+FilteringWrapper<CrossCompartmentSecurityWrapper, GentlyOpaque>
+                ::defaultValue(JSContext *cx, HandleObject obj,
+                               JSType hint, MutableHandleValue vp)
+{
+    JSString *str = JS_NewStringCopyZ(cx, "[Opaque]");
+    if (!str)
+        return false;
+    vp.set(JS::StringValue(str));
+    return true;
+}
+
+
+template <typename Base, typename Policy>
+bool
+FilteringWrapper<Base, Policy>::enter(JSContext *cx, HandleObject wrapper,
+                                      HandleId id, Wrapper::Action act, bool *bp)
 {
     // This is a super ugly hacky to get around Xray Resolve wonkiness.
     //
@@ -152,34 +183,35 @@ FilteringWrapper<Base, Policy>::enter(JSContext *cx, JSObject *wrapper, jsid id,
         return true;
     }
     if (!Policy::check(cx, wrapper, id, act)) {
-        *bp = JS_IsExceptionPending(cx) ? false : Policy::deny(act);
+        *bp = JS_IsExceptionPending(cx) ? false : Policy::deny(act, id);
         return false;
     }
     *bp = true;
     return true;
 }
 
-#define SOW FilteringWrapper<CrossCompartmentSecurityWrapper, OnlyIfSubjectIsSystem>
-#define SCSOW FilteringWrapper<SameCompartmentSecurityWrapper, OnlyIfSubjectIsSystem>
+// NB: don't need SOW here because the resulting wrapper would be identical to
+// NNXOW.
+#define SCSOW FilteringWrapper<SameCompartmentSecurityWrapper, Opaque>
 #define XOW FilteringWrapper<SecurityXrayXPCWN, CrossOriginAccessiblePropertiesOnly>
 #define DXOW   FilteringWrapper<SecurityXrayDOM, CrossOriginAccessiblePropertiesOnly>
 #define NNXOW FilteringWrapper<CrossCompartmentSecurityWrapper, Opaque>
 #define CW FilteringWrapper<SameCompartmentSecurityWrapper, ComponentsObjectPolicy>
 #define XCW FilteringWrapper<CrossCompartmentSecurityWrapper, ComponentsObjectPolicy>
-template<> SOW SOW::singleton(WrapperFactory::SCRIPT_ACCESS_ONLY_FLAG |
-                              WrapperFactory::SOW_FLAG);
-template<> SCSOW SCSOW::singleton(WrapperFactory::SCRIPT_ACCESS_ONLY_FLAG |
-                                  WrapperFactory::SOW_FLAG);
-template<> XOW XOW::singleton(WrapperFactory::SCRIPT_ACCESS_ONLY_FLAG);
-template<> DXOW DXOW::singleton(WrapperFactory::SCRIPT_ACCESS_ONLY_FLAG);
-template<> NNXOW NNXOW::singleton(WrapperFactory::SCRIPT_ACCESS_ONLY_FLAG);
+#define GO FilteringWrapper<CrossCompartmentSecurityWrapper, GentlyOpaque>
+template<> SCSOW SCSOW::singleton(0);
+template<> XOW XOW::singleton(0);
+template<> DXOW DXOW::singleton(0);
+template<> NNXOW NNXOW::singleton(0);
 
 template<> CW CW::singleton(0);
 template<> XCW XCW::singleton(0);
 
-template class SOW;
+template<> GO GO::singleton(0);
+
 template class XOW;
 template class DXOW;
 template class NNXOW;
 template class ChromeObjectWrapperBase;
+template class GO;
 }

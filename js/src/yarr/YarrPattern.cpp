@@ -1,4 +1,5 @@
-/* vim: set ts=4 sw=4 tw=99 et:
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  *
  * Copyright (C) 2009 Apple Inc. All rights reserved.
  * Copyright (C) 2010 Peter Varga (pvarga@inf.u-szeged.hu), University of Szeged
@@ -491,11 +492,12 @@ public:
                     newDisjunction->m_parent = disjunction->m_parent;
                 }
                 PatternAlternative* newAlternative = newDisjunction->addNewAlternative();
+                newAlternative->m_terms.reserve(alternative->m_terms.size());
                 for (unsigned i = 0; i < alternative->m_terms.size(); ++i)
                     newAlternative->m_terms.append(copyTerm(alternative->m_terms[i], filterStartsWithBOL));
             }
         }
-        
+
         if (newDisjunction)
             m_pattern.m_disjunctions.append(newDisjunction);
         return newDisjunction;

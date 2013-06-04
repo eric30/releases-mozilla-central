@@ -11,17 +11,17 @@
 #include "nsIInputStream.h"
 #include "nsISimpleEnumerator.h"
 
+#include "mozilla/dom/quota/Utilities.h"
 #include "mozStorageCID.h"
 #include "mozStorageHelper.h"
 
+#include "Client.h"
 #include "FileInfo.h"
 #include "IndexedDatabaseManager.h"
 #include "OpenDatabaseHelper.h"
 
 #include "IndexedDatabaseInlines.h"
 #include <algorithm>
-
-#define JOURNAL_DIRECTORY_NAME "journals"
 
 USING_INDEXEDDB_NAMESPACE
 
@@ -385,11 +385,22 @@ FileManager::InitDirectory(nsIFile* aDirectory,
 nsresult
 FileManager::GetUsage(nsIFile* aDirectory, uint64_t* aUsage)
 {
-  uint64_t usage = 0;
+  NS_ASSERTION(!NS_IsMainThread(), "Wrong thread!");
+
+  bool exists;
+  nsresult rv = aDirectory->Exists(&exists);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  if (!exists) {
+    *aUsage = 0;
+    return NS_OK;
+  }
 
   nsCOMPtr<nsISimpleEnumerator> entries;
-  nsresult rv = aDirectory->GetDirectoryEntries(getter_AddRefs(entries));
+  rv = aDirectory->GetDirectoryEntries(getter_AddRefs(entries));
   NS_ENSURE_SUCCESS(rv, rv);
+
+  uint64_t usage = 0;
 
   bool hasMore;
   while (NS_SUCCEEDED((rv = entries->HasMoreElements(&hasMore))) && hasMore) {
@@ -412,7 +423,7 @@ FileManager::GetUsage(nsIFile* aDirectory, uint64_t* aUsage)
     rv = file->GetFileSize(&fileSize);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    IncrementUsage(&usage, uint64_t(fileSize));
+    quota::IncrementUsage(&usage, uint64_t(fileSize));
   }
 
   *aUsage = usage;

@@ -96,6 +96,7 @@
     <command id="Tools:DevToolbar" oncommand="DeveloperToolbar.toggle();" disabled="true" hidden="true"/>
     <command id="Tools:DevToolbarFocus" oncommand="DeveloperToolbar.focusToggle();" disabled="true"/>
     <command id="Tools:ChromeDebugger" oncommand="DebuggerUI.toggleChromeDebugger();" disabled="true" hidden="true"/>
+    <command id="Tools:BrowserConsole" oncommand="HUDConsoleUI.toggleBrowserConsole();"/>
     <command id="Tools:Scratchpad" oncommand="Scratchpad.openScratchpad();" disabled="true" hidden="true"/>
     <command id="Tools:ResponsiveUI" oncommand="ResponsiveUI.toggle();" disabled="true" hidden="true"/>
     <command id="Tools:Addons" oncommand="BrowserOpenAddonsMgr();"/>
@@ -108,8 +109,8 @@
     <command id="History:UndoCloseTab" oncommand="undoCloseTab();"/>
     <command id="History:UndoCloseWindow" oncommand="undoCloseWindow();"/>
     <command id="Browser:ToggleAddonBar" oncommand="toggleAddonBar();"/>
-    <command id="Social:SharePage" oncommand="SocialShareButton.sharePage();" disabled="true"/>
-    <command id="Social:UnsharePage" oncommand="SocialShareButton.unsharePage();"/>
+    <command id="Social:TogglePageMark" oncommand="SocialMark.togglePageMark();" disabled="true"/>
+    <command id="Social:SharePage" oncommand="SocialShare.sharePage();" disabled="true"/>
     <command id="Social:ToggleSidebar" oncommand="Social.toggleSidebar();"/>
     <command id="Social:ToggleNotifications" oncommand="Social.toggleNotifications();" hidden="true"/>
     <command id="Social:FocusChat" oncommand="SocialChatBar.focus();" hidden="true" disabled="true"/>
@@ -184,6 +185,10 @@
     <broadcaster id="devtoolsMenuBroadcaster_ChromeDebugger"
                  label="&chromeDebuggerMenu.label;"
                  command="Tools:ChromeDebugger"/>
+    <broadcaster id="devtoolsMenuBroadcaster_BrowserConsole"
+                 label="&browserConsoleCmd.label;"
+                 key="key_browserConsole"
+                 command="Tools:BrowserConsole"/>
     <broadcaster id="devtoolsMenuBroadcaster_Scratchpad"
                  label="&scratchpad.label;"
                  command="Tools:Scratchpad"
@@ -199,7 +204,6 @@
                  command="View:PageSource"/>
     <broadcaster id="devtoolsMenuBroadcaster_ErrorConsole"
                  label="&errorConsoleCmd.label;"
-                 key="key_errorConsole"
                  command="Tools:ErrorConsole"/>
     <broadcaster id="devtoolsMenuBroadcaster_GetMoreTools"
                  label="&getMoreDevtoolsCmd.label;"
@@ -257,7 +261,7 @@
     <key id="key_openDownloads" key="&downloads.commandkey;" command="Tools:Downloads" modifiers="accel"/>
 #endif
     <key id="key_openAddons" key="&addons.commandkey;" command="Tools:Addons" modifiers="accel,shift"/>
-    <key id="key_errorConsole" key="&errorConsoleCmd.commandkey;" command="Tools:ErrorConsole" modifiers="accel,shift"/>
+    <key id="key_browserConsole" key="&browserConsoleCmd.commandkey;" command="Tools:BrowserConsole" modifiers="accel,shift"/>
     <key id="key_devToolbar" keycode="&devToolbar.keycode;" modifiers="shift"
          keytext="&devToolbar.keytext;" command="Tools:DevToolbarFocus"/>
     <key id="key_responsiveUI" key="&responsiveDesignTool.commandkey;" command="Tools:ResponsiveUI"
@@ -346,8 +350,8 @@
 # overridden for other purposes there.
     <key id="viewBookmarksSidebarWinKb" key="&bookmarksWinCmd.commandkey;" command="viewBookmarksSidebar" modifiers="accel"/>
 #endif
-    
-    <key id="sharePage" key="&sharePageCmd.commandkey;" command="Social:SharePage" modifiers="accel,shift"/>
+
+    <key id="markPage" key="&markPageCmd.commandkey;" command="Social:TogglePageMark" modifiers="accel,shift"/>
     <key id="focusChatBar" key="&social.chatBar.commandkey;" command="Social:FocusChat" modifiers="accel,shift"/>
 
     <key id="key_stop" keycode="VK_ESCAPE" command="Browser:Stop"/>
@@ -385,7 +389,7 @@
     <key id="key_sanitize_mac" command="Tools:Sanitize" keycode="VK_BACK" modifiers="accel,shift"/>
 #endif
 #ifdef XP_UNIX
-    <key id="key_quitApplication" key="&quitApplicationCmdMac.key;" command="cmd_quitApplication" modifiers="accel"/>
+    <key id="key_quitApplication" key="&quitApplicationCmdUnix.key;" command="cmd_quitApplication" modifiers="accel"/>
 #endif
 
 #ifdef FULL_BROWSER_WINDOW

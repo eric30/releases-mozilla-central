@@ -6,7 +6,6 @@
 #ifndef mozilla_dom_SVGTextPathElement_h
 #define mozilla_dom_SVGTextPathElement_h
 
-#include "nsIDOMSVGElement.h"
 #include "nsSVGEnum.h"
 #include "nsSVGLength2.h"
 #include "nsSVGString.h"
@@ -34,8 +33,7 @@ static const unsigned short TEXTPATH_SPACINGTYPE_EXACT   = 2;
 
 typedef SVGTextContentElement SVGTextPathElementBase;
 
-class SVGTextPathElement MOZ_FINAL : public SVGTextPathElementBase,
-                                     public nsIDOMSVGElement
+class SVGTextPathElement MOZ_FINAL : public SVGTextPathElementBase
 {
 friend class ::nsSVGTextPathFrame;
 friend class ::nsSVGTextFrame2;
@@ -44,27 +42,14 @@ protected:
   friend nsresult (::NS_NewSVGTextPathElement(nsIContent **aResult,
                                               already_AddRefed<nsINodeInfo> aNodeInfo));
   SVGTextPathElement(already_AddRefed<nsINodeInfo> aNodeInfo);
-  virtual JSObject* WrapNode(JSContext *cx, JSObject *scope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *cx,
+                             JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
 public:
-  // interfaces:
-
-  NS_DECL_ISUPPORTS_INHERITED
-
-  // xxx If xpcom allowed virtual inheritance we wouldn't need to
-  // forward here :-(
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
-  NS_FORWARD_NSIDOMSVGELEMENT(SVGTextPathElementBase::)
-
   // nsIContent interface
-  NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const;
+  NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const MOZ_OVERRIDE;
 
-  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const;
-
-  virtual nsIDOMNode* AsDOMNode() { return this; }
-
-  virtual bool IsEventAttributeName(nsIAtom* aName) MOZ_OVERRIDE;
+  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
 
   // WebIDL
   already_AddRefed<SVGAnimatedLength> StartOffset();
@@ -74,9 +59,9 @@ public:
 
  protected:
 
-  virtual LengthAttributesInfo GetLengthInfo();
-  virtual EnumAttributesInfo GetEnumInfo();
-  virtual StringAttributesInfo GetStringInfo();
+  virtual LengthAttributesInfo GetLengthInfo() MOZ_OVERRIDE;
+  virtual EnumAttributesInfo GetEnumInfo() MOZ_OVERRIDE;
+  virtual StringAttributesInfo GetStringInfo() MOZ_OVERRIDE;
 
   enum { STARTOFFSET };
   nsSVGLength2 mLengthAttributes[1];

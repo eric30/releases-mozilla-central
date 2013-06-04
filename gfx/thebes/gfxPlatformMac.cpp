@@ -95,12 +95,9 @@ already_AddRefed<gfxASurface>
 gfxPlatformMac::CreateOffscreenSurface(const gfxIntSize& size,
                                        gfxASurface::gfxContentType contentType)
 {
-    gfxASurface *newSurface = nullptr;
-
-    newSurface = new gfxQuartzSurface(size, OptimalFormatForContent(contentType));
-
-    NS_IF_ADDREF(newSurface);
-    return newSurface;
+    nsRefPtr<gfxASurface> newSurface =
+      new gfxQuartzSurface(size, OptimalFormatForContent(contentType));
+    return newSurface.forget();
 }
 
 already_AddRefed<gfxASurface>
@@ -127,8 +124,8 @@ gfxPlatformMac::OptimizeImage(gfxImageSurface *aSurface,
         isurf = new gfxImageSurface (surfaceSize, format);
         if (!isurf->CopyFrom (aSurface)) {
             // don't even bother doing anything more
-            NS_ADDREF(aSurface);
-            return aSurface;
+            nsRefPtr<gfxASurface> ret = aSurface;
+            return ret.forget();
         }
     }
 
@@ -387,8 +384,8 @@ gfxPlatformMac::CreateThebesSurfaceAliasForDrawTarget_hack(mozilla::gfx::DrawTar
     size_t stride = CGBitmapContextGetBytesPerRow(cg);
     gfxIntSize size(aTarget->GetSize().width, aTarget->GetSize().height);
     nsRefPtr<gfxImageSurface> imageSurface = new gfxImageSurface(data, size, stride, bpp == 2
-                                                                                     ? gfxImageFormat::ImageFormatRGB16_565
-                                                                                     : gfxImageFormat::ImageFormatARGB32);
+                                                                                     ? gfxASurface::ImageFormatRGB16_565
+                                                                                     : gfxASurface::ImageFormatARGB32);
     // Here we should return a gfxQuartzImageSurface but quartz will assumes that image surfaces
     // don't change which wont create a proper alias to the draw target, therefore we have to
     // return a plain image surface.

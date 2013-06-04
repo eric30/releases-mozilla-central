@@ -7,6 +7,7 @@
 #ifndef mozilla_dom_HTMLObjectElement_h
 #define mozilla_dom_HTMLObjectElement_h
 
+#include "mozilla/Attributes.h"
 #include "nsGenericHTMLElement.h"
 #include "nsObjectLoadingContent.h"
 #include "nsIDOMHTMLObjectElement.h"
@@ -49,45 +50,45 @@ public:
 
   virtual nsresult BindToTree(nsIDocument *aDocument, nsIContent *aParent,
                               nsIContent *aBindingParent,
-                              bool aCompileEventHandlers);
+                              bool aCompileEventHandlers) MOZ_OVERRIDE;
   virtual void UnbindFromTree(bool aDeep = true,
-                              bool aNullParent = true);
+                              bool aNullParent = true) MOZ_OVERRIDE;
   virtual nsresult SetAttr(int32_t aNameSpaceID, nsIAtom *aName,
                            nsIAtom *aPrefix, const nsAString &aValue,
-                           bool aNotify);
+                           bool aNotify) MOZ_OVERRIDE;
   virtual nsresult UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
-                             bool aNotify);
+                             bool aNotify) MOZ_OVERRIDE;
 
-  virtual bool IsHTMLFocusable(bool aWithMouse, bool *aIsFocusable, int32_t *aTabIndex);
-  virtual IMEState GetDesiredIMEState();
+  virtual bool IsHTMLFocusable(bool aWithMouse, bool *aIsFocusable, int32_t *aTabIndex) MOZ_OVERRIDE;
+  virtual IMEState GetDesiredIMEState() MOZ_OVERRIDE;
 
   // Overriden nsIFormControl methods
-  NS_IMETHOD_(uint32_t) GetType() const
+  NS_IMETHOD_(uint32_t) GetType() const MOZ_OVERRIDE
   {
     return NS_FORM_OBJECT;
   }
 
-  NS_IMETHOD Reset();
-  NS_IMETHOD SubmitNamesValues(nsFormSubmission *aFormSubmission);
+  NS_IMETHOD Reset() MOZ_OVERRIDE;
+  NS_IMETHOD SubmitNamesValues(nsFormSubmission *aFormSubmission) MOZ_OVERRIDE;
 
-  virtual bool IsDisabled() const { return false; }
+  virtual bool IsDisabled() const MOZ_OVERRIDE { return false; }
 
-  virtual void DoneAddingChildren(bool aHaveNotified);
-  virtual bool IsDoneAddingChildren();
+  virtual void DoneAddingChildren(bool aHaveNotified) MOZ_OVERRIDE;
+  virtual bool IsDoneAddingChildren() MOZ_OVERRIDE;
 
   virtual bool ParseAttribute(int32_t aNamespaceID,
                                 nsIAtom *aAttribute,
                                 const nsAString &aValue,
-                                nsAttrValue &aResult);
-  virtual nsMapRuleToAttributesFunc GetAttributeMappingFunction() const;
-  NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom *aAttribute) const;
-  virtual nsEventStates IntrinsicState() const;
-  virtual void DestroyContent();
+                                nsAttrValue &aResult) MOZ_OVERRIDE;
+  virtual nsMapRuleToAttributesFunc GetAttributeMappingFunction() const MOZ_OVERRIDE;
+  NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom *aAttribute) const MOZ_OVERRIDE;
+  virtual nsEventStates IntrinsicState() const MOZ_OVERRIDE;
+  virtual void DestroyContent() MOZ_OVERRIDE;
 
   // nsObjectLoadingContent
-  virtual uint32_t GetCapabilities() const;
+  virtual uint32_t GetCapabilities() const MOZ_OVERRIDE;
 
-  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const;
+  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
 
   nsresult CopyInnerTo(Element* aDest);
 
@@ -96,9 +97,7 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(HTMLObjectElement,
                                            nsGenericHTMLFormElement)
 
-  virtual nsXPCClassInfo* GetClassInfo();
-
-  virtual nsIDOMNode* AsDOMNode() { return this; }
+  virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
 
   // Web IDL binding methods
   // XPCOM GetData is ok; note that it's a URI attribute with a weird base URI
@@ -182,11 +181,11 @@ public:
   }
   uint32_t Hspace()
   {
-    return GetHTMLUnsignedIntAttr(nsGkAtoms::hspace, 0);
+    return GetUnsignedIntAttr(nsGkAtoms::hspace, 0);
   }
   void SetHspace(uint32_t aValue, ErrorResult& aRv)
   {
-    SetHTMLUnsignedIntAttr(nsGkAtoms::hspace, aValue, aRv);
+    SetUnsignedIntAttr(nsGkAtoms::hspace, aValue, aRv);
   }
   void GetStandby(DOMString& aValue)
   {
@@ -198,11 +197,11 @@ public:
   }
   uint32_t Vspace()
   {
-    return GetHTMLUnsignedIntAttr(nsGkAtoms::vspace, 0);
+    return GetUnsignedIntAttr(nsGkAtoms::vspace, 0);
   }
   void SetVspace(uint32_t aValue, ErrorResult& aRv)
   {
-    SetHTMLUnsignedIntAttr(nsGkAtoms::vspace, aValue, aRv);
+    SetUnsignedIntAttr(nsGkAtoms::vspace, aValue, aRv);
   }
   // XPCOM GetCodebase is ok; note that it's a URI attribute
   void SetCodeBase(const nsAString& aValue, ErrorResult& aRv)
@@ -242,12 +241,11 @@ private:
    */
   bool IsFocusableForTabIndex();
   
-  virtual void GetItemValueText(nsAString& text);
-  virtual void SetItemValueText(const nsAString& text);
+  virtual void GetItemValueText(nsAString& text) MOZ_OVERRIDE;
+  virtual void SetItemValueText(const nsAString& text) MOZ_OVERRIDE;
 
-  virtual JSObject* WrapNode(JSContext *aCx, JSObject *aScope) MOZ_OVERRIDE;
-  virtual JSObject* GetCanonicalPrototype(JSContext* aCx,
-                                          JSObject* aGlobal) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *aCx,
+                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
   bool mIsDoneAddingChildren;
 };

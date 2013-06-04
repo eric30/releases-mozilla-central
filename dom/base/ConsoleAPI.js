@@ -180,7 +180,7 @@ ConsoleAPI.prototype = {
     this._queuedCalls = [];
     this._timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
     this._window = Cu.getWeakReference(aWindow);
-    this.timerRegistry = {};
+    this.timerRegistry = new Map();
 
     return contentObj;
   },
@@ -193,7 +193,7 @@ ConsoleAPI.prototype = {
         Services.obs.removeObserver(this, "inner-window-destroyed");
         this._windowDestroyed = true;
         if (!this._timerInitialized) {
-          this.timerRegistry = {};
+          this.timerRegistry.clear();
         }
       }
     }
@@ -209,11 +209,16 @@ ConsoleAPI.prototype = {
    */
   queueCall: function CA_queueCall(aMethod, aArguments)
   {
+    let window = this._window.get();
     let metaForCall = {
-      isPrivate: PrivateBrowsingUtils.isWindowPrivate(this._window.get()),
+      private: PrivateBrowsingUtils.isWindowPrivate(window),
       timeStamp: Date.now(),
       stack: this.getStackTrace(aMethod != "trace" ? 1 : null),
     };
+
+    if (aMethod == "time" || aMethod == "timeEnd") {
+      metaForCall.monotonicTimer = window.performance.now();
+    }
 
     this._queuedCalls.push([aMethod, aArguments, metaForCall]);
 
@@ -239,7 +244,7 @@ ConsoleAPI.prototype = {
 
       if (this._windowDestroyed) {
         ConsoleAPIStorage.clearEvents(this._innerID);
-        this.timerRegistry = {};
+        this.timerRegistry.clear();
       }
     }
   },
@@ -265,6 +270,7 @@ ConsoleAPI.prototype = {
       functionName: frame.functionName,
       timeStamp: meta.timeStamp,
       arguments: args,
+      private: meta.private,
     };
 
     switch (method) {
@@ -293,17 +299,17 @@ ConsoleAPI.prototype = {
       case "dir":
         break;
       case "time":
-        consoleEvent.timer = this.startTimer(args[0], meta.timeStamp);
+        consoleEvent.timer = this.startTimer(args[0], meta.monotonicTimer);
         break;
       case "timeEnd":
-        consoleEvent.timer = this.stopTimer(args[0], meta.timeStamp);
+        consoleEvent.timer = this.stopTimer(args[0], meta.monotonicTimer);
         break;
       default:
         // unknown console API method!
         return;
     }
 
-    this.notifyObservers(method, consoleEvent, meta.isPrivate);
+    this.notifyObservers(method, consoleEvent);
   },
 
   /**
@@ -314,18 +320,11 @@ ConsoleAPI.prototype = {
    * @param object aConsoleEvent
    *        The console event object to send to observers for the given console
    *        API call.
-   * @param boolean aPrivate
-   *        Tells whether the window is in private browsing mode.
    */
-  notifyObservers: function CA_notifyObservers(aLevel, aConsoleEvent, aPrivate)
+  notifyObservers: function CA_notifyObservers(aLevel, aConsoleEvent)
   {
     aConsoleEvent.wrappedJSObject = aConsoleEvent;
-
-    // Store non-private messages for which the inner window was not destroyed.
-    if (!aPrivate) {
-      ConsoleAPIStorage.recordEvent(this._innerID, aConsoleEvent);
-    }
-
+    ConsoleAPIStorage.recordEvent(this._innerID, aConsoleEvent);
     Services.obs.notifyObservers(aConsoleEvent, "console-api-log-event",
                                  this._outerID);
   },
@@ -417,10 +416,8 @@ ConsoleAPI.prototype = {
   },
 
   /*
-   * A registry of started timers. Timer maps are key-value pairs of timer
-   * names to timer start times, for all timers defined in the page. Timer
-   * names are prepended with the inner window ID in order to avoid conflicts
-   * with Object.prototype functions.
+   * A registry of started timers.
+   * @type Map
    */
   timerRegistry: null,
 
@@ -429,8 +426,9 @@ ConsoleAPI.prototype = {
    *
    * @param string aName
    *        The name of the timer.
-   * @param number [aTimestamp=Date.now()]
-   *        Optional timestamp that tells when the timer was originally started.
+   * @param number aTimestamp
+   *        A monotonic strictly-increasing timing value that tells when the
+   *        timer was started.
    * @return object
    *        The name property holds the timer name and the started property
    *        holds the time the timer was started. In case of error, it returns
@@ -439,16 +437,16 @@ ConsoleAPI.prototype = {
    **/
   startTimer: function CA_startTimer(aName, aTimestamp) {
     if (!aName) {
-        return;
+      return;
     }
-    if (Object.keys(this.timerRegistry).length > MAX_PAGE_TIMERS - 1) {
-        return { error: "maxTimersExceeded" };
+    if (this.timerRegistry.size > MAX_PAGE_TIMERS - 1) {
+      return { error: "maxTimersExceeded" };
     }
-    let key = this._innerID + "-" + aName.toString();
-    if (!(key in this.timerRegistry)) {
-        this.timerRegistry[key] = aTimestamp || Date.now();
+    let key = aName.toString();
+    if (!this.timerRegistry.has(key)) {
+      this.timerRegistry.set(key, aTimestamp);
     }
-    return { name: aName, started: this.timerRegistry[key] };
+    return { name: aName, started: this.timerRegistry.get(key) };
   },
 
   /**
@@ -456,22 +454,23 @@ ConsoleAPI.prototype = {
    *
    * @param string aName
    *        The name of the timer.
-   * @param number [aTimestamp=Date.now()]
-   *        Optional timestamp that tells when the timer was originally stopped.
+   * @param number aTimestamp
+   *        A monotonic strictly-increasing timing value that tells when the
+   *        timer was stopped.
    * @return object
    *        The name property holds the timer name and the duration property
    *        holds the number of milliseconds since the timer was started.
    **/
   stopTimer: function CA_stopTimer(aName, aTimestamp) {
     if (!aName) {
-        return;
+      return;
     }
-    let key = this._innerID + "-" + aName.toString();
-    if (!(key in this.timerRegistry)) {
-        return;
+    let key = aName.toString();
+    if (!this.timerRegistry.has(key)) {
+      return;
     }
-    let duration = (aTimestamp || Date.now()) - this.timerRegistry[key];
-    delete this.timerRegistry[key];
+    let duration = aTimestamp - this.timerRegistry.get(key);
+    this.timerRegistry.delete(key);
     return { name: aName, duration: duration };
   }
 };

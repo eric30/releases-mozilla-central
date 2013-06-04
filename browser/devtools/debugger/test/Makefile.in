@@ -11,16 +11,14 @@ relativesrcdir  = @relativesrcdir@
 include $(DEPTH)/config/autoconf.mk
 
 MOCHITEST_BROWSER_TESTS = \
-	$(browser_dbg_cmd_break.js disabled until bug 722727 is fixed) \
-	browser_dbg_cmd.js \
 	browser_dbg_aaa_run_first_leaktest.js \
 	browser_dbg_clean-exit.js \
-	browser_dbg_createChrome.js \
+	browser_dbg_cmd.js \
+	browser_dbg_cmd_break.js \
 	$(browser_dbg_createRemote.js disabled for intermittent failures, bug 753225) \
-	$(browser_dbg_debugger-tab-switch.js disabled until issues 106, 40 are fixed) \
-	$(browser_dbg_debugger-tab-switch-window.js disabled until issues 106, 40 are fixed) \
 	browser_dbg_debuggerstatement.js \
-	browser_dbg_listtabs.js \
+	browser_dbg_listtabs-01.js \
+	browser_dbg_listtabs-02.js \
 	browser_dbg_tabactor-01.js \
 	browser_dbg_tabactor-02.js \
 	browser_dbg_globalactor-01.js \
@@ -36,6 +34,7 @@ MOCHITEST_BROWSER_TESTS = \
 	browser_dbg_propertyview-09.js \
 	browser_dbg_propertyview-10.js \
 	browser_dbg_propertyview-11.js \
+	browser_dbg_propertyview-12.js \
 	browser_dbg_propertyview-edit-value.js \
 	browser_dbg_propertyview-edit-watch.js \
 	browser_dbg_propertyview-data-big.js \
@@ -63,7 +62,10 @@ MOCHITEST_BROWSER_TESTS = \
 	browser_dbg_location-changes.js \
 	browser_dbg_location-changes-new.js \
 	browser_dbg_location-changes-blank.js \
+	browser_dbg_location-changes-bp.js \
+	browser_dbg_sources-cache.js \
 	browser_dbg_scripts-switching.js \
+	browser_dbg_scripts-switching-02.js \
 	browser_dbg_scripts-sorting.js \
 	browser_dbg_scripts-searching-01.js \
 	browser_dbg_scripts-searching-02.js \
@@ -75,6 +77,7 @@ MOCHITEST_BROWSER_TESTS = \
 	browser_dbg_scripts-searching-08.js \
 	browser_dbg_scripts-searching-files_ui.js \
 	browser_dbg_scripts-searching-popup.js \
+	browser_dbg_function-search.js \
 	browser_dbg_pause-resume.js \
 	browser_dbg_pause-warning.js \
 	browser_dbg_update-editor-mode.js \
@@ -96,8 +99,9 @@ MOCHITEST_BROWSER_TESTS = \
 	browser_dbg_bfcache.js \
 	browser_dbg_progress-listener-bug.js \
 	browser_dbg_chrome-debugging.js \
+	browser_dbg_source_maps-01.js \
+	browser_dbg_source_maps-02.js \
 	head.js \
-	helpers.js \
 	$(NULL)
 
 MOCHITEST_BROWSER_PAGES = \
@@ -109,6 +113,7 @@ MOCHITEST_BROWSER_PAGES = \
 	browser_dbg_debuggerstatement.html \
 	browser_dbg_stack.html \
 	browser_dbg_script-switching.html \
+	browser_dbg_script-switching-02.html \
 	test-script-switching-01.js \
 	test-script-switching-02.js \
 	browser_dbg_big-data.html \
@@ -122,7 +127,26 @@ MOCHITEST_BROWSER_PAGES = \
 	browser_dbg_breakpoint-new-script.html \
 	browser_dbg_conditional-breakpoints.html \
 	browser_dbg_watch-expressions.html \
+	browser_dbg_function-search-01.html \
+	browser_dbg_function-search-02.html \
+	test-function-search-01.js \
+	test-function-search-02.js \
+	test-function-search-03.js \
+	binary_search.html \
+	binary_search.coffee \
+	binary_search.js \
+	binary_search.map \
+	test-location-changes-bp.js \
+	test-location-changes-bp.html \
 	$(NULL)
+
+ifneq (Linux,$(OS_ARCH))
+MOCHITEST_BROWSER_TESTS += \
+	browser_dbg_createChrome.js \
+	$(NULL)
+else
+$(browser_dbg_createChrome.js disabled to fix for ubuntu hangs, bug 847558)
+endif
 
 MOCHITEST_BROWSER_FILES_PARTS = MOCHITEST_BROWSER_TESTS MOCHITEST_BROWSER_PAGES
 

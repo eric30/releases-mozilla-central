@@ -7,22 +7,47 @@ from __future__ import print_function, unicode_literals
 import os
 import platform
 import sys
+import time
+
+
+STATE_DIR_FIRST_RUN = '''
+mach and the build system store shared state in a common directory on the
+filesystem. The following directory will be created:
+
+  {userdir}
+
+If you would like to use a different directory, hit CTRL+c and set the
+MOZBUILD_STATE_PATH environment variable to the directory you would like to
+use and re-run mach. For this change to take effect forever, you'll likely
+want to export this environment variable from your shell's init scripts.
+'''.lstrip()
+
 
 # TODO Bug 794506 Integrate with the in-tree virtualenv configuration.
 SEARCH_PATHS = [
     'python/mach',
     'python/mozboot',
     'python/mozbuild',
-    'build/pymake',
     'python/blessings',
     'python/psutil',
     'python/which',
+    'build/pymake',
+    'config',
     'other-licenses/ply',
     'xpcom/idl-parser',
     'testing',
     'testing/xpcshell',
-    'testing/mozbase/mozprocess',
+    'testing/marionette/client',
+    'testing/marionette/client/marionette',
+    'testing/mozbase/mozcrash',
+    'testing/mozbase/mozdevice',
     'testing/mozbase/mozfile',
+    'testing/mozbase/mozhttpd',
+    'testing/mozbase/mozlog',
+    'testing/mozbase/moznetwork',
+    'testing/mozbase/mozprocess',
+    'testing/mozbase/mozprofile',
+    'testing/mozbase/mozrunner',
     'testing/mozbase/mozinfo',
 ]
 
@@ -35,10 +60,46 @@ MACH_MODULES = [
     'python/mozbuild/mozbuild/config.py',
     'python/mozbuild/mozbuild/mach_commands.py',
     'python/mozbuild/mozbuild/frontend/mach_commands.py',
+    'testing/marionette/mach_commands.py',
     'testing/mochitest/mach_commands.py',
     'testing/xpcshell/mach_commands.py',
     'tools/mach_commands.py',
 ]
+
+
+CATEGORIES = {
+    'build': {
+        'short': 'Build Commands',
+        'long': 'Interact with the build system',
+        'priority': 80,
+    },
+    'post-build': {
+        'short': 'Post-build Commands',
+        'long': 'Common actions performed after completing a build.',
+        'priority': 70,
+    },
+    'testing': {
+        'short': 'Testing',
+        'long': 'Run tests.',
+        'priority': 60,
+    },
+    'devenv': {
+        'short': 'Development Environment',
+        'long': 'Set up and configure your development environment.',
+        'priority': 50,
+    },
+    'build-dev': {
+        'short': 'Low-level Build System Interaction',
+        'long': 'Interact with specific parts of the build system.',
+        'priority': 20,
+    },
+    'misc': {
+        'short': 'Potpourri',
+        'long': 'Potent potables and assorted snacks.',
+        'priority': 10,
+    }
+}
+
 
 def bootstrap(topsrcdir, mozilla_dir=None):
     if mozilla_dir is None:
@@ -52,6 +113,39 @@ def bootstrap(topsrcdir, mozilla_dir=None):
         print('You are running Python', platform.python_version())
         sys.exit(1)
 
+    # Global build system and mach state is stored in a central directory. By
+    # default, this is ~/.mozbuild. However, it can be defined via an
+    # environment variable. We detect first run (by lack of this directory
+    # existing) and notify the user that it will be created. The logic for
+    # creation is much simpler for the "advanced" environment variable use
+    # case. For default behavior, we educate users and give them an opportunity
+    # to react. We always exit after creating the directory because users don't
+    # like surprises.
+    state_user_dir = os.path.expanduser('~/.mozbuild')
+    state_env_dir = os.environ.get('MOZBUILD_STATE_PATH', None)
+    if state_env_dir:
+        if not os.path.exists(state_env_dir):
+            print('Creating global state directory from environment variable: %s'
+                % state_env_dir)
+            os.makedirs(state_env_dir, mode=0777)
+            print('Please re-run mach.')
+            sys.exit(1)
+    else:
+        if not os.path.exists(state_user_dir):
+            print(STATE_DIR_FIRST_RUN.format(userdir=state_user_dir))
+            try:
+                for i in range(20, -1, -1):
+                    time.sleep(1)
+                    sys.stdout.write('%d ' % i)
+                    sys.stdout.flush()
+            except KeyboardInterrupt:
+                sys.exit(1)
+
+            print('\nCreating default state directory: %s' % state_user_dir)
+            os.mkdir(state_user_dir)
+            print('Please re-run mach.')
+            sys.exit(1)
+
     try:
         import mach.main
     except ImportError:
@@ -59,6 +153,11 @@ def bootstrap(topsrcdir, mozilla_dir=None):
         import mach.main
 
     mach = mach.main.Mach(topsrcdir)
+    for category, meta in CATEGORIES.items():
+        mach.define_category(category, meta['short'], meta['long'],
+            meta['priority'])
+
     for path in MACH_MODULES:
         mach.load_commands_from_file(os.path.join(mozilla_dir, path))
+
     return mach

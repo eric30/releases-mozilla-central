@@ -20,10 +20,15 @@
 
 // Moz forward declarations
 class MetroWidget;
-class nsIDOMTouch;
 enum nsEventStatus;
 class nsGUIEvent;
 struct nsIntPoint;
+
+namespace mozilla {
+namespace dom {
+class Touch;
+}
+}
 
 // Windows forward declarations
 namespace ABI {
@@ -132,6 +137,10 @@ public:
 
   // The Edge gesture event is special.  It does not come from our window
   // or from our GestureRecognizer.
+  HRESULT OnEdgeGestureStarted(IEdgeGesture* aSender,
+                               IEdgeGestureEventArgs* aArgs);
+  HRESULT OnEdgeGestureCanceled(IEdgeGesture* aSender,
+                                IEdgeGestureEventArgs* aArgs);
   HRESULT OnEdgeGestureCompleted(IEdgeGesture* aSender,
                                  IEdgeGestureEventArgs* aArgs);
 
@@ -231,8 +240,8 @@ private:
   void DispatchPendingTouchEvent();
   void DispatchPendingTouchEvent(nsEventStatus& status);
   nsBaseHashtable<nsUint32HashKey,
-                  nsCOMPtr<nsIDOMTouch>,
-                  nsCOMPtr<nsIDOMTouch> > mTouches;
+                  nsRefPtr<mozilla::dom::Touch>,
+                  nsRefPtr<mozilla::dom::Touch> > mTouches;
 
   // When a key press is received, we convert the Windows virtual key
   // into a gecko virtual key to send in a gecko event.
@@ -244,7 +253,8 @@ private:
   static bool sIsVirtualKeyMapInitialized;
   static void InitializeVirtualKeyMap();
   static uint32_t GetMozKeyCode(uint32_t aKey);
-
+  // Computes DOM key name index for the aVirtualKey.
+  static KeyNameIndex GetDOMKeyNameIndex(uint32_t aVirtualKey);
   // These registration tokens are set when we register ourselves to receive
   // events from our window.  We must hold on to them for the entire duration
   // that we want to receive these events.  When we are done, we must
@@ -262,9 +272,11 @@ private:
   // using this token.
   EventRegistrationToken mTokenAcceleratorKeyActivated;
 
-  // When we register ourselves to handle the edge gesture, we receive a
-  // token.  When we unregister ourselves, we must use the token we received.
-  EventRegistrationToken mTokenEdgeGesture;
+  // When we register ourselves to handle edge gestures, we receive a
+  // token. To we unregister ourselves, we must use the token we received.
+  EventRegistrationToken mTokenEdgeStarted;
+  EventRegistrationToken mTokenEdgeCanceled;
+  EventRegistrationToken mTokenEdgeCompleted;
 
   // These registration tokens are set when we register ourselves to receive
   // events from our GestureRecognizer.  It's probably not a huge deal if we

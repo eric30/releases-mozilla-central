@@ -69,16 +69,44 @@ if (!("profileDir" in OS.Constants.Path) || !("localProfileDir" in OS.Constants.
 }
 
 /**
+ * A global constant used as a default refs parameter value when cloning.
+ */
+const noRefs = [];
+
+/**
  * Return a shallow clone of the enumerable properties of an object.
  *
- * We use this whenever normalizing options requires making (shallow)
+ * Utility used whenever normalizing options requires making (shallow)
  * changes to an option object. The copy ensures that we do not modify
  * a client-provided object by accident.
+ *
+ * Note: to reference and not copy specific fields, provide an optional
+ * |refs| argument containing their names.
+ *
+ * @param {JSON} object Options to be cloned.
+ * @param {Array} refs An optional array of field names to be passed by
+ * reference instead of copying.
  */
-let clone = function clone(object) {
+let clone = function clone(object, refs = noRefs) {
   let result = {};
+  // Make a reference between result[key] and object[key].
+  let refer = function refer(result, key, object) {
+    Object.defineProperty(result, key, {
+        enumerable: true,
+        get: function() {
+            return object[key];
+        },
+        set: function(value) {
+            object[key] = value;
+        }
+    });
+  };
   for (let k in object) {
-    result[k] = object[k];
+    if (refs.indexOf(k) < 0) {
+      result[k] = object[k];
+    } else {
+      refer(result, k, object);
+    }
   }
   return result;
 };
@@ -88,14 +116,38 @@ let clone = function clone(object) {
  */
 const noOptions = {};
 
-
 let worker = new PromiseWorker(
   "resource://gre/modules/osfile/osfile_async_worker.js", LOG);
 let Scheduler = {
   post: function post(...args) {
+    // By convention, the last argument of any message may be an |options| object.
+    let methodArgs = args[1];
+    let options = methodArgs ? methodArgs[methodArgs.length - 1] : null;
     let promise = worker.post.apply(worker, args);
     return promise.then(
-      null,
+      function onSuccess(data) {
+        // Check for duration and return result.
+        if (!options) {
+          return data.ok;
+        }
+        // Check for options.outExecutionDuration.
+        if (typeof options !== "object" ||
+          !("outExecutionDuration" in options)) {
+          return data.ok;
+        }
+        // If data.durationMs is not present, return data.ok (there was an
+        // exception applying the method).
+        if (!("durationMs" in data)) {
+          return data.ok;
+        }
+        // Accumulate (or initialize) outExecutionDuration
+        if (typeof options.outExecutionDuration == "number") {
+          options.outExecutionDuration += data.durationMs;
+        } else {
+          options.outExecutionDuration = data.durationMs;
+        }
+        return data.ok;
+      },
       function onError(error) {
         // Decode any serialized error
         if (error instanceof PromiseWorker.WorkerError) {
@@ -126,10 +178,34 @@ Object.defineProperty(OS.Shared, "DEBUG", {
     }
 });
 
+// Observer topics used for monitoring shutdown
+const WEB_WORKERS_SHUTDOWN_TOPIC = "web-workers-shutdown";
+const TEST_WEB_WORKERS_SHUTDOWN_TOPIC = "test.osfile.web-workers-shutdown";
+
+// Preference used to configure test shutdown observer.
+const PREF_OSFILE_TEST_SHUTDOWN_OBSERVER =
+  "toolkit.osfile.test.shutdown.observer";
+
+/**
+ * Safely attempt removing a test shutdown observer.
+ */
+let removeTestObserver = function removeTestObserver() {
+  try {
+    Services.obs.removeObserver(webWorkersShutdownObserver,
+      TEST_WEB_WORKERS_SHUTDOWN_TOPIC);
+  } catch (ex) {
+    // There was no observer to remove.
+  }
+};
+
 /**
  * An observer function to be used to monitor web-workers-shutdown events.
  */
-let webWorkersShutdownObserver = function webWorkersShutdownObserver() {
+let webWorkersShutdownObserver = function webWorkersShutdownObserver(aSubject, aTopic) {
+  if (aTopic == WEB_WORKERS_SHUTDOWN_TOPIC) {
+    Services.obs.removeObserver(webWorkersShutdownObserver, WEB_WORKERS_SHUTDOWN_TOPIC);
+    removeTestObserver();
+  }
   // Send a "System_shutdown" message to the worker.
   Scheduler.post("System_shutdown").then(function onSuccess(opened) {
     let msg = "";
@@ -148,14 +224,32 @@ let webWorkersShutdownObserver = function webWorkersShutdownObserver() {
   });
 };
 
-// Attaching an observer listening to the "web-workers-shutdown".
-Services.obs.addObserver(webWorkersShutdownObserver, "web-workers-shutdown",
-  false);
-// Attaching the same observer listening to the
-// "test.osfile.web-workers-shutdown".
-// Note: This is used for testing purposes.
 Services.obs.addObserver(webWorkersShutdownObserver,
-  "test.osfile.web-workers-shutdown", false);
+  WEB_WORKERS_SHUTDOWN_TOPIC, false);
+
+// Attaching an observer for PREF_OSFILE_TEST_SHUTDOWN_OBSERVER to enable or
+// disable the test shutdown event observer.
+// Note: By default the PREF_OSFILE_TEST_SHUTDOWN_OBSERVER is unset.
+// Note: This is meant to be used for testing purposes only.
+Services.prefs.addObserver(PREF_OSFILE_TEST_SHUTDOWN_OBSERVER,
+  function prefObserver() {
+    let addObserver;
+    try {
+      addObserver = Services.prefs.getBoolPref(
+        PREF_OSFILE_TEST_SHUTDOWN_OBSERVER);
+    } catch (x) {
+      // In case PREF_OSFILE_TEST_SHUTDOWN_OBSERVER was cleared.
+      addObserver = false;
+    }
+    if (addObserver) {
+      // Attaching an observer listening to the TEST_WEB_WORKERS_SHUTDOWN_TOPIC.
+      Services.obs.addObserver(webWorkersShutdownObserver,
+        TEST_WEB_WORKERS_SHUTDOWN_TOPIC, false);
+    } else {
+      // Removing the observer.
+      removeTestObserver();
+    }
+  }, false);
 
 /**
  * Representation of a file, with asynchronous methods.
@@ -185,7 +279,7 @@ File.prototype = {
    * @rejects {OS.File.Error}
    */
   close: function close() {
-    if (this._fdmsg) {
+    if (this._fdmsg != null) {
       let msg = this._fdmsg;
       this._fdmsg = null;
       return this._closeResult =
@@ -202,9 +296,6 @@ File.prototype = {
    * @rejects {OS.File.Error}
    */
   stat: function stat() {
-    if (!this._fdmsg) {
-      return Promise.reject(OSError.closed("accessing file"));
-    }
     return Scheduler.post("File_prototype_stat", [this._fdmsg], this).then(
       File.Info.fromMsg
     );
@@ -222,12 +313,14 @@ File.prototype = {
    * @resolves {number} The number of bytes effectively read.
    * @rejects {OS.File.Error}
    */
-  readTo: function readTo(buffer, options) {
+  readTo: function readTo(buffer, options = noOptions) {
     // If |buffer| is a typed array and there is no |bytes| options, we
     // need to extract the |byteLength| now, as it will be lost by
     // communication
-    if (isTypedArray(buffer) && (!options || !"bytes" in options)) {
-      options = clone(options || noOptions);
+    if (isTypedArray(buffer) && (!options || !("bytes" in options))) {
+      // Preserve the reference to |outExecutionDuration| option if it is
+      // passed.
+      options = clone(options, ["outExecutionDuration"]);
       options.bytes = buffer.byteLength;
     }
     // Note: Type.void_t.out_ptr.toMsg ensures that
@@ -258,12 +351,14 @@ File.prototype = {
    *
    * @return {number} The number of bytes actually written.
    */
-  write: function write(buffer, options) {
+  write: function write(buffer, options = noOptions) {
     // If |buffer| is a typed array and there is no |bytes| options,
     // we need to extract the |byteLength| now, as it will be lost
     // by communication
-    if (isTypedArray(buffer) && (!options || !"bytes" in options)) {
-      options = clone(options || noOptions);
+    if (isTypedArray(buffer) && (!options || !("bytes" in options))) {
+      // Preserve the reference to |outExecutionDuration| option if it is
+      // passed.
+      options = clone(options, ["outExecutionDuration"]);
       options.bytes = buffer.byteLength;
     }
     // Note: Type.void_t.out_ptr.toMsg ensures that
@@ -493,13 +588,14 @@ File.makeDir = function makeDir(path, options) {
  * @param {string} path The path to the file.
  * @param {number=} bytes Optionally, an upper bound to the number of bytes
  * to read.
+ * @param {JSON} options Additional options.
  *
  * @resolves {Uint8Array} A buffer holding the bytes
  * read from the file.
  */
-File.read = function read(path, bytes) {
+File.read = function read(path, bytes, options) {
   let promise = Scheduler.post("read",
-    [Type.path.toMsg(path), bytes], path);
+    [Type.path.toMsg(path), bytes, options], path);
   return promise.then(
     function onSuccess(data) {
       return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
@@ -556,9 +652,10 @@ File.exists = function exists(path) {
  * @return {promise}
  * @resolves {number} The number of bytes actually written.
  */
-File.writeAtomic = function writeAtomic(path, buffer, options) {
-  // Copy |options| to avoid modifying the original object
-  options = clone(options || noOptions);
+File.writeAtomic = function writeAtomic(path, buffer, options = noOptions) {
+  // Copy |options| to avoid modifying the original object but preserve the
+  // reference to |outExecutionDuration| option if it is passed.
+  options = clone(options, ["outExecutionDuration"]);
   // As options.tmpPath is a path, we need to encode it as |Type.path| message
   if ("tmpPath" in options) {
     options.tmpPath = Type.path.toMsg(options.tmpPath);

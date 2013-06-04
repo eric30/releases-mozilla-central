@@ -9,22 +9,12 @@ VPATH     = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = ipc
-
-include $(topsrcdir)/ipc/app/defs.mk
-PROGRAM = $(MOZ_CHILD_PROCESS_NAME)
-
 ifneq ($(dir $(PROGRAM)),./)
   GENERATED_DIRS = $(dir $(PROGRAM))
 endif
 
-CPPSRCS = \
-  MozillaRuntimeMain.cpp \
-  $(NULL)
-
 ifeq (android,$(MOZ_WIDGET_TOOLKIT))
 WRAP_LDFLAGS =
-CPPSRCS = MozillaRuntimeMainAndroid.cpp
 else
 LIBS += \
   $(XPCOM_LIBS) \
@@ -72,6 +62,7 @@ include $(topsrcdir)/config/rules.mk
 LDFLAGS += $(MOZ_ALLOW_HEAP_EXECUTE_FLAGS)
 
 ifeq ($(OS_ARCH),WINNT) #{
+EXTRA_DEPS += $(PROGRAM).manifest
 #
 # Control the default heap size.
 # This is the heap returned by GetProcessHeap().

@@ -199,6 +199,13 @@ struct BidiParagraphData {
     }
   }
 
+  void ResetForNewBlock()
+  {
+    for (BidiParagraphData* bpd = this; bpd; bpd = bpd->mSubParagraph) {
+      bpd->mPrevFrame = nullptr;
+    }
+  }
+
   void AppendFrame(nsIFrame* aFrame,
                    nsBlockInFlowLineIterator* aLineIter,
                    nsIContent* aContent = nullptr)
@@ -387,8 +394,10 @@ static bool
 IsBidiSplittable(nsIFrame* aFrame)
 {
   // Bidi inline containers should be split, unless they're line frames.
-  return aFrame->IsFrameOfType(nsIFrame::eBidiInlineContainer)
-    && aFrame->GetType() != nsGkAtoms::lineFrame;
+  nsIAtom* frameType = aFrame->GetType();
+  return (aFrame->IsFrameOfType(nsIFrame::eBidiInlineContainer) &&
+          frameType != nsGkAtoms::lineFrame) ||
+         frameType == nsGkAtoms::textFrame;
 }
 
 // Should this frame be treated as a leaf (e.g. when building mLogicalFrames)?
@@ -425,16 +434,14 @@ SplitInlineAncestors(nsIFrame* aParent,
     // Split the child list after |frame|, unless it is the last child.
     if (!frame || frame->GetNextSibling()) {
     
-      nsresult rv = presShell->FrameConstructor()->
-        CreateContinuingFrame(presContext, parent, grandparent, &newParent, false);
-      if (NS_FAILED(rv)) {
-        return rv;
-      }
+      newParent = presShell->FrameConstructor()->
+        CreateContinuingFrame(presContext, parent, grandparent, false);
 
       nsContainerFrame* container = do_QueryFrame(parent);
       nsFrameList tail = container->StealFramesAfter(frame);
 
       // Reparent views as necessary
+      nsresult rv;
       rv = nsContainerFrame::ReparentFrameViewList(presContext, tail, parent, newParent);
       if (NS_FAILED(rv)) {
         return rv;
@@ -527,11 +534,8 @@ CreateContinuation(nsIFrame*  aFrame,
     return rv;
   }
 
-  rv = presShell->FrameConstructor()->
-    CreateContinuingFrame(presContext, aFrame, parent, aNewFrame, aIsFluid);
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
+  *aNewFrame = presShell->FrameConstructor()->
+    CreateContinuingFrame(presContext, aFrame, parent, aIsFluid);
 
   // The list name kNoReflowPrincipalList would indicate we don't want reflow
   // XXXbz this needs higher-level framelist love
@@ -608,8 +612,7 @@ nsBidiPresUtils::Resolve(nsBlockFrame* aBlockFrame)
        block = static_cast<nsBlockFrame*>(block->GetNextContinuation())) {
     block->RemoveStateBits(NS_BLOCK_NEEDS_BIDI_RESOLUTION);
     nsBlockInFlowLineIterator lineIter(block, block->begin_lines());
-    bpd.mPrevFrame = nullptr;
-    bpd.GetSubParagraph()->mPrevFrame = nullptr;
+    bpd.ResetForNewBlock();
     TraverseFrames(aBlockFrame, &lineIter, block->GetFirstPrincipalChild(), &bpd);
     // XXX what about overflow lines?
   }
@@ -813,8 +816,7 @@ nsBidiPresUtils::ResolveParagraph(nsBlockFrame* aBlockFrame,
               while (parent && nextParent) {
                 if (parent == nextParent ||
                     nextParent != parent->GetNextInFlow() ||
-                    !parent->IsFrameOfType(nsIFrame::eLineParticipant) ||
-                    !nextParent->IsFrameOfType(nsIFrame::eLineParticipant)) {
+                    !IsBidiSplittable(parent)) {
                   break;
                 }
                 parent->SetNextContinuation(nextParent);
@@ -879,7 +881,7 @@ nsBidiPresUtils::ResolveParagraph(nsBlockFrame* aBlockFrame,
     }
   } // for
 
-  if (aBpd->mParagraphDepth > 1) {
+  if (aBpd->mParagraphDepth > 0) {
     nsIFrame* child;
     nsIFrame* parent;
     if (firstFrame) {
@@ -924,6 +926,10 @@ nsBidiPresUtils::TraverseFrames(nsBlockFrame*              aBlockFrame,
 {
   if (!aCurrentFrame)
     return;
+
+#ifdef DEBUG
+  nsBlockFrame* initialLineContainer = aLineIter->GetContainer();
+#endif
 
   nsIFrame* childFrame = aCurrentFrame;
   do {
@@ -1170,6 +1176,8 @@ nsBidiPresUtils::TraverseFrames(nsBlockFrame*              aBlockFrame,
     }
     childFrame = nextSibling;
   } while (childFrame);
+
+  MOZ_ASSERT(initialLineContainer == aLineIter->GetContainer());
 }
 
 void
@@ -1599,7 +1607,7 @@ nsBidiPresUtils::RemoveBidiContinuation(BidiParagraphData *aBpd,
   // to content)
   nsIFrame* lastFrame = aBpd->FrameAt(aLastIndex);
   nsIFrame* next = lastFrame->GetNextInFlow();
-  if (next) {
+  if (next && IsBidiSplittable(lastFrame)) {
     lastFrame->SetNextContinuation(next);
     next->SetPrevContinuation(lastFrame);
   }
@@ -1986,7 +1994,7 @@ nsresult nsBidiPresUtils::ProcessText(const PRUnichar*       aText,
   return NS_OK;
 }
 
-class NS_STACK_CLASS nsIRenderingContextBidiProcessor : public nsBidiPresUtils::BidiProcessor {
+class MOZ_STACK_CLASS nsIRenderingContextBidiProcessor : public nsBidiPresUtils::BidiProcessor {
 public:
   nsIRenderingContextBidiProcessor(nsRenderingContext* aCtx,
                                    nsRenderingContext* aTextRunConstructionContext,
@@ -2131,7 +2139,7 @@ void nsBidiPresUtils::CopyLogicalToVisual(const nsAString& aSource,
   uint32_t srcLength = aSource.Length();
   if (srcLength == 0)
     return;
-  if (!EnsureStringLength(aDest, srcLength)) {
+  if (!aDest.SetLength(srcLength, fallible_t())) {
     return;
   }
   nsAString::const_iterator fromBegin, fromEnd;

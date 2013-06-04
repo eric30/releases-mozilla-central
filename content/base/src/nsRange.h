@@ -65,6 +65,9 @@ public:
   static nsresult CreateRange(nsIDOMNode* aStartParent, int32_t aStartOffset,
                               nsIDOMNode* aEndParent, int32_t aEndOffset,
                               nsIDOMRange** aRange);
+  static nsresult CreateRange(nsINode* aStartParent, int32_t aStartOffset,
+                              nsINode* aEndParent, int32_t aEndOffset,
+                              nsRange** aRange);
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(nsRange, nsIDOMRange)
@@ -161,6 +164,10 @@ public:
   NS_DECL_NSIMUTATIONOBSERVER_CONTENTAPPENDED
 
   // WebIDL
+  static already_AddRefed<nsRange>
+  Constructor(const mozilla::dom::GlobalObject& global,
+              mozilla::ErrorResult& aRv);
+
   bool Collapsed() const
   {
     return mIsPositioned && mStartParent == mEndParent &&
@@ -197,7 +204,8 @@ public:
   already_AddRefed<nsClientRectList> GetClientRects();
 
   nsINode* GetParentObject() const { return mOwner; }
-  virtual JSObject* WrapObject(JSContext* cx, JSObject* scope) MOZ_OVERRIDE MOZ_FINAL;
+  virtual JSObject* WrapObject(JSContext* cx,
+                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE MOZ_FINAL;
 
 private:
   // no copy's or assigns
@@ -256,7 +264,7 @@ protected:
    */
   nsINode* GetRegisteredCommonAncestor();
 
-  struct NS_STACK_CLASS AutoInvalidateSelection
+  struct MOZ_STACK_CLASS AutoInvalidateSelection
   {
     AutoInvalidateSelection(nsRange* aRange) : mRange(aRange)
     {

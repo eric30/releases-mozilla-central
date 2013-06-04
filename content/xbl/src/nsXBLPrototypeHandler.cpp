@@ -9,6 +9,7 @@
 #include "nsXBLPrototypeHandler.h"
 #include "nsXBLPrototypeBinding.h"
 #include "nsContentUtils.h"
+#include "nsCxPusher.h"
 #include "nsIContent.h"
 #include "nsIAtom.h"
 #include "nsIDOMKeyEvent.h"
@@ -25,7 +26,6 @@
 #include "nsIDOMHTMLInputElement.h"
 #include "nsFocusManager.h"
 #include "nsEventListenerManager.h"
-#include "nsIDOMEventTarget.h"
 #include "nsIDOMEventListener.h"
 #include "nsPIDOMWindow.h"
 #include "nsPIWindowRoot.h"
@@ -139,9 +139,7 @@ nsXBLPrototypeHandler::GetHandlerElement()
 {
   if (mType & NS_HANDLER_TYPE_XUL) {
     nsCOMPtr<nsIContent> element = do_QueryReferent(mHandlerElement);
-    nsIContent* el = nullptr;
-    element.swap(el);
-    return el;
+    return element.forget();
   }
 
   return nullptr;
@@ -187,7 +185,7 @@ nsXBLPrototypeHandler::InitAccessKeys()
 }
 
 nsresult
-nsXBLPrototypeHandler::ExecuteHandler(nsIDOMEventTarget* aTarget,
+nsXBLPrototypeHandler::ExecuteHandler(EventTarget* aTarget,
                                       nsIDOMEvent* aEvent)
 {
   nsresult rv = NS_ERROR_FAILURE;
@@ -262,7 +260,7 @@ nsXBLPrototypeHandler::ExecuteHandler(nsIDOMEventTarget* aTarget,
       boundDocument = content->OwnerDoc();
     }
 
-    boundGlobal = boundDocument->GetScopeObject();
+    boundGlobal = do_QueryInterface(boundDocument->GetScopeObject());
   }
 
   if (!boundGlobal)
@@ -272,7 +270,6 @@ nsXBLPrototypeHandler::ExecuteHandler(nsIDOMEventTarget* aTarget,
   if (!boundContext)
     return NS_OK;
 
-  nsScriptObjectHolder<JSObject> handler(boundContext);
   nsISupports *scriptTarget;
 
   if (winRoot) {
@@ -287,13 +284,15 @@ nsXBLPrototypeHandler::ExecuteHandler(nsIDOMEventTarget* aTarget,
   nsCxPusher pusher;
   NS_ENSURE_STATE(pusher.Push(aTarget));
 
-  rv = EnsureEventHandler(boundGlobal, boundContext, onEventAtom, handler);
+  AutoPushJSContext cx(boundContext->GetNativeContext());
+  JS::Rooted<JSObject*> handler(cx);
+
+  rv = EnsureEventHandler(boundGlobal, boundContext, onEventAtom, &handler);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  AutoPushJSContext cx(boundContext->GetNativeContext());
-  JSAutoRequest ar(cx);
-  JSObject* globalObject = boundGlobal->GetGlobalJSObject();
-  JSObject* scopeObject = xpc::GetXBLScope(cx, globalObject);
+  JS::Rooted<JSObject*> globalObject(cx, boundGlobal->GetGlobalJSObject());
+  JS::Rooted<JSObject*> scopeObject(cx, xpc::GetXBLScope(cx, globalObject));
+  NS_ENSURE_TRUE(scopeObject, NS_ERROR_OUT_OF_MEMORY);
 
   // Bind it to the bound element. Note that if we're using a separate XBL scope,
   // we'll actually be binding the event handler to a cross-compartment wrapper
@@ -302,35 +301,31 @@ nsXBLPrototypeHandler::ExecuteHandler(nsIDOMEventTarget* aTarget,
   // First, enter our XBL scope. This is where the generic handler should have
   // been compiled, above.
   JSAutoCompartment ac(cx, scopeObject);
-  JSObject* genericHandler = handler.get();
-  bool ok = JS_WrapObject(cx, &genericHandler);
+  JS::Rooted<JSObject*> genericHandler(cx, handler.get());
+  bool ok = JS_WrapObject(cx, genericHandler.address());
   NS_ENSURE_TRUE(ok, NS_ERROR_OUT_OF_MEMORY);
   MOZ_ASSERT(!js::IsCrossCompartmentWrapper(genericHandler));
 
   // Wrap the native into the XBL scope. This creates a reflector in the document
   // scope if one doesn't already exist, and potentially wraps it cross-
   // compartment into our scope (via aAllowWrapping=true).
-  JS::Value targetV = JS::UndefinedValue();
-  rv = nsContentUtils::WrapNative(cx, scopeObject, scriptTarget, &targetV, nullptr,
+  JS::Rooted<JS::Value> targetV(cx, JS::UndefinedValue());
+  rv = nsContentUtils::WrapNative(cx, scopeObject, scriptTarget, targetV.address(), nullptr,
                                   /* aAllowWrapping = */ true);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Next, clone the generic handler to be parented to the target.
-  JSObject* bound = JS_CloneFunctionObject(cx, genericHandler, &targetV.toObject());
+  JS::Rooted<JSObject*> bound(cx, JS_CloneFunctionObject(cx, genericHandler, &targetV.toObject()));
   NS_ENSURE_TRUE(bound, NS_ERROR_FAILURE);
 
   // Now, wrap the bound handler into the content compartment and use it.
   JSAutoCompartment ac2(cx, globalObject);
-  if (!JS_WrapObject(cx, &bound)) {
+  if (!JS_WrapObject(cx, bound.address())) {
     return NS_ERROR_FAILURE;
   }
-  nsScriptObjectHolder<JSObject> boundHandler(boundContext, bound);
 
   nsRefPtr<EventHandlerNonNull> handlerCallback =
-    new EventHandlerNonNull(cx, globalObject, boundHandler.get(), &ok);
-  if (!ok) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
+    new EventHandlerNonNull(bound);
 
   nsEventHandler eventHandler(handlerCallback);
 
@@ -352,12 +347,14 @@ nsresult
 nsXBLPrototypeHandler::EnsureEventHandler(nsIScriptGlobalObject* aGlobal,
                                           nsIScriptContext *aBoundContext,
                                           nsIAtom *aName,
-                                          nsScriptObjectHolder<JSObject>& aHandler)
+                                          JS::MutableHandle<JSObject*> aHandler)
 {
+  AutoPushJSContext cx(aBoundContext->GetNativeContext());
+
   // Check to see if we've already compiled this
   nsCOMPtr<nsPIDOMWindow> pWindow = do_QueryInterface(aGlobal);
   if (pWindow) {
-    JSObject* cachedHandler = pWindow->GetCachedXBLPrototypeHandler(this);
+    JS::Rooted<JSObject*> cachedHandler(cx, pWindow->GetCachedXBLPrototypeHandler(this));
     if (cachedHandler) {
       xpc_UnmarkGrayObject(cachedHandler);
       aHandler.set(cachedHandler);
@@ -370,9 +367,9 @@ nsXBLPrototypeHandler::EnsureEventHandler(nsIScriptGlobalObject* aGlobal,
   nsDependentString handlerText(mHandlerText);
   NS_ENSURE_TRUE(!handlerText.IsEmpty(), NS_ERROR_FAILURE);
 
-  AutoPushJSContext cx(aBoundContext->GetNativeContext());
-  JSObject* globalObject = aGlobal->GetGlobalJSObject();
-  JSObject* scopeObject = xpc::GetXBLScope(cx, globalObject);
+  JS::Rooted<JSObject*> globalObject(cx, aGlobal->GetGlobalJSObject());
+  JS::Rooted<JSObject*> scopeObject(cx, xpc::GetXBLScope(cx, globalObject));
+  NS_ENSURE_TRUE(scopeObject, NS_ERROR_OUT_OF_MEMORY);
 
   nsAutoCString bindingURI;
   mPrototypeBinding->DocURI()->GetSpec(bindingURI);
@@ -383,25 +380,23 @@ nsXBLPrototypeHandler::EnsureEventHandler(nsIScriptGlobalObject* aGlobal,
                                    &argNames);
 
   // Compile the event handler in the xbl scope.
-  JSAutoRequest ar(cx);
   JSAutoCompartment ac(cx, scopeObject);
   JS::CompileOptions options(cx);
   options.setFileAndLine(bindingURI.get(), mLineNumber)
-         .setVersion(JSVERSION_LATEST)
-         .setUserBit(true); // Flag us as XBL
+         .setVersion(JSVERSION_LATEST);
 
-  JS::RootedObject rootedNull(cx, nullptr); // See bug 781070.
-  JSObject* handlerFun = nullptr;
+  JS::Rooted<JSObject*> rootedNull(cx); // See bug 781070.
+  JS::Rooted<JSObject*> handlerFun(cx);
   nsresult rv = nsJSUtils::CompileFunction(cx, rootedNull, options,
                                            nsAtomCString(aName), argCount,
-                                           argNames, handlerText, &handlerFun);
+                                           argNames, handlerText, handlerFun.address());
   NS_ENSURE_SUCCESS(rv, rv);
   NS_ENSURE_TRUE(handlerFun, NS_ERROR_FAILURE);
 
   // Wrap the handler into the content scope, since we're about to stash it
   // on the DOM window and such.
   JSAutoCompartment ac2(cx, globalObject);
-  bool ok = JS_WrapObject(cx, &handlerFun);
+  bool ok = JS_WrapObject(cx, handlerFun.address());
   NS_ENSURE_TRUE(ok, NS_ERROR_OUT_OF_MEMORY);
   aHandler.set(handlerFun);
   NS_ENSURE_TRUE(aHandler, NS_ERROR_FAILURE);
@@ -414,7 +409,7 @@ nsXBLPrototypeHandler::EnsureEventHandler(nsIScriptGlobalObject* aGlobal,
 }
 
 nsresult
-nsXBLPrototypeHandler::DispatchXBLCommand(nsIDOMEventTarget* aTarget, nsIDOMEvent* aEvent)
+nsXBLPrototypeHandler::DispatchXBLCommand(EventTarget* aTarget, nsIDOMEvent* aEvent)
 {
   // This is a special-case optimization to make command handling fast.
   // It isn't really a part of XBL, but it helps speed things up.
@@ -422,7 +417,7 @@ nsXBLPrototypeHandler::DispatchXBLCommand(nsIDOMEventTarget* aTarget, nsIDOMEven
   if (aEvent) {
     // See if preventDefault has been set.  If so, don't execute.
     bool preventDefault = false;
-    aEvent->GetPreventDefault(&preventDefault);
+    aEvent->GetDefaultPrevented(&preventDefault);
     if (preventDefault) {
       return NS_OK;
     }
@@ -575,15 +570,14 @@ nsXBLPrototypeHandler::DispatchXULKeyCommand(nsIDOMEvent* aEvent)
 already_AddRefed<nsIAtom>
 nsXBLPrototypeHandler::GetEventName()
 {
-  nsIAtom* eventName = mEventName;
-  NS_IF_ADDREF(eventName);
-  return eventName;
+  nsCOMPtr<nsIAtom> eventName = mEventName;
+  return eventName.forget();
 }
 
 already_AddRefed<nsIController>
-nsXBLPrototypeHandler::GetController(nsIDOMEventTarget* aTarget)
+nsXBLPrototypeHandler::GetController(EventTarget* aTarget)
 {
-  // XXX Fix this so there's a generic interface that describes controllers, 
+  // XXX Fix this so there's a generic interface that describes controllers,
   // This code should have no special knowledge of what objects might have controllers.
   nsCOMPtr<nsIControllers> controllers;
 
@@ -612,13 +606,12 @@ nsXBLPrototypeHandler::GetController(nsIDOMEventTarget* aTarget)
   // Return the first controller.
   // XXX This code should be checking the command name and using supportscommand and
   // iscommandenabled.
-  nsIController* controller;
+  nsCOMPtr<nsIController> controller;
   if (controllers) {
-    controllers->GetControllerAt(0, &controller);  // return reference
+    controllers->GetControllerAt(0, getter_AddRefs(controller));
   }
-  else controller = nullptr;
 
-  return controller;
+  return controller.forget();
 }
 
 bool
@@ -812,7 +805,7 @@ nsXBLPrototypeHandler::ConstructPrototype(nsIContent* aKeyElement,
     char* str = ToNewCString(modifiers);
     char* newStr;
     char* token = nsCRT::strtok( str, ", \t", &newStr );
-    while( token != NULL ) {
+    while( token != nullptr ) {
       if (PL_strcmp(token, "shift") == 0)
         mKeyMask |= cShift | cShiftMask;
       else if (PL_strcmp(token, "alt") == 0)

@@ -168,7 +168,7 @@ void nsDisplayButtonForeground::Paint(nsDisplayListBuilder* aBuilder,
   nsPresContext *presContext = mFrame->PresContext();
   const nsStyleDisplay *disp = mFrame->StyleDisplay();
   if (!mFrame->IsThemed(disp) ||
-      !presContext->GetTheme()->ThemeDrawsFocusForWidget(presContext, mFrame, disp->mAppearance)) {
+      !presContext->GetTheme()->ThemeDrawsFocusForWidget(disp->mAppearance)) {
     // draw the focus and outline borders
     nsRect r = nsRect(ToReferenceFrame(), mFrame->GetSize());
     mBFR->PaintOutlineAndFocusBorders(presContext, *aCtx, mVisibleRect, r);
@@ -185,11 +185,18 @@ nsButtonFrameRenderer::DisplayButton(nsDisplayListBuilder* aBuilder,
       nsDisplayButtonBoxShadowOuter(aBuilder, this));
   }
 
+  // Almost all buttons draw some kind of background so there's not much
+  // point in checking whether we should create this item.
   aBackground->AppendNewToTop(new (aBuilder)
     nsDisplayButtonBorderBackground(aBuilder, this));
 
-  aForeground->AppendNewToTop(new (aBuilder)
-    nsDisplayButtonForeground(aBuilder, this));
+  // Only display focus rings if we actually have them. Since at most one
+  // button would normally display a focus ring, most buttons won't have them.
+  if ((mOuterFocusStyle && mOuterFocusStyle->StyleBorder()->HasBorder()) ||
+      (mInnerFocusStyle && mInnerFocusStyle->StyleBorder()->HasBorder())) {
+    aForeground->AppendNewToTop(new (aBuilder)
+      nsDisplayButtonForeground(aBuilder, this));
+  }
   return NS_OK;
 }
 

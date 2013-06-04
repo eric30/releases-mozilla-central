@@ -1,9 +1,8 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=78:
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this file,
- * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #ifndef ObjectImpl_inl_h___
 #define ObjectImpl_inl_h___
@@ -12,12 +11,13 @@
 
 #include "jscompartment.h"
 #include "jsgc.h"
-#include "jsinterp.h"
+#include "jsproxy.h"
 
 #include "gc/Heap.h"
 #include "gc/Marking.h"
 #include "js/TemplateLib.h"
 
+#include "Interpreter.h"
 #include "ObjectImpl.h"
 
 namespace js {
@@ -40,13 +40,25 @@ Debug_SetSlotRangeToCrashOnTouch(HeapSlot *begin, HeapSlot *end)
 
 } // namespace js
 
-inline js::RawShape
+inline JSCompartment *
+js::ObjectImpl::compartment() const
+{
+    return lastProperty()->base()->compartment();
+}
+
+inline js::TaggedProto
+js::ObjectImpl::getTaggedProto() const
+{
+    return TaggedProto(getProto());
+}
+
+inline js::Shape *
 js::ObjectImpl::nativeLookup(JSContext *cx, PropertyId pid)
 {
     return nativeLookup(cx, pid.asId());
 }
 
-inline js::RawShape
+inline js::Shape *
 js::ObjectImpl::nativeLookup(JSContext *cx, PropertyName *name)
 {
     return nativeLookup(cx, NameToId(name));
@@ -70,9 +82,43 @@ js::ObjectImpl::nativeContains(JSContext *cx, Shape *shape)
     return nativeLookup(cx, shape->propid()) == shape;
 }
 
+inline js::Shape *
+js::ObjectImpl::nativeLookupPure(PropertyId pid)
+{
+    return nativeLookupPure(pid.asId());
+}
+
+inline js::Shape *
+js::ObjectImpl::nativeLookupPure(PropertyName *name)
+{
+    return nativeLookupPure(NameToId(name));
+}
+
+inline bool
+js::ObjectImpl::nativeContainsPure(jsid id)
+{
+    return nativeLookupPure(id) != NULL;
+}
+
+inline bool
+js::ObjectImpl::nativeContainsPure(PropertyName *name)
+{
+    return nativeContainsPure(NameToId(name));
+}
+
+inline bool
+js::ObjectImpl::nativeContainsPure(Shape *shape)
+{
+    return nativeLookupPure(shape->propid()) == shape;
+}
+
 inline bool
 js::ObjectImpl::isExtensible() const
 {
+    if (this->isProxy())
+        return Proxy::isExtensible(const_cast<JSObject*>(this->asObjectPtr()));
+
+    // [[Extensible]] for ordinary non-proxy objects is an object flag.
     return !lastProperty()->hasObjectFlag(BaseShape::NOT_EXTENSIBLE);
 }
 
@@ -81,6 +127,13 @@ js::ObjectImpl::getDenseInitializedLength()
 {
     MOZ_ASSERT(isNative());
     return getElementsHeader()->initializedLength;
+}
+
+inline uint32_t
+js::ObjectImpl::getDenseCapacity()
+{
+    MOZ_ASSERT(isNative());
+    return getElementsHeader()->capacity;
 }
 
 inline js::HeapSlotArray
@@ -312,9 +365,24 @@ js::ObjectImpl::dynamicSlotsCount(uint32_t nfixed, uint32_t span)
 }
 
 inline size_t
-js::ObjectImpl::sizeOfThis() const
+js::ObjectImpl::tenuredSizeOfThis() const
 {
-    return js::gc::Arena::thingSize(getAllocKind());
+    return js::gc::Arena::thingSize(tenuredGetAllocKind());
+}
+
+JS_ALWAYS_INLINE JS::Zone *
+js::ObjectImpl::zone() const
+{
+    return shape_->zone();
+}
+
+JS_ALWAYS_INLINE JS::Zone *
+ZoneOfValue(const JS::Value &value)
+{
+    JS_ASSERT(value.isMarkable());
+    if (value.isObject())
+        return value.toObject().zone();
+    return static_cast<js::gc::Cell *>(value.toGCThing())->tenuredZone();
 }
 
 /* static */ inline void
@@ -359,7 +427,7 @@ js::ObjectImpl::writeBarrierPre(ObjectImpl *obj)
      * This would normally be a null test, but TypeScript::global uses 0x1 as a
      * special value.
      */
-    if (IsNullTaggedPointer(obj))
+    if (IsNullTaggedPointer(obj) || !obj->runtime()->needsBarrier())
         return;
 
     Zone *zone = obj->zone();

@@ -6,8 +6,8 @@
 
 const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
+Cu.import("resource://gre/modules/Preferences.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://services-common/preferences.js");
 Cu.import("resource://services-common/utils.js");
 
 
@@ -247,14 +247,24 @@ DataReportingService.prototype = Object.freeze({
       }
     }
 
-    // The reporter initializes in the background.
+    if (loggingPrefs.get("dumpEnabled", false)) {
+      let level = loggingPrefs.get("dumpLevel", "Debug");
+      let appender = new ns.Log4Moz.DumpAppender();
+      appender.level = ns.Log4Moz.Level[level] || ns.Log4Moz.Level.Debug;
+
+      for (let name of LOGGERS) {
+        let logger = ns.Log4Moz.repository.getLogger(name);
+        logger.addAppender(appender);
+      }
+    }
+
     this._healthReporter = new ns.HealthReporter(HEALTHREPORT_BRANCH,
                                                  this.policy,
                                                  this.sessionRecorder);
 
     // Wait for initialization to finish so if a shutdown occurs before init
     // has finished we don't adversely affect app startup on next run.
-    this._healthReporter.onInit().then(function onInit() {
+    this._healthReporter.init().then(function onInit() {
       this._prefs.set("service.firstRun", true);
     }.bind(this));
   },

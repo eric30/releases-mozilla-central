@@ -44,12 +44,10 @@ public:
   }
 #endif
 
-  virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext);
-
 #ifdef DEBUG
-  NS_IMETHOD Init(nsIContent* aContent,
-                  nsIFrame*   aParent,
-                  nsIFrame*   aPrevInFlow);
+  virtual void Init(nsIContent* aContent,
+                    nsIFrame*   aParent,
+                    nsIFrame*   aPrevInFlow) MOZ_OVERRIDE;
 #endif
   /**
    * Get the "type" of the frame
@@ -76,15 +74,8 @@ NS_NewSVGFEContainerFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 
 NS_IMPL_FRAMEARENA_HELPERS(SVGFEContainerFrame)
 
-/* virtual */ void
-SVGFEContainerFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
-{
-  SVGFEContainerFrameBase::DidSetStyleContext(aOldStyleContext);
-  nsSVGEffects::InvalidateRenderingObservers(this);
-}
-
 #ifdef DEBUG
-NS_IMETHODIMP
+void
 SVGFEContainerFrame::Init(nsIContent* aContent,
                           nsIFrame* aParent,
                           nsIFrame* aPrevInFlow)
@@ -93,7 +84,7 @@ SVGFEContainerFrame::Init(nsIContent* aContent,
                "Trying to construct an SVGFEContainerFrame for a "
                "content element that doesn't support the right interfaces");
 
-  return SVGFEContainerFrameBase::Init(aContent, aParent, aPrevInFlow);
+  SVGFEContainerFrameBase::Init(aContent, aParent, aPrevInFlow);
 }
 #endif /* DEBUG */
 

@@ -1,6 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=79:
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -18,6 +17,7 @@
 #include "builtin/Module.h"
 #include "frontend/ParseMaps.h"
 #include "frontend/ParseNode.h"
+#include "frontend/TokenStream.h"
 #include "vm/ScopeObject.h"
 
 namespace js {
@@ -199,8 +199,11 @@ class FunctionBox : public ObjectBox, public SharedContext
 {
   public:
     Bindings        bindings;               /* bindings for this function */
-    size_t          bufStart;
-    size_t          bufEnd;
+    uint32_t        bufStart;
+    uint32_t        bufEnd;
+    uint32_t        startLine;
+    uint32_t        startColumn;
+    uint32_t        asmStart;               /* offset of the "use asm" directive, if present */
     uint16_t        ndefaults;
     bool            inWith:1;               /* some enclosing scope is a with-statement */
     bool            inGenexpLambda:1;       /* lambda from generator expression */
@@ -233,6 +236,12 @@ class FunctionBox : public ObjectBox, public SharedContext
     // (transitively) nested inside a function that has.
     bool useAsmOrInsideUseAsm() const {
         return useAsm || insideUseAsm;
+    }
+
+    void setStart(const TokenStream &tokenStream) {
+        bufStart = tokenStream.currentToken().pos.begin;
+        startLine = tokenStream.getLineno();
+        startColumn = tokenStream.getColumn();
     }
 };
 

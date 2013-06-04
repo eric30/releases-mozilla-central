@@ -1164,7 +1164,7 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(DOMCSSStyleRule)
   // Trace the wrapper for our declaration.  This just expands out
   // NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER which we can't use
   // directly because the wrapper is on the declaration, not on us.
-  nsContentUtils::TraceWrapper(tmp->DOMDeclaration(), aCallback, aClosure);
+  tmp->DOMDeclaration()->TraceWrapper(aCallbacks, aClosure);
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(DOMCSSStyleRule)
@@ -1281,6 +1281,7 @@ StyleRule::StyleRule(nsCSSSelectorList* aSelector,
     mImportantRule(nullptr),
     mDOMRule(nullptr),
     mLineNumber(0),
+    mColumnNumber(0),
     mWasMatched(false)
 {
   NS_PRECONDITION(aDeclaration, "must have a declaration");
@@ -1294,6 +1295,7 @@ StyleRule::StyleRule(const StyleRule& aCopy)
     mImportantRule(nullptr),
     mDOMRule(nullptr),
     mLineNumber(aCopy.mLineNumber),
+    mColumnNumber(aCopy.mColumnNumber),
     mWasMatched(false)
 {
   // rest is constructed lazily on existing data
@@ -1308,6 +1310,7 @@ StyleRule::StyleRule(StyleRule& aCopy,
     mImportantRule(nullptr),
     mDOMRule(aCopy.mDOMRule),
     mLineNumber(aCopy.mLineNumber),
+    mColumnNumber(aCopy.mColumnNumber),
     mWasMatched(false)
 {
   // The DOM rule is replacing |aCopy| with |this|, so transfer
@@ -1383,12 +1386,13 @@ StyleRule::Clone() const
 /* virtual */ nsIDOMCSSRule*
 StyleRule::GetDOMRule()
 {
-  if (!GetStyleSheet()) {
-    // inline style rules aren't supposed to have a DOM rule object, only
-    // a declaration.
-    return nullptr;
-  }
   if (!mDOMRule) {
+    if (!GetStyleSheet()) {
+      // Inline style rules aren't supposed to have a DOM rule object, only
+      // a declaration.  But if we do have one already, from a style sheet
+      // rule that used to be in a document, we still want to return it.
+      return nullptr;
+    }
     mDOMRule = new DOMCSSStyleRule(this);
     NS_ADDREF(mDOMRule);
   }
@@ -1405,12 +1409,7 @@ StyleRule::GetExistingDOMRule()
 StyleRule::DeclarationChanged(Declaration* aDecl,
                               bool aHandleContainer)
 {
-  StyleRule* clone = new StyleRule(*this, aDecl);
-  if (!clone) {
-    return nullptr;
-  }
-
-  NS_ADDREF(clone); // for return
+  nsRefPtr<StyleRule> clone = new StyleRule(*this, aDecl);
 
   if (aHandleContainer) {
     nsCSSStyleSheet* sheet = GetStyleSheet();
@@ -1425,7 +1424,7 @@ StyleRule::DeclarationChanged(Declaration* aDecl,
     }
   }
 
-  return clone;
+  return clone.forget();
 }
 
 /* virtual */ void

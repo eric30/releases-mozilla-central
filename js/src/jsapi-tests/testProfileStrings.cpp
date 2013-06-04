@@ -1,5 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=99:
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  *
  * Tests the stack-based instrumentation profiler on a JSRuntime
  */
@@ -27,7 +27,7 @@ reset(JSContext *cx)
 }
 
 static JSClass ptestClass = {
-    "Prof", 0, JS_PropertyStub, JS_PropertyStub, JS_PropertyStub,
+    "Prof", 0, JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub,
     JS_StrictPropertyStub, JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub
 };
 
@@ -42,7 +42,7 @@ static JSBool
 test_fn2(JSContext *cx, unsigned argc, jsval *vp)
 {
     jsval r;
-    JS::RootedObject global(cx, JS_GetGlobalObject(cx));
+    JS::RootedObject global(cx, JS_GetGlobalForScopeChain(cx));
     return JS_CallFunctionName(cx, global, "d", 0, NULL, &r);
 }
 
@@ -70,7 +70,7 @@ Prof(JSContext* cx, unsigned argc, jsval *vp)
     return JS_TRUE;
 }
 
-static JSFunctionSpec ptestFunctions[] = {
+static const JSFunctionSpec ptestFunctions[] = {
     JS_FS("test_fn", test_fn, 0, 0),
     JS_FS("test_fn2", test_fn2, 0, 0),
     JS_FS("enable", enable, 0, 0),
@@ -82,7 +82,7 @@ static JSObject*
 initialize(JSContext *cx)
 {
     js::SetRuntimeProfilingStack(cx->runtime, pstack, &psize, 10);
-    JS::RootedObject global(cx, JS_GetGlobalObject(cx));
+    JS::RootedObject global(cx, JS_GetGlobalForScopeChain(cx));
     return JS_InitClass(cx, global, NULL, &ptestClass, Prof, 0,
                         NULL, ptestFunctions, NULL, NULL);
 }
@@ -142,8 +142,7 @@ END_TEST(testProfileStrings_isCalledWithInterpreter)
 BEGIN_TEST(testProfileStrings_isCalledWithJIT)
 {
     CHECK(initialize(cx));
-    JS_SetOptions(cx, JS_GetOptions(cx) | JSOPTION_METHODJIT |
-                        JSOPTION_METHODJIT_ALWAYS);
+    JS_SetOptions(cx, JS_GetOptions(cx) | JSOPTION_BASELINE | JSOPTION_ION);
 
     EXEC("function g() { var p = new Prof(); p.test_fn(); }");
     EXEC("function f() { g(); }");
@@ -191,7 +190,7 @@ END_TEST(testProfileStrings_isCalledWithJIT)
 BEGIN_TEST(testProfileStrings_isCalledWhenError)
 {
     CHECK(initialize(cx));
-    JS_SetOptions(cx, JS_GetOptions(cx) | JSOPTION_METHODJIT | JSOPTION_METHODJIT_ALWAYS);
+    JS_SetOptions(cx, JS_GetOptions(cx) | JSOPTION_BASELINE | JSOPTION_ION);
 
     EXEC("function check2() { throw 'a'; }");
 
@@ -214,7 +213,7 @@ END_TEST(testProfileStrings_isCalledWhenError)
 BEGIN_TEST(testProfileStrings_worksWhenEnabledOnTheFly)
 {
     CHECK(initialize(cx));
-    JS_SetOptions(cx, JS_GetOptions(cx) | JSOPTION_METHODJIT | JSOPTION_METHODJIT_ALWAYS);
+    JS_SetOptions(cx, JS_GetOptions(cx) | JSOPTION_BASELINE | JSOPTION_ION);
 
     EXEC("function b(p) { p.test_fn(); }");
     EXEC("function a() { var p = new Prof(); p.enable(); b(p); }");

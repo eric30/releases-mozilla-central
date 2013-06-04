@@ -6,6 +6,7 @@
 #ifndef mozilla_dom_HTMLMenuElement_h
 #define mozilla_dom_HTMLMenuElement_h
 
+#include "mozilla/Attributes.h"
 #include "nsIDOMHTMLMenuElement.h"
 #include "nsIHTMLMenu.h"
 #include "nsGenericHTMLElement.h"
@@ -44,11 +45,11 @@ public:
   virtual bool ParseAttribute(int32_t aNamespaceID,
                                 nsIAtom* aAttribute,
                                 const nsAString& aValue,
-                                nsAttrValue& aResult);
+                                nsAttrValue& aResult) MOZ_OVERRIDE;
 
-  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const;
+  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
 
-  virtual nsIDOMNode* AsDOMNode() { return this; }
+  virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
 
   uint8_t GetType() const { return mType; }
 
@@ -82,7 +83,8 @@ public:
   // The XPCOM Build is OK for us
 
 protected:
-  virtual JSObject* WrapNode(JSContext *aCx, JSObject *aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *aCx,
+                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
 
 protected:

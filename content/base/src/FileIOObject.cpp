@@ -85,13 +85,13 @@ FileIOObject::DispatchError(nsresult rv, nsAString& finalEvent)
   // Set the status attribute, and dispatch the error event
   switch (rv) {
   case NS_ERROR_FILE_NOT_FOUND:
-    mError = DOMError::CreateWithName(NS_LITERAL_STRING("NotFoundError"));
+    mError = new DOMError(GetOwner(), NS_LITERAL_STRING("NotFoundError"));
     break;
   case NS_ERROR_FILE_ACCESS_DENIED:
-    mError = DOMError::CreateWithName(NS_LITERAL_STRING("SecurityError"));
+    mError = new DOMError(GetOwner(), NS_LITERAL_STRING("SecurityError"));
     break;
   default:
-    mError = DOMError::CreateWithName(NS_LITERAL_STRING("NotReadableError"));
+    mError = new DOMError(GetOwner(), NS_LITERAL_STRING("NotReadableError"));
     break;
   }
 
@@ -217,12 +217,13 @@ FileIOObject::OnStopRequest(nsIRequest* aRequest, nsISupports* aContext,
   return NS_OK;
 }
 
-NS_IMETHODIMP
-FileIOObject::Abort()
+void
+FileIOObject::Abort(ErrorResult& aRv)
 {
   if (mReadyState != 1) {
     // XXX The spec doesn't say this
-    return NS_ERROR_DOM_FILE_ABORT_ERR;
+    aRv.Throw(NS_ERROR_DOM_FILE_ABORT_ERR);
+    return;
   }
 
   ClearProgressEventTimer();
@@ -230,30 +231,14 @@ FileIOObject::Abort()
   mReadyState = 2; // There are DONE constants on multiple interfaces,
                    // but they all have value 2.
   // XXX The spec doesn't say this
-  mError = DOMError::CreateWithName(NS_LITERAL_STRING("AbortError"));
+  mError = new DOMError(GetOwner(), NS_LITERAL_STRING("AbortError"));
 
   nsString finalEvent;
-  nsresult rv = DoAbort(finalEvent);
+  DoAbort(finalEvent);
 
   // Dispatch the events
   DispatchProgressEvent(NS_LITERAL_STRING(ABORT_STR));
   DispatchProgressEvent(finalEvent);
-
-  return rv;
-}
-
-NS_IMETHODIMP
-FileIOObject::GetReadyState(uint16_t *aReadyState)
-{
-  *aReadyState = mReadyState;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-FileIOObject::GetError(nsIDOMDOMError** aError)
-{
-  NS_IF_ADDREF(*aError = mError);
-  return NS_OK;
 }
 
 } // namespace dom

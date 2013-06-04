@@ -17,32 +17,20 @@ namespace dom {
 
 typedef SVGTextPositioningElement SVGAltGlyphElementBase;
 
-class SVGAltGlyphElement MOZ_FINAL : public SVGAltGlyphElementBase,
-                                     public nsIDOMSVGElement
+class SVGAltGlyphElement MOZ_FINAL : public SVGAltGlyphElementBase
 {
 protected:
   friend nsresult (::NS_NewSVGAltGlyphElement(nsIContent **aResult,
                                               already_AddRefed<nsINodeInfo> aNodeInfo));
   SVGAltGlyphElement(already_AddRefed<nsINodeInfo> aNodeInfo);
-  virtual JSObject* WrapNode(JSContext *cx, JSObject *scope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *cx,
+                             JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
 public:
-  // interfaces:
-
-  NS_DECL_ISUPPORTS_INHERITED
-
-  // xxx If xpcom allowed virtual inheritance we wouldn't need to
-  // forward here :-(
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
-  NS_FORWARD_NSIDOMSVGELEMENT(SVGAltGlyphElementBase::)
-
   // nsIContent interface
-  NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const;
+  NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const MOZ_OVERRIDE;
 
-  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const;
-
-  virtual nsIDOMNode* AsDOMNode() { return this; }
+  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
 
   // WebIDL
   already_AddRefed<nsIDOMSVGAnimatedString> Href();
@@ -54,9 +42,7 @@ public:
 protected:
 
   // nsSVGElement overrides
-  virtual StringAttributesInfo GetStringInfo();
-
-  virtual bool IsEventName(nsIAtom* aName);
+  virtual StringAttributesInfo GetStringInfo() MOZ_OVERRIDE;
 
   enum { HREF };
   nsSVGString mStringAttributes[1];

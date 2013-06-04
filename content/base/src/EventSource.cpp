@@ -12,7 +12,6 @@
 #include "nsNetUtil.h"
 #include "nsMimeTypes.h"
 #include "nsDOMMessageEvent.h"
-#include "nsIJSContextStack.h"
 #include "nsIPromptFactory.h"
 #include "nsIWindowWatcher.h"
 #include "nsPresContext.h"
@@ -29,6 +28,7 @@
 #include "nsIChannelPolicy.h"
 #include "nsIContentSecurityPolicy.h"
 #include "nsContentUtils.h"
+#include "nsCxPusher.h"
 #include "mozilla/Preferences.h"
 #include "xpcpublic.h"
 #include "nsCrossSiteListenerProxy.h"
@@ -62,6 +62,7 @@ EventSource::EventSource() :
   mGoingToDispatchAllMessages(false),
   mWithCredentials(false),
   mWaitingForOnStopRequest(false),
+  mInterrupted(false),
   mLastConvertionResult(NS_OK),
   mReadyState(CONNECTING),
   mScriptLine(0),
@@ -201,10 +202,8 @@ EventSource::Init(nsISupports* aOwner,
   mWithCredentials = aWithCredentials;
   BindToOwner(ownerWindow);
 
-  nsCOMPtr<nsIJSContextStack> stack =
-    do_GetService("@mozilla.org/js/xpc/ContextStack;1");
-  JSContext* cx = nullptr;
-  if (stack && NS_SUCCEEDED(stack->Peek(&cx)) && cx) {
+  // The conditional here is historical and not necessarily sane.
+  if (JSContext *cx = nsContentUtils::GetCurrentJSContext()) {
     const char *filename;
     if (nsJSUtils::GetCallingLocation(cx, &filename, &mScriptLine)) {
       mScriptFile.AssignASCII(filename);
@@ -278,7 +277,7 @@ EventSource::Init(nsISupports* aOwner,
 }
 
 /* virtual */ JSObject*
-EventSource::WrapObject(JSContext* aCx, JSObject* aScope)
+EventSource::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
   return EventSourceBinding::Wrap(aCx, aScope, this);
 }
@@ -348,9 +347,23 @@ EventSource::OnStartRequest(nsIRequest *aRequest,
   rv = httpChannel->GetContentType(contentType);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  if (!requestSucceeded || !contentType.EqualsLiteral(TEXT_EVENT_STREAM)) {
+  nsresult status;
+  aRequest->GetStatus(&status);
+
+  if (NS_FAILED(status) || !requestSucceeded ||
+      !contentType.EqualsLiteral(TEXT_EVENT_STREAM)) {
     DispatchFailConnection();
     return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  uint32_t httpStatus;
+  rv = httpChannel->GetResponseStatus(&httpStatus);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  if (httpStatus != 200) {
+    mInterrupted = true;
+    DispatchFailConnection();
+    return NS_ERROR_ABORT;
   }
 
   nsCOMPtr<nsIPrincipal> principal = mPrincipal;
@@ -973,7 +986,7 @@ EventSource::ConsoleError()
   NS_ConvertUTF8toUTF16 specUTF16(targetSpec);
   const PRUnichar *formatStrings[] = { specUTF16.get() };
 
-  if (mReadyState == CONNECTING) {
+  if (mReadyState == CONNECTING && !mInterrupted) {
     rv = PrintErrorOnConsole("chrome://global/locale/appstrings.properties",
                              NS_LITERAL_STRING("connectionFailure").get(),
                              formatStrings, ArrayLength(formatStrings));
@@ -1235,10 +1248,9 @@ EventSource::DispatchAllMessageEvents()
       message(static_cast<Message*>(mMessagesToDispatch.PopFront()));
 
     // Now we can turn our string into a jsval
-    jsval jsData;
+    JS::Rooted<JS::Value> jsData(cx);
     {
       JSString* jsString;
-      JSAutoRequest ar(cx);
       jsString = JS_NewUCStringCopyN(cx,
                                      message->mData.get(),
                                      message->mData.Length());

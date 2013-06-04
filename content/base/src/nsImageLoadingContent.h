@@ -298,8 +298,8 @@ protected:
   /**
    * Cancels and nulls-out the "current" and "pending" requests if they exist.
    */
-  void ClearCurrentRequest(nsresult aReason);
-  void ClearPendingRequest(nsresult aReason);
+  void ClearCurrentRequest(nsresult aReason, uint32_t aFlags);
+  void ClearPendingRequest(nsresult aReason, uint32_t aFlags);
 
   /**
    * Retrieve a pointer to the 'registered with the refresh driver' flag for
@@ -337,11 +337,11 @@ protected:
   enum {
     SKIP_FRAME_CHECK = 0x1
   };
-  nsresult TrackImage(imgIRequest* aImage, uint32_t aFlags = 0);
+  void TrackImage(imgIRequest* aImage, uint32_t aFlags = 0);
   enum {
     REQUEST_DISCARD = 0x1
   };
-  nsresult UntrackImage(imgIRequest* aImage, uint32_t aFlags = 0);
+  void UntrackImage(imgIRequest* aImage, uint32_t aFlags = 0);
 
   /* MEMBERS */
   nsRefPtr<imgRequestProxy> mCurrentRequest;

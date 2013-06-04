@@ -1,3 +1,4 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -7,3 +8,7 @@ DIRS += ['testplugin']
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('gtk2', 'cocoa', 'windows'):
     TEST_DIRS += ['mochitest']
+
+MODULE = 'test_plugin'
+
+XPCSHELL_TESTS_MANIFESTS += ['unit/xpcshell.ini']

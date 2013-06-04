@@ -52,13 +52,12 @@ native nsSize(nsSize);
 
 /**
  * imgIContainer is the interface that represents an image. It allows
- * access to frames as Thebes surfaces, and permits users to extract subregions
- * as other imgIContainers. It also allows drawing of images on to Thebes
- * contexts.
+ * access to frames as Thebes surfaces. It also allows drawing of images
+ * onto Thebes contexts.
  *
  * Internally, imgIContainer also manages animation of images.
  */
-[scriptable, builtinclass, uuid(01c4f92f-f883-4837-a127-d8f30920e374)]
+[scriptable, builtinclass, uuid(b56906e9-830c-45f4-b572-8c71e7619dad)]
 interface imgIContainer : nsISupports
 {
   /**
@@ -131,6 +130,10 @@ interface imgIContainer : nsISupports
    *
    * FLAG_CLAMP: Extend the image to the fill area by clamping image sample
    * coordinates instead of by tiling. This only affects 'draw'.
+   *
+   * FLAG_HIGH_QUALITY_SCALING: A hint as to whether this image should be
+   * scaled using the high quality scaler. Do not set this if not drawing to
+   * a window or not listening to invalidations.
    */
 
   const long FLAG_NONE            = 0x0;
@@ -138,6 +141,7 @@ interface imgIContainer : nsISupports
   const long FLAG_DECODE_NO_PREMULTIPLY_ALPHA = 0x2;
   const long FLAG_DECODE_NO_COLORSPACE_CONVERSION = 0x4;
   const long FLAG_CLAMP           = 0x8;
+  const long FLAG_HIGH_QUALITY_SCALING = 0x10;
 
   /**
     * Constants for specifying various "special" frames.
@@ -179,19 +183,6 @@ interface imgIContainer : nsISupports
   [noscript] ImageContainer getImageContainer(in LayerManager aManager);
 
   /**
-   * Create a new imgContainer that contains only a single frame, which itself
-   * contains a subregion of the given frame.
-   *
-   * @param aWhichFrame Frame specifier of the FRAME_* variety.
-   * @param aRect the area of the current frame to be duplicated in the
-   *              returned imgContainer's frame.
-   * @param aFlags Flags of the FLAG_* variety
-   */
-  [noscript] imgIContainer extractFrame(in uint32_t aWhichFrame,
-                                        [const] in nsIntRect aRect,
-                                        in uint32_t aFlags);
-
-  /**
    * Draw a frame onto the context specified.
    *
    * @param aContext The Thebes context to draw the image to.
@@ -229,11 +220,10 @@ interface imgIContainer : nsISupports
 
   /*
    * Ensures that an image is decoding. Calling this function guarantees that
-   * the image will at some point fire off decode notifications. Calling draw(),
-   * getFrame(), copyFrame(), or extractCurrentFrame() triggers the same
-   * mechanism internally. Thus, if you want to be sure that the image will be
-   * decoded but don't want to access it until then, you must call
-   * requestDecode().
+   * the image will at some point fire off decode notifications. Calling draw()
+   * or getFrame() triggers the same mechanism internally. Thus, if you want to
+   * be sure that the image will be decoded but don't want to access it until
+   * then, you must call requestDecode().
    */
   void requestDecode();
 
@@ -289,4 +279,41 @@ interface imgIContainer : nsISupports
 
   /* Methods to control animation */
   void resetAnimation();
+
+  /*
+   * Returns an index for the requested animation frame (either FRAME_FIRST or
+   * FRAME_CURRENT).
+   *
+   * The units of the index aren't specified, and may vary between different
+   * types of images. What you can rely on is that on all occasions when
+   * getFrameIndex(FRAME_CURRENT) returns a certain value,
+   * draw(..FRAME_CURRENT..) will draw the same frame. The same holds for
+   * FRAME_FIRST as well.
+   *
+   * @param aWhichFrame Frame specifier of the FRAME_* variety.
+   */
+  [notxpcom] float getFrameIndex(in uint32_t aWhichFrame);
+
+  /*
+   * Returns the delay, in ms, between the first and second frame. If this
+   * returns 0, there is no delay between first and second frame (i.e., this
+   * image could render differently whenever it draws).
+   *
+   * If this image is not animated, or not known to be animated (see attribute
+   * animated), returns -1.
+   */
+  [notxpcom] int32_t getFirstFrameDelay();
+
+  /*
+   * If this is an animated image that hasn't started animating already, this
+   * sets the animation's start time to the indicated time.
+   *
+   * This has no effect if the image isn't animated or it has started animating
+   * already; it also has no effect if the image format doesn't care about
+   * animation start time.
+   *
+   * In all cases, animation does not actually begin until startAnimation(),
+   * resetAnimation(), or requestRefresh() is called for the first time.
+   */
+  [notxpcom] void setAnimationStartTime([const] in TimeStamp aTime);
 };

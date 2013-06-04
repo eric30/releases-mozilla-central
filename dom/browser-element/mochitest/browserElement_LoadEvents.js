@@ -6,11 +6,10 @@
 
 "use strict";
 SimpleTest.waitForExplicitFinish();
+browserElementTestHelpers.setEnabledPref(true);
+browserElementTestHelpers.addPermission();
 
 function runTest() {
-  browserElementTestHelpers.setEnabledPref(true);
-  browserElementTestHelpers.addPermission();
-
   // Load emptypage1 into the iframe, wait for that to finish loading, then
   // call runTest2.
   //
@@ -46,6 +45,7 @@ function runTest() {
     ok(e.isTrusted, 'Event should be trusted.');
     ok(seenLoadStart, 'loadend after loadstart.');
     ok(!seenLoadEnd, 'Just one loadend event.');
+    ok(seenLocationChange, 'loadend after locationchange.');
     seenLoadEnd = true;
   }
 
@@ -115,4 +115,4 @@ function runTest2() {
   waitForAllCallbacks();
 }
 
-addEventListener('load', function() { SimpleTest.executeSoon(runTest); });
+addEventListener('testready', runTest);

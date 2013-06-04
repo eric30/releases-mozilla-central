@@ -4,7 +4,7 @@
    - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
 <?xml-stylesheet href="chrome://browser/skin/" type="text/css"?>
 <?xml-stylesheet href="chrome://browser/content/devtools/widgets.css" type="text/css"?>
-<?xml-stylesheet href="chrome://browser/content/debugger.css" type="text/css"?>
+<?xml-stylesheet href="chrome://browser/content/devtools/debugger.css" type="text/css"?>
 <?xml-stylesheet href="chrome://browser/skin/devtools/common.css" type="text/css"?>
 <?xml-stylesheet href="chrome://browser/skin/devtools/widgets.css" type="text/css"?>
 <?xml-stylesheet href="chrome://browser/skin/devtools/debugger.css" type="text/css"?>
@@ -13,7 +13,7 @@
   %debuggerDTD;
 ]>
 <?xul-overlay href="chrome://global/content/editMenuOverlay.xul"?>
-<?xul-overlay href="chrome://browser/content/source-editor-overlay.xul"?>
+<?xul-overlay href="chrome://browser/content/devtools/source-editor-overlay.xul"?>
 
 <window xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
   <script type="text/javascript" src="chrome://global/content/globalOverlay.js"/>
@@ -26,6 +26,10 @@
   <commandset id="sourceEditorCommands"/>
 
   <commandset id="debuggerCommands">
+    <command id="nextSourceCommand"
+             oncommand="DebuggerView.Sources.selectNextItem()"/>
+    <command id="prevSourceCommand"
+             oncommand="DebuggerView.Sources.selectPrevItem()"/>
     <command id="resumeCommand"
              oncommand="DebuggerView.Toolbar._onResumePressed()"/>
     <command id="stepOverCommand"
@@ -38,6 +42,8 @@
              oncommand="DebuggerView.Filtering._doFileSearch()"/>
     <command id="globalSearchCommand"
              oncommand="DebuggerView.Filtering._doGlobalSearch()"/>
+    <command id="functionSearchCommand"
+             oncommand="DebuggerView.Filtering._doFunctionSearch()"/>
     <command id="tokenSearchCommand"
              oncommand="DebuggerView.Filtering._doTokenSearch()"/>
     <command id="lineSearchCommand"
@@ -62,6 +68,8 @@
              oncommand="DebuggerView.Options._toggleShowVariablesOnlyEnum()"/>
     <command id="toggleShowVariablesFilterBox"
              oncommand="DebuggerView.Options._toggleShowVariablesFilterBox()"/>
+    <command id="toggleShowOriginalSource"
+             oncommand="DebuggerView.Options._toggleShowOriginalSource()"/>
   </commandset>
 
   <popupset id="debuggerPopupset">
@@ -94,6 +102,11 @@
                 accesskey="&debuggerUI.searchGlobal.key;"
                 key="globalSearchKey"
                 command="globalSearchCommand"/>
+      <menuitem id="se-dbg-cMenu-findFunction"
+                label="&debuggerUI.searchFunction;"
+                accesskey="&debuggerUI.searchFunction.key;"
+                key="functionSearchKey"
+                command="functionSearchCommand"/>
       <menuseparator/>
       <menuitem id="se-dbg-cMenu-findToken"
                 label="&debuggerUI.searchToken;"
@@ -153,10 +166,23 @@
                 label="&debuggerUI.showVarsFilter;"
                 accesskey="&debuggerUI.showVarsFilter.key;"
                 command="toggleShowVariablesFilterBox"/>
+      <menuitem id="show-original-source"
+                type="checkbox"
+                label="&debuggerUI.showOriginalSource;"
+                accesskey="&debuggerUI.showOriginalSource.key;"
+                command="toggleShowOriginalSource"/>
     </menupopup>
   </popupset>
 
   <keyset id="debuggerKeys">
+    <key id="nextSourceKey"
+         keycode="VK_DOWN"
+         modifiers="accel alt"
+         command="nextSourceCommand"/>
+    <key id="prevSourceKey"
+         keycode="VK_UP"
+         modifiers="accel alt"
+         command="prevSourceCommand"/>
     <key id="resumeKey"
          keycode="&debuggerUI.stepping.resume;"
          command="resumeCommand"/>
@@ -174,10 +200,18 @@
          key="&debuggerUI.searchFile.key;"
          modifiers="accel"
          command="fileSearchCommand"/>
+    <key id="fileSearchKey"
+         key="&debuggerUI.searchFile.altkey;"
+         modifiers="accel"
+         command="fileSearchCommand"/>
     <key id="globalSearchKey"
          key="&debuggerUI.searchGlobal.key;"
          modifiers="accel alt"
          command="globalSearchCommand"/>
+    <key id="functionSearchKey"
+         key="&debuggerUI.searchFunction.key;"
+         modifiers="accel"
+         command="functionSearchCommand"/>
     <key id="tokenSearchKey"
          key="&debuggerUI.searchToken.key;"
          modifiers="accel"
@@ -254,7 +288,7 @@
         <splitter class="devtools-side-splitter"/>
         <vbox id="editor" flex="1"/>
         <splitter class="devtools-side-splitter"/>
-        <vbox id="instruments-pane">
+        <vbox id="instruments-pane" hidden="true">
           <vbox id="expressions"/>
           <splitter class="devtools-horizontal-splitter"/>
           <vbox id="variables" flex="1"/>
@@ -279,6 +313,13 @@
                class="plain searchbox-panel-operator-label"/>
       </hbox>
       <hbox align="center">
+        <button id="function-operator-button"
+                class="searchbox-panel-operator-button"
+                command="functionSearchCommand"/>
+        <label id="function-operator-label"
+               class="plain searchbox-panel-operator-label"/>
+      </hbox>
+      <hbox align="center">
         <button id="token-operator-button"
                 class="searchbox-panel-operator-button"
                 command="tokenSearchCommand"/>
@@ -295,17 +336,11 @@
       <hbox align="center">
         <button id="variable-operator-button"
                 class="searchbox-panel-operator-button"
-                 command="variableSearchCommand"/>
+                command="variableSearchCommand"/>
         <label id="variable-operator-label"
                class="plain searchbox-panel-operator-label"/>
       </hbox>
     </vbox>
-  </panel>
-
-  <panel id="filtered-sources-panel"
-         level="top"
-         noautofocus="true"
-         position="before_start">
   </panel>
 
   <panel id="conditional-breakpoint-panel"
@@ -318,6 +353,16 @@
              value="&debuggerUI.condBreakPanelTitle;"/>
       <textbox id="conditional-breakpoint-panel-textbox"/>
     </vbox>
+  </panel>
+
+  <panel id="resumption-order-panel"
+         type="arrow"
+         noautofocus="true"
+         position="before_start">
+    <hbox align="start">
+      <image class="alert-icon"/>
+      <label id="resumption-panel-desc" class="description"/>
+    </hbox>
   </panel>
 
 </window>

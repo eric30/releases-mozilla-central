@@ -15,7 +15,6 @@
 #include "nsComponentManagerUtils.h"
 #include "nsNetUtil.h"
 #include "nsScriptLoader.h"
-#include "nsIJSContextStack.h"
 #include "nsFrameLoader.h"
 #include "xpcpublic.h"
 #include "nsIMozBrowserFrame.h"
@@ -39,7 +38,8 @@ nsInProcessTabChildGlobal::DoSendSyncMessage(const nsAString& aMessage,
   }
   if (mChromeMessageManager) {
     nsRefPtr<nsFrameMessageManager> mm = mChromeMessageManager;
-    mm->ReceiveMessage(mOwner, aMessage, true, &aData, nullptr, aJSONRetVal);
+    mm->ReceiveMessage(mOwner, aMessage, true, &aData, JS::NullPtr(),
+                       aJSONRetVal);
   }
   return true;
 }
@@ -74,7 +74,7 @@ public:
 
       nsRefPtr<nsFrameMessageManager> mm = mTabChild->mChromeMessageManager;
       mm->ReceiveMessage(mTabChild->mOwner, mMessage, false, &data,
-                         nullptr, nullptr, nullptr);
+                         JS::NullPtr(), nullptr, nullptr);
     }
     return NS_OK;
   }
@@ -165,8 +165,9 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(nsInProcessTabChildGlobal)
   NS_INTERFACE_MAP_ENTRY(nsISyncMessageSender)
   NS_INTERFACE_MAP_ENTRY(nsIContentFrameMessageManager)
   NS_INTERFACE_MAP_ENTRY(nsIInProcessContentFrameMessageManager)
-  NS_INTERFACE_MAP_ENTRY(nsIScriptContextPrincipal)
   NS_INTERFACE_MAP_ENTRY(nsIScriptObjectPrincipal)
+  NS_INTERFACE_MAP_ENTRY(nsIGlobalObject)
+  NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
   NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(ContentFrameMessageManager)
 NS_INTERFACE_MAP_END_INHERITING(nsDOMEventTargetHelper)
 
@@ -244,10 +245,9 @@ nsInProcessTabChildGlobal::DelayedDisconnect()
   if (mListenerManager) {
     mListenerManager->Disconnect();
   }
-  
+
   if (!mLoadingScript) {
-    nsContentUtils::ReleaseWrapper(static_cast<nsIDOMEventTarget*>(this),
-                                   this);
+    nsContentUtils::ReleaseWrapper(static_cast<EventTarget*>(this), this);
     if (mCx) {
       DestroyCx();
     }
@@ -307,8 +307,7 @@ nsInProcessTabChildGlobal::InitTabChildGlobal()
     id.AppendLiteral("?ownedBy=");
     id.Append(u);
   }
-  nsISupports* scopeSupports =
-    NS_ISUPPORTS_CAST(nsIDOMEventTarget*, this);
+  nsISupports* scopeSupports = NS_ISUPPORTS_CAST(EventTarget*, this);
   NS_ENSURE_STATE(InitTabChildGlobalInternal(scopeSupports, id));
   return NS_OK;
 }

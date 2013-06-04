@@ -38,6 +38,9 @@ using namespace mozilla::dom;
 static bool BaseTypeAndSizeFromUniformType(WebGLenum uType, WebGLenum *baseType, WebGLint *unitSize);
 static WebGLenum InternalFormatForFormatAndType(WebGLenum format, WebGLenum type, bool isGLES2);
 
+// For a Tegra workaround.
+static const int MAX_DRAW_CALLS_SINCE_FLUSH = 100;
+
 //
 //  WebGL API
 //
@@ -314,7 +317,7 @@ GLenum WebGLContext::CheckedBufferData(GLenum target,
         return LOCAL_GL_INVALID_VALUE;
     }
 #endif
-    WebGLBuffer *boundBuffer = NULL;
+    WebGLBuffer *boundBuffer = nullptr;
     if (target == LOCAL_GL_ARRAY_BUFFER) {
         boundBuffer = mBoundArrayBuffer;
     } else if (target == LOCAL_GL_ELEMENT_ARRAY_BUFFER) {
@@ -342,7 +345,7 @@ WebGLContext::BufferData(WebGLenum target, WebGLsizeiptr size,
     if (!IsContextStable())
         return;
 
-    WebGLBuffer *boundBuffer = NULL;
+    WebGLBuffer *boundBuffer = nullptr;
 
     if (target == LOCAL_GL_ARRAY_BUFFER) {
         boundBuffer = mBoundArrayBuffer;
@@ -387,7 +390,7 @@ WebGLContext::BufferData(WebGLenum target, ArrayBuffer *data, WebGLenum usage)
         return ErrorInvalidValue("bufferData: null object passed");
     }
 
-    WebGLBuffer *boundBuffer = NULL;
+    WebGLBuffer *boundBuffer = nullptr;
 
     if (target == LOCAL_GL_ARRAY_BUFFER) {
         boundBuffer = mBoundArrayBuffer;
@@ -425,7 +428,7 @@ WebGLContext::BufferData(WebGLenum target, ArrayBufferView& data, WebGLenum usag
     if (!IsContextStable())
         return;
 
-    WebGLBuffer *boundBuffer = NULL;
+    WebGLBuffer *boundBuffer = nullptr;
 
     if (target == LOCAL_GL_ARRAY_BUFFER) {
         boundBuffer = mBoundArrayBuffer;
@@ -468,7 +471,7 @@ WebGLContext::BufferSubData(GLenum target, WebGLsizeiptr byteOffset,
         return;
     }
 
-    WebGLBuffer *boundBuffer = NULL;
+    WebGLBuffer *boundBuffer = nullptr;
 
     if (target == LOCAL_GL_ARRAY_BUFFER) {
         boundBuffer = mBoundArrayBuffer;
@@ -486,10 +489,10 @@ WebGLContext::BufferSubData(GLenum target, WebGLsizeiptr byteOffset,
 
     CheckedUint32 checked_neededByteLength = CheckedUint32(byteOffset) + data->Length();
     if (!checked_neededByteLength.isValid())
-        return ErrorInvalidOperation("bufferSubData: integer overflow computing the needed byte length");
+        return ErrorInvalidValue("bufferSubData: integer overflow computing the needed byte length");
 
     if (checked_neededByteLength.value() > boundBuffer->ByteLength())
-        return ErrorInvalidOperation("bufferSubData: not enough data - operation requires %d bytes, but buffer only has %d bytes",
+        return ErrorInvalidValue("bufferSubData: not enough data - operation requires %d bytes, but buffer only has %d bytes",
                                      checked_neededByteLength.value(), boundBuffer->ByteLength());
 
     MakeContextCurrent();
@@ -506,7 +509,7 @@ WebGLContext::BufferSubData(WebGLenum target, WebGLsizeiptr byteOffset,
     if (!IsContextStable())
         return;
 
-    WebGLBuffer *boundBuffer = NULL;
+    WebGLBuffer *boundBuffer = nullptr;
 
     if (target == LOCAL_GL_ARRAY_BUFFER) {
         boundBuffer = mBoundArrayBuffer;
@@ -524,10 +527,10 @@ WebGLContext::BufferSubData(WebGLenum target, WebGLsizeiptr byteOffset,
 
     CheckedUint32 checked_neededByteLength = CheckedUint32(byteOffset) + data.Length();
     if (!checked_neededByteLength.isValid())
-        return ErrorInvalidOperation("bufferSubData: integer overflow computing the needed byte length");
+        return ErrorInvalidValue("bufferSubData: integer overflow computing the needed byte length");
 
     if (checked_neededByteLength.value() > boundBuffer->ByteLength())
-        return ErrorInvalidOperation("bufferSubData: not enough data -- operation requires %d bytes, but buffer only has %d bytes",
+        return ErrorInvalidValue("bufferSubData: not enough data -- operation requires %d bytes, but buffer only has %d bytes",
                                      checked_neededByteLength.value(), boundBuffer->ByteLength());
 
     boundBuffer->ElementArrayCacheBufferSubData(byteOffset, data.Data(), data.Length());
@@ -731,7 +734,7 @@ WebGLContext::CopyTexSubImage2D_base(WebGLenum target,
         // now that the size is known, create the buffer
 
         // We need some zero pages, because GL doesn't guarantee the
-        // contents of a texture allocated with NULL data.
+        // contents of a texture allocated with nullptr data.
         // Hopefully calloc will just mmap zero pages here.
         void *tempZeroData = calloc(1, bytesNeeded);
         if (!tempZeroData)
@@ -1477,6 +1480,17 @@ WebGLContext::DrawArrays(GLenum mode, WebGLint first, WebGLsizei count)
         mShouldPresent = true;
         mIsScreenCleared = false;
     }
+
+    if (gl->WorkAroundDriverBugs()) {
+        if (gl->Renderer() == gl::GLContext::RendererTegra) {
+            mDrawCallsSinceLastFlush++;
+
+            if (mDrawCallsSinceLastFlush >= MAX_DRAW_CALLS_SINCE_FLUSH) {
+                gl->fFlush();
+                mDrawCallsSinceLastFlush = 0;
+            }
+        }
+    }
 }
 
 void
@@ -1511,6 +1525,11 @@ WebGLContext::DrawElements(WebGLenum mode, WebGLsizei count, WebGLenum type,
     } else if (type == LOCAL_GL_UNSIGNED_BYTE) {
         checked_byteCount = count;
         first = byteOffset;
+    } else if (type == LOCAL_GL_UNSIGNED_INT && IsExtensionEnabled(OES_element_index_uint)) {
+        checked_byteCount = 4 * CheckedUint32(count);
+        if (byteOffset % 4 != 0)
+            return ErrorInvalidOperation("drawElements: invalid byteOffset for UNSIGNED_INT (must be a multiple of 4)");
+        first = byteOffset / 4;
     } else {
         return ErrorInvalidEnum("drawElements: type must be UNSIGNED_SHORT or UNSIGNED_BYTE");
     }
@@ -1570,6 +1589,17 @@ WebGLContext::DrawElements(WebGLenum mode, WebGLsizei count, WebGLenum type,
         Invalidate();
         mShouldPresent = true;
         mIsScreenCleared = false;
+    }
+
+    if (gl->WorkAroundDriverBugs()) {
+        if (gl->Renderer() == gl::GLContext::RendererTegra) {
+            mDrawCallsSinceLastFlush++;
+
+            if (mDrawCallsSinceLastFlush >= MAX_DRAW_CALLS_SINCE_FLUSH) {
+                gl->fFlush();
+                mDrawCallsSinceLastFlush = 0;
+            }
+        }
     }
 }
 
@@ -2816,16 +2846,15 @@ WebGLContext::GetUniformLocation(WebGLProgram *prog, const nsAString& name)
     MakeContextCurrent();
     GLint intlocation = gl->fGetUniformLocation(progname, mappedName.get());
 
-    WebGLUniformLocation *loc = nullptr;
+    nsRefPtr<WebGLUniformLocation> loc;
     if (intlocation >= 0) {
         WebGLUniformInfo info = prog->GetUniformInfoForMappedIdentifier(mappedName);
         loc = new WebGLUniformLocation(this,
                                        prog,
                                        intlocation,
                                        info);
-        NS_ADDREF(loc);
     }
-    return loc;
+    return loc.forget();
 }
 
 JS::Value
@@ -3301,9 +3330,8 @@ WebGLContext::ReadPixels(WebGLint x, WebGLint y, WebGLsizei width,
         // the buffer to zero and compute the parameters to pass to OpenGL. We have to use an intermediate buffer
         // to accomodate the potentially different strides (widths).
 
-        // zero the whole destination buffer. Too bad for the part that's going to be overwritten, we're not
-        // 100% efficient here, but in practice this is a quite rare case anyway.
-        memset(data, 0, dataByteLen);
+        // Zero the whole pixel dest area in the destination buffer.
+        memset(data, 0, checked_neededByteLength.value());
 
         if (   x >= framebufferWidth
             || x+width <= 0
@@ -4251,8 +4279,13 @@ WebGLContext::CompileShader(WebGLShader *shader)
         resources.MaxTextureImageUnits = mGLMaxTextureImageUnits;
         resources.MaxFragmentUniformVectors = mGLMaxFragmentUniformVectors;
         resources.MaxDrawBuffers = 1;
+
         if (IsExtensionEnabled(OES_standard_derivatives))
             resources.OES_standard_derivatives = 1;
+
+        // Tell ANGLE to allow highp in frag shaders. (unless disabled)
+        // If underlying GLES doesn't have highp in frag shaders, it should complain anyways.
+        resources.FragmentPrecisionHigh = mDisableFragHighP ? 0 : 1;
 
         // We're storing an actual instance of StripComments because, if we don't, the 
         // cleanSource nsAString instance will be destroyed before the reference is
@@ -4283,12 +4316,10 @@ WebGLContext::CompileShader(WebGLShader *shader)
         int compileOptions = SH_ATTRIBUTES_UNIFORMS |
                              SH_ENFORCE_PACKING_RESTRICTIONS;
 
-        // we want to do this everywhere, but:
-#ifndef XP_WIN // to do this on Windows, we need ANGLE r1719, 1733, 1734.
-#ifndef XP_MACOSX // to do this on Mac, we need to do it only on Mac OSX > 10.6 as this
+        // We want to do this everywhere, but:
+#ifndef XP_MACOSX // To do this on Mac, we need to do it only on Mac OSX > 10.6 as this
                   // causes the shader compiler in 10.6 to crash
         compileOptions |= SH_CLAMP_INDIRECT_ARRAY_BOUNDS;
-#endif
 #endif
 
         if (useShaderSourceTranslation) {
@@ -4310,7 +4341,7 @@ WebGLContext::CompileShader(WebGLShader *shader)
         }
 
         if (!ShCompile(compiler, &s, 1, compileOptions)) {
-            int len = 0;
+            size_t len = 0;
             ShGetInfo(compiler, SH_INFO_LOG_LENGTH, &len);
 
             if (len) {
@@ -4326,15 +4357,15 @@ WebGLContext::CompileShader(WebGLShader *shader)
             return;
         }
 
-        int num_attributes = 0;
+        size_t num_attributes = 0;
         ShGetInfo(compiler, SH_ACTIVE_ATTRIBUTES, &num_attributes);
-        int num_uniforms = 0;
+        size_t num_uniforms = 0;
         ShGetInfo(compiler, SH_ACTIVE_UNIFORMS, &num_uniforms);
-        int attrib_max_length = 0;
+        size_t attrib_max_length = 0;
         ShGetInfo(compiler, SH_ACTIVE_ATTRIBUTE_MAX_LENGTH, &attrib_max_length);
-        int uniform_max_length = 0;
+        size_t uniform_max_length = 0;
         ShGetInfo(compiler, SH_ACTIVE_UNIFORM_MAX_LENGTH, &uniform_max_length);
-        int mapped_max_length = 0;
+        size_t mapped_max_length = 0;
         ShGetInfo(compiler, SH_MAPPED_NAME_MAX_LENGTH, &mapped_max_length);
 
         shader->mAttribMaxNameLength = attrib_max_length;
@@ -4347,10 +4378,11 @@ WebGLContext::CompileShader(WebGLShader *shader)
         nsAutoArrayPtr<char> uniform_name(new char[uniform_max_length+1]);
         nsAutoArrayPtr<char> mapped_name(new char[mapped_max_length+1]);
 
-        for (int i = 0; i < num_uniforms; i++) {
-            int length, size;
+        for (size_t i = 0; i < num_uniforms; i++) {
+            size_t length;
+            int size;
             ShDataType type;
-            ShGetActiveUniform(compiler, i,
+            ShGetActiveUniform(compiler, (int)i,
                                 &length, &size, &type,
                                 uniform_name,
                                 mapped_name);
@@ -4375,10 +4407,11 @@ WebGLContext::CompileShader(WebGLShader *shader)
 
         if (useShaderSourceTranslation) {
 
-            for (int i = 0; i < num_attributes; i++) {
-                int length, size;
+            for (size_t i = 0; i < num_attributes; i++) {
+                size_t length;
+                int size;
                 ShDataType type;
-                ShGetActiveAttrib(compiler, i,
+                ShGetActiveAttrib(compiler, (int)i,
                                   &length, &size, &type,
                                   attribute_name,
                                   mapped_name);
@@ -4387,7 +4420,7 @@ WebGLContext::CompileShader(WebGLShader *shader)
                                                     nsDependentCString(mapped_name)));
             }
 
-            int len = 0;
+            size_t len = 0;
             ShGetInfo(compiler, SH_OBJECT_CODE_LENGTH, &len);
 
             nsAutoCString translatedSrc;
@@ -4396,12 +4429,12 @@ WebGLContext::CompileShader(WebGLShader *shader)
 
             const char *ts = translatedSrc.get();
 
-            gl->fShaderSource(shadername, 1, &ts, NULL);
+            gl->fShaderSource(shadername, 1, &ts, nullptr);
         } else { // not useShaderSourceTranslation
             // we just pass the raw untranslated shader source. We then can't use ANGLE idenfier mapping.
             // that's really bad, as that means we can't be 100% conformant. We should work towards always
             // using ANGLE identifier mapping.
-            gl->fShaderSource(shadername, 1, &s, NULL);
+            gl->fShaderSource(shadername, 1, &s, nullptr);
         }
 
         shader->SetTranslationSuccess();
@@ -4670,14 +4703,23 @@ WebGLContext::GetShaderPrecisionFormat(WebGLenum shadertype, WebGLenum precision
     }
 
     MakeContextCurrent();
-
     GLint range[2], precision;
-    gl->fGetShaderPrecisionFormat(shadertype, precisiontype, range, &precision);
 
-    WebGLShaderPrecisionFormat *retShaderPrecisionFormat
+    if (mDisableFragHighP &&
+        shadertype == LOCAL_GL_FRAGMENT_SHADER &&
+        (precisiontype == LOCAL_GL_HIGH_FLOAT ||
+         precisiontype == LOCAL_GL_HIGH_INT))
+    {
+      precision = 0;
+      range[0] = 0;
+      range[1] = 0;
+    } else {
+      gl->fGetShaderPrecisionFormat(shadertype, precisiontype, range, &precision);
+    }
+
+    nsRefPtr<WebGLShaderPrecisionFormat> retShaderPrecisionFormat
         = new WebGLShaderPrecisionFormat(this, range[0], range[1], precision);
-    NS_ADDREF(retShaderPrecisionFormat);
-    return retShaderPrecisionFormat;
+    return retShaderPrecisionFormat.forget();
 }
 
 void
@@ -4875,11 +4917,11 @@ WebGLContext::TexImage2D_base(WebGLenum target, WebGLint level, WebGLenum intern
 
     if (format == LOCAL_GL_DEPTH_COMPONENT || format == LOCAL_GL_DEPTH_STENCIL) {
         if (IsExtensionEnabled(WEBGL_depth_texture)) {
-            if (target != LOCAL_GL_TEXTURE_2D || data != NULL || level != 0)
+            if (target != LOCAL_GL_TEXTURE_2D || data != nullptr || level != 0)
                 return ErrorInvalidOperation("texImage2D: "
                                              "with format of DEPTH_COMPONENT or DEPTH_STENCIL "
                                              "target must be TEXTURE_2D, "
-                                             "data must be NULL, "
+                                             "data must be nullptr, "
                                              "level must be zero");
         }
         else
@@ -4954,7 +4996,7 @@ WebGLContext::TexImage2D_base(WebGLenum target, WebGLint level, WebGLenum intern
         }
     } else {
         // We need some zero pages, because GL doesn't guarantee the
-        // contents of a texture allocated with NULL data.
+        // contents of a texture allocated with nullptr data.
         // Hopefully calloc will just mmap zero pages here.
         void *tempZeroData = calloc(1, bytesNeeded);
         if (!tempZeroData)

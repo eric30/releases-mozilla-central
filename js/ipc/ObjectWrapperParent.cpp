@@ -1,6 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=80:
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -17,6 +16,7 @@
 #include "jsfriendapi.h"
 
 using namespace mozilla::jsipc;
+using namespace JS;
 
 namespace {
 
@@ -28,7 +28,7 @@ namespace {
 
     class AutoResolveFlag
     {
-        JSObject* mObj;
+        Rooted<JSObject*> mObj;
         unsigned mOldFlags;
         MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 
@@ -46,9 +46,9 @@ namespace {
 
     public:
 
-        AutoResolveFlag(JSObject* obj
+        AutoResolveFlag(JSContext *cx, JSObject* obj
                         MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
-            : mObj(obj)
+            : mObj(cx, obj)
             , mOldFlags(SetFlags(obj, GetFlags(obj) | CPOW_FLAG_RESOLVING))
         {
             MOZ_GUARD_OBJECT_NOTIFIER_INIT;
@@ -101,8 +101,8 @@ ObjectWrapperParent::CheckOperation(JSContext* cx,
     switch (status->type()) {
     case OperationStatus::TJSVariant:
         {
-            jsval thrown;
-            if (jsval_from_JSVariant(cx, status->get_JSVariant(), &thrown))
+            Rooted<Value> thrown(cx);
+            if (jsval_from_JSVariant(cx, status->get_JSVariant(), thrown.address()))
                 JS_SetPendingException(cx, thrown);
             *status = JS_FALSE;
         }
@@ -179,11 +179,13 @@ ObjectWrapperParent::GetJSObject(JSContext* cx) const
 }
 
 static ObjectWrapperParent*
-Unwrap(JSContext* cx, JSObject* obj)
+Unwrap(JSContext* cx, JSObject* objArg)
 {
+    Rooted<JSObject*> obj(cx, objArg), proto(cx);
     while (js::GetObjectClass(obj) != &ObjectWrapperParent::sCPOW_JSClass) {
-        if (!js::GetObjectProto(cx, obj, &obj) || !obj)
+        if (!js::GetObjectProto(cx, obj, &proto) || !proto)
             return NULL;
+        obj = proto;
     }
 
     ObjectWrapperParent* self =
@@ -275,6 +277,43 @@ ObjectWrapperParent::jsval_from_JSVariant(JSContext* cx, const JSVariant& from,
 }
 
 /*static*/ bool
+ObjectWrapperParent::boolean_from_JSVariant(JSContext* cx, const JSVariant& from,
+                                            JSBool* to)
+{
+    switch (from.type()) {
+    case JSVariant::Tvoid_t:
+        *to = false;
+        return true;
+    case JSVariant::TPObjectWrapperParent: {
+        Rooted<Value> v(cx);
+        if (!jsval_from_PObjectWrapperParent(cx, from.get_PObjectWrapperParent(), v.address()))
+            return false;
+        *to = JS::ToBoolean(v);
+        return true;
+    }
+    case JSVariant::TnsString:
+        {
+            JSString* str = JS_NewUCStringCopyZ(cx, from.get_nsString().BeginReading());
+            if (!str)
+                return false;
+            *to = JS::ToBoolean(JS::StringValue(str));
+            return true;
+        }
+    case JSVariant::Tint:
+        *to = from.get_int() != 0;
+        return true;
+    case JSVariant::Tdouble:
+        *to = JS::ToBoolean(JS::DoubleValue(from.get_double()));
+        return true;
+    case JSVariant::Tbool:
+        *to = from.get_bool();
+        return true;
+    default:
+        return false;
+    }
+}
+
+/*static*/ bool
 ObjectWrapperParent::
 JSObject_to_PObjectWrapperParent(JSContext* cx, JSObject* from, PObjectWrapperParent** to)
 {
@@ -293,7 +332,7 @@ JSObject_to_PObjectWrapperParent(JSContext* cx, JSObject* from, PObjectWrapperPa
 ObjectWrapperParent::
 JSObject_from_PObjectWrapperParent(JSContext* cx,
                                    const PObjectWrapperParent* from,
-                                   JSMutableHandleObject to)
+                                   MutableHandleObject to)
 {
     const ObjectWrapperParent* owp =
         static_cast<const ObjectWrapperParent*>(from);
@@ -309,7 +348,7 @@ jsval_from_PObjectWrapperParent(JSContext* cx,
                                 const PObjectWrapperParent* from,
                                 jsval* to)
 {
-    JS::RootedObject obj(cx);
+    Rooted<JSObject*> obj(cx);
     if (!JSObject_from_PObjectWrapperParent(cx, from, &obj))
         return false;
     *to = OBJECT_TO_JSVAL(obj);
@@ -432,7 +471,7 @@ ObjectWrapperParent::CPOW_SetProperty(JSContext *cx, JSHandleObject obj, JSHandl
     
 /*static*/ JSBool
 ObjectWrapperParent::CPOW_DelProperty(JSContext *cx, JSHandleObject obj, JSHandleId id,
-                                      JSMutableHandleValue vp)
+                                      JSBool *succeeded)
 {
     CPOW_LOG(("Calling CPOW_DelProperty (%s)...",
               JSVAL_TO_CSTR(cx, id)));
@@ -454,7 +493,7 @@ ObjectWrapperParent::CPOW_DelProperty(JSContext *cx, JSHandleObject obj, JSHandl
             self->CallDelProperty(in_id,
                                   aco.StatusPtr(), &out_v) &&
             aco.Ok() &&
-            jsval_from_JSVariant(cx, out_v, vp.address()));
+            boolean_from_JSVariant(cx, out_v, succeeded));
 }
 
 JSBool
@@ -491,7 +530,7 @@ ObjectWrapperParent::NewEnumerateNext(JSContext* cx, jsval* statep, jsid* idp)
         jsid_from_nsString(cx, out_id, idp))
     {
         JSObject* obj = GetJSObject(cx);
-        AutoResolveFlag arf(obj);
+        AutoResolveFlag arf(cx, obj);
         return JS_DefinePropertyById(cx, obj, *idp, JSVAL_VOID, NULL, NULL,
                                      JSPROP_ENUMERATE);
     }
@@ -539,7 +578,7 @@ ObjectWrapperParent::CPOW_NewEnumerate(JSContext *cx, JSHandleObject obj,
 
 /*static*/ JSBool
 ObjectWrapperParent::CPOW_NewResolve(JSContext *cx, JSHandleObject obj, JSHandleId id,
-                                     unsigned flags, JSMutableHandleObject objp)
+                                     unsigned flags, MutableHandleObject objp)
 {
     CPOW_LOG(("Calling CPOW_NewResolve (%s)...",
               JSVAL_TO_CSTR(cx, id)));
@@ -565,8 +604,8 @@ ObjectWrapperParent::CPOW_NewResolve(JSContext *cx, JSHandleObject obj, JSHandle
         return JS_FALSE;
 
     if (objp) {
-        AutoResolveFlag arf(objp);
-        JS::RootedObject obj2(cx, objp);
+        AutoResolveFlag arf(cx, objp.get());
+        Rooted<JSObject*> obj2(cx, objp);
         JS_DefinePropertyById(cx, obj2, id, JSVAL_VOID, NULL, NULL,
                               JSPROP_ENUMERATE);
     }
@@ -608,7 +647,7 @@ ObjectWrapperParent::CPOW_Call(JSContext* cx, unsigned argc, jsval* vp)
 {
     CPOW_LOG(("Calling CPOW_Call..."));
 
-    JSObject* thisobj = JS_THIS_OBJECT(cx, vp);
+    Rooted<JSObject*> thisobj(cx, JS_THIS_OBJECT(cx, vp));
     if (!thisobj)
         return JS_FALSE;
 

@@ -30,10 +30,17 @@ public:
 
   virtual nsresult StopInternal();
 
-  virtual nsresult GetDefaultAdapterPathInternal(BluetoothReplyRunnable* aRunnable);
+  virtual bool IsEnabledInternal();
 
-  virtual nsresult GetPairedDevicePropertiesInternal(const nsTArray<nsString>& aDeviceAddresses,
-                                                     BluetoothReplyRunnable* aRunnable);
+  virtual nsresult GetDefaultAdapterPathInternal(
+                                             BluetoothReplyRunnable* aRunnable);
+
+  virtual nsresult GetConnectedDevicePropertiesInternal(uint16_t aProfileId,
+                                             BluetoothReplyRunnable* aRunnable);
+
+  virtual nsresult GetPairedDevicePropertiesInternal(
+                                     const nsTArray<nsString>& aDeviceAddresses,
+                                     BluetoothReplyRunnable* aRunnable);
 
   virtual nsresult StartDiscoveryInternal(BluetoothReplyRunnable* aRunnable);
 
@@ -78,20 +85,13 @@ public:
                mozilla::ipc::UnixSocketConsumer* aConsumer);
 
   virtual nsresult
-  GetSocketViaService(const nsAString& aObjectPath,
-                      const nsAString& aService,
-                      BluetoothSocketType aType,
-                      bool aAuth,
-                      bool aEncrypt,
-                      mozilla::ipc::UnixSocketConsumer* aConsumer,
-                      BluetoothReplyRunnable* aRunnable);
+  GetServiceChannel(const nsAString& aDeviceAddress,
+                    const nsAString& aServiceUuid,
+                    BluetoothProfileManagerBase* aManager);
 
-  virtual nsresult
-  ListenSocketViaService(int aChannel,
-                         BluetoothSocketType aType,
-                         bool aAuth,
-                         bool aEncrypt,
-                         mozilla::ipc::UnixSocketConsumer* aConsumer);
+  virtual bool
+  UpdateSdpRecords(const nsAString& aDeviceAddress,
+                   BluetoothProfileManagerBase* aManager);
 
   virtual nsresult
   CreatePairedDeviceInternal(const nsAString& aDeviceAddress,
@@ -145,6 +145,15 @@ public:
   virtual void
   ConfirmReceivingFile(const nsAString& aDeviceAddress, bool aConfirm,
                        BluetoothReplyRunnable* aRunnable);
+
+  virtual void
+  ConnectSco(BluetoothReplyRunnable* aRunnable);
+
+  virtual void
+  DisconnectSco(BluetoothReplyRunnable* aRunnable);
+
+  virtual void
+  IsScoConnected(BluetoothReplyRunnable* aRunnable);
 
 private:
   nsresult SendGetPropertyMessage(const nsAString& aPath,

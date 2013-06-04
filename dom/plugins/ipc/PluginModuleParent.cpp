@@ -38,7 +38,11 @@
 #include "PluginHangUIParent.h"
 #include "mozilla/widget/AudioSession.h"
 #endif
-#include "sampler.h"
+#ifdef MOZ_ENABLE_PROFILER_SPS
+#include "nsIProfileSaveEvent.h"
+#endif
+#include "mozilla/Services.h"
+#include "nsIObserverService.h"
 
 using base::KillProcess;
 
@@ -138,11 +142,19 @@ PluginModuleParent::PluginModuleParent(const char* aFilePath)
     Preferences::RegisterCallback(TimeoutChanged, kHangUITimeoutPref, this);
     Preferences::RegisterCallback(TimeoutChanged, kHangUIMinDisplayPref, this);
 #endif
+
+#ifdef MOZ_ENABLE_PROFILER_SPS
+    InitPluginProfiling();
+#endif
 }
 
 PluginModuleParent::~PluginModuleParent()
 {
     NS_ASSERTION(OkToCleanup(), "unsafe destruction");
+
+#ifdef MOZ_ENABLE_PROFILER_SPS
+    ShutdownPluginProfiling();
+#endif
 
     if (!mShutdown) {
         NS_WARNING("Plugin host deleted the module without shutting down.");
@@ -194,7 +206,7 @@ PluginModuleParent::WriteExtraDataForMinidump(AnnotationTable& notes)
     nsCString pluginName;
     nsCString pluginVersion;
 
-    nsRefPtr<nsPluginHost> ph = already_AddRefed<nsPluginHost>(nsPluginHost::GetInst());
+    nsRefPtr<nsPluginHost> ph = nsPluginHost::GetInst();
     if (ph) {
         nsPluginTag* tag = ph->TagForPlugin(mPlugin);
         if (tag) {
@@ -536,8 +548,7 @@ PluginModuleParent::EvaluateHangUIState(const bool aReset)
 bool
 PluginModuleParent::GetPluginName(nsAString& aPluginName)
 {
-    nsRefPtr<nsPluginHost> host = 
-        dont_AddRef<nsPluginHost>(nsPluginHost::GetInst());
+    nsRefPtr<nsPluginHost> host = nsPluginHost::GetInst();
     if (!host) {
         return false;
     }
@@ -567,7 +578,8 @@ PluginModuleParent::LaunchHangUI()
         mHangUIParent = nullptr;
     }
     mHangUIParent = new PluginHangUIParent(this, 
-            Preferences::GetInt(kHangUITimeoutPref, 0));
+            Preferences::GetInt(kHangUITimeoutPref, 0),
+            Preferences::GetInt(kChildTimeoutPref, 0));
     nsAutoString pluginName;
     if (!GetPluginName(pluginName)) {
         return false;
@@ -860,7 +872,7 @@ PluginModuleParent::NPP_NewStream(NPP instance, NPMIMEType type,
                                   NPStream* stream, NPBool seekable,
                                   uint16_t* stype)
 {
-    SAMPLE_LABEL("PluginModuleParent", "NPP_NewStream");
+    PROFILER_LABEL("PluginModuleParent", "NPP_NewStream");
     PluginInstanceParent* i = InstCast(instance);
     if (!i)
         return NPERR_GENERIC_ERROR;
@@ -1710,3 +1722,57 @@ PluginModuleParent::OnCrash(DWORD processID)
 }
 
 #endif // MOZ_CRASHREPORTER_INJECTOR
+
+#ifdef MOZ_ENABLE_PROFILER_SPS
+class PluginProfilerObserver MOZ_FINAL : public nsIObserver,
+                                         public nsSupportsWeakReference
+{
+public:
+    NS_DECL_ISUPPORTS
+    NS_DECL_NSIOBSERVER
+
+    explicit PluginProfilerObserver(PluginModuleParent* pmp)
+      : mPmp(pmp)
+    {}
+
+private:
+    PluginModuleParent* mPmp;
+};
+
+NS_IMPL_ISUPPORTS2(PluginProfilerObserver, nsIObserver, nsISupportsWeakReference)
+
+NS_IMETHODIMP
+PluginProfilerObserver::Observe(nsISupports *aSubject,
+                                const char *aTopic,
+                                const PRUnichar *aData)
+{
+    nsCOMPtr<nsIProfileSaveEvent> pse = do_QueryInterface(aSubject);
+    if (pse) {
+      nsCString result;
+      bool success = mPmp->CallGeckoGetProfile(&result);
+      if (success && !result.IsEmpty()) {
+          pse->AddSubProfile(result.get());
+      }
+    }
+    return NS_OK;
+}
+
+void
+PluginModuleParent::InitPluginProfiling()
+{
+    nsCOMPtr<nsIObserverService> observerService = mozilla::services::GetObserverService();
+    if (observerService) {
+        mProfilerObserver = new PluginProfilerObserver(this);
+        observerService->AddObserver(mProfilerObserver, "profiler-subprocess", false);
+    }
+}
+
+void
+PluginModuleParent::ShutdownPluginProfiling()
+{
+    nsCOMPtr<nsIObserverService> observerService = mozilla::services::GetObserverService();
+    if (observerService) {
+        observerService->RemoveObserver(mProfilerObserver, "profiler-subprocess");
+    }
+}
+#endif

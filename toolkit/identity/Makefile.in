@@ -11,18 +11,12 @@ include $(DEPTH)/config/autoconf.mk
 
 FAIL_ON_WARNINGS := 1
 
-MODULE = identity
 MODULE_NAME = identity
 LIBRARY_NAME = identity
 FORCE_STATIC_LIB = 1
 LIBXUL_LIBRARY = 1
 IS_COMPONENT = 1
-GRE_MODULE = 1
 EXPORT_LIBRARY = 1
-
-CPPSRCS = \
-  IdentityCryptoService.cpp \
-  $(NULL)
 
 EXTRA_JS_MODULES = \
 	IdentityUtils.jsm \

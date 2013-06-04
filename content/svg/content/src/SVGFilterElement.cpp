@@ -17,7 +17,7 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGFilterElement::WrapNode(JSContext *aCx, JSObject *aScope)
+SVGFilterElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
   return SVGFilterElementBinding::Wrap(aCx, aScope, this);
 }
@@ -53,19 +53,11 @@ nsSVGElement::StringInfo SVGFilterElement::sStringInfo[1] =
 };
 
 //----------------------------------------------------------------------
-// nsISupports methods
-
-NS_IMPL_ISUPPORTS_INHERITED4(SVGFilterElement, SVGFilterElementBase,
-                             nsIDOMNode, nsIDOMElement,
-                             nsIDOMSVGElement, nsIDOMSVGUnitTypes)
-
-//----------------------------------------------------------------------
 // Implementation
 
 SVGFilterElement::SVGFilterElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : SVGFilterElementBase(aNodeInfo)
 {
-  SetIsDOMBinding();
 }
 
 //----------------------------------------------------------------------

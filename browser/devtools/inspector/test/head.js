@@ -8,14 +8,16 @@ const Cc = Components.classes;
 let tempScope = {};
 Cu.import("resource:///modules/devtools/LayoutHelpers.jsm", tempScope);
 let LayoutHelpers = tempScope.LayoutHelpers;
-Cu.import("resource:///modules/devtools/Target.jsm", tempScope);
-let TargetFactory = tempScope.TargetFactory;
+
+let {devtools} = Cu.import("resource://gre/modules/devtools/Loader.jsm", tempScope);
+let TargetFactory = devtools.TargetFactory;
+
 Components.utils.import("resource://gre/modules/devtools/Console.jsm", tempScope);
 let console = tempScope.console;
 
 // Import the GCLI test helper
 let testDir = gTestPath.substr(0, gTestPath.lastIndexOf("/"));
-Services.scriptloader.loadSubScript(testDir + "/helpers.js", this);
+Services.scriptloader.loadSubScript(testDir + "../../../commandline/test/helpers.js", this);
 
 function openInspector(callback)
 {
@@ -146,3 +148,4 @@ function focusSearchBoxUsingShortcut(panelWin, callback) {
   }, false);
   EventUtils.synthesizeKey(name, modifiers);
 }
+

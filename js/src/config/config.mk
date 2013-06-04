@@ -246,7 +246,9 @@ $(error Component makefile does not specify MODULE_NAME.)
 endif
 endif
 FORCE_STATIC_LIB=1
-SHORT_LIBNAME=
+ifneq ($(SHORT_LIBNAME),)
+$(error SHORT_LIBNAME is $(SHORT_LIBNAME) but SHORT_LIBNAME is not compatable with LIBXUL_LIBRARY)
+endif
 endif
 
 # If we are building this component into an extension/xulapp, it cannot be
@@ -270,6 +272,13 @@ endif
 ifndef STATIC_LIBRARY_NAME
 ifdef LIBRARY_NAME
 STATIC_LIBRARY_NAME=$(LIBRARY_NAME)
+endif
+endif
+
+# PGO on MSVC is opt-in
+ifdef _MSC_VER
+ifndef MSVC_ENABLE_PGO
+NO_PROFILE_GUIDED_OPTIMIZE = 1
 endif
 endif
 

@@ -11,11 +11,12 @@ const { Cc, Ci } = require('chrome');
 const { EventEmitter } = require('../deprecated/events');
 const { Trait } = require('../deprecated/traits');
 const { when } = require('../system/unload');
+const events = require('../system/events');
 const { getInnerId, getOuterId, windows, isDocumentLoaded, isBrowser,
         getMostRecentBrowserWindow, getMostRecentWindow } = require('../window/utils');
 const errors = require('../deprecated/errors');
 const { deprecateFunction } = require('../util/deprecate');
-const { ignoreWindow } = require('sdk/private-browsing/utils');
+const { ignoreWindow, isGlobalPBSupported } = require('sdk/private-browsing/utils');
 const { isPrivateBrowsingSupported } = require('../self');
 
 const windowWatcher = Cc['@mozilla.org/embedcomp/window-watcher;1'].
@@ -24,7 +25,7 @@ const appShellService = Cc['@mozilla.org/appshell/appShellService;1'].
                         getService(Ci.nsIAppShellService);
 
 // Bug 834961: ignore private windows when they are not supported
-function getWindows() windows(null, { includePrivate: isPrivateBrowsingSupported });
+function getWindows() windows(null, { includePrivate: isPrivateBrowsingSupported || isGlobalPBSupported });
 
 /**
  * An iterator for XUL windows currently in the application.
@@ -68,6 +69,8 @@ function WindowTracker(delegate) {
   for each (let window in getWindows())
     this._regWindow(window);
   windowWatcher.registerNotification(this);
+  this._onToplevelWindowReady = this._onToplevelWindowReady.bind(this);
+  events.on('toplevel-window-ready', this._onToplevelWindowReady);
 
   require('../system/unload').ensure(this);
 
@@ -116,6 +119,7 @@ WindowTracker.prototype = {
 
   unload: function unload() {
     windowWatcher.unregisterNotification(this);
+    events.off('toplevel-window-ready', this._onToplevelWindowReady);
     for each (let window in getWindows())
       this._unregWindow(window);
   },
@@ -128,14 +132,20 @@ WindowTracker.prototype = {
     }
   }),
 
+  _onToplevelWindowReady: function _onToplevelWindowReady({subject}) {
+    let window = subject;
+    // ignore private windows if they are not supported
+    if (ignoreWindow(window))
+      return;
+    this._regWindow(window);
+  },
+
   observe: errors.catchAndLog(function observe(subject, topic, data) {
     var window = subject.QueryInterface(Ci.nsIDOMWindow);
     // ignore private windows if they are not supported
     if (ignoreWindow(window))
       return;
-    if (topic == 'domwindowopened')
-      this._regWindow(window);
-    else
+    if (topic == 'domwindowclosed')
       this._unregWindow(window);
   })
 };

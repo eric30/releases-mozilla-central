@@ -5,7 +5,6 @@
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-/* $Id: ssl3con.c,v 1.201 2013/02/07 01:29:19 wtc%google.com Exp $ */
 
 /* TODO(ekr): Implement HelloVerifyRequest on server side. OK for now. */
 
@@ -41,6 +40,7 @@
 		(x)->pValue=(v); (x)->ulValueLen = (l);
 #endif
 
+static SECStatus ssl3_AuthCertificate(sslSocket *ss);
 static void      ssl3_CleanupPeerCerts(sslSocket *ss);
 static PK11SymKey *ssl3_GenerateRSAPMS(sslSocket *ss, ssl3CipherSpec *spec,
                                        PK11SlotInfo * serverKeySlot);
@@ -49,6 +49,7 @@ static SECStatus ssl3_DeriveConnectionKeysPKCS11(sslSocket *ss);
 static SECStatus ssl3_HandshakeFailure(      sslSocket *ss);
 static SECStatus ssl3_InitState(             sslSocket *ss);
 static SECStatus ssl3_SendCertificate(       sslSocket *ss);
+static SECStatus ssl3_SendCertificateStatus( sslSocket *ss);
 static SECStatus ssl3_SendEmptyCertificate(  sslSocket *ss);
 static SECStatus ssl3_SendCertificateRequest(sslSocket *ss);
 static SECStatus ssl3_SendNextProto(         sslSocket *ss);
@@ -153,7 +154,7 @@ static ssl3CipherSuiteCfg cipherSuites[ssl_V3_SUITES_IMPLEMENTED] = {
  * precedence (desirability).  It only includes compression methods we
  * implement.
  */
-static const /*SSLCompressionMethod*/ uint8 compressions [] = {
+static const /*SSLCompressionMethod*/ PRUint8 compressions [] = {
 #ifdef NSS_ENABLE_ZLIB
     ssl_compression_deflate,
 #endif
@@ -180,7 +181,7 @@ compressionEnabled(sslSocket *ss, SSLCompressionMethod compression)
     }
 }
 
-static const /*SSL3ClientCertificateType */ uint8 certificate_types [] = {
+static const /*SSL3ClientCertificateType */ PRUint8 certificate_types [] = {
     ct_RSA_sign,
     ct_DSS_sign,
 #ifdef NSS_ENABLE_ECC
@@ -2825,7 +2826,7 @@ ssl3_HandleNoCertificate(sslSocket *ss)
 SECStatus
 SSL3_SendAlert(sslSocket *ss, SSL3AlertLevel level, SSL3AlertDescription desc)
 {
-    uint8 	bytes[2];
+    PRUint8 	bytes[2];
     SECStatus	rv;
 
     SSL_TRC(3, ("%d: SSL3[%d]: send alert record, level=%d desc=%d",
@@ -3045,7 +3046,7 @@ ssl3_HandleAlert(sslSocket *ss, sslBuffer *buf)
 static SECStatus
 ssl3_SendChangeCipherSpecs(sslSocket *ss)
 {
-    uint8             change = change_cipher_spec_choice;
+    PRUint8           change = change_cipher_spec_choice;
     ssl3CipherSpec *  pwSpec;
     SECStatus         rv;
     PRInt32           sent;
@@ -3635,8 +3636,8 @@ SECStatus
 ssl3_AppendHandshakeNumber(sslSocket *ss, PRInt32 num, PRInt32 lenSize)
 {
     SECStatus rv;
-    uint8     b[4];
-    uint8 *   p = b;
+    PRUint8   b[4];
+    PRUint8 * p = b;
 
     switch (lenSize) {
       case 4:
@@ -3777,7 +3778,7 @@ PRInt32
 ssl3_ConsumeHandshakeNumber(sslSocket *ss, PRInt32 bytes, SSL3Opaque **b,
 			    PRUint32 *length)
 {
-    uint8     *buf = *b;
+    PRUint8  *buf = *b;
     int       i;
     PRInt32   num = 0;
 
@@ -4381,7 +4382,7 @@ ssl3_SendClientHello(sslSocket *ss, PRBool resending)
 	    total_exten_len += 2;
     }
 
-#if defined(NSS_ENABLE_ECC) && !defined(NSS_ECC_MORE_THAN_SUITE_B)
+#if defined(NSS_ENABLE_ECC)
     if (!total_exten_len || !isTLS) {
 	/* not sending the elliptic_curves and ec_point_formats extensions */
     	ssl3_DisableECCSuites(ss, NULL); /* disable all ECC suites */
@@ -5770,7 +5771,7 @@ ssl3_BigIntGreaterThanOne(const SECItem* mpint) {
 static SECStatus
 ssl3_HandleServerKeyExchange(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
 {
-    PRArenaPool *    arena     = NULL;
+    PLArenaPool *    arena     = NULL;
     SECKEYPublicKey *peerKey   = NULL;
     PRBool           isTLS;
     SECStatus        rv;
@@ -6008,7 +6009,7 @@ typedef struct dnameNode {
 static SECStatus
 ssl3_HandleCertificateRequest(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
 {
-    PRArenaPool *        arena       = NULL;
+    PLArenaPool *        arena       = NULL;
     dnameNode *          node;
     PRInt32              remaining;
     PRBool               isTLS       = PR_FALSE;
@@ -6488,6 +6489,10 @@ ssl3_SendServerHelloSequence(sslSocket *ss)
 	return rv;	/* err code is set. */
     }
     rv = ssl3_SendCertificate(ss);
+    if (rv != SECSuccess) {
+	return rv;	/* error code is set. */
+    }
+    rv = ssl3_SendCertificateStatus(ss);
     if (rv != SECSuccess) {
 	return rv;	/* error code is set. */
     }
@@ -7738,7 +7743,7 @@ ssl3_SendCertificateRequest(sslSocket *ss)
 {
     SECItem *      name;
     CERTDistNames *ca_list;
-    const uint8 *  certTypes;
+    const PRUint8 *certTypes;
     SECItem *      names	= NULL;
     SECStatus      rv;
     int            length;
@@ -8433,13 +8438,69 @@ ssl3_SendCertificate(sslSocket *ss)
     return SECSuccess;
 }
 
+/*
+ * Used by server only.
+ * single-stapling, send only a single cert status
+ */
+static SECStatus
+ssl3_SendCertificateStatus(sslSocket *ss)
+{
+    SECStatus rv;
+    int len = 0;
+    SECItemArray *statusToSend = NULL;
+    SSL3KEAType certIndex;
+
+    SSL_TRC(3, ("%d: SSL3[%d]: send certificate status handshake",
+		SSL_GETPID(), ss->fd));
+
+    PORT_Assert( ss->opt.noLocks || ssl_HaveXmitBufLock(ss));
+    PORT_Assert( ss->opt.noLocks || ssl_HaveSSL3HandshakeLock(ss));
+    PORT_Assert( ss->sec.isServer);
+
+    if (!ssl3_ExtensionNegotiated(ss, ssl_cert_status_xtn))
+	return SECSuccess;
+
+    /* Use certStatus based on the cert being used. */
+    if ((ss->ssl3.hs.kea_def->kea == kea_ecdhe_rsa) ||
+	(ss->ssl3.hs.kea_def->kea == kea_dhe_rsa)) {
+	certIndex = kt_rsa;
+    } else {
+	certIndex = ss->ssl3.hs.kea_def->exchKeyType;
+    }
+    if (ss->certStatusArray[certIndex] && ss->certStatusArray[certIndex]->len) {
+	statusToSend = ss->certStatusArray[certIndex];
+    }
+    if (!statusToSend)
+	return SECSuccess;
+
+    /* Use the array's first item only (single stapling) */
+    len = 1 + statusToSend->items[0].len + 3;
+
+    rv = ssl3_AppendHandshakeHeader(ss, certificate_status, len);
+    if (rv != SECSuccess) {
+	return rv; 		/* err set by AppendHandshake. */
+    }
+    rv = ssl3_AppendHandshakeNumber(ss, 1 /*ocsp*/, 1);
+    if (rv != SECSuccess)
+	return rv; 		/* err set by AppendHandshake. */
+
+    rv = ssl3_AppendHandshakeVariable(ss,
+				      statusToSend->items[0].data,
+				      statusToSend->items[0].len,
+				      3);
+    if (rv != SECSuccess)
+	return rv; 		/* err set by AppendHandshake. */
+
+    return SECSuccess;
+}
+
 /* This is used to delete the CA certificates in the peer certificate chain
  * from the cert database after they've been validated.
  */
 static void
 ssl3_CleanupPeerCerts(sslSocket *ss)
 {
-    PRArenaPool * arena = ss->ssl3.peerCertArena;
+    PLArenaPool * arena = ss->ssl3.peerCertArena;
     ssl3CertNode *certs = (ssl3CertNode *)ss->ssl3.peerCertChain;
 
     for (; certs; certs = certs->next) {
@@ -8448,6 +8509,63 @@ ssl3_CleanupPeerCerts(sslSocket *ss)
     if (arena) PORT_FreeArena(arena, PR_FALSE);
     ss->ssl3.peerCertArena = NULL;
     ss->ssl3.peerCertChain = NULL;
+}
+
+/* Called from ssl3_HandleHandshakeMessage() when it has deciphered a complete
+ * ssl3 CertificateStatus message.
+ * Caller must hold Handshake and RecvBuf locks.
+ * This is always called before ssl3_HandleCertificate, even if the Certificate
+ * message is sent first.
+ */
+static SECStatus
+ssl3_HandleCertificateStatus(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
+{
+    PRInt32 status, len;
+
+    if (ss->ssl3.hs.ws != wait_certificate_status) {
+        (void)SSL3_SendAlert(ss, alert_fatal, unexpected_message);
+        PORT_SetError(SSL_ERROR_RX_UNEXPECTED_CERT_STATUS);
+        return SECFailure;
+    }
+
+    PORT_Assert(!ss->sec.isServer);
+
+    /* Consume the CertificateStatusType enum */
+    status = ssl3_ConsumeHandshakeNumber(ss, 1, &b, &length);
+    if (status != 1 /* ocsp */) {
+       goto format_loser;
+    }
+
+    len = ssl3_ConsumeHandshakeNumber(ss, 3, &b, &length);
+    if (len != length) {
+       goto format_loser;
+    }
+
+#define MAX_CERTSTATUS_LEN 0x1ffff   /* 128k - 1 */
+    if (length > MAX_CERTSTATUS_LEN)
+       goto format_loser;
+#undef MAX_CERTSTATUS_LEN
+
+    /* Array size 1, because we currently implement single-stapling only */
+    SECITEM_AllocArray(NULL, &ss->sec.ci.sid->peerCertStatus, 1);
+    if (!ss->sec.ci.sid->peerCertStatus.items)
+       return SECFailure;
+
+    ss->sec.ci.sid->peerCertStatus.items[0].data = PORT_Alloc(length);
+
+    if (!ss->sec.ci.sid->peerCertStatus.items[0].data) {
+        SECITEM_FreeArray(&ss->sec.ci.sid->peerCertStatus, PR_FALSE);
+        return SECFailure;
+    }
+
+    PORT_Memcpy(ss->sec.ci.sid->peerCertStatus.items[0].data, b, length);
+    ss->sec.ci.sid->peerCertStatus.items[0].len = length;
+    ss->sec.ci.sid->peerCertStatus.items[0].type = siBuffer;
+
+    return ssl3_AuthCertificate(ss);
+
+format_loser:
+    return ssl3_DecodeError(ss);
 }
 
 /* Called from ssl3_HandleHandshakeMessage() when it has deciphered a complete
@@ -8516,7 +8634,8 @@ ssl3_HandleCertificate(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
 	    errCode = PORT_GetError();
 	    goto loser;
 	}
-	goto server_no_cert;
+       ss->ssl3.hs.ws = wait_client_key;
+       return SECSuccess;
     }
 
     ss->ssl3.peerCertArena = PORT_NewArena(DER_DEFAULT_CHUNKSIZE);
@@ -8594,6 +8713,48 @@ ssl3_HandleCertificate(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
         goto decode_loser;
 
     SECKEY_UpdateCertPQG(ss->sec.peerCert);
+
+    if (!isServer && ssl3_ExtensionNegotiated(ss, ssl_cert_status_xtn)) {
+       ss->ssl3.hs.ws = wait_certificate_status;
+       rv = SECSuccess;
+    } else {
+       rv = ssl3_AuthCertificate(ss); /* sets ss->ssl3.hs.ws */
+    }
+
+    return rv;
+
+ambiguous_err:
+    errCode = PORT_GetError();
+    switch (errCode) {
+    case PR_OUT_OF_MEMORY_ERROR:
+    case SEC_ERROR_BAD_DATABASE:
+    case SEC_ERROR_NO_MEMORY:
+       if (isTLS) {
+           desc = internal_error;
+           goto alert_loser;
+       }
+       goto loser;
+    }
+    ssl3_SendAlertForCertError(ss, errCode);
+    goto loser;
+
+decode_loser:
+    desc = isTLS ? decode_error : bad_certificate;
+
+alert_loser:
+    (void)SSL3_SendAlert(ss, alert_fatal, desc);
+
+loser:
+    (void)ssl_MapLowLevelError(errCode);
+    return SECFailure;
+}
+
+static SECStatus
+ssl3_AuthCertificate(sslSocket *ss)
+{
+    SECStatus        rv;
+    PRBool           isServer   = (PRBool)(!!ss->sec.isServer);
+    int              errCode;
 
     ss->ssl3.hs.authCertificatePending = PR_FALSE;
 
@@ -8691,7 +8852,6 @@ ssl3_HandleCertificate(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
 	    ss->ssl3.hs.ws = wait_server_key; /* allow server_key_exchange */
 	}
     } else {
-server_no_cert:
 	ss->ssl3.hs.ws = wait_client_key;
     }
 
@@ -8704,34 +8864,7 @@ server_no_cert:
 
     return rv;
 
-ambiguous_err:
-    errCode = PORT_GetError();
-    switch (errCode) {
-    case PR_OUT_OF_MEMORY_ERROR:
-    case SEC_ERROR_BAD_DATABASE:
-    case SEC_ERROR_NO_MEMORY:
-	if (isTLS) {
-	    desc = internal_error;
-	    goto alert_loser;
-	}
-	goto loser;
-    }
-    ssl3_SendAlertForCertError(ss, errCode);
-    goto loser;
-
-decode_loser:
-    desc = isTLS ? decode_error : bad_certificate;
-
-alert_loser:
-    (void)SSL3_SendAlert(ss, alert_fatal, desc);
-
 loser:
-    ssl3_CleanupPeerCerts(ss);
-
-    if (ss->sec.peerCert != NULL) {
-	CERT_DestroyCertificate(ss->sec.peerCert);
-	ss->sec.peerCert = NULL;
-    }
     (void)ssl_MapLowLevelError(errCode);
     return SECFailure;
 }
@@ -9420,6 +9553,23 @@ ssl3_HandleHandshakeMessage(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
     }
 
     PORT_SetError(0);	/* each message starts with no error. */
+
+    if (ss->ssl3.hs.ws == wait_certificate_status &&
+        ss->ssl3.hs.msg_type != certificate_status) {
+        /* If we negotiated the certificate_status extension then we deferred
+         * certificate validation until we get the CertificateStatus messsage.
+         * But the CertificateStatus message is optional. If the server did
+         * not send it then we need to validate the certificate now. If the
+         * server does send the CertificateStatus message then we will
+         * authenticate the certificate in ssl3_HandleCertificateStatus.
+         */
+        rv = ssl3_AuthCertificate(ss); /* sets ss->ssl3.hs.ws */
+        PORT_Assert(rv != SECWouldBlock);
+        if (rv != SECSuccess) {
+            return rv;
+        }
+    }
+
     switch (ss->ssl3.hs.msg_type) {
     case hello_request:
 	if (length != 0) {
@@ -9460,6 +9610,9 @@ ssl3_HandleHandshakeMessage(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
 	break;
     case certificate:
 	rv = ssl3_HandleCertificate(ss, b, length);
+	break;
+    case certificate_status:
+	rv = ssl3_HandleCertificateStatus(ss, b, length);
 	break;
     case server_key_exchange:
 	if (ss->sec.isServer) {
@@ -9523,7 +9676,7 @@ ssl3_HandleHandshakeMessage(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
 	rv = SECFailure;
     }
 
-    if (IS_DTLS(ss) && (rv == SECSuccess)) {
+    if (IS_DTLS(ss) && (rv != SECFailure)) {
 	/* Increment the expected sequence number */
 	ss->ssl3.hs.recvMessageSeq++;
     }
@@ -9557,7 +9710,7 @@ ssl3_HandleHandshake(sslSocket *ss, sslBuffer *origBuf)
     }
     while (buf->len > 0) {
 	if (ss->ssl3.hs.header_bytes < 4) {
-	    uint8 t;
+	    PRUint8 t;
 	    t = *(buf->buf++);
 	    buf->len--;
 	    if (ss->ssl3.hs.header_bytes++ == 0)
@@ -10328,7 +10481,7 @@ ssl3_InitState(sslSocket *ss)
 
     ss->ssl3.hs.ws = (ss->sec.isServer) ? wait_client_hello : wait_server_hello;
 #ifdef NSS_ENABLE_ECC
-    ss->ssl3.hs.negotiatedECCurves = SSL3_SUPPORTED_CURVES_MASK;
+    ss->ssl3.hs.negotiatedECCurves = ssl3_GetSupportedECCCurveMask(ss);
 #endif
     ssl_ReleaseSpecWriteLock(ss);
 

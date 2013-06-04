@@ -388,8 +388,8 @@ JSBool PACDnsResolve(JSContext *cx, unsigned int argc, JS::Value *vp)
     return false;
   }
 
-  JSString *arg1 = nullptr;
-  if (!JS_ConvertArguments(cx, argc, JS_ARGV(cx, vp), "S", &arg1))
+  JS::Rooted<JSString*> arg1(cx);
+  if (!JS_ConvertArguments(cx, argc, JS_ARGV(cx, vp), "S", arg1.address()))
     return false;
 
   nsDependentJSString hostName;
@@ -429,8 +429,8 @@ JSBool PACMyIpAddress(JSContext *cx, unsigned int argc, JS::Value *vp)
 static
 JSBool PACProxyAlert(JSContext *cx, unsigned int argc, JS::Value *vp)
 {
-  JSString *arg1 = nullptr;
-  if (!JS_ConvertArguments(cx, argc, JS_ARGV(cx, vp), "S", &arg1))
+  JS::Rooted<JSString*> arg1(cx);
+  if (!JS_ConvertArguments(cx, argc, JS_ARGV(cx, vp), "S", arg1.address()))
     return false;
 
   nsDependentJSString message;
@@ -447,7 +447,7 @@ JSBool PACProxyAlert(JSContext *cx, unsigned int argc, JS::Value *vp)
   return true;
 }
 
-static JSFunctionSpec PACGlobalFunctions[] = {
+static const JSFunctionSpec PACGlobalFunctions[] = {
   JS_FS("dnsResolve", PACDnsResolve, 1, 0),
   JS_FS("myIpAddress", PACMyIpAddress, 0, 0),
   JS_FS("alert", PACProxyAlert, 1, 0),
@@ -525,6 +525,12 @@ private:
     mRuntime = JS_NewRuntime(sRuntimeHeapSize, JS_NO_HELPER_THREADS);
     NS_ENSURE_TRUE(mRuntime, NS_ERROR_OUT_OF_MEMORY);
 
+    /*
+     * Not setting this will cause JS_CHECK_RECURSION to report false
+     * positives
+     */ 
+    JS_SetNativeStackQuota(mRuntime, 128 * sizeof(size_t) * 1024); 
+
     mContext = JS_NewContext(mRuntime, 0);
     NS_ENSURE_TRUE(mContext, NS_ERROR_OUT_OF_MEMORY);
 
@@ -549,7 +555,7 @@ private:
 JSClass JSRuntimeWrapper::sGlobalClass = {
   "PACResolutionThreadGlobal",
   JSCLASS_GLOBAL_FLAGS,
-  JS_PropertyStub, JS_PropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
+  JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
   JS_EnumerateStub, JS_ResolveStub, JS_ConvertStub
 };
 
@@ -641,9 +647,9 @@ ProxyAutoConfig::GetProxyForURI(const nsCString &aTestURI,
     JS::RootedValue hostValue(cx, STRING_TO_JSVAL(hostString));
 
     JS::Value argv[2] = { uriValue, hostValue };
-    JS::Value rval;
+    JS::Rooted<JS::Value> rval(cx);
     JSBool ok = JS_CallFunctionName(cx, mJSRuntime->Global(),
-                                    "FindProxyForURL", 2, argv, &rval);
+                                    "FindProxyForURL", 2, argv, rval.address());
 
     if (ok && rval.isString()) {
       nsDependentJSString pacString;

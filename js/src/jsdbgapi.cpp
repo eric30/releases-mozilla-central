@@ -1,6 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=99:
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -9,21 +8,15 @@
  * JS debugging API.
  */
 
-#include "mozilla/DebugOnly.h"
+#include "jsdbgapi.h"
 
 #include <string.h>
 #include "jsprvtd.h"
 #include "jstypes.h"
-#include "jsutil.h"
-#include "jsclist.h"
 #include "jsapi.h"
 #include "jscntxt.h"
-#include "jsversion.h"
-#include "jsdbgapi.h"
 #include "jsfun.h"
 #include "jsgc.h"
-#include "jsinterp.h"
-#include "jslock.h"
 #include "jsobj.h"
 #include "jsopcode.h"
 #include "jsscript.h"
@@ -31,27 +24,27 @@
 #include "jswatchpoint.h"
 #include "jswrapper.h"
 
-#include "gc/Marking.h"
 #include "frontend/BytecodeEmitter.h"
-#include "frontend/Parser.h"
 #include "vm/Debugger.h"
+#include "vm/Interpreter.h"
 #include "vm/Shape.h"
+
+#ifdef JS_ASMJS
+#include "ion/AsmJSModule.h"
+#endif
 
 #include "jsatominlines.h"
 #include "jsinferinlines.h"
 #include "jsobjinlines.h"
-#include "jsinterpinlines.h"
 #include "jsscriptinlines.h"
 
-#include "vm/Shape-inl.h"
+#include "vm/Interpreter-inl.h"
 #include "vm/Stack-inl.h"
-
-#include "jsautooplen.h"
 
 using namespace js;
 using namespace js::gc;
 
-using mozilla::DebugOnly;
+using mozilla::PodZero;
 
 JS_PUBLIC_API(JSBool)
 JS_GetDebugMode(JSContext *cx)
@@ -84,18 +77,20 @@ js::ScriptDebugPrologue(JSContext *cx, AbstractFramePtr frame)
 {
     JS_ASSERT_IF(frame.isStackFrame(), frame.asStackFrame() == cx->fp());
 
-    if (frame.isFramePushedByExecute()) {
-        if (JSInterpreterHook hook = cx->runtime->debugHooks.executeHook)
-            frame.setHookData(hook(cx, Jsvalify(frame), IsTopFrameConstructing(cx, frame),
-                                   true, 0, cx->runtime->debugHooks.executeHookData));
-    } else {
-        if (JSInterpreterHook hook = cx->runtime->debugHooks.callHook)
-            frame.setHookData(hook(cx, Jsvalify(frame), IsTopFrameConstructing(cx, frame),
-                                   true, 0, cx->runtime->debugHooks.callHookData));
+    if (!frame.script()->selfHosted) {
+        if (frame.isFramePushedByExecute()) {
+            if (JSInterpreterHook hook = cx->runtime->debugHooks.executeHook)
+                frame.setHookData(hook(cx, Jsvalify(frame), IsTopFrameConstructing(cx, frame),
+                                       true, 0, cx->runtime->debugHooks.executeHookData));
+        } else {
+            if (JSInterpreterHook hook = cx->runtime->debugHooks.callHook)
+                frame.setHookData(hook(cx, Jsvalify(frame), IsTopFrameConstructing(cx, frame),
+                                       true, 0, cx->runtime->debugHooks.callHookData));
+        }
     }
 
     RootedValue rval(cx);
-    JSTrapStatus status = Debugger::onEnterFrame(cx, &rval);
+    JSTrapStatus status = Debugger::onEnterFrame(cx, frame, &rval);
     switch (status) {
       case JSTRAP_CONTINUE:
         break;
@@ -120,6 +115,7 @@ js::ScriptDebugEpilogue(JSContext *cx, AbstractFramePtr frame, bool okArg)
     JS_ASSERT_IF(frame.isStackFrame(), frame.asStackFrame() == cx->fp());
     JSBool ok = okArg;
 
+    // We don't add hook data for self-hosted scripts, so we don't need to check for them, here.
     if (void *hookData = frame.maybeHookData()) {
         if (frame.isFramePushedByExecute()) {
             if (JSInterpreterHook hook = cx->runtime->debugHooks.executeHook)
@@ -130,7 +126,7 @@ js::ScriptDebugEpilogue(JSContext *cx, AbstractFramePtr frame, bool okArg)
         }
     }
 
-    return Debugger::onLeaveFrame(cx, ok);
+    return Debugger::onLeaveFrame(cx, frame, ok);
 }
 
 JSTrapStatus
@@ -293,11 +289,12 @@ JS_ClearInterrupt(JSRuntime *rt, JSInterruptHook *hoop, void **closurep)
 /************************************************************************/
 
 JS_PUBLIC_API(JSBool)
-JS_SetWatchPoint(JSContext *cx, JSObject *obj_, jsid id,
+JS_SetWatchPoint(JSContext *cx, JSObject *obj_, jsid id_,
                  JSWatchPointHandler handler, JSObject *closure_)
 {
     assertSameCompartment(cx, obj_);
 
+    RootedId id(cx, id_);
     RootedObject origobj(cx, obj_), closure(cx, closure_);
     RootedObject obj(cx, GetInnerObject(cx, origobj));
     if (!obj)
@@ -386,7 +383,7 @@ JS_ClearAllWatchPoints(JSContext *cx)
 /************************************************************************/
 
 JS_PUBLIC_API(unsigned)
-JS_PCToLineNumber(JSContext *cx, RawScript script, jsbytecode *pc)
+JS_PCToLineNumber(JSContext *cx, JSScript *script, jsbytecode *pc)
 {
     return js::PCToLineNumber(script, pc);
 }
@@ -467,22 +464,27 @@ JS_FunctionHasLocalNames(JSContext *cx, JSFunction *fun)
 }
 
 extern JS_PUBLIC_API(uintptr_t *)
-JS_GetFunctionLocalNameArray(JSContext *cx, JSFunction *fun, void **markp)
+JS_GetFunctionLocalNameArray(JSContext *cx, JSFunction *fun, void **memp)
 {
     RootedScript script(cx, fun->nonLazyScript());
     BindingVector bindings(cx);
     if (!FillBindingVector(script, &bindings))
         return NULL;
 
-    /* Munge data into the API this method implements.  Avert your eyes! */
-    *markp = cx->tempLifoAlloc().mark();
+    LifoAlloc &lifo = cx->tempLifoAlloc();
 
-    uintptr_t *names = cx->tempLifoAlloc().newArray<uintptr_t>(bindings.length());
-    if (!names) {
+    // Store the LifoAlloc::Mark right before the allocation.
+    LifoAlloc::Mark mark = lifo.mark();
+    void *mem = lifo.alloc(sizeof(LifoAlloc::Mark) + bindings.length() * sizeof(uintptr_t));
+    if (!mem) {
         js_ReportOutOfMemory(cx);
         return NULL;
     }
+    *memp = mem;
+    *reinterpret_cast<LifoAlloc::Mark*>(mem) = mark;
 
+    // Munge data into the API this method implements.  Avert your eyes!
+    uintptr_t *names = reinterpret_cast<uintptr_t*>((char*)mem + sizeof(LifoAlloc::Mark));
     for (size_t i = 0; i < bindings.length(); i++)
         names[i] = reinterpret_cast<uintptr_t>(bindings[i].name());
 
@@ -502,9 +504,9 @@ JS_AtomKey(JSAtom *atom)
 }
 
 extern JS_PUBLIC_API(void)
-JS_ReleaseFunctionLocalNameArray(JSContext *cx, void *mark)
+JS_ReleaseFunctionLocalNameArray(JSContext *cx, void *mem)
 {
-    cx->tempLifoAlloc().release(mark);
+    cx->tempLifoAlloc().release(*reinterpret_cast<LifoAlloc::Mark*>(mem));
 }
 
 JS_PUBLIC_API(JSScript *)
@@ -515,7 +517,7 @@ JS_GetFunctionScript(JSContext *cx, JSFunction *fun)
     if (fun->isInterpretedLazy()) {
         RootedFunction rootedFun(cx, fun);
         AutoCompartment funCompartment(cx, rootedFun);
-        RawScript script = rootedFun->getOrCreateScript(cx);
+        JSScript *script = rootedFun->getOrCreateScript(cx);
         if (!script)
             MOZ_CRASH();
         return script;
@@ -598,15 +600,9 @@ JS_GetScriptVersion(JSContext *cx, JSScript *script)
 }
 
 JS_PUBLIC_API(bool)
-JS_GetScriptUserBit(JSScript *script)
+JS_GetScriptIsSelfHosted(JSScript *script)
 {
-    return script->userBit;
-}
-
-JS_PUBLIC_API(void)
-JS_SetScriptUserBit(JSScript *script, bool b)
-{
-    script->userBit = b;
+    return script->selfHosted;
 }
 
 /***************************************************************************/
@@ -829,89 +825,6 @@ JS_SetDebugErrorHook(JSRuntime *rt, JSDebugErrorHook hook, void *closure)
 
 /************************************************************************/
 
-JS_PUBLIC_API(size_t)
-JS_GetObjectTotalSize(JSContext *cx, JSObject *obj)
-{
-    return obj->computedSizeOfThisSlotsElements();
-}
-
-static size_t
-GetAtomTotalSize(JSContext *cx, JSAtom *atom)
-{
-    return sizeof(AtomStateEntry) + sizeof(HashNumber) +
-           sizeof(JSString) +
-           (atom->length() + 1) * sizeof(jschar);
-}
-
-JS_PUBLIC_API(size_t)
-JS_GetFunctionTotalSize(JSContext *cx, JSFunction *fun)
-{
-    size_t nbytes = sizeof *fun;
-    nbytes += JS_GetObjectTotalSize(cx, fun);
-    if (fun->isInterpreted())
-        nbytes += JS_GetScriptTotalSize(cx, fun->nonLazyScript());
-    if (fun->displayAtom())
-        nbytes += GetAtomTotalSize(cx, fun->displayAtom());
-    return nbytes;
-}
-
-JS_PUBLIC_API(size_t)
-JS_GetScriptTotalSize(JSContext *cx, JSScript *script)
-{
-    size_t nbytes, pbytes;
-    jssrcnote *sn, *notes;
-    ObjectArray *objarray;
-    JSPrincipals *principals;
-
-    nbytes = sizeof *script;
-    nbytes += script->length * sizeof script->code[0];
-    nbytes += script->natoms * sizeof script->atoms[0];
-    for (size_t i = 0; i < script->natoms; i++)
-        nbytes += GetAtomTotalSize(cx, script->atoms[i]);
-
-    if (script->filename())
-        nbytes += strlen(script->filename()) + 1;
-
-    notes = script->notes();
-    for (sn = notes; !SN_IS_TERMINATOR(sn); sn = SN_NEXT(sn))
-        continue;
-    nbytes += (sn - notes + 1) * sizeof *sn;
-
-    if (script->hasObjects()) {
-        objarray = script->objects();
-        size_t i = objarray->length;
-        nbytes += sizeof *objarray + i * sizeof objarray->vector[0];
-        do {
-            nbytes += JS_GetObjectTotalSize(cx, objarray->vector[--i]);
-        } while (i != 0);
-    }
-
-    if (script->hasRegexps()) {
-        objarray = script->regexps();
-        size_t i = objarray->length;
-        nbytes += sizeof *objarray + i * sizeof objarray->vector[0];
-        do {
-            nbytes += JS_GetObjectTotalSize(cx, objarray->vector[--i]);
-        } while (i != 0);
-    }
-
-    if (script->hasTrynotes())
-        nbytes += sizeof(TryNoteArray) + script->trynotes()->length * sizeof(JSTryNote);
-
-    principals = script->principals();
-    if (principals) {
-        JS_ASSERT(principals->refcount);
-        pbytes = sizeof *principals;
-        if (principals->refcount > 1)
-            pbytes = JS_HOWMANY(pbytes, principals->refcount);
-        nbytes += pbytes;
-    }
-
-    return nbytes;
-}
-
-/************************************************************************/
-
 JS_FRIEND_API(void)
 js_RevertVersion(JSContext *cx)
 {
@@ -996,24 +909,40 @@ JS_DumpCompartmentPCCounts(JSContext *cx)
         if (script->hasScriptCounts && script->enclosingScriptsCompiledSuccessfully())
             JS_DumpPCCounts(cx, script);
     }
-}
 
-JS_PUBLIC_API(JSObject *)
-JS_UnwrapObject(JSObject *obj)
-{
-    return UnwrapObject(obj);
-}
+#if defined(JS_ASMJS) && defined(DEBUG)
+    for (unsigned thingKind = FINALIZE_OBJECT0; thingKind < FINALIZE_OBJECT_LIMIT; thingKind++) {
+        for (CellIter i(cx->zone(), (AllocKind) thingKind); !i.done(); i.next()) {
+            JSObject *obj = i.get<JSObject>();
+            if (obj->compartment() != cx->compartment)
+                continue;
 
-JS_PUBLIC_API(JSObject *)
-JS_UnwrapObjectAndInnerize(JSObject *obj)
-{
-    return UnwrapObject(obj, /* stopAtOuter = */ false);
+            if (IsAsmJSModuleObject(obj)) {
+                AsmJSModule &module = AsmJSModuleObjectToModule(obj);
+
+                Sprinter sprinter(cx);
+                if (!sprinter.init())
+                    return;
+
+                fprintf(stdout, "--- Asm.js Module ---\n");
+
+                for (size_t i = 0; i < module.numFunctionCounts(); i++) {
+                    ion::IonScriptCounts *counts = module.functionCounts(i);
+                    DumpIonScriptCounts(&sprinter, counts);
+                }
+
+                fputs(sprinter.string(), stdout);
+                fprintf(stdout, "--- END Asm.js Module ---\n");
+            }
+        }
+    }
+#endif
 }
 
 JS_FRIEND_API(JSBool)
 js_CallContextDebugHandler(JSContext *cx)
 {
-    ScriptFrameIter iter(cx);
+    NonBuiltinScriptFrameIter iter(cx);
     JS_ASSERT(!iter.done());
 
     RootedValue rval(cx);
@@ -1032,14 +961,12 @@ js_CallContextDebugHandler(JSContext *cx)
     }
 }
 
-JS_PUBLIC_API(StackDescription *)
+JS_PUBLIC_API(JS::StackDescription *)
 JS::DescribeStack(JSContext *cx, unsigned maxFrames)
 {
     Vector<FrameDescription> frames(cx);
 
-    for (ScriptFrameIter i(cx); !i.done(); ++i) {
-        if (i.script()->selfHosted)
-            continue;
+    for (NonBuiltinScriptFrameIter i(cx); !i.done(); ++i) {
         FrameDescription desc;
         desc.script = i.script();
         desc.lineno = PCToLineNumber(i.script(), i.pc());
@@ -1050,7 +977,7 @@ JS::DescribeStack(JSContext *cx, unsigned maxFrames)
             break;
     }
 
-    StackDescription *desc = js_new<StackDescription>();
+    JS::StackDescription *desc = js_new<JS::StackDescription>();
     if (!desc)
         return NULL;
 
@@ -1060,7 +987,7 @@ JS::DescribeStack(JSContext *cx, unsigned maxFrames)
 }
 
 JS_PUBLIC_API(void)
-JS::FreeStackDescription(JSContext *cx, StackDescription *desc)
+JS::FreeStackDescription(JSContext *cx, JS::StackDescription *desc)
 {
     js_delete(desc->frames);
     js_delete(desc);
@@ -1110,7 +1037,7 @@ FormatValue(JSContext *cx, const Value &v, JSAutoByteString &bytes)
 }
 
 static char *
-FormatFrame(JSContext *cx, const ScriptFrameIter &iter, char *buf, int num,
+FormatFrame(JSContext *cx, const NonBuiltinScriptFrameIter &iter, char *buf, int num,
             JSBool showArgs, JSBool showLocals, JSBool showThisProps)
 {
     RootedScript script(cx, iter.script());
@@ -1288,7 +1215,7 @@ JS::FormatStackDump(JSContext *cx, char *buf,
 {
     int num = 0;
 
-    for (ScriptFrameIter i(cx); !i.done(); ++i) {
+    for (NonBuiltinScriptFrameIter i(cx); !i.done(); ++i) {
         buf = FormatFrame(cx, i, buf, num, showArgs, showLocals, showThisProps);
         num++;
     }
@@ -1425,27 +1352,27 @@ JSAbstractFramePtr::evaluateUCInStackFrame(JSContext *cx,
 
 JSBrokenFrameIterator::JSBrokenFrameIterator(JSContext *cx)
 {
-    ScriptFrameIter iter(cx);
+    NonBuiltinScriptFrameIter iter(cx);
     data_ = iter.copyData();
 }
 
 JSBrokenFrameIterator::~JSBrokenFrameIterator()
 {
-    js_free((StackIter::Data *)data_);
+    js_free((ScriptFrameIter::Data *)data_);
 }
 
 bool
 JSBrokenFrameIterator::done() const
 {
-    ScriptFrameIter iter(*(StackIter::Data *)data_);
+    NonBuiltinScriptFrameIter iter(*(ScriptFrameIter::Data *)data_);
     return iter.done();
 }
 
 JSBrokenFrameIterator &
 JSBrokenFrameIterator::operator++()
 {
-    StackIter::Data *data = (StackIter::Data *)data_;
-    ScriptFrameIter iter(*data);
+    ScriptFrameIter::Data *data = (ScriptFrameIter::Data *)data_;
+    NonBuiltinScriptFrameIter iter(*data);
     ++iter;
     *data = iter.data_;
     return *this;
@@ -1454,20 +1381,20 @@ JSBrokenFrameIterator::operator++()
 JSAbstractFramePtr
 JSBrokenFrameIterator::abstractFramePtr() const
 {
-    ScriptFrameIter iter(*(StackIter::Data *)data_);
+    NonBuiltinScriptFrameIter iter(*(ScriptFrameIter::Data *)data_);
     return Jsvalify(iter.abstractFramePtr());
 }
 
 jsbytecode *
 JSBrokenFrameIterator::pc() const
 {
-    ScriptFrameIter iter(*(StackIter::Data *)data_);
+    NonBuiltinScriptFrameIter iter(*(ScriptFrameIter::Data *)data_);
     return iter.pc();
 }
 
 bool
 JSBrokenFrameIterator::isConstructing() const
 {
-    ScriptFrameIter iter(*(StackIter::Data *)data_);
+    NonBuiltinScriptFrameIter iter(*(ScriptFrameIter::Data *)data_);
     return iter.isConstructing();
 }

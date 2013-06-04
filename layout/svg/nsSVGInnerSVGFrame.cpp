@@ -12,6 +12,7 @@
 #include "nsISVGChildFrame.h"
 #include "nsRenderingContext.h"
 #include "nsSVGContainerFrame.h"
+#include "nsSVGEffects.h"
 #include "nsSVGIntegrationUtils.h"
 #include "mozilla/dom/SVGSVGElement.h"
 
@@ -35,7 +36,7 @@ NS_QUERYFRAME_HEAD(nsSVGInnerSVGFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsSVGInnerSVGFrameBase)
 
 #ifdef DEBUG
-NS_IMETHODIMP
+void
 nsSVGInnerSVGFrame::Init(nsIContent* aContent,
                          nsIFrame* aParent,
                          nsIFrame* aPrevInFlow)
@@ -43,7 +44,7 @@ nsSVGInnerSVGFrame::Init(nsIContent* aContent,
   NS_ASSERTION(aContent->IsSVG(nsGkAtoms::svg),
                "Content is not an SVG 'svg' element!");
 
-  return nsSVGInnerSVGFrameBase::Init(aContent, aParent, aPrevInFlow);
+  nsSVGInnerSVGFrameBase::Init(aContent, aParent, aPrevInFlow);
 }
 #endif /* DEBUG */
 
@@ -172,7 +173,7 @@ nsSVGInnerSVGFrame::AttributeChanged(int32_t  aNameSpaceID,
 
     if (aAttribute == nsGkAtoms::width ||
         aAttribute == nsGkAtoms::height) {
-      nsSVGUtils::InvalidateBounds(this, false);
+      nsSVGEffects::InvalidateRenderingObservers(this);
       nsSVGUtils::ScheduleReflowSVG(this);
 
       if (content->HasViewBoxOrSyntheticViewBox()) {
@@ -197,17 +198,25 @@ nsSVGInnerSVGFrame::AttributeChanged(int32_t  aNameSpaceID,
       // make sure our cached transform matrix gets (lazily) updated
       mCanvasTM = nullptr;
 
-      nsSVGUtils::InvalidateBounds(this, false);
-      nsSVGUtils::ScheduleReflowSVG(this);
-
       nsSVGUtils::NotifyChildrenOfSVGChange(
           this, aAttribute == nsGkAtoms::viewBox ?
                   TRANSFORM_CHANGED | COORD_CONTEXT_CHANGED : TRANSFORM_CHANGED);
 
-      if (aAttribute == nsGkAtoms::viewBox ||
-          (aAttribute == nsGkAtoms::preserveAspectRatio &&
-           content->HasViewBoxOrSyntheticViewBox())) {
+      // We don't invalidate for transform changes (the layers code does that).
+      // Also note that SVGTransformableElement::GetAttributeChangeHint will
+      // return nsChangeHint_UpdateOverflow for "transform" attribute changes
+      // and cause DoApplyRenderingChangeToTree to make the SchedulePaint call.
+
+      if (aAttribute == nsGkAtoms::x || aAttribute == nsGkAtoms::y) {
+        nsSVGEffects::InvalidateRenderingObservers(this);
+        nsSVGUtils::ScheduleReflowSVG(this);
+      } else if (aAttribute == nsGkAtoms::viewBox ||
+                 (aAttribute == nsGkAtoms::preserveAspectRatio &&
+                  content->HasViewBoxOrSyntheticViewBox())) {
         content->ChildrenOnlyTransformChanged();
+        // SchedulePaint sets a global state flag so we only need to call it once
+        // (on ourself is fine), not once on each child (despite bug 828240).
+        SchedulePaint();
       }
     }
   }

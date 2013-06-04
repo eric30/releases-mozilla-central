@@ -1,3 +1,4 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # Copyright (c) 2013 Mozilla Foundation and Contributors
 # All rights reserved.
@@ -23,4 +24,15 @@
 # THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+MODULE = 'webvtt'
+
+EXPORTS.webvtt += [
+    'include/webvtt/cue.h',
+    'include/webvtt/error.h',
+    'include/webvtt/node.h',
+    'include/webvtt/parser.h',
+    'include/webvtt/string.h',
+    'include/webvtt/util.h',
+]
 

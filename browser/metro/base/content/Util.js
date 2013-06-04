@@ -134,10 +134,37 @@ let Util = {
     aElement.style.border = "2px solid red";
   },
 
+  transitionElementVisibility: function(aNodes, aVisible) {
+    // accept single node or a collection of nodes
+    aNodes = aNodes.length ? aNodes : [aNodes];
+    let defd = Promise.defer();
+    let pending = 0;
+    Array.forEach(aNodes, function(aNode) {
+      if (aVisible) {
+        aNode.hidden = false;
+        aNode.removeAttribute("fade"); // trigger transition to full opacity
+      } else {
+        aNode.setAttribute("fade", true); // trigger transition to 0 opacity
+      }
+      aNode.addEventListener("transitionend", function onTransitionEnd(aEvent){
+        aNode.removeEventListener("transitionend", onTransitionEnd);
+        if (!aVisible) {
+          aNode.hidden = true;
+        }
+        pending--;
+        if (!pending){
+          defd.resolve(true);
+        }
+      }, false);
+      pending++;
+    });
+    return defd.promise;
+  },
+
   getHrefForElement: function getHrefForElement(target) {
     let link = null;
     while (target) {
-      if (target instanceof Ci.nsIDOMHTMLAnchorElement || 
+      if (target instanceof Ci.nsIDOMHTMLAnchorElement ||
           target instanceof Ci.nsIDOMHTMLAreaElement ||
           target instanceof Ci.nsIDOMHTMLLinkElement) {
           if (target.hasAttribute("href"))
@@ -156,6 +183,10 @@ let Util = {
     return ((aElement instanceof Ci.nsIDOMHTMLInputElement &&
              aElement.mozIsTextField(false)) ||
             aElement instanceof Ci.nsIDOMHTMLTextAreaElement);
+  },
+
+  isMultilineInput: function isMultilineInput(aElement) {
+    return (aElement instanceof Ci.nsIDOMHTMLTextAreaElement);
   },
 
   isLink: function isLink(aElement) {
@@ -178,6 +209,12 @@ let Util = {
   /*
    * Rect and nsIDOMRect utilities
    */
+
+  getCleanRect: function getCleanRect() {
+    return {
+      left: 0, top: 0, right: 0, bottom: 0
+    };
+  },
 
   pointWithinRect: function pointWithinRect(aX, aY, aRect) {
     return (aRect.left < aX && aRect.top < aY &&
@@ -252,6 +289,13 @@ let Util = {
             aURL == "about:start");
   },
 
+  // Title to use for emptyURL tabs.
+  getEmptyURLTabTitle: function getEmptyURLTabTitle() {
+    let browserStrings = Services.strings.createBundle("chrome://browser/locale/browser.properties");
+
+    return browserStrings.GetStringFromName("tabs.emptyTabTitle");
+  },
+
   // Don't remember these pages in the session store.
   isURLMemorable: function isURLMemorable(aURL) {
     return !(aURL == "about:blank" ||
@@ -270,6 +314,30 @@ let Util = {
   /*
    * Screen and layout utilities
    */
+
+   /*
+    * translateToTopLevelWindow - Given an element potentially within
+    * a subframe, calculate the offsets up to the top level browser.
+    */
+  translateToTopLevelWindow: function translateToTopLevelWindow(aElement) {
+    let offsetX = 0;
+    let offsetY = 0;
+    let element = aElement;
+    while (element &&
+           element.ownerDocument &&
+           element.ownerDocument.defaultView != content) {
+      element = element.ownerDocument.defaultView.frameElement;
+      let rect = element.getBoundingClientRect();
+      offsetX += rect.left;
+      offsetY += rect.top;
+    }
+    let win = null;
+    if (element == aElement)
+      win = content;
+    else
+      win = element.contentDocument.defaultView;
+    return { targetWindow: win, offsetX: offsetX, offsetY: offsetY };
+  },
 
   get displayDPI() {
     delete this.displayDPI;
@@ -428,7 +496,7 @@ Util.Timeout.prototype = {
     return this;
   },
 
-  // Return true if we are waiting for a callback. 
+  // Return true if we are waiting for a callback.
   isPending: function isPending() {
     return this._type !== null;
   }

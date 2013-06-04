@@ -30,6 +30,7 @@
 #include "nsIDOMHTMLScriptElement.h"
 #include "nsIDocShell.h"
 #include "nsContentUtils.h"
+#include "nsCxPusher.h"
 #include "nsUnicharUtils.h"
 #include "nsAutoPtr.h"
 #include "nsIXPConnect.h"
@@ -613,12 +614,12 @@ nsScriptLoader::ProcessScriptElement(nsIScriptElement *aElement)
 
   if (csp) {
     PR_LOG(gCspPRLog, PR_LOG_DEBUG, ("New ScriptLoader i ****with CSP****"));
-    bool inlineOK;
-    rv = csp->GetAllowsInlineScript(&inlineOK);
+    bool inlineOK = true;
+    bool reportViolations = false;
+    rv = csp->GetAllowsInlineScript(&reportViolations, &inlineOK);
     NS_ENSURE_SUCCESS(rv, false);
 
-    if (!inlineOK) {
-      PR_LOG(gCspPRLog, PR_LOG_DEBUG, ("CSP blocked inline scripts (2)"));
+    if (reportViolations) {
       // gather information to log with violation report
       nsIURI* uri = mDocument->GetDocumentURI();
       nsAutoCString asciiSpec;
@@ -636,6 +637,10 @@ nsScriptLoader::ProcessScriptElement(nsIScriptElement *aElement)
                                NS_ConvertUTF8toUTF16(asciiSpec),
                                scriptText,
                                aElement->GetScriptLineNumber());
+    }
+
+    if (!inlineOK) {
+      PR_LOG(gCspPRLog, PR_LOG_DEBUG, ("CSP blocked inline scripts (2)"));
       return false;
     }
   }
@@ -801,7 +806,7 @@ nsScriptLoader::EvaluateScript(nsScriptLoadRequest* aRequest,
   }
 
   nsPIDOMWindow *pwin = mDocument->GetInnerWindow();
-  if (!pwin || !pwin->IsInnerWindow()) {
+  if (!pwin) {
     return NS_ERROR_FAILURE;
   }
   nsCOMPtr<nsIScriptGlobalObject> globalObject = do_QueryInterface(pwin);
@@ -844,14 +849,14 @@ nsScriptLoader::EvaluateScript(nsScriptLoadRequest* aRequest,
     if (aRequest->mOriginPrincipal) {
       options.setOriginPrincipals(nsJSPrincipals::get(aRequest->mOriginPrincipal));
     }
-    rv = context->EvaluateString(aScript, *globalObject->GetGlobalJSObject(),
+    JS::Rooted<JSObject*> global(cx, globalObject->GetGlobalJSObject());
+    rv = context->EvaluateString(aScript, global,
                                  options, /* aCoerceToString = */ false, nullptr);
   }
 
   // Put the old script back in case it wants to do anything else.
   mCurrentScript = oldCurrent;
 
-  JSAutoRequest ar(cx);
   context->SetProcessingScriptTag(oldProcessingScriptTag);
   return rv;
 }
@@ -977,14 +982,14 @@ DetectByteOrderMark(const unsigned char* aBytes, int32_t aLen, nsCString& oChars
     if (0xFF == aBytes[1]) {
       // FE FF
       // UTF-16, big-endian
-      oCharset.Assign("UTF-16");
+      oCharset.Assign("UTF-16BE");
     }
     break;
   case 0xFF:
     if (0xFE == aBytes[1]) {
       // FF FE
       // UTF-16, little-endian
-      oCharset.Assign("UTF-16");
+      oCharset.Assign("UTF-16LE");
     }
     break;
   }
@@ -1058,7 +1063,7 @@ nsScriptLoader::ConvertToUTF16(nsIChannel* aChannel, const uint8_t* aData,
                                  aLength, &unicodeLength);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  if (!EnsureStringLength(aString, unicodeLength)) {
+  if (!aString.SetLength(unicodeLength, fallible_t())) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
 

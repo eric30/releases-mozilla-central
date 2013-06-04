@@ -9,9 +9,6 @@
 #include "nsDOMScrollAreaEvent.h"
 #include "nsGUIEvent.h"
 #include "nsClientRect.h"
-#include "nsDOMClassInfoID.h"
-#include "nsIClassInfo.h"
-#include "nsIXPCScriptable.h"
 
 nsDOMScrollAreaEvent::nsDOMScrollAreaEvent(mozilla::dom::EventTarget* aOwner,
                                            nsPresContext *aPresContext,
@@ -20,6 +17,7 @@ nsDOMScrollAreaEvent::nsDOMScrollAreaEvent(mozilla::dom::EventTarget* aOwner,
   , mClientArea(nullptr)
 {
   mClientArea.SetLayoutRect(aEvent ? aEvent->mArea : nsRect());
+  SetIsDOMBinding();
 }
 
 nsDOMScrollAreaEvent::~nsDOMScrollAreaEvent()
@@ -35,11 +33,8 @@ nsDOMScrollAreaEvent::~nsDOMScrollAreaEvent()
 NS_IMPL_ADDREF_INHERITED(nsDOMScrollAreaEvent, nsDOMUIEvent)
 NS_IMPL_RELEASE_INHERITED(nsDOMScrollAreaEvent, nsDOMUIEvent)
 
-DOMCI_DATA(ScrollAreaEvent, nsDOMScrollAreaEvent)
-
 NS_INTERFACE_MAP_BEGIN(nsDOMScrollAreaEvent)
   NS_INTERFACE_MAP_ENTRY(nsIDOMScrollAreaEvent)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(ScrollAreaEvent)
 NS_INTERFACE_MAP_END_INHERITING(nsDOMUIEvent)
 
 

@@ -1,6 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=4 sw=4 et tw=99:
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -421,6 +420,24 @@ bool
 ValueNumberer::analyze()
 {
     return computeValueNumbers() && eliminateRedundancies();
+}
+
+// Called by the compiler if we need to re-run GVN.
+bool
+ValueNumberer::clear()
+{
+    IonSpew(IonSpew_GVN, "Clearing value numbers");
+
+    // Clear the VN of every MDefinition
+    for (ReversePostorderIterator block(graph_.rpoBegin()); block != graph_.rpoEnd(); block++) {
+        if (mir->shouldCancel("Value Numbering (clearing)"))
+            return false;
+        for (MDefinitionIterator iter(*block); iter; iter++)
+            iter->clearValueNumberData();
+        block->lastIns()->clearValueNumberData();
+    }
+
+    return true;
 }
 
 uint32_t

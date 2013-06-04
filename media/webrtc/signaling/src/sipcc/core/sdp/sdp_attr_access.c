@@ -5,6 +5,7 @@
 #include "sdp_os_defs.h"
 #include "sdp.h"
 #include "sdp_private.h"
+#include "fsm.h"
 #include "CSFLog.h"
 
 static const char* logTag = "sdp_attr_access";
@@ -6659,6 +6660,7 @@ sdp_result_e sdp_attr_get_fmtp_streams (void *sdp_ptr, u16 level,
                       "not found.", sdp_p->debug_str, level, inst_num);
         }
         sdp_p->conf_p->num_invalid_param++;
+        *val = WEBRTC_DATACHANNEL_STREAMS_DEFAULT;
         return (SDP_INVALID_PARAMETER);
     } else {
         *val = attr_p->attr.fmtp.streams;
@@ -10231,7 +10233,7 @@ sdp_result_e sdp_set_group_num_id (void *sdp_ptr, u16 level,
         return (SDP_INVALID_PARAMETER);
     } else if ((group_num_id == 0) || (group_num_id > SDP_MAX_GROUP_STREAM_ID)){
         if (sdp_p->debug_flag[SDP_DEBUG_ERRORS]) {
-            CSFLogError(logTag, "%s Number of group id value provided - %u is invalid\n",
+            CSFLogError(logTag, "%s Number of group id value provided - %u is invalid",
                       sdp_p->debug_str, group_num_id);
         }
         sdp_p->conf_p->num_invalid_param++;

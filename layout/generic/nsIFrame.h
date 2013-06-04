@@ -577,17 +577,15 @@ public:
    * frame (the frame that was split).
    *
    * If you want a view associated with your frame, you should create the view
-   * now.
+   * after Init() has returned.
    *
    * @param   aContent the content object associated with the frame
-   * @param   aGeometricParent  the geometric parent frame
-   * @param   aContentParent  the content parent frame
-   * @param   aContext the style context associated with the frame
+   * @param   aParent the parent frame
    * @param   aPrevInFlow the prev-in-flow frame
    */
-  NS_IMETHOD  Init(nsIContent*      aContent,
-                   nsIFrame*        aParent,
-                   nsIFrame*        aPrevInFlow) = 0;
+  virtual void Init(nsIContent*      aContent,
+                    nsIFrame*        aParent,
+                    nsIFrame*        aPrevInFlow) = 0;
 
   /**
    * Destroys this frame and each of its child frames (recursively calls
@@ -776,36 +774,20 @@ public:
   virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext) = 0;
 
   /**
-   * Get the style data associated with this frame.  This returns a
-   * const style struct pointer that should never be modified.  See
-   * |nsStyleContext::StyleData| for more information.
-   *
-   * The use of the typesafe functions below is preferred to direct use
-   * of this function.
-   */
-  virtual const void* StyleDataExternal(nsStyleStructID aSID) const = 0;
-
-  /**
    * Define typesafe getter functions for each style struct by
    * preprocessing the list of style structs.  These functions are the
    * preferred way to get style data.  The macro creates functions like:
    *   const nsStyleBorder* StyleBorder();
    *   const nsStyleColor* StyleColor();
+   *
+   * Callers outside of libxul should use nsIDOMWindow::GetComputedStyle()
+   * instead of these accessors.
    */
-
-#ifdef _IMPL_NS_LAYOUT
-  #define STYLE_STRUCT(name_, checkdata_cb_, ctor_args_)                      \
+  #define STYLE_STRUCT(name_, checkdata_cb_)                                  \
     const nsStyle##name_ * Style##name_ () const {                            \
       NS_ASSERTION(mStyleContext, "No style context found!");                 \
       return mStyleContext->Style##name_ ();                                  \
     }
-#else
-  #define STYLE_STRUCT(name_, checkdata_cb_, ctor_args_)                      \
-    const nsStyle##name_ * Style##name_ () const {                            \
-      return static_cast<const nsStyle##name_*>(                              \
-                            StyleDataExternal(eStyleStruct_##name_));         \
-    }
-#endif
   #include "nsStyleStructList.h"
   #undef STYLE_STRUCT
 
@@ -1011,6 +993,14 @@ public:
   nsRect GetContentRectRelativeToSelf() const;
 
   /**
+   * The area to paint box-shadows around.  The default is the border rect.
+   * (nsFieldSetFrame overrides this).
+   */
+  virtual nsRect VisualBorderRectRelativeToSelf() const {
+    return nsRect(0, 0, mRect.width, mRect.height);
+  }
+
+  /**
    * Get the size, in app units, of the border radii. It returns FALSE iff all
    * returned radii == 0 (so no border radii), TRUE otherwise.
    * For the aRadii indexes, use the NS_CORNER_* constants in nsStyleConsts.h
@@ -1207,25 +1197,6 @@ public:
                                           const nsRect&         aDirtyRect,
                                           nsDisplayList*        aList);
 
-  /**
-   * Clips the display items of aFromSet, putting the results in aToSet.
-   * Only items corresponding to frames which are descendants of this frame
-   * are clipped. In other words, descendant elements whose CSS boxes do not
-   * have this frame as a container are not clipped. Also,
-   * border/background/outline items for this frame are not clipped,
-   * unless aClipBorderBackground is set to true. (We need this because
-   * a scrollframe must overflow-clip its scrolled child's background/borders.)
-   *
-   * Indices into aClipRadii are the NS_CORNER_* constants in nsStyleConsts.h
-   */
-  nsresult OverflowClip(nsDisplayListBuilder*   aBuilder,
-                        const nsDisplayListSet& aFromSet,
-                        const nsDisplayListSet& aToSet,
-                        const nsRect&           aClipRect,
-                        const nscoord           aClipRadii[8],
-                        bool                    aClipBorderBackground = false,
-                        bool                    aClipAll = false);
-
   enum {
     DISPLAY_CHILD_FORCE_PSEUDO_STACKING_CONTEXT = 0x01,
     DISPLAY_CHILD_FORCE_STACKING_CONTEXT = 0x02,
@@ -1245,15 +1216,6 @@ public:
                                 const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists,
                                 uint32_t                aFlags = 0);
-
-  /**
-   * A helper for replaced elements that want to clip their content to a
-   * border radius, but only need clipping at all when they have a
-   * border radius.
-   */
-  void WrapReplacedContentForBorderRadius(nsDisplayListBuilder* aBuilder,
-                                          nsDisplayList* aFromList,
-                                          const nsDisplayListSet& aToLists);
 
   /**
    * Does this frame need a view?
@@ -1352,7 +1314,7 @@ public:
   // Note that the primary offset can be after the secondary offset; for places
   // that need the beginning and end of the object, the StartOffset and 
   // EndOffset helpers can be used.
-  struct NS_STACK_CLASS ContentOffsets {
+  struct MOZ_STACK_CLASS ContentOffsets {
     nsCOMPtr<nsIContent> content;
     bool IsNull() { return !content; }
     int32_t offset;
@@ -1390,7 +1352,7 @@ public:
    * loaded image that should be preferred. If it is not possible to use it, or
    * if it is null, mCursor should be used.
    */
-  struct NS_STACK_CLASS Cursor {
+  struct MOZ_STACK_CLASS Cursor {
     nsCOMPtr<imgIContainer> mContainer;
     int32_t                 mCursor;
     bool                    mHaveHotspot;
@@ -2300,6 +2262,12 @@ public:
    * invalid areas in the layer tree and schedule a layer tree
    * composite operation to display the layer tree.
    *
+   * In general it is not necessary for frames to call this when they change.
+   * For example, changes that result in a reflow will have this called for
+   * them by PresContext::DoReflow when the reflow begins. Style changes that 
+   * do not trigger a reflow should have this called for them by
+   * DoApplyRenderingChangeToTree.
+   *
    * @param aFlags PAINT_COMPOSITE_ONLY : No changes have been made
    * that require a layer tree update, so only schedule a layer
    * tree composite.
@@ -3150,11 +3118,32 @@ private:
 
 #ifdef DEBUG
 public:
-  // Formerly nsIFrameDebug
+  static void IndentBy(FILE* out, int32_t aIndent) {
+    while (--aIndent >= 0) fputs("  ", out);
+  }
+  void ListTag(FILE* out) const {
+    ListTag(out, this);
+  }
+  static void ListTag(FILE* out, const nsIFrame* aFrame) {
+    nsAutoString tmp;
+    aFrame->GetFrameName(tmp);
+    fputs(NS_LossyConvertUTF16toASCII(tmp).get(), out);
+    fprintf(out, "@%p", static_cast<const void*>(aFrame));
+  }
+  void ListGeneric(FILE* out, int32_t aIndent, uint32_t aFlags) const;
   enum {
     TRAVERSE_SUBDOCUMENT_FRAMES = 0x01
   };
-  NS_IMETHOD  List(FILE* out, int32_t aIndent, uint32_t aFlags = 0) const = 0;
+  virtual void List(FILE* out, int32_t aIndent, uint32_t aFlags = 0) const;
+  /**
+   * lists the frames beginning from the root frame
+   * - calls root frame's List(...)
+   */
+  static void RootFrameList(nsPresContext* aPresContext,
+                            FILE* out, int32_t aIndent);
+  static void DumpFrameTree(nsIFrame* aFrame);
+
+
   NS_IMETHOD  GetFrameName(nsAString& aResult) const = 0;
   NS_IMETHOD_(nsFrameState)  GetDebugStateBits() const = 0;
   NS_IMETHOD  DumpRegressionData(nsPresContext* aPresContext,

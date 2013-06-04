@@ -10,13 +10,16 @@
 #if defined(XP_WIN)
 #include <windows.h>
 #include <stdlib.h>
+#include <io.h>
+#include <fcntl.h>
 #elif defined(XP_UNIX)
-#include <sys/time.h>
 #include <sys/resource.h>
+#include <time.h>
 #include <unistd.h>
 #endif
 
 #ifdef XP_MACOSX
+#include <mach/mach_time.h>
 #include "MacQuirks.h"
 #endif
 
@@ -49,7 +52,10 @@ using namespace mozilla;
 #define kDesktopFolder "browser"
 #define kMetroFolder "metro"
 #define kMetroAppIniFilename "metroapp.ini"
+#ifdef XP_WIN
 #define kMetroTestFile "tests.ini"
+const char* kMetroConsoleIdParam = "testconsoleid=";
+#endif
 
 static void Output(const char *fmt, ... )
 {
@@ -100,6 +106,40 @@ static bool IsArg(const char* arg, const char* s)
 
   return false;
 }
+
+#ifdef XP_WIN
+/*
+ * AttachToTestHarness - Windows helper for when we are running
+ * in the immersive environment. Firefox is launched by Windows in
+ * response to a request by metrotestharness, which is launched by
+ * runtests.py. As such stdout in fx doesn't point to the right
+ * stream. This helper touches up stdout such that test output gets
+ * routed to a named pipe metrotestharness creates and dumps to its
+ * stdout.
+ */
+static void AttachToTestHarness()
+{
+  // attach to the metrotestharness named logging pipe
+  HANDLE winOut = CreateFileA("\\\\.\\pipe\\metrotestharness",
+                              GENERIC_WRITE,
+                              FILE_SHARE_WRITE, 0,
+                              OPEN_EXISTING, 0, 0);
+  
+  if (winOut == INVALID_HANDLE_VALUE) {
+    OutputDebugStringW(L"Could not create named logging pipe.\n");
+    return;
+  }
+
+  // Set the c runtime handle
+  int stdOut = _open_osfhandle((intptr_t)winOut, _O_APPEND);
+  if (stdOut == -1) {
+    OutputDebugStringW(L"Could not open c-runtime handle.\n");
+    return;
+  }
+  FILE *fp = _fdopen(stdOut, "a");
+  *stdout = *fp;
+}
+#endif
 
 XRE_GetFileFromPathType XRE_GetFileFromPath;
 XRE_CreateAppDataType XRE_CreateAppData;
@@ -191,6 +231,10 @@ static int do_main(int argc, char* argv[], nsIFile *xreDirectory)
       argv[1] = argv[0];
       argv++;
       argc--;
+    } else if (IsArg(argv[1], "BackgroundSessionClosed")) {
+      // This command line flag is used for indirect shutdowns, the OS
+      // relaunches Metro Firefox with this command line arg.
+      mainFlags = XRE_MAIN_FLAG_USE_METRO;
     } else {
       // This command-line flag is used to test the metro browser in a desktop
       // environment.
@@ -318,6 +362,10 @@ static int do_main(int argc, char* argv[], nsIFile *xreDirectory)
       }
       if (ptr == newArgv[newArgc-1])
         newArgc--;
+
+      // attach browser stdout to metrotestharness stdout
+      AttachToTestHarness();
+
       int result = XRE_main(newArgc, newArgv, appData, mainFlags);
       XRE_FreeAppData(appData);
       return result;
@@ -334,25 +382,80 @@ static int do_main(int argc, char* argv[], nsIFile *xreDirectory)
   return 255;
 }
 
-/* Local implementation of PR_Now, since the executable can't depend on NSPR */
-static PRTime _PR_Now()
-{
 #ifdef XP_WIN
-  MOZ_STATIC_ASSERT(sizeof(PRTime) == sizeof(FILETIME), "PRTime must have the same size as FILETIME");
-  FILETIME ft;
-  GetSystemTimeAsFileTime(&ft);
-  PRTime now;
-  CopyMemory(&now, &ft, sizeof(PRTime));
-#ifdef __GNUC__
-  return (now - 116444736000000000LL) / 10LL;
-#else
-  return (now - 116444736000000000i64) / 10i64;
+
+/**
+ * Used only when GetTickCount64 is not available on the platform.
+ * Last result of GetTickCount call. Kept in [ms].
+ */
+static DWORD sLastGTCResult = 0;
+
+/**
+ *  Higher part of the 64-bit value of MozGetTickCount64,
+ * incremented atomically.
+ */
+static DWORD sLastGTCRollover = 0;
+
+/**
+ * Function protecting GetTickCount result from rolling over. The original
+ * code comes from the Windows implementation of the TimeStamp class minus the
+ * locking harness which isn't needed here.
+ *
+ * @returns The current time in milliseconds
+ */
+static ULONGLONG WINAPI
+MozGetTickCount64()
+{
+  DWORD GTC = ::GetTickCount();
+
+  /* Pull the rollover counter forward only if new value of GTC goes way
+   * down under the last saved result */
+  if ((sLastGTCResult > GTC) && ((sLastGTCResult - GTC) > (1UL << 30)))
+    ++sLastGTCRollover;
+
+  sLastGTCResult = GTC;
+  return (ULONGLONG)sLastGTCRollover << 32 | sLastGTCResult;
+}
+
+typedef ULONGLONG (WINAPI* GetTickCount64_t)();
+static GetTickCount64_t sGetTickCount64 = nullptr;
+
 #endif
 
-#else
-  struct timeval tm;
-  gettimeofday(&tm, 0);
-  return (((PRTime)tm.tv_sec * 1000000LL) + (PRTime)tm.tv_usec);
+/**
+ * Local TimeStamp::Now()-compatible implementation used to record timestamps
+ * which will be passed to XRE_StartupTimelineRecord().
+ */
+static uint64_t
+TimeStamp_Now()
+{
+#ifdef XP_WIN
+  LARGE_INTEGER freq;
+  ::QueryPerformanceFrequency(&freq);
+
+  HMODULE kernelDLL = GetModuleHandleW(L"kernel32.dll");
+  sGetTickCount64 = reinterpret_cast<GetTickCount64_t>
+    (GetProcAddress(kernelDLL, "GetTickCount64"));
+
+  if (!sGetTickCount64) {
+    /* If the platform does not support the GetTickCount64 (Windows XP doesn't),
+     * then use our fallback implementation based on GetTickCount. */
+    sGetTickCount64 = MozGetTickCount64;
+  }
+
+  return sGetTickCount64() * freq.QuadPart;
+#elif defined(XP_MACOSX)
+  return mach_absolute_time();
+#elif defined(HAVE_CLOCK_MONOTONIC)
+  struct timespec ts;
+  int rv = clock_gettime(CLOCK_MONOTONIC, &ts);
+
+  if (rv != 0) {
+    return 0;
+  }
+
+  uint64_t baseNs = (uint64_t)ts.tv_sec * 1000000000;
+  return baseNs + (uint64_t)ts.tv_nsec;
 #endif
 }
 
@@ -474,7 +577,7 @@ int main(int argc, char* argv[])
 #ifdef DEBUG_delay_start_metro
   Sleep(5000);
 #endif
-  PRTime start = _PR_Now();
+  uint64_t start = TimeStamp_Now();
 
 #ifdef XP_MACOSX
   TriggerQuirks();

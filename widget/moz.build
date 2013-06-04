@@ -1,3 +1,4 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -9,6 +10,8 @@ toolkit = CONFIG['MOZ_WIDGET_TOOLKIT']
 
 if toolkit in ('os2', 'cocoa', 'qt', 'android', 'gonk'):
     DIRS += [toolkit]
+if toolkit in ('qt', 'android', 'gonk', 'gtk2'):
+    EXPORTS += ['nsIPrintDialogService.h']
 
 if toolkit == 'windows':
     DIRS += ['windows']
@@ -17,13 +20,13 @@ if toolkit == 'windows':
         'nsIJumpListBuilder.idl',
         'nsIJumpListItem.idl',
         'nsIPrintSettingsWin.idl',
+        'nsITaskbarOverlayIconController.idl',
         'nsITaskbarPreview.idl',
+        'nsITaskbarPreviewButton.idl',
+        'nsITaskbarPreviewController.idl',
+        'nsITaskbarProgress.idl',
         'nsITaskbarTabPreview.idl',
         'nsITaskbarWindowPreview.idl',
-        'nsITaskbarPreviewController.idl',
-        'nsITaskbarPreviewButton.idl',
-        'nsITaskbarProgress.idl',
-        'nsITaskbarOverlayIconController.idl',
         'nsIWinTaskbar.idl',
     ]
 elif toolkit == 'cocoa':
@@ -33,10 +36,15 @@ elif toolkit == 'cocoa':
         'nsIStandaloneNativeMenu.idl',
         'nsITaskbarProgress.idl',
     ]
+    EXPORTS += [
+        'nsINativeMenuService.h',
+        'nsIPrintDialogService.h',
+    ]
 elif toolkit == 'os2':
     XPIDL_SOURCES += [
         'nsIRwsService.idl',
     ]
+    EXPORTS += ['nsIDragSessionOS2.h']
 
 TEST_TOOL_DIRS += ['tests']
 
@@ -85,4 +93,33 @@ if CONFIG['MOZ_METRO']:
         'MetroUIUtils.idl',
         'nsIWinMetroUtils.idl',
     ]
+
+MODULE = 'widget'
+
+EXPORTS += [
+    'InputData.h',
+    'nsEvent.h',
+    'nsGUIEvent.h',
+    'nsIDeviceContextSpec.h',
+    'nsINativeKeyBindings.h',
+    'nsIPluginWidget.h',
+    'nsIRollupListener.h',
+    'nsIWidget.h',
+    'nsIWidgetListener.h',
+    'nsNativeWidget.h',
+    'nsWidgetInitData.h',
+    'nsWidgetsCID.h',
+]
+
+EXPORTS.mozilla += [
+    'LookAndFeel.h',
+    'WidgetUtils.h',
+]
+
+if CONFIG['MOZ_INSTRUMENT_EVENT_LOOP']:
+    EXPORTS.mozilla += [
+        'WidgetTraceEvent.h',
+    ]
+
+EXPORTS.IPC = ['nsGUIEventIPC.h']
 

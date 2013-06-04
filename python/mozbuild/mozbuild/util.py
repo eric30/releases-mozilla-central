@@ -11,9 +11,14 @@ import copy
 import errno
 import hashlib
 import os
+import sys
 
 from StringIO import StringIO
 
+if sys.version_info[0] == 3:
+    str_type = str
+else:
+    str_type = basestring
 
 def hash_file(path):
     """Hashes a file specified by the path given and returns the hex digest."""
@@ -212,3 +217,160 @@ def resolve_target_to_make(topobjdir, target):
 
         target = os.path.join(os.path.basename(reldir), target)
         reldir = os.path.dirname(reldir)
+
+
+class UnsortedError(Exception):
+    def __init__(self, srtd, original):
+        assert len(srtd) == len(original)
+
+        self.sorted = srtd
+        self.original = original
+
+        for i, orig in enumerate(original):
+            s = srtd[i]
+
+            if orig != s:
+                self.i = i
+                break
+
+    def __str__(self):
+        s = StringIO()
+
+        s.write('An attempt was made to add an unsorted sequence to a list. ')
+        s.write('The incoming list is unsorted starting at element %d. ' %
+            self.i)
+        s.write('We expected "%s" but got "%s"' % (
+            self.sorted[self.i], self.original[self.i]))
+
+        return s.getvalue()
+
+
+class StrictOrderingOnAppendList(list):
+    """A list specialized for moz.build environments.
+
+    We overload the assignment and append operations to require that incoming
+    elements be ordered. This enforces cleaner style in moz.build files.
+    """
+    @staticmethod
+    def ensure_sorted(l):
+        srtd = sorted(l)
+
+        if srtd != l:
+            raise UnsortedError(srtd, l)
+
+    def __init__(self, iterable=[]):
+        StrictOrderingOnAppendList.ensure_sorted(iterable)
+
+        list.__init__(self, iterable)
+
+    def extend(self, l):
+        if not isinstance(l, list):
+            raise ValueError('List can only be extended with other list instances.')
+
+        StrictOrderingOnAppendList.ensure_sorted(l)
+
+        return list.extend(self, l)
+
+    def __setslice__(self, i, j, sequence):
+        if not isinstance(sequence, list):
+            raise ValueError('List can only be sliced with other list instances.')
+
+        StrictOrderingOnAppendList.ensure_sorted(sequence)
+
+        return list.__setslice__(self, i, j, sequence)
+
+    def __add__(self, other):
+        if not isinstance(other, list):
+            raise ValueError('Only lists can be appended to lists.')
+
+        StrictOrderingOnAppendList.ensure_sorted(other)
+
+        # list.__add__ will return a new list. We "cast" it to our type.
+        return StrictOrderingOnAppendList(list.__add__(self, other))
+
+    def __iadd__(self, other):
+        if not isinstance(other, list):
+            raise ValueError('Only lists can be appended to lists.')
+
+        StrictOrderingOnAppendList.ensure_sorted(other)
+
+        list.__iadd__(self, other)
+
+        return self
+
+
+class MozbuildDeletionError(Exception):
+    pass
+
+class HierarchicalStringList(object):
+    """A hierarchy of lists of strings.
+
+    Each instance of this object contains a list of strings, which can be set or
+    appended to. A sub-level of the hierarchy is also an instance of this class,
+    can be added by appending to an attribute instead.
+
+    For example, the moz.build variable EXPORTS is an instance of this class. We
+    can do:
+
+    EXPORTS += ['foo.h']
+    EXPORTS.mozilla.dom += ['bar.h']
+
+    In this case, we have 3 instances (EXPORTS, EXPORTS.mozilla, and
+    EXPORTS.mozilla.dom), and the first and last each have one element in their
+    list.
+    """
+    __slots__ = ('_strings', '_children')
+
+    def __init__(self):
+        self._strings = StrictOrderingOnAppendList()
+        self._children = {}
+
+    def get_children(self):
+        return self._children
+
+    def get_strings(self):
+        return self._strings
+
+    def __setattr__(self, name, value):
+        if name in self.__slots__:
+            return object.__setattr__(self, name, value)
+
+        # __setattr__ can be called with a list when a simple assignment is
+        # used:
+        #
+        # EXPORTS.foo = ['file.h']
+        #
+        # In this case, we need to overwrite foo's current list of strings.
+        #
+        # However, __setattr__ is also called with a HierarchicalStringList
+        # to try to actually set the attribute. We want to ignore this case,
+        # since we don't actually create an attribute called 'foo', but just add
+        # it to our list of children (using _get_exportvariable()).
+        exports = self._get_exportvariable(name)
+        if not isinstance(value, HierarchicalStringList):
+            exports._check_list(value)
+            exports._strings = value
+
+    def __getattr__(self, name):
+        if name.startswith('__'):
+            return object.__getattr__(self, name)
+        return self._get_exportvariable(name)
+
+    def __delattr__(self, name):
+        raise MozbuildDeletionError('Unable to delete attributes for this object')
+
+    def __iadd__(self, other):
+        self._check_list(other)
+        self._strings += other
+        return self
+
+    def _get_exportvariable(self, name):
+        return self._children.setdefault(name, HierarchicalStringList())
+
+    def _check_list(self, value):
+        if not isinstance(value, list):
+            raise ValueError('Expected a list of strings, not %s' % type(value))
+        for v in value:
+            if not isinstance(v, str_type):
+                raise ValueError(
+                    'Expected a list of strings, not an element of %s' % type(v))

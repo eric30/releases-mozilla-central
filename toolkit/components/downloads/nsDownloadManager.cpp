@@ -231,7 +231,7 @@ nsDownloadManager::RemoveAllDownloads(nsCOMArray<nsDownload>& aDownloads)
     nsRefPtr<nsDownload> dl = aDownloads[0];
 
     nsresult result = NS_OK;
-    if (dl->IsPaused() && GetQuitBehavior() != QUIT_AND_CANCEL)
+    if (!dl->mPrivate && dl->IsPaused() && GetQuitBehavior() != QUIT_AND_CANCEL)
       aDownloads.RemoveObject(dl);
     else
       result = dl->Cancel();
@@ -2418,7 +2418,6 @@ nsDownloadManager::Observe(nsISupports *aSubject,
     // Upon leaving private browsing mode, cancel all private downloads,
     // remove all trace of them, and then blow away the private database
     // and recreate a blank one.
-    PauseAllDownloads(mCurrentPrivateDownloads, true);
     RemoveAllDownloads(mCurrentPrivateDownloads);
     InitPrivateDB();
   } else if (strcmp(aTopic, "last-pb-context-exiting") == 0) {
@@ -2524,6 +2523,20 @@ nsDownload::nsDownload() : mDownloadState(nsIDownloadManager::DOWNLOAD_NOTSTARTE
 nsDownload::~nsDownload()
 {
 }
+
+#ifdef MOZ_ENABLE_GIO
+static void gio_set_metadata_done(GObject *source_obj, GAsyncResult *res, gpointer user_data)
+{
+  GError *err = NULL;
+  g_file_set_attributes_finish(G_FILE(source_obj), res, NULL, &err);
+  if (err) {
+#ifdef DEBUG
+    NS_DebugBreak(NS_DEBUG_WARNING, "Set file metadata failed: ", err->message, __FILE__, __LINE__);
+#endif
+    g_error_free(err);
+  }
+}
+#endif
 
 nsresult
 nsDownload::SetState(DownloadState aState)
@@ -2670,11 +2683,14 @@ nsDownload::SetState(DownloadState aState)
           GFile* gio_file = g_file_new_for_path(NS_ConvertUTF16toUTF8(path).get());
           nsCString source_uri;
           mSource->GetSpec(source_uri);
-
-          g_file_set_attribute(gio_file, "metadata::download-uri",
-                               G_FILE_ATTRIBUTE_TYPE_STRING,
-                               (gpointer)source_uri.get(),
-                               G_FILE_QUERY_INFO_NONE, NULL, NULL);
+          GFileInfo *file_info = g_file_info_new();
+          g_file_info_set_attribute_string(file_info, "metadata::download-uri", source_uri.get());
+          g_file_set_attributes_async(gio_file,
+                                      file_info,
+                                      G_FILE_QUERY_INFO_NONE,
+                                      G_PRIORITY_DEFAULT,
+                                      NULL, gio_set_metadata_done, NULL);
+          g_object_unref(file_info);
           g_object_unref(gio_file);
 #endif
         }
@@ -3347,10 +3363,6 @@ nsDownload::Cancel()
   // Don't cancel if download is already finished
   if (IsFinished())
     return NS_OK;
-
-  // if the download is fake-paused, we have to resume it so we can cancel it
-  if (IsPaused() && !IsResumable())
-    (void)Resume();
 
   // Have the download cancel its connection
   (void)CancelTransfer();

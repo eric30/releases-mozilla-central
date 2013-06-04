@@ -39,6 +39,9 @@ nsPerformanceTiming::~nsPerformanceTiming()
 DOMTimeMilliSec
 nsPerformanceTiming::DomainLookupStart() const
 {
+  if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+    return 0;
+  }
   if (!mChannel) {
     return FetchStart();
   }
@@ -50,6 +53,9 @@ nsPerformanceTiming::DomainLookupStart() const
 DOMTimeMilliSec
 nsPerformanceTiming::DomainLookupEnd() const
 {
+  if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+    return 0;
+  }
   if (!mChannel) {
     return FetchStart();
   }
@@ -61,6 +67,9 @@ nsPerformanceTiming::DomainLookupEnd() const
 DOMTimeMilliSec
 nsPerformanceTiming::ConnectStart() const
 {
+  if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+    return 0;
+  }
   if (!mChannel) {
     return FetchStart();
   }
@@ -72,6 +81,9 @@ nsPerformanceTiming::ConnectStart() const
 DOMTimeMilliSec
 nsPerformanceTiming::ConnectEnd() const
 {
+  if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+    return 0;
+  }
   if (!mChannel) {
     return FetchStart();
   }
@@ -83,6 +95,9 @@ nsPerformanceTiming::ConnectEnd() const
 DOMTimeMilliSec
 nsPerformanceTiming::RequestStart() const
 {
+  if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+    return 0;
+  }
   if (!mChannel) {
     return FetchStart();
   }
@@ -94,6 +109,9 @@ nsPerformanceTiming::RequestStart() const
 DOMTimeMilliSec
 nsPerformanceTiming::ResponseStart() const
 {
+  if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+    return 0;
+  }
   if (!mChannel) {
     return FetchStart();
   }
@@ -110,6 +128,9 @@ nsPerformanceTiming::ResponseStart() const
 DOMTimeMilliSec
 nsPerformanceTiming::ResponseEnd() const
 {
+  if (!nsContentUtils::IsPerformanceTimingEnabled()) {
+    return 0;
+  }
   if (!mChannel) {
     return FetchStart();
   }
@@ -124,7 +145,7 @@ nsPerformanceTiming::ResponseEnd() const
 }
 
 JSObject*
-nsPerformanceTiming::WrapObject(JSContext *cx, JSObject *scope)
+nsPerformanceTiming::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
 {
   return dom::PerformanceTimingBinding::Wrap(cx, scope, this);
 }
@@ -147,7 +168,7 @@ nsPerformanceNavigation::~nsPerformanceNavigation()
 }
 
 JSObject*
-nsPerformanceNavigation::WrapObject(JSContext *cx, JSObject *scope)
+nsPerformanceNavigation::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
 {
   return dom::PerformanceNavigationBinding::Wrap(cx, scope, this);
 }
@@ -206,7 +227,7 @@ nsPerformance::Now()
 }
 
 JSObject*
-nsPerformance::WrapObject(JSContext *cx, JSObject *scope)
+nsPerformance::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
 {
   return dom::PerformanceBinding::Wrap(cx, scope, this);
 }

@@ -8,41 +8,52 @@ this.EXPORTED_SYMBOLS = [ "DeveloperToolbar", "CommandUtils" ];
 
 const NS_XHTML = "http://www.w3.org/1999/xhtml";
 const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
+const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
-Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
-Components.utils.import("resource://gre/modules/Services.jsm");
-Components.utils.import("resource:///modules/devtools/Commands.jsm");
+Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource:///modules/devtools/Commands.jsm");
 
-const Node = Components.interfaces.nsIDOMNode;
+const Node = Ci.nsIDOMNode;
 
 XPCOMUtils.defineLazyModuleGetter(this, "console",
                                   "resource://gre/modules/devtools/Console.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "gcli",
-                                  "resource:///modules/devtools/gcli.jsm");
+                                  "resource://gre/modules/devtools/gcli.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "CmdCommands",
                                   "resource:///modules/devtools/BuiltinCommands.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "PageErrorListener",
+XPCOMUtils.defineLazyModuleGetter(this, "ConsoleServiceListener",
                                   "resource://gre/modules/devtools/WebConsoleUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "PluralForm",
                                   "resource://gre/modules/PluralForm.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "TargetFactory",
-                                  "resource:///modules/devtools/Target.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "devtools",
+                                  "resource://gre/modules/devtools/Loader.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "require",
+                                  "resource://gre/modules/devtools/Require.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "EventEmitter",
+                                  "resource:///modules/devtools/shared/event-emitter.js");
 
 XPCOMUtils.defineLazyGetter(this, "prefBranch", function() {
-  let prefService = Components.classes["@mozilla.org/preferences-service;1"]
-          .getService(Components.interfaces.nsIPrefService);
+  let prefService = Cc["@mozilla.org/preferences-service;1"]
+                    .getService(Ci.nsIPrefService);
   return prefService.getBranch(null)
-          .QueryInterface(Components.interfaces.nsIPrefBranch2);
+                    .QueryInterface(Ci.nsIPrefBranch2);
 });
 
 XPCOMUtils.defineLazyGetter(this, "toolboxStrings", function () {
   return Services.strings.createBundle("chrome://browser/locale/devtools/toolbox.properties");
 });
+
+let Telemetry = devtools.require("devtools/shared/telemetry");
+
+const converters = require("gcli/converters");
 
 /**
  * A collection of utilities to help working with commands
@@ -53,8 +64,7 @@ let CommandUtils = {
    * @param aPref The name of the preference to read
    */
   getCommandbarSpec: function CU_getCommandbarSpec(aPref) {
-    let value = prefBranch.getComplexValue(aPref,
-                               Components.interfaces.nsISupportsString).data;
+    let value = prefBranch.getComplexValue(aPref, Ci.nsISupportsString).data;
     return JSON.parse(value);
   },
 
@@ -148,16 +158,16 @@ let CommandUtils = {
   createEnvironment: function(chromeDocument, contentDocument) {
     let environment = {
       chromeDocument: chromeDocument,
-      contentDocument: contentDocument, // Use of contentDocument is deprecated
+      chromeWindow: chromeDocument.defaultView,
 
       document: contentDocument,
-      window: contentDocument.defaultView
+      window: contentDocument != null ? contentDocument.defaultView : undefined
     };
 
     Object.defineProperty(environment, "target", {
       get: function() {
         let tab = chromeDocument.defaultView.getBrowser().selectedTab;
-        return TargetFactory.forTab(tab);
+        return devtools.TargetFactory.forTab(tab);
       },
       enumerable: true
     });
@@ -176,9 +186,12 @@ this.CommandUtils = CommandUtils;
  * to using panels.
  */
 XPCOMUtils.defineLazyGetter(this, "isLinux", function () {
-  let os = Components.classes["@mozilla.org/xre/app-info;1"]
-           .getService(Components.interfaces.nsIXULRuntime).OS;
-  return os == "Linux";
+  return OS == "Linux";
+});
+
+XPCOMUtils.defineLazyGetter(this, "OS", function () {
+  let os = Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime).OS;
+  return os;
 });
 
 /**
@@ -195,6 +208,7 @@ this.DeveloperToolbar = function DeveloperToolbar(aChromeWindow, aToolbarElement
   this._element.hidden = true;
   this._doc = this._element.ownerDocument;
 
+  this._telemetry = new Telemetry();
   this._lastState = NOTIFICATIONS.HIDE;
   this._pendingShowCallback = undefined;
   this._pendingHide = false;
@@ -205,6 +219,8 @@ this.DeveloperToolbar = function DeveloperToolbar(aChromeWindow, aToolbarElement
                              .getElementById("developer-toolbar-toolbox-button");
   this._errorCounterButton._defaultTooltipText =
     this._errorCounterButton.getAttribute("tooltiptext");
+
+  EventEmitter.decorate(this);
 
   try {
     CmdCommands.refreshAutoCommands(aChromeWindow);
@@ -325,6 +341,8 @@ DeveloperToolbar.prototype.show = function DT_show(aFocus, aCallback)
 
   Services.prefs.setBoolPref("devtools.toolbar.visible", true);
 
+  this._telemetry.toolOpened("developertoolbar");
+
   this._notify(NOTIFICATIONS.LOAD);
   this._pendingShowCallback = aCallback;
   this._pendingHide = false;
@@ -338,7 +356,7 @@ DeveloperToolbar.prototype.show = function DT_show(aFocus, aCallback)
 
   this._input = this._doc.querySelector(".gclitoolbar-input-node");
   this.tooltipPanel = new TooltipPanel(this._doc, this._input, checkLoad);
-  this.outputPanel = new OutputPanel(this._doc, this._input, checkLoad);
+  this.outputPanel = new OutputPanel(this, checkLoad);
 };
 
 /**
@@ -369,16 +387,19 @@ DeveloperToolbar.prototype._onload = function DT_onload(aFocus)
   this.display.focusManager.addMonitoredElement(this.outputPanel._frame);
   this.display.focusManager.addMonitoredElement(this._element);
 
-  this.display.onVisibilityChange.add(this.outputPanel._visibilityChanged, this.outputPanel);
-  this.display.onVisibilityChange.add(this.tooltipPanel._visibilityChanged, this.tooltipPanel);
+  this.display.onVisibilityChange.add(this.outputPanel._visibilityChanged,
+                                      this.outputPanel);
+  this.display.onVisibilityChange.add(this.tooltipPanel._visibilityChanged,
+                                      this.tooltipPanel);
   this.display.onOutput.add(this.outputPanel._outputChanged, this.outputPanel);
 
-  this._chromeWindow.getBrowser().tabContainer.addEventListener("TabSelect", this, false);
-  this._chromeWindow.getBrowser().tabContainer.addEventListener("TabClose", this, false);
-  this._chromeWindow.getBrowser().addEventListener("load", this, true);
-  this._chromeWindow.getBrowser().addEventListener("beforeunload", this, true);
+  let tabbrowser = this._chromeWindow.getBrowser();
+  tabbrowser.tabContainer.addEventListener("TabSelect", this, false);
+  tabbrowser.tabContainer.addEventListener("TabClose", this, false);
+  tabbrowser.addEventListener("load", this, true);
+  tabbrowser.addEventListener("beforeunload", this, true);
 
-  this._initErrorsCount(this._chromeWindow.getBrowser().selectedTab);
+  this._initErrorsCount(tabbrowser.selectedTab);
 
   this._element.hidden = false;
 
@@ -423,8 +444,8 @@ DeveloperToolbar.prototype._initErrorsCount = function DT__initErrorsCount(aTab)
   }
 
   let window = aTab.linkedBrowser.contentWindow;
-  let listener = new PageErrorListener(window, {
-    onPageError: this._onPageError.bind(this, tabId),
+  let listener = new ConsoleServiceListener(window, {
+    onConsoleServiceMessage: this._onPageError.bind(this, tabId),
   });
   listener.init();
 
@@ -483,6 +504,7 @@ DeveloperToolbar.prototype.hide = function DT_hide()
   this._doc.getElementById("Tools:DevToolbar").setAttribute("checked", "false");
   this.destroy();
 
+  this._telemetry.toolClosed("developertoolbar");
   this._notify(NOTIFICATIONS.HIDE);
 };
 
@@ -495,13 +517,13 @@ DeveloperToolbar.prototype.destroy = function DT_destroy()
     return;
   }
 
-  this._chromeWindow.getBrowser().tabContainer.removeEventListener("TabSelect", this, false);
-  this._chromeWindow.getBrowser().tabContainer.removeEventListener("TabClose", this, false);
-  this._chromeWindow.getBrowser().removeEventListener("load", this, true); 
-  this._chromeWindow.getBrowser().removeEventListener("beforeunload", this, true);
+  let tabbrowser = this._chromeWindow.getBrowser();
+  tabbrowser.tabContainer.removeEventListener("TabSelect", this, false);
+  tabbrowser.tabContainer.removeEventListener("TabClose", this, false);
+  tabbrowser.removeEventListener("load", this, true);
+  tabbrowser.removeEventListener("beforeunload", this, true);
 
-  let tabs = this._chromeWindow.getBrowser().tabs;
-  Array.prototype.forEach.call(tabs, this._stopErrorsCount, this);
+  Array.prototype.forEach.call(tabbrowser.tabs, this._stopErrorsCount, this);
 
   this.display.focusManager.removeMonitoredElement(this.outputPanel._frame);
   this.display.focusManager.removeMonitoredElement(this._element);
@@ -663,6 +685,8 @@ function DT__updateErrorsCount(aChangedTabId)
     btn.removeAttribute("error-count");
     btn.setAttribute("tooltiptext", btn._defaultTooltipText);
   }
+
+  this.emit("errors-counter-updated");
 };
 
 /**
@@ -700,10 +724,11 @@ function DT_resetErrorsCount(aTab)
  * @param aInput the input element that should get focus.
  * @param aLoadCallback called when the panel is loaded properly.
  */
-function OutputPanel(aChromeDoc, aInput, aLoadCallback)
+function OutputPanel(aDevToolbar, aLoadCallback)
 {
-  this._input = aInput;
-  this._toolbar = aChromeDoc.getElementById("developer-toolbar");
+  this._devtoolbar = aDevToolbar;
+  this._input = this._devtoolbar._input;
+  this._toolbar = this._devtoolbar._doc.getElementById("developer-toolbar");
 
   this._loadCallback = aLoadCallback;
 
@@ -721,7 +746,7 @@ function OutputPanel(aChromeDoc, aInput, aLoadCallback)
 
   // TODO: Switch back from tooltip to panel when metacity focus issue is fixed:
   // https://bugzilla.mozilla.org/show_bug.cgi?id=780102
-  this._panel = aChromeDoc.createElement(isLinux ? "tooltip" : "panel");
+  this._panel = this._devtoolbar._doc.createElement(isLinux ? "tooltip" : "panel");
 
   this._panel.id = "gcli-output";
   this._panel.classList.add("gcli-panel");
@@ -743,7 +768,7 @@ function OutputPanel(aChromeDoc, aInput, aLoadCallback)
 
   this._toolbar.parentElement.insertBefore(this._panel, this._toolbar);
 
-  this._frame = aChromeDoc.createElementNS(NS_XHTML, "iframe");
+  this._frame = this._devtoolbar._doc.createElementNS(NS_XHTML, "iframe");
   this._frame.id = "gcli-output-frame";
   this._frame.setAttribute("src", "chrome://browser/content/devtools/commandlineoutput.xhtml");
   this._frame.setAttribute("sandbox", "allow-same-origin");
@@ -752,6 +777,7 @@ function OutputPanel(aChromeDoc, aInput, aLoadCallback)
   this.displayedOutput = undefined;
 
   this._onload = this._onload.bind(this);
+  this._update = this._update.bind(this);
   this._frame.addEventListener("load", this._onload, true);
 
   this.loaded = false;
@@ -781,33 +807,6 @@ OutputPanel.prototype._onload = function OP_onload()
     delete this._loadCallback;
   }
 };
-
-/**
- * Determine the scrollbar width in the current document.
- *
- * @private
- */
-Object.defineProperty(OutputPanel.prototype, 'scrollbarWidth', {
-  get: function() {
-    if (this.__scrollbarWidth) {
-      return this.__scrollbarWidth;
-    }
-
-    let hbox = this.document.createElementNS(XUL_NS, "hbox");
-    hbox.setAttribute("style", "height: 0%; overflow: hidden");
-
-    let scrollbar = this.document.createElementNS(XUL_NS, "scrollbar");
-    scrollbar.setAttribute("orient", "vertical");
-    hbox.appendChild(scrollbar);
-
-    this.document.documentElement.appendChild(hbox);
-    this.__scrollbarWidth = scrollbar.clientWidth;
-    this.document.documentElement.removeChild(hbox);
-
-    return this.__scrollbarWidth;
-  },
-  enumerable: true
-});
 
 /**
  * Prevent the popup from hiding if it is not permitted via this.canHide.
@@ -854,13 +853,32 @@ OutputPanel.prototype._resize = function CLP_resize()
   // Set max panel width to match any content with a max of the width of the
   // browser window.
   let maxWidth = this._panel.ownerDocument.documentElement.clientWidth;
-  let width = Math.min(maxWidth, this.document.documentElement.scrollWidth);
 
-  // Add scrollbar width to content size in case a scrollbar is needed.
-  width += this.scrollbarWidth;
+  // Adjust max width according to OS.
+  // We'd like to put this in CSS but we can't:
+  //   body { width: calc(min(-5px, max-content)); }
+  //   #_panel { max-width: -5px; }
+  switch(OS) {
+    case "Linux":
+      maxWidth -= 5;
+      break;
+    case "Darwin":
+      maxWidth -= 25;
+      break;
+    case "WINNT":
+      maxWidth -= 5;
+      break;
+  }
+
+  this.document.body.style.width = "-moz-max-content";
+  let style = this._frame.contentWindow.getComputedStyle(this.document.body);
+  let frameWidth = parseInt(style.width, 10);
+  let width = Math.min(maxWidth, frameWidth);
+  this.document.body.style.width = width + "px";
 
   // Set the width of the iframe.
   this._frame.style.minWidth = width + "px";
+  this._panel.style.maxWidth = maxWidth + "px";
 
   // browserAdjustment is used to correct the panel height according to the
   // browsers borders etc.
@@ -897,24 +915,50 @@ OutputPanel.prototype._outputChanged = function OP_outputChanged(aEvent)
   this.remove();
 
   this.displayedOutput = aEvent.output;
-  this.update();
-
-  this.displayedOutput.onChange.add(this.update, this);
   this.displayedOutput.onClose.add(this.remove, this);
+
+  if (this.displayedOutput.completed) {
+    this._update();
+  }
+  else {
+    this.displayedOutput.promise.then(this._update, this._update)
+                                .then(null, console.error);
+  }
 };
 
 /**
  * Called when displayed Output says it's changed or from outputChanged, which
  * happens when there is a new displayed Output.
  */
-OutputPanel.prototype.update = function OP_update()
+OutputPanel.prototype._update = function OP_update()
 {
-  if (this.displayedOutput.data == null) {
-    while (this._div.hasChildNodes()) {
-      this._div.removeChild(this._div.firstChild);
-    }
-  } else {
-    this.displayedOutput.toDom(this._div);
+  // destroy has been called, bail out
+  if (this._div == null) {
+    return;
+  }
+
+  // Empty this._div
+  while (this._div.hasChildNodes()) {
+    this._div.removeChild(this._div.firstChild);
+  }
+
+  if (this.displayedOutput.data != null) {
+    let requisition = this._devtoolbar.display.requisition;
+    let nodePromise = converters.convert(this.displayedOutput.data,
+                                         this.displayedOutput.type, 'dom',
+                                         requisition.conversionContext);
+    nodePromise.then(function(node) {
+      while (this._div.hasChildNodes()) {
+        this._div.removeChild(this._div.firstChild);
+      }
+
+      var links = node.ownerDocument.querySelectorAll('*[href]');
+      for (var i = 0; i < links.length; i++) {
+        links[i].setAttribute('target', '_blank');
+      }
+
+      this._div.appendChild(node);
+    }.bind(this));
     this.show();
   }
 };
@@ -933,7 +977,6 @@ OutputPanel.prototype.remove = function OP_remove()
   }
 
   if (this.displayedOutput) {
-    this.displayedOutput.onChange.remove(this.update, this);
     this.displayedOutput.onClose.remove(this.remove, this);
     delete this.displayedOutput;
   }
@@ -951,6 +994,7 @@ OutputPanel.prototype.destroy = function OP_destroy()
   this._panel.removeChild(this._frame);
   this._toolbar.parentElement.removeChild(this._panel);
 
+  delete this._devtoolbar;
   delete this._input;
   delete this._toolbar;
   delete this._onload;

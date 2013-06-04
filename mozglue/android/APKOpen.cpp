@@ -11,7 +11,6 @@
 
 #include <jni.h>
 #include <android/log.h>
-#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
@@ -20,6 +19,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <zlib.h>
@@ -27,6 +27,7 @@
 #include "APKOpen.h"
 #include <sys/time.h>
 #include <sys/resource.h>
+#include <sys/prctl.h>
 #include "Zip.h"
 #include "sqlite3.h"
 #include "SQLiteBridge.h"
@@ -37,6 +38,20 @@
 /* Android headers don't define RUSAGE_THREAD */
 #ifndef RUSAGE_THREAD
 #define RUSAGE_THREAD 1
+#endif
+
+#ifndef RELEASE_BUILD
+/* Official builds have the debuggable flag set to false, which disables
+ * the backtrace dumper from bionic. However, as it is useful for native
+ * crashes happening before the crash reporter is registered, re-enable
+ * it on non release builds (i.e. nightly and aurora).
+ * Using a constructor so that it is re-enabled as soon as libmozglue.so
+ * is loaded.
+ */
+__attribute__((constructor))
+void make_dumpable() {
+  prctl(PR_SET_DUMPABLE, 1);
+}
 #endif
 
 extern "C" {
@@ -56,7 +71,6 @@ extern "C" {
 }
 
 typedef int mozglueresult;
-typedef int64_t MOZTime;
 
 enum StartupEvent {
 #define mozilla_StartupTimeline_Event(ev, z) ev,
@@ -67,11 +81,22 @@ enum StartupEvent {
 
 using namespace mozilla;
 
-static MOZTime MOZ_Now()
+/**
+ * Local TimeStamp::Now()-compatible implementation used to record timestamps
+ * which will be passed to XRE_StartupTimelineRecord().
+ */
+
+static uint64_t TimeStamp_Now()
 {
-  struct timeval tm;
-  gettimeofday(&tm, 0);
-  return (((MOZTime)tm.tv_sec * 1000000LL) + (MOZTime)tm.tv_usec);
+  struct timespec ts;
+  int rv = clock_gettime(CLOCK_MONOTONIC, &ts);
+
+  if (rv != 0) {
+    return 0;
+  }
+
+  uint64_t baseNs = (uint64_t)ts.tv_sec * 1000000000;
+  return baseNs + (uint64_t)ts.tv_nsec;
 }
 
 static struct mapping_info * lib_mapping = NULL;
@@ -121,81 +146,14 @@ xul_dlsym(const char *symbolName, T *value)
   *value = (T) (uintptr_t) __wrap_dlsym(xul_handle, symbolName);
 }
 
-#if defined(MOZ_CRASHREPORTER)
-static void
-extractLib(Zip::Stream &s, void * dest)
-{
-  z_stream strm = {
-    next_in: (Bytef *)s.GetBuffer(),
-    avail_in: s.GetSize(),
-    total_in: 0,
-
-    next_out: (Bytef *)dest,
-    avail_out: s.GetUncompressedSize(),
-    total_out: 0
-  };
-
-  int ret;
-  ret = inflateInit2(&strm, -MAX_WBITS);
-  if (ret != Z_OK)
-    __android_log_print(ANDROID_LOG_ERROR, "GeckoLibLoad", "inflateInit failed: %s", strm.msg);
-
-  ret = inflate(&strm, Z_SYNC_FLUSH);
-  if (ret != Z_STREAM_END)
-    __android_log_print(ANDROID_LOG_ERROR, "GeckoLibLoad", "inflate failed: %s", strm.msg);
-
-  ret = inflateEnd(&strm);
-  if (ret != Z_OK)
-    __android_log_print(ANDROID_LOG_ERROR, "GeckoLibLoad", "inflateEnd failed: %s", strm.msg);
-
-  if (strm.total_out != s.GetUncompressedSize())
-    __android_log_print(ANDROID_LOG_ERROR, "GeckoLibLoad", "File not fully uncompressed! %lu / %d", strm.total_out, s.GetUncompressedSize());
-}
-#endif
-
-static struct lib_cache_info *cache_mapping = NULL;
-
-NS_EXPORT const struct lib_cache_info *
-getLibraryCache()
-{
-  return cache_mapping;
-}
-
-#ifdef MOZ_CRASHREPORTER
-static void *
-extractBuf(const char * path, Zip *zip)
-{
-  Zip::Stream s;
-  if (!zip->GetStream(path, &s))
-    return NULL;
-
-  // allocate space for a trailing null byte
-  void * buf = malloc(s.GetUncompressedSize() + 1);
-  if (buf == (void *)-1) {
-    __android_log_print(ANDROID_LOG_ERROR, "GeckoLibLoad", "Couldn't alloc decompression buffer for %s", path);
-    return NULL;
-  }
-  if (s.GetType() == Zip::Stream::DEFLATE)
-    extractLib(s, buf);
-  else
-    memcpy(buf, s.GetBuffer(), s.GetUncompressedSize());
-
-  // null terminate it
-  ((unsigned char*) buf)[s.GetUncompressedSize()] = 0;
-
-  return buf;
-}
-#endif
-
 static int mapping_count = 0;
-static char *file_ids = NULL;
 
 #define MAX_MAPPING_INFO 32
 
 extern "C" void
 report_mapping(char *name, void *base, uint32_t len, uint32_t offset)
 {
-  if (!file_ids || mapping_count >= MAX_MAPPING_INFO)
+  if (mapping_count >= MAX_MAPPING_INFO)
     return;
 
   struct mapping_info *info = &lib_mapping[mapping_count++];
@@ -203,10 +161,6 @@ report_mapping(char *name, void *base, uint32_t len, uint32_t offset)
   info->base = (uintptr_t)base;
   info->len = len;
   info->offset = offset;
-
-  char * entry = strstr(file_ids, name);
-  if (entry)
-    info->file_id = strndup(entry + strlen(name) + 1, 32);
 }
 
 static mozglueresult
@@ -214,27 +168,17 @@ loadGeckoLibs(const char *apkName)
 {
   chdir(getenv("GRE_HOME"));
 
-  MOZTime t0 = MOZ_Now();
-  struct rusage usage1;
-  getrusage(RUSAGE_THREAD, &usage1);
+  uint64_t t0 = TimeStamp_Now();
+  struct rusage usage1_thread, usage1;
+  getrusage(RUSAGE_THREAD, &usage1_thread);
+  getrusage(RUSAGE_SELF, &usage1);
   
   RefPtr<Zip> zip = ZipCollection::GetZip(apkName);
 
-#ifdef MOZ_CRASHREPORTER
-  file_ids = (char *)extractBuf("lib.id", zip);
-#endif
-
-  char *file = new char[strlen(apkName) + sizeof("!/libxpcom.so")];
-  sprintf(file, "%s!/libxpcom.so", apkName);
-  __wrap_dlopen(file, RTLD_GLOBAL | RTLD_LAZY);
-  // libxul.so is pulled from libxpcom.so, so we don't need to give the full path
-  xul_handle = __wrap_dlopen("libxul.so", RTLD_GLOBAL | RTLD_LAZY);
+  char *file = new char[strlen(apkName) + sizeof("!/libxul.so")];
+  sprintf(file, "%s!/libxul.so", apkName);
+  xul_handle = __wrap_dlopen(file, RTLD_GLOBAL | RTLD_LAZY);
   delete[] file;
-
-#ifdef MOZ_CRASHREPORTER
-  free(file_ids);
-  file_ids = NULL;
-#endif
 
   if (!xul_handle) {
     __android_log_print(ANDROID_LOG_ERROR, "GeckoLibLoad", "Couldn't get a handle to libxul!");
@@ -245,18 +189,26 @@ loadGeckoLibs(const char *apkName)
 #include "jni-stubs.inc"
 #undef JNI_BINDINGS
 
-  void (*XRE_StartupTimelineRecord)(int, MOZTime);
+  void (*XRE_StartupTimelineRecord)(int, uint64_t);
   xul_dlsym("XRE_StartupTimelineRecord", &XRE_StartupTimelineRecord);
 
-  MOZTime t1 = MOZ_Now();
-  struct rusage usage2;
-  getrusage(RUSAGE_THREAD, &usage2);
+  uint64_t t1 = TimeStamp_Now();
+  struct rusage usage2_thread, usage2;
+  getrusage(RUSAGE_THREAD, &usage2_thread);
+  getrusage(RUSAGE_SELF, &usage2);
 
-  __android_log_print(ANDROID_LOG_ERROR, "GeckoLibLoad", "Loaded libs in %lldms total, %ldms user, %ldms system, %ld faults",
-                      (t1 - t0) / 1000,
-                      (usage2.ru_utime.tv_sec - usage1.ru_utime.tv_sec)*1000 + (usage2.ru_utime.tv_usec - usage1.ru_utime.tv_usec)/1000,
-                      (usage2.ru_stime.tv_sec - usage1.ru_stime.tv_sec)*1000 + (usage2.ru_stime.tv_usec - usage1.ru_stime.tv_usec)/1000,
-                      usage2.ru_majflt-usage1.ru_majflt);
+#define RUSAGE_TIMEDIFF(u1, u2, field) \
+  ((u2.ru_ ## field.tv_sec - u1.ru_ ## field.tv_sec) * 1000 + \
+   (u2.ru_ ## field.tv_usec - u1.ru_ ## field.tv_usec) / 1000)
+
+  __android_log_print(ANDROID_LOG_ERROR, "GeckoLibLoad", "Loaded libs in %lldms total, %ldms(%ldms) user, %ldms(%ldms) system, %ld(%ld) faults",
+                      (t1 - t0) / 1000000,
+                      RUSAGE_TIMEDIFF(usage1_thread, usage2_thread, utime),
+                      RUSAGE_TIMEDIFF(usage1, usage2, utime),
+                      RUSAGE_TIMEDIFF(usage1_thread, usage2_thread, stime),
+                      RUSAGE_TIMEDIFF(usage1, usage2, stime),
+                      usage2_thread.ru_majflt - usage1_thread.ru_majflt,
+                      usage2.ru_majflt - usage1.ru_majflt);
 
   XRE_StartupTimelineRecord(LINKER_INITIALIZED, t0);
   XRE_StartupTimelineRecord(LIBRARIES_LOADED, t1);
@@ -282,19 +234,10 @@ loadSQLiteLibs(const char *apkName)
     lib_mapping = (struct mapping_info *)calloc(MAX_MAPPING_INFO, sizeof(*lib_mapping));
   }
 
-#ifdef MOZ_CRASHREPORTER
-  file_ids = (char *)extractBuf("lib.id", zip);
-#endif
-
   char *file = new char[strlen(apkName) + sizeof("!/libmozsqlite3.so")];
   sprintf(file, "%s!/libmozsqlite3.so", apkName);
   sqlite_handle = __wrap_dlopen(file, RTLD_GLOBAL | RTLD_LAZY);
   delete [] file;
-
-#ifdef MOZ_CRASHREPORTER
-  free(file_ids);
-  file_ids = NULL;
-#endif
 
   if (!sqlite_handle) {
     __android_log_print(ANDROID_LOG_ERROR, "GeckoLibLoad", "Couldn't get a handle to libmozsqlite3!");
@@ -319,10 +262,6 @@ loadNSSLibs(const char *apkName)
     lib_mapping = (struct mapping_info *)calloc(MAX_MAPPING_INFO, sizeof(*lib_mapping));
   }
 
-#ifdef MOZ_CRASHREPORTER
-  file_ids = (char *)extractBuf("lib.id", zip);
-#endif
-
   char *file = new char[strlen(apkName) + sizeof("!/libnss3.so")];
   sprintf(file, "%s!/libnss3.so", apkName);
   nss_handle = __wrap_dlopen(file, RTLD_GLOBAL | RTLD_LAZY);
@@ -338,11 +277,6 @@ loadNSSLibs(const char *apkName)
   sprintf(file, "%s!/libplc4.so", apkName);
   plc_handle = __wrap_dlopen(file, RTLD_GLOBAL | RTLD_LAZY);
   delete [] file;
-#endif
-
-#ifdef MOZ_CRASHREPORTER
-  free(file_ids);
-  file_ids = NULL;
 #endif
 
   if (!nss_handle) {
@@ -469,9 +403,6 @@ ChildProcessInit(int argc, char* argv[])
   if (loadGeckoLibs(argv[i]) != SUCCESS) {
     return FAILURE;
   }
-
-  // don't pass the last arg - it's only recognized by the lib cache
-  argc--;
 
   GeckoProcessType (*fXRE_StringToChildProcessType)(char*);
   xul_dlsym("XRE_StringToChildProcessType", &fXRE_StringToChildProcessType);

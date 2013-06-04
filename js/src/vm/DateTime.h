@@ -1,8 +1,8 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this file,
- * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #ifndef DateTime_h___
 #define DateTime_h___
@@ -37,12 +37,16 @@ const double msPerDay = msPerHour * HoursPerDay;
 const unsigned SecondsPerHour = 60 * 60;
 const unsigned SecondsPerDay = SecondsPerHour * 24;
 
+const double StartOfTime = -8.64e15;
+const double EndOfTime = 8.64e15;
+const double MaxTimeMagnitude = 8.64e15;
+
 /* ES5 15.9.1.14. */
 inline double
 TimeClip(double time)
 {
     /* Steps 1-2. */
-    if (!MOZ_DOUBLE_IS_FINITE(time) || mozilla::Abs(time) > 8.64e15)
+    if (!mozilla::IsFinite(time) || mozilla::Abs(time) > MaxTimeMagnitude)
         return js_NaN;
 
     /* Step 3. */

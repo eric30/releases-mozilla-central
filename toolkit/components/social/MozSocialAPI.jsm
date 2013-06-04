@@ -31,7 +31,7 @@ this.MozSocialAPI = {
       }
 
     } else {
-      Services.obs.removeObserver(injectController, "document-element-inserted", false);
+      Services.obs.removeObserver(injectController, "document-element-inserted");
     }
   }
 };
@@ -53,13 +53,20 @@ function injectController(doc, topic, data) {
                                   .getInterface(Ci.nsIWebNavigation)
                                   .QueryInterface(Ci.nsIDocShell)
                                   .chromeEventHandler;
+    // limit injecting into social panels or same-origin browser tabs if
+    // social.debug.injectIntoTabs is enabled
+    let allowTabs = false;
+    try {
+      allowTabs = containingBrowser.contentWindow == window &&
+                  Services.prefs.getBoolPref("social.debug.injectIntoTabs");
+    } catch(e) {}
 
     let origin = containingBrowser.getAttribute("origin");
-    if (!origin) {
+    if (!allowTabs && !origin) {
       return;
     }
 
-    SocialService.getProvider(origin, function(provider) {
+    SocialService.getProvider(doc.nodePrincipal.origin, function(provider) {
       if (provider && provider.workerURL && provider.enabled) {
         attachToWindow(provider, window);
       }
@@ -139,6 +146,32 @@ function attachToWindow(provider, targetWindow) {
         if (!chromeWindow.SocialFlyout || !chromeWindow.SocialFlyout.panel)
           return;
         chromeWindow.SocialFlyout.panel.hidePopup();
+      }
+    },
+    // allow a provider to share to other providers through the browser
+    share: {
+      enumerable: true,
+      configurable: true,
+      writable: true,
+      value: function(data) {
+        let chromeWindow = getChromeWindow(targetWindow);
+        if (!chromeWindow.SocialShare || chromeWindow.SocialShare.shareButton.hidden)
+          throw new Error("Share is unavailable");
+        // ensure user action initates the share
+        let dwu = chromeWindow.QueryInterface(Ci.nsIInterfaceRequestor)
+                              .getInterface(Ci.nsIDOMWindowUtils);
+        if (!dwu.isHandlingUserInput)
+          throw new Error("Attempt to share without user input");
+
+        // limit to a few params we want to support for now
+        let dataOut = {};
+        for (let sub of ["url", "title", "description", "source"]) {
+          dataOut[sub] = data[sub];
+        }
+        if (data.image)
+          dataOut.previews = [data.image];
+
+        chromeWindow.SocialShare.sharePage(null, dataOut);
       }
     },
     getAttention: {

@@ -16,7 +16,6 @@
 #include "mozilla/Monitor.h"
 #include "nsClassHashtable.h"
 #include "nsHashKeys.h"
-#include "nsRefPtrHashtable.h"
 
 #include "IDBTransaction.h"
 
@@ -46,8 +45,8 @@ public:
                     bool aFinish,
                     nsIRunnable* aFinishRunnable);
 
-  bool WaitForAllDatabasesToComplete(nsTArray<IDBDatabase*>& aDatabases,
-                                     nsIRunnable* aCallback);
+  void WaitForDatabasesToComplete(nsTArray<nsRefPtr<IDBDatabase> >& aDatabases,
+                                  nsIRunnable* aCallback);
 
   // Abort all transactions, unless they are already in the process of being
   // committed, for aDatabase.
@@ -83,8 +82,7 @@ protected:
 
   struct TransactionInfo
   {
-    TransactionInfo(IDBTransaction* aTransaction,
-                    const nsTArray<nsString>& aObjectStoreNames)
+    TransactionInfo(IDBTransaction* aTransaction)
     {
       MOZ_COUNT_CTOR(TransactionInfo);
 
@@ -93,7 +91,6 @@ protected:
 
       transaction = aTransaction;
       queue = new TransactionQueue(aTransaction);
-      objectStoreNames.AppendElements(aObjectStoreNames);
     }
 
     ~TransactionInfo()
@@ -103,7 +100,6 @@ protected:
 
     nsRefPtr<IDBTransaction> transaction;
     nsRefPtr<TransactionQueue> queue;
-    nsTArray<nsString> objectStoreNames;
     nsTHashtable<nsPtrHashKey<TransactionInfo> > blockedOn;
     nsTHashtable<nsPtrHashKey<TransactionInfo> > blocking;
   };
@@ -163,7 +159,7 @@ protected:
 
   struct DatabasesCompleteCallback
   {
-    nsTArray<IDBDatabase*> mDatabases;
+    nsTArray<nsRefPtr<IDBDatabase> > mDatabases;
     nsCOMPtr<nsIRunnable> mCallback;
   };
 
@@ -177,7 +173,7 @@ protected:
 
   TransactionQueue& GetQueueForTransaction(IDBTransaction* aTransaction);
 
-  bool MaybeFireCallback(DatabasesCompleteCallback& aCallback);
+  bool MaybeFireCallback(DatabasesCompleteCallback aCallback);
 
   nsCOMPtr<nsIThreadPool> mThreadPool;
 

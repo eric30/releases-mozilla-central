@@ -3,9 +3,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include <errno.h>
+#include <stdio.h>
+
 #include "nscore.h"
 #include "nsStringGlue.h"
 #include "private/pprio.h"
+#include "mozilla/Assertions.h"
 #include "mozilla/FileUtils.h"
 
 #if defined(XP_MACOSX)
@@ -112,6 +116,71 @@ mozilla::fallocate(PRFileDesc *aFD, int64_t aLength)
 #endif
   return false;
 }
+
+#ifdef ReadSysFile_PRESENT
+
+bool
+mozilla::ReadSysFile(
+  const char* aFilename,
+  char* aBuf,
+  size_t aBufSize)
+{
+  int fd = MOZ_TEMP_FAILURE_RETRY(open(aFilename, O_RDONLY));
+  if (fd < 0) {
+    return false;
+  }
+  ScopedClose autoClose(fd);
+  if (aBufSize == 0) {
+    return true;
+  }
+  ssize_t bytesRead;
+  size_t offset = 0;
+  do {
+    bytesRead = MOZ_TEMP_FAILURE_RETRY(
+      read(fd, aBuf + offset, aBufSize - offset));
+    if (bytesRead == -1) {
+      return false;
+    }
+    offset += bytesRead;
+  } while (bytesRead > 0 && offset < aBufSize);
+  MOZ_ASSERT(offset <= aBufSize);
+  if (offset > 0 && aBuf[offset - 1] == '\n') {
+    offset--;
+  }
+  if (offset == aBufSize) {
+    MOZ_ASSERT(offset > 0);
+    offset--;
+  }
+  aBuf[offset] = '\0';
+  return true;
+}
+
+bool
+mozilla::ReadSysFile(
+  const char* aFilename,
+  int* aVal)
+{
+  char valBuf[32];
+  if (!ReadSysFile(aFilename, valBuf, sizeof(valBuf))) {
+    return false;
+  }
+  return sscanf(valBuf, "%d", aVal) == 1;
+}
+
+bool
+mozilla::ReadSysFile(
+  const char* aFilename,
+  bool* aVal)
+{
+  int v;
+  if (!ReadSysFile(aFilename, &v)) {
+    return false;
+  }
+  *aVal = (v != 0);
+  return true;
+}
+
+#endif /* ReadSysFile_PRESENT */
 
 void
 mozilla::ReadAheadLib(nsIFile* aFile)
@@ -404,23 +473,36 @@ void
 mozilla::ReadAheadFile(mozilla::pathstr_t aFilePath, const size_t aOffset,
                        const size_t aCount, mozilla::filedesc_t* aOutFd)
 {
+#if defined(XP_WIN)
   if (!aFilePath) {
+    if (aOutFd) {
+      *aOutFd = INVALID_HANDLE_VALUE;
+    }
     return;
   }
-#if defined(XP_WIN)
   HANDLE fd = CreateFileW(aFilePath, GENERIC_READ, FILE_SHARE_READ,
                           NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+  if (aOutFd) {
+    *aOutFd = fd;
+  }
   if (fd == INVALID_HANDLE_VALUE) {
     return;
   }
   ReadAhead(fd, aOffset, aCount);
-  if (aOutFd) {
-    *aOutFd = fd;
-  } else {
+  if (!aOutFd) {
     CloseHandle(fd);
   }
 #elif defined(LINUX) && !defined(ANDROID) || defined(XP_MACOSX)
+  if (!aFilePath) {
+    if (aOutFd) {
+      *aOutFd = -1;
+    }
+    return;
+  }
   int fd = open(aFilePath, O_RDONLY);
+  if (aOutFd) {
+    *aOutFd = fd;
+  }
   if (fd < 0) {
     return;
   }
@@ -428,6 +510,9 @@ mozilla::ReadAheadFile(mozilla::pathstr_t aFilePath, const size_t aOffset,
   if (aCount == SIZE_MAX) {
     struct stat st;
     if (fstat(fd, &st) < 0) {
+      if (!aOutFd) {
+        close(fd);
+      }
       return;
     }
     count = st.st_size;
@@ -435,9 +520,7 @@ mozilla::ReadAheadFile(mozilla::pathstr_t aFilePath, const size_t aOffset,
     count = aCount;
   }
   ReadAhead(fd, aOffset, count);
-  if (aOutFd) {
-    *aOutFd = fd;
-  } else {
+  if (!aOutFd) {
     close(fd);
   }
 #endif

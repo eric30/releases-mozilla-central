@@ -9,8 +9,8 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= libpixman
 LIBRARY_NAME	= mozlibpixman
+MSVC_ENABLE_PGO := 1
 LIBXUL_LIBRARY = 1
 
 ifeq ($(OS_TARGET),Android)
@@ -141,8 +141,6 @@ SSRCS += pixman-arm-neon-asm-bilinear.S
 DEFINES += -DUSE_ARM_NEON
 ARM_NEON_CFLAGS = -mfpu=neon
 endif
-
-EXPORTS		= pixman.h pixman-version.h
 
 LOCAL_INCLUDES	+= -I$(srcdir) -I$(srcdir)/../../cairo/src
 

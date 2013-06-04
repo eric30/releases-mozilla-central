@@ -22,7 +22,7 @@ namespace {
 
 using mozilla::DOMSVGNumber;
 
-void UpdateListIndicesFromIndex(nsTArray<DOMSVGNumber*>& aItemsArray,
+void UpdateListIndicesFromIndex(FallibleTArray<DOMSVGNumber*>& aItemsArray,
                                 uint32_t aStartingIndex)
 {
   uint32_t length = aItemsArray.Length();
@@ -69,7 +69,7 @@ NS_INTERFACE_MAP_END
 
 
 JSObject*
-DOMSVGNumberList::WrapObject(JSContext *cx, JSObject *scope)
+DOMSVGNumberList::WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
 {
   return mozilla::dom::SVGNumberListBinding::Wrap(cx, scope, this);
 }

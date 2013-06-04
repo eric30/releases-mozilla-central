@@ -13,7 +13,7 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGFEMergeElement::WrapNode(JSContext *aCx, JSObject *aScope)
+SVGFEMergeElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
   return SVGFEMergeElementBinding::Wrap(aCx, aScope, this);
 }
@@ -22,13 +22,6 @@ nsSVGElement::StringInfo SVGFEMergeElement::sStringInfo[1] =
 {
   { &nsGkAtoms::result, kNameSpaceID_None, true }
 };
-
-//----------------------------------------------------------------------
-// nsISupports methods
-
-NS_IMPL_ISUPPORTS_INHERITED3(SVGFEMergeElement, SVGFEMergeElementBase,
-                             nsIDOMNode, nsIDOMElement,
-                             nsIDOMSVGElement)
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFEMergeElement)
 

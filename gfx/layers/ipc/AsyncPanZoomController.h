@@ -111,7 +111,7 @@ public:
    * { x = 0, y = 0, width = surface.width, height = surface.height }, however
    * there is no hard requirement for this.
    */
-  void UpdateCompositionBounds(const nsIntRect& aCompositionBounds);
+  void UpdateCompositionBounds(const LayerIntRect& aCompositionBounds);
 
   /**
    * We are scrolling a subframe, so disable our machinery until we hit
@@ -177,7 +177,8 @@ public:
    */
   bool SampleContentTransformForFrame(const TimeStamp& aSampleTime,
                                       ContainerLayer* aLayer,
-                                      ViewTransform* aTransform);
+                                      ViewTransform* aNewTransform,
+                                      gfx::Point& aScrollOffset);
 
   /**
    * A shadow layer update has arrived. |aViewportFrame| is the new FrameMetrics
@@ -201,7 +202,7 @@ public:
    * Sets the CSS page rect, and calculates a new page rect based on the zoom
    * level of the current metrics and the passed in CSS page rect.
    */
-  void SetPageRect(const gfx::Rect& aCSSPageRect);
+  void SetPageRect(const CSSRect& aCSSPageRect);
 
   /**
    * Sets the DPI of the device for use within panning and zooming logic. It is
@@ -242,7 +243,7 @@ public:
    */
   static gfxSize CalculateResolution(const FrameMetrics& aMetrics);
 
-  static gfx::Rect CalculateCompositedRectInCssPixels(const FrameMetrics& aMetrics);
+  static CSSRect CalculateCompositedRectInCssPixels(const FrameMetrics& aMetrics);
 
   /**
    * Send an mozbrowserasyncscroll event.
@@ -543,7 +544,7 @@ private:
   // frame.
   TimeStamp mLastSampleTime;
   // The last time a touch event came through on the UI thread.
-  int32_t mLastEventTime;
+  uint32_t mLastEventTime;
 
   // Start time of an animation. This is used for a zoom to animation to mark
   // the beginning.

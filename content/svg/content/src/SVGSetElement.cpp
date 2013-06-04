@@ -12,17 +12,10 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGSetElement::WrapNode(JSContext *aCx, JSObject *aScope)
+SVGSetElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
   return SVGSetElementBinding::Wrap(aCx, aScope, this);
 }
-
-//----------------------------------------------------------------------
-// nsISupports methods
-
-NS_IMPL_ISUPPORTS_INHERITED3(SVGSetElement, SVGAnimationElement,
-                             nsIDOMNode, nsIDOMElement,
-                             nsIDOMSVGElement)
 
 //----------------------------------------------------------------------
 // Implementation
@@ -38,7 +31,6 @@ SVGSetElement::SVGSetElement(already_AddRefed<nsINodeInfo> aNodeInfo)
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGSetElement)
 
 //----------------------------------------------------------------------
-// nsISMILAnimationElement methods
 
 nsSMILAnimationFunction&
 SVGSetElement::AnimationFunction()

@@ -5,7 +5,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "AudioBuffer.h"
-#include <speex/speex_resampler.h>
 #include "mozilla/dom/AudioBufferBinding.h"
 #include "nsContentUtils.h"
 #include "AudioContext.h"
@@ -14,6 +13,8 @@
 #include "AudioSegment.h"
 #include "nsIScriptError.h"
 #include "nsPIDOMWindow.h"
+#include "AudioChannelFormat.h"
+#include "mozilla/PodOperations.h"
 
 namespace mozilla {
 namespace dom {
@@ -74,7 +75,7 @@ AudioBuffer::InitializeBuffers(uint32_t aNumberOfChannels, JSContext* aJSContext
     return false;
   }
   for (uint32_t i = 0; i < aNumberOfChannels; ++i) {
-    JSObject* array = JS_NewFloat32Array(aJSContext, mLength);
+    JS::RootedObject array(aJSContext, JS_NewFloat32Array(aJSContext, mLength));
     if (!array) {
       return false;
     }
@@ -85,12 +86,12 @@ AudioBuffer::InitializeBuffers(uint32_t aNumberOfChannels, JSContext* aJSContext
 }
 
 JSObject*
-AudioBuffer::WrapObject(JSContext* aCx, JSObject* aScope)
+AudioBuffer::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
   return AudioBufferBinding::Wrap(aCx, aScope, this);
 }
 
-void
+bool
 AudioBuffer::RestoreJSChannelData(JSContext* aJSContext)
 {
   if (mSharedChannels) {
@@ -99,14 +100,25 @@ AudioBuffer::RestoreJSChannelData(JSContext* aJSContext)
       // The following code first zeroes the array and then copies our data
       // into it. We could avoid this with additional JS APIs to construct
       // an array (or ArrayBuffer) containing initial data.
-      JSObject* array = JS_NewFloat32Array(aJSContext, mLength);
+      JS::RootedObject array(aJSContext, JS_NewFloat32Array(aJSContext, mLength));
+      if (!array) {
+        return false;
+      }
       memcpy(JS_GetFloat32ArrayData(array), data, sizeof(float)*mLength);
       mJSChannels[i] = array;
     }
 
     mSharedChannels = nullptr;
-    mResampledChannels = nullptr;
   }
+
+  return true;
+}
+
+void
+AudioBuffer::SetRawChannelContents(JSContext* aJSContext, uint32_t aChannel,
+                                   float* aContents)
+{
+  PodCopy(JS_GetFloat32ArrayData(mJSChannels[aChannel]), aContents, mLength);
 }
 
 JSObject*
@@ -118,23 +130,36 @@ AudioBuffer::GetChannelData(JSContext* aJSContext, uint32_t aChannel,
     return nullptr;
   }
 
-  RestoreJSChannelData(aJSContext);
+  if (!RestoreJSChannelData(aJSContext)) {
+    aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
+    return nullptr;
+  }
 
   return mJSChannels[aChannel];
 }
 
-void
+bool
 AudioBuffer::SetChannelDataFromArrayBufferContents(JSContext* aJSContext,
                                                    uint32_t aChannel,
                                                    void* aContents)
 {
-  RestoreJSChannelData(aJSContext);
+  if (!RestoreJSChannelData(aJSContext)) {
+    return false;
+  }
 
   MOZ_ASSERT(aChannel < NumberOfChannels());
-  JSObject* arrayBuffer = JS_NewArrayBufferWithContents(aJSContext, aContents);
+  JS::RootedObject arrayBuffer(aJSContext, JS_NewArrayBufferWithContents(aJSContext, aContents));
+  if (!arrayBuffer) {
+    return false;
+  }
   mJSChannels[aChannel] = JS_NewFloat32ArrayWithBuffer(aJSContext, arrayBuffer,
                                                        0, -1);
+  if (!mJSChannels[aChannel]) {
+    return false;
+  }
   MOZ_ASSERT(mLength == JS_GetTypedArrayLength(mJSChannels[aChannel]));
+
+  return true;
 }
 
 static already_AddRefed<ThreadSharedFloatArrayBufferList>
@@ -144,7 +169,7 @@ StealJSArrayDataIntoThreadSharedFloatArrayBufferList(JSContext* aJSContext,
   nsRefPtr<ThreadSharedFloatArrayBufferList> result =
     new ThreadSharedFloatArrayBufferList(aJSArrays.Length());
   for (uint32_t i = 0; i < aJSArrays.Length(); ++i) {
-    JSObject* arrayBuffer = JS_GetArrayBufferViewBuffer(aJSArrays[i]);
+    JS::RootedObject arrayBuffer(aJSContext, JS_GetArrayBufferViewBuffer(aJSArrays[i]));
     void* dataToFree = nullptr;
     uint8_t* stolenData = nullptr;
     if (arrayBuffer &&
@@ -160,74 +185,42 @@ StealJSArrayDataIntoThreadSharedFloatArrayBufferList(JSContext* aJSContext,
 }
 
 ThreadSharedFloatArrayBufferList*
-AudioBuffer::GetThreadSharedChannelsForRate(JSContext* aJSContext, uint32_t aRate,
-                                            uint32_t* aLength)
+AudioBuffer::GetThreadSharedChannelsForRate(JSContext* aJSContext)
 {
-  if (mResampledChannels && mResampledChannelsRate == aRate) {
-    // return cached data
-    *aLength = mResampledChannelsLength;
-    return mResampledChannels;
-  }
-
   if (!mSharedChannels) {
     // Steal JS data
     mSharedChannels =
       StealJSArrayDataIntoThreadSharedFloatArrayBufferList(aJSContext, mJSChannels);
   }
 
-  if (mSampleRate == aRate) {
-    *aLength = mLength;
-    return mSharedChannels;
+  return mSharedChannels;
+}
+
+void
+AudioBuffer::MixToMono(JSContext* aJSContext)
+{
+  if (mJSChannels.Length() == 1) {
+    // The buffer is already mono
+    return;
   }
 
-  mResampledChannels = new ThreadSharedFloatArrayBufferList(NumberOfChannels());
-
-  double newLengthD = ceil(Duration()*aRate);
-  uint32_t newLength = uint32_t(newLengthD);
-  *aLength = newLength;
-  double size = sizeof(float)*NumberOfChannels()*newLengthD;
-  if (size != uint32_t(size)) {
-    return mResampledChannels;
-  }
-  float* outputData = static_cast<float*>(malloc(uint32_t(size)));
-  if (!outputData) {
-    nsCOMPtr<nsPIDOMWindow> pWindow = do_QueryInterface(mContext->GetParentObject());
-    nsIDocument* doc = nullptr;
-    if (pWindow) {
-      doc = pWindow->GetExtantDoc();
-    }
-    nsContentUtils::ReportToConsole(nsIScriptError::errorFlag,
-                                    "Media",
-                                    doc,
-                                    nsContentUtils::eDOM_PROPERTIES,
-                                    "MediaBufferSourceNodeResampleOutOfMemory");
-    return mResampledChannels;
+  // Prepare the input channels
+  nsAutoTArray<const void*, GUESS_AUDIO_CHANNELS> channels;
+  channels.SetLength(mJSChannels.Length());
+  for (uint32_t i = 0; i < mJSChannels.Length(); ++i) {
+    channels[i] = JS_GetFloat32ArrayData(mJSChannels[i]);
   }
 
-  SpeexResamplerState* resampler = speex_resampler_init(NumberOfChannels(),
-                                                        mSampleRate,
-                                                        aRate,
-                                                        SPEEX_RESAMPLER_QUALITY_DEFAULT,
-                                                        nullptr);
+  // Prepare the output channels
+  float* downmixBuffer = new float[mLength];
 
-  for (uint32_t i = 0; i < NumberOfChannels(); ++i) {
-    const float* inputData = mSharedChannels->GetData(i);
-    uint32_t inSamples = mLength;
-    uint32_t outSamples = newLength;
+  // Perform the down-mix
+  AudioChannelsDownMix(channels, &downmixBuffer, 1, mLength);
 
-    speex_resampler_process_float(resampler, i,
-                                  inputData, &inSamples,
-                                  outputData, &outSamples);
-
-    mResampledChannels->SetData(i, i == 0 ? outputData : nullptr, outputData);
-    outputData += newLength;
-  }
-
-  speex_resampler_destroy(resampler);
-
-  mResampledChannelsRate = aRate;
-  mResampledChannelsLength = newLength;
-  return mResampledChannels;
+  // Truncate the shared channels and copy the downmixed data over
+  mJSChannels.SetLength(1);
+  SetRawChannelContents(aJSContext, 0, downmixBuffer);
+  delete[] downmixBuffer;
 }
 
 }

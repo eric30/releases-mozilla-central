@@ -7,10 +7,16 @@ var PreferencesPanelView = {
   init: function pv_init() {
     // Run some setup code the first time the panel is shown.
     Elements.prefsFlyout.addEventListener("PopupChanged", function onShow(aEvent) {
-      if (aEvent.detail && aEvent.popup === Elements.prefsFlyout) {
+      if (aEvent.detail && aEvent.target === Elements.prefsFlyout) {
         Elements.prefsFlyout.removeEventListener("PopupChanged", onShow, false);
-        MasterPasswordUI.updatePreference();
+        SanitizeUI.init();
       }
     }, false);
+  },
+  onDNTPreferenceChanged: function onDNTPreferenceChanged() {
+    let dntNoPref = document.getElementById("prefs-dnt-nopref");
+
+    // When "tell sites nothing about my preferences" is selected, disable do not track.
+    Services.prefs.setBoolPref("privacy.donottrackheader.enabled", !dntNoPref.selected);
   }
 };

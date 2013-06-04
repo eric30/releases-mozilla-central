@@ -443,16 +443,6 @@ GfxInfo::Init()
     }
   }
 
-  const char *spoofedDriverVersionString = PR_GetEnv("MOZ_GFX_SPOOF_DRIVER_VERSION");
-  if (spoofedDriverVersionString) {
-    mDriverVersion.AssignASCII(spoofedDriverVersionString);
-  }
-
-  const char *spoofedVendor = PR_GetEnv("MOZ_GFX_SPOOF_VENDOR_ID");
-  if (spoofedVendor) {
-    mAdapterVendorID.AssignASCII(spoofedVendor);
-  }
-
   mHasDriverVersionMismatch = false;
   if (mAdapterVendorID == GfxDriverInfo::GetDeviceVendor(VendorIntel)) {
     // we've had big crashers (bugs 590373 and 595364) apparently correlated
@@ -461,19 +451,34 @@ GfxInfo::Init()
     bool is64bitApp = sizeof(void*) == 8;
     const PRUnichar *dllFileName = is64bitApp
                                  ? L"igd10umd64.dll"
-                                 : L"igd10umd32.dll";
-    nsString dllVersion;
+                                 : L"igd10umd32.dll",
+                    *dllFileName2 = is64bitApp
+                                 ? L"igd10iumd64.dll"
+                                 : L"igd10iumd32.dll";
+    nsString dllVersion, dllVersion2;
     gfxWindowsPlatform::GetDLLVersion((PRUnichar*)dllFileName, dllVersion);
+    gfxWindowsPlatform::GetDLLVersion((PRUnichar*)dllFileName2, dllVersion2);
 
-    uint64_t dllNumericVersion = 0, driverNumericVersion = 0;
+    uint64_t dllNumericVersion = 0, dllNumericVersion2 = 0, driverNumericVersion = 0;
     ParseDriverVersion(dllVersion, &dllNumericVersion);
+    ParseDriverVersion(dllVersion2, &dllNumericVersion2);
     ParseDriverVersion(mDriverVersion, &driverNumericVersion);
 
     // if GetDLLVersion fails, it gives "0.0.0.0"
     // so if GetDLLVersion failed, we get dllNumericVersion = 0
     // so this test implicitly handles the case where GetDLLVersion failed
-    if (dllNumericVersion != driverNumericVersion)
+    if (dllNumericVersion != driverNumericVersion && dllNumericVersion2 != driverNumericVersion)
       mHasDriverVersionMismatch = true;
+  }
+
+  const char *spoofedDriverVersionString = PR_GetEnv("MOZ_GFX_SPOOF_DRIVER_VERSION");
+  if (spoofedDriverVersionString) {
+    mDriverVersion.AssignASCII(spoofedDriverVersionString);
+  }
+
+  const char *spoofedVendor = PR_GetEnv("MOZ_GFX_SPOOF_VENDOR_ID");
+  if (spoofedVendor) {
+    mAdapterVendorID.AssignASCII(spoofedVendor);
   }
 
   const char *spoofedDevice = PR_GetEnv("MOZ_GFX_SPOOF_DEVICE_ID");
@@ -785,14 +790,14 @@ GfxInfo::GetGfxDriverInfo()
     /*
      * Bug 783517 - crashes in AMD driver on Windows 8
      */
-    APPEND_TO_DRIVER_BLOCKLIST( DRIVER_OS_WINDOWS_8,
+    APPEND_TO_DRIVER_BLOCKLIST_RANGE( DRIVER_OS_WINDOWS_8,
       (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorATI), GfxDriverInfo::allDevices,
       GfxDriverInfo::allFeatures, nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION,
-      DRIVER_LESS_THAN_OR_EQUAL, V(8,982,0,0), "> 12.8" );
-    APPEND_TO_DRIVER_BLOCKLIST( DRIVER_OS_WINDOWS_8,
+      DRIVER_BETWEEN_INCLUSIVE_START, V(8,982,0,0), V(8,983,0,0), "!= 8.982.*.*" );
+    APPEND_TO_DRIVER_BLOCKLIST_RANGE( DRIVER_OS_WINDOWS_8,
       (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorAMD), GfxDriverInfo::allDevices,
       GfxDriverInfo::allFeatures, nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION,
-      DRIVER_LESS_THAN_OR_EQUAL, V(8,982,0,0), "> 12.8" );
+      DRIVER_BETWEEN_INCLUSIVE_START, V(8,982,0,0), V(8,983,0,0), "!= 8.982.*.*" );
 
     /* OpenGL on any ATI/AMD hardware is discouraged
      * See:
@@ -885,6 +890,14 @@ GfxInfo::GetGfxDriverInfo()
      * See bug 806786
      */
     APPEND_TO_DRIVER_BLOCKLIST2( DRIVER_OS_WINDOWS_7,
+        (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorIntel), (GfxDeviceFamily*) GfxDriverInfo::GetDeviceFamily(IntelMobileHDGraphics),
+      nsIGfxInfo::FEATURE_DIRECT2D, nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION,
+      DRIVER_LESS_THAN_OR_EQUAL, V(8,15,10,2302) );
+
+    /* Disable D2D on Win8 on Intel HD Graphics on driver <= 8.15.10.2302
+     * See bug 804144 and 863683
+     */
+    APPEND_TO_DRIVER_BLOCKLIST2( DRIVER_OS_WINDOWS_8,
         (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorIntel), (GfxDeviceFamily*) GfxDriverInfo::GetDeviceFamily(IntelMobileHDGraphics),
       nsIGfxInfo::FEATURE_DIRECT2D, nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION,
       DRIVER_LESS_THAN_OR_EQUAL, V(8,15,10,2302) );

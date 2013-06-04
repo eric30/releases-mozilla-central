@@ -22,11 +22,10 @@ public class testVkbOverlap extends PixelTest {
     }
 
     public void testVkbOverlap() {
-        Device device = new Device();
         blockForGeckoReady();
         testSetup("initial-scale=1.0, user-scalable=no", false);
         testSetup("initial-scale=1.0", false);
-        testSetup("", "phone".equals(device.type));
+        testSetup("", "phone".equals(mDevice.type));
     }
 
     private void testSetup(String viewport, boolean shouldZoom) {
@@ -41,6 +40,7 @@ public class testVkbOverlap extends PixelTest {
         int greenPixelCount = 0;
 
         PaintedSurface painted = waitForPaint(paintExpecter);
+        paintExpecter.unregisterListener();
         try {
             greenPixelCount = countGreenPixels(painted);
         } finally {
@@ -66,6 +66,7 @@ public class testVkbOverlap extends PixelTest {
         // now that the focus is in the text field we will repaint every 500ms as the cursor blinks, so we need to use a smaller
         // "no paints" threshold to consider the page painted
         paintExpecter.blockUntilClear(LESS_THAN_CURSOR_BLINK_PERIOD);
+        paintExpecter.unregisterListener();
         painted = mDriver.getPaintedSurface();
         try {
             // if the vkb scrolled into view as expected, then the number of green pixels now visible should be about the

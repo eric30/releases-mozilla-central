@@ -216,6 +216,11 @@ toolbarbutton.bookmark-item > menupopup {
   max-height: 16px;
 }
 
+#PlacesToolbarItems > .bookmark-item:not([image]):not([label=""]):not([container]) > .toolbarbutton-icon {
+  display: none;
+}
+
+
 .bookmark-item > .toolbarbutton-icon[label]:not([label=""]),
 .bookmark-item > .toolbarbutton-icon[type="menu"] {
   -moz-margin-end: 5px;
@@ -422,7 +427,8 @@ toolbarbutton.bookmark-item > menupopup {
     list-style-image: url("chrome://browser/skin/Toolbar@2x.png");
   }
 
-  :-moz-any(@primaryToolbarButtons@):not(#tabview-button) > .toolbarbutton-icon {
+  :-moz-any(@primaryToolbarButtons@):not(#tabview-button) > .toolbarbutton-icon,
+  :-moz-any(@primaryToolbarButtons@):not(#tabview-button) > .toolbarbutton-menubutton-button > .toolbarbutton-icon {
     width: 20px;
   }
 }
@@ -457,27 +463,31 @@ toolbar:not([mode="icons"]) #restore-button {
 }
 
 .toolbarbutton-1[disabled="true"] > .toolbarbutton-icon,
-.toolbarbutton-1[type="menu-button"] > .toolbarbutton-menubutton-button[disabled="true"] > .toolbarbutton-icon,
+.toolbarbutton-1[disabled="true"] > .toolbarbutton-badge-container > .toolbarbutton-icon,
+.toolbarbutton-1 > .toolbarbutton-menubutton-button[disabled="true"] > .toolbarbutton-icon,
 #restore-button[disabled="true"] > .toolbarbutton-icon {
   opacity: .4;
 }
 
 @media (-moz-mac-lion-theme) {
   .toolbarbutton-1[disabled="true"] > .toolbarbutton-icon,
-  .toolbarbutton-1[type="menu-button"] > .toolbarbutton-menubutton-button[disabled="true"] > .toolbarbutton-icon,
+  .toolbarbutton-1[disabled="true"] > .toolbarbutton-badge-container > .toolbarbutton-icon,
+  .toolbarbutton-1 > .toolbarbutton-menubutton-button[disabled="true"] > .toolbarbutton-icon,
   #restore-button[disabled="true"] > .toolbarbutton-icon,
   .toolbarbutton-1[disabled="true"] > .toolbarbutton-menu-dropmarker,
   .toolbarbutton-1[disabled="true"] > .toolbarbutton-menubutton-dropmarker,
   .toolbarbutton-1:not(:hover):-moz-window-inactive > .toolbarbutton-icon,
-  .toolbarbutton-1:not(:hover):-moz-window-inactive > .toolbarbutton-icon,
+  .toolbarbutton-1:not(:hover):-moz-window-inactive > .toolbarbutton-badge-container > .toolbarbutton-icon,
   #restore-button:not(:hover):-moz-window-inactive > .toolbarbutton-icon,
   .toolbarbutton-1:not(:hover):-moz-window-inactive > .toolbarbutton-menu-dropmarker,
-  .toolbarbutton-1:not(:hover):-moz-window-inactive > .toolbarbutton-menubutton-dropmarker {
+  .toolbarbutton-1:not(:hover):-moz-window-inactive > .toolbarbutton-menubutton-dropmarker > .dropmarker-icon,
+  .toolbarbutton-1:not(:hover):-moz-window-inactive > .toolbarbutton-menubutton-button > .toolbarbutton-icon {
     opacity: .5;
   }
 
   .toolbarbutton-1:-moz-window-inactive[disabled="true"] > .toolbarbutton-icon,
-  .toolbarbutton-1:-moz-window-inactive[type="menu-button"] > .toolbarbutton-menubutton-button[disabled="true"] > .toolbarbutton-icon,
+  .toolbarbutton-1:-moz-window-inactive[disabled="true"] > .toolbarbutton-badge-container > .toolbarbutton-icon,
+  .toolbarbutton-1:-moz-window-inactive > .toolbarbutton-menubutton-button[disabled="true"] > .toolbarbutton-icon,
   #restore-button:-moz-window-inactive[disabled="true"] > .toolbarbutton-icon {
     opacity: .25;
   }
@@ -505,8 +515,7 @@ toolbar:not([mode="icons"]) #restore-button {
 }
 
 .toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker {
-  width: 14px;
-  padding-top: 2px;
+  padding: 2px 4px 0;
   -moz-border-start: none !important;
 }
 
@@ -1671,53 +1680,69 @@ window[tabsontop="false"] richlistitem[type~="action"][actiontype="switchtab"][s
   }
 }
 
+/* social share panel */
+.social-share-frame {
+  background: linear-gradient(to bottom, rgba(242,242,242,.99), rgba(242,242,242,.95));
+  border-left: 1px solid #f8f8f8;
+  width: 330px;
+  height: 150px;
+  /* we resize our panels dynamically, make it look nice */
+  transition: height 100ms ease-out, width 100ms ease-out;
+}
+
+#social-share-button {
+  list-style-image: url("chrome://browser/skin/social/share-button.png");
+}
+
+#social-share-button[open],
+#social-share-button:hover:active {
+  list-style-image: url("chrome://browser/skin/social/share-button-active.png");
+}
+
+.social-share-toolbar {
+  border-right: 1px solid #dedede;
+  background: linear-gradient(to bottom, rgba(247,247,247,.99), rgba(247,247,247,.95));
+}
+
+#social-share-provider-buttons {
+  border-right: 1px solid #fbfbfb;
+  padding: 6px;
+}
+
+#social-share-provider-buttons > .share-provider-button {
+  padding: 6px;
+  margin: 0;
+  border: none;
+  border-radius: 2px;
+}
+
+#social-share-provider-buttons > .share-provider-button[checked],
+#social-share-provider-buttons > .share-provider-button:active {
+  padding: 5px;
+  border: 1px solid #b5b5b8;
+  box-shadow: inset 1px 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+#social-share-provider-buttons > .share-provider-button[checked] {
+  background: linear-gradient(to bottom, #d9d9d9, #e3e3e3);
+}
+
+#social-share-provider-buttons > .share-provider-button > .toolbarbutton-text {
+  display: none;
+}
+#social-share-provider-buttons > .share-provider-button > .toolbarbutton-icon {
+  width: 16px;
+  min-height: 16px;
+  max-height: 16px;
+}
+
 /* social recommending panel */
 
-#share-button {
+#social-mark-button {
   -moz-image-region: rect(0, 16px, 16px, 0);
 }
 
-#socialUserPortrait {
-  width: 48px;
-  height: 48px;
-  list-style-image:url("chrome://global/skin/icons/information-32.png");
-}
-
-#socialUserDisplayName,
-#socialUserPortrait {
-  cursor: pointer;
-}
-
-#socialUserDisplayName {
-  -moz-appearance: none;
-  border: none;
-  background-color: transparent;
-  margin: 1px;
-  padding: 0;
-  font-size: 130%;
-  font-weight: bold;
-}
-
-#socialUserDisplayName > .button-box {
-  -moz-padding-start: 0;
-  padding-top: 0;
-  border-top-width: 0;
-}
-
-#socialUserDisplayName:hover {
-  color: -moz-nativehyperlinktext;
-  text-decoration: underline;
-}
-
-#unsharePopupText {
-  height: 48px;
-}
-
-#unsharePopupBottomButtons {
-  margin-top: 1em;
-}
-
-/* STAR BUTTON */
+/* Star button */
 #star-button {
   list-style-image: url("chrome://browser/skin/places/star-icons.png");
   -moz-image-region: rect(0, 16px, 16px, 0);
@@ -2056,11 +2081,22 @@ window[tabsontop="false"] richlistitem[type~="action"][actiontype="switchtab"][s
   }
 }
 
+/* History Swipe Animation */
+
+#historySwipeAnimationCurrentPage,
+#historySwipeAnimationNextPage {
+  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.6);
+}
+
+#historySwipeAnimationContainer {
+  background: url("chrome://browser/skin/linen-pattern.png") #B3B9C1;
+}
+
 /* ----- SIDEBAR ELEMENTS ----- */
 
 #sidebar,
 sidebarheader {
-  background-color: #d4dde5;
+  background-color: #e2e7ed;
 }
 
 #sidebar:-moz-window-inactive,
@@ -2080,7 +2116,7 @@ sidebarheader {
 
 .sidebar-splitter {
   -moz-border-start: none;
-  -moz-border-end: 1px solid #404040;
+  -moz-border-end: 1px solid #bdbdbd;
   min-width: 1px;
   width: 3px;
   background-image: none !important;
@@ -2694,10 +2730,14 @@ toolbarbutton.chevron > .toolbarbutton-menu-dropmarker {
 }
 
 :-moz-any(#TabsToolbar, #addon-bar) .toolbarbutton-1:not([type="menu-button"]),
-:-moz-any(#TabsToolbar, #addon-bar) .toolbarbutton-1 > .toolbarbutton-menubutton-button,
-:-moz-any(#TabsToolbar, #addon-bar) .toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker {
+:-moz-any(#TabsToolbar, #addon-bar) .toolbarbutton-1 > .toolbarbutton-menubutton-button {
   margin: 0;
   padding: 0 1px;
+}
+
+:-moz-any(#TabsToolbar, #addon-bar) .toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker {
+  padding-left: 4px;
+  padding-right: 4px;
 }
 
 .tabbrowser-arrowscrollbox > .scrollbutton-up:not([disabled]):hover,
@@ -3093,6 +3133,15 @@ toolbarbutton.chevron > .toolbarbutton-menu-dropmarker {
   }
 }
 
+#plugin-install-notification-icon {
+  list-style-image: url(chrome://browser/skin/pluginInstall-16.png);
+}
+@media (min-resolution: 2dppx) {
+  #plugin-install-notification-icon {
+    list-style-image: url(chrome://browser/skin/pluginInstall-16@2x.png);
+  }
+}
+
 #notification-popup-box[hidden] {
   /* Override display:none to make the pluginBlockedNotification animation work
      when showing the notification repeatedly. */
@@ -3155,6 +3204,17 @@ toolbarbutton.chevron > .toolbarbutton-menu-dropmarker {
   }
 }
 
+#pointerLock-notification-icon {
+  list-style-image: url(chrome://browser/skin/pointerLock-16.png);
+}
+@media (min-resolution: 2dppx) {
+  #pointerLock-notification-icon {
+    list-style-image: url(chrome://browser/skin/pointerLock-16@2x.png);
+  }
+}
+
+
+
 .popup-notification-icon {
   width: 64px;
   height: 64px;
@@ -3194,6 +3254,15 @@ toolbarbutton.chevron > .toolbarbutton-menu-dropmarker {
   list-style-image: url(chrome://mozapps/skin/plugins/pluginBlocked-64.png);
 }
 
+.popup-notification-icon[popupid="plugins-not-found"] {
+  list-style-image: url(chrome://browser/skin/pluginInstall-64.png);
+}
+@media (min-resolution: 2dppx) {
+  .popup-notification-icon[popupid="plugins-not-found"] {
+    list-style-image: url(chrome://browser/skin/pluginInstall-64\@2x.png);
+  }
+}
+
 .addon-progress-description {
   width: 350px;
   max-width: 350px;
@@ -3226,7 +3295,8 @@ toolbarbutton.chevron > .toolbarbutton-menu-dropmarker {
 }
 
 .popup-notification-icon[popupid="indexedDB-permissions-prompt"],
-.popup-notification-icon[popupid="indexedDB-quota-prompt"] {
+.popup-notification-icon[popupid="indexedDB-quota-prompt"],
+.popup-notification-icon[popupid*="offline-app-requested"] {
   list-style-image: url(chrome://global/skin/icons/question-64.png);
 }
 
@@ -3247,6 +3317,19 @@ toolbarbutton.chevron > .toolbarbutton-menu-dropmarker {
     list-style-image: url(chrome://browser/skin/mixed-content-blocked-64@2x.png);
   }
 }
+
+.popup-notification-icon[popupid="pointerLock"] {
+  list-style-image: url(chrome://browser/skin/pointerLock-64.png);
+}
+@media (min-resolution: 2dppx) {
+  .popup-notification-icon[popupid="pointerLock"] {
+    list-style-image: url(chrome://browser/skin/pointerLock-64@2x.png);
+  }
+}
+#pointerLock-cancel {
+  margin: 0px;
+}
+
 
 #mixed-content-blocked-helplink {
   margin: 0px;
@@ -3577,40 +3660,72 @@ toolbarbutton.chevron > .toolbarbutton-menu-dropmarker {
 
 /* === social toolbar button === */
 
-toolbar[mode="icons"] > *|* > .social-notification-container {
-  -moz-appearance: toolbarbutton;
-}
-
-.social-notification-container > .toolbarbutton-1 {
-  -moz-appearance: none;
+#social-toolbar-item > .toolbarbutton-1 {
   margin-left: 0;
   margin-right: 0;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
 }
 
-#social-toolbar-item {
-  margin: 0 4px;
+#social-toolbar-item > .toolbarbutton-1:-moz-locale-dir(ltr) {
+  -moz-border-end-width: 0;
+}
+#social-toolbar-item > .toolbarbutton-1:last-child:-moz-locale-dir(ltr) {
+  -moz-border-end-width: 1px;
+}
+#social-toolbar-item > .toolbarbutton-1:-moz-locale-dir(rtl) {
+  -moz-border-start-width: 0;
+}
+#social-toolbar-item > .toolbarbutton-1:first-child:-moz-locale-dir(rtl) {
+  -moz-border-start-width: 1px;
+}
+
+#social-toolbar-item > .toolbarbutton-1:-moz-locale-dir(ltr):first-child,
+#social-toolbar-item > .toolbarbutton-1:-moz-locale-dir(rtl):last-child {
+  margin-left: 4px;
+  border-top-left-radius: 3px;
+  border-bottom-left-radius: 3px;
+}
+#social-toolbar-item > .toolbarbutton-1:-moz-locale-dir(rtl):first-child,
+#social-toolbar-item > .toolbarbutton-1:-moz-locale-dir(ltr):last-child {
+  margin-right: 4px;
+  border-top-right-radius: 3px;
+  border-bottom-right-radius: 3px;
+}
+
+#social-toolbar-item > toolbaritem {
+  margin: 0;
 }
 
 #social-provider-button {
-  -moz-image-region: rect(0, 16px, 16px, 0);
-  /* Needed to make the adjacent buttons combine */
-  margin-left: 0;
-  margin-right: 0;
+  list-style-image: url(chrome://browser/skin/social/services-16.png);
+}
+
+@media (min-resolution: 2dppx) {
+  #social-provider-button {
+    list-style-image: url(chrome://browser/skin/social/services-16@2x.png);
+  }
+  #social-provider-button > .toolbarbutton-icon {
+    width: 16px;
+  }
 }
 
 #social-provider-button > .toolbarbutton-menu-dropmarker {
   display: none;
 }
 
-.social-notification-container {
-  /* position:relative on .toolbarbutton-1 does not get position:absolute
-     to work as expected on .toolbarbutton-1 generated content. Placing a
-     simple container outside of .toolbarbutton-1 and setting position:relative
-     on the simple container however will work. */
+.toolbarbutton-badge-container {
+  margin: 0;
+  padding: 0;
   position: relative;
 }
+.toolbarbutton-badge-container > .toolbarbutton-icon {
+  margin: 2px;
+}
 
-.social-notification-container > .toolbarbutton-1[badge]:not([badge=""])::after {
+.toolbarbutton-badge[badge]:not([badge=""]) {
   /* The |content| property is set in the content stylesheet. */
   font-size: 9px;
   font-weight: bold;
@@ -3621,21 +3736,78 @@ toolbar[mode="icons"] > *|* > .social-notification-container {
   border-radius: 2px;
   box-shadow: 0 1px 0 rgba(0,39,121,0.77);
   position: absolute;
-  top: 2px;
+  top: 0;
   right: 0;
+  z-index: 1;
 }
 
-.social-notification-container > .toolbarbutton-1[badge]:not([badge=""]):-moz-locale-dir(rtl)::after {
+.toolbarbutton-badge[badge]:not([badge=""]):-moz-window-inactive {
+  background-color: rgb(230,230,230);
+  box-shadow: none;
+  border: 1px solid rgb(206,206,206);
+  color: rgb(192,192,192);
+}
+
+.toolbarbutton-badge[badge]:not([badge=""]):-moz-locale-dir(rtl) {
   left: 0;
   right: auto;
 }
 
-toolbar[mode="icons"] > *|* > .social-notification-container > .toolbarbutton-1[badge]:not([badge=""])::after {
+toolbar[mode="icons"] > *|* > .toolbarbutton-badge[badge]:not([badge=""]) {
   right: -2px;
 }
 
-toolbar[mode="icons"] > *|* > .social-notification-container > .toolbarbutton-1[badge]:not([badge=""]):-moz-locale-dir(rtl)::after {
+toolbar[mode="icons"] > *|* > .toolbarbutton-badge[badge]:not([badge=""]):-moz-locale-dir(rtl) {
   left: -2px;
+}
+
+.popup-notification-icon[popupid="servicesInstall"] {
+  list-style-image: url(chrome://browser/skin/social/services-64.png);
+}
+#servicesInstall-notification-icon {
+  list-style-image: url(chrome://browser/skin/social/services-16.png);
+}
+
+@media (min-resolution: 2dppx) {
+  .popup-notification-icon[popupid="servicesInstall"] {
+    list-style-image: url(chrome://browser/skin/social/services-64@2x.png);
+  }
+  #servicesInstall-notification-icon {
+    list-style-image: url(chrome://browser/skin/social/services-16@2x.png);
+  }
+}
+
+#social-undoactivation-button,
+#servicesInstall-learnmore-link {
+  -moz-margin-start: 0; /* override default label margin to match description margin */
+}
+
+.social-activation-icon {
+  width: auto;
+  height: auto;
+  max-height: 64px;
+  max-width: 64px;
+}
+
+#social-activation-message {
+  max-width: 250px;
+}
+
+#social-activation-message > label {
+  margin: 0;
+}
+
+#social-activation-button {
+  @hudButton@
+  min-height: 0px;
+}
+
+#social-activation-button:focus {
+  @hudButtonFocused@
+}
+
+#social-activation-button:hover:active {
+  @hudButtonPressed@
 }
 
 /* === end of social toolbar button === */
@@ -3657,8 +3829,34 @@ toolbar[mode="icons"] > *|* > .social-notification-container > .toolbarbutton-1[
   padding: 0;
 }
 
-.social-panel-frame {
+/* fixup rounded corners for osx panels */
+.social-panel > .social-panel-frame {
   border-radius: inherit;
+}
+
+#social-share-panel {
+  margin-top: 3px;
+  max-height: 600px;
+  min-height: 100px;
+  max-width: 800px;
+  min-width: 300px;
+}
+
+.social-share-frame {
+  border-top-left-radius: none;
+  border-bottom-left-radius: none;
+  border-top-right-radius: inherit;
+  border-bottom-right-radius: inherit;
+}
+
+#social-share-panel > .social-share-toolbar {
+  border-top-left-radius: inherit;
+  border-bottom-left-radius: inherit;
+}
+
+#social-share-provider-buttons {
+  border-top-left-radius: inherit;
+  border-bottom-left-radius: inherit;
 }
 
 /* === end of social toolbar provider menu === */
@@ -3676,13 +3874,17 @@ toolbar[mode="icons"] > *|* > .social-notification-container > .toolbarbutton-1[
 
 .chatbar-button {
   background-color: #d9d9d9;
+  background-image: linear-gradient(rgba(255,255,255,.43), rgba(255,255,255,0));
+  border-top-left-radius: @toolbarbuttonCornerRadius@;
+  border-top-right-radius: @toolbarbuttonCornerRadius@;
 }
 
+.chatbar-button:hover,
 .chatbar-button[open="true"] {
   background-color: #f0f0f0;
 }
 
-.chatbar-button[activity] {
+.chatbar-button[activity]:not([open]) {
   background-image: radial-gradient(circle farthest-corner at center 2px, rgb(254,254,255) 3%, rgba(210,235,255,0.9) 12%, rgba(148,205,253,0.6) 30%, rgba(148,205,253,0.2) 70%);
 }
 
@@ -3869,5 +4071,3 @@ panel[type="arrow"][popupid="click-to-play-plugins"] > .panel-arrowcontainer > .
     -moz-padding-end: 50px;
   }
 }
-
-

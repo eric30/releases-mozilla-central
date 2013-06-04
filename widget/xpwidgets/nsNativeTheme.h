@@ -15,8 +15,8 @@
 #include "nsEventStates.h"
 #include "nsTArray.h"
 #include "nsITimer.h"
+#include "nsIContent.h"
 
-class nsIContent;
 class nsIFrame;
 class nsIPresShell;
 class nsPresContext;
@@ -172,6 +172,9 @@ class nsNativeTheme : public nsITimerCallback
                                                       bool aNextSibling);
 
   bool IsRangeHorizontal(nsIFrame* aFrame);
+
+  // scrollbar
+  bool IsDarkBackground(nsIFrame* aFrame);
 
  private:
   uint32_t mAnimatedContentTimeout;

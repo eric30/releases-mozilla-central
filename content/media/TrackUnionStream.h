@@ -47,10 +47,14 @@ public:
       mappedTracksWithMatchingInputTracks.AppendElement(false);
     }
     bool allFinished = true;
+    bool allHaveCurrentData = true;
     for (uint32_t i = 0; i < mInputs.Length(); ++i) {
       MediaStream* stream = mInputs[i]->GetSource();
       if (!stream->IsFinishedOnGraphThread()) {
         allFinished = false;
+      }
+      if (!stream->HasCurrentData()) {
+        allHaveCurrentData = false;
       }
       for (StreamBuffer::TrackIter tracks(stream->GetStreamBuffer());
            !tracks.IsEnded(); tracks.Next()) {
@@ -97,6 +101,10 @@ public:
       FinishOnGraphThread();
     }
     mBuffer.AdvanceKnownTracksTime(GraphTimeToStreamTime(aTo));
+    if (allHaveCurrentData) {
+      // We can make progress if we're not blocked
+      mHasCurrentData = true;
+    }
   }
 
 protected:
@@ -212,7 +220,7 @@ protected:
       if (interval.mInputIsBlocked) {
         // Maybe the input track ended?
         segment->AppendNullData(ticks);
-        LOG(PR_LOG_DEBUG, ("TrackUnionStream %p appending %lld ticks of null data to track %d",
+        LOG(PR_LOG_DEBUG+1, ("TrackUnionStream %p appending %lld ticks of null data to track %d",
             this, (long long)ticks, outputTrack->GetID()));
       } else {
         // Figuring out which samples to use from the input stream is tricky
@@ -227,10 +235,11 @@ protected:
         segment->AppendSlice(*aInputTrack->GetSegment(),
                              std::min(inputTrackEndPoint, inputStartTicks),
                              std::min(inputTrackEndPoint, inputEndTicks));
-        LOG(PR_LOG_DEBUG, ("TrackUnionStream %p appending %lld ticks of input data to track %d",
+        LOG(PR_LOG_DEBUG+1, ("TrackUnionStream %p appending %lld ticks of input data to track %d",
             this, (long long)(std::min(inputTrackEndPoint, inputEndTicks) - std::min(inputTrackEndPoint, inputStartTicks)),
             outputTrack->GetID()));
       }
+      ApplyTrackDisabling(outputTrack->GetID(), segment);
       for (uint32_t j = 0; j < mListeners.Length(); ++j) {
         MediaStreamListener* l = mListeners[j];
         l->NotifyQueuedTrackChanges(Graph(), outputTrack->GetID(),

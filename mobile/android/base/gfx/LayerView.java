@@ -5,12 +5,13 @@
 
 package org.mozilla.gecko.gfx;
 
-import org.mozilla.gecko.GeckoApp;
-import org.mozilla.gecko.OnInterceptTouchListener;
+import org.mozilla.gecko.GeckoAccessibility;
+import org.mozilla.gecko.GeckoAppShell;
+import org.mozilla.gecko.GeckoEvent;
 import org.mozilla.gecko.R;
+import org.mozilla.gecko.TouchEventInterceptor;
 import org.mozilla.gecko.ZoomConstraints;
 import org.mozilla.gecko.util.EventDispatcher;
-import org.mozilla.gecko.GeckoAccessibility;
 
 import android.content.Context;
 import android.graphics.Bitmap;
@@ -20,6 +21,7 @@ import android.graphics.PixelFormat;
 import android.graphics.PointF;
 import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
+import android.os.Build;
 import android.os.Handler;
 import android.util.AttributeSet;
 import android.util.Log;
@@ -35,6 +37,7 @@ import android.view.inputmethod.InputConnection;
 import android.widget.FrameLayout;
 
 import java.nio.IntBuffer;
+import java.util.ArrayList;
 
 /**
  * A view rendered by the layer compositor.
@@ -46,6 +49,7 @@ public class LayerView extends FrameLayout {
 
     private GeckoLayerClient mLayerClient;
     private PanZoomController mPanZoomController;
+    private LayerMarginsAnimator mMarginsAnimator;
     private GLController mGLController;
     private InputConnectionHandler mInputConnectionHandler;
     private LayerRenderer mRenderer;
@@ -58,7 +62,9 @@ public class LayerView extends FrameLayout {
     private TextureView mTextureView;
 
     private Listener mListener;
-    private OnInterceptTouchListener mTouchIntercepter;
+
+    /* This should only be modified on the Java UI thread. */
+    private final ArrayList<TouchEventInterceptor> mTouchInterceptors;
 
     /* Flags used to determine when to show the painted surface. */
     public static final int PAINT_START = 0;
@@ -94,11 +100,14 @@ public class LayerView extends FrameLayout {
         mGLController = GLController.getInstance(this);
         mPaintState = PAINT_START;
         mBackgroundColor = Color.WHITE;
+
+        mTouchInterceptors = new ArrayList<TouchEventInterceptor>();
     }
 
     public void initializeView(EventDispatcher eventDispatcher) {
         mLayerClient = new GeckoLayerClient(getContext(), this, eventDispatcher);
         mPanZoomController = mLayerClient.getPanZoomController();
+        mMarginsAnimator = mLayerClient.getLayerMarginsAnimator();
 
         mRenderer = new LayerRenderer(this);
         mInputConnectionHandler = null;
@@ -107,6 +116,45 @@ public class LayerView extends FrameLayout {
         setFocusableInTouchMode(true);
 
         GeckoAccessibility.setDelegate(this);
+    }
+
+    public void geckoConnected() {
+        mLayerClient.notifyGeckoReady();
+        addTouchInterceptor(new TouchEventInterceptor() {
+            private PointF mInitialTouchPoint = null;
+
+            @Override
+            public boolean onInterceptTouchEvent(View view, MotionEvent event) {
+                return false;
+            }
+
+            @Override
+            public boolean onTouch(View view, MotionEvent event) {
+                if (event == null) {
+                    return true;
+                }
+
+                int action = event.getActionMasked();
+                PointF point = new PointF(event.getX(), event.getY());
+                if (action == MotionEvent.ACTION_DOWN) {
+                    mInitialTouchPoint = point;
+                }
+
+                if (mInitialTouchPoint != null && action == MotionEvent.ACTION_MOVE) {
+                    if (PointUtils.subtract(point, mInitialTouchPoint).length() <
+                        PanZoomController.PAN_THRESHOLD) {
+                        // Don't send the touchmove event if if the users finger hasn't moved far.
+                        // Necessary for Google Maps to work correctly. See bug 771099.
+                        return true;
+                    } else {
+                        mInitialTouchPoint = null;
+                    }
+                }
+
+                GeckoAppShell.sendEventToGecko(GeckoEvent.createMotionEvent(event, false));
+                return true;
+            }
+        });
     }
 
     public void show() {
@@ -128,15 +176,35 @@ public class LayerView extends FrameLayout {
         }
     }
 
-    public void setTouchIntercepter(final OnInterceptTouchListener touchIntercepter) {
-        // this gets run on the gecko thread, but for thread safety we want the assignment
-        // on the UI thread.
+    public void addTouchInterceptor(final TouchEventInterceptor aTouchInterceptor) {
         post(new Runnable() {
             @Override
             public void run() {
-                mTouchIntercepter = touchIntercepter;
+                mTouchInterceptors.add(aTouchInterceptor);
             }
         });
+    }
+
+    public void removeTouchInterceptor(final TouchEventInterceptor aTouchInterceptor) {
+        post(new Runnable() {
+            @Override
+            public void run() {
+                mTouchInterceptors.remove(aTouchInterceptor);
+            }
+        });
+    }
+
+    private boolean runTouchInterceptors(MotionEvent event, boolean aOnTouch) {
+        boolean result = false;
+        for (TouchEventInterceptor i : mTouchInterceptors) {
+            if (aOnTouch) {
+                result |= i.onTouch(this, event);
+            } else {
+                result |= i.onInterceptTouchEvent(this, event);
+            }
+        }
+
+        return result;
     }
 
     @Override
@@ -145,13 +213,13 @@ public class LayerView extends FrameLayout {
             requestFocus();
         }
 
-        if (mTouchIntercepter != null && mTouchIntercepter.onInterceptTouchEvent(this, event)) {
+        if (runTouchInterceptors(event, false)) {
             return true;
         }
         if (mPanZoomController != null && mPanZoomController.onTouchEvent(event)) {
             return true;
         }
-        if (mTouchIntercepter != null && mTouchIntercepter.onTouch(this, event)) {
+        if (runTouchInterceptors(event, true)) {
             return true;
         }
         return false;
@@ -159,7 +227,7 @@ public class LayerView extends FrameLayout {
 
     @Override
     public boolean onHoverEvent(MotionEvent event) {
-        if (mTouchIntercepter != null && mTouchIntercepter.onTouch(this, event)) {
+        if (runTouchInterceptors(event, true)) {
             return true;
         }
         return false;
@@ -182,7 +250,12 @@ public class LayerView extends FrameLayout {
         if (shouldUseTextureView()) {
             mTextureView = new TextureView(getContext());
             mTextureView.setSurfaceTextureListener(new SurfaceTextureListener());
-            mTextureView.setBackgroundColor(Color.WHITE);
+
+            // The background is set to this color when the LayerView is
+            // created, and it will be shown immediately at startup. Shortly
+            // after, the tab's background color will be used before any content
+            // is shown.
+            mTextureView.setBackgroundResource(R.color.background_normal);
             addView(mTextureView, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
         } else {
             // This will stop PropertyAnimator from creating a drawing cache (i.e. a bitmap)
@@ -190,7 +263,7 @@ public class LayerView extends FrameLayout {
             setWillNotCacheDrawing(false);
 
             mSurfaceView = new LayerSurfaceView(getContext(), this);
-            mSurfaceView.setBackgroundColor(Color.WHITE);
+            mSurfaceView.setBackgroundResource(R.color.background_normal);
             addView(mSurfaceView, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
 
             SurfaceHolder holder = mSurfaceView.getHolder();
@@ -201,6 +274,7 @@ public class LayerView extends FrameLayout {
 
     public GeckoLayerClient getLayerClient() { return mLayerClient; }
     public PanZoomController getPanZoomController() { return mPanZoomController; }
+    public LayerMarginsAnimator getLayerMarginsAnimator() { return mMarginsAnimator; }
 
     public ImmutableViewportMetrics getViewportMetrics() {
         return mLayerClient.getViewportMetrics();
@@ -230,9 +304,13 @@ public class LayerView extends FrameLayout {
         mLayerClient.setZoomConstraints(constraints);
     }
 
+    public void setIsRTL(boolean aIsRTL) {
+        mLayerClient.setIsRTL(aIsRTL);
+    }
+
     public void setInputConnectionHandler(InputConnectionHandler inputConnectionHandler) {
         mInputConnectionHandler = inputConnectionHandler;
-        mLayerClient.forceRedraw();
+        mLayerClient.forceRedraw(null);
     }
 
     @Override
@@ -350,7 +428,7 @@ public class LayerView extends FrameLayout {
     private Bitmap getDrawable(int resId) {
         BitmapFactory.Options options = new BitmapFactory.Options();
         options.inScaled = false;
-        return BitmapFactory.decodeResource(getContext().getResources(), resId, options);
+        return BitmapUtils.decodeResource(getContext(), resId, options);
     }
 
     Bitmap getShadowPattern() {
@@ -412,7 +490,7 @@ public class LayerView extends FrameLayout {
     /** This function is invoked by Gecko (compositor thread) via JNI; be careful when modifying signature. */
     public static GLController registerCxxCompositor() {
         try {
-            LayerView layerView = GeckoApp.mAppContext.getLayerView();
+            LayerView layerView = GeckoAppShell.getLayerView();
             GLController controller = layerView.getGLController();
             controller.compositorCreated();
             return controller;
@@ -491,7 +569,9 @@ public class LayerView extends FrameLayout {
 
     @Override
     public void setOverScrollMode(int overscrollMode) {
-        super.setOverScrollMode(overscrollMode);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.GINGERBREAD) {
+            super.setOverScrollMode(overscrollMode);
+        }
         if (mPanZoomController != null) {
             mPanZoomController.setOverScrollMode(overscrollMode);
         }
@@ -502,7 +582,11 @@ public class LayerView extends FrameLayout {
         if (mPanZoomController != null) {
             return mPanZoomController.getOverScrollMode();
         }
-        return super.getOverScrollMode();
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.GINGERBREAD) {
+            return super.getOverScrollMode();
+        }
+        return View.OVER_SCROLL_ALWAYS;
     }
 
     @Override

@@ -33,7 +33,7 @@ class nsITextControlElement;
  * and also XUL controls such as <textbox> which use one of these elements behind
  * the scenes.
  *
- * This class is held as a member of nsHTMLInputElement and nsHTMLTextAreaElement.
+ * This class is held as a member of HTMLInputElement and nsHTMLTextAreaElement.
  * The public functions in this class include the public APIs which content/ uses.
  * Layout code uses the nsITextControlElement interface to invoke functions on this
  * class.
@@ -137,6 +137,8 @@ public:
   void SetValue(const nsAString& aValue, bool aUserInput,
                 bool aSetValueAsChanged);
   void GetValue(nsAString& aValue, bool aIgnoreWrap) const;
+  void EmptyValue() { if (mValue) mValue->Truncate(); }
+  bool IsEmpty() const { return mValue ? mValue->IsEmpty() : true; }
 
   nsresult CreatePlaceholderNode();
 
@@ -281,5 +283,20 @@ private:
   SelectionProperties mSelectionProperties;
   bool mPlaceholderVisibility;
 };
+
+inline void
+ImplCycleCollectionUnlink(nsTextEditorState& aField)
+{
+  aField.Unlink();
+}
+
+inline void
+ImplCycleCollectionTraverse(nsCycleCollectionTraversalCallback& aCallback,
+                            nsTextEditorState& aField,
+                            const char* aName,
+                            uint32_t aFlags = 0)
+{
+  aField.Traverse(aCallback);
+}
 
 #endif

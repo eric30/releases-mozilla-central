@@ -15,13 +15,16 @@ namespace mozilla {
 
 /**
  * An AudioNodeStream produces a single audio track with ID
- * AUDIO_NODE_STREAM_TRACK_ID. This track has rate IdealAudioRate().
+ * AUDIO_NODE_STREAM_TRACK_ID. This track has rate AudioContext::sIdealAudioRate
+ * for regular audio contexts, and the rate requested by the web content
+ * for offline audio contexts.
  * Each chunk in the track is a single block of WEBAUDIO_BLOCK_SIZE samples.
  */
 static const int AUDIO_NODE_STREAM_TRACK_ID = 1;
 
 AudioNodeStream::~AudioNodeStream()
 {
+  MOZ_COUNT_DTOR(AudioNodeStream);
 }
 
 void
@@ -52,10 +55,9 @@ void
 AudioNodeStream::SetStreamTimeParameterImpl(uint32_t aIndex, MediaStream* aRelativeToStream,
                                             double aStreamTime)
 {
-  StreamTime streamTime = std::max<MediaTime>(0, SecondsToMediaTime(aStreamTime));
-  GraphTime graphTime = aRelativeToStream->StreamTimeToGraphTime(streamTime);
-  StreamTime thisStreamTime = GraphTimeToStreamTimeOptimistic(graphTime);
-  TrackTicks ticks = TimeToTicksRoundDown(IdealAudioRate(), thisStreamTime);
+  TrackTicks ticks =
+      WebAudioUtils::ConvertDestinationStreamTimeToSourceStreamTime(
+          aStreamTime, this, aRelativeToStream);
   mEngine->SetStreamTimeParameter(aIndex, ticks);
 }
 
@@ -101,19 +103,23 @@ AudioNodeStream::SetInt32Parameter(uint32_t aIndex, int32_t aValue)
 
 void
 AudioNodeStream::SetTimelineParameter(uint32_t aIndex,
-                                      const AudioEventTimeline<ErrorResult>& aValue)
+                                      const AudioParamTimeline& aValue)
 {
   class Message : public ControlMessage {
   public:
     Message(AudioNodeStream* aStream, uint32_t aIndex,
-            const AudioEventTimeline<ErrorResult>& aValue)
-      : ControlMessage(aStream), mValue(aValue), mIndex(aIndex) {}
+            const AudioParamTimeline& aValue)
+      : ControlMessage(aStream),
+        mValue(aValue),
+        mSampleRate(aStream->SampleRate()),
+        mIndex(aIndex) {}
     virtual void Run()
     {
       static_cast<AudioNodeStream*>(mStream)->Engine()->
-          SetTimelineParameter(mIndex, mValue);
+          SetTimelineParameter(mIndex, mValue, mSampleRate);
     }
-    AudioEventTimeline<ErrorResult> mValue;
+    AudioParamTimeline mValue;
+    TrackRate mSampleRate;
     uint32_t mIndex;
   };
   GraphImpl()->AppendMessage(new Message(this, aIndex, aValue));
@@ -159,6 +165,76 @@ AudioNodeStream::SetBuffer(already_AddRefed<ThreadSharedFloatArrayBufferList> aB
   GraphImpl()->AppendMessage(new Message(this, aBuffer));
 }
 
+void
+AudioNodeStream::SetRawArrayData(nsTArray<float>& aData)
+{
+  class Message : public ControlMessage {
+  public:
+    Message(AudioNodeStream* aStream,
+            nsTArray<float>& aData)
+      : ControlMessage(aStream)
+    {
+      mData.SwapElements(aData);
+    }
+    virtual void Run()
+    {
+      static_cast<AudioNodeStream*>(mStream)->Engine()->SetRawArrayData(mData);
+    }
+    nsTArray<float> mData;
+  };
+
+  MOZ_ASSERT(this);
+  GraphImpl()->AppendMessage(new Message(this, aData));
+}
+
+void
+AudioNodeStream::SetChannelMixingParameters(uint32_t aNumberOfChannels,
+                                            ChannelCountMode aChannelCountMode,
+                                            ChannelInterpretation aChannelInterpretation)
+{
+  class Message : public ControlMessage {
+  public:
+    Message(AudioNodeStream* aStream,
+            uint32_t aNumberOfChannels,
+            ChannelCountMode aChannelCountMode,
+            ChannelInterpretation aChannelInterpretation)
+      : ControlMessage(aStream),
+        mNumberOfChannels(aNumberOfChannels),
+        mChannelCountMode(aChannelCountMode),
+        mChannelInterpretation(aChannelInterpretation)
+    {}
+    virtual void Run()
+    {
+      static_cast<AudioNodeStream*>(mStream)->
+        SetChannelMixingParametersImpl(mNumberOfChannels, mChannelCountMode,
+                                       mChannelInterpretation);
+    }
+    uint32_t mNumberOfChannels;
+    ChannelCountMode mChannelCountMode;
+    ChannelInterpretation mChannelInterpretation;
+  };
+
+  MOZ_ASSERT(this);
+  GraphImpl()->AppendMessage(new Message(this, aNumberOfChannels,
+                                         aChannelCountMode,
+                                         aChannelInterpretation));
+}
+
+void
+AudioNodeStream::SetChannelMixingParametersImpl(uint32_t aNumberOfChannels,
+                                                ChannelCountMode aChannelCountMode,
+                                                ChannelInterpretation aChannelInterpretation)
+{
+  // Make sure that we're not clobbering any significant bits by fitting these
+  // values in 16 bits.
+  MOZ_ASSERT(int(aChannelCountMode) < INT16_MAX);
+  MOZ_ASSERT(int(aChannelInterpretation) < INT16_MAX);
+
+  mNumberOfInputChannels = aNumberOfChannels;
+  mChannelCountMode = aChannelCountMode;
+  mChannelInterpretation = aChannelInterpretation;
+}
+
 StreamBuffer::Track*
 AudioNodeStream::EnsureTrack()
 {
@@ -167,32 +243,46 @@ AudioNodeStream::EnsureTrack()
     nsAutoPtr<MediaSegment> segment(new AudioSegment());
     for (uint32_t j = 0; j < mListeners.Length(); ++j) {
       MediaStreamListener* l = mListeners[j];
-      l->NotifyQueuedTrackChanges(Graph(), AUDIO_NODE_STREAM_TRACK_ID, IdealAudioRate(), 0,
+      l->NotifyQueuedTrackChanges(Graph(), AUDIO_NODE_STREAM_TRACK_ID, mSampleRate, 0,
                                   MediaStreamListener::TRACK_EVENT_CREATED,
                                   *segment);
     }
-    track = &mBuffer.AddTrack(AUDIO_NODE_STREAM_TRACK_ID, IdealAudioRate(), 0, segment.forget());
+    track = &mBuffer.AddTrack(AUDIO_NODE_STREAM_TRACK_ID, mSampleRate, 0, segment.forget());
   }
   return track;
 }
 
-AudioChunk*
-AudioNodeStream::ObtainInputBlock(AudioChunk* aTmpChunk)
+bool
+AudioNodeStream::AllInputsFinished() const
 {
   uint32_t inputCount = mInputs.Length();
-  uint32_t outputChannelCount = 0;
+  for (uint32_t i = 0; i < inputCount; ++i) {
+    if (!mInputs[i]->GetSource()->IsFinishedOnGraphThread()) {
+      return false;
+    }
+  }
+  return !!inputCount;
+}
+
+void
+AudioNodeStream::ObtainInputBlock(AudioChunk& aTmpChunk, uint32_t aPortIndex)
+{
+  uint32_t inputCount = mInputs.Length();
+  uint32_t outputChannelCount = 1;
   nsAutoTArray<AudioChunk*,250> inputChunks;
   for (uint32_t i = 0; i < inputCount; ++i) {
+    if (aPortIndex != mInputs[i]->InputNumber()) {
+      // This input is connected to a different port
+      continue;
+    }
     MediaStream* s = mInputs[i]->GetSource();
     AudioNodeStream* a = static_cast<AudioNodeStream*>(s);
     MOZ_ASSERT(a == s->AsAudioNodeStream());
-    if (a->IsFinishedOnGraphThread()) {
+    if (a->IsFinishedOnGraphThread() ||
+        a->IsAudioParamStream()) {
       continue;
     }
-    AudioChunk* chunk = &a->mLastChunk;
-    // XXX when we implement DelayNode, this will no longer be true and we'll
-    // need to treat a null chunk (when the DelayNode hasn't had a chance
-    // to produce data yet) as silence here.
+    AudioChunk* chunk = &a->mLastChunks[mInputs[i]->OutputNumber()];
     MOZ_ASSERT(chunk);
     if (chunk->IsNull()) {
       continue;
@@ -203,31 +293,85 @@ AudioNodeStream::ObtainInputBlock(AudioChunk* aTmpChunk)
       GetAudioChannelsSuperset(outputChannelCount, chunk->mChannelData.Length());
   }
 
+  switch (mChannelCountMode) {
+  case ChannelCountMode::Explicit:
+    // Disregard the output channel count that we've calculated, and just use
+    // mNumberOfInputChannels.
+    outputChannelCount = mNumberOfInputChannels;
+    break;
+  case ChannelCountMode::Clamped_max:
+    // Clamp the computed output channel count to mNumberOfInputChannels.
+    outputChannelCount = std::min(outputChannelCount, mNumberOfInputChannels);
+    break;
+  case ChannelCountMode::Max:
+    // Nothing to do here, just shut up the compiler warning.
+    break;
+  }
+
   uint32_t inputChunkCount = inputChunks.Length();
-  if (inputChunkCount == 0) {
-    aTmpChunk->SetNull(WEBAUDIO_BLOCK_SIZE);
-    return aTmpChunk;
+  if (inputChunkCount == 0 ||
+      (inputChunkCount == 1 && inputChunks[0]->mChannelData.Length() == 0)) {
+    aTmpChunk.SetNull(WEBAUDIO_BLOCK_SIZE);
+    return;
   }
 
-  if (inputChunkCount == 1) {
-    return inputChunks[0];
+  if (inputChunkCount == 1 &&
+      inputChunks[0]->mChannelData.Length() == outputChannelCount) {
+    aTmpChunk = *inputChunks[0];
+    return;
   }
 
-  AllocateAudioBlock(outputChannelCount, aTmpChunk);
+  if (outputChannelCount == 0) {
+    aTmpChunk.SetNull(WEBAUDIO_BLOCK_SIZE);
+    return;
+  }
+
+  AllocateAudioBlock(outputChannelCount, &aTmpChunk);
+  float silenceChannel[WEBAUDIO_BLOCK_SIZE] = {0.f};
+  // The static storage here should be 1KB, so it's fine
+  nsAutoTArray<float, GUESS_AUDIO_CHANNELS*WEBAUDIO_BLOCK_SIZE> downmixBuffer;
 
   for (uint32_t i = 0; i < inputChunkCount; ++i) {
     AudioChunk* chunk = inputChunks[i];
     nsAutoTArray<const void*,GUESS_AUDIO_CHANNELS> channels;
     channels.AppendElements(chunk->mChannelData);
     if (channels.Length() < outputChannelCount) {
-      AudioChannelsUpMix(&channels, outputChannelCount, nullptr);
-      NS_ASSERTION(outputChannelCount == channels.Length(),
-                   "We called GetAudioChannelsSuperset to avoid this");
+      if (mChannelInterpretation == ChannelInterpretation::Speakers) {
+        AudioChannelsUpMix(&channels, outputChannelCount, nullptr);
+        NS_ASSERTION(outputChannelCount == channels.Length(),
+                     "We called GetAudioChannelsSuperset to avoid this");
+      } else {
+        // Fill up the remaining channels by zeros
+        for (uint32_t j = channels.Length(); j < outputChannelCount; ++j) {
+          channels.AppendElement(silenceChannel);
+        }
+      }
+    } else if (channels.Length() > outputChannelCount) {
+      if (mChannelInterpretation == ChannelInterpretation::Speakers) {
+        nsAutoTArray<float*,GUESS_AUDIO_CHANNELS> outputChannels;
+        outputChannels.SetLength(outputChannelCount);
+        downmixBuffer.SetLength(outputChannelCount * WEBAUDIO_BLOCK_SIZE);
+        for (uint32_t j = 0; j < outputChannelCount; ++j) {
+          outputChannels[j] = &downmixBuffer[j * WEBAUDIO_BLOCK_SIZE];
+        }
+
+        AudioChannelsDownMix(channels, outputChannels.Elements(),
+                             outputChannelCount, WEBAUDIO_BLOCK_SIZE);
+
+        channels.SetLength(outputChannelCount);
+        for (uint32_t j = 0; j < channels.Length(); ++j) {
+          channels[j] = outputChannels[j];
+        }
+      } else {
+        // Drop the remaining channels
+        channels.RemoveElementsAt(outputChannelCount,
+                                  channels.Length() - outputChannelCount);
+      }
     }
 
     for (uint32_t c = 0; c < channels.Length(); ++c) {
       const float* inputData = static_cast<const float*>(channels[c]);
-      float* outputData = static_cast<float*>(const_cast<void*>(aTmpChunk->mChannelData[c]));
+      float* outputData = static_cast<float*>(const_cast<void*>(aTmpChunk.mChannelData[c]));
       if (inputData) {
         if (i == 0) {
           AudioBlockCopyChannelWithScale(inputData, chunk->mVolume, outputData);
@@ -241,8 +385,6 @@ AudioNodeStream::ObtainInputBlock(AudioChunk* aTmpChunk)
       }
     }
   }
-
-  return aTmpChunk;
 }
 
 // The MediaStreamGraph guarantees that this is actually one block, for
@@ -250,38 +392,67 @@ AudioNodeStream::ObtainInputBlock(AudioChunk* aTmpChunk)
 void
 AudioNodeStream::ProduceOutput(GraphTime aFrom, GraphTime aTo)
 {
+  if (mMarkAsFinishedAfterThisBlock) {
+    // This stream was finished the last time that we looked at it, and all
+    // of the depending streams have finished their output as well, so now
+    // it's time to mark this stream as finished.
+    FinishOutput();
+  }
+
   StreamBuffer::Track* track = EnsureTrack();
 
-  AudioChunk outputChunk;
   AudioSegment* segment = track->Get<AudioSegment>();
+
+  uint16_t outputCount = std::max(uint16_t(1), mEngine->OutputCount());
+  mLastChunks.SetLength(outputCount);
 
   if (mInCycle) {
     // XXX DelayNode not supported yet so just produce silence
-    outputChunk.SetNull(WEBAUDIO_BLOCK_SIZE);
+    for (uint16_t i = 0; i < outputCount; ++i) {
+      mLastChunks[i].SetNull(WEBAUDIO_BLOCK_SIZE);
+    }
   } else {
-    AudioChunk tmpChunk;
-    AudioChunk* inputChunk = ObtainInputBlock(&tmpChunk);
+    for (uint16_t i = 0; i < outputCount; ++i) {
+      mLastChunks[i].SetNull(0);
+    }
+
+    // We need to generate at least one input
+    uint16_t maxInputs = std::max(uint16_t(1), mEngine->InputCount());
+    OutputChunks inputChunks;
+    inputChunks.SetLength(maxInputs);
+    for (uint16_t i = 0; i < maxInputs; ++i) {
+      ObtainInputBlock(inputChunks[i], i);
+    }
     bool finished = false;
-    mEngine->ProduceAudioBlock(this, *inputChunk, &outputChunk, &finished);
+    if (maxInputs <= 1 && mEngine->OutputCount() <= 1) {
+      mEngine->ProduceAudioBlock(this, inputChunks[0], &mLastChunks[0], &finished);
+    } else {
+      mEngine->ProduceAudioBlocksOnPorts(this, inputChunks, mLastChunks, &finished);
+    }
     if (finished) {
-      FinishOutput();
+      mMarkAsFinishedAfterThisBlock = true;
     }
   }
 
-  mLastChunk = outputChunk;
+  if (mDisabledTrackIDs.Contains(AUDIO_NODE_STREAM_TRACK_ID)) {
+    for (uint32_t i = 0; i < mLastChunks.Length(); ++i) {
+      mLastChunks[i].SetNull(WEBAUDIO_BLOCK_SIZE);
+    }
+  }
+
   if (mKind == MediaStreamGraph::EXTERNAL_STREAM) {
-    segment->AppendAndConsumeChunk(&outputChunk);
+    segment->AppendAndConsumeChunk(&mLastChunks[0]);
   } else {
-    segment->AppendNullData(outputChunk.GetDuration());
+    segment->AppendNullData(mLastChunks[0].GetDuration());
   }
 
   for (uint32_t j = 0; j < mListeners.Length(); ++j) {
     MediaStreamListener* l = mListeners[j];
-    AudioChunk copyChunk = outputChunk;
+    AudioChunk copyChunk = mLastChunks[0];
     AudioSegment tmpSegment;
     tmpSegment.AppendAndConsumeChunk(&copyChunk);
     l->NotifyQueuedTrackChanges(Graph(), AUDIO_NODE_STREAM_TRACK_ID,
-                                IdealAudioRate(), segment->GetDuration(), 0,
+                                mSampleRate, segment->GetDuration(), 0,
                                 tmpSegment);
   }
 }
@@ -307,7 +478,7 @@ AudioNodeStream::FinishOutput()
     MediaStreamListener* l = mListeners[j];
     AudioSegment emptySegment;
     l->NotifyQueuedTrackChanges(Graph(), AUDIO_NODE_STREAM_TRACK_ID,
-                                IdealAudioRate(),
+                                mSampleRate,
                                 track->GetSegment()->GetDuration(),
                                 MediaStreamListener::TRACK_EVENT_ENDED, emptySegment);
   }

@@ -62,9 +62,7 @@ nsGenericDOMDataNode::~nsGenericDOMDataNode()
   }
 }
 
-NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(nsGenericDOMDataNode)
-  nsINode::Trace(tmp, aCallback, aClosure);
-NS_IMPL_CYCLE_COLLECTION_TRACE_END
+NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(nsGenericDOMDataNode)
 
 NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_BEGIN(nsGenericDOMDataNode)
   return Element::CanSkip(tmp, aRemovingAllowed);
@@ -206,6 +204,13 @@ nsGenericDOMDataNode::SubstringData(uint32_t aStart, uint32_t aCount,
     const char *data = mText.Get1b() + aStart;
     CopyASCIItoUTF16(Substring(data, data + amount), aReturn);
   }
+}
+
+NS_IMETHODIMP
+nsGenericDOMDataNode::MozRemove()
+{
+  Remove();
+  return NS_OK;
 }
 
 //----------------------------------------------------------------------

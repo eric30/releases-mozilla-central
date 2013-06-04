@@ -6,18 +6,19 @@
 
 #include "nsIDOMEventTarget.idl"
 
-interface nsIDOMDOMError;
 interface nsIDOMWindow;
 interface nsIDOMDOMCursor;
 interface nsICursorContinueCallback;
 
-[scriptable, builtinclass, uuid(d88998b7-ee30-4ae5-bbed-58f5711929de)]
+[scriptable, builtinclass, uuid(d4c7372a-661c-4798-9a13-af48128609e9)]
 interface nsIDOMDOMRequest : nsIDOMEventTarget
 {
   readonly attribute DOMString readyState; // "pending" or "done"
 
   readonly attribute jsval result;
-  readonly attribute nsIDOMDOMError error;
+
+  // DOMError
+  readonly attribute nsISupports error;
 
   [implicit_jscontext] attribute jsval onsuccess;
   [implicit_jscontext] attribute jsval onerror;

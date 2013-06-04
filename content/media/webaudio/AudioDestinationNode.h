@@ -14,27 +14,33 @@ namespace dom {
 
 class AudioContext;
 
-/**
- * Need to have an nsWrapperCache on AudioDestinationNodes since
- * AudioContext.destination returns them.
- */
-class AudioDestinationNode : public AudioNode,
-                             public nsWrapperCache
+class AudioDestinationNode : public AudioNode
 {
 public:
-  AudioDestinationNode(AudioContext* aContext, MediaStreamGraph* aGraph);
+  // This node type knows what MediaStreamGraph to use based on
+  // whether it's in offline mode.
+  AudioDestinationNode(AudioContext* aContext,
+                       bool aIsOffline,
+                       uint32_t aNumberOfChannels = 0,
+                       uint32_t aLength = 0,
+                       float aSampleRate = 0.0f);
 
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(AudioDestinationNode,
-                                                         AudioNode)
 
-  virtual JSObject* WrapObject(JSContext* aCx, JSObject* aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx,
+                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
-  virtual uint32_t NumberOfOutputs() const MOZ_FINAL MOZ_OVERRIDE
+  virtual uint16_t NumberOfOutputs() const MOZ_FINAL MOZ_OVERRIDE
   {
     return 0;
   }
 
+  void StartRendering();
+
+  void DestroyGraph();
+
+private:
+  uint32_t mFramesToProduce;
 };
 
 }

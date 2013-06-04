@@ -3,7 +3,7 @@
 #include "nsISettingsService.h"
 
 #include "nsCOMPtr.h"
-#include "nsIJSContextStack.h"
+#include "nsIXPConnect.h"
 #include "nsIObserver.h"
 #include "nsIThread.h"
 #include "nsComponentManagerUtils.h"
@@ -153,13 +153,8 @@ TestSettingsObserver::Observe(nsISupports *aSubject,
   }
 
   // Get the safe JS context.
-  nsCOMPtr<nsIThreadJSContextStack> stack =
-    do_GetService("@mozilla.org/js/xpc/ContextStack;1");
-  if (!stack) {
-    CHECK_MSG(false, "Failed to get JSContextStack");
-    return NS_OK;
-  }
-  JSContext *cx = stack->GetSafeJSContext();
+  nsCOMPtr<nsIXPConnect> xpc = do_GetService(nsIXPConnect::GetCID());
+  AutoSafeJSContext cx;
   if (!cx) {
     CHECK_MSG(false, "Failed to GetSafeJSContext");
     return NS_OK;
@@ -167,7 +162,7 @@ TestSettingsObserver::Observe(nsISupports *aSubject,
 
   // Parse the JSON data.
   nsDependentString dataStr(aData);
-  JS::Value data;
+  JS::Rooted<JS::Value> data(cx);
   if (!JS_ParseJSON(cx, dataStr.get(), dataStr.Length(), &data) ||
       !data.isObject()) {
     CHECK_MSG(false, "Failed to get the data");

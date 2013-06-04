@@ -37,9 +37,9 @@ doc_viewer(nsIDocShell *aDocShell)
 {
     if (!aDocShell)
         return nullptr;
-    nsIContentViewer *result = nullptr;
-    aDocShell->GetContentViewer(&result);
-    return result;
+    nsCOMPtr<nsIContentViewer> result;
+    aDocShell->GetContentViewer(getter_AddRefs(result));
+    return result.forget();
 }
 
 static already_AddRefed<nsIPresShell>
@@ -73,9 +73,8 @@ document(nsIDocShell *aDocShell)
     cv->GetDOMDocument(getter_AddRefs(domDoc));
     if (!domDoc)
         return nullptr;
-    nsIDocument *result = nullptr;
-    CallQueryInterface(domDoc, &result);
-    return result;
+    nsCOMPtr<nsIDocument> result = do_QueryInterface(domDoc);
+    return result.forget();
 }
 #endif
 
@@ -307,7 +306,7 @@ nsLayoutDebuggingTools::SetReflowCounts(bool aShow)
 
 static void DumpAWebShell(nsIDocShellTreeItem* aShellItem, FILE* out, int32_t aIndent)
 {
-    nsXPIDLString name;
+    nsString name;
     nsCOMPtr<nsIDocShellTreeItem> parent;
     int32_t i, n;
 
@@ -315,7 +314,7 @@ static void DumpAWebShell(nsIDocShellTreeItem* aShellItem, FILE* out, int32_t aI
         fprintf(out, "  ");
 
     fprintf(out, "%p '", static_cast<void*>(aShellItem));
-    aShellItem->GetName(getter_Copies(name));
+    aShellItem->GetName(name);
     aShellItem->GetSameTypeParent(getter_AddRefs(parent));
     fputs(NS_LossyConvertUTF16toASCII(name).get(), out);
     fprintf(out, "' parent=%p <\n", static_cast<void*>(parent));

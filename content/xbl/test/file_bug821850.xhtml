@@ -40,12 +40,14 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=821850
           ok(bound, "bound is non-null");
           is(bound.method('baz'), "method:baz", "Xray methods work");
           is(bound.prop, "propVal", "Property Xrays work");
-          is(bound.primitiveField, 2, "Field Xrays work");
-          is(bound.objectField.bar.a, 1, "Field Xrays work on objects");
-          is(bound.contentField.foo, 10, "Field Xrays work on content objects");
-          var hole = bound.contentField.rabbit.hole;
-          is(hole.win, window, "We gain back Xray vision when hitting a native object");
-          ok(Cu.isXrayWrapper(hole.win), "Really is Xray");
+          is(bound.primitiveField, undefined, "Xrays don't show fields");
+          is(bound.wrappedJSObject.primitiveField, 2, "Waiving Xrays show fields");
+
+          // Check that here document.QueryInterface works
+          ok("QueryInterface" in document,
+             "Should have a document.QueryInterface here");
+          is(document.QueryInterface(Components.interfaces.nsIDOMDocument),
+             document, "Should be able to QI the document");
 
           // This gets invoked by an event handler.
           window.finish = function() {
@@ -54,7 +56,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=821850
             is(bound.wrappedJSObject.method('bay'), "hah", "Xray waived methods work");
             is(bound.prop, "set:someOtherVal", "Xray props work");
             is(bound.wrappedJSObject.prop, "redefined", "Xray waived props work");
-            is(bound.primitiveField, 321, "Can't do anything about redefined fields");
+            is(bound.wrappedJSObject.primitiveField, 321, "Can't do anything about redefined fields");
 
             SimpleTest.finish();
           }
@@ -63,12 +65,24 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=821850
           win.go();
         </constructor>
         <field name="primitiveField">2</field>
-        <field name="objectField">({ foo: 2, bar: {a: 1} })</field>
-        <field name="contentField">XPCNativeWrapper.unwrap(window).contentVal</field>
         <method name="method">
           <parameter name="arg" />
           <body>
             return "method:" + arg;
+          </body>
+        </method>
+        <method name="passMeAJSObject">
+          <parameter name="arg" />
+          <body>
+            is(typeof arg.prop, 'undefined', "No properties");
+            is(Object.getOwnPropertyNames(arg).length, 0, "Should have no own properties");
+            try {
+              arg.foo = 2;
+              ok(true, "Stuff fails silently");
+            } catch (e) {
+              ok(false, "Stuff should fail silently");
+            }
+            is(typeof arg.foo, 'undefined', "Shouldn't place props");
           </body>
         </method>
         <property name="prop">
@@ -95,6 +109,10 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=821850
   window.contentVal = { foo: 10, rabbit: { hole: { bar: 100, win: window} } };
   ok(true, "Set contentVal");
 
+  // Check that we're not exposing QueryInterface to non-XBL code
+  ok(!("QueryInterface" in document),
+     "Should not have a document.QueryInterface here");
+
   function go() {
     "use strict";
 
@@ -113,18 +131,19 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=821850
     // Inspect the bound element.
     var bound = document.getElementById('bound');
     is(bound.primitiveField, 2, "Can see primitive fields");
-    is(typeof bound.objectField, "object", "objectField exists");
-    checkThrows(function() bound.objectField.foo);
     is(bound.method("foo"), "method:foo", "Can invoke XBL method from content");
     is(bound.prop, "propVal", "Can access properties from content");
     bound.prop = "someOtherVal";
     is(bound.prop, "set:someOtherVal", "Can set properties from content");
 
+    // Make sure we can't pass JS objects to the XBL scope.
+    var proto = bound.__proto__;
+    proto.passMeAJSObject({prop: 2});
+
     //
     // Try sticking a bunch of stuff on the prototype object.
     //
 
-    var proto = bound.__proto__;
     proto.someExpando = 201;
     is(bound.someExpando, 201, "Can stick non-XBL properties on the proto");
 

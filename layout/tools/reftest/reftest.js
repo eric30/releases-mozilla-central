@@ -566,6 +566,8 @@ function BuildConditionSandbox(aURL) {
       gWindowUtils.layerManagerType != "Basic";
     sandbox.layersOpenGL =
       gWindowUtils.layerManagerType == "OpenGL";
+    sandbox.layersOMTC =
+      gWindowUtils.layerManagerRemote == true;
 
     // Shortcuts for widget toolkits.
     sandbox.B2G = xr.widgetToolkit == "gonk";
@@ -1102,12 +1104,6 @@ function ServeFiles(manifestPrincipal, depth, aURL, files)
 // Return true iff this window is focused when this function returns.
 function Focus()
 {
-    // FIXME/bug 583976: focus doesn't yet work with out-of-process
-    // content.
-    if (gBrowserIsRemote) {
-        return false;
-    }
-
     var fm = CC["@mozilla.org/focus-manager;1"].getService(CI.nsIFocusManager);
     fm.focusedWindow = gContainingWindow;
 #ifdef XP_MACOSX
@@ -1508,7 +1504,7 @@ function RecordResult(testRunTime, errorMsg, scriptResults)
         gCurrentCanvas = gURICanvases[gCurrentURL];
     }
     if (gCurrentCanvas == null) {
-        gDumpLog("REFTEST TEST-UNEXPECTED-FAIL | | program error managing snapshots\n");
+        gDumpLog("REFTEST TEST-UNEXPECTED-FAIL | " + gCurrentURL + " | program error managing snapshots\n");
         ++gTestResults.Exception;
     }
     if (gState == 1) {
@@ -1821,7 +1817,7 @@ function RecvContentReady()
 
 function RecvException(what)
 {
-    gDumpLog("REFTEST TEST-UNEXPECTED-FAIL | | "+ what +"\n");
+    gDumpLog("REFTEST TEST-UNEXPECTED-FAIL | " + gCurrentURL + " | " + what + "\n");
     ++gTestResults.Exception;
 }
 
@@ -1844,7 +1840,7 @@ function RecvLog(type, msg)
     } else if (type == "warning") {
         LogWarning(msg);
     } else {
-        gDumpLog("REFTEST TEST-UNEXPECTED-FAIL | | unknown log type "+ type +"\n");
+        gDumpLog("REFTEST TEST-UNEXPECTED-FAIL | " + gCurrentURL + " | unknown log type " + type + "\n");
         ++gTestResults.Exception;
     }
 }

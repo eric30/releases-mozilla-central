@@ -12,16 +12,18 @@ const STACK_FRAMES_SOURCE_URL_TRIM_SECTION = "center";
 const STACK_FRAMES_POPUP_SOURCE_URL_MAX_LENGTH = 32; // chars
 const STACK_FRAMES_POPUP_SOURCE_URL_TRIM_SECTION = "center";
 const STACK_FRAMES_SCROLL_DELAY = 100; // ms
-const PANES_APPEARANCE_DELAY = 50; // ms
 const BREAKPOINT_LINE_TOOLTIP_MAX_LENGTH = 1000; // chars
 const BREAKPOINT_CONDITIONAL_POPUP_POSITION = "before_start";
 const BREAKPOINT_CONDITIONAL_POPUP_OFFSET_X = 7; // px
 const BREAKPOINT_CONDITIONAL_POPUP_OFFSET_Y = -3; // px
-const FILTERED_SOURCES_MAX_RESULTS = 10;
+const RESULTS_PANEL_POPUP_POSITION = "before_end";
+const RESULTS_PANEL_MAX_RESULTS = 10;
 const GLOBAL_SEARCH_EXPAND_MAX_RESULTS = 50;
 const GLOBAL_SEARCH_LINE_MAX_LENGTH = 300; // chars
 const GLOBAL_SEARCH_ACTION_MAX_DELAY = 1500; // ms
+const FUNCTION_SEARCH_ACTION_MAX_DELAY = 400; // ms
 const SEARCH_GLOBAL_FLAG = "!";
+const SEARCH_FUNCTION_FLAG = "@";
 const SEARCH_TOKEN_FLAG = "#";
 const SEARCH_LINE_FLAG = ":";
 const SEARCH_VARIABLE_FLAG = "*";
@@ -36,7 +38,7 @@ let DebuggerView = {
    * @param function aCallback
    *        Called after the view finishes initializing.
    */
-  initialize: function DV_initialize(aCallback) {
+  initialize: function(aCallback) {
     dumpn("Initializing the DebuggerView");
 
     this._initializeWindow();
@@ -46,6 +48,7 @@ let DebuggerView = {
     this.Options.initialize();
     this.Filtering.initialize();
     this.FilteredSources.initialize();
+    this.FilteredFunctions.initialize();
     this.ChromeGlobals.initialize();
     this.StackFrames.initialize();
     this.Sources.initialize();
@@ -69,13 +72,14 @@ let DebuggerView = {
    * @param function aCallback
    *        Called after the view finishes destroying.
    */
-  destroy: function DV_destroy(aCallback) {
+  destroy: function(aCallback) {
     dumpn("Destroying the DebuggerView");
 
     this.Toolbar.destroy();
     this.Options.destroy();
     this.Filtering.destroy();
     this.FilteredSources.destroy();
+    this.FilteredFunctions.destroy();
     this.ChromeGlobals.destroy();
     this.StackFrames.destroy();
     this.Sources.destroy();
@@ -91,7 +95,7 @@ let DebuggerView = {
   /**
    * Initializes the UI for the window.
    */
-  _initializeWindow: function DV__initializeWindow() {
+  _initializeWindow: function() {
     dumpn("Initializing the DebuggerView window");
 
     let isRemote = window._isRemoteDebugger;
@@ -112,7 +116,7 @@ let DebuggerView = {
   /**
    * Destroys the UI for the window.
    */
-  _destroyWindow: function DV__destroyWindow() {
+  _destroyWindow: function() {
     dumpn("Destroying the DebuggerView window");
 
     if (window._isRemoteDebugger || window._isChromeDebugger) {
@@ -126,7 +130,7 @@ let DebuggerView = {
   /**
    * Initializes the UI for all the displayed panes.
    */
-  _initializePanes: function DV__initializePanes() {
+  _initializePanes: function() {
     dumpn("Initializing the DebuggerView panes");
 
     this._sourcesPane = document.getElementById("sources-pane");
@@ -144,7 +148,7 @@ let DebuggerView = {
   /**
    * Destroys the UI for all the displayed panes.
    */
-  _destroyPanes: function DV__destroyPanes() {
+  _destroyPanes: function() {
     dumpn("Destroying the DebuggerView panes");
 
     Prefs.sourcesWidth = this._sourcesPane.getAttribute("width");
@@ -161,7 +165,7 @@ let DebuggerView = {
    * @param function aCallback
    *        Called after the editor finishes initializing.
    */
-  _initializeEditor: function DV__initializeEditor(aCallback) {
+  _initializeEditor: function(aCallback) {
     dumpn("Initializing the DebuggerView editor");
 
     let placeholder = document.getElementById("editor");
@@ -174,18 +178,18 @@ let DebuggerView = {
     };
 
     this.editor = new SourceEditor();
-    this.editor.init(placeholder, config, function() {
+    this.editor.init(placeholder, config, () => {
       this._loadingText = L10N.getStr("loadingText");
       this._onEditorLoad();
       aCallback();
-    }.bind(this));
+    });
   },
 
   /**
    * The load event handler for the source editor, also executing any necessary
    * post-load operations.
    */
-  _onEditorLoad: function DV__onEditorLoad() {
+  _onEditorLoad: function() {
     dumpn("Finished loading the DebuggerView editor");
 
     DebuggerController.Breakpoints.initialize();
@@ -197,7 +201,7 @@ let DebuggerView = {
    * Destroys the SourceEditor instance and also executes any necessary
    * post-unload operations.
    */
-  _destroyEditor: function DV__destroyEditor() {
+  _destroyEditor: function() {
     dumpn("Destroying the DebuggerView editor");
 
     DebuggerController.Breakpoints.destroy();
@@ -215,7 +219,7 @@ let DebuggerView = {
    * @param string aTextContent [optional]
    *        The source text content.
    */
-  setEditorMode: function DV_setEditorMode(aUrl, aContentType = "", aTextContent = "") {
+  setEditorMode: function(aUrl, aContentType = "", aTextContent = "") {
     if (aContentType) {
       if (/javascript/.test(aContentType)) {
         this.editor.setMode(SourceEditor.MODES.JAVASCRIPT);
@@ -260,7 +264,7 @@ let DebuggerView = {
 
     // If the source is not loaded, display a placeholder text.
     if (!aSource.loaded) {
-      DebuggerController.SourceScripts.getText(aSource, set.bind(this, aSource));
+      DebuggerController.SourceScripts.getText(aSource, set.bind(this));
     }
     // If the source is already loaded, display it immediately.
     else {
@@ -324,7 +328,7 @@ let DebuggerView = {
    *          - noCaret: don't set the caret location at the specified line
    *          - noDebug: don't set the debug location at the specified line
    */
-  updateEditor: function DV_updateEditor(aUrl, aLine, aFlags = {}) {
+  updateEditor: function(aUrl, aLine, aFlags = {}) {
     if (!this._isInitialized || this._isDestroyed) {
       return;
     }
@@ -350,7 +354,9 @@ let DebuggerView = {
     }
     // If the requested source exists, display it and update.
     else if (this.Sources.containsValue(aUrl) && !aFlags.noSwitch) {
+      this.Sources.node.preventFocusOnSelection = true;
       this.Sources.selectedValue = aUrl;
+      this.Sources.node.preventFocusOnSelection = false;
       set(aLine);
     }
     // Dumb request, invalidate the caret position and debug location.
@@ -371,10 +377,10 @@ let DebuggerView = {
         aLine += aFlags.lineOffset;
       }
       if (!aFlags.noCaret) {
-        editor.setCaretPosition(aLine - 1);
+        editor.setCaretPosition(aLine - 1, aFlags.columnOffset);
       }
       if (!aFlags.noDebug) {
-        editor.setDebugLocation(aLine - 1);
+        editor.setDebugLocation(aLine - 1, aFlags.columnOffset);
       }
     }
   },
@@ -388,7 +394,7 @@ let DebuggerView = {
    * @return string
    *         The specified line's text.
    */
-  getEditorLine: function SS_getEditorLine(aLine) {
+  getEditorLine: function(aLine) {
     let line = aLine || this.editor.getCaretPosition().line;
     let start = this.editor.getLineStart(line);
     let end = this.editor.getLineEnd(line);
@@ -396,71 +402,45 @@ let DebuggerView = {
   },
 
   /**
+   * Gets the text in the source editor's selection bounds.
+   *
+   * @return string
+   *         The selected text.
+   */
+  getEditorSelection: function() {
+    let selection = this.editor.getSelection();
+    return this.editor.getText(selection.start, selection.end);
+  },
+
+  /**
    * Gets the visibility state of the instruments pane.
    * @return boolean
    */
   get instrumentsPaneHidden()
-    this._instrumentsPaneToggleButton.hasAttribute("toggled"),
+    this._instrumentsPane.hasAttribute("pane-collapsed"),
 
   /**
    * Sets the instruments pane hidden or visible.
    *
-   * @param object aFlags [optional]
-   *        An object containing some of the following boolean properties:
-   *        - visible: true if the pane should be shown, false for hidden
+   * @param object aFlags
+   *        An object containing some of the following properties:
+   *        - visible: true if the pane should be shown, false to hide
    *        - animated: true to display an animation on toggle
    *        - delayed: true to wait a few cycles before toggle
    *        - callback: a function to invoke when the toggle finishes
    */
-  toggleInstrumentsPane: function DV__toggleInstrumentsPane(aFlags = {}) {
-    // Avoid useless toggles.
-    if (aFlags.visible == !this.instrumentsPaneHidden) {
-      if (aFlags.callback) aFlags.callback();
-      return;
-    }
+  toggleInstrumentsPane: function(aFlags) {
+    let pane = this._instrumentsPane;
+    let button = this._instrumentsPaneToggleButton;
 
-    // Computes and sets the pane margins in order to hide or show it.
-    function set() {
-      if (aFlags.visible) {
-        this._instrumentsPane.style.marginLeft = "0";
-        this._instrumentsPane.style.marginRight = "0";
-        this._instrumentsPaneToggleButton.removeAttribute("toggled");
-        this._instrumentsPaneToggleButton.setAttribute("tooltiptext", this._collapsePaneString);
-      } else {
-        let margin = ~~(this._instrumentsPane.getAttribute("width")) + 1;
-        this._instrumentsPane.style.marginLeft = -margin + "px";
-        this._instrumentsPane.style.marginRight = -margin + "px";
-        this._instrumentsPaneToggleButton.setAttribute("toggled", "true");
-        this._instrumentsPaneToggleButton.setAttribute("tooltiptext", this._expandPaneString);
-      }
+    ViewHelpers.togglePane(aFlags, pane);
 
-      if (aFlags.animated) {
-        // Displaying the panes may have the effect of triggering scrollbars to
-        // appear in the source editor, which would render the currently
-        // highlighted line to appear behind them in some cases.
-        window.addEventListener("transitionend", function onEvent() {
-          window.removeEventListener("transitionend", onEvent, false);
-          DebuggerView.updateEditor();
-
-          // Invoke the callback when the transition ended.
-          if (aFlags.callback) aFlags.callback();
-        }, false);
-      } else {
-        // Invoke the callback immediately since there's no transition.
-        if (aFlags.callback) aFlags.callback();
-      }
-    }
-
-    if (aFlags.animated) {
-      this._instrumentsPane.setAttribute("animated", "");
+    if (aFlags.visible) {
+      button.removeAttribute("pane-collapsed");
+      button.setAttribute("tooltiptext", this._collapsePaneString);
     } else {
-      this._instrumentsPane.removeAttribute("animated");
-    }
-
-    if (aFlags.delayed) {
-      window.setTimeout(set.bind(this), PANES_APPEARANCE_DELAY);
-    } else {
-      set.call(this);
+      button.setAttribute("pane-collapsed", "");
+      button.setAttribute("tooltiptext", this._expandPaneString);
     }
   },
 
@@ -470,7 +450,7 @@ let DebuggerView = {
    * @param function aCallback
    *        A function to invoke when the toggle finishes.
    */
-  showInstrumentsPane: function DV__showInstrumentsPane(aCallback) {
+  showInstrumentsPane: function(aCallback) {
     DebuggerView.toggleInstrumentsPane({
       visible: true,
       animated: true,
@@ -482,17 +462,17 @@ let DebuggerView = {
   /**
    * Handles any initialization on a tab navigation event issued by the client.
    */
-  _handleTabNavigation: function DV__handleTabNavigation() {
+  _handleTabNavigation: function() {
     dumpn("Handling tab navigation in the DebuggerView");
 
     this.Filtering.clearSearch();
+    this.FilteredSources.clearView();
+    this.FilteredFunctions.clearView();
     this.GlobalSearch.clearView();
-    this.GlobalSearch.clearCache();
     this.ChromeGlobals.empty();
     this.StackFrames.empty();
     this.Sources.empty();
     this.Variables.empty();
-    SourceUtils.clearCache();
 
     if (this.editor) {
       this.editor.setText("");
@@ -587,8 +567,7 @@ ListWidget.prototype = {
    * @return nsIDOMNode
    *         The element associated with the displayed item.
    */
-  insertItemAt:
-  function DVSL_insertItemAt(aIndex, aLabel, aValue, aDescription, aAttachment) {
+  insertItemAt: function(aIndex, aLabel, aValue, aDescription, aAttachment) {
     let list = this._list;
     let childNodes = list.childNodes;
 
@@ -608,7 +587,7 @@ ListWidget.prototype = {
    * @return nsIDOMNode
    *         The element associated with the displayed item.
    */
-  getItemAtIndex: function DVSL_getItemAtIndex(aIndex) {
+  getItemAtIndex: function(aIndex) {
     return this._list.childNodes[aIndex];
   },
 
@@ -618,7 +597,7 @@ ListWidget.prototype = {
    * @param nsIDOMNode aChild
    *        The element associated with the displayed item.
    */
-  removeChild: function DVSL__removeChild(aChild) {
+  removeChild: function(aChild) {
     this._list.removeChild(aChild);
 
     if (this._selectedItem == aChild) {
@@ -632,13 +611,12 @@ ListWidget.prototype = {
   /**
    * Immediately removes all of the child nodes from this container.
    */
-  removeAllItems: function DVSL_removeAllItems() {
+  removeAllItems: function() {
     let parent = this._parent;
     let list = this._list;
-    let firstChild;
 
-    while ((firstChild = list.firstChild)) {
-      list.removeChild(firstChild);
+    while (list.hasChildNodes()) {
+      list.firstChild.remove();
     }
     parent.scrollTop = 0;
     parent.scrollLeft = 0;
@@ -700,7 +678,7 @@ ListWidget.prototype = {
   /**
    * Creates and appends a label displayed permanently in this container's header.
    */
-  _appendPermaNotice: function DVSL__appendPermaNotice() {
+  _appendPermaNotice: function() {
     if (this._permaTextNode || !this._permaTextValue) {
       return;
     }
@@ -716,7 +694,7 @@ ListWidget.prototype = {
   /**
    * Creates and appends a label signaling that this container is empty.
    */
-  _appendEmptyNotice: function DVSL__appendEmptyNotice() {
+  _appendEmptyNotice: function() {
     if (this._emptyTextNode || !this._emptyTextValue) {
       return;
     }
@@ -732,7 +710,7 @@ ListWidget.prototype = {
   /**
    * Removes the label signaling that this container is empty.
    */
-  _removeEmptyNotice: function DVSL__removeEmptyNotice() {
+  _removeEmptyNotice: function() {
     if (!this._emptyTextNode) {
       return;
     }
@@ -751,6 +729,201 @@ ListWidget.prototype = {
 };
 
 /**
+ * A custom items container, used for displaying views like the
+ * FilteredSources, FilteredFunctions etc., inheriting the generic MenuContainer.
+ */
+function ResultsPanelContainer() {
+  this._createItemView = this._createItemView.bind(this);
+}
+
+create({ constructor: ResultsPanelContainer, proto: MenuContainer.prototype }, {
+  onClick: null,
+  onSelect: null,
+
+  /**
+   * Sets the anchor node for this container panel.
+   * @param nsIDOMNode aNode
+   */
+  set anchor(aNode) {
+    this._anchor = aNode;
+
+    // If the anchor node is not null, create a panel to attach to the anchor
+    // when showing the popup.
+    if (aNode) {
+      if (!this._panel) {
+        this._panel = document.createElement("panel");
+        this._panel.className = "results-panel";
+        this._panel.setAttribute("level", "top");
+        this._panel.setAttribute("noautofocus", "true");
+        document.documentElement.appendChild(this._panel);
+      }
+      if (!this.node) {
+        this.node = new ListWidget(this._panel);
+        this.node.itemType = "vbox";
+        this.node.itemFactory = this._createItemView;
+        this.node.addEventListener("click", this.onClick, false);
+      }
+    }
+    // Cleanup the anchor and remove the previously created panel.
+    else {
+      if (this._panel) {
+        document.documentElement.removeChild(this._panel);
+        this._panel = null;
+      }
+      if (this.node) {
+        this.node.removeEventListener("click", this.onClick, false);
+        this.node = null;
+      }
+    }
+  },
+
+  /**
+   * Gets the anchor node for this container panel.
+   * @return nsIDOMNode
+   */
+  get anchor() this._anchor,
+
+  /**
+   * Sets the default top, left and position params when opening the panel.
+   * @param object aOptions
+   */
+  set options(aOptions) {
+    this._top = aOptions.top;
+    this._left = aOptions.left;
+    this._position = aOptions.position;
+  },
+
+  /**
+   * Gets the default params for when opening the panel.
+   * @return object
+   */
+  get options() ({
+    top: this._top,
+    left: this._left,
+    position: this._position
+  }),
+
+  /**
+   * Sets the container panel hidden or visible. It's hidden by default.
+   * @param boolean aFlag
+   */
+  set hidden(aFlag) {
+    if (aFlag) {
+      this._panel.hidePopup();
+    } else {
+      this._panel.openPopup(this._anchor, this._position, this._left, this._top);
+      this.anchor.focus();
+    }
+  },
+
+  /**
+   * Gets this container's visibility state.
+   * @return boolean
+   */
+  get hidden()
+    this._panel.state == "closed" ||
+    this._panel.state == "hiding",
+
+  /**
+   * Removes all items from this container and hides it.
+   */
+  clearView: function() {
+    this.hidden = true;
+    this.empty();
+    window.dispatchEvent(document, "Debugger:ResultsPanelContainer:ViewCleared");
+  },
+
+  /**
+   * Focuses the next found item in this container.
+   */
+  focusNext: function() {
+    let nextIndex = this.selectedIndex + 1;
+    if (nextIndex >= this.itemCount) {
+      nextIndex = 0;
+    }
+    this.select(this.getItemAtIndex(nextIndex));
+  },
+
+  /**
+   * Focuses the previously found item in this container.
+   */
+  focusPrev: function() {
+    let prevIndex = this.selectedIndex - 1;
+    if (prevIndex < 0) {
+      prevIndex = this.itemCount - 1;
+    }
+    this.select(this.getItemAtIndex(prevIndex));
+  },
+
+  /**
+   * Updates the selected item in this container.
+   *
+   * @param MenuItem | number aItem
+   *        The item associated with the element to select.
+   */
+  select: function(aItem) {
+    if (typeof aItem == "number") {
+      this.select(this.getItemAtIndex(aItem));
+      return;
+    }
+
+    // Update the currently selected item in this container using the
+    // selectedItem setter in the MenuContainer prototype chain.
+    this.selectedItem = aItem;
+
+    // Invoke the attached selection callback if available in any
+    // inheriting prototype.
+    if (this.onSelect) {
+      this.onSelect({ target: aItem.target });
+    }
+  },
+
+  /**
+   * Customization function for creating an item's UI.
+   *
+   * @param nsIDOMNode aElementNode
+   *        The element associated with the displayed item.
+   * @param any aAttachment
+   *        Some attached primitive/object.
+   * @param string aLabel
+   *        The item's label.
+   * @param string aValue
+   *        The item's value.
+   * @param string aDescription
+   *        An optional description of the item.
+   */
+  _createItemView: function(aElementNode, aAttachment, aLabel, aValue, aDescription) {
+    let labelsGroup = document.createElement("hbox");
+    if (aDescription) {
+      let preLabelNode = document.createElement("label");
+      preLabelNode.className = "plain results-panel-item-pre";
+      preLabelNode.setAttribute("value", aDescription);
+      labelsGroup.appendChild(preLabelNode);
+    }
+    if (aLabel) {
+      let labelNode = document.createElement("label");
+      labelNode.className = "plain results-panel-item-name";
+      labelNode.setAttribute("value", aLabel);
+      labelsGroup.appendChild(labelNode);
+    }
+
+    let valueNode = document.createElement("label");
+    valueNode.className = "plain results-panel-item-details";
+    valueNode.setAttribute("value", aValue);
+
+    aElementNode.className = "light results-panel-item";
+    aElementNode.appendChild(labelsGroup);
+    aElementNode.appendChild(valueNode);
+  },
+
+  _anchor: null,
+  _panel: null,
+  _position: RESULTS_PANEL_POPUP_POSITION,
+  _left: 0,
+  _top: 0
+});
+
+/**
  * A simple way of displaying a "Connect to..." prompt.
  */
 function RemoteDebuggerPrompt() {
@@ -764,7 +937,7 @@ RemoteDebuggerPrompt.prototype = {
    * @param boolean aIsReconnectingFlag
    *        True to show the reconnect message instead of the connect request.
    */
-  show: function RDP_show(aIsReconnectingFlag) {
+  show: function(aIsReconnectingFlag) {
     let check = { value: Prefs.remoteAutoConnect };
     let input = { value: Prefs.remoteHost + ":" + Prefs.remotePort };
     let parts;

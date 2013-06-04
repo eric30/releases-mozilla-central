@@ -1,6 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=78:
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -24,7 +23,7 @@
  * location. The GC must therefore know about all live pointers to a thing,
  * not just one of them, in order to behave correctly.
  *
- * The |Root| and |Handle| classes below are used to root stack locations
+ * The |Rooted| and |Handle| classes below are used to root stack locations
  * whose value may be held live across a call that can trigger GC. For a
  * code fragment such as:
  *
@@ -49,7 +48,7 @@
  * dangerous-looking actions cannot trigger a GC: js_malloc, cx->malloc_,
  * rt->malloc_, and friends and JS_ReportOutOfMemory.
  *
- * The following family of four classes will exactly root a stack location.
+ * The following family of three classes will exactly root a stack location.
  * Incorrect usage of these classes will result in a compile error in almost
  * all cases. Therefore, it is very hard to be incorrectly rooted if you use
  * these classes exclusively. These classes are all templated on the type T of
@@ -58,7 +57,7 @@
  * - Rooted<T> declares a variable of type T, whose value is always rooted.
  *   Rooted<T> may be automatically coerced to a Handle<T>, below. Rooted<T>
  *   should be used whenever a local variable's value may be held live across a
- *   call which can trigger a GC. This is generally true of
+ *   call which can trigger a GC.
  *
  * - Handle<T> is a const reference to a Rooted<T>. Functions which take GC
  *   things or values as arguments and need to root those arguments should
@@ -74,8 +73,9 @@
  *   updating the value of the referenced Rooted<T>. A MutableHandle<T> can be
  *   created from a Rooted<T> by using |Rooted<T>::operator&()|.
  *
- * In some cases the small performance overhead of exact rooting is too much.
- * In these cases, try the following:
+ * In some cases the small performance overhead of exact rooting (measured to
+ * be a few nanoseconds on desktop) is too much. In these cases, try the
+ * following:
  *
  * - Move all Rooted<T> above inner loops: this allows you to re-use the root
  *   on each iteration of the loop.
@@ -83,28 +83,23 @@
  * - Pass Handle<T> through your hot call stack to avoid re-rooting costs at
  *   every invocation.
  *
- * There also exists a set of RawT typedefs for modules without rooting
- * concerns, such as the GC. Do not use these as they provide no rooting
- * protection whatsoever.
- *
  * The following diagram explains the list of supported, implicit type
  * conversions between classes of this family:
  *
- *  RawT -----> Rooted<T> ----> Handle<T>
- *                 |               ^
- *                 |               |
- *                 |               |
- *                 +---> MutableHandle<T>
- *                 (via &)
+ *  Rooted<T> ----> Handle<T>
+ *     |               ^
+ *     |               |
+ *     |               |
+ *     +---> MutableHandle<T>
+ *     (via &)
  *
- * Currently all of these types implicit conversion to RawT. These are present
- * only for the purpose of bootstrapping exact rooting and will be removed in
- * the future (Bug 817164).
+ * All of these types have an implicit conversion to raw pointers.
  */
 
 namespace js {
 
 class Module;
+class ScriptSourceObject;
 
 template <typename T>
 struct RootMethods {};
@@ -117,6 +112,31 @@ class HandleBase {};
 
 template <typename T>
 class MutableHandleBase {};
+
+template <typename T>
+class HeapBase {};
+
+/*
+ * js::NullPtr acts like a NULL pointer in contexts that require a Handle.
+ *
+ * Handle provides an implicit constructor for js::NullPtr so that, given:
+ *   foo(Handle<JSObject*> h);
+ * callers can simply write:
+ *   foo(js::NullPtr());
+ * which avoids creating a Rooted<JSObject*> just to pass NULL.
+ *
+ * This is the SpiderMonkey internal variant. js::NullPtr should be used in
+ * preference to JS::NullPtr to avoid the GOT access required for JS_PUBLIC_API
+ * symbols.
+ */
+struct NullPtr
+{
+    static void * const constNullValue;
+};
+
+namespace gc {
+struct Cell;
+} /* namespace gc */
 
 } /* namespace js */
 
@@ -136,15 +156,80 @@ CheckStackRoots(JSContext *cx);
 #endif
 
 /*
- * Handle provides an implicit constructor for NullPtr so that, given:
+ * JS::NullPtr acts like a NULL pointer in contexts that require a Handle.
+ *
+ * Handle provides an implicit constructor for JS::NullPtr so that, given:
  *   foo(Handle<JSObject*> h);
  * callers can simply write:
- *   foo(NullPtr());
+ *   foo(JS::NullPtr());
  * which avoids creating a Rooted<JSObject*> just to pass NULL.
  */
-struct NullPtr
+struct JS_PUBLIC_API(NullPtr)
 {
     static void * const constNullValue;
+};
+
+/*
+ * Encapsulated pointer class for use on the heap.
+ *
+ * Implements post barriers for heap-based GC thing pointers outside the engine.
+ */
+template <typename T>
+class Heap : public js::HeapBase<T>
+{
+  public:
+    Heap() { set(js::RootMethods<T>::initial()); }
+    explicit Heap(T p) { set(p); }
+    explicit Heap(const Heap<T> &p) { set(p.ptr); }
+
+    ~Heap() {
+        if (js::RootMethods<T>::needsPostBarrier(ptr))
+            relocate();
+    }
+
+    bool operator!=(const T &other) { return *ptr != other; }
+    bool operator==(const T &other) { return *ptr == other; }
+
+    operator T() const { return ptr; }
+    T operator->() const { return ptr; }
+    const T *address() const { return &ptr; }
+    const T &get() const { return ptr; }
+
+    T *unsafeGet() { return &ptr; }
+
+    Heap<T> &operator=(T p) {
+        set(p);
+        return *this;
+    }
+
+    void set(T newPtr) {
+        JS_ASSERT(!js::RootMethods<T>::poisoned(newPtr));
+        if (js::RootMethods<T>::needsPostBarrier(newPtr)) {
+            ptr = newPtr;
+            post();
+        } else if (js::RootMethods<T>::needsPostBarrier(ptr)) {
+            relocate();  /* Called before overwriting ptr. */
+            ptr = newPtr;
+        } else {
+            ptr = newPtr;
+        }
+    }
+
+  private:
+    void post() {
+#ifdef JSGC_GENERATIONAL
+        JS_ASSERT(js::RootMethods<T>::needsPostBarrier(ptr));
+        js::RootMethods<T>::postBarrier(&ptr);
+#endif
+    }
+
+    void relocate() {
+#ifdef JSGC_GENERATIONAL
+        js::RootMethods<T>::relocate(&ptr);
+#endif
+    }
+
+    T ptr;
 };
 
 /*
@@ -156,7 +241,7 @@ struct NullPtr
  * specialization, define a HandleBase<T> specialization containing them.
  */
 template <typename T>
-class Handle : public js::HandleBase<T>
+class MOZ_NONHEAP_CLASS Handle : public js::HandleBase<T>
 {
     friend class MutableHandle<T>;
 
@@ -170,13 +255,25 @@ class Handle : public js::HandleBase<T>
     }
 
     /* Create a handle for a NULL pointer. */
-    Handle(NullPtr) {
-        typedef typename js::tl::StaticAssert<mozilla::IsPointer<T>::value>::result _;
-        ptr = reinterpret_cast<const T *>(&NullPtr::constNullValue);
+    Handle(js::NullPtr) {
+        MOZ_STATIC_ASSERT(mozilla::IsPointer<T>::value,
+                          "js::NullPtr overload not valid for non-pointer types");
+        ptr = reinterpret_cast<const T *>(&js::NullPtr::constNullValue);
+    }
+
+    /* Create a handle for a NULL pointer. */
+    Handle(JS::NullPtr) {
+        MOZ_STATIC_ASSERT(mozilla::IsPointer<T>::value,
+                          "JS::NullPtr overload not valid for non-pointer types");
+        ptr = reinterpret_cast<const T *>(&JS::NullPtr::constNullValue);
     }
 
     Handle(MutableHandle<T> handle) {
         ptr = handle.address();
+    }
+
+    Handle(const Heap<T> &heapPtr) {
+        ptr = heapPtr.address();
     }
 
     /*
@@ -198,7 +295,7 @@ class Handle : public js::HandleBase<T>
      */
     template <typename S>
     inline
-    Handle(Rooted<S> &root,
+    Handle(const Rooted<S> &root,
            typename mozilla::EnableIf<mozilla::IsConvertible<S, T>::value, int>::Type dummy = 0);
 
     /* Construct a read only handle from a mutable handle. */
@@ -208,9 +305,13 @@ class Handle : public js::HandleBase<T>
            typename mozilla::EnableIf<mozilla::IsConvertible<S, T>::value, int>::Type dummy = 0);
 
     const T *address() const { return ptr; }
-    T get() const { return *ptr; }
+    const T& get() const { return *ptr; }
 
-    operator T() const { return get(); }
+    /*
+     * Return a reference so passing a Handle<T> to something that
+     * takes a |const T&| is not a GC hazard.
+     */
+    operator const T&() const { return get(); }
     T operator->() const { return get(); }
 
     bool operator!=(const T &other) { return *ptr != other; }
@@ -225,13 +326,14 @@ class Handle : public js::HandleBase<T>
     void operator=(S v) MOZ_DELETE;
 };
 
-typedef Handle<JSObject*>    HandleObject;
-typedef Handle<js::Module*>  HandleModule;
-typedef Handle<JSFunction*>  HandleFunction;
-typedef Handle<JSScript*>    HandleScript;
-typedef Handle<JSString*>    HandleString;
-typedef Handle<jsid>         HandleId;
-typedef Handle<Value>        HandleValue;
+typedef Handle<JSObject*>                   HandleObject;
+typedef Handle<js::Module*>                 HandleModule;
+typedef Handle<js::ScriptSourceObject *>    HandleScriptSource;
+typedef Handle<JSFunction*>                 HandleFunction;
+typedef Handle<JSScript*>                   HandleScript;
+typedef Handle<JSString*>                   HandleString;
+typedef Handle<jsid>                        HandleId;
+typedef Handle<Value>                       HandleValue;
 
 /*
  * Similar to a handle, but the underlying storage can be changed. This is
@@ -242,7 +344,7 @@ typedef Handle<Value>        HandleValue;
  * them.
  */
 template <typename T>
-class MutableHandle : public js::MutableHandleBase<T>
+class MOZ_STACK_CLASS MutableHandle : public js::MutableHandleBase<T>
 {
   public:
     inline MutableHandle(Rooted<T> *root);
@@ -287,18 +389,14 @@ typedef MutableHandle<JSString*>   MutableHandleString;
 typedef MutableHandle<jsid>        MutableHandleId;
 typedef MutableHandle<Value>       MutableHandleValue;
 
+#ifdef JSGC_GENERATIONAL
+JS_PUBLIC_API(void) HeapCellPostBarrier(js::gc::Cell **cellp);
+JS_PUBLIC_API(void) HeapCellRelocate(js::gc::Cell **cellp);
+#endif
+
 } /* namespace JS */
 
 namespace js {
-
-/*
- * Raw pointer used as documentation that a parameter does not need to be
- * rooted.
- */
-typedef JSObject *                  RawObject;
-typedef JSString *                  RawString;
-typedef jsid                        RawId;
-typedef JS::Value                   RawValue;
 
 /*
  * InternalHandle is a handle to an internal pointer into a gcthing. Use
@@ -329,7 +427,7 @@ class InternalHandle<T*>
      * Create an InternalHandle to a field within a Rooted<>.
      */
     template<typename R>
-    InternalHandle(const Rooted<R> &root, T *field)
+    InternalHandle(const JS::Rooted<R> &root, T *field)
       : holder((void**)root.address()), offset(uintptr_t(field) - uintptr_t(root.get()))
     {}
 
@@ -353,24 +451,10 @@ class InternalHandle<T*>
      * fromMarkedLocation().
      */
     InternalHandle(T *field)
-      : holder(reinterpret_cast<void * const *>(&JS::NullPtr::constNullValue)),
+      : holder(reinterpret_cast<void * const *>(&js::NullPtr::constNullValue)),
         offset(uintptr_t(field))
     {}
 };
-
-/*
- * This macro simplifies forward declaration of a class and its matching raw-pointer.
- */
-# define ForwardDeclare(type)              \
-    class type;                            \
-    typedef type * Raw##type
-
-# define ForwardDeclareJS(type)            \
-    class JS##type;                        \
-    namespace js {                         \
-        typedef JS##type * Raw##type;      \
-    }                                      \
-    class JS##type
 
 /*
  * By default, pointers should use the inheritance hierarchy to find their
@@ -388,7 +472,16 @@ struct RootMethods<T *>
 {
     static T *initial() { return NULL; }
     static ThingRootKind kind() { return RootKind<T *>::rootKind(); }
-    static bool poisoned(T *v) { return IsPoisonedPtr(v); }
+    static bool poisoned(T *v) { return JS::IsPoisonedPtr(v); }
+    static bool needsPostBarrier(T *v) { return v; }
+#ifdef JSGC_GENERATIONAL
+    static void postBarrier(T **vp) {
+        JS::HeapCellPostBarrier(reinterpret_cast<js::gc::Cell **>(vp));
+    }
+    static void relocate(T **vp) {
+        JS::HeapCellRelocate(reinterpret_cast<js::gc::Cell **>(vp));
+    }
+#endif
 };
 
 } /* namespace js */
@@ -404,7 +497,7 @@ namespace JS {
  * specialization, define a RootedBase<T> specialization containing them.
  */
 template <typename T>
-class Rooted : public js::RootedBase<T>
+class MOZ_STACK_CLASS Rooted : public js::RootedBase<T>
 {
     void init(JSContext *cxArg) {
 #if defined(JSGC_ROOT_ANALYSIS) || defined(JSGC_USE_EXACT_ROOTING)
@@ -464,7 +557,11 @@ class Rooted : public js::RootedBase<T>
     Rooted<T> *previous() { return prev; }
 #endif
 
-    operator T() const { return ptr; }
+    /*
+     * Important: Return a reference here so passing a Rooted<T> to
+     * something that takes a |const T&| is not a GC hazard.
+     */
+    operator const T&() const { return ptr; }
     T operator->() const { return ptr; }
     T *address() { return &ptr; }
     const T *address() const { return &ptr; }
@@ -524,13 +621,14 @@ template <>
 class Rooted<JSStableString *>;
 #endif
 
-typedef Rooted<JSObject*>    RootedObject;
-typedef Rooted<js::Module*>  RootedModule;
-typedef Rooted<JSFunction*>  RootedFunction;
-typedef Rooted<JSScript*>    RootedScript;
-typedef Rooted<JSString*>    RootedString;
-typedef Rooted<jsid>         RootedId;
-typedef Rooted<JS::Value>    RootedValue;
+typedef Rooted<JSObject*>                   RootedObject;
+typedef Rooted<js::Module*>                 RootedModule;
+typedef Rooted<js::ScriptSourceObject *>    RootedScriptSource;
+typedef Rooted<JSFunction*>                 RootedFunction;
+typedef Rooted<JSScript*>                   RootedScript;
+typedef Rooted<JSString*>                   RootedString;
+typedef Rooted<jsid>                        RootedId;
+typedef Rooted<JS::Value>                   RootedValue;
 
 } /* namespace JS */
 
@@ -707,15 +805,15 @@ class MaybeRooted
 template <typename T> class MaybeRooted<T, CanGC>
 {
   public:
-    typedef Handle<T> HandleType;
-    typedef Rooted<T> RootType;
-    typedef MutableHandle<T> MutableHandleType;
+    typedef JS::Handle<T> HandleType;
+    typedef JS::Rooted<T> RootType;
+    typedef JS::MutableHandle<T> MutableHandleType;
 
-    static inline Handle<T> toHandle(HandleType v) {
+    static inline JS::Handle<T> toHandle(HandleType v) {
         return v;
     }
 
-    static inline MutableHandle<T> toMutableHandle(MutableHandleType v) {
+    static inline JS::MutableHandle<T> toMutableHandle(MutableHandleType v) {
         return v;
     }
 };
@@ -727,14 +825,14 @@ template <typename T> class MaybeRooted<T, NoGC>
     typedef FakeRooted<T> RootType;
     typedef FakeMutableHandle<T> MutableHandleType;
 
-    static inline Handle<T> toHandle(HandleType v) {
+    static inline JS::Handle<T> toHandle(HandleType v) {
         JS_NOT_REACHED("Bad conversion");
-        return Handle<T>::fromMarkedLocation(NULL);
+        return JS::Handle<T>::fromMarkedLocation(NULL);
     }
 
-    static inline MutableHandle<T> toMutableHandle(MutableHandleType v) {
+    static inline JS::MutableHandle<T> toMutableHandle(MutableHandleType v) {
         JS_NOT_REACHED("Bad conversion");
-        return MutableHandle<T>::fromMarkedLocation(NULL);
+        return JS::MutableHandle<T>::fromMarkedLocation(NULL);
     }
 };
 
@@ -744,7 +842,7 @@ namespace JS {
 
 template <typename T> template <typename S>
 inline
-Handle<T>::Handle(Rooted<S> &root,
+Handle<T>::Handle(const Rooted<S> &root,
                   typename mozilla::EnableIf<mozilla::IsConvertible<S, T>::value, int>::Type dummy)
 {
     ptr = reinterpret_cast<const T *>(root.address());
@@ -765,8 +863,6 @@ MutableHandle<T>::MutableHandle(Rooted<T> *root)
     ptr = root->address();
 }
 
-JS_FRIEND_API(bool) NeedRelaxedRootChecks();
-
 } /* namespace JS */
 
 namespace js {
@@ -775,18 +871,12 @@ namespace js {
  * Hook for dynamic root analysis. Checks the native stack and poisons
  * references to GC things which have not been rooted.
  */
-inline void MaybeCheckStackRoots(JSContext *cx, bool relax = true)
+inline void MaybeCheckStackRoots(JSContext *cx)
 {
 #if defined(DEBUG) && defined(JS_GC_ZEAL) && defined(JSGC_ROOT_ANALYSIS) && !defined(JS_THREADSAFE)
-    if (relax && NeedRelaxedRootChecks())
-        return;
-    CheckStackRoots(cx);
+    JS::CheckStackRoots(cx);
 #endif
 }
-
-namespace gc {
-struct Cell;
-} /* namespace gc */
 
 /* Base class for automatic read-only object rooting during compilation. */
 class CompilerRootNode
@@ -805,9 +895,5 @@ class CompilerRootNode
 };
 
 }  /* namespace js */
-
-ForwardDeclareJS(Script);
-ForwardDeclareJS(Function);
-ForwardDeclareJS(Object);
 
 #endif  /* jsgc_root_h___ */

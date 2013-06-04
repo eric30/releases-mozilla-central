@@ -263,6 +263,13 @@ DisableSensorNotifications(SensorType aSensor) {
   Hal()->SendDisableSensorNotifications(aSensor);
 }
 
+//TODO: bug 852944 - IPC implementations of these
+void StartMonitoringGamepadStatus()
+{}
+
+void StopMonitoringGamepadStatus()
+{}
+
 void
 EnableWakeLockNotifications()
 {
@@ -332,9 +339,11 @@ SetAlarm(int32_t aSeconds, int32_t aNanoseconds)
 }
 
 void
-SetProcessPriority(int aPid, ProcessPriority aPriority)
+SetProcessPriority(int aPid,
+                   ProcessPriority aPriority,
+                   ProcessCPUPriority aCPUPriority)
 {
-  Hal()->SendSetProcessPriority(aPid, aPriority);
+  NS_RUNTIMEABORT("Only the main process may set processes' priorities.");
 }
 
 void
@@ -398,6 +407,18 @@ void
 FactoryReset()
 {
   Hal()->SendFactoryReset();
+}
+
+void
+StartDiskSpaceWatcher()
+{
+  NS_RUNTIMEABORT("StartDiskSpaceWatcher() can't be called from sandboxed contexts.");
+}
+
+void
+StopDiskSpaceWatcher()
+{
+  NS_RUNTIMEABORT("StopDiskSpaceWatcher() can't be called from sandboxed contexts.");
 }
 
 class HalParent : public PHalParent
@@ -772,15 +793,6 @@ public:
   {
     // Content has no reason to listen to switch events currently.
     *aState = hal::GetCurrentSwitchState(aDevice);
-    return true;
-  }
-
-  virtual bool
-  RecvSetProcessPriority(const int& aPid, const ProcessPriority& aPriority)
-  {
-    // TODO As a security check, we should ensure that aPid is either the pid
-    // of our child, or the pid of one of the child's children.
-    hal::SetProcessPriority(aPid, aPriority);
     return true;
   }
 

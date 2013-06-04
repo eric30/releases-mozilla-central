@@ -1,6 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=4 sw=4 et tw=99:
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -19,6 +18,8 @@ namespace ion {
     _(TableSwitch)                                                          \
     _(Goto)                                                                 \
     _(Test)                                                                 \
+    _(TypeObjectDispatch)                                                   \
+    _(FunctionDispatch)                                                     \
     _(PolyInlineDispatch)                                                   \
     _(Compare)                                                              \
     _(Phi)                                                                  \
@@ -27,12 +28,14 @@ namespace ion {
     _(OsrScopeChain)                                                        \
     _(ReturnFromCtor)                                                       \
     _(CheckOverRecursed)                                                    \
-    _(RecompileCheck)                                                       \
     _(DefVar)                                                               \
     _(DefFun)                                                               \
     _(CreateThis)                                                           \
     _(CreateThisWithProto)                                                  \
     _(CreateThisWithTemplate)                                               \
+    _(CreateArgumentsObject)                                                \
+    _(GetArgumentsObjectArg)                                                \
+    _(SetArgumentsObjectArg)                                                \
     _(PrepareCall)                                                          \
     _(PassArg)                                                              \
     _(Call)                                                                 \
@@ -81,6 +84,7 @@ namespace ion {
     _(NewDeclEnvObject)                                                     \
     _(NewCallObject)                                                        \
     _(NewStringObject)                                                      \
+    _(InitElem)                                                             \
     _(InitProp)                                                             \
     _(Start)                                                                \
     _(OsrEntry)                                                             \
@@ -98,10 +102,15 @@ namespace ion {
     _(FunctionEnvironment)                                                  \
     _(TypeBarrier)                                                          \
     _(MonitorTypes)                                                         \
+    _(PostWriteBarrier)                                                     \
     _(GetPropertyCache)                                                     \
+    _(GetPropertyPolymorphic)                                               \
+    _(SetPropertyPolymorphic)                                               \
     _(GetElementCache)                                                      \
+    _(SetElementCache)                                                      \
     _(BindNameCache)                                                        \
     _(GuardShape)                                                           \
+    _(GuardObjectType)                                                      \
     _(GuardClass)                                                           \
     _(ArrayLength)                                                          \
     _(TypedArrayLength)                                                     \
@@ -121,7 +130,10 @@ namespace ion {
     _(ArrayConcat)                                                          \
     _(LoadTypedArrayElement)                                                \
     _(LoadTypedArrayElementHole)                                            \
+    _(LoadTypedArrayElementStatic)                                          \
     _(StoreTypedArrayElement)                                               \
+    _(StoreTypedArrayElementHole)                                           \
+    _(StoreTypedArrayElementStatic)                                         \
     _(EffectiveAddress)                                                     \
     _(ClampToUint8)                                                         \
     _(LoadFixedSlot)                                                        \
@@ -133,6 +145,7 @@ namespace ion {
     _(CallGetElement)                                                       \
     _(CallSetElement)                                                       \
     _(CallSetProperty)                                                      \
+    _(CallInitElementArray)                                                 \
     _(DeleteProperty)                                                       \
     _(SetPropertyCache)                                                     \
     _(IteratorStart)                                                        \
@@ -142,6 +155,8 @@ namespace ion {
     _(StringLength)                                                         \
     _(ArgumentsLength)                                                      \
     _(GetArgument)                                                          \
+    _(RunOncePrologue)                                                      \
+    _(Rest)                                                                 \
     _(Floor)                                                                \
     _(Round)                                                                \
     _(In)                                                                   \
@@ -151,6 +166,7 @@ namespace ion {
     _(FunctionBoundary)                                                     \
     _(GetDOMProperty)                                                       \
     _(SetDOMProperty)                                                       \
+    _(IsCallable)                                                           \
     _(AsmJSNeg)                                                             \
     _(AsmJSUDiv)                                                            \
     _(AsmJSUMod)                                                            \
@@ -173,6 +189,7 @@ namespace ion {
     _(ParNewDenseArray)                                                     \
     _(ParBailout)                                                           \
     _(ParLambda)                                                            \
+    _(ParRest)                                                              \
     _(ParSlice)                                                             \
     _(ParWriteGuard)                                                        \
     _(ParDump)                                                              \

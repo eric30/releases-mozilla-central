@@ -54,15 +54,19 @@ nsVolumeService::GetSingleton()
   if (!sSingleton) {
     sSingleton = new nsVolumeService();
   }
-  NS_ADDREF(sSingleton.get());
-  return sSingleton.get();
+  nsRefPtr<nsVolumeService> volumeService = sSingleton.get();
+  return volumeService.forget();
 }
 
 // static
 void
 nsVolumeService::Shutdown()
 {
-  if (!sSingleton || (XRE_GetProcessType() != GeckoProcessType_Default)) {
+  if (!sSingleton) {
+    return;
+  }
+  if (XRE_GetProcessType() != GeckoProcessType_Default) {
+    sSingleton = nullptr;
     return;
   }
 
@@ -80,14 +84,13 @@ nsVolumeService::Shutdown()
 }
 
 nsVolumeService::nsVolumeService()
+  : mArrayMonitor("nsVolumeServiceArray")
 {
   sSingleton = this;
 
   if (XRE_GetProcessType() != GeckoProcessType_Default) {
-    // We don't support the nsIVolumeService in the child processes,
-    // but we get constructed due to the way we're registered with
-    // nsLayoutModule.cpp. So we exit early to reduce our memory
-    // impact, and so that we don't start unnecessary IOThread stuff.
+    // Request the initial state for all volumes.
+    ContentChild::GetSingleton()->SendBroadcastVolume(NS_LITERAL_STRING(""));
     return;
   }
 
@@ -110,16 +113,49 @@ nsVolumeService::~nsVolumeService()
 }
 
 // Callback for nsIDOMMozWakeLockListener
-NS_IMETHODIMP nsVolumeService::Callback(const nsAString& aTopic, const nsAString& aState)
+NS_IMETHODIMP
+nsVolumeService::Callback(const nsAString& aTopic, const nsAString& aState)
 {
   CheckMountLock(aTopic, aState);
   return NS_OK;
 }
 
-NS_IMETHODIMP nsVolumeService::BroadcastVolume(const nsAString& aVolName)
+NS_IMETHODIMP
+nsVolumeService::BroadcastVolume(const nsAString& aVolName)
 {
   MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_Default);
-  nsRefPtr<nsVolume> vol = FindVolumeByName(aVolName);
+
+  if (aVolName.EqualsLiteral("")) {
+    nsVolume::Array volumeArray;
+    {
+      // Copy the array since we don't want to call BroadcastVolume
+      // while we're holding the lock.
+      MonitorAutoLock autoLock(mArrayMonitor);
+      volumeArray = mVolumeArray;
+    }
+
+    // We treat being passed the empty string as "broadcast all volumes"
+    nsVolume::Array::size_type numVolumes = volumeArray.Length();
+    nsVolume::Array::index_type volIndex;
+    for (volIndex = 0; volIndex < numVolumes; volIndex++) {
+      const nsString& volName(volumeArray[volIndex]->Name());
+      if (!volName.EqualsLiteral("")) {
+        // Note: The volume service is the only entity that should be able to
+        // modify the array of volumes. So we shouldn't have any issues with
+        // the array being modified under our feet (Since we're the volume
+        // service the array can't change until after we finish iterating the
+        // the loop).
+        nsresult rv = BroadcastVolume(volName);
+        NS_ENSURE_SUCCESS(rv, rv);
+      }
+    }
+    return NS_OK;
+  }
+  nsRefPtr<nsVolume> vol;
+  {
+    MonitorAutoLock autoLock(mArrayMonitor);
+    vol = FindVolumeByName(aVolName);
+  }
   if (!vol) {
     ERR("BroadcastVolume: Unable to locate volume '%s'",
         NS_LossyConvertUTF16toASCII(aVolName).get());
@@ -137,27 +173,38 @@ NS_IMETHODIMP nsVolumeService::BroadcastVolume(const nsAString& aVolName)
 
 NS_IMETHODIMP nsVolumeService::GetVolumeByName(const nsAString& aVolName, nsIVolume **aResult)
 {
-  MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_Default);
+  MonitorAutoLock autoLock(mArrayMonitor);
+
   nsRefPtr<nsVolume> vol = FindVolumeByName(aVolName);
   if (!vol) {
-    ERR("GetVolumeByName: Unable to locate volume '%s'",
-        NS_LossyConvertUTF16toASCII(aVolName).get());
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  NS_ADDREF(*aResult = vol);
+  vol.forget(aResult);
   return NS_OK;
 }
 
-NS_IMETHODIMP nsVolumeService::GetVolumeByPath(const nsAString& aPath, nsIVolume **aResult)
+NS_IMETHODIMP
+nsVolumeService::GetVolumeByPath(const nsAString& aPath, nsIVolume **aResult)
 {
-  MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_Default);
-  nsCString utf8Path = NS_ConvertUTF16toUTF8(aPath);
+  NS_ConvertUTF16toUTF8 utf8Path(aPath);
   char realPathBuf[PATH_MAX];
 
-  if (!realpath(utf8Path.get(), realPathBuf)) {
-    ERR("GetVolumeByPath: realpath on '%s' failed: %d", utf8Path.get(), errno);
-    return NSRESULT_FOR_ERRNO();
+  while (realpath(utf8Path.get(), realPathBuf) < 0) {
+    if (errno != ENOENT) {
+      ERR("GetVolumeByPath: realpath on '%s' failed: %d", utf8Path.get(), errno);
+      return NSRESULT_FOR_ERRNO();
+    }
+    // The pathname we were passed doesn't exist, so we try stripping off trailing
+    // components until we get a successful call to realpath, or until we run out
+    // of components (if we finally get to /something then we also stop).
+    int32_t slashIndex = utf8Path.RFindChar('/');
+    if ((slashIndex == kNotFound) || (slashIndex == 0)) {
+      errno = ENOENT;
+      ERR("GetVolumeByPath: realpath on '%s' failed.", utf8Path.get());
+      return NSRESULT_FOR_ERRNO();
+    }
+    utf8Path.Assign(Substring(utf8Path, 0, slashIndex));
   }
 
   // The volume mount point is always a directory. Something like /mnt/sdcard
@@ -170,63 +217,103 @@ NS_IMETHODIMP nsVolumeService::GetVolumeByPath(const nsAString& aPath, nsIVolume
 
   strlcat(realPathBuf, "/", sizeof(realPathBuf));
 
-  nsVolume::Array::size_type  numVolumes = mVolumeArray.Length();
+  MonitorAutoLock autoLock(mArrayMonitor);
+
+  nsVolume::Array::size_type numVolumes = mVolumeArray.Length();
   nsVolume::Array::index_type volIndex;
   for (volIndex = 0; volIndex < numVolumes; volIndex++) {
     nsRefPtr<nsVolume> vol = mVolumeArray[volIndex];
-    nsAutoCString volMountPointSlash = NS_ConvertUTF16toUTF8(vol->MountPoint());
+    NS_ConvertUTF16toUTF8 volMountPointSlash(vol->MountPoint());
     volMountPointSlash.Append(NS_LITERAL_CSTRING("/"));
     nsDependentCSubstring testStr(realPathBuf, volMountPointSlash.Length());
     if (volMountPointSlash.Equals(testStr)) {
-      NS_ADDREF(*aResult = vol);
+      vol.forget(aResult);
       return NS_OK;
     }
   }
+  return NS_ERROR_FILE_NOT_FOUND;
+}
 
-  // In order to support queries by DeviceStorage and the updater, we will fabricate
-  // a volume from the pathname, so that the caller can determine the volume size
-  nsRefPtr<nsVolume> vol = new nsVolume(NS_LITERAL_STRING("fake"),
-                                        aPath, nsIVolume::STATE_MOUNTED,
-                                        -1 /*generation*/);
-  NS_ADDREF(*aResult = vol);
+NS_IMETHODIMP
+nsVolumeService::CreateOrGetVolumeByPath(const nsAString& aPath, nsIVolume** aResult)
+{
+  nsresult rv = GetVolumeByPath(aPath, aResult);
+  if (rv == NS_OK) {
+    return NS_OK;
+  }
+
+  // In order to support queries by the updater, we will fabricate a volume
+  // from the pathname, so that the caller can determine the volume size.
+  nsCOMPtr<nsIVolume> vol = new nsVolume(NS_LITERAL_STRING("fake"),
+                                         aPath, nsIVolume::STATE_MOUNTED,
+                                         -1 /*generation*/);
+  vol.forget(aResult);
   return NS_OK;
 }
 
-NS_IMETHODIMP nsVolumeService::CreateMountLock(const nsAString& aVolumeName, nsIVolumeMountLock **aResult)
+NS_IMETHODIMP
+nsVolumeService::GetVolumeNames(nsTArray<nsString>& aVolNames)
 {
-  nsRefPtr<nsVolumeMountLock> mountLock = nsVolumeMountLock::Create(aVolumeName);
+  MonitorAutoLock autoLock(mArrayMonitor);
+
+  nsVolume::Array::size_type numVolumes = mVolumeArray.Length();
+  nsVolume::Array::index_type volIndex;
+  for (volIndex = 0; volIndex < numVolumes; volIndex++) {
+    nsRefPtr<nsVolume> vol = mVolumeArray[volIndex];
+    aVolNames.AppendElement(vol->Name());
+  }
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsVolumeService::CreateMountLock(const nsAString& aVolumeName, nsIVolumeMountLock **aResult)
+{
+  nsCOMPtr<nsIVolumeMountLock> mountLock = nsVolumeMountLock::Create(aVolumeName);
   if (!mountLock) {
     return NS_ERROR_NOT_AVAILABLE;
   }
-  NS_ADDREF(*aResult = mountLock);
+  mountLock.forget(aResult);
   return NS_OK;
 }
 
-void nsVolumeService::CheckMountLock(const nsAString& aMountLockName,
-                                     const nsAString& aMountLockState)
+void
+nsVolumeService::CheckMountLock(const nsAString& aMountLockName,
+                                const nsAString& aMountLockState)
 {
   MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_Default);
   MOZ_ASSERT(NS_IsMainThread());
 
-  nsVolume::Array::size_type  numVolumes = mVolumeArray.Length();
+  nsRefPtr<nsVolume> vol = FindVolumeByMountLockName(aMountLockName);
+  if (vol) {
+    vol->UpdateMountLock(aMountLockState);
+  }
+}
+
+already_AddRefed<nsVolume>
+nsVolumeService::FindVolumeByMountLockName(const nsAString& aMountLockName)
+{
+  MonitorAutoLock autoLock(mArrayMonitor);
+
+  nsVolume::Array::size_type numVolumes = mVolumeArray.Length();
   nsVolume::Array::index_type volIndex;
   for (volIndex = 0; volIndex < numVolumes; volIndex++) {
     nsRefPtr<nsVolume> vol = mVolumeArray[volIndex];
     nsString mountLockName;
     vol->GetMountLockName(mountLockName);
     if (mountLockName.Equals(aMountLockName)) {
-      vol->UpdateMountLock(aMountLockState);
-      return;
+      return vol.forget();
     }
   }
+  return nullptr;
 }
 
-already_AddRefed<nsVolume> nsVolumeService::FindVolumeByName(const nsAString& aName)
+already_AddRefed<nsVolume>
+nsVolumeService::FindVolumeByName(const nsAString& aName)
 {
-  MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_Default);
-  MOZ_ASSERT(NS_IsMainThread());
+  mArrayMonitor.AssertCurrentThreadOwns();
 
-  nsVolume::Array::size_type  numVolumes = mVolumeArray.Length();
+  nsVolume::Array::size_type numVolumes = mVolumeArray.Length();
   nsVolume::Array::index_type volIndex;
   for (volIndex = 0; volIndex < numVolumes; volIndex++) {
     nsRefPtr<nsVolume> vol = mVolumeArray[volIndex];
@@ -234,14 +321,14 @@ already_AddRefed<nsVolume> nsVolumeService::FindVolumeByName(const nsAString& aN
       return vol.forget();
     }
   }
-  return NULL;
+  return nullptr;
 }
 
 //static
-already_AddRefed<nsVolume> nsVolumeService::FindAddVolumeByName(const nsAString& aName)
+already_AddRefed<nsVolume>
+nsVolumeService::CreateOrFindVolumeByName(const nsAString& aName)
 {
-  MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_Default);
-  MOZ_ASSERT(NS_IsMainThread());
+  MonitorAutoLock autoLock(mArrayMonitor);
 
   nsRefPtr<nsVolume> vol;
   vol = FindVolumeByName(aName);
@@ -254,12 +341,14 @@ already_AddRefed<nsVolume> nsVolumeService::FindAddVolumeByName(const nsAString&
   return vol.forget();
 }
 
-void nsVolumeService::UpdateVolume(const nsVolume* aVolume)
+void
+nsVolumeService::UpdateVolume(nsIVolume* aVolume)
 {
-  MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_Default);
   MOZ_ASSERT(NS_IsMainThread());
 
-  nsRefPtr<nsVolume> vol = FindAddVolumeByName(aVolume->Name());
+  nsString volName;
+  aVolume->GetName(volName);
+  nsRefPtr<nsVolume> vol = CreateOrFindVolumeByName(volName);
   if (vol->Equals(aVolume)) {
     // Nothing has really changed. Don't bother telling anybody.
     return;
@@ -295,8 +384,8 @@ public:
         mVolume->MountGeneration(), (int)mVolume->IsMountLocked());
 
     mVolumeService->UpdateVolume(mVolume);
-    mVolumeService = NULL;
-    mVolume = NULL;
+    mVolumeService = nullptr;
+    mVolume = nullptr;
     return NS_OK;
   }
 
@@ -305,7 +394,8 @@ private:
   nsRefPtr<nsVolume>        mVolume;
 };
 
-void nsVolumeService::UpdateVolumeIOThread(const Volume* aVolume)
+void
+nsVolumeService::UpdateVolumeIOThread(const Volume* aVolume)
 {
   DBG("UpdateVolumeIOThread: Volume '%s' state %s mount '%s' gen %d locked %d",
       aVolume->NameStr(), aVolume->StateStr(), aVolume->MountPoint().get(),

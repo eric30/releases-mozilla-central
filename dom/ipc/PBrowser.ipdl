@@ -23,12 +23,12 @@ include "mozilla/dom/TabMessageUtils.h";
 include "mozilla/dom/ScreenOrientation.h";
 include "mozilla/dom/PermissionMessageUtils.h";
 include "mozilla/layout/RenderFrameUtils.h";
+include "mozilla/layers/CompositorTypes.h";
 
 using IPC::Principal;
 using gfxMatrix;
 using gfxRect;
 using gfxSize;
-using mozilla::layers::LayersBackend;
 using mozilla::layers::FrameMetrics;
 using mozilla::layout::ScrollingBehavior;
 using mozilla::void_t;
@@ -50,7 +50,7 @@ using nsTextEvent;
 using nsTouchEvent;
 using RemoteDOMEvent;
 using mozilla::dom::ScreenOrientation;
-
+using mozilla::layers::TextureFactoryIdentifier;
 namespace mozilla {
 namespace dom {
 
@@ -176,6 +176,11 @@ parent:
     sync GetDPI() returns (float value);
 
     /**
+     * Gets the default scaling factor of the screen corresponding to this browser.
+     */
+    sync GetDefaultScale() returns (double value);
+
+    /**
      * Return native data of root widget
      */
     sync GetWidgetNativeData() returns (WindowsHandle value);
@@ -209,7 +214,7 @@ parent:
      */
     sync PRenderFrame()
         returns (ScrollingBehavior scrolling,
-                 LayersBackend backend, int32_t maxTextureSize, uint64_t layersId);
+                 TextureFactoryIdentifier textureFactoryIdentifier, uint64_t layersId);
 
     /** 
      * Starts an offline application cache update.
@@ -383,20 +388,6 @@ child:
                       nsString bgcolor,
                       uint32_t renderFlags, bool flushLayout,
                       nsIntSize renderSize);
-
-    /**
-     * Send the child its app type.  The app type identifies the kind of app
-     * shown in this PBrowser.  Currently, the only recognized app type is
-     * "homescreen".
-     *
-     * The value here corresponds to the "mozapptype" attribute on iframes.  For
-     * example, <iframe mozbrowser mozapp="..." mozapptype="homescreen">.
-     *
-     * Only app frames (i.e., frames with an app-id) should have a non-empty app
-     * type.  If you try to SetAppType() with a non-empty app type on a non-app
-     * PBrowserChild, we may assert.
-     */
-    SetAppType(nsString appType);
 
     /**
      * Sent by the chrome process when it no longer wants this remote

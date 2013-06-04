@@ -10,7 +10,7 @@
 #include "nsThreadManager.h"
 #include "nsThreadUtils.h"
 #include "plarena.h"
-#include "sampler.h"
+#include "GeckoProfiler.h"
 
 using mozilla::TimeDuration;
 using mozilla::TimeStamp;
@@ -106,7 +106,7 @@ public:
   NS_IMETHOD Run();
 
   nsTimerEvent(nsTimerImpl *timer, int32_t generation)
-    : mTimer(timer), mGeneration(generation) {
+    : mTimer(dont_AddRef(timer)), mGeneration(generation) {
     // timer is already addref'd for us
     MOZ_COUNT_CTOR(nsTimerEvent);
 
@@ -135,10 +135,6 @@ public:
 private:
   nsTimerEvent(); // Not implemented
   ~nsTimerEvent() {
-#ifdef DEBUG
-    if (mTimer)
-      NS_WARNING("leaking reference to nsTimerImpl");
-#endif
     MOZ_COUNT_DTOR(nsTimerEvent);
 
     MOZ_ASSERT(!sCanDeleteAllocator || sAllocatorUsers > 0,
@@ -146,7 +142,7 @@ private:
     PR_ATOMIC_DECREMENT(&sAllocatorUsers);
   }
 
-  nsTimerImpl *mTimer;
+  nsRefPtr<nsTimerImpl> mTimer;
   int32_t      mGeneration;
 
   static TimerEventAllocator* sAllocator;
@@ -319,6 +315,10 @@ nsresult nsTimerImpl::InitCommon(uint32_t aType, uint32_t aDelay)
   nsresult rv;
 
   NS_ENSURE_TRUE(gThread, NS_ERROR_NOT_INITIALIZED);
+  if (!mEventTarget) {
+    NS_ERROR("mEventTarget is NULL");
+    return NS_ERROR_NOT_INITIALIZED;
+  }
 
   rv = gThread->Init();
   NS_ENSURE_SUCCESS(rv, rv);
@@ -494,7 +494,7 @@ void nsTimerImpl::Fire()
   if (mCanceled)
     return;
 
-  SAMPLE_LABEL("Timer", "Fire");
+  PROFILER_LABEL("Timer", "Fire");
 
   TimeStamp now = TimeStamp::Now();
 #ifdef DEBUG_TIMERS
@@ -612,10 +612,7 @@ void nsTimerEvent::DeleteAllocatorIfNeeded()
 
 NS_IMETHODIMP nsTimerEvent::Run()
 {
-  nsRefPtr<nsTimerImpl> timer;
-  timer.swap(mTimer);
-
-  if (mGeneration != timer->GetGeneration())
+  if (mGeneration != mTimer->GetGeneration())
     return NS_OK;
 
 #ifdef DEBUG_TIMERS
@@ -627,13 +624,18 @@ NS_IMETHODIMP nsTimerEvent::Run()
   }
 #endif
 
-  timer->Fire();
+  mTimer->Fire();
 
   return NS_OK;
 }
 
 nsresult nsTimerImpl::PostTimerEvent()
 {
+  if (!mEventTarget) {
+    NS_ERROR("Attempt to post timer event to NULL event target");
+    return NS_ERROR_NOT_INITIALIZED;
+  }
+
   // XXX we may want to reuse this nsTimerEvent in the case of repeating timers.
 
   // Since TimerThread addref'd 'this' for us, we don't need to addref here.

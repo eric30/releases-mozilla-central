@@ -9,7 +9,6 @@
 #include "nsGkAtoms.h"
 #include "nsIFrame.h"
 #include "nsError.h"
-#include "nsContentUtils.h"
 
 NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(TextPath)
 
@@ -19,7 +18,7 @@ namespace dom {
 class SVGAnimatedLength;
 
 JSObject*
-SVGTextPathElement::WrapNode(JSContext *aCx, JSObject *aScope)
+SVGTextPathElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
   return SVGTextPathElementBinding::Wrap(aCx, aScope, this);
 }
@@ -59,19 +58,11 @@ nsSVGElement::StringInfo SVGTextPathElement::sStringInfo[1] =
 };
 
 //----------------------------------------------------------------------
-// nsISupports methods
-
-NS_IMPL_ISUPPORTS_INHERITED3(SVGTextPathElement, SVGTextPathElementBase,
-                             nsIDOMNode, nsIDOMElement,
-                             nsIDOMSVGElement)
-
-//----------------------------------------------------------------------
 // Implementation
 
 SVGTextPathElement::SVGTextPathElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : SVGTextPathElementBase(aNodeInfo)
 {
-  SetIsDOMBinding();
 }
 
 //----------------------------------------------------------------------
@@ -121,13 +112,6 @@ SVGTextPathElement::IsAttributeMapped(const nsIAtom* name) const
 
   return FindAttributeDependence(name, map) ||
     SVGTextPathElementBase::IsAttributeMapped(name);
-}
-
-
-bool
-SVGTextPathElement::IsEventAttributeName(nsIAtom* aName)
-{
-  return nsContentUtils::IsEventAttributeName(aName, EventNameType_SVGGraphic);
 }
 
 //----------------------------------------------------------------------

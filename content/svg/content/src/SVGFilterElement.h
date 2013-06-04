@@ -6,7 +6,6 @@
 #ifndef mozilla_dom_SVGFilterElement_h
 #define mozilla_dom_SVGFilterElement_h
 
-#include "nsIDOMSVGUnitTypes.h"
 #include "nsSVGEnum.h"
 #include "nsSVGElement.h"
 #include "nsSVGIntegerPair.h"
@@ -25,9 +24,7 @@ namespace mozilla {
 namespace dom {
 class SVGAnimatedLength;
 
-class SVGFilterElement : public SVGFilterElementBase,
-                         public nsIDOMSVGElement,
-                         public nsIDOMSVGUnitTypes
+class SVGFilterElement : public SVGFilterElementBase
 {
   friend class ::nsSVGFilterFrame;
   friend class ::nsAutoFilterInstance;
@@ -36,29 +33,19 @@ protected:
   friend nsresult (::NS_NewSVGFilterElement(nsIContent **aResult,
                                             already_AddRefed<nsINodeInfo> aNodeInfo));
   SVGFilterElement(already_AddRefed<nsINodeInfo> aNodeInfo);
-  virtual JSObject* WrapNode(JSContext *cx, JSObject *scope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *cx,
+                             JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
 public:
-  // interfaces:
-
-  NS_DECL_ISUPPORTS_INHERITED
-
-  // xxx I wish we could use virtual inheritance
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
-  NS_FORWARD_NSIDOMSVGELEMENT(SVGFilterElementBase::)
-
   // nsIContent
-  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const;
-  NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const;
+  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
+  NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const MOZ_OVERRIDE;
 
   // Invalidate users of this filter
   void Invalidate();
 
-  virtual nsIDOMNode* AsDOMNode() { return this; }
-
   // nsSVGSVGElement methods:
-  virtual bool HasValidDimensions() const;
+  virtual bool HasValidDimensions() const MOZ_OVERRIDE;
 
   // WebIDL
   already_AddRefed<SVGAnimatedLength> X();
@@ -74,10 +61,10 @@ public:
 
 protected:
 
-  virtual LengthAttributesInfo GetLengthInfo();
-  virtual IntegerPairAttributesInfo GetIntegerPairInfo();
-  virtual EnumAttributesInfo GetEnumInfo();
-  virtual StringAttributesInfo GetStringInfo();
+  virtual LengthAttributesInfo GetLengthInfo() MOZ_OVERRIDE;
+  virtual IntegerPairAttributesInfo GetIntegerPairInfo() MOZ_OVERRIDE;
+  virtual EnumAttributesInfo GetEnumInfo() MOZ_OVERRIDE;
+  virtual StringAttributesInfo GetStringInfo() MOZ_OVERRIDE;
 
   enum { ATTR_X, ATTR_Y, ATTR_WIDTH, ATTR_HEIGHT };
   nsSVGLength2 mLengthAttributes[4];

@@ -1,17 +1,17 @@
 <!DOCTYPE html>
 <html>
 <!--
-https://bugzilla.mozilla.org/show_bug.cgi?id={674720}
+https://bugzilla.mozilla.org/show_bug.cgi?id=674720
 -->
 <head>
-  <title>Test for Bug {674720} WebContacts</title>
+  <title>Test for Bug 674720 WebContacts</title>
   <script type="text/javascript" src="/MochiKit/MochiKit.js"></script>
   <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
 </head>
 <body>
 
-<a target="_blank" href="https://bugzilla.mozilla.org/show_bug.cgi?id={674720}">Mozilla Bug {674720}</a>
+<a target="_blank" href="https://bugzilla.mozilla.org/show_bug.cgi?id=674720">Mozilla Bug 674720</a>
 <p id="display"></p>
 <div id="content" style="display: none">
 
@@ -21,12 +21,9 @@ https://bugzilla.mozilla.org/show_bug.cgi?id={674720}
 
 "use strict";
 
-// this shouldn't be necessary when bug 792594 is fixed
-if (!SpecialPowers.getBoolPref("dom.mozContacts.enabled")) {
-  var comp = SpecialPowers.wrap(SpecialPowers.Components);
-  comp.utils.import("resource://gre/modules/ContactService.jsm");
-  comp.utils.import("resource://gre/modules/PermissionPromptHelper.jsm");
-  SpecialPowers.setBoolPref("dom.mozContacts.enabled", true);
+if (SpecialPowers.isMainProcess()) {
+  SpecialPowers.Cu.import("resource://gre/modules/ContactService.jsm");
+  SpecialPowers.Cu.import("resource://gre/modules/PermissionPromptHelper.jsm");
 }
 
 SpecialPowers.addPermission("contacts-write", true, document);
@@ -130,7 +127,7 @@ function verifyBlob(blob1, blob2, isLast)
       verifyBuffers(buffer1, buffer2, isLast);
     }
   }
-  
+
   var reader2 = new FileReader();
   reader2.readAsArrayBuffer(blob1);
   reader2.onload = function(event) {
@@ -154,7 +151,6 @@ function verifyBlobArray(blobs1, blobs2)
   for (var i = 0; i < blobs1.length; i++)
     verifyBlob(blobs1[i], blobs2[i], i == blobs1.length - 1);
 }
-
 
 var req;
 var index = 0;
@@ -186,7 +182,7 @@ var steps = [
   function () {
     ok(true, "Retrieving by substring");
     var options = {filterBy: ["givenName"],
-                   filterOp: "contains",
+                   filterOp: "startsWith",
                    filterValue: properties1.givenName.substring(0,3)};
     req = mozContacts.find(options);
     req.onsuccess = function () {
@@ -212,7 +208,7 @@ var steps = [
   function () {
     ok(true, "Retrieving by substring");
     var options = {filterBy: ["givenName"],
-                   filterOp: "contains",
+                   filterOp: "startsWith",
                    filterValue: properties2.givenName.substring(0,3)};
     req = mozContacts.find(options);
     req.onsuccess = function () {
@@ -251,7 +247,7 @@ var steps = [
   function () {
     ok(true, "Retrieving by substring");
     var options = {filterBy: ["givenName"],
-                   filterOp: "contains",
+                   filterOp: "startsWith",
                    filterValue: "asdf"};
     req = mozContacts.find(options);
     req.onsuccess = function () {
@@ -305,20 +301,8 @@ function next() {
   index += 1;
 }
 
-function permissionTest() {
-  if (gContactsEnabled) {
-    next();
-  } else {
-    is(mozContacts, null, "mozContacts is null when not enabled.");
-    SimpleTest.finish();
-  }
-}
-
-var gContactsEnabled = SpecialPowers.getBoolPref("dom.mozContacts.enabled");
 SimpleTest.waitForExplicitFinish();
-addLoadEvent(permissionTest);
-
-ok(true, "test passed");
+addLoadEvent(next);
 </script>
 </pre>
 </body>

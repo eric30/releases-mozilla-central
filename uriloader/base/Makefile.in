@@ -10,22 +10,10 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= uriloader
 LIBRARY_NAME	= uriloaderbase_s
-GRE_MODULE	= 1
+MSVC_ENABLE_PGO := 1
 LIBXUL_LIBRARY  = 1
 FAIL_ON_WARNINGS = 1
-
-
-CPPSRCS = 							\
-				nsURILoader.cpp 		\
-				nsDocLoader.cpp			\
-				$(NULL)
-
-EXPORTS = 							\
-				nsURILoader.h	 		\
-				nsDocLoader.h			\
-				$(NULL)
 
 # we don't want the shared lib, but we want to force the creation of a static lib.
 FORCE_STATIC_LIB = 1

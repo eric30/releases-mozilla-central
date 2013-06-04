@@ -16,12 +16,11 @@
 #include "nsBidiPresUtils.h"
 #include "nsDisplayList.h"
 #include "nsError.h"
-#include "nsIDOMSVGRect.h"
 #include "nsRenderingContext.h"
 #include "nsSVGEffects.h"
 #include "nsSVGIntegrationUtils.h"
 #include "nsSVGPaintServerFrame.h"
-#include "nsSVGRect.h"
+#include "mozilla/dom/SVGRect.h"
 #include "nsSVGTextPathFrame.h"
 #include "nsSVGUtils.h"
 #include "nsTextFragment.h"
@@ -291,7 +290,7 @@ nsSVGGlyphFrame::CharacterDataChanged(CharacterDataChangeInfo* aInfo)
     // nsSVGUtils::InvalidateAndScheduleBoundsUpdate properly is when all our
     // text is gone, since it skips empty frames. So we have to invalidate
     // ourself.
-    nsSVGUtils::InvalidateBounds(this);
+    nsSVGEffects::InvalidateRenderingObservers(this);
   }
 
   return NS_OK;
@@ -307,13 +306,14 @@ nsSVGGlyphFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
 {
   nsSVGGlyphFrameBase::DidSetStyleContext(aOldStyleContext);
 
-  if (!(GetStateBits() & NS_FRAME_FIRST_REFLOW)) {
+  if (!(GetStateBits() & NS_FRAME_FIRST_REFLOW) ||
+      (GetStateBits() & NS_STATE_SVG_NONDISPLAY_CHILD)) {
     ClearTextRun();
     NotifyGlyphMetricsChange();
   }
 }
 
-NS_IMETHODIMP
+void
 nsSVGGlyphFrame::Init(nsIContent* aContent,
                       nsIFrame* aParent,
                       nsIFrame* aPrevInFlow)
@@ -332,7 +332,7 @@ nsSVGGlyphFrame::Init(nsIContent* aContent,
                "trying to construct an SVGGlyphFrame for wrong content element");
 #endif /* DEBUG */
 
-  return nsSVGGlyphFrameBase::Init(aContent, aParent, aPrevInFlow);
+  nsSVGGlyphFrameBase::Init(aContent, aParent, aPrevInFlow);
 }
 
 nsIAtom *
@@ -393,11 +393,6 @@ nsSVGGlyphFrame::PaintSVG(nsRenderingContext *aContext,
     if (!iter.SetInitialMatrix(gfx)) {
       return NS_OK;
     }
-
-    if (GetClipRule() == NS_STYLE_FILL_RULE_EVENODD)
-      gfx->SetFillRule(gfxContext::FILL_RULE_EVEN_ODD);
-    else
-      gfx->SetFillRule(gfxContext::FILL_RULE_WINDING);
 
     if (renderMode == SVGAutoRenderState::CLIP_MASK) {
       gfx->SetColor(gfxRGBA(1.0f, 1.0f, 1.0f, 1.0f));
@@ -1256,7 +1251,7 @@ nsSVGGlyphFrame::GetEndPositionOfChar(uint32_t charnum,
 }
 
 nsresult
-nsSVGGlyphFrame::GetExtentOfChar(uint32_t charnum, nsIDOMSVGRect **_retval)
+nsSVGGlyphFrame::GetExtentOfChar(uint32_t charnum, dom::SVGIRect **_retval)
 {
   *_retval = nullptr;
 
@@ -1285,7 +1280,12 @@ nsSVGGlyphFrame::GetExtentOfChar(uint32_t charnum, nsIDOMSVGRect **_retval)
                             metrics.mAdvanceWidth,
                             metrics.mAscent + metrics.mDescent));
   tmpCtx->IdentityMatrix();
-  return NS_NewSVGRect(_retval, tmpCtx->GetUserPathExtent());
+
+  nsRefPtr<dom::SVGRect> rect =
+    NS_NewSVGRect(mContent, tmpCtx->GetUserPathExtent());
+
+  rect.forget(_retval);
+  return NS_OK;
 }
 
 nsresult

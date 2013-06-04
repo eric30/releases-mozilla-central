@@ -43,6 +43,9 @@ class Emulator(object):
 
     deviceRe = re.compile(r"^emulator-(\d+)(\s*)(.*)$")
     _default_res = '320x480'
+    prefs = {'app.update.enabled': False,
+             'app.update.staging.enabled': False,
+             'app.update.service.enabled': False}
 
     def __init__(self, homedir=None, noWindow=False, logcat_dir=None,
                  arch="x86", emulatorBinary=None, res=None, sdcard=None,
@@ -74,7 +77,7 @@ class Emulator(object):
         self.copy_userdata = self.dataImg is None
 
     def _check_for_b2g(self):
-        self.b2g = B2GInstance(homedir=self.homedir)
+        self.b2g = B2GInstance(homedir=self.homedir, emulator=True)
         self.adb = self.b2g.adb_path
         self.homedir = self.b2g.homedir
 
@@ -161,6 +164,9 @@ class Emulator(object):
                                     and self.proc.poll() is not None):
             return True
         return False
+
+    def check_for_minidumps(self, symbols_path):
+        return self.b2g.check_for_crashes(symbols_path)
 
     def create_sdcard(self, sdcard):
         self._tmp_sdcard = tempfile.mktemp(prefix='sdcard')
@@ -274,7 +280,7 @@ waitFor(
         marionette.delete_session()
 
     def connect(self):
-        self.adb = B2GInstance.check_adb(self.homedir)
+        self.adb = B2GInstance.check_adb(self.homedir, emulator=True)
         self.start_adb()
 
         online, offline = self._get_adb_devices()
@@ -345,6 +351,27 @@ waitFor(
             self.install_gecko(gecko_path, marionette)
 
         self.wait_for_system_message(marionette)
+        self.set_prefs(marionette)
+
+    def set_prefs(self, marionette):
+        marionette.start_session()
+        marionette.set_context(marionette.CONTEXT_CHROME)
+        for pref in self.prefs:
+            marionette.execute_script("""
+            Components.utils.import("resource://gre/modules/Services.jsm");
+            let argtype = typeof(arguments[1]);
+            switch(argtype) {
+                case 'boolean':
+                    Services.prefs.setBoolPref(arguments[0], arguments[1]);
+                    break;
+                case 'number':
+                    Services.prefs.setIntPref(arguments[0], arguments[1]);
+                    break;
+                default:
+                    Services.prefs.setCharPref(arguments[0], arguments[1]);
+            }
+            """, [pref, self.prefs[pref]])
+        marionette.delete_session()
 
     def restart_b2g(self):
         print 'restarting B2G'

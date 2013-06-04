@@ -23,6 +23,7 @@
 #include "nsITextScroll.h"
 #include "nsIDocShellTreeOwner.h"
 #include "nsIContentViewerContainer.h"
+#include "nsIDOMStorageManager.h"
 
 #include "nsDocLoader.h"
 #include "nsIURILoader.h"
@@ -50,7 +51,6 @@
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIPrompt.h"
 #include "nsIRefreshURI.h"
-#include "nsIScriptGlobalObject.h"
 #include "nsIScriptGlobalObjectOwner.h"
 #include "nsISHistory.h"
 #include "nsILayoutHistoryState.h"
@@ -70,7 +70,6 @@
 #include "nsISecureBrowserUI.h"
 #include "nsIObserver.h"
 #include "nsDocShellLoadTypes.h"
-#include "nsIDOMEventTarget.h"
 #include "nsILoadContext.h"
 #include "nsIWidget.h"
 #include "nsIWebShellServices.h"
@@ -79,11 +78,18 @@
 #include "nsICommandManager.h"
 #include "nsCRT.h"
 
+namespace mozilla {
+namespace dom {
+class EventTarget;
+}
+}
+
 class nsDocShell;
-class nsIController;
-class OnLinkClickEvent;
-class nsIScrollableFrame;
 class nsDOMNavigationTiming;
+class nsGlobalWindow;
+class nsIController;
+class nsIScrollableFrame;
+class OnLinkClickEvent;
 
 /* load commands were moved to nsIDocShell.h */
 /* load types were moved to nsDocShellLoadTypes.h */
@@ -146,7 +152,8 @@ class nsDocShell : public nsDocLoader,
                    public nsILoadContext,
                    public nsIWebShellServices,
                    public nsILinkHandler,
-                   public nsIClipboardCommands
+                   public nsIClipboardCommands,
+                   public nsIDOMStorageManager
 {
     friend class nsDSURIContentListener;
 
@@ -178,6 +185,7 @@ public:
     NS_DECL_NSIOBSERVER
     NS_DECL_NSICLIPBOARDCOMMANDS
     NS_DECL_NSIWEBSHELLSERVICES
+    NS_FORWARD_SAFE_NSIDOMSTORAGEMANAGER(TopSessionStorageManager())
 
     NS_IMETHOD Stop() {
         // Need this here because otherwise nsIWebNavigation::Stop
@@ -628,10 +636,8 @@ protected:
     
     void ReattachEditorToWindow(nsISHEntry *aSHEntry);
 
-    nsresult GetSessionStorageForURI(nsIURI* aURI,
-                                     const nsSubstring& aDocumentURI,
-                                     bool create,
-                                     nsIDOMStorage** aStorage);
+    nsCOMPtr<nsIDOMStorageManager> mSessionStorageManager;
+    nsIDOMStorageManager* TopSessionStorageManager();
 
     // helpers for executing commands
     nsresult GetControllerForCommand(const char *inCommand,
@@ -643,6 +649,9 @@ protected:
     nsIChannel* GetCurrentDocChannel();
 
     bool ShouldBlockLoadingForBackButton();
+
+    // Convenience method for getting our parent docshell.  Can return null
+    already_AddRefed<nsDocShell> GetParentDocshell();
 protected:
     // Override the parent setter from nsDocLoader
     virtual nsresult SetDocLoaderParent(nsDocLoader * aLoader);
@@ -673,9 +682,6 @@ protected:
 
     bool HasUnloadedParent();
 
-    // hash of session storages, keyed by domain
-    nsInterfaceHashtable<nsCStringHashKey, nsIDOMStorage> mStorages;
-
     // Dimensions of the docshell
     nsIntRect                  mBounds;
     nsString                   mName;
@@ -697,7 +703,7 @@ protected:
     // mCurrentURI should be marked immutable on set if possible.
     nsCOMPtr<nsIURI>           mCurrentURI;
     nsCOMPtr<nsIURI>           mReferrerURI;
-    nsCOMPtr<nsIScriptGlobalObject> mScriptGlobal;
+    nsRefPtr<nsGlobalWindow>   mScriptGlobal;
     nsCOMPtr<nsISHistory>      mSessionHistory;
     nsCOMPtr<nsIGlobalHistory2> mGlobalHistory;
     nsCOMPtr<nsIWebBrowserFind> mFind;
@@ -750,7 +756,7 @@ protected:
     // For that reasons don't use nsCOMPtr.
 
     nsIDocShellTreeOwner *     mTreeOwner; // Weak Reference
-    nsIDOMEventTarget *       mChromeEventHandler; //Weak Reference
+    mozilla::dom::EventTarget* mChromeEventHandler; //Weak Reference
 
     eCharsetReloadState        mCharsetReloadState;
 
@@ -863,9 +869,10 @@ protected:
     uint32_t mOwnOrContainingAppId;
 
 private:
-    nsCOMPtr<nsIAtom> mForcedCharset;
-    nsCOMPtr<nsIAtom> mParentCharset;
+    nsCString         mForcedCharset;
+    nsCString         mParentCharset;
     nsTObserverArray<nsWeakPtr> mPrivacyObservers;
+    nsTObserverArray<nsWeakPtr> mReflowObservers;
     int32_t           mParentCharsetSource;
     nsCString         mOriginalUriString;
 

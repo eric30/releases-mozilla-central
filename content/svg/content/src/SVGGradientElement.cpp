@@ -5,7 +5,7 @@
 
 #include "mozilla/dom/SVGGradientElement.h"
 
-#include "DOMSVGAnimatedTransformList.h"
+#include "mozilla/dom/SVGAnimatedTransformList.h"
 #include "mozilla/dom/SVGRadialGradientElementBinding.h"
 #include "mozilla/dom/SVGLinearGradientElementBinding.h"
 #include "mozilla/Util.h"
@@ -47,22 +47,11 @@ nsSVGElement::StringInfo SVGGradientElement::sStringInfo[1] =
 };
 
 //----------------------------------------------------------------------
-// nsISupports methods
-
-NS_IMPL_ADDREF_INHERITED(SVGGradientElement, SVGGradientElementBase)
-NS_IMPL_RELEASE_INHERITED(SVGGradientElement, SVGGradientElementBase)
-
-NS_INTERFACE_MAP_BEGIN(SVGGradientElement)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMSVGUnitTypes)
-NS_INTERFACE_MAP_END_INHERITING(SVGGradientElementBase)
-
-//----------------------------------------------------------------------
 // Implementation
 
 SVGGradientElement::SVGGradientElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : SVGGradientElementBase(aNodeInfo)
 {
-  SetIsDOMBinding();
 }
 
 //----------------------------------------------------------------------
@@ -89,12 +78,12 @@ SVGGradientElement::GradientUnits()
 }
 
 /* readonly attribute SVGAnimatedTransformList gradientTransform; */
-already_AddRefed<DOMSVGAnimatedTransformList>
+already_AddRefed<SVGAnimatedTransformList>
 SVGGradientElement::GradientTransform()
 {
   // We're creating a DOM wrapper, so we must tell GetAnimatedTransformList
   // to allocate the SVGAnimatedTransformList if it hasn't already done so:
-  return DOMSVGAnimatedTransformList::GetDOMWrapper(
+  return SVGAnimatedTransformList::GetDOMWrapper(
            GetAnimatedTransformList(DO_ALLOCATE), this);
 }
 
@@ -128,7 +117,7 @@ SVGGradientElement::IsAttributeMapped(const nsIAtom* name) const
 //---------------------Linear Gradients------------------------
 
 JSObject*
-SVGLinearGradientElement::WrapNode(JSContext* aCx, JSObject* aScope)
+SVGLinearGradientElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
   return SVGLinearGradientElementBinding::Wrap(aCx, aScope, this);
 }
@@ -140,13 +129,6 @@ nsSVGElement::LengthInfo SVGLinearGradientElement::sLengthInfo[4] =
   { &nsGkAtoms::x2, 100, nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
   { &nsGkAtoms::y2, 0, nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y },
 };
-
-//----------------------------------------------------------------------
-// nsISupports methods
-
-NS_IMPL_ISUPPORTS_INHERITED3(SVGLinearGradientElement, SVGLinearGradientElementBase,
-                             nsIDOMNode,
-                             nsIDOMElement, nsIDOMSVGElement)
 
 //----------------------------------------------------------------------
 // Implementation
@@ -190,11 +172,11 @@ SVGLinearGradientElement::Y2()
 //----------------------------------------------------------------------
 // nsSVGElement methods
 
-SVGAnimatedTransformList*
+nsSVGAnimatedTransformList*
 SVGGradientElement::GetAnimatedTransformList(uint32_t aFlags)
 {
   if (!mGradientTransform && (aFlags & DO_ALLOCATE)) {
-    mGradientTransform = new SVGAnimatedTransformList();
+    mGradientTransform = new nsSVGAnimatedTransformList();
   }
   return mGradientTransform;
 }
@@ -209,7 +191,7 @@ SVGLinearGradientElement::GetLengthInfo()
 //-------------------------- Radial Gradients ----------------------------
 
 JSObject*
-SVGRadialGradientElement::WrapNode(JSContext* aCx, JSObject* aScope)
+SVGRadialGradientElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
   return SVGRadialGradientElementBinding::Wrap(aCx, aScope, this);
 }
@@ -222,13 +204,6 @@ nsSVGElement::LengthInfo SVGRadialGradientElement::sLengthInfo[5] =
   { &nsGkAtoms::fx, 50, nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::X },
   { &nsGkAtoms::fy, 50, nsIDOMSVGLength::SVG_LENGTHTYPE_PERCENTAGE, SVGContentUtils::Y },
 };
-
-//----------------------------------------------------------------------
-// nsISupports methods
-
-NS_IMPL_ISUPPORTS_INHERITED3(SVGRadialGradientElement, SVGRadialGradientElementBase,
-                             nsIDOMNode,
-                             nsIDOMElement, nsIDOMSVGElement)
 
 //----------------------------------------------------------------------
 // Implementation

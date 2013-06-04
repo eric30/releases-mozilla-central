@@ -452,15 +452,6 @@
                        xbl:inherits="xbl:text=value,disabled,tabindex,rows,cols,readonly,wrap,placeholder,mozactionhint,spellcheck"><children/></html:textarea>
       </xul:hbox>
     </content>
-
-    <implementation>
-      <constructor><![CDATA[
-        // Given how the anonymous textarea is constructed, the HTMLTextArea
-        // implementation do not hear of the textContent being set. We have to
-        // set it again so the value is properly set.
-        this.inputField.textContent = this.inputField.textContent;
-      ]]></constructor>
-    </implementation>
   </binding>
 
   <binding id="input-box">
@@ -468,8 +459,10 @@
       <children/>
       <xul:menupopup anonid="input-box-contextmenu"
                      class="textbox-contextmenu"
-                     onpopupshowing="if (document.commandDispatcher.focusedElement != this.parentNode.firstChild)
-                                       this.parentNode.firstChild.focus();
+                     onpopupshowing="var input =
+                                       this.parentNode.getElementsByAttribute('anonid', 'input')[0];
+                                     if (document.commandDispatcher.focusedElement != input)
+                                       input.focus();
                                      this.parentNode._doPopupItemEnabling(this);"
                      oncommand="var cmd = event.originalTarget.getAttribute('cmd'); if(cmd) { this.parentNode.doCommand(cmd); event.stopPropagation(); }">
         <xul:menuitem label="&undoCmd.label;" accesskey="&undoCmd.accesskey;" cmd="cmd_undo"/>
@@ -530,8 +523,10 @@
       <children/>
       <xul:menupopup anonid="input-box-contextmenu"
                      class="textbox-contextmenu"
-                     onpopupshowing="if (document.commandDispatcher.focusedElement != this.parentNode.firstChild)
-                                       this.parentNode.firstChild.focus();
+                     onpopupshowing="var input =
+                                       this.parentNode.getElementsByAttribute('anonid', 'input')[0];
+                                     if (document.commandDispatcher.focusedElement != input)
+                                       input.focus();
                                      this.parentNode._doPopupItemEnablingSpell(this);"
                      onpopuphiding="this.parentNode._doPopupItemDisabling(this);"
                      oncommand="var cmd = event.originalTarget.getAttribute('cmd'); if(cmd) { this.parentNode.doCommand(cmd); event.stopPropagation(); }">

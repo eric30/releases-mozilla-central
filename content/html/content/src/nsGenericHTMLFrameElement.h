@@ -5,6 +5,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifndef nsGenericHTMLFrameElement_h
+#define nsGenericHTMLFrameElement_h
+
+#include "mozilla/Attributes.h"
 #include "nsGenericHTMLElement.h"
 #include "nsIFrameLoader.h"
 #include "nsIMozBrowserFrame.h"
@@ -34,18 +38,18 @@ public:
 
   virtual ~nsGenericHTMLFrameElement();
 
-  NS_IMETHOD QueryInterface(REFNSIID aIID, void** aInstancePtr);
+  NS_IMETHOD QueryInterface(REFNSIID aIID, void** aInstancePtr) MOZ_OVERRIDE;
   NS_DECL_NSIFRAMELOADEROWNER
   NS_DECL_NSIDOMMOZBROWSERFRAME
   NS_DECL_NSIMOZBROWSERFRAME
 
   // nsIContent
-  virtual bool IsHTMLFocusable(bool aWithMouse, bool *aIsFocusable, int32_t *aTabIndex);
+  virtual bool IsHTMLFocusable(bool aWithMouse, bool *aIsFocusable, int32_t *aTabIndex) MOZ_OVERRIDE;
   virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
                               nsIContent* aBindingParent,
-                              bool aCompileEventHandlers);
+                              bool aCompileEventHandlers) MOZ_OVERRIDE;
   virtual void UnbindFromTree(bool aDeep = true,
-                              bool aNullParent = true);
+                              bool aNullParent = true) MOZ_OVERRIDE;
   nsresult SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
                    const nsAString& aValue, bool aNotify)
   {
@@ -56,7 +60,7 @@ public:
                            bool aNotify) MOZ_OVERRIDE;
   virtual nsresult UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
                              bool aNotify) MOZ_OVERRIDE;
-  virtual void DestroyContent();
+  virtual void DestroyContent() MOZ_OVERRIDE;
 
   nsresult CopyInnerTo(mozilla::dom::Element* aDest);
 
@@ -68,28 +72,6 @@ public:
   void SwapFrameLoaders(nsXULElement& aOtherOwner, mozilla::ErrorResult& aError);
 
 protected:
-  /**
-   * Listens to titlechanged events from the document inside the iframe and
-   * forwards them along to the iframe so it can fire a mozbrowsertitlechange
-   * event if appropriate.
-   */
-  class TitleChangedListener MOZ_FINAL : public nsIDOMEventListener
-  {
-  public:
-    TitleChangedListener(nsGenericHTMLFrameElement *aElement,
-                         nsIDOMEventTarget *aChromeHandler);
-
-    /* Unregister this listener. */
-    void Unregister();
-
-    NS_DECL_ISUPPORTS
-    NS_DECL_NSIDOMEVENTLISTENER
-
-  private:
-    nsWeakPtr mElement; /* nsGenericHTMLFrameElement */
-    nsWeakPtr mChromeHandler; /* nsIDOMEventTarget */
-  };
-
   // This doesn't really ensure a frame loade in all cases, only when
   // it makes sense.
   void EnsureFrameLoader();
@@ -109,3 +91,5 @@ protected:
   bool                    mBrowserFrameListenersRegistered;
   bool                    mFrameLoaderCreationDisallowed;
 };
+
+#endif // nsGenericHTMLFrameElement_h

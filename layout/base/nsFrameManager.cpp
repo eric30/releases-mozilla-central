@@ -63,7 +63,7 @@
 
 #include "nsFrameManager.h"
 #include "nsRuleProcessorData.h"
-#include "sampler.h"
+#include "GeckoProfiler.h"
 
 #ifdef ACCESSIBILITY
 #include "nsAccessibilityService.h"
@@ -186,23 +186,6 @@ protected:
 nsFrameManager::~nsFrameManager()
 {
   NS_ASSERTION(!mPresShell, "nsFrameManager::Destroy never called");
-}
-
-nsresult
-nsFrameManager::Init(nsStyleSet* aStyleSet)
-{
-  if (!mPresShell) {
-    NS_ERROR("null pres shell");
-    return NS_ERROR_FAILURE;
-  }
-
-  if (!aStyleSet) {
-    NS_ERROR("null style set");
-    return NS_ERROR_FAILURE;
-  }
-
-  mStyleSet = aStyleSet;
-  return NS_OK;
 }
 
 void
@@ -1209,9 +1192,6 @@ nsFrameManager::ReResolveStyleContext(nsPresContext     *aPresContext,
       // above, which we would have previously hit for aFrame's previous
       // continuation).
       newContext = prevContinuationContext;
-      // We don't know what changes the previous continuation had, so
-      // assume the worst.
-      nonInheritedHints = nsChangeHint_Hints_NotHandledForDescendants;
     }
     else if (pseudoTag == nsCSSAnonBoxes::mozNonElement) {
       NS_ASSERTION(localContent,
@@ -1658,14 +1638,12 @@ nsFrameManager::ComputeStyleChangeFor(nsIFrame          *aFrame,
                                       RestyleTracker&    aRestyleTracker,
                                       bool               aRestyleDescendants)
 {
-  SAMPLE_LABEL("CSS", "ComputeStyleChangeFor");
+  PROFILER_LABEL("CSS", "ComputeStyleChangeFor");
 
   nsIContent *content = aFrame->GetContent();
   if (aMinChange) {
     aChangeList->AppendChange(aFrame, content, aMinChange);
   }
-
-  nsChangeHint topLevelChange = aMinChange;
 
   nsIFrame* frame = aFrame;
   nsIFrame* frame2 = aFrame;
@@ -1692,16 +1670,15 @@ nsFrameManager::ComputeStyleChangeFor(nsIFrame          *aFrame,
       // Inner loop over next-in-flows of the current frame
       nsChangeHint frameChange =
         ReResolveStyleContext(GetPresContext(), frame, nullptr,
-                              aChangeList, topLevelChange, nsChangeHint(0),
+                              aChangeList, aMinChange, nsChangeHint(0),
                               aRestyleDescendants ?
                                 eRestyle_Subtree : eRestyle_Self,
                               aRestyleTracker,
                               eSendAllNotifications,
                               visibleKidsOfHiddenElement,
                               treeMatchContext);
-      NS_UpdateHint(topLevelChange, frameChange);
 
-      if (topLevelChange & nsChangeHint_ReconstructFrame) {
+      if (frameChange & nsChangeHint_ReconstructFrame) {
         // If it's going to cause a framechange, then don't bother
         // with the continuations or special siblings since they'll be
         // clobbered by the frame reconstruct anyway.

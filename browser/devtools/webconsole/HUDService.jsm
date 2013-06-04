@@ -10,18 +10,22 @@ const Cc = Components.classes;
 const Ci = Components.interfaces;
 const Cu = Components.utils;
 
-const CONSOLEAPI_CLASS_ID = "{b49c18f8-3379-4fc0-8c90-d7772c1a9ff3}";
-
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "gDevTools",
     "resource:///modules/devtools/gDevTools.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "TargetFactory",
-    "resource:///modules/devtools/Target.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "devtools",
+    "resource://gre/modules/devtools/Loader.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "Services",
     "resource://gre/modules/Services.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "DebuggerServer",
+  "resource://gre/modules/devtools/dbg-server.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "DebuggerClient",
+  "resource://gre/modules/devtools/dbg-client.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "WebConsoleUtils",
     "resource://gre/modules/devtools/WebConsoleUtils.jsm");
@@ -29,8 +33,15 @@ XPCOMUtils.defineLazyModuleGetter(this, "WebConsoleUtils",
 XPCOMUtils.defineLazyModuleGetter(this, "Promise",
     "resource://gre/modules/commonjs/sdk/core/promise.js");
 
+XPCOMUtils.defineLazyModuleGetter(this, "ViewHelpers",
+    "resource:///modules/devtools/ViewHelpers.jsm");
+
+let Telemetry = devtools.require("devtools/shared/telemetry");
+
 const STRINGS_URI = "chrome://browser/locale/devtools/webconsole.properties";
 let l10n = new WebConsoleUtils.l10n(STRINGS_URI);
+
+const BROWSER_CONSOLE_WINDOW_FEATURES = "chrome,titlebar,toolbar,centerscreen,resizable,dialog=no";
 
 this.EXPORTED_SYMBOLS = ["HUDService"];
 
@@ -71,18 +82,43 @@ HUD_SERVICE.prototype =
   /**
    * Open a Web Console for the given target.
    *
-   * @see devtools/framework/Target.jsm for details about targets.
+   * @see devtools/framework/target.js for details about targets.
    *
    * @param object aTarget
    *        The target that the web console will connect to.
-   * @param nsIDOMElement aIframe
-   *        The iframe element into which to place the web console.
+   * @param nsIDOMWindow aIframeWindow
+   *        The window where the web console UI is already loaded.
+   * @param nsIDOMWindow aChromeWindow
+   *        The window of the web console owner.
    * @return object
    *         A Promise object for the opening of the new WebConsole instance.
    */
-  openWebConsole: function HS_openWebConsole(aTarget, aIframe)
+  openWebConsole:
+  function HS_openWebConsole(aTarget, aIframeWindow, aChromeWindow)
   {
-    let hud = new WebConsole(aTarget, aIframe);
+    let hud = new WebConsole(aTarget, aIframeWindow, aChromeWindow);
+    this.hudReferences[hud.hudId] = hud;
+    return hud.init();
+  },
+
+  /**
+   * Open a Browser Console for the given target.
+   *
+   * @see devtools/framework/Target.jsm for details about targets.
+   *
+   * @param object aTarget
+   *        The target that the browser console will connect to.
+   * @param nsIDOMWindow aIframeWindow
+   *        The window where the browser console UI is already loaded.
+   * @param nsIDOMWindow aChromeWindow
+   *        The window of the browser console owner.
+   * @return object
+   *         A Promise object for the opening of the new BrowserConsole instance.
+   */
+  openBrowserConsole:
+  function HS_openBrowserConsole(aTarget, aIframeWindow, aChromeWindow)
+  {
+    let hud = new BrowserConsole(aTarget, aIframeWindow, aChromeWindow);
     this.hudReferences[hud.hudId] = hud;
     return hud.init();
   },
@@ -144,24 +180,27 @@ HUD_SERVICE.prototype =
  * that displays console log data as well as provides an interactive terminal to
  * manipulate the target's document content.
  *
- * This object only wraps the iframe that holds the Web Console UI.
+ * This object only wraps the iframe that holds the Web Console UI. This is
+ * meant to be an integration point between the Firefox UI and the Web Console
+ * UI and features.
  *
  * @constructor
  * @param object aTarget
  *        The target that the web console will connect to.
- * @param nsIDOMElement aIframe
- *        iframe into which we should create the WebConsole UI.
+ * @param nsIDOMWindow aIframeWindow
+ *        The window where the web console UI is already loaded.
+ * @param nsIDOMWindow aChromeWindow
+ *        The window of the web console owner.
  */
-function WebConsole(aTarget, aIframe)
+function WebConsole(aTarget, aIframeWindow, aChromeWindow)
 {
-  this.iframe = aIframe;
-  this.iframe.className = "web-console-frame";
-  this.chromeDocument = this.iframe.ownerDocument;
-  this.chromeWindow = this.chromeDocument.defaultView;
+  this.iframeWindow = aIframeWindow;
+  this.chromeWindow = aChromeWindow;
   this.hudId = "hud_" + Date.now();
   this.target = aTarget;
 
   this.browserWindow = this.chromeWindow.top;
+
   let element = this.browserWindow.document.documentElement;
   if (element.getAttribute("windowtype") != "navigator:browser") {
     this.browserWindow = HUDService.currentContext();
@@ -169,11 +208,12 @@ function WebConsole(aTarget, aIframe)
 }
 
 WebConsole.prototype = {
+  iframeWindow: null,
   chromeWindow: null,
-  chromeDocument: null,
+  browserWindow: null,
   hudId: null,
   target: null,
-  iframe: null,
+  _browserConsole: false,
   _destroyer: null,
 
   /**
@@ -212,37 +252,8 @@ WebConsole.prototype = {
    */
   init: function WC_init()
   {
-    let deferred = Promise.defer();
-
-    let onIframeLoad = function() {
-      this.iframe.removeEventListener("load", onIframeLoad, true);
-      initUI();
-    }.bind(this);
-
-    let initUI = function() {
-      this.iframeWindow = this.iframe.contentWindow.wrappedJSObject;
-      this.ui = new this.iframeWindow.WebConsoleFrame(this);
-      this.ui.init().then(onSuccess, onFailure);
-    }.bind(this);
-
-    let onSuccess = function() {
-      deferred.resolve(this);
-    }.bind(this);
-
-    let onFailure = function(aReason) {
-      deferred.reject(aReason);
-    };
-
-    let win, doc;
-    if ((win = this.iframe.contentWindow) &&
-        (doc = win.document) &&
-        doc.readyState == "complete") {
-      initUI();
-    }
-    else {
-      this.iframe.addEventListener("load", onIframeLoad, true);
-    }
-    return deferred.promise;
+    this.ui = new this.iframeWindow.WebConsoleFrame(this);
+    return this.ui.init().then(() => this);
   },
 
   /**
@@ -327,20 +338,20 @@ WebConsole.prototype = {
   viewSourceInStyleEditor:
   function WC_viewSourceInStyleEditor(aSourceURL, aSourceLine)
   {
-    let styleSheets = {};
-    if (this.target.isLocalTab) {
-      styleSheets = this.target.window.document.styleSheets;
+    let toolbox = gDevTools.getToolbox(this.target);
+    if (!toolbox) {
+      this.viewSource(aSourceURL, aSourceLine);
+      return;
     }
-    for each (let style in styleSheets) {
-      if (style.href == aSourceURL) {
-        gDevTools.showToolbox(this.target, "styleeditor").then(function(toolbox) {
-          toolbox.getCurrentPanel().selectStyleSheet(style, aSourceLine);
-        });
-        return;
+
+    gDevTools.showToolbox(this.target, "styleeditor").then(function(toolbox) {
+      try {
+        toolbox.getCurrentPanel().selectStyleSheet(aSourceURL, aSourceLine);
+      } catch(e) {
+        // Open view source if style editor fails.
+        this.viewSource(aSourceURL, aSourceLine);
       }
-    }
-    // Open view source if style editor fails.
-    this.viewSource(aSourceURL, aSourceLine);
+    });
   },
 
   /**
@@ -360,6 +371,10 @@ WebConsole.prototype = {
     let panelWin = null;
     let debuggerWasOpen = true;
     let toolbox = gDevTools.getToolbox(this.target);
+    if (!toolbox) {
+      self.viewSource(aSourceURL, aSourceLine);
+      return;
+    }
 
     if (!toolbox.getPanel("jsdebugger")) {
       debuggerWasOpen = false;
@@ -402,6 +417,40 @@ WebConsole.prototype = {
       panelWin.removeEventListener("Debugger:SourceShown", onSource, false);
       panelWin.DebuggerView.editor.setCaretPosition(aSourceLine - 1);
     }
+  },
+
+  /**
+   * Retrieve information about the JavaScript debugger's stackframes list. This
+   * is used to allow the Web Console to evaluate code in the selected
+   * stackframe.
+   *
+   * @return object|null
+   *         An object which holds:
+   *         - frames: the active ThreadClient.cachedFrames array.
+   *         - selected: depth/index of the selected stackframe in the debugger
+   *         UI.
+   *         If the debugger is not open or if it's not paused, then |null| is
+   *         returned.
+   */
+  getDebuggerFrames: function WC_getDebuggerFrames()
+  {
+    let toolbox = gDevTools.getToolbox(this.target);
+    if (!toolbox) {
+      return null;
+    }
+    let panel = toolbox.getPanel("jsdebugger");
+    if (!panel) {
+      return null;
+    }
+    let framesController = panel.panelWin.gStackFrames;
+    let thread = framesController.activeThread;
+    if (thread && thread.paused) {
+      return {
+        frames: thread.cachedFrames,
+        selected: framesController.currentFrame,
+      };
+    }
+    return null;
   },
 
   /**
@@ -452,11 +501,108 @@ WebConsole.prototype = {
   },
 };
 
+
+/**
+ * A BrowserConsole instance is an interactive console initialized *per target*
+ * that displays console log data as well as provides an interactive terminal to
+ * manipulate the target's document content.
+ *
+ * This object only wraps the iframe that holds the Browser Console UI. This is
+ * meant to be an integration point between the Firefox UI and the Browser Console
+ * UI and features.
+ *
+ * @constructor
+ * @param object aTarget
+ *        The target that the browser console will connect to.
+ * @param nsIDOMWindow aIframeWindow
+ *        The window where the browser console UI is already loaded.
+ * @param nsIDOMWindow aChromeWindow
+ *        The window of the browser console owner.
+ */
+function BrowserConsole()
+{
+  WebConsole.apply(this, arguments);
+  this._telemetry = new Telemetry();
+}
+
+ViewHelpers.create({ constructor: BrowserConsole, proto: WebConsole.prototype },
+{
+  _browserConsole: true,
+  _bc_init: null,
+  _bc_destroyer: null,
+
+  $init: WebConsole.prototype.init,
+
+  /**
+   * Initialize the Browser Console instance.
+   *
+   * @return object
+   *         A Promise for the initialization.
+   */
+  init: function BC_init()
+  {
+    if (this._bc_init) {
+      return this._bc_init;
+    }
+
+    let window = this.iframeWindow;
+
+    // Make sure that the closing of the Browser Console window destroys this
+    // instance.
+    let onClose = () => {
+      window.removeEventListener("unload", onClose);
+      this.destroy();
+    };
+    window.addEventListener("unload", onClose);
+
+    // Make sure Ctrl-W closes the Browser Console window.
+    window.document.getElementById("cmd_close").removeAttribute("disabled");
+
+    this._telemetry.toolOpened("browserconsole");
+
+    this._bc_init = this.$init();
+    return this._bc_init;
+  },
+
+  $destroy: WebConsole.prototype.destroy,
+
+  /**
+   * Destroy the object.
+   *
+   * @return object
+   *         A Promise object that is resolved once the Browser Console is closed.
+   */
+  destroy: function BC_destroy()
+  {
+    if (this._bc_destroyer) {
+      return this._bc_destroyer.promise;
+    }
+
+    this._telemetry.toolClosed("browserconsole");
+
+    this._bc_destroyer = Promise.defer();
+
+    let chromeWindow = this.chromeWindow;
+    this.$destroy().then(() =>
+      this.target.client.close(() => {
+        HeadsUpDisplayUICommands._browserConsoleID = null;
+        chromeWindow.close();
+        this._bc_destroyer.resolve(null);
+      }));
+
+    return this._bc_destroyer.promise;
+  },
+});
+
+
 //////////////////////////////////////////////////////////////////////////
 // HeadsUpDisplayUICommands
 //////////////////////////////////////////////////////////////////////////
 
 var HeadsUpDisplayUICommands = {
+  _browserConsoleID: null,
+  _browserConsoleDefer: null,
+
   /**
    * Toggle the Web Console for the current tab.
    *
@@ -467,7 +613,7 @@ var HeadsUpDisplayUICommands = {
   toggleHUD: function UIC_toggleHUD()
   {
     let window = HUDService.currentContext();
-    let target = TargetFactory.forTab(window.gBrowser.selectedTab);
+    let target = devtools.TargetFactory.forTab(window.gBrowser.selectedTab);
     let toolbox = gDevTools.getToolbox(target);
 
     return toolbox && toolbox.currentToolId == "webconsole" ?
@@ -485,14 +631,107 @@ var HeadsUpDisplayUICommands = {
   getOpenHUD: function UIC_getOpenHUD()
   {
     let tab = HUDService.currentContext().gBrowser.selectedTab;
-    if (!tab || !TargetFactory.isKnownTab(tab)) {
+    if (!tab || !devtools.TargetFactory.isKnownTab(tab)) {
       return null;
     }
-    let target = TargetFactory.forTab(tab);
+    let target = devtools.TargetFactory.forTab(tab);
     let toolbox = gDevTools.getToolbox(target);
     let panel = toolbox ? toolbox.getPanel("webconsole") : null;
     return panel ? panel.hud : null;
   },
+
+  /**
+   * Toggle the Browser Console.
+   */
+  toggleBrowserConsole: function UIC_toggleBrowserConsole()
+  {
+    if (this._browserConsoleID) {
+      let hud = HUDService.getHudReferenceById(this._browserConsoleID);
+      return hud.destroy();
+    }
+
+    if (this._browserConsoleDefer) {
+      return this._browserConsoleDefer.promise;
+    }
+
+    this._browserConsoleDefer = Promise.defer();
+
+    function connect()
+    {
+      let deferred = Promise.defer();
+
+      if (!DebuggerServer.initialized) {
+        DebuggerServer.init();
+        DebuggerServer.addBrowserActors();
+      }
+
+      let client = new DebuggerClient(DebuggerServer.connectPipe());
+      client.connect(() =>
+        client.listTabs((aResponse) => {
+          // Add Global Process debugging...
+          let globals = JSON.parse(JSON.stringify(aResponse));
+          delete globals.tabs;
+          delete globals.selected;
+          // ...only if there are appropriate actors (a 'from' property will
+          // always be there).
+          if (Object.keys(globals).length > 1) {
+            deferred.resolve({ form: globals, client: client, chrome: true });
+          } else {
+            deferred.reject("Global console not found!");
+          }
+        }));
+
+      return deferred.promise;
+    }
+
+    let target;
+    function getTarget(aConnection)
+    {
+      let options = {
+        form: aConnection.form,
+        client: aConnection.client,
+        chrome: true,
+      };
+
+      return devtools.TargetFactory.forRemoteTab(options);
+    }
+
+    function openWindow(aTarget)
+    {
+      target = aTarget;
+
+      let deferred = Promise.defer();
+
+      let win = Services.ww.openWindow(null, devtools.Tools.webConsole.url, "_blank",
+                                       BROWSER_CONSOLE_WINDOW_FEATURES, null);
+      win.addEventListener("DOMContentLoaded", function onLoad() {
+        win.removeEventListener("DOMContentLoaded", onLoad);
+
+        // Set the correct Browser Console title.
+        let root = win.document.documentElement;
+        root.setAttribute("title", root.getAttribute("browserConsoleTitle"));
+
+        deferred.resolve(win);
+      });
+
+      return deferred.promise;
+    }
+
+    connect().then(getTarget).then(openWindow).then((aWindow) =>
+      HUDService.openBrowserConsole(target, aWindow, aWindow)
+        .then((aBrowserConsole) => {
+          this._browserConsoleID = aBrowserConsole.hudId;
+          this._browserConsoleDefer.resolve(aBrowserConsole);
+          this._browserConsoleDefer = null;
+        }));
+
+    return this._browserConsoleDefer.promise;
+  },
+
+  get browserConsole() {
+    return HUDService.getHudReferenceById(this._browserConsoleID);
+  },
 };
 
 const HUDService = new HUD_SERVICE();
+

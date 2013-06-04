@@ -8,6 +8,7 @@
 
 #include "nsWrapperCache.h"
 #include "xpcpublic.h"
+#include "jsapi.h"
 
 // We want to encode 3 bits into mWrapperPtrBits, so anything we store in it
 // needs to be aligned on 8 byte boundaries.
@@ -50,10 +51,16 @@ nsWrapperCache::IsBlackAndDoesNotNeedTracing(nsISupports* aThis)
     nsXPCOMCycleCollectionParticipant* participant = nullptr;
     CallQueryInterface(aThis, &participant);
     bool hasGrayObjects = false;
-    participant->Trace(aThis, SearchGray, &hasGrayObjects);
+    participant->Trace(aThis, TraceCallbackFunc(SearchGray), &hasGrayObjects);
     return !hasGrayObjects;
   }
   return false;
+}
+
+inline void
+nsWrapperCache::TraceJSObjectFromBits(JSTracer* aTrc, const char* aName)
+{
+  JS_CallMaskedObjectTracer(aTrc, &mWrapperPtrBits, kWrapperBitMask, aName);
 }
 
 #endif /* nsWrapperCache_h___ */

@@ -2,8 +2,9 @@
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
 let tempScope = {};
-Cu.import("resource:///modules/devtools/Target.jsm", tempScope);
-let TargetFactory = tempScope.TargetFactory;
+let {gDevTools} = Cu.import("resource:///modules/devtools/gDevTools.jsm", {});
+let {devtools} = Cu.import("resource://gre/modules/devtools/Loader.jsm", {});
+let TargetFactory = devtools.TargetFactory;
 
 let DOMUtils = Cc["@mozilla.org/inspector/dom-utils;1"].getService(Ci.inIDOMUtils);
 

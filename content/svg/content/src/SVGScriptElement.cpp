@@ -16,7 +16,7 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGScriptElement::WrapNode(JSContext *aCx, JSObject *aScope)
+SVGScriptElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
   return SVGScriptElementBinding::Wrap(aCx, aScope, this);
 }
@@ -43,7 +43,6 @@ SVGScriptElement::SVGScriptElement(already_AddRefed<nsINodeInfo> aNodeInfo,
   : SVGScriptElementBase(aNodeInfo)
   , nsScriptElement(aFromParser)
 {
-  SetIsDOMBinding();
   AddMutationObserver(this);
 }
 

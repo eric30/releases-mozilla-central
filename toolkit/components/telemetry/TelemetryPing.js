@@ -58,11 +58,13 @@ const RWX_OWNER = 0700;
 //   * MEMORY_JS_GC_HEAP, and
 //   * MEMORY_JS_COMPARTMENTS_SYSTEM.
 //
+// We used to measure "explicit" too, but it could cause hangs, and the data
+// was always really noisy anyway.  See bug 859657.
 const MEM_HISTOGRAMS = {
   "js-gc-heap": "MEMORY_JS_GC_HEAP",
   "js-compartments/system": "MEMORY_JS_COMPARTMENTS_SYSTEM",
   "js-compartments/user": "MEMORY_JS_COMPARTMENTS_USER",
-  "explicit": "MEMORY_EXPLICIT",
+  "js-main-runtime-temporary-peak": "MEMORY_JS_MAIN_RUNTIME_TEMPORARY_PEAK",
   "resident-fast": "MEMORY_RESIDENT",
   "vsize": "MEMORY_VSIZE",
   "storage-sqlite": "MEMORY_STORAGE_SQLITE",
@@ -172,19 +174,12 @@ TelemetryPing.prototype = {
   _pendingPings: [],
   _doLoadSaveNotifications: false,
   _startupIO : {},
-  _hashID: Ci.nsICryptoHash.SHA256,
   // The number of outstanding saved pings that we have issued loading
   // requests for.
   _pingsLoaded: 0,
   // The number of those requests that have actually completed.
   _pingLoadsCompleted: 0,
   _savedProfileDirectory: null,
-  // Saving pings for later consumption is done in two parts: one part
-  // saves a minimal amount of information in these variables.  Said
-  // information will not be available later on.  The second part
-  // handles retrieving histograms and writing the data to disk.
-  _savedSimpleMeasurements: null,
-  _savedInfo: null,
   // The previous build ID, if this is the first run with a new build.
   // Undefined if this is not the first run, or the previous build ID is unknown.
   _previousBuildID: undefined,
@@ -248,6 +243,10 @@ TelemetryPing.prototype = {
     let failedProfileLockCount = Telemetry.failedProfileLockCount;
     if (failedProfileLockCount)
       ret.failedProfileLockCount = failedProfileLockCount;
+
+    let maximalNumberOfConcurrentThreads = Telemetry.maximalNumberOfConcurrentThreads;
+    if (maximalNumberOfConcurrentThreads)
+      ret.maximalNumberOfConcurrentThreads = maximalNumberOfConcurrentThreads;
 
     for (let ioCounter in this._startupIO)
       ret[ioCounter] = this._startupIO[ioCounter];
@@ -424,7 +423,7 @@ TelemetryPing.prototype = {
                      "adapterDriverDate", "adapterDescription2",
                      "adapterVendorID2", "adapterDeviceID2", "adapterRAM2",
                      "adapterDriver2", "adapterDriverVersion2",
-                     "adapterDriverDate2", "isGPU2Active", "D2DEnabled;",
+                     "adapterDriverDate2", "isGPU2Active", "D2DEnabled",
                      "DWriteEnabled", "DWriteVersion"
                     ];
 
@@ -571,10 +570,10 @@ TelemetryPing.prototype = {
     };
 
     if (Object.keys(this._slowSQLStartup.mainThread).length
-	|| Object.keys(this._slowSQLStartup.otherThreads).length) {
+      || Object.keys(this._slowSQLStartup.otherThreads).length) {
       payloadObj.slowSQLStartup = this._slowSQLStartup;
     }
-    
+
     return payloadObj;
   },
 
@@ -609,17 +608,6 @@ TelemetryPing.prototype = {
 
     let payloadIterWithThis = payloadIter.bind(this);
     return { __iterator__: payloadIterWithThis };
-  },
-
-  hashString: function hashString(s) {
-    let digest = Cc["@mozilla.org/security/hash;1"]
-                 .createInstance(Ci.nsICryptoHash);
-    digest.init(this._hashID);
-    let stream = Cc["@mozilla.org/io/string-input-stream;1"]
-                 .createInstance(Ci.nsIStringInputStream);
-    stream.data = s;
-    digest.updateFromStream(stream, stream.available());
-    return digest.finish(/*base64encode=*/true);
   },
 
   /**
@@ -686,11 +674,12 @@ TelemetryPing.prototype = {
     }
   },
 
+  submissionPath: function submissionPath() {
+    return "/submit/telemetry/" + this._uuid;
+  },
+
   doPing: function doPing(server, ping, onSuccess, onError) {
-    let submitPath = "/submit/telemetry/" + (ping.reason == "test-ping"
-                                             ? "test-ping"
-                                             : ping.slug);
-    let url = server + submitPath;
+    let url = server + this.submissionPath();
     let request = Cc["@mozilla.org/xmlextras/xmlhttprequest;1"]
                   .createInstance(Ci.nsIXMLHttpRequest);
     request.mozBackgroundRequest = true;
@@ -800,9 +789,12 @@ TelemetryPing.prototype = {
       Telemetry.canRecord = false;
       return;
     }
+    Services.obs.addObserver(this, "profile-before-change2", false);
     Services.obs.addObserver(this, "sessionstore-windows-restored", false);
     Services.obs.addObserver(this, "quit-application-granted", false);
-    Services.obs.addObserver(this, "profile-before-change2", false);
+#ifdef MOZ_WIDGET_ANDROID
+    Services.obs.addObserver(this, "application-background", false);
+#endif
     Services.obs.addObserver(this, "xul-window-visible", false);
     this._hasWindowRestoredObserver = true;
     this._hasXulWindowVisibleObserver = true;
@@ -825,18 +817,6 @@ TelemetryPing.prototype = {
                                  Ci.nsITimer.TYPE_ONE_SHOT);
   },
 
-  ensurePingChecksum: function ensurePingChecksum(ping) {
-    /* A ping from the current session won't have a checksum.  */
-    if (!ping.checksum) {
-      return;
-    }
-
-    let checksumNow = this.hashString(ping.payload);
-    if (ping.checksum != checksumNow) {
-      throw new Error("Invalid ping checksum")
-    }
-  },
-
   addToPendingPings: function addToPendingPings(file, stream) {
     let success = false;
 
@@ -845,8 +825,6 @@ TelemetryPing.prototype = {
       stream.close();
       let ping = JSON.parse(string);
       this._pingLoadsCompleted++;
-      // This will throw if checksum is invalid.
-      this.ensurePingChecksum(ping);
       this._pendingPings.push(ping);
       if (this._doLoadSaveNotifications &&
           this._pingLoadsCompleted == this._pingsLoaded) {
@@ -854,7 +832,7 @@ TelemetryPing.prototype = {
       }
       success = true;
     } catch (e) {
-      // An error reading the file, or an error parsing/checksumming the contents.
+      // An error reading the file, or an error parsing the contents.
       stream.close();           // close is idempotent.
       file.remove(true);
     }
@@ -983,9 +961,6 @@ TelemetryPing.prototype = {
   },
 
   saveFileForPing: function saveFileForPing(ping) {
-    if (!('checksum' in ping)) {
-      ping.checksum = this.hashString(ping.payload);
-    }
     let file = this.ensurePingDirectory();
     file.append(ping.slug);
     return file;
@@ -996,6 +971,8 @@ TelemetryPing.prototype = {
   },
 
   savePendingPings: function savePendingPings() {
+    let sessionPing = this.getSessionPayloadAndSlug("saved-session");
+    this.savePing(sessionPing, true);
     this._pendingPings.forEach(function sppcb(e, i, a) {
                                  this.savePing(e, false);
                                }, this);
@@ -1020,8 +997,11 @@ TelemetryPing.prototype = {
       Services.obs.removeObserver(this, "xul-window-visible");
       this._hasXulWindowVisibleObserver = false;
     }
-    Services.obs.removeObserver(this, "quit-application-granted");
     Services.obs.removeObserver(this, "profile-before-change2");
+    Services.obs.removeObserver(this, "quit-application-granted");
+#ifdef MOZ_WIDGET_ANDROID
+    Services.obs.removeObserver(this, "application-background", false);
+#endif
   },
 
   getPayload: function getPayload() {
@@ -1121,23 +1101,36 @@ TelemetryPing.prototype = {
     case "idle":
       this.sendIdlePing(false, this._server);
       break;
-    case "quit-application-granted":
-      if (Telemetry.canSend) {
-        this._savedSimpleMeasurements = this.getSimpleMeasurements(/*forSavedSession=*/true);
-        this._savedInfo = this.getMetadata("saved-session");
-        this.savePendingPings();
-      }
-      break;
     case "profile-before-change2":
       this.uninstall();
       if (Telemetry.canSend) {
-        let payloadObj =
-          this.assemblePayloadWithMeasurements(this._savedSimpleMeasurements,
-                                               this._savedInfo);
-        let ping = this.assemblePing(payloadObj, "saved-session");
+        this.savePendingPings();
+      }
+      break;
+
+#ifdef MOZ_WIDGET_ANDROID
+    // On Android, we can get killed without warning once we are in the background,
+    // but we may also submit data and/or come back into the foreground without getting
+    // killed. To deal with this, we save the current session data to file when we are
+    // put into the background. This handles the following post-backgrounding scenarios:
+    // 1) We are killed immediately. In this case the current session data (which we
+    //    save to a file) will be loaded and submitted on a future run.
+    // 2) We submit the data while in the background, and then are killed. In this case
+    //    the file that we saved will be deleted by the usual process in
+    //    finishPingRequest after it is submitted.
+    // 3) We submit the data, and then come back into the foreground. Same as case (2).
+    // 4) We do not submit the data, but come back into the foreground. In this case
+    //    we have the option of either deleting the file that we saved (since we will either
+    //    send the live data while in the foreground, or create the file again on the next
+    //    backgrounding), or not (in which case we will delete it on submit, or overwrite
+    //    it on the next backgrounding). Not deleting it is faster, so that's what we do.
+    case "application-background":
+      if (Telemetry.canSend) {
+        let ping = this.getSessionPayloadAndSlug("saved-session");
         this.savePing(ping, true);
       }
       break;
+#endif
     }
   },
 

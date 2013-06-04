@@ -43,9 +43,11 @@ let Elements = {};
   ["tray",               "tray"],
   ["toolbar",            "toolbar"],
   ["browsers",           "browsers"],
-  ["appbar",             "appbar"],
+  ["navbar",             "navbar"],
+  ["contextappbar",      "contextappbar"],
   ["contentViewport",    "content-viewport"],
   ["progress",           "progress-control"],
+  ["progressContainer",  "progress-container"],
   ["contentNavigator",   "content-navigator"],
   ["aboutFlyout",        "about-flyoutpanel"],
   ["prefsFlyout",        "prefs-flyoutpanel"],
@@ -77,6 +79,7 @@ var BrowserUI = {
   get _back() { return document.getElementById("cmd_back"); },
   get _forward() { return document.getElementById("cmd_forward"); },
 
+  lastKnownGoodURL: "", //used when the user wants to escape unfinished url entry
   init: function() {
     // listen content messages
     messageManager.addMessageListener("DOMTitleChanged", this);
@@ -93,7 +96,6 @@ var BrowserUI = {
     window.addEventListener("MozPrecisePointer", this, true);
     window.addEventListener("MozImprecisePointer", this, true);
 
-    Services.prefs.addObserver("browser.tabs.tabsOnly", this, false);
     Services.prefs.addObserver("browser.cache.disk_cache_ssl", this, false);
     Services.obs.addObserver(this, "metro_viewstate_changed", false);
 
@@ -140,32 +142,19 @@ var BrowserUI = {
       messageManager.addMessageListener("Browser:MozApplicationManifest", OfflineApps);
 
       try {
-        BrowserUI._updateTabsOnly();
         Downloads.init();
         DialogUI.init();
         FormHelperUI.init();
         FindHelperUI.init();
-        FullScreenVideo.init();
         PdfJs.init();
 #ifdef MOZ_SERVICES_SYNC
-        WeaveGlue.init();
+        Sync.init();
 #endif
       } catch(ex) {
         Util.dumpLn("Exception in delay load module:", ex.message);
       }
 
-      try {
-        // XXX This is currently failing
-        CapturePickerUI.init();
-      } catch(ex) {
-        Util.dumpLn("Exception in CapturePickerUI:", ex.message);
-      }
-
-#ifdef MOZ_UPDATER
-      // Check for updates in progress
-      let updatePrompt = Cc["@mozilla.org/updates/update-prompt;1"].createInstance(Ci.nsIUpdatePrompt);
-      updatePrompt.checkForUpdates();
-#endif
+      BrowserUI._pullDesktopControlledPrefs();
 
       // check for left over crash reports and submit them if found.
       if (BrowserUI.startupCrashCheck()) {
@@ -257,6 +246,37 @@ var BrowserUI = {
     return uri.spec;
   },
 
+  /**
+    * Some prefs that have consequences in both Metro and Desktop such as
+    * app-update prefs, are automatically pulled from Desktop here.
+    */
+  _pullDesktopControlledPrefs: function() {
+    function pullDesktopControlledPrefType(prefType, prefFunc) {
+      try {
+        registry.create(Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER,
+                      "Software\\Mozilla\\Firefox\\Metro\\Prefs\\" + prefType,
+                      Ci.nsIWindowsRegKey.ACCESS_ALL);
+        for (let i = 0; i < registry.valueCount; i++) {
+          let prefName = registry.getValueName(i);
+          let prefValue = registry.readStringValue(prefName);
+          if (prefType == Ci.nsIPrefBranch.PREF_BOOL) {
+            prefValue = prefValue == "true";
+          }
+          Services.prefs[prefFunc](prefName, prefValue);
+        }
+      } catch (ex) {
+        Util.dumpLn("Could not pull for prefType " + prefType + ": " + ex);
+      } finally {
+        registry.close();
+      }
+    }
+    let registry = Cc["@mozilla.org/windows-registry-key;1"].
+                   createInstance(Ci.nsIWindowsRegKey);
+    pullDesktopControlledPrefType(Ci.nsIPrefBranch.PREF_INT, "setIntPref");
+    pullDesktopControlledPrefType(Ci.nsIPrefBranch.PREF_BOOL, "setBoolPref");
+    pullDesktopControlledPrefType(Ci.nsIPrefBranch.PREF_STRING, "setCharPref");
+  },
+
   /* Set the location to the current content */
   updateURI: function(aOptions) {
     aOptions = aOptions || {};
@@ -285,17 +305,19 @@ var BrowserUI = {
     content.focus();
     this._setURI(aURI);
 
-    let postData = {};
-    aURI = Browser.getShortcutOrURI(aURI, postData);
-    Browser.loadURI(aURI, { flags: Ci.nsIWebNavigation.LOAD_FLAGS_ALLOW_THIRD_PARTY_FIXUP, postData: postData });
+    Task.spawn(function() {
+      let postData = {};
+      aURI = yield Browser.getShortcutOrURI(aURI, postData);
+      Browser.loadURI(aURI, { flags: Ci.nsIWebNavigation.LOAD_FLAGS_ALLOW_THIRD_PARTY_FIXUP, postData: postData });
 
-    // Delay doing the fixup so the raw URI is passed to loadURIWithFlags
-    // and the proper third-party fixup can be done
-    let fixupFlags = Ci.nsIURIFixup.FIXUP_FLAG_ALLOW_KEYWORD_LOOKUP;
-    let uri = gURIFixup.createFixupURI(aURI, fixupFlags);
-    gHistSvc.markPageAsTyped(uri);
+      // Delay doing the fixup so the raw URI is passed to loadURIWithFlags
+      // and the proper third-party fixup can be done
+      let fixupFlags = Ci.nsIURIFixup.FIXUP_FLAG_ALLOW_KEYWORD_LOOKUP;
+      let uri = gURIFixup.createFixupURI(aURI, fixupFlags);
+      gHistSvc.markPageAsTyped(uri);
 
-    this._titleChanged(Browser.selectedBrowser);
+      BrowserUI._titleChanged(Browser.selectedBrowser);
+    });
   },
 
   handleUrlbarEnter: function handleUrlbarEnter(aEvent) {
@@ -391,13 +413,32 @@ var BrowserUI = {
     this.newTab(aURI, aOwner);
   },
 
-  closeTab: function closeTab(aTab) {
-    // If we only have one tab, open a new one
-    if (Browser.tabs.length == 1)
-      Browser.addTab(Browser.getHomePage());
+  setOnTabAnimationEnd: function setOnTabAnimationEnd(aCallback) {
+    Elements.tabs.addEventListener("animationend", function onAnimationEnd() {
+      Elements.tabs.removeEventListener("animationend", onAnimationEnd);
+      aCallback();
+    });
+  },
 
+  closeTab: function closeTab(aTab) {
     // If no tab is passed in, assume the current tab
-    Browser.closeTab(aTab || Browser.selectedTab);
+    let tab = aTab || Browser.selectedTab;
+    Browser.closeTab(tab);
+  },
+
+  animateClosingTab: function animateClosingTab(tabToClose) {
+    tabToClose.chromeTab.setAttribute("closing", "true");
+
+    let wasCollapsed = !ContextUI.isExpanded;
+    if (wasCollapsed) {
+      ContextUI.displayTabs();
+    }
+
+    this.setOnTabAnimationEnd(function() {
+	    Browser.closeTab(tabToClose, { forceClose: true } );
+        if (wasCollapsed)
+          ContextUI.dismissWithDelay(kNewTabAnimationDelayMsec);
+    });
   },
 
   /**
@@ -498,38 +539,20 @@ var BrowserUI = {
       focusedElement.blur();
   },
 
+  blurNavBar: function blurNavBar() {
+    this._edit.blur();
+  },
+
   // If the user types in the address bar, cancel pending
   // navbar autohide if set.
   navEditKeyPress: function navEditKeyPress() {
     ContextUI.cancelDismiss();
   },
 
-
-  /*********************************
-   * Conventional tabs
-   */
-
-  // Tabsonly displays the url bar with conventional tabs. Also
-  // the tray does not auto hide.
-  get isTabsOnly() {
-    return Services.prefs.getBoolPref("browser.tabs.tabsOnly");
-  },
-
-  _updateTabsOnly: function _updateTabsOnly() {
-    if (this.isTabsOnly) {
-      Elements.windowState.setAttribute("tabsonly", "true");
-    } else {
-      Elements.windowState.removeAttribute("tabsonly");
-    }
-  },
-
   observe: function BrowserUI_observe(aSubject, aTopic, aData) {
     switch (aTopic) {
       case "nsPref:changed":
         switch (aData) {
-          case "browser.tabs.tabsOnly":
-            this._updateTabsOnly();
-            break;
           case "browser.cache.disk_cache_ssl":
             this._sslDiskCacheEnabled = Services.prefs.getBoolPref(aData);
             break;
@@ -537,8 +560,17 @@ var BrowserUI = {
         break;
       case "metro_viewstate_changed":
         this._adjustDOMforViewState();
-        if (aData == "snapped")
+        let autocomplete = document.getElementById("start-autocomplete");
+        if (aData == "snapped") {
           FlyoutPanelsUI.hide();
+          // Order matters (need grids to get dimensions, etc), now
+          // let snapped grid know to refresh/redraw
+          Services.obs.notifyObservers(null, "metro_viewstate_dom_snapped", null);
+          autocomplete.setAttribute("orient", "vertical");
+        }
+        else {
+          autocomplete.setAttribute("orient", "horizontal");
+        }
         break;
     }
   },
@@ -566,8 +598,6 @@ var BrowserUI = {
       }
       Elements.windowState.setAttribute("viewstate", currViewState);
     }
-    // content navigator helper
-    document.getElementById("content-navigator").contentHasChanged();
   },
 
   _titleChanged: function(aBrowser) {
@@ -581,7 +611,7 @@ var BrowserUI = {
     } else if (!Util.isURLEmpty(url)) {
       tabCaption = url;
     } else {
-      tabCaption = Strings.browser.GetStringFromName("tabs.emptyTabTitle");
+      tabCaption = Util.getEmptyURLTabTitle();
     }
 
     let tab = Browser.getTabForBrowser(aBrowser);
@@ -591,8 +621,19 @@ var BrowserUI = {
 
   _updateButtons: function _updateButtons() {
     let browser = Browser.selectedBrowser;
-    this._back.setAttribute("disabled", !browser.canGoBack);
-    this._forward.setAttribute("disabled", !browser.canGoForward);
+    if (!browser) {
+      return;
+    }
+    if (browser.canGoBack) {
+      this._back.removeAttribute("disabled");
+    } else {
+      this._back.setAttribute("disabled", true);
+    }
+    if (browser.canGoForward) {
+      this._forward.removeAttribute("disabled");
+    } else {
+      this._forward.setAttribute("disabled", true);
+    }
   },
 
   _updateToolbar: function _updateToolbar() {
@@ -607,21 +648,23 @@ var BrowserUI = {
 
   _setURI: function _setURI(aURL) {
     this._edit.value = aURL;
+    this.lastKnownGoodURL = aURL;
   },
 
   _urlbarClicked: function _urlbarClicked() {
     // If the urlbar is not already focused, focus it and select the contents.
     if (Elements.urlbarState.getAttribute("mode") != "edit")
-      this._editURI();
+      this._editURI(true);
   },
 
-  _editURI: function _editURI() {
+  _editURI: function _editURI(aShouldDismiss) {
     this._edit.focus();
     this._edit.select();
 
     Elements.urlbarState.setAttribute("mode", "edit");
     StartUI.show();
-    ContextUI.dismissTabs();
+    if (aShouldDismiss)
+      ContextUI.dismissTabs();
   },
 
   _urlbarBlurred: function _urlbarBlurred() {
@@ -691,6 +734,7 @@ var BrowserUI = {
     aEvent.preventDefault();
 
     if (this._edit.popupOpen) {
+      this._edit.value = this.lastKnownGoodURL;
       this._edit.closePopup();
       StartUI.hide();
       ContextUI.dismiss();
@@ -711,8 +755,9 @@ var BrowserUI = {
     }
 
     // Check open modal elements
-    if (DialogUI.modals.length > 0)
+    if (DialogUI.modals.length > 0) {
       return;
+    }
 
     // Check open panel
     if (PanelUI.isVisible) {
@@ -721,7 +766,7 @@ var BrowserUI = {
     }
 
     // Check content helper
-    let contentHelper = document.getElementById("content-navigator");
+    let contentHelper = Elements.contentNavigator;
     if (contentHelper.isActive) {
       contentHelper.model.hide();
       return;
@@ -839,6 +884,13 @@ var BrowserUI = {
       return false;
     }
 
+    // Don't capture pages in snapped mode, this produces 2/3 black
+    // thumbs or stretched out ones
+    //   Ci.nsIWinMetroUtils.snapped is inaccessible on
+    //   desktop/nonwindows systems
+    if(Elements.windowState.getAttribute("viewstate") == "snapped") {
+      return false;
+    }
     // There's no point in taking screenshot of loading pages.
     if (aBrowser.docShell.busyFlags != Ci.nsIDocShell.BUSY_FLAGS_NONE) {
       return false;
@@ -927,8 +979,6 @@ var BrowserUI = {
       case "cmd_panel":
       case "cmd_flyout_back":
       case "cmd_sanitize":
-      case "cmd_zoomin":
-      case "cmd_zoomout":
       case "cmd_volumeLeft":
       case "cmd_volumeRight":
       case "cmd_openFile":
@@ -984,10 +1034,10 @@ var BrowserUI = {
         break;
       case "cmd_openLocation":
         ContextUI.displayNavbar();
-        this._editURI();
+        this._editURI(true);
         break;
       case "cmd_addBookmark":
-        Elements.appbar.show();
+        Elements.navbar.show();
         Appbar.onStarButton(true);
         break;
       case "cmd_bookmarks":
@@ -998,7 +1048,7 @@ var BrowserUI = {
         break;
       case "cmd_remoteTabs":
         if (Weave.Status.checkSetup() == Weave.CLIENT_NOT_CONFIGURED) {
-          WeaveGlue.open();
+          Sync.open();
         } else {
           PanelUI.show("remotetabs-container");
         }
@@ -1012,7 +1062,7 @@ var BrowserUI = {
         break;
       case "cmd_newTab":
         this.newTab();
-        this._editURI();
+        this._editURI(false);
         break;
       case "cmd_closeTab":
         this.closeTab();
@@ -1021,32 +1071,14 @@ var BrowserUI = {
         this.undoCloseTab();
         break;
       case "cmd_sanitize":
-      {
-        let title = Strings.browser.GetStringFromName("clearPrivateData.title");
-        let message = Strings.browser.GetStringFromName("clearPrivateData.message");
-        let clear = Services.prompt.confirm(window, title, message);
-        if (clear) {
-          // disable the button temporarily to indicate something happened
-          let button = document.getElementById("prefs-clear-data");
-          button.disabled = true;
-          setTimeout(function() { button.disabled = false; }, 5000);
-
-          Sanitizer.sanitize();
-        }
+        SanitizeUI.onSanitize();
         break;
-      }
       case "cmd_flyout_back":
         FlyoutPanelsUI.hide();
         MetroUtils.showSettingsFlyout();
         break;
       case "cmd_panel":
         PanelUI.toggle();
-        break;
-      case "cmd_zoomin":
-        Browser.zoom(-1);
-        break;
-      case "cmd_zoomout":
-        Browser.zoom(1);
         break;
       case "cmd_volumeLeft":
         // Zoom in (portrait) or out (landscape)
@@ -1063,6 +1095,10 @@ var BrowserUI = {
         this.savePage();
         break;
     }
+  },
+
+  crashReportingPrefChanged: function crashReportingPrefChanged(aState) {
+    CrashReporter.submitReports = aState;
   }
 };
 
@@ -1082,7 +1118,9 @@ var ContextUI = {
     Elements.browsers.addEventListener("mousedown", this, true);
     Elements.browsers.addEventListener("touchstart", this, true);
     Elements.browsers.addEventListener("AlertActive", this, true);
-    window.addEventListener("MozEdgeUIGesture", this, true);
+    window.addEventListener("MozEdgeUIStarted", this, true);
+    window.addEventListener("MozEdgeUICanceled", this, true);
+    window.addEventListener("MozEdgeUICompleted", this, true);
     window.addEventListener("keypress", this, true);
     window.addEventListener("KeyboardChanged", this, false);
 
@@ -1136,9 +1174,9 @@ var ContextUI = {
       this._setIsVisible(true);
       shown = true;
     }
-    if (!Elements.appbar.isShowing) {
-      // show the appbar
-      Elements.appbar.show();
+    if (!Elements.navbar.isShowing) {
+      // show the navbar
+      Elements.navbar.show();
       shown = true;
     }
 
@@ -1164,14 +1202,17 @@ var ContextUI = {
 
   /** Briefly show the tab bar and then hide it */
   peekTabs: function peekTabs() {
-    if (this.isExpanded)
-      return;
+    if (this.isExpanded) {
+      setTimeout(function () {
+        ContextUI.dismissWithDelay(kNewTabAnimationDelayMsec);
+      }, 0);
+    } else {
+      BrowserUI.setOnTabAnimationEnd(function () {
+        ContextUI.dismissWithDelay(kNewTabAnimationDelayMsec);
+      });
 
-    Elements.tabs.addEventListener("animationend", function onAnimationEnd() {
-      Elements.tabs.removeEventListener("animationend", onAnimationEnd);
-      ContextUI.dismissWithDelay(kNewTabAnimationDelayMsec);
-    });
-    this.displayTabs();
+      this.displayTabs();
+    }
   },
 
   // Dismiss all context UI.
@@ -1186,7 +1227,7 @@ var ContextUI = {
       this._setIsVisible(false);
       dismissed = true;
     }
-    if (Elements.appbar.isShowing) {
+    if (Elements.navbar.isShowing) {
       this.dismissAppbar();
       dismissed = true;
     }
@@ -1244,8 +1285,7 @@ var ContextUI = {
 
   // tab tray state
   _setIsExpanded: function _setIsExpanded(aFlag, setSilently) {
-    // if the tray can't be expanded because we're in
-    // tabsonly mode, don't expand it.
+    // if the tray can't be expanded, don't expand it.
     if (!this.isExpandable || this.isExpanded == aFlag)
       return;
 
@@ -1273,7 +1313,29 @@ var ContextUI = {
    * Events
    */
 
-  _onEdgeUIEvent: function _onEdgeUIEvent(aEvent) {
+  _onEdgeUIStarted: function(aEvent) {
+    this._hasEdgeSwipeStarted = true;
+    this._clearDelayedTimeout();
+
+    if (StartUI.hide()) {
+      this.dismiss();
+      return;
+    }
+    this.toggle();
+  },
+
+  _onEdgeUICanceled: function(aEvent) {
+    this._hasEdgeSwipeStarted = false;
+    StartUI.hide();
+    this.dismiss();
+  },
+
+  _onEdgeUICompleted: function(aEvent) {
+    if (this._hasEdgeSwipeStarted) {
+      this._hasEdgeSwipeStarted = false;
+      return;
+    }
+
     this._clearDelayedTimeout();
     if (StartUI.hide()) {
       this.dismiss();
@@ -1284,8 +1346,14 @@ var ContextUI = {
 
   handleEvent: function handleEvent(aEvent) {
     switch (aEvent.type) {
-      case "MozEdgeUIGesture":
-        this._onEdgeUIEvent(aEvent);
+      case "MozEdgeUIStarted":
+        this._onEdgeUIStarted(aEvent);
+        break;
+      case "MozEdgeUICanceled":
+        this._onEdgeUICanceled(aEvent);
+        break;
+      case "MozEdgeUICompleted":
+        this._onEdgeUICompleted(aEvent);
         break;
       case "mousedown":
         if (aEvent.button == 0 && this.isVisible)
@@ -1330,6 +1398,7 @@ var StartUI = {
 
   sections: [
     "TopSitesStartView",
+    "TopSitesSnappedView",
     "BookmarksStartView",
     "HistoryStartView",
     "RemoteTabsStartView"
@@ -1339,6 +1408,7 @@ var StartUI = {
     Elements.startUI.addEventListener("autocompletestart", this, false);
     Elements.startUI.addEventListener("autocompleteend", this, false);
     Elements.startUI.addEventListener("contextmenu", this, false);
+    Elements.startUI.addEventListener("click", this, false);
 
     this.sections.forEach(function (sectionName) {
       let section = window[sectionName];
@@ -1420,6 +1490,12 @@ var StartUI = {
     }
   },
 
+  onClick: function onClick(aEvent) {
+    // If someone clicks / taps in empty grid space, take away
+    // focus from the nav bar edit so the soft keyboard will hide.
+    BrowserUI.blurNavBar();
+  },
+
   handleEvent: function handleEvent(aEvent) {
     switch (aEvent.type) {
       case "autocompletestart":
@@ -1430,8 +1506,11 @@ var StartUI = {
         break;
       case "contextmenu":
         let event = document.createEvent("Events");
-        event.initEvent("MozEdgeUIGesture", true, false);
+        event.initEvent("MozEdgeUICompleted", true, false);
         window.dispatchEvent(event);
+        break;
+      case "click":
+        this.onClick(aEvent);
         break;
     }
   }
@@ -1441,34 +1520,24 @@ var SyncPanelUI = {
   init: function() {
     // Run some setup code the first time the panel is shown.
     Elements.syncFlyout.addEventListener("PopupChanged", function onShow(aEvent) {
-      if (aEvent.detail && aEvent.popup === Elements.syncFlyout) {
+      if (aEvent.detail && aEvent.target === Elements.syncFlyout) {
         Elements.syncFlyout.removeEventListener("PopupChanged", onShow, false);
-        WeaveGlue.init();
+        Sync.init();
       }
     }, false);
   }
 };
 
 var FlyoutPanelsUI = {
-  get _aboutVersionLabel() {
-    return document.getElementById('about-version-label');
-  },
-
-  _initAboutPanel: function() {
-    // Include the build ID if this is an "a#" (nightly or aurora) build
-    let version = Services.appinfo.version;
-    if (/a\d+$/.test(version)) {
-      let buildID = Services.appinfo.appBuildID;
-      let buildDate = buildID.slice(0,4) + "-" + buildID.slice(4,6) +
-                      "-" + buildID.slice(6,8);
-      this._aboutVersionLabel.textContent +=" (" + buildDate + ")";
-    }
-  },
-
   init: function() {
-    this._initAboutPanel();
+    AboutPanelUI.init();
     PreferencesPanelView.init();
     SyncPanelUI.init();
+
+    // make sure to hide all flyouts when window is deactivated
+    window.addEventListener("deactivate", function(window) {
+      FlyoutPanelsUI.hide();
+    });
   },
 
   hide: function() {
@@ -1601,7 +1670,7 @@ var DialogUI = {
 
     let currentNode;
     let nodeIterator = xhr.responseXML.createNodeIterator(xhr.responseXML, NodeFilter.SHOW_TEXT, null, false);
-    while (currentNode = nodeIterator.nextNode()) {
+    while (!!(currentNode = nodeIterator.nextNode())) {
       let trimmed = currentNode.nodeValue.replace(/^\s\s*/, "").replace(/\s\s*$/, "");
       if (!trimmed.length)
         currentNode.parentNode.removeChild(currentNode);
@@ -1674,14 +1743,14 @@ var DialogUI = {
     this._hidePopup();
     this._popup =  { "panel": aPanel,
                      "elements": (aElements instanceof Array) ? aElements : [aElements] };
-    this._dispatchPopupChanged(true);
+    this._dispatchPopupChanged(true, aPanel);
   },
 
   popPopup: function popPopup(aPanel) {
     if (!this._popup || aPanel != this._popup.panel)
       return;
     this._popup = null;
-    this._dispatchPopupChanged(false);
+    this._dispatchPopupChanged(false, aPanel);
   },
 
   _hidePopup: function _hidePopup() {
@@ -1707,11 +1776,10 @@ var DialogUI = {
     }
   },
 
-  _dispatchPopupChanged: function _dispatchPopupChanged(aVisible) {
+  _dispatchPopupChanged: function _dispatchPopupChanged(aVisible, aElement) {
     let event = document.createEvent("UIEvents");
     event.initUIEvent("PopupChanged", true, true, window, aVisible);
-    event.popup = this._popup;
-    Elements.stack.dispatchEvent(event);
+    aElement.dispatchEvent(event);
   },
 
   _isEventInsidePopup: function _isEventInsidePopup(aEvent) {

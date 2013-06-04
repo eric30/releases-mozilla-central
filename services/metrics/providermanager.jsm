@@ -34,7 +34,9 @@ this.ProviderManager = function (storage) {
   this._providerInitializing = false;
 
   this._pullOnlyProviders = {};
-  this._pullOnlyProvidersRegistered = false;
+  this._pullOnlyProvidersRegisterCount = 0;
+  this._pullOnlyProvidersState = this.PULL_ONLY_NOT_REGISTERED;
+  this._pullOnlyProvidersCurrentPromise = null;
 
   // Callback to allow customization of providers after they are constructed
   // but before they call out into their initialization code.
@@ -42,6 +44,11 @@ this.ProviderManager = function (storage) {
 }
 
 this.ProviderManager.prototype = Object.freeze({
+  PULL_ONLY_NOT_REGISTERED: "none",
+  PULL_ONLY_REGISTERING: "registering",
+  PULL_ONLY_UNREGISTERING: "unregistering",
+  PULL_ONLY_REGISTERED: "registered",
+
   get providers() {
     let providers = [];
     for (let [name, entry] of this._providers) {
@@ -82,15 +89,19 @@ this.ProviderManager.prototype = Object.freeze({
    *
    * One can register entries in the application's .manifest file. e.g.
    *
-   *   category healthreport-js-provider FooProvider resource://gre/modules/foo.jsm
+   *   category healthreport-js-provider-default FooProvider resource://gre/modules/foo.jsm
+   *   category healthreport-js-provider-nightly EyeballProvider resource://gre/modules/eyeball.jsm
    *
    * Then to load them:
    *
    *   let reporter = getHealthReporter("healthreport.");
-   *   reporter.registerProvidersFromCategoryManager("healthreport-js-provider");
+   *   reporter.registerProvidersFromCategoryManager("healthreport-js-provider-default");
+   *
+   * If the category has no defined members, this call has no effect, and no error is raised.
    *
    * @param category
-   *        (string) Name of category to query and load from.
+   *        (string) Name of category from which to query and load.
+   * @return a newly spawned Task.
    */
   registerProvidersFromCategoryManager: function (category) {
     this._log.info("Registering providers from category: " + category);
@@ -117,8 +128,9 @@ this.ProviderManager.prototype = Object.freeze({
           promises.push(promise);
         }
       } catch (ex) {
-        this._recordError("Error registering provider from category manager : " +
-                          entry + ": ", ex);
+        this._recordProviderError(entry,
+                                  "Error registering provider from category manager",
+                                  ex);
         continue;
       }
     }
@@ -153,7 +165,7 @@ this.ProviderManager.prototype = Object.freeze({
     }
 
     if (this._providers.has(provider.name)) {
-      return Promise.resolve();
+      return CommonUtils.laterTickResolvingPromise();
     }
 
     let deferred = Promise.defer();
@@ -221,41 +233,136 @@ this.ProviderManager.prototype = Object.freeze({
    * Ensure that pull-only providers are registered.
    */
   ensurePullOnlyProvidersRegistered: function () {
-    if (this._pullOnlyProvidersRegistered) {
-      return Promise.resolve();
+    let state = this._pullOnlyProvidersState;
+
+    this._pullOnlyProvidersRegisterCount++;
+
+    if (state == this.PULL_ONLY_REGISTERED) {
+      this._log.debug("Requested pull-only provider registration and " +
+                      "providers are already registered.");
+      return CommonUtils.laterTickResolvingPromise();
     }
 
-    let onFinished = function () {
-      this._pullOnlyProvidersRegistered = true;
+    // If we're in the process of registering, chain off that request.
+    if (state == this.PULL_ONLY_REGISTERING) {
+      this._log.debug("Requested pull-only provider registration and " +
+                      "registration is already in progress.");
+      return this._pullOnlyProvidersCurrentPromise;
+    }
 
-      return Promise.resolve();
-    }.bind(this);
+    this._log.debug("Pull-only provider registration requested.");
 
-    return Task.spawn(function registerPullProviders() {
-      for each (let providerType in this._pullOnlyProviders) {
+    // A side-effect of setting this is that an active unregistration will
+    // effectively short circuit and finish as soon as the in-flight
+    // unregistration (if any) finishes.
+    this._pullOnlyProvidersState = this.PULL_ONLY_REGISTERING;
+
+    let inFlightPromise = this._pullOnlyProvidersCurrentPromise;
+
+    this._pullOnlyProvidersCurrentPromise =
+      Task.spawn(function registerPullProviders() {
+
+      if (inFlightPromise) {
+        this._log.debug("Waiting for in-flight pull-only provider activity " +
+                        "to finish before registering.");
         try {
-          let provider = this._initProviderFromType(providerType);
-          yield this.registerProvider(provider);
+          yield inFlightPromise;
         } catch (ex) {
-          this._recordError("Error registering pull-only provider", ex);
+          this._log.warn("Error when waiting for existing pull-only promise: " +
+                         CommonUtils.exceptionStr(ex));
         }
       }
-    }.bind(this)).then(onFinished, onFinished);
+
+      for each (let providerType in this._pullOnlyProviders) {
+        // Short-circuit if we're no longer registering.
+        if (this._pullOnlyProvidersState != this.PULL_ONLY_REGISTERING) {
+          this._log.debug("Aborting pull-only provider registration.");
+          break;
+        }
+
+        try {
+          let provider = this._initProviderFromType(providerType);
+
+          // This is a no-op if the provider is already registered. So, the
+          // only overhead is constructing an instance. This should be cheap
+          // and isn't worth optimizing.
+          yield this.registerProvider(provider);
+        } catch (ex) {
+          this._recordProviderError(providerType.prototype.name,
+                                    "Error registering pull-only provider",
+                                    ex);
+        }
+      }
+
+      // It's possible we changed state while registering. Only mark as
+      // registered if we didn't change state.
+      if (this._pullOnlyProvidersState == this.PULL_ONLY_REGISTERING) {
+        this._pullOnlyProvidersState = this.PULL_ONLY_REGISTERED;
+        this._pullOnlyProvidersCurrentPromise = null;
+      }
+    }.bind(this));
+    return this._pullOnlyProvidersCurrentPromise;
   },
 
   ensurePullOnlyProvidersUnregistered: function () {
-    if (!this._pullOnlyProvidersRegistered) {
-      return Promise.resolve();
+    let state = this._pullOnlyProvidersState;
+
+    // If we're not registered, this is a no-op.
+    if (state == this.PULL_ONLY_NOT_REGISTERED) {
+      this._log.debug("Requested pull-only provider unregistration but none " +
+                      "are registered.");
+      return CommonUtils.laterTickResolvingPromise();
     }
 
-    let onFinished = function () {
-      this._pullOnlyProvidersRegistered = false;
+    // If we're currently unregistering, recycle the promise from last time.
+    if (state == this.PULL_ONLY_UNREGISTERING) {
+      this._log.debug("Requested pull-only provider unregistration and " +
+                 "unregistration is in progress.");
+      this._pullOnlyProvidersRegisterCount =
+        Math.max(0, this._pullOnlyProvidersRegisterCount - 1);
 
-      return Promise.resolve();
-    }.bind(this);
+      return this._pullOnlyProvidersCurrentPromise;
+    }
 
-    return Task.spawn(function unregisterPullProviders() {
+    // We ignore this request while multiple entities have requested
+    // registration because we don't want a request from an "inner,"
+    // short-lived request to overwrite the desire of the "parent,"
+    // longer-lived request.
+    if (this._pullOnlyProvidersRegisterCount > 1) {
+      this._log.debug("Requested pull-only provider unregistration while " +
+                      "other callers still want them registered. Ignoring.");
+      this._pullOnlyProvidersRegisterCount--;
+      return CommonUtils.laterTickResolvingPromise();
+    }
+
+    // We are either fully registered or registering with a single consumer.
+    // In both cases we are authoritative and can commence unregistration.
+
+    this._log.debug("Pull-only providers being unregistered.");
+    this._pullOnlyProvidersRegisterCount =
+      Math.max(0, this._pullOnlyProvidersRegisterCount - 1);
+    this._pullOnlyProvidersState = this.PULL_ONLY_UNREGISTERING;
+    let inFlightPromise = this._pullOnlyProvidersCurrentPromise;
+
+    this._pullOnlyProvidersCurrentPromise =
+      Task.spawn(function unregisterPullProviders() {
+
+      if (inFlightPromise) {
+        this._log.debug("Waiting for in-flight pull-only provider activity " +
+                        "to complete before unregistering.");
+        try {
+          yield inFlightPromise;
+        } catch (ex) {
+          this._log.warn("Error when waiting for existing pull-only promise: " +
+                         CommonUtils.exceptionStr(ex));
+        }
+      }
+
       for (let provider of this.providers) {
+        if (this._pullOnlyProvidersState != this.PULL_ONLY_UNREGISTERING) {
+          return;
+        }
+
         if (!provider.pullOnly) {
           continue;
         }
@@ -266,13 +373,20 @@ this.ProviderManager.prototype = Object.freeze({
         try {
           yield provider.shutdown();
         } catch (ex) {
-          this._recordError("Error when shutting down provider: " +
-                            provider.name, ex);
+          this._recordProviderError(provider.name,
+                                    "Error when shutting down provider",
+                                    ex);
         } finally {
           this.unregisterProvider(provider.name);
         }
       }
-    }.bind(this)).then(onFinished, onFinished);
+
+      if (this._pullOnlyProvidersState == this.PULL_ONLY_UNREGISTERING) {
+        this._pullOnlyProvidersState = this.PULL_ONLY_NOT_REGISTERED;
+        this._pullOnlyProvidersCurrentPromise = null;
+      }
+    }.bind(this));
+    return this._pullOnlyProvidersCurrentPromise;
   },
 
   _popAndInitProvider: function () {
@@ -373,7 +487,7 @@ this.ProviderManager.prototype = Object.freeze({
           }
         }
 
-        return Promise.resolve(result);
+        return CommonUtils.laterTickResolvingPromise(result);
       });
 
       promises.push([provider.name, promise]);
@@ -412,7 +526,7 @@ this.ProviderManager.prototype = Object.freeze({
   _recordProviderError: function (name, msg, ex) {
     let msg = "Provider error: " + name + ": " + msg;
     if (ex) {
-      msg += ": " + ex.message;
+      msg += ": " + CommonUtils.exceptionStr(ex);
     }
     this._log.warn(msg);
 

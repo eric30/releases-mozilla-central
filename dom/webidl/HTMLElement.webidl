@@ -12,8 +12,6 @@
  * and create derivative works of this document.
  */
 
-interface DOMStringMap;
-
 interface HTMLElement : Element {
   // metadata attributes
            attribute DOMString title;
@@ -74,7 +72,7 @@ interface HTMLElement : Element {
   //readonly attribute boolean? commandChecked;
 
   // styling
-  [Constant]
+  [PutForwards=cssText, Constant]
   readonly attribute CSSStyleDeclaration style;
 
   // Mozilla specific stuff

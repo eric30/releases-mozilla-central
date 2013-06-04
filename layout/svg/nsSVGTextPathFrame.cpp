@@ -29,7 +29,7 @@ NS_NewSVGTextPathFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 NS_IMPL_FRAMEARENA_HELPERS(nsSVGTextPathFrame)
 
 #ifdef DEBUG
-NS_IMETHODIMP
+void
 nsSVGTextPathFrame::Init(nsIContent* aContent,
                          nsIFrame* aParent,
                          nsIFrame* aPrevInFlow)
@@ -46,7 +46,7 @@ nsSVGTextPathFrame::Init(nsIContent* aContent,
   NS_ASSERTION(aContent->IsSVG(nsGkAtoms::textPath),
                "Content is not an SVG textPath");
 
-  return nsSVGTextPathFrameBase::Init(aContent, aParent, aPrevInFlow);
+  nsSVGTextPathFrameBase::Init(aContent, aParent, aPrevInFlow);
 }
 #endif /* DEBUG */
 
@@ -158,12 +158,12 @@ nsSVGTextPathFrame::AttributeChanged(int32_t         aNameSpaceID,
 {
   if (aNameSpaceID == kNameSpaceID_None &&
       aAttribute == nsGkAtoms::startOffset) {
-    nsSVGUtils::InvalidateBounds(this, false);
+    nsSVGEffects::InvalidateRenderingObservers(this);
     nsSVGUtils::ScheduleReflowSVG(this);
     NotifyGlyphMetricsChange();
   } else if (aNameSpaceID == kNameSpaceID_XLink &&
              aAttribute == nsGkAtoms::href) {
-    nsSVGUtils::InvalidateBounds(this, false);
+    nsSVGEffects::InvalidateRenderingObservers(this);
     nsSVGUtils::ScheduleReflowSVG(this);
     // Blow away our reference, if any
     Properties().Delete(nsSVGEffects::HrefProperty());

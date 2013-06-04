@@ -1,6 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=4 sw=4 et tw=99:
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -33,10 +32,10 @@
     _(ParNewDenseArray)             \
     _(ParNewCallObject)             \
     _(ParBailout)                   \
+    _(InitElem)                     \
     _(InitProp)                     \
     _(CheckOverRecursed)            \
     _(ParCheckOverRecursed)         \
-    _(RecompileCheck)               \
     _(DefVar)                       \
     _(DefFun)                       \
     _(CallKnown)                    \
@@ -51,6 +50,9 @@
     _(CreateThis)                   \
     _(CreateThisWithProto)          \
     _(CreateThisWithTemplate)       \
+    _(CreateArgumentsObject)        \
+    _(GetArgumentsObjectArg)        \
+    _(SetArgumentsObjectArg)        \
     _(ReturnFromCtor)               \
     _(BitNotI)                      \
     _(BitNotV)                      \
@@ -65,6 +67,8 @@
     _(TestDAndBranch)               \
     _(TestVAndBranch)               \
     _(TestOAndBranch)               \
+    _(FunctionDispatch)             \
+    _(TypeObjectDispatch)           \
     _(PolyInlineDispatch)           \
     _(Compare)                      \
     _(CompareAndBranch)             \
@@ -72,7 +76,6 @@
     _(CompareDAndBranch)            \
     _(CompareS)                     \
     _(CompareStrictS)               \
-    _(ParCompareS)                  \
     _(CompareB)                     \
     _(CompareBAndBranch)            \
     _(CompareV)                     \
@@ -130,11 +133,14 @@
     _(StoreSlotV)                   \
     _(StoreSlotT)                   \
     _(GuardShape)                   \
+    _(GuardObjectType)              \
     _(GuardClass)                   \
     _(ParWriteGuard)                \
     _(ParDump)                      \
     _(TypeBarrier)                  \
     _(MonitorTypes)                 \
+    _(PostWriteBarrierO)            \
+    _(PostWriteBarrierV)            \
     _(InitializedLength)            \
     _(SetInitializedLength)         \
     _(BoundsCheck)                  \
@@ -154,7 +160,10 @@
     _(StoreElementHoleT)            \
     _(LoadTypedArrayElement)        \
     _(LoadTypedArrayElementHole)    \
+    _(LoadTypedArrayElementStatic)  \
     _(StoreTypedArrayElement)       \
+    _(StoreTypedArrayElementHole)   \
+    _(StoreTypedArrayElementStatic) \
     _(EffectiveAddress)             \
     _(ClampIToUint8)                \
     _(ClampDToUint8)                \
@@ -167,6 +176,8 @@
     _(ParSlice)                     \
     _(GetPropertyCacheV)            \
     _(GetPropertyCacheT)            \
+    _(GetPropertyPolymorphicV)      \
+    _(GetPropertyPolymorphicT)      \
     _(GetElementCacheV)             \
     _(GetElementCacheT)             \
     _(BindNameCache)                \
@@ -176,10 +187,15 @@
     _(CallsiteCloneCache)           \
     _(CallGetElement)               \
     _(CallSetElement)               \
+    _(CallInitElementArray)         \
     _(CallSetProperty)              \
     _(CallDeleteProperty)           \
     _(SetPropertyCacheV)            \
     _(SetPropertyCacheT)            \
+    _(SetElementCacheV)             \
+    _(SetElementCacheT)             \
+    _(SetPropertyPolymorphicV)      \
+    _(SetPropertyPolymorphicT)      \
     _(CallIteratorStart)            \
     _(IteratorStart)                \
     _(IteratorNext)                 \
@@ -191,6 +207,9 @@
     _(StringLength)                 \
     _(ArgumentsLength)              \
     _(GetArgument)                  \
+    _(RunOncePrologue)              \
+    _(Rest)                         \
+    _(ParRest)                      \
     _(TypeOfV)                      \
     _(ToIdV)                        \
     _(Floor)                        \
@@ -205,6 +224,7 @@
     _(GetDOMProperty)               \
     _(SetDOMProperty)               \
     _(CallDOMNative)                \
+    _(IsCallable)                   \
     _(AsmJSLoadHeap)                \
     _(AsmJSStoreHeap)               \
     _(AsmJSLoadGlobalVar)           \

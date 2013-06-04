@@ -1,12 +1,13 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=4 sw=4 et tw=79 ft=cpp:
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #ifndef String_inl_h__
 #define String_inl_h__
+
+#include "mozilla/PodOperations.h"
 
 #include "jscntxt.h"
 #include "jsprobes.h"
@@ -23,11 +24,11 @@ namespace js {
 
 template <AllowGC allowGC>
 static JS_ALWAYS_INLINE JSInlineString *
-NewShortString(JSContext *cx, Latin1Chars chars)
+NewShortString(JSContext *cx, JS::Latin1Chars chars)
 {
     size_t len = chars.length();
     JS_ASSERT(JSShortString::lengthFits(len));
-    RawInlineString str = JSInlineString::lengthFits(len)
+    JSInlineString *str = JSInlineString::lengthFits(len)
                           ? JSInlineString::new_<allowGC>(cx)
                           : JSShortString::new_<allowGC>(cx);
     if (!str)
@@ -37,13 +38,12 @@ NewShortString(JSContext *cx, Latin1Chars chars)
     for (size_t i = 0; i < len; ++i)
         p[i] = static_cast<jschar>(chars[i]);
     p[len] = '\0';
-    Probes::createString(cx, str, len);
     return str;
 }
 
 template <AllowGC allowGC>
 static JS_ALWAYS_INLINE JSInlineString *
-NewShortString(JSContext *cx, StableTwoByteChars chars)
+NewShortString(JSContext *cx, JS::StableTwoByteChars chars)
 {
     size_t len = chars.length();
 
@@ -59,15 +59,14 @@ NewShortString(JSContext *cx, StableTwoByteChars chars)
         return NULL;
 
     jschar *storage = str->init(len);
-    PodCopy(storage, chars.start().get(), len);
+    mozilla::PodCopy(storage, chars.start().get(), len);
     storage[len] = 0;
-    Probes::createString(cx, str, len);
     return str;
 }
 
 template <AllowGC allowGC>
 static JS_ALWAYS_INLINE JSInlineString *
-NewShortString(JSContext *cx, TwoByteChars chars)
+NewShortString(JSContext *cx, JS::TwoByteChars chars)
 {
     size_t len = chars.length();
 
@@ -83,14 +82,13 @@ NewShortString(JSContext *cx, TwoByteChars chars)
         if (!allowGC)
             return NULL;
         jschar tmp[JSShortString::MAX_SHORT_LENGTH];
-        PodCopy(tmp, chars.start().get(), len);
-        return NewShortString<CanGC>(cx, StableTwoByteChars(tmp, len));
+        mozilla::PodCopy(tmp, chars.start().get(), len);
+        return NewShortString<CanGC>(cx, JS::StableTwoByteChars(tmp, len));
     }
 
     jschar *storage = str->init(len);
-    PodCopy(storage, chars.start().get(), len);
+    mozilla::PodCopy(storage, chars.start().get(), len);
     storage[len] = 0;
-    Probes::createString(cx, str, len);
     return str;
 }
 
@@ -110,7 +108,7 @@ inline void
 JSString::writeBarrierPre(JSString *str)
 {
 #ifdef JSGC_INCREMENTAL
-    if (!str)
+    if (!str || !str->runtime()->needsBarrier())
         return;
 
     JS::Zone *zone = str->zone();
@@ -233,7 +231,7 @@ JSDependentString::new_(JSContext *cx, JSLinearString *baseArg, const jschar *ch
      * is more efficient to immediately undepend here.
      */
     if (JSShortString::lengthFits(length))
-        return js::NewShortString<js::CanGC>(cx, js::TwoByteChars(chars, length));
+        return js::NewShortString<js::CanGC>(cx, JS::TwoByteChars(chars, length));
 
     JSDependentString *str = (JSDependentString *)js_NewGCString<js::NoGC>(cx);
     if (str) {
@@ -406,10 +404,10 @@ inline JSLinearString *
 js::StaticStrings::getUnitStringForElement(JSContext *cx, JSString *str, size_t index)
 {
     JS_ASSERT(index < str->length());
-    const jschar *chars = str->getChars(cx);
-    if (!chars)
+
+    jschar c;
+    if (!str->getChar(cx, index, &c))
         return NULL;
-    jschar c = chars[index];
     if (c < UNIT_STATIC_LIMIT)
         return getUnit(c);
     return js_NewDependentString(cx, str, index, 1);

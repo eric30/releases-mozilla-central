@@ -5,7 +5,7 @@ function ffi(a,b,c,d) {
     return a+b+c+d;
 }
 
-var f = asmLink(asmCompile('global','imp', USE_ASM + 'var ffi=imp.ffi; function g() { return 1 } function f() { var i=0; i=g(); return ((ffi(4,5,6,7)|0)+i)|0 } return f'), null, {ffi:ffi});
+var f = asmLink(asmCompile('global','imp', USE_ASM + 'var ffi=imp.ffi; function g() { return 1 } function f() { var i=0; i=g()|0; return ((ffi(4,5,6,7)|0)+i)|0 } return f'), null, {ffi:ffi});
 assertEq(f(1), 23);
 
 var counter = 0;
@@ -28,6 +28,7 @@ assertAsmTypeFail('glob', 'imp', USE_ASM + 'var inc=imp.inc; function f() { retu
 assertAsmTypeFail('glob', 'imp', USE_ASM + 'var inc=imp.inc; function f() { return +((inc()|0) + 1.1) } return f');
 assertAsmTypeFail('glob', 'imp', USE_ASM + 'var inc=imp.inc; function f() { return +(inc() + 1.1) } return f');
 assertAsmTypeFail('glob', 'imp', USE_ASM + 'var inc=imp.inc; function f() { return (+inc() + 1)|0 } return f');
+assertAsmTypeFail('glob', 'imp', USE_ASM + 'var inc=imp.inc; function f() { var i = 0; inc(i>>>0) } return f');
 
 assertAsmLinkFail(asmCompile('glob', 'imp', USE_ASM + 'var inc=imp.inc; function f() { return inc()|0 } return f'), null, {});
 assertAsmLinkFail(asmCompile('glob', 'imp', USE_ASM + 'var inc=imp.inc; function f() { return inc()|0 } return f'), null, {inc:0});

@@ -1,7 +1,7 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-MARIONETTE_TIMEOUT = 10000;
+MARIONETTE_TIMEOUT = 60000;
 
 SpecialPowers.addPermission("sms", true, document);
 SpecialPowers.setBoolPref("dom.sms.enabled", true);
@@ -80,7 +80,7 @@ function test2() {
 function deleteMsg() {
   log("Deleting SMS (id: " + smsId + ").");
   let request = sms.delete(smsId);
-  ok(request instanceof MozSmsRequest,
+  ok(request instanceof DOMRequest,
       "request is instanceof " + request.constructor);
 
   request.onsuccess = function(event) {

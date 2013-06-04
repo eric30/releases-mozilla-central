@@ -7,9 +7,10 @@
 #ifndef mozilla_dom_HTMLSourceElement_h
 #define mozilla_dom_HTMLSourceElement_h
 
+#include "mozilla/Attributes.h"
 #include "nsIDOMHTMLSourceElement.h"
 #include "nsGenericHTMLElement.h"
-#include "nsHTMLMediaElement.h"
+#include "mozilla/dom/HTMLMediaElement.h"
 
 namespace mozilla {
 namespace dom {
@@ -36,15 +37,15 @@ public:
   // nsIDOMHTMLSourceElement
   NS_DECL_NSIDOMHTMLSOURCEELEMENT
 
-  virtual nsresult Clone(nsINodeInfo* aNodeInfo, nsINode** aResult) const;
+  virtual nsresult Clone(nsINodeInfo* aNodeInfo, nsINode** aResult) const MOZ_OVERRIDE;
 
   // Override BindToTree() so that we can trigger a load when we add a
   // child source element.
   virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
                               nsIContent* aBindingParent,
-                              bool aCompileEventHandlers);
+                              bool aCompileEventHandlers) MOZ_OVERRIDE;
 
-  virtual nsIDOMNode* AsDOMNode() { return this; }
+  virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
 
   // WebIDL
   void GetSrc(nsString& aSrc)
@@ -75,11 +76,12 @@ public:
   }
 
 protected:
-  virtual JSObject* WrapNode(JSContext* aCx, JSObject* aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext* aCx,
+                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
 protected:
-  virtual void GetItemValueText(nsAString& text);
-  virtual void SetItemValueText(const nsAString& text);
+  virtual void GetItemValueText(nsAString& text) MOZ_OVERRIDE;
+  virtual void SetItemValueText(const nsAString& text) MOZ_OVERRIDE;
 };
 
 } // namespace dom

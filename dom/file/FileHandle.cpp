@@ -35,7 +35,7 @@ public:
   { }
 
   nsresult
-  GetSuccessResult(JSContext* aCx, jsval* aVal);
+  GetSuccessResult(JSContext* aCx, JS::Value* aVal);
 
   void
   ReleaseObjects()
@@ -86,14 +86,14 @@ FileHandle::Open(const nsAString& aMode,
   FileMode mode;
   if (aOptionalArgCount) {
     if (aMode.EqualsLiteral("readwrite")) {
-      mode = FileModeValues::Readwrite;
+      mode = FileMode::Readwrite;
     } else if (aMode.EqualsLiteral("readonly")) {
-      mode = FileModeValues::Readonly;
+      mode = FileMode::Readonly;
     } else {
       return NS_ERROR_TYPE_ERR;
     }
   } else {
-    mode = FileModeValues::Readonly;
+    mode = FileMode::Readonly;
   }
 
   ErrorResult rv;
@@ -107,20 +107,20 @@ FileHandle::Open(FileMode aMode, ErrorResult& aError)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  if (FileService::IsShuttingDown() || mFileStorage->IsStorageShuttingDown()) {
+  if (FileService::IsShuttingDown() || mFileStorage->IsShuttingDown()) {
     aError.Throw(NS_ERROR_DOM_FILEHANDLE_UNKNOWN_ERR);
     return nullptr;
   }
 
-  MOZ_STATIC_ASSERT(static_cast<uint32_t>(FileModeValues::Readonly) ==
+  MOZ_STATIC_ASSERT(static_cast<uint32_t>(FileMode::Readonly) ==
                     static_cast<uint32_t>(LockedFile::READ_ONLY),
                     "Enum values should match.");
-  MOZ_STATIC_ASSERT(static_cast<uint32_t>(FileModeValues::Readwrite) ==
+  MOZ_STATIC_ASSERT(static_cast<uint32_t>(FileMode::Readwrite) ==
                     static_cast<uint32_t>(LockedFile::READ_WRITE),
                     "Enum values should match.");
 
   nsRefPtr<LockedFile> lockedFile =
-    LockedFile::Create(this, static_cast<LockedFile::Mode>(aMode));
+    LockedFile::Create(this, LockedFile::Mode(static_cast<int>(aMode)));
   if (!lockedFile) {
     aError.Throw(NS_ERROR_DOM_FILEHANDLE_UNKNOWN_ERR);
     return nullptr;
@@ -186,13 +186,14 @@ FileHandle::GetFileInfo()
 }
 
 nsresult
-GetFileHelper::GetSuccessResult(JSContext* aCx, jsval* aVal)
+GetFileHelper::GetSuccessResult(JSContext* aCx, JS::Value* aVal)
 {
   nsCOMPtr<nsIDOMFile> domFile =
     mFileHandle->CreateFileObject(mLockedFile, mParams->Size());
 
+  JS::Rooted<JSObject*> global(aCx, JS_GetGlobalForScopeChain(aCx));
   nsresult rv =
-    nsContentUtils::WrapNative(aCx, JS_GetGlobalForScopeChain(aCx), domFile,
+    nsContentUtils::WrapNative(aCx, global, domFile,
                                &NS_GET_IID(nsIDOMFile), aVal);
   NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_FILEHANDLE_UNKNOWN_ERR);
 
@@ -201,7 +202,7 @@ GetFileHelper::GetSuccessResult(JSContext* aCx, jsval* aVal)
 
 /* virtual */
 JSObject*
-FileHandle::WrapObject(JSContext* aCx, JSObject* aScope)
+FileHandle::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
   return FileHandleBinding::Wrap(aCx, aScope, this);
 }

@@ -1,6 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=4 sw=4 et tw=79 ft=cpp:
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -10,6 +9,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/GuardObjects.h"
+#include "mozilla/PodOperations.h"
 
 #include "jsapi.h"
 #include "jsatom.h"
@@ -21,17 +21,13 @@
 #include "js/CharacterEncoding.h"
 #include "js/RootingAPI.h"
 
-ForwardDeclareJS(String);
 class JSDependentString;
-class JSUndependedString;
 class JSExtensibleString;
 class JSExternalString;
-ForwardDeclareJS(LinearString);
+class JSInlineString;
 class JSStableString;
-ForwardDeclareJS(InlineString);
+class JSString;
 class JSRope;
-ForwardDeclareJS(FlatString);
-ForwardDeclareJS(Atom);
 
 namespace js {
 
@@ -273,6 +269,7 @@ class JSString : public js::gc::Cell
 
     inline const jschar *getChars(JSContext *cx);
     inline const jschar *getCharsZ(JSContext *cx);
+    inline bool getChar(JSContext *cx, size_t index, jschar *code);
 
     /* Fallible conversions to more-derived string types. */
 
@@ -414,6 +411,9 @@ class JSString : public js::gc::Cell
         return offsetof(JSString, d.u1.chars);
     }
 
+    JS::Zone *zone() const { return tenuredZone(); }
+    js::gc::AllocKind getAllocKind() const { return tenuredGetAllocKind(); }
+
     static inline void writeBarrierPre(JSString *str);
     static inline void writeBarrierPost(JSString *str, void *addr);
     static inline bool needWriteBarrierPre(JS::Zone *zone);
@@ -462,6 +462,13 @@ class JSRope : public JSString
     }
 
     inline void markChildren(JSTracer *trc);
+
+    inline static size_t offsetOfLeft() {
+        return offsetof(JSRope, d.u1.left);
+    }
+    inline static size_t offsetOfRight() {
+        return offsetof(JSRope, d.s.u2.right);
+    }
 };
 
 JS_STATIC_ASSERT(sizeof(JSRope) == sizeof(JSString));
@@ -667,6 +674,10 @@ class JSInlineString : public JSFlatString
     static bool lengthFits(size_t length) {
         return length <= MAX_INLINE_LENGTH;
     }
+
+    static size_t offsetOfInlineStorage() {
+        return offsetof(JSInlineString, d.inlineStorage);
+    }
 };
 
 JS_STATIC_ASSERT(sizeof(JSInlineString) == sizeof(JSString));
@@ -771,9 +782,9 @@ class StaticStrings
     JSAtom *length2StaticTable[NUM_SMALL_CHARS * NUM_SMALL_CHARS];
 
     void clear() {
-        PodArrayZero(unitStaticTable);
-        PodArrayZero(length2StaticTable);
-        PodArrayZero(intStaticTable);
+        mozilla::PodArrayZero(unitStaticTable);
+        mozilla::PodArrayZero(length2StaticTable);
+        mozilla::PodArrayZero(intStaticTable);
     }
 
   public:
@@ -843,7 +854,7 @@ class PropertyName : public JSAtom
 
 JS_STATIC_ASSERT(sizeof(PropertyName) == sizeof(JSString));
 
-static JS_ALWAYS_INLINE RawId
+static JS_ALWAYS_INLINE jsid
 NameToId(PropertyName *name)
 {
     return NON_INTEGER_ATOM_TO_JSID(name);
@@ -879,6 +890,40 @@ JSString::getChars(JSContext *cx)
     if (JSLinearString *str = ensureLinear(cx))
         return str->chars();
     return NULL;
+}
+
+JS_ALWAYS_INLINE bool
+JSString::getChar(JSContext *cx, size_t index, jschar *code)
+{
+    JS_ASSERT(index < length());
+
+    /*
+     * Optimization for one level deep ropes.
+     * This is common for the following pattern:
+     *
+     * while() {
+     *   text = text.substr(0, x) + "bla" + text.substr(x)
+     *   test.charCodeAt(x + 1)
+     * }
+     */
+    const jschar *chars;
+    if (isRope()) {
+        JSRope *rope = &asRope();
+        if (uint32_t(index) < rope->leftChild()->length()) {
+            chars = rope->leftChild()->getChars(cx);
+        } else {
+            chars = rope->rightChild()->getChars(cx);
+            index -= rope->leftChild()->length();
+        }
+    } else {
+        chars = getChars(cx);
+    }
+
+    if (!chars)
+        return false;
+
+    *code = chars[index];
+    return true;
 }
 
 JS_ALWAYS_INLINE const jschar *

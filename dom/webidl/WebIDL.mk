@@ -9,9 +9,11 @@ generated_webidl_files = \
   $(NULL)
 
 webidl_files = \
+  AnalyserNode.webidl \
   AnimationEvent.webidl \
   ArchiveReader.webidl \
   ArchiveRequest.webidl \
+  Attr.webidl \
   AudioBuffer.webidl \
   AudioBufferSourceNode.webidl \
   AudioContext.webidl \
@@ -19,30 +21,45 @@ webidl_files = \
   AudioListener.webidl \
   AudioNode.webidl \
   AudioParam.webidl \
-  AudioSourceNode.webidl \
+  AudioStreamTrack.webidl \
+  AudioProcessingEvent.webidl \
+  BarProp.webidl \
   BatteryManager.webidl \
+  BeforeUnloadEvent.webidl \
   BiquadFilterNode.webidl \
   Blob.webidl \
   CanvasRenderingContext2D.webidl \
   CaretPosition.webidl \
   CDATASection.webidl \
   CFStateChangeEvent.webidl \
+  ChannelMergerNode.webidl \
+  ChannelSplitterNode.webidl \
   CharacterData.webidl \
+  ChildNode.webidl \
   ClientRect.webidl \
   ClientRectList.webidl \
+  ClipboardEvent.webidl \
+  CameraManager.webidl \
   CommandEvent.webidl \
   Comment.webidl \
+  CompositionEvent.webidl \
+  Coordinates.webidl \
   CSS.webidl \
   CSSPrimitiveValue.webidl \
   CSSStyleDeclaration.webidl \
   CSSStyleSheet.webidl \
   CSSValue.webidl \
   CSSValueList.webidl \
+  DataContainerEvent.webidl \
   DelayNode.webidl \
+  DesktopNotification.webidl \
+  DeviceMotionEvent.webidl \
+  DeviceStorage.webidl \
   Document.webidl \
   DocumentFragment.webidl \
   DocumentType.webidl \
   DOMCursor.webidl \
+  DOMError.webidl \
   DOMImplementation.webidl \
   DOMParser.webidl \
   DOMRequest.webidl \
@@ -50,6 +67,7 @@ webidl_files = \
   DOMStringMap.webidl \
   DOMTokenList.webidl \
   DOMTransaction.webidl \
+  DragEvent.webidl \
   DummyBinding.webidl \
   DynamicsCompressorNode.webidl \
   Element.webidl \
@@ -61,18 +79,22 @@ webidl_files = \
   File.webidl \
   FileHandle.webidl \
   FileList.webidl \
+  FileReader.webidl \
   FileReaderSync.webidl \
   FileRequest.webidl \
   FormData.webidl \
   Function.webidl \
   GainNode.webidl \
+  Geolocation.webidl \
   HTMLAnchorElement.webidl \
   HTMLAppletElement.webidl \
   HTMLAreaElement.webidl \
+  HTMLAudioElement.webidl \
   HTMLBaseElement.webidl \
   HTMLBodyElement.webidl \
   HTMLBRElement.webidl \
   HTMLButtonElement.webidl \
+  HTMLCanvasElement.webidl \
   HTMLCollection.webidl \
   HTMLDataElement.webidl \
   HTMLDataListElement.webidl \
@@ -90,12 +112,15 @@ webidl_files = \
   HTMLHeadingElement.webidl \
   HTMLHRElement.webidl \
   HTMLHtmlElement.webidl \
+  HTMLIFrameElement.webidl \
   HTMLImageElement.webidl \
+  HTMLInputElement.webidl \
   HTMLLabelElement.webidl \
   HTMLLegendElement.webidl \
   HTMLLIElement.webidl \
   HTMLLinkElement.webidl \
   HTMLMapElement.webidl \
+  HTMLMediaElement.webidl \
   HTMLMenuElement.webidl \
   HTMLMenuItemElement.webidl \
   HTMLMetaElement.webidl \
@@ -114,6 +139,8 @@ webidl_files = \
   HTMLPropertiesCollection.webidl \
   HTMLQuoteElement.webidl \
   HTMLScriptElement.webidl \
+  HTMLSelectElement.webidl \
+  HTMLSourceElement.webidl \
   HTMLSpanElement.webidl \
   HTMLStyleElement.webidl \
   HTMLTableCaptionElement.webidl \
@@ -122,38 +149,70 @@ webidl_files = \
   HTMLTableElement.webidl \
   HTMLTableRowElement.webidl \
   HTMLTableSectionElement.webidl \
+  HTMLTemplateElement.webidl \
   HTMLTextAreaElement.webidl \
+  HTMLTrackElement.webidl \
   HTMLTimeElement.webidl \
   HTMLTitleElement.webidl \
   HTMLUListElement.webidl \
+  HTMLVideoElement.webidl \
+  IDBDatabase.webidl \
+  IDBFactory.webidl \
   IDBVersionChangeEvent.webidl \
   ImageData.webidl \
+  ImageDocument.webidl \
   InspectorUtils.webidl \
+  KeyboardEvent.webidl \
+  KeyEvent.webidl \
   LinkStyle.webidl \
   LocalMediaStream.webidl \
   Location.webidl \
+  MediaError.webidl \
   MediaStream.webidl \
+  MediaStreamEvent.webidl \
+  MediaStreamTrack.webidl \
   MessageEvent.webidl \
+  MobileMessageManager.webidl \
+  MouseEvent.webidl \
+  MouseScrollEvent.webidl \
   MozActivity.webidl \
+  MozMmsMessage.webidl \
+  MozNamedAttrMap.webidl \
   MutationEvent.webidl \
   MutationObserver.webidl \
+  NetDashboard.webidl \
   Node.webidl \
   NodeFilter.webidl \
   NodeIterator.webidl \
   NodeList.webidl \
   Notification.webidl \
+  NotifyAudioAvailableEvent.webidl \
+  NotifyPaintEvent.webidl \
+  OfflineAudioCompletionEvent.webidl \
+  OfflineAudioContext.webidl \
+  OfflineResourceList.webidl \
   PaintRequest.webidl \
   PaintRequestList.webidl \
   PannerNode.webidl \
   Performance.webidl \
   PerformanceNavigation.webidl \
   PerformanceTiming.webidl \
+  Position.webidl \
+  PositionError.webidl \
   ProcessingInstruction.webidl \
   Range.webidl \
   Rect.webidl \
   RGBColor.webidl \
   RTCConfiguration.webidl \
+  RTCDataChannelEvent.webidl \
+  RTCIceCandidate.webidl \
+  RTCPeerConnection.webidl \
+  RTCPeerConnectionIceEvent.webidl \
+  RTCSessionDescription.webidl \
   Screen.webidl \
+  ScriptProcessorNode.webidl \
+  ScrollAreaEvent.webidl \
+  SimpleGestureEvent.webidl \
   StyleSheet.webidl \
   SVGAElement.webidl \
   SVGAltGlyphElement.webidl \
@@ -166,6 +225,7 @@ webidl_files = \
   SVGAnimatedPathData.webidl \
   SVGAnimatedPoints.webidl \
   SVGAnimatedPreserveAspectRatio.webidl \
+  SVGAnimatedRect.webidl \
   SVGAnimatedTransformList.webidl \
   SVGAnimateElement.webidl \
   SVGAnimateMotionElement.webidl \
@@ -176,23 +236,35 @@ webidl_files = \
   SVGComponentTransferFunctionElement.webidl \
   SVGDefsElement.webidl \
   SVGDescElement.webidl \
+  SVGDocument.webidl \
   SVGElement.webidl \
   SVGEllipseElement.webidl \
   SVGFilterElement.webidl \
   SVGFilterPrimitiveStandardAttributes.webidl \
   SVGFEBlendElement.webidl \
+  SVGFEColorMatrixElement.webidl \
   SVGFEComponentTransferElement.webidl \
+  SVGFECompositeElement.webidl \
+  SVGFEConvolveMatrixElement.webidl \
+  SVGFEDiffuseLightingElement.webidl \
+  SVGFEDisplacementMapElement.webidl \
   SVGFEDistantLightElement.webidl \
   SVGFEFloodElement.webidl \
   SVGFEFuncAElement.webidl \
   SVGFEFuncBElement.webidl \
   SVGFEFuncGElement.webidl \
   SVGFEFuncRElement.webidl \
+  SVGFEGaussianBlurElement.webidl \
   SVGFEImageElement.webidl \
   SVGFEMergeElement.webidl \
   SVGFEMergeNodeElement.webidl \
+  SVGFEMorphologyElement.webidl \
+  SVGFEOffsetElement.webidl \
   SVGFEPointLightElement.webidl \
+  SVGFESpecularLightingElement.webidl \
+  SVGFESpotLightElement.webidl \
   SVGFETileElement.webidl \
+  SVGFETurbulenceElement.webidl \
   SVGFitToViewBox.webidl \
   SVGForeignObjectElement.webidl \
   SVGGElement.webidl \
@@ -218,10 +290,12 @@ webidl_files = \
   SVGPolylineElement.webidl \
   SVGPreserveAspectRatio.webidl \
   SVGRadialGradientElement.webidl \
+  SVGRect.webidl \
   SVGRectElement.webidl \
   SVGScriptElement.webidl \
   SVGSetElement.webidl \
   SVGStopElement.webidl \
+  SVGStringList.webidl \
   SVGStyleElement.webidl \
   SVGSVGElement.webidl \
   SVGSwitchElement.webidl \
@@ -240,39 +314,49 @@ webidl_files = \
   SVGURIReference.webidl \
   SVGViewElement.webidl \
   SVGZoomAndPan.webidl \
+  SVGZoomEvent.webidl \
   Text.webidl \
   TextDecoder.webidl \
   TextEncoder.webidl \
+  TextTrack.webidl \
+  TextTrackCue.webidl \
+  TextTrackCueList.webidl \
+  TextTrackList.webidl \
+  TimeEvent.webidl \
   TimeRanges.webidl \
+  Touch.webidl \
+  TouchEvent.webidl \
   TransitionEvent.webidl \
+  TreeColumns.webidl \
   TreeWalker.webidl \
   UIEvent.webidl \
   URL.webidl \
   ValidityState.webidl \
   WebComponents.webidl \
   WebSocket.webidl \
+  WheelEvent.webidl \
   UndoManager.webidl \
   URLUtils.webidl \
   USSDReceivedEvent.webidl \
+  VideoStreamTrack.webidl \
+  WaveShaperNode.webidl \
+  WaveTable.webidl \
+  Window.webidl \
+  XMLDocument.webidl \
   XMLHttpRequest.webidl \
   XMLHttpRequestEventTarget.webidl \
   XMLHttpRequestUpload.webidl \
   XMLSerializer.webidl \
   XMLStylesheetProcessingInstruction.webidl \
   XPathEvaluator.webidl \
+  XULCommandEvent.webidl \
+  XULDocument.webidl \
   XULElement.webidl \
   $(NULL)
 
 ifdef MOZ_AUDIO_CHANNEL_MANAGER
 webidl_files += \
   AudioChannelManager.webidl \
-  $(NULL)
-endif
-
-ifdef MOZ_MEDIA
-webidl_files += \
-  HTMLSourceElement.webidl \
-  MediaError.webidl \
   $(NULL)
 endif
 
@@ -284,7 +368,34 @@ endif
 
 ifdef MOZ_WEBRTC
 webidl_files += \
+  DataChannel.webidl \
   MediaStreamList.webidl \
+  $(NULL)
+endif
+
+ifdef MOZ_WEBSPEECH
+webidl_files += \
+  SpeechGrammar.webidl \
+  SpeechGrammarList.webidl \
+  SpeechRecognitionAlternative.webidl \
+  SpeechRecognitionResultList.webidl \
+  SpeechRecognitionResult.webidl \
+  SpeechRecognition.webidl \
+  SpeechSynthesisUtterance.webidl \
+  SpeechSynthesisVoice.webidl \
+  SpeechSynthesis.webidl \
+  $(NULL)
+endif
+
+ifdef MOZ_GAMEPAD
+webidl_files += \
+  Gamepad.webidl \
+  $(NULL)
+endif
+
+ifdef MOZ_B2G_RIL
+webidl_files += \
+  MozStkCommandEvent.webidl \
   $(NULL)
 endif
 
@@ -293,6 +404,8 @@ test_webidl_files := \
   TestCodeGen.webidl \
   TestDictionary.webidl \
   TestExampleGen.webidl \
+  TestJSImplGen.webidl \
+  TestJSImplInheritanceGen.webidl \
   TestTypedef.webidl \
   $(NULL)
 else

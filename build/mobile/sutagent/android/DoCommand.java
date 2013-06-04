@@ -107,7 +107,7 @@ public class DoCommand {
     String ffxProvider = "org.mozilla.ffxcp";
     String fenProvider = "org.mozilla.fencp";
 
-    private final String prgVersion = "SUTAgentAndroid Version 1.16";
+    private final String prgVersion = "SUTAgentAndroid Version 1.18";
 
     public enum Command
         {
@@ -124,6 +124,7 @@ public class DoCommand {
         ID ("id"),
         UPTIME ("uptime"),
         UPTIMEMILLIS ("uptimemillis"),
+        SUTUPTIMEMILLIS ("sutuptimemillis"),
         SETTIME ("settime"),
         SYSTIME ("systime"),
         SCREEN ("screen"),
@@ -178,6 +179,7 @@ public class DoCommand {
         TZSET ("tzset"),
         ADB ("adb"),
         CHMOD ("chmod"),
+        TOPACTIVITY ("activity"),
         UNKNOWN ("unknown");
 
         private final String theCmd;
@@ -428,6 +430,8 @@ public class DoCommand {
                     strReturn += "\n";
                     strReturn += GetUptimeMillis();
                     strReturn += "\n";
+                    strReturn += GetSutUptimeMillis();
+                    strReturn += "\n";
                     strReturn += GetScreenInfo();
                     strReturn += "\n";
                     strReturn += GetRotationInfo();
@@ -441,6 +445,12 @@ public class DoCommand {
                     strReturn += GetProcessInfo();
                     strReturn += "\n";
                     strReturn += GetSutUserInfo();
+                    strReturn += "\n";
+                    strReturn += GetDiskInfo("/data");
+                    strReturn += "\n";
+                    strReturn += GetDiskInfo("/system");
+                    strReturn += "\n";
+                    strReturn += GetDiskInfo("/mnt/sdcard");
                     }
                 else
                     {
@@ -479,6 +489,10 @@ public class DoCommand {
                             strReturn = GetUptimeMillis();
                             break;
 
+                        case SUTUPTIMEMILLIS:
+                            strReturn = GetSutUptimeMillis();
+                            break;
+
                         case MEMORY:
                             strReturn = GetMemoryInfo();
                             break;
@@ -493,6 +507,15 @@ public class DoCommand {
 
                         case TEMPERATURE:
                             strReturn += GetTemperatureInfo();
+                            break;
+
+                        case DISK:
+                            strReturn += "\n";
+                            strReturn += GetDiskInfo("/data");
+                            strReturn += "\n";
+                            strReturn += GetDiskInfo("/system");
+                            strReturn += "\n";
+                            strReturn += GetDiskInfo("/mnt/sdcard");
                             break;
 
                         default:
@@ -807,6 +830,10 @@ public class DoCommand {
                     strReturn = ChmodDir(Argv[1]);
                 else
                     strReturn = sErrorPrefix + "Wrong number of arguments for chmod command!";
+                break;
+
+            case TOPACTIVITY:
+                strReturn = TopActivity();
                 break;
 
             case HELP:
@@ -2670,18 +2697,19 @@ private void CancelNotification()
         return "Temperature: " + sTempVal;
         }
 
-    // todo
     public String GetDiskInfo(String sPath)
         {
         String sRet = "";
         StatFs statFS = new StatFs(sPath);
 
-        int nBlockCount = statFS.getBlockCount();
-        int nBlockSize = statFS.getBlockSize();
-        int nBlocksAvail = statFS.getAvailableBlocks();
-        int nBlocksFree = statFS.getFreeBlocks();
+        long nBlockCount = statFS.getBlockCount();
+        long nBlockSize = statFS.getBlockSize();
+        long nBlocksAvail = statFS.getAvailableBlocks();
+        // Free is often the same as Available, but can include reserved
+        // blocks that are not available to normal applications.
+        // long nBlocksFree = statFS.getFreeBlocks();
 
-        sRet = "total:     " + (nBlockCount * nBlockSize) + "\nfree:      " + (nBlocksFree * nBlockSize) + "\navailable: " + (nBlocksAvail * nBlockSize);
+        sRet = sPath + ": " + (nBlockCount * nBlockSize) + " total, " + (nBlocksAvail * nBlockSize) + " available";
 
         return (sRet);
         }
@@ -3045,6 +3073,12 @@ private void CancelNotification()
         return Long.toString(SystemClock.uptimeMillis());
         }
  
+    public String GetSutUptimeMillis()
+        {
+        long now = System.currentTimeMillis();
+        return "SUTagent running for "+Long.toString(now - SUTAgentAndroid.nCreateTimeMillis)+" ms";
+        }
+ 
     public String NewKillProc(String sProcId, OutputStream out)
         {
         String sRet = "";
@@ -3317,7 +3351,16 @@ private void CancelNotification()
 
         try
             {
-            pProc = Runtime.getRuntime().exec(this.getSuArgs("pm install -r " + sApp + " Cleanup;exit"));
+            // on android 4.2 and above, we want to pass the "-d" argument to pm so that version
+            // downgrades are allowed... (option unsupported in earlier versions)
+            String sPmCmd;
+
+            if (android.os.Build.VERSION.SDK_INT >= 17) { // JELLY_BEAN_MR1
+                sPmCmd = "pm install -r -d " + sApp + " Cleanup;exit";
+            } else {
+                sPmCmd = "pm install -r " + sApp + " Cleanup;exit";
+            }
+            pProc = Runtime.getRuntime().exec(this.getSuArgs(sPmCmd));
             RedirOutputThread outThrd3 = new RedirOutputThread(pProc, out);
             outThrd3.start();
             try {
@@ -3819,6 +3862,29 @@ private void CancelNotification()
         return(sRet);
         }
 
+    public String TopActivity()
+        {
+        String sRet = "";
+        ActivityManager aMgr = (ActivityManager) contextWrapper.getSystemService(Activity.ACTIVITY_SERVICE);
+        List< ActivityManager.RunningTaskInfo > taskInfo = null;
+        ComponentName componentInfo = null;
+        if (aMgr != null)
+            {
+            taskInfo = aMgr.getRunningTasks(1);
+            }
+        if (taskInfo != null)
+            {
+            // topActivity: "The activity component at the top of the history stack of the task.
+            // This is what the user is currently doing."
+            componentInfo = taskInfo.get(0).topActivity;
+            }
+        if (componentInfo != null)
+            {
+            sRet = componentInfo.getPackageName();
+            }
+        return(sRet);
+        }
+
     private String PrintUsage()
         {
         String sRet =
@@ -3836,6 +3902,7 @@ private void CancelNotification()
             "        [id]                    - unique identifier for device\n" +
             "        [uptime]                - uptime for device\n" +
             "        [uptimemillis]          - uptime for device in milliseconds\n" +
+            "        [sutuptimemillis]       - uptime for SUT in milliseconds\n" +
             "        [systime]               - current system time\n" +
             "        [screen]                - width, height and bits per pixel for device\n" +
             "        [memory]                - physical, free, available, storage memory\n" +
@@ -3880,6 +3947,7 @@ private void CancelNotification()
             "tzget                           - returns the current timezone set on the device\n" +
             "rebt                            - reboot device\n" +
             "adb ip|usb                      - set adb to use tcp/ip on port 5555 or usb\n" +
+            "activity                        - print package name of top (foreground) activity\n" +
             "quit                            - disconnect SUTAgent\n" +
             "exit                            - close SUTAgent\n" +
             "ver                             - SUTAgent version\n" +

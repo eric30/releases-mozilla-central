@@ -642,19 +642,23 @@ public:
 
     void Sweep() {
         for (Map::Enum e(mTable); !e.empty(); e.popFront()) {
-            if (JS_IsAboutToBeFinalized(e.front().key) || JS_IsAboutToBeFinalized(e.front().value))
+            JSObject *updated = e.front().key;
+            if (JS_IsAboutToBeFinalized(&updated) || JS_IsAboutToBeFinalized(&e.front().value))
                 e.removeFront();
+            else if (updated != e.front().key)
+                e.rekeyFront(updated);
         }
     }
 
-    void Reparent(JSContext *aCx, JSObject *aNewInner) {
+    void Reparent(JSContext *aCx, JSObject *aNewInnerArg) {
+        JS::RootedObject aNewInner(aCx, aNewInnerArg);
         for (Map::Enum e(mTable); !e.empty(); e.popFront()) {
             /*
              * We reparent wrappers that have as their parent an inner window
              * whose outer has the new inner window as its current inner.
              */
-            JSObject *parent = JS_GetParent(e.front().value);
-            JSObject *outer = JS_ObjectToOuterObject(aCx, parent);
+            JS::RootedObject parent(aCx, JS_GetParent(e.front().value));
+            JS::RootedObject outer(aCx, JS_ObjectToOuterObject(aCx, parent));
             if (outer) {
                 JSObject *inner = JS_ObjectToInnerObject(aCx, outer);
                 if (inner == aNewInner && inner != parent)

@@ -16,8 +16,7 @@ namespace dom {
 
 typedef nsSVGFE SVGFETileElementBase;
 
-class SVGFETileElement : public SVGFETileElementBase,
-                         public nsIDOMSVGElement
+class SVGFETileElement : public SVGFETileElementBase
 {
   friend nsresult (::NS_NewSVGFETileElement(nsIContent **aResult,
                                             already_AddRefed<nsINodeInfo> aNodeInfo));
@@ -25,45 +24,35 @@ protected:
   SVGFETileElement(already_AddRefed<nsINodeInfo> aNodeInfo)
     : SVGFETileElementBase(aNodeInfo)
   {
-    SetIsDOMBinding();
   }
-  virtual JSObject* WrapNode(JSContext *cx, JSObject *scope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *cx,
+                             JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
 public:
   virtual bool SubregionIsUnionOfRegions() { return false; }
 
-  // interfaces:
-  NS_DECL_ISUPPORTS_INHERITED
-
   virtual nsresult Filter(nsSVGFilterInstance* aInstance,
                           const nsTArray<const Image*>& aSources,
                           const Image* aTarget,
-                          const nsIntRect& aDataRect);
+                          const nsIntRect& aDataRect) MOZ_OVERRIDE;
   virtual bool AttributeAffectsRendering(
-          int32_t aNameSpaceID, nsIAtom* aAttribute) const;
-  virtual nsSVGString& GetResultImageName() { return mStringAttributes[RESULT]; }
-  virtual void GetSourceImageNames(nsTArray<nsSVGStringInfo>& aSources);
+          int32_t aNameSpaceID, nsIAtom* aAttribute) const MOZ_OVERRIDE;
+  virtual nsSVGString& GetResultImageName() MOZ_OVERRIDE { return mStringAttributes[RESULT]; }
+  virtual void GetSourceImageNames(nsTArray<nsSVGStringInfo>& aSources) MOZ_OVERRIDE;
   virtual nsIntRect ComputeTargetBBox(const nsTArray<nsIntRect>& aSourceBBoxes,
-          const nsSVGFilterInstance& aInstance);
+          const nsSVGFilterInstance& aInstance) MOZ_OVERRIDE;
   virtual void ComputeNeededSourceBBoxes(const nsIntRect& aTargetBBox,
-          nsTArray<nsIntRect>& aSourceBBoxes, const nsSVGFilterInstance& aInstance);
+          nsTArray<nsIntRect>& aSourceBBoxes, const nsSVGFilterInstance& aInstance) MOZ_OVERRIDE;
   virtual nsIntRect ComputeChangeBBox(const nsTArray<nsIntRect>& aSourceChangeBoxes,
-          const nsSVGFilterInstance& aInstance);
+          const nsSVGFilterInstance& aInstance) MOZ_OVERRIDE;
 
-  NS_FORWARD_NSIDOMSVGELEMENT(SVGFETileElementBase::)
-
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
-
-  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const;
-
-  virtual nsIDOMNode* AsDOMNode() { return this; }
+  virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
 
   // WebIDL
   already_AddRefed<nsIDOMSVGAnimatedString> In1();
 
 protected:
-  virtual StringAttributesInfo GetStringInfo();
+  virtual StringAttributesInfo GetStringInfo() MOZ_OVERRIDE;
 
   enum { RESULT, IN1 };
   nsSVGString mStringAttributes[2];

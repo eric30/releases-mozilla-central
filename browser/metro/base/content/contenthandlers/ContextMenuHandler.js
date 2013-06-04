@@ -18,10 +18,6 @@ var ContextMenuHandler = {
     // Messages we receive from browser
     // Command sent over from browser that only we can handle.
     addMessageListener("Browser:ContextCommand", this, false);
-    // InvokeContextAtPoint is sent to us from browser's selection
-    // overlay when it traps a contextmenu event. In response we
-    // should invoke context menu logic at the point specified.
-    addMessageListener("Browser:InvokeContextAtPoint", this, false);
 
     this.popupNode = null;
   },
@@ -41,9 +37,6 @@ var ContextMenuHandler = {
     switch (aMessage.name) {
       case "Browser:ContextCommand":
         this._onContextCommand(aMessage);
-      break;
-      case "Browser:InvokeContextAtPoint":
-        this._onContextAtPoint(aMessage);
       break;
     }
   },
@@ -69,21 +62,6 @@ var ContextMenuHandler = {
         this._onPaste();
         break;
 
-      case "play":
-      case "pause":
-        if (node instanceof Ci.nsIDOMHTMLMediaElement)
-          node[command]();
-        break;
-
-      case "videotab":
-        if (node instanceof Ci.nsIDOMHTMLVideoElement) {
-          node.pause();
-          Cu.import("resource:///modules/video.jsm");
-          Video.fullScreenSourceElement = node;
-          sendAsyncMessage("Browser:FullScreenVideo:Start");
-        }
-        break;
-
       case "select-all":
         this._onSelectAll();
         break;
@@ -92,18 +70,6 @@ var ContextMenuHandler = {
         this._onCopyImage();
         break;
     }
-  },
-
-  /*
-   * Handler for selection overlay context menu events.
-   */
-  _onContextAtPoint: function _onContextAtPoint(aMessage) {
-    // we need to find popupNode as if the context menu were
-    // invoked on underlying content.
-    let { element, frameX, frameY } =
-      elementFromPoint(aMessage.json.xPos, aMessage.json.yPos);
-    this._processPopupNode(element, frameX, frameY,
-                           Ci.nsIDOMMouseEvent.MOZ_SOURCE_TOUCH);
   },
 
   /******************************************************
@@ -193,31 +159,6 @@ var ContextMenuHandler = {
    * Utility routines
    */
 
-   /*
-    * _translateToTopLevelWindow - Given a potential coordinate set within
-    * a subframe, translate up to the parent window which is what front
-    * end code expect.
-    */
-  _translateToTopLevelWindow: function _translateToTopLevelWindow(aPopupNode) {
-    let offsetX = 0;
-    let offsetY = 0;
-    let element = aPopupNode;
-    while (element &&
-           element.ownerDocument &&
-           element.ownerDocument.defaultView != content) {
-      element = element.ownerDocument.defaultView.frameElement;
-      let rect = element.getBoundingClientRect();
-      offsetX += rect.left;
-      offsetY += rect.top;
-    }
-    let win = null;
-    if (element == aPopupNode)
-      win = content;
-    else
-      win = element.contentDocument.defaultView;
-    return { targetWindow: win, offsetX: offsetX, offsetY: offsetY };
-  },
-
   /*
    * _processPopupNode - Generate and send a Content:ContextMenu message
    * to browser detailing the underlying content types at this.popupNode.
@@ -231,7 +172,7 @@ var ContextMenuHandler = {
     let { targetWindow: targetWindow,
           offsetX: offsetX,
           offsetY: offsetY } =
-      this._translateToTopLevelWindow(aPopupNode);
+      Util.translateToTopLevelWindow(aPopupNode);
 
     let popupNode = this.popupNode = aPopupNode;
     let imageUrl = "";
@@ -306,12 +247,13 @@ var ContextMenuHandler = {
 
           // Don't include "copy" for password fields.
           if (!(elem instanceof Ci.nsIDOMHTMLInputElement) || elem.mozIsTextField(true)) {
+            // If there is a selection add cut and copy
             if (selectionStart != selectionEnd) {
               state.types.push("cut");
               state.types.push("copy");
               state.string = elem.value.slice(selectionStart, selectionEnd);
-            }
-            if (elem.value && (selectionStart > 0 || selectionEnd < elem.textLength)) {
+            } else if (elem.value && elem.textLength) {
+              // There is text and it is not selected so add selectable items
               state.types.push("selectable");
               state.string = elem.value;
             }

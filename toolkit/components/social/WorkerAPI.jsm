@@ -58,14 +58,12 @@ WorkerAPI.prototype = {
     },
     "social.user-profile": function (data) {
       this._provider.updateUserProfile(data);
-      // get the info we need for 'recommend' support.
-      this._port.postMessage({topic: "social.user-recommend-prompt"});
     },
     "social.ambient-notification": function (data) {
       this._provider.setAmbientNotification(data);
     },
-    "social.user-recommend-prompt-response": function(data) {
-      this._provider.recommendInfo = data;
+    "social.page-mark-config": function(data) {
+      this._provider.pageMarkInfo = data;
     },
     "social.cookies-get": function(data) {
       let document = this._port._window.document;
@@ -80,7 +78,7 @@ WorkerAPI.prototype = {
                               data: results});
     },
     'social.request-chat': function(data) {
-      openChatWindow(null, this._provider, data, null, "minimized");
+      openChatWindow(null, this._provider, data);
     },
     'social.notification-create': function(data) {
       if (!Services.prefs.getBoolPref("social.toast-notifications.enabled"))

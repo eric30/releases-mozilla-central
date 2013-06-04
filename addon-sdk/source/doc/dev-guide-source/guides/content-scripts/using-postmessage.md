@@ -39,7 +39,7 @@ function. Again, `panel` and `page` integrate `worker` directly:
     panel.postMessage(addonMessage);
 
 However, for `page-mod` objects you need to listen to the `onAttach` event
-and use the worker supplied to that:
+and use the [worker](modules/sdk/content/worker.html#Worker) supplied to that:
 
     var pageMod = require('sdk/page-mod').PageMod({
       include: ['*'],
@@ -58,50 +58,6 @@ argument to the constructor:
         // Handle message from the content script
       }
     });
-
-## Timing Issues Using postMessage ##
-
-Content scripts are loaded according to the value of the
-[`contentScriptWhen`](dev-guide/guides/content-scripts/loading.html)
-option: until that point is reached, any attempt to send a message to
-the script using `postMessage()` will trigger an exception, probably
-this:
-
-<span class="aside">
-This is a generic message which is emitted whenever we try to
-send a message to a content script, but can't find the worker
-which is supposed to receive it.
-</span>
-
-<pre>
-Error: Couldn't find the worker to receive this message. The script may not be initialized yet, or may already have been unloaded.
-</pre>
-
-So code like this, where we create a panel and then
-synchronously send it a message using `postMessage()`, will not work:
-
-    var data = require("sdk/self").data;
-
-    var panel = require("sdk/panel").Panel({
-      contentURL: "http://www.bbc.co.uk/mobile/index.html",
-      contentScriptFile: data.url("panel.js")
-    });
-
-    panel.postMessage("hi from main.js");
-
-[`port.emit()`](dev-guide/guides/content-scripts/using-port.html)
-queues messages until the content script is ready to receive them,
-so the equivalent code using `port.emit()` will work:
-
-    var data = require("sdk/self").data;
-
-    var panel = require("sdk/panel").Panel({
-      contentURL: "http://www.bbc.co.uk/mobile/index.html",
-      contentScriptFile: data.url("panel.js")
-    });
-
-    panel.port.emit("hi from main.js");
-
 
 ## Message Events Versus User-Defined Events ##
 

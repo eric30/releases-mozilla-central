@@ -6,12 +6,14 @@
  * The origin of this IDL file is
  * http://www.whatwg.org/specs/web-apps/current-work/#the-location-interface
  *
- * © Copyright 2004-2011 Apple Computer, Inc., Mozilla Foundation, and
+ * Â© Copyright 2004-2011 Apple Computer, Inc., Mozilla Foundation, and
  * Opera Software ASA. You are granted a license to use, reproduce
  * and create derivative works of this document.
  */
 
-[Unforgeable] interface Location {
+// No support for [Unforgeable] on interfaces yet
+//[Unforgeable]
+interface Location {
   stringifier attribute DOMString href;
   void assign(DOMString url);
   void replace(DOMString url);

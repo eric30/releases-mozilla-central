@@ -63,7 +63,7 @@
     </menupopup>
   </popupset>
 
-  <hbox flex="1">
+  <box flex="1" class="devtools-responsive-container">
     <vbox flex="1">
       <toolbar id="inspector-toolbar"
         class="devtools-toolbar"
@@ -87,9 +87,9 @@
       </vbox>
     </vbox>
     <splitter class="devtools-side-splitter"/>
-    <tabbox id="inspector-sidebar" class="devtools-sidebar-tabs" hidden="true">
+    <tabbox id="inspector-sidebar" handleCtrlTab="false" class="devtools-sidebar-tabs" hidden="true">
       <tabs/>
       <tabpanels flex="1"/>
     </tabbox>
-  </hbox>
+  </box>
 </window>

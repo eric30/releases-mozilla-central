@@ -1,3 +1,4 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -9,6 +10,7 @@ XPIDL_SOURCES += [
     'nsIApplicationCacheChannel.idl',
     'nsIApplicationCacheContainer.idl',
     'nsIApplicationCacheService.idl',
+    'nsIArrayBufferInputStream.idl',
     'nsIAsyncStreamCopier.idl',
     'nsIAsyncVerifyRedirectCallback.idl',
     'nsIAuthInformation.idl',
@@ -45,6 +47,7 @@ XPIDL_SOURCES += [
     'nsIInputStreamChannel.idl',
     'nsIInputStreamPump.idl',
     'nsILoadGroup.idl',
+    'nsILoadGroupChild.idl',
     'nsIMIMEInputStream.idl',
     'nsIMultiPartChannel.idl',
     'nsINSSErrorsService.idl',
@@ -105,6 +108,7 @@ XPIDL_SOURCES += [
     'nsIUnicharStreamLoader.idl',
     'nsIUploadChannel.idl',
     'nsIUploadChannel2.idl',
+    'nsPILoadGroupInternal.idl',
     'nsPISocketTransportService.idl',
 ]
 
@@ -112,4 +116,18 @@ if CONFIG['MOZ_TOOLKIT_SEARCH']:
     XPIDL_SOURCES += [
         'nsIBrowserSearchService.idl',
     ]
+
+MODULE = 'necko'
+
+EXPORTS += [
+    'netCore.h',
+    'nsASocketHandler.h',
+    'nsAsyncRedirectVerifyHelper.h',
+    'nsChannelProperties.h',
+    'nsNetStrings.h',
+    'nsNetUtil.h',
+    'nsReadLine.h',
+    'nsStreamListenerWrapper.h',
+    'nsURIHashKey.h',
+]
 

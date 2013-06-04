@@ -1,6 +1,5 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=4 sw=4 et tw=78:
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -11,12 +10,12 @@
 #include "jscntxt.h"
 #include "jscompartment.h"
 #include "jsfriendapi.h"
-#include "jsinterp.h"
 #include "jsprobes.h"
 #include "jsgc.h"
 
 #include "builtin/Object.h" // For js::obj_construct
 #include "frontend/ParseMaps.h"
+#include "vm/Interpreter.h"
 #include "vm/RegExpObject.h"
 
 #include "jsgcinlines.h"
@@ -28,6 +27,15 @@ NewObjectCache::staticAsserts()
 {
     JS_STATIC_ASSERT(NewObjectCache::MAX_OBJ_SIZE == sizeof(JSObject_Slots16));
     JS_STATIC_ASSERT(gc::FINALIZE_OBJECT_LAST == gc::FINALIZE_OBJECT16_BACKGROUND);
+}
+
+inline void
+NewObjectCache::clearNurseryObjects(JSRuntime *rt)
+{
+    for (unsigned i = 0; i < mozilla::ArrayLength(entries); ++i) {
+        if (IsInsideNursery(rt, entries[i].key))
+            mozilla::PodZero(&entries[i]);
+    }
 }
 
 inline bool
@@ -73,7 +81,7 @@ NewObjectCache::fill(EntryIndex entry_, Class *clasp, gc::Cell *key, gc::AllocKi
     entry->key = key;
     entry->kind = kind;
 
-    entry->nbytes = obj->sizeOfThis();
+    entry->nbytes = gc::Arena::thingSize(kind);
     js_memcpy(&entry->templateObject, obj, entry->nbytes);
 }
 
@@ -102,6 +110,9 @@ NewObjectCache::fillType(EntryIndex entry, Class *clasp, js::types::TypeObject *
 inline JSObject *
 NewObjectCache::newObjectFromHit(JSContext *cx, EntryIndex entry_, js::gc::InitialHeap heap)
 {
+    // The new object cache does not account for metadata attached via callbacks.
+    JS_ASSERT(!cx->compartment->objectMetadataCallback);
+
     JS_ASSERT(unsigned(entry_) < mozilla::ArrayLength(entries));
     Entry *entry = &entries[entry_];
 
@@ -420,6 +431,16 @@ CallJSPropertyOpSetter(JSContext *cx, StrictPropertyOp op, HandleObject obj, Han
 
     assertSameCompartment(cx, obj, id, vp);
     return op(cx, obj, id, strict, vp);
+}
+
+static inline bool
+CallJSDeletePropertyOp(JSContext *cx, JSDeletePropertyOp op, HandleObject receiver, HandleId id,
+                       JSBool *succeeded)
+{
+    JS_CHECK_RECURSION(cx, return false);
+
+    assertSameCompartment(cx, receiver, id);
+    return op(cx, receiver, id, succeeded);
 }
 
 inline bool

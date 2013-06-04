@@ -8,6 +8,7 @@ const { Cc, Ci } = require("chrome");
 const { setTimeout } = require("sdk/timers");
 const { LoaderWithHookedConsole } = require("sdk/test/loader");
 const { Worker } = require("sdk/content/worker");
+const { close } = require("sdk/window/helpers");
 
 const DEFAULT_CONTENT_URL = "data:text/html;charset=utf-8,foo";
 
@@ -64,8 +65,8 @@ function WorkerTest(url, callback) {
         // ... before loading the expected doc and waiting for its load event
         loadAndWait(browser, url, function onDocumentLoaded() {
           callback(assert, browser, function onTestDone() {
-            chromeWindow.close();
-            done();
+
+            close(chromeWindow).then(done);
           });
         });
       });
@@ -175,6 +176,7 @@ exports["test:emit hack message"] = WorkerTest(
 exports["test:n-arguments emit"] = WorkerTest(
   DEFAULT_CONTENT_URL,
   function(assert, browser, done) {
+    let repeat = 0;
     let worker =  Worker({
         window: browser.contentWindow,
         contentScript: "new " + function WorkerScope() {
@@ -187,10 +189,14 @@ exports["test:n-arguments emit"] = WorkerTest(
 
     // Validate worker.port
     worker.port.on("content-to-addon", function (arg1, arg2, arg3) {
-      assert.equal(arg1, "first argument");
-      assert.equal(arg2, "second");
-      assert.equal(arg3, "third");
-      done();
+      if (!repeat++) {
+        this.emit("addon-to-content", "first argument", "second", "third");
+      } else {
+        assert.equal(arg1, "first argument");
+        assert.equal(arg2, "second");
+        assert.equal(arg3, "third");
+        done();
+      }
     });
     worker.port.emit("addon-to-content", "first argument", "second", "third");
   }
@@ -313,8 +319,7 @@ exports["test:chrome is unwrapped"] = function(assert, done) {
       onMessage: function(msg) {
         assert.ok(msg,
           "content script has an unwrapped access to chrome document");
-        window.close();
-        done();
+        close(window).then(done);
       }
     });
 

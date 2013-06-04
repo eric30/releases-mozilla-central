@@ -12,6 +12,8 @@
 // Helper Classes
 #include "nsIServiceManager.h"
 #include "nsAutoPtr.h"
+#include "nsContentUtils.h"
+#include "nsCxPusher.h"
 
 // Interfaces needed to be included
 #include "nsIDOMNode.h"
@@ -30,7 +32,6 @@
 #include "nsIURIFixup.h"
 #include "nsCDefaultURIFixup.h"
 #include "nsIWebNavigation.h"
-#include "nsIJSContextStack.h"
 #include "mozilla/BrowserElementParent.h"
 
 #include "nsIDOMDocument.h"
@@ -46,8 +47,6 @@ using namespace mozilla;
 
 // CIDs
 static NS_DEFINE_CID(kWindowMediatorCID, NS_WINDOWMEDIATOR_CID);
-
-static const char *sJSStackContractID="@mozilla.org/js/xpc/ContextStack;1";
 
 //*****************************************************************************
 //*** nsSiteWindow declaration
@@ -454,9 +453,6 @@ NS_IMETHODIMP nsContentTreeOwner::SetStatusWithContext(uint32_t aStatusType,
     case STATUS_SCRIPT:
       xulBrowserWindow->SetJSStatus(aStatusText);
       break;
-    case STATUS_SCRIPT_DEFAULT:
-      xulBrowserWindow->SetJSDefaultStatus(aStatusText);
-      break;
     case STATUS_LINK:
       {
         nsCOMPtr<nsIDOMElement> element = do_QueryInterface(aStatusContext);
@@ -787,34 +783,6 @@ NS_IMETHODIMP nsContentTreeOwner::SetTitle(const PRUnichar* aTitle)
   return mXULWindow->SetTitle(title.get());
 }
 
-NS_STACK_CLASS class NullJSContextPusher {
-public:
-  NullJSContextPusher() {
-    mService = do_GetService(sJSStackContractID);
-    if (mService) {
-#ifdef DEBUG
-      nsresult rv =
-#endif
-        mService->Push(nullptr);
-      NS_ASSERTION(NS_SUCCEEDED(rv), "Mismatched push/pop");
-    }
-  }
-
-  ~NullJSContextPusher() {
-    if (mService) {
-      JSContext *cx;
-#ifdef DEBUG
-      nsresult rv =
-#endif
-        mService->Pop(&cx);
-      NS_ASSERTION(NS_SUCCEEDED(rv) && !cx, "Bad pop!");
-    }
-  }
-
-private:
-  nsCOMPtr<nsIThreadJSContextStack> mService;
-};
-
 //*****************************************************************************
 // nsContentTreeOwner: nsIWindowProvider
 //*****************************************************************************   
@@ -942,7 +910,8 @@ nsContentTreeOwner::ProvideWindow(nsIDOMWindow* aParent,
   *aWindowIsNew = (containerPref != nsIBrowserDOMWindow::OPEN_CURRENTWINDOW);
 
   {
-    NullJSContextPusher pusher;
+    nsCxPusher pusher;
+    pusher.PushNull();
 
     // Get a new rendering area from the browserDOMWin.  We don't want
     // to be starting any loads here, so get it with a null URI.

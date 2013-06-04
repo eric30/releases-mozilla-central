@@ -14,7 +14,7 @@ namespace mobilemessage {
 
 // For MmsMessageData.state and SmsMessageData.deliveryState
 // Please keep the following files in sync with enum below:
-// embedding/android/GeckoSmsManager.java
+// mobile/android/base/GeckoSmsManager.java
 enum DeliveryState {
   eDeliveryState_Sent = 0,
   eDeliveryState_Received,
@@ -32,6 +32,8 @@ enum DeliveryStatus {
   eDeliveryStatus_Success,
   eDeliveryStatus_Pending,
   eDeliveryStatus_Error,
+  eDeliveryStatus_Reject,
+  eDeliveryStatus_Manual,
   // This state should stay at the end.
   eDeliveryStatus_EndGuard
 };
@@ -54,6 +56,14 @@ enum MessageClass {
   eMessageClass_Class3,
   // This state should stay at the end.
   eMessageClass_EndGuard
+};
+
+// For ThreadData.
+enum MessageType {
+  eMessageType_SMS = 0,
+  eMessageType_MMS,
+  // This state should stay at the end.
+  eMessageType_EndGuard
 };
 
 } // namespace mobilemessage
@@ -100,6 +110,16 @@ struct ParamTraits<mozilla::dom::mobilemessage::MessageClass>
   : public EnumSerializer<mozilla::dom::mobilemessage::MessageClass,
                           mozilla::dom::mobilemessage::eMessageClass_Normal,
                           mozilla::dom::mobilemessage::eMessageClass_EndGuard>
+{};
+
+/**
+ * MessageType class serializer.
+ */
+template <>
+struct ParamTraits<mozilla::dom::mobilemessage::MessageType>
+  : public EnumSerializer<mozilla::dom::mobilemessage::MessageType,
+                          mozilla::dom::mobilemessage::eMessageType_SMS,
+                          mozilla::dom::mobilemessage::eMessageType_EndGuard>
 {};
 
 } // namespace IPC

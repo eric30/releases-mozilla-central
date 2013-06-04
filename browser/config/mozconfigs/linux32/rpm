@@ -9,7 +9,7 @@ ac_add_options --disable-updater
 ac_add_options --prefix=$PREFIX
 ac_add_options --libdir=$LIBDIR
 
-. $topsrcdir/build/unix/mozconfig.linux
+. $topsrcdir/build/unix/mozconfig.linux32
 
 # Avoid dependency on libstdc++ 4.5
 ac_add_options --enable-stdcxx-compat
@@ -18,8 +18,6 @@ ac_add_options --enable-stdcxx-compat
 export MOZILLA_OFFICIAL=1
 
 export MOZ_TELEMETRY_REPORTING=1
-
-mk_add_options PROFILE_GEN_SCRIPT='$(PYTHON) @MOZ_OBJDIR@/_profile/pgo/profileserver.py'
 
 #Use ccache
 ac_add_options --with-ccache=/usr/bin/ccache

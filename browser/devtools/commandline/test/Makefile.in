@@ -15,7 +15,23 @@ MOCHITEST_BROWSER_FILES = \
   browser_cmd_addon.js \
   $(browser_cmd_calllog.js disabled until bug 845831 is fixed) \
   $(browser_cmd_calllog_chrome.js disabled until bug 845831 is fixed) \
+  browser_cmd_appcache_invalid.js \
+  browser_cmd_appcache_invalid_appcache.appcache \
+  browser_cmd_appcache_invalid_appcache.appcache^headers^ \
+  browser_cmd_appcache_invalid_index.html \
+  browser_cmd_appcache_invalid_page1.html \
+  browser_cmd_appcache_invalid_page2.html \
+  browser_cmd_appcache_invalid_page3.html \
+  browser_cmd_appcache_invalid_page3.html^headers^ \
+  browser_cmd_appcache_valid.js \
+  browser_cmd_appcache_valid_appcache.appcache \
+  browser_cmd_appcache_valid_appcache.appcache^headers^ \
+  browser_cmd_appcache_valid_index.html \
+  browser_cmd_appcache_valid_page1.html \
+  browser_cmd_appcache_valid_page2.html \
+  browser_cmd_appcache_valid_page3.html \
   browser_cmd_commands.js \
+  browser_cmd_cookie.html \
   browser_cmd_cookie.js \
   browser_cmd_jsb.js \
   browser_cmd_jsb_script.jsi \
@@ -36,9 +52,12 @@ MOCHITEST_BROWSER_FILES = \
   browser_gcli_inputter.js \
   browser_gcli_intro.js \
   browser_gcli_js.js \
-  browser_gcli_keyboard.js \
+  browser_gcli_keyboard1.js \
+  browser_gcli_keyboard2.js \
+  browser_gcli_keyboard3.js \
   browser_gcli_menu.js \
   browser_gcli_node.js \
+  browser_gcli_remote.js \
   browser_gcli_resource.js \
   browser_gcli_scratchpad.js \
   browser_gcli_spell.js \

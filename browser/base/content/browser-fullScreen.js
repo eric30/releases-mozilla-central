@@ -18,7 +18,12 @@ var FullScreen = {
 
     // Toggle the View:FullScreen command, which controls elements like the
     // fullscreen menuitem, menubars, and the appmenu.
-    document.getElementById("View:FullScreen").setAttribute("checked", enterFS);
+    let fullscreenCommand = document.getElementById("View:FullScreen");
+    if (enterFS) {
+      fullscreenCommand.setAttribute("checked", enterFS);
+    } else {
+      fullscreenCommand.removeAttribute("checked");
+    }
 
 #ifdef XP_MACOSX
     // Make sure the menu items are adjusted.
@@ -105,11 +110,13 @@ var FullScreen = {
       return;
 
     // However, if we receive a "MozEnteredDomFullScreen" event for a document
-    // which is not a subdocument of the currently selected tab, we know that
-    // we've switched tabs since the request to enter full-screen was made,
-    // so we should exit full-screen since the "full-screen document" isn't
-    // acutally visible.
-    if (event.target.defaultView.top != gBrowser.contentWindow) {
+    // which is not a subdocument of a currently active (ie. visible) browser
+    // or iframe, we know that we've switched to a different frame since the
+    // request to enter full-screen was made, so we should exit full-screen
+    // since the "full-screen document" isn't acutally visible.
+    if (!event.target.defaultView.QueryInterface(Ci.nsIInterfaceRequestor)
+                                 .getInterface(Ci.nsIWebNavigation)
+                                 .QueryInterface(Ci.nsIDocShell).isActive) {
       document.mozCancelFullScreen();
       return;
     }
@@ -566,14 +573,9 @@ var FullScreen = {
 
     // In tabs-on-top mode, move window controls to the tab bar,
     // and in tabs-on-bottom mode, move them back to the navigation toolbar.
-    // When there is a chance the tab bar may be collapsed, put window
-    // controls on nav bar.
     var fullscreenctls = document.getElementById("window-controls");
     var navbar = document.getElementById("nav-bar");
-    var ctlsOnTabbar = window.toolbar.visible &&
-                       (navbar.collapsed ||
-                          (TabsOnTop.enabled &&
-                           !gPrefService.getBoolPref("browser.tabs.autoHide")));
+    var ctlsOnTabbar = window.toolbar.visible && (navbar.collapsed || TabsOnTop.enabled);
     if (fullscreenctls.parentNode == navbar && ctlsOnTabbar) {
       fullscreenctls.removeAttribute("flex");
       document.getElementById("TabsToolbar").appendChild(fullscreenctls);

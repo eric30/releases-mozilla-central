@@ -1,8 +1,8 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this file,
- * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #ifndef StringBuffer_h___
 #define StringBuffer_h___
@@ -13,9 +13,6 @@
 #include "jscntxt.h"
 
 #include "js/Vector.h"
-
-ForwardDeclareJS(Atom);
-ForwardDeclareJS(FlatString);
 
 namespace js {
 
@@ -49,7 +46,7 @@ class StringBuffer
     inline bool resize(size_t len) { return cb.resize(len); }
     inline bool append(const jschar c) { return cb.append(c); }
     inline bool append(const jschar *chars, size_t len) { return cb.append(chars, len); }
-    inline bool append(const CharPtr chars, size_t len) { return cb.append(chars.get(), len); }
+    inline bool append(const JS::CharPtr chars, size_t len) { return cb.append(chars.get(), len); }
     inline bool append(const jschar *begin, const jschar *end) { return cb.append(begin, end); }
     inline bool append(JSString *str);
     inline bool append(JSLinearString *str);
@@ -68,7 +65,7 @@ class StringBuffer
     void infallibleAppend(const jschar *chars, size_t len) {
         cb.infallibleAppend(chars, len);
     }
-    void infallibleAppend(const CharPtr chars, size_t len) {
+    void infallibleAppend(const JS::CharPtr chars, size_t len) {
         cb.infallibleAppend(chars.get(), len);
     }
     void infallibleAppend(const jschar *begin, const jschar *end) {
@@ -89,10 +86,10 @@ class StringBuffer
      * Creates a string from the characters in this buffer, then (regardless
      * whether string creation succeeded or failed) empties the buffer.
      */
-    js::RawFlatString finishString();
+    JSFlatString *finishString();
 
     /* Identical to finishString() except that an atom is created. */
-    js::RawAtom finishAtom();
+    JSAtom *finishAtom();
 
     /*
      * Creates a raw string from the characters in this buffer.  The string is

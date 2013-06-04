@@ -60,9 +60,9 @@ sdp_result_e sdp_build_version (sdp_t *sdp_p, u16 level, flex_string *fs)
     return (SDP_SUCCESS);
 }
 
-static sdp_result_e sdp_verify_unsigned(const char *ptr, PRUint64 max_value)
+static sdp_result_e sdp_verify_unsigned(const char *ptr, uint64_t max_value)
 {
-    PRUint64 numeric_value;
+    uint64_t numeric_value;
     /* Checking for only numbers since PR_sscanf will ignore trailing
        characters */
     size_t end = strspn(ptr, "0123456789");
@@ -92,7 +92,8 @@ sdp_result_e sdp_parse_owner (sdp_t *sdp_p, u16 level, const char *ptr)
         integer.  The initial value of the version MUST be less than
         (2**62)-1, to avoid rollovers.
     */
-    PRUint64     max_value_sessid_version = ((((PRUint64) 1) << 62) - 2);
+    const uint64_t max_value_sessid = ((((uint64_t) 1) << 63) - 1);
+    const uint64_t max_value_version = ((((uint64_t) 1) << 62) - 2);
 
     if (sdp_p->owner_name[0] != '\0') {
         sdp_p->conf_p->num_invalid_token_order++;
@@ -119,7 +120,7 @@ sdp_result_e sdp_parse_owner (sdp_t *sdp_p, u16 level, const char *ptr)
         /* Make sure the sessid is numeric, even though we store it as
          * a string.
          */
-        result = sdp_verify_unsigned(sdp_p->owner_sessid, max_value_sessid_version);
+        result = sdp_verify_unsigned(sdp_p->owner_sessid, max_value_sessid);
     }
     if (result != SDP_SUCCESS) {
         sdp_parse_error(sdp_p->peerconnection,
@@ -135,7 +136,7 @@ sdp_result_e sdp_parse_owner (sdp_t *sdp_p, u16 level, const char *ptr)
         /* Make sure the version is numeric, even though we store it as
          * a string.
          */
-        result = sdp_verify_unsigned(sdp_p->owner_version, max_value_sessid_version);
+        result = sdp_verify_unsigned(sdp_p->owner_version, max_value_version);
     }
     if (result != SDP_SUCCESS) {
         sdp_parse_error(sdp_p->peerconnection,
@@ -1413,28 +1414,28 @@ sdp_result_e sdp_parse_media (sdp_t *sdp_p, u16 level, const char *ptr)
                   sdp_get_media_name(mca_p->media));
         switch (mca_p->port_format) {
         case SDP_PORT_NUM_ONLY:
-            SDP_PRINT("Port num %ld, ", mca_p->port);
+            SDP_PRINT("Port num %d, ", mca_p->port);
             break;
 
         case SDP_PORT_NUM_COUNT:
-            SDP_PRINT("Port num %ld, count %ld, ",
+            SDP_PRINT("Port num %d, count %d, ",
                       mca_p->port, mca_p->num_ports);
             break;
         case SDP_PORT_VPI_VCI:
-            SDP_PRINT("VPI/VCI %ld/%lu, ", mca_p->vpi, mca_p->vci);
+            SDP_PRINT("VPI/VCI %d/%u, ", mca_p->vpi, mca_p->vci);
             break;
         case SDP_PORT_VCCI:
-            SDP_PRINT("VCCI %ld, ", mca_p->vcci);
+            SDP_PRINT("VCCI %d, ", mca_p->vcci);
             break;
         case SDP_PORT_NUM_VPI_VCI:
-            SDP_PRINT("Port %ld, VPI/VCI %ld/%lu, ", mca_p->port,
+            SDP_PRINT("Port %d, VPI/VCI %d/%u, ", mca_p->port,
                       mca_p->vpi, mca_p->vci);
             break;
         case SDP_PORT_VCCI_CID:
-            SDP_PRINT("VCCI %ld, CID %ld, ", mca_p->vcci, mca_p->cid);
+            SDP_PRINT("VCCI %d, CID %d, ", mca_p->vcci, mca_p->cid);
             break;
         case SDP_PORT_NUM_VPI_VCI_CID:
-            SDP_PRINT("Port %ld, VPI/VCI %ld/%lu, CID %ld, ", mca_p->port,
+            SDP_PRINT("Port %d, VPI/VCI %d/%u, CID %d, ", mca_p->port,
                       mca_p->vpi, mca_p->vci, mca_p->cid);
             break;
         default:

@@ -52,7 +52,6 @@ class nsIDocumentObserver;
 class nsIDOMDocument;
 class nsIDOMDocumentFragment;
 class nsIDOMEvent;
-class nsIDOMEventTarget;
 class nsIDOMHTMLFormElement;
 class nsIDOMHTMLInputElement;
 class nsIDOMKeyEvent;
@@ -65,7 +64,6 @@ class nsIFragmentContentSink;
 class nsIImageLoadingContent;
 class nsIInterfaceRequestor;
 class nsIIOService;
-class nsIJSContextStack;
 class nsIJSRuntimeService;
 class nsILineBreaker;
 class nsIMIMEHeaderParam;
@@ -83,7 +81,6 @@ class nsIScriptSecurityManager;
 class nsIStringBundle;
 class nsIStringBundleService;
 class nsISupportsHashKey;
-class nsIThreadJSContextStack;
 class nsIURI;
 class nsIWidget;
 class nsIWordBreaker;
@@ -97,6 +94,7 @@ class nsScriptObjectTracer;
 class nsStringHashKey;
 class nsTextFragment;
 class nsViewportInfo;
+class nsIFrame;
 
 struct JSContext;
 struct JSPropertyDescriptor;
@@ -120,6 +118,7 @@ class Selection;
 namespace dom {
 class DocumentFragment;
 class Element;
+class EventTarget;
 } // namespace dom
 
 namespace layers {
@@ -185,8 +184,6 @@ public:
 
   static bool LookupBindingMember(JSContext* aCx, nsIContent *aContent,
                                   JS::HandleId aId, JSPropertyDescriptor* aDesc);
-  static bool IsBindingField(JSContext* aCx, nsIContent* aContent,
-                             JS::HandleId aId);
 
   /**
    * Returns the parent node of aChild crossing document boundaries.
@@ -208,6 +205,15 @@ public:
    */
   static bool ContentIsDescendantOf(const nsINode* aPossibleDescendant,
                                       const nsINode* aPossibleAncestor);
+
+  /**
+   * Similar to ContentIsDescendantOf, except will treat an HTMLTemplateElement
+   * or ShadowRoot as an ancestor of things in the corresponding DocumentFragment.
+   * See the concept of "host-including inclusive ancestor" in the DOM
+   * specification.
+   */
+  static bool ContentIsHostIncludingDescendantOf(
+    const nsINode* aPossibleDescendant, const nsINode* aPossibleAncestor);
 
   /**
    * Similar to ContentIsDescendantOf except it crosses document boundaries.
@@ -334,6 +340,12 @@ public:
    */
   static bool IsHTMLWhitespace(PRUnichar aChar);
 
+  /*
+   * Returns whether the character is an HTML whitespace (see IsHTMLWhitespace)
+   * or a nbsp character (U+00A0).
+   */
+  static bool IsHTMLWhitespaceOrNBSP(PRUnichar aChar);
+
   /**
    * Is the HTML local name a block element?
    */
@@ -409,7 +421,7 @@ public:
    *
    * @return The document or null if no JS Context.
    */
-  static nsIDOMDocument *GetDocumentFromCaller();
+  static nsIDocument* GetDocumentFromCaller();
 
   /**
    * Get the document through the JS context that's currently on the stack.
@@ -418,7 +430,7 @@ public:
    *
    * @return The document or null if no JS context
    */
-  static nsIDOMDocument *GetDocumentFromContext();
+  static nsIDocument* GetDocumentFromContext();
 
   // Check if a node is in the document prolog, i.e. before the document
   // element.
@@ -493,7 +505,7 @@ public:
    * @return boolean indicating whether a BOM was detected.
    */
   static bool CheckForBOM(const unsigned char* aBuffer, uint32_t aLength,
-                          nsACString& aCharset, bool *bigEndian = nullptr);
+                          nsACString& aCharset);
 
   static nsresult GuessCharset(const char *aData, uint32_t aDataLen,
                                nsACString &aCharset);
@@ -779,6 +791,7 @@ public:
     eBRAND_PROPERTIES,
     eCOMMON_DIALOG_PROPERTIES,
     eMATHML_PROPERTIES,
+    eSECURITY_PROPERTIES,
     PropertiesFile_COUNT
   };
   static nsresult ReportToConsole(uint32_t aErrorFlags,
@@ -841,6 +854,11 @@ public:
    * Returns true if aDocument is in a docshell whose parent is the same type
    */
   static bool IsChildOfSameType(nsIDocument* aDoc);
+
+  /**
+  '* Returns true if the content-type will be rendered as plain-text.
+   */
+  static bool IsPlainTextType(const nsACString& aContentType);
 
   /**
    * Get the script file name to use when compiling the script
@@ -932,7 +950,7 @@ public:
                                        bool aCanBubble,
                                        bool aCancelable,
                                        bool *aDefaultAction = nullptr);
-                                       
+
   /**
    * This method creates and dispatches a untrusted event.
    * Works only with events which can be created by calling
@@ -1288,8 +1306,6 @@ public:
   }
   static void ReleaseWrapper(void* aScriptObjectHolder,
                              nsWrapperCache* aCache);
-  static void TraceWrapper(nsWrapperCache* aCache, TraceCallback aCallback,
-                           void *aClosure);
 
   /*
    * Notify when the first XUL menu is opened and when the all XUL menus are
@@ -1334,6 +1350,11 @@ public:
    * Returns true if aPrincipal is the system principal.
    */
   static bool IsSystemPrincipal(nsIPrincipal* aPrincipal);
+
+  /**
+   * Gets the system principal from the security manager.
+   */
+  static nsIPrincipal* GetSystemPrincipal();
 
   /**
    * *aResourcePrincipal is a principal describing who may access the contents
@@ -1539,10 +1560,14 @@ public:
                                         uint32_t aDisplayWidth,
                                         uint32_t aDisplayHeight);
 
+#ifdef MOZ_WIDGET_ANDROID
   /**
    * The device-pixel-to-CSS-px ratio used to adjust meta viewport values.
+   * XXX Not to be used --- use nsIWidget::GetDefaultScale instead. Will be
+   * removed when bug 803207 is fixed.
    */
   static double GetDevicePixelsPerMetaViewportPixel(nsIWidget* aWidget);
+#endif
 
   // Call EnterMicroTask when you're entering JS execution.
   // Usually the best way to do this is to use nsAutoMicroTask.
@@ -1600,12 +1625,7 @@ public:
   static nsresult CheckSameOrigin(nsIChannel *aOldChannel, nsIChannel *aNewChannel);
   static nsIInterfaceRequestor* GetSameOriginChecker();
 
-  static nsIThreadJSContextStack* ThreadJSContextStack()
-  {
-    return sThreadJSContextStack;
-  }
-
-  // Trace the safe JS context of the ThreadJSContextStack.
+  // Trace the safe JS context.
   static void TraceSafeJSContext(JSTracer* aTrc);
 
 
@@ -1663,7 +1683,7 @@ public:
    */
   static bool CanAccessNativeAnon();
 
-  static nsresult WrapNative(JSContext *cx, JSObject *scope,
+  static nsresult WrapNative(JSContext *cx, JS::Handle<JSObject*> scope,
                              nsISupports *native, const nsIID* aIID,
                              JS::Value *vp,
                              // If non-null aHolder will keep the Value alive
@@ -1676,7 +1696,7 @@ public:
   }
 
   // Same as the WrapNative above, but use this one if aIID is nsISupports' IID.
-  static nsresult WrapNative(JSContext *cx, JSObject *scope,
+  static nsresult WrapNative(JSContext *cx, JS::Handle<JSObject*> scope,
                              nsISupports *native, JS::Value *vp,
                              // If non-null aHolder will keep the Value alive
                              // while there's a ref to it
@@ -1686,7 +1706,7 @@ public:
     return WrapNative(cx, scope, native, nullptr, nullptr, vp, aHolder,
                       aAllowWrapping);
   }
-  static nsresult WrapNative(JSContext *cx, JSObject *scope,
+  static nsresult WrapNative(JSContext *cx, JS::Handle<JSObject*> scope,
                              nsISupports *native, nsWrapperCache *cache,
                              JS::Value *vp,
                              // If non-null aHolder will keep the Value alive
@@ -1706,7 +1726,7 @@ public:
 
   static nsresult CreateBlobBuffer(JSContext* aCx,
                                    const nsACString& aData,
-                                   JS::Value& aBlob);
+                                   JS::MutableHandle<JS::Value> aBlob);
 
   static void StripNullChars(const nsAString& aInStr, nsAString& aOutStr);
 
@@ -1756,14 +1776,14 @@ public:
    * getting generic data like a device context or widget from it is OK, but it
    * might not be this document's actual presentation.
    */
-  static nsIPresShell* FindPresShellForDocument(nsIDocument* aDoc);
+  static nsIPresShell* FindPresShellForDocument(const nsIDocument* aDoc);
 
   /**
    * Returns the widget for this document if there is one. Looks at all ancestor
    * documents to try to find a widget, so for example this can still find a
    * widget for documents in display:none frames that have no presentation.
    */
-  static nsIWidget* WidgetForDocument(nsIDocument* aDoc);
+  static nsIWidget* WidgetForDocument(const nsIDocument* aDoc);
 
   /**
    * Returns a layer manager to use for the given document. Basically we
@@ -1776,7 +1796,7 @@ public:
    * layer manager should be used for retained layers
    */
   static already_AddRefed<mozilla::layers::LayerManager>
-  LayerManagerForDocument(nsIDocument *aDoc, bool *aAllowRetaining = nullptr);
+  LayerManagerForDocument(const nsIDocument *aDoc, bool *aAllowRetaining = nullptr);
 
   /**
    * Returns a layer manager to use for the given document. Basically we
@@ -1846,6 +1866,14 @@ public:
    * Returns true if the idle observers API is enabled.
    */
   static bool IsIdleObserverAPIEnabled() { return sIsIdleObserverAPIEnabled; }
+
+  /*
+   * Returns true if the performance timing APIs are enabled.
+   */
+  static bool IsPerformanceTimingEnabled()
+  {
+    return sIsPerformanceTimingEnabled;
+  }
   
   /**
    * Returns true if the doc tree branch which contains aDoc contains any
@@ -1870,6 +1898,12 @@ public:
    * nullptr.
    */
   static nsIDocument* GetFullscreenAncestor(nsIDocument* aDoc);
+
+  /**
+   * Returns true if aWin and the current pointer lock document
+   * have common scriptable top window.
+   */
+  static bool IsInPointerLockContext(nsIDOMWindow* aWin);
 
   /**
    * Returns the time limit on handling user input before
@@ -1979,13 +2013,6 @@ public:
   static nsresult Atob(const nsAString& aAsciiString,
                        nsAString& aBinaryData);
 
-  /** If aJSArray is a Javascript array, this method iterates over its
-   *  elements and appends values to aRetVal as nsIAtoms.
-   *  @throw NS_ERROR_ILLEGAL_VALUE if aJSArray isn't a JS array.
-   */ 
-  static nsresult JSArrayToAtomArray(JSContext* aCx, const JS::Value& aJSArray,
-                                     nsCOMArray<nsIAtom>& aRetVal);
-
   /**
    * Returns whether the input element passed in parameter has the autocomplete
    * functionality enabled. It is taking into account the form owner.
@@ -2090,6 +2117,21 @@ public:
                                         int32_t& aOutStartOffset,
                                         int32_t& aOutEndOffset);
 
+  /**
+   * Takes a frame for anonymous content within a text control (<input> or
+   * <textarea>), and returns an offset in the text content, adjusted for a
+   * trailing <br> frame.
+   *
+   * @param aOffsetFrame      Frame for the text content in which the offset
+   *                          lies
+   * @param aOffset           Offset as calculated by GetContentOffsetsFromPoint
+   * @param aOutOffset        Output adjusted offset
+   *
+   * @see GetSelectionInTextControl for the original basis of this function.
+   */
+  static int32_t GetAdjustedOffsetInTextControl(nsIFrame* aOffsetFrame,
+                                                int32_t aOffset);
+
   static nsIEditor* GetHTMLEditor(nsPresContext* aPresContext);
 
   /**
@@ -2112,12 +2154,12 @@ private:
   static bool CanCallerAccess(nsIPrincipal* aSubjectPrincipal,
                                 nsIPrincipal* aPrincipal);
 
-  static nsresult WrapNative(JSContext *cx, JSObject *scope,
+  static nsresult WrapNative(JSContext *cx, JS::Handle<JSObject*> scope,
                              nsISupports *native, nsWrapperCache *cache,
                              const nsIID* aIID, JS::Value *vp,
                              nsIXPConnectJSObjectHolder** aHolder,
                              bool aAllowWrapping);
-                            
+
   static nsresult DispatchEvent(nsIDocument* aDoc,
                                 nsISupports* aTarget,
                                 const nsAString& aEventName,
@@ -2141,8 +2183,6 @@ private:
   static nsIXPConnect *sXPConnect;
 
   static nsIScriptSecurityManager *sSecurityManager;
-
-  static nsIThreadJSContextStack *sThreadJSContextStack;
 
   static nsIParserService *sParserService;
 
@@ -2198,6 +2238,7 @@ private:
   static bool sFullscreenApiIsContentOnly;
   static uint32_t sHandlingInputTimeout;
   static bool sIsIdleObserverAPIEnabled;
+  static bool sIsPerformanceTimingEnabled;
 
   static nsHtml5StringParser* sHTMLFragmentParser;
   static nsIParser* sXMLFragmentParser;
@@ -2227,41 +2268,7 @@ typedef nsCharSeparatedTokenizerTemplate<nsContentUtils::IsHTMLWhitespace>
   nsContentUtils::DropJSObjects(NS_CYCLE_COLLECTION_UPCAST(obj, clazz))
 
 
-class NS_STACK_CLASS nsCxPusher
-{
-public:
-  nsCxPusher();
-  ~nsCxPusher(); // Calls Pop();
-
-  // Returns false if something erroneous happened.
-  bool Push(nsIDOMEventTarget *aCurrentTarget);
-  // If nothing has been pushed to stack, this works like Push.
-  // Otherwise if context will change, Pop and Push will be called.
-  bool RePush(nsIDOMEventTarget *aCurrentTarget);
-  // If a null JSContext is passed to Push(), that will cause no
-  // push to happen and false to be returned.
-  void Push(JSContext *cx);
-  // Explicitly push a null JSContext on the the stack
-  void PushNull();
-
-  // Pop() will be a no-op if Push() or PushNull() fail
-  void Pop();
-
-  nsIScriptContext* GetCurrentScriptContext() { return mScx; }
-private:
-  // Combined code for PushNull() and Push(JSContext*)
-  void DoPush(JSContext* cx);
-
-  nsCOMPtr<nsIScriptContext> mScx;
-  bool mScriptIsRunning;
-  bool mPushedSomething;
-#ifdef DEBUG
-  JSContext* mPushedContext;
-  unsigned mCompartmentDepthOnEntry;
-#endif
-};
-
-class NS_STACK_CLASS nsAutoScriptBlocker {
+class MOZ_STACK_CLASS nsAutoScriptBlocker {
 public:
   nsAutoScriptBlocker(MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM) {
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;
@@ -2274,7 +2281,7 @@ private:
   MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
-class NS_STACK_CLASS nsAutoScriptBlockerSuppressNodeRemoved :
+class MOZ_STACK_CLASS nsAutoScriptBlockerSuppressNodeRemoved :
                           public nsAutoScriptBlocker {
 public:
   nsAutoScriptBlockerSuppressNodeRemoved() {
@@ -2289,7 +2296,7 @@ public:
   }
 };
 
-class NS_STACK_CLASS nsAutoMicroTask
+class MOZ_STACK_CLASS nsAutoMicroTask
 {
 public:
   nsAutoMicroTask()
@@ -2301,70 +2308,6 @@ public:
     nsContentUtils::LeaveMicroTask();
   }
 };
-
-namespace mozilla {
-
-/**
- * Use AutoJSContext when you need a JS context on the stack but don't have one
- * passed as a parameter. AutoJSContext will take care of finding the most
- * appropriate JS context and release it when leaving the stack.
- */
-class NS_STACK_CLASS AutoJSContext {
-public:
-  AutoJSContext(MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM);
-  operator JSContext*();
-
-protected:
-  AutoJSContext(bool aSafe MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
-
-private:
-  // We need this Init() method because we can't use delegating constructor for
-  // the moment. It is a C++11 feature and we do not require C++11 to be
-  // supported to be able to compile Gecko.
-  void Init(bool aSafe MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
-
-  JSContext* mCx;
-  nsCxPusher mPusher;
-  MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
-};
-
-/**
- * SafeAutoJSContext is similar to AutoJSContext but will only return the safe
- * JS context. That means it will never call ::GetCurrentJSContext().
- */
-class NS_STACK_CLASS SafeAutoJSContext : public AutoJSContext {
-public:
-  SafeAutoJSContext(MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM);
-};
-
-/**
- * Use AutoPushJSContext when you want to use a specific JSContext that may or
- * may not be already on the stack. This differs from nsCxPusher in that it only
- * pushes in the case that the given cx is not the active cx on the JSContext
- * stack, which avoids an expensive JS_SaveFrameChain in the common case.
- *
- * Most consumers of this should probably just use AutoJSContext. But the goal
- * here is to preserve the existing behavior while ensure proper cx-stack
- * semantics in edge cases where the context being used doesn't match the active
- * context.
- *
- * NB: This will not push a null cx even if aCx is null. Make sure you know what
- * you're doing.
- */
-class NS_STACK_CLASS AutoPushJSContext {
-  nsCxPusher mPusher;
-  JSContext* mCx;
-
-public:
-    AutoPushJSContext(JSContext* aCx) : mCx(aCx) {
-      if (mCx && mCx != nsContentUtils::GetCurrentJSContext()) {
-        mPusher.Push(mCx);
-      }
-    }
-    operator JSContext*() { return mCx; }
-};
-
-} // namespace mozilla
 
 #define NS_INTERFACE_MAP_ENTRY_TEAROFF(_interface, _allocator)                \
   if (aIID.Equals(NS_GET_IID(_interface))) {                                  \

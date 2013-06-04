@@ -9,7 +9,6 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = browser_feeds
 LIBRARY_NAME = browser_feeds_s
 
 FORCE_STATIC_LIB = 1
@@ -30,8 +29,6 @@ EXTRA_PP_COMPONENTS = \
 	FeedWriter.js \
 	$(NULL)
 
-
-CPPSRCS = nsFeedSniffer.cpp
 
 LOCAL_INCLUDES = -I$(srcdir)/../../build
 

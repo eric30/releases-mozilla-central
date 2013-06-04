@@ -9,14 +9,14 @@ XPCOMUtils.defineLazyModuleGetter(this, "Task",
 XPCOMUtils.defineLazyModuleGetter(this, "AboutHomeUtils",
   "resource:///modules/AboutHomeUtils.jsm");
 
+let gRightsVersion = Services.prefs.getIntPref("browser.rights.version");
+
 registerCleanupFunction(function() {
   // Ensure we don't pollute prefs for next tests.
-  try {
-    Services.prefs.clearUserPref("network.cookies.cookieBehavior");
-  } catch (ex) {}
-  try {
-    Services.prefs.clearUserPref("network.cookie.lifetimePolicy");
-  } catch (ex) {}
+  Services.prefs.clearUserPref("network.cookies.cookieBehavior");
+  Services.prefs.clearUserPref("network.cookie.lifetimePolicy");
+  Services.prefs.clearUserPref("browser.rights.override");
+  Services.prefs.clearUserPref("browser.rights." + gRightsVersion + ".shown");
 });
 
 let gTests = [
@@ -25,13 +25,14 @@ let gTests = [
   desc: "Check that clearing cookies does not clear storage",
   setup: function ()
   {
-    Cc["@mozilla.org/dom/storagemanager;1"]
-      .getService(Ci.nsIObserver)
-      .observe(null, "cookie-changed", "cleared");
+    Cc["@mozilla.org/observer-service;1"]
+      .getService(Ci.nsIObserverService)
+      .notifyObservers(null, "cookie-changed", "cleared");
   },
   run: function (aSnippetsMap)
   {
-    isnot(aSnippetsMap.get("snippets-last-update"), null);
+    isnot(aSnippetsMap.get("snippets-last-update"), null,
+          "snippets-last-update should have a value");
   }
 },
 
@@ -113,10 +114,10 @@ let gTests = [
   run: function () {
     try {
       let cm = Cc["@mozilla.org/categorymanager;1"].getService(Ci.nsICategoryManager);
-      cm.getCategoryEntry("healthreport-js-provider", "SearchesProvider");
+      cm.getCategoryEntry("healthreport-js-provider-default", "SearchesProvider");
     } catch (ex) {
       // Health Report disabled, or no SearchesProvider.
-      return;
+      return Promise.resolve();
     }
 
     let deferred = Promise.defer();
@@ -136,15 +137,16 @@ let gTests = [
         let provider = reporter.getProvider("org.mozilla.searches");
         ok(provider, "Searches provider is available.");
 
-        let engineName = doc.documentElement.getAttribute("searchEngineName").toLowerCase();
+        let engineName = doc.documentElement.getAttribute("searchEngineName");
+        let id = Services.search.getEngineByName(engineName).identifier;
 
-        let m = provider.getMeasurement("counts", 1);
+        let m = provider.getMeasurement("counts", 2);
         m.getValues().then(function onValues(data) {
           let now = new Date();
           ok(data.days.hasDay(now), "Have data for today.");
 
           let day = data.days.getDay(now);
-          let field = engineName + ".abouthome";
+          let field = id + ".abouthome";
           ok(day.has(field), "Have data for about home on this engine.");
 
           // Note the search from the previous test.
@@ -199,15 +201,63 @@ let gTests = [
   }
 },
 
+{
+  desc: "Check if the 'Know Your Rights default snippet is shown when 'browser.rights.override' pref is set",
+  beforeRun: function ()
+  {
+    Services.prefs.setBoolPref("browser.rights.override", false);
+  },
+  setup: function () { },
+  run: function (aSnippetsMap)
+  {
+    let doc = gBrowser.selectedTab.linkedBrowser.contentDocument;
+    let showRights = AboutHomeUtils.showKnowYourRights;
+
+    ok(showRights, "AboutHomeUtils.showKnowYourRights should be TRUE");
+
+    let snippetsElt = doc.getElementById("snippets");
+    ok(snippetsElt, "Found snippets element");
+    is(snippetsElt.getElementsByTagName("a")[0].href, "about:rights", "Snippet link is present.");
+
+    Services.prefs.clearUserPref("browser.rights.override");
+  }
+},
+
+{
+  desc: "Check if the 'Know Your Rights default snippet is NOT shown when 'browser.rights.override' pref is NOT set",
+  beforeRun: function ()
+  {
+    Services.prefs.setBoolPref("browser.rights.override", true);
+  },
+  setup: function () { },
+  run: function (aSnippetsMap)
+  {
+    let doc = gBrowser.selectedTab.linkedBrowser.contentDocument;
+    let rightsData = AboutHomeUtils.knowYourRightsData;
+    
+    ok(!rightsData, "AboutHomeUtils.knowYourRightsData should be FALSE");
+
+    let snippetsElt = doc.getElementById("snippets");
+    ok(snippetsElt, "Found snippets element");
+    ok(snippetsElt.getElementsByTagName("a")[0].href != "about:rights", "Snippet link should not point to about:rights.");
+
+    Services.prefs.clearUserPref("browser.rights.override");
+  }
+}
+
 ];
 
 function test()
 {
   waitForExplicitFinish();
+  requestLongerTimeout(2);
 
   Task.spawn(function () {
     for (let test of gTests) {
       info(test.desc);
+
+      if (test.beforeRun)
+        yield test.beforeRun();
 
       let tab = yield promiseNewTabLoadEvent("about:home", "DOMContentLoaded");
 
@@ -220,12 +270,13 @@ function test()
       let snippetsMap = yield promiseSetupSnippetsMap(tab, test.setup);
       // Ensure browser has set attributes already, or wait for them.
       yield promise;
-
+      info("Running test");
       yield test.run(snippetsMap);
-
+      info("Cleanup");
       gBrowser.removeCurrentTab();
     }
-
+  }).then(finish, ex => {
+    ok(false, "Unexpected Exception: " + ex);
     finish();
   });
 }
@@ -243,8 +294,15 @@ function promiseNewTabLoadEvent(aUrl, aEventType="load")
 {
   let deferred = Promise.defer();
   let tab = gBrowser.selectedTab = gBrowser.addTab(aUrl);
+  info("Wait tab event: " + aEventType);
   tab.linkedBrowser.addEventListener(aEventType, function load(event) {
+    if (event.originalTarget != tab.linkedBrowser.contentDocument ||
+        event.target.location.href == "about:blank") {
+      info("skipping spurious load event");
+      return;
+    }
     tab.linkedBrowser.removeEventListener(aEventType, load, true);
+    info("Tab event received: " + aEventType);
     deferred.resolve(tab);
   }, true);
   return deferred.promise;
@@ -264,7 +322,12 @@ function promiseSetupSnippetsMap(aTab, aSetupFn)
 {
   let deferred = Promise.defer();
   let cw = aTab.linkedBrowser.contentWindow.wrappedJSObject;
+  info("Waiting for snippets map");
   cw.ensureSnippetsMapThen(function (aSnippetsMap) {
+    info("Got snippets map: " +
+         "{ last-update: " + aSnippetsMap.get("snippets-last-update") +
+         ", cached-version: " + aSnippetsMap.get("snippets-cached-version") +
+         " }");
     // Don't try to update.
     aSnippetsMap.set("snippets-last-update", Date.now());
     aSnippetsMap.set("snippets-cached-version", AboutHomeUtils.snippetsVersion);
@@ -293,6 +356,8 @@ function promiseBrowserAttributes(aTab)
   //docElt.setAttribute("snippetsURL", "nonexistent://test");
   let observer = new MutationObserver(function (mutations) {
     for (let mutation of mutations) {
+      info("Got attribute mutation: " + mutation.attributeName +
+                                    " from " + mutation.oldValue); 
       if (mutation.attributeName == "snippetsURL" &&
           docElt.getAttribute("snippetsURL") != "nonexistent://test") {
         docElt.setAttribute("snippetsURL", "nonexistent://test");
@@ -300,6 +365,7 @@ function promiseBrowserAttributes(aTab)
 
       // Now we just have to wait for the last attribute.
       if (mutation.attributeName == "searchEngineURL") {
+        info("Remove attributes observer");
         observer.disconnect();
         // Must be sure to continue after the page mutation observer.
         executeSoon(function() deferred.resolve());
@@ -307,6 +373,7 @@ function promiseBrowserAttributes(aTab)
       }
     }
   });
+  info("Add attributes observer");
   observer.observe(docElt, { attributes: true });
 
   return deferred.promise;

@@ -12,17 +12,10 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGTextElement::WrapNode(JSContext *aCx, JSObject *aScope)
+SVGTextElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
   return SVGTextElementBinding::Wrap(aCx, aScope, this);
 }
-
-//----------------------------------------------------------------------
-// nsISupports methods
-
-NS_IMPL_ISUPPORTS_INHERITED3(SVGTextElement, SVGTextElementBase,
-                             nsIDOMNode, nsIDOMElement,
-                             nsIDOMSVGElement)
 
 //----------------------------------------------------------------------
 // Implementation
@@ -30,7 +23,6 @@ NS_IMPL_ISUPPORTS_INHERITED3(SVGTextElement, SVGTextElementBase,
 SVGTextElement::SVGTextElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : SVGTextElementBase(aNodeInfo)
 {
-  SetIsDOMBinding();
 }
 
 //----------------------------------------------------------------------

@@ -12,27 +12,15 @@ include $(DEPTH)/config/autoconf.mk
 USE_RCS_MK := 1
 include $(topsrcdir)/config/makefiles/rcs.mk
 
-MODULE = telemetry
 MODULE_NAME = telemetry
-GRE_MODULE = 1
 
 LIBXUL_LIBRARY = 1
 EXPORT_LIBRARY = 1
 IS_COMPONENT = 1
-ifndef _MSC_VER
-# Note: Bug 851306 tracks the MSVC-only build warnings in this directory.
 FAIL_ON_WARNINGS = 1
-endif # !_MSC_VER
 
 LIBRARY_NAME = telemetry
-
-EXPORTS_NAMESPACES = mozilla
-
-EXPORTS_mozilla = \
-  Telemetry.h \
-  ProcessedStack.h \
-  TelemetryHistogramEnums.h \
-  $(NULL)
+MSVC_ENABLE_PGO := 1
 
 EXTRA_PP_COMPONENTS = \
   TelemetryPing.js \
@@ -46,11 +34,8 @@ EXTRA_JS_MODULES = \
   TelemetryStopwatch.jsm \
   $(NULL)
 
-CPPSRCS = \
-  Telemetry.cpp \
-  $(NULL)
-
 LOCAL_INCLUDES += -I$(topsrcdir)/xpcom/build
+LOCAL_INCLUDES += -I$(topsrcdir)/xpcom/threads
 
 EXTRA_DSO_LDOPTS += \
   $(MOZ_COMPONENT_LIBS) \

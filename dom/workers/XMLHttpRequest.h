@@ -83,7 +83,7 @@ public:
   {
     // Pretend like someone passed null, so we can pick up the default values
     MozXMLHttpRequestParametersWorkers params;
-    if (!params.Init(aGlobal.GetContext(), nullptr, JS::NullValue())) {
+    if (!params.Init(aGlobal.GetContext(), JS::NullHandleValue)) {
       aRv.Throw(NS_ERROR_UNEXPECTED);
       return nullptr;
     }
@@ -105,7 +105,8 @@ public:
   }                                                                            \
                                                                                \
   void                                                                         \
-  SetOn##_type(JSContext* /* unused */, JSObject* aListener, ErrorResult& aRv) \
+  SetOn##_type(JSContext* /* unused */,  JS::Handle<JSObject*> aListener,      \
+               ErrorResult& aRv)                                               \
   {                                                                            \
     SetEventListener(NS_LITERAL_STRING(#_type), aListener, aRv);               \
   }
@@ -241,7 +242,7 @@ public:
   }
 
   JS::Value
-  GetInterface(JSContext* cx, JSObject* aIID, ErrorResult& aRv)
+  GetInterface(JSContext* cx, JS::Handle<JSObject*> aIID, ErrorResult& aRv)
   {
     aRv.Throw(NS_ERROR_FAILURE);
     return JSVAL_NULL;
@@ -289,7 +290,7 @@ private:
   MaybeDispatchPrematureAbortEvents(ErrorResult& aRv);
 
   void
-  DispatchPrematureAbortEvent(JSObject* aTarget, uint8_t aEventType,
+  DispatchPrematureAbortEvent(JS::Handle<JSObject*> aTarget, uint8_t aEventType,
                               bool aUploadTarget, ErrorResult& aRv);
 
   bool

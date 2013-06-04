@@ -30,6 +30,10 @@ flyoutpanel {
   -moz-binding: url('chrome://browser/content/bindings/flyoutpanel.xml#flyoutpanelBinding');
 }
 
+cssthrobber {
+  -moz-binding: url('chrome://browser/content/bindings/cssthrobber.xml#cssthrobberBinding');
+}
+
 settings {
   -moz-binding: url("chrome://mozapps/content/extensions/setting.xml#settings");
 }
@@ -118,8 +122,12 @@ placelabel {
   -moz-binding: url("chrome://browser/content/bindings/bindings.xml#place-label");
 }
 
-radio {
+radio[type="toggle"] {
   -moz-binding: url("chrome://global/content/bindings/radio.xml#radio");
+}
+
+radiogroup {
+  -moz-binding: url("chrome://global/content/bindings/radio.xml#radiogroup");
 }
 
 checkbox.toggleswitch {
@@ -184,10 +192,6 @@ dialog {
 /* Do not allow these to inherit from the toolkit binding */
 dialog.content-dialog {
   -moz-binding: none;
-}
-
-pageaction {
-  -moz-binding: url("chrome://browser/content/bindings/pageaction.xml#pageaction");
 }
 
 arrowbox {

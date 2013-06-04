@@ -11,7 +11,6 @@ from urlparse import urlparse
 __all__ = [
   "ZipFileReader",
   "addCommonOptions",
-  "checkForCrashes",
   "dumpLeakLog",
   "isURL",
   "processLeakLog",
@@ -29,6 +28,16 @@ DEBUGGER_INFO = {
   "gdb": {
     "interactive": True,
     "args": "-q --args"
+  },
+
+  "cgdb": {
+    "interactive": True,
+    "args": "-q --args"
+  },
+
+  "lldb": {
+    "interactive": True,
+    "args": "--"
   },
 
   # valgrind doesn't explain much about leaks unless you set the
@@ -132,95 +141,6 @@ def addCommonOptions(parser, defaults={}):
                     help = "prevents the test harness from redirecting "
                         "stdout and stderr for interactive debuggers")
 
-def checkForCrashes(dumpDir, symbolsPath, testName=None):
-  stackwalkPath = os.environ.get('MINIDUMP_STACKWALK', None)
-  # try to get the caller's filename if no test name is given
-  if testName is None:
-    try:
-      testName = os.path.basename(sys._getframe(1).f_code.co_filename)
-    except:
-      testName = "unknown"
-
-  # Check preconditions
-  dumps = glob.glob(os.path.join(dumpDir, '*.dmp'))
-  if len(dumps) == 0:
-    return False
-
-  try:
-    removeSymbolsPath = False
-
-    # If our symbols are at a remote URL, download them now
-    if symbolsPath and isURL(symbolsPath):
-      print "Downloading symbols from: " + symbolsPath
-      removeSymbolsPath = True
-      # Get the symbols and write them to a temporary zipfile
-      data = urllib2.urlopen(symbolsPath)
-      symbolsFile = tempfile.TemporaryFile()
-      symbolsFile.write(data.read())
-      # extract symbols to a temporary directory (which we'll delete after
-      # processing all crashes)
-      symbolsPath = tempfile.mkdtemp()
-      zfile = ZipFileReader(symbolsFile)
-      zfile.extractall(symbolsPath)
-
-    for d in dumps:
-      stackwalkOutput = []
-      stackwalkOutput.append("Crash dump filename: " + d)
-      topFrame = None
-      if symbolsPath and stackwalkPath and os.path.exists(stackwalkPath):
-        # run minidump stackwalk
-        p = subprocess.Popen([stackwalkPath, d, symbolsPath],
-                             stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE)
-        (out, err) = p.communicate()
-        if len(out) > 3:
-          # minidump_stackwalk is chatty, so ignore stderr when it succeeds.
-          stackwalkOutput.append(out)
-          # The top frame of the crash is always the line after "Thread N (crashed)"
-          # Examples:
-          #  0  libc.so + 0xa888
-          #  0  libnss3.so!nssCertificate_Destroy [certificate.c : 102 + 0x0]
-          #  0  mozjs.dll!js::GlobalObject::getDebuggers() [GlobalObject.cpp:89df18f9b6da : 580 + 0x0]
-          #  0  libxul.so!void js::gc::MarkInternal<JSObject>(JSTracer*, JSObject**) [Marking.cpp : 92 + 0x28]
-          lines = out.splitlines()
-          for i, line in enumerate(lines):
-            if "(crashed)" in line:
-              match = re.search(r"^ 0  (?:.*!)?(?:void )?([^\[]+)", lines[i+1])
-              if match:
-                topFrame = "@ %s" % match.group(1).strip()
-              break
-        else:
-          stackwalkOutput.append("stderr from minidump_stackwalk:")
-          stackwalkOutput.append(err)
-        if p.returncode != 0:
-          stackwalkOutput.append("minidump_stackwalk exited with return code %d" % p.returncode)
-      else:
-        if not symbolsPath:
-          stackwalkOutput.append("No symbols path given, can't process dump.")
-        if not stackwalkPath:
-          stackwalkOutput.append("MINIDUMP_STACKWALK not set, can't process dump.")
-        elif stackwalkPath and not os.path.exists(stackwalkPath):
-          stackwalkOutput.append("MINIDUMP_STACKWALK binary not found: %s" % stackwalkPath)
-      if not topFrame:
-        topFrame = "Unknown top frame"
-      log.info("PROCESS-CRASH | %s | application crashed [%s]", testName, topFrame)
-      print '\n'.join(stackwalkOutput)
-      dumpSavePath = os.environ.get('MINIDUMP_SAVE_PATH', None)
-      if dumpSavePath:
-        shutil.move(d, dumpSavePath)
-        print "Saved dump as %s" % os.path.join(dumpSavePath,
-                                                os.path.basename(d))
-      else:
-        os.remove(d)
-      extra = os.path.splitext(d)[0] + ".extra"
-      if os.path.exists(extra):
-        os.remove(extra)
-  finally:
-    if removeSymbolsPath:
-      shutil.rmtree(symbolsPath)
-
-  return True
-
 def getFullPath(directory, path):
   "Get an absolute path relative to 'directory'."
   return os.path.normpath(os.path.join(directory, os.path.expanduser(path)))
@@ -283,9 +203,8 @@ def dumpLeakLog(leakLogFile, filter = False):
   if not os.path.exists(leakLogFile):
     return
 
-  leaks = open(leakLogFile, "r")
-  leakReport = leaks.read()
-  leaks.close()
+  with open(leakLogFile, "r") as leaks:
+    leakReport = leaks.read()
 
   # Only |XPCOM_MEM_LEAK_LOG| reports can be actually filtered out.
   # Only check whether an actual leak was reported.
@@ -295,9 +214,8 @@ def dumpLeakLog(leakLogFile, filter = False):
   # Simply copy the log.
   log.info(leakReport.rstrip("\n"))
 
-def processSingleLeakFile(leakLogFileName, PID, processType, leakThreshold):
-  """Process a single leak log, corresponding to the specified
-  process PID and type.
+def processSingleLeakFile(leakLogFileName, processType, leakThreshold):
+  """Process a single leak log.
   """
 
   #                  Per-Inst  Leaked      Total  Rem ...
@@ -308,85 +226,75 @@ def processSingleLeakFile(leakLogFileName, PID, processType, leakThreshold):
                       r"-?\d+\s+(?P<numLeaked>-?\d+)")
 
   processString = ""
-  if PID and processType:
-    processString = "| %s process %s " % (processType, PID)
-  leaks = open(leakLogFileName, "r")
-  for line in leaks:
-    matches = lineRe.match(line)
-    if (matches and
-        int(matches.group("numLeaked")) == 0 and
-        matches.group("name") != "TOTAL"):
-      continue
-    log.info(line.rstrip())
-  leaks.close()
+  if processType:
+    # eg 'plugin'
+    processString = " %s process:" % processType
 
-  leaks = open(leakLogFileName, "r")
-  seenTotal = False
   crashedOnPurpose = False
-  prefix = "TEST-PASS"
-  numObjects = 0
-  for line in leaks:
-    if line.find("purposefully crash") > -1:
-      crashedOnPurpose = True
-    matches = lineRe.match(line)
-    if not matches:
-      continue
-    name = matches.group("name")
-    size = int(matches.group("size"))
-    bytesLeaked = int(matches.group("bytesLeaked"))
-    numLeaked = int(matches.group("numLeaked"))
-    if size < 0 or bytesLeaked < 0 or numLeaked < 0:
-      log.info("TEST-UNEXPECTED-FAIL %s| automationutils.processLeakLog() | negative leaks caught!" %
-               processString)
+  totalBytesLeaked = None
+  leakAnalysis = []
+  leakedObjectNames = []
+  with open(leakLogFileName, "r") as leaks:
+    for line in leaks:
+      if line.find("purposefully crash") > -1:
+        crashedOnPurpose = True
+      matches = lineRe.match(line)
+      if not matches:
+        # eg: the leak table header row
+        log.info(line.rstrip())
+        continue
+      name = matches.group("name")
+      size = int(matches.group("size"))
+      bytesLeaked = int(matches.group("bytesLeaked"))
+      numLeaked = int(matches.group("numLeaked"))
+      # Output the raw line from the leak log table if it is the TOTAL row,
+      # or is for an object row that has been leaked.
+      if numLeaked != 0 or name == "TOTAL":
+        log.info(line.rstrip())
+      # Analyse the leak log, but output later or it will interrupt the leak table
       if name == "TOTAL":
-        seenTotal = True
-    elif name == "TOTAL":
-      seenTotal = True
-      # Check for leaks.
-      if bytesLeaked < 0 or bytesLeaked > leakThreshold:
-        prefix = "TEST-UNEXPECTED-FAIL"
-        leakLog = "TEST-UNEXPECTED-FAIL %s| automationutils.processLeakLog() | leaked" \
-                  " %d bytes during test execution" % (processString, bytesLeaked)
-      elif bytesLeaked > 0:
-        leakLog = "TEST-PASS %s| automationutils.processLeakLog() | WARNING leaked" \
-                  " %d bytes during test execution" % (processString, bytesLeaked)
-      else:
-        leakLog = "TEST-PASS %s| automationutils.processLeakLog() | no leaks detected!" \
-                  % processString
-      # Remind the threshold if it is not 0, which is the default/goal.
-      if leakThreshold != 0:
-        leakLog += " (threshold set at %d bytes)" % leakThreshold
-      # Log the information.
-      log.info(leakLog)
-    else:
-      if numLeaked != 0:
-        if numLeaked > 1:
-          instance = "instances"
-          rest = " each (%s bytes total)" % matches.group("bytesLeaked")
-        else:
-          instance = "instance"
-          rest = ""
-        numObjects += 1
-        if numObjects > 5:
-          # don't spam brief tinderbox logs with tons of leak output
-          prefix = "TEST-INFO"
-        log.info("%(prefix)s %(process)s| automationutils.processLeakLog() | leaked %(numLeaked)d %(instance)s of %(name)s "
-                 "with size %(size)s bytes%(rest)s" %
-                 { "prefix": prefix,
-                   "process": processString,
-                   "numLeaked": numLeaked,
-                   "instance": instance,
-                   "name": name,
-                   "size": matches.group("size"),
-                   "rest": rest })
-  if not seenTotal:
-    if crashedOnPurpose:
-      log.info("INFO | automationutils.processLeakLog() | process %s was " \
-               "deliberately crashed and thus has no leak log" % PID)
-    else:
-      log.info("WARNING | automationutils.processLeakLog() | missing output line for total leaks!")
-  leaks.close()
+        totalBytesLeaked = bytesLeaked
+      if size < 0 or bytesLeaked < 0 or numLeaked < 0:
+        leakAnalysis.append("TEST-UNEXPECTED-FAIL | leakcheck |%s negative leaks caught!"
+                            % processString)
+        continue
+      if name != "TOTAL" and numLeaked != 0:
+        leakedObjectNames.append(name)
+        leakAnalysis.append("TEST-INFO | leakcheck |%s leaked %d %s (%s bytes)"
+                            % (processString, numLeaked, name, bytesLeaked))
+  log.info('\n'.join(leakAnalysis))
 
+  if totalBytesLeaked is None:
+    # We didn't see a line with name 'TOTAL'
+    if crashedOnPurpose:
+      log.info("TEST-INFO | leakcheck |%s deliberate crash and thus no leak log"
+               % processString)
+    else:
+      # TODO: This should be a TEST-UNEXPECTED-FAIL, but was changed to a warning
+      # due to too many intermittent failures (see bug 831223).
+      log.info("WARNING | leakcheck |%s missing output line for total leaks!"
+               % processString)
+    return
+
+  if totalBytesLeaked == 0:
+    log.info("TEST-PASS | leakcheck |%s no leaks detected!" % processString)
+    return
+
+  # totalBytesLeaked was seen and is non-zero.
+  if totalBytesLeaked > leakThreshold:
+    # Fail the run if we're over the threshold (which defaults to 0)
+    prefix = "TEST-UNEXPECTED-FAIL"
+  else:
+    prefix = "WARNING"
+  # Create a comma delimited string of the first N leaked objects found,
+  # to aid with bug summary matching in TBPL. Note: The order of the objects
+  # had no significance (they're sorted alphabetically).
+  maxSummaryObjects = 5
+  leakedObjectSummary = ', '.join(leakedObjectNames[:maxSummaryObjects])
+  if len(leakedObjectNames) > maxSummaryObjects:
+    leakedObjectSummary += ', ...'
+  log.info("%s | leakcheck |%s %d bytes leaked (%s)"
+           % (prefix, processString, totalBytesLeaked, leakedObjectSummary))
 
 def processLeakLog(leakLogFile, leakThreshold = 0):
   """Process the leak log, including separate leak logs created
@@ -397,25 +305,26 @@ def processLeakLog(leakLogFile, leakThreshold = 0):
   """
 
   if not os.path.exists(leakLogFile):
-    log.info("WARNING | automationutils.processLeakLog() | refcount logging is off, so leaks can't be detected!")
+    log.info("WARNING | leakcheck | refcount logging is off, so leaks can't be detected!")
     return
 
+  if leakThreshold != 0:
+    log.info("TEST-INFO | leakcheck | threshold set at %d bytes" % leakThreshold)
+
   (leakLogFileDir, leakFileBase) = os.path.split(leakLogFile)
-  pidRegExp = re.compile(r".*?_([a-z]*)_pid(\d*)$")
+  fileNameRegExp = re.compile(r".*?_([a-z]*)_pid\d*$")
   if leakFileBase[-4:] == ".log":
     leakFileBase = leakFileBase[:-4]
-    pidRegExp = re.compile(r".*?_([a-z]*)_pid(\d*).log$")
+    fileNameRegExp = re.compile(r".*?_([a-z]*)_pid\d*.log$")
 
   for fileName in os.listdir(leakLogFileDir):
     if fileName.find(leakFileBase) != -1:
       thisFile = os.path.join(leakLogFileDir, fileName)
-      processPID = 0
       processType = None
-      m = pidRegExp.search(fileName)
+      m = fileNameRegExp.search(fileName)
       if m:
         processType = m.group(1)
-        processPID = m.group(2)
-      processSingleLeakFile(thisFile, processPID, processType, leakThreshold)
+      processSingleLeakFile(thisFile, processType, leakThreshold)
 
 def replaceBackSlashes(input):
   return input.replace('\\', '/')

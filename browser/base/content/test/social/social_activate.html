@@ -12,8 +12,8 @@ var data = {
   "icon64URL": "chrome://branding/content/icon64.png",
 
   // at least one of these must be defined
-  "workerURL": "/browser/browser/base/content/test/social/social_sidebar.html",
-  "sidebarURL": "/browser/browser/base/content/test/social/social_worker.js",
+  "sidebarURL": "/browser/browser/base/content/test/social/social_sidebar.html",
+  "workerURL": "/browser/browser/base/content/test/social/social_worker.js",
 
   // should be available for display purposes
   "description": "A short paragraph about this provider",
@@ -28,11 +28,17 @@ function activate(node) {
   var event = new CustomEvent("ActivateSocialFeature");
   node.dispatchEvent(event);
 }
+
+function oldActivate(node) {
+  var event = new CustomEvent("ActivateSocialFeature");
+  document.dispatchEvent(event);
+}
 </script>
 <body>
 
 nothing to see here
 
+<button id="activation-old" onclick="oldActivate(this)">Activate The Demo Provider</button>
 <button id="activation" onclick="activate(this)">Activate The Demo Provider</button>
 
 </body>

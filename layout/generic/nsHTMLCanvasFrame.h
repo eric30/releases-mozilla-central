@@ -34,13 +34,15 @@ public:
   typedef mozilla::layers::LayerManager LayerManager;
   typedef mozilla::FrameLayerBuilder::ContainerParameters ContainerParameters;
 
+  NS_DECL_QUERYFRAME_TARGET(nsHTMLCanvasFrame)
+  NS_DECL_QUERYFRAME
   NS_DECL_FRAMEARENA_HELPERS
 
   nsHTMLCanvasFrame(nsStyleContext* aContext) : nsContainerFrame(aContext) {}
 
-  NS_IMETHOD Init(nsIContent* aContent,
-                  nsIFrame*   aParent,
-                  nsIFrame*   aPrevInFlow) MOZ_OVERRIDE;
+  virtual void Init(nsIContent* aContent,
+                    nsIFrame*   aParent,
+                    nsIFrame*   aPrevInFlow) MOZ_OVERRIDE;
 
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                 const nsRect&           aDirtyRect,
@@ -76,7 +78,7 @@ public:
 
   virtual nsIAtom* GetType() const MOZ_OVERRIDE;
 
-  virtual bool IsFrameOfType(uint32_t aFlags) const
+  virtual bool IsFrameOfType(uint32_t aFlags) const MOZ_OVERRIDE
   {
     return nsSplittableFrame::IsFrameOfType(aFlags & ~(nsIFrame::eReplaced));
   }
@@ -86,7 +88,7 @@ public:
 #endif
 
   // Inserted child content gets its frames parented by our child block
-  virtual nsIFrame* GetContentInsertionFrame() {
+  virtual nsIFrame* GetContentInsertionFrame() MOZ_OVERRIDE {
     return GetFirstPrincipalChild()->GetContentInsertionFrame();
   }
 

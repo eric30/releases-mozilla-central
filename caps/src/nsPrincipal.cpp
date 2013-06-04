@@ -17,13 +17,13 @@
 #include "nsNetUtil.h"
 #include "nsJSPrincipals.h"
 #include "nsVoidArray.h"
-#include "nsHashtable.h"
 #include "nsIObjectInputStream.h"
 #include "nsIObjectOutputStream.h"
 #include "nsIClassInfoImpl.h"
 #include "nsError.h"
 #include "nsIContentSecurityPolicy.h"
 #include "nsContentUtils.h"
+#include "nsCxPusher.h"
 #include "jswrapper.h"
 
 #include "nsPrincipal.h"
@@ -145,7 +145,7 @@ void nsPrincipal::dumpImpl()
 }
 #endif 
 
-NS_IMPL_CLASSINFO(nsPrincipal, NULL, nsIClassInfo::MAIN_THREAD_ONLY,
+NS_IMPL_CLASSINFO(nsPrincipal, nullptr, nsIClassInfo::MAIN_THREAD_ONLY,
                   NS_PRINCIPAL_CID)
 NS_IMPL_QUERY_INTERFACE2_CI(nsPrincipal,
                             nsIPrincipal,
@@ -403,7 +403,9 @@ nsPrincipal::CheckMayLoad(nsIURI* aURI, bool aReport, bool aAllowIfInheritsPrinc
           NS_FAILED(codebaseFileURL->GetFile(getter_AddRefs(codebaseFile))) ||
           !targetFile || !codebaseFile ||
           NS_FAILED(targetFile->Normalize()) ||
+#ifndef MOZ_WIDGET_ANDROID
           NS_FAILED(codebaseFile->Normalize()) ||
+#endif
           NS_FAILED(targetFile->IsDirectory(&targetIsDir)) ||
           targetIsDir) {
         if (aReport) {
@@ -492,7 +494,7 @@ nsPrincipal::SetDomain(nsIURI* aDomain)
 
   // Recompute all wrappers between compartments using this principal and other
   // non-chrome compartments.
-  SafeAutoJSContext cx;
+  AutoSafeJSContext cx;
   JSPrincipals *principals = nsJSPrincipals::get(static_cast<nsIPrincipal*>(this));
   bool success = js::RecomputeWrappers(cx, js::ContentCompartmentsOnly(),
                                        js::CompartmentsWithPrincipals(principals));
@@ -692,7 +694,7 @@ nsPrincipal::GetAppStatus()
 
 static const char EXPANDED_PRINCIPAL_SPEC[] = "[Expanded Principal]";
 
-NS_IMPL_CLASSINFO(nsExpandedPrincipal, NULL, nsIClassInfo::MAIN_THREAD_ONLY,
+NS_IMPL_CLASSINFO(nsExpandedPrincipal, nullptr, nsIClassInfo::MAIN_THREAD_ONLY,
                   NS_EXPANDEDPRINCIPAL_CID)
 NS_IMPL_QUERY_INTERFACE2_CI(nsExpandedPrincipal,
                             nsIPrincipal,

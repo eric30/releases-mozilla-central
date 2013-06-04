@@ -10,6 +10,7 @@
 #include "AccessibleHypertext_i.c"
 
 #include "HyperTextAccessibleWrap.h"
+#include "IUnknownImpl.h"
 
 using namespace mozilla::a11y;
 
@@ -38,7 +39,7 @@ ia2AccessibleHypertext::get_hyperlink(long aLinkIndex,
 {
   A11Y_TRYBLOCK_BEGIN
 
-  *aHyperlink = NULL;
+  *aHyperlink = nullptr;
 
   HyperTextAccessibleWrap* hyperText = static_cast<HyperTextAccessibleWrap*>(this);
   if (hyperText->IsDefunct())

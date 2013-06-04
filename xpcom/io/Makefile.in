@@ -10,9 +10,8 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= xpcom
 LIBRARY_NAME	= xpcomio_s
-GRE_MODULE	= 1
+MSVC_ENABLE_PGO := 1
 MOZILLA_INTERNAL_API = 1
 LIBXUL_LIBRARY  = 1
 
@@ -23,87 +22,16 @@ MODULE_OPTIMIZE_FLAGS = $(MOZ_OPTIMIZE_FLAGS) -fno-strict-aliasing
 endif
 endif
 
-CPPSRCS		= \
-		Base64.cpp \
-		nsAnonymousTemporaryFile.cpp \
-		nsAppFileLocationProvider.cpp \
-		nsBinaryStream.cpp \
-		nsDirectoryService.cpp \
-		nsEscape.cpp \
-		nsInputStreamTee.cpp \
-		nsLinebreakConverter.cpp \
-		nsLocalFileCommon.cpp \
-		nsMultiplexInputStream.cpp \
-		nsNativeCharsetUtils.cpp \
-		nsPipe3.cpp \
-		nsStreamUtils.cpp \
-		nsScriptableInputStream.cpp \
-		nsScriptableBase64Encoder.cpp \
-		nsSegmentedBuffer.cpp \
-		nsStorageStream.cpp \
-		nsStringStream.cpp \
-		nsUnicharInputStream.cpp \
-		nsIOUtil.cpp \
-		nsWildCard.cpp \
-		SpecialSystemDirectory.cpp \
-		$(NULL)
-
 ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
 CMMSRCS		+= \
 		CocoaFileUtils.mm \
 		$(NULL)
 endif
 
-ifeq ($(MOZ_WIDGET_TOOLKIT),os2)
-CPPSRCS		+= nsLocalFileOS2.cpp
-else
-ifeq ($(MOZ_WIDGET_TOOLKIT),windows)
-CPPSRCS		+= nsLocalFileWin.cpp
-else
-CPPSRCS		+= nsLocalFileUnix.cpp
-endif # windows
-endif # OS2
-
-EXPORTS		= \
-		nsAnonymousTemporaryFile.h \
-		nsAppDirectoryServiceDefs.h \
-		nsDirectoryService.h \
-		nsDirectoryServiceAtomList.h \
-		nsEscape.h \
-		nsLinebreakConverter.h \
-		nsLocalFile.h \
-		nsMultiplexInputStream.h \
-		nsNativeCharsetUtils.h \
-		nsScriptableInputStream.h \
-		nsStorageStream.h \
-		nsStringStream.h \
-		nsStreamUtils.h \
-		nsUnicharInputStream.h \
-		nsWildCard.h \
-		SpecialSystemDirectory.h \
-		$(NULL)
-
-ifeq ($(MOZ_WIDGET_TOOLKIT),os2)
-EXPORTS		+= nsLocalFileOS2.h
-else
-ifeq ($(MOZ_WIDGET_TOOLKIT),windows)
-EXPORTS		+= nsLocalFileWin.h
-else
-EXPORTS		+= nsLocalFileUnix.h
-endif # windows
-endif # os2
-
-EXPORTS_NAMESPACES = mozilla
-EXPORTS_mozilla = \
-    Base64.h \
-    $(NULL)
-
 SDK_HEADERS =  \
 		nsDirectoryServiceDefs.h \
 		nsDirectoryServiceUtils.h \
 		$(NULL)
-
-EXPORTS		:= $(addprefix $(srcdir)/, $(EXPORTS))
 
 # we don't want the shared lib, but we want to force the creation of a static lib.
 FORCE_STATIC_LIB = 1

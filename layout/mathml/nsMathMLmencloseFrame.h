@@ -38,7 +38,8 @@ enum nsMencloseNotation
     NOTATION_UPDIAGONALSTRIKE = 0x100,
     NOTATION_DOWNDIAGONALSTRIKE = 0x200,
     NOTATION_VERTICALSTRIKE = 0x400,
-    NOTATION_HORIZONTALSTRIKE = 0x800
+    NOTATION_HORIZONTALSTRIKE = 0x800,
+    NOTATION_UPDIAGONALARROW = 0x1000
   };
 
 class nsMathMLmencloseFrame : public nsMathMLContainerFrame {
@@ -51,7 +52,7 @@ public:
   virtual nsresult
   Place(nsRenderingContext& aRenderingContext,
         bool                 aPlaceOrigin,
-        nsHTMLReflowMetrics& aDesiredSize);
+        nsHTMLReflowMetrics& aDesiredSize) MOZ_OVERRIDE;
   
   virtual nsresult
   MeasureForWidth(nsRenderingContext& aRenderingContext,
@@ -64,9 +65,9 @@ public:
   
   virtual void
   SetAdditionalStyleContext(int32_t          aIndex, 
-                            nsStyleContext*  aStyleContext);
+                            nsStyleContext*  aStyleContext) MOZ_OVERRIDE;
   virtual nsStyleContext*
-  GetAdditionalStyleContext(int32_t aIndex) const;
+  GetAdditionalStyleContext(int32_t aIndex) const MOZ_OVERRIDE;
 
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                 const nsRect&           aDirtyRect,

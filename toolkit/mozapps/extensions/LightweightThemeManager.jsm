@@ -42,12 +42,12 @@ const PERSIST_FILES = {
 XPCOMUtils.defineLazyModuleGetter(this, "LightweightThemeImageOptimizer",
   "resource://gre/modules/LightweightThemeImageOptimizer.jsm");
 
-__defineGetter__("_prefs", function prefsGetter() {
+this.__defineGetter__("_prefs", function prefsGetter() {
   delete this._prefs;
   return this._prefs = Services.prefs.getBranch("lightweightThemes.");
 });
 
-__defineGetter__("_maxUsedThemes", function maxUsedThemesGetter() {
+this.__defineGetter__("_maxUsedThemes", function maxUsedThemesGetter() {
   delete this._maxUsedThemes;
   try {
     this._maxUsedThemes = _prefs.getIntPref("maxUsedThemes");
@@ -58,7 +58,7 @@ __defineGetter__("_maxUsedThemes", function maxUsedThemesGetter() {
   return this._maxUsedThemes;
 });
 
-__defineSetter__("_maxUsedThemes", function maxUsedThemesSetter(aVal) {
+this.__defineSetter__("_maxUsedThemes", function maxUsedThemesSetter(aVal) {
   delete this._maxUsedThemes;
   return this._maxUsedThemes = aVal;
 });
@@ -195,6 +195,10 @@ this.LightweightThemeManager = {
     req.mozBackgroundRequest = true;
     req.overrideMimeType("text/plain");
     req.open("GET", theme.updateURL, true);
+    // Prevent the request from reading from the cache.
+    req.channel.loadFlags |= Ci.nsIRequest.LOAD_BYPASS_CACHE;
+    // Prevent the request from writing to the cache.
+    req.channel.loadFlags |= Ci.nsIRequest.INHIBIT_CACHING;
 
     var self = this;
     req.addEventListener("load", function loadEventListener() {

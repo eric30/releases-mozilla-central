@@ -126,17 +126,9 @@ nsSVGMaskFrame::ComputeMaskAlpha(nsRenderingContext *aContext,
     nsSVGUtils::ComputeAlphaMask(data, stride, rect, aOpacity);
   }
 
-  gfxPattern *retval = new gfxPattern(image);
+  nsRefPtr<gfxPattern> retval = new gfxPattern(image);
   retval->SetMatrix(matrix);
-  NS_IF_ADDREF(retval);
-  return retval;
-}
-
-/* virtual */ void
-nsSVGMaskFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
-{
-  nsSVGEffects::InvalidateDirectRenderingObservers(this);
-  nsSVGMaskFrameBase::DidSetStyleContext(aOldStyleContext);
+  return retval.forget();
 }
 
 NS_IMETHODIMP
@@ -159,7 +151,7 @@ nsSVGMaskFrame::AttributeChanged(int32_t  aNameSpaceID,
 }
 
 #ifdef DEBUG
-NS_IMETHODIMP
+void
 nsSVGMaskFrame::Init(nsIContent* aContent,
                      nsIFrame* aParent,
                      nsIFrame* aPrevInFlow)
@@ -167,7 +159,7 @@ nsSVGMaskFrame::Init(nsIContent* aContent,
   NS_ASSERTION(aContent->IsSVG(nsGkAtoms::mask),
                "Content is not an SVG mask");
 
-  return nsSVGMaskFrameBase::Init(aContent, aParent, aPrevInFlow);
+  nsSVGMaskFrameBase::Init(aContent, aParent, aPrevInFlow);
 }
 #endif /* DEBUG */
 

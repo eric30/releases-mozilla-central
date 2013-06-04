@@ -24,22 +24,14 @@ namespace dom {
 class CallbackInterface : public CallbackObject
 {
 public:
-  /**
-   * Create a CallbackInterface.  aCallback is the callback object we're
-   * wrapping.  aOwner is the object that will be receiving this
-   * CallbackInterface as a method argument, if any.  We need this so we can
-   * store our callable in the same compartment as our owner.  If *aInited is
-   * set to false, an exception has been thrown.
-   */
-  CallbackInterface(JSContext* cx, JSObject* aOwner, JSObject* aCallback,
-                   bool* aInited)
-    : CallbackObject(cx, aOwner, aCallback, aInited)
+  explicit CallbackInterface(JSObject* aCallback)
+    : CallbackObject(aCallback)
   {
   }
 
 protected:
   bool GetCallableProperty(JSContext* cx, const char* aPropName,
-                           JS::Value* aCallable);
+                           JS::MutableHandle<JS::Value> aCallable);
 
 };
 

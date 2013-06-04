@@ -7,6 +7,7 @@ from __future__ import unicode_literals
 import hashlib
 import os
 import unittest
+import sys
 
 from mozfile.mozfile import NamedTemporaryFile
 from mozunit import (
@@ -18,8 +19,16 @@ from mozbuild.util import (
     FileAvoidWrite,
     hash_file,
     resolve_target_to_make,
+    MozbuildDeletionError,
+    HierarchicalStringList,
+    StrictOrderingOnAppendList,
+    UnsortedError,
 )
 
+if sys.version_info[0] == 3:
+    str_type = 'str'
+else:
+    str_type = 'unicode'
 
 data_path = os.path.abspath(os.path.dirname(__file__))
 data_path = os.path.join(data_path, 'data')
@@ -145,6 +154,134 @@ class TestResolveTargetToMake(unittest.TestCase):
         self.assertResolve('test-dir/without/Makefile', ('test-dir', 'without/Makefile'))
         self.assertResolve('test-dir/without/with/Makefile', ('test-dir', 'without/with/Makefile'))
         self.assertResolve('test-dir/without/with/without/Makefile', ('test-dir/without/with', 'without/Makefile'))
+
+class TestHierarchicalStringList(unittest.TestCase):
+    def setUp(self):
+        self.EXPORTS = HierarchicalStringList()
+
+    def test_exports_append(self):
+        self.assertEqual(self.EXPORTS.get_strings(), [])
+        self.EXPORTS += ["foo.h"]
+        self.assertEqual(self.EXPORTS.get_strings(), ["foo.h"])
+        self.EXPORTS += ["bar.h"]
+        self.assertEqual(self.EXPORTS.get_strings(), ["foo.h", "bar.h"])
+
+    def test_exports_subdir(self):
+        self.assertEqual(self.EXPORTS.get_children(), {})
+        self.EXPORTS.foo += ["foo.h"]
+        self.assertItemsEqual(self.EXPORTS.get_children(), {"foo" : True})
+        self.assertEqual(self.EXPORTS.foo.get_strings(), ["foo.h"])
+        self.EXPORTS.bar += ["bar.h"]
+        self.assertItemsEqual(self.EXPORTS.get_children(),
+                              {"foo" : True, "bar" : True})
+        self.assertEqual(self.EXPORTS.foo.get_strings(), ["foo.h"])
+        self.assertEqual(self.EXPORTS.bar.get_strings(), ["bar.h"])
+
+    def test_exports_multiple_subdir(self):
+        self.EXPORTS.foo.bar = ["foobar.h"]
+        self.assertItemsEqual(self.EXPORTS.get_children(), {"foo" : True})
+        self.assertItemsEqual(self.EXPORTS.foo.get_children(), {"bar" : True})
+        self.assertItemsEqual(self.EXPORTS.foo.bar.get_children(), {})
+        self.assertEqual(self.EXPORTS.get_strings(), [])
+        self.assertEqual(self.EXPORTS.foo.get_strings(), [])
+        self.assertEqual(self.EXPORTS.foo.bar.get_strings(), ["foobar.h"])
+
+    def test_invalid_exports_append(self):
+        with self.assertRaises(ValueError) as ve:
+            self.EXPORTS += "foo.h"
+        self.assertEqual(str(ve.exception),
+                         "Expected a list of strings, not <type '%s'>" % str_type)
+
+    def test_invalid_exports_set(self):
+        with self.assertRaises(ValueError) as ve:
+            self.EXPORTS.foo = "foo.h"
+
+        self.assertEqual(str(ve.exception),
+                         "Expected a list of strings, not <type '%s'>" % str_type)
+
+    def test_invalid_exports_append_base(self):
+        with self.assertRaises(ValueError) as ve:
+            self.EXPORTS += "foo.h"
+
+        self.assertEqual(str(ve.exception),
+                         "Expected a list of strings, not <type '%s'>" % str_type)
+
+    def test_invalid_exports_bool(self):
+        with self.assertRaises(ValueError) as ve:
+            self.EXPORTS += [True]
+
+        self.assertEqual(str(ve.exception),
+                         "Expected a list of strings, not an element of "
+                         "<type 'bool'>")
+
+    def test_del_exports(self):
+        with self.assertRaises(MozbuildDeletionError) as mde:
+            self.EXPORTS.foo += ['bar.h']
+            del self.EXPORTS.foo
+
+    def test_unsorted_appends(self):
+        with self.assertRaises(UnsortedError) as ee:
+            self.EXPORTS += ['foo.h', 'bar.h']
+
+
+class TestStrictOrderingOnAppendList(unittest.TestCase):
+    def test_init(self):
+        l = StrictOrderingOnAppendList()
+        self.assertEqual(len(l), 0)
+
+        l = StrictOrderingOnAppendList(['a', 'b', 'c'])
+        self.assertEqual(len(l), 3)
+
+        with self.assertRaises(UnsortedError):
+            StrictOrderingOnAppendList(['c', 'b', 'a'])
+
+        self.assertEqual(len(l), 3)
+
+    def test_extend(self):
+        l = StrictOrderingOnAppendList()
+        l.extend(['a', 'b'])
+        self.assertEqual(len(l), 2)
+        self.assertIsInstance(l, StrictOrderingOnAppendList)
+
+        with self.assertRaises(UnsortedError):
+            l.extend(['d', 'c'])
+
+        self.assertEqual(len(l), 2)
+
+    def test_slicing(self):
+        l = StrictOrderingOnAppendList()
+        l[:] = ['a', 'b']
+        self.assertEqual(len(l), 2)
+        self.assertIsInstance(l, StrictOrderingOnAppendList)
+
+        with self.assertRaises(UnsortedError):
+            l[:] = ['b', 'a']
+
+        self.assertEqual(len(l), 2)
+
+    def test_add(self):
+        l = StrictOrderingOnAppendList()
+        l2 = l + ['a', 'b']
+        self.assertEqual(len(l), 0)
+        self.assertEqual(len(l2), 2)
+        self.assertIsInstance(l2, StrictOrderingOnAppendList)
+
+        with self.assertRaises(UnsortedError):
+            l2 = l + ['b', 'a']
+
+        self.assertEqual(len(l), 0)
+
+    def test_iadd(self):
+        l = StrictOrderingOnAppendList()
+        l += ['a', 'b']
+        self.assertEqual(len(l), 2)
+        self.assertIsInstance(l, StrictOrderingOnAppendList)
+
+        with self.assertRaises(UnsortedError):
+            l += ['b', 'a']
+
+        self.assertEqual(len(l), 2)
+
 
 if __name__ == '__main__':
     main()

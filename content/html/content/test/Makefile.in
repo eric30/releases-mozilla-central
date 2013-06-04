@@ -264,7 +264,6 @@ MOCHITEST_FILES = \
 		test_bug742030.html \
 		test_bug742549.html \
 		test_bug745685.html \
-		test_input_file_picker.html \
 		test_bug763626.html \
 		test_bug780993.html \
 		test_bug797113.html \
@@ -346,13 +345,18 @@ MOCHITEST_FILES = \
 		test_meta_attributes_reflection.html \
 		test_mod_attributes_reflection.html \
 		test_mozaudiochannel.html \
+		test_mozLoadFrom.html \
 		test_style_attributes_reflection.html \
 		test_bug629801.html \
 		test_bug839371.html \
 		test_element_prototype.html \
 		test_formData.html \
+		test_audio_wakelock.html \
+		test_video_wakelock.html \
+		wakelock.ogg \
+		wakelock.ogv \
+		test_bug869040.html \
 		$(NULL)
-
 
 MOCHITEST_BROWSER_FILES = \
 		browser_bug649778.js \

@@ -13,8 +13,6 @@ var gSmallTests = [
   { name:"seek.webm", type:"video/webm", width:320, height:240, duration:3.966 },
   { name:"detodos.opus", type:"audio/ogg; codecs=opus", duration:2.9135 },
   { name:"gizmo.mp4", type:"video/mp4", duration:5.56 },
-  { name:"dash-manifest.mpd", type:"application/dash+xml",
-    width:320, height:180, duration:3.966 },
   { name:"bogus.duh", type:"bogus/duh" }
 ];
 
@@ -27,7 +25,6 @@ var gProgressTests = [
   { name:"320x240.ogv", type:"video/ogg", width:320, height:240, duration:0.266, size:28942 },
   { name:"seek.webm", type:"video/webm", duration:3.966, size:215529 },
   { name:"gizmo.mp4", type:"video/mp4", duration:5.56, size:383631 },
-  { name:"dash-manifest.mpd", type:"application/dash+xml", duration:3.966 },
   { name:"bogus.duh", type:"bogus/duh" }
 ];
 
@@ -39,7 +36,6 @@ var gPlayedTests = [
   { name:"seek.webm", type:"video/webm", duration:3.966 },
   { name:"gizmo.mp4", type:"video/mp4", duration:5.56 },
   { name:"owl.mp3", type:"audio/mpeg", duration:3.29 },
-  { name:"dash-manifest.mpd", type:"application/dash+xml", duration:3.966 },
 ];
 
 // Used by test_mozLoadFrom.  Need one test file per decoder backend, plus
@@ -66,12 +62,13 @@ var gPausedAfterEndedTests = gSmallTests.concat([
   { name:"small-shot.ogg", type:"video/ogg", duration:0.276 }
 ]);
 
-// Test the mozHasAudio property
-var gMozHasAudioTests = [
-  { name:"big.wav", type:"audio/x-wav", duration:9.278981, size:102444, hasAudio:undefined },
-  { name:"320x240.ogv", type:"video/ogg", width:320, height:240, duration:0.266, size:28942, hasAudio:false },
-  { name:"short-video.ogv", type:"video/ogg", duration:1.081, hasAudio:true },
-  { name:"seek.webm", type:"video/webm", duration:3.966, size:215529, hasAudio:false },
+// Test the mozHasAudio property, and APIs that detect different kinds of
+// tracks
+var gTrackTests = [
+  { name:"big.wav", type:"audio/x-wav", duration:9.278981, size:102444, hasAudio:true, hasVideo:false },
+  { name:"320x240.ogv", type:"video/ogg", width:320, height:240, duration:0.266, size:28942, hasAudio:false, hasVideo:true },
+  { name:"short-video.ogv", type:"video/ogg", duration:1.081, hasAudio:true, hasVideo:true },
+  { name:"seek.webm", type:"video/webm", duration:3.966, size:215529, hasAudio:false, hasVideo:true },
   { name:"bogus.duh", type:"bogus/duh" }
 ];
 
@@ -157,14 +154,21 @@ var gPlayTests = [
   // Opus data in an ogg container
   { name:"detodos.opus", type:"audio/ogg; codecs=opus", duration:2.9135 },
 
+  // Multichannel Opus in an ogg container
+  { name:"test-1-mono.opus", type:"audio/ogg; codecs=opus", duration:1.044 },
+  { name:"test-2-stereo.opus", type:"audio/ogg; codecs=opus", duration:2.925 },
+  { name:"test-3-LCR.opus", type:"audio/ogg; codecs=opus", duration:4.214 },
+  { name:"test-4-quad.opus", type:"audio/ogg; codecs=opus", duration:6.234 },
+  { name:"test-5-5.0.opus", type:"audio/ogg; codecs=opus", duration:7.558 },
+  { name:"test-6-5.1.opus", type:"audio/ogg; codecs=opus", duration:10.333 },
+  { name:"test-7-6.1.opus", type:"audio/ogg; codecs=opus", duration:11.690 },
+  { name:"test-8-7.1.opus", type:"audio/ogg; codecs=opus", duration:13.478 },
+
   { name:"gizmo.mp4", type:"video/mp4", duration:5.56 },
 
   { name:"small-shot.m4a", type:"audio/mp4", duration:0.29 },
   { name:"small-shot.mp3", type:"audio/mpeg", duration:0.27 },
   { name:"owl.mp3", type:"audio/mpeg", duration:3.29 },
-
-  // DASH WebM MPD
-  { name:"dash-manifest.mpd", type:"application/dash+xml", duration:3.966 },
 
   // Invalid file
   { name:"bogus.duh", type:"bogus/duh", duration:Number.NaN }
@@ -193,13 +197,6 @@ var gInvalidTests = [
   { name:"invalid-cmap-s0c0.opus", type:"audio/ogg; codecs=opus"},
   { name:"invalid-cmap-s0c2.opus", type:"audio/ogg; codecs=opus"},
   { name:"invalid-cmap-s1c2.opus", type:"audio/ogg; codecs=opus"},
-];
-
-// Files to test for stream switching. Note: media files referenced in DASH MPD
-// files should be accessed via dash_detect_stream_switch.sjs.
-var gStreamSwitchTests = [
-  { name:"dash-manifest-sjs.mpd", type:"application/dash+xml",
-    width:320, height:180, duration:3.966 }
 ];
 
 // Converts a path/filename to a file:// URI which we can load from disk.
@@ -268,12 +265,6 @@ var gInfoLeakTests = [
     type: 'video/webm',
     src: fileUriToSrc("tests/content/media/test/404.webm", false),
   }, {
-    type: 'application/dash+xml',
-    src: fileUriToSrc("tests/content/media/test/dash-manifest.mpd", true),
-  }, {
-    type: 'application/dash+xml',
-    src: fileUriToSrc("tests/content/media/test/404.mpd", false),
-  }, {
     type: 'video/ogg',
     src: 'http://localhost/404.ogv',
   }, {
@@ -282,9 +273,6 @@ var gInfoLeakTests = [
   }, {
     type: 'video/webm',
     src: 'http://localhost/404.webm',
-  }, {
-    type: 'application/dash+xml',
-    src: 'http://localhost/404.mpd',
   }, {
     type: 'video/ogg',
     src: 'http://example.com/tests/content/media/test/test_info_leak.html'
@@ -324,7 +312,6 @@ var gSeekTests = [
   { name:"detodos.opus", type:"audio/ogg; codecs=opus", duration:2.9135 },
   { name:"gizmo.mp4", type:"video/mp4", duration:5.56 },
   { name:"owl.mp3", type:"audio/mpeg", duration:3.29 },
-  { name:"dash-manifest.mpd", type:"application/dash+xml", duration:3.966 },
   { name:"bogus.duh", type:"bogus/duh", duration:123 }
 ];
 
@@ -357,8 +344,6 @@ var gDecodeErrorTests = [
   // Invalid files
   { name:"bogus.wav", type:"audio/x-wav" },
   { name:"bogus.ogv", type:"video/ogg" },
-  { name:"dash-manifest-garbled.mpd", type:"application/dash+xml" },
-  { name:"dash-manifest-garbled-webm.mpd", type:"application/dash+xml" },
 
   { name:"bogus.duh", type:"bogus/duh" }
 ];
@@ -505,7 +490,7 @@ function checkMetadata(msg, e, test) {
 // installed video backends.
 function getPlayableVideo(candidates) {
   var v = document.createElement("video");
-  var resources = candidates.filter(function(x){return (/^video/.test(x.type) || /^application\/dash\+xml/.test(x.type)) && v.canPlayType(x.type);});
+  var resources = candidates.filter(function(x){return /^video/.test(x.type) && v.canPlayType(x.type);});
   if (resources.length > 0)
     return resources[0];
   return null;
@@ -521,7 +506,7 @@ function getPlayableAudio(candidates) {
 
 // Returns the type of element that should be created for the given mimetype.
 function getMajorMimeType(mimetype) {
-  if (/^video/.test(mimetype) || /^application\/dash\+xml/.test(mimetype)) {
+  if (/^video/.test(mimetype)) {
     return "video";
   } else {
     return "audio";

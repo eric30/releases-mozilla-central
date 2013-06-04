@@ -16,7 +16,6 @@
 #include "nsHashtable.h"
 #include "nsCOMPtr.h"
 #include "nsIChannelEventSink.h"
-#include "nsIJSContextStack.h"
 #include "nsIObserver.h"
 #include "pldhash.h"
 #include "plstr.h"
@@ -145,7 +144,7 @@ static void
 ClearPropertyPolicyEntry(PLDHashTable *table, PLDHashEntryHdr *entry)
 {
     PropertyPolicy* pp = (PropertyPolicy*)entry;
-    pp->key = NULL;
+    pp->key = nullptr;
 }
 
 // Class Policy
@@ -384,10 +383,11 @@ private:
 
     // Returns null if a principal cannot be found; generally callers
     // should error out at that point.
-    static nsIPrincipal* doGetObjectPrincipal(JSObject *obj);
+    static nsIPrincipal* doGetObjectPrincipal(JS::Handle<JSObject*> obj);
 #ifdef DEBUG
     static nsIPrincipal*
-    old_doGetObjectPrincipal(JSObject *obj, bool aAllowShortCircuit = true);
+    old_doGetObjectPrincipal(JS::Handle<JSObject*> obj,
+                             bool aAllowShortCircuit = true);
 #endif
 
     // Returns null if a principal cannot be found.  Note that rv can be NS_OK
@@ -410,7 +410,8 @@ private:
                            uint32_t aAction);
 
     nsresult
-    LookupPolicy(nsIPrincipal* principal,
+    LookupPolicy(JSContext* cx,
+                 nsIPrincipal* principal,
                  ClassInfoData& aClassData, jsid aProperty,
                  uint32_t aAction,
                  ClassPolicy** aCachedClassPolicy,
@@ -443,7 +444,7 @@ private:
     // of obj (the last object on its parent chain). Callers MUST pass in a
     // non-null rv here.
     static nsIPrincipal*
-    GetFunctionObjectPrincipal(JSContext* cx, JSObject* obj, nsresult* rv);
+    GetFunctionObjectPrincipal(JSContext* cx, JS::Handle<JSObject*> obj, nsresult* rv);
 
     /**
      * Check capability levels for an |aObj| that implements
@@ -523,7 +524,6 @@ private:
 
     static nsIIOService    *sIOService;
     static nsIXPConnect    *sXPConnect;
-    static nsIThreadJSContextStack* sJSContextStack;
     static nsIStringBundle *sStrBundle;
     static JSRuntime       *sRuntime;
 };

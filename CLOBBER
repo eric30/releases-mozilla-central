@@ -15,4 +15,9 @@
 #
 # Note: The description below will be part of the error message shown to users.
 #
-Bug 851920 - Resources removed from the pre-processing chain are still dependant on MOZ_PROFILING/MOZ_TELEMETRY*
+# Modifying this file will now automatically clobber the buildbot machines \o/
+#
+Bug 496923 removed a directory which the non-regenerated js/src/tests/Makefile will still request.
+
+Alternative to clobber is to run ./config.status from the objdir and to
+touch the CLOBBER file in the objdir.

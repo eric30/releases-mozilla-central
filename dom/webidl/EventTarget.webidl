@@ -27,3 +27,21 @@ interface EventTarget {
   [Throws]
   boolean dispatchEvent(Event event);
 };
+
+// Mozilla extensions for use by JS-implemented event targets to
+// implement on* properties.
+partial interface EventTarget {
+  [ChromeOnly, Throws]
+  void setEventHandler(DOMString type, EventHandler handler);
+
+  [ChromeOnly]
+  EventHandler getEventHandler(DOMString type);
+};
+
+// Mozilla extension to make firing events on event targets from
+// chrome easier.  This returns the window which can be used to create
+// events to fire at this EventTarget, or null if there isn't one.
+partial interface EventTarget {
+  [ChromeOnly]
+  readonly attribute WindowProxy? ownerGlobal;
+};

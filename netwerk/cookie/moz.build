@@ -1,3 +1,4 @@
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -14,3 +15,23 @@ XPIDL_SOURCES += [
 
 XPIDL_MODULE = 'necko_cookie'
 
+MODULE = 'necko'
+
+if CONFIG['NECKO_COOKIES']:
+    EXPORTS.mozilla.net = [
+        'CookieServiceParent.h',
+        'CookieServiceChild.h',
+    ]
+    CPP_SOURCES += [
+        'nsCookie.cpp',
+        'nsCookieService.cpp',
+        'CookieServiceParent.cpp',
+        'CookieServiceChild.cpp',
+    ]
+
+if CONFIG['NECKO_COOKIES']:
+    XPCSHELL_TESTS_MANIFESTS += ['test/unit/xpcshell.ini']
+
+# FIXME/bug 575918: out-of-process xpcshell is broken on OS X
+if CONFIG['NECKO_COOKIES'] and CONFIG['OS_ARCH'] != 'Darwin':
+    XPCSHELL_TESTS_MANIFESTS += ['test/unit_ipc/xpcshell.ini']

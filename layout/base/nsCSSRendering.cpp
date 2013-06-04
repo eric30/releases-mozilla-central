@@ -30,6 +30,7 @@
 #include "nsIScrollableFrame.h"
 #include "imgIRequest.h"
 #include "imgIContainer.h"
+#include "ImageOps.h"
 #include "nsCSSRendering.h"
 #include "nsCSSColorUtils.h"
 #include "nsITheme.h"
@@ -50,7 +51,7 @@
 #include "nsSVGEffects.h"
 #include "nsSVGIntegrationUtils.h"
 #include "gfxDrawable.h"
-#include "sampler.h"
+#include "GeckoProfiler.h"
 #include "nsCSSRenderingBorders.h"
 #include "mozilla/css/ImageLoader.h"
 #include "ImageContainer.h"
@@ -60,6 +61,7 @@
 
 using namespace mozilla;
 using namespace mozilla::css;
+using mozilla::image::ImageOps;
 
 static int gFrameTreeLockCount = 0;
 
@@ -583,7 +585,7 @@ nsCSSRendering::PaintBorder(nsPresContext* aPresContext,
                             nsStyleContext* aStyleContext,
                             int aSkipSides)
 {
-  SAMPLE_LABEL("nsCSSRendering", "PaintBorder");
+  PROFILER_LABEL("nsCSSRendering", "PaintBorder");
   nsStyleContext *styleIfVisited = aStyleContext->GetStyleIfVisited();
   const nsStyleBorder *styleBorder = aStyleContext->StyleBorder();
   // Don't check RelevantLinkVisited here, since we want to take the
@@ -1212,7 +1214,8 @@ nsCSSRendering::PaintBoxShadowOuter(nsPresContext* aPresContext,
   } else {
     nativeTheme = false;
     nscoord twipsRadii[8];
-    NS_ASSERTION(aFrameArea.Size() == aForFrame->GetSize(), "unexpected size");
+    NS_ASSERTION(aFrameArea.Size() == aForFrame->VisualBorderRectRelativeToSelf().Size(),
+                 "unexpected size");
     hasBorderRadius = aForFrame->GetBorderRadii(twipsRadii);
     if (hasBorderRadius) {
       ComputePixelRadii(twipsRadii, twipsPerPixel, &borderRadii);
@@ -1541,7 +1544,7 @@ nsCSSRendering::PaintBackground(nsPresContext* aPresContext,
                                 nsRect* aBGClipRect,
                                 int32_t aLayer)
 {
-  SAMPLE_LABEL("nsCSSRendering", "PaintBackground");
+  PROFILER_LABEL("nsCSSRendering", "PaintBackground");
   NS_PRECONDITION(aForFrame,
                   "Frame is expected to be provided to PaintBackground");
 
@@ -1578,7 +1581,7 @@ nsCSSRendering::PaintBackgroundColor(nsPresContext* aPresContext,
                                      const nsRect& aBorderArea,
                                      uint32_t aFlags)
 {
-  SAMPLE_LABEL("nsCSSRendering", "PaintBackgroundColor");
+  PROFILER_LABEL("nsCSSRendering", "PaintBackgroundColor");
   NS_PRECONDITION(aForFrame,
                   "Frame is expected to be provided to PaintBackground");
 
@@ -2086,7 +2089,7 @@ nsCSSRendering::PaintGradient(nsPresContext* aPresContext,
                               const nsRect& aOneCellArea,
                               const nsRect& aFillArea)
 {
-  SAMPLE_LABEL("nsCSSRendering", "PaintGradient");
+  PROFILER_LABEL("nsCSSRendering", "PaintGradient");
   Telemetry::AutoTimer<Telemetry::GRADIENT_DURATION, Telemetry::Microsecond> gradientTimer;
   if (aOneCellArea.IsEmpty())
     return;
@@ -2947,6 +2950,9 @@ nsCSSRendering::PrepareBackgroundLayer(nsPresContext* aPresContext,
   if (aFlags & nsCSSRendering::PAINTBG_SYNC_DECODE_IMAGES) {
     irFlags |= nsImageRenderer::FLAG_SYNC_DECODE_IMAGES;
   }
+  if (aFlags & nsCSSRendering::PAINTBG_TO_WINDOW) {
+    irFlags |= nsImageRenderer::FLAG_PAINTING_TO_WINDOW;
+  }
 
   nsBackgroundLayerState state(aForFrame, &aLayer.mImage, irFlags);
   if (!state.mImageRenderer.PrepareImage()) {
@@ -3021,10 +3027,11 @@ nsCSSRendering::GetBackgroundLayerRect(nsPresContext* aPresContext,
                                        const nsRect& aBorderArea,
                                        const nsRect& aClipRect,
                                        const nsStyleBackground& aBackground,
-                                       const nsStyleBackground::Layer& aLayer)
+                                       const nsStyleBackground::Layer& aLayer,
+                                       uint32_t aFlags)
 {
   nsBackgroundLayerState state =
-      PrepareBackgroundLayer(aPresContext, aForFrame, 0, aBorderArea,
+      PrepareBackgroundLayer(aPresContext, aForFrame, aFlags, aBorderArea,
                              aClipRect, aBackground, aLayer);
   return state.mFillArea;
 }
@@ -3314,20 +3321,10 @@ DrawBorderImageComponent(nsRenderingContext&  aRenderingContext,
   if (aFill.IsEmpty() || aSrc.IsEmpty())
     return;
 
-  // Don't bother trying to cache sub images if the border image is animated
-  // We can only sucessfully call GetAnimated() if we are fully decoded, so default to true
-  bool animated = true;
-  aImage->GetAnimated(&animated);
-
   nsCOMPtr<imgIContainer> subImage;
-  if (animated || (subImage = aStyleBorder.GetSubImage(aIndex)) == 0) {
-    if (NS_FAILED(aImage->ExtractFrame(imgIContainer::FRAME_CURRENT, aSrc,
-                                       imgIContainer::FLAG_SYNC_DECODE,
-                                       getter_AddRefs(subImage))))
-      return;
-
-    if (!animated)
-      aStyleBorder.SetSubImage(aIndex, subImage);
+  if ((subImage = aStyleBorder.GetSubImage(aIndex)) == nullptr) {
+    subImage = ImageOps::Clip(aImage, aSrc);
+    aStyleBorder.SetSubImage(aIndex, subImage);
   }
 
   gfxPattern::GraphicsFilter graphicsFilter =
@@ -4293,18 +4290,7 @@ nsImageRenderer::PrepareImage()
           // The cropped image is identical to the source image
           mImageContainer.swap(srcImage);
         } else {
-          nsCOMPtr<imgIContainer> subImage;
-          uint32_t aExtractFlags = (mFlags & FLAG_SYNC_DECODE_IMAGES)
-                                     ? (uint32_t) imgIContainer::FLAG_SYNC_DECODE
-                                     : (uint32_t) imgIContainer::FLAG_NONE;
-          nsresult rv = srcImage->ExtractFrame(imgIContainer::FRAME_CURRENT,
-                                               actualCropRect, aExtractFlags,
-                                               getter_AddRefs(subImage));
-          if (NS_FAILED(rv)) {
-            NS_WARNING("The cropped image contains no pixels to draw; "
-                       "maybe the crop rect is outside the image frame rect");
-            return false;
-          }
+          nsCOMPtr<imgIContainer> subImage = ImageOps::Clip(srcImage, actualCropRect);
           mImageContainer.swap(subImage);
         }
       }
@@ -4655,9 +4641,14 @@ nsImageRenderer::Draw(nsPresContext*       aPresContext,
   switch (mType) {
     case eStyleImageType_Image:
     {
-      uint32_t drawFlags = (mFlags & FLAG_SYNC_DECODE_IMAGES)
-                             ? (uint32_t) imgIContainer::FLAG_SYNC_DECODE
-                             : (uint32_t) imgIContainer::FLAG_NONE;
+      uint32_t drawFlags = imgIContainer::FLAG_NONE;
+      if (mFlags & FLAG_SYNC_DECODE_IMAGES) {
+        drawFlags |= imgIContainer::FLAG_SYNC_DECODE;
+      }
+      if (mFlags & FLAG_PAINTING_TO_WINDOW) {
+        drawFlags |= imgIContainer::FLAG_HIGH_QUALITY_SCALING;
+      }
+
       nsLayoutUtils::DrawBackgroundImage(&aRenderingContext, mImageContainer,
           nsIntSize(nsPresContext::AppUnitsToIntCSSPixels(mSize.width),
                     nsPresContext::AppUnitsToIntCSSPixels(mSize.height)),
@@ -4696,6 +4687,18 @@ nsImageRenderer::IsRasterImage()
   if (mType != eStyleImageType_Image || !mImageContainer)
     return false;
   return mImageContainer->GetType() == imgIContainer::TYPE_RASTER;
+}
+
+bool
+nsImageRenderer::IsAnimatedImage()
+{
+  if (mType != eStyleImageType_Image || !mImageContainer)
+    return false;
+  bool animated = false;
+  if (NS_SUCCEEDED(mImageContainer->GetAnimated(&animated)) && animated)
+    return true;
+
+  return false;
 }
 
 already_AddRefed<mozilla::layers::ImageContainer>

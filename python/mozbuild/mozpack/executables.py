@@ -20,40 +20,28 @@ MACHO_SIGNATURES = [
 
 FAT_SIGNATURE = 0xcafebabe  # mach-o FAT binary
 
-EXECUTABLE_SIGNATURES = [
-    0x7f454c46,  # Elf
-] + MACHO_SIGNATURES
+ELF_SIGNATURE = 0x7f454c46  # Elf binary
 
+UNKNOWN = 0
+MACHO = 1
+ELF = 2
 
-def is_executable(path):
+def get_type(path):
     '''
-    Return whether a given file path points to an executable or a library,
-    where an executable or library is identified by:
-        - the file extension on OS/2
-        - the file signature on OS/X and ELF systems (GNU/Linux, Android, BSD,
-          Solaris)
-
-    As this function is intended for use to choose between the ExecutableFile
-    and File classes in FileFinder, and choosing ExecutableFile only matters
-    on OS/2, OS/X and ELF systems, we don't bother detecting other kind of
-    executables.
+    Check the signature of the give file and returns what kind of executable
+    matches.
     '''
-    if not os.path.exists(path):
-        return False
-
-    if substs['OS_ARCH'] == 'OS2':
-        return path.lower().endswith((substs['DLL_SUFFIX'],
-                                      substs['BIN_SUFFIX']))
-
     with open(path, 'rb') as f:
         signature = f.read(4)
         if len(signature) < 4:
-            return False
+            return UNKNOWN
         signature = struct.unpack('>L', signature)[0]
-        if signature in EXECUTABLE_SIGNATURES:
-            return True
+        if signature == ELF_SIGNATURE:
+            return ELF
+        if signature in MACHO_SIGNATURES:
+            return MACHO
         if signature != FAT_SIGNATURE:
-            return False
+            return UNKNOWN
         # We have to sanity check the second four bytes, because Java class
         # files use the same magic number as Mach-O fat binaries.
         # This logic is adapted from file(1), which says that Mach-O uses
@@ -63,9 +51,34 @@ def is_executable(path):
         # class format used the version 43.0.
         num = f.read(4)
         if len(num) < 4:
-            return False
+            return UNKNOWN
         num = struct.unpack('>L', num)[0]
-        return num < 20
+        if num < 20:
+            return MACHO
+        return UNKNOWN
+
+
+def is_executable(path):
+    '''
+    Return whether a given file path points to an executable or a library,
+    where an executable or library is identified by:
+        - the file extension on OS/2 and WINNT
+        - the file signature on OS/X and ELF systems (GNU/Linux, Android, BSD,
+          Solaris)
+
+    As this function is intended for use to choose between the ExecutableFile
+    and File classes in FileFinder, and choosing ExecutableFile only matters
+    on OS/2, OS/X, ELF and WINNT (in GCC build) systems, we don't bother
+    detecting other kind of executables.
+    '''
+    if not os.path.exists(path):
+        return False
+
+    if substs['OS_ARCH'] == 'OS2' or substs['OS_ARCH'] == 'WINNT':
+        return path.lower().endswith((substs['DLL_SUFFIX'],
+                                      substs['BIN_SUFFIX']))
+
+    return get_type(path) != UNKNOWN
 
 
 def may_strip(path):

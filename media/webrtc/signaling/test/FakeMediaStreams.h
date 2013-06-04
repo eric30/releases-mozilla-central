@@ -32,6 +32,8 @@ namespace mozilla {
 
 class Fake_SourceMediaStream;
 
+static const int64_t USECS_PER_S = 1000000;
+
 class Fake_MediaStreamListener
 {
  public:
@@ -108,8 +110,9 @@ class Fake_SourceMediaStream : public Fake_MediaStream {
 
   void AddTrack(mozilla::TrackID aID, mozilla::TrackRate aRate, mozilla::TrackTicks aStart,
                 mozilla::MediaSegment* aSegment) {}
+  void EndTrack(mozilla::TrackID aID) {}
 
-  void AppendToTrack(mozilla::TrackID aID, mozilla::MediaSegment* aSegment) {
+  bool AppendToTrack(mozilla::TrackID aID, mozilla::MediaSegment* aSegment) {
     bool nonZeroSample = false;
     MOZ_ASSERT(aSegment);
     if(aSegment->GetType() == mozilla::MediaSegment::AUDIO) {
@@ -126,7 +129,7 @@ class Fake_SourceMediaStream : public Fake_MediaStream {
         for(int i=0; i<chunk.mDuration; i++) {
           if(buf[i]) {
             //atleast one non-zero sample found.
-            nonZeroSample = true; 
+            nonZeroSample = true;
             break;
           }
         }
@@ -143,6 +146,7 @@ class Fake_SourceMediaStream : public Fake_MediaStream {
       //segment count.
       ++mSegmentsAdded;
     }
+    return true;
   }
 
   void AdvanceKnownTracksTime(mozilla::StreamTime aKnownTime) {}
@@ -194,20 +198,20 @@ public:
   CreateSourceStream(nsIDOMWindow* aWindow, uint32_t aHintContents) {
     Fake_SourceMediaStream *source = new Fake_SourceMediaStream();
 
-    Fake_DOMMediaStream *ds = new Fake_DOMMediaStream(source);
+    nsRefPtr<Fake_DOMMediaStream> ds = new Fake_DOMMediaStream(source);
     ds->SetHintContents(aHintContents);
-    ds->AddRef();
 
-    return ds;
+    return ds.forget();
   }
 
   Fake_MediaStream *GetStream() { return mMediaStream; }
 
   // Hints to tell the SDP generator about whether this
   // MediaStream probably has audio and/or video
+  typedef uint8_t TrackTypeHints;
   enum {
-    HINT_CONTENTS_AUDIO = 0x00000001U,
-    HINT_CONTENTS_VIDEO = 0x00000002U
+    HINT_CONTENTS_AUDIO = 0x01,
+    HINT_CONTENTS_VIDEO = 0x02
   };
   uint32_t GetHintContents() const { return mHintContents; }
   void SetHintContents(uint32_t aHintContents) { mHintContents = aHintContents; }

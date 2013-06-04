@@ -5,7 +5,6 @@
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-/* $Id: sslimpl.h,v 1.109 2012/11/14 01:14:12 wtc%google.com Exp $ */
 
 #ifndef __sslimpl_h_
 #define __sslimpl_h_
@@ -141,11 +140,9 @@ typedef enum { SSLAppOpRead = 0,
 #define NUM_MIXERS                      9
 
 /* Mask of the 25 named curves we support. */
-#ifndef NSS_ECC_MORE_THAN_SUITE_B
-#define SSL3_SUPPORTED_CURVES_MASK 0x3800000	/* only 3 curves, suite B*/
-#else
-#define SSL3_SUPPORTED_CURVES_MASK 0x3fffffe
-#endif
+#define SSL3_ALL_SUPPORTED_CURVES_MASK 0x3fffffe
+/* only 3 curves, suite B*/
+#define SSL3_SUITE_B_SUPPORTED_CURVES_MASK 0x3800000
 
 #ifndef BPB
 #define BPB 8 /* Bits Per Byte */
@@ -316,6 +313,7 @@ typedef struct sslOptionsStr {
     unsigned int requireSafeNegotiation : 1;  /* 22 */
     unsigned int enableFalseStart       : 1;  /* 23 */
     unsigned int cbcRandomIV            : 1;  /* 24 */
+    unsigned int enableOCSPStapling     : 1;  /* 25 */
 } sslOptions;
 
 typedef enum { sslHandshakingUndetermined = 0,
@@ -575,6 +573,7 @@ struct sslSessionIDStr {
     sslSessionID *        next;   /* chain used for client sockets, only */
 
     CERTCertificate *     peerCert;
+    SECItemArray          peerCertStatus; /* client only */
     const char *          peerID;     /* client only */
     const char *          urlSvrName; /* client only */
     CERTCertificate *     localCert;
@@ -609,7 +608,7 @@ struct sslSessionIDStr {
 	} ssl2;
 	struct {
 	    /* values that are copied into the server's on-disk SID cache. */
-	    uint8                 sessionIDLength;
+	    PRUint8               sessionIDLength;
 	    SSL3Opaque            sessionID[SSL3_SESSIONID_BYTES];
 
 	    ssl3CipherSuite       cipherSuite;
@@ -717,6 +716,7 @@ typedef enum {
     wait_change_cipher, 
     wait_finished,
     wait_server_hello, 
+    wait_certificate_status,
     wait_server_cert, 
     wait_server_key,
     wait_cert_request, 
@@ -865,7 +865,7 @@ struct ssl3StateStr {
 			/* This says what cipher suites we can do, and should 
 			 * be either SSL_ALLOWED or SSL_RESTRICTED 
 			 */
-    PRArenaPool *        peerCertArena;  
+    PLArenaPool *        peerCertArena;
 			    /* These are used to keep track of the peer CA */
     void *               peerCertChain;     
 			    /* chain while we are trying to validate it.   */
@@ -919,26 +919,26 @@ typedef struct SSLWrappedSymWrappingKeyStr {
 } SSLWrappedSymWrappingKey;
 
 typedef struct SessionTicketStr {
-    uint16                ticket_version;
+    PRUint16              ticket_version;
     SSL3ProtocolVersion   ssl_version;
     ssl3CipherSuite       cipher_suite;
     SSLCompressionMethod  compression_method;
     SSLSignType           authAlgorithm;
-    uint32                authKeyBits;
+    PRUint32              authKeyBits;
     SSLKEAType            keaType;
-    uint32                keaKeyBits;
+    PRUint32              keaKeyBits;
     /*
      * exchKeyType and msWrapMech contain meaningful values only if
      * ms_is_wrapped is true.
      */
-    uint8                 ms_is_wrapped;
+    PRUint8               ms_is_wrapped;
     SSLKEAType            exchKeyType; /* XXX(wtc): same as keaType above? */
     CK_MECHANISM_TYPE     msWrapMech;
-    uint16                ms_length;
+    PRUint16              ms_length;
     SSL3Opaque            master_secret[48];
     ClientIdentity        client_identity;
     SECItem               peer_cert;
-    uint32                timestamp;
+    PRUint32              timestamp;
     SECItem               srvName; /* negotiated server name */
 }  SessionTicket;
 
@@ -1175,6 +1175,8 @@ const unsigned char *  preferredCipher;
     /* Configuration state for server sockets */
     /* server cert and key for each KEA type */
     sslServerCerts        serverCerts[kt_kea_size];
+    /* each cert needs its own status */
+    SECItemArray *        certStatusArray[kt_kea_size];
 
     ssl3CipherSuiteCfg cipherSuites[ssl_V3_SUITES_IMPLEMENTED];
     ssl3KeyPair *         ephemeralECDHKeyPair; /* for ECDHE-* handshake */
@@ -1489,6 +1491,8 @@ extern void      ssl3_FilterECCipherSuitesByServerCerts(sslSocket *ss);
 extern PRBool    ssl3_IsECCEnabled(sslSocket *ss);
 extern SECStatus ssl3_DisableECCSuites(sslSocket * ss, 
                                        const ssl3CipherSuite * suite);
+extern PRInt32   ssl3_GetSupportedECCCurveMask(sslSocket *ss);
+
 
 /* Macro for finding a curve equivalent in strength to RSA key's */
 #define SSL_RSASTRENGTH_TO_ECSTRENGTH(s) \
@@ -1532,7 +1536,7 @@ typedef enum { ec_noName     = 0,
 	       ec_pastLastName
 } ECName;
 
-extern SECStatus ssl3_ECName2Params(PRArenaPool *arena, ECName curve,
+extern SECStatus ssl3_ECName2Params(PLArenaPool *arena, ECName curve,
 				   SECKEYECParams *params);
 ECName	ssl3_GetCurveWithECKeyStrength(PRUint32 curvemsk, int requiredECCbits);
 

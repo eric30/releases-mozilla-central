@@ -54,6 +54,11 @@ function getMostRecentBrowserWindow() {
 }
 exports.getMostRecentBrowserWindow = getMostRecentBrowserWindow;
 
+function getHiddenWindow() {
+  return appShellService.hiddenDOMWindow;
+}
+exports.getHiddenWindow = getHiddenWindow;
+
 function getMostRecentWindow(type) {
   return WM.getMostRecentWindow(type);
 }
@@ -89,6 +94,12 @@ function getXULWindow(window) {
 };
 exports.getXULWindow = getXULWindow;
 
+function getDOMWindow(xulWindow) {
+  return xulWindow.QueryInterface(Ci.nsIInterfaceRequestor).
+    getInterface(Ci.nsIDOMWindow);
+}
+exports.getDOMWindow = getDOMWindow;
+
 /**
  * Returns `nsIBaseWindow` for the given `nsIDOMWindow`.
  */
@@ -101,6 +112,19 @@ function getBaseWindow(window) {
     QueryInterface(Ci.nsIBaseWindow);
 }
 exports.getBaseWindow = getBaseWindow;
+
+/**
+ * Returns the `nsIDOMWindow` toplevel window for any child/inner window
+ */
+function getToplevelWindow(window) {
+  return window.QueryInterface(Ci.nsIInterfaceRequestor)
+               .getInterface(Ci.nsIWebNavigation)
+               .QueryInterface(Ci.nsIDocShellTreeItem)
+               .rootTreeItem
+               .QueryInterface(Ci.nsIInterfaceRequestor)
+               .getInterface(Ci.nsIDOMWindow);
+}
+exports.getToplevelWindow = getToplevelWindow;
 
 function getWindowDocShell(window) window.gBrowser.docShell;
 exports.getWindowDocShell = getWindowDocShell;
@@ -163,29 +187,31 @@ function open(uri, options) {
   options = options || {};
   let newWindow = windowWatcher.
     openWindow(options.parent || null,
-               uri,
+               uri || URI_BROWSER,
                options.name || null,
                serializeFeatures(options.features || {}),
                options.args || null);
 
   return newWindow;
 }
+
+
 exports.open = open;
 
 function onFocus(window) {
-  let deferred = defer();
+  let { resolve, promise } = defer();
 
   if (isFocused(window)) {
-    deferred.resolve(window);
+    resolve(window);
   }
   else {
     window.addEventListener("focus", function focusListener() {
       window.removeEventListener("focus", focusListener, true);
-      deferred.resolve(window);
+      resolve(window);
     }, true);
   }
 
-  return deferred.promise;
+  return promise;
 }
 exports.onFocus = onFocus;
 
@@ -205,6 +231,7 @@ function isFocused(window) {
 
   return (focusedChildWindow === childTargetWindow);
 }
+exports.isFocused = isFocused;
 
 /**
  * Opens a top level window and returns it's `nsIDOMWindow` representation.
@@ -214,7 +241,7 @@ function isFocused(window) {
  */
 function openDialog(options) {
   options = options || {};
-  
+
   let features = options.features || FEATURES;
   if (!!options.private &&
       !array.has(features.toLowerCase().split(','), 'private')) {
@@ -262,6 +289,15 @@ function windows(type, options) {
 exports.windows = windows;
 
 /**
+ * Check if the given window is interactive.
+ * i.e. if its "DOMContentLoaded" event has already been fired.
+ * @params {nsIDOMWindow} window
+ */
+function isInteractive(window)
+  window.document.readyState === "interactive" || isDocumentLoaded(window)
+exports.isInteractive = isInteractive;
+
+/**
  * Check if the given window is completely loaded.
  * i.e. if its "load" event has already been fired and all possible DOM content
  * is done loading (the whole DOM document, images content, ...)
@@ -295,7 +331,8 @@ exports.isXULBrowser = isXULBrowser;
  * Returns the most recent focused window
  */
 function getFocusedWindow() {
-  let window = getMostRecentBrowserWindow();
+  let window = WM.getMostRecentWindow(BROWSER);
+
   return window ? window.document.commandDispatcher.focusedWindow : null;
 }
 exports.getFocusedWindow = getFocusedWindow;
@@ -304,7 +341,8 @@ exports.getFocusedWindow = getFocusedWindow;
  * Returns the focused element in the most recent focused window
  */
 function getFocusedElement() {
-  let window = getMostRecentBrowserWindow();
+  let window = WM.getMostRecentWindow(BROWSER);
+
   return window ? window.document.commandDispatcher.focusedElement : null;
 }
 exports.getFocusedElement = getFocusedElement;
@@ -315,3 +353,27 @@ function getFrames(window) {
   }, [])
 }
 exports.getFrames = getFrames;
+
+function getScreenPixelsPerCSSPixel(window) {
+  return window.QueryInterface(Ci.nsIInterfaceRequestor).
+                getInterface(Ci.nsIDOMWindowUtils).screenPixelsPerCSSPixel;
+}
+exports.getScreenPixelsPerCSSPixel = getScreenPixelsPerCSSPixel;
+
+function getOwnerBrowserWindow(node) {
+  /**
+  Takes DOM node and returns browser window that contains it.
+  **/
+
+  let window = node.ownerDocument.defaultView.top;
+  // If anchored window is browser then it's target browser window.
+  if (isBrowser(window)) return window;
+  // Otherwise iterate over each browser window and find a one that
+  // contains browser for the anchored window document.
+  let document = window.document;
+  let browsers = windows("navigator:browser", { includePrivate: true });
+  return array.find(browsers, function isTargetBrowser(window) {
+    return !!window.gBrowser.getBrowserForDocument(document);
+  });
+}
+exports.getOwnerBrowserWindow = getOwnerBrowserWindow;

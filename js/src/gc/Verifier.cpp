@@ -1,6 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=78:
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -29,15 +28,30 @@ using namespace js::gc;
 using namespace mozilla;
 
 #if defined(DEBUG) && defined(JS_GC_ZEAL) && defined(JSGC_ROOT_ANALYSIS) && !defined(JS_THREADSAFE)
+#  if JS_STACK_GROWTH_DIRECTION > 0
+#    error "Root analysis is only supported on a descending stack."
+#  endif
+
+template <typename T>
+bool
+CheckNonAddressThing(uintptr_t *w, Rooted<T> *rootp)
+{
+    return w >= (uintptr_t*)rootp->address() && w < (uintptr_t*)(rootp->address() + 1);
+}
 
 JS_ALWAYS_INLINE bool
-CheckStackRootThing(uintptr_t *w, void *address, ThingRootKind kind)
+CheckStackRootThing(uintptr_t *w, Rooted<void *> *rootp, ThingRootKind kind)
 {
-    if (kind != THING_ROOT_BINDINGS)
-        return address == static_cast<void*>(w);
+    if (kind == THING_ROOT_BINDINGS)
+        return CheckNonAddressThing(w, reinterpret_cast<Rooted<Bindings> *>(rootp));
 
-    Bindings *bp = static_cast<Bindings*>(address);
-    return w >= (uintptr_t*)bp && w < (uintptr_t*)(bp + 1);
+    if (kind == THING_ROOT_PROPERTY_DESCRIPTOR)
+        return CheckNonAddressThing(w, reinterpret_cast<Rooted<PropertyDescriptor> *>(rootp));
+
+    if (kind == THING_ROOT_VALUE)
+        return CheckNonAddressThing(w, reinterpret_cast<Rooted<Value> *>(rootp));
+
+    return rootp->address() == static_cast<void*>(w);
 }
 
 struct Rooter {
@@ -58,7 +72,7 @@ CheckStackRoot(JSRuntime *rt, uintptr_t *w, Rooter *begin, Rooter *end)
         return;
 
     /* Don't check atoms as these will never be subject to generational collection. */
-    if (static_cast<Cell *>(thing)->zone() == rt->atomsCompartment->zone())
+    if (static_cast<Cell *>(thing)->tenuredZone() == rt->atomsCompartment->zone())
         return;
 
     /*
@@ -68,7 +82,7 @@ CheckStackRoot(JSRuntime *rt, uintptr_t *w, Rooter *begin, Rooter *end)
      */
 
     for (Rooter *p = begin; p != end; p++) {
-        if (CheckStackRootThing(w, p->rooter->address(), p->kind))
+        if (CheckStackRootThing(w, p->rooter, p->kind))
             return;
     }
 
@@ -93,7 +107,7 @@ CheckStackRoot(JSRuntime *rt, uintptr_t *w, Rooter *begin, Rooter *end)
      * overwrite a now-dead GC thing pointer. In this case we want to avoid
      * damaging the smaller value.
      */
-    PoisonPtr(w);
+    JS::PoisonPtr(w);
 }
 
 static void
@@ -114,7 +128,7 @@ CheckStackRootsRangeAndSkipIon(JSRuntime *rt, uintptr_t *begin, uintptr_t *end, 
      */
     uintptr_t *i = begin;
 
-#if JS_STACK_GROWTH_DIRECTION < 0 && defined(JS_ION)
+#if defined(JS_ION)
     for (ion::IonActivationIterator ion(rt); ion.more(); ++ion) {
         uintptr_t *ionMin, *ionEnd;
         ion.ionStackRange(ionMin, ionEnd);
@@ -169,15 +183,15 @@ SuppressCheckRoots(Vector<Rooter, 0, SystemAllocPolicy> &rooters)
     qsort(rooters.begin(), rooters.length(), sizeof(Rooter), CompareRooters);
 
     // Forward-declare a variable so its address can be used to mark the
-    // current top of the stack
+    // current top of the stack.
     unsigned int pos;
 
-    // Compute the hash of the current stack
+    // Compute the hash of the current stack.
     uint32_t hash = HashGeneric(&pos);
     for (unsigned int i = 0; i < Min(StackCheckDepth, rooters.length()); i++)
         hash = AddToHash(hash, rooters[rooters.length() - i - 1].rooter);
 
-    // Scan through the remembered stacks to find the current stack
+    // Scan through the remembered stacks to find the current stack.
     for (pos = 0; pos < numMemories; pos++) {
         if (stacks[pos] == hash) {
             // Skip this check. Technically, it is incorrect to not update the
@@ -187,7 +201,7 @@ SuppressCheckRoots(Vector<Rooter, 0, SystemAllocPolicy> &rooters)
         }
     }
 
-    // Replace the oldest remembered stack with our current stack
+    // Replace the oldest remembered stack with our current stack.
     stacks[oldestMemory] = hash;
     oldestMemory = (oldestMemory + 1) % NumStackMemories;
     if (numMemories < NumStackMemories)
@@ -239,13 +253,9 @@ JS::CheckStackRoots(JSContext *cx)
 
     JS_ASSERT(cgcd->hasStackToScan());
     uintptr_t *stackMin, *stackEnd;
-#if JS_STACK_GROWTH_DIRECTION > 0
-    stackMin = rt->nativeStackBase;
-    stackEnd = cgcd->nativeStackTop;
-#else
     stackMin = cgcd->nativeStackTop + 1;
     stackEnd = reinterpret_cast<uintptr_t *>(rt->nativeStackBase);
-#endif
+    JS_ASSERT(stackMin <= stackEnd);
 
     // Gather up all of the rooters
     Vector<Rooter, 0, SystemAllocPolicy> rooters;
@@ -267,12 +277,7 @@ JS::CheckStackRoots(JSContext *cx)
     for (Rooter *p = rooters.begin(); p != rooters.end(); p++) {
         if (p->rooter->scanned) {
             uintptr_t *addr = reinterpret_cast<uintptr_t*>(p->rooter);
-#if JS_STACK_GROWTH_DIRECTION < 0
-            if (stackEnd > addr)
-#else
-            if (stackEnd < addr)
-#endif
-            {
+            if (stackEnd > addr) {
                 stackEnd = addr;
                 firstScanned = p->rooter;
             }
@@ -284,25 +289,19 @@ JS::CheckStackRoots(JSContext *cx)
     Rooter *firstToScan = rooters.begin();
     if (firstScanned) {
         for (Rooter *p = rooters.begin(); p != rooters.end(); p++) {
-#if JS_STACK_GROWTH_DIRECTION < 0
-            if (p->rooter >= firstScanned)
-#else
-            if (p->rooter <= firstScanned)
-#endif
-            {
+            if (p->rooter >= firstScanned) {
                 Swap(*firstToScan, *p);
                 ++firstToScan;
             }
         }
     }
 
-    JS_ASSERT(stackMin <= stackEnd);
     CheckStackRootsRangeAndSkipIon(rt, stackMin, stackEnd, firstToScan, rooters.end());
     CheckStackRootsRange(rt, cgcd->registerSnapshot.words,
                          ArrayEnd(cgcd->registerSnapshot.words),
                          firstToScan, rooters.end());
 
-    // Mark all rooters as scanned
+    // Mark all rooters as scanned.
     for (Rooter *p = rooters.begin(); p != rooters.end(); p++)
         p->rooter->scanned = true;
 }
@@ -318,6 +317,11 @@ DisableGGCForVerification(JSRuntime *rt)
     if (rt->gcVerifyPreData || rt->gcVerifyPostData)
         return;
 
+    if (rt->gcNursery.isEnabled()) {
+        MinorGC(rt, JS::gcreason::API);
+        rt->gcNursery.disable();
+    }
+
     if (rt->gcStoreBuffer.isEnabled())
         rt->gcStoreBuffer.disable();
 #endif
@@ -330,8 +334,10 @@ EnableGGCAfterVerification(JSRuntime *rt)
     if (rt->gcVerifyPreData || rt->gcVerifyPostData)
         return;
 
-    if (rt->gcGenerationalEnabled)
+    if (rt->gcGenerationalEnabled) {
+        rt->gcNursery.enable();
         rt->gcStoreBuffer.enable();
+    }
 #endif
 }
 
@@ -494,12 +500,13 @@ gc::StartVerifyPreBarriers(JSRuntime *rt)
 
     const size_t size = 64 * 1024 * 1024;
     trc->root = (VerifyNode *)js_malloc(size);
-    JS_ASSERT(trc->root);
+    if (!trc->root)
+        goto oom;
     trc->edgeptr = (char *)trc->root;
     trc->term = trc->edgeptr + size;
 
     if (!trc->nodemap.init())
-        return;
+        goto oom;
 
     /* Create the root node. */
     trc->curnode = MakeNode(trc, NULL, JSGCTraceKind(0));
@@ -510,7 +517,8 @@ gc::StartVerifyPreBarriers(JSRuntime *rt)
     /* Make all the roots be edges emanating from the root node. */
     MarkRuntime(trc);
 
-    VerifyNode *node = trc->curnode;
+    VerifyNode *node;
+    node = trc->curnode;
     if (trc->edgeptr == trc->term)
         goto oom;
 
@@ -534,6 +542,7 @@ gc::StartVerifyPreBarriers(JSRuntime *rt)
     rt->gcIncrementalState = MARK;
     rt->gcMarker.start();
 
+    rt->setNeedsBarrier(true);
     for (ZonesIter zone(rt); !zone.done(); zone.next()) {
         PurgeJITCaches(zone);
         zone->setNeedsBarrier(true, Zone::UpdateIon);
@@ -617,6 +626,7 @@ gc::EndVerifyPreBarriers(JSRuntime *rt)
         zone->setNeedsBarrier(false, Zone::UpdateIon);
         PurgeJITCaches(zone);
     }
+    rt->setNeedsBarrier(false);
 
     /*
      * We need to bump gcNumber so that the methodjit knows that jitcode has
@@ -754,15 +764,9 @@ js::gc::EndVerifyPostBarriers(JSRuntime *rt)
         goto oom;
 
     /* Walk the heap. */
-    for (CompartmentsIter c(rt); !c.done(); c.next()) {
-        if (IsAtomsCompartment(c))
-            continue;
-
-        if (c->watchpointMap)
-            c->watchpointMap->markAll(trc);
-
+    for (GCZoneGroupIter zone(rt); !zone.done(); zone.next()) {
         for (size_t kind = 0; kind < FINALIZE_LIMIT; ++kind) {
-            for (CellIterUnderGC cells(c, AllocKind(kind)); !cells.done(); cells.next()) {
+            for (CellIterUnderGC cells(zone, AllocKind(kind)); !cells.done(); cells.next()) {
                 Cell *src = cells.getCell();
                 if (!rt->gcVerifierNursery.isInside(src))
                     JS_TraceChildren(trc, src, MapAllocToTraceKind(AllocKind(kind)));

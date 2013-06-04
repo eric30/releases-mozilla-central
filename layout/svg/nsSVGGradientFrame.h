@@ -6,6 +6,7 @@
 #ifndef __NS_SVGGRADIENTFRAME_H__
 #define __NS_SVGGRADIENTFRAME_H__
 
+#include "mozilla/Attributes.h"
 #include "gfxMatrix.h"
 #include "nsCOMPtr.h"
 #include "nsFrame.h"
@@ -22,7 +23,7 @@ class nsStyleContext;
 struct gfxRect;
 
 namespace mozilla {
-class SVGAnimatedTransformList;
+class nsSVGAnimatedTransformList;
 
 namespace dom {
 class SVGLinearGradientElement;
@@ -50,17 +51,15 @@ public:
                           const gfxMatrix& aContextMatrix,
                           nsStyleSVGPaint nsStyleSVG::*aFillOrStroke,
                           float aGraphicOpacity,
-                          const gfxRect *aOverrideBounds);
+                          const gfxRect *aOverrideBounds) MOZ_OVERRIDE;
 
   // nsIFrame interface:
-  virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext);
-
   NS_IMETHOD AttributeChanged(int32_t         aNameSpaceID,
                               nsIAtom*        aAttribute,
-                              int32_t         aModType);
+                              int32_t         aModType) MOZ_OVERRIDE;
 
 #ifdef DEBUG
-  NS_IMETHOD GetFrameName(nsAString& aResult) const
+  NS_IMETHOD GetFrameName(nsAString& aResult) const MOZ_OVERRIDE
   {
     return MakeFrameName(NS_LITERAL_STRING("SVGGradient"), aResult);
   }
@@ -74,20 +73,16 @@ private:
   nsSVGGradientFrame* GetReferencedGradient();
 
   // Optionally get a stop frame (returns stop index/count)
-  int32_t GetStopFrame(int32_t aIndex, nsIFrame * *aStopFrame);
+  void GetStopFrames(nsTArray<nsIFrame*>* aStopFrames);
 
-  void GetStopInformation(int32_t aIndex,
-                          float *aOffset, nscolor *aColor, float *aStopOpacity);
-
-  const mozilla::SVGAnimatedTransformList* GetGradientTransformList(
+  const mozilla::nsSVGAnimatedTransformList* GetGradientTransformList(
     nsIContent* aDefault);
   // Will be singular for gradientUnits="objectBoundingBox" with an empty bbox.
   gfxMatrix GetGradientTransform(nsIFrame *aSource,
                                  const gfxRect *aOverrideBounds);
 
 protected:
-  uint32_t GetStopCount();
-  virtual bool IsSingleColour(uint32_t nStops) = 0;
+  virtual bool GradientVectorLengthIsZero() = 0;
   virtual already_AddRefed<gfxPattern> CreateGradient() = 0;
 
   // Internal methods for handling referenced gradients
@@ -143,19 +138,19 @@ public:
 
   // nsIFrame interface:
 #ifdef DEBUG
-  NS_IMETHOD Init(nsIContent*      aContent,
-                  nsIFrame*        aParent,
-                  nsIFrame*        aPrevInFlow);
+  virtual void Init(nsIContent*      aContent,
+                    nsIFrame*        aParent,
+                    nsIFrame*        aPrevInFlow) MOZ_OVERRIDE;
 #endif
 
-  virtual nsIAtom* GetType() const;  // frame type: nsGkAtoms::svgLinearGradientFrame
+  virtual nsIAtom* GetType() const MOZ_OVERRIDE;  // frame type: nsGkAtoms::svgLinearGradientFrame
 
   NS_IMETHOD AttributeChanged(int32_t         aNameSpaceID,
                               nsIAtom*        aAttribute,
-                              int32_t         aModType);
+                              int32_t         aModType) MOZ_OVERRIDE;
 
 #ifdef DEBUG
-  NS_IMETHOD GetFrameName(nsAString& aResult) const
+  NS_IMETHOD GetFrameName(nsAString& aResult) const MOZ_OVERRIDE
   {
     return MakeFrameName(NS_LITERAL_STRING("SVGLinearGradient"), aResult);
   }
@@ -164,9 +159,9 @@ public:
 protected:
   float GetLengthValue(uint32_t aIndex);
   virtual mozilla::dom::SVGLinearGradientElement* GetLinearGradientWithLength(
-    uint32_t aIndex, mozilla::dom::SVGLinearGradientElement* aDefault);
-  virtual bool IsSingleColour(uint32_t nStops);
-  virtual already_AddRefed<gfxPattern> CreateGradient();
+    uint32_t aIndex, mozilla::dom::SVGLinearGradientElement* aDefault) MOZ_OVERRIDE;
+  virtual bool GradientVectorLengthIsZero() MOZ_OVERRIDE;
+  virtual already_AddRefed<gfxPattern> CreateGradient() MOZ_OVERRIDE;
 };
 
 // -------------------------------------------------------------------------
@@ -188,19 +183,19 @@ public:
 
   // nsIFrame interface:
 #ifdef DEBUG
-  NS_IMETHOD Init(nsIContent*      aContent,
-                  nsIFrame*        aParent,
-                  nsIFrame*        aPrevInFlow);
+  virtual void Init(nsIContent*      aContent,
+                    nsIFrame*        aParent,
+                    nsIFrame*        aPrevInFlow) MOZ_OVERRIDE;
 #endif
 
-  virtual nsIAtom* GetType() const;  // frame type: nsGkAtoms::svgRadialGradientFrame
+  virtual nsIAtom* GetType() const MOZ_OVERRIDE;  // frame type: nsGkAtoms::svgRadialGradientFrame
 
   NS_IMETHOD AttributeChanged(int32_t         aNameSpaceID,
                               nsIAtom*        aAttribute,
-                              int32_t         aModType);
+                              int32_t         aModType) MOZ_OVERRIDE;
 
 #ifdef DEBUG
-  NS_IMETHOD GetFrameName(nsAString& aResult) const
+  NS_IMETHOD GetFrameName(nsAString& aResult) const MOZ_OVERRIDE
   {
     return MakeFrameName(NS_LITERAL_STRING("SVGRadialGradient"), aResult);
   }
@@ -212,9 +207,9 @@ protected:
   float GetLengthValueFromElement(uint32_t aIndex,
                                   mozilla::dom::SVGRadialGradientElement& aElement);
   virtual mozilla::dom::SVGRadialGradientElement* GetRadialGradientWithLength(
-    uint32_t aIndex, mozilla::dom::SVGRadialGradientElement* aDefault);
-  virtual bool IsSingleColour(uint32_t nStops);
-  virtual already_AddRefed<gfxPattern> CreateGradient();
+    uint32_t aIndex, mozilla::dom::SVGRadialGradientElement* aDefault) MOZ_OVERRIDE;
+  virtual bool GradientVectorLengthIsZero() MOZ_OVERRIDE;
+  virtual already_AddRefed<gfxPattern> CreateGradient() MOZ_OVERRIDE;
 };
 
 #endif // __NS_SVGGRADIENTFRAME_H__

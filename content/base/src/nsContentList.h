@@ -12,6 +12,7 @@
 #ifndef nsContentList_h___
 #define nsContentList_h___
 
+#include "mozilla/Attributes.h"
 #include "nsContentListDeclarations.h"
 #include "nsISupports.h"
 #include "nsTArray.h"
@@ -49,8 +50,8 @@ public:
   NS_DECL_NSIDOMNODELIST
 
   // nsINodeList
-  virtual int32_t IndexOf(nsIContent* aContent);
-  virtual nsIContent* Item(uint32_t aIndex);
+  virtual int32_t IndexOf(nsIContent* aContent) MOZ_OVERRIDE;
+  virtual nsIContent* Item(uint32_t aIndex) MOZ_OVERRIDE;
 
   uint32_t Length() const { 
     return mElements.Length();
@@ -91,7 +92,7 @@ public:
 
   virtual int32_t IndexOf(nsIContent *aContent, bool aDoFlush);
 
-  virtual JSObject* WrapObject(JSContext *cx, JSObject *scope)
+  virtual JSObject* WrapObject(JSContext *cx, JS::Handle<JSObject*> scope)
     MOZ_OVERRIDE = 0;
 
 protected:
@@ -111,11 +112,12 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(nsSimpleContentList,
                                            nsBaseContentList)
 
-  virtual nsINode* GetParentObject()
+  virtual nsINode* GetParentObject() MOZ_OVERRIDE
   {
     return mRoot;
   }
-  virtual JSObject* WrapObject(JSContext *cx, JSObject *scope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext *cx,
+                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
 private:
   // This has to be a strong reference, the root might go away before the list.
@@ -246,24 +248,25 @@ public:
 
   // nsWrapperCache
   using nsWrapperCache::GetWrapperPreserveColor;
-  virtual JSObject* WrapObject(JSContext *cx, JSObject *scope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext *cx,
+                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
   // nsIDOMHTMLCollection
   NS_DECL_NSIDOMHTMLCOLLECTION
 
   // nsBaseContentList overrides
-  virtual int32_t IndexOf(nsIContent *aContent, bool aDoFlush);
-  virtual int32_t IndexOf(nsIContent* aContent);
-  virtual nsINode* GetParentObject()
+  virtual int32_t IndexOf(nsIContent *aContent, bool aDoFlush) MOZ_OVERRIDE;
+  virtual int32_t IndexOf(nsIContent* aContent) MOZ_OVERRIDE;
+  virtual nsINode* GetParentObject() MOZ_OVERRIDE
   {
     return mRootNode;
   }
 
-  virtual nsIContent* Item(uint32_t aIndex);
-  virtual mozilla::dom::Element* GetElementAt(uint32_t index);
+  virtual nsIContent* Item(uint32_t aIndex) MOZ_OVERRIDE;
+  virtual mozilla::dom::Element* GetElementAt(uint32_t index) MOZ_OVERRIDE;
   virtual JSObject* NamedItem(JSContext* cx, const nsAString& name,
-                              mozilla::ErrorResult& error);
-  virtual void GetSupportedNames(nsTArray<nsString>& aNames);
+                              mozilla::ErrorResult& error) MOZ_OVERRIDE;
+  virtual void GetSupportedNames(nsTArray<nsString>& aNames) MOZ_OVERRIDE;
 
   // nsContentList public methods
   NS_HIDDEN_(uint32_t) Length(bool aDoFlush);
@@ -434,7 +437,7 @@ protected:
  */
 class nsCacheableFuncStringContentList;
 
-class NS_STACK_CLASS nsFuncStringCacheKey {
+class MOZ_STACK_CLASS nsFuncStringCacheKey {
 public:
   nsFuncStringCacheKey(nsINode* aRootNode,
                        nsContentListMatchFunc aFunc,
@@ -490,7 +493,7 @@ protected:
     MOZ_ASSERT(mData);
   }
 
-  virtual void RemoveFromCaches() {
+  virtual void RemoveFromCaches() MOZ_OVERRIDE {
     RemoveFromFuncStringHashtable();
   }
   void RemoveFromFuncStringHashtable();
@@ -515,7 +518,8 @@ public:
 #endif
   }
 
-  virtual JSObject* WrapObject(JSContext *cx, JSObject *scope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext *cx,
+                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
 #ifdef DEBUG
   static const ContentListType sType;
@@ -539,7 +543,8 @@ public:
 #endif
   }
 
-  virtual JSObject* WrapObject(JSContext *cx, JSObject *scope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext *cx,
+                               JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
 #ifdef DEBUG
   static const ContentListType sType;

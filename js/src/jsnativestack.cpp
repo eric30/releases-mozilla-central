@@ -1,12 +1,9 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 et sw=4 tw=80:
- */
-/* This Source Code Form is subject to the terms of the Mozilla Public
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
+ * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include <stdlib.h>
-#include "jstypes.h"
 #include "jsnativestack.h"
 
 #ifdef XP_WIN
@@ -19,7 +16,7 @@
 #elif defined(XP_MACOSX) || defined(DARWIN) || defined(XP_UNIX)
 # include <pthread.h>
 
-# if defined(__FreeBSD__) || defined(__OpenBSD__)
+# if defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
 #  include <pthread_np.h>
 # endif
 

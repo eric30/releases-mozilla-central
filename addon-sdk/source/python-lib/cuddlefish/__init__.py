@@ -143,8 +143,8 @@ parser_groups = (
                                     help="display test output in a parseable format",
                                     action="store_true",
                                     default=False,
-                                    cmds=['test', 'testex', 'testpkgs',
-                                          'testall'])),
+                                    cmds=['run', 'test', 'testex', 'testpkgs',
+                                          'testaddons', 'testall'])),
         ]
      ),
 
@@ -228,6 +228,12 @@ parser_groups = (
                                   metavar=None,
                                   default=False,
                                   cmds=['sdocs'])),
+        (("", "--check-memory",), dict(dest="check_memory",
+                                       help="attempts to detect leaked compartments after a test run",
+                                       action="store_true",
+                                       default=False,
+                                       cmds=['test', 'testpkgs', 'testaddons',
+                                             'testall'])),
         ]
      ),
 
@@ -660,7 +666,7 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
     # a Mozilla application (which includes running tests).
 
     use_main = False
-    inherited_options = ['verbose', 'enable_e10s']
+    inherited_options = ['verbose', 'enable_e10s', 'parseable', 'check_memory']
     enforce_timeouts = False
 
     if command == "xpi":
@@ -669,7 +675,7 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
         if 'tests' not in target_cfg:
             target_cfg['tests'] = []
         inherited_options.extend(['iterations', 'filter', 'profileMemory',
-                                  'stopOnError', 'parseable'])
+                                  'stopOnError'])
         enforce_timeouts = True
     elif command == "run":
         use_main = True
@@ -893,7 +899,9 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
                   xpi_path=xpi_path,
                   harness_options=harness_options,
                   limit_to=used_files,
-                  extra_harness_options=extra_harness_options)
+                  extra_harness_options=extra_harness_options,
+                  bundle_sdk=True,
+                  pkgdir=options.pkgdir)
     else:
         from cuddlefish.runner import run_app
 
@@ -925,7 +933,8 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
                              env_root=env_root,
                              is_running_tests=(command == "test"),
                              overload_modules=options.overload_modules,
-                             bundle_sdk=options.bundle_sdk)
+                             bundle_sdk=options.bundle_sdk,
+                             pkgdir=options.pkgdir)
         except ValueError, e:
             print ""
             print "A given cfx option has an inappropriate value:"

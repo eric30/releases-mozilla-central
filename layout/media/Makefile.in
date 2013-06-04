@@ -10,7 +10,6 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= layout
 LIBRARY_NAME	= gkmedias
 EXPORT_LIBRARY	= $(DIST)/lib
 ifeq (WINNT,$(OS_TARGET))
@@ -72,12 +71,6 @@ SHARED_LIBRARY_LIBS 	+= \
 endif
 endif
 
-ifdef MOZ_SYDNEYAUDIO
-SHARED_LIBRARY_LIBS 	+= \
-	$(DEPTH)/media/libsydneyaudio/src/$(LIB_PREFIX)sydneyaudio.$(LIB_SUFFIX) \
-	$(NULL)
-endif
-
 ifdef MOZ_SPEEX_RESAMPLER
 SHARED_LIBRARY_LIBS 	+= \
 	$(DEPTH)/media/libspeex_resampler/src/$(LIB_PREFIX)speex_resampler.$(LIB_SUFFIX) \
@@ -121,11 +114,9 @@ ifdef MOZ_ENABLE_SKIA
 SHARED_LIBRARY_LIBS += $(MOZ_SKIA_LIBS)
 endif
 
-ifdef MOZ_WEBVTT
 SHARED_LIBRARY_LIBS += \
   $(DEPTH)/media/webvtt/$(LIB_PREFIX)webvtt.$(LIB_SUFFIX) \
   $(NULL)
-endif
 
 ifdef MOZ_WEBRTC
 ifndef MOZ_WEBRTC_IN_LIBXUL
@@ -150,13 +141,6 @@ EXTRA_DSO_LDOPTS += \
   -DELAYLOAD:msdmo.dll \
   $(NULL)
 endif
-endif
-
-ifdef MOZ_WEBRTC
-EXTRA_DSO_LDOPTS += \
-  -LIBPATH:"$(MOZ_DIRECTX_SDK_PATH)/lib/$(MOZ_DIRECTX_SDK_CPU_SUFFIX)" \
-  $(NULL)
-OS_LIBS += $(call EXPAND_LIBNAME,secur32 crypt32 iphlpapi strmiids dmoguids wmcodecdspuuid amstrmid msdmo wininet)
 endif
 DEFFILE = symbols.def
 endif

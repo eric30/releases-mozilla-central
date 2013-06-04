@@ -214,7 +214,7 @@ nsXPCWrappedJS::TraceJS(JSTracer* trc)
 {
     NS_ASSERTION(mRefCnt >= 2 && IsValid(), "must be strongly referenced");
     JS_SET_TRACING_DETAILS(trc, GetTraceName, this, 0);
-    JS_CallTracer(trc, GetJSObjectPreserveColor(), JSTRACE_OBJECT);
+    JS_CallObjectTracer(trc, &mJSObj, "nsXPCWrappedJS::mJSObj");
 }
 
 // static
@@ -236,15 +236,10 @@ nsXPCWrappedJS::GetWeakReference(nsIWeakReference** aInstancePtr)
     return nsSupportsWeakReference::GetWeakReference(aInstancePtr);
 }
 
-NS_IMETHODIMP
-nsXPCWrappedJS::GetJSObject(JSObject** aJSObj)
+JSObject*
+nsXPCWrappedJS::GetJSObject()
 {
-    NS_PRECONDITION(aJSObj, "bad param");
-    NS_PRECONDITION(IsValid(), "bad wrapper");
-
-    if (!(*aJSObj = GetJSObject()))
-        return NS_ERROR_OUT_OF_MEMORY;
-    return NS_OK;
+    return xpc_UnmarkGrayObject(mJSObj);
 }
 
 static bool
@@ -277,8 +272,8 @@ nsXPCWrappedJS::GetNewOrUsed(JSContext* cx,
                              nsISupports* aOuter,
                              nsXPCWrappedJS** wrapperResult)
 {
+    JS::RootedObject jsObj(cx, aJSObj);
     JSObject2WrappedJSMap* map;
-    JSObject* rootJSObj;
     nsXPCWrappedJS* root = nullptr;
     nsXPCWrappedJS* wrapper = nullptr;
     nsXPCWrappedJSClass* clazz = nullptr;
@@ -297,7 +292,7 @@ nsXPCWrappedJS::GetNewOrUsed(JSContext* cx,
     // from here on we need to return through 'return_wrapper'
 
     // always find the root JSObject
-    rootJSObj = clazz->GetRootJSObject(cx, aJSObj);
+    JS::RootedObject rootJSObj(cx, clazz->GetRootJSObject(cx, jsObj));
     if (!rootJSObj)
         goto return_wrapper;
 
@@ -318,9 +313,9 @@ nsXPCWrappedJS::GetNewOrUsed(JSContext* cx,
 
     if (!root) {
         // build the root wrapper
-        if (rootJSObj == aJSObj) {
+        if (rootJSObj == jsObj) {
             // the root will do double duty as the interface wrapper
-            wrapper = root = new nsXPCWrappedJS(cx, aJSObj, clazz, nullptr,
+            wrapper = root = new nsXPCWrappedJS(cx, jsObj, clazz, nullptr,
                                                 aOuter);
             if (!root)
                 goto return_wrapper;
@@ -328,7 +323,7 @@ nsXPCWrappedJS::GetNewOrUsed(JSContext* cx,
             {   // scoped lock
 #if DEBUG_xpc_leaks
                 printf("Created nsXPCWrappedJS %p, JSObject is %p\n",
-                       (void*)wrapper, (void*)aJSObj);
+                       (void*)wrapper, (void*)jsObj);
 #endif
                 XPCAutoLock lock(rt->GetMapLock());
                 map->Add(root);
@@ -381,12 +376,12 @@ nsXPCWrappedJS::GetNewOrUsed(JSContext* cx,
     NS_ASSERTION(clazz,"bad clazz");
 
     if (!wrapper) {
-        wrapper = new nsXPCWrappedJS(cx, aJSObj, clazz, root, aOuter);
+        wrapper = new nsXPCWrappedJS(cx, jsObj, clazz, root, aOuter);
         if (!wrapper)
             goto return_wrapper;
 #if DEBUG_xpc_leaks
         printf("Created nsXPCWrappedJS %p, JSObject is %p\n",
-               (void*)wrapper, (void*)aJSObj);
+               (void*)wrapper, (void*)jsObj);
 #endif
     }
 

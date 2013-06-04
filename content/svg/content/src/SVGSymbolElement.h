@@ -20,34 +20,27 @@ namespace dom {
 typedef nsSVGElement SVGSymbolElementBase;
 
 class SVGSymbolElement MOZ_FINAL : public SVGSymbolElementBase,
-                                   public nsIDOMSVGElement,
                                    public SVGTests
 {
 protected:
   friend nsresult (::NS_NewSVGSymbolElement(nsIContent **aResult,
                                             already_AddRefed<nsINodeInfo> aNodeInfo));
   SVGSymbolElement(already_AddRefed<nsINodeInfo> aNodeInfo);
-  virtual JSObject* WrapNode(JSContext *cx, JSObject *scope) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *cx,
+                             JS::Handle<JSObject*> scope) MOZ_OVERRIDE;
 
 public:
   // interfaces:
 
   NS_DECL_ISUPPORTS_INHERITED
 
-  // xxx I wish we could use virtual inheritance
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
-  NS_FORWARD_NSIDOMSVGELEMENT(nsSVGElement::)
-
   // nsIContent interface
   NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* name) const;
 
   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const;
 
-  virtual nsIDOMNode* AsDOMNode() { return this; }
-
   // WebIDL
-  already_AddRefed<nsIDOMSVGAnimatedRect> ViewBox();
+  already_AddRefed<SVGAnimatedRect> ViewBox();
   already_AddRefed<DOMSVGAnimatedPreserveAspectRatio> PreserveAspectRatio();
 
 protected:

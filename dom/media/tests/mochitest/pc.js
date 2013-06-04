@@ -360,6 +360,16 @@ function PCT_setMediaConstraints(constraintsLocal, constraintsRemote) {
 };
 
 /**
+ * Sets the media constraints used on a createOffer call in the test.
+ *
+ * @param {object} constraints the media constraints to use on createOffer
+ */
+PeerConnectionTest.prototype.setOfferConstraints =
+function PCT_setOfferConstraints(constraints) {
+  this.pcLocal.offerConstraints = constraints;
+};
+
+/**
  * Start running the tests as assigned to the command chain.
  */
 PeerConnectionTest.prototype.run = function PCT_run() {
@@ -399,6 +409,7 @@ function PeerConnectionWrapper(label, configuration) {
   this.label = label;
 
   this.constraints = [ ];
+  this.offerConstraints = {};
   this.streams = [ ];
 
   info("Creating new PeerConnectionWrapper: " + this.label);
@@ -502,7 +513,7 @@ PeerConnectionWrapper.prototype = {
           self.attachMedia(stream, type, 'local');
 
           _getAllUserMedia(constraintsList, index + 1);
-        }, unexpectedCallbackAndFinish);
+        }, unexpectedCallbackAndFinish(new Error));
       } else {
         onSuccess();
       }
@@ -525,7 +536,7 @@ PeerConnectionWrapper.prototype = {
       info("Got offer: " + JSON.stringify(offer));
       self._last_offer = offer;
       onSuccess(offer);
-    }, unexpectedCallbackAndFinish);
+    }, unexpectedCallbackAndFinish(new Error), this.offerConstraints);
   },
 
   /**
@@ -541,41 +552,39 @@ PeerConnectionWrapper.prototype = {
       info('Got answer for ' + self.label + ': ' + JSON.stringify(answer));
       self._last_answer = answer;
       onSuccess(answer);
-    }, unexpectedCallbackAndFinish);
+    }, unexpectedCallbackAndFinish(new Error));
   },
 
   /**
    * Sets the local description and automatically handles the failure case.
    *
-   * @param {object} sdp
-   *        SDP for the local description request
+   * @param {object} desc
+   *        mozRTCSessionDescription for the local description request
    * @param {function} onSuccess
    *        Callback to execute if the local description was set successfully
    */
-  setLocalDescription : function PCW_setLocalDescription(sdp, onSuccess) {
+  setLocalDescription : function PCW_setLocalDescription(desc, onSuccess) {
     var self = this;
-
-    this._pc.setLocalDescription(sdp, function () {
+    this._pc.setLocalDescription(desc, function () {
       info("Successfully set the local description for " + self.label);
       onSuccess();
-    }, unexpectedCallbackAndFinish);
+    }, unexpectedCallbackAndFinish(new Error));
   },
 
   /**
    * Sets the remote description and automatically handles the failure case.
    *
-   * @param {object} sdp
-   *        SDP for the remote description request
+   * @param {object} desc
+   *        mozRTCSessionDescription for the remote description request
    * @param {function} onSuccess
    *        Callback to execute if the remote description was set successfully
    */
-  setRemoteDescription : function PCW_setRemoteDescription(sdp, onSuccess) {
+  setRemoteDescription : function PCW_setRemoteDescription(desc, onSuccess) {
     var self = this;
-
-    this._pc.setRemoteDescription(sdp, function () {
+    this._pc.setRemoteDescription(desc, function () {
       info("Successfully set remote description for " + self.label);
       onSuccess();
-    }, unexpectedCallbackAndFinish);
+    }, unexpectedCallbackAndFinish(new Error));
   },
 
   /**

@@ -13,7 +13,7 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGLineElement::WrapNode(JSContext *aCx, JSObject *aScope)
+SVGLineElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
   return SVGLineElementBinding::Wrap(aCx, aScope, this);
 }
@@ -27,19 +27,11 @@ nsSVGElement::LengthInfo SVGLineElement::sLengthInfo[4] =
 };
 
 //----------------------------------------------------------------------
-// nsISupports methods
-
-NS_IMPL_ISUPPORTS_INHERITED3(SVGLineElement, SVGLineElementBase,
-                             nsIDOMNode, nsIDOMElement,
-                             nsIDOMSVGElement)
-
-//----------------------------------------------------------------------
 // Implementation
 
 SVGLineElement::SVGLineElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : SVGLineElementBase(aNodeInfo)
 {
-  SetIsDOMBinding();
 }
 
 //----------------------------------------------------------------------

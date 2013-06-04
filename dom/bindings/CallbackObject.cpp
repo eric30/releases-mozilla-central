@@ -11,6 +11,7 @@
 #include "nsIScriptContext.h"
 #include "nsPIDOMWindow.h"
 #include "nsJSUtils.h"
+#include "nsCxPusher.h"
 #include "nsIScriptSecurityManager.h"
 #include "xpcprivate.h"
 
@@ -18,6 +19,7 @@ namespace mozilla {
 namespace dom {
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(CallbackObject)
+  NS_INTERFACE_MAP_ENTRY(mozilla::dom::CallbackObject)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
@@ -34,7 +36,7 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(CallbackObject)
   NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mCallback)
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
-CallbackObject::CallSetup::CallSetup(JSObject* const aCallback,
+CallbackObject::CallSetup::CallSetup(JS::Handle<JSObject*> aCallback,
                                      ErrorResult& aRv,
                                      ExceptionHandling aExceptionHandling)
   : mCx(nullptr)
@@ -50,7 +52,7 @@ CallbackObject::CallSetup::CallSetup(JSObject* const aCallback,
   // callable.
 
   // First, find the real underlying callback.
-  JSObject* realCallback = js::UnwrapObject(aCallback);
+  JSObject* realCallback = js::UncheckedUnwrap(aCallback);
 
   // Now get the nsIScriptGlobalObject for this callback.
   JSContext* cx = nullptr;
@@ -88,8 +90,10 @@ CallbackObject::CallSetup::CallSetup(JSObject* const aCallback,
     cx = nsContentUtils::GetSafeJSContext();
   }
 
-  // Victory!  We have a JSContext.  Now do the things we need a JSContext for.
-  mAr.construct(cx);
+  // Go ahead and stick our callable in a Rooted, to make sure it can't go
+  // gray again.  We can do this even though we're not in the right compartment
+  // yet, because Rooted<> does not care about compartments.
+  mRootedCallable.construct(cx, aCallback);
 
   // Make sure our JSContext is pushed on the stack.
   mCxPusher.Push(cx);
@@ -97,7 +101,7 @@ CallbackObject::CallSetup::CallSetup(JSObject* const aCallback,
   // After this point we guarantee calling ScriptEvaluated() if we
   // have an nsIScriptContext.
   // XXXbz Why, if, say CheckFunctionAccess fails?  I know that's how
-  // nsJSContext::CallEventHandler works, but is it required?
+  // nsJSContext::CallEventHandler used to work, but is it required?
   // FIXME: Bug 807369.
   mCtx = ctx;
 
@@ -106,15 +110,7 @@ CallbackObject::CallSetup::CallSetup(JSObject* const aCallback,
   // Make sure to unwrap aCallback before passing it in, because
   // getting principals from wrappers is silly.
   nsresult rv = nsContentUtils::GetSecurityManager()->
-    CheckFunctionAccess(cx, js::UnwrapObject(aCallback), nullptr);
-
-  // Construct a termination func holder even if we're not planning to
-  // run any script.  We need this because we're going to call
-  // ScriptEvaluated even if we don't run the script...  See XXX
-  // comment above.
-  if (ctx) {
-    mTerminationFuncHolder.construct(static_cast<nsJSContext*>(ctx));
-  }
+    CheckFunctionAccess(cx, js::UncheckedUnwrap(aCallback), nullptr);
 
   if (NS_FAILED(rv)) {
     // Security check failed.  We're done here.
@@ -145,8 +141,8 @@ CallbackObject::CallSetup::~CallSetup()
       JS_SetOptions(mCx, mSavedJSContextOptions);
       mErrorResult.MightThrowJSException();
       if (JS_IsExceptionPending(mCx)) {
-        JS::Value exn;
-        if (JS_GetPendingException(mCx, &exn)) {
+        JS::Rooted<JS::Value> exn(mCx);
+        if (JS_GetPendingException(mCx, exn.address())) {
           mErrorResult.ThrowJSException(mCx, exn);
           JS_ClearPendingException(mCx);
           dealtWithPendingException = true;
@@ -184,15 +180,16 @@ CallbackObject::CallSetup::~CallSetup()
 
 already_AddRefed<nsISupports>
 CallbackObjectHolderBase::ToXPCOMCallback(CallbackObject* aCallback,
-                                          const nsIID& aIID)
+                                          const nsIID& aIID) const
 {
   if (!aCallback) {
     return nullptr;
   }
 
-  JSObject* callback = aCallback->Callback();
+  AutoSafeJSContext cx;
 
-  SafeAutoJSContext cx;
+  JS::Rooted<JSObject*> callback(cx, aCallback->Callback());
+
   JSAutoCompartment ac(cx, callback);
   XPCCallContext ccx(NATIVE_CALLER, cx);
   if (!ccx.IsValid()) {

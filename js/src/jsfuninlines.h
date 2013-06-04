@@ -1,6 +1,5 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=99:
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -29,7 +28,7 @@ JSFunction::initAtom(JSAtom *atom)
 }
 
 inline void
-JSFunction::setGuessedAtom(js::RawAtom atom)
+JSFunction::setGuessedAtom(JSAtom *atom)
 {
     JS_ASSERT(atom_ == NULL);
     JS_ASSERT(atom != NULL);
@@ -89,6 +88,13 @@ JSFunction::initializeExtended()
     JS_ASSERT(mozilla::ArrayLength(toExtended()->extendedSlots) == 2);
     toExtended()->extendedSlots[0].init(js::UndefinedValue());
     toExtended()->extendedSlots[1].init(js::UndefinedValue());
+}
+
+inline void
+JSFunction::initExtendedSlot(size_t which, const js::Value &val)
+{
+    JS_ASSERT(which < mozilla::ArrayLength(toExtended()->extendedSlots));
+    toExtended()->extendedSlots[which].init(val);
 }
 
 inline void
@@ -162,12 +168,32 @@ SkipScopeParent(JSObject *parent)
     return parent;
 }
 
+inline bool
+CanReuseFunctionForClone(JSContext *cx, HandleFunction fun)
+{
+    if (!fun->hasSingletonType())
+        return false;
+    if (fun->isInterpretedLazy()) {
+        LazyScript *lazy = fun->lazyScript();
+        if (lazy->hasBeenCloned())
+            return false;
+        lazy->setHasBeenCloned();
+    } else {
+        JSScript *script = fun->nonLazyScript();
+        if (script->hasBeenCloned)
+            return false;
+        script->hasBeenCloned = true;
+    }
+    return true;
+}
+
 inline JSFunction *
-CloneFunctionObjectIfNotSingleton(JSContext *cx, HandleFunction fun, HandleObject parent)
+CloneFunctionObjectIfNotSingleton(JSContext *cx, HandleFunction fun, HandleObject parent,
+                                  NewObjectKind newKind = GenericObject)
 {
     /*
      * For attempts to clone functions at a function definition opcode,
-     * don't perform the clone if the function has singleton type. This
+     * try to avoid the the clone if the function has singleton type. This
      * was called pessimistically, and we need to preserve the type's
      * property that if it is singleton there is only a single object
      * with its type in existence.
@@ -177,19 +203,22 @@ CloneFunctionObjectIfNotSingleton(JSContext *cx, HandleFunction fun, HandleObjec
      * cases, fall through to CloneFunctionObject, which will deep clone
      * the function's script.
      */
-    if (fun->hasSingletonType()) {
-        RootedScript script(cx, fun->getOrCreateScript(cx));
-        if (!script->hasBeenCloned) {
-            script->hasBeenCloned = true;
-            Rooted<JSObject*> obj(cx, SkipScopeParent(parent));
-            if (!JSObject::setParent(cx, fun, obj))
-                return NULL;
-            fun->setEnvironment(parent);
-            return fun;
-        }
+    if (CanReuseFunctionForClone(cx, fun)) {
+        RootedObject obj(cx, SkipScopeParent(parent));
+        if (!JSObject::setParent(cx, fun, obj))
+            return NULL;
+        fun->setEnvironment(parent);
+        return fun;
     }
 
-    return CloneFunctionObject(cx, fun, parent);
+    // These intermediate variables are needed to avoid link errors on some
+    // platforms.  Sigh.
+    gc::AllocKind finalizeKind = JSFunction::FinalizeKind;
+    gc::AllocKind extendedFinalizeKind = JSFunction::ExtendedFinalizeKind;
+    gc::AllocKind kind = fun->isExtended()
+                         ? extendedFinalizeKind
+                         : finalizeKind;
+    return CloneFunctionObject(cx, fun, parent, kind, newKind);
 }
 
 } /* namespace js */
@@ -206,6 +235,33 @@ JSFunction::initScript(JSScript *script_)
 {
     JS_ASSERT(isInterpreted());
     mutableScript().init(script_);
+}
+
+inline void
+JSFunction::initLazyScript(js::LazyScript *lazy)
+{
+    JS_ASSERT(isInterpreted());
+
+    flags &= ~INTERPRETED;
+    flags |= INTERPRETED_LAZY;
+
+    u.i.s.lazy_ = lazy;
+}
+
+inline JSObject *
+JSFunction::getBoundFunctionTarget() const
+{
+    JS_ASSERT(isFunction());
+    JS_ASSERT(isBoundFunction());
+
+    /* Bound functions abuse |parent| to store their target function. */
+    return getParent();
+}
+
+inline bool
+js::Class::isCallable() const
+{
+    return this == &js::FunctionClass || call;
 }
 
 #endif /* jsfuninlines_h___ */

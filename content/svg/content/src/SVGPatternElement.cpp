@@ -5,9 +5,9 @@
 
 #include "mozilla/Util.h"
 
-#include "DOMSVGAnimatedTransformList.h"
 #include "nsCOMPtr.h"
 #include "nsGkAtoms.h"
+#include "mozilla/dom/SVGAnimatedTransformList.h"
 #include "mozilla/dom/SVGPatternElement.h"
 #include "mozilla/dom/SVGPatternElementBinding.h"
 
@@ -17,7 +17,7 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGPatternElement::WrapNode(JSContext *aCx, JSObject *aScope)
+SVGPatternElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
 {
   return SVGPatternElementBinding::Wrap(aCx, aScope, this);
 }
@@ -50,19 +50,11 @@ nsSVGElement::StringInfo SVGPatternElement::sStringInfo[1] =
 };
 
 //----------------------------------------------------------------------
-// nsISupports methods
-
-NS_IMPL_ISUPPORTS_INHERITED4(SVGPatternElement, SVGPatternElementBase,
-                             nsIDOMNode, nsIDOMElement,
-                             nsIDOMSVGElement, nsIDOMSVGUnitTypes)
-
-//----------------------------------------------------------------------
 // Implementation
 
 SVGPatternElement::SVGPatternElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : SVGPatternElementBase(aNodeInfo)
 {
-  SetIsDOMBinding();
 }
 
 //----------------------------------------------------------------------
@@ -72,12 +64,10 @@ NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGPatternElement)
 
 //----------------------------------------------------------------------
 
-already_AddRefed<nsIDOMSVGAnimatedRect>
+already_AddRefed<SVGAnimatedRect>
 SVGPatternElement::ViewBox()
 {
-  nsCOMPtr<nsIDOMSVGAnimatedRect> rect;
-  mViewBox.ToDOMAnimatedRect(getter_AddRefs(rect), this);
-  return rect.forget();
+  return mViewBox.ToSVGAnimatedRect(this);
 }
 
 already_AddRefed<DOMSVGAnimatedPreserveAspectRatio>
@@ -102,12 +92,12 @@ SVGPatternElement::PatternContentUnits()
   return mEnumAttributes[PATTERNCONTENTUNITS].ToDOMAnimatedEnum(this);
 }
 
-already_AddRefed<DOMSVGAnimatedTransformList>
+already_AddRefed<SVGAnimatedTransformList>
 SVGPatternElement::PatternTransform()
 {
   // We're creating a DOM wrapper, so we must tell GetAnimatedTransformList
   // to allocate the SVGAnimatedTransformList if it hasn't already done so:
-  return DOMSVGAnimatedTransformList::GetDOMWrapper(
+  return SVGAnimatedTransformList::GetDOMWrapper(
            GetAnimatedTransformList(DO_ALLOCATE), this);
 }
 
@@ -165,11 +155,11 @@ SVGPatternElement::IsAttributeMapped(const nsIAtom* name) const
 //----------------------------------------------------------------------
 // nsSVGElement methods
 
-SVGAnimatedTransformList*
+nsSVGAnimatedTransformList*
 SVGPatternElement::GetAnimatedTransformList(uint32_t aFlags)
 {
   if (!mPatternTransform && (aFlags & DO_ALLOCATE)) {
-    mPatternTransform = new SVGAnimatedTransformList();
+    mPatternTransform = new nsSVGAnimatedTransformList();
   }
   return mPatternTransform;
 }

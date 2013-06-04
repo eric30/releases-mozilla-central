@@ -30,6 +30,8 @@
 #include "nsIAppsService.h"
 #include "mozIApplication.h"
 #include "nsIEffectiveTLDService.h"
+#include "nsPIDOMWindow.h"
+#include "nsIDocument.h"
 
 static nsPermissionManager *gPermissionManager = nullptr;
 
@@ -53,7 +55,7 @@ ChildProcess()
   if (IsChildProcess()) {
     ContentChild* cpc = ContentChild::GetSingleton();
     if (!cpc)
-      NS_RUNTIMEABORT("Content Process is NULL!");
+      NS_RUNTIMEABORT("Content Process is nullptr!");
     return cpc;
   }
 

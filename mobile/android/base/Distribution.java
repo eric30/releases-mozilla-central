@@ -11,6 +11,9 @@ package org.mozilla.gecko;
 
 import org.mozilla.gecko.util.ThreadUtils;
 
+import org.json.JSONArray;
+import org.json.JSONException;
+
 import android.app.Activity;
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -27,9 +30,6 @@ import java.io.OutputStream;
 import java.util.Enumeration;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
-
-import org.json.JSONArray;
-import org.json.JSONException;
 
 public final class Distribution {
     private static final String LOGTAG = "GeckoDistribution";
@@ -155,18 +155,40 @@ public final class Distribution {
         InputStream inputStream = null;
         try {
             if (state == STATE_UNKNOWN) {
-                // If the distribution hasn't been set yet, get bookmarks.json out of the APK
+                // If the distribution hasn't been set yet, first look for bookmarks.json in the APK.
                 File applicationPackage = new File(context.getPackageResourcePath());
                 zip = new ZipFile(applicationPackage);
                 ZipEntry zipEntry = zip.getEntry("distribution/bookmarks.json");
-                if (zipEntry == null) {
-                    return null;
+                if (zipEntry != null) {
+                    inputStream = zip.getInputStream(zipEntry);
+                } else {
+                    // If there's no bookmarks.json in the APK, but there is a preferences.json,
+                    // don't create any distribution bookmarks.
+                    zipEntry = zip.getEntry("distribution/preferences.json");
+                    if (zipEntry != null) {
+                        return null;
+                    }
+                    // Otherwise, look for bookmarks.json in the /system directory.
+                    File systemFile = new File("/system/" + context.getPackageName() + "/distribution/bookmarks.json");
+                    if (!systemFile.exists()) {
+                        return null;
+                    }
+                    inputStream = new FileInputStream(systemFile);
                 }
-                inputStream = zip.getInputStream(zipEntry);
             } else {
-                // Otherwise, get bookmarks.json out of the data directory
-                File dataDir = new File(context.getApplicationInfo().dataDir);
-                File file = new File(dataDir, "distribution/bookmarks.json");
+                // Otherwise, look for bookmarks.json in the stored distribution path,
+                // or in the data directory if that pref doesn't exist.
+                String pathKeyName = context.getPackageName() + ".distribution_path";
+                String distPath = settings.getString(pathKeyName, null);
+
+                File distDir = null;
+                if (distPath != null) {
+                    distDir = new File(distPath);
+                } else {
+                    distDir = new File(context.getApplicationInfo().dataDir, "distribution");
+                }
+
+                File file = new File(distDir, "bookmarks.json");
                 inputStream = new FileInputStream(file);
             }
 

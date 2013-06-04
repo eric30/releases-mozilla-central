@@ -21,57 +21,12 @@ VPATH += $(srcdir)/fallback
 endif
 
 LIBRARY_NAME     = dom_mobilemessage_s
+MSVC_ENABLE_PGO := 1
 LIBXUL_LIBRARY   = 1
 FORCE_STATIC_LIB = 1
-ifndef _MSC_VER
 FAIL_ON_WARNINGS := 1
-endif # !_MSC_VER
 
 include $(topsrcdir)/dom/dom-config.mk
-
-EXPORTS_NAMESPACES = \
-  mozilla/dom \
-  mozilla/dom/mobilemessage \
-  $(NULL)
-
-EXPORTS_mozilla/dom = \
-  SmsManager.h \
-  MobileMessageManager.h \
-  SmsMessage.h \
-  MmsMessage.h \
-  SmsRequest.h \
-  SmsSegmentInfo.h \
-  SmsFilter.h \
-  $(NULL)
-
-EXPORTS_mozilla/dom/mobilemessage = \
-  SmsChild.h \
-  SmsParent.h \
-  MobileMessageService.h \
-  SmsServicesFactory.h \
-  Constants.h \
-  Types.h \
-  MobileMessageCallback.h \
-  $(NULL)
-
-CPPSRCS = \
-  SmsManager.cpp \
-  MobileMessageManager.cpp \
-  SmsService.cpp \
-  MobileMessageService.cpp \
-  SmsIPCService.cpp \
-  SmsServicesFactory.cpp \
-  SmsParent.cpp \
-  SmsMessage.cpp \
-  MmsMessage.cpp \
-  Constants.cpp \
-  SmsChild.cpp \
-  SmsRequest.cpp \
-  MobileMessageCallback.cpp \
-  SmsFilter.cpp \
-  SmsSegmentInfo.cpp \
-  SmsCursor.cpp \
-  $(NULL)
 
 LOCAL_INCLUDES = \
   -I$(topsrcdir)/content/events/src \
@@ -89,16 +44,18 @@ LOCAL_INCLUDES += \
   $(NULL)
 
 EXTRA_COMPONENTS = \
+  ril/MmsService.js \
+  ril/MmsService.manifest \
   ril/MobileMessageDatabaseService.js \
   ril/MobileMessageDatabaseService.manifest \
   $(NULL)
-else
-EXPORTS_mozilla/dom/mobilemessage += \
-  MobileMessageDatabaseService.h \
-  $(NULL)
 
-CPPSRCS += \
-  MobileMessageDatabaseService.cpp \
+EXTRA_JS_MODULES = \
+  ril/mms_consts.js \
+  ril/MmsPduHelper.jsm \
+  ril/wap_consts.js \
+  ril/WapPushManager.js \
+  ril/WspPduHelper.jsm \
   $(NULL)
 endif
 

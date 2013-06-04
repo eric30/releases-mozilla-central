@@ -500,6 +500,12 @@
   ERROR(NS_ERROR_DOM_RETVAL_UNDEFINED,             FAILURE(1013)),
   ERROR(NS_ERROR_DOM_QUOTA_REACHED,                FAILURE(1014)),
   ERROR(NS_ERROR_DOM_JS_EXCEPTION,                 FAILURE(1015)),
+
+  /* May be used to indicate when e.g. setting a property value didn't
+   * actually change the value, like for obj.foo = "bar"; obj.foo = "bar";
+   * the second assignment throws NS_SUCCESS_DOM_NO_OPERATION.
+   */
+  ERROR(NS_SUCCESS_DOM_NO_OPERATION,               SUCCESS(1)),
 #undef MODULE
 
 
@@ -692,7 +698,7 @@
   ERROR(NS_CONTENT_BLOCKED,                 SUCCESS(8)),
   ERROR(NS_CONTENT_BLOCKED_SHOW_ALT,        SUCCESS(9)),
   ERROR(NS_PROPTABLE_PROP_OVERWRITTEN,      SUCCESS(11)),
-  /* Error codes for FindBroadcaster in nsXULDocument.cpp */
+  /* Error codes for FindBroadcaster in XULDocument.cpp */
   ERROR(NS_FINDBROADCASTER_NOT_FOUND,       SUCCESS(12)),
   ERROR(NS_FINDBROADCASTER_FOUND,           SUCCESS(13)),
   ERROR(NS_FINDBROADCASTER_AWAIT_OVERLAYS,  SUCCESS(14)),
