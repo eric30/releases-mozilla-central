@@ -32,7 +32,7 @@ const char* NFC_SOCKET_NAME = "/dev/socket/nfcd";
 
 // Network port to connect to for adb forwarded sockets when doing
 // desktop development.
-const uint32_t NFCD_TEST_PORT = 6300;
+const uint32_t NFCD_TEST_PORT = 6400;
 
 class DispatchNfcEvent : public WorkerTask
 {
@@ -48,7 +48,7 @@ private:
 bool
 DispatchNfcEvent::RunTask(JSContext *aCx)
 {
-    JSObject *obj = JS_GetGlobalObject(aCx);
+    JSObject *obj = JS_GetGlobalForScopeChain(aCx);
     JSObject *array = JS_NewUint8Array(aCx, mMessage->mSize);
     if (!array) {
         return false;
@@ -62,16 +62,17 @@ DispatchNfcEvent::RunTask(JSContext *aCx)
 class NfcConnector : public mozilla::ipc::UnixSocketConnector
 {
 public:
+  NfcConnector() {}
   virtual ~NfcConnector()
   {}
 
- virtual int Create();
-  virtual void CreateAddr(bool aIsServer,
+  virtual int Create();
+  virtual bool CreateAddr(bool aIsServer,
                           socklen_t& aAddrSize,
-                          struct sockaddr *aAddr,
+                          sockaddr_any& aAddr,
                           const char* aAddress);
   virtual bool SetUp(int aFd);
-  virtual void GetSocketAddr(const sockaddr& aAddr,
+  virtual void GetSocketAddr(const sockaddr_any& aAddr,
                              nsAString& aAddrStr);
 };
 
@@ -104,38 +105,42 @@ NfcConnector::Create()
     return fd;
 }
 
-void
+bool
 NfcConnector::CreateAddr(bool aIsServer,
                          socklen_t& aAddrSize,
-                         struct sockaddr *aAddr,
+                         sockaddr_any& aAddr,
                          const char* aAddress)
 {
-    // We never open Nfc socket as server.
+    // We never open nfc socket as server.
     MOZ_ASSERT(!aIsServer);
-
+    uint32_t af;
 #if defined(MOZ_WIDGET_GONK)
-    struct sockaddr_un addr_un;
-
-    memset(&addr_un, 0, sizeof(addr_un));
-    strcpy(addr_un.sun_path, aAddress);
-    addr_un.sun_family = AF_LOCAL;
-
-    aAddrSize = strlen(aAddress) + offsetof(struct sockaddr_un, sun_path) + 1;
-    memcpy(aAddr, &addr_un, aAddrSize);
+    af = AF_LOCAL;
 #else
-    struct hostent *hp;
-    struct sockaddr_in addr_in;
-
-    hp = gethostbyname("localhost");
-    if (!hp) {
-    memset(&addr_in, 0, sizeof(addr_in));
-    addr_in.sin_family = hp->h_addrtype;
-    addr_in.sin_port = htons(Nfc_TEST_PORT);
-    memcpy(&addr_in.sin_addr, hp->h_addr, hp->h_length);
-    aAddrSize = sizeof(addr_in);
-    memcpy(aAddr, &addr_in, aAddrSize);
-    }
+    af = AF_INET;
 #endif
+    switch (af) {
+    case AF_LOCAL:
+        aAddr.un.sun_family = af;
+        if(strlen(aAddress) > sizeof(aAddr.un.sun_path)) {
+            NS_WARNING("Address too long for socket struct!");
+            return false;
+        }
+        strcpy((char*)&aAddr.un.sun_path, aAddress);
+        aAddrSize = strlen(aAddress) + offsetof(struct sockaddr_un, sun_path) + 1;
+        break;
+    case AF_INET:
+        aAddr.in.sin_family = af;
+        aAddr.in.sin_port = htons(NFCD_TEST_PORT);
+        aAddr.in.sin_addr.s_addr = htons(INADDR_LOOPBACK);
+        aAddrSize = sizeof(sockaddr_in);
+        break;
+    default:
+        NS_WARNING("Socket type not handled by connector!");
+        return false;
+    }
+    return true;
+
 }
 
 bool
@@ -146,7 +151,7 @@ NfcConnector::SetUp(int aFd)
 }
 
 void
-NfcConnector::GetSocketAddr(const sockaddr& aAddr,
+NfcConnector::GetSocketAddr(const sockaddr_any& aAddr,
                             nsAString& aAddrStr)
 {
     MOZ_NOT_REACHED("This should never be called!");

@@ -136,7 +136,7 @@ ConnectWorkerToNfc::RunTask(JSContext *aCx)
   // communication.
   NS_ASSERTION(!NS_IsMainThread(), "Expecting to be on the worker thread");
   NS_ASSERTION(!JS_IsRunning(aCx), "Are we being called somehow?");
-  JSObject *workerGlobal = JS_GetGlobalObject(aCx);
+  JSObject *workerGlobal = JS_GetGlobalForScopeChain(aCx);
 
   return !!JS_DefineFunction(aCx, workerGlobal, "postNfcMessage", PostToNfc, 1,
                              0);
