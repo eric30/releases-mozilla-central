@@ -31,8 +31,7 @@ public:
   NS_IMETHOD Initialize(nsISupports* aOwner,
                      JSContext* aContext,
                      JSObject* aObject,
-                     PRUint32 aArgc,
-                     JS::Value* aArgv);
+                     const JS::CallArgs &aArgv);
 
   virtual ~NdefRecord() {}
 

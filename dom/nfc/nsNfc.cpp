@@ -319,7 +319,7 @@ NS_NewNfc(nsPIDOMWindow* aWindow, nsIDOMNfc** aNfc)
   }
 
   nsCOMPtr<nsIDocument> document =
-    do_QueryInterface(innerWindow->GetExtantDocument());
+    do_QueryInterface(innerWindow->GetExtantDoc());
   NS_ENSURE_TRUE(document, NS_NOINTERFACE);
 
   // Do security checks.

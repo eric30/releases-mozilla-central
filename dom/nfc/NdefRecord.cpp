@@ -44,13 +44,13 @@ NS_IMETHODIMP
 NdefRecord::Initialize(nsISupports* aOwner,
                      JSContext* aContext,
                      JSObject* aObject,
-                     PRUint32 aArgc,
-                     JS::Value* aArgv)
+                     const JS::CallArgs& aArgv)
 {
   JSString* jsstr;
   size_t length;
+  unsigned argc = aArgv.length();
 
-  if (aArgc != 4) {
+  if (argc != 4) {
     return NS_ERROR_INVALID_ARG;
   }
 
