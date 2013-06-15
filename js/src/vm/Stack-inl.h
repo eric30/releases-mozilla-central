@@ -13,11 +13,9 @@
 #include "jscompartment.h"
 
 #include "vm/Stack.h"
-#ifdef JS_ION
 #include "ion/BaselineFrame.h"
 #include "ion/BaselineFrame-inl.h"
 #include "ion/IonFrameIterator-inl.h"
-#endif
 #include "jsscriptinlines.h"
 
 #include "ArgumentsObject-inl.h"
@@ -337,24 +335,32 @@ ContextStack::currentScript(jsbytecode **ppc,
     if (ppc)
         *ppc = NULL;
 
-    if (!hasfp())
+    Activation *act = cx_->mainThread().activation();
+    while (act && act->cx() != cx_)
+        act = act->prev();
+
+    if (!act)
         return NULL;
 
-    FrameRegs &regs = this->regs();
-    StackFrame *fp = regs.fp();
+    JS_ASSERT(act->cx() == cx_);
 
 #ifdef JS_ION
-    if (fp->beginsIonActivation()) {
+    if (act->isJit()) {
         JSScript *script = NULL;
         ion::GetPcScript(cx_, &script, ppc);
-        if (!allowCrossCompartment && script->compartment() != cx_->compartment)
+        if (!allowCrossCompartment && script->compartment() != cx_->compartment())
             return NULL;
         return script;
     }
 #endif
 
+    JS_ASSERT(act->isInterpreter());
+
+    StackFrame *fp = act->asInterpreter()->current();
+    JS_ASSERT(!fp->runningInJit());
+
     JSScript *script = fp->script();
-    if (!allowCrossCompartment && script->compartment() != cx_->compartment)
+    if (!allowCrossCompartment && script->compartment() != cx_->compartment())
         return NULL;
 
     if (ppc)
@@ -372,7 +378,7 @@ template <class Op>
 inline void
 ScriptFrameIter::ionForEachCanonicalActualArg(JSContext *cx, Op op)
 {
-    JS_ASSERT(isIon());
+    JS_ASSERT(isJit());
 #ifdef JS_ION
     if (data_.ionFrames_.isOptimizedJS()) {
         ionInlineFrames_.forEachCanonicalActualArg(cx, op, 0, -1);
@@ -869,6 +875,34 @@ AbstractFramePtr::popWith(JSContext *cx) const
     else
         JS_NOT_REACHED("Invalid frame");
 }
+
+Activation::Activation(JSContext *cx, Kind kind, bool active)
+  : cx_(cx),
+    compartment_(cx->compartment()),
+    prev_(cx->mainThread().activation_),
+    active_(active),
+    savedFrameChain_(0),
+    kind_(kind)
+{
+    cx->mainThread().activation_ = this;
+}
+
+Activation::~Activation()
+{
+    JS_ASSERT(cx_->mainThread().activation_ == this);
+    cx_->mainThread().activation_ = prev_;
+}
+
+InterpreterActivation::InterpreterActivation(JSContext *cx, StackFrame *entry, FrameRegs &regs)
+  : Activation(cx, Interpreter),
+    entry_(entry),
+    current_(entry),
+    regs_(regs)
+{}
+
+// Define destructor explicitly to silence GCC used-but-never-defined warning.
+InterpreterActivation::~InterpreterActivation()
+{}
 
 } /* namespace js */
 #endif /* Stack_inl_h__ */

@@ -181,7 +181,6 @@ nsHttpHandler::nsHttpHandler()
     , mSpdyV2(true)
     , mSpdyV3(true)
     , mCoalesceSpdy(true)
-    , mUseAlternateProtocol(false)
     , mSpdyPersistentSettings(false)
     , mAllowSpdyPush(true)
     , mSpdySendingChunkSize(ASpdySession::kSendingChunkSize)
@@ -202,7 +201,7 @@ nsHttpHandler::nsHttpHandler()
     gHttpLog = PR_NewLogModule("nsHttp");
 #endif
 
-    LOG(("Creating nsHttpHandler [this=%x].\n", this));
+    LOG(("Creating nsHttpHandler [this=%p].\n", this));
 
     MOZ_ASSERT(!gHttpHandler, "HTTP handler already created!");
     gHttpHandler = this;
@@ -210,7 +209,7 @@ nsHttpHandler::nsHttpHandler()
 
 nsHttpHandler::~nsHttpHandler()
 {
-    LOG(("Deleting nsHttpHandler [this=%x]\n", this));
+    LOG(("Deleting nsHttpHandler [this=%p]\n", this));
 
     // make sure the connection manager is shutdown
     if (mConnMgr) {
@@ -1115,13 +1114,6 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
         rv = prefs->GetBoolPref(HTTP_PREF("spdy.coalesce-hostnames"), &cVar);
         if (NS_SUCCEEDED(rv))
             mCoalesceSpdy = cVar;
-    }
-
-    if (PREF_CHANGED(HTTP_PREF("spdy.use-alternate-protocol"))) {
-        rv = prefs->GetBoolPref(HTTP_PREF("spdy.use-alternate-protocol"),
-                                &cVar);
-        if (NS_SUCCEEDED(rv))
-            mUseAlternateProtocol = cVar;
     }
 
     if (PREF_CHANGED(HTTP_PREF("spdy.persistent-settings"))) {

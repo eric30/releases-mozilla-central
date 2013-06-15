@@ -50,7 +50,7 @@ ParseMapPool::allocateFresh()
     if (!all.reserve(newAllLength) || !recyclable.reserve(newAllLength))
         return NULL;
 
-    AtomMapT *map = cx->new_<AtomMapT>(cx);
+    AtomMapT *map = js_new<AtomMapT>();
     if (!map)
         return NULL;
 
@@ -133,5 +133,5 @@ frontend::InitAtomMap(JSContext *cx, frontend::AtomIndexMap *indices, HeapPtrAto
     }
 }
 
-template class AtomDecls<FullParseHandler>;
-template class AtomDecls<SyntaxParseHandler>;
+template class js::frontend::AtomDecls<FullParseHandler>;
+template class js::frontend::AtomDecls<SyntaxParseHandler>;

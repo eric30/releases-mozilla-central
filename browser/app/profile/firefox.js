@@ -143,8 +143,17 @@ pref("app.update.auto", true);
 // 2                  download no prompt  prompt
 //
 // See chart in nsUpdateService.js source for more details
+// incompatibilities are ignored by updates in Metro
 //
-pref("app.update.mode", 1);
+pref("app.update.mode", 0);
+
+#ifdef XP_WIN
+#ifdef MOZ_METRO
+// Enables update checking in the Metro environment.
+// add-on incompatibilities are ignored by updates in Metro.
+pref("app.update.metro.enabled", true);
+#endif
+#endif
 
 // If set to true, the Update Service will present no UI for any event.
 pref("app.update.silent", false);
@@ -393,7 +402,11 @@ pref("browser.link.open_newwindow.override.external", -1);
 // 2: don't divert window.open with features
 pref("browser.link.open_newwindow.restriction", 2);
 
-// Disable opening a new window via window.open if browser is in fullscreen mode
+// If true, this pref causes windows opened by window.open to be forced into new
+// tabs (rather than potentially opening separate windows, depending on
+// window.open arguments) when the browser is in fullscreen mode.
+// We set this differently on Mac because the fullscreen implementation there is
+// different.
 #ifdef XP_MACOSX
 pref("browser.link.open_newwindow.disabled_in_fullscreen", true);
 #else
@@ -1063,7 +1076,7 @@ pref("devtools.debugger.remote-host", "localhost");
 pref("devtools.debugger.remote-autoconnect", false);
 pref("devtools.debugger.remote-connection-retries", 3);
 pref("devtools.debugger.remote-timeout", 20000);
-pref("devtools.debugger.source-maps-enabled", false);
+pref("devtools.debugger.source-maps-enabled", true);
 
 // The default Debugger UI settings
 pref("devtools.debugger.ui.win-x", 0);
@@ -1133,6 +1146,11 @@ pref("devtools.webconsole.filter.secwarn", true);
 
 // Text size in the Web Console. Use 0 for the system default size.
 pref("devtools.webconsole.fontSize", 0);
+
+// Persistent logging: |true| if you want the Web Console to keep all of the
+// logged messages after reloading the page, |false| if you want the output to
+// be cleared each time page navigation happens.
+pref("devtools.webconsole.persistlog", false);
 
 // The number of lines that are displayed in the web console for the Net,
 // CSS, JS and Web Developer categories.

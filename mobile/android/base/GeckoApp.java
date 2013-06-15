@@ -16,6 +16,7 @@ import org.mozilla.gecko.menu.GeckoMenu;
 import org.mozilla.gecko.menu.GeckoMenuInflater;
 import org.mozilla.gecko.menu.MenuPanel;
 import org.mozilla.gecko.health.BrowserHealthRecorder;
+import org.mozilla.gecko.health.BrowserHealthRecorder.SessionInformation;
 import org.mozilla.gecko.updater.UpdateService;
 import org.mozilla.gecko.updater.UpdateServiceHelper;
 import org.mozilla.gecko.util.EventDispatcher;
@@ -57,6 +58,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.PowerManager;
 import android.os.StrictMode;
+import android.provider.ContactsContract;
 
 import android.telephony.CellLocation;
 import android.telephony.NeighboringCellInfo;
@@ -116,6 +118,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -142,6 +145,7 @@ abstract public class GeckoApp
     public static final String ACTION_DEBUG         = "org.mozilla.gecko.DEBUG";
     public static final String ACTION_BOOKMARK      = "org.mozilla.gecko.BOOKMARK";
     public static final String ACTION_LOAD          = "org.mozilla.gecko.LOAD";
+    public static final String ACTION_LAUNCH_SETTINGS = "org.mozilla.gecko.SETTINGS";
     public static final String ACTION_INIT_PW       = "org.mozilla.gecko.INIT_PW";
     public static final String SAVED_STATE_IN_BACKGROUND = "inBackground";
     public static final String SAVED_STATE_PRIVATE_SESSION = "privateSession";
@@ -160,7 +164,8 @@ abstract public class GeckoApp
     protected RelativeLayout mMainLayout;
     protected RelativeLayout mGeckoLayout;
     public View getView() { return mGeckoLayout; }
-    public SurfaceView cameraView;
+    public SurfaceView mCameraView;
+    public List<GeckoAppShell.AppStateListener> mAppStateListeners;
     private static GeckoApp sAppContext;
     protected MenuPanel mMenuPanel;
     protected Menu mMenu;
@@ -177,6 +182,9 @@ abstract public class GeckoApp
     protected DoorHangerPopup mDoorHangerPopup;
     protected FormAssistPopup mFormAssistPopup;
     protected TabsPanel mTabsPanel;
+
+    // Handles notification messages from javascript
+    protected NotificationHelper mNotificationHelper;
 
     protected LayerView mLayerView;
     private AbsoluteLayout mPluginContainer;
@@ -246,8 +254,20 @@ abstract public class GeckoApp
         return this;
     }
 
+    public static SharedPreferences getAppSharedPreferences() {
+        return GeckoApp.sAppContext.getSharedPreferences(PREFS_NAME, 0);
+    }
+
     public SurfaceView getCameraView() {
-        return cameraView;
+        return mCameraView;
+    }
+
+    public void addAppStateListener(GeckoAppShell.AppStateListener listener) {
+        mAppStateListeners.add(listener);
+    }
+
+    public void removeAppStateListener(GeckoAppShell.AppStateListener listener) {
+        mAppStateListeners.remove(listener);
     }
 
     public FormAssistPopup getFormAssistPopup() {
@@ -534,6 +554,11 @@ abstract public class GeckoApp
             } else if (event.equals("Gecko:Ready")) {
                 mGeckoReadyStartupTimer.stop();
                 geckoConnected();
+
+                // This method is already running on the background thread, so we
+                // know that mHealthRecorder will exist. This method is cheap, so
+                // don't spawn a new runnable.
+                mHealthRecorder.recordGeckoStartupTime(mGeckoReadyStartupTimer.getElapsed());
             } else if (event.equals("ToggleChrome:Hide")) {
                 toggleChrome(false);
             } else if (event.equals("ToggleChrome:Show")) {
@@ -652,6 +677,19 @@ abstract public class GeckoApp
                 } else {
                     mPrivateBrowsingSession = message.getString("session");
                 }
+            } else if (event.equals("Contact:Add")) {                
+                if (!message.isNull("email")) {
+                    Uri contactUri = Uri.parse(message.getString("email"));       
+                    Intent i = new Intent(ContactsContract.Intents.SHOW_OR_CREATE_CONTACT, contactUri);
+                    startActivity(i);
+                } else if (!message.isNull("phone")) {
+                    Uri contactUri = Uri.parse(message.getString("phone"));       
+                    Intent i = new Intent(ContactsContract.Intents.SHOW_OR_CREATE_CONTACT, contactUri);
+                    startActivity(i);
+                } else {
+                    // something went wrong.
+                    Log.e(LOGTAG, "Received Contact:Add message with no email nor phone number");
+                }                
             }
         } catch (Exception e) {
             Log.e(LOGTAG, "Exception handling message \"" + event + "\":", e);
@@ -1208,6 +1246,7 @@ abstract public class GeckoApp
 
         // Set up tabs panel.
         mTabsPanel = (TabsPanel) findViewById(R.id.tabs_panel);
+        mNotificationHelper = new NotificationHelper(this);
 
         // Check if the last run was exited due to a normal kill while
         // we were in the background, or a more harsh kill while we were
@@ -1230,20 +1269,20 @@ abstract public class GeckoApp
         ThreadUtils.postToBackgroundThread(new Runnable() {
             @Override
             public void run() {
-                SharedPreferences prefs =
-                    GeckoApp.sAppContext.getSharedPreferences(PREFS_NAME, 0);
+                final SharedPreferences prefs = GeckoApp.getAppSharedPreferences();
 
-                boolean wasOOM = prefs.getBoolean(PREFS_OOM_EXCEPTION, false);
-                boolean wasStopped = prefs.getBoolean(PREFS_WAS_STOPPED, true);
-                if (wasOOM || !wasStopped) {
+                SessionInformation previousSession = SessionInformation.fromSharedPrefs(prefs);
+                if (previousSession.wasKilled()) {
                     Telemetry.HistogramAdd("FENNEC_WAS_KILLED", 1);
                 }
+
                 SharedPreferences.Editor editor = prefs.edit();
                 editor.putBoolean(GeckoApp.PREFS_OOM_EXCEPTION, false);
 
-                // Put a flag to check if we got a normal onSaveInstanceState
-                // on exit, or if we were suddenly killed (crash or native OOM)
+                // Put a flag to check if we got a normal `onSaveInstanceState`
+                // on exit, or if we were suddenly killed (crash or native OOM).
                 editor.putBoolean(GeckoApp.PREFS_WAS_STOPPED, false);
+
                 editor.commit();
 
                 // The lifecycle of mHealthRecorder is "shortly after onCreate"
@@ -1252,7 +1291,8 @@ abstract public class GeckoApp
                 final String profilePath = getProfile().getDir().getAbsolutePath();
                 final EventDispatcher dispatcher = GeckoAppShell.getEventDispatcher();
                 Log.i(LOGTAG, "Creating BrowserHealthRecorder.");
-                mHealthRecorder = new BrowserHealthRecorder(sAppContext, profilePath, dispatcher);
+                mHealthRecorder = new BrowserHealthRecorder(sAppContext, profilePath, dispatcher,
+                                                            previousSession);
             }
         });
 
@@ -1264,15 +1304,16 @@ abstract public class GeckoApp
         mPluginContainer = (AbsoluteLayout) findViewById(R.id.plugin_container);
         mFormAssistPopup = (FormAssistPopup) findViewById(R.id.form_assist_popup);
 
-        if (cameraView == null) {
-            cameraView = new SurfaceView(this);
-            cameraView.getHolder().setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
+        if (mCameraView == null) {
+            mCameraView = new SurfaceView(this);
+            mCameraView.getHolder().setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
         }
 
         if (mLayerView == null) {
             LayerView layerView = (LayerView) findViewById(R.id.layer_view);
             layerView.initializeView(GeckoAppShell.getEventDispatcher());
             mLayerView = layerView;
+            GeckoAppShell.setLayerView(layerView);
             // bind the GeckoEditable instance to the new LayerView
             GeckoAppShell.notifyIMEContext(GeckoEditableListener.IME_STATE_DISABLED, "", "", "");
         }
@@ -1394,8 +1435,20 @@ abstract public class GeckoApp
             }, 1000 * 5 /* 5 seconds */);
         }
 
+        // Check if launched from data reporting notification.
+        if (ACTION_LAUNCH_SETTINGS.equals(action)) {
+            Intent settingsIntent = new Intent(GeckoApp.sAppContext, GeckoPreferences.class);
+            // Copy extras.
+            settingsIntent.putExtras(intent);
+            startActivity(settingsIntent);
+        }
+
+        //app state callbacks
+        mAppStateListeners = new LinkedList<GeckoAppShell.AppStateListener>();
+
         //register for events
         registerEventListener("log");
+        registerEventListener("Reader:ListCountRequest");
         registerEventListener("Reader:Added");
         registerEventListener("Reader:Removed");
         registerEventListener("Reader:Share");
@@ -1432,6 +1485,7 @@ abstract public class GeckoApp
         registerEventListener("Update:Download");
         registerEventListener("Update:Install");
         registerEventListener("PrivateBrowsing:Data");
+        registerEventListener("Contact:Add");
 
         if (SmsManager.getInstance() != null) {
           SmsManager.getInstance().start();
@@ -1460,12 +1514,16 @@ abstract public class GeckoApp
             }
         });
 
-        // End of the startup of our Java App
+        // Trigger the completion of the telemetry timer that wraps activity startup,
+        // then grab the duration to give to FHR.
         mJavaUiStartupTimer.stop();
+        final long javaDuration = mJavaUiStartupTimer.getElapsed();
 
         ThreadUtils.getBackgroundHandler().postDelayed(new Runnable() {
             @Override
             public void run() {
+                mHealthRecorder.recordJavaStartupTime(javaDuration);
+
                 // Sync settings need Gecko to be loaded, so
                 // no hurry in starting this.
                 checkMigrateSync();
@@ -1475,10 +1533,12 @@ abstract public class GeckoApp
                 final Context context = GeckoApp.sAppContext;
                 AnnouncementsBroadcastService.recordLastLaunch(context);
 
-                // Kick off our background service to fetch product announcements.
-                // We do this by invoking the broadcast receiver, which uses the
-                // system alarm infrastructure to perform tasks at intervals.
+                // Kick off our background services that fetch product
+                // announcements and upload health reports.  We do this by
+                // invoking the broadcast receiver, which uses the system alarm
+                // infrastructure to perform tasks at intervals.
                 GeckoPreferences.broadcastAnnouncementsPref(context);
+                GeckoPreferences.broadcastHealthReportUploadPref(context);
 
                 /*
                   XXXX see bug 635342
@@ -1580,7 +1640,7 @@ abstract public class GeckoApp
             return RESTORE_OOM;
         }
 
-        final SharedPreferences prefs = GeckoApp.sAppContext.getSharedPreferences(PREFS_NAME, 0);
+        final SharedPreferences prefs = GeckoApp.getAppSharedPreferences();
 
         // We record crashes in the crash reporter. If sessionstore.js
         // exists, but we didn't flag a crash in the crash reporter, we
@@ -1627,11 +1687,11 @@ abstract public class GeckoApp
 
     public void enableCameraView() {
         // Some phones (eg. nexus S) need at least a 8x16 preview size
-        mMainLayout.addView(cameraView, new AbsoluteLayout.LayoutParams(8, 16, 0, 0));
+        mMainLayout.addView(mCameraView, new AbsoluteLayout.LayoutParams(8, 16, 0, 0));
     }
 
     public void disableCameraView() {
-        mMainLayout.removeView(cameraView);
+        mMainLayout.removeView(mCameraView);
     }
 
     public String getDefaultUAString() {
@@ -1732,6 +1792,12 @@ abstract public class GeckoApp
             GeckoAppShell.sendEventToGecko(GeckoEvent.createURILoadEvent(uri));
         } else if (ACTION_ALERT_CALLBACK.equals(action)) {
             processAlertCallback(intent);
+        } if (ACTION_LAUNCH_SETTINGS.equals(action)) {
+            // Check if launched from data reporting notification.
+            Intent settingsIntent = new Intent(GeckoApp.sAppContext, GeckoPreferences.class);
+            // Copy extras.
+            settingsIntent.putExtras(intent);
+            startActivity(settingsIntent);
         }
     }
 
@@ -1778,14 +1844,35 @@ abstract public class GeckoApp
         // User may have enabled/disabled accessibility.
         GeckoAccessibility.updateAccessibilitySettings(this);
 
+        if (mAppStateListeners != null) {
+            for (GeckoAppShell.AppStateListener listener: mAppStateListeners) {
+                listener.onResume();
+            }
+        }
+
+        // We use two times: a pseudo-unique wall-clock time to identify the
+        // current session across power cycles, and the elapsed realtime to
+        // track the duration of the session.
+        final long now = System.currentTimeMillis();
+        final long realTime = android.os.SystemClock.elapsedRealtime();
+        final BrowserHealthRecorder rec = mHealthRecorder;
+
         ThreadUtils.postToBackgroundThread(new Runnable() {
             @Override
             public void run() {
-                SharedPreferences prefs =
-                    GeckoApp.sAppContext.getSharedPreferences(GeckoApp.PREFS_NAME, 0);
+                // Now construct the new session on BrowserHealthRecorder's behalf. We do this here
+                // so it can benefit from a single near-startup prefs commit.
+                SessionInformation currentSession = new SessionInformation(now, realTime);
+
+                SharedPreferences prefs = GeckoApp.getAppSharedPreferences();
                 SharedPreferences.Editor editor = prefs.edit();
                 editor.putBoolean(GeckoApp.PREFS_WAS_STOPPED, false);
+                currentSession.recordBegin(editor);
                 editor.commit();
+
+                if (rec != null) {
+                    rec.setCurrentSession(currentSession);
+                }
             }
          });
     }
@@ -1803,21 +1890,31 @@ abstract public class GeckoApp
     @Override
     public void onPause()
     {
+        final BrowserHealthRecorder rec = mHealthRecorder;
+
         // In some way it's sad that Android will trigger StrictMode warnings
         // here as the whole point is to save to disk while the activity is not
         // interacting with the user.
         ThreadUtils.postToBackgroundThread(new Runnable() {
             @Override
             public void run() {
-                SharedPreferences prefs =
-                    GeckoApp.sAppContext.getSharedPreferences(GeckoApp.PREFS_NAME, 0);
+                SharedPreferences prefs = GeckoApp.getAppSharedPreferences();
                 SharedPreferences.Editor editor = prefs.edit();
                 editor.putBoolean(GeckoApp.PREFS_WAS_STOPPED, true);
+                if (rec != null) {
+                    rec.recordSessionEnd("P", editor);
+                }
                 editor.commit();
             }
         });
 
         GeckoScreenOrientationListener.getInstance().stop();
+
+        if (mAppStateListeners != null) {
+            for(GeckoAppShell.AppStateListener listener: mAppStateListeners) {
+                listener.onPause();
+            }
+        }
 
         super.onPause();
     }
@@ -1828,8 +1925,7 @@ abstract public class GeckoApp
         ThreadUtils.postToBackgroundThread(new Runnable() {
             @Override
             public void run() {
-                SharedPreferences prefs =
-                    GeckoApp.sAppContext.getSharedPreferences(GeckoApp.PREFS_NAME, 0);
+                SharedPreferences prefs = GeckoApp.getAppSharedPreferences();
                 SharedPreferences.Editor editor = prefs.edit();
                 editor.putBoolean(GeckoApp.PREFS_WAS_STOPPED, false);
                 editor.commit();
@@ -1843,6 +1939,7 @@ abstract public class GeckoApp
     public void onDestroy()
     {
         unregisterEventListener("log");
+        unregisterEventListener("Reader:ListCountRequest");
         unregisterEventListener("Reader:Added");
         unregisterEventListener("Reader:Removed");
         unregisterEventListener("Reader:Share");
@@ -1879,6 +1976,7 @@ abstract public class GeckoApp
         unregisterEventListener("Update:Download");
         unregisterEventListener("Update:Install");
         unregisterEventListener("PrivateBrowsing:Data");
+        unregisterEventListener("Contact:Add");
 
         deleteTempFiles();
 
@@ -1902,9 +2000,16 @@ abstract public class GeckoApp
                 SmsManager.getInstance().shutdown();
         }
 
-        if (mHealthRecorder != null) {
-            mHealthRecorder.close();
-            mHealthRecorder = null;
+        final BrowserHealthRecorder rec = mHealthRecorder;
+        mHealthRecorder = null;
+        if (rec != null) {
+            // Closing a BrowserHealthRecorder could incur a write.
+            ThreadUtils.postToBackgroundThread(new Runnable() {
+                @Override
+                public void run() {
+                    rec.close();
+                }
+            });
         }
 
         super.onDestroy();
@@ -2175,10 +2280,6 @@ abstract public class GeckoApp
         if (!GeckoAppShell.sActivityHelper.handleActivityResult(requestCode, resultCode, data)) {
             super.onActivityResult(requestCode, resultCode, data);
         }
-    }
-
-    public LayerView getLayerView() {
-        return mLayerView;
     }
 
     public AbsoluteLayout getPluginContainer() { return mPluginContainer; }

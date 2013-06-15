@@ -20,7 +20,6 @@ import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.PendingIntent;
 import android.content.ActivityNotFoundException;
-import android.content.ClipData;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -102,7 +101,6 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.StringTokenizer;
 import java.util.TreeMap;
-import java.util.concurrent.SynchronousQueue;
 
 public class GeckoAppShell
 {
@@ -287,12 +285,8 @@ public class GeckoAppShell
         // run gecko -- it will spawn its own thread
         GeckoAppShell.nativeInit();
 
-        // Tell Gecko where the target byte buffer is for rendering
-        if (getGeckoInterface() != null)
-           sLayerView  = getGeckoInterface().getLayerView();
         if (sLayerView != null)
             GeckoAppShell.setLayerClient(sLayerView.getLayerClient());
-
 
         // First argument is the .apk path
         String combinedArgs = apkPath + " -greomni " + apkPath;
@@ -1105,6 +1099,38 @@ public class GeckoAppShell
     }
 
     /**
+     * Given a URI, a MIME type, and a title,
+     * produce a share intent which can be used to query all activities
+     * than can open the specified URI.
+     *
+     * @param context a <code>Context</code> instance.
+     * @param targetURI the string spec of the URI to open.
+     * @param mimeType an optional MIME type string.
+     * @param title the title to use in <code>ACTION_SEND</code> intents.
+     * @return an <code>Intent</code>, or <code>null</code> if none could be
+     *         produced.
+     */
+    static Intent getShareIntent(final Context context,
+                                 final String targetURI,
+                                 final String mimeType,
+                                 final String title) {
+        Intent shareIntent = getIntentForActionString(Intent.ACTION_SEND);
+        shareIntent.putExtra(Intent.EXTRA_TEXT, targetURI);
+        shareIntent.putExtra(Intent.EXTRA_SUBJECT, title);
+
+        // Note that EXTRA_TITLE is intended to be used for share dialog
+        // titles. Common usage (e.g., Pocket) suggests that it's sometimes
+        // interpreted as an alternate to EXTRA_SUBJECT, so we include it.
+        shareIntent.putExtra(Intent.EXTRA_TITLE, title);
+
+        if (mimeType != null && mimeType.length() > 0) {
+            shareIntent.setType(mimeType);
+        }
+
+        return shareIntent;
+    }
+
+    /**
      * Given a URI, a MIME type, an Android intent "action", and a title,
      * produce an intent which can be used to start an activity to open
      * the specified URI.
@@ -1125,19 +1151,7 @@ public class GeckoAppShell
                                    final String title) {
 
         if (action.equalsIgnoreCase(Intent.ACTION_SEND)) {
-            Intent shareIntent = getIntentForActionString(action);
-            shareIntent.putExtra(Intent.EXTRA_TEXT, targetURI);
-            shareIntent.putExtra(Intent.EXTRA_SUBJECT, title);
-
-            // Note that EXTRA_TITLE is intended to be used for share dialog
-            // titles. Common usage (e.g., Pocket) suggests that it's sometimes
-            // interpreted as an alternate to EXTRA_SUBJECT, so we include it.
-            shareIntent.putExtra(Intent.EXTRA_TITLE, title);
-
-            if (mimeType != null && mimeType.length() > 0) {
-                shareIntent.setType(mimeType);
-            }
-
+            Intent shareIntent = getShareIntent(context, targetURI, mimeType, title);
             return Intent.createChooser(shareIntent,
                                         context.getResources().getString(R.string.share_title)); 
         }
@@ -1213,85 +1227,6 @@ public class GeckoAppShell
         intent.setData(pruned);
 
         return intent;
-    }
-
-    /* On some devices, access to the clipboard service needs to happen
-     * on a thread with a looper, so this function requires a looper is
-     * present on the thread. */
-    private static String getClipboardTextImpl() {
-        Context context = getContext();
-        if (android.os.Build.VERSION.SDK_INT >= 11) {
-            android.content.ClipboardManager cm = (android.content.ClipboardManager)context.getSystemService(Context.CLIPBOARD_SERVICE);
-            if (cm.hasPrimaryClip()) {
-                ClipData clip = cm.getPrimaryClip();
-                if (clip != null) {
-                    ClipData.Item item = clip.getItemAt(0);
-                    return item.coerceToText(context).toString();
-                }
-            }
-        } else {
-            android.text.ClipboardManager cm = (android.text.ClipboardManager)context.getSystemService(Context.CLIPBOARD_SERVICE);
-            if (cm.hasText()) {
-                return cm.getText().toString();
-            }
-        }
-        return null;
-    }
-
-    private static SynchronousQueue<String> sClipboardQueue = new SynchronousQueue<String>();
-
-    static String getClipboardText() {
-        // If we're on the UI thread or the background thread, we have a looper on the thread
-        // and can just call this directly. For any other threads, post the call to the
-        // background thread.
-
-        if (ThreadUtils.isOnUiThread() || ThreadUtils.isOnBackgroundThread()) {
-            return getClipboardTextImpl();
-        }
-
-        ThreadUtils.postToBackgroundThread(new Runnable() { 
-            @Override
-            public void run() {
-                String text = getClipboardTextImpl();
-                try {
-                    sClipboardQueue.put(text != null ? text : "");
-                } catch (InterruptedException ie) {}
-            }
-        });
-        try {
-            return sClipboardQueue.take();
-        } catch (InterruptedException ie) {
-            return "";
-        }
-    }
-
-    static void setClipboardText(String copiedText) {
-        // Copy an empty string instead of null to avoid clipboard crashes.
-        // AndroidBridge::EmptyClipboard() passes null to clear the clipboard's current contents.
-        final String text = (copiedText != null) ? copiedText : "";
-
-        ThreadUtils.postToBackgroundThread(new Runnable() {
-            @Override
-            public void run() {
-                Context context = getContext();
-                if (android.os.Build.VERSION.SDK_INT >= 11) {
-                    android.content.ClipboardManager cm = (android.content.ClipboardManager)
-                        context.getSystemService(Context.CLIPBOARD_SERVICE);
-                    ClipData clip = ClipData.newPlainText("Text", text);
-                    try {
-                        cm.setPrimaryClip(clip);
-                    } catch (NullPointerException e) {
-                        // Bug 776223: This is a Samsung clipboard bug. setPrimaryClip() can throw
-                        // a NullPointerException if Samsung's /data/clipboard directory is full.
-                        // Fortunately, the text is still successfully copied to the clipboard.
-                    }
-                } else {
-                    android.text.ClipboardManager cm = (android.text.ClipboardManager)
-                        context.getSystemService(Context.CLIPBOARD_SERVICE);
-                    cm.setText(text);
-                }
-            }
-        });
     }
 
     public static void setNotificationClient(NotificationClient client) {
@@ -2021,9 +1956,13 @@ public class GeckoAppShell
         sContextGetter = cg;
     }
 
+    public interface AppStateListener {
+        public void onPause();
+        public void onResume();
+    }
+
     public interface GeckoInterface {
         public GeckoProfile getProfile();
-        public LayerView getLayerView();
         public PromptService getPromptService();
         public Activity getActivity();
         public String getDefaultUAString();
@@ -2035,6 +1974,8 @@ public class GeckoAppShell
         public void removePluginView(final View view, final boolean isFullScreen);
         public void enableCameraView();
         public void disableCameraView();
+        public void addAppStateListener(AppStateListener listener);
+        public void removeAppStateListener(AppStateListener listener);
         public SurfaceView getCameraView();
         public void notifyWakeLockChanged(String topic, String state);
         public FormAssistPopup getFormAssistPopup();

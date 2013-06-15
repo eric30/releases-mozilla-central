@@ -415,9 +415,9 @@ create({ constructor: RequestsMenuView, proto: MenuContainer.prototype }, {
    * Sorts all network requests in this container by a specified detail.
    *
    * @param string aType
-   *        Either null, "status", "method", "file", "domain", "type" or "size".
+   *        Either "status", "method", "file", "domain", "type", "size" or "waterfall".
    */
-  sortBy: function(aType) {
+  sortBy: function(aType = "waterfall") {
     let target = $("#requests-menu-" + aType + "-button");
     let headers = document.querySelectorAll(".requests-menu-header-button");
 
@@ -430,24 +430,17 @@ create({ constructor: RequestsMenuView, proto: MenuContainer.prototype }, {
 
     let direction = "";
     if (target) {
-      if (!target.hasAttribute("sorted")) {
-        target.setAttribute("sorted", direction = "ascending");
-        target.setAttribute("tooltiptext", L10N.getStr("networkMenu.sortedAsc"));
-      } else if (target.getAttribute("sorted") == "ascending") {
+      if (target.getAttribute("sorted") == "ascending") {
         target.setAttribute("sorted", direction = "descending");
         target.setAttribute("tooltiptext", L10N.getStr("networkMenu.sortedDesc"));
       } else {
-        target.removeAttribute("sorted");
-        target.removeAttribute("tooltiptext");
+        target.setAttribute("sorted", direction = "ascending");
+        target.setAttribute("tooltiptext", L10N.getStr("networkMenu.sortedAsc"));
       }
     }
 
-    // Sort by timing.
-    if (!target || !direction) {
-      this.sortContents(this._byTiming);
-    }
     // Sort by whatever was requested.
-    else switch (aType) {
+    switch (aType) {
       case "status":
         if (direction == "ascending") {
           this.sortContents(this._byStatus);
@@ -488,6 +481,13 @@ create({ constructor: RequestsMenuView, proto: MenuContainer.prototype }, {
           this.sortContents(this._bySize);
         } else {
           this.sortContents((a, b) => !this._bySize(a, b));
+        }
+        break;
+      case "waterfall":
+        if (direction == "ascending") {
+          this.sortContents(this._byTiming);
+        } else {
+          this.sortContents((a, b) => !this._byTiming(a, b));
         }
         break;
     }
@@ -897,10 +897,11 @@ create({ constructor: RequestsMenuView, proto: MenuContainer.prototype }, {
       let startCapNode = $(".requests-menu-timings-cap.start", target);
       let endCapNode = $(".requests-menu-timings-cap.end", target);
       let totalNode = $(".requests-menu-timings-total", target);
+      let direction = window.isRTL ? -1 : 1;
 
       // Render the timing information at a specific horizontal translation
       // based on the delta to the first monitored event network.
-      let translateX = "translateX(" + attachment.startedDeltaMillis + "px)";
+      let translateX = "translateX(" + (direction * attachment.startedDeltaMillis) + "px)";
 
       // Based on the total time passed until the last request, rescale
       // all the waterfalls to a reasonable size.
@@ -911,8 +912,8 @@ create({ constructor: RequestsMenuView, proto: MenuContainer.prototype }, {
       let revScaleX = "scaleX(" + (1 / scale) + ")";
 
       timingsNode.style.transform = scaleX + " " + translateX;
-      startCapNode.style.transform = revScaleX + " translateX(0.5px)";
-      endCapNode.style.transform = revScaleX + " translateX(-0.5px)";
+      startCapNode.style.transform = revScaleX + " translateX(" + (direction * 0.5) + "px)";
+      endCapNode.style.transform = revScaleX + " translateX(" + (direction * -0.5) + "px)";
       totalNode.style.transform = revScaleX;
     }
   },
@@ -924,7 +925,7 @@ create({ constructor: RequestsMenuView, proto: MenuContainer.prototype }, {
    *        The current waterfall scale.
    */
   _showWaterfallDivisionLabels: function(aScale) {
-    let container = $("#requests-menu-waterfall-header-box");
+    let container = $("#requests-menu-waterfall-button");
     let availableWidth = this._waterfallWidth - REQUESTS_WATERFALL_SAFE_BOUNDS;
 
     // Nuke all existing labels.
@@ -947,10 +948,11 @@ create({ constructor: RequestsMenuView, proto: MenuContainer.prototype }, {
 
       // Insert one label for each division on the current scale.
       let fragment = document.createDocumentFragment();
+      let direction = window.isRTL ? -1 : 1;
 
       for (let x = 0; x < availableWidth; x += scaledStep) {
         let divisionMS = (x / aScale).toFixed(0);
-        let translateX = "translateX(" + (x | 0) + "px)";
+        let translateX = "translateX(" + ((direction * x) | 0) + "px)";
 
         let node = document.createElement("label");
         let text = L10N.getFormatStr("networkMenu.divisionMS", divisionMS);
@@ -1009,7 +1011,8 @@ create({ constructor: RequestsMenuView, proto: MenuContainer.prototype }, {
       for (let i = 1; i <= REQUESTS_WATERFALL_BACKGROUND_TICKS_SCALES; i++) {
         let increment = scaledStep * Math.pow(2, i);
         for (let x = 0; x < canvasWidth; x += increment) {
-          data32[x | 0] = (alphaComponent << 24) | (b << 16) | (g << 8) | r;
+          let position = (window.isRTL ? canvasWidth - x : x) | 0;
+          data32[position] = (alphaComponent << 24) | (b << 16) | (g << 8) | r;
         }
         alphaComponent += REQUESTS_WATERFALL_BACKGROUND_TICKS_OPACITY_ADD;
       }
@@ -1035,6 +1038,9 @@ create({ constructor: RequestsMenuView, proto: MenuContainer.prototype }, {
    * Hides the overflowing columns in the requests table.
    */
   _hideOverflowingColumns: function() {
+    if (window.isRTL) {
+      return;
+    }
     let table = $("#network-table");
     let toolbar = $("#requests-menu-toolbar");
     let columns = [
@@ -1202,7 +1208,11 @@ create({ constructor: RequestsMenuView, proto: MenuContainer.prototype }, {
       let waterfall = $("#requests-menu-waterfall-header-box");
       let containerBounds = container.getBoundingClientRect();
       let waterfallBounds = waterfall.getBoundingClientRect();
-      this._cachedWaterfallWidth = containerBounds.width - waterfallBounds.left;
+      if (!window.isRTL) {
+        this._cachedWaterfallWidth = containerBounds.width - waterfallBounds.left;
+      } else {
+        this._cachedWaterfallWidth = waterfallBounds.right;
+      }
     }
     return this._cachedWaterfallWidth;
   },
@@ -1305,6 +1315,7 @@ NetworkDetailsView.prototype = {
     $("#request-params-box").setAttribute("flex", "1");
     $("#request-params-box").hidden = false;
     $("#request-post-data-textarea-box").hidden = true;
+    $("#response-content-info-header").hidden = true;
     $("#response-content-json-box").hidden = true;
     $("#response-content-textarea-box").hidden = true;
     $("#response-content-image-box").hidden = true;
@@ -1519,20 +1530,23 @@ NetworkDetailsView.prototype = {
    *
    * @param object aHeadersResponse
    *        The "requestHeaders" message received from the server.
-   * @param object aPostResponse
+   * @param object aPostDataResponse
    *        The "requestPostData" message received from the server.
    */
-  _setRequestPostParams: function(aHeadersResponse, aPostResponse) {
-    if (!aHeadersResponse || !aPostResponse) {
+  _setRequestPostParams: function(aHeadersResponse, aPostDataResponse) {
+    if (!aHeadersResponse || !aPostDataResponse) {
       return;
     }
-    let contentType = aHeadersResponse.headers.filter(({ name }) => name == "Content-Type")[0];
-    let text = aPostResponse.postData.text;
-
-    gNetwork.getString(text).then((aString) => {
+    gNetwork.getString(aPostDataResponse.postData.text).then((aString) => {
       // Handle query strings (poor man's forms, e.g. "?foo=bar&baz=42").
-      if (contentType.value.contains("x-www-form-urlencoded")) {
-        this._addParams(this._paramsFormData, aString);
+      let cType = aHeadersResponse.headers.filter(({ name }) => name == "Content-Type")[0];
+      let cString = cType ? cType.value : "";
+      if (cString.contains("x-www-form-urlencoded") ||
+          aString.contains("x-www-form-urlencoded")) {
+        let formDataGroups = aString.split(/\r\n|\n|\r/);
+        for (let group of formDataGroups) {
+          this._addParams(this._paramsFormData, group);
+        }
       }
       // Handle actual forms ("multipart/form-data" content type).
       else {
@@ -1562,6 +1576,10 @@ NetworkDetailsView.prototype = {
    *        A query string of params (e.g. "?foo=bar&baz=42").
    */
   _addParams: function(aName, aParams) {
+    // Make sure there's at least one param available.
+    if (!aParams || !aParams.contains("=")) {
+      return;
+    }
     // Turn the params string into an array containing { name: value } tuples.
     let paramsArray = aParams.replace(/^[?&]/, "").split("&").map((e) =>
       let (param = e.split("=")) {
@@ -1595,18 +1613,42 @@ NetworkDetailsView.prototype = {
     gNetwork.getString(text).then((aString) => {
       // Handle json.
       if (mimeType.contains("/json")) {
-        $("#response-content-json-box").hidden = false;
         let jsonpRegex = /^[a-zA-Z0-9_$]+\(|\)$/g; // JSONP with callback.
         let sanitizedJSON = aString.replace(jsonpRegex, "");
         let callbackPadding = aString.match(jsonpRegex);
 
-        let jsonScopeName = callbackPadding
-          ? L10N.getFormatStr("jsonpScopeName", callbackPadding[0].slice(0, -1))
-          : L10N.getStr("jsonScopeName");
+        // Make sure this is an valid JSON object first. If so, nicely display
+        // the parsing results in a variables view. Otherwise, simply show
+        // the contents as plain text.
+        try {
+          var jsonObject = JSON.parse(sanitizedJSON);
+        } catch (e) {
+          var parsingError = e;
+        }
 
-        let jsonScope = this._json.addScope(jsonScopeName);
-        jsonScope.addVar().populate(JSON.parse(sanitizedJSON), { expanded: true });
-        jsonScope.expanded = true;
+        // Valid JSON.
+        if (jsonObject) {
+          $("#response-content-json-box").hidden = false;
+          let jsonScopeName = callbackPadding
+            ? L10N.getFormatStr("jsonpScopeName", callbackPadding[0].slice(0, -1))
+            : L10N.getStr("jsonScopeName");
+
+          let jsonScope = this._json.addScope(jsonScopeName);
+          jsonScope.addVar().populate(jsonObject, { expanded: true });
+          jsonScope.expanded = true;
+        }
+        // Malformed JSON.
+        else {
+          $("#response-content-textarea-box").hidden = false;
+          NetMonitorView.editor("#response-content-textarea").then((aEditor) => {
+            aEditor.setMode(SourceEditor.MODES.JAVASCRIPT);
+            aEditor.setText(aString);
+          });
+          let infoHeader = $("#response-content-info-header");
+          infoHeader.setAttribute("value", parsingError);
+          infoHeader.setAttribute("tooltiptext", parsingError);
+          infoHeader.hidden = false;
+        }
       }
       // Handle images.
       else if (mimeType.contains("image/")) {

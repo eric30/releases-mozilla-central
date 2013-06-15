@@ -7,7 +7,6 @@
 #ifndef Shape_inl_h__
 #define Shape_inl_h__
 
-#include "mozilla/DebugOnly.h"
 #include "mozilla/PodOperations.h"
 
 #include "jsarray.h"
@@ -21,7 +20,6 @@
 #include "gc/Marking.h"
 #include "vm/ArgumentsObject.h"
 #include "vm/ScopeObject.h"
-#include "vm/Shape-inl.h"
 #include "vm/StringObject.h"
 
 #include "jscntxtinlines.h"
@@ -289,8 +287,10 @@ Shape::getUserId(JSContext *cx, MutableHandleId idp) const
 #endif
     if (self->hasShortID()) {
         int16_t id = self->shortid();
-        if (id < 0)
-            return ValueToId<CanGC>(cx, Int32Value(id), idp);
+        if (id < 0) {
+            RootedValue v(cx, Int32Value(id));
+            return ValueToId<CanGC>(cx, v, idp);
+        }
         idp.set(INT_TO_JSID(id));
     } else {
         idp.set(self->propid());

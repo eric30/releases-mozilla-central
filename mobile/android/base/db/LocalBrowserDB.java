@@ -473,6 +473,26 @@ public class LocalBrowserDB implements BrowserDB.BrowserDBIface {
     }
 
     @Override
+    public int getReadingListCount(ContentResolver cr) {
+        // This method is about the Reading List, not normal bookmarks
+        Cursor c = null;
+        int count = 0;
+
+        try {
+            c = cr.query(mBookmarksUriWithProfile,
+                         new String[] { Bookmarks._ID },
+                         Bookmarks.PARENT + " = ?",
+                         new String[] { String.valueOf(Bookmarks.FIXED_READING_LIST_ID) },
+                         null);
+            count = c.getCount();
+        } finally {
+            c.close();
+        }
+
+        return count;
+    }
+
+    @Override
     public boolean isBookmark(ContentResolver cr, String uri) {
         // This method is about normal bookmarks, not the Reading List
         int count = 0;
@@ -1221,5 +1241,24 @@ public class LocalBrowserDB implements BrowserDB.BrowserDBIface {
         }
 
         return (count > 0);
+    }
+
+    public Cursor getBookmarkForUrl(ContentResolver cr, String url) {
+        Cursor c = cr.query(bookmarksUriWithLimit(1),
+                            new String[] { Bookmarks._ID,
+                                           Bookmarks.URL,
+                                           Bookmarks.TITLE,
+                                           Bookmarks.KEYWORD },
+                            Bookmarks.URL + " = ?",
+                            new String[] { url },
+                            null);
+        if (c == null) {
+            return c;
+        } else if (c.getCount() == 0) {
+            c.close();
+            c = null;
+        }
+
+        return c;
     }
 }

@@ -29,6 +29,7 @@
 #include "nsIRedirectResultListener.h"
 #include "mozilla/TimeStamp.h"
 #include "nsError.h"
+#include "nsPrintfCString.h"
 #include "nsAlgorithm.h"
 #include "GeckoProfiler.h"
 #include "nsIConsoleService.h"
@@ -379,18 +380,6 @@ nsHttpChannel::Connect()
         if (NS_SUCCEEDED(rv) && isStsHost) {
             LOG(("nsHttpChannel::Connect() STS permissions found\n"));
             return AsyncCall(&nsHttpChannel::HandleAsyncRedirectChannelToHttps);
-        }
-
-        // Check for a previous SPDY Alternate-Protocol directive
-        if (gHttpHandler->IsSpdyEnabled() && mAllowSpdy) {
-            nsAutoCString hostPort;
-
-            if (NS_SUCCEEDED(mURI->GetHostPort(hostPort)) &&
-                gHttpHandler->ConnMgr()->GetSpdyAlternateProtocol(hostPort)) {
-                LOG(("nsHttpChannel::Connect() Alternate-Protocol found\n"));
-                return AsyncCall(
-                    &nsHttpChannel::HandleAsyncRedirectChannelToHttps);
-            }
         }
     }
 
@@ -3699,7 +3688,7 @@ nsHttpChannel::AddCacheEntryHeaders(nsICacheEntryDescriptor *entry)
 {
     nsresult rv;
 
-    LOG(("nsHttpChannel::AddCacheEntryHeaders [this=%x] begin", this));
+    LOG(("nsHttpChannel::AddCacheEntryHeaders [this=%p] begin", this));
     // Store secure data in memory only
     if (mSecurityInfo)
         entry->SetSecurityInfo(mSecurityInfo);
@@ -3734,7 +3723,7 @@ nsHttpChannel::AddCacheEntryHeaders(nsICacheEntryDescriptor *entry)
             char *val = buf.BeginWriting(); // going to munge buf
             char *token = nsCRT::strtok(val, NS_HTTP_HEADER_SEPS, &val);
             while (token) {
-                LOG(("nsHttpChannel::AddCacheEntryHeaders [this=%x] " \
+                LOG(("nsHttpChannel::AddCacheEntryHeaders [this=%p] " \
                         "processing %s", this, token));
                 if (*token != '*') {
                     nsHttpAtom atom = nsHttp::ResolveAtom(token);
@@ -3743,7 +3732,7 @@ nsHttpChannel::AddCacheEntryHeaders(nsICacheEntryDescriptor *entry)
                     if (val) {
                         // If cookie-header, store a hash of the value
                         if (atom == nsHttp::Cookie) {
-                            LOG(("nsHttpChannel::AddCacheEntryHeaders [this=%x] " \
+                            LOG(("nsHttpChannel::AddCacheEntryHeaders [this=%p] " \
                                     "cookie-value %s", this, val));
                             rv = Hash(val, hash);
                             // If hash failed, store a string not very likely
@@ -3760,7 +3749,7 @@ nsHttpChannel::AddCacheEntryHeaders(nsICacheEntryDescriptor *entry)
                         metaKey = prefix + nsDependentCString(token);
                         entry->SetMetaDataElement(metaKey.get(), val);
                     } else {
-                        LOG(("nsHttpChannel::AddCacheEntryHeaders [this=%x] " \
+                        LOG(("nsHttpChannel::AddCacheEntryHeaders [this=%p] " \
                                 "clearing metadata for %s", this, token));
                         metaKey = prefix + nsDependentCString(token);
                         entry->SetMetaDataElement(metaKey.get(), nullptr);
@@ -4264,6 +4253,8 @@ NS_INTERFACE_MAP_BEGIN(nsHttpChannel)
     NS_INTERFACE_MAP_ENTRY(nsIApplicationCacheChannel)
     NS_INTERFACE_MAP_ENTRY(nsIAsyncVerifyRedirectCallback)
     NS_INTERFACE_MAP_ENTRY(nsITimedChannel)
+    NS_INTERFACE_MAP_ENTRY(nsIThreadRetargetableRequest)
+    NS_INTERFACE_MAP_ENTRY(nsIThreadRetargetableStreamListener)
 NS_INTERFACE_MAP_END_INHERITING(HttpBaseChannel)
 
 //-----------------------------------------------------------------------------
@@ -4416,20 +4407,6 @@ nsHttpChannel::BeginConnect()
     LOG(("nsHttpChannel::BeginConnect [this=%p]\n", this));
     nsresult rv;
 
-    // notify "http-on-modify-request" observers
-    CallOnModifyRequestObservers();
-
-    // Check to see if we should redirect this channel elsewhere by
-    // nsIHttpChannel.redirectTo API request
-    if (mAPIRedirectToURI) {
-        return AsyncCall(&nsHttpChannel::HandleAsyncAPIRedirect);
-    }
-
-    // If mTimingEnabled flag is not set after OnModifyRequest() then
-    // clear the already recorded AsyncOpen value for consistency.
-    if (!mTimingEnabled)
-        mAsyncOpenTime = TimeStamp();
-
     // Construct connection info object
     nsAutoCString host;
     int32_t port = -1;
@@ -4467,6 +4444,20 @@ nsHttpChannel::BeginConnect()
 
     // check to see if authorization headers should be included
     mAuthProvider->AddAuthorizationHeaders();
+
+    // notify "http-on-modify-request" observers
+    CallOnModifyRequestObservers();
+
+    // Check to see if we should redirect this channel elsewhere by
+    // nsIHttpChannel.redirectTo API request
+    if (mAPIRedirectToURI) {
+        return AsyncCall(&nsHttpChannel::HandleAsyncAPIRedirect);
+    }
+
+    // If mTimingEnabled flag is not set after OnModifyRequest() then
+    // clear the already recorded AsyncOpen value for consistency.
+    if (!mTimingEnabled)
+        mAsyncOpenTime = TimeStamp();
 
     // when proxying only use the pipeline bit if ProxyPipelining() allows it.
     if (!mConnectionInfo->UsingConnect() && mConnectionInfo->UsingHttpProxy()) {
@@ -4553,7 +4544,7 @@ nsHttpChannel::SetupFallbackChannel(const char *aFallbackKey)
 {
     ENSURE_CALLED_BEFORE_CONNECT();
 
-    LOG(("nsHttpChannel::SetupFallbackChannel [this=%x, key=%s]",
+    LOG(("nsHttpChannel::SetupFallbackChannel [this=%p, key=%s]",
          this, aFallbackKey));
     mFallbackChannel = true;
     mFallbackKey = aFallbackKey;
@@ -4884,16 +4875,6 @@ nsHttpChannel::OnStartRequest(nsIRequest *request, nsISupports *ctxt)
         mSecurityInfo = mTransaction->SecurityInfo();
     }
 
-    if (!mCachePump && NS_FAILED(mStatus) &&
-        (mLoadFlags & LOAD_REPLACE) && mOriginalURI && mAllowSpdy) {
-        // For sanity's sake we may want to cancel an alternate protocol
-        // redirection involving the original host name
-
-        nsAutoCString hostPort;
-        if (NS_SUCCEEDED(mOriginalURI->GetHostPort(hostPort)))
-            gHttpHandler->ConnMgr()->RemoveSpdyAlternateProtocol(hostPort);
-    }
-
     // don't enter this block if we're reading from the cache...
     if (NS_SUCCEEDED(mStatus) && !mCachePump && mTransaction) {
         // mTransactionPump doesn't hit OnInputStreamReady and call this until
@@ -4963,6 +4944,42 @@ nsHttpChannel::ContinueOnStartRequest3(nsresult result)
         return NS_OK;
 
     return CallOnStartRequest();
+}
+
+class OnStopRequestCleanupEvent : public nsRunnable
+{
+public:
+    OnStopRequestCleanupEvent(nsHttpChannel *aHttpChannel,
+                              nsresult aStatus)
+    : mHttpChannel(aHttpChannel)
+    , mStatus(aStatus)
+    {
+        MOZ_ASSERT(!NS_IsMainThread(), "Shouldn't be created on main thread");
+        NS_ASSERTION(aHttpChannel, "aHttpChannel should not be null");
+    }
+
+    NS_IMETHOD Run()
+    {
+        MOZ_ASSERT(NS_IsMainThread(), "Should run on main thread");
+        if (mHttpChannel) {
+            mHttpChannel->OnStopRequestCleanup(mStatus);
+        }
+        return NS_OK;
+    }
+private:
+    nsRefPtr<nsHttpChannel> mHttpChannel;
+    nsresult mStatus;
+};
+
+nsresult
+nsHttpChannel::OnStopRequestCleanup(nsresult aStatus)
+{
+    NS_ASSERTION(NS_IsMainThread(), "Should be on main thread");
+    if (mLoadGroup) {
+        mLoadGroup->RemoveRequest(this, nullptr, aStatus);
+    }
+    ReleaseListeners();
+    return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -5094,13 +5111,16 @@ nsHttpChannel::OnStopRequest(nsIRequest *request, nsISupports *ctxt, nsresult st
     if (mOfflineCacheEntry)
         CloseOfflineCacheEntry();
 
-    if (mLoadGroup)
-        mLoadGroup->RemoveRequest(this, nullptr, status);
+    if (NS_IsMainThread()) {
+        OnStopRequestCleanup(status);
+    } else {
+        nsresult rv = NS_DispatchToMainThread(
+            new OnStopRequestCleanupEvent(this, status));
+        NS_ENSURE_SUCCESS(rv, rv);
+    }
 
     // We don't need this info anymore
     CleanRedirectCacheChainIfNecessary();
-
-    ReleaseListeners();
 
     return NS_OK;
 }
@@ -5108,6 +5128,37 @@ nsHttpChannel::OnStopRequest(nsIRequest *request, nsISupports *ctxt, nsresult st
 //-----------------------------------------------------------------------------
 // nsHttpChannel::nsIStreamListener
 //-----------------------------------------------------------------------------
+
+class OnTransportStatusAsyncEvent : public nsRunnable
+{
+public:
+    OnTransportStatusAsyncEvent(nsITransportEventSink* aEventSink,
+                                nsresult aTransportStatus,
+                                uint64_t aProgress,
+                                uint64_t aProgressMax)
+    : mEventSink(aEventSink)
+    , mTransportStatus(aTransportStatus)
+    , mProgress(aProgress)
+    , mProgressMax(aProgressMax)
+    {
+        MOZ_ASSERT(!NS_IsMainThread(), "Shouldn't be created on main thread");
+    }
+
+    NS_IMETHOD Run()
+    {
+        MOZ_ASSERT(NS_IsMainThread(), "Should run on main thread");
+        if (mEventSink) {
+            mEventSink->OnTransportStatus(nullptr, mTransportStatus,
+                                          mProgress, mProgressMax);
+        }
+        return NS_OK;
+    }
+private:
+    nsCOMPtr<nsITransportEventSink> mEventSink;
+    nsresult mTransportStatus;
+    uint64_t mProgress;
+    uint64_t mProgressMax;
+};
 
 NS_IMETHODIMP
 nsHttpChannel::OnDataAvailable(nsIRequest *request, nsISupports *ctxt,
@@ -5153,7 +5204,14 @@ nsHttpChannel::OnDataAvailable(nsIRequest *request, nsISupports *ctxt,
         uint64_t progress = mLogicalOffset + uint64_t(count);
         MOZ_ASSERT(progress <= progressMax, "unexpected progress values");
 
-        OnTransportStatus(nullptr, transportStatus, progress, progressMax);
+        if (NS_IsMainThread()) {
+            OnTransportStatus(nullptr, transportStatus, progress, progressMax);
+        } else {
+            nsresult rv = NS_DispatchToMainThread(
+                new OnTransportStatusAsyncEvent(this, transportStatus,
+                                                progress, progressMax));
+            NS_ENSURE_SUCCESS(rv, rv);
+        }
 
         //
         // we have to manually keep the logical offset of the stream up-to-date.
@@ -5175,6 +5233,71 @@ nsHttpChannel::OnDataAvailable(nsIRequest *request, nsISupports *ctxt,
     }
 
     return NS_ERROR_ABORT;
+}
+
+//-----------------------------------------------------------------------------
+// nsHttpChannel::nsIThreadRetargetableRequest
+//-----------------------------------------------------------------------------
+
+NS_IMETHODIMP
+nsHttpChannel::RetargetDeliveryTo(nsIEventTarget* aNewTarget)
+{
+    MOZ_ASSERT(NS_IsMainThread(), "Should be called on main thread only");
+
+    NS_ENSURE_ARG(aNewTarget);
+    if (aNewTarget == NS_GetCurrentThread()) {
+        NS_WARNING("Retargeting delivery to same thread");
+        return NS_OK;
+    }
+    NS_ENSURE_TRUE(mTransactionPump || mCachePump, NS_ERROR_NOT_AVAILABLE);
+
+    nsresult rv = NS_OK;
+    // If both cache pump and transaction pump exist, we're probably dealing
+    // with partially cached content. So, we must be able to retarget both.
+    nsCOMPtr<nsIThreadRetargetableRequest> retargetableCachePump;
+    nsCOMPtr<nsIThreadRetargetableRequest> retargetableTransactionPump;
+    if (mCachePump) {
+        // Direct call to QueryInterface to avoid multiple inheritance issues.
+        rv = mCachePump->QueryInterface(NS_GET_IID(nsIThreadRetargetableRequest),
+                                        getter_AddRefs(retargetableCachePump));
+        // nsInputStreamPump should implement this interface.
+        MOZ_ASSERT(retargetableCachePump);
+        rv = retargetableCachePump->RetargetDeliveryTo(aNewTarget);
+    }
+    if (NS_SUCCEEDED(rv) && mTransactionPump) {
+        // Direct call to QueryInterface to avoid multiple inheritance issues.
+        rv = mTransactionPump->QueryInterface(NS_GET_IID(nsIThreadRetargetableRequest),
+                                              getter_AddRefs(retargetableTransactionPump));
+        // nsInputStreamPump should implement this interface.
+        MOZ_ASSERT(retargetableTransactionPump);
+        rv = retargetableTransactionPump->RetargetDeliveryTo(aNewTarget);
+
+        // If retarget fails for transaction pump, we must restore mCachePump.
+        if (NS_FAILED(rv) && retargetableCachePump) {
+            nsCOMPtr<nsIThread> mainThread;
+            rv = NS_GetMainThread(getter_AddRefs(mainThread));
+            NS_ENSURE_SUCCESS(rv, rv);
+            rv = retargetableCachePump->RetargetDeliveryTo(mainThread);
+        }
+    }
+    return rv;
+}
+
+//-----------------------------------------------------------------------------
+// nsHttpChannel::nsThreadRetargetableStreamListener
+//-----------------------------------------------------------------------------
+
+NS_IMETHODIMP
+nsHttpChannel::CheckListenerChain()
+{
+    NS_ASSERTION(NS_IsMainThread(), "Should be on main thread!");
+    nsresult rv = NS_OK;
+    nsCOMPtr<nsIThreadRetargetableStreamListener> retargetableListener =
+        do_QueryInterface(mListener, &rv);
+    if (retargetableListener) {
+        rv = retargetableListener->CheckListenerChain();
+    }
+    return rv;
 }
 
 //-----------------------------------------------------------------------------

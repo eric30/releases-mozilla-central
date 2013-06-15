@@ -55,6 +55,8 @@ class BluetoothHfpManager : public BluetoothSocketObserver
                           , public BluetoothProfileManagerBase
 {
 public:
+  NS_DECL_ISUPPORTS
+
   static BluetoothHfpManager* Get();
   ~BluetoothHfpManager();
 
@@ -68,6 +70,7 @@ public:
                                    const nsAString& aServiceUuid,
                                    int aChannel) MOZ_OVERRIDE;
   virtual void OnUpdateSdpRecords(const nsAString& aDeviceAddress) MOZ_OVERRIDE;
+  virtual void GetAddress(nsAString& aDeviceAddress) MOZ_OVERRIDE;
 
   void Connect(const nsAString& aDeviceAddress,
                const bool aIsHandsfree,
@@ -87,7 +90,6 @@ public:
 
   bool IsConnected();
   bool IsScoConnected();
-  void GetAddress(nsAString& aDeviceAddress);
 
 private:
   class GetVolumeTask;
@@ -114,17 +116,18 @@ private:
 
   void NotifyDialer(const nsAString& aCommand);
   void NotifyStatusChanged(const nsAString& aType);
-  void NotifyAudioManager(const nsAString& aAddress);
+  void NotifyAudioManager(bool aStatus);
 
-  bool SendCommand(const char* aCommand, uint8_t aValue = 0);
+  bool SendCommand(const char* aCommand, uint32_t aValue = 0);
   bool SendLine(const char* aMessage);
-  void UpdateCIND(uint8_t aType, uint8_t aValue, bool aSend);
+  void UpdateCIND(uint8_t aType, uint8_t aValue, bool aSend = true);
   void OnScoConnectSuccess();
   void OnScoConnectError();
   void OnScoDisconnect();
 
   int mCurrentVgs;
   int mCurrentVgm;
+  bool mBSIR;
   bool mCCWA;
   bool mCLIP;
   bool mCMEE;

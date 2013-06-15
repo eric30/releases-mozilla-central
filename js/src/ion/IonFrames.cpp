@@ -4,37 +4,39 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "Ion.h"
 #include "IonFrames.h"
+
 #include "jsobj.h"
 #include "jsscript.h"
 #include "jsfun.h"
-#include "BaselineFrame.h"
-#include "BaselineIC.h"
-#include "BaselineJIT.h"
-#include "IonCompartment.h"
-#include "IonFrames-inl.h"
-#include "IonFrameIterator-inl.h"
-#include "Safepoints.h"
-#include "IonSpewer.h"
-#include "IonMacroAssembler.h"
-#include "PcScriptCache.h"
-#include "PcScriptCache-inl.h"
 #include "gc/Marking.h"
-#include "SnapshotReader.h"
-#include "Safepoints.h"
-#include "VMFunctions.h"
+#include "ion/BaselineFrame.h"
+#include "ion/BaselineIC.h"
+#include "ion/BaselineJIT.h"
+#include "ion/Ion.h"
+#include "ion/IonCompartment.h"
+#include "ion/IonMacroAssembler.h"
+#include "ion/IonSpewer.h"
+#include "ion/PcScriptCache.h"
+#include "ion/Safepoints.h"
+#include "ion/SnapshotReader.h"
+#include "ion/VMFunctions.h"
+
+#include "ion/IonFrameIterator-inl.h"
+#include "ion/IonFrames-inl.h"
+#include "ion/PcScriptCache-inl.h"
+#include "vm/Probes-inl.h"
 
 namespace js {
 namespace ion {
 
-IonFrameIterator::IonFrameIterator(const IonActivationIterator &activations)
-    : current_(activations.top()),
+IonFrameIterator::IonFrameIterator(const ActivationIterator &activations)
+    : current_(activations.jitTop()),
       type_(IonFrame_Exit),
       returnAddressToFp_(NULL),
       frameSize_(0),
       cachedSafepointIndex_(NULL),
-      activation_(activations.activation())
+      activation_(activations.activation()->asJit())
 {
 }
 
@@ -362,7 +364,7 @@ HandleException(JSContext *cx, const IonFrameIterator &frame, ResumeFromExceptio
     jsbytecode *pc;
     frame.baselineScriptAndPc(script.address(), &pc);
 
-    if (cx->isExceptionPending() && cx->compartment->debugMode()) {
+    if (cx->isExceptionPending() && cx->compartment()->debugMode()) {
         BaselineFrame *baselineFrame = frame.baselineFrame();
         JSTrapStatus status = DebugExceptionUnwind(cx, baselineFrame, pc);
         switch (status) {
@@ -460,8 +462,8 @@ HandleException(ResumeFromException *rfe)
     // This may happen if a callVM function causes an invalidation (setting the
     // override), and then fails, bypassing the bailout handlers that would
     // otherwise clear the return override.
-    if (cx->runtime->hasIonReturnOverride())
-        cx->runtime->takeIonReturnOverride();
+    if (cx->runtime()->hasIonReturnOverride())
+        cx->runtime()->takeIonReturnOverride();
 
     IonFrameIterator iter(cx->mainThread().ionTop);
     while (!iter.isEntry()) {
@@ -484,7 +486,7 @@ HandleException(ResumeFromException *rfe)
 
             IonScript *ionScript = NULL;
             if (iter.checkInvalidation(&ionScript))
-                ionScript->decref(cx->runtime->defaultFreeOp());
+                ionScript->decref(cx->runtime()->defaultFreeOp());
 
         } else if (iter.isBaselineJS()) {
             // It's invalid to call DebugEpilogue twice for the same frame.
@@ -502,7 +504,7 @@ HandleException(ResumeFromException *rfe)
             // it doesn't try to pop the SPS frame again.
             iter.baselineFrame()->unsetPushedSPSFrame();
  
-            if (cx->compartment->debugMode() && !calledDebugEpilogue) {
+            if (cx->compartment()->debugMode() && !calledDebugEpilogue) {
                 // If DebugEpilogue returns |true|, we have to perform a forced
                 // return, e.g. return frame->returnValue() to the caller.
                 BaselineFrame *frame = iter.baselineFrame();
@@ -593,45 +595,6 @@ EnsureExitFrame(IonCommonFrameLayout *frame)
 
     JS_ASSERT(frame->prevType() == IonFrame_OptimizedJS);
     frame->changePrevType(IonFrame_Unwound_OptimizedJS);
-}
-
-void
-IonActivationIterator::settle()
-{
-    while (activation_ && activation_->empty()) {
-        top_ = activation_->prevIonTop();
-        activation_ = activation_->prev();
-    }
-}
-
-IonActivationIterator::IonActivationIterator(JSContext *cx)
-  : top_(cx->mainThread().ionTop),
-    activation_(cx->mainThread().ionActivation)
-{
-    settle();
-}
-
-IonActivationIterator::IonActivationIterator(JSRuntime *rt)
-  : top_(rt->mainThread.ionTop),
-    activation_(rt->mainThread.ionActivation)
-{
-    settle();
-}
-
-IonActivationIterator &
-IonActivationIterator::operator++()
-{
-    JS_ASSERT(activation_);
-    top_ = activation_->prevIonTop();
-    activation_ = activation_->prev();
-    settle();
-    return *this;
-}
-
-bool
-IonActivationIterator::more() const
-{
-    return !!activation_;
 }
 
 CalleeToken
@@ -788,9 +751,9 @@ MarkBaselineStubFrame(JSTracer *trc, const IonFrameIterator &frame)
 }
 
 void
-IonActivationIterator::ionStackRange(uintptr_t *&min, uintptr_t *&end)
+JitActivationIterator::jitStackRange(uintptr_t *&min, uintptr_t *&end)
 {
-    IonFrameIterator frames(top());
+    IonFrameIterator frames(jitTop());
 
     if (frames.isFakeExitFrame()) {
         min = reinterpret_cast<uintptr_t *>(frames.fp());
@@ -798,10 +761,26 @@ IonActivationIterator::ionStackRange(uintptr_t *&min, uintptr_t *&end)
         IonExitFrameLayout *exitFrame = frames.exitFrame();
         IonExitFooterFrame *footer = exitFrame->footer();
         const VMFunction *f = footer->function();
-        if (exitFrame->isWrapperExit() && f->outParam == Type_Handle)
-            min = reinterpret_cast<uintptr_t *>(footer->outVp());
-        else
+        if (exitFrame->isWrapperExit() && f->outParam == Type_Handle) {
+            switch (f->outParamRootType) {
+              case VMFunction::RootNone:
+                JS_NOT_REACHED("Handle outparam must have root type");
+                break;
+              case VMFunction::RootObject:
+              case VMFunction::RootString:
+              case VMFunction::RootPropertyName:
+              case VMFunction::RootFunction:
+              case VMFunction::RootCell:
+                // These are all handles to GCThing pointers.
+                min = reinterpret_cast<uintptr_t *>(footer->outParam<void *>());
+                break;
+              case VMFunction::RootValue:
+                min = reinterpret_cast<uintptr_t *>(footer->outParam<Value>());
+                break;
+            }
+        } else {
             min = reinterpret_cast<uintptr_t *>(footer);
+        }
     }
 
     while (!frames.done())
@@ -925,12 +904,33 @@ MarkIonExitFrame(JSTracer *trc, const IonFrameIterator &frame)
         }
     }
 
-    if (f->outParam == Type_Handle)
-        gc::MarkValueRoot(trc, footer->outVp(), "ion-vm-outvp");
+    if (f->outParam == Type_Handle) {
+        switch (f->outParamRootType) {
+          case VMFunction::RootNone:
+            JS_NOT_REACHED("Handle outparam must have root type");
+            break;
+          case VMFunction::RootObject:
+            gc::MarkObjectRoot(trc, footer->outParam<JSObject *>(), "ion-vm-out");
+            break;
+          case VMFunction::RootString:
+          case VMFunction::RootPropertyName:
+            gc::MarkStringRoot(trc, footer->outParam<JSString *>(), "ion-vm-out");
+            break;
+          case VMFunction::RootFunction:
+            gc::MarkObjectRoot(trc, footer->outParam<JSFunction *>(), "ion-vm-out");
+            break;
+          case VMFunction::RootValue:
+            gc::MarkValueRoot(trc, footer->outParam<Value>(), "ion-vm-outvp");
+            break;
+          case VMFunction::RootCell:
+            gc::MarkGCThingRoot(trc, footer->outParam<void *>(), "ion-vm-out");
+            break;
+        }
+    }
 }
 
 static void
-MarkIonActivation(JSTracer *trc, const IonActivationIterator &activations)
+MarkJitActivation(JSTracer *trc, const JitActivationIterator &activations)
 {
     for (IonFrameIterator frames(activations); !frames.done(); ++frames) {
         switch (frames.type()) {
@@ -965,10 +965,10 @@ MarkIonActivation(JSTracer *trc, const IonActivationIterator &activations)
 }
 
 void
-MarkIonActivations(JSRuntime *rt, JSTracer *trc)
+MarkJitActivations(JSRuntime *rt, JSTracer *trc)
 {
-    for (IonActivationIterator activations(rt); activations.more(); ++activations)
-        MarkIonActivation(trc, activations);
+    for (JitActivationIterator activations(rt); !activations.done(); ++activations)
+        MarkJitActivation(trc, activations);
 }
 
 void
@@ -981,10 +981,9 @@ AutoTempAllocatorRooter::trace(JSTracer *trc)
 void
 GetPcScript(JSContext *cx, JSScript **scriptRes, jsbytecode **pcRes)
 {
-    JS_ASSERT(cx->fp()->beginsIonActivation());
     IonSpew(IonSpew_Snapshots, "Recover PC & Script from the last frame.");
 
-    JSRuntime *rt = cx->runtime;
+    JSRuntime *rt = cx->runtime();
 
     // Recover the return address.
     IonFrameIterator it(rt->mainThread.ionTop);
@@ -1361,19 +1360,7 @@ IonFrameIterator::isConstructing() const
     }
 
     JS_ASSERT(parent.done());
-
-    // If entryfp is not set, we entered Ion via a C++ native, like Array.map,
-    // using FastInvoke. FastInvoke is never used for constructor calls.
-    if (!activation_->entryfp())
-        return false;
-
-    // If callingIntoIon, we either entered Ion from JM or entered Ion from
-    // a C++ native using FastInvoke. In both of these cases we don't handle
-    // constructor calls.
-    if (activation_->entryfp()->callingIntoIon())
-        return false;
-    JS_ASSERT(activation_->entryfp()->runningInIon());
-    return activation_->entryfp()->isConstructing();
+    return activation_->firstFrameIsConstructing();
 }
 
 unsigned

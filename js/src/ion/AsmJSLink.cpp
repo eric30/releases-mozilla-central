@@ -23,8 +23,6 @@ using namespace js;
 using namespace js::ion;
 using namespace mozilla;
 
-#ifdef JS_ASMJS
-
 static bool
 LinkFail(JSContext *cx, const char *str)
 {
@@ -258,15 +256,15 @@ AsmJSActivation::AsmJSActivation(JSContext *cx, const AsmJSModule &module)
     profiler_(NULL),
     resumePC_(NULL)
 {
-    if (cx->runtime->spsProfiler.enabled()) {
-        profiler_ = &cx->runtime->spsProfiler;
+    if (cx->runtime()->spsProfiler.enabled()) {
+        profiler_ = &cx->runtime()->spsProfiler;
         profiler_->enterNative("asm.js code", this);
     }
 
-    prev_ = cx_->runtime->mainThread.asmJSActivationStack_;
+    prev_ = cx_->runtime()->mainThread.asmJSActivationStack_;
 
-    JSRuntime::AutoLockForOperationCallback lock(cx_->runtime);
-    cx_->runtime->mainThread.asmJSActivationStack_ = this;
+    JSRuntime::AutoLockForOperationCallback lock(cx_->runtime());
+    cx_->runtime()->mainThread.asmJSActivationStack_ = this;
 
     (void) errorRejoinSP_;  // squelch GCC warning
 }
@@ -276,10 +274,10 @@ AsmJSActivation::~AsmJSActivation()
     if (profiler_)
         profiler_->exitNative();
 
-    JS_ASSERT(cx_->runtime->mainThread.asmJSActivationStack_ == this);
+    JS_ASSERT(cx_->runtime()->mainThread.asmJSActivationStack_ == this);
 
-    JSRuntime::AutoLockForOperationCallback lock(cx_->runtime);
-    cx_->runtime->mainThread.asmJSActivationStack_ = prev_;
+    JSRuntime::AutoLockForOperationCallback lock(cx_->runtime());
+    cx_->runtime()->mainThread.asmJSActivationStack_ = prev_;
 }
 
 static const unsigned ASM_MODULE_SLOT = 0;
@@ -332,6 +330,8 @@ js::CallAsmJS(JSContext *cx, unsigned argc, Value *vp)
 
     {
         AsmJSActivation activation(cx, module);
+        ion::IonContext ictx(cx, NULL);
+        JitActivation jitActivation(cx, /* firstFrameIsConstructing = */ false, /* active */ false);
 
         // Call into generated code.
 #ifdef JS_CPU_ARM
@@ -389,7 +389,8 @@ HandleDynamicLinkFailure(JSContext *cx, CallArgs args, AsmJSModule &module, Hand
     const jschar *chars = src->chars().get();
 
     RootedFunction fun(cx, NewFunction(cx, NullPtr(), NULL, 0, JSFunction::INTERPRETED,
-                                       cx->global(), name));
+                                       cx->global(), name, JSFunction::FinalizeKind,
+                                       TenuredObject));
     if (!fun)
         return false;
 
@@ -527,5 +528,3 @@ js::IsAsmJSModuleNative(js::Native native)
 {
     return native == LinkAsmJS;
 }
-
-#endif  // defined(JS_ASMJS)

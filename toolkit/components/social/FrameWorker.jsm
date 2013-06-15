@@ -136,7 +136,7 @@ FrameWorker.prototype = {
     let workerAPI = ['WebSocket', 'localStorage', 'atob', 'btoa',
                      'clearInterval', 'clearTimeout', 'dump',
                      'setInterval', 'setTimeout', 'XMLHttpRequest',
-                     'FileReader', 'Blob', 'EventSource',
+                     'FileReader', 'Blob', 'EventSource', 'indexedDB',
                      'location'];
     // Bug 798660 - XHR and WebSocket have issues in a sandbox and need
     // to be unwrapped to work
@@ -345,8 +345,8 @@ function makeHiddenFrame() {
   docShell.allowAuth = false;
   docShell.allowPlugins = false;
   docShell.allowImages = false;
+  docShell.allowMedia = false;
   docShell.allowWindowControl = false;
-  // TODO: disable media (bug 759964)
   return iframe;
 }
 

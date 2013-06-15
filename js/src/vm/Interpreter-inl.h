@@ -13,11 +13,11 @@
 #include "jsinfer.h"
 #include "jslibmath.h"
 #include "jsnum.h"
-#include "jsprobes.h"
 #include "jsstr.h"
-
-#include "vm/Interpreter.h"
+#include "ion/Ion.h"
+#include "ion/IonCompartment.h"
 #include "vm/ForkJoin.h"
+#include "vm/Interpreter.h"
 
 #include "jsatominlines.h"
 #include "jsfuninlines.h"
@@ -25,12 +25,6 @@
 #include "jsopcodeinlines.h"
 #include "jspropertycacheinlines.h"
 #include "jstypedarrayinlines.h"
-
-#ifdef JS_ION
-#include "ion/Ion.h"
-#include "ion/IonCompartment.h"
-#endif
-
 #include "vm/GlobalObject-inl.h"
 #include "vm/Stack-inl.h"
 
@@ -83,7 +77,7 @@ ComputeImplicitThis(JSContext *cx, HandleObject obj, MutableHandleValue vp)
 inline bool
 ComputeThis(JSContext *cx, AbstractFramePtr frame)
 {
-    JS_ASSERT_IF(frame.isStackFrame(), !frame.asStackFrame()->runningInIon());
+    JS_ASSERT_IF(frame.isStackFrame(), !frame.asStackFrame()->runningInJit());
     if (frame.thisValue().isObject())
         return true;
     RootedValue thisv(cx, frame.thisValue());
@@ -738,7 +732,7 @@ GetObjectElementOperation(JSContext *cx, JSOp op, JSObject *objArg, bool wasObje
 {
     do {
         // Don't call GetPcScript (needed for analysis) from inside Ion since it's expensive.
-        bool analyze = !cx->fp()->beginsIonActivation();
+        bool analyze = cx->mainThread().currentlyRunningInInterpreter();
 
         uint32_t index;
         if (IsDefinitelyIndex(rref, &index)) {
@@ -863,7 +857,7 @@ GetElementOperation(JSContext *cx, JSOp op, MutableHandleValue lref, HandleValue
     if (lref.isString() && IsDefinitelyIndex(rref, &index)) {
         JSString *str = lref.toString();
         if (index < str->length()) {
-            str = cx->runtime->staticStrings.getUnitStringForElement(cx, str, index);
+            str = cx->runtime()->staticStrings.getUnitStringForElement(cx, str, index);
             if (!str)
                 return false;
             res.setString(str);
@@ -899,7 +893,7 @@ SetObjectElementOperation(JSContext *cx, Handle<JSObject*> obj, HandleId id, con
             // that's ok, because optimized ion doesn't generate analysis info.  However,
             // baseline must generate this information, so it passes the script and pc in
             // as arguments.
-            if (script || !cx->fp()->beginsIonActivation()) {
+            if (script || cx->mainThread().currentlyRunningInInterpreter()) {
                 JS_ASSERT(!!script == !!pc);
                 if (!script)
                     types::TypeScript::GetPcScript(cx, script.address(), &pc);

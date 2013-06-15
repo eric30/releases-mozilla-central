@@ -4,7 +4,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-TEST_DIRS += ['httpserver', 'browser']
+TEST_DIRS += ['httpserver', 'browser', 'mochitests']
 
 MODULE = 'test_necko'
 
@@ -31,4 +31,9 @@ CPP_SOURCES += [
     'TestURLParser.cpp',
     'TestUpload.cpp',
     'urltest.cpp',
+]
+
+bin_suffix = CONFIG['BIN_SUFFIX']
+SIMPLE_PROGRAMS += [
+    "%s%s" % (x[0:-4], bin_suffix) for x in CPP_SOURCES
 ]

@@ -9,7 +9,7 @@ VPATH     = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-EXTRA_COMPONENTS = \
+DISABLED_EXTRA_COMPONENTS = \
   AppsService.js \
   AppsService.manifest \
   Webapps.manifest \
@@ -22,15 +22,6 @@ EXTRA_PP_COMPONENTS = \
 EXTRA_PP_JS_MODULES += \
   Webapps.jsm \
   AppsUtils.jsm \
-  $(NULL)
-
-EXTRA_JS_MODULES += \
-  AppsServiceChild.jsm \
-  OfflineCacheInstaller.jsm \
-  PermissionsInstaller.jsm \
-  PermissionsTable.jsm \
-  FreeSpaceWatcher.jsm \
-  AppDownloadManager.jsm \
   $(NULL)
 
 include $(topsrcdir)/config/rules.mk

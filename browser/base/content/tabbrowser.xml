@@ -59,6 +59,9 @@
           return this._visibleTabs;
         ]]></getter>
       </property>
+
+      <field name="closingTabsEnum" readonly="true">({ ALL: 0, OTHER: 1, TO_END: 2 });</field>
+
       <field name="_visibleTabs">null</field>
 
       <field name="mURIFixup" readonly="true">
@@ -1380,6 +1383,12 @@
             t._tPos = position;
             this.tabContainer._setPositionalAttributes();
 
+            // Prevent the superfluous initial load of a blank document
+            // if we're going to load something other than about:blank.
+            if (!uriIsAboutBlank) {
+              b.setAttribute("nodefaultsrc", "true");
+            }
+
             // NB: this appendChild call causes us to run constructors for the
             // browser element, which fires off a bunch of notifications. Some
             // of those notifications can cause code to run that inspects our
@@ -1388,13 +1397,6 @@
             this.mPanelContainer.appendChild(notificationbox);
 
             this.tabContainer.updateVisibility();
-
-            if (!uriIsAboutBlank) {
-              // Stop the existing about:blank load.  Otherwise, if aURI
-              // doesn't stop in-progress loads on its own, we'll get into
-              // trouble with multiple parallel loads running at once.
-              b.stop();
-            }
 
             // wire up a progress listener for the new browser object.
             var tabListener = this.mTabProgressListener(t, b, uriIsAboutBlank);
@@ -1488,17 +1490,33 @@
       </method>
 
       <method name="warnAboutClosingTabs">
-      <parameter name="aAll"/>
+      <parameter name="aCloseTabs"/>
+      <parameter name="aTab"/>
       <body>
         <![CDATA[
-          var tabsToClose = (aAll ?
-                               this.tabs.length - this._removingTabs.length :
-                               this.visibleTabs.length - 1)
-                            - gBrowser._numPinnedTabs;
+          var tabsToClose;
+          switch (aCloseTabs) {
+            case this.closingTabsEnum.ALL:
+              tabsToClose = this.tabs.length - this._removingTabs.length -
+                            gBrowser._numPinnedTabs;
+              break;
+            case this.closingTabsEnum.OTHER:
+              tabsToClose = this.visibleTabs.length - 1 - gBrowser._numPinnedTabs;
+              break;
+            case this.closingTabsEnum.TO_END:
+              if (!aTab)
+                throw new Error("Required argument missing: aTab");
+
+              tabsToClose = this.getTabsToTheEndFrom(aTab).length;
+              break;
+            default:
+              throw new Error("Invalid argument: " + aCloseTabs);
+          }
+
           if (tabsToClose <= 1)
             return true;
 
-          const pref = aAll ?
+          const pref = aCloseTabs == this.closingTabsEnum.ALL ?
                        "browser.tabs.warnOnClose" : "browser.tabs.warnOnCloseOtherTabs";
           var shouldPrompt = Services.prefs.getBoolPref(pref);
           if (!shouldPrompt)
@@ -1525,18 +1543,46 @@
                          + (ps.BUTTON_TITLE_CANCEL * ps.BUTTON_POS_1),
                          bundle.getString("tabs.closeButtonMultiple"),
                          null, null,
-                         aAll ?
+                         aCloseTabs == this.closingTabsEnum.ALL ?
                            bundle.getString("tabs.closeWarningPromptMe") : null,
                          warnOnClose);
           var reallyClose = (buttonPressed == 0);
 
           // don't set the pref unless they press OK and it's false
-          if (aAll && reallyClose && !warnOnClose.value)
+          if (aCloseTabs == this.closingTabsEnum.ALL && reallyClose && !warnOnClose.value)
             Services.prefs.setBoolPref(pref, false);
 
           return reallyClose;
         ]]>
       </body>
+      </method>
+
+      <method name="getTabsToTheEndFrom">
+        <parameter name="aTab"/>
+        <body>
+          <![CDATA[
+            var tabsToEnd = [];
+            let tabs = this.visibleTabs;
+            for (let i = tabs.length - 1; tabs[i] != aTab && i >= 0; --i) {
+              tabsToEnd.push(tabs[i]);
+            }
+            return tabsToEnd.reverse();
+          ]]>
+        </body>
+      </method>
+
+      <method name="removeTabsToTheEndFrom">
+        <parameter name="aTab"/>
+        <body>
+          <![CDATA[
+            if (this.warnAboutClosingTabs(this.closingTabsEnum.TO_END, aTab)) {
+              let tabs = this.getTabsToTheEndFrom(aTab);
+              for (let i = tabs.length - 1; i >= 0; --i) {
+                this.removeTab(tabs[i], {animate: true});
+              }
+            }
+          ]]>
+        </body>
       </method>
 
       <method name="removeAllTabsBut">
@@ -1546,7 +1592,7 @@
             if (aTab.pinned)
               return;
 
-            if (this.warnAboutClosingTabs(false)) {
+            if (this.warnAboutClosingTabs(this.closingTabsEnum.OTHER)) {
               let tabs = this.visibleTabs;
               this.selectedTab = aTab;
 

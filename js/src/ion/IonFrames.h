@@ -4,7 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef jsion_frames_h__
+#if !defined(jsion_frames_h__) && defined(JS_ION)
 #define jsion_frames_h__
 
 #include "mozilla/DebugOnly.h"
@@ -270,7 +270,7 @@ void HandleParallelFailure(ResumeFromException *rfe);
 
 void EnsureExitFrame(IonCommonFrameLayout *frame);
 
-void MarkIonActivations(JSRuntime *rt, JSTracer *trc);
+void MarkJitActivations(JSRuntime *rt, JSTracer *trc);
 void MarkIonCompilerRoots(JSTracer *trc);
 
 static inline uint32_t

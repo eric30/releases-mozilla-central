@@ -192,13 +192,13 @@ extern mozilla::ThreadLocal<PerThreadData *> TlsPerThreadData;
 inline JSRuntime *
 GetRuntime(const JSContext *cx)
 {
-    return ContextFriendFields::get(cx)->runtime;
+    return ContextFriendFields::get(cx)->runtime_;
 }
 
 inline JSCompartment *
 GetContextCompartment(const JSContext *cx)
 {
-    return ContextFriendFields::get(cx)->compartment;
+    return ContextFriendFields::get(cx)->compartment_;
 }
 
 inline JS::Zone *
@@ -369,7 +369,8 @@ struct Function {
 };
 
 struct Atom {
-    size_t _;
+    static const size_t LENGTH_SHIFT = 4;
+    size_t lengthAndFlags;
     const jschar *chars;
 };
 
@@ -541,6 +542,13 @@ inline const jschar *
 GetAtomChars(JSAtom *atom)
 {
     return reinterpret_cast<shadow::Atom *>(atom)->chars;
+}
+
+inline size_t
+GetAtomLength(JSAtom *atom)
+{
+    using shadow::Atom;
+    return reinterpret_cast<Atom*>(atom)->lengthAndFlags >> Atom::LENGTH_SHIFT;
 }
 
 inline JSLinearString *
@@ -859,10 +867,10 @@ NukeCrossCompartmentWrappers(JSContext* cx,
                              const CompartmentFilter& targetFilter,
                              NukeReferencesToWindow nukeReferencesToWindow);
 
-/* Specify information about ListBase proxies in the DOM, for use by ICs. */
+/* Specify information about DOMProxy proxies in the DOM, for use by ICs. */
 
 /*
- * The ListBaseShadowsCheck function will be called to check if the property for
+ * The DOMProxyShadowsCheck function will be called to check if the property for
  * id should be gotten from the prototype, or if there is an own property that
  * shadows it.
  * If DoesntShadow is returned then the slot at listBaseExpandoSlot should
@@ -885,21 +893,21 @@ struct ExpandoAndGeneration {
   uint32_t generation;
 };
 
-typedef enum ListBaseShadowsResult {
+typedef enum DOMProxyShadowsResult {
   ShadowCheckFailed,
   Shadows,
   DoesntShadow,
   DoesntShadowUnique
-} ListBaseShadowsResult;
-typedef ListBaseShadowsResult
-(* ListBaseShadowsCheck)(JSContext* cx, JSHandleObject object, JSHandleId id);
+} DOMProxyShadowsResult;
+typedef DOMProxyShadowsResult
+(* DOMProxyShadowsCheck)(JSContext* cx, JSHandleObject object, JSHandleId id);
 JS_FRIEND_API(void)
-SetListBaseInformation(void *listBaseHandlerFamily, uint32_t listBaseExpandoSlot,
-                       ListBaseShadowsCheck listBaseShadowsCheck);
+SetDOMProxyInformation(void *domProxyHandlerFamily, uint32_t domProxyExpandoSlot,
+                       DOMProxyShadowsCheck domProxyShadowsCheck);
 
-void *GetListBaseHandlerFamily();
-uint32_t GetListBaseExpandoSlot();
-ListBaseShadowsCheck GetListBaseShadowsCheck();
+void *GetDOMProxyHandlerFamily();
+uint32_t GetDOMProxyExpandoSlot();
+DOMProxyShadowsCheck GetDOMProxyShadowsCheck();
 
 } /* namespace js */
 
@@ -1472,6 +1480,8 @@ class JSJitSetterCallArgs : protected JS::MutableHandleValue
     // Add get() or maybe hasDefined() as needed
 };
 
+struct JSJitMethodCallArgsTraits;
+
 /*
  * A class, expected to be passed by reference, which represents the CallArgs
  * for a JSJitMethodOp.
@@ -1480,6 +1490,7 @@ class JSJitMethodCallArgs : protected JS::detail::CallArgsBase<JS::detail::NoUse
 {
   private:
     typedef JS::detail::CallArgsBase<JS::detail::NoUsedRval> Base;
+    friend struct JSJitMethodCallArgsTraits;
 
   public:
     explicit JSJitMethodCallArgs(const JS::CallArgs& args) {
@@ -1504,6 +1515,12 @@ class JSJitMethodCallArgs : protected JS::detail::CallArgsBase<JS::detail::NoUse
     // Add get() as needed
 };
 
+struct JSJitMethodCallArgsTraits
+{
+    static const size_t offsetOfArgv = offsetof(JSJitMethodCallArgs, argv_);
+    static const size_t offsetOfArgc = offsetof(JSJitMethodCallArgs, argc_);
+};
+
 /*
  * This struct contains metadata passed from the DOM to the JS Engine for JIT
  * optimizations on DOM property accessors. Eventually, this should be made
@@ -1511,13 +1528,13 @@ class JSJitMethodCallArgs : protected JS::detail::CallArgsBase<JS::detail::NoUse
  */
 typedef bool
 (* JSJitGetterOp)(JSContext *cx, JSHandleObject thisObj,
-                  void *specializedThis, JS::Value *vp);
+                  void *specializedThis, JSJitGetterCallArgs args);
 typedef bool
 (* JSJitSetterOp)(JSContext *cx, JSHandleObject thisObj,
-                  void *specializedThis, JS::Value *vp);
+                  void *specializedThis, JSJitSetterCallArgs args);
 typedef bool
 (* JSJitMethodOp)(JSContext *cx, JSHandleObject thisObj,
-                  void *specializedThis, unsigned argc, JS::Value *vp);
+                  void *specializedThis, const JSJitMethodCallArgs& args);
 
 struct JSJitInfo {
     enum OpType {

@@ -42,7 +42,7 @@ interface nsIVariant;
 interface nsIPrivacyTransitionObserver;
 interface nsIReflowObserver;
 
-[scriptable, builtinclass, uuid(d15b07e0-c604-11e2-8bdc-651679957a39)]
+[scriptable, builtinclass, uuid(f453d2ee-bac7-46f9-a553-df918f0cc0d0)]
 interface nsIDocShell : nsIDocShellTreeItem
 {
   /**
@@ -233,6 +233,11 @@ interface nsIDocShell : nsIDocShellTreeItem
    * Attribute stating whether or not images should be loaded.
    */
   attribute boolean allowImages;
+
+  /**
+   * Attribute stating whether or not media (audio/video) should be loaded.
+   */
+  [infallible] attribute boolean allowMedia;
 
   /**
    * Attribute that determines whether DNS prefetch is allowed for this subtree
@@ -824,4 +829,41 @@ interface nsIDocShell : nsIDocShellTreeItem
    *                                  creating the editor.
    */     
   void makeEditable(in boolean inWaitForUriLoad);
+
+  /**
+   * Get the SHEntry associated with a child docshell
+   */
+  nsISHEntry getChildSHEntry(in long aChildOffset);
+
+  /**
+   * Add a Child SHEntry for a frameset page, given the child's loadtype.
+   * If aCloneChildren is true, then aCloneReference's children will be
+   * cloned onto aHistoryEntry.
+   */
+  void addChildSHEntry(in nsISHEntry aCloneReference,
+                       in nsISHEntry aHistoryEntry,
+                       in long aChildOffset,
+                       in unsigned long aLoadType,
+                       in boolean aCloneChilden);
+
+  /**
+   * Whether this docshell should save entries in global history.
+   */
+  attribute boolean useGlobalHistory;
+
+  /**
+   * Removes nsISHEntry objects related to this docshell from session history.
+   * Use this only with subdocuments, like iframes.
+   */
+  void removeFromSessionHistory();
+
+  /**
+   * Set when an iframe/frame is added dynamically.
+   */
+  attribute boolean createdDynamically;
+
+  /**
+   * Returns false for mLSHE, true for mOSHE
+   */
+  boolean getCurrentSHEntry(out nsISHEntry aEntry);
 };

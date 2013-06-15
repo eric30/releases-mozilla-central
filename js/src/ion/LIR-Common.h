@@ -173,6 +173,20 @@ class LPointer : public LInstructionHelper<1, 0, 0>
     }
 };
 
+// Constant double.
+class LDouble : public LInstructionHelper<1, 0, 0>
+{
+    double d_;
+  public:
+    LIR_HEADER(Double);
+
+    LDouble(double d) : d_(d)
+    { }
+    double getDouble() const {
+        return d_;
+    }
+};
+
 // A constant Value.
 class LValue : public LInstructionHelper<BOX_PIECES, 0, 0>
 {
@@ -530,18 +544,13 @@ class LInitProp : public LCallInstructionHelper<0, 1 + BOX_PIECES, 0>
     }
 };
 
-class LCheckOverRecursed : public LInstructionHelper<0, 0, 1>
+class LCheckOverRecursed : public LInstructionHelper<0, 0, 0>
 {
   public:
     LIR_HEADER(CheckOverRecursed)
 
-    LCheckOverRecursed(const LDefinition &limitreg) {
-        setTemp(0, limitreg);
-    }
-
-    const LAllocation *limitTemp() {
-        return getTemp(0)->output();
-    }
+    LCheckOverRecursed()
+    { }
 };
 
 class LParCheckOverRecursed : public LInstructionHelper<0, 1, 1>
@@ -972,22 +981,20 @@ class LCallNative : public LJSCallInstructionHelper<BOX_PIECES, 0, 4>
 };
 
 // Generates a hardcoded callsite for a known, DOM-native target.
-class LCallDOMNative : public LJSCallInstructionHelper<BOX_PIECES, 0, 5>
+class LCallDOMNative : public LJSCallInstructionHelper<BOX_PIECES, 0, 4>
 {
   public:
     LIR_HEADER(CallDOMNative)
 
     LCallDOMNative(uint32_t argslot,
                    const LDefinition &argJSContext, const LDefinition &argObj,
-                   const LDefinition &argPrivate, const LDefinition &argArgc,
-                   const LDefinition &argVp)
+                   const LDefinition &argPrivate, const LDefinition &argArgs)
       : JSCallHelper(argslot)
     {
         setTemp(0, argJSContext);
         setTemp(1, argObj);
         setTemp(2, argPrivate);
-        setTemp(3, argArgc);
-        setTemp(4, argVp);
+        setTemp(3, argArgs);
     }
 
     const LAllocation *getArgJSContext() {
@@ -999,11 +1006,8 @@ class LCallDOMNative : public LJSCallInstructionHelper<BOX_PIECES, 0, 5>
     const LAllocation *getArgPrivate() {
         return getTemp(2)->output();
     }
-    const LAllocation *getArgArgc() {
+    const LAllocation *getArgArgs() {
         return getTemp(3)->output();
-    }
-    const LAllocation *getArgVp() {
-        return getTemp(4)->output();
     }
 };
 
@@ -2062,6 +2066,33 @@ class LSqrtD : public LInstructionHelper<1, 1, 0>
     LIR_HEADER(SqrtD)
     LSqrtD(const LAllocation &num) {
         setOperand(0, num);
+    }
+};
+
+class LAtan2D : public LCallInstructionHelper<1, 2, 1>
+{
+  public:
+    LIR_HEADER(Atan2D)
+    LAtan2D(const LAllocation &y, const LAllocation &x, const LDefinition &temp) {
+        setOperand(0, y);
+        setOperand(1, x);
+        setTemp(0, temp);
+    }
+
+    const LAllocation *y() {
+        return getOperand(0);
+    }
+
+    const LAllocation *x() {
+        return getOperand(1);
+    }
+
+    const LDefinition *temp() {
+        return getTemp(0);
+    }
+
+    const LDefinition *output() {
+        return getDef(0);
     }
 };
 

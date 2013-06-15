@@ -944,7 +944,7 @@ js_InitGC(JSRuntime *rt, uint32_t maxbytes)
 #endif
 
 #ifdef JSGC_GENERATIONAL
-    if (!rt->gcNursery.enable())
+    if (!rt->gcNursery.init())
         return false;
 
     if (!rt->gcStoreBuffer.enable())
@@ -1031,7 +1031,7 @@ template <typename T>
 static bool
 AddRoot(JSContext *cx, T *rp, const char *name, JSGCRootType rootType)
 {
-    bool ok = AddRoot(cx->runtime, rp, name, rootType);
+    bool ok = AddRoot(cx->runtime(), rp, name, rootType);
     if (!ok)
         JS_ReportOutOfMemory(cx);
     return ok;
@@ -1471,7 +1471,7 @@ RunLastDitchGC(JSContext *cx, JS::Zone *zone, AllocKind thingKind)
 
     PrepareZoneForGC(zone);
 
-    JSRuntime *rt = cx->runtime;
+    JSRuntime *rt = cx->runtime();
 
     /* The last ditch GC preserves all atoms. */
     AutoKeepAtoms keep(rt);
@@ -1958,7 +1958,7 @@ js::TriggerZoneGC(Zone *zone, JS::gcreason::Reason reason)
 void
 js::MaybeGC(JSContext *cx)
 {
-    JSRuntime *rt = cx->runtime;
+    JSRuntime *rt = cx->runtime();
     rt->assertValidThread();
 
     if (rt->gcZeal() == ZealAllocValue || rt->gcZeal() == ZealPokeValue) {
@@ -2577,8 +2577,8 @@ PurgeRuntime(JSRuntime *rt)
     rt->sourceDataCache.purge();
     rt->evalCache.clear();
 
-    for (ContextIter acx(rt); !acx.done(); acx.next())
-        acx->purge();
+    if (!rt->activeCompilations)
+        rt->parseMapPool.purgeAll();
 }
 
 static bool
@@ -3243,6 +3243,7 @@ JSCompartment::findOutgoingEdges(ComponentFinder<JS::Zone> &finder)
             }
         } else {
             JS_ASSERT(kind == CrossCompartmentKey::DebuggerScript ||
+                      kind == CrossCompartmentKey::DebuggerSource ||
                       kind == CrossCompartmentKey::DebuggerObject ||
                       kind == CrossCompartmentKey::DebuggerEnvironment);
             /*
@@ -4700,7 +4701,7 @@ AutoPrepareForTracing::AutoPrepareForTracing(JSRuntime *rt)
 JSCompartment *
 js::NewCompartment(JSContext *cx, Zone *zone, JSPrincipals *principals)
 {
-    JSRuntime *rt = cx->runtime;
+    JSRuntime *rt = cx->runtime();
     JS_AbortIfWrongThread(rt);
 
     ScopedJSDeletePtr<Zone> zoneHolder;
@@ -4747,12 +4748,12 @@ void
 gc::RunDebugGC(JSContext *cx)
 {
 #ifdef JS_GC_ZEAL
-    JSRuntime *rt = cx->runtime;
+    JSRuntime *rt = cx->runtime();
 
     if (rt->mainThread.suppressGC)
         return;
 
-    PrepareForDebugGC(cx->runtime);
+    PrepareForDebugGC(cx->runtime());
 
     int type = rt->gcZeal();
     if (type == ZealIncrementalRootsThenFinish ||
@@ -4789,7 +4790,7 @@ gc::RunDebugGC(JSContext *cx)
             rt->gcIncrementalLimit = rt->gcZealFrequency / 2;
         }
     } else if (type == ZealPurgeAnalysisValue) {
-        cx->compartment->types.maybePurgeAnalysis(cx, /* force = */ true);
+        cx->compartment()->types.maybePurgeAnalysis(cx, /* force = */ true);
     } else {
         Collect(rt, false, SliceBudget::Unlimited, GC_NORMAL, JS::gcreason::DEBUG_GC);
     }
@@ -4801,7 +4802,7 @@ void
 gc::SetDeterministicGC(JSContext *cx, bool enabled)
 {
 #ifdef JS_GC_ZEAL
-    JSRuntime *rt = cx->runtime;
+    JSRuntime *rt = cx->runtime();
     rt->gcDeterministicOnly = enabled;
 #endif
 }
@@ -4809,14 +4810,14 @@ gc::SetDeterministicGC(JSContext *cx, bool enabled)
 void
 gc::SetValidateGC(JSContext *cx, bool enabled)
 {
-    JSRuntime *rt = cx->runtime;
+    JSRuntime *rt = cx->runtime();
     rt->gcValidate = enabled;
 }
 
 void
 gc::SetFullCompartmentChecks(JSContext *cx, bool enabled)
 {
-    JSRuntime *rt = cx->runtime;
+    JSRuntime *rt = cx->runtime();
     rt->gcFullCompartmentChecks = enabled;
 }
 
@@ -4905,7 +4906,7 @@ ReleaseScriptCounts(FreeOp *fop)
 JS_FRIEND_API(void)
 js::StartPCCountProfiling(JSContext *cx)
 {
-    JSRuntime *rt = cx->runtime;
+    JSRuntime *rt = cx->runtime();
 
     if (rt->profilingScripts)
         return;
@@ -4921,7 +4922,7 @@ js::StartPCCountProfiling(JSContext *cx)
 JS_FRIEND_API(void)
 js::StopPCCountProfiling(JSContext *cx)
 {
-    JSRuntime *rt = cx->runtime;
+    JSRuntime *rt = cx->runtime();
 
     if (!rt->profilingScripts)
         return;
@@ -4953,7 +4954,7 @@ js::StopPCCountProfiling(JSContext *cx)
 JS_FRIEND_API(void)
 js::PurgePCCounts(JSContext *cx)
 {
-    JSRuntime *rt = cx->runtime;
+    JSRuntime *rt = cx->runtime();
 
     if (!rt->scriptAndCountsVector)
         return;
@@ -5035,7 +5036,7 @@ ArenaLists::containsArena(JSRuntime *rt, ArenaHeader *needle)
 
 
 AutoMaybeTouchDeadZones::AutoMaybeTouchDeadZones(JSContext *cx)
-  : runtime(cx->runtime),
+  : runtime(cx->runtime()),
     markCount(runtime->gcObjectsMarkedInDeadZones),
     inIncremental(JS::IsIncrementalGCInProgress(runtime)),
     manipulatingDeadZones(runtime->gcManipulatingDeadZones)
@@ -5063,7 +5064,7 @@ AutoMaybeTouchDeadZones::~AutoMaybeTouchDeadZones()
 }
 
 AutoSuppressGC::AutoSuppressGC(JSContext *cx)
-  : suppressGC_(cx->runtime->mainThread.suppressGC)
+  : suppressGC_(cx->runtime()->mainThread.suppressGC)
 {
     suppressGC_++;
 }

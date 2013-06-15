@@ -46,6 +46,7 @@ class AudioListener;
 class BiquadFilterNode;
 class ChannelMergerNode;
 class ChannelSplitterNode;
+class ConvolverNode;
 class DelayNode;
 class DynamicsCompressorNode;
 class GainNode;
@@ -167,6 +168,9 @@ public:
   already_AddRefed<PannerNode>
   CreatePanner();
 
+  already_AddRefed<ConvolverNode>
+  CreateConvolver();
+
   already_AddRefed<ChannelSplitterNode>
   CreateChannelSplitter(uint32_t aNumberOfOutputs, ErrorResult& aRv);
 
@@ -200,6 +204,8 @@ public:
   void UnregisterScriptProcessorNode(ScriptProcessorNode* aNode);
   void UpdatePannerSource();
 
+  uint32_t MaxChannelCount() const;
+
   JSContext* GetJSContext() const;
 
 private:
@@ -223,6 +229,8 @@ private:
   // Hashset containing all ScriptProcessorNodes in order to stop them.
   // These are all weak pointers.
   nsTHashtable<nsPtrHashKey<ScriptProcessorNode> > mScriptProcessorNodes;
+  // Number of channels passed in the OfflineAudioContext ctor.
+  uint32_t mNumberOfChannels;
   bool mIsOffline;
 };
 

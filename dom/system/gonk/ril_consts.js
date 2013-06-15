@@ -430,6 +430,7 @@ this.ICC_EF_SMS    = 0x6f3c;
 this.ICC_EF_MSISDN = 0x6f40;
 this.ICC_EF_CBMI   = 0x6f45;
 this.ICC_EF_SPN    = 0x6f46;
+this.ICC_EF_CBMID  = 0x6f48;
 this.ICC_EF_SDN    = 0x6f49;
 this.ICC_EF_EXT1   = 0x6f4a;
 this.ICC_EF_EXT2   = 0x6f4b;
@@ -1073,6 +1074,7 @@ this.GECKO_ICC_SERVICES = {
     CBMI: 14,
     SPN: 17,
     SDN: 18,
+    DATA_DOWNLOAD_SMS_CB: 25,
     DATA_DOWNLOAD_SMS_PP: 26,
     CBMIR: 30,
     BDN: 31,
@@ -1088,6 +1090,7 @@ this.GECKO_ICC_SERVICES = {
     CBMIR: 16,
     SPN: 19,
     DATA_DOWNLOAD_SMS_PP: 28,
+    DATA_DOWNLOAD_SMS_CB: 29,
     PNN: 45,
     OPL: 46,
     SPDI: 51
@@ -1338,7 +1341,7 @@ this.PDU_PID_REPLACE_SHORT_MESSAGE_TYPE_5 = 0x45;
 this.PDU_PID_REPLACE_SHORT_MESSAGE_TYPE_6 = 0x46;
 this.PDU_PID_REPLACE_SHORT_MESSAGE_TYPE_7 = 0x47;
 this.PDU_PID_ENHANDED_MESSAGE_SERVICE     = 0x5E;
-this.PDU_PID_RETURN_CALL_MESSAGE          = 0x5F
+this.PDU_PID_RETURN_CALL_MESSAGE          = 0x5F;
 this.PDU_PID_ANSI_136_R_DATA              = 0x7C;
 this.PDU_PID_ME_DATA_DOWNLOAD             = 0x7D;
 this.PDU_PID_ME_DEPERSONALIZATION         = 0x7E;
@@ -2161,6 +2164,18 @@ this.DATACALL_AUTH_PAP = 1;
 this.DATACALL_AUTH_CHAP = 2;
 this.DATACALL_AUTH_PAP_OR_CHAP = 3;
 
+this.GECKO_DATACALL_AUTH_NONE = "none";
+this.GECKO_DATACALL_AUTH_PAP = "pap";
+this.GECKO_DATACALL_AUTH_CHAP = "chap";
+this.GECKO_DATACALL_AUTH_PAP_OR_CHAP = "papOrChap";
+this.GECKO_DATACALL_AUTH_DEFAULT = GECKO_DATACALL_AUTH_PAP_OR_CHAP;
+this.RIL_DATACALL_AUTH_TO_GECKO = [
+  GECKO_DATACALL_AUTH_NONE,         // DATACALL_AUTH_NONE
+  GECKO_DATACALL_AUTH_PAP,          // DATACALL_AUTH_PAP
+  GECKO_DATACALL_AUTH_CHAP,         // DATACALL_AUTH_CHAP
+  GECKO_DATACALL_AUTH_PAP_OR_CHAP   // DATACALL_AUTH_PAP_OR_CHAP
+];
+
 this.DATACALL_PROFILE_DEFAULT = 0;
 this.DATACALL_PROFILE_TETHERED = 1;
 this.DATACALL_PROFILE_OEM_BASE = 1000;
@@ -2538,6 +2553,43 @@ this.PDU_CDMA_MSG_CODING_IS_91_TYPE_VOICEMAIL_STATUS = 0x82;
 this.PDU_CDMA_MSG_CODING_IS_91_TYPE_SMS_FULL = 0x83;
 this.PDU_CDMA_MSG_CODING_IS_91_TYPE_CLI = 0x84;
 this.PDU_CDMA_MSG_CODING_IS_91_TYPE_SMS = 0x85;
+
+/**
+ * The table for MCC which the length of MNC is 3
+ *
+ * This table is built from below links.
+ * - http://www.itu.int/pub/T-SP-E.212B-2013
+ * - http://en.wikipedia.org/wiki/Mobile_Network_Code
+ */
+this.MCC_TABLE_FOR_MNC_LENGTH_IS_3 = [
+  "302",  // Canada
+  "310",  // United States of America
+  "311",  // United States of America
+  "312",  // United States of America
+  "313",  // United States of America
+  "316",  // United States of America
+  "330",  // Puerto Rico
+  "334",  // Mexico
+  "338",  // Jamaica
+  "342",  // Barbados
+  "344",  // Antigua and Barbuda
+  "346",  // Cayman Islands
+  "348",  // British Virgin Islands
+  "350",  // Bermuda
+  "352",  // Grenada
+  "354",  // Montserrat
+  "356",  // Saint Kitts and Nevis
+  "358",  // Saint Lucia
+  "360",  // Saint Vincent and the Grenadines
+  "365",  // Anguilla
+  "366",  // Dominica
+  "376",  // Turks and Caicos Islands
+  "405",  // India
+  "708",  // Honduras
+  "722",  // Argentina
+  "732",  // Colombia
+  "750"   // Falkland Islands (Malvinas)
+];
 
 // Allow this file to be imported via Components.utils.import().
 this.EXPORTED_SYMBOLS = Object.keys(this);

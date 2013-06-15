@@ -252,7 +252,7 @@ InitExnPrivate(JSContext *cx, HandleObject exnObject, HandleString message,
     JS_ASSERT(exnObject->isError());
     JS_ASSERT(!exnObject->getPrivate());
 
-    JSCheckAccessOp checkAccess = cx->runtime->securityCallbacks->checkObjectAccess;
+    JSCheckAccessOp checkAccess = cx->runtime()->securityCallbacks->checkObjectAccess;
 
     Vector<JSStackTraceStackElem> frames(cx);
     {
@@ -274,7 +274,7 @@ InitExnPrivate(JSContext *cx, HandleObject exnObject, HandleString message,
             if (i.isNonEvalFunctionFrame()) {
                 JSAtom *atom = i.callee()->displayAtom();
                 if (atom == NULL)
-                    atom = cx->runtime->emptyString;
+                    atom = cx->runtime()->emptyString;
                 frame.funName = atom;
             } else {
                 frame.funName = NULL;
@@ -559,7 +559,7 @@ Exception(JSContext *cx, unsigned argc, Value *vp)
     /* Set the 'message' property. */
     RootedString message(cx);
     if (args.hasDefined(0)) {
-        message = ToString<CanGC>(cx, args[0]);
+        message = ToString<CanGC>(cx, args.handleAt(0));
         if (!message)
             return false;
         args[0].setString(message);
@@ -574,12 +574,12 @@ Exception(JSContext *cx, unsigned argc, Value *vp)
     RootedScript script(cx, iter.done() ? NULL : iter.script());
     RootedString filename(cx);
     if (args.length() > 1) {
-        filename = ToString<CanGC>(cx, args[1]);
+        filename = ToString<CanGC>(cx, args.handleAt(1));
         if (!filename)
             return false;
         args[1].setString(filename);
     } else {
-        filename = cx->runtime->emptyString;
+        filename = cx->runtime()->emptyString;
         if (!iter.done()) {
             if (const char *cfilename = script->filename()) {
                 filename = FilenameToString(cx, cfilename);
@@ -645,7 +645,7 @@ exn_toString(JSContext *cx, unsigned argc, Value *vp)
     /* Step 6. */
     RootedString message(cx);
     if (msgVal.isUndefined()) {
-        message = cx->runtime->emptyString;
+        message = cx->runtime()->emptyString;
     } else {
         message = ToString<CanGC>(cx, msgVal);
         if (!message)
@@ -791,7 +791,7 @@ InitErrorClass(JSContext *cx, Handle<GlobalObject*> global, int type, HandleObje
 
     RootedValue nameValue(cx, StringValue(name));
     RootedValue zeroValue(cx, Int32Value(0));
-    RootedValue empty(cx, StringValue(cx->runtime->emptyString));
+    RootedValue empty(cx, StringValue(cx->runtime()->emptyString));
     RootedId nameId(cx, NameToId(cx->names().name));
     RootedId messageId(cx, NameToId(cx->names().message));
     RootedId fileNameId(cx, NameToId(cx->names().fileName));
@@ -865,9 +865,9 @@ js_GetLocalizedErrorMessage(JSContext* cx, void *userRef, const char *locale,
 {
     const JSErrorFormatString *errorString = NULL;
 
-    if (cx->runtime->localeCallbacks && cx->runtime->localeCallbacks->localeGetErrorMessage) {
-        errorString = cx->runtime->localeCallbacks
-                                 ->localeGetErrorMessage(userRef, locale, errorNumber);
+    if (cx->runtime()->localeCallbacks && cx->runtime()->localeCallbacks->localeGetErrorMessage) {
+        errorString = cx->runtime()->localeCallbacks
+                                   ->localeGetErrorMessage(userRef, locale, errorNumber);
     }
     if (!errorString)
         errorString = js_GetErrorMessage(userRef, locale, errorNumber);
@@ -1083,7 +1083,7 @@ js_ReportUncaughtException(JSContext *cx)
         }
 
         if (JS_GetProperty(cx, exnObject, filename_str, &roots[4])) {
-            JSString *tmp = ToString<CanGC>(cx, roots[4]);
+            JSString *tmp = ToString<CanGC>(cx, HandleValue::fromMarkedLocation(&roots[4]));
             if (tmp)
                 filename.encodeLatin1(cx, tmp);
         }
@@ -1160,11 +1160,11 @@ js_CopyErrorObject(JSContext *cx, HandleObject errobj, HandleObject scope)
     ScopedJSFreePtr<JSErrorReport> autoFreeErrorReport(copy->errorReport);
 
     copy->message.init(priv->message);
-    if (!cx->compartment->wrap(cx, &copy->message))
+    if (!cx->compartment()->wrap(cx, &copy->message))
         return NULL;
     JS::Anchor<JSString *> messageAnchor(copy->message);
     copy->filename.init(priv->filename);
-    if (!cx->compartment->wrap(cx, &copy->filename))
+    if (!cx->compartment()->wrap(cx, &copy->filename))
         return NULL;
     JS::Anchor<JSString *> filenameAnchor(copy->filename);
     copy->lineno = priv->lineno;

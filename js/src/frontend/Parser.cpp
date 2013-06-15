@@ -21,6 +21,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+
 #include "jstypes.h"
 #include "jsutil.h"
 #include "jsapi.h"
@@ -38,9 +39,9 @@
 #include "jsscript.h"
 #include "jsstr.h"
 
+#include "frontend/BytecodeCompiler.h"
 #include "frontend/FoldConstants.h"
 #include "frontend/ParseMaps.h"
-#include "frontend/Parser.h"
 #include "frontend/TokenStream.h"
 #include "gc/Marking.h"
 #include "vm/Interpreter.h"
@@ -56,6 +57,7 @@
 
 #include "vm/NumericConversions.h"
 #include "vm/RegExpObject-inl.h"
+#include "vm/RegExpStatics-inl.h"
 
 using namespace js;
 using namespace js::gc;
@@ -348,7 +350,7 @@ Parser<ParseHandler>::reportHelper(ParseReportKind kind, bool strict, uint32_t o
         result =
             tokenStream.reportCompileErrorNumberVA(offset, JSREPORT_WARNING, errorNumber, args);
         break;
-      case ParseStrictWarning:
+      case ParseExtraWarning:
         result = tokenStream.reportStrictWarningErrorNumberVA(offset, errorNumber, args);
         break;
       case ParseStrictError:
@@ -410,7 +412,7 @@ Parser<ParseHandler>::Parser(JSContext *cx, const CompileOptions &options,
     traceListHead(NULL),
     pc(NULL),
     sct(NULL),
-    keepAtoms(cx->runtime),
+    keepAtoms(cx->runtime()),
     foldConstants(foldConstants),
     compileAndGo(options.compileAndGo),
     selfHostingMode(options.selfHostingMode),
@@ -420,24 +422,15 @@ Parser<ParseHandler>::Parser(JSContext *cx, const CompileOptions &options,
     // XXX bug 678037 always disable syntax parsing for now.
     handler.disableSyntaxParser();
 
-    cx->activeCompilations++;
+    cx->runtime()->activeCompilations++;
 
-    // The Mozilla specific 'strict' option adds extra warnings which are not
-    // generated if functions are parsed lazily. Note that the standard
-    // "use strict" does not inhibit lazy parsing.
-    if (context->hasStrictOption())
+    // The Mozilla specific JSOPTION_EXTRA_WARNINGS option adds extra warnings
+    // which are not generated if functions are parsed lazily. Note that the
+    // standard "use strict" does not inhibit lazy parsing.
+    if (context->hasExtraWarningsOption())
         handler.disableSyntaxParser();
-}
 
-template <typename ParseHandler>
-bool
-Parser<ParseHandler>::init()
-{
-    if (!context->ensureParseMapPool())
-        return false;
-
-    tempPoolMark = context->tempLifoAlloc().mark();
-    return true;
+    tempPoolMark = cx->tempLifoAlloc().mark();
 }
 
 template <typename ParseHandler>
@@ -445,7 +438,7 @@ Parser<ParseHandler>::~Parser()
 {
     JSContext *cx = context;
     cx->tempLifoAlloc().release(tempPoolMark);
-    cx->activeCompilations--;
+    cx->runtime()->activeCompilations--;
 
     /*
      * The parser can allocate enormous amounts of memory for large functions.
@@ -496,6 +489,8 @@ FunctionBox::FunctionBox(JSContext *cx, ObjectBox* traceListHead, JSFunction *fu
     insideUseAsm(outerpc && outerpc->useAsmOrInsideUseAsm()),
     funCxFlags()
 {
+    JS_ASSERT(fun->isTenured());
+
     if (!outerpc) {
         inWith = false;
 
@@ -602,6 +597,12 @@ void
 Parser<ParseHandler>::trace(JSTracer *trc)
 {
     traceListHead->trace(trc);
+}
+
+void
+MarkParser(JSTracer *trc, AutoGCRooter *parser)
+{
+    static_cast<Parser<FullParseHandler> *>(parser)->trace(trc);
 }
 
 /*
@@ -793,7 +794,7 @@ Parser<ParseHandler>::checkFinalReturn(Node pn)
 {
     JS_ASSERT(pc->sc->isFunctionBox());
     return HasFinalReturn(pn) == ENDS_IN_RETURN ||
-           reportBadReturn(pn, ParseStrictWarning,
+           reportBadReturn(pn, ParseExtraWarning,
                            JSMSG_NO_RETURN_VALUE, JSMSG_ANON_NO_RETURN_VALUE);
 }
 
@@ -837,10 +838,7 @@ Parser<ParseHandler>::checkStrictBinding(HandlePropertyName name, Node pn)
     if (!pc->sc->needStrictChecks())
         return true;
 
-    if (name == context->names().eval ||
-        name == context->names().arguments ||
-        FindKeyword(name->charsZ(), name->length()))
-    {
+    if (name == context->names().eval || name == context->names().arguments || IsKeyword(name)) {
         JSAutoByteString bytes;
         if (!js_AtomToPrintableString(context, name, &bytes))
             return false;
@@ -1064,7 +1062,7 @@ Parser<ParseHandler>::functionBody(FunctionSyntaxKind kind, FunctionBodyType typ
     }
 
     /* Check for falling off the end of a function that returns a value. */
-    if (context->hasStrictOption() && pc->funHasReturnExpr && !checkFinalReturn(pn))
+    if (context->hasExtraWarningsOption() && pc->funHasReturnExpr && !checkFinalReturn(pn))
         return null();
 
     if (kind != Arrow) {
@@ -1720,10 +1718,10 @@ Parser<FullParseHandler>::checkFunctionDefinition(HandlePropertyName funName,
             JS_ASSERT(!dn->isUsed());
             JS_ASSERT(dn->isDefn());
 
-            if (context->hasStrictOption() || dn->kind() == Definition::CONST) {
+            if (context->hasExtraWarningsOption() || dn->kind() == Definition::CONST) {
                 JSAutoByteString name;
                 ParseReportKind reporter = (dn->kind() != Definition::CONST)
-                                           ? ParseStrictWarning
+                                           ? ParseExtraWarning
                                            : ParseError;
                 if (!js_AtomToPrintableString(context, funName, &name) ||
                     !report(reporter, false, NULL, JSMSG_REDECLARED_VAR,
@@ -2327,7 +2325,7 @@ template <>
 ParseNode *
 Parser<FullParseHandler>::moduleDecl()
 {
-    JS_ASSERT(tokenStream.currentToken().name() == context->runtime->atomState.module);
+    JS_ASSERT(tokenStream.currentToken().name() == context->runtime()->atomState.module);
     if (!((pc->sc->isGlobalSharedContext() || pc->sc->isModuleBox()) && pc->atBodyLevel()))
     {
         report(ParseError, false, NULL, JSMSG_MODULE_STATEMENT);
@@ -2339,7 +2337,7 @@ Parser<FullParseHandler>::moduleDecl()
         return NULL;
     JS_ALWAYS_TRUE(tokenStream.matchToken(TOK_STRING));
     RootedAtom atom(context, tokenStream.currentToken().atom());
-    Module *module = js_NewModule(context, atom);
+    Module *module = Module::create(context, atom);
     if (!module)
         return NULL;
     ModuleBox *modulebox = newModuleBox(module, pc);
@@ -2468,7 +2466,7 @@ Parser<ParseHandler>::maybeParseDirective(Node pn, bool *cont)
         // in other browsers first.
         handler.setPrologue(pn);
 
-        if (directive == context->runtime->atomState.useStrict) {
+        if (directive == context->runtime()->atomState.useStrict) {
             // We're going to be in strict mode. Note that this scope explicitly
             // had "use strict";
             pc->sc->setExplicitUseStrict();
@@ -2614,7 +2612,7 @@ Parser<ParseHandler>::condition()
 
     /* Check for (a = b) and warn about possible (a == b) mistype. */
     if (handler.isOperationWithoutParens(pn, PNK_ASSIGN) &&
-        !report(ParseStrictWarning, false, null(), JSMSG_EQUAL_AS_ASSIGN))
+        !report(ParseExtraWarning, false, null(), JSMSG_EQUAL_AS_ASSIGN))
     {
         return null();
     }
@@ -2765,6 +2763,51 @@ PopStatementPC(JSContext *cx, ParseContext<ParseHandler> *pc)
     }
 }
 
+/*
+ * The function LexicalLookup searches a static binding for the given name in
+ * the stack of statements enclosing the statement currently being parsed. Each
+ * statement that introduces a new scope has a corresponding scope object, on
+ * which the bindings for that scope are stored. LexicalLookup either returns
+ * the innermost statement which has a scope object containing a binding with
+ * the given name, or NULL.
+ */
+template <class ContextT>
+typename ContextT::StmtInfo *
+LexicalLookup(ContextT *ct, HandleAtom atom, int *slotp, typename ContextT::StmtInfo *stmt)
+{
+    RootedId id(ct->sc->context, AtomToId(atom));
+
+    if (!stmt)
+        stmt = ct->topScopeStmt;
+    for (; stmt; stmt = stmt->downScope) {
+        /*
+         * With-statements introduce dynamic bindings. Since dynamic bindings
+         * can potentially override any static bindings introduced by statements
+         * further up the stack, we have to abort the search.
+         */
+        if (stmt->type == STMT_WITH)
+            break;
+
+        // Skip statements that do not introduce a new scope
+        if (!stmt->isBlockScope)
+            continue;
+
+        StaticBlockObject &blockObj = *stmt->blockObj;
+        Shape *shape = blockObj.nativeLookup(ct->sc->context, id);
+        if (shape) {
+            JS_ASSERT(shape->hasShortID());
+
+            if (slotp)
+                *slotp = blockObj.stackDepth() + shape->shortid();
+            return stmt;
+        }
+    }
+
+    if (slotp)
+        *slotp = -1;
+    return stmt;
+}
+
 template <typename ParseHandler>
 static inline bool
 OuterLet(ParseContext<ParseHandler> *pc, StmtInfoPC *stmt, HandleAtom atom)
@@ -2843,7 +2886,7 @@ Parser<ParseHandler>::bindVarOrConst(JSContext *cx, BindData<ParseHandler> *data
             parser->report(ParseError, false, pn, JSMSG_REDECLARED_PARAM, bytes.ptr());
             return false;
         }
-        if (!parser->report(ParseStrictWarning, false, pn, JSMSG_VAR_HIDES_ARG, bytes.ptr()))
+        if (!parser->report(ParseExtraWarning, false, pn, JSMSG_VAR_HIDES_ARG, bytes.ptr()))
             return false;
     } else {
         bool error = (isConstDecl ||
@@ -2851,12 +2894,12 @@ Parser<ParseHandler>::bindVarOrConst(JSContext *cx, BindData<ParseHandler> *data
                       (dn_kind == Definition::LET &&
                        (stmt->type != STMT_CATCH || OuterLet(pc, stmt, name))));
 
-        if (cx->hasStrictOption()
+        if (cx->hasExtraWarningsOption()
             ? data->op != JSOP_DEFVAR || dn_kind != Definition::VAR
             : error)
         {
             JSAutoByteString bytes;
-            ParseReportKind reporter = error ? ParseError : ParseStrictWarning;
+            ParseReportKind reporter = error ? ParseError : ParseExtraWarning;
             if (!js_AtomToPrintableString(cx, name, &bytes) ||
                 !parser->report(reporter, false, pn, JSMSG_REDECLARED_VAR,
                                 Definition::kindString(dn_kind), bytes.ptr()))
@@ -3247,8 +3290,8 @@ Parser<ParseHandler>::returnOrYield(bool useAssignExpr)
         return null();
     }
 
-    if (context->hasStrictOption() && pc->funHasReturnExpr && pc->funHasReturnVoid &&
-        !reportBadReturn(pn, ParseStrictWarning,
+    if (context->hasExtraWarningsOption() && pc->funHasReturnExpr && pc->funHasReturnVoid &&
+        !reportBadReturn(pn, ParseExtraWarning,
                          JSMSG_NO_RETURN_VALUE, JSMSG_ANON_NO_RETURN_VALUE))
     {
         return null();
@@ -3783,11 +3826,7 @@ Parser<FullParseHandler>::forStatement()
          * any, else NULL. Note that the "declaration with initializer" case
          * rewrites the loop-head, moving the decl and setting pn1 to NULL.
          */
-        pn2 = NULL;
         if (forDecl) {
-            /* Tell EmitVariables that pn1 is part of a for/in. */
-            pn1->pn_xflags |= PNX_FORINVAR;
-
             pn2 = pn1->pn_head;
             if ((pn2->isKind(PNK_NAME) && pn2->maybeExpr())
 #if JS_HAS_DESTRUCTURING
@@ -3814,14 +3853,12 @@ Parser<FullParseHandler>::forStatement()
                     return null();
 
                 /*
-                 * All of 'var x = i' is hoisted above 'for (x in o)',
-                 * so clear PNX_FORINVAR.
+                 * All of 'var x = i' is hoisted above 'for (x in o)'.
                  *
                  * Request JSOP_POP here since the var is for a simple
                  * name (it is not a destructuring binding's left-hand
                  * side) and it has an initializer.
                  */
-                pn1->pn_xflags &= ~PNX_FORINVAR;
                 pn1->pn_xflags |= PNX_POPVAR;
                 pn1 = NULL;
 
@@ -4285,10 +4322,10 @@ Parser<ParseHandler>::withStatement()
     uint32_t begin = tokenStream.currentToken().pos.begin;
 
     // In most cases, we want the constructs forbidden in strict mode code to be
-    // a subset of those that JSOPTION_STRICT warns about, and we should use
-    // reportStrictModeError.  However, 'with' is the sole instance of a
+    // a subset of those that JSOPTION_EXTRA_WARNINGS warns about, and we should
+    // use reportStrictModeError.  However, 'with' is the sole instance of a
     // construct that is forbidden in strict mode code, but doesn't even merit a
-    // warning under JSOPTION_STRICT.  See
+    // warning under JSOPTION_EXTRA_WARNINGS.  See
     // https://bugzilla.mozilla.org/show_bug.cgi?id=514576#c1.
     if (pc->sc->strict && !report(ParseStrictError, true, null(), JSMSG_STRICT_CODE_WITH))
         return null();
@@ -4536,7 +4573,7 @@ Parser<ParseHandler>::statement()
             return null();
 
         if (handler.isEmptySemicolon(thenBranch) &&
-            !report(ParseStrictWarning, false, null(), JSMSG_EMPTY_CONSEQUENT))
+            !report(ParseExtraWarning, false, null(), JSMSG_EMPTY_CONSEQUENT))
         {
             return null();
         }
@@ -6023,7 +6060,6 @@ Parser<FullParseHandler>::comprehensionTail(ParseNode *kid, unsigned blockid, bo
         vars->pn_pos = pn3->pn_pos;
         vars->makeEmpty();
         vars->append(pn3);
-        vars->pn_xflags |= PNX_FORINVAR;
 
         /* Definitions can't be passed directly to EmitAssignment as lhs. */
         pn3 = cloneLeftHandSide(pn3);
@@ -6503,13 +6539,6 @@ Parser<FullParseHandler>::newRegExp(const jschar *buf, size_t length, RegExpFlag
     if (!reobj)
         return NULL;
 
-    if (!compileAndGo) {
-        if (!JSObject::clearParent(context, reobj))
-            return NULL;
-        if (!JSObject::clearType(context, reobj))
-            return NULL;
-    }
-
     pn->pn_objbox = newObjectBox(reobj);
     if (!pn->pn_objbox)
         return NULL;
@@ -6673,7 +6702,7 @@ Parser<ParseHandler>::primaryExpr(TokenKind tt)
          * A map from property names we've seen thus far to a mask of property
          * assignment types, stored and retrieved with ALE_SET_INDEX/ALE_INDEX.
          */
-        AtomIndexMap seen(context);
+        AtomIndexMap seen;
 
         enum AssignmentType {
             GET     = 0x1,
@@ -6686,11 +6715,13 @@ Parser<ParseHandler>::primaryExpr(TokenKind tt)
             return null();
 
         RootedAtom atom(context);
+        Value tmp;
         for (;;) {
             TokenKind ltok = tokenStream.getToken(TSF_KEYWORD_IS_NAME);
             switch (ltok) {
               case TOK_NUMBER:
-                atom = ToAtom<CanGC>(context, DoubleValue(tokenStream.currentToken().number()));
+                tmp = DoubleValue(tokenStream.currentToken().number());
+                atom = ToAtom<CanGC>(context, HandleValue::fromMarkedLocation(&tmp));
                 if (!atom)
                     return null();
                 pn3 = handler.newNumber(tokenStream.currentToken());
@@ -6723,7 +6754,8 @@ Parser<ParseHandler>::primaryExpr(TokenKind tt)
                             pn3 = handler.newNumber(index);
                             if (!pn3)
                                 return null();
-                            atom = ToAtom<CanGC>(context, DoubleValue(index));
+                            tmp = DoubleValue(index);
+                            atom = ToAtom<CanGC>(context, HandleValue::fromMarkedLocation(&tmp));
                             if (!atom)
                                 return null();
                         } else {
@@ -6733,7 +6765,8 @@ Parser<ParseHandler>::primaryExpr(TokenKind tt)
                         }
                     } else if (tt == TOK_NUMBER) {
                         double number = tokenStream.currentToken().number();
-                        atom = ToAtom<CanGC>(context, DoubleValue(number));
+                        tmp = DoubleValue(number);
+                        atom = ToAtom<CanGC>(context, HandleValue::fromMarkedLocation(&tmp));
                         if (!atom)
                             return null();
                         pn3 = handler.newNumber(tokenStream.currentToken());

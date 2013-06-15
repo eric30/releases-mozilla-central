@@ -28,6 +28,9 @@ PRLogModuleInfo* gWMFByteStreamLog = nullptr;
 #define LOG(...)
 #endif
 
+// Limit the number of threads that we use for IO.
+static const uint32_t NumWMFIoThreads = 4;
+
 // Thread pool listener which ensures that MSCOM is initialized and
 // deinitialized on the thread pool thread. We can call back into WMF
 // on this thread, so we need MSCOM working.
@@ -101,6 +104,7 @@ WMFByteStream::WMFByteStream(MediaResource* aResource,
     mResource(aResource),
     mReentrantMonitor("WMFByteStream.Data"),
     mOffset(0),
+    mBytesConsumed(0),
     mIsShutdown(false)
 {
   NS_ASSERTION(NS_IsMainThread(), "Must be on main thread.");
@@ -141,6 +145,19 @@ WMFByteStream::Init()
     NS_ADDREF(sThreadPool);
 
     rv = sThreadPool->SetName(NS_LITERAL_CSTRING("WMFByteStream Async Read Pool"));
+    NS_ENSURE_SUCCESS(rv, rv);
+    
+    // We limit the number of threads that we use for IO. Note that the thread
+    // limit is the same as the idle limit so that we're not constantly creating
+    // and destroying threads. When the thread pool threads shutdown they
+    // dispatch an event to the main thread to call nsIThread::Shutdown(),
+    // and if we're very busy that can take a while to run, and we end up with
+    // dozens of extra threads. Note that threads that are idle for 60 seconds
+    // are shutdown naturally.
+    rv = sThreadPool->SetThreadLimit(NumWMFIoThreads);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    rv = sThreadPool->SetIdleThreadLimit(NumWMFIoThreads);
     NS_ENSURE_SUCCESS(rv, rv);
 
     nsCOMPtr<nsIThreadPoolListener> listener = new ThreadPoolListener();
@@ -387,6 +404,15 @@ WMFByteStream::Close()
   return S_OK;
 }
 
+uint32_t
+WMFByteStream::GetAndResetBytesConsumedCount()
+{
+  ReentrantMonitorAutoEnter mon(mReentrantMonitor);
+  uint32_t bytesConsumed = mBytesConsumed;
+  mBytesConsumed = 0;
+  return bytesConsumed;
+}
+
 STDMETHODIMP
 WMFByteStream::EndRead(IMFAsyncResult* aResult, ULONG *aBytesRead)
 {
@@ -409,6 +435,10 @@ WMFByteStream::EndRead(IMFAsyncResult* aResult, ULONG *aBytesRead)
 
   LOG("WMFByteStream::EndRead() offset=%lld *aBytesRead=%u mOffset=%lld status=0x%x hr=0x%x eof=%d",
       requestState->mOffset, *aBytesRead, mOffset, aResult->GetStatus(), hr, IsEOS());
+
+  if (SUCCEEDED(aResult->GetStatus())) {
+    mBytesConsumed += requestState->mBytesRead;
+  }
 
   return aResult->GetStatus();
 }

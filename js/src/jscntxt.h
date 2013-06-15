@@ -29,6 +29,7 @@
 #include "prmjtime.h"
 
 #include "ds/LifoAlloc.h"
+#include "frontend/ParseMaps.h"
 #include "gc/Nursery.h"
 #include "gc/Statistics.h"
 #include "gc/StoreBuffer.h"
@@ -128,7 +129,6 @@ class MathCache;
 
 namespace ion {
 class IonRuntime;
-class IonActivation;
 }
 
 class WeakMapBase;
@@ -488,11 +488,6 @@ class PerThreadData : public js::PerThreadDataFriendFields
     inline void setIonStackLimit(uintptr_t limit);
 
     /*
-     * This points to the most recent Ion activation running on the thread.
-     */
-    js::ion::IonActivation  *ionActivation;
-
-    /*
      * asm.js maintains a stack of AsmJSModule activations (see AsmJS.h). This
      * stack is used by JSRuntime::triggerOperationCallback to stop long-
      * running asm.js without requiring dynamic polling operations in the
@@ -501,12 +496,23 @@ class PerThreadData : public js::PerThreadDataFriendFields
      * synchronized (by rt->operationCallbackLock).
      */
   private:
+    friend class js::Activation;
+    friend class js::ActivationIterator;
     friend class js::AsmJSActivation;
+
+    /*
+     * Points to the most recent activation running on the thread.
+     * See Activation comment in vm/Stack.h.
+     */
+    js::Activation *activation_;
 
     /* See AsmJSActivation comment. Protected by rt->operationCallbackLock. */
     js::AsmJSActivation *asmJSActivationStack_;
 
   public:
+    static unsigned offsetOfActivation() {
+        return offsetof(PerThreadData, activation_);
+    }
     static unsigned offsetOfAsmJSActivationStackReadOnly() {
         return offsetof(PerThreadData, asmJSActivationStack_);
     }
@@ -516,6 +522,16 @@ class PerThreadData : public js::PerThreadDataFriendFields
     }
     js::AsmJSActivation *asmJSActivationStackFromOwnerThread() const {
         return asmJSActivationStack_;
+    }
+
+    js::Activation *activation() const {
+        return activation_;
+    }
+    bool currentlyRunningInInterpreter() const {
+        return activation_->isInterpreter();
+    }
+    bool currentlyRunningInJit() const {
+        return activation_->isJit();
     }
 
     /*
@@ -610,8 +626,6 @@ struct MallocProvider
 namespace gc {
 class MarkingValidator;
 } // namespace gc
-
-class JS_FRIEND_API(AutoEnterPolicy);
 
 typedef Vector<JS::Zone *, 1, SystemAllocPolicy> ZoneVector;
 
@@ -1259,6 +1273,16 @@ struct JSRuntime : public JS::shadow::Runtime,
 
     js::ConservativeGCData conservativeGC;
 
+    /* Pool of maps used during parse/emit. */
+    js::frontend::ParseMapPool parseMapPool;
+
+    /*
+     * Count of currently active compilations.
+     * When there are compilations active for the context, the GC must not
+     * purge the ParseMapPool.
+     */
+    unsigned activeCompilations;
+
   private:
     JSPrincipals        *trustedPrincipals_;
   public:
@@ -1502,8 +1526,11 @@ struct JSContext : js::ContextFriendFields,
     JSContext *thisDuringConstruction() { return this; }
     ~JSContext();
 
+    JSRuntime *runtime() const { return runtime_; }
+    JSCompartment *compartment() const { return compartment_; }
+
     inline JS::Zone *zone() const;
-    js::PerThreadData &mainThread() { return runtime->mainThread; }
+    js::PerThreadData &mainThread() { return runtime()->mainThread; }
 
   private:
     /* See JSContext::findVersion. */
@@ -1519,7 +1546,7 @@ struct JSContext : js::ContextFriendFields,
     unsigned            options_;            /* see jsapi.h for JSOPTION_* */
 
   public:
-    int32_t             reportGranularity;  /* see jsprobes.h */
+    int32_t             reportGranularity;  /* see vm/Probes.h */
 
     js::AutoResolving   *resolvingList;
 
@@ -1603,11 +1630,6 @@ struct JSContext : js::ContextFriendFields,
     /* Wrap cx->exception for the current compartment. */
     void wrapPendingException();
 
-  private:
-    /* Lazily initialized pool of maps used during parse/emit. */
-    js::frontend::ParseMapPool *parseMapPool_;
-
-  public:
     /* State for object and array toSource conversion. */
     js::ObjectSet       cycleDetectorSet;
 
@@ -1624,13 +1646,6 @@ struct JSContext : js::ContextFriendFields,
     inline js::RegExpStatics *regExpStatics();
 
   public:
-    js::frontend::ParseMapPool &parseMapPool() {
-        JS_ASSERT(parseMapPool_);
-        return *parseMapPool_;
-    }
-
-    inline bool ensureParseMapPool();
-
     /*
      * The default script compilation version can be set iff there is no code running.
      * This typically occurs via the JSAPI right after a context is constructed.
@@ -1694,16 +1709,16 @@ struct JSContext : js::ContextFriendFields,
         return !!(options_ & opt);
     }
 
-    bool hasStrictOption() const { return hasOption(JSOPTION_STRICT); }
+    bool hasExtraWarningsOption() const { return hasOption(JSOPTION_EXTRA_WARNINGS); }
     bool hasWErrorOption() const { return hasOption(JSOPTION_WERROR); }
 
-    js::LifoAlloc &tempLifoAlloc() { return runtime->tempLifoAlloc; }
+    js::LifoAlloc &tempLifoAlloc() { return runtime()->tempLifoAlloc; }
     inline js::LifoAlloc &analysisLifoAlloc();
     inline js::LifoAlloc &typeLifoAlloc();
 
     inline js::PropertyTree &propertyTree();
 
-    js::PropertyCache &propertyCache() { return runtime->propertyCache; }
+    js::PropertyCache &propertyCache() { return runtime()->propertyCache; }
 
 #ifdef JS_THREADSAFE
     unsigned            outstandingRequests;/* number of JS_BeginRequest calls
@@ -1745,14 +1760,12 @@ struct JSContext : js::ContextFriendFields,
     void leaveGenerator(JSGenerator *gen);
 
     void *onOutOfMemory(void *p, size_t nbytes) {
-        return runtime->onOutOfMemory(p, nbytes, this);
+        return runtime()->onOutOfMemory(p, nbytes, this);
     }
     void updateMallocCounter(size_t nbytes);
     void reportAllocationOverflow() {
         js_ReportAllocationOverflow(this);
     }
-
-    void purge();
 
     bool isExceptionPending() {
         return throwing;
@@ -1770,7 +1783,7 @@ struct JSContext : js::ContextFriendFields,
         exception.setUndefined();
     }
 
-    JSAtomState & names() { return runtime->atomState; }
+    JSAtomState & names() { return runtime()->atomState; }
 
 #ifdef DEBUG
     /*
@@ -1779,13 +1792,6 @@ struct JSContext : js::ContextFriendFields,
      */
     bool stackIterAssertionEnabled;
 #endif
-
-    /*
-     * Count of currently active compilations.
-     * When there are compilations active for the context, the GC must not
-     * purge the ParseMapPool.
-     */
-    unsigned activeCompilations;
 
     /*
      * See JS_SetTrustedPrincipals in jsapi.h.
@@ -2095,7 +2101,7 @@ js_ReportValueErrorFlags(JSContext *cx, unsigned flags, const unsigned errorNumb
 extern const JSErrorFormatString js_ErrorFormatString[JSErr_Limit];
 
 #ifdef JS_THREADSAFE
-# define JS_ASSERT_REQUEST_DEPTH(cx)  JS_ASSERT((cx)->runtime->requestDepth >= 1)
+# define JS_ASSERT_REQUEST_DEPTH(cx)  JS_ASSERT((cx)->runtime()->requestDepth >= 1)
 #else
 # define JS_ASSERT_REQUEST_DEPTH(cx)  ((void) 0)
 #endif
@@ -2119,7 +2125,7 @@ static MOZ_ALWAYS_INLINE bool
 JS_CHECK_OPERATION_LIMIT(JSContext *cx)
 {
     JS_ASSERT_REQUEST_DEPTH(cx);
-    return !cx->runtime->interrupt || js_InvokeOperationCallback(cx);
+    return !cx->runtime()->interrupt || js_InvokeOperationCallback(cx);
 }
 
 namespace js {
@@ -2324,7 +2330,7 @@ class RuntimeAllocPolicy
 
   public:
     RuntimeAllocPolicy(JSRuntime *rt) : runtime(rt) {}
-    RuntimeAllocPolicy(JSContext *cx) : runtime(cx->runtime) {}
+    RuntimeAllocPolicy(JSContext *cx) : runtime(cx->runtime()) {}
     void *malloc_(size_t bytes) { return runtime->malloc_(bytes); }
     void *calloc_(size_t bytes) { return runtime->calloc_(bytes); }
     void *realloc_(void *p, size_t bytes) { return runtime->realloc_(p, bytes); }

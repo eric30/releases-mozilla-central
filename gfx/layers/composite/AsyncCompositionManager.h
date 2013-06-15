@@ -116,7 +116,6 @@ private:
 
   void SetFirstPaintViewport(const LayerIntPoint& aOffset,
                              float aZoom,
-                             const LayerIntRect& aPageRect,
                              const CSSRect& aCssPageRect);
   void SetPageRect(const CSSRect& aCssPageRect);
   void SyncViewportInfo(const LayerIntRect& aDisplayPort,
@@ -130,7 +129,7 @@ private:
                         float aZoom,
                         const CSSRect& aCssPageRect,
                         bool aLayersUpdated,
-                        const gfx::Rect& aDisplayPort,
+                        const CSSRect& aDisplayPort,
                         float aDisplayResolution,
                         bool aIsFirstPaint,
                         gfx::Margin& aFixedLayerMargins,
@@ -163,7 +162,7 @@ private:
   void DetachRefLayers();
 
   TargetConfig mTargetConfig;
-  LayerIntRect mContentRect;
+  CSSRect mContentRect;
 
   nsRefPtr<LayerManagerComposite> mLayerManager;
   // When this flag is set, the next composition will be the first for a

@@ -47,3 +47,14 @@ else:
             'stabs_to_module.cc',
             'stabs_reader.cc',
         ]
+
+if CONFIG['OS_TARGET'] != 'WINNT' and CONFIG['MOZ_CRASHREPORTER']:
+    HOST_CSRCS += CSRCS
+
+if CONFIG['OS_TARGET'] != 'WINNT' and CONFIG['MOZ_CRASHREPORTER']:
+    HOST_LIBRARY_NAME = 'host_breakpad_common_s'
+
+if CONFIG['OS_ARCH'] == 'Darwin':
+    CMMSRCS += [
+        'mac/dump_syms.mm',
+    ]

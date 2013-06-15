@@ -188,7 +188,6 @@ DOMCI_CLASS(NfcNdefEvent)
 DOMCI_CLASS(NdefRecord)
 #endif
 
-DOMCI_CLASS(CameraManager)
 DOMCI_CLASS(CameraControl)
 DOMCI_CLASS(CameraCapabilities)
 
@@ -198,10 +197,3 @@ DOMCI_CLASS(AsyncScrollEventDetail)
 DOMCI_CLASS(LockedFile)
 
 DOMCI_CLASS(CSSFontFeatureValuesRule)
-
-#ifdef MOZ_TIME_MANAGER
-DOMCI_CLASS(MozTimeManager)
-#endif
-
-#ifdef MOZ_WEBRTC
-#endif

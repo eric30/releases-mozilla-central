@@ -1194,6 +1194,12 @@ InitSystemMetrics()
     sSystemMetrics->AppendElement(nsGkAtoms::swipe_animation_enabled);
   }
 
+  rv = LookAndFeel::GetInt(LookAndFeel::eIntID_PhysicalHomeButton,
+                           &metricResult);
+  if (NS_SUCCEEDED(rv) && metricResult) {
+    sSystemMetrics->AppendElement(nsGkAtoms::physical_home_button);
+  }
+
 #ifdef XP_WIN
   if (NS_SUCCEEDED(
         LookAndFeel::GetInt(LookAndFeel::eIntID_WindowsThemeIdentifier,
@@ -1202,6 +1208,9 @@ InitSystemMetrics()
     switch(metricResult) {
       case LookAndFeel::eWindowsTheme_Aero:
         sSystemMetrics->AppendElement(nsGkAtoms::windows_theme_aero);
+        break;
+      case LookAndFeel::eWindowsTheme_AeroLite:
+        sSystemMetrics->AppendElement(nsGkAtoms::windows_theme_aero_lite);
         break;
       case LookAndFeel::eWindowsTheme_LunaBlue:
         sSystemMetrics->AppendElement(nsGkAtoms::windows_theme_luna_blue);
@@ -2095,7 +2104,7 @@ static bool SelectorMatches(Element* aElement,
         if (aTreeMatchContext.mForStyling &&
             statesToCheck.HasAtLeastOneOfStates(NS_EVENT_STATE_HOVER)) {
           // Mark the element as having :hover-dependent style
-          aElement->SetFlags(NODE_HAS_RELEVANT_HOVER_RULES);
+          aElement->SetHasRelevantHoverRules();
         }
         if (aNodeMatchContext.mStateMask.HasAtLeastOneOfStates(statesToCheck)) {
           if (aDependence)
@@ -2314,10 +2323,16 @@ static bool SelectorMatchesTree(Element* aPrevElement,
         // it tests from the top of the content tree, down.  This
         // doesn't matter much for performance since most selectors
         // don't match.  (If most did, it might be faster...)
+        Element* styleScope = aTreeMatchContext.mCurrentStyleScope;
         if (SelectorMatchesTree(element, selector, aTreeMatchContext,
                                 aLookForRelevantLink)) {
           return true;
         }
+        // We want to reset mCurrentStyleScope on aTreeMatchContext
+        // back to its state before the SelectorMatchesTree call, in
+        // case that call happens to traverse past the style scope element
+        // and sets it to null.
+        aTreeMatchContext.mCurrentStyleScope = styleScope;
       }
       selector = selector->mNext;
     }
@@ -2456,6 +2471,10 @@ static inline nsRestyleHint RestyleHintForOp(PRUnichar oper)
 nsRestyleHint
 nsCSSRuleProcessor::HasStateDependentStyle(StateRuleProcessorData* aData)
 {
+  MOZ_ASSERT(!aData->mTreeMatchContext.mForScopedStyle,
+             "mCurrentStyleScope will need to be saved and restored after the "
+             "SelectorMatchesTree call");
+
   RuleCascadeData* cascade = GetRuleCascade(aData->mPresContext);
 
   // Look up the content node in the state rule list, which points to
@@ -2486,14 +2505,14 @@ nsCSSRuleProcessor::HasStateDependentStyle(StateRuleProcessorData* aData)
           states.HasAtLeastOneOfStates(aData->mStateMask) &&
           // We can optimize away testing selectors that only involve :hover, a
           // namespace, and a tag name against nodes that don't have the
-          // NODE_HAS_RELEVANT_HOVER_RULES flag: such a selector didn't match
+          // NodeHasRelevantHoverRules flag: such a selector didn't match
           // the tag name or namespace the first time around (since the :hover
-          // didn't set the NODE_HAS_RELEVANT_HOVER_RULES flag), so it won't
+          // didn't set the NodeHasRelevantHoverRules flag), so it won't
           // match it now.  Check for our selector only having :hover states, or
           // the element having the hover rules flag, or the selector having
           // some sort of non-namespace, non-tagname data in it.
           (states != NS_EVENT_STATE_HOVER ||
-           aData->mElement->HasFlag(NODE_HAS_RELEVANT_HOVER_RULES) ||
+           aData->mElement->HasRelevantHoverRules() ||
            selector->mIDList || selector->mClassList ||
            // We generally expect an mPseudoClassList, since we have a :hover.
            // The question is whether we have anything else in there.
@@ -3327,6 +3346,10 @@ nsCSSRuleProcessor::SelectorListMatches(Element* aElement,
                                         TreeMatchContext& aTreeMatchContext,
                                         nsCSSSelectorList* aSelectorList)
 {
+  MOZ_ASSERT(!aTreeMatchContext.mForScopedStyle,
+             "mCurrentStyleScope will need to be saved and restored after the "
+             "SelectorMatchesTree call");
+
   while (aSelectorList) {
     nsCSSSelector* sel = aSelectorList->mSelectors;
     NS_ASSERTION(sel, "Should have *some* selectors");

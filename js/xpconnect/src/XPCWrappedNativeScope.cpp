@@ -126,7 +126,6 @@ XPCWrappedNativeScope::XPCWrappedNativeScope(JSContext *cx,
         mComponents(nullptr),
         mNext(nullptr),
         mGlobalJSObject(aGlobal),
-        mPrototypeNoHelper(nullptr),
         mIsXBLScope(false)
 {
     // add ourselves to the scopes list
@@ -188,27 +187,28 @@ XPCWrappedNativeScope::IsDyingScope(XPCWrappedNativeScope *scope)
 }
 
 JSObject*
-XPCWrappedNativeScope::GetComponentsJSObject(XPCCallContext& ccx)
+XPCWrappedNativeScope::GetComponentsJSObject()
 {
+    AutoJSContext cx;
     if (!mComponents)
         mComponents = new nsXPCComponents(this);
 
-    AutoMarkingNativeInterfacePtr iface(ccx);
-    iface = XPCNativeInterface::GetNewOrUsed(ccx, &NS_GET_IID(nsIXPCComponents));
+    AutoMarkingNativeInterfacePtr iface(cx);
+    iface = XPCNativeInterface::GetNewOrUsed(&NS_GET_IID(nsIXPCComponents));
     if (!iface)
         return nullptr;
 
     nsCOMPtr<nsIXPCComponents> cholder(mComponents);
     xpcObjectHelper helper(cholder);
     nsCOMPtr<XPCWrappedNative> wrapper;
-    XPCWrappedNative::GetNewOrUsed(ccx, helper, this, iface, getter_AddRefs(wrapper));
+    XPCWrappedNative::GetNewOrUsed(helper, this, iface, getter_AddRefs(wrapper));
     if (!wrapper)
         return nullptr;
 
     // The call to wrap() here is necessary even though the object is same-
     // compartment, because it applies our security wrapper.
-    JS::RootedObject obj(ccx, wrapper->GetFlatJSObject());
-    if (!JS_WrapObject(ccx, obj.address()))
+    JS::RootedObject obj(cx, wrapper->GetFlatJSObject());
+    if (!JS_WrapObject(cx, obj.address()))
         return nullptr;
     return obj;
 }
@@ -285,40 +285,6 @@ bool AllowXBLScope(JSCompartment *c)
 }
 } /* namespace xpc */
 
-// Dummy JS class to let wrappers w/o an xpc prototype share
-// scopes. By doing this we avoid allocating a new scope for every
-// wrapper on creation of the wrapper, and most wrappers won't need
-// their own scope at all for the lifetime of the wrapper.
-// WRAPPER_SLOTS is key here (even though there's never anything
-// in the private data slot in these prototypes), as the number of
-// reserved slots in this class needs to match that of the wrappers
-// for the JS engine to share scopes.
-
-js::Class XPC_WN_NoHelper_Proto_JSClass = {
-    "XPC_WN_NoHelper_Proto_JSClass",// name;
-    WRAPPER_SLOTS,                  // flags;
-
-    /* Mandatory non-null function pointer members. */
-    JS_PropertyStub,                // addProperty;
-    JS_DeletePropertyStub,          // delProperty;
-    JS_PropertyStub,                // getProperty;
-    JS_StrictPropertyStub,          // setProperty;
-    JS_EnumerateStub,               // enumerate;
-    JS_ResolveStub,                 // resolve;
-    JS_ConvertStub,                 // convert;
-    nullptr,                         // finalize;
-
-    /* Optionally non-null members start here. */
-    nullptr,                         // checkAccess;
-    nullptr,                         // call;
-    nullptr,                         // construct;
-    nullptr,                         // hasInstance;
-    nullptr,                         // trace;
-
-    JS_NULL_CLASS_EXT,
-    XPC_WN_NoCall_ObjectOps
-};
-
 XPCWrappedNativeScope::~XPCWrappedNativeScope()
 {
     MOZ_COUNT_DTOR(XPCWrappedNativeScope);
@@ -356,26 +322,6 @@ XPCWrappedNativeScope::~XPCWrappedNativeScope()
     JSRuntime *rt = XPCJSRuntime::Get()->GetJSRuntime();
     mXBLScope.finalize(rt);
     mGlobalJSObject.finalize(rt);
-}
-
-JSObject *
-XPCWrappedNativeScope::GetPrototypeNoHelper(XPCCallContext& ccx)
-{
-    // We could create this prototype in our constructor, but all scopes
-    // don't need one, so we save ourselves a bit of space if we
-    // create these when they're needed.
-    if (!mPrototypeNoHelper) {
-        mPrototypeNoHelper = JS_NewObject(ccx, js::Jsvalify(&XPC_WN_NoHelper_Proto_JSClass),
-                                          JS_GetObjectPrototype(ccx, mGlobalJSObject),
-                                          mGlobalJSObject);
-
-        NS_ASSERTION(mPrototypeNoHelper,
-                     "Failed to create prototype for wrappers w/o a helper");
-    } else {
-        xpc_UnmarkGrayObject(mPrototypeNoHelper);
-    }
-
-    return mPrototypeNoHelper;
 }
 
 static JSDHashOperator
@@ -426,8 +372,7 @@ WrappedNativeSuspecter(JSDHashTable *table, JSDHashEntryHdr *hdr,
 static void
 SuspectDOMExpandos(JSObject *obj, nsCycleCollectionNoteRootCallback &cb)
 {
-    const dom::DOMClass* clasp = dom::GetDOMClass(obj);
-    MOZ_ASSERT(clasp && clasp->mDOMObjectIsISupports);
+    MOZ_ASSERT(dom::GetDOMClass(obj) && dom::GetDOMClass(obj)->mDOMObjectIsISupports);
     nsISupports* native = dom::UnwrapDOMObject<nsISupports>(obj);
     cb.NoteXPCOMRoot(native);
 }
@@ -482,9 +427,6 @@ XPCWrappedNativeScope::StartFinalizationPhaseOfGC(JSFreeOp *fop, XPCJSRuntime* r
             cur->mNext = gDyingScopes;
             gDyingScopes = cur;
             cur = nullptr;
-        } else {
-            if (cur->mPrototypeNoHelper && JS_IsAboutToBeFinalized(&cur->mPrototypeNoHelper))
-                cur->mPrototypeNoHelper = nullptr;
         }
         if (cur)
             prev = cur;
@@ -706,10 +648,10 @@ WNProtoSecPolicyClearer(JSDHashTable *table, JSDHashEntryHdr *hdr,
 
 // static
 nsresult
-XPCWrappedNativeScope::ClearAllWrappedNativeSecurityPolicies(XPCCallContext& ccx)
+XPCWrappedNativeScope::ClearAllWrappedNativeSecurityPolicies()
 {
     // Hold the lock throughout.
-    XPCAutoLock lock(ccx.GetRuntime()->GetMapLock());
+    XPCAutoLock lock(XPCJSRuntime::Get()->GetMapLock());
 
     for (XPCWrappedNativeScope* cur = gScopes; cur; cur = cur->mNext) {
         cur->mWrappedNativeProtoMap->Enumerate(WNProtoSecPolicyClearer, nullptr);
@@ -738,10 +680,6 @@ WNProtoRemover(JSDHashTable *table, JSDHashEntryHdr *hdr,
 void
 XPCWrappedNativeScope::RemoveWrappedNativeProtos()
 {
-    // Clear the no helper wrapper prototype object so that a new one
-    // gets created if needed.
-    mPrototypeNoHelper = nullptr;
-
     XPCAutoLock al(XPCJSRuntime::Get()->GetMapLock());
 
     mWrappedNativeProtoMap->Enumerate(WNProtoRemover,
@@ -802,7 +740,6 @@ XPCWrappedNativeScope::DebugDump(int16_t depth)
         XPC_LOG_ALWAYS(("mNext @ %x", mNext));
         XPC_LOG_ALWAYS(("mComponents @ %x", mComponents.get()));
         XPC_LOG_ALWAYS(("mGlobalJSObject @ %x", mGlobalJSObject.get()));
-        XPC_LOG_ALWAYS(("mPrototypeNoHelper @ %x", mPrototypeNoHelper));
 
         XPC_LOG_ALWAYS(("mWrappedNativeMap @ %x with %d wrappers(s)",         \
                         mWrappedNativeMap,                                    \

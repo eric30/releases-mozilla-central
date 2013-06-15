@@ -10,12 +10,10 @@
 #include "mozilla/Util.h"
 
 #include "RegExpObject.h"
-#include "RegExpStatics.h"
 
 #include "jsobjinlines.h"
 #include "jsstrinlines.h"
 
-#include "RegExpStatics-inl.h"
 #include "String-inl.h"
 
 inline js::RegExpObject &
@@ -125,7 +123,7 @@ RegExpToShared(JSContext *cx, HandleObject obj, RegExpGuard *g)
 inline void
 RegExpShared::prepareForUse(JSContext *cx)
 {
-    gcNumberWhenUsed = cx->runtime->gcNumber;
+    gcNumberWhenUsed = cx->runtime()->gcNumber;
 }
 
 RegExpGuard::RegExpGuard(JSContext *cx)

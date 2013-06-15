@@ -149,7 +149,7 @@ js::math_acos(JSContext *cx, unsigned argc, Value *vp)
     }
     if (!ToNumber(cx, vp[2], &x))
         return JS_FALSE;
-    MathCache *mathCache = cx->runtime->getMathCache(cx);
+    MathCache *mathCache = cx->runtime()->getMathCache(cx);
     if (!mathCache)
         return JS_FALSE;
     z = math_acos_impl(mathCache, x);
@@ -178,7 +178,7 @@ js::math_asin(JSContext *cx, unsigned argc, Value *vp)
     }
     if (!ToNumber(cx, vp[2], &x))
         return JS_FALSE;
-    MathCache *mathCache = cx->runtime->getMathCache(cx);
+    MathCache *mathCache = cx->runtime()->getMathCache(cx);
     if (!mathCache)
         return JS_FALSE;
     z = math_asin_impl(mathCache, x);
@@ -203,7 +203,7 @@ js::math_atan(JSContext *cx, unsigned argc, Value *vp)
     }
     if (!ToNumber(cx, vp[2], &x))
         return JS_FALSE;
-    MathCache *mathCache = cx->runtime->getMathCache(cx);
+    MathCache *mathCache = cx->runtime()->getMathCache(cx);
     if (!mathCache)
         return JS_FALSE;
     z = math_atan_impl(mathCache, x);
@@ -212,33 +212,33 @@ js::math_atan(JSContext *cx, unsigned argc, Value *vp)
 }
 
 double
-js::ecmaAtan2(double x, double y)
+js::ecmaAtan2(double y, double x)
 {
 #if defined(_MSC_VER)
     /*
      * MSVC's atan2 does not yield the result demanded by ECMA when both x
      * and y are infinite.
      * - The result is a multiple of pi/4.
-     * - The sign of x determines the sign of the result.
-     * - The sign of y determines the multiplicator, 1 or 3.
+     * - The sign of y determines the sign of the result.
+     * - The sign of x determines the multiplicator, 1 or 3.
      */
-    if (IsInfinite(x) && IsInfinite(y)) {
-        double z = js_copysign(M_PI / 4, x);
-        if (y < 0)
+    if (IsInfinite(y) && IsInfinite(x)) {
+        double z = js_copysign(M_PI / 4, y);
+        if (x < 0)
             z *= 3;
         return z;
     }
 #endif
 
 #if defined(SOLARIS) && defined(__GNUC__)
-    if (x == 0) {
-        if (MOZ_DOUBLE_IS_NEGZERO(y))
-            return js_copysign(M_PI, x);
-        if (y == 0)
-            return x;
+    if (y == 0) {
+        if (IsNegativeZero(x))
+            return js_copysign(M_PI, y);
+        if (x == 0)
+            return y;
     }
 #endif
-    return atan2(x, y);
+    return atan2(y, x);
 }
 
 JSBool
@@ -300,7 +300,7 @@ js::math_cos(JSContext *cx, unsigned argc, Value *vp)
     }
     if (!ToNumber(cx, vp[2], &x))
         return JS_FALSE;
-    MathCache *mathCache = cx->runtime->getMathCache(cx);
+    MathCache *mathCache = cx->runtime()->getMathCache(cx);
     if (!mathCache)
         return JS_FALSE;
     z = math_cos_impl(mathCache, x);
@@ -333,7 +333,7 @@ js::math_exp(JSContext *cx, unsigned argc, Value *vp)
     }
     if (!ToNumber(cx, vp[2], &x))
         return JS_FALSE;
-    MathCache *mathCache = cx->runtime->getMathCache(cx);
+    MathCache *mathCache = cx->runtime()->getMathCache(cx);
     if (!mathCache)
         return JS_FALSE;
     z = math_exp_impl(mathCache, x);
@@ -402,7 +402,7 @@ js::math_log(JSContext *cx, unsigned argc, Value *vp)
     }
     if (!ToNumber(cx, vp[2], &x))
         return JS_FALSE;
-    MathCache *mathCache = cx->runtime->getMathCache(cx);
+    MathCache *mathCache = cx->runtime()->getMathCache(cx);
     if (!mathCache)
         return JS_FALSE;
     z = math_log_impl(mathCache, x);
@@ -627,7 +627,7 @@ random_next(uint64_t *rngState, int bits)
 static inline double
 random_nextDouble(JSContext *cx)
 {
-    uint64_t *rng = &cx->compartment->rngState;
+    uint64_t *rng = &cx->compartment()->rngState;
     return double((random_next(rng, 26) << 27) + random_next(rng, 27)) / RNG_DSCALE;
 }
 
@@ -693,7 +693,7 @@ js::math_sin(JSContext *cx, unsigned argc, Value *vp)
     }
     if (!ToNumber(cx, vp[2], &x))
         return JS_FALSE;
-    MathCache *mathCache = cx->runtime->getMathCache(cx);
+    MathCache *mathCache = cx->runtime()->getMathCache(cx);
     if (!mathCache)
         return JS_FALSE;
     z = math_sin_impl(mathCache, x);
@@ -712,7 +712,7 @@ js_math_sqrt(JSContext *cx, unsigned argc, Value *vp)
     }
     if (!ToNumber(cx, vp[2], &x))
         return JS_FALSE;
-    MathCache *mathCache = cx->runtime->getMathCache(cx);
+    MathCache *mathCache = cx->runtime()->getMathCache(cx);
     if (!mathCache)
         return JS_FALSE;
     z = mathCache->lookup(sqrt, x);
@@ -737,7 +737,7 @@ js::math_tan(JSContext *cx, unsigned argc, Value *vp)
     }
     if (!ToNumber(cx, vp[2], &x))
         return JS_FALSE;
-    MathCache *mathCache = cx->runtime->getMathCache(cx);
+    MathCache *mathCache = cx->runtime()->getMathCache(cx);
     if (!mathCache)
         return JS_FALSE;
     z = math_tan_impl(mathCache, x);

@@ -69,9 +69,9 @@ ion::Bailout(BailoutStack *sp, BaselineBailoutInfo **bailoutInfo)
     JSContext *cx = GetIonContext()->cx;
     // We don't have an exit frame.
     cx->mainThread().ionTop = NULL;
-    IonActivationIterator ionActivations(cx);
-    IonBailoutIterator iter(ionActivations, sp);
-    IonActivation *activation = ionActivations.activation();
+    JitActivationIterator jitActivations(cx->runtime());
+    IonBailoutIterator iter(jitActivations, sp);
+    JitActivation *activation = jitActivations.activation()->asJit();
 
     IonSpew(IonSpew_Bailouts, "Took bailout! Snapshot offset: %d", iter.snapshotOffset());
 
@@ -100,9 +100,9 @@ ion::InvalidationBailout(InvalidationBailoutStack *sp, size_t *frameSizeOut,
 
     // We don't have an exit frame.
     cx->mainThread().ionTop = NULL;
-    IonActivationIterator ionActivations(cx);
-    IonBailoutIterator iter(ionActivations, sp);
-    IonActivation *activation = ionActivations.activation();
+    JitActivationIterator jitActivations(cx->runtime());
+    IonBailoutIterator iter(jitActivations, sp);
+    JitActivation *activation = jitActivations.activation()->asJit();
 
     IonSpew(IonSpew_Bailouts, "Took invalidation bailout! Snapshot offset: %d", iter.snapshotOffset());
 
@@ -133,7 +133,7 @@ ion::InvalidationBailout(InvalidationBailoutStack *sp, size_t *frameSizeOut,
         IonSpew(IonSpew_Invalidate, "   new  ra %p", (void *) frame->returnAddress());
     }
 
-    iter.ionScript()->decref(cx->runtime->defaultFreeOp());
+    iter.ionScript()->decref(cx->runtime()->defaultFreeOp());
 
     return retval;
 }

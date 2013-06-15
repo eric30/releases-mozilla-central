@@ -14,7 +14,6 @@
 #include "jsnum.h"
 #include "jsobj.h"
 #include "jsstr.h"
-
 #include "gc/Barrier.h"
 #include "vm/String.h"
 
@@ -43,7 +42,7 @@ AtomToId(JSAtom *atom)
 
 template <AllowGC allowGC>
 inline JSAtom *
-ToAtom(JSContext *cx, const js::Value &v)
+ToAtom(JSContext *cx, typename MaybeRooted<Value, allowGC>::HandleType v)
 {
     if (!v.isString()) {
         JSString *str = js::ToStringSlow<allowGC>(cx, v);
@@ -63,7 +62,8 @@ ToAtom(JSContext *cx, const js::Value &v)
 
 template <AllowGC allowGC>
 inline bool
-ValueToId(JSContext* cx, const Value &v, typename MaybeRooted<jsid, allowGC>::MutableHandleType idp)
+ValueToId(JSContext* cx, typename MaybeRooted<Value, allowGC>::HandleType v,
+          typename MaybeRooted<jsid, allowGC>::MutableHandleType idp)
 {
     int32_t i;
     if (ValueFitsInInt32(v, &i) && INT_FITS_IN_JSID(i)) {
@@ -146,7 +146,8 @@ IdToString(JSContext *cx, jsid id)
     if (JS_LIKELY(JSID_IS_INT(id)))
         return Int32ToString<CanGC>(cx, JSID_TO_INT(id));
 
-    JSString *str = ToStringSlow<CanGC>(cx, IdToValue(id));
+    RootedValue idv(cx, IdToValue(id));
+    JSString *str = ToStringSlow<CanGC>(cx, idv);
     if (!str)
         return NULL;
 
@@ -183,7 +184,7 @@ TypeName(JSType type, JSRuntime *rt)
 inline Handle<PropertyName*>
 TypeName(JSType type, JSContext *cx)
 {
-    return TypeName(type, cx->runtime);
+    return TypeName(type, cx->runtime());
 }
 
 inline Handle<PropertyName*>
@@ -194,7 +195,7 @@ ClassName(JSProtoKey key, JSContext *cx)
                      JSProto_LIMIT * sizeof(FixedHeapPtr<PropertyName>) <=
                      sizeof(JSAtomState));
     JS_STATIC_ASSERT(JSProto_Null == 0);
-    return (&cx->runtime->atomState.Null)[key];
+    return (&cx->runtime()->atomState.Null)[key];
 }
 
 } // namespace js

@@ -7,6 +7,8 @@
 #ifndef jsobjinlines_h___
 #define jsobjinlines_h___
 
+#include "jsobj.h"
+
 #include "jsapi.h"
 #include "jsarray.h"
 #include "jsbool.h"
@@ -15,15 +17,13 @@
 #include "jsiter.h"
 #include "jslock.h"
 #include "jsnum.h"
-#include "jsobj.h"
-#include "jsprobes.h"
 #include "jspropertytree.h"
 #include "jsproxy.h"
 #include "jsstr.h"
 #include "jstypedarray.h"
 #include "jswrapper.h"
 
-#include "builtin/Iterator-inl.h"
+#include "builtin/Module.h"
 #include "gc/Barrier.h"
 #include "gc/Marking.h"
 #include "js/MemoryMetrics.h"
@@ -33,6 +33,7 @@
 #include "vm/GlobalObject.h"
 #include "vm/Shape.h"
 #include "vm/NumberObject.h"
+#include "vm/Probes.h"
 #include "vm/RegExpStatics.h"
 #include "vm/StringObject.h"
 
@@ -41,13 +42,9 @@
 #include "jsfuninlines.h"
 #include "jsgcinlines.h"
 #include "jsinferinlines.h"
-#include "jsscriptinlines.h"
-
 #include "gc/Barrier-inl.h"
-
 #include "vm/ObjectImpl-inl.h"
 #include "vm/Shape-inl.h"
-#include "vm/RegExpStatics-inl.h"
 #include "vm/String-inl.h"
 
 /* static */ inline bool
@@ -323,20 +320,6 @@ JSObject::getRawSlots()
 {
     JS_ASSERT(isGlobal());
     return slots;
-}
-
-inline const js::Value &
-JSObject::getReservedSlot(uint32_t index) const
-{
-    JS_ASSERT(index < JSSLOT_FREE(getClass()));
-    return getSlot(index);
-}
-
-inline js::HeapSlot &
-JSObject::getReservedSlotRef(uint32_t index)
-{
-    JS_ASSERT(index < JSSLOT_FREE(getClass()));
-    return getSlotRef(index);
 }
 
 inline void
@@ -673,13 +656,13 @@ JSObject::parExtendDenseElements(js::Allocator *alloc, js::Value *v, uint32_t ex
 
     js::HeapSlot *sp = elements + initializedLength;
     if (v) {
-        for (uint32_t i = 0; i < extra; i++)
-            sp[i].init(runtime(), this, js::HeapSlot::Element, initializedLength+i, v[i]);
-    } else {
         for (uint32_t i = 0; i < extra; i++) {
-            sp[i].init(runtime(), this, js::HeapSlot::Element,
-                       initializedLength + i, js::MagicValue(JS_ELEMENTS_HOLE));
+            JS_ASSERT_IF(v[i].isMarkable(), static_cast<js::gc::Cell *>(v[i].toGCThing())->isTenured());
+            *sp[i].unsafeGet() = v[i];
         }
+    } else {
+        for (uint32_t i = 0; i < extra; i++)
+            *sp[i].unsafeGet() = js::MagicValue(JS_ELEMENTS_HOLE);
     }
     header->initializedLength = requiredCapacity;
     if (header->length < requiredCapacity)
@@ -757,12 +740,13 @@ JSObject::setDateUTCTime(const js::Value &time)
 /* static */ inline bool
 JSObject::setSingletonType(JSContext *cx, js::HandleObject obj)
 {
-    JS_ASSERT(!IsInsideNursery(cx->runtime, obj.get()));
+    JS_ASSERT(!IsInsideNursery(cx->runtime(), obj.get()));
 
     if (!cx->typeInferenceEnabled())
         return true;
 
-    js::types::TypeObject *type = cx->compartment->getLazyType(cx, obj->getClass(), obj->getTaggedProto());
+    js::types::TypeObject *type =
+        cx->compartment()->getLazyType(cx, obj->getClass(), obj->getTaggedProto());
     if (!type)
         return false;
 
@@ -773,10 +757,10 @@ JSObject::setSingletonType(JSContext *cx, js::HandleObject obj)
 inline js::types::TypeObject*
 JSObject::getType(JSContext *cx)
 {
-    JS_ASSERT(cx->compartment == compartment());
+    JS_ASSERT(cx->compartment() == compartment());
     if (hasLazyType()) {
         JS::RootedObject self(cx, this);
-        if (cx->compartment != compartment())
+        if (cx->compartment() != compartment())
             MOZ_CRASH();
         return makeLazyType(cx, self);
     }
@@ -787,9 +771,9 @@ JSObject::getType(JSContext *cx)
 JSObject::clearType(JSContext *cx, js::HandleObject obj)
 {
     JS_ASSERT(!obj->hasSingletonType());
-    JS_ASSERT(cx->compartment == obj->compartment());
+    JS_ASSERT(cx->compartment() == obj->compartment());
 
-    js::types::TypeObject *type = cx->compartment->getNewType(cx, obj->getClass(), NULL);
+    js::types::TypeObject *type = cx->compartment()->getNewType(cx, obj->getClass(), NULL);
     if (!type)
         return false;
 
@@ -937,6 +921,20 @@ JSObject::asString()
     return *static_cast<js::StringObject *>(this);
 }
 
+inline js::ScriptSourceObject &
+JSObject::asScriptSource()
+{
+    JS_ASSERT(isScriptSource());
+    return *static_cast<js::ScriptSourceObject *>(this);
+}
+
+inline js::Module &
+JSObject::asModule()
+{
+    JS_ASSERT(isModule());
+    return *static_cast<js::Module *>(this);
+}
+
 inline bool
 JSObject::isDebugScope() const
 {
@@ -980,7 +978,7 @@ JSObject::create(JSContext *cx, js::gc::AllocKind kind, js::gc::InitialHeap heap
     }
 
 #ifdef JSGC_GENERATIONAL
-    cx->runtime->gcNursery.notifyInitialSlots(obj, slots);
+    cx->runtime()->gcNursery.notifyInitialSlots(obj, slots);
 #endif
 
     obj->shape_.init(shape);
@@ -1112,6 +1110,10 @@ JSObject::hasShapeTable() const
 JSObject::lookupGeneric(JSContext *cx, js::HandleObject obj, js::HandleId id,
                         js::MutableHandleObject objp, js::MutableHandleShape propp)
 {
+    /* NB: The logic of lookupGeneric is implicitly reflected in IonBuilder.cpp's
+     *     |CanEffectlesslyCallLookupGenericOnObject| logic.
+     *     If this changes, please remember to update the logic there as well.
+     */
     js::LookupGenericOp op = obj->getOps()->lookupGeneric;
     if (op)
         return op(cx, obj, id, objp, propp);
@@ -1286,12 +1288,6 @@ JSObject::getSpecialAttributes(JSContext *cx, js::HandleObject obj,
 {
     JS::RootedId id(cx, SPECIALID_TO_JSID(sid));
     return getGenericAttributes(cx, obj, id, attrsp);
-}
-
-inline bool
-js::ObjectImpl::isProxy() const
-{
-    return js::IsProxy(const_cast<JSObject*>(this->asObjectPtr()));
 }
 
 inline bool
@@ -1808,9 +1804,11 @@ NewObjectMetadata(JSContext *cx)
 {
     // The metadata callback is invoked before each created object, except when
     // analysis is active as the callback may reenter JS.
-    if (JS_UNLIKELY((size_t)cx->compartment->objectMetadataCallback) && !cx->compartment->activeAnalysis) {
+    if (JS_UNLIKELY((size_t)cx->compartment()->objectMetadataCallback) &&
+        !cx->compartment()->activeAnalysis)
+    {
         gc::AutoSuppressGC suppress(cx);
-        return cx->compartment->objectMetadataCallback(cx);
+        return cx->compartment()->objectMetadataCallback(cx);
     }
     return NULL;
 }

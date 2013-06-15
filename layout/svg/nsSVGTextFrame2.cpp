@@ -2863,27 +2863,6 @@ SVGTextDrawPathCallbacks::StrokeGeometry()
   }
 }
 
-// -----------------------------------------------------------------------------
-// GlyphMetricsUpdater
-
-NS_IMETHODIMP
-GlyphMetricsUpdater::Run()
-{
-  if (mFrame) {
-    Run(mFrame);
-  }
-  return NS_OK;
-}
-
-void
-GlyphMetricsUpdater::Run(nsSVGTextFrame2* aFrame)
-{
-  aFrame->mPositioningDirty = true;
-  nsSVGEffects::InvalidateRenderingObservers(aFrame);
-  nsSVGUtils::ScheduleReflowSVG(aFrame);
-  aFrame->mGlyphMetricsUpdater = nullptr;
-}
-
 }
 
 // ============================================================================
@@ -2980,15 +2959,6 @@ nsSVGTextFrame2::Init(nsIContent* aContent,
                NS_FRAME_SVG_LAYOUT | NS_FRAME_IS_SVG_TEXT);
 
   mMutationObserver.StartObserving(this);
-}
-
-void
-nsSVGTextFrame2::DestroyFrom(nsIFrame* aDestructRoot)
-{
-  if (mGlyphMetricsUpdater) {
-    mGlyphMetricsUpdater->Revoke();
-  }
-  nsSVGTextFrame2Base::DestroyFrom(aDestructRoot);
 }
 
 void
@@ -3141,7 +3111,7 @@ nsSVGTextFrame2::MutationObserver::ContentAppended(nsIDocument* aDocument,
                                                    nsIContent* aFirstNewContent,
                                                    int32_t aNewIndexInContainer)
 {
-  mFrame->NotifyGlyphMetricsChange(ePositioningDirtyDueToMutation);
+  mFrame->NotifyGlyphMetricsChange();
 }
 
 void
@@ -3151,7 +3121,7 @@ nsSVGTextFrame2::MutationObserver::ContentInserted(
                                         nsIContent* aChild,
                                         int32_t aIndexInContainer)
 {
-  mFrame->NotifyGlyphMetricsChange(ePositioningDirtyDueToMutation);
+  mFrame->NotifyGlyphMetricsChange();
 }
 
 void
@@ -3162,7 +3132,7 @@ nsSVGTextFrame2::MutationObserver::ContentRemoved(
                                        int32_t aIndexInContainer,
                                        nsIContent* aPreviousSibling)
 {
-  mFrame->NotifyGlyphMetricsChange(ePositioningDirtyDueToMutation);
+  mFrame->NotifyGlyphMetricsChange();
 }
 
 void
@@ -3203,42 +3173,6 @@ nsSVGTextFrame2::MutationObserver::AttributeChanged(
       mFrame->NotifyGlyphMetricsChange();
     }
   }
-}
-
-NS_IMETHODIMP
-nsSVGTextFrame2::Reflow(nsPresContext*           aPresContext,
-                        nsHTMLReflowMetrics&     aDesiredSize,
-                        const nsHTMLReflowState& aReflowState,
-                        nsReflowStatus&          aStatus)
-{
-  NS_ABORT_IF_FALSE(!(GetStateBits() & NS_STATE_SVG_NONDISPLAY_CHILD),
-                    "Should not have been called");
-
-  // Only InvalidateAndScheduleReflowSVG marks us with NS_FRAME_IS_DIRTY,
-  // so if that bit is still set we still have a resize pending. If we hit
-  // this assertion, then we should get the presShell to skip reflow roots
-  // that have a dirty parent since a reflow is going to come via the
-  // reflow root's parent anyway.
-  NS_ASSERTION(!(GetStateBits() & NS_FRAME_IS_DIRTY),
-               "Reflowing while a resize is pending is wasteful");
-
-  // ReflowSVG makes sure mRect is up to date before we're called.
-
-  NS_ASSERTION(!aReflowState.parentReflowState,
-               "should only get reflow from being reflow root");
-  NS_ASSERTION(aReflowState.ComputedWidth() == GetSize().width &&
-               aReflowState.ComputedHeight() == GetSize().height,
-               "reflow roots should be reflowed at existing size and "
-               "svg.css should ensure we have no padding/border/margin");
-
-  DoReflow();
-
-  aDesiredSize.width = aReflowState.ComputedWidth();
-  aDesiredSize.height = aReflowState.ComputedHeight();
-  aDesiredSize.SetOverflowAreasToDesiredBounds();
-  aStatus = NS_FRAME_COMPLETE;
-
-  return NS_OK;
 }
 
 void
@@ -4828,34 +4762,11 @@ nsSVGTextFrame2::ShouldRenderAsPath(nsRenderingContext* aContext,
 }
 
 void
-nsSVGTextFrame2::NotifyGlyphMetricsChange(uint32_t aFlags)
+nsSVGTextFrame2::NotifyGlyphMetricsChange()
 {
-  NS_ASSERTION(!aFlags || aFlags == ePositioningDirtyDueToMutation,
-               "unexpected aFlags value");
-
-  if (aFlags == ePositioningDirtyDueToMutation) {
-    // We need to perform the operations in GlyphMetricsUpdater in a
-    // script runner since we can get called just after a DOM mutation,
-    // before frames have been reconstructed, and UpdateGlyphPositioning
-    // will be called with out-of-date frames.  This occurs when the
-    // <text> element is being filtered, as the InvalidateBounds()
-    // call needs to call in to GetBBoxContribution() to determine the
-    // filtered region, and that needs to iterate over the text frames.
-    // We would flush frame construction, but that needs to be done
-    // inside a script runner.
-    //
-    // Much of the time, this will perform the GlyphMetricsUpdater
-    // operations immediately.
-    if (mGlyphMetricsUpdater) {
-      return;
-    }
-    mGlyphMetricsUpdater = new GlyphMetricsUpdater(this);
-    nsContentUtils::AddScriptRunner(mGlyphMetricsUpdater.get());
-    return;
-  }
-
-  // Otherwise, we perform the glyph metrics update immediately.
-  GlyphMetricsUpdater::Run(this);
+  mPositioningDirty = true;
+  nsSVGEffects::InvalidateRenderingObservers(this);
+  nsSVGUtils::ScheduleReflowSVG(this);
 }
 
 void

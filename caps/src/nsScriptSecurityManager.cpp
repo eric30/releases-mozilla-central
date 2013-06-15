@@ -72,7 +72,6 @@ using namespace mozilla::dom;
 static NS_DEFINE_CID(kZipReaderCID, NS_ZIPREADER_CID);
 
 nsIIOService    *nsScriptSecurityManager::sIOService = nullptr;
-nsIXPConnect    *nsScriptSecurityManager::sXPConnect = nullptr;
 nsIStringBundle *nsScriptSecurityManager::sStrBundle = nullptr;
 JSRuntime       *nsScriptSecurityManager::sRuntime   = 0;
 bool nsScriptSecurityManager::sStrictFileOriginPolicy = true;
@@ -261,14 +260,14 @@ JSContext *
 nsScriptSecurityManager::GetCurrentJSContext()
 {
     // Get JSContext from stack.
-    return sXPConnect->GetCurrentJSContext();
+    return nsXPConnect::XPConnect()->GetCurrentJSContext();
 }
 
 JSContext *
 nsScriptSecurityManager::GetSafeJSContext()
 {
     // Get JSContext from stack.
-    return sXPConnect->GetSafeJSContext();
+    return nsXPConnect::XPConnect()->GetSafeJSContext();
 }
 
 /* static */
@@ -2057,7 +2056,7 @@ nsScriptSecurityManager::old_doGetObjectPrincipal(JS::Handle<JSObject*> aObj,
     NS_ASSERTION(aObj, "Bad call to doGetObjectPrincipal()!");
     nsIPrincipal* result = nullptr;
 
-    JSContext* cx = sXPConnect->GetCurrentJSContext();
+    JSContext* cx = nsXPConnect::XPConnect()->GetCurrentJSContext();
     JS::RootedObject obj(cx, aObj);
     JS::RootedObject origObj(cx, obj);
     js::Class *jsClass = js::GetObjectClass(obj);
@@ -2092,8 +2091,8 @@ nsScriptSecurityManager::old_doGetObjectPrincipal(JS::Handle<JSObject*> aObj,
         // *end* of this loop.
         
         if (IS_WRAPPER_CLASS(jsClass)) {
-            result = sXPConnect->GetPrincipal(obj,
-                                              aAllowShortCircuit);
+            result = nsXPConnect::XPConnect()->GetPrincipal(obj,
+                                                            aAllowShortCircuit);
             if (result) {
                 break;
             }
@@ -2220,7 +2219,7 @@ NS_IMETHODIMP
 nsScriptSecurityManager::CanCreateInstance(JSContext *cx,
                                            const nsCID &aCID)
 {
-    nsresult rv = CheckXPCPermissions(nullptr, nullptr, nullptr, nullptr, nullptr);
+    nsresult rv = CheckXPCPermissions(cx, nullptr, nullptr, nullptr, nullptr);
     if (NS_FAILED(rv))
     {
         //-- Access denied, report an error
@@ -2237,7 +2236,7 @@ NS_IMETHODIMP
 nsScriptSecurityManager::CanGetService(JSContext *cx,
                                        const nsCID &aCID)
 {
-    nsresult rv = CheckXPCPermissions(nullptr, nullptr, nullptr, nullptr, nullptr);
+    nsresult rv = CheckXPCPermissions(cx, nullptr, nullptr, nullptr, nullptr);
     if (NS_FAILED(rv))
     {
         //-- Access denied, report an error
@@ -2273,6 +2272,7 @@ nsScriptSecurityManager::CheckXPCPermissions(JSContext* cx,
                                              nsIPrincipal* aSubjectPrincipal,
                                              const char* aObjectSecurityLevel)
 {
+    MOZ_ASSERT(cx);
     JS::RootedObject jsObject(cx, aJSObject);
     // Check if the subject is privileged.
     if (SubjectIsPrivileged())
@@ -2422,8 +2422,6 @@ nsScriptSecurityManager::nsScriptSecurityManager(void)
 
 nsresult nsScriptSecurityManager::Init()
 {
-    NS_ADDREF(sXPConnect = nsXPConnect::XPConnect());
-
     JSContext* cx = GetSafeJSContext();
     if (!cx) return NS_ERROR_FAILURE;   // this can happen of xpt loading fails
     
@@ -2453,11 +2451,7 @@ nsresult nsScriptSecurityManager::Init()
 
     //-- Register security check callback in the JS engine
     //   Currently this is used to control access to function.caller
-    nsCOMPtr<nsIJSRuntimeService> runtimeService =
-        do_QueryInterface(sXPConnect, &rv);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    rv = runtimeService->GetRuntime(&sRuntime);
+    rv = nsXPConnect::XPConnect()->GetRuntime(&sRuntime);
     NS_ENSURE_SUCCESS(rv, rv);
 
     static const JSSecurityCallbacks securityCallbacks = {
@@ -2498,7 +2492,6 @@ nsScriptSecurityManager::Shutdown()
     sEnabledID = JSID_VOID;
 
     NS_IF_RELEASE(sIOService);
-    NS_IF_RELEASE(sXPConnect);
     NS_IF_RELEASE(sStrBundle);
 }
 
@@ -2516,8 +2509,8 @@ nsScriptSecurityManager::GetScriptSecurityManager()
             return nullptr;
         }
  
-        rv = sXPConnect->SetDefaultSecurityManager(ssManager,
-                                                   nsIXPCSecurityManager::HOOK_ALL);
+        rv = nsXPConnect::XPConnect()->
+            SetDefaultSecurityManager(ssManager);
         if (NS_FAILED(rv)) {
             NS_WARNING("Failed to install xpconnect security manager!");
             return nullptr;
@@ -2545,8 +2538,8 @@ nsresult
 nsScriptSecurityManager::InitPolicies()
 {
     // Clear any policies cached on XPConnect wrappers
-    NS_ENSURE_STATE(sXPConnect);
-    nsresult rv = sXPConnect->ClearAllWrappedNativeSecurityPolicies();
+    nsresult rv =
+        nsXPConnect::XPConnect()->ClearAllWrappedNativeSecurityPolicies();
     if (NS_FAILED(rv)) return rv;
 
     //-- Clear mOriginToPolicyMap: delete mapped DomainEntry items,

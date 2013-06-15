@@ -49,7 +49,6 @@
 #include "nsEventDispatcher.h"
 #include "nsISHistory.h"
 #include "nsISHistoryInternal.h"
-#include "nsIDocShellHistory.h"
 #include "nsIDOMHTMLDocument.h"
 #include "nsIXULWindow.h"
 #include "nsIEditor.h"
@@ -318,6 +317,15 @@ nsFrameLoader::LoadFrame()
   src.Trim(" \t\n\r");
 
   if (src.IsEmpty()) {
+    // If the frame is a XUL element and has the attribute 'nodefaultsrc=true'
+    // then we will not use 'about:blank' as fallback but return early without
+    // starting a load if no 'src' attribute is given (or it's empty).
+    if (mOwnerContent->IsXUL() &&
+        mOwnerContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::nodefaultsrc,
+                                   nsGkAtoms::_true, eCaseMatters)) {
+      return NS_OK;
+    }
+
     src.AssignLiteral("about:blank");
   }
 
@@ -1328,9 +1336,8 @@ nsFrameLoader::Destroy()
 
   // Seems like this is a dynamic frame removal.
   if (dynamicSubframeRemoval) {
-    nsCOMPtr<nsIDocShellHistory> dhistory = do_QueryInterface(mDocShell);
-    if (dhistory) {
-      dhistory->RemoveFromSessionHistory();
+    if (mDocShell) {
+      mDocShell->RemoveFromSessionHistory();
     }
   }
 
@@ -1537,9 +1544,8 @@ nsFrameLoader::MaybeCreateDocShell()
   NS_ENSURE_TRUE(mDocShell, NS_ERROR_FAILURE);
 
   if (!mNetworkCreated) {
-    nsCOMPtr<nsIDocShellHistory> history = do_QueryInterface(mDocShell);
-    if (history) {
-      history->SetCreatedDynamically(true);
+    if (mDocShell) {
+      mDocShell->SetCreatedDynamically(true);
     }
   }
 

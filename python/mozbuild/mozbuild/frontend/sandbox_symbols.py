@@ -66,6 +66,12 @@ VARIABLES = {
         This variable contains a list of files to invoke the assembler on.
         """),
 
+    'CMMSRCS': (StrictOrderingOnAppendList, list, [],
+        """Sources to compile with the Objective C/C++ compiler.
+
+        This variable contains a list of objective-C++ sources to compile.
+        """),
+
     'CSRCS': (StrictOrderingOnAppendList, list, [],
         """C code source files.
 
@@ -92,6 +98,32 @@ VARIABLES = {
         delimiters.
         """),
 
+    'EXTRA_COMPONENTS': (StrictOrderingOnAppendList, list, [],
+        """Additional component files to distribute.
+
+       This variable contains a list of files to copy into $(FINAL_TARGET)/components/.
+        """),
+
+    'EXTRA_JS_MODULES': (StrictOrderingOnAppendList, list, [],
+        """Additional JavaScript files to distribute.
+
+        This variable contains a list of files to copy into JS_MODULES_PATH,
+        which is $(FINAL_TARGET)/modules by default.
+        """),
+
+    'EXTRA_PP_COMPONENTS': (StrictOrderingOnAppendList, list, [],
+        """Javascript XPCOM files.
+
+       This variable contains a list of files to preprocess.  Generated
+       files will be installed in the /components directory of the distribution.
+        """),
+
+    'HOST_CSRCS': (StrictOrderingOnAppendList, list, [],
+        """C source files to compile with the host compiler.
+
+        This variable contains a list of C source files to compile.
+        """),
+
     'PARALLEL_DIRS': (list, list, [],
         """A parallel version of DIRS.
 
@@ -101,10 +133,37 @@ VARIABLES = {
         likely go away.
         """),
 
+    'HOST_LIBRARY_NAME': (unicode, unicode, "",
+        """Name of target library generated when cross compiling.
+        """),
+
+    'JS_MODULES_PATH': (unicode, unicode, "",
+        """Path to install EXTRA_JS_MODULES.
+
+        EXTRA_JS_MODULES files are copied to this path, which defaults to
+        $(FINAL_TARGET)/modules if unspecified.
+        """),
+
+    'LIBRARY_NAME': (unicode, unicode, "",
+        """The name of the library generated for a directory.
+
+        Example:
+        In example/components/moz.build,
+        LIBRARY_NAME = 'xpcomsample'
+        would generate example/components/libxpcomsample.so on Linux, or
+        example/components/xpcomsample.lib on Windows.
+        """),
+
     'SIMPLE_PROGRAMS': (StrictOrderingOnAppendList, list, [],
         """Generate a list of binaries from source.
 
         A list of sources, one per program, to compile & link with libs into standalone programs.
+        """),
+
+    'SSRCS': (StrictOrderingOnAppendList, list, [],
+        """Assembly source files.
+
+        This variable contains a list of files to invoke the assembler on.
         """),
 
     'TOOL_DIRS': (list, list, [],

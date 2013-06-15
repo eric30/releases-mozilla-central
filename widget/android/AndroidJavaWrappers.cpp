@@ -351,7 +351,7 @@ AndroidGeckoLayerClient::InitGeckoLayerClientClass(JNIEnv *jEnv)
 
     jGeckoLayerClientClass = getClassGlobalRef("org/mozilla/gecko/gfx/GeckoLayerClient");
 
-    jSetFirstPaintViewport = getMethod("setFirstPaintViewport", "(FFFFFFFFFFF)V");
+    jSetFirstPaintViewport = getMethod("setFirstPaintViewport", "(FFFFFFF)V");
     jSetPageRect = getMethod("setPageRect", "(FFFF)V");
     jSyncViewportInfoMethod = getMethod("syncViewportInfo",
                                         "(IIIIFZ)Lorg/mozilla/gecko/gfx/ViewTransform;");
@@ -797,9 +797,13 @@ AndroidGeckoEvent::MakeMultiTouchInput(nsIWidget* widget)
     const nsIntPoint& offset = widget->WidgetToScreenOffset();
     event.mTouches.SetCapacity(endIndex - startIndex);
     for (int i = startIndex; i < endIndex; i++) {
+        nsIntPoint point = Points()[i] - offset;
+        nsIntPoint radius = PointRadii()[i];
         SingleTouchData data(PointIndicies()[i],
-                             Points()[i] - offset,
-                             PointRadii()[i],
+                             ScreenIntPoint::FromUnknownPoint(
+                               gfx::IntPoint(point.x, point.y)),
+                             ScreenSize::FromUnknownSize(
+                               gfx::Size(radius.x, radius.y)),
                              Orientations()[i],
                              Pressures()[i]);
         event.mTouches.AppendElement(data);
@@ -863,7 +867,7 @@ AndroidProgressiveUpdateData::Init(jobject jobj)
 }
 
 void
-AndroidGeckoLayerClient::SetFirstPaintViewport(const LayerIntPoint& aOffset, float aZoom, const LayerIntRect& aPageRect, const CSSRect& aCssPageRect)
+AndroidGeckoLayerClient::SetFirstPaintViewport(const LayerIntPoint& aOffset, float aZoom, const CSSRect& aCssPageRect)
 {
     NS_ASSERTION(!isNull(), "SetFirstPaintViewport called on null layer client!");
     JNIEnv *env = GetJNIForThread();    // this is called on the compositor thread
@@ -872,7 +876,6 @@ AndroidGeckoLayerClient::SetFirstPaintViewport(const LayerIntPoint& aOffset, flo
 
     AutoLocalJNIFrame jniFrame(env, 0);
     return env->CallVoidMethod(wrapped_obj, jSetFirstPaintViewport, (float)aOffset.x, (float)aOffset.y, aZoom,
-                               (float)aPageRect.x, (float)aPageRect.y, (float)aPageRect.XMost(), (float)aPageRect.YMost(),
                                aCssPageRect.x, aCssPageRect.y, aCssPageRect.XMost(), aCssPageRect.YMost());
 }
 
@@ -923,7 +926,7 @@ AndroidGeckoLayerClient::SyncViewportInfo(const LayerIntRect& aDisplayPort, floa
 
 void
 AndroidGeckoLayerClient::SyncFrameMetrics(const gfx::Point& aScrollOffset, float aZoom, const CSSRect& aCssPageRect,
-                                          bool aLayersUpdated, const gfx::Rect& aDisplayPort, float aDisplayResolution,
+                                          bool aLayersUpdated, const CSSRect& aDisplayPort, float aDisplayResolution,
                                           bool aIsFirstPaint, gfx::Margin& aFixedLayerMargins, ScreenPoint& aOffset)
 {
     NS_ASSERTION(!isNull(), "SyncFrameMetrics called on null layer client!");
@@ -934,15 +937,14 @@ AndroidGeckoLayerClient::SyncFrameMetrics(const gfx::Point& aScrollOffset, float
     AutoLocalJNIFrame jniFrame(env);
 
     // convert the displayport rect from scroll-relative CSS pixels to document-relative device pixels
-    int dpX = NS_lround((aDisplayPort.x * aDisplayResolution) + aScrollOffset.x);
-    int dpY = NS_lround((aDisplayPort.y * aDisplayResolution) + aScrollOffset.y);
-    int dpW = NS_lround(aDisplayPort.width * aDisplayResolution);
-    int dpH = NS_lround(aDisplayPort.height * aDisplayResolution);
+    LayerRect dpUnrounded = LayerRect::FromCSSRect(aDisplayPort, aDisplayResolution, aDisplayResolution);
+    dpUnrounded += LayerPoint::FromUnknownPoint(aScrollOffset);
+    LayerIntRect dp = LayerRect::RoundToInt(dpUnrounded);
 
     jobject viewTransformJObj = env->CallObjectMethod(wrapped_obj, jSyncFrameMetricsMethod,
             aScrollOffset.x, aScrollOffset.y, aZoom,
             aCssPageRect.x, aCssPageRect.y, aCssPageRect.XMost(), aCssPageRect.YMost(),
-            aLayersUpdated, dpX, dpY, dpW, dpH, aDisplayResolution,
+            aLayersUpdated, dp.x, dp.y, dp.width, dp.height, aDisplayResolution,
             aIsFirstPaint);
 
     if (jniFrame.CheckForException())
@@ -959,7 +961,7 @@ AndroidGeckoLayerClient::SyncFrameMetrics(const gfx::Point& aScrollOffset, float
 
 bool
 AndroidGeckoLayerClient::ProgressiveUpdateCallback(bool aHasPendingNewThebesContent,
-                                                   const gfx::Rect& aDisplayPort,
+                                                   const LayerRect& aDisplayPort,
                                                    float aDisplayResolution,
                                                    bool aDrawingCritical,
                                                    gfx::Rect& aViewport,

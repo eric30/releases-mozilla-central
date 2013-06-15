@@ -667,7 +667,7 @@ IntersectDominators(MBasicBlock *block1, MBasicBlock *block2)
             MBasicBlock *idom = finger2->immediateDominator();
             if (idom == finger2)
                 return NULL; // Empty intersection.
-            finger2 = finger2->immediateDominator();
+            finger2 = idom;
         }
     }
     return finger1;
@@ -704,8 +704,10 @@ ComputeImmediateDominators(MIRGraph &graph)
             // Find the first common dominator.
             for (size_t i = 1; i < block->numPredecessors(); i++) {
                 MBasicBlock *pred = block->getPredecessor(i);
-                if (pred->immediateDominator() != NULL)
-                    newIdom = IntersectDominators(pred, newIdom);
+                if (pred->immediateDominator() == NULL)
+                    continue;
+
+                newIdom = IntersectDominators(pred, newIdom);
 
                 // If there is no common dominator, the block self-dominates.
                 if (newIdom == NULL) {
@@ -905,28 +907,8 @@ CheckUseImpliesOperand(MInstruction *ins, MUse *use)
 }
 #endif // DEBUG
 
-#ifdef DEBUG
-static void
-AssertReversePostOrder(MIRGraph &graph)
-{
-    // Check that every block is visited after all its predecessors (except backedges).
-    for (ReversePostorderIterator block(graph.rpoBegin()); block != graph.rpoEnd(); block++) {
-        JS_ASSERT(!block->isMarked());
-
-        for (size_t i = 0; i < block->numPredecessors(); i++) {
-            MBasicBlock *pred = block->getPredecessor(i);
-            JS_ASSERT_IF(!pred->isLoopBackedge(), pred->isMarked());
-        }
-
-        block->mark();
-    }
-
-    graph.unmarkBlocks();
-}
-#endif
-
 void
-ion::AssertGraphCoherency(MIRGraph &graph)
+ion::AssertBasicGraphCoherency(MIRGraph &graph)
 {
 #ifdef DEBUG
     // Assert successor and predecessor list coherency.
@@ -952,7 +934,34 @@ ion::AssertGraphCoherency(MIRGraph &graph)
     }
 
     JS_ASSERT(graph.numBlocks() == count);
+#endif
+}
 
+#ifdef DEBUG
+static void
+AssertReversePostOrder(MIRGraph &graph)
+{
+    // Check that every block is visited after all its predecessors (except backedges).
+    for (ReversePostorderIterator block(graph.rpoBegin()); block != graph.rpoEnd(); block++) {
+        JS_ASSERT(!block->isMarked());
+
+        for (size_t i = 0; i < block->numPredecessors(); i++) {
+            MBasicBlock *pred = block->getPredecessor(i);
+            JS_ASSERT_IF(!pred->isLoopBackedge(), pred->isMarked());
+        }
+
+        block->mark();
+    }
+
+    graph.unmarkBlocks();
+}
+#endif
+
+void
+ion::AssertGraphCoherency(MIRGraph &graph)
+{
+#ifdef DEBUG
+    AssertBasicGraphCoherency(graph);
     AssertReversePostOrder(graph);
 #endif
 }

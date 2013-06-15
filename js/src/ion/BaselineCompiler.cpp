@@ -196,7 +196,7 @@ BaselineCompiler::compile()
         baselineScript->toggleBarriers(true);
 
     // All SPS instrumentation is emitted toggled off.  Toggle them on if needed.
-    if (cx->runtime->spsProfiler.enabled())
+    if (cx->runtime()->spsProfiler.enabled())
         baselineScript->toggleSPS(true);
 
     return Method_Compiled;
@@ -297,7 +297,7 @@ BaselineCompiler::emitOutOfLinePostBarrierSlot()
 #endif
 
     masm.setupUnalignedABICall(2, scratch);
-    masm.movePtr(ImmWord(cx->runtime), scratch);
+    masm.movePtr(ImmWord(cx->runtime()), scratch);
     masm.passABIArg(scratch);
     masm.passABIArg(objReg);
     masm.callWithABI(JS_FUNC_TO_DATA_PTR(void *, PostWriteBarrier));
@@ -411,7 +411,7 @@ bool
 BaselineCompiler::emitStackCheck()
 {
     Label skipCall;
-    uintptr_t *limitAddr = &cx->runtime->mainThread.ionStackLimit;
+    uintptr_t *limitAddr = &cx->runtime()->mainThread.ionStackLimit;
     masm.loadPtr(AbsoluteAddress(limitAddr), R0.scratchReg());
     masm.branchPtr(Assembler::AboveOrEqual, BaselineStackReg, R0.scratchReg(), &skipCall);
 
@@ -430,7 +430,7 @@ bool
 BaselineCompiler::emitInterruptCheck()
 {
     Label done;
-    void *interrupt = (void *)&cx->compartment->rt->interrupt;
+    void *interrupt = (void *)&cx->compartment()->rt->interrupt;
     masm.branch32(Assembler::Equal, AbsoluteAddress(interrupt), Imm32(0), &done);
 
     prepareVMCall();
@@ -512,7 +512,7 @@ BaselineCompiler::emitDebugTrap()
     bool enabled = script->stepModeEnabled() || script->hasBreakpointsAt(pc);
 
     // Emit patchable call to debug trap handler.
-    IonCode *handler = cx->compartment->ionCompartment()->debugTrapHandler(cx);
+    IonCode *handler = cx->compartment()->ionCompartment()->debugTrapHandler(cx);
     mozilla::DebugOnly<CodeOffsetLabel> offset = masm.toggledCall(handler, enabled);
 
 #ifdef DEBUG
@@ -555,7 +555,7 @@ BaselineCompiler::emitSPSPop()
     Label noPop;
     masm.branchTest32(Assembler::Zero, frame.addressOfFlags(),
                       Imm32(BaselineFrame::HAS_PUSHED_SPS_FRAME), &noPop);
-    masm.spsPopFrameSafe(&cx->runtime->spsProfiler, R1.scratchReg());
+    masm.spsPopFrameSafe(&cx->runtime()->spsProfiler, R1.scratchReg());
     masm.bind(&noPop);
 }
 
@@ -1597,11 +1597,11 @@ BaselineCompiler::emit_JSOP_GETGNAME()
         return true;
     }
     if (name == cx->names().NaN) {
-        frame.push(cx->runtime->NaNValue);
+        frame.push(cx->runtime()->NaNValue);
         return true;
     }
     if (name == cx->names().Infinity) {
-        frame.push(cx->runtime->positiveInfinityValue);
+        frame.push(cx->runtime()->positiveInfinityValue);
         return true;
     }
 
@@ -1814,7 +1814,7 @@ BaselineCompiler::emit_JSOP_SETALIASEDVAR()
     // Scope coordinate object is already in R2.scratchReg().
     frame.syncStack(0);
 
-    Nursery &nursery = cx->runtime->gcNursery;
+    Nursery &nursery = cx->runtime()->gcNursery;
     Label skipBarrier;
     Label isTenured;
     masm.branchTestObject(Assembler::NotEqual, R0, &skipBarrier);
@@ -1995,17 +1995,23 @@ BaselineCompiler::emitInitPropGetterSetter()
     JS_ASSERT(JSOp(*pc) == JSOP_INITPROP_GETTER ||
               JSOp(*pc) == JSOP_INITPROP_SETTER);
 
-    // Load value in R0, keep object on the stack.
-    frame.popRegsAndSync(1);
+    // Load value in R0 but keep it on the stack for the decompiler.
+    frame.syncStack(0);
+    masm.loadValue(frame.addressOfStackValue(frame.peek(-1)), R0);
+
     prepareVMCall();
 
     pushArg(R0);
     pushArg(ImmGCPtr(script->getName(pc)));
-    masm.extractObject(frame.addressOfStackValue(frame.peek(-1)), R0.scratchReg());
+    masm.extractObject(frame.addressOfStackValue(frame.peek(-2)), R0.scratchReg());
     pushArg(R0.scratchReg());
     pushArg(ImmWord(pc));
 
-    return callVM(InitPropGetterSetterInfo);
+    if (!callVM(InitPropGetterSetterInfo))
+        return false;
+
+    frame.pop();
+    return true;
 }
 
 bool
@@ -2031,17 +2037,25 @@ BaselineCompiler::emitInitElemGetterSetter()
     JS_ASSERT(JSOp(*pc) == JSOP_INITELEM_GETTER ||
               JSOp(*pc) == JSOP_INITELEM_SETTER);
 
-    // Load index and value in R0 and R1, keep object on the stack.
-    frame.popRegsAndSync(2);
+    // Load index and value in R0 and R1, but keep values on the stack for the
+    // decompiler.
+    frame.syncStack(0);
+    masm.loadValue(frame.addressOfStackValue(frame.peek(-2)), R0);
+    masm.loadValue(frame.addressOfStackValue(frame.peek(-1)), R1);
+
     prepareVMCall();
 
     pushArg(R1);
     pushArg(R0);
-    masm.extractObject(frame.addressOfStackValue(frame.peek(-1)), R0.scratchReg());
+    masm.extractObject(frame.addressOfStackValue(frame.peek(-3)), R0.scratchReg());
     pushArg(R0.scratchReg());
     pushArg(ImmWord(pc));
 
-    return callVM(InitElemGetterSetterInfo);
+    if (!callVM(InitElemGetterSetterInfo))
+        return false;
+
+    frame.popn(2);
+    return true;
 }
 
 bool

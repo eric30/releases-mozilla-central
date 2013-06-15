@@ -725,6 +725,7 @@ this.DOMApplicationRegistry = {
         ppmm.removeMessageListener(msgName, this);
       }).bind(this));
       Services.obs.removeObserver(this, "xpcom-shutdown");
+      cpmm = null;
       ppmm = null;
     }
   },
@@ -3131,7 +3132,9 @@ this.DOMApplicationRegistry = {
       } catch(e) { }
     });
     // Send back an answer to the child.
-    ppmm.broadcastAsyncMessage("Webapps:ClearBrowserData:Return", msg);
+    if (msg) {
+      ppmm.broadcastAsyncMessage("Webapps:ClearBrowserData:Return", msg);
+    }
   },
 
   registerBrowserElementParentForApp: function(bep, appId) {

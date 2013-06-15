@@ -530,7 +530,7 @@ SECU_ReadDERFromFile(SECItem *der, PRFileDesc *inFile, PRBool ascii)
 	    }
 	} else {
 	    /* need one additional byte for zero terminator */
-	    rv = SECITEM_ReallocItem(NULL, &filedata, filedata.len, filedata.len+1);
+	    rv = SECITEM_ReallocItemV2(NULL, &filedata, filedata.len+1);
 	    if (rv != SECSuccess) {
 		PORT_Free(filedata.data);
 		return rv;
@@ -3594,6 +3594,10 @@ SECU_GetSSLVersionFromName(const char *buf, size_t bufLen, PRUint16 *version)
     }
     if (!PL_strncasecmp(buf, "tls1.1", bufLen)) {
         *version = SSL_LIBRARY_VERSION_TLS_1_1;
+        return SECSuccess;
+    }
+    if (!PL_strncasecmp(buf, "tls1.2", bufLen)) {
+        *version = SSL_LIBRARY_VERSION_TLS_1_2;
         return SECSuccess;
     }
     PORT_SetError(SEC_ERROR_INVALID_ARGS);

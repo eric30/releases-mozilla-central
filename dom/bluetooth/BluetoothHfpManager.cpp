@@ -8,6 +8,7 @@
 
 #include "BluetoothHfpManager.h"
 
+#include "BluetoothA2dpManager.h"
 #include "BluetoothReplyRunnable.h"
 #include "BluetoothService.h"
 #include "BluetoothSocket.h"
@@ -30,7 +31,21 @@
 #define MOZSETTINGS_CHANGED_ID "mozsettings-changed"
 #define MOBILE_CONNECTION_ICCINFO_CHANGED "mobile-connection-iccinfo-changed"
 #define MOBILE_CONNECTION_VOICE_CHANGED "mobile-connection-voice-changed"
-#define BLUETOOTH_SCO_STATUS_CHANGED "bluetooth-sco-status-changed"
+
+/**
+ * BRSF bitmask of AG supported features. See 4.34.1 "Bluetooth Defined AT
+ * Capabilities" in Bluetooth hands-free profile 1.6
+ */
+#define BRSF_BIT_THREE_WAY_CALLING         1
+#define BSRF_BIT_EC_NR_FUNCTION            (1 << 1)
+#define BRSF_BIT_VOICE_RECOGNITION         (1 << 2)
+#define BRSF_BIT_IN_BAND_RING_TONE         (1 << 3)
+#define BRSF_BIT_ATTACH_NUM_TO_VOICE_TAG   (1 << 4)
+#define BRSF_BIT_ABILITY_TO_REJECT_CALL    (1 << 5)
+#define BRSF_BIT_ENHANCED_CALL_STATUS      (1 << 6)
+#define BRSF_BIT_ENHANCED_CALL_CONTROL     (1 << 7)
+#define BRSF_BIT_EXTENDED_ERR_RESULT_CODES (1 << 8)
+#define BRSF_BIT_CODEC_NEGOTIATION         (1 << 9)
 
 /**
  * These constants are used in result code such as +CLIP and +CCWA. The value
@@ -47,7 +62,7 @@ using namespace mozilla::ipc;
 USING_BLUETOOTH_NAMESPACE
 
 namespace {
-  StaticAutoPtr<BluetoothHfpManager> gBluetoothHfpManager;
+  StaticRefPtr<BluetoothHfpManager> gBluetoothHfpManager;
   StaticRefPtr<BluetoothHfpManagerObserver> sHfpObserver;
   bool gInShutdown = false;
   static const char kHfpCrlf[] = "\xd\xa";
@@ -98,6 +113,7 @@ typedef struct {
   const char* name;
   const char* range;
   int value;
+  bool activated;
 } CINDItem;
 
 enum CINDType {
@@ -112,13 +128,13 @@ enum CINDType {
 
 static CINDItem sCINDItems[] = {
   {},
-  {"battchg", "0-5", 5},
-  {"call", "0,1", CallState::NO_CALL},
-  {"callheld", "0-2", CallHeldState::NO_CALLHELD},
-  {"callsetup", "0-3", CallSetupState::NO_CALLSETUP},
-  {"service", "0,1", 0},
-  {"signal", "0-5", 0},
-  {"roam", "0,1", 0}
+  {"battchg", "0-5", 5, true},
+  {"call", "0,1", CallState::NO_CALL, true},
+  {"callheld", "0-2", CallHeldState::NO_CALLHELD, true},
+  {"callsetup", "0-3", CallSetupState::NO_CALLSETUP, true},
+  {"service", "0,1", 0, true},
+  {"signal", "0-5", 0, true},
+  {"roam", "0,1", 0, true}
 };
 
 class mozilla::dom::bluetooth::Call {
@@ -204,10 +220,7 @@ public:
     // Range of battery level: [0, 1], double
     // Range of CIND::BATTCHG: [0, 5], int
     int level = ceil(aBatteryInfo.level() * 5.0);
-    if (level != sCINDItems[CINDType::BATTCHG].value) {
-      sCINDItems[CINDType::BATTCHG].value = level;
-      gBluetoothHfpManager->SendCommand("+CIEV: ", CINDType::BATTCHG);
-    }
+    gBluetoothHfpManager->UpdateCIND(CINDType::BATTCHG, level);
   }
 };
 
@@ -342,6 +355,13 @@ IsValidDtmf(const char aChar) {
   return false;
 }
 
+static bool
+IsMandatoryIndicator(const CINDType aType) {
+  return (aType == CINDType::CALL) ||
+         (aType == CINDType::CALLHELD) ||
+         (aType == CINDType::CALLSETUP);
+}
+
 BluetoothHfpManager::BluetoothHfpManager()
 {
   Reset();
@@ -364,6 +384,9 @@ BluetoothHfpManager::Reset()
   sCINDItems[CINDType::CALL].value = CallState::NO_CALL;
   sCINDItems[CINDType::CALLSETUP].value = CallSetupState::NO_CALLSETUP;
   sCINDItems[CINDType::CALLHELD].value = CallHeldState::NO_CALLHELD;
+  for (uint8_t i = 1; i < ArrayLength(sCINDItems); i++) {
+    sCINDItems[i].activated = true;
+  }
 
   mCCWA = false;
   mCLIP = false;
@@ -371,6 +394,13 @@ BluetoothHfpManager::Reset()
   mCMER = false;
   mReceiveVgsFlag = false;
   mDialingRequestProcessed = true;
+
+  // We disable BSIR by default as it requires OEM implement BT SCO + SPEAKER
+  // output audio path in audio driver. OEM can enable BSIR by setting
+  // mBSIR=true here.
+  //
+  // Please see Bug 878728 for more information.
+  mBSIR = false;
 
   ResetCallArray();
 }
@@ -504,7 +534,7 @@ BluetoothHfpManager::NotifyDialer(const nsAString& aCommand)
 }
 
 void
-BluetoothHfpManager::NotifyAudioManager(const nsAString& aAddress)
+BluetoothHfpManager::NotifyAudioManager(bool aStatus)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -512,9 +542,12 @@ BluetoothHfpManager::NotifyAudioManager(const nsAString& aAddress)
     do_GetService("@mozilla.org/observer-service;1");
   NS_ENSURE_TRUE_VOID(obs);
 
-  if (NS_FAILED(obs->NotifyObservers(nullptr,
+  nsAutoString data;
+  data.AppendInt(aStatus);
+
+  if (NS_FAILED(obs->NotifyObservers(this,
                                      BLUETOOTH_SCO_STATUS_CHANGED,
-                                     aAddress.BeginReading()))) {
+                                     data.BeginReading()))) {
     NS_WARNING("Failed to notify bluetooth-sco-status-changed observsers!");
   }
 }
@@ -604,10 +637,7 @@ BluetoothHfpManager::HandleVoiceConnectionChanged()
 
   bool roaming;
   voiceInfo->GetRoaming(&roaming);
-  if (roaming != sCINDItems[CINDType::ROAM].value) {
-    sCINDItems[CINDType::ROAM].value = roaming;
-    SendCommand("+CIEV: ", CINDType::ROAM);
-  }
+  UpdateCIND(CINDType::ROAM, roaming);
 
   bool service = false;
   nsString regState;
@@ -615,10 +645,7 @@ BluetoothHfpManager::HandleVoiceConnectionChanged()
   if (regState.EqualsLiteral("registered")) {
     service = true;
   }
-  if (service != sCINDItems[CINDType::SERVICE].value) {
-    sCINDItems[CINDType::SERVICE].value = service;
-    SendCommand("+CIEV: ", CINDType::SERVICE);
-  }
+  UpdateCIND(CINDType::SERVICE, service);
 
   uint8_t signal;
   JS::Value value;
@@ -628,11 +655,7 @@ BluetoothHfpManager::HandleVoiceConnectionChanged()
     return NS_ERROR_FAILURE;
   }
   signal = ceil(value.toNumber() / 20.0);
-
-  if (signal != sCINDItems[CINDType::SIGNAL].value) {
-    sCINDItems[CINDType::SIGNAL].value = signal;
-    SendCommand("+CIEV: ", CINDType::SIGNAL);
-  }
+  UpdateCIND(CINDType::SIGNAL, signal);
 
   /**
    * Possible return values for mode are:
@@ -711,7 +734,15 @@ BluetoothHfpManager::ReceiveSocketData(BluetoothSocket* aSocket,
   // For more information, please refer to 4.34.1 "Bluetooth Defined AT
   // Capabilities" in Bluetooth hands-free profile 1.6
   if (msg.Find("AT+BRSF=") != -1) {
-    SendCommand("+BRSF: ", 97);
+    uint32_t brsf = BRSF_BIT_THREE_WAY_CALLING |
+                    BRSF_BIT_ABILITY_TO_REJECT_CALL |
+                    BRSF_BIT_ENHANCED_CALL_STATUS;
+
+    if (mBSIR) {
+      brsf |= BRSF_BIT_IN_BAND_RING_TONE;
+    }
+
+    SendCommand("+BRSF: ", brsf);
   } else if (msg.Find("AT+CIND=?") != -1) {
     // Asking for CIND range
     SendCommand("+CIND: ", 0);
@@ -970,6 +1001,36 @@ BluetoothHfpManager::ReceiveSocketData(BluetoothSocket* aSocket,
       message.AppendLiteral(",,4");
       SendLine(message.get());
     }
+  } else if (msg.Find("AT+BIA=") != -1) {
+    ParseAtCommand(msg, 7, atCommandValues);
+
+    for (uint8_t i = 0; i < atCommandValues.Length(); i++) {
+      CINDType indicatorType = (CINDType) (i + 1);
+      if (indicatorType >= ArrayLength(sCINDItems)) {
+        // Ignore excess parameters at the end
+        break;
+      }
+
+      if (!IsMandatoryIndicator(indicatorType)) {
+        /**
+         * Accept only following indicator states:
+         * - "1": activate
+         * - "0": deactivate
+         * - "" : maintain current state
+         * Otherwise we regard the command incorrectly formatted.
+         */
+        if (atCommandValues[i].EqualsLiteral("1")) {
+          sCINDItems[indicatorType].activated = 1;
+        } else if (atCommandValues[i].EqualsLiteral("0")) {
+          sCINDItems[indicatorType].activated = 0;
+        } else if (!atCommandValues[i].EqualsLiteral("")) {
+          SendLine("ERROR");
+          return;
+        }
+      } else {
+        // Ignore requests to activate/deactivate mandatory indicators
+      }
+    }
   } else {
     nsCString warningMsg;
     warningMsg.Append(NS_LITERAL_CSTRING("Unsupported AT command: "));
@@ -993,14 +1054,21 @@ BluetoothHfpManager::Connect(const nsAString& aDeviceAddress,
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  NS_ENSURE_FALSE_VOID(gInShutdown);
-  NS_ENSURE_FALSE_VOID(mSocket);
+  BluetoothService* bs = BluetoothService::Get();
+  if (!bs || gInShutdown) {
+    DispatchBluetoothReply(aRunnable, BluetoothValue(),
+                           NS_LITERAL_STRING(ERR_NO_AVAILABLE_RESOURCE));
+    return;
+  }
+
+  if (mSocket) {
+    DispatchBluetoothReply(aRunnable, BluetoothValue(),
+                           NS_LITERAL_STRING(ERR_REACHED_CONNECTION_LIMIT));
+    return;
+  }
 
   mNeedsUpdatingSdpRecords = true;
   mIsHandsfree = aIsHandsfree;
-
-  BluetoothService* bs = BluetoothService::Get();
-  NS_ENSURE_TRUE_VOID(bs);
 
   nsString uuid;
   if (aIsHandsfree) {
@@ -1084,6 +1152,10 @@ BluetoothHfpManager::Disconnect()
     mSocket->Disconnect();
     mSocket = nullptr;
   }
+
+  BluetoothA2dpManager* a2dp = BluetoothA2dpManager::Get();
+  NS_ENSURE_TRUE_VOID(a2dp);
+  a2dp->Disconnect();
 }
 
 bool
@@ -1101,7 +1173,7 @@ BluetoothHfpManager::SendLine(const char* aMessage)
 }
 
 bool
-BluetoothHfpManager::SendCommand(const char* aCommand, uint8_t aValue)
+BluetoothHfpManager::SendCommand(const char* aCommand, uint32_t aValue)
 {
   if (!IsConnected()) {
     NS_WARNING("Trying to SendCommand() without a SLC");
@@ -1109,11 +1181,10 @@ BluetoothHfpManager::SendCommand(const char* aCommand, uint8_t aValue)
   }
 
   nsAutoCString message;
-  int value = aValue;
   message += aCommand;
 
   if (!strcmp(aCommand, "+CIEV: ")) {
-    if (!mCMER) {
+    if (!mCMER || !sCINDItems[aValue].activated) {
       // Indicator status update is disabled
       return true;
     }
@@ -1199,7 +1270,7 @@ BluetoothHfpManager::SendCommand(const char* aCommand, uint8_t aValue)
     }
     return rv;
   } else {
-    message.AppendInt(value);
+    message.AppendInt(aValue);
   }
 
   return SendLine(message.get());
@@ -1210,8 +1281,7 @@ BluetoothHfpManager::UpdateCIND(uint8_t aType, uint8_t aValue, bool aSend)
 {
   if (sCINDItems[aType].value != aValue) {
     sCINDItems[aType].value = aValue;
-    // Indicator status update is enabled
-    if (aSend && mCMER) {
+    if (aSend) {
       SendCommand("+CIEV: ", aType);
     }
   }
@@ -1299,6 +1369,11 @@ BluetoothHfpManager::HandleCallStateChanged(uint32_t aCallIndex,
         // Start sending RING indicator to HF
         sStopSendingRingFlag = false;
         UpdateCIND(CINDType::CALLSETUP, CallSetupState::INCOMING, aSend);
+
+        if (mBSIR) {
+          // Setup audio connection for in-band ring tone
+          ConnectSco();
+        }
 
         nsAutoString number(aNumber);
         if (!mCLIP) {
@@ -1461,6 +1536,10 @@ BluetoothHfpManager::OnConnectSuccess(BluetoothSocket* aSocket)
   NotifyStatusChanged(NS_LITERAL_STRING("bluetooth-hfp-status-changed"));
 
   ListenSco();
+
+  BluetoothA2dpManager* a2dp = BluetoothA2dpManager::Get();
+  NS_ENSURE_TRUE_VOID(a2dp);
+  a2dp->Connect(mDeviceAddress);
 }
 
 void
@@ -1589,7 +1668,7 @@ BluetoothHfpManager::OnScoConnectSuccess()
     mScoRunnable = nullptr;
   }
 
-  NotifyAudioManager(mDeviceAddress);
+  NotifyAudioManager(true);
   NotifyStatusChanged(NS_LITERAL_STRING("bluetooth-sco-status-changed"));
 
   mScoSocketStatus = mScoSocket->GetConnectionStatus();
@@ -1613,7 +1692,7 @@ BluetoothHfpManager::OnScoDisconnect()
 {
   if (mScoSocketStatus == SocketConnectionStatus::SOCKET_CONNECTED) {
     ListenSco();
-    NotifyAudioManager(EmptyString());
+    NotifyAudioManager(false);
     NotifyStatusChanged(NS_LITERAL_STRING("bluetooth-sco-status-changed"));
   }
 }
@@ -1718,3 +1797,6 @@ BluetoothHfpManager::IsScoConnected()
   }
   return false;
 }
+
+NS_IMPL_ISUPPORTS0(BluetoothHfpManager)
+

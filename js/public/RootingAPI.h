@@ -178,7 +178,11 @@ template <typename T>
 class Heap : public js::HeapBase<T>
 {
   public:
-    Heap() { set(js::RootMethods<T>::initial()); }
+    Heap() {
+        MOZ_STATIC_ASSERT(sizeof(T) == sizeof(Heap<T>),
+                          "Heap<T> must be binary compatible with T.");
+        set(js::RootMethods<T>::initial());
+    }
     explicit Heap(T p) { set(p); }
     explicit Heap(const Heap<T> &p) { set(p.ptr); }
 
@@ -251,6 +255,8 @@ class MOZ_NONHEAP_CLASS Handle : public js::HandleBase<T>
     Handle(Handle<S> handle,
            typename mozilla::EnableIf<mozilla::IsConvertible<S, T>::value, int>::Type dummy = 0)
     {
+        MOZ_STATIC_ASSERT(sizeof(Handle<T>) == sizeof(T *),
+                          "Handle must be binary compatible with T*.");
         ptr = reinterpret_cast<const T *>(handle.address());
     }
 
@@ -506,9 +512,8 @@ class MOZ_STACK_CLASS Rooted : public js::RootedBase<T>
 #endif
     }
 
-    void init(js::PerThreadData *ptArg) {
+    void init(js::PerThreadDataFriendFields *pt) {
 #if defined(JSGC_ROOT_ANALYSIS) || defined(JSGC_USE_EXACT_ROOTING)
-        js::PerThreadDataFriendFields *pt = js::PerThreadDataFriendFields::get(ptArg);
         commonInit(pt->thingGCRooters);
 #endif
     }
@@ -535,7 +540,7 @@ class MOZ_STACK_CLASS Rooted : public js::RootedBase<T>
       : ptr(js::RootMethods<T>::initial())
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-        init(pt);
+        init(js::PerThreadDataFriendFields::get(pt));
     }
 
     Rooted(js::PerThreadData *pt, T initial
@@ -543,7 +548,23 @@ class MOZ_STACK_CLASS Rooted : public js::RootedBase<T>
       : ptr(initial)
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-        init(pt);
+        init(js::PerThreadDataFriendFields::get(pt));
+    }
+
+    Rooted(JSRuntime *rt
+           MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+      : ptr(js::RootMethods<T>::initial())
+    {
+        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+        init(js::PerThreadDataFriendFields::getMainThread(rt));
+    }
+
+    Rooted(JSRuntime *rt, T initial
+           MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+      : ptr(initial)
+    {
+        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+        init(js::PerThreadDataFriendFields::getMainThread(rt));
     }
 
     ~Rooted() {
@@ -577,6 +598,11 @@ class MOZ_STACK_CLASS Rooted : public js::RootedBase<T>
     T &operator=(const Rooted &value) {
         ptr = value;
         return ptr;
+    }
+
+    void set(T value) {
+        JS_ASSERT(!js::RootMethods<T>::poisoned(value));
+        ptr = value;
     }
 
     bool operator!=(const T &other) { return ptr != other; }
@@ -860,6 +886,8 @@ template <typename T>
 inline
 MutableHandle<T>::MutableHandle(Rooted<T> *root)
 {
+    MOZ_STATIC_ASSERT(sizeof(MutableHandle<T>) == sizeof(T *),
+                      "MutableHandle must be binary compatible with T*.");
     ptr = root->address();
 }
 

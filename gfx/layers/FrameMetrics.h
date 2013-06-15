@@ -32,7 +32,6 @@ public:
 
   FrameMetrics()
     : mCompositionBounds(0, 0, 0, 0)
-    , mContentRect(0, 0, 0, 0)
     , mDisplayPort(0, 0, 0, 0)
     , mCriticalDisplayPort(0, 0, 0, 0)
     , mViewport(0, 0, 0, 0)
@@ -51,7 +50,6 @@ public:
   bool operator==(const FrameMetrics& aOther) const
   {
     return mCompositionBounds.IsEqualEdges(aOther.mCompositionBounds) &&
-           mContentRect.IsEqualEdges(aOther.mContentRect) &&
            mDisplayPort.IsEqualEdges(aOther.mDisplayPort) &&
            mCriticalDisplayPort.IsEqualEdges(aOther.mCriticalDisplayPort) &&
            mViewport.IsEqualEdges(aOther.mViewport) &&
@@ -122,17 +120,6 @@ public:
   // metric as they do not have a displayport set. See bug 775452.
   LayerIntRect mCompositionBounds;
 
-  // |mScrollableRect|, stored in layer pixels. DECPRECATED, DO NOT USE.
-  //
-  // This is valid on any layer where |mScrollableRect| is, though it may be
-  // more lazily maintained than |mScrollableRect|. That is, when
-  // |mScrollableRect| is updated, this may lag. For this reason, it's better to
-  // use |mScrollableRect| for any control logic.
-  //
-  // FIXME/bug 785929: Is this really necessary? Can it not be calculated from
-  // |mScrollableRect| whenever it's needed?
-  LayerIntRect mContentRect;
-
   // ---------------------------------------------------------------------------
   // The following metrics are all in CSS pixels. They are not in any uniform
   // space, so each is explained separately.
@@ -155,7 +142,7 @@ public:
   //
   // This is only valid on the root layer. Nested iframes do not have a
   // displayport set on them. See bug 775452.
-  gfx::Rect mDisplayPort;
+  CSSRect mDisplayPort;
 
   // If non-empty, the area of a frame's contents that is considered critical
   // to paint. Area outside of this area (i.e. area inside mDisplayPort, but
@@ -163,7 +150,7 @@ public:
   // painted with lower precision, or not painted at all.
   //
   // The same restrictions for mDisplayPort apply here.
-  gfx::Rect mCriticalDisplayPort;
+  CSSRect mCriticalDisplayPort;
 
   // The CSS viewport, which is the dimensions we're using to constrain the
   // <html> element of this frame, relative to the top-left of the layer. Note
@@ -174,7 +161,7 @@ public:
   // their own viewport, which will just be the size of the window of the
   // iframe. For layers that don't correspond to a document, this metric is
   // meaningless and invalid.
-  gfx::Rect mViewport;
+  CSSRect mViewport;
 
   // The position of the top-left of the CSS viewport, relative to the document
   // (or the document relative to the viewport, if that helps understand it).
@@ -191,7 +178,7 @@ public:
   //
   // This is valid for any layer, but is always relative to this frame and
   // not any parents, regardless of parent transforms.
-  mozilla::CSSPoint mScrollOffset;
+  CSSPoint mScrollOffset;
 
   // A unique ID assigned to each scrollable frame (unless this is
   // ROOT_SCROLL_ID, in which case it is not unique).
@@ -208,7 +195,7 @@ public:
   // window.scrollTo().
   //
   // This is valid on any layer unless it has no content.
-  mozilla::CSSRect mScrollableRect;
+  CSSRect mScrollableRect;
 
   // ---------------------------------------------------------------------------
   // The following metrics are dimensionless.

@@ -273,6 +273,7 @@ MOCHITEST_FILES = \
 		test_bug827426.html \
 		test_bug838582.html \
 		test_bug839913.html \
+		test_bug840877.html \
 		test_bug841466.html \
 		test_iframe_sandbox_inheritance.html \
 		file_iframe_sandbox_a_if1.html \
@@ -356,6 +357,11 @@ MOCHITEST_FILES = \
 		wakelock.ogg \
 		wakelock.ogv \
 		test_bug869040.html \
+		allowMedia.sjs \
+		$(NULL)
+
+MOCHITEST_CHROME_FILES = \
+		test_allowMedia.html \
 		$(NULL)
 
 MOCHITEST_BROWSER_FILES = \

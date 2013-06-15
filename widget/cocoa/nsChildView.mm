@@ -2230,7 +2230,8 @@ nsChildView::MaybeDrawRoundedCorners(GLManager* aManager, const nsIntRect& aRect
     return;
   }
 
-  if (!mCornerMaskImage) {
+  if (!mCornerMaskImage ||
+      mCornerMaskImage->GetSize().width != mDevPixelCornerRadius) {
     mCornerMaskImage =
       aManager->gl()->CreateTextureImage(nsIntSize(mDevPixelCornerRadius,
                                                    mDevPixelCornerRadius),
@@ -3694,10 +3695,10 @@ NSEvent* gLastDragMouseDownEvent = nil;
 
 #ifdef __LP64__
 - (bool)sendSwipeEvent:(NSEvent*)aEvent
-                withKind:(PRUint32)aMsg
-       allowedDirections:(PRUint32*)aAllowedDirections
-               direction:(PRUint32)aDirection
-                   delta:(PRFloat64)aDelta
+                withKind:(uint32_t)aMsg
+       allowedDirections:(uint32_t*)aAllowedDirections
+               direction:(uint32_t)aDirection
+                   delta:(double)aDelta
 {
   if (!mGeckoChild)
     return false;
@@ -3711,10 +3712,10 @@ NSEvent* gLastDragMouseDownEvent = nil;
 }
 
 - (void)sendSwipeEndEvent:(NSEvent *)anEvent
-        allowedDirections:(PRUint32)aAllowedDirections
+        allowedDirections:(uint32_t)aAllowedDirections
 {
     // Tear down animation overlay by sending a swipe end event.
-    PRUint32 allowedDirectionsCopy = aAllowedDirections;
+    uint32_t allowedDirectionsCopy = aAllowedDirections;
     [self sendSwipeEvent:anEvent
                 withKind:NS_SIMPLE_GESTURE_SWIPE_END
        allowedDirections:&allowedDirectionsCopy
@@ -3772,9 +3773,9 @@ NSEvent* gLastDragMouseDownEvent = nil;
     return;
   }
 
-  PRUint32 vDirs = (PRUint32)nsIDOMSimpleGestureEvent::DIRECTION_DOWN |
-                   (PRUint32)nsIDOMSimpleGestureEvent::DIRECTION_UP;
-  PRUint32 direction = 0;
+  uint32_t vDirs = (uint32_t)nsIDOMSimpleGestureEvent::DIRECTION_DOWN |
+                   (uint32_t)nsIDOMSimpleGestureEvent::DIRECTION_UP;
+  uint32_t direction = 0;
   // Only initiate horizontal tracking for events whose horizontal element is
   // at least eight times larger than its vertical element. This minimizes
   // performance problems with vertical scrolls (by minimizing the possibility
@@ -3790,9 +3791,9 @@ NSEvent* gLastDragMouseDownEvent = nil;
       return;
 
     if (deltaX < 0.0)
-      direction = (PRUint32)nsIDOMSimpleGestureEvent::DIRECTION_RIGHT;
+      direction = (uint32_t)nsIDOMSimpleGestureEvent::DIRECTION_RIGHT;
     else
-      direction = (PRUint32)nsIDOMSimpleGestureEvent::DIRECTION_LEFT;
+      direction = (uint32_t)nsIDOMSimpleGestureEvent::DIRECTION_LEFT;
   }
   // Only initiate vertical tracking for events whose vertical element is
   // at least two times larger than its horizontal element. This minimizes
@@ -3800,9 +3801,9 @@ NSEvent* gLastDragMouseDownEvent = nil;
   else if (overflowY != 0.0 && deltaY != 0.0 &&
            fabsf(deltaY) > fabsf(deltaX) * 2) {
     if (deltaY < 0.0)
-      direction = (PRUint32)nsIDOMSimpleGestureEvent::DIRECTION_DOWN;
+      direction = (uint32_t)nsIDOMSimpleGestureEvent::DIRECTION_DOWN;
     else
-      direction = (PRUint32)nsIDOMSimpleGestureEvent::DIRECTION_UP;
+      direction = (uint32_t)nsIDOMSimpleGestureEvent::DIRECTION_UP;
 
     if ((mCurrentSwipeDir & vDirs) && (mCurrentSwipeDir != direction)) {
       // If a swipe is currently being tracked kill it -- it's been interrupted
@@ -3829,7 +3830,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
     mCancelSwipeAnimation = nil;
   }
 
-  PRUint32 allowedDirections = 0;
+  uint32_t allowedDirections = 0;
   // We're ready to start the animation. Tell Gecko about it, and at the same
   // time ask it if it really wants to start an animation for this event.
   // This event also reports back the directions that we can swipe in.
@@ -3877,7 +3878,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
                                         NSEventPhase phase,
                                         BOOL isComplete,
                                         BOOL *stop) {
-    PRUint32 allowedDirectionsCopy = allowedDirections;
+    uint32_t allowedDirectionsCopy = allowedDirections;
     // Since this tracking handler can be called asynchronously, mGeckoChild
     // might have become NULL here (our child widget might have been
     // destroyed).
@@ -3912,7 +3913,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
       // The animation might continue even after this event was sent, so
       // don't tear down the animation overlay yet.
 
-      PRUint32 directionCopy = direction;
+      uint32_t directionCopy = direction;
 
       // gestureAmount is documented to be '-1', '0' or '1' when isComplete
       // is TRUE, but the docs don't say anything about its value at other
@@ -4091,7 +4092,20 @@ NSEvent* gLastDragMouseDownEvent = nil;
   }
 
   // This might destroy our widget (and null out mGeckoChild).
-  mGeckoChild->DispatchWindowEvent(geckoEvent);
+  bool defaultPrevented = mGeckoChild->DispatchWindowEvent(geckoEvent);
+
+  // Check to see if we are double-clicking in the titlebar.
+  CGFloat locationInTitlebar = [[self window] frame].size.height - [theEvent locationInWindow].y;
+  if (!defaultPrevented && [theEvent clickCount] == 2 &&
+      [[self window] isMovableByWindowBackground] &&
+      [self shouldMinimizeOnTitlebarDoubleClick] &&
+      [[self window] isKindOfClass:[ToolbarWindow class]] &&
+      (locationInTitlebar < [(ToolbarWindow*)[self window] titlebarHeight] ||
+       locationInTitlebar < [(ToolbarWindow*)[self window] unifiedToolbarHeight])) {
+
+    NSButton *minimizeButton = [[self window] standardWindowButton:NSWindowMiniaturizeButton];
+    [minimizeButton performClick:self];
+  }
 
   // If our mouse-up event's location is over some other object (as might
   // happen if it came at the end of a dragging operation), also send our
@@ -4600,6 +4614,22 @@ static int32_t RoundUp(double aDouble)
     mouseEvent->buttons |= nsMouseEvent::e5thButtonFlag;
   }
 
+  switch ([aMouseEvent type]) {
+    case NSLeftMouseDown:
+    case NSLeftMouseUp:
+    case NSLeftMouseDragged:
+    case NSRightMouseDown:
+    case NSRightMouseUp:
+    case NSRightMouseDragged:
+    case NSOtherMouseDown:
+    case NSOtherMouseUp:
+    case NSOtherMouseDragged:
+      if ([aMouseEvent subtype] == NSTabletPointEventSubtype) {
+        mouseEvent->pressure = [aMouseEvent pressure];
+      }
+      break;
+  }
+
   NS_OBJC_END_TRY_ABORT_BLOCK;
 }
 
@@ -4679,6 +4709,17 @@ static int32_t RoundUp(double aDouble)
 {
   NS_ENSURE_TRUE(mTextInputHandler, NO);
   return mTextInputHandler->HasMarkedText();
+}
+
+- (BOOL)shouldMinimizeOnTitlebarDoubleClick
+{
+  NSString *MDAppleMiniaturizeOnDoubleClickKey =
+                                      @"AppleMiniaturizeOnDoubleClick";
+  NSUserDefaults *userDefaults = [NSUserDefaults standardUserDefaults];
+  bool shouldMinimize = [[userDefaults
+          objectForKey:MDAppleMiniaturizeOnDoubleClickKey] boolValue];
+
+  return shouldMinimize;
 }
 
 - (NSInteger) conversationIdentifier

@@ -6,6 +6,7 @@
 package org.mozilla.gecko;
 
 import org.mozilla.gecko.gfx.InputConnectionHandler;
+import org.mozilla.gecko.util.Clipboard;
 import org.mozilla.gecko.util.GamepadUtils;
 import org.mozilla.gecko.util.ThreadUtils;
 
@@ -271,10 +272,10 @@ class GeckoInputConnection
                 // If selection is empty, we'll select everything
                 if (selStart == selEnd) {
                     // Fill the clipboard
-                    GeckoAppShell.setClipboardText(editable.toString());
+                    Clipboard.setText(editable);
                     editable.clear();
                 } else {
-                    GeckoAppShell.setClipboardText(
+                    Clipboard.setText(
                             editable.toString().substring(
                                 Math.min(selStart, selEnd),
                                 Math.max(selStart, selEnd)));
@@ -282,7 +283,7 @@ class GeckoInputConnection
                 }
                 break;
             case R.id.paste:
-                commitText(GeckoAppShell.getClipboardText(), 1);
+                commitText(Clipboard.getText(), 1);
                 break;
             case R.id.copy:
                 // Copy the current selection or the empty string if nothing is selected.
@@ -290,7 +291,7 @@ class GeckoInputConnection
                                     editable.toString().substring(
                                         Math.min(selStart, selEnd),
                                         Math.max(selStart, selEnd));
-                GeckoAppShell.setClipboardText(copiedText);
+                Clipboard.setText(copiedText);
                 break;
         }
         return true;
@@ -397,9 +398,6 @@ class GeckoInputConnection
         }
         mBatchSelectionChanged = false;
         mBatchTextChanged = false;
-        mUpdateRequest = null;
-
-        mCurrentInputMethod = "";
 
         // Do not reset mIMEState here; see comments in notifyIMEContext
     }
@@ -903,8 +901,7 @@ class GeckoInputConnection
                                               typeHint.equalsIgnoreCase("month") ||
                                               typeHint.equalsIgnoreCase("week") ||
                                               typeHint.equalsIgnoreCase("datetime-local"))))) {
-            mIMEState = IME_STATE_DISABLED;
-            return;
+            state = IME_STATE_DISABLED;
         }
 
         // mIMEState and the mIME*Hint fields should only be changed by notifyIMEContext,
@@ -920,6 +917,10 @@ class GeckoInputConnection
         mIMETypeHint = (typeHint == null) ? "" : typeHint;
         mIMEModeHint = (modeHint == null) ? "" : modeHint;
         mIMEActionHint = (actionHint == null) ? "" : actionHint;
+
+        // These fields are reset here and will be updated when restartInput is called below
+        mUpdateRequest = null;
+        mCurrentInputMethod = "";
 
         View v = getView();
         if (v == null || !v.hasFocus()) {

@@ -35,8 +35,10 @@ class AssemblerX86Shared
     bool enoughMemory_;
 
     void writeDataRelocation(const Value &val) {
-        if (val.isMarkable())
+        if (val.isMarkable()) {
+            JS_ASSERT(static_cast<gc::Cell*>(val.toGCThing())->isTenured());
             dataRelocations_.writeUnsigned(masm.currentOffset());
+        }
     }
     void writeDataRelocation(const ImmGCPtr &ptr) {
         if (ptr.value)
@@ -1100,15 +1102,15 @@ class AssemblerX86Shared
     }
     void psrldq(Imm32 shift, const FloatRegister &dest) {
         JS_ASSERT(HasSSE2());
-        masm.psrldq_rr(dest.code(), shift.value);
+        masm.psrldq_ir(shift.value, dest.code());
     }
     void psllq(Imm32 shift, const FloatRegister &dest) {
         JS_ASSERT(HasSSE2());
-        masm.psllq_rr(dest.code(), shift.value);
+        masm.psllq_ir(shift.value, dest.code());
     }
     void psrlq(Imm32 shift, const FloatRegister &dest) {
         JS_ASSERT(HasSSE2());
-        masm.psrlq_rr(dest.code(), shift.value);
+        masm.psrlq_ir(shift.value, dest.code());
     }
 
     void cvtsi2sd(const Operand &src, const FloatRegister &dest) {

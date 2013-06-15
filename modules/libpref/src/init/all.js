@@ -760,9 +760,6 @@ pref("dom.forms.color", false);
 // Enables system messages and activities
 pref("dom.sysmsg.enabled", false);
 
-// Allocation Threshold for Workers
-pref("dom.workers.mem.gc_allocation_threshold_mb", 30);
-
 // Parsing perf prefs. For now just mimic what the old code did.
 #ifndef XP_WIN
 pref("content.sink.pending_event_mode", 0);
@@ -1006,7 +1003,11 @@ pref("network.http.fast-fallback-to-IPv4", true);
 
 // The maximum amount of time the cache session lock can be held
 // before a new transaction bypasses the cache. In milliseconds.
+#ifdef RELEASE_BUILD
+pref("network.http.bypass-cachelock-threshold", 200000);
+#else
 pref("network.http.bypass-cachelock-threshold", 250);
+#endif
 
 // Try and use SPDY when using SSL
 pref("network.http.spdy.enabled", true);
@@ -1015,7 +1016,6 @@ pref("network.http.spdy.enabled.v3", true);
 pref("network.http.spdy.chunk-size", 4096);
 pref("network.http.spdy.timeout", 180);
 pref("network.http.spdy.coalesce-hostnames", true);
-pref("network.http.spdy.use-alternate-protocol", true);
 pref("network.http.spdy.persistent-settings", false);
 pref("network.http.spdy.ping-threshold", 58);
 pref("network.http.spdy.ping-timeout", 8);
@@ -1772,6 +1772,9 @@ pref("layout.css.scope-pseudo.enabled", false);
 pref("layout.css.scope-pseudo.enabled", true);
 #endif
 
+// Is support for CSS vertical text enabled?
+pref("layout.css.vertical-text.enabled", false);
+
 // pref for which side vertical scrollbars should be on
 // 0 = end-side in UI direction
 // 1 = end-side in document/content direction
@@ -1822,6 +1825,13 @@ pref("dom.max_script_run_time", 10);
 
 // If true, ArchiveReader will be enabled
 pref("dom.archivereader.enabled", false);
+
+// If true, Future will be enabled
+#ifdef RELEASE_BUILD
+pref("dom.future.enabled", false);
+#else
+pref("dom.future.enabled", true);
+#endif
 
 // Hang monitor timeout after which we kill the browser, in seconds
 // (0 is disabled)
@@ -3962,6 +3972,11 @@ pref("webgl.default-no-alpha", false);
 pref("webgl.force-layers-readback", false);
 pref("webgl.lose-context-on-heap-minimize", false);
 pref("webgl.can-lose-context-in-foreground", true);
+pref("webgl.max-warnings-per-context", 32);
+#ifdef MOZ_WIDGET_GONK
+pref("gfx.gralloc.fence-with-readpixels", false);
+#endif
+
 
 // Stagefright prefs
 pref("stagefright.force-enabled", false);

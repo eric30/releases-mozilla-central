@@ -17,7 +17,7 @@
 #include "jsscript.h"
 #include "jswin.h"
 
-#include "frontend/FoldConstants.h"
+#include "frontend/BytecodeCompiler.h"
 #include "frontend/FullParseHandler.h"
 #include "frontend/ParseMaps.h"
 #include "frontend/ParseNode.h"
@@ -329,15 +329,7 @@ struct Parser : private AutoGCRooter, public StrictModeGetter
            LazyScript *lazyOuterFunction);
     ~Parser();
 
-    friend void AutoGCRooter::trace(JSTracer *trc);
-
-    /*
-     * Initialize a parser. The compiler owns the arena pool "tops-of-stack"
-     * space above the current JSContext.tempLifoAlloc mark. This means you
-     * cannot allocate from tempLifoAlloc and save the pointer beyond the next
-     * Parser destructor invocation.
-     */
-    bool init();
+    friend void js::frontend::MarkParser(JSTracer *trc, AutoGCRooter *parser);
 
     const char *getFilename() const { return tokenStream.getFilename(); }
     JSVersion versionNumber() const { return tokenStream.versionNumber(); }

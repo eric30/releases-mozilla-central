@@ -806,6 +806,24 @@ struct ParamTraits< mozilla::gfx::PointTyped<T> >
   }
 };
 
+template<class T>
+struct ParamTraits< mozilla::gfx::IntPointTyped<T> >
+{
+  typedef mozilla::gfx::IntPointTyped<T> paramType;
+
+  static void Write(Message* msg, const paramType& param)
+  {
+    WriteParam(msg, param.x);
+    WriteParam(msg, param.y);
+  }
+
+  static bool Read(const Message* msg, void** iter, paramType* result)
+  {
+    return (ReadParam(msg, iter, &result->x) &&
+            ReadParam(msg, iter, &result->y));
+  }
+};
+
 template<>
 struct ParamTraits<mozilla::gfx::Size>
 {
@@ -1056,7 +1074,6 @@ struct ParamTraits<mozilla::layers::FrameMetrics>
   {
     WriteParam(aMsg, aParam.mScrollableRect);
     WriteParam(aMsg, aParam.mViewport);
-    WriteParam(aMsg, aParam.mContentRect);
     WriteParam(aMsg, aParam.mScrollOffset);
     WriteParam(aMsg, aParam.mDisplayPort);
     WriteParam(aMsg, aParam.mCriticalDisplayPort);
@@ -1073,7 +1090,6 @@ struct ParamTraits<mozilla::layers::FrameMetrics>
   {
     return (ReadParam(aMsg, aIter, &aResult->mScrollableRect) &&
             ReadParam(aMsg, aIter, &aResult->mViewport) &&
-            ReadParam(aMsg, aIter, &aResult->mContentRect) &&
             ReadParam(aMsg, aIter, &aResult->mScrollOffset) &&
             ReadParam(aMsg, aIter, &aResult->mDisplayPort) &&
             ReadParam(aMsg, aIter, &aResult->mCriticalDisplayPort) &&

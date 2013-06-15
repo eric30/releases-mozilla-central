@@ -402,7 +402,6 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     static void sweepAll(FreeOp *fop);
     static void detachAllDebuggersFromGlobal(FreeOp *fop, GlobalObject *global,
                                              GlobalObjectSet::Enum *compartmentEnum);
-    static bool isDebugWrapper(JSObject *o);
     static void findCompartmentEdges(JS::Zone *v, gc::ComponentFinder<JS::Zone> &finder);
 
     static inline JSTrapStatus onEnterFrame(JSContext *cx, AbstractFramePtr frame,
@@ -434,7 +433,7 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     bool wrapEnvironment(JSContext *cx, Handle<Env*> env, MutableHandleValue vp);
 
     /*
-     * Like cx->compartment->wrap(cx, vp), but for the debugger compartment.
+     * Like cx->compartment()->wrap(cx, vp), but for the debugger compartment.
      *
      * Preconditions: *vp is a value from a debuggee compartment; cx is in the
      * debugger's compartment.
@@ -463,7 +462,7 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
      * When passing values from the debugger to the debuggee:
      *     call unwrapDebuggeeValue;  // debugger-unwrapping
      *     enter debuggee compartment;
-     *     call cx->compartment->wrap;  // compartment-rewrapping
+     *     call cx->compartment()->wrap;  // compartment-rewrapping
      *
      * (Extreme nerd sidebar: Unwrapping happens in two steps because there are
      * two different kinds of symmetry at work: regardless of which direction
@@ -629,13 +628,6 @@ Debugger::toJSObjectRef()
     return object;
 }
 
-Debugger *
-Debugger::fromJSObject(JSObject *obj)
-{
-    JS_ASSERT(js::GetObjectClass(obj) == &jsclass);
-    return (Debugger *) obj->getPrivate();
-}
-
 bool
 Debugger::observesEnterFrame() const
 {
@@ -660,35 +652,18 @@ Debugger::observesGlobal(GlobalObject *global) const
     return debuggees.has(global);
 }
 
-bool
-Debugger::observesFrame(AbstractFramePtr frame) const
-{
-    return observesGlobal(&frame.script()->global());
-}
-
 JSTrapStatus
 Debugger::onEnterFrame(JSContext *cx, AbstractFramePtr frame, MutableHandleValue vp)
 {
-    if (cx->compartment->getDebuggees().empty())
+    if (cx->compartment()->getDebuggees().empty())
         return JSTRAP_CONTINUE;
     return slowPathOnEnterFrame(cx, frame, vp);
-}
-
-bool
-Debugger::onLeaveFrame(JSContext *cx, AbstractFramePtr frame, bool ok)
-{
-    /* Traps must be cleared from eval frames, see slowPathOnLeaveFrame. */
-    bool evalTraps = frame.isEvalFrame() &&
-                     frame.script()->hasAnyBreakpointsOrStepMode();
-    if (!cx->compartment->getDebuggees().empty() || evalTraps)
-        ok = slowPathOnLeaveFrame(cx, frame, ok);
-    return ok;
 }
 
 JSTrapStatus
 Debugger::onDebuggerStatement(JSContext *cx, MutableHandleValue vp)
 {
-    return cx->compartment->getDebuggees().empty()
+    return cx->compartment()->getDebuggees().empty()
            ? JSTRAP_CONTINUE
            : dispatchHook(cx, vp, OnDebuggerStatement);
 }
@@ -696,7 +671,7 @@ Debugger::onDebuggerStatement(JSContext *cx, MutableHandleValue vp)
 JSTrapStatus
 Debugger::onExceptionUnwind(JSContext *cx, MutableHandleValue vp)
 {
-    return cx->compartment->getDebuggees().empty()
+    return cx->compartment()->getDebuggees().empty()
            ? JSTRAP_CONTINUE
            : dispatchHook(cx, vp, OnExceptionUnwind);
 }
@@ -713,7 +688,7 @@ Debugger::onNewScript(JSContext *cx, HandleScript script, GlobalObject *compileA
 bool
 Debugger::onNewGlobalObject(JSContext *cx, Handle<GlobalObject *> global)
 {
-    if (JS_CLIST_IS_EMPTY(&cx->runtime->onNewGlobalObjectWatchers))
+    if (JS_CLIST_IS_EMPTY(&cx->runtime()->onNewGlobalObjectWatchers))
         return true;
     return Debugger::slowPathOnNewGlobalObject(cx, global);
 }

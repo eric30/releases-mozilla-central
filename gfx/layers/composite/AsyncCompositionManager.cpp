@@ -351,12 +351,12 @@ AsyncCompositionManager::ApplyAsyncContentTransformToTree(TimeStamp aCurrentFram
 
     const gfx3DMatrix& rootTransform = mLayerManager->GetRoot()->GetTransform();
     const FrameMetrics& metrics = container->GetFrameMetrics();
-    gfx::Rect displayPortLayersPixels(metrics.mCriticalDisplayPort.IsEmpty() ?
-                                      metrics.mDisplayPort : metrics.mCriticalDisplayPort);
+    CSSRect displayPort(metrics.mCriticalDisplayPort.IsEmpty() ?
+                        metrics.mDisplayPort : metrics.mCriticalDisplayPort);
     gfx::Margin fixedLayerMargins(0, 0, 0, 0);
     ScreenPoint offset(0, 0);
     SyncFrameMetrics(scrollOffset, treeTransform.mScale.width, metrics.mScrollableRect,
-                     mLayersUpdated, displayPortLayersPixels, 1 / rootTransform.GetXScale(),
+                     mLayersUpdated, displayPort, 1 / rootTransform.GetXScale(),
                      mIsFirstPaint, fixedLayerMargins, offset);
 
     mIsFirstPaint = false;
@@ -411,28 +411,25 @@ AsyncCompositionManager::TransformScrollableLayer(Layer* aLayer, const gfx3DMatr
     metrics.mScrollOffset, layerPixelRatioX, layerPixelRatioY);
 
   if (mIsFirstPaint) {
-    mContentRect = metrics.mContentRect;
+    mContentRect = metrics.mScrollableRect;
     SetFirstPaintViewport(scrollOffsetLayerPixels,
                           layerPixelRatioX,
-                          mContentRect,
-                          metrics.mScrollableRect);
+                          mContentRect);
     mIsFirstPaint = false;
-  } else if (!metrics.mContentRect.IsEqualEdges(mContentRect)) {
-    mContentRect = metrics.mContentRect;
-    SetPageRect(metrics.mScrollableRect);
+  } else if (!metrics.mScrollableRect.IsEqualEdges(mContentRect)) {
+    mContentRect = metrics.mScrollableRect;
+    SetPageRect(mContentRect);
   }
 
   // We synchronise the viewport information with Java after sending the above
   // notifications, so that Java can take these into account in its response.
   // Calculate the absolute display port to send to Java
-  LayerIntRect displayPort = LayerIntRect::FromCSSRectRounded(
-    CSSRect::FromUnknownRect(metrics.mCriticalDisplayPort.IsEmpty()
-                             ? metrics.mDisplayPort
-                             : metrics.mCriticalDisplayPort),
-    layerPixelRatioX, layerPixelRatioY);
-
-  displayPort.x += scrollOffsetLayerPixels.x;
-  displayPort.y += scrollOffsetLayerPixels.y;
+  LayerIntRect displayPort =
+    LayerIntRect::FromCSSRectRounded(metrics.mCriticalDisplayPort.IsEmpty()
+                                       ? metrics.mDisplayPort
+                                       : metrics.mCriticalDisplayPort,
+                                     layerPixelRatioX, layerPixelRatioY);
+  displayPort += scrollOffsetLayerPixels;
 
   gfx::Margin fixedLayerMargins(0, 0, 0, 0);
   ScreenPoint offset(0, 0);
@@ -472,26 +469,27 @@ AsyncCompositionManager::TransformScrollableLayer(Layer* aLayer, const gfx3DMatr
   gfxPoint fixedOffset;
   gfxSize scaleDiff;
 
+  LayerRect content = LayerRect::FromCSSRect(mContentRect,
+                                             1 / aRootTransform.GetXScale(),
+                                             1 / aRootTransform.GetYScale());
   // If the contents can fit entirely within the widget area on a particular
-  // dimenson, we need to translate and scale so that the fixed layers remain
+  // dimension, we need to translate and scale so that the fixed layers remain
   // within the page boundaries.
-  if (mContentRect.width * tempScaleDiffX < metrics.mCompositionBounds.width) {
+  if (mContentRect.width * scaleX < metrics.mCompositionBounds.width) {
     fixedOffset.x = -metricsScrollOffset.x;
-    scaleDiff.width = std::min(1.0f, metrics.mCompositionBounds.width / (float)mContentRect.width);
+    scaleDiff.width = std::min(1.0f, metrics.mCompositionBounds.width / content.width);
   } else {
-    fixedOffset.x = clamped(scrollOffset.x / tempScaleDiffX, (float)mContentRect.x,
-                       mContentRect.XMost() - metrics.mCompositionBounds.width / tempScaleDiffX) -
-               metricsScrollOffset.x;
+    fixedOffset.x = clamped(scrollOffset.x / tempScaleDiffX, content.x,
+        content.XMost() - metrics.mCompositionBounds.width / tempScaleDiffX) - metricsScrollOffset.x;
     scaleDiff.width = tempScaleDiffX;
   }
 
-  if (mContentRect.height * tempScaleDiffY < metrics.mCompositionBounds.height) {
+  if (mContentRect.height * scaleY < metrics.mCompositionBounds.height) {
     fixedOffset.y = -metricsScrollOffset.y;
-    scaleDiff.height = std::min(1.0f, metrics.mCompositionBounds.height / (float)mContentRect.height);
+    scaleDiff.height = std::min(1.0f, metrics.mCompositionBounds.height / content.height);
   } else {
-    fixedOffset.y = clamped(scrollOffset.y / tempScaleDiffY, (float)mContentRect.y,
-                       mContentRect.YMost() - metrics.mCompositionBounds.height / tempScaleDiffY) -
-               metricsScrollOffset.y;
+    fixedOffset.y = clamped(scrollOffset.y / tempScaleDiffY, content.y,
+        content.YMost() - metrics.mCompositionBounds.height / tempScaleDiffY) - metricsScrollOffset.y;
     scaleDiff.height = tempScaleDiffY;
   }
 
@@ -554,11 +552,10 @@ AsyncCompositionManager::TransformShadowTree(TimeStamp aCurrentFrame)
 void
 AsyncCompositionManager::SetFirstPaintViewport(const LayerIntPoint& aOffset,
                                                float aZoom,
-                                               const LayerIntRect& aPageRect,
                                                const CSSRect& aCssPageRect)
 {
 #ifdef MOZ_WIDGET_ANDROID
-  AndroidBridge::Bridge()->SetFirstPaintViewport(aOffset, aZoom, aPageRect, aCssPageRect);
+  AndroidBridge::Bridge()->SetFirstPaintViewport(aOffset, aZoom, aCssPageRect);
 #endif
 }
 
@@ -595,7 +592,7 @@ AsyncCompositionManager::SyncFrameMetrics(const gfx::Point& aScrollOffset,
                                           float aZoom,
                                           const CSSRect& aCssPageRect,
                                           bool aLayersUpdated,
-                                          const gfx::Rect& aDisplayPort,
+                                          const CSSRect& aDisplayPort,
                                           float aDisplayResolution,
                                           bool aIsFirstPaint,
                                           gfx::Margin& aFixedLayerMargins,
