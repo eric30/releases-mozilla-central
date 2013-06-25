@@ -4,8 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef ObjectImpl_h___
-#define ObjectImpl_h___
+#ifndef vm_ObjectImpl_h
+#define vm_ObjectImpl_h
 
 #include "mozilla/Assertions.h"
 #include "mozilla/GuardObjects.h"
@@ -1251,7 +1251,7 @@ class ObjectImpl : public gc::Cell
     friend class NewObjectCache;
 
     inline void invalidateSlotRange(uint32_t start, uint32_t count);
-    inline void initializeSlotRange(uint32_t start, uint32_t count);
+    void initializeSlotRange(uint32_t start, uint32_t count);
 
     /*
      * Initialize a flat array of slots to this object at a start slot.  The
@@ -1372,7 +1372,9 @@ class ObjectImpl : public gc::Cell
     inline bool nativeContainsPure(Shape* shape);
 
     inline JSClass *getJSClass() const;
-    inline bool hasClass(const Class *c) const;
+    inline bool hasClass(const Class *c) const {
+        return getClass() == c;
+    }
     inline const ObjectOps *getOps() const;
 
     /*
@@ -1509,17 +1511,33 @@ class ObjectImpl : public gc::Cell
 
     /* Private data accessors. */
 
-    inline void *&privateRef(uint32_t nfixed) const; /* XXX should be private, not protected! */
+    inline void *&privateRef(uint32_t nfixed) const { /* XXX should be private, not protected! */
+        /*
+         * The private pointer of an object can hold any word sized value.
+         * Private pointers are stored immediately after the last fixed slot of
+         * the object.
+         */
+        MOZ_ASSERT(nfixed == numFixedSlots());
+        MOZ_ASSERT(hasPrivate());
+        HeapSlot *end = &fixedSlots()[nfixed];
+        return *reinterpret_cast<void**>(end);
+    }
 
-    inline bool hasPrivate() const;
-    inline void *getPrivate() const;
+    inline bool hasPrivate() const {
+        return getClass()->hasPrivate();
+    }
+    inline void *getPrivate() const {
+        return privateRef(numFixedSlots());
+    }
     inline void setPrivate(void *data);
     inline void setPrivateGCThing(gc::Cell *cell);
     inline void setPrivateUnbarriered(void *data);
     inline void initPrivate(void *data);
 
     /* Access private data for an object with a known number of fixed slots. */
-    inline void *getPrivate(uint32_t nfixed) const;
+    inline void *getPrivate(uint32_t nfixed) const {
+        return privateRef(nfixed);
+    }
 
     /* JIT Accessors */
     static size_t offsetOfShape() { return offsetof(ObjectImpl, shape_); }
@@ -1612,7 +1630,7 @@ extern bool
 HasElement(JSContext *cx, Handle<ObjectImpl*> obj, uint32_t index, unsigned resolveFlags,
            bool *found);
 
-template <> struct RootMethods<PropertyId>
+template <> struct GCMethods<PropertyId>
 {
     static PropertyId initial() { return PropertyId(); }
     static ThingRootKind kind() { return THING_ROOT_PROPERTY_ID; }
@@ -1621,4 +1639,4 @@ template <> struct RootMethods<PropertyId>
 
 } /* namespace js */
 
-#endif /* ObjectImpl_h__ */
+#endif /* vm_ObjectImpl_h */

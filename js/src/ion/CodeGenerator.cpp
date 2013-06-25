@@ -126,7 +126,7 @@ CodeGenerator::visitOutOfLineCache(OutOfLineUpdateCache *ool)
 
 StringObject *
 MNewStringObject::templateObj() const {
-    return &templateObj_->asString();
+    return &templateObj_->as<StringObject>();
 }
 
 CodeGenerator::CodeGenerator(MIRGenerator *gen, LIRGraph *graph, MacroAssembler *masm)
@@ -1139,7 +1139,7 @@ bool
 CodeGenerator::visitTypeBarrier(LTypeBarrier *lir)
 {
     ValueOperand operand = ToValue(lir, LTypeBarrier::Input);
-    Register scratch = ToRegister(lir->temp());
+    Register scratch = ToTempUnboxRegister(lir->temp());
 
     Label matched, miss;
     masm.guardTypeSet(operand, lir->mir()->resultTypeSet(), scratch, &matched, &miss);
@@ -1154,7 +1154,7 @@ bool
 CodeGenerator::visitMonitorTypes(LMonitorTypes *lir)
 {
     ValueOperand operand = ToValue(lir, LMonitorTypes::Input);
-    Register scratch = ToRegister(lir->temp());
+    Register scratch = ToTempUnboxRegister(lir->temp());
 
     Label matched, miss;
     masm.guardTypeSet(operand, lir->mir()->typeSet(), scratch, &matched, &miss);
@@ -1288,7 +1288,7 @@ CodeGenerator::visitPostWriteBarrierV(LPostWriteBarrierV *lir)
         masm.bind(&tenured);
     }
 
-    Register valuereg = masm.extractObject(value, ToRegister(lir->temp()));
+    Register valuereg = masm.extractObject(value, ToTempUnboxRegister(lir->temp()));
     masm.branchPtr(Assembler::Below, valuereg, ImmWord(nursery.start()), ool->rejoin());
     masm.branchPtr(Assembler::Below, valuereg, ImmWord(nursery.heapEnd()), ool->entry());
 
@@ -1552,7 +1552,7 @@ CodeGenerator::visitCallGeneric(LCallGeneric *call)
 
     // Guard that calleereg is actually a function object.
     masm.loadObjClass(calleereg, nargsreg);
-    masm.cmpPtr(nargsreg, ImmWord(&js::FunctionClass));
+    masm.cmpPtr(nargsreg, ImmWord(&JSFunction::class_));
     if (!bailoutIf(Assembler::NotEqual, call->snapshot()))
         return false;
 
@@ -1693,6 +1693,10 @@ CodeGenerator::visitCallKnown(LCallKnown *call)
         dropArguments(call->numStackArgs() + 1);
         return true;
     }
+
+    // The calleereg is known to be a non-native function, but might point to
+    // a LazyScript instead of a JSScript.
+    masm.branchIfFunctionHasNoScript(calleereg, &uncompiled);
 
     // Knowing that calleereg is a non-native function, load the JSScript.
     masm.loadPtr(Address(calleereg, JSFunction::offsetOfNativeOrScript()), objreg);
@@ -1871,7 +1875,7 @@ CodeGenerator::visitApplyArgsGeneric(LApplyArgsGeneric *apply)
     // Unless already known, guard that calleereg is actually a function object.
     if (!apply->hasSingleTarget()) {
         masm.loadObjClass(calleereg, objreg);
-        masm.cmpPtr(objreg, ImmWord(&js::FunctionClass));
+        masm.cmpPtr(objreg, ImmWord(&JSFunction::class_));
         if (!bailoutIf(Assembler::NotEqual, apply->snapshot()))
             return false;
     }
@@ -2737,6 +2741,10 @@ class OutOfLineNewObject : public OutOfLineCodeBase<CodeGenerator>
 typedef JSObject *(*NewInitObjectFn)(JSContext *, HandleObject);
 static const VMFunction NewInitObjectInfo = FunctionInfo<NewInitObjectFn>(NewInitObject);
 
+typedef JSObject *(*NewInitObjectWithClassPrototypeFn)(JSContext *, HandleObject);
+static const VMFunction NewInitObjectWithClassPrototypeInfo =
+    FunctionInfo<NewInitObjectWithClassPrototypeFn>(NewInitObjectWithClassPrototype);
+
 bool
 CodeGenerator::visitNewObjectVMCall(LNewObject *lir)
 {
@@ -2748,8 +2756,17 @@ CodeGenerator::visitNewObjectVMCall(LNewObject *lir)
     saveLive(lir);
 
     pushArg(ImmGCPtr(lir->mir()->templateObject()));
-    if (!callVM(NewInitObjectInfo, lir))
+
+    // If we're making a new object with a class prototype (that is, an object
+    // that derives its class from its prototype instead of being
+    // ObjectClass'd) from self-hosted code, we need a different init
+    // function.
+    if (lir->mir()->templateObjectIsClassPrototype()) {
+        if (!callVM(NewInitObjectWithClassPrototypeInfo, lir))
+            return false;
+    } else if (!callVM(NewInitObjectInfo, lir)) {
         return false;
+    }
 
     if (ReturnReg != objReg)
         masm.movePtr(ReturnReg, objReg);
@@ -3540,7 +3557,8 @@ CodeGenerator::visitCompareStrictS(LCompareStrictS *lir)
     const ValueOperand leftV = ToValue(lir, LCompareStrictS::Lhs);
     Register right = ToRegister(lir->right());
     Register output = ToRegister(lir->output());
-    Register temp = ToRegister(lir->temp0());
+    Register temp = ToRegister(lir->temp());
+    Register tempToUnbox = ToTempUnboxRegister(lir->tempToUnbox());
 
     Label string, done;
 
@@ -3549,7 +3567,7 @@ CodeGenerator::visitCompareStrictS(LCompareStrictS *lir)
     masm.jump(&done);
 
     masm.bind(&string);
-    Register left = masm.extractString(leftV, ToRegister(lir->temp1()));
+    Register left = masm.extractString(leftV, tempToUnbox);
     if (!emitCompareS(lir, op, left, right, output, temp))
         return false;
 
@@ -3706,9 +3724,9 @@ CodeGenerator::visitIsNullOrLikeUndefined(LIsNullOrLikeUndefined *lir)
             // undefined.
             masm.branchTestObject(Assembler::NotEqual, tag, notNullOrLikeUndefined);
 
-            Register objreg = masm.extractObject(value, ToRegister(lir->temp0()));
+            Register objreg = masm.extractObject(value, ToTempUnboxRegister(lir->tempToUnbox()));
             testObjectTruthy(objreg, notNullOrLikeUndefined, nullOrLikeUndefined,
-                             ToRegister(lir->temp1()), ool);
+                             ToRegister(lir->temp()), ool);
         }
 
         Label done;
@@ -3785,8 +3803,8 @@ CodeGenerator::visitIsNullOrLikeUndefinedAndBranch(LIsNullOrLikeUndefinedAndBran
             masm.branchTestObject(Assembler::NotEqual, tag, ifFalseLabel);
 
             // Objects that emulate undefined are loosely equal to null/undefined.
-            Register objreg = masm.extractObject(value, ToRegister(lir->temp0()));
-            testObjectTruthy(objreg, ifFalseLabel, ifTrueLabel, ToRegister(lir->temp1()), ool);
+            Register objreg = masm.extractObject(value, ToTempUnboxRegister(lir->tempToUnbox()));
+            testObjectTruthy(objreg, ifFalseLabel, ifTrueLabel, ToRegister(lir->temp()), ool);
         } else {
             masm.jump(ifFalseLabel);
         }
@@ -6771,9 +6789,9 @@ CodeGenerator::visitIsCallable(LIsCallable *ins)
 
     masm.loadObjClass(object, output);
 
-    // An object is callable iff (isFunction() || getClass()->call).
+    // An object is callable iff (is<JSFunction>() || getClass()->call).
     Label notFunction, done;
-    masm.branchPtr(Assembler::NotEqual, output, ImmWord(&js::FunctionClass), &notFunction);
+    masm.branchPtr(Assembler::NotEqual, output, ImmWord(&JSFunction::class_), &notFunction);
     masm.move32(Imm32(1), output);
     masm.jump(&done);
 
@@ -6820,6 +6838,22 @@ CodeGenerator::visitOutOfLinePropagateParallelAbort(OutOfLinePropagateParallelAb
 
     masm.moveValue(MagicValue(JS_ION_ERROR), JSReturnOperand);
     masm.jump(returnLabel_);
+    return true;
+}
+
+bool
+CodeGenerator::visitHaveSameClass(LHaveSameClass *ins)
+{
+    Register lhs = ToRegister(ins->lhs());
+    Register rhs = ToRegister(ins->rhs());
+    Register temp = ToRegister(ins->getTemp(0));
+    Register output = ToRegister(ins->output());
+
+    masm.loadObjClass(lhs, temp);
+    masm.loadObjClass(rhs, output);
+    masm.cmpPtr(temp, output);
+    masm.emitSet(Assembler::Equal, output);
+
     return true;
 }
 

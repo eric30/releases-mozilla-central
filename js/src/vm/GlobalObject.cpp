@@ -20,10 +20,10 @@
 #include "builtin/Object.h"
 #include "builtin/RegExp.h"
 
+#include "jscompartmentinlines.h"
 #include "jsobjinlines.h"
 
 #include "vm/GlobalObject-inl.h"
-#include "vm/RegExpObject-inl.h"
 #include "vm/RegExpStatics-inl.h"
 
 using namespace js;
@@ -33,7 +33,7 @@ js_InitObjectClass(JSContext *cx, HandleObject obj)
 {
     JS_ASSERT(obj->isNative());
 
-    return obj->asGlobal().getOrCreateObjectPrototype(cx);
+    return obj->as<GlobalObject>().getOrCreateObjectPrototype(cx);
 }
 
 JSObject *
@@ -41,7 +41,7 @@ js_InitFunctionClass(JSContext *cx, HandleObject obj)
 {
     JS_ASSERT(obj->isNative());
 
-    return obj->asGlobal().getOrCreateFunctionPrototype(cx);
+    return obj->as<GlobalObject>().getOrCreateFunctionPrototype(cx);
 }
 
 static JSBool
@@ -134,7 +134,7 @@ ProtoSetterImpl(JSContext *cx, CallArgs args)
      * which due to their complicated delegate-object shenanigans can't easily
      * have a mutable [[Prototype]].
      */
-    if (obj->isProxy() || obj->isArrayBuffer()) {
+    if (obj->isProxy() || obj->is<ArrayBufferObject>()) {
         JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_INCOMPATIBLE_PROTO,
                              "Object", "__proto__ setter",
                              obj->isProxy() ? "Proxy" : "ArrayBuffer");
@@ -200,11 +200,11 @@ GlobalObject::initFunctionAndObjectClasses(JSContext *cx)
     /* Create |Function.prototype| next so we can create other functions. */
     RootedFunction functionProto(cx);
     {
-        JSObject *functionProto_ = NewObjectWithGivenProto(cx, &FunctionClass, objectProto, self,
-                                                           SingletonObject);
+        JSObject *functionProto_ = NewObjectWithGivenProto(cx, &JSFunction::class_,
+                                                           objectProto, self, SingletonObject);
         if (!functionProto_)
             return NULL;
-        functionProto = functionProto_->toFunction();
+        functionProto = &functionProto_->as<JSFunction>();
 
         /*
          * Bizarrely, |Function.prototype| must be an interpreted function, so
@@ -260,15 +260,15 @@ GlobalObject::initFunctionAndObjectClasses(JSContext *cx)
          * inference to have unknown properties, to simplify handling of e.g.
          * CloneFunctionObject.
          */
-        if (!setNewTypeUnknown(cx, &FunctionClass, functionProto))
+        if (!setNewTypeUnknown(cx, &JSFunction::class_, functionProto))
             return NULL;
     }
 
     /* Create the Object function now that we have a [[Prototype]] for it. */
     RootedFunction objectCtor(cx);
     {
-        RootedObject ctor(cx, NewObjectWithGivenProto(cx, &FunctionClass, functionProto, self,
-                                                      SingletonObject));
+        RootedObject ctor(cx, NewObjectWithGivenProto(cx, &JSFunction::class_, functionProto,
+                                                      self, SingletonObject));
         if (!ctor)
             return NULL;
         RootedAtom objectAtom(cx, cx->names().Object);
@@ -288,8 +288,8 @@ GlobalObject::initFunctionAndObjectClasses(JSContext *cx)
     RootedFunction functionCtor(cx);
     {
         // Note that ctor is rooted purely for the JS_ASSERT at the end
-        RootedObject ctor(cx, NewObjectWithGivenProto(cx, &FunctionClass, functionProto, self,
-                                                      SingletonObject));
+        RootedObject ctor(cx, NewObjectWithGivenProto(cx, &JSFunction::class_, functionProto,
+                                                      self, SingletonObject));
         if (!ctor)
             return NULL;
         RootedAtom functionAtom(cx, cx->names().Function);
@@ -424,7 +424,7 @@ GlobalObject::create(JSContext *cx, Class *clasp)
     if (!obj)
         return NULL;
 
-    Rooted<GlobalObject *> global(cx, &obj->asGlobal());
+    Rooted<GlobalObject *> global(cx, &obj->as<GlobalObject>());
 
     cx->compartment()->initGlobal(*global);
 
@@ -509,7 +509,7 @@ static JSObject *
 CreateBlankProto(JSContext *cx, Class *clasp, JSObject &proto, GlobalObject &global)
 {
     JS_ASSERT(clasp != &ObjectClass);
-    JS_ASSERT(clasp != &FunctionClass);
+    JS_ASSERT(clasp != &JSFunction::class_);
 
     RootedObject blankProto(cx, NewObjectWithGivenProto(cx, clasp, &proto, &global, SingletonObject));
     if (!blankProto)

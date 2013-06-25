@@ -84,7 +84,7 @@ CodeOffsetJump::fixup(MacroAssembler *masm)
 const char *
 IonCache::CacheName(IonCache::Kind kind)
 {
-    static const char *names[] =
+    static const char * const names[] =
     {
 #define NAME(x) #x,
         IONCACHE_KIND_LIST(NAME)
@@ -450,8 +450,8 @@ GeneratePrototypeGuards(JSContext *cx, IonScript *ion, MacroAssembler &masm, JSO
         // use objectReg in the rest of this function.
         masm.loadPtr(Address(objectReg, JSObject::offsetOfType()), scratchReg);
         Address proto(scratchReg, offsetof(types::TypeObject, proto));
-        masm.branchPtr(Assembler::NotEqual, proto,
-                       ImmMaybeNurseryPtr(ion->method(), obj->getProto()), failures);
+        masm.branchNurseryPtr(Assembler::NotEqual, proto,
+                              ImmMaybeNurseryPtr(obj->getProto()), failures);
     }
 
     JSObject *pobj = IsCacheableDOMProxy(obj)
@@ -462,7 +462,7 @@ GeneratePrototypeGuards(JSContext *cx, IonScript *ion, MacroAssembler &masm, JSO
     while (pobj != holder) {
         if (pobj->hasUncacheableProto()) {
             JS_ASSERT(!pobj->hasSingletonType());
-            masm.movePtr(ImmMaybeNurseryPtr(ion->method(), pobj), scratchReg);
+            masm.moveNurseryPtr(ImmMaybeNurseryPtr(pobj), scratchReg);
             Address objType(scratchReg, JSObject::offsetOfType());
             masm.branchPtr(Assembler::NotEqual, objType, ImmGCPtr(pobj->type()), failures);
         }
@@ -555,10 +555,10 @@ IsCacheableNoProperty(JSObject *obj, JSObject *holder, Shape *shape, jsbytecode 
 static bool
 IsOptimizableArgumentsObjectForLength(JSObject *obj)
 {
-    if (!obj->isArguments())
+    if (!obj->is<ArgumentsObject>())
         return false;
 
-    if (obj->asArguments().hasOverriddenLength())
+    if (obj->as<ArgumentsObject>().hasOverriddenLength())
         return false;
 
     return true;
@@ -570,7 +570,7 @@ IsOptimizableArgumentsObjectForGetElem(JSObject *obj, Value idval)
     if (!IsOptimizableArgumentsObjectForLength(obj))
         return false;
 
-    ArgumentsObject &argsObj = obj->asArguments();
+    ArgumentsObject &argsObj = obj->as<ArgumentsObject>();
 
     if (argsObj.isAnyElementDeleted())
         return false;
@@ -594,8 +594,8 @@ IsCacheableGetPropCallNative(JSObject *obj, JSObject *holder, Shape *shape)
     if (!shape->hasGetterValue() || !shape->getterValue().isObject())
         return false;
 
-    return shape->getterValue().toObject().isFunction() &&
-           shape->getterValue().toObject().toFunction()->isNative();
+    return shape->getterValue().toObject().is<JSFunction>() &&
+           shape->getterValue().toObject().as<JSFunction>().isNative();
 }
 
 static bool
@@ -768,7 +768,7 @@ GenerateReadSlot(JSContext *cx, IonScript *ion, MacroAssembler &masm,
         if (holder) {
             // Guard on the holder's shape.
             holderReg = scratchReg;
-            masm.movePtr(ImmMaybeNurseryPtr(ion->method(), holder), holderReg);
+            masm.moveNurseryPtr(ImmMaybeNurseryPtr(holder), holderReg);
             masm.branchPtr(Assembler::NotEqual,
                            Address(holderReg, JSObject::offsetOfShape()),
                            ImmGCPtr(holder->lastProperty()),
@@ -852,7 +852,7 @@ GenerateCallGetter(JSContext *cx, IonScript *ion, MacroAssembler &masm,
 
     // Guard on the holder's shape.
     Register holderReg = scratchReg;
-    masm.movePtr(ImmMaybeNurseryPtr(ion->method(), holder), holderReg);
+    masm.moveNurseryPtr(ImmMaybeNurseryPtr(holder), holderReg);
     masm.branchPtr(Assembler::NotEqual,
                    Address(holderReg, JSObject::offsetOfShape()),
                    ImmGCPtr(holder->lastProperty()),
@@ -890,8 +890,8 @@ GenerateCallGetter(JSContext *cx, IonScript *ion, MacroAssembler &masm,
 
     if (callNative) {
         JS_ASSERT(shape->hasGetterValue() && shape->getterValue().isObject() &&
-                  shape->getterValue().toObject().isFunction());
-        JSFunction *target = shape->getterValue().toObject().toFunction();
+                  shape->getterValue().toObject().is<JSFunction>());
+        JSFunction *target = &shape->getterValue().toObject().as<JSFunction>();
 
         JS_ASSERT(target);
         JS_ASSERT(target->isNative());
@@ -936,7 +936,7 @@ GenerateCallGetter(JSContext *cx, IonScript *ion, MacroAssembler &masm,
 
         PropertyOp target = shape->getterOp();
         JS_ASSERT(target);
-        // JSPropertyOp: JSBool fn(JSContext *cx, JSHandleObject obj, JSHandleId id, JSMutableHandleValue vp)
+        // JSPropertyOp: JSBool fn(JSContext *cx, HandleObject obj, HandleId id, MutableHandleValue vp)
 
         // Push args on stack first so we can take pointers to make handles.
         masm.Push(UndefinedValue());
@@ -1252,7 +1252,7 @@ GetPropertyIC::attachTypedArrayLength(JSContext *cx, IonScript *ion, JSObject *o
 bool
 GetPropertyIC::attachArgumentsLength(JSContext *cx, IonScript *ion, JSObject *obj)
 {
-    JS_ASSERT(obj->isArguments());
+    JS_ASSERT(obj->is<ArgumentsObject>());
     JS_ASSERT(!idempotent());
 
     Label failures;
@@ -1268,8 +1268,8 @@ GetPropertyIC::attachArgumentsLength(JSContext *cx, IonScript *ion, JSObject *ob
     }
     JS_ASSERT(object() != tmpReg);
 
-    Class *clasp = obj->isStrictArguments() ? &StrictArgumentsObjectClass
-                                            : &NormalArgumentsObjectClass;
+    Class *clasp = obj->is<StrictArgumentsObject>() ? &StrictArgumentsObject::class_
+                                                    : &NormalArgumentsObject::class_;
 
     Label fail;
     Label pass;
@@ -1293,7 +1293,7 @@ GetPropertyIC::attachArgumentsLength(JSContext *cx, IonScript *ion, JSObject *ob
     masm.bind(&failures);
     attacher.jumpNextStub(masm);
 
-    if (obj->isStrictArguments()) {
+    if (obj->is<StrictArgumentsObject>()) {
         JS_ASSERT(!hasStrictArgumentsLengthStub_);
         hasStrictArgumentsLengthStub_ = true;
         return linkAndAttachStub(cx, masm, attacher, ion, "ArgsObj length (strict)");
@@ -1462,7 +1462,7 @@ GetPropertyIC::update(JSContext *cx, size_t cacheIndex,
         if (name == cx->names().length &&
             IsOptimizableArgumentsObjectForLength(obj) &&
             (cache.output().type() == MIRType_Value || cache.output().type() == MIRType_Int32) &&
-            !cache.hasArgumentsLengthStub(obj->isStrictArguments()))
+            !cache.hasArgumentsLengthStub(obj->is<StrictArgumentsObject>()))
         {
             isCacheable = true;
             if (!cache.attachArgumentsLength(cx, ion, obj))
@@ -1799,7 +1799,7 @@ SetPropertyIC::attachSetterCall(JSContext *cx, IonScript *ion,
         if (obj != holder)
             GeneratePrototypeGuards(cx, ion, masm, obj, holder, object(), scratchReg, &protoFailure);
 
-        masm.movePtr(ImmMaybeNurseryPtr(ion->method(), holder), scratchReg);
+        masm.moveNurseryPtr(ImmMaybeNurseryPtr(holder), scratchReg);
         masm.branchPtr(Assembler::NotEqual,
                        Address(scratchReg, JSObject::offsetOfShape()),
                        ImmGCPtr(holder->lastProperty()),
@@ -1845,8 +1845,8 @@ SetPropertyIC::attachSetterCall(JSContext *cx, IonScript *ion,
 
     StrictPropertyOp target = shape->setterOp();
     JS_ASSERT(target);
-    // JSStrictPropertyOp: JSBool fn(JSContext *cx, JSHandleObject obj,
-    //                               JSHandleId id, JSBool strict, JSMutableHandleValue vp);
+    // JSStrictPropertyOp: JSBool fn(JSContext *cx, HandleObject obj,
+    //                               HandleId id, JSBool strict, MutableHandleValue vp);
 
     // Push args on stack first so we can take pointers to make handles.
     if (value().constant())
@@ -2372,7 +2372,7 @@ GetElementIC::attachTypedArrayElement(JSContext *cx, IonScript *ion, JSObject *o
 bool
 GetElementIC::attachArgumentsElement(JSContext *cx, IonScript *ion, JSObject *obj)
 {
-    JS_ASSERT(obj->isArguments());
+    JS_ASSERT(obj->is<ArgumentsObject>());
 
     Label failures;
     MacroAssembler masm(cx);
@@ -2381,8 +2381,8 @@ GetElementIC::attachArgumentsElement(JSContext *cx, IonScript *ion, JSObject *ob
     Register tmpReg = output().scratchReg().gpr();
     JS_ASSERT(tmpReg != InvalidReg);
 
-    Class *clasp = obj->isStrictArguments() ? &StrictArgumentsObjectClass
-                                            : &NormalArgumentsObjectClass;
+    Class *clasp = obj->is<StrictArgumentsObject>() ? &StrictArgumentsObject::class_
+                                                    : &NormalArgumentsObject::class_;
 
     Label fail;
     Label pass;
@@ -2467,7 +2467,7 @@ GetElementIC::attachArgumentsElement(JSContext *cx, IonScript *ion, JSObject *ob
     attacher.jumpNextStub(masm);
 
 
-    if (obj->isStrictArguments()) {
+    if (obj->is<StrictArgumentsObject>()) {
         JS_ASSERT(!hasStrictArgumentsStub_);
         hasStrictArgumentsStub_ = true;
         return linkAndAttachStub(cx, masm, attacher, ion, "ArgsObj element (strict)");
@@ -2507,7 +2507,7 @@ GetElementIC::update(JSContext *cx, size_t cacheIndex, HandleObject obj,
     bool attachedStub = false;
     if (cache.canAttachStub()) {
         if (IsOptimizableArgumentsObjectForGetElem(obj, idval) &&
-            !cache.hasArgumentsStub(obj->isStrictArguments()) &&
+            !cache.hasArgumentsStub(obj->is<StrictArgumentsObject>()) &&
             !cache.index().constant() &&
             (cache.index().reg().hasValue() ||
              cache.index().reg().type() == MIRType_Int32) &&
@@ -2715,7 +2715,7 @@ SetElementIC::reset()
 bool
 BindNameIC::attachGlobal(JSContext *cx, IonScript *ion, JSObject *scopeChain)
 {
-    JS_ASSERT(scopeChain->isGlobal());
+    JS_ASSERT(scopeChain->is<GlobalObject>());
 
     MacroAssembler masm(cx);
     RepatchStubAppender attacher(*this);
@@ -2734,18 +2734,18 @@ static inline void
 GenerateScopeChainGuard(MacroAssembler &masm, JSObject *scopeObj,
                         Register scopeObjReg, Shape *shape, Label *failures)
 {
-    if (scopeObj->isCall()) {
+    if (scopeObj->is<CallObject>()) {
         // We can skip a guard on the call object if the script's bindings are
         // guaranteed to be immutable (and thus cannot introduce shadowing
         // variables).
-        CallObject *callObj = &scopeObj->asCall();
+        CallObject *callObj = &scopeObj->as<CallObject>();
         if (!callObj->isForEval()) {
             JSFunction *fun = &callObj->callee();
             JSScript *script = fun->nonLazyScript();
             if (!script->funHasExtensibleScope)
                 return;
         }
-    } else if (scopeObj->isGlobal()) {
+    } else if (scopeObj->is<GlobalObject>()) {
         // If this is the last object on the scope walk, and the property we've
         // found is not configurable, then we don't need a shape guard because
         // the shape cannot be removed.
@@ -2766,14 +2766,14 @@ GenerateScopeChainGuards(MacroAssembler &masm, JSObject *scopeChain, JSObject *h
     // Walk up the scope chain. Note that IsCacheableScopeChain guarantees the
     // |tobj == holder| condition terminates the loop.
     while (true) {
-        JS_ASSERT(IsCacheableNonGlobalScope(tobj) || tobj->isGlobal());
+        JS_ASSERT(IsCacheableNonGlobalScope(tobj) || tobj->is<GlobalObject>());
 
         GenerateScopeChainGuard(masm, tobj, outputReg, NULL, failures);
         if (tobj == holder)
             break;
 
         // Load the next link.
-        tobj = &tobj->asScope().enclosingScope();
+        tobj = &tobj->as<ScopeObject>().enclosingScope();
         masm.extractObject(Address(outputReg, ScopeObject::offsetOfEnclosingScope()), outputReg);
     }
 }
@@ -2794,7 +2794,7 @@ BindNameIC::attachNonGlobal(JSContext *cx, IonScript *ion, JSObject *scopeChain,
                                    holder != scopeChain ? &failures : NULL);
 
     if (holder != scopeChain) {
-        JSObject *parent = &scopeChain->asScope().enclosingScope();
+        JSObject *parent = &scopeChain->as<ScopeObject>().enclosingScope();
         masm.extractObject(Address(scopeChainReg(), ScopeObject::offsetOfEnclosingScope()), outputReg());
 
         GenerateScopeChainGuards(masm, parent, holder, outputReg(), &failures);
@@ -2827,7 +2827,7 @@ IsCacheableScopeChain(JSObject *scopeChain, JSObject *holder)
         if (scopeChain == holder)
             return true;
 
-        scopeChain = &scopeChain->asScope().enclosingScope();
+        scopeChain = &scopeChain->as<ScopeObject>().enclosingScope();
         if (!scopeChain) {
             IonSpew(IonSpew_InlineCaches, "Scope chain indirect hit");
             return false;
@@ -2848,7 +2848,7 @@ BindNameIC::update(JSContext *cx, size_t cacheIndex, HandleObject scopeChain)
     HandlePropertyName name = cache.name();
 
     RootedObject holder(cx);
-    if (scopeChain->isGlobal()) {
+    if (scopeChain->is<GlobalObject>()) {
         holder = scopeChain;
     } else {
         if (!LookupNameWithGlobalDefault(cx, name, scopeChain, &holder))
@@ -2858,7 +2858,7 @@ BindNameIC::update(JSContext *cx, size_t cacheIndex, HandleObject scopeChain)
     // Stop generating new stubs once we hit the stub count limit, see
     // GetPropertyCache.
     if (cache.canAttachStub()) {
-        if (scopeChain->isGlobal()) {
+        if (scopeChain->is<GlobalObject>()) {
             if (!cache.attachGlobal(cx, ion, scopeChain))
                 return NULL;
         } else if (IsCacheableScopeChain(scopeChain, holder)) {
@@ -2918,12 +2918,12 @@ IsCacheableNameReadSlot(JSContext *cx, HandleObject scopeChain, HandleObject obj
     if (obj != holder)
         return false;
 
-    if (obj->isGlobal()) {
+    if (obj->is<GlobalObject>()) {
         // Support only simple property lookups.
         if (!IsCacheableGetPropReadSlot(obj, holder, shape) &&
             !IsCacheableNoProperty(obj, holder, shape, pc, output))
             return false;
-    } else if (obj->isCall()) {
+    } else if (obj->is<CallObject>()) {
         if (!shape->hasDefaultGetter())
             return false;
     } else {
@@ -2933,11 +2933,11 @@ IsCacheableNameReadSlot(JSContext *cx, HandleObject scopeChain, HandleObject obj
 
     RootedObject obj2(cx, scopeChain);
     while (obj2) {
-        if (!IsCacheableNonGlobalScope(obj2) && !obj2->isGlobal())
+        if (!IsCacheableNonGlobalScope(obj2) && !obj2->is<GlobalObject>())
             return false;
 
         // Stop once we hit the global or target obj.
-        if (obj2->isGlobal() || obj2 == obj)
+        if (obj2->is<GlobalObject>() || obj2 == obj)
             break;
 
         obj2 = obj2->enclosingScope();
@@ -2973,7 +2973,7 @@ IsCacheableNameCallGetter(JSObject *scopeChain, JSObject *obj, JSObject *holder,
     if (obj != scopeChain)
         return false;
 
-    if (!obj->isGlobal())
+    if (!obj->is<GlobalObject>())
         return false;
 
     return IsCacheableGetPropCallNative(obj, holder, shape) ||
@@ -3053,7 +3053,7 @@ CallsiteCloneIC::update(JSContext *cx, size_t cacheIndex, HandleObject callee)
 
     // Act as the identity for functions that are not clone-at-callsite, as we
     // generate this cache as long as some callees are clone-at-callsite.
-    RootedFunction fun(cx, callee->toFunction());
+    RootedFunction fun(cx, &callee->as<JSFunction>());
     if (!fun->hasScript() || !fun->nonLazyScript()->shouldCloneAtCallsite)
         return fun;
 

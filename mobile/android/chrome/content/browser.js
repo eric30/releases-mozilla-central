@@ -30,6 +30,9 @@ XPCOMUtils.defineLazyModuleGetter(this, "DebuggerServer",
 XPCOMUtils.defineLazyModuleGetter(this, "UserAgentOverrides",
                                   "resource://gre/modules/UserAgentOverrides.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "LoginManagerContent",
+                                  "resource://gre/modules/LoginManagerContent.jsm");
+
 XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
                                   "resource://gre/modules/NetUtil.jsm");
 
@@ -610,6 +613,13 @@ var BrowserApp = {
     // initialize the form history and passwords databases on upgrades
     Services.obs.notifyObservers(null, "FormHistory:Init", "");
     Services.obs.notifyObservers(null, "Passwords:Init", "");
+
+    // Migrate user-set "plugins.click_to_play" pref. See bug 884694.
+    // Because the default value is true, a user-set pref means that the pref was set to false.
+    if (Services.prefs.prefHasUserValue("plugins.click_to_play")) {
+      Services.prefs.setIntPref("plugin.default.state", Ci.nsIPluginTag.STATE_ENABLED);
+      Services.prefs.clearUserPref("plugins.click_to_play");
+    }
   },
 
   shutdown: function shutdown() {
@@ -1075,11 +1085,13 @@ var BrowserApp = {
         continue;
       }
 
-      // Some preferences use integers or strings instead of booleans for
-      // indicating enabled/disabled. Since the Java UI uses the type to
-      // determine which ui elements to show, we need to normalize these
-      // preferences to be actual booleans.
+      // Some Gecko preferences use integers or strings to reference
+      // state instead of directly representing the value.
+      // Since the Java UI uses the type to determine which ui elements
+      // to show and how to handle them, we need to normalize these
+      // preferences to the correct type.
       switch (prefName) {
+        // (string) index for determining which multiple choice value to display.
         case "browser.chrome.titlebarMode":
         case "network.cookie.cookieBehavior":
         case "font.size.inflation.minTwips":
@@ -1304,11 +1316,18 @@ var BrowserApp = {
         browser.goForward();
         break;
 
-      case "Session:Reload":
+      case "Session:Reload": {
+        let allowMixedContent = false;
+        if (aData) {
+            let data = JSON.parse(aData);
+            allowMixedContent = data.allowMixedContent;
+        }
+
         // Try to use the session history to reload so that framesets are
         // handled properly. If the window has no session history, fall back
         // to using the web navigation's reload method.
-        let flags = Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_PROXY | Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_CACHE;
+        let flags = allowMixedContent ? Ci.nsIWebNavigation.LOAD_FLAGS_ALLOW_MIXED_CONTENT :
+                    Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_PROXY | Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_CACHE;
         let webNav = browser.webNavigation;
         try {
           let sh = webNav.sessionHistory;
@@ -1317,15 +1336,17 @@ var BrowserApp = {
         } catch (e) {}
         webNav.reload(flags);
         break;
+      }
 
       case "Session:Stop":
         browser.stop();
         break;
 
-      case "Session:ShowHistory":
+      case "Session:ShowHistory": {
         let data = JSON.parse(aData);
         this.showHistory(data.fromIndex, data.toIndex, data.selIndex);
         break;
+      }
 
       case "Tab:Load": {
         let data = JSON.parse(aData);
@@ -2563,6 +2584,8 @@ Tab.prototype = {
     this.browser.addEventListener("DOMTitleChanged", this, true);
     this.browser.addEventListener("DOMWindowClose", this, true);
     this.browser.addEventListener("DOMWillOpenModalDialog", this, true);
+    this.browser.addEventListener("DOMAutoComplete", this, true);
+    this.browser.addEventListener("blur", this, true);
     this.browser.addEventListener("scroll", this, true);
     this.browser.addEventListener("MozScrolledAreaChanged", this, true);
     // Note that the XBL binding is untrusted
@@ -2712,6 +2735,8 @@ Tab.prototype = {
     this.browser.removeEventListener("DOMTitleChanged", this, true);
     this.browser.removeEventListener("DOMWindowClose", this, true);
     this.browser.removeEventListener("DOMWillOpenModalDialog", this, true);
+    this.browser.removeEventListener("DOMAutoComplete", this, true);
+    this.browser.removeEventListener("blur", this, true);
     this.browser.removeEventListener("scroll", this, true);
     this.browser.removeEventListener("MozScrolledAreaChanged", this, true);
     this.browser.removeEventListener("PluginBindingAttached", this, true);
@@ -2985,8 +3010,8 @@ Tab.prototype = {
     // the clamping scroll-port size.
     let factor = Math.min(viewportWidth / screenWidth, pageWidth / screenWidth,
                           viewportHeight / screenHeight, pageHeight / screenHeight);
-    let scrollPortWidth = Math.min(screenWidth * factor, pageWidth * zoom);
-    let scrollPortHeight = Math.min(screenHeight * factor, pageHeight * zoom);
+    let scrollPortWidth = screenWidth * factor;
+    let scrollPortHeight = screenHeight * factor;
 
     let win = this.browser.contentWindow;
     win.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils).
@@ -3205,6 +3230,8 @@ Tab.prototype = {
       case "DOMContentLoaded": {
         let target = aEvent.originalTarget;
 
+        LoginManagerContent.onContentLoaded(aEvent);
+
         // ignore on frames and other documents
         if (target != this.browser.contentDocument)
           return;
@@ -3365,6 +3392,12 @@ Tab.prototype = {
         // tab is brought to the front.
         let tab = BrowserApp.getTabForWindow(aEvent.target.top);
         BrowserApp.selectTab(tab);
+        break;
+      }
+
+      case "DOMAutoComplete":
+      case "blur": {
+        LoginManagerContent.onUsernameInput(aEvent);
         break;
       }
 
@@ -5121,7 +5154,7 @@ let HealthReportStatusListener = {
         break;
       case "nsPref:changed":
         sendMessageToJava({ type: "Pref:Change", pref: aData, value: Services.prefs.getBoolPref(aData) });
-        break
+        break;
     }
   },
 
@@ -5147,19 +5180,11 @@ let HealthReportStatusListener = {
   ],
 
   /**
-   * Return true if either the add-on has opted out of AMO updates, and thus
-   * we shouldn't provide details to FHR, or it's an add-on type that we
-   * don't want to report details for.
+   * Return true if the add-on is not of a type for which we report full details.
    * These add-ons will still make it over to Java, but will be filtered out.
    */
   _shouldIgnore: function (aAddon) {
-    // TODO: check this pref. If it's false, the add-on has opted out of
-    // AMO updates, and should not be reported.
-    let optOutPref = "extensions." + aAddon.id + ".getAddons.cache.enabled";
-    if (this.FULL_DETAIL_TYPES.indexOf(aAddon.type) == -1) {
-      return true;
-    }
-    return false;
+    return this.FULL_DETAIL_TYPES.indexOf(aAddon.type) == -1;
   },
 
   _dateToDays: function (aDate) {
@@ -6018,10 +6043,24 @@ var CharacterEncoding = {
 };
 
 var IdentityHandler = {
-  // Mode strings used to control CSS display
-  IDENTITY_MODE_IDENTIFIED       : "identified", // High-quality identity information
-  IDENTITY_MODE_DOMAIN_VERIFIED  : "verified",   // Minimal SSL CA-signed domain verification
-  IDENTITY_MODE_UNKNOWN          : "unknown",  // No trusted identity information
+  // No trusted identity information. No site identity icon is shown.
+  IDENTITY_MODE_UNKNOWN: "unknown",
+
+  // Minimal SSL CA-signed domain verification. Blue lock icon is shown.
+  IDENTITY_MODE_DOMAIN_VERIFIED: "verified",
+
+  // High-quality identity information. Green lock icon is shown.
+  IDENTITY_MODE_IDENTIFIED: "identified",
+
+  // The following mixed content modes are only used if "security.mixed_content.block_active_content"
+  // is enabled. Even though the mixed content state and identitity state are orthogonal,
+  // our Java frontend coalesces them into one indicator.
+
+  // Blocked active mixed content. Shield icon is shown, with a popup option to load content.
+  IDENTITY_MODE_MIXED_CONTENT_BLOCKED: "mixed_content_blocked",
+
+  // Loaded active mixed content. Yellow triangle icon is shown.
+  IDENTITY_MODE_MIXED_CONTENT_LOADED: "mixed_content_loaded",
 
   // Cache the most recent SSLStatus and Location seen in getIdentityStrings
   _lastStatus : null,
@@ -6061,6 +6100,14 @@ var IdentityHandler = {
   },
 
   getIdentityMode: function getIdentityMode(aState) {
+    if (aState & Ci.nsIWebProgressListener.STATE_BLOCKED_MIXED_ACTIVE_CONTENT)
+      return this.IDENTITY_MODE_MIXED_CONTENT_BLOCKED;
+
+    // Only show an indicator for loaded mixed content if the pref to block it is enabled
+    if ((aState & Ci.nsIWebProgressListener.STATE_LOADED_MIXED_ACTIVE_CONTENT) &&
+         Services.prefs.getBoolPref("security.mixed_content.block_active_content"))
+      return this.IDENTITY_MODE_MIXED_CONTENT_LOADED;
+
     if (aState & Ci.nsIWebProgressListener.STATE_IDENTITY_EV_TOPLEVEL)
       return this.IDENTITY_MODE_IDENTIFIED;
 
@@ -6110,7 +6157,7 @@ var IdentityHandler = {
     result.verifier = Strings.browser.formatStringFromName("identity.identified.verifier", [iData.caOrg], 1);
 
     // If the cert is identified, then we can populate the results with credentials
-    if (mode == this.IDENTITY_MODE_IDENTIFIED) {
+    if (aState & Ci.nsIWebProgressListener.STATE_IDENTITY_EV_TOPLEVEL) {
       result.owner = iData.subjectOrg;
 
       // Build an appropriate supplemental block out of whatever location data we have
@@ -6129,7 +6176,7 @@ var IdentityHandler = {
     }
     
     // Otherwise, we don't know the cert owner
-    result.owner = Strings.browser.GetStringFromName("identity.ownerUnknown2");
+    result.owner = Strings.browser.GetStringFromName("identity.ownerUnknown3");
 
     // Cache the override service the first time we need to check it
     if (!this._overrideService)

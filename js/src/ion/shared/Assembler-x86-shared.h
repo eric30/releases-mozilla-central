@@ -4,8 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef jsion_assembler_x86_shared__
-#define jsion_assembler_x86_shared__
+#ifndef ion_shared_Assembler_x86_shared_h
+#define ion_shared_Assembler_x86_shared_h
 #include <cstddef>
 #include "assembler/assembler/X86Assembler.h"
 
@@ -580,25 +580,27 @@ class AssemblerX86Shared
     void cmpEAX(Label *label) { cmpSrc(label); }
     void bind(Label *label) {
         JSC::MacroAssembler::Label jsclabel;
+        JSC::X86Assembler::JmpDst dst(masm.label());
         if (label->used()) {
             bool more;
             JSC::X86Assembler::JmpSrc jmp(label->offset());
             do {
                 JSC::X86Assembler::JmpSrc next;
                 more = masm.nextJump(jmp, &next);
-                masm.linkJump(jmp, masm.label());
+                masm.linkJump(jmp, dst);
                 jmp = next;
             } while (more);
         }
-        label->bind(masm.label().offset());
+        label->bind(dst.offset());
     }
     void bind(RepatchLabel *label) {
         JSC::MacroAssembler::Label jsclabel;
+        JSC::X86Assembler::JmpDst dst(masm.label());
         if (label->used()) {
             JSC::X86Assembler::JmpSrc jmp(label->offset());
-            masm.linkJump(jmp, masm.label());
+            masm.linkJump(jmp, dst);
         }
-        label->bind(masm.label().offset());
+        label->bind(dst.offset());
     }
     uint32_t currentOffset() {
         return masm.label().offset();
@@ -1356,5 +1358,4 @@ class AssemblerX86Shared
 } // namespace ion
 } // namespace js
 
-#endif // jsion_assembler_x86_shared__
-
+#endif /* ion_shared_Assembler_x86_shared_h */

@@ -4,18 +4,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "gc/Marking.h"
+
 #include "mozilla/DebugOnly.h"
 
-#include "jsprf.h"
-#include "jsstr.h"
-
-#include "gc/Marking.h"
-#include "gc/Nursery-inl.h"
+#include "ion/IonCode.h"
 #include "vm/Shape.h"
 
-#include "jsobjinlines.h"
+#include "jscompartmentinlines.h"
 
-#include "ion/IonCode.h"
+#include "gc/Nursery-inl.h"
 #include "vm/Shape-inl.h"
 #include "vm/String-inl.h"
 
@@ -515,24 +513,6 @@ MarkValueInternal(JSTracer *trc, Value *v)
     }
 }
 
-static inline void
-MarkValueInternalMaybeNullPayload(JSTracer *trc, Value *v)
-{
-    if (v->isMarkable()) {
-        void *thing = v->toGCThing();
-        if (thing) {
-            JS_SET_TRACING_LOCATION(trc, (void *)v);
-            MarkKind(trc, &thing, v->gcKind());
-            if (v->isString())
-                v->setString((JSString *)thing);
-            else
-                v->setObjectOrNull((JSObject *)thing);
-            return;
-        }
-    }
-    JS_UNSET_TRACING_LOCATION(trc);
-}
-
 void
 gc::MarkValue(JSTracer *trc, EncapsulatedValue *v, const char *name)
 {
@@ -580,16 +560,6 @@ gc::MarkValueRootRange(JSTracer *trc, size_t len, Value *vec, const char *name)
     for (size_t i = 0; i < len; ++i) {
         JS_SET_TRACING_INDEX(trc, name, i);
         MarkValueInternal(trc, &vec[i]);
-    }
-}
-
-void
-gc::MarkValueRootRangeMaybeNullPayload(JSTracer *trc, size_t len, Value *vec, const char *name)
-{
-    JS_ROOT_MARKING_ASSERT(trc);
-    for (size_t i = 0; i < len; ++i) {
-        JS_SET_TRACING_INDEX(trc, name, i);
-        MarkValueInternalMaybeNullPayload(trc, &vec[i]);
     }
 }
 

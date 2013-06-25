@@ -383,10 +383,10 @@ class ReferenceFinder {
             JSObject *object = static_cast<JSObject *>(cell);
 
             /* Certain classes of object are for internal use only. */
-            if (object->isBlock() ||
-                object->isCall() ||
-                object->isWith() ||
-                object->isDeclEnv()) {
+            if (object->is<BlockObject>() ||
+                object->is<CallObject>() ||
+                object->is<WithObject>() ||
+                object->is<DeclEnvObject>()) {
                 return JSVAL_VOID;
             }
 

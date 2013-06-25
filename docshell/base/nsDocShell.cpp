@@ -10,6 +10,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/AutoRestore.h"
+#include "mozilla/Casting.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/TabChild.h"
@@ -238,6 +239,7 @@ static uint32_t gValidateOrigin = 0xffffffff;
 // Hint for native dispatch of events on how long to delay after 
 // all documents have loaded in milliseconds before favoring normal
 // native event dispatch priorites over performance
+// Can be overridden with docshell.event_starvation_delay_hint pref.
 #define NS_EVENT_STARVATION_DELAY_HINT 2000
 
 #ifdef PR_LOGGING
@@ -251,11 +253,14 @@ const char kBrandBundleURL[]      = "chrome://branding/locale/brand.properties";
 const char kAppstringsBundleURL[] = "chrome://global/locale/appstrings.properties";
 
 static void
-FavorPerformanceHint(bool perfOverStarvation, uint32_t starvationDelay)
+FavorPerformanceHint(bool perfOverStarvation)
 {
     nsCOMPtr<nsIAppShell> appShell = do_GetService(kAppShellCID);
-    if (appShell)
-        appShell->FavorPerformanceHint(perfOverStarvation, starvationDelay);
+    if (appShell) {
+        appShell->FavorPerformanceHint(perfOverStarvation,
+                                       Preferences::GetUint("docshell.event_starvation_delay_hint",
+                                                            NS_EVENT_STARVATION_DELAY_HINT));
+    }
 }
 
 //*****************************************************************************
@@ -805,7 +810,7 @@ nsDocShell::nsDocShell():
   ++gNumberOfDocShells;
   if (!PR_GetEnv("MOZ_QUIET")) {
       printf("++DOCSHELL %p == %ld [id = %llu]\n", (void*) this,
-             gNumberOfDocShells, mHistoryID);
+             gNumberOfDocShells, SafeCast<unsigned long long>(mHistoryID));
   }
 #endif
 }
@@ -834,7 +839,7 @@ nsDocShell::~nsDocShell()
     --gNumberOfDocShells;
     if (!PR_GetEnv("MOZ_QUIET")) {
         printf("--DOCSHELL %p == %ld [id = %llu]\n", (void*) this,
-               gNumberOfDocShells, mHistoryID);
+               gNumberOfDocShells, SafeCast<unsigned long long>(mHistoryID));
     }
 #endif
 }
@@ -1640,16 +1645,15 @@ nsDocShell::FirePageHideNotification(bool aIsUnload)
     return NS_OK;
 }
 
-nsresult
+void
 nsDocShell::MaybeInitTiming()
 {
     if (mTiming) {
-        return NS_OK;
+        return;
     }
 
     mTiming = new nsDOMNavigationTiming();
     mTiming->NotifyNavigationStart();
-    return NS_OK;
 }
 
 
@@ -3087,14 +3091,18 @@ nsDocShell::FindItemWithName(const PRUnichar * aName,
     if (!*aName)
         return NS_OK;
 
-    if (!aRequestor)
-    {
-        nsCOMPtr<nsIDocShellTreeItem> foundItem;
+    if (aRequestor) {
+        // If aRequestor is not null we don't need to check special names, so
+        // just hand straight off to the search by actual name function.
+        return DoFindItemWithName(aName, aRequestor, aOriginalRequestor,
+                                  _retval);
+    } else {
 
         // This is the entry point into the target-finding algorithm.  Check
         // for special names.  This should only be done once, hence the check
         // for a null aRequestor.
 
+        nsCOMPtr<nsIDocShellTreeItem> foundItem;
         nsDependentString name(aName);
         if (name.LowerCaseEqualsLiteral("_self")) {
             foundItem = this;
@@ -3143,16 +3151,19 @@ nsDocShell::FindItemWithName(const PRUnichar * aName,
                 // a new window?
             }
 #endif
+        } else {
+            // Do the search for item by an actual name.
+            DoFindItemWithName(aName, aRequestor, aOriginalRequestor,
+                               getter_AddRefs(foundItem));
         }
 
         if (foundItem && !CanAccessItem(foundItem, aOriginalRequestor)) {
             foundItem = nullptr;
         }
 
+        // DoFindItemWithName only returns active items and we don't check if
+        // the item is active for the special cases.
         if (foundItem) {
-            // We return foundItem here even if it's not an active
-            // item since all the names we've dealt with so far are
-            // special cases that we won't bother looking for further.
 
             // If our document is sandboxed, we need to do some extra checks.
             uint32_t sandboxFlags = 0;
@@ -3174,17 +3185,14 @@ nsDocShell::FindItemWithName(const PRUnichar * aName,
                     bool isAncestor = false;
 
                     nsCOMPtr<nsIDocShellTreeItem> parentAsItem;
-                    GetSameTypeParent(getter_AddRefs(parentAsItem));
-
+                    foundItem->GetSameTypeParent(getter_AddRefs(parentAsItem));
                     while (parentAsItem) {
-                        nsCOMPtr<nsIDocShellTreeItem> tmp;
-                        parentAsItem->GetParent(getter_AddRefs(tmp));
-
-                        if (tmp && tmp == selfAsItem) {
+                        if (parentAsItem == selfAsItem) {
                             isAncestor = true;
                             break;
                         }
-                        parentAsItem = tmp;
+                        nsCOMPtr<nsIDocShellTreeItem> tmp = parentAsItem;
+                        tmp->GetSameTypeParent(getter_AddRefs(parentAsItem));
                     }
 
                     if (!isAncestor) {
@@ -3212,12 +3220,17 @@ nsDocShell::FindItemWithName(const PRUnichar * aName,
             }
 
             foundItem.swap(*_retval);
-            return NS_OK;
         }
+        return NS_OK;
     }
+}
 
-    // Keep looking
-        
+nsresult
+nsDocShell::DoFindItemWithName(const PRUnichar* aName,
+                               nsISupports* aRequestor,
+                               nsIDocShellTreeItem* aOriginalRequestor,
+                               nsIDocShellTreeItem** _retval)
+{
     // First we check our name.
     if (mName.Equals(aName) && ItemIsActive(this) &&
         CanAccessItem(this, aOriginalRequestor)) {
@@ -6359,9 +6372,7 @@ nsDocShell::OnStateChange(nsIWebProgress * aProgress, nsIRequest * aRequest,
         // We don't update navigation timing for wyciwyg channels
         if (this == aProgress && !wcwgChannel){
             MaybeInitTiming();
-            if (mTiming) {
-                mTiming->NotifyFetchStart(uri, ConvertLoadTypeToNavigationType(mLoadType));
-            } 
+            mTiming->NotifyFetchStart(uri, ConvertLoadTypeToNavigationType(mLoadType));
         }
 
         // Was the wyciwyg document loaded on this docshell?
@@ -6663,7 +6674,7 @@ nsDocShell::EndPageLoad(nsIWebProgress * aProgress,
         // over performance
         if (--gNumberOfDocumentsLoading == 0) {
           // Hint to use normal native event dispatch priorities 
-          FavorPerformanceHint(false, NS_EVENT_STARVATION_DELAY_HINT);
+          FavorPerformanceHint(false);
         }
     }
     /* Check if the httpChannel has any cache-control related response headers,
@@ -6970,10 +6981,8 @@ nsDocShell::CreateAboutBlankContentViewer(nsIPrincipal* aPrincipal,
 
     // Make sure timing is created. Unload gets fired first for
     // document loaded from the session history.
-    rv = MaybeInitTiming();
-    if (mTiming) {
-      mTiming->NotifyBeforeUnload();
-    }
+    MaybeInitTiming();
+    mTiming->NotifyBeforeUnload();
 
     bool okToUnload;
     rv = mContentViewer->PermitUnload(false, &okToUnload);
@@ -7670,7 +7679,7 @@ nsDocShell::RestoreFromHistory()
     // Tell the event loop to favor plevents over user events, see comments
     // in CreateContentViewer.
     if (++gNumberOfDocumentsLoading == 1)
-        FavorPerformanceHint(true, NS_EVENT_STARVATION_DELAY_HINT);
+        FavorPerformanceHint(true);
 
 
     if (oldMUDV && newMUDV) {
@@ -7881,17 +7890,6 @@ nsDocShell::RestoreFromHistory()
     // Restart plugins, and paint the content.
     if (shell) {
         shell->Thaw();
-
-        newVM = shell->GetViewManager();
-        if (newVM) {
-            // When we insert the root view above the resulting invalidate is
-            // dropped because painting is suppressed in the presshell until we
-            // call Thaw. So we issue the invalidate here.
-            newRootView = newVM->GetRootView();
-            if (newRootView) {
-                newVM->InvalidateView(newRootView);
-            }
-        }
     }
 
     return privWin->FireDelayedDOMEvents();
@@ -8079,7 +8077,7 @@ nsDocShell::CreateContentViewer(const char *aContentType,
       // Hint to favor performance for the plevent notification mechanism.
       // We want the pages to load as fast as possible even if its means 
       // native messages might be starved.
-      FavorPerformanceHint(true, NS_EVENT_STARVATION_DELAY_HINT);
+      FavorPerformanceHint(true);
     }
 
     if (onLocationChangeNeeded) {
@@ -12151,7 +12149,7 @@ nsDocShell::OnLinkClickSync(nsIContent *aContent,
 
   // XXX When the linking node was HTMLFormElement, it is synchronous event.
   //     That is, the caller of this method is not |OnLinkClickEvent::Run()|
-  //     but |nsHTMLFormElement::SubmitSubmission(...)|.
+  //     but |HTMLFormElement::SubmitSubmission(...)|.
   if (nsGkAtoms::form == aContent->Tag() && ShouldBlockLoadingForBackButton()) {
     return NS_OK;
   }

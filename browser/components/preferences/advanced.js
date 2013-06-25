@@ -50,6 +50,16 @@ var gAdvancedPane = {
       ["autoMetro", "autoMetroIndent"].forEach(
         function(id) document.getElementById(id).collapsed = true
       );
+    } else {
+      let brandShortName =
+        document.getElementById("bundleBrand").getString("brandShortName");
+      let bundlePrefs = document.getElementById("bundlePreferences");
+      let autoDesktop = document.getElementById("autoDesktop");
+      autoDesktop.label =
+        bundlePrefs.getFormattedString("updateAutoDesktop.label",
+                                       [brandShortName]);
+      autoDesktop.accessKey =
+        bundlePrefs.getString("updateAutoDesktop.accessKey");
     }
 #endif
 #endif
@@ -791,16 +801,6 @@ var gAdvancedPane = {
   {
     document.documentElement.openWindow("mozilla:certmanager",
                                         "chrome://pippki/content/certManager.xul",
-                                        "", null);
-  },
-
-  /**
-   * Displays a dialog which describes the user's CRLs.
-   */
-  showCRLs: function ()
-  {
-    document.documentElement.openWindow("mozilla:crlmanager",
-                                        "chrome://pippki/content/crlManager.xul",
                                         "", null);
   },
 

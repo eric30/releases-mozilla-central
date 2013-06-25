@@ -4,20 +4,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef jsatom_h___
-#define jsatom_h___
+#ifndef jsatom_h
+#define jsatom_h
 
 #include "mozilla/HashFunctions.h"
 
 #include <stddef.h>
 #include "jsalloc.h"
 #include "jsapi.h"
-#include "jsfriendapi.h"
-#include "jsprototypes.h"
 #include "jsprvtd.h"
 #include "jspubtd.h"
-#include "jslock.h"
-#include "jsversion.h"
 
 #include "gc/Barrier.h"
 #include "js/HashTable.h"
@@ -181,7 +177,7 @@ extern const char   js_send_str[];
 
 namespace js {
 
-extern const char * TypeStrings[];
+extern const char * const TypeStrings[];
 
 /*
  * Initialize atom state. Return true on success, false on failure to allocate
@@ -234,7 +230,7 @@ extern JSAtom *
 AtomizeString(JSContext *cx, JSString *str, js::InternBehavior ib = js::DoNotInternAtom);
 
 template <AllowGC allowGC>
-inline JSAtom *
+extern JSAtom *
 ToAtom(JSContext *cx, typename MaybeRooted<Value, allowGC>::HandleType v);
 
 template<XDRMode mode>
@@ -243,4 +239,4 @@ XDRAtom(XDRState<mode> *xdr, js::MutableHandleAtom atomp);
 
 } /* namespace js */
 
-#endif /* jsatom_h___ */
+#endif /* jsatom_h */

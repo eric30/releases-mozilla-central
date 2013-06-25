@@ -9,23 +9,21 @@
  */
 #include "jsatom.h"
 
-#include <stdlib.h>
-#include <string.h>
-
 #include "mozilla/RangedPtr.h"
 #include "mozilla/Util.h"
 
+#include <string.h>
+
 #include "jsapi.h"
 #include "jscntxt.h"
-#include "jslock.h"
 #include "jsstr.h"
 #include "jstypes.h"
-#include "jsversion.h"
 
 #include "gc/Marking.h"
 #include "vm/Xdr.h"
 
 #include "jsatominlines.h"
+#include "jscompartmentinlines.h"
 
 #include "vm/String-inl.h"
 
@@ -42,7 +40,7 @@ js_AtomToPrintableString(JSContext *cx, JSAtom *atom, JSAutoByteString *bytes)
     return js_ValueToPrintable(cx, StringValue(atom), bytes);
 }
 
-const char * js::TypeStrings[] = {
+const char * const js::TypeStrings[] = {
     js_undefined_str,
     js_object_str,
     js_function_str,
@@ -433,6 +431,32 @@ js::IndexToIdSlow<CanGC>(JSContext *cx, uint32_t index, MutableHandleId idp);
 
 template bool
 js::IndexToIdSlow<NoGC>(JSContext *cx, uint32_t index, FakeMutableHandle<jsid> idp);
+
+template <AllowGC allowGC>
+JSAtom *
+js::ToAtom(JSContext *cx, typename MaybeRooted<Value, allowGC>::HandleType v)
+{
+    if (!v.isString()) {
+        JSString *str = js::ToStringSlow<allowGC>(cx, v);
+        if (!str)
+            return NULL;
+        JS::Anchor<JSString *> anchor(str);
+        return AtomizeString<allowGC>(cx, str);
+    }
+
+    JSString *str = v.toString();
+    if (str->isAtom())
+        return &str->asAtom();
+
+    JS::Anchor<JSString *> anchor(str);
+    return AtomizeString<allowGC>(cx, str);
+}
+
+template JSAtom *
+js::ToAtom<CanGC>(JSContext *cx, HandleValue v);
+
+template JSAtom *
+js::ToAtom<NoGC>(JSContext *cx, Value v);
 
 template<XDRMode mode>
 bool

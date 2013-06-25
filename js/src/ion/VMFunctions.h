@@ -4,13 +4,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef jsion_vm_functions_h__
-#define jsion_vm_functions_h__
+#ifndef ion_VMFunctions_h
+#define ion_VMFunctions_h
 
 #include "jspubtd.h"
 
 namespace js {
 
+class DeclEnvObject;
 class ForkJoinSlice;
 
 namespace ion {
@@ -19,6 +20,7 @@ enum DataType {
     Type_Void,
     Type_Bool,
     Type_Int32,
+    Type_Pointer,
     Type_Object,
     Type_Value,
     Type_Handle,
@@ -327,6 +329,7 @@ template <class> struct OutParamToDataType { static const DataType result = Type
 template <> struct OutParamToDataType<Value *> { static const DataType result = Type_Value; };
 template <> struct OutParamToDataType<int *> { static const DataType result = Type_Int32; };
 template <> struct OutParamToDataType<uint32_t *> { static const DataType result = Type_Int32; };
+template <> struct OutParamToDataType<uint8_t **> { static const DataType result = Type_Pointer; };
 template <> struct OutParamToDataType<MutableHandleValue> { static const DataType result = Type_Handle; };
 template <> struct OutParamToDataType<MutableHandleObject> { static const DataType result = Type_Handle; };
 
@@ -556,6 +559,7 @@ bool IteratorMore(JSContext *cx, HandleObject obj, JSBool *res);
 JSObject *NewInitParallelArray(JSContext *cx, HandleObject templateObj);
 JSObject *NewInitArray(JSContext *cx, uint32_t count, types::TypeObject *type);
 JSObject *NewInitObject(JSContext *cx, HandleObject templateObject);
+JSObject *NewInitObjectWithClassPrototype(JSContext *cx, HandleObject templateObject);
 
 bool ArrayPopDense(JSContext *cx, HandleObject obj, MutableHandleValue rval);
 bool ArrayPushDense(JSContext *cx, HandleObject obj, HandleValue v, uint32_t *length);
@@ -618,5 +622,4 @@ bool InitBaselineFrameForOsr(BaselineFrame *frame, StackFrame *interpFrame,
 } // namespace ion
 } // namespace js
 
-#endif // jsion_vm_functions_h_
-
+#endif /* ion_VMFunctions_h */

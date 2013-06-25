@@ -1027,7 +1027,6 @@ pref("services.sync.prefs.sync.privacy.clearOnShutdown.siteSettings", true);
 pref("services.sync.prefs.sync.privacy.donottrackheader.enabled", true);
 pref("services.sync.prefs.sync.privacy.donottrackheader.value", true);
 pref("services.sync.prefs.sync.privacy.sanitize.sanitizeOnShutdown", true);
-pref("services.sync.prefs.sync.security.OCSP.disable_button.managecrl", true);
 pref("services.sync.prefs.sync.security.OCSP.enabled", true);
 pref("services.sync.prefs.sync.security.OCSP.require", true);
 pref("services.sync.prefs.sync.security.default_personal_cert", true);
@@ -1073,19 +1072,13 @@ pref("devtools.debugger.chrome-enabled", true);
 pref("devtools.debugger.chrome-debugging-host", "localhost");
 pref("devtools.debugger.chrome-debugging-port", 6080);
 pref("devtools.debugger.remote-host", "localhost");
-pref("devtools.debugger.remote-autoconnect", false);
-pref("devtools.debugger.remote-connection-retries", 3);
 pref("devtools.debugger.remote-timeout", 20000);
+pref("devtools.debugger.pause-on-exceptions", false);
 pref("devtools.debugger.source-maps-enabled", true);
 
 // The default Debugger UI settings
-pref("devtools.debugger.ui.win-x", 0);
-pref("devtools.debugger.ui.win-y", 0);
-pref("devtools.debugger.ui.win-width", 900);
-pref("devtools.debugger.ui.win-height", 400);
 pref("devtools.debugger.ui.panes-sources-width", 200);
 pref("devtools.debugger.ui.panes-instruments-width", 300);
-pref("devtools.debugger.ui.pause-on-exceptions", false);
 pref("devtools.debugger.ui.panes-visible-on-startup", false);
 pref("devtools.debugger.ui.variables-sorting-enabled", true);
 pref("devtools.debugger.ui.variables-only-enum-visible", false);
@@ -1137,12 +1130,28 @@ pref("devtools.webconsole.filter.csserror", true);
 pref("devtools.webconsole.filter.cssparser", true);
 pref("devtools.webconsole.filter.exception", true);
 pref("devtools.webconsole.filter.jswarn", true);
+pref("devtools.webconsole.filter.jslog", true);
 pref("devtools.webconsole.filter.error", true);
 pref("devtools.webconsole.filter.warn", true);
 pref("devtools.webconsole.filter.info", true);
 pref("devtools.webconsole.filter.log", true);
 pref("devtools.webconsole.filter.secerror", true);
 pref("devtools.webconsole.filter.secwarn", true);
+
+// Remember the Browser Console filters
+pref("devtools.browserconsole.filter.network", true);
+pref("devtools.browserconsole.filter.networkinfo", true);
+pref("devtools.browserconsole.filter.csserror", true);
+pref("devtools.browserconsole.filter.cssparser", true);
+pref("devtools.browserconsole.filter.exception", true);
+pref("devtools.browserconsole.filter.jswarn", true);
+pref("devtools.browserconsole.filter.jslog", true);
+pref("devtools.browserconsole.filter.error", true);
+pref("devtools.browserconsole.filter.warn", true);
+pref("devtools.browserconsole.filter.info", true);
+pref("devtools.browserconsole.filter.log", true);
+pref("devtools.browserconsole.filter.secerror", true);
+pref("devtools.browserconsole.filter.secwarn", true);
 
 // Text size in the Web Console. Use 0 for the system default size.
 pref("devtools.webconsole.fontSize", 0);
@@ -1193,7 +1202,7 @@ pref("browser.panorama.animate_zoom", true);
 // Defines the url to be used for new tabs.
 pref("browser.newtab.url", "about:newtab");
 // Activates preloading of the new tab url.
-pref("browser.newtab.preload", false);
+pref("browser.newtab.preload", true);
 
 // Toggles the content of 'about:newtab'. Shows the grid when enabled.
 pref("browser.newtabpage.enabled", true);
@@ -1273,3 +1282,6 @@ pref("media.webaudio.enabled", true);
 // If this turns true, Moz*Gesture events are not called stopPropagation()
 // before content.
 pref("dom.debug.propagate_gesture_events_through_content", false);
+
+// The request URL of the GeoLocation backend.
+pref("geo.wifi.uri", "https://www.googleapis.com/geolocation/v1/geolocate?key=%GOOGLE_API_KEY%");

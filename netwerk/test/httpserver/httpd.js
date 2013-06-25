@@ -535,7 +535,8 @@ nsHttpServer.prototype =
       dumpn(">>> listening on port " + socket.port + ", " + maxConnections +
             " pending connections");
       socket.asyncListen(this);
-      this._identity._initialize(port, host, true);
+      this._port = socket.port;
+      this._identity._initialize(socket.port, host, true);
       this._socket = socket;
     }
     catch (e)
@@ -3974,10 +3975,7 @@ Response.prototype =
       var avail = bodyStream ? bodyStream.available() : 0;
 
       // XXX assumes stream will always report the full amount of data available
-      // Set "Content-Length" if not already set by request handler.
-      if (!headers.hasHeader("Content-Length")) {
-        headers.setHeader("Content-Length", "" + avail, false);
-      }
+      headers.setHeader("Content-Length", "" + avail, false);
     }
 
 

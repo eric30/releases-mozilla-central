@@ -4,8 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef RegExpObject_h__
-#define RegExpObject_h__
+#ifndef vm_RegExpObject_h
+#define vm_RegExpObject_h
 
 #include "mozilla/Attributes.h"
 
@@ -294,6 +294,8 @@ class RegExpObject : public JSObject
   public:
     static const unsigned RESERVED_SLOTS = 6;
 
+    static Class class_;
+
     /*
      * Note: The regexp statics flags are OR'd into the provided flags,
      * so this function is really meant for object creation during code
@@ -399,4 +401,4 @@ CloneScriptRegExpObject(JSContext *cx, RegExpObject &re);
 
 } /* namespace js */
 
-#endif
+#endif /* vm_RegExpObject_h */

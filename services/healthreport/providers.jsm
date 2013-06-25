@@ -34,7 +34,7 @@ Cu.import("resource://gre/modules/Metrics.jsm");
 
 #endif
 
-Cu.import("resource://gre/modules/commonjs/sdk/core/promise.js");
+Cu.import("resource://gre/modules/Promise.jsm");
 Cu.import("resource://gre/modules/osfile.jsm");
 Cu.import("resource://gre/modules/Preferences.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
@@ -839,13 +839,6 @@ AddonsProvider.prototype = Object.freeze({
       data.counts[type] = (data.counts[type] || 0) + 1;
 
       if (this.FULL_DETAIL_TYPES.indexOf(addon.type) == -1) {
-        continue;
-      }
-
-      let optOutPref = "extensions." + addon.id + ".getAddons.cache.enabled";
-      if (!this._prefs.get(optOutPref, true)) {
-        this._log.debug("Ignoring add-on that's opted out of AMO updates: " +
-                        addon.id);
         continue;
       }
 

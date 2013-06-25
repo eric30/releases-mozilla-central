@@ -44,7 +44,11 @@ var gIgnoreWindowSize = false;
 var gTotalChunks = 0;
 var gThisChunk = 0;
 var gContainingWindow = null;
-var gFilter = null;
+var gURLFilterRegex = null;
+const FOCUS_FILTER_ALL_TESTS = "all";
+const FOCUS_FILTER_NEEDS_FOCUS_TESTS = "needs-focus";
+const FOCUS_FILTER_NON_NEEDS_FOCUS_TESTS = "non-needs-focus";
+var gFocusFilterMode = FOCUS_FILTER_ALL_TESTS;
 
 // "<!--CLEAR-->"
 const BLANK_URL_FOR_CLEARING = "data:text/html;charset=UTF-8,%3C%21%2D%2DCLEAR%2D%2D%3E";
@@ -133,8 +137,7 @@ var gPrefsToRestore = [];
 const gProtocolRE = /^\w+:/;
 const gPrefItemRE = /^(|test-|ref-)pref\((.+?),(.*)\)$/;
 
-var HTTP_SERVER_PORT = 4444;
-const HTTP_SERVER_PORTS_TO_TRY = 50;
+var gHttpServerPort = -1;
 
 // whether to run slow tests or not
 var gRunSlowTests = true;
@@ -343,7 +346,11 @@ function InitAndStartRefTests()
     }
 
     try {
-        gFilter = new RegExp(prefs.getCharPref("reftest.filter"));
+        gURLFilterRegex = new RegExp(prefs.getCharPref("reftest.filter"));
+    } catch(e) {}
+
+    try {
+        gFocusFilterMode = prefs.getCharPref("reftest.focusFilterMode");
     } catch(e) {}
 
     gWindowUtils = gContainingWindow.QueryInterface(CI.nsIInterfaceRequestor).getInterface(CI.nsIDOMWindowUtils);
@@ -380,19 +387,8 @@ function InitAndStartRefTests()
 function StartHTTPServer()
 {
     gServer.registerContentType("sjs", "sjs");
-    // We want to try different ports in case the port we want
-    // is being used.
-    var tries = HTTP_SERVER_PORTS_TO_TRY;
-    do {
-        try {
-            gServer.start(HTTP_SERVER_PORT);
-            return;
-        } catch (ex) {
-            ++HTTP_SERVER_PORT;
-            if (--tries == 0)
-                throw ex;
-        }
-    } while (true);
+    gServer.start(-1);
+    gHttpServerPort = gServer.identity.primaryPort;
 }
 
 function StartTests()
@@ -431,7 +427,7 @@ function StartTests()
     }
 #else
     try {
-        // Need to read the manifest once we have the final HTTP_SERVER_PORT.
+        // Need to read the manifest once we have gHttpServerPort..
         var args = window.arguments[0].wrappedJSObject;
 
         if ("nocache" in args && args["nocache"])
@@ -726,7 +722,13 @@ function ReadTopManifest(aFileURL)
 
 function AddTestItem(aTest)
 {
-    if (gFilter && !gFilter.test(aTest.url1.spec))
+    if (gURLFilterRegex && !gURLFilterRegex.test(aTest.url1.spec))
+        return;
+    if (gFocusFilterMode == FOCUS_FILTER_NEEDS_FOCUS_TESTS &&
+        !aTest.needsFocus)
+        return;
+    if (gFocusFilterMode == FOCUS_FILTER_NON_NEEDS_FOCUS_TESTS &&
+        aTest.needsFocus)
         return;
     gURLs.push(aTest);
 }
@@ -1081,9 +1083,8 @@ function ServeFiles(manifestPrincipal, depth, aURL, files)
     var secMan = CC[NS_SCRIPTSECURITYMANAGER_CONTRACTID]
                      .getService(CI.nsIScriptSecurityManager);
 
-    var testbase = gIOService.newURI("http://localhost:" + HTTP_SERVER_PORT +
-                                         path + dirPath,
-                                     null, null);
+    var testbase = gIOService.newURI("http://localhost:" + gHttpServerPort +
+                                     path + dirPath, null, null);
 
     function FileToURI(file)
     {
@@ -1405,6 +1406,18 @@ function UpdateCurrentCanvasForInvalidation(rects)
     }
 }
 
+function UpdateWholeCurrentCanvasForInvalidation()
+{
+    LogInfo("Updating entire canvas for invalidation");
+
+    if (!gCurrentCanvas) {
+        return;
+    }
+
+    var ctx = gCurrentCanvas.getContext("2d");
+    DoDrawWindow(ctx, 0, 0, gCurrentCanvas.width, gCurrentCanvas.height);
+}
+
 function RecordResult(testRunTime, errorMsg, scriptResults)
 {
     LogInfo("RecordResult fired");
@@ -1660,7 +1673,7 @@ function FindUnexpectedCrashDumpFiles()
                 gDumpLog("REFTEST TEST-UNEXPECTED-FAIL | " + gCurrentURL +
                          " | This test left crash dumps behind, but we weren't expecting it to!\n");
             }
-            gDumpLog("REFTEST INFO | Found unexpected crash dump file" + path +
+            gDumpLog("REFTEST INFO | Found unexpected crash dump file " + path +
                      ".\n");
             gUnexpectedCrashDumpFiles[path] = true;
         }
@@ -1804,6 +1817,10 @@ function RegisterMessageListenersAndLoadContentScript()
         function (m) { RecvUpdateCanvasForInvalidation(m.json.rects); }
     );
     gBrowserMessageManager.addMessageListener(
+        "reftest:UpdateWholeCanvasForInvalidation",
+        function (m) { RecvUpdateWholeCanvasForInvalidation(); }
+    );
+    gBrowserMessageManager.addMessageListener(
         "reftest:ExpectProcessCrash",
         function (m) { RecvExpectProcessCrash(); }
     );
@@ -1881,6 +1898,11 @@ function RecvTestDone(runtimeMs)
 function RecvUpdateCanvasForInvalidation(rects)
 {
     UpdateCurrentCanvasForInvalidation(rects);
+}
+
+function RecvUpdateWholeCanvasForInvalidation()
+{
+    UpdateWholeCurrentCanvasForInvalidation();
 }
 
 function OnProcessCrashed(subject, topic, data)

@@ -11,7 +11,6 @@
 #include "jscntxt.h"
 #include "jsgc.h"
 #include "jsiter.h"
-#include "jsmath.h"
 #include "jsproxy.h"
 #include "jswatchpoint.h"
 #include "jswrapper.h"
@@ -21,9 +20,12 @@
 #include "ion/IonCompartment.h"
 #endif
 #include "js/RootingAPI.h"
+#include "vm/StopIterationObject.h"
 
 #include "jsgcinlines.h"
 #include "jsobjinlines.h"
+
+#include "gc/Barrier-inl.h"
 
 using namespace js;
 using namespace js::gc;
@@ -233,7 +235,7 @@ JSCompartment::wrap(JSContext *cx, MutableHandleValue vp, HandleObject existingA
             return WrapForSameCompartment(cx, obj, vp);
 
         /* Translate StopIteration singleton. */
-        if (obj->isStopIteration())
+        if (obj->is<StopIterationObject>())
             return js_FindClassObject(cx, JSProto_StopIteration, vp);
 
         /* Unwrap the object, but don't unwrap outer windows. */
@@ -603,6 +605,78 @@ JSCompartment::hasScriptsOnStack()
     return false;
 }
 
+static bool
+AddInnerLazyFunctionsFromScript(JSScript *script, AutoObjectVector &lazyFunctions)
+{
+    if (!script->hasObjects())
+        return true;
+    ObjectArray *objects = script->objects();
+    for (size_t i = script->innerObjectsStart(); i < objects->length; i++) {
+        JSObject *obj = objects->vector[i];
+        if (obj->is<JSFunction>() && obj->as<JSFunction>().isInterpretedLazy()) {
+            if (!lazyFunctions.append(obj))
+                return false;
+        }
+    }
+    return true;
+}
+
+static bool
+CreateLazyScriptsForCompartment(JSContext *cx)
+{
+    AutoObjectVector lazyFunctions(cx);
+
+    // Find all root lazy functions in the compartment: those which have not been
+    // compiled and which have a source object, indicating that their parent has
+    // been compiled.
+    for (gc::CellIter i(cx->zone(), JSFunction::FinalizeKind); !i.done(); i.next()) {
+        JSObject *obj = i.get<JSObject>();
+        if (obj->compartment() == cx->compartment() && obj->is<JSFunction>()) {
+            JSFunction *fun = &obj->as<JSFunction>();
+            if (fun->isInterpretedLazy()) {
+                LazyScript *lazy = fun->lazyScriptOrNull();
+                if (lazy && lazy->sourceObject() && !lazy->maybeScript()) {
+                    if (!lazyFunctions.append(fun))
+                        return false;
+                }
+            }
+        }
+    }
+
+    // Create scripts for each lazy function, updating the list of functions to
+    // process with any newly exposed inner functions in created scripts.
+    // A function cannot be delazified until its outer script exists.
+    for (size_t i = 0; i < lazyFunctions.length(); i++) {
+        JSFunction *fun = &lazyFunctions[i]->as<JSFunction>();
+
+        // lazyFunctions may have been populated with multiple functions for
+        // a lazy script.
+        if (!fun->isInterpretedLazy())
+            continue;
+
+        JSScript *script = fun->getOrCreateScript(cx);
+        if (!script)
+            return false;
+        if (!AddInnerLazyFunctionsFromScript(script, lazyFunctions))
+            return false;
+    }
+
+    // Repoint any clones of the original functions to their new script.
+    for (gc::CellIter i(cx->zone(), JSFunction::FinalizeKind); !i.done(); i.next()) {
+        JSObject *obj = i.get<JSObject>();
+        if (obj->compartment() == cx->compartment() && obj->is<JSFunction>()) {
+            JSFunction *fun = &obj->as<JSFunction>();
+            if (fun->isInterpretedLazy()) {
+                LazyScript *lazy = fun->lazyScriptOrNull();
+                if (lazy && lazy->maybeScript())
+                    fun->existingScript();
+            }
+        }
+    }
+
+    return true;
+}
+
 bool
 JSCompartment::setDebugModeFromC(JSContext *cx, bool b, AutoDebugModeGC &dmgc)
 {
@@ -626,6 +700,8 @@ JSCompartment::setDebugModeFromC(JSContext *cx, bool b, AutoDebugModeGC &dmgc)
             JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_DEBUG_NOT_IDLE);
             return false;
         }
+        if (enabledAfter && !CreateLazyScriptsForCompartment(cx))
+            return false;
     }
 
     debugModeBits = (debugModeBits & ~unsigned(DebugFromC)) | (b ? DebugFromC : 0);
@@ -677,10 +753,14 @@ JSCompartment::addDebuggee(JSContext *cx, js::GlobalObject *global)
 
 bool
 JSCompartment::addDebuggee(JSContext *cx,
-                           js::GlobalObject *global,
+                           GlobalObject *globalArg,
                            AutoDebugModeGC &dmgc)
 {
+    Rooted<GlobalObject*> global(cx, globalArg);
+
     bool wasEnabled = debugMode();
+    if (!wasEnabled && !CreateLazyScriptsForCompartment(cx))
+        return false;
     if (!debuggees.put(global)) {
         js_ReportOutOfMemory(cx);
         return false;

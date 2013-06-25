@@ -36,7 +36,7 @@ DefineStaticJSVals(JSContext* cx)
 int HandlerFamily;
 
 js::DOMProxyShadowsResult
-DOMProxyShadows(JSContext* cx, JSHandleObject proxy, JSHandleId id)
+DOMProxyShadows(JSContext* cx, JS::Handle<JSObject*> proxy, JS::Handle<jsid> id)
 {
   JS::Value v = js::GetProxyExtra(proxy, JSPROXYSLOT_EXPANDO);
   if (v.isObject()) {
@@ -132,7 +132,7 @@ DOMProxyHandler::EnsureExpandoObject(JSContext* cx, JS::Handle<JSObject*> obj)
   nsWrapperCache* cache;
   CallQueryInterface(native, &cache);
   if (expandoAndGeneration) {
-    nsContentUtils::PreserveWrapper(native, cache);
+    cache->PreserveWrapper(native);
     expandoAndGeneration->expando.setObject(*expando);
 
     return expando;

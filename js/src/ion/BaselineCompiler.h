@@ -4,8 +4,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#if !defined(jsion_baseline_compiler_h__) && defined(JS_ION)
-#define jsion_baseline_compiler_h__
+#ifndef ion_BaselineCompiler_h
+#define ion_BaselineCompiler_h
+
+#ifdef JS_ION
 
 #include "jscntxt.h"
 #include "jscompartment.h"
@@ -152,6 +154,9 @@ namespace ion {
     _(JSOP_SETCALL)            \
     _(JSOP_THROW)              \
     _(JSOP_TRY)                \
+    _(JSOP_FINALLY)            \
+    _(JSOP_GOSUB)              \
+    _(JSOP_RETSUB)             \
     _(JSOP_ENTERBLOCK)         \
     _(JSOP_ENTERLET0)          \
     _(JSOP_ENTERLET1)          \
@@ -265,5 +270,6 @@ class BaselineCompiler : public BaselineCompilerSpecific
 } // namespace ion
 } // namespace js
 
-#endif
+#endif // JS_ION
 
+#endif /* ion_BaselineCompiler_h */

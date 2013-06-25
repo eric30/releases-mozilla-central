@@ -14,39 +14,30 @@
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/PodOperations.h"
 
-#ifdef HAVE_MEMORY_H
-#include <memory.h>
-#endif
 #include <string.h>
 
 #include "jstypes.h"
 #include "jsutil.h"
-#include "jsprf.h"
 #include "jsapi.h"
 #include "jsatom.h"
 #include "jscntxt.h"
-#include "jsversion.h"
 #include "jsfun.h"
 #include "jsnum.h"
 #include "jsopcode.h"
 #include "jsscript.h"
-#include "jsautooplen.h"        // generated headers last
 
-#include "ds/LifoAlloc.h"
 #include "frontend/Parser.h"
 #include "frontend/TokenStream.h"
 #include "ion/AsmJS.h"
 #include "vm/Debugger.h"
-#include "vm/RegExpObject.h"
-#include "vm/Shape.h"
 
 #include "jsatominlines.h"
+#include "jsobjinlines.h"
 #include "jsscriptinlines.h"
 
 #include "frontend/ParseMaps-inl.h"
 #include "frontend/ParseNode-inl.h"
 #include "frontend/SharedContext-inl.h"
-#include "vm/Shape-inl.h"
 
 using namespace js;
 using namespace js::gc;
@@ -150,7 +141,7 @@ static StaticBlockObject &
 CurrentBlock(StmtInfoBCE *topStmt)
 {
     JS_ASSERT(topStmt->type == STMT_BLOCK || topStmt->type == STMT_SWITCH);
-    JS_ASSERT(topStmt->blockObj->isStaticBlock());
+    JS_ASSERT(topStmt->blockObj->is<StaticBlockObject>());
     return *topStmt->blockObj;
 }
 
@@ -285,7 +276,7 @@ const char js_with_statement_str[] = "with statement";
 const char js_finally_block_str[]  = "finally block";
 const char js_script_str[]         = "script";
 
-static const char *statementName[] = {
+static const char * const statementName[] = {
     "label statement",       /* LABEL */
     "if statement",          /* IF */
     "else statement",        /* ELSE */
@@ -862,10 +853,10 @@ EmitAliasedVarOp(JSContext *cx, JSOp op, ParseNode *pn, BytecodeEmitter *bce)
          */
         for (unsigned i = pn->pn_cookie.level(); i; i--) {
             skippedScopes += ClonedBlockDepth(bceOfDef);
-            JSFunction *funOfDef = bceOfDef->sc->asFunctionBox()->function();
-            if (funOfDef->isHeavyweight()) {
+            FunctionBox *funbox = bceOfDef->sc->asFunctionBox();
+            if (funbox->isHeavyweight()) {
                 skippedScopes++;
-                if (funOfDef->isNamedLambda())
+                if (funbox->function()->isNamedLambda())
                     skippedScopes++;
             }
             bceOfDef = bceOfDef->parent;
@@ -1055,7 +1046,7 @@ EmitEnterBlock(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn, JSOp op)
     if (!EmitObjectOp(cx, pn->pn_objbox, op, bce))
         return false;
 
-    Rooted<StaticBlockObject*> blockObj(cx, &pn->pn_objbox->object->asStaticBlock());
+    Rooted<StaticBlockObject*> blockObj(cx, &pn->pn_objbox->object->as<StaticBlockObject>());
 
     int depth = bce->stackDepth -
                 (blockObj->slotCount() + ((op == JSOP_ENTERLET1) ? 1 : 0));
@@ -1128,13 +1119,24 @@ TryConvertFreeName(BytecodeEmitter *bce, ParseNode *pn)
      * resolving upvar accesses within the inner function.
      */
     if (bce->emitterMode == BytecodeEmitter::LazyFunction) {
+        // The only statements within a lazy function which can push lexical
+        // scopes are try/catch blocks. Use generic ops in this case.
+        for (StmtInfoBCE *stmt = bce->topStmt; stmt; stmt = stmt->down) {
+            switch (stmt->type) {
+              case STMT_TRY:
+              case STMT_FINALLY:
+                return true;
+              default:;
+            }
+        }
+
         size_t hops = 0;
         FunctionBox *funbox = bce->sc->asFunctionBox();
         if (funbox->hasExtensibleScope())
             return false;
-        if (funbox->function()->atom() == pn->pn_atom)
+        if (funbox->function()->isNamedLambda() && funbox->function()->atom() == pn->pn_atom)
             return false;
-        if (funbox->function()->isHeavyweight()) {
+        if (funbox->isHeavyweight()) {
             hops++;
             if (funbox->function()->isNamedLambda())
                 hops++;
@@ -1144,6 +1146,10 @@ TryConvertFreeName(BytecodeEmitter *bce, ParseNode *pn)
         RootedObject outerScope(bce->sc->context, bce->script->enclosingStaticScope());
         for (StaticScopeIter ssi(bce->sc->context, outerScope); !ssi.done(); ssi++) {
             if (ssi.type() != StaticScopeIter::FUNCTION) {
+                if (ssi.type() == StaticScopeIter::BLOCK) {
+                    // Use generic ops if a catch block is encountered.
+                    return false;
+                }
                 if (ssi.hasDynamicScopeObject())
                     hops++;
                 continue;
@@ -1383,7 +1389,7 @@ BindNameToSlotHelper(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
         if (dn->pn_cookie.level() != bce->script->staticLevel)
             return true;
 
-        RootedFunction fun(cx, bce->sc->asFunctionBox()->function());
+        DebugOnly<JSFunction *> fun = bce->sc->asFunctionBox()->function();
         JS_ASSERT(fun->isLambda());
         JS_ASSERT(pn->pn_atom == fun->atom());
 
@@ -1411,7 +1417,7 @@ BindNameToSlotHelper(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
          * heavyweight, ensuring that the function name is represented in
          * the scope chain so that assignment will throw a TypeError.
          */
-        if (!fun->isHeavyweight()) {
+        if (!bce->sc->asFunctionBox()->isHeavyweight()) {
             op = JSOP_CALLEE;
             pn->pn_dflags |= PND_CONST;
         }
@@ -1710,7 +1716,7 @@ BytecodeEmitter::needsImplicitThis()
     } else {
         JSObject *scope = sc->asGlobalSharedContext()->scopeChain();
         while (scope) {
-            if (scope->isWith())
+            if (scope->is<WithObject>())
                 return true;
             scope = scope->enclosingScope();
         }
@@ -2029,19 +2035,15 @@ EmitElemOperands(JSContext *cx, ParseNode *pn, JSOp op, BytecodeEmitter *bce)
          */
         left = pn->maybeExpr();
         if (!left) {
-            left = NullaryNode::create(PNK_STRING, &bce->parser->handler);
+            left = bce->parser->handler.new_<NullaryNode>(
+                PNK_STRING, JSOP_BINDNAME, pn->pn_pos, pn->pn_atom);
             if (!left)
                 return false;
-            left->setOp(JSOP_BINDNAME);
-            left->pn_pos = pn->pn_pos;
-            left->pn_atom = pn->pn_atom;
         }
-        right = NullaryNode::create(PNK_STRING, &bce->parser->handler);
+        right = bce->parser->handler.new_<NullaryNode>(
+            PNK_STRING, JSOP_STRING, pn->pn_pos, pn->pn_atom);
         if (!right)
             return false;
-        right->setOp(JSOP_STRING);
-        right->pn_pos = pn->pn_pos;
-        right->pn_atom = pn->pn_atom;
     } else {
         JS_ASSERT(pn->isArity(PN_BINARY));
         left = pn->pn_left;
@@ -2197,7 +2199,7 @@ EmitSwitch(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
      */
     uint32_t blockObjCount = 0;
     if (pn2->isKind(PNK_LEXICALSCOPE)) {
-        blockObjCount = pn2->pn_objbox->object->asStaticBlock().slotCount();
+        blockObjCount = pn2->pn_objbox->object->as<StaticBlockObject>().slotCount();
         for (uint32_t i = 0; i < blockObjCount; ++i) {
             if (Emit1(cx, bce, JSOP_UNDEFINED) < 0)
                 return false;
@@ -2211,7 +2213,7 @@ EmitSwitch(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
 
 #if JS_HAS_BLOCK_SCOPE
     if (pn2->isKind(PNK_LEXICALSCOPE)) {
-        PushBlockScopeBCE(bce, &stmtInfo, pn2->pn_objbox->object->asStaticBlock(), -1);
+        PushBlockScopeBCE(bce, &stmtInfo, pn2->pn_objbox->object->as<StaticBlockObject>(), -1);
         stmtInfo.type = STMT_SWITCH;
         if (!EmitEnterBlock(cx, bce, pn2, JSOP_ENTERLET1))
             return false;
@@ -2571,7 +2573,7 @@ frontend::EmitFunctionScript(JSContext *cx, BytecodeEmitter *bce, ParseNode *bod
         !funbox->isGenerator();
     if (runOnce) {
         bce->switchToProlog();
-        if (!Emit1(cx, bce, JSOP_RUNONCE) < 0)
+        if (Emit1(cx, bce, JSOP_RUNONCE) < 0)
             return false;
         bce->switchToMain();
     }
@@ -2622,7 +2624,7 @@ MaybeEmitVarDecl(JSContext *cx, BytecodeEmitter *bce, JSOp prologOp, ParseNode *
     }
 
     if (JOF_OPTYPE(pn->getOp()) == JOF_ATOM &&
-        (!bce->sc->isFunctionBox() || bce->sc->asFunctionBox()->function()->isHeavyweight()))
+        (!bce->sc->isFunctionBox() || bce->sc->asFunctionBox()->isHeavyweight()))
     {
         bce->switchToProlog();
         if (!UpdateSourceCoordNotes(cx, bce, pn->pn_pos.begin))
@@ -2676,7 +2678,7 @@ EmitDestructuringDecls(JSContext *cx, BytecodeEmitter *bce, JSOp prologOp, Parse
 
     if (pn->isKind(PNK_ARRAY)) {
         for (pn2 = pn->pn_head; pn2; pn2 = pn2->pn_next) {
-            if (pn2->isKind(PNK_COMMA))
+            if (pn2->isKind(PNK_ELISION))
                 continue;
             emitter = (pn2->isKind(PNK_NAME))
                       ? EmitDestructuringDecl
@@ -2896,8 +2898,8 @@ EmitDestructuringOpsHelper(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn,
             JS_ASSERT(bce->stackDepth >= stackDepth + 1);
         }
 
-        /* Nullary comma node makes a hole in the array destructurer. */
-        if (pn3->isKind(PNK_COMMA) && pn3->isArity(PN_NULLARY)) {
+        /* Elision node makes a hole in the array destructurer. */
+        if (pn3->isKind(PNK_ELISION)) {
             JS_ASSERT(pn->isKind(PNK_ARRAY));
             JS_ASSERT(pn2 == pn3);
             if (Emit1(cx, bce, JSOP_POP) < 0)
@@ -2972,7 +2974,7 @@ EmitGroupAssignment(JSContext *cx, BytecodeEmitter *bce, JSOp prologOp,
         }
 
         /* MaybeEmitGroupAssignment won't call us if rhs is holey. */
-        JS_ASSERT(!(pn->isKind(PNK_COMMA) && pn->isArity(PN_NULLARY)));
+        JS_ASSERT(!pn->isKind(PNK_ELISION));
         if (!EmitTree(cx, bce, pn))
             return false;
         ++limit;
@@ -2989,7 +2991,7 @@ EmitGroupAssignment(JSContext *cx, BytecodeEmitter *bce, JSOp prologOp,
         if (!EmitUnaliasedVarOp(cx, JSOP_GETLOCAL, slot, bce))
             return false;
 
-        if (pn->isKind(PNK_COMMA) && pn->isArity(PN_NULLARY)) {
+        if (pn->isKind(PNK_ELISION)) {
             if (Emit1(cx, bce, JSOP_POP) < 0)
                 return false;
         } else {
@@ -3819,7 +3821,7 @@ EmitTry(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
              * guardJump at the next catch (the guard mismatch case).
              */
             JS_ASSERT(pn3->isKind(PNK_LEXICALSCOPE));
-            count = pn3->pn_objbox->object->asStaticBlock().slotCount();
+            count = pn3->pn_objbox->object->as<StaticBlockObject>().slotCount();
             if (!EmitTree(cx, bce, pn3))
                 return false;
 
@@ -4045,7 +4047,7 @@ EmitLet(JSContext *cx, BytecodeEmitter *bce, ParseNode *pnLet)
     JS_ASSERT(varList->isArity(PN_LIST));
     ParseNode *letBody = pnLet->pn_right;
     JS_ASSERT(letBody->isLet() && letBody->isKind(PNK_LEXICALSCOPE));
-    Rooted<StaticBlockObject*> blockObj(cx, &letBody->pn_objbox->object->asStaticBlock());
+    Rooted<StaticBlockObject*> blockObj(cx, &letBody->pn_objbox->object->as<StaticBlockObject>());
 
     int letHeadDepth = bce->stackDepth;
 
@@ -4093,7 +4095,7 @@ EmitLexicalScope(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
 
     StmtInfoBCE stmtInfo(cx);
     ObjectBox *objbox = pn->pn_objbox;
-    StaticBlockObject &blockObj = objbox->object->asStaticBlock();
+    StaticBlockObject &blockObj = objbox->object->as<StaticBlockObject>();
     size_t slots = blockObj.slotCount();
     PushBlockScopeBCE(bce, &stmtInfo, blockObj, bce->offset());
 
@@ -4138,7 +4140,8 @@ EmitForIn(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn, ptrdiff_t top)
     bool letDecl = pn1 && pn1->isKind(PNK_LEXICALSCOPE);
     JS_ASSERT_IF(letDecl, pn1->isLet());
 
-    Rooted<StaticBlockObject*> blockObj(cx, letDecl ? &pn1->pn_objbox->object->asStaticBlock() : NULL);
+    Rooted<StaticBlockObject*>
+        blockObj(cx, letDecl ? &pn1->pn_objbox->object->as<StaticBlockObject>() : NULL);
     uint32_t blockObjCount = blockObj ? blockObj->slotCount() : 0;
 
     if (letDecl) {
@@ -4491,8 +4494,12 @@ EmitFunc(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
         return false;
 
     if (fun->isInterpretedLazy()) {
-        if (!fun->lazyScript()->parent())
-            fun->lazyScript()->initParent(bce->script);
+        if (!fun->lazyScript()->sourceObject()) {
+            JSObject *scope = bce->blockChain;
+            if (!scope && bce->sc->isFunctionBox())
+                scope = bce->sc->asFunctionBox()->function();
+            fun->lazyScript()->setParent(scope, bce->script->sourceObject(), bce->script->originPrincipals);
+        }
     } else {
         SharedContext *outersc = bce->sc;
 
@@ -4557,6 +4564,9 @@ EmitFunc(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
             /* We measured the max scope depth when we parsed the function. */
             if (!EmitFunctionScript(cx, &bce2, pn->pn_body))
                 return false;
+
+            if (funbox->usesArguments && funbox->usesApply)
+                script->usesArgumentsAndApply = true;
         }
     }
 
@@ -5264,16 +5274,14 @@ EmitIncOrDec(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
  * the comment on EmitSwitch.
  */
 MOZ_NEVER_INLINE static bool
-EmitLabel(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
+EmitLabeledStatement(JSContext *cx, BytecodeEmitter *bce, const LabeledStatement *pn)
 {
     /*
      * Emit a JSOP_LABEL instruction. The argument is the offset to the statement
      * following the labeled statement.
      */
-    JSAtom *atom = pn->pn_atom;
-
     jsatomid index;
-    if (!bce->makeAtomIndex(atom, &index))
+    if (!bce->makeAtomIndex(pn->label(), &index))
         return false;
 
     ptrdiff_t top = EmitJump(cx, bce, JSOP_LABEL, 0);
@@ -5283,8 +5291,8 @@ EmitLabel(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
     /* Emit code for the labeled statement. */
     StmtInfoBCE stmtInfo(cx);
     PushStatementBCE(bce, &stmtInfo, STMT_LABEL, bce->offset());
-    stmtInfo.label = atom;
-    if (!EmitTree(cx, bce, pn->expr()))
+    stmtInfo.label = pn->label();
+    if (!EmitTree(cx, bce, pn->statement()))
         return false;
     if (!PopStatementBCE(cx, bce))
         return false;
@@ -5527,7 +5535,7 @@ EmitArray(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
     if (nspread && !EmitNumberOp(cx, 0, bce))
         return false;
     for (atomIndex = 0; pn2; atomIndex++, pn2 = pn2->pn_next) {
-        if (pn2->isKind(PNK_COMMA) && pn2->isArity(PN_NULLARY)) {
+        if (pn2->isKind(PNK_ELISION)) {
             if (Emit1(cx, bce, JSOP_HOLE) < 0)
                 return false;
         } else {
@@ -5816,8 +5824,8 @@ frontend::EmitTree(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
         ok = EmitStatement(cx, bce, pn);
         break;
 
-      case PNK_COLON:
-        ok = EmitLabel(cx, bce, pn);
+      case PNK_LABEL:
+        ok = EmitLabeledStatement(cx, bce, &pn->as<LabeledStatement>());
         break;
 
       case PNK_COMMA:
@@ -6005,8 +6013,7 @@ frontend::EmitTree(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
         break;
 
       case PNK_REGEXP:
-        JS_ASSERT(pn->isOp(JSOP_REGEXP));
-        ok = EmitRegExp(cx, bce->regexpList.add(pn->pn_objbox), bce);
+        ok = EmitRegExp(cx, bce->regexpList.add(pn->as<RegExpLiteral>().objbox()), bce);
         break;
 
       case PNK_TRUE:
@@ -6405,7 +6412,7 @@ CGConstList::finish(ConstArray *array)
  * We should try to get rid of offsetBias (always 0 or 1, where 1 is
  * JSOP_{NOP,POP}_LENGTH), which is used only by SRC_FOR.
  */
-JS_FRIEND_DATA(JSSrcNoteSpec) js_SrcNoteSpec[] = {
+const JSSrcNoteSpec js_SrcNoteSpec[] = {
 /*  0 */ {"null",           0},
 
 /*  1 */ {"if",             0},

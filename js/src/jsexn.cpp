@@ -9,7 +9,6 @@
  */
 #include "jsexn.h"
 
-#include <stdlib.h>
 #include <string.h>
 
 #include "mozilla/PodOperations.h"
@@ -19,7 +18,6 @@
 #include "jsutil.h"
 #include "jsapi.h"
 #include "jscntxt.h"
-#include "jsversion.h"
 #include "jsfun.h"
 #include "jsnum.h"
 #include "jsobj.h"
@@ -598,7 +596,7 @@ Exception(JSContext *cx, unsigned argc, Value *vp)
         lineno = iter.done() ? 0 : PCToLineNumber(script, iter.pc(), &column);
     }
 
-    int exnType = args.callee().toFunction()->getExtendedSlot(0).toInt32();
+    int exnType = args.callee().as<JSFunction>().getExtendedSlot(0).toInt32();
     if (!InitExnPrivate(cx, obj, message, filename, lineno, column, NULL, exnType))
         return false;
 
@@ -832,10 +830,10 @@ InitErrorClass(JSContext *cx, Handle<GlobalObject*> global, int type, HandleObje
 JSObject *
 js_InitExceptionClasses(JSContext *cx, HandleObject obj)
 {
-    JS_ASSERT(obj->isGlobal());
+    JS_ASSERT(obj->is<GlobalObject>());
     JS_ASSERT(obj->isNative());
 
-    Rooted<GlobalObject*> global(cx, &obj->asGlobal());
+    Rooted<GlobalObject*> global(cx, &obj->as<GlobalObject>());
 
     RootedObject objectProto(cx, global->getOrCreateObjectPrototype(cx));
     if (!objectProto)
@@ -892,7 +890,7 @@ js::GetErrorTypeName(JSContext* cx, int16_t exnType)
 
 #if defined ( DEBUG_mccabe ) && defined ( PRINTNAMES )
 /* For use below... get character strings for error name and exception name */
-static struct exnname { char *name; char *exception; } errortoexnname[] = {
+static const struct exnname { char *name; char *exception; } errortoexnname[] = {
 #define MSG_DEF(name, number, count, exception, format) \
     {#name, #exception},
 #include "js.msg"

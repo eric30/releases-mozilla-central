@@ -676,7 +676,7 @@ ICStubCompiler::emitPostWriteBarrierSlot(MacroAssembler &masm, Register obj, Reg
 static bool
 IsTopFrameConstructing(JSContext *cx)
 {
-    JS_ASSERT(cx->mainThread().currentlyRunningInJit());
+    JS_ASSERT(cx->currentlyRunningInJit());
     JitActivationIterator activations(cx->runtime());
     IonFrameIterator iter(activations);
     JS_ASSERT(iter.type() == IonFrame_Exit);
@@ -1316,13 +1316,16 @@ ICTypeMonitor_TypeObject::Compiler::generateStubCode(MacroAssembler &masm)
 
 bool
 ICUpdatedStub::addUpdateStubForValue(JSContext *cx, HandleScript script, HandleObject obj,
-                                     jsid id, HandleValue val)
+                                     HandleId id, HandleValue val)
 {
     if (numOptimizedStubs_ >= MAX_OPTIMIZED_STUBS) {
         // TODO: if the TypeSet becomes unknown or has the AnyObject type,
         // replace stubs with a single stub to handle these.
         return true;
     }
+
+    if (!obj->getType(cx))
+        return false;
 
     types::EnsureTrackPropertyTypes(cx, obj, id);
 
@@ -2465,6 +2468,9 @@ DoBinaryArithFallback(JSContext *cx, BaselineFrame *frame, ICBinaryArith_Fallbac
         return false;
     }
 
+    if (ret.isDouble())
+        stub->setSawDoubleResult();
+
     // Check to see if a new stub should be generated.
     if (stub->numOptimizedStubs() >= ICBinaryArith_Fallback::MAX_OPTIMIZED_STUBS) {
         // TODO: Discard all stubs in this IC and replace with inert megamorphic stub.
@@ -2546,9 +2552,10 @@ DoBinaryArithFallback(JSContext *cx, BaselineFrame *frame, ICBinaryArith_Fallbac
         }
     }
 
-    // TODO: unlink previous !allowDouble stub.
     if (lhs.isInt32() && rhs.isInt32()) {
         bool allowDouble = ret.isDouble();
+        if (allowDouble)
+            stub->unlinkStubsWithKind(cx, ICStub::BinaryArith_Int32);
         IonSpew(IonSpew_BaselineIC, "  Generating %s(Int32, Int32%s) stub", js_CodeName[op],
                 allowDouble ? " => Double" : "");
         ICBinaryArith_Int32::Compiler compilerInt32(cx, op, allowDouble);
@@ -2966,6 +2973,9 @@ DoUnaryArithFallback(JSContext *cx, BaselineFrame *frame, ICUnaryArith_Fallback 
         return false;
     }
 
+    if (res.isDouble())
+        stub->setSawDoubleResult();
+
     if (stub->numOptimizedStubs() >= ICUnaryArith_Fallback::MAX_OPTIMIZED_STUBS) {
         // TODO: Discard/replace stubs.
         return true;
@@ -3279,10 +3289,10 @@ IsCacheableGetPropCall(JSObject *obj, JSObject *holder, Shape *shape, bool *isSc
     if (!shape->hasGetterValue())
         return false;
 
-    if (!shape->getterValue().isObject() || !shape->getterObject()->isFunction())
+    if (!shape->getterValue().isObject() || !shape->getterObject()->is<JSFunction>())
         return false;
 
-    JSFunction *func = shape->getterObject()->toFunction();
+    JSFunction *func = &shape->getterObject()->as<JSFunction>();
     if (func->isNative()) {
         *isScripted = false;
         return true;
@@ -3394,10 +3404,10 @@ IsCacheableSetPropCall(JSObject *obj, JSObject *holder, Shape *shape, bool *isSc
     if (!shape->hasSetterValue())
         return false;
 
-    if (!shape->setterValue().isObject() || !shape->setterObject()->isFunction())
+    if (!shape->setterValue().isObject() || !shape->setterObject()->is<JSFunction>())
         return false;
 
-    JSFunction *func = shape->setterObject()->toFunction();
+    JSFunction *func = &shape->setterObject()->as<JSFunction>();
     if (func->isNative()) {
         *isScripted = false;
         return true;
@@ -3529,9 +3539,9 @@ TryAttachGetElemStub(JSContext *cx, HandleScript script, ICGetElem_Fallback *stu
     RootedObject obj(cx, &lhs.toObject());
 
     // Check for ArgumentsObj[int] accesses
-    if (obj->isArguments() && rhs.isInt32()) {
+    if (obj->is<ArgumentsObject>() && rhs.isInt32()) {
         ICGetElem_Arguments::Which which = ICGetElem_Arguments::Normal;
-        if (obj->isStrictArguments())
+        if (obj->is<StrictArgumentsObject>())
             which = ICGetElem_Arguments::Strict;
         if (!ArgumentsGetElemStubExists(stub, which)) {
             IonSpew(IonSpew_BaselineIC, "  Generating GetElem(ArgsObj[Int32]) stub");
@@ -3923,7 +3933,7 @@ ICGetElem_Arguments::Compiler::generateStubCode(MacroAssembler &masm)
               which_ == ICGetElem_Arguments::Normal);
 
     bool isStrict = which_ == ICGetElem_Arguments::Strict;
-    Class *clasp = isStrict ? &StrictArgumentsObjectClass : &NormalArgumentsObjectClass;
+    Class *clasp = isStrict ? &StrictArgumentsObject::class_ : &NormalArgumentsObject::class_;
 
     GeneralRegisterSet regs(availableGeneralRegs(2));
     Register scratchReg = regs.takeAny();
@@ -4212,7 +4222,7 @@ DoSetElemFallback(JSContext *cx, BaselineFrame *frame, ICSetElem_Fallback *stub,
                 ICUpdatedStub *denseStub = compiler.getStub(compiler.getStubSpace(script));
                 if (!denseStub)
                     return false;
-                if (!denseStub->addUpdateStubForValue(cx, script, obj, JSID_VOID, rhs))
+                if (!denseStub->addUpdateStubForValue(cx, script, obj, JS::JSID_VOIDHANDLE, rhs))
                     return false;
 
                 stub->addNewStub(denseStub);
@@ -4226,7 +4236,7 @@ DoSetElemFallback(JSContext *cx, BaselineFrame *frame, ICSetElem_Fallback *stub,
                 ICUpdatedStub *denseStub = compiler.getStub(compiler.getStubSpace(script));
                 if (!denseStub)
                     return false;
-                if (!denseStub->addUpdateStubForValue(cx, script, obj, JSID_VOID, rhs))
+                if (!denseStub->addUpdateStubForValue(cx, script, obj, JS::JSID_VOIDHANDLE, rhs))
                     return false;
 
                 stub->addNewStub(denseStub);
@@ -4778,7 +4788,7 @@ static bool
 TryAttachGlobalNameStub(JSContext *cx, HandleScript script, ICGetName_Fallback *stub,
                         HandleObject global, HandlePropertyName name)
 {
-    JS_ASSERT(global->isGlobal());
+    JS_ASSERT(global->is<GlobalObject>());
 
     RootedId id(cx, NameToId(name));
 
@@ -4816,14 +4826,14 @@ TryAttachScopeNameStub(JSContext *cx, HandleScript script, ICGetName_Fallback *s
         if (!shapes.append(scopeChain->lastProperty()))
             return false;
 
-        if (scopeChain->isGlobal()) {
+        if (scopeChain->is<GlobalObject>()) {
             shape = scopeChain->nativeLookup(cx, id);
             if (shape)
                 break;
             return true;
         }
 
-        if (!scopeChain->isScope() || scopeChain->isWith())
+        if (!scopeChain->is<ScopeObject>() || scopeChain->is<WithObject>())
             return true;
 
         // Check for an 'own' property on the scope. There is no need to
@@ -5189,11 +5199,11 @@ TryAttachLengthStub(JSContext *cx, HandleScript script, ICGetProp_Fallback *stub
         return true;
     }
 
-    if (obj->isArguments() && res.isInt32()) {
+    if (obj->is<ArgumentsObject>() && res.isInt32()) {
         IonSpew(IonSpew_BaselineIC, "  Generating GetProp(ArgsObj.length %s) stub",
-                obj->isStrictArguments() ? "Strict" : "Normal");
+                obj->is<StrictArgumentsObject>() ? "Strict" : "Normal");
         ICGetProp_ArgumentsLength::Which which = ICGetProp_ArgumentsLength::Normal;
-        if (obj->isStrictArguments())
+        if (obj->is<StrictArgumentsObject>())
             which = ICGetProp_ArgumentsLength::Strict;
         ICGetProp_ArgumentsLength::Compiler compiler(cx, which);
         ICStub *newStub = compiler.getStub(compiler.getStubSpace(script));
@@ -5287,7 +5297,7 @@ TryAttachNativeGetPropStub(JSContext *cx, HandleScript script, jsbytecode *pc,
 
     // Try handling scripted getters.
     if (cacheableCall && isScripted && !isDOMProxy) {
-        RootedFunction callee(cx, shape->getterObject()->toFunction());
+        RootedFunction callee(cx, &shape->getterObject()->as<JSFunction>());
         JS_ASSERT(obj != holder);
         JS_ASSERT(callee->hasScript());
 
@@ -5307,7 +5317,7 @@ TryAttachNativeGetPropStub(JSContext *cx, HandleScript script, jsbytecode *pc,
 
     // Try handling JSNative getters.
     if (cacheableCall && !isScripted) {
-        RootedFunction callee(cx, shape->getterObject()->toFunction());
+        RootedFunction callee(cx, &shape->getterObject()->as<JSFunction>());
         JS_ASSERT(obj != holder);
         JS_ASSERT(callee->isNative());
 
@@ -6112,7 +6122,7 @@ ICGetProp_ArgumentsLength::Compiler::generateStubCode(MacroAssembler &masm)
               which_ == ICGetProp_ArgumentsLength::Normal);
 
     bool isStrict = which_ == ICGetProp_ArgumentsLength::Strict;
-    Class *clasp = isStrict ? &StrictArgumentsObjectClass : &NormalArgumentsObjectClass;
+    Class *clasp = isStrict ? &StrictArgumentsObject::class_ : &NormalArgumentsObject::class_;
 
     Register scratchReg = R1.scratchReg();
 
@@ -6217,7 +6227,7 @@ TryAttachSetPropStub(JSContext *cx, HandleScript script, jsbytecode *pc, ICSetPr
 
     // Try handling scripted setters.
     if (cacheableCall && isScripted) {
-        RootedFunction callee(cx, shape->setterObject()->toFunction());
+        RootedFunction callee(cx, &shape->setterObject()->as<JSFunction>());
         JS_ASSERT(obj != holder);
         JS_ASSERT(callee->hasScript());
 
@@ -6236,7 +6246,7 @@ TryAttachSetPropStub(JSContext *cx, HandleScript script, jsbytecode *pc, ICSetPr
 
     // Try handling JSNative setters.
     if (cacheableCall && !isScripted) {
-        RootedFunction callee(cx, shape->setterObject()->toFunction());
+        RootedFunction callee(cx, &shape->setterObject()->as<JSFunction>());
         JS_ASSERT(obj != holder);
         JS_ASSERT(callee->isNative());
 
@@ -6292,7 +6302,7 @@ DoSetPropFallback(JSContext *cx, BaselineFrame *frame, ICSetProp_Fallback *stub,
         if (!SetNameOperation(cx, script, pc, obj, rhs))
             return false;
     } else if (op == JSOP_SETALIASEDVAR) {
-        obj->asScope().setAliasedVar(cx, pc, name, rhs);
+        obj->as<ScopeObject>().setAliasedVar(cx, pc, name, rhs);
     } else if (script->strict) {
         if (!js::SetProperty<true>(cx, obj, id, rhs))
             return false;
@@ -6778,9 +6788,9 @@ TryAttachFunApplyStub(JSContext *cx, ICCall_Fallback *stub, HandleScript script,
     if (argc != 2)
         return true;
 
-    if (!thisv.isObject() || !thisv.toObject().isFunction())
+    if (!thisv.isObject() || !thisv.toObject().is<JSFunction>())
         return true;
-    RootedFunction target(cx, thisv.toObject().toFunction());
+    RootedFunction target(cx, &thisv.toObject().as<JSFunction>());
 
     // right now, only handle situation where second argument is |arguments|
     if (argv[1].isMagic(JS_OPTIMIZED_ARGUMENTS) && !script->needsArgsObj()) {
@@ -6826,10 +6836,10 @@ TryAttachCallStub(JSContext *cx, ICCall_Fallback *stub, HandleScript script, jsb
         return true;
 
     RootedObject obj(cx, &callee.toObject());
-    if (!obj->isFunction())
+    if (!obj->is<JSFunction>())
         return true;
 
-    RootedFunction fun(cx, obj->toFunction());
+    RootedFunction fun(cx, &obj->as<JSFunction>());
 
     if (fun->hasScript()) {
         // Never attach optimized scripted call stubs for JSOP_FUNAPPLY.
@@ -7071,7 +7081,8 @@ ICCallStubCompiler::guardFunApply(MacroAssembler &masm, GeneralRegisterSet regs,
     masm.branchTestObject(Assembler::NotEqual, val, failure);
     Register callee = masm.extractObject(val, ExtractTemp1);
 
-    masm.branchTestObjClass(Assembler::NotEqual, callee, regs.getAny(), &FunctionClass, failure);
+    masm.branchTestObjClass(Assembler::NotEqual, callee, regs.getAny(), &JSFunction::class_,
+                            failure);
     masm.loadPtr(Address(callee, JSFunction::offsetOfNativeOrScript()), callee);
 
     masm.branchPtr(Assembler::NotEqual, callee, ImmWord((void*) js_fun_apply), failure);
@@ -7086,7 +7097,8 @@ ICCallStubCompiler::guardFunApply(MacroAssembler &masm, GeneralRegisterSet regs,
     regs.add(val);
     regs.takeUnchecked(target);
 
-    masm.branchTestObjClass(Assembler::NotEqual, target, regs.getAny(), &FunctionClass, failure);
+    masm.branchTestObjClass(Assembler::NotEqual, target, regs.getAny(), &JSFunction::class_,
+                            failure);
 
     if (checkNative) {
         masm.branchIfInterpreted(target, failure);
@@ -7240,7 +7252,8 @@ ICCallScriptedCompiler::generateStubCode(MacroAssembler &masm)
 
     // Ensure callee is a function.
     Register callee = masm.extractObject(R1, ExtractTemp0);
-    masm.branchTestObjClass(Assembler::NotEqual, callee, regs.getAny(), &FunctionClass, &failure);
+    masm.branchTestObjClass(Assembler::NotEqual, callee, regs.getAny(), &JSFunction::class_,
+                            &failure);
 
     // If calling a specific script, check if the script matches.  Otherwise, ensure that
     // callee function is scripted.  Leave calleeScript in |callee| reg.
@@ -7831,7 +7844,9 @@ DoIteratorMoreFallback(JSContext *cx, BaselineFrame *frame, ICIteratorMore_Fallb
         return false;
     res.setBoolean(cond);
 
-    if (iterValue.toObject().isPropertyIterator() && !stub->hasStub(ICStub::IteratorMore_Native)) {
+    if (iterValue.toObject().is<PropertyIteratorObject>() &&
+        !stub->hasStub(ICStub::IteratorMore_Native))
+    {
         ICIteratorMore_Native::Compiler compiler(cx);
         ICStub *newStub = compiler.getStub(compiler.getStubSpace(frame->script()));
         if (!newStub)
@@ -7909,7 +7924,9 @@ DoIteratorNextFallback(JSContext *cx, BaselineFrame *frame, ICIteratorNext_Fallb
     if (!IteratorNext(cx, iteratorObject, res))
         return false;
 
-    if (iteratorObject->isPropertyIterator() && !stub->hasStub(ICStub::IteratorNext_Native)) {
+    if (iteratorObject->is<PropertyIteratorObject>() &&
+        !stub->hasStub(ICStub::IteratorNext_Native))
+    {
         ICIteratorNext_Native::Compiler compiler(cx);
         ICStub *newStub = compiler.getStub(compiler.getStubSpace(frame->script()));
         if (!newStub)
@@ -8178,6 +8195,111 @@ ICRest_Fallback::Compiler::generateStubCode(MacroAssembler &masm)
     masm.pushBaselineFramePtr(BaselineFrameReg, R0.scratchReg()); // frame pointer
 
     return tailCallVM(DoCreateRestParameterInfo, masm);
+}
+
+static bool
+DoRetSubFallback(JSContext *cx, BaselineFrame *frame, ICRetSub_Fallback *stub,
+                 HandleValue val, uint8_t **resumeAddr)
+{
+    FallbackICSpew(cx, stub, "RetSub");
+
+    // |val| is the bytecode offset where we should resume.
+
+    JS_ASSERT(val.isInt32());
+    JS_ASSERT(val.toInt32() >= 0);
+
+    JSScript *script = frame->script();
+    uint32_t offset = uint32_t(val.toInt32());
+    JS_ASSERT(offset < script->length);
+
+    *resumeAddr = script->baselineScript()->nativeCodeForPC(script, script->code + offset);
+
+    if (stub->numOptimizedStubs() >= ICRetSub_Fallback::MAX_OPTIMIZED_STUBS)
+        return true;
+
+    // Attach an optimized stub for this pc offset.
+    IonSpew(IonSpew_BaselineIC, "  Generating RetSub stub for pc offset %u", offset);
+    ICRetSub_Resume::Compiler compiler(cx, offset, *resumeAddr);
+    ICStub *optStub = compiler.getStub(compiler.getStubSpace(script));
+    if (!optStub)
+        return false;
+
+    stub->addNewStub(optStub);
+    return true;
+}
+
+typedef bool(*DoRetSubFallbackFn)(JSContext *cx, BaselineFrame *, ICRetSub_Fallback *,
+                                  HandleValue, uint8_t **);
+static const VMFunction DoRetSubFallbackInfo = FunctionInfo<DoRetSubFallbackFn>(DoRetSubFallback);
+
+typedef bool (*ThrowFn)(JSContext *, HandleValue);
+static const VMFunction ThrowInfo = FunctionInfo<ThrowFn>(js::Throw);
+
+bool
+ICRetSub_Fallback::Compiler::generateStubCode(MacroAssembler &masm)
+{
+    // If R0 is BooleanValue(true), rethrow R1.
+    Label rethrow;
+    masm.branchTestBooleanTruthy(true, R0, &rethrow);
+    {
+        // Call a stub to get the native code address for the pc offset in R1.
+        GeneralRegisterSet regs(availableGeneralRegs(0));
+        regs.take(R1);
+        regs.takeUnchecked(BaselineTailCallReg);
+
+        Register frame = regs.takeAny();
+        masm.movePtr(BaselineFrameReg, frame);
+
+        enterStubFrame(masm, regs.getAny());
+
+        masm.pushValue(R1);
+        masm.push(BaselineStubReg);
+        masm.pushBaselineFramePtr(frame, frame);
+
+        if (!callVM(DoRetSubFallbackInfo, masm))
+            return false;
+
+        leaveStubFrame(masm);
+
+        EmitChangeICReturnAddress(masm, ReturnReg);
+        EmitReturnFromIC(masm);
+    }
+
+    masm.bind(&rethrow);
+    EmitRestoreTailCallReg(masm);
+    masm.pushValue(R1);
+    return tailCallVM(ThrowInfo, masm);
+}
+
+bool
+ICRetSub_Resume::Compiler::generateStubCode(MacroAssembler &masm)
+{
+    // If R0 is BooleanValue(true), rethrow R1.
+    Label fail, rethrow;
+    masm.branchTestBooleanTruthy(true, R0, &rethrow);
+
+    // R1 is the pc offset. Ensure it matches this stub's offset.
+    Register offset = masm.extractInt32(R1, ExtractTemp0);
+    masm.branch32(Assembler::NotEqual,
+                  Address(BaselineStubReg, ICRetSub_Resume::offsetOfPCOffset()),
+                  offset,
+                  &fail);
+
+    // pc offset matches, resume at the target pc.
+    masm.loadPtr(Address(BaselineStubReg, ICRetSub_Resume::offsetOfAddr()), R0.scratchReg());
+    EmitChangeICReturnAddress(masm, R0.scratchReg());
+    EmitReturnFromIC(masm);
+
+    // Rethrow the Value stored in R1.
+    masm.bind(&rethrow);
+    EmitRestoreTailCallReg(masm);
+    masm.pushValue(R1);
+    if (!tailCallVM(ThrowInfo, masm))
+        return false;
+
+    masm.bind(&fail);
+    EmitStubGuardFailure(masm);
+    return true;
 }
 
 ICProfiler_PushFunction::ICProfiler_PushFunction(IonCode *stubCode, const char *str,

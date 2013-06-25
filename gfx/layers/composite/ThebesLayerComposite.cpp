@@ -165,8 +165,8 @@ ThebesLayerComposite::GetEffectiveResolution()
   gfxSize resolution(1, 1);
   for (ContainerLayer* parent = GetParent(); parent; parent = parent->GetParent()) {
     const FrameMetrics& metrics = parent->GetFrameMetrics();
-    resolution.width *= metrics.mResolution.width;
-    resolution.height *= metrics.mResolution.height;
+    resolution.width *= metrics.mResolution.scale;
+    resolution.height *= metrics.mResolution.scale;
   }
 
   return resolution;
@@ -199,8 +199,8 @@ ThebesLayerComposite::GetDisplayPort()
                                 metrics.mDisplayPort.height);
           displayPort.ScaleRoundOut(parentResolution.width, parentResolution.height);
       }
-      parentResolution.width /= metrics.mResolution.width;
-      parentResolution.height /= metrics.mResolution.height;
+      parentResolution.width /= metrics.mResolution.scale;
+      parentResolution.height /= metrics.mResolution.scale;
     }
     if (parent->UseIntermediateSurface()) {
       transform.PreMultiply(parent->GetTransform());
@@ -246,17 +246,16 @@ ThebesLayerComposite::GetCompositionBounds()
       // the content resolution.
       Layer* rootLayer = Manager()->GetRoot();
       const gfx3DMatrix& rootTransform = rootLayer->GetTransform();
-      float scaleX = rootTransform.GetXScale();
-      float scaleY = rootTransform.GetYScale();
+      LayerToCSSScale scale(rootTransform.GetXScale(),
+                            rootTransform.GetYScale());
 
       // Get the content document bounds, in screen-space.
       const FrameMetrics& metrics = scrollableLayer->GetFrameMetrics();
-      const LayerIntRect content = LayerIntRect::FromCSSRectRounded(metrics.mScrollableRect,
-                                                                    1 / scaleX,
-                                                                    1 / scaleY);
+      const LayerIntRect content = RoundedToInt(metrics.mScrollableRect / scale);
+      // !!! WTF. this code is just wrong. See bug 881451.
       gfx::Point scrollOffset =
-        gfx::Point((metrics.mScrollOffset.x * metrics.LayersPixelsPerCSSPixel().width) / scaleX,
-                   (metrics.mScrollOffset.y * metrics.LayersPixelsPerCSSPixel().height) / scaleY);
+        gfx::Point((metrics.mScrollOffset.x * metrics.LayersPixelsPerCSSPixel().scale) / scale.scale,
+                   (metrics.mScrollOffset.y * metrics.LayersPixelsPerCSSPixel().scale) / scale.scale);
       const nsIntPoint contentOrigin(
         content.x - NS_lround(scrollOffset.x),
         content.y - NS_lround(scrollOffset.y));

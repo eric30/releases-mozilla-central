@@ -4,13 +4,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef LifoAlloc_h__
-#define LifoAlloc_h__
+#ifndef ds_LifoAlloc_h
+#define ds_LifoAlloc_h
 
-#include "mozilla/Assertions.h"
-#include "mozilla/Attributes.h"
 #include "mozilla/DebugOnly.h"
-#include "mozilla/GuardObjects.h"
 #include "mozilla/MemoryChecking.h"
 #include "mozilla/PodOperations.h"
 #include "mozilla/TypeTraits.h"
@@ -21,8 +18,6 @@
 // thrashing, unused segments are deallocated when garbage collection occurs.
 
 #include "jsutil.h"
-
-#include "js/TemplateLib.h"
 
 namespace js {
 
@@ -413,4 +408,4 @@ class LifoAllocScope
 
 } // namespace js
 
-#endif
+#endif /* ds_LifoAlloc_h */

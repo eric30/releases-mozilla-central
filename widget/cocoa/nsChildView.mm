@@ -140,7 +140,7 @@ uint32_t nsChildView::sLastInputEventCount = 0;
 - (void)processPendingRedraws;
 
 - (void)drawRect:(NSRect)aRect inContext:(CGContextRef)aContext;
-
+- (nsIntRegion)nativeDirtyRegionWithBoundingRect:(NSRect)aRect;
 - (BOOL)isUsingMainThreadOpenGL;
 - (BOOL)isUsingOpenGL;
 - (void)drawUsingOpenGL;
@@ -1386,6 +1386,10 @@ NS_IMETHODIMP nsChildView::Invalidate(const nsIntRect &aRect)
   if (!mView || !mVisible)
     return NS_OK;
 
+  NS_ASSERTION(GetLayerManager()->GetBackendType() != LAYERS_CLIENT ||
+               Compositor::GetBackend() == LAYERS_BASIC,
+               "Shouldn't need to invalidate with accelerated OMTC layers!");
+
   if ([NSView focusView]) {
     // if a view is focussed (i.e. being drawn), then postpone the invalidate so that we
     // don't lose it.
@@ -1417,7 +1421,8 @@ nsChildView::ShouldUseOffMainThreadCompositing()
   // OMTC doesn't work with Basic Layers on OS X right now. Once it works, we'll
   // still want to disable it for certain kinds of windows (e.g. popups).
   return nsBaseWidget::ShouldUseOffMainThreadCompositing() &&
-         ComputeShouldAccelerate(mUseLayersAcceleration);
+         (ComputeShouldAccelerate(mUseLayersAcceleration) ||
+          Preferences::GetBool("layers.offmainthreadcomposition.prefer-basic", false));
 }
 
 inline uint16_t COLOR8TOCOLOR16(uint8_t color8)
@@ -2942,6 +2947,27 @@ NSEvent* gLastDragMouseDownEvent = nil;
          [(BaseWindow*)[self window] drawsContentsIntoWindowFrame];
 }
 
+- (nsIntRegion)nativeDirtyRegionWithBoundingRect:(NSRect)aRect
+{
+  nsIntRect boundingRect = mGeckoChild->CocoaPointsToDevPixels(aRect);
+  const NSRect *rects;
+  NSInteger count;
+  [[NSView focusView] getRectsBeingDrawn:&rects count:&count];
+
+  if (count > MAX_RECTS_IN_REGION) {
+    return boundingRect;
+  }
+
+  nsIntRegion region;
+  for (NSInteger i = 0; i < count; ++i) {
+    // Add the rect to the region.
+    NSRect r = [self convertRect:rects[i] fromView:[NSView focusView]];
+    region.Or(region, mGeckoChild->CocoaPointsToDevPixels(r));
+  }
+  region.And(region, boundingRect);
+  return region;
+}
+
 // The display system has told us that a portion of our view is dirty. Tell
 // gecko to paint it
 - (void)drawRect:(NSRect)aRect
@@ -2978,25 +3004,6 @@ NSEvent* gLastDragMouseDownEvent = nil;
   fprintf (stderr, "  xform in: [%f %f %f %f %f %f]\n", xform.a, xform.b, xform.c, xform.d, xform.tx, xform.ty);
 #endif
 
-  nsIntRegion region;
-  nsIntRect boundingRect = mGeckoChild->CocoaPointsToDevPixels(aRect);
-  const NSRect *rects;
-  NSInteger count, i;
-  [[NSView focusView] getRectsBeingDrawn:&rects count:&count];
-
-  CGContextClipToRects(aContext, (CGRect*)rects, count);
-
-  if (count < MAX_RECTS_IN_REGION) {
-    for (i = 0; i < count; ++i) {
-      // Add the rect to the region.
-      NSRect r = [self convertRect:rects[i] fromView:[NSView focusView]];
-      region.Or(region, mGeckoChild->CocoaPointsToDevPixels(r));
-    }
-    region.And(region, boundingRect);
-  } else {
-    region = boundingRect;
-  }
-
   if ([self isUsingOpenGL]) {
     // For Gecko-initiated repaints in OpenGL mode, drawUsingOpenGL is
     // directly called from a delayed perform callback - without going through
@@ -3012,17 +3019,18 @@ NSEvent* gLastDragMouseDownEvent = nil;
     // So we need to clear the pixel buffer contents in the corners.
     [self clearCorners];
 
-    // When our view covers the titlebar, we need to repaint the titlebar
-    // texture buffer when, for example, the window buttons are hovered.
-    // So we notify our nsChildView about any areas needing repainting.
-    mGeckoChild->NotifyDirtyRegion(region);
-
     // Do GL composition and return.
     [self drawUsingOpenGL];
     return;
   }
 
   PROFILER_LABEL("widget", "ChildView::drawRect");
+
+  // Clip to the dirty region.
+  const NSRect *rects;
+  NSInteger count;
+  [[NSView focusView] getRectsBeingDrawn:&rects count:&count];
+  CGContextClipToRects(aContext, (CGRect*)rects, count);
 
   // The CGContext that drawRect supplies us with comes with a transform that
   // scales one user space unit to one Cocoa point, which can consist of
@@ -3036,6 +3044,8 @@ NSEvent* gLastDragMouseDownEvent = nil;
   nsIntSize backingSize(viewSize.width * scale, viewSize.height * scale);
 
   CGContextSaveGState(aContext);
+
+  nsIntRegion region = [self nativeDirtyRegionWithBoundingRect:aRect];
 
   // Create Cairo objects.
   nsRefPtr<gfxQuartzSurface> targetSurface =
@@ -3301,6 +3311,18 @@ NSEvent* gLastDragMouseDownEvent = nil;
       [self performSelector:@selector(releaseWidgets:)
                  withObject:widgetArray
                  afterDelay:0];
+    }
+
+    if ([self isUsingOpenGL]) {
+      // When our view covers the titlebar, we need to repaint the titlebar
+      // texture buffer when, for example, the window buttons are hovered.
+      // So we notify our nsChildView about any areas needing repainting.
+      mGeckoChild->NotifyDirtyRegion([self nativeDirtyRegionWithBoundingRect:[self bounds]]);
+
+      if (mGeckoChild->GetLayerManager()->GetBackendType() == LAYERS_CLIENT) {
+        ClientLayerManager *manager = static_cast<ClientLayerManager*>(mGeckoChild->GetLayerManager());
+        manager->WindowOverlayChanged();
+      }
     }
 
     mGeckoChild->WillPaintWindow();

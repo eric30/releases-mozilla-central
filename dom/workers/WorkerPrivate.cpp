@@ -6,6 +6,7 @@
 
 #include "WorkerPrivate.h"
 
+#include "amIAddonManager.h"
 #include "nsIClassInfo.h"
 #include "nsIContentSecurityPolicy.h"
 #include "nsIConsoleService.h"
@@ -25,6 +26,7 @@
 #include "nsIXPConnect.h"
 #include "nsIXPCScriptNotify.h"
 #include "nsPrintfCString.h"
+#include "nsHostObjectProtocolHandler.h"
 
 #include <algorithm>
 #include "jsfriendapi.h"
@@ -528,18 +530,23 @@ class MainThreadReleaseRunnable : public nsRunnable
 {
   nsCOMPtr<nsIThread> mThread;
   nsTArray<nsCOMPtr<nsISupports> > mDoomed;
+  nsTArray<nsCString> mHostObjectURIs;
 
 public:
   MainThreadReleaseRunnable(nsCOMPtr<nsIThread>& aThread,
-                            nsTArray<nsCOMPtr<nsISupports> >& aDoomed)
+                            nsTArray<nsCOMPtr<nsISupports> >& aDoomed,
+                            nsTArray<nsCString>& aHostObjectURIs)
   {
     mThread.swap(aThread);
     mDoomed.SwapElements(aDoomed);
+    mHostObjectURIs.SwapElements(aHostObjectURIs);
   }
 
-  MainThreadReleaseRunnable(nsTArray<nsCOMPtr<nsISupports> >& aDoomed)
+  MainThreadReleaseRunnable(nsTArray<nsCOMPtr<nsISupports> >& aDoomed,
+                            nsTArray<nsCString>& aHostObjectURIs)
   {
     mDoomed.SwapElements(aDoomed);
+    mHostObjectURIs.SwapElements(aHostObjectURIs);
   }
 
   NS_IMETHOD
@@ -552,6 +559,10 @@ public:
       NS_ASSERTION(runtime, "This should never be null!");
 
       runtime->NoteIdleThread(mThread);
+    }
+
+    for (uint32_t i = 0, len = mHostObjectURIs.Length(); i < len; ++i) {
+      nsHostObjectProtocolHandler::RemoveDataEntry(mHostObjectURIs[i]);
     }
 
     return NS_OK;
@@ -591,8 +602,11 @@ public:
     nsTArray<nsCOMPtr<nsISupports> > doomed;
     mFinishedWorker->ForgetMainThreadObjects(doomed);
 
+    nsTArray<nsCString> hostObjectURIs;
+    mFinishedWorker->StealHostObjectURIs(hostObjectURIs);
+
     nsRefPtr<MainThreadReleaseRunnable> runnable =
-      new MainThreadReleaseRunnable(mThread, doomed);
+      new MainThreadReleaseRunnable(mThread, doomed, hostObjectURIs);
     if (NS_FAILED(NS_DispatchToMainThread(runnable, NS_DISPATCH_NORMAL))) {
       NS_WARNING("Failed to dispatch, going to leak!");
     }
@@ -640,8 +654,11 @@ public:
     nsTArray<nsCOMPtr<nsISupports> > doomed;
     mFinishedWorker->ForgetMainThreadObjects(doomed);
 
+    nsTArray<nsCString> hostObjectURIs;
+    mFinishedWorker->StealHostObjectURIs(hostObjectURIs);
+
     nsRefPtr<MainThreadReleaseRunnable> runnable =
-      new MainThreadReleaseRunnable(doomed);
+      new MainThreadReleaseRunnable(doomed, hostObjectURIs);
     if (NS_FAILED(NS_DispatchToCurrentThread(runnable))) {
       NS_WARNING("Failed to dispatch, going to leak!");
     }
@@ -1757,12 +1774,14 @@ class WorkerPrivate::MemoryReporter MOZ_FINAL : public nsIMemoryMultiReporter
   SharedMutex mMutex;
   WorkerPrivate* mWorkerPrivate;
   nsCString mRtPath;
+  bool mAlreadyMappedToAddon;
 
 public:
   NS_DECL_ISUPPORTS
 
   MemoryReporter(WorkerPrivate* aWorkerPrivate)
-  : mMutex(aWorkerPrivate->mMutex), mWorkerPrivate(aWorkerPrivate)
+  : mMutex(aWorkerPrivate->mMutex), mWorkerPrivate(aWorkerPrivate),
+    mAlreadyMappedToAddon(false)
   {
     aWorkerPrivate->AssertIsOnWorkerThread();
 
@@ -1794,10 +1813,14 @@ public:
   {
     AssertIsOnMainThread();
 
+    // Assumes that WorkerJSRuntimeStats will hold a reference to mRtPath,
+    // and not a copy, as TryToMapAddon() may later modify the string again.
     WorkerJSRuntimeStats rtStats(mRtPath);
 
     {
       MutexAutoLock lock(mMutex);
+
+      TryToMapAddon();
 
       if (!mWorkerPrivate ||
           !mWorkerPrivate->BlockAndCollectRuntimeStats(&rtStats)) {
@@ -1822,6 +1845,42 @@ private:
 
     NS_ASSERTION(mWorkerPrivate, "Disabled more than once!");
     mWorkerPrivate = nullptr;
+  }
+
+  // Only call this from the main thread and under mMutex lock.
+  void
+  TryToMapAddon()
+  {
+    AssertIsOnMainThread();
+    mMutex.AssertCurrentThreadOwns();
+
+    if (mAlreadyMappedToAddon || !mWorkerPrivate) {
+      return;
+    }
+
+    nsCOMPtr<nsIURI> scriptURI;
+    if (NS_FAILED(NS_NewURI(getter_AddRefs(scriptURI),
+                            mWorkerPrivate->ScriptURL()))) {
+      return;
+    }
+
+    mAlreadyMappedToAddon = true;
+
+    nsAutoCString addonId;
+    bool ok;
+    nsCOMPtr<amIAddonManager> addonManager =
+      do_GetService("@mozilla.org/addons/integration;1");
+
+    if (!addonManager ||
+        NS_FAILED(addonManager->MapURIToAddonID(scriptURI, addonId, &ok)) ||
+        !ok) {
+      return;
+    }
+
+    static const size_t explicitLength = strlen("explicit/");
+    addonId.Insert(NS_LITERAL_CSTRING("add-ons/"), 0);
+    addonId += "/";
+    mRtPath.Insert(addonId, explicitLength);
   }
 };
 
@@ -4251,6 +4310,29 @@ WorkerPrivate::AssertIsOnWorkerThread() const
   }
 }
 #endif
+
+template <class Derived>
+void
+WorkerPrivateParent<Derived>::RegisterHostObjectURI(const nsACString& aURI)
+{
+  AssertIsOnMainThread();
+  mHostObjectURIs.AppendElement(aURI);
+}
+
+template <class Derived>
+void
+WorkerPrivateParent<Derived>::UnregisterHostObjectURI(const nsACString& aURI)
+{
+  AssertIsOnMainThread();
+  mHostObjectURIs.RemoveElement(aURI);
+}
+
+template <class Derived>
+void
+WorkerPrivateParent<Derived>::StealHostObjectURIs(nsTArray<nsCString>& aArray)
+{
+  aArray.SwapElements(mHostObjectURIs);
+}
 
 WorkerCrossThreadDispatcher*
 WorkerPrivate::GetCrossThreadDispatcher()

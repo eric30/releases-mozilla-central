@@ -300,23 +300,6 @@ gfxPlatform::Init()
     sCmapDataLog = PR_NewLogModule("cmapdata");;
 #endif
 
-    bool useOffMainThreadCompositing = false;
-    useOffMainThreadCompositing = GetPrefLayersOffMainThreadCompositionEnabled() ||
-        Preferences::GetBool("browser.tabs.remote", false);
-#ifdef MOZ_X11
-    useOffMainThreadCompositing &= (PR_GetEnv("MOZ_USE_OMTC") != NULL) ||
-                                   (PR_GetEnv("MOZ_OMTC_ENABLED") != NULL);
-#endif
-
-    if (useOffMainThreadCompositing && (XRE_GetProcessType() ==
-                                        GeckoProcessType_Default)) {
-        CompositorParent::StartUp();
-        if (Preferences::GetBool("layers.async-video.enabled",false)) {
-            ImageBridgeChild::StartUp();
-        }
-
-    }
-
     /* Initialize the GfxInfo service.
      * Note: we can't call functions on GfxInfo that depend
      * on gPlatform until after it has been initialized
@@ -347,6 +330,19 @@ gfxPlatform::Init()
 #ifdef DEBUG
     mozilla::gl::GLContext::StaticInit();
 #endif
+
+    bool useOffMainThreadCompositing = GetPrefLayersOffMainThreadCompositionEnabled() ||
+        Preferences::GetBool("browser.tabs.remote", false);
+    useOffMainThreadCompositing &= GetPlatform()->SupportsOffMainThreadCompositing();
+
+    if (useOffMainThreadCompositing && (XRE_GetProcessType() ==
+                                        GeckoProcessType_Default)) {
+        CompositorParent::StartUp();
+        if (Preferences::GetBool("layers.async-video.enabled",false)) {
+            ImageBridgeChild::StartUp();
+        }
+
+    }
 
     nsresult rv;
 
@@ -1815,6 +1811,7 @@ gfxPlatform::GetOrientationSyncMillis() const
  */
 static bool sPrefLayersOffMainThreadCompositionEnabled = false;
 static bool sPrefLayersOffMainThreadCompositionTestingEnabled = false;
+static bool sPrefLayersOffMainThreadCompositionForceEnabled = false;
 static bool sPrefLayersAccelerationForceEnabled = false;
 static bool sPrefLayersAccelerationDisabled = false;
 static bool sPrefLayersPreferOpenGL = false;
@@ -1827,8 +1824,8 @@ void InitLayersAccelerationPrefs()
   {
     sPrefLayersOffMainThreadCompositionEnabled = Preferences::GetBool("layers.offmainthreadcomposition.enabled", false);
     sPrefLayersOffMainThreadCompositionTestingEnabled = Preferences::GetBool("layers.offmainthreadcomposition.testing.enabled", false);
-    sPrefLayersAccelerationForceEnabled = Preferences::GetBool("layers.acceleration.force-enabled", false) ||
-                                          Preferences::GetBool("browser.tabs.remote", false);
+    sPrefLayersOffMainThreadCompositionForceEnabled = Preferences::GetBool("layers.offmainthreadcomposition.force-enabled", false);
+    sPrefLayersAccelerationForceEnabled = Preferences::GetBool("layers.acceleration.force-enabled", false);
     sPrefLayersAccelerationDisabled = Preferences::GetBool("layers.acceleration.disabled", false);
     sPrefLayersPreferOpenGL = Preferences::GetBool("layers.prefer-opengl", false);
     sPrefLayersPreferD3D9 = Preferences::GetBool("layers.prefer-d3d9", false);
@@ -1841,7 +1838,14 @@ bool gfxPlatform::GetPrefLayersOffMainThreadCompositionEnabled()
 {
   InitLayersAccelerationPrefs();
   return sPrefLayersOffMainThreadCompositionEnabled ||
+         sPrefLayersOffMainThreadCompositionForceEnabled ||
          sPrefLayersOffMainThreadCompositionTestingEnabled;
+}
+
+bool gfxPlatform::GetPrefLayersOffMainThreadCompositionForceEnabled()
+{
+  InitLayersAccelerationPrefs();
+  return sPrefLayersOffMainThreadCompositionForceEnabled;
 }
 
 bool gfxPlatform::GetPrefLayersAccelerationForceEnabled()

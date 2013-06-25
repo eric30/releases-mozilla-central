@@ -82,12 +82,12 @@ char* xpc_CloneAllAccess()
     return (char*)nsMemory::Clone(allAccess, sizeof(allAccess));
 }
 
-char * xpc_CheckAccessList(const PRUnichar* wideName, const char* list[])
+char * xpc_CheckAccessList(const PRUnichar* wideName, const char* const list[])
 {
     nsAutoCString asciiName;
     CopyUTF16toUTF8(nsDependentString(wideName), asciiName);
 
-    for (const char** p = list; *p; p++)
+    for (const char* const* p = list; *p; p++)
         if (!strcmp(*p, asciiName.get()))
             return xpc_CloneAllAccess();
 
@@ -1329,7 +1329,7 @@ nsXPCComponents_Results::NewEnumerate(nsIXPConnectWrappedNative *wrapper,
                                       uint32_t enum_op, jsval * statep,
                                       jsid * idp, bool *_retval)
 {
-    void** iter;
+    const void** iter;
 
     switch (enum_op) {
         case JSENUMERATE_INIT:
@@ -1346,7 +1346,7 @@ nsXPCComponents_Results::NewEnumerate(nsIXPConnectWrappedNative *wrapper,
         case JSENUMERATE_NEXT:
         {
             const char* name;
-            iter = (void**) JSVAL_TO_PRIVATE(*statep);
+            iter = (const void**) JSVAL_TO_PRIVATE(*statep);
             if (nsXPCException::IterateNSResults(nullptr, &name, nullptr, iter)) {
                 JSString* idstr = JS_NewStringCopyZ(cx, name);
                 if (idstr && JS_ValueToId(cx, STRING_TO_JSVAL(idstr), idp))
@@ -1357,7 +1357,7 @@ nsXPCComponents_Results::NewEnumerate(nsIXPConnectWrappedNative *wrapper,
 
         case JSENUMERATE_DESTROY:
         default:
-            iter = (void**) JSVAL_TO_PRIVATE(*statep);
+            iter = (const void**) JSVAL_TO_PRIVATE(*statep);
             delete [] (char*) iter;
             *statep = JSVAL_NULL;
             return NS_OK;
@@ -1378,7 +1378,7 @@ nsXPCComponents_Results::NewResolve(nsIXPConnectWrappedNative *wrapper,
 
     if (JSID_IS_STRING(id) && name.encodeLatin1(cx, JSID_TO_STRING(id))) {
         const char* rv_name;
-        void* iter = nullptr;
+        const void* iter = nullptr;
         nsresult rv;
         while (nsXPCException::IterateNSResults(&rv, &rv_name, nullptr, &iter)) {
             if (!strcmp(name.ptr(), rv_name)) {
@@ -2684,10 +2684,6 @@ nsXPCComponents_Utils::LookupMethod(const JS::Value& object,
         // Enter the target compartment.
         JSAutoCompartment ac(cx, obj);
 
-        // Morph slim wrappers.
-        if (IS_SLIM_WRAPPER(obj) && !MorphSlimWrapper(cx, obj))
-            return NS_ERROR_FAILURE;
-
         // Now, try to create an Xray wrapper around the object. This won't work
         // if the object isn't Xray-able. In that case, we throw.
         JSObject *xray = WrapperFactory::WrapForSameCompartmentXray(cx, obj);
@@ -2940,13 +2936,13 @@ CreateXMLHttpRequest(JSContext *cx, unsigned argc, jsval *vp)
 }
 
 static JSBool
-sandbox_enumerate(JSContext *cx, JSHandleObject obj)
+sandbox_enumerate(JSContext *cx, HandleObject obj)
 {
     return JS_EnumerateStandardClasses(cx, obj);
 }
 
 static JSBool
-sandbox_resolve(JSContext *cx, JSHandleObject obj, JSHandleId id)
+sandbox_resolve(JSContext *cx, HandleObject obj, HandleId id)
 {
     JSBool resolved;
     return JS_ResolveStandardClass(cx, obj, id, &resolved);
@@ -2964,7 +2960,7 @@ sandbox_finalize(JSFreeOp *fop, JSObject *obj)
 }
 
 static JSBool
-sandbox_convert(JSContext *cx, JSHandleObject obj, JSType type, JSMutableHandleValue vp)
+sandbox_convert(JSContext *cx, HandleObject obj, JSType type, MutableHandleValue vp)
 {
     if (type == JSTYPE_OBJECT) {
         vp.set(OBJECT_TO_JSVAL(obj));
@@ -3130,9 +3126,9 @@ bool BindPropertyOp(JSContext *cx, Op &op, PropertyDescriptor *desc, HandleId id
 }
 
 extern JSBool
-XPC_WN_Helper_GetProperty(JSContext *cx, JSHandleObject obj, JSHandleId id, JSMutableHandleValue vp);
+XPC_WN_Helper_GetProperty(JSContext *cx, HandleObject obj, HandleId id, MutableHandleValue vp);
 extern JSBool
-XPC_WN_Helper_SetProperty(JSContext *cx, JSHandleObject obj, JSHandleId id, JSBool strict, JSMutableHandleValue vp);
+XPC_WN_Helper_SetProperty(JSContext *cx, HandleObject obj, HandleId id, JSBool strict, MutableHandleValue vp);
 
 bool
 xpc::SandboxProxyHandler::getPropertyDescriptor(JSContext *cx,
@@ -3316,7 +3312,7 @@ xpc_CreateSandboxObject(JSContext *cx, jsval *vp, nsISupports *prinOrSop, Sandbo
             // Now check what sort of thing we've got in |proto|
             JSObject *unwrappedProto = js::UncheckedUnwrap(options.proto, false);
             js::Class *unwrappedClass = js::GetObjectClass(unwrappedProto);
-            if (IS_WRAPPER_CLASS(unwrappedClass) ||
+            if (IS_WN_CLASS(unwrappedClass) ||
                 mozilla::dom::IsDOMClass(Jsvalify(unwrappedClass))) {
                 // Wrap it up in a proxy that will do the right thing in terms
                 // of this-binding for methods.
@@ -4007,7 +4003,7 @@ nsXPCComponents_Utils::GetWeakReference(const JS::Value &object, JSContext *cx,
 NS_IMETHODIMP
 nsXPCComponents_Utils::ForceGC()
 {
-    JSRuntime* rt = nsXPConnect::GetRuntimeInstance()->GetJSRuntime();
+    JSRuntime* rt = nsXPConnect::GetRuntimeInstance()->Runtime();
     JS::PrepareForFullGC(rt);
     JS::GCForReason(rt, JS::gcreason::COMPONENT_UTILS);
     return NS_OK;
@@ -4025,7 +4021,7 @@ nsXPCComponents_Utils::ForceCC()
 NS_IMETHODIMP
 nsXPCComponents_Utils::ForceShrinkingGC()
 {
-    JSRuntime* rt = nsXPConnect::GetRuntimeInstance()->GetJSRuntime();
+    JSRuntime* rt = nsXPConnect::GetRuntimeInstance()->Runtime();
     JS::PrepareForFullGC(rt);
     JS::ShrinkingGC(rt, JS::gcreason::COMPONENT_UTILS);
     return NS_OK;
@@ -4039,7 +4035,7 @@ class PreciseGCRunnable : public nsRunnable
 
     NS_IMETHOD Run()
     {
-        JSRuntime* rt = nsXPConnect::GetRuntimeInstance()->GetJSRuntime();
+        JSRuntime* rt = nsXPConnect::GetRuntimeInstance()->Runtime();
 
         JSContext *cx;
         JSContext *iter = nullptr;
@@ -4298,7 +4294,10 @@ nsXPCComponents_Utils::IsDeadWrapper(const jsval &obj, bool *out)
     if (JSVAL_IS_PRIMITIVE(obj))
         return NS_ERROR_INVALID_ARG;
 
-    *out = JS_IsDeadWrapper(JSVAL_TO_OBJECT(obj));
+    // Make sure to unwrap first. Once a proxy is nuked, it ceases to be a
+    // wrapper, meaning that, if passed to another compartment, we'll generate
+    // a CCW for it. Make sure that IsDeadWrapper sees through the confusion.
+    *out = JS_IsDeadWrapper(js::CheckedUnwrap(JSVAL_TO_OBJECT(obj)));
     return NS_OK;
 }
 
@@ -4399,7 +4398,7 @@ nsXPCComponents_Utils::CanCreateWrapper(const nsIID * iid, char **_retval)
 NS_IMETHODIMP
 nsXPCComponents_Utils::CanCallMethod(const nsIID * iid, const PRUnichar *methodName, char **_retval)
 {
-    static const char* allowed[] = { "lookupMethod", "evalInSandbox", nullptr };
+    static const char* const allowed[] = { "lookupMethod", "evalInSandbox", nullptr };
     *_retval = xpc_CheckAccessList(methodName, allowed);
     return NS_OK;
 }
@@ -4831,8 +4830,8 @@ nsXPCComponents::SetProperty(nsIXPConnectWrappedNative *wrapper,
 }
 
 static JSBool
-ContentComponentsGetterOp(JSContext *cx, JSHandleObject obj, JSHandleId id,
-                          JSMutableHandleValue vp)
+ContentComponentsGetterOp(JSContext *cx, HandleObject obj, HandleId id,
+                          MutableHandleValue vp)
 {
     // If chrome is accessing the Components object of content, allow.
     MOZ_ASSERT(nsContentUtils::GetCurrentJSContext() == cx);
@@ -4921,7 +4920,7 @@ nsXPCComponents::CanCreateWrapper(const nsIID * iid, char **_retval)
 NS_IMETHODIMP
 nsXPCComponents::CanCallMethod(const nsIID * iid, const PRUnichar *methodName, char **_retval)
 {
-    static const char* allowed[] = { "isSuccessCode", "lookupMethod", nullptr };
+    static const char* const allowed[] = { "isSuccessCode", "lookupMethod", nullptr };
     *_retval = xpc_CheckAccessList(methodName, allowed);
     if (*_retval &&
         methodName[0] == 'l' &&
@@ -4936,7 +4935,7 @@ nsXPCComponents::CanCallMethod(const nsIID * iid, const PRUnichar *methodName, c
 NS_IMETHODIMP
 nsXPCComponents::CanGetProperty(const nsIID * iid, const PRUnichar *propertyName, char **_retval)
 {
-    static const char* allowed[] = { "interfaces", "interfacesByID", "results", nullptr};
+    static const char* const allowed[] = { "interfaces", "interfacesByID", "results", nullptr};
     *_retval = xpc_CheckAccessList(propertyName, allowed);
     if (*_retval &&
         propertyName[0] == 'i' &&

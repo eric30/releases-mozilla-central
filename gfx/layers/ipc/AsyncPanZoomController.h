@@ -111,7 +111,7 @@ public:
    * { x = 0, y = 0, width = surface.width, height = surface.height }, however
    * there is no hard requirement for this.
    */
-  void UpdateCompositionBounds(const LayerIntRect& aCompositionBounds);
+  void UpdateCompositionBounds(const ScreenIntRect& aCompositionBounds);
 
   /**
    * We are scrolling a subframe, so disable our machinery until we hit
@@ -178,7 +178,7 @@ public:
   bool SampleContentTransformForFrame(const TimeStamp& aSampleTime,
                                       ContainerLayer* aLayer,
                                       ViewTransform* aNewTransform,
-                                      gfx::Point& aScrollOffset);
+                                      ScreenPoint& aScrollOffset);
 
   /**
    * A shadow layer update has arrived. |aViewportFrame| is the new FrameMetrics
@@ -227,7 +227,7 @@ public:
    * Return the scale factor needed to fit the viewport in |aMetrics|
    * into its composition bounds.
    */
-  static gfxSize CalculateIntrinsicScale(const FrameMetrics& aMetrics);
+  static CSSToScreenScale CalculateIntrinsicScale(const FrameMetrics& aMetrics);
 
   /**
    * Return the resolution that content should be rendered at given
@@ -235,7 +235,7 @@ public:
    * factor, etc.  (The mResolution member of aFrameMetrics is
    * ignored.)
    */
-  static gfxSize CalculateResolution(const FrameMetrics& aMetrics);
+  static CSSToScreenScale CalculateResolution(const FrameMetrics& aMetrics);
 
   static CSSRect CalculateCompositedRectInCssPixels(const FrameMetrics& aMetrics);
 
@@ -250,6 +250,13 @@ public:
    * Does the work for ReceiveInputEvent().
    */
   nsEventStatus HandleInputEvent(const InputData& aEvent);
+
+  /**
+   * Sync panning and zooming animation using a fixed frame time.
+   * This will ensure that we animate the APZC correctly with other external
+   * animations to the same timestamp.
+   */
+  static void SetFrameTime(const TimeStamp& aMilliseconds);
 
 protected:
   /**
@@ -456,7 +463,7 @@ protected:
    *
    * *** The monitor must be held while calling this.
    */
-  void SetZoomAndResolution(float aScale);
+  void SetZoomAndResolution(const ScreenToScreenScale& aZoom);
 
   /**
    * Timeout function for mozbrowserasyncscroll event. Because we throttle

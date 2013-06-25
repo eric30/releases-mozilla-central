@@ -4,8 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef jsion_codegen_inl_h__
-#define jsion_codegen_inl_h__
+#ifndef ion_shared_CodeGenerator_shared_inl_h
+#define ion_shared_CodeGenerator_shared_inl_h
 
 namespace js {
 namespace ion {
@@ -43,6 +43,14 @@ static inline Register
 ToRegister(const LDefinition *def)
 {
     return ToRegister(*def->output());
+}
+
+static inline Register
+ToTempUnboxRegister(const LDefinition *def)
+{
+    if (def->isBogusTemp())
+        return InvalidReg;
+    return ToRegister(def);
 }
 
 static inline Register
@@ -152,5 +160,4 @@ CodeGeneratorShared::restoreLiveIgnore(LInstruction *ins, RegisterSet ignore)
 } // ion
 } // js
 
-#endif // jsion_codegen_inl_h__
-
+#endif /* ion_shared_CodeGenerator_shared_inl_h */

@@ -48,7 +48,7 @@ _SERV_FILES = 	\
 		$(topsrcdir)/build/mobile/b2gautomation.py \
 		gen_template.pl \
 		server.js \
-		harness-overlay.xul \
+		chunkifyTests.js \
 		harness.xul \
 		browser-test-overlay.xul \
 		browser-test.js \
@@ -125,6 +125,7 @@ TEST_HARNESS_BINS := \
   ssltunnel$(BIN_SUFFIX) \
   certutil$(BIN_SUFFIX) \
   pk12util$(BIN_SUFFIX) \
+  OCSPStaplingServer$(BIN_SUFFIX) \
   fix_stack_using_bpsyms.py \
   $(NULL)
 

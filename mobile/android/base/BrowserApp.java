@@ -152,6 +152,15 @@ abstract public class BrowserApp extends GeckoApp
 
     private BrowserHealthReporter mBrowserHealthReporter;
 
+    private SiteIdentityPopup mSiteIdentityPopup;
+
+    public SiteIdentityPopup getSiteIdentityPopup() {
+        if (mSiteIdentityPopup == null)
+            mSiteIdentityPopup = new SiteIdentityPopup(this);
+
+        return mSiteIdentityPopup;
+    }
+
     @Override
     public void onTabChanged(Tab tab, Tabs.TabEvents msg, Object data) {
         switch(msg) {
@@ -173,8 +182,8 @@ abstract public class BrowserApp extends GeckoApp
                         hideAboutHome();
                     }
 
-                    // Dismiss any SiteIdentity Popup
-                    SiteIdentityPopup.getInstance().dismiss();
+                    if (mSiteIdentityPopup != null)
+                        mSiteIdentityPopup.dismiss();
 
                     final TabsPanel.Panel panel = tab.isPrivate()
                                                 ? TabsPanel.Panel.PRIVATE_TABS
@@ -443,6 +452,8 @@ abstract public class BrowserApp extends GeckoApp
         registerEventListener("Feedback:OpenPlayStore");
         registerEventListener("Feedback:MaybeLater");
         registerEventListener("Telemetry:Gather");
+        registerEventListener("Settings:Show");
+        registerEventListener("Updater:Launch");
 
         Distribution.init(this, getPackageResourcePath());
         JavaAddonManager.getInstance().init(getApplicationContext());
@@ -715,6 +726,8 @@ abstract public class BrowserApp extends GeckoApp
         unregisterEventListener("Feedback:OpenPlayStore");
         unregisterEventListener("Feedback:MaybeLater");
         unregisterEventListener("Telemetry:Gather");
+        unregisterEventListener("Settings:Show");
+        unregisterEventListener("Updater:Launch");
 
         if (AppConstants.MOZ_ANDROID_BEAM && Build.VERSION.SDK_INT >= 14) {
             NfcAdapter nfc = NfcAdapter.getDefaultAdapter(this);
@@ -818,6 +831,9 @@ abstract public class BrowserApp extends GeckoApp
                 toolbarLayout.scrollTo(0, toolbarLayout.getHeight() - marginTop);
             }
         });
+
+        if (mFormAssistPopup != null)
+            mFormAssistPopup.onMetricsChanged(aMetrics);
     }
 
     @Override
@@ -896,6 +912,19 @@ abstract public class BrowserApp extends GeckoApp
         invalidateOptionsMenu();
         updateSideBarState();
         mTabsPanel.refresh();
+        if (mSiteIdentityPopup != null) {
+            mSiteIdentityPopup.dismiss();
+        }
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (mSiteIdentityPopup != null && mSiteIdentityPopup.isShowing()) {
+            mSiteIdentityPopup.dismiss();
+            return;
+        }
+
+        super.onBackPressed();
     }
 
     @Override
@@ -1083,6 +1112,17 @@ abstract public class BrowserApp extends GeckoApp
                 final String url = message.getString("url");
                 GeckoAppShell.openUriExternal(url, "text/plain", "", "",
                                               Intent.ACTION_SEND, title);
+            } else if (event.equals("Settings:Show")) {
+                // null strings return "null" (http://code.google.com/p/android/issues/detail?id=13830)
+                String resource = null;
+                if (!message.isNull(GeckoPreferences.INTENT_EXTRA_RESOURCES)) {
+                    resource = message.getString(GeckoPreferences.INTENT_EXTRA_RESOURCES);
+                }
+                Intent settingsIntent = new Intent(this, GeckoPreferences.class);
+                GeckoPreferences.setResourceToOpen(settingsIntent, resource);
+                startActivity(settingsIntent);
+            } else if (event.equals("Updater:Launch")) {
+                handleUpdaterLaunch();
             } else {
                 super.handleMessage(event, message);
             }
@@ -1831,5 +1871,34 @@ abstract public class BrowserApp extends GeckoApp
     protected String getDefaultProfileName() {
         String profile = GeckoProfile.findDefaultProfile(this);
         return (profile != null ? profile : "default");
+    }
+
+    /**
+     * Launch UI that lets the user update Firefox.
+     *
+     * This depends on the current channel: Release and Beta both direct to the
+     * Google Play Store.  If updating is enabled, Aurora, Nightly, and custom
+     * builds open about:, which provides an update interface.
+     *
+     * If updating is not enabled, this simply logs an error.
+     *
+     * @return true if update UI was launched.
+     */
+    protected boolean handleUpdaterLaunch() {
+        if ("release".equals(AppConstants.MOZ_UPDATE_CHANNEL) ||
+            "beta".equals(AppConstants.MOZ_UPDATE_CHANNEL)) {
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setData(Uri.parse("market://details?id=" + getPackageName()));
+            startActivity(intent);
+            return true;
+        }
+
+        if (AppConstants.MOZ_UPDATER) {
+            Tabs.getInstance().loadUrlInTab("about:");
+            return true;
+        }
+
+        Log.w(LOGTAG, "No candidate updater found; ignoring launch request.");
+        return false;
     }
 }

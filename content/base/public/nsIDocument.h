@@ -114,8 +114,8 @@ typedef CallbackObjectHolder<NodeFilter, nsIDOMNodeFilter> NodeFilterHolder;
 } // namespace mozilla
 
 #define NS_IDOCUMENT_IID \
-{ 0x308f8444, 0x7679, 0x445a, \
- { 0xa6, 0xcc, 0xb9, 0x5c, 0x61, 0xff, 0xe2, 0x66 } }
+{ 0x62cca591, 0xa030, 0x4117, \
+ { 0x9b, 0x80, 0xdc, 0xd3, 0x66, 0xbb, 0xb5, 0x9 } }
 
 // Flag for AddStyleSheet().
 #define NS_STYLESHEET_FROM_CATALOG                (1 << 0)
@@ -766,15 +766,10 @@ public:
    * Get this document's inline style sheet.  May return null if there
    * isn't one
    */
-  virtual nsHTMLCSSStyleSheet* GetInlineStyleSheet() const = 0;
+  nsHTMLCSSStyleSheet* GetInlineStyleSheet() const {
+    return mStyleAttrStyleSheet;
+  }
 
-  /**
-   * Get/set the object from which a document can get a script context
-   * and scope. This is the context within which all scripts (during
-   * document creation and during event handling) will run. Note that
-   * this is the *inner* window object.
-   */
-  virtual nsIScriptGlobalObject* GetScriptGlobalObject() const = 0;
   virtual void SetScriptGlobalObject(nsIScriptGlobalObject* aGlobalObject) = 0;
 
   /**
@@ -1473,8 +1468,7 @@ public:
   {
     NS_PRECONDITION(!GetShell() &&
                     !nsCOMPtr<nsISupports>(GetContainer()) &&
-                    !GetWindow() &&
-                    !GetScriptGlobalObject(),
+                    !GetWindow(),
                     "Shouldn't set mDisplayDocument on documents that already "
                     "have a presentation or a docshell or a window");
     NS_PRECONDITION(aDisplayDocument != this, "Should be different document");
@@ -2178,6 +2172,7 @@ protected:
   nsRefPtr<mozilla::css::Loader> mCSSLoader;
   nsRefPtr<mozilla::css::ImageLoader> mStyleImageLoader;
   nsRefPtr<nsHTMLStyleSheet> mAttrStyleSheet;
+  nsRefPtr<nsHTMLCSSStyleSheet> mStyleAttrStyleSheet;
 
   // The set of all object, embed, applet, video and audio elements for
   // which this is the owner document. (They might not be in the document.)

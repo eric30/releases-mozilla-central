@@ -98,6 +98,9 @@ this.SystemMessagePermissionsTable = {
   "ussd-received": {
     "mobileconnection": []
   },
+  "wappush-received": {
+    "sms": []
+  },
   "nfc-ndef-discovered": {
     "nfc": []
   },

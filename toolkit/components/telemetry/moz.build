@@ -26,3 +26,8 @@ CPP_SOURCES += [
 EXTRA_COMPONENTS += [
     'TelemetryPing.manifest',
 ]
+
+EXTRA_PP_COMPONENTS += [
+    'TelemetryPing.js',
+]
+

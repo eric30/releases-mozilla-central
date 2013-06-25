@@ -15,8 +15,6 @@
 #include "mozilla/RangedPtr.h"
 
 #include "double-conversion.h"
-// Avoid warnings about ASSERT being defined by the assembler as well.
-#undef ASSERT
 
 #ifdef XP_OS2
 #define _PC_53  PC_53
@@ -24,16 +22,13 @@
 #define _MCW_PC MCW_PC
 #endif
 #include <locale.h>
-#include <limits.h>
 #include <math.h>
 #include <string.h>
 
 #include "jstypes.h"
-#include "jsutil.h"
 #include "jsapi.h"
 #include "jsatom.h"
 #include "jscntxt.h"
-#include "jsversion.h"
 #include "jsdtoa.h"
 #include "jsobj.h"
 #include "jsstr.h"
@@ -42,7 +37,6 @@
 #include "vm/StringBuffer.h"
 
 #include "jsatominlines.h"
-#include "jsobjinlines.h"
 #include "jsstrinlines.h"
 #include "vm/NumberObject-inl.h"
 #include "vm/String-inl.h"
@@ -414,7 +408,7 @@ static const JSFunctionSpec number_functions[] = {
     JS_FS_END
 };
 
-Class js::NumberClass = {
+Class NumberObject::class_ = {
     js_Number_str,
     JSCLASS_HAS_RESERVED_SLOTS(1) | JSCLASS_HAS_CACHED_PROTO(JSProto_Number),
     JS_PropertyStub,         /* addProperty */
@@ -453,7 +447,7 @@ Number(JSContext *cx, unsigned argc, Value *vp)
 JS_ALWAYS_INLINE bool
 IsNumber(const Value &v)
 {
-    return v.isNumber() || (v.isObject() && v.toObject().hasClass(&NumberClass));
+    return v.isNumber() || (v.isObject() && v.toObject().is<NumberObject>());
 }
 
 inline double
@@ -461,7 +455,7 @@ Extract(const Value &v)
 {
     if (v.isNumber())
         return v.toNumber();
-    return v.toObject().asNumber().unbox();
+    return v.toObject().as<NumberObject>().unbox();
 }
 
 #if JS_HAS_TOSOURCE
@@ -1133,12 +1127,12 @@ js_InitNumberClass(JSContext *cx, HandleObject obj)
     /* XXX must do at least once per new thread, so do it per JSContext... */
     FIX_FPU();
 
-    Rooted<GlobalObject*> global(cx, &obj->asGlobal());
+    Rooted<GlobalObject*> global(cx, &obj->as<GlobalObject>());
 
-    RootedObject numberProto(cx, global->createBlankPrototype(cx, &NumberClass));
+    RootedObject numberProto(cx, global->createBlankPrototype(cx, &NumberObject::class_));
     if (!numberProto)
         return NULL;
-    numberProto->asNumber().setPrimitiveValue(0);
+    numberProto->as<NumberObject>().setPrimitiveValue(0);
 
     RootedFunction ctor(cx);
     ctor = global->createConstructor(cx, Number, cx->names().Number, 1);

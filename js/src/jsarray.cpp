@@ -11,8 +11,6 @@
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/Util.h"
 
-#include <stdlib.h>
-
 #include "jsapi.h"
 #include "jsatom.h"
 #include "jscntxt.h"
@@ -33,7 +31,6 @@
 
 #include "jsatominlines.h"
 #include "jscntxtinlines.h"
-#include "jsobjinlines.h"
 #include "jsstrinlines.h"
 
 #include "vm/ArgumentsObject-inl.h"
@@ -58,8 +55,8 @@ js::GetLengthProperty(JSContext *cx, HandleObject obj, uint32_t *lengthp)
         return true;
     }
 
-    if (obj->isArguments()) {
-        ArgumentsObject &argsobj = obj->asArguments();
+    if (obj->is<ArgumentsObject>()) {
+        ArgumentsObject &argsobj = obj->as<ArgumentsObject>();
         if (!argsobj.hasOverriddenLength()) {
             *lengthp = argsobj.initialLength();
             return true;
@@ -214,8 +211,8 @@ GetElement(JSContext *cx, HandleObject obj, IndexType index, JSBool *hole, Mutab
             return true;
         }
     }
-    if (obj->isArguments()) {
-        if (obj->asArguments().maybeGetElement(uint32_t(index), vp)) {
+    if (obj->is<ArgumentsObject>()) {
+        if (obj->as<ArgumentsObject>().maybeGetElement(uint32_t(index), vp)) {
             *hole = false;
             return true;
         }
@@ -250,8 +247,8 @@ js::GetElements(JSContext *cx, HandleObject aobj, uint32_t length, Value *vp)
         return true;
     }
 
-    if (aobj->isArguments()) {
-        ArgumentsObject &argsobj = aobj->asArguments();
+    if (aobj->is<ArgumentsObject>()) {
+        ArgumentsObject &argsobj = aobj->as<ArgumentsObject>();
         if (!argsobj.hasOverriddenLength()) {
             if (argsobj.maybeGetElements(0, length, vp))
                 return true;
@@ -1012,17 +1009,17 @@ array_toString(JSContext *cx, unsigned argc, Value *vp)
         return true;
     }
 
-    InvokeArgsGuard ag;
-    if (!cx->stack.pushInvokeArgs(cx, 0, &ag))
+    InvokeArgs args2(cx);
+    if (!args2.init(0))
         return false;
 
-    ag.setCallee(join);
-    ag.setThis(ObjectValue(*obj));
+    args2.setCallee(join);
+    args2.setThis(ObjectValue(*obj));
 
     /* Do the call. */
-    if (!Invoke(cx, ag))
+    if (!Invoke(cx, args2))
         return false;
-    args.rval().set(ag.rval());
+    args.rval().set(args2.rval());
     return true;
 }
 
@@ -1424,20 +1421,20 @@ SortComparatorFunction::operator()(const Value &a, const Value &b, bool *lessOrE
     if (!JS_CHECK_OPERATION_LIMIT(cx))
         return false;
 
-    InvokeArgsGuard &ag = fig.args();
-    if (!ag.pushed() && !cx->stack.pushInvokeArgs(cx, 2, &ag))
+    InvokeArgs &args = fig.args();
+    if (!args.init(2))
         return false;
 
-    ag.setCallee(fval);
-    ag.setThis(UndefinedValue());
-    ag[0] = a;
-    ag[1] = b;
+    args.setCallee(fval);
+    args.setThis(UndefinedValue());
+    args[0] = a;
+    args[1] = b;
 
     if (!fig.invoke(cx))
         return false;
 
     double cmp;
-    if (!ToNumber(cx, ag.rval(), &cmp))
+    if (!ToNumber(cx, args.rval(), &cmp))
         return false;
 
     /*
@@ -1476,6 +1473,7 @@ typedef bool (*ComparatorNumeric)(const NumericElement &a, const NumericElement 
 
 ComparatorNumeric SortComparatorNumerics[] = {
     NULL,
+    NULL,
     ComparatorNumericLeftMinusRight,
     ComparatorNumericRightMinusLeft
 };
@@ -1498,12 +1496,16 @@ typedef bool (*ComparatorInt32)(const Value &a, const Value &b, bool *lessOrEqua
 
 ComparatorInt32 SortComparatorInt32s[] = {
     NULL,
+    NULL,
     ComparatorInt32LeftMinusRight,
     ComparatorInt32RightMinusLeft
 };
 
+// Note: Values for this enum must match up with SortComparatorNumerics
+// and SortComparatorInt32s.
 enum ComparatorMatchResult {
-    Match_None = 0,
+    Match_Failure = 0,
+    Match_None,
     Match_LeftMinusRight,
     Match_RightMinusLeft
 };
@@ -1513,20 +1515,23 @@ enum ComparatorMatchResult {
  * patterns: namely, |return x - y| and |return y - x|.
  */
 ComparatorMatchResult
-MatchNumericComparator(const Value &v)
+MatchNumericComparator(JSContext *cx, const Value &v)
 {
     if (!v.isObject())
         return Match_None;
 
     JSObject &obj = v.toObject();
-    if (!obj.isFunction())
+    if (!obj.is<JSFunction>())
         return Match_None;
 
-    JSFunction *fun = obj.toFunction();
-    if (!fun->hasScript())
+    JSFunction *fun = &obj.as<JSFunction>();
+    if (!fun->isInterpreted())
         return Match_None;
 
-    JSScript *script = fun->nonLazyScript();
+    JSScript *script = fun->getOrCreateScript(cx);
+    if (!script)
+        return Match_Failure;
+
     jsbytecode *pc = script->code;
 
     uint16_t arg0, arg1;
@@ -1803,7 +1808,9 @@ js::array_sort(JSContext *cx, unsigned argc, Value *vp)
                     return false;
             }
         } else {
-            ComparatorMatchResult comp = MatchNumericComparator(fval);
+            ComparatorMatchResult comp = MatchNumericComparator(cx, fval);
+            if (comp == Match_Failure)
+                return false;
 
             if (comp != Match_None) {
                 if (allInts) {
@@ -2630,7 +2637,7 @@ array_filter(JSContext *cx, unsigned argc, Value *vp)
     /* Step 9. */
     JS_ASSERT(!InParallelSection());
     FastInvokeGuard fig(cx, ObjectValue(*callable));
-    InvokeArgsGuard &ag = fig.args();
+    InvokeArgs &args2 = fig.args();
     RootedValue kValue(cx);
     while (k < len) {
         if (!JS_CHECK_OPERATION_LIMIT(cx))
@@ -2643,17 +2650,17 @@ array_filter(JSContext *cx, unsigned argc, Value *vp)
 
         /* Step c.ii-iii. */
         if (!kNotPresent) {
-            if (!ag.pushed() && !cx->stack.pushInvokeArgs(cx, 3, &ag))
+            if (!args2.init(3))
                 return false;
-            ag.setCallee(ObjectValue(*callable));
-            ag.setThis(thisv);
-            ag[0] = kValue;
-            ag[1] = NumberValue(k);
-            ag[2] = ObjectValue(*obj);
+            args2.setCallee(ObjectValue(*callable));
+            args2.setThis(thisv);
+            args2[0] = kValue;
+            args2[1] = NumberValue(k);
+            args2[2] = ObjectValue(*obj);
             if (!fig.invoke(cx))
                 return false;
 
-            if (ToBoolean(ag.rval())) {
+            if (ToBoolean(args2.rval())) {
                 if (!SetArrayElement(cx, arr, to, kValue))
                     return false;
                 to++;
@@ -2711,6 +2718,7 @@ static const JSFunctionSpec array_methods[] = {
          {"some",               {NULL, NULL},       1,0, "ArraySome"},
          {"every",              {NULL, NULL},       1,0, "ArrayEvery"},
 
+    JS_FN("iterator",           JS_ArrayIterator,   0,0),
     JS_FS_END
 };
 
@@ -2785,7 +2793,7 @@ js_InitArrayClass(JSContext *cx, HandleObject obj)
 {
     JS_ASSERT(obj->isNative());
 
-    Rooted<GlobalObject*> global(cx, &obj->asGlobal());
+    Rooted<GlobalObject*> global(cx, &obj->as<GlobalObject>());
 
     RootedObject proto(cx, global->getOrCreateObjectPrototype(cx));
     if (!proto)
@@ -2795,8 +2803,12 @@ js_InitArrayClass(JSContext *cx, HandleObject obj)
     if (!type)
         return NULL;
 
+    JSObject *metadata = NULL;
+    if (!NewObjectMetadata(cx, &metadata))
+        return NULL;
+
     RootedShape shape(cx, EmptyShape::getInitialShape(cx, &ArrayClass, TaggedProto(proto),
-                                                      proto->getParent(), NewObjectMetadata(cx),
+                                                      proto->getParent(), metadata,
                                                       gc::FINALIZE_OBJECT0));
 
     RootedObject arrayProto(cx, JSObject::createArray(cx, gc::FINALIZE_OBJECT4, gc::TenuredHeap, shape, type, 0));
@@ -2827,14 +2839,6 @@ js_InitArrayClass(JSContext *cx, HandleObject obj)
     }
 
     if (!DefineConstructorAndPrototype(cx, global, JSProto_Array, ctor, arrayProto))
-        return NULL;
-
-    JSFunction *fun = JS_DefineFunction(cx, arrayProto, "values", JS_ArrayIterator, 0, 0);
-    if (!fun)
-        return NULL;
-
-    RootedValue funval(cx, ObjectValue(*fun));
-    if (!JS_DefineProperty(cx, arrayProto, "iterator", funval, NULL, NULL, 0))
         return NULL;
 
     return arrayProto;
@@ -2898,12 +2902,16 @@ NewArray(JSContext *cx, uint32_t length, JSObject *protoArg, NewObjectKind newKi
     if (!type)
         return NULL;
 
+    JSObject *metadata = NULL;
+    if (!NewObjectMetadata(cx, &metadata))
+        return NULL;
+
     /*
      * Get a shape with zero fixed slots, regardless of the size class.
      * See JSObject::createArray.
      */
     RootedShape shape(cx, EmptyShape::getInitialShape(cx, &ArrayClass, TaggedProto(proto),
-                                                      cx->global(), NewObjectMetadata(cx), gc::FINALIZE_OBJECT0));
+                                                      cx->global(), metadata, gc::FINALIZE_OBJECT0));
     if (!shape)
         return NULL;
 

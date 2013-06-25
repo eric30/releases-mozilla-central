@@ -277,9 +277,11 @@ public:
     , mMainThreadDestroyed(false)
     , mGraph(nullptr)
   {
+    MOZ_COUNT_CTOR(MediaStream);
   }
   virtual ~MediaStream()
   {
+    MOZ_COUNT_DTOR(MediaStream);
     NS_ASSERTION(mMainThreadDestroyed, "Should have been destroyed already");
     NS_ASSERTION(mMainThreadListeners.IsEmpty(),
                  "All main thread listeners should have been removed");
@@ -431,12 +433,20 @@ public:
 
   bool HasCurrentData() { return mHasCurrentData; }
 
+  StreamBuffer::Track* EnsureTrack(TrackID aTrack, TrackRate aSampleRate);
+
   void ApplyTrackDisabling(TrackID aTrackID, MediaSegment* aSegment);
 
   DOMMediaStream* GetWrapper()
   {
     NS_ASSERTION(NS_IsMainThread(), "Only use DOMMediaStream on main thread");
     return mWrapper;
+  }
+
+  // Return true if the main thread needs to observe updates from this stream.
+  virtual bool MainThreadNeedsUpdates() const
+  {
+    return true;
   }
 
 protected:
@@ -933,7 +943,7 @@ public:
   // Internal AudioNodeStreams can only pass their output to another
   // AudioNode, whereas external AudioNodeStreams can pass their output
   // to an nsAudioStream for playback.
-  enum AudioNodeStreamKind { INTERNAL_STREAM, EXTERNAL_STREAM };
+  enum AudioNodeStreamKind { SOURCE_STREAM, INTERNAL_STREAM, EXTERNAL_STREAM };
   /**
    * Create a stream that will process audio for an AudioNode.
    * Takes ownership of aEngine.  aSampleRate is the sampling rate used

@@ -73,34 +73,50 @@ MIRGraph::removeBlocksAfter(MBasicBlock *start)
         if (block->id() <= start->id())
             continue;
 
-        if (block == osrBlock_)
-            osrBlock_ = NULL;
-
-        if (exitAccumulator_) {
-            size_t i = 0;
-            while (i < exitAccumulator_->length()) {
-                if ((*exitAccumulator_)[i] == block)
-                    exitAccumulator_->erase(exitAccumulator_->begin() + i);
-                else
-                    i++;
-            }
-        }
-        block->discardAllInstructions();
-        block->discardAllPhis();
+        // removeBlock will not remove the resumepoints, since
+        // it can be shared with outer blocks. So remove them now.
         block->discardAllResumePoints();
-        block->markAsDead();
         removeBlock(block);
     }
 }
 
 void
-MIRGraph::unmarkBlocks() {
+MIRGraph::removeBlock(MBasicBlock *block)
+{
+    // Remove a block from the graph. It will also cleanup the block,
+    // except for removing the resumepoints, since multiple blocks can
+    // share the same resumepoints and we cannot distinguish between them.
+
+    if (block == osrBlock_)
+        osrBlock_ = NULL;
+
+    if (exitAccumulator_) {
+        size_t i = 0;
+        while (i < exitAccumulator_->length()) {
+            if ((*exitAccumulator_)[i] == block)
+                exitAccumulator_->erase(exitAccumulator_->begin() + i);
+            else
+                i++;
+        }
+    }
+
+    block->discardAllInstructions();
+    block->discardAllPhis();
+    block->markAsDead();
+    blocks_.remove(block);
+    numBlocks_--;
+}
+
+void
+MIRGraph::unmarkBlocks()
+{
     for (MBasicBlockIterator i(blocks_.begin()); i != blocks_.end(); i++)
         i->unmark();
 }
 
 MDefinition *
-MIRGraph::parSlice() {
+MIRGraph::parSlice()
+{
     // Search the entry block to find a par slice instruction.  If we do not
     // find one, add one after the Start instruction.
     //
@@ -1046,4 +1062,29 @@ MBasicBlock::immediateDominatorBranch(BranchDirection *pdirection)
     }
 
     return NULL;
+}
+
+void
+MIRGraph::dump(FILE *fp)
+{
+#ifdef DEBUG
+    for (MBasicBlockIterator iter(begin()); iter != end(); iter++) {
+        iter->dump(fp);
+    }
+#endif
+}
+
+void
+MBasicBlock::dump(FILE *fp)
+{
+#ifdef DEBUG
+    for (MPhiIterator iter(phisBegin()); iter != phisEnd(); iter++) {
+        iter->printOpcode(fp);
+        fprintf(fp, "\n");
+    }
+    for (MInstructionIterator iter(begin()); iter != end(); iter++) {
+        iter->printOpcode(fp);
+        fprintf(fp, "\n");
+    }
+#endif
 }

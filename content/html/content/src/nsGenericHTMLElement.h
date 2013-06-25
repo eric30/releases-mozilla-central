@@ -33,13 +33,13 @@ class nsILayoutHistoryState;
 class nsIEditor;
 struct nsRect;
 struct nsSize;
-class nsHTMLFormElement;
 class nsIDOMHTMLMenuElement;
 class nsIDOMHTMLCollection;
 class nsDOMSettableTokenList;
 
 namespace mozilla {
 namespace dom{
+class HTMLFormElement;
 class HTMLPropertiesCollection;
 class HTMLMenuElement;
 }
@@ -666,7 +666,8 @@ public:
    *        current form that they're not descendants of.
    * @note This method should not be called if the element has a form attribute.
    */
-  nsHTMLFormElement* FindAncestorForm(nsHTMLFormElement* aCurrentForm = nullptr);
+  mozilla::dom::HTMLFormElement*
+  FindAncestorForm(mozilla::dom::HTMLFormElement* aCurrentForm = nullptr);
 
   virtual void RecompileScriptEventListeners() MOZ_OVERRIDE;
 
@@ -1047,15 +1048,16 @@ class HTMLFieldSetElement;
 
 // Form element specific bits
 enum {
-  // If this flag is set on an nsGenericHTMLFormElement, that means that we have
-  // added ourselves to our mForm.  It's possible to have a non-null mForm, but
-  // not have this flag set.  That happens when the form is set via the content
-  // sink.
+  // If this flag is set on an nsGenericHTMLFormElement or an HTMLImageElement,
+  // that means that we have added ourselves to our mForm.  It's possible to
+  // have a non-null mForm, but not have this flag set.  That happens when the
+  // form is set via the content sink.
   ADDED_TO_FORM =                         FORM_ELEMENT_FLAG_BIT(0),
 
-  // If this flag is set on an nsGenericHTMLFormElement, that means that its form
-  // is in the process of being unbound from the tree, and this form element
-  // hasn't re-found its form in nsGenericHTMLFormElement::UnbindFromTree yet.
+  // If this flag is set on an nsGenericHTMLFormElement or an HTMLImageElement,
+  // that means that its form is in the process of being unbound from the tree,
+  // and this form element hasn't re-found its form in
+  // nsGenericHTMLFormElement::UnbindFromTree yet.
   MAYBE_ORPHAN_FORM_ELEMENT =             FORM_ELEMENT_FLAG_BIT(1)
 };
 
@@ -1086,7 +1088,7 @@ public:
 
   // nsIFormControl
   virtual mozilla::dom::Element* GetFormElement() MOZ_OVERRIDE;
-  nsHTMLFormElement* GetForm() const
+  mozilla::dom::HTMLFormElement* GetForm() const
   {
     return mForm;
   }
@@ -1220,7 +1222,7 @@ protected:
   FocusTristate FocusState();
 
   /** The form that contains this control */
-  nsHTMLFormElement* mForm;
+  mozilla::dom::HTMLFormElement* mForm;
 
   /* This is a pointer to our closest fieldset parent if any */
   mozilla::dom::HTMLFieldSetElement* mFieldSet;

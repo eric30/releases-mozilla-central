@@ -204,7 +204,7 @@ if test -n "$gonkdir" ; then
 
     case "$ANDROID_VERSION" in
     15)
-        GONK_INCLUDES="-I$gonkdir/frameworks/base/opengl/include -I$gonkdir/frameworks/base/native/include -I$gonkdir/frameworks/base/include -I$gonkdir/frameworks/base/services/camera -I$gonkdir/frameworks/base/include/media/stagefright -I$gonkdir/frameworks/base/include/media/stagefright/openmax -I$gonkdir/frameworks/base/media/libstagefright/rtsp -I$gonkdir/frameworks/base/media/libstagefright/include -I$gonkdir/external/dbus -I$gonkdir/external/bluetooth/bluez/lib -I$gonkdir/dalvik/libnativehelper/include/nativehelper -I$gonkdir/external/valgrind"
+        GONK_INCLUDES="-I$gonkdir/frameworks/base/opengl/include -I$gonkdir/frameworks/base/native/include -I$gonkdir/frameworks/base/include -I$gonkdir/frameworks/base/services/camera -I$gonkdir/frameworks/base/include/media/stagefright -I$gonkdir/frameworks/base/include/media/stagefright/openmax -I$gonkdir/frameworks/base/media/libstagefright/rtsp -I$gonkdir/frameworks/base/media/libstagefright/include -I$gonkdir/external/dbus -I$gonkdir/external/bluetooth/bluez/lib -I$gonkdir/dalvik/libnativehelper/include/nativehelper"
         MOZ_B2G_BT=1
         MOZ_B2G_CAMERA=1
         MOZ_OMX_DECODER=1
@@ -218,7 +218,7 @@ if test -n "$gonkdir" ; then
         AC_MSG_ERROR([Unsupported platform version: $ANDROID_VERSION])
         ;;
     esac
-    CPPFLAGS="-DANDROID -isystem $gonkdir/bionic/libc/$ARCH_DIR/include -isystem $gonkdir/bionic/libc/include/ -isystem $gonkdir/bionic/libc/kernel/common -isystem $gonkdir/bionic/libc/kernel/$ARCH_DIR -isystem $gonkdir/bionic/libm/include -I$gonkdir/system -I$gonkdir/system/core/include -isystem $gonkdir/bionic -I$gonkdir/hardware/libhardware/include $GONK_INCLUDES $CPPFLAGS"
+    CPPFLAGS="-DANDROID -isystem $gonkdir/bionic/libc/$ARCH_DIR/include -isystem $gonkdir/bionic/libc/include/ -isystem $gonkdir/bionic/libc/kernel/common -isystem $gonkdir/bionic/libc/kernel/$ARCH_DIR -isystem $gonkdir/bionic/libm/include -I$gonkdir/system -I$gonkdir/system/core/include -isystem $gonkdir/bionic -I$gonkdir/hardware/libhardware/include -I$gonkdir/external/valgrind/fxos-include $GONK_INCLUDES $CPPFLAGS"
     CFLAGS="-mandroid -fno-short-enums -fno-exceptions $CFLAGS"
     CXXFLAGS="-mandroid -fno-short-enums -fno-exceptions -Wno-psabi $CXXFLAGS $STLPORT_CPPFLAGS"
     dnl Add -llog by default, since we use it all over the place.
@@ -448,7 +448,7 @@ esac
 
 case "$target" in
 *-mingw*)
-    if test "$GCC" != "yes"; then
+    if test "$GCC" != "yes" -a -z "$CLANG_CC"; then
         # Check to see if we are really running in a msvc environemnt
         _WIN32_MSVC=1
         AC_CHECK_PROGS(MIDL, midl)
@@ -573,38 +573,6 @@ case "$target" in
             ;;
         esac
 
-        # Identify which version of the SDK we're building with
-        # Windows Server 2008 and newer SDKs have WinSDKVer.h, get the version
-        # from there
-        MOZ_CHECK_HEADERS([winsdkver.h])
-        if test "$ac_cv_header_winsdkver_h" = "yes"; then
-            # Get the highest _WIN32_WINNT and NTDDI versions supported
-            # Take the higher of the two
-            # This is done because the Windows 7 beta SDK reports its
-            # NTDDI_MAXVER to be 0x06000100 instead of 0x06010000, as it should
-            AC_CACHE_CHECK(for highest Windows version supported by this SDK,
-                           ac_cv_winsdk_maxver,
-                           [cat > conftest.h <<EOF
-#include <winsdkver.h>
-#include <sdkddkver.h>
-
-#if (NTDDI_VERSION_FROM_WIN32_WINNT(_WIN32_WINNT_MAXVER) > NTDDI_MAXVER)
-#define WINSDK_MAXVER NTDDI_VERSION_FROM_WIN32_WINNT(_WIN32_WINNT_MAXVER)
-#else
-#define WINSDK_MAXVER NTDDI_MAXVER
-#endif
-
-WINSDK_MAXVER
-EOF
-                            ac_cv_winsdk_maxver=`$CPP conftest.h 2>/dev/null | tail -n1`
-                            rm -f conftest.h
-                           ])
-            MOZ_WINSDK_MAXVER=${ac_cv_winsdk_maxver}
-        else
-            # Any SDK which doesn't have WinSDKVer.h is too old.
-            AC_MSG_ERROR([Your SDK does not have WinSDKVer.h. It is probably too old. Please upgrade to a newer SDK or try running the Windows SDK Configuration Tool and selecting a newer SDK. See https://developer.mozilla.org/En/Windows_SDK_versions for more details on fixing this.])
-        fi
-
         unset _MSVC_VER_FILTER
 
         AC_CACHE_CHECK(for std::_Throw, ac_cv_have_std__Throw,
@@ -672,7 +640,7 @@ EOF
         if test "$WRAP_STL_INCLUDES" = "1"; then
             STL_FLAGS='-D_HAS_EXCEPTIONS=0 -I$(DIST)/stl_wrappers'
         fi
-    else
+    elif test -z "$CLANG_CC"; then
         # Check w32api version
         _W32API_MAJOR_VERSION=`echo $W32API_VERSION | $AWK -F\. '{ print $1 }'`
         _W32API_MINOR_VERSION=`echo $W32API_VERSION | $AWK -F\. '{ print $2 }'`
@@ -723,6 +691,11 @@ EOF
         MOZ_WINSDK_MAXVER=0x06020000
     fi # !GNU_CC
 
+    # If MSVC or clang
+    if test "$GCC" != "yes" -o -n "$CLANG_CC" ; then
+        MOZ_FIND_WINSDK_VERSION
+    fi
+
     AC_DEFINE_UNQUOTED(WINVER,0x$WINVER)
     AC_DEFINE_UNQUOTED(_WIN32_WINNT,0x$WINVER)
     # Require OS features provided by IE 6.0 SP2 (XP SP2)
@@ -741,6 +714,8 @@ EOF
     AC_DEFINE_UNQUOTED(MOZ_WINSDK_TARGETVER,0x$MOZ_WINSDK_TARGETVER)
     # Definitions matching sdkddkver.h
     AC_DEFINE_UNQUOTED(MOZ_NTDDI_WIN7, 0x06010000)
+    AC_DEFINE_UNQUOTED(MOZ_WINSDK_MAXVER,$MOZ_WINSDK_MAXVER)
+    AC_SUBST(MOZ_WINSDK_MAXVER)
     ;;
 esac
 
@@ -2081,7 +2056,7 @@ ia64*-hpux*)
     MC=mc.exe
     # certain versions of cygwin's makedepend barf on the
     # #include <string> vs -I./dist/include/string issue so don't use it
-    if test -n "$GNU_CC"; then
+    if test -n "$GNU_CC" -o -n "$CLANG_CC"; then
         CC="$CC -mwindows"
         CXX="$CXX -mwindows"
         CPP="$CPP -mwindows"
@@ -2275,10 +2250,6 @@ ia64*-hpux*)
     	AC_DEFINE(_CPU_ARCH_NOT_DEFINED)
 	;;
     esac
-
-    if test "$HAVE_64BIT_OS"; then
-    	AC_DEFINE(_WIN64)
-    fi
     ;;
 
 *-netbsd*)
@@ -2913,7 +2884,11 @@ AC_SUBST(VISIBILITY_FLAGS)
 
 MOZ_GCC_PR49911
 MOZ_GCC_PR39608
-MOZ_LLVM_PR8927
+if test "$OS_TARGET" != WINNT; then
+    # Only run this test with clang on non-Windows platforms, because clang
+    # cannot do enough code gen for now to make this test work correctly.
+    MOZ_LLVM_PR8927
+fi
 
 dnl Check for __force_align_arg_pointer__ for SSE2 on gcc
 dnl ========================================================
@@ -4357,6 +4332,16 @@ fi
 AC_DEFINE_UNQUOTED(MOZ_UPDATE_CHANNEL, $MOZ_UPDATE_CHANNEL)
 AC_SUBST(MOZ_UPDATE_CHANNEL)
 
+# Allow to specify a Google API key file that contains the secret key to be
+# used for various Google API requests.
+MOZ_ARG_WITH_STRING(google-api-keyfile,
+[  --with-google-api-keyfile=file   Use the secret key contained in the given keyfile for Google API requests],
+  MOZ_GOOGLE_API_KEY=`cat $withval`)
+if test -z "$MOZ_GOOGLE_API_KEY"; then
+    MOZ_GOOGLE_API_KEY=no-google-api-key
+fi
+AC_DEFINE_UNQUOTED(MOZ_GOOGLE_API_KEY, $MOZ_GOOGLE_API_KEY)
+
 # Allow the application to influence configure with a confvars.sh script.
 AC_MSG_CHECKING([if app-specific confvars.sh exists])
 if test -f "${srcdir}/${MOZ_BUILD_APP}/confvars.sh" ; then
@@ -4735,15 +4720,34 @@ then
     [ QTDIR=$withval])
 
     if test -z "$QTDIR"; then
-        PKG_CHECK_MODULES(MOZ_QT, QtGui QtNetwork QtCore QtOpenGL)
-        PKG_CHECK_MODULES(MOZ_QT5, Qt5Widgets Qt5Multimedia Qt5PrintSupport,
-                      MOZ_ENABLE_QT5=1,
-                      MOZ_ENABLE_QT5=)
-        if test "$MOZ_ENABLE_QT5"; then
-            echo "Using qt5"
-            MOZ_QT_CFLAGS="$MOZ_QT_CFLAGS $MOZ_QT5_CFLAGS"
-            MOZ_QT_LIBS="$MOZ_QT_LIBS $MOZ_QT5_LIBS"
-        fi
+        AC_CHECK_PROGS(HOST_QMAKE, $HOST_QMAKE qmake, "")
+    else
+        HOST_QMAKE="$QTDIR/bin/qmake"
+    fi
+    QT_VERSION=`$HOST_QMAKE -v | grep 'Using Qt version' | grep -oP '\d+\.\d+\.\d+'`
+
+    if test -z "$QTDIR"; then
+        case $QT_VERSION in
+        5.*)
+            AC_MSG_RESULT("Using qt5: $QT_VERSION")
+            PKG_CHECK_MODULES(MOZ_QT, Qt5Gui Qt5Network Qt5Core Qt5OpenGL Qt5Widgets Qt5PrintSupport, ,
+            [
+              AC_MSG_ERROR([$MOZ_QT_PKG_ERRORS Need qtbase development packages, (On Ubuntu, you might try installing the packages qtbase5-dev libqt5opengl5-dev.)])
+            ])
+            QT5INCDIR=`pkg-config --variable=includedir Qt5Gui`
+            MOZ_QT_CFLAGS="$MOZ_QT_CFLAGS -I$QT5INCDIR/QtGui/$QT_VERSION/QtGui"
+            ;;
+        4.*)
+            AC_MSG_RESULT("Using qt4: $QT_VERSION")
+            PKG_CHECK_MODULES(MOZ_QT, QtGui QtNetwork QtCore QtOpenGL, ,
+            [
+              AC_MSG_ERROR([$MOZ_QT_PKG_ERRORS Need qt4 development package, (On Ubuntu, you might try installing the packages libqt4-dev libqt4-opengl-dev.)])
+            ])
+            ;;
+        *)
+            AC_MSG_ERROR([* * * Unsupported Qt Version: $QT_VERSION])
+            ;;
+        esac
 
         AC_CHECK_PROGS(HOST_MOC, $MOC moc, "")
         AC_CHECK_PROGS(HOST_RCC, $RCC rcc, "")
@@ -4756,18 +4760,25 @@ then
         MOZ_QT_CFLAGS="$MOZ_QT_CFLAGS -I$QTDIR/include/QtXml"
         MOZ_QT_CFLAGS="$MOZ_QT_CFLAGS -I$QTDIR/include/QtDeclarative"
 
-        # QtWidgets was introduced only in Qt5
-        if test -d $QTDIR/include/QtWidgets; then
-            echo "Using qt5"
+        case $QT_VERSION in
+        5.*)
+            AC_MSG_RESULT("Using qt5: $QT_VERSION")
             MOZ_QT_LIBS="-L$QTDIR/lib/ -lQt5Gui -lQt5Network -lQt5Core -lQt5Xml -lQt5OpenGL"
-            MOZ_QT_CFLAGS="$MOZ_QT_CFLAGS -I$QTDIR/include/QtGui/5.0.1/QtGui"
+            MOZ_QT_CFLAGS="$MOZ_QT_CFLAGS -I$QTDIR/include/QtGui/$QT_VERSION/QtGui"
             MOZ_QT_CFLAGS="$MOZ_QT_CFLAGS -I$QTDIR/include/QtWidgets"
             MOZ_QT_CFLAGS="$MOZ_QT_CFLAGS -I$QTDIR/include/QtPrintSupport"
             MOZ_QT_LIBS="$MOZ_QT_LIBS -lQt5Widgets -lQt5PrintSupport"
-        else
+            ;;
+        4.*)
+            AC_MSG_RESULT("Using qt4: $QT_VERSION")
             MOZ_QT_LIBS="-L$QTDIR/lib/ -lQtGui -lQtNetwork -lQtCore -lQtXml -lQtOpenGL"
             MOZ_QT_CFLAGS="$MOZ_QT_CFLAGS -I$QTDIR/include/Qt"
-        fi
+            ;;
+        *)
+            AC_MSG_ERROR([* * * Unsupported Qt Version: $QT_VERSION])
+            ;;
+        esac
+
         HOST_MOC="$QTDIR/bin/moc"
         HOST_RCC="$QTDIR/bin/rcc"
     fi
@@ -5755,6 +5766,10 @@ AC_SUBST(MOZ_PULSEAUDIO_LIBS)
 dnl ========================================================
 dnl = Enable GStreamer
 dnl ========================================================
+if test "$OS_TARGET" = "Linux"; then
+  MOZ_GSTREAMER=1
+fi
+
 MOZ_ARG_ENABLE_BOOL(gstreamer,
 [  --enable-gstreamer           Enable GStreamer support],
 MOZ_GSTREAMER=1,
@@ -5768,7 +5783,8 @@ if test "$MOZ_GSTREAMER"; then
     PKG_CHECK_MODULES(GSTREAMER,
                       gstreamer-$GST_API_VERSION >= $GST_VERSION
                       gstreamer-app-$GST_API_VERSION
-                      gstreamer-plugins-base-$GST_API_VERSION)
+                      gstreamer-plugins-base-$GST_API_VERSION, ,
+                      AC_MSG_ERROR([gstreamer and gstreamer-plugins-base development packages are needed to build gstreamer backend. Install them or disable gstreamer support with --disable-gstreamer]))
     if test -n "$GSTREAMER_LIBS"; then
        _SAVE_LDFLAGS=$LDFLAGS
        LDFLAGS="$LDFLAGS $GSTREAMER_LIBS -lgstvideo-$GST_API_VERSION"
@@ -5776,11 +5792,11 @@ if test "$MOZ_GSTREAMER"; then
        if test -n "$_HAVE_LIBGSTVIDEO" ; then
           GSTREAMER_LIBS="$GSTREAMER_LIBS -lgstvideo-$GST_API_VERSION"
        else
-          AC_MSG_ERROR([gstreamer video backend requires libgstvideo])
+          AC_MSG_ERROR([gstreamer-plugins-base found, but no libgstvideo. Something has gone terribly wrong. Try reinstalling gstreamer-plugins-base; failing that, disable the gstreamer backend with --disable-gstreamer.])
        fi
        LDFLAGS=$_SAVE_LDFLAGS
     else
-       AC_MSG_ERROR([gstreamer backend requires the gstreamer packages])
+       AC_MSG_ERROR([gstreamer and gstreamer-plugins-base development packages are needed to build gstreamer backend. Install them or disable gstreamer support with --disable-gstreamer])
     fi
 fi
 AC_SUBST(GSTREAMER_CFLAGS)

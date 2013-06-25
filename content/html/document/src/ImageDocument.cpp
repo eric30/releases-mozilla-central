@@ -81,8 +81,7 @@ ImageListener::OnStartRequest(nsIRequest* request, nsISupports *ctxt)
     return NS_ERROR_FAILURE;
   }
 
-  nsCOMPtr<nsPIDOMWindow> domWindow =
-    do_QueryInterface(imgDoc->GetScriptGlobalObject());
+  nsCOMPtr<nsPIDOMWindow> domWindow = imgDoc->GetWindow();
   NS_ENSURE_TRUE(domWindow, NS_ERROR_UNEXPECTED);
 
   // Do a ShouldProcess check to see whether to keep loading the image.
@@ -445,7 +444,7 @@ ImageDocument::Notify(imgIRequest* aRequest, int32_t aType, const nsIntRect* aDa
   nsDOMTokenList* classList = mImageContent->AsElement()->GetClassList();
   mozilla::ErrorResult rv;
   if (aType == imgINotificationObserver::DECODE_COMPLETE) {
-    if (mImageContent) {
+    if (mImageContent && !nsContentUtils::IsChildOfSameType(this)) {
       // Update the background-color of the image only after the
       // image has been decoded to prevent flashes of just the
       // background-color.
@@ -456,7 +455,7 @@ ImageDocument::Notify(imgIRequest* aRequest, int32_t aType, const nsIntRect* aDa
 
   if (aType == imgINotificationObserver::DISCARD) {
     // mImageContent can be null if the document is already destroyed
-    if (mImageContent) {
+    if (mImageContent && !nsContentUtils::IsChildOfSameType(this)) {
       // Remove any decoded-related styling when the image is unloaded.
       classList->Remove(NS_LITERAL_STRING("decoded"), rv);
       NS_ENSURE_SUCCESS(rv.ErrorCode(), rv.ErrorCode());

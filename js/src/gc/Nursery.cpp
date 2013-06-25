@@ -9,11 +9,15 @@
 
 #include "jscompartment.h"
 #include "jsgc.h"
+#include "jstypedarray.h"
 #include "jsutil.h"
 
 #include "gc/GCInternals.h"
 #include "gc/Memory.h"
 #include "vm/Debugger.h"
+
+#include "jscompartmentinlines.h"
+#include "jsobjinlines.h"
 
 #include "gc/Barrier-inl.h"
 #include "gc/Nursery-inl.h"
@@ -32,7 +36,20 @@ js::Nursery::init()
 
     fallbackBitmap.clear(false);
 
-    void *heap = MapAlignedPages(NurserySize, Alignment);
+    void *heap = MapAlignedPages(runtime(), NurserySize, Alignment);
+#ifdef JSGC_ROOT_ANALYSIS
+    // Our poison pointers are not guaranteed to be invalid on 64-bit
+    // architectures, and often are valid. We can't just reserve the full
+    // poison range, because it might already have been taken up by something
+    // else (shared library, previous allocation). So we'll just loop and
+    // discard poison pointers until we get something valid.
+    //
+    // This leaks all of these poisoned pointers. It would be better if they
+    // were marked as uncommitted, but it's a little complicated to avoid
+    // clobbering pre-existing unrelated mappings.
+    while (IsPoisonedPtr(heap) || IsPoisonedPtr((void*)(uintptr_t(heap) + NurserySize)))
+        heap = MapAlignedPages(NurserySize, Alignment);
+#endif
     if (!heap)
         return false;
 
@@ -52,7 +69,7 @@ js::Nursery::init()
 js::Nursery::~Nursery()
 {
     if (start())
-        UnmapPages((void *)start(), NurserySize);
+        UnmapPages(runtime(), (void *)start(), NurserySize);
 }
 
 void
@@ -199,7 +216,6 @@ class MinorCollectionTracer : public JSTracer
     RelocationOverlay **tail;
 
     /* Save and restore all of the runtime state we use during MinorGC. */
-    bool savedNeedsBarrier;
     AutoDisableProxyCheck disableStrictProxyChecking;
 
     /* Insert the given relocation entry into the list of things to visit. */
@@ -216,22 +232,11 @@ class MinorCollectionTracer : public JSTracer
         tenuredSize(0),
         head(NULL),
         tail(&head),
-        savedNeedsBarrier(rt->needsBarrier()),
         disableStrictProxyChecking(rt)
     {
         JS_TracerInit(this, rt, Nursery::MinorGCCallback);
         eagerlyTraceWeakMaps = TraceWeakMapKeysValues;
-
         rt->gcNumber++;
-        rt->setNeedsBarrier(false);
-        for (ZonesIter zone(rt); !zone.done(); zone.next())
-            zone->saveNeedsBarrier(false);
-    }
-
-    ~MinorCollectionTracer() {
-        runtime->setNeedsBarrier(savedNeedsBarrier);
-        for (ZonesIter zone(runtime); !zone.done(); zone.next())
-            zone->restoreNeedsBarrier();
     }
 };
 
@@ -252,8 +257,8 @@ GetObjectAllocKindForCopy(JSRuntime *rt, JSObject *obj)
         return GetBackgroundAllocKind(GetGCArrayKind(nelements));
     }
 
-    if (obj->isFunction())
-        return obj->toFunction()->getAllocKind();
+    if (obj->is<JSFunction>())
+        return obj->as<JSFunction>().getAllocKind();
 
     AllocKind kind = GetGCObjectFixedSlotsKind(obj->numFixedSlots());
     if (CanBeFinalizedInBackground(kind, obj->getClass()))
@@ -265,19 +270,10 @@ void *
 js::Nursery::allocateFromTenured(Zone *zone, AllocKind thingKind)
 {
     void *t = zone->allocator.arenas.allocateFromFreeList(thingKind, Arena::thingSize(thingKind));
-    if (!t) {
-        zone->allocator.arenas.checkEmptyFreeList(thingKind);
-        t = zone->allocator.arenas.allocateFromArena(zone, thingKind);
-    }
-
-    /*
-     * Pre barriers are disabled during minor collection, however, we still
-     * want objects to be allocated black if an incremental GC is in progress.
-     */
-    if (zone->savedNeedsBarrier())
-        static_cast<Cell *>(t)->markIfUnmarked();
-
-    return t;
+    if (t)
+        return t;
+    zone->allocator.arenas.checkEmptyFreeList(thingKind);
+    return zone->allocator.arenas.allocateFromArena(zone, thingKind);
 }
 
 void *
@@ -335,9 +331,9 @@ js::Nursery::moveSlotsToTenured(JSObject *dst, JSObject *src, AllocKind dstKind)
         return 0;
     }
 
-    Allocator *alloc = &src->zone()->allocator;
+    Zone *zone = src->zone();
     size_t count = src->numDynamicSlots();
-    dst->slots = alloc->pod_malloc<HeapSlot>(count);
+    dst->slots = zone->pod_malloc<HeapSlot>(count);
     PodCopy(dst->slots, src->slots, count);
     return count * sizeof(HeapSlot);
 }
@@ -348,7 +344,7 @@ js::Nursery::moveElementsToTenured(JSObject *dst, JSObject *src, AllocKind dstKi
     if (src->hasEmptyElements())
         return 0;
 
-    Allocator *alloc = &src->zone()->allocator;
+    Zone *zone = src->zone();
     ObjectElements *srcHeader = src->getElementsHeader();
     ObjectElements *dstHeader;
 
@@ -360,10 +356,10 @@ js::Nursery::moveElementsToTenured(JSObject *dst, JSObject *src, AllocKind dstKi
     }
 
     /* ArrayBuffer stores byte-length, not Value count. */
-    if (src->isArrayBuffer()) {
+    if (src->is<ArrayBufferObject>()) {
         size_t nbytes = sizeof(ObjectElements) + srcHeader->initializedLength;
         if (src->hasDynamicElements()) {
-            dstHeader = static_cast<ObjectElements *>(alloc->malloc_(nbytes));
+            dstHeader = static_cast<ObjectElements *>(zone->malloc_(nbytes));
             if (!dstHeader)
                 MOZ_CRASH();
         } else {
@@ -386,7 +382,7 @@ js::Nursery::moveElementsToTenured(JSObject *dst, JSObject *src, AllocKind dstKi
     }
 
     size_t nbytes = nslots * sizeof(HeapValue);
-    dstHeader = static_cast<ObjectElements *>(alloc->malloc_(nbytes));
+    dstHeader = static_cast<ObjectElements *>(zone->malloc_(nbytes));
     if (!dstHeader)
         MOZ_CRASH();
     js_memcpy(dstHeader, srcHeader, nslots * sizeof(HeapSlot));
@@ -507,6 +503,8 @@ js::Nursery::collect(JSRuntime *rt, JS::gcreason::Reason reason)
         return;
 
     rt->gcHelperThread.waitBackgroundSweepEnd();
+
+    AutoStopVerifyingBarriers av(rt, false);
 
     /* Move objects pointed to by roots from the nursery to the major heap. */
     MinorCollectionTracer trc(rt, this);

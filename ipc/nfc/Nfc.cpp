@@ -37,17 +37,22 @@ const uint32_t NFCD_TEST_PORT = 6400;
 class DispatchNfcEvent : public WorkerTask
 {
 public:
-  DispatchNfcEvent(UnixSocketRawData* aMessage)
+    DispatchNfcEvent(UnixSocketRawData* aMessage)
       : mMessage(aMessage)
     { }
-  virtual bool RunTask(JSContext *aCx);
+
+    virtual bool RunTask(JSContext *aCx);
+
 private:
-  nsAutoPtr<UnixSocketRawData> mMessage;
+    nsAutoPtr<UnixSocketRawData> mMessage;
 };
 
 bool
 DispatchNfcEvent::RunTask(JSContext *aCx)
 {
+    MOZ_ASSERT(NS_IsMainThread(), "DispatchNfcEvent on main thread");
+    MOZ_ASSERT(aCx);
+
     JSObject *obj = JS_GetGlobalForScopeChain(aCx);
     JSObject *array = JS_NewUint8Array(aCx, mMessage->mSize);
     if (!array) {
@@ -62,18 +67,18 @@ DispatchNfcEvent::RunTask(JSContext *aCx)
 class NfcConnector : public mozilla::ipc::UnixSocketConnector
 {
 public:
-  NfcConnector() {}
-  virtual ~NfcConnector()
-  {}
+    NfcConnector() {}
+    virtual ~NfcConnector()
+    {}
 
-  virtual int Create();
-  virtual bool CreateAddr(bool aIsServer,
-                          socklen_t& aAddrSize,
-                          sockaddr_any& aAddr,
-                          const char* aAddress);
-  virtual bool SetUp(int aFd);
-  virtual void GetSocketAddr(const sockaddr_any& aAddr,
-                             nsAString& aAddrStr);
+    virtual int Create();
+    virtual bool CreateAddr(bool aIsServer,
+                            socklen_t& aAddrSize,
+                            sockaddr_any& aAddr,
+                            const char* aAddress);
+    virtual bool SetUp(int aFd);
+    virtual void GetSocketAddr(const sockaddr_any& aAddr,
+                               nsAString& aAddrStr);
 };
 
 int
@@ -86,12 +91,8 @@ NfcConnector::Create()
 #if defined(MOZ_WIDGET_GONK)
     fd = socket(AF_LOCAL, SOCK_STREAM, 0);
 #else
-    struct hostent *hp;
-
-    hp = gethostbyname("localhost");
-    if (hp) {
-        fd = socket(hp->h_addrtype, SOCK_STREAM, 0);
-    }
+    // If we can't hit a local loopback, fail later in connect.
+    fd = socket(AF_INET, SOCK_STREAM, 0);
 #endif
 
     if (fd < 0) {
@@ -181,7 +182,9 @@ void
 NfcConsumer::ReceiveSocketData(nsAutoPtr<UnixSocketRawData>& aMessage)
 {
     MOZ_ASSERT(NS_IsMainThread());
+#ifdef DEBUG
     LOG("ReceiveSocketData\n");
+#endif
     nsRefPtr<DispatchNfcEvent> dre(new DispatchNfcEvent(aMessage.forget()));
     mDispatcher->PostTask(dre);
 }
@@ -196,14 +199,18 @@ NfcConsumer::OnConnectSuccess()
 void
 NfcConsumer::OnConnectError()
 {
+#ifdef DEBUG
     LOG("%s\n", __FUNCTION__);
+#endif
     CloseSocket();
 }
 
 void
 NfcConsumer::OnDisconnect()
 {
+#ifdef DEBUG
     LOG("%s\n", __FUNCTION__);
+#endif
     if (!mShutdown) {
         ConnectSocket(new NfcConnector(), NFC_SOCKET_NAME, 1000);
     }

@@ -4,8 +4,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#if !defined(jsion_frames_h__) && defined(JS_ION)
-#define jsion_frames_h__
+#ifndef ion_IonFrames_h
+#define ion_IonFrames_h
+
+#ifdef JS_ION
 
 #include "mozilla/DebugOnly.h"
 
@@ -257,12 +259,16 @@ struct ResumeFromException
 {
     static const uint32_t RESUME_ENTRY_FRAME = 0;
     static const uint32_t RESUME_CATCH = 1;
-    static const uint32_t RESUME_FORCED_RETURN = 2;
+    static const uint32_t RESUME_FINALLY = 2;
+    static const uint32_t RESUME_FORCED_RETURN = 3;
 
     uint8_t *framePointer;
     uint8_t *stackPointer;
     uint8_t *target;
     uint32_t kind;
+
+    // Value to push when resuming into a |finally| block.
+    Value exception;
 };
 
 void HandleException(ResumeFromException *rfe);
@@ -330,5 +336,6 @@ MarkCalleeToken(JSTracer *trc, CalleeToken token);
 } /* namespace ion */
 } /* namespace js */
 
-#endif // jsion_frames_h__
+#endif // JS_ION
 
+#endif /* ion_IonFrames_h */

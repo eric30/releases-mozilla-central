@@ -4,8 +4,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#if !defined(jsion_macro_assembler_h__) && defined(JS_ION)
-#define jsion_macro_assembler_h__
+#ifndef ion_IonMacroAssembler_h
+#define ion_IonMacroAssembler_h
+
+#ifdef JS_ION
+
+#include "jstypedarray.h"
+#include "jscompartment.h"
 
 #if defined(JS_CPU_X86)
 # include "ion/x86/MacroAssembler-x86.h"
@@ -14,16 +19,12 @@
 #elif defined(JS_CPU_ARM)
 # include "ion/arm/MacroAssembler-arm.h"
 #endif
+#include "ion/AsmJS.h"
 #include "ion/IonCompartment.h"
 #include "ion/IonInstrumentation.h"
 #include "ion/ParallelFunctions.h"
 #include "ion/VMFunctions.h"
-
 #include "vm/ForkJoin.h"
-
-#include "jstypedarray.h"
-#include "jscompartment.h"
-
 #include "vm/Shape.h"
 
 namespace js {
@@ -58,6 +59,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     mozilla::Maybe<IonContext> ionContext_;
     mozilla::Maybe<AutoIonContextAlloc> alloc_;
     bool enoughMemory_;
+    bool embedsNurseryPointers_;
 
   private:
     // This field is used to manage profiling instrumentation output. If
@@ -73,6 +75,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     // instrumentation from being emitted.
     MacroAssembler()
       : enoughMemory_(true),
+        embedsNurseryPointers_(false),
         sps_(NULL)
     {
         JSContext *cx = GetIonContext()->cx;
@@ -94,6 +97,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     // (for example, Trampoline-$(ARCH).cpp and IonCaches.cpp).
     MacroAssembler(JSContext *cx)
       : enoughMemory_(true),
+        embedsNurseryPointers_(false),
         sps_(NULL)
     {
         constructRoot(cx);
@@ -131,6 +135,10 @@ class MacroAssembler : public MacroAssemblerSpecific
     }
     bool oom() const {
         return !enoughMemory_ || MacroAssemblerSpecific::oom();
+    }
+
+    bool embedsNurseryPointers() const {
+        return embedsNurseryPointers_;
     }
 
     // Emits a test of a value against all types in a TypeSet. A scratch
@@ -501,6 +509,10 @@ class MacroAssembler : public MacroAssemblerSpecific
         align(8);
         bind(&done);
     }
+
+    void branchNurseryPtr(Condition cond, const Address &ptr1, const ImmMaybeNurseryPtr &ptr2,
+                          Label *label);
+    void moveNurseryPtr(const ImmMaybeNurseryPtr &ptr, const Register &reg);
 
     void canonicalizeDouble(FloatRegister reg) {
         Label notNaN;
@@ -996,4 +1008,6 @@ class ABIArgIter
 } // namespace ion
 } // namespace js
 
-#endif // jsion_macro_assembler_h__
+#endif // JS_ION
+
+#endif /* ion_IonMacroAssembler_h */

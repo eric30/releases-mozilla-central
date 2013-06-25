@@ -13,7 +13,6 @@
 #include "nsIPluginDocument.h"
 #include "nsIDOMDocument.h"
 #include "nsThreadUtils.h"
-#include "nsIDOMSVGDocument.h"
 #include "nsIScriptError.h"
 #include "nsIWidget.h"
 #include "nsContentUtils.h"
@@ -94,7 +93,7 @@ NS_IMPL_RELEASE_INHERITED(HTMLSharedObjectElement, Element)
 NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(HTMLSharedObjectElement)
   NS_HTML_CONTENT_INTERFACES_AMBIGUOUS(nsGenericHTMLElement,
                                        nsIDOMHTMLAppletElement)
-  NS_INTERFACE_TABLE_INHERITED9(HTMLSharedObjectElement,
+  NS_INTERFACE_TABLE_INHERITED8(HTMLSharedObjectElement,
                                 nsIRequestObserver,
                                 nsIStreamListener,
                                 nsIFrameLoaderOwner,
@@ -102,7 +101,6 @@ NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(HTMLSharedObjectElement)
                                 imgINotificationObserver,
                                 nsIImageLoadingContent,
                                 imgIOnloadBlocker,
-                                nsIInterfaceRequestor,
                                 nsIChannelEventSink)
   NS_INTERFACE_TABLE_TO_MAP_SEGUE
   NS_INTERFACE_MAP_ENTRY_IF_TAG(nsIDOMHTMLAppletElement, applet)

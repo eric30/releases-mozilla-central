@@ -4,8 +4,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "ion/IonMacroAssembler.h"
+
 #include "jsinfer.h"
 
+#include "ion/AsmJS.h"
 #include "ion/Bailouts.h"
 #include "ion/BaselineIC.h"
 #include "ion/BaselineJIT.h"
@@ -15,6 +18,7 @@
 #include "js/RootingAPI.h"
 #include "vm/ForkJoin.h"
 
+#include "jsgcinlines.h"
 #include "jsinferinlines.h"
 
 using namespace js;
@@ -83,6 +87,7 @@ MacroAssembler::guardTypeSet(const Source &address, const TypeSet *types,
     if (types->hasType(types::Type::AnyObjectType())) {
         branchTestObject(Equal, tag, matched);
     } else if (types->getObjectCount()) {
+        JS_ASSERT(scratch != InvalidReg);
         branchTestObject(NotEqual, tag, miss);
         Register obj = extractObject(address, scratch);
 
@@ -214,6 +219,27 @@ MacroAssembler::PopRegsInMaskIgnore(RegisterSet set, RegisterSet ignore)
         freeStack(reservedG);
     }
     JS_ASSERT(diffG == 0);
+}
+
+void
+MacroAssembler::branchNurseryPtr(Condition cond, const Address &ptr1, const ImmMaybeNurseryPtr &ptr2,
+                                 Label *label)
+{
+#ifdef JSGC_GENERATIONAL
+    if (ptr2.value && gc::IsInsideNursery(GetIonContext()->cx->runtime(), (void *)ptr2.value))
+        embedsNurseryPointers_ = true;
+#endif
+    branchPtr(cond, ptr1, ptr2, label);
+}
+
+void
+MacroAssembler::moveNurseryPtr(const ImmMaybeNurseryPtr &ptr, const Register &reg)
+{
+#ifdef JSGC_GENERATIONAL
+    if (ptr.value && gc::IsInsideNursery(GetIonContext()->cx->runtime(), (void *)ptr.value))
+        embedsNurseryPointers_ = true;
+#endif
+    movePtr(ptr, reg);
 }
 
 template<typename T>
@@ -513,8 +539,8 @@ MacroAssembler::parNewGCThing(const Register &result,
     uint32_t thingSize = (uint32_t)gc::Arena::thingSize(allocKind);
 
     // Load the allocator:
-    // tempReg1 = (Allocator*) forkJoinSlice->allocator
-    loadPtr(Address(threadContextReg, offsetof(js::ForkJoinSlice, allocator)),
+    // tempReg1 = (Allocator*) forkJoinSlice->allocator()
+    loadPtr(Address(threadContextReg, ThreadSafeContext::offsetOfAllocator()),
             tempReg1);
 
     // Get a pointer to the relevant free list:
@@ -691,7 +717,10 @@ MacroAssembler::performOsr()
     bind(&isFunction);
     {
         // Function - create the callee token, then get the script.
-        orPtr(Imm32(CalleeToken_Function), calleeToken);
+
+        // Skip the or-ing of CalleeToken_Function into calleeToken since it is zero.
+        JS_ASSERT(CalleeToken_Function == 0);
+
         loadPtr(Address(script, JSFunction::offsetOfNativeOrScript()), script);
     }
 

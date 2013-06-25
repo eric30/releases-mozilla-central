@@ -35,3 +35,12 @@ EXTRA_COMPONENTS += [
     'nsURLClassifier.manifest',
     'nsUrlClassifierHashCompleter.js',
 ]
+
+# Same as JS components that are run through the pre-processor.
+EXTRA_PP_COMPONENTS += [
+    'nsUrlClassifierLib.js',
+    'nsUrlClassifierListManager.js',
+]
+
+LIBRARY_NAME = 'urlclassifier_s'
+

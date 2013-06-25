@@ -4,8 +4,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#if !defined(jsion_asmjsmodule_h__) && defined(JS_ION)
-#define jsion_asmjsmodule_h__
+#ifndef ion_AsmJSModule_h
+#define ion_AsmJSModule_h
+
+#ifdef JS_ION
 
 #include "gc/Marking.h"
 #include "ion/RegisterSets.h"
@@ -17,8 +19,7 @@
 
 namespace js {
 
-// The basis of the asm.js type system is the EcmaScript-defined coercions
-// ToInt32 and ToNumber.
+// These EcmaScript-defined coercions form the basis of the asm.js type system.
 enum AsmJSCoercion
 {
     AsmJS_ToInt32,
@@ -70,7 +71,7 @@ class AsmJSModule
             AsmJSMathBuiltin mathBuiltin_;
             double constantValue_;
         } u;
-        HeapPtrPropertyName name_;
+        RelocatablePtr<PropertyName> name_;
 
         friend class AsmJSModule;
         Global(Which which) : which_(which) {}
@@ -202,8 +203,8 @@ class AsmJSModule
 
       private:
 
-        HeapPtrFunction fun_;
-        HeapPtrPropertyName maybeFieldName_;
+        RelocatablePtr<JSFunction> fun_;
+        RelocatablePtr<PropertyName> maybeFieldName_;
         ArgCoercionVector argCoercions_;
         ReturnType returnType_;
         bool hasCodePtr_;
@@ -597,12 +598,12 @@ class AsmJSModule
     }
 
     void setFunctionBytes(size_t functionBytes) {
-        JS_ASSERT(functionBytes % gc::PageSize == 0);
+        JS_ASSERT(functionBytes % AsmJSPageSize == 0);
         functionBytes_ = functionBytes;
     }
     size_t functionBytes() const {
         JS_ASSERT(functionBytes_);
-        JS_ASSERT(functionBytes_ % gc::PageSize == 0);
+        JS_ASSERT(functionBytes_ % AsmJSPageSize == 0);
         return functionBytes_;
     }
     bool containsPC(void *pc) const {
@@ -611,11 +612,7 @@ class AsmJSModule
     }
 
     bool addHeapAccesses(const ion::AsmJSHeapAccessVector &accesses) {
-        if (!heapAccesses_.reserve(heapAccesses_.length() + accesses.length()))
-            return false;
-        for (size_t i = 0; i < accesses.length(); i++)
-            heapAccesses_.infallibleAppend(accesses[i]);
-        return true;
+        return heapAccesses_.append(accesses);
     }
     unsigned numHeapAccesses() const {
         return heapAccesses_.length();
@@ -628,11 +625,7 @@ class AsmJSModule
     }
 #if defined(JS_CPU_ARM)
     bool addBoundsChecks(const ion::AsmJSBoundsCheckVector &checks) {
-        if (!boundsChecks_.reserve(boundsChecks_.length() + checks.length()))
-            return false;
-        for (size_t i = 0; i < checks.length(); i++)
-            boundsChecks_.infallibleAppend(checks[i]);
-        return true;
+        return boundsChecks_.append(checks);
     }
     void convertBoundsChecksToActualOffset(ion::MacroAssembler &masm) {
         for (unsigned i = 0; i < boundsChecks_.length(); i++)
@@ -663,7 +656,7 @@ class AsmJSModule
 
 
     void takeOwnership(JSC::ExecutablePool *pool, uint8_t *code, size_t codeBytes, size_t totalBytes) {
-        JS_ASSERT(uintptr_t(code) % gc::PageSize == 0);
+        JS_ASSERT(uintptr_t(code) % AsmJSPageSize == 0);
         codePool_ = pool;
         code_ = code;
         codeBytes_ = codeBytes;
@@ -671,7 +664,7 @@ class AsmJSModule
     }
     uint8_t *functionCode() const {
         JS_ASSERT(code_);
-        JS_ASSERT(uintptr_t(code_) % gc::PageSize == 0);
+        JS_ASSERT(uintptr_t(code_) % AsmJSPageSize == 0);
         return code_;
     }
 
@@ -746,5 +739,6 @@ SetAsmJSModuleObject(JSFunction *moduleFun, JSObject *moduleObj);
 
 }  // namespace js
 
-#endif  // jsion_asmjsmodule_h__
+#endif  // JS_ION
 
+#endif /* ion_AsmJSModule_h */

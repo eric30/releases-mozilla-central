@@ -66,7 +66,7 @@ RUN_MOCHITEST_REMOTE = \
 RUN_MOCHITEST_ROBOCOP = \
   rm -f ./$@.log && \
   $(PYTHON) _tests/testing/mochitest/runtestsremote.py \
-    --robocop-apk=$(DEPTH)/build/mobile/robocop/robocop-debug-signed.apk \
+    --robocop-apk=$(DEPTH)/build/mobile/robocop/robocop-debug.apk \
     --robocop-ids=$(DEPTH)/mobile/android/base/fennec_ids.txt \
     --robocop-ini=$(DEPTH)/build/mobile/robocop/robocop.ini \
     --console-level=INFO --log-file=./$@.log --file-level=INFO $(DM_FLAGS) --dm_trans=$(DM_TRANS) \
@@ -470,7 +470,6 @@ endif
 	$(NSINSTALL) $(DEPTH)/build/mobile/sutagent/android/ffxcp/FfxCP.apk $(PKG_STAGE)/bin
 
 stage-jetpack: make-stage-dir
-	$(NSINSTALL) $(topsrcdir)/testing/jetpack/jetpack-location.txt $(PKG_STAGE)/jetpack
 	$(MAKE) -C $(DEPTH)/addon-sdk stage-tests-package
 
 stage-peptest: make-stage-dir

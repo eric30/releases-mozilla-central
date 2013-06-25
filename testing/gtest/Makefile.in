@@ -18,7 +18,6 @@ VPATH = \
 include $(DEPTH)/config/autoconf.mk
 
 MODULE_NAME = gtest
-LIBRARY_NAME = gtest
 EXPORT_LIBRARY = 1
 LIBXUL_LIBRARY = 1
 IS_COMPONENT = 1
@@ -45,6 +44,7 @@ check gtest::
 ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
 	$(MAKE) -C $(DEPTH)/browser/app repackage
 endif
+	$(PYTHON) $(topsrcdir)/testing/gtest/rungtests.py --xre-path=$(DIST)/bin --symbols-path=$(DIST)/crashreporter-symbols $(DIST)/bin/$(MOZ_APP_NAME)$(BIN_SUFFIX)
 endif
 endif
 

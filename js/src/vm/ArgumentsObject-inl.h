@@ -4,12 +4,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef ArgumentsObject_inl_h___
-#define ArgumentsObject_inl_h___
+#ifndef vm_ArgumentsObject_inl_h
+#define vm_ArgumentsObject_inl_h
 
-#include "ArgumentsObject.h"
+#include "vm/ArgumentsObject.h"
 
-#include "ScopeObject-inl.h"
+#include "vm/ScopeObject.h"
 
 namespace js {
 
@@ -17,7 +17,7 @@ inline uint32_t
 ArgumentsObject::initialLength() const
 {
     uint32_t argc = uint32_t(getFixedSlot(INITIAL_LENGTH_SLOT).toInt32()) >> PACKED_BITS_COUNT;
-    JS_ASSERT(argc <= StackSpace::ARGS_LENGTH_MAX);
+    JS_ASSERT(argc <= ARGS_LENGTH_MAX);
     return argc;
 }
 
@@ -71,7 +71,7 @@ ArgumentsObject::element(uint32_t i) const
     JS_ASSERT(!isElementDeleted(i));
     const Value &v = data()->args[i];
     if (v.isMagic(JS_FORWARD_TO_CALL_OBJECT)) {
-        CallObject &callobj = getFixedSlot(MAYBE_CALL_SLOT).toObject().asCall();
+        CallObject &callobj = getFixedSlot(MAYBE_CALL_SLOT).toObject().as<CallObject>();
         for (AliasedFormalIter fi(callobj.callee().nonLazyScript()); ; fi++) {
             if (fi.frameIndex() == i)
                 return callobj.aliasedVar(fi);
@@ -86,7 +86,7 @@ ArgumentsObject::setElement(JSContext *cx, uint32_t i, const Value &v)
     JS_ASSERT(!isElementDeleted(i));
     HeapValue &lhs = data()->args[i];
     if (lhs.isMagic(JS_FORWARD_TO_CALL_OBJECT)) {
-        CallObject &callobj = getFixedSlot(MAYBE_CALL_SLOT).toObject().asCall();
+        CallObject &callobj = getFixedSlot(MAYBE_CALL_SLOT).toObject().as<CallObject>();
         for (AliasedFormalIter fi(callobj.callee().nonLazyScript()); ; fi++) {
             if (fi.frameIndex() == i) {
                 callobj.setAliasedVar(cx, fi, fi->name(), v);
@@ -161,4 +161,4 @@ NormalArgumentsObject::clearCallee()
 
 } /* namespace js */
 
-#endif /* ArgumentsObject_inl_h___ */
+#endif /* vm_ArgumentsObject_inl_h */

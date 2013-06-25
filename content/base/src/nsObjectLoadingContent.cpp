@@ -56,6 +56,7 @@
 #include "nsStyleUtil.h"
 #include "nsGUIEvent.h"
 #include "nsUnicharUtils.h"
+#include "mozilla/Preferences.h"
 
 // Concrete classes
 #include "nsFrameLoader.h"
@@ -603,9 +604,9 @@ nsObjectLoadingContent::IsSupportedDocument(const nsCString& aMimeType)
   nsCOMPtr<nsIWebNavigation> webNav;
   nsIDocument* currentDoc = thisContent->GetCurrentDoc();
   if (currentDoc) {
-    webNav = do_GetInterface(currentDoc->GetScriptGlobalObject());
+    webNav = do_GetInterface(currentDoc->GetWindow());
   }
-  
+
   uint32_t supported;
   nsresult rv = info->IsTypeSupported(aMimeType, webNav, &supported);
 
@@ -843,6 +844,10 @@ nsObjectLoadingContent::InstantiatePluginInstance(bool aIsLoading)
     }
   }
 
+  nsCOMPtr<nsIRunnable> ev = new nsSimplePluginEvent(thisContent,
+    NS_LITERAL_STRING("PluginInstantiated"));
+  NS_DispatchToCurrentThread(ev);
+
   return NS_OK;
 }
 
@@ -1061,8 +1066,40 @@ nsObjectLoadingContent::GetContentTypeForMIMEType(const nsACString& aMIMEType,
 }
 
 // nsIInterfaceRequestor
+// We use a shim class to implement this so that JS consumers still
+// see an interface requestor even though WebIDL bindings don't expose
+// that stuff.
+class ObjectInterfaceRequestorShim MOZ_FINAL : public nsIInterfaceRequestor,
+                                               public nsIChannelEventSink
+{
+public:
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+  NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(ObjectInterfaceRequestorShim,
+                                           nsIInterfaceRequestor)
+  NS_DECL_NSIINTERFACEREQUESTOR
+  NS_FORWARD_NSICHANNELEVENTSINK(mContent->)
+
+  ObjectInterfaceRequestorShim(nsIChannelEventSink* aContent)
+    : mContent(aContent)
+  {}
+
+protected:
+  nsRefPtr<nsIChannelEventSink> mContent;
+};
+
+NS_IMPL_CYCLE_COLLECTION_1(ObjectInterfaceRequestorShim, mContent)
+
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(ObjectInterfaceRequestorShim)
+  NS_INTERFACE_MAP_ENTRY(nsIInterfaceRequestor)
+  NS_INTERFACE_MAP_ENTRY(nsIChannelEventSink)
+  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIInterfaceRequestor)
+NS_INTERFACE_MAP_END
+
+NS_IMPL_CYCLE_COLLECTING_ADDREF(ObjectInterfaceRequestorShim)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(ObjectInterfaceRequestorShim)
+
 NS_IMETHODIMP
-nsObjectLoadingContent::GetInterface(const nsIID & aIID, void **aResult)
+ObjectInterfaceRequestorShim::GetInterface(const nsIID & aIID, void **aResult)
 {
   if (aIID.Equals(NS_GET_IID(nsIChannelEventSink))) {
     nsIChannelEventSink* sink = this;
@@ -1798,8 +1835,8 @@ nsObjectLoadingContent::LoadObject(bool aNotify,
   // will not be checked for previews, as well as invalid plugins
   // (they will not have the mContentType set).
   FallbackType clickToPlayReason;
-  if ((mType == eType_Null || mType == eType_Plugin) &&
-      !ShouldPlay(clickToPlayReason)) {
+  if (!mActivated && (mType == eType_Null || mType == eType_Plugin) &&
+      !ShouldPlay(clickToPlayReason, false)) {
     LOG(("OBJLC [%p]: Marking plugin as click-to-play", this));
     mType = eType_Null;
     fallbackType = clickToPlayReason;
@@ -2079,7 +2116,9 @@ nsObjectLoadingContent::OpenChannel()
     channelPolicy->SetContentSecurityPolicy(csp);
     channelPolicy->SetLoadType(nsIContentPolicy::TYPE_OBJECT);
   }
-  rv = NS_NewChannel(getter_AddRefs(chan), mURI, nullptr, group, this,
+  nsRefPtr<ObjectInterfaceRequestorShim> shim =
+    new ObjectInterfaceRequestorShim(this);
+  rv = NS_NewChannel(getter_AddRefs(chan), mURI, nullptr, group, shim,
                      nsIChannel::LOAD_CALL_CONTENT_SNIFFERS |
                      nsIChannel::LOAD_CLASSIFY_URI,
                      channelPolicy);
@@ -2684,6 +2723,17 @@ nsObjectLoadingContent::GetPluginFallbackType(uint32_t* aPluginFallbackType)
   return NS_OK;
 }
 
+uint32_t
+nsObjectLoadingContent::DefaultFallbackType()
+{
+  FallbackType reason;
+  bool go = ShouldPlay(reason, true);
+  if (go) {
+    return PLUGIN_ACTIVE;
+  }
+  return reason;
+}
+
 NS_IMETHODIMP
 nsObjectLoadingContent::GetHasRunningPlugin(bool *aHasPlugin)
 {
@@ -2708,10 +2758,22 @@ nsObjectLoadingContent::CancelPlayPreview()
   return NS_OK;
 }
 
+static bool sPrefsInitialized;
+static uint32_t sSessionTimeoutMinutes;
+static uint32_t sPersistentTimeoutDays;
+
 bool
-nsObjectLoadingContent::ShouldPlay(FallbackType &aReason)
+nsObjectLoadingContent::ShouldPlay(FallbackType &aReason, bool aIgnoreCurrentType)
 {
   nsresult rv;
+
+  if (!sPrefsInitialized) {
+    Preferences::AddUintVarCache(&sSessionTimeoutMinutes,
+                                 "plugin.sessionPermissionNow.intervalInMinutes", 60);
+    Preferences::AddUintVarCache(&sPersistentTimeoutDays,
+                                 "plugin.persistentPermissionAlways.intervalInDays", 90);
+    sPrefsInitialized = true;
+  }
 
   nsRefPtr<nsPluginHost> pluginHost = nsPluginHost::GetInst();
 
@@ -2722,7 +2784,7 @@ nsObjectLoadingContent::ShouldPlay(FallbackType &aReason)
   if (isPlayPreviewSpecified) {
     playPreviewInfo->GetIgnoreCTP(&ignoreCTP);
   }
-  if (isPlayPreviewSpecified && !mPlayPreviewCanceled && !mActivated &&
+  if (isPlayPreviewSpecified && !mPlayPreviewCanceled &&
       ignoreCTP) {
     // play preview in ignoreCTP mode is shown even if the native plugin
     // is not present/installed
@@ -2730,13 +2792,13 @@ nsObjectLoadingContent::ShouldPlay(FallbackType &aReason)
     return false;
   }
   // at this point if it's not a plugin, we let it play/fallback
-  if (mType != eType_Plugin) {
+  if (!aIgnoreCurrentType && mType != eType_Plugin) {
     return true;
   }
 
   // Order of checks:
-  // * Already activated? Then ok
   // * Assume a default of click-to-play
+  // * If globally disabled, per-site permissions cannot override.
   // * If blocklisted, override the reason with the blocklist reason
   // * If not blocklisted but playPreview, override the reason with the
   //   playPreview reason.
@@ -2745,25 +2807,30 @@ nsObjectLoadingContent::ShouldPlay(FallbackType &aReason)
   // * Blocklisted plugins are forced to CtP
   // * Check per-plugin permission and follow that.
 
-  if (mActivated) {
-    return true;
+  aReason = eFallbackClickToPlay;
+
+  uint32_t enabledState = nsIPluginTag::STATE_DISABLED;
+  pluginHost->GetStateForType(mContentType, &enabledState);
+  if (nsIPluginTag::STATE_DISABLED == enabledState) {
+    aReason = eFallbackDisabled;
+    return false;
   }
 
   // Before we check permissions, get the blocklist state of this plugin to set
   // the fallback reason correctly.
-  aReason = eFallbackClickToPlay;
   uint32_t blocklistState = nsIBlocklistService::STATE_NOT_BLOCKED;
   pluginHost->GetBlocklistStateForType(mContentType.get(), &blocklistState);
+  if (blocklistState == nsIBlocklistService::STATE_BLOCKED) {
+    // no override possible
+    aReason = eFallbackBlocklisted;
+    return false;
+  }
+
   if (blocklistState == nsIBlocklistService::STATE_VULNERABLE_UPDATE_AVAILABLE) {
     aReason = eFallbackVulnerableUpdatable;
   }
   else if (blocklistState == nsIBlocklistService::STATE_VULNERABLE_NO_UPDATE) {
     aReason = eFallbackVulnerableNoUpdate;
-  }
-  else if (blocklistState == nsIBlocklistService::STATE_BLOCKED) {
-    // no override possible
-    aReason = eFallbackBlocklisted;
-    return false;
   }
 
   if (aReason == eFallbackClickToPlay && isPlayPreviewSpecified &&
@@ -2808,6 +2875,13 @@ nsObjectLoadingContent::ShouldPlay(FallbackType &aReason)
                                                         permissionString.Data(),
                                                         &permission);
     NS_ENSURE_SUCCESS(rv, false);
+    if (permission != nsIPermissionManager::UNKNOWN_ACTION) {
+      uint64_t nowms = PR_Now() / 1000;
+      permissionManager->UpdateExpireTime(
+        topDoc->NodePrincipal(), permissionString.Data(), false,
+        nowms + sSessionTimeoutMinutes * 60 * 1000,
+        nowms / 1000 + uint64_t(sPersistentTimeoutDays) * 24 * 60 * 60 * 1000);
+    }
     switch (permission) {
     case nsIPermissionManager::ALLOW_ACTION:
       return true;
@@ -2822,13 +2896,6 @@ nsObjectLoadingContent::ShouldPlay(FallbackType &aReason)
       MOZ_ASSERT(false);
       return false;
     }
-  }
-
-  uint32_t enabledState = nsIPluginTag::STATE_DISABLED;
-  pluginHost->GetStateForType(mContentType, &enabledState);
-  if (nsIPluginTag::STATE_DISABLED == enabledState) {
-    aReason = eFallbackDisabled;
-    return false;
   }
 
   // No site-specific permissions. Vulnerable plugins are automatically CtP
@@ -3153,8 +3220,8 @@ nsObjectLoadingContent::TeardownProtoChain()
 }
 
 bool
-nsObjectLoadingContent::DoNewResolve(JSContext* aCx, JSHandleObject aObject,
-                                     JSHandleId aId, unsigned aFlags,
+nsObjectLoadingContent::DoNewResolve(JSContext* aCx, JS::Handle<JSObject*> aObject,
+                                     JS::Handle<jsid> aId, unsigned aFlags,
                                      JS::MutableHandle<JSObject*> aObjp)
 {
   // We don't resolve anything; we just try to make sure we're instantiated

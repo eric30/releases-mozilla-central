@@ -409,6 +409,28 @@ TruncateTo(nsTArray<T>& aArrayToTruncate, const nsTArray<U>& aReferenceArray)
   }
 }
 
+/**
+ * Asserts that the anonymous block child of the nsSVGTextFrame2 has been
+ * reflowed (or does not exist).  Returns null if the child has not been
+ * reflowed, and the frame otherwise.
+ *
+ * We check whether the kid has been reflowed and not the frame itself
+ * since we sometimes need to call this function during reflow, after the
+ * kid has been reflowed but before we have cleared the dirty bits on the
+ * frame itself.
+ */
+static nsSVGTextFrame2*
+FrameIfAnonymousChildReflowed(nsSVGTextFrame2* aFrame)
+{
+  NS_PRECONDITION(aFrame, "aFrame must not be null");
+  nsIFrame* kid = aFrame->GetFirstPrincipalChild();
+  if (NS_SUBTREE_DIRTY(kid)) {
+    MOZ_ASSERT(false, "should have already reflowed the anonymous block child");
+    return nullptr;
+  }
+  return aFrame;
+}
+
 
 // ============================================================================
 // Utility classes
@@ -1616,6 +1638,10 @@ private:
 uint32_t
 TextFrameIterator::UndisplayedCharacters() const
 {
+  MOZ_ASSERT(!(mRootFrame->GetFirstPrincipalChild() &&
+               NS_SUBTREE_DIRTY(mRootFrame->GetFirstPrincipalChild())),
+             "should have already reflowed the anonymous block child");
+
   if (!mCurrentFrame) {
     return mRootFrame->mTrailingUndisplayedCharacters;
   }
@@ -1755,7 +1781,7 @@ public:
   TextRenderedRunIterator(nsSVGTextFrame2* aSVGTextFrame,
                           RenderedRunFilter aFilter = eAllFrames,
                           nsIFrame* aSubtree = nullptr)
-    : mFrameIterator(aSVGTextFrame, aSubtree),
+    : mFrameIterator(FrameIfAnonymousChildReflowed(aSVGTextFrame), aSubtree),
       mFilter(aFilter),
       mTextElementCharIndex(0),
       mFrameStartTextElementCharIndex(0),
@@ -1777,7 +1803,7 @@ public:
   TextRenderedRunIterator(nsSVGTextFrame2* aSVGTextFrame,
                           RenderedRunFilter aFilter,
                           nsIContent* aSubtree)
-    : mFrameIterator(aSVGTextFrame, aSubtree),
+    : mFrameIterator(FrameIfAnonymousChildReflowed(aSVGTextFrame), aSubtree),
       mFilter(aFilter),
       mTextElementCharIndex(0),
       mFrameStartTextElementCharIndex(0),
@@ -1968,10 +1994,15 @@ TextRenderedRunIterator::Next()
 TextRenderedRun
 TextRenderedRunIterator::First()
 {
+  if (!mFrameIterator.Current()) {
+    return TextRenderedRun();
+  }
+
   if (Root()->mPositions.IsEmpty()) {
     mFrameIterator.Close();
     return TextRenderedRun();
   }
+
   // Get the character index for the start of this rendered run, by skipping
   // any undisplayed characters.
   mTextElementCharIndex = mFrameIterator.UndisplayedCharacters();
@@ -2265,7 +2296,7 @@ CharIterator::CharIterator(nsSVGTextFrame2* aSVGTextFrame,
                            CharIterator::CharacterFilter aFilter,
                            nsIContent* aSubtree)
   : mFilter(aFilter),
-    mFrameIterator(aSVGTextFrame, aSubtree),
+    mFrameIterator(FrameIfAnonymousChildReflowed(aSVGTextFrame), aSubtree),
     mFrameForTrimCheck(nullptr),
     mTrimmedOffset(0),
     mTrimmedLength(0),
@@ -3136,6 +3167,15 @@ nsSVGTextFrame2::MutationObserver::ContentRemoved(
 }
 
 void
+nsSVGTextFrame2::MutationObserver::CharacterDataChanged(
+                                                 nsIDocument* aDocument,
+                                                 nsIContent* aContent,
+                                                 CharacterDataChangeInfo* aInfo)
+{
+  mFrame->NotifyGlyphMetricsChange();
+}
+
+void
 nsSVGTextFrame2::MutationObserver::AttributeChanged(
                                                 nsIDocument* aDocument,
                                                 mozilla::dom::Element* aElement,
@@ -3221,7 +3261,8 @@ nsSVGTextFrame2::NotifySVGChanged(uint32_t aFlags)
   bool needGlyphMetricsUpdate = false;
   bool needNewCanvasTM = false;
 
-  if ((aFlags & COORD_CONTEXT_CHANGED) && mPositioningMayUsePercentages) {
+  if ((aFlags & COORD_CONTEXT_CHANGED) &&
+      (mState & NS_STATE_SVG_POSITIONING_MAY_USE_PERCENTAGES)) {
     needGlyphMetricsUpdate = true;
   }
 
@@ -3232,6 +3273,12 @@ nsSVGTextFrame2::NotifySVGChanged(uint32_t aFlags)
       needNewBounds = true;
       needGlyphMetricsUpdate = true;
     }
+    if (StyleSVGReset()->mVectorEffect ==
+        NS_STYLE_VECTOR_EFFECT_NON_SCALING_STROKE) {
+      // Stroke currently contributes to our mRect, and our stroke depends on
+      // the transform to our outer-<svg> if |vector-effect:non-scaling-stroke|.
+      needNewBounds = true;
+    }
   }
 
   if (needNewBounds) {
@@ -3240,7 +3287,7 @@ nsSVGTextFrame2::NotifySVGChanged(uint32_t aFlags)
     // invalidate them. We also don't need to invalidate ourself, since our
     // changed ancestor will have invalidated its entire area, which includes
     // our area.
-    nsSVGUtils::ScheduleReflowSVG(this);
+    ScheduleReflowSVG();
   }
 
   if (needGlyphMetricsUpdate) {
@@ -3487,7 +3534,7 @@ nsSVGTextFrame2::ReflowSVG()
                     "ReflowSVG mechanism not designed for this");
 
   if (!nsSVGUtils::NeedsReflowSVG(this)) {
-    NS_ASSERTION(!mPositioningDirty, "How did this happen?");
+    NS_ASSERTION(!(mState & NS_STATE_SVG_POSITIONING_DIRTY), "How did this happen?");
     return;
   }
 
@@ -4098,7 +4145,7 @@ nsSVGTextFrame2::ResolvePositions(nsIContent* aContent,
     }
 
     uint32_t count = GetTextContentLength(aContent);
-    bool& percentages = mPositioningMayUsePercentages;
+    bool percentages = false;
 
     // New text anchoring chunks start at each character assigned a position
     // with x="" or y="", or if we forced one with aForceStartOfChunk due to
@@ -4166,6 +4213,10 @@ nsSVGTextFrame2::ResolvePositions(nsIContent* aContent,
         j++;
       }
     }
+
+    if (percentages) {
+      AddStateBits(NS_STATE_SVG_POSITIONING_MAY_USE_PERCENTAGES);
+    }
   }
 
   // Recurse to children.
@@ -4189,7 +4240,7 @@ bool
 nsSVGTextFrame2::ResolvePositions(nsTArray<gfxPoint>& aDeltas)
 {
   NS_ASSERTION(mPositions.IsEmpty(), "expected mPositions to be empty");
-  mPositioningMayUsePercentages = false;
+  RemoveStateBits(NS_STATE_SVG_POSITIONING_MAY_USE_PERCENTAGES);
 
   CharIterator it(this, CharIterator::eOriginal);
   if (it.AtEnd()) {
@@ -4623,7 +4674,7 @@ void
 nsSVGTextFrame2::DoGlyphPositioning()
 {
   mPositions.Clear();
-  mPositioningDirty = false;
+  RemoveStateBits(NS_STATE_SVG_POSITIONING_DIRTY);
 
   // Determine the positions of each character in app units.
   nsTArray<nsPoint> charPositions;
@@ -4762,11 +4813,21 @@ nsSVGTextFrame2::ShouldRenderAsPath(nsRenderingContext* aContext,
 }
 
 void
+nsSVGTextFrame2::ScheduleReflowSVG()
+{
+  if (mState & NS_STATE_SVG_NONDISPLAY_CHILD) {
+    ScheduleReflowSVGNonDisplayText();
+  } else {
+    nsSVGUtils::ScheduleReflowSVG(this);
+  }
+}
+
+void
 nsSVGTextFrame2::NotifyGlyphMetricsChange()
 {
-  mPositioningDirty = true;
+  AddStateBits(NS_STATE_SVG_POSITIONING_DIRTY);
   nsSVGEffects::InvalidateRenderingObservers(this);
-  nsSVGUtils::ScheduleReflowSVG(this);
+  ScheduleReflowSVG();
 }
 
 void
@@ -4777,7 +4838,7 @@ nsSVGTextFrame2::UpdateGlyphPositioning()
     return;
   }
 
-  if (mPositioningDirty) {
+  if (mState & NS_STATE_SVG_POSITIONING_DIRTY) {
     MOZ_ASSERT(!NS_SUBTREE_DIRTY(kid), "should have already reflowed the kid");
     DoGlyphPositioning();
   }
@@ -4813,7 +4874,7 @@ nsSVGTextFrame2::DoReflow()
 {
   // Since we are going to reflow the anonymous block frame, we will
   // need to update mPositions.
-  mPositioningDirty = true;
+  AddStateBits(NS_STATE_SVG_POSITIONING_DIRTY);
 
   if (mState & NS_STATE_SVG_NONDISPLAY_CHILD) {
     // Normally, these dirty flags would be cleared in ReflowSVG(), but that

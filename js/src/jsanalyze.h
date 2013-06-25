@@ -6,21 +6,15 @@
 
 /* Definitions for javascript analysis. */
 
-#ifndef jsanalyze_h___
-#define jsanalyze_h___
+#ifndef jsanalyze_h
+#define jsanalyze_h
 
 #include "mozilla/PodOperations.h"
-#include "mozilla/TypeTraits.h"
 
-#include "jsautooplen.h"
 #include "jscompartment.h"
 #include "jscntxt.h"
 #include "jsinfer.h"
 #include "jsscript.h"
-
-#include "ds/LifoAlloc.h"
-#include "js/TemplateLib.h"
-#include "vm/ScopeObject.h"
 
 class JSScript;
 
@@ -1102,4 +1096,4 @@ template <> struct IsPod<js::analyze::SSAUseChain>      : TrueType {};
 
 } /* namespace mozilla */
 
-#endif // jsanalyze_h___
+#endif /* jsanalyze_h */

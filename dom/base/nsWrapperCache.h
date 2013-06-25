@@ -8,7 +8,7 @@
 
 #include "nsCycleCollectionParticipant.h"
 #include "mozilla/Assertions.h"
-#include "js/RootingAPI.h"
+#include "js/Value.h"
 
 struct JSTracer;
 class JSObject;
@@ -123,7 +123,7 @@ public:
 
   void SetIsDOMBinding()
   {
-    MOZ_ASSERT(!mWrapper && !GetWrapperFlags(),
+    MOZ_ASSERT(!mWrapper && !(GetWrapperFlags() & ~WRAPPER_IS_DOM_BINDING),
                "This flag should be set before creating any wrappers.");
     SetWrapperFlags(WRAPPER_IS_DOM_BINDING);
   }
@@ -182,7 +182,7 @@ public:
   void TraceWrapper(const TraceCallbacks& aCallbacks, void* aClosure)
   {
     if (PreservingWrapper() && mWrapper) {
-        aCallbacks.Trace(&mWrapper, "Preserved wrapper", aClosure);
+      aCallbacks.Trace(&mWrapper, "Preserved wrapper", aClosure);
     }
   }
 
@@ -212,6 +212,36 @@ public:
   {
     MOZ_ASSERT((aFlagsToUnset & kWrapperFlagsMask) == 0, "Bad flag mask");
     mFlags &= ~aFlagsToUnset;
+  }
+
+  void PreserveWrapper(nsISupports* aScriptObjectHolder)
+  {
+    if (PreservingWrapper()) {
+      return;
+    }
+
+    nsISupports* ccISupports;
+    aScriptObjectHolder->QueryInterface(NS_GET_IID(nsCycleCollectionISupports),
+                                        reinterpret_cast<void**>(&ccISupports));
+    MOZ_ASSERT(ccISupports);
+
+    nsXPCOMCycleCollectionParticipant* participant;
+    CallQueryInterface(ccISupports, &participant);
+    PreserveWrapper(ccISupports, participant);
+  }
+
+  void PreserveWrapper(void* aScriptObjectHolder, nsScriptObjectTracer* aTracer)
+  {
+    if (PreservingWrapper()) {
+      return;
+    }
+
+    HoldJSObjects(aScriptObjectHolder, aTracer);
+    SetPreservingWrapper(true);
+#ifdef DEBUG
+    // Make sure the cycle collector will be able to traverse to the wrapper.
+    CheckCCWrapperTraversal(aScriptObjectHolder, aTracer);
+#endif
   }
 
 private:
@@ -251,6 +281,14 @@ private:
     mFlags &= ~aFlagsToUnset;
   }
 
+  static void HoldJSObjects(void* aScriptObjectHolder,
+                            nsScriptObjectTracer* aTracer);
+
+#ifdef DEBUG
+  void CheckCCWrapperTraversal(void* aScriptObjectHolder,
+                               nsScriptObjectTracer* aTracer);
+#endif // DEBUG
+
   /**
    * If this bit is set then we're preserving the wrapper, which in effect ties
    * the lifetime of the JS object stored in the cache to the lifetime of the
@@ -280,8 +318,8 @@ private:
   enum { kWrapperFlagsMask = (WRAPPER_BIT_PRESERVED | WRAPPER_IS_DOM_BINDING |
                               WRAPPER_HAS_SOW) };
 
-  JSObject* mWrapper;
-  uint32_t  mFlags;
+  JS::Heap<JSObject*> mWrapper;
+  uint32_t            mFlags;
 };
 
 enum { WRAPPER_CACHE_FLAGS_BITS_USED = 3 };

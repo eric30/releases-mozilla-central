@@ -9,6 +9,8 @@
  * ECMAScript Internationalization API Specification.
  */
 
+#include "builtin/Intl.h"
+
 #include <string.h>
 
 #include "jsapi.h"
@@ -16,7 +18,6 @@
 #include "jscntxt.h"
 #include "jsobj.h"
 
-#include "builtin/Intl.h"
 #include "vm/DateTime.h"
 #include "vm/GlobalObject.h"
 #include "vm/Interpreter.h"
@@ -440,10 +441,10 @@ IntlInitialize(JSContext *cx, HandleObject obj, Handle<PropertyName*> initialize
     if (!cx->global()->getIntrinsicValue(cx, initializer, &initializerValue))
         return false;
     JS_ASSERT(initializerValue.isObject());
-    JS_ASSERT(initializerValue.toObject().isFunction());
+    JS_ASSERT(initializerValue.toObject().is<JSFunction>());
 
-    InvokeArgsGuard args;
-    if (!cx->stack.pushInvokeArgs(cx, 3, &args))
+    InvokeArgs args(cx);
+    if (!args.init(3))
         return false;
 
     args.setCallee(initializerValue);
@@ -506,10 +507,10 @@ GetInternals(JSContext *cx, HandleObject obj, MutableHandleObject internals)
     if (!cx->global()->getIntrinsicValue(cx, cx->names().getInternals, &getInternalsValue))
         return false;
     JS_ASSERT(getInternalsValue.isObject());
-    JS_ASSERT(getInternalsValue.toObject().isFunction());
+    JS_ASSERT(getInternalsValue.toObject().is<JSFunction>());
 
-    InvokeArgsGuard args;
-    if (!cx->stack.pushInvokeArgs(cx, 1, &args))
+    InvokeArgs args(cx);
+    if (!args.init(1))
         return false;
 
     args.setCallee(getInternalsValue);
@@ -705,7 +706,7 @@ InitCollatorClass(JSContext *cx, HandleObject Intl, Handle<GlobalObject*> global
     if (!ctor)
         return NULL;
 
-    RootedObject proto(cx, global->asGlobal().getOrCreateCollatorPrototype(cx));
+    RootedObject proto(cx, global->as<GlobalObject>().getOrCreateCollatorPrototype(cx));
     if (!proto)
         return NULL;
     if (!LinkConstructorAndPrototype(cx, ctor, proto))
@@ -1184,7 +1185,7 @@ InitNumberFormatClass(JSContext *cx, HandleObject Intl, Handle<GlobalObject*> gl
     if (!ctor)
         return NULL;
 
-    RootedObject proto(cx, global->asGlobal().getOrCreateNumberFormatPrototype(cx));
+    RootedObject proto(cx, global->as<GlobalObject>().getOrCreateNumberFormatPrototype(cx));
     if (!proto)
         return NULL;
     if (!LinkConstructorAndPrototype(cx, ctor, proto))
@@ -1633,7 +1634,7 @@ InitDateTimeFormatClass(JSContext *cx, HandleObject Intl, Handle<GlobalObject*> 
     if (!ctor)
         return NULL;
 
-    RootedObject proto(cx, global->asGlobal().getOrCreateDateTimeFormatPrototype(cx));
+    RootedObject proto(cx, global->as<GlobalObject>().getOrCreateDateTimeFormatPrototype(cx));
     if (!proto)
         return NULL;
     if (!LinkConstructorAndPrototype(cx, ctor, proto))
@@ -2025,8 +2026,8 @@ static const JSFunctionSpec intl_static_methods[] = {
 JSObject *
 js_InitIntlClass(JSContext *cx, HandleObject obj)
 {
-    JS_ASSERT(obj->isGlobal());
-    Rooted<GlobalObject*> global(cx, &obj->asGlobal());
+    JS_ASSERT(obj->is<GlobalObject>());
+    Rooted<GlobalObject*> global(cx, &obj->as<GlobalObject>());
 
     // The constructors above need to be able to determine whether they've been
     // called with this being "the standard built-in Intl object". The global

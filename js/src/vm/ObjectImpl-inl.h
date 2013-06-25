@@ -4,8 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef ObjectImpl_inl_h___
-#define ObjectImpl_inl_h___
+#ifndef vm_ObjectImpl_inl_h
+#define vm_ObjectImpl_inl_h
 
 #include "mozilla/Assertions.h"
 
@@ -16,9 +16,10 @@
 #include "gc/Heap.h"
 #include "gc/Marking.h"
 #include "js/TemplateLib.h"
+#include "vm/Interpreter.h"
+#include "vm/ObjectImpl.h"
 
-#include "Interpreter.h"
-#include "ObjectImpl.h"
+#include "gc/Barrier-inl.h"
 
 namespace js {
 
@@ -204,24 +205,6 @@ js::ObjectImpl::invalidateSlotRange(uint32_t start, uint32_t length)
 #endif /* DEBUG */
 }
 
-inline void
-js::ObjectImpl::initializeSlotRange(uint32_t start, uint32_t length)
-{
-    /*
-     * No bounds check, as this is used when the object's shape does not
-     * reflect its allocated slots (updateSlotsForSpan).
-     */
-    HeapSlot *fixedStart, *fixedEnd, *slotsStart, *slotsEnd;
-    getSlotRangeUnchecked(start, length, &fixedStart, &fixedEnd, &slotsStart, &slotsEnd);
-
-    JSRuntime *rt = runtime();
-    uint32_t offset = start;
-    for (HeapSlot *sp = fixedStart; sp < fixedEnd; sp++)
-        sp->init(rt, this->asObjectPtr(), HeapSlot::Slot, offset++, UndefinedValue());
-    for (HeapSlot *sp = slotsStart; sp < slotsEnd; sp++)
-        sp->init(rt, this->asObjectPtr(), HeapSlot::Slot, offset++, UndefinedValue());
-}
-
 inline bool
 js::ObjectImpl::isNative() const
 {
@@ -332,12 +315,6 @@ js::ObjectImpl::getJSClass() const
     return Jsvalify(getClass());
 }
 
-inline bool
-js::ObjectImpl::hasClass(const Class *c) const
-{
-    return getClass() == c;
-}
-
 inline const js::ObjectOps *
 js::ObjectImpl::getOps() const
 {
@@ -379,16 +356,8 @@ js::ObjectImpl::tenuredSizeOfThis() const
 JS_ALWAYS_INLINE JS::Zone *
 js::ObjectImpl::zone() const
 {
+    JS_ASSERT(InSequentialOrExclusiveParallelSection());
     return shape_->zone();
-}
-
-JS_ALWAYS_INLINE JS::Zone *
-ZoneOfValue(const JS::Value &value)
-{
-    JS_ASSERT(value.isMarkable());
-    if (value.isObject())
-        return value.toObject().zone();
-    return static_cast<js::gc::Cell *>(value.toGCThing())->tenuredZone();
 }
 
 /* static */ inline void
@@ -397,7 +366,7 @@ js::ObjectImpl::readBarrier(ObjectImpl *obj)
 #ifdef JSGC_INCREMENTAL
     Zone *zone = obj->zone();
     if (zone->needsBarrier()) {
-        MOZ_ASSERT(!zone->rt->isHeapBusy());
+        MOZ_ASSERT(!zone->rt->isHeapMajorCollecting());
         JSObject *tmp = obj->asObjectPtr();
         MarkObjectUnbarriered(zone->barrierTracer(), &tmp, "read barrier");
         MOZ_ASSERT(tmp == obj->asObjectPtr());
@@ -438,7 +407,7 @@ js::ObjectImpl::writeBarrierPre(ObjectImpl *obj)
 
     Zone *zone = obj->zone();
     if (zone->needsBarrier()) {
-        MOZ_ASSERT(!zone->rt->isHeapBusy());
+        MOZ_ASSERT(!zone->rt->isHeapMajorCollecting());
         JSObject *tmp = obj->asObjectPtr();
         MarkObjectUnbarriered(zone->barrierTracer(), &tmp, "write barrier");
         MOZ_ASSERT(tmp == obj->asObjectPtr());
@@ -454,38 +423,6 @@ js::ObjectImpl::writeBarrierPost(ObjectImpl *obj, void *addr)
         return;
     obj->runtime()->gcStoreBuffer.putCell((Cell **)addr);
 #endif
-}
-
-inline bool
-js::ObjectImpl::hasPrivate() const
-{
-    return getClass()->hasPrivate();
-}
-
-inline void *&
-js::ObjectImpl::privateRef(uint32_t nfixed) const
-{
-    /*
-     * The private pointer of an object can hold any word sized value.
-     * Private pointers are stored immediately after the last fixed slot of
-     * the object.
-     */
-    MOZ_ASSERT(nfixed == numFixedSlots());
-    MOZ_ASSERT(hasPrivate());
-    HeapSlot *end = &fixedSlots()[nfixed];
-    return *reinterpret_cast<void**>(end);
-}
-
-inline void *
-js::ObjectImpl::getPrivate() const
-{
-    return privateRef(numFixedSlots());
-}
-
-inline void *
-js::ObjectImpl::getPrivate(uint32_t nfixed) const
-{
-    return privateRef(nfixed);
 }
 
 inline void
@@ -518,4 +455,4 @@ js::ObjectImpl::initPrivate(void *data)
     privateRef(numFixedSlots()) = data;
 }
 
-#endif /* ObjectImpl_inl_h__ */
+#endif /* vm_ObjectImpl_inl_h */

@@ -655,7 +655,11 @@ protected:
 
     void ClearFrameHistory(nsISHEntry* aEntry);
 
-    nsresult MaybeInitTiming();
+    /**
+     * Initializes mTiming if it isn't yet.
+     * After calling this, mTiming is non-null.
+     */
+    void MaybeInitTiming();
 
     // Event type dispatched by RestorePresentation
     class RestorePresentationEvent : public nsRunnable {
@@ -873,6 +877,13 @@ private:
     nsTObserverArray<nsWeakPtr> mReflowObservers;
     int32_t           mParentCharsetSource;
     nsCString         mOriginalUriString;
+
+    // Separate function to do the actual name (i.e. not _top, _self etc.)
+    // searching for FindItemWithName.
+    nsresult DoFindItemWithName(const PRUnichar* aName,
+                                nsISupports* aRequestor,
+                                nsIDocShellTreeItem* aOriginalRequestor,
+                                nsIDocShellTreeItem** _retval);
 
 #ifdef DEBUG
     // We're counting the number of |nsDocShells| to help find leaks

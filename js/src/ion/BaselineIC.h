@@ -4,8 +4,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#if !defined(jsion_baseline_ic_h__) && defined(JS_ION)
-#define jsion_baseline_ic_h__
+#ifndef ion_BaselineIC_h
+#define ion_BaselineIC_h
+
+#ifdef JS_ION
 
 #include "jscntxt.h"
 #include "jscompartment.h"
@@ -390,7 +392,10 @@ class ICEntry
     _(TypeOf_Fallback)          \
     _(TypeOf_Typed)             \
                                 \
-    _(Rest_Fallback)
+    _(Rest_Fallback)            \
+                                \
+    _(RetSub_Fallback)          \
+    _(RetSub_Resume)
 
 #define FORWARD_DECLARE_STUBS(kindName) class IC##kindName;
     IC_STUB_KIND_LIST(FORWARD_DECLARE_STUBS)
@@ -738,6 +743,7 @@ class ICStub
           case GetProp_DOMProxyShadowed:
           case SetProp_CallScripted:
           case SetProp_CallNative:
+          case RetSub_Fallback:
             return true;
           default:
             return false;
@@ -923,7 +929,7 @@ class ICUpdatedStub : public ICStub
   public:
     bool initUpdatingChain(JSContext *cx, ICStubSpace *space);
 
-    bool addUpdateStubForValue(JSContext *cx, HandleScript script, HandleObject obj, jsid id,
+    bool addUpdateStubForValue(JSContext *cx, HandleScript script, HandleObject obj, HandleId id,
                                HandleValue val);
 
     void addOptimizedUpdateStub(ICStub *stub) {
@@ -2373,7 +2379,10 @@ class ICBinaryArith_Fallback : public ICFallbackStub
     friend class ICStubSpace;
 
     ICBinaryArith_Fallback(IonCode *stubCode)
-      : ICFallbackStub(BinaryArith_Fallback, stubCode) {}
+      : ICFallbackStub(BinaryArith_Fallback, stubCode)
+    {
+        extra_ = 0;
+    }
 
   public:
     static const uint32_t MAX_OPTIMIZED_STUBS = 8;
@@ -2382,6 +2391,13 @@ class ICBinaryArith_Fallback : public ICFallbackStub
         if (!code)
             return NULL;
         return space->allocate<ICBinaryArith_Fallback>(code);
+    }
+
+    bool sawDoubleResult() {
+        return extra_;
+    }
+    void setSawDoubleResult() {
+        extra_ = 1;
     }
 
     // Compiler for this stub kind.
@@ -2403,14 +2419,20 @@ class ICBinaryArith_Int32 : public ICStub
 {
     friend class ICStubSpace;
 
-    ICBinaryArith_Int32(IonCode *stubCode)
-      : ICStub(BinaryArith_Int32, stubCode) {}
+    ICBinaryArith_Int32(IonCode *stubCode, bool allowDouble)
+      : ICStub(BinaryArith_Int32, stubCode)
+    {
+        extra_ = allowDouble;
+    }
 
   public:
-    static inline ICBinaryArith_Int32 *New(ICStubSpace *space, IonCode *code) {
+    static inline ICBinaryArith_Int32 *New(ICStubSpace *space, IonCode *code, bool allowDouble) {
         if (!code)
             return NULL;
-        return space->allocate<ICBinaryArith_Int32>(code);
+        return space->allocate<ICBinaryArith_Int32>(code, allowDouble);
+    }
+    bool allowDouble() const {
+        return extra_;
     }
 
     // Compiler for this stub kind.
@@ -2433,7 +2455,7 @@ class ICBinaryArith_Int32 : public ICStub
             op_(op), allowDouble_(allowDouble) {}
 
         ICStub *getStub(ICStubSpace *space) {
-            return ICBinaryArith_Int32::New(space, getStubCode());
+            return ICBinaryArith_Int32::New(space, getStubCode(), allowDouble_);
         }
     };
 };
@@ -2655,7 +2677,10 @@ class ICUnaryArith_Fallback : public ICFallbackStub
     friend class ICStubSpace;
 
     ICUnaryArith_Fallback(IonCode *stubCode)
-      : ICFallbackStub(UnaryArith_Fallback, stubCode) {}
+      : ICFallbackStub(UnaryArith_Fallback, stubCode)
+    {
+        extra_ = 0;
+    }
 
   public:
     static const uint32_t MAX_OPTIMIZED_STUBS = 8;
@@ -2664,6 +2689,13 @@ class ICUnaryArith_Fallback : public ICFallbackStub
         if (!code)
             return NULL;
         return space->allocate<ICUnaryArith_Fallback>(code);
+    }
+
+    bool sawDoubleResult() {
+        return extra_;
+    }
+    void setSawDoubleResult() {
+        extra_ = 1;
     }
 
     // Compiler for this stub kind.
@@ -2717,7 +2749,7 @@ class ICUnaryArith_Double : public ICStub
     friend class ICStubSpace;
 
     ICUnaryArith_Double(IonCode *stubCode)
-      : ICStub(UnaryArith_Int32, stubCode)
+      : ICStub(UnaryArith_Double, stubCode)
     {}
 
   public:
@@ -2733,7 +2765,7 @@ class ICUnaryArith_Double : public ICStub
 
       public:
         Compiler(JSContext *cx, JSOp op)
-          : ICMultiStubCompiler(cx, ICStub::UnaryArith_Int32, op)
+          : ICMultiStubCompiler(cx, ICStub::UnaryArith_Double, op)
         {}
 
         ICStub *getStub(ICStubSpace *space) {
@@ -5519,7 +5551,92 @@ class ICRest_Fallback : public ICFallbackStub
     };
 };
 
+// Stub for JSOP_RETSUB ("returning" from a |finally| block).
+class ICRetSub_Fallback : public ICFallbackStub
+{
+    friend class ICStubSpace;
+
+    ICRetSub_Fallback(IonCode *stubCode)
+      : ICFallbackStub(ICStub::RetSub_Fallback, stubCode)
+    { }
+
+  public:
+    static const uint32_t MAX_OPTIMIZED_STUBS = 8;
+
+    static inline ICRetSub_Fallback *New(ICStubSpace *space, IonCode *code) {
+        if (!code)
+            return NULL;
+        return space->allocate<ICRetSub_Fallback>(code);
+    }
+
+    class Compiler : public ICStubCompiler {
+      protected:
+        bool generateStubCode(MacroAssembler &masm);
+
+      public:
+        Compiler(JSContext *cx)
+          : ICStubCompiler(cx, ICStub::RetSub_Fallback)
+        { }
+
+        ICStub *getStub(ICStubSpace *space) {
+            return ICRetSub_Fallback::New(space, getStubCode());
+        }
+    };
+};
+
+// Optimized JSOP_RETSUB stub. Every stub maps a single pc offset to its
+// native code address.
+class ICRetSub_Resume : public ICStub
+{
+    friend class ICStubSpace;
+
+  protected:
+    uint32_t pcOffset_;
+    uint8_t *addr_;
+
+    ICRetSub_Resume(IonCode *stubCode, uint32_t pcOffset, uint8_t *addr)
+      : ICStub(ICStub::RetSub_Resume, stubCode),
+        pcOffset_(pcOffset),
+        addr_(addr)
+    { }
+
+  public:
+    static ICRetSub_Resume *New(ICStubSpace *space, IonCode *code, uint32_t pcOffset,
+                                uint8_t *addr) {
+        if (!code)
+            return NULL;
+        return space->allocate<ICRetSub_Resume>(code, pcOffset, addr);
+    }
+
+    static size_t offsetOfPCOffset() {
+        return offsetof(ICRetSub_Resume, pcOffset_);
+    }
+    static size_t offsetOfAddr() {
+        return offsetof(ICRetSub_Resume, addr_);
+    }
+
+    class Compiler : public ICStubCompiler {
+        uint32_t pcOffset_;
+        uint8_t *addr_;
+
+        bool generateStubCode(MacroAssembler &masm);
+
+      public:
+        Compiler(JSContext *cx, uint32_t pcOffset, uint8_t *addr)
+          : ICStubCompiler(cx, ICStub::RetSub_Resume),
+            pcOffset_(pcOffset),
+            addr_(addr)
+        { }
+
+        ICStub *getStub(ICStubSpace *space) {
+            return ICRetSub_Resume::New(space, getStubCode(), pcOffset_, addr_);
+        }
+    };
+};
+
 } // namespace ion
 } // namespace js
 
-#endif
+#endif // JS_ION
+
+#endif /* ion_BaselineIC_h */

@@ -16,6 +16,9 @@ endif
 # responsibility between Makefile.in and mozbuild files.
 _MOZBUILD_EXTERNAL_VARIABLES := \
   DIRS \
+  EXTRA_PP_COMPONENTS \
+  HOST_CSRCS \
+  HOST_LIBRARY_NAME \
   MODULE \
   PARALLEL_DIRS \
   TEST_DIRS \
@@ -109,10 +112,6 @@ else
 endif # ifndef .PYMAKE
 
 _VPATH_SRCS = $(abspath $<)
-
-ifdef EXTRA_DSO_LIBS
-EXTRA_DSO_LIBS	:= $(call EXPAND_MOZLIBNAME,$(EXTRA_DSO_LIBS))
-endif
 
 ################################################################################
 # Testing frameworks support
@@ -419,15 +418,20 @@ ifdef MOZ_UPDATE_XTERM
 UPDATE_TITLE = printf "\033]0;%s in %s\007" $(1) $(shell $(BUILD_TOOLS)/print-depth-path.sh)/$(2) ;
 endif
 
-define SUBMAKE # $(call SUBMAKE,target,directory)
+# Static directories are largely independent of our build system. But, they
+# could share the same build mechanism (like moz.build files). We need to
+# prevent leaking of our backend state to these independent build systems. This
+# is why MOZBUILD_BACKEND_CHECKED isn't exported to make invocations for static
+# directories.
+define SUBMAKE # $(call SUBMAKE,target,directory,static)
 +@$(UPDATE_TITLE)
-+$(MAKE) $(if $(2),-C $(2)) $(1)
++$(if $(3), MOZBUILD_BACKEND_CHECKED=,) $(MAKE) $(if $(2),-C $(2)) $(1)
 
 endef # The extra line is important here! don't delete it
 
 define TIER_DIR_SUBMAKE
 @echo "BUILDSTATUS TIERDIR_START $(2)"
-$(call SUBMAKE,$(1),$(2))
+$(call SUBMAKE,$(1),$(2),$(3))
 @echo "BUILDSTATUS TIERDIR_FINISH $(2)"
 
 endef # Ths empty line is important.
@@ -442,11 +446,6 @@ endif
 ifneq (,$(strip $(PARALLEL_DIRS)))
 LOOP_OVER_PARALLEL_DIRS = \
   $(foreach dir,$(PARALLEL_DIRS),$(call SUBMAKE,$@,$(dir)))
-endif
-
-ifneq (,$(strip $(STATIC_DIRS)))
-LOOP_OVER_STATIC_DIRS = \
-  $(foreach dir,$(STATIC_DIRS),$(call SUBMAKE,$@,$(dir)))
 endif
 
 ifneq (,$(strip $(TOOL_DIRS)))
@@ -674,7 +673,7 @@ else
 
 default all::
 ifneq (,$(strip $(STATIC_DIRS)))
-	$(foreach dir,$(STATIC_DIRS),$(call SUBMAKE,,$(dir)))
+	$(foreach dir,$(STATIC_DIRS),$(call SUBMAKE,,$(dir),1))
 endif
 	$(MAKE) export
 	$(MAKE) libs
@@ -718,7 +717,7 @@ endif
 	@echo "BUILDSTATUS DIRS $$($$@_dirs)"
 ifneq (,$(tier_$(1)_staticdirs))
 	@echo "BUILDSTATUS SUBTIER_START $(1) static"
-	$$(foreach dir,$$($$@_staticdirs),$$(call TIER_DIR_SUBMAKE,,$$(dir)))
+	$$(foreach dir,$$($$@_staticdirs),$$(call TIER_DIR_SUBMAKE,,$$(dir),1))
 	@echo "BUILDSTATUS SUBTIER_FINISH $(1) static"
 endif
 ifneq (,$(tier_$(1)_dirs))
@@ -1183,22 +1182,13 @@ else
 endif
 endif
 
-# need 3 separate lines for OS/2
-%:: %.pl
-	$(RM) $@
-	cp $< $@
-	chmod +x $@
-
-%:: %.sh
-	$(RM) $@
-	cp $< $@
-	chmod +x $@
-
 # Cancel these implicit rules
 #
 %: %,v
 
 %: RCS/%,v
+
+%: RCS/%
 
 %: s.%
 

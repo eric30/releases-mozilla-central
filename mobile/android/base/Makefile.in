@@ -48,6 +48,7 @@ FENNEC_JAVA_FILES = \
   ANRReporter.java \
   ActivityHandlerHelper.java \
   AlertNotification.java \
+  AlignRightLinkPreference.java \
   AllCapsTextView.java \
   AndroidImport.java \
   AndroidImportPreference.java \
@@ -173,6 +174,9 @@ FENNEC_JAVA_FILES = \
   WebAppAllocator.java \
   WebAppImpl.java \
   ZoomConstraints.java \
+  braille/com/googlecode/eyesfree/braille/selfbraille/ISelfBrailleService.java \
+  braille/com/googlecode/eyesfree/braille/selfbraille/SelfBrailleClient.java \
+  braille/com/googlecode/eyesfree/braille/selfbraille/WriteData.java \
   db/BrowserContract.java \
   db/BrowserProvider.java \
   db/FormHistoryProvider.java \
@@ -235,6 +239,7 @@ FENNEC_JAVA_FILES = \
   widget/ActivityChooserModel.java \
   widget/AddonsSection.java \
   widget/ButtonToast.java \
+  widget/ArrowPopup.java \
   widget/DateTimePicker.java \
   widget/Divider.java \
   widget/FaviconView.java \
@@ -434,6 +439,7 @@ endif
 RES_LAYOUT = \
   $(SYNC_RES_LAYOUT) \
   res/layout/abouthome_content.xml \
+  res/layout/arrow_popup.xml \
   res/layout/autocomplete_list.xml \
   res/layout/autocomplete_list_item.xml \
   res/layout/awesomebar.xml \
@@ -451,7 +457,6 @@ RES_LAYOUT = \
   res/layout/bookmark_edit.xml \
   res/layout/browser_toolbar.xml \
   res/layout/datetime_picker.xml \
-  res/layout/doorhangerpopup.xml \
   res/layout/doorhanger.xml \
   res/layout/doorhanger_button.xml \
   res/layout/find_in_page_content.xml \
@@ -466,11 +471,12 @@ RES_LAYOUT = \
   res/layout/notification_icon_text.xml \
   res/layout/notification_progress.xml \
   res/layout/notification_progress_text.xml \
+  res/layout/preference_rightalign_icon.xml \
   res/layout/site_setting_item.xml \
   res/layout/site_setting_title.xml \
   res/layout/setup_screen.xml \
   res/layout/shared_ui_components.xml \
-  res/layout/site_identity_popup.xml \
+  res/layout/site_identity.xml \
   res/layout/remote_tabs_child.xml \
   res/layout/remote_tabs_group.xml \
   res/layout/tabs_panel.xml \
@@ -609,6 +615,7 @@ RES_DRAWABLE_MDPI = \
   res/drawable-mdpi/alert_camera.png \
   res/drawable-mdpi/alert_mic.png \
   res/drawable-mdpi/alert_mic_camera.png \
+  res/drawable-mdpi/arrow_popup_bg.9.png \
   res/drawable-mdpi/autocomplete_list_bg.9.png \
   res/drawable-mdpi/awesomebar_tab_center.9.png \
   res/drawable-mdpi/awesomebar_tab_left.9.png \
@@ -659,14 +666,12 @@ RES_DRAWABLE_MDPI = \
   res/drawable-mdpi/tabs_count_foreground.png \
   res/drawable-mdpi/toast.9.png \
   res/drawable-mdpi/toast_button_focused.9.png \
-  res/drawable-mdpi/toast_button_focused.9.png \
   res/drawable-mdpi/toast_button_pressed.9.png \
   res/drawable-mdpi/toast_divider.9.png \
   res/drawable-mdpi/address_bar_url_default.9.png \
   res/drawable-mdpi/address_bar_url_default_pb.9.png \
   res/drawable-mdpi/address_bar_url_pressed.9.png \
   res/drawable-mdpi/address_bar_url_pressed_pb.9.png \
-  res/drawable-mdpi/doorhanger_popup_bg.9.png \
   res/drawable-mdpi/find_close.png \
   res/drawable-mdpi/find_next.png \
   res/drawable-mdpi/find_prev.png \
@@ -681,6 +686,8 @@ RES_DRAWABLE_MDPI = \
   res/drawable-mdpi/menu_item_check.png \
   res/drawable-mdpi/menu_item_more.png \
   res/drawable-mdpi/menu_item_uncheck.png \
+  res/drawable-mdpi/site_security_blocked_mixed_content.png \
+  res/drawable-mdpi/site_security_loaded_mixed_content.png \
   res/drawable-mdpi/site_security_identified.png \
   res/drawable-mdpi/site_security_verified.png \
   res/drawable-mdpi/tabs_normal.png \
@@ -732,6 +739,7 @@ RES_DRAWABLE_HDPI = \
   res/drawable-hdpi/alert_camera.png \
   res/drawable-hdpi/alert_mic.png \
   res/drawable-hdpi/alert_mic_camera.png \
+  res/drawable-hdpi/arrow_popup_bg.9.png \
   res/drawable-hdpi/awesomebar_tab_center.9.png \
   res/drawable-hdpi/awesomebar_tab_left.9.png \
   res/drawable-hdpi/awesomebar_tab_right.9.png \
@@ -770,7 +778,6 @@ RES_DRAWABLE_HDPI = \
   res/drawable-hdpi/address_bar_url_default_pb.9.png \
   res/drawable-hdpi/address_bar_url_pressed.9.png \
   res/drawable-hdpi/address_bar_url_pressed_pb.9.png \
-  res/drawable-hdpi/doorhanger_popup_bg.9.png \
   res/drawable-hdpi/find_close.png \
   res/drawable-hdpi/find_next.png \
   res/drawable-hdpi/find_prev.png \
@@ -785,6 +792,8 @@ RES_DRAWABLE_HDPI = \
   res/drawable-hdpi/menu_item_check.png \
   res/drawable-hdpi/menu_item_more.png \
   res/drawable-hdpi/menu_item_uncheck.png \
+  res/drawable-hdpi/site_security_blocked_mixed_content.png \
+  res/drawable-hdpi/site_security_loaded_mixed_content.png \
   res/drawable-hdpi/site_security_identified.png \
   res/drawable-hdpi/site_security_verified.png \
   res/drawable-hdpi/tabs_normal.png \
@@ -828,6 +837,7 @@ RES_DRAWABLE_XHDPI = \
   res/drawable-xhdpi/alert_camera.png \
   res/drawable-xhdpi/alert_mic.png \
   res/drawable-xhdpi/alert_mic_camera.png \
+  res/drawable-xhdpi/arrow_popup_bg.9.png \
   res/drawable-xhdpi/awesomebar_tab_center.9.png \
   res/drawable-xhdpi/awesomebar_tab_left.9.png \
   res/drawable-xhdpi/awesomebar_tab_right.9.png \
@@ -859,7 +869,6 @@ RES_DRAWABLE_XHDPI = \
   res/drawable-xhdpi/tab_thumbnail_shadow.png \
   res/drawable-xhdpi/tabs_count.png \
   res/drawable-xhdpi/tabs_count_foreground.png \
-  res/drawable-xhdpi/doorhanger_popup_bg.9.png \
   res/drawable-xhdpi/find_close.png \
   res/drawable-xhdpi/find_next.png \
   res/drawable-xhdpi/find_prev.png \
@@ -881,6 +890,8 @@ RES_DRAWABLE_XHDPI = \
   res/drawable-xhdpi/tab_indicator_divider.9.png \
   res/drawable-xhdpi/tab_indicator_selected.9.png \
   res/drawable-xhdpi/tab_indicator_selected_focused.9.png \
+  res/drawable-xhdpi/site_security_blocked_mixed_content.png \
+  res/drawable-xhdpi/site_security_loaded_mixed_content.png \
   res/drawable-xhdpi/site_security_identified.png \
   res/drawable-xhdpi/site_security_verified.png \
   res/drawable-xhdpi/tabs_normal.png \
@@ -982,21 +993,21 @@ RES_DRAWABLE_XHDPI_V11 = \
   $(NULL)
 
 RES_DRAWABLE_LARGE_MDPI_V11 = \
-  res/drawable-large-mdpi-v11/doorhanger_popup_bg.9.png \
+  res/drawable-large-mdpi-v11/arrow_popup_bg.9.png \
   res/drawable-large-mdpi-v11/ic_menu_reload.png \
   res/drawable-large-mdpi-v11/ic_menu_forward.png \
   res/drawable-large-mdpi-v11/menu.png \
   $(NULL)
 
 RES_DRAWABLE_LARGE_HDPI_V11 = \
-  res/drawable-large-hdpi-v11/doorhanger_popup_bg.9.png \
+  res/drawable-large-hdpi-v11/arrow_popup_bg.9.png \
   res/drawable-large-hdpi-v11/ic_menu_reload.png \
   res/drawable-large-hdpi-v11/ic_menu_forward.png \
   res/drawable-large-hdpi-v11/menu.png \
   $(NULL)
 
 RES_DRAWABLE_LARGE_XHDPI_V11 = \
-  res/drawable-large-xhdpi-v11/doorhanger_popup_bg.9.png \
+  res/drawable-large-xhdpi-v11/arrow_popup_bg.9.png \
   res/drawable-large-xhdpi-v11/ic_menu_reload.png \
   res/drawable-large-xhdpi-v11/ic_menu_forward.png \
   res/drawable-large-xhdpi-v11/menu.png \
@@ -1218,6 +1229,7 @@ CLASSES_WITH_JNI= \
     org.mozilla.gecko.GeckoAppShell \
     org.mozilla.gecko.GeckoJavaSampler \
     org.mozilla.gecko.gfx.NativePanZoomController \
+    org.mozilla.gecko.ANRReporter \
     $(NULL)
 
 ifdef MOZ_WEBSMS_BACKEND

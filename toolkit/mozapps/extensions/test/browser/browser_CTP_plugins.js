@@ -11,8 +11,8 @@ function updateBlocklist(aCallback) {
   var blocklistNotifier = Cc["@mozilla.org/extensions/blocklist;1"]
                           .getService(Ci.nsITimerCallback);
   var observer = function() {
-    aCallback();
     Services.obs.removeObserver(observer, "blocklist-updated");
+    SimpleTest.executeSoon(aCallback);
   };
   Services.obs.addObserver(observer, "blocklist-updated", false);
   blocklistNotifier.notify(null);
@@ -118,7 +118,7 @@ function part6() {
 }
 
 function part7() {
-  ok(!PopupNotifications.getNotification("click-to-play-plugins", gPluginBrowser), "part7: should not have a click-to-play notification");
+  ok(PopupNotifications.getNotification("click-to-play-plugins", gPluginBrowser), "part7: disabled plugins still show a notification");
   let testPlugin = gPluginBrowser.contentDocument.getElementById("test");
   ok(testPlugin, "part7: should have a plugin element in the page");
   let objLoadingContent = testPlugin.QueryInterface(Ci.nsIObjectLoadingContent);

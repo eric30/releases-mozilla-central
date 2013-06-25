@@ -13,7 +13,6 @@ include $(srcdir)/objs.mk
 
 EXTRA_DEPS += $(srcdir)/objs.mk
 
-LIBRARY_NAME	= xpcomglue_s
 DIST_INSTALL	= 1
 
 LOCAL_INCLUDES	= \
@@ -30,7 +29,6 @@ SDK_HEADERS = \
 		nsCategoryCache.h \
 		nsClassHashtable.h \
 		nsComponentManagerUtils.h \
-		nsCycleCollectionJSRuntime.h \
 		nsCycleCollectionParticipant.h \
 		nsCycleCollectorUtils.h \
 		nsDataHashtable.h \
@@ -46,6 +44,7 @@ SDK_HEADERS = \
 		nsISupportsUtils.h \
 		nsIWeakReferenceUtils.h \
 		nsInterfaceHashtable.h \
+		nsJSThingHashtable.h \
 		nsMemory.h \
 		nsQuickSort.h \
 		nsRefPtrHashtable.h \

@@ -89,6 +89,15 @@ pref("dom.workers.maxPerDomain", 20);
 // Whether nonzero values can be returned from performance.timing.*
 pref("dom.enable_performance", true);
 
+// Whether the Gamepad API is enabled
+#ifdef RELEASE_BUILD
+pref("dom.gamepad.enabled", false);
+pref("dom.gamepad.non_standard_events.enabled", false);
+#else
+pref("dom.gamepad.enabled", true);
+pref("dom.gamepad.non_standard_events.enabled", true);
+#endif
+
 // Fastback caching - if this pref is negative, then we calculate the number
 // of content viewers to cache based on the amount of available memory.
 pref("browser.sessionhistory.max_total_viewers", -1);
@@ -158,6 +167,7 @@ pref("media.wakelock_timeout", 2000);
 #ifdef MOZ_WMF
 pref("media.windows-media-foundation.enabled", true);
 pref("media.windows-media-foundation.use-dxva", true);
+pref("media.windows-media-foundation.play-stand-alone", true);
 #endif
 #ifdef MOZ_RAW
 pref("media.raw.enabled", true);
@@ -178,7 +188,7 @@ pref("media.webm.enabled", true);
 pref("media.dash.enabled", false);
 #endif
 #ifdef MOZ_GSTREAMER
-pref("media.gstreamer.enabled", true);
+pref("media.gstreamer.enabled", false);
 #endif
 #ifdef MOZ_WEBRTC
 pref("media.navigator.enabled", true);
@@ -817,6 +827,7 @@ pref("javascript.options.mem.gc_low_frequency_heap_growth", 150);
 pref("javascript.options.mem.gc_dynamic_heap_growth", true);
 pref("javascript.options.mem.gc_dynamic_mark_slice", true);
 pref("javascript.options.mem.gc_allocation_threshold_mb", 30);
+pref("javascript.options.mem.gc_decommit_threshold_mb", 32);
 
 pref("javascript.options.mem.analysis_purge_mb", 100);
 
@@ -1804,7 +1815,6 @@ pref("capability.policy.default.SOAPCall.invokeVerifySourceHeader", "allAccess")
 
 // if true, allow plug-ins to override internal imglib decoder mime types in full-page mode
 pref("plugin.override_internal_types", false);
-pref("plugin.expose_full_path", false); // if true navigator.plugins reveals full path
 
 // See bug 136985.  Gives embedders a pref to hook into to show
 // a popup blocker if they choose.
@@ -1844,6 +1854,13 @@ pref("plugins.load_appdir_plugins", false);
 pref("plugins.click_to_play", false);
 // The default value for nsIPluginTag.enabledState (STATE_ENABLED = 2)
 pref("plugin.default.state", 2);
+
+// How long in minutes we will allow a plugin to work after the user has chosen
+// to allow it "now"
+pref("plugin.sessionPermissionNow.intervalInMinutes", 60);
+// How long in days we will allow a plugin to work after the user has chosen
+// to allow it persistently.
+pref("plugin.persistentPermissionAlways.intervalInDays", 90);
 
 #ifndef DEBUG
 // How long a plugin is allowed to process a synchronous IPC message
@@ -3973,6 +3990,7 @@ pref("webgl.force-layers-readback", false);
 pref("webgl.lose-context-on-heap-minimize", false);
 pref("webgl.can-lose-context-in-foreground", true);
 pref("webgl.max-warnings-per-context", 32);
+pref("webgl.enable-draft-extensions", false);
 #ifdef MOZ_WIDGET_GONK
 pref("gfx.gralloc.fence-with-readpixels", false);
 #endif
@@ -4007,7 +4025,11 @@ pref("layers.acceleration.draw-fps", false);
 
 pref("layers.draw-borders", false);
 
+#ifdef XP_MACOSX
+pref("layers.offmainthreadcomposition.enabled", true);
+#else
 pref("layers.offmainthreadcomposition.enabled", false);
+#endif
 // same effect as layers.offmainthreadcomposition.enabled, but specifically for
 // use with tests.
 pref("layers.offmainthreadcomposition.testing.enabled", false);
@@ -4089,9 +4111,6 @@ pref("dom.idle-observers-api.enabled", true);
 // Time limit, in milliseconds, for nsEventStateManager::IsHandlingUserInput().
 // Used to detect long running handlers of user-generated events.
 pref("dom.event.handling-user-input-time-limit", 1000);
- 
-//3D Transforms
-pref("layout.3d-transforms.enabled", true);
 
 // Whether we should layerize all animated images (if otherwise possible).
 pref("layout.animated-image-layers.enabled", false);

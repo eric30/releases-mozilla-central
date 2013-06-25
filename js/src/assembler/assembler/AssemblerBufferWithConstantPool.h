@@ -28,8 +28,8 @@
  * 
  * ***** END LICENSE BLOCK ***** */
 
-#ifndef AssemblerBufferWithConstantPool_h
-#define AssemblerBufferWithConstantPool_h
+#ifndef assembler_assembler_AssemblerBufferWithConstantPool_h
+#define assembler_assembler_AssemblerBufferWithConstantPool_h
 
 #include "assembler/wtf/Platform.h"
 
@@ -39,7 +39,6 @@
 #include "assembler/wtf/SegmentedVector.h"
 #include "assembler/wtf/Assertions.h"
 
-#include "jsnum.h"
 #define ASSEMBLER_HAS_CONSTANT_POOL 1
 
 namespace JSC {
@@ -384,4 +383,4 @@ private:
 
 #endif // ENABLE(ASSEMBLER)
 
-#endif // AssemblerBufferWithConstantPool_h
+#endif /* assembler_assembler_AssemblerBufferWithConstantPool_h */

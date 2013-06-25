@@ -23,7 +23,6 @@
  */
 
 #include <ctype.h>
-#include <locale.h>
 #include <math.h>
 #include <string.h>
 
@@ -32,7 +31,6 @@
 #include "prmjtime.h"
 #include "jsutil.h"
 #include "jsapi.h"
-#include "jsversion.h"
 #include "jscntxt.h"
 #include "jsnum.h"
 #include "jsobj.h"
@@ -46,8 +44,6 @@
 #include "vm/StringBuffer.h"
 
 #include "jsobjinlines.h"
-
-#include "js/Date.h"
 
 using namespace js;
 using namespace js::types;
@@ -544,7 +540,7 @@ Class js::DateClass = {
 
 /* for use by date_parse */
 
-static const char* wtb[] = {
+static const char* const wtb[] = {
     "am", "pm",
     "monday", "tuesday", "wednesday", "thursday", "friday",
     "saturday", "sunday",
@@ -558,7 +554,7 @@ static const char* wtb[] = {
     /* time zone table needs to be expanded */
 };
 
-static int ttb[] = {
+static const int ttb[] = {
     -1, -2, 0, 0, 0, 0, 0, 0, 0,       /* AM/PM */
     2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
     10000 + 0, 10000 + 0, 10000 + 0,   /* GMT/UT/UTC */
@@ -2460,12 +2456,12 @@ date_setYear(JSContext *cx, unsigned argc, Value *vp)
 }
 
 /* constants for toString, toUTCString */
-static char js_NaN_date_str[] = "Invalid Date";
-static const char* days[] =
+static const char js_NaN_date_str[] = "Invalid Date";
+static const char * const days[] =
 {
    "Sun","Mon","Tue","Wed","Thu","Fri","Sat"
 };
-static const char* months[] =
+static const char * const months[] =
 {
    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
 };
@@ -2594,16 +2590,16 @@ date_toJSON(JSContext *cx, unsigned argc, Value *vp)
     }
 
     /* Step 6. */
-    InvokeArgsGuard ag;
-    if (!cx->stack.pushInvokeArgs(cx, 0, &ag))
+    InvokeArgs args2(cx);
+    if (!args2.init(0))
         return false;
 
-    ag.setCallee(toISO);
-    ag.setThis(ObjectValue(*obj));
+    args2.setCallee(toISO);
+    args2.setThis(ObjectValue(*obj));
 
-    if (!Invoke(cx, ag))
+    if (!Invoke(cx, args2))
         return false;
-    args.rval().set(ag.rval());
+    args.rval().set(args2.rval());
     return true;
 }
 
@@ -3142,7 +3138,7 @@ js_InitDateClass(JSContext *cx, HandleObject obj)
 {
     JS_ASSERT(obj->isNative());
 
-    Rooted<GlobalObject*> global(cx, &obj->asGlobal());
+    Rooted<GlobalObject*> global(cx, &obj->as<GlobalObject>());
 
     RootedObject dateProto(cx, global->createBlankPrototype(cx, &DateClass));
     if (!dateProto)

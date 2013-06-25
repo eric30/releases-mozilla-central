@@ -15,8 +15,10 @@ import org.mozilla.gecko.util.ThreadUtils;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Dialog;
+import android.app.Fragment;
 import android.app.NotificationManager;
 import android.content.Context;
 import android.content.DialogInterface;
@@ -70,6 +72,10 @@ public class GeckoPreferences
     private static String PREFS_MENU_CHAR_ENCODING = "browser.menu.showCharacterEncoding";
     private static String PREFS_MP_ENABLED = "privacy.masterpassword.enabled";
     private static String PREFS_UPDATER_AUTODOWNLOAD = "app.update.autodownload";
+    private static String PREFS_GEO_REPORTING = "app.geo.reportdata";
+    private static String PREFS_HEALTHREPORT_LINK = NON_PREF_PREFIX + "healthreport.link";
+
+    private static int REQUEST_CODE_PREF_SCREEN = 5;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -81,8 +87,8 @@ public class GeckoPreferences
 
         super.onCreate(savedInstanceState);
 
+        // Use setResourceToOpen to specify these extras.
         Bundle intentExtras = getIntent().getExtras();
-
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.HONEYCOMB) {
             if (intentExtras != null && intentExtras.containsKey(INTENT_EXTRA_RESOURCES)) {
                 String resourceName = intentExtras.getString(INTENT_EXTRA_RESOURCES);
@@ -177,6 +183,37 @@ public class GeckoPreferences
     }
 
     @Override
+    public void startActivity(Intent intent) {
+        // For settings, we want to be able to pass results up the chain
+        // of preference screens so Settings can behave as a single unit.
+        // Specifically, when we open a link, we want to back out of all
+        // the settings screens.
+        // We need to start nested PreferenceScreens withStartActivityForResult().
+        // Android doesn't let us do that (see Preference.onClick), so we're overriding here.
+        startActivityForResult(intent, REQUEST_CODE_PREF_SCREEN);
+    }
+
+    @Override
+    public void startWithFragment(String fragmentName, Bundle args,
+            Fragment resultTo, int resultRequestCode, int titleRes, int shortTitleRes) {
+        // Overriding because we want to use startActivityForResult for Fragment intents.
+        Intent intent = onBuildStartFragmentIntent(fragmentName, args, titleRes, shortTitleRes);
+        if (resultTo == null) {
+            startActivityForResult(intent, REQUEST_CODE_PREF_SCREEN);
+        } else {
+            resultTo.startActivityForResult(intent, resultRequestCode);
+        }
+    }
+
+    @Override
+    public void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (REQUEST_CODE_PREF_SCREEN == requestCode && Activity.RESULT_CANCELED == resultCode) {
+            setResult(Activity.RESULT_CANCELED);
+            finish();
+        }
+    }
+
+    @Override
     public void handleMessage(String event, JSONObject message) {
         try {
             if (event.equals("Sanitize:Finished")) {
@@ -234,19 +271,24 @@ public class GeckoPreferences
                 setupPreferences((PreferenceGroup) pref, prefs);
             } else {
                 pref.setOnPreferenceChangeListener(this);
-                if (PREFS_UPDATER_AUTODOWNLOAD.equals(key) && !AppConstants.MOZ_UPDATER) {
+                if (!AppConstants.MOZ_UPDATER &&
+                    PREFS_UPDATER_AUTODOWNLOAD.equals(key)) {
                     preferences.removePreference(pref);
                     i--;
                     continue;
-                } else if (PREFS_TELEMETRY_ENABLED.equals(key) && !AppConstants.MOZ_TELEMETRY_REPORTING) {
+                } else if (!AppConstants.MOZ_TELEMETRY_REPORTING &&
+                           PREFS_TELEMETRY_ENABLED.equals(key)) {
                     preferences.removePreference(pref);
                     i--;
                     continue;
-                } else if (PREFS_HEALTHREPORT_UPLOAD_ENABLED.equals(key) && !AppConstants.MOZ_SERVICES_HEALTHREPORT) {
+                } else if (!AppConstants.MOZ_SERVICES_HEALTHREPORT &&
+                           (PREFS_HEALTHREPORT_UPLOAD_ENABLED.equals(key) ||
+                            PREFS_HEALTHREPORT_LINK.equals(key))) {
                     preferences.removePreference(pref);
                     i--;
                     continue;
-                } else if (PREFS_CRASHREPORTER_ENABLED.equals(key) && !AppConstants.MOZ_CRASHREPORTER) {
+                } else if (!AppConstants.MOZ_CRASHREPORTER &&
+                           PREFS_CRASHREPORTER_ENABLED.equals(key)) {
                     preferences.removePreference(pref);
                     i--;
                     continue;
@@ -397,6 +439,10 @@ public class GeckoPreferences
             // repeated background upload attempts.
             broadcastHealthReportUploadPref(GeckoAppShell.getContext(), ((Boolean) newValue).booleanValue());
             return true;
+        } else if (PREFS_GEO_REPORTING.equals(prefName)) {
+            // Translate boolean value to int for geo reporting pref.
+            PrefsHelper.setPref(prefName, (Boolean) newValue ? 1 : 0);
+            return true;
         }
 
         if (!TextUtils.isEmpty(prefName)) {
@@ -408,6 +454,7 @@ public class GeckoPreferences
             CharSequence newEntry = ((ListPreference) preference).getEntries()[newIndex];
             ((ListPreference) preference).setSummary(newEntry);
         } else if (preference instanceof LinkPreference) {
+            setResult(Activity.RESULT_CANCELED);
             finish();
         } else if (preference instanceof FontSizePreference) {
             final FontSizePreference fontSizePref = (FontSizePreference) preference;
@@ -652,6 +699,27 @@ public class GeckoPreferences
             }
 
             @Override
+            public void prefValue(String prefName, final int value) {
+                final Preference pref = getField(prefName);
+                final CheckBoxPrefSetter prefSetter;
+                if (PREFS_GEO_REPORTING.equals(prefName)) {
+                    if (Build.VERSION.SDK_INT < 14) {
+                        prefSetter = new CheckBoxPrefSetter();
+                    } else {
+                        prefSetter = new TwoStatePrefSetter();
+                    }
+                    ThreadUtils.postToUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            prefSetter.setBooleanPref(pref, value == 1);
+                        }
+                    });
+                } else {
+                    Log.w(LOGTAG, "Unhandled int value for pref [" + pref + "]");
+                }
+            }
+
+            @Override
             public boolean isObserver() {
                 return true;
             }
@@ -680,5 +748,32 @@ public class GeckoPreferences
     @Override
     public boolean isGeckoActivityOpened() {
         return false;
+    }
+
+    /**
+     * Given an Intent instance, add extras to specify which settings section to
+     * open.
+     *
+     * resource should be a valid Android XML resource identifier.
+     *
+     * The mechanism to open a section differs based on Android version.
+     */
+    public static void setResourceToOpen(final Intent intent, final String resource) {
+        if (intent == null) {
+            throw new IllegalArgumentException("intent must not be null");
+        }
+        if (resource == null) {
+            return;
+        }
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.HONEYCOMB) {
+            intent.putExtra("resource", resource);
+        } else {
+            intent.putExtra(PreferenceActivity.EXTRA_SHOW_FRAGMENT, GeckoPreferenceFragment.class.getName());
+
+            Bundle fragmentArgs = new Bundle();
+            fragmentArgs.putString("resource", resource);
+            intent.putExtra(PreferenceActivity.EXTRA_SHOW_FRAGMENT_ARGUMENTS, fragmentArgs);
+        }
     }
 }

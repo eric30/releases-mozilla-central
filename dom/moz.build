@@ -93,6 +93,9 @@ if CONFIG['MOZ_B2G_FM']:
 if CONFIG['MOZ_PAY']:
     PARALLEL_DIRS += ['payment']
 
+if CONFIG['MOZ_GAMEPAD']:
+    PARALLEL_DIRS += ['gamepad']
+
 if CONFIG['MOZ_B2G_NFC']:
     PARALLEL_DIRS += ['nfc']
 

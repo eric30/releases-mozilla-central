@@ -4,6 +4,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+// HttpLog.h should generally be included first
+#include "HttpLog.h"
+
 #include "nsHttp.h"
 #include "nsHttpChannel.h"
 #include "nsHttpHandler.h"
@@ -29,7 +32,6 @@
 #include "nsIRedirectResultListener.h"
 #include "mozilla/TimeStamp.h"
 #include "nsError.h"
-#include "nsPrintfCString.h"
 #include "nsAlgorithm.h"
 #include "GeckoProfiler.h"
 #include "nsIConsoleService.h"
@@ -249,10 +251,10 @@ private:
     const uint32_t mLoadFlags;
     const bool mCacheForOfflineUse;
     const bool mFallbackChannel;
-    const InfallableCopyCString mClientID;
+    const nsCString mClientID;
     const nsCacheStoragePolicy mStoragePolicy;
     const bool mUsingPrivateBrowsing;
-    const InfallableCopyCString mCacheKey;
+    const nsCString mCacheKey;
     const nsCacheAccessMode mAccessToRequest;
     const bool mNoWait;
     const bool mUsingSSL;
@@ -4253,8 +4255,6 @@ NS_INTERFACE_MAP_BEGIN(nsHttpChannel)
     NS_INTERFACE_MAP_ENTRY(nsIApplicationCacheChannel)
     NS_INTERFACE_MAP_ENTRY(nsIAsyncVerifyRedirectCallback)
     NS_INTERFACE_MAP_ENTRY(nsITimedChannel)
-    NS_INTERFACE_MAP_ENTRY(nsIThreadRetargetableRequest)
-    NS_INTERFACE_MAP_ENTRY(nsIThreadRetargetableStreamListener)
 NS_INTERFACE_MAP_END_INHERITING(HttpBaseChannel)
 
 //-----------------------------------------------------------------------------
@@ -4946,42 +4946,6 @@ nsHttpChannel::ContinueOnStartRequest3(nsresult result)
     return CallOnStartRequest();
 }
 
-class OnStopRequestCleanupEvent : public nsRunnable
-{
-public:
-    OnStopRequestCleanupEvent(nsHttpChannel *aHttpChannel,
-                              nsresult aStatus)
-    : mHttpChannel(aHttpChannel)
-    , mStatus(aStatus)
-    {
-        MOZ_ASSERT(!NS_IsMainThread(), "Shouldn't be created on main thread");
-        NS_ASSERTION(aHttpChannel, "aHttpChannel should not be null");
-    }
-
-    NS_IMETHOD Run()
-    {
-        MOZ_ASSERT(NS_IsMainThread(), "Should run on main thread");
-        if (mHttpChannel) {
-            mHttpChannel->OnStopRequestCleanup(mStatus);
-        }
-        return NS_OK;
-    }
-private:
-    nsRefPtr<nsHttpChannel> mHttpChannel;
-    nsresult mStatus;
-};
-
-nsresult
-nsHttpChannel::OnStopRequestCleanup(nsresult aStatus)
-{
-    NS_ASSERTION(NS_IsMainThread(), "Should be on main thread");
-    if (mLoadGroup) {
-        mLoadGroup->RemoveRequest(this, nullptr, aStatus);
-    }
-    ReleaseListeners();
-    return NS_OK;
-}
-
 NS_IMETHODIMP
 nsHttpChannel::OnStopRequest(nsIRequest *request, nsISupports *ctxt, nsresult status)
 {
@@ -5111,16 +5075,13 @@ nsHttpChannel::OnStopRequest(nsIRequest *request, nsISupports *ctxt, nsresult st
     if (mOfflineCacheEntry)
         CloseOfflineCacheEntry();
 
-    if (NS_IsMainThread()) {
-        OnStopRequestCleanup(status);
-    } else {
-        nsresult rv = NS_DispatchToMainThread(
-            new OnStopRequestCleanupEvent(this, status));
-        NS_ENSURE_SUCCESS(rv, rv);
-    }
+    if (mLoadGroup)
+        mLoadGroup->RemoveRequest(this, nullptr, status);
 
     // We don't need this info anymore
     CleanRedirectCacheChainIfNecessary();
+
+    ReleaseListeners();
 
     return NS_OK;
 }
@@ -5128,37 +5089,6 @@ nsHttpChannel::OnStopRequest(nsIRequest *request, nsISupports *ctxt, nsresult st
 //-----------------------------------------------------------------------------
 // nsHttpChannel::nsIStreamListener
 //-----------------------------------------------------------------------------
-
-class OnTransportStatusAsyncEvent : public nsRunnable
-{
-public:
-    OnTransportStatusAsyncEvent(nsITransportEventSink* aEventSink,
-                                nsresult aTransportStatus,
-                                uint64_t aProgress,
-                                uint64_t aProgressMax)
-    : mEventSink(aEventSink)
-    , mTransportStatus(aTransportStatus)
-    , mProgress(aProgress)
-    , mProgressMax(aProgressMax)
-    {
-        MOZ_ASSERT(!NS_IsMainThread(), "Shouldn't be created on main thread");
-    }
-
-    NS_IMETHOD Run()
-    {
-        MOZ_ASSERT(NS_IsMainThread(), "Should run on main thread");
-        if (mEventSink) {
-            mEventSink->OnTransportStatus(nullptr, mTransportStatus,
-                                          mProgress, mProgressMax);
-        }
-        return NS_OK;
-    }
-private:
-    nsCOMPtr<nsITransportEventSink> mEventSink;
-    nsresult mTransportStatus;
-    uint64_t mProgress;
-    uint64_t mProgressMax;
-};
 
 NS_IMETHODIMP
 nsHttpChannel::OnDataAvailable(nsIRequest *request, nsISupports *ctxt,
@@ -5204,14 +5134,7 @@ nsHttpChannel::OnDataAvailable(nsIRequest *request, nsISupports *ctxt,
         uint64_t progress = mLogicalOffset + uint64_t(count);
         MOZ_ASSERT(progress <= progressMax, "unexpected progress values");
 
-        if (NS_IsMainThread()) {
-            OnTransportStatus(nullptr, transportStatus, progress, progressMax);
-        } else {
-            nsresult rv = NS_DispatchToMainThread(
-                new OnTransportStatusAsyncEvent(this, transportStatus,
-                                                progress, progressMax));
-            NS_ENSURE_SUCCESS(rv, rv);
-        }
+        OnTransportStatus(nullptr, transportStatus, progress, progressMax);
 
         //
         // we have to manually keep the logical offset of the stream up-to-date.
@@ -5233,71 +5156,6 @@ nsHttpChannel::OnDataAvailable(nsIRequest *request, nsISupports *ctxt,
     }
 
     return NS_ERROR_ABORT;
-}
-
-//-----------------------------------------------------------------------------
-// nsHttpChannel::nsIThreadRetargetableRequest
-//-----------------------------------------------------------------------------
-
-NS_IMETHODIMP
-nsHttpChannel::RetargetDeliveryTo(nsIEventTarget* aNewTarget)
-{
-    MOZ_ASSERT(NS_IsMainThread(), "Should be called on main thread only");
-
-    NS_ENSURE_ARG(aNewTarget);
-    if (aNewTarget == NS_GetCurrentThread()) {
-        NS_WARNING("Retargeting delivery to same thread");
-        return NS_OK;
-    }
-    NS_ENSURE_TRUE(mTransactionPump || mCachePump, NS_ERROR_NOT_AVAILABLE);
-
-    nsresult rv = NS_OK;
-    // If both cache pump and transaction pump exist, we're probably dealing
-    // with partially cached content. So, we must be able to retarget both.
-    nsCOMPtr<nsIThreadRetargetableRequest> retargetableCachePump;
-    nsCOMPtr<nsIThreadRetargetableRequest> retargetableTransactionPump;
-    if (mCachePump) {
-        // Direct call to QueryInterface to avoid multiple inheritance issues.
-        rv = mCachePump->QueryInterface(NS_GET_IID(nsIThreadRetargetableRequest),
-                                        getter_AddRefs(retargetableCachePump));
-        // nsInputStreamPump should implement this interface.
-        MOZ_ASSERT(retargetableCachePump);
-        rv = retargetableCachePump->RetargetDeliveryTo(aNewTarget);
-    }
-    if (NS_SUCCEEDED(rv) && mTransactionPump) {
-        // Direct call to QueryInterface to avoid multiple inheritance issues.
-        rv = mTransactionPump->QueryInterface(NS_GET_IID(nsIThreadRetargetableRequest),
-                                              getter_AddRefs(retargetableTransactionPump));
-        // nsInputStreamPump should implement this interface.
-        MOZ_ASSERT(retargetableTransactionPump);
-        rv = retargetableTransactionPump->RetargetDeliveryTo(aNewTarget);
-
-        // If retarget fails for transaction pump, we must restore mCachePump.
-        if (NS_FAILED(rv) && retargetableCachePump) {
-            nsCOMPtr<nsIThread> mainThread;
-            rv = NS_GetMainThread(getter_AddRefs(mainThread));
-            NS_ENSURE_SUCCESS(rv, rv);
-            rv = retargetableCachePump->RetargetDeliveryTo(mainThread);
-        }
-    }
-    return rv;
-}
-
-//-----------------------------------------------------------------------------
-// nsHttpChannel::nsThreadRetargetableStreamListener
-//-----------------------------------------------------------------------------
-
-NS_IMETHODIMP
-nsHttpChannel::CheckListenerChain()
-{
-    NS_ASSERTION(NS_IsMainThread(), "Should be on main thread!");
-    nsresult rv = NS_OK;
-    nsCOMPtr<nsIThreadRetargetableStreamListener> retargetableListener =
-        do_QueryInterface(mListener, &rv);
-    if (retargetableListener) {
-        rv = retargetableListener->CheckListenerChain();
-    }
-    return rv;
 }
 
 //-----------------------------------------------------------------------------

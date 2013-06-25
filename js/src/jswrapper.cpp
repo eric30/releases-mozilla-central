@@ -346,8 +346,8 @@ CanReify(HandleValue vp)
 {
     JSObject *obj;
     return vp.isObject() &&
-           (obj = &vp.toObject())->isPropertyIterator() &&
-           (obj->asPropertyIterator().getNativeIterator()->flags & JSITER_ENUMERATE);
+           (obj = &vp.toObject())->is<PropertyIteratorObject>() &&
+           (obj->as<PropertyIteratorObject>().getNativeIterator()->flags & JSITER_ENUMERATE);
 }
 
 struct AutoCloseIterator
@@ -366,7 +366,7 @@ struct AutoCloseIterator
 static bool
 Reify(JSContext *cx, JSCompartment *origin, MutableHandleValue vp)
 {
-    Rooted<PropertyIteratorObject*> iterObj(cx, &vp.toObject().asPropertyIterator());
+    Rooted<PropertyIteratorObject*> iterObj(cx, &vp.toObject().as<PropertyIteratorObject>());
     NativeIterator *ni = iterObj->getNativeIterator();
 
     AutoCloseIterator close(cx, iterObj);
@@ -479,8 +479,8 @@ CrossCompartmentWrapper::nativeCall(JSContext *cx, IsAcceptableThis test, Native
     RootedObject wrapped(cx, wrappedObject(wrapper));
     {
         AutoCompartment call(cx, wrapped);
-        InvokeArgsGuard dstArgs;
-        if (!cx->stack.pushInvokeArgs(cx, srcArgs.length(), &dstArgs))
+        InvokeArgs dstArgs(cx);
+        if (!dstArgs.init(srcArgs.length()))
             return false;
 
         Value *src = srcArgs.base();
@@ -513,7 +513,6 @@ CrossCompartmentWrapper::nativeCall(JSContext *cx, IsAcceptableThis test, Native
             return false;
 
         srcArgs.rval().set(dstArgs.rval());
-        dstArgs.pop();
     }
     return cx->compartment()->wrap(cx, srcArgs.rval());
 }

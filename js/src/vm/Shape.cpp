@@ -6,29 +6,17 @@
 
 /* JS symbol tables. */
 
-#include <stdlib.h>
-#include <string.h>
-
 #include "mozilla/DebugOnly.h"
 #include "mozilla/PodOperations.h"
 
-#include "jstypes.h"
-#include "jsclist.h"
-#include "jsutil.h"
 #include "jsapi.h"
 #include "jsatom.h"
 #include "jscntxt.h"
-#include "jsdbgapi.h"
-#include "jslock.h"
-#include "jsnum.h"
 #include "jsobj.h"
-#include "jsstr.h"
 
 #include "js/HashTable.h"
-#include "js/MemoryMetrics.h"
 #include "vm/Shape.h"
 
-#include "jsatominlines.h"
 #include "jscntxtinlines.h"
 #include "jsobjinlines.h"
 
@@ -1338,6 +1326,7 @@ EmptyShape::getInitialShape(JSContext *cx, Class *clasp, TaggedProto proto,
     if (p)
         return p->shape;
 
+    SkipRoot skip(cx, &p); /* The hash may look like a GC pointer and get poisoned. */
     Rooted<TaggedProto> protoRoot(cx, proto);
     RootedObject parentRoot(cx, parent);
     RootedObject metadataRoot(cx, metadata);
@@ -1384,7 +1373,7 @@ NewObjectCache::invalidateEntriesForShape(JSContext *cx, HandleShape shape, Hand
     EntryIndex entry;
     if (lookupGlobal(clasp, global, kind, &entry))
         PodZero(&entries[entry]);
-    if (!proto->isGlobal() && lookupProto(clasp, proto, kind, &entry))
+    if (!proto->is<GlobalObject>() && lookupProto(clasp, proto, kind, &entry))
         PodZero(&entries[entry]);
     if (lookupType(clasp, type, kind, &entry))
         PodZero(&entries[entry]);

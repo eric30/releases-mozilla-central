@@ -4,8 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef String_inl_h__
-#define String_inl_h__
+#ifndef vm_String_inl_h
+#define vm_String_inl_h
 
 #include "vm/String.h"
 
@@ -15,7 +15,6 @@
 #include "gc/Marking.h"
 
 #include "jsgcinlines.h"
-#include "jsobjinlines.h"
 
 namespace js {
 
@@ -510,4 +509,4 @@ JSExternalString::finalize(js::FreeOp *fop)
     fin->finalize(fin, const_cast<jschar *>(chars()));
 }
 
-#endif
+#endif /* vm_String_inl_h */

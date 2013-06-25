@@ -260,9 +260,9 @@ if (SpecialPowers.getBoolPref("layout.css.flexbox.enabled")) {
 }
 
 var div = document.getElementById("display");
-var transformDiv = document.getElementById("transformTest");
+var OMTAdiv = document.getElementById("transformTest");
 var cs = getComputedStyle(div, "");
-var transformCs = getComputedStyle(transformDiv, "");
+var OMTACs = getComputedStyle(OMTAdiv, "");
 var winUtils = SpecialPowers.getDOMWindowUtils(window);
 
 function computeMatrix(v) {
@@ -295,42 +295,35 @@ var transformTests = [
     expected: computeMatrix('rotate(90deg)') },
   { start: 'none', end: 'rotatez(360deg)',
     expected_uncomputed: 'rotate(90deg)',
-    expected: computeMatrix('rotate(90deg)'),
-    requires_3d: true },
+    expected: computeMatrix('rotate(90deg)') },
   { start: 'none', end: 'rotate(720deg)',
     expected_uncomputed: 'rotate(180deg)',
     expected: computeMatrix('rotate(180deg)') },
   { start: 'none', end: 'rotate(720deg)',
     expected_uncomputed: 'rotatez(180deg)',
-    expected: computeMatrix('rotate(180deg)'),
-    requires_3d: true },
+    expected: computeMatrix('rotate(180deg)') },
   { start: 'none', end: 'rotate(1080deg)',
     expected_uncomputed: 'rotate(270deg)',
     expected: computeMatrix('rotate(270deg)') },
   { start: 'none', end: 'rotate(1080deg)',
     expected_uncomputed: 'rotate(270deg)',
-    expected: computeMatrix('rotatez(270deg)'),
-    requires_3d: true },
+    expected: computeMatrix('rotatez(270deg)') },
   { start: 'none', end: 'rotate(1440deg)',
     expected_uncomputed: 'rotate(360deg)',
     expected: computeMatrix('scale(1)'),
     round_error_ok: true },
   { start: 'none', end: 'rotatey(60deg)',
     expected_uncomputed: 'rotatey(15deg)',
-    expected: computeMatrix('rotatey(15deg)'),
-    requires_3d: true },
+    expected: computeMatrix('rotatey(15deg)') },
   { start: 'none', end: 'rotatey(720deg)',
     expected_uncomputed: 'rotatey(180deg)',
-    expected: computeMatrix('rotatey(180deg)'),
-    requires_3d: true },
+    expected: computeMatrix('rotatey(180deg)') },
   { start: 'none', end: 'rotatex(60deg)',
     expected_uncomputed: 'rotatex(15deg)',
-    expected: computeMatrix('rotatex(15deg)'),
-    requires_3d: true },
+    expected: computeMatrix('rotatex(15deg)') },
   { start: 'none', end: 'rotatex(720deg)',
     expected_uncomputed: 'rotatex(180deg)',
-    expected: computeMatrix('rotatex(180deg)'),
-    requires_3d: true },
+    expected: computeMatrix('rotatex(180deg)') },
 
   // translate
   { start: 'translate(20px)', end: 'none',
@@ -347,12 +340,10 @@ var transformTests = [
     expected: 'matrix(1, 0, 0, 1, 0, -30)' },
   { start: 'translateZ(40px)', end: 'none',
     expected_uncomputed: 'translateZ(30px)',
-    expected: 'matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 30, 1)',
-    requires_3d: true },
+    expected: 'matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 30, 1)' },
   { start: 'none', end: 'translate3D(40px, 60px, -40px)',
     expected_uncomputed: 'translate3D(10px, 15px, -10px)',
-    expected: 'matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 10, 15, -10, 1)',
-    requires_3d: true },
+    expected: 'matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 10, 15, -10, 1)' },
   // percentages are relative to 300px (width) and 50px (height)
   // per the prerequisites in property_database.js
   { start: 'translate(20%)', end: 'none',
@@ -427,12 +418,10 @@ var transformTests = [
     expected: 'matrix(1, 0, 0, 4, 0, 0)' },
   { start: 'scaleZ(5)', end: 'none',
     expected_uncomputed: 'scaleZ(4)',
-    expected: 'matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 4, 0, 0, 0, 0, 1)',
-    requires_3d: true },
+    expected: 'matrix3d(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 4, 0, 0, 0, 0, 1)' },
   { start: 'none', end: 'scale3D(5, 5, 5)',
     expected_uncomputed: 'scale3D(2, 2, 2)',
-    expected: 'matrix3d(2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 1)',
-    requires_3d: true },
+    expected: 'matrix3d(2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 1)' },
 
   // skew
   { start: 'skewX(45deg)', end: 'none',
@@ -695,11 +684,6 @@ function get_distance(prop, v1, v2)
 {
   return SpecialPowers.DOMWindowUtils
            .computeAnimationDistance(div, prop, v1, v2);
-}
-
-function transform3D_enabled()
-{
-  return SpecialPowers.getBoolPref("layout.3d-transforms.enabled");
 }
 
 function check_distance(prop, start, quarter, end)
@@ -1178,6 +1162,15 @@ function test_radius_transition(prop) {
                  "calc(4.6875% + 16px) calc(9.375% + 4px)",
                  "64px 16px");
 
+  div.style.setProperty("transition-property", "none", "");
+  div.style.setProperty(prop, "calc(5px) 10px", "");
+  is(cs.getPropertyValue(prop), "5px 10px",
+     "radius-valued property " + prop + ": computed value before transition");
+  div.style.setProperty("transition-property", prop, "");
+  div.style.setProperty(prop, "calc(25px) calc(50px)", "");
+  is(cs.getPropertyValue(prop), "10px 20px",
+     "radius-valued property " + prop + ": interpolation of radius with calc() units");
+
   div.style.setProperty("transition-timing-function", FUNC_NEGATIVE, "");
   div.style.setProperty("transition-property", "none", "");
   div.style.setProperty(prop, "0px 0px", "");
@@ -1646,9 +1639,6 @@ function test_transform_transition(prop) {
 
   for (var i in transformTests) {
     var test = transformTests[i];
-    if (test.requires_3d && !transform3D_enabled()) {
-      continue;
-    }
     div.style.setProperty("transition-property", "none", "");
     div.style.setProperty(prop, test.start, "");
     cs.getPropertyValue(prop);
@@ -1684,8 +1674,8 @@ function test_transform_transition(prop) {
   // FIXME: should perhaps test that no clamping occurs
 
   // These tests check the computed value 2/3 of the way through the transition
-  transformDiv.style.setProperty("transition-duration", "300s", "");
-  transformDiv.style.setProperty("transition-timing-function", "linear", "");
+  OMTAdiv.style.setProperty("transition-duration", "300s", "");
+  OMTAdiv.style.setProperty("transition-timing-function", "linear", "");
   window.requestAnimationFrame(nextAsyncTransformTest);
 }
 
@@ -1694,23 +1684,16 @@ function nextAsyncTransformTest()
   var test = transformTests[transformTestIndex];
 
   if (transformTestIndex >= transformTests.length) {
-    transformDiv.style.removeProperty("transition");
-    SimpleTest.finish();
+    window.requestAnimationFrame(asyncOpacityTest);
     return;
   }
 
-  if (test.requires_3d && !transform3D_enabled()) {
-    transformTestIndex++;
-    window.requestAnimationFrame(nextAsyncTransformTest);
-    return;
-  }
-
-  transformDiv.style.setProperty("transition-property", "none", "");
-  transformDiv.style.setProperty("transform", test.start, "");
-  transformCs.getPropertyValue("transform");
-  transformDiv.style.setProperty("transition-property", "transform", "");
-  transformDiv.style.setProperty("transform", test.end, "");
-  transformCs.getPropertyValue("transform");
+  OMTAdiv.style.setProperty("transition-property", "none", "");
+  OMTAdiv.style.setProperty("transform", test.start, "");
+  OMTACs.getPropertyValue("transform");
+  OMTAdiv.style.setProperty("transition-property", "transform", "");
+  OMTAdiv.style.setProperty("transform", test.end, "");
+  OMTACs.getPropertyValue("transform");
 
   window.requestAnimationFrame(checkAsyncTransformTest);
 }
@@ -1721,8 +1704,8 @@ function checkAsyncTransformTest() {
   }
   winUtils.advanceTimeAndRefresh(200000);
   var test = transformTests[transformTestIndex];
-  var async_transform = winUtils.getOMTAOrComputedStyle(transformDiv, "transform");
-  var computed_transform = transformCs.getPropertyValue("transform");
+  var async_transform = winUtils.getOMTAOrComputedStyle(OMTAdiv, "transform");
+  var computed_transform = OMTACs.getPropertyValue("transform");
   var async_split = s(async_transform);
   var cs_split = s(computed_transform);
   var pass = true;
@@ -1738,6 +1721,28 @@ function checkAsyncTransformTest() {
   transformTestIndex++;
   winUtils.restoreNormalRefresh();
   window.requestAnimationFrame(nextAsyncTransformTest);
+}
+
+function asyncOpacityTest() {
+  OMTAdiv.style.setProperty("transition-property", "none", "");
+  OMTAdiv.style.setProperty("opacity", 0, "");
+  OMTACs.getPropertyValue("opacity");
+  OMTAdiv.style.setProperty("transition-property", "opacity", "");
+  OMTAdiv.style.setProperty("opacity", 1, "");
+  OMTACs.getPropertyValue("opacity");
+
+  window.requestAnimationFrame(checkAsyncOpacityTest);
+}
+
+function checkAsyncOpacityTest() {
+  winUtils.advanceTimeAndRefresh(200000);
+  var async_opacity = winUtils.getOMTAOrComputedStyle(OMTAdiv, "opacity");
+  var computed_opacity = OMTACs.getPropertyValue("opacity");
+  is(async_opacity, computed_opacity,
+     "Async animated opacity should match computed opacity");
+  winUtils.restoreNormalRefresh();
+  OMTAdiv.style.removeProperty("transition");
+  SimpleTest.finish();
 }
 
 </script>

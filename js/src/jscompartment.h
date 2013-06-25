@@ -4,15 +4,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef jscompartment_h___
-#define jscompartment_h___
+#ifndef jscompartment_h
+#define jscompartment_h
 
-#include "mozilla/Attributes.h"
-#include "mozilla/GuardObjects.h"
 #include "mozilla/Util.h"
 
 #include "jscntxt.h"
-#include "jsfun.h"
 #include "jsgc.h"
 #include "jsobj.h"
 
@@ -561,5 +558,4 @@ class AutoWrapperRooter : private AutoGCRooter {
 
 } /* namespace js */
 
-#endif /* jscompartment_h___ */
-
+#endif /* jscompartment_h */

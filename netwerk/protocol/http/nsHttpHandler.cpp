@@ -4,6 +4,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+// HttpLog.h should generally be included first
+#include "HttpLog.h"
+
 #include "nsHttp.h"
 #include "nsHttpHandler.h"
 #include "nsHttpChannel.h"
@@ -1603,11 +1606,11 @@ nsHttpHandler::NewProxiedChannel(nsIURI *uri,
         // enable pipelining over SSL if requested
         if (mPipeliningOverSSL)
             caps |= NS_HTTP_ALLOW_PIPELINING;
+    }
 
-        if (!IsNeckoChild()) {
-            // HACK: make sure PSM gets initialized on the main thread.
-            net_EnsurePSMInit();
-        }
+    if (!IsNeckoChild()) {
+        // HACK: make sure PSM gets initialized on the main thread.
+        net_EnsurePSMInit();
     }
 
     rv = httpChannel->Init(uri, caps, proxyInfo, proxyResolveFlags, proxyURI);
