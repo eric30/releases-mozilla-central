@@ -1451,16 +1451,13 @@ Navigator::GetMozNfc(nsIDOMNfc** aNfc)
   nsCOMPtr<nsIDOMNfc> nfc = mNfc;
 
   if (!nfc) {
-    nsCOMPtr<nsPIDOMWindow> window = do_QueryReferent(mWindow);
-    NS_ENSURE_TRUE(window, NS_ERROR_FAILURE);
+    NS_ENSURE_STATE(mWindow);
+    nsresult rv = NS_NewNfc(mWindow, getter_AddRefs(mNfc));
+    NS_ENSURE_SUCCESS(rv, rv);
 
     if (!CheckPermission("nfc")) {
       return NS_OK;
     }
-
-    NS_WARNING("NFC, create: ");
-    nsresult rv = NS_NewNfc(window, getter_AddRefs(mNfc));
-    NS_ENSURE_SUCCESS(rv, rv);
 
     // mNfc may be null here!
     nfc = mNfc;

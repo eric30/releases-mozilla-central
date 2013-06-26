@@ -3,6 +3,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/* Copyright © 2013 Deutsche Telekom, Inc. */
+
 #include "nsNfc.h"
 #include "Nfc.h"
 
@@ -19,7 +21,7 @@
 #include "nsServiceManagerUtils.h"
 #include "SystemWorkerManager.h"
 
-#include "NfcNdefEvent.h"
+#include "NfcEvent.h"
 
 using namespace mozilla::dom::nfc;
 
@@ -90,48 +92,34 @@ NS_IMETHODIMP
 nsNfc::NdefDiscovered(const JS::Value& aNdefRecords, JSContext* aCx)
 {
   // Parse JSON
-  nsString result;
+  nsString message;
   nsresult rv;
 
   nsCOMPtr<nsIJSON> json(new nsJSON());
-  rv = json->EncodeFromJSVal((jsval*)&aNdefRecords, aCx, result); // EncodeJSVal param1 not const...
+  rv = json->EncodeFromJSVal((jsval*)&aNdefRecords, aCx, message); // EncodeJSVal param1 not const...
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Dispatch incoming event.
-  nsRefPtr<nsDOMEvent> event = NfcNdefEvent::Create(this, result);
+  nsRefPtr<NfcEvent> event = NfcEvent::Create(this, message);
   NS_ASSERTION(event, "This should never fail!");
 
-  rv = event->InitEvent(NS_LITERAL_STRING("ndefdiscovered"), false, false);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  bool dummy;
-  rv = DispatchEvent(event, &dummy);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  return NS_OK;
+  return event->Dispatch(this, NS_LITERAL_STRING("ndefdiscovered"));
 }
 
 NS_IMETHODIMP
 nsNfc::NdefDisconnected(const JS::Value& aNfcHandle, JSContext* aCx) {
-  nsString result;
+  nsString message;
   nsresult rv;
 
   nsCOMPtr<nsIJSON> json(new nsJSON());
-  rv = json->EncodeFromJSVal((jsval*)&aNfcHandle, aCx, result);
+  rv = json->EncodeFromJSVal((jsval*)&aNfcHandle, aCx, message);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Dispatch incoming event.
-  nsRefPtr<nsDOMEvent> event = NfcNdefEvent::Create(this, result);
+  nsRefPtr<NfcEvent> event = NfcEvent::Create(this, message);
   NS_ASSERTION(event, "This should never fail!");
 
-  rv = event->InitEvent(NS_LITERAL_STRING("ndefdisconnected"), false, false);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  bool dummy;
-  rv = DispatchEvent(event, &dummy);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  return NS_OK;
+  return event->Dispatch(this, NS_LITERAL_STRING("ndefdisconnected"));
 }
 
 NS_IMETHODIMP
@@ -217,72 +205,54 @@ nsNfc::NdefPush(const JS::Value& aRecords, JSContext* aCx, nsIDOMDOMRequest** aR
 }
 
 NS_IMETHODIMP
-nsNfc::SecureElementActivated(const JS::Value& aSEMessage, JSContext* aCx) {
-  nsString result;
+nsNfc::SecureElementActivated(const JS::Value& aSEMessage, JSContext* aCx)
+{
+  nsString message;
   nsresult rv;
 
   nsCOMPtr<nsIJSON> json(new nsJSON());
-  rv = json->EncodeFromJSVal((jsval*)&aSEMessage, aCx, result);
+  rv = json->EncodeFromJSVal((jsval*)&aSEMessage, aCx, message);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Dispatch incoming event.
-  nsRefPtr<nsDOMEvent> event = NfcNdefEvent::Create(this, result);
+  nsRefPtr<NfcEvent> event = NfcEvent::Create(this, message);
   NS_ASSERTION(event, "This should never fail!");
-  rv = event->InitEvent(NS_LITERAL_STRING("secureelementactivated"), false, false);
-  NS_ENSURE_SUCCESS(rv, rv);
 
-  bool dummy;
-  rv = DispatchEvent(event, &dummy);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  return NS_OK;
+  return event->Dispatch(this, NS_LITERAL_STRING("secureelementactivated"));
 }
 
 NS_IMETHODIMP
-nsNfc::SecureElementDeactivated(const JS::Value& aSEMessage, JSContext* aCx) {
-  nsString result;
+nsNfc::SecureElementDeactivated(const JS::Value& aSEMessage, JSContext* aCx)
+{
+  nsString message;
   nsresult rv;
 
   nsCOMPtr<nsIJSON> json(new nsJSON());
-  rv = json->EncodeFromJSVal((jsval*)&aSEMessage, aCx, result);
+  rv = json->EncodeFromJSVal((jsval*)&aSEMessage, aCx, message);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Dispatch incoming event.
-  nsRefPtr<nsDOMEvent> event = NfcNdefEvent::Create(this, result);
+  nsRefPtr<NfcEvent> event = NfcEvent::Create(this, message);
   NS_ASSERTION(event, "This should never fail!");
 
-  rv = event->InitEvent(NS_LITERAL_STRING("secureelementdeactivated"), false, false);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  bool dummy;
-  rv = DispatchEvent(event, &dummy);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  return NS_OK;
+  return event->Dispatch(this, NS_LITERAL_STRING("secureelementdeactivated"));
 }
 
 NS_IMETHODIMP
 nsNfc::SecureElementTransaction(const JS::Value& aSETransactionMessage, JSContext* aCx)
 {
-  nsString result;
+  nsString message;
   nsresult rv;
 
   nsCOMPtr<nsIJSON> json(new nsJSON());
-  rv = json->EncodeFromJSVal((jsval*)&aSETransactionMessage, aCx, result);
+  rv = json->EncodeFromJSVal((jsval*)&aSETransactionMessage, aCx, message);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Dispatch incoming event.
-  nsRefPtr<nsDOMEvent> event = NfcNdefEvent::Create(this, result);
+  nsRefPtr<NfcEvent> event = NfcEvent::Create(this, message);
   NS_ASSERTION(event, "This should never fail!");
 
-  rv = event->InitEvent(NS_LITERAL_STRING("secureelementtransaction"), false, false);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  bool dummy;
-  rv = DispatchEvent(event, &dummy);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  return NS_OK;
+  return event->Dispatch(this, NS_LITERAL_STRING("secureelementtransaction"));
 }
 
 // TODO: make private

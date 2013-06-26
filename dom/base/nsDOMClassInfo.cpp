@@ -285,7 +285,6 @@ using mozilla::dom::workers::ResolveWorkerClasses;
 #ifdef MOZ_B2G_NFC
 #include "nsNfc.h"
 #include "nsIDOMNfc.h"
-#include "NfcNdefEvent.h"
 #include "NdefRecord.h"
 #endif
 
@@ -1865,11 +1864,6 @@ nsDOMClassInfo::Init()
   DOM_CLASSINFO_MAP_BEGIN(Nfc, nsIDOMNfc)
     DOM_CLASSINFO_MAP_ENTRY(nsIDOMNfc)
     DOM_CLASSINFO_MAP_ENTRY(nsIDOMEventTarget)
-  DOM_CLASSINFO_MAP_END
-
-  DOM_CLASSINFO_MAP_BEGIN(NfcNdefEvent, nsIDOMNfcNdefEvent)
-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMNfcNdefEvent)
-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMEvent)
   DOM_CLASSINFO_MAP_END
 
   DOM_CLASSINFO_MAP_BEGIN(NdefRecord, nsIDOMNdefRecord)

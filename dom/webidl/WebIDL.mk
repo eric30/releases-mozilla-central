@@ -454,6 +454,12 @@ webidl_files += \
   $(NULL)
 endif
 
+ifdef MOZ_B2G_NFC
+webidl_files += \
+  MozNfcEvent.webidl \
+  $(NULL)
+endif
+
 ifdef MOZ_GAMEPAD
 webidl_files += \
   GamepadEvent.webidl \

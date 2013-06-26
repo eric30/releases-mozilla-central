@@ -2,6 +2,8 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+#
+# Copyright © 2013 Deutsche Telekom, Inc.
 
 if CONFIG['MOZ_B2G_NFC']:
     MODULE = 'dom'
@@ -10,13 +12,13 @@ if CONFIG['MOZ_B2G_NFC']:
         'nsIDOMNavigatorNfc.idl',
         'nsIDOMNdefRecord.idl',
         'nsIDOMNfc.idl',
-        'nsIDOMNfcNdefEvent.idl',
+        'nsIDOMNfcEvent.idl',
     ]
     EXPORTS.mozilla.dom.nfc += [
         'nsNfc.h',
     ]
     CPP_SOURCES += [
         'nsNfc.cpp',
-        'NfcNdefEvent.cpp',
         'NdefRecord.cpp',
+        'NfcEvent.cpp',
     ]
