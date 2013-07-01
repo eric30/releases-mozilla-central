@@ -13,6 +13,7 @@ interface nsINfcContentHelper : nsISupports
   void registerNfcCallback(in nsINfcCallback callback);
   void unregisterNfcCallback(in nsINfcCallback callback);
 
+  nsIDOMDOMRequest transceive(in nsIDOMWindow window, in jsval params);
   nsIDOMDOMRequest writeNdefTag(in nsIDOMWindow window, in jsval records);
   nsIDOMDOMRequest ndefPush(in nsIDOMWindow window, in jsval records);
   void sendToNfcd(in DOMString message);

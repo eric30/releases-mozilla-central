@@ -13,6 +13,8 @@
  * limitations under the License.
  */
 
+/* Copyright © 2013, Deutsche Telekom, Inc. */
+
 "use strict";
 
 const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
@@ -28,6 +30,7 @@ const NFC_CID =
 
 const NFC_IPC_MSG_NAMES = [
   "NFC:SendToNfcd",
+  "NFC:Transceive",
   "NFC:WriteNdefTag",
   "NFC:NdefPush"
 ];
@@ -84,8 +87,12 @@ Nfc.prototype = {
         ppmm.broadcastAsyncMessage("NFC:NdefDiscovered", message);
         gSystemMessenger.broadcastMessage("nfc-ndef-discovered", message);
         break;
-      case "ndefDisconnected":
-        ppmm.broadcastAsyncMessage("NFC:NdefDisconnected", message);
+      case "tagDiscovered":
+        ppmm.broadcastAsyncMessage("NFC:TagDiscovered", message);
+        gSystemMessenger.broadcastMessage("nfc-tag-discovered", message);
+        break;
+      case "disconnected":
+        ppmm.broadcastAsyncMessage("NFC:Disconnected", message);
         gSystemMessenger.broadcastMessage("nfc-disconnected", message);
         break;
       case "requestStatus":
@@ -156,6 +163,9 @@ Nfc.prototype = {
     switch (message.name) {
       case "NFC:SendToNfcd":
         this.sendToNfcd(message.json);
+        break;
+      case "NFC:Transceive":
+        this.transceive(message.json);
         break;
       case "NFC:WriteNdefTag":
         this.writeNdefTag(message.json);

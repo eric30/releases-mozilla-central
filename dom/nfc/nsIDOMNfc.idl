@@ -15,7 +15,10 @@ interface nsIDOMNfc : nsIDOMEventTarget {
   attribute jsval onndefdiscovered;
 
   [implicit_jscontext]
-  attribute jsval onndefdisconnected;
+  attribute jsval ontagdiscovered;
+
+  [implicit_jscontext]
+  attribute jsval ondisconnected;
 
   [implicit_jscontext]
   attribute jsval onsecureelementactivated;
@@ -28,6 +31,10 @@ interface nsIDOMNfc : nsIDOMEventTarget {
 
   [implicit_jscontext]
   boolean validateNdefTag(in jsval records);
+
+  // read the raw data off the tag, without interpretation.
+  [implicit_jscontext]
+  nsIDOMDOMRequest transceive(in jsval params);
 
   // records is an array of 1 or more records
   [implicit_jscontext]

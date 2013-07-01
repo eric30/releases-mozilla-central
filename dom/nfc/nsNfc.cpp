@@ -82,7 +82,8 @@ DOMCI_DATA(Nfc, nsNfc)
 NS_IMPL_ISUPPORTS1(nsNfc::NfcCallback, nsINfcCallback)
 
 NS_IMPL_EVENT_HANDLER(nsNfc, ndefdiscovered)
-NS_IMPL_EVENT_HANDLER(nsNfc, ndefdisconnected)
+NS_IMPL_EVENT_HANDLER(nsNfc, tagdiscovered)
+NS_IMPL_EVENT_HANDLER(nsNfc, disconnected)
 NS_IMPL_EVENT_HANDLER(nsNfc, secureelementactivated)
 NS_IMPL_EVENT_HANDLER(nsNfc, secureelementdeactivated)
 NS_IMPL_EVENT_HANDLER(nsNfc, secureelementtransaction)
@@ -107,7 +108,25 @@ nsNfc::NdefDiscovered(const JS::Value& aNdefRecords, JSContext* aCx)
 }
 
 NS_IMETHODIMP
-nsNfc::NdefDisconnected(const JS::Value& aNfcHandle, JSContext* aCx) {
+nsNfc::TagDiscovered(const JS::Value& aTagMetadata, JSContext* aCx)
+{
+  // Parse JSON
+  nsString message;
+  nsresult rv;
+
+  nsCOMPtr<nsIJSON> json(new nsJSON());
+  rv = json->EncodeFromJSVal((jsval*)&aTagMetadata, aCx, message); // EncodeJSVal param1 not const...
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  // Dispatch incoming event.
+  nsRefPtr<NfcEvent> event = NfcEvent::Create(this, message);
+  NS_ASSERTION(event, "This should never fail!");
+
+  return event->Dispatch(this, NS_LITERAL_STRING("tagdiscovered"));
+}
+
+NS_IMETHODIMP
+nsNfc::Disconnected(const JS::Value& aNfcHandle, JSContext* aCx) {
   nsString message;
   nsresult rv;
 
@@ -119,7 +138,7 @@ nsNfc::NdefDisconnected(const JS::Value& aNfcHandle, JSContext* aCx) {
   nsRefPtr<NfcEvent> event = NfcEvent::Create(this, message);
   NS_ASSERTION(event, "This should never fail!");
 
-  return event->Dispatch(this, NS_LITERAL_STRING("ndefdisconnected"));
+  return event->Dispatch(this, NS_LITERAL_STRING("disconnected"));
 }
 
 NS_IMETHODIMP
@@ -161,6 +180,16 @@ nsNfc::ValidateNdefTag(const JS::Value& aRecords, JSContext* aCx, bool* result)
     }
   }
   *result = true;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsNfc::Transceive(const JS::Value& aParams, JSContext* aCx, nsIDOMDOMRequest** aRequest)
+{
+  // Call to NfcContentHelper.js
+  *aRequest = nullptr;
+  nsresult rv = mNfc->Transceive(GetOwner(), aParams, aRequest);
+  NS_ENSURE_SUCCESS(rv, rv);
   return NS_OK;
 }
 

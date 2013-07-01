@@ -13,6 +13,8 @@
  * limitations under the License.
  */
 
+/* Copyright © 2013, Deutsche Telekom, Inc. */
+
 "use strict";
 
 importScripts("systemlibs.js");
@@ -61,6 +63,10 @@ let Nfc = {
       return;
     }
     method.call(this, message);
+  },
+
+  transceive: function transceive(message) {
+    postNfcMessage(JSON.stringify(message.content));
   },
 
   directMessage: function directMessage(message) {

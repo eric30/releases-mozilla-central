@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Copyright © 2013, Deutsche Telekom, Inc.
+
 # Nfc.js
 component {2ff24790-5e74-11e1-b86c-0800200c9a66} Nfc.js
 contract @mozilla.org/nfc;1 {2ff24790-5e74-11e1-b86c-0800200c9a66}

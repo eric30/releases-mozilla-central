@@ -13,6 +13,8 @@
  * limitations under the License.
  */
 
+/* Copyright © 2013, Deutsche Telekom, Inc. */
+
 "use strict";
 
 const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
@@ -29,7 +31,8 @@ const NFCCONTENTHELPER_CID =
 
 const NFC_IPC_MSG_NAMES = [
   "NFC:NdefDiscovered",
-  "NFC:NdefDisconnected",
+  "NFC:TagDiscovered",
+  "NFC:Disconnected",
   "NFC:RequestStatus",
   "NFC:SecureElementActivated",
   "NFC:SecureElementDeactivated",
@@ -91,6 +94,22 @@ NfcContentHelper.prototype = {
     cpmm.sendAsyncMessage("NFC:NdefPush", {
       requestId: requestId,
       records: encodedRecords
+    });
+    return request;
+  },
+
+  transceive: function transceive(window, params) {
+    if (window == null) {
+      throw Components.Exception("Can't get window object",
+                                  Cr.NS_ERROR_UNEXPECTED);
+    }
+
+    let request = Services.DOMRequest.createRequest(window);
+    let requestId = btoa(this.getRequestId(request));
+
+    cpmm.sendAsyncMessage("NFC:Transceive", {
+      requestId: requestId,
+      params: params
     });
     return request;
   },
@@ -216,8 +235,11 @@ NfcContentHelper.prototype = {
       case "NFC:NdefDiscovered":
         this.handleNdefDiscovered(message.json);
         break;
-      case "NFC:NdefDisconnected":
-        this.handleNdefDisconnected(message.json);
+      case "NFC:TagDiscovered":
+        this.handleNdefDiscovered(message.json);
+        break;
+      case "NFC:Disconnected":
+        this.handleDisconnected(message.json);
         break;
       case "NFC:RequestStatus":
         this.handleRequestStatus(message.json);
@@ -245,8 +267,13 @@ NfcContentHelper.prototype = {
     this._deliverCallback("_nfcCallbacks", "ndefDiscovered", [records]);
   },
 
-  handleNdefDisconnected: function handleNdefDisconnected(message) {
-    this._deliverCallback("_nfcCallbacks", "ndefDisconnected", [message]);
+  handleTagDiscovered: function handleTagDiscovered(message) {
+    let records = message.content.records;
+    this._deliverCallback("_nfcCallbacks", "tagDiscovered", [records]);
+  },
+
+  handleDisconnected: function handleDisconnected(message) {
+    this._deliverCallback("_nfcCallbacks", "disconnected", [message]);
   },
 
   handleRequestStatus: function handleRequestStatus(message) {
