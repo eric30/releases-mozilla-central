@@ -84,8 +84,8 @@ Nfc.prototype = {
     debug("Received message: " + JSON.stringify(message));
     switch (message.type) {
       case "ndefDiscovered":
-        ppmm.broadcastAsyncMessage("NFC:NdefDiscovered", message);
-        gSystemMessenger.broadcastMessage("nfc-ndef-discovered", message);
+        ppmm.broadcastAsyncMessage("NFC:NdefDiscovered", message); // Send to event callbacks
+        gSystemMessenger.broadcastMessage("nfc-ndef-discovered", message); // Sent to activities
         break;
       case "tagDiscovered":
         ppmm.broadcastAsyncMessage("NFC:TagDiscovered", message);
@@ -122,6 +122,22 @@ Nfc.prototype = {
 
   sendToNfcd: function sendToNfcd(message) {
     this.worker.postMessage({type: "directMessage", content: message});
+  },
+
+  // tag read/write command message handler.
+  transceive: function transceive(params) {
+    var params = message.params;
+    var rid = message.requestId;
+
+    var outMessage = {
+      type: "transceive",
+      requestId: rid,
+      content: {
+        params: params
+      }
+    };
+
+    this.worker.postMessage({type: "transceive", content: outMessage});
   },
 
   writeNdefTag: function writeNdefTag(message) {

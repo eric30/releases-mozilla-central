@@ -65,12 +65,12 @@ let Nfc = {
     method.call(this, message);
   },
 
-  transceive: function transceive(message) {
-    postNfcMessage(JSON.stringify(message.content));
-  },
-
   directMessage: function directMessage(message) {
     postNfcMessage(message.content);
+  },
+
+  transceive: function transceive(message) {
+    postNfcMessage(JSON.stringify(message.content));
   },
 
   writeNdefTag: function writeNdefTag(message) {
