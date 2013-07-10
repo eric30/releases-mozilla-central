@@ -31,9 +31,15 @@ const NFCCONTENTHELPER_CID =
 
 const NFC_IPC_MSG_NAMES = [
   "NFC:NdefDiscovered",
-  "NFC:TagDiscovered",
-  "NFC:Disconnected",
-  "NFC:RequestStatus",
+  "NFC:TechDiscoveredNotification",
+  "NFC:TechLostNotification",
+  "NFC:NDEFDetailsResponse",
+  "NFC:NDEFWriteResponse",
+  "NFC:NfcATagDetailsResponse",
+  "NFC:NfcATagDiscoveredNotification",
+  "NFC:NfcATagConnectResponse",
+  "NFC:NfcATagTransceiveResponse",
+  "NFC:NfcATagCloseResponse",
   "NFC:SecureElementActivated",
   "NFC:SecureElementDeactivated",
   "NFC:SecureElementTransaction"
@@ -230,21 +236,38 @@ NfcContentHelper.prototype = {
   },
 
   receiveMessage: function receiveMessage(message) {
-    let request;
     switch (message.name) {
       case "NFC:NdefDiscovered":
         this.handleNdefDiscovered(message.json);
         break;
-      case "NFC:TagDiscovered":
-        this.handleNdefDiscovered(message.json);
+      case "NFC:TechDiscoveredNotification":
+        this.handleTechDiscoveredNotification(message.json);
         break;
-      case "NFC:Disconnected":
-        this.handleDisconnected(message.json);
+      case "NFC:NfcATagDiscoveredNotification":
+        this.handleNfcATagDiscoveredNotification(message.json);
         break;
-      case "NFC:RequestStatus":
-        this.handleRequestStatus(message.json);
+      case "NFC:TechLostNotification":
+        this.handleTechLostNotification(message.json);
         break;
-      case "NFC:SecureElementActivated":
+      case "NFC:NDEFDetailsResponse":
+        this.handleNDEFDetailResponse(message.json);
+        break;
+      case "NFC:NDEFWriteResponse":
+        this.handleNDEFWriteResponse(message.json);
+        break;
+      case "NFC:NfcATagDetailsResponse":
+        this.handleNfcATagDetailsResponse(message.json);
+        break;
+      case "NFC:NfcATagConnectResponse":
+        this.handleNfcATagConnectResponse(message.json);
+        break;
+      case "NFC:NfcATagTransceiveResponse":
+        this.handleNfcATagTransceiveResponse(message.json);
+        break;
+      case "NFC:NfcATagCloseResponse":
+        this.handleNfcATagCloseResponse(message.json);
+        break;
+      case "SecureElementActivated":
         this.handleSecureElementActivated(message.json);
         break;
       case "NFC:SecureElementDeactivated":
@@ -267,19 +290,23 @@ NfcContentHelper.prototype = {
     this._deliverCallback("_nfcCallbacks", "ndefDiscovered", [records]);
   },
 
-  handleTagDiscovered: function handleTagDiscovered(message) {
-    let records = message.content.records;
-    this._deliverCallback("_nfcCallbacks", "tagDiscovered", [records]);
+  // NFC Notifications
+  handleTechDiscoveredNotification: function handleTechDiscoveredNotification(message) {
+    this._deliverCallback("_nfcCallbacks", "techDiscovered", [message]);
   },
 
-  handleDisconnected: function handleDisconnected(message) {
-    this._deliverCallback("_nfcCallbacks", "disconnected", [message]);
+  handleTechLostNotification: function handleTechLostNotification(message) {
+    this._deliverCallback("_nfcCallbacks", "techLost", [message]);
   },
 
-  handleRequestStatus: function handleRequestStatus(message) {
-    let response = message.content; // Subfields of content: requestId, status, optional message
+  handleNfcATagDiscoveredNofitication: function handleTechDiscoveredNotification(message) {
+    this._deliverCallback("_nfcCallbacks", "nfcATagDiscovered", [message]);
+  },
+
+  // handle DOMRequest based response messages. Subfields of message.content: requestId, status, optional message
+  handleResponse: function handleResponse(message) {
+    let response = message.content;
     let requestId = atob(response.requestId);
-    debug("handleRequestStatus (" + response.requestId + ", " + response.status + ")");
     if (response.status == "OK") {
       this.fireRequestSuccess(requestId, response.message);
     } else {
@@ -287,6 +314,43 @@ NfcContentHelper.prototype = {
     }
   },
 
+  handleNDEFDetailsResponse: function handleNDEFDetailsResponse(message) {
+    let response = message.content;
+    debug("NDEFDetailsResponse(" + response.requestId + ", " + response.status + ")");
+    this.handleResponse(message);
+  },
+
+  handleNDEFWriteResponse: function handleNDEFWriteResponse(message) {
+    let response = message.content;
+    debug("NDEFWriteResponse(" + response.requestId + ", " + response.status + ")");
+    this.handleResponse(message);
+  },
+
+  handleNfcATagDetailsResponse: function handleNfcATagDetailsResponse(message) {
+    let response = message.content;
+    debug("NfcATagDetailsResponse(" + response.requestId + ", " + response.status + ")");
+    this.handleResponse(message);
+  },
+
+  handleNfcATagConnectResponse: function handleNfcATagConnectResponse(message) {
+    let response = message.content;
+    debug("NfcATagConnectResponse(" + response.requestId + ", " + response.status + ")");
+    this.handleResponse(message);
+  },
+
+  handleNfcATagTransceiveResponse: function handleNfcATagTransceiveResponse(message) {
+    let response = message.content;
+    debug("NfcATagTransceiveResponse(" + response.requestId + ", " + response.status + ")");
+    this.handleResponse(message);
+  },
+
+  handleNfcATagCloseResponse: function handleNfcATagCloseResponse(message) {
+    let response = message.content;
+    debug("NfcATagCloseResponse(" + response.requestId + ", " + response.status + ")");
+    this.handleResponse(message);
+  },
+
+  // Secure Element Notifications:
   handleSecureElementActivated: function handleSecureElementActivated(message) {
     this._deliverCallback("_nfcCallbacks", "secureElementActivated", [message]);
   },

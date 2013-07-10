@@ -124,6 +124,11 @@ Nfc.prototype = {
     this.worker.postMessage({type: "directMessage", content: message});
   },
 
+  ndefDetails: function ndefDetails(message) {
+    var rid = message.requestId;
+    this.worker.postMessage({type: "ndefDetails", requestId: rid});
+  },
+
   // tag read/write command message handler.
   transceive: function transceive(params) {
     var params = message.params;

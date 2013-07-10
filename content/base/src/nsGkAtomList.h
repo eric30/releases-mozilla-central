@@ -728,6 +728,9 @@ GK_ATOM(onload, "onload")
 #ifdef MOZ_B2G_NFC
 GK_ATOM(onndefdiscovered, "onndefdiscovered")
 GK_ATOM(ontagdiscovered, "ontagdiscovered")
+GK_ATOM(ontechdiscovered, "ontechdiscovered")
+GK_ATOM(onnfcatagdiscovered, "onnfcatagdiscovered")
+GK_ATOM(ontechlost, "ontechlost")
 #endif
 GK_ATOM(onpopstate, "onpopstate")
 GK_ATOM(only, "only")               // this one is not an event

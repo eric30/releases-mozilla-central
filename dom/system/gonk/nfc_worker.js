@@ -65,18 +65,56 @@ let Nfc = {
     method.call(this, message);
   },
 
+  /**
+   * Debug only
+   */
   directMessage: function directMessage(message) {
     postNfcMessage(message.content);
   },
 
+  ndefDetails: function ndefDetails(message) {
+    postNfcMessage(message.requestId); // Just request ID.
+  },
+
+  ndefWrite: function ndefWrite(message) {
+    postNfcMessage(message.content);
+  },
+
+  nfcATagDetails: function nfcATagDetails(message) {
+    postNfcMessage(message.requestId); // Just request ID.
+  },
+
+  /**
+   * Open a connection to the NFC target. Request ID is required.
+   */
+  connect: function connect(message) {
+    postNfcMessage(JSON.stringify(message.content));
+  },
+
+  /**
+   *  Excahnge PDUs with the NFC target. Request ID is required.
+   */
   transceive: function transceive(message) {
     postNfcMessage(JSON.stringify(message.content));
   },
 
+  /**
+   * Close connection to the NFC target. Request ID is required.
+   */
+  disconnect: function disconnect(message) {
+    postNfcMessage(JSON.stringify(message.content));
+  },
+
+  /**
+   * Write an NDEF formatted message to the NFC target.
+   */
   writeNdefTag: function writeNdefTag(message) {
     postNfcMessage(JSON.stringify(message.content));
   },
 
+  /**
+   * P2P NDEF message push between a pair of NFC devices
+   */
   ndefPush: function ndefPush(message) {
     postNfcMessage(JSON.stringify(message.content));
   },

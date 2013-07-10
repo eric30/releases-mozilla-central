@@ -18,7 +18,13 @@ interface nsIDOMNfc : nsIDOMEventTarget {
   attribute jsval ontagdiscovered;
 
   [implicit_jscontext]
-  attribute jsval ondisconnected;
+  attribute jsval ontechdiscovered;
+
+  [implicit_jscontext]
+  attribute jsval onnfcatagdiscovered;
+
+  [implicit_jscontext]
+  attribute jsval ontechlost;
 
   [implicit_jscontext]
   attribute jsval onsecureelementactivated;
@@ -32,9 +38,17 @@ interface nsIDOMNfc : nsIDOMEventTarget {
   [implicit_jscontext]
   boolean validateNdefTag(in jsval records);
 
-  // read the raw data off the tag, without interpretation.
+  [implicit_jscontext]
+  nsIDOMDOMRequest nfcATagConnect();
+
+  [implicit_jscontext]
+  nsIDOMDOMRequest nfcATransceive(in jsval params);
+
   [implicit_jscontext]
   nsIDOMDOMRequest transceive(in jsval params);
+
+  [implicit_jscontext]
+  nsIDOMDOMRequest nfcATagClose();
 
   // records is an array of 1 or more records
   [implicit_jscontext]
