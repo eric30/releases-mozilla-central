@@ -87,6 +87,10 @@ Nfc.prototype = {
         ppmm.broadcastAsyncMessage("NFC:NdefDiscovered", message); // Send to event callbacks
         gSystemMessenger.broadcastMessage("nfc-ndef-discovered", message); // Sent to activities
         break;
+      case "techDiscovered":
+        ppmm.broadcastAsyncMessage("NFC:TechDiscovered", message);
+        gSystemMessenger.broadcastMessage("nfc-technology-discovered", message);
+        break;
       case "tagDiscovered":
         ppmm.broadcastAsyncMessage("NFC:TagDiscovered", message);
         gSystemMessenger.broadcastMessage("nfc-tag-discovered", message);
