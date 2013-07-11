@@ -11,7 +11,6 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/Monitor.h"
 #include "mozilla/RefPtr.h"
-#include "mozilla/TimeStamp.h"
 #include "InputData.h"
 #include "Axis.h"
 #include "TaskThrottler.h"
@@ -224,22 +223,6 @@ public:
     double aEstimatedPaintDuration);
 
   /**
-   * Return the scale factor needed to fit the viewport in |aMetrics|
-   * into its composition bounds.
-   */
-  static CSSToScreenScale CalculateIntrinsicScale(const FrameMetrics& aMetrics);
-
-  /**
-   * Return the resolution that content should be rendered at given
-   * the configuration in aFrameMetrics: viewport dimensions, zoom
-   * factor, etc.  (The mResolution member of aFrameMetrics is
-   * ignored.)
-   */
-  static CSSToScreenScale CalculateResolution(const FrameMetrics& aMetrics);
-
-  static CSSRect CalculateCompositedRectInCssPixels(const FrameMetrics& aMetrics);
-
-  /**
    * Send an mozbrowserasyncscroll event.
    * *** The monitor must be held while calling this.
    */
@@ -257,6 +240,17 @@ public:
    * animations to the same timestamp.
    */
   static void SetFrameTime(const TimeStamp& aMilliseconds);
+
+  /**
+   * Transform and intersect aPoint with the layer tree returning the appropriate
+   * AsyncPanZoomController for this point.
+   * aRelativePointOut Return the point transformed into the layer coordinates
+   * relative to the scroll origin for this layer.
+   */
+  static void GetAPZCAtPoint(const ContainerLayer& aLayerTree,
+                             const ScreenIntPoint& aPoint,
+                             AsyncPanZoomController** aApzcOut,
+                             LayerIntPoint* aRelativePointOut);
 
 protected:
   /**
@@ -559,13 +553,6 @@ private:
   // |mMonitor|; that is, it should be held whenever this is updated.
   PanZoomState mState;
 
-  // How long it took in the past to paint after a series of previous requests.
-  nsTArray<TimeDuration> mPreviousPaintDurations;
-
-  // When the last paint request started. Used to determine the duration of
-  // previous paints.
-  TimeStamp mPreviousPaintStartTime;
-
   // The last time and offset we fire the mozbrowserasyncscroll event when
   // compositor has sampled the content transform for this frame.
   TimeStamp mLastAsyncScrollTime;
@@ -588,12 +575,6 @@ private:
   uint32_t mAsyncScrollTimeout;
 
   int mDPI;
-
-  // Stores the current paint status of the frame that we're managing. Repaints
-  // may be triggered by other things (like content doing things), in which case
-  // this status will not be updated. It is only changed when this class
-  // requests a repaint.
-  bool mWaitingForContentToPaint;
 
   // Flag used to determine whether or not we should disable handling of the
   // next batch of touch events. This is used for sync scrolling of subframes.

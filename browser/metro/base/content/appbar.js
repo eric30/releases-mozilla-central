@@ -4,8 +4,6 @@
 "use strict";
 
 var Appbar = {
-  get consoleButton() { return document.getElementById('console-button'); },
-  get jsShellButton() { return document.getElementById('jsshell-button'); },
   get starButton()    { return document.getElementById('star-button'); },
   get pinButton()     { return document.getElementById('pin-button'); },
   get menuButton()    { return document.getElementById('menu-button'); },
@@ -14,18 +12,16 @@ var Appbar = {
   activeTileset: null,
 
   init: function Appbar_init() {
-    window.addEventListener('MozContextUIShow', this);
-    window.addEventListener('MozContextUIDismiss', this);
-    window.addEventListener('MozAppbarDismiss', this);
+    // fired from appbar bindings
     Elements.contextappbar.addEventListener('MozAppbarShowing', this, false);
     Elements.contextappbar.addEventListener('MozAppbarDismissing', this, false);
+
+    // fired when a context sensitive item (bookmarks) changes state
     window.addEventListener('MozContextActionsChange', this, false);
+
+    // browser events we need to update button state on
     Elements.browsers.addEventListener('URLChanged', this, true);
     Elements.tabList.addEventListener('TabSelect', this, true);
-    Elements.panelUI.addEventListener('ToolPanelShown', this, false);
-    Elements.panelUI.addEventListener('ToolPanelHidden', this, false);
-
-    this._updateDebugButtons();
 
     // tilegroup selection events for all modules get bubbled up
     window.addEventListener("selectionchange", this, false);
@@ -35,22 +31,10 @@ var Appbar = {
     switch (aEvent.type) {
       case 'URLChanged':
       case 'TabSelect':
-        this.update();
-        Elements.navbar.dismiss();
-        Elements.contextappbar.dismiss();
-        break;
-      case 'MozContextUIShow':
-        Elements.navbar.show();
-        break;
-      case 'MozAppbarDismiss':
-      case 'MozContextUIDismiss':
-      case 'ToolPanelShown':
-      case 'ToolPanelHidden':
-        Elements.navbar.dismiss();
-        Elements.contextappbar.dismiss();
-        break;
       case 'MozAppbarShowing':
+        this.update();
         break;
+
       case 'MozAppbarDismissing':
         if (this.activeTileset) {
           this.activeTileset.clearSelection();
@@ -58,11 +42,13 @@ var Appbar = {
         this.clearContextualActions();
         this.activeTileset = null;
         break;
+
       case 'MozContextActionsChange':
         let actions = aEvent.actions;
         // could transition in old, new buttons?
         this.showContextualActions(actions);
         break;
+
       case "selectionchange":
         let nodeName = aEvent.target.nodeName;
         if ('richgrid' === nodeName) {
@@ -113,6 +99,10 @@ var Appbar = {
 
   onMenuButton: function(aEvent) {
       var typesArray = ["find-in-page"];
+
+      if (ConsolePanelView.enabled) typesArray.push("open-error-console");
+      if (!MetroUtils.immersive) typesArray.push("open-jsshell");
+
       try {
         // If we have a valid http or https URI then show the view on desktop
         // menu item.
@@ -150,17 +140,6 @@ var Appbar = {
       }
     } catch(ex) {
     }
-  },
-
-  onConsoleButton: function() {
-    PanelUI.show("console-container");
-  },
-
-  onJSShellButton: function() {
-    // XXX for debugging, this only works when running on the desktop.
-    if (!MetroUtils.immersive)
-      window.openDialog("chrome://browser/content/shell.xul", "_blank",
-                        "all=no,scrollbars=yes,resizable=yes,dialog=no");
   },
 
   dispatchContextualAction: function(aActionName){
@@ -259,9 +238,4 @@ var Appbar = {
       this.starButton.checked = isStarred;
     }.bind(this));
   },
-
-  _updateDebugButtons: function() {
-    this.consoleButton.disabled = !ConsolePanelView.enabled;
-    this.jsShellButton.disabled = MetroUtils.immersive;
-  },
-  };
+};

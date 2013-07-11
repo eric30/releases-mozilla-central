@@ -19,10 +19,12 @@
   (function(exports) {
      "use strict";
 
-     // exports.OS.Win is created by osfile_win_back.jsm
-     if (exports.OS.File) {
-       return; // Avoid double-initialization
+     exports.OS = require("resource://gre/modules/osfile/osfile_shared_allthreads.jsm").OS;
+      // exports.OS.Win is created by osfile_win_back.jsm
+     if (exports.OS && exports.OS.File) {
+        return; // Avoid double-initialization
      }
+
      exports.OS.Win.File._init();
      let Const = exports.OS.Constants.Win;
      let WinFile = exports.OS.Win.File;
@@ -329,11 +331,21 @@
       * Remove an existing file.
       *
       * @param {string} path The name of the file.
+      * @param {*=} options Additional options.
+      *   - {bool} ignoreAbsent If |false|, throw an error if the file does
+      *     not exist. |true| by default.
+      *
       * @throws {OS.File.Error} In case of I/O error.
       */
-     File.remove = function remove(path) {
-       throw_on_zero("remove",
-         WinFile.DeleteFile(path));
+     File.remove = function remove(path, options = {}) {
+       let result = WinFile.DeleteFile(path);
+       if (!result) {
+         if ((!("ignoreAbsent" in options) || options.ignoreAbsent) &&
+             ctypes.winLastError == Const.ERROR_FILE_NOT_FOUND) {
+           return;
+         }
+         throw new File.Error("remove");
+       }
      };
 
      /**

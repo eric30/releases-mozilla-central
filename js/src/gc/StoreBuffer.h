@@ -13,9 +13,11 @@
 # error "Generational GC requires exact rooting."
 #endif
 
-#include "jsgc.h"
 #include "jsalloc.h"
+#include "jsgc.h"
 #include "jsobj.h"
+
+#include "gc/Nursery.h"
 
 namespace js {
 namespace gc {
@@ -35,18 +37,14 @@ class BufferableRef
 };
 
 /*
- * HashKeyRef represents a reference to a HashTable key. Manual HashTable
- * barriers should should instantiate this template with their own table/key
- * type to insert into the generic buffer with putGeneric.
+ * HashKeyRef represents a reference to a HashMap key. This should normally
+ * be used through the HashTableWriteBarrierPost function.
  */
 template <typename Map, typename Key>
 class HashKeyRef : public BufferableRef
 {
     Map *map;
     Key key;
-
-    typedef typename Map::Entry::ValueType ValueType;
-    typedef typename Map::Ptr Ptr;
 
   public:
     HashKeyRef(Map *m, const Key &k) : map(m), key(k) {}
@@ -56,13 +54,9 @@ class HashKeyRef : public BufferableRef
         typename Map::Ptr p = map->lookup(key);
         if (!p)
             return;
-        ValueType value = p->value;
-        JS_SET_TRACING_LOCATION(trc, (void*)&p->key);
+        JS_SET_TRACING_LOCATION(trc, (void*)&*p);
         Mark(trc, &key, "HashKeyRef");
-        if (prior != key) {
-            map->remove(prior);
-            map->put(key, value);
-        }
+        map->rekey(prior, key);
     }
 };
 
@@ -210,12 +204,15 @@ class StoreBuffer
         void put(const T &t) {
             JS_ASSERT(!owner->inParallelSection());
 
+            /* Ensure T is derived from BufferableRef. */
+            (void)static_cast<const BufferableRef*>(&t);
+
             /* Check if we have been enabled. */
             if (!pos)
                 return;
 
             /* Check for overflow. */
-            if (top - pos < (unsigned)(sizeof(unsigned) + sizeof(T))) {
+            if (unsigned(top - pos) < unsigned(sizeof(unsigned) + sizeof(T))) {
                 owner->setOverflowed();
                 return;
             }
@@ -346,6 +343,22 @@ class StoreBuffer
         void mark(JSTracer *trc);
     };
 
+    class CallbackRef : public BufferableRef
+    {
+      public:
+        typedef void (*MarkCallback)(JSTracer *trc, void *key);
+
+        CallbackRef(MarkCallback cb, void *k) : callback(cb), key(k) {}
+
+        virtual void mark(JSTracer *trc) {
+            callback(trc, key);
+        }
+
+      private:
+        MarkCallback callback;
+        void *key;
+    };
+
     MonoTypeBuffer<ValueEdge> bufferVal;
     MonoTypeBuffer<CellPtrEdge> bufferCell;
     MonoTypeBuffer<SlotEdge> bufferSlot;
@@ -425,6 +438,11 @@ class StoreBuffer
     template <typename T>
     void putGeneric(const T &t) {
         bufferGeneric.put(t);
+    }
+
+    /* Insert or update a callback entry. */
+    void putCallback(CallbackRef::MarkCallback callback, void *key) {
+        bufferGeneric.put(CallbackRef(callback, key));
     }
 
     /* Mark the source of all edges in the store buffer. */

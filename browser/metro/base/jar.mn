@@ -8,7 +8,6 @@ chrome.jar:
 
   content/aboutCertError.xhtml                 (content/pages/aboutCertError.xhtml)
   content/aboutRights.xhtml                    (content/pages/aboutRights.xhtml)
-  content/aboutCrash.xhtml                     (content/pages/aboutCrash.xhtml)
   content/blockedSite.xhtml                    (content/pages/blockedSite.xhtml)
   content/netError.xhtml                       (content/pages/netError.xhtml)
 
@@ -29,12 +28,17 @@ chrome.jar:
   content/bindings/cssthrobber.xml             (content/bindings/cssthrobber.xml)
   content/bindings/popup.xml                   (content/bindings/popup.xml)
 
+* content/flyouts/flyoutUI.js                  (content/flyouts/flyoutUI.js)
+* content/flyouts/aboutFlyout.js               (content/flyouts/aboutFlyout.js)
+  content/flyouts/prefsFlyout.js               (content/flyouts/prefsFlyout.js)
+
   content/prompt/alert.xul                     (content/prompt/alert.xul)
   content/prompt/confirm.xul                   (content/prompt/confirm.xul)
   content/prompt/prompt.xul                    (content/prompt/prompt.xul)
   content/prompt/promptPassword.xul            (content/prompt/promptPassword.xul)
   content/prompt/select.xul                    (content/prompt/select.xul)
   content/prompt/prompt.js                     (content/prompt/prompt.js)
+  content/prompt/crash.xul                     (content/prompt/crash.xul)
 
   content/helperui/AlertsHelper.js             (content/helperui/AlertsHelper.js)
   content/helperui/IndexedDB.js                (content/helperui/IndexedDB.js)
@@ -70,7 +74,6 @@ chrome.jar:
   content/ContextCommands.js                   (content/ContextCommands.js)
   content/commandUtil.js                       (content/commandUtil.js)
   content/appbar.js                            (content/appbar.js)
-* content/aboutPanel.js                        (content/aboutPanel.js)
   content/shell.xul                            (content/jsshell/shell.xul)
   content/shell.html                           (content/jsshell/shell.html)
   content/browser.css                          (content/browser.css)
@@ -80,7 +83,6 @@ chrome.jar:
   content/input.js                             (content/input.js)
   content/Util.js                              (content/Util.js)
   content/bookmarks.js                         (content/bookmarks.js)
-  content/preferences.js                       (content/preferences.js)
   content/exceptions.js                        (content/exceptions.js)
   content/downloads.js                         (content/downloads.js)
   content/history.js                           (content/history.js)
@@ -88,11 +90,13 @@ chrome.jar:
   content/TopSites.js                          (content/TopSites.js)
   content/console.js                           (content/console.js)
   content/AnimatedZoom.js                      (content/AnimatedZoom.js)
+  content/dbg-metro-actors.js                  (content/dbg-metro-actors.js)
 #ifdef MOZ_SERVICES_SYNC
-* content/sync.js                              (content/sync.js)
+  content/flyouts/syncFlyout.js                (content/flyouts/syncFlyout.js)
   content/RemoteTabs.js                        (content/RemoteTabs.js)
 #endif
   content/NavButtonSlider.js                   (content/NavButtonSlider.js)
+  content/ContextUI.js                         (content/ContextUI.js)
 
 % override chrome://global/content/config.xul chrome://browser/content/config.xul
 % override chrome://global/content/netError.xhtml chrome://browser/content/netError.xhtml

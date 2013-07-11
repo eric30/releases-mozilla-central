@@ -30,8 +30,7 @@ CreateMessageFromMessageData(const MobileMessageData& aData)
       message = new SmsMessage(aData.get_SmsMessageData());
       break;
     default:
-      MOZ_NOT_REACHED("Unexpected type of MobileMessageData");
-      return nullptr;
+      MOZ_CRASH("Unexpected type of MobileMessageData");
   }
 
   return message.forget();
@@ -111,28 +110,26 @@ SmsChild::RecvNotifyDeliveryErrorMessage(const MobileMessageData& aData)
 }
 
 PSmsRequestChild*
-SmsChild::AllocPSmsRequest(const IPCSmsRequest& aRequest)
+SmsChild::AllocPSmsRequestChild(const IPCSmsRequest& aRequest)
 {
-  MOZ_NOT_REACHED("Caller is supposed to manually construct a request!");
-  return nullptr;
+  MOZ_CRASH("Caller is supposed to manually construct a request!");
 }
 
 bool
-SmsChild::DeallocPSmsRequest(PSmsRequestChild* aActor)
+SmsChild::DeallocPSmsRequestChild(PSmsRequestChild* aActor)
 {
   delete aActor;
   return true;
 }
 
 PMobileMessageCursorChild*
-SmsChild::AllocPMobileMessageCursor(const IPCMobileMessageCursor& aCursor)
+SmsChild::AllocPMobileMessageCursorChild(const IPCMobileMessageCursor& aCursor)
 {
-  MOZ_NOT_REACHED("Caller is supposed to manually construct a cursor!");
-  return nullptr;
+  MOZ_CRASH("Caller is supposed to manually construct a cursor!");
 }
 
 bool
-SmsChild::DeallocPMobileMessageCursor(PMobileMessageCursorChild* aActor)
+SmsChild::DeallocPMobileMessageCursorChild(PMobileMessageCursorChild* aActor)
 {
   // MobileMessageCursorChild is refcounted, must not be freed manually.
   // Originally AddRefed in SendCursorRequest() in SmsIPCService.cpp.
@@ -200,8 +197,7 @@ SmsRequestChild::Recv__delete__(const MessageReply& aReply)
       mReplyRequest->NotifyMarkMessageReadFailed(aReply.get_ReplyMarkeMessageReadFail().error());
       break;
     default:
-      MOZ_NOT_REACHED("Received invalid response parameters!");
-      return false;
+      MOZ_CRASH("Received invalid response parameters!");
   }
 
   return true;
@@ -243,8 +239,7 @@ MobileMessageCursorChild::RecvNotifyResult(const MobileMessageCursorData& aData)
       result = new MobileMessageThread(aData.get_ThreadData());
       break;
     default:
-      MOZ_NOT_REACHED("Received invalid response parameters!");
-      return false;
+      MOZ_CRASH("Received invalid response parameters!");
   }
 
   mCursorCallback->NotifyCursorResult(result);

@@ -178,9 +178,14 @@ class MacroAssemblerX86Shared : public Assembler
         return pushWithPatch(word);
     }
 
-    void Pop(const Register &reg) {
-        pop(reg);
+    template <typename T>
+    void Pop(const T &t) {
+        pop(t);
         framePushed_ -= STACK_SLOT_SIZE;
+    }
+    void Pop(const FloatRegister &t) {
+        pop(t);
+        framePushed_ -= sizeof(double);
     }
     void implicitPop(uint32_t args) {
         JS_ASSERT(args % STACK_SLOT_SIZE == 0);
@@ -221,10 +226,10 @@ class MacroAssemblerX86Shared : public Assembler
         movzbl(Operand(src), dest);
     }
     void load8SignExtend(const Address &src, const Register &dest) {
-        movxbl(Operand(src), dest);
+        movsbl(Operand(src), dest);
     }
     void load8SignExtend(const BaseIndex &src, const Register &dest) {
-        movxbl(Operand(src), dest);
+        movsbl(Operand(src), dest);
     }
     template <typename S, typename T>
     void store8(const S &src, const T &dest) {
@@ -241,10 +246,10 @@ class MacroAssemblerX86Shared : public Assembler
         movw(src, Operand(dest));
     }
     void load16SignExtend(const Address &src, const Register &dest) {
-        movxwl(Operand(src), dest);
+        movswl(Operand(src), dest);
     }
     void load16SignExtend(const BaseIndex &src, const Register &dest) {
-        movxwl(Operand(src), dest);
+        movswl(Operand(src), dest);
     }
     void load32(const Address &address, Register dest) {
         movl(Operand(address), dest);
@@ -381,27 +386,22 @@ class MacroAssemblerX86Shared : public Assembler
         bind(&done);
     }
 
-    bool maybeInlineDouble(uint64_t u, const FloatRegister &dest) {
-        // This implements parts of "13.4 Generating constants" of
-        // "2. Optimizing subroutines in assembly language" by Agner Fog,
-        // generalized to handle any case that can use a pcmpeqw and
-        // up to two shifts.
+    bool maybeInlineDouble(double d, const FloatRegister &dest) {
+        uint64_t u = mozilla::BitwiseCast<uint64_t>(d);
 
+        // Loading zero with xor is specially optimized in hardware.
         if (u == 0) {
             xorpd(dest, dest);
             return true;
         }
 
-        int tz = js_bitscan_ctz64(u);
-        int lz = js_bitscan_clz64(u);
-        if (u == (~uint64_t(0) << (lz + tz) >> lz)) {
-            pcmpeqw(dest, dest);
-            if (tz != 0)
-                psllq(Imm32(lz + tz), dest);
-            if (lz != 0)
-                psrlq(Imm32(lz), dest);
-            return true;
-        }
+        // It is also possible to load several common constants using pcmpeqw
+        // to get all ones and then psllq and psrlq to get zeros at the ends,
+        // as described in "13.4 Generating constants" of
+        // "2. Optimizing subroutines in assembly language" by Agner Fog, and as
+        // previously implemented here. However, with x86 and x64 both using
+        // constant pool loads for double constants, this is probably only
+        // worthwhile in cases where a load is likely to be delayed.
 
         return false;
     }

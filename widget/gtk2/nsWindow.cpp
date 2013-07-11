@@ -5784,7 +5784,7 @@ nsWindow::CreateRootAccessible()
 {
     if (mIsTopLevel && !mRootAccessible) {
         LOG(("nsWindow:: Create Toplevel Accessibility\n"));
-        mRootAccessible = GetAccessible();
+        mRootAccessible = GetRootAccessible();
     }
 }
 
@@ -5802,7 +5802,7 @@ nsWindow::DispatchEventToRootAccessible(uint32_t aEventType)
     }
 
     // Get the root document accessible and fire event to it.
-    a11y::Accessible* acc = GetAccessible();
+    a11y::Accessible* acc = GetRootAccessible();
     if (acc) {
         accService->FireAccessibleEvent(aEventType, acc);
     }
@@ -5970,6 +5970,24 @@ nsWindow::GetSurfaceForGdkDrawable(GdkDrawable* aDrawable,
     }
 
     return result.forget();
+}
+#endif
+
+#if defined(MOZ_WIDGET_GTK2)
+TemporaryRef<gfx::DrawTarget>
+nsWindow::StartRemoteDrawing()
+{
+  gfxASurface *surf = GetThebesSurface();
+  if (!surf) {
+    return nullptr;
+  }
+
+  gfx::IntSize size(surf->GetSize().width, surf->GetSize().height);
+  if (size.width <= 0 || size.height <= 0) {
+    return nullptr;
+  }
+
+  return gfxPlatform::GetPlatform()->CreateDrawTargetForSurface(surf, size);
 }
 #endif
 

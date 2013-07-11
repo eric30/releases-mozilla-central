@@ -218,6 +218,9 @@ pref("media.navigator.enabled", true);
 // TextTrack support
 pref("media.webvtt.enabled", false);
 
+// Whether to enable MediaSource support
+pref("media.mediasource.enabled", false);
+
 #ifdef MOZ_WEBSPEECH
 pref("media.webspeech.recognition.enable", false);
 #endif
@@ -231,6 +234,9 @@ pref("media.autoplay.enabled", true);
 // The default number of decoded video frames that are enqueued in
 // MediaDecoderReader's mVideoQueue.
 pref("media.video-queue.default-size", 10);
+
+// Whether to disable the video stats to prevent fingerprinting
+pref("media.video_stats.enabled", true);
 
 // Whether to enable the audio writing APIs on the audio element
 pref("media.audio_data.enabled", true);
@@ -252,6 +258,11 @@ pref("gfx.color_management.enablev4", false);
 
 pref("gfx.downloadable_fonts.enabled", true);
 pref("gfx.downloadable_fonts.fallback_delay", 3000);
+
+#ifdef ANDROID
+pref("gfx.bundled_fonts.enabled", true);
+pref("gfx.bundled_fonts.force-enabled", false);
+#endif
 
 pref("gfx.filter.nearest.force-enabled", false);
 
@@ -770,6 +781,9 @@ pref("dom.forms.color", false);
 // Enables system messages and activities
 pref("dom.sysmsg.enabled", false);
 
+// Enable pre-installed applications.
+pref("dom.webapps.useCurrentProfile", false);
+
 // Parsing perf prefs. For now just mimic what the old code did.
 #ifndef XP_WIN
 pref("content.sink.pending_event_mode", 0);
@@ -800,8 +814,6 @@ pref("javascript.options.baselinejit.chrome",  true);
 pref("javascript.options.ion.content",      true);
 pref("javascript.options.asmjs",            true);
 pref("javascript.options.ion.parallel_compilation", true);
-pref("javascript.options.pccounts.content", false);
-pref("javascript.options.pccounts.chrome",  false);
 pref("javascript.options.jit_hardening", true);
 pref("javascript.options.typeinference", true);
 // This preference limits the memory usage of javascript.
@@ -1919,7 +1931,7 @@ pref("svg.paint-order.enabled", true);
 #endif
 
 // Is support for the new SVG text implementation enabled?
-pref("svg.text.css-frames.enabled", false);
+pref("svg.text.css-frames.enabled", true);
 
 pref("font.minimum-size.ar", 0);
 pref("font.minimum-size.x-armn", 0);
@@ -3321,73 +3333,82 @@ pref("font.name-list.sans-serif.he", "Droid Sans Hebrew, Open Sans, Droid Sans")
 pref("font.name.serif.ja", "Charis SIL Compact");
 pref("font.name.sans-serif.ja", "Open Sans");
 pref("font.name.monospace.ja", "MotoyaLMaru");
+pref("font.name-list.serif.ja", "Droid Serif");
 pref("font.name-list.sans-serif.ja", "Open Sans, Roboto, Droid Sans, MotoyaLMaru, MotoyaLCedar, Droid Sans Japanese");
 pref("font.name-list.monospace.ja", "MotoyaLMaru, MotoyaLCedar, Droid Sans Mono");
 
 pref("font.name.serif.ko", "Charis SIL Compact");
 pref("font.name.sans-serif.ko", "Open Sans");
 pref("font.name.monospace.ko", "Droid Sans Mono");
-pref("font.name-list.serif.ko", "HYSerif");
+pref("font.name-list.serif.ko", "Droid Serif, HYSerif");
 pref("font.name-list.sans-serif.ko", "SmartGothic, NanumGothic, DroidSansFallback, Droid Sans Fallback");
 
 pref("font.name.serif.th", "Charis SIL Compact");
 pref("font.name.sans-serif.th", "Open Sans");
 pref("font.name.monospace.th", "Droid Sans Mono");
+pref("font.name-list.serif.th", "Droid Serif");
 pref("font.name-list.sans-serif.th", "Droid Sans Thai, Open Sans, Droid Sans");
 
 pref("font.name.serif.tr", "Charis SIL Compact");
 pref("font.name.sans-serif.tr", "Open Sans");
 pref("font.name.monospace.tr", "Droid Sans Mono");
+pref("font.name-list.serif.tr", "Droid Serif");
 pref("font.name-list.sans-serif.tr", "Open Sans, Roboto, Droid Sans");
 
 pref("font.name.serif.x-baltic", "Charis SIL Compact");
 pref("font.name.sans-serif.x-baltic", "Open Sans");
 pref("font.name.monospace.x-baltic", "Droid Sans Mono");
+pref("font.name-list.serif.x-baltic", "Droid Serif");
 pref("font.name-list.sans-serif.x-baltic", "Open Sans, Roboto, Droid Sans");
 
 pref("font.name.serif.x-central-euro", "Charis SIL Compact");
 pref("font.name.sans-serif.x-central-euro", "Open Sans");
 pref("font.name.monospace.x-central-euro", "Droid Sans Mono");
+pref("font.name-list.serif.x-central-euro", "Droid Serif");
 pref("font.name-list.sans-serif.x-central-euro", "Open Sans, Roboto, Droid Sans");
 
 pref("font.name.serif.x-cyrillic", "Charis SIL Compact");
 pref("font.name.sans-serif.x-cyrillic", "Open Sans");
 pref("font.name.monospace.x-cyrillic", "Droid Sans Mono");
+pref("font.name-list.serif.x-cyrillic", "Droid Serif");
 pref("font.name-list.sans-serif.x-cyrillic", "Open Sans, Roboto, Droid Sans");
 
 pref("font.name.serif.x-unicode", "Charis SIL Compact");
 pref("font.name.sans-serif.x-unicode", "Open Sans");
 pref("font.name.monospace.x-unicode", "Droid Sans Mono");
+pref("font.name-list.serif.x-unicode", "Droid Serif");
 pref("font.name-list.sans-serif.x-unicode", "Open Sans, Roboto, Droid Sans");
 
 pref("font.name.serif.x-user-def", "Charis SIL Compact");
 pref("font.name.sans-serif.x-user-def", "Open Sans");
 pref("font.name.monospace.x-user-def", "Droid Sans Mono");
+pref("font.name-list.serif.x-user-def", "Droid Serif");
 pref("font.name-list.sans-serif.x-user-def", "Open Sans, Roboto, Droid Sans");
 
 pref("font.name.serif.x-western", "Charis SIL Compact");
 pref("font.name.sans-serif.x-western", "Open Sans");
 pref("font.name.monospace.x-western", "Droid Sans Mono");
+pref("font.name-list.serif.x-western", "Droid Serif");
 pref("font.name-list.sans-serif.x-western", "Open Sans, Roboto, Droid Sans");
 
 pref("font.name.serif.zh-CN", "Charis SIL Compact");
 pref("font.name.sans-serif.zh-CN", "Open Sans");
 pref("font.name.monospace.zh-CN", "Droid Sans Mono");
-pref("font.name-list.serif.zh-CN", "Droid Sans Fallback");
+pref("font.name-list.serif.zh-CN", "Droid Serif, Droid Sans Fallback");
 pref("font.name-list.sans-serif.zh-CN", "Roboto, Droid Sans, Droid Sans Fallback");
 pref("font.name-list.monospace.zh-CN", "Droid Sans Fallback");
 
 pref("font.name.serif.zh-HK", "Charis SIL Compact");
 pref("font.name.sans-serif.zh-HK", "Open Sans");
 pref("font.name.monospace.zh-HK", "Droid Sans Mono");
-pref("font.name-list.serif.zh-HK", "Droid Sans Fallback");
+pref("font.name-list.serif.zh-HK", "Droid Serif, Droid Sans Fallback");
 pref("font.name-list.sans-serif.zh-HK", "Roboto, Droid Sans, Droid Sans Fallback");
 pref("font.name-list.monospace.zh-HK", "Droid Sans Fallback");
 
 pref("font.name.serif.zh-TW", "Charis SIL Compact");
 pref("font.name.sans-serif.zh-TW", "Open Sans");
 pref("font.name.monospace.zh-TW", "Droid Sans Mono");
-pref("font.name-list.serif.zh-TW", "Droid Sans Fallback");
+pref("font.name-list.serif.zh-TW", "Droid Serif, Droid Sans Fallback");
 pref("font.name-list.sans-serif.zh-TW", "Roboto, Droid Sans, Droid Sans Fallback");
 pref("font.name-list.monospace.zh-TW", "Droid Sans Fallback");
 
@@ -3895,14 +3916,6 @@ pref("browser.zoom.reflowZoom.reflowTimeout", 500);
  */
 pref("browser.zoom.reflowZoom.reflowTextOnPageLoad", true);
 
-
-/**
- * The minimum font size to maintain when double-tap zooming into an element, in
- * twips. The browser will attempt to make the frame large enough to enlarge the
- * font size to this value.
- */
-pref("browser.zoom.reflowZoom.minFontSizeTwips", 120);
-
 // Image-related prefs
 // The maximum size, in bytes, of the decoded images we cache
 pref("image.cache.size", 5242880);
@@ -4024,6 +4037,7 @@ pref("layers.acceleration.force-enabled", false);
 pref("layers.acceleration.draw-fps", false);
 
 pref("layers.draw-borders", false);
+pref("layers.frame-counter", false);
 
 #ifdef XP_MACOSX
 pref("layers.offmainthreadcomposition.enabled", true);
@@ -4194,6 +4208,18 @@ pref("memory.ghost_window_timeout_seconds", 60);
 pref("memory.free_dirty_pages", false);
 
 pref("social.enabled", false);
+// comma separated list of domain origins (e.g. https://domain.com) for
+// providers that can install from their own website without user warnings.
+// entries are
+pref("social.whitelist", "https://mozsocial.cliqz.com,https://now.msn.com,https://mixi.jp");
+// omma separated list of domain origins (e.g. https://domain.com) for directory
+// websites (e.g. AMO) that can install providers for other sites
+pref("social.directories", "https://addons.mozilla.org");
+// remote-install allows any website to activate a provider, with extended UI
+// notifying user of installation. we can later pref off remote install if
+// necessary. This does not affect whitelisted and directory installs.
+pref("social.remote-install.enabled", true);
+pref("social.toast-notifications.enabled", true);
 
 // Disable idle observer fuzz, because only privileged content can access idle
 // observers (bug 780507).
@@ -4252,6 +4278,9 @@ pref("dom.mms.retrievalRetryIntervals", "60000,300000,600000,1800000");
 
 // Debug enabler for MMS.
 pref("mms.debugging.enabled", false);
+
+// Number of RadioInterface instances to create.
+pref("ril.numRadioInterfaces", 1);
 
 // If the user puts a finger down on an element and we think the user
 // might be executing a pan gesture, how long do we wait before

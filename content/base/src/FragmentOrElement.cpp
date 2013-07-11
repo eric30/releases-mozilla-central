@@ -10,6 +10,7 @@
  * utility methods for subclasses, and so forth.
  */
 
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/Util.h"
 #include "mozilla/Likely.h"
 
@@ -93,7 +94,7 @@
 #include "nsView.h"
 #include "nsViewManager.h"
 #include "nsIScrollableFrame.h"
-#include "nsXBLInsertionPoint.h"
+#include "ChildIterator.h"
 #include "mozilla/css/StyleRule.h" /* For nsCSSSelectorList */
 #include "nsRuleProcessorData.h"
 #include "nsAsyncDOMEvent.h"
@@ -148,16 +149,15 @@ nsIContent::FindFirstNonChromeOnlyAccessContent() const
 nsIContent*
 nsIContent::GetFlattenedTreeParent() const
 {
-  nsIContent *parent = GetParent();
-  if (parent && parent->HasFlag(NODE_MAY_BE_IN_BINDING_MNGR)) {
-    nsIDocument *doc = parent->OwnerDoc();
-    nsIContent* insertionElement =
-      doc->BindingManager()->GetNestedInsertionPoint(parent, this);
-    if (insertionElement) {
-      parent = insertionElement;
+  if (HasFlag(NODE_MAY_BE_IN_BINDING_MNGR)) {
+    nsIContent* parent = OwnerDoc()->BindingManager()->
+      GetInsertionParent(const_cast<nsIContent*>(this));
+    if (parent) {
+      return parent;
     }
   }
-  return parent;
+
+  return GetParent();
 }
 
 nsIContent::IMEState
@@ -593,7 +593,7 @@ FragmentOrElement::nsDOMSlots::Unlink(bool aIsXUL)
 }
 
 size_t
-FragmentOrElement::nsDOMSlots::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+FragmentOrElement::nsDOMSlots::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 {
   size_t n = aMallocSizeOf(this);
 
@@ -652,24 +652,14 @@ FragmentOrElement::GetChildren(uint32_t aFilter)
   // explict content altered by insertion point if we were requested for XBL
   // anonymous content, otherwise append explicit content with respect to
   // insertion point if any.
-  nsINodeList *childList = nullptr;
-
-  nsIDocument* document = OwnerDoc();
   if (!(aFilter & eAllButXBL)) {
-    childList = document->BindingManager()->GetXBLChildNodesFor(this);
-    if (!childList) {
-      childList = ChildNodes();
+    FlattenedChildIterator iter(this);
+    for (nsIContent* child = iter.GetNextChild(); child; child = iter.GetNextChild()) {
+      list->AppendElement(child);
     }
-
   } else {
-    childList = document->BindingManager()->GetContentListFor(this);
-  }
-
-  if (childList) {
-    uint32_t length = 0;
-    childList->GetLength(&length);
-    for (uint32_t idx = 0; idx < length; idx++) {
-      nsIContent* child = childList->Item(idx);
+    ExplicitChildIterator iter(this);
+    for (nsIContent* child = iter.GetNextChild(); child; child = iter.GetNextChild()) {
       list->AppendElement(child);
     }
   }
@@ -1044,6 +1034,7 @@ public:
       Telemetry::Accumulate(Telemetry::CYCLE_COLLECTOR_CONTENT_UNBIND,
                             uint32_t(PR_Now() - start) / PR_USEC_PER_MSEC);
     }
+    nsCycleCollector_dispatchDeferredDeletion();
     if (this == sContentUnbinder) {
       sContentUnbinder = nullptr;
       if (mNext) {
@@ -1690,24 +1681,20 @@ NS_INTERFACE_MAP_BEGIN(FragmentOrElement)
   NS_INTERFACE_MAP_ENTRY(mozilla::dom::EventTarget)
   NS_INTERFACE_MAP_ENTRY_TEAROFF(nsISupportsWeakReference,
                                  new nsNodeSupportsWeakRefTearoff(this))
-  NS_INTERFACE_MAP_ENTRY_TEAROFF(nsIDOMNodeSelector,
-                                 new nsNodeSelectorTearoff(this))
   NS_INTERFACE_MAP_ENTRY_TEAROFF(nsIDOMXPathNSResolver,
                                  new nsNode3Tearoff(this))
   NS_INTERFACE_MAP_ENTRY_TEAROFF(nsITouchEventReceiver,
                                  new nsTouchEventReceiverTearoff(this))
   NS_INTERFACE_MAP_ENTRY_TEAROFF(nsIInlineEventHandlers,
                                  new nsInlineEventHandlersTearoff(this))
-  // nsNodeSH::PreCreate() depends on the identity pointer being the
-  // same as nsINode (which nsIContent inherits), so if you change the
-  // below line, make sure nsNodeSH::PreCreate() still does the right
-  // thing!
+  // DOM bindings depend on the identity pointer being the
+  // same as nsINode (which nsIContent inherits).
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIContent)
 NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(FragmentOrElement)
-NS_IMPL_CYCLE_COLLECTING_RELEASE_WITH_DESTROY(FragmentOrElement,
-                                              nsNodeUtils::LastRelease(this))
+NS_IMPL_CYCLE_COLLECTING_RELEASE_WITH_LAST_RELEASE(FragmentOrElement,
+                                                   nsNodeUtils::LastRelease(this))
 
 nsresult
 FragmentOrElement::PostQueryInterface(REFNSIID aIID, void** aInstancePtr)
@@ -1834,7 +1821,7 @@ FragmentOrElement::FireNodeRemovedForChildren()
 }
 
 size_t
-FragmentOrElement::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+FragmentOrElement::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 {
   size_t n = 0;
   n += nsIContent::SizeOfExcludingThis(aMallocSizeOf);

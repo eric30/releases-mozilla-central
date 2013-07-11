@@ -283,7 +283,7 @@ FinishCreate(XPCWrappedNativeScope* Scope,
 nsresult
 XPCWrappedNative::WrapNewGlobal(xpcObjectHelper &nativeHelper,
                                 nsIPrincipal *principal, bool initStandardClasses,
-                                ZoneSpecifier zoneSpec,
+                                JS::CompartmentOptions& aOptions,
                                 XPCWrappedNative **wrappedGlobal)
 {
     AutoJSContext cx;
@@ -313,7 +313,7 @@ XPCWrappedNative::WrapNewGlobal(xpcObjectHelper &nativeHelper,
     MOZ_ASSERT(clasp->flags & JSCLASS_IS_GLOBAL);
 
     // Create the global.
-    RootedObject global(cx, xpc::CreateGlobalObject(cx, clasp, principal, zoneSpec));
+    RootedObject global(cx, xpc::CreateGlobalObject(cx, clasp, principal, aOptions));
     if (!global)
         return NS_ERROR_FAILURE;
     XPCWrappedNativeScope *scope = GetCompartmentPrivate(global)->scope;
@@ -824,13 +824,8 @@ XPCWrappedNative::Destroy()
     if (mIdentity) {
         XPCJSRuntime* rt = GetRuntime();
         if (rt && rt->GetDoingFinalization()) {
-            if (rt->DeferredRelease(mIdentity)) {
-                mIdentity = nullptr;
-            } else {
-                NS_WARNING("Failed to append object for deferred release.");
-                // XXX do we really want to do this???
-                NS_RELEASE(mIdentity);
-            }
+            nsContentUtils::DeferredFinalize(mIdentity);
+            mIdentity = nullptr;
         } else {
             NS_RELEASE(mIdentity);
         }
@@ -1153,7 +1148,7 @@ XPCWrappedNative::FlatJSObjectFinalized()
         for (int i = XPC_WRAPPED_NATIVE_TEAROFFS_PER_CHUNK-1; i >= 0; i--, to++) {
             JSObject* jso = to->GetJSObjectPreserveColor();
             if (jso) {
-                NS_ASSERTION(JS_IsAboutToBeFinalized(&jso), "bad!");
+                MOZ_ASSERT(JS_IsAboutToBeFinalizedUnbarriered(&jso));
                 JS_SetPrivate(jso, nullptr);
                 to->JSObjectFinalized();
             }
@@ -1168,11 +1163,7 @@ XPCWrappedNative::FlatJSObjectFinalized()
 #endif
                 XPCJSRuntime* rt = GetRuntime();
                 if (rt) {
-                    if (!rt->DeferredRelease(obj)) {
-                        NS_WARNING("Failed to append object for deferred release.");
-                        // XXX do we really want to do this???
-                        obj->Release();
-                    }
+                    nsContentUtils::DeferredFinalize(obj);
                 } else {
                     obj->Release();
                 }

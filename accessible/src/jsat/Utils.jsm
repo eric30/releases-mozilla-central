@@ -8,6 +8,12 @@ const Cu = Components.utils;
 const Cc = Components.classes;
 const Ci = Components.interfaces;
 
+const EVENT_STATE_CHANGE = Ci.nsIAccessibleEvent.EVENT_STATE_CHANGE;
+
+const ROLE_CELL = Ci.nsIAccessibleRole.ROLE_CELL;
+const ROLE_COLUMNHEADER = Ci.nsIAccessibleRole.ROLE_COLUMNHEADER;
+const ROLE_ROWHEADER = Ci.nsIAccessibleRole.ROLE_ROWHEADER;
+
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, 'Services',
   'resource://gre/modules/Services.jsm');
@@ -191,15 +197,18 @@ this.Utils = {
   },
 
   getAttributes: function getAttributes(aAccessible) {
-    let attributesEnum = aAccessible.attributes.enumerate();
     let attributes = {};
 
-    // Populate |attributes| object with |aAccessible|'s attribute key-value
-    // pairs.
-    while (attributesEnum.hasMoreElements()) {
-      let attribute = attributesEnum.getNext().QueryInterface(
-        Ci.nsIPropertyElement);
-      attributes[attribute.key] = attribute.value;
+    if (aAccessible && aAccessible.attributes) {
+      let attributesEnum = aAccessible.attributes.enumerate();
+
+      // Populate |attributes| object with |aAccessible|'s attribute key-value
+      // pairs.
+      while (attributesEnum.hasMoreElements()) {
+        let attribute = attributesEnum.getNext().QueryInterface(
+          Ci.nsIPropertyElement);
+        attributes[attribute.key] = attribute.value;
+      }
     }
 
     return attributes;
@@ -215,6 +224,42 @@ this.Utils = {
   getPixelsPerCSSPixel: function getPixelsPerCSSPixel(aWindow) {
     return aWindow.QueryInterface(Ci.nsIInterfaceRequestor)
       .getInterface(Ci.nsIDOMWindowUtils).screenPixelsPerCSSPixel;
+  },
+
+  getBounds: function getBounds(aAccessible) {
+      let objX = {}, objY = {}, objW = {}, objH = {};
+      aAccessible.getBounds(objX, objY, objW, objH);
+      return new Rect(objX.value, objY.value, objW.value, objH.value);
+  },
+
+  inHiddenSubtree: function inHiddenSubtree(aAccessible) {
+    for (let acc=aAccessible; acc; acc=acc.parent) {
+      if (JSON.parse(Utils.getAttributes(acc).hidden)) {
+        return true;
+      }
+    }
+    return false;
+  },
+
+  isAliveAndVisible: function isAliveAndVisible(aAccessible) {
+    if (!aAccessible) {
+      return false;
+    }
+
+    try {
+      let extstate = {};
+      let state = {};
+      aAccessible.getState(state, extstate);
+      if (extstate.value & Ci.nsIAccessibleStates.EXT_STATE_DEFUNCT ||
+          state.value & Ci.nsIAccessibleStates.STATE_INVISIBLE ||
+          Utils.inHiddenSubtree(aAccessible)) {
+        return false;
+      }
+    } catch (x) {
+      return false;
+    }
+
+    return true;
   }
 };
 
@@ -268,12 +313,27 @@ this.Logger = {
       this, [this.ERROR].concat(Array.prototype.slice.call(arguments)));
   },
 
-  logException: function logException(aException) {
+  logException: function logException(
+    aException, aErrorMessage = 'An exception has occured') {
     try {
-      let args = [aException.message];
-      args.push.apply(args, aException.stack ? ['\n', aException.stack] :
-        ['(' + aException.fileName + ':' + aException.lineNumber + ')']);
-      this.error.apply(this, args);
+      let stackMessage = '';
+      if (aException.stack) {
+        stackMessage = '  ' + aException.stack.replace(/\n/g, '\n  ');
+      } else if (aException.location) {
+        let frame = aException.location;
+        let stackLines = [];
+        while (frame && frame.lineNumber) {
+          stackLines.push(
+            '  ' + frame.name + '@' + frame.filename + ':' + frame.lineNumber);
+          frame = frame.caller;
+        }
+        stackMessage = stackLines.join('\n');
+      } else {
+        stackMessage = '(' + aException.fileName + ':' + aException.lineNumber + ')';
+      }
+      this.error(aErrorMessage + ':\n ' +
+                 aException.message + '\n' +
+                 stackMessage);
     } catch (x) {
       this.error(x);
     }
@@ -292,7 +352,7 @@ this.Logger = {
 
   eventToString: function eventToString(aEvent) {
     let str = Utils.AccRetrieval.getStringEventType(aEvent.eventType);
-    if (aEvent.eventType == Ci.nsIAccessibleEvent.EVENT_STATE_CHANGE) {
+    if (aEvent.eventType == EVENT_STATE_CHANGE) {
       let event = aEvent.QueryInterface(Ci.nsIAccessibleStateChangeEvent);
       let stateStrings = event.isExtraState ?
         Utils.AccRetrieval.getStringStates(0, event.state) :
@@ -350,6 +410,45 @@ PivotContext.prototype = {
     return this._oldAccessible;
   },
 
+  /**
+   * Get a list of |aAccessible|'s ancestry up to the root.
+   * @param  {nsIAccessible} aAccessible.
+   * @return {Array} Ancestry list.
+   */
+  _getAncestry: function _getAncestry(aAccessible) {
+    let ancestry = [];
+    let parent = aAccessible;
+    while (parent && (parent = parent.parent)) {
+      ancestry.push(parent);
+    }
+    return ancestry.reverse();
+  },
+
+  /**
+   * A list of the old accessible's ancestry.
+   */
+  get oldAncestry() {
+    if (!this._oldAncestry) {
+      if (!this._oldAccessible) {
+        this._oldAncestry = [];
+      } else {
+        this._oldAncestry = this._getAncestry(this._oldAccessible);
+        this._oldAncestry.push(this._oldAccessible);
+      }
+    }
+    return this._oldAncestry;
+  },
+
+  /**
+   * A list of the current accessible's ancestry.
+   */
+  get currentAncestry() {
+    if (!this._currentAncestry) {
+      this._currentAncestry = this._getAncestry(this._accessible);
+    }
+    return this._currentAncestry;
+  },
+
   /*
    * This is a list of the accessible's ancestry up to the common ancestor
    * of the accessible and the old accessible. It is useful for giving the
@@ -357,32 +456,10 @@ PivotContext.prototype = {
    */
   get newAncestry() {
     if (!this._newAncestry) {
-      let newLineage = [];
-      let oldLineage = [];
-
-      let parent = this._accessible;
-      while (parent && (parent = parent.parent))
-        newLineage.push(parent);
-
-      parent = this._oldAccessible;
-      while (parent && (parent = parent.parent))
-        oldLineage.push(parent);
-
-      this._newAncestry = [];
-
-      while (true) {
-        let newAncestor = newLineage.pop();
-        let oldAncestor = oldLineage.pop();
-
-        if (newAncestor == undefined)
-          break;
-
-        if (newAncestor != oldAncestor)
-          this._newAncestry.push(newAncestor);
-      }
-
+      this._newAncestry = [currentAncestor for (
+        [index, currentAncestor] of Iterator(this.currentAncestry)) if (
+          currentAncestor !== this.oldAncestry[index])];
     }
-
     return this._newAncestry;
   },
 
@@ -426,13 +503,99 @@ PivotContext.prototype = {
     return this._traverse(this._accessible, aPreorder, aStop);
   },
 
+  getCellInfo: function getCellInfo(aAccessible) {
+    if (!this._cells) {
+      this._cells = new WeakMap();
+    }
+
+    let domNode = aAccessible.DOMNode;
+    if (this._cells.has(domNode)) {
+      return this._cells.get(domNode);
+    }
+
+    let cellInfo = {};
+    let getAccessibleCell = function getAccessibleCell(aAccessible) {
+      if (!aAccessible) {
+        return null;
+      }
+      if ([ROLE_CELL, ROLE_COLUMNHEADER, ROLE_ROWHEADER].indexOf(
+        aAccessible.role) < 0) {
+          return null;
+      }
+      try {
+        return aAccessible.QueryInterface(Ci.nsIAccessibleTableCell);
+      } catch (x) {
+        Logger.logException(x);
+        return null;
+      }
+    };
+    let getHeaders = function getHeaders(aHeaderCells) {
+      let enumerator = aHeaderCells.enumerate();
+      while (enumerator.hasMoreElements()) {
+        yield enumerator.getNext().QueryInterface(Ci.nsIAccessible).name;
+      }
+    };
+
+    cellInfo.current = getAccessibleCell(aAccessible);
+
+    if (!cellInfo.current) {
+      Logger.warning(aAccessible,
+        'does not support nsIAccessibleTableCell interface.');
+      this._cells.set(domNode, null);
+      return null;
+    }
+
+    let table = cellInfo.current.table;
+    if (table.isProbablyForLayout()) {
+      this._cells.set(domNode, null);
+      return null;
+    }
+
+    cellInfo.previous = null;
+    let oldAncestry = this.oldAncestry.reverse();
+    let ancestor = oldAncestry.shift();
+    while (!cellInfo.previous && ancestor) {
+      let cell = getAccessibleCell(ancestor);
+      if (cell && cell.table === table) {
+        cellInfo.previous = cell;
+      }
+      ancestor = oldAncestry.shift();
+    }
+
+    if (cellInfo.previous) {
+      cellInfo.rowChanged = cellInfo.current.rowIndex !==
+        cellInfo.previous.rowIndex;
+      cellInfo.columnChanged = cellInfo.current.columnIndex !==
+        cellInfo.previous.columnIndex;
+    } else {
+      cellInfo.rowChanged = true;
+      cellInfo.columnChanged = true;
+    }
+
+    cellInfo.rowExtent = cellInfo.current.rowExtent;
+    cellInfo.columnExtent = cellInfo.current.columnExtent;
+    cellInfo.columnIndex = cellInfo.current.columnIndex;
+    cellInfo.rowIndex = cellInfo.current.rowIndex;
+
+    cellInfo.columnHeaders = [];
+    if (cellInfo.columnChanged && cellInfo.current.role !==
+      ROLE_COLUMNHEADER) {
+      cellInfo.columnHeaders = [headers for (headers of getHeaders(
+        cellInfo.current.columnHeaderCells))];
+    }
+    cellInfo.rowHeaders = [];
+    if (cellInfo.rowChanged && cellInfo.current.role === ROLE_CELL) {
+      cellInfo.rowHeaders = [headers for (headers of getHeaders(
+        cellInfo.current.rowHeaderCells))];
+    }
+
+    this._cells.set(domNode, cellInfo);
+    return cellInfo;
+  },
+
   get bounds() {
     if (!this._bounds) {
-      let objX = {}, objY = {}, objW = {}, objH = {};
-
-      this._accessible.getBounds(objX, objY, objW, objH);
-
-      this._bounds = new Rect(objX.value, objY.value, objW.value, objH.value);
+      this._bounds = Utils.getBounds(this._accessible);
     }
 
     return this._bounds.clone();
@@ -442,7 +605,7 @@ PivotContext.prototype = {
     try {
       let extstate = {};
       aAccessible.getState({}, extstate);
-      return !!(aAccessible.value & Ci.nsIAccessibleStates.EXT_STATE_DEFUNCT);
+      return !!(extstate.value & Ci.nsIAccessibleStates.EXT_STATE_DEFUNCT);
     } catch (x) {
       return true;
     }

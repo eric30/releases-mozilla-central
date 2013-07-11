@@ -161,9 +161,6 @@ CrossSlideHandler.prototype = {
     if (!isSelectable(target))
         return;
 
-    // we'll handle this event, dont let it bubble further
-    aEvent.stopPropagation();
-
     let scrollAxis = getScrollAxisFromElement(target);
 
     this.drag = {
@@ -178,8 +175,6 @@ CrossSlideHandler.prototype = {
     if (!this.drag) {
       return;
     }
-    // event is handled here, dont let it bubble further
-    aEvent.stopPropagation();
 
     if (aEvent.touches.length!==1) {
       // cancel if another touch point gets involved
@@ -196,40 +191,42 @@ CrossSlideHandler.prototype = {
     let crossAxisDistance = Math.abs(endPt[crossAxis] - startPt[crossAxis]);
     // distance along the scrolling axis
     let scrollAxisDistance = Math.abs(endPt[scrollAxis] - startPt[scrollAxis]);
-
     let currState = this.drag.state;
     let newState = this.getCrossSlideState(crossAxisDistance, scrollAxisDistance);
 
-    if (-1 == newState) {
-      // out of bounds, cancel the event always
-      return this.cancel(aEvent);
+    switch (newState) {
+      case -1 :
+        // dodgy input/out of bounds
+        return this.cancel(aEvent);
+      case CrossSlidingState.STARTED :
+        break;
+      case CrossSlidingState.DRAGGING :
+        if (scrollAxisDistance > this.thresholds.SELECTIONSTART) {
+          // looks like a pan/scroll was intended
+          return this.cancel(aEvent);
+        }
+        // else fall-thru'
+      case CrossSlidingState.SELECTING :
+      case CrossSlidingState.SELECT_SPEED_BUMPING :
+      case CrossSlidingState.SPEED_BUMPING :
+        // we're committed to a cross-slide gesture,
+        // so going out of bounds at this point means aborting
+        if (!withinCone(crossAxisDistance, scrollAxisDistance)) {
+          return this.cancel(aEvent);
+        }
+        // we're mid-gesture, consume this event
+        aEvent.stopPropagation();
+        break;
     }
 
-    let isWithinCone = withinCone(crossAxisDistance, scrollAxisDistance);
-    if (currState < CrossSlidingState.SELECTING && !isWithinCone) {
-      // ignore, no progress to report
-      return;
+    if (currState !== newState) {
+      this.drag.state = newState;
+      this._fireProgressEvent( CrossSlidingStateNames[newState], aEvent );
     }
-    if (currState >= CrossSlidingState.SELECTING && !isWithinCone) {
-      // we're committed to a cross-slide gesture,
-      // so going out of bounds at this point means aborting
-      return this.cancel(aEvent);
-    }
-
-    if (currState > newState) {
-      // moved backwards, ignoring
-      return;
-    }
-
-    this.drag.state = newState;
-    this._fireProgressEvent( CrossSlidingStateNames[newState], aEvent );
   },
   _onTouchEnd: function(aEvent){
     if (!this.drag)
       return;
-
-    // event is handled, dont let it bubble further
-    aEvent.stopPropagation();
 
     if (this.drag.state < CrossSlidingState.SELECTING) {
       return this.cancel(aEvent);

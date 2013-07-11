@@ -11,6 +11,7 @@
  */
 #include "jsprvtd.h"
 #include "jsobj.h"
+#include "jsscript.h"
 
 #include "gc/Barrier.h"
 
@@ -82,7 +83,17 @@ class JSFunction : public JSObject
   public:
 
     /* Call objects must be created for each invocation of a heavyweight function. */
-    inline bool isHeavyweight() const;
+    bool isHeavyweight() const {
+        JS_ASSERT(!isInterpretedLazy());
+
+        if (isNative())
+            return false;
+
+        // Note: this should be kept in sync with FunctionBox::isHeavyweight().
+        return nonLazyScript()->bindings.hasAnyAliasedBindings() ||
+               nonLazyScript()->funHasExtensibleScope ||
+               nonLazyScript()->funNeedsDeclEnvObject;
+    }
 
     /* A function can be classified as either native (C++) or interpreted (JS): */
     bool isInterpreted()            const { return flags & (INTERPRETED | INTERPRETED_LAZY); }
@@ -128,12 +139,19 @@ class JSFunction : public JSObject
         return isInterpreted() && !isFunctionPrototype() &&
                (!isSelfHostedBuiltin() || isSelfHostedConstructor());
     }
-    bool isNamedLambda()     const {
+    bool isNamedLambda() const {
         return isLambda() && atom_ && !hasGuessedAtom();
     }
+    bool hasParallelNative() const {
+        return isNative() && jitInfo() && !!jitInfo()->parallelNative;
+    }
+
+    bool isBuiltinFunctionConstructor();
 
     /* Returns the strictness of this function, which must be interpreted. */
-    inline bool strict() const;
+    bool strict() const {
+        return nonLazyScript()->strict;
+    }
 
     // Can be called multiple times by the parser.
     void setArgCount(uint16_t nargs) {
@@ -190,7 +208,10 @@ class JSFunction : public JSObject
      * For an interpreted function, accessors for the initial scope object of
      * activations (stack frames) of the function.
      */
-    inline JSObject *environment() const;
+    JSObject *environment() const {
+        JS_ASSERT(isInterpreted());
+        return u.i.env_;
+    }
     inline void setEnvironment(JSObject *obj);
     inline void initEnvironment(JSObject *obj);
 
@@ -258,7 +279,12 @@ class JSFunction : public JSObject
 
     inline void setScript(JSScript *script_);
     inline void initScript(JSScript *script_);
-    inline void initLazyScript(js::LazyScript *script);
+    void initLazyScript(js::LazyScript *lazy) {
+        JS_ASSERT(isInterpreted());
+        flags &= ~INTERPRETED;
+        flags |= INTERPRETED_LAZY;
+        u.i.s.lazy_ = lazy;
+    }
 
     JSNative native() const {
         JS_ASSERT(isNative());
@@ -269,9 +295,30 @@ class JSFunction : public JSObject
         return isInterpreted() ? NULL : native();
     }
 
-    inline void initNative(js::Native native, const JSJitInfo *jitinfo);
-    inline const JSJitInfo *jitInfo() const;
-    inline void setJitInfo(const JSJitInfo *data);
+    JSParallelNative parallelNative() const {
+        JS_ASSERT(hasParallelNative());
+        return jitInfo()->parallelNative;
+    }
+
+    JSParallelNative maybeParallelNative() const {
+        return hasParallelNative() ? parallelNative() : NULL;
+    }
+
+    void initNative(js::Native native, const JSJitInfo *jitinfo) {
+        JS_ASSERT(native);
+        u.n.native = native;
+        u.n.jitinfo = jitinfo;
+    }
+
+    const JSJitInfo *jitInfo() const {
+        JS_ASSERT(isNative());
+        return u.n.jitinfo;
+    }
+
+    void setJitInfo(const JSJitInfo *data) {
+        JS_ASSERT(isNative());
+        u.n.jitinfo = data;
+    }
 
     static unsigned offsetOfNativeOrScript() {
         JS_STATIC_ASSERT(offsetof(U, n.native) == offsetof(U, i.s.script_));
@@ -321,7 +368,7 @@ class JSFunction : public JSObject
     inline const js::Value &getExtendedSlot(size_t which) const;
 
     /* Constructs a new type for the function if necessary. */
-    static bool setTypeForScriptedFunction(JSContext *cx, js::HandleFunction fun,
+    static bool setTypeForScriptedFunction(js::ExclusiveContext *cx, js::HandleFunction fun,
                                            bool singleton = false);
 
     /* GC support. */
@@ -347,8 +394,11 @@ JSAPIToJSFunctionFlags(unsigned flags)
 
 namespace js {
 
+extern JSBool
+Function(JSContext *cx, unsigned argc, Value *vp);
+
 extern JSFunction *
-NewFunction(JSContext *cx, HandleObject funobj, JSNative native, unsigned nargs,
+NewFunction(ExclusiveContext *cx, HandleObject funobj, JSNative native, unsigned nargs,
             JSFunction::Flags flags, HandleObject parent, HandleAtom atom,
             gc::AllocKind allocKind = JSFunction::FinalizeKind,
             NewObjectKind newKind = GenericObject);
@@ -358,6 +408,9 @@ DefineFunction(JSContext *cx, HandleObject obj, HandleId id, JSNative native,
                unsigned nargs, unsigned flags,
                gc::AllocKind allocKind = JSFunction::FinalizeKind,
                NewObjectKind newKind = GenericObject);
+
+// ES6 9.2.5 IsConstructor
+bool IsConstructor(const Value &v);
 
 /*
  * Function extended with reserved slots for use by various kinds of functions.
@@ -395,6 +448,13 @@ JSFunction::toExtended() const
 {
     JS_ASSERT(isExtended());
     return static_cast<const js::FunctionExtended *>(this);
+}
+
+inline const js::Value &
+JSFunction::getExtendedSlot(size_t which) const
+{
+    JS_ASSERT(which < mozilla::ArrayLength(toExtended()->extendedSlots));
+    return toExtended()->extendedSlots[which];
 }
 
 namespace js {
@@ -440,5 +500,16 @@ js_fun_call(JSContext *cx, unsigned argc, js::Value *vp);
 extern JSObject*
 js_fun_bind(JSContext *cx, js::HandleObject target, js::HandleValue thisArg,
             js::Value *boundArgs, unsigned argslen);
+
+#ifdef DEBUG
+namespace JS {
+namespace detail {
+
+JS_PUBLIC_API(void)
+CheckIsValidConstructible(Value calleev);
+
+} // namespace detail
+} // namespace JS
+#endif
 
 #endif /* jsfun_h */

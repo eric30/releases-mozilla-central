@@ -13,9 +13,12 @@
 #include "ion/RegisterSets.h"
 
 #include "jsscript.h"
-#include "jstypedarrayinlines.h"
 
-#include "IonMacroAssembler.h"
+#if defined(JS_ION_PERF)
+# include "ion/PerfSpewer.h"
+#endif
+
+#include "ion/IonMacroAssembler.h"
 
 namespace js {
 
@@ -217,7 +220,7 @@ class AsmJSModule
 
         ExportedFunction(JSFunction *fun,
                          PropertyName *maybeFieldName,
-                         MoveRef<ArgCoercionVector> argCoercions,
+                         mozilla::MoveRef<ArgCoercionVector> argCoercions,
                          ReturnType returnType)
           : fun_(fun),
             maybeFieldName_(maybeFieldName),
@@ -235,10 +238,10 @@ class AsmJSModule
         }
 
       public:
-        ExportedFunction(MoveRef<ExportedFunction> rhs)
+        ExportedFunction(mozilla::MoveRef<ExportedFunction> rhs)
           : fun_(rhs->fun_),
             maybeFieldName_(rhs->maybeFieldName_),
-            argCoercions_(Move(rhs->argCoercions_)),
+            argCoercions_(mozilla::Move(rhs->argCoercions_)),
             returnType_(rhs->returnType_),
             hasCodePtr_(rhs->hasCodePtr_),
             u(rhs->u)
@@ -280,16 +283,38 @@ class AsmJSModule
         }
     };
 
-#if defined(MOZ_VTUNE)
+#if defined(MOZ_VTUNE) or defined(JS_ION_PERF)
     // Function information to add to the VTune JIT profiler following linking.
     struct ProfiledFunction
     {
         JSAtom *name;
         unsigned startCodeOffset;
         unsigned endCodeOffset;
+        unsigned lineno;
+        unsigned columnIndex;
 
-        ProfiledFunction(JSAtom *name, unsigned start, unsigned end)
-          : name(name), startCodeOffset(start), endCodeOffset(end)
+        ProfiledFunction(JSAtom *name, unsigned start, unsigned end,
+                         unsigned line = 0U, unsigned column = 0U)
+          : name(name),
+            startCodeOffset(start),
+            endCodeOffset(end),
+            lineno(line),
+            columnIndex(column)
+        { }
+    };
+#endif
+
+#if defined(JS_ION_PERF)
+    struct ProfiledBlocksFunction : public ProfiledFunction
+    {
+        ion::PerfSpewer::BasicBlocksVector blocks;
+
+        ProfiledBlocksFunction(JSAtom *name, unsigned start, unsigned end, ion::PerfSpewer::BasicBlocksVector &blocksVector)
+          : ProfiledFunction(name, start, end), blocks(Move(blocksVector))
+        { }
+
+        ProfiledBlocksFunction(const ProfiledBlocksFunction &copy)
+          : ProfiledFunction(copy.name, copy.startCodeOffset, copy.endCodeOffset), blocks(Move(copy.blocks))
         { }
     };
 #endif
@@ -336,7 +361,7 @@ class AsmJSModule
     typedef Vector<ion::AsmJSBoundsCheck, 0, SystemAllocPolicy> BoundsCheckVector;
 #endif
     typedef Vector<ion::IonScriptCounts *, 0, SystemAllocPolicy> FunctionCountsVector;
-#if defined(MOZ_VTUNE)
+#if defined(MOZ_VTUNE) or defined(JS_ION_PERF)
     typedef Vector<ProfiledFunction, 0, SystemAllocPolicy> ProfiledFunctionVector;
 #endif
 
@@ -349,6 +374,10 @@ class AsmJSModule
 #endif
 #if defined(MOZ_VTUNE)
     ProfiledFunctionVector                profiledFunctions_;
+#endif
+#if defined(JS_ION_PERF)
+    ProfiledFunctionVector                perfProfiledFunctions_;
+    Vector<ProfiledBlocksFunction, 0, SystemAllocPolicy> perfProfiledBlocksFunctions_;
 #endif
 
     uint32_t                              numGlobalVars_;
@@ -472,10 +501,11 @@ class AsmJSModule
     }
 
     bool addExportedFunction(JSFunction *fun, PropertyName *maybeFieldName,
-                             MoveRef<ArgCoercionVector> argCoercions, ReturnType returnType)
+                             mozilla::MoveRef<ArgCoercionVector> argCoercions,
+                             ReturnType returnType)
     {
         ExportedFunction func(fun, maybeFieldName, argCoercions, returnType);
-        return exports_.append(Move(func));
+        return exports_.append(mozilla::Move(func));
     }
     unsigned numExportedFunctions() const {
         return exports_.length();
@@ -496,6 +526,31 @@ class AsmJSModule
     }
     const ProfiledFunction &profiledFunction(unsigned i) const {
         return profiledFunctions_[i];
+    }
+#endif
+#ifdef JS_ION_PERF
+    bool trackPerfProfiledFunction(JSAtom *name, unsigned startCodeOffset, unsigned endCodeOffset,
+                                   unsigned line, unsigned column)
+    {
+        ProfiledFunction func(name, startCodeOffset, endCodeOffset, line, column);
+        return perfProfiledFunctions_.append(func);
+    }
+    unsigned numPerfFunctions() const {
+        return perfProfiledFunctions_.length();
+    }
+    const ProfiledFunction &perfProfiledFunction(unsigned i) const {
+        return perfProfiledFunctions_[i];
+    }
+
+    bool trackPerfProfiledBlocks(JSAtom *name, unsigned startCodeOffset, unsigned endCodeOffset, ion::PerfSpewer::BasicBlocksVector &basicBlocks) {
+        ProfiledBlocksFunction func(name, startCodeOffset, endCodeOffset, basicBlocks);
+        return perfProfiledBlocksFunctions_.append(func);
+    }
+    unsigned numPerfBlocksFunctions() const {
+        return perfProfiledBlocksFunctions_.length();
+    }
+    const ProfiledBlocksFunction perfProfiledBlocksFunction(unsigned i) const {
+        return perfProfiledBlocksFunctions_[i];
     }
 #endif
     bool hasArrayView() const {
@@ -633,13 +688,12 @@ class AsmJSModule
     }
 
     void patchBoundsChecks(unsigned heapSize) {
-        ion::AutoFlushCache afc("patchBoundsCheck");
-        int bits = -1;
-        JS_CEILING_LOG2(bits, heapSize);
-        if (bits == -1) {
-            // tried to size the array to 0, that is bad, but not horrible
+        if (heapSize == 0)
             return;
-        }
+
+        ion::AutoFlushCache afc("patchBoundsCheck");
+        uint32_t bits;
+        JS_CEILING_LOG2(bits, heapSize);
 
         for (unsigned i = 0; i < boundsChecks_.length(); i++)
             ion::Assembler::updateBoundsCheck(bits, (ion::Instruction*)(boundsChecks_[i].offset() + code_));

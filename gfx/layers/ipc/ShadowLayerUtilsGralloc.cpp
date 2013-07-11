@@ -125,7 +125,7 @@ ImageFormatForPixelFormat(android::PixelFormat aFormat)
   case PIXEL_FORMAT_A_8:
     return gfxASurface::ImageFormatA8;
   default:
-    MOZ_NOT_REACHED("Unknown gralloc pixel format");
+    MOZ_CRASH("Unknown gralloc pixel format");
   }
   return gfxASurface::ImageFormatARGB32;
 }
@@ -143,7 +143,7 @@ PixelFormatForImageFormat(gfxASurface::gfxImageFormat aFormat)
   case gfxASurface::ImageFormatA8:
     return android::PIXEL_FORMAT_A_8;
   default:
-    MOZ_NOT_REACHED("Unknown gralloc pixel format");
+    MOZ_CRASH("Unknown gralloc pixel format");
   }
   return gfxASurface::ImageFormatARGB32;
 }
@@ -199,7 +199,7 @@ NS_MEMORY_REPORTER_IMPLEMENT(GrallocBufferActor,
 
 GrallocBufferActor::GrallocBufferActor()
 : mAllocBytes(0)
-, mTextureHost(nullptr)
+, mDeprecatedTextureHost(nullptr)
 {
   static bool registered;
   if (!registered) {
@@ -253,15 +253,15 @@ GrallocBufferActor::Create(const gfxIntSize& aSize,
 // used only for hacky fix in gecko 23 for bug 862324
 void GrallocBufferActor::ActorDestroy(ActorDestroyReason)
 {
-  if (mTextureHost) {
-    mTextureHost->ForgetBuffer();
+  if (mDeprecatedTextureHost) {
+    mDeprecatedTextureHost->ForgetBuffer();
   }
 }
 
 // used only for hacky fix in gecko 23 for bug 862324
-void GrallocBufferActor::SetTextureHost(TextureHost* aTextureHost)
+void GrallocBufferActor::SetDeprecatedTextureHost(DeprecatedTextureHost* aDeprecatedTextureHost)
 {
-  mTextureHost = aTextureHost;
+  mDeprecatedTextureHost = aDeprecatedTextureHost;
 }
 
 /*static*/ already_AddRefed<TextureImage>

@@ -242,7 +242,7 @@ CloseDatabaseListener::CloseDatabaseListener(nsPermissionManager* aManager,
 }
 
 NS_IMETHODIMP
-CloseDatabaseListener::Complete()
+CloseDatabaseListener::Complete(nsresult, nsISupports*)
 {
   // Help breaking cycles
   nsRefPtr<nsPermissionManager> manager = mManager.forget();
@@ -288,8 +288,7 @@ DeleteFromMozHostListener(nsPermissionManager* aManager)
 
 NS_IMETHODIMP DeleteFromMozHostListener::HandleResult(mozIStorageResultSet *)
 {
-  MOZ_NOT_REACHED("Should not get any results");
-  return NS_OK;
+  MOZ_CRASH("Should not get any results");
 }
 
 NS_IMETHODIMP DeleteFromMozHostListener::HandleError(mozIStorageError *)

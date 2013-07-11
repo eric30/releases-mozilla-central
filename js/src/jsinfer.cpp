@@ -7,6 +7,7 @@
 #include "jsinfer.h"
 
 #include "mozilla/DebugOnly.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/PodOperations.h"
 
 #include "jsapi.h"
@@ -189,8 +190,7 @@ types::TypeString(Type type)
           case JSVAL_TYPE_MAGIC:
             return "lazyargs";
           default:
-            JS_NOT_REACHED("Bad type");
-            return "";
+            MOZ_ASSUME_UNREACHABLE("Bad type");
         }
     }
     if (type.isUnknown())
@@ -1173,7 +1173,7 @@ GetSingletonPropertyType(JSContext *cx, JSObject *rawObjArg, HandleId id)
     if (JSID_IS_VOID(id))
         return Type::UnknownType();
 
-    if (obj->isTypedArray()) {
+    if (obj->is<TypedArrayObject>()) {
         if (id == id_length(cx))
             return Type::Int32Type();
         obj = obj->getProto();
@@ -1418,8 +1418,8 @@ TypeConstraintCall::newType(JSContext *cx, TypeSet *source, Type type)
                 }
             }
 
-            if (native == intrinsic_UnsafeSetElement) {
-                // UnsafeSetElement(arr0, idx0, elem0, ..., arrN, idxN, elemN)
+            if (native == intrinsic_UnsafePutElements) {
+                // UnsafePutElements(arr0, idx0, elem0, ..., arrN, idxN, elemN)
                 // is (basically) equivalent to arri[idxi] = elemi for i = 0...N
                 JS_ASSERT((callsite->argumentCount % 3) == 0);
                 for (size_t i = 0; i < callsite->argumentCount; i += 3) {
@@ -2086,7 +2086,7 @@ StackTypeSet::convertDoubleElements(JSContext *cx)
         // double in their element types (as the conversion may render the type
         // information incorrect), nor for non-array objects (as their elements
         // may point to emptyObjectElements, which cannot be converted).
-        if (!types->hasType(Type::DoubleType()) || type->clasp != &ArrayClass) {
+        if (!types->hasType(Type::DoubleType()) || type->clasp != &ArrayObject::class_) {
             dontConvert = true;
             alwaysConvert = false;
             continue;
@@ -2160,8 +2160,8 @@ StackTypeSet::getTypedArrayType()
     Class *clasp = getKnownClass();
 
     if (clasp && IsTypedArrayClass(clasp))
-        return clasp - &TypedArray::classes[0];
-    return TypedArray::TYPE_MAX;
+        return clasp - &TypedArrayObject::classes[0];
+    return TypedArrayObject::TYPE_MAX;
 }
 
 bool
@@ -2338,9 +2338,9 @@ TypeZone::init(JSContext *cx)
 }
 
 TypeObject *
-TypeCompartment::newTypeObject(JSContext *cx, Class *clasp, Handle<TaggedProto> proto, bool unknown)
+TypeCompartment::newTypeObject(ExclusiveContext *cx, Class *clasp, Handle<TaggedProto> proto, bool unknown)
 {
-    JS_ASSERT_IF(proto.isObject(), cx->compartment() == proto.toObject()->compartment());
+    JS_ASSERT_IF(proto.isObject(), cx->isInsideCurrentCompartment(proto.toObject()));
 
     TypeObject *object = gc::NewGCThing<TypeObject, CanGC>(cx, gc::FINALIZE_TYPE_OBJECT,
                                                            sizeof(TypeObject), gc::TenuredHeap);
@@ -3153,7 +3153,7 @@ TypeCompartment::fixArrayType(JSContext *cx, JSObject *obj)
      * If the array is heterogenous, keep the existing type object, which has
      * unknown properties.
      */
-    JS_ASSERT(obj->isArray());
+    JS_ASSERT(obj->is<ArrayObject>());
 
     unsigned len = obj->getDenseInitializedLength();
     if (len == 0)
@@ -3182,7 +3182,7 @@ TypeCompartment::fixArrayType(JSContext *cx, JSObject *obj)
         Rooted<Type> origType(cx, type);
         /* Make a new type to use for future arrays with the same elements. */
         RootedObject objProto(cx, obj->getProto());
-        Rooted<TypeObject*> objType(cx, newTypeObject(cx, &ArrayClass, objProto));
+        Rooted<TypeObject*> objType(cx, newTypeObject(cx, &ArrayObject::class_, objProto));
         if (!objType) {
             cx->compartment()->types.setPendingNukeTypes(cx);
             return;
@@ -5615,6 +5615,60 @@ types::TypeMonitorResult(JSContext *cx, JSScript *script, jsbytecode *pc, const 
     types->addType(cx, type);
 }
 
+bool
+types::UseNewTypeForClone(JSFunction *fun)
+{
+    if (!fun->isInterpreted())
+        return false;
+
+    if (fun->hasScript() && fun->nonLazyScript()->shouldCloneAtCallsite)
+        return true;
+
+    if (fun->isArrow())
+        return false;
+
+    if (fun->hasSingletonType())
+        return false;
+
+    /*
+     * When a function is being used as a wrapper for another function, it
+     * improves precision greatly to distinguish between different instances of
+     * the wrapper; otherwise we will conflate much of the information about
+     * the wrapped functions.
+     *
+     * An important example is the Class.create function at the core of the
+     * Prototype.js library, which looks like:
+     *
+     * var Class = {
+     *   create: function() {
+     *     return function() {
+     *       this.initialize.apply(this, arguments);
+     *     }
+     *   }
+     * };
+     *
+     * Each instance of the innermost function will have a different wrapped
+     * initialize method. We capture this, along with similar cases, by looking
+     * for short scripts which use both .apply and arguments. For such scripts,
+     * whenever creating a new instance of the function we both give that
+     * instance a singleton type and clone the underlying script.
+     */
+
+    uint32_t begin, end;
+    if (fun->hasScript()) {
+        if (!fun->nonLazyScript()->usesArgumentsAndApply)
+            return false;
+        begin = fun->nonLazyScript()->sourceStart;
+        end = fun->nonLazyScript()->sourceEnd;
+    } else {
+        if (!fun->lazyScript()->usesArgumentsAndApply())
+            return false;
+        begin = fun->lazyScript()->begin();
+        end = fun->lazyScript()->end();
+    }
+
+    return end - begin <= 100;
+}
 /////////////////////////////////////////////////////////////////////
 // TypeScript
 /////////////////////////////////////////////////////////////////////
@@ -5825,10 +5879,13 @@ JSScript::makeAnalysis(JSContext *cx)
 }
 
 /* static */ bool
-JSFunction::setTypeForScriptedFunction(JSContext *cx, HandleFunction fun, bool singleton /* = false */)
+JSFunction::setTypeForScriptedFunction(ExclusiveContext *cxArg, HandleFunction fun,
+                                       bool singleton /* = false */)
 {
-    if (!cx->typeInferenceEnabled())
+    if (!cxArg->typeInferenceEnabled())
         return true;
+
+    JSContext *cx = cxArg->asJSContext();
 
     if (singleton) {
         if (!setSingletonType(cx, fun))
@@ -5900,7 +5957,7 @@ JSObject::splicePrototype(JSContext *cx, Class *clasp, Handle<TaggedProto> proto
     }
 
     if (!cx->typeInferenceEnabled()) {
-        TypeObject *type = cx->compartment()->getNewType(cx, clasp, proto);
+        TypeObject *type = cx->getNewType(clasp, proto);
         if (!type)
             return false;
         self->type_ = type;
@@ -5982,7 +6039,7 @@ JSObject::makeLazyType(JSContext *cx, HandleObject obj)
     if (obj->isIndexed())
         type->flags |= OBJECT_FLAG_SPARSE_INDEXES;
 
-    if (obj->isArray() && obj->getArrayLength() > INT32_MAX)
+    if (obj->is<ArrayObject>() && obj->as<ArrayObject>().length() > INT32_MAX)
         type->flags |= OBJECT_FLAG_LENGTH_OVERFLOW;
 
     obj->type_ = type;
@@ -6038,10 +6095,12 @@ JSObject::setNewTypeUnknown(JSContext *cx, Class *clasp, HandleObject obj)
 }
 
 TypeObject *
-JSCompartment::getNewType(JSContext *cx, Class *clasp, TaggedProto proto_, JSFunction *fun_)
+ExclusiveContext::getNewType(Class *clasp, TaggedProto proto_, JSFunction *fun_)
 {
     JS_ASSERT_IF(fun_, proto_.isObject());
-    JS_ASSERT_IF(proto_.isObject(), cx->compartment() == proto_.toObject()->compartment());
+    JS_ASSERT_IF(proto_.isObject(), isInsideCurrentCompartment(proto_.toObject()));
+
+    TypeObjectSet &newTypeObjects = compartment_->newTypeObjects;
 
     if (!newTypeObjects.initialized() && !newTypeObjects.init())
         return NULL;
@@ -6062,15 +6121,15 @@ JSCompartment::getNewType(JSContext *cx, Class *clasp, TaggedProto proto_, JSFun
          * 'prototype' property of some scripted function.
          */
         if (type->newScript && type->newScript->fun != fun_)
-            type->clearNewScript(cx);
+            type->clearNewScript(asJSContext());
 
         return type;
     }
 
-    Rooted<TaggedProto> proto(cx, proto_);
-    RootedFunction fun(cx, fun_);
+    Rooted<TaggedProto> proto(this, proto_);
+    RootedFunction fun(this, fun_);
 
-    if (proto.isObject() && !proto.toObject()->setDelegate(cx))
+    if (proto.isObject() && !proto.toObject()->setDelegate(this))
         return NULL;
 
     bool markUnknown =
@@ -6078,16 +6137,17 @@ JSCompartment::getNewType(JSContext *cx, Class *clasp, TaggedProto proto_, JSFun
         ? proto.toObject()->lastProperty()->hasObjectFlag(BaseShape::NEW_TYPE_UNKNOWN)
         : true;
 
-    RootedTypeObject type(cx, types.newTypeObject(cx, clasp, proto, markUnknown));
+    RootedTypeObject type(this, compartment_->types.newTypeObject(this, clasp, proto, markUnknown));
     if (!type)
         return NULL;
 
     if (!newTypeObjects.relookupOrAdd(p, TypeObjectSet::Lookup(clasp, proto), type.get()))
         return NULL;
 
-    if (!cx->typeInferenceEnabled())
+    if (!typeInferenceEnabled())
         return type;
 
+    JSContext *cx = asJSContext();
     AutoEnterAnalysis enter(cx);
 
     /*
@@ -6126,12 +6186,6 @@ JSCompartment::getNewType(JSContext *cx, Class *clasp, TaggedProto proto_, JSFun
         type->flags |= OBJECT_FLAG_SETS_MARKED_UNKNOWN;
 
     return type;
-}
-
-TypeObject *
-JSObject::getNewType(JSContext *cx, Class *clasp, JSFunction *fun)
-{
-    return cx->compartment()->getNewType(cx, clasp, this, fun);
 }
 
 TypeObject *
@@ -6693,7 +6747,7 @@ TypeCompartment::maybePurgeAnalysis(JSContext *cx, bool force)
 
 static void
 SizeOfScriptTypeInferenceData(JSScript *script, JS::TypeInferenceSizes *sizes,
-                              JSMallocSizeOfFun mallocSizeOf)
+                              mozilla::MallocSizeOf mallocSizeOf)
 {
     TypeScript *typeScript = script->types;
     if (!typeScript)
@@ -6715,13 +6769,13 @@ SizeOfScriptTypeInferenceData(JSScript *script, JS::TypeInferenceSizes *sizes,
 }
 
 void
-Zone::sizeOfIncludingThis(JSMallocSizeOfFun mallocSizeOf, size_t *typePool)
+Zone::sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf, size_t *typePool)
 {
     *typePool += types.typeLifoAlloc.sizeOfExcludingThis(mallocSizeOf);
 }
 
 void
-JSCompartment::sizeOfTypeInferenceData(JS::TypeInferenceSizes *sizes, JSMallocSizeOfFun mallocSizeOf)
+JSCompartment::sizeOfTypeInferenceData(JS::TypeInferenceSizes *sizes, mozilla::MallocSizeOf mallocSizeOf)
 {
     sizes->analysisPool += analysisLifoAlloc.sizeOfExcludingThis(mallocSizeOf);
 
@@ -6760,7 +6814,7 @@ JSCompartment::sizeOfTypeInferenceData(JS::TypeInferenceSizes *sizes, JSMallocSi
 }
 
 size_t
-TypeObject::sizeOfExcludingThis(JSMallocSizeOfFun mallocSizeOf)
+TypeObject::sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf)
 {
     if (singleton) {
         /*

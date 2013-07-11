@@ -34,8 +34,8 @@
 
 #if ENABLE_ASSEMBLER
 
-#include "X86Assembler.h"
-#include "AbstractMacroAssembler.h"
+#include "assembler/assembler/X86Assembler.h"
+#include "assembler/assembler/AbstractMacroAssembler.h"
 
 #if WTF_COMPILER_MSVC
 #if WTF_CPU_X86_64
@@ -431,22 +431,22 @@ public:
 
     void load8SignExtend(BaseIndex address, RegisterID dest)
     {
-        m_assembler.movxbl_mr(address.offset, address.base, address.index, address.scale, dest);
+        m_assembler.movsbl_mr(address.offset, address.base, address.index, address.scale, dest);
     }
     
     void load8SignExtend(Address address, RegisterID dest)
     {
-        m_assembler.movxbl_mr(address.offset, address.base, dest);
+        m_assembler.movsbl_mr(address.offset, address.base, dest);
     }
 
     void load16SignExtend(BaseIndex address, RegisterID dest)
     {
-        m_assembler.movxwl_mr(address.offset, address.base, address.index, address.scale, dest);
+        m_assembler.movswl_mr(address.offset, address.base, address.index, address.scale, dest);
     }
     
     void load16SignExtend(Address address, RegisterID dest)
     {
-        m_assembler.movxwl_mr(address.offset, address.base, dest);
+        m_assembler.movswl_mr(address.offset, address.base, dest);
     }
 
     void load16(BaseIndex address, RegisterID dest)

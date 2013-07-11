@@ -21,6 +21,10 @@ class PropertyName;
 class SpecialId;
 class PropertyId;
 
+// This is equal to JSFunction::class_.  Use it in places where you don't want
+// to #include jsfun.h.
+extern JS_FRIEND_DATA(js::Class*) FunctionClassPtr;
+
 static JS_ALWAYS_INLINE jsid
 SPECIALID_TO_JSID(const SpecialId &sid);
 
@@ -195,7 +199,7 @@ typedef void
     const char          *name;                                                \
     uint32_t            flags;                                                \
                                                                               \
-    /* Mandatory non-null function pointer members. */                        \
+    /* Mandatory function pointer members. */                                 \
     JSPropertyOp        addProperty;                                          \
     JSDeletePropertyOp  delProperty;                                          \
     JSPropertyOp        getProperty;                                          \
@@ -203,9 +207,9 @@ typedef void
     JSEnumerateOp       enumerate;                                            \
     JSResolveOp         resolve;                                              \
     JSConvertOp         convert;                                              \
-    FinalizeOp          finalize;                                             \
                                                                               \
-    /* Optionally non-null members start here. */                             \
+    /* Optional members (may be null). */                                     \
+    FinalizeOp          finalize;                                             \
     JSCheckAccessOp     checkAccess;                                          \
     JSNative            call;                                                 \
     JSHasInstanceOp     hasInstance;                                          \
@@ -312,8 +316,9 @@ struct Class
         return flags & JSCLASS_EMULATES_UNDEFINED;
     }
 
-    /* Defined in jsfuninlines.h */
-    inline bool isCallable() const;
+    bool isCallable() const {
+        return this == js::FunctionClassPtr || call;
+    }
 
     static size_t offsetOfFlags() { return offsetof(Class, flags); }
 };

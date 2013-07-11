@@ -45,6 +45,19 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
     bool dynamicAlignment_;
     bool enoughMemory_;
 
+    // These use SystemAllocPolicy since asm.js releases memory after each
+    // function is compiled, and these need to live until after all functions
+    // are compiled.
+    struct Double {
+        double value;
+        NonAssertingLabel uses;
+        Double(double value) : value(value) {}
+    };
+    Vector<Double, 0, SystemAllocPolicy> doubles_;
+
+    typedef HashMap<double, size_t, DefaultHasher<double>, SystemAllocPolicy> DoubleMap;
+    DoubleMap doubleMap_;
+
     void setupABICall(uint32_t arg);
 
   protected:
@@ -53,6 +66,7 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
   public:
     using MacroAssemblerX86Shared::call;
     using MacroAssemblerX86Shared::Push;
+    using MacroAssemblerX86Shared::Pop;
     using MacroAssemblerX86Shared::callWithExitFrame;
     using MacroAssemblerX86Shared::branch32;
 
@@ -69,6 +83,10 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
         enoughMemory_(true)
     {
     }
+
+    // The buffer is about to be linked, make sure any constant pools or excess
+    // bookkeeping has been flushed to the instruction stream.
+    void finish();
 
     bool oom() const {
         return MacroAssemblerX86Shared::oom() || !enoughMemory_;
@@ -94,8 +112,7 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
                            base.scale(), base.disp() + 4);
 
           default:
-            JS_NOT_REACHED("unexpected operand kind");
-            return base; // Silence GCC warning.
+            MOZ_ASSUME_UNREACHABLE("unexpected operand kind");
         }
     }
     static inline Operand ToUpper32(const Address &address) {
@@ -144,9 +161,12 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
     template <typename T>
     void storeValue(const Value &val, const T &dest) {
         jsval_layout jv = JSVAL_TO_IMPL(val);
-        movq(ImmWord(jv.asBits), ScratchReg);
-        if (val.isMarkable())
+        if (val.isMarkable()) {
+            movWithPatch(ImmWord(jv.asBits), ScratchReg);
             writeDataRelocation(val);
+        } else {
+            mov(ImmWord(jv.asBits), ScratchReg);
+        }
         movq(ScratchReg, Operand(dest));
     }
     void storeValue(ValueOperand val, BaseIndex dest) {
@@ -189,10 +209,14 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
     void pushValue(const Address &addr) {
         push(Operand(addr));
     }
+    void Pop(const ValueOperand &val) {
+        popValue(val);
+        framePushed_ -= sizeof(Value);
+    }
 
     void moveValue(const Value &val, const Register &dest) {
         jsval_layout jv = JSVAL_TO_IMPL(val);
-        movq(ImmWord(jv.asPtr), dest);
+        movWithPatch(ImmWord(jv.asPtr), dest);
         writeDataRelocation(val);
     }
     void moveValue(const Value &src, const ValueOperand &dest) {
@@ -444,6 +468,9 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
     }
     void addPtr(Imm32 imm, const Address &dest) {
         addq(imm, Operand(dest));
+    }
+    void addPtr(Imm32 imm, const Operand &dest) {
+        addq(imm, dest);
     }
     void addPtr(ImmWord imm, const Register &dest) {
         JS_ASSERT(dest != ScratchReg);
@@ -931,17 +958,7 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
         cvtsi2sd(operand.valueReg(), dest);
     }
 
-    void loadConstantDouble(double d, const FloatRegister &dest) {
-        union DoublePun {
-            uint64_t u;
-            double d;
-        } pun;
-        pun.d = d;
-        if (!maybeInlineDouble(pun.u, dest)) {
-            mov(ImmWord(pun.u), ScratchReg);
-            movqsd(ScratchReg, dest);
-        }
-    }
+    void loadConstantDouble(double d, const FloatRegister &dest);
     void loadStaticDouble(const double *dp, const FloatRegister &dest) {
         loadConstantDouble(*dp, dest);
     }

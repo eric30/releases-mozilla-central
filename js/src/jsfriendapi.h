@@ -7,6 +7,8 @@
 #ifndef jsfriendapi_h
 #define jsfriendapi_h
 
+#include "mozilla/MemoryReporting.h"
+
 #include "jsclass.h"
 #include "jspubtd.h"
 #include "jsprvtd.h"
@@ -130,6 +132,12 @@ js_GetterOnlyPropertyStub(JSContext *cx, JS::HandleObject obj, JS::HandleId id, 
 
 JS_FRIEND_API(void)
 js_ReportOverRecursed(JSContext *maybecx);
+
+JS_FRIEND_API(bool)
+js_ObjectClassIs(JSContext *cx, JS::HandleObject obj, js::ESClassValue classValue);
+
+JS_FRIEND_API(const char *)
+js_ObjectClassName(JSContext *cx, JS::HandleObject obj);
 
 #ifdef DEBUG
 
@@ -307,7 +315,7 @@ IterateGrayObjects(JS::Zone *zone, GCThingCallback cellCallback, void *data);
 
 #ifdef JS_HAS_CTYPES
 extern JS_FRIEND_API(size_t)
-SizeOfDataIfCDataObject(JSMallocSizeOfFun mallocSizeOf, JSObject *obj);
+SizeOfDataIfCDataObject(mozilla::MallocSizeOf mallocSizeOf, JSObject *obj);
 #endif
 
 extern JS_FRIEND_API(JSCompartment *)
@@ -378,10 +386,6 @@ struct Atom {
 };
 
 } /* namespace shadow */
-
-// This is equal to JSFunction::class_.  Use it in places where you don't want
-// to #include jsfun.h.
-extern JS_FRIEND_DATA(js::Class*) FunctionClassPtr;
 
 extern JS_FRIEND_DATA(js::Class) FunctionProxyClass;
 extern JS_FRIEND_DATA(js::Class) OuterWindowProxyClass;
@@ -615,6 +619,12 @@ GetNativeStackLimit(const JSRuntime *rt)
     return PerThreadDataFriendFields::getMainThread(rt)->nativeStackLimit;
 }
 
+inline uintptr_t
+GetNativeStackLimit(JSContext *cx)
+{
+    return GetNativeStackLimit(GetRuntime(cx));
+}
+
 /*
  * These macros report a stack overflow and run |onerror| if we are close to
  * using up the C stack. The JS_CHECK_CHROME_RECURSION variant gives us a little
@@ -624,7 +634,7 @@ GetNativeStackLimit(const JSRuntime *rt)
 #define JS_CHECK_RECURSION(cx, onerror)                              \
     JS_BEGIN_MACRO                                                              \
         int stackDummy_;                                                        \
-        if (!JS_CHECK_STACK_SIZE(js::GetNativeStackLimit(js::GetRuntime(cx)), &stackDummy_)) { \
+        if (!JS_CHECK_STACK_SIZE(js::GetNativeStackLimit(cx), &stackDummy_)) {  \
             js_ReportOverRecursed(cx);                                          \
             onerror;                                                            \
         }                                                                       \
@@ -633,7 +643,7 @@ GetNativeStackLimit(const JSRuntime *rt)
 #define JS_CHECK_RECURSION_WITH_EXTRA_DONT_REPORT(cx, extra, onerror)           \
     JS_BEGIN_MACRO                                                              \
         uint8_t stackDummy_;                                                    \
-        if (!JS_CHECK_STACK_SIZE(js::GetNativeStackLimit(js::GetRuntime(cx)),   \
+        if (!JS_CHECK_STACK_SIZE(js::GetNativeStackLimit(cx),                   \
                                  &stackDummy_ - (extra)))                       \
         {                                                                       \
             onerror;                                                            \
@@ -643,7 +653,7 @@ GetNativeStackLimit(const JSRuntime *rt)
 #define JS_CHECK_CHROME_RECURSION(cx, onerror)                                  \
     JS_BEGIN_MACRO                                                              \
         int stackDummy_;                                                        \
-        if (!JS_CHECK_STACK_SIZE_WITH_TOLERANCE(js::GetNativeStackLimit(js::GetRuntime(cx)), \
+        if (!JS_CHECK_STACK_SIZE_WITH_TOLERANCE(js::GetNativeStackLimit(cx),    \
                                                 &stackDummy_,                   \
                                                 1024 * sizeof(size_t)))         \
         {                                                                       \
@@ -1556,7 +1566,8 @@ struct JSJitInfo {
     enum OpType {
         Getter,
         Setter,
-        Method
+        Method,
+        OpType_None
     };
 
     union {
@@ -1573,7 +1584,13 @@ struct JSJitInfo {
                                keep returning the same value for the given
                                "this" object" */
     JSValueType returnType; /* The return type tag.  Might be JSVAL_TYPE_UNKNOWN */
+
+    /* An alternative native that's safe to call in parallel mode. */
+    JSParallelNative parallelNative;
 };
+
+#define JS_JITINFO_NATIVE_PARALLEL(op)                                         \
+    {{NULL},0,0,JSJitInfo::OpType_None,false,false,false,JSVAL_TYPE_MISSING,op}
 
 static JS_ALWAYS_INLINE const JSJitInfo *
 FUNCTION_VALUE_TO_JITINFO(const JS::Value& v)
@@ -1754,6 +1771,22 @@ GetObjectMetadata(JSObject *obj);
 extern JS_FRIEND_API(JSBool)
 DefaultValue(JSContext *cx, JS::HandleObject obj, JSType hint, MutableHandleValue vp);
 
+/*
+ * Helper function. To approximate a call to the [[DefineOwnProperty]] internal
+ * method described in ES5, first call this, then call JS_DefinePropertyById.
+ *
+ * JS_DefinePropertyById by itself does not enforce the invariants on
+ * non-configurable properties when obj->isNative(). This function performs the
+ * relevant checks (specified in ES5 8.12.9 [[DefineOwnProperty]] steps 1-11),
+ * but only if obj is native.
+ *
+ * The reason for the messiness here is that ES5 uses [[DefineOwnProperty]] as
+ * a sort of extension point, but there is no hook in js::Class,
+ * js::ProxyHandler, or the JSAPI with precisely the right semantics for it.
+ */
+extern JS_FRIEND_API(bool)
+CheckDefineProperty(JSContext *cx, HandleObject obj, HandleId id, HandleValue value,
+                    PropertyOp getter, StrictPropertyOp setter, unsigned attrs);
 
 } /* namespace js */
 
@@ -1763,5 +1796,13 @@ js_DefineOwnProperty(JSContext *cx, JSObject *objArg, jsid idArg,
 
 extern JS_FRIEND_API(JSBool)
 js_ReportIsNotFunction(JSContext *cx, const JS::Value& v);
+
+#ifdef JSGC_GENERATIONAL
+extern JS_FRIEND_API(void)
+JS_StorePostBarrierCallback(JSContext* cx, void (*callback)(JSTracer *trc, void *key), void *key);
+#else
+inline void
+JS_StorePostBarrierCallback(JSContext* cx, void (*callback)(JSTracer *trc, void *key), void *key) {}
+#endif /* JSGC_GENERATIONAL */
 
 #endif /* jsfriendapi_h */

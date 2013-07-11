@@ -59,6 +59,7 @@
 #include "nsObjectFrame.h"
 #include "nsTransitionManager.h"
 #include "nsAnimationManager.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/Element.h"
 #include "nsIMessageManager.h"
 #include "FrameLayerBuilder.h"
@@ -320,7 +321,15 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsPresContext)
 NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsPresContext)
-NS_IMPL_CYCLE_COLLECTING_RELEASE(nsPresContext)
+NS_IMPL_CYCLE_COLLECTING_RELEASE_WITH_LAST_RELEASE(nsPresContext, LastRelease())
+
+void
+nsPresContext::LastRelease()
+{
+  if (IsRoot()) {
+    static_cast<nsRootPresContext*>(this)->CancelDidPaintTimer();
+  }
+}
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsPresContext)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDocument);
@@ -2524,7 +2533,7 @@ nsPresContext::GetPrimaryFrameFor(nsIContent* aContent)
 
 
 size_t
-nsPresContext::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+nsPresContext::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 {
   return mPropertyTable.SizeOfExcludingThis(aMallocSizeOf);
          mLangGroupFontPrefs.SizeOfExcludingThis(aMallocSizeOf);
@@ -2860,7 +2869,7 @@ nsRootPresContext::FlushWillPaintObservers()
 }
 
 size_t
-nsRootPresContext::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+nsRootPresContext::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 {
   return nsPresContext::SizeOfExcludingThis(aMallocSizeOf);
 

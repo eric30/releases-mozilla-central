@@ -17,7 +17,6 @@
 #include "vm/Interpreter.h"
 
 #include "jsfuninlines.h"
-#include "jstypedarrayinlines.h"
 
 #include "vm/BooleanObject-inl.h"
 #include "vm/NumberObject-inl.h"
@@ -138,7 +137,7 @@ intrinsic_ToInteger(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     double result;
-    if (!ToInteger(cx, args[0], &result))
+    if (!ToInteger(cx, args.handleAt(0), &result))
         return false;
     args.rval().setDouble(result);
     return true;
@@ -323,6 +322,27 @@ js::intrinsic_Dump(JSContext *cx, unsigned argc, Value *vp)
     args.rval().setUndefined();
     return true;
 }
+
+JSBool
+intrinsic_ParallelSpew(ThreadSafeContext *cx, unsigned argc, Value *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    JS_ASSERT(args.length() == 1);
+    JS_ASSERT(args[0].isString());
+
+    ScopedThreadSafeStringInspector inspector(args[0].toString());
+    if (!inspector.ensureChars(cx))
+        return false;
+
+    ScopedJSFreePtr<char> bytes(TwoByteCharsToNewUTF8CharsZ(cx, inspector.range()).c_str());
+    parallel::Spew(parallel::SpewOps, bytes);
+
+    args.rval().setUndefined();
+    return true;
+}
+
+const JSJitInfo intrinsic_ParallelSpew_jitInfo =
+    JS_JITINFO_NATIVE_PARALLEL(JSParallelNativeThreadSafeWrapper<intrinsic_ParallelSpew>);
 #endif
 
 /*
@@ -414,10 +434,9 @@ js::intrinsic_NewDenseArray(JSContext *cx, unsigned argc, Value *vp)
 }
 
 /*
- * UnsafeSetElement(arr0, idx0, elem0, ..., arrN, idxN, elemN): For
- * each set of (arr, idx, elem) arguments that are passed, performs
- * the assignment |arr[idx] = elem|. |arr| must be either a dense array
- * or a typed array.
+ * UnsafePutElements(arr0, idx0, elem0, ..., arrN, idxN, elemN): For each set of
+ * (arr, idx, elem) arguments that are passed, performs the assignment
+ * |arr[idx] = elem|. |arr| must be either a dense array or a typed array.
  *
  * If |arr| is a dense array, the index must be an int32 less than the
  * initialized length of |arr|. Use |%EnsureDenseResultArrayElements|
@@ -427,7 +446,7 @@ js::intrinsic_NewDenseArray(JSContext *cx, unsigned argc, Value *vp)
  * length of |arr|.
  */
 JSBool
-js::intrinsic_UnsafeSetElement(JSContext *cx, unsigned argc, Value *vp)
+js::intrinsic_UnsafePutElements(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
 
@@ -443,7 +462,7 @@ js::intrinsic_UnsafeSetElement(JSContext *cx, unsigned argc, Value *vp)
 
         JS_ASSERT(args[arri].isObject());
         JS_ASSERT(args[arri].toObject().isNative() ||
-                  args[arri].toObject().isTypedArray());
+                  args[arri].toObject().is<TypedArrayObject>());
         JS_ASSERT(args[idxi].isInt32());
 
         RootedObject arrobj(cx, &args[arri].toObject());
@@ -453,7 +472,7 @@ js::intrinsic_UnsafeSetElement(JSContext *cx, unsigned argc, Value *vp)
             JS_ASSERT(idx < arrobj->getDenseInitializedLength());
             JSObject::setDenseElementWithType(cx, arrobj, idx, args[elemi]);
         } else {
-            JS_ASSERT(idx < TypedArray::length(arrobj));
+            JS_ASSERT(idx < arrobj->as<TypedArrayObject>().length());
             RootedValue tmp(cx, args[elemi]);
             // XXX: Always non-strict.
             if (!JSObject::setElement(cx, arrobj, arrobj, idx, &tmp, false))
@@ -606,7 +625,7 @@ const JSFunctionSpec intrinsic_functions[] = {
     JS_FN("DecompileArg",            intrinsic_DecompileArg,            2,0),
     JS_FN("RuntimeDefaultLocale",    intrinsic_RuntimeDefaultLocale,    0,0),
 
-    JS_FN("UnsafeSetElement",        intrinsic_UnsafeSetElement,        3,0),
+    JS_FN("UnsafePutElements",               intrinsic_UnsafePutElements,               3,0),
     JS_FN("UnsafeSetReservedSlot",   intrinsic_UnsafeSetReservedSlot,   3,0),
     JS_FN("UnsafeGetReservedSlot",   intrinsic_UnsafeGetReservedSlot,   2,0),
 
@@ -638,6 +657,10 @@ const JSFunctionSpec intrinsic_functions[] = {
 
 #ifdef DEBUG
     JS_FN("Dump",                 intrinsic_Dump,                 1,0),
+
+    JS_FNINFO("ParallelSpew",
+              JSNativeThreadSafeWrapper<intrinsic_ParallelSpew>,
+              &intrinsic_ParallelSpew_jitInfo, 1,0),
 #endif
 
     JS_FS_END
@@ -664,6 +687,20 @@ JSRuntime::initSelfHosting(JSContext *cx)
     if (!JS_DefineFunctions(cx, shg, intrinsic_functions))
         return false;
 
+    /*
+     * In self-hosting mode, scripts emit JSOP_CALLINTRINSIC instead of
+     * JSOP_NAME or JSOP_GNAME to access unbound variables. JSOP_CALLINTRINSIC
+     * does a name lookup in a special object, whose properties are filled in
+     * lazily upon first access for a given global.
+     *
+     * As that object is inaccessible to client code, the lookups are
+     * guaranteed to return the original objects, ensuring safe implementation
+     * of self-hosted builtins.
+     *
+     * Additionally, the special syntax _CallFunction(receiver, ...args, fun)
+     * is supported, for which bytecode is emitted that invokes |fun| with
+     * |receiver| as the this-object and ...args as the arguments..
+     */
     CompileOptions options(cx);
     options.setFileAndLine("self-hosted", 1);
     options.setSelfHostingMode(true);
@@ -796,8 +833,8 @@ CloneObject(JSContext *cx, HandleObject srcObj, CloneMemory &clonedObjects)
         RegExpObject &reobj = srcObj->as<RegExpObject>();
         RootedAtom source(cx, reobj.getSource());
         clone = RegExpObject::createNoStatics(cx, source, reobj.getFlags(), NULL);
-    } else if (srcObj->isDate()) {
-        clone = JS_NewDateObjectMsec(cx, srcObj->getDateUTCTime().toNumber());
+    } else if (srcObj->is<DateObject>()) {
+        clone = JS_NewDateObjectMsec(cx, srcObj->as<DateObject>().UTCTime().toNumber());
     } else if (srcObj->is<BooleanObject>()) {
         clone = BooleanObject::create(cx, srcObj->as<BooleanObject>().unbox());
     } else if (srcObj->is<NumberObject>()) {
@@ -810,7 +847,7 @@ CloneObject(JSContext *cx, HandleObject srcObj, CloneMemory &clonedObjects)
         if (!str)
             return NULL;
         clone = StringObject::create(cx, str);
-    } else if (srcObj->isArray()) {
+    } else if (srcObj->is<ArrayObject>()) {
         clone = NewDenseEmptyArray(cx, NULL, TenuredObject);
     } else {
         JS_ASSERT(srcObj->isNative());

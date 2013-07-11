@@ -39,28 +39,6 @@ AliasedFormalIter::AliasedFormalIter(JSScript *script)
     settle();
 }
 
-extern void
-CurrentScriptFileLineOriginSlow(JSContext *cx, const char **file, unsigned *linenop, JSPrincipals **origin);
-
-inline void
-CurrentScriptFileLineOrigin(JSContext *cx, const char **file, unsigned *linenop, JSPrincipals **origin,
-                            LineOption opt = NOT_CALLED_FROM_JSOP_EVAL)
-{
-    if (opt == CALLED_FROM_JSOP_EVAL) {
-        JSScript *script = NULL;
-        jsbytecode *pc = NULL;
-        types::TypeScript::GetPcScript(cx, &script, &pc);
-        JS_ASSERT(JSOp(*pc) == JSOP_EVAL);
-        JS_ASSERT(*(pc + JSOP_EVAL_LENGTH) == JSOP_LINENO);
-        *file = script->filename();
-        *linenop = GET_UINT16(pc + JSOP_EVAL_LENGTH);
-        *origin = script->originPrincipals;
-        return;
-    }
-
-    CurrentScriptFileLineOriginSlow(cx, file, linenop, origin);
-}
-
 inline void
 ScriptCounts::destroy(FreeOp *fop)
 {
@@ -130,18 +108,6 @@ JSScript::getRegExp(size_t index)
     return (js::RegExpObject *) obj;
 }
 
-inline bool
-JSScript::isEmpty() const
-{
-    if (length > 3)
-        return false;
-
-    jsbytecode *pc = code;
-    if (noScriptRval && JSOp(*pc) == JSOP_FALSE)
-        ++pc;
-    return JSOp(*pc) == JSOP_STOP;
-}
-
 inline js::GlobalObject &
 JSScript::global() const
 {
@@ -167,11 +133,6 @@ JSScript::writeBarrierPre(JSScript *script)
         JS_ASSERT(tmp == script);
     }
 #endif
-}
-
-inline void
-JSScript::writeBarrierPost(JSScript *script, void *addr)
-{
 }
 
 /* static */ inline void

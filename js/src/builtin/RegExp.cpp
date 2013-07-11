@@ -8,6 +8,7 @@
 
 #include "jscntxt.h"
 
+#include "vm/RegExpStatics.h"
 #include "vm/StringBuffer.h"
 
 #include "jsobjinlines.h"
@@ -329,7 +330,7 @@ regexp_construct(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
 
-    if (!IsConstructing(args)) {
+    if (!args.isConstructing()) {
         /*
          * If first arg is regexp and no flags are given, just return the arg.
          * Otherwise, delegate to the standard constructor.
@@ -544,7 +545,7 @@ js::ExecuteRegExp(JSContext *cx, HandleObject regexp, HandleString string, Match
         return RegExpRunStatus_Error;
 
     /* Step 4. */
-    Value lastIndex = reobj->getLastIndex();
+    RootedValue lastIndex(cx, reobj->getLastIndex());
     size_t length = input->length();
 
     /* Step 5. */
@@ -585,13 +586,11 @@ js::ExecuteRegExp(JSContext *cx, HandleObject regexp, HandleString string, Match
     if (status == RegExpRunStatus_Error)
         return RegExpRunStatus_Error;
 
-    /* Step 11 (with sticky extension). */
-    if (re->global() || (status == RegExpRunStatus_Success && re->sticky())) {
-        if (status == RegExpRunStatus_Success_NotFound)
-            reobj->zeroLastIndex();
-        else
-            reobj->setLastIndex(lastIndexInt);
-    }
+    /* Steps 9a and 11 (with sticky extension). */
+    if (status == RegExpRunStatus_Success_NotFound)
+        reobj->zeroLastIndex();
+    else if (re->global() || re->sticky())
+        reobj->setLastIndex(lastIndexInt);
 
     return status;
 }

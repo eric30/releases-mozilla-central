@@ -88,6 +88,12 @@ public class AwesomeBar extends GeckoActivity
 
         setContentView(R.layout.awesomebar);
 
+        // ActionBar's isShowing() method returns true in its initial state,
+        // so that it cannot be drawn until hide is called.
+        if (Build.VERSION.SDK_INT >= 11) {
+            getActionBar().hide();
+        }
+
         mGoButton = (ImageButton) findViewById(R.id.awesomebar_button);
         mText = (CustomEditText) findViewById(R.id.awesomebar_text);
 
@@ -195,7 +201,7 @@ public class AwesomeBar extends GeckoActivity
         mText.setOnKeyListener(new View.OnKeyListener() {
             @Override
             public boolean onKey(View v, int keyCode, KeyEvent event) {
-                if (keyCode == KeyEvent.KEYCODE_ENTER || GamepadUtils.isActionKey(event)) {
+                if (keyCode == KeyEvent.KEYCODE_ENTER) {
                     if (event.getAction() != KeyEvent.ACTION_DOWN)
                         return true;
 
@@ -259,21 +265,6 @@ public class AwesomeBar extends GeckoActivity
             bookmarksTab.setShowReadingList(true);
             mAwesomeTabs.setCurrentItemByTag(bookmarksTab.getTag());
         }
-    }
-
-    /*
-     * Only one factory can be set on the inflater; however, we want to use two
-     * factories (GeckoViewsFactory and the FragmentActivity factory).
-     * Overriding onCreateView() here allows us to dispatch view creation to
-     * both factories.
-     */
-    @Override
-    public View onCreateView(String name, Context context, AttributeSet attrs) {
-        View view = GeckoViewsFactory.getInstance().onCreateView(name, context, attrs);
-        if (view == null) {
-            view = super.onCreateView(name, context, attrs);
-        }
-        return view;
     }
 
     private boolean handleBackKey() {
@@ -463,7 +454,8 @@ public class AwesomeBar extends GeckoActivity
             keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
             keyCode == KeyEvent.KEYCODE_DEL ||
             keyCode == KeyEvent.KEYCODE_VOLUME_UP ||
-            keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+            keyCode == KeyEvent.KEYCODE_VOLUME_DOWN ||
+            GamepadUtils.isActionKey(event)) {
             return super.onKeyDown(keyCode, event);
         } else if (keyCode == KeyEvent.KEYCODE_SEARCH) {
              mText.setText("");

@@ -3448,14 +3448,10 @@ nsBlockFrame::DoReflowInlineFrames(nsBlockReflowState& aState,
   // the resolved paragraph level of the first frame on the line, not the block
   // frame, because the block frame could be split by hard line breaks into
   // multiple paragraphs with different base direction
-  uint8_t direction;
-  if (StyleTextReset()->mUnicodeBidi & NS_STYLE_UNICODE_BIDI_PLAINTEXT) {
-    FramePropertyTable *propTable = aState.mPresContext->PropertyTable();
-    direction =  NS_PTR_TO_INT32(propTable->Get(aLine->mFirstChild,
-                                                BaseLevelProperty())) & 1;
-  } else {
-    direction = StyleVisibility()->mDirection;
-  }
+  uint8_t direction =
+    (StyleTextReset()->mUnicodeBidi & NS_STYLE_UNICODE_BIDI_PLAINTEXT) ?
+      nsBidiPresUtils::GetFrameBaseLevel(aLine->mFirstChild) & 1 :
+      StyleVisibility()->mDirection;
 
   aLineLayout.BeginLineReflow(x, aState.mY,
                               availWidth, availHeight,
@@ -6131,10 +6127,15 @@ DisplayLine(nsDisplayListBuilder* aBuilder, const nsRect& aLineArea,
       !lineMayHaveTextOverflow)
     return;
 
+  // Collect our line's display items in a temporary nsDisplayListCollection,
+  // so that we can apply any "text-overflow" clipping to the entire collection
+  // without affecting previous lines.
+  nsDisplayListCollection collection;
+
   // Block-level child backgrounds go on the blockBorderBackgrounds list ...
   // Inline-level child backgrounds go on the regular child content list.
-  nsDisplayListSet childLists(aLists,
-    lineInline ? aLists.Content() : aLists.BlockBorderBackgrounds());
+  nsDisplayListSet childLists(collection,
+    lineInline ? collection.Content() : collection.BlockBorderBackgrounds());
 
   uint32_t flags = lineInline ? nsIFrame::DISPLAY_CHILD_INLINE : 0;
 
@@ -6147,8 +6148,10 @@ DisplayLine(nsDisplayListBuilder* aBuilder, const nsRect& aLineArea,
   }
   
   if (lineMayHaveTextOverflow) {
-    aTextOverflow->ProcessLine(aLists, aLine.get());
+    aTextOverflow->ProcessLine(collection, aLine.get());
   }
+
+  collection.MoveTo(aLists);
 }
 
 void

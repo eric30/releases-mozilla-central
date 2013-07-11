@@ -203,8 +203,11 @@ class Heap : public js::HeapBase<T>
             relocate();
     }
 
-    bool operator!=(const T &other) const { return ptr != other; }
+    bool operator==(const Heap<T> &other) { return ptr == other.ptr; }
+    bool operator!=(const Heap<T> &other) { return ptr != other.ptr; }
+
     bool operator==(const T &other) const { return ptr == other; }
+    bool operator!=(const T &other) const { return ptr != other; }
 
     operator T() const { return ptr; }
     T operator->() const { return ptr; }
@@ -509,7 +512,7 @@ struct GCMethods<T *>
 #endif
 };
 
-#if defined(DEBUG) && defined(JS_THREADSAFE)
+#if defined(DEBUG)
 /* This helper allows us to assert that Rooted<T> is scoped within a request. */
 extern JS_PUBLIC_API(bool)
 IsInRequest(JSContext *cx);
@@ -530,21 +533,16 @@ namespace JS {
 template <typename T>
 class MOZ_STACK_CLASS Rooted : public js::RootedBase<T>
 {
-    void init(JSContext *cxArg) {
-        MOZ_ASSERT(cxArg);
-#ifdef JS_THREADSAFE
-        MOZ_ASSERT(js::IsInRequest(cxArg));
-#endif
-#if defined(JSGC_ROOT_ANALYSIS) || defined(JSGC_USE_EXACT_ROOTING)
-        js::ContextFriendFields *cx = js::ContextFriendFields::get(cxArg);
-        commonInit(cx->thingGCRooters);
-#endif
-    }
+    /* Note: CX is a subclass of either ContextFriendFields or PerThreadDataFriendFields. */
+    template <typename CX>
+    void init(CX *cx) {
+#ifdef JSGC_TRACK_EXACT_ROOTS
+        js::ThingRootKind kind = js::GCMethods<T>::kind();
+        this->stack = &cx->thingGCRooters[kind];
+        this->prev = *stack;
+        *stack = reinterpret_cast<Rooted<void*>*>(this);
 
-    void init(js::PerThreadDataFriendFields *pt) {
-        MOZ_ASSERT(pt);
-#if defined(JSGC_ROOT_ANALYSIS) || defined(JSGC_USE_EXACT_ROOTING)
-        commonInit(pt->thingGCRooters);
+        JS_ASSERT(!js::GCMethods<T>::poisoned(ptr));
 #endif
     }
 
@@ -554,7 +552,8 @@ class MOZ_STACK_CLASS Rooted : public js::RootedBase<T>
       : ptr(js::GCMethods<T>::initial())
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-        init(cx);
+        MOZ_ASSERT(js::IsInRequest(cx));
+        init(js::ContextFriendFields::get(cx));
     }
 
     Rooted(JSContext *cx, T initial
@@ -562,23 +561,40 @@ class MOZ_STACK_CLASS Rooted : public js::RootedBase<T>
       : ptr(initial)
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-        init(cx);
+        MOZ_ASSERT(js::IsInRequest(cx));
+        init(js::ContextFriendFields::get(cx));
     }
 
-    Rooted(js::PerThreadData *pt
+    Rooted(js::ContextFriendFields *cx
            MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
       : ptr(js::GCMethods<T>::initial())
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-        init(js::PerThreadDataFriendFields::get(pt));
+        init(cx);
     }
 
-    Rooted(js::PerThreadData *pt, T initial
+    Rooted(js::ContextFriendFields *cx, T initial
            MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
       : ptr(initial)
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-        init(js::PerThreadDataFriendFields::get(pt));
+        init(cx);
+    }
+
+    Rooted(js::PerThreadDataFriendFields *pt
+           MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+      : ptr(js::GCMethods<T>::initial())
+    {
+        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+        init(pt);
+    }
+
+    Rooted(js::PerThreadDataFriendFields *pt, T initial
+           MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+      : ptr(initial)
+    {
+        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+        init(pt);
     }
 
     Rooted(JSRuntime *rt
@@ -598,13 +614,13 @@ class MOZ_STACK_CLASS Rooted : public js::RootedBase<T>
     }
 
     ~Rooted() {
-#if defined(JSGC_ROOT_ANALYSIS) || defined(JSGC_USE_EXACT_ROOTING)
+#ifdef JSGC_TRACK_EXACT_ROOTS
         JS_ASSERT(*stack == reinterpret_cast<Rooted<void*>*>(this));
         *stack = prev;
 #endif
     }
 
-#if defined(JSGC_ROOT_ANALYSIS) || defined(JSGC_USE_EXACT_ROOTING)
+#ifdef JSGC_TRACK_EXACT_ROOTS
     Rooted<T> *previous() { return prev; }
 #endif
 
@@ -639,24 +655,16 @@ class MOZ_STACK_CLASS Rooted : public js::RootedBase<T>
     bool operator==(const T &other) const { return ptr == other; }
 
   private:
-    void commonInit(Rooted<void*> **thingGCRooters) {
-#if defined(JSGC_ROOT_ANALYSIS) || defined(JSGC_USE_EXACT_ROOTING)
-        js::ThingRootKind kind = js::GCMethods<T>::kind();
-        this->stack = &thingGCRooters[kind];
-        this->prev = *stack;
-        *stack = reinterpret_cast<Rooted<void*>*>(this);
-
-        JS_ASSERT(!js::GCMethods<T>::poisoned(ptr));
-#endif
-    }
-
-#if defined(JSGC_ROOT_ANALYSIS) || defined(JSGC_USE_EXACT_ROOTING)
+#ifdef JSGC_TRACK_EXACT_ROOTS
     Rooted<void*> **stack, *prev;
 #endif
 
 #if defined(DEBUG) && defined(JS_GC_ZEAL) && defined(JSGC_ROOT_ANALYSIS) && !defined(JS_THREADSAFE)
     /* Has the rooting analysis ever scanned this Rooted's stack location? */
     friend void JS::CheckStackRoots(JSContext*);
+#endif
+
+#ifdef JSGC_ROOT_ANALYSIS
     bool scanned;
 #endif
 
@@ -704,8 +712,9 @@ class SkipRoot
     const uint8_t *start;
     const uint8_t *end;
 
-    template <typename T>
-    void init(SkipRoot **head, const T *ptr, size_t count) {
+    template <typename CX, typename T>
+    void init(CX *cx, const T *ptr, size_t count) {
+        SkipRoot **head = &cx->skipGCRooters;
         this->stack = head;
         this->prev = *stack;
         *stack = this;
@@ -714,23 +723,6 @@ class SkipRoot
     }
 
   public:
-    template <typename T>
-    SkipRoot(JSContext *cx, const T *ptr, size_t count = 1
-             MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
-    {
-        init(&ContextFriendFields::get(cx)->skipGCRooters, ptr, count);
-        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-    }
-
-    template <typename T>
-    SkipRoot(js::PerThreadData *ptd, const T *ptr, size_t count = 1
-             MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
-    {
-        PerThreadDataFriendFields *ptff = PerThreadDataFriendFields::get(ptd);
-        init(&ptff->skipGCRooters, ptr, count);
-        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-    }
-
     ~SkipRoot() {
         JS_ASSERT(*stack == this);
         *stack = prev;
@@ -744,22 +736,36 @@ class SkipRoot
 
 #else /* DEBUG && JSGC_ROOT_ANALYSIS */
 
+    template <typename T>
+    void init(js::ContextFriendFields *cx, const T *ptr, size_t count) {}
+
   public:
+
+#endif /* DEBUG && JSGC_ROOT_ANALYSIS */
+
     template <typename T>
     SkipRoot(JSContext *cx, const T *ptr, size_t count = 1
              MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
     {
+        init(ContextFriendFields::get(cx), ptr, count);
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     }
 
     template <typename T>
-    SkipRoot(PerThreadData *ptd, const T *ptr, size_t count = 1
+    SkipRoot(ContextFriendFields *cx, const T *ptr, size_t count = 1
              MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
     {
+        init(cx, ptr, count);
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     }
 
-#endif /* DEBUG && JSGC_ROOT_ANALYSIS */
+    template <typename T>
+    SkipRoot(PerThreadData *pt, const T *ptr, size_t count = 1
+             MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+    {
+        init(PerThreadDataFriendFields::get(pt), ptr, count);
+        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+    }
 
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
@@ -769,15 +775,17 @@ template <typename T>
 class FakeRooted : public RootedBase<T>
 {
   public:
-    FakeRooted(JSContext *cx
-                MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+    template <typename CX>
+    FakeRooted(CX *cx
+               MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
       : ptr(GCMethods<T>::initial())
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     }
 
-    FakeRooted(JSContext *cx, T initial
-                MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+    template <typename CX>
+    FakeRooted(CX *cx, T initial
+               MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
       : ptr(initial)
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
@@ -882,13 +890,11 @@ template <typename T> class MaybeRooted<T, NoGC>
     typedef FakeMutableHandle<T> MutableHandleType;
 
     static inline JS::Handle<T> toHandle(HandleType v) {
-        JS_NOT_REACHED("Bad conversion");
-        return JS::Handle<T>::fromMarkedLocation(NULL);
+        MOZ_ASSUME_UNREACHABLE("Bad conversion");
     }
 
     static inline JS::MutableHandle<T> toMutableHandle(MutableHandleType v) {
-        JS_NOT_REACHED("Bad conversion");
-        return JS::MutableHandle<T>::fromMarkedLocation(NULL);
+        MOZ_ASSUME_UNREACHABLE("Bad conversion");
     }
 };
 

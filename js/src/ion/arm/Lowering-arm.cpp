@@ -6,7 +6,7 @@
 
 #include "ion/MIR.h"
 #include "ion/Lowering.h"
-#include "Assembler-arm.h"
+#include "ion/arm/Assembler-arm.h"
 #include "ion/shared/Lowering-shared-inl.h"
 
 using namespace js;
@@ -247,11 +247,18 @@ LIRGeneratorARM::lowerDivI(MDiv *div)
         }
     }
 
-    LDivI *lir = new LDivI(useFixed(div->lhs(), r0), use(div->rhs(), r1),
-                           tempFixed(r2), tempFixed(r3));
-    if (div->fallible() && !assignSnapshot(lir))
-        return false;
-    return defineFixed(lir, div, LAllocation(AnyRegister(r0)));
+    if (hasIDIV()) {
+        LDivI *lir = new LDivI(useRegister(div->lhs()), useRegister(div->rhs()), temp());
+        if (div->fallible() && !assignSnapshot(lir))
+            return false;
+        return define(lir, div);
+    } else {
+        LSoftDivI *lir = new LSoftDivI(useFixed(div->lhs(), r0), use(div->rhs(), r1),
+                                       tempFixed(r2), tempFixed(r3));
+        if (div->fallible() && !assignSnapshot(lir))
+            return false;
+        return defineFixed(lir, div, LAllocation(AnyRegister(r0)));
+    }
 }
 
 bool
@@ -316,6 +323,14 @@ LGetPropertyCacheT *
 LIRGeneratorARM::newLGetPropertyCacheT(MGetPropertyCache *ins)
 {
     return new LGetPropertyCacheT(useRegister(ins->object()), LDefinition::BogusTemp());
+}
+
+LGetElementCacheT *
+LIRGeneratorARM::newLGetElementCacheT(MGetElementCache *ins)
+{
+    return new LGetElementCacheT(useRegister(ins->object()),
+                                 useRegister(ins->index()),
+                                 LDefinition::BogusTemp());
 }
 
 bool
@@ -457,7 +472,7 @@ LIRGeneratorARM::visitAsmJSStoreHeap(MAsmJSStoreHeap *ins)
         lir = new LAsmJSStoreHeap(useRegisterAtStart(ins->ptr()),
                                   useRegisterAtStart(ins->value()));
         break;
-      default: JS_NOT_REACHED("unexpected array type");
+      default: MOZ_ASSUME_UNREACHABLE("unexpected array type");
     }
 
     return add(lir, ins);
@@ -481,8 +496,7 @@ LIRGeneratorARM::lowerTruncateDToInt32(MTruncateToInt32 *ins)
 bool
 LIRGeneratorARM::visitStoreTypedArrayElementStatic(MStoreTypedArrayElementStatic *ins)
 {
-    JS_NOT_REACHED("NYI");
-    return true;
+    MOZ_ASSUME_UNREACHABLE("NYI");
 }
 
 //__aeabi_uidiv

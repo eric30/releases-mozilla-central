@@ -122,7 +122,7 @@ nsWeakFrame nsEventStateManager::sLastDragOverFrame = nullptr;
 nsIntPoint nsEventStateManager::sLastRefPoint = kInvalidRefPoint;
 nsIntPoint nsEventStateManager::sLastScreenPoint = nsIntPoint(0,0);
 nsIntPoint nsEventStateManager::sSynthCenteringPoint = kInvalidRefPoint;
-nsIntPoint nsEventStateManager::sLastClientPoint = nsIntPoint(0,0);
+CSSIntPoint nsEventStateManager::sLastClientPoint = CSSIntPoint(0, 0);
 bool nsEventStateManager::sIsPointerLocked = false;
 // Reference to the pointer locked element.
 nsWeakPtr nsEventStateManager::sPointerLockedElement;
@@ -1495,8 +1495,7 @@ nsEventStateManager::DispatchCrossProcessEvent(nsEvent* aEvent,
     return remote->SendRealTouchEvent(*touchEvent);
   }
   default: {
-    MOZ_NOT_REACHED("Attempt to send non-whitelisted event?");
-    return false;
+    MOZ_CRASH("Attempt to send non-whitelisted event?");
   }
   }
 }
@@ -1554,7 +1553,7 @@ nsEventStateManager::MapEventCoordinatesForChildProcess(
     nsTouchEvent* touchEvent = static_cast<nsTouchEvent*>(aEvent);
     // Then offset all the touch points by that distance, to put them
     // in the space where top-left is 0,0.
-    const nsTArray<nsCOMPtr<nsIDOMTouch> >& touches = touchEvent->touches;
+    const nsTArray< nsRefPtr<Touch> >& touches = touchEvent->touches;
     for (uint32_t i = 0; i < touches.Length(); ++i) {
       nsIDOMTouch* touch = touches[i];
       if (touch) {
@@ -1638,7 +1637,7 @@ nsEventStateManager::HandleCrossProcessEvent(nsEvent *aEvent,
     // This loop is similar to the one used in
     // PresShell::DispatchTouchEvent().
     nsTouchEvent* touchEvent = static_cast<nsTouchEvent*>(aEvent);
-    const nsTArray<nsCOMPtr<nsIDOMTouch> >& touches = touchEvent->touches;
+    const nsTArray< nsRefPtr<Touch> >& touches = touchEvent->touches;
     for (uint32_t i = 0; i < touches.Length(); ++i) {
       nsIDOMTouch* touch = touches[i];
       // NB: the |mChanged| check is an optimization, subprocesses can
@@ -2520,8 +2519,7 @@ nsEventStateManager::DispatchLegacyMouseScrollEvents(nsIFrame* aTargetFrame,
       break;
 
     default:
-      MOZ_NOT_REACHED("Invalid deltaMode value comes");
-      return;
+      MOZ_CRASH("Invalid deltaMode value comes");
   }
 
   // Send the legacy events in following order:
@@ -2847,8 +2845,7 @@ nsEventStateManager::DoScrollText(nsIScrollableFrame* aScrollableFrame,
       origin = nsGkAtoms::pixels;
       break;
     default:
-      MOZ_NOT_REACHED("Invalid deltaMode value comes");
-      return;
+      MOZ_CRASH("Invalid deltaMode value comes");
   }
 
   // We shouldn't scroll more one page at once except when over one page scroll
@@ -2892,8 +2889,7 @@ nsEventStateManager::DoScrollText(nsIScrollableFrame* aScrollableFrame,
       mode = nsIScrollableFrame::SMOOTH;
       break;
     default:
-      MOZ_NOT_REACHED("Invalid scrollType value comes");
-      return;
+      MOZ_CRASH("Invalid scrollType value comes");
   }
 
   nsIntPoint overflow;

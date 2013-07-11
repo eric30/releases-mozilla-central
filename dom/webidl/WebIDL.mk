@@ -21,8 +21,8 @@ webidl_files = \
   AudioListener.webidl \
   AudioNode.webidl \
   AudioParam.webidl \
-  AudioStreamTrack.webidl \
   AudioProcessingEvent.webidl \
+  AudioStreamTrack.webidl \
   BarProp.webidl \
   BatteryManager.webidl \
   BeforeUnloadEvent.webidl \
@@ -61,6 +61,7 @@ webidl_files = \
   DOMCursor.webidl \
   DOMError.webidl \
   DOMImplementation.webidl \
+  DOMMMIError.webidl \
   DOMParser.webidl \
   DOMRequest.webidl \
   DOMSettableTokenList.webidl \
@@ -155,13 +156,14 @@ webidl_files = \
   HTMLTableSectionElement.webidl \
   HTMLTemplateElement.webidl \
   HTMLTextAreaElement.webidl \
-  HTMLTrackElement.webidl \
   HTMLTimeElement.webidl \
   HTMLTitleElement.webidl \
+  HTMLTrackElement.webidl \
   HTMLUListElement.webidl \
   HTMLVideoElement.webidl \
   IDBDatabase.webidl \
   IDBFactory.webidl \
+  IDBFileHandle.webidl \
   IDBVersionChangeEvent.webidl \
   ImageData.webidl \
   ImageDocument.webidl \
@@ -172,11 +174,15 @@ webidl_files = \
   LocalMediaStream.webidl \
   Location.webidl \
   MediaError.webidl \
+  MediaRecorder.webidl \
+  MediaSource.webidl \
   MediaStream.webidl \
   MediaStreamAudioDestinationNode.webidl \
   MediaStreamEvent.webidl \
   MediaStreamTrack.webidl \
   MessageEvent.webidl \
+  MimeType.webidl \
+  MimeTypeArray.webidl \
   MobileMessageManager.webidl \
   MouseEvent.webidl \
   MouseScrollEvent.webidl \
@@ -204,6 +210,8 @@ webidl_files = \
   PerformanceNavigation.webidl \
   PerformanceTiming.webidl \
   PeriodicWave.webidl \
+  Plugin.webidl \
+  PluginArray.webidl \
   Position.webidl \
   PositionError.webidl \
   ProcessingInstruction.webidl \
@@ -220,14 +228,19 @@ webidl_files = \
   ScriptProcessorNode.webidl \
   ScrollAreaEvent.webidl \
   SimpleGestureEvent.webidl \
+  SourceBuffer.webidl \
+  SourceBufferList.webidl \
   StyleSheet.webidl \
   SVGAElement.webidl \
   SVGAltGlyphElement.webidl \
   SVGAngle.webidl \
   SVGAnimatedAngle.webidl \
   SVGAnimatedBoolean.webidl \
+  SVGAnimatedEnumeration.webidl \
+  SVGAnimatedInteger.webidl \
   SVGAnimatedLength.webidl \
   SVGAnimatedLengthList.webidl \
+  SVGAnimatedNumber.webidl \
   SVGAnimatedNumberList.webidl \
   SVGAnimatedPathData.webidl \
   SVGAnimatedPoints.webidl \
@@ -247,8 +260,6 @@ webidl_files = \
   SVGDocument.webidl \
   SVGElement.webidl \
   SVGEllipseElement.webidl \
-  SVGFilterElement.webidl \
-  SVGFilterPrimitiveStandardAttributes.webidl \
   SVGFEBlendElement.webidl \
   SVGFEColorMatrixElement.webidl \
   SVGFEComponentTransferElement.webidl \
@@ -273,6 +284,8 @@ webidl_files = \
   SVGFESpotLightElement.webidl \
   SVGFETileElement.webidl \
   SVGFETurbulenceElement.webidl \
+  SVGFilterElement.webidl \
+  SVGFilterPrimitiveStandardAttributes.webidl \
   SVGFitToViewBox.webidl \
   SVGForeignObjectElement.webidl \
   SVGGElement.webidl \
@@ -318,8 +331,8 @@ webidl_files = \
   SVGTransformList.webidl \
   SVGTSpanElement.webidl \
   SVGUnitTypes.webidl \
-  SVGUseElement.webidl \
   SVGURIReference.webidl \
+  SVGUseElement.webidl \
   SVGViewElement.webidl \
   SVGZoomAndPan.webidl \
   SVGZoomEvent.webidl \
@@ -334,19 +347,21 @@ webidl_files = \
   TimeRanges.webidl \
   Touch.webidl \
   TouchEvent.webidl \
+  TouchList.webidl \
   TransitionEvent.webidl \
   TreeColumns.webidl \
   TreeWalker.webidl \
   UIEvent.webidl \
+  UndoManager.webidl \
   URL.webidl \
+  URLUtils.webidl \
   ValidityState.webidl \
+  VideoPlaybackQuality.webidl \
+  VideoStreamTrack.webidl \
+  WaveShaperNode.webidl \
   WebComponents.webidl \
   WebSocket.webidl \
   WheelEvent.webidl \
-  UndoManager.webidl \
-  URLUtils.webidl \
-  VideoStreamTrack.webidl \
-  WaveShaperNode.webidl \
   Window.webidl \
   XMLDocument.webidl \
   XMLHttpRequest.webidl \
@@ -383,14 +398,14 @@ ifdef MOZ_WEBSPEECH
 webidl_files += \
   SpeechGrammar.webidl \
   SpeechGrammarList.webidl \
-  SpeechRecognitionAlternative.webidl \
-  SpeechRecognitionResultList.webidl \
-  SpeechRecognitionResult.webidl \
   SpeechRecognition.webidl \
-  SpeechSynthesisUtterance.webidl \
-  SpeechSynthesisVoice.webidl \
+  SpeechRecognitionAlternative.webidl \
+  SpeechRecognitionResult.webidl \
+  SpeechRecognitionResultList.webidl \
   SpeechSynthesis.webidl \
   SpeechSynthesisEvent.webidl \
+  SpeechSynthesisUtterance.webidl \
+  SpeechSynthesisVoice.webidl \
   $(NULL)
 endif
 
@@ -407,31 +422,32 @@ webidl_files += \
 endif
 
 webidl_files += \
-  ProgressEvent.webidl \
-  StorageEvent.webidl \
-  DeviceProximityEvent.webidl \
-  MozSettingsEvent.webidl \
-  UserProximityEvent.webidl \
-  CustomEvent.webidl \
-  PageTransitionEvent.webidl \
-  DOMTransactionEvent.webidl \
-  PopStateEvent.webidl \
-  HashChangeEvent.webidl \
-  CloseEvent.webidl \
-  MozContactChangeEvent.webidl \
-  DeviceOrientationEvent.webidl \
-  DeviceLightEvent.webidl \
-  MozApplicationEvent.webidl \
-  SmartCardEvent.webidl \
-  StyleRuleChangeEvent.webidl \
-  StyleSheetChangeEvent.webidl \
-  StyleSheetApplicableStateChangeEvent.webidl \
-  ElementReplaceEvent.webidl \
-  MozSmsEvent.webidl \
-  MozMmsEvent.webidl \
-  DeviceStorageChangeEvent.webidl \
-  PopupBlockedEvent.webidl \
   BlobEvent.webidl \
+  CloseEvent.webidl \
+  CustomEvent.webidl \
+  DeviceLightEvent.webidl \
+  DeviceOrientationEvent.webidl \
+  DeviceProximityEvent.webidl \
+  DeviceStorageChangeEvent.webidl \
+  DOMTransactionEvent.webidl \
+  ElementReplaceEvent.webidl \
+  HashChangeEvent.webidl \
+  MozApplicationEvent.webidl \
+  MozContactChangeEvent.webidl \
+  MozMmsEvent.webidl \
+  MozSettingsEvent.webidl \
+  MozSmsEvent.webidl \
+  PageTransitionEvent.webidl \
+  PopStateEvent.webidl \
+  PopupBlockedEvent.webidl \
+  ProgressEvent.webidl \
+  RecordErrorEvent.webidl \
+  SmartCardEvent.webidl \
+  StorageEvent.webidl \
+  StyleRuleChangeEvent.webidl \
+  StyleSheetApplicableStateChangeEvent.webidl \
+  StyleSheetChangeEvent.webidl \
+  UserProximityEvent.webidl \
   $(NULL)
 
 ifdef MOZ_B2G_BT
@@ -446,10 +462,10 @@ webidl_files += \
   CFStateChangeEvent.webidl \
   DataErrorEvent.webidl \
   IccCardLockErrorEvent.webidl \
-  MozWifiStatusChangeEvent.webidl \
-  MozWifiConnectionInfoEvent.webidl \
   MozCellBroadcastEvent.webidl \
   MozVoicemailEvent.webidl \
+  MozWifiConnectionInfoEvent.webidl \
+  MozWifiStatusChangeEvent.webidl \
   USSDReceivedEvent.webidl \
   $(NULL)
 endif
@@ -462,16 +478,16 @@ endif
 
 ifdef MOZ_GAMEPAD
 webidl_files += \
-  GamepadEvent.webidl \
-  GamepadButtonEvent.webidl \
   GamepadAxisMoveEvent.webidl \
+  GamepadButtonEvent.webidl \
+  GamepadEvent.webidl \
   $(NULL)
 endif
 
 ifdef MOZ_WEBSPEECH
 webidl_files += \
-  SpeechRecognitionEvent.webidl \
   SpeechRecognitionError.webidl \
+  SpeechRecognitionEvent.webidl \
   $(NULL)
 endif
 

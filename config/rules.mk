@@ -17,9 +17,13 @@ endif
 _MOZBUILD_EXTERNAL_VARIABLES := \
   DIRS \
   EXTRA_PP_COMPONENTS \
+  GTEST_CMMSRCS \
+  GTEST_CPPSRCS \
+  GTEST_CSRCS \
   HOST_CSRCS \
   HOST_LIBRARY_NAME \
   MODULE \
+  NO_DIST_INSTALL \
   PARALLEL_DIRS \
   TEST_DIRS \
   TIERS \
@@ -162,9 +166,15 @@ ifdef CPP_UNIT_TESTS
 # through TestHarness.h, by modifying the list of includes and the libs against
 # which stuff links.
 CPPSRCS += $(CPP_UNIT_TESTS)
-SIMPLE_PROGRAMS += $(CPP_UNIT_TESTS:.cpp=$(BIN_SUFFIX))
+CPP_UNIT_TEST_BINS := $(CPP_UNIT_TESTS:.cpp=$(BIN_SUFFIX))
+SIMPLE_PROGRAMS += $(CPP_UNIT_TEST_BINS)
 INCLUDES += -I$(DIST)/include/testing
 LIBS += $(XPCOM_GLUE_LDOPTS) $(NSPR_LIBS) $(MOZ_JS_LIBS) $(if $(JS_SHARED_LIBRARY),,$(MOZ_ZLIB_LIBS))
+
+ifndef MOZ_PROFILE_GENERATE
+libs:: $(CPP_UNIT_TEST_BINS) $(call mkdir_deps,$(DIST)/cppunittests)
+	$(NSINSTALL) $(CPP_UNIT_TEST_BINS) $(DIST)/cppunittests
+endif
 
 check::
 	@$(PYTHON) $(topsrcdir)/testing/runcppunittests.py --xre-path=$(DIST)/bin --symbols-path=$(DIST)/crashreporter-symbols $(subst .cpp,$(BIN_SUFFIX),$(CPP_UNIT_TESTS))
@@ -1481,21 +1491,23 @@ libs:: $(call mkdir_deps,$(FINAL_TARGET))
 endif
 
 ################################################################################
-# Copy each element of EXTRA_JS_MODULES to JS_MODULES_PATH, or
-# $(FINAL_TARGET)/modules if that isn't defined.
-JS_MODULES_PATH ?= $(FINAL_TARGET)/modules
+# Copy each element of EXTRA_JS_MODULES to
+# $(FINAL_TARGET)/$(JS_MODULES_PATH). JS_MODULES_PATH defaults to "modules"
+# if it is undefined.
+JS_MODULES_PATH ?= modules
+FINAL_JS_MODULES_PATH := $(FINAL_TARGET)/$(JS_MODULES_PATH)
 
 ifdef EXTRA_JS_MODULES
 ifndef NO_DIST_INSTALL
 EXTRA_JS_MODULES_FILES := $(EXTRA_JS_MODULES)
-EXTRA_JS_MODULES_DEST := $(JS_MODULES_PATH)
+EXTRA_JS_MODULES_DEST := $(FINAL_JS_MODULES_PATH)
 INSTALL_TARGETS += EXTRA_JS_MODULES
 endif
 endif
 
 ifdef EXTRA_PP_JS_MODULES
 ifndef NO_DIST_INSTALL
-EXTRA_PP_JS_MODULES_PATH := $(JS_MODULES_PATH)
+EXTRA_PP_JS_MODULES_PATH := $(FINAL_JS_MODULES_PATH)
 PP_TARGETS += EXTRA_PP_JS_MODULES
 endif
 endif

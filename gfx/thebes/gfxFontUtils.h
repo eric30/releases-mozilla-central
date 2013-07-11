@@ -23,6 +23,7 @@
 #include "nsAutoPtr.h"
 #include "mozilla/Likely.h"
 #include "mozilla/Endian.h"
+#include "mozilla/MemoryReporting.h"
 
 #include "zlib.h"
 #include <algorithm>
@@ -257,7 +258,7 @@ public:
         }
     }
 
-    size_t SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const {
+    size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const {
         size_t total = mBlocks.SizeOfExcludingThis(aMallocSizeOf);
         for (uint32_t i = 0; i < mBlocks.Length(); i++) {
             if (mBlocks[i]) {
@@ -267,7 +268,7 @@ public:
         return total;
     }
 
-    size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const {
+    size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const {
         return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
     }
 
@@ -799,21 +800,10 @@ public:
                    uint32_t aUnicode, uint32_t aVarSelector = 0);
 
 #ifdef XP_WIN
-
-    // given a TrueType/OpenType data file, produce a EOT-format header
-    // for use with Windows T2Embed API AddFontResource type API's
-    // effectively hide existing fonts with matching names aHeaderLen is
-    // the size of the header buffer on input, the actual size of the
-    // EOT header on output
-    static nsresult
-    MakeEOTHeader(const uint8_t *aFontData, uint32_t aFontDataLength,
-                  FallibleTArray<uint8_t> *aHeader, FontDataOverlay *aOverlay);
-
     // determine whether a font (which has already been sanitized, so is known
     // to be a valid sfnt) is CFF format rather than TrueType
     static bool
-    IsCffFont(const uint8_t* aFontData, bool& hasVertical);
-
+    IsCffFont(const uint8_t* aFontData);
 #endif
 
     // determine the format of font data

@@ -9,6 +9,7 @@
 EXPORTS_NAMESPACES += mozilla
 
 EXPORTS_mozilla += \
+  AllocPolicy.h \
   Assertions.h \
   Atomics.h \
   Attributes.h \
@@ -29,12 +30,15 @@ EXPORTS_mozilla += \
   LinkedList.h \
   MathAlgorithms.h \
   MemoryChecking.h \
+  MemoryReporting.h \
   MSStdInt.h \
+  Move.h \
   NullPtr.h \
   PodOperations.h \
   Poison.h \
   Range.h \
   RangedPtr.h \
+  ReentrancyGuard.h \
   RefPtr.h \
   Scoped.h \
   SHA1.h \

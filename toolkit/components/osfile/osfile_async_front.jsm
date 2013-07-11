@@ -21,13 +21,15 @@
 
 this.EXPORTED_SYMBOLS = ["OS"];
 
-Components.utils.import("resource://gre/modules/osfile/osfile_shared_allthreads.jsm", this);
+let SharedAll = {};
+Components.utils.import("resource://gre/modules/osfile/osfile_shared_allthreads.jsm", SharedAll);
+
+// Boilerplate, to simplify the transition to require()
+let OS = SharedAll.OS;
 
 let LOG = OS.Shared.LOG.bind(OS.Shared, "Controller");
-let isTypedArray = OS.Shared.isTypedArray;
 
-// A simple flag used to control debugging messages.
-let DEBUG = OS.Shared.DEBUG;
+let isTypedArray = OS.Shared.isTypedArray;
 
 // The constructor for file errors.
 let OSError;
@@ -45,7 +47,7 @@ if (OS.Constants.Win) {
 let Type = OS.Shared.Type;
 
 // The library of promises.
-Components.utils.import("resource://gre/modules/commonjs/sdk/core/promise.js", this);
+Components.utils.import("resource://gre/modules/Promise.jsm", this);
 
 // The implementation of communications
 Components.utils.import("resource://gre/modules/osfile/_PromiseWorker.jsm", this);
@@ -155,23 +157,48 @@ let Scheduler = {
   }
 };
 
-// Update worker's DEBUG flag if it's true.
-if (DEBUG === true) {
-  Scheduler.post("SET_DEBUG", [DEBUG]);
-}
+const PREF_OSFILE_LOG = "toolkit.osfile.log";
+const PREF_OSFILE_LOG_REDIRECT = "toolkit.osfile.log.redirect";
 
-// Define a new getter and setter for OS.Shared.DEBUG to be able to watch
-// for changes to it and update worker's DEBUG accordingly.
-Object.defineProperty(OS.Shared, "DEBUG", {
-    configurable: true,
-    get: function () {
-        return DEBUG;
-    },
-    set: function (newVal) {
-        Scheduler.post("SET_DEBUG", [newVal]);
-        DEBUG = newVal;
-    }
-});
+/**
+ * Safely read a PREF_OSFILE_LOG preference.
+ * Returns a value read or, in case of an error, oldPref or false.
+ *
+ * @param bool oldPref
+ *        An optional value that the DEBUG flag was set to previously.
+ */
+let readDebugPref = function readDebugPref(prefName, oldPref = false) {
+  let pref = oldPref;
+  try {
+    pref = Services.prefs.getBoolPref(prefName);
+  } catch (x) {
+    // In case of an error when reading a pref keep it as is.
+  }
+  // If neither pref nor oldPref were set, default it to false.
+  return pref;
+};
+
+/**
+ * Listen to PREF_OSFILE_LOG changes and update gShouldLog flag
+ * appropriately.
+ */
+Services.prefs.addObserver(PREF_OSFILE_LOG,
+  function prefObserver(aSubject, aTopic, aData) {
+    OS.Shared.DEBUG = readDebugPref(PREF_OSFILE_LOG, OS.Shared.DEBUG);
+    Scheduler.post("SET_DEBUG", [OS.Shared.DEBUG]);
+  }, false);
+OS.Shared.DEBUG = readDebugPref(PREF_OSFILE_LOG, false);
+
+Services.prefs.addObserver(PREF_OSFILE_LOG_REDIRECT,
+  function prefObserver(aSubject, aTopic, aData) {
+    OS.Shared.TEST = readDebugPref(PREF_OSFILE_LOG_REDIRECT, OS.Shared.TEST);
+  }, false);
+OS.Shared.TEST = readDebugPref(PREF_OSFILE_LOG_REDIRECT, false);
+
+// Update worker's DEBUG flag if it's true.
+if (OS.Shared.DEBUG === true) {
+  Scheduler.post("SET_DEBUG", [true]);
+}
 
 // Observer topics used for monitoring shutdown
 const WEB_WORKERS_SHUTDOWN_TOPIC = "web-workers-shutdown";
@@ -616,16 +643,13 @@ File.exists = function exists(path) {
  * until the contents are fully written, the destination file is
  * not modified.
  *
- * By default, files are flushed for additional safety, i.e. to lower
- * the risks of losing data in case the device is suddenly removed or
- * in case of sudden shutdown. This additional safety is important
- * for user-critical data (e.g. preferences, application data, etc.)
- * but comes at a performance cost. For non-critical data (e.g. cache,
- * thumbnails, etc.), you may wish to deactivate flushing by passing
- * option |flush: false|.
- *
- * Important note: In the current implementation, option |tmpPath|
- * is required. This requirement should disappear as part of bug 793660.
+ * Limitation: In a few extreme cases (hardware failure during the
+ * write, user unplugging disk during the write, etc.), data may be
+ * corrupted. If your data is user-critical (e.g. preferences,
+ * application data, etc.), you may wish to consider adding options
+ * |tmpPath| and/or |flush| to reduce the likelihood of corruption, as
+ * detailed below. Note that no combination of options can be
+ * guaranteed to totally eliminate the risk of corruption.
  *
  * @param {string} path The path of the file to modify.
  * @param {Typed Array | C pointer} buffer A buffer containing the bytes to write.
@@ -633,16 +657,20 @@ File.exists = function exists(path) {
  * of this function. This object may contain the following fields:
  * - {number} bytes The number of bytes to write. If unspecified,
  * |buffer.byteLength|. Required if |buffer| is a C pointer.
- * - {string} tmpPath The path at which to write the temporary file.
+ * - {string} tmpPath If |null| or unspecified, write all data directly
+ * to |path|. If specified, write all data to a temporary file called
+ * |tmpPath| and, once this write is complete, rename the file to
+ * replace |path|. Performing this additional operation is a little
+ * slower but also a little safer.
  * - {bool} noOverwrite - If set, this function will fail if a file already
- * exists at |path|. The |tmpPath| is not overwritten if |path| exist.
- * - {bool} flush - If set to |false|, the function will not flush the
- * file. This improves performance considerably, but the resulting
- * behavior is slightly less safe: if the system shuts down improperly
- * (typically due to a kernel freeze or a power failure) or if the
- * device is disconnected or removed before the buffer is flushed, the
- * file may be corrupted.
- *
+ * exists at |path|.
+ * - {bool} flush - If |false| or unspecified, return immediately once the
+ * write is complete. If |true|, before writing, force the operating system
+ * to write its internal disk buffers to the disk. This is considerably slower
+ * (not just for the application but for the whole system) but also safer:
+ * if the system shuts down improperly (typically due to a kernel freeze
+ * or a power failure) or if the device is disconnected before the buffer
+ * is flushed, the file has more chances of not being corrupted.
  *
  * @return {promise}
  * @resolves {number} The number of bytes actually written.
@@ -719,6 +747,9 @@ let DirectoryIterator = function DirectoryIterator(path, options) {
   this._isClosed = false;
 };
 DirectoryIterator.prototype = {
+  iterator: function () this,
+  __iterator__: function () this,
+
   /**
    * Determine whether the directory exists.
    *

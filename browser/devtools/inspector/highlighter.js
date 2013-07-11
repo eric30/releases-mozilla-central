@@ -95,6 +95,7 @@ Highlighter.prototype = {
 
   _init: function Highlighter__init()
   {
+    this.toggleLockState = this.toggleLockState.bind(this);
     this.unlockAndFocus = this.unlockAndFocus.bind(this);
     this.updateInfobar = this.updateInfobar.bind(this);
     this.highlight = this.highlight.bind(this);
@@ -228,6 +229,15 @@ Highlighter.prototype = {
    */
   invalidateSize: function Highlighter_invalidateSize()
   {
+    // The highlighter runs locally while the selection runs remotely,
+    // so we can't quite trust the selection's isConnected to protect us
+    // here, do the check manually.
+    if (!this.selection.node ||
+        !this.selection.node.ownerDocument ||
+        !this.selection.node.ownerDocument.defaultView) {
+      return;
+    }
+
     let canHiglightNode = this.selection.isNode() &&
                           this.selection.isConnected() &&
                           this.selection.isElementNode();
@@ -307,6 +317,19 @@ Highlighter.prototype = {
       this.showOutline();
     }
     this.emit("unlocked");
+  },
+
+  /**
+   * Toggle between locked and unlocked
+   */
+  toggleLockState: function() {
+    if (this.locked) {
+      this.startNode = this.selection.node;
+      this.unlockAndFocus();
+    } else {
+      this.selection.setNode(this.startNode);
+      this.lock();
+    }
   },
 
   /**
@@ -408,7 +431,7 @@ Highlighter.prototype = {
     this.inspectButton.className = "highlighter-nodeinfobar-button highlighter-nodeinfobar-inspectbutton"
     let toolbarInspectButton = this.inspector.panelDoc.getElementById("inspector-inspect-toolbutton");
     this.inspectButton.setAttribute("tooltiptext", toolbarInspectButton.getAttribute("tooltiptext"));
-    this.inspectButton.addEventListener("command", this.unlockAndFocus);
+    this.inspectButton.addEventListener("command", this.toggleLockState);
 
     let nodemenu = this.chromeDoc.createElement("toolbarbutton");
     nodemenu.setAttribute("type", "menu");

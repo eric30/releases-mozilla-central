@@ -4,15 +4,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "BaselineJIT.h"
-#include "BaselineIC.h"
-#include "BaselineHelpers.h"
-#include "BaselineCompiler.h"
-#include "FixedList.h"
-#include "IonLinker.h"
-#include "IonSpewer.h"
-#include "VMFunctions.h"
-#include "IonFrames-inl.h"
+#include "ion/BaselineJIT.h"
+#include "ion/BaselineIC.h"
+#include "ion/BaselineHelpers.h"
+#include "ion/BaselineCompiler.h"
+#include "ion/FixedList.h"
+#include "ion/IonLinker.h"
+#include "ion/IonSpewer.h"
+#include "ion/VMFunctions.h"
+#include "ion/IonFrames-inl.h"
 
 #include "jsopcodeinlines.h"
 
@@ -22,11 +22,7 @@ using namespace js;
 using namespace js::ion;
 
 BaselineCompiler::BaselineCompiler(JSContext *cx, HandleScript script)
-  : BaselineCompilerSpecific(cx, script),
-    return_(new HeapLabel())
-#ifdef JSGC_GENERATIONAL
-    , postBarrierSlot_(new HeapLabel())
-#endif
+  : BaselineCompilerSpecific(cx, script)
 {
 }
 
@@ -261,7 +257,7 @@ BaselineCompiler::emitPrologue()
 bool
 BaselineCompiler::emitEpilogue()
 {
-    masm.bind(return_);
+    masm.bind(&return_);
 
     // Pop SPS frame if necessary
     emitSPSPop();
@@ -283,7 +279,7 @@ BaselineCompiler::emitEpilogue()
 bool
 BaselineCompiler::emitOutOfLinePostBarrierSlot()
 {
-    masm.bind(postBarrierSlot_);
+    masm.bind(&postBarrierSlot_);
 
     Register objReg = R2.scratchReg();
     GeneralRegisterSet regs(GeneralRegisterSet::All());
@@ -346,7 +342,7 @@ BaselineCompiler::emitDebugPrologue()
     masm.branchTest32(Assembler::Zero, ReturnReg, ReturnReg, &done);
     {
         masm.loadValue(frame.addressOfReturnValue(), JSReturnOperand);
-        masm.jump(return_);
+        masm.jump(&return_);
     }
     masm.bind(&done);
     return true;
@@ -1087,7 +1083,7 @@ BaselineCompiler::storeValue(const StackValue *source, const Address &dest,
         masm.storeValue(scratch, dest);
         break;
       default:
-        JS_NOT_REACHED("Invalid kind");
+        MOZ_ASSUME_UNREACHABLE("Invalid kind");
     }
 }
 
@@ -1824,7 +1820,7 @@ BaselineCompiler::emit_JSOP_SETALIASEDVAR()
     masm.branchPtr(Assembler::Below, objReg, ImmWord(nursery.heapEnd()), &skipBarrier);
 
     masm.bind(&isTenured);
-    masm.call(postBarrierSlot_);
+    masm.call(&postBarrierSlot_);
 
     masm.bind(&skipBarrier);
 #endif
@@ -2489,7 +2485,7 @@ BaselineCompiler::emit_JSOP_DEBUGGER()
     masm.branchTest32(Assembler::Zero, ReturnReg, ReturnReg, &done);
     {
         masm.loadValue(frame.addressOfReturnValue(), JSReturnOperand);
-        masm.jump(return_);
+        masm.jump(&return_);
     }
     masm.bind(&done);
     return true;
@@ -2522,7 +2518,7 @@ BaselineCompiler::emitReturn()
     if (JSOp(*pc) != JSOP_STOP) {
         // JSOP_STOP is immediately followed by the return label, so we don't
         // need a jump.
-        masm.jump(return_);
+        masm.jump(&return_);
     }
 
     return true;
@@ -2743,11 +2739,6 @@ bool
 BaselineCompiler::emit_JSOP_REST()
 {
     frame.syncStack(0);
-
-    RootedTypeObject type(cx, types::TypeScript::InitObject(cx, script, pc, JSProto_Array));
-    if (!type)
-        return false;
-    masm.movePtr(ImmGCPtr(type), R0.scratchReg());
 
     ICRest_Fallback::Compiler stubCompiler(cx);
     if (!emitOpIC(stubCompiler.getStub(&stubSpace_)))

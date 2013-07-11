@@ -189,10 +189,6 @@ SourcesView.prototype = Heritage.extend(WidgetMethods, {
     }
 
     sourceItem.remove(breakpointItem);
-
-    if (this._selectedBreakpoint == breakpointItem) {
-      this._selectedBreakpoint = null;
-    }
   },
 
   /**
@@ -572,6 +568,10 @@ SourcesView.prototype = Heritage.extend(WidgetMethods, {
     let contextMenu = aItem.attachment.popup;
     document.getElementById(contextMenu.commandsetId).remove();
     document.getElementById(contextMenu.menupopupId).remove();
+
+    if (this._selectedBreakpoint == aItem) {
+      this._selectedBreakpoint = null;
+    }
   },
 
   /**
@@ -1067,7 +1067,12 @@ let SourceUtils = {
       return "";
     }
 
-    let { scheme, hostPort, directory, fileName } = uri;
+    let { scheme, directory, fileName } = uri;
+    let hostPort;
+    // Add-on SDK jar: URLs will cause accessing hostPort to throw.
+    if (scheme != "jar") {
+      hostPort = uri.hostPort;
+    }
     let lastDir = directory.split("/").reverse()[1];
     let group = [];
 
@@ -1636,16 +1641,17 @@ GlobalSearchView.prototype = Heritage.extend(WidgetMethods, {
   _startSearch: function(aQuery) {
     this._searchedToken = aQuery;
 
-    DebuggerController.SourceScripts.fetchSources(DebuggerView.Sources.values, {
-      onFinished: this._performGlobalSearch
-    });
+    // Start fetching as many sources as possible, then perform the search.
+    DebuggerController.SourceScripts
+      .getTextForSources(DebuggerView.Sources.values)
+      .then(this._performGlobalSearch);
   },
 
   /**
    * Finds string matches in all the sources stored in the controller's cache,
    * and groups them by location and line number.
    */
-  _performGlobalSearch: function() {
+  _performGlobalSearch: function(aSources) {
     // Get the currently searched token from the filtering input.
     let token = this._searchedToken;
 
@@ -1662,9 +1668,8 @@ GlobalSearchView.prototype = Heritage.extend(WidgetMethods, {
 
     // Prepare the results map, containing search details for each line.
     let globalResults = new GlobalResults();
-    let sourcesCache = DebuggerController.SourceScripts.getCache();
 
-    for (let [location, contents] of sourcesCache) {
+    for (let [location, contents] of aSources) {
       // Verify that the search token is found anywhere in the source.
       if (!contents.toLowerCase().contains(lowerCaseToken)) {
         continue;
@@ -1684,7 +1689,7 @@ GlobalSearchView.prototype = Heritage.extend(WidgetMethods, {
         let lineNumber = i;
         let lineResults = new LineResults();
 
-        lowerCaseLine.split(lowerCaseToken).reduce(function(prev, curr, index, {length}) {
+        lowerCaseLine.split(lowerCaseToken).reduce((prev, curr, index, { length }) => {
           let prevLength = prev.length;
           let currLength = curr.length;
           let unmatched = line.substr(prevLength, currLength);

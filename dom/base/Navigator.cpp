@@ -11,6 +11,7 @@
 #include "nsIXULAppInfo.h"
 #include "nsPluginArray.h"
 #include "nsMimeTypeArray.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/DesktopNotification.h"
 #include "nsGeolocation.h"
 #include "nsIHttpProtocolHandler.h"
@@ -164,10 +165,47 @@ NS_INTERFACE_MAP_END
 NS_IMPL_CYCLE_COLLECTING_ADDREF(Navigator)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(Navigator)
 
-// We seem to manually break cycles through most of our members in Invalidate.
-// That said, if those members get set _after_ the window calls Invalidate on
-// us, then what?
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(Navigator, mWindow)
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(Navigator)
+  tmp->Invalidate();
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mWindow)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Navigator)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPlugins)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMimeTypes)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mGeolocation)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mNotification)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mBatteryManager)
+  // mPowerManager isn't cycle collected
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSmsManager)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMobileMessageManager)
+#ifdef MOZ_B2G_RIL
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTelephony)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mVoicemail)
+#endif
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mConnection)
+#ifdef MOZ_B2G_RIL
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMobileConnection)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCellBroadcast)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mIccManager)
+#endif
+#ifdef MOZ_B2G_BT
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mBluetooth)
+#endif
+#ifdef MOZ_AUDIO_CHANNEL_MANAGER
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAudioChannelManager)
+#endif
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCameraManager)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMessagesManager)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDeviceStorageStores)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTimeManager)
+
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWindow)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+
+NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(Navigator)
 
 void
 Navigator::Invalidate()
@@ -179,6 +217,8 @@ Navigator::Invalidate()
     mPlugins->Invalidate();
     mPlugins = nullptr;
   }
+
+  mMimeTypes = nullptr;
 
   // If there is a page transition, make sure delete the geolocation object.
   if (mGeolocation) {
@@ -456,11 +496,12 @@ Navigator::GetProductSub(nsAString& aProductSub)
 }
 
 NS_IMETHODIMP
-Navigator::GetMimeTypes(nsIDOMMimeTypeArray** aMimeTypes)
+Navigator::GetMimeTypes(nsISupports** aMimeTypes)
 {
   if (!mMimeTypes) {
     NS_ENSURE_STATE(mWindow);
-    mMimeTypes = new nsMimeTypeArray(this);
+    nsWeakPtr win = do_GetWeakReference(mWindow);
+    mMimeTypes = new nsMimeTypeArray(win);
   }
 
   NS_ADDREF(*aMimeTypes = mMimeTypes);
@@ -469,16 +510,16 @@ Navigator::GetMimeTypes(nsIDOMMimeTypeArray** aMimeTypes)
 }
 
 NS_IMETHODIMP
-Navigator::GetPlugins(nsIDOMPluginArray** aPlugins)
+Navigator::GetPlugins(nsISupports** aPlugins)
 {
   if (!mPlugins) {
     NS_ENSURE_STATE(mWindow);
-
-    mPlugins = new nsPluginArray(this, mWindow->GetDocShell());
+    nsWeakPtr win = do_GetWeakReference(mWindow);
+    mPlugins = new nsPluginArray(win);
     mPlugins->Init();
   }
 
-  NS_ADDREF(*aPlugins = mPlugins);
+  NS_ADDREF(*aPlugins = static_cast<nsIObserver*>(mPlugins.get()));
 
   return NS_OK;
 }
@@ -592,31 +633,16 @@ Navigator::JavaEnabled(bool* aReturn)
 
   if (!mMimeTypes) {
     NS_ENSURE_STATE(mWindow);
-    mMimeTypes = new nsMimeTypeArray(this);
+    nsWeakPtr win = do_GetWeakReference(mWindow);
+    mMimeTypes = new nsMimeTypeArray(win);
   }
 
   RefreshMIMEArray();
 
-  uint32_t count;
-  mMimeTypes->GetLength(&count);
-  for (uint32_t i = 0; i < count; i++) {
-    nsresult rv;
-    nsIDOMMimeType* type = mMimeTypes->GetItemAt(i, &rv);
+  nsMimeType *mimeType =
+    mMimeTypes->NamedItem(NS_LITERAL_STRING("application/x-java-vm"));
 
-    if (NS_FAILED(rv) || !type) {
-      continue;
-    }
-
-    nsAutoString mimeString;
-    if (NS_FAILED(type->GetType(mimeString))) {
-      continue;
-    }
-
-    if (mimeString.EqualsLiteral("application/x-java-vm")) {
-      *aReturn = true;
-      break;
-    }
-  }
+  *aReturn = mimeType && mimeType->GetEnabledPlugin();
 
   return NS_OK;
 }
@@ -1576,7 +1602,7 @@ Navigator::GetMozCameras(nsISupports** aCameraManager)
 }
 
 size_t
-Navigator::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+Navigator::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
 {
   size_t n = aMallocSizeOf(this);
 

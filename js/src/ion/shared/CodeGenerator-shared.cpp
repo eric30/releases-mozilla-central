@@ -6,11 +6,11 @@
 
 #include "mozilla/DebugOnly.h"
 
-#include "CodeGenerator-shared.h"
+#include "ion/shared/CodeGenerator-shared.h"
 #include "ion/MIRGenerator.h"
 #include "ion/IonFrames-inl.h"
 #include "ion/MIR.h"
-#include "CodeGenerator-shared-inl.h"
+#include "ion/shared/CodeGenerator-shared-inl.h"
 #include "ion/IonSpewer.h"
 #include "ion/IonMacroAssembler.h"
 #include "ion/ParallelFunctions.h"
@@ -135,7 +135,7 @@ CodeGeneratorShared::encodeSlots(LSnapshot *snapshot, MResumePoint *resumePoint,
 {
     IonSpew(IonSpew_Codegen, "Encoding %u of resume point %p's operands starting from %u",
             resumePoint->numOperands(), (void *) resumePoint, *startIndex);
-    for (uint32_t slotno = 0; slotno < resumePoint->numOperands(); slotno++) {
+    for (uint32_t slotno = 0, e = resumePoint->numOperands(); slotno < e; slotno++) {
         uint32_t i = slotno + *startIndex;
         MDefinition *mir = resumePoint->getOperand(slotno);
 

@@ -82,26 +82,25 @@ ForkJoinSlice::InitializeTLS()
 JSRuntime *
 ForkJoinSlice::runtime()
 {
-    JS_NOT_REACHED("Not THREADSAFE build");
+    MOZ_ASSUME_UNREACHABLE("Not THREADSAFE build");
 }
 
 bool
 ForkJoinSlice::check()
 {
-    JS_NOT_REACHED("Not THREADSAFE build");
-    return true;
+    MOZ_ASSUME_UNREACHABLE("Not THREADSAFE build");
 }
 
 void
 ForkJoinSlice::requestGC(JS::gcreason::Reason reason)
 {
-    JS_NOT_REACHED("Not THREADSAFE build");
+    MOZ_ASSUME_UNREACHABLE("Not THREADSAFE build");
 }
 
 void
 ForkJoinSlice::requestZoneGC(JS::Zone *zone, JS::gcreason::Reason reason)
 {
-    JS_NOT_REACHED("Not THREADSAFE build");
+    MOZ_ASSUME_UNREACHABLE("Not THREADSAFE build");
 }
 
 void
@@ -110,14 +109,14 @@ ParallelBailoutRecord::setCause(ParallelBailoutCause cause,
                                 JSScript *currentScript,
                                 jsbytecode *currentPc)
 {
-    JS_NOT_REACHED("Not THREADSAFE build");
+    MOZ_ASSUME_UNREACHABLE("Not THREADSAFE build");
 }
 
 void
 ParallelBailoutRecord::addTrace(JSScript *script,
                                 jsbytecode *pc)
 {
-    JS_NOT_REACHED("Not THREADSAFE build");
+    MOZ_ASSUME_UNREACHABLE("Not THREADSAFE build");
 }
 
 bool
@@ -595,12 +594,12 @@ js::ParallelDo::apply()
         // compiled scripts were collected.
         if (ParallelTestsShouldPass(cx_) && worklist_.length() != 0) {
             JS_ReportError(cx_, "ForkJoin: compilation required in par or bailout mode");
-            return ExecutionFatal;
+            return SpewEndOp(ExecutionFatal);
         }
         break;
 
       case NumForkJoinModes:
-        JS_NOT_REACHED("Invalid mode");
+        MOZ_ASSUME_UNREACHABLE("Invalid mode");
     }
 
     while (bailouts < MAX_BAILOUTS) {

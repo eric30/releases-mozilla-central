@@ -239,11 +239,10 @@ _ENABLE_PIC=1
 
 ifdef LIBXUL_LIBRARY
 ifdef IS_COMPONENT
-ifdef MODULE_NAME
-DEFINES += -DXPCOM_TRANSLATE_NSGM_ENTRY_POINT=1
-else
-$(error Component makefile does not specify MODULE_NAME.)
+$(error IS_COMPONENT is set, but is not compatible with LIBXUL_LIBRARY)
 endif
+ifdef MODULE_NAME
+$(error MODULE_NAME is $(MODULE_NAME) but MODULE_NAME and LIBXUL_LIBRARY are not compatible)
 endif
 FORCE_STATIC_LIB=1
 ifneq ($(SHORT_LIBNAME),)
@@ -358,12 +357,10 @@ ifdef BOTH_MANIFESTS
 MAKE_JARS_FLAGS += --both-manifests
 endif
 
-TAR_CREATE_FLAGS = -cvhf
-TAR_CREATE_FLAGS_QUIET = -chf
+TAR_CREATE_FLAGS = -chf
 
 ifeq ($(OS_ARCH),OS2)
-TAR_CREATE_FLAGS = -cvf
-TAR_CREATE_FLAGS_QUIET = -cf
+TAR_CREATE_FLAGS = -cf
 endif
 
 #

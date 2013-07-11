@@ -9,8 +9,8 @@
 
 #include "mozilla/DebugOnly.h"
 
-#include "RegisterAllocator.h"
-#include "StackSlotAllocator.h"
+#include "ion/RegisterAllocator.h"
+#include "ion/StackSlotAllocator.h"
 
 // Common structures and functions used by register allocators that operate on
 // virtual register live ranges.
@@ -117,9 +117,8 @@ UseCompatibleWith(const LUse *use, LAllocation alloc)
           // UsePosition is only used as hint.
         return alloc.isRegister();
       default:
-        JS_NOT_REACHED("Unknown use policy");
+        MOZ_ASSUME_UNREACHABLE("Unknown use policy");
     }
-    return false;
 }
 
 #ifdef DEBUG
@@ -147,9 +146,8 @@ DefinitionCompatibleWith(LInstruction *ins, const LDefinition *def, LAllocation 
       case LDefinition::PASSTHROUGH:
         return true;
       default:
-        JS_NOT_REACHED("Unknown definition policy");
+        MOZ_ASSUME_UNREACHABLE("Unknown definition policy");
     }
-    return false;
 }
 
 #endif // DEBUG
@@ -494,6 +492,12 @@ IsNunbox(VirtualRegister *vreg)
 #else
     return false;
 #endif
+}
+
+static inline bool
+IsSlotsOrElements(VirtualRegister *vreg)
+{
+    return vreg->type() == LDefinition::SLOTS;
 }
 
 static inline bool

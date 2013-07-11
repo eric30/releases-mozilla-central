@@ -133,7 +133,7 @@ inline gfxContext::GraphicsLineCap ThebesLineCap(CapStyle aStyle)
   case CAP_SQUARE:
     return gfxContext::LINE_CAP_SQUARE;
   }
-  MOZ_NOT_REACHED("Incomplete switch");
+  MOZ_CRASH("Incomplete switch");
 }
 
 inline CapStyle ToCapStyle(gfxContext::GraphicsLineCap aStyle)
@@ -146,7 +146,7 @@ inline CapStyle ToCapStyle(gfxContext::GraphicsLineCap aStyle)
   case gfxContext::LINE_CAP_SQUARE:
     return CAP_SQUARE;
   }
-  MOZ_NOT_REACHED("Incomplete switch");
+  MOZ_CRASH("Incomplete switch");
 }
 
 inline gfxContext::GraphicsLineJoin ThebesLineJoin(JoinStyle aStyle)
@@ -173,7 +173,7 @@ inline JoinStyle ToJoinStyle(gfxContext::GraphicsLineJoin aStyle)
   case gfxContext::LINE_JOIN_ROUND:
     return JOIN_ROUND;
   }
-  MOZ_NOT_REACHED("Incomplete switch");
+  MOZ_CRASH("Incomplete switch");
 }
 
 inline gfxMatrix ThebesMatrix(const Matrix &aMatrix)
@@ -220,10 +220,12 @@ inline gfxASurface::gfxContentType ContentForFormat(const SurfaceFormat &aFormat
   switch (aFormat) {
   case FORMAT_R5G6B5:
   case FORMAT_B8G8R8X8:
+  case FORMAT_R8G8B8X8:
     return gfxASurface::CONTENT_COLOR;
   case FORMAT_A8:
     return gfxASurface::CONTENT_ALPHA;
   case FORMAT_B8G8R8A8:
+  case FORMAT_R8G8B8A8:
   default:
     return gfxASurface::CONTENT_COLOR_ALPHA;
   }

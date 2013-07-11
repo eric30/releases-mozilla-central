@@ -4360,6 +4360,13 @@ nsContentUtils::IsSystemPrincipal(nsIPrincipal* aPrincipal)
   return NS_SUCCEEDED(rv) && isSystem;
 }
 
+bool
+nsContentUtils::IsExpandedPrincipal(nsIPrincipal* aPrincipal)
+{
+  nsCOMPtr<nsIExpandedPrincipal> ep = do_QueryInterface(aPrincipal);
+  return !!ep;
+}
+
 nsIPrincipal*
 nsContentUtils::GetSystemPrincipal()
 {
@@ -4836,30 +4843,6 @@ nsContentUtils::GetViewportInfo(nsIDocument *aDocument,
 {
   return aDocument->GetViewportInfo(aDisplayWidth, aDisplayHeight);
 }
-
-#ifdef MOZ_WIDGET_ANDROID
-/* static */
-double
-nsContentUtils::GetDevicePixelsPerMetaViewportPixel(nsIWidget* aWidget)
-{
-  int32_t prefValue = Preferences::GetInt("browser.viewport.scaleRatio", 0);
-  if (prefValue > 0) {
-    return double(prefValue) / 100.0;
-  }
-
-  float dpi = aWidget->GetDPI();
-  if (dpi < 200.0) {
-    // Includes desktop displays, LDPI and MDPI Android devices
-    return 1.0;
-  }
-  if (dpi < 300.0) {
-    // Includes Nokia N900, and HDPI Android devices
-    return 1.5;
-  }
-  // For very high-density displays like the iPhone 4, use an integer ratio.
-  return floor(dpi / 150.0);
-}
-#endif
 
 /* static */
 nsresult
@@ -5774,6 +5757,22 @@ nsContentUtils::AllocClassMatchingInfo(nsINode* aRootNode,
 }
 
 // static
+void
+nsContentUtils::DeferredFinalize(nsISupports* aSupports)
+{
+  cyclecollector::DeferredFinalize(aSupports);
+}
+
+// static
+void
+nsContentUtils::DeferredFinalize(mozilla::DeferredFinalizeAppendFunction aAppendFunc,
+                                 mozilla::DeferredFinalizeFunction aFunc,
+                                 void* aThing)
+{
+  cyclecollector::DeferredFinalize(aAppendFunc, aFunc, aThing);
+}
+
+// static
 bool
 nsContentUtils::IsFocusedContent(const nsIContent* aContent)
 {
@@ -6100,11 +6099,17 @@ nsContentUtils::SetUpChannelOwner(nsIPrincipal* aLoadingPrincipal,
   if (aForceOwner || ((NS_SUCCEEDED(URIInheritsSecurityContext(aURI, &inherit)) &&
       (inherit || (aSetUpForAboutBlank && NS_IsAboutBlank(aURI)))))) {
 #ifdef DEBUG
-    // Assert that aForceOwner is only set for null principals
+    // Assert that aForceOwner is only set for null principals for non-srcdoc
+    // loads.  (Strictly speaking not all uses of about:srcdoc would be 
+    // srcdoc loads, but the URI is non-resolvable in cases where it is not).
     if (aForceOwner) {
-      nsCOMPtr<nsIURI> ownerURI;
-      nsresult rv = aLoadingPrincipal->GetURI(getter_AddRefs(ownerURI));
-      MOZ_ASSERT(NS_SUCCEEDED(rv) && SchemeIs(ownerURI, NS_NULLPRINCIPAL_SCHEME));
+      nsAutoCString uriStr;
+      aURI->GetSpec(uriStr);
+      if(!uriStr.EqualsLiteral("about:srcdoc")) {
+        nsCOMPtr<nsIURI> ownerURI;
+        nsresult rv = aLoadingPrincipal->GetURI(getter_AddRefs(ownerURI));
+        MOZ_ASSERT(NS_SUCCEEDED(rv) && SchemeIs(ownerURI, NS_NULLPRINCIPAL_SCHEME));
+      }
     }
 #endif
     aChannel->SetOwner(aLoadingPrincipal);
@@ -6287,9 +6292,6 @@ nsContentUtils::ReleaseWrapper(void* aScriptObjectHolder,
     JSObject* obj = aCache->GetWrapperPreserveColor();
     if (aCache->IsDOMBinding() && obj && js::IsProxy(obj)) {
         DOMProxyHandler::GetAndClearExpandoObject(obj);
-        if (!aCache->PreservingWrapper()) {
-          return;
-        }
     }
     aCache->SetPreservingWrapper(false);
     DropJSObjects(aScriptObjectHolder);

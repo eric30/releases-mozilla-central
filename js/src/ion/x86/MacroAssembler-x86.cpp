@@ -4,9 +4,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "MacroAssembler-x86.h"
+#include "ion/x86/MacroAssembler-x86.h"
+#include "ion/BaselineFrame.h"
 #include "ion/MoveEmitter.h"
 #include "ion/IonFrames.h"
+#include "mozilla/Casting.h"
 
 #include "jsscriptinlines.h"
 
@@ -16,12 +18,7 @@ using namespace js::ion;
 void
 MacroAssemblerX86::loadConstantDouble(double d, const FloatRegister &dest)
 {
-    union DoublePun {
-        uint64_t u;
-        double d;
-    } dpun;
-    dpun.d = d;
-    if (maybeInlineDouble(dpun.u, dest))
+    if (maybeInlineDouble(d, dest))
         return;
 
     if (!doubleMap_.initialized()) {
@@ -41,8 +38,19 @@ MacroAssemblerX86::loadConstantDouble(double d, const FloatRegister &dest)
             return;
     }
     Double &dbl = doubles_[doubleIndex];
-    masm.movsd_mr(reinterpret_cast<void *>(dbl.uses.prev()), dest.code());
+    JS_ASSERT(!dbl.uses.bound());
+
+    masm.movsd_mr(reinterpret_cast<const void *>(dbl.uses.prev()), dest.code());
     dbl.uses.setPrev(masm.size());
+}
+
+void
+MacroAssemblerX86::loadStaticDouble(const double *dp, const FloatRegister &dest) {
+    if (maybeInlineDouble(*dp, dest))
+        return;
+
+    // x86 can just load from any old immediate address.
+    movsd(dp, dest);
 }
 
 void

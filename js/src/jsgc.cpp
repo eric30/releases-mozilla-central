@@ -8,10 +8,14 @@
 
 #include "jsgc.h"
 
+#include "mozilla/DebugOnly.h"
+#include "mozilla/MemoryReporting.h"
+#include "mozilla/Move.h"
+#include "mozilla/Util.h"
+
 #include "prmjtime.h"
 
-#include "mozilla/DebugOnly.h"
-#include "mozilla/Util.h"
+using mozilla::Swap;
 
 /*
  * This code implements a mark-and-sweep garbage collector. The mark phase is
@@ -72,8 +76,8 @@
 #include "jsgcinlines.h"
 #include "jsobjinlines.h"
 
-#include "gc/FindSCCs-inl.h"
 #include "vm/String-inl.h"
+#include "vm/Stack-inl.h"
 
 #ifdef XP_WIN
 # include "jswin.h"
@@ -97,6 +101,12 @@ static const uint64_t GC_IDLE_FULL_SPAN = 20 * 1000 * 1000;
 
 /* Increase the IGC marking slice time if we are in highFrequencyGC mode. */
 static const int IGC_MARK_SLICE_MULTIPLIER = 2;
+
+#if defined(ANDROID) || defined(MOZ_B2G)
+static const int MAX_EMPTY_CHUNK_COUNT = 2;
+#else
+static const int MAX_EMPTY_CHUNK_COUNT = 30;
+#endif
 
 /* This array should be const, but that doesn't link right under GCC. */
 const AllocKind gc::slotsToThingKind[] = {
@@ -451,8 +461,7 @@ FinalizeArenas(FreeOp *fop,
         return FinalizeTypedArenas<ion::IonCode>(fop, src, dest, thingKind, budget);
 #endif
       default:
-        JS_NOT_REACHED("Invalid alloc kind");
-        return true;
+        MOZ_ASSUME_UNREACHABLE("Invalid alloc kind");
     }
 }
 
@@ -532,13 +541,16 @@ ChunkPool::expire(JSRuntime *rt, bool releaseAll)
      * and are more likely to reach the max age.
      */
     Chunk *freeList = NULL;
+    int freeChunkCount = 0;
     for (Chunk **chunkp = &emptyChunkListHead; *chunkp; ) {
         JS_ASSERT(emptyCount);
         Chunk *chunk = *chunkp;
         JS_ASSERT(chunk->unused());
         JS_ASSERT(!rt->gcChunkSet.has(chunk));
         JS_ASSERT(chunk->info.age <= MAX_EMPTY_CHUNK_AGE);
-        if (releaseAll || chunk->info.age == MAX_EMPTY_CHUNK_AGE) {
+        if (releaseAll || chunk->info.age == MAX_EMPTY_CHUNK_AGE ||
+            freeChunkCount++ > MAX_EMPTY_CHUNK_COUNT)
+        {
             *chunkp = chunk->info.next;
             --emptyCount;
             chunk->prepareToBeFreed(rt);
@@ -714,8 +726,7 @@ Chunk::findDecommittedArenaOffset()
     for (unsigned i = 0; i < info.lastDecommittedArenaOffset; i++)
         if (decommittedArenas.get(i))
             return i;
-    JS_NOT_REACHED("No decommitted arenas found.");
-    return -1;
+    MOZ_ASSUME_UNREACHABLE("No decommitted arenas found.");
 }
 
 ArenaHeader *
@@ -1480,21 +1491,21 @@ RunLastDitchGC(JSContext *cx, JS::Zone *zone, AllocKind thingKind)
 
 template <AllowGC allowGC>
 /* static */ void *
-ArenaLists::refillFreeList(ThreadSafeContext *tcx, AllocKind thingKind)
+ArenaLists::refillFreeList(ThreadSafeContext *cx, AllocKind thingKind)
 {
-    JS_ASSERT(tcx->allocator()->arenas.freeLists[thingKind].isEmpty());
+    JS_ASSERT(cx->allocator()->arenas.freeLists[thingKind].isEmpty());
 
-    Zone *zone = tcx->allocator()->zone_;
+    Zone *zone = cx->allocator()->zone_;
     JSRuntime *rt = zone->rt;
     JS_ASSERT(!rt->isHeapBusy());
 
     bool runGC = rt->gcIncrementalState != NO_INCREMENTAL &&
                  zone->gcBytes > zone->gcTriggerBytes &&
-                 tcx->allowGC() && allowGC;
+                 cx->allowGC() && allowGC;
 
     for (;;) {
         if (JS_UNLIKELY(runGC)) {
-            if (void *thing = RunLastDitchGC(tcx->asJSContext(), zone, thingKind))
+            if (void *thing = RunLastDitchGC(cx->asJSContext(), zone, thingKind))
                 return thing;
         }
 
@@ -1510,8 +1521,8 @@ ArenaLists::refillFreeList(ThreadSafeContext *tcx, AllocKind thingKind)
          * value we get.
          */
         for (bool secondAttempt = false; ; secondAttempt = true) {
-            void *thing = tcx->allocator()->arenas.allocateFromArenaInline(zone, thingKind);
-            if (JS_LIKELY(!!thing) || tcx->isForkJoinSlice())
+            void *thing = cx->allocator()->arenas.allocateFromArenaInline(zone, thingKind);
+            if (JS_LIKELY(!!thing) || cx->isForkJoinSlice())
                 return thing;
             if (secondAttempt)
                 break;
@@ -1532,7 +1543,7 @@ ArenaLists::refillFreeList(ThreadSafeContext *tcx, AllocKind thingKind)
     }
 
     JS_ASSERT(allowGC);
-    js_ReportOutOfMemory(tcx->asJSContext());
+    js_ReportOutOfMemory(cx);
     return NULL;
 }
 
@@ -1865,7 +1876,7 @@ GCMarker::GrayCallback(JSTracer *trc, void **thingp, JSGCTraceKind kind)
 }
 
 size_t
-GCMarker::sizeOfExcludingThis(JSMallocSizeOfFun mallocSizeOf) const
+GCMarker::sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const
 {
     size_t size = stack.sizeOfExcludingThis(mallocSizeOf);
     for (ZonesIter zone(runtime); !zone.done(); zone.next())
@@ -2339,7 +2350,7 @@ GCHelperThread::startBackgroundShrink()
          */
         break;
       case SHUTDOWN:
-        JS_NOT_REACHED("No shrink on shutdown");
+        MOZ_ASSUME_UNREACHABLE("No shrink on shutdown");
     }
 #endif /* JS_THREADSAFE */
 }
@@ -2908,8 +2919,8 @@ MarkGrayReferences(JSRuntime *rt)
                 gcmarker->markBufferedGrayRoots(zone);
         } else {
             JS_ASSERT(!rt->gcIsIncremental);
-            if (JSTraceDataOp op = rt->gcGrayRootsTraceOp)
-                (*op)(gcmarker, rt->gcGrayRootsData);
+            if (JSTraceDataOp op = rt->gcGrayRootTracer.op)
+                (*op)(gcmarker, rt->gcGrayRootTracer.data);
         }
         SliceBudget budget;
         gcmarker->drainMarkStack(budget);
@@ -3072,7 +3083,7 @@ js::gc::MarkingValidator::nonIncrementalMark()
         Chunk *chunk = r.front();
         ChunkBitmap *bitmap = &chunk->bitmap;
         ChunkBitmap *entry = map.lookup(chunk)->value;
-        js::Swap(*entry, *bitmap);
+        Swap(*entry, *bitmap);
     }
 
     /* Restore the weak map and array buffer lists. */
@@ -3499,8 +3510,7 @@ RemoveFromGrayList(JSObject *wrapper)
         obj = next;
     }
 
-    JS_NOT_REACHED("object not found in gray link list");
-    return false;
+    MOZ_ASSUME_UNREACHABLE("object not found in gray link list");
 }
 
 static void
@@ -4102,7 +4112,7 @@ ResetIncrementalGC(JSRuntime *rt, const char *reason)
         break;
 
       default:
-        JS_NOT_REACHED("Invalid incremental GC state");
+        MOZ_ASSUME_UNREACHABLE("Invalid incremental GC state");
     }
 
     rt->gcStats.reset(reason);
@@ -4545,7 +4555,7 @@ Collect(JSRuntime *rt, bool incremental, int64_t budget,
         if (rt->gcIncrementalState == NO_INCREMENTAL) {
             gcstats::AutoPhase ap(rt->gcStats, gcstats::PHASE_GC_BEGIN);
             if (JSGCCallback callback = rt->gcCallback)
-                callback(rt, JSGC_BEGIN);
+                callback(rt, JSGC_BEGIN, rt->gcCallbackData);
         }
 
         rt->gcPoke = false;
@@ -4554,7 +4564,7 @@ Collect(JSRuntime *rt, bool incremental, int64_t budget,
         if (rt->gcIncrementalState == NO_INCREMENTAL) {
             gcstats::AutoPhase ap(rt->gcStats, gcstats::PHASE_GC_END);
             if (JSGCCallback callback = rt->gcCallback)
-                callback(rt, JSGC_END);
+                callback(rt, JSGC_END, rt->gcCallbackData);
         }
 
         /* Need to re-schedule all zones for GC. */
@@ -4670,7 +4680,8 @@ AutoPrepareForTracing::AutoPrepareForTracing(JSRuntime *rt)
 }
 
 JSCompartment *
-js::NewCompartment(JSContext *cx, Zone *zone, JSPrincipals *principals)
+js::NewCompartment(JSContext *cx, Zone *zone, JSPrincipals *principals,
+                   const JS::CompartmentOptions &options)
 {
     JSRuntime *rt = cx->runtime();
     JS_AbortIfWrongThread(rt);
@@ -4692,7 +4703,7 @@ js::NewCompartment(JSContext *cx, Zone *zone, JSPrincipals *principals)
         zone->isSystem = principals && principals == trusted;
     }
 
-    ScopedJSDeletePtr<JSCompartment> compartment(cx->new_<JSCompartment>(zone));
+    ScopedJSDeletePtr<JSCompartment> compartment(cx->new_<JSCompartment>(zone, options));
     if (!compartment || !compartment->init(cx))
         return NULL;
 
@@ -5044,6 +5055,12 @@ AutoSuppressGC::AutoSuppressGC(JSCompartment *comp)
   : suppressGC_(comp->rt->mainThread.suppressGC)
 {
     suppressGC_++;
+}
+
+bool
+js::UninlinedIsInsideNursery(JSRuntime *rt, const void *thing)
+{
+    return IsInsideNursery(rt, thing);
 }
 
 #ifdef DEBUG

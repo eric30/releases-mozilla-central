@@ -18,7 +18,7 @@ Cu.import("resource://gre/modules/IndexedDBHelper.jsm");
 Cu.import("resource://gre/modules/PhoneNumberUtils.jsm");
 
 const DB_NAME = "contacts";
-const DB_VERSION = 11;
+const DB_VERSION = 12;
 const STORE_NAME = "contacts";
 const SAVED_GETALL_STORE_NAME = "getallcache";
 const CHUNK_SIZE = 20;
@@ -327,8 +327,18 @@ ContactDB.prototype = {
           }
         };
       } else if (currVersion == 9) {
+        // no-op, see https://bugzilla.mozilla.org/show_bug.cgi?id=883770#c16
+      } else if (currVersion == 10) {
+        if (DEBUG) debug("Adding object store for database revision");
+        db.createObjectStore(REVISION_STORE).put(0, REVISION_KEY);
+      } else if (currVersion == 11) {
         if (DEBUG) debug("Add a telMatch index with national and international numbers");
-        objectStore.createIndex("telMatch", "search.parsedTel", {multiEntry: true});
+        if (!objectStore) {
+          objectStore = aTransaction.objectStore(STORE_NAME);
+        }
+        if (!objectStore.indexNames.contains("telMatch")) {
+          objectStore.createIndex("telMatch", "search.parsedTel", {multiEntry: true});
+        }
         objectStore.openCursor().onsuccess = function(event) {
           let cursor = event.target.result;
           if (cursor) {
@@ -351,13 +361,10 @@ ContactDB.prototype = {
             cursor.continue();
           }
         };
-      } else if (currVersion == 10) {
-        if (DEBUG) debug("Adding object store for database revision");
-        db.createObjectStore(REVISION_STORE).put(0, REVISION_KEY);
       }
 
       // Increment the DB revision on future schema changes as well
-      if (currVersion > 10) {
+      if (currVersion > 11) {
         this.incrementRevision(aTransaction);
       }
     }

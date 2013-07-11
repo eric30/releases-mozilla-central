@@ -18,10 +18,10 @@ XPIDL_SOURCES += [
 EXPORTS.mozilla.dom += [
     'EnableSpeechSynthesisCheck.h',
     'SpeechSynthesis.h',
-    'SpeechSynthesisChild.h',
-    'SpeechSynthesisParent.h',
     'SpeechSynthesisUtterance.h',
     'SpeechSynthesisVoice.h',
+    'ipc/SpeechSynthesisChild.h',
+    'ipc/SpeechSynthesisParent.h',
     'nsSpeechTask.h',
     'nsSynthVoiceRegistry.h',
 ]
@@ -37,3 +37,7 @@ CPP_SOURCES += [
     'nsSynthVoiceRegistry.cpp',
 ]
 
+IPDL_SOURCES += [
+    'ipc/PSpeechSynthesis.ipdl',
+    'ipc/PSpeechSynthesisRequest.ipdl',
+]

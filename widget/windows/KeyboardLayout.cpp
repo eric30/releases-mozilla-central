@@ -497,8 +497,7 @@ NativeKey::NativeKey(nsWindowBase* aWidget,
             mVirtualKeyCode = VK_LSHIFT;
             break;
           default:
-            MOZ_NOT_REACHED("Unsupported mOriginalVirtualKeyCode");
-            break;
+            MOZ_CRASH("Unsupported mOriginalVirtualKeyCode");
         }
         break;
       }
@@ -534,8 +533,7 @@ NativeKey::NativeKey(nsWindowBase* aWidget,
           }
           break;
         default:
-          MOZ_NOT_REACHED("Unsupported mOriginalVirtualKeyCode");
-          break;
+          MOZ_CRASH("Unsupported mOriginalVirtualKeyCode");
       }
       break;
     }
@@ -551,8 +549,7 @@ NativeKey::NativeKey(nsWindowBase* aWidget,
         ComputeVirtualKeyCodeFromScanCodeEx();
       break;
     default:
-      MOZ_NOT_REACHED("Unsupported message");
-      break;
+      MOZ_CRASH("Unsupported message");
   }
 
   if (!mVirtualKeyCode) {
@@ -737,8 +734,7 @@ NativeKey::InitKeyEvent(nsKeyEvent& aKeyEvent,
     case NS_KEY_PRESS:
       break;
     default:
-      MOZ_NOT_REACHED("Invalid event message");
-      break;
+      MOZ_CRASH("Invalid event message");
   }
 
   aKeyEvent.mKeyNameIndex = mKeyNameIndex;
@@ -750,6 +746,10 @@ bool
 NativeKey::DispatchKeyEvent(nsKeyEvent& aKeyEvent,
                             const MSG* aMsgSentToPlugin) const
 {
+  if (mWidget->Destroyed()) {
+    MOZ_CRASH("NativeKey tries to dispatch a key event on destroyed widget");
+  }
+
   KeyboardLayout::NotifyIdleServiceOfUserActivity();
 
   NPEvent pluginEvent;
@@ -761,7 +761,7 @@ NativeKey::DispatchKeyEvent(nsKeyEvent& aKeyEvent,
     aKeyEvent.pluginEvent = static_cast<void*>(&pluginEvent);
   }
 
-  return mWidget->DispatchWindowEvent(&aKeyEvent);
+  return (mWidget->DispatchWindowEvent(&aKeyEvent) || mWidget->Destroyed());
 }
 
 bool
@@ -789,6 +789,12 @@ NativeKey::HandleKeyDownMessage(bool* aEventDispatched) const
       *aEventDispatched = true;
     }
     defaultPrevented = DispatchKeyEvent(keydownEvent, &mMsg);
+
+    if (mWidget->Destroyed()) {
+      // If this was destroyed by the keydown event handler, we shouldn't
+      // dispatch keypress event on this window.
+      return true;
+    }
 
     // If IMC wasn't associated to the window but is associated it now (i.e.,
     // focus is moved from a non-editable editor to an editor by keydown
@@ -822,12 +828,6 @@ NativeKey::HandleKeyDownMessage(bool* aEventDispatched) const
       // Return here.  We shouldn't dispatch keypress event for this WM_KEYDOWN.
       // If it's needed, it will be dispatched after next (redirected)
       // WM_KEYDOWN.
-      return true;
-    }
-
-    if (mWidget->Destroyed()) {
-      // If this was destroyed by the keydown event handler, we shouldn't
-      // dispatch keypress event on this window.
       return true;
     }
   } else {
@@ -1069,8 +1069,7 @@ NativeKey::RemoveFollowingCharMessage() const
   MSG msg;
   if (!WinUtils::GetMessage(&msg, mMsg.hwnd,
                             mCharMsg.message, mCharMsg.message)) {
-    MOZ_NOT_REACHED("We lost the following char message");
-    return mCharMsg;
+    MOZ_CRASH("We lost the following char message");
   }
 
   MOZ_ASSERT(mCharMsg.message == msg.message &&
@@ -1080,20 +1079,24 @@ NativeKey::RemoveFollowingCharMessage() const
   return mCharMsg;
 }
 
-void
+bool
 NativeKey::RemoveMessageAndDispatchPluginEvent(UINT aFirstMsg,
                                                UINT aLastMsg) const
 {
   MSG msg;
   if (mIsFakeCharMsg) {
     if (aFirstMsg > WM_CHAR || aLastMsg < WM_CHAR) {
-      return;
+      return false;
     }
     msg = mCharMsg;
   } else {
     WinUtils::GetMessage(&msg, mMsg.hwnd, aFirstMsg, aLastMsg);
   }
+  if (mWidget->Destroyed()) {
+    MOZ_CRASH("NativeKey tries to dispatch a plugin event on destroyed widget");
+  }
   mWidget->DispatchPluginEvent(msg);
+  return mWidget->Destroyed();
 }
 
 bool
@@ -1109,7 +1112,9 @@ NativeKey::DispatchKeyPressEventsAndDiscardsCharMessages(
   bool anyCharMessagesRemoved = false;
 
   if (mIsFakeCharMsg) {
-    RemoveMessageAndDispatchPluginEvent(WM_KEYFIRST, WM_KEYLAST);
+    if (RemoveMessageAndDispatchPluginEvent(WM_KEYFIRST, WM_KEYLAST)) {
+      return true;
+    }
     anyCharMessagesRemoved = true;
   } else {
     MSG msg;
@@ -1117,7 +1122,9 @@ NativeKey::DispatchKeyPressEventsAndDiscardsCharMessages(
       WinUtils::PeekMessage(&msg, mMsg.hwnd, WM_KEYFIRST, WM_KEYLAST,
                             PM_NOREMOVE | PM_NOYIELD);
     while (gotMsg && (msg.message == WM_CHAR || msg.message == WM_SYSCHAR)) {
-      RemoveMessageAndDispatchPluginEvent(WM_KEYFIRST, WM_KEYLAST);
+      if (RemoveMessageAndDispatchPluginEvent(WM_KEYFIRST, WM_KEYLAST)) {
+        return true;
+      }
       anyCharMessagesRemoved = true;
       gotMsg = WinUtils::PeekMessage(&msg, mMsg.hwnd, WM_KEYFIRST, WM_KEYLAST,
                                      PM_NOREMOVE | PM_NOYIELD);
@@ -1127,7 +1134,9 @@ NativeKey::DispatchKeyPressEventsAndDiscardsCharMessages(
   if (!anyCharMessagesRemoved &&
       mDOMKeyCode == NS_VK_BACK && IsIMEDoingKakuteiUndo()) {
     MOZ_ASSERT(!mIsFakeCharMsg);
-    RemoveMessageAndDispatchPluginEvent(WM_CHAR, WM_CHAR);
+    if (RemoveMessageAndDispatchPluginEvent(WM_CHAR, WM_CHAR)) {
+      return true;
+    }
   }
 
   return DispatchKeyPressEventsWithKeyboardLayout(aExtraFlags);
@@ -1292,6 +1301,9 @@ NativeKey::DispatchKeyPressEventsWithKeyboardLayout(
     keypressEvent.alternativeCharCodes.AppendElements(altArray);
     InitKeyEvent(keypressEvent, modKeyState);
     defaultPrevented = (DispatchKeyEvent(keypressEvent) || defaultPrevented);
+    if (mWidget->Destroyed()) {
+      return true;
+    }
   }
 
   return defaultPrevented;
@@ -1339,7 +1351,9 @@ NativeKey::DispatchKeyPressEventForFollowingCharMessage(
     bool defaultPrevented = aExtraFlags.mDefaultPrevented;
     if (mWidget->PluginHasFocus()) {
       // We need to send the removed message to focused plug-in.
-      defaultPrevented = mWidget->DispatchPluginEvent(msg) || defaultPrevented;
+      defaultPrevented =
+        (mWidget->DispatchPluginEvent(msg) || defaultPrevented ||
+         mWidget->Destroyed());
     }
     return defaultPrevented;
   }
@@ -2047,18 +2061,80 @@ KeyboardLayout::ConvertNativeKeyCodeToDOMKeyCode(UINT aNativeKeyCode) const
 KeyNameIndex
 KeyboardLayout::ConvertNativeKeyCodeToKeyNameIndex(uint8_t aVirtualKey) const
 {
+#define NS_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX(aNativeKey, aKeyNameIndex)
+#define NS_JAPANESE_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX(aNativeKey, aKeyNameIndex)
+#define NS_KOREAN_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX(aNativeKey, aKeyNameIndex)
+#define NS_OTHER_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX(aNativeKey, aKeyNameIndex)
+
   switch (aVirtualKey) {
 
+#undef NS_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX
 #define NS_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX(aNativeKey, aKeyNameIndex) \
     case aNativeKey: return aKeyNameIndex;
 
 #include "NativeKeyToDOMKeyName.h"
 
 #undef NS_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX
+#define NS_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX(aNativeKey, aKeyNameIndex)
 
     default:
-      return IsPrintableCharKey(aVirtualKey) ? KEY_NAME_INDEX_PrintableKey :
-                                               KEY_NAME_INDEX_Unidentified;
+      if (IsPrintableCharKey(aVirtualKey)) {
+        return KEY_NAME_INDEX_PrintableKey;
+      }
+      break;
+  }
+
+  HKL layout = GetLayout();
+  WORD langID = LOWORD(static_cast<HKL>(layout));
+  WORD primaryLangID = PRIMARYLANGID(langID);
+
+  if (primaryLangID == LANG_JAPANESE) {
+    switch (aVirtualKey) {
+
+#undef NS_JAPANESE_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX
+#define NS_JAPANESE_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX(aNativeKey, aKeyNameIndex)\
+      case aNativeKey: return aKeyNameIndex;
+
+#include "NativeKeyToDOMKeyName.h"
+
+#undef NS_JAPANESE_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX
+#define NS_JAPANESE_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX(aNativeKey, aKeyNameIndex)
+
+      default:
+        break;
+    }
+  } else if (primaryLangID == LANG_KOREAN) {
+    switch (aVirtualKey) {
+
+#undef NS_KOREAN_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX
+#define NS_KOREAN_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX(aNativeKey, aKeyNameIndex)\
+      case aNativeKey: return aKeyNameIndex;
+
+#include "NativeKeyToDOMKeyName.h"
+
+#undef NS_KOREAN_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX
+#define NS_KOREAN_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX(aNativeKey, aKeyNameIndex)
+
+      default:
+        return KEY_NAME_INDEX_Unidentified;
+    }
+  }
+
+  switch (aVirtualKey) {
+
+#undef NS_OTHER_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX
+#define NS_OTHER_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX(aNativeKey, aKeyNameIndex)\
+    case aNativeKey: return aKeyNameIndex;
+
+#include "NativeKeyToDOMKeyName.h"
+
+#undef NS_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX
+#undef NS_JAPANESE_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX
+#undef NS_KOREAN_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX
+#undef NS_OTHER_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX
+
+    default:
+      return KEY_NAME_INDEX_Unidentified;
   }
 }
 

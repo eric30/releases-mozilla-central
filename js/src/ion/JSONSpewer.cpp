@@ -6,12 +6,13 @@
 
 #include <stdarg.h>
 
-#include "JSONSpewer.h"
-#include "LIR.h"
-#include "MIR.h"
-#include "MIRGraph.h"
-#include "LinearScan.h"
-#include "RangeAnalysis.h"
+#include "ion/JSONSpewer.h"
+#include "ion/LIR.h"
+#include "ion/MIR.h"
+#include "ion/MIRGraph.h"
+#include "ion/LinearScan.h"
+#include "ion/RangeAnalysis.h"
+
 using namespace js;
 using namespace js::ion;
 
@@ -251,7 +252,7 @@ JSONSpewer::spewMDef(MDefinition *def)
     endList();
 
     beginListProperty("inputs");
-    for (size_t i = 0; i < def->numOperands(); i++)
+    for (size_t i = 0, e = def->numOperands(); i < e; i++)
         integerValue(def->getOperand(i)->id());
     endList();
 

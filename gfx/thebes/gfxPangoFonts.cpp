@@ -627,14 +627,6 @@ bool gfxDownloadedFcFontEntry::SetCairoFace(cairo_font_face_t *aFace)
     return true;
 }
 
-static int
-DirEntryCmp(const void* aKey, const void* aItem)
-{
-    int32_t tag = *static_cast<const int32_t*>(aKey);
-    const TableDirEntry* entry = static_cast<const TableDirEntry*>(aItem);
-    return tag - int32_t(entry->tag);
-}
-
 hb_blob_t *
 gfxDownloadedFcFontEntry::GetFontTable(uint32_t aTableTag)
 {
@@ -642,18 +634,7 @@ gfxDownloadedFcFontEntry::GetFontTable(uint32_t aTableTag)
     // so we can just return a blob that "wraps" the appropriate chunk of it.
     // The blob should not attempt to free its data, as the entire sfnt data
     // will be freed when the font entry is deleted.
-    const SFNTHeader* header = reinterpret_cast<const SFNTHeader*>(mFontData);
-    const TableDirEntry* dir = reinterpret_cast<const TableDirEntry*>(header + 1);
-    dir = static_cast<const TableDirEntry*>
-        (bsearch(&aTableTag, dir, uint16_t(header->numTables),
-                 sizeof(TableDirEntry), DirEntryCmp));
-    if (dir) {
-        return hb_blob_create(reinterpret_cast<const char*>(mFontData) +
-                                  dir->offset, dir->length,
-                              HB_MEMORY_MODE_READONLY, nullptr, nullptr);
-
-    }
-    return nullptr;
+    return GetTableFromFontData(mFontData, aTableTag);
 }
 
 /*
@@ -669,6 +650,10 @@ public:
     static already_AddRefed<gfxFcFont>
     GetOrMakeFont(FcPattern *aRequestedPattern, FcPattern *aFontPattern,
                   const gfxFontStyle *aFontStyle);
+
+#ifdef USE_SKIA
+    virtual mozilla::TemporaryRef<mozilla::gfx::GlyphRenderingOptions> GetGlyphRenderingOptions();
+#endif
 
 protected:
     virtual bool ShapeText(gfxContext      *aContext,
@@ -2184,3 +2169,36 @@ ApplyGdkScreenFontOptions(FcPattern *aPattern)
 }
 
 #endif // MOZ_WIDGET_GTK2
+
+#ifdef USE_SKIA
+mozilla::TemporaryRef<mozilla::gfx::GlyphRenderingOptions>
+gfxFcFont::GetGlyphRenderingOptions()
+{
+  cairo_scaled_font_t *scaled_font = CairoScaledFont();
+  cairo_font_options_t *options = cairo_font_options_create();
+  cairo_scaled_font_get_font_options(scaled_font, options);
+  cairo_hint_style_t hint_style = cairo_font_options_get_hint_style(options);     
+  cairo_font_options_destroy(options);
+
+  mozilla::gfx::FontHinting hinting;
+
+  switch (hint_style) {
+    case CAIRO_HINT_STYLE_NONE:
+      hinting = mozilla::gfx::FONT_HINTING_NONE;
+      break;
+    case CAIRO_HINT_STYLE_SLIGHT:
+      hinting = mozilla::gfx::FONT_HINTING_LIGHT;
+      break;
+    case CAIRO_HINT_STYLE_FULL:
+      hinting = mozilla::gfx::FONT_HINTING_FULL;
+      break;
+    default:
+      hinting = mozilla::gfx::FONT_HINTING_NORMAL;
+      break;
+  }
+
+  // We don't want to force the use of the autohinter over the font's built in hints
+  return mozilla::gfx::Factory::CreateCairoGlyphRenderingOptions(hinting, false);
+}
+#endif
+

@@ -582,6 +582,24 @@ nsFrameMessageManager::AssertAppHasPermission(const nsAString& aPermission,
                                aHasPermission);
 }
 
+NS_IMETHODIMP
+nsFrameMessageManager::CheckAppHasStatus(unsigned short aStatus,
+                                         bool* aHasStatus)
+{
+  *aHasStatus = false;
+
+  // This API is only supported for message senders in the chrome process.
+  if (!mChrome || mIsBroadcaster) {
+    return NS_ERROR_NOT_IMPLEMENTED;
+  }
+  if (!mCallback) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+  *aHasStatus = mCallback->CheckAppHasStatus(aStatus);
+
+  return NS_OK;
+}
+
 class MMListenerRemover
 {
 public:
@@ -614,14 +632,10 @@ nsFrameMessageManager::ReceiveMessage(nsISupports* aTarget,
                                       bool aSync,
                                       const StructuredCloneData* aCloneData,
                                       JS::Handle<JSObject*> aObjectsArray,
-                                      InfallibleTArray<nsString>* aJSONRetVal,
-                                      JSContext* aContext)
+                                      InfallibleTArray<nsString>* aJSONRetVal)
 {
-  JSContext *cxToUse = mContext ? mContext
-                                : (aContext ? aContext
-                                            : nsContentUtils::GetSafeJSContext());
-  AutoPushJSContext ctx(cxToUse);
-  JS::Rooted<JSObject*> objectsArray(cxToUse, aObjectsArray);
+  AutoSafeJSContext ctx;
+  JS::Rooted<JSObject*> objectsArray(ctx, aObjectsArray);
   if (mListeners.Length()) {
     nsCOMPtr<nsIAtom> name = do_GetAtom(aMessage);
     MMListenerRemover lr(this);
@@ -637,9 +651,6 @@ nsFrameMessageManager::ReceiveMessage(nsISupports* aTarget,
         if (!object) {
           continue;
         }
-        nsCxPusher pusher;
-        pusher.Push(ctx);
-
         JSAutoCompartment ac(ctx, object);
 
         // The parameter for the listener function.
@@ -744,7 +755,7 @@ nsFrameMessageManager::ReceiveMessage(nsISupports* aTarget,
   return mParentManager ? mParentManager->ReceiveMessage(aTarget, aMessage,
                                                          aSync, aCloneData,
                                                          objectsArray,
-                                                         aJSONRetVal, mContext) : NS_OK;
+                                                         aJSONRetVal) : NS_OK;
 }
 
 void
@@ -801,12 +812,18 @@ nsFrameMessageManager::RemoveFromParent()
   mParentManager = nullptr;
   mCallback = nullptr;
   mOwnedCallback = nullptr;
-  mContext = nullptr;
 }
 
 void
 nsFrameMessageManager::Disconnect(bool aRemoveFromParent)
 {
+  if (!mDisconnected) {
+    nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
+    if (obs) {
+       obs->NotifyObservers(NS_ISUPPORTS_CAST(nsIContentFrameMessageManager*, this),
+                            "message-manager-disconnect", nullptr);
+    }
+  }
   if (mParentManager && aRemoveFromParent) {
     mParentManager->RemoveChildManager(this);
   }
@@ -814,7 +831,6 @@ nsFrameMessageManager::Disconnect(bool aRemoveFromParent)
   mParentManager = nullptr;
   mCallback = nullptr;
   mOwnedCallback = nullptr;
-  mContext = nullptr;
   if (!mHandlingMessage) {
     mListeners.Clear();
   }
@@ -827,84 +843,8 @@ NS_NewGlobalMessageManager(nsIMessageBroadcaster** aResult)
                  NS_ERROR_NOT_AVAILABLE);
   nsFrameMessageManager* mm = new nsFrameMessageManager(nullptr,
                                                         nullptr,
-                                                        nullptr,
                                                         MM_CHROME | MM_GLOBAL | MM_BROADCASTER);
   return CallQueryInterface(mm, aResult);
-}
-
-void
-ContentScriptErrorReporter(JSContext* aCx,
-                           const char* aMessage,
-                           JSErrorReport* aReport)
-{
-  nsresult rv;
-  nsCOMPtr<nsIScriptError> scriptError =
-      do_CreateInstance(NS_SCRIPTERROR_CONTRACTID, &rv);
-  if (NS_FAILED(rv)) {
-    return;
-  }
-  nsAutoString message, filename, line;
-  uint32_t lineNumber, columnNumber, flags, errorNumber;
-
-  if (aReport) {
-    if (aReport->ucmessage) {
-      message.Assign(static_cast<const PRUnichar*>(aReport->ucmessage));
-    }
-    filename.AssignWithConversion(aReport->filename);
-    line.Assign(static_cast<const PRUnichar*>(aReport->uclinebuf));
-    lineNumber = aReport->lineno;
-    columnNumber = aReport->uctokenptr - aReport->uclinebuf;
-    flags = aReport->flags;
-    errorNumber = aReport->errorNumber;
-  } else {
-    lineNumber = columnNumber = errorNumber = 0;
-    flags = nsIScriptError::errorFlag | nsIScriptError::exceptionFlag;
-  }
-
-  if (message.IsEmpty()) {
-    message.AssignWithConversion(aMessage);
-  }
-
-  rv = scriptError->Init(message, filename, line,
-                         lineNumber, columnNumber, flags,
-                         "Message manager content script");
-  if (NS_FAILED(rv)) {
-    return;
-  }
-
-  nsCOMPtr<nsIConsoleService> consoleService =
-      do_GetService(NS_CONSOLESERVICE_CONTRACTID);
-  if (consoleService) {
-    (void) consoleService->LogMessage(scriptError);
-  }
-
-#ifdef DEBUG
-  // Print it to stderr as well, for the benefit of those invoking
-  // mozilla with -console.
-  nsAutoCString error;
-  error.Assign("JavaScript ");
-  if (JSREPORT_IS_STRICT(flags)) {
-    error.Append("strict ");
-  }
-  if (JSREPORT_IS_WARNING(flags)) {
-    error.Append("warning: ");
-  } else {
-    error.Append("error: ");
-  }
-  error.Append(aReport->filename);
-  error.Append(", line ");
-  error.AppendInt(lineNumber, 10);
-  error.Append(": ");
-  if (aReport->ucmessage) {
-    AppendUTF16toUTF8(static_cast<const PRUnichar*>(aReport->ucmessage),
-                      error);
-  } else {
-    error.Append(aMessage);
-  }
-
-  fprintf(stderr, "%s\n", error.get());
-  fflush(stderr);
-#endif
 }
 
 nsDataHashtable<nsStringHashKey, nsFrameJSScriptExecutorHolder*>*
@@ -912,9 +852,9 @@ nsDataHashtable<nsStringHashKey, nsFrameJSScriptExecutorHolder*>*
 nsScriptCacheCleaner* nsFrameScriptExecutor::sScriptCacheCleaner = nullptr;
 
 void
-nsFrameScriptExecutor::DidCreateCx()
+nsFrameScriptExecutor::DidCreateGlobal()
 {
-  NS_ASSERTION(mCx, "Should have mCx!");
+  NS_ASSERTION(mGlobal, "Should have mGlobal!");
   if (!sCachedScripts) {
     sCachedScripts =
       new nsDataHashtable<nsStringHashKey, nsFrameJSScriptExecutorHolder*>;
@@ -924,26 +864,6 @@ nsFrameScriptExecutor::DidCreateCx()
       new nsScriptCacheCleaner();
     scriptCacheCleaner.forget(&sScriptCacheCleaner);
   }
-}
-
-void
-nsFrameScriptExecutor::DestroyCx()
-{
-  if (mCxStackRefCnt) {
-    mDelayedCxDestroy = true;
-    return;
-  }
-  mDelayedCxDestroy = false;
-  if (mCx) {
-    nsIXPConnect* xpc = nsContentUtils::XPConnect();
-    if (xpc) {
-      xpc->ReleaseJSContext(mCx, true);
-    } else {
-      JS_DestroyContext(mCx);
-    }
-  }
-  mCx = nullptr;
-  mGlobal = nullptr;
 }
 
 static PLDHashOperator
@@ -977,7 +897,7 @@ nsFrameScriptExecutor::Shutdown()
 void
 nsFrameScriptExecutor::LoadFrameScriptInternal(const nsAString& aURL)
 {
-  if (!mGlobal || !mCx || !sCachedScripts) {
+  if (!mGlobal || !sCachedScripts) {
     return;
   }
 
@@ -988,11 +908,11 @@ nsFrameScriptExecutor::LoadFrameScriptInternal(const nsAString& aURL)
   }
 
   if (holder) {
-    nsCxPusher pusher;
-    pusher.Push(mCx);
-    JS::Rooted<JSObject*> global(mCx, mGlobal->GetJSObject());
+    AutoSafeJSContext cx;
+    JS::Rooted<JSObject*> global(cx, mGlobal->GetJSObject());
     if (global) {
-      (void) JS_ExecuteScript(mCx, global, holder->mScript, nullptr);
+      JSAutoCompartment ac(cx, global);
+      (void) JS_ExecuteScript(cx, global, holder->mScript, nullptr);
     }
   }
 }
@@ -1041,18 +961,17 @@ nsFrameScriptExecutor::TryCacheLoadAndCompileScript(const nsAString& aURL,
   }
 
   if (!dataString.IsEmpty()) {
-    nsCxPusher pusher;
-    pusher.Push(mCx);
-    JS::Rooted<JSObject*> global(mCx, mGlobal->GetJSObject());
+    AutoSafeJSContext cx;
+    JS::Rooted<JSObject*> global(cx, mGlobal->GetJSObject());
     if (global) {
-      JSAutoCompartment ac(mCx, global);
-      JS::CompileOptions options(mCx);
+      JSAutoCompartment ac(cx, global);
+      JS::CompileOptions options(cx);
       options.setNoScriptRval(true)
              .setFileAndLine(url.get(), 1)
              .setPrincipals(nsJSPrincipals::get(mPrincipal));
-      JS::RootedObject empty(mCx, nullptr);
-      JS::Rooted<JSScript*> script(mCx,
-        JS::Compile(mCx, empty, options, dataString.get(),
+      JS::RootedObject empty(cx, nullptr);
+      JS::Rooted<JSScript*> script(cx,
+        JS::Compile(cx, empty, options, dataString.get(),
                     dataString.Length()));
 
       if (script) {
@@ -1063,11 +982,11 @@ nsFrameScriptExecutor::TryCacheLoadAndCompileScript(const nsAString& aURL,
           nsFrameJSScriptExecutorHolder* holder =
             new nsFrameJSScriptExecutorHolder(script);
           // Root the object also for caching.
-          JS_AddNamedScriptRoot(mCx, &(holder->mScript),
+          JS_AddNamedScriptRoot(cx, &(holder->mScript),
                                 "Cached message manager script");
           sCachedScripts->Put(aURL, holder);
         } else if (aBehavior == EXECUTE_IF_CANT_CACHE) {
-          (void) JS_ExecuteScript(mCx, global, script, nullptr);
+          (void) JS_ExecuteScript(cx, global, script, nullptr);
         }
       }
     }
@@ -1087,64 +1006,31 @@ nsFrameScriptExecutor::InitTabChildGlobalInternal(nsISupports* aScope,
   runtimeSvc->GetRuntime(&rt);
   NS_ENSURE_TRUE(rt, false);
 
-  JSContext* cx_ = JS_NewContext(rt, 8192);
-  NS_ENSURE_TRUE(cx_, false);
-  AutoPushJSContext cx(cx_);
-
-  mCx = cx;
-
+  AutoSafeJSContext cx;
   nsContentUtils::GetSecurityManager()->GetSystemPrincipal(getter_AddRefs(mPrincipal));
-
-  JS_SetOptions(cx, JS_GetOptions(cx) | JSOPTION_PRIVATE_IS_NSISUPPORTS);
-  JS_SetVersion(cx, JSVERSION_LATEST);
-  JS_SetErrorReporter(cx, ContentScriptErrorReporter);
 
   nsIXPConnect* xpc = nsContentUtils::XPConnect();
   const uint32_t flags = nsIXPConnect::INIT_JS_STANDARD_CLASSES;
 
-
-  JS_SetContextPrivate(cx, aScope);
+  JS::CompartmentOptions options;
+  options.setZone(JS::SystemZone)
+         .setVersion(JSVERSION_LATEST);
 
   nsresult rv =
     xpc->InitClassesWithNewWrappedGlobal(cx, aScope, mPrincipal,
-                                         flags, JS::SystemZone, getter_AddRefs(mGlobal));
+                                         flags, options, getter_AddRefs(mGlobal));
   NS_ENSURE_SUCCESS(rv, false);
 
 
   JS::Rooted<JSObject*> global(cx, mGlobal->GetJSObject());
   NS_ENSURE_TRUE(global, false);
 
-  JS_SetGlobalObject(cx, global);
-
   // Set the location information for the new global, so that tools like
   // about:memory may use that information.
   xpc::SetLocationForGlobal(global, aID);
 
-  DidCreateCx();
+  DidCreateGlobal();
   return true;
-}
-
-// static
-void
-nsFrameScriptExecutor::Traverse(nsFrameScriptExecutor *tmp,
-                                nsCycleCollectionTraversalCallback &cb)
-{
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mGlobal)
-  nsIXPConnect* xpc = nsContentUtils::XPConnect();
-  if (xpc) {
-    NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mCx");
-    xpc->NoteJSContext(tmp->mCx, cb);
-  }
-}
-
-// static
-void
-nsFrameScriptExecutor::Unlink(nsFrameScriptExecutor* aTmp)
-{
-  if (aTmp->mCx) {
-    JSAutoRequest ar(aTmp->mCx);
-    JS_SetGlobalObject(aTmp->mCx, nullptr);
-  }
 }
 
 NS_IMPL_ISUPPORTS1(nsScriptCacheCleaner, nsIObserver)
@@ -1178,7 +1064,7 @@ public:
 
       nsRefPtr<nsFrameMessageManager> ppm = nsFrameMessageManager::sChildProcessManager;
       ppm->ReceiveMessage(static_cast<nsIContentFrameMessageManager*>(ppm.get()), mMessage,
-                          false, &data, JS::NullPtr(), nullptr, nullptr);
+                          false, &data, JS::NullPtr(), nullptr);
     }
     return NS_OK;
   }
@@ -1308,7 +1194,7 @@ public:
       nsRefPtr<nsFrameMessageManager> ppm =
         nsFrameMessageManager::sSameProcessParentManager;
       ppm->ReceiveMessage(static_cast<nsIContentFrameMessageManager*>(ppm.get()),
-                          mMessage, false, &data, JS::NullPtr(), nullptr, nullptr);
+                          mMessage, false, &data, JS::NullPtr(), nullptr);
      }
      return NS_OK;
   }
@@ -1379,9 +1265,7 @@ NS_NewParentProcessMessageManager(nsIMessageBroadcaster** aResult)
                  NS_ERROR_NOT_AVAILABLE);
   nsRefPtr<nsFrameMessageManager> mm = new nsFrameMessageManager(nullptr,
                                                                  nullptr,
-                                                                 nullptr,
                                                                  MM_CHROME | MM_PROCESSMANAGER | MM_BROADCASTER);
-  NS_ENSURE_TRUE(mm, NS_ERROR_OUT_OF_MEMORY);
   nsFrameMessageManager::sParentProcessManager = mm;
   nsFrameMessageManager::NewProcessMessageManager(nullptr); // Create same process message manager.
   return CallQueryInterface(mm, aResult);
@@ -1402,12 +1286,10 @@ nsFrameMessageManager::NewProcessMessageManager(mozilla::dom::ContentParent* aPr
   if (aProcess) {
     mm = new nsFrameMessageManager(aProcess,
                                    nsFrameMessageManager::sParentProcessManager,
-                                   nullptr,
                                    MM_CHROME | MM_PROCESSMANAGER);
   } else {
     mm = new nsFrameMessageManager(new SameParentProcessMessageManagerCallback(),
                                    nsFrameMessageManager::sParentProcessManager,
-                                   nullptr,
                                    MM_CHROME | MM_PROCESSMANAGER | MM_OWNSCALLBACK);
     sSameProcessParentManager = mm;
   }
@@ -1428,9 +1310,7 @@ NS_NewChildProcessMessageManager(nsISyncMessageSender** aResult)
   }
   nsFrameMessageManager* mm = new nsFrameMessageManager(cb,
                                                         nullptr,
-                                                        nullptr,
                                                         MM_PROCESSMANAGER | MM_OWNSCALLBACK);
-  NS_ENSURE_TRUE(mm, NS_ERROR_OUT_OF_MEMORY);
   nsFrameMessageManager::sChildProcessManager = mm;
   return CallQueryInterface(mm, aResult);
 }

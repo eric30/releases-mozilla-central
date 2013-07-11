@@ -9,6 +9,7 @@ MODULE = 'necko'
 EXPORTS += [
     'nsFileStreams.h',
     'nsMIMEInputStream.h',
+    'nsTemporaryFileInputStream.h',
     'nsURLHelper.h',
 ]
 
@@ -64,6 +65,7 @@ CPP_SOURCES += [
     'nsStreamLoader.cpp',
     'nsStreamTransportService.cpp',
     'nsSyncStreamListener.cpp',
+    'nsTemporaryFileInputStream.cpp',
     'nsTransportUtils.cpp',
     'nsUDPServerSocket.cpp',
     'nsURIChecker.cpp',
@@ -103,3 +105,7 @@ if CONFIG['MOZ_PLATFORM_MAEMO']:
         CPP_SOURCES += [
             'nsAutodialQt.cpp',
         ]
+
+EXTRA_JS_MODULES += [
+    'NetUtil.jsm',
+]

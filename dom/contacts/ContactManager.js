@@ -739,7 +739,8 @@ ContactManager.prototype = {
       requestID: requestID,
       origin: principal.origin,
       appID: principal.appId,
-      browserFlag: principal.isInBrowserElement
+      browserFlag: principal.isInBrowserElement,
+      windowID: this._window.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils).outerWindowID
     });
   },
 
@@ -911,7 +912,7 @@ ContactManager.prototype = {
   },
 
   init: function(aWindow) {
-    this.initHelper(aWindow, ["Contacts:Find:Return:OK", "Contacts:Find:Return:KO",
+    this.initDOMRequestHelper(aWindow, ["Contacts:Find:Return:OK", "Contacts:Find:Return:KO",
                               "Contacts:Clear:Return:OK", "Contacts:Clear:Return:KO",
                               "Contact:Save:Return:OK", "Contact:Save:Return:KO",
                               "Contact:Remove:Return:OK", "Contact:Remove:Return:KO",
@@ -929,7 +930,9 @@ ContactManager.prototype = {
   },
 
   classID : CONTACTMANAGER_CID,
-  QueryInterface : XPCOMUtils.generateQI([nsIDOMContactManager, Ci.nsIDOMGlobalPropertyInitializer]),
+  QueryInterface : XPCOMUtils.generateQI([nsIDOMContactManager,
+                                          Ci.nsIDOMGlobalPropertyInitializer,
+                                          Ci.nsISupportsWeakReference]),
 
   classInfo : XPCOMUtils.generateCI({classID: CONTACTMANAGER_CID,
                                      contractID: CONTACTMANAGER_CONTRACTID,

@@ -76,6 +76,7 @@
 #include "nsIClipboardCommands.h"
 #include "nsICommandManager.h"
 #include "nsCRT.h"
+#include "prtime.h"
 
 namespace mozilla {
 namespace dom {
@@ -289,6 +290,8 @@ protected:
     // Actually open a channel and perform a URI load.  Note: whatever owner is
     // passed to this function will be set on the channel.  Callers who wish to
     // not have an owner on the channel should just pass null.
+    // If aSrcdoc is not void, the load will be considered as a srcdoc load,
+    // and the contents of aSrcdoc will be loaded instead of aURI.
     virtual nsresult DoURILoad(nsIURI * aURI,
                                nsIURI * aReferrer,
                                bool aSendReferrer,
@@ -302,7 +305,8 @@ protected:
                                nsIRequest ** aRequest,
                                bool aIsNewWindowTarget,
                                bool aBypassClassifier,
-                               bool aForceAllowCookies);
+                               bool aForceAllowCookies,
+                               const nsAString &aSrcdoc);
     NS_IMETHOD AddHeadersToChannel(nsIInputStream * aHeadersData, 
                                   nsIChannel * aChannel);
     virtual nsresult DoChannelLoad(nsIChannel * aChannel,

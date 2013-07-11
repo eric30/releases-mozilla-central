@@ -843,6 +843,12 @@
     "extended_statistics_ok": true,
     "description": "ms of SSL wait time including TCP and proxy tunneling"
   },
+  "SSL_TIME_UNTIL_HANDSHAKE_FINISHED": {
+    "kind": "exponential",
+    "high": "60000",
+    "n_buckets": 200,
+    "description": "ms of SSL wait time for full handshake including TCP and proxy tunneling"
+  },
   "SSL_BYTES_BEFORE_CERT_CALLBACK": {
     "kind": "exponential",
     "high": "32000",
@@ -3092,6 +3098,30 @@
     "n_buckets": "80 + 1",
     "description": "The time (in milliseconds) after showing a PopupNotification that the mainAction was first triggered"
   },
+  "DEVTOOLS_DEBUGGER_RDP_LOCAL_RELOAD_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'reload' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_REMOTE_RELOAD_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'reload' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_LOCAL_NAVIGATETO_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'navigateTo' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_REMOTE_NAVIGATETO_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'navigateTo' request to go round trip."
+  },
   "DEVTOOLS_DEBUGGER_RDP_LOCAL_DETACH_MS": {
     "kind": "exponential",
     "high": "10000",
@@ -3633,5 +3663,10 @@
   "BROWSER_IS_USER_DEFAULT": {
     "kind": "boolean",
     "description": "The result of the startup default desktop browser check."
+  },
+  "MIXED_CONTENT_PAGE_LOAD": {
+    "kind": "enumerated",
+    "n_values": 4,
+    "description": "Accumulates type of content (mixed, mixed passive, unmixed) per page load"
   }
 }

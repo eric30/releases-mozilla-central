@@ -366,8 +366,7 @@ MmsMessage::GetDelivery(nsAString& aDelivery)
     case eDeliveryState_Unknown:
     case eDeliveryState_EndGuard:
     default:
-      MOZ_NOT_REACHED("We shouldn't get any other delivery state!");
-      return NS_ERROR_UNEXPECTED;
+      MOZ_CRASH("We shouldn't get any other delivery state!");
   }
 
   return NS_OK;
@@ -409,8 +408,7 @@ MmsMessage::GetDeliveryStatus(JSContext* aCx, JS::Value* aDeliveryStatus)
         break;
       case eDeliveryStatus_EndGuard:
       default:
-        MOZ_NOT_REACHED("We shouldn't get any other delivery status!");
-        return NS_ERROR_UNEXPECTED;
+        MOZ_CRASH("We shouldn't get any other delivery status!");
     }
     tempStrArray.AppendElement(statusStr);
   }
@@ -475,13 +473,7 @@ MmsMessage::GetSmil(nsAString& aSmil)
 NS_IMETHODIMP
 MmsMessage::GetAttachments(JSContext* aCx, JS::Value* aAttachments)
 {
-  // TODO Bug 850529 We should return an empty array (or null)
-  // when it has no attachments? Need to further check this.
   uint32_t length = mAttachments.Length();
-  if (length == 0) {
-    *aAttachments = JSVAL_NULL;
-    return NS_OK;
-  }
 
   JS::Rooted<JSObject*> attachments(aCx, JS_NewArrayObject(aCx, length, nullptr));
   NS_ENSURE_TRUE(attachments, NS_ERROR_OUT_OF_MEMORY);

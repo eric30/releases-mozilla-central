@@ -16,7 +16,6 @@
  */
 
 interface StyleSheetList;
-interface TouchList;
 interface WindowProxy;
 interface nsISupports;
 
@@ -317,6 +316,12 @@ partial interface Document {
 
   [ChromeOnly]
   attribute boolean styleSheetChangeEventsEnabled;
+};
+
+// Extension to give chrome JS the ability to determine when a document was
+// created to satisfy an iframe with srcdoc attribute.
+partial interface Document {
+  [ChromeOnly] readonly attribute boolean isSrcdocDocument;
 };
 
 Document implements XPathEvaluator;

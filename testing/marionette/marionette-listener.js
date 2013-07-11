@@ -12,7 +12,7 @@ let loader = Cc["@mozilla.org/moz/jssubscript-loader;1"]
                .getService(Ci.mozIJSSubScriptLoader);
 
 loader.loadSubScript("chrome://marionette/content/marionette-simpletest.js");
-loader.loadSubScript("chrome://marionette/content/marionette-log-obj.js");
+loader.loadSubScript("chrome://marionette/content/marionette-common.js");
 Cu.import("chrome://marionette/content/marionette-elements.js");
 Cu.import("resource://gre/modules/FileUtils.jsm");
 Cu.import("resource://gre/modules/NetUtil.jsm");
@@ -279,35 +279,6 @@ function resetValues() {
   mouseEventsOnly = false;
 }
 
-/**
- * Creates an error message for a JavaScript exception thrown during
- * execute_(async_)script.
- *
- * This will generate a [msg, trace] pair like:
- *
- * ['ReferenceError: foo is not defined',
- *  'execute_script @test_foo.py, line 10
- *   inline javascript, line 2
- *   src: "return foo;"']
- *
- * @param error An Error object passed to a catch() clause.
-          fnName The name of the function to use in the stack trace message
-                 (e.g., 'execute_script').
-          pythonFile The filename of the test file containing the Marionette
-                  command that caused this exception to occur.
-          pythonLine The line number of the above test file.
-          script The JS script being executed in text form.
- */
-function createStackMessage(error, fnName, pythonFile, pythonLine, script) {
-  let python_stack = fnName + " @" + pythonFile + ", line " + pythonLine;
-  let stack = error.stack.split("\n");
-  let line = stack[0].substr(stack[0].lastIndexOf(':') + 1);
-  let msg = error.name + ": " + error.message;
-  let trace = python_stack +
-              "\ninline javascript, line " + line +
-              "\nsrc: \"" + script.split("\n")[line] + "\"";
-  return [msg, trace];
-}
 
 /*
  * Marionette Methods
@@ -582,7 +553,15 @@ function executeWithCallback(msg, useFinish) {
  * This function creates a touch event given a touch type and a touch
  */
 function emitTouchEvent(type, touch) {
-  // Using domWindowUtils
+  let loggingInfo = "Marionette: emitting Touch event of type " + type + " to element with id: " + touch.target.id + " and tag name: " + touch.target.tagName + " at coordinates (" + touch.clientX + ", " + touch.clientY + ") relative to the viewport";
+  dump(loggingInfo);
+  /*
+  Disabled per bug 888303
+  marionetteLogObj.log(loggingInfo, "TRACE");
+  sendSyncMessage("Marionette:shareData",
+                  {log: elementManager.wrapValue(marionetteLogObj.getLogs())});
+  marionetteLogObj.clearLogs();
+  */
   let domWindowUtils = curWindow.QueryInterface(Components.interfaces.nsIInterfaceRequestor).getInterface(Components.interfaces.nsIDOMWindowUtils);
   domWindowUtils.sendTouchEvent(type, [touch.identifier], [touch.screenX], [touch.screenY], [touch.radiusX], [touch.radiusY], [touch.rotationAngle], [touch.force], 1, 0);
 }
@@ -595,11 +574,19 @@ function emitTouchEvent(type, touch) {
  *           elClientX and elClientY are the coordinates of the mouse relative to the viewport
  */
 function emitMouseEvent(doc, type, elClientX, elClientY, detail, button) {
+  let loggingInfo = "Marionette: emitting Mouse event of type " + type + " at coordinates (" + elClientX + ", " + elClientY + ") relative to the viewport";
+  dump(loggingInfo);
+  /*
+  Disabled per bug 888303
+  marionetteLogObj.log(loggingInfo, "TRACE");
+  sendSyncMessage("Marionette:shareData",
+                  {log: elementManager.wrapValue(marionetteLogObj.getLogs())});
+  marionetteLogObj.clearLogs();
+  */
   detail = detail || 1;
   button = button || 0;
-  var win = doc.defaultView;
+  let win = doc.defaultView;
   // Figure out the element the mouse would be over at (x, y)
-  var target = doc.elementFromPoint(elClientX, elClientY);
   utils.synthesizeMouseAtPoint(elClientX, elClientY, {type: type, button: button, clickCount: detail}, win);
 }
 

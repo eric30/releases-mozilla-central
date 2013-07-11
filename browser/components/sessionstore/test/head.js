@@ -19,6 +19,13 @@ registerCleanupFunction(function () {
   Services.prefs.clearUserPref("browser.sessionstore.restore_on_demand");
 });
 
+// Obtain access to internals
+Services.prefs.setBoolPref("browser.sessionstore.debug", true);
+registerCleanupFunction(function () {
+  Services.prefs.clearUserPref("browser.sessionstore.debug");
+});
+
+
 // This kicks off the search service used on about:home and allows the
 // session restore tests to be run standalone without triggering errors.
 Cc["@mozilla.org/browser/clh;1"].getService(Ci.nsIBrowserHandler).defaultArgs;
@@ -282,12 +289,37 @@ function closeAllButPrimaryWindow() {
   }
 }
 
-function whenNewWindowLoaded(aIsPrivate, aCallback) {
-  let win = OpenBrowserWindow({private: aIsPrivate});
+function whenNewWindowLoaded(aOptions, aCallback) {
+  let win = OpenBrowserWindow(aOptions);
+  let gotLoad = false;
+  let gotActivate = (Cc["@mozilla.org/focus-manager;1"].getService(Ci.nsIFocusManager).activeWindow == win);
+
+  function maybeRunCallback() {
+    if (gotLoad && gotActivate) {
+      win.BrowserChromeTest.runWhenReady(function() {
+        executeSoon(function() { aCallback(win); });
+      });
+    }
+  }
+
+  if (!gotActivate) {
+    win.addEventListener("activate", function onActivate() {
+      info("Got activate.");
+      win.removeEventListener("activate", onActivate, false);
+      gotActivate = true;
+      maybeRunCallback();
+    }, false);
+  } else {
+    info("Was activated.");
+  }
+
   win.addEventListener("load", function onLoad() {
+    info("Got load");
     win.removeEventListener("load", onLoad, false);
-    aCallback(win);
+    gotLoad = true;
+    maybeRunCallback();
   }, false);
+  return win;
 }
 
 /**

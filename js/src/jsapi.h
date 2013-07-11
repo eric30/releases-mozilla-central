@@ -10,6 +10,7 @@
 #define jsapi_h
 
 #include "mozilla/FloatingPoint.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/RangedPtr.h"
 #include "mozilla/StandardInteger.h"
 #include "mozilla/ThreadLocal.h"
@@ -53,6 +54,7 @@ class JS_PUBLIC_API(AutoCheckRequestDepth)
     JSContext *cx;
   public:
     AutoCheckRequestDepth(JSContext *cx);
+    AutoCheckRequestDepth(js::ContextFriendFields *cx);
     ~AutoCheckRequestDepth();
 };
 
@@ -83,6 +85,7 @@ inline void AssertArgumentsAreSane(JSContext *cx, const Value &v) {
 class JS_PUBLIC_API(AutoGCRooter) {
   public:
     AutoGCRooter(JSContext *cx, ptrdiff_t tag);
+    AutoGCRooter(js::ContextFriendFields *cx, ptrdiff_t tag);
 
     ~AutoGCRooter() {
         JS_ASSERT(this == *stackTop);
@@ -130,7 +133,8 @@ class JS_PUBLIC_API(AutoGCRooter) {
         OBJU32HASHMAP=-24, /* js::AutoObjectUnsigned32HashMap */
         OBJHASHSET =  -25, /* js::AutoObjectHashSet */
         JSONPARSER =  -26, /* js::JSONParser */
-        CUSTOM =      -27  /* js::CustomAutoRooter */
+        CUSTOM =      -27, /* js::CustomAutoRooter */
+        FUNVECTOR =   -28  /* js::AutoFunctionVector */
     };
 
   private:
@@ -219,6 +223,13 @@ class AutoVectorRooter : protected AutoGCRooter
 {
   public:
     explicit AutoVectorRooter(JSContext *cx, ptrdiff_t tag
+                              MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+      : AutoGCRooter(cx, tag), vector(cx), vectorRoot(cx, &vector)
+    {
+        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+    }
+
+    explicit AutoVectorRooter(js::ContextFriendFields *cx, ptrdiff_t tag
                               MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
       : AutoGCRooter(cx, tag), vector(cx), vectorRoot(cx, &vector)
     {
@@ -378,10 +389,10 @@ class AutoHashMapRooter : protected AutoGCRooter
         return map.capacity();
     }
 
-    size_t sizeOfExcludingThis(JSMallocSizeOfFun mallocSizeOf) const {
+    size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const {
         return map.sizeOfExcludingThis(mallocSizeOf);
     }
-    size_t sizeOfIncludingThis(JSMallocSizeOfFun mallocSizeOf) const {
+    size_t sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const {
         return map.sizeOfIncludingThis(mallocSizeOf);
     }
 
@@ -493,10 +504,10 @@ class AutoHashSetRooter : protected AutoGCRooter
         return set.capacity();
     }
 
-    size_t sizeOfExcludingThis(JSMallocSizeOfFun mallocSizeOf) const {
+    size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const {
         return set.sizeOfExcludingThis(mallocSizeOf);
     }
-    size_t sizeOfIncludingThis(JSMallocSizeOfFun mallocSizeOf) const {
+    size_t sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const {
         return set.sizeOfIncludingThis(mallocSizeOf);
     }
 
@@ -572,6 +583,26 @@ class AutoObjectVector : public AutoVectorRooter<JSObject *>
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
+class AutoFunctionVector : public AutoVectorRooter<JSFunction *>
+{
+  public:
+    explicit AutoFunctionVector(JSContext *cx
+                                MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+        : AutoVectorRooter<JSFunction *>(cx, FUNVECTOR)
+    {
+        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+    }
+
+    explicit AutoFunctionVector(js::ContextFriendFields *cx
+                                MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+        : AutoVectorRooter<JSFunction *>(cx, FUNVECTOR)
+    {
+        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+    }
+
+    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
+};
+
 class AutoScriptVector : public AutoVectorRooter<JSScript *>
 {
   public:
@@ -591,7 +622,8 @@ class AutoScriptVector : public AutoVectorRooter<JSScript *>
 class JS_PUBLIC_API(CustomAutoRooter) : private AutoGCRooter
 {
   public:
-    explicit CustomAutoRooter(JSContext *cx MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+    template <typename CX>
+    explicit CustomAutoRooter(CX *cx MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
       : AutoGCRooter(cx, CUSTOM)
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
@@ -941,7 +973,7 @@ typedef enum JSGCStatus {
 } JSGCStatus;
 
 typedef void
-(* JSGCCallback)(JSRuntime *rt, JSGCStatus status);
+(* JSGCCallback)(JSRuntime *rt, JSGCStatus status, void *data);
 
 typedef enum JSFinalizeStatus {
     /*
@@ -1500,7 +1532,7 @@ namespace JS {
 
 /* ES5 9.3 ToNumber. */
 JS_ALWAYS_INLINE bool
-ToNumber(JSContext *cx, const Value &v, double *out)
+ToNumber(JSContext *cx, HandleValue v, double *out)
 {
     AssertArgumentsAreSane(cx, v);
     {
@@ -1880,8 +1912,14 @@ JS_ContextIterator(JSRuntime *rt, JSContext **iterp);
 extern JS_PUBLIC_API(JSVersion)
 JS_GetVersion(JSContext *cx);
 
-extern JS_PUBLIC_API(JSVersion)
-JS_SetVersion(JSContext *cx, JSVersion version);
+// Mutate the version on the compartment. This is generally discouraged, but
+// necessary to support the version mutation in the js and xpc shell command
+// set.
+//
+// It would be nice to put this in jsfriendapi, but the linkage requirements
+// of the shells make that impossible.
+JS_PUBLIC_API(void)
+JS_SetVersionForCompartment(JSCompartment *compartment, JSVersion version);
 
 extern JS_PUBLIC_API(const char *)
 JS_VersionToString(JSVersion version);
@@ -1940,8 +1978,6 @@ JS_StringToVersion(const char *string);
                                                    embedding. */
 
 #define JSOPTION_BASELINE       JS_BIT(14)      /* Baseline compiler. */
-
-#define JSOPTION_PCCOUNT        JS_BIT(15)      /* Collect per-op execution counts */
 
 #define JSOPTION_TYPE_INFERENCE JS_BIT(16)      /* Perform type inference. */
 #define JSOPTION_STRICT_MODE    JS_BIT(17)      /* Provides a way to force
@@ -2352,8 +2388,12 @@ JS_AnchorPtr(void *p);
  *          JS_CallTracer whenever the root contains a traceable thing.
  * data:    the data argument to pass to each invocation of traceOp.
  */
+extern JS_PUBLIC_API(JSBool)
+JS_AddExtraGCRootsTracer(JSRuntime *rt, JSTraceDataOp traceOp, void *data);
+
+/* Undo a call to JS_AddExtraGCRootsTracer. */
 extern JS_PUBLIC_API(void)
-JS_SetExtraGCRootsTracer(JSRuntime *rt, JSTraceDataOp traceOp, void *data);
+JS_RemoveExtraGCRootsTracer(JSRuntime *rt, JSTraceDataOp traceOp, void *data);
 
 /*
  * JS_CallTracer API and related macros for implementors of JSTraceOp, to
@@ -2606,7 +2646,7 @@ extern JS_PUBLIC_API(void)
 JS_MaybeGC(JSContext *cx);
 
 extern JS_PUBLIC_API(void)
-JS_SetGCCallback(JSRuntime *rt, JSGCCallback cb);
+JS_SetGCCallback(JSRuntime *rt, JSGCCallback cb, void *data);
 
 extern JS_PUBLIC_API(void)
 JS_SetFinalizeCallback(JSRuntime *rt, JSFinalizeCallback cb);
@@ -2631,7 +2671,10 @@ JS_IsGCMarkingTracer(JSTracer *trc);
  * re-inserted with the correct hash.
  */
 extern JS_PUBLIC_API(JSBool)
-JS_IsAboutToBeFinalized(JSObject **obj);
+JS_IsAboutToBeFinalized(JS::Heap<JSObject *> *objp);
+
+extern JS_PUBLIC_API(JSBool)
+JS_IsAboutToBeFinalizedUnbarriered(JSObject **objp);
 
 typedef enum JSGCParamKey {
     /* Maximum nominal heap before last ditch GC. */
@@ -2774,7 +2817,7 @@ struct JSClass {
     const char          *name;
     uint32_t            flags;
 
-    /* Mandatory non-null function pointer members. */
+    /* Mandatory function pointer members. */
     JSPropertyOp        addProperty;
     JSDeletePropertyOp  delProperty;
     JSPropertyOp        getProperty;
@@ -2782,9 +2825,9 @@ struct JSClass {
     JSEnumerateOp       enumerate;
     JSResolveOp         resolve;
     JSConvertOp         convert;
-    JSFinalizeOp        finalize;
 
-    /* Optionally non-null members start here. */
+    /* Optional members (may be null). */
+    JSFinalizeOp        finalize;
     JSCheckAccessOp     checkAccess;
     JSNative            call;
     JSHasInstanceOp     hasInstance;
@@ -3136,18 +3179,34 @@ SameZoneAs(JSObject *obj)
     return ZoneSpecifier(obj);
 }
 
+struct JS_PUBLIC_API(CompartmentOptions) {
+    ZoneSpecifier zoneSpec;
+    JSVersion version;
+
+    explicit CompartmentOptions() : zoneSpec(JS::FreshZone)
+                                  , version(JSVERSION_UNKNOWN)
+    {}
+
+    CompartmentOptions &setZone(ZoneSpecifier spec) { zoneSpec = spec; return *this; }
+    CompartmentOptions &setVersion(JSVersion version_) {
+        JS_ASSERT(version_ != JSVERSION_UNKNOWN);
+        version = version_;
+        return *this;
+    }
+};
+
 } /* namespace JS */
 
 extern JS_PUBLIC_API(JSObject *)
 JS_NewGlobalObject(JSContext *cx, JSClass *clasp, JSPrincipals *principals,
-                   JS::ZoneSpecifier zoneSpec = JS::FreshZone);
+                   const JS::CompartmentOptions &options = JS::CompartmentOptions());
 
 extern JS_PUBLIC_API(JSObject *)
 JS_NewObject(JSContext *cx, JSClass *clasp, JSObject *proto, JSObject *parent);
 
 /* Queries the [[Extensible]] property of the object. */
 extern JS_PUBLIC_API(JSBool)
-JS_IsExtensible(JSObject *obj);
+JS_IsExtensible(JSContext *cx, JS::HandleObject obj, JSBool *extensible);
 
 extern JS_PUBLIC_API(JSBool)
 JS_IsNative(JSObject *obj);
@@ -3176,6 +3235,9 @@ JS_DeepFreezeObject(JSContext *cx, JSObject *obj);
  */
 extern JS_PUBLIC_API(JSBool)
 JS_FreezeObject(JSContext *cx, JSObject *obj);
+
+extern JS_PUBLIC_API(JSBool)
+JS_PreventExtensions(JSContext *cx, JS::HandleObject obj);
 
 extern JS_PUBLIC_API(JSObject *)
 JS_New(JSContext *cx, JSObject *ctor, unsigned argc, jsval *argv);
@@ -3893,6 +3955,10 @@ struct JS_PUBLIC_API(CompileOptions) {
     bool noScriptRval;
     bool selfHostingMode;
     bool canLazilyParse;
+    bool strictOption;
+    bool extraWarningsOption;
+    bool werrorOption;
+    bool asmJSOption;
     enum SourcePolicy {
         NO_SOURCE,
         LAZY_SOURCE,
@@ -4423,6 +4489,8 @@ class JSAutoByteString
         mBytes = JS_EncodeString(cx, str);
         return mBytes;
     }
+
+    char *encodeLatin1(js::ContextFriendFields *cx, JSString *str);
 
     char *encodeUtf8(JSContext *cx, JSString *str) {
         JS_ASSERT(!mBytes);
@@ -5096,6 +5164,7 @@ using JS::Latin1CharsZ;
 using JS::AutoIdVector;
 using JS::AutoValueVector;
 using JS::AutoObjectVector;
+using JS::AutoFunctionVector;
 using JS::AutoScriptVector;
 using JS::AutoIdArray;
 

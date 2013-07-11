@@ -32,12 +32,12 @@ function debug(aMsg) {
   //dump("-*-*- Webapps.jsm : " + aMsg + "\n");
 }
 
-let cachedSysMsgPref = null;
+function supportUseCurrentProfile() {
+  return Services.prefs.getBoolPref("dom.webapps.useCurrentProfile");
+}
+
 function supportSystemMessages() {
-  if (cachedSysMsgPref === null) {
-    cachedSysMsgPref = Services.prefs.getBoolPref("dom.sysmsg.enabled");
-  }
-  return cachedSysMsgPref;
+  return Services.prefs.getBoolPref("dom.sysmsg.enabled");
 }
 
 // Minimum delay between two progress events while downloading, in ms.
@@ -78,6 +78,13 @@ XPCOMUtils.defineLazyGetter(this, "updateSvc", function() {
   // the webapp); otherwise, they're in the current profile.
   const DIRECTORY_NAME = WEBAPP_RUNTIME ? "WebappRegD" : "ProfD";
 #endif
+
+// We'll use this to identify privileged apps that have been preinstalled
+// For those apps we'll set
+// STORE_ID_PENDING_PREFIX + installOrigin
+// as the storeID. This ensures it's unique and can't be set from a legit
+// store even by error.
+const STORE_ID_PENDING_PREFIX = "#unknownID#";
 
 this.DOMApplicationRegistry = {
   appsFile: null,
@@ -258,16 +265,19 @@ this.DOMApplicationRegistry = {
 
     // Install the permissions for this app, as if we were updating
     // to cleanup the old ones if needed.
-    this._readManifests([{ id: aId }], (function(aResult) {
-      let data = aResult[0];
-      PermissionsInstaller.installPermissions({
-        manifest: data.manifest,
-        manifestURL: this.webapps[aId].manifestURL,
-        origin: this.webapps[aId].origin
-      }, true, function() {
-        debug("Error installing permissions for " + aId);
-      });
-    }).bind(this));
+    // TODO It's not clear what this should do when there are multiple profiles.
+    if (supportUseCurrentProfile()) {
+      this._readManifests([{ id: aId }], (function(aResult) {
+        let data = aResult[0];
+        PermissionsInstaller.installPermissions({
+          manifest: data.manifest,
+          manifestURL: this.webapps[aId].manifestURL,
+          origin: this.webapps[aId].origin
+        }, true, function() {
+          debug("Error installing permissions for " + aId);
+        });
+      }).bind(this));
+    }
   },
 
   updateOfflineCacheForApp: function updateOfflineCacheForApp(aId) {
@@ -342,6 +352,11 @@ this.DOMApplicationRegistry = {
     }
 
     app.origin = "app://" + aId;
+
+    // Do this for all preinstalled apps... we can't know at this
+    // point if the updates will be signed or not and it doesn't
+    // hurt to have it always.
+    app.storeId = STORE_ID_PENDING_PREFIX + app.installOrigin;
 
     // Extract the manifest.webapp file from application.zip.
     let zipFile = baseDir.clone();
@@ -1237,11 +1252,14 @@ this.DOMApplicationRegistry = {
         this._saveApps((function() {
           // Update the handlers and permissions for this app.
           this.updateAppHandlers(aOldManifest, aData, app);
-          PermissionsInstaller.installPermissions(
-            { manifest: aData,
-              origin: app.origin,
-              manifestURL: app.manifestURL },
-            true);
+          if (supportUseCurrentProfile()) {
+            PermissionsInstaller.installPermissions(
+              { manifest: aData,
+                origin: app.origin,
+                manifestURL: app.manifestURL },
+              true);
+          }
+
           this.broadcastMessage("Webapps:PackageEvent",
                                 { type: "applied",
                                   manifestURL: app.manifestURL,
@@ -1462,12 +1480,14 @@ this.DOMApplicationRegistry = {
         this._writeFile(manFile, JSON.stringify(aNewManifest), function() { });
         manifest = new ManifestHelper(aNewManifest, app.origin);
 
-        // Update the permissions for this app.
-        PermissionsInstaller.installPermissions({
-          manifest: app.manifest,
-          origin: app.origin,
-          manifestURL: aData.manifestURL
-        }, true);
+        if (supportUseCurrentProfile()) {
+          // Update the permissions for this app.
+          PermissionsInstaller.installPermissions({
+            manifest: app.manifest,
+            origin: app.origin,
+            manifestURL: aData.manifestURL
+          }, true);
+        }
 
         app.name = manifest.name;
         app.csp = manifest.csp || "";
@@ -2012,12 +2032,14 @@ this.DOMApplicationRegistry = {
     // For package apps, the permissions are not in the mini-manifest, so
     // don't update the permissions yet.
     if (!aData.isPackage) {
-      PermissionsInstaller.installPermissions({ origin: appObject.origin,
-                                                manifestURL: appObject.manifestURL,
-                                                manifest: jsonManifest },
-                                              isReinstall, (function() {
-        this.uninstall(aData, aData.mm);
-      }).bind(this));
+      if (supportUseCurrentProfile()) {
+        PermissionsInstaller.installPermissions({ origin: appObject.origin,
+                                                  manifestURL: appObject.manifestURL,
+                                                  manifest: jsonManifest },
+                                                isReinstall, (function() {
+          this.uninstall(aData, aData.mm);
+        }).bind(this));
+      }
     }
 
     ["installState", "downloadAvailable",
@@ -2075,12 +2097,13 @@ this.DOMApplicationRegistry = {
         app.downloadAvailable = false;
         this._saveApps((function() {
           this.updateAppHandlers(null, aManifest, appObject);
-
-          // Update the permissions for this app.
-          PermissionsInstaller.installPermissions({ manifest: aManifest,
-                                                    origin: appObject.origin,
-                                                    manifestURL: appObject.manifestURL },
-                                                  true);
+          if (supportUseCurrentProfile()) {
+            // Update the permissions for this app.
+            PermissionsInstaller.installPermissions({ manifest: aManifest,
+                                                      origin: appObject.origin,
+                                                      manifestURL: appObject.manifestURL },
+                                                    true);
+          }
           debug("About to fire Webapps:PackageEvent 'installed'");
           this.broadcastMessage("Webapps:PackageEvent",
                                 { type: "installed",
@@ -2244,7 +2267,8 @@ this.DOMApplicationRegistry = {
     function checkForStoreIdMatch(aStoreId, aStoreVersion) {
       // Things to check:
       // 1. if it's a update:
-      //   a. We should already have this storeId
+      //   a. We should already have this storeId, or the original storeId must start
+      //      with STORE_ID_PENDING_PREFIX
       //   b. The manifestURL for the stored app should be the same one we're
       //      updating
       //   c. And finally the version of the update should be higher than the one
@@ -2258,14 +2282,17 @@ this.DOMApplicationRegistry = {
       let appId = self.getAppLocalIdByStoreId(aStoreId);
       let isInstalled = appId != Ci.nsIScriptSecurityManager.NO_APP_ID;
       if (aIsUpdate) {
-        if (!isInstalled || (app.localId !== appId)) {
-          // If we don't have the storeId on track already, this
-          // cannot be an update
+        let isDifferent = app.localId !== appId;
+        let isPending = app.storeId.indexOf(STORE_ID_PENDING_PREFIX) == 0;
+
+        if ((!isInstalled && !isPending) || (isInstalled && isDifferent)) {
           throw "WRONG_APP_STORE_ID";
         }
-        if (app.storeVersion >= aStoreVersion) {
+
+        if (!isPending && (app.storeVersion >= aStoreVersion)) {
           throw "APP_STORE_VERSION_ROLLBACK";
         }
+
       } else if (isInstalled) {
         throw "WRONG_APP_STORE_ID";
       }

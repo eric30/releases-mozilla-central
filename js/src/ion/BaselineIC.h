@@ -14,8 +14,8 @@
 #include "jsgc.h"
 #include "jsopcode.h"
 #include "jsproxy.h"
-#include "BaselineJIT.h"
-#include "BaselineRegisters.h"
+#include "ion/BaselineJIT.h"
+#include "ion/BaselineRegisters.h"
 
 #include "gc/Heap.h"
 
@@ -544,8 +544,7 @@ class ICStub
             IC_STUB_KIND_LIST(DEF_KIND_STR)
 #undef DEF_KIND_STR
           default:
-            JS_NOT_REACHED("Invalid kind.");
-            return "INVALID_KIND";
+            MOZ_ASSUME_UNREACHABLE("Invalid kind.");
         }
     }
 
@@ -1046,7 +1045,7 @@ class ICStubCompiler
             regs.take(R1);
             break;
           default:
-            JS_NOT_REACHED("Invalid numInputs");
+            MOZ_ASSUME_UNREACHABLE("Invalid numInputs");
         }
 
         return regs;

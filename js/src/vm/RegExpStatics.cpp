@@ -6,10 +6,11 @@
 
 #include "vm/RegExpStatics.h"
 
+#include "vm/RegExpStaticsObject.h"
+
 #include "jsobjinlines.h"
 
 #include "vm/RegExpObject-inl.h"
-#include "vm/RegExpStatics-inl.h"
 
 using namespace js;
 
@@ -36,7 +37,7 @@ resc_trace(JSTracer *trc, JSObject *obj)
     res->mark(trc);
 }
 
-Class js::RegExpStaticsClass = {
+Class RegExpStaticsObject::class_ = {
     "RegExpStatics",
     JSCLASS_HAS_PRIVATE | JSCLASS_IMPLEMENTS_BARRIERS,
     JS_PropertyStub,         /* addProperty */
@@ -57,7 +58,7 @@ Class js::RegExpStaticsClass = {
 JSObject *
 RegExpStatics::create(JSContext *cx, GlobalObject *parent)
 {
-    JSObject *obj = NewObjectWithGivenProto(cx, &RegExpStaticsClass, NULL, parent);
+    JSObject *obj = NewObjectWithGivenProto(cx, &RegExpStaticsObject::class_, NULL, parent);
     if (!obj)
         return NULL;
     RegExpStatics *res = cx->new_<RegExpStatics>();

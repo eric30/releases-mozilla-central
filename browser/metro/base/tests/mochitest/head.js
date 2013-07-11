@@ -27,6 +27,15 @@ function isLandscapeMode()
   return (MetroUtils.snappedState == Ci.nsIWinMetroUtils.fullScreenLandscape);
 }
 
+function setDevPixelEqualToPx()
+{
+  todo(false, "test depends on devPixelsPerPx set to 1.0 - see bugs 886624 and 859742");
+  SpecialPowers.setCharPref("layout.css.devPixelsPerPx", "1.0");
+  registerCleanupFunction(function () {
+    SpecialPowers.clearUserPref("layout.css.devPixelsPerPx");
+  });
+}
+
 function checkContextUIMenuItemCount(aCount)
 {
   let visibleCount = 0;
@@ -162,23 +171,22 @@ function clearSelection(aTarget) {
   Asynchronous Metro ui helpers
 =============================================================================*/
 
+// Hides the tab and context app bar if they are visible
 function hideContextUI()
 {
   purgeEventQueue();
 
   return Task.spawn(function() {
-    if (ContextUI.isExpanded) {
+    if (ContextUI.tabbarVisible) {
       let promise = waitForEvent(Elements.tray, "transitionend", null, Elements.tray);
-      if (ContextUI.dismiss())
-      {
-        info("ContextUI dismissed, waiting...");
+      if (ContextUI.dismiss()) {
         yield promise;
       }
     }
 
-    if (Elements.contextappbar.isShowing) {
+    if (ContextUI.contextAppbarVisible) {
       let promise = waitForEvent(Elements.contextappbar, "transitionend", null, Elements.contextappbar);
-      Elements.contextappbar.dismiss();
+      ContextUI.dismissContextAppbar();
       yield promise;
     }
   });
@@ -187,7 +195,7 @@ function hideContextUI()
 function showNavBar()
 {
   let promise = waitForEvent(Elements.navbar, "transitionend");
-  if (!ContextUI.isVisible) {
+  if (!ContextUI.navbarVisible) {
     ContextUI.displayNavbar();
     return promise;
   }
@@ -525,6 +533,25 @@ function synthesizeNativeMouseMUp(aElement, aOffsetX, aOffsetY) {
 }
 
 /*
+ * logicalCoordsForElement - given coordinates relative to top-left of
+ * given element, returns logical coordinates for window. If a non-numeric
+ * X or Y value is given, a value for the center of the element in that
+ * dimension is used.
+ *
+ * @param aElement element coordinates are relative to.
+ * @param aX, aY relative coordinates.
+ */
+function logicalCoordsForElement (aElement, aX, aY) {
+  let coords = { x: null, y: null };
+  let rect = aElement.getBoundingClientRect();
+
+  coords.x = isNaN(aX) ? rect.left + (rect.width / 2) : rect.left + aX;
+  coords.y = isNaN(aY) ? rect.top + (rect.height / 2) : rect.top + aY;
+
+  return coords;
+}
+
+/*
  * sendContextMenuClick - simulates a press-hold touch input event. Event
  * is delivered to the main window of the application through the top-level
  * widget.
@@ -559,8 +586,8 @@ function sendContextMenuClickToWindow(aWindow, aX, aY) {
 function sendContextMenuClickToElement(aWindow, aElement, aX, aY) {
   let utils = aWindow.QueryInterface(Components.interfaces.nsIInterfaceRequestor)
                       .getInterface(Components.interfaces.nsIDOMWindowUtils);
-  let rect = aElement.getBoundingClientRect();
-  utils.sendMouseEventToWindow("contextmenu", rect.left + aX, rect.top + aY, 2, 1, 0, true,
+  let coords = logicalCoordsForElement(aElement, aX, aY);
+  utils.sendMouseEventToWindow("contextmenu", coords.x, coords.y, 2, 1, 0, true,
                                 1, Ci.nsIDOMMouseEvent.MOZ_SOURCE_TOUCH);
 }
 
@@ -587,8 +614,8 @@ function sendTap(aWindow, aX, aY) {
 }
 
 function sendElementTap(aWindow, aElement, aX, aY) {
-  let rect = aElement.getBoundingClientRect();
-  EventUtils.synthesizeMouseAtPoint(rect.left + aX, rect.top + aY, {
+  let coords = logicalCoordsForElement(aElement, aX, aY);
+  EventUtils.synthesizeMouseAtPoint(coords.x, coords.y, {
       clickCount: 1,
       inputSource: Ci.nsIDOMMouseEvent.MOZ_SOURCE_TOUCH
     }, aWindow);
@@ -756,6 +783,24 @@ function runTests() {
   });
 }
 
+// wrap a method with a spy that records how and how many times it gets called
+// the spy is returned; use spy.restore() to put the original back
+function spyOnMethod(aObj, aMethod) {
+  let origFunc = aObj[aMethod];
+  let spy = function() {
+    spy.calledWith = Array.slice(arguments);
+    spy.callCount++;
+    return (spy.returnValue = origFunc.apply(aObj, arguments));
+  };
+  spy.callCount = 0;
+  spy.restore = function() {
+    return (aObj[aMethod] = origFunc);
+  };
+  return (aObj[aMethod] = spy);
+}
+
+// replace a method with a stub that records how and how many times it gets called
+// the stub is returned; use stub.restore() to put the original back
 function stubMethod(aObj, aMethod) {
   let origFunc = aObj[aMethod];
   let func = function() {

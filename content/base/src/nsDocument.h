@@ -25,7 +25,6 @@
 #include "nsIScriptGlobalObject.h"
 #include "nsIContent.h"
 #include "nsEventListenerManager.h"
-#include "nsIDOMNodeSelector.h"
 #include "nsIPrincipal.h"
 #include "nsIParser.h"
 #include "nsBindingManager.h"
@@ -62,6 +61,7 @@
 #include "nsISecurityEventSink.h"
 #include "nsIChannelEventSink.h"
 #include "imgIRequest.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/DOMImplementation.h"
 #include "nsIDOMTouchEvent.h"
 #include "nsIInlineEventHandlers.h"
@@ -224,7 +224,7 @@ public:
   };
 
   static size_t SizeOfExcludingThis(nsIdentifierMapEntry* aEntry,
-                                    nsMallocSizeOfFun aMallocSizeOf,
+                                    mozilla::MallocSizeOf aMallocSizeOf,
                                     void* aArg);
 
 private:
@@ -818,10 +818,6 @@ public:
   already_AddRefed<nsIBoxObject> GetBoxObjectFor(mozilla::dom::Element* aElement,
                                                  mozilla::ErrorResult& aRv) MOZ_OVERRIDE;
 
-  virtual NS_HIDDEN_(nsresult) GetXBLChildNodesFor(nsIContent* aContent,
-                                                   nsIDOMNodeList** aResult);
-  virtual NS_HIDDEN_(nsresult) GetContentListFor(nsIContent* aContent,
-                                                 nsIDOMNodeList** aResult);
   virtual NS_HIDDEN_(Element*)
     GetAnonymousElementByAttribute(nsIContent* aElement,
                                    nsIAtom* aAttrName,
@@ -1121,6 +1117,12 @@ public:
 
   static void XPCOMShutdown();
 
+  bool mIsTopLevelContentDocument:1;
+
+  bool IsTopLevelContentDocument();
+
+  void SetIsTopLevelContentDocument(bool aIsTopLevelContentDocument);
+
   js::ExpandoAndGeneration mExpandoAndGeneration;
 
 protected:
@@ -1287,9 +1289,6 @@ protected:
   uint8_t mXMLDeclarationBits;
 
   nsInterfaceHashtable<nsPtrHashKey<nsIContent>, nsPIBoxObject> *mBoxObjectTable;
-
-  // The channel that got passed to StartDocumentLoad(), if any
-  nsCOMPtr<nsIChannel> mChannel;
 
   // A document "without a browsing context" that owns the content of
   // HTMLTemplateElement.

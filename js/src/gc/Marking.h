@@ -8,7 +8,6 @@
 #define gc_Marking_h
 
 #include "jsgc.h"
-#include "jscntxt.h"
 #include "jslock.h"
 
 #include "gc/Barrier.h"
@@ -30,6 +29,7 @@ namespace js {
 
 class ArgumentsObject;
 class ArrayBufferObject;
+class ArrayBufferViewObject;
 class BaseShape;
 class GlobalObject;
 class UnownedBaseShape;
@@ -95,6 +95,7 @@ DeclMarker(BaseShape, UnownedBaseShape)
 DeclMarker(IonCode, ion::IonCode)
 DeclMarker(Object, ArgumentsObject)
 DeclMarker(Object, ArrayBufferObject)
+DeclMarker(Object, ArrayBufferViewObject)
 DeclMarker(Object, DebugScopeObject)
 DeclMarker(Object, GlobalObject)
 DeclMarker(Object, JSObject)
@@ -191,6 +192,9 @@ bool
 IsValueAboutToBeFinalized(Value *v);
 
 /*** Slot Marking ***/
+
+bool
+IsSlotMarked(HeapSlot *s);
 
 void
 MarkSlot(JSTracer *trc, HeapSlot *s, const char *name);

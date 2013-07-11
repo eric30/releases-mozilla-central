@@ -6,6 +6,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/DebugOnly.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/Util.h"
 
 #include "mozilla/dom/ContentChild.h"
@@ -2140,6 +2141,8 @@ History::FetchPageInfo(VisitData& _place, bool* _exists)
       "FROM moz_places "
       "WHERE url = :page_url "
     );
+    NS_ENSURE_STATE(stmt);
+
     rv = URIBinder::Bind(stmt, NS_LITERAL_CSTRING("page_url"), _place.spec);
     NS_ENSURE_SUCCESS(rv, rv);
   }
@@ -2149,11 +2152,12 @@ History::FetchPageInfo(VisitData& _place, bool* _exists)
       "FROM moz_places "
       "WHERE guid = :guid "
     );
+    NS_ENSURE_STATE(stmt);
+
     rv = stmt->BindUTF8StringByName(NS_LITERAL_CSTRING("guid"), _place.guid);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
-  NS_ENSURE_TRUE(stmt, rv);
   mozStorageStatementScoper scoper(stmt);
 
   rv = stmt->ExecuteStep(_exists);
@@ -2221,13 +2225,13 @@ History::FetchPageInfo(VisitData& _place, bool* _exists)
 }
 
 /* static */ size_t
-History::SizeOfEntryExcludingThis(KeyClass* aEntry, nsMallocSizeOfFun aMallocSizeOf, void *)
+History::SizeOfEntryExcludingThis(KeyClass* aEntry, mozilla::MallocSizeOf aMallocSizeOf, void *)
 {
   return aEntry->array.SizeOfExcludingThis(aMallocSizeOf);
 }
 
 size_t
-History::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOfThis)
+History::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOfThis)
 {
   return aMallocSizeOfThis(this) +
          mObservers.SizeOfExcludingThis(SizeOfEntryExcludingThis, aMallocSizeOfThis);
@@ -2712,7 +2716,7 @@ History::GetPlacesInfo(const JS::Value& aPlaceIdentifiers,
       nsCOMPtr<nsIURI> uri = GetJSValueAsURI(aCtx, placeIdentifier);
       if (!uri)
         return NS_ERROR_INVALID_ARG; // neither a guid, nor a uri.
-      *placesInfo.AppendElement(VisitData(uri));
+      placesInfo.AppendElement(VisitData(uri));
     }
   }
 

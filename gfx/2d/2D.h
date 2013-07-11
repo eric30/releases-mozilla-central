@@ -11,6 +11,13 @@
 #include "Rect.h"
 #include "Matrix.h"
 #include "UserData.h"
+
+// GenericRefCountedBase allows us to hold on to refcounted objects of any type
+// (contrary to RefCounted<T> which requires knowing the type T) and, in particular,
+// without having a dependency on that type. This is used for DrawTargetSkia
+// to be able to hold on to a GLContext.
+#include "mozilla/GenericRefCounted.h"
+
 // This RefPtr class isn't ideal for usage in Azure, as it doesn't allow T**
 // outparams using the &-operator. But it will have to do as there's no easy
 // solution.
@@ -31,6 +38,10 @@ struct ID3D10Texture2D;
 struct IDWriteRenderingParams;
 
 class GrContext;
+struct GrGLInterface;
+
+struct CGContext;
+typedef struct CGContext *CGContextRef;
 
 namespace mozilla {
 
@@ -296,7 +307,7 @@ public:
 
 /*
  * This is the base class for source surfaces. These objects are surfaces
- * which may be used as a source in a SurfacePattern of a DrawSurface call.
+ * which may be used as a source in a SurfacePattern or a DrawSurface call.
  * They cannot be drawn to directly.
  */
 class SourceSurface : public RefCounted<SourceSurface>
@@ -719,7 +730,7 @@ public:
   virtual void MaskSurface(const Pattern &aSource,
                            SourceSurface *aMask,
                            Point aOffset,
-                           const DrawOptions &aOptions = DrawOptions()) { MOZ_ASSERT(0); };
+                           const DrawOptions &aOptions = DrawOptions()) = 0;
 
   /*
    * Push a clip to the DrawTarget.
@@ -856,6 +867,20 @@ public:
     return mPermitSubpixelAA;
   }
 
+  virtual GenericRefCountedBase* GetGLContext() const {
+    return nullptr;
+  }
+
+#ifdef USE_SKIA_GPU
+  virtual void InitWithGLContextAndGrGLInterface(GenericRefCountedBase* aGLContext,
+                                            GrGLInterface* aGrGLInterface,
+                                            const IntSize &aSize,
+                                            SurfaceFormat aFormat)
+  {
+    MOZ_CRASH();
+  }
+#endif
+
 protected:
   UserData mUserData;
   Matrix mTransform;
@@ -936,7 +961,21 @@ public:
 
 #ifdef USE_SKIA_GPU
   static TemporaryRef<DrawTarget>
-    CreateSkiaDrawTargetForFBO(unsigned int aFBOID, GrContext *aContext, const IntSize &aSize, SurfaceFormat aFormat);
+    CreateDrawTargetSkiaWithGLContextAndGrGLInterface(GenericRefCountedBase* aGLContext,
+                                                      GrGLInterface* aGrGLInterface,
+                                                      const IntSize &aSize,
+                                                      SurfaceFormat aFormat);
+#endif
+
+#if defined(USE_SKIA) && defined(MOZ_ENABLE_FREETYPE)
+  static TemporaryRef<GlyphRenderingOptions>
+    CreateCairoGlyphRenderingOptions(FontHinting aHinting, bool aAutoHinting);
+#endif
+  static TemporaryRef<DrawTarget>
+    CreateDualDrawTarget(DrawTarget *targetA, DrawTarget *targetB);
+
+#ifdef XP_MACOSX
+  static TemporaryRef<DrawTarget> CreateDrawTargetForCairoCGContext(CGContextRef cg, const IntSize& aSize);
 #endif
 
 #ifdef WIN32
@@ -962,6 +1001,46 @@ private:
 
   static DrawEventRecorder *mRecorder;
 };
+
+#ifdef XP_MACOSX
+/* This is a helper class that let's you borrow a CGContextRef from a
+ * DrawTargetCG. This is used for drawing themed widgets.
+ *
+ * Callers should check the cg member after constructing the object
+ * to see if it succeeded. The DrawTarget should not be used while
+ * the context is borrowed. */
+class BorrowedCGContext
+{
+public:
+  BorrowedCGContext(DrawTarget *aDT) : mDT(aDT)
+  {
+    cg = BorrowCGContextFromDrawTarget(aDT);
+  }
+
+  // The caller needs to call Finish if cg is non-null when
+  // they are done with the context. This is currently explicit
+  // instead of happening implicitly in the destructor to make
+  // what's happening in the caller more clear. It also
+  // let's you resume using the DrawTarget in the same scope.
+  void Finish()
+  {
+    if (cg) {
+      ReturnCGContextToDrawTarget(mDT, cg);
+      cg = nullptr;
+    }
+  }
+
+  ~BorrowedCGContext() {
+    MOZ_ASSERT(!cg);
+  }
+
+  CGContextRef cg;
+private:
+  static CGContextRef BorrowCGContextFromDrawTarget(DrawTarget *aDT);
+  static void ReturnCGContextToDrawTarget(DrawTarget *aDT, CGContextRef cg);
+  DrawTarget *mDT;
+};
+#endif
 
 }
 }

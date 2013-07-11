@@ -19,6 +19,7 @@
 #include "mozilla/dom/SVGMatrix.h"
 #include "DOMSVGPoint.h"
 #include "nsIFrame.h"
+#include "nsFrameSelection.h"
 #include "nsISVGSVGFrame.h" //XXX
 #include "mozilla/dom/SVGRect.h"
 #include "nsError.h"
@@ -37,6 +38,7 @@
 #include "nsSMILTypes.h"
 #include "SVGAngle.h"
 #include <algorithm>
+#include "prtime.h"
 
 NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT_CHECK_PARSER(SVG)
 
@@ -362,6 +364,16 @@ SVGSVGElement::SetCurrentTime(float seconds)
     FlushAnimations();
   }
   // else we're not the outermost <svg> or not bound to a tree, so silently fail
+}
+
+void
+SVGSVGElement::DeselectAll()
+{
+  nsIFrame* frame = GetPrimaryFrame();
+  if (frame) {
+    nsRefPtr<nsFrameSelection> frameSelection = frame->GetFrameSelection();
+    frameSelection->ClearNormalSelection();
+  }
 }
 
 already_AddRefed<nsIDOMSVGNumber>

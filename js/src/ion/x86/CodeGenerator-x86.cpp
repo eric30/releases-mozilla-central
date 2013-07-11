@@ -8,7 +8,7 @@
 
 #include "jsnum.h"
 
-#include "CodeGenerator-x86.h"
+#include "ion/x86/CodeGenerator-x86.h"
 #include "ion/MIR.h"
 #include "ion/MIRGraph.h"
 #include "ion/shared/CodeGenerator-shared-inl.h"
@@ -415,15 +415,15 @@ CodeGeneratorX86::loadViewTypeElement(ArrayBufferView::ViewType vt, const Addres
                                       const LDefinition *out)
 {
     switch (vt) {
-      case ArrayBufferView::TYPE_INT8:    masm.movxblWithPatch(srcAddr, ToRegister(out)); break;
+      case ArrayBufferView::TYPE_INT8:    masm.movsblWithPatch(srcAddr, ToRegister(out)); break;
       case ArrayBufferView::TYPE_UINT8_CLAMPED:
       case ArrayBufferView::TYPE_UINT8:   masm.movzblWithPatch(srcAddr, ToRegister(out)); break;
-      case ArrayBufferView::TYPE_INT16:   masm.movxwlWithPatch(srcAddr, ToRegister(out)); break;
+      case ArrayBufferView::TYPE_INT16:   masm.movswlWithPatch(srcAddr, ToRegister(out)); break;
       case ArrayBufferView::TYPE_UINT16:  masm.movzwlWithPatch(srcAddr, ToRegister(out)); break;
       case ArrayBufferView::TYPE_INT32:   masm.movlWithPatch(srcAddr, ToRegister(out)); break;
       case ArrayBufferView::TYPE_UINT32:  masm.movlWithPatch(srcAddr, ToRegister(out)); break;
       case ArrayBufferView::TYPE_FLOAT64: masm.movsdWithPatch(srcAddr, ToFloatRegister(out)); break;
-      default: JS_NOT_REACHED("unexpected array type");
+      default: MOZ_ASSUME_UNREACHABLE("unexpected array type");
     }
 }
 
@@ -526,7 +526,7 @@ CodeGeneratorX86::storeViewTypeElement(ArrayBufferView::ViewType vt, const LAllo
       case ArrayBufferView::TYPE_INT32:   masm.movlWithPatch(ToRegister(value), dstAddr); break;
       case ArrayBufferView::TYPE_UINT32:  masm.movlWithPatch(ToRegister(value), dstAddr); break;
       case ArrayBufferView::TYPE_FLOAT64: masm.movsdWithPatch(ToFloatRegister(value), dstAddr); break;
-      default: JS_NOT_REACHED("unexpected array type");
+      default: MOZ_ASSUME_UNREACHABLE("unexpected array type");
     }
 }
 
@@ -655,6 +655,14 @@ CodeGeneratorX86::postAsmJSCall(LAsmJSCall *lir)
 }
 
 void
+DispatchIonCache::initializeAddCacheState(LInstruction *ins, AddCacheState *addState)
+{
+    // On x86, where there is no general purpose scratch register available,
+    // child cache classes must manually specify a dispatch scratch register.
+    MOZ_ASSUME_UNREACHABLE("x86 needs manual assignment of dispatchScratch");
+}
+
+void
 ParallelGetPropertyIC::initializeAddCacheState(LInstruction *ins, AddCacheState *addState)
 {
     // We don't have a scratch register, but only use the temp if we needed
@@ -664,6 +672,18 @@ ParallelGetPropertyIC::initializeAddCacheState(LInstruction *ins, AddCacheState 
         addState->dispatchScratch = output_.scratchReg().gpr();
     else
         addState->dispatchScratch = ToRegister(ins->toGetPropertyCacheT()->temp());
+}
+
+void
+ParallelGetElementIC::initializeAddCacheState(LInstruction *ins, AddCacheState *addState)
+{
+    // We don't have a scratch register, but only use the temp if we needed
+    // one, it's BogusTemp otherwise.
+    JS_ASSERT(ins->isGetElementCacheV() || ins->isGetElementCacheT());
+    if (ins->isGetElementCacheV() || ins->toGetElementCacheT()->temp()->isBogusTemp())
+        addState->dispatchScratch = output_.scratchReg().gpr();
+    else
+        addState->dispatchScratch = ToRegister(ins->toGetElementCacheT()->temp());
 }
 
 namespace js {

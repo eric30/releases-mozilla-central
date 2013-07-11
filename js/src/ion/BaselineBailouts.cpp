@@ -4,15 +4,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "BaselineCompiler.h"
-#include "BaselineIC.h"
-#include "BaselineJIT.h"
-#include "CompileInfo.h"
-#include "IonSpewer.h"
-#include "IonFrames-inl.h"
+#include "ion/BaselineCompiler.h"
+#include "ion/BaselineIC.h"
+#include "ion/BaselineJIT.h"
+#include "ion/CompileInfo.h"
+#include "ion/IonSpewer.h"
+#include "ion/IonFrames-inl.h"
 
 #include "vm/Stack-inl.h"
 
+#include "jsfuninlines.h"
 #include "jsopcodeinlines.h"
 
 using namespace js;
@@ -445,7 +446,8 @@ static bool
 InitFromBailout(JSContext *cx, HandleScript caller, jsbytecode *callerPC,
                 HandleFunction fun, HandleScript script, IonScript *ionScript,
                 SnapshotIterator &iter, bool invalidate, BaselineStackBuilder &builder,
-                MutableHandleFunction nextCallee, jsbytecode **callPC)
+                AutoValueVector &startFrameFormals, MutableHandleFunction nextCallee,
+                jsbytecode **callPC)
 {
     uint32_t exprStackSlots = iter.slots() - (script->nfixed + CountArgSlots(script, fun));
 
@@ -592,12 +594,27 @@ InitFromBailout(JSContext *cx, HandleScript caller, jsbytecode *callerPC,
         IonSpew(IonSpew_BaselineBailouts, "      frame slots %u, nargs %u, nfixed %u",
                 iter.slots(), fun->nargs, script->nfixed);
 
+        if (!callerPC) {
+            // This is the first frame. Store the formals in a Vector until we
+            // are done. Due to UCE and phi elimination, we could store an
+            // UndefinedValue() here for formals we think are unused, but
+            // locals may still reference the original argument slot
+            // (MParameter/LArgument) and expect the original Value.
+            JS_ASSERT(startFrameFormals.empty());
+            if (!startFrameFormals.resize(fun->nargs))
+                return false;
+        }
+
         for (uint32_t i = 0; i < fun->nargs; i++) {
             Value arg = iter.read();
             IonSpew(IonSpew_BaselineBailouts, "      arg %d = %016llx",
                         (int) i, *((uint64_t *) &arg));
-            size_t argOffset = builder.framePushed() + IonJSFrameLayout::offsetOfActualArg(i);
-            *builder.valuePointerAtStackOffset(argOffset) = arg;
+            if (callerPC) {
+                size_t argOffset = builder.framePushed() + IonJSFrameLayout::offsetOfActualArg(i);
+                *builder.valuePointerAtStackOffset(argOffset) = arg;
+            } else {
+                startFrameFormals[i] = arg;
+            }
         }
     }
 
@@ -1091,12 +1108,14 @@ ion::BailoutIonToBaseline(JSContext *cx, JitActivation *activation, IonBailoutIt
     jsbytecode *callerPC = NULL;
     RootedFunction fun(cx, callee);
     RootedScript scr(cx, iter.script());
+    AutoValueVector startFrameFormals(cx);
     while (true) {
         IonSpew(IonSpew_BaselineBailouts, "    FrameNo %d", frameNo);
         jsbytecode *callPC = NULL;
         RootedFunction nextCallee(cx, NULL);
         if (!InitFromBailout(cx, caller, callerPC, fun, scr, iter.ionScript(),
-                             snapIter, invalidate, builder, &nextCallee, &callPC))
+                             snapIter, invalidate, builder, startFrameFormals,
+                             &nextCallee, &callPC))
         {
             return BAILOUT_RETURN_FATAL_ERROR;
         }
@@ -1118,6 +1137,12 @@ ion::BailoutIonToBaseline(JSContext *cx, JitActivation *activation, IonBailoutIt
     }
     IonSpew(IonSpew_BaselineBailouts, "  Done restoring frames");
     BailoutKind bailoutKind = snapIter.bailoutKind();
+
+    if (!startFrameFormals.empty()) {
+        // Set the first frame's formals, see the comment in InitFromBailout.
+        Value *argv = builder.startFrame()->argv() + 1; // +1 to skip |this|.
+        mozilla::PodCopy(argv, startFrameFormals.begin(), startFrameFormals.length());
+    }
 
     // Take the reconstructed baseline stack so it doesn't get freed when builder destructs.
     BaselineBailoutInfo *info = builder.takeBuffer();
@@ -1303,7 +1328,7 @@ ion::FinishBailoutToBaseline(BaselineBailoutInfo *bailoutInfo)
             return false;
         break;
       default:
-        JS_NOT_REACHED("Unknown bailout kind!");
+        MOZ_ASSUME_UNREACHABLE("Unknown bailout kind!");
     }
 
     if (!CheckFrequentBailouts(cx, outerScript))

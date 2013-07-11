@@ -36,6 +36,7 @@
 #include "nsCategoryManager.h"
 #include "nsCategoryManagerUtils.h"
 #include "xptiprivate.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/XPTInterfaceInfoManager.h"
 #include "nsIConsoleService.h"
 #include "nsIMemoryReporter.h"
@@ -48,7 +49,6 @@
 #include "nsIClassInfo.h"
 #include "nsLocalFile.h"
 #include "nsReadableUtils.h"
-#include "nsStaticComponents.h"
 #include "nsString.h"
 #include "nsXPIDLString.h"
 #include "prcmon.h"
@@ -77,6 +77,10 @@
 using namespace mozilla;
 
 PRLogModuleInfo* nsComponentManagerLog = nullptr;
+
+// defined in nsStaticXULComponents.cpp to contain all the components in
+// libxul.
+extern mozilla::Module const *const *const kPStaticModules[];
 
 #if 0 || defined (DEBUG_timeless)
  #define SHOW_DENIED_ON_SHUTDOWN
@@ -1680,7 +1684,7 @@ nsComponentManagerImpl::ContractIDToCID(const char *aContractID,
 static size_t
 SizeOfFactoriesEntryExcludingThis(nsIDHashKey::KeyType aKey,
                                   nsFactoryEntry* const &aData,
-                                  nsMallocSizeOfFun aMallocSizeOf,
+                                  MallocSizeOf aMallocSizeOf,
                                   void* aUserArg)
 {
     return aData->SizeOfIncludingThis(aMallocSizeOf);
@@ -1689,7 +1693,7 @@ SizeOfFactoriesEntryExcludingThis(nsIDHashKey::KeyType aKey,
 static size_t
 SizeOfContractIDsEntryExcludingThis(nsCStringHashKey::KeyType aKey,
                                     nsFactoryEntry* const &aData,
-                                    nsMallocSizeOfFun aMallocSizeOf,
+                                    MallocSizeOf aMallocSizeOf,
                                     void* aUserArg)
 {
     // We don't measure the nsFactoryEntry data because its owned by mFactories
@@ -1698,7 +1702,7 @@ SizeOfContractIDsEntryExcludingThis(nsCStringHashKey::KeyType aKey,
 }
 
 size_t
-nsComponentManagerImpl::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf)
+nsComponentManagerImpl::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf)
 {
     size_t n = aMallocSizeOf(this);
     n += mLoaderMap.SizeOfExcludingThis(nullptr, aMallocSizeOf);
@@ -1802,7 +1806,7 @@ nsFactoryEntry::GetFactory()
 }
 
 size_t
-nsFactoryEntry::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf)
+nsFactoryEntry::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf)
 {
     size_t n = aMallocSizeOf(this);
 

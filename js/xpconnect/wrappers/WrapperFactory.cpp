@@ -93,7 +93,7 @@ WrapperFactory::CreateXrayWaiver(JSContext *cx, HandleObject obj)
           JSObject2JSObjectMap::newMap(XPC_WRAPPER_MAP_SIZE);
         MOZ_ASSERT(scope->mWaiverWrapperMap);
     }
-    if (!scope->mWaiverWrapperMap->Add(obj, waiver))
+    if (!scope->mWaiverWrapperMap->Add(cx, obj, waiver))
         return nullptr;
     return waiver;
 }
@@ -623,7 +623,7 @@ WrapperFactory::WrapForSameCompartmentXray(JSContext *cx, JSObject *obj)
     else if (type == XrayForDOMObject)
         wrapper = &SCPermissiveXrayDOM::singleton;
     else
-        MOZ_NOT_REACHED("Bad Xray type");
+        MOZ_ASSUME_UNREACHABLE("Bad Xray type");
 
     // Make the Xray.
     JSObject *parent = JS_GetGlobalForObject(cx, obj);

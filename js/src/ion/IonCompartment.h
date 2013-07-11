@@ -9,12 +9,14 @@
 
 #ifdef JS_ION
 
-#include "IonCode.h"
+#include "mozilla/MemoryReporting.h"
+
+#include "ion/IonCode.h"
 #include "jsweakcache.h"
 #include "js/Value.h"
 #include "vm/Stack.h"
-#include "IonFrames.h"
-#include "CompileInfo.h"
+#include "ion/IonFrames.h"
+#include "ion/CompileInfo.h"
 
 namespace js {
 namespace ion {
@@ -64,7 +66,7 @@ typedef Vector<IonBuilder*, 0, SystemAllocPolicy> OffThreadCompilationVector;
 // Optimized stubs are allocated per-compartment and are always purged when
 // JIT-code is discarded. Fallback stubs are allocated per BaselineScript and
 // are only destroyed when the BaselineScript is destroyed.
-struct ICStubSpace
+class ICStubSpace
 {
   protected:
     LifoAlloc allocator_;
@@ -80,7 +82,7 @@ struct ICStubSpace
 
     JS_DECLARE_NEW_METHODS(allocate, alloc, inline)
 
-    size_t sizeOfExcludingThis(JSMallocSizeOfFun mallocSizeOf) const {
+    size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const {
         return allocator_.sizeOfExcludingThis(mallocSizeOf);
     }
 };
@@ -226,8 +228,9 @@ class IonCompartment
     // pointers. This has to be a weak pointer to avoid keeping the whole
     // compartment alive.
     ReadBarriered<IonCode> stringConcatStub_;
+    ReadBarriered<IonCode> parallelStringConcatStub_;
 
-    IonCode *generateStringConcatStub(JSContext *cx);
+    IonCode *generateStringConcatStub(JSContext *cx, ExecutionMode mode);
 
   public:
     IonCode *getVMWrapper(const VMFunction &f);
@@ -287,7 +290,7 @@ class IonCompartment
         switch (mode) {
           case SequentialExecution: return rt->argumentsRectifier_;
           case ParallelExecution:   return rt->parallelArgumentsRectifier_;
-          default:                  JS_NOT_REACHED("No such execution mode");
+          default:                  MOZ_ASSUME_UNREACHABLE("No such execution mode");
         }
     }
 
@@ -319,8 +322,12 @@ class IonCompartment
         return rt->debugTrapHandler(cx);
     }
 
-    IonCode *stringConcatStub() {
-        return stringConcatStub_;
+    IonCode *stringConcatStub(ExecutionMode mode) {
+        switch (mode) {
+          case SequentialExecution: return stringConcatStub_;
+          case ParallelExecution:   return parallelStringConcatStub_;
+          default:                  MOZ_ASSUME_UNREACHABLE("No such execution mode");
+        }
     }
 
     AutoFlushCache *flusher() {

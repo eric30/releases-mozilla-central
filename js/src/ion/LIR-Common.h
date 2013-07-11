@@ -226,11 +226,13 @@ class LControlInstructionHelper : public LInstructionHelper<0, Operands, Temps> 
     MBasicBlock *successors_[Succs];
 
   public:
-    size_t numSuccessors() const { return Succs; }
+    size_t numSuccessors() const MOZ_FINAL MOZ_OVERRIDE { return Succs; }
 
-    MBasicBlock *getSuccessor(size_t i) const { return successors_[i]; }
+    MBasicBlock *getSuccessor(size_t i) const MOZ_FINAL MOZ_OVERRIDE {
+        return successors_[i];
+    }
 
-    void setSuccessor(size_t i, MBasicBlock *successor) {
+    void setSuccessor(size_t i, MBasicBlock *successor) MOZ_FINAL MOZ_OVERRIDE {
         successors_[i] = successor;
     }
 };
@@ -968,12 +970,12 @@ class LCallNative : public LJSCallInstructionHelper<BOX_PIECES, 0, 4>
     LIR_HEADER(CallNative)
 
     LCallNative(uint32_t argslot,
-                const LDefinition &argJSContext, const LDefinition &argUintN,
+                const LDefinition &argContext, const LDefinition &argUintN,
                 const LDefinition &argVp, const LDefinition &tmpreg)
       : JSCallHelper(argslot)
     {
         // Registers used for callWithABI().
-        setTemp(0, argJSContext);
+        setTemp(0, argContext);
         setTemp(1, argUintN);
         setTemp(2, argVp);
 
@@ -981,7 +983,7 @@ class LCallNative : public LJSCallInstructionHelper<BOX_PIECES, 0, 4>
         setTemp(3, tmpreg);
     }
 
-    const LAllocation *getArgJSContextReg() {
+    const LAllocation *getArgContextReg() {
         return getTemp(0)->output();
     }
     const LAllocation *getArgUintNReg() {
@@ -2304,6 +2306,41 @@ class LConcat : public LInstructionHelper<1, 2, 4>
     }
 };
 
+class LParConcat : public LInstructionHelper<1, 3, 3>
+{
+  public:
+    LIR_HEADER(ParConcat)
+
+    LParConcat(const LAllocation &parSlice, const LAllocation &lhs, const LAllocation &rhs,
+               const LDefinition &temp1, const LDefinition &temp2, const LDefinition &temp3) {
+        setOperand(0, parSlice);
+        setOperand(1, lhs);
+        setOperand(2, rhs);
+        setTemp(0, temp1);
+        setTemp(1, temp2);
+        setTemp(2, temp3);
+    }
+
+    const LAllocation *parSlice() {
+        return this->getOperand(0);
+    }
+    const LAllocation *lhs() {
+        return this->getOperand(1);
+    }
+    const LAllocation *rhs() {
+        return this->getOperand(2);
+    }
+    const LDefinition *temp1() {
+        return this->getTemp(0);
+    }
+    const LDefinition *temp2() {
+        return this->getTemp(1);
+    }
+    const LDefinition *temp3() {
+        return this->getTemp(2);
+    }
+};
+
 // Get uint16 character code from a string.
 class LCharCodeAt : public LInstructionHelper<1, 2, 0>
 {
@@ -2442,8 +2479,7 @@ class LTruncateDToInt32 : public LInstructionHelper<1, 1, 1>
     }
 };
 
-// Convert a any input type hosted on one definition to a string with a function
-// call.
+// Convert an integer hosted on one definition to a string with a function call.
 class LIntToString : public LInstructionHelper<1, 1, 0>
 {
   public:
@@ -2453,6 +2489,25 @@ class LIntToString : public LInstructionHelper<1, 1, 0>
         setOperand(0, input);
     }
 
+    const MToString *mir() {
+        return mir_->toToString();
+    }
+};
+
+// Convert a double hosted on one definition to a string with a function call.
+class LDoubleToString : public LInstructionHelper<1, 1, 1>
+{
+  public:
+    LIR_HEADER(DoubleToString)
+
+    LDoubleToString(const LAllocation &input, const LDefinition &temp) {
+        setOperand(0, input);
+        setTemp(0, temp);
+    }
+
+    const LDefinition *tempInt() {
+        return getTemp(0);
+    }
     const MToString *mir() {
         return mir_->toToString();
     }
@@ -2688,6 +2743,31 @@ class LConvertElementsToDoubles : public LInstructionHelper<0, 1, 0>
 
     const LAllocation *elements() {
         return getOperand(0);
+    }
+};
+
+// If |elements| has the CONVERT_DOUBLE_ELEMENTS flag, convert int32 value to
+// double. Else return the original value.
+class LMaybeToDoubleElement : public LInstructionHelper<BOX_PIECES, 2, 1>
+{
+  public:
+    LIR_HEADER(MaybeToDoubleElement)
+
+    LMaybeToDoubleElement(const LAllocation &elements, const LAllocation &value,
+                          const LDefinition &tempFloat) {
+        setOperand(0, elements);
+        setOperand(1, value);
+        setTemp(0, tempFloat);
+    }
+
+    const LAllocation *elements() {
+        return getOperand(0);
+    }
+    const LAllocation *value() {
+        return getOperand(1);
+    }
+    const LDefinition *tempFloat() {
+        return getTemp(0);
     }
 };
 
@@ -3672,14 +3752,16 @@ class LGetElementCacheV : public LInstructionHelper<BOX_PIECES, 1 + BOX_PIECES, 
     }
 };
 
-class LGetElementCacheT : public LInstructionHelper<1, 2, 0>
+class LGetElementCacheT : public LInstructionHelper<1, 2, 1>
 {
   public:
     LIR_HEADER(GetElementCacheT)
 
-    LGetElementCacheT(const LAllocation &object, const LAllocation &index) {
+    LGetElementCacheT(const LAllocation &object, const LAllocation &index,
+                      const LDefinition &temp) {
         setOperand(0, object);
         setOperand(1, index);
+        setTemp(0, temp);
     }
     const LAllocation *object() {
         return getOperand(0);
@@ -3689,6 +3771,9 @@ class LGetElementCacheT : public LInstructionHelper<1, 2, 0>
     }
     const LDefinition *output() {
         return getDef(0);
+    }
+    const LDefinition *temp() {
+        return getTemp(0);
     }
     const MGetElementCache *mir() const {
         return mir_->toGetElementCache();
@@ -4386,7 +4471,7 @@ class MPhi;
 // register allocator. Like its equivalent in MIR, phis are collected at the
 // top of blocks and are meant to be executed in parallel, choosing the input
 // corresponding to the predecessor taken in the control flow graph.
-class LPhi : public LInstruction
+class LPhi MOZ_FINAL : public LInstruction
 {
     uint32_t numInputs_;
     LAllocation *inputs_;
@@ -4427,21 +4512,19 @@ class LPhi : public LInstruction
         return 0;
     }
     LDefinition *getTemp(size_t index) {
-        JS_NOT_REACHED("no temps");
-        return NULL;
+        MOZ_ASSUME_UNREACHABLE("no temps");
     }
     void setTemp(size_t index, const LDefinition &temp) {
-        JS_NOT_REACHED("no temps");
+        MOZ_ASSUME_UNREACHABLE("no temps");
     }
     size_t numSuccessors() const {
         return 0;
     }
     MBasicBlock *getSuccessor(size_t i) const {
-        JS_NOT_REACHED("no successors");
-        return NULL;
+        MOZ_ASSUME_UNREACHABLE("no successors");
     }
     void setSuccessor(size_t i, MBasicBlock *) {
-        JS_NOT_REACHED("no successors");
+        MOZ_ASSUME_UNREACHABLE("no successors");
     }
 
     virtual void printInfo(FILE *fp) {
@@ -4689,7 +4772,7 @@ class LAsmJSPassStackArg : public LInstructionHelper<0, 1, 0>
     }
 };
 
-class LAsmJSCall : public LInstruction
+class LAsmJSCall MOZ_FINAL : public LInstruction
 {
     LAllocation *operands_;
     uint32_t numOperands_;
@@ -4740,20 +4823,19 @@ class LAsmJSCall : public LInstruction
         return 0;
     }
     LDefinition *getTemp(size_t index) {
-        JS_NOT_REACHED("no temps");
+        MOZ_ASSUME_UNREACHABLE("no temps");
     }
     void setTemp(size_t index, const LDefinition &a) {
-        JS_NOT_REACHED("no temps");
+        MOZ_ASSUME_UNREACHABLE("no temps");
     }
     size_t numSuccessors() const {
         return 0;
     }
     MBasicBlock *getSuccessor(size_t i) const {
-        JS_NOT_REACHED("no successors");
-        return NULL;
+        MOZ_ASSUME_UNREACHABLE("no successors");
     }
     void setSuccessor(size_t i, MBasicBlock *) {
-        JS_NOT_REACHED("no successors");
+        MOZ_ASSUME_UNREACHABLE("no successors");
     }
 };
 

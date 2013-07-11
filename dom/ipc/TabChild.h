@@ -44,6 +44,7 @@
 #include "FrameMetrics.h"
 #include "ProcessUtils.h"
 #include "mozilla/dom/TabContext.h"
+#include "mozilla/dom/ContentChild.h"
 
 struct gfxMatrix;
 class nsICachedFileDescriptorListener;
@@ -163,8 +164,8 @@ public:
     static void PreloadSlowThings();
 
     /** Return a TabChild with the given attributes. */
-    static already_AddRefed<TabChild> 
-    Create(const TabContext& aContext, uint32_t aChromeFlags);
+    static already_AddRefed<TabChild>
+    Create(ContentChild* aManager, const TabContext& aContext, uint32_t aChromeFlags);
 
     virtual ~TabChild();
 
@@ -230,11 +231,11 @@ public:
                                   const ClonedMessageData& aData);
 
     virtual PDocumentRendererChild*
-    AllocPDocumentRenderer(const nsRect& documentRect, const gfxMatrix& transform,
-                           const nsString& bgcolor,
-                           const uint32_t& renderFlags, const bool& flushLayout,
-                           const nsIntSize& renderSize);
-    virtual bool DeallocPDocumentRenderer(PDocumentRendererChild* actor);
+    AllocPDocumentRendererChild(const nsRect& documentRect, const gfxMatrix& transform,
+                                const nsString& bgcolor,
+                                const uint32_t& renderFlags, const bool& flushLayout,
+                                const nsIntSize& renderSize);
+    virtual bool DeallocPDocumentRendererChild(PDocumentRendererChild* actor);
     virtual bool RecvPDocumentRendererConstructor(PDocumentRendererChild* actor,
                                                   const nsRect& documentRect,
                                                   const gfxMatrix& transform,
@@ -243,12 +244,12 @@ public:
                                                   const bool& flushLayout,
                                                   const nsIntSize& renderSize);
 
-    virtual PContentDialogChild* AllocPContentDialog(const uint32_t&,
-                                                     const nsCString&,
-                                                     const nsCString&,
-                                                     const InfallibleTArray<int>&,
-                                                     const InfallibleTArray<nsString>&);
-    virtual bool DeallocPContentDialog(PContentDialogChild* aDialog);
+    virtual PContentDialogChild* AllocPContentDialogChild(const uint32_t&,
+                                                          const nsCString&,
+                                                          const nsCString&,
+                                                          const InfallibleTArray<int>&,
+                                                          const InfallibleTArray<nsString>&);
+    virtual bool DeallocPContentDialogChild(PContentDialogChild* aDialog);
     static void ParamsToArrays(nsIDialogParamBlock* aParams,
                                InfallibleTArray<int>& aIntParams,
                                InfallibleTArray<nsString>& aStringParams);
@@ -269,20 +270,18 @@ public:
     }
 #endif /* DEBUG */
 
-    virtual PContentPermissionRequestChild* AllocPContentPermissionRequest(const nsCString& aType,
-                                                                           const nsCString& aAccess,
-                                                                           const IPC::Principal& aPrincipal);
-    virtual bool DeallocPContentPermissionRequest(PContentPermissionRequestChild* actor);
+    virtual PContentPermissionRequestChild* AllocPContentPermissionRequestChild(const nsCString& aType,
+                                                                                const nsCString& aAccess,
+                                                                                const IPC::Principal& aPrincipal);
+    virtual bool DeallocPContentPermissionRequestChild(PContentPermissionRequestChild* actor);
 
-    virtual POfflineCacheUpdateChild* AllocPOfflineCacheUpdate(
+    virtual POfflineCacheUpdateChild* AllocPOfflineCacheUpdateChild(
             const URIParams& manifestURI,
             const URIParams& documentURI,
             const bool& stickDocument);
-    virtual bool DeallocPOfflineCacheUpdate(POfflineCacheUpdateChild* offlineCacheUpdate);
+    virtual bool DeallocPOfflineCacheUpdateChild(POfflineCacheUpdateChild* offlineCacheUpdate);
 
     nsIWebNavigation* WebNavigation() { return mWebNav; }
-
-    JSContext* GetJSContext() { return mCx; }
 
     nsIPrincipal* GetPrincipal() { return mPrincipal; }
 
@@ -328,19 +327,21 @@ public:
                                     const nsAString& aPath,
                                     nsICachedFileDescriptorListener* aCallback);
 
+    ContentChild* Manager() { return mManager; }
+
 protected:
-    virtual PRenderFrameChild* AllocPRenderFrame(ScrollingBehavior* aScrolling,
-                                                 TextureFactoryIdentifier* aTextureFactoryIdentifier,
-                                                 uint64_t* aLayersId) MOZ_OVERRIDE;
-    virtual bool DeallocPRenderFrame(PRenderFrameChild* aFrame) MOZ_OVERRIDE;
+    virtual PRenderFrameChild* AllocPRenderFrameChild(ScrollingBehavior* aScrolling,
+                                                      TextureFactoryIdentifier* aTextureFactoryIdentifier,
+                                                      uint64_t* aLayersId) MOZ_OVERRIDE;
+    virtual bool DeallocPRenderFrameChild(PRenderFrameChild* aFrame) MOZ_OVERRIDE;
     virtual bool RecvDestroy() MOZ_OVERRIDE;
 
     nsEventStatus DispatchWidgetEvent(nsGUIEvent& event);
 
-    virtual PIndexedDBChild* AllocPIndexedDB(const nsCString& aASCIIOrigin,
-                                             bool* /* aAllowed */);
+    virtual PIndexedDBChild* AllocPIndexedDBChild(const nsCString& aASCIIOrigin,
+                                                  bool* /* aAllowed */);
 
-    virtual bool DeallocPIndexedDB(PIndexedDBChild* aActor);
+    virtual bool DeallocPIndexedDBChild(PIndexedDBChild* aActor);
 
 private:
     /**
@@ -351,7 +352,7 @@ private:
      *
      * |aIsBrowserElement| indicates whether we're a browser (but not an app).
      */
-    TabChild(const TabContext& aContext, uint32_t aChromeFlags);
+    TabChild(ContentChild* aManager, const TabContext& aContext, uint32_t aChromeFlags);
 
     nsresult Init();
 
@@ -372,6 +373,10 @@ private:
     void DestroyWindow();
     void SetProcessNameToAppName();
     bool ProcessUpdateFrame(const mozilla::layers::FrameMetrics& aFrameMetrics);
+
+    // Update the DOM with the given display port. Finds the element based on
+    // the aFrameMetrics.mScrollId.
+    void SetDisplayPort(const FrameMetrics& aFrameMetrics);
 
     // Call RecvShow(nsIntSize(0, 0)) and block future calls to RecvShow().
     void DoFakeShow();
@@ -427,6 +432,7 @@ private:
     nsCOMPtr<nsIURI> mLastURI;
     FrameMetrics mLastMetrics;
     RenderFrameChild* mRemoteFrame;
+    nsRefPtr<ContentChild> mManager;
     nsRefPtr<TabChildGlobal> mTabChildGlobal;
     uint32_t mChromeFlags;
     nsIntRect mOuterRect;

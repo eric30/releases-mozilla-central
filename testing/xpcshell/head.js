@@ -45,6 +45,17 @@ try {
 } 
 catch (e) { }
 
+// Only if building of places is enabled.
+if (runningInParent &&
+    "mozIAsyncHistory" in Components.interfaces) {
+  // Ensure places history is enabled for xpcshell-tests as some non-FF
+  // apps disable it.
+  let (prefs = Components.classes["@mozilla.org/preferences-service;1"]
+               .getService(Components.interfaces.nsIPrefBranch)) {
+    prefs.setBoolPref("places.history.enabled", true);
+  };
+}
+
 try {
   if (runningInParent) {
     let prefs = Components.classes["@mozilla.org/preferences-service;1"]
@@ -466,9 +477,12 @@ function do_execute_soon(callback, aName) {
 function do_throw(error, stack) {
   let filename = "";
   if (!stack) {
-    if (error instanceof Error) {
-      // |error| is an exception object
+    // Use duck typing rather than instanceof in case error came
+    // from another context
+    if ("filename" in error)
       filename = error.fileName;
+    if ("stack" in error) {
+      // |error| is likely an exception object
       stack = error.stack;
     } else {
       stack = Components.stack.caller;
@@ -1145,3 +1159,14 @@ function run_next_test()
     do_test_finished(_gRunningTest.name);
   }
 }
+
+try {
+  if (runningInParent) {
+    // Always use network provider for geolocation tests
+    // so we bypass the OSX dialog raised by the corelocation provider
+    let prefs = Components.classes["@mozilla.org/preferences-service;1"]
+      .getService(Components.interfaces.nsIPrefBranch);
+
+    prefs.setBoolPref("geo.provider.testing", true);
+  }
+} catch (e) { }

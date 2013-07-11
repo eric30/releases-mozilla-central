@@ -7,6 +7,7 @@
 #include "jscompartment.h"
 
 #include "mozilla/DebugOnly.h"
+#include "mozilla/MemoryReporting.h"
 
 #include "jscntxt.h"
 #include "jsgc.h"
@@ -22,6 +23,7 @@
 #include "js/RootingAPI.h"
 #include "vm/StopIterationObject.h"
 
+#include "jsfuninlines.h"
 #include "jsgcinlines.h"
 #include "jsobjinlines.h"
 
@@ -32,8 +34,9 @@ using namespace js::gc;
 
 using mozilla::DebugOnly;
 
-JSCompartment::JSCompartment(Zone *zone)
+JSCompartment::JSCompartment(Zone *zone, const JS::CompartmentOptions &options = JS::CompartmentOptions())
   : zone_(zone),
+    options_(options),
     rt(zone->rt),
     principals(NULL),
     isSystem(false),
@@ -85,7 +88,7 @@ JSCompartment::init(JSContext *cx)
 {
     /*
      * As a hack, we clear our timezone cache every time we create a new
-     * compartment.  This ensures that the cache is always relatively fresh, but
+     * compartment. This ensures that the cache is always relatively fresh, but
      * shouldn't interfere with benchmarks which create tons of date objects
      * (unless they also create tons of iframes, which seems unlikely).
      */
@@ -488,6 +491,8 @@ JSCompartment::markAllCrossCompartmentWrappers(JSTracer *trc)
 void
 JSCompartment::mark(JSTracer *trc)
 {
+    JS_ASSERT(!trc->runtime->isHeapMinorCollecting());
+
 #ifdef JS_ION
     if (ionCompartment_)
         ionCompartment_->mark(trc, this);
@@ -825,7 +830,7 @@ JSCompartment::clearTraps(FreeOp *fop)
 }
 
 void
-JSCompartment::sizeOfIncludingThis(JSMallocSizeOfFun mallocSizeOf, size_t *compartmentObject,
+JSCompartment::sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf, size_t *compartmentObject,
                                    JS::TypeInferenceSizes *tiSizes, size_t *shapesCompartmentTables,
                                    size_t *crossCompartmentWrappersArg, size_t *regexpCompartment,
                                    size_t *debuggeesSet, size_t *baselineStubsOptimized)

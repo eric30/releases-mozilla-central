@@ -21,6 +21,8 @@
   locale/browser/passwordmgr.properties   (%chrome/passwordmgr.properties)
   locale/browser/prompt.dtd               (%chrome/prompt.dtd)
   locale/browser/phishing.dtd             (%chrome/phishing.dtd)
+  locale/browser/crashprompt.dtd          (%chrome/crashprompt.dtd)
+  locale/browser/crashprompt.properties   (%chrome/crashprompt.properties)
 
 @AB_CD@.jar:
 % locale browser @AB_CD@ %locale/browser/
@@ -32,6 +34,7 @@
 
 @AB_CD@.jar:
 relativesrcdir browser/locales:
+  locale/browser/syncBrand.dtd            (%chrome/browser/syncBrand.dtd)
   locale/browser/region.properties        (%chrome/browser-region/region.properties)
   locale/browser/netError.dtd             (%chrome/overrides/netError.dtd)
 % override chrome://global/locale/netError.dtd chrome://browser/locale/netError.dtd

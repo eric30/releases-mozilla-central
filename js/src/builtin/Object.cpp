@@ -15,31 +15,13 @@
 #include "vm/StringBuffer.h"
 
 #include "jsobjinlines.h"
+#include "jsstrinlines.h"
 
 using namespace js;
 using namespace js::types;
 
 using js::frontend::IsIdentifier;
 using mozilla::ArrayLength;
-
-
-// Duplicated in jsobj.cpp
-static bool
-DefineProperties(JSContext *cx, HandleObject obj, HandleObject props)
-{
-    AutoIdVector ids(cx);
-    AutoPropDescArrayRooter descs(cx);
-    if (!ReadPropertyDescriptors(cx, props, true, &ids, &descs))
-        return false;
-
-    bool dummy;
-    for (size_t i = 0, len = ids.length(); i < len; i++) {
-        if (!DefineProperty(cx, obj, ids.handleAt(i), descs[i], true, &dummy))
-            return false;
-    }
-
-    return true;
-}
 
 
 JSBool
@@ -557,7 +539,12 @@ obj_watch_handler(JSContext *cx, JSObject *obj_, jsid id_, jsval old,
 
     JSObject *callable = (JSObject *)closure;
     Value argv[] = { IdToValue(id), old, *nvp };
-    return Invoke(cx, ObjectValue(*obj), ObjectOrNullValue(callable), ArrayLength(argv), argv, nvp);
+    RootedValue rv(cx);
+    if (!Invoke(cx, ObjectValue(*obj), ObjectOrNullValue(callable), ArrayLength(argv), argv, &rv))
+        return false;
+
+    *nvp = rv;
+    return true;
 }
 
 static JSBool
@@ -899,7 +886,10 @@ obj_isExtensible(JSContext *cx, unsigned argc, Value *vp)
     if (!GetFirstArgumentAsObject(cx, args, "Object.isExtensible", &obj))
         return false;
 
-    args.rval().setBoolean(obj->isExtensible());
+    bool extensible;
+    if (!JSObject::isExtensible(cx, obj, &extensible))
+        return false;
+    args.rval().setBoolean(extensible);
     return true;
 }
 
@@ -912,7 +902,11 @@ obj_preventExtensions(JSContext *cx, unsigned argc, Value *vp)
         return false;
 
     args.rval().setObject(*obj);
-    if (!obj->isExtensible())
+
+    bool extensible;
+    if (!JSObject::isExtensible(cx, obj, &extensible))
+        return false;
+    if (!extensible)
         return true;
 
     return JSObject::preventExtensions(cx, obj);

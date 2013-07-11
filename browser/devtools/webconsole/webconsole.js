@@ -31,8 +31,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "AutocompletePopup",
 XPCOMUtils.defineLazyModuleGetter(this, "WebConsoleUtils",
                                   "resource://gre/modules/devtools/WebConsoleUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "Promise",
-                                  "resource://gre/modules/commonjs/sdk/core/promise.js");
+XPCOMUtils.defineLazyModuleGetter(this, "promise",
+                                  "resource://gre/modules/commonjs/sdk/core/promise.js", "Promise");
 
 XPCOMUtils.defineLazyModuleGetter(this, "VariablesView",
                                   "resource:///modules/devtools/VariablesView.jsm");
@@ -119,7 +119,7 @@ const SEVERITY_CLASS_FRAGMENTS = [
 // division of message type into "category" and "severity".
 const MESSAGE_PREFERENCE_KEYS = [
 //  Error         Warning   Info    Log
-  [ "network",    null,         null,   "networkinfo", ],  // Network
+  [ "network",    "netwarn",    null,   "networkinfo", ],  // Network
   [ "csserror",   "cssparser",  null,   null,          ],  // CSS
   [ "exception",  "jswarn",     null,   "jslog",       ],  // JS
   [ "error",      "warn",       "info", "log",         ],  // Web Developer
@@ -239,7 +239,7 @@ WebConsoleFrame.prototype = {
   get popupset() this.owner.mainPopupSet,
 
   /**
-   * Holds the initialization Promise object.
+   * Holds the initialization promise object.
    * @private
    * @type object
    */
@@ -355,14 +355,36 @@ WebConsoleFrame.prototype = {
 
   _destroyer: null,
 
+  // Used in tests.
   _saveRequestAndResponseBodies: false,
 
   /**
    * Tells whether to save the bodies of network requests and responses.
    * Disabled by default to save memory.
-   * @type boolean
+   *
+   * @return boolean
+   *         The saveRequestAndResponseBodies pref value.
    */
-  get saveRequestAndResponseBodies() this._saveRequestAndResponseBodies,
+  getSaveRequestAndResponseBodies:
+  function WCF_getSaveRequestAndResponseBodies() {
+    let deferred = promise.defer();
+    let toGet = [
+      "NetworkMonitor.saveRequestAndResponseBodies"
+    ];
+
+    // Make sure the web console client connection is established first.
+    this.webConsoleClient.getPreferences(toGet, aResponse => {
+      if (!aResponse.error) {
+        this._saveRequestAndResponseBodies = aResponse.preferences[toGet[0]];
+        deferred.resolve(this._saveRequestAndResponseBodies);
+      }
+      else {
+        deferred.reject(aResponse.error);
+      }
+    });
+
+    return deferred.promise;
+  },
 
   /**
    * Setter for saving of network request and response bodies.
@@ -370,37 +392,40 @@ WebConsoleFrame.prototype = {
    * @param boolean aValue
    *        The new value you want to set.
    */
-  set saveRequestAndResponseBodies(aValue) {
+  setSaveRequestAndResponseBodies:
+  function WCF_setSaveRequestAndResponseBodies(aValue) {
+    let deferred = promise.defer();
     let newValue = !!aValue;
-    let preferences = {
+    let toSet = {
       "NetworkMonitor.saveRequestAndResponseBodies": newValue,
     };
 
-    this.webConsoleClient.setPreferences(preferences, function(aResponse) {
+    // Make sure the web console client connection is established first.
+    this.webConsoleClient.setPreferences(toSet, aResponse => {
       if (!aResponse.error) {
         this._saveRequestAndResponseBodies = newValue;
+        deferred.resolve(aResponse);
       }
-    }.bind(this));
+      else {
+        deferred.reject(aResponse.error);
+      }
+    });
+
+    return deferred.promise;
   },
 
-  _persistLog: null,
-
   /**
-   * Getter for the persistent logging preference. This value is cached per
-   * instance to avoid reading the pref too often.
+   * Getter for the persistent logging preference.
    * @type boolean
    */
   get persistLog() {
-    if (this._persistLog === null) {
-      this._persistLog = Services.prefs.getBoolPref(PREF_PERSISTLOG);
-    }
-    return this._persistLog;
+    return Services.prefs.getBoolPref(PREF_PERSISTLOG);
   },
 
   /**
    * Initialize the WebConsoleFrame instance.
    * @return object
-   *         A Promise object for the initialization.
+   *         A promise object for the initialization.
    */
   init: function WCF_init()
   {
@@ -413,7 +438,7 @@ WebConsoleFrame.prototype = {
    *
    * @private
    * @return object
-   *         A Promise object that is resolved/reject based on the connection
+   *         A promise object that is resolved/reject based on the connection
    *         result.
    */
   _initConnection: function WCF__initConnection()
@@ -422,11 +447,10 @@ WebConsoleFrame.prototype = {
       return this._initDefer.promise;
     }
 
-    this._initDefer = Promise.defer();
+    this._initDefer = promise.defer();
     this.proxy = new WebConsoleConnectionProxy(this, this.owner.target);
 
     this.proxy.connect().then(() => { // on success
-      this.saveRequestAndResponseBodies = this._saveRequestAndResponseBodies;
       this._initDefer.resolve(this);
     }, (aReason) => { // on failure
       let node = this.createMessageNode(CATEGORY_JS, SEVERITY_ERROR,
@@ -479,42 +503,48 @@ WebConsoleFrame.prototype = {
       this.inputNode.style.fontSize = fontSize + "px";
     }
 
+    let updateSaveBodiesPrefUI = (aElement) => {
+      this.getSaveRequestAndResponseBodies().then(aValue => {
+        aElement.setAttribute("checked", aValue);
+        this.emit("save-bodies-ui-toggled");
+      });
+    }
+
+    let reverseSaveBodiesPref = ({ target: aElement }) => {
+      this.getSaveRequestAndResponseBodies().then(aValue => {
+        this.setSaveRequestAndResponseBodies(!aValue);
+        aElement.setAttribute("checked", aValue);
+        this.emit("save-bodies-pref-reversed");
+      });
+    }
+
     let saveBodies = doc.getElementById("saveBodies");
-    saveBodies.addEventListener("command", function() {
-      this.saveRequestAndResponseBodies = !this.saveRequestAndResponseBodies;
-    }.bind(this));
-    saveBodies.setAttribute("checked", this.saveRequestAndResponseBodies);
+    saveBodies.addEventListener("click", reverseSaveBodiesPref);
     saveBodies.disabled = !this.getFilterState("networkinfo") &&
                           !this.getFilterState("network");
 
-    saveBodies.parentNode.addEventListener("popupshowing", function() {
-      saveBodies.setAttribute("checked", this.saveRequestAndResponseBodies);
-      saveBodies.disabled = !this.getFilterState("networkinfo") &&
-                            !this.getFilterState("network");
-    }.bind(this));
-
-    // Remove this part when context menu entry is removed.
     let saveBodiesContextMenu = doc.getElementById("saveBodiesContextMenu");
-    saveBodiesContextMenu.addEventListener("command", function() {
-      this.saveRequestAndResponseBodies = !this.saveRequestAndResponseBodies;
-    }.bind(this));
-    saveBodiesContextMenu.setAttribute("checked",
-                                       this.saveRequestAndResponseBodies);
+    saveBodiesContextMenu.addEventListener("click", reverseSaveBodiesPref);
     saveBodiesContextMenu.disabled = !this.getFilterState("networkinfo") &&
                                      !this.getFilterState("network");
 
-    saveBodiesContextMenu.parentNode.addEventListener("popupshowing", function() {
-      saveBodiesContextMenu.setAttribute("checked",
-                                         this.saveRequestAndResponseBodies);
+    saveBodies.parentNode.addEventListener("popupshowing", () => {
+      updateSaveBodiesPrefUI(saveBodies);
+      saveBodies.disabled = !this.getFilterState("networkinfo") &&
+                            !this.getFilterState("network");
+    });
+
+    saveBodiesContextMenu.parentNode.addEventListener("popupshowing", () => {
+      updateSaveBodiesPrefUI(saveBodiesContextMenu);
       saveBodiesContextMenu.disabled = !this.getFilterState("networkinfo") &&
                                        !this.getFilterState("network");
-    }.bind(this));
+    });
 
     let clearButton = doc.getElementsByClassName("webconsole-clear-console-button")[0];
-    clearButton.addEventListener("command", function WCF__onClearButton() {
+    clearButton.addEventListener("command", () => {
       this.owner._onClearButton();
       this.jsterm.clearOutput(true);
-    }.bind(this));
+    });
 
     this.jsterm = new JSTerm(this);
     this.jsterm.init();
@@ -529,7 +559,7 @@ WebConsoleFrame.prototype = {
   {
     let prefs = ["network", "networkinfo", "csserror", "cssparser", "exception",
                  "jswarn", "jslog", "error", "info", "warn", "log", "secerror",
-                 "secwarn"];
+                 "secwarn", "netwarn"];
     for (let pref of prefs) {
       this.filterPrefs[pref] = Services.prefs
                                .getBoolPref(this._filterPrefsPrefix + pref);
@@ -2697,7 +2727,7 @@ WebConsoleFrame.prototype = {
    * when the Web Console is closed.
    *
    * @return object
-   *         A Promise that is resolved when the WebConsoleFrame instance is
+   *         A promise that is resolved when the WebConsoleFrame instance is
    *         destroyed.
    */
   destroy: function WCF_destroy()
@@ -2706,7 +2736,7 @@ WebConsoleFrame.prototype = {
       return this._destroyer.promise;
     }
 
-    this._destroyer = Promise.defer();
+    this._destroyer = promise.defer();
 
     this._repeatNodes = {};
     this._outputQueue = [];
@@ -3104,12 +3134,12 @@ JSTerm.prototype = {
    *        If you do not provide a |frame| the string will be evaluated in the
    *        global content window.
    * @return object
-   *         A Promise object that is resolved when the server response is
+   *         A promise object that is resolved when the server response is
    *         received.
    */
   requestEvaluation: function JST_requestEvaluation(aString, aOptions = {})
   {
-    let deferred = Promise.defer();
+    let deferred = promise.defer();
 
     function onResult(aResponse) {
       if (!aResponse.error) {
@@ -3178,7 +3208,7 @@ JSTerm.prototype = {
    *        - autofocus: optional boolean, |true| if you want to give focus to
    *        the variables view window after open, |false| otherwise.
    * @return object
-   *         A Promise object that is resolved when the variables view has
+   *         A promise object that is resolved when the variables view has
    *         opened. The new variables view instance is given to the callbacks.
    */
   openVariablesView: function JST_openVariablesView(aOptions)
@@ -3208,10 +3238,10 @@ JSTerm.prototype = {
       return view;
     };
 
-    let promise;
+    let openPromise;
     if (aOptions.targetElement) {
-      let deferred = Promise.defer();
-      promise = deferred.promise;
+      let deferred = promise.defer();
+      openPromise = deferred.promise;
       let document = aOptions.targetElement.ownerDocument;
       let iframe = document.createElement("iframe");
 
@@ -3228,10 +3258,10 @@ JSTerm.prototype = {
       if (!this.sidebar) {
         this._createSidebar();
       }
-      promise = this._addVariablesViewSidebarTab();
+      openPromise = this._addVariablesViewSidebarTab();
     }
 
-    return promise.then(onContainerReady);
+    return openPromise.then(onContainerReady);
   },
 
   /**
@@ -3253,11 +3283,11 @@ JSTerm.prototype = {
    *
    * @private
    * @return object
-   *         A Promise object for the adding of the new tab.
+   *         A promise object for the adding of the new tab.
    */
   _addVariablesViewSidebarTab: function JST__addVariablesViewSidebarTab()
   {
-    let deferred = Promise.defer();
+    let deferred = promise.defer();
 
     let onTabReady = () => {
       let window = this.sidebar.getWindowForTab("variablesview");
@@ -4047,9 +4077,8 @@ JSTerm.prototype = {
       return false;
     }
 
-    // Only complete if the selection is empty and at the end of the input.
-    if (inputNode.selectionStart == inputNode.selectionEnd &&
-        inputNode.selectionEnd != inputValue.length) {
+    // Only complete if the selection is empty.
+    if (inputNode.selectionStart != inputNode.selectionEnd) {
       this.clearCompletion();
       return false;
     }
@@ -4185,6 +4214,11 @@ JSTerm.prototype = {
 
   onAutocompleteSelect: function JSTF_onAutocompleteSelect()
   {
+    // Render the suggestion only if the cursor is at the end of the input.
+    if (this.inputNode.selectionStart != this.inputNode.value.length) {
+      return;
+    }
+
     let currentItem = this.autocompletePopup.selectedItem;
     if (currentItem && this.lastCompletion.value) {
       let suffix = currentItem.label.substring(this.lastCompletion.
@@ -4226,7 +4260,11 @@ JSTerm.prototype = {
     if (currentItem && this.lastCompletion.value) {
       let suffix = currentItem.label.substring(this.lastCompletion.
                                                matchProp.length);
-      this.setInputValue(this.inputNode.value + suffix);
+      let cursor = this.inputNode.selectionStart;
+      let value = this.inputNode.value;
+      this.setInputValue(value.substr(0, cursor) + suffix + value.substr(cursor));
+      let newCursor = cursor + suffix.length;
+      this.inputNode.selectionStart = this.inputNode.selectionEnd = newCursor;
       updated = true;
     }
 
@@ -4624,7 +4662,7 @@ WebConsoleConnectionProxy.prototype = {
    * Initialize a debugger client and connect it to the debugger server.
    *
    * @return object
-   *         A Promise object that is resolved/rejected based on the success of
+   *         A promise object that is resolved/rejected based on the success of
    *         the connection initialization.
    */
   connect: function WCCP_connect()
@@ -4633,15 +4671,15 @@ WebConsoleConnectionProxy.prototype = {
       return this._connectDefer.promise;
     }
 
-    this._connectDefer = Promise.defer();
+    this._connectDefer = promise.defer();
 
     let timeout = Services.prefs.getIntPref(PREF_CONNECTION_TIMEOUT);
     this._connectTimer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
     this._connectTimer.initWithCallback(this._connectionTimeout,
                                         timeout, Ci.nsITimer.TYPE_ONE_SHOT);
 
-    let promise = this._connectDefer.promise;
-    promise.then(function _onSucess() {
+    let connPromise = this._connectDefer.promise;
+    connPromise.then(function _onSucess() {
       this._connectTimer.cancel();
       this._connectTimer = null;
     }.bind(this), function _onFailure() {
@@ -4667,7 +4705,7 @@ WebConsoleConnectionProxy.prototype = {
     }
     this._attachConsole();
 
-    return promise;
+    return connPromise;
   },
 
   /**
@@ -4740,7 +4778,7 @@ WebConsoleConnectionProxy.prototype = {
     }
 
     if (!this._connectTimer) {
-      // This happens if the Promise is rejected (eg. a timeout), but the
+      // This happens if the promise is rejected (eg. a timeout), but the
       // connection attempt is successful, nonetheless.
       Cu.reportError("Web Console getCachedMessages error: invalid state.");
     }
@@ -4922,7 +4960,7 @@ WebConsoleConnectionProxy.prototype = {
    * Disconnect the Web Console from the remote server.
    *
    * @return object
-   *         A Promise object that is resolved when disconnect completes.
+   *         A promise object that is resolved when disconnect completes.
    */
   disconnect: function WCCP_disconnect()
   {
@@ -4930,7 +4968,7 @@ WebConsoleConnectionProxy.prototype = {
       return this._disconnecter.promise;
     }
 
-    this._disconnecter = Promise.defer();
+    this._disconnecter = promise.defer();
 
     if (!this.client) {
       this._disconnecter.resolve(null);

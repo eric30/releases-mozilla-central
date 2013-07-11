@@ -9,10 +9,9 @@
 #include "jscntxt.h"
 #include "jscompartment.h"
 #include "jsmath.h"
-#include "CodeGenerator-x86-shared.h"
-#include "CodeGenerator-shared-inl.h"
+#include "ion/shared/CodeGenerator-x86-shared.h"
+#include "ion/shared/CodeGenerator-shared-inl.h"
 #include "ion/IonFrames.h"
-#include "ion/MoveEmitter.h"
 #include "ion/IonCompartment.h"
 #include "ion/ParallelFunctions.h"
 
@@ -23,8 +22,7 @@ namespace js {
 namespace ion {
 
 CodeGeneratorX86Shared::CodeGeneratorX86Shared(MIRGenerator *gen, LIRGraph *graph, MacroAssembler *masm)
-  : CodeGeneratorShared(gen, graph, masm),
-    deoptLabel_(NULL)
+  : CodeGeneratorShared(gen, graph, masm)
 {
 }
 
@@ -40,17 +38,13 @@ CodeGeneratorX86Shared::generatePrologue()
     // Note that this automatically sets MacroAssembler::framePushed().
     masm.reserveStack(frameSize());
 
-    // Allocate returnLabel_ on the heap, so we don't run its destructor and
-    // assert-not-bound in debug mode on compilation failure.
-    returnLabel_ = new HeapLabel();
-
     return true;
 }
 
 bool
 CodeGeneratorX86Shared::generateEpilogue()
 {
-    masm.bind(returnLabel_);
+    masm.bind(&returnLabel_);
 
     // Pop the stack we allocated at the start of the function.
     masm.freeStack(frameSize());
@@ -229,9 +223,9 @@ CodeGeneratorX86Shared::generateOutOfLineCode()
     if (!CodeGeneratorShared::generateOutOfLineCode())
         return false;
 
-    if (deoptLabel_) {
+    if (deoptLabel_.used()) {
         // All non-table-based bailouts will go here.
-        masm.bind(deoptLabel_);
+        masm.bind(&deoptLabel_);
 
         // Push the frame size, so the handler can recover the IonScript.
         masm.push(Imm32(frameSize()));
@@ -293,7 +287,7 @@ CodeGeneratorX86Shared::bailout(const T &binder, LSnapshot *snapshot)
       case SequentialExecution:
         break;
       default:
-        JS_NOT_REACHED("No such execution mode");
+        MOZ_ASSUME_UNREACHABLE("No such execution mode");
     }
 
     if (!encode(snapshot))
@@ -350,11 +344,8 @@ CodeGeneratorX86Shared::bailout(LSnapshot *snapshot)
 bool
 CodeGeneratorX86Shared::visitOutOfLineBailout(OutOfLineBailout *ool)
 {
-    if (!deoptLabel_)
-        deoptLabel_ = new HeapLabel();
-
     masm.push(Imm32(ool->snapshot()->snapshotOffset()));
-    masm.jmp(deoptLabel_);
+    masm.jmp(&deoptLabel_);
     return true;
 }
 
@@ -844,33 +835,59 @@ CodeGeneratorX86Shared::visitModI(LModI *ins)
 
     Label done;
 
-    // Prevent divide by zero
-    masm.testl(rhs, rhs);
-    if (ins->mir()->isTruncated()) {
-        Label notzero;
-        masm.j(Assembler::NonZero, &notzero);
-        masm.xorl(edx, edx);
-        masm.jmp(&done);
-        masm.bind(&notzero);
-    } else {
-        if (!bailoutIf(Assembler::Zero, ins->snapshot()))
-            return false;
+    // Prevent divide by zero.
+    if (ins->mir()->canBeDivideByZero()) {
+        masm.testl(rhs, rhs);
+        if (ins->mir()->isTruncated()) {
+            Label notzero;
+            masm.j(Assembler::NonZero, &notzero);
+            masm.xorl(edx, edx);
+            masm.jmp(&done);
+            masm.bind(&notzero);
+        } else {
+            if (!bailoutIf(Assembler::Zero, ins->snapshot()))
+                return false;
+        }
     }
 
     Label negative;
 
     // Switch based on sign of the lhs.
-    masm.branchTest32(Assembler::Signed, lhs, lhs, &negative);
+    if (ins->mir()->canBeNegativeDividend())
+        masm.branchTest32(Assembler::Signed, lhs, lhs, &negative);
+
     // If lhs >= 0 then remainder = lhs % rhs. The remainder must be positive.
     {
+        // Check if rhs is a power-of-two.
+        if (ins->mir()->canBePowerOfTwoDivisor()) {
+            JS_ASSERT(rhs != remainder);
+
+            // Rhs y is a power-of-two if (y & (y-1)) == 0. Note that if
+            // y is any negative number other than INT32_MIN, both y and
+            // y-1 will have the sign bit set so these are never optimized
+            // as powers-of-two. If y is INT32_MIN, y-1 will be INT32_MAX
+            // and because lhs >= 0 at this point, lhs & INT32_MAX returns
+            // the correct value.
+            Label notPowerOfTwo;
+            masm.mov(rhs, remainder);
+            masm.subl(Imm32(1), remainder);
+            masm.branchTest32(Assembler::NonZero, remainder, rhs, &notPowerOfTwo);
+            {
+                masm.andl(lhs, remainder);
+                masm.jmp(&done);
+            }
+            masm.bind(&notPowerOfTwo);
+        }
+
         // Since lhs >= 0, the sign-extension will be 0
         masm.xorl(edx, edx);
         masm.idiv(rhs);
-        masm.jump(&done);
     }
 
     // Otherwise, we have to beware of two special cases:
-    {
+    if (ins->mir()->canBeNegativeDividend()) {
+        masm.jump(&done);
+
         masm.bind(&negative);
 
         // Prevent an integer overflow exception from -2147483648 % -1
@@ -939,7 +956,7 @@ CodeGeneratorX86Shared::visitBitOpI(LBitOpI *ins)
                 masm.andl(ToOperand(rhs), ToRegister(lhs));
             break;
         default:
-            JS_NOT_REACHED("unexpected binary opcode");
+            MOZ_ASSUME_UNREACHABLE("unexpected binary opcode");
     }
 
     return true;
@@ -973,7 +990,7 @@ CodeGeneratorX86Shared::visitShiftI(LShiftI *ins)
             }
             break;
           default:
-            JS_NOT_REACHED("Unexpected shift op");
+            MOZ_ASSUME_UNREACHABLE("Unexpected shift op");
         }
     } else {
         JS_ASSERT(ToRegister(rhs) == ecx);
@@ -994,7 +1011,7 @@ CodeGeneratorX86Shared::visitShiftI(LShiftI *ins)
             }
             break;
           default:
-            JS_NOT_REACHED("Unexpected shift op");
+            MOZ_ASSUME_UNREACHABLE("Unexpected shift op");
         }
     }
 
@@ -1033,43 +1050,6 @@ CodeGeneratorX86Shared::toMoveOperand(const LAllocation *a) const
     if (a->isFloatReg())
         return MoveOperand(ToFloatRegister(a));
     return MoveOperand(StackPointer, ToStackOffset(a));
-}
-
-bool
-CodeGeneratorX86Shared::visitMoveGroup(LMoveGroup *group)
-{
-    if (!group->numMoves())
-        return true;
-
-    MoveResolver &resolver = masm.moveResolver();
-
-    for (size_t i = 0; i < group->numMoves(); i++) {
-        const LMove &move = group->getMove(i);
-
-        const LAllocation *from = move.from();
-        const LAllocation *to = move.to();
-
-        // No bogus moves.
-        JS_ASSERT(*from != *to);
-        JS_ASSERT(!from->isConstant());
-        JS_ASSERT(from->isDouble() == to->isDouble());
-
-        MoveResolver::Move::Kind kind = from->isDouble()
-                                        ? MoveResolver::Move::DOUBLE
-                                        : MoveResolver::Move::GENERAL;
-
-        if (!resolver.addMove(toMoveOperand(from), toMoveOperand(to), kind))
-            return false;
-    }
-
-    if (!resolver.resolve())
-        return false;
-
-    MoveEmitter emitter(masm);
-    emitter.emit(resolver);
-    emitter.finish();
-
-    return true;
 }
 
 class OutOfLineTableSwitch : public OutOfLineCodeBase<CodeGeneratorX86Shared>
@@ -1176,8 +1156,7 @@ CodeGeneratorX86Shared::visitMathD(LMathD *math)
         masm.divsd(rhs, lhs);
         break;
       default:
-        JS_NOT_REACHED("unexpected opcode");
-        return false;
+        MOZ_ASSUME_UNREACHABLE("unexpected opcode");
     }
     return true;
 }

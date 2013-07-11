@@ -10,8 +10,6 @@
  * liability, trademark and document use rules apply.
  */
 
-interface SVGAnimatedEnumeration;
-
 interface SVGTextContentElement : SVGGraphicsElement {
 
   // lengthAdjust Types
@@ -19,8 +17,8 @@ interface SVGTextContentElement : SVGGraphicsElement {
   const unsigned short LENGTHADJUST_SPACING = 1;
   const unsigned short LENGTHADJUST_SPACINGANDGLYPHS = 2;
 
-  // readonly attribute SVGAnimatedLength textLength;
-  // readonly attribute SVGAnimatedEnumeration lengthAdjust;
+  readonly attribute SVGAnimatedLength textLength;
+  readonly attribute SVGAnimatedEnumeration lengthAdjust;
 
   long getNumberOfChars();
   float getComputedTextLength();

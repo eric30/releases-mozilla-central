@@ -194,6 +194,37 @@ ion::ParExtendArray(ForkJoinSlice *slice, JSObject *array, uint32_t length)
     return array;
 }
 
+ParallelResult
+ion::ParConcatStrings(ForkJoinSlice *slice, HandleString left, HandleString right,
+                      MutableHandleString out)
+{
+    JSString *str = ConcatStringsPure(slice, left, right);
+    if (!str)
+        return TP_RETRY_SEQUENTIALLY;
+    out.set(str);
+    return TP_SUCCESS;
+}
+
+ParallelResult
+ion::ParIntToString(ForkJoinSlice *slice, int i, MutableHandleString out)
+{
+    JSFlatString *str = Int32ToString<NoGC>(slice, i);
+    if (!str)
+        return TP_RETRY_SEQUENTIALLY;
+    out.set(str);
+    return TP_SUCCESS;
+}
+
+ParallelResult
+ion::ParDoubleToString(ForkJoinSlice *slice, double d, MutableHandleString out)
+{
+    JSString *str = js_NumberToString<NoGC>(slice, d);
+    if (!str)
+        return TP_RETRY_SEQUENTIALLY;
+    out.set(str);
+    return TP_SUCCESS;
+}
+
 #define PAR_RELATIONAL_OP(OP, EXPECTED)                                         \
 do {                                                                            \
     /* Optimize for two int-tagged operands (typical loop control). */          \
@@ -225,17 +256,15 @@ do {                                                                            
 } while(0)
 
 static ParallelResult
-ParCompareStrings(ForkJoinSlice *slice, HandleString str1,
-                  HandleString str2, int32_t *res)
+ParCompareStrings(ForkJoinSlice *slice, JSString *left, JSString *right, int32_t *res)
 {
-    if (!str1->isLinear())
-        return TP_RETRY_SEQUENTIALLY;
-    if (!str2->isLinear())
-        return TP_RETRY_SEQUENTIALLY;
-    JSLinearString &linearStr1 = str1->asLinear();
-    JSLinearString &linearStr2 = str2->asLinear();
-    if (!CompareChars(linearStr1.chars(), linearStr1.length(),
-                      linearStr2.chars(), linearStr2.length(),
+    ScopedThreadSafeStringInspector leftInspector(left);
+    ScopedThreadSafeStringInspector rightInspector(right);
+    if (!leftInspector.ensureChars(slice) || !rightInspector.ensureChars(slice))
+        return TP_FATAL;
+
+    if (!CompareChars(leftInspector.chars(), left->length(),
+                      rightInspector.chars(), right->length(),
                       res))
         return TP_FATAL;
 
@@ -252,9 +281,7 @@ ParCompareMaybeStrings(ForkJoinSlice *slice,
         return TP_RETRY_SEQUENTIALLY;
     if (!v2.isString())
         return TP_RETRY_SEQUENTIALLY;
-    RootedString str1(slice->perThreadData, v1.toString());
-    RootedString str2(slice->perThreadData, v2.toString());
-    return ParCompareStrings(slice, str1, str2, res);
+    return ParCompareStrings(slice, v1.toString(), v2.toString(), res);
 }
 
 template<bool Equal>
@@ -452,7 +479,8 @@ ion::ParCallToUncompiledScript(JSFunction *func)
             Spew(SpewBailouts, "Call to bound function (excessive depth: %d)", depth);
         }
     } else {
-        JS_NOT_REACHED("ParCall'ed functions must have scripts or be ES6 bound functions.");
+        JS_ASSERT(func->isNative());
+        Spew(SpewBailouts, "Call to native function");
     }
 #endif
 }
@@ -466,10 +494,9 @@ ion::InitRestParameter(ForkJoinSlice *slice, uint32_t length, Value *rest,
     // before this point. We can do the allocation here like in the sequential
     // path, but duplicating the initGCThing logic is too tedious.
     JS_ASSERT(res);
-    JS_ASSERT(res->isArray());
+    JS_ASSERT(res->is<ArrayObject>());
     JS_ASSERT(!res->getDenseInitializedLength());
     JS_ASSERT(res->type() == templateObj->type());
-    // See note in visitRest in ParallelArrayAnalysis.
     JS_ASSERT(res->type()->unknownProperties());
 
     if (length) {

@@ -8,6 +8,7 @@
 
 #include "jsiter.h"
 
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/PodOperations.h"
 #include "mozilla/Util.h"
 
@@ -333,7 +334,7 @@ GetCustomIterator(JSContext *cx, HandleObject obj, unsigned flags, MutableHandle
 
     /* Otherwise call it and return that object. */
     Value arg = BooleanValue((flags & JSITER_FOREACH) == 0);
-    if (!Invoke(cx, ObjectValue(*obj), vp, 1, &arg, vp.address()))
+    if (!Invoke(cx, ObjectValue(*obj), vp, 1, &arg, vp))
         return false;
     if (vp.isPrimitive()) {
         /*
@@ -341,7 +342,7 @@ GetCustomIterator(JSContext *cx, HandleObject obj, unsigned flags, MutableHandle
          * trace, so the object we are iterating over is on top of the stack (-1).
          */
         JSAutoByteString bytes;
-        if (!js_AtomToPrintableString(cx, name, &bytes))
+        if (!AtomToPrintableString(cx, name, &bytes))
             return false;
         RootedValue val(cx, ObjectValue(*obj));
         js_ReportValueError2(cx, JSMSG_BAD_TRAP_RETURN_VALUE,
@@ -374,7 +375,7 @@ static inline PropertyIteratorObject *
 NewPropertyIteratorObject(JSContext *cx, unsigned flags)
 {
     if (flags & JSITER_ENUMERATE) {
-        RootedTypeObject type(cx, cx->compartment()->getNewType(cx, &PropertyIteratorObject::class_, NULL));
+        RootedTypeObject type(cx, cx->getNewType(&PropertyIteratorObject::class_, NULL));
         if (!type)
             return NULL;
 
@@ -583,7 +584,7 @@ js::GetIterator(JSContext *cx, HandleObject obj, unsigned flags, MutableHandleVa
             return false;
         }
 
-        if (!Invoke(cx, ObjectOrNullValue(obj), method, 0, NULL, vp.address()))
+        if (!Invoke(cx, ObjectOrNullValue(obj), method, 0, NULL, vp))
             return false;
 
         JSObject *resultObj = ToObject(cx, vp);
@@ -813,7 +814,7 @@ iterator_iteratorObject(JSContext *cx, HandleObject obj, JSBool keysonly)
 }
 
 size_t
-PropertyIteratorObject::sizeOfMisc(JSMallocSizeOfFun mallocSizeOf) const
+PropertyIteratorObject::sizeOfMisc(mozilla::MallocSizeOf mallocSizeOf) const
 {
     return mallocSizeOf(getPrivate());
 }
@@ -958,10 +959,8 @@ const JSFunctionSpec ElementIteratorObject::methods[] = {
     JS_FS_END
 };
 
-#if JS_HAS_GENERATORS
 static JSBool
 CloseGenerator(JSContext *cx, HandleObject genobj);
-#endif
 
 bool
 js::ValueToIterator(JSContext *cx, unsigned flags, MutableHandleValue vp)
@@ -1023,12 +1022,9 @@ js::CloseIterator(JSContext *cx, HandleObject obj)
              */
             ni->props_cursor = ni->props_array;
         }
-    }
-#if JS_HAS_GENERATORS
-    else if (obj->is<GeneratorObject>()) {
+    } else if (obj->is<GeneratorObject>()) {
         return CloseGenerator(cx, obj);
     }
-#endif
     return true;
 }
 
@@ -1248,7 +1244,7 @@ js_IteratorMore(JSContext *cx, HandleObject iterobj, MutableHandleValue rval)
         /* Call the iterator object's .next method. */
         if (!JSObject::getProperty(cx, iterobj, iterobj, cx->names().next, rval))
             return false;
-        if (!Invoke(cx, ObjectValue(*iterobj), rval, 0, NULL, rval.address())) {
+        if (!Invoke(cx, ObjectValue(*iterobj), rval, 0, NULL, rval)) {
             /* Check for StopIteration. */
             if (!cx->isExceptionPending() || !IsStopIteration(cx->getPendingException()))
                 return false;
@@ -1319,8 +1315,6 @@ Class StopIterationObject::class_ = {
 
 /*** Generators **********************************************************************************/
 
-#if JS_HAS_GENERATORS
-
 static void
 generator_finalize(FreeOp *fop, JSObject *obj)
 {
@@ -1360,6 +1354,14 @@ GeneratorWriteBarrierPre(JSContext *cx, JSGenerator *gen)
     JS::Zone *zone = cx->zone();
     if (zone->needsBarrier())
         MarkGeneratorFrame(zone->barrierTracer(), gen);
+}
+
+static void
+GeneratorWriteBarrierPost(JSContext *cx, JSGenerator *gen)
+{
+#ifdef JSGC_GENERATIONAL
+    cx->runtime()->gcStoreBuffer.putWholeCell(gen->obj);
+#endif
 }
 
 /*
@@ -1417,11 +1419,6 @@ GeneratorState::pushInterpreterFrame(JSContext *cx, FrameGuard *)
      * or else some kind of epoch scheme would have to be used.
      */
     GeneratorWriteBarrierPre(cx, gen_);
-
-    /*
-     * Don't change the state until after the frame is successfully pushed
-     * or else we might fail to scan some generator values.
-     */
     gen_->state = futureState_;
 
     gen_->fp->clearSuspended();
@@ -1560,9 +1557,12 @@ SendToGenerator(JSContext *cx, JSGeneratorOp op, HandleObject obj,
         if (gen->state == JSGEN_OPEN) {
             /*
              * Store the argument to send as the result of the yield
-             * expression.
+             * expression. The generator stack is not barriered, so we need
+             * write barriers here.
              */
+            HeapValue::writeBarrierPre(gen->regs.sp[-1]);
             gen->regs.sp[-1] = arg;
+            HeapValue::writeBarrierPost(cx->runtime(), gen->regs.sp[-1], &gen->regs.sp[-1]);
         }
         futureState = JSGEN_RUNNING;
         break;
@@ -1596,6 +1596,7 @@ SendToGenerator(JSContext *cx, JSGeneratorOp op, HandleObject obj,
         JS_ASSERT(op != JSGENOP_CLOSE);
         gen->fp->clearYielding();
         gen->state = JSGEN_OPEN;
+        GeneratorWriteBarrierPost(cx, gen);
         return ok;
     }
 
@@ -1776,8 +1777,6 @@ static const JSFunctionSpec generator_methods[] = {
     JS_FS_END
 };
 
-#endif /* JS_HAS_GENERATORS */
-
 /* static */ bool
 GlobalObject::initIteratorClasses(JSContext *cx, Handle<GlobalObject *> global)
 {
@@ -1819,14 +1818,12 @@ GlobalObject::initIteratorClasses(JSContext *cx, Handle<GlobalObject *> global)
         global->setReservedSlot(ELEMENT_ITERATOR_PROTO, ObjectValue(*proto));
     }
 
-#if JS_HAS_GENERATORS
     if (global->getSlot(GENERATOR_PROTO).isUndefined()) {
         proto = global->createBlankPrototype(cx, &GeneratorObject::class_);
         if (!proto || !DefinePropertiesAndBrand(cx, proto, NULL, generator_methods))
             return false;
         global->setReservedSlot(GENERATOR_PROTO, ObjectValue(*proto));
     }
-#endif
 
     if (global->getPrototype(JSProto_StopIteration).isUndefined()) {
         proto = global->createBlankPrototype(cx, &StopIterationObject::class_);

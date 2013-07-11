@@ -70,7 +70,6 @@ FENNEC_JAVA_FILES = \
   BrowserApp.java \
   BrowserToolbar.java \
   BrowserToolbarBackground.java \
-  BrowserToolbarLayout.java \
   CameraImageResultHandler.java \
   CameraVideoResultHandler.java \
   CanvasDelegate.java \
@@ -113,7 +112,6 @@ FENNEC_JAVA_FILES = \
   GeckoThread.java \
   GeckoJavaSampler.java \
   GlobalHistory.java \
-  GeckoViewsFactory.java \
   GeckoView.java \
   health/BrowserHealthRecorder.java \
   health/BrowserHealthReporter.java \
@@ -148,6 +146,7 @@ FENNEC_JAVA_FILES = \
   RemoteTabs.java \
   RobocopAPI.java \
   ServiceNotificationClient.java \
+  ScrollAnimator.java \
   SessionParser.java \
   SetupScreen.java \
   ShapedButton.java \
@@ -571,15 +570,16 @@ RES_VALUES_V14 = \
   $(NULL)
 
 RES_XML = \
-  res/xml/preferences_datareporting.xml \
+  res/xml/preferences_customize.xml \
+  res/xml/preferences_display.xml \
+  res/xml/preferences_privacy.xml \
+  res/xml/preferences_vendor.xml \
   $(SYNC_RES_XML) \
   $(NULL)
 
 RES_XML_V11 = \
   res/xml-v11/preference_headers.xml \
-  res/xml-v11/preferences_general.xml \
-  res/xml-v11/preferences_content.xml \
-  res/xml-v11/preferences_privacy.xml \
+  res/xml-v11/preferences_customize_tablet.xml \
   res/xml-v11/preferences.xml \
   $(NULL)
 
@@ -1327,7 +1327,7 @@ $(RES_BRANDING_DRAWABLE_MDPI): $(addprefix $(topsrcdir)/,$(MOZ_BRANDING_DRAWABLE
 	$(NSINSTALL) -D res/drawable-mdpi
 	$(NSINSTALL) $^ res/drawable-mdpi/
 
-$(RES_DIRS):
+$(RES_DIRS): $(subst res/,$(srcdir)/resources/,$(RESOURCES))
 	$(RM) -r $@
 	$(NSINSTALL) -D $@
 
@@ -1335,6 +1335,8 @@ $(RESOURCES): $(RES_DIRS) $(subst res/,$(srcdir)/resources/,$(RESOURCES))
 	@echo "creating $@"
 	$(NSINSTALL) $(subst res/,$(srcdir)/resources/,$@) $(dir $@)
 
+res/values/strings.xml:
+	$(MAKE) -C locales
 
 R.java: $(MOZ_APP_ICON) $(RESOURCES) $(RES_DRAWABLE) $(RES_BRANDING_DRAWABLE_MDPI) $(PP_RES_XML) res/drawable-mdpi/icon.png res/drawable-hdpi/icon.png res/drawable-xhdpi/icon.png res/drawable-xxhdpi/icon.png res/values/strings.xml AndroidManifest.xml FORCE
 	$(AAPT) package -f -M AndroidManifest.xml -I $(ANDROID_SDK)/android.jar -S res -J . --custom-package org.mozilla.gecko

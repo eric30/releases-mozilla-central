@@ -76,7 +76,6 @@ MOCHITEST_FILES_A = \
 		test_bug378969.html \
 		test_bug382113.html \
 		test_bug382871.html \
-		test_bug383430.html \
 		test_bug384003.xhtml \
 		test_bug390219.html \
 		test_bug390735.html \
@@ -631,6 +630,11 @@ MOCHITEST_FILES_C= \
 		test_bug869000.html \
 		test_bug869002.html \
 		test_bug876282.html \
+		test_CSP_bug885433.html \
+		file_CSP_bug885433_allows.html \
+		file_CSP_bug885433_allows.html^headers^ \
+		file_CSP_bug885433_blocks.html \
+		file_CSP_bug885433_blocks.html^headers^ \
 		$(NULL)
 
 # OOP tests don't work on Windows (bug 763081) or native-fennec

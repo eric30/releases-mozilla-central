@@ -94,6 +94,31 @@ public:
     return mScrollOffset * LayersPixelsPerCSSPixel();
   }
 
+  /**
+   * Return the scale factor needed to fit the viewport
+   * into its composition bounds.
+   */
+  CSSToScreenScale CalculateIntrinsicScale() const
+  {
+    return CSSToScreenScale(float(mCompositionBounds.width) / float(mViewport.width));
+  }
+
+  /**
+   * Return the resolution that content should be rendered at given
+   * the configuration in this metrics object: viewport dimensions,
+   * zoom factor, etc. (The mResolution member of this metrics is
+   * ignored.)
+   */
+  CSSToScreenScale CalculateResolution() const
+  {
+    return CalculateIntrinsicScale() * mZoom;
+  }
+
+  CSSRect CalculateCompositedRectInCssPixels() const
+  {
+    return CSSRect(gfx::RoundedIn(mCompositionBounds / CalculateResolution()));
+  }
+
   // ---------------------------------------------------------------------------
   // The following metrics are all in widget space/device pixels.
   //
@@ -134,7 +159,7 @@ public:
   //
   // To pre-render a margin of 100 CSS pixels around the window,
   // { x = -100, y = - 100,
-  //   width = window.innerWidth + 100, height = window.innerHeight + 100 }
+  //   width = window.innerWidth + 200, height = window.innerHeight + 200 }
   //
   // This is only valid on the root layer. Nested iframes do not have a
   // displayport set on them. See bug 775452.
@@ -212,11 +237,10 @@ public:
   // will always be 2.0 no matter what the viewport or composition
   // bounds.
   //
-  // In the steady state (no animations), and ignoring DPI, then the
-  // following is usually true
+  // In the steady state (no animations), the following is usually true
   //
   //  intrinsicScale = (mCompositionBounds / mViewport)
-  //  mResolution = mZoom * intrinsicScale
+  //  mResolution = mZoom * intrinsicScale / mDevPixelsPerCSSPixel
   //
   // When this is not true, we're probably asynchronously sampling a
   // zoom animation for content.

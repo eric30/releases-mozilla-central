@@ -3275,10 +3275,12 @@ xpc_CreateSandboxObject(JSContext *cx, jsval *vp, nsISupports *prinOrSop, Sandbo
         MOZ_ASSERT(principal);
     }
 
-    JS::ZoneSpecifier zoneSpec = options.sameZoneAs
+    JS::CompartmentOptions compartmentOptions;
+    compartmentOptions.setZone(options.sameZoneAs
                                  ? JS::SameZoneAs(js::UncheckedUnwrap(options.sameZoneAs))
-                                 : JS::SystemZone;
-    RootedObject sandbox(cx, xpc::CreateGlobalObject(cx, &SandboxClass, principal, zoneSpec));
+                                 : JS::SystemZone);
+    RootedObject sandbox(cx, xpc::CreateGlobalObject(cx, &SandboxClass,
+                                                     principal, compartmentOptions));
     if (!sandbox)
         return NS_ERROR_FAILURE;
 
@@ -3334,15 +3336,14 @@ xpc_CreateSandboxObject(JSContext *cx, jsval *vp, nsISupports *prinOrSop, Sandbo
         // Pass on ownership of sbp to |sandbox|.
         JS_SetPrivate(sandbox, sbp.forget().get());
 
-        {
-          JSAutoCompartment ac(cx, sandbox);
-          if (options.wantComponents &&
-              !nsXPCComponents::AttachComponentsObject(cx, GetObjectScope(sandbox)))
-              return NS_ERROR_XPC_UNEXPECTED;
+      bool allowComponents = nsContentUtils::IsSystemPrincipal(principal) ||
+                             nsContentUtils::IsExpandedPrincipal(principal);
+      if (options.wantComponents && allowComponents &&
+          !nsXPCComponents::AttachComponentsObject(cx, GetObjectScope(sandbox)))
+          return NS_ERROR_XPC_UNEXPECTED;
 
-          if (!XPCNativeWrapper::AttachNewConstructorObject(cx, sandbox))
-              return NS_ERROR_XPC_UNEXPECTED;
-        }
+      if (!XPCNativeWrapper::AttachNewConstructorObject(cx, sandbox))
+          return NS_ERROR_XPC_UNEXPECTED;
 
         if (!JS_DefineFunctions(cx, sandbox, SandboxFunctions))
             return NS_ERROR_XPC_UNEXPECTED;
@@ -3816,6 +3817,13 @@ nsXPCComponents_Utils::EvalInSandbox(const nsAString& source,
             return NS_ERROR_INVALID_ARG;
 
         jsVersion = JS_StringToVersion(bytes.ptr());
+        // Explicitly check for "latest", which we support for sandboxes but
+        // isn't in the set of web-exposed version strings.
+        if (jsVersion == JSVERSION_UNKNOWN &&
+            !strcmp(bytes.ptr(), "latest"))
+        {
+            jsVersion = JSVERSION_LATEST;
+        }
         if (jsVersion == JSVERSION_UNKNOWN)
             return NS_ERROR_INVALID_ARG;
     }
@@ -3900,12 +3908,11 @@ xpc_EvalInSandbox(JSContext *cx, HandleObject sandboxArg, const nsAString& sourc
         pusher.Push(sandcx);
         JSAutoCompartment ac(sandcx, sandbox);
 
-        if (jsVersion != JSVERSION_DEFAULT)
-            JS_SetVersion(sandcx, jsVersion);
-
         JS::CompileOptions options(sandcx);
         options.setPrincipals(nsJSPrincipals::get(prin))
                .setFileAndLine(filename, lineNo);
+        if (jsVersion != JSVERSION_DEFAULT)
+               options.setVersion(jsVersion);
         JS::RootedObject rootedSandbox(sandcx, sandbox);
         ok = JS::Evaluate(sandcx, rootedSandbox, options,
                           PromiseFlatString(source).get(), source.Length(),
@@ -3942,7 +3949,7 @@ xpc_EvalInSandbox(JSContext *cx, HandleObject sandboxArg, const nsAString& sourc
 
         // Set the exception on our caller's cx.
         JS_SetPendingException(cx, exn);
-        return NS_OK;
+        return NS_ERROR_FAILURE;
     }
 
     // Transitively apply Xray waivers if |sb| was waived.

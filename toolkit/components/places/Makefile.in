@@ -14,32 +14,12 @@ LIBRARY_NAME  = places
 MSVC_ENABLE_PGO := 1
 LIBXUL_LIBRARY = 1
 EXPORT_LIBRARY = 1
-MODULE_NAME = nsPlacesModule
-IS_COMPONENT = 1
 
 LOCAL_INCLUDES += -I$(srcdir)/../build
 
-DISABLED_EXTRA_COMPONENTS = \
-  toolkitplaces.manifest \
-  nsLivemarkService.js \
-  nsTaggingService.js \
-  nsPlacesExpiration.js \
-  PlacesCategoriesStarter.js \
-  ColorAnalyzer.js \
-  $(NULL)
 
 ifdef MOZ_XUL
-DISABLED_EXTRA_COMPONENTS += nsPlacesAutoComplete.js nsPlacesAutoComplete.manifest
 endif
-
-EXTRA_JS_MODULES = \
-  PlacesDBUtils.jsm \
-  ColorAnalyzer_worker.js \
-  ColorConversion.js \
-  ClusterLib.js \
-  BookmarkJSONUtils.jsm \
-  PlacesBackups.jsm \
-  $(NULL)
 
 EXTRA_PP_JS_MODULES = \
   BookmarkHTMLUtils.jsm \
