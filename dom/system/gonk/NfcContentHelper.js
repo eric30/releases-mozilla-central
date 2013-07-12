@@ -41,8 +41,7 @@ XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
                                    "nsISyncMessageSender");
 
 function NfcContentHelper() {
-  this.initRequests();
-  this.initMessageListener(NFC_IPC_MSG_NAMES);
+  this.initDOMRequestHelper(/* aWindow */ null, NFC_IPC_MSG_NAMES);
   Services.obs.addObserver(this, "xpcom-shutdown", false);
 }
 
