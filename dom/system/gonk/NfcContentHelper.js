@@ -378,7 +378,7 @@ NfcContentHelper.prototype = {
   },
 
   // handle DOMRequest based response messages. Subfields of message.content: requestId, status, optional message
-  handleResponse: function handleResponse(message) {
+  handleDOMRequestResponse: function handleResponse(message) {
     let response = message.content;
     let requestId = atob(response.requestId);
     if (response.status == "OK") {
@@ -391,43 +391,43 @@ NfcContentHelper.prototype = {
   handleNDEFDetailsResponse: function handleNDEFDetailsResponse(message) {
     let response = message.content;
     debug("NDEFDetailsResponse(" + response.requestId + ", " + response.status + ")");
-    this.handleResponse(message);
+    this.handleDOMRequestResponse(message);
   },
 
   handleNDEFReadResponse: function handleNDEFReadResponse(message) {
     let response = message.content;
     debug("NDEFReadResponse(" + response.requestId + ", " + response.status + ")");
-    this.handleResponse(message);
+    this.handleDOMRequestResponse(message);
   },
 
   handleNDEFWriteResponse: function handleNDEFWriteResponse(message) {
     let response = message.content;
     debug("NDEFWriteResponse(" + response.requestId + ", " + response.status + ")");
-    this.handleResponse(message);
+    this.handleDOMRequestResponse(message);
   },
 
   handleNfcATagDetailsResponse: function handleNfcATagDetailsResponse(message) {
     let response = message.content;
     debug("NfcATagDetailsResponse(" + response.requestId + ", " + response.status + ")");
-    this.handleResponse(message);
+    this.handleDOMRequestResponse(message);
   },
 
   handleNfcATagTransceiveResponse: function handleNfcATagTransceiveResponse(message) {
     let response = message.content;
     debug("NfcATagTransceiveResponse(" + response.requestId + ", " + response.status + ")");
-    this.handleResponse(message);
+    this.handleDOMRequestResponse(message);
   },
 
   handleConnectResponse: function handleConnectResponse(message) {
     let response = message.content;
     debug("ConnectResponse(" + response.requestId + ", " + response.status + ")");
-    this.handleResponse(message);
+    this.handleDOMRequestResponse(message);
   },
 
   handleCloseResponse: function handleCloseResponse(message) {
     let response = message.content;
     debug("CloseResponse(" + response.requestId + ", " + response.status + ")");
-    this.handleResponse(message);
+    this.handleDOMRequestResponse(message);
   },
 
   // Secure Element Notifications:
