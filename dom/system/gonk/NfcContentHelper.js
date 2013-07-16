@@ -34,12 +34,12 @@ const NFC_IPC_MSG_NAMES = [
   "NFC:TechDiscoveredNotification",
   "NFC:TechLostNotification",
   "NFC:NDEFDetailsResponse",
+  "NFC:NDEFReadResponse",
   "NFC:NDEFWriteResponse",
   "NFC:NfcATagDetailsResponse",
-  "NFC:NfcATagDiscoveredNotification",
-  "NFC:NfcATagConnectResponse",
   "NFC:NfcATagTransceiveResponse",
-  "NFC:NfcATagCloseResponse",
+  "NFC:ConnectResponse",
+  "NFC:CloseResponse",
   "NFC:SecureElementActivated",
   "NFC:SecureElementDeactivated",
   "NFC:SecureElementTransaction"
@@ -85,6 +85,54 @@ NfcContentHelper.prototype = {
     return encodedRecords;
   },
 
+  ndefDetails: function ndefDetails(window) {
+    if (window == null) {
+      throw Components.Exception("Can't get window object",
+                                  Cr.NS_ERROR_UNEXPECTED);
+    }
+
+    let request = Services.DOMRequest.createRequest(window);
+    let requestId = btoa(this.getRequestId(request));
+
+    cpmm.sendAsyncMessage("NFC:NdefDetails", {
+      requestId: requestId
+    });
+    return request;
+  },
+
+  ndefRead: function ndefWrite(window) {
+    if (window == null) {
+      throw Components.Exception("Can't get window object",
+                                  Cr.NS_ERROR_UNEXPECTED);
+    }
+
+    let request = Services.DOMRequest.createRequest(window);
+    let requestId = btoa(this.getRequestId(request));
+
+    cpmm.sendAsyncMessage("NFC:NdefRead", {
+      requestId: requestId
+    });
+    return request;
+  },
+
+  ndefWrite: function ndefWrite(window, records) {
+    if (window == null) {
+      throw Components.Exception("Can't get window object",
+                                  Cr.NS_ERROR_UNEXPECTED);
+    }
+
+    let request = Services.DOMRequest.createRequest(window);
+    let requestId = btoa(this.getRequestId(request));
+
+    let encodedRecords = this.encodeNdefRecords(records);
+
+    cpmm.sendAsyncMessage("NFC:NdefWrite", {
+      requestId: requestId,
+      records: encodedRecords
+    });
+    return request;
+  },
+
   ndefPush: function ndefPush(window, records) {
     debug("ndefPush");
     if (window == null) {
@@ -104,7 +152,7 @@ NfcContentHelper.prototype = {
     return request;
   },
 
-  transceive: function transceive(window, params) {
+  nfcATagDetails: function nfcATagDetails(window) {
     if (window == null) {
       throw Components.Exception("Can't get window object",
                                   Cr.NS_ERROR_UNEXPECTED);
@@ -113,14 +161,29 @@ NfcContentHelper.prototype = {
     let request = Services.DOMRequest.createRequest(window);
     let requestId = btoa(this.getRequestId(request));
 
-    cpmm.sendAsyncMessage("NFC:Transceive", {
+    cpmm.sendAsyncMessage("NFC:NfcATagDetails", {
+      requestId: requestId
+    });
+    return request;
+  },
+
+  nfcATagTransceive: function nfcATagTransceive(window, params) {
+    if (window == null) {
+      throw Components.Exception("Can't get window object",
+                                  Cr.NS_ERROR_UNEXPECTED);
+    }
+
+    let request = Services.DOMRequest.createRequest(window);
+    let requestId = btoa(this.getRequestId(request));
+
+    cpmm.sendAsyncMessage("NFC:NfcATagTransceive", {
       requestId: requestId,
       params: params
     });
     return request;
   },
 
-  writeNdefTag: function writeNdefTag(window, records) {
+  connect: function connect(window) {
     if (window == null) {
       throw Components.Exception("Can't get window object",
                                   Cr.NS_ERROR_UNEXPECTED);
@@ -129,11 +192,25 @@ NfcContentHelper.prototype = {
     let request = Services.DOMRequest.createRequest(window);
     let requestId = btoa(this.getRequestId(request));
 
-    let encodedRecords = this.encodeNdefRecords(records);
-
-    cpmm.sendAsyncMessage("NFC:WriteNdefTag", {
+    cpmm.sendAsyncMessage("NFC:Connect", {
       requestId: requestId,
-      records: encodedRecords
+      params: params
+    });
+    return request;
+  },
+
+  close: function close(window) {
+    if (window == null) {
+      throw Components.Exception("Can't get window object",
+                                  Cr.NS_ERROR_UNEXPECTED);
+    }
+
+    let request = Services.DOMRequest.createRequest(window);
+    let requestId = btoa(this.getRequestId(request));
+
+    cpmm.sendAsyncMessage("NFC:Close", {
+      requestId: requestId,
+      params: params
     });
     return request;
   },
@@ -237,14 +314,8 @@ NfcContentHelper.prototype = {
 
   receiveMessage: function receiveMessage(message) {
     switch (message.name) {
-      case "NFC:NdefDiscovered":
-        this.handleNdefDiscovered(message.json);
-        break;
       case "NFC:TechDiscoveredNotification":
         this.handleTechDiscoveredNotification(message.json);
-        break;
-      case "NFC:NfcATagDiscoveredNotification":
-        this.handleNfcATagDiscoveredNotification(message.json);
         break;
       case "NFC:TechLostNotification":
         this.handleTechLostNotification(message.json);
@@ -252,20 +323,23 @@ NfcContentHelper.prototype = {
       case "NFC:NDEFDetailsResponse":
         this.handleNDEFDetailResponse(message.json);
         break;
+      case "NFC:NDEFReadResponse":
+        this.handleNDEFReadResponse(message.json);
+        break;
       case "NFC:NDEFWriteResponse":
         this.handleNDEFWriteResponse(message.json);
         break;
       case "NFC:NfcATagDetailsResponse":
         this.handleNfcATagDetailsResponse(message.json);
         break;
-      case "NFC:NfcATagConnectResponse":
-        this.handleNfcATagConnectResponse(message.json);
-        break;
       case "NFC:NfcATagTransceiveResponse":
         this.handleNfcATagTransceiveResponse(message.json);
         break;
-      case "NFC:NfcATagCloseResponse":
-        this.handleNfcATagCloseResponse(message.json);
+      case "NFC:ConnectResponse":
+        this.handleConnectResponse(message.json);
+        break;
+      case "NFC:CloseResponse":
+        this.handleCloseResponse(message.json);
         break;
       case "SecureElementActivated":
         this.handleSecureElementActivated(message.json);
@@ -320,6 +394,12 @@ NfcContentHelper.prototype = {
     this.handleResponse(message);
   },
 
+  handleNDEFReadResponse: function handleNDEFReadResponse(message) {
+    let response = message.content;
+    debug("NDEFReadResponse(" + response.requestId + ", " + response.status + ")");
+    this.handleResponse(message);
+  },
+
   handleNDEFWriteResponse: function handleNDEFWriteResponse(message) {
     let response = message.content;
     debug("NDEFWriteResponse(" + response.requestId + ", " + response.status + ")");
@@ -332,21 +412,21 @@ NfcContentHelper.prototype = {
     this.handleResponse(message);
   },
 
-  handleNfcATagConnectResponse: function handleNfcATagConnectResponse(message) {
-    let response = message.content;
-    debug("NfcATagConnectResponse(" + response.requestId + ", " + response.status + ")");
-    this.handleResponse(message);
-  },
-
   handleNfcATagTransceiveResponse: function handleNfcATagTransceiveResponse(message) {
     let response = message.content;
     debug("NfcATagTransceiveResponse(" + response.requestId + ", " + response.status + ")");
     this.handleResponse(message);
   },
 
-  handleNfcATagCloseResponse: function handleNfcATagCloseResponse(message) {
+  handleConnectResponse: function handleConnectResponse(message) {
     let response = message.content;
-    debug("NfcATagCloseResponse(" + response.requestId + ", " + response.status + ")");
+    debug("ConnectResponse(" + response.requestId + ", " + response.status + ")");
+    this.handleResponse(message);
+  },
+
+  handleCloseResponse: function handleCloseResponse(message) {
+    let response = message.content;
+    debug("CloseResponse(" + response.requestId + ", " + response.status + ")");
     this.handleResponse(message);
   },
 

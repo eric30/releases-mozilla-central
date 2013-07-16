@@ -30,8 +30,13 @@ const NFC_CID =
 
 const NFC_IPC_MSG_NAMES = [
   "NFC:SendToNfcd",
-  "NFC:Transceive",
-  "NFC:WriteNdefTag",
+  "NFC:NefDetails",
+  "NFC:NdefRead",
+  "NFC:NdefWrite",
+  "NFC:NfcATagDetails",
+  "NFC:NfcATagTransceive",
+  "NFC:Connect",
+  "NFC:Close",
   "NFC:NdefPush"
 ];
 
@@ -83,25 +88,13 @@ Nfc.prototype = {
     let message = event.data;
     debug("Received message: " + JSON.stringify(message));
     switch (message.type) {
-      case "ndefDiscovered":
-        ppmm.broadcastAsyncMessage("NFC:NdefDiscovered", message); // Send to event callbacks
-        gSystemMessenger.broadcastMessage("nfc-ndef-discovered", message); // Sent to activities
-        break;
       case "techDiscovered":
         ppmm.broadcastAsyncMessage("NFC:TechDiscovered", message);
         gSystemMessenger.broadcastMessage("nfc-technology-discovered", message);
         break;
-      case "tagDiscovered":
-        ppmm.broadcastAsyncMessage("NFC:TagDiscovered", message);
-        gSystemMessenger.broadcastMessage("nfc-tag-discovered", message);
-        break;
-      case "disconnected":
-        ppmm.broadcastAsyncMessage("NFC:Disconnected", message);
-        gSystemMessenger.broadcastMessage("nfc-disconnected", message);
-        break;
-      case "requestStatus":
-        ppmm.broadcastAsyncMessage("NFC:RequestStatus", message);
-        gSystemMessenger.broadcastMessage("nfc-request-status", message);
+      case "techLost":
+        ppmm.broadcastAsyncMessage("NFC:TechLost", message);
+        gSystemMessenger.broadcastMessage("nfc-techlost", message);
         break;
       case "secureElementActivated":
         ppmm.broadcastAsyncMessage("NFC:SecureElementActivated", message);
@@ -128,42 +121,96 @@ Nfc.prototype = {
     this.worker.postMessage({type: "directMessage", content: message});
   },
 
-  ndefDetails: function ndefDetails(message) {
-    var rid = message.requestId;
-    this.worker.postMessage({type: "ndefDetails", requestId: rid});
-  },
-
-  // tag read/write command message handler.
-  transceive: function transceive(params) {
-    var params = message.params;
+  ndefDetails: function ndefDetails() {
     var rid = message.requestId;
 
     var outMessage = {
-      type: "transceive",
+      type: "NdefDetailsRequest",
       requestId: rid,
-      content: {
-        params: params
-      }
     };
 
-    this.worker.postMessage({type: "transceive", content: outMessage});
+    this.worker.postMessage({type: "ndefDetails", content: outMessage});
   },
 
-  writeNdefTag: function writeNdefTag(message) {
+  ndefRead: function ndefRead() {
+    var rid = message.requestId;
+
+    var outMessage = {
+      type: "NdefReadRequest",
+      requestId: rid,
+    };
+
+    this.worker.postMessage({type: "ndefRead", content: outMessage});
+  },
+
+  ndefWrite: function ndefWrite(message) {
     var records = message.records;
     var rid = message.requestId;
 
     var outMessage = {
-      type: "ndefWriteRequest",
+      type: "NdefWriteRequest",
       requestId: rid,
       content: {
         records: records
       }
     };
 
-    this.worker.postMessage({type: "writeNdefTag", content: outMessage});
+    this.worker.postMessage({type: "ndefWrite", content: outMessage});
   },
 
+  // tag read/write command message handler.
+  nfcATagDetails: function nfcATagDetails() {
+    var params = message.params;
+    var rid = message.requestId;
+
+    var outMessage = {
+      type: "NfcATagDetailsRequest",
+      requestId: rid,
+      }
+    };
+
+    this.worker.postMessage({type: "nfcATagDetails", content: outMessage});
+  },
+
+  // tag read/write command message handler.
+  nfcATagTransceive: function nfcATagTransceive(params) {
+    var params = message.params;
+    var rid = message.requestId;
+
+    var outMessage = {
+      type: "NfcATagTransceiveRequest",
+      requestId: rid,
+      content: {
+        params: params
+      }
+    };
+
+    this.worker.postMessage({type: "nfcATagTransceive", content: outMessage});
+  },
+
+  // tag read/write command message handler.
+  connect: function connect() {
+    var rid = message.requestId;
+
+    var outMessage = {
+      type: "ConnectRequest",
+      requestId: rid,
+    };
+
+    this.worker.postMessage({type: "connect", content: outMessage});
+  },
+
+  // tag read/write command message handler.
+  close: function close() {
+    var rid = message.requestId;
+
+    var outMessage = {
+      type: "CloseRequest",
+      requestId: rid,
+    };
+
+    this.worker.postMessage({type: "close", content: outMessage});
+  },
 
   ndefPush: function ndefPush(message) {
     var records = message.records;
@@ -189,11 +236,23 @@ Nfc.prototype = {
       case "NFC:SendToNfcd":
         this.sendToNfcd(message.json);
         break;
-      case "NFC:Transceive":
-        this.transceive(message.json);
+      case "NFC:NdefRead":
+        this.ndefRead(message.json);
         break;
-      case "NFC:WriteNdefTag":
-        this.writeNdefTag(message.json);
+      case "NFC:NdefWrite":
+        this.ndefWrite(message.json);
+        break;
+      case "NFC:NfcATagDetails":
+        this.nfcATagDetails(message.json);
+        break;
+      case "NFC:NfcATagTransceive":
+        this.nfcATagTransceive(message.json);
+        break;
+      case "NFC:Connect":
+        this.connect(message.json);
+        break;
+      case "NFC:Close":
+        this.close(message.json);
         break;
       case "NFC:NdefPush":
         this.ndefPush(message.json);

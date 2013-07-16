@@ -72,16 +72,39 @@ let Nfc = {
     postNfcMessage(message.content);
   },
 
+  /**
+   * Retrieve metadata describing the NDEF formatted data, if present.
+   */
   ndefDetails: function ndefDetails(message) {
     postNfcMessage(message.requestId); // Just request ID.
   },
 
+  /**
+   * Read and return NDEF data, if present.
+   */
+  ndefRead: function ndefRead(message) {
+    postNfcMessage(message.contnet);
+  },
+
+  /**
+   * Write to a target that accepts NDEF formattable data
+   */
   ndefWrite: function ndefWrite(message) {
     postNfcMessage(message.content);
   },
 
+  /**
+   * Retrieve metadata describing the NfcA tag type, if present.
+   */
   nfcATagDetails: function nfcATagDetails(message) {
     postNfcMessage(message.requestId); // Just request ID.
+  },
+
+  /**
+   *  Excahnge PDUs with the NFC target. Request ID is required.
+   */
+  nfcATagTransceive: function nfcATagTransceive(message) {
+    postNfcMessage(JSON.stringify(message.content));
   },
 
   /**
@@ -92,28 +115,14 @@ let Nfc = {
   },
 
   /**
-   *  Excahnge PDUs with the NFC target. Request ID is required.
-   */
-  transceive: function transceive(message) {
-    postNfcMessage(JSON.stringify(message.content));
-  },
-
-  /**
    * Close connection to the NFC target. Request ID is required.
    */
-  disconnect: function disconnect(message) {
+  close: function cose(message) {
     postNfcMessage(JSON.stringify(message.content));
   },
 
   /**
-   * Write an NDEF formatted message to the NFC target.
-   */
-  writeNdefTag: function writeNdefTag(message) {
-    postNfcMessage(JSON.stringify(message.content));
-  },
-
-  /**
-   * P2P NDEF message push between a pair of NFC devices
+   * P2P NDEF message push between a pair of NFC devices.
    */
   ndefPush: function ndefPush(message) {
     postNfcMessage(JSON.stringify(message.content));

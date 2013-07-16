@@ -12,16 +12,7 @@
 interface nsIDOMNfc : nsIDOMEventTarget {
 
   [implicit_jscontext]
-  attribute jsval onndefdiscovered;
-
-  [implicit_jscontext]
-  attribute jsval ontagdiscovered;
-
-  [implicit_jscontext]
   attribute jsval ontechdiscovered;
-
-  [implicit_jscontext]
-  attribute jsval onnfcatagdiscovered;
 
   [implicit_jscontext]
   attribute jsval ontechlost;
@@ -35,30 +26,49 @@ interface nsIDOMNfc : nsIDOMEventTarget {
   [implicit_jscontext]
   attribute jsval onsecureelementtransaction;
 
+  /**
+   * NDEF Functions
+   */
   [implicit_jscontext]
   boolean validateNdefTag(in jsval records);
 
+  /* Get metadata details of the discovered and connected NDEF message */
   [implicit_jscontext]
-  nsIDOMDOMRequest nfcATagConnect();
+  nsIDOMDOMRequest ndefDetails();
 
+  /**
+   * NDEF Read returns an array of NDEF Records consisting of 1 or more elements
+   */
   [implicit_jscontext]
-  nsIDOMDOMRequest nfcATransceive(in jsval params);
+  nsIDOMDOMRequest ndefRead();
 
+  /* NDEF Write records that is an array of 1 or more records */
   [implicit_jscontext]
-  nsIDOMDOMRequest transceive(in jsval params);
+  nsIDOMDOMRequest ndefWrite(in jsval records);
 
-  [implicit_jscontext]
-  nsIDOMDOMRequest nfcATagClose();
-
-  // records is an array of 1 or more records
-  [implicit_jscontext]
-  nsIDOMDOMRequest writeNdefTag(in jsval records);
-
-  // records is an array of 1 or more records
+  /* P2P Push NDEF records that is an array of 1 or more records */
   [implicit_jscontext]
   nsIDOMDOMRequest ndefPush(in jsval records);
 
-  // Only for debug/development purposes to send a unfiltered
-  // message to the nfcd socket
+  /**
+   * NFCA functions
+   */
+
+  [implicit_jscontext]
+  nsIDOMDOMRequest nfcATagDetails();
+
+  [implicit_jscontext]
+  nsIDOMDOMRequest nfcATagTransceive(in jsval params);
+
+  [implicit_jscontext]
+  nsIDOMDOMRequest connect();
+
+  [implicit_jscontext]
+  nsIDOMDOMRequest close();
+
+  /**
+   * Only for debug/development purposes to send a unfiltered
+   * message to the nfcd socket
+   */
   void sendToNfcd(in DOMString message);
 };

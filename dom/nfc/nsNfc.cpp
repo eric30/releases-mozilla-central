@@ -81,51 +81,12 @@ DOMCI_DATA(Nfc, nsNfc)
 
 NS_IMPL_ISUPPORTS1(nsNfc::NfcCallback, nsINfcCallback)
 
-NS_IMPL_EVENT_HANDLER(nsNfc, ndefdiscovered)
-NS_IMPL_EVENT_HANDLER(nsNfc, tagdiscovered)
 NS_IMPL_EVENT_HANDLER(nsNfc, techdiscovered)
-NS_IMPL_EVENT_HANDLER(nsNfc, nfcatagdiscovered)
 NS_IMPL_EVENT_HANDLER(nsNfc, techlost)
 NS_IMPL_EVENT_HANDLER(nsNfc, secureelementactivated)
 NS_IMPL_EVENT_HANDLER(nsNfc, secureelementdeactivated)
 NS_IMPL_EVENT_HANDLER(nsNfc, secureelementtransaction)
 
-
-NS_IMETHODIMP
-nsNfc::NdefDiscovered(const JS::Value& aNdefRecords, JSContext* aCx)
-{
-  // Parse JSON
-  nsString message;
-  nsresult rv;
-
-  nsCOMPtr<nsIJSON> json(new nsJSON());
-  rv = json->EncodeFromJSVal((jsval*)&aNdefRecords, aCx, message); // EncodeJSVal param1 not const...
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Dispatch incoming event.
-  nsRefPtr<NfcEvent> event = NfcEvent::Create(this, message);
-  NS_ASSERTION(event, "This should never fail!");
-
-  return event->Dispatch(this, NS_LITERAL_STRING("ndefdiscovered"));
-}
-
-NS_IMETHODIMP
-nsNfc::TagDiscovered(const JS::Value& aNdefRecords, JSContext* aCx)
-{
-  // Parse JSON
-  nsString message;
-  nsresult rv;
-
-  nsCOMPtr<nsIJSON> json(new nsJSON());
-  rv = json->EncodeFromJSVal((jsval*)&aNdefRecords, aCx, message);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Dispatch incoming event.
-  nsRefPtr<NfcEvent> event = NfcEvent::Create(this, message);
-  NS_ASSERTION(event, "This should never fail!");
-
-  return event->Dispatch(this, NS_LITERAL_STRING("tagdiscovered"));
-}
 
 NS_IMETHODIMP
 nsNfc::TechDiscovered(const JS::Value& aTagMetadata, JSContext* aCx)
@@ -143,24 +104,6 @@ nsNfc::TechDiscovered(const JS::Value& aTagMetadata, JSContext* aCx)
   NS_ASSERTION(event, "This should never fail!");
 
   return event->Dispatch(this, NS_LITERAL_STRING("techdiscovered"));
-}
-
-NS_IMETHODIMP
-nsNfc::NfcATagDiscovered(const JS::Value& aTagMetadata, JSContext* aCx)
-{
-  // Parse JSON
-  nsString message;
-  nsresult rv;
-
-  nsCOMPtr<nsIJSON> json(new nsJSON());
-  rv = json->EncodeFromJSVal((jsval*)&aTagMetadata, aCx, message);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Dispatch incoming event.
-  nsRefPtr<NfcEvent> event = NfcEvent::Create(this, message);
-  NS_ASSERTION(event, "This should never fail!");
-
-  return event->Dispatch(this, NS_LITERAL_STRING("nfcatagdiscovered"));
 }
 
 NS_IMETHODIMP
@@ -222,45 +165,27 @@ nsNfc::ValidateNdefTag(const JS::Value& aRecords, JSContext* aCx, bool* result)
 }
 
 NS_IMETHODIMP
-nsNfc::NfcATagConnect(JSContext* aCx, nsIDOMDOMRequest** aRequest)
-{
-  *aRequest = nullptr;
-  nsresult rv = mNfc->NfcATagConnect(GetOwner(), aRequest);
-  NS_ENSURE_SUCCESS(rv, rv);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsNfc::Transceive(const JS::Value& aParams, JSContext* aCx, nsIDOMDOMRequest** aRequest)
+nsNfc::NdefDetails(JSContext* aCx, nsIDOMDOMRequest** aRequest)
 {
   // Call to NfcContentHelper.js
   *aRequest = nullptr;
-  nsresult rv = mNfc->Transceive(GetOwner(), aParams, aRequest);
+  nsresult rv = mNfc->NdefDetails(GetOwner(), aRequest);
   NS_ENSURE_SUCCESS(rv, rv);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsNfc::NfcATransceive(const JS::Value& aParams, JSContext* aCx, nsIDOMDOMRequest** aRequest)
+nsNfc::NdefRead(JSContext* aCx, nsIDOMDOMRequest** aRequest)
 {
   // Call to NfcContentHelper.js
   *aRequest = nullptr;
-  nsresult rv = mNfc->NfcATransceive(GetOwner(), aParams, aRequest);
+  nsresult rv = mNfc->NdefRead(GetOwner(), aRequest);
   NS_ENSURE_SUCCESS(rv, rv);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsNfc::NfcATagClose(JSContext* aCx, nsIDOMDOMRequest** aRequest)
-{
-  *aRequest = nullptr;
-  nsresult rv = mNfc->NfcATagClose(GetOwner(), aRequest);
-  NS_ENSURE_SUCCESS(rv, rv);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsNfc::WriteNdefTag(const JS::Value& aRecords, JSContext* aCx, nsIDOMDOMRequest** aRequest)
+nsNfc::NdefWrite(const JS::Value& aRecords, JSContext* aCx, nsIDOMDOMRequest** aRequest)
 {
   bool isValid;
 
@@ -274,7 +199,45 @@ nsNfc::WriteNdefTag(const JS::Value& aRecords, JSContext* aCx, nsIDOMDOMRequest*
 
   // Call to NfcContentHelper.js
   *aRequest = nullptr;
-  nsresult rv = mNfc->WriteNdefTag(GetOwner(), aRecords, aRequest);
+  nsresult rv = mNfc->NdefWrite(GetOwner(), aRecords, aRequest);
+  NS_ENSURE_SUCCESS(rv, rv);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsNfc::NfcATagDetails(JSContext* aCx, nsIDOMDOMRequest** aRequest)
+{
+  // Call to NfcContentHelper.js
+  *aRequest = nullptr;
+  nsresult rv = mNfc->NfcATagDetails(GetOwner(), aRequest);
+  NS_ENSURE_SUCCESS(rv, rv);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsNfc::NfcATagTransceive(const JS::Value& aParams, JSContext* aCx, nsIDOMDOMRequest** aRequest)
+{
+  // Call to NfcContentHelper.js
+  *aRequest = nullptr;
+  nsresult rv = mNfc->NfcATagTransceive(GetOwner(), aParams, aRequest);
+  NS_ENSURE_SUCCESS(rv, rv);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsNfc::Connect(JSContext* aCx, nsIDOMDOMRequest** aRequest)
+{
+  *aRequest = nullptr;
+  nsresult rv = mNfc->Connect(GetOwner(), aRequest);
+  NS_ENSURE_SUCCESS(rv, rv);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsNfc::Close(JSContext* aCx, nsIDOMDOMRequest** aRequest)
+{
+  *aRequest = nullptr;
+  nsresult rv = mNfc->Close(GetOwner(), aRequest);
   NS_ENSURE_SUCCESS(rv, rv);
   return NS_OK;
 }

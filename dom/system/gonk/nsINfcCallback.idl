@@ -9,10 +9,7 @@
 [scriptable, uuid(999fa430-6180-11e1-b86c-0800200c9a66)]
 interface nsINfcCallback : nsISupports
 {
-  [implicit_jscontext] void ndefDiscovered(in jsval aNdefRecords);
-  [implicit_jscontext] void tagDiscovered(in jsval aNdefRecords);
   [implicit_jscontext] void techDiscovered(in jsval aMetadata);
-  [implicit_jscontext] void nfcATagDiscovered(in jsval aMetadata);
   [implicit_jscontext] void techLost(in jsval aNfcHandle);
 
   [implicit_jscontext] void secureElementActivated(in jsval aSEMessage);
