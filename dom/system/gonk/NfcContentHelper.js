@@ -183,7 +183,7 @@ NfcContentHelper.prototype = {
     return request;
   },
 
-  connect: function connect(window) {
+  connect: function connect(window, techType) {
     if (window == null) {
       throw Components.Exception("Can't get window object",
                                   Cr.NS_ERROR_UNEXPECTED);
@@ -194,7 +194,7 @@ NfcContentHelper.prototype = {
 
     cpmm.sendAsyncMessage("NFC:Connect", {
       requestId: requestId,
-      params: params
+      techType: techType 
     });
     return request;
   },
@@ -209,8 +209,7 @@ NfcContentHelper.prototype = {
     let requestId = btoa(this.getRequestId(request));
 
     cpmm.sendAsyncMessage("NFC:Close", {
-      requestId: requestId,
-      params: params
+      requestId: requestId
     });
     return request;
   },

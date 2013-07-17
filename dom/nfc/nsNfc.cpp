@@ -225,10 +225,10 @@ nsNfc::NfcATagTransceive(const JS::Value& aParams, JSContext* aCx, nsIDOMDOMRequ
 }
 
 NS_IMETHODIMP
-nsNfc::Connect(JSContext* aCx, nsIDOMDOMRequest** aRequest)
+nsNfc::Connect(uint32_t techType, JSContext* aCx, nsIDOMDOMRequest** aRequest)
 {
   *aRequest = nullptr;
-  nsresult rv = mNfc->Connect(GetOwner(), aRequest);
+  nsresult rv = mNfc->Connect(GetOwner(), techType, aRequest);
   NS_ENSURE_SUCCESS(rv, rv);
   return NS_OK;
 }

@@ -61,7 +61,7 @@ interface nsIDOMNfc : nsIDOMEventTarget {
   nsIDOMDOMRequest nfcATagTransceive(in jsval params);
 
   [implicit_jscontext]
-  nsIDOMDOMRequest connect();
+  nsIDOMDOMRequest connect(in unsigned long techType);
 
   [implicit_jscontext]
   nsIDOMDOMRequest close();

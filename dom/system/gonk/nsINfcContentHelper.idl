@@ -22,7 +22,7 @@ interface nsINfcContentHelper : nsISupports
   nsIDOMDOMRequest nfcATagDetails(in nsIDOMWindow window);
   nsIDOMDOMRequest nfcATagTransceive(in nsIDOMWindow window, in jsval params); // NFCA transceive
 
-  nsIDOMDOMRequest connect(in nsIDOMWindow window);
+  nsIDOMDOMRequest connect(in nsIDOMWindow window, in unsigned long techType);
   nsIDOMDOMRequest close(in nsIDOMWindow window);
 
   // DEBUG only:

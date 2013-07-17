@@ -117,7 +117,7 @@ let Nfc = {
   /**
    * Close connection to the NFC target. Request ID is required.
    */
-  close: function cose(message) {
+  close: function close(message) {
     postNfcMessage(JSON.stringify(message.content));
   },
 
