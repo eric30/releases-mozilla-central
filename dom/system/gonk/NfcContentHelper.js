@@ -31,8 +31,8 @@ const NFCCONTENTHELPER_CID =
 
 const NFC_IPC_MSG_NAMES = [
   "NFC:NdefDiscovered",
-  "NFC:TechDiscoveredNotification",
-  "NFC:TechLostNotification",
+  "NFC:TechDiscovered",
+  "NFC:TechLost",
   "NFC:NDEFDetailsResponse",
   "NFC:NDEFReadResponse",
   "NFC:NDEFWriteResponse",
@@ -100,7 +100,7 @@ NfcContentHelper.prototype = {
     return request;
   },
 
-  ndefRead: function ndefWrite(window) {
+  ndefRead: function ndefRead(window) {
     if (window == null) {
       throw Components.Exception("Can't get window object",
                                   Cr.NS_ERROR_UNEXPECTED);
@@ -313,11 +313,11 @@ NfcContentHelper.prototype = {
 
   receiveMessage: function receiveMessage(message) {
     switch (message.name) {
-      case "NFC:TechDiscoveredNotification":
-        this.handleTechDiscoveredNotification(message.json);
+      case "NFC:TechDiscovered":
+        this.handleTechDiscovered(message.json);
         break;
-      case "NFC:TechLostNotification":
-        this.handleTechLostNotification(message.json);
+      case "NFC:TechLost":
+        this.handleTechLost(message.json);
         break;
       case "NFC:NDEFDetailsResponse":
         this.handleNDEFDetailResponse(message.json);
@@ -364,15 +364,15 @@ NfcContentHelper.prototype = {
   },
 
   // NFC Notifications
-  handleTechDiscoveredNotification: function handleTechDiscoveredNotification(message) {
+  handleTechDiscovered: function handleTechDiscovered(message) {
     this._deliverCallback("_nfcCallbacks", "techDiscovered", [message]);
   },
 
-  handleTechLostNotification: function handleTechLostNotification(message) {
+  handleTechLost: function handleTechLost(message) {
     this._deliverCallback("_nfcCallbacks", "techLost", [message]);
   },
 
-  handleNfcATagDiscoveredNofitication: function handleTechDiscoveredNotification(message) {
+  handleNfcATagDiscoveredNofitication: function handleTechDiscovered(message) {
     this._deliverCallback("_nfcCallbacks", "nfcATagDiscovered", [message]);
   },
 

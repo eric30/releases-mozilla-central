@@ -37,7 +37,7 @@ const NFC_IPC_MSG_NAMES = [
   "NFC:NfcATagTransceive",
   "NFC:Connect",
   "NFC:Close",
-  "NFC:NdefPush"
+  "NFC:NDEFPush"
 ];
 
 XPCOMUtils.defineLazyServiceGetter(this, "ppmm",
@@ -121,23 +121,23 @@ Nfc.prototype = {
     this.worker.postMessage({type: "directMessage", content: message});
   },
 
-  ndefDetails: function ndefDetails() {
+  ndefDetails: function ndefDetails(message) {
     var rid = message.requestId;
 
     var outMessage = {
-      type: "NdefDetailsRequest",
-      requestId: rid,
+      type: "NDEFDetailsRequest",
+      requestId: rid
     };
 
     this.worker.postMessage({type: "ndefDetails", content: outMessage});
   },
 
-  ndefRead: function ndefRead() {
+  ndefRead: function ndefRead(message) {
     var rid = message.requestId;
 
     var outMessage = {
-      type: "NdefReadRequest",
-      requestId: rid,
+      type: "NDEFReadRequest",
+      requestId: rid
     };
 
     this.worker.postMessage({type: "ndefRead", content: outMessage});
@@ -148,7 +148,7 @@ Nfc.prototype = {
     var rid = message.requestId;
 
     var outMessage = {
-      type: "NdefWriteRequest",
+      type: "NDEFWriteRequest",
       requestId: rid,
       content: {
         records: records
@@ -159,14 +159,13 @@ Nfc.prototype = {
   },
 
   // tag read/write command message handler.
-  nfcATagDetails: function nfcATagDetails() {
+  nfcATagDetails: function nfcATagDetails(message) {
     var params = message.params;
     var rid = message.requestId;
 
     var outMessage = {
       type: "NfcATagDetailsRequest",
-      requestId: rid,
-      }
+      requestId: rid
     };
 
     this.worker.postMessage({type: "nfcATagDetails", content: outMessage});
@@ -189,25 +188,26 @@ Nfc.prototype = {
   },
 
   // tag read/write command message handler.
-  connect: function connect(techType) {
+  connect: function connect(message, techType) {
     var rid = message.requestId;
+    var techType = message.tech;
 
     var outMessage = {
       type: "ConnectRequest",
       requestId: rid,
-      techType: techType,
+      tech: techType
     };
 
     this.worker.postMessage({type: "connect", content: outMessage});
   },
 
   // tag read/write command message handler.
-  close: function close() {
+  close: function close(message) {
     var rid = message.requestId;
 
     var outMessage = {
       type: "CloseRequest",
-      requestId: rid,
+      requestId: rid
     };
 
     this.worker.postMessage({type: "close", content: outMessage});

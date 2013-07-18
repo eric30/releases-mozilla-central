@@ -76,28 +76,28 @@ let Nfc = {
    * Retrieve metadata describing the NDEF formatted data, if present.
    */
   ndefDetails: function ndefDetails(message) {
-    postNfcMessage(message.requestId); // Just request ID.
+    postNfcMessage(JSON.stringify(message.requestId)); // Just request ID.
   },
 
   /**
    * Read and return NDEF data, if present.
    */
   ndefRead: function ndefRead(message) {
-    postNfcMessage(message.contnet);
+    postNfcMessage(JSON.stringify(message.content));
   },
 
   /**
    * Write to a target that accepts NDEF formattable data
    */
   ndefWrite: function ndefWrite(message) {
-    postNfcMessage(message.content);
+    postNfcMessage(JSON.stringify(message.content));
   },
 
   /**
    * Retrieve metadata describing the NfcA tag type, if present.
    */
   nfcATagDetails: function nfcATagDetails(message) {
-    postNfcMessage(message.requestId); // Just request ID.
+    postNfcMessage(JSON.stringify(message.requestId)); // Just request ID.
   },
 
   /**
