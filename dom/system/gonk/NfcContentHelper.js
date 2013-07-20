@@ -394,6 +394,7 @@ NfcContentHelper.prototype = {
   },
 
   handleNDEFReadResponse: function handleNDEFReadResponse(message) {
+    debug("NDEFReadResponse(" + JSON.stringify(message) + ")");
     let response = message.content;
     debug("NDEFReadResponse(" + response.requestId + ", " + response.status + ")");
     this.handleDOMRequestResponse(message);

@@ -101,13 +101,10 @@ this.SystemMessagePermissionsTable = {
   "wappush-received": {
     "sms": []
   },
-  "nfc-ndef-discovered": {
+  "nfc-tech-discovered": {
     "nfc": []
   },
-  "nfc-disconnected": {
-    "nfc": []
-  },
-  "nfc-request-status": {
+  "nfc-tech-lost": {
     "nfc": []
   },
   "nfc-secure-element-activated": {

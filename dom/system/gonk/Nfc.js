@@ -90,12 +90,23 @@ Nfc.prototype = {
     switch (message.type) {
       case "techDiscovered":
         ppmm.broadcastAsyncMessage("NFC:TechDiscovered", message);
-        gSystemMessenger.broadcastMessage("nfc-technology-discovered", message);
+        gSystemMessenger.broadcastMessage("nfc-tech-discovered", message);
         break;
       case "techLost":
         ppmm.broadcastAsyncMessage("NFC:TechLost", message);
-        gSystemMessenger.broadcastMessage("nfc-techlost", message);
+        gSystemMessenger.broadcastMessage("nfc-tech-lost", message);
         break;
+
+      case "NDEFDetailsResponse":
+        ppmm.broadcastAsyncMessage("NFC:NDEFDetailsResponse", message);
+        break;
+      case "NDEFReadResponse":
+        ppmm.broadcastAsyncMessage("NFC:NDEFReadResponse", message);
+        break;
+      case "NDEFWriteResponse":
+        ppmm.broadcastAsyncMessage("NFC:NDEFWriteResponse", message);
+        break;
+
       case "secureElementActivated":
         ppmm.broadcastAsyncMessage("NFC:SecureElementActivated", message);
         gSystemMessenger.broadcastMessage("secureelement-activated", message);
@@ -108,6 +119,7 @@ Nfc.prototype = {
         ppmm.broadcastAsyncMessage("NFC:SecureElementTransaction", message);
         gSystemMessenger.broadcastMessage("secureelement-transaction", message);
         break;
+
       default:
         throw new Error("Don't know about this message type: " + message.type);
     }
