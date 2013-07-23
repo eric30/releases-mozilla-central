@@ -22,6 +22,7 @@
 #include "nsISecureBrowserUI.h"
 #include "nsITabParent.h"
 #include "nsWeakReference.h"
+#include "Units.h"
 
 struct gfxMatrix;
 struct JSContext;
@@ -30,6 +31,7 @@ class mozIApplication;
 class nsFrameLoader;
 class nsIDOMElement;
 class nsIURI;
+class CpowHolder;
 
 namespace mozilla {
 
@@ -122,9 +124,11 @@ public:
     virtual bool AnswerCreateWindow(PBrowserParent** retval);
     virtual bool RecvSyncMessage(const nsString& aMessage,
                                  const ClonedMessageData& aData,
+                                 const InfallibleTArray<CpowEntry>& aCpows,
                                  InfallibleTArray<nsString>* aJSONRetVal);
     virtual bool RecvAsyncMessage(const nsString& aMessage,
-                                  const ClonedMessageData& aData);
+                                  const ClonedMessageData& aData,
+                                  const InfallibleTArray<CpowEntry>& aCpows);
     virtual bool RecvNotifyIMEFocus(const bool& aFocus,
                                     nsIMEUpdatePreference* aPreference,
                                     uint32_t* aSeqno);
@@ -152,7 +156,7 @@ public:
     virtual bool RecvGetDPI(float* aValue);
     virtual bool RecvGetDefaultScale(double* aValue);
     virtual bool RecvGetWidgetNativeData(WindowsHandle* aValue);
-    virtual bool RecvZoomToRect(const gfxRect& aRect);
+    virtual bool RecvZoomToRect(const CSSRect& aRect);
     virtual bool RecvUpdateZoomConstraints(const bool& aAllowZoom,
                                            const float& aMinZoom,
                                            const float& aMaxZoom);
@@ -233,6 +237,7 @@ protected:
     bool ReceiveMessage(const nsString& aMessage,
                         bool aSync,
                         const StructuredCloneData* aCloneData,
+                        CpowHolder* aCpows,
                         InfallibleTArray<nsString>* aJSONRetVal = nullptr);
 
     virtual bool Recv__delete__() MOZ_OVERRIDE;
@@ -321,7 +326,7 @@ private:
     // means that the touch events are relative to where the frame was at the
     // start of the touch. We need to look for a better solution to this
     // problem see bug 872911.
-    nsIntPoint mChildProcessOffsetAtTouchStart;
+    LayoutDeviceIntPoint mChildProcessOffsetAtTouchStart;
     // When true, we've initiated normal shutdown and notified our
     // managing PContent.
     bool mMarkedDestroying;

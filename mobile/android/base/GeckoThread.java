@@ -20,6 +20,7 @@ import android.os.Looper;
 import android.os.SystemClock;
 import android.util.Log;
 import android.app.Activity;
+import java.io.IOException;
 
 
 import java.util.Locale;
@@ -98,7 +99,16 @@ public class GeckoThread extends Thread implements GeckoEventListener {
     }
 
     private String addCustomProfileArg(String args) {
-        String profile = GeckoAppShell.getGeckoInterface() == null || GeckoApp.sIsUsingCustomProfile ? "" : (" -P " + GeckoAppShell.getGeckoInterface().getProfile().getName());
+        String profile = "";
+        if (GeckoAppShell.getGeckoInterface() != null) {
+            if (GeckoAppShell.getGeckoInterface().getProfile().inGuestMode()) {
+                try {
+                    profile = " -profile " + GeckoAppShell.getGeckoInterface().getProfile().getDir().getCanonicalPath();
+                } catch (IOException ioe) { Log.e(LOGTAG, "error getting guest profile path", ioe); }
+            } else if (GeckoApp.sIsUsingCustomProfile) {
+                profile = " -P " + GeckoAppShell.getGeckoInterface().getProfile().getName();
+            }
+        }
         return (args != null ? args : "") + profile;
     }
 
@@ -120,6 +130,8 @@ public class GeckoThread extends Thread implements GeckoEventListener {
         GeckoAppShell.runGecko(path, args, mUri, type);
     }
 
+    private static Object sLock = new Object();
+
     @Override
     public void handleMessage(String event, JSONObject message) {
         if ("Gecko:Ready".equals(event)) {
@@ -130,13 +142,13 @@ public class GeckoThread extends Thread implements GeckoEventListener {
     }
 
     public static boolean checkLaunchState(LaunchState checkState) {
-        synchronized (sLaunchState) {
+        synchronized (sLock) {
             return sLaunchState == checkState;
         }
     }
 
     static void setLaunchState(LaunchState setState) {
-        synchronized (sLaunchState) {
+        synchronized (sLock) {
             sLaunchState = setState;
         }
     }
@@ -146,7 +158,7 @@ public class GeckoThread extends Thread implements GeckoEventListener {
      * state is <code>checkState</code>; otherwise do nothing and return false.
      */
     static boolean checkAndSetLaunchState(LaunchState checkState, LaunchState setState) {
-        synchronized (sLaunchState) {
+        synchronized (sLock) {
             if (sLaunchState != checkState)
                 return false;
             sLaunchState = setState;

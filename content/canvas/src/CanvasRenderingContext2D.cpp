@@ -104,6 +104,7 @@
 #include "GLContextProvider.h"
 #include "GLContextSkia.h"
 #include "SurfaceTypes.h"
+#include "nsIGfxInfo.h"
 using mozilla::gl::GLContext;
 using mozilla::gl::GLContextProvider;
 #endif
@@ -859,34 +860,40 @@ CanvasRenderingContext2D::EnsureTarget()
 
      if (layerManager) {
 #ifdef USE_SKIA_GPU
-       if (gfxPlatform::GetPlatform()->UseAcceleratedSkiaCanvas()) {
-         SurfaceCaps caps = SurfaceCaps::ForRGBA();
-         caps.preserve = true;
+      if (gfxPlatform::GetPlatform()->UseAcceleratedSkiaCanvas()) {
+        SurfaceCaps caps = SurfaceCaps::ForRGBA();
+        caps.preserve = true;
 
 #ifdef MOZ_WIDGET_GONK
-         layers::ShadowLayerForwarder *forwarder = layerManager->AsShadowForwarder();
-         if (forwarder) {
-           caps.surfaceAllocator = static_cast<layers::ISurfaceAllocator*>(forwarder);
-         }
+        layers::ShadowLayerForwarder *forwarder = layerManager->AsShadowForwarder();
+        if (forwarder) {
+          caps.surfaceAllocator = static_cast<layers::ISurfaceAllocator*>(forwarder);
+        }
 #endif
 
-         DemoteOldestContextIfNecessary();
+        DemoteOldestContextIfNecessary();
 
-         nsRefPtr<GLContext> glContext;
+        nsRefPtr<GLContext> glContext;
+        nsCOMPtr<nsIGfxInfo> gfxInfo = do_GetService("@mozilla.org/gfx/info;1");
+        nsString vendor;
 
-         if (!mForceSoftware) {
-           glContext = GLContextProvider::CreateOffscreen(gfxIntSize(size.width, size.height),
-                                                          caps, GLContext::ContextFlagsNone);
-         }
+        if (!mForceSoftware &&
+            gfxInfo &&
+            NS_SUCCEEDED(gfxInfo->GetAdapterVendorID(vendor)) &&
+            StringBeginsWith(vendor, NS_LITERAL_STRING("NVIDIA")))
+        {
+          glContext = GLContextProvider::CreateOffscreen(gfxIntSize(size.width, size.height),
+                                                         caps, GLContext::ContextFlagsNone);
+        }
 
-         if (glContext) {
-           SkAutoTUnref<GrGLInterface> i(CreateGrGLInterfaceFromGLContext(glContext));
-           mTarget = Factory::CreateDrawTargetSkiaWithGLContextAndGrGLInterface(glContext, i, size, format);
-           AddDemotableContext(this);
-         } else {
-           mTarget = layerManager->CreateDrawTarget(size, format);
-         }
-       } else
+        if (glContext) {
+          SkAutoTUnref<GrGLInterface> i(CreateGrGLInterfaceFromGLContext(glContext));
+          mTarget = Factory::CreateDrawTargetSkiaWithGLContextAndGrGLInterface(glContext, i, size, format);
+          AddDemotableContext(this);
+        } else {
+          mTarget = layerManager->CreateDrawTarget(size, format);
+        }
+      } else
 #endif
        mTarget = layerManager->CreateDrawTarget(size, format);
      } else {
@@ -3296,6 +3303,8 @@ CanvasRenderingContext2D::DrawWindow(nsIDOMWindow* window, double x,
   // gfxContext-over-Azure may modify the DrawTarget's transform, so
   // save and restore it
   Matrix matrix = mTarget->GetTransform();
+  double sw = matrix._11 * w;
+  double sh = matrix._22 * h;
   nsRefPtr<gfxContext> thebes;
   nsRefPtr<gfxASurface> drawSurf;
   if (gfxPlatform::GetPlatform()->SupportsAzureContentForDrawTarget(mTarget)) {
@@ -3304,7 +3313,7 @@ CanvasRenderingContext2D::DrawWindow(nsIDOMWindow* window, double x,
                                 matrix._22, matrix._31, matrix._32));
   } else {
     drawSurf =
-      gfxPlatform::GetPlatform()->CreateOffscreenSurface(gfxIntSize(ceil(w), ceil(h)),
+      gfxPlatform::GetPlatform()->CreateOffscreenSurface(gfxIntSize(ceil(sw), ceil(sh)),
                                                          gfxASurface::CONTENT_COLOR_ALPHA);
     if (!drawSurf) {
       error.Throw(NS_ERROR_FAILURE);
@@ -3314,6 +3323,7 @@ CanvasRenderingContext2D::DrawWindow(nsIDOMWindow* window, double x,
     drawSurf->SetDeviceOffset(gfxPoint(-floor(x), -floor(y)));
     thebes = new gfxContext(drawSurf);
     thebes->Translate(gfxPoint(floor(x), floor(y)));
+    thebes->Scale(matrix._11, matrix._22);
   }
 
   nsCOMPtr<nsIPresShell> shell = presContext->PresShell();
@@ -3333,8 +3343,11 @@ CanvasRenderingContext2D::DrawWindow(nsIDOMWindow* window, double x,
                                            IntSize(size.width, size.height),
                                            img->Stride(),
                                            FORMAT_B8G8R8A8);
-    mgfx::Rect rect(0, 0, w, h);
-    mTarget->DrawSurface(data, rect, rect);
+    mgfx::Rect destRect(0, 0, w, h);
+    mgfx::Rect sourceRect(0, 0, sw, sh);
+    mTarget->DrawSurface(data, destRect, sourceRect,
+                         DrawSurfaceOptions(mgfx::FILTER_POINT),
+                         DrawOptions(1.0f, OP_SOURCE, AA_NONE));
     mTarget->Flush();
   } else {
     mTarget->SetTransform(matrix);

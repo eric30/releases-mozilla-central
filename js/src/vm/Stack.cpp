@@ -17,7 +17,6 @@
 #endif
 
 #include "vm/Interpreter-inl.h"
-#include "vm/ScopeObject-inl.h"
 #include "vm/Stack-inl.h"
 #include "vm/Probes-inl.h"
 
@@ -1219,6 +1218,14 @@ ScriptFrameIter::frameSlotValue(size_t index) const
 
 #if defined(_MSC_VER)
 # pragma optimize("", on)
+#endif
+
+#ifdef DEBUG
+/* static */
+bool NonBuiltinScriptFrameIter::includeSelfhostedFrames() {
+    static char* env = getenv("MOZ_SHOW_ALL_JS_FRAMES");
+    return (bool)env;
+}
 #endif
 
 /*****************************************************************************/

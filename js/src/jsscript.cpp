@@ -34,12 +34,13 @@
 #include "vm/Shape.h"
 #include "vm/Xdr.h"
 
+#include "jsfuninlines.h"
 #include "jsinferinlines.h"
 #include "jsscriptinlines.h"
 
-#include "vm/Interpreter-inl.h"
-#include "vm/RegExpObject-inl.h"
 #include "vm/ScopeObject-inl.h"
+#include "vm/Runtime-inl.h"
+#include "vm/Stack-inl.h"
 
 using namespace js;
 using namespace js::gc;
@@ -945,7 +946,7 @@ Class ScriptSourceObject::class_ = {
 };
 
 ScriptSourceObject *
-ScriptSourceObject::create(JSContext *cx, ScriptSource *source)
+ScriptSourceObject::create(ExclusiveContext *cx, ScriptSource *source)
 {
     RootedObject object(cx, NewObjectWithGivenProto(cx, &class_, NULL, cx->global()));
     if (!object)
@@ -1456,7 +1457,7 @@ ScriptSource::performXDR(XDRState<mode> *xdr)
 }
 
 bool
-ScriptSource::setFilename(JSContext *cx, const char *filename)
+ScriptSource::setFilename(ExclusiveContext *cx, const char *filename)
 {
     JS_ASSERT(!filename_);
     size_t len = strlen(filename) + 1;
@@ -1470,12 +1471,14 @@ ScriptSource::setFilename(JSContext *cx, const char *filename)
 }
 
 bool
-ScriptSource::setSourceMap(JSContext *cx, jschar *sourceMapURL, const char *filename)
+ScriptSource::setSourceMap(ExclusiveContext *cx, jschar *sourceMapURL)
 {
     JS_ASSERT(sourceMapURL);
     if (hasSourceMap()) {
-        if (!JS_ReportErrorFlagsAndNumber(cx, JSREPORT_WARNING, js_GetErrorMessage, NULL,
-                                          JSMSG_ALREADY_HAS_SOURCEMAP, filename)) {
+        if (cx->isJSContext() &&
+            !JS_ReportErrorFlagsAndNumber(cx->asJSContext(), JSREPORT_WARNING, js_GetErrorMessage,
+                                          NULL, JSMSG_ALREADY_HAS_SOURCEMAP, filename_))
+        {
             js_free(sourceMapURL);
             return false;
         }
@@ -1520,6 +1523,8 @@ js::SaveSharedScriptData(ExclusiveContext *cx, Handle<JSScript *> script, Shared
     ASSERT(script != NULL);
     ASSERT(ssd != NULL);
 
+    AutoLockForExclusiveAccess lock(cx);
+
     ScriptBytecodeHasher::Lookup l(ssd);
 
     ScriptDataTable::AddPtr p = cx->scriptDataTable().lookupForAdd(l);
@@ -1558,11 +1563,16 @@ js::SweepScriptData(JSRuntime *rt)
 {
     JS_ASSERT(rt->gcIsFull);
     ScriptDataTable &table = rt->scriptDataTable;
+
+    bool keepAtoms = false;
+    for (ThreadDataIter iter(rt); !iter.done(); iter.next())
+        keepAtoms |= iter->gcKeepAtoms;
+
     for (ScriptDataTable::Enum e(table); !e.empty(); e.popFront()) {
         SharedScriptData *entry = e.front();
         if (entry->marked) {
             entry->marked = false;
-        } else if (!rt->gcKeepAtoms) {
+        } else if (!keepAtoms) {
             js_free(entry);
             e.removeFront();
         }
@@ -2015,7 +2025,7 @@ js::CallNewScriptHook(JSContext *cx, HandleScript script, HandleFunction fun)
 
     JS_ASSERT(!script->isActiveEval);
     if (JSNewScriptHook hook = cx->runtime()->debugHooks.newScriptHook) {
-        AutoKeepAtoms keep(cx->runtime());
+        AutoKeepAtoms keepAtoms(cx->perThreadData);
         hook(cx, script->filename(), script->lineno, script, fun,
              cx->runtime()->debugHooks.newScriptHookData);
     }
@@ -2445,6 +2455,7 @@ js::CloneScript(JSContext *cx, HandleObject enclosingScope, HandleFunction fun, 
     dst->isGeneratorExp = src->isGeneratorExp;
 
     /* Copy over hints. */
+    dst->shouldInline = src->shouldInline;
     dst->shouldCloneAtCallsite = src->shouldCloneAtCallsite;
     dst->isCallsiteClone = src->isCallsiteClone;
 
@@ -2790,6 +2801,9 @@ JSScript::markChildren(JSTracer *trc)
 void
 LazyScript::markChildren(JSTracer *trc)
 {
+    if (function_)
+        MarkObject(trc, &function_, "function");
+
     if (sourceObject_)
         MarkObject(trc, &sourceObject_, "sourceObject");
 
@@ -2964,9 +2978,10 @@ JSScript::formalLivesInArgumentsObject(unsigned argSlot)
     return argsObjAliasesFormals() && !formalIsAliased(argSlot);
 }
 
-LazyScript::LazyScript(void *table, uint32_t numFreeVariables, uint32_t numInnerFunctions,
+LazyScript::LazyScript(JSFunction *fun, void *table, uint32_t numFreeVariables, uint32_t numInnerFunctions,
                        JSVersion version, uint32_t begin, uint32_t end, uint32_t lineno, uint32_t column)
   : script_(NULL),
+    function_(fun),
     enclosingScope_(NULL),
     sourceObject_(NULL),
     table_(table),
@@ -3015,8 +3030,8 @@ LazyScript::sourceObject() const
 }
 
 /* static */ LazyScript *
-LazyScript::Create(ExclusiveContext *cx, uint32_t numFreeVariables, uint32_t numInnerFunctions,
-                   JSVersion version,
+LazyScript::Create(ExclusiveContext *cx, HandleFunction fun,
+                   uint32_t numFreeVariables, uint32_t numInnerFunctions, JSVersion version,
                    uint32_t begin, uint32_t end, uint32_t lineno, uint32_t column)
 {
     JS_ASSERT(begin <= end);
@@ -3035,7 +3050,7 @@ LazyScript::Create(ExclusiveContext *cx, uint32_t numFreeVariables, uint32_t num
     if (!res)
         return NULL;
 
-    return new (res) LazyScript(table, numFreeVariables, numInnerFunctions, version,
+    return new (res) LazyScript(fun, table, numFreeVariables, numInnerFunctions, version,
                                 begin, end, lineno, column);
 }
 

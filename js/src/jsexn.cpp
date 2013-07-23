@@ -22,6 +22,7 @@
 #include "jsnum.h"
 #include "jsobj.h"
 #include "jsscript.h"
+#include "jswrapper.h"
 
 #include "gc/Marking.h"
 #include "vm/ErrorObject.h"
@@ -30,7 +31,6 @@
 
 #include "jsfuninlines.h"
 #include "jsobjinlines.h"
-#include "jsstrinlines.h"
 
 using namespace js;
 using namespace js::gc;

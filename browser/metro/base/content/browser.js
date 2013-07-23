@@ -574,6 +574,7 @@ var Browser = {
     } else {
       // Update all of our UI to reflect the new tab's location
       BrowserUI.updateURI();
+      BrowserUI.update();
 
       let event = document.createEvent("Events");
       event.initEvent("TabSelect", true, false);
@@ -1204,6 +1205,10 @@ nsBrowserAccess.prototype = {
 
   isTabContentWindow: function(aWindow) {
     return Browser.browsers.some(function (browser) browser.contentWindow == aWindow);
+  },
+
+  get contentWindow() {
+    return Browser.selectedBrowser.contentWindow;
   }
 };
 
@@ -1375,8 +1380,7 @@ function getNotificationBox(aBrowser) {
 }
 
 function showDownloadManager(aWindowContext, aID, aReason) {
-  PanelUI.show("downloads-container");
-  // TODO: select the download with aID
+  // TODO: Bug 883962: Toggle the downloads infobar as our current "download manager".
 }
 
 function Tab(aURI, aParams, aOwner) {
@@ -1578,7 +1582,7 @@ Tab.prototype = {
 
     // Ensure that history is initialized
     history.QueryInterface(Ci.nsISHistoryInternal);
-    
+
     for (let i = 0, length = otherHistory.index; i <= length; i++)
       history.addEntry(otherHistory.getEntryAtIndex(i, false), true);
   },

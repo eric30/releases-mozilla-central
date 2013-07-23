@@ -35,6 +35,7 @@ SYNC_JAVA_FILES := \
   background/common/log/writers/StringLogWriter.java \
   background/common/log/writers/TagLogWriter.java \
   background/common/log/writers/ThreadLocalTagLogWriter.java \
+  background/datareporting/TelemetryRecorder.java \
   background/db/CursorDumper.java \
   background/db/Tab.java \
   background/healthreport/Environment.java \
@@ -51,6 +52,7 @@ SYNC_JAVA_FILES := \
   background/healthreport/upload/HealthReportBroadcastService.java \
   background/healthreport/upload/HealthReportUploadService.java \
   background/healthreport/upload/HealthReportUploadStartReceiver.java \
+  background/healthreport/upload/ObsoleteDocumentTracker.java \
   background/healthreport/upload/SubmissionClient.java \
   background/healthreport/upload/SubmissionPolicy.java \
   sync/AlreadySyncingException.java \
@@ -167,7 +169,6 @@ SYNC_JAVA_FILES := \
   sync/repositories/android/CachedSQLiteOpenHelper.java \
   sync/repositories/android/ClientsDatabase.java \
   sync/repositories/android/ClientsDatabaseAccessor.java \
-  sync/repositories/android/FennecControlHelper.java \
   sync/repositories/android/FennecTabsRepository.java \
   sync/repositories/android/FormHistoryRepositorySession.java \
   sync/repositories/android/PasswordsRepositorySession.java \
@@ -297,15 +298,15 @@ SYNC_JAVA_FILES := \
   $(NULL)
 
 SYNC_RES_DRAWABLE := \
-  mobile/android/base/resources/drawable/pin_background.xml \
+  res/drawable/pin_background.xml \
   $(NULL)
 
 SYNC_RES_DRAWABLE_LDPI := \
   $(NULL)
 
 SYNC_RES_DRAWABLE_MDPI := \
-  mobile/android/base/resources/drawable-mdpi/desktop.png \
-  mobile/android/base/resources/drawable-mdpi/mobile.png \
+  res/drawable-mdpi/desktop.png \
+  res/drawable-mdpi/mobile.png \
   $(NULL)
 
 SYNC_RES_DRAWABLE_HDPI := \

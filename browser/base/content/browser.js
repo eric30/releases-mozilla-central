@@ -755,6 +755,7 @@ var gBrowserInit = {
     gBrowser.addEventListener("PluginCrashed",         gPluginHandler, true);
     gBrowser.addEventListener("PluginOutdated",        gPluginHandler, true);
     gBrowser.addEventListener("PluginInstantiated",    gPluginHandler, true);
+    gBrowser.addEventListener("PluginRemoved",         gPluginHandler, true);
 
     gBrowser.addEventListener("NewPluginInstalled", gPluginHandler.newPluginInstalled, true);
 
@@ -823,7 +824,8 @@ var gBrowserInit = {
     // setup history swipe animation
     gHistorySwipeAnimation.init();
 
-    if (window.opener && !window.opener.closed) {
+    if (window.opener && !window.opener.closed &&
+        PrivateBrowsingUtils.isWindowPrivate(window) == PrivateBrowsingUtils.isWindowPrivate(window.opener)) {
       let openerSidebarBox = window.opener.document.getElementById("sidebar-box");
       // If the opener had a sidebar, open the same sidebar in our window.
       // The opener can be the hidden window too, if we're coming from the state
@@ -2305,11 +2307,11 @@ function BrowserOnAboutPageLoad(doc) {
     }
     docElt.setAttribute("snippetsVersion", AboutHomeUtils.snippetsVersion);
 
-    function updateSearchEngine() {
+    let updateSearchEngine = function() {
       let engine = AboutHomeUtils.defaultSearchEngine;
       docElt.setAttribute("searchEngineName", engine.name);
       docElt.setAttribute("searchEngineURL", engine.searchURL);
-    }
+    };
     updateSearchEngine();
 
     // Listen for the event that's triggered when the user changes search engine.
@@ -3668,10 +3670,8 @@ var XULBrowserWindow = {
   init: function () {
     this.throbberElement = document.getElementById("navigator-throbber");
 
-    // Initialize the security button's state and tooltip text.  Remember to reset
-    // _hostChanged, otherwise onSecurityChange will short circuit.
+    // Initialize the security button's state and tooltip text.
     var securityUI = gBrowser.securityUI;
-    this._hostChanged = true;
     this.onSecurityChange(null, null, securityUI.state);
   },
 
@@ -3862,7 +3862,6 @@ var XULBrowserWindow = {
 
   onLocationChange: function (aWebProgress, aRequest, aLocationURI, aFlags) {
     var location = aLocationURI ? aLocationURI.spec : "";
-    this._hostChanged = true;
 
     // Hide the form invalid popup.
     if (gFormSubmitObserver.panel) {
@@ -3973,16 +3972,6 @@ var XULBrowserWindow = {
         }
       } else
         disableFindCommands(false);
-
-      if (gFindBarInitialized) {
-        if (gFindBar.findMode != gFindBar.FIND_NORMAL) {
-          // Close the Find toolbar if we're in old-style TAF mode
-          gFindBar.close();
-        }
-
-        // fix bug 253793 - turn off highlight when page changes
-        gFindBar.getElement("highlight").checked = false;
-      }
     }
     UpdateBackForwardCommands(gBrowser.webNavigation);
 
@@ -4014,37 +4003,18 @@ var XULBrowserWindow = {
 
   // Properties used to cache security state used to update the UI
   _state: null,
-  _hostChanged: false, // onLocationChange will flip this bit
+  _lastLocation: null,
 
   onSecurityChange: function (aWebProgress, aRequest, aState) {
     // Don't need to do anything if the data we use to update the UI hasn't
     // changed
+    let uri = gBrowser.currentURI;
+    let spec = uri.spec;
     if (this._state == aState &&
-        !this._hostChanged) {
-#ifdef DEBUG
-      try {
-        var contentHost = gBrowser.contentWindow.location.host;
-        if (this._host !== undefined && this._host != contentHost) {
-            Components.utils.reportError(
-              "ASSERTION: browser.js host is inconsistent. Content window has " +
-              "<" + contentHost + "> but cached host is <" + this._host + ">.\n"
-            );
-        }
-      } catch (ex) {}
-#endif
+        this._lastLocation == spec)
       return;
-    }
     this._state = aState;
-
-#ifdef DEBUG
-    try {
-      this._host = gBrowser.contentWindow.location.host;
-    } catch(ex) {
-      this._host = null;
-    }
-#endif
-
-    this._hostChanged = false;
+    this._lastLocation = spec;
 
     // aState is defined as a bitmask that may be extended in the future.
     // We filter out any unknown bits before testing for known values.
@@ -4073,7 +4043,6 @@ var XULBrowserWindow = {
         gURLBar.removeAttribute("level");
     }
 
-    let uri = gBrowser.currentURI;
     try {
       uri = Services.uriFixup.createExposableURI(uri);
     } catch (e) {}
@@ -4465,6 +4434,10 @@ nsBrowserAccess.prototype = {
 
   isTabContentWindow: function (aWindow) {
     return gBrowser.browsers.some(function (browser) browser.contentWindow == aWindow);
+  },
+
+  get contentWindow() {
+    return gBrowser.contentWindow;
   }
 }
 
@@ -6292,15 +6265,31 @@ function undoCloseTab(aIndex) {
   var tab = null;
   var ss = Cc["@mozilla.org/browser/sessionstore;1"].
            getService(Ci.nsISessionStore);
-  if (ss.getClosedTabCount(window) > (aIndex || 0)) {
-    TabView.prepareUndoCloseTab(blankTabToRemove);
-    tab = ss.undoCloseTab(window, aIndex || 0);
-    TabView.afterUndoCloseTab();
-
-    if (blankTabToRemove)
-      gBrowser.removeTab(blankTabToRemove);
+  let numberOfTabsToUndoClose = 0;
+  if (Number.isInteger(aIndex)) {
+    if (ss.getClosedTabCount(window) > aIndex) {
+      numberOfTabsToUndoClose = 1;
+    } else {
+      return tab;
+    }
+  } else {
+    numberOfTabsToUndoClose = ss.getNumberOfTabsClosedLast(window);
+    aIndex = 0;
   }
 
+  while (numberOfTabsToUndoClose > 0 &&
+         numberOfTabsToUndoClose--) {
+    TabView.prepareUndoCloseTab(blankTabToRemove);
+    tab = ss.undoCloseTab(window, aIndex);
+    TabView.afterUndoCloseTab();
+    if (blankTabToRemove) {
+      gBrowser.removeTab(blankTabToRemove);
+      blankTabToRemove = null;
+    }
+  }
+
+  // Reset the number of tabs closed last time to the default.
+  ss.setNumberOfTabsClosedLast(window, 1);
   return tab;
 }
 
@@ -6901,7 +6890,7 @@ var gIdentityHandler = {
         continue;
       let menuitem = document.createElement("menuitem");
       menuitem.setAttribute("value", state);
-      menuitem.setAttribute("label", SitePermissions.getStateLabel(state));
+      menuitem.setAttribute("label", SitePermissions.getStateLabel(aPermission, state));
       menupopup.appendChild(menuitem);
     }
     menulist.appendChild(menupopup);
@@ -7094,10 +7083,15 @@ var TabContextMenu = {
       menuItem.disabled = disabled;
 
     // Session store
-    document.getElementById("context_undoCloseTab").disabled =
-      Cc["@mozilla.org/browser/sessionstore;1"].
-      getService(Ci.nsISessionStore).
-      getClosedTabCount(window) == 0;
+    let ss = Cc["@mozilla.org/browser/sessionstore;1"].
+               getService(Ci.nsISessionStore);
+    let undoCloseTabElement = document.getElementById("context_undoCloseTab");
+    let closedTabCount = ss.getNumberOfTabsClosedLast(window);
+    undoCloseTabElement.disabled = closedTabCount == 0;
+    // Change the label of "Undo Close Tab" to specify if it will undo a batch-close
+    // or a single close.
+    let visibleLabel = closedTabCount <= 1 ? "singletablabel" : "multipletablabel";
+    undoCloseTabElement.setAttribute("label", undoCloseTabElement.getAttribute(visibleLabel));
 
     // Only one of pin/unpin should be visible
     document.getElementById("context_pinTab").hidden = this.contextTab.pinned;

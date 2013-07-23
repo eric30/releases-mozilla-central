@@ -226,13 +226,13 @@ class LControlInstructionHelper : public LInstructionHelper<0, Operands, Temps> 
     MBasicBlock *successors_[Succs];
 
   public:
-    size_t numSuccessors() const MOZ_FINAL MOZ_OVERRIDE { return Succs; }
+    virtual size_t numSuccessors() const MOZ_FINAL MOZ_OVERRIDE { return Succs; }
 
-    MBasicBlock *getSuccessor(size_t i) const MOZ_FINAL MOZ_OVERRIDE {
+    virtual MBasicBlock *getSuccessor(size_t i) const MOZ_FINAL MOZ_OVERRIDE {
         return successors_[i];
     }
 
-    void setSuccessor(size_t i, MBasicBlock *successor) MOZ_FINAL MOZ_OVERRIDE {
+    virtual void setSuccessor(size_t i, MBasicBlock *successor) MOZ_FINAL MOZ_OVERRIDE {
         successors_[i] = successor;
     }
 };
@@ -4075,7 +4075,7 @@ class LSetPropertyCacheT : public LInstructionHelper<0, 2, 1>
     }
 };
 
-class LSetElementCacheV : public LInstructionHelper<0, 1 + 2 * BOX_PIECES, 1>
+class LSetElementCacheV : public LInstructionHelper<0, 1 + 2 * BOX_PIECES, 2>
 {
   public:
     LIR_HEADER(SetElementCacheV);
@@ -4083,9 +4083,12 @@ class LSetElementCacheV : public LInstructionHelper<0, 1 + 2 * BOX_PIECES, 1>
     static const size_t Index = 1;
     static const size_t Value = 1 + BOX_PIECES;
 
-    LSetElementCacheV(const LAllocation &object, const LDefinition &temp) {
+    LSetElementCacheV(const LAllocation &object, const LDefinition &elem,
+                      const LDefinition &temp)
+    {
         setOperand(0, object);
-        setTemp(0, temp);
+        setTemp(0, elem);
+        setTemp(1, temp);
     }
     const MSetElementCache *mir() const {
         return mir_->toSetElementCache();
@@ -4094,12 +4097,15 @@ class LSetElementCacheV : public LInstructionHelper<0, 1 + 2 * BOX_PIECES, 1>
     const LAllocation *object() {
         return getOperand(0);
     }
-    const LDefinition *temp() {
+    const LDefinition *temp0() {
         return getTemp(0);
+    }
+    const LDefinition *temp1() {
+        return getTemp(1);
     }
 };
 
-class LSetElementCacheT : public LInstructionHelper<0, 2 + BOX_PIECES, 1>
+class LSetElementCacheT : public LInstructionHelper<0, 2 + BOX_PIECES, 2>
 {
   public:
     LIR_HEADER(SetElementCacheT);
@@ -4107,10 +4113,11 @@ class LSetElementCacheT : public LInstructionHelper<0, 2 + BOX_PIECES, 1>
     static const size_t Index = 2;
 
     LSetElementCacheT(const LAllocation &object, const LAllocation &value,
-                      const LDefinition &temp) {
+                      const LDefinition &elem, const LDefinition &temp) {
         setOperand(0, object);
         setOperand(1, value);
-        setTemp(0, temp);
+        setTemp(0, elem);
+        setTemp(1, temp);
     }
     const MSetElementCache *mir() const {
         return mir_->toSetElementCache();
@@ -4122,8 +4129,11 @@ class LSetElementCacheT : public LInstructionHelper<0, 2 + BOX_PIECES, 1>
     const LAllocation *value() {
         return getOperand(1);
     }
-    const LDefinition *temp() {
+    const LDefinition *temp0() {
         return getTemp(0);
+    }
+    const LDefinition *temp1() {
+        return getTemp(1);
     }
 };
 

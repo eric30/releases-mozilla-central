@@ -35,6 +35,8 @@ typedef _cairo_scaled_font cairo_scaled_font_t;
 
 struct ID3D10Device1;
 struct ID3D10Texture2D;
+struct ID3D11Device;
+struct ID2D1Device;
 struct IDWriteRenderingParams;
 
 class GrContext;
@@ -839,6 +841,8 @@ public:
    */
   virtual void *GetNativeSurface(NativeSurfaceType aType) { return NULL; }
 
+  virtual bool IsDualDrawTarget() { return false; }
+
   void AddUserData(UserDataKey *key, void *userData, void (*destroy)(void*)) {
     mUserData.Add(key, userData, destroy);
   }
@@ -987,6 +991,11 @@ public:
 
   static void SetDirect3D10Device(ID3D10Device1 *aDevice);
   static ID3D10Device1 *GetDirect3D10Device();
+#ifdef USE_D2D1_1
+  static void SetDirect3D11Device(ID3D11Device *aDevice);
+  static ID3D11Device *GetDirect3D11Device();
+  static ID2D1Device *GetD2D1Device();
+#endif
 
   static TemporaryRef<GlyphRenderingOptions>
     CreateDWriteGlyphRenderingOptions(IDWriteRenderingParams *aParams);
@@ -997,6 +1006,10 @@ public:
 
 private:
   static ID3D10Device1 *mD3D10Device;
+#ifdef USE_D2D1_1
+  static ID3D11Device *mD3D11Device;
+  static ID2D1Device *mD2D1Device;
+#endif
 #endif
 
   static DrawEventRecorder *mRecorder;
@@ -1012,9 +1025,26 @@ private:
 class BorrowedCGContext
 {
 public:
-  BorrowedCGContext(DrawTarget *aDT) : mDT(aDT)
+  BorrowedCGContext()
+    : cg(nullptr)
+    , mDT(nullptr)
+  { }
+
+  BorrowedCGContext(DrawTarget *aDT)
+    : mDT(aDT)
   {
     cg = BorrowCGContextFromDrawTarget(aDT);
+  }
+
+  // We can optionally Init after construction in
+  // case we don't know what the DT will be at construction
+  // time.
+  CGContextRef Init(DrawTarget *aDT)
+  {
+    MOZ_ASSERT(!mDT, "Can't initialize twice!");
+    mDT = aDT;
+    cg = BorrowCGContextFromDrawTarget(aDT);
+    return cg;
   }
 
   // The caller needs to call Finish if cg is non-null when

@@ -17,12 +17,12 @@
 #include "jsobj.h"
 
 #include "vm/GlobalObject.h"
+#include "vm/ProxyObject.h"
 #include "vm/StringBuffer.h"
 
 #include "jsboolinlines.h"
 
 #include "vm/BooleanObject-inl.h"
-#include "vm/GlobalObject-inl.h"
 
 using namespace js;
 using namespace js::types;
@@ -200,7 +200,7 @@ js::ToBooleanSlow(const Value &v)
 bool
 js::BooleanGetPrimitiveValueSlow(HandleObject wrappedBool, JSContext *cx)
 {
-    JS_ASSERT(wrappedBool->isProxy());
+    JS_ASSERT(wrappedBool->is<ProxyObject>());
     JSObject *obj = Wrapper::wrappedObject(wrappedBool);
     JS_ASSERT(obj);
     return obj->as<BooleanObject>().unbox();

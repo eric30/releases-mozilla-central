@@ -19,7 +19,11 @@
 #include "SkTSearch.h"
 
 #ifndef SK_FONT_FILE_PREFIX
+#ifdef SK_BUILD_FOR_ANDROID
+    #define SK_FONT_FILE_PREFIX "/fonts/"
+#else
     #define SK_FONT_FILE_PREFIX "/usr/share/fonts/truetype/"
+#endif
 #endif
 #ifndef SK_FONT_FILE_DIR_SEPERATOR
     #define SK_FONT_FILE_DIR_SEPERATOR "/"
@@ -106,20 +110,6 @@ static FamilyRec* find_family(const SkTypeface* member) {
         for (int i = 0; i < 4; i++) {
             if (curr->fFaces[i] == member) {
                 return curr;
-            }
-        }
-        curr = curr->fNext;
-    }
-    return NULL;
-}
-
-static SkTypeface* find_from_uniqueID(uint32_t uniqueID) {
-    FamilyRec* curr = gFamilyHead;
-    while (curr != NULL) {
-        for (int i = 0; i < 4; i++) {
-            SkTypeface* face = curr->fFaces[i];
-            if (face != NULL && face->uniqueID() == uniqueID) {
-                return face;
             }
         }
         curr = curr->fNext;
@@ -419,7 +409,13 @@ static void load_system_fonts() {
         return;
     }
 
-    SkString baseDirectory(SK_FONT_FILE_PREFIX);
+    SkString baseDirectory;
+#ifdef SK_BUILD_FOR_ANDROID
+    baseDirectory.set(getenv("ANDROID_ROOT"));
+#endif
+
+    baseDirectory.append(SK_FONT_FILE_PREFIX);
+
     unsigned int count = 0;
     load_directory_fonts(baseDirectory, &count);
 

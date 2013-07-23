@@ -122,6 +122,11 @@ EvaluateConstantOperands(MBinaryInstruction *ins, bool *ptypeChange = NULL)
         MOZ_ASSUME_UNREACHABLE("NYI");
     }
 
+    // setNumber eagerly transforms a number to int32.
+    // Transform back to double, if the output type is double.
+    if (ins->type() == MIRType_Double && ret.isInt32())
+        ret.setDouble(ret.toNumber());
+
     if (ins->type() != MIRTypeFromValue(ret)) {
         if (ptypeChange)
             *ptypeChange = true;
@@ -1545,6 +1550,26 @@ MustBeUInt32(MDefinition *def, MDefinition **pwrapped)
     return false;
 }
 
+bool
+MBinaryInstruction::tryUseUnsignedOperands()
+{
+    MDefinition *newlhs, *newrhs;
+    if (MustBeUInt32(getOperand(0), &newlhs) && MustBeUInt32(getOperand(1), &newrhs)) {
+        if (newlhs->type() != MIRType_Int32 || newrhs->type() != MIRType_Int32)
+            return false;
+        if (newlhs != getOperand(0)) {
+            getOperand(0)->setFoldedUnchecked();
+            replaceOperand(0, newlhs);
+        }
+        if (newrhs != getOperand(1)) {
+            getOperand(1)->setFoldedUnchecked();
+            replaceOperand(1, newrhs);
+        }
+        return true;
+    }
+    return false;
+}
+
 void
 MCompare::infer(JSContext *cx, BaselineInspector *inspector, jsbytecode *pc)
 {
@@ -1560,19 +1585,8 @@ MCompare::infer(JSContext *cx, BaselineInspector *inspector, jsbytecode *pc)
     bool strictEq = jsop() == JSOP_STRICTEQ || jsop() == JSOP_STRICTNE;
     bool relationalEq = !(looseEq || strictEq);
 
-    // Comparisons on unsigned integers may be treated as UInt32. Skip any (x >>> 0)
-    // operation coercing the operands to uint32. The type policy will make sure the
-    // now unwrapped operand is an int32.
-    MDefinition *newlhs, *newrhs;
-    if (MustBeUInt32(getOperand(0), &newlhs) && MustBeUInt32(getOperand(1), &newrhs)) {
-        if (newlhs != getOperand(0)) {
-            getOperand(0)->setFoldedUnchecked();
-            replaceOperand(0, newlhs);
-        }
-        if (newrhs != getOperand(1)) {
-            getOperand(1)->setFoldedUnchecked();
-            replaceOperand(1, newrhs);
-        }
+    // Comparisons on unsigned integers may be treated as UInt32.
+    if (tryUseUnsignedOperands()) {
         compareType_ = Compare_UInt32;
         return;
     }
@@ -2284,8 +2298,7 @@ InlinePropertyTable::trimTo(AutoObjectVector &targets, Vector<bool> &choiceSet)
 }
 
 void
-InlinePropertyTable::trimToAndMaybePatchTargets(AutoObjectVector &targets,
-                                                AutoObjectVector &originals)
+InlinePropertyTable::trimToTargets(AutoObjectVector &targets)
 {
     IonSpew(IonSpew_Inlining, "Got inlineable property cache with %d cases",
             (int)numEntries());
@@ -2293,12 +2306,8 @@ InlinePropertyTable::trimToAndMaybePatchTargets(AutoObjectVector &targets,
     size_t i = 0;
     while (i < numEntries()) {
         bool foundFunc = false;
-        // Compare using originals, but if we find a matching function,
-        // patch it to the target, which might be a clone.
-        for (size_t j = 0; j < originals.length(); j++) {
-            if (entries_[i]->func == originals[j]) {
-                if (entries_[i]->func != targets[j])
-                    entries_[i] = new Entry(entries_[i]->typeObj, &targets[j]->as<JSFunction>());
+        for (size_t j = 0; j < targets.length(); j++) {
+            if (entries_[i]->func == targets[j]) {
                 foundFunc = true;
                 break;
             }

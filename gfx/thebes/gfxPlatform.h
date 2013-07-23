@@ -133,6 +133,8 @@ GetBackendName(mozilla::gfx::BackendType aBackend)
         return "skia";
       case mozilla::gfx::BACKEND_RECORDING:
         return "recording";
+      case mozilla::gfx::BACKEND_DIRECT2D1_1:
+        return "direct2d 1.1";
       case mozilla::gfx::BACKEND_NONE:
         return "none";
   }
@@ -193,6 +195,8 @@ public:
      */
     virtual mozilla::RefPtr<mozilla::gfx::SourceSurface>
       GetSourceSurfaceForSurface(mozilla::gfx::DrawTarget *aTarget, gfxASurface *aSurface);
+
+    static void ClearSourceSurfaceForSurface(gfxASurface *aSurface);
 
     virtual mozilla::TemporaryRef<mozilla::gfx::ScaledFont>
       GetScaledFontForFont(mozilla::gfx::DrawTarget* aTarget, gfxFont *aFont);

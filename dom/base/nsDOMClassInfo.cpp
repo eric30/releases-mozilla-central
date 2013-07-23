@@ -129,13 +129,11 @@
 #include "nsIXSLTProcessorPrivate.h"
 
 #include "nsXMLHttpRequest.h"
-#include "nsIDOMSettingsManager.h"
 #include "nsIDOMContactManager.h"
 #include "nsIDOMPermissionSettings.h"
 #include "nsIDOMApplicationRegistry.h"
 
 // includes needed for the prototype chain interfaces
-#include "nsIDOMNavigator.h"
 #include "nsIDOMDocumentXBL.h"
 #include "nsIDOMElementCSSInlineStyle.h"
 #include "nsIDOMLinkStyle.h"
@@ -162,10 +160,6 @@
 #include "nsIControllers.h"
 #include "nsISelection.h"
 #include "nsIBoxObject.h"
-#ifdef MOZ_GAMEPAD
-#include "nsINavigatorGamepads.h"
-#include "mozilla/dom/GamepadService.h"
-#endif
 #ifdef MOZ_XUL
 #include "nsITreeSelection.h"
 #include "nsITreeContentView.h"
@@ -191,20 +185,10 @@
 // Geolocation
 #include "nsIDOMGeoPositionCoords.h"
 
-// User media
-#ifdef MOZ_MEDIA_NAVIGATOR
-#include "nsIDOMNavigatorUserMedia.h"
-#endif
-
 // Workers
 #include "mozilla/dom/workers/Workers.h"
 
 #include "nsDOMFile.h"
-
-#include "nsIDOMNavigatorDesktopNotification.h"
-#include "nsIDOMNavigatorDeviceStorage.h"
-#include "nsIDOMNavigatorGeolocation.h"
-#include "Navigator.h"
 
 #include "nsIEventListenerService.h"
 #include "nsIMessageManager.h"
@@ -242,7 +226,6 @@ using mozilla::dom::workers::ResolveWorkerClasses;
 #include "nsIDOMSmsSegmentInfo.h"
 #include "nsIDOMMozMobileMessageThread.h"
 #include "nsIDOMConnection.h"
-#include "mozilla/dom/network/Utils.h"
 
 #ifdef MOZ_B2G_RIL
 #include "Telephony.h"
@@ -269,7 +252,6 @@ using mozilla::dom::workers::ResolveWorkerClasses;
 #include "NdefRecord.h"
 #endif
 
-#include "nsIDOMNavigatorSystemMessages.h"
 #include "DOMCameraManager.h"
 #include "DOMCameraControl.h"
 #include "DOMCameraCapabilities.h"
@@ -444,10 +426,6 @@ static nsDOMClassInfoData sClassInfoData[] = {
                              nsIXPCScriptable::WANT_ADDPROPERTY) &
                             ~nsIXPCScriptable::ALLOW_PROP_MODS_TO_PROTOTYPE))
 
-  NS_DEFINE_CLASSINFO_DATA(Navigator, nsNavigatorSH,
-                           DOM_DEFAULT_SCRIPTABLE_FLAGS |
-                           nsIXPCScriptable::WANT_PRECREATE |
-                           nsIXPCScriptable::WANT_NEWRESOLVE)
   NS_DEFINE_CLASSINFO_DATA(History, nsHistorySH,
                            ARRAY_SCRIPTABLE_FLAGS |
                            nsIXPCScriptable::WANT_PRECREATE)
@@ -796,7 +774,6 @@ jsid nsDOMClassInfo::sScrollMaxY_id      = JSID_VOID;
 jsid nsDOMClassInfo::sItem_id            = JSID_VOID;
 jsid nsDOMClassInfo::sNamedItem_id       = JSID_VOID;
 jsid nsDOMClassInfo::sEnumerate_id       = JSID_VOID;
-jsid nsDOMClassInfo::sNavigator_id       = JSID_VOID;
 jsid nsDOMClassInfo::sTop_id             = JSID_VOID;
 jsid nsDOMClassInfo::sDocument_id        = JSID_VOID;
 jsid nsDOMClassInfo::sFrames_id          = JSID_VOID;
@@ -988,7 +965,6 @@ nsDOMClassInfo::DefineStaticJSVals(JSContext *cx)
   SET_JSID_TO_STRING(sItem_id,            cx, "item");
   SET_JSID_TO_STRING(sNamedItem_id,       cx, "namedItem");
   SET_JSID_TO_STRING(sEnumerate_id,       cx, "enumerateProperties");
-  SET_JSID_TO_STRING(sNavigator_id,       cx, "navigator");
   SET_JSID_TO_STRING(sTop_id,             cx, "top");
   SET_JSID_TO_STRING(sDocument_id,        cx, "document");
   SET_JSID_TO_STRING(sFrames_id,          cx, "frames");
@@ -1277,54 +1253,6 @@ nsDOMClassInfo::Init()
 
   DOM_CLASSINFO_MAP_BEGIN(Location, nsIDOMLocation)
     DOM_CLASSINFO_MAP_ENTRY(nsIDOMLocation)
-  DOM_CLASSINFO_MAP_END
-
-  DOM_CLASSINFO_MAP_BEGIN(Navigator, nsIDOMNavigator)
-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMNavigator)
-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMNavigatorDeviceStorage)
-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMNavigatorGeolocation)
-    DOM_CLASSINFO_MAP_CONDITIONAL_ENTRY(nsIDOMNavigatorDesktopNotification,
-                                        Navigator::HasDesktopNotificationSupport())
-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMClientInformation)
-    DOM_CLASSINFO_MAP_CONDITIONAL_ENTRY(nsINavigatorBattery,
-                                        battery::BatteryManager::HasSupport())
-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMMozNavigatorSms)
-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMMozNavigatorMobileMessage)
-#ifdef MOZ_MEDIA_NAVIGATOR
-    DOM_CLASSINFO_MAP_ENTRY(nsINavigatorUserMedia)
-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMNavigatorUserMedia)
-#endif
-#ifdef MOZ_B2G_RIL
-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMNavigatorTelephony)
-#endif
-#ifdef MOZ_GAMEPAD
-    DOM_CLASSINFO_MAP_CONDITIONAL_ENTRY(nsINavigatorGamepads,
-                                        GamepadService::IsAPIEnabled())
-#endif
-    DOM_CLASSINFO_MAP_CONDITIONAL_ENTRY(nsIDOMMozNavigatorNetwork,
-                                        network::IsAPIEnabled())
-#ifdef MOZ_B2G_RIL
-    DOM_CLASSINFO_MAP_ENTRY(nsIMozNavigatorMobileConnection)
-    DOM_CLASSINFO_MAP_ENTRY(nsIMozNavigatorCellBroadcast)
-    DOM_CLASSINFO_MAP_ENTRY(nsIMozNavigatorVoicemail)
-    DOM_CLASSINFO_MAP_ENTRY(nsIMozNavigatorIccManager)
-#endif
-#ifdef MOZ_B2G_BT
-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMNavigatorBluetooth)
-#endif
-#ifdef MOZ_B2G_NFC
-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMNavigatorNfc)
-#endif
-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMNavigatorCamera)
-    DOM_CLASSINFO_MAP_CONDITIONAL_ENTRY(nsIDOMNavigatorSystemMessages,
-                                        Activity::PrefEnabled())
-#ifdef MOZ_TIME_MANAGER
-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMMozNavigatorTime)
-#endif
-#ifdef MOZ_AUDIO_CHANNEL_MANAGER
-    DOM_CLASSINFO_MAP_ENTRY(nsIMozNavigatorAudioChannelManager)
-#endif
-
   DOM_CLASSINFO_MAP_END
 
   DOM_CLASSINFO_MAP_BEGIN(History, nsIDOMHistory)
@@ -2407,7 +2335,6 @@ nsDOMClassInfo::ShutDown()
   sScrollMaxY_id      = JSID_VOID;
   sItem_id            = JSID_VOID;
   sEnumerate_id       = JSID_VOID;
-  sNavigator_id       = JSID_VOID;
   sTop_id             = JSID_VOID;
   sDocument_id        = JSID_VOID;
   sFrames_id          = JSID_VOID;
@@ -4177,12 +4104,7 @@ const InterfaceShimEntry kInterfaceShimMap[] =
   { "nsIDOMLoadStatus", "LoadStatus" },
   { "nsIDOMOfflineResourceList", "OfflineResourceList" },
   { "nsIDOMRange", "Range" },
-  { "nsIDOMSVGFETurbulenceElement", "SVGFETurbulenceElement" },
-  { "nsIDOMSVGFEMorphologyElement", "SVGFEMorphologyElement" },
-  { "nsIDOMSVGFEConvolveMatrixElement", "SVGFEConvolveMatrixElement" },
-  { "nsIDOMSVGFEDisplacementMapElement", "SVGFEDisplacementMapElement" },
   { "nsIDOMSVGLength", "SVGLength" },
-  { "nsIDOMSVGUnitTypes", "SVGUnitTypes" },
   { "nsIDOMNodeFilter", "NodeFilter" },
   { "nsIDOMXPathNamespace", "XPathNamespace" },
   { "nsIDOMXPathResult", "XPathResult" },
@@ -4448,30 +4370,6 @@ nsWindowSH::NewResolve(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
       return NS_OK;
     }
   } else {
-    if (sNavigator_id == id) {
-      nsCOMPtr<nsIDOMNavigator> navigator;
-      rv = win->GetNavigator(getter_AddRefs(navigator));
-      NS_ENSURE_SUCCESS(rv, rv);
-
-      JS::Rooted<JS::Value> v(cx);
-      nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
-      rv = WrapNative(cx, obj, navigator, &NS_GET_IID(nsIDOMNavigator), true,
-                      v.address(), getter_AddRefs(holder));
-      NS_ENSURE_SUCCESS(rv, rv);
-
-      // Hold on to the navigator object as a global property so we
-      // don't need to worry about losing expando properties etc.
-      if (!::JS_DefinePropertyById(cx, obj, id, v,
-                                   JS_PropertyStub, JS_StrictPropertyStub,
-                                   JSPROP_READONLY | JSPROP_PERMANENT |
-                                   JSPROP_ENUMERATE)) {
-        return NS_ERROR_FAILURE;
-      }
-      *objp = obj;
-
-      return NS_OK;
-    }
-
     if (sDocument_id == id) {
       nsCOMPtr<nsIDocument> document = win->GetDoc();
       JS::Rooted<JS::Value> v(cx);
@@ -4681,140 +4579,6 @@ nsLocationSH::AddProperty(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
   }
 
   return NS_OK;
-}
-
-// DOM Navigator helper
-
-NS_IMETHODIMP
-nsNavigatorSH::NewResolve(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
-                          JSObject *aObj, jsid aId, uint32_t flags,
-                          JSObject **objp, bool *_retval)
-{
-  JS::Rooted<JSObject*> obj(cx, aObj);
-  JS::Rooted<jsid> id(cx, aId);
-  if (!JSID_IS_STRING(id)) {
-    return NS_OK;
-  }
-
-  nsScriptNameSpaceManager *nameSpaceManager =
-    nsJSRuntime::GetNameSpaceManager();
-  NS_ENSURE_TRUE(nameSpaceManager, NS_ERROR_NOT_INITIALIZED);
-
-  nsDependentJSString name(id);
-
-  const nsGlobalNameStruct* name_struct =
-    nameSpaceManager->LookupNavigatorName(name);
-  if (!name_struct) {
-    return NS_OK;
-  }
-
-  if (name_struct->mType == nsGlobalNameStruct::eTypeNewDOMBinding) {
-    mozilla::dom::ConstructNavigatorProperty construct = name_struct->mConstructNavigatorProperty;
-    MOZ_ASSERT(construct);
-
-    JS::Rooted<JSObject*> naviObj(cx, js::CheckedUnwrap(obj, /* stopAtOuter = */ false));
-    NS_ENSURE_TRUE(naviObj, NS_ERROR_DOM_SECURITY_ERR);
-
-    JS::Rooted<JSObject*> domObject(cx);
-    {
-      JSAutoCompartment ac(cx, naviObj);
-
-      // Check whether our constructor is enabled after we unwrap Xrays, since
-      // we don't want to define an interface on the Xray if it's disabled in
-      // the target global, even if it's enabled in the Xray's global.
-      if (name_struct->mConstructorEnabled &&
-          !(*name_struct->mConstructorEnabled)(cx, naviObj)) {
-        return NS_OK;
-      }
-
-      domObject = construct(cx, naviObj);
-      if (!domObject) {
-        return NS_ERROR_FAILURE;
-      }
-    }
-
-    if (!JS_WrapObject(cx, domObject.address()) ||
-        !JS_DefinePropertyById(cx, obj, id,
-                               JS::ObjectValue(*domObject),
-                               nullptr, nullptr, JSPROP_ENUMERATE)) {
-      return NS_ERROR_FAILURE;
-    }
-
-    *_retval = true;
-    *objp = obj;
-
-    return NS_OK;
-  }
-
-  NS_ASSERTION(name_struct->mType == nsGlobalNameStruct::eTypeNavigatorProperty,
-               "unexpected type");
-
-  nsresult rv = NS_OK;
-
-  nsCOMPtr<nsISupports> native(do_CreateInstance(name_struct->mCID, &rv));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  JS::Rooted<JS::Value> prop_val(cx, JS::UndefinedValue()); // Property value.
-
-  nsCOMPtr<nsIDOMGlobalPropertyInitializer> gpi(do_QueryInterface(native));
-
-  if (gpi) {
-    nsCOMPtr<nsIDOMNavigator> navigator = do_QueryWrappedNative(wrapper);
-    nsIDOMWindow *window = static_cast<Navigator*>(navigator.get())->GetWindow();
-    NS_ENSURE_TRUE(window, NS_ERROR_UNEXPECTED);
-
-    rv = gpi->Init(window, prop_val.address());
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
-
-  if (JSVAL_IS_PRIMITIVE(prop_val) && !JSVAL_IS_NULL(prop_val)) {
-    nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
-    rv = WrapNative(cx, obj, native, true, prop_val.address(),
-                    getter_AddRefs(holder));
-
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
-
-  if (!JS_WrapValue(cx, prop_val.address())) {
-    return NS_ERROR_UNEXPECTED;
-  }
-
-  JSBool ok = ::JS_DefinePropertyById(cx, obj, id, prop_val,
-                                      JS_PropertyStub, JS_StrictPropertyStub,
-                                      JSPROP_ENUMERATE);
-
-  *_retval = true;
-  *objp = obj;
-
-  return ok ? NS_OK : NS_ERROR_FAILURE;
-}
-
-// static
-nsresult
-nsNavigatorSH::PreCreate(nsISupports *nativeObj, JSContext *cx,
-                         JSObject *globalObj, JSObject **parentObj)
-{
-  // window.navigator can hold expandos and thus we need to only ever
-  // create one wrapper per navigator object so that expandos are
-  // visible independently of who's looking it up.
-  *parentObj = globalObj;
-
-  nsCOMPtr<nsIDOMNavigator> safeNav(do_QueryInterface(nativeObj));
-  if (!safeNav) {
-    // Oops, this wasn't really a navigator object. This can happen if someone
-    // tries to use our scriptable helper as a real object and tries to wrap
-    // it, see bug 319296.
-    return NS_OK;
-  }
-
-  Navigator *nav = static_cast<Navigator*>(safeNav.get());
-  nsGlobalWindow *win = static_cast<nsGlobalWindow*>(nav->GetWindow());
-  if (!win) {
-    NS_WARNING("Refusing to create a navigator in the wrong scope");
-
-    return NS_ERROR_UNEXPECTED;
-  }
-  return SetParentToWindow(win, parentObj);
 }
 
 // EventTarget helper

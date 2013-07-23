@@ -60,6 +60,8 @@ public:
     {
         nsCString version;
         nsCString buildID;
+        nsCString name;
+        nsCString UAName;
     };
 
     bool Init(MessageLoop* aIOLoop,
@@ -178,7 +180,8 @@ public:
     virtual bool RecvNotifyAlertsObserver(const nsCString& aType, const nsString& aData);
 
     virtual bool RecvAsyncMessage(const nsString& aMsg,
-                                  const ClonedMessageData& aData);
+                                  const ClonedMessageData& aData,
+                                  const InfallibleTArray<CpowEntry>& aCpows);
 
     virtual bool RecvGeolocationUpdate(const GeoPosition& somewhere);
 
@@ -193,7 +196,8 @@ public:
     virtual bool RecvGarbageCollect();
     virtual bool RecvCycleCollect();
 
-    virtual bool RecvAppInfo(const nsCString& version, const nsCString& buildID);
+    virtual bool RecvAppInfo(const nsCString& version, const nsCString& buildID,
+                             const nsCString& name, const nsCString& UAName);
 
     virtual bool RecvLastPrivateDocShellDestroyed();
 

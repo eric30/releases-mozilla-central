@@ -12,9 +12,6 @@
 #include "ion/IonLinker.h"
 #include "ion/IonSpewer.h"
 #include "ion/VMFunctions.h"
-#include "ion/IonFrames-inl.h"
-
-#include "jsopcodeinlines.h"
 
 #include "vm/Interpreter-inl.h"
 
@@ -86,6 +83,7 @@ BaselineCompiler::compile()
     MethodStatus status = emitBody();
     if (status != Method_Compiled)
         return status;
+
 
     if (!emitEpilogue())
         return Method_Error;
@@ -227,6 +225,11 @@ BaselineCompiler::emitPrologue()
             masm.pushValue(R0);
     }
 
+#if JS_TRACE_LOGGING
+    masm.tracelogStart(script.get());
+    masm.tracelogLog(TraceLogging::INFO_ENGINE_BASELINE);
+#endif
+
     // Record the offset of the prologue, because Ion can bailout before
     // the scope chain is initialized.
     prologueOffset_ = masm.currentOffset();
@@ -258,6 +261,10 @@ bool
 BaselineCompiler::emitEpilogue()
 {
     masm.bind(&return_);
+
+#if JS_TRACE_LOGGING
+    masm.tracelogStop();
+#endif
 
     // Pop SPS frame if necessary
     emitSPSPop();
@@ -1413,7 +1420,7 @@ BaselineCompiler::emit_JSOP_NEWINIT()
         JS_ASSERT(key == JSProto_Object);
 
         RootedObject templateObject(cx);
-        templateObject = NewBuiltinClassInstance(cx, &ObjectClass, TenuredObject);
+        templateObject = NewBuiltinClassInstance(cx, &JSObject::class_, TenuredObject);
         if (!templateObject)
             return false;
 

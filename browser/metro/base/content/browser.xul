@@ -6,7 +6,6 @@
 
 <?xml-stylesheet href="chrome://browser/skin/platform.css" type="text/css"?>
 <?xml-stylesheet href="chrome://browser/skin/browser.css" type="text/css"?>
-<?xml-stylesheet href="chrome://browser/skin/forms.css" type="text/css"?>
 <?xml-stylesheet href="chrome://browser/content/browser.css" type="text/css"?>
 <?xml-stylesheet href="chrome://browser/skin/cssthrobber.css" type="text/css"?>
 <?xml-stylesheet href="chrome://browser/skin/tiles.css" type="text/css"?>
@@ -180,7 +179,8 @@
     <vbox id="page">
       <vbox id="tray" class="tray-toolbar" observes="bcast_windowState" >
         <!-- Tabs -->
-        <hbox id="tabs-container" observes="bcast_windowState">
+        <!-- onclick handler to work around bug 837242 -->
+        <hbox id="tabs-container" observes="bcast_windowState" onclick="void(0);">
           <box id="tabs" flex="1"
                 observes="bcast_preciseInput"
                 onselect="BrowserUI.selectTabAndDismiss(this);"
@@ -197,19 +197,19 @@
             <scrollbox id="start-scrollbox" orient="horizontal" observes="bcast_preciseInput" flex="1">
               <vbox id="start-topsites" class="meta-section">
                 <label class="meta-section-title" value="&startTopSitesHeader.label;"/>
-                <richgrid id="start-topsites-grid" rows="3" columns="3" tiletype="thumbnail" seltype="multiple" flex="1"/>
+                <richgrid id="start-topsites-grid" noun="topsite" rows="3" columns="3" tiletype="thumbnail" seltype="multiple" flex="1"/>
               </vbox>
               <vbox id="start-bookmarks" class="meta-section">
                 <label class="meta-section-title" value="&startBookmarksHeader.label;"/>
-                <richgrid id="start-bookmarks-grid" seltype="multiple" flex="1"/>
+                <richgrid id="start-bookmarks-grid" noun="bookmark" seltype="multiple" flex="1"/>
               </vbox>
               <vbox id="start-history" class="meta-section">
                 <label class="meta-section-title" value="&startHistoryHeader.label;"/>
-                <richgrid id="start-history-grid" seltype="multiple" flex="1"/>
+                <richgrid id="start-history-grid" noun="history" seltype="multiple" flex="1"/>
               </vbox>
               <vbox id="start-remotetabs" class="meta-section">
                 <label class="meta-section-title" value="&startRemoteTabsHeader.label;"/>
-                <richgrid id="start-remotetabs-grid" seltype="multiple" flex="1"/>
+                <richgrid id="start-remotetabs-grid" noun="tab" seltype="multiple" flex="1"/>
               </vbox>
             </scrollbox>
           </hbox>
@@ -219,7 +219,7 @@
             <scrollbox id="snapped-scrollbox" orient="vertical" flex="1">
               <vbox id="snapped-topsites">
                 <label class="meta-section-title" value="&startTopSitesHeader.label;"/>
-                <richgrid id="snapped-topsites-grid" class="canSnapTiles" rows="8" columns="1" flex="1"/>
+                <richgrid id="snapped-topsites-grid" noun="topsite" class="canSnapTiles" rows="8" columns="1" flex="1"/>
               </vbox>
               <label class="meta-section-title" value="&snappedBookmarksHeader.label;"
                 onclick="PanelUI.show('bookmarks-container');"/>
@@ -229,8 +229,6 @@
                 onclick="PanelUI.show('remotetabs-container');" inputProcessing="true"/>
             </scrollbox>
           </hbox>
-          <!-- Autocompletion interface -->
-          <box id="start-autocomplete" observes="bcast_windowState"/>
         </hbox>
       </vbox> <!-- end tray -->
 
@@ -251,59 +249,54 @@
     <html:div id="overlay-plus" class="overlay-button"
               observes="cmd_back"></html:div>
 
-    <!-- popup for content navigator helper -->
-    <appbar id="content-navigator" class="window-width content-navigator-box" orient="horizontal" pack="start">
-      <textbox id="find-helper-textbox" class="search-bar content-navigator-item" oncommand="FindHelperUI.search(this.value)" oninput="FindHelperUI.updateCommands(this.value);" type="search"/>
-      <button class="content-navigator-item previous-button" command="cmd_findPrevious"/>
-      <button class="content-navigator-item next-button" command="cmd_findNext"/>
-      <spacer flex="1"/>
-      <button class="content-navigator-item close-button" command="cmd_findClose"/>
-    </appbar>
-
     <!-- Navbar -->
     <appbar id="navbar" mousethrough="never" observes="bcast_windowState">
       <hbox id="progress-container" layer="true">
         <hbox id="progress-control" />
       </hbox>
 
-      <!-- Main Toolbar -->
-      <toolbar id="toolbar" observes="bcast_windowState" flex="1">
-        <observes element="bcast_windowState" attribute="*"/>
-        <observes element="bcast_urlbarState" attribute="*"/>
+      <vbox id="toolbar-autocomplete" flex="1">
+        <!-- Autocomplete -->
+        <scrollbox flex="1">
+          <hbox id="urlbar-autocomplete" observes="bcast_windowState"/>
+        </scrollbox>
 
-        <toolbarbutton id="back-button" class="appbar-primary" command="cmd_back"/>
-        <toolbarbutton id="forward-button" class="appbar-primary" command="cmd_forward"/>
+        <!-- Main Toolbar -->
+        <toolbar id="toolbar" observes="bcast_windowState" flex="1">
+          <observes element="bcast_windowState" attribute="*"/>
+          <observes element="bcast_urlbarState" attribute="*"/>
 
-        <hbox id="urlbar-container" flex="1" observes="bcast_urlbarState">
-          <hbox id="urlbar" flex="1">
-            <box id="identity-box" role="button">
-              <hbox id="identity-box-inner" align="center" mousethrough="always">
-                <image id="identity-icon"/>
-              </hbox>
-            </box>
+          <toolbarbutton id="back-button" class="appbar-primary" command="cmd_back"/>
+          <toolbarbutton id="forward-button" class="appbar-primary" command="cmd_forward"/>
 
-            <textbox id="urlbar-edit"
-                     type="url"
-                     class="uri-element"
-                     autocompletesearch="history"
-                     autocompletepopup="start-autocomplete"
-                     completeselectedindex="true"
-                     placeholder="&urlbar.emptytext;"
-                     flex="1"
-                     onpaste="this.focus();"
-                     ontextentered="BrowserUI.handleUrlbarEnter(param);"
-                     onblur="BrowserUI._urlbarBlurred();"/>
+          <hbox id="urlbar-container" flex="1" observes="bcast_urlbarState">
+            <hbox id="urlbar" flex="1">
+              <box id="identity-box" role="button">
+                <hbox id="identity-box-inner" align="center" mousethrough="always">
+                  <image id="identity-icon"/>
+                </hbox>
+              </box>
+
+              <textbox id="urlbar-edit"
+                       type="url"
+                       class="uri-element"
+                       autocompletesearch="history"
+                       autocompletepopup="urlbar-autocomplete"
+                       completeselectedindex="true"
+                       placeholder="&urlbar.emptytext;"
+                       flex="1"/>
+            </hbox>
+
+            <toolbarbutton id="reload-button" oncommand="CommandUpdater.doCommand(event.shiftKey ? 'cmd_forceReload' : 'cmd_reload');"/>
+            <toolbarbutton id="stop-button" command="cmd_stop"/>
           </hbox>
 
-          <toolbarbutton id="reload-button" oncommand="CommandUpdater.doCommand(event.shiftKey ? 'cmd_forceReload' : 'cmd_reload');"/>
-          <toolbarbutton id="stop-button" command="cmd_stop"/>
-        </hbox>
-
-        <toolbarbutton id="download-button" oncommand="Appbar.onDownloadButton()"/>
-        <toolbarbutton id="star-button" class="appbar-primary" type="checkbox" oncommand="Appbar.onStarButton()"/>
-        <toolbarbutton id="pin-button" class="appbar-primary" type="checkbox" oncommand="Appbar.onPinButton()"/>
-        <toolbarbutton id="menu-button" class="appbar-primary" oncommand="Appbar.onMenuButton(event)"/>
-       </toolbar>
+          <toolbarbutton id="download-button" class="appbar-secondary" oncommand="Appbar.onDownloadButton()"/>
+          <toolbarbutton id="star-button" class="appbar-primary" type="checkbox" oncommand="Appbar.onStarButton()"/>
+          <toolbarbutton id="pin-button" class="appbar-primary" type="checkbox" oncommand="Appbar.onPinButton()"/>
+          <toolbarbutton id="menu-button" class="appbar-primary" oncommand="Appbar.onMenuButton(event)"/>
+        </toolbar>
+      </vbox>
     </appbar>
 
     <vbox id="panel-container" hidden="true" class="window-width window-height meta" observes="bcast_windowState">
@@ -322,16 +315,13 @@
 
       <deck id="panel-items" selectedIndex="0" flex="1" >
         <scrollbox id="bookmarks-container" flex="1">
-          <richgrid id="bookmarks-list" class="canSnapTiles" seltype="multiple" flex="1"/>
+          <richgrid id="bookmarks-list" noun="bookmark" class="canSnapTiles" seltype="multiple" flex="1"/>
         </scrollbox>
         <scrollbox id="history-container" flex="1">
-          <richgrid id="history-list" class="canSnapTiles" seltype="multiple" flex="1"/>
-        </scrollbox>
-        <scrollbox id="downloads-container" flex="1">
-          <richgrid id="downloads-list" class="canSnapTiles" seltype="single" flex="1"/>
+          <richgrid id="history-list" noun="history" class="canSnapTiles" seltype="multiple" flex="1"/>
         </scrollbox>
         <scrollbox id="remotetabs-container" flex="1">
-          <richgrid id="remotetabs-list" class="canSnapTiles" seltype="single" flex="1"/>
+          <richgrid id="remotetabs-list" noun="tab" class="canSnapTiles" seltype="single" flex="1"/>
         </scrollbox>
         <vbox id="console-container" flex="1">
           <vbox id="console-header" class="panel-list">
@@ -357,14 +347,33 @@
       </deck>
     </vbox>
 
+    <!-- Find bar -->
+    <appbar id="findbar" class="window-width findbar-box" orient="horizontal" pack="start">
+      <textbox id="findbar-textbox" class="search-bar findbar-item" oncommand="FindHelperUI.search(this.value)" oninput="FindHelperUI.updateCommands(this.value);" type="search"/>
+      <button class="findbar-item previous-button" command="cmd_findPrevious"/>
+      <button class="findbar-item next-button" command="cmd_findNext"/>
+      <spacer flex="1"/>
+      <button id="findbar-close" class="findbar-item close-button" command="cmd_findClose"/>
+    </appbar>
+
     <!-- Context button bar -->
     <appbar id="contextappbar">
-      <toolbar id="contextualactions-tray" flex="1">
-        <toolbarbutton id="delete-selected-button" hidden="true" fade="true" oncommand="Appbar.dispatchContextualAction('delete')"/>
-        <toolbarbutton id="restore-selected-button" hidden="true" fade="true" oncommand="Appbar.dispatchContextualAction('restore')"/>
-        <toolbarbutton id="pin-selected-button" hidden="true" fade="true" oncommand="Appbar.dispatchContextualAction('pin')"/>
-        <toolbarbutton id="unpin-selected-button" hidden="true" fade="true" oncommand="Appbar.dispatchContextualAction('unpin')"/>
-        <toolbarbutton id="clear-selected-button" hidden="true" fade="true" oncommand="Appbar.dispatchContextualAction('clear')"/>
+      <toolbar id="contextualactions-tray" labelled="true" flex="1">
+        <toolbarbutton id="delete-selected-button" class="appbar-secondary"
+                       modifies-noun="true" hidden="true" fade="true"
+                       oncommand="Appbar.dispatchContextualAction('delete')"/>
+        <toolbarbutton id="restore-selected-button" class="appbar-secondary"
+                       modifies-noun="true" hidden="true" fade="true"
+                       oncommand="Appbar.dispatchContextualAction('restore')"/>
+        <toolbarbutton id="pin-selected-button" class="appbar-secondary"
+                       modifies-noun="true" hidden="true" fade="true"
+                       oncommand="Appbar.dispatchContextualAction('pin')"/>
+        <toolbarbutton id="unpin-selected-button" class="appbar-secondary"
+                       modifies-noun="true" hidden="true" fade="true"
+                       oncommand="Appbar.dispatchContextualAction('unpin')"/>
+        <toolbarbutton id="clear-selected-button" class="appbar-secondary"
+                       hidden="true" fade="true"
+                       oncommand="Appbar.dispatchContextualAction('clear')"/>
       </toolbar>
     </appbar>
 
@@ -671,6 +680,9 @@
       <setting pref="signon.rememberSignons" title="&optionsHeader.privacy.passwords.label;" type="bool"/>
       <settings id="prefs-reporting" label="&optionsHeader.reporting.title;">
         <setting pref="app.crashreporter.autosubmit" type="bool" title="&optionsHeader.reporting.crashes.label;" oncommand="BrowserUI.crashReportingPrefChanged(this.value);"/>
+      </settings>
+      <settings id="prefs-telemetry" label="&optionsHeader.telemetry.title;">
+        <setting pref="toolkit.telemetry.enabled" type="bool" title="&optionsHeader.telemetry.label;" oncommand="FlyoutPanelsUI.PrefsFlyout.onTelemetryPreferenceChanged(this.value);"/>
       </settings>
       <settings id="prefs-dnt" label="&doNotTrack.title;">
         <description>&doNotTrack.desc;</description>

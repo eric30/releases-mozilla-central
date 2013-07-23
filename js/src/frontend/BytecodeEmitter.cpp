@@ -38,7 +38,6 @@
 
 #include "frontend/ParseMaps-inl.h"
 #include "frontend/ParseNode-inl.h"
-#include "frontend/SharedContext-inl.h"
 
 using namespace js;
 using namespace js::gc;
@@ -2047,11 +2046,6 @@ EmitElemOperands(ExclusiveContext *cx, ParseNode *pn, JSOp op, BytecodeEmitter *
         right = pn->pn_right;
     }
 
-    if (op == JSOP_GETELEM && left->isKind(PNK_NAME) && right->isKind(PNK_NUMBER)) {
-        if (!BindNameToSlot(cx, bce, left))
-            return false;
-    }
-
     if (!EmitTree(cx, bce, left))
         return false;
 
@@ -2732,65 +2726,90 @@ EmitDestructuringLHS(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn, 
             if (Emit1(cx, bce, JSOP_POP) < 0)
                 return false;
         }
+    } else if (emitOption == PushInitialValues) {
+        // The lhs is a simple name so the to-be-destructured value is
+        // its initial value and there is nothing to do.
+        JS_ASSERT(pn->getOp() == JSOP_GETLOCAL);
+        JS_ASSERT(pn->pn_dflags & PND_BOUND);
     } else {
-        if (emitOption == PushInitialValues) {
-            /*
-             * The lhs is a simple name so the to-be-destructured value is
-             * its initial value and there is nothing to do.
-             */
-            JS_ASSERT(pn->getOp() == JSOP_GETLOCAL);
-            JS_ASSERT(pn->pn_dflags & PND_BOUND);
-            return true;
-        }
+        // All paths below must pop after assigning to the lhs.
 
-        /* All paths below must pop after assigning to the lhs. */
-
-        if (pn->isKind(PNK_NAME)) {
+        switch (pn->getKind()) {
+          case PNK_NAME:
             if (!BindNameToSlot(cx, bce, pn))
                 return false;
 
-            /* Allow 'const [x,y] = o', make 'const x,y; [x,y] = o' a nop. */
+            // Allow 'const [x,y] = o', make 'const x,y; [x,y] = o' a nop.
             if (pn->isConst() && !pn->isDefn())
                 return Emit1(cx, bce, JSOP_POP) >= 0;
-        }
 
-        switch (pn->getOp()) {
-          case JSOP_SETNAME:
-          case JSOP_SETGNAME:
-            /*
-             * NB: pn is a PN_NAME node, not a PN_BINARY.  Nevertheless,
-             * we want to emit JSOP_ENUMELEM, which has format JOF_ELEM.
-             * So here and for JSOP_ENUMCONSTELEM, we use EmitElemOp.
-             */
+            switch (pn->getOp()) {
+              case JSOP_SETNAME:
+              case JSOP_SETGNAME:
+                // This is like ordinary assignment, but with one difference.
+                //
+                // In `a = b`, we first determine a binding for `a` (using
+                // JSOP_BINDNAME or JSOP_BINDGNAME), then we evaluate `b`, then
+                // a JSOP_SETNAME instruction.
+                //
+                // In `[a] = [b]`, per spec, `b` is evaluated first, then we
+                // determine a binding for `a`. Then we need to do assignment--
+                // but the operands are on the stack in the wrong order for
+                // JSOP_SETPROP, so we use JSOP_ENUMELEM instead.
+                //
+                // EmitElemOp ordinarily works with PNK_ELEM nodes, naturally,
+                // but it has special code to handle PNK_NAME nodes in this one
+                // case.
+                if (!EmitElemOp(cx, pn, JSOP_ENUMELEM, bce))
+                    return false;
+                break;
+
+              case JSOP_SETCONST:
+                // As above.
+                if (!EmitElemOp(cx, pn, JSOP_ENUMCONSTELEM, bce))
+                    return false;
+                break;
+
+              case JSOP_SETLOCAL:
+              case JSOP_SETARG:
+                if (!EmitVarOp(cx, pn, pn->getOp(), bce))
+                    return false;
+                if (Emit1(cx, bce, JSOP_POP) < 0)
+                    return false;
+                break;
+
+              default:
+                MOZ_ASSUME_UNREACHABLE("EmitDestructuringLHS: bad name op");
+            }
+            break;
+
+          case PNK_DOT:
+          case PNK_ELEM:
+            // See the (PNK_NAME, JSOP_SETNAME) case above.
+            //
+            // In `a.x = b`, `a` is evaluated first, then `b`, then a
+            // JSOP_SETPROP instruction.
+            //
+            // In `[a.x] = [b]`, per spec, `b` is evaluated before `a`. Then we
+            // need a property set -- but the operands are on the stack in the
+            // wrong order for JSOP_SETPROP, so we use JSOP_ENUMELEM instead.
+            //
+            // EmitElemOp has special code to handle PNK_DOT nodes in this one
+            // case.
             if (!EmitElemOp(cx, pn, JSOP_ENUMELEM, bce))
                 return false;
             break;
 
-          case JSOP_SETCONST:
-            if (!EmitElemOp(cx, pn, JSOP_ENUMCONSTELEM, bce))
-                return false;
-            break;
-
-          case JSOP_SETLOCAL:
-          case JSOP_SETARG:
-            if (!EmitVarOp(cx, pn, pn->getOp(), bce))
-                return false;
-            if (Emit1(cx, bce, JSOP_POP) < 0)
-                return false;
-            break;
-
-          case JSOP_CALL:
-          case JSOP_EVAL:
-          case JSOP_FUNCALL:
-          case JSOP_FUNAPPLY:
+          case PNK_CALL:
             JS_ASSERT(pn->pn_xflags & PNX_SETCALL);
             if (!EmitTree(cx, bce, pn))
                 return false;
 
-            /*
-             * We just emitted JSOP_SETCALL which will always throw.
-             * Pop the call return value and the RHS.
-             */
+            // Pop the call return value and the RHS, presumably for the
+            // benefit of bytecode analysis. (The interpreter will never reach
+            // these instructions since we just emitted JSOP_SETCALL, which
+            // always throws. It's possible no analyses actually depend on this
+            // either.)
             if (Emit1(cx, bce, JSOP_POP) < 0)
                 return false;
             if (Emit1(cx, bce, JSOP_POP) < 0)
@@ -2798,16 +2817,7 @@ EmitDestructuringLHS(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn, 
             break;
 
           default:
-          {
-            if (!EmitTree(cx, bce, pn))
-                return false;
-            if (!EmitElemOpBase(cx, bce, JSOP_ENUMELEM))
-                return false;
-            break;
-          }
-
-          case JSOP_ENUMELEM:
-            JS_ASSERT(0);
+            MOZ_ASSUME_UNREACHABLE("EmitDestructuringLHS: bad lhs kind");
         }
     }
 
@@ -3534,7 +3544,7 @@ ParseNode::getConstantValue(ExclusiveContext *cx, bool strictChecks, MutableHand
         JS_ASSERT(isOp(JSOP_NEWINIT) && !(pn_xflags & PNX_NONCONST));
 
         gc::AllocKind kind = GuessObjectGCKind(pn_count);
-        RootedObject obj(cx, NewBuiltinClassInstance(cx, &ObjectClass, kind, MaybeSingletonObject));
+        RootedObject obj(cx, NewBuiltinClassInstance(cx, &JSObject::class_, kind, MaybeSingletonObject));
         if (!obj)
             return false;
 
@@ -4451,12 +4461,10 @@ EmitFor(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn, ptrdiff_t top
 static JS_NEVER_INLINE bool
 EmitFunc(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn)
 {
+    cx->maybePause();
+
     FunctionBox *funbox = pn->pn_funbox;
     RootedFunction fun(cx, funbox->function());
-    if (fun->isNative()) {
-        JS_ASSERT(IsAsmJSModuleNative(fun->native()));
-        return true;
-    }
     JS_ASSERT_IF(fun->isInterpretedLazy(), fun->lazyScript());
 
     /*
@@ -4479,73 +4487,44 @@ EmitFunc(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn)
      * case, if the lambda runs multiple times then CloneFunctionObject will
      * make a deep clone of its contents.
      */
-    bool singleton =
-        cx->isJSContext() &&
-        cx->asJSContext()->typeInferenceEnabled() &&
-        bce->script->compileAndGo &&
-        (bce->checkSingletonContext() ||
-         (!bce->isInLoop() &&
-          bce->parent &&
-          bce->parent->emittingRunOnceLambda));
-    if (!JSFunction::setTypeForScriptedFunction(cx, fun, singleton))
-        return false;
+    if (fun->isInterpreted()) {
+        bool singleton =
+            cx->isJSContext() &&
+            cx->asJSContext()->typeInferenceEnabled() &&
+            bce->script->compileAndGo &&
+            fun->isInterpreted() &&
+            (bce->checkSingletonContext() ||
+             (!bce->isInLoop() &&
+              bce->parent &&
+              bce->parent->emittingRunOnceLambda));
+        if (!JSFunction::setTypeForScriptedFunction(cx, fun, singleton))
+            return false;
 
-    if (fun->isInterpretedLazy()) {
-        if (!fun->lazyScript()->sourceObject()) {
-            JSObject *scope = bce->blockChain;
-            if (!scope && bce->sc->isFunctionBox())
-                scope = bce->sc->asFunctionBox()->function();
-            fun->lazyScript()->setParent(scope, bce->script->sourceObject(), bce->script->originPrincipals);
-        }
-    } else {
-        SharedContext *outersc = bce->sc;
-
-        if (outersc->isFunctionBox() && outersc->asFunctionBox()->mightAliasLocals())
-            funbox->setMightAliasLocals();      // inherit mightAliasLocals from parent
-        JS_ASSERT_IF(outersc->strict, funbox->strict);
-
-        // Inherit most things (principals, version, etc) from the parent.
-        Rooted<JSScript*> parent(cx, bce->script);
-        CompileOptions options(bce->parser->options());
-        options.setPrincipals(parent->principals())
-               .setOriginPrincipals(parent->originPrincipals)
-               .setCompileAndGo(parent->compileAndGo)
-               .setSelfHostingMode(parent->selfHosted)
-               .setNoScriptRval(false)
-               .setForEval(false)
-               .setVersion(parent->getVersion());
-
-        bool generateBytecode = true;
-#ifdef JS_ION
-        if (funbox->useAsm) {
-            if (!cx->isJSContext()) {
-                bce->parser->tokenStream.reportError(JSMSG_SYNTAX_ERROR);
-                return false;
+        if (fun->isInterpretedLazy()) {
+            if (!fun->lazyScript()->sourceObject()) {
+                JSObject *scope = bce->blockChain;
+                if (!scope && bce->sc->isFunctionBox())
+                    scope = bce->sc->asFunctionBox()->function();
+                fun->lazyScript()->setParent(scope, bce->script->sourceObject(), bce->script->originPrincipals);
             }
+        } else {
+            SharedContext *outersc = bce->sc;
 
-            RootedFunction moduleFun(cx);
+            if (outersc->isFunctionBox() && outersc->asFunctionBox()->mightAliasLocals())
+                funbox->setMightAliasLocals();      // inherit mightAliasLocals from parent
+            JS_ASSERT_IF(outersc->strict, funbox->strict);
 
-            // In a function like this:
-            //
-            //   function f() { "use asm"; ... }
-            //
-            // funbox->asmStart points to the '"', and funbox->bufEnd points
-            // one past the final '}'.  We need to exclude that final '}',
-            // so we use |funbox->bufEnd - 1| below.
-            //
-            if (!CompileAsmJS(cx->asJSContext(), *bce->tokenStream(), pn, options,
-                              bce->script->scriptSource(), funbox->asmStart, funbox->bufEnd - 1,
-                              &moduleFun))
-                return false;
+            // Inherit most things (principals, version, etc) from the parent.
+            Rooted<JSScript*> parent(cx, bce->script);
+            CompileOptions options(bce->parser->options());
+            options.setPrincipals(parent->principals())
+                   .setOriginPrincipals(parent->originPrincipals)
+                   .setCompileAndGo(parent->compileAndGo)
+                   .setSelfHostingMode(parent->selfHosted)
+                   .setNoScriptRval(false)
+                   .setForEval(false)
+                   .setVersion(parent->getVersion());
 
-            if (moduleFun) {
-                funbox->object = moduleFun;
-                generateBytecode = false;
-            }
-        }
-#endif
-
-        if (generateBytecode) {
             Rooted<JSObject*> enclosingScope(cx, EnclosingStaticScope(bce));
             Rooted<ScriptSourceObject *> sourceObject(cx, bce->script->sourceObject());
             Rooted<JSScript*> script(cx, JSScript::Create(cx, enclosingScope, false, options,
@@ -4571,6 +4550,8 @@ EmitFunc(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn)
             if (funbox->usesArguments && funbox->usesApply)
                 script->usesArgumentsAndApply = true;
         }
+    } else {
+        JS_ASSERT(IsAsmJSModuleNative(fun->native()));
     }
 
     /* Make the function object a literal in the outer script's pool. */
@@ -5394,7 +5375,7 @@ EmitObject(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn)
     RootedObject obj(cx);
     if (bce->script->compileAndGo) {
         gc::AllocKind kind = GuessObjectGCKind(pn->pn_count);
-        obj = NewBuiltinClassInstance(cx, &ObjectClass, kind);
+        obj = NewBuiltinClassInstance(cx, &JSObject::class_, kind);
         if (!obj)
             return false;
     }
@@ -5684,6 +5665,7 @@ frontend::EmitTree(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn)
             bool restIsDefn = false;
             if (fun->hasRest()) {
                 JS_ASSERT(!bce->sc->asFunctionBox()->argumentsHasLocalBinding());
+
                 // Defaults with a rest parameter need special handling. The
                 // rest parameter needs to be undefined while defaults are being
                 // processed. To do this, we create the rest argument and let it
@@ -5697,6 +5679,7 @@ frontend::EmitTree(ExclusiveContext *cx, BytecodeEmitter *bce, ParseNode *pn)
                 if (Emit1(cx, bce, JSOP_REST) < 0)
                     return false;
                 CheckTypeSet(cx, bce, JSOP_REST);
+
                 // Only set the rest parameter if it's not aliased by a nested
                 // function in the body.
                 if (restIsDefn) {

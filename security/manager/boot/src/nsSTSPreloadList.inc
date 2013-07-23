@@ -8,7 +8,7 @@
 /*****************************************************************************/
 
 #include "mozilla/StandardInteger.h"
-const PRTime gPreloadListExpirationTime = INT64_C(1383992137406000);
+const PRTime gPreloadListExpirationTime = INT64_C(1385202156273000);
 
 class nsSTSPreload
 {
@@ -18,21 +18,24 @@ class nsSTSPreload
 };
 
 static const nsSTSPreload kSTSPreloadList[] = {
+  { "aladdinschools.appspot.com", false },
   { "alpha.irccloud.com", false },
   { "api.intercom.io", false },
   { "app.recurly.com", false },
   { "arivo.com.br", true },
+  { "bank.simple.com", false },
   { "bassh.net", true },
   { "bccx.com", true },
   { "blog.cyveillance.com", true },
   { "blog.linode.com", false },
   { "blog.torproject.org", false },
-  { "blueseed.co", false },
   { "bugzilla.mozilla.org", true },
   { "business.medbank.com.mt", true },
   { "carezone.com", false },
   { "check.torproject.org", false },
+  { "chromiumcodereview.appspot.com", false },
   { "cloudsecurityalliance.org", true },
+  { "codereview.appspot.com", false },
   { "conformal.com", true },
   { "controlcenter.gigahost.dk", true },
   { "crate.io", true },
@@ -69,7 +72,6 @@ static const nsSTSPreload kSTSPreloadList[] = {
   { "logotype.se", true },
   { "lookout.com", false },
   { "luneta.nearbuysystems.com", false },
-  { "makeyourlaws.org", false },
   { "manager.linode.com", false },
   { "mattmccutchen.net", true },
   { "mega.co.nz", false },
@@ -83,10 +85,9 @@ static const nsSTSPreload kSTSPreloadList[] = {
   { "paste.linode.com", false },
   { "pastebin.linode.com", false },
   { "pay.gigahost.dk", true },
-  { "paymill.com", true },
-  { "paymill.de", true },
   { "piratenlogin.de", true },
   { "pixi.me", true },
+  { "rapidresearch.me", true },
   { "riseup.net", true },
   { "roundcube.mayfirst.org", false },
   { "sandbox.mydigipass.com", false },
@@ -123,5 +124,4 @@ static const nsSTSPreload kSTSPreloadList[] = {
   { "www.therapynotes.com", false },
   { "www.torproject.org", false },
   { "www.twitter.com", false },
-  { "zoo24.de", true },
 };

@@ -30,8 +30,6 @@
 #include "vm/StringBuffer.h"
 
 #include "jsatominlines.h"
-#include "jscntxtinlines.h"
-#include "jsstrinlines.h"
 
 #include "vm/ArrayObject-inl.h"
 #include "vm/ArgumentsObject-inl.h"
@@ -45,6 +43,7 @@ using namespace js::types;
 
 using mozilla::Abs;
 using mozilla::ArrayLength;
+using mozilla::CeilingLog2;
 using mozilla::DebugOnly;
 using mozilla::IsNaN;
 using mozilla::PointerRangeSize;
@@ -423,10 +422,8 @@ js::CanonicalizeArrayLengthValue(JSContext *cx, HandleValue v, uint32_t *newLen)
     if (d == *newLen)
         return true;
 
-    if (!cx->isJSContext())
-        return false;
-
-    JS_ReportErrorNumber(cx->asJSContext(), js_GetErrorMessage, NULL, JSMSG_BAD_ARRAY_LENGTH);
+    if (cx->isJSContext())
+        JS_ReportErrorNumber(cx->asJSContext(), js_GetErrorMessage, NULL, JSMSG_BAD_ARRAY_LENGTH);
     return false;
 }
 
@@ -462,6 +459,9 @@ js::ArraySetLength(JSContext *cx, Handle<ArrayObject*> arr, HandleId id, unsigne
     if (!lengthIsWritable) {
         if (newLen == oldLen)
             return true;
+
+        if (!cx->isJSContext())
+            return false;
 
         if (setterIsStrict) {
             return JS_ReportErrorFlagsAndNumber(cx->asJSContext(),
@@ -1302,9 +1302,8 @@ NumDigitsBase10(uint32_t n)
      * Algorithm taken from
      * http://graphics.stanford.edu/~seander/bithacks.html#IntegerLog10
      */
-    uint32_t log2, t;
-    JS_CEILING_LOG2(log2, n);
-    t = log2 * 1233 >> 12;
+    uint32_t log2 = CeilingLog2(n);
+    uint32_t t = log2 * 1233 >> 12;
     return t - (n < powersOf10[t]) + 1;
 }
 

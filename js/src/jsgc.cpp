@@ -65,9 +65,11 @@ using mozilla::Swap;
 #include "gc/Marking.h"
 #include "gc/Memory.h"
 #include "vm/Debugger.h"
+#include "vm/ProxyObject.h"
 #include "vm/Shape.h"
 #include "vm/String.h"
 #include "vm/ForkJoin.h"
+#include "vm/WrapperObject.h"
 #include "ion/IonCode.h"
 #ifdef JS_ION
 # include "ion/BaselineJIT.h"
@@ -77,6 +79,7 @@ using mozilla::Swap;
 #include "jsobjinlines.h"
 
 #include "vm/String-inl.h"
+#include "vm/Runtime-inl.h"
 #include "vm/Stack-inl.h"
 
 #ifdef XP_WIN
@@ -1084,6 +1087,18 @@ js::AddScriptRoot(JSContext *cx, JSScript **rp, const char *name)
     return AddRoot(cx, rp, name, JS_GC_ROOT_SCRIPT_PTR);
 }
 
+extern JS_FRIEND_API(bool)
+js_AddObjectRoot(JSRuntime *rt, JSObject **objp)
+{
+    return AddRoot(rt, objp, NULL, JS_GC_ROOT_OBJECT_PTR);
+}
+
+extern JS_FRIEND_API(void)
+js_RemoveObjectRoot(JSRuntime *rt, JSObject **objp)
+{
+    js_RemoveRoot(rt, objp);
+}
+
 JS_FRIEND_API(void)
 js_RemoveRoot(JSRuntime *rt, void *rp)
 {
@@ -1474,7 +1489,7 @@ RunLastDitchGC(JSContext *cx, JS::Zone *zone, AllocKind thingKind)
     JSRuntime *rt = cx->runtime();
 
     /* The last ditch GC preserves all atoms. */
-    AutoKeepAtoms keep(rt);
+    AutoKeepAtoms keepAtoms(cx->perThreadData);
     GC(rt, GC_NORMAL, JS::gcreason::LAST_DITCH);
 
     /*
@@ -2581,7 +2596,10 @@ PurgeRuntime(JSRuntime *rt)
     rt->sourceDataCache.purge();
     rt->evalCache.clear();
 
-    if (!rt->activeCompilations)
+    bool activeCompilations = false;
+    for (ThreadDataIter iter(rt); !iter.done(); iter.next())
+        activeCompilations |= iter->activeCompilations;
+    if (!activeCompilations)
         rt->parseMapPool.purgeAll();
 }
 
@@ -2753,7 +2771,12 @@ BeginMarkPhase(JSRuntime *rt)
      * to atoms that we would miss.
      */
     Zone *atomsZone = rt->atomsCompartment->zone();
-    if (atomsZone->isGCScheduled() && rt->gcIsFull && !rt->gcKeepAtoms) {
+
+    bool keepAtoms = false;
+    for (ThreadDataIter iter(rt); !iter.done(); iter.next())
+        keepAtoms |= iter->gcKeepAtoms;
+
+    if (atomsZone->isGCScheduled() && rt->gcIsFull && !keepAtoms) {
         JS_ASSERT(!atomsZone->isCollecting());
         atomsZone->setGCState(Zone::Mark);
     }
@@ -3362,23 +3385,22 @@ static bool
 IsGrayListObject(JSObject *obj)
 {
     JS_ASSERT(obj);
-    return IsCrossCompartmentWrapper(obj) && !IsDeadProxyObject(obj);
+    return obj->is<CrossCompartmentWrapperObject>() && !IsDeadProxyObject(obj);
 }
 
-const unsigned JSSLOT_GC_GRAY_LINK = JSSLOT_PROXY_EXTRA + 1;
-
-static unsigned
-GrayLinkSlot(JSObject *obj)
+/* static */ unsigned
+ProxyObject::grayLinkSlot(JSObject *obj)
 {
     JS_ASSERT(IsGrayListObject(obj));
-    return JSSLOT_GC_GRAY_LINK;
+    return ProxyObject::EXTRA_SLOT + 1;
 }
 
 #ifdef DEBUG
 static void
 AssertNotOnGrayList(JSObject *obj)
 {
-    JS_ASSERT_IF(IsGrayListObject(obj), obj->getReservedSlot(GrayLinkSlot(obj)).isUndefined());
+    JS_ASSERT_IF(IsGrayListObject(obj),
+                 obj->getReservedSlot(ProxyObject::grayLinkSlot(obj)).isUndefined());
 }
 #endif
 
@@ -3386,13 +3408,13 @@ static JSObject *
 CrossCompartmentPointerReferent(JSObject *obj)
 {
     JS_ASSERT(IsGrayListObject(obj));
-    return &GetProxyPrivate(obj).toObject();
+    return &obj->as<ProxyObject>().private_().toObject();
 }
 
 static JSObject *
 NextIncomingCrossCompartmentPointer(JSObject *prev, bool unlink)
 {
-    unsigned slot = GrayLinkSlot(prev);
+    unsigned slot = ProxyObject::grayLinkSlot(prev);
     JSObject *next = prev->getReservedSlot(slot).toObjectOrNull();
     JS_ASSERT_IF(next, IsGrayListObject(next));
 
@@ -3408,7 +3430,7 @@ js::DelayCrossCompartmentGrayMarking(JSObject *src)
     JS_ASSERT(IsGrayListObject(src));
 
     /* Called from MarkCrossCompartmentXXX functions. */
-    unsigned slot = GrayLinkSlot(src);
+    unsigned slot = ProxyObject::grayLinkSlot(src);
     JSObject *dest = CrossCompartmentPointerReferent(src);
     JSCompartment *comp = dest->compartment();
 
@@ -3486,7 +3508,7 @@ RemoveFromGrayList(JSObject *wrapper)
     if (!IsGrayListObject(wrapper))
         return false;
 
-    unsigned slot = GrayLinkSlot(wrapper);
+    unsigned slot = ProxyObject::grayLinkSlot(wrapper);
     if (wrapper->getReservedSlot(slot).isUndefined())
         return false;  /* Not on our list. */
 
@@ -3501,7 +3523,7 @@ RemoveFromGrayList(JSObject *wrapper)
     }
 
     while (obj) {
-        unsigned slot = GrayLinkSlot(obj);
+        unsigned slot = ProxyObject::grayLinkSlot(obj);
         JSObject *next = obj->getReservedSlot(slot).toObjectOrNull();
         if (next == wrapper) {
             obj->setCrossCompartmentSlot(slot, ObjectOrNullValue(tail));
@@ -3997,7 +4019,8 @@ class AutoGCSession : AutoTraceSession {
 /* Start a new heap session. */
 AutoTraceSession::AutoTraceSession(JSRuntime *rt, js::HeapState heapState)
   : runtime(rt),
-    prevState(rt->heapState)
+    prevState(rt->heapState),
+    pause(rt)
 {
     JS_ASSERT(!rt->noGCOrAllocationCheck);
     JS_ASSERT(!rt->isHeapBusy());
@@ -4328,7 +4351,11 @@ gc::IsIncrementalGCSafe(JSRuntime *rt)
 {
     JS_ASSERT(!rt->mainThread.suppressGC);
 
-    if (rt->gcKeepAtoms)
+    bool keepAtoms = false;
+    for (ThreadDataIter iter(rt); !iter.done(); iter.next())
+        keepAtoms |= iter->gcKeepAtoms;
+
+    if (keepAtoms)
         return IncrementalSafety::Unsafe("gcKeepAtoms set");
 
     if (!rt->gcIncrementalEnabled)
@@ -4651,6 +4678,11 @@ void
 js::MinorGC(JSRuntime *rt, JS::gcreason::Reason reason)
 {
 #ifdef JSGC_GENERATIONAL
+#if JS_TRACE_LOGGING
+    AutoTraceLog logger(TraceLogging::defaultLogger(),
+                        TraceLogging::MINOR_GC_START,
+                        TraceLogging::MINOR_GC_STOP);
+#endif
     rt->gcNursery.collect(rt, reason);
 #endif
 }
@@ -4843,6 +4875,10 @@ js::ReleaseAllJITCode(FreeOp *fop)
             ion::FinishDiscardBaselineScript(fop, script);
         }
     }
+
+    /* Sweep now invalidated compiler outputs from each compartment. */
+    for (CompartmentsIter comp(fop->runtime()); !comp.done(); comp.next())
+        comp->types.sweepCompilerOutputs(fop, false);
 #endif
 }
 

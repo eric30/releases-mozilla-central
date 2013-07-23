@@ -12,6 +12,7 @@
 #include "jscntxt.h"
 #include "jsfriendapi.h"
 #include "jsobj.h"
+#include "jswrapper.h"
 
 #include "vm/GlobalObject.h"
 #include "vm/WeakMapObject.h"
@@ -258,7 +259,8 @@ TryPreserveReflector(JSContext *cx, HandleObject obj)
 {
     if (obj->getClass()->ext.isWrappedNative ||
         (obj->getClass()->flags & JSCLASS_IS_DOMJSCLASS) ||
-        (obj->isProxy() && GetProxyHandler(obj)->family() == GetDOMProxyHandlerFamily()))
+        (obj->is<ProxyObject>() &&
+         obj->as<ProxyObject>().handler()->family() == GetDOMProxyHandlerFamily()))
     {
         JS_ASSERT(cx->runtime()->preserveWrapperCallback);
         if (!cx->runtime()->preserveWrapperCallback(cx, obj)) {

@@ -91,6 +91,8 @@ static const char *sExtensionNames[] = {
     "GL_APPLE_vertex_array_object",
     "GL_ARB_draw_buffers",
     "GL_EXT_draw_buffers",
+    "GL_EXT_gpu_shader4",
+    "GL_EXT_blend_minmax",
     nullptr
 };
 
@@ -625,24 +627,11 @@ GLContext::InitWithPrefix(const char *prefix, bool trygl)
 #ifdef XP_MACOSX
         if (mWorkAroundDriverBugs) {
             if (mVendor == VendorIntel) {
-                SInt32 major, minor;
-                OSErr err1 = ::Gestalt(gestaltSystemVersionMajor, &major);
-                OSErr err2 = ::Gestalt(gestaltSystemVersionMinor, &minor);
-
-                // For 2D textures, see bug 737182 for the original restriction to 4K and
-                // see bug 807096 for why we further restricted it to 2K on < 10.8
-                // For good measure, we align renderbuffers on what we do for 2D textures
-                if (err1 != noErr || err2 != noErr ||
-                    major < 10 || (major == 10 && minor < 8)) {
-                    mMaxTextureSize        = std::min(mMaxTextureSize, 2048);
-                    mMaxRenderbufferSize   = std::min(mMaxRenderbufferSize, 2048);
-                }
-                else {
-                    mMaxTextureSize        = std::min(mMaxTextureSize, 4096);
-                    mMaxRenderbufferSize   = std::min(mMaxRenderbufferSize, 4096);
-                }
-                // For cube map textures, see bug 684882.
+                // see bug 737182 for 2D textures, bug 684882 for cube map textures.
+                mMaxTextureSize        = std::min(mMaxTextureSize,        4096);
                 mMaxCubeMapTextureSize = std::min(mMaxCubeMapTextureSize, 512);
+                // for good measure, we align renderbuffers on what we do for 2D textures
+                mMaxRenderbufferSize   = std::min(mMaxRenderbufferSize,   4096);
                 mNeedsTextureSizeChecks = true;
             } else if (mVendor == VendorNVIDIA) {
                 SInt32 major, minor;
@@ -651,9 +640,17 @@ GLContext::InitWithPrefix(const char *prefix, bool trygl)
 
                 if (err1 != noErr || err2 != noErr ||
                     major < 10 || (major == 10 && minor < 8)) {
+                    // See bug 877949.
                     mMaxTextureSize = std::min(mMaxTextureSize, 4096);
-                    mMaxRenderbufferSize   = std::min(mMaxRenderbufferSize, 4096);
+                    mMaxRenderbufferSize = std::min(mMaxRenderbufferSize, 4096);
                 }
+                else {
+                    // See bug 879656.  8192 fails, 8191 works.
+                    mMaxTextureSize = std::min(mMaxTextureSize, 8191);
+                    mMaxRenderbufferSize = std::min(mMaxRenderbufferSize, 8191);
+                }
+                // Part of the bug 879656, but it also doesn't hurt the 877949
+                mNeedsTextureSizeChecks = true;
             }
         }
 #endif
@@ -1170,7 +1167,7 @@ GLContext::IsFramebufferComplete(GLuint fb, GLenum* pStatus)
 void
 GLContext::AttachBuffersToFB(GLuint colorTex, GLuint colorRB,
                              GLuint depthRB, GLuint stencilRB,
-                             GLuint fb)
+                             GLuint fb, GLenum target)
 {
     MOZ_ASSERT(fb);
     MOZ_ASSERT( !(colorTex && colorRB) );
@@ -1180,9 +1177,11 @@ GLContext::AttachBuffersToFB(GLuint colorTex, GLuint colorRB,
 
     if (colorTex) {
         MOZ_ASSERT(fIsTexture(colorTex));
+        MOZ_ASSERT(target == LOCAL_GL_TEXTURE_2D ||
+                   target == LOCAL_GL_TEXTURE_RECTANGLE_ARB);
         fFramebufferTexture2D(LOCAL_GL_FRAMEBUFFER,
                               LOCAL_GL_COLOR_ATTACHMENT0,
-                              LOCAL_GL_TEXTURE_2D,
+                              target,
                               colorTex,
                               0);
     } else if (colorRB) {

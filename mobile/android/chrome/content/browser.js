@@ -204,6 +204,9 @@ XPCOMUtils.defineLazyModuleGetter(this, "Rect",
                                   "resource://gre/modules/Geometry.jsm");
 
 function resolveGeckoURI(aURI) {
+  if (!aURI)
+    throw "Can't resolve an empty uri";
+
   if (aURI.startsWith("chrome://")) {
     let registry = Cc['@mozilla.org/chrome/chrome-registry;1'].getService(Ci["nsIChromeRegistry"]);
     return registry.convertChromeURL(Services.io.newURI(aURI, null, null)).spec;
@@ -232,6 +235,10 @@ var Strings = {};
     return Services.strings.createBundle(bundle);
   });
 });
+
+const kFormHelperModeDisabled = 0;
+const kFormHelperModeEnabled = 1;
+const kFormHelperModeDynamic = 2;   // disabled on tablets
 
 var BrowserApp = {
   _tabs: [],
@@ -728,7 +735,7 @@ var BrowserApp = {
       if (tabs[i].browser.contentWindow == aWindow)
         return tabs[i];
     }
-    return null; 
+    return null;
   },
 
   getBrowserForWindow: function getBrowserForWindow(aWindow) {
@@ -987,7 +994,7 @@ var BrowserApp = {
   getPreferences: function getPreferences(aPrefsRequest, aListen) {
     let prefs = [];
 
-    for each (let prefName in aPrefsRequest.preferences) {
+    for (let prefName of aPrefsRequest.preferences) {
       let pref = {
         name: prefName,
         type: "",
@@ -1294,12 +1301,19 @@ var BrowserApp = {
   },
 
   scrollToFocusedInput: function(aBrowser, aAllowZoom = true) {
+    let formHelperMode = Services.prefs.getIntPref("formhelper.mode");
+    if (formHelperMode == kFormHelperModeDisabled)
+      return;
+
     let focused = this.getFocusedInput(aBrowser);
 
     if (focused) {
+      let shouldZoom = Services.prefs.getBoolPref("formhelper.autozoom");
+      if (formHelperMode == kFormHelperModeDynamic && this.isTablet)
+        shouldZoom = false;
        // _zoomToElement will handle not sending any message if this input is already mostly filling the screen
       BrowserEventHandler._zoomToElement(focused, -1, false,
-          aAllowZoom && !this.isTablet && !ViewportHandler.getViewportMetadata(aBrowser.contentWindow).isSpecified);
+          aAllowZoom && shouldZoom && !ViewportHandler.getViewportMetadata(aBrowser.contentWindow).isSpecified);
     }
   },
 
@@ -1539,13 +1553,21 @@ var BrowserApp = {
 var NativeWindow = {
   init: function() {
     Services.obs.addObserver(this, "Menu:Clicked", false);
+    Services.obs.addObserver(this, "PageActions:Clicked", false);
+    Services.obs.addObserver(this, "PageActions:LongClicked", false);
     Services.obs.addObserver(this, "Doorhanger:Reply", false);
+    Services.obs.addObserver(this, "Toast:Click", false);
+    Services.obs.addObserver(this, "Toast:Hidden", false);
     this.contextmenus.init();
   },
 
   uninit: function() {
     Services.obs.removeObserver(this, "Menu:Clicked");
+    Services.obs.removeObserver(this, "PageActions:Clicked");
+    Services.obs.removeObserver(this, "PageActions:LongClicked");
     Services.obs.removeObserver(this, "Doorhanger:Reply");
+    Services.obs.removeObserver(this, "Toast:Click", false);
+    Services.obs.removeObserver(this, "Toast:Hidden", false);
     this.contextmenus.uninit();
   },
 
@@ -1565,12 +1587,55 @@ var NativeWindow = {
   },
 
   toast: {
-    show: function(aMessage, aDuration) {
-      sendMessageToJava({
+    _callbacks: {},
+    show: function(aMessage, aDuration, aOptions) {
+      let msg = {
         type: "Toast:Show",
         message: aMessage,
         duration: aDuration
+      };
+
+      if (aOptions && aOptions.button) {
+        msg.button = {
+          label: aOptions.button.label,
+          id: uuidgen.generateUUID().toString(),
+          // If the caller specified a button, make sure we convert any chrome urls
+          // to jar:jar urls so that the frontend can show them
+          icon: aOptions.button.icon ? resolveGeckoURI(aOptions.button.icon) : null,
+        };
+        this._callbacks[msg.button.id] = aOptions.button.callback;
+      }
+
+      sendMessageToJava(msg);
+    }
+  },
+
+  pageactions: {
+    _items: { },
+    add: function(aOptions) {
+      let id = uuidgen.generateUUID().toString();
+      sendMessageToJava({
+        gecko: {
+          type: "PageActions:Add",
+          id: id,
+          title: aOptions.title,
+          icon: aOptions.icon,
+        }
       });
+      this._items[id] = {
+        clickCallback: aOptions.clickCallback,
+        longClickCallback: aOptions.longClickCallback
+      };
+      return id;
+    },
+    remove: function(id) {
+      sendMessageToJava({
+        gecko: {
+          type: "PageActions:Remove",
+          id: id
+        }
+      });
+      delete this._items[id];
     }
   },
 
@@ -1671,6 +1736,20 @@ var NativeWindow = {
     if (aTopic == "Menu:Clicked") {
       if (this.menu._callbacks[aData])
         this.menu._callbacks[aData]();
+    } else if (aTopic == "PageActions:Clicked") {
+        if (this.pageactions._items[aData].clickCallback)
+          this.pageactions._items[aData].clickCallback();
+    } else if (aTopic == "PageActions:LongClicked") {
+        if (this.pageactions._items[aData].longClickCallback)
+          this.pageactions._items[aData].longClickCallback();
+    } else if (aTopic == "Toast:Click") {
+      if (this.toast._callbacks[aData]) {
+        this.toast._callbacks[aData]();
+        delete this.toast._callbacks[aData];
+      }
+    } else if (aTopic == "Toast:Hidden") {
+      if (this.toast._callbacks[aData])
+        delete this.toast._callbacks[aData];
     } else if (aTopic == "Doorhanger:Reply") {
       let data = JSON.parse(aData);
       let reply_id = data["callback"];
@@ -1969,7 +2048,8 @@ var NativeWindow = {
         }
 
         // then check for any context menu items registered in the ui
-         for each (let item in this.items) {
+        for (let itemId of Object.keys(this.items)) {
+          let item = this.items[itemId];
           if (!this._getMenuItemForId(item.id) && item.matches(element, aX, aY)) {
             this.menuitems.push(item);
           }
@@ -2442,6 +2522,10 @@ nsBrowserAccess.prototype = {
 
   isTabContentWindow: function(aWindow) {
     return BrowserApp.getBrowserForWindow(aWindow) != null;
+  },
+
+  get contentWindow() {
+    return BrowserApp.selectedBrowser.contentWindow;
   }
 };
 
@@ -2469,11 +2553,13 @@ function Tab(aURL, aParams) {
   this._fixedMarginTop = 0;
   this._fixedMarginRight = 0;
   this._fixedMarginBottom = 0;
+  this._readerEnabled = false;
+  this._readerActive = false;
   this.userScrollPos = { x: 0, y: 0 };
   this.viewportExcludesHorizontalMargins = true;
   this.viewportExcludesVerticalMargins = true;
   this.viewportMeasureCallback = null;
-  this.lastPageSizeAfterViewportChange = { width: 0, height: 0 };
+  this.lastPageSizeUsedForViewportChange = { width: 0, height: 0 };
   this.contentDocumentIsDisplayed = true;
   this.pluginDoorhangerTimeout = null;
   this.shouldShowPluginDoorhanger = true;
@@ -2763,6 +2849,7 @@ Tab.prototype = {
       this.browser.setAttribute("type", "content-primary");
       this.browser.focus();
       this.browser.docShellIsActive = true;
+      Reader.updatePageAction(this);
     } else {
       this.browser.setAttribute("type", "content-targetable");
       this.browser.docShellIsActive = false;
@@ -3159,67 +3246,72 @@ Tab.prototype = {
     return viewport;
   },
 
-  sendViewportUpdate: function(aPageSizeUpdate, aAfterViewportSizeChange) {
+  sendViewportUpdate: function(aPageSizeUpdate) {
     let viewport = this.getViewport();
     let displayPort = getBridge().getDisplayPort(aPageSizeUpdate, BrowserApp.isBrowserContentDocumentDisplayed(), this.id, viewport);
     if (displayPort != null)
       this.setDisplayPort(displayPort);
+  },
 
-    if (aAfterViewportSizeChange) {
-      // Store the page size that was used to calculate the viewport so that we
-      // can verify it's changed when we consider remeasuring.
-      this.lastPageSizeAfterViewportChange =
-        { width: viewport.pageRight - viewport.pageLeft,
-          height: viewport.pageBottom - viewport.pageTop };
-    } else if (aPageSizeUpdate &&
-               (gViewportMargins.top > 0 || gViewportMargins.right > 0
-                  || gViewportMargins.bottom > 0 || gViewportMargins.left > 0)) {
-      // If the page size has changed so that it might or might not fit on the
-      // screen with the margins included, run updateViewportSize to resize the
-      // browser accordingly.
-      // A page will receive the smaller viewport when its page size fits
-      // within the screen size, so remeasure when the page size remains within
-      // the threshold of screen + margins, in case it's sizing itself relative
-      // to the viewport.
-      let hasHorizontalMargins = gViewportMargins.left > 0 || gViewportMargins.right > 0;
-      let hasVerticalMargins = gViewportMargins.top > 0 || gViewportMargins.bottom > 0;
-      let pageHeightGreaterThanScreenHeight, pageWidthGreaterThanScreenWidth;
+  updateViewportForPageSize: function() {
+    let hasHorizontalMargins = gViewportMargins.left != 0 || gViewportMargins.right != 0;
+    let hasVerticalMargins = gViewportMargins.top != 0 || gViewportMargins.bottom != 0;
 
-      if (hasHorizontalMargins) {
-        pageWidthGreaterThanScreenWidth =
-            Math.round(viewport.pageRight - viewport.pageLeft)
-            > gScreenWidth + gViewportMargins.left + gViewportMargins.right;
+    if (!hasHorizontalMargins && !hasVerticalMargins) {
+      // If there are no margins, then we don't need to do any remeasuring
+      return;
+    }
+
+    // If the page size has changed so that it might or might not fit on the
+    // screen with the margins included, run updateViewportSize to resize the
+    // browser accordingly.
+    // A page will receive the smaller viewport when its page size fits
+    // within the screen size, so remeasure when the page size remains within
+    // the threshold of screen + margins, in case it's sizing itself relative
+    // to the viewport.
+    let viewport = this.getViewport();
+    let pageWidth = viewport.pageRight - viewport.pageLeft;
+    let pageHeight = viewport.pageBottom - viewport.pageTop;
+    let remeasureNeeded = false;
+
+    if (hasHorizontalMargins) {
+      let screenWidth = gScreenWidth + gViewportMargins.left + gViewportMargins.right;
+      let viewportShouldExcludeHorizontalMargins = (Math.round(pageWidth) <= screenWidth);
+      if (viewportShouldExcludeHorizontalMargins != this.viewportExcludesHorizontalMargins) {
+        remeasureNeeded = true;
       }
-      if (hasVerticalMargins) {
-        pageHeightGreaterThanScreenHeight =
-            Math.round(viewport.pageBottom - viewport.pageTop)
-            > gScreenHeight + gViewportMargins.top + gViewportMargins.bottom;
+    }
+    if (hasVerticalMargins) {
+      let screenHeight = gScreenHeight + gViewportMargins.top + gViewportMargins.bottom;
+      let viewportShouldExcludeVerticalMargins = (Math.round(pageHeight) <= screenHeight);
+      if (viewportShouldExcludeVerticalMargins != this.viewportExcludesVerticalMargins) {
+        remeasureNeeded = true;
       }
+    }
 
-      if ((hasHorizontalMargins
-           && (pageWidthGreaterThanScreenWidth != this.viewportExcludesHorizontalMargins)) ||
-          (hasVerticalMargins
-           && (pageHeightGreaterThanScreenHeight != this.viewportExcludesVerticalMargins))) {
-        if (!this.viewportMeasureCallback) {
-          this.viewportMeasureCallback = setTimeout(function() {
-            this.viewportMeasureCallback = null;
+    if (remeasureNeeded) {
+      if (!this.viewportMeasureCallback) {
+        this.viewportMeasureCallback = setTimeout(function() {
+          this.viewportMeasureCallback = null;
 
-            let viewport = this.getViewport();
-            if (Math.abs((viewport.pageRight - viewport.pageLeft)
-                           - this.lastPageSizeAfterViewportChange.width) >= 0.5 ||
-                Math.abs((viewport.pageBottom - viewport.pageTop)
-                           - this.lastPageSizeAfterViewportChange.height) >= 0.5) {
-              this.updateViewportSize(gScreenWidth);
-            }
-          }.bind(this), kViewportRemeasureThrottle);
-        }
-      } else if (this.viewportMeasureCallback) {
-        // If the page changed size twice since we last measured the viewport and
-        // the latest size change reveals we don't need to remeasure, cancel any
-        // pending remeasure.
-        clearTimeout(this.viewportMeasureCallback);
-        this.viewportMeasureCallback = null;
+          // Re-fetch the viewport as it may have changed between setting the timeout
+          // and running this callback
+          let viewport = this.getViewport();
+          let pageWidth = viewport.pageRight - viewport.pageLeft;
+          let pageHeight = viewport.pageBottom - viewport.pageTop;
+
+          if (Math.abs(pageWidth - this.lastPageSizeUsedForViewportChange.width) >= 0.5 ||
+              Math.abs(pageHeight - this.lastPageSizeUsedForViewportChange.height) >= 0.5) {
+            this.updateViewportSize(gScreenWidth);
+          }
+        }.bind(this), kViewportRemeasureThrottle);
       }
+    } else if (this.viewportMeasureCallback) {
+      // If the page changed size twice since we last measured the viewport and
+      // the latest size change reveals we don't need to remeasure, cancel any
+      // pending remeasure.
+      clearTimeout(this.viewportMeasureCallback);
+      this.viewportMeasureCallback = null;
     }
   },
 
@@ -3415,6 +3507,7 @@ Tab.prototype = {
           return;
 
         this.sendViewportUpdate(true);
+        this.updateViewportForPageSize();
         break;
       }
 
@@ -3449,9 +3542,12 @@ Tab.prototype = {
           if (article == null || (article.url != tabURL)) {
             // Don't clear the article for about:reader pages since we want to
             // use the article from the previous page
-            if (!tabURL.startsWith("about:reader"))
+            if (!tabURL.startsWith("about:reader")) {
               this.savedArticle = null;
-
+              this.readerEnabled = false;
+            } else {
+              this.readerActive = true;
+            }
             return;
           }
 
@@ -3461,6 +3557,12 @@ Tab.prototype = {
             type: "Content:ReaderEnabled",
             tabID: this.id
           });
+
+          if(this.readerActive)
+            this.readerActive = false;
+
+          if(!this.readerEnabled)
+            this.readerEnabled = true;
         }.bind(this));
       }
     }
@@ -3777,6 +3879,13 @@ Tab.prototype = {
         this.viewportExcludesVerticalMargins = false;
       }
 
+      // Store the page size that was used to calculate the viewport so that we
+      // can verify it's changed when we consider remeasuring in updateViewportForPageSize
+      this.lastPageSizeUsedForViewportChange = {
+        width: pageWidth,
+        height: pageHeight
+      };
+
       minScale = screenW / pageWidth;
     }
     minScale = this.clampZoom(minScale);
@@ -3804,7 +3913,7 @@ Tab.prototype = {
     let zoom = (aInitialLoad && metadata.defaultZoom) ? metadata.defaultZoom : this.clampZoom(this._zoom * zoomScale);
     this.setResolution(zoom, false);
     this.setScrollClampingSize(zoom);
-    this.sendViewportUpdate(false, true);
+    this.sendViewportUpdate();
   },
 
   sendViewportMetadata: function sendViewportMetadata() {
@@ -3907,6 +4016,26 @@ Tab.prototype = {
           ViewportHandler.updateMetadata(this, false);
         break;
     }
+  },
+
+  set readerEnabled(isReaderEnabled) {
+    this._readerEnabled = isReaderEnabled;
+    if (this.getActive())
+      Reader.updatePageAction(this);
+  },
+
+  get readerEnabled() {
+    return this._readerEnabled;
+  },
+
+  set readerActive(isReaderActive) {
+    this._readerActive = isReaderActive;
+    if (this.getActive())
+      Reader.updatePageAction(this);
+  },
+
+  get readerActive() {
+    return this._readerActive;
   },
 
   // nsIBrowserTab
@@ -6335,7 +6464,7 @@ var SearchEngines = {
           formData.push({ name: escapedName, value: escapedValue });
           break;
         case "select-one":
-          for each (let option in el.options) {
+          for (let option of el.options) {
             if (option.selected) {
               formData.push({ name: escapedName, value: escapedValue });
               break;
@@ -6847,6 +6976,46 @@ let Reader = {
     Services.prefs.addObserver("reader.parse-on-load.", this, false);
   },
 
+  pageAction: {
+    readerModeCallback: function(){
+      sendMessageToJava({
+        gecko: {
+          type: "Reader:Click",
+        }
+      });
+    },
+
+    readerModeActiveCallback: function(){
+      sendMessageToJava({
+        gecko: {
+          type: "Reader:LongClick",
+        }
+      });
+    },
+  },
+
+  updatePageAction: function(tab) {
+    if(this.pageAction.id) {
+      NativeWindow.pageactions.remove(this.pageAction.id);
+      delete this.pageAction.id;
+    }
+
+    if (tab.readerActive) {
+      this.pageAction.id = NativeWindow.pageactions.add({
+        title: Strings.browser.GetStringFromName("readerMode.exit"),
+        icon: "drawable://reader_active",
+        clickCallback: this.pageAction.readerModeCallback
+      });
+    } else if (tab.readerEnabled) {
+      this.pageAction.id = NativeWindow.pageactions.add({
+        title: Strings.browser.GetStringFromName("readerMode.enter"),
+        icon: "drawable://reader",
+        clickCallback:this.pageAction.readerModeCallback,
+        longClickCallback: this.pageAction.readerModeActiveCallback
+      });
+    }
+  },
+
   observe: function(aMessage, aTopic, aData) {
     switch(aTopic) {
       case "Reader:Add": {
@@ -6978,14 +7147,16 @@ let Reader = {
 
   getArticleForTab: function Reader_getArticleForTab(tabId, url, callback) {
     let tab = BrowserApp.getTabForId(tabId);
-    let article = tab.savedArticle;
-
-    if (article && article.url == url) {
-      this.log("Saved article found in tab");
-      callback(article);
-    } else {
-      this.parseDocumentFromURL(url, callback);
+    if (tab) {
+      let article = tab.savedArticle;
+      if (article && article.url == url) {
+        this.log("Saved article found in tab");
+        callback(article);
+        return;
+      }
     }
+
+    this.parseDocumentFromURL(url, callback);
   },
 
   parseDocumentFromTab: function(tabId, callback) {

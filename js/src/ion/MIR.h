@@ -4,20 +4,24 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/*
+ * Everything needed to build actual MIR instructions: the actual opcodes and
+ * instructions, the instruction interface, and use chains.
+ */
+
 #ifndef ion_MIR_h
 #define ion_MIR_h
 
-// This file declares everything needed to build actual MIR instructions: the
-// actual opcodes and instructions themselves, the instruction interface, and
-// use chains.
+#include "mozilla/Array.h"
+
 #include "jscntxt.h"
-#include "jslibmath.h"
 #include "jsinfer.h"
+#include "jslibmath.h"
+
 #include "ion/TypePolicy.h"
 #include "ion/IonAllocPolicy.h"
 #include "ion/InlineList.h"
 #include "ion/MOpcodes.h"
-#include "ion/FixedArityList.h"
 #include "ion/IonMacroAssembler.h"
 #include "ion/Bailouts.h"
 #include "ion/FixedList.h"
@@ -626,7 +630,7 @@ template <size_t Arity>
 class MAryInstruction : public MInstruction
 {
   protected:
-    FixedArityList<MUse, Arity> operands_;
+    mozilla::Array<MUse, Arity> operands_;
 
     void setOperand(size_t index, MDefinition *operand) MOZ_FINAL MOZ_OVERRIDE {
         operands_[index].set(operand, this, index);
@@ -943,8 +947,8 @@ class MTableSwitch MOZ_FINAL
 template <size_t Arity, size_t Successors>
 class MAryControlInstruction : public MControlInstruction
 {
-    FixedArityList<MUse, Arity> operands_;
-    FixedArityList<MBasicBlock *, Successors> successors_;
+    mozilla::Array<MUse, Arity> operands_;
+    mozilla::Array<MBasicBlock *, Successors> successors_;
 
   protected:
     void setOperand(size_t index, MDefinition *operand) MOZ_FINAL MOZ_OVERRIDE {
@@ -1706,6 +1710,11 @@ class MBinaryInstruction : public MAryInstruction<2>
         return (left->valueNumber() == insLeft->valueNumber()) &&
                (right->valueNumber() == insRight->valueNumber());
     }
+
+    // Return true if the operands to this instruction are both unsigned,
+    // in which case any wrapping operands were replaced with the underlying
+    // int32 operands.
+    bool tryUseUnsignedOperands();
 };
 
 class MTernaryInstruction : public MAryInstruction<3>
@@ -3010,7 +3019,8 @@ class MAbs
     }
     static MAbs *NewAsmJS(MDefinition *num, MIRType type) {
         MAbs *ins = new MAbs(num, type);
-        ins->implicitTruncate_ = true;
+        if (type == MIRType_Int32)
+            ins->implicitTruncate_ = true;
         return ins;
     }
     MDefinition *num() const {
@@ -3201,7 +3211,20 @@ class MMathFunction
         Tan,
         ACos,
         ASin,
-        ATan
+        ATan,
+        Log10,
+        Log2,
+        Log1P,
+        ExpM1,
+        CosH,
+        SinH,
+        TanH,
+        ACosH,
+        ASinH,
+        ATanH,
+        Sign,
+        Trunc,
+        Cbrt
     };
 
   private:
@@ -3388,12 +3411,14 @@ class MDiv : public MBinaryArithInstruction
     bool canBeNegativeZero_;
     bool canBeNegativeOverflow_;
     bool canBeDivideByZero_;
+    bool unsigned_;
 
     MDiv(MDefinition *left, MDefinition *right, MIRType type)
       : MBinaryArithInstruction(left, right),
         canBeNegativeZero_(true),
         canBeNegativeOverflow_(true),
-        canBeDivideByZero_(true)
+        canBeDivideByZero_(true),
+        unsigned_(false)
     {
         if (type != MIRType_Value)
             specialization_ = type;
@@ -3438,14 +3463,21 @@ class MDiv : public MBinaryArithInstruction
         return canBeDivideByZero_;
     }
 
+    bool isUnsigned() {
+        return unsigned_;
+    }
+
     bool fallible();
     bool truncate();
 };
 
 class MMod : public MBinaryArithInstruction
 {
+    bool unsigned_;
+
     MMod(MDefinition *left, MDefinition *right, MIRType type)
-      : MBinaryArithInstruction(left, right)
+      : MBinaryArithInstruction(left, right),
+        unsigned_(false)
     {
         if (type != MIRType_Value)
             specialization_ = type;
@@ -3473,6 +3505,10 @@ class MMod : public MBinaryArithInstruction
     bool canBeNegativeDividend() const;
     bool canBeDivideByZero() const;
     bool canBePowerOfTwoDivisor() const;
+
+    bool isUnsigned() {
+        return unsigned_;
+    }
 
     bool fallible();
 
@@ -5001,14 +5037,14 @@ class MLoadTypedArrayElementHole
         return getOperand(1);
     }
     AliasSet getAliasSet() const {
-        // Out-of-bounds accesses are handled using a VM call, this may
-        // invoke getters on the prototype chain.
-        return AliasSet::Store(AliasSet::Any);
+        return AliasSet::Load(AliasSet::TypedArrayElement);
     }
 };
 
 // Load a value fallibly or infallibly from a statically known typed array.
-class MLoadTypedArrayElementStatic : public MUnaryInstruction
+class MLoadTypedArrayElementStatic
+  : public MUnaryInstruction,
+    public IntPolicy<0>
 {
     MLoadTypedArrayElementStatic(TypedArrayObject *typedArray, MDefinition *ptr)
       : MUnaryInstruction(ptr), typedArray_(typedArray), fallible_(true)
@@ -5045,6 +5081,10 @@ class MLoadTypedArrayElementStatic : public MUnaryInstruction
 
     void setInfallible() {
         fallible_ = false;
+    }
+
+    TypePolicy *typePolicy() {
+        return this;
     }
 
     void computeRange();
@@ -5431,7 +5471,7 @@ class InlinePropertyTable : public TempObject
     void trimTo(AutoObjectVector &targets, Vector<bool> &choiceSet);
 
     // Ensure that the InlinePropertyTable's domain is a subset of |targets|.
-    void trimToAndMaybePatchTargets(AutoObjectVector &targets, AutoObjectVector &originals);
+    void trimToTargets(AutoObjectVector &targets);
 };
 
 class MGetPropertyCache

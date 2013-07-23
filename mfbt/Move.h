@@ -101,11 +101,11 @@ namespace mozilla {
  * One hint: if you're writing a move constructor where the type has members
  * that should be moved themselves, it's much nicer to write this:
  *
- *   C(MoveRef<C> c) : x(c->x), y(c->y) { }
+ *   C(MoveRef<C> c) : x(Move(c->x)), y(Move(c->y)) { }
  *
  * than the equivalent:
  *
- *   C(MoveRef<C> c) { new(&x) X(c->x); new(&y) Y(c->y); }
+ *   C(MoveRef<C> c) { new(&x) X(Move(c->x)); new(&y) Y(Move(c->y)); }
  *
  * especially since GNU C++ fails to notice that this does indeed initialize x
  * and y, which may matter if they're const.
@@ -133,6 +133,20 @@ template<typename T>
 inline MoveRef<T>
 Move(const T& t)
 {
+  // With some versions of gcc, for a class C, there's an (incorrect) ambiguity
+  // between the C(const C&) constructor and the default C(C&&) C++11 move
+  // constructor, when the constructor is called with a const C& argument.
+  //
+  // This ambiguity manifests with the Move implementation above when Move is
+  // passed const U& for some class U.  Calling Move(const U&) returns a
+  // MoveRef<const U&>, which is then commonly passed to the U constructor,
+  // triggering an implicit conversion to const U&.  gcc doesn't know whether to
+  // call U(const U&) or U(U&&), so it wrongly reports a compile error.
+  //
+  // http://gcc.gnu.org/bugzilla/show_bug.cgi?id=50442 has since been fixed, so
+  // this is no longer an issue for up-to-date compilers.  But there's no harm
+  // in keeping it around for older compilers, so we might as well.  See also
+  // bug 686280.
   return MoveRef<T>(const_cast<T&>(t));
 }
 

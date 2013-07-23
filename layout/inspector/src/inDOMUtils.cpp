@@ -34,6 +34,8 @@
 #include "nsRuleProcessorData.h"
 #include "nsCSSRuleProcessor.h"
 #include "mozilla/dom/InspectorUtilsBinding.h"
+#include "nsCSSProps.h"
+#include "nsColor.h"
 
 using namespace mozilla;
 using namespace mozilla::css;
@@ -102,12 +104,7 @@ inDOMUtils::GetParentForNode(nsIDOMNode* aNode,
   } else if (aShowingAnonymousContent) {
     nsCOMPtr<nsIContent> content = do_QueryInterface(aNode);
     if (content) {
-      nsIContent* bparent = nullptr;
-      nsRefPtr<nsBindingManager> bindingManager = inLayoutUtils::GetBindingManagerFor(aNode);
-      if (bindingManager) {
-        bparent = bindingManager->GetInsertionParent(content);
-      }
-
+      nsIContent* bparent = content->GetXBLInsertionParent();
       parent = do_QueryInterface(bparent);
     }
   }
@@ -422,6 +419,134 @@ inDOMUtils::GetCSSPropertyNames(uint32_t aFlags, uint32_t* aCount,
   return NS_OK;
 }
 
+static void InsertNoDuplicates(nsTArray<nsString>& aArray,
+                               const nsAString& aString)
+{
+  size_t i = aArray.IndexOfFirstElementGt(aString);
+  if (i > 0 && aArray[i-1].Equals(aString)) {
+    return;
+  }
+  aArray.InsertElementAt(i, aString);
+}
+
+static void GetKeywordsForProperty(const nsCSSProperty aProperty,
+                                   nsTArray<nsString>& aArray)
+{
+  if (nsCSSProps::IsShorthand(aProperty)) {
+    // Shorthand props have no keywords.
+    return;
+  }
+  const int32_t *keywordTable = nsCSSProps::kKeywordTableTable[aProperty];
+  if (keywordTable) {
+    size_t i = 0;
+    while (nsCSSKeyword(keywordTable[i]) != eCSSKeyword_UNKNOWN) {
+      nsCSSKeyword word = nsCSSKeyword(keywordTable[i]);
+      InsertNoDuplicates(aArray,
+                         NS_ConvertASCIItoUTF16(nsCSSKeywords::GetStringValue(word)));
+      // Increment counter by 2, because in this table every second
+      // element is a nsCSSKeyword.
+      i += 2;
+    }
+  }
+}
+
+static void GetColorsForProperty(const uint32_t aParserVariant,
+                                 nsTArray<nsString>& aArray)
+{
+  if (aParserVariant & VARIANT_COLOR) {
+    size_t size;
+    const char * const *allColorNames = NS_AllColorNames(&size);
+    for (size_t i = 0; i < size; i++) {
+      CopyASCIItoUTF16(allColorNames[i], *aArray.AppendElement());
+    }
+  }
+  return;
+}
+
+static void GetOtherValuesForProperty(const uint32_t aParserVariant,
+                                      nsTArray<nsString>& aArray)
+{
+  if (aParserVariant & VARIANT_AUTO) {
+    InsertNoDuplicates(aArray, NS_LITERAL_STRING("auto"));
+  }
+  if (aParserVariant & VARIANT_NORMAL) {
+    InsertNoDuplicates(aArray, NS_LITERAL_STRING("normal"));
+  }
+  if(aParserVariant & VARIANT_ALL) {
+    InsertNoDuplicates(aArray, NS_LITERAL_STRING("all"));
+  }
+  if (aParserVariant & VARIANT_NONE) {
+    InsertNoDuplicates(aArray, NS_LITERAL_STRING("none"));
+  }
+  if (aParserVariant & VARIANT_ELEMENT) {
+    InsertNoDuplicates(aArray, NS_LITERAL_STRING("-moz-element"));
+  }
+  if (aParserVariant & VARIANT_IMAGE_RECT) {
+    InsertNoDuplicates(aArray, NS_LITERAL_STRING("-moz-image-rect"));
+  }
+  if (aParserVariant & VARIANT_COLOR) {
+    InsertNoDuplicates(aArray, NS_LITERAL_STRING("rgb"));
+    InsertNoDuplicates(aArray, NS_LITERAL_STRING("hsl"));
+    InsertNoDuplicates(aArray, NS_LITERAL_STRING("-moz-rgba"));
+    InsertNoDuplicates(aArray, NS_LITERAL_STRING("-moz-hsla"));
+    InsertNoDuplicates(aArray, NS_LITERAL_STRING("rgba"));
+    InsertNoDuplicates(aArray, NS_LITERAL_STRING("hsla"));
+  }
+  if (aParserVariant & VARIANT_TIMING_FUNCTION) {
+    InsertNoDuplicates(aArray, NS_LITERAL_STRING("cubic-bezier"));
+    InsertNoDuplicates(aArray, NS_LITERAL_STRING("steps"));
+  }
+  if (aParserVariant & VARIANT_CALC) {
+    InsertNoDuplicates(aArray, NS_LITERAL_STRING("calc"));
+    InsertNoDuplicates(aArray, NS_LITERAL_STRING("-moz-calc"));
+  }
+}
+
+NS_IMETHODIMP
+inDOMUtils::GetCSSValuesForProperty(const nsAString& aProperty,
+                                    uint32_t* aLength,
+                                    PRUnichar*** aValues)
+{
+  nsCSSProperty propertyID = nsCSSProps::LookupProperty(aProperty,
+                                                        nsCSSProps::eEnabled);
+  if (propertyID == eCSSProperty_UNKNOWN) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsTArray<nsString> array;
+  // We start collecting the values, BUT colors need to go in first, because array
+  // needs to stay sorted, and the colors are sorted, so we just append them.
+  if (!nsCSSProps::IsShorthand(propertyID)) {
+    // Property is longhand.
+    uint32_t propertyParserVariant = nsCSSProps::ParserVariant(propertyID);
+    // Get colors first.
+    GetColorsForProperty(propertyParserVariant, array);
+    GetKeywordsForProperty(propertyID, array);
+    GetOtherValuesForProperty(propertyParserVariant, array);
+  } else {
+    // Property is shorthand.
+    CSSPROPS_FOR_SHORTHAND_SUBPROPERTIES(subproperty, propertyID) {
+      uint32_t propertyParserVariant = nsCSSProps::ParserVariant(*subproperty);
+      // Get colors first.
+      GetColorsForProperty(propertyParserVariant, array);
+      GetKeywordsForProperty(*subproperty, array);
+      GetOtherValuesForProperty(propertyParserVariant, array);
+    }
+  }
+  // All CSS properties take initial and inherit.
+  InsertNoDuplicates(array, NS_LITERAL_STRING("-moz-initial"));
+  InsertNoDuplicates(array, NS_LITERAL_STRING("inherit"));
+
+  *aLength = array.Length();
+  PRUnichar** ret =
+    static_cast<PRUnichar**>(NS_Alloc(*aLength * sizeof(PRUnichar*)));
+  for (uint32_t i = 0; i < *aLength; ++i) {
+    ret[i] = ToNewUnicode(array[i]);
+  }
+  *aValues = ret;
+  return NS_OK;
+}
+
 NS_IMETHODIMP
 inDOMUtils::ColorNameToRGB(const nsAString& aColorName, JSContext* aCx,
                            JS::Value* aValue)
@@ -472,8 +597,7 @@ inDOMUtils::GetBindingURLs(nsIDOMElement *aElement, nsIArray **_retval)
   nsCOMPtr<nsIContent> content = do_QueryInterface(aElement);
   NS_ENSURE_ARG_POINTER(content);
 
-  nsIDocument *ownerDoc = content->OwnerDoc();
-  nsXBLBinding *binding = ownerDoc->BindingManager()->GetBinding(content);
+  nsXBLBinding *binding = content->GetXBLBinding();
 
   while (binding) {
     urls->AppendElement(binding->PrototypeBinding()->BindingURI(), false);

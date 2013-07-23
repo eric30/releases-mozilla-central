@@ -348,13 +348,13 @@ class ScriptSource
     template <XDRMode mode>
     bool performXDR(XDRState<mode> *xdr);
 
-    bool setFilename(JSContext *cx, const char *filename);
+    bool setFilename(ExclusiveContext *cx, const char *filename);
     const char *filename() const {
         return filename_;
     }
 
     // Source maps
-    bool setSourceMap(JSContext *cx, jschar *sourceMapURL, const char *filename);
+    bool setSourceMap(ExclusiveContext *cx, jschar *sourceMapURL);
     const jschar *sourceMap();
     bool hasSourceMap() const { return sourceMap_ != NULL; }
 
@@ -388,7 +388,7 @@ class ScriptSourceObject : public JSObject
     static Class class_;
 
     static void finalize(FreeOp *fop, JSObject *obj);
-    static ScriptSourceObject *create(JSContext *cx, ScriptSource *source);
+    static ScriptSourceObject *create(ExclusiveContext *cx, ScriptSource *source);
 
     ScriptSource *source() {
         return static_cast<ScriptSource *>(getReservedSlot(SOURCE_SLOT).toPrivate());
@@ -549,8 +549,8 @@ class JSScript : public js::gc::Cell
        information can be made context sensitive. See discussion in
        bug 826148. */
     bool            shouldCloneAtCallsite:1;
-
     bool            isCallsiteClone:1; /* is a callsite clone; has a link to the original function */
+    bool            shouldInline:1;    /* hint to inline when possible */
 #ifdef JS_ION
     bool            failedBoundsCheck:1; /* script has had hoisted bounds checks fail */
     bool            failedShapeGuard:1; /* script has had hoisted shape guard fail */
@@ -1124,6 +1124,9 @@ class LazyScript : public js::gc::Cell
     // pointer to the result.
     HeapPtrScript script_;
 
+    // Original function with which the lazy script is associated.
+    HeapPtrFunction function_;
+
     // Function or block chain in which the script is nested, or NULL.
     HeapPtrObject enclosingScope_;
 
@@ -1133,10 +1136,6 @@ class LazyScript : public js::gc::Cell
 
     // Heap allocated table with any free variables or inner functions.
     void *table_;
-
-#if JS_BITS_PER_WORD == 32
-    uint32_t padding;
-#endif
 
     // Assorted bits that should really be in ScriptSourceObject.
     JSPrincipals *originPrincipals_;
@@ -1159,14 +1158,19 @@ class LazyScript : public js::gc::Cell
     uint32_t lineno_;
     uint32_t column_;
 
-    LazyScript(void *table, uint32_t numFreeVariables, uint32_t numInnerFunctions, JSVersion version,
+    LazyScript(JSFunction *fun, void *table,
+               uint32_t numFreeVariables, uint32_t numInnerFunctions, JSVersion version,
                uint32_t begin, uint32_t end, uint32_t lineno, uint32_t column);
 
   public:
-    static LazyScript *Create(ExclusiveContext *cx,
+    static LazyScript *Create(ExclusiveContext *cx, HandleFunction fun,
                               uint32_t numFreeVariables, uint32_t numInnerFunctions,
                               JSVersion version, uint32_t begin, uint32_t end,
                               uint32_t lineno, uint32_t column);
+
+    JSFunction *function() const {
+        return function_;
+    }
 
     void initScript(JSScript *script);
     JSScript *maybeScript() {

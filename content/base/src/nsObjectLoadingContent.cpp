@@ -196,26 +196,36 @@ CheckPluginStopEvent::Run()
  */
 class nsSimplePluginEvent : public nsRunnable {
 public:
-  nsSimplePluginEvent(nsIContent* aContent, const nsAString &aEvent)
-    : mContent(aContent),
-      mEvent(aEvent)
-  {}
+  nsSimplePluginEvent(nsIContent* aTarget, const nsAString &aEvent)
+    : mTarget(aTarget)
+    , mDocument(aTarget->GetCurrentDoc())
+    , mEvent(aEvent)
+  {
+  }
+
+  nsSimplePluginEvent(nsIDocument* aTarget, const nsAString& aEvent)
+    : mTarget(aTarget)
+    , mDocument(aTarget)
+    , mEvent(aEvent)
+  {
+  }
 
   ~nsSimplePluginEvent() {}
 
   NS_IMETHOD Run();
 
 private:
-  nsCOMPtr<nsIContent> mContent;
+  nsCOMPtr<nsISupports> mTarget;
+  nsCOMPtr<nsIDocument> mDocument;
   nsString mEvent;
 };
 
 NS_IMETHODIMP
 nsSimplePluginEvent::Run()
 {
-  LOG(("OBJLC [%p]: nsSimplePluginEvent firing event \"%s\"", mContent.get(),
+  LOG(("OBJLC [%p]: nsSimplePluginEvent firing event \"%s\"", mTarget.get(),
        mEvent.get()));
-  nsContentUtils::DispatchTrustedEvent(mContent->GetDocument(), mContent,
+  nsContentUtils::DispatchTrustedEvent(mDocument, mTarget,
                                        mEvent, true, true);
   return NS_OK;
 }
@@ -674,7 +684,9 @@ nsObjectLoadingContent::UnbindFromTree(bool aDeep, bool aNullParent)
     ///             would keep the docshell around, but trash the frameloader
     UnloadObject();
   }
-
+  nsCOMPtr<nsIRunnable> ev = new nsSimplePluginEvent(thisContent->GetCurrentDoc(),
+                                           NS_LITERAL_STRING("PluginRemoved"));
+  NS_DispatchToCurrentThread(ev);
 }
 
 nsObjectLoadingContent::nsObjectLoadingContent()
@@ -3216,7 +3228,7 @@ nsObjectLoadingContent::SetupProtoChain(JSContext* aCx,
     return;
   }
 
-  if (pi_proto && js::GetObjectClass(pi_proto) != &js::ObjectClass) {
+  if (pi_proto && js::GetObjectClass(pi_proto) != js::ObjectClassPtr) {
     // The plugin wrapper has a proto that's not Object.prototype, set
     // 'pi.__proto__.__proto__' to the original 'this.__proto__'
     if (pi_proto != my_proto && !::JS_SetPrototype(aCx, pi_proto, my_proto)) {
@@ -3350,8 +3362,8 @@ nsObjectLoadingContent::TeardownProtoChain()
 
 bool
 nsObjectLoadingContent::DoNewResolve(JSContext* aCx, JS::Handle<JSObject*> aObject,
-                                     JS::Handle<jsid> aId, unsigned aFlags,
-                                     JS::MutableHandle<JSObject*> aObjp)
+                                     JS::Handle<jsid> aId,
+                                     JS::MutableHandle<JS::Value> aValue)
 {
   // We don't resolve anything; we just try to make sure we're instantiated
 

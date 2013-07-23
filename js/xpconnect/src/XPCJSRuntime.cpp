@@ -396,6 +396,17 @@ GetJunkScope()
     return self->GetJunkScope();
 }
 
+nsIGlobalObject *
+GetJunkScopeGlobal()
+{
+    JSObject *junkScope = GetJunkScope();
+    // GetJunkScope would ideally never fail, currently it is not yet the case
+    // unfortunately...(see Bug 874158)
+    if (!junkScope)
+        return nullptr;
+    return GetNativeForGlobal(junkScope);
+}
+
 }
 
 static void
@@ -2637,10 +2648,11 @@ XPCJSRuntime::OnJSContextNew(JSContext *cx)
         RootedString str(cx);
         for (unsigned i = 0; i < IDX_TOTAL_COUNT; i++) {
             str = JS_InternString(cx, mStrings[i]);
-            if (!str || !JS_ValueToId(cx, STRING_TO_JSVAL(str), &mStrIDs[i])) {
+            if (!str) {
                 mStrIDs[0] = JSID_VOID;
                 return false;
             }
+            mStrIDs[i] = INTERNED_STRING_TO_JSID(cx, str);
             mStrJSVals[i] = STRING_TO_JSVAL(str);
         }
 

@@ -5,9 +5,17 @@ MARIONETTE_TIMEOUT = 30000;
 
 SpecialPowers.addPermission("mobileconnection", true, document);
 
-let connection = navigator.mozMobileConnection;
-ok(connection instanceof MozMobileConnection,
-   "connection is instanceof " + connection.constructor);
+// Permission changes can't change existing Navigator.prototype
+// objects, so grab our objects from a new Navigator
+let ifr = document.createElement("iframe");
+let connection;
+ifr.onload = function() {
+  connection = ifr.contentWindow.navigator.mozMobileConnection;
+  ok(connection instanceof ifr.contentWindow.MozMobileConnection,
+     "connection is instanceof " + connection.constructor);
+  testConnectionInfo();
+};
+document.body.appendChild(ifr);
 
 let emulatorCmdPendingCount = 0;
 function setEmulatorVoiceState(state) {
@@ -76,11 +84,6 @@ function testUnregistered() {
 }
 
 function testSearching() {
-  // For some reason, requesting the "searching" state puts the fake modem
-  // into "registered"... Skipping this test for now.
-  testDenied();
-  return;
-
   setEmulatorVoiceState("searching");
 
   connection.addEventListener("voicechange", function onvoicechange() {
@@ -149,5 +152,3 @@ function cleanUp() {
   SpecialPowers.removePermission("mobileconnection", document);
   finish();
 }
-
-testConnectionInfo();

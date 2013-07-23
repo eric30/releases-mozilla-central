@@ -7,6 +7,7 @@
 /* JS symbol tables. */
 
 #include "mozilla/DebugOnly.h"
+#include "mozilla/MathAlgorithms.h"
 #include "mozilla/PodOperations.h"
 
 #include "jsapi.h"
@@ -28,6 +29,7 @@ using namespace js::gc;
 
 using mozilla::DebugOnly;
 using mozilla::PodZero;
+using mozilla::CeilingLog2Size;
 
 bool
 ShapeTable::init(ExclusiveContext *cx, Shape *lastProp)
@@ -39,7 +41,7 @@ ShapeTable::init(ExclusiveContext *cx, Shape *lastProp)
      * event, let's try to grow, overallocating to hold at least twice the
      * current population.
      */
-    uint32_t sizeLog2 = JS_CEILING_LOG2W(2 * entryCount);
+    uint32_t sizeLog2 = CeilingLog2Size(2 * entryCount);
     if (sizeLog2 < MIN_SIZE_LOG2)
         sizeLog2 = MIN_SIZE_LOG2;
 
@@ -451,7 +453,8 @@ JSObject::addProperty(ExclusiveContext *cx, HandleObject obj, HandleId id,
     if (!JSObject::isExtensible(cx, obj, &extensible))
         return NULL;
     if (!extensible) {
-        obj->reportNotExtensible(cx->asJSContext());
+        if (cx->isJSContext())
+            obj->reportNotExtensible(cx->asJSContext());
         return NULL;
     }
 
@@ -577,8 +580,10 @@ CheckCanChangeAttrs(ExclusiveContext *cx, JSObject *obj, Shape *shape, unsigned 
 
     /* Reject attempts to remove a slot from the permanent data property. */
     if (shape->isDataDescriptor() && shape->hasSlot() &&
-        (*attrsp & (JSPROP_GETTER | JSPROP_SETTER | JSPROP_SHARED))) {
-        obj->reportNotConfigurable(cx->asJSContext(), shape->propid());
+        (*attrsp & (JSPROP_GETTER | JSPROP_SETTER | JSPROP_SHARED)))
+    {
+        if (cx->isJSContext())
+            obj->reportNotConfigurable(cx->asJSContext(), shape->propid());
         return false;
     }
 
@@ -618,7 +623,8 @@ JSObject::putProperty(ExclusiveContext *cx, HandleObject obj, HandleId id,
         if (!JSObject::isExtensible(cx, obj, &extensible))
             return NULL;
         if (!extensible) {
-            obj->reportNotExtensible(cx->asJSContext());
+            if (cx->isJSContext())
+                obj->reportNotExtensible(cx->asJSContext());
             return NULL;
         }
 
@@ -740,7 +746,9 @@ JSObject::putProperty(ExclusiveContext *cx, HandleObject obj, HandleId id,
     if (hadSlot && !shape->hasSlot()) {
         if (oldSlot < obj->slotSpan())
             obj->freeSlot(oldSlot);
-        ++cx->asJSContext()->runtime()->propertyRemovals;
+        /* Note: The optimization based on propertyRemovals is only relevant to the main thread. */
+        if (cx->isJSContext())
+            ++cx->asJSContext()->runtime()->propertyRemovals;
     }
 
     obj->checkShapeConsistency();
@@ -844,7 +852,8 @@ JSObject::removeProperty(ExclusiveContext *cx, jsid id_)
     /* If shape has a slot, free its slot number. */
     if (shape->hasSlot()) {
         self->freeSlot(shape->slot());
-        ++cx->asJSContext()->runtime()->propertyRemovals;
+        if (cx->isJSContext())
+            ++cx->asJSContext()->runtime()->propertyRemovals;
     }
 
     /*
@@ -1093,7 +1102,7 @@ js::ObjectImpl::preventExtensions(JSContext *cx, Handle<ObjectImpl*> obj)
                "preventExtensions");
 #endif
 
-    if (obj->isProxy()) {
+    if (Downcast(obj)->is<ProxyObject>()) {
         RootedObject object(cx, obj->asObjectPtr());
         return js::Proxy::preventExtensions(cx, object);
     }

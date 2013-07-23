@@ -174,7 +174,7 @@ class BuildProgressFooter(object):
                 written += len(arg)
             else:
                 if written + len(part) > max_width:
-                    write_pieces.append(arg[0:max_width - written])
+                    write_pieces.append(part[0:max_width - written])
                     written += len(part)
                     break
 
@@ -292,6 +292,17 @@ class Build(MachCommandBase):
                         path_arg.relpath())
 
                     if make_dir is None and make_target is None:
+                        return 1
+
+                    # See bug 886162 - we don't want to "accidentally" build
+                    # the entire tree (if that's really the intent, it's
+                    # unlikely they would have specified a directory.)
+                    if not make_dir and not make_target:
+                        print("The specified directory doesn't contain a "
+                              "Makefile and the first parent with one is the "
+                              "root of the tree. Please specify a directory "
+                              "with a Makefile or run |mach build| if you "
+                              "want to build the entire tree.")
                         return 1
 
                     target_pairs.append((make_dir, make_target))

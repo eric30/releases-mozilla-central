@@ -10,6 +10,7 @@ EXPORTS_NAMESPACES += mozilla
 
 EXPORTS_mozilla += \
   AllocPolicy.h \
+  Array.h \
   Assertions.h \
   Atomics.h \
   Attributes.h \
@@ -44,10 +45,12 @@ EXPORTS_mozilla += \
   SHA1.h \
   SplayTree.h \
   StandardInteger.h \
+  TemplateLib.h \
   ThreadLocal.h \
   TypedEnum.h \
   Types.h \
   TypeTraits.h \
   Util.h \
+  Vector.h \
   WeakPtr.h \
   $(NULL)

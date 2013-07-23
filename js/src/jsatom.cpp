@@ -24,9 +24,6 @@
 
 #include "jscompartmentinlines.h"
 
-#ifdef JSGC_GENERATIONAL
-#include "vm/Shape-inl.h"
-#endif
 #include "vm/String-inl.h"
 
 using namespace js;
@@ -39,6 +36,10 @@ using mozilla::RangedPtr;
 const char *
 js::AtomToPrintableString(ExclusiveContext *cx, JSAtom *atom, JSAutoByteString *bytes)
 {
+    // The only uses for this method when running off the main thread are for
+    // parse errors/warnings, which will not actually be reported in such cases.
+    if (!cx->isJSContext())
+        return "";
     return js_ValueToPrintable(cx->asJSContext(), StringValue(atom), bytes);
 }
 
@@ -241,6 +242,8 @@ AtomizeAndTakeOwnership(ExclusiveContext *cx, jschar *tbchars, size_t length, In
         return s;
     }
 
+    AutoLockForExclusiveAccess lock(cx);
+
     /*
      * If a GC occurs at js_NewStringCopy then |p| will still have the correct
      * hash, allowing us to avoid rehashing it. Even though the hash is
@@ -257,7 +260,7 @@ AtomizeAndTakeOwnership(ExclusiveContext *cx, jschar *tbchars, size_t length, In
         return atom;
     }
 
-    AutoEnterAtomsCompartment ac(cx);
+    AutoCompartment ac(cx, cx->atomsCompartment());
 
     JSFlatString *flat = js_NewString<CanGC>(cx, tbchars, length);
     if (!flat) {
@@ -292,6 +295,8 @@ AtomizeAndCopyChars(ExclusiveContext *cx, const jschar *tbchars, size_t length, 
      * GC will potentially free some table entries.
      */
 
+    AutoLockForExclusiveAccess lock(cx);
+
     AtomSet& atoms = cx->atoms();
     AtomSet::AddPtr p = atoms.lookupForAdd(AtomHasher::Lookup(tbchars, length));
     SkipRoot skipHash(cx, &p); /* Prevent the hash from being poisoned. */
@@ -301,7 +306,7 @@ AtomizeAndCopyChars(ExclusiveContext *cx, const jschar *tbchars, size_t length, 
         return atom;
     }
 
-    AutoEnterAtomsCompartment ac(cx);
+    AutoCompartment ac(cx, cx->atomsCompartment());
 
     JSFlatString *flat = js_NewStringCopyN<allowGC>(cx, tbchars, length);
     if (!flat)
@@ -311,7 +316,8 @@ AtomizeAndCopyChars(ExclusiveContext *cx, const jschar *tbchars, size_t length, 
 
     if (!atoms.relookupOrAdd(p, AtomHasher::Lookup(tbchars, length),
                              AtomStateEntry(atom, bool(ib)))) {
-        js_ReportOutOfMemory(cx); /* SystemAllocPolicy does not report OOM. */
+        if (allowGC)
+            js_ReportOutOfMemory(cx); /* SystemAllocPolicy does not report OOM. */
         return NULL;
     }
 
@@ -329,6 +335,8 @@ js::AtomizeString(ExclusiveContext *cx, JSString *str,
         if (ib != InternAtom || js::StaticStrings::isStatic(&atom))
             return &atom;
 
+        AutoLockForExclusiveAccess lock(cx);
+
         AtomSet::Ptr p = cx->atoms().lookup(AtomHasher::Lookup(&atom));
         JS_ASSERT(p); /* Non-static atom must exist in atom state set. */
         JS_ASSERT(p->asPtr() == &atom);
@@ -337,14 +345,21 @@ js::AtomizeString(ExclusiveContext *cx, JSString *str,
         return &atom;
     }
 
-    const jschar *chars = str->getChars(cx->asJSContext());
-    if (!chars)
-        return NULL;
+    const jschar *chars;
+    if (str->isLinear()) {
+        chars = str->asLinear().chars();
+    } else {
+        if (!cx->shouldBeJSContext())
+            return NULL;
+        chars = str->getChars(cx->asJSContext());
+        if (!chars)
+            return NULL;
+    }
 
     if (JSAtom *atom = AtomizeAndCopyChars<NoGC>(cx, chars, str->length(), ib))
         return atom;
 
-    if (!allowGC)
+    if (!cx->isJSContext() || !allowGC)
         return NULL;
 
     JSLinearString *linear = str->ensureLinear(cx->asJSContext());

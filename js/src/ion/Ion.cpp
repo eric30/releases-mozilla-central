@@ -47,9 +47,7 @@
 #include "jsgcinlines.h"
 #include "jsinferinlines.h"
 
-#include "gc/Barrier-inl.h"
 #include "vm/Stack-inl.h"
-#include "ion/IonFrames-inl.h"
 #include "ion/CompilerRoot.h"
 #include "ion/ExecutionModeInlines.h"
 #include "ion/AsmJS.h"
@@ -172,6 +170,7 @@ ion::InitializeIon()
 
 IonRuntime::IonRuntime()
   : execAlloc_(NULL),
+    exceptionTail_(NULL),
     enterJIT_(NULL),
     bailoutHandler_(NULL),
     argumentsRectifier_(NULL),
@@ -194,7 +193,8 @@ IonRuntime::~IonRuntime()
 bool
 IonRuntime::initialize(JSContext *cx)
 {
-    AutoEnterAtomsCompartment ac(cx);
+    AutoLockForExclusiveAccess lock(cx);
+    AutoCompartment ac(cx, cx->atomsCompartment());
 
     IonContext ictx(cx, NULL);
     AutoFlushCache afc("IonRuntime::initialize");
@@ -208,6 +208,10 @@ IonRuntime::initialize(JSContext *cx)
 
     functionWrappers_ = cx->new_<VMWrapperMap>(cx);
     if (!functionWrappers_ || !functionWrappers_->init())
+        return false;
+
+    exceptionTail_ = generateExceptionTailStub(cx);
+    if (!exceptionTail_)
         return false;
 
     if (cx->runtime()->jitSupportsFloatingPoint) {
@@ -274,7 +278,8 @@ IonRuntime::debugTrapHandler(JSContext *cx)
     if (!debugTrapHandler_) {
         // IonRuntime code stubs are shared across compartments and have to
         // be allocated in the atoms compartment.
-        AutoEnterAtomsCompartment ac(cx);
+        AutoLockForExclusiveAccess lock(cx);
+        AutoCompartment ac(cx, cx->runtime()->atomsCompartment);
         debugTrapHandler_ = generateDebugTrapHandler(cx);
     }
     return debugTrapHandler_;
@@ -1922,19 +1927,7 @@ ion::Cannon(JSContext *cx, RunState &state)
     if (!SetEnterJitData(cx, data, state, vals))
         return IonExec_Error;
 
-#if JS_TRACE_LOGGING
-    TraceLog(TraceLogging::defaultLogger(),
-             TraceLogging::ION_CANNON_START,
-             script);
-#endif
-
     IonExecStatus status = EnterIon(cx, data);
-
-#if JS_TRACE_LOGGING
-    TraceLog(TraceLogging::defaultLogger(),
-             TraceLogging::ION_CANNON_STOP,
-             script);
-#endif
 
     if (status == IonExec_Ok)
         state.setReturnValue(data.result);

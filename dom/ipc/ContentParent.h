@@ -17,6 +17,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/HalTypes.h"
 #include "mozilla/LinkedList.h"
+#include "mozilla/StaticPtr.h"
 
 #include "nsFrameMessageManager.h"
 #include "nsIObserver.h"
@@ -105,6 +106,7 @@ public:
                        nsIDOMElement* aFrameElement);
 
     static void GetAll(nsTArray<ContentParent*>& aArray);
+    static void GetAllEvenIfDead(nsTArray<ContentParent*>& aArray);
 
     NS_DECL_ISUPPORTS
     NS_DECL_NSIOBSERVER
@@ -114,8 +116,10 @@ public:
     /**
      * MessageManagerCallback methods that we override.
      */
-    virtual bool DoSendAsyncMessage(const nsAString& aMessage,
-                                    const mozilla::dom::StructuredCloneData& aData) MOZ_OVERRIDE;
+    virtual bool DoSendAsyncMessage(JSContext* aCx,
+                                    const nsAString& aMessage,
+                                    const mozilla::dom::StructuredCloneData& aData,
+                                    JS::Handle<JSObject *> aCpows) MOZ_OVERRIDE;
     virtual bool CheckPermission(const nsAString& aPermission) MOZ_OVERRIDE;
     virtual bool CheckManifestURL(const nsAString& aManifestURL) MOZ_OVERRIDE;
     virtual bool CheckAppHasPermission(const nsAString& aPermission) MOZ_OVERRIDE;
@@ -144,9 +148,7 @@ public:
         return mSubprocess;
     }
 
-    int32_t Pid() {
-        return base::GetProcId(mSubprocess->GetChildProcessHandle());
-    }
+    int32_t Pid();
 
     bool NeedsPermissionsUpdate() {
         return mSendPermissionUpdates;
@@ -180,7 +182,7 @@ private:
     static nsDataHashtable<nsStringHashKey, ContentParent*> *sAppContentParents;
     static nsTArray<ContentParent*>* sNonAppContentParents;
     static nsTArray<ContentParent*>* sPrivateContent;
-    static LinkedList<ContentParent> sContentParents;
+    static StaticAutoPtr<LinkedList<ContentParent> > sContentParents;
 
     static void JoinProcessesIOThread(const nsTArray<ContentParent*>* aProcesses,
                                       Monitor* aMonitor, bool* aDone);
@@ -199,7 +201,6 @@ private:
     // using them.
     using PContentParent::SendPBrowserConstructor;
     using PContentParent::SendPTestShellConstructor;
-    using PContentParent::SendPJavaScriptConstructor;
 
     // No more than one of !!aApp, aIsForBrowser, and aIsForPreallocated may be
     // true.
@@ -242,8 +243,13 @@ private:
      * will return false and this ContentParent will not be returned
      * by the Get*() funtions.  However, the shutdown sequence itself
      * may be asynchronous.
+     *
+     * If aCloseWithError is true and this is the first call to
+     * ShutDownProcess, then we'll close our channel using CloseWithError()
+     * rather than vanilla Close().  CloseWithError() indicates to IPC that this
+     * is an abnormal shutdown (e.g. a crash).
      */
-    void ShutDownProcess();
+    void ShutDownProcess(bool aCloseWithError);
 
     PCompositorParent*
     AllocPCompositorParent(mozilla::ipc::Transport* aTransport,
@@ -372,9 +378,11 @@ private:
 
     virtual bool RecvSyncMessage(const nsString& aMsg,
                                  const ClonedMessageData& aData,
+                                 const InfallibleTArray<CpowEntry>& aCpows,
                                  InfallibleTArray<nsString>* aRetvals);
     virtual bool RecvAsyncMessage(const nsString& aMsg,
-                                  const ClonedMessageData& aData);
+                                  const ClonedMessageData& aData,
+                                  const InfallibleTArray<CpowEntry>& aCpows);
 
     virtual bool RecvFilePathUpdateNotify(const nsString& aType,
                                           const nsString& aStorageName,

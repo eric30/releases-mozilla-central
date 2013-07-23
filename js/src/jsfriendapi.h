@@ -139,6 +139,12 @@ js_ObjectClassIs(JSContext *cx, JS::HandleObject obj, js::ESClassValue classValu
 JS_FRIEND_API(const char *)
 js_ObjectClassName(JSContext *cx, JS::HandleObject obj);
 
+JS_FRIEND_API(bool)
+js_AddObjectRoot(JSRuntime *rt, JSObject **objp);
+
+JS_FRIEND_API(void)
+js_RemoveObjectRoot(JSRuntime *rt, JSObject **objp);
+
 #ifdef DEBUG
 
 /*
@@ -230,19 +236,6 @@ typedef bool
   */
 extern JS_FRIEND_API(void)
 DumpHeapComplete(JSRuntime *rt, FILE *fp);
-
-class JS_FRIEND_API(AutoSwitchCompartment) {
-  private:
-    JSContext *cx;
-    JSCompartment *oldCompartment;
-  public:
-    AutoSwitchCompartment(JSContext *cx, JSCompartment *newCompartment
-                          MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
-    AutoSwitchCompartment(JSContext *cx, JS::HandleObject target
-                          MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
-    ~AutoSwitchCompartment();
-    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
-};
 
 #ifdef OLD_GETTER_SETTER_METHODS
 JS_FRIEND_API(JSBool) obj_defineGetter(JSContext *cx, unsigned argc, js::Value *vp);
@@ -387,10 +380,15 @@ struct Atom {
 
 } /* namespace shadow */
 
-extern JS_FRIEND_DATA(js::Class) FunctionProxyClass;
-extern JS_FRIEND_DATA(js::Class) OuterWindowProxyClass;
-extern JS_FRIEND_DATA(js::Class) ObjectProxyClass;
-extern JS_FRIEND_DATA(js::Class) ObjectClass;
+// These are equal to |&{Function,Object,OuterWindow}ProxyObject::class_|.  Use
+// them in places where you don't want to #include vm/ProxyObject.h.
+extern JS_FRIEND_DATA(js::Class*) FunctionProxyClassPtr;
+extern JS_FRIEND_DATA(js::Class*) ObjectProxyClassPtr;
+extern JS_FRIEND_DATA(js::Class*) OuterWindowProxyClassPtr;
+
+// This is equal to |&JSObject::class_|.  Use it in places where you don't want
+// to #include jsobj.h.
+extern JS_FRIEND_DATA(js::Class*) ObjectClassPtr;
 
 inline js::Class *
 GetObjectClass(JSObject *obj)
@@ -492,9 +490,9 @@ inline bool
 GetObjectProto(JSContext *cx, JS::Handle<JSObject*> obj, JS::MutableHandle<JSObject*> proto)
 {
     js::Class *clasp = GetObjectClass(obj);
-    if (clasp == &js::ObjectProxyClass ||
-        clasp == &js::OuterWindowProxyClass ||
-        clasp == &js::FunctionProxyClass)
+    if (clasp == js::ObjectProxyClassPtr ||
+        clasp == js::OuterWindowProxyClassPtr ||
+        clasp == js::FunctionProxyClassPtr)
     {
         return JS_GetPrototype(cx, obj, proto.address());
     }

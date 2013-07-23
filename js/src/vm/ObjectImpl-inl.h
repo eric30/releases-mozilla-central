@@ -15,10 +15,12 @@
 
 #include "gc/Heap.h"
 #include "gc/Marking.h"
-#include "js/TemplateLib.h"
 #include "vm/ObjectImpl.h"
 
 #include "gc/Barrier-inl.h"
+#include "vm/Interpreter.h"
+#include "vm/ObjectImpl.h"
+#include "vm/ProxyObject.h"
 
 inline JSCompartment *
 js::ObjectImpl::compartment() const
@@ -41,7 +43,7 @@ js::ObjectImpl::nativeContainsPure(Shape *shape)
 inline bool
 js::ObjectImpl::nonProxyIsExtensible() const
 {
-    MOZ_ASSERT(!isProxy());
+    MOZ_ASSERT(!asObjectPtr()->is<ProxyObject>());
 
     // [[Extensible]] for ordinary non-proxy objects is an object flag.
     return !lastProperty()->hasObjectFlag(BaseShape::NOT_EXTENSIBLE);
@@ -50,7 +52,9 @@ js::ObjectImpl::nonProxyIsExtensible() const
 /* static */ inline bool
 js::ObjectImpl::isExtensible(ExclusiveContext *cx, js::Handle<ObjectImpl*> obj, bool *extensible)
 {
-    if (obj->isProxy()) {
+    if (obj->asObjectPtr()->is<ProxyObject>()) {
+        if (!cx->shouldBeJSContext())
+            return false;
         HandleObject h =
             HandleObject::fromMarkedLocation(reinterpret_cast<JSObject* const*>(obj.address()));
         return Proxy::isExtensible(cx->asJSContext(), h, extensible);
@@ -64,12 +68,6 @@ inline bool
 js::ObjectImpl::isNative() const
 {
     return lastProperty()->isNative();
-}
-
-inline bool
-js::ObjectImpl::isProxy() const
-{
-    return js::IsProxy(const_cast<JSObject*>(this->asObjectPtr()));
 }
 
 #ifdef DEBUG
@@ -229,6 +227,22 @@ js::ObjectImpl::writeBarrierPost(ObjectImpl *obj, void *addr)
     if (IsNullTaggedPointer(obj))
         return;
     obj->runtime()->gcStoreBuffer.putCell((Cell **)addr);
+#endif
+}
+
+/* static */ inline void
+js::ObjectImpl::writeBarrierPostRelocate(ObjectImpl *obj, void *addr)
+{
+#ifdef JSGC_GENERATIONAL
+    obj->runtime()->gcStoreBuffer.putRelocatableCell((Cell **)addr);
+#endif
+}
+
+/* static */ inline void
+js::ObjectImpl::writeBarrierPostRemove(ObjectImpl *obj, void *addr)
+{
+#ifdef JSGC_GENERATIONAL
+    obj->runtime()->gcStoreBuffer.removeRelocatableCell((Cell **)addr);
 #endif
 }
 

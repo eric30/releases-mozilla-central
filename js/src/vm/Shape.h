@@ -10,6 +10,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/GuardObjects.h"
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/TemplateLib.h"
 
 #include "jspropertytree.h"
 #include "jstypes.h"
@@ -108,7 +109,7 @@ static const uint32_t SHAPE_MAXIMUM_SLOT = JS_BIT(24) - 2;
  * minimize footprint.
  */
 struct ShapeTable {
-    static const uint32_t HASH_BITS     = tl::BitSize<HashNumber>::result;
+    static const uint32_t HASH_BITS     = mozilla::tl::BitSize<HashNumber>::value;
     static const uint32_t MIN_ENTRIES   = 7;
     static const uint32_t MIN_SIZE_LOG2 = 4;
     static const uint32_t MIN_SIZE      = JS_BIT(MIN_SIZE_LOG2);
@@ -1044,28 +1045,64 @@ struct StackShape
         SkipRoot skip;
         MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
     };
- };
+};
 
 } /* namespace js */
 
 /* js::Shape pointer tag bit indicating a collision. */
 #define SHAPE_COLLISION                 (uintptr_t(1))
-#define SHAPE_REMOVED                   ((Shape *) SHAPE_COLLISION)
+#define SHAPE_REMOVED                   ((js::Shape *) SHAPE_COLLISION)
 
-/* Macros to get and set shape pointer values and collision flags. */
-#define SHAPE_IS_FREE(shape)            ((shape) == NULL)
-#define SHAPE_IS_REMOVED(shape)         ((shape) == SHAPE_REMOVED)
-#define SHAPE_IS_LIVE(shape)            ((shape) > SHAPE_REMOVED)
-#define SHAPE_FLAG_COLLISION(spp,shape) (*(spp) = (Shape *)                  \
-                                         (uintptr_t(shape) | SHAPE_COLLISION))
-#define SHAPE_HAD_COLLISION(shape)      (uintptr_t(shape) & SHAPE_COLLISION)
-#define SHAPE_FETCH(spp)                SHAPE_CLEAR_COLLISION(*(spp))
+/* Functions to get and set shape pointer values and collision flags. */
 
-#define SHAPE_CLEAR_COLLISION(shape)                                          \
-    ((Shape *) (uintptr_t(shape) & ~SHAPE_COLLISION))
+inline bool
+SHAPE_IS_FREE(js::Shape *shape)
+{
+    return shape == NULL;
+}
 
-#define SHAPE_STORE_PRESERVING_COLLISION(spp, shape)                          \
-    (*(spp) = (Shape *) (uintptr_t(shape) | SHAPE_HAD_COLLISION(*(spp))))
+inline bool
+SHAPE_IS_REMOVED(js::Shape *shape)
+{
+    return shape == SHAPE_REMOVED;
+}
+
+inline bool
+SHAPE_IS_LIVE(js::Shape *shape)
+{
+    return shape > SHAPE_REMOVED;
+}
+
+inline void
+SHAPE_FLAG_COLLISION(js::Shape **spp, js::Shape *shape)
+{
+    *spp = reinterpret_cast<js::Shape*>(uintptr_t(shape) | SHAPE_COLLISION);
+}
+
+inline bool
+SHAPE_HAD_COLLISION(js::Shape *shape)
+{
+    return uintptr_t(shape) & SHAPE_COLLISION;
+}
+
+inline js::Shape *
+SHAPE_CLEAR_COLLISION(js::Shape *shape)
+{
+    return reinterpret_cast<js::Shape*>(uintptr_t(shape) & ~SHAPE_COLLISION);
+}
+
+inline js::Shape *
+SHAPE_FETCH(js::Shape **spp)
+{
+    return SHAPE_CLEAR_COLLISION(*spp);
+}
+
+inline void
+SHAPE_STORE_PRESERVING_COLLISION(js::Shape **spp, js::Shape *shape)
+{
+    *spp = reinterpret_cast<js::Shape*>(uintptr_t(shape) |
+                                        uintptr_t(SHAPE_HAD_COLLISION(*spp)));
+}
 
 namespace js {
 

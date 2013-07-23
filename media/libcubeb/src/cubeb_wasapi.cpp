@@ -9,9 +9,9 @@
 #endif
 #include <assert.h>
 #include <windows.h>
-#include <Mmdeviceapi.h>
-#include <WinDef.h>
-#include <Audioclient.h>
+#include <mmdeviceapi.h>
+#include <windef.h>
+#include <audioclient.h>
 #include <math.h>
 #include <process.h>
 #include <avrt.h>
@@ -21,7 +21,7 @@
 #include "cubeb-speex-resampler.h"
 #include <stdio.h>
 
-#if 1
+#if 0
 #  define LOG(...) do {         \
   fprintf(stderr, __VA_ARGS__); \
   fprintf(stderr, "\n");        \
@@ -289,6 +289,11 @@ wasapi_stream_render_loop(LPVOID stream)
     switch (waitResult) {
     case WAIT_OBJECT_0: { /* shutdown */
       is_playing = false;
+      /* We don't check if the drain is actually finished here, we just want to
+       * shutdown. */
+      if (stm->draining) {
+        stm->state_callback(stm, stm->user_ptr, CUBEB_STATE_DRAINED);
+      }
       continue;
     }
     case WAIT_OBJECT_0 + 1: { /* refill */

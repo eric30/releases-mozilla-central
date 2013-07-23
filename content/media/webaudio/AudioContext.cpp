@@ -176,12 +176,13 @@ AudioContext::CreateBuffer(JSContext* aJSContext, ArrayBuffer& aBuffer,
                   aBuffer.Data(), aBuffer.Length(),
                   contentType);
 
-  WebAudioDecodeJob job(contentType, this);
+  nsRefPtr<WebAudioDecodeJob> job =
+    new WebAudioDecodeJob(contentType, this, aBuffer);
 
   if (mDecoder.SyncDecodeMedia(contentType.get(),
-                               aBuffer.Data(), aBuffer.Length(), job) &&
-      job.mOutput) {
-    nsRefPtr<AudioBuffer> buffer = job.mOutput.forget();
+                               aBuffer.Data(), aBuffer.Length(), *job) &&
+      job->mOutput) {
+    nsRefPtr<AudioBuffer> buffer = job->mOutput.forget();
     if (aMixToMono) {
       buffer->MixToMono(aJSContext);
     }
@@ -212,8 +213,13 @@ bool IsValidBufferSize(uint32_t aBufferSize) {
 }
 
 already_AddRefed<MediaStreamAudioDestinationNode>
-AudioContext::CreateMediaStreamDestination()
+AudioContext::CreateMediaStreamDestination(ErrorResult& aRv)
 {
+  if (mIsOffline) {
+    aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
+    return nullptr;
+  }
+
   nsRefPtr<MediaStreamAudioDestinationNode> node =
       new MediaStreamAudioDestinationNode(this);
   return node.forget();
@@ -374,8 +380,8 @@ AudioContext::DecodeAudioData(const ArrayBuffer& aBuffer,
   if (aFailureCallback.WasPassed()) {
     failureCallback = &aFailureCallback.Value();
   }
-  nsAutoPtr<WebAudioDecodeJob> job(
-    new WebAudioDecodeJob(contentType, this,
+  nsRefPtr<WebAudioDecodeJob> job(
+    new WebAudioDecodeJob(contentType, this, aBuffer,
                           &aSuccessCallback, failureCallback));
   mDecoder.AsyncDecodeMedia(contentType.get(),
                             aBuffer.Data(), aBuffer.Length(), *job);
@@ -400,6 +406,9 @@ void
 AudioContext::UnregisterPannerNode(PannerNode* aNode)
 {
   mPannerNodes.RemoveEntry(aNode);
+  if (mListener) {
+    mListener->UnregisterPannerNode(aNode);
+  }
 }
 
 void
