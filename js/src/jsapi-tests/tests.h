@@ -10,12 +10,12 @@
 #include "mozilla/Util.h"
 
 #include "jsapi.h"
+#include "jscntxt.h"
 #include "jsprvtd.h"
 #include "jsalloc.h"
 
 // For js::gc::AutoSuppressGC
 #include "jsgc.h"
-#include "jsgcinlines.h"
 
 #include "js/Vector.h"
 
@@ -81,6 +81,7 @@ class JSAPITest
         }
         if (cx) {
             JS_RemoveObjectRoot(cx, &global);
+            JS_LeaveCompartment(cx, NULL);
             JS_EndRequest(cx);
             JS_DestroyContext(cx);
             cx = NULL;
@@ -301,7 +302,6 @@ class JSAPITest
         if (!cx)
             return NULL;
         JS_SetOptions(cx, JSOPTION_VAROBJFIX);
-        JS_SetVersion(cx, JSVERSION_LATEST);
         JS_SetErrorReporter(cx, &reportError);
         return cx;
     }

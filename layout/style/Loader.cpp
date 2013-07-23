@@ -16,6 +16,7 @@
 
 /* loading of CSS style sheets using the network APIs */
 
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/Util.h"
 
 #include "mozilla/css/Loader.h"
@@ -970,6 +971,34 @@ Loader::IsAlternate(const nsAString& aTitle, bool aHasAlternateRel)
   }
 
   return !aTitle.Equals(mPreferredSheet);
+}
+
+/* static */ PLDHashOperator
+Loader::RemoveEntriesWithURI(URIPrincipalAndCORSModeHashKey* aKey,
+                             nsRefPtr<nsCSSStyleSheet> &aSheet,
+                             void* aUserData)
+{
+  nsIURI* obsoleteURI = static_cast<nsIURI*>(aUserData);
+  nsIURI* sheetURI = aKey->GetURI();
+  bool areEqual;
+  nsresult rv = sheetURI->Equals(obsoleteURI, &areEqual);
+  if (NS_SUCCEEDED(rv) && areEqual) {
+    return PL_DHASH_REMOVE;
+  }
+  return PL_DHASH_NEXT;
+}
+
+nsresult
+Loader::ObsoleteSheet(nsIURI* aURI)
+{
+  if (!mCompleteSheets.IsInitialized()) {
+    return NS_OK;
+  }
+  if (!aURI) {
+    return NS_ERROR_INVALID_ARG;
+  }
+  mCompleteSheets.Enumerate(RemoveEntriesWithURI, aURI);
+  return NS_OK;
 }
 
 /**
@@ -2442,13 +2471,13 @@ Loader::UnlinkCachedSheets()
 
 struct SheetMemoryCounter {
   size_t size;
-  nsMallocSizeOfFun mallocSizeOf;
+  mozilla::MallocSizeOf mallocSizeOf;
 };
 
 static size_t
 CountSheetMemory(URIPrincipalAndCORSModeHashKey* /* unused */,
                  const nsRefPtr<nsCSSStyleSheet>& aSheet,
-                 nsMallocSizeOfFun aMallocSizeOf,
+                 mozilla::MallocSizeOf aMallocSizeOf,
                  void* /* unused */)
 {
   // If aSheet has a parent, then its parent will report it so we don't
@@ -2462,7 +2491,7 @@ CountSheetMemory(URIPrincipalAndCORSModeHashKey* /* unused */,
 }
 
 size_t
-Loader::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+Loader::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
 {
   size_t s = aMallocSizeOf(this);
 

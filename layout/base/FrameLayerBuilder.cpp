@@ -1579,15 +1579,9 @@ ContainerState::PopThebesLayerData()
       colorLayer->SetBaseTransform(data->mLayer->GetBaseTransform());
       colorLayer->SetPostScale(data->mLayer->GetPostXScale(), data->mLayer->GetPostYScale());
 
-      // Clip colorLayer to its visible region, since ColorLayers are
-      // allowed to paint outside the visible region. Here we rely on the
-      // fact that uniform display items fill rectangles; obviously the
-      // area to fill must contain the visible region, and because it's
-      // a rectangle, it must therefore contain the visible region's GetBounds.
-      // Note that the visible region is already clipped appropriately.
       nsIntRect visibleRect = data->mVisibleRegion.GetBounds();
-      visibleRect.MoveBy(mParameters.mOffset);
-      colorLayer->SetClipRect(&visibleRect);
+      visibleRect.MoveBy(-GetTranslationForThebesLayer(data->mLayer));
+      colorLayer->SetBounds(visibleRect);
 
       layer = colorLayer;
     }
@@ -2047,6 +2041,9 @@ ContainerState::ProcessDisplayItems(const nsDisplayList& aList,
     topLeft = lastActiveScrolledRoot->GetOffsetToCrossDoc(mContainerReferenceFrame);
   }
 
+  int32_t maxLayers = nsDisplayItem::MaxActiveLayers();
+  int layerCount = 0;
+
   for (nsDisplayItem* item = aList.GetBottom(); item; item = item->GetAbove()) {
     NS_ASSERTION(mAppUnitsPerDevPixel == AppUnitsPerDevPixel(item),
       "items in a container layer should all have the same app units per dev pixel");
@@ -2089,12 +2086,18 @@ ContainerState::ProcessDisplayItems(const nsDisplayList& aList,
       }
     }
 
+    if (maxLayers != -1 && layerCount >= maxLayers) {
+      forceInactive = true;
+    }
+
     // Assign the item to a layer
     if (layerState == LAYER_ACTIVE_FORCE ||
         (layerState == LAYER_INACTIVE && !mManager->IsWidgetLayerManager()) ||
         (!forceInactive &&
          (layerState == LAYER_ACTIVE_EMPTY ||
           layerState == LAYER_ACTIVE))) {
+
+      layerCount++;
 
       // LAYER_ACTIVE_EMPTY means the layer is created just for its metadata.
       // We should never see an empty layer with any visible content!

@@ -34,7 +34,7 @@ class BaselineCompiler;
 class Nursery
 {
   public:
-    const static int NumNurseryChunks = 8;
+    const static int NumNurseryChunks = 16;
     const static int LastNurseryChunk = NumNurseryChunks - 1;
     const static size_t Alignment = gc::ChunkSize;
     const static size_t NurserySize = gc::ChunkSize * NumNurseryChunks;
@@ -92,6 +92,9 @@ class Nursery
      */
     template <typename T>
     JS_ALWAYS_INLINE bool getForwardedPointer(T **ref);
+
+    /* Forward a slots/elements pointer stored in an Ion frame. */
+    void forwardBufferPointer(HeapSlot **pSlotsElems);
 
   private:
     /*
@@ -203,10 +206,20 @@ class Nursery
      * Move the object at |src| in the Nursery to an already-allocated cell
      * |dst| in Tenured.
      */
+    void collectToFixedPoint(gc::MinorCollectionTracer *trc);
+    JS_ALWAYS_INLINE void traceObject(gc::MinorCollectionTracer *trc, JSObject *src);
+    JS_ALWAYS_INLINE void markSlots(gc::MinorCollectionTracer *trc, HeapSlot *vp, uint32_t nslots);
+    JS_ALWAYS_INLINE void markSlots(gc::MinorCollectionTracer *trc, HeapSlot *vp, HeapSlot *end);
+    JS_ALWAYS_INLINE void markSlot(gc::MinorCollectionTracer *trc, HeapSlot *slotp);
     void *moveToTenured(gc::MinorCollectionTracer *trc, JSObject *src);
     size_t moveObjectToTenured(JSObject *dst, JSObject *src, gc::AllocKind dstKind);
     size_t moveElementsToTenured(JSObject *dst, JSObject *src, gc::AllocKind dstKind);
     size_t moveSlotsToTenured(JSObject *dst, JSObject *src, gc::AllocKind dstKind);
+
+    /* Handle relocation of slots/elements pointers stored in Ion frames. */
+    void setSlotsForwardingPointer(HeapSlot *oldSlots, HeapSlot *newSlots, uint32_t nslots);
+    void setElementsForwardingPointer(ObjectElements *oldHeader, ObjectElements *newHeader,
+                                      uint32_t nelems);
 
     /* Handle fallback marking. See the comment in MarkStoreBuffer. */
     void markFallback(gc::Cell *cell);

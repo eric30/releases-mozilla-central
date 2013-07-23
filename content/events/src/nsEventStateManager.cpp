@@ -96,6 +96,7 @@
 #include "GeckoProfiler.h"
 
 #include "nsIDOMClientRect.h"
+#include "Units.h"
 
 #ifdef XP_MACOSX
 #import <ApplicationServices/ApplicationServices.h>
@@ -122,7 +123,7 @@ nsWeakFrame nsEventStateManager::sLastDragOverFrame = nullptr;
 nsIntPoint nsEventStateManager::sLastRefPoint = kInvalidRefPoint;
 nsIntPoint nsEventStateManager::sLastScreenPoint = nsIntPoint(0,0);
 nsIntPoint nsEventStateManager::sSynthCenteringPoint = kInvalidRefPoint;
-nsIntPoint nsEventStateManager::sLastClientPoint = nsIntPoint(0,0);
+CSSIntPoint nsEventStateManager::sLastClientPoint = CSSIntPoint(0, 0);
 bool nsEventStateManager::sIsPointerLocked = false;
 // Reference to the pointer locked element.
 nsWeakPtr nsEventStateManager::sPointerLockedElement;
@@ -1495,8 +1496,7 @@ nsEventStateManager::DispatchCrossProcessEvent(nsEvent* aEvent,
     return remote->SendRealTouchEvent(*touchEvent);
   }
   default: {
-    MOZ_NOT_REACHED("Attempt to send non-whitelisted event?");
-    return false;
+    MOZ_CRASH("Attempt to send non-whitelisted event?");
   }
   }
 }
@@ -1525,7 +1525,7 @@ nsEventStateManager::IsRemoteTarget(nsIContent* target) {
   return false;
 }
 
-/*static*/ nsIntPoint
+/*static*/ LayoutDeviceIntPoint
 nsEventStateManager::GetChildProcessOffset(nsFrameLoader* aFrameLoader,
                                            const nsEvent& aEvent)
 {
@@ -1533,32 +1533,33 @@ nsEventStateManager::GetChildProcessOffset(nsFrameLoader* aFrameLoader,
   // 0,0.  Map the event coordinates to match that.
   nsIFrame* targetFrame = aFrameLoader->GetPrimaryFrameOfOwningContent();
   if (!targetFrame) {
-    return nsIntPoint();
+    return LayoutDeviceIntPoint();
   }
   nsPresContext* presContext = targetFrame->PresContext();
 
   // Find out how far we're offset from the nearest widget.
   nsPoint pt = nsLayoutUtils::GetEventCoordinatesRelativeTo(&aEvent,
                                                             targetFrame);
-  return pt.ToNearestPixels(presContext->AppUnitsPerDevPixel());
+  return LayoutDeviceIntPoint::FromAppUnitsToNearest(pt, presContext->AppUnitsPerDevPixel());
 }
 
 /*static*/ void
 nsEventStateManager::MapEventCoordinatesForChildProcess(
-  const nsIntPoint& aOffset, nsEvent* aEvent)
+  const LayoutDeviceIntPoint& aOffset, nsEvent* aEvent)
 {
+  nsIntPoint aOffsetIntPoint(aOffset.x, aOffset.y);
   if (aEvent->eventStructType != NS_TOUCH_EVENT) {
-    aEvent->refPoint = aOffset;
+    aEvent->refPoint = aOffsetIntPoint;
   } else {
     aEvent->refPoint = nsIntPoint();
     nsTouchEvent* touchEvent = static_cast<nsTouchEvent*>(aEvent);
     // Then offset all the touch points by that distance, to put them
     // in the space where top-left is 0,0.
-    const nsTArray<nsCOMPtr<nsIDOMTouch> >& touches = touchEvent->touches;
+    const nsTArray< nsRefPtr<Touch> >& touches = touchEvent->touches;
     for (uint32_t i = 0; i < touches.Length(); ++i) {
       nsIDOMTouch* touch = touches[i];
       if (touch) {
-        touch->mRefPoint += aOffset;
+        touch->mRefPoint += aOffsetIntPoint;
       }
     }
   }
@@ -1568,7 +1569,7 @@ nsEventStateManager::MapEventCoordinatesForChildProcess(
 nsEventStateManager::MapEventCoordinatesForChildProcess(nsFrameLoader* aFrameLoader,
                                                         nsEvent* aEvent)
 {
-  nsIntPoint offset = GetChildProcessOffset(aFrameLoader, *aEvent);
+  LayoutDeviceIntPoint offset = GetChildProcessOffset(aFrameLoader, *aEvent);
   MapEventCoordinatesForChildProcess(offset, aEvent);
 }
 
@@ -1638,7 +1639,7 @@ nsEventStateManager::HandleCrossProcessEvent(nsEvent *aEvent,
     // This loop is similar to the one used in
     // PresShell::DispatchTouchEvent().
     nsTouchEvent* touchEvent = static_cast<nsTouchEvent*>(aEvent);
-    const nsTArray<nsCOMPtr<nsIDOMTouch> >& touches = touchEvent->touches;
+    const nsTArray< nsRefPtr<Touch> >& touches = touchEvent->touches;
     for (uint32_t i = 0; i < touches.Length(); ++i) {
       nsIDOMTouch* touch = touches[i];
       // NB: the |mChanged| check is an optimization, subprocesses can
@@ -2520,8 +2521,7 @@ nsEventStateManager::DispatchLegacyMouseScrollEvents(nsIFrame* aTargetFrame,
       break;
 
     default:
-      MOZ_NOT_REACHED("Invalid deltaMode value comes");
-      return;
+      MOZ_CRASH("Invalid deltaMode value comes");
   }
 
   // Send the legacy events in following order:
@@ -2847,8 +2847,7 @@ nsEventStateManager::DoScrollText(nsIScrollableFrame* aScrollableFrame,
       origin = nsGkAtoms::pixels;
       break;
     default:
-      MOZ_NOT_REACHED("Invalid deltaMode value comes");
-      return;
+      MOZ_CRASH("Invalid deltaMode value comes");
   }
 
   // We shouldn't scroll more one page at once except when over one page scroll
@@ -2892,8 +2891,7 @@ nsEventStateManager::DoScrollText(nsIScrollableFrame* aScrollableFrame,
       mode = nsIScrollableFrame::SMOOTH;
       break;
     default:
-      MOZ_NOT_REACHED("Invalid scrollType value comes");
-      return;
+      MOZ_CRASH("Invalid scrollType value comes");
   }
 
   nsIntPoint overflow;
@@ -4569,7 +4567,10 @@ nsEventStateManager::CheckForAndDispatchClick(nsPresContext* aPresContext,
       if (!mouseContent && !mCurrentTarget) {
         return NS_OK;
       }
-      ret = presShell->HandleEventWithTarget(&event, mCurrentTarget,
+
+      // HandleEvent clears out mCurrentTarget which we might need again
+      nsWeakFrame currentTarget = mCurrentTarget;
+      ret = presShell->HandleEventWithTarget(&event, currentTarget,
                                              mouseContent, aStatus);
       if (NS_SUCCEEDED(ret) && aEvent->clickCount == 2) {
         //fire double click
@@ -4583,7 +4584,7 @@ nsEventStateManager::CheckForAndDispatchClick(nsPresContext* aPresContext,
         event2.button = aEvent->button;
         event2.inputSource = aEvent->inputSource;
 
-        ret = presShell->HandleEventWithTarget(&event2, mCurrentTarget,
+        ret = presShell->HandleEventWithTarget(&event2, currentTarget,
                                                mouseContent, aStatus);
       }
     }

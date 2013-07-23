@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "tests.h"
+#include "jsapi-tests/tests.h"
 #include "jsfun.h"
 #include "jscntxt.h"
 
@@ -134,7 +134,7 @@ JSContext *createContext()
 {
     JSContext *cx = JSAPITest::createContext();
     if (cx)
-        JS_SetOptions(cx, JS_GetOptions(cx) | JSOPTION_BASELINE | JSOPTION_ION | JSOPTION_PCCOUNT);
+        JS_SetOptions(cx, JS_GetOptions(cx) | JSOPTION_BASELINE | JSOPTION_ION);
     return cx;
 }
 

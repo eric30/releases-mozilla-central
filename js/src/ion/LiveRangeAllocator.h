@@ -7,10 +7,11 @@
 #ifndef ion_LiveRangeAllocator_h
 #define ion_LiveRangeAllocator_h
 
+#include "mozilla/Array.h"
 #include "mozilla/DebugOnly.h"
 
-#include "RegisterAllocator.h"
-#include "StackSlotAllocator.h"
+#include "ion/RegisterAllocator.h"
+#include "ion/StackSlotAllocator.h"
 
 // Common structures and functions used by register allocators that operate on
 // virtual register live ranges.
@@ -117,9 +118,8 @@ UseCompatibleWith(const LUse *use, LAllocation alloc)
           // UsePosition is only used as hint.
         return alloc.isRegister();
       default:
-        JS_NOT_REACHED("Unknown use policy");
+        MOZ_ASSUME_UNREACHABLE("Unknown use policy");
     }
-    return false;
 }
 
 #ifdef DEBUG
@@ -147,9 +147,8 @@ DefinitionCompatibleWith(LInstruction *ins, const LDefinition *def, LAllocation 
       case LDefinition::PASSTHROUGH:
         return true;
       default:
-        JS_NOT_REACHED("Unknown definition policy");
+        MOZ_ASSUME_UNREACHABLE("Unknown definition policy");
     }
-    return false;
 }
 
 #endif // DEBUG
@@ -497,6 +496,12 @@ IsNunbox(VirtualRegister *vreg)
 }
 
 static inline bool
+IsSlotsOrElements(VirtualRegister *vreg)
+{
+    return vreg->type() == LDefinition::SLOTS;
+}
+
+static inline bool
 IsTraceable(VirtualRegister *reg)
 {
     if (reg->type() == LDefinition::OBJECT)
@@ -518,7 +523,7 @@ class LiveRangeAllocator : public RegisterAllocator
     // Computed inforamtion
     BitSet **liveIn;
     VirtualRegisterMap<VREG> vregs;
-    FixedArityList<LiveInterval *, AnyRegister::Total> fixedIntervals;
+    mozilla::Array<LiveInterval *, AnyRegister::Total> fixedIntervals;
 
     // Union of all ranges in fixedIntervals, used to quickly determine
     // whether an interval intersects with a fixed register.

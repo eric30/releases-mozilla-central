@@ -9,6 +9,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/GuardObjects.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/Util.h"
 
 #include "jscntxt.h"
@@ -185,7 +186,10 @@ struct Zone : private JS::shadow::Zone,
 
     void scheduleGC() {
         JS_ASSERT(!rt->isHeapBusy());
-        gcScheduled = true;
+
+        /* Note: zones cannot be collected while in use by other threads. */
+        if (!usedByExclusiveThread)
+            gcScheduled = true;
     }
 
     void unscheduleGC() {
@@ -234,6 +238,9 @@ struct Zone : private JS::shadow::Zone,
 
     bool                         isSystem;
 
+    /* Whether this zone is being used by a thread with an ExclusiveContext. */
+    bool usedByExclusiveThread;
+
     /*
      * These flags help us to discover if a compartment that shouldn't be alive
      * manages to outlive a GC.
@@ -259,7 +266,7 @@ struct Zone : private JS::shadow::Zone,
 
     void discardJitCode(js::FreeOp *fop, bool discardConstraints);
 
-    void sizeOfIncludingThis(JSMallocSizeOfFun mallocSizeOf, size_t *typePool);
+    void sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf, size_t *typePool);
 
     void setGCLastBytes(size_t lastBytes, js::JSGCInvocationKind gckind);
     void reduceGCTriggerBytes(size_t amount);

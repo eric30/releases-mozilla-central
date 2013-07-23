@@ -23,25 +23,6 @@ using js::frontend::IsIdentifier;
 using mozilla::ArrayLength;
 
 
-// Duplicated in jsobj.cpp
-static bool
-DefineProperties(JSContext *cx, HandleObject obj, HandleObject props)
-{
-    AutoIdVector ids(cx);
-    AutoPropDescArrayRooter descs(cx);
-    if (!ReadPropertyDescriptors(cx, props, true, &ids, &descs))
-        return false;
-
-    bool dummy;
-    for (size_t i = 0, len = ids.length(); i < len; i++) {
-        if (!DefineProperty(cx, obj, ids.handleAt(i), descs[i], true, &dummy))
-            return false;
-    }
-
-    return true;
-}
-
-
 JSBool
 js::obj_construct(JSContext *cx, unsigned argc, Value *vp)
 {
@@ -384,7 +365,7 @@ DefineAccessor(JSContext *cx, unsigned argc, Value *vp)
     if (!ValueToId<CanGC>(cx, args.handleAt(0), &id))
         return false;
 
-    RootedObject descObj(cx, NewBuiltinClassInstance(cx, &ObjectClass));
+    RootedObject descObj(cx, NewBuiltinClassInstance(cx, &JSObject::class_));
     if (!descObj)
         return false;
 
@@ -439,7 +420,7 @@ obj_lookupGetter(JSContext *cx, unsigned argc, Value *vp)
     RootedObject obj(cx, ToObject(cx, args.thisv()));
     if (!obj)
         return JS_FALSE;
-    if (obj->isProxy()) {
+    if (obj->is<ProxyObject>()) {
         // The vanilla getter lookup code below requires that the object is
         // native. Handle proxies separately.
         args.rval().setUndefined();
@@ -475,7 +456,7 @@ obj_lookupSetter(JSContext *cx, unsigned argc, Value *vp)
     RootedObject obj(cx, ToObject(cx, args.thisv()));
     if (!obj)
         return JS_FALSE;
-    if (obj->isProxy()) {
+    if (obj->is<ProxyObject>()) {
         // The vanilla setter lookup code below requires that the object is
         // native. Handle proxies separately.
         args.rval().setUndefined();
@@ -557,7 +538,12 @@ obj_watch_handler(JSContext *cx, JSObject *obj_, jsid id_, jsval old,
 
     JSObject *callable = (JSObject *)closure;
     Value argv[] = { IdToValue(id), old, *nvp };
-    return Invoke(cx, ObjectValue(*obj), ObjectOrNullValue(callable), ArrayLength(argv), argv, nvp);
+    RootedValue rv(cx);
+    if (!Invoke(cx, ObjectValue(*obj), ObjectOrNullValue(callable), ArrayLength(argv), argv, &rv))
+        return false;
+
+    *nvp = rv;
+    return true;
 }
 
 static JSBool
@@ -626,7 +612,7 @@ obj_hasOwnProperty(JSContext *cx, unsigned argc, Value *vp)
     if (args.thisv().isObject() && ValueToId<NoGC>(cx, idValue, &id)) {
         JSObject *obj = &args.thisv().toObject(), *obj2;
         Shape *prop;
-        if (!obj->isProxy() &&
+        if (!obj->is<ProxyObject>() &&
             HasOwnProperty<NoGC>(cx, obj->getOps()->lookupGeneric, obj, id, &obj2, &prop))
         {
             args.rval().setBoolean(!!prop);
@@ -647,7 +633,7 @@ obj_hasOwnProperty(JSContext *cx, unsigned argc, Value *vp)
     /* Non-standard code for proxies. */
     RootedObject obj2(cx);
     RootedShape prop(cx);
-    if (obj->isProxy()) {
+    if (obj->is<ProxyObject>()) {
         bool has;
         if (!Proxy::hasOwn(cx, obj, idRoot, &has))
             return false;
@@ -716,12 +702,9 @@ obj_create(JSContext *cx, unsigned argc, Value *vp)
      * Use the callee's global as the parent of the new object to avoid dynamic
      * scoping (i.e., using the caller's global).
      */
-    RootedObject obj(cx, NewObjectWithGivenProto(cx, &ObjectClass, proto, &args.callee().global()));
+    RootedObject obj(cx, NewObjectWithGivenProto(cx, &JSObject::class_, proto, &args.callee().global()));
     if (!obj)
         return false;
-
-    /* Don't track types or array-ness for objects created here. */
-    MarkTypeObjectUnknownProperties(cx, obj->type());
 
     /* 15.2.3.5 step 4. */
     if (args.hasDefined(1)) {
@@ -899,7 +882,10 @@ obj_isExtensible(JSContext *cx, unsigned argc, Value *vp)
     if (!GetFirstArgumentAsObject(cx, args, "Object.isExtensible", &obj))
         return false;
 
-    args.rval().setBoolean(obj->isExtensible());
+    bool extensible;
+    if (!JSObject::isExtensible(cx, obj, &extensible))
+        return false;
+    args.rval().setBoolean(extensible);
     return true;
 }
 
@@ -912,7 +898,11 @@ obj_preventExtensions(JSContext *cx, unsigned argc, Value *vp)
         return false;
 
     args.rval().setObject(*obj);
-    if (!obj->isExtensible())
+
+    bool extensible;
+    if (!JSObject::isExtensible(cx, obj, &extensible))
+        return false;
+    if (!extensible)
         return true;
 
     return JSObject::preventExtensions(cx, obj);

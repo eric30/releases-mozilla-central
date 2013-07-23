@@ -31,6 +31,7 @@
 #include "nsTArray.h"
 #include "nsAutoPtr.h"
 #include "nsIWidget.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/TimeStamp.h"
 #include "prclist.h"
 #include "Layers.h"
@@ -74,6 +75,10 @@ class nsIDOMMediaQueryList;
 #ifdef MOZ_REFLOW_PERF
 class nsRenderingContext;
 #endif
+
+namespace mozilla {
+  class RestyleManager;
+}
 
 // supported values for cached bool types
 enum nsPresContext_CachedBoolPrefType {
@@ -237,15 +242,20 @@ public:
   }
 
 #ifdef _IMPL_NS_LAYOUT
-  nsStyleSet* StyleSet() { return GetPresShell()->StyleSet(); }
+  nsStyleSet* StyleSet() { return PresShell()->StyleSet(); }
 
   nsFrameManager* FrameManager()
-    { return GetPresShell()->FrameManager(); }
+    { return PresShell()->FrameManager(); }
+
+  nsCSSFrameConstructor* FrameConstructor()
+    { return PresShell()->FrameConstructor(); }
 
   nsTransitionManager* TransitionManager() { return mTransitionManager; }
   nsAnimationManager* AnimationManager() { return mAnimationManager; }
 
   nsRefreshDriver* RefreshDriver() { return mRefreshDriver; }
+
+  mozilla::RestyleManager* RestyleManager() { return mRestyleManager; }
 #endif
 
   /**
@@ -304,7 +314,22 @@ public:
   /** 
    * Get medium of presentation
    */
-  nsIAtom* Medium() { return mMedium; }
+  nsIAtom* Medium() {
+    if (!mIsEmulatingMedia)
+      return mMedium;
+    return mMediaEmulated;
+  }
+
+  /*
+   * Render the document as if being viewed on a device with the specified
+   * media type.
+   */
+  void EmulateMedium(const nsAString& aMediaType);
+
+  /*
+   * Restore the viewer's natural medium
+   */
+  void StopEmulatingMedium();
 
   void* AllocateFromShell(size_t aSize)
   {
@@ -962,8 +987,8 @@ public:
     PropertyTable()->DeleteAllFor(aFrame);
   }
 
-  virtual size_t SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const;
-  virtual size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const {
+  virtual size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
+  virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const {
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }
 
@@ -1057,7 +1082,7 @@ protected:
                             NS_FONT_STRETCH_NORMAL, 0, 0)
     {}
 
-    size_t SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const {
+    size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const {
       size_t n = 0;
       LangGroupFontPrefs *curr = mNext;
       while (curr) {
@@ -1148,8 +1173,10 @@ protected:
   nsRefPtr<nsRefreshDriver> mRefreshDriver;
   nsRefPtr<nsTransitionManager> mTransitionManager;
   nsRefPtr<nsAnimationManager> mAnimationManager;
+  nsRefPtr<mozilla::RestyleManager> mRestyleManager;
   nsIAtom*              mMedium;        // initialized by subclass ctors;
                                         // weak pointer to static atom
+  nsCOMPtr<nsIAtom> mMediaEmulated;
 
   nsILinkHandler*       mLinkHandler;   // [WEAK]
 
@@ -1259,6 +1286,7 @@ protected:
   unsigned              mPendingUIResolutionChanged : 1;
   unsigned              mPendingMediaFeatureValuesChanged : 1;
   unsigned              mPrefChangePendingNeedsReflow : 1;
+  unsigned              mIsEmulatingMedia : 1;
   // True if the requests in mInvalidateRequestsSinceLastPaint cover the
   // entire viewport
   unsigned              mAllInvalidated : 1;
@@ -1320,6 +1348,8 @@ protected:
   };
 
   nscolor MakeColorPref(const nsString& aColor);
+
+  void LastRelease();
 
 #ifdef DEBUG
 private:
@@ -1419,7 +1449,7 @@ public:
    */
   void FlushWillPaintObservers();
 
-  virtual size_t SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const MOZ_OVERRIDE;
+  virtual size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE;
 
 protected:
   /**

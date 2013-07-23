@@ -509,7 +509,7 @@ public:
   /**
    * A style attribute mapping function for the most common attributes, to be
    * called by subclasses' attribute mapping functions.  Currently handles
-   * dir and lang, could handle others.
+   * dir, lang and hidden, could handle others.
    *
    * @param aAttributes the list of attributes to map
    * @param aData the returned rule data [INOUT]
@@ -517,6 +517,15 @@ public:
    */
   static void MapCommonAttributesInto(const nsMappedAttributes* aAttributes, 
                                       nsRuleData* aRuleData);
+  /**
+   * Same as MapCommonAttributesInto except that it does not handle hidden.
+   *
+   * @param aAttributes the list of attributes to map
+   * @param aData the returned rule data [INOUT]
+   * @see GetAttributeMappingFunction
+   */
+  static void MapCommonAttributesIntoExceptHidden(const nsMappedAttributes* aAttributes,
+                                                  nsRuleData* aRuleData);
 
   static const MappedAttributeEntry sCommonAttributeMap[];
   static const MappedAttributeEntry sImageMarginSizeAttributeMap[];
@@ -1461,16 +1470,6 @@ protected:
                                      mNodeInfo->Equals(nsGkAtoms::_tag))
 
 
-#define NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO_GETTER(_getter) \
-  if (aIID.Equals(NS_GET_IID(nsIClassInfo)) ||               \
-      aIID.Equals(NS_GET_IID(nsXPCClassInfo))) {             \
-    foundInterface = _getter ();                             \
-    if (!foundInterface) {                                   \
-      *aInstancePtr = nullptr;                                \
-      return NS_ERROR_OUT_OF_MEMORY;                         \
-    }                                                        \
-  } else
-
 #define NS_FORWARD_NSIDOMHTMLELEMENT_TO_GENERIC                                \
   NS_IMETHOD GetId(nsAString& aId) MOZ_FINAL {                                 \
     mozilla::dom::Element::GetId(aId);                                         \
@@ -1711,7 +1710,6 @@ protected:
  * A macro to declare the NS_NewHTMLXXXElement() functions.
  */
 #define NS_DECLARE_NS_NEW_HTML_ELEMENT(_elementName)                       \
-class nsHTML##_elementName##Element;                                       \
 namespace mozilla {                                                        \
 namespace dom {                                                            \
 class HTML##_elementName##Element;                                         \
@@ -1729,55 +1727,6 @@ NS_NewHTML##_elementName##Element(already_AddRefed<nsINodeInfo> aNodeInfo, \
   return NS_NewHTMLSharedElement(aNodeInfo, aFromParser);                  \
 }
 
-namespace mozilla {
-namespace dom {
-
-// A helper struct to automatically detect whether HTMLFooElement is implemented
-// as nsHTMLFooElement or as mozilla::dom::HTMLFooElement by using SFINAE to
-// look for the InNavQuirksMode function (which lives on nsGenericHTMLElement)
-// on both types and using whichever one the substitution succeeds with.
-
-struct NewHTMLElementHelper
-{
-  template<typename V, V> struct SFINAE;
-  typedef bool (*InNavQuirksMode)(nsIDocument*);
-
-  template<typename T, typename U>
-  static nsGenericHTMLElement*
-  Create(already_AddRefed<nsINodeInfo> aNodeInfo,
-         SFINAE<InNavQuirksMode, T::InNavQuirksMode>* dummy=nullptr)
-  {
-    return new T(aNodeInfo);
-  }
-  template<typename T, typename U>
-  static nsGenericHTMLElement*
-  Create(already_AddRefed<nsINodeInfo> aNodeInfo,
-         SFINAE<InNavQuirksMode, U::InNavQuirksMode>* dummy=nullptr)
-  {
-    return new U(aNodeInfo);
-  }
-
-  template<typename T, typename U>
-  static nsGenericHTMLElement*
-  Create(already_AddRefed<nsINodeInfo> aNodeInfo,
-         mozilla::dom::FromParser aFromParser,
-         SFINAE<InNavQuirksMode, U::InNavQuirksMode>* dummy=nullptr)
-  {
-    return new U(aNodeInfo, aFromParser);
-  }
-  template<typename T, typename U>
-  static nsGenericHTMLElement*
-  Create(already_AddRefed<nsINodeInfo> aNodeInfo,
-         mozilla::dom::FromParser aFromParser,
-         SFINAE<InNavQuirksMode, T::InNavQuirksMode>* dummy=nullptr)
-  {
-    return new T(aNodeInfo, aFromParser);
-  }
-};
-
-}
-}
-
 /**
  * A macro to implement the NS_NewHTMLXXXElement() functions.
  */
@@ -1786,9 +1735,7 @@ nsGenericHTMLElement*                                                        \
 NS_NewHTML##_elementName##Element(already_AddRefed<nsINodeInfo> aNodeInfo,   \
                                   mozilla::dom::FromParser aFromParser)      \
 {                                                                            \
-  return mozilla::dom::NewHTMLElementHelper::                                \
-    Create<nsHTML##_elementName##Element,                                    \
-           mozilla::dom::HTML##_elementName##Element>(aNodeInfo);            \
+  return new mozilla::dom::HTML##_elementName##Element(aNodeInfo);           \
 }
 
 #define NS_IMPL_NS_NEW_HTML_ELEMENT_CHECK_PARSER(_elementName)               \
@@ -1796,10 +1743,8 @@ nsGenericHTMLElement*                                                        \
 NS_NewHTML##_elementName##Element(already_AddRefed<nsINodeInfo> aNodeInfo,   \
                                   mozilla::dom::FromParser aFromParser)      \
 {                                                                            \
-  return mozilla::dom::NewHTMLElementHelper::                                \
-    Create<nsHTML##_elementName##Element,                                    \
-           mozilla::dom::HTML##_elementName##Element>(aNodeInfo,             \
-                                                      aFromParser);          \
+  return new mozilla::dom::HTML##_elementName##Element(aNodeInfo,            \
+                                                       aFromParser);         \
 }
 
 // Here, we expand 'NS_DECLARE_NS_NEW_HTML_ELEMENT()' by hand.

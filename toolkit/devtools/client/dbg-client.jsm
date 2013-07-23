@@ -20,8 +20,9 @@ this.EXPORTED_SYMBOLS = ["DebuggerTransport",
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/NetUtil.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/commonjs/sdk/core/promise.js");
-const { defer, resolve, reject } = Promise;
+Cu.import("resource://gre/modules/Timer.jsm");
+let promise = Cu.import("resource://gre/modules/commonjs/sdk/core/promise.js").Promise;
+const { defer, resolve, reject } = promise;
 
 XPCOMUtils.defineLazyServiceGetter(this, "socketTransportService",
                                    "@mozilla.org/network/socket-transport-service;1",
@@ -199,6 +200,7 @@ const UnsolicitedPauses = {
   "resumeLimit": "resumeLimit",
   "debuggerStatement": "debuggerStatement",
   "breakpoint": "breakpoint",
+  "DOMEvent": "DOMEvent",
   "watchpoint": "watchpoint",
   "exception": "exception"
 };
@@ -320,7 +322,7 @@ DebuggerClient.Argument = function DCP(aPosition) {
 };
 
 DebuggerClient.Argument.prototype.getArgument = function DCP_getArgument(aParams) {
-  if (!this.position in aParams) {
+  if (!(this.position in aParams)) {
     throw new Error("Bad index into params: " + this.position);
   }
   return aParams[this.position];
@@ -492,16 +494,16 @@ DebuggerClient.prototype = {
   /**
    * Reconfigure a thread actor.
    *
-   * @param boolean aUseSourceMaps
-   *        A flag denoting whether to use source maps or not.
+   * @param object aOptions
+   *        A dictionary object of the new options to use in the thread actor.
    * @param function aOnResponse
    *        Called with the response packet.
    */
-  reconfigureThread: function DC_reconfigureThread(aUseSourceMaps, aOnResponse) {
+  reconfigureThread: function(aOptions, aOnResponse) {
     let packet = {
       to: this.activeThread._actor,
       type: "reconfigure",
-      options: { useSourceMaps: aUseSourceMaps }
+      options: aOptions
     };
     this.request(packet, aOnResponse);
   },
@@ -923,6 +925,28 @@ TabClient.prototype = {
     },
     telemetry: "TABDETACH"
   }),
+
+  /**
+   * Reload the page in this tab.
+   */
+  reload: DebuggerClient.requester({
+    type: "reload"
+  }, {
+    telemetry: "RELOAD"
+  }),
+
+  /**
+   * Navigate to another URL.
+   *
+   * @param string url
+   *        The URL to navigate to.
+   */
+  navigateTo: DebuggerClient.requester({
+    type: "navigateTo",
+    url: args(0)
+  }, {
+    telemetry: "NAVIGATETO"
+  }),
 };
 
 eventSource(TabClient.prototype);
@@ -1001,6 +1025,7 @@ ThreadClient.prototype = {
   get paused() { return this._state === "paused"; },
 
   _pauseOnExceptions: false,
+  _pauseOnDOMEvents: null,
 
   _actor: null,
   get actor() { return this._actor; },
@@ -1036,7 +1061,15 @@ ThreadClient.prototype = {
       // further requests that should only be sent in the paused state.
       this._state = "resuming";
 
-      aPacket.pauseOnExceptions = this._pauseOnExceptions;
+      if (!aPacket.resumeLimit) {
+        delete aPacket.resumeLimit;
+      }
+      if (this._pauseOnExceptions) {
+        aPacket.pauseOnExceptions = this._pauseOnExceptions;
+      }
+      if (this._pauseOnDOMEvents) {
+        aPacket.pauseOnDOMEvents = this._pauseOnDOMEvents;
+      }
       return aPacket;
     },
     after: function (aResponse) {
@@ -1108,19 +1141,48 @@ ThreadClient.prototype = {
    */
   pauseOnExceptions: function TC_pauseOnExceptions(aFlag, aOnResponse) {
     this._pauseOnExceptions = aFlag;
-    // If the debuggee is paused, the value of the flag will be communicated in
-    // the next resumption. Otherwise we have to force a pause in order to send
-    // the flag.
-    if (!this.paused) {
-      this.interrupt(function(aResponse) {
-        if (aResponse.error) {
-          // Can't continue if pausing failed.
-          aOnResponse(aResponse);
-          return;
-        }
-        this.resume(aOnResponse);
-      }.bind(this));
+    // If the debuggee is paused, we have to send the flag via a reconfigure
+    // request.
+    if (this.paused) {
+      this._client.reconfigureThread({ pauseOnExceptions: aFlag }, aOnResponse);
+      return;
     }
+    // Otherwise send the flag using a standard resume request.
+    this.interrupt(aResponse => {
+      if (aResponse.error) {
+        // Can't continue if pausing failed.
+        aOnResponse(aResponse);
+        return;
+      }
+      this.resume(aOnResponse);
+    });
+  },
+
+  /**
+   * Enable pausing when the specified DOM events are triggered. Disabling
+   * pausing on an event can be realized by calling this method with the updated
+   * array of events that doesn't contain it.
+   *
+   * @param array|string events
+   *        An array of strings, representing the DOM event types to pause on,
+   *        or "*" to pause on all DOM events. Pass an empty array to
+   *        completely disable pausing on DOM events.
+   * @param function onResponse
+   *        Called with the response packet in a future turn of the event loop.
+   */
+  pauseOnDOMEvents: function (events, onResponse) {
+    this._pauseOnDOMEvents = events;
+    // If the debuggee is paused, the value of the array will be communicated in
+    // the next resumption. Otherwise we have to force a pause in order to send
+    // the array.
+    if (this.paused)
+      return void setTimeout(onResponse, 0);
+    this.interrupt(response => {
+      // Can't continue if pausing failed.
+      if (response.error)
+        return void onResponse(response);
+      this.resume(onResponse);
+    });
   },
 
   /**
@@ -1246,6 +1308,18 @@ ThreadClient.prototype = {
     actors: args(0)
   }, {
     telemetry: "THREADGRIPS"
+  }),
+
+  /**
+   * Return the event listeners defined on the page.
+   *
+   * @param aOnResponse Function
+   *        Called with the thread's response.
+   */
+  eventListeners: DebuggerClient.requester({
+    type: "eventListeners"
+  }, {
+    telemetry: "EVENTLISTENERS"
   }),
 
   /**

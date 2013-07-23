@@ -14,6 +14,8 @@ if (typeof Components != "undefined") {
 }
 (function(exports) {
 
+exports.OS = require("resource://gre/modules/osfile/osfile_shared_allthreads.jsm").OS;
+
 let LOG = exports.OS.Shared.LOG.bind(OS.Shared, "Shared front-end");
 
 /**
@@ -303,20 +305,19 @@ AbstractFile.read = function read(path, bytes) {
 };
 
 /**
- * Write a file in one operation.
+ * Write a file, atomically.
  *
- * By default, this operation ensures that, until the contents are
- * fully written, the destination file is not modified. By default,
- * files are flushed for additional safety, i.e. to lower the risks of
- * losing data in case the device is suddenly removed or in case of
- * sudden shutdown. This additional safety is important for
- * user-critical data (e.g. preferences, application data, etc.) but
- * comes at a performance cost. For non-critical data (e.g. cache,
- * thumbnails, etc.), you may wish to deactivate flushing by passing
- * option |flush: false|.
+ * By opposition to a regular |write|, this operation ensures that,
+ * until the contents are fully written, the destination file is
+ * not modified.
  *
- * Important note: In the current implementation, option |tmpPath|
- * is required. This requirement should disappear as part of bug 793660.
+ * Limitation: In a few extreme cases (hardware failure during the
+ * write, user unplugging disk during the write, etc.), data may be
+ * corrupted. If your data is user-critical (e.g. preferences,
+ * application data, etc.), you may wish to consider adding options
+ * |tmpPath| and/or |flush| to reduce the likelihood of corruption, as
+ * detailed below. Note that no combination of options can be
+ * guaranteed to totally eliminate the risk of corruption.
  *
  * @param {string} path The path of the file to modify.
  * @param {Typed Array | C pointer} buffer A buffer containing the bytes to write.
@@ -324,15 +325,20 @@ AbstractFile.read = function read(path, bytes) {
  * of this function. This object may contain the following fields:
  * - {number} bytes The number of bytes to write. If unspecified,
  * |buffer.byteLength|. Required if |buffer| is a C pointer.
- * - {string} tmpPath The path at which to write the temporary file.
+ * - {string} tmpPath If |null| or unspecified, write all data directly
+ * to |path|. If specified, write all data to a temporary file called
+ * |tmpPath| and, once this write is complete, rename the file to
+ * replace |path|. Performing this additional operation is a little
+ * slower but also a little safer.
  * - {bool} noOverwrite - If set, this function will fail if a file already
- * exists at |path|. The |tmpPath| is not overwritten if |path| exist.
- * - {bool} flush - If set to |false|, the function will not flush the
- * file. This improves performance considerably, but the resulting
- * behavior is slightly less safe: if the system shuts down improperly
- * (typically due to a kernel freeze or a power failure) or if the
- * device is disconnected or removed before the buffer is flushed, the
- * file may be corrupted.
+ * exists at |path|.
+ * - {bool} flush - If |false| or unspecified, return immediately once the
+ * write is complete. If |true|, before writing, force the operating system
+ * to write its internal disk buffers to the disk. This is considerably slower
+ * (not just for the application but for the whole system) but also safer:
+ * if the system shuts down improperly (typically due to a kernel freeze
+ * or a power failure) or if the device is disconnected before the buffer
+ * is flushed, the file has more chances of not being corrupted.
  *
  * @return {number} The number of bytes actually written.
  */
@@ -354,36 +360,36 @@ AbstractFile.writeAtomic =
     buffer = new TextEncoder(encoding).encode(buffer);
   }
 
-  if ("flush" in options && !options.flush) {
+  let bytesWritten = 0;
+
+  if (!options.tmpPath) {
     // Just write, without any renaming trick
-    let dest;
+    let dest = OS.File.open(path, {write: true, truncate: true});
     try {
-      dest = OS.File.open(path, {write: true, truncate: true});
-      return dest.write(buffer, options);
+      bytesWritten = dest.write(buffer, options);
+      if (options.flush) {
+        dest.flush();
+      }
     } finally {
       dest.close();
     }
+    return bytesWritten;
   }
 
-  let tmpPath = options.tmpPath;
-  if (!tmpPath) {
-    throw new TypeError("Expected option tmpPath");
-  }
-
-
-  let tmpFile = OS.File.open(tmpPath, {write: true, truncate: true});
-  let bytesWritten;
+  let tmpFile = OS.File.open(options.tmpPath, {write: true, truncate: true});
   try {
     bytesWritten = tmpFile.write(buffer, options);
-    tmpFile.flush();
+    if (options.flush) {
+      tmpFile.flush();
+    }
   } catch (x) {
-    OS.File.remove(tmpPath);
+    OS.File.remove(options.tmpPath);
     throw x;
   } finally {
     tmpFile.close();
   }
 
-  OS.File.move(tmpPath, path, {noCopy: true});
+  OS.File.move(options.tmpPath, path, {noCopy: true});
   return bytesWritten;
 };
 

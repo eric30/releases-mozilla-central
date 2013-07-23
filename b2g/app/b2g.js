@@ -421,7 +421,6 @@ pref("services.push.udp.port", 2442);
 // NetworkStats
 #ifdef MOZ_B2G_RIL
 pref("dom.mozNetworkStats.enabled", true);
-pref("ril.lastKnownMcc", "724");
 pref("ril.cellbroadcast.disabled", false);
 #endif
 
@@ -532,6 +531,9 @@ pref("ui.click_hold_context_menus.delay", 750);
 
 // Enable device storage
 pref("device.storage.enabled", true);
+
+// Enable pre-installed applications
+pref("dom.webapps.useCurrentProfile", true);
 
 // Enable system message
 pref("dom.sysmsg.enabled", true);
@@ -648,6 +650,9 @@ pref("dom.disable_window_open_dialog_feature", true);
 
 // Screen reader support
 pref("accessibility.accessfu.activate", 2);
+pref("accessibility.accessfu.quicknav_modes", "Link,Heading,FormElement,Landmark,ListItem");
+// Setting for an utterance order (0 - description first, 1 - description last).
+pref("accessibility.accessfu.utterance", 1);
 // Whether to skip images with empty alt text
 pref("accessibility.accessfu.skip_empty_images", true);
 
@@ -737,6 +742,6 @@ pref("ping.manifestURL", "https://marketplace.firefox.com/packaged.webapp");
 // Enable the disk space watcher
 pref("disk_space_watcher.enabled", true);
 
-// Enable future
-pref("dom.future.enabled", false);
+// Enable promise
+pref("dom.promise.enabled", false);
 

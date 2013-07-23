@@ -2124,13 +2124,12 @@ nsWindow::OnExposeEvent(cairo_t *cr)
         return TRUE;
     }
     // If this widget uses OMTC...
-    if (GetLayerManager()->AsShadowForwarder() && GetLayerManager()->AsShadowForwarder()->HasShadowManager() &&
-        Compositor::GetBackend() != LAYERS_BASIC) {
+    if (GetLayerManager()->GetBackendType() == LAYERS_CLIENT) {
+        listener->PaintWindow(this, region);
         listener->DidPaintWindow();
 
         g_free(rects);
         return TRUE;
-
     } else if (GetLayerManager()->GetBackendType() == mozilla::layers::LAYERS_OPENGL) {
         LayerManagerOGL *manager = static_cast<LayerManagerOGL*>(GetLayerManager());
         manager->SetClippingRegion(region);
@@ -2199,10 +2198,6 @@ nsWindow::OnExposeEvent(cairo_t *cr)
     {
       if (GetLayerManager()->GetBackendType() == LAYERS_BASIC) {
         AutoLayerManagerSetup setupLayerManager(this, ctx, layerBuffering);
-        painted = listener->PaintWindow(this, region);
-      } else if (GetLayerManager()->GetBackendType() == LAYERS_CLIENT) {
-        ClientLayerManager *manager = static_cast<ClientLayerManager*>(GetLayerManager());
-        manager->SetShadowTarget(ctx);
         painted = listener->PaintWindow(this, region);
       }
     }
@@ -5784,7 +5779,7 @@ nsWindow::CreateRootAccessible()
 {
     if (mIsTopLevel && !mRootAccessible) {
         LOG(("nsWindow:: Create Toplevel Accessibility\n"));
-        mRootAccessible = GetAccessible();
+        mRootAccessible = GetRootAccessible();
     }
 }
 
@@ -5802,7 +5797,7 @@ nsWindow::DispatchEventToRootAccessible(uint32_t aEventType)
     }
 
     // Get the root document accessible and fire event to it.
-    a11y::Accessible* acc = GetAccessible();
+    a11y::Accessible* acc = GetRootAccessible();
     if (acc) {
         accService->FireAccessibleEvent(aEventType, acc);
     }
@@ -5970,6 +5965,24 @@ nsWindow::GetSurfaceForGdkDrawable(GdkDrawable* aDrawable,
     }
 
     return result.forget();
+}
+#endif
+
+#if defined(MOZ_WIDGET_GTK2)
+TemporaryRef<gfx::DrawTarget>
+nsWindow::StartRemoteDrawing()
+{
+  gfxASurface *surf = GetThebesSurface();
+  if (!surf) {
+    return nullptr;
+  }
+
+  gfx::IntSize size(surf->GetSize().width, surf->GetSize().height);
+  if (size.width <= 0 || size.height <= 0) {
+    return nullptr;
+  }
+
+  return gfxPlatform::GetPlatform()->CreateDrawTargetForSurface(surf, size);
 }
 #endif
 

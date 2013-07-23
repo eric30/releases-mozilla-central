@@ -135,6 +135,9 @@ var ChromeSelectionHandler = {
     this._handleSelectionPoint(aMsg.change, pos, true);
     this._selectionMoveActive = false;
     
+    // Clear any existing scroll timers
+    this._clearTimers();
+
     // Update the position of our selection monocles
     this._updateSelectionUI("end", true, true);
   },
@@ -267,6 +270,14 @@ var ChromeSelectionHandler = {
     this._domWinUtils = null;
     this._targetIsEditable = false;
     this.sendAsync("Content:HandlerShutdown", {});
+  },
+
+  get hasSelection() {
+    if (!this._targetElement) {
+      return false;
+    }
+    let selection = this._getSelection();
+    return (selection && !selection.isCollapsed);
   },
 
   /*************************************************

@@ -38,6 +38,7 @@
 #include "mozilla/Attributes.h"
 #include "nsContentUtils.h"
 #include "gfxPlatform.h"
+#include "mozilla/gfx/2D.h"
 
 #ifdef ACCESSIBILITY
 #include "nsAccessibilityService.h"
@@ -475,7 +476,16 @@ void nsBaseWidget::AddChild(nsIWidget* aChild)
 //-------------------------------------------------------------------------
 void nsBaseWidget::RemoveChild(nsIWidget* aChild)
 {
+#ifdef DEBUG
+#ifdef XP_MACOSX
+  // nsCocoaWindow doesn't implement GetParent, so in that case parent will be
+  // null and we'll just have to do without this assertion.
+  nsIWidget* parent = aChild->GetParent();
+  NS_ASSERTION(!parent || parent == this, "Not one of our kids!");
+#else
   NS_ASSERTION(aChild->GetParent() == this, "Not one of our kids!");
+#endif
+#endif
 
   if (mLastChild == aChild) {
     mLastChild = mLastChild->GetPrevSibling();
@@ -1031,6 +1041,11 @@ CompositorChild* nsBaseWidget::GetRemoteRenderer()
   return mCompositorChild;
 }
 
+TemporaryRef<mozilla::gfx::DrawTarget> nsBaseWidget::StartRemoteDrawing()
+{
+  return nullptr;
+}
+
 //-------------------------------------------------------------------------
 //
 // Return the used device context
@@ -1483,7 +1498,7 @@ nsBaseWidget::NotifyUIStateChanged(UIStateChangeType aShowAccelerators,
 #ifdef ACCESSIBILITY
 
 a11y::Accessible*
-nsBaseWidget::GetAccessible()
+nsBaseWidget::GetRootAccessible()
 {
   NS_ENSURE_TRUE(mWidgetListener, nullptr);
 
@@ -1498,7 +1513,8 @@ nsBaseWidget::GetAccessible()
 
   // Accessible creation might be not safe so use IsSafeToRunScript to
   // make sure it's not created at unsafe times.
-  nsCOMPtr<nsIAccessibilityService> accService = services::GetAccessibilityService();
+  nsCOMPtr<nsIAccessibilityService> accService =
+    services::GetAccessibilityService();
   if (accService) {
     return accService->GetRootDocumentAccessible(presShell, nsContentUtils::IsSafeToRunScript());
   }

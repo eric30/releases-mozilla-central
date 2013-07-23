@@ -16,9 +16,9 @@
  */
 
 interface StyleSheetList;
-interface TouchList;
 interface WindowProxy;
 interface nsISupports;
+interface URI;
 
 enum VisibilityState { "hidden", "visible" };
 
@@ -317,6 +317,17 @@ partial interface Document {
 
   [ChromeOnly]
   attribute boolean styleSheetChangeEventsEnabled;
+
+  [ChromeOnly, Throws]
+  void obsoleteSheet(URI sheetURI);
+  [ChromeOnly, Throws]
+  void obsoleteSheet(DOMString sheetURI);
+};
+
+// Extension to give chrome JS the ability to determine when a document was
+// created to satisfy an iframe with srcdoc attribute.
+partial interface Document {
+  [ChromeOnly] readonly attribute boolean isSrcdocDocument;
 };
 
 Document implements XPathEvaluator;

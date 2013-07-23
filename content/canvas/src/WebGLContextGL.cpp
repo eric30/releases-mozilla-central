@@ -15,6 +15,7 @@
 #include "WebGLShaderPrecisionFormat.h"
 #include "WebGLTexture.h"
 #include "WebGLExtensions.h"
+#include "WebGLVertexArray.h"
 
 #include "nsString.h"
 #include "nsDebug.h"
@@ -162,7 +163,7 @@ WebGLContext::BindBuffer(WebGLenum target, WebGLBuffer *buf)
     if (target == LOCAL_GL_ARRAY_BUFFER) {
         mBoundArrayBuffer = buf;
     } else if (target == LOCAL_GL_ELEMENT_ARRAY_BUFFER) {
-        mBoundElementArrayBuffer = buf;
+        mBoundVertexArray->mBoundElementArrayBuffer = buf;
     }
 
     MakeContextCurrent();
@@ -337,7 +338,7 @@ GLenum WebGLContext::CheckedBufferData(GLenum target,
     if (target == LOCAL_GL_ARRAY_BUFFER) {
         boundBuffer = mBoundArrayBuffer;
     } else if (target == LOCAL_GL_ELEMENT_ARRAY_BUFFER) {
-        boundBuffer = mBoundElementArrayBuffer;
+        boundBuffer = mBoundVertexArray->mBoundElementArrayBuffer;
     }
     NS_ABORT_IF_FALSE(boundBuffer != nullptr, "no buffer bound for this target");
     
@@ -366,7 +367,7 @@ WebGLContext::BufferData(WebGLenum target, WebGLsizeiptr size,
     if (target == LOCAL_GL_ARRAY_BUFFER) {
         boundBuffer = mBoundArrayBuffer;
     } else if (target == LOCAL_GL_ELEMENT_ARRAY_BUFFER) {
-        boundBuffer = mBoundElementArrayBuffer;
+        boundBuffer = mBoundVertexArray->mBoundElementArrayBuffer;
     } else {
         return ErrorInvalidEnumInfo("bufferData: target", target);
     }
@@ -380,10 +381,16 @@ WebGLContext::BufferData(WebGLenum target, WebGLsizeiptr size,
     if (!boundBuffer)
         return ErrorInvalidOperation("bufferData: no buffer bound!");
 
+    void* zeroBuffer = calloc(size, 1);
+    if (!zeroBuffer)
+        return ErrorOutOfMemory("bufferData: out of memory");
+
     MakeContextCurrent();
     InvalidateCachedMinInUseAttribArrayLength();
 
-    GLenum error = CheckedBufferData(target, size, 0, usage);
+    GLenum error = CheckedBufferData(target, size, zeroBuffer, usage);
+    free(zeroBuffer);
+
     if (error) {
         GenerateWarning("bufferData generated error %s", ErrorName(error));
         return;
@@ -411,7 +418,7 @@ WebGLContext::BufferData(WebGLenum target, ArrayBuffer *data, WebGLenum usage)
     if (target == LOCAL_GL_ARRAY_BUFFER) {
         boundBuffer = mBoundArrayBuffer;
     } else if (target == LOCAL_GL_ELEMENT_ARRAY_BUFFER) {
-        boundBuffer = mBoundElementArrayBuffer;
+        boundBuffer = mBoundVertexArray->mBoundElementArrayBuffer;
     } else {
         return ErrorInvalidEnumInfo("bufferData: target", target);
     }
@@ -449,7 +456,7 @@ WebGLContext::BufferData(WebGLenum target, ArrayBufferView& data, WebGLenum usag
     if (target == LOCAL_GL_ARRAY_BUFFER) {
         boundBuffer = mBoundArrayBuffer;
     } else if (target == LOCAL_GL_ELEMENT_ARRAY_BUFFER) {
-        boundBuffer = mBoundElementArrayBuffer;
+        boundBuffer = mBoundVertexArray->mBoundElementArrayBuffer;
     } else {
         return ErrorInvalidEnumInfo("bufferData: target", target);
     }
@@ -492,7 +499,7 @@ WebGLContext::BufferSubData(GLenum target, WebGLsizeiptr byteOffset,
     if (target == LOCAL_GL_ARRAY_BUFFER) {
         boundBuffer = mBoundArrayBuffer;
     } else if (target == LOCAL_GL_ELEMENT_ARRAY_BUFFER) {
-        boundBuffer = mBoundElementArrayBuffer;
+        boundBuffer = mBoundVertexArray->mBoundElementArrayBuffer;
     } else {
         return ErrorInvalidEnumInfo("bufferSubData: target", target);
     }
@@ -530,7 +537,7 @@ WebGLContext::BufferSubData(WebGLenum target, WebGLsizeiptr byteOffset,
     if (target == LOCAL_GL_ARRAY_BUFFER) {
         boundBuffer = mBoundArrayBuffer;
     } else if (target == LOCAL_GL_ELEMENT_ARRAY_BUFFER) {
-        boundBuffer = mBoundElementArrayBuffer;
+        boundBuffer = mBoundVertexArray->mBoundElementArrayBuffer;
     } else {
         return ErrorInvalidEnumInfo("bufferSubData: target", target);
     }
@@ -603,117 +610,6 @@ WebGLContext::CheckFramebufferStatus(WebGLenum target)
     if(mBoundFramebuffer->HasAttachmentsOfMismatchedDimensions())
         return LOCAL_GL_FRAMEBUFFER_INCOMPLETE_DIMENSIONS;
     return gl->fCheckFramebufferStatus(target);
-}
-
-void
-WebGLContext::Clear(WebGLbitfield mask)
-{
-    if (!IsContextStable())
-        return;
-
-    MakeContextCurrent();
-
-    uint32_t m = mask & (LOCAL_GL_COLOR_BUFFER_BIT | LOCAL_GL_DEPTH_BUFFER_BIT | LOCAL_GL_STENCIL_BUFFER_BIT);
-    if (mask != m)
-        return ErrorInvalidValue("clear: invalid mask bits");
-
-    if (mBoundFramebuffer) {
-        if (!mBoundFramebuffer->CheckAndInitializeRenderbuffers())
-            return ErrorInvalidFramebufferOperation("clear: incomplete framebuffer");
-
-        gl->fClear(mask);
-        return;
-    }
-
-    // Ok, we're clearing the default framebuffer/screen.
-
-    bool needsClear = true;
-    if (mIsScreenCleared) {
-        bool isClearRedundant = true;
-        if (mask & LOCAL_GL_COLOR_BUFFER_BIT) {
-            if (mColorClearValue[0] != 0.0f ||
-                mColorClearValue[1] != 0.0f ||
-                mColorClearValue[2] != 0.0f ||
-                mColorClearValue[3] != 0.0f)
-            {
-                isClearRedundant = false;
-            }
-        }
-
-        if (mask & LOCAL_GL_DEPTH_BUFFER_BIT) {
-            if (mDepthClearValue != 1.0f) {
-                isClearRedundant = false;
-            }
-        }
-
-        if (mask & LOCAL_GL_DEPTH_BUFFER_BIT) {
-            if (mStencilClearValue != 0) {
-                isClearRedundant = false;
-            }
-        }
-
-        if (isClearRedundant)
-            needsClear = false;
-    }
-
-    if (needsClear) {
-        gl->fClear(mask);
-        mIsScreenCleared = false;
-    }
-
-    Invalidate();
-    mShouldPresent = true;
-}
-
-void
-WebGLContext::ClearColor(WebGLclampf r, WebGLclampf g,
-                         WebGLclampf b, WebGLclampf a)
-{
-    if (!IsContextStable())
-        return;
-
-    MakeContextCurrent();
-    mColorClearValue[0] = r;
-    mColorClearValue[1] = g;
-    mColorClearValue[2] = b;
-    mColorClearValue[3] = a;
-    gl->fClearColor(r, g, b, a);
-}
-
-void
-WebGLContext::ClearDepth(WebGLclampf v)
-{
-    if (!IsContextStable())
-        return;
-
-    MakeContextCurrent();
-    mDepthClearValue = v;
-    gl->fClearDepth(v);
-}
-
-void
-WebGLContext::ClearStencil(WebGLint v)
-{
-    if (!IsContextStable())
-        return;
-
-    MakeContextCurrent();
-    mStencilClearValue = v;
-    gl->fClearStencil(v);
-}
-
-void
-WebGLContext::ColorMask(WebGLboolean r, WebGLboolean g, WebGLboolean b, WebGLboolean a)
-{
-    if (!IsContextStable())
-        return;
-
-    MakeContextCurrent();
-    mColorWriteMask[0] = r;
-    mColorWriteMask[1] = g;
-    mColorWriteMask[2] = b;
-    mColorWriteMask[3] = a;
-    gl->fColorMask(r, g, b, a);
 }
 
 void
@@ -1059,13 +955,14 @@ WebGLContext::DeleteBuffer(WebGLBuffer *buf)
     if (mBoundArrayBuffer == buf)
         BindBuffer(LOCAL_GL_ARRAY_BUFFER,
                    static_cast<WebGLBuffer*>(nullptr));
-    if (mBoundElementArrayBuffer == buf)
+
+    if (mBoundVertexArray->mBoundElementArrayBuffer == buf)
         BindBuffer(LOCAL_GL_ELEMENT_ARRAY_BUFFER,
                    static_cast<WebGLBuffer*>(nullptr));
 
     for (int32_t i = 0; i < mGLMaxVertexAttribs; i++) {
-        if (mAttribBuffers[i].buf == buf)
-            mAttribBuffers[i].buf = nullptr;
+        if (mBoundVertexArray->mAttribBuffers[i].buf == buf)
+            mBoundVertexArray->mAttribBuffers[i].buf = nullptr;
     }
 
     buf->RequestDelete();
@@ -1201,17 +1098,6 @@ WebGLContext::DepthFunc(WebGLenum func)
 }
 
 void
-WebGLContext::DepthMask(WebGLboolean b)
-{
-    if (!IsContextStable())
-        return;
-
-    MakeContextCurrent();
-    mDepthWriteMask = b;
-    gl->fDepthMask(b);
-}
-
-void
 WebGLContext::DepthRange(WebGLfloat zNear, WebGLfloat zFar)
 {
     if (!IsContextStable())
@@ -1239,7 +1125,7 @@ WebGLContext::DisableVertexAttribArray(WebGLuint index)
     if (index || gl->IsGLES2())
         gl->fDisableVertexAttribArray(index);
 
-    mAttribBuffers[index].enabled = false;
+    mBoundVertexArray->mAttribBuffers[index].enabled = false;
 }
 
 int
@@ -1250,14 +1136,14 @@ WebGLContext::WhatDoesVertexAttrib0Need()
     // work around Mac OSX crash, see bug 631420
 #ifdef XP_MACOSX
     if (gl->WorkAroundDriverBugs() &&
-        mAttribBuffers[0].enabled &&
+        mBoundVertexArray->mAttribBuffers[0].enabled &&
         !mCurrentProgram->IsAttribInUse(0))
     {
         return VertexAttrib0Status::EmulatedUninitializedArray;
     }
 #endif
 
-    return (gl->IsGLES2() || mAttribBuffers[0].enabled) ? VertexAttrib0Status::Default
+    return (gl->IsGLES2() || mBoundVertexArray->mAttribBuffers[0].enabled) ? VertexAttrib0Status::Default
          : mCurrentProgram->IsAttribInUse(0)            ? VertexAttrib0Status::EmulatedInitializedArray
                                                         : VertexAttrib0Status::EmulatedUninitializedArray;
 }
@@ -1357,13 +1243,13 @@ WebGLContext::UndoFakeVertexAttrib0()
     if (whatDoesAttrib0Need == VertexAttrib0Status::Default)
         return;
 
-    gl->fBindBuffer(LOCAL_GL_ARRAY_BUFFER, mAttribBuffers[0].buf ? mAttribBuffers[0].buf->GLName() : 0);
+    gl->fBindBuffer(LOCAL_GL_ARRAY_BUFFER, mBoundVertexArray->mAttribBuffers[0].buf ? mBoundVertexArray->mAttribBuffers[0].buf->GLName() : 0);
     gl->fVertexAttribPointer(0,
-                             mAttribBuffers[0].size,
-                             mAttribBuffers[0].type,
-                             mAttribBuffers[0].normalized,
-                             mAttribBuffers[0].stride,
-                             reinterpret_cast<const GLvoid *>(mAttribBuffers[0].byteOffset));
+                             mBoundVertexArray->mAttribBuffers[0].size,
+                             mBoundVertexArray->mAttribBuffers[0].type,
+                             mBoundVertexArray->mAttribBuffers[0].normalized,
+                             mBoundVertexArray->mAttribBuffers[0].stride,
+                             reinterpret_cast<const GLvoid *>(mBoundVertexArray->mAttribBuffers[0].byteOffset));
 
     gl->fBindBuffer(LOCAL_GL_ARRAY_BUFFER, mBoundArrayBuffer ? mBoundArrayBuffer->GLName() : 0);
 }
@@ -1503,9 +1389,9 @@ WebGLContext::DrawArrays(GLenum mode, WebGLint first, WebGLsizei count)
             return ErrorInvalidFramebufferOperation("drawArrays: incomplete framebuffer");
     }
 
-    BindFakeBlackTextures();
     if (!DoFakeVertexAttrib0(checked_firstPlusCount.value()))
         return;
+    BindFakeBlackTextures();
 
     SetupContextLossTimer();
     gl->fDrawArrays(mode, first, count);
@@ -1580,10 +1466,10 @@ WebGLContext::DrawElements(WebGLenum mode, WebGLsizei count, WebGLenum type,
     if (!mCurrentProgram)
         return;
 
-    if (!mBoundElementArrayBuffer)
+    if (!mBoundVertexArray->mBoundElementArrayBuffer)
         return ErrorInvalidOperation("drawElements: must have element array buffer binding");
 
-    if (!mBoundElementArrayBuffer->ByteLength())
+    if (!mBoundVertexArray->mBoundElementArrayBuffer->ByteLength())
         return ErrorInvalidOperation("drawElements: bound element array buffer doesn't have any data");
 
     CheckedUint32 checked_neededByteCount = checked_byteCount + byteOffset;
@@ -1591,7 +1477,7 @@ WebGLContext::DrawElements(WebGLenum mode, WebGLsizei count, WebGLenum type,
     if (!checked_neededByteCount.isValid())
         return ErrorInvalidOperation("drawElements: overflow in byteOffset+byteCount");
 
-    if (checked_neededByteCount.value() > mBoundElementArrayBuffer->ByteLength())
+    if (checked_neededByteCount.value() > mBoundVertexArray->mBoundElementArrayBuffer->ByteLength())
         return ErrorInvalidOperation("drawElements: bound element array buffer is too small for given count and offset");
 
     uint32_t maxAllowedCount = 0;
@@ -1599,7 +1485,7 @@ WebGLContext::DrawElements(WebGLenum mode, WebGLsizei count, WebGLenum type,
         return;
 
     if (!maxAllowedCount ||
-        !mBoundElementArrayBuffer->Validate(type, maxAllowedCount - 1, first, count))
+        !mBoundVertexArray->mBoundElementArrayBuffer->Validate(type, maxAllowedCount - 1, first, count))
     {
         return ErrorInvalidOperation(
             "DrawElements: bound vertex attribute buffers do not have sufficient "
@@ -1613,9 +1499,9 @@ WebGLContext::DrawElements(WebGLenum mode, WebGLsizei count, WebGLenum type,
             return ErrorInvalidFramebufferOperation("drawElements: incomplete framebuffer");
     }
 
-    BindFakeBlackTextures();
     if (!DoFakeVertexAttrib0(maxAllowedCount))
         return;
+    BindFakeBlackTextures();
 
     SetupContextLossTimer();
     gl->fDrawElements(mode, count, type, reinterpret_cast<GLvoid*>(byteOffset));
@@ -1698,7 +1584,7 @@ WebGLContext::EnableVertexAttribArray(WebGLuint index)
     InvalidateCachedMinInUseAttribArrayLength();
 
     gl->fEnableVertexAttribArray(index);
-    mAttribBuffers[index].enabled = true;
+    mBoundVertexArray->mAttribBuffers[index].enabled = true;
 }
 
 void
@@ -2018,6 +1904,21 @@ WebGLContext::GetParameter(JSContext* cx, WebGLenum pname, ErrorResult& rv)
         }
     }
 
+    if (IsExtensionEnabled(OES_vertex_array_object)) {
+        switch (pname) {
+
+             case LOCAL_GL_VERTEX_ARRAY_BINDING:
+             {
+                 if (mBoundVertexArray == mDefaultVertexArray){
+                     return WebGLObjectAsJSValue(cx, (WebGLVertexArray *) nullptr, rv);
+                 }
+
+                 return WebGLObjectAsJSValue(cx, mBoundVertexArray.get(), rv);
+             }
+
+        }
+    }
+
     switch (pname) {
         //
         // String params
@@ -2027,7 +1928,18 @@ WebGLContext::GetParameter(JSContext* cx, WebGLenum pname, ErrorResult& rv)
         case LOCAL_GL_RENDERER:
             return StringValue(cx, "Mozilla", rv);
         case LOCAL_GL_VERSION:
-            return StringValue(cx, "WebGL 1.0", rv);
+        {
+            const char* version = 0;
+
+            if (IsWebGL2()) {
+                version = "WebGL 2.0";
+            } else {
+                version = "WebGL 1.0";
+            }
+
+            MOZ_ASSERT(version != 0);
+            return StringValue(cx, version, rv);
+        }
         case LOCAL_GL_SHADING_LANGUAGE_VERSION:
             return StringValue(cx, "WebGL GLSL ES 1.0", rv);
 
@@ -2279,7 +2191,7 @@ WebGLContext::GetParameter(JSContext* cx, WebGLenum pname, ErrorResult& rv)
 
         case LOCAL_GL_ELEMENT_ARRAY_BUFFER_BINDING:
         {
-            return WebGLObjectAsJSValue(cx, mBoundElementArrayBuffer.get(), rv);
+            return WebGLObjectAsJSValue(cx, mBoundVertexArray->mBoundElementArrayBuffer.get(), rv);
         }
 
         case LOCAL_GL_RENDERBUFFER_BINDING:
@@ -2943,7 +2855,7 @@ WebGLContext::GetVertexAttrib(JSContext* cx, WebGLuint index, WebGLenum pname,
     if (!IsContextStable())
         return JS::NullValue();
 
-    if (!ValidateAttribIndex(index, "getVertexAttrib"))
+    if (!mBoundVertexArray->EnsureAttribIndex(index, "getVertexAttrib"))
         return JS::NullValue();
 
     MakeContextCurrent();
@@ -2951,18 +2863,18 @@ WebGLContext::GetVertexAttrib(JSContext* cx, WebGLuint index, WebGLenum pname,
     switch (pname) {
         case LOCAL_GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING:
         {
-            return WebGLObjectAsJSValue(cx, mAttribBuffers[index].buf.get(), rv);
+            return WebGLObjectAsJSValue(cx, mBoundVertexArray->mAttribBuffers[index].buf.get(), rv);
         }
 
         case LOCAL_GL_VERTEX_ATTRIB_ARRAY_STRIDE:
-            return JS::Int32Value(mAttribBuffers[index].stride);
+            return JS::Int32Value(mBoundVertexArray->mAttribBuffers[index].stride);
 
         case LOCAL_GL_VERTEX_ATTRIB_ARRAY_SIZE:
         {
             if (!ValidateAttribIndex(index, "enableVertexAttribArray"))
                 return JS::NullValue();
 
-            if (!mAttribBuffers[index].enabled)
+            if (!mBoundVertexArray->mAttribBuffers[index].enabled)
                 return JS::Int32Value(4);
 
             // Don't break; fall through.
@@ -2997,14 +2909,12 @@ WebGLContext::GetVertexAttrib(JSContext* cx, WebGLuint index, WebGLenum pname,
 
         case LOCAL_GL_VERTEX_ATTRIB_ARRAY_ENABLED:
         {
-            return JS::BooleanValue(mAttribBuffers[index].enabled);
+            return JS::BooleanValue(mBoundVertexArray->mAttribBuffers[index].enabled);
         }
 
         case LOCAL_GL_VERTEX_ATTRIB_ARRAY_NORMALIZED:
         {
-            GLint i = 0;
-            gl->fGetVertexAttribiv(index, pname, &i);
-            return JS::BooleanValue(bool(i));
+            return JS::BooleanValue(mBoundVertexArray->mAttribBuffers[index].normalized);
         }
 
         default:
@@ -3028,7 +2938,7 @@ WebGLContext::GetVertexAttribOffset(WebGLuint index, WebGLenum pname)
         return 0;
     }
 
-    return mAttribBuffers[index].byteOffset;
+    return mBoundVertexArray->mAttribBuffers[index].byteOffset;
 }
 
 void
@@ -3648,45 +3558,6 @@ WebGLContext::StencilFuncSeparate(WebGLenum face, WebGLenum func, WebGLint ref, 
 
     MakeContextCurrent();
     gl->fStencilFuncSeparate(face, func, ref, mask);
-}
-
-void
-WebGLContext::StencilMask(WebGLuint mask)
-{
-    if (!IsContextStable())
-        return;
-
-    mStencilWriteMaskFront = mask;
-    mStencilWriteMaskBack = mask;
-
-    MakeContextCurrent();
-    gl->fStencilMask(mask);
-}
-
-void
-WebGLContext::StencilMaskSeparate(WebGLenum face, WebGLuint mask)
-{
-    if (!IsContextStable())
-        return;
-
-    if (!ValidateFaceEnum(face, "stencilMaskSeparate: face"))
-        return;
-
-    switch (face) {
-        case LOCAL_GL_FRONT_AND_BACK:
-            mStencilWriteMaskFront = mask;
-            mStencilWriteMaskBack = mask;
-            break;
-        case LOCAL_GL_FRONT:
-            mStencilWriteMaskFront = mask;
-            break;
-        case LOCAL_GL_BACK:
-            mStencilWriteMaskBack = mask;
-            break;
-    }
-
-    MakeContextCurrent();
-    gl->fStencilMaskSeparate(face, mask);
 }
 
 void
@@ -4394,6 +4265,57 @@ WebGLContext::CompileShader(WebGLShader *shader)
 
         const char *s = sourceCString.get();
 
+#define WEBGL2_BYPASS_ANGLE
+#ifdef WEBGL2_BYPASS_ANGLE
+        /*
+         * The bypass don't bring a full support for GLSL ES 3.0, but the main purpose
+         * is to natively bring gl_InstanceID (to do instanced rendering) and gl_FragData
+         *
+         * To remove the bypass code, just comment #define WEBGL2_BYPASS_ANGLE above
+         *
+         * To bypass angle, the context must be a WebGL 2 and the shader must have the
+         * following line at the very top :
+         *      #version proto-200
+         *
+         * In this case, byPassANGLE == true and here is what we do :
+         *  We create two shader source code:
+         *    - one for the driver, that enable GL_EXT_gpu_shader4
+         *    - one for the angle compilor, to get informations about vertex attributes
+         *      and uniforms
+         */
+        static const char *bypassPrefixSearch = "#version proto-200";
+        static const char *bypassANGLEPrefix[2] = {"precision mediump float;\n"
+                                                   "#define gl_VertexID 0\n"
+                                                   "#define gl_InstanceID 0\n",
+
+                                                   "precision mediump float;\n"
+                                                   "#extension GL_EXT_draw_buffers : enable\n"
+                                                   "#define gl_PrimitiveID 0\n"};
+
+        const bool bypassANGLE = IsWebGL2() && (strstr(s, bypassPrefixSearch) != 0);
+
+        const char *angleShaderCode = s;
+        nsTArray<char> bypassANGLEShaderCode;
+        nsTArray<char> bypassDriverShaderCode;
+
+        if (bypassANGLE) {
+            const int bypassStage = (shader->ShaderType() == LOCAL_GL_FRAGMENT_SHADER) ? 1 : 0;
+            const char *originalShader = strstr(s, bypassPrefixSearch) + strlen(bypassPrefixSearch);
+            int originalShaderSize = strlen(s) - (originalShader - s);
+            int bypassShaderCodeSize = originalShaderSize + 4096 + 1;
+
+            bypassANGLEShaderCode.SetLength(bypassShaderCodeSize);
+            strcpy(bypassANGLEShaderCode.Elements(), bypassANGLEPrefix[bypassStage]);
+            strcat(bypassANGLEShaderCode.Elements(), originalShader);
+
+            bypassDriverShaderCode.SetLength(bypassShaderCodeSize);
+            strcpy(bypassDriverShaderCode.Elements(), "#extension GL_EXT_gpu_shader4 : enable\n");
+            strcat(bypassDriverShaderCode.Elements(), originalShader);
+
+            angleShaderCode = bypassANGLEShaderCode.Elements();
+        }
+#endif
+
         compiler = ShConstructCompiler((ShShaderType) shader->ShaderType(),
                                        SH_WEBGL_SPEC,
                                        targetShaderSourceLanguage,
@@ -4426,7 +4348,11 @@ WebGLContext::CompileShader(WebGLShader *shader)
 #endif
         }
 
+#ifdef WEBGL2_BYPASS_ANGLE
+        if (!ShCompile(compiler, &angleShaderCode, 1, compileOptions)) {
+#else
         if (!ShCompile(compiler, &s, 1, compileOptions)) {
+#endif
             size_t len = 0;
             ShGetInfo(compiler, SH_INFO_LOG_LENGTH, &len);
 
@@ -4515,7 +4441,17 @@ WebGLContext::CompileShader(WebGLShader *shader)
 
             const char *ts = translatedSrc.get();
 
+#ifdef WEBGL2_BYPASS_ANGLE
+            if (bypassANGLE) {
+                const char* driverShaderCode = bypassDriverShaderCode.Elements();
+                gl->fShaderSource(shadername, 1, (const GLchar**) &driverShaderCode, nullptr);
+            }
+            else {
+                gl->fShaderSource(shadername, 1, &ts, nullptr);
+            }
+#else
             gl->fShaderSource(shadername, 1, &ts, nullptr);
+#endif
         } else { // not useShaderSourceTranslation
             // we just pass the raw untranslated shader source. We then can't use ANGLE idenfier mapping.
             // that's really bad, as that means we can't be 100% conformant. We should work towards always
@@ -4877,8 +4813,9 @@ WebGLContext::VertexAttribPointer(WebGLuint index, WebGLint size, WebGLenum type
     // requiredAlignment should always be a power of two.
     WebGLsizei requiredAlignmentMask = requiredAlignment - 1;
 
-    if (!ValidateAttribIndex(index, "vertexAttribPointer"))
+    if ( !mBoundVertexArray->EnsureAttribIndex(index, "vertexAttribPointer") ) {
         return;
+    }
 
     if (size < 1 || size > 4)
         return ErrorInvalidValue("vertexAttribPointer: invalid element size");
@@ -4907,7 +4844,7 @@ WebGLContext::VertexAttribPointer(WebGLuint index, WebGLint size, WebGLenum type
         return ErrorInvalidOperation("vertexAttribPointer: type must match bound VBO type: %d != %d", type, mBoundArrayBuffer->GLType());
     */
 
-    WebGLVertexAttribData &vd = mAttribBuffers[index];
+    WebGLVertexAttribData &vd = mBoundVertexArray->mAttribBuffers[index];
 
     vd.buf = mBoundArrayBuffer;
     vd.stride = stride;
@@ -5400,17 +5337,14 @@ WebGLTexelFormat mozilla::GetWebGLTexelFormat(GLenum format, GLenum type)
             case LOCAL_GL_UNSIGNED_INT:
                 return WebGLTexelConversions::D32;
             default:
-                MOZ_NOT_REACHED("Invalid WebGL texture format/type?");
-                return WebGLTexelConversions::BadFormat;
+                MOZ_CRASH("Invalid WebGL texture format/type?");
         }
     } else if (format == LOCAL_GL_DEPTH_STENCIL) {
         switch (type) {
             case LOCAL_GL_UNSIGNED_INT_24_8_EXT:
                 return WebGLTexelConversions::D24S8;
             default:
-                MOZ_NOT_REACHED("Invalid WebGL texture format/type?");
-                NS_ABORT_IF_FALSE(false, "Coding mistake?! Should never reach this point.");
-                return WebGLTexelConversions::BadFormat;
+                MOZ_CRASH("Invalid WebGL texture format/type?");
         }
     }
 

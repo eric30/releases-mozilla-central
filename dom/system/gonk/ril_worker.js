@@ -87,6 +87,8 @@ let RILQUIRKS_MODEM_DEFAULTS_TO_EMERGENCY_MODE = libcutils.property_get("ro.moz.
 let RILQUIRKS_SIM_APP_STATE_EXTRA_FIELDS = libcutils.property_get("ro.moz.ril.simstate_extra_field", "false") === "true";
 // Needed for call-waiting on Peak device
 let RILQUIRKS_EXTRA_UINT32_2ND_CALL = libcutils.property_get("ro.moz.ril.extra_int_2nd_call", "false") == "true";
+// On the emulator we support querying the number of lock retries
+let RILQUIRKS_HAVE_QUERY_ICC_LOCK_RETRY_COUNT = libcutils.property_get("ro.moz.ril.query_icc_count", "false") == "true";
 
 // Marker object.
 let PENDING_NETWORK_TYPE = {};
@@ -1197,6 +1199,58 @@ let RIL = {
   },
 
   /**
+   * Helper function for fetching the number of unlock retries of ICC locks.
+   *
+   * We only query the retry count when we're on the emulator. The phones do
+   * not support the request id and their rild doesn't return an error.
+   */
+  iccGetCardLockRetryCount: function iccGetCardLockRetryCount(options) {
+    var selCode = {
+      pin: ICC_SEL_CODE_SIM_PIN,
+      puk: ICC_SEL_CODE_SIM_PUK,
+      pin2: ICC_SEL_CODE_SIM_PIN2,
+      puk2: ICC_SEL_CODE_SIM_PUK2,
+      nck: ICC_SEL_CODE_PH_NET_PIN,
+      cck: ICC_SEL_CODE_PH_CORP_PIN,
+      spck: ICC_SEL_CODE_PH_SP_PIN
+    };
+
+    if (typeof(selCode[options.lockType]) === 'undefined') {
+      /* unknown lock type */
+      options.errorMsg = GECKO_ERROR_GENERIC_FAILURE;
+      options.success = false;
+      this.sendDOMMessage(options);
+      return;
+    }
+
+    if (RILQUIRKS_HAVE_QUERY_ICC_LOCK_RETRY_COUNT) {
+      /* Only the emulator supports this request, ... */
+      options.selCode = selCode[options.lockType];
+      this.queryICCLockRetryCount(options);
+    } else {
+      /* ... while the phones do not. */
+      options.errorMsg = GECKO_ERROR_REQUEST_NOT_SUPPORTED;
+      options.success = false;
+      this.sendDOMMessage(options);
+    }
+  },
+
+  /**
+   * Query ICC lock retry count.
+   *
+   * @param selCode
+   *        One of ICC_SEL_CODE_*.
+   * @param serviceClass
+   *        One of ICC_SERVICE_CLASS_*.
+   */
+  queryICCLockRetryCount: function queryICCLockRetryCount(options) {
+    Buf.newParcel(REQUEST_GET_UNLOCK_RETRY_COUNT, options);
+    Buf.writeUint32(1);
+    Buf.writeString(options.selCode);
+    Buf.sendParcel();
+  },
+
+  /**
    * Query ICC facility lock.
    *
    * @param facility
@@ -1422,6 +1476,39 @@ let RIL = {
     Buf.writeUint32(2);
     Buf.writeUint32(options.enabled ? 1 : 0);
     Buf.writeUint32(ICC_SERVICE_CLASS_VOICE);
+    Buf.sendParcel();
+  },
+
+  /**
+   * Queries current CLIP status.
+   *
+   * (MMI request for code "*#30#")
+   *
+   */
+  queryCLIP: function queryCLIP(options) {
+    Buf.simpleRequest(REQUEST_QUERY_CLIP, options);
+  },
+
+  /**
+   * Queries current CLIR status.
+   *
+   */
+  getCLIR: function getCLIR(options) {
+    Buf.simpleRequest(REQUEST_GET_CLIR, options);
+  },
+
+  /**
+   * Enables or disables the presentation of the calling line identity (CLI) to
+   * the called party when originating a call.
+   *
+   * @param options.clirMode
+   *        Is one of the CLIR_* constants in
+   *        nsIDOMMozMobileConnection interface.
+   */
+  setCLIR: function setCLIR(options) {
+    Buf.newParcel(REQUEST_SET_CLIR, options);
+    Buf.writeUint32(1);
+    Buf.writeUint32(options.clirMode);
     Buf.sendParcel();
   },
 
@@ -2183,41 +2270,65 @@ let RIL = {
     let mmiString = options.mmi;
     let mmi = this._parseMMI(mmiString);
 
-    let _sendMMIError = (function _sendMMIError(errorMsg) {
+    let _sendMMIError = (function _sendMMIError(errorMsg, mmiServiceCode) {
+      options.success = false;
       options.rilMessageType = "sendMMI";
       options.errorMsg = errorMsg;
+      if (mmiServiceCode) {
+        options.mmiServiceCode = mmiServiceCode;
+      }
       this.sendDOMMessage(options);
     }).bind(this);
 
-    function _isValidPINPUKRequest() {
+    function _isValidPINPUKRequest(mmiServiceCode) {
       // The only allowed MMI procedure for ICC PIN, PIN2, PUK and PUK2 handling
       // is "Registration" (**).
       if (!mmi.procedure || mmi.procedure != MMI_PROCEDURE_REGISTRATION ) {
-        _sendMMIError("WRONG_MMI_PROCEDURE");
-        return;
+        _sendMMIError(MMI_ERROR_KS_INVALID_ACTION, mmiServiceCode);
+        return false;
       }
 
       if (!mmi.sia || !mmi.sia.length || !mmi.sib || !mmi.sib.length ||
           !mmi.sic || !mmi.sic.length) {
-        _sendMMIError("MISSING_SUPPLEMENTARY_INFORMATION");
-        return;
+        _sendMMIError(MMI_ERROR_KS_ERROR, mmiServiceCode);
+        return false;
       }
 
       if (mmi.sib != mmi.sic) {
-        _sendMMIError("NEW_PIN_MISMATCH");
-        return;
+        _sendMMIError(MMI_ERROR_KS_MISMATCH_PIN, mmiServiceCode);
+        return false;
+      }
+
+      if (mmi.sia.length < 4 || mmi.sia.length > 8 ||
+          mmi.sib.length < 4 || mmi.sib.length > 8 ||
+          mmi.sic.length < 4 || mmi.sic.length > 8) {
+        _sendMMIError(MMI_ERROR_KS_INVALID_PIN, mmiServiceCode);
+        return false;
       }
 
       return true;
     }
 
-    if (mmi == null) {
+    function _isRadioAvailable(mmiServiceCode) {
+      if (RIL.radioState !== GECKO_RADIOSTATE_READY) {
+        _sendMMIError(GECKO_ERROR_RADIO_NOT_AVAILABLE, mmiServiceCode);
+        return false;
+      }
+      return true;
+    }
+
+    // If we couldn't parse the MMI code, we'll send it as an USSD request.
+    if (mmi === null) {
       if (this._ussdSession) {
+        if (!_isRadioAvailable(MMI_KS_SC_USSD)) {
+          return;
+        }
         options.ussd = mmiString;
         this.sendUSSD(options);
         return;
       }
-      _sendMMIError("NO_VALID_MMI_STRING");
+
+      _sendMMIError(MMI_ERROR_KS_ERROR);
       return;
     }
 
@@ -2225,10 +2336,11 @@ let RIL = {
       debug("MMI " + JSON.stringify(mmi));
     }
 
+    options.rilMessageType = "sendMMI";
+
     // We check if the MMI service code is supported and in that case we
     // trigger the appropriate RIL request if possible.
     let sc = mmi.serviceCode;
-
     switch (sc) {
       // Call forwarding
       case MMI_SC_CFU:
@@ -2237,12 +2349,15 @@ let RIL = {
       case MMI_SC_CF_NOT_REACHABLE:
       case MMI_SC_CF_ALL:
       case MMI_SC_CF_ALL_CONDITIONAL:
+        if (!_isRadioAvailable(MMI_KS_SC_CALL_FORWARDING)) {
+          return;
+        }
         // Call forwarding requires at least an action, given by the MMI
         // procedure, and a reason, given by the MMI service code, but there
         // is no way that we get this far without a valid procedure or service
         // code.
+        options.mmiServiceCode = MMI_KS_SC_CALL_FORWARDING;
         options.action = MMI_PROC_TO_CF_ACTION[mmi.procedure];
-        options.rilMessageType = "sendMMI";
         options.reason = MMI_SC_TO_CF_REASON[sc];
         options.number = mmi.sia;
         options.serviceClass = this._siToServiceClass(mmi.sib);
@@ -2263,11 +2378,12 @@ let RIL = {
         // an MMI code of the form **04*OLD_PIN*NEW_PIN*NEW_PIN#, where old PIN
         // should be entered as the SIA parameter and the new PIN as SIB and
         // SIC.
-        if (!_isValidPINPUKRequest()) {
+        if (!_isRadioAvailable(MMI_KS_SC_PIN) ||
+            !_isValidPINPUKRequest(MMI_KS_SC_PIN)) {
           return;
         }
 
-        options.rilRequestType = "sendMMI";
+        options.mmiServiceCode = MMI_KS_SC_PIN;
         options.pin = mmi.sia;
         options.newPin = mmi.sib;
         this.changeICCPIN(options);
@@ -2279,11 +2395,12 @@ let RIL = {
         // enter and MMI code of the form **042*OLD_PIN2*NEW_PIN2*NEW_PIN2#,
         // where the old PIN2 should be entered as the SIA parameter and the
         // new PIN2 as SIB and SIC.
-        if (!_isValidPINPUKRequest()) {
+        if (!_isRadioAvailable(MMI_KS_SC_PIN2) ||
+            !_isValidPINPUKRequest(MMI_KS_SC_PIN2)) {
           return;
         }
 
-        options.rilRequestType = "sendMMI";
+        options.mmiServiceCode = MMI_KS_SC_PIN2;
         options.pin = mmi.sia;
         options.newPin = mmi.sib;
         this.changeICCPIN2(options);
@@ -2295,11 +2412,12 @@ let RIL = {
         // enter an MMI code of the form **05*PUK*NEW_PIN*NEW_PIN#, where PUK
         // should be entered as the SIA parameter and the new PIN as SIB and
         // SIC.
-        if (!_isValidPINPUKRequest()) {
+        if (!_isRadioAvailable(MMI_KS_SC_PUK) ||
+            !_isValidPINPUKRequest(MMI_KS_SC_PUK)) {
           return;
         }
 
-        options.rilRequestType = "sendMMI";
+        options.mmiServiceCode = MMI_KS_SC_PUK;
         options.puk = mmi.sia;
         options.newPin = mmi.sib;
         this.enterICCPUK(options);
@@ -2311,11 +2429,12 @@ let RIL = {
         // enter an MMI code of the form **052*PUK2*NEW_PIN2*NEW_PIN2#, where
         // PUK2 should be entered as the SIA parameter and the new PIN2 as SIB
         // and SIC.
-        if (!_isValidPINPUKRequest()) {
+        if (!_isRadioAvailable(MMI_KS_SC_PUK2) ||
+            !_isValidPINPUKRequest(MMI_KS_SC_PUK2)) {
           return;
         }
 
-        options.rilRequestType = "sendMMI";
+        options.mmiServiceCode = MMI_KS_SC_PUK2;
         options.puk = mmi.sia;
         options.newPin = mmi.sib;
         this.enterICCPUK2(options);
@@ -2329,10 +2448,42 @@ let RIL = {
           return;
         }
         // If we already had the device's IMEI, we just send it to the DOM.
-        options.rilMessageType = "sendMMI";
+        options.mmiServiceCode = MMI_KS_SC_IMEI;
         options.success = true;
-        options.result = this.IMEI;
+        options.statusMessage = this.IMEI;
         this.sendDOMMessage(options);
+        return;
+
+      // CLIP
+      case MMI_SC_CLIP:
+        options.mmiServiceCode = MMI_KS_SC_CLIP;
+        options.procedure = mmi.procedure;
+        if (options.procedure === MMI_PROCEDURE_INTERROGATION) {
+          this.queryCLIP(options);
+        } else {
+          _sendMMIError(MMI_ERROR_KS_NOT_SUPPORTED, MMI_KS_SC_CLIP);
+        }
+        return;
+
+      // CLIR (non-temporary ones)
+      case MMI_SC_CLIR:
+        options.mmiServiceCode = MMI_KS_SC_CLIR;
+        options.procedure = mmi.procedure;
+        switch (options.procedure) {
+          case MMI_PROCEDURE_INTERROGATION:
+            this.getCLIR(options);
+            return;
+          case MMI_PROCEDURE_ACTIVATION:
+            options.clirMode = CLIR_INVOCATION;
+            break;
+          case MMI_PROCEDURE_DEACTIVATION:
+            options.clirMode = CLIR_SUPPRESSION;
+            break;
+          default:
+            _sendMMIError(MMI_ERROR_KS_ERROR);
+            return;
+        }
+        this.setCLIR(options);
         return;
 
       // Call barring
@@ -2344,12 +2495,9 @@ let RIL = {
       case MMI_SC_BA_ALL:
       case MMI_SC_BA_MO:
       case MMI_SC_BA_MT:
-        _sendMMIError("CALL_BARRING_NOT_SUPPORTED_VIA_MMI");
-        return;
-
       // Call waiting
       case MMI_SC_CALL_WAITING:
-        _sendMMIError("CALL_WAITING_NOT_SUPPORTED_VIA_MMI");
+        _sendMMIError(MMI_ERROR_KS_NOT_SUPPORTED);
         return;
     }
 
@@ -2357,14 +2505,19 @@ let RIL = {
     // a #-string, it shall still be sent as a USSD request.
     if (mmi.fullMMI &&
         (mmiString.charAt(mmiString.length - 1) == MMI_END_OF_USSD)) {
+      if (!_isRadioAvailable(MMI_KS_SC_USSD)) {
+        return;
+      }
+
       options.ussd = mmi.fullMMI;
+      options.mmiServiceCode = MMI_KS_SC_USSD;
       this.sendUSSD(options);
       return;
     }
 
     // At this point, the MMI string is considered as not valid MMI code and
     // not valid USSD code.
-    _sendMMIError("NOT_VALID_MMI_STRING");
+    _sendMMIError(MMI_ERROR_KS_ERROR);
   },
 
   /**
@@ -2384,6 +2537,7 @@ let RIL = {
    * Cancel pending USSD.
    */
    cancelUSSD: function cancelUSSD(options) {
+     options.mmiServiceCode = MMI_KS_SC_USSD;
      Buf.simpleRequest(REQUEST_CANCEL_USSD, options);
    },
 
@@ -3016,12 +3170,56 @@ let RIL = {
    /**
    * Helper for processing responses of functions such as enterICC* and changeICC*.
    */
-  _processEnterAndChangeICCResponses: function _processEnterAndChangeICCResponses(length, options) {
+  _processEnterAndChangeICCResponses:
+    function _processEnterAndChangeICCResponses(length, options) {
     options.success = (options.rilRequestError === 0);
     if (!options.success) {
       options.errorMsg = RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError];
     }
     options.retryCount = length ? Buf.readUint32List()[0] : -1;
+    if (options.rilMessageType != "sendMMI") {
+      this.sendDOMMessage(options);
+      return;
+    }
+
+    let mmiServiceCode = options.mmiServiceCode;
+
+    if (options.success) {
+      switch (mmiServiceCode) {
+        case MMI_KS_SC_PIN:
+          options.statusMessage = MMI_SM_KS_PIN_CHANGED;
+          break;
+        case MMI_KS_SC_PIN2:
+          options.statusMessage = MMI_SM_KS_PIN2_CHANGED;
+          break;
+        case MMI_KS_SC_PUK:
+          options.statusMessage = MMI_SM_KS_PIN_UNBLOCKED;
+          break;
+        case MMI_KS_SC_PUK2:
+          options.statusMessage = MMI_SM_KS_PIN2_UNBLOCKED;
+          break;
+      }
+    } else {
+      if (options.retryCount <= 0) {
+        if (mmiServiceCode === MMI_KS_SC_PUK) {
+          options.errorMsg = MMI_ERROR_KS_SIM_BLOCKED;
+        } else if (mmiServiceCode === MMI_KS_SC_PIN) {
+          options.errorMsg = MMI_ERROR_KS_NEEDS_PUK;
+        }
+      } else {
+        if (mmiServiceCode === MMI_KS_SC_PIN ||
+            mmiServiceCode === MMI_KS_SC_PIN2) {
+          options.errorMsg = MMI_ERROR_KS_BAD_PIN;
+        } else if (mmiServiceCode === MMI_KS_SC_PUK ||
+                   mmiServiceCode === MMI_KS_SC_PUK2) {
+          options.errorMsg = MMI_ERROR_KS_BAD_PUK;
+        }
+        if (options.retryCount != undefined) {
+          options.additionalInformation = options.retryCount;
+        }
+      }
+    }
+
     this.sendDOMMessage(options);
   },
 
@@ -3113,7 +3311,7 @@ let RIL = {
     let changed = false;
 
     let regState = RIL.parseInt(newState[0], NETWORK_CREG_STATE_UNKNOWN);
-    if (curState.regState != regState) {
+    if (curState.regState === undefined || curState.regState !== regState) {
       changed = true;
       curState.regState = regState;
 
@@ -3136,19 +3334,23 @@ let RIL = {
     // From TS 23.003, 0000 and 0xfffe are indicated that no valid LAI exists
     // in MS. So we still need to report the '0000' as well.
     let lac = RIL.parseInt(newState[1], -1, 16);
-    if (curState.cell.gsmLocationAreaCode !== lac) {
+    if (curState.cell.gsmLocationAreaCode === undefined ||
+        curState.cell.gsmLocationAreaCode !== lac) {
       curState.cell.gsmLocationAreaCode = lac;
       changed = true;
     }
 
     let cid = RIL.parseInt(newState[2], -1, 16);
-    if (curState.cell.gsmCellId !== cid) {
+    if (curState.cell.gsmCellId === undefined ||
+        curState.cell.gsmCellId !== cid) {
       curState.cell.gsmCellId = cid;
       changed = true;
     }
 
-    let radioTech = RIL.parseInt(newState[3], NETWORK_CREG_TECH_UNKNOWN);
-    if (curState.radioTech != radioTech) {
+    let radioTech = (newState[3] === undefined ?
+                     NETWORK_CREG_TECH_UNKNOWN :
+                     RIL.parseInt(newState[3], NETWORK_CREG_TECH_UNKNOWN));
+    if (curState.radioTech === undefined || curState.radioTech !== radioTech) {
       changed = true;
       curState.radioTech = radioTech;
       curState.type = GECKO_RADIO_TECH[radioTech] || null;
@@ -3205,11 +3407,15 @@ let RIL = {
     }
 
     if (!this.operator) {
-      this.operator = {rilMessageType: "operatorchange"};
+      this.operator = {
+        rilMessageType: "operatorchange",
+        longName: null,
+        shortName: null
+      };
     }
 
     let [longName, shortName, networkTuple] = operatorData;
-    let thisTuple = this.operator.mcc + this.operator.mnc;
+    let thisTuple = (this.operator.mcc || "") + (this.operator.mnc || "");
 
     if (this.operator.longName !== longName ||
         this.operator.shortName !== shortName ||
@@ -3222,7 +3428,7 @@ let RIL = {
         try {
           this._processNetworkTuple(networkTuple, this.operator);
         } catch (e) {
-          debug("Error processing operator tuple: " + e);
+          if (DEBUG) debug("Error processing operator tuple: " + e);
         }
       } else {
         // According to ril.h, the operator fields will be NULL when the operator
@@ -3462,7 +3668,7 @@ let RIL = {
       try {
         this._processNetworkTuple(networkTuple, network);
       } catch (e) {
-        debug("Error processing operator tuple: " + e);
+        if (DEBUG) debug("Error processing operator tuple: " + e);
       }
 
       let state = strings[i + 3];
@@ -4511,6 +4717,15 @@ RIL[REQUEST_GET_IMSI] = function REQUEST_GET_IMSI(length, options) {
   options.rilMessageType = "iccimsi";
   options.imsi = this.iccInfoPrivate.imsi;
   this.sendDOMMessage(options);
+
+  if (this._isCdma) {
+    let mccMnc = ICCUtilsHelper.parseMccMncFromImsi(this.iccInfoPrivate.imsi);
+    if (mccMnc) {
+      this.iccInfo.mcc = mccMnc.mcc;
+      this.iccInfo.mnc = mccMnc.mnc;
+      ICCUtilsHelper.handleICCInfoChange();
+    }
+  }
 };
 RIL[REQUEST_HANGUP] = function REQUEST_HANGUP(length, options) {
   if (options.rilRequestError) {
@@ -4567,11 +4782,6 @@ RIL[REQUEST_LAST_CALL_FAIL_CAUSE] = function REQUEST_LAST_CALL_FAIL_CAUSE(length
   let failCause = Buf.readUint32();
   switch (failCause) {
     case CALL_FAIL_NORMAL:
-      this._handleDisconnectedCall(options);
-      break;
-    case CALL_FAIL_BUSY:
-      options.state = CALL_STATE_BUSY;
-      this._handleChangedCallState(options);
       this._handleDisconnectedCall(options);
       break;
     default:
@@ -4774,8 +4984,108 @@ RIL[REQUEST_CANCEL_USSD] = function REQUEST_CANCEL_USSD(length, options) {
   options.errorMsg = RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError];
   this.sendDOMMessage(options);
 };
-RIL[REQUEST_GET_CLIR] = null;
-RIL[REQUEST_SET_CLIR] = null;
+RIL[REQUEST_GET_CLIR] = function REQUEST_GET_CLIR(length, options) {
+  options.success = (options.rilRequestError === 0);
+  if (!options.success) {
+    options.errorMsg = RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError];
+    this.sendDOMMessage(options);
+    return;
+  }
+
+  let bufLength = Buf.readUint32();
+  if (!bufLength || bufLength < 2) {
+    options.success = false;
+    options.errorMsg = GECKO_ERROR_GENERIC_FAILURE;
+    this.sendDOMMessage(options);
+    return;
+  }
+
+  options.n = Buf.readUint32(); // Will be TS 27.007 +CLIR parameter 'n'.
+  options.m = Buf.readUint32(); // Will be TS 27.007 +CLIR parameter 'm'.
+
+  if (options.rilMessageType === "sendMMI") {
+    // TS 27.007 +CLIR parameter 'm'.
+    switch (options.m) {
+      // CLIR not provisioned.
+      case 0:
+        options.statusMessage = MMI_SM_KS_SERVICE_NOT_PROVISIONED;
+        break;
+      // CLIR provisioned in permanent mode.
+      case 1:
+        options.statusMessage = MMI_SM_KS_CLIR_PERMANENT;
+        break;
+      // Unknown (e.g. no network, etc.).
+      case 2:
+        options.success = false;
+        options.errorMsg = MMI_ERROR_KS_ERROR;
+        break;
+      // CLIR temporary mode presentation restricted.
+      case 3:
+        // TS 27.007 +CLIR parameter 'n'.
+        switch (options.n) {
+          // Default.
+          case 0:
+          // CLIR invocation.
+          case 1:
+            options.statusMessage = MMI_SM_KS_CLIR_DEFAULT_ON_NEXT_CALL_ON;
+            break;
+          // CLIR suppression.
+          case 2:
+            options.statusMessage = MMI_SM_KS_CLIR_DEFAULT_ON_NEXT_CALL_OFF;
+            break;
+          default:
+            options.success = false;
+            options.errorMsg = GECKO_ERROR_GENERIC_FAILURE;
+            break;
+        }
+        break;
+      // CLIR temporary mode presentation allowed.
+      case 4:
+        // TS 27.007 +CLIR parameter 'n'.
+        switch (options.n) {
+          // Default.
+          case 0:
+          // CLIR suppression.
+          case 2:
+            options.statusMessage = MMI_SM_KS_CLIR_DEFAULT_OFF_NEXT_CALL_OFF;
+            break;
+          // CLIR invocation.
+          case 1:
+            options.statusMessage = MMI_SM_KS_CLIR_DEFAULT_OFF_NEXT_CALL_ON;
+            break;
+          default:
+            options.success = false;
+            options.errorMsg = GECKO_ERROR_GENERIC_FAILURE;
+            break;
+        }
+        break;
+      default:
+        options.success = false;
+        options.errorMsg = GECKO_ERROR_GENERIC_FAILURE;
+        break;
+    }
+  }
+
+  this.sendDOMMessage(options);
+};
+RIL[REQUEST_SET_CLIR] = function REQUEST_SET_CLIR(length, options) {
+  options.success = (options.rilRequestError === 0);
+  if (!options.success) {
+    options.errorMsg = RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError];
+  }
+  if (options.success && (options.rilMessageType === "sendMMI")) {
+    switch (options.procedure) {
+      case MMI_PROCEDURE_ACTIVATION:
+        options.statusMessage = MMI_SM_KS_SERVICE_ENABLED;
+        break;
+      case MMI_PROCEDURE_DEACTIVATION:
+        options.statusMessage = MMI_SM_KS_SERVICE_DISABLED;
+        break;
+    }
+  }
+  this.sendDOMMessage(options);
+};
+
 RIL[REQUEST_QUERY_CALL_FORWARD_STATUS] =
   function REQUEST_QUERY_CALL_FORWARD_STATUS(length, options) {
     options.success = (options.rilRequestError === 0);
@@ -4791,8 +5101,7 @@ RIL[REQUEST_QUERY_CALL_FORWARD_STATUS] =
     }
     if (!rulesLength) {
       options.success = false;
-      options.errorMsg =
-        "Invalid rule length while querying call forwarding status.";
+      options.errorMsg = GECKO_ERROR_GENERIC_FAILURE;
       this.sendDOMMessage(options);
       return;
     }
@@ -4808,6 +5117,13 @@ RIL[REQUEST_QUERY_CALL_FORWARD_STATUS] =
       rules[i] = rule;
     }
     options.rules = rules;
+    if (options.rilMessageType === "sendMMI") {
+      options.statusMessage = MMI_SM_KS_SERVICE_INTERROGATED;
+      // MMI query call forwarding options request returns a set of rules that
+      // will be exposed in the form of an array of nsIDOMMozMobileCFInfo
+      // instances.
+      options.additionalInformation = rules;
+    }
     this.sendDOMMessage(options);
 };
 RIL[REQUEST_SET_CALL_FORWARD] =
@@ -4815,6 +5131,22 @@ RIL[REQUEST_SET_CALL_FORWARD] =
     options.success = (options.rilRequestError === 0);
     if (!options.success) {
       options.errorMsg = RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError];
+    }
+    if (options.success && options.isSendMMI) {
+      switch (options.action) {
+        case CALL_FORWARD_ACTION_ENABLE:
+          options.statusMessage = MMI_SM_KS_SERVICE_ENABLED;
+          break;
+        case CALL_FORWARD_ACTION_DISABLE:
+          options.statusMessage = MMI_SM_KS_SERVICE_DISABLED;
+          break;
+        case CALL_FORWARD_ACTION_REGISTRATION:
+          options.statusMessage = MMI_SM_KS_SERVICE_REGISTERED;
+          break;
+        case CALL_FORWARD_ACTION_ERASURE:
+          options.statusMessage = MMI_SM_KS_SERVICE_ERASED;
+          break;
+      }
     }
     this.sendDOMMessage(options);
 };
@@ -4847,13 +5179,14 @@ RIL[REQUEST_GET_IMEI] = function REQUEST_GET_IMEI(length, options) {
     return;
   }
 
+  options.mmiServiceCode = MMI_KS_SC_IMEI;
   options.rilMessageType = "sendMMI";
   options.success = (options.rilRequestError === 0);
   options.errorMsg = RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError];
   if ((!options.success || this.IMEI == null) && !options.errorMsg) {
     options.errorMsg = GECKO_ERROR_GENERIC_FAILURE;
   }
-  options.result = this.IMEI;
+  options.statusMessage = this.IMEI;
   this.sendDOMMessage(options);
 };
 RIL[REQUEST_GET_IMEISV] = function REQUEST_GET_IMEISV(length, options) {
@@ -5002,7 +5335,44 @@ RIL[REQUEST_BASEBAND_VERSION] = function REQUEST_BASEBAND_VERSION(length, option
 RIL[REQUEST_SEPARATE_CONNECTION] = null;
 RIL[REQUEST_SET_MUTE] = null;
 RIL[REQUEST_GET_MUTE] = null;
-RIL[REQUEST_QUERY_CLIP] = null;
+RIL[REQUEST_QUERY_CLIP] = function REQUEST_QUERY_CLIP(length, options) {
+  options.success = (options.rilRequestError === 0);
+  if (!options.success) {
+    options.errorMsg = RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError];
+    this.sendDOMMessage(options);
+    return;
+  }
+
+  let bufLength = Buf.readUint32();
+  if (!bufLength) {
+    options.success = false;
+    options.errorMsg = GECKO_ERROR_GENERIC_FAILURE;
+    this.sendDOMMessage(options);
+    return;
+  }
+
+  // options.provisioned informs about the called party receives the calling
+  // party's address information:
+  // 0 for CLIP not provisioned
+  // 1 for CLIP provisioned
+  // 2 for unknown
+  options.provisioned = Buf.readUint32();
+  if (options.rilMessageType === "sendMMI") {
+    switch (options.provisioned) {
+      case 0:
+        options.statusMessage = MMI_SM_KS_SERVICE_DISABLED;
+        break;
+      case 1:
+        options.statusMessage = MMI_SM_KS_SERVICE_ENABLED;
+        break;
+      default:
+        options.success = false;
+        options.errorMsg = MMI_ERROR_KS_ERROR;
+        break;
+    }
+  }
+  this.sendDOMMessage(options);
+};
 RIL[REQUEST_LAST_DATA_CALL_FAIL_CAUSE] = null;
 
 RIL.readDataCall_v5 = function readDataCall_v5(options) {
@@ -5228,6 +5598,14 @@ RIL[REQUEST_VOICE_RADIO_TECH] = function REQUEST_VOICE_RADIO_TECH(length, option
   }
   let radioTech = Buf.readUint32List();
   this._processRadioTech(radioTech[0]);
+};
+RIL[REQUEST_GET_UNLOCK_RETRY_COUNT] = function REQUEST_GET_UNLOCK_RETRY_COUNT(length, options) {
+  options.success = (options.rilRequestError === 0);
+  if (!options.success) {
+    options.errorMsg = RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError];
+  }
+  options.retryCount = length ? Buf.readUint32List()[0] : -1;
+  this.sendDOMMessage(options);
 };
 RIL[UNSOLICITED_RESPONSE_RADIO_STATE_CHANGED] = function UNSOLICITED_RESPONSE_RADIO_STATE_CHANGED() {
   let radioState = Buf.readUint32();
@@ -6464,14 +6842,17 @@ let GsmPDUHelper = {
    */
   readDiallingNumber: function readDiallingNumber(len) {
     if (DEBUG) debug("PDU: Going to read Dialling number: " + len);
+    if (len === 0) {
+      return "";
+    }
 
     // TOA = TON + NPI
     let toa = this.readHexOctet();
 
-    let number = this.readSwappedNibbleBcdString(len - 1).toString();
+    let number = this.readSwappedNibbleBcdString(len - 1);
     if (number.length <= 0) {
-      if (DEBUG) debug("PDU error: no number provided");
-      return null;
+      if (DEBUG) debug("No number provided");
+      return "";
     }
     if ((toa >> 4) == (PDU_TOA_INTERNATIONAL >> 4)) {
       number = '+' + number;
@@ -7787,6 +8168,7 @@ let CdmaPDUHelper = {
       case PDU_DCS_MSG_CODING_16BITS_ALPHABET:
         return PDU_CDMA_MSG_CODING_UNICODE;
     }
+    throw new Error("gsmDcsToCdmaEncoding(): Invalid GSM SMS DCS value: " + encoding);
   },
 
   /**
@@ -8629,7 +9011,7 @@ let StkCommandParamsFactory = {
         param = this.processTimerManagement(cmdDetails, ctlvs);
         break;
       default:
-        debug("unknown proactive command");
+        if (DEBUG) debug("unknown proactive command");
         break;
     }
     return param;
@@ -9080,7 +9462,7 @@ let StkProactiveCmdHelper = {
       case COMPREHENSIONTLV_TAG_URL:
         return this.retrieveUrl(length);
       default:
-        debug("StkProactiveCmdHelper: unknown tag " + tag.toString(16));
+        if (DEBUG) debug("StkProactiveCmdHelper: unknown tag " + tag.toString(16));
         Buf.seekIncoming(length * PDU_HEX_OCTET_SIZE);
         return null;
     }
@@ -10167,7 +10549,9 @@ let ICCRecordHelper = {
   readMSISDN: function readMSISDN() {
     function callback(options) {
       let contact = GsmPDUHelper.readAlphaIdDiallingNumber(options.recordSize);
-      if (!contact || RIL.iccInfo.msisdn === contact.number) {
+      if (!contact ||
+          (RIL.iccInfo.msisdn !== undefined &&
+           RIL.iccInfo.msisdn === contact.number)) {
         return;
       }
       RIL.iccInfo.msisdn = contact.number;
@@ -10198,20 +10582,12 @@ let ICCRecordHelper = {
         debug("AD: " + str);
       }
 
-      let imsi = RIL.iccInfoPrivate.imsi;
-      if (imsi) {
-        // MCC is the first 3 digits of IMSI.
-        RIL.iccInfo.mcc = imsi.substr(0,3);
-        // The 4th byte of the response is the length of MNC.
-        let mncLength = ad && ad[3];
-        if (!mncLength) {
-          // If response dose not contain the length of MNC, check the MCC table
-          // to decide the length of MNC.
-          let index = MCC_TABLE_FOR_MNC_LENGTH_IS_3.indexOf(RIL.iccInfo.mcc);
-          mncLength = (index !== -1) ? 3 : 2;
-        }
-        RIL.iccInfo.mnc = imsi.substr(3, mncLength);
-        if (DEBUG) debug("MCC: " + RIL.iccInfo.mcc + " MNC: " + RIL.iccInfo.mnc);
+      // The 4th byte of the response is the length of MNC.
+      let mccMnc = ICCUtilsHelper.parseMccMncFromImsi(RIL.iccInfoPrivate.imsi,
+                                                      ad && ad[3]);
+      if (mccMnc) {
+        RIL.iccInfo.mcc = mccMnc.mcc;
+        RIL.iccInfo.mnc = mccMnc.mnc;
         ICCUtilsHelper.handleICCInfoChange();
       }
     }
@@ -10399,7 +10775,9 @@ let ICCRecordHelper = {
   readMBDN: function readMBDN() {
     function callback(options) {
       let contact = GsmPDUHelper.readAlphaIdDiallingNumber(options.recordSize);
-      if (!contact || RIL.iccInfo.mbdn === contact.number){
+      if (!contact ||
+          (RIL.iccInfo.mbdn !== undefined &&
+           RIL.iccInfo.mbdn === contact.number)) {
         return;
       }
       RIL.iccInfo.mbdn = contact.number;
@@ -11454,9 +11832,9 @@ let ICCUtilsHelper = {
       bitmask = 1 << ((usimService % 8) << 0);
     }
 
-    return (serviceTable &&
+    return (serviceTable !== null) &&
            (index < serviceTable.length) &&
-           (serviceTable[index] & bitmask)) !== 0;
+           ((serviceTable[index] & bitmask) !== 0);
   },
 
   /**
@@ -11485,6 +11863,36 @@ let ICCUtilsHelper = {
     }
 
     return true;
+  },
+
+  /**
+   * Parse MCC/MNC from IMSI. If there is no available value for the length of
+   * mnc, it will use the data in MCC table to parse.
+   *
+   * @param imsi
+   *        The imsi of icc.
+   * @param mncLength [optional]
+   *        The length of mnc.
+   *
+   * @return An object contains the parsing result of mcc and mnc.
+   *         Or null if any error occurred.
+   */
+  parseMccMncFromImsi: function parseMccMncFromImsi(imsi, mncLength) {
+    if (!imsi) {
+      return;
+    }
+
+    // MCC is the first 3 digits of IMSI.
+    let mcc = imsi.substr(0,3);
+    if (!mncLength) {
+      // Check the MCC table to decide the length of MNC.
+      let index = MCC_TABLE_FOR_MNC_LENGTH_IS_3.indexOf(mcc);
+      mncLength = (index !== -1) ? 3 : 2;
+    }
+    let mnc = imsi.substr(3, mncLength);
+    if (DEBUG) debug("IMSI: " + imsi + " MCC: " + mcc + " MNC: " + mnc);
+
+    return { mcc: mcc, mnc: mnc};
   },
 };
 

@@ -240,8 +240,7 @@ void FMRadio::Notify(const FMRadioOperationInformation& info)
       DispatchTrustedEvent(RADIO_SEEK_COMPLETE_EVENT_NAME);
       break;
     default:
-      MOZ_NOT_REACHED();
-      return;
+      MOZ_CRASH();
   }
 }
 
@@ -259,16 +258,7 @@ NS_IMETHODIMP FMRadio::CanPlayChanged(bool canPlay)
   }
 
   /* mute fm first, it should be better to stop&resume fm */
-  if (canPlay) {
-    audioManager->SetFmRadioAudioEnabled(true);
-    int32_t volIdx = 0;
-    // Restore fm volume, that value is sync as music type
-    audioManager->GetStreamVolumeIndex(nsIAudioManager::STREAM_TYPE_MUSIC, &volIdx);
-    audioManager->SetStreamVolumeIndex(nsIAudioManager::STREAM_TYPE_FM, volIdx);
-  } else {
-    audioManager->SetStreamVolumeIndex(nsIAudioManager::STREAM_TYPE_FM, 0);
-    audioManager->SetFmRadioAudioEnabled(false);
-  }
+  audioManager->SetFmRadioAudioEnabled(canPlay);
   return NS_OK;
 }
 

@@ -21,6 +21,15 @@
 #define NS_HTTP_VERSION_1_0     10
 #define NS_HTTP_VERSION_1_1     11
 
+namespace mozilla {
+namespace net {
+    enum {
+        SPDY_VERSION_2 = 2,
+        SPDY_VERSION_3 = 3
+    };
+} // namespace mozilla::net
+} // namespace mozilla
+
 typedef uint8_t nsHttpVersion;
 
 //-----------------------------------------------------------------------------
@@ -57,6 +66,11 @@ typedef uint8_t nsHttpVersion;
 // a transaction with this flag loads without respect to whether the load
 // group is currently blocking on some resources
 #define NS_HTTP_LOAD_UNBLOCKED       (1<<8)
+
+// These flags allow a transaction to use TLS false start with
+// weaker security profiles based on past history
+#define NS_HTTP_ALLOW_RSA_FALSESTART (1<<9)
+#define NS_HTTP_ALLOW_RC4_FALSESTART (1<<10)
 
 //-----------------------------------------------------------------------------
 // some default values

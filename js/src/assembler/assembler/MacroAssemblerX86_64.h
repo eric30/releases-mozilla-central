@@ -36,7 +36,7 @@
 
 #if ENABLE_ASSEMBLER && WTF_CPU_X86_64
 
-#include "MacroAssemblerX86Common.h"
+#include "assembler/assembler/MacroAssemblerX86Common.h"
 
 #define REPTACH_OFFSET_CALL_R11 3
 
@@ -568,10 +568,10 @@ public:
         storePtr(ImmPtr(reinterpret_cast<void *>(imm.u.u64)), address);
     }
 
-    bool supportsFloatingPoint() const { return true; }
+    static bool supportsFloatingPoint() { return true; }
     // See comment on MacroAssemblerARMv7::supportsFloatingPointTruncate()
-    bool supportsFloatingPointTruncate() const { return true; }
-    bool supportsFloatingPointSqrt() const { return true; }
+    static bool supportsFloatingPointTruncate() { return true; }
+    static bool supportsFloatingPointSqrt() { return true; }
 
 private:
     friend class LinkBuffer;

@@ -75,7 +75,11 @@ public class GeckoPreferences
     private static String PREFS_GEO_REPORTING = "app.geo.reportdata";
     private static String PREFS_HEALTHREPORT_LINK = NON_PREF_PREFIX + "healthreport.link";
 
+    public static String PREFS_RESTORE_SESSION = NON_PREF_PREFIX + "restoreSession";
+
+    // These values are chosen to be distinct from other Activity constants.
     private static int REQUEST_CODE_PREF_SCREEN = 5;
+    private static int RESULT_CODE_EXIT_SETTINGS = 6;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -90,13 +94,23 @@ public class GeckoPreferences
         // Use setResourceToOpen to specify these extras.
         Bundle intentExtras = getIntent().getExtras();
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.HONEYCOMB) {
+            int res = 0;
             if (intentExtras != null && intentExtras.containsKey(INTENT_EXTRA_RESOURCES)) {
+                // Fetch resource id from intent.
                 String resourceName = intentExtras.getString(INTENT_EXTRA_RESOURCES);
-                int resource = getResources().getIdentifier(resourceName, "xml", getPackageName());
-                addPreferencesFromResource(resource);
-            } else {
-                addPreferencesFromResource(R.xml.preferences);
+                if (resourceName != null) {
+                    res = getResources().getIdentifier(resourceName, "xml", getPackageName());
+                    if (res == 0) {
+                        Log.e(LOGTAG, "No resource found named " + resourceName);
+                    }
+                }
             }
+            if (res == 0) {
+                // No resource specified, or the resource was invalid; use the default preferences screen.
+                Log.e(LOGTAG, "Displaying default settings.");
+                res = R.xml.preferences;
+            }
+            addPreferencesFromResource(res);
         }
 
         registerEventListener("Sanitize:Finished");
@@ -121,14 +135,14 @@ public class GeckoPreferences
         Bundle fragmentArgs = new Bundle();
         // Add resource argument to fragment if it exists.
         if (intentExtras != null && intentExtras.containsKey(INTENT_EXTRA_RESOURCES)) {
-            String resource = intentExtras.getString(INTENT_EXTRA_RESOURCES);
-            fragmentArgs.putString(INTENT_EXTRA_RESOURCES, resource);
+            String resourceName = intentExtras.getString(INTENT_EXTRA_RESOURCES);
+            fragmentArgs.putString(INTENT_EXTRA_RESOURCES, resourceName);
         } else {
             // Use top-level settings screen.
             if (!onIsMultiPane()) {
                 fragmentArgs.putString(INTENT_EXTRA_RESOURCES, "preferences");
             } else {
-                fragmentArgs.putString(INTENT_EXTRA_RESOURCES, "preferences_general");
+                fragmentArgs.putString(INTENT_EXTRA_RESOURCES, "preferences_customize_tablet");
             }
         }
 
@@ -207,8 +221,9 @@ public class GeckoPreferences
 
     @Override
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
-        if (REQUEST_CODE_PREF_SCREEN == requestCode && Activity.RESULT_CANCELED == resultCode) {
-            setResult(Activity.RESULT_CANCELED);
+        if (REQUEST_CODE_PREF_SCREEN == requestCode && RESULT_CODE_EXIT_SETTINGS == resultCode) {
+            // Pass this result up to the parent activity.
+            setResult(RESULT_CODE_EXIT_SETTINGS);
             finish();
         }
     }
@@ -443,6 +458,10 @@ public class GeckoPreferences
             // Translate boolean value to int for geo reporting pref.
             PrefsHelper.setPref(prefName, (Boolean) newValue ? 1 : 0);
             return true;
+        } else if (PREFS_RESTORE_SESSION.equals(prefName)) {
+            // Do nothing else; the pref will be persisted in the shared prefs,
+            // and it will be read at startup in Java before a session restore.
+            return true;
         }
 
         if (!TextUtils.isEmpty(prefName)) {
@@ -454,7 +473,7 @@ public class GeckoPreferences
             CharSequence newEntry = ((ListPreference) preference).getEntries()[newIndex];
             ((ListPreference) preference).setSummary(newEntry);
         } else if (preference instanceof LinkPreference) {
-            setResult(Activity.RESULT_CANCELED);
+            setResult(RESULT_CODE_EXIT_SETTINGS);
             finish();
         } else if (preference instanceof FontSizePreference) {
             final FontSizePreference fontSizePref = (FontSizePreference) preference;

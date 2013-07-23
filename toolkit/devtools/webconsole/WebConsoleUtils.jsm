@@ -144,8 +144,32 @@ this.WebConsoleUtils = {
   getInnerWindowId: function WCU_getInnerWindowId(aWindow)
   {
     return aWindow.QueryInterface(Ci.nsIInterfaceRequestor).
-           getInterface(Ci.nsIDOMWindowUtils).currentInnerWindowID;
+             getInterface(Ci.nsIDOMWindowUtils).currentInnerWindowID;
   },
+
+  /**
+   * Recursively gather a list of inner window ids given a
+   * top level window.
+   *
+   * @param nsIDOMWindow aWindow
+   * @return Array
+   *         list of inner window ids.
+   */
+  getInnerWindowIDsForFrames: function WCU_getInnerWindowIDsForFrames(aWindow)
+  {
+    let innerWindowID = this.getInnerWindowId(aWindow);
+    let ids = [innerWindowID];
+
+    if (aWindow.frames) {
+      for (let i = 0; i < aWindow.frames.length; i++) {
+        let frame = aWindow.frames[i];
+        ids = ids.concat(this.getInnerWindowIDsForFrames(frame));
+      }
+    }
+
+    return ids;
+  },
+
 
   /**
    * Gets the ID of the outer window of this DOM window.
@@ -703,10 +727,12 @@ function findCompletionBeginning(aStr)
  *
  * @param object aScope
  *        Scope to use for the completion.
- *
  * @param string aInputValue
  *        Value that should be completed.
- *
+ * @param number [aCursor=aInputValue.length]
+ *        Optional offset in the input where the cursor is located. If this is
+ *        omitted then the cursor is assumed to be at the end of the input
+ *        value.
  * @returns null or object
  *          If no completion valued could be computed, null is returned,
  *          otherwise a object with the following form is returned:
@@ -716,13 +742,18 @@ function findCompletionBeginning(aStr)
  *                         the matches-strings.
  *            }
  */
-function JSPropertyProvider(aScope, aInputValue)
+function JSPropertyProvider(aScope, aInputValue, aCursor)
 {
+  if (aCursor === undefined) {
+    aCursor = aInputValue.length;
+  }
+
+  let inputValue = aInputValue.substring(0, aCursor);
   let obj = WCU.unwrap(aScope);
 
-  // Analyse the aInputValue and find the beginning of the last part that
+  // Analyse the inputValue and find the beginning of the last part that
   // should be completed.
-  let beginning = findCompletionBeginning(aInputValue);
+  let beginning = findCompletionBeginning(inputValue);
 
   // There was an error analysing the string.
   if (beginning.err) {
@@ -735,7 +766,7 @@ function JSPropertyProvider(aScope, aInputValue)
     return null;
   }
 
-  let completionPart = aInputValue.substring(beginning.startPos);
+  let completionPart = inputValue.substring(beginning.startPos);
 
   // Don't complete on just an empty string.
   if (completionPart.trim() == "") {
@@ -986,7 +1017,7 @@ ConsoleServiceListener.prototype =
   },
 
   /**
-   * Get the cached page errors for the current inner window.
+   * Get the cached page errors for the current inner window and its (i)frames.
    *
    * @param boolean [aIncludePrivate=false]
    *        Tells if you want to also retrieve messages coming from private
@@ -997,22 +1028,36 @@ ConsoleServiceListener.prototype =
    */
   getCachedMessages: function CSL_getCachedMessages(aIncludePrivate = false)
   {
-    let innerWindowID = this.window ?
-                        WebConsoleUtils.getInnerWindowId(this.window) : null;
     let errors = Services.console.getMessageArray() || [];
+
+    // if !this.window, we're in a browser console. Still need to filter
+    // private messages.
+    if (!this.window) {
+      return errors.filter((aError) => {
+        if (aError instanceof Ci.nsIScriptError) {
+          if (!aIncludePrivate && aError.isFromPrivateWindow) {
+            return false;
+          }
+        }
+
+        return true;
+      });
+    }
+
+    let ids = WebConsoleUtils.getInnerWindowIDsForFrames(this.window);
 
     return errors.filter((aError) => {
       if (aError instanceof Ci.nsIScriptError) {
         if (!aIncludePrivate && aError.isFromPrivateWindow) {
           return false;
         }
-        if (innerWindowID &&
-            (aError.innerWindowID != innerWindowID ||
+        if (ids &&
+            (ids.indexOf(aError.innerWindowID) == -1 ||
              !this.isCategoryAllowed(aError.category))) {
           return false;
         }
       }
-      else if (innerWindowID) {
+      else if (ids && ids[0]) {
         // If this is not an nsIScriptError and we need to do window-based
         // filtering we skip this message.
         return false;
@@ -1115,7 +1160,7 @@ ConsoleAPIListener.prototype =
   },
 
   /**
-   * Get the cached messages for the current inner window.
+   * Get the cached messages for the current inner window and its (i)frames.
    *
    * @param boolean [aIncludePrivate=false]
    *        Tells if you want to also retrieve messages coming from private
@@ -1125,14 +1170,24 @@ ConsoleAPIListener.prototype =
    */
   getCachedMessages: function CAL_getCachedMessages(aIncludePrivate = false)
   {
-    let innerWindowId = this.window ?
-                        WebConsoleUtils.getInnerWindowId(this.window) : null;
-    let events = ConsoleAPIStorage.getEvents(innerWindowId);
-    if (aIncludePrivate) {
-      return events;
+    let messages = [];
+
+    // if !this.window, we're in a browser console. Retrieve all events
+    // for filtering based on privacy.
+    if (!this.window) {
+      messages = ConsoleAPIStorage.getEvents();
+    } else {
+      let ids = WebConsoleUtils.getInnerWindowIDsForFrames(this.window);
+      ids.forEach((id) => {
+        messages = messages.concat(ConsoleAPIStorage.getEvents(id));
+      });
     }
 
-    return events.filter((m) => !m.private);
+    if (aIncludePrivate) {
+      return messages;
+    }
+
+    return messages.filter((m) => !m.private);
   },
 
   /**
@@ -1700,10 +1755,10 @@ NetworkResponseListener.prototype = {
  *        window is given, all browser network requests are logged.
  * @param object aOwner
  *        The network monitor owner. This object needs to hold:
- *        - onNetworkEvent(aRequestInfo). This method is invoked once for every
- *        new network request and it is given one arguments: the initial network
- *        request information. onNetworkEvent() must return an object which
- *        holds several add*() methods which are used to add further network
+ *        - onNetworkEvent(aRequestInfo, aChannel). This method is invoked once for
+ *        every new network request and it is given two arguments: the initial network
+ *        request information, and the channel. onNetworkEvent() must return an object
+ *        which holds several add*() methods which are used to add further network
  *        request/response information.
  *        - saveRequestAndResponseBodies property which tells if you want to log
  *        request and response bodies.
@@ -2004,7 +2059,7 @@ NetworkMonitor.prototype = {
       cookies = NetworkHelper.parseCookieHeader(cookieHeader);
     }
 
-    httpActivity.owner = this.owner.onNetworkEvent(event);
+    httpActivity.owner = this.owner.onNetworkEvent(event, aChannel);
 
     this._setupResponseListener(httpActivity);
 

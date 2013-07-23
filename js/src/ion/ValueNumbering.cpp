@@ -4,11 +4,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "Ion.h"
-#include "IonBuilder.h"
-#include "IonSpewer.h"
-#include "CompileInfo.h"
-#include "ValueNumbering.h"
+#include "ion/Ion.h"
+#include "ion/IonBuilder.h"
+#include "ion/IonSpewer.h"
+#include "ion/CompileInfo.h"
+#include "ion/ValueNumbering.h"
 
 using namespace js;
 using namespace js::ion;
@@ -89,7 +89,7 @@ ValueNumberer::simplifyControlInstruction(MControlInstruction *def)
 
     // MControlInstructions should not have consumers.
     JS_ASSERT(repl->isControlInstruction());
-    JS_ASSERT(def->useCount() == 0);
+    JS_ASSERT(!def->hasUses());
 
     if (def->isInWorklist())
         repl->setInWorklist();

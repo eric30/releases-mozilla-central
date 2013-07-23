@@ -12,6 +12,7 @@
 #include "mozilla/dom/SVGAngle.h"
 #include "mozilla/dom/SVGMarkerElement.h"
 #include "mozilla/dom/SVGMarkerElementBinding.h"
+#include "mozilla/Preferences.h"
 #include "gfxMatrix.h"
 #include "SVGContentUtils.h"
 
@@ -54,42 +55,38 @@ nsSVGElement::AngleInfo SVGMarkerElement::sAngleInfo[1] =
 };
 
 //----------------------------------------------------------------------
-// nsISupports methods
-
-NS_SVG_VAL_IMPL_CYCLE_COLLECTION(nsSVGOrientType::DOMAnimatedEnum, mSVGElement)
-
-NS_IMPL_CYCLE_COLLECTING_ADDREF(nsSVGOrientType::DOMAnimatedEnum)
-NS_IMPL_CYCLE_COLLECTING_RELEASE(nsSVGOrientType::DOMAnimatedEnum)
-
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsSVGOrientType::DOMAnimatedEnum)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMSVGAnimatedEnumeration)
-  NS_INTERFACE_MAP_ENTRY(nsISupports)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(SVGAnimatedEnumeration)
-NS_INTERFACE_MAP_END
-
-//----------------------------------------------------------------------
 // Implementation
 
 nsresult
 nsSVGOrientType::SetBaseValue(uint16_t aValue,
                               nsSVGElement *aSVGElement)
 {
-  if (aValue == SVG_MARKER_ORIENT_AUTO || aValue == SVG_MARKER_ORIENT_ANGLE) {
+  if (aValue == SVG_MARKER_ORIENT_AUTO_START_REVERSE &&
+      !SVGMarkerElement::MarkerImprovementsPrefEnabled()) {
+    return NS_ERROR_DOM_SYNTAX_ERR;
+  }
+
+  if (aValue == SVG_MARKER_ORIENT_AUTO ||
+      aValue == SVG_MARKER_ORIENT_ANGLE ||
+      aValue == SVG_MARKER_ORIENT_AUTO_START_REVERSE) {
     SetBaseValue(aValue);
     aSVGElement->SetAttr(
       kNameSpaceID_None, nsGkAtoms::orient, nullptr,
       (aValue == SVG_MARKER_ORIENT_AUTO ?
-        NS_LITERAL_STRING("auto") : NS_LITERAL_STRING("0")),
+        NS_LITERAL_STRING("auto") :
+        aValue == SVG_MARKER_ORIENT_ANGLE ?
+          NS_LITERAL_STRING("0") :
+          NS_LITERAL_STRING("auto-start-reverse")),
       true);
     return NS_OK;
   }
   return NS_ERROR_DOM_SYNTAX_ERR;
 }
 
-already_AddRefed<nsIDOMSVGAnimatedEnumeration>
+already_AddRefed<SVGAnimatedEnumeration>
 nsSVGOrientType::ToDOMAnimatedEnum(nsSVGElement *aSVGElement)
 {
-  nsCOMPtr<nsIDOMSVGAnimatedEnumeration> toReturn =
+  nsRefPtr<SVGAnimatedEnumeration> toReturn =
     new DOMAnimatedEnum(this, aSVGElement);
   return toReturn.forget();
 }
@@ -134,7 +131,7 @@ SVGMarkerElement::RefY()
   return mLengthAttributes[REFY].ToDOMAnimatedLength(this);
 }
 
-already_AddRefed<nsIDOMSVGAnimatedEnumeration>
+already_AddRefed<SVGAnimatedEnumeration>
 SVGMarkerElement::MarkerUnits()
 {
   return mEnumAttributes[MARKERUNITS].ToDOMAnimatedEnum(this);
@@ -152,7 +149,7 @@ SVGMarkerElement::MarkerHeight()
   return mLengthAttributes[MARKERHEIGHT].ToDOMAnimatedLength(this);
 }
 
-already_AddRefed<nsIDOMSVGAnimatedEnumeration>
+already_AddRefed<SVGAnimatedEnumeration>
 SVGMarkerElement::OrientType()
 {
   return mOrientType.ToDOMAnimatedEnum(this);
@@ -216,6 +213,12 @@ SVGMarkerElement::ParseAttribute(int32_t aNameSpaceID, nsIAtom* aName,
   if (aNameSpaceID == kNameSpaceID_None && aName == nsGkAtoms::orient) {
     if (aValue.EqualsLiteral("auto")) {
       mOrientType.SetBaseValue(SVG_MARKER_ORIENT_AUTO);
+      aResult.SetTo(aValue);
+      return true;
+    }
+    if (aValue.EqualsLiteral("auto-start-reverse") &&
+        MarkerImprovementsPrefEnabled()) {
+      mOrientType.SetBaseValue(SVG_MARKER_ORIENT_AUTO_START_REVERSE);
       aResult.SetTo(aValue);
       return true;
     }
@@ -295,14 +298,24 @@ SVGMarkerElement::GetPreserveAspectRatio()
 
 gfxMatrix
 SVGMarkerElement::GetMarkerTransform(float aStrokeWidth,
-                                     float aX, float aY, float aAutoAngle)
+                                     float aX, float aY, float aAutoAngle,
+                                     bool aIsStart)
 {
   gfxFloat scale = mEnumAttributes[MARKERUNITS].GetAnimValue() ==
                      SVG_MARKERUNITS_STROKEWIDTH ? aStrokeWidth : 1.0;
 
-  gfxFloat angle = mOrientType.GetAnimValue() == SVG_MARKER_ORIENT_AUTO ?
-                    aAutoAngle :
-                    mAngleAttributes[ORIENT].GetAnimValue() * M_PI / 180.0;
+  gfxFloat angle;
+  switch (mOrientType.GetAnimValueInternal()) {
+    case SVG_MARKER_ORIENT_AUTO:
+      angle = aAutoAngle;
+      break;
+    case SVG_MARKER_ORIENT_AUTO_START_REVERSE:
+      angle = aAutoAngle + (aIsStart ? M_PI : 0.0);
+      break;
+    default: // SVG_MARKER_ORIENT_ANGLE
+      angle = mAngleAttributes[ORIENT].GetAnimValue() * M_PI / 180.0;
+      break;
+  }
 
   return gfxMatrix(cos(angle) * scale,   sin(angle) * scale,
                    -sin(angle) * scale,  cos(angle) * scale,
@@ -352,6 +365,12 @@ SVGMarkerElement::GetViewBoxTransform()
   }
 
   return *mViewBoxToViewportTransform;
+}
+
+/* static */ bool
+SVGMarkerElement::MarkerImprovementsPrefEnabled()
+{
+  return Preferences::GetBool("svg.marker-improvements.enabled", false);
 }
 
 } // namespace dom

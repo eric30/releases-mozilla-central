@@ -9,7 +9,10 @@
 #ifndef xpcmaps_h___
 #define xpcmaps_h___
 
+#include "mozilla/MemoryReporting.h"
+
 #include "js/HashTable.h"
+#include "jsfriendapi.h"
 
 // Maps...
 
@@ -43,13 +46,16 @@ public:
         return p ? p->value : nullptr;
     }
 
-    inline nsXPCWrappedJS* Add(nsXPCWrappedJS* wrapper) {
+    inline nsXPCWrappedJS* Add(JSContext* cx, nsXPCWrappedJS* wrapper) {
         NS_PRECONDITION(wrapper,"bad param");
         JSObject* obj = wrapper->GetJSObjectPreserveColor();
         Map::AddPtr p = mTable.lookupForAdd(obj);
         if (p)
             return p->value;
-        return mTable.add(p, obj, wrapper) ? wrapper : nullptr;
+        if (!mTable.add(p, obj, wrapper))
+            return nullptr;
+        JS_StorePostBarrierCallback(cx, KeyMarkCallback, obj);
+        return wrapper;
     }
 
     inline void Remove(nsXPCWrappedJS* wrapper) {
@@ -68,7 +74,7 @@ public:
 
     void ShutdownMarker(JSRuntime* rt);
 
-    size_t SizeOfIncludingThis(nsMallocSizeOfFun mallocSizeOf) {
+    size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) {
         size_t n = mallocSizeOf(this);
         n += mTable.sizeOfExcludingThis(mallocSizeOf);
         return n;
@@ -76,6 +82,19 @@ public:
 
 private:
     JSObject2WrappedJSMap() {}
+
+    /*
+     * This function is called during minor GCs for each key in the HashMap that
+     * has been moved.
+     */
+    static void KeyMarkCallback(JSTracer *trc, void *k) {
+        JSObject *key = static_cast<JSObject*>(k);
+        JSObject *prior = key;
+        JS_CallObjectTracer(trc, &key, "XPCJSRuntime::mWrappedJSMap key");
+        XPCJSRuntime* rt = nsXPConnect::GetRuntimeInstance();
+        JSObject2WrappedJSMap* self = rt->GetWrappedJSMap();
+        self->mTable.rekey(prior, key);
+    }
 
     Map mTable;
 };
@@ -136,14 +155,14 @@ public:
     inline uint32_t Enumerate(PLDHashEnumerator f, void *arg)
         {return PL_DHashTableEnumerate(mTable, f, arg);}
 
-    size_t SizeOfIncludingThis(nsMallocSizeOfFun mallocSizeOf);
+    size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf);
 
     ~Native2WrappedNativeMap();
 private:
     Native2WrappedNativeMap();    // no implementation
     Native2WrappedNativeMap(int size);
 
-    static size_t SizeOfEntryExcludingThis(PLDHashEntryHdr *hdr, JSMallocSizeOfFun mallocSizeOf, void *);
+    static size_t SizeOfEntryExcludingThis(PLDHashEntryHdr *hdr, mozilla::MallocSizeOf mallocSizeOf, void *);
 
 private:
     PLDHashTable *mTable;
@@ -255,14 +274,14 @@ public:
     inline uint32_t Enumerate(PLDHashEnumerator f, void *arg)
         {return PL_DHashTableEnumerate(mTable, f, arg);}
 
-    size_t SizeOfIncludingThis(nsMallocSizeOfFun mallocSizeOf);
+    size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf);
 
     ~IID2NativeInterfaceMap();
 private:
     IID2NativeInterfaceMap();    // no implementation
     IID2NativeInterfaceMap(int size);
 
-    static size_t SizeOfEntryExcludingThis(PLDHashEntryHdr *hdr, JSMallocSizeOfFun mallocSizeOf, void *);
+    static size_t SizeOfEntryExcludingThis(PLDHashEntryHdr *hdr, mozilla::MallocSizeOf mallocSizeOf, void *);
 
 private:
     PLDHashTable *mTable;
@@ -318,7 +337,7 @@ public:
     // So we don't want to count those XPCNativeSets, because they are better
     // counted elsewhere (i.e. in XPCJSRuntime::mNativeSetMap, which holds
     // pointers to *all* XPCNativeSets).  Hence the "Shallow".
-    size_t ShallowSizeOfIncludingThis(nsMallocSizeOfFun mallocSizeOf);
+    size_t ShallowSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf);
 
     ~ClassInfo2NativeSetMap();
 private:
@@ -374,14 +393,14 @@ public:
     inline uint32_t Enumerate(PLDHashEnumerator f, void *arg)
         {return PL_DHashTableEnumerate(mTable, f, arg);}
 
-    size_t SizeOfIncludingThis(nsMallocSizeOfFun mallocSizeOf);
+    size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf);
 
     ~ClassInfo2WrappedNativeProtoMap();
 private:
     ClassInfo2WrappedNativeProtoMap();    // no implementation
     ClassInfo2WrappedNativeProtoMap(int size);
 
-    static size_t SizeOfEntryExcludingThis(PLDHashEntryHdr *hdr, JSMallocSizeOfFun mallocSizeOf, void *);
+    static size_t SizeOfEntryExcludingThis(PLDHashEntryHdr *hdr, mozilla::MallocSizeOf mallocSizeOf, void *);
 
 private:
     PLDHashTable *mTable;
@@ -447,14 +466,14 @@ public:
     inline uint32_t Enumerate(PLDHashEnumerator f, void *arg)
         {return PL_DHashTableEnumerate(mTable, f, arg);}
 
-    size_t SizeOfIncludingThis(nsMallocSizeOfFun mallocSizeOf);
+    size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf);
 
     ~NativeSetMap();
 private:
     NativeSetMap();    // no implementation
     NativeSetMap(int size);
 
-    static size_t SizeOfEntryExcludingThis(PLDHashEntryHdr *hdr, JSMallocSizeOfFun mallocSizeOf, void *);
+    static size_t SizeOfEntryExcludingThis(PLDHashEntryHdr *hdr, mozilla::MallocSizeOf mallocSizeOf, void *);
 
 private:
     PLDHashTable *mTable;
@@ -603,7 +622,7 @@ private:
 
 class JSObject2JSObjectMap
 {
-    typedef js::HashMap<JSObject *, JSObject *, js::PointerHasher<JSObject *, 3>,
+    typedef js::HashMap<JSObject *, JS::Heap<JSObject *>, js::PointerHasher<JSObject *, 3>,
                         js::SystemAllocPolicy> Map;
 
 public:
@@ -623,13 +642,15 @@ public:
     }
 
     /* Note: If the entry already exists, return the old value. */
-    inline JSObject* Add(JSObject *key, JSObject *value) {
+    inline JSObject* Add(JSContext *cx, JSObject *key, JSObject *value) {
         NS_PRECONDITION(key,"bad param");
         Map::AddPtr p = mTable.lookupForAdd(key);
         if (p)
             return p->value;
         if (!mTable.add(p, key, value))
             return nullptr;
+        MOZ_ASSERT(xpc::GetObjectScope(key)->mWaiverWrapperMap == this);
+        JS_StorePostBarrierCallback(cx, KeyMarkCallback, key);
         return value;
     }
 
@@ -643,7 +664,7 @@ public:
     void Sweep() {
         for (Map::Enum e(mTable); !e.empty(); e.popFront()) {
             JSObject *updated = e.front().key;
-            if (JS_IsAboutToBeFinalized(&updated) || JS_IsAboutToBeFinalized(&e.front().value))
+            if (JS_IsAboutToBeFinalizedUnbarriered(&updated) || JS_IsAboutToBeFinalized(&e.front().value))
                 e.removeFront();
             else if (updated != e.front().key)
                 e.rekeyFront(updated);
@@ -671,6 +692,18 @@ public:
 
 private:
     JSObject2JSObjectMap() {}
+
+    /*
+     * This function is called during minor GCs for each key in the HashMap that
+     * has been moved.
+     */
+    static void KeyMarkCallback(JSTracer *trc, void *k) {
+        JSObject *key = static_cast<JSObject*>(k);
+        JSObject *prior = key;
+        JS_CallObjectTracer(trc, &key, "XPCWrappedNativeScope::mWaiverWrapperMap key");
+        JSObject2JSObjectMap *self = xpc::GetObjectScope(key)->mWaiverWrapperMap;
+        self->mTable.rekey(prior, key);
+    }
 
     Map mTable;
 };

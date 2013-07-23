@@ -96,7 +96,7 @@ let SocialServiceInternal = {
     let hosts = [];
     let providers = {};
 
-    for (p of SocialServiceInternal.providerArray) {
+    for (let p of SocialServiceInternal.providerArray) {
       p.frecency = 0;
       providers[p.domain] = p;
       hosts.push(p.domain);
@@ -143,10 +143,7 @@ XPCOMUtils.defineLazyGetter(SocialServiceInternal, "providers", function () {
   for (let manifest of this.manifests) {
     try {
       if (ActiveProviders.has(manifest.origin)) {
-        let activationType = getOriginActivationType(manifest.origin);
-        let blessed = activationType == "builtin" ||
-                      activationType == "whitelist";
-        let provider = new SocialProvider(manifest, blessed);
+        let provider = new SocialProvider(manifest);
         providers[provider.origin] = provider;
       }
     } catch (err) {
@@ -643,6 +640,36 @@ this.SocialService = {
     }
   },
 
+  /**
+   * updateProvider is used from the worker to self-update.  Since we do not
+   * have knowledge of the currently selected provider here, we will notify
+   * the front end to deal with any reload.
+   */
+  updateProvider: function(aDOMDocument, aManifest, aCallback) {
+    let installOrigin = aDOMDocument.nodePrincipal.origin;
+    let installType = this.getOriginActivationType(installOrigin);
+    // if we get data, we MUST have a valid manifest generated from the data
+    let manifest = this._manifestFromData(installType, aManifest, aDOMDocument.nodePrincipal);
+    if (!manifest)
+      throw new Error("SocialService.installProvider: service configuration is invalid from " + installOrigin);
+
+    // overwrite the preference
+    let string = Cc["@mozilla.org/supports-string;1"].
+                 createInstance(Ci.nsISupportsString);
+    string.data = JSON.stringify(manifest);
+    Services.prefs.setComplexValue(getPrefnameFromOrigin(manifest.origin), Ci.nsISupportsString, string);
+
+    // overwrite the existing provider then notify the front end so it can
+    // handle any reload that might be necessary.
+    if (ActiveProviders.has(manifest.origin)) {
+      let provider = new SocialProvider(manifest);
+      SocialServiceInternal.providers[provider.origin] = provider;
+      // update the cache and ui, reload provider if necessary
+      this._notifyProviderListeners("provider-update", provider);
+    }
+
+  },
+
   uninstallProvider: function(origin) {
     let manifest = SocialServiceInternal.getManifestByOrigin(origin);
     let addon = new AddonWrapper(manifest);
@@ -658,7 +685,7 @@ this.SocialService = {
  * @param {jsobj} object representing the manifest file describing this provider
  * @param {bool} boolean indicating whether this provider is "built in"
  */
-function SocialProvider(input, blessed = false) {
+function SocialProvider(input) {
   if (!input.name)
     throw new Error("SocialProvider must be passed a name");
   if (!input.origin)
@@ -682,7 +709,11 @@ function SocialProvider(input, blessed = false) {
   this.ambientNotificationIcons = {};
   this.errorState = null;
   this.frecency = 0;
-  this.blessed = blessed;
+
+  let activationType = getOriginActivationType(input.origin);
+  this.blessed = activationType == "builtin" ||
+                 activationType == "whitelist";
+
   try {
     this.domain = etld.getBaseDomainFromHost(originUri.host);
   } catch(e) {
@@ -709,6 +740,10 @@ SocialProvider.prototype = {
     } else {
       this._terminate();
     }
+  },
+
+  get manifest() {
+    return SocialServiceInternal.getManifestByOrigin(this.origin);
   },
 
   // Reference to a workerAPI object for this provider. Null if the provider has

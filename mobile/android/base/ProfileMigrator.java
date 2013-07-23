@@ -12,8 +12,6 @@ import org.mozilla.gecko.db.LocalBrowserDB;
 import org.mozilla.gecko.mozglue.GeckoLoader;
 import org.mozilla.gecko.sqlite.SQLiteBridge;
 import org.mozilla.gecko.sqlite.SQLiteBridgeException;
-import org.mozilla.gecko.sync.setup.SyncAccounts;
-import org.mozilla.gecko.sync.setup.SyncAccounts.SyncAccountParameters;
 import org.mozilla.gecko.util.ThreadUtils;
 
 import android.accounts.Account;
@@ -29,6 +27,7 @@ import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Handler;
 import android.os.RemoteException;
 import android.text.TextUtils;
 import android.util.Log;
@@ -60,6 +59,10 @@ public class ProfileMigrator {
     private Runnable mLongOperationStopCallback;
     private LocalBrowserDB mDB;
 
+    // Delay before running one-time "cleanup" tasks that may be needed
+    // after a version upgrade.
+    private static final int CLEANUP_DEFERRAL_SECONDS = 15;
+
     // Default number of history entries to migrate in one run.
     private static final int DEFAULT_HISTORY_MIGRATE_COUNT = 2000;
 
@@ -71,7 +74,6 @@ public class ProfileMigrator {
     private static final String PREFS_MIGRATE_HISTORY_DONE = "history_done";
     // Number of history entries already migrated.
     private static final String PREFS_MIGRATE_HISTORY_COUNT = "history_count";
-    private static final String PREFS_MIGRATE_SYNC_DONE = "sync_done";
 
     // Profile has been moved to internal storage?
     private static final String PREFS_MIGRATE_MOVE_PROFILE_DONE
@@ -263,27 +265,6 @@ public class ProfileMigrator {
     private static final String HISTORY_DATE   = "h_date";
     private static final String HISTORY_VISITS = "h_visits";
 
-    /*
-      Sync settings to get from prefs.js.
-    */
-    private static final String[] SYNC_SETTINGS_LIST = new String[] {
-        "services.sync.account",
-        "services.sync.client.name",
-        "services.sync.client.GUID",
-        "services.sync.serverURL",
-        "services.sync.clusterURL"
-    };
-
-    /*
-      Sync settings to get from password manager.
-    */
-    private static final String SYNC_HOST_NAME = "chrome://weave";
-    private static final String[] SYNC_REALM_LIST = new String[] {
-        "Mozilla Services Password",
-        "Mozilla Services Encryption Passphrase"
-    };
-
-
     public ProfileMigrator(Context context) {
         mContext = context;
         mCr = mContext.getContentResolver();
@@ -332,14 +313,18 @@ public class ProfileMigrator {
         new PlacesRunnable(profileDir, maxEntries).run();
     }
 
-    public void launchSyncPrefs() {
-        // Sync settings will post a runnable, no need for a seperate thread.
-        new SyncTask().run();
-    }
-
     public void launchMoveProfile() {
         // Make sure the profile is on internal storage.
         new MoveProfileTask().run();
+    }
+
+    public void launchDeferredCleanup() {
+        // Do any relevant cleanup shortly after startup to deal with "residue"
+        // from older versions of Gecko.
+        // This cleanup is done on the ProfileMigrator background thread,
+        // CLEANUP_DEFERRAL_SECONDS seconds after startup.
+        Handler handler = new Handler();
+        handler.postDelayed(new DeferredCleanupTask(), CLEANUP_DEFERRAL_SECONDS * 1000);
     }
 
     public boolean areBookmarksMigrated() {
@@ -348,11 +333,6 @@ public class ProfileMigrator {
 
     public boolean isHistoryMigrated() {
         return getPreferences().getBoolean(PREFS_MIGRATE_HISTORY_DONE, false);
-    }
-
-    // Have Sync settings been transferred?
-    public boolean hasSyncMigrated() {
-        return getPreferences().getBoolean(PREFS_MIGRATE_SYNC_DONE, false);
     }
 
     // Has the profile been moved from an SDcard to internal storage?
@@ -407,10 +387,6 @@ public class ProfileMigrator {
 
     protected void setMigratedBookmarks() {
         setBooleanPrefTrue(PREFS_MIGRATE_BOOKMARKS_DONE);
-    }
-
-    protected void setMigratedSync() {
-        setBooleanPrefTrue(PREFS_MIGRATE_SYNC_DONE);
     }
 
     protected void setMovedProfile() {
@@ -529,146 +505,6 @@ public class ProfileMigrator {
         }
     }
 
-    private class SyncTask implements Runnable {
-        private Map<String, String> mSyncSettingsMap;
-
-        protected void requestValues() {
-            mSyncSettingsMap = new HashMap<String, String>();
-            PrefsHelper.getPrefs(SYNC_SETTINGS_LIST, new PrefsHelper.PrefHandlerBase() {
-                @Override public void prefValue(String pref, boolean value) {
-                    mSyncSettingsMap.put(pref, value ? "1" : "0");
-                }
-
-                @Override public void prefValue(String pref, String value) {
-                    if (!TextUtils.isEmpty(value)) {
-                        mSyncSettingsMap.put(pref, value);
-                    } else {
-                        Log.w(LOGTAG, "Could not recover setting for = " + pref);
-                        mSyncSettingsMap.put(pref, null);
-                    }
-                }
-
-                @Override public void finish() {
-                    // Now call the password provider to fill in the rest.
-                    for (String location: SYNC_REALM_LIST) {
-                        Log.d(LOGTAG, "Checking: " + location);
-                        String passwd = getPassword(location);
-                        if (!TextUtils.isEmpty(passwd)) {
-                            Log.d(LOGTAG, "Got password");
-                            mSyncSettingsMap.put(location, passwd);
-                        } else {
-                            Log.d(LOGTAG, "No password found");
-                            mSyncSettingsMap.put(location, null);
-                        }
-                    }
-
-                    // Call Sync and transfer settings.
-                    configureSync();
-                }
-            });
-        }
-
-        protected String getPassword(String realm) {
-            Cursor cursor = null;
-            String result = null;
-            try {
-                cursor = mCr.query(Passwords.CONTENT_URI,
-                                   null,
-                                   Passwords.HOSTNAME + " = ? AND "
-                                   + Passwords.HTTP_REALM + " = ?",
-                                   new String[] { SYNC_HOST_NAME, realm },
-                                   null);
-
-                if (cursor != null) {
-                    final int userCol =
-                        cursor.getColumnIndexOrThrow(Passwords.ENCRYPTED_USERNAME);
-                    final int passCol =
-                        cursor.getColumnIndexOrThrow(Passwords.ENCRYPTED_PASSWORD);
-
-                    if (cursor.moveToFirst()) {
-                        String user = cursor.getString(userCol);
-                        String pass = cursor.getString(passCol);
-                        result = pass;
-                    } else {
-                        Log.i(LOGTAG, "No password found for realm = " + realm);
-                    }
-                }
-            } finally {
-                if (cursor != null)
-                    cursor.close();
-            }
-
-            return result;
-        }
-
-        protected void configureSync() {
-            final String userName = mSyncSettingsMap.get("services.sync.account");
-            final String syncKey = mSyncSettingsMap.get("Mozilla Services Encryption Passphrase");
-            final String syncPass = mSyncSettingsMap.get("Mozilla Services Password");
-            final String serverURL = mSyncSettingsMap.get("services.sync.serverURL");
-            final String clusterURL = mSyncSettingsMap.get("services.sync.clusterURL");
-            final String clientName = mSyncSettingsMap.get("services.sync.client.name");
-            final String clientGuid = mSyncSettingsMap.get("services.sync.client.GUID");
-
-            ThreadUtils.postToBackgroundThread(new Runnable() {
-                @Override
-                public void run() {
-                    if (userName == null || syncKey == null || syncPass == null) {
-                        // This isn't going to work. Give up.
-                        Log.e(LOGTAG, "Profile has incomplete Sync config. Not migrating.");
-                        setMigratedSync();
-                        return;
-                    }
-
-                    final SyncAccountParameters params =
-                        new SyncAccountParameters(mContext, null,
-                                                  userName, syncKey,
-                                                  syncPass, serverURL, clusterURL,
-                                                  clientName, clientGuid);
-
-                    final Account account = SyncAccounts.createSyncAccount(params);
-                    if (account == null) {
-                        Log.e(LOGTAG, "Failed to migrate Sync account.");
-                    } else {
-                        Log.i(LOGTAG, "Migrating Sync account succeeded.");
-                    }
-                    setMigratedSync();
-                }
-            });
-        }
-
-        protected void registerAndRequest() {
-            ThreadUtils.postToBackgroundThread(new Runnable() {
-                @Override
-                public void run() {
-                    requestValues();
-                }
-            });
-        }
-
-        @Override
-        public void run() {
-            // Run only if no Sync accounts exist.
-            new SyncAccounts.AccountsExistTask() {
-                @Override
-                protected void onPostExecute(Boolean result) {
-                    if (result.booleanValue()) {
-                        ThreadUtils.postToBackgroundThread(new Runnable() {
-                            @Override
-                            public void run() {
-                                Log.i(LOGTAG, "Sync account already configured, skipping.");
-                                setMigratedSync();
-                            }
-                        });
-                    } else {
-                        // No account configured, fire up.
-                        registerAndRequest();
-                    }
-                }
-            }.execute(mContext);
-        }
-    }
-
     private class MiscTask implements Runnable {
         protected void cleanupXULLibCache() {
             File cacheFile = GeckoLoader.getCacheDir(mContext);
@@ -688,6 +524,49 @@ public class ProfileMigrator {
         public void run() {
             // XXX: Land dependent bugs (732069) first
             // cleanupXULLibCache();
+        }
+    }
+
+    private class DeferredCleanupTask implements Runnable {
+        // The cleanup-version setting is recorded to avoid repeating the same
+        // tasks on subsequent startups; CURRENT_CLEANUP_VERSION may be updated
+        // if we need to do additional cleanup for future Gecko versions.
+
+        private static final String CLEANUP_VERSION = "cleanup-version";
+        private static final int CURRENT_CLEANUP_VERSION = 1;
+
+        @Override
+        public void run() {
+            long cleanupVersion = getPreferences().getInt(CLEANUP_VERSION, 0);
+
+            if (cleanupVersion < 1) {
+                // Reduce device storage footprint by removing .ttf files from
+                // the res/fonts directory: we no longer need to copy our
+                // bundled fonts out of the APK in order to use them.
+                // See https://bugzilla.mozilla.org/show_bug.cgi?id=878674.
+                File dir = new File("res/fonts");
+                if (dir.exists() && dir.isDirectory()) {
+                    for (File file : dir.listFiles()) {
+                        if (file.isFile() && file.getName().endsWith(".ttf")) {
+                            Log.i(LOGTAG, "deleting " + file.toString());
+                            file.delete();
+                        }
+                    }
+                    if (!dir.delete()) {
+                        Log.w(LOGTAG, "unable to delete res/fonts directory (not empty?)");
+                    } else {
+                        Log.i(LOGTAG, "res/fonts directory deleted");
+                    }
+                }
+            }
+
+            // Additional cleanup needed for future versions would go here
+
+            if (cleanupVersion != CURRENT_CLEANUP_VERSION) {
+                SharedPreferences.Editor editor = getPreferences().edit();
+                editor.putInt(CLEANUP_VERSION, CURRENT_CLEANUP_VERSION);
+                editor.commit();
+            }
         }
     }
 

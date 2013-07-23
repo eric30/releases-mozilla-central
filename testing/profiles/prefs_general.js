@@ -122,7 +122,6 @@ user_pref("dom.global-constructor.disable.mozContact", false);
 
 // Enable mozSettings
 user_pref("dom.mozSettings.enabled", true);
-user_pref("dom.navigator-property.disable.mozSettings", false);
 
 // Make sure the disk cache doesn't get auto disabled
 user_pref("network.http.bypass-cachelock-threshold", 200000);
@@ -141,3 +140,7 @@ user_pref("media.webaudio.legacy.AudioParam", true);
 user_pref("media.webaudio.legacy.BiquadFilterNode", true);
 user_pref("media.webaudio.legacy.PannerNode", true);
 user_pref("media.webaudio.legacy.OscillatorNode", true);
+
+// Always use network provider for geolocation tests
+// so we bypass the OSX dialog raised by the corelocation provider
+user_pref("geo.provider.testing", true);

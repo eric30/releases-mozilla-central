@@ -464,7 +464,7 @@ var PlacesCommandHook = {
                  "", "chrome,toolbar=yes,dialog=no,resizable", aLeftPaneRoot);
     }
     else {
-      organizer.PlacesOrganizer.selectLeftPaneQuery(aLeftPaneRoot);
+      organizer.PlacesOrganizer.selectLeftPaneContainerByHierarchy(aLeftPaneRoot);
       organizer.focus();
     }
   }
@@ -571,7 +571,7 @@ HistoryMenu.prototype = {
     m.setAttribute("label", strings.getString("menuRestoreAllTabs.label"));
     m.addEventListener("command", function() {
       for (var i = 0; i < undoItems.length; i++)
-        undoCloseTab();
+        undoCloseTab(0);
     }, false);
   },
 

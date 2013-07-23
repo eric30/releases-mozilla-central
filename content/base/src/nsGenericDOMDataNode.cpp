@@ -11,6 +11,7 @@
 #include "mozilla/DebugOnly.h"
 
 #include "nsGenericDOMDataNode.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/Element.h"
 #include "nsIDocument.h"
 #include "nsEventListenerManager.h"
@@ -85,11 +86,21 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsGenericDOMDataNode)
     return NS_SUCCESS_INTERRUPTED_TRAVERSE;
   }
 
+  nsDataSlots *slots = tmp->GetExistingDataSlots();
+  if (slots) {
+    slots->Traverse(cb);
+  }
+
   tmp->OwnerDoc()->BindingManager()->Traverse(tmp, cb);
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsGenericDOMDataNode)
   nsINode::Unlink(tmp);
+
+  nsDataSlots *slots = tmp->GetExistingDataSlots();
+  if (slots) {
+    slots->Unlink();
+  }
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_INTERFACE_MAP_BEGIN(nsGenericDOMDataNode)
@@ -103,16 +114,14 @@ NS_INTERFACE_MAP_BEGIN(nsGenericDOMDataNode)
                                  new nsNodeSupportsWeakRefTearoff(this))
   NS_INTERFACE_MAP_ENTRY_TEAROFF(nsIDOMXPathNSResolver,
                                  new nsNode3Tearoff(this))
-  // nsNodeSH::PreCreate() depends on the identity pointer being the
-  // same as nsINode (which nsIContent inherits), so if you change the
-  // below line, make sure nsNodeSH::PreCreate() still does the right
-  // thing!
+  // DOM bindings depend on the identity pointer being the
+  // same as nsINode (which nsIContent inherits).
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIContent)
 NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsGenericDOMDataNode)
-NS_IMPL_CYCLE_COLLECTING_RELEASE_WITH_DESTROY(nsGenericDOMDataNode,
-                                              nsNodeUtils::LastRelease(this))
+NS_IMPL_CYCLE_COLLECTING_RELEASE_WITH_LAST_RELEASE(nsGenericDOMDataNode,
+                                                   nsNodeUtils::LastRelease(this))
 
 
 void
@@ -331,6 +340,8 @@ nsGenericDOMDataNode::SetTextInternal(uint32_t aOffset, uint32_t aCount,
 
     delete [] to;
   }
+
+  UnsetFlags(NS_CACHED_TEXT_IS_ONLY_WHITESPACE);
 
   if (document && mText.IsBidi()) {
     // If we found bidi characters in mText.SetTo() above, indicate that the
@@ -638,6 +649,41 @@ nsGenericDOMDataNode::GetBindingParent() const
   return slots ? slots->mBindingParent : nullptr;
 }
 
+nsXBLBinding *
+nsGenericDOMDataNode::GetXBLBinding() const
+{
+  return nullptr;
+}
+
+void
+nsGenericDOMDataNode::SetXBLBinding(nsXBLBinding* aBinding,
+                                    nsBindingManager* aOldBindingManager)
+{
+}
+
+nsIContent *
+nsGenericDOMDataNode::GetXBLInsertionParent() const
+{
+  if (HasFlag(NODE_MAY_BE_IN_BINDING_MNGR)) {
+    nsDataSlots *slots = GetExistingDataSlots();
+    if (slots) {
+      return slots->mXBLInsertionParent;
+    }
+  }
+
+  return nullptr;
+}
+
+void
+nsGenericDOMDataNode::SetXBLInsertionParent(nsIContent* aContent)
+{
+  nsDataSlots *slots = DataSlots();
+  if (aContent) {
+    SetFlags(NODE_MAY_BE_IN_BINDING_MNGR);
+  }
+  slots->mXBLInsertionParent = aContent;
+}
+
 bool
 nsGenericDOMDataNode::IsNodeOfType(uint32_t aFlags) const
 {
@@ -681,6 +727,19 @@ nsINode::nsSlots*
 nsGenericDOMDataNode::CreateSlots()
 {
   return new nsDataSlots();
+}
+
+void
+nsGenericDOMDataNode::nsDataSlots::Traverse(nsCycleCollectionTraversalCallback &cb)
+{
+  NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mSlots->mXBLInsertionParent");
+  cb.NoteXPCOMChild(mXBLInsertionParent.get());
+}
+
+void
+nsGenericDOMDataNode::nsDataSlots::Unlink()
+{
+  mXBLInsertionParent = nullptr;
 }
 
 //----------------------------------------------------------------------
@@ -850,6 +909,10 @@ nsGenericDOMDataNode::TextIsOnlyWhitespace()
     return false;
   }
 
+  if (HasFlag(NS_CACHED_TEXT_IS_ONLY_WHITESPACE)) {
+    return HasFlag(NS_TEXT_IS_ONLY_WHITESPACE);
+  }
+
   const char* cp = mText.Get1b();
   const char* end = cp + mText.GetLength();
 
@@ -857,12 +920,15 @@ nsGenericDOMDataNode::TextIsOnlyWhitespace()
     char ch = *cp;
 
     if (!dom::IsSpaceCharacter(ch)) {
+      UnsetFlags(NS_TEXT_IS_ONLY_WHITESPACE);
+      SetFlags(NS_CACHED_TEXT_IS_ONLY_WHITESPACE);
       return false;
     }
 
     ++cp;
   }
 
+  SetFlags(NS_CACHED_TEXT_IS_ONLY_WHITESPACE | NS_TEXT_IS_ONLY_WHITESPACE);
   return true;
 }
 
@@ -920,7 +986,7 @@ nsGenericDOMDataNode::GetClassAttributeName() const
 }
 
 size_t
-nsGenericDOMDataNode::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+nsGenericDOMDataNode::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 {
   size_t n = nsIContent::SizeOfExcludingThis(aMallocSizeOf);
   n += mText.SizeOfExcludingThis(aMallocSizeOf);

@@ -23,9 +23,8 @@ char*
 PK11PasswordPrompt(PK11SlotInfo *slot, PRBool retry, void* arg);
 
 void HandshakeCallback(PRFileDesc *fd, void *client_data);
-
-SECStatus RegisterMyOCSPAIAInfoCallback();
-SECStatus UnregisterMyOCSPAIAInfoCallback();
+SECStatus CanFalseStartCallback(PRFileDesc* fd, void* client_data,
+                                PRBool *canFalseStart);
 
 class nsHTTPListener MOZ_FINAL : public nsIStreamLoaderObserver
 {
@@ -222,6 +221,3 @@ public:
 };
 
 #endif // _NSNSSCALLBACKS_H_
-
-
-

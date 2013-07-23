@@ -5,6 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "base/basictypes.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/Util.h"
 
 #include "nsLayoutUtils.h"
@@ -710,6 +711,17 @@ nsLayoutUtils::GetStyleFrame(nsIFrame* aFrame)
   }
 
   return aFrame;
+}
+
+nsIFrame*
+nsLayoutUtils::GetStyleFrame(const nsIContent* aContent)
+{
+  nsIFrame *frame = aContent->GetPrimaryFrame();
+  if (!frame) {
+    return nullptr;
+  }
+
+  return nsLayoutUtils::GetStyleFrame(frame);
 }
 
 nsIFrame*
@@ -2544,6 +2556,15 @@ GetPercentHeight(const nsStyleCoord& aStyle,
   if (!f) {
     NS_NOTREACHED("top of frame tree not a containing block");
     return false;
+  }
+
+  // During reflow, nsHTMLScrollFrame::ReflowScrolledFrame uses
+  // SetComputedHeight on the reflow state for its child to propagate its
+  // computed height to the scrolled content. So here we skip to the scroll
+  // frame that contains this scrolled content in order to get the same
+  // behavior as layout when computing percentage heights.
+  if (f->StyleContext()->GetPseudo() == nsCSSAnonBoxes::scrolledContent) {
+    f = f->GetParent();
   }
 
   const nsStylePosition *pos = f->StylePosition();
@@ -4877,7 +4898,7 @@ nsLayoutUtils::GetFontFacesForText(nsIFrame* aFrame,
 /* static */
 size_t
 nsLayoutUtils::SizeOfTextRunsForFrames(nsIFrame* aFrame,
-                                       nsMallocSizeOfFun aMallocSizeOf,
+                                       MallocSizeOf aMallocSizeOf,
                                        bool clear)
 {
   NS_PRECONDITION(aFrame, "NULL frame pointer");
@@ -5055,7 +5076,7 @@ nsLayoutUtils::PostRestyleEvent(Element* aElement,
   if (doc) {
     nsCOMPtr<nsIPresShell> presShell = doc->GetShell();
     if (presShell) {
-      presShell->FrameConstructor()->PostRestyleEvent(
+      presShell->GetPresContext()->RestyleManager()->PostRestyleEvent(
         aElement, aRestyleHint, aMinChangeHint);
     }
   }

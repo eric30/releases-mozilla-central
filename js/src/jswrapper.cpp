@@ -13,24 +13,18 @@
 #include "jsgc.h"
 #include "jsiter.h"
 
-#include "jsobjinlines.h"
+#include "vm/ErrorObject.h"
+#include "vm/WrapperObject.h"
 
-#include "builtin/Iterator-inl.h"
+#include "jsobjinlines.h"
 
 using namespace js;
 using namespace js::gc;
 
 int js::sWrapperFamily;
 
-void *
-Wrapper::getWrapperFamily()
-{
-    return &sWrapperFamily;
-}
-
 JSObject *
-Wrapper::New(JSContext *cx, JSObject *obj, JSObject *proto, JSObject *parent,
-             Wrapper *handler)
+Wrapper::New(JSContext *cx, JSObject *obj, JSObject *proto, JSObject *parent, Wrapper *handler)
 {
     JS_ASSERT(parent);
 
@@ -45,31 +39,32 @@ JSObject *
 Wrapper::Renew(JSContext *cx, JSObject *existing, JSObject *obj, Wrapper *handler)
 {
     JS_ASSERT(!obj->isCallable());
-    return RenewProxyObject(cx, existing, handler, ObjectValue(*obj));
+    existing->as<ProxyObject>().renew(cx, handler, ObjectValue(*obj));
+    return existing;
 }
 
 Wrapper *
 Wrapper::wrapperHandler(JSObject *wrapper)
 {
-    JS_ASSERT(wrapper->isWrapper());
-    return static_cast<Wrapper*>(GetProxyHandler(wrapper));
+    JS_ASSERT(wrapper->is<WrapperObject>());
+    return static_cast<Wrapper*>(wrapper->as<ProxyObject>().handler());
 }
 
 JSObject *
 Wrapper::wrappedObject(JSObject *wrapper)
 {
-    JS_ASSERT(wrapper->isWrapper());
-    return GetProxyTargetObject(wrapper);
+    JS_ASSERT(wrapper->is<WrapperObject>());
+    return wrapper->as<ProxyObject>().target();
 }
 
 JS_FRIEND_API(JSObject *)
 js::UncheckedUnwrap(JSObject *wrapped, bool stopAtOuter, unsigned *flagsp)
 {
     unsigned flags = 0;
-    while (wrapped->isWrapper() &&
+    while (wrapped->is<WrapperObject>() &&
            !JS_UNLIKELY(stopAtOuter && wrapped->getClass()->ext.innerObject)) {
         flags |= Wrapper::wrapperHandler(wrapped)->flags();
-        wrapped = GetProxyPrivate(wrapped).toObjectOrNull();
+        wrapped = wrapped->as<ProxyObject>().private_().toObjectOrNull();
     }
     if (flagsp)
         *flagsp = flags;
@@ -90,7 +85,7 @@ js::CheckedUnwrap(JSObject *obj, bool stopAtOuter)
 JS_FRIEND_API(JSObject *)
 js::UnwrapOneChecked(JSObject *obj, bool stopAtOuter)
 {
-    if (!obj->isWrapper() ||
+    if (!obj->is<WrapperObject>() ||
         JS_UNLIKELY(!!obj->getClass()->ext.innerObject && stopAtOuter))
     {
         return obj;
@@ -101,10 +96,10 @@ js::UnwrapOneChecked(JSObject *obj, bool stopAtOuter)
 }
 
 bool
-js::IsCrossCompartmentWrapper(JSObject *wrapper)
+js::IsCrossCompartmentWrapper(JSObject *obj)
 {
-    return wrapper->isWrapper() &&
-           !!(Wrapper::wrapperHandler(wrapper)->flags() & Wrapper::CROSS_COMPARTMENT);
+    return IsWrapper(obj) &&
+           !!(Wrapper::wrapperHandler(obj)->flags() & Wrapper::CROSS_COMPARTMENT);
 }
 
 Wrapper::Wrapper(unsigned flags, bool hasPrototype) : DirectProxyHandler(&sWrapperFamily)
@@ -129,16 +124,18 @@ js::TransparentObjectWrapper(JSContext *cx, HandleObject existing, HandleObject 
                              unsigned flags)
 {
     // Allow wrapping outer window proxies.
-    JS_ASSERT(!obj->isWrapper() || obj->getClass()->ext.innerObject);
+    JS_ASSERT(!obj->is<WrapperObject>() || obj->getClass()->ext.innerObject);
     return Wrapper::New(cx, obj, wrappedProto, parent, &CrossCompartmentWrapper::singleton);
 }
 
 ErrorCopier::~ErrorCopier()
 {
-    JSContext *cx = ac.ref().context();
+    JSContext *cx = ac.ref().context()->asJSContext();
     if (ac.ref().origin() != cx->compartment() && cx->isExceptionPending()) {
         RootedValue exc(cx, cx->getPendingException());
-        if (exc.isObject() && exc.toObject().isError() && exc.toObject().getPrivate()) {
+        if (exc.isObject() && exc.toObject().is<ErrorObject>() &&
+            exc.toObject().as<ErrorObject>().getExnPrivate())
+        {
             cx->clearPendingException();
             ac.destroy();
             Rooted<JSObject*> errObj(cx, &exc.toObject());
@@ -187,18 +184,12 @@ bool CrossCompartmentWrapper::finalizeInBackground(Value priv)
 #define NOTHING (true)
 
 bool
-CrossCompartmentWrapper::isExtensible(JSObject *wrapper)
+CrossCompartmentWrapper::isExtensible(JSContext *cx, HandleObject wrapper, bool *extensible)
 {
-    // The lack of a context to enter a compartment here is troublesome.  We
-    // don't know anything about the wrapped object (it might even be a
-    // proxy!), and embeddings' proxy handlers could theoretically trigger
-    // compartment mismatches here (because isExtensible wouldn't be called in
-    // the wrapped object's compartment.  But that's probably not very likely.
-    // (Famous last words.)
-    //
-    // Given that we're likely going to make this method take a context and
-    // maybe be fallible at some point, punt on the issue for now.
-    return wrappedObject(wrapper)->isExtensible();
+    PIERCE(cx, wrapper,
+           NOTHING,
+           Wrapper::isExtensible(cx, wrapper, extensible),
+           NOTHING);
 }
 
 bool
@@ -474,7 +465,7 @@ CrossCompartmentWrapper::nativeCall(JSContext *cx, IsAcceptableThis test, Native
 {
     RootedObject wrapper(cx, &srcArgs.thisv().toObject());
     JS_ASSERT(srcArgs.thisv().isMagic(JS_IS_CONSTRUCTING) ||
-              !UncheckedUnwrap(wrapper)->isCrossCompartmentWrapper());
+              !UncheckedUnwrap(wrapper)->is<CrossCompartmentWrapperObject>());
 
     RootedObject wrapped(cx, wrappedObject(wrapper));
     {
@@ -500,10 +491,10 @@ CrossCompartmentWrapper::nativeCall(JSContext *cx, IsAcceptableThis test, Native
             // This logic can go away when same-compartment security wrappers go away.
             if ((src == srcArgs.base() + 1) && dst->isObject()) {
                 RootedObject thisObj(cx, &dst->toObject());
-                if (thisObj->isWrapper() &&
+                if (thisObj->is<WrapperObject>() &&
                     !Wrapper::wrapperHandler(thisObj)->isSafeToUnwrap())
                 {
-                    JS_ASSERT(!IsCrossCompartmentWrapper(thisObj));
+                    JS_ASSERT(!thisObj->is<CrossCompartmentWrapperObject>());
                     *dst = ObjectValue(*Wrapper::wrappedObject(thisObj));
                 }
             }
@@ -601,11 +592,12 @@ SecurityWrapper<Base>::SecurityWrapper(unsigned flags)
 
 template <class Base>
 bool
-SecurityWrapper<Base>::isExtensible(JSObject *wrapper)
+SecurityWrapper<Base>::isExtensible(JSContext *cx, HandleObject wrapper, bool *extensible)
 {
     // Just like BaseProxyHandler, SecurityWrappers claim by default to always
     // be extensible, so as not to leak information about the state of the
     // underlying wrapped thing.
+    *extensible = true;
     return true;
 }
 
@@ -687,10 +679,11 @@ DeadObjectProxy::DeadObjectProxy()
 }
 
 bool
-DeadObjectProxy::isExtensible(JSObject *proxy)
+DeadObjectProxy::isExtensible(JSContext *cx, HandleObject proxy, bool *extensible)
 {
     // This is kind of meaningless, but dead-object semantics aside,
     // [[Extensible]] always being true is consistent with other proxy types.
+    *extensible = true;
     return true;
 }
 
@@ -836,39 +829,18 @@ js::NewDeadProxyObject(JSContext *cx, JSObject *parent)
 bool
 js::IsDeadProxyObject(JSObject *obj)
 {
-    return IsProxy(obj) && GetProxyHandler(obj) == &DeadObjectProxy::singleton;
-}
-
-static void
-NukeSlot(JSObject *wrapper, uint32_t slot, Value v)
-{
-    Value old = wrapper->getSlot(slot);
-    if (old.isMarkable()) {
-        Zone *zone = ZoneOfValue(old);
-        AutoMarkInDeadZone amd(zone);
-        wrapper->setReservedSlot(slot, v);
-    } else {
-        wrapper->setReservedSlot(slot, v);
-    }
+    return obj->is<ProxyObject>() &&
+           obj->as<ProxyObject>().handler() == &DeadObjectProxy::singleton;
 }
 
 void
 js::NukeCrossCompartmentWrapper(JSContext *cx, JSObject *wrapper)
 {
-    JS_ASSERT(IsCrossCompartmentWrapper(wrapper));
+    JS_ASSERT(wrapper->is<CrossCompartmentWrapperObject>());
 
     NotifyGCNukeWrapper(wrapper);
 
-    NukeSlot(wrapper, JSSLOT_PROXY_PRIVATE, NullValue());
-    SetProxyHandler(wrapper, &DeadObjectProxy::singleton);
-
-    if (IsFunctionProxy(wrapper)) {
-        NukeSlot(wrapper, JSSLOT_PROXY_CALL, NullValue());
-        NukeSlot(wrapper, JSSLOT_PROXY_CONSTRUCT, NullValue());
-    }
-
-    NukeSlot(wrapper, JSSLOT_PROXY_EXTRA + 0, NullValue());
-    NukeSlot(wrapper, JSSLOT_PROXY_EXTRA + 1, NullValue());
+    wrapper->as<ProxyObject>().nuke(&DeadObjectProxy::singleton);
 
     JS_ASSERT(IsDeadProxyObject(wrapper));
 }
@@ -931,8 +903,8 @@ js::RemapWrapper(JSContext *cx, JSObject *wobjArg, JSObject *newTargetArg)
 {
     RootedObject wobj(cx, wobjArg);
     RootedObject newTarget(cx, newTargetArg);
-    JS_ASSERT(IsCrossCompartmentWrapper(wobj));
-    JS_ASSERT(!IsCrossCompartmentWrapper(newTarget));
+    JS_ASSERT(wobj->is<CrossCompartmentWrapperObject>());
+    JS_ASSERT(!newTarget->is<CrossCompartmentWrapperObject>());
     JSObject *origTarget = Wrapper::wrappedObject(wobj);
     JS_ASSERT(origTarget);
     Value origv = ObjectValue(*origTarget);
@@ -982,7 +954,7 @@ js::RemapWrapper(JSContext *cx, JSObject *wobjArg, JSObject *newTargetArg)
 
     // Update the entry in the compartment's wrapper map to point to the old
     // wrapper, which has now been updated (via reuse or swap).
-    JS_ASSERT(wobj->isWrapper());
+    JS_ASSERT(wobj->is<WrapperObject>());
     wcompartment->putWrapper(ObjectValue(*newTarget), ObjectValue(*wobj));
     return true;
 }

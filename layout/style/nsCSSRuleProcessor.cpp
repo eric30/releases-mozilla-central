@@ -23,6 +23,7 @@
 #include "nsIAtom.h"
 #include "pldhash.h"
 #include "nsICSSPseudoComparator.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/css/StyleRule.h"
 #include "mozilla/css/GroupRule.h"
 #include "nsIDocument.h"
@@ -456,8 +457,8 @@ public:
   void EnumerateAllRules(Element* aElement, ElementDependentRuleProcessorData* aData,
                          NodeMatchContext& aNodeMatchContext);
 
-  size_t SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const;
-  size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const;
+  size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const;
+  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const;
 
 protected:
   typedef nsTArray<RuleValue> RuleValueList;
@@ -794,14 +795,14 @@ void RuleHash::EnumerateAllRules(Element* aElement, ElementDependentRuleProcesso
 }
 
 static size_t
-SizeOfRuleHashTableEntry(PLDHashEntryHdr* aHdr, nsMallocSizeOfFun aMallocSizeOf, void *)
+SizeOfRuleHashTableEntry(PLDHashEntryHdr* aHdr, MallocSizeOf aMallocSizeOf, void *)
 {
   RuleHashTableEntry* entry = static_cast<RuleHashTableEntry*>(aHdr);
   return entry->mRules.SizeOfExcludingThis(aMallocSizeOf);
 }
 
 size_t
-RuleHash::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+RuleHash::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 {
   size_t n = 0;
 
@@ -835,7 +836,7 @@ RuleHash::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
 }
 
 size_t
-RuleHash::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+RuleHash::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 {
   return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
 }
@@ -959,7 +960,7 @@ struct RuleCascadeData {
     }
   }
 
-  size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const;
+  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const;
 
   RuleHash                 mRuleHash;
   RuleHash*
@@ -992,14 +993,14 @@ struct RuleCascadeData {
 };
 
 static size_t
-SizeOfSelectorsEntry(PLDHashEntryHdr* aHdr, nsMallocSizeOfFun aMallocSizeOf, void *)
+SizeOfSelectorsEntry(PLDHashEntryHdr* aHdr, MallocSizeOf aMallocSizeOf, void *)
 {
   AtomSelectorEntry* entry = static_cast<AtomSelectorEntry*>(aHdr);
   return entry->mSelectors.SizeOfExcludingThis(aMallocSizeOf);
 }
 
 size_t
-RuleCascadeData::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+RuleCascadeData::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 {
   size_t n = aMallocSizeOf(this);
 
@@ -1233,6 +1234,27 @@ InitSystemMetrics()
     }
   }
 #endif
+
+  // os version metrics, currently only defined for Windows.
+  if (NS_SUCCEEDED(
+        LookAndFeel::GetInt(LookAndFeel::eIntID_OperatingSystemVersionIdentifier,
+                            &metricResult))) {
+    switch(metricResult) {
+      case LookAndFeel::eOperatingSystemVersion_WindowsXP:
+        sSystemMetrics->AppendElement(nsGkAtoms::windows_version_xp);
+        break;
+      case LookAndFeel::eOperatingSystemVersion_WindowsVista:
+        sSystemMetrics->AppendElement(nsGkAtoms::windows_version_vista);
+        break;
+      case LookAndFeel::eOperatingSystemVersion_Windows7:
+        sSystemMetrics->AppendElement(nsGkAtoms::windows_version_win7);
+        break;
+      case LookAndFeel::eOperatingSystemVersion_Windows8:
+        sSystemMetrics->AppendElement(nsGkAtoms::windows_version_win8);
+        break;
+      // don't add anything for future versions
+    }
+  }
 
   return true;
 }
@@ -2285,6 +2307,25 @@ static bool SelectorMatchesTree(Element* aPrevElement,
           // traverse further up the tree.
           aTreeMatchContext.PopStyleScopeForSelectorMatching(element);
         }
+
+        // Compatibility hack: First try matching this selector as though the
+        // <xbl:children> element wasn't in the tree to allow old selectors
+        // were written before <xbl:children> participated in CSS selector
+        // matching to work.
+        if (selector->mOperator == '>' && element->IsActiveChildrenElement()) {
+          Element* styleScope = aTreeMatchContext.mCurrentStyleScope;
+          if (SelectorMatchesTree(element, selector, aTreeMatchContext,
+                                  aLookForRelevantLink)) {
+            // It matched, don't try matching on the <xbl:children> element at
+            // all.
+            return true;
+          }
+          // We want to reset mCurrentStyleScope on aTreeMatchContext
+          // back to its state before the SelectorMatchesTree call, in
+          // case that call happens to traverse past the style scope element
+          // and sets it to null.
+          aTreeMatchContext.mCurrentStyleScope = styleScope;
+        }
       }
     }
     if (!element) {
@@ -2700,7 +2741,7 @@ nsCSSRuleProcessor::MediumFeaturesChanged(nsPresContext* aPresContext)
 }
 
 /* virtual */ size_t
-nsCSSRuleProcessor::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+nsCSSRuleProcessor::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 {
   size_t n = 0;
   n += mSheets.SizeOfExcludingThis(aMallocSizeOf);
@@ -2713,7 +2754,7 @@ nsCSSRuleProcessor::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
 }
 
 /* virtual */ size_t
-nsCSSRuleProcessor::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+nsCSSRuleProcessor::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 {
   return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
 }
@@ -3392,6 +3433,7 @@ TreeMatchContext::InitAncestors(Element *aElement)
       if (!parent->IsElement()) {
         break;
       }
+
       cur = parent->AsElement();
     } while (true);
 

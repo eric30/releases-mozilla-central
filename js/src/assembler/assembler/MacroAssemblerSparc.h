@@ -7,12 +7,12 @@
 #ifndef assembler_assembler_MacroAssemblerSparc_h
 #define assembler_assembler_MacroAssemblerSparc_h
 
-#include <assembler/wtf/Platform.h>
+#include "assembler/wtf/Platform.h"
 
 #if ENABLE_ASSEMBLER && WTF_CPU_SPARC
 
-#include "SparcAssembler.h"
-#include "AbstractMacroAssembler.h"
+#include "assembler/assembler/SparcAssembler.h"
+#include "assembler/assembler/AbstractMacroAssembler.h"
 
 namespace JSC {
 
@@ -1107,17 +1107,17 @@ namespace JSC {
         }
 
         // Floating point operators
-        bool supportsFloatingPoint() const
+        static bool supportsFloatingPoint()
         {
             return true;
         }
 
-        bool supportsFloatingPointTruncate() const
+        static bool supportsFloatingPointTruncate()
         {
             return true;
         }
 
-        bool supportsFloatingPointSqrt() const
+        static bool supportsFloatingPointSqrt()
         {
             return true;
         }

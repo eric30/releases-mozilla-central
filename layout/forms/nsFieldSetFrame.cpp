@@ -16,7 +16,7 @@
 #include "nsISupports.h"
 #include "nsIAtom.h"
 #include "nsPresContext.h"
-#include "nsFrameManager.h"
+#include "RestyleManager.h"
 #include "nsHTMLParts.h"
 #include "nsGkAtoms.h"
 #include "nsStyleConsts.h"
@@ -194,6 +194,9 @@ public:
                        HitTestState* aState, nsTArray<nsIFrame*> *aOutFrames);
   virtual void Paint(nsDisplayListBuilder* aBuilder,
                      nsRenderingContext* aCtx);
+  virtual void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
+                                         const nsDisplayItemGeometry* aGeometry,
+                                         nsRegion *aInvalidRegion) MOZ_OVERRIDE;
   NS_DISPLAY_DECL_NAME("FieldSetBorderBackground", TYPE_FIELDSET_BORDER_BACKGROUND)
 };
 
@@ -213,6 +216,16 @@ nsDisplayFieldSetBorderBackground::Paint(nsDisplayListBuilder* aBuilder,
   static_cast<nsFieldSetFrame*>(mFrame)->
     PaintBorderBackground(*aCtx, ToReferenceFrame(),
                           mVisibleRect, aBuilder->GetBackgroundPaintFlags());
+}
+
+void
+nsDisplayFieldSetBorderBackground::ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
+                                                             const nsDisplayItemGeometry* aGeometry,
+                                                             nsRegion *aInvalidRegion)
+{
+  AddInvalidRegionForSyncDecodeBackgroundImages(aBuilder, aGeometry, aInvalidRegion);
+
+  nsDisplayItem::ComputeInvalidationRegion(aBuilder, aGeometry, aInvalidRegion);
 }
 
 void
@@ -580,7 +593,7 @@ nsFieldSetFrame::Reflow(nsPresContext*           aPresContext,
     nsPoint curOrigin = legend->GetPosition();
 
     // only if the origin changed
-    if ((curOrigin.x != mLegendRect.x) || (curOrigin.y != mLegendRect.y)) {
+    if ((curOrigin.x != actualLegendRect.x) || (curOrigin.y != actualLegendRect.y)) {
       legend->SetPosition(nsPoint(actualLegendRect.x , actualLegendRect.y));
       nsContainerFrame::PositionFrameView(legend);
 
@@ -667,13 +680,13 @@ nsFieldSetFrame::AccessibleType()
 void
 nsFieldSetFrame::ReparentFrameList(const nsFrameList& aFrameList)
 {
-  nsFrameManager* frameManager = PresContext()->FrameManager();
+  RestyleManager* restyleManager = PresContext()->RestyleManager();
   nsIFrame* inner = GetInner();
   for (nsFrameList::Enumerator e(aFrameList); !e.AtEnd(); e.Next()) {
     NS_ASSERTION(GetLegend() || e.get()->GetType() != nsGkAtoms::legendFrame,
                  "The fieldset's legend is not allowed in this list");
     e.get()->SetParent(inner);
-    frameManager->ReparentStyleContext(e.get());
+    restyleManager->ReparentStyleContext(e.get());
   }
 }
 

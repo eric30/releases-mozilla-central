@@ -40,27 +40,29 @@ function startInspectorTests(toolbox)
   let p = doc.querySelector("p");
 
   inspector.selection.setNode(p);
+  inspector.once("inspector-updated", () => {
+    testHighlighter(p);
+    testMarkupView(p);
+    testBreadcrumbs(p);
 
-  testHighlighter(p);
-  testMarkupView(p);
-  testBreadcrumbs(p);
+    let span = doc.querySelector("span");
+    span.scrollIntoView();
 
-  let span = doc.querySelector("span");
-  span.scrollIntoView();
+    inspector.selection.setNode(span);
+    inspector.once("inspector-updated", () => {
+      testHighlighter(span);
+      testMarkupView(span);
+      testBreadcrumbs(span);
 
-  inspector.selection.setNode(span);
-
-  testHighlighter(span);
-  testMarkupView(span);
-  testBreadcrumbs(span);
-
-  toolbox.once("destroyed", function() {
-    ok("true", "'destroyed' notification received.");
-    let target = TargetFactory.forTab(gBrowser.selectedTab);
-    ok(!gDevTools.getToolbox(target), "Toolbox destroyed.");
-    executeSoon(runContextMenuTest);
+      toolbox.once("destroyed", function() {
+        ok("true", "'destroyed' notification received.");
+        let target = TargetFactory.forTab(gBrowser.selectedTab);
+        ok(!gDevTools.getToolbox(target), "Toolbox destroyed.");
+        executeSoon(runContextMenuTest);
+      });
+      toolbox.destroy();
+    });
   });
-  toolbox.destroy();
 }
 
 
@@ -70,16 +72,19 @@ function testHighlighter(node)
   is(getHighlitNode(), node, "Right node is highlighted");
 }
 
+let callNo = 0;
 function testMarkupView(node)
 {
   let i = getActiveInspector();
-  is(i.markup._selectedContainer.node, node, "Right node is selected in the markup view");
+  try {
+    is(i.markup._selectedContainer.node.rawNode(), node, "Right node is selected in the markup view");
+  } catch(ex) { console.error(ex); }
 }
 
 function testBreadcrumbs(node)
 {
   let b = getActiveInspector().breadcrumbs;
-  let expectedText = b.prettyPrintNodeAsText(node);
+  let expectedText = b.prettyPrintNodeAsText(getNodeFront(node));
   let button = b.container.querySelector("button[checked=true]");
   ok(button, "A crumbs is checked=true");
   is(button.getAttribute("tooltiptext"), expectedText, "Crumb refers to the right node");
@@ -89,7 +94,15 @@ function _clickOnInspectMenuItem(node) {
   document.popupNode = node;
   var contentAreaContextMenu = document.getElementById("contentAreaContextMenu");
   var contextMenu = new nsContextMenu(contentAreaContextMenu);
-  return contextMenu.inspectNode();
+  var promise = devtools.require("sdk/core/promise");
+  var deferred = promise.defer();
+  contextMenu.inspectNode().then(() => {
+    let i = getActiveInspector();
+    i.once("inspector-updated", () => {
+      deferred.resolve(undefined);
+    });
+  });
+  return deferred.promise;
 }
 
 function runContextMenuTest()

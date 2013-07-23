@@ -22,7 +22,7 @@ if CONFIG['MOZ_PLACES']:
         'nsIBrowserHistory.idl',
         'nsIFaviconService.idl',
         'nsINavBookmarksService.idl',
-        'nsITaggingService.idl ',
+        'nsITaggingService.idl',
         'nsPIPlacesDatabase.idl',
         'nsPIPlacesHistoryListenersNotifier.idl',
     ]
@@ -49,6 +49,15 @@ if CONFIG['MOZ_PLACES']:
         'PlaceInfo.cpp',
         'VisitInfo.cpp',
         'Database.cpp',
+    ]
+
+    EXTRA_JS_MODULES = [
+        'BookmarkJSONUtils.jsm',
+        'ClusterLib.js',
+        'ColorAnalyzer_worker.js',
+        'ColorConversion.js',
+        'PlacesBackups.jsm',
+        'PlacesDBUtils.jsm',
     ]
 
 MODULE = 'places'

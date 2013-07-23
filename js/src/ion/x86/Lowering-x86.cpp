@@ -4,10 +4,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "Lowering-x86.h"
+#include "ion/x86/Lowering-x86.h"
 
 #include "ion/MIR.h"
-#include "Assembler-x86.h"
+#include "ion/x86/Assembler-x86.h"
 #include "ion/shared/Lowering-shared-inl.h"
 
 using namespace js;
@@ -237,7 +237,7 @@ LIRGeneratorX86::visitAsmJSStoreHeap(MAsmJSStoreHeap *ins)
         lir = new LAsmJSStoreHeap(useRegisterAtStart(ins->ptr()),
                                   useRegisterAtStart(ins->value()));
         break;
-      default: JS_NOT_REACHED("unexpected array type");
+      default: MOZ_ASSUME_UNREACHABLE("unexpected array type");
     }
 
     return add(lir, ins);
@@ -261,7 +261,7 @@ LIRGeneratorX86::visitStoreTypedArrayElementStatic(MStoreTypedArrayElementStatic
         lir = new LStoreTypedArrayElementStatic(useRegisterAtStart(ins->ptr()),
                                                 useRegisterAtStart(ins->value()));
         break;
-      default: JS_NOT_REACHED("unexpected array type");
+      default: MOZ_ASSUME_UNREACHABLE("unexpected array type");
     }
 
     return add(lir, ins);
@@ -285,4 +285,17 @@ LIRGeneratorX86::newLGetPropertyCacheT(MGetPropertyCache *ins)
     else
         scratch = LDefinition::BogusTemp();
     return new LGetPropertyCacheT(useRegister(ins->object()), scratch);
+}
+
+LGetElementCacheT *
+LIRGeneratorX86::newLGetElementCacheT(MGetElementCache *ins)
+{
+    LDefinition scratch;
+    if (ins->type() == MIRType_Double)
+        scratch = temp();
+    else
+        scratch = LDefinition::BogusTemp();
+    return new LGetElementCacheT(useRegister(ins->object()),
+                                 useRegister(ins->index()),
+                                 scratch);
 }

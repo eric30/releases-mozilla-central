@@ -4,12 +4,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "BaselineCompiler.h"
-#include "BaselineIC.h"
-#include "BaselineJIT.h"
-#include "CompileInfo.h"
-#include "IonSpewer.h"
-#include "IonFrames-inl.h"
+#include "mozilla/MemoryReporting.h"
+
+#include "ion/BaselineCompiler.h"
+#include "ion/BaselineIC.h"
+#include "ion/BaselineJIT.h"
+#include "ion/CompileInfo.h"
+#include "ion/IonSpewer.h"
+#include "ion/IonFrames-inl.h"
 
 #include "vm/Stack-inl.h"
 
@@ -182,6 +184,10 @@ ion::EnterBaselineAtBranch(JSContext *cx, StackFrame *fp, jsbytecode *pc)
         else
             data.calleeToken = CalleeToToken(fp->script());
     }
+
+#if JS_TRACE_LOGGING
+    TraceLogging::defaultLogger()->log(TraceLogging::INFO_ENGINE_BASELINE);
+#endif
 
     IonExecStatus status = EnterBaseline(cx, data);
     if (status != IonExec_Ok)
@@ -488,8 +494,7 @@ BaselineScript::icEntryFromPCOffset(uint32_t pcOffset)
         if (icEntry(i).isForOp())
             return icEntry(i);
     }
-    JS_NOT_REACHED("Invalid PC offset for IC entry.");
-    return icEntry(mid);
+    MOZ_ASSUME_UNREACHABLE("Invalid PC offset for IC entry.");
 }
 
 ICEntry &
@@ -634,8 +639,7 @@ BaselineScript::nativeCodeForPC(JSScript *script, jsbytecode *pc, PCMappingSlotI
         curPC += GetBytecodeLength(curPC);
     }
 
-    JS_NOT_REACHED("Invalid pc");
-    return NULL;
+    MOZ_ASSUME_UNREACHABLE("Invalid pc");
 }
 
 jsbytecode *
@@ -679,8 +683,7 @@ BaselineScript::pcForReturnOffset(JSScript *script, uint32_t nativeOffset)
         curPC += GetBytecodeLength(curPC);
     }
 
-    JS_NOT_REACHED("Invalid pc");
-    return NULL;
+    MOZ_ASSUME_UNREACHABLE("Invalid pc");
 }
 
 jsbytecode *
@@ -843,7 +846,7 @@ ion::IonCompartment::toggleBaselineStubBarriers(bool enabled)
 }
 
 void
-ion::SizeOfBaselineData(JSScript *script, JSMallocSizeOfFun mallocSizeOf, size_t *data,
+ion::SizeOfBaselineData(JSScript *script, mozilla::MallocSizeOf mallocSizeOf, size_t *data,
                         size_t *fallbackStubs)
 {
     *data = 0;

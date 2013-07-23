@@ -11,12 +11,13 @@
 
 #include "mozilla/DebugOnly.h"
 
+#include "jscntxt.h"
 #include "jsfun.h"
 #include "jstypes.h"
 #include "jsutil.h"
-#include "Registers.h"
-#include "IonCode.h"
-#include "IonFrameIterator.h"
+#include "ion/Registers.h"
+#include "ion/IonCode.h"
+#include "ion/IonFrameIterator.h"
 
 class JSFunction;
 class JSScript;
@@ -90,8 +91,7 @@ ScriptFromCalleeToken(CalleeToken token)
       case CalleeToken_ParallelFunction:
         return CalleeTokenToParallelFunction(token)->nonLazyScript();
     }
-    JS_NOT_REACHED("invalid callee token tag");
-    return NULL;
+    MOZ_ASSUME_UNREACHABLE("invalid callee token tag");
 }
 
 // In between every two frames lies a small header describing both frames. This
@@ -283,6 +283,37 @@ static inline uint32_t
 MakeFrameDescriptor(uint32_t frameSize, FrameType type)
 {
     return (frameSize << FRAMESIZE_SHIFT) | type;
+}
+
+// Returns the JSScript associated with the topmost Ion frame.
+inline JSScript *
+GetTopIonJSScript(PerThreadData *pt, const SafepointIndex **safepointIndexOut, void **returnAddrOut)
+{
+    IonFrameIterator iter(pt->ionTop);
+    JS_ASSERT(iter.type() == IonFrame_Exit);
+    ++iter;
+
+    // If needed, grab the safepoint index.
+    if (safepointIndexOut)
+        *safepointIndexOut = iter.safepoint();
+
+    JS_ASSERT(iter.returnAddressToFp() != NULL);
+    if (returnAddrOut)
+        *returnAddrOut = (void *) iter.returnAddressToFp();
+
+    if (iter.isBaselineStub()) {
+        ++iter;
+        JS_ASSERT(iter.isBaselineJS());
+    }
+
+    JS_ASSERT(iter.isScripted());
+    return iter.script();
+}
+
+inline JSScript *
+GetTopIonJSScript(JSContext *cx, const SafepointIndex **safepointIndexOut, void **returnAddrOut)
+{
+    return GetTopIonJSScript(&cx->mainThread(), safepointIndexOut, returnAddrOut);
 }
 
 } // namespace ion

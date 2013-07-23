@@ -197,7 +197,7 @@ nsCoreUtils::GetDOMElementFor(nsIContent *aContent)
     return aContent;
 
   if (aContent->IsNodeOfType(nsINode::eTEXT))
-    return aContent->GetParent();
+    return aContent->GetFlattenedTreeParent();
 
   return nullptr;
 }
@@ -540,7 +540,7 @@ nsCoreUtils::GetTreeBoxObject(nsIContent *aContent)
           return treeBox.forget();
       }
     }
-    currentContent = currentContent->GetParent();
+    currentContent = currentContent->GetFlattenedTreeParent();
   }
 
   return nullptr;
@@ -652,6 +652,20 @@ nsCoreUtils::ScrollTo(nsIPresShell* aPresShell, nsIContent* aContent,
   ConvertScrollTypeToPercents(aScrollType, &vertical, &horizontal);
   aPresShell->ScrollContentIntoView(aContent, vertical, horizontal,
                                     nsIPresShell::SCROLL_OVERFLOW_HIDDEN);
+}
+
+bool
+nsCoreUtils::IsWhitespaceString(const nsSubstring& aString)
+{
+  nsSubstring::const_char_iterator iterBegin, iterEnd;
+
+  aString.BeginReading(iterBegin);
+  aString.EndReading(iterEnd);
+
+  while (iterBegin != iterEnd && IsWhitespace(*iterBegin))
+    ++iterBegin;
+
+  return iterBegin == iterEnd;
 }
 
 

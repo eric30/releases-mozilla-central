@@ -6,7 +6,7 @@
 
 const {Cc, Ci, Cu} = require("chrome");
 const MAX_ORDINAL = 99;
-let Promise = require("sdk/core/promise");
+let promise = require("sdk/core/promise");
 let EventEmitter = require("devtools/shared/event-emitter");
 let Telemetry = require("devtools/shared/telemetry");
 
@@ -191,7 +191,7 @@ Toolbox.prototype = {
    * Open the toolbox
    */
   open: function TBOX_open() {
-    let deferred = Promise.defer();
+    let deferred = promise.defer();
 
     this._host.create().then(iframe => {
       let domReady = () => {
@@ -207,6 +207,7 @@ Toolbox.prototype = {
         this._buildTabs();
         this._buildButtons();
         this._addKeysToWindow();
+        this._addToolSwitchingKeys();
 
         this._telemetry.toolOpened("toolbox");
 
@@ -228,6 +229,13 @@ Toolbox.prototype = {
     key.addEventListener("command", function(toolId) {
       this.selectTool(toolId);
     }.bind(this, "options"), true);
+  },
+
+  _addToolSwitchingKeys: function TBOX__addToolSwitchingKeys() {
+    let nextKey = this.doc.getElementById("toolbox-next-tool-key");
+    nextKey.addEventListener("command", this.selectNextTool.bind(this), true);
+    let prevKey = this.doc.getElementById("toolbox-previous-tool-key");
+    prevKey.addEventListener("command", this.selectPreviousTool.bind(this), true);
   },
 
   /**
@@ -351,6 +359,9 @@ Toolbox.prototype = {
     let id = toolDefinition.id;
 
     let radio = this.doc.createElement("radio");
+    // The radio element is not being used in the conventional way, thus
+    // the devtools-tab class replaces the radio XBL binding with its base
+    // binding (the control-item binding).
     radio.className = "toolbox-tab devtools-tab";
     radio.id = "toolbox-tab-" + id;
     radio.setAttribute("toolid", id);
@@ -424,7 +435,7 @@ Toolbox.prototype = {
    *        The id of the tool to load.
    */
   loadTool: function TBOX_loadTool(id) {
-    let deferred = Promise.defer();
+    let deferred = promise.defer();
     let iframe = this.doc.getElementById("toolbox-panel-iframe-" + id);
 
     if (iframe) {
@@ -458,7 +469,7 @@ Toolbox.prototype = {
       iframe.removeEventListener("DOMContentLoaded", onLoad, true);
 
       let built = definition.build(iframe.contentWindow, this);
-      Promise.resolve(built).then((panel) => {
+      promise.resolve(built).then((panel) => {
         this._toolPanels.set(id, panel);
         this.emit(id + "-ready", panel);
         gDevTools.emit(id + "-ready", this, panel);
@@ -489,7 +500,7 @@ Toolbox.prototype = {
 
     if (this._currentToolId == id) {
       // Return the existing panel in order to have a consistent return value.
-      return Promise.resolve(this._toolPanels.get(id));
+      return promise.resolve(this._toolPanels.get(id));
     }
 
     if (!this.isReady) {
@@ -534,6 +545,26 @@ Toolbox.prototype = {
       this.emit(id + "-selected", panel);
       return panel;
     });
+  },
+
+  /**
+   * Loads the tool next to the currently selected tool.
+   */
+  selectNextTool: function TBOX_selectNextTool() {
+    let selected = this.doc.querySelector(".devtools-tab[selected]");
+    let next = selected.nextSibling || selected.parentNode.firstChild;
+    let tool = next.getAttribute("toolid");
+    return this.selectTool(tool);
+  },
+
+  /**
+   * Loads the tool just left to the currently selected tool.
+   */
+  selectPreviousTool: function TBOX_selectPreviousTool() {
+    let selected = this.doc.querySelector(".devtools-tab[selected]");
+    let previous = selected.previousSibling || selected.parentNode.lastChild;
+    let tool = previous.getAttribute("toolid");
+    return this.selectTool(tool);
   },
 
   /**
@@ -731,7 +762,7 @@ Toolbox.prototype = {
     // Assign the "_destroyer" property before calling the other
     // destroyer methods to guarantee that the Toolbox's destroy
     // method is only executed once.
-    let deferred = Promise.defer();
+    let deferred = promise.defer();
     this._destroyer = deferred.promise;
 
     this._target.off("navigate", this._refreshHostTitle);
@@ -741,7 +772,7 @@ Toolbox.prototype = {
     gDevTools.off("tool-registered", this._toolRegistered);
     gDevTools.off("tool-unregistered", this._toolUnregistered);
 
-    // Revert docShell.allowJavascript back to it's original value if it was
+    // Revert docShell.allowJavascript back to its original value if it was
     // changed via the Disable JS option.
     if (typeof this._origAllowJavascript != "undefined") {
       let docShell = this._host.hostTab.linkedBrowser.docShell;
@@ -752,7 +783,12 @@ Toolbox.prototype = {
     let outstanding = [];
 
     for (let [id, panel] of this._toolPanels) {
-      outstanding.push(panel.destroy());
+      try {
+        outstanding.push(panel.destroy());
+      } catch(e) {
+        // We don't want to stop here if any panel fail to close.
+        console.error(e);
+      }
     }
 
     let container = this.doc.getElementById("toolbox-buttons");
@@ -772,7 +808,7 @@ Toolbox.prototype = {
     }
     this._target = null;
 
-    Promise.all(outstanding).then(function() {
+    promise.all(outstanding).then(function() {
       this.emit("destroyed");
       // Free _host after the call to destroyed in order to let a chance
       // to destroyed listeners to still query toolbox attributes

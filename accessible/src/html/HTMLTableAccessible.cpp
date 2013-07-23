@@ -48,6 +48,7 @@ HTMLTableCellAccessible::
   HTMLTableCellAccessible(nsIContent* aContent, DocAccessible* aDoc) :
   HyperTextAccessibleWrap(aContent, aDoc), xpcAccessibleTableCell(this)
 {
+  mGenericTypes |= eTableCell;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -314,6 +315,7 @@ HTMLTableHeaderCellAccessible::NativeRole()
 
   // Assume it's columnheader if there are headers in siblings, otherwise
   // rowheader.
+  // This should iterate the flattened tree
   nsIContent* parentContent = mContent->GetParent();
   if (!parentContent) {
     NS_ERROR("Deattached content on alive accessible?");

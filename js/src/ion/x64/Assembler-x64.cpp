@@ -4,11 +4,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "Assembler-x64.h"
+#include "ion/x64/Assembler-x64.h"
 #include "gc/Marking.h"
 #include "ion/LIR.h"
-
-#include "jsscriptinlines.h"
 
 using namespace js;
 using namespace js::ion;
@@ -45,7 +43,7 @@ ABIArgGenerator::next(MIRType type)
         current_ = ABIArg(FloatArgRegs[regIndex_++]);
         break;
       default:
-        JS_NOT_REACHED("Unexpected argument type");
+        MOZ_ASSUME_UNREACHABLE("Unexpected argument type");
     }
     return current_;
 #else
@@ -68,7 +66,7 @@ ABIArgGenerator::next(MIRType type)
         current_ = ABIArg(FloatArgRegs[floatRegIndex_++]);
         break;
       default:
-        JS_NOT_REACHED("Unexpected argument type");
+        MOZ_ASSUME_UNREACHABLE("Unexpected argument type");
     }
     return current_;
 #endif

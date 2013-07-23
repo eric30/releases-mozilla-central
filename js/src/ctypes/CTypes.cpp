@@ -7,6 +7,7 @@
 #include "ctypes/CTypes.h"
 
 #include "mozilla/FloatingPoint.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/StandardInteger.h"
 
 #include <limits>
@@ -33,9 +34,9 @@
 #include "jscompartment.h"
 #include "jsnum.h"
 #include "jsprf.h"
-#include "jstypedarray.h"
 
 #include "ctypes/Library.h"
+#include "vm/TypedArrayObject.h"
 
 using namespace std;
 
@@ -786,14 +787,14 @@ GetABICode(JSObject* obj)
   return ABICode(JSVAL_TO_INT(result));
 }
 
-JSErrorFormatString ErrorFormatString[CTYPESERR_LIMIT] = {
+static JSErrorFormatString ErrorFormatString[CTYPESERR_LIMIT] = {
 #define MSG_DEF(name, number, count, exception, format) \
   { format, count, exception } ,
-#include "ctypes.msg"
+#include "ctypes/ctypes.msg"
 #undef MSG_DEF
 };
 
-const JSErrorFormatString*
+static const JSErrorFormatString*
 GetErrorMessage(void* userRef, const char* locale, const unsigned errorNumber)
 {
   if (0 < errorNumber && errorNumber < CTYPESERR_LIMIT)
@@ -801,7 +802,7 @@ GetErrorMessage(void* userRef, const char* locale, const unsigned errorNumber)
   return NULL;
 }
 
-JSBool
+static JSBool
 TypeError(JSContext* cx, const char* expected, jsval actual)
 {
   JSString* str = JS_ValueToSource(cx, actual);
@@ -1008,7 +1009,7 @@ InitTypeConstructor(JSContext* cx,
   return true;
 }
 
-JSObject*
+static JSObject*
 InitInt64Class(JSContext* cx,
                HandleObject parent,
                JSClass* clasp,
@@ -1056,7 +1057,7 @@ AttachProtos(JSObject* proto, const AutoObjectVector& protos)
     JS_SetReservedSlot(proto, i, OBJECT_TO_JSVAL(protos[i]));
 }
 
-JSBool
+static JSBool
 InitTypeClasses(JSContext* cx, HandleObject parent)
 {
   // Initialize the ctypes.CType class. This acts as an abstract base class for
@@ -1204,7 +1205,7 @@ InitTypeClasses(JSContext* cx, HandleObject parent)
       INT_TO_JSVAL(ffiType.alignment), &ffiType));                             \
   if (!typeObj_##name)                                                         \
     return false;
-#include "typedefs.h"
+#include "ctypes/typedefs.h"
 
   // Alias 'ctypes.unsigned' as 'ctypes.unsigned_int', since they represent
   // the same type in C.
@@ -1252,8 +1253,8 @@ GetCallbacks(JSObject* obj)
 // Utility function to access a property of an object as an object
 // returns false and sets the error if the property does not exist
 // or is not an object
-bool GetObjectProperty(JSContext *cx, HandleObject obj,
-                       const char *property, MutableHandleObject result)
+static bool GetObjectProperty(JSContext *cx, HandleObject obj,
+                              const char *property, MutableHandleObject result)
 {
   RootedValue val(cx);
   if (!JS_GetProperty(cx, obj, property, val.address())) {
@@ -1337,7 +1338,7 @@ JS_SetCTypesCallbacks(JSObject *ctypesObj, JSCTypesCallbacks* callbacks)
 namespace js {
 
 JS_FRIEND_API(size_t)
-SizeOfDataIfCDataObject(JSMallocSizeOfFun mallocSizeOf, JSObject *obj)
+SizeOfDataIfCDataObject(mozilla::MallocSizeOf mallocSizeOf, JSObject *obj)
 {
     if (!CData::IsCData(obj))
         return 0;
@@ -1591,7 +1592,7 @@ jsvalToInteger(JSContext* cx, jsval val, IntegerType* result)
         *result = IntegerType(*static_cast<fromType*>(data));                  \
         return true;
 #define DEFINE_WRAPPED_INT_TYPE(x, y, z) DEFINE_INT_TYPE(x, y, z)
-#include "typedefs.h"
+#include "ctypes/typedefs.h"
       case TYPE_void_t:
       case TYPE_bool:
       case TYPE_float:
@@ -1681,7 +1682,7 @@ jsvalToFloat(JSContext *cx, jsval val, FloatType* result)
         return true;
 #define DEFINE_INT_TYPE(x, y, z) DEFINE_FLOAT_TYPE(x, y, z)
 #define DEFINE_WRAPPED_INT_TYPE(x, y, z) DEFINE_INT_TYPE(x, y, z)
-#include "typedefs.h"
+#include "ctypes/typedefs.h"
       case TYPE_void_t:
       case TYPE_bool:
       case TYPE_char:
@@ -2031,7 +2032,7 @@ strnlen(const CharType* begin, size_t max)
 //   parent's buffer.
 // * If 'parentObj' is null, the new CData object may or may not own its
 //   resulting buffer depending on the 'ownResult' argument.
-JSBool
+static JSBool
 ConvertToJS(JSContext* cx,
             HandleObject typeObj,
             HandleObject parentObj,
@@ -2100,7 +2101,7 @@ ConvertToJS(JSContext* cx,
     /* use, if any. */                                                         \
     *result = INT_TO_JSVAL(*static_cast<type*>(data));                         \
     break;
-#include "typedefs.h"
+#include "ctypes/typedefs.h"
   case TYPE_jschar: {
     // Convert the jschar to a 1-character string.
     JSString* str = JS_NewUCStringCopyN(cx, static_cast<jschar*>(data), 1);
@@ -2128,7 +2129,7 @@ ConvertToJS(JSContext* cx,
     break;
   }
   case TYPE_function:
-    JS_NOT_REACHED("cannot return a FunctionType");
+    MOZ_ASSUME_UNREACHABLE("cannot return a FunctionType");
   }
 
   return true;
@@ -2144,29 +2145,29 @@ bool CanConvertTypedArrayItemTo(JSObject *baseType, JSObject *valObj, JSContext 
   }
   TypeCode elementTypeCode;
   switch (JS_GetArrayBufferViewType(valObj)) {
-  case TypedArray::TYPE_INT8:
+  case TypedArrayObject::TYPE_INT8:
     elementTypeCode = TYPE_int8_t;
     break;
-  case TypedArray::TYPE_UINT8:
-  case TypedArray::TYPE_UINT8_CLAMPED:
+  case TypedArrayObject::TYPE_UINT8:
+  case TypedArrayObject::TYPE_UINT8_CLAMPED:
     elementTypeCode = TYPE_uint8_t;
     break;
-  case TypedArray::TYPE_INT16:
+  case TypedArrayObject::TYPE_INT16:
     elementTypeCode = TYPE_int16_t;
     break;
-  case TypedArray::TYPE_UINT16:
+  case TypedArrayObject::TYPE_UINT16:
     elementTypeCode = TYPE_uint16_t;
     break;
-  case TypedArray::TYPE_INT32:
+  case TypedArrayObject::TYPE_INT32:
     elementTypeCode = TYPE_int32_t;
     break;
-  case TypedArray::TYPE_UINT32:
+  case TypedArrayObject::TYPE_UINT32:
     elementTypeCode = TYPE_uint32_t;
     break;
-  case TypedArray::TYPE_FLOAT32:
+  case TypedArrayObject::TYPE_FLOAT32:
     elementTypeCode = TYPE_float32_t;
     break;
-  case TypedArray::TYPE_FLOAT64:
+  case TypedArrayObject::TYPE_FLOAT64:
     elementTypeCode = TYPE_float64_t;
     break;
   default:
@@ -2186,7 +2187,7 @@ bool CanConvertTypedArrayItemTo(JSObject *baseType, JSObject *valObj, JSContext 
 //    we can autoconvert a JS string primitive to a pointer-to-character type.
 //    In this case, ownership of the allocated string is handed off to the
 //    caller; 'freePointer' will be set to indicate this.
-JSBool
+static JSBool
 ImplicitConvert(JSContext* cx,
                 HandleValue val,
                 JSObject* targetType_,
@@ -2286,7 +2287,7 @@ ImplicitConvert(JSContext* cx,
     *static_cast<type*>(buffer) = result;                                      \
     break;                                                                     \
   }
-#include "typedefs.h"
+#include "ctypes/typedefs.h"
   case TYPE_pointer: {
     if (JSVAL_IS_NULL(val)) {
       // Convert to a null pointer.
@@ -2568,8 +2569,7 @@ ImplicitConvert(JSContext* cx,
   }
   case TYPE_void_t:
   case TYPE_function:
-    JS_NOT_REACHED("invalid type");
-    return false;
+    MOZ_ASSUME_UNREACHABLE("invalid type");
   }
 
   return true;
@@ -2578,7 +2578,7 @@ ImplicitConvert(JSContext* cx,
 // Convert jsval 'val' to a C binary representation of CType 'targetType',
 // storing the result in 'buffer'. This function is more forceful than
 // ImplicitConvert.
-JSBool
+static JSBool
 ExplicitConvert(JSContext* cx, HandleValue val, HandleObject targetType, void* buffer)
 {
   // If ImplicitConvert succeeds, use that result.
@@ -2621,7 +2621,7 @@ ExplicitConvert(JSContext* cx, HandleValue val, HandleObject targetType, void* b
 #define DEFINE_WRAPPED_INT_TYPE(x, y, z) DEFINE_INT_TYPE(x, y, z)
 #define DEFINE_CHAR_TYPE(x, y, z) DEFINE_INT_TYPE(x, y, z)
 #define DEFINE_JSCHAR_TYPE(x, y, z) DEFINE_CHAR_TYPE(x, y, z)
-#include "typedefs.h"
+#include "ctypes/typedefs.h"
   case TYPE_pointer: {
     // Convert a number, Int64 object, or UInt64 object to a pointer.
     uintptr_t result;
@@ -2641,8 +2641,7 @@ ExplicitConvert(JSContext* cx, HandleValue val, HandleObject targetType, void* b
     return false;
   case TYPE_void_t:
   case TYPE_function:
-    JS_NOT_REACHED("invalid type");
-    return false;
+    MOZ_ASSUME_UNREACHABLE("invalid type");
   }
   return true;
 }
@@ -2777,7 +2776,7 @@ BuildTypeSource(JSContext* cx,
   case TYPE_void_t:
 #define DEFINE_TYPE(name, type, ffiType)  \
   case TYPE_##name:
-#include "typedefs.h"
+#include "ctypes/typedefs.h"
   {
     AppendString(result, "ctypes.");
     JSString* nameStr = CType::GetName(cx, typeObj);
@@ -2814,8 +2813,7 @@ BuildTypeSource(JSContext* cx,
       AppendString(result, "ctypes.winapi_abi, ");
       break;
     case INVALID_ABI:
-      JS_NOT_REACHED("invalid abi");
-      break;
+      MOZ_ASSUME_UNREACHABLE("invalid abi");
     }
 
     // Recursively build the source string describing the function return and
@@ -2962,7 +2960,7 @@ BuildDataSource(JSContext* cx,
     /* Serialize as an integer. */                                             \
     IntegerToString(*static_cast<type*>(data), 10, result);                    \
     break;
-#include "typedefs.h"
+#include "ctypes/typedefs.h"
   case TYPE_jschar: {
     // Serialize as a 1-character JS string.
     JSString* str = JS_NewUCStringCopyN(cx, static_cast<jschar*>(data), 1);
@@ -3059,8 +3057,7 @@ BuildDataSource(JSContext* cx,
     break;
   }
   case TYPE_void_t:
-    JS_NOT_REACHED("invalid type");
-    break;
+    MOZ_ASSUME_UNREACHABLE("invalid type");
   }
 
   return true;
@@ -3533,7 +3530,7 @@ CType::GetFFIType(JSContext* cx, JSObject* obj)
     break;
 
   default:
-    JS_NOT_REACHED("simple types must have an ffi_type");
+    MOZ_ASSUME_UNREACHABLE("simple types must have an ffi_type");
   }
 
   if (!result)
@@ -5462,8 +5459,7 @@ FunctionType::BuildSymbolName(JSString* name,
   }
 
   case INVALID_ABI:
-    JS_NOT_REACHED("invalid abi");
-    break;
+    MOZ_ASSUME_UNREACHABLE("invalid abi");
   }
 }
 
@@ -5857,7 +5853,7 @@ FunctionType::Call(JSContext* cx,
 #define DEFINE_BOOL_TYPE(x, y, z) DEFINE_INT_TYPE(x, y, z)
 #define DEFINE_CHAR_TYPE(x, y, z) DEFINE_INT_TYPE(x, y, z)
 #define DEFINE_JSCHAR_TYPE(x, y, z) DEFINE_INT_TYPE(x, y, z)
-#include "typedefs.h"
+#include "ctypes/typedefs.h"
   default:
     break;
   }
@@ -6149,7 +6145,7 @@ CClosure::ClosureStub(ffi_cif* cif, void* result, void** args, void* userData)
 #define DEFINE_BOOL_TYPE(x, y, z) DEFINE_INT_TYPE(x, y, z)
 #define DEFINE_CHAR_TYPE(x, y, z) DEFINE_INT_TYPE(x, y, z)
 #define DEFINE_JSCHAR_TYPE(x, y, z) DEFINE_INT_TYPE(x, y, z)
-#include "typedefs.h"
+#include "ctypes/typedefs.h"
       rvSize = Align(rvSize, sizeof(ffi_arg));
       break;
     default:
@@ -6237,7 +6233,7 @@ CClosure::ClosureStub(ffi_cif* cif, void* result, void** args, void* userData)
 #define DEFINE_BOOL_TYPE(x, y, z) DEFINE_INT_TYPE(x, y, z)
 #define DEFINE_CHAR_TYPE(x, y, z) DEFINE_INT_TYPE(x, y, z)
 #define DEFINE_JSCHAR_TYPE(x, y, z) DEFINE_INT_TYPE(x, y, z)
-#include "typedefs.h"
+#include "ctypes/typedefs.h"
   default:
     break;
   }
@@ -6799,7 +6795,7 @@ CDataFinalizer::Methods::ToString(JSContext *cx, unsigned argc, jsval *vp)
       return JS_FALSE;
     }
   } else if (!CDataFinalizer::GetValue(cx, objThis, value.address())) {
-    JS_NOT_REACHED("Could not convert an empty CDataFinalizer");
+    MOZ_ASSUME_UNREACHABLE("Could not convert an empty CDataFinalizer");
   } else {
     strMessage = JS_ValueToString(cx, value);
     if (!strMessage) {
@@ -7007,7 +7003,7 @@ CDataFinalizer::Construct(JSContext* cx, unsigned argc, jsval *vp)
       objBestArgType = CData::GetCType(objData);
       size_t sizeBestArg;
       if (!CType::GetSafeSize(objBestArgType, &sizeBestArg)) {
-        JS_NOT_REACHED("object with unknown size");
+        MOZ_ASSUME_UNREACHABLE("object with unknown size");
       }
       if (sizeBestArg != sizeArg) {
         return TypeError(cx, "(an object with the same size as that expected by the C finalization function)", valData);

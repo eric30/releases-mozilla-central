@@ -51,30 +51,51 @@ const BinaryOutputStream = Components.Constructor(
                                       "nsIBinaryOutputStream",
                                       "setOutputStream")
 
-const HTTP_SERVER_PORT = 4444;
-const HTTP_BASE = "http://localhost:" + HTTP_SERVER_PORT;
+Object.defineProperty(this, "HTTP_BASE", {get: function() {
+  return "http://localhost:" + gHttpServer.identity.primaryPort;
+}});
 
-const FAKE_SERVER_PORT = 4445;
-const FAKE_BASE = "http://localhost:" + FAKE_SERVER_PORT;
+Object.defineProperty(this, "FAKE_BASE", {get: function() {
+  return "http://localhost:" + gFakeServerPort;
+}});
 
-const TEST_REFERRER_URI = NetUtil.newURI(HTTP_BASE + "/referrer.html");
-const TEST_SOURCE_URI = NetUtil.newURI(HTTP_BASE + "/source.txt");
-const TEST_EMPTY_URI = NetUtil.newURI(HTTP_BASE + "/empty.txt");
-const TEST_FAKE_SOURCE_URI = NetUtil.newURI(FAKE_BASE + "/source.txt");
+Object.defineProperty(this, "TEST_REFERRER_URI", {get: function() {
+  return NetUtil.newURI(HTTP_BASE + "/referrer.html");
+}});
+
+Object.defineProperty(this, "TEST_SOURCE_URI", {get: function() {
+  return NetUtil.newURI(HTTP_BASE + "/source.txt");
+}});
+
+Object.defineProperty(this, "TEST_EMPTY_URI", {get: function() {
+  return NetUtil.newURI(HTTP_BASE + "/empty.txt");
+}});
+
+Object.defineProperty(this, "TEST_FAKE_SOURCE_URI", {get: function() {
+  return NetUtil.newURI(FAKE_BASE + "/source.txt");
+}});
 
 const TEST_EMPTY_NOPROGRESS_PATH = "/empty-noprogress.txt";
-const TEST_EMPTY_NOPROGRESS_URI = NetUtil.newURI(HTTP_BASE +
-                                                 TEST_EMPTY_NOPROGRESS_PATH);
+
+Object.defineProperty(this, "TEST_EMPTY_NOPROGRESS_URI", {get: function() {
+  return NetUtil.newURI(HTTP_BASE + TEST_EMPTY_NOPROGRESS_PATH);
+}});
 
 const TEST_INTERRUPTIBLE_PATH = "/interruptible.txt";
-const TEST_INTERRUPTIBLE_URI = NetUtil.newURI(HTTP_BASE +
-                                              TEST_INTERRUPTIBLE_PATH);
+
+Object.defineProperty(this, "TEST_INTERRUPTIBLE_URI", {get: function() {
+  return NetUtil.newURI(HTTP_BASE + TEST_INTERRUPTIBLE_PATH);
+}});
 
 const TEST_INTERRUPTIBLE_GZIP_PATH = "/interruptible_gzip.txt";
-const TEST_INTERRUPTIBLE_GZIP_URI = NetUtil.newURI(HTTP_BASE +
-                                                   TEST_INTERRUPTIBLE_GZIP_PATH);
+
+Object.defineProperty(this, "TEST_INTERRUPTIBLE_GZIP_URI", {get: function() {
+  return NetUtil.newURI(HTTP_BASE + TEST_INTERRUPTIBLE_GZIP_PATH);
+}});
 
 const TEST_TARGET_FILE_NAME = "test-download.txt";
+const TEST_STORE_FILE_NAME = "test-downloads.json";
+
 const TEST_DATA_SHORT = "This test string is downloaded.";
 // Generate using gzipCompressString in TelemetryPing.js.
 const TEST_DATA_SHORT_GZIP_ENCODED_FIRST = [
@@ -185,6 +206,32 @@ function promiseSimpleDownload(aSourceURI) {
 }
 
 /**
+ * Returns a new public DownloadList object.
+ *
+ * @return {Promise}
+ * @resolves The newly created DownloadList object.
+ * @rejects JavaScript exception.
+ */
+function promiseNewDownloadList() {
+  // Force the creation of a new public download list.
+  Downloads._promisePublicDownloadList = null;
+  return Downloads.getPublicDownloadList();
+}
+
+/**
+ * Returns a new private DownloadList object.
+ *
+ * @return {Promise}
+ * @resolves The newly created DownloadList object.
+ * @rejects JavaScript exception.
+ */
+function promiseNewPrivateDownloadList() {
+  // Force the creation of a new public download list.
+  Downloads._privateDownloadList = null;
+  return Downloads.getPrivateDownloadList();
+}
+
+/**
  * Ensures that the given file contents are equal to the given string.
  *
  * @param aFile
@@ -256,7 +303,8 @@ function promiseAddDownloadToHistory(aSourceURI) {
  */
 function startFakeServer()
 {
-  let serverSocket = new ServerSocket(FAKE_SERVER_PORT, true, -1);
+  let serverSocket = new ServerSocket(-1, true, -1);
+  gFakeServerPort = serverSocket.port;
   serverSocket.asyncListen({
     onSocketAccepted: function (aServ, aTransport) {
       aTransport.close(Cr.NS_BINDING_ABORTED);
@@ -382,13 +430,14 @@ function isValidDate(aDate) {
 //// Initialization functions common to all tests
 
 let gHttpServer;
+let gFakeServerPort;
 
 add_task(function test_common_initialize()
 {
   // Start the HTTP server.
   gHttpServer = new HttpServer();
   gHttpServer.registerDirectory("/", do_get_file("../data"));
-  gHttpServer.start(HTTP_SERVER_PORT);
+  gHttpServer.start(-1);
 
   registerInterruptibleHandler(TEST_INTERRUPTIBLE_PATH,
     function firstPart(aRequest, aResponse) {
@@ -420,4 +469,9 @@ add_task(function test_common_initialize()
       bos.writeByteArray(TEST_DATA_SHORT_GZIP_ENCODED_SECOND,
                          TEST_DATA_SHORT_GZIP_ENCODED_SECOND.length);
     });
+
+  // Disable integration with the host application requiring profile access.
+  DownloadIntegration.dontLoad = true;
+  // Disable the parental controls checking.
+  DownloadIntegration.dontCheckParentalControls = true;
 });

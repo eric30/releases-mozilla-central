@@ -11,7 +11,6 @@
 #include "mozilla/Util.h"
 #include "nsCOMPtr.h"
 #include "nsGkAtoms.h"
-#include "nsIDOMSVGAnimatedEnum.h"
 #include "nsSVGElement.h"
 
 NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(LinearGradient)
@@ -71,7 +70,7 @@ SVGGradientElement::GetStringInfo()
                               ArrayLength(sStringInfo));
 }
 
-already_AddRefed<nsIDOMSVGAnimatedEnumeration>
+already_AddRefed<SVGAnimatedEnumeration>
 SVGGradientElement::GradientUnits()
 {
   return mEnumAttributes[GRADIENTUNITS].ToDOMAnimatedEnum(this);
@@ -87,7 +86,7 @@ SVGGradientElement::GradientTransform()
            GetAnimatedTransformList(DO_ALLOCATE), this);
 }
 
-already_AddRefed<nsIDOMSVGAnimatedEnumeration>
+already_AddRefed<SVGAnimatedEnumeration>
 SVGGradientElement::SpreadMethod()
 {
   return mEnumAttributes[SPREADMETHOD].ToDOMAnimatedEnum(this);

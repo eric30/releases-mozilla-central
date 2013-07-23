@@ -13,13 +13,15 @@
     _(Box)                      \
     _(BoxDouble)                \
     _(DivI)                     \
+    _(SoftDivI)                 \
     _(DivPowTwoI)               \
     _(ModI)                     \
+    _(SoftModI)                 \
     _(ModPowTwoI)               \
     _(ModMaskI)                 \
     _(PowHalfD)                 \
     _(UInt32ToDouble)           \
-    _(AsmJSDivOrMod)            \
+    _(UDivOrMod)                \
     _(AsmJSLoadFuncPtr)
 
 

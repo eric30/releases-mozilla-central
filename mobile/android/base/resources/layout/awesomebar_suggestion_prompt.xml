@@ -10,6 +10,7 @@
       android:background="@drawable/address_bar_bg">
 
     <LinearLayout android:id="@+id/prompt_container"
+                  android:focusable="true"
                   android:layout_width="fill_parent"
                   android:layout_height="wrap_content"
                   android:orientation="horizontal"
@@ -17,13 +18,13 @@
                   android:gravity="center_vertical"
                   android:padding="10dip">
 
-        <Gecko.TextView android:id="@+id/suggestions_prompt_title"
-                        android:layout_height="wrap_content"
-                        android:layout_width="wrap_content"
-                        android:textColor="@color/awesome_bar_title"
-                        android:layout_marginLeft="6dip"
-                        android:textSize="14sp"
-                        android:layout_weight="1" />
+        <org.mozilla.gecko.GeckoTextView android:id="@+id/suggestions_prompt_title"
+                                         android:layout_height="wrap_content"
+                                         android:layout_width="wrap_content"
+                                         android:textColor="@color/awesome_bar_title"
+                                         android:layout_marginLeft="6dip"
+                                         android:textSize="14sp"
+                                         android:layout_weight="1" />
 
         <TextView android:id="@+id/suggestions_prompt_yes"
                 android:layout_height="wrap_content"
@@ -35,7 +36,7 @@
                 android:paddingRight="15dp"
                 android:paddingTop="7dp"
                 android:paddingBottom="7dp"
-                android:clickable="true"
+                android:focusable="true"
                 android:text="@string/button_yes" />
 
         <TextView android:id="@+id/suggestions_prompt_no"
@@ -44,11 +45,12 @@
                 android:textSize="14sp"
                 android:layout_marginLeft="6dip"
                 android:background="@drawable/suggestion_selector"
+                android:nextFocusRight="@+id/suggestions_prompt_no"
                 android:paddingLeft="15dp"
                 android:paddingRight="15dp"
                 android:paddingTop="7dp"
                 android:paddingBottom="7dp"
-                android:clickable="true"
+                android:focusable="true"
                 android:text="@string/button_no" />
 
     </LinearLayout>

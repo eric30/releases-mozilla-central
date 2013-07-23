@@ -131,6 +131,8 @@ class WatchpointMap;
 typedef JSObject Env;
 
 typedef JSNative             Native;
+typedef JSParallelNative     ParallelNative;
+typedef JSThreadSafeNative   ThreadSafeNative;
 typedef JSPropertyOp         PropertyOp;
 typedef JSStrictPropertyOp   StrictPropertyOp;
 typedef JSPropertyDescriptor PropertyDescriptor;
@@ -148,10 +150,10 @@ struct Token;
 struct TokenPos;
 class TokenStream;
 class ParseMapPool;
-struct ParseNode;
+class ParseNode;
 
 template <typename ParseHandler>
-struct Parser;
+class Parser;
 
 } /* namespace frontend */
 

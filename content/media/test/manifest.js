@@ -16,6 +16,13 @@ var gSmallTests = [
   { name:"bogus.duh", type:"bogus/duh" }
 ];
 
+// Used by test_bug654550.html, for videoStats preference
+var gVideoTests = [
+  { name:"320x240.ogv", type:"video/ogg", width:320, height:240, duration:0.266 },
+  { name:"seek.webm", type:"video/webm", width:320, height:240, duration:3.966 },
+  { name:"bogus.duh", type:"bogus/duh" }
+];
+
 // Used by test_progress to ensure we get the correct progress information
 // during resource download.
 var gProgressTests = [
@@ -31,7 +38,6 @@ var gProgressTests = [
 // Used by test_played.html
 var gPlayedTests = [
   { name:"big.wav", type:"audio/x-wav", duration:9.0 },
-  { name:"sound.ogg", type:"audio/ogg", duration:4.0 },
   { name:"seek.ogv", type:"video/ogg", duration:3.966 },
   { name:"seek.webm", type:"video/webm", duration:3.966 },
   { name:"gizmo.mp4", type:"video/mp4", duration:5.56 },

@@ -6,6 +6,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/DebugOnly.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/Util.h"
 
 #include "mozilla/dom/ContentChild.h"
@@ -75,6 +76,7 @@ struct VisitData {
   , visitTime(0)
   , frecency(-1)
   , titleChanged(false)
+  , shouldUpdateFrecency(true)
   {
     guid.SetIsVoid(true);
     title.SetIsVoid(true);
@@ -90,6 +92,7 @@ struct VisitData {
   , visitTime(0)
   , frecency(-1)
   , titleChanged(false)
+  , shouldUpdateFrecency(true)
   {
     (void)aURI->GetSpec(spec);
     (void)GetReversedHostname(aURI, revHost);
@@ -156,6 +159,9 @@ struct VisitData {
 
   // TODO bug 626836 hook up hidden and typed change tracking too!
   bool titleChanged;
+
+  // Indicates whether frecency should be updated for this visit.
+  bool shouldUpdateFrecency;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -996,8 +1002,12 @@ private:
 
     // TODO (bug 623969) we shouldn't update this after each visit, but
     // rather only for each unique place to save disk I/O.
-    rv = UpdateFrecency(aPlace);
-    NS_ENSURE_SUCCESS(rv, rv);
+
+    // Don't update frecency if the page should not appear in autocomplete.
+    if (aPlace.shouldUpdateFrecency) {
+      rv = UpdateFrecency(aPlace);
+      NS_ENSURE_SUCCESS(rv, rv);
+    }
 
     return NS_OK;
   }
@@ -1167,10 +1177,7 @@ private:
    */
   nsresult UpdateFrecency(const VisitData& aPlace)
   {
-    // Don't update frecency if the page should not appear in autocomplete.
-    if (aPlace.frecency == 0) {
-      return NS_OK;
-    }
+    MOZ_ASSERT(aPlace.shouldUpdateFrecency);
 
     nsresult rv;
     { // First, set our frecency to the proper value.
@@ -2063,7 +2070,10 @@ History::InsertPlace(const VisitData& aPlace)
   NS_ENSURE_SUCCESS(rv, rv);
   rv = stmt->BindInt32ByName(NS_LITERAL_CSTRING("typed"), aPlace.typed);
   NS_ENSURE_SUCCESS(rv, rv);
-  rv = stmt->BindInt32ByName(NS_LITERAL_CSTRING("frecency"), aPlace.frecency);
+  // When inserting a page for a first visit that should not appear in
+  // autocomplete, for example an error page, use a zero frecency.
+  int32_t frecency = aPlace.shouldUpdateFrecency ? aPlace.frecency : 0;
+  rv = stmt->BindInt32ByName(NS_LITERAL_CSTRING("frecency"), frecency);
   NS_ENSURE_SUCCESS(rv, rv);
   rv = stmt->BindInt32ByName(NS_LITERAL_CSTRING("hidden"), aPlace.hidden);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -2140,6 +2150,8 @@ History::FetchPageInfo(VisitData& _place, bool* _exists)
       "FROM moz_places "
       "WHERE url = :page_url "
     );
+    NS_ENSURE_STATE(stmt);
+
     rv = URIBinder::Bind(stmt, NS_LITERAL_CSTRING("page_url"), _place.spec);
     NS_ENSURE_SUCCESS(rv, rv);
   }
@@ -2149,11 +2161,12 @@ History::FetchPageInfo(VisitData& _place, bool* _exists)
       "FROM moz_places "
       "WHERE guid = :guid "
     );
+    NS_ENSURE_STATE(stmt);
+
     rv = stmt->BindUTF8StringByName(NS_LITERAL_CSTRING("guid"), _place.guid);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
-  NS_ENSURE_TRUE(stmt, rv);
   mozStorageStatementScoper scoper(stmt);
 
   rv = stmt->ExecuteStep(_exists);
@@ -2221,13 +2234,13 @@ History::FetchPageInfo(VisitData& _place, bool* _exists)
 }
 
 /* static */ size_t
-History::SizeOfEntryExcludingThis(KeyClass* aEntry, nsMallocSizeOfFun aMallocSizeOf, void *)
+History::SizeOfEntryExcludingThis(KeyClass* aEntry, mozilla::MallocSizeOf aMallocSizeOf, void *)
 {
   return aEntry->array.SizeOfExcludingThis(aMallocSizeOf);
 }
 
 size_t
-History::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOfThis)
+History::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOfThis)
 {
   return aMallocSizeOfThis(this) +
          mObservers.SizeOfExcludingThis(SizeOfEntryExcludingThis, aMallocSizeOfThis);
@@ -2413,7 +2426,7 @@ History::VisitURI(nsIURI* aURI,
 
   // Error pages should never be autocompleted.
   if (aFlags & IHistory::UNRECOVERABLE_ERROR) {
-    place.frecency = 0;
+    place.shouldUpdateFrecency = false;
   }
 
   // EMBED visits are session-persistent and should not go through the database.
@@ -2712,7 +2725,7 @@ History::GetPlacesInfo(const JS::Value& aPlaceIdentifiers,
       nsCOMPtr<nsIURI> uri = GetJSValueAsURI(aCtx, placeIdentifier);
       if (!uri)
         return NS_ERROR_INVALID_ARG; // neither a guid, nor a uri.
-      *placesInfo.AppendElement(VisitData(uri));
+      placesInfo.AppendElement(VisitData(uri));
     }
   }
 

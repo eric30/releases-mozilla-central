@@ -33,6 +33,8 @@ public final class GeckoProfile {
     private File mMozDir;
     private File mDir;
 
+    private boolean mInGuestMode = false;
+
     static private INIParser getProfilesINI(Context context) {
       File filesDir = context.getFilesDir();
       File mozillaDir = new File(filesDir, "mozilla");
@@ -41,8 +43,11 @@ public final class GeckoProfile {
     }
 
     public static GeckoProfile get(Context context) {
-        if (context instanceof GeckoApp)
+        if (context instanceof GeckoApp) {
+            if (((GeckoApp)context).mProfile != null)
+                return ((GeckoApp)context).mProfile;
             return get(context, ((GeckoApp)context).getDefaultProfileName());
+        }
 
         return get(context, "");
     }
@@ -53,17 +58,24 @@ public final class GeckoProfile {
             if (profile != null)
                 return profile;
         }
-        return get(context, profileName, null);
+        return get(context, profileName, (File)null);
     }
 
     public static GeckoProfile get(Context context, String profileName, String profilePath) {
+        File dir = null;
+        if (!TextUtils.isEmpty(profilePath))
+            dir = new File(profilePath);
+        return get(context, profileName, dir);
+    }
+
+    public static GeckoProfile get(Context context, String profileName, File profileDir) {
         if (context == null) {
             throw new IllegalArgumentException("context must be non-null");
         }
 
         // if no profile was passed in, look for the default profile listed in profiles.ini
         // if that doesn't exist, look for a profile called 'default'
-        if (TextUtils.isEmpty(profileName) && TextUtils.isEmpty(profilePath)) {
+        if (TextUtils.isEmpty(profileName) && profileDir == null) {
             profileName = GeckoProfile.findDefaultProfile(context);
             if (profileName == null)
                 profileName = "default";
@@ -73,10 +85,10 @@ public final class GeckoProfile {
         synchronized (sProfileCache) {
             GeckoProfile profile = sProfileCache.get(profileName);
             if (profile == null) {
-                profile = new GeckoProfile(context, profileName, profilePath);
+                profile = new GeckoProfile(context, profileName, profileDir);
                 sProfileCache.put(profileName, profile);
             } else {
-                profile.setDir(profilePath);
+                profile.setDir(profileDir);
             }
             return profile;
         }
@@ -99,25 +111,44 @@ public final class GeckoProfile {
         return new GeckoProfile(context, profileName).remove();
     }
 
+    public static GeckoProfile createGuestProfile(Context context) {
+        if (context == null) {
+            throw new IllegalArgumentException("context must be non-null");
+        }
+        try {
+            File guestDir = context.getDir("guest", Context.MODE_PRIVATE);
+            if (guestDir.exists())
+                guestDir.delete();
+            guestDir.mkdir();
+            GeckoProfile profile = get(context, "guest", guestDir);
+            profile.mInGuestMode = true;
+            return profile;
+        } catch (Exception ex) {
+            Log.e(LOGTAG, "Error creating guest profile", ex);
+        }
+        return null;
+    }
+
     private GeckoProfile(Context context, String profileName) {
         mContext = context;
         mName = profileName;
     }
 
-    private GeckoProfile(Context context, String profileName, String profilePath) {
+    private GeckoProfile(Context context, String profileName, File profileDir) {
         mContext = context;
         mName = profileName;
-        setDir(profilePath);
+        setDir(profileDir);
     }
 
-    private void setDir(String profilePath) {
-        if (!TextUtils.isEmpty(profilePath)) {
-            File dir = new File(profilePath);
-            if (dir.exists() && dir.isDirectory()) {
-                mDir = dir;
-            } else {
-                Log.w(LOGTAG, "requested profile directory missing: " + profilePath);
-            }
+    public boolean inGuestMode() {
+        return mInGuestMode;
+    }
+
+    private void setDir(File dir) {
+        if (dir != null && dir.exists() && dir.isDirectory()) {
+            mDir = dir;
+        } else {
+            Log.w(LOGTAG, "requested profile directory missing: " + dir);
         }
     }
 
@@ -164,23 +195,6 @@ public final class GeckoProfile {
 
     public File getFilesDir() {
         return mContext.getFilesDir();
-    }
-
-    /**
-     * Determines whether the tabs from the previous session should be
-     * automatically restored.
-     *
-     * sessionstore.js is moved to sessionstore.bak on a clean quit, so if we
-     * still have sessionstore.js at startup, that means we were killed
-     * uncleanly. This is caused by either 1) a crash, or 2) being killed by
-     * android because of memory constraints. Either way, the existence of this
-     * file indicates that we'll want to restore the previous session.
-     *
-     * @return whether the previous session should be restored
-     */
-    public boolean shouldRestoreSession() {
-        File sessionFile = getFile("sessionstore.js");
-        return sessionFile != null && sessionFile.exists();
     }
 
     /**
@@ -238,7 +252,7 @@ public final class GeckoProfile {
     private String readFile(File target) throws IOException {
         FileReader fr = new FileReader(target);
         try {
-            StringBuffer sb = new StringBuffer();
+            StringBuilder sb = new StringBuilder();
             char[] buf = new char[8192];
             int read = fr.read(buf);
             while (read >= 0) {
@@ -346,7 +360,7 @@ public final class GeckoProfile {
 
     private static String saltProfileName(String name) {
         String allowedChars = "abcdefghijklmnopqrstuvwxyz0123456789";
-        StringBuffer salt = new StringBuffer(16);
+        StringBuilder salt = new StringBuilder(16);
         for (int i = 0; i < 8; i++) {
             salt.append(allowedChars.charAt((int)(Math.random() * allowedChars.length())));
         }

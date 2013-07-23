@@ -78,22 +78,41 @@ class LUInt32ToDouble : public LInstructionHelper<1, 1, 0>
     }
 };
 
-// LDivI is presently implemented as a proper C function,
-// so it trashes r0, r1, r2 and r3.  The call also trashes lr, and has the
-// ability to trash ip. The function also takes two arguments (dividend in r0,
-// divisor in r1). The LInstruction gets encoded such that the divisor and
-// dividend are passed in their apropriate registers, and are marked as copy
-// so we can modify them (and the function will).
-// The other thre registers that can be trashed are marked as such. For the time
-// being, the link register is not marked as trashed because we never allocate
-// to the link register.
-class LDivI : public LBinaryMath<2>
+class LDivI : public LBinaryMath<1>
 {
   public:
     LIR_HEADER(DivI);
 
     LDivI(const LAllocation &lhs, const LAllocation &rhs,
-          const LDefinition &temp1, const LDefinition &temp2) {
+          const LDefinition &temp) {
+        setOperand(0, lhs);
+        setOperand(1, rhs);
+        setTemp(0, temp);
+    }
+
+    MDiv *mir() const {
+        return mir_->toDiv();
+    }
+};
+
+// LSoftDivI is a software divide for ARM cores that don't support a hardware
+// divide instruction.
+//
+// It is implemented as a proper C function so it trashes r0, r1, r2 and r3.  The
+// call also trashes lr, and has the ability to trash ip. The function also
+// takes two arguments (dividend in r0, divisor in r1). The LInstruction gets
+// encoded such that the divisor and dividend are passed in their apropriate
+// registers, and are marked as copy so we can modify them (and the function
+// will).  The other thre registers that can be trashed are marked as such. For
+// the time being, the link register is not marked as trashed because we never
+// allocate to the link register.
+class LSoftDivI : public LBinaryMath<2>
+{
+  public:
+    LIR_HEADER(SoftDivI);
+
+    LSoftDivI(const LAllocation &lhs, const LAllocation &rhs,
+              const LDefinition &temp1, const LDefinition &temp2) {
         setOperand(0, lhs);
         setOperand(1, rhs);
         setTemp(0, temp1);
@@ -131,14 +150,32 @@ class LDivPowTwoI : public LInstructionHelper<1, 1, 0>
     }
 };
 
-class LModI : public LBinaryMath<3>
+class LModI : public LBinaryMath<1>
 {
   public:
     LIR_HEADER(ModI);
 
     LModI(const LAllocation &lhs, const LAllocation &rhs,
-          const LDefinition &temp1, const LDefinition &temp2,
           const LDefinition &callTemp)
+    {
+        setOperand(0, lhs);
+        setOperand(1, rhs);
+        setTemp(0, callTemp);
+    }
+
+    MMod *mir() const {
+        return mir_->toMod();
+    }
+};
+
+class LSoftModI : public LBinaryMath<3>
+{
+  public:
+    LIR_HEADER(SoftModI);
+
+    LSoftModI(const LAllocation &lhs, const LAllocation &rhs,
+              const LDefinition &temp1, const LDefinition &temp2,
+              const LDefinition &callTemp)
     {
         setOperand(0, lhs);
         setOperand(1, rhs);
@@ -324,12 +361,12 @@ class LMulI : public LBinaryMath<0>
 
 // This class performs a simple x86 'div', yielding either a quotient or remainder depending on
 // whether this instruction is defined to output eax (quotient) or edx (remainder).
-class LAsmJSDivOrMod : public LBinaryMath<2>
+class LUDivOrMod : public LBinaryMath<2>
 {
   public:
-    LIR_HEADER(AsmJSDivOrMod);
+    LIR_HEADER(UDivOrMod);
 
-    LAsmJSDivOrMod(const LAllocation &lhs, const LAllocation &rhs, const LDefinition &temp1, const LDefinition &temp2) {
+    LUDivOrMod(const LAllocation &lhs, const LAllocation &rhs, const LDefinition &temp1, const LDefinition &temp2) {
         setOperand(0, lhs);
         setOperand(1, rhs);
         setTemp(0, temp1);

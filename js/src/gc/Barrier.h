@@ -132,6 +132,11 @@ class EncapsulatedPtr
 
     ~EncapsulatedPtr() { pre(); }
 
+    void init(T *v) {
+        JS_ASSERT(!IsPoisonedPtr<T>(v));
+        this->value = v;
+    }
+
     /* Use to set the pointer to NULL. */
     void clear() {
         pre();
@@ -384,8 +389,14 @@ class EncapsulatedValue : public ValueOperations<EncapsulatedValue>
     }
     inline ~EncapsulatedValue();
 
-    inline void init(const Value &v);
-    inline void init(JSRuntime *rt, const Value &v);
+    void init(const Value &v) {
+        JS_ASSERT(!IsPoisonedValue(v));
+        value = v;
+    }
+    void init(JSRuntime *rt, const Value &v) {
+        JS_ASSERT(!IsPoisonedValue(v));
+        value = v;
+    }
 
     inline EncapsulatedValue &operator=(const Value &v);
     inline EncapsulatedValue &operator=(const EncapsulatedValue &v);
@@ -648,15 +659,6 @@ class ReadBarrieredValue
     inline JSObject &toObject() const;
 };
 
-namespace tl {
-
-template <class T> struct IsRelocatableHeapType<HeapPtr<T> >
-                                                    { static const bool result = false; };
-template <> struct IsRelocatableHeapType<HeapSlot>  { static const bool result = false; };
-template <> struct IsRelocatableHeapType<HeapValue> { static const bool result = false; };
-template <> struct IsRelocatableHeapType<HeapId>    { static const bool result = false; };
-
-} /* namespace tl */
 } /* namespace js */
 
 #endif /* gc_Barrier_h */

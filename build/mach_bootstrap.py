@@ -29,6 +29,7 @@ SEARCH_PATHS = [
     'python/mozboot',
     'python/mozbuild',
     'python/blessings',
+    'python/configobj',
     'python/psutil',
     'python/which',
     'build/pymake',
@@ -55,6 +56,7 @@ SEARCH_PATHS = [
 MACH_MODULES = [
     'addon-sdk/mach_commands.py',
     'layout/tools/reftest/mach_commands.py',
+    'python/mach_commands.py',
     'python/mach/mach/commands/commandinfo.py',
     'python/mozboot/mozboot/mach_commands.py',
     'python/mozbuild/mozbuild/config.py',
@@ -127,9 +129,10 @@ def bootstrap(topsrcdir, mozilla_dir=None):
         if not os.path.exists(state_env_dir):
             print('Creating global state directory from environment variable: %s'
                 % state_env_dir)
-            os.makedirs(state_env_dir, mode=0777)
+            os.makedirs(state_env_dir, mode=0o770)
             print('Please re-run mach.')
             sys.exit(1)
+        state_dir = state_env_dir
     else:
         if not os.path.exists(state_user_dir):
             print(STATE_DIR_FIRST_RUN.format(userdir=state_user_dir))
@@ -145,6 +148,7 @@ def bootstrap(topsrcdir, mozilla_dir=None):
             os.mkdir(state_user_dir)
             print('Please re-run mach.')
             sys.exit(1)
+        state_dir = state_user_dir
 
     try:
         import mach.main
@@ -152,7 +156,12 @@ def bootstrap(topsrcdir, mozilla_dir=None):
         sys.path[0:0] = [os.path.join(mozilla_dir, path) for path in SEARCH_PATHS]
         import mach.main
 
+    def populate_context(context):
+        context.state_dir = state_dir
+
     mach = mach.main.Mach(topsrcdir)
+    mach.populate_context_handler = populate_context
+
     for category, meta in CATEGORIES.items():
         mach.define_category(category, meta['short'], meta['long'],
             meta['priority'])

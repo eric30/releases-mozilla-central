@@ -11,14 +11,12 @@ XPIDL_SOURCES += [
     'nsIIDBCursor.idl',
     'nsIIDBCursorWithValue.idl',
     'nsIIDBDatabase.idl',
-    'nsIIDBFileHandle.idl',
     'nsIIDBIndex.idl',
     'nsIIDBKeyRange.idl',
     'nsIIDBObjectStore.idl',
     'nsIIDBOpenDBRequest.idl',
     'nsIIDBRequest.idl',
     'nsIIDBTransaction.idl',
-    'nsIIDBVersionChangeEvent.idl',
     'nsIIndexedDatabaseManager.idl',
 ]
 

@@ -23,6 +23,13 @@ scrollbar[orient="vertical"]
    -moz-appearance: scrollbartrack-vertical;
 }
 
+@media all and (-moz-overlay-scrollbars) {
+  scrollbar:not([active="true"]),
+  scrollbar[disabled="true"] {
+    visibility: hidden;
+  }
+}
+
 /* ::::: borders for thumb and buttons ::::: */
 
 thumb,

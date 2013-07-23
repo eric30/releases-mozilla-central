@@ -64,38 +64,24 @@ const GENERIC_VARIABLES_VIEW_SETTINGS = {
 let NetMonitorView = {
   /**
    * Initializes the network monitor view.
-   *
-   * @param function aCallback
-   *        Called after the view finishes initializing.
    */
-  initialize: function(aCallback) {
-    dumpn("Initializing the NetMonitorView");
-
+  initialize: function() {
     this._initializePanes();
 
     this.Toolbar.initialize();
     this.RequestsMenu.initialize();
     this.NetworkDetails.initialize();
-
-    aCallback();
   },
 
   /**
    * Destroys the network monitor view.
-   *
-   * @param function aCallback
-   *        Called after the view finishes destroying.
    */
-  destroy: function(aCallback) {
-    dumpn("Destroying the NetMonitorView");
-
+  destroy: function() {
     this.Toolbar.destroy();
     this.RequestsMenu.destroy();
     this.NetworkDetails.destroy();
 
     this._destroyPanes();
-
-    aCallback();
   },
 
   /**
@@ -165,7 +151,7 @@ let NetMonitorView = {
     }
 
     if (aTabIndex !== undefined) {
-      $("#details-pane").selectedIndex = aTabIndex;
+      $("#event-details-pane").selectedIndex = aTabIndex;
     }
   },
 
@@ -175,7 +161,7 @@ let NetMonitorView = {
    * @param string aId
    *        The id of the editor placeholder node.
    * @return object
-   *         A Promise that is resolved when the editor is available.
+   *         A promise that is resolved when the editor is available.
    */
   editor: function(aId) {
     dumpn("Getting a NetMonitorView editor: " + aId);
@@ -184,7 +170,7 @@ let NetMonitorView = {
       return this._editorPromises.get(aId);
     }
 
-    let deferred = Promise.defer();
+    let deferred = promise.defer();
     this._editorPromises.set(aId, deferred.promise);
 
     // Initialize the source editor and store the newly created instance
@@ -199,9 +185,7 @@ let NetMonitorView = {
   _detailsPaneToggleButton: null,
   _collapsePaneString: "",
   _expandPaneString: "",
-  _editorPromises: new Map(),
-  _isInitialized: false,
-  _isDestroyed: false
+  _editorPromises: new Map()
 };
 
 /**
@@ -278,6 +262,7 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
     this.widget = new SideMenuWidget($("#requests-menu-contents"), false);
     this._summary = $("#request-menu-network-summary");
 
+    this.allowFocusOnRightClick = true;
     this.widget.maintainSelectionVisible = false;
     this.widget.autoscrollWithAppendedItems = true;
 
@@ -336,7 +321,7 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
     this._registerLastRequestEnd(unixTime);
 
     // Append a network request item to this container.
-    let requestItem = this.push([menuView, aId], {
+    let requestItem = this.push([menuView, aId, ""], {
       attachment: {
         startedDeltaMillis: unixTime - this._firstRequestStartedMillis,
         startedMillis: unixTime,
@@ -351,7 +336,71 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
 
     this.refreshSummary();
     this.refreshZebra();
+
+    if (aId == this._preferredItemId) {
+      this.selectedItem = requestItem;
+    }
   },
+
+  /**
+   * Create a new custom request form populated with the data from
+   * the currently selected request.
+   */
+  cloneSelectedRequest: function() {
+    let selected = this.selectedItem.attachment;
+
+    // Create the element node for the network request item.
+    let menuView = this._createMenuView(selected.method, selected.url);
+
+    let newItem = this.push([menuView,, ""], {
+      attachment: Object.create(selected, {
+        isCustom: { value: true }
+      })
+    });
+
+    // Immediately switch to new request pane.
+    this.selectedItem = newItem;
+  },
+
+  /**
+   * Copy the request url from the currently selected item.
+   */
+  copyUrl: function() {
+    let selected = this.selectedItem.attachment;
+
+    clipboardHelper.copyString(selected.url, document);
+  },
+
+  /**
+   * Send a new HTTP request using the data in the custom request form.
+   */
+  sendCustomRequest: function() {
+    let selected = this.selectedItem.attachment;
+
+    let data = Object.create(selected, {
+      headers: { value: selected.requestHeaders.headers }
+    });
+
+    if (selected.requestPostData) {
+      data.body = selected.requestPostData.postData.text;
+    }
+
+    NetMonitorController.webConsoleClient.sendHTTPRequest(data, aResponse => {
+      let id = aResponse.eventActor.actor;
+      this._preferredItemId = id;
+    });
+
+    this.closeCustomRequest();
+  },
+
+  /**
+   * Remove the currently selected custom request.
+   */
+  closeCustomRequest: function() {
+    this.remove(this.selectedItem);
+
+    NetMonitorView.Sidebar.toggle(false);
+   },
 
   /**
    * Filters all network requests in this container by a specified type.
@@ -690,11 +739,11 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
             break;
           case "status":
             requestItem.attachment.status = value;
-            this._updateMenuView(requestItem, key, value);
+            this.updateMenuView(requestItem, key, value);
             break;
           case "statusText":
             requestItem.attachment.statusText = value;
-            this._updateMenuView(requestItem, key,
+            this.updateMenuView(requestItem, key,
               requestItem.attachment.status + " " +
               requestItem.attachment.statusText);
             break;
@@ -703,11 +752,11 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
             break;
           case "contentSize":
             requestItem.attachment.contentSize = value;
-            this._updateMenuView(requestItem, key, value);
+            this.updateMenuView(requestItem, key, value);
             break;
           case "mimeType":
             requestItem.attachment.mimeType = value;
-            this._updateMenuView(requestItem, key, value);
+            this.updateMenuView(requestItem, key, value);
             break;
           case "responseContent":
             requestItem.attachment.responseContent = value;
@@ -715,7 +764,7 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
           case "totalTime":
             requestItem.attachment.totalTime = value;
             requestItem.attachment.endedMillis = requestItem.attachment.startedMillis + value;
-            this._updateMenuView(requestItem, key, value);
+            this.updateMenuView(requestItem, key, value);
             this._registerLastRequestEnd(requestItem.attachment.endedMillis);
             break;
           case "eventTimings":
@@ -757,23 +806,11 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
    *         The network request view.
    */
   _createMenuView: function(aMethod, aUrl) {
-    let uri = nsIURL(aUrl);
-    let nameWithQuery = this._getUriNameWithQuery(uri);
-    let hostPort = this._getUriHostPort(uri);
-
     let template = $("#requests-menu-item-template");
     let fragment = document.createDocumentFragment();
 
-    let method = $(".requests-menu-method", template);
-    method.setAttribute("value", aMethod);
-
-    let file = $(".requests-menu-file", template);
-    file.setAttribute("value", nameWithQuery);
-    file.setAttribute("tooltiptext", nameWithQuery);
-
-    let domain = $(".requests-menu-domain", template);
-    domain.setAttribute("value", hostPort);
-    domain.setAttribute("tooltiptext", hostPort);
+    this.updateMenuView(template, 'method', aMethod);
+    this.updateMenuView(template, 'url', aUrl);
 
     let waterfall = $(".requests-menu-waterfall", template);
     waterfall.style.backgroundImage = this._cachedWaterfallBackground;
@@ -796,22 +833,48 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
    * @param any aValue
    *        The new value to be shown.
    */
-  _updateMenuView: function(aItem, aKey, aValue) {
+  updateMenuView: function(aItem, aKey, aValue) {
+    let target = aItem.target || aItem;
+
     switch (aKey) {
+      case "method": {
+        let node = $(".requests-menu-method", target);
+        node.setAttribute("value", aValue);
+        break;
+      }
+      case "url": {
+        let uri;
+        try {
+          uri = nsIURL(aValue);
+        } catch(e) {
+          break; // User input may not make a well-formed url yet.
+        }
+        let nameWithQuery = this._getUriNameWithQuery(uri);
+        let hostPort = this._getUriHostPort(uri);
+
+        let node = $(".requests-menu-file", target);
+        node.setAttribute("value", nameWithQuery);
+        node.setAttribute("tooltiptext", nameWithQuery);
+
+        let domain = $(".requests-menu-domain", target);
+        domain.setAttribute("value", hostPort);
+        domain.setAttribute("tooltiptext", hostPort);
+        break;
+      }
       case "status": {
-        let node = $(".requests-menu-status", aItem.target);
+        let node = $(".requests-menu-status", target);
         node.setAttribute("code", aValue);
         break;
       }
       case "statusText": {
-        let node = $(".requests-menu-status-and-method", aItem.target);
+        let node = $(".requests-menu-status-and-method", target);
         node.setAttribute("tooltiptext", aValue);
         break;
       }
       case "contentSize": {
         let kb = aValue / 1024;
         let size = L10N.numberWithDecimals(kb, CONTENT_SIZE_DECIMALS);
-        let node = $(".requests-menu-size", aItem.target);
+        let node = $(".requests-menu-size", target);
         let text = L10N.getFormatStr("networkMenu.sizeKB", size);
         node.setAttribute("value", text);
         node.setAttribute("tooltiptext", text);
@@ -819,14 +882,14 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
       }
       case "mimeType": {
         let type = this._getAbbreviatedMimeType(aValue);
-        let node = $(".requests-menu-type", aItem.target);
+        let node = $(".requests-menu-type", target);
         let text = CONTENT_MIME_TYPE_ABBREVIATIONS[type] || type;
         node.setAttribute("value", text);
         node.setAttribute("tooltiptext", aValue);
         break;
       }
       case "totalTime": {
-        let node = $(".requests-menu-timings-total", aItem.target);
+        let node = $(".requests-menu-timings-total", target);
         let text = L10N.getFormatStr("networkMenu.totalMS", aValue); // integer
         node.setAttribute("value", text);
         node.setAttribute("tooltiptext", text);
@@ -1089,10 +1152,10 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
    */
   _onSelect: function({ detail: item }) {
     if (item) {
-      NetMonitorView.NetworkDetails.populate(item.attachment);
-      NetMonitorView.NetworkDetails.toggle(true);
+      NetMonitorView.Sidebar.populate(item.attachment);
+      NetMonitorView.Sidebar.toggle(true);
     } else {
-      NetMonitorView.NetworkDetails.toggle(false);
+      NetMonitorView.Sidebar.toggle(false);
     }
   },
 
@@ -1102,6 +1165,17 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
   _onResize: function(e) {
     // Allow requests to settle down first.
     drain("resize-events", RESIZE_REFRESH_RATE, () => this._flushWaterfallViews(true));
+  },
+
+  /**
+   * Handle the context menu opening. Hide items if no request is selected.
+   */
+  _onContextShowing: function() {
+    let resendElement = $("#request-menu-context-resend");
+    resendElement.hidden = !this.selectedItem || this.selectedItem.attachment.isCustom;
+
+    let copyUrlElement = $("#request-menu-context-copy-url");
+    copyUrlElement.hidden = !this.selectedItem;
   },
 
   /**
@@ -1240,6 +1314,162 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
 });
 
 /**
+ * Functions handling the sidebar details view.
+ */
+function SidebarView() {
+  dumpn("SidebarView was instantiated");
+}
+
+SidebarView.prototype = {
+  /**
+   * Sets this view hidden or visible. It's visible by default.
+   *
+   * @param boolean aVisibleFlag
+   *        Specifies the intended visibility.
+   */
+  toggle: function(aVisibleFlag) {
+    NetMonitorView.toggleDetailsPane({ visible: aVisibleFlag });
+    NetMonitorView.RequestsMenu._flushWaterfallViews(true);
+  },
+
+  /**
+   * Populates this view with the specified data.
+   *
+   * @param object aData
+   *        The data source (this should be the attachment of a request item).
+   */
+  populate: function(aData) {
+    if (aData.isCustom) {
+      NetMonitorView.CustomRequest.populate(aData);
+      $("#details-pane").selectedIndex = 0;
+    } else {
+      NetMonitorView.NetworkDetails.populate(aData);
+      $("#details-pane").selectedIndex = 1;
+    }
+  },
+
+  /**
+   * Hides this container.
+   */
+  reset: function() {
+    this.toggle(false);
+  }
+}
+
+/**
+ * Functions handling the custom request view.
+ */
+function CustomRequestView() {
+  dumpn("CustomRequestView was instantiated");
+}
+
+CustomRequestView.prototype = {
+  /**
+   * Populates this view with the specified data.
+   *
+   * @param object aData
+   *        The data source (this should be the attachment of a request item).
+   */
+  populate: function(aData) {
+    $("#custom-url-value").value = aData.url;
+    $("#custom-method-value").value = aData.method;
+    $("#custom-headers-value").value =
+       writeHeaderText(aData.requestHeaders.headers);
+
+    if (aData.requestPostData) {
+      let body = aData.requestPostData.postData.text;
+
+      gNetwork.getString(body).then(aString => {
+        $("#custom-postdata-value").value =  aString;
+      });
+    }
+
+    this.updateCustomQuery(aData.url);
+  },
+
+  /**
+   * Handle user input in the custom request form.
+   *
+   * @param object aField
+   *        the field that the user updated.
+   */
+  onUpdate: function(aField) {
+    let selectedItem = NetMonitorView.RequestsMenu.selectedItem;
+    let field = aField;
+    let value;
+
+    switch(aField) {
+      case 'method':
+        value = $("#custom-method-value").value.trim();
+        selectedItem.attachment.method = value;
+        break;
+      case 'url':
+        value = $("#custom-url-value").value;
+        this.updateCustomQuery(value);
+        selectedItem.attachment.url = value;
+        break;
+      case 'query':
+        let query = $("#custom-query-value").value;
+        this.updateCustomUrl(query);
+        field = 'url';
+        value = $("#custom-url-value").value
+        selectedItem.attachment.url = value;
+        break;
+      case 'body':
+        value = $("#custom-postdata-value").value;
+        selectedItem.attachment.requestPostData = {
+          postData: {
+            text: value
+          }
+        };
+        break;
+      case 'headers':
+        let headersText = $("#custom-headers-value").value;
+        value = parseHeaderText(headersText);
+        selectedItem.attachment.requestHeaders = {
+          headers: value
+        };
+        break;
+    }
+
+    NetMonitorView.RequestsMenu.updateMenuView(selectedItem, field, value);
+  },
+
+  /**
+   * Update the query string field based on the url.
+   *
+   * @param object aUrl
+   *        url to extract query string from.
+   */
+  updateCustomQuery: function(aUrl) {
+    let paramsArray = parseQueryString(nsIURL(aUrl).query);
+    if (!paramsArray) {
+      $("#custom-query").hidden = true;
+      return;
+    }
+    $("#custom-query").hidden = false;
+    $("#custom-query-value").value = writeQueryText(paramsArray);
+  },
+
+  /**
+   * Update the url based on the query string field.
+   *
+   * @param object aQueryText
+   *        contents of the query string field.
+   */
+  updateCustomUrl: function(aQueryText) {
+    let params = parseQueryText(aQueryText);
+    let queryString = writeQueryString(params);
+
+    let url = $("#custom-url-value").value;
+    let oldQuery = nsIURL(url).query;
+    let path = url.replace(oldQuery, queryString);
+
+    $("#custom-url-value").value = path;
+  }
+}
+
+/**
  * Functions handling the requests details view.
  */
 function NetworkDetailsView() {
@@ -1253,9 +1483,9 @@ NetworkDetailsView.prototype = {
    * Initialization function, called when the network monitor is started.
    */
   initialize: function() {
-    dumpn("Initializing the RequestsMenuView");
+    dumpn("Initializing the NetworkDetailsView");
 
-    this.widget = $("#details-pane");
+    this.widget = $("#event-details-pane");
 
     this._headers = new VariablesView($("#all-headers"),
       Heritage.extend(GENERIC_VARIABLES_VIEW_SETTINGS, {
@@ -1292,25 +1522,13 @@ NetworkDetailsView.prototype = {
    * Destruction function, called when the network monitor is closed.
    */
   destroy: function() {
-    dumpn("Destroying the SourcesView");
+    dumpn("Destroying the NetworkDetailsView");
   },
 
   /**
-   * Sets this view hidden or visible. It's visible by default.
-   *
-   * @param boolean aVisibleFlag
-   *        Specifies the intended visibility.
-   */
-  toggle: function(aVisibleFlag) {
-    NetMonitorView.toggleDetailsPane({ visible: aVisibleFlag });
-    NetMonitorView.RequestsMenu._flushWaterfallViews(true);
-  },
-
-  /**
-   * Hides and resets this container (removes all the networking information).
+   * Resets this container (removes all the networking information).
    */
   reset: function() {
-    this.toggle(false);
     this._dataSrc = null;
   },
 
@@ -1456,7 +1674,7 @@ NetworkDetailsView.prototype = {
 
     for (let header of aResponse.headers) {
       let headerVar = headersScope.addItem(header.name, {}, true);
-      gNetwork.getString(header.value).then((aString) => headerVar.setGrip(aString));
+      gNetwork.getString(header.value).then(aString => headerVar.setGrip(aString));
     }
   },
 
@@ -1499,7 +1717,7 @@ NetworkDetailsView.prototype = {
 
     for (let cookie of aResponse.cookies) {
       let cookieVar = cookiesScope.addItem(cookie.name, {}, true);
-      gNetwork.getString(cookie.value).then((aString) => cookieVar.setGrip(aString));
+      gNetwork.getString(cookie.value).then(aString => cookieVar.setGrip(aString));
 
       // By default the cookie name and value are shown. If this is the only
       // information available, then nothing else is to be displayed.
@@ -1511,7 +1729,7 @@ NetworkDetailsView.prototype = {
       // Display any other information other than the cookie name and value
       // which may be available.
       let rawObject = Object.create(null);
-      let otherProps = cookieProps.filter((e) => e != "name" && e != "value");
+      let otherProps = cookieProps.filter(e => e != "name" && e != "value");
       for (let prop of otherProps) {
         rawObject[prop] = cookie[prop];
       }
@@ -1546,7 +1764,7 @@ NetworkDetailsView.prototype = {
     if (!aHeadersResponse || !aPostDataResponse) {
       return;
     }
-    gNetwork.getString(aPostDataResponse.postData.text).then((aString) => {
+    gNetwork.getString(aPostDataResponse.postData.text).then(aString => {
       // Handle query strings (poor man's forms, e.g. "?foo=bar&baz=42").
       let cType = aHeadersResponse.headers.filter(({ name }) => name == "Content-Type")[0];
       let cString = cType ? cType.value : "";
@@ -1568,7 +1786,7 @@ NetworkDetailsView.prototype = {
         paramsScope.locked = true;
 
         $("#request-post-data-textarea-box").hidden = false;
-        NetMonitorView.editor("#request-post-data-textarea").then((aEditor) => {
+        NetMonitorView.editor("#request-post-data-textarea").then(aEditor => {
           aEditor.setText(aString);
         });
       }
@@ -1581,21 +1799,14 @@ NetworkDetailsView.prototype = {
    *
    * @param string aName
    *        The type of params to populate (get or post).
-   * @param string aParams
+   * @param string aQueryString
    *        A query string of params (e.g. "?foo=bar&baz=42").
    */
-  _addParams: function(aName, aParams) {
-    // Make sure there's at least one param available.
-    if (!aParams || !aParams.contains("=")) {
+  _addParams: function(aName, aQueryString) {
+    let paramsArray = parseQueryString(aQueryString);
+    if (!paramsArray) {
       return;
     }
-    // Turn the params string into an array containing { name: value } tuples.
-    let paramsArray = aParams.replace(/^[?&]/, "").split("&").map((e) =>
-      let (param = e.split("=")) {
-        name: NetworkHelper.convertToUnicode(unescape(param[0])),
-        value: NetworkHelper.convertToUnicode(unescape(param[1]))
-      });
-
     let paramsScope = this._params.addScope(aName);
     paramsScope.expanded = true;
 
@@ -1619,7 +1830,7 @@ NetworkDetailsView.prototype = {
     }
     let { mimeType, text, encoding } = aResponse.content;
 
-    gNetwork.getString(text).then((aString) => {
+    gNetwork.getString(text).then(aString => {
       // Handle json.
       if (mimeType.contains("/json")) {
         let jsonpRegex = /^[a-zA-Z0-9_$]+\(|\)$/g; // JSONP with callback.
@@ -1649,7 +1860,7 @@ NetworkDetailsView.prototype = {
         // Malformed JSON.
         else {
           $("#response-content-textarea-box").hidden = false;
-          NetMonitorView.editor("#response-content-textarea").then((aEditor) => {
+          NetMonitorView.editor("#response-content-textarea").then(aEditor => {
             aEditor.setMode(SourceEditor.MODES.JAVASCRIPT);
             aEditor.setText(aString);
           });
@@ -1674,7 +1885,7 @@ NetworkDetailsView.prototype = {
         $("#response-content-image-encoding-value").setAttribute("value", encoding);
 
         // Wait for the image to load in order to display the width and height.
-        $("#response-content-image").onload = (e) => {
+        $("#response-content-image").onload = e => {
           // XUL images are majestic so they don't bother storing their dimensions
           // in width and height attributes like the rest of the folk. Hack around
           // this by getting the bounding client rect and subtracting the margins.
@@ -1686,7 +1897,7 @@ NetworkDetailsView.prototype = {
       // Handle anything else.
       else {
         $("#response-content-textarea-box").hidden = false;
-        NetMonitorView.editor("#response-content-textarea").then((aEditor) => {
+        NetMonitorView.editor("#response-content-textarea").then(aEditor => {
           aEditor.setMode(SourceEditor.MODES.TEXT);
           aEditor.setText(aString);
 
@@ -1808,6 +2019,110 @@ function nsIURL(aUrl, aStore = nsIURL.store) {
 nsIURL.store = new Map();
 
 /**
+ * Parse a url's query string into its components
+ *
+ * @param  string aQueryString
+ *         The query part of a url
+ * @return array
+ *         Array of query params {name, value}
+ */
+function parseQueryString(aQueryString) {
+  // Make sure there's at least one param available.
+  if (!aQueryString || !aQueryString.contains("=")) {
+    return;
+  }
+  // Turn the params string into an array containing { name: value } tuples.
+  let paramsArray = aQueryString.replace(/^[?&]/, "").split("&").map(e =>
+    let (param = e.split("=")) {
+      name: NetworkHelper.convertToUnicode(unescape(param[0])),
+      value: NetworkHelper.convertToUnicode(unescape(param[1]))
+    });
+  return paramsArray;
+}
+
+/**
+ * Parse text representation of HTTP headers.
+ *
+ * @param  string aText
+ *         Text of headers
+ * @return array
+ *         Array of headers info {name, value}
+ */
+function parseHeaderText(aText) {
+  return parseRequestText(aText, ":");
+}
+
+/**
+ * Parse readable text list of a query string.
+ *
+ * @param  string aText
+ *         Text of query string represetation
+ * @return array
+ *         Array of query params {name, value}
+ */
+function parseQueryText(aText) {
+  return parseRequestText(aText, "=");
+}
+
+/**
+ * Parse a text representation of a name:value list with
+ * the given name:value divider character.
+ *
+ * @param  string aText
+ *         Text of list
+ * @return array
+ *         Array of headers info {name, value}
+ */
+function parseRequestText(aText, aDivider) {
+  let regex = new RegExp("(.+?)\\" + aDivider + "\\s*(.+)");
+  let pairs = [];
+  for (let line of aText.split("\n")) {
+    let matches;
+    if (matches = regex.exec(line)) {
+      let [, name, value] = matches;
+      pairs.push({name: name, value: value});
+    }
+  }
+  return pairs;
+}
+
+/**
+ * Write out a list of headers into a chunk of text
+ *
+ * @param array aHeaders
+ *        Array of headers info {name, value}
+ * @return string aText
+ *         List of headers in text format
+ */
+function writeHeaderText(aHeaders) {
+  return [(name + ": " + value) for ({name, value} of aHeaders)].join("\n");
+}
+
+/**
+ * Write out a list of query params into a chunk of text
+ *
+ * @param array aParams
+ *        Array of query params {name, value}
+ * @return string
+ *         List of query params in text format
+ */
+function writeQueryText(aParams) {
+  return [(name + "=" + value) for ({name, value} of aParams)].join("\n");
+}
+
+/**
+ * Write out a list of query params into a query string
+ *
+ * @param array aParams
+ *        Array of query  params {name, value}
+ * @return string
+ *         Query string that can be appended to a url.
+ */
+function writeQueryString(aParams) {
+  return [(name + "=" + value) for ({name, value} of aParams)].join("&");
+}
+
+/**
  * Helper for draining a rapid succession of events and invoking a callback
  * once everything settles down.
  */
@@ -1822,4 +2137,6 @@ drain.store = new Map();
  */
 NetMonitorView.Toolbar = new ToolbarView();
 NetMonitorView.RequestsMenu = new RequestsMenuView();
+NetMonitorView.Sidebar = new SidebarView();
+NetMonitorView.CustomRequest = new CustomRequestView();
 NetMonitorView.NetworkDetails = new NetworkDetailsView();

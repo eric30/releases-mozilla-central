@@ -13,7 +13,6 @@
 #include "nsXPCOMPrivate.h"
 #include "nsXPCOMCIDInternal.h"
 
-#include "nsStaticComponents.h"
 #include "prlink.h"
 
 #include "nsCycleCollector.h"
@@ -241,6 +240,7 @@ nsXPTIInterfaceInfoManagerGetSingleton(nsISupports* outer,
 
 nsComponentManagerImpl* nsComponentManagerImpl::gComponentManager = NULL;
 bool gXPCOMShuttingDown = false;
+bool gXPCOMThreadsShutDown = false;
 
 static NS_DEFINE_CID(kComponentManagerCID, NS_COMPONENTMANAGER_CID);
 static NS_DEFINE_CID(kINIParserFactoryCID, NS_INIPARSERFACTORY_CID);
@@ -588,6 +588,7 @@ ShutdownXPCOM(nsIServiceManager* servMgr)
                 NotifyObservers(nullptr, NS_XPCOM_SHUTDOWN_THREADS_OBSERVER_ID,
                                 nullptr);
 
+        gXPCOMThreadsShutDown = true;
         nsCycleCollector_shutdownThreads();
 
         NS_ProcessPendingEvents(thread);
@@ -648,8 +649,6 @@ ShutdownXPCOM(nsIServiceManager* servMgr)
     // Release the directory service
     NS_IF_RELEASE(nsDirectoryService::gService);
 
-    nsCycleCollector_shutdown();
-
     if (moduleLoaders) {
         bool more;
         nsCOMPtr<nsISupports> el;
@@ -674,6 +673,8 @@ ShutdownXPCOM(nsIServiceManager* servMgr)
 
         moduleLoaders = nullptr;
     }
+
+    nsCycleCollector_shutdown();
 
     PROFILER_MARKER("Shutdown xpcom");
     // If we are doing any shutdown checks, poison writes.

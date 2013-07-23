@@ -171,7 +171,7 @@ BrowserElementChild.prototype = {
                      /* wantsUntrusted = */ false);
 
     addEventListener('DOMLinkAdded',
-                     this._iconChangedHandler.bind(this),
+                     this._linkAddedHandler.bind(this),
                      /* useCapture = */ true,
                      /* wantsUntrusted = */ false);
 
@@ -447,22 +447,45 @@ BrowserElementChild.prototype = {
   },
 
   _iconChangedHandler: function(e) {
-    debug("Got iconchanged: (" + e.target.href + ")");
-    var hasIcon = e.target.rel.split(' ').some(function(x) {
-      return x.toLowerCase() === 'icon';
-    });
+    debug('Got iconchanged: (' + e.target.href + ')');
 
-    if (hasIcon) {
-      var win = e.target.ownerDocument.defaultView;
-      // Ignore iconchanges which don't come from the top-level
-      // <iframe mozbrowser> window.
-      if (win == content) {
-        sendAsyncMsg('iconchange', { _payload_: e.target.href });
-      }
-      else {
-        debug("Not top level!");
-      }
+    sendAsyncMsg('iconchange', { _payload_: e.target.href });
+  },
+
+  _openSearchHandler: function(e) {
+    debug('Got opensearch: (' + e.target.href + ')');
+
+    if (e.target.type !== "application/opensearchdescription+xml") {
+      return;
     }
+
+    sendAsyncMsg('opensearch', { title: e.target.title,
+                                 href: e.target.href });
+
+  },
+
+  // Processes the "rel" field in <link> tags and forward to specific handlers.
+  _linkAddedHandler: function(e) {
+    let win = e.target.ownerDocument.defaultView;
+    // Ignore links which don't come from the top-level
+    // <iframe mozbrowser> window.
+    if (win != content) {
+      debug('Not top level!');
+      return;
+    }
+
+    let handlers = {
+      'icon': this._iconChangedHandler,
+      'search': this._openSearchHandler
+    };
+
+    debug('Got linkAdded: (' + e.target.href + ') ' + e.target.rel);
+    e.target.rel.split(' ').forEach(function(x) {
+      let token = x.toLowerCase();
+      if (handlers[token]) {
+        handlers[token](e);
+      }
+    }, this);
   },
 
   _addMozAfterPaintHandler: function(callback) {
@@ -583,14 +606,18 @@ BrowserElementChild.prototype = {
   _getSystemCtxMenuData: function(elem) {
     if ((elem instanceof Ci.nsIDOMHTMLAnchorElement && elem.href) ||
         (elem instanceof Ci.nsIDOMHTMLAreaElement && elem.href)) {
-      return elem.href;
+      return {uri: elem.href};
     }
     if (elem instanceof Ci.nsIImageLoadingContent && elem.currentURI) {
-      return elem.currentURI.spec;
+      return {uri: elem.currentURI.spec};
     }
-    if ((elem instanceof Ci.nsIDOMHTMLMediaElement) ||
-        (elem instanceof Ci.nsIDOMHTMLImageElement)) {
-      return elem.currentSrc || elem.src;
+    if (elem instanceof Ci.nsIDOMHTMLImageElement) {
+      return {uri: elem.src};
+    }
+    if (elem instanceof Ci.nsIDOMHTMLMediaElement) {
+      let hasVideo = !(elem.readyState >= elem.HAVE_METADATA &&
+                       (elem.videoWidth == 0 || elem.videoHeight == 0));
+      return {uri: elem.currentSrc || elem.src, hasVideo: hasVideo};
     }
     return false;
   },

@@ -117,11 +117,6 @@ else
 LOCAL_INCLUDES = -Ictypes/libffi/include
 endif
 
-LOCAL_INCLUDES += \
-    -I. \
-    $(NULL)
-
-
 ifdef MOZ_NATIVE_FFI
 EXTRA_DSO_LDOPTS += $(MOZ_FFI_LIBS)
 else
@@ -339,10 +334,7 @@ check-jstests:
 #
 #   Bug 652155: On Mac, SM(d) doesn't work for unknown reasons
 
-ifeq ($(OS_ARCH),WINNT)
-ifdef ENABLE_METHODJIT
-endif
-else
+ifneq ($(OS_ARCH),WINNT)
 ifndef HAVE_DTRACE
 #check:: check-jstests
 endif
@@ -518,7 +510,7 @@ JS_CONFIG_SUBSTITUTIONS=\
 	-DMOZJS_ALPHA="$(MOZJS_ALPHA)" \
 	-DNSPR_CFLAGS="$(NSPR_CFLAGS)" \
 	-DNSPR_PKGCONF_CHECK="$(NSPR_PKGCONF_CHECK)" \
-	-DUSE_CXX11="$(USE_CXX11)"
+	$(NULL)
 
 $(JS_CONFIG_NAME): js-config.in Makefile $(DEPTH)/config/autoconf.mk $(topsrcdir)/config/config.mk $(topsrcdir)/config/rules.mk
 	$(RM) $@.tmp
@@ -650,6 +642,8 @@ selfhosting_srcs := \
   $(srcdir)/builtin/Number.js \
   $(srcdir)/builtin/ParallelArray.js \
   $(srcdir)/builtin/String.js \
+  $(srcdir)/builtin/Set.js \
+  $(srcdir)/builtin/Map.js \
   $(NULL)
 
 selfhosted_out_h_deps := \
@@ -681,8 +675,6 @@ CXXFLAGS += -DUSE_SYSTEM_MALLOC=1 -DENABLE_ASSEMBLER=1
 ifneq (,$(ENABLE_YARR_JIT))
 CXXFLAGS +=  -DENABLE_JIT=1
 endif
-
-INCLUDES +=	-I$(srcdir)/assembler -I$(srcdir)/yarr
 
 #
 # END kludges for the Nitro assembler

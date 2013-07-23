@@ -19,6 +19,9 @@ EXPORTS.mozilla.dom += [
     'Touch.h',
 ]
 
+if CONFIG['MOZ_WEBSPEECH']:
+    EXPORTS.mozilla.dom += ['SpeechRecognitionError.h']
+
 CPP_SOURCES += [
     'DOMWheelEvent.cpp',
     'EventTarget.cpp',
@@ -60,3 +63,6 @@ CPP_SOURCES += [
     'nsPaintRequest.cpp',
     'nsPrivateTextRange.cpp',
 ]
+
+if CONFIG['MOZ_WEBSPEECH']:
+    CPP_SOURCES += ['SpeechRecognitionError.cpp']

@@ -8,8 +8,6 @@
 #include <os2safe.h>
 #endif
 
-#define XPCOM_TRANSLATE_NSGM_ENTRY_POINT 1
-
 #if defined(MOZ_WIDGET_QT)
 #include <QApplication>
 #include <QStringList>
@@ -121,7 +119,6 @@ using mozilla::scache::StartupCache;
 #include "nsEmbedCID.h"
 #include "nsNetUtil.h"
 #include "nsReadableUtils.h"
-#include "nsStaticComponents.h"
 #include "nsXPCOM.h"
 #include "nsXPCOMCIDInternal.h"
 #include "nsXPIDLString.h"
@@ -635,7 +632,9 @@ NS_IMETHODIMP
 nsXULAppInfo::GetName(nsACString& aResult)
 {
   if (XRE_GetProcessType() == GeckoProcessType_Content) {
-    return NS_ERROR_NOT_AVAILABLE;
+    ContentChild* cc = ContentChild::GetSingleton();
+    aResult = cc->GetAppInfo().name;
+    return NS_OK;
   }
   aResult.Assign(gAppData->name);
 
@@ -699,7 +698,9 @@ NS_IMETHODIMP
 nsXULAppInfo::GetUAName(nsACString& aResult)
 {
   if (XRE_GetProcessType() == GeckoProcessType_Content) {
-    return NS_ERROR_NOT_AVAILABLE;
+    ContentChild* cc = ContentChild::GetSingleton();
+    aResult = cc->GetAppInfo().UAName;
+    return NS_OK;
   }
   aResult.Assign(gAppData->UAName);
 
@@ -1399,8 +1400,9 @@ static int MSCRTReportHook( int aReportType, char *aMessage, int *oReturnValue)
 static inline void
 DumpVersion()
 {
-  printf("%s %s %s", 
-         gAppData->vendor ? gAppData->vendor : "", gAppData->name, gAppData->version);
+  if (gAppData->vendor)
+    printf("%s ", gAppData->vendor);
+  printf("%s %s", gAppData->name, gAppData->version);
   if (gAppData->copyright)
       printf(", %s", gAppData->copyright);
   printf("\n");

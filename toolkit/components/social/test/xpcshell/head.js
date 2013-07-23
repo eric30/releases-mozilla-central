@@ -6,9 +6,6 @@ const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
-// Ensure history is enabled.
-Services.prefs.setBoolPref("places.history.enabled", true);
-
 XPCOMUtils.defineLazyModuleGetter(this, "Promise",
   "resource://gre/modules/commonjs/sdk/core/promise.js");
 XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
@@ -154,8 +151,11 @@ AsyncRunner.prototype = {
   },
 
   observe: function observe(msg) {
-    if (msg instanceof Ci.nsIScriptError)
+    if (msg instanceof Ci.nsIScriptError &&
+        !(msg.flags & Ci.nsIScriptError.warningFlag))
+    {
       this._callbacks.consoleError(msg);
+    }
   },
 };
 

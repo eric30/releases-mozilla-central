@@ -4810,7 +4810,7 @@ gsmsdp_negotiate_media_lines (fsm_fcb_t *fcb_p, cc_sdp_t *sdp_p, boolean initial
            actual behavior. This really needs to be a negotiation, with the
            results of the negotiation propagating into the codec configuration.
            See Bug 880067. */
-        if (media_type == SDP_MEDIA_VIDEO) {
+        if (media && media_type == SDP_MEDIA_VIDEO) {
             gsmsdp_set_rtcp_fb_nack_attribute(media->level, sdp_p->src_sdp,
                                               SDP_ALL_PAYLOADS,
                                               SDP_RTCP_FB_NACK_UNSPECIFIED);
@@ -6527,6 +6527,76 @@ gsmsdp_process_offer_sdp (fsm_fcb_t *fcb_p,
     gsmsdp_set_remote_sdp(dcb_p, dcb_p->sdp);
 
     return (status);
+}
+
+
+/*
+ * gsmsdp_check_peer_ice_attributes_exist
+ *
+ * Read ICE parameters from the SDP and return failure
+ * if they are not complete.
+ *
+ * fcb_p - pointer to the fcb
+ *
+ */
+cc_causes_t
+gsmsdp_check_ice_attributes_exist(fsm_fcb_t *fcb_p) {
+    fsmdef_dcb_t    *dcb_p = fcb_p->dcb;
+    sdp_result_e     sdp_res;
+    char            *ufrag;
+    char            *pwd;
+    fsmdef_media_t  *media;
+    boolean          has_session_ufrag = FALSE;
+    boolean          has_session_pwd = FALSE;
+
+    /* Check for valid ICE parameters */
+    sdp_res = sdp_attr_get_ice_attribute(dcb_p->sdp->dest_sdp,
+        SDP_SESSION_LEVEL, 0, SDP_ATTR_ICE_UFRAG, 1, &ufrag);
+    if (sdp_res == SDP_SUCCESS && ufrag) {
+        has_session_ufrag = TRUE;
+    }
+
+    sdp_res = sdp_attr_get_ice_attribute(dcb_p->sdp->dest_sdp,
+        SDP_SESSION_LEVEL, 0, SDP_ATTR_ICE_PWD, 1, &pwd);
+    if (sdp_res == SDP_SUCCESS && pwd) {
+        has_session_pwd = TRUE;
+    }
+
+    if (has_session_ufrag && has_session_pwd) {
+        /* Both exist at session level, success */
+        return CC_CAUSE_OK;
+    }
+
+    /* Incomplete ICE params at session level, check all media levels */
+    GSMSDP_FOR_ALL_MEDIA(media, dcb_p) {
+        if (!GSMSDP_MEDIA_ENABLED(media)) {
+            continue;
+        }
+
+        if (!has_session_ufrag) {
+            sdp_res = sdp_attr_get_ice_attribute(dcb_p->sdp->dest_sdp,
+                media->level, 0, SDP_ATTR_ICE_UFRAG, 1, &ufrag);
+
+            if (sdp_res != SDP_SUCCESS || !ufrag) {
+                GSM_ERR_MSG(GSM_L_C_F_PREFIX"missing ICE ufrag parameter.",
+                            dcb_p->line, dcb_p->call_id, __FUNCTION__);
+                return CC_CAUSE_ERROR;
+            }
+        }
+
+        if (!has_session_pwd) {
+            sdp_res = sdp_attr_get_ice_attribute(dcb_p->sdp->dest_sdp,
+                media->level, 0, SDP_ATTR_ICE_PWD, 1, &pwd);
+
+            if (sdp_res != SDP_SUCCESS || !pwd) {
+                GSM_ERR_MSG(GSM_L_C_F_PREFIX"missing ICE pwd parameter.",
+                            dcb_p->line, dcb_p->call_id, __FUNCTION__);
+                return CC_CAUSE_ERROR;
+            }
+        }
+    }
+
+    return CC_CAUSE_OK;
 }
 
 /*

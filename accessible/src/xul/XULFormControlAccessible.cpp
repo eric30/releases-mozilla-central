@@ -244,7 +244,7 @@ XULDropmarkerAccessible::DropmarkerOpen(bool aToggleOpen)
   bool isOpen = false;
 
   nsCOMPtr<nsIDOMXULButtonElement> parentButtonElement =
-    do_QueryInterface(mContent->GetParent());
+    do_QueryInterface(mContent->GetFlattenedTreeParent());
 
   if (parentButtonElement) {
     parentButtonElement->GetOpen(&isOpen);
@@ -830,6 +830,10 @@ already_AddRefed<nsFrameSelection>
 XULTextFieldAccessible::FrameSelection()
 {
   nsCOMPtr<nsIContent> inputContent(GetInputField());
+  NS_ASSERTION(inputContent, "No input content");
+  if (!inputContent)
+    return nullptr;
+
   nsIFrame* frame = inputContent->GetPrimaryFrame();
   return frame ? frame->GetFrameSelection() : nullptr;
 }

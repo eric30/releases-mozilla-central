@@ -34,10 +34,10 @@ add_task(function test_getSystemDownloadsDirectory()
   let downloadDir;
 
   // OSX / Linux / Windows but not XP/2k
-  if (("nsILocalFileMac" in Ci) ||
-      ("@mozilla.org/gnome-gconf-service;1" in Cc) ||
-      ("@mozilla.org/windows-registry-key;1" in Cc &&
-        parseFloat(Services.sysinfo.getProperty("version")) >= 6)) {
+  if (Services.appinfo.OS == "Darwin" ||
+      Services.appinfo.OS == "Linux" ||
+      (Services.appinfo.OS == "WINNT" &&
+       parseFloat(Services.sysinfo.getProperty("version")) >= 6)) {
     downloadDir = yield DownloadIntegration.getSystemDownloadsDirectory();
     do_check_true(downloadDir instanceof Ci.nsIFile);
     do_check_eq(downloadDir.path, tempDir.path);
@@ -124,7 +124,6 @@ add_task(function test_getUserDownloadsDirectory()
 
   cleanup();
 });
-
 
 /**
  * Tests that the getTemporaryDownloadsDirectory returns a valid nsFile 

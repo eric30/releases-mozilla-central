@@ -30,6 +30,7 @@
 #include "nsError.h"
 #include "nsRuleProcessorData.h"
 #include "nsCSSRuleProcessor.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/Element.h"
 #include "nsCSSFrameConstructor.h"
 #include "nsHashKeys.h"
@@ -372,13 +373,13 @@ nsHTMLStyleSheet::MediumFeaturesChanged(nsPresContext* aPresContext)
 }
 
 /* virtual */ size_t
-nsHTMLStyleSheet::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+nsHTMLStyleSheet::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 {
   return 0; // nsHTMLStyleSheets are charged to the DOM, not layout
 }
 
 /* virtual */ size_t
-nsHTMLStyleSheet::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+nsHTMLStyleSheet::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 {
   return 0; // nsHTMLStyleSheets are charged to the DOM, not layout
 }
@@ -440,7 +441,7 @@ nsHTMLStyleSheet::ImplLinkColorSetter(nsRefPtr<HTMLColorRule>& aRule, nscolor aC
   if (mDocument && mDocument->GetShell()) {
     Element* root = mDocument->GetRootElement();
     if (root) {
-      mDocument->GetShell()->FrameConstructor()->
+      mDocument->GetShell()->GetPresContext()->RestyleManager()->
         PostRestyleEvent(root, eRestyle_Subtree, NS_STYLE_HINT_NONE);
     }
   }
@@ -527,7 +528,7 @@ nsHTMLStyleSheet::LangRuleFor(const nsString& aLanguage)
 
 static size_t
 SizeOfAttributesEntryExcludingThis(PLDHashEntryHdr* aEntry,
-                                   nsMallocSizeOfFun aMallocSizeOf,
+                                   MallocSizeOf aMallocSizeOf,
                                    void* aArg)
 {
   NS_PRECONDITION(aEntry, "The entry should not be null!");
@@ -538,7 +539,7 @@ SizeOfAttributesEntryExcludingThis(PLDHashEntryHdr* aEntry,
 }
 
 size_t
-nsHTMLStyleSheet::DOMSizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+nsHTMLStyleSheet::DOMSizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 {
   size_t n = aMallocSizeOf(this);
 

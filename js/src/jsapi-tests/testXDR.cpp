@@ -4,7 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "tests.h"
+#include "jsapi-tests/tests.h"
 #include "jsscript.h"
 #include "jsstr.h"
 #include "jsfriendapi.h"
@@ -238,7 +238,7 @@ BEGIN_TEST(testXDR_sourceMap)
         CHECK(expected);
 
         // The script source takes responsibility of free'ing |expected|.
-        CHECK(script->scriptSource()->setSourceMap(cx, expected, script->filename()));
+        CHECK(script->scriptSource()->setSourceMap(cx, expected));
         script = FreezeThaw(cx, script);
         CHECK(script);
         CHECK(script->scriptSource());

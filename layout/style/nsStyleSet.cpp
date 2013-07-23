@@ -9,6 +9,7 @@
  * potentially re-creating) style contexts
  */
 
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/Util.h"
 
 #include "nsStyleSet.h"
@@ -98,6 +99,28 @@ nsInitialStyleRule::List(FILE* out, int32_t aIndent) const
 }
 #endif
 
+NS_IMPL_ISUPPORTS1(nsDisableTextZoomStyleRule, nsIStyleRule)
+
+/* virtual */ void
+nsDisableTextZoomStyleRule::MapRuleInfoInto(nsRuleData* aRuleData)
+{
+  if (!(aRuleData->mSIDs & NS_STYLE_INHERIT_BIT(Font)))
+    return;
+
+  nsCSSValue* value = aRuleData->ValueForTextZoom();
+  if (value->GetUnit() == eCSSUnit_Null)
+    value->SetNoneValue();
+}
+
+#ifdef DEBUG
+/* virtual */ void
+nsDisableTextZoomStyleRule::List(FILE* out, int32_t aIndent) const
+{
+  for (int32_t index = aIndent; --index >= 0; ) fputs("  ", out);
+  fputs("[disable text zoom style rule] {}\n", out);
+}
+#endif
+
 static const nsStyleSet::sheetType gCSSSheetTypes[] = {
   nsStyleSet::eAgentSheet,
   nsStyleSet::eUserSheet,
@@ -119,7 +142,7 @@ nsStyleSet::nsStyleSet()
 }
 
 size_t
-nsStyleSet::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+nsStyleSet::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 {
   size_t n = aMallocSizeOf(this);
 
@@ -147,6 +170,7 @@ nsStyleSet::Init(nsPresContext *aPresContext)
   mFirstLineRule = new nsEmptyStyleRule;
   mFirstLetterRule = new nsEmptyStyleRule;
   mPlaceholderRule = new nsEmptyStyleRule;
+  mDisableTextZoomStyleRule = new nsDisableTextZoomStyleRule;
 
   mRuleTree = nsRuleNode::CreateRootNode(aPresContext);
 
@@ -1151,6 +1175,7 @@ nsStyleSet::ResolveStyleFor(Element* aElement,
   aTreeMatchContext.ResetForUnvisitedMatching();
   ElementRuleProcessorData data(PresContext(), aElement, &ruleWalker,
                                 aTreeMatchContext);
+  WalkDisableTextZoomRule(aElement, &ruleWalker);
   FileRules(EnumRulesMatching<ElementRuleProcessorData>, &data, aElement,
             &ruleWalker);
 
@@ -1285,6 +1310,14 @@ nsStyleSet::WalkRestrictionRule(nsCSSPseudoElements::Type aPseudoType,
     aRuleWalker->Forward(mFirstLineRule);
   else if (aPseudoType == nsCSSPseudoElements::ePseudo_mozPlaceholder)
     aRuleWalker->Forward(mPlaceholderRule);
+}
+
+void
+nsStyleSet::WalkDisableTextZoomRule(Element* aElement, nsRuleWalker* aRuleWalker)
+{
+  aRuleWalker->SetLevel(eAgentSheet, false, false);
+  if (aElement->IsSVG(nsGkAtoms::text))
+    aRuleWalker->Forward(mDisableTextZoomStyleRule);
 }
 
 already_AddRefed<nsStyleContext>

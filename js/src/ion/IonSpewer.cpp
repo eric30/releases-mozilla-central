@@ -6,10 +6,8 @@
 
 #ifdef DEBUG
 
-#include "Ion.h"
-#include "IonSpewer.h"
-
-#include "jsscriptinlines.h"
+#include "ion/Ion.h"
+#include "ion/IonSpewer.h"
 
 #ifndef ION_SPEW_DIR
 # if defined(_WIN32)

@@ -43,7 +43,7 @@
 #include "nsFrameManager.h"
 #include "nsLayoutUtils.h"
 #include "nsViewManager.h"
-#include "nsCSSFrameConstructor.h"
+#include "RestyleManager.h"
 #include "nsCSSRuleProcessor.h"
 #include "nsStyleChangeList.h"
 #include "nsRuleNode.h"
@@ -59,6 +59,7 @@
 #include "nsObjectFrame.h"
 #include "nsTransitionManager.h"
 #include "nsAnimationManager.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/Element.h"
 #include "nsIMessageManager.h"
 #include "FrameLayerBuilder.h"
@@ -67,6 +68,7 @@
 #include "mozilla/css/ImageLoader.h"
 #include "mozilla/dom/PBrowserChild.h"
 #include "mozilla/dom/TabChild.h"
+#include "RestyleManager.h"
 
 #ifdef IBMBIDI
 #include "nsBidiPresUtils.h"
@@ -232,6 +234,7 @@ nsPresContext::nsPresContext(nsIDocument* aDocument, nsPresContextType aType)
     mMedium = nsGkAtoms::print;
     mPaginated = true;
   }
+  mMediaEmulated = mMedium;
 
   if (!IsDynamic()) {
     mImageAnimationMode = imgIContainer::kDontAnimMode;
@@ -320,7 +323,15 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsPresContext)
 NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsPresContext)
-NS_IMPL_CYCLE_COLLECTING_RELEASE(nsPresContext)
+NS_IMPL_CYCLE_COLLECTING_RELEASE_WITH_LAST_RELEASE(nsPresContext, LastRelease())
+
+void
+nsPresContext::LastRelease()
+{
+  if (IsRoot()) {
+    static_cast<nsRootPresContext*>(this)->CancelDidPaintTimer();
+  }
+}
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsPresContext)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDocument);
@@ -921,6 +932,9 @@ nsPresContext::Init(nsDeviceContext* aDeviceContext)
 
   mAnimationManager = new nsAnimationManager(this);
 
+  // FIXME: Why is mozilla:: needed?
+  mRestyleManager = new mozilla::RestyleManager(this);
+
   if (mDocument->GetDisplayDocument()) {
     NS_ASSERTION(mDocument->GetDisplayDocument()->GetShell() &&
                  mDocument->GetDisplayDocument()->GetShell()->GetPresContext(),
@@ -1088,6 +1102,10 @@ nsPresContext::SetShell(nsIPresShell* aShell)
     if (mAnimationManager) {
       mAnimationManager->Disconnect();
       mAnimationManager = nullptr;
+    }
+    if (mRestyleManager) {
+      mRestyleManager->Disconnect();
+      mRestyleManager = nullptr;
     }
 
     if (IsRoot()) {
@@ -1683,6 +1701,30 @@ nsPresContext::UIResolutionChangedInternal()
 }
 
 void
+nsPresContext::EmulateMedium(const nsAString& aMediaType)
+{
+  nsIAtom* previousMedium = Medium();
+  mIsEmulatingMedia = true;
+
+  nsAutoString mediaType;
+  nsContentUtils::ASCIIToLower(aMediaType, mediaType);
+
+  mMediaEmulated = do_GetAtom(mediaType);
+  if (mMediaEmulated != previousMedium && mShell) {
+    MediaFeatureValuesChanged(eRebuildStyleIfNeeded, nsChangeHint(0));
+  }
+}
+
+void nsPresContext::StopEmulatingMedium()
+{
+  nsIAtom* previousMedium = Medium();
+  mIsEmulatingMedia = false;
+  if (Medium() != previousMedium) {
+    MediaFeatureValuesChanged(eRebuildStyleIfNeeded, nsChangeHint(0));
+  }
+}
+
+void
 nsPresContext::RebuildAllStyleData(nsChangeHint aExtraHint)
 {
   if (!mShell) {
@@ -1695,7 +1737,7 @@ nsPresContext::RebuildAllStyleData(nsChangeHint aExtraHint)
   RebuildUserFontSet();
   AnimationManager()->KeyframesListIsDirty();
 
-  mShell->FrameConstructor()->RebuildAllStyleData(aExtraHint);
+  RestyleManager()->RebuildAllStyleData(aExtraHint);
 }
 
 void
@@ -1705,7 +1747,7 @@ nsPresContext::PostRebuildAllStyleDataEvent(nsChangeHint aExtraHint)
     // We must have been torn down. Nothing to do here.
     return;
   }
-  mShell->FrameConstructor()->PostRebuildAllStyleDataEvent(aExtraHint);
+  RestyleManager()->PostRebuildAllStyleDataEvent(aExtraHint);
 }
 
 void
@@ -2524,7 +2566,7 @@ nsPresContext::GetPrimaryFrameFor(nsIContent* aContent)
 
 
 size_t
-nsPresContext::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+nsPresContext::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 {
   return mPropertyTable.SizeOfExcludingThis(aMallocSizeOf);
          mLangGroupFontPrefs.SizeOfExcludingThis(aMallocSizeOf);
@@ -2860,7 +2902,7 @@ nsRootPresContext::FlushWillPaintObservers()
 }
 
 size_t
-nsRootPresContext::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+nsRootPresContext::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 {
   return nsPresContext::SizeOfExcludingThis(aMallocSizeOf);
 

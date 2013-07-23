@@ -44,7 +44,7 @@ public:
   LayerManagerComposite* layer_manager() const { return mLayerManager; }
 
   uint64_t GetId() const { return mId; }
-  ContainerLayer* GetRoot() const { return mRoot; }
+  Layer* GetRoot() const { return mRoot; }
 
   // ISurfaceAllocator
   virtual bool AllocShmem(size_t aSize,
@@ -82,17 +82,17 @@ protected:
                                 gfx3DMatrix* aTransform) MOZ_OVERRIDE;
 
   virtual PGrallocBufferParent*
-  AllocPGrallocBuffer(const gfxIntSize& aSize,
+  AllocPGrallocBufferParent(const gfxIntSize& aSize,
                       const uint32_t& aFormat, const uint32_t& aUsage,
                       MaybeMagicGrallocBufferHandle* aOutHandle) MOZ_OVERRIDE;
   virtual bool
-  DeallocPGrallocBuffer(PGrallocBufferParent* actor) MOZ_OVERRIDE;
+  DeallocPGrallocBufferParent(PGrallocBufferParent* actor) MOZ_OVERRIDE;
 
-  virtual PLayerParent* AllocPLayer() MOZ_OVERRIDE;
-  virtual bool DeallocPLayer(PLayerParent* actor) MOZ_OVERRIDE;
+  virtual PLayerParent* AllocPLayerParent() MOZ_OVERRIDE;
+  virtual bool DeallocPLayerParent(PLayerParent* actor) MOZ_OVERRIDE;
 
-  virtual PCompositableParent* AllocPCompositable(const TextureInfo& aInfo) MOZ_OVERRIDE;
-  virtual bool DeallocPCompositable(PCompositableParent* actor) MOZ_OVERRIDE;
+  virtual PCompositableParent* AllocPCompositableParent(const TextureInfo& aInfo) MOZ_OVERRIDE;
+  virtual bool DeallocPCompositableParent(PCompositableParent* actor) MOZ_OVERRIDE;
 
   void Attach(ShadowLayerParent* aLayerParent, CompositableParent* aCompositable);
 
@@ -101,7 +101,7 @@ private:
   ShadowLayersManager* mShadowLayersManager;
   // Hold the root because it might be grafted under various
   // containers in the "real" layer tree
-  nsRefPtr<ContainerLayer> mRoot;
+  nsRefPtr<Layer> mRoot;
   // When this is nonzero, it refers to a layer tree owned by the
   // compositor thread.  It is always true that
   //   mId != 0 => mRoot == null

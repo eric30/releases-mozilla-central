@@ -19,10 +19,12 @@
   (function(exports) {
      "use strict";
 
-     // exports.OS.Win is created by osfile_win_back.jsm
-     if (exports.OS.File) {
-       return; // Avoid double-initialization
+     exports.OS = require("resource://gre/modules/osfile/osfile_shared_allthreads.jsm").OS;
+      // exports.OS.Win is created by osfile_win_back.jsm
+     if (exports.OS && exports.OS.File) {
+        return; // Avoid double-initialization
      }
+
      exports.OS.Win.File._init();
      let Const = exports.OS.Constants.Win;
      let WinFile = exports.OS.Win.File;
@@ -253,10 +255,10 @@
       * @throws {OS.File.Error} If the file could not be opened.
       */
      File.open = function Win_open(path, mode = {}, options = {}) {
-       let share = options.winShare || DEFAULT_SHARE;
+       let share = options.winShare !== undefined ? options.winShare : DEFAULT_SHARE;
        let security = options.winSecurity || null;
-       let flags = options.winFlags || DEFAULT_FLAGS;
-       let template = options.winTemplate?options.winTemplate._fd:null;
+       let flags = options.winFlags !== undefined ? options.winFlags : DEFAULT_FLAGS;
+       let template = options.winTemplate ? options.winTemplate._fd : null;
        let access;
        let disposition;
        if ("winAccess" in options && "winDisposition" in options) {
@@ -329,11 +331,21 @@
       * Remove an existing file.
       *
       * @param {string} path The name of the file.
+      * @param {*=} options Additional options.
+      *   - {bool} ignoreAbsent If |false|, throw an error if the file does
+      *     not exist. |true| by default.
+      *
       * @throws {OS.File.Error} In case of I/O error.
       */
-     File.remove = function remove(path) {
-       throw_on_zero("remove",
-         WinFile.DeleteFile(path));
+     File.remove = function remove(path, options = {}) {
+       let result = WinFile.DeleteFile(path);
+       if (!result) {
+         if ((!("ignoreAbsent" in options) || options.ignoreAbsent) &&
+             ctypes.winLastError == Const.ERROR_FILE_NOT_FOUND) {
+           return;
+         }
+         throw new File.Error("remove");
+       }
      };
 
      /**
@@ -481,7 +493,9 @@
       * This iterator will not enter subdirectories.
       *
       * @param {string} path The directory upon which to iterate.
-      * @param {*=} options Ignored in this implementation.
+      * @param {*=} options An object that may contain the following field:
+      * @option {string} winPattern Windows file name pattern; if set,
+      * only files matching this pattern are returned.
       *
       * @throws {File.Error} If |path| does not represent a directory or
       * if the directory cannot be iterated.

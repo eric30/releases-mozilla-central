@@ -24,6 +24,7 @@
 #include "nsLayoutUtils.h"
 #include "nsINameSpaceManager.h"
 #include "nsIContent.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/Element.h"
 #include "nsIFrame.h"
 #include "nsView.h"
@@ -99,7 +100,7 @@ MutationBitForEventType(uint32_t aEventType)
   return 0;
 }
 
-uint32_t nsEventListenerManager::sCreatedCount = 0;
+uint32_t nsEventListenerManager::sMainThreadCreatedCount = 0;
 
 nsEventListenerManager::nsEventListenerManager(EventTarget* aTarget) :
   mMayHavePaintEventListener(false),
@@ -115,7 +116,9 @@ nsEventListenerManager::nsEventListenerManager(EventTarget* aTarget) :
 {
   NS_ASSERTION(aTarget, "unexpected null pointer");
 
-  ++sCreatedCount;
+  if (NS_IsMainThread()) {
+    ++sMainThreadCreatedCount;
+  }
 }
 
 nsEventListenerManager::~nsEventListenerManager() 
@@ -1275,7 +1278,7 @@ nsEventListenerManager::GetEventHandlerInternal(nsIAtom *aEventName)
 }
 
 size_t
-nsEventListenerManager::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf)
+nsEventListenerManager::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf)
   const
 {
   size_t n = aMallocSizeOf(this);

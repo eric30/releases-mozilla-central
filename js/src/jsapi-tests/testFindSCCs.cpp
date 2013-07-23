@@ -6,7 +6,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
-#include "tests.h"
+#include "jsapi-tests/tests.h"
 
 #include <string.h>
 #include <stdarg.h>
@@ -15,8 +15,6 @@
 #include "jsgc.h"
 
 #include "gc/FindSCCs.h"
-
-#include "gc/FindSCCs-inl.h"
 
 static const unsigned MaxVertices = 10;
 

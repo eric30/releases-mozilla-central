@@ -287,7 +287,7 @@ ContainerRender(Container* aContainer,
 #ifdef MOZ_DUMP_PAINTING
     if (gfxUtils::sDumpPainting) {
       nsRefPtr<gfxImageSurface> surf = 
-        aContainer->gl()->GetTexImage(containerSurface, true, aManager->GetFBOLayerProgramType());
+        aContainer->gl()->GetTexImage(containerSurface, true, aManager->GetFBOTextureFormat());
 
       WriteSnapshotToDumpFile(aContainer, surf);
     }
@@ -322,6 +322,7 @@ ContainerRender(Container* aContainer,
       rgb->Activate();
       rgb->SetLayerQuadRect(visibleRect);
       rgb->SetLayerTransform(transform);
+      rgb->SetTextureTransform(gfx3DMatrix());
       rgb->SetLayerOpacity(opacity);
       rgb->SetRenderOffset(aOffset);
       rgb->SetTextureUnit(0);

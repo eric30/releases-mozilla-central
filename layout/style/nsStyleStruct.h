@@ -86,6 +86,8 @@ public:
   void* operator new(size_t sz, nsPresContext* aContext) CPP_THROW_NEW;
   void Destroy(nsPresContext* aContext);
 
+  void EnableZoom(nsPresContext* aContext, bool aEnable);
+
   nsFont  mFont;        // [inherited]
   nscoord mSize;        // [inherited] Our "computed size". Can be different
                         // from mFont.size which is our "actual size" and is
@@ -101,6 +103,10 @@ public:
 
   // was mLanguage set based on a lang attribute in the document?
   bool mExplicitLanguage;        // [inherited]
+
+  // should calls to ZoomText() and UnZoomText() be made to the font
+  // size on this nsStyleFont?
+  bool mAllowZoom;               // [inherited]
 
   // The value mSize would have had if scriptminsize had never been applied
   nscoord mScriptUnconstrainedSize;
@@ -236,6 +242,12 @@ struct nsStyleImage {
    * |eStyleImageType_Element|.
    */
   bool IsComplete() const;
+  /**
+   * @return true if this image is loaded without error;
+   * always returns true if |mType| is |eStyleImageType_Gradient| or
+   * |eStyleImageType_Element|.
+   */
+  bool IsLoaded() const;
   /**
    * @return true if it is 100% confident that this image contains no pixel
    * to draw.
@@ -2250,6 +2262,10 @@ struct nsStyleSVG {
   bool mStrokeDasharrayFromObject   : 1;
   bool mStrokeDashoffsetFromObject  : 1;
   bool mStrokeWidthFromObject       : 1;
+
+  bool HasMarker() const {
+    return mMarkerStart || mMarkerMid || mMarkerEnd;
+  }
 };
 
 struct nsStyleSVGReset {

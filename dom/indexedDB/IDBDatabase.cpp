@@ -136,8 +136,7 @@ public:
                                             const ResponseValue& aResponseValue)
                                             MOZ_OVERRIDE
   {
-    MOZ_NOT_REACHED("Should never get here!");
-    return NS_ERROR_UNEXPECTED;
+    MOZ_CRASH("Should never get here!");
   }
 
 private:
@@ -244,6 +243,12 @@ IDBDatabase::IDBDatabase()
 IDBDatabase::~IDBDatabase()
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+}
+
+void
+IDBDatabase::LastRelease()
+{
+  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
   NS_ASSERTION(!mActorParent, "Actor parent owns us, how can we be dying?!");
   if (mActorChild) {
@@ -259,6 +264,7 @@ IDBDatabase::~IDBDatabase()
     if (quotaManager) {
       quotaManager->UnregisterStorage(this);
     }
+    mRegistered = false;
   }
 }
 
@@ -869,8 +875,7 @@ nsresult
 NoRequestDatabaseHelper::UnpackResponseFromParentProcess(
                                             const ResponseValue& aResponseValue)
 {
-  MOZ_NOT_REACHED("Should never get here!");
-  return NS_ERROR_UNEXPECTED;
+  MOZ_CRASH("Should never get here!");
 }
 
 nsresult

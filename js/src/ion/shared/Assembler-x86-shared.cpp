@@ -7,8 +7,6 @@
 #include "ion/IonMacroAssembler.h"
 #include "gc/Marking.h"
 
-#include "jsscriptinlines.h"
-
 using namespace js;
 using namespace js::ion;
 
@@ -123,8 +121,7 @@ AssemblerX86Shared::InvertCondition(Condition cond)
       case BelowOrEqual:
         return Above;
       default:
-        JS_NOT_REACHED("unexpected condition");
-        return Equal;
+        MOZ_ASSUME_UNREACHABLE("unexpected condition");
     }
 }
 

@@ -197,14 +197,11 @@ nsHTMLDocument::nsHTMLDocument()
   mIsRegularHTML = true;
   mDefaultElementType = kNameSpaceID_XHTML;
   mCompatMode = eCompatibility_NavQuirks;
-
-  SetIsDOMBinding();
 }
 
 nsHTMLDocument::~nsHTMLDocument()
 {
   mAll = nullptr;
-  NS_DROP_JS_OBJECTS(this, nsHTMLDocument);
 }
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsHTMLDocument, nsDocument)
@@ -1073,20 +1070,20 @@ nsHTMLDocument::SetDomain(const nsAString& aDomain, ErrorResult& rv)
 nsGenericHTMLElement*
 nsHTMLDocument::GetBody()
 {
-  Element* body = GetBodyElement();
-
-  if (body) {
-    // There is a body element, return that as the body.
-    return static_cast<nsGenericHTMLElement*>(body);
+  Element* html = GetHtmlElement();
+  if (!html) {
+    return nullptr;
   }
 
-  // The document is most likely a frameset document so look for the
-  // outer most frameset element
-  nsRefPtr<nsContentList> nodeList =
-    NS_GetContentList(this, kNameSpaceID_XHTML, NS_LITERAL_STRING("frameset"));
-  Element* frameset = nodeList->GetElementAt(0);
-  MOZ_ASSERT(!frameset || frameset->IsHTML());
-  return static_cast<nsGenericHTMLElement*>(frameset);
+  for (nsIContent* child = html->GetFirstChild();
+       child;
+       child = child->GetNextSibling()) {
+    if (child->IsHTML(nsGkAtoms::body) || child->IsHTML(nsGkAtoms::frameset)) {
+      return static_cast<nsGenericHTMLElement*>(child);
+    }
+  }
+
+  return nullptr;
 }
 
 NS_IMETHODIMP
@@ -1127,12 +1124,12 @@ nsHTMLDocument::SetBody(nsGenericHTMLElement* newBody, ErrorResult& rv)
   }
 
   // Use DOM methods so that we pass through the appropriate security checks.
-  Element* currentBody = GetBodyElement();
+  nsCOMPtr<Element> currentBody = GetBodyElement();
   if (currentBody) {
     root->ReplaceChild(*newBody, *currentBody, rv);
+  } else {
+    root->AppendChild(*newBody, rv);
   }
-
-  root->AppendChild(*newBody, rv);
 }
 
 NS_IMETHODIMP
@@ -2704,7 +2701,7 @@ nsHTMLDocument::GetAll(JSContext* aCx, ErrorResult& aRv)
     JS_SetPrivate(mAll, static_cast<nsINode*>(this));
     NS_ADDREF_THIS();
 
-    NS_HOLD_JS_OBJECTS(this, nsHTMLDocument);
+    PreserveWrapper(static_cast<nsINode*>(this));
   }
 
   return mAll;

@@ -36,8 +36,8 @@
 
 #if ENABLE_ASSEMBLER && WTF_CPU_ARM_TRADITIONAL
 
-#include "ARMAssembler.h"
-#include "AbstractMacroAssembler.h"
+#include "assembler/assembler/ARMAssembler.h"
+#include "assembler/assembler/AbstractMacroAssembler.h"
 
 namespace JSC {
 
@@ -1111,17 +1111,17 @@ public:
     }
 
     // Floating point operators
-    bool supportsFloatingPoint() const
+    static bool supportsFloatingPoint()
     {
         return s_isVFPPresent;
     }
 
-    bool supportsFloatingPointTruncate() const
+    static bool supportsFloatingPointTruncate()
     {
         return true;
     }
 
-    bool supportsFloatingPointSqrt() const
+    static bool supportsFloatingPointSqrt()
     {
         return s_isVFPPresent;
     }

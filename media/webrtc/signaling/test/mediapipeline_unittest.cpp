@@ -54,7 +54,7 @@ class TestAgent {
       audio_pipeline_(),
       video_flow_(new TransportFlow()),
       video_prsock_(new TransportLayerPrsock()),
-      video_config_(120, "VP8", 640, 480),
+      video_config_(120, "VP8"),
       video_conduit_(mozilla::VideoSessionConduit::Create()),
       video_(),
       video_pipeline_() {
@@ -87,7 +87,7 @@ class TestAgent {
   void Start() {
     nsresult ret;
 
-    MOZ_MTLOG(PR_LOG_DEBUG, "Starting");
+    MOZ_MTLOG(ML_DEBUG, "Starting");
 
     mozilla::SyncRunnable::DispatchToThread(
       test_utils->sts_target(),
@@ -107,7 +107,7 @@ class TestAgent {
   }
 
   void Stop() {
-    MOZ_MTLOG(PR_LOG_DEBUG, "Stopping");
+    MOZ_MTLOG(ML_DEBUG, "Stopping");
 
     if (audio_pipeline_)
       audio_pipeline_->ShutdownMedia_m();

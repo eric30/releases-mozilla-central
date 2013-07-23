@@ -29,11 +29,11 @@
 #include <cstdio>
 #include <dbus/dbus.h>
 
-#include "pratom.h"
 #include "nsAutoPtr.h"
 #include "nsThreadUtils.h"
 #include "nsDebug.h"
 #include "nsDataHashtable.h"
+#include "mozilla/Atomics.h"
 #include "mozilla/Hal.h"
 #include "mozilla/ipc/UnixSocket.h"
 #include "mozilla/ipc/DBusThread.h"
@@ -148,10 +148,10 @@ static const char* sBluetoothDBusSignals[] =
  * used by any other thread.
  *
  */
-static nsAutoPtr<RawDBusConnection> gThreadConnection;
+static nsRefPtr<RawDBusConnection> gThreadConnection;
 static nsDataHashtable<nsStringHashKey, DBusMessage* > sPairingReqTable;
 static nsDataHashtable<nsStringHashKey, DBusMessage* > sAuthorizeReqTable;
-static int32_t sIsPairing = 0;
+static Atomic<int32_t> sIsPairing;
 static nsString sAdapterPath;
 
 typedef void (*UnpackFunc)(DBusMessage*, DBusError*, BluetoothValue&, nsAString&);
@@ -343,28 +343,6 @@ ExtractHandles(DBusMessage *aReply, nsTArray<uint32_t>& aOutHandles)
 
 // static
 bool
-BluetoothDBusService::AddServiceRecords(const char* serviceName,
-                                        unsigned long long uuidMsb,
-                                        unsigned long long uuidLsb,
-                                        int channel)
-{
-  MOZ_ASSERT(!NS_IsMainThread());
-
-  DBusMessage* reply =
-    dbus_func_args(gThreadConnection->GetConnection(),
-                   NS_ConvertUTF16toUTF8(sAdapterPath).get(),
-                   DBUS_ADAPTER_IFACE, "AddRfcommServiceRecord",
-                   DBUS_TYPE_STRING, &serviceName,
-                   DBUS_TYPE_UINT64, &uuidMsb,
-                   DBUS_TYPE_UINT64, &uuidLsb,
-                   DBUS_TYPE_UINT16, &channel,
-                   DBUS_TYPE_INVALID);
-
-  return reply ? dbus_returns_uint32(reply) : -1;
-}
-
-// static
-bool
 BluetoothDBusService::AddReservedServicesInternal(
                                    const nsTArray<uint32_t>& aServices,
                                    nsTArray<uint32_t>& aServiceHandlesContainer)
@@ -456,7 +434,7 @@ GetObjectPathCallback(DBusMessage* aMsg, void* aBluetoothReplyRunnable)
   if (sIsPairing) {
     RunDBusCallback(aMsg, aBluetoothReplyRunnable,
                     UnpackObjectPathMessage);
-    PR_AtomicDecrement(&sIsPairing);
+    sIsPairing--;
   }
 }
 
@@ -1138,100 +1116,84 @@ handle_error:
   return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
 }
 
-static const DBusObjectPathVTable agentVtable = {
-  NULL, AgentEventFilter, NULL, NULL, NULL, NULL
+class RegisterAgentReplyHandler : public DBusReplyHandler
+{
+public:
+  RegisterAgentReplyHandler(const DBusObjectPathVTable* aAgentVTable)
+    : mAgentVTable(aAgentVTable)
+  {
+    MOZ_ASSERT(aAgentVTable);
+  }
+
+  void Handle(DBusMessage* aReply)
+  {
+    MOZ_ASSERT(!NS_IsMainThread()); // DBus thread
+
+    if (!aReply || (dbus_message_get_type(aReply) == DBUS_MESSAGE_TYPE_ERROR)) {
+      return;
+    }
+
+    nsRefPtr<RawDBusConnection> threadConnection = gThreadConnection;
+
+    if (!threadConnection.get()) {
+      BT_WARNING("%s: DBus connection has been closed.", __FUNCTION__);
+      return;
+    }
+
+    // There is no "RegisterAgent" function defined in device interface.
+    // When we call "CreatePairedDevice", it will do device agent registration
+    // for us. (See maemo.org/api_refs/5.0/beta/bluez/adapter.html)
+    if (!dbus_connection_register_object_path(threadConnection->GetConnection(),
+                                              KEY_REMOTE_AGENT,
+                                              mAgentVTable,
+                                              NULL)) {
+      BT_WARNING("%s: Can't register object path %s for remote device agent!",
+                 __FUNCTION__, KEY_REMOTE_AGENT);
+      return;
+    }
+
+    NS_DispatchToMainThread(new PrepareProfileManagersRunnable());
+  }
+
+private:
+  const DBusObjectPathVTable* mAgentVTable;
 };
 
-// Local agent means agent for Adapter, not agent for Device. Some signals
-// will be passed to local agent, some will be passed to device agent.
-// For example, if a remote device would like to pair with us, then the
-// signal will be passed to local agent. If we start pairing process with
-// calling CreatePairedDevice, we'll get signal which should be passed to
-// device agent.
-static bool
-RegisterLocalAgent(const char* adapterPath,
-                   const char* agentPath,
-                   const char* capabilities)
+static bool RegisterAgent(const DBusObjectPathVTable* aAgentVTable)
 {
   MOZ_ASSERT(!NS_IsMainThread());
 
+  const char* agentPath = KEY_LOCAL_AGENT;
+  const char* capabilities = B2G_AGENT_CAPABILITIES;
+
+  // Local agent means agent for Adapter, not agent for Device. Some signals
+  // will be passed to local agent, some will be passed to device agent.
+  // For example, if a remote device would like to pair with us, then the
+  // signal will be passed to local agent. If we start pairing process with
+  // calling CreatePairedDevice, we'll get signal which should be passed to
+  // device agent.
   if (!dbus_connection_register_object_path(gThreadConnection->GetConnection(),
-                                            agentPath,
-                                            &agentVtable,
+                                            KEY_LOCAL_AGENT,
+                                            aAgentVTable,
                                             NULL)) {
     BT_WARNING("%s: Can't register object path %s for agent!",
-                __FUNCTION__, agentPath);
+               __FUNCTION__, KEY_LOCAL_AGENT);
     return false;
   }
 
-  DBusMessage* msg =
-    dbus_message_new_method_call("org.bluez", adapterPath,
-                                 DBUS_ADAPTER_IFACE, "RegisterAgent");
-  if (!msg) {
-    BT_WARNING("%s: Can't allocate new method call for agent!", __FUNCTION__);
-    return false;
-  }
+  nsRefPtr<RegisterAgentReplyHandler> handler = new RegisterAgentReplyHandler(aAgentVTable);
+  MOZ_ASSERT(handler.get());
 
-  if (!dbus_message_append_args(msg,
-                                DBUS_TYPE_OBJECT_PATH, &agentPath,
-                                DBUS_TYPE_STRING, &capabilities,
-                                DBUS_TYPE_INVALID)) {
-    BT_WARNING("%s: Couldn't append arguments to dbus message.", __FUNCTION__);
-    return false;
-  }
+  bool success = dbus_func_args_async(gThreadConnection->GetConnection(), -1,
+                                      RegisterAgentReplyHandler::Callback, handler.get(),
+                                      NS_ConvertUTF16toUTF8(sAdapterPath).get(),
+                                      DBUS_ADAPTER_IFACE, "RegisterAgent",
+                                      DBUS_TYPE_OBJECT_PATH, &agentPath,
+                                      DBUS_TYPE_STRING, &capabilities,
+                                      DBUS_TYPE_INVALID);
+  NS_ENSURE_TRUE(success, false);
 
-  DBusError err;
-  dbus_error_init(&err);
-
-  DBusMessage* reply =
-    dbus_connection_send_with_reply_and_block(gThreadConnection->GetConnection(),
-                                              msg, -1, &err);
-  dbus_message_unref(msg);
-
-  if (!reply) {
-    if (dbus_error_is_set(&err)) {
-      if (!strcmp(err.name, "org.bluez.Error.AlreadyExists")) {
-        LOG_AND_FREE_DBUS_ERROR(&err);
-#ifdef DEBUG
-        BT_WARNING("Agent already registered, still returning true");
-#endif
-      } else {
-        LOG_AND_FREE_DBUS_ERROR(&err);
-        BT_WARNING("%s: Can't register agent!", __FUNCTION__);
-        return false;
-      }
-    }
-  } else {
-    dbus_message_unref(reply);
-  }
-
-  dbus_connection_flush(gThreadConnection->GetConnection());
-  return true;
-}
-
-static bool
-RegisterAgent()
-{
-  MOZ_ASSERT(!NS_IsMainThread());
-
-  if (!RegisterLocalAgent(NS_ConvertUTF16toUTF8(sAdapterPath).get(),
-                          KEY_LOCAL_AGENT,
-                          B2G_AGENT_CAPABILITIES)) {
-    return false;
-  }
-
-  // There is no "RegisterAgent" function defined in device interface.
-  // When we call "CreatePairedDevice", it will do device agent registration
-  // for us. (See maemo.org/api_refs/5.0/beta/bluez/adapter.html)
-  if (!dbus_connection_register_object_path(gThreadConnection->GetConnection(),
-                                            KEY_REMOTE_AGENT,
-                                            &agentVtable,
-                                            NULL)) {
-    BT_WARNING("%s: Can't register object path %s for remote device agent!",
-               __FUNCTION__, KEY_REMOTE_AGENT);
-
-    return false;
-  }
+  handler.forget();
 
   return true;
 }
@@ -1239,8 +1201,12 @@ RegisterAgent()
 class PrepareAdapterRunnable : public nsRunnable
 {
 public:
-  nsresult Run()
+  NS_IMETHOD Run()
   {
+    static const DBusObjectPathVTable sAgentVTable = {
+      NULL, AgentEventFilter, NULL, NULL, NULL, NULL
+    };
+
     MOZ_ASSERT(!NS_IsMainThread());
     nsTArray<uint32_t> uuids;
 
@@ -1259,12 +1225,11 @@ public:
 #endif
     }
 
-    if(!RegisterAgent()) {
+    if(!RegisterAgent(&sAgentVTable)) {
       NS_WARNING("Failed to register agent");
       return NS_ERROR_FAILURE;
     }
 
-    NS_DispatchToMainThread(new PrepareProfileManagersRunnable());
     return NS_OK;
   }
 };
@@ -1678,7 +1643,7 @@ BluetoothDBusService::StopInternal()
   sAuthorizeReqTable.EnumerateRead(UnrefDBusMessages, nullptr);
   sAuthorizeReqTable.Clear();
 
-  PR_AtomicSet(&sIsPairing, 0);
+  sIsPairing = 0;
 
   StopDBus();
   return NS_OK;
@@ -2094,36 +2059,6 @@ BluetoothDBusService::GetDevicePath(const nsAString& aAdapterPath,
   return true;
 }
 
-static int
-GetDeviceServiceChannel(const nsAString& aObjectPath,
-                        const nsAString& aPattern,
-                        int aAttributeId)
-{
-  // This is a blocking call, should not be run on main thread.
-  MOZ_ASSERT(!NS_IsMainThread());
-
-#ifdef MOZ_WIDGET_GONK
-  // GetServiceAttributeValue only exists in android's bluez dbus binding
-  // implementation
-  nsCString tempPattern = NS_ConvertUTF16toUTF8(aPattern);
-  const char* pattern = tempPattern.get();
-
-  DBusMessage *reply =
-    dbus_func_args(gThreadConnection->GetConnection(),
-                   NS_ConvertUTF16toUTF8(aObjectPath).get(),
-                   DBUS_DEVICE_IFACE, "GetServiceAttributeValue",
-                   DBUS_TYPE_STRING, &pattern,
-                   DBUS_TYPE_UINT16, &aAttributeId,
-                   DBUS_TYPE_INVALID);
-
-  return reply ? dbus_returns_int32(reply) : -1;
-#else
-  // FIXME/Bug 793977 qdot: Just return something for desktop, until we have a
-  // parser for the GetServiceAttributes xml block
-  return 1;
-#endif
-}
-
 // static
 bool
 BluetoothDBusService::RemoveReservedServicesInternal(
@@ -2173,7 +2108,7 @@ BluetoothDBusService::CreatePairedDeviceInternal(
    *
    * Please see Bug 818696 for more information.
    */
-  PR_AtomicIncrement(&sIsPairing);
+  sIsPairing++;
 
   nsRefPtr<BluetoothReplyRunnable> runnable = aRunnable;
   // Then send CreatePairedDevice, it will register a temp device agent then
@@ -2589,8 +2524,7 @@ public:
     mDeviceAddress = GetAddressFromObjectPath(aObjectPath);
   }
 
-  nsresult
-  Run()
+  NS_IMETHOD Run()
   {
     MOZ_ASSERT(NS_IsMainThread());
 
@@ -2606,55 +2540,92 @@ private:
   BluetoothProfileManagerBase* mManager;
 };
 
-class GetServiceChannelRunnable : public nsRunnable
+class OnGetServiceChannelReplyHandler : public DBusReplyHandler
 {
 public:
-  GetServiceChannelRunnable(const nsAString& aObjectPath,
-                            const nsAString& aServiceUuid,
-                            BluetoothProfileManagerBase* aManager)
-    : mObjectPath(aObjectPath),
-      mServiceUuid(aServiceUuid),
-      mManager(aManager)
+  OnGetServiceChannelReplyHandler(const nsAString& aObjectPath,
+                                  const nsAString& aServiceUUID,
+                                  BluetoothProfileManagerBase* aBluetoothProfileManager)
+  : mObjectPath(aObjectPath),
+    mServiceUUID(aServiceUUID),
+    mBluetoothProfileManager(aBluetoothProfileManager)
   {
-    MOZ_ASSERT(!aObjectPath.IsEmpty());
-    MOZ_ASSERT(!aServiceUuid.IsEmpty());
-    MOZ_ASSERT(aManager);
+    MOZ_ASSERT(mBluetoothProfileManager);
   }
 
-  nsresult
-  Run()
+  void Handle(DBusMessage* aReply)
   {
-    MOZ_ASSERT(!NS_IsMainThread());
+    MOZ_ASSERT(!NS_IsMainThread()); // DBus thread
 
-    int channel = GetDeviceServiceChannel(mObjectPath, mServiceUuid, 0x0004);
-    nsRefPtr<nsRunnable> r(new OnGetServiceChannelRunnable(mObjectPath,
-                                                           mServiceUuid,
-                                                           channel,
-                                                           mManager));
-    NS_DispatchToMainThread(r);
-    return NS_OK;
+    // The default channel is an invalid value of -1. We
+    // update it if we have received a correct reply. Both
+    // cases, valid and invalid channel numbers, are handled
+    // in BluetoothProfileManagerBase::OnGetServiceChannel.
+
+    int channel = -1;
+
+    if (aReply && (dbus_message_get_type(aReply) != DBUS_MESSAGE_TYPE_ERROR)) {
+      channel = dbus_returns_int32(aReply);
+    }
+
+    nsRefPtr<nsRunnable> r = new OnGetServiceChannelRunnable(mObjectPath,
+                                                             mServiceUUID,
+                                                             channel,
+                                                             mBluetoothProfileManager);
+    nsresult rv = NS_DispatchToMainThread(r);
+    NS_ENSURE_SUCCESS_VOID(rv);
   }
 
 private:
   nsString mObjectPath;
-  nsString mServiceUuid;
-  BluetoothProfileManagerBase* mManager;
+  nsString mServiceUUID;
+  BluetoothProfileManagerBase* mBluetoothProfileManager;
 };
 
 nsresult
 BluetoothDBusService::GetServiceChannel(const nsAString& aDeviceAddress,
-                                        const nsAString& aServiceUuid,
+                                        const nsAString& aServiceUUID,
                                         BluetoothProfileManagerBase* aManager)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(mBluetoothCommandThread);
 
   nsString objectPath(GetObjectPathFromAddress(sAdapterPath, aDeviceAddress));
 
-  nsRefPtr<nsRunnable> r(new GetServiceChannelRunnable(objectPath,
-                                                       aServiceUuid,
-                                                       aManager));
-  mBluetoothCommandThread->Dispatch(r, NS_DISPATCH_NORMAL);
+#ifdef MOZ_WIDGET_GONK
+  static const int sProtocolDescriptorList = 0x0004;
+
+  // GetServiceAttributeValue only exists in android's bluez dbus binding
+  // implementation
+  nsCString serviceUUID = NS_ConvertUTF16toUTF8(aServiceUUID);
+  const char* cstrServiceUUID = serviceUUID.get();
+
+  nsRefPtr<OnGetServiceChannelReplyHandler> handler =
+    new OnGetServiceChannelReplyHandler(objectPath, aServiceUUID, aManager);
+
+  bool success = dbus_func_args_async(mConnection, -1,
+                                      OnGetServiceChannelReplyHandler::Callback, handler,
+                                      NS_ConvertUTF16toUTF8(objectPath).get(),
+                                      DBUS_DEVICE_IFACE, "GetServiceAttributeValue",
+                                      DBUS_TYPE_STRING, &cstrServiceUUID,
+                                      DBUS_TYPE_UINT16, &sProtocolDescriptorList,
+                                      DBUS_TYPE_INVALID);
+  NS_ENSURE_TRUE(success, NS_ERROR_FAILURE);
+
+  handler.forget();
+#else
+  // FIXME/Bug 793977 qdot: Just set something for desktop, until we have a
+  // parser for the GetServiceAttributes xml block
+  //
+  // Even though we are on the main thread already, we need to dispatch a
+  // runnable here. OnGetServiceChannel needs mRunnable to be set, which
+  // happens after GetServiceChannel returns.
+  nsRefPtr<nsRunnable> r = new OnGetServiceChannelRunnable(objectPath,
+                                                           aServiceUUID,
+                                                           1,
+                                                           aManager);
+  nsresult rv = NS_DispatchToMainThread(r);
+  NS_ENSURE_SUCCESS_VOID(rv);
+#endif
 
   return NS_OK;
 }

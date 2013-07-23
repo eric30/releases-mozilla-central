@@ -13,6 +13,7 @@
 #define FragmentOrElement_h___
 
 #include "mozilla/Attributes.h"
+#include "mozilla/MemoryReporting.h"
 #include "nsAttrAndChildArray.h"          // member
 #include "nsCycleCollectionParticipant.h" // NS_DECL_CYCLE_*
 #include "nsIContent.h"                   // base class
@@ -214,6 +215,11 @@ public:
   virtual bool TextIsOnlyWhitespace() MOZ_OVERRIDE;
   virtual void AppendTextTo(nsAString& aResult) MOZ_OVERRIDE;
   virtual nsIContent *GetBindingParent() const MOZ_OVERRIDE;
+  virtual nsXBLBinding *GetXBLBinding() const MOZ_OVERRIDE;
+  virtual void SetXBLBinding(nsXBLBinding* aBinding,
+                             nsBindingManager* aOldBindingManager = nullptr) MOZ_OVERRIDE;
+  virtual nsIContent *GetXBLInsertionParent() const;
+  virtual void SetXBLInsertionParent(nsIContent* aContent);
   virtual bool IsLink(nsIURI** aURI) const MOZ_OVERRIDE;
 
   virtual void DestroyContent() MOZ_OVERRIDE;
@@ -298,7 +304,7 @@ public:
     void Traverse(nsCycleCollectionTraversalCallback &cb, bool aIsXUL);
     void Unlink(bool aIsXUL);
 
-    size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const;
+    size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
     /**
      * The .style attribute (an interface that forwards to the actual
@@ -358,6 +364,16 @@ public:
      * An object implementing the .classList property for this element.
      */
     nsRefPtr<nsDOMTokenList> mClassList;
+
+    /**
+     * XBL binding installed on the element.
+     */
+    nsRefPtr<nsXBLBinding> mXBLBinding;
+
+    /**
+     * XBL binding installed on the lement.
+     */
+    nsCOMPtr<nsIContent> mXBLInsertionParent;
   };
 
 protected:

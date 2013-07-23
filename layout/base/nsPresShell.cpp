@@ -18,6 +18,7 @@
 
 /* a presentation of a document, part 2 */
 
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/PBrowserChild.h"
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/Likely.h"
@@ -135,7 +136,6 @@
 #include "nsIURI.h"
 #include "nsIScrollableFrame.h"
 #include "prtime.h"
-#include "prlong.h"
 #include "nsIDragService.h"
 #include "nsCopySupport.h"
 #include "nsIDOMHTMLAnchorElement.h"
@@ -197,7 +197,7 @@ CapturingContentInfo nsIPresShell::gCaptureInfo =
   { false /* mAllowed */, false /* mPointerLock */, false /* mRetargetToElement */,
     false /* mPreventDrag */, nullptr /* mContent */ };
 nsIContent* nsIPresShell::gKeyDownTarget;
-nsInterfaceHashtable<nsUint32HashKey, nsIDOMTouch> nsIPresShell::gCaptureTouchList;
+nsRefPtrHashtable<nsUint32HashKey, dom::Touch> nsIPresShell::gCaptureTouchList;
 bool nsIPresShell::gPreventMouseEvents = false;
 
 // convert a color value to a string, in the CSS format #RRGGBB
@@ -539,7 +539,7 @@ VerifyStyleTree(nsPresContext* aPresContext, nsFrameManager* aFrameManager)
 {
   if (nsFrame::GetVerifyStyleTreeEnable()) {
     nsIFrame* rootFrame = aFrameManager->GetRootFrame();
-    aFrameManager->DebugVerifyStyleTree(rootFrame);
+    aPresContext->RestyleManager()->DebugVerifyStyleTree(rootFrame);
   }
 }
 #define VERIFY_STYLE_TREE ::VerifyStyleTree(mPresContext, mFrameConstructor)
@@ -1720,7 +1720,7 @@ PresShell::Initialize(nscoord aWidth, nscoord aHeight)
     {
       nsAutoScriptBlocker scriptBlocker;
       mFrameConstructor->CreateNeededFrames();
-      mFrameConstructor->ProcessPendingRestyles();
+      mPresContext->RestyleManager()->ProcessPendingRestyles();
     }
 
     // And that might have run _more_ XBL constructors
@@ -1862,7 +1862,7 @@ PresShell::ResizeReflowIgnoreOverride(nscoord aWidth, nscoord aHeight)
     {
       nsAutoScriptBlocker scriptBlocker;
       mFrameConstructor->CreateNeededFrames();
-      mFrameConstructor->ProcessPendingRestyles();
+      mPresContext->RestyleManager()->ProcessPendingRestyles();
     }
 
     rootFrame = mFrameConstructor->GetRootFrame();
@@ -2692,25 +2692,26 @@ PresShell::RecreateFramesFor(nsIContent* aContent)
 
   // Mark ourselves as not safe to flush while we're doing frame construction.
   ++mChangeNestCount;
-  nsresult rv = mFrameConstructor->ProcessRestyledFrames(changeList);
-  mFrameConstructor->FlushOverflowChangedTracker();
+  RestyleManager* restyleManager = mPresContext->RestyleManager();
+  nsresult rv = restyleManager->ProcessRestyledFrames(changeList);
+  restyleManager->FlushOverflowChangedTracker();
   --mChangeNestCount;
-  
+
   return rv;
 }
 
 void
 nsIPresShell::PostRecreateFramesFor(Element* aElement)
 {
-  FrameConstructor()->PostRestyleEvent(aElement, nsRestyleHint(0),
-                                       nsChangeHint_ReconstructFrame);
+  mPresContext->RestyleManager()->PostRestyleEvent(aElement, nsRestyleHint(0),
+                                                   nsChangeHint_ReconstructFrame);
 }
 
 void
 nsIPresShell::RestyleForAnimation(Element* aElement, nsRestyleHint aHint)
 {
-  FrameConstructor()->PostAnimationRestyleEvent(aElement, aHint,
-                                                NS_STYLE_HINT_NONE);
+  mPresContext->RestyleManager()->PostAnimationRestyleEvent(aElement, aHint,
+                                                            NS_STYLE_HINT_NONE);
 }
 
 void
@@ -3426,14 +3427,15 @@ void
 PresShell::DispatchSynthMouseMove(nsGUIEvent *aEvent,
                                   bool aFlushOnHoverChange)
 {
-  uint32_t hoverGenerationBefore = mFrameConstructor->GetHoverGeneration();
+  RestyleManager* restyleManager = mPresContext->RestyleManager();
+  uint32_t hoverGenerationBefore = restyleManager->GetHoverGeneration();
   nsEventStatus status;
   nsView* targetView = nsView::GetViewFor(aEvent->widget);
   if (!targetView)
     return;
   targetView->GetViewManager()->DispatchEvent(aEvent, targetView, &status);
   if (aFlushOnHoverChange &&
-      hoverGenerationBefore != mFrameConstructor->GetHoverGeneration()) {
+      hoverGenerationBefore != restyleManager->GetHoverGeneration()) {
     // Flush so that the resulting reflow happens now so that our caller
     // can suppress any synthesized mouse moves caused by that reflow.
     FlushPendingNotifications(Flush_Layout);
@@ -3854,7 +3856,7 @@ PresShell::FlushPendingNotifications(mozilla::ChangesToFlush aFlush)
       if (!mIsDestroying) {
         nsAutoScriptBlocker scriptBlocker;
         mFrameConstructor->CreateNeededFrames();
-        mFrameConstructor->ProcessPendingRestyles();
+        mPresContext->RestyleManager()->ProcessPendingRestyles();
       }
     }
 
@@ -3881,7 +3883,7 @@ PresShell::FlushPendingNotifications(mozilla::ChangesToFlush aFlush)
     if (!mIsDestroying) {
       nsAutoScriptBlocker scriptBlocker;
       mFrameConstructor->CreateNeededFrames();
-      mFrameConstructor->ProcessPendingRestyles();
+      mPresContext->RestyleManager()->ProcessPendingRestyles();
     }
 
 
@@ -3917,14 +3919,12 @@ PresShell::FlushPendingNotifications(mozilla::ChangesToFlush aFlush)
 }
 
 void
-PresShell::CharacterDataChanged(nsIDocument *aDocument,
-                                nsIContent*  aContent,
-                                CharacterDataChangeInfo* aInfo)
+PresShell::CharacterDataWillChange(nsIDocument *aDocument,
+                                   nsIContent*  aContent,
+                                   CharacterDataChangeInfo* aInfo)
 {
   NS_PRECONDITION(!mIsDocumentGone, "Unexpected CharacterDataChanged");
   NS_PRECONDITION(aDocument == mDocument, "Unexpected aDocument");
-
-  nsAutoCauseReflowNotifier crNotifier(this);
 
   if (mCaret) {
     // Invalidate the caret's current location before we call into the frame
@@ -3933,8 +3933,23 @@ PresShell::CharacterDataChanged(nsIDocument *aDocument,
     // text frame the caret is in to forget what part of the content they
     // refer to, making it hard for them to return the correct continuation
     // frame to the caret.
+    //
+    // It's also important to do this before the content actually changes, since
+    // in bidi text the caret needs to look at the content to determine its
+    // position and shape.
     mCaret->InvalidateOutsideCaret();
   }
+}
+
+void
+PresShell::CharacterDataChanged(nsIDocument *aDocument,
+                                nsIContent*  aContent,
+                                CharacterDataChangeInfo* aInfo)
+{
+  NS_PRECONDITION(!mIsDocumentGone, "Unexpected CharacterDataChanged");
+  NS_PRECONDITION(aDocument == mDocument, "Unexpected aDocument");
+
+  nsAutoCauseReflowNotifier crNotifier(this);
 
   // Call this here so it only happens for real content mutations and
   // not cases when the frame constructor calls its own methods to force
@@ -3945,9 +3960,9 @@ PresShell::CharacterDataChanged(nsIDocument *aDocument,
   if (selectorFlags != 0 && !aContent->IsRootOfAnonymousSubtree()) {
     Element* element = container->AsElement();
     if (aInfo->mAppend && !aContent->GetNextSibling())
-      mFrameConstructor->RestyleForAppend(element, aContent);
+      mPresContext->RestyleManager()->RestyleForAppend(element, aContent);
     else
-      mFrameConstructor->RestyleForInsertOrChange(element, aContent);
+      mPresContext->RestyleManager()->RestyleForInsertOrChange(element, aContent);
   }
 
   mFrameConstructor->CharacterDataChanged(aContent, aInfo);
@@ -3964,7 +3979,7 @@ PresShell::ContentStateChanged(nsIDocument* aDocument,
 
   if (mDidInitialize) {
     nsAutoCauseReflowNotifier crNotifier(this);
-    mFrameConstructor->ContentStateChanged(aContent, aStateMask);
+    mPresContext->RestyleManager()->ContentStateChanged(aContent, aStateMask);
     VERIFY_STYLE_TREE;
   }
 }
@@ -3980,8 +3995,9 @@ PresShell::DocumentStatesChanged(nsIDocument* aDocument,
       mStyleSet->HasDocumentStateDependentStyle(mPresContext,
                                                 mDocument->GetRootElement(),
                                                 aStateMask)) {
-    mFrameConstructor->PostRestyleEvent(mDocument->GetRootElement(),
-                                        eRestyle_Subtree, NS_STYLE_HINT_NONE);
+    mPresContext->RestyleManager()->PostRestyleEvent(mDocument->GetRootElement(),
+                                                     eRestyle_Subtree,
+                                                     NS_STYLE_HINT_NONE);
     VERIFY_STYLE_TREE;
   }
 
@@ -4012,8 +4028,8 @@ PresShell::AttributeWillChange(nsIDocument* aDocument,
   // squelch any other inappropriate notifications as well.
   if (mDidInitialize) {
     nsAutoCauseReflowNotifier crNotifier(this);
-    mFrameConstructor->AttributeWillChange(aElement, aNameSpaceID,
-                                           aAttribute, aModType);
+    mPresContext->RestyleManager()->AttributeWillChange(aElement, aNameSpaceID,
+                                                        aAttribute, aModType);
     VERIFY_STYLE_TREE;
   }
 }
@@ -4033,8 +4049,8 @@ PresShell::AttributeChanged(nsIDocument* aDocument,
   // squelch any other inappropriate notifications as well.
   if (mDidInitialize) {
     nsAutoCauseReflowNotifier crNotifier(this);
-    mFrameConstructor->AttributeChanged(aElement, aNameSpaceID,
-                                        aAttribute, aModType);
+    mPresContext->RestyleManager()->AttributeChanged(aElement, aNameSpaceID,
+                                                     aAttribute, aModType);
     VERIFY_STYLE_TREE;
   }
 }
@@ -4058,7 +4074,8 @@ PresShell::ContentAppended(nsIDocument *aDocument,
   // Call this here so it only happens for real content mutations and
   // not cases when the frame constructor calls its own methods to force
   // frame reconstruction.
-  mFrameConstructor->RestyleForAppend(aContainer->AsElement(), aFirstNewContent);
+  mPresContext->RestyleManager()->
+    RestyleForAppend(aContainer->AsElement(), aFirstNewContent);
 
   mFrameConstructor->ContentAppended(aContainer, aFirstNewContent, true);
 
@@ -4088,8 +4105,10 @@ PresShell::ContentInserted(nsIDocument* aDocument,
   // Call this here so it only happens for real content mutations and
   // not cases when the frame constructor calls its own methods to force
   // frame reconstruction.
-  if (aContainer)
-    mFrameConstructor->RestyleForInsertOrChange(aContainer->AsElement(), aChild);
+  if (aContainer) {
+    mPresContext->RestyleManager()->
+      RestyleForInsertOrChange(aContainer->AsElement(), aChild);
+  }
 
   mFrameConstructor->ContentInserted(aContainer, aChild, nullptr, true);
 
@@ -4140,8 +4159,8 @@ PresShell::ContentRemoved(nsIDocument *aDocument,
   }
   
   if (aContainer && aContainer->IsElement()) {
-    mFrameConstructor->RestyleForRemove(aContainer->AsElement(), aChild,
-                                        oldNextSibling);
+    mPresContext->RestyleManager()->
+      RestyleForRemove(aContainer->AsElement(), aChild, oldNextSibling);
   }
 
   bool didReconstruct;
@@ -4218,18 +4237,19 @@ nsIPresShell::ReconstructStyleDataInternal()
     // No content to restyle
     return;
   }
-  
+
+  RestyleManager* restyleManager = mPresContext->RestyleManager();
   if (scopeRoots.IsEmpty()) {
     // If scopeRoots is empty, we know that mStylesHaveChanged was true at
     // the beginning of this function, and that we need to restyle the whole
     // document.
-    mFrameConstructor->PostRestyleEvent(root, eRestyle_Subtree,
-                                        NS_STYLE_HINT_NONE);
+    restyleManager->PostRestyleEvent(root, eRestyle_Subtree,
+                                     NS_STYLE_HINT_NONE);
   } else {
     for (uint32_t i = 0; i < scopeRoots.Length(); i++) {
       Element* scopeRoot = scopeRoots[i];
-      mFrameConstructor->PostRestyleEvent(scopeRoot, eRestyle_Subtree,
-                                          NS_STYLE_HINT_NONE);
+      restyleManager->PostRestyleEvent(scopeRoot, eRestyle_Subtree,
+                                       NS_STYLE_HINT_NONE);
     }
   }
 }
@@ -4448,6 +4468,9 @@ PresShell::RenderDocument(const nsRect& aRect, uint32_t aFlags,
   if (aFlags & RENDER_IGNORE_VIEWPORT_SCROLLING) {
     wouldFlushRetainedLayers = !IgnoringViewportScrolling();
     mRenderFlags = ChangeFlag(mRenderFlags, true, STATE_IGNORING_VIEWPORT_SCROLLING);
+  }
+  if (aFlags & RENDER_DRAWWINDOW_NOT_FLUSHING) {
+    mRenderFlags = ChangeFlag(mRenderFlags, true, STATE_DRAWWINDOW_NOT_FLUSHING);
   }
   if (aFlags & RENDER_DOCUMENT_RELATIVE) {
     // XXX be smarter about this ... drawWindow might want a rect
@@ -5858,11 +5881,11 @@ PresShell::RecordMouseLocation(nsGUIEvent* aEvent)
 }
 
 static void
-EvictTouchPoint(nsCOMPtr<nsIDOMTouch>& aTouch)
+EvictTouchPoint(nsRefPtr<dom::Touch>& aTouch)
 {
   nsIWidget *widget = nullptr;
   // is there an easier/better way to dig out the widget?
-  nsCOMPtr<nsINode> node(do_QueryInterface(aTouch->GetTarget()));
+  nsCOMPtr<nsINode> node(do_QueryInterface(aTouch->mTarget));
   if (!node) {
     return;
   }
@@ -5895,21 +5918,21 @@ EvictTouchPoint(nsCOMPtr<nsIDOMTouch>& aTouch)
 }
 
 static PLDHashOperator
-AppendToTouchList(const uint32_t& aKey, nsCOMPtr<nsIDOMTouch>& aData, void *aTouchList)
+AppendToTouchList(const uint32_t& aKey, nsRefPtr<dom::Touch>& aData, void *aTouchList)
 {
-  nsTArray<nsCOMPtr<nsIDOMTouch> > *touches = static_cast<nsTArray<nsCOMPtr<nsIDOMTouch> > *>(aTouchList);
+  nsTArray< nsRefPtr<dom::Touch> >* touches =
+    static_cast<nsTArray< nsRefPtr<dom::Touch> >*>(aTouchList);
   aData->mChanged = false;
   touches->AppendElement(aData);
   return PL_DHASH_NEXT;
 }
 
 static PLDHashOperator
-FindAnyTarget(const uint32_t& aKey, nsCOMPtr<nsIDOMTouch>& aData,
+FindAnyTarget(const uint32_t& aKey, nsRefPtr<dom::Touch>& aData,
               void* aAnyTarget)
 {
   if (aData) {
-    nsCOMPtr<nsIDOMEventTarget> target;
-    aData->GetTarget(getter_AddRefs(target));
+    dom::EventTarget* target = aData->Target();
     if (target) {
       nsCOMPtr<nsIContent>* content =
         static_cast<nsCOMPtr<nsIContent>*>(aAnyTarget);
@@ -6129,7 +6152,7 @@ PresShell::HandleEvent(nsIFrame        *aFrame,
         // the start of a new touch session and evict any old touches in the
         // queue
         if (touchEvent->touches.Length() == 1) {
-          nsTArray<nsCOMPtr<nsIDOMTouch> > touches;
+          nsTArray< nsRefPtr<dom::Touch> > touches;
           gCaptureTouchList.Enumerate(&AppendToTouchList, (void *)&touches);
           for (uint32_t i = 0; i < touches.Length(); ++i) {
             EvictTouchPoint(touches[i]);
@@ -6148,12 +6171,10 @@ PresShell::HandleEvent(nsIFrame        *aFrame,
         // Add any new touches to the queue
         for (int32_t i = touchEvent->touches.Length(); i; ) {
           --i;
-          nsIDOMTouch *touch = touchEvent->touches[i];
-          Touch *domtouch = static_cast<Touch*>(touch);
+          dom::Touch* touch = touchEvent->touches[i];
           touch->mMessage = aEvent->message;
 
-          int32_t id = 0;
-          touch->GetIdentifier(&id);
+          int32_t id = touch->Identifier();
           if (!gCaptureTouchList.Get(id, nullptr)) {
             // This event is a new touch. Mark it as a changedTouch and
             // add it to the queue.
@@ -6173,7 +6194,7 @@ PresShell::HandleEvent(nsIFrame        *aFrame,
               while (anyTarget && !anyTarget->IsElement()) {
                 anyTarget = anyTarget->GetParent();
               }
-              domtouch->SetTarget(anyTarget);
+              touch->SetTarget(anyTarget);
               gCaptureTouchList.Put(id, touch);
             } else {
               nsIFrame* newTargetFrame = nullptr;
@@ -6213,13 +6234,11 @@ PresShell::HandleEvent(nsIFrame        *aFrame,
             // This touch is an old touch, we need to ensure that is not
             // marked as changed and set its target correctly
             touch->mChanged = false;
-            int32_t id;
-            touch->GetIdentifier(&id);
+            int32_t id = touch->Identifier();
 
-            nsCOMPtr<nsIDOMTouch> oldTouch;
-            gCaptureTouchList.Get(id, getter_AddRefs(oldTouch));
+            nsRefPtr<dom::Touch> oldTouch = gCaptureTouchList.GetWeak(id);
             if (oldTouch) {
-              domtouch->SetTarget(oldTouch->GetTarget());
+              touch->SetTarget(oldTouch->mTarget);
               gCaptureTouchList.Put(id, touch);
             }
           }
@@ -6282,24 +6301,21 @@ PresShell::HandleEvent(nsIFrame        *aFrame,
       case NS_TOUCH_END: {
         // get the correct shell to dispatch to
         nsTouchEvent* touchEvent = static_cast<nsTouchEvent*>(aEvent);
-        nsTArray<nsCOMPtr<nsIDOMTouch> >  &touches = touchEvent->touches;
+        nsTArray< nsRefPtr<dom::Touch> >& touches = touchEvent->touches;
         for (uint32_t i = 0; i < touches.Length(); ++i) {
-          nsIDOMTouch *touch = touches[i];
+          dom::Touch* touch = touches[i];
           if (!touch) {
             break;
           }
   
-          int32_t id;
-          touch->GetIdentifier(&id);
-          nsCOMPtr<nsIDOMTouch> oldTouch;
-          gCaptureTouchList.Get(id, getter_AddRefs(oldTouch));
+          nsRefPtr<dom::Touch> oldTouch =
+            gCaptureTouchList.GetWeak(touch->Identifier());
           if (!oldTouch) {
             break;
           }
   
-          nsCOMPtr<nsIDOMEventTarget> targetPtr;
-          oldTouch->GetTarget(getter_AddRefs(targetPtr));
-          nsCOMPtr<nsIContent> content = do_QueryInterface(targetPtr);
+          nsCOMPtr<nsIContent> content =
+            do_QueryInterface(oldTouch->Target());
           if (!content) {
             break;
           }
@@ -6677,28 +6693,24 @@ PresShell::HandleEventInternal(nsEvent* aEvent, nsEventStatus* aStatus)
         // Remove the changed touches
         // need to make sure we only remove touches that are ending here
         nsTouchEvent* touchEvent = static_cast<nsTouchEvent*>(aEvent);
-        nsTArray<nsCOMPtr<nsIDOMTouch> >  &touches = touchEvent->touches;
+        nsTArray< nsRefPtr<dom::Touch> >& touches = touchEvent->touches;
         for (uint32_t i = 0; i < touches.Length(); ++i) {
-          nsIDOMTouch *touch = touches[i];
-          Touch *domtouch = static_cast<Touch*>(touch);
+          dom::Touch* touch = touches[i];
           if (!touch) {
             continue;
           }
           touch->mMessage = aEvent->message;
           touch->mChanged = true;
-          nsCOMPtr<nsIDOMTouch> oldTouch;
 
-          int32_t id;
-          touch->GetIdentifier(&id);
-
-          gCaptureTouchList.Get(id, getter_AddRefs(oldTouch));
+          int32_t id = touch->Identifier();
+          nsRefPtr<dom::Touch> oldTouch = gCaptureTouchList.GetWeak(id);
           if (!oldTouch) {
             continue;
           }
-          nsCOMPtr<EventTarget> targetPtr = oldTouch->GetTarget();
+          nsCOMPtr<EventTarget> targetPtr = oldTouch->mTarget;
 
           mCurrentEventContent = do_QueryInterface(targetPtr);
-          domtouch->SetTarget(targetPtr);
+          touch->SetTarget(targetPtr);
           gCaptureTouchList.Remove(id);
         }
         // add any touches left in the touch list, but ensure changed=false
@@ -6708,36 +6720,33 @@ PresShell::HandleEventInternal(nsEvent* aEvent, nsEventStatus* aStatus)
       case NS_TOUCH_MOVE: {
         // Check for touches that changed. Mark them add to queue
         nsTouchEvent* touchEvent = static_cast<nsTouchEvent*>(aEvent);
-        nsTArray<nsCOMPtr<nsIDOMTouch> >& touches = touchEvent->touches;
+        nsTArray< nsRefPtr<dom::Touch> >& touches = touchEvent->touches;
         bool haveChanged = false;
         for (int32_t i = touches.Length(); i; ) {
           --i;
-          nsIDOMTouch *touch = touches[i];
-          Touch *domtouch = static_cast<Touch*>(touch);
+          dom::Touch* touch = touches[i];
           if (!touch) {
             continue;
           }
-          int32_t id;
-          touch->GetIdentifier(&id);
+          int32_t id = touch->Identifier();
           touch->mMessage = aEvent->message;
 
-          nsCOMPtr<nsIDOMTouch> oldTouch;
-          gCaptureTouchList.Get(id, getter_AddRefs(oldTouch));
+          nsRefPtr<dom::Touch> oldTouch = gCaptureTouchList.GetWeak(id);
           if (!oldTouch) {
             touches.RemoveElementAt(i);
             continue;
           }
-          if(domtouch->Equals(oldTouch)) {
+          if (touch->Equals(oldTouch)) {
             touch->mChanged = true;
             haveChanged = true;
           }
 
-          nsCOMPtr<EventTarget> targetPtr = oldTouch->GetTarget();
+          nsCOMPtr<dom::EventTarget> targetPtr = oldTouch->mTarget;
           if (!targetPtr) {
             touches.RemoveElementAt(i);
             continue;
           }
-          domtouch->SetTarget(targetPtr);
+          touch->SetTarget(targetPtr);
 
           gCaptureTouchList.Put(id, touch);
           // if we're moving from touchstart to touchmove for this touch
@@ -8151,8 +8160,9 @@ PresShell::Observe(nsISupports* aSubject,
         {
           nsAutoScriptBlocker scriptBlocker;
           ++mChangeNestCount;
-          mFrameConstructor->ProcessRestyledFrames(changeList);
-          mFrameConstructor->FlushOverflowChangedTracker();
+          RestyleManager* restyleManager = mPresContext->RestyleManager();
+          restyleManager->ProcessRestyledFrames(changeList);
+          restyleManager->FlushOverflowChangedTracker();
           --mChangeNestCount;
         }
       }
@@ -9444,7 +9454,7 @@ PresShell::GetRootPresShell()
 }
 
 void
-PresShell::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf,
+PresShell::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf,
                                nsArenaMemoryStats *aArenaObjectsSize,
                                size_t *aPresShellSize,
                                size_t *aStyleSetsSize,
@@ -9463,7 +9473,7 @@ PresShell::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf,
 }
 
 size_t
-PresShell::SizeOfTextRuns(nsMallocSizeOfFun aMallocSizeOf) const
+PresShell::SizeOfTextRuns(MallocSizeOf aMallocSizeOf) const
 {
   nsIFrame* rootFrame = mFrameConstructor->GetRootFrame();
   if (!rootFrame) {

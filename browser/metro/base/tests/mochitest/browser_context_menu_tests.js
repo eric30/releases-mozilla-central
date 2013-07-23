@@ -54,7 +54,7 @@ gTests.push({
 
     // invoke selection context menu
     let promise = waitForEvent(document, "popupshown");
-    sendContextMenuClickToElement(win, span, 85, 10);
+    sendContextMenuClickToElement(win, span);
     yield promise;
 
     // should be visible
@@ -87,7 +87,7 @@ gTests.push({
     let link = win.document.getElementById("text2-link");
     win.getSelection().selectAllChildren(link);
     promise = waitForEvent(document, "popupshown");
-    sendContextMenuClickToElement(win, link, 40, 10);
+    sendContextMenuClickToElement(win, link);
     yield promise;
 
     // should be visible
@@ -109,7 +109,7 @@ gTests.push({
 
     link = win.document.getElementById("text2-link");
     promise = waitForEvent(document, "popupshown");
-    sendContextMenuClickToElement(win, link, 40, 10);
+    sendContextMenuClickToElement(win, link);
     yield promise;
 
     // should be visible
@@ -131,7 +131,7 @@ gTests.push({
 
     let input = win.document.getElementById("text3-input");
     promise = waitForEvent(document, "popupshown");
-    sendContextMenuClickToElement(win, input, 20, 10);
+    sendContextMenuClickToElement(win, input);
     yield promise;
 
     // should be visible
@@ -155,7 +155,7 @@ gTests.push({
     input.value = "hello, I'm sorry but I must be going.";
     input.setSelectionRange(0, 5);
     promise = waitForEvent(document, "popupshown");
-    sendContextMenuClickToElement(win, input, 20, 10);
+    sendContextMenuClickToElement(win, input, 20);
     yield promise;
 
     // should be visible
@@ -187,7 +187,7 @@ gTests.push({
     input = win.document.getElementById("text3-input");
     input.select();
     promise = waitForEvent(document, "popupshown");
-    sendContextMenuClickToElement(win, input, 20, 10);
+    sendContextMenuClickToElement(win, input, 20);
     yield promise;
 
     // should be visible
@@ -208,7 +208,7 @@ gTests.push({
     input = win.document.getElementById("text3-input");
     input.select();
     promise = waitForEvent(document, "popupshown");
-    sendContextMenuClickToElement(win, input, 20, 10);
+    sendContextMenuClickToElement(win, input, 20);
     yield promise;
 
     // should be visible
@@ -232,7 +232,7 @@ gTests.push({
     input.value = "hello, I'm sorry but I must be going.";
     input.setSelectionRange(0, 5);
     promise = waitForEvent(document, "popupshown");
-    sendContextMenuClickToElement(win, input, 20, 10);
+    sendContextMenuClickToElement(win, input, 20);
     yield promise;
 
     // should be visible
@@ -268,7 +268,7 @@ gTests.push({
     input.value = "";
 
     promise = waitForEvent(document, "popupshown");
-    sendContextMenuClickToElement(win, input, 20, 10);
+    sendContextMenuClickToElement(win, input, 20);
     yield promise;
 
     // should be visible
@@ -291,7 +291,7 @@ gTests.push({
     input.value = "";
 
     promise = waitForEvent(Elements.tray, "transitionend");
-    sendContextMenuClickToElement(win, input, 20, 10);
+    sendContextMenuClickToElement(win, input, 20);
     yield promise;
 
     // should *not* be visible
@@ -409,7 +409,9 @@ gTests.push({
 
     ////////////////////////////////////////////////////////////
     // Context menu options
-
+    /*
+    XXX disabled temporarily due to bug 880739
+    
     // image01 - 1x1x100x100
     let promise = waitForEvent(document, "popupshown");
     sendContextMenuClickToWindow(win, 10, 10);
@@ -456,7 +458,7 @@ gTests.push({
     purgeEventQueue();
 
     ok(saveLocationPath.exists(), "image saved");
-
+    */
     ////////////////////////////////////////////////////////////
     // Copy image
 
@@ -465,10 +467,10 @@ gTests.push({
     yield promise;
     ok(ContextMenuUI._menuPopup._visible, "is visible");
 
-    menuItem = document.getElementById("context-copy-image");
+    let menuItem = document.getElementById("context-copy-image");
     ok(menuItem, "menu item exists");
     ok(!menuItem.hidden, "menu item visible");
-    popupPromise = waitForEvent(document, "popuphidden");
+    let popupPromise = waitForEvent(document, "popuphidden");
     EventUtils.synthesizeMouse(menuItem, 10, 10, {}, win);
     yield popupPromise;
 

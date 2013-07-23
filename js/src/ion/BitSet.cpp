@@ -5,9 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "jsutil.h"
-#include "BitSet.h"
-
-#include "jsscriptinlines.h"
+#include "ion/BitSet.h"
 
 using namespace js;
 using namespace js::ion;

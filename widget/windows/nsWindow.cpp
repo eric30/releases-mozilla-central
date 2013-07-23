@@ -106,6 +106,8 @@
 #include "mozilla/Services.h"
 #include "nsNativeThemeWin.h"
 #include "nsWindowsDllInterceptor.h"
+#include "nsLayoutUtils.h"
+#include "nsView.h"
 #include "nsIWindowMediator.h"
 #include "nsIServiceManager.h"
 #include "nsWindowGfx.h"
@@ -142,6 +144,7 @@
 #include "oleidl.h"
 #include <winuser.h>
 #include "nsAccessibilityService.h"
+#include "mozilla/a11y/DocAccessible.h"
 #include "mozilla/a11y/Platform.h"
 #if !defined(WINABLEAPI)
 #include <winable.h>
@@ -594,6 +597,13 @@ nsWindow::Create(nsIWidget *aParent,
       Preferences::GetBool("intl.keyboard.per_window_layout", false);
   }
 
+  // Query for command button metric data for rendering the titlebar. We
+  // only do this once on the first window.
+  if (mWindowType == eWindowType_toplevel &&
+      (!nsUXThemeData::sTitlebarInfoPopulatedThemed ||
+       !nsUXThemeData::sTitlebarInfoPopulatedAero)) {
+    nsUXThemeData::UpdateTitlebarInfo(mWnd);
+  }
   return NS_OK;
 }
 
@@ -641,8 +651,8 @@ NS_METHOD nsWindow::Destroy()
   // Our windows can be subclassed which may prevent us receiving WM_DESTROY. If OnDestroy()
   // didn't get called, call it now.
   if (false == mOnDestroyCalled) {
-    LRESULT result;
-    mWindowHook.Notify(mWnd, WM_DESTROY, 0, 0, &result);
+    MSGResult msgResult;
+    mWindowHook.Notify(mWnd, WM_DESTROY, 0, 0, msgResult);
     OnDestroy();
   }
 
@@ -1237,9 +1247,11 @@ void nsWindow::SetThemeRegion()
  **************************************************************/
 
 NS_METHOD nsWindow::RegisterTouchWindow() {
-  mTouchWindow = true;
-  mGesture.RegisterTouchWindow(mWnd);
-  ::EnumChildWindows(mWnd, nsWindow::RegisterTouchForDescendants, 0);
+  if (Preferences::GetInt("dom.w3c_touch_events.enabled", 0)) {
+    mTouchWindow = true;
+    mGesture.RegisterTouchWindow(mWnd);
+    ::EnumChildWindows(mWnd, nsWindow::RegisterTouchForDescendants, 0);
+  }
   return NS_OK;
 }
 
@@ -3736,7 +3748,7 @@ bool nsWindow::DispatchPluginEvent(UINT aMessage,
 {
   bool ret = nsWindowBase::DispatchPluginEvent(
                WinUtils::InitMSG(aMessage, aWParam, aLParam, mWnd));
-  if (aDispatchPendingEvents) {
+  if (aDispatchPendingEvents && !Destroyed()) {
     DispatchPendingEvents();
   }
   return ret;
@@ -4337,28 +4349,26 @@ LRESULT CALLBACK nsWindow::WindowProcInternal(HWND hWnd, UINT msg, WPARAM wParam
 // processed by the caller self.
 bool
 nsWindow::ProcessMessageForPlugin(const MSG &aMsg,
-                                  LRESULT *aResult,
-                                  bool &aCallDefWndProc)
+                                  MSGResult& aResult)
 {
-  NS_PRECONDITION(aResult, "aResult must be non-null.");
-  *aResult = 0;
+  aResult.mResult = 0;
+  aResult.mConsumed = true;
 
-  aCallDefWndProc = false;
   bool eventDispatched = false;
   switch (aMsg.message) {
     case WM_CHAR:
     case WM_SYSCHAR:
-      *aResult = ProcessCharMessage(aMsg, &eventDispatched);
+      aResult.mResult = ProcessCharMessage(aMsg, &eventDispatched);
       break;
 
     case WM_KEYUP:
     case WM_SYSKEYUP:
-      *aResult = ProcessKeyUpMessage(aMsg, &eventDispatched);
+      aResult.mResult = ProcessKeyUpMessage(aMsg, &eventDispatched);
       break;
 
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN:
-      *aResult = ProcessKeyDownMessage(aMsg, &eventDispatched);
+      aResult.mResult = ProcessKeyDownMessage(aMsg, &eventDispatched);
       break;
 
     case WM_DEADCHAR:
@@ -4375,9 +4385,12 @@ nsWindow::ProcessMessageForPlugin(const MSG &aMsg,
       return false;
   }
 
-  if (!eventDispatched)
-    aCallDefWndProc = !nsWindowBase::DispatchPluginEvent(aMsg);
-  DispatchPendingEvents();
+  if (!eventDispatched) {
+    aResult.mConsumed = nsWindowBase::DispatchPluginEvent(aMsg);
+  }
+  if (!Destroyed()) {
+    DispatchPendingEvents();
+  }
   return true;
 }
 
@@ -4410,37 +4423,49 @@ static bool CleartypeSettingChanged()
   return true;
 }
 
-// The main windows message processing method.
-bool nsWindow::ProcessMessage(UINT msg, WPARAM &wParam, LPARAM &lParam,
-                                LRESULT *aRetValue)
+bool
+nsWindow::ExternalHandlerProcessMessage(UINT aMessage,
+                                        WPARAM& aWParam,
+                                        LPARAM& aLParam,
+                                        MSGResult& aResult)
 {
-  // (Large blocks of code should be broken out into OnEvent handlers.)
-  if (mWindowHook.Notify(mWnd, msg, wParam, lParam, aRetValue))
+  if (mWindowHook.Notify(mWnd, aMessage, aWParam, aLParam, aResult)) {
     return true;
+  }
 
+  if (IMEHandler::ProcessMessage(this, aMessage, aWParam, aLParam, aResult)) {
+    return true;
+  }
+
+  if (MouseScrollHandler::ProcessMessage(this, aMessage, aWParam, aLParam,
+                                         aResult)) {
+    return true;
+  }
+
+  if (PluginHasFocus()) {
+    MSG nativeMsg = WinUtils::InitMSG(aMessage, aWParam, aLParam, mWnd);
+    if (ProcessMessageForPlugin(nativeMsg, aResult)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// The main windows message processing method.
+bool
+nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
+                         LRESULT *aRetValue)
+{
 #if defined(EVENT_DEBUG_OUTPUT)
   // First param shows all events, second param indicates whether
   // to show mouse move events. See nsWindowDbg for details.
   PrintEvent(msg, SHOW_REPEAT_EVENTS, SHOW_MOUSEMOVE_EVENTS);
 #endif
 
-  bool eatMessage;
-  if (IMEHandler::ProcessMessage(this, msg, wParam, lParam, aRetValue,
-                                 eatMessage)) {
-    return mWnd ? eatMessage : true;
-  }
-
-  if (MouseScrollHandler::ProcessMessage(this, msg, wParam, lParam, aRetValue,
-                                         eatMessage)) {
-    return mWnd ? eatMessage : true;
-  }
-
-  if (PluginHasFocus()) {
-    bool callDefaultWndProc;
-    MSG nativeMsg = WinUtils::InitMSG(msg, wParam, lParam, mWnd);
-    if (ProcessMessageForPlugin(nativeMsg, aRetValue, callDefaultWndProc)) {
-      return mWnd ? !callDefaultWndProc : true;
-    }
+  MSGResult msgResult(aRetValue);
+  if (ExternalHandlerProcessMessage(msg, wParam, lParam, msgResult)) {
+    return (msgResult.mConsumed || !mWnd);
   }
 
   bool result = false;    // call the default nsWindow proc
@@ -4455,6 +4480,7 @@ bool nsWindow::ProcessMessage(UINT msg, WPARAM &wParam, LPARAM &lParam,
     return true;
   }
 
+  // (Large blocks of code should be broken out into OnEvent handlers.)
   switch (msg) {
     // WM_QUERYENDSESSION must be handled by all windows.
     // Otherwise Windows thinks the window can just be killed at will.
@@ -5153,7 +5179,7 @@ bool nsWindow::ProcessMessage(UINT msg, WPARAM &wParam, LPARAM &lParam,
       // for details).
       DWORD objId = static_cast<DWORD>(lParam);
       if (objId == OBJID_CLIENT) { // oleacc.dll will be loaded dynamically
-        a11y::Accessible* rootAccessible = GetRootAccessible(); // Held by a11y cache
+        a11y::Accessible* rootAccessible = GetAccessible(); // Held by a11y cache
         if (rootAccessible) {
           IAccessible *msaaAccessible = NULL;
           rootAccessible->GetNativeInterface((void**)&msaaAccessible); // does an addref
@@ -6615,47 +6641,25 @@ nsWindow::GetIMEUpdatePreference()
 #ifdef ACCESSIBILITY
 
 #ifdef DEBUG_WMGETOBJECT
-#define NS_LOG_WMGETOBJECT_WNDACC(aWnd)                                        \
-  a11y::Accessible* acc = aWnd ? aWind->GetAccessible() : nullptr;             \
-  PR_LOG(gWindowsLog, PR_LOG_ALWAYS, ("     acc: %p", acc));                   \
-  if (acc) {                                                                   \
+#define NS_LOG_WMGETOBJECT(aWnd, aHwnd, aAcc)                                  \
+  PR_LOG(gWindowsLog, PR_LOG_ALWAYS,                                           \
+         ("Get the window:\n  {\n     HWND: %d, parent HWND: %d, wndobj: %p,\n",\
+           aHwnd, ::GetParent(aHwnd), aWnd));                                  \
+  PR_LOG(gWindowsLog, PR_LOG_ALWAYS, ("     acc: %p", aAcc));                  \
+  if (aAcc) {                                                                  \
     nsAutoString name;                                                         \
-    acc->GetName(name);                                                        \
+    aAcc->Name(name);                                                          \
     PR_LOG(gWindowsLog, PR_LOG_ALWAYS,                                         \
            (", accname: %s", NS_ConvertUTF16toUTF8(name).get()));              \
-    nsCOMPtr<nsIAccessibleDocument> doc = do_QueryObject(acc);                 \
-    void *hwnd = nullptr;                                                      \
-    doc->GetWindowHandle(&hwnd);                                               \
-    PR_LOG(gWindowsLog, PR_LOG_ALWAYS, (", acc hwnd: %d", hwnd));              \
-  }
+  }                                                                            \
+  PR_LOG(gWindowsLog, PR_LOG_ALWAYS, ("\n }\n"));
 
-#define NS_LOG_WMGETOBJECT_THISWND                                             \
-{                                                                              \
-  PR_LOG(gWindowsLog, PR_LOG_ALWAYS,                                           \
-         ("\n*******Get Doc Accessible*******\nOrig Window: "));               \
-  PR_LOG(gWindowsLog, PR_LOG_ALWAYS,                                           \
-         ("\n  {\n     HWND: %d, parent HWND: %d, wndobj: %p,\n",              \
-          mWnd, ::GetParent(mWnd), this));                                     \
-  NS_LOG_WMGETOBJECT_WNDACC(this)                                              \
-  PR_LOG(gWindowsLog, PR_LOG_ALWAYS, ("\n  }\n"));                             \
-}
-
-#define NS_LOG_WMGETOBJECT_WND(aMsg, aHwnd)                                    \
-{                                                                              \
-  nsWindow* wnd = WinUtils::GetNSWindowPtr(aHwnd);                             \
-  PR_LOG(gWindowsLog, PR_LOG_ALWAYS,                                           \
-         ("Get " aMsg ":\n  {\n     HWND: %d, parent HWND: %d, wndobj: %p,\n", \
-          aHwnd, ::GetParent(aHwnd), wnd));                                    \
-  NS_LOG_WMGETOBJECT_WNDACC(wnd);                                              \
-  PR_LOG(gWindowsLog, PR_LOG_ALWAYS, ("\n }\n"));                              \
-}
 #else
-#define NS_LOG_WMGETOBJECT_THISWND
-#define NS_LOG_WMGETOBJECT_WND(aMsg, aHwnd)
-#endif // DEBUG_WMGETOBJECT
+#define NS_LOG_WMGETOBJECT(aWnd, aHwnd, aAcc)
+#endif
 
 a11y::Accessible*
-nsWindow::GetRootAccessible()
+nsWindow::GetAccessible()
 {
   // If the pref was ePlatformIsDisabled, return null here, disabling a11y.
   if (a11y::PlatformDisabledState() == a11y::ePlatformIsDisabled)
@@ -6665,10 +6669,28 @@ nsWindow::GetRootAccessible()
     return nullptr;
   }
 
-  NS_LOG_WMGETOBJECT_THISWND
-  NS_LOG_WMGETOBJECT_WND("This Window", mWnd);
+  // In case of popup window return a popup accessible.
+  nsView* view = nsView::GetViewFor(this);
+  if (view) {
+    nsIFrame* frame = view->GetFrame();
+    if (frame && nsLayoutUtils::IsPopup(frame)) {
+      nsCOMPtr<nsIAccessibilityService> accService =
+        services::GetAccessibilityService();
+      if (accService) {
+        a11y::DocAccessible* docAcc =
+          GetAccService()->GetDocAccessible(frame->PresContext()->PresShell());
+        if (docAcc) {
+          NS_LOG_WMGETOBJECT(this, mWnd,
+                             docAcc->GetAccessible(frame->GetContent()));
+          return docAcc->GetAccessible(frame->GetContent());
+        }
+      }
+    }
+  }
 
-  return GetAccessible();
+  // otherwise root document accessible.
+  NS_LOG_WMGETOBJECT(this, mWnd, GetRootAccessible());
+  return GetRootAccessible();
 }
 #endif
 

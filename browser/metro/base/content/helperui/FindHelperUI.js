@@ -42,13 +42,13 @@ var FindHelperUI = {
   },
 
   init: function findHelperInit() {
-    this._textbox = document.getElementById("find-helper-textbox");
-    this._container = Elements.contentNavigator;
+    this._textbox = document.getElementById("findbar-textbox");
+    this._container = Elements.findbar;
 
     this._cmdPrevious = document.getElementById(this.commands.previous);
     this._cmdNext = document.getElementById(this.commands.next);
 
-    this._textbox.addEventListener('keydown', this);
+    this._textbox.addEventListener("keydown", this);
 
     // Listen for find assistant messages from content
     messageManager.addMessageListener("FindAssist:Show", this);
@@ -57,8 +57,7 @@ var FindHelperUI = {
     // Listen for events where form assistant should be closed
     Elements.tabList.addEventListener("TabSelect", this, true);
     Elements.browsers.addEventListener("URLChanged", this, true);
-    window.addEventListener("MozContextUIShow", this, true);
-    window.addEventListener("MozContextUIExpand", this, true);
+    window.addEventListener("MozAppbarShowing", this);
   },
 
   receiveMessage: function findHelperReceiveMessage(aMessage) {
@@ -80,8 +79,6 @@ var FindHelperUI = {
 
   handleEvent: function findHelperHandleEvent(aEvent) {
     switch (aEvent.type) {
-      case "MozContextUIShow":
-      case "MozContextUIExpand":
       case "TabSelect":
         this.hide();
         break;
@@ -93,17 +90,22 @@ var FindHelperUI = {
 
       case "keydown":
         if (aEvent.keyCode == Ci.nsIDOMKeyEvent.DOM_VK_RETURN) {
-	  if (aEvent.shiftKey) {
-	    this.goToPrevious();
-	  } else {
-	    this.goToNext();
-	  }
+          if (aEvent.shiftKey) {
+            this.goToPrevious();
+          } else {
+            this.goToNext();
+          }
+        }
+
+      case "MozAppbarShowing":
+        if (aEvent.target != this._container) {
+          this.hide();
         }
     }
   },
 
   show: function findHelperShow() {
-    if (this._open)
+    if (StartUI.isVisible || this._open)
       return;
 
     // Hide any menus

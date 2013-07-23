@@ -91,9 +91,11 @@ MobileMessageCallback::NotifyError(int32_t aError)
     case nsIMobileMessageCallback::RADIO_DISABLED_ERROR:
       mDOMRequest->FireError(NS_LITERAL_STRING("RadioDisabledError"));
       break;
+    case nsIMobileMessageCallback::INVALID_ADDRESS_ERROR:
+      mDOMRequest->FireError(NS_LITERAL_STRING("InvalidAddressError"));
+      break;
     default: // SUCCESS_NO_ERROR is handled above.
-      MOZ_NOT_REACHED("Should never get here!");
-      return NS_ERROR_FAILURE;
+      MOZ_CRASH("Should never get here!");
   }
 
   return NS_OK;

@@ -180,8 +180,6 @@ class nsMainThreadPtrHandle
     return *this;
   }
 
-  operator nsMainThreadPtrHolder<T>*() { return mPtr.get(); }
-
   // These all call through to nsMainThreadPtrHolder, and thus implicitly
   // assert that we're on the main thread. Off-main-thread consumers must treat
   // these handles as opaque.

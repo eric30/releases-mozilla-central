@@ -124,24 +124,14 @@ class StringifyContext
         gap(gap),
         replacer(cx, replacer),
         propertyList(propertyList),
-        depth(0),
-        objectStack(cx)
+        depth(0)
     {}
-
-    bool init() {
-        return objectStack.init(16);
-    }
-
-#ifdef DEBUG
-    ~StringifyContext() { JS_ASSERT(objectStack.empty()); }
-#endif
 
     StringBuffer &sb;
     const StringBuffer &gap;
     RootedObject replacer;
     const AutoIdVector &propertyList;
     uint32_t depth;
-    HashSet<JSObject *> objectStack;
 };
 
 static JSBool Str(JSContext *cx, const Value &v, StringifyContext *scx);
@@ -160,31 +150,6 @@ WriteIndent(JSContext *cx, StringifyContext *scx, uint32_t limit)
 
     return JS_TRUE;
 }
-
-class CycleDetector
-{
-  public:
-    CycleDetector(JSContext *cx, StringifyContext *scx, JSObject *obj)
-      : objectStack(scx->objectStack), obj(cx, obj) {
-    }
-
-    bool init(JSContext *cx) {
-        HashSet<JSObject *>::AddPtr ptr = objectStack.lookupForAdd(obj);
-        if (ptr) {
-            JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_CYCLIC_VALUE, js_object_str);
-            return false;
-        }
-        return objectStack.add(ptr, obj);
-    }
-
-    ~CycleDetector() {
-        objectStack.remove(obj);
-    }
-
-  private:
-    HashSet<JSObject *> &objectStack;
-    RootedObject obj;
-};
 
 template<typename KeyType>
 class KeyStringifier {
@@ -313,9 +278,13 @@ JO(JSContext *cx, HandleObject obj, StringifyContext *scx)
      */
 
     /* Steps 1-2, 11. */
-    CycleDetector detect(cx, scx, obj);
-    if (!detect.init(cx))
-        return JS_FALSE;
+    AutoCycleDetector detect(cx, obj);
+    if (!detect.init())
+        return false;
+    if (detect.foundCycle()) {
+        JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_CYCLIC_VALUE, js_object_str);
+        return false;
+    }
 
     if (!scx->sb.append('{'))
         return JS_FALSE;
@@ -399,9 +368,13 @@ JA(JSContext *cx, HandleObject obj, StringifyContext *scx)
      */
 
     /* Steps 1-2, 11. */
-    CycleDetector detect(cx, scx, obj);
-    if (!detect.init(cx))
-        return JS_FALSE;
+    AutoCycleDetector detect(cx, obj);
+    if (!detect.init())
+        return false;
+    if (detect.foundCycle()) {
+        JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_CYCLIC_VALUE, js_object_str);
+        return false;
+    }
 
     if (!scx->sb.append('['))
         return JS_FALSE;
@@ -523,8 +496,7 @@ js_Stringify(JSContext *cx, MutableHandleValue vp, JSObject *replacer_, Value sp
              StringBuffer &sb)
 {
     RootedObject replacer(cx, replacer_);
-    RootedValue spaceRoot(cx, space_);
-    Value &space = spaceRoot.get();
+    RootedValue space(cx, space_);
 
     /* Step 4. */
     AutoIdVector propertyList(cx);
@@ -563,7 +535,7 @@ js_Stringify(JSContext *cx, MutableHandleValue vp, JSObject *replacer_, Value sp
             /* Step 4b(ii). */
             uint32_t len;
             JS_ALWAYS_TRUE(GetLengthProperty(cx, replacer, &len));
-            if (replacer->isArray() && !replacer->isIndexed())
+            if (replacer->is<ArrayObject>() && !replacer->isIndexed())
                 len = Min(len, replacer->getDenseInitializedLength());
 
             // Cap the initial size to a moderately small value.  This avoids
@@ -631,7 +603,7 @@ js_Stringify(JSContext *cx, MutableHandleValue vp, JSObject *replacer_, Value sp
                 return false;
             space = NumberValue(d);
         } else if (ObjectClassIs(spaceObj, ESClass_String, cx)) {
-            JSString *str = ToStringSlow<CanGC>(cx, spaceRoot);
+            JSString *str = ToStringSlow<CanGC>(cx, space);
             if (!str)
                 return false;
             space = StringValue(str);
@@ -662,7 +634,7 @@ js_Stringify(JSContext *cx, MutableHandleValue vp, JSObject *replacer_, Value sp
     }
 
     /* Step 9. */
-    RootedObject wrapper(cx, NewBuiltinClassInstance(cx, &ObjectClass));
+    RootedObject wrapper(cx, NewBuiltinClassInstance(cx, &JSObject::class_));
     if (!wrapper)
         return false;
 
@@ -676,9 +648,6 @@ js_Stringify(JSContext *cx, MutableHandleValue vp, JSObject *replacer_, Value sp
 
     /* Step 11. */
     StringifyContext scx(cx, sb, gap, replacer, propertyList);
-    if (!scx.init())
-        return false;
-
     if (!PreprocessValue(cx, wrapper, HandleId(emptyId), vp, &scx))
         return false;
     if (IsFilteredValue(vp))
@@ -703,10 +672,10 @@ Walk(JSContext *cx, HandleObject holder, HandleId name, HandleValue reviver, Mut
         RootedObject obj(cx, &val.toObject());
 
         /* 'val' must have been produced by the JSON parser, so not a proxy. */
-        JS_ASSERT(!obj->isProxy());
-        if (obj->isArray()) {
+        JS_ASSERT(!obj->is<ProxyObject>());
+        if (obj->is<ArrayObject>()) {
             /* Step 2a(ii). */
-            uint32_t length = obj->getArrayLength();
+            uint32_t length = obj->as<ArrayObject>().length();
 
             /* Step 2a(i), 2a(iii-iv). */
             RootedId id(cx);
@@ -789,7 +758,7 @@ Walk(JSContext *cx, HandleObject holder, HandleId name, HandleValue reviver, Mut
 static bool
 Revive(JSContext *cx, HandleValue reviver, MutableHandleValue vp)
 {
-    RootedObject obj(cx, NewBuiltinClassInstance(cx, &ObjectClass));
+    RootedObject obj(cx, NewBuiltinClassInstance(cx, &JSObject::class_));
     if (!obj)
         return false;
 

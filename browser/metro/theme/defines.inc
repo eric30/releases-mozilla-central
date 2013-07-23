@@ -19,6 +19,7 @@
 %define toolbar_vertical_spacing 5px
 %define toolbar_horizontal_spacing 20px
 %define toolbar_height 68px
+%define labelled_toolbar_height 90px
 %define tabs_height 178px
 %define findbar_height 54px
 
@@ -29,8 +30,16 @@
 %define thumbnail_width 232px
 %define thumbnail_height 148px
 
+%define grid_column_width 131px
+%define grid_double_column_width 262px
+%define grid_row_height 86px
+%define grid_double_row_height 172px
+
+%define compactgrid_column_width 62px
+%define compactgrid_row_height 62px
+
 %define tile_border_color #dbdcde
-%define tile_width 200px
+%define tile_spacing 12px
 
 %define scroller_thickness 4px
 %define scroller_minimum 8px

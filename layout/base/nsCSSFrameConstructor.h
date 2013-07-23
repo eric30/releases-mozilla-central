@@ -20,9 +20,9 @@
 #include "nsHashKeys.h"
 #include "nsThreadUtils.h"
 #include "nsCSSPseudoElements.h"
-#include "RestyleTracker.h"
 #include "nsIAnonymousContentCreator.h"
 #include "nsFrameManager.h"
+#include "RestyleManager.h"
 
 class nsIDocument;
 struct nsFrameItems;
@@ -36,32 +36,37 @@ class nsPresContext;
 class nsStyleChangeList;
 class nsIFrame;
 struct nsGenConInitializer;
-class ChildIterator;
+
 class nsICSSAnonBoxPseudo;
 class nsPageContentFrame;
 struct PendingBinding;
-class nsRefreshDriver;
 
 class nsFrameConstructorState;
 class nsFrameConstructorSaveState;
 
+namespace mozilla {
+
+class RestyleManager;
+
+namespace dom {
+
+class FlattenedChildIterator;
+
+}
+}
+
 class nsCSSFrameConstructor : public nsFrameManager
 {
-  friend class nsRefreshDriver;
-
 public:
   typedef mozilla::dom::Element Element;
-  typedef mozilla::css::RestyleTracker RestyleTracker;
-  typedef mozilla::css::OverflowChangedTracker OverflowChangedTracker;
+
+  friend class mozilla::RestyleManager;
 
   nsCSSFrameConstructor(nsIDocument *aDocument, nsIPresShell* aPresShell,
                         nsStyleSet* aStyleSet);
   ~nsCSSFrameConstructor(void) {
     NS_ASSERTION(mUpdateCount == 0, "Dying in the middle of our own update?");
   }
-
-  struct RestyleData;
-  friend struct RestyleData;
 
   // get the alternate text for a content node
   static void GetAlternateTextFor(nsIContent*    aContent,
@@ -73,6 +78,9 @@ private:
   nsCSSFrameConstructor& operator=(const nsCSSFrameConstructor& aCopy) MOZ_DELETE;
 
 public:
+  mozilla::RestyleManager* RestyleManager() const
+    { return mPresShell->GetPresContext()->RestyleManager(); }
+
   nsIFrame* ConstructRootFrame();
 
   nsresult ReconstructDocElementHierarchy();
@@ -110,7 +118,6 @@ private:
   // ContentInserted calls for each child.  aEndChild = nullptr indicates that we
   // are dealing with an append.
   nsIFrame* GetRangeInsertionPoint(nsIContent* aContainer,
-                                   nsIFrame* aParentFrame,
                                    nsIContent* aStartChild,
                                    nsIContent* aEndChild,
                                    bool aAllowLazyConstruction);
@@ -200,24 +207,12 @@ public:
   nsresult CharacterDataChanged(nsIContent* aContent,
                                 CharacterDataChangeInfo* aInfo);
 
-  nsresult ContentStateChanged(nsIContent*   aContent,
-                               nsEventStates aStateMask);
-
   // generate the child frames and process bindings
   nsresult GenerateChildFrames(nsIFrame* aFrame);
 
   // Should be called when a frame is going to be destroyed and
   // WillDestroyFrameTree hasn't been called yet.
   void NotifyDestroyingFrame(nsIFrame* aFrame);
-
-  void AttributeWillChange(Element* aElement,
-                           int32_t  aNameSpaceID,
-                           nsIAtom* aAttribute,
-                           int32_t  aModType);
-  void AttributeChanged(Element* aElement,
-                        int32_t  aNameSpaceID,
-                        nsIAtom* aAttribute,
-                        int32_t  aModType);
 
   void BeginUpdate();
   void EndUpdate();
@@ -226,124 +221,6 @@ public:
   // Gets called when the presshell is destroying itself and also
   // when we tear down our frame tree to reconstruct it
   void WillDestroyFrameTree();
-
-  // Get an integer that increments every time there is a style change
-  // as a result of a change to the :hover content state.
-  uint32_t GetHoverGeneration() const { return mHoverGeneration; }
-
-  // Get a counter that increments on every style change, that we use to
-  // track whether off-main-thread animations are up-to-date.
-  uint64_t GetAnimationGeneration() const { return mAnimationGeneration; }
-
-  // Note: It's the caller's responsibility to make sure to wrap a
-  // ProcessRestyledFrames call in a view update batch and a script blocker.
-  // This function does not call ProcessAttachedQueue() on the binding manager.
-  // If the caller wants that to happen synchronously, it needs to handle that
-  // itself.
-  nsresult ProcessRestyledFrames(nsStyleChangeList& aRestyleArray);
-
-private:
-
-  friend class mozilla::css::RestyleTracker;
-
-  void RestyleForEmptyChange(Element* aContainer);
-
-public:
-  // Restyling for a ContentInserted (notification after insertion) or
-  // for a CharacterDataChanged.  |aContainer| must be non-null; when
-  // the container is null, no work is needed.
-  void RestyleForInsertOrChange(Element* aContainer, nsIContent* aChild);
-
-  // This would be the same as RestyleForInsertOrChange if we got the
-  // notification before the removal.  However, we get it after, so we need the
-  // following sibling in addition to the old child.  |aContainer| must be
-  // non-null; when the container is null, no work is needed.  aFollowingSibling
-  // is the sibling that used to come after aOldChild before the removal.
-  void RestyleForRemove(Element* aContainer,
-                        nsIContent* aOldChild,
-                        nsIContent* aFollowingSibling);
-  // Same for a ContentAppended.  |aContainer| must be non-null; when
-  // the container is null, no work is needed.
-  void RestyleForAppend(Element* aContainer, nsIContent* aFirstNewContent);
-
-  // Process any pending restyles. This should be called after
-  // CreateNeededFrames.
-  // Note: It's the caller's responsibility to make sure to wrap a
-  // ProcessPendingRestyles call in a view update batch and a script blocker.
-  // This function does not call ProcessAttachedQueue() on the binding manager.
-  // If the caller wants that to happen synchronously, it needs to handle that
-  // itself.
-  void ProcessPendingRestyles();
-  
-  // Rebuilds all style data by throwing out the old rule tree and
-  // building a new one, and additionally applying aExtraHint (which
-  // must not contain nsChangeHint_ReconstructFrame) to the root frame.
-  void RebuildAllStyleData(nsChangeHint aExtraHint);
-
-  // Helper that does part of the work of RebuildAllStyleData, shared by
-  // RestyleElement for 'rem' handling.
-  void DoRebuildAllStyleData(RestyleTracker& aRestyleTracker,
-                             nsChangeHint aExtraHint);
-
-  // See PostRestyleEventCommon below.
-  void PostRestyleEvent(Element* aElement,
-                        nsRestyleHint aRestyleHint,
-                        nsChangeHint aMinChangeHint)
-  {
-    nsPresContext *presContext = mPresShell->GetPresContext();
-    if (presContext) {
-      PostRestyleEventCommon(aElement, aRestyleHint, aMinChangeHint,
-                             presContext->IsProcessingAnimationStyleChange());
-    }
-  }
-
-  // See PostRestyleEventCommon below.
-  void PostAnimationRestyleEvent(Element* aElement,
-                                 nsRestyleHint aRestyleHint,
-                                 nsChangeHint aMinChangeHint)
-  {
-    PostRestyleEventCommon(aElement, aRestyleHint, aMinChangeHint, true);
-  }
-
-  void FlushOverflowChangedTracker() 
-  {
-    mOverflowChangedTracker.Flush();
-  }
-
-private:
-  /**
-   * Notify the frame constructor that an element needs to have its
-   * style recomputed.
-   * @param aElement: The element to be restyled.
-   * @param aRestyleHint: Which nodes need to have selector matching run
-   *                      on them.
-   * @param aMinChangeHint: A minimum change hint for aContent and its
-   *                        descendants.
-   * @param aForAnimation: Whether the style should be computed with or
-   *                       without animation data.  Animation code
-   *                       sometimes needs to pass true; other code
-   *                       should generally pass the the pres context's
-   *                       IsProcessingAnimationStyleChange() value
-   *                       (which is the default value).
-   */
-  void PostRestyleEventCommon(Element* aElement,
-                              nsRestyleHint aRestyleHint,
-                              nsChangeHint aMinChangeHint,
-                              bool aForAnimation);
-  void PostRestyleEventInternal(bool aForLazyConstruction);
-public:
-
-  /**
-   * Asynchronously clear style data from the root frame downwards and ensure
-   * it will all be rebuilt. This is safe to call anytime; it will schedule
-   * a restyle and take effect next time style changes are flushed.
-   * This method is used to recompute the style data when some change happens
-   * outside of any style rules, like a color preference change or a change
-   * in a system font size, or to fix things up when an optimization in the
-   * style data has become invalid. We assume that the root frame will not
-   * need to be reframed.
-   */
-  void PostRebuildAllStyleDataEvent(nsChangeHint aExtraHint);
 
   // Request to create a continuing frame.  This method never returns null.
   nsIFrame* CreateContinuingFrame(nsPresContext* aPresContext,
@@ -355,10 +232,9 @@ public:
   nsresult ReplicateFixedFrames(nsPageContentFrame* aParentFrame);
 
   // Get the XBL insertion point for a child
-  nsresult GetInsertionPoint(nsIFrame*     aParentFrame,
-                             nsIContent*   aChildContent,
-                             nsIFrame**    aInsertionPoint,
-                             bool*       aMultiple = nullptr);
+  nsIFrame* GetInsertionPoint(nsIContent* aContainer,
+                              nsIContent* aChildContent,
+                              bool*       aMultiple = nullptr);
 
   nsresult CreateListBoxContent(nsPresContext* aPresContext,
                                 nsIFrame*       aParentFrame,
@@ -382,8 +258,6 @@ public:
   nsIFrame* GetDocElementContainingBlock()
     { return mDocElementContainingBlock; }
 
-  void SetPromoteReflowsToReframeRoot(bool aPromote) { mPromoteReflowsToReframeRoot = aPromote; }
-
 private:
   struct FrameConstructionItem;
   class FrameConstructionItemList;
@@ -393,14 +267,6 @@ private:
                                nsIFrame*      aParentFrame,
                                nsIFrame*      aPrevPageFrame,
                                nsIFrame*&     aCanvasFrame);
-
-  /* aMinHint is the minimal change that should be made to the element */
-  // XXXbz do we really need the aPrimaryFrame argument here?
-  void RestyleElement(Element* aElement,
-                      nsIFrame*       aPrimaryFrame,
-                      nsChangeHint    aMinHint,
-                      RestyleTracker& aRestyleTracker,
-                      bool            aRestyleDescendants);
 
   void InitAndRestoreFrame (const nsFrameConstructorState& aState,
                             nsIContent*                    aContent,
@@ -1405,7 +1271,7 @@ private:
 
   /**
    * Construct the frames for the children of aContent.  "children" is defined
-   * as "whatever ChildIterator returns for aContent".  This means we're
+   * as "whatever FlattenedChildIterator returns for aContent".  This means we're
    * basically operating on children in the "flattened tree" per sXBL/XBL2.
    * This method will also handle constructing ::before, ::after,
    * ::first-letter, and ::first-line frames, as needed and if allowed.
@@ -1651,13 +1517,6 @@ private:
 
   nsresult ReframeContainingBlock(nsIFrame* aFrame);
 
-  nsresult StyleChangeReflow(nsIFrame* aFrame, nsChangeHint aHint);
-
-  // Returns true if this function managed to successfully move a frame, and
-  // false if it could not process the position change, and a reflow should
-  // be performed instead.
-  bool RecomputePosition(nsIFrame* aFrame);
-
   //----------------------------------------
 
   // Methods support :first-letter style
@@ -1784,15 +1643,13 @@ private:
   // Find the ``rightmost'' frame for the content immediately preceding the one
   // aIter points to, following continuations if necessary.  aIter is passed by
   // value on purpose, so as not to modify the caller's iterator.
-  nsIFrame* FindPreviousSibling(const ChildIterator& aFirst,
-                                ChildIterator aIter,
+  nsIFrame* FindPreviousSibling(mozilla::dom::FlattenedChildIterator aIter,
                                 uint8_t& aTargetContentDisplay);
 
   // Find the frame for the content node immediately following the one aIter
   // points to, following continuations if necessary.  aIter is passed by value
   // on purpose, so as not to modify the caller's iterator.
-  nsIFrame* FindNextSibling(ChildIterator aIter,
-                            const ChildIterator& aLast,
+  nsIFrame* FindNextSibling(mozilla::dom::FlattenedChildIterator aIter,
                             uint8_t& aTargetContentDisplay);
 
   // Find the right previous sibling for an insertion.  This also updates the
@@ -1879,28 +1736,10 @@ private:
   bool                mQuotesDirty : 1;
   bool                mCountersDirty : 1;
   bool                mIsDestroyingFrameTree : 1;
-  bool                mRebuildAllStyleData : 1;
   // This is true if mDocElementContainingBlock supports absolute positioning
   bool                mHasRootAbsPosContainingBlock : 1;
-  // True if we're already waiting for a refresh notification
-  bool                mObservingRefreshDriver : 1;
-  // True if we're in the middle of a nsRefreshDriver refresh
-  bool                mInStyleRefresh : 1;
-  // True if reflows/frame reconstruction should be promoted to reframe the root element
-  bool                mPromoteReflowsToReframeRoot : 1;
-  uint32_t            mHoverGeneration;
-  nsChangeHint        mRebuildAllExtraHint;
 
   nsCOMPtr<nsILayoutHistoryState> mTempFrameTreeState;
-
-  OverflowChangedTracker mOverflowChangedTracker;
-
-  // The total number of animation flushes by this frame constructor.
-  // Used to keep the layer and animation manager in sync.
-  uint64_t mAnimationGeneration;
-
-  RestyleTracker mPendingRestyles;
-  RestyleTracker mPendingAnimationRestyles;
 };
 
 #endif /* nsCSSFrameConstructor_h___ */

@@ -543,6 +543,7 @@ function BuildConditionSandbox(aURL) {
     sandbox.d2d = false;
     sandbox.azureQuartz = false;
     sandbox.azureSkia = false;
+    sandbox.azureSkiaGL = false;
     sandbox.contentSameGfxBackendAsCanvas = false;
 #else
     var gfxInfo = (NS_GFXINFO_CONTRACTID in CC) && CC[NS_GFXINFO_CONTRACTID].getService(CI.nsIGfxInfo);
@@ -554,6 +555,7 @@ function BuildConditionSandbox(aURL) {
     var info = gfxInfo.getInfo();
     sandbox.azureQuartz = info.AzureCanvasBackend == "quartz";
     sandbox.azureSkia = info.AzureCanvasBackend == "skia";
+    sandbox.azureSkiaGL = info.AzureSkiaAccelerated; // FIXME: assumes GL right now
     // true if we are using the same Azure backend for rendering canvas and content
     sandbox.contentSameGfxBackendAsCanvas = info.AzureContentBackend == info.AzureCanvasBackend
                                             || (info.AzureContentBackend == "none" && info.AzureCanvasBackend == "cairo");
@@ -573,6 +575,14 @@ function BuildConditionSandbox(aURL) {
     sandbox.gtk2Widget = xr.widgetToolkit == "gtk2";
     sandbox.qtWidget = xr.widgetToolkit == "qt";
     sandbox.winWidget = xr.widgetToolkit == "windows";
+
+    if (sandbox.Android) {
+        var sysInfo = CC["@mozilla.org/system-info;1"].getService(CI.nsIPropertyBag2);
+
+        // This is currently used to distinguish Android 4.0.3 (SDK version 15)
+        // and later from Android 2.x
+        sandbox.AndroidVersion = sysInfo.getPropertyAsInt32("version");
+    }
 
 #if MOZ_ASAN
     sandbox.AddressSanitizer = true;

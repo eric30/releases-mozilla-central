@@ -64,6 +64,10 @@
 #include "GonkGPSGeolocationProvider.h"
 #endif
 
+#ifdef MOZ_WIDGET_COCOA
+#include "CoreLocationLocationProvider.h"
+#endif
+
 #include "nsIDOMDocument.h"
 #include "nsIDocument.h"
 
@@ -248,6 +252,26 @@ PositionError::GetCode(int16_t *aCode)
 {
   NS_ENSURE_ARG_POINTER(aCode);
   *aCode = Code();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+PositionError::GetMessage(nsAString& aMessage)
+{
+  switch (mCode)
+  {
+    case nsIDOMGeoPositionError::PERMISSION_DENIED:
+      aMessage = NS_LITERAL_STRING("User denied geolocation prompt");
+      break;
+    case nsIDOMGeoPositionError::POSITION_UNAVAILABLE:
+      aMessage = NS_LITERAL_STRING("Unknown error acquiring position");
+      break;
+    case nsIDOMGeoPositionError::TIMEOUT:
+      aMessage = NS_LITERAL_STRING("Position acquisition timed out");
+      break;
+    default:
+      break;
+  }
   return NS_OK;
 }
 
@@ -654,9 +678,22 @@ nsresult nsGeolocationService::Init()
   mProvider = do_GetService(GONK_GPS_GEOLOCATION_PROVIDER_CONTRACTID);
 #endif
 
-  nsCOMPtr<nsIGeolocationProvider> providerOveride = do_GetService(NS_GEOLOCATION_PROVIDER_CONTRACTID); 
-  if (providerOveride) {
-    mProvider = providerOveride;
+#ifdef MOZ_WIDGET_COCOA
+  mProvider = new CoreLocationLocationProvider();
+#endif
+
+  // Override platform-specific providers with the default (network)
+  // provider while testing. Our tests are currently not meant to exercise
+  // the provider, and some tests rely on the network provider being used.
+  // "geo.provider.testing" is always set for all plain and browser chrome
+  // mochitests, and also for xpcshell tests.
+  if (!mProvider || Preferences::GetBool("geo.provider.testing", false)) {
+    nsCOMPtr<nsIGeolocationProvider> override =
+      do_GetService(NS_GEOLOCATION_PROVIDER_CONTRACTID);
+
+    if (override) {
+      mProvider = override;
+    }
   }
 
   return NS_OK;

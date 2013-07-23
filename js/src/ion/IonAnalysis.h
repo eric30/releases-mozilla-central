@@ -9,8 +9,8 @@
 
 // This file declares various analysis passes that operate on MIR.
 
-#include "IonAllocPolicy.h"
-#include "MIR.h"
+#include "ion/IonAllocPolicy.h"
+#include "ion/MIR.h"
 
 namespace js {
 namespace ion {
@@ -105,7 +105,7 @@ class LinearSum
     LinearSum(const LinearSum &other)
       : constant_(other.constant_)
     {
-        terms_.append(other.terms_);
+        terms_.appendAll(other.terms_);
     }
 
     bool multiply(int32_t scale);

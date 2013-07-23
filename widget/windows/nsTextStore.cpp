@@ -1024,8 +1024,7 @@ nsTextStore::FlushPendingActions()
         break;
       }
       default:
-        MOZ_NOT_REACHED("unexpected action type");
-        break;
+        MOZ_CRASH("unexpected action type");
     }
 
     if (mWidget && !mWidget->Destroyed()) {
@@ -2921,13 +2920,16 @@ nsTextStore::OnFocusChange(bool aGotFocus,
 nsIMEUpdatePreference
 nsTextStore::GetIMEUpdatePreference()
 {
-  bool hasFocus = false;
+  int8_t notifications = nsIMEUpdatePreference::NOTIFY_NOTHING;
   if (sTsfThreadMgr && sTsfTextStore && sTsfTextStore->mDocumentMgr) {
     nsRefPtr<ITfDocumentMgr> docMgr;
     sTsfThreadMgr->GetFocus(getter_AddRefs(docMgr));
-    hasFocus = (docMgr == sTsfTextStore->mDocumentMgr);
+    if (docMgr == sTsfTextStore->mDocumentMgr) {
+      notifications = (nsIMEUpdatePreference::NOTIFY_SELECTION_CHANGE |
+                       nsIMEUpdatePreference::NOTIFY_TEXT_CHANGE);
+    }
   }
-  return nsIMEUpdatePreference(hasFocus, false);
+  return nsIMEUpdatePreference(notifications, false);
 }
 
 nsresult

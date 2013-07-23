@@ -26,6 +26,8 @@
 #include "nsViewportFrame.h"
 #include "RenderFrameParent.h"
 #include "mozilla/layers/LayerManagerComposite.h"
+#include "mozilla/layers/CompositorChild.h"
+#include "ClientLayerManager.h"
 
 typedef nsContentView::ViewConfig ViewConfig;
 using namespace mozilla::dom;
@@ -428,7 +430,7 @@ BuildViewMap(ViewMap& oldContentViews, ViewMap& newContentViews,
 
 static void
 BuildBackgroundPatternFor(ContainerLayer* aContainer,
-                          ContainerLayer* aShadowRoot,
+                          Layer* aShadowRoot,
                           const ViewConfig& aConfig,
                           const gfxRGBA& aColor,
                           LayerManager* aManager,
@@ -602,7 +604,7 @@ RenderFrameParent::RenderFrameParent(nsFrameLoader* aFrameLoader,
 
   nsRefPtr<LayerManager> lm = GetFrom(mFrameLoader);
   // Perhaps the document containing this frame currently has no presentation?
-  if (lm && lm->AsLayerManagerComposite()) {
+  if (lm && lm->GetBackendType() == LAYERS_CLIENT) {
     *aTextureFactoryIdentifier = lm->GetTextureFactoryIdentifier();
   } else {
     *aTextureFactoryIdentifier = TextureFactoryIdentifier();
@@ -612,6 +614,10 @@ RenderFrameParent::RenderFrameParent(nsFrameLoader* aFrameLoader,
     // Our remote frame will push layers updates to the compositor,
     // and we'll keep an indirect reference to that tree.
     *aId = mLayersId = CompositorParent::AllocateLayerTreeId();
+    if (lm && lm->GetBackendType() == LAYERS_CLIENT) {
+      ClientLayerManager *clientManager = static_cast<ClientLayerManager*>(lm.get());
+      clientManager->GetRemoteRenderer()->SendNotifyChildCreated(mLayersId);
+    }
     if (aScrollingBehavior == ASYNC_PAN_ZOOM) {
       mContentController = new RemoteContentController(this);
       mPanZoomController = new AsyncPanZoomController(
@@ -733,7 +739,7 @@ RenderFrameParent::BuildLayer(nsDisplayListBuilder* aBuilder,
     mContainer->SetInheritedScale(1.0f, 1.0f);
   }
 
-  ContainerLayer* shadowRoot = GetRootLayer();
+  Layer* shadowRoot = GetRootLayer();
   if (!shadowRoot) {
     mContainer = nullptr;
     return nullptr;
@@ -846,7 +852,7 @@ RenderFrameParent::RecvDetectScrollableSubframe()
 }
 
 PLayerTransactionParent*
-RenderFrameParent::AllocPLayerTransaction()
+RenderFrameParent::AllocPLayerTransactionParent()
 {
   if (!mFrameLoader || mFrameLoaderDestroyed) {
     return nullptr;
@@ -856,7 +862,7 @@ RenderFrameParent::AllocPLayerTransaction()
 }
 
 bool
-RenderFrameParent::DeallocPLayerTransaction(PLayerTransactionParent* aLayers)
+RenderFrameParent::DeallocPLayerTransactionParent(PLayerTransactionParent* aLayers)
 {
   delete aLayers;
   return true;
@@ -930,7 +936,7 @@ RenderFrameParent::GetLayerTreeId() const
   return mLayersId;
 }
 
-ContainerLayer*
+Layer*
 RenderFrameParent::GetRootLayer() const
 {
   LayerTransactionParent* shadowLayers = GetShadowLayers();
@@ -951,7 +957,7 @@ RenderFrameParent::BuildDisplayList(nsDisplayListBuilder* aBuilder,
   nsRect bounds = aFrame->EnsureInnerView()->GetBounds() + offset;
   clipState.ClipContentDescendants(bounds);
 
-  ContainerLayer* container = GetRootLayer();
+  Layer* container = GetRootLayer();
   if (aBuilder->IsForEventDelivery() && container) {
     ViewTransform offset =
       ViewTransform(GetContentRectLayerOffset(aFrame, aBuilder));
@@ -964,7 +970,7 @@ RenderFrameParent::BuildDisplayList(nsDisplayListBuilder* aBuilder,
 }
 
 void
-RenderFrameParent::ZoomToRect(const gfxRect& aRect)
+RenderFrameParent::ZoomToRect(const CSSRect& aRect)
 {
   if (mPanZoomController) {
     mPanZoomController->ZoomToRect(aRect);

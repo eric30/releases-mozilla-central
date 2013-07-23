@@ -33,6 +33,8 @@
 #include "gfxQuartzNativeDrawing.h"
 #include <algorithm>
 
+using namespace mozilla::gfx;
+
 #define DRAW_IN_FRAME_DEBUG 0
 #define SCROLLBARS_VISUAL_DEBUG 0
 
@@ -2038,7 +2040,15 @@ nsNativeThemeCocoa::DrawWidgetBackground(nsRenderingContext* aContext,
       break;
 
     case NS_THEME_MENUITEM: {
-      if (thebesCtx->OriginalSurface()->GetContentType() == gfxASurface::CONTENT_COLOR_ALPHA) {
+      bool isTransparent;
+      if (thebesCtx->IsCairo()) {
+        isTransparent = thebesCtx->OriginalSurface()->GetContentType() == gfxASurface::CONTENT_COLOR_ALPHA;
+      } else {
+        SurfaceFormat format  = thebesCtx->GetDrawTarget()->GetFormat();
+        isTransparent = (format == FORMAT_R8G8B8A8) ||
+                        (format == FORMAT_B8G8R8A8);
+      }
+      if (isTransparent) {
         // Clear the background to get correct transparency.
         CGContextClearRect(cgContext, macRect);
       }
@@ -2336,7 +2346,10 @@ nsNativeThemeCocoa::DrawWidgetBackground(nsRenderingContext* aContext,
             macRect.origin.y += 4;
             macRect.size.height -= 4;
           } else {
-            macRect.origin.x += 4;
+            if (aFrame->StyleVisibility()->mDirection !=
+                NS_STYLE_DIRECTION_RTL) {
+              macRect.origin.x += 4;
+            }
             macRect.size.width -= 4;
           }
         }

@@ -316,7 +316,8 @@ EvalKernel(JSContext *cx, const CallArgs &args, EvalType evalType, AbstractFrame
                .setNoScriptRval(false)
                .setPrincipals(principals)
                .setOriginPrincipals(originPrincipals);
-        JSScript *compiled = frontend::CompileScript(cx, scopeobj, callerScript, options,
+        JSScript *compiled = frontend::CompileScript(cx, &cx->tempLifoAlloc(),
+                                                     scopeobj, callerScript, options,
                                                      chars.get(), length, stableStr, staticLevel);
         if (!compiled)
             return false;
@@ -380,7 +381,8 @@ js::DirectEvalFromIon(JSContext *cx,
                .setNoScriptRval(false)
                .setPrincipals(principals)
                .setOriginPrincipals(originPrincipals);
-        JSScript *compiled = frontend::CompileScript(cx, scopeobj, callerScript, options,
+        JSScript *compiled = frontend::CompileScript(cx, &cx->tempLifoAlloc(),
+                                                     scopeobj, callerScript, options,
                                                      chars.get(), length, stableStr, staticLevel);
         if (!compiled)
             return false;
@@ -469,7 +471,7 @@ js::PrincipalsForCompiledCode(const CallReceiver &call, JSContext *cx)
 {
     JSObject &callee = call.callee();
     JS_ASSERT(IsAnyBuiltinEval(&callee.as<JSFunction>()) ||
-              IsBuiltinFunctionConstructor(&callee.as<JSFunction>()));
+              callee.as<JSFunction>().isBuiltinFunctionConstructor());
 
     // To compute the principals of the compiled eval/Function code, we simply
     // use the callee's principals. To see why the caller's principals are

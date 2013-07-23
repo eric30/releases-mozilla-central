@@ -161,7 +161,7 @@ var ContextCommands = {
 
   openLinkInNewTab: function cc_openLinkInNewTab() {
     Browser.addTab(ContextMenuUI.popupState.linkURL, false, Browser.selectedTab);
-    ContextUI.peekTabs();
+    ContextUI.peekTabs(kOpenInNewTabAnimationDelayMsec);
   },
 
   copyLink: function cc_copyLink() {
@@ -229,6 +229,17 @@ var ContextCommands = {
   },
 
   // App bar
+
+  errorConsole: function cc_errorConsole() {
+    PanelUI.show("console-container");
+  },
+
+  jsShell: function cc_jsShell() {
+    // XXX for debugging, this only works when running on the desktop.
+    if (!MetroUtils.immersive)
+      window.openDialog("chrome://browser/content/shell.xul", "_blank",
+                        "all=no,scrollbars=yes,resizable=yes,dialog=no");
+  },
 
   findInPage: function cc_findInPage() {
     FindHelperUI.show();

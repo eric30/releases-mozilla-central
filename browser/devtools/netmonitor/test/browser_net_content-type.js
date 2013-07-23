@@ -178,9 +178,9 @@ function test() {
             is(jsonScope.querySelectorAll(".variables-view-property .name")[1].getAttribute("value"),
               "__proto__", "The second json property name was incorrect.");
             is(jsonScope.querySelectorAll(".variables-view-property .value")[1].getAttribute("value"),
-              "[object Object]", "The second json property value was incorrect.");
+              "Object", "The second json property value was incorrect.");
 
-            return Promise.resolve();
+            return promise.resolve();
           }
           case "html": {
             checkVisibility("textarea");
@@ -196,7 +196,7 @@ function test() {
             checkVisibility("image");
 
             let imageNode = tabpanel.querySelector("#response-content-image");
-            let deferred = Promise.defer();
+            let deferred = promise.defer();
 
             imageNode.addEventListener("load", function onLoad() {
               imageNode.removeEventListener("load", onLoad);

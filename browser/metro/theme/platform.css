@@ -17,8 +17,8 @@
 }
 
 .text-link {
+  color: @metro_orange@;
   text-decoration: none;
-  color: #1167bd;
 }
 
 textbox,
@@ -118,11 +118,6 @@ textbox[isempty="true"] {
   color: @field_mid_foreground_color@;
 }
 
-.link {
-  color: blue;
-  text-decoration: underline;
-}
-
 spinbuttons {
   border: none;
 }
@@ -190,6 +185,7 @@ menulist {
 
 .menu-popup > richlistbox > scrollbox {
   width: 100%;
+  overflow-x: hidden !important;
 }
 
 .menu-popup richlistitem {
@@ -198,16 +194,17 @@ menulist {
   min-width: @touch_action_minwidth@; /* keep the button from being too narrow */
   border: 0 none;
   -moz-box-align: center;
+  font-weight: 600;
 }
 
 .menu-popup richlistitem:not([disabled]):hover {
-  background-color: #dedad0;
+  background-color: #ccc;
   color: black;
 }
 
 .menu-popup richlistitem:not([disabled]):active {
-  background-color: @selected_color@ !important;
-  color: black;
+  background-color: black;
+  color: white;
 }
 
 .menu-popup > richlistbox[left-hand="true"] > richlistitem {
@@ -216,6 +213,61 @@ menulist {
 
 .menu-popup > richlistbox[left-hand="false"] > richlistitem {
   padding-right: 50px;
+}
+
+/* Additional styles applied to popups for form <select> elements. */
+
+#select-container {
+  padding: 0;
+  position: absolute;
+  background-color: transparent;
+}
+
+#select-commands {
+  -moz-appearance: none;
+  background-color: white;
+  border: #000 solid @metro_border_thick@;
+  display: -moz-box;
+  -moz-user-focus: ignore;
+  -moz-box-align: stretch;
+  width: 100%;
+}
+
+/* listcell element doesn't have flex="1" so we need to force it */
+.option-command > listcell {
+  -moz-box-flex: 1 !important;
+}
+
+.option-command {
+  min-height: @touch_button_small@;
+  min-width: @touch_action_minwidth@; /* keep the button from being too narrow */
+  border: 0 none;
+}
+
+.option-command.selected {
+  background-color: #ff8000;
+  color: white;
+}
+
+.option-command.optgroup {
+  font-weight: bold;
+  font-style: italic;
+  pointer-events: none;
+}
+
+.option-command:not([disabled]):hover {
+  background-color: #f0f0f0;
+  color: black;
+}
+
+.option-command:not([disabled]):active {
+  background-color: #d3d3d3;
+  color: black;
+}
+
+.select-popup > richlistbox > scrollbox {
+  width: 100%;
+  overflow-x: hidden !important;
 }
 
 /* Toolbar Button --------------------------------------------------------- */
@@ -446,149 +498,6 @@ notification {
   -moz-box-flex: 9999;
 }
 
-
-/* Rich Grid ---------------------------------------------------------------- */
-
-richgrid {
-  display: -moz-box;
-  -moz-box-sizing: border-box;
-}
-
-richgrid .meta-grid {
-  display: block;
-}
-
-richgriditem {
-  padding: @metro_spacing_small@;
-}
-
-richgriditem .richgrid-item-content {
-  border: @metro_border_thin@ solid @tile_border_color@;
-  box-shadow: 0 0 @metro_spacing_snormal@ rgba(0, 0, 0, 0.1);
-  -moz-box-sizing: border-box;
-  padding: 10px 8px 6px 8px;
-  position: relative;
-}
-.richgrid-item-content {
-  background: #fff;
-}
-
-richgriditem[selected] .richgrid-item-content::after {
-    content: "";
-    pointer-events: none;
-    display: block;
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    background-image: url(chrome://browser/skin/images/tile-selected-check-hdpi.png);
-    background-origin: border-box;
-    background-position: right 0 top 0;
-    background-repeat: no-repeat;
-    /* scale the image whatever the dppx */
-    background-size: 35px 35px;
-    border: @metro_border_xthick@ solid @selected_color@;
-}
-
-richgriditem[crosssliding] {
-  z-index: 1;
-}
-
-/* ease the return to original position when cross-sliding */
-richgriditem:not([crosssliding]) {
-  transition: transform ease-out 0.2s;
-}
-
-richgriditem .richgrid-icon-container {
-  padding-bottom: 2px;
-}
-
-richgriditem .richgrid-icon-box {
-  padding: 4px;
-  background: #fff;
-  opacity: 1.0;
-}
-
-
-/* tile pinned-state indication */
-richgriditem[pinned] .richgrid-item-content::before {
-  pointer-events:none;
-  content: "";
-  display: block;
-  position: absolute;
-  width: 35px;
-  height: 35px;
-  right: 0;
-  left: auto;
-  top: 0;
-  background-image: url(chrome://browser/skin/images/pinned-hdpi.png);
-  background-position: center;
-  background-repeat: no-repeat;
-  /* scale the image whatever the dppx */
-  background-size: 70px 70px;
-}
-
-/* Selected _and_ pinned tiles*/
-richgriditem[selected][pinned] .richgrid-item-content::before {
-  background-position: right -@metro_border_xthick@ top -@metro_border_xthick@;
-  width: 70px;
-  height: 70px;
-}
-
-richgriditem[pinned]:-moz-locale-dir(rtl) .richgrid-item-content::before {
-  left: 0;
-  right: auto;
-}
-
-richgriditem[customColor] {
-  color: #f1f1f1;
-}
-richgriditem[customImage] {
-  color: #1a1a1a;
-}
-
-
-richgriditem[customColor] .richgrid-icon-box {
-  opacity: 0.8;
-  background-color: #fff;
-}
-
-.richgrid-item-content[customImage] {
-  height: 160px;
-  width: 250px;
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
-  -moz-box-pack: end;
-  padding: 0px;
-}
-
-/* hide icon if there is an image background */
-.richgrid-icon-container[customImage] {
-  visibility: collapse;
-}
-
-.richgrid-item-desc {
-  width: @tile_width@;
-  font-size: @metro_font_normal@;
-  margin-left: 0px;
-  padding-left: 0px !important;
-}
-
-.richgrid-item-content[customImage] > .richgrid-item-desc {
-  background: hsla(0,2%,98%,.95);
-  /*margin-bottom: 0px;
-  margin-right: 0px;*/
-  margin: 0px;
-}
-
-richgriditem image {
-  width: 24px;
-  height: 24px;
-  list-style-image: url("chrome://browser/skin/images/identity-icons-generic.png");
-}
-
 /* Dialogs ----------------------------------------------------------------- */
 
 .modal-block,
@@ -639,6 +548,7 @@ dialog > .prompt-inner {
 }
 
 .prompt-message {
+  padding-top: @metro_spacing_normal@;
   text-align: start;
   font-size: @metro_font_normal@;
 }
@@ -653,6 +563,42 @@ dialog > .prompt-inner {
   margin: @margin_xnormal@;
   font-size: @font_normal@;
   text-align: start;
+}
+
+/* additional styles for crash prompt dialog */
+
+/* specific height and wider for the long privacy statement */
+.prompt-inner-statement {
+  margin-top: @metro_spacing_xnormal@;
+  margin-bottom: @metro_spacing_xnormal@;
+  height: 450px;
+  width: 800px;
+}
+
+.crash-message {
+  text-align: justify;
+  margin-top: 5px;
+  margin-bottom: @metro_spacing_small@;
+  font-size: @metro_font_normal@;
+}
+
+.crash-link {
+  margin-top: @metro_spacing_small@;
+}
+
+/* temp - bug 887176 */
+.crash-privacy-back-button {
+  width: 26px;
+  margin-top: 22px; /* align with title text */
+  -moz-margin-end: 15px;
+  background-image: url(chrome://browser/skin/images/appbar-stop.png);
+  background-origin: border-box;
+  background-position: right 0 top 0;
+  background-repeat: no-repeat;
+}
+
+.crash-privacy-statement-scroller {
+  overflow: auto;
 }
 
 /* Arrowbox ---------------------------------------------------------------- */
@@ -715,4 +661,218 @@ arrowbox {
 .meta-section-title {
   font-size: @metro_font_large@;
   font-weight: 100;
+}
+
+/* App bars ----------------------------------------------------------------- */
+
+appbar {
+  display: block;
+  position: fixed;
+  bottom: 0;
+  width: 100%;
+  transform: translateY(100%);
+  transition: transform @metro_animation_duration@ @metro_animation_easing@;
+  font-size: 0;
+}
+
+appbar toolbar {
+  -moz-appearance: none;
+  -moz-box-align: center;
+  border: 0;
+  width: 100%;
+  min-height: @toolbar_height@;
+  font-size: 1rem;
+}
+
+appbar[visible] {
+  transform: none;
+}
+
+#stack[keyboardVisible] > appbar {
+  /* Slow the bottom up transition since it's impossible to match the system's
+     soft keyboard movement. */
+  transition: transform @metro_animation_duration@ @metro_animation_easing@,
+              bottom @appbar_keyboard_slideup_duration@ @metro_animation_easing@;
+}
+
+appbar toolbar > toolbarbutton {
+  border: 0;
+  margin: 0 @toolbar_horizontal_spacing@;
+  padding: 0;
+  /* Don't inherit background-color from toolbarbutton[checked="true"] */
+  background-color: transparent;
+}
+
+appbar toolbar > toolbarbutton[disabled] {
+  visibility: collapse;
+}
+
+appbar toolbar[labelled] {
+  min-height: @labelled_toolbar_height@;
+}
+
+appbar toolbar[labelled] > toolbarbutton {
+  -moz-box-orient: vertical;
+}
+
+appbar toolbar[labelled] > toolbarbutton > .toolbarbutton-text {
+  display: block;
+  padding-top: @metro_spacing_small@;
+  font-size: 0.75rem;
+}
+
+/* Sprites */
+
+.appbar-primary > .toolbarbutton-icon,
+.appbar-secondary > .toolbarbutton-icon {
+  width: 40px;
+  height: 40px;
+}
+
+/* Primary sprite format: one button per sprite.
+
+   States from left to right:
+   normal, hover, active/toggled, toggled+hover, toggled+active. */
+
+.appbar-primary {
+  -moz-image-region: rect(0 40px 40px 0);
+}
+
+.appbar-primary:not([checked]):hover:not(:active) {
+  -moz-image-region: rect(0 80px 40px 40px);
+}
+
+.appbar-primary[checked] {
+  -moz-image-region: rect(0 120px 40px 80px);
+}
+
+.appbar-primary[checked]:hover:not(:active) {
+  -moz-image-region: rect(0 160px 40px 120px);
+}
+
+.appbar-primary:active {
+  -moz-image-region: rect(0 120px 40px 80px);
+}
+
+@media (min-resolution: 130dpi) {
+  .appbar-primary {
+    -moz-image-region: rect(0 56px 56px 0);
+  }
+
+  .appbar-primary:not([checked]):hover:not(:active) {
+    -moz-image-region: rect(0 112px 56px 56px);
+  }
+
+  .appbar-primary[checked] {
+    -moz-image-region: rect(0 224px 56px 168px);
+  }
+
+  .appbar-primary[checked]:hover:not(:active) {
+    -moz-image-region: rect(0 224px 56px 168px);
+  }
+
+  .appbar-primary:active {
+    -moz-image-region: rect(0 168px 56px 112px);
+  }
+}
+
+/* Secondary sprite format: one sprite for everything */
+
+.appbar-secondary {
+  list-style-image: url(chrome://browser/skin/images/appbar-icons.png);
+}
+
+/* Find bar ------------------------------------------------------------- */
+
+#findbar {
+  background-color: @metro_orange@;
+  padding: 0;
+  pointer-events: none;
+}
+
+#findbar > toolbar {
+  min-height: @findbar_height@ !important;
+}
+
+#findbar > .previous-button,
+#findbar > .next-button,
+#findbar > .close-button {
+  list-style-image: url(chrome://browser/skin/images/appbar-icons.png);
+  min-width: @touch_button_small@ !important; /* button size */
+  min-height: @touch_button_small@ !important; /* button size */
+  border: none !important;
+  background-image: none !important;
+  background-color: inherit !important;
+  pointer-events: auto;
+  -moz-user-focus: ignore !important;
+  margin: 0 @margin_normal@ !important;
+}
+
+#findbar > .close-button {
+  -moz-margin-start: 0;
+  -moz-image-region: rect(0px, 480px, 40px, 440px);
+}
+
+#findbar > .close-button:hover {
+  -moz-image-region: rect(40px, 480px, 80px, 440px);
+}
+
+#findbar > .close-button:active {
+  -moz-image-region: rect(80px, 480px, 120px, 440px);
+}
+
+#findbar > .previous-button {
+  -moz-margin-end: 0;
+  -moz-image-region: rect(0px, 400px, 40px, 360px);
+}
+
+#findbar > .previous-button:hover {
+  -moz-image-region: rect(40px, 400px, 80px, 360px);
+}
+
+#findbar > .previous-button:active{
+  -moz-image-region: rect(80px, 400px, 120px, 360px);
+}
+
+#findbar > .next-button {
+  -moz-margin-start: 0;
+  -moz-image-region: rect(0px, 440px, 40px, 400px);
+}
+
+#findbar > .next-button:hover {
+  -moz-image-region: rect(40px, 440px, 80px, 400px);
+}
+
+#findbar > .next-button:active {
+  -moz-image-region: rect(80px, 440px, 120px, 400px);
+}
+
+#findbar-textbox {
+  pointer-events: auto;
+  -moz-margin-end: 0;
+  border: none !important;
+  width: 20em;
+}
+
+.textbox-search-icon {
+  list-style-image: url("chrome://browser/skin/images/search-glass-30.png");
+  -moz-image-region: auto;
+}
+
+/* Override the default box ordering and make the find textbox appear to the
+   right of the icon */
+#findbar-textbox input {
+  -moz-box-ordinal-group: 2
+}
+
+#findbar-textbox deck {
+  margin-right: @margin_normal@;
+}
+
+#findbar-textbox[status="1"] { /* Ci.nsITypeAheadFind.FIND_NOTFOUND */
+  background: rgb(255,200,200);
+}
+
+#findbar-textbox:hover:active {
+  background: #8db8d8;
 }

@@ -6,15 +6,17 @@
 
 #ifdef JSGC_GENERATIONAL
 
-#include "jsgc.h"
-
-#include "gc/Barrier-inl.h"
 #include "gc/StoreBuffer.h"
+
+#include "mozilla/Assertions.h"
+
 #include "vm/ForkJoin.h"
+
 #include "vm/ObjectImpl-inl.h"
 
 using namespace js;
 using namespace js::gc;
+using mozilla::ReentrancyGuard;
 
 /*** SlotEdge ***/
 
@@ -64,8 +66,12 @@ StoreBuffer::WholeCellEdges::mark(JSTracer *trc)
         MarkChildren(trc, static_cast<JSObject *>(tenured));
         return;
     }
+#ifdef JS_ION
     JS_ASSERT(kind == JSTRACE_IONCODE);
     static_cast<ion::IonCode *>(tenured)->trace(trc);
+#else
+    MOZ_ASSUME_UNREACHABLE("Only objects can be in the wholeCellBuffer if IonMonkey is disabled.");
+#endif
 }
 
 /*** MonoTypeBuffer ***/
@@ -142,6 +148,7 @@ template <typename T>
 void
 StoreBuffer::MonoTypeBuffer<T>::mark(JSTracer *trc)
 {
+    ReentrancyGuard g(*this);
     compact();
     T *cursor = base;
     while (cursor != pos) {
@@ -235,6 +242,8 @@ StoreBuffer::GenericBuffer::clear()
 void
 StoreBuffer::GenericBuffer::mark(JSTracer *trc)
 {
+    ReentrancyGuard g(*this);
+
     uint8_t *p = base;
     while (p < pos) {
         unsigned size = *((unsigned *)p);
