@@ -45,6 +45,10 @@ class nsIDOMMozIccManager;
 class nsIDOMBluetoothManager;
 #endif // MOZ_B2G_BT
 
+#ifdef MOZ_B2G_NFC
+class nsIDOMMozNfc;
+#endif // MOZ_B2G_NFC
+
 #include "nsIDOMNavigatorSystemMessages.h"
 
 #include "DOMCameraManager.h"
@@ -230,7 +234,7 @@ public:
   nsIDOMBluetoothManager* GetMozBluetooth(ErrorResult& aRv);
 #endif // MOZ_B2G_BT
 #ifdef MOZ_B2G_NFC
-  nsIDOMNfc* GetMozNfc(ErrorResult& aRv);
+  nsIDOMMozNfc* GetMozNfc(ErrorResult& aRv);
 #endif // MOZ_B2G_NFC
 #ifdef MOZ_TIME_MANAGER
   time::TimeManager* GetMozTime(ErrorResult& aRv);
@@ -280,6 +284,9 @@ public:
 #ifdef MOZ_B2G_BT
   static bool HasBluetoothSupport(JSContext* /* unused */, JSObject* aGlobal);
 #endif // MOZ_B2G_BT
+#ifdef MOZ_B2G_NFC
+  static bool HasNfcSupport(JSContext* /* unused */, JSObject* aGlobal);
+#endif // MOZ_B2G_NFC
 #ifdef MOZ_TIME_MANAGER
   static bool HasTimeSupport(JSContext* /* unused */, JSObject* aGlobal);
 #endif // MOZ_TIME_MANAGER
@@ -325,7 +332,7 @@ private:
   nsCOMPtr<nsIDOMBluetoothManager> mBluetooth;
 #endif
 #ifdef MOZ_B2G_NFC
-  nsCOMPtr<nsIDOMNfc> mNfc;
+  nsCOMPtr<nsIDOMMozNfc> mNfc;
 #endif
 #ifdef MOZ_AUDIO_CHANNEL_MANAGER
   nsRefPtr<system::AudioChannelManager> mAudioChannelManager;

@@ -299,6 +299,13 @@ partial interface Navigator {
 };
 #endif // MOZ_B2G_RIL
 
+// nsIMozNavigatorNfc
+interface MozNfc;
+partial interface Navigator {
+   [Throws, Func="Navigator::HasNfcSupport"]
+   readonly attribute MozNfc? mozNfc;
+};
+
 #ifdef MOZ_GAMEPAD
 // https://dvcs.w3.org/hg/gamepad/raw-file/default/gamepad.html#navigator-interface-extension
 partial interface Navigator {

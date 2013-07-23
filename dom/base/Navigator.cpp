@@ -160,6 +160,9 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Navigator)
 #ifdef MOZ_B2G_BT
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mBluetooth)
 #endif
+#ifdef MOZ_B2G_NFC
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mNfc)
+#endif
 #ifdef MOZ_AUDIO_CHANNEL_MANAGER
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAudioChannelManager)
 #endif
@@ -1296,6 +1299,26 @@ Navigator::GetMozBluetooth(ErrorResult& aRv)
 }
 #endif //MOZ_B2G_BT
 
+#ifdef MOZ_B2G_NFC
+nsIDOMMozNfc*
+Navigator::GetMozNfc(ErrorResult& aRv)
+{
+  if (!mNfc) {
+    if (!mWindow) {
+      aRv.Throw(NS_ERROR_UNEXPECTED);
+      return nullptr;
+    }
+    nsresult rv = NS_NewNfc(mWindow, getter_AddRefs(mNfc));
+    if (NS_FAILED(rv)) {
+      aRv.Throw(rv);
+      return nullptr;
+    }
+  }
+
+  return mNfc;
+}
+#endif //MOZ_B2G_NFC
+
 nsresult
 Navigator::EnsureMessagesManager()
 {
@@ -1722,6 +1745,17 @@ Navigator::HasBluetoothSupport(JSContext* /* unused */, JSObject* aGlobal)
   return win && bluetooth::BluetoothManager::CheckPermission(win);
 }
 #endif // MOZ_B2G_BT
+
+#ifdef MOZ_B2G_NFC
+/* static */
+bool
+Navigator::HasNfcSupport(JSContext* /* unused */, JSObject* aGlobal)
+{
+  nsCOMPtr<nsPIDOMWindow> win = GetWindowFromGlobal(aGlobal);
+  return win && CheckPermission(win, "nfc");
+}
+#endif // MOZ_B2G_NFC
+
 
 #ifdef MOZ_TIME_MANAGER
 /* static */

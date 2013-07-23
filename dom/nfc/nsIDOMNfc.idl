@@ -9,7 +9,7 @@
 #include "nsIDOMDOMRequest.idl"
 
 [scriptable, builtinclass, uuid(c2c01a50-4779-11e1-b86c-0800200c9a66)]
-interface nsIDOMNfc : nsIDOMEventTarget {
+interface nsIDOMMozNfc : nsIDOMEventTarget {
 
   [implicit_jscontext]
   attribute jsval onndefdiscovered;
