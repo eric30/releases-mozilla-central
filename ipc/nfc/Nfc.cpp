@@ -50,9 +50,6 @@ private:
 bool
 DispatchNfcEvent::RunTask(JSContext *aCx)
 {
-    MOZ_ASSERT(NS_IsMainThread(), "DispatchNfcEvent on main thread");
-    MOZ_ASSERT(aCx);
-
     JSObject *obj = JS_GetGlobalForScopeChain(aCx);
     JSObject *array = JS_NewUint8Array(aCx, mMessage->mSize);
     if (!array) {

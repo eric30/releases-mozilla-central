@@ -9,7 +9,6 @@ if CONFIG['MOZ_B2G_NFC']:
     MODULE = 'dom'
     XPIDL_MODULE = 'dom_nfc'
     XPIDL_SOURCES += [
-        'nsIDOMNavigatorNfc.idl',
         'nsIDOMNdefRecord.idl',
         'nsIDOMNfc.idl',
         'nsIDOMNfcEvent.idl',

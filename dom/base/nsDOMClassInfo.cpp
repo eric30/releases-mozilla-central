@@ -689,10 +689,8 @@ static nsDOMClassInfoData sClassInfoData[] = {
 #endif
 
 #ifdef MOZ_B2G_NFC
-  NS_DEFINE_CLASSINFO_DATA(Nfc, nsEventTargetSH,
+  NS_DEFINE_CLASSINFO_DATA(MozNfc, nsEventTargetSH,
                            EVENTTARGET_SCRIPTABLE_FLAGS)
-  NS_DEFINE_CLASSINFO_DATA(NfcNdefEvent, nsDOMGenericSH,
-                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
   NS_DEFINE_CLASSINFO_DATA(NdefRecord, nsDOMGenericSH,
                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
 #endif
@@ -1640,11 +1638,10 @@ nsDOMClassInfo::Init()
 #endif
 
 #ifdef MOZ_B2G_NFC
-  DOM_CLASSINFO_MAP_BEGIN(Nfc, nsIDOMMozNfc)
+  DOM_CLASSINFO_MAP_BEGIN(MozNfc, nsIDOMMozNfc)
     DOM_CLASSINFO_MAP_ENTRY(nsIDOMMozNfc)
     DOM_CLASSINFO_MAP_ENTRY(nsIDOMEventTarget)
   DOM_CLASSINFO_MAP_END
-
   DOM_CLASSINFO_MAP_BEGIN(NdefRecord, nsIDOMNdefRecord)
     DOM_CLASSINFO_MAP_ENTRY(nsIDOMNdefRecord)
   DOM_CLASSINFO_MAP_END

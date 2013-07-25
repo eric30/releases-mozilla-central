@@ -540,6 +540,7 @@ SystemWorkerManager::SendRilRawData(unsigned long aClientId,
   return gInstance->mRilConsumers[aClientId]->SendSocketData(aRaw);
 }
 
+#ifdef MOZ_B2G_NFC
 bool
 SystemWorkerManager::SendNfcRawData(UnixSocketRawData* aRaw)
 {
@@ -551,6 +552,7 @@ SystemWorkerManager::SendNfcRawData(UnixSocketRawData* aRaw)
   }
   return gInstance->mNfcConsumer->SendSocketData(aRaw);
 }
+#endif // MOZ_B2G_NFC
 
 NS_IMETHODIMP
 SystemWorkerManager::GetInterface(const nsIID &aIID, void **aResult)
@@ -607,11 +609,11 @@ SystemWorkerManager::RegisterRilWorker(unsigned int aClientId,
   return NS_OK;
 }
 
-#ifdef MOZ_B2G_NFC
 nsresult
 SystemWorkerManager::RegisterNfcWorker(const JS::Value& aWorker,
                                        JSContext *aCx)
 {
+#ifdef MOZ_B2G_NFC
   NS_ENSURE_TRUE(!JSVAL_IS_PRIMITIVE(aWorker), NS_ERROR_UNEXPECTED);
 
   // Check a system property to see if NFC is enabled.
@@ -648,9 +650,9 @@ SystemWorkerManager::RegisterNfcWorker(const JS::Value& aWorker,
   // We're keeping as much of this implementation as possible in JS, so the real
   // worker lives in Nfc.js. All we do here is hold it alive and
   // hook it up to the NFC thread.
+#endif // MOZ_B2G_NFC
   return NS_OK;
 }
-#endif
 
 #ifdef MOZ_WIDGET_GONK
 nsresult

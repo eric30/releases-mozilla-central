@@ -156,8 +156,7 @@ DOMCI_CLASS(BluetoothDevice)
 #endif
 
 #ifdef MOZ_B2G_NFC
-DOMCI_CLASS(Nfc)
-DOMCI_CLASS(NfcNdefEvent)
+DOMCI_CLASS(MozNfc)
 DOMCI_CLASS(NdefRecord)
 #endif
 
