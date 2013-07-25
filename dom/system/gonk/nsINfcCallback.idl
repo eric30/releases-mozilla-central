@@ -9,8 +9,4 @@ interface nsINfcCallback : nsISupports
 {
   [implicit_jscontext] void ndefDiscovered(in jsval aNdefRecords);
   [implicit_jscontext] void ndefDisconnected(in jsval aNfcHandle);
-
-  [implicit_jscontext] void secureElementActivated(in jsval aSEMessage);
-  [implicit_jscontext] void secureElementDeactivated(in jsval aSEMessage);
-  [implicit_jscontext] void secureElementTransaction(in jsval aSETransactionMessage);
 };

@@ -92,18 +92,6 @@ Nfc.prototype = {
         ppmm.broadcastAsyncMessage("NFC:RequestStatus", message);
         gSystemMessenger.broadcastMessage("nfc-request-status", message);
         break;
-      case "secureElementActivated":
-        ppmm.broadcastAsyncMessage("NFC:SecureElementActivated", message);
-        gSystemMessenger.broadcastMessage("secureelement-activated", message);
-        break;
-      case "secureElementDeactivated":
-        ppmm.broadcastAsyncMessage("NFC:SecureElementDeactivated", message);
-        gSystemMessenger.broadcastMessage("secureelement-deactivated", message);
-        break;
-      case "secureElementTransaction":
-        ppmm.broadcastAsyncMessage("NFC:SecureElementTransaction", message);
-        gSystemMessenger.broadcastMessage("secureelement-transaction", message);
-        break;
       default:
         throw new Error("Don't know about this message type: " + message.type);
     }

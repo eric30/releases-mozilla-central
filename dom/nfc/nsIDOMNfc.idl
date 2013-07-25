@@ -18,15 +18,6 @@ interface nsIDOMMozNfc : nsIDOMEventTarget {
   attribute jsval onndefdisconnected;
 
   [implicit_jscontext]
-  attribute jsval onsecureelementactivated;
-
-  [implicit_jscontext]
-  attribute jsval onsecureelementdeactivated;
-
-  [implicit_jscontext]
-  attribute jsval onsecureelementtransaction;
-
-  [implicit_jscontext]
   boolean validateNdefTag(in jsval records);
 
   // records is an array of 1 or more records

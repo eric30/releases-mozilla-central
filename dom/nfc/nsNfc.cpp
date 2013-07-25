@@ -83,10 +83,6 @@ NS_IMPL_ISUPPORTS1(nsNfc::NfcCallback, nsINfcCallback)
 
 NS_IMPL_EVENT_HANDLER(nsNfc, ndefdiscovered)
 NS_IMPL_EVENT_HANDLER(nsNfc, ndefdisconnected)
-NS_IMPL_EVENT_HANDLER(nsNfc, secureelementactivated)
-NS_IMPL_EVENT_HANDLER(nsNfc, secureelementdeactivated)
-NS_IMPL_EVENT_HANDLER(nsNfc, secureelementtransaction)
-
 
 NS_IMETHODIMP
 nsNfc::NdefDiscovered(const JS::Value& aNdefRecords, JSContext* aCx)
@@ -202,57 +198,6 @@ nsNfc::NdefPush(const JS::Value& aRecords, JSContext* aCx, nsIDOMDOMRequest** aR
   nsresult rv = mNfc->NdefPush(GetOwner(), aRecords, aRequest);
   NS_ENSURE_SUCCESS(rv, rv);
   return NS_OK;
-}
-
-NS_IMETHODIMP
-nsNfc::SecureElementActivated(const JS::Value& aSEMessage, JSContext* aCx)
-{
-  nsString message;
-  nsresult rv;
-
-  nsCOMPtr<nsIJSON> json(new nsJSON());
-  rv = json->EncodeFromJSVal((jsval*)&aSEMessage, aCx, message);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Dispatch incoming event.
-  nsRefPtr<NfcEvent> event = NfcEvent::Create(this, message);
-  NS_ASSERTION(event, "This should never fail!");
-
-  return event->Dispatch(this, NS_LITERAL_STRING("secureelementactivated"));
-}
-
-NS_IMETHODIMP
-nsNfc::SecureElementDeactivated(const JS::Value& aSEMessage, JSContext* aCx)
-{
-  nsString message;
-  nsresult rv;
-
-  nsCOMPtr<nsIJSON> json(new nsJSON());
-  rv = json->EncodeFromJSVal((jsval*)&aSEMessage, aCx, message);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Dispatch incoming event.
-  nsRefPtr<NfcEvent> event = NfcEvent::Create(this, message);
-  NS_ASSERTION(event, "This should never fail!");
-
-  return event->Dispatch(this, NS_LITERAL_STRING("secureelementdeactivated"));
-}
-
-NS_IMETHODIMP
-nsNfc::SecureElementTransaction(const JS::Value& aSETransactionMessage, JSContext* aCx)
-{
-  nsString message;
-  nsresult rv;
-
-  nsCOMPtr<nsIJSON> json(new nsJSON());
-  rv = json->EncodeFromJSVal((jsval*)&aSETransactionMessage, aCx, message);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Dispatch incoming event.
-  nsRefPtr<NfcEvent> event = NfcEvent::Create(this, message);
-  NS_ASSERTION(event, "This should never fail!");
-
-  return event->Dispatch(this, NS_LITERAL_STRING("secureelementtransaction"));
 }
 
 // TODO: make private
