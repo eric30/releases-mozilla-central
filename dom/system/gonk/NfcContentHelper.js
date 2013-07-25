@@ -30,7 +30,6 @@ const NFCCONTENTHELPER_CID =
 
 
 const NFC_IPC_MSG_NAMES = [
-  "NFC:NdefDiscovered",
   "NFC:TechDiscovered",
   "NFC:TechLost",
   "NFC:NDEFDetailsResponse",
@@ -39,10 +38,7 @@ const NFC_IPC_MSG_NAMES = [
   "NFC:NfcATagDetailsResponse",
   "NFC:NfcATagTransceiveResponse",
   "NFC:ConnectResponse",
-  "NFC:CloseResponse",
-  "NFC:SecureElementActivated",
-  "NFC:SecureElementDeactivated",
-  "NFC:SecureElementTransaction"
+  "NFC:CloseResponse"
 ];
 
 XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
@@ -339,27 +335,7 @@ NfcContentHelper.prototype = {
       case "NFC:CloseResponse":
         this.handleCloseResponse(message.json);
         break;
-      case "SecureElementActivated":
-        this.handleSecureElementActivated(message.json);
-        break;
-      case "NFC:SecureElementDeactivated":
-        this.handleSecureElementDeactivated(message.json);
-        break;
-      case "NFC:SecureElementTransaction":
-        this.handleSecureElementTransaction(message.json);
-        break;
     }
-  },
-
-  handleNdefDiscovered: function handleNdefDiscovered(message) {
-    let records = message.content.records;
-    for (var i = 0; i < records.length; i++) {
-      records[i].tnf = records[i].tnf;
-      records[i].type = atob(records[i].type);
-      records[i].id = atob(records[i].id);
-      records[i].payload = atob(records[i].payload);
-    }
-    this._deliverCallback("_nfcCallbacks", "ndefDiscovered", [records]);
   },
 
   // NFC Notifications
@@ -427,19 +403,6 @@ NfcContentHelper.prototype = {
     let response = message.content;
     debug("CloseResponse(" + response.requestId + ", " + response.status + ")");
     this.handleDOMRequestResponse(message);
-  },
-
-  // Secure Element Notifications:
-  handleSecureElementActivated: function handleSecureElementActivated(message) {
-    this._deliverCallback("_nfcCallbacks", "secureElementActivated", [message]);
-  },
-
-  handleSecureElementDeactivated: function handleSecureElementDeactivated(message) {
-    this._deliverCallback("_nfcCallbacks", "secureElementDeactivated", [message]);
-  },
-
-  handleSecureElementTransaction: function handleSecureElementTransaction(message) {
-    this._deliverCallback("_nfcCallbacks", "secureElementTransaction", [message]);
   },
 
   _deliverCallback: function _deliverCallback(callbackType, name, args) {

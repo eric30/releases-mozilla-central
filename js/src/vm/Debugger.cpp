@@ -4,7 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "vm/Debugger.h"
+#include "vm/Debugger-inl.h"
 
 #include "jsapi.h"
 #include "jscntxt.h"
@@ -3820,7 +3820,7 @@ DebuggerFrame_getThis(JSContext *cx, unsigned argc, Value *vp)
     RootedValue thisv(cx);
     {
         AutoCompartment ac(cx, iter.scopeChain());
-        if (!iter.computeThis())
+        if (!iter.computeThis(cx))
             return false;
         thisv = iter.thisv();
     }
@@ -4220,7 +4220,7 @@ DebuggerGenericEval(JSContext *cx, const char *fullMethodName, const Value &code
     Rooted<Env *> env(cx);
     if (iter) {
         /* ExecuteInEnv requires 'fp' to have a computed 'this" value. */
-        if (!iter->computeThis())
+        if (!iter->computeThis(cx))
             return false;
         thisv = iter->thisv();
         env = GetDebugScopeForFrame(cx, iter->abstractFramePtr());

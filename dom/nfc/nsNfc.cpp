@@ -71,22 +71,18 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(nsNfc)
   NS_INTERFACE_MAP_ENTRY(nsIDOMMozNfc)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(Nfc)
+  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(MozNfc)
 NS_INTERFACE_MAP_END_INHERITING(nsDOMEventTargetHelper)
 
 NS_IMPL_ADDREF_INHERITED(nsNfc, nsDOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(nsNfc, nsDOMEventTargetHelper)
 
-DOMCI_DATA(Nfc, nsNfc)
+DOMCI_DATA(MozNfc, nsNfc)
 
 NS_IMPL_ISUPPORTS1(nsNfc::NfcCallback, nsINfcCallback)
 
 NS_IMPL_EVENT_HANDLER(nsNfc, techdiscovered)
 NS_IMPL_EVENT_HANDLER(nsNfc, techlost)
-NS_IMPL_EVENT_HANDLER(nsNfc, secureelementactivated)
-NS_IMPL_EVENT_HANDLER(nsNfc, secureelementdeactivated)
-NS_IMPL_EVENT_HANDLER(nsNfc, secureelementtransaction)
-
 
 NS_IMETHODIMP
 nsNfc::TechDiscovered(const JS::Value& aTagMetadata, JSContext* aCx)
@@ -119,7 +115,7 @@ nsNfc::TechLost(const JS::Value& aNfcHandle, JSContext* aCx) {
   nsRefPtr<NfcEvent> event = NfcEvent::Create(this, message);
   NS_ASSERTION(event, "This should never fail!");
 
-  return event->Dispatch(this, NS_LITERAL_STRING("disconnected"));
+  return event->Dispatch(this, NS_LITERAL_STRING("techlost"));
 }
 
 NS_IMETHODIMP
@@ -260,57 +256,6 @@ nsNfc::NdefPush(const JS::Value& aRecords, JSContext* aCx, nsIDOMDOMRequest** aR
   nsresult rv = mNfc->NdefPush(GetOwner(), aRecords, aRequest);
   NS_ENSURE_SUCCESS(rv, rv);
   return NS_OK;
-}
-
-NS_IMETHODIMP
-nsNfc::SecureElementActivated(const JS::Value& aSEMessage, JSContext* aCx)
-{
-  nsString message;
-  nsresult rv;
-
-  nsCOMPtr<nsIJSON> json(new nsJSON());
-  rv = json->EncodeFromJSVal((jsval*)&aSEMessage, aCx, message);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Dispatch incoming event.
-  nsRefPtr<NfcEvent> event = NfcEvent::Create(this, message);
-  NS_ASSERTION(event, "This should never fail!");
-
-  return event->Dispatch(this, NS_LITERAL_STRING("secureelementactivated"));
-}
-
-NS_IMETHODIMP
-nsNfc::SecureElementDeactivated(const JS::Value& aSEMessage, JSContext* aCx)
-{
-  nsString message;
-  nsresult rv;
-
-  nsCOMPtr<nsIJSON> json(new nsJSON());
-  rv = json->EncodeFromJSVal((jsval*)&aSEMessage, aCx, message);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Dispatch incoming event.
-  nsRefPtr<NfcEvent> event = NfcEvent::Create(this, message);
-  NS_ASSERTION(event, "This should never fail!");
-
-  return event->Dispatch(this, NS_LITERAL_STRING("secureelementdeactivated"));
-}
-
-NS_IMETHODIMP
-nsNfc::SecureElementTransaction(const JS::Value& aSETransactionMessage, JSContext* aCx)
-{
-  nsString message;
-  nsresult rv;
-
-  nsCOMPtr<nsIJSON> json(new nsJSON());
-  rv = json->EncodeFromJSVal((jsval*)&aSETransactionMessage, aCx, message);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Dispatch incoming event.
-  nsRefPtr<NfcEvent> event = NfcEvent::Create(this, message);
-  NS_ASSERTION(event, "This should never fail!");
-
-  return event->Dispatch(this, NS_LITERAL_STRING("secureelementtransaction"));
 }
 
 // TODO: make private

@@ -302,7 +302,14 @@ DebuggerClient.requester = function DC_requester(aPacketSkeleton, { telemetry,
       // The callback is always the last parameter.
       let thisCallback = args[maxPosition + 1];
       if (thisCallback) {
-        thisCallback(aResponse);
+        try {
+          thisCallback(aResponse);
+        } catch (e) {
+          let msg = "Error executing callback passed to debugger client: "
+            + e + "\n" + e.stack;
+          dumpn(msg);
+          Cu.reportError(msg);
+        }
       }
 
       if (histogram) {
@@ -1678,6 +1685,17 @@ GripClient.prototype = {
     type: "prototype"
   }, {
     telemetry: "PROTOTYPE"
+  }),
+
+  /**
+   * Request the display string of the object.
+   *
+   * @param aOnResponse function Called with the request's response.
+   */
+  getDisplayString: DebuggerClient.requester({
+    type: "displayString"
+  }, {
+    telemetry: "DISPLAYSTRING"
   }),
 };
 

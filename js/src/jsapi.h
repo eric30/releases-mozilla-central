@@ -1776,6 +1776,18 @@ JS_NewRuntime(uint32_t maxbytes, JSUseHelperThreads useHelperThreads);
 extern JS_PUBLIC_API(void)
 JS_DestroyRuntime(JSRuntime *rt);
 
+// These are equivalent to ICU's |UMemAllocFn|, |UMemReallocFn|, and
+// |UMemFreeFn| types.  The first argument (called |context| in the ICU docs)
+// will always be NULL, and should be ignored.
+typedef void *(*JS_ICUAllocFn)(const void *, size_t size);
+typedef void *(*JS_ICUReallocFn)(const void *, void *p, size_t size);
+typedef void (*JS_ICUFreeFn)(const void *, void *p);
+
+// This function can be used to track memory used by ICU.
+// Do not use it unless you know what you are doing!
+extern JS_PUBLIC_API(bool)
+JS_SetICUMemoryFunctions(JS_ICUAllocFn allocFn, JS_ICUReallocFn reallocFn, JS_ICUFreeFn freeFn);
+
 extern JS_PUBLIC_API(void)
 JS_ShutDown(void);
 
@@ -2586,13 +2598,11 @@ JS_CallHashSetObjectTracer(JSTracer *trc, HashSetEnum &e, JSObject *const &key, 
 }
 
 /*
- * The JS_CallMaskedObjectTracer variant traces a JSObject* that is stored
- * with flags embedded in the low bits of the word. The flagMask parameter
- * expects |*objp & flagMask| to yield the flags with the pointer value
- * stripped and |*objp & ~flagMask| to yield a valid GC pointer.
+ * Trace an object that is known to always be tenured.  No post barriers are
+ * required in this case.
  */
 extern JS_PUBLIC_API(void)
-JS_CallMaskedObjectTracer(JSTracer *trc, uintptr_t *objp, uintptr_t flagMask, const char *name);
+JS_CallTenuredObjectTracer(JSTracer *trc, JS::TenuredHeap<JSObject *> *objp, const char *name);
 
 /*
  * API for JSTraceCallback implementations.
@@ -4159,25 +4169,33 @@ JS_CallFunctionValue(JSContext *cx, JSObject *obj, jsval fval, unsigned argc,
 namespace JS {
 
 static inline bool
-Call(JSContext *cx, JSObject *thisObj, JSFunction *fun, unsigned argc, jsval *argv, jsval *rval) {
-    return !!JS_CallFunction(cx, thisObj, fun, argc, argv, rval);
+Call(JSContext *cx, JSObject *thisObj, JSFunction *fun, unsigned argc, jsval *argv,
+     MutableHandle<Value> rval)
+{
+    return !!JS_CallFunction(cx, thisObj, fun, argc, argv, rval.address());
 }
 
 static inline bool
-Call(JSContext *cx, JSObject *thisObj, const char *name, unsigned argc, jsval *argv, jsval *rval) {
-    return !!JS_CallFunctionName(cx, thisObj, name, argc, argv, rval);
+Call(JSContext *cx, JSObject *thisObj, const char *name, unsigned argc, jsval *argv,
+     MutableHandle<Value> rval)
+{
+    return !!JS_CallFunctionName(cx, thisObj, name, argc, argv, rval.address());
 }
 
 static inline bool
-Call(JSContext *cx, JSObject *thisObj, jsval fun, unsigned argc, jsval *argv, jsval *rval) {
-    return !!JS_CallFunctionValue(cx, thisObj, fun, argc, argv, rval);
+Call(JSContext *cx, JSObject *thisObj, jsval fun, unsigned argc, jsval *argv,
+     MutableHandle<Value> rval)
+{
+    return !!JS_CallFunctionValue(cx, thisObj, fun, argc, argv, rval.address());
 }
 
 extern JS_PUBLIC_API(bool)
-Call(JSContext *cx, jsval thisv, jsval fun, unsigned argc, jsval *argv, jsval *rval);
+Call(JSContext *cx, jsval thisv, jsval fun, unsigned argc, jsval *argv, MutableHandle<Value> rval);
 
 static inline bool
-Call(JSContext *cx, jsval thisv, JSObject *funObj, unsigned argc, jsval *argv, jsval *rval) {
+Call(JSContext *cx, jsval thisv, JSObject *funObj, unsigned argc, jsval *argv,
+     MutableHandle<Value> rval)
+{
     return Call(cx, thisv, OBJECT_TO_JSVAL(funObj), argc, argv, rval);
 }
 
