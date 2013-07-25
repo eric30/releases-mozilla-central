@@ -8,7 +8,7 @@
  * JavaScript bytecode interpreter.
  */
 
-#include "vm/Interpreter.h"
+#include "vm/Interpreter-inl.h"
 
 #include "mozilla/DebugOnly.h"
 #include "mozilla/FloatingPoint.h"
@@ -19,6 +19,7 @@
 #include "jsapi.h"
 #include "jsarray.h"
 #include "jsatom.h"
+#include "jsautooplen.h"
 #include "jscntxt.h"
 #include "jsdbgapi.h"
 #include "jsfun.h"
@@ -30,6 +31,10 @@
 #include "jsprf.h"
 #include "jsscript.h"
 #include "jsstr.h"
+#if JS_TRACE_LOGGING
+#include "TraceLogging.h"
+#endif
+
 #include "builtin/Eval.h"
 #include "ion/BaselineJIT.h"
 #include "ion/Ion.h"
@@ -42,15 +47,8 @@
 #include "jsscriptinlines.h"
 
 #include "ion/IonFrames-inl.h"
-#include "vm/Interpreter-inl.h"
 #include "vm/Probes-inl.h"
 #include "vm/Stack-inl.h"
-
-#include "jsautooplen.h"
-
-#if JS_TRACE_LOGGING
-#include "TraceLogging.h"
-#endif
 
 using namespace js;
 using namespace js::gc;
@@ -264,20 +262,31 @@ GetPropertyOperation(JSContext *cx, StackFrame *fp, HandleScript script, jsbytec
             return true;
     }
 
-    JSObject *obj = ToObjectFromStack(cx, lval);
-    if (!obj)
-        return false;
+    RootedId id(cx, NameToId(script->getName(pc)));
+    RootedObject obj(cx);
+
+    /* Optimize (.1).toString(). */
+    if (lval.isNumber() && id == NameToId(cx->names().toString)) {
+        JSObject *proto = fp->global().getOrCreateNumberPrototype(cx);
+        if (!proto)
+            return false;
+        if (ClassMethodIsNative(cx, proto, &NumberObject::class_, id, js_num_toString))
+            obj = proto;
+    }
+
+    if (!obj) {
+        obj = ToObjectFromStack(cx, lval);
+        if (!obj)
+            return false;
+    }
 
     bool wasObject = lval.isObject();
 
-    RootedId id(cx, NameToId(script->getName(pc)));
-    RootedObject nobj(cx, obj);
-
     if (obj->getOps()->getProperty) {
-        if (!JSObject::getGeneric(cx, nobj, nobj, id, vp))
+        if (!JSObject::getGeneric(cx, obj, obj, id, vp))
             return false;
     } else {
-        if (!GetPropertyHelper(cx, nobj, id, 0, vp))
+        if (!GetPropertyHelper(cx, obj, id, 0, vp))
             return false;
     }
 
@@ -286,7 +295,7 @@ GetPropertyOperation(JSContext *cx, StackFrame *fp, HandleScript script, jsbytec
         JS_UNLIKELY(vp.isPrimitive()) &&
         wasObject)
     {
-        if (!OnUnknownMethod(cx, nobj, IdToValue(id), vp))
+        if (!OnUnknownMethod(cx, obj, IdToValue(id), vp))
             return false;
     }
 #endif

@@ -14,24 +14,25 @@
 #include "mozilla/PodOperations.h"
 #include "mozilla/RangedPtr.h"
 
-#include "double-conversion.h"
-
 #ifdef XP_OS2
 #define _PC_53  PC_53
 #define _MCW_EM MCW_EM
 #define _MCW_PC MCW_PC
 #endif
+
 #include <locale.h>
 #include <math.h>
 #include <string.h>
 
-#include "jstypes.h"
+#include "double-conversion.h"
 #include "jsapi.h"
 #include "jsatom.h"
 #include "jscntxt.h"
 #include "jsdtoa.h"
 #include "jsobj.h"
 #include "jsstr.h"
+#include "jstypes.h"
+
 #include "vm/GlobalObject.h"
 #include "vm/NumericConversions.h"
 #include "vm/StringBuffer.h"
@@ -623,8 +624,8 @@ num_toString_impl(JSContext *cx, CallArgs args)
     return true;
 }
 
-static JSBool
-num_toString(JSContext *cx, unsigned argc, Value *vp)
+JSBool
+js_num_toString(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     return CallNonGenericMethod<IsNumber, num_toString_impl>(cx, args);
@@ -911,7 +912,7 @@ static const JSFunctionSpec number_methods[] = {
 #if JS_HAS_TOSOURCE
     JS_FN(js_toSource_str,       num_toSource,          0, 0),
 #endif
-    JS_FN(js_toString_str,       num_toString,          1, 0),
+    JS_FN(js_toString_str,       js_num_toString,       1, 0),
 #if ENABLE_INTL_API
          {js_toLocaleString_str, {NULL, NULL},           0,0, "Number_toLocaleString"},
 #else
