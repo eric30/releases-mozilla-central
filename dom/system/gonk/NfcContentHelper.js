@@ -48,6 +48,8 @@ XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
 function NfcContentHelper() {
   this.initDOMRequestHelper(/* aWindow */ null, NFC_IPC_MSG_NAMES);
   Services.obs.addObserver(this, "xpcom-shutdown", false);
+
+  this._sessionMap = new Array();
 }
 
 NfcContentHelper.prototype = {
@@ -61,6 +63,9 @@ NfcContentHelper.prototype = {
     classDescription: "NfcContentHelper",
     interfaces:       [Ci.nsINfcContentHelper]
   }),
+
+  _sessionMap: null,
+  _connectedSessionId: null,
 
   sendToNfcd: function sendToNfcd(message) {
     cpmm.sendAsyncMessage("NFC:SendToNfcd", message);
@@ -87,10 +92,10 @@ NfcContentHelper.prototype = {
     }
 
     let request = Services.DOMRequest.createRequest(window);
-    let requestId = btoa(this.getRequestId(request));
+    this._sessionMap[this._connectedSessionId] = this.getRequestId(request);
 
     cpmm.sendAsyncMessage("NFC:NdefDetails", {
-      requestId: requestId
+      sessionId: this._connectedSessionId
     });
     return request;
   },
@@ -102,10 +107,10 @@ NfcContentHelper.prototype = {
     }
 
     let request = Services.DOMRequest.createRequest(window);
-    let requestId = btoa(this.getRequestId(request));
+    this._sessionMap[this._connectedSessionId] = this.getRequestId(request);
 
     cpmm.sendAsyncMessage("NFC:NdefRead", {
-      requestId: requestId
+      sessionId: this._connectedSessionId
     });
     return request;
   },
@@ -117,12 +122,12 @@ NfcContentHelper.prototype = {
     }
 
     let request = Services.DOMRequest.createRequest(window);
-    let requestId = btoa(this.getRequestId(request));
+    this._sessionMap[this._connectedSessionId] = this.getRequestId(request);
 
     let encodedRecords = this.encodeNdefRecords(records);
 
     cpmm.sendAsyncMessage("NFC:NdefWrite", {
-      requestId: requestId,
+      sessionId: this._connectedSessionId,
       records: encodedRecords
     });
     return request;
@@ -136,12 +141,12 @@ NfcContentHelper.prototype = {
     }
 
     let request = Services.DOMRequest.createRequest(window);
-    let requestId = btoa(this.getRequestId(request));
+    this._sessionMap[this._connectedSessionId] = this.getRequestId(request);
 
     let encodedRecords = this.encodeNdefRecords(records);
 
     cpmm.sendAsyncMessage("NFC:NdefPush", {
-      requestId: requestId,
+      sessionId: this._connectedSessionId,
       records: encodedRecords
     });
     return request;
@@ -154,10 +159,10 @@ NfcContentHelper.prototype = {
     }
 
     let request = Services.DOMRequest.createRequest(window);
-    let requestId = btoa(this.getRequestId(request));
+    this._sessionMap[this._connectedSessionId] = this.getRequestId(request);
 
     cpmm.sendAsyncMessage("NFC:NfcATagDetails", {
-      requestId: requestId
+      sessionId: this._connectedSessionId
     });
     return request;
   },
@@ -169,10 +174,10 @@ NfcContentHelper.prototype = {
     }
 
     let request = Services.DOMRequest.createRequest(window);
-    let requestId = btoa(this.getRequestId(request));
+    this._sessionMap[this._connectedSessionId] = this.getRequestId(request);
 
     cpmm.sendAsyncMessage("NFC:NfcATagTransceive", {
-      requestId: requestId,
+      sessionId: this._connectedSessionId,
       params: params
     });
     return request;
@@ -185,10 +190,10 @@ NfcContentHelper.prototype = {
     }
 
     let request = Services.DOMRequest.createRequest(window);
-    let requestId = btoa(this.getRequestId(request));
+    this._sessionMap[this._connectedSessionId] = this.getRequestId(request);
 
     cpmm.sendAsyncMessage("NFC:Connect", {
-      requestId: requestId,
+      sessionId: this._connectedSessionId,
       techType: techType 
     });
     return request;
@@ -201,10 +206,10 @@ NfcContentHelper.prototype = {
     }
 
     let request = Services.DOMRequest.createRequest(window);
-    let requestId = btoa(this.getRequestId(request));
+    this._sessionMap[this._connectedSessionId] = this.getRequestId(request);
 
     cpmm.sendAsyncMessage("NFC:Close", {
-      requestId: requestId
+      sessionId: this._connectedSessionId
     });
     return request;
   },
@@ -307,6 +312,7 @@ NfcContentHelper.prototype = {
   },
 
   receiveMessage: function receiveMessage(message) {
+    debug("Message received: " + JSON.stringify(message));
     switch (message.name) {
       case "NFC:TechDiscovered":
         this.handleTechDiscovered(message.json);
@@ -340,21 +346,45 @@ NfcContentHelper.prototype = {
 
   // NFC Notifications
   handleTechDiscovered: function handleTechDiscovered(message) {
+    debug('XXXXXX TechDiscovered. Check for existing session:');
+    if (this._sessionMap[this._connectedSessionId]) {
+      debug('Have existing session:');
+      delete this._sessionMap[this._connectedSessionId];
+    }
+    debug('updating connected session:');
+    this._connectedSessionId = message.sessionId;
+    debug('updated.');
     this._deliverCallback("_nfcCallbacks", "techDiscovered", [message]);
   },
 
   handleTechLost: function handleTechLost(message) {
+    debug('XXXXXX TechLost. Check for existing session:');
+    if (this._sessionMap[this._connectedSessionId]) {
+      debug('Have existing session:');
+      delete this._sessionMap[this._connectedSessionId];
+    }
+    this._connectedSessionId = null;
     this._deliverCallback("_nfcCallbacks", "techLost", [message]);
   },
 
   handleNfcATagDiscoveredNofitication: function handleTechDiscovered(message) {
+    debug('XXXXXX NfcATagDiscovered. Check for existing session:');
+    if (this._sessionMap[this._connectedSessionId]) {
+      debug('Have existing session:');
+      delete this._sessionMap[this._connectedSessionId];
+    }
+    debug('updating connected session:');
+    delete this._sessionMap[this._connectedSessionId];
+    this._connectedSessionId = message.sessionId;
+    debug('updated.');
     this._deliverCallback("_nfcCallbacks", "nfcATagDiscovered", [message]);
   },
 
   // handle DOMRequest based response messages. Subfields of message.content: requestId, status, optional message
   handleDOMRequestResponse: function handleResponse(message) {
     let response = message.content;
-    let requestId = atob(response.requestId);
+    let requestId = this._sessionMap[this._connectedSessionId];
+
     if (response.status == "OK") {
       this.fireRequestSuccess(requestId, response.message);
     } else {
@@ -364,45 +394,49 @@ NfcContentHelper.prototype = {
 
   handleNDEFDetailsResponse: function handleNDEFDetailsResponse(message) {
     let response = message.content;
-    debug("NDEFDetailsResponse(" + response.requestId + ", " + response.status + ")");
+    debug("NDEFDetailsResponse(" + response.sessionId + ", " + response.status + ")");
     this.handleDOMRequestResponse(message);
   },
 
   handleNDEFReadResponse: function handleNDEFReadResponse(message) {
     debug("NDEFReadResponse(" + JSON.stringify(message) + ")");
     let response = message.content;
-    debug("NDEFReadResponse(" + response.requestId + ", " + response.status + ")");
+    debug("NDEFReadResponse(" + response.sessionId + ", " + response.status + ")");
     this.handleDOMRequestResponse(message);
   },
 
   handleNDEFWriteResponse: function handleNDEFWriteResponse(message) {
     let response = message.content;
-    debug("NDEFWriteResponse(" + response.requestId + ", " + response.status + ")");
+    debug("NDEFWriteResponse(" + response.sessionId + ", " + response.status + ")");
     this.handleDOMRequestResponse(message);
   },
 
   handleNfcATagDetailsResponse: function handleNfcATagDetailsResponse(message) {
     let response = message.content;
-    debug("NfcATagDetailsResponse(" + response.requestId + ", " + response.status + ")");
+    debug("NfcATagDetailsResponse(" + response.sessionId + ", " + response.status + ")");
     this.handleDOMRequestResponse(message);
   },
 
   handleNfcATagTransceiveResponse: function handleNfcATagTransceiveResponse(message) {
     let response = message.content;
-    debug("NfcATagTransceiveResponse(" + response.requestId + ", " + response.status + ")");
+    debug("NfcATagTransceiveResponse(" + response.sessionId + ", " + response.status + ")");
     this.handleDOMRequestResponse(message);
   },
 
   handleConnectResponse: function handleConnectResponse(message) {
     let response = message.content;
-    debug("ConnectResponse(" + response.requestId + ", " + response.status + ")");
+    debug("ConnectResponse(" + response.sessionId + ", " + response.status + ")");
     this.handleDOMRequestResponse(message);
   },
 
   handleCloseResponse: function handleCloseResponse(message) {
     let response = message.content;
-    debug("CloseResponse(" + response.requestId + ", " + response.status + ")");
+    debug("CloseResponse(" + response.sessionId + ", " + response.status + ")");
     this.handleDOMRequestResponse(message);
+
+    // Cleanup lost session.
+    delete this._sessionMap[this._connectedSessionId];
+    this._connectedSessionId = null;
   },
 
   _deliverCallback: function _deliverCallback(callbackType, name, args) {

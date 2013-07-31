@@ -121,22 +121,20 @@ Nfc.prototype = {
   },
 
   ndefDetails: function ndefDetails(message) {
-    var rid = message.requestId;
-
+    debug("ndefDetailsRequest message: " + JSON.stringify(message));
     var outMessage = {
       type: "NDEFDetailsRequest",
-      requestId: rid
+      sessionId: message.sessionId
     };
 
     this.worker.postMessage({type: "ndefDetails", content: outMessage});
   },
 
   ndefRead: function ndefRead(message) {
-    var rid = message.requestId;
-
+    debug("ndefReadRequest message: " + JSON.stringify(message));
     var outMessage = {
       type: "NDEFReadRequest",
-      requestId: rid
+      sessionId: message.sessionId
     };
 
     this.worker.postMessage({type: "ndefRead", content: outMessage});
@@ -144,11 +142,11 @@ Nfc.prototype = {
 
   ndefWrite: function ndefWrite(message) {
     var records = message.records;
-    var rid = message.requestId;
 
+    debug("ndefWriteRequest message: " + JSON.stringify(message));
     var outMessage = {
       type: "NDEFWriteRequest",
-      requestId: rid,
+      sessionId: message.sessionId,
       content: {
         records: records
       }
@@ -160,11 +158,11 @@ Nfc.prototype = {
   // tag read/write command message handler.
   nfcATagDetails: function nfcATagDetails(message) {
     var params = message.params;
-    var rid = message.requestId;
 
+    debug("nfcATagDetails: " + JSON.stringify(message));
     var outMessage = {
       type: "NfcATagDetailsRequest",
-      requestId: rid
+      sessionId: message.sessionId
     };
 
     this.worker.postMessage({type: "nfcATagDetails", content: outMessage});
@@ -173,11 +171,11 @@ Nfc.prototype = {
   // tag read/write command message handler.
   nfcATagTransceive: function nfcATagTransceive(params) {
     var params = message.params;
-    var rid = message.requestId;
 
+    debug("nfcATagTransceive: " + JSON.stringify(message));
     var outMessage = {
       type: "NfcATagTransceiveRequest",
-      requestId: rid,
+      sessionId: message.sessionId,
       content: {
         params: params
       }
@@ -188,13 +186,13 @@ Nfc.prototype = {
 
   // tag read/write command message handler.
   connect: function connect(message, techType) {
-    var rid = message.requestId;
     var techType = message.tech;
 
+    debug("NFC connect: " + JSON.stringify(message));
     var outMessage = {
       type: "ConnectRequest",
-      requestId: rid,
-      tech: techType
+      sessionId: message.sessionId,
+      tech: message.tech
     };
 
     this.worker.postMessage({type: "connect", content: outMessage});
@@ -202,11 +200,10 @@ Nfc.prototype = {
 
   // tag read/write command message handler.
   close: function close(message) {
-    var rid = message.requestId;
-
+    debug("NFC close: " + JSON.stringify(message));
     var outMessage = {
       type: "CloseRequest",
-      requestId: rid
+      sessionId: message.sessionId
     };
 
     this.worker.postMessage({type: "close", content: outMessage});
@@ -214,11 +211,11 @@ Nfc.prototype = {
 
   ndefPush: function ndefPush(message) {
     var records = message.records;
-    var rid = message.requestId;
 
+    debug("ndefPush: " + JSON.stringify(message));
     var outMessage = {
       type: "ndefPushRequest",
-      requestId: rid,
+      sessionId: message.sessionId,
       content: {
         records: records
       }
