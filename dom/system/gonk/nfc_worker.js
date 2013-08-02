@@ -76,7 +76,7 @@ let Nfc = {
    * Retrieve metadata describing the NDEF formatted data, if present.
    */
   ndefDetails: function ndefDetails(message) {
-    postNfcMessage(JSON.stringify(message.requestId)); // Just request ID.
+    postNfcMessage(JSON.stringify(message.content));
   },
 
   /**

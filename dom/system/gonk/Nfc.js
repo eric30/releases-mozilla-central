@@ -30,7 +30,7 @@ const NFC_CID =
 
 const NFC_IPC_MSG_NAMES = [
   "NFC:SendToNfcd",
-  "NFC:NefDetails",
+  "NFC:NdefDetails",
   "NFC:NdefRead",
   "NFC:NdefWrite",
   "NFC:NfcATagDetails",
@@ -232,6 +232,9 @@ Nfc.prototype = {
     switch (message.name) {
       case "NFC:SendToNfcd":
         this.sendToNfcd(message.json);
+        break;
+      case "NFC:NdefDetails":
+        this.ndefDetails(message.json);
         break;
       case "NFC:NdefRead":
         this.ndefRead(message.json);

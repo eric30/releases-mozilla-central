@@ -92,9 +92,11 @@ NfcContentHelper.prototype = {
     }
 
     let request = Services.DOMRequest.createRequest(window);
-    this._sessionMap[this._connectedSessionId] = this.getRequestId(request);
+    let requestId = this.getRequestId(request);
+    this._sessionMap[this._connectedSessionId] = requestId;
 
     cpmm.sendAsyncMessage("NFC:NdefDetails", {
+      requestId: requestId,
       sessionId: this._connectedSessionId
     });
     return request;
@@ -107,9 +109,11 @@ NfcContentHelper.prototype = {
     }
 
     let request = Services.DOMRequest.createRequest(window);
-    this._sessionMap[this._connectedSessionId] = this.getRequestId(request);
+    let requestId = this.getRequestId(request);
+    this._sessionMap[this._connectedSessionId] = requestId;
 
     cpmm.sendAsyncMessage("NFC:NdefRead", {
+      requestId: requestId,
       sessionId: this._connectedSessionId
     });
     return request;
@@ -321,7 +325,7 @@ NfcContentHelper.prototype = {
         this.handleTechLost(message.json);
         break;
       case "NFC:NDEFDetailsResponse":
-        this.handleNDEFDetailResponse(message.json);
+        this.handleNDEFDetailsResponse(message.json);
         break;
       case "NFC:NDEFReadResponse":
         this.handleNDEFReadResponse(message.json);
@@ -381,58 +385,103 @@ NfcContentHelper.prototype = {
   },
 
   // handle DOMRequest based response messages. Subfields of message.content: requestId, status, optional message
-  handleDOMRequestResponse: function handleResponse(message) {
-    let response = message.content;
-    let requestId = this._sessionMap[this._connectedSessionId];
+  // The reciever has to unpack the resultArray, as JSON doesn't work.
+  handleDOMRequestResponse: function handleResponse(message, resultArray) {
+    let requestId = this._sessionMap[message.sessionId];
 
-    if (response.status == "OK") {
-      this.fireRequestSuccess(requestId, response.message);
-    } else {
-      this.fireRequestError(requestId, response.message);
+    debug("Retrieved requestId: " + requestId);
+    debug("Param message: " + message);
+    if (message.sessionId != this._connectedSessionId) {
+      this.fireRequestError(requestId, message.status);
+    } else  {
+      this.fireRequestSuccess(requestId, resultArray);
     }
   },
 
   handleNDEFDetailsResponse: function handleNDEFDetailsResponse(message) {
-    let response = message.content;
-    debug("NDEFDetailsResponse(" + response.sessionId + ", " + response.status + ")");
-    this.handleDOMRequestResponse(message);
+    debug("NDEFDetailsResponse(" + JSON.stringify(message) + ")");
+    let requestId = this._sessionMap[message.sessionId];
+    let results = message.content;
+    if (message.sessionId != this._connectedSessionId) {
+      this.fireRequestError(requestId, message.status);
+    } else  {
+      this.fireRequestSuccess(requestId, [results.maxndefMsgLen, results.cardstate]);
+    }
   },
 
   handleNDEFReadResponse: function handleNDEFReadResponse(message) {
     debug("NDEFReadResponse(" + JSON.stringify(message) + ")");
-    let response = message.content;
-    debug("NDEFReadResponse(" + response.sessionId + ", " + response.status + ")");
-    this.handleDOMRequestResponse(message);
+    let requestId = this._sessionMap[message.sessionId];
+
+    let records = message.content.records;
+    for (var i = 0; i < records.length; i++) {
+      records[i].tnf = records[i].tnf;
+      records[i].type = atob(records[i].type);
+      records[i].id = atob(records[i].id);
+      records[i].payload = atob(records[i].payload);
+    }
+    let msg = { records: records };
+
+    if (message.sessionId != this._connectedSessionId) {
+      this.fireRequestError(requestId, message.status);
+    } else  {
+      this.fireRequestSuccess(requestId, JSON.stringify(records));
+    }
   },
 
   handleNDEFWriteResponse: function handleNDEFWriteResponse(message) {
-    let response = message.content;
-    debug("NDEFWriteResponse(" + response.sessionId + ", " + response.status + ")");
-    this.handleDOMRequestResponse(message);
+    debug("NDEFWriteResponse(" + JSON.stringify(message) + ")");
+    let requestId = this._sessionMap[message.sessionId];
+    let results = message.content;
+    if (message.sessionId != this._connectedSessionId) {
+      this.fireRequestError(requestId, message.status);
+    } else  {
+      this.fireRequestSuccess(requestId, [results.status, results.message]);
+    }
   },
 
   handleNfcATagDetailsResponse: function handleNfcATagDetailsResponse(message) {
-    let response = message.content;
-    debug("NfcATagDetailsResponse(" + response.sessionId + ", " + response.status + ")");
-    this.handleDOMRequestResponse(message);
+    debug("NfcATagDetailsResponse(" + JSON.stringify(message) + ")");
+    let requestId = this._sessionMap[message.sessionId];
+    let results = message.content;
+    if (message.sessionId != this._connectedSessionId) {
+      this.fireRequestError(requestId, message.status);
+    } else  {
+      this.fireRequestSuccess(requestId, [results.maxMsgLen, results.cardstate]);
+    }
   },
 
   handleNfcATagTransceiveResponse: function handleNfcATagTransceiveResponse(message) {
-    let response = message.content;
-    debug("NfcATagTransceiveResponse(" + response.sessionId + ", " + response.status + ")");
-    this.handleDOMRequestResponse(message);
+    debug("NfcATagTransceiveResponse(" + JSON.stringify(message) + ")");
+    let requestId = this._sessionMap[message.sessionId];
+    let results = message.content;
+    if (message.sessionId != this._connectedSessionId) {
+      this.fireRequestError(requestId, message.status);
+    } else  {
+      this.fireRequestSuccess(requestId, [results.status, results.message]);
+    }
   },
 
   handleConnectResponse: function handleConnectResponse(message) {
-    let response = message.content;
-    debug("ConnectResponse(" + response.sessionId + ", " + response.status + ")");
-    this.handleDOMRequestResponse(message);
+    debug("ConnectResponse(" + JSON.stringify(message) + ")");
+    let requestId = this._sessionMap[message.sessionId];
+    let results = message.content;
+    if (message.sessionId != this._connectedSessionId) {
+      this.fireRequestError(requestId, message.status);
+    } else  {
+      this.fireRequestSuccess(requestId, [results.status, results.message]);
+    }
   },
 
   handleCloseResponse: function handleCloseResponse(message) {
-    let response = message.content;
-    debug("CloseResponse(" + response.sessionId + ", " + response.status + ")");
-    this.handleDOMRequestResponse(message);
+    debug("CloseResponse(" + JSON.stringify(message) + ")");
+    let requestId = this._sessionMap[message.sessionId];
+    let results = message.content;
+    if (message.sessionId != this._connectedSessionId) {
+      this.fireRequestError(requestId, message.status);
+    } else  {
+      this.fireRequestSuccess(requestId, [results.status, results.message]);
+    }
 
     // Cleanup lost session.
     delete this._sessionMap[this._connectedSessionId];
