@@ -125,8 +125,9 @@ Nfc.prototype = {
     var outMessage = {
       type: "NDEFDetailsRequest",
       sessionId: message.sessionId,
-      requestId: message.requestid
+      requestId: message.requestId
     };
+    debug("ndefDetailsRequest message out: " + JSON.stringify(outMessage));
 
     this.worker.postMessage({type: "ndefDetails", content: outMessage});
   },
@@ -136,9 +137,10 @@ Nfc.prototype = {
     var outMessage = {
       type: "NDEFReadRequest",
       sessionId: message.sessionId,
-      requestId: message.requestid
+      requestId: message.requestId
     };
 
+    debug("ndefReadRequest message out: " + JSON.stringify(outMessage));
     this.worker.postMessage({type: "ndefRead", content: outMessage});
   },
 
@@ -149,7 +151,7 @@ Nfc.prototype = {
     var outMessage = {
       type: "NDEFWriteRequest",
       sessionId: message.sessionId,
-      requestId: message.requestid,
+      requestId: message.requestId,
       content: {
         records: records
       }
@@ -166,7 +168,7 @@ Nfc.prototype = {
     var outMessage = {
       type: "NfcATagDetailsRequest",
       sessionId: message.sessionId,
-      requestId: message.requestid
+      requestId: message.requestId
     };
 
     this.worker.postMessage({type: "nfcATagDetails", content: outMessage});
@@ -180,7 +182,7 @@ Nfc.prototype = {
     var outMessage = {
       type: "NfcATagTransceiveRequest",
       sessionId: message.sessionId,
-      requestId: message.requestid,
+      requestId: message.requestId,
       content: {
         params: params
       }
@@ -197,7 +199,7 @@ Nfc.prototype = {
     var outMessage = {
       type: "ConnectRequest",
       sessionId: message.sessionId,
-      requestId: message.requestid,
+      requestId: message.requestId,
       tech: message.tech
     };
 
@@ -210,7 +212,7 @@ Nfc.prototype = {
     var outMessage = {
       type: "CloseRequest",
       sessionId: message.sessionId,
-      requestId: message.requestid
+      requestId: message.requestId
     };
 
     this.worker.postMessage({type: "close", content: outMessage});
@@ -223,7 +225,7 @@ Nfc.prototype = {
     var outMessage = {
       type: "ndefPushRequest",
       sessionId: message.sessionId,
-      requestId: message.requestid,
+      requestId: message.requestId,
       content: {
         records: records
       }
