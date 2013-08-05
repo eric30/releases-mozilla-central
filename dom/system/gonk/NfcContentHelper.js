@@ -21,6 +21,7 @@ const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/ObjectWrapper.jsm");
 Cu.import("resource://gre/modules/DOMRequestHelper.jsm");
 
 const DEBUG = true; // set to true to see debug messages
@@ -93,7 +94,7 @@ NfcContentHelper.prototype = {
 
     let request = Services.DOMRequest.createRequest(window);
     let requestId = this.getRequestId(request);
-    this._sessionMap[this._connectedSessionId] = requestId;
+    this._sessionMap[this._connectedSessionId] = {win: window};
 
     cpmm.sendAsyncMessage("NFC:NdefDetails", {
       requestId: requestId,
@@ -110,7 +111,7 @@ NfcContentHelper.prototype = {
 
     let request = Services.DOMRequest.createRequest(window);
     let requestId = this.getRequestId(request);
-    this._sessionMap[this._connectedSessionId] = requestId;
+    this._sessionMap[this._connectedSessionId] = {win: window};
 
     cpmm.sendAsyncMessage("NFC:NdefRead", {
       requestId: requestId,
@@ -126,11 +127,12 @@ NfcContentHelper.prototype = {
     }
 
     let request = Services.DOMRequest.createRequest(window);
-    this._sessionMap[this._connectedSessionId] = this.getRequestId(request);
+    this._sessionMap[this._connectedSessionId] = {win: window};
 
     let encodedRecords = this.encodeNdefRecords(records);
 
     cpmm.sendAsyncMessage("NFC:NdefWrite", {
+      requestId: requestId,
       sessionId: this._connectedSessionId,
       records: encodedRecords
     });
@@ -145,11 +147,12 @@ NfcContentHelper.prototype = {
     }
 
     let request = Services.DOMRequest.createRequest(window);
-    this._sessionMap[this._connectedSessionId] = this.getRequestId(request);
+    this._sessionMap[this._connectedSessionId] = {win: window};
 
     let encodedRecords = this.encodeNdefRecords(records);
 
     cpmm.sendAsyncMessage("NFC:NdefPush", {
+      requestId: requestId,
       sessionId: this._connectedSessionId,
       records: encodedRecords
     });
@@ -163,9 +166,10 @@ NfcContentHelper.prototype = {
     }
 
     let request = Services.DOMRequest.createRequest(window);
-    this._sessionMap[this._connectedSessionId] = this.getRequestId(request);
+    this._sessionMap[this._connectedSessionId] = {win: window};
 
     cpmm.sendAsyncMessage("NFC:NfcATagDetails", {
+      requestId: requestId,
       sessionId: this._connectedSessionId
     });
     return request;
@@ -178,9 +182,10 @@ NfcContentHelper.prototype = {
     }
 
     let request = Services.DOMRequest.createRequest(window);
-    this._sessionMap[this._connectedSessionId] = this.getRequestId(request);
+    this._sessionMap[this._connectedSessionId] = {win: window};
 
     cpmm.sendAsyncMessage("NFC:NfcATagTransceive", {
+      requestId: requestId,
       sessionId: this._connectedSessionId,
       params: params
     });
@@ -194,9 +199,10 @@ NfcContentHelper.prototype = {
     }
 
     let request = Services.DOMRequest.createRequest(window);
-    this._sessionMap[this._connectedSessionId] = this.getRequestId(request);
+    this._sessionMap[this._connectedSessionId] = {win: window};
 
     cpmm.sendAsyncMessage("NFC:Connect", {
+      requestId: requestId,
       sessionId: this._connectedSessionId,
       techType: techType 
     });
@@ -210,9 +216,10 @@ NfcContentHelper.prototype = {
     }
 
     let request = Services.DOMRequest.createRequest(window);
-    this._sessionMap[this._connectedSessionId] = this.getRequestId(request);
+    this._sessionMap[this._connectedSessionId] = {win: window};
 
     cpmm.sendAsyncMessage("NFC:Close", {
+      requestId: requestId,
       sessionId: this._connectedSessionId
     });
     return request;
@@ -387,100 +394,122 @@ NfcContentHelper.prototype = {
   // handle DOMRequest based response messages. Subfields of message.content: requestId, status, optional message
   // The reciever has to unpack the resultArray, as JSON doesn't work.
   handleDOMRequestResponse: function handleResponse(message, resultArray) {
-    let requestId = this._sessionMap[message.sessionId];
+    let requester = this._sessionMap[message.sessionId];
 
-    debug("Retrieved requestId: " + requestId);
+    debug("Retrieved requestId: " + requester.requestId);
     debug("Param message: " + message);
     if (message.sessionId != this._connectedSessionId) {
       this.fireRequestError(requestId, message.status);
     } else  {
-      this.fireRequestSuccess(requestId, resultArray);
+      this.fireRequestSuccess(message.requestId, resultArray);
     }
   },
 
   handleNDEFDetailsResponse: function handleNDEFDetailsResponse(message) {
     debug("NDEFDetailsResponse(" + JSON.stringify(message) + ")");
-    let requestId = this._sessionMap[message.sessionId];
-    let results = message.content;
+    let requester = this._sessionMap[message.sessionId];
+    let result = message.content;
+
     if (message.sessionId != this._connectedSessionId) {
-      this.fireRequestError(requestId, message.status);
+      this.fireRequestError(requester.requestId, message.status);
     } else  {
-      this.fireRequestSuccess(requestId, [results.maxndefMsgLen, results.cardstate]);
+      this.fireRequestSuccess(message.requestId, ObjectWrapper.wrap(result, requester.win));
     }
   },
 
   handleNDEFReadResponse: function handleNDEFReadResponse(message) {
     debug("NDEFReadResponse(" + JSON.stringify(message) + ")");
-    let requestId = this._sessionMap[message.sessionId];
+    let requester = this._sessionMap[message.sessionId];
 
-    let records = message.content.records;
-    for (var i = 0; i < records.length; i++) {
-      records[i].tnf = records[i].tnf;
-      records[i].type = atob(records[i].type);
-      records[i].id = atob(records[i].id);
-      records[i].payload = atob(records[i].payload);
-    }
-    let msg = { records: records };
+    //let records = message.content;
+    let result = message.content;
+    /*
+    let contact = Cc["@mozilla.org/contact;1"].createInstance(Ci.nsIDOMContact);
+    let prop = {name: ["Joe Contact"], tel: [{value: "1555-1234556"}]};
+    contact.init(prop);
+    let result = [contact]; // Works!!!
+    */
+    /*
+    let result = records.map(function(r) {
+      debug("XXXXXXXXXXXXXXXXX In records map loop");
+      let ndefrecord = Cc["@mozilla.org/ndefrecord;1"].createInstance(Ci.nsIDOMMozNdefRecord);
+      let btype = atob(r.type);
+      let bid = atob(r.id);
+      let bpayload = atob(r.payload);
+      let prop = {tnf: r.tnf, type: btype, id: bid, payload: bpayload};
+      debug("XXXXXXXXXXXXXXXXX Props to be set.");
+      debug("XXXXXXXXXXXXXXXXX :" + JSON.stringify(prop));
+
+      ndefrecord.init(prop); // Init with MozNdefRecordProperties interface (no new)
+      debug("XXXXXXXXXXXXXXXXX ndefrecord init returned.");
+      return ndefrecord;
+    });
+    debug("Exited ndefrecords array loop");
+    debug("String: " + JSON.stringify(result));
+    debug("Firing next.");
+    */
 
     if (message.sessionId != this._connectedSessionId) {
-      this.fireRequestError(requestId, message.status);
+      this.fireRequestError(requester.requestId, message.status);
     } else  {
-      this.fireRequestSuccess(requestId, JSON.stringify(records));
+      this.fireRequestSuccess(message.requestId, ObjectWrapper.wrap(result, requester.win));
     }
   },
 
   handleNDEFWriteResponse: function handleNDEFWriteResponse(message) {
     debug("NDEFWriteResponse(" + JSON.stringify(message) + ")");
-    let requestId = this._sessionMap[message.sessionId];
-    let results = message.content;
+    let requester = this._sessionMap[message.sessionId];
+    let result = message.content;
+
     if (message.sessionId != this._connectedSessionId) {
       this.fireRequestError(requestId, message.status);
     } else  {
-      this.fireRequestSuccess(requestId, [results.status, results.message]);
+      this.fireRequestSuccess(message.requestId, ObjectWrapper.wrap(result, requester.win));
     }
   },
 
   handleNfcATagDetailsResponse: function handleNfcATagDetailsResponse(message) {
     debug("NfcATagDetailsResponse(" + JSON.stringify(message) + ")");
-    let requestId = this._sessionMap[message.sessionId];
-    let results = message.content;
+    let requester = this._sessionMap[message.sessionId];
+    let result = message.content;
+
     if (message.sessionId != this._connectedSessionId) {
-      this.fireRequestError(requestId, message.status);
+      this.fireRequestError(requester.requestId, message.status);
     } else  {
-      this.fireRequestSuccess(requestId, [results.maxMsgLen, results.cardstate]);
+      this.fireRequestSuccess(message.requestId, [results.maxMsgLen, results.cardstate]);
     }
   },
 
   handleNfcATagTransceiveResponse: function handleNfcATagTransceiveResponse(message) {
     debug("NfcATagTransceiveResponse(" + JSON.stringify(message) + ")");
-    let requestId = this._sessionMap[message.sessionId];
-    let results = message.content;
+    let requester = this._sessionMap[message.sessionId];
+    let result = message.content;
     if (message.sessionId != this._connectedSessionId) {
-      this.fireRequestError(requestId, message.status);
+      this.fireRequestError(requester.requestId, message.status);
     } else  {
-      this.fireRequestSuccess(requestId, [results.status, results.message]);
+      this.fireRequestSuccess(message.requestId, ObjectWrapper.wrap(result, requester.win));
     }
   },
 
   handleConnectResponse: function handleConnectResponse(message) {
     debug("ConnectResponse(" + JSON.stringify(message) + ")");
-    let requestId = this._sessionMap[message.sessionId];
-    let results = message.content;
+    let requester = this._sessionMap[message.sessionId];
+    let result = message.content;
     if (message.sessionId != this._connectedSessionId) {
-      this.fireRequestError(requestId, message.status);
+      this.fireRequestError(requester.requestId, message.status);
     } else  {
-      this.fireRequestSuccess(requestId, [results.status, results.message]);
+      this.fireRequestSuccess(message.requestId, ObjectWrapper.wrap(result, requester.win));
     }
   },
 
   handleCloseResponse: function handleCloseResponse(message) {
     debug("CloseResponse(" + JSON.stringify(message) + ")");
-    let requestId = this._sessionMap[message.sessionId];
-    let results = message.content;
+    let requester = this._sessionMap[message.sessionId];
+    let result = message.content;
     if (message.sessionId != this._connectedSessionId) {
-      this.fireRequestError(requestId, message.status);
+      this.fireRequestError(requester.requestId, message.status);
     } else  {
-      this.fireRequestSuccess(requestId, [results.status, results.message]);
+      this.fireRequestSuccess(message.requestId, ObjectWrapper.wrap(result, requester.win));
     }
 
     // Cleanup lost session.

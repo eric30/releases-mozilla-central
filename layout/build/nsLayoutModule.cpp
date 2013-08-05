@@ -116,6 +116,16 @@ using mozilla::dom::bluetooth::BluetoothService;
   "@mozilla.org/bluetooth/service;1"
 #endif
 
+#ifdef MOZ_B2G_NFC
+#include "NdefRecord.h"
+using mozilla::dom::nfc::NdefRecord;
+#define NDEFRECORD_CID \
+  {0x42a70160, 0xc4a3, 0x11e1, {0x9b, 0x21, 0x08, 0x00, 0x20, 0x0c, 0x9a, 0x66}}
+#define NDEFRECORD_CONTRACTID \
+  "@mozilla.org/ndefrecord;1"
+#endif
+
+
 #ifdef MOZ_WIDGET_GONK
 #include "AudioManager.h"
 using mozilla::dom::gonk::AudioManager;
