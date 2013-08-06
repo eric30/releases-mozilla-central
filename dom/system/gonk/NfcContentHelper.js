@@ -93,7 +93,7 @@ NfcContentHelper.prototype = {
     }
 
     let request = Services.DOMRequest.createRequest(window);
-    let requestId = this.getRequestId(request);
+    let requestId = btoa(this.getRequestId(request));
     this._sessionMap[this._connectedSessionId] = {win: window};
 
     cpmm.sendAsyncMessage("NFC:NdefDetails", {
@@ -110,7 +110,7 @@ NfcContentHelper.prototype = {
     }
 
     let request = Services.DOMRequest.createRequest(window);
-    let requestId = this.getRequestId(request);
+    let requestId = btoa(this.getRequestId(request));
     this._sessionMap[this._connectedSessionId] = {win: window};
 
     cpmm.sendAsyncMessage("NFC:NdefRead", {
@@ -127,6 +127,7 @@ NfcContentHelper.prototype = {
     }
 
     let request = Services.DOMRequest.createRequest(window);
+    let requestId = btoa(this.getRequestId(request));
     this._sessionMap[this._connectedSessionId] = {win: window};
 
     let encodedRecords = this.encodeNdefRecords(records);
@@ -147,6 +148,7 @@ NfcContentHelper.prototype = {
     }
 
     let request = Services.DOMRequest.createRequest(window);
+    let requestId = btoa(this.getRequestId(request));
     this._sessionMap[this._connectedSessionId] = {win: window};
 
     let encodedRecords = this.encodeNdefRecords(records);
@@ -166,6 +168,7 @@ NfcContentHelper.prototype = {
     }
 
     let request = Services.DOMRequest.createRequest(window);
+    let requestId = btoa(this.getRequestId(request));
     this._sessionMap[this._connectedSessionId] = {win: window};
 
     cpmm.sendAsyncMessage("NFC:NfcATagDetails", {
@@ -182,6 +185,7 @@ NfcContentHelper.prototype = {
     }
 
     let request = Services.DOMRequest.createRequest(window);
+    let requestId = btoa(this.getRequestId(request));
     this._sessionMap[this._connectedSessionId] = {win: window};
 
     cpmm.sendAsyncMessage("NFC:NfcATagTransceive", {
@@ -199,6 +203,7 @@ NfcContentHelper.prototype = {
     }
 
     let request = Services.DOMRequest.createRequest(window);
+    let requestId = btoa(this.getRequestId(request));
     this._sessionMap[this._connectedSessionId] = {win: window};
 
     cpmm.sendAsyncMessage("NFC:Connect", {
@@ -216,6 +221,7 @@ NfcContentHelper.prototype = {
     }
 
     let request = Services.DOMRequest.createRequest(window);
+    let requestId = btoa(this.getRequestId(request));
     this._sessionMap[this._connectedSessionId] = {win: window};
 
     cpmm.sendAsyncMessage("NFC:Close", {
@@ -391,24 +397,11 @@ NfcContentHelper.prototype = {
     this._deliverCallback("_nfcCallbacks", "nfcATagDiscovered", [message]);
   },
 
-  // handle DOMRequest based response messages. Subfields of message.content: requestId, status, optional message
-  // The reciever has to unpack the resultArray, as JSON doesn't work.
-  handleDOMRequestResponse: function handleResponse(message, resultArray) {
-    let requester = this._sessionMap[message.sessionId];
-
-    debug("Retrieved requestId: " + requester.requestId);
-    debug("Param message: " + message);
-    if (message.sessionId != this._connectedSessionId) {
-      this.fireRequestError(requestId, message.status);
-    } else  {
-      this.fireRequestSuccess(message.requestId, resultArray);
-    }
-  },
-
   handleNDEFDetailsResponse: function handleNDEFDetailsResponse(message) {
     debug("NDEFDetailsResponse(" + JSON.stringify(message) + ")");
     let requester = this._sessionMap[message.sessionId];
     let result = message.content;
+    let requestId = atob(result.requestId);
 
     if (message.sessionId != this._connectedSessionId) {
       this.fireRequestError(requester.requestId, message.status);
@@ -423,6 +416,7 @@ NfcContentHelper.prototype = {
 
     //let records = message.content;
     let result = message.content;
+    let requestId = atob(message.requestId);
     /*
     let contact = Cc["@mozilla.org/contact;1"].createInstance(Ci.nsIDOMContact);
     let prop = {name: ["Joe Contact"], tel: [{value: "1555-1234556"}]};
@@ -450,9 +444,9 @@ NfcContentHelper.prototype = {
     */
 
     if (message.sessionId != this._connectedSessionId) {
-      this.fireRequestError(requester.requestId, message.status);
+      this.fireRequestError(requestId, message.status);
     } else  {
-      this.fireRequestSuccess(message.requestId, ObjectWrapper.wrap(result, requester.win));
+      this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
     }
   },
 
@@ -460,11 +454,12 @@ NfcContentHelper.prototype = {
     debug("NDEFWriteResponse(" + JSON.stringify(message) + ")");
     let requester = this._sessionMap[message.sessionId];
     let result = message.content;
+    let requestId = atob(result.requestId);
 
     if (message.sessionId != this._connectedSessionId) {
       this.fireRequestError(requestId, message.status);
     } else  {
-      this.fireRequestSuccess(message.requestId, ObjectWrapper.wrap(result, requester.win));
+      this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
     }
   },
 
@@ -472,11 +467,12 @@ NfcContentHelper.prototype = {
     debug("NfcATagDetailsResponse(" + JSON.stringify(message) + ")");
     let requester = this._sessionMap[message.sessionId];
     let result = message.content;
+    let requestId = atob(result.requestId);
 
     if (message.sessionId != this._connectedSessionId) {
-      this.fireRequestError(requester.requestId, message.status);
+      this.fireRequestError(requestId, message.status);
     } else  {
-      this.fireRequestSuccess(message.requestId, [results.maxMsgLen, results.cardstate]);
+      this.fireRequestSuccess(requestId, [results.maxMsgLen, results.cardstate]);
     }
   },
 
@@ -484,10 +480,12 @@ NfcContentHelper.prototype = {
     debug("NfcATagTransceiveResponse(" + JSON.stringify(message) + ")");
     let requester = this._sessionMap[message.sessionId];
     let result = message.content;
+    let requestId = atob(result.requestId);
+
     if (message.sessionId != this._connectedSessionId) {
-      this.fireRequestError(requester.requestId, message.status);
+      this.fireRequestError(requestId, message.status);
     } else  {
-      this.fireRequestSuccess(message.requestId, ObjectWrapper.wrap(result, requester.win));
+      this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
     }
   },
 
@@ -495,10 +493,12 @@ NfcContentHelper.prototype = {
     debug("ConnectResponse(" + JSON.stringify(message) + ")");
     let requester = this._sessionMap[message.sessionId];
     let result = message.content;
+    let requestId = atob(result.requestId);
+
     if (message.sessionId != this._connectedSessionId) {
-      this.fireRequestError(requester.requestId, message.status);
+      this.fireRequestError(requestId, message.status);
     } else  {
-      this.fireRequestSuccess(message.requestId, ObjectWrapper.wrap(result, requester.win));
+      this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
     }
   },
 
@@ -506,10 +506,12 @@ NfcContentHelper.prototype = {
     debug("CloseResponse(" + JSON.stringify(message) + ")");
     let requester = this._sessionMap[message.sessionId];
     let result = message.content;
+    let requestId = atob(result.requestId);
+
     if (message.sessionId != this._connectedSessionId) {
-      this.fireRequestError(requester.requestId, message.status);
+      this.fireRequestError(requestId, message.status);
     } else  {
-      this.fireRequestSuccess(message.requestId, ObjectWrapper.wrap(result, requester.win));
+      this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
     }
 
     // Cleanup lost session.
