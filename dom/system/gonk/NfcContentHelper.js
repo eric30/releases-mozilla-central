@@ -94,8 +94,7 @@ NfcContentHelper.prototype = {
 
     let request = Services.DOMRequest.createRequest(window);
     let requestId = btoa(this.getRequestId(request));
-    this._requestMap[requestId] = {win: window, sessionId: this._connectedSessionId};
-    debug("ZZZZ Map: window " + this._requestMap[requestId].win + " sess: " + this._requestMap[requestId].sessionId);
+    this._requestMap[requestId] = {win: window};
 
     cpmm.sendAsyncMessage("NFC:NdefDetails", {
       requestId: requestId,
@@ -112,8 +111,7 @@ NfcContentHelper.prototype = {
 
     let request = Services.DOMRequest.createRequest(window);
     let requestId = btoa(this.getRequestId(request));
-    this._requestMap[requestId] = {win: window, sessionId: this._connectedSessionId};
-    debug("ZZZZ Map: window " + this._requestMap[requestId].win + " sess: " + this._requestMap[requestId].sessionId);
+    this._requestMap[requestId] = {win: window};
 
     cpmm.sendAsyncMessage("NFC:NdefRead", {
       requestId: requestId,
@@ -130,8 +128,7 @@ NfcContentHelper.prototype = {
 
     let request = Services.DOMRequest.createRequest(window);
     let requestId = btoa(this.getRequestId(request));
-    this._requestMap[requestId] = {win: window, sessionId: this._connectedSessionId};
-    debug("ZZZZ Map: window " + this._requestMap[requestId].win + " sess: " + this._requestMap[requestId].sessionId);
+    this._requestMap[requestId] = {win: window};
 
     let encodedRecords = this.encodeNdefRecords(records);
 
@@ -152,8 +149,7 @@ NfcContentHelper.prototype = {
 
     let request = Services.DOMRequest.createRequest(window);
     let requestId = btoa(this.getRequestId(request));
-    this._requestMap[requestId] = {win: window, sessionId: this._connectedSessionId};
-    debug("XXX Map: " + this._requestMap[requestId]);
+    this._requestMap[requestId] = {win: window};
 
     let encodedRecords = this.encodeNdefRecords(records);
 
@@ -173,7 +169,7 @@ NfcContentHelper.prototype = {
 
     let request = Services.DOMRequest.createRequest(window);
     let requestId = btoa(this.getRequestId(request));
-    this._requestMap[requestId] = {win: window, sessionId: this._connectedSessionId};
+    this._requestMap[requestId] = {win: window};
 
     cpmm.sendAsyncMessage("NFC:NfcATagDetails", {
       requestId: requestId,
@@ -190,7 +186,7 @@ NfcContentHelper.prototype = {
 
     let request = Services.DOMRequest.createRequest(window);
     let requestId = btoa(this.getRequestId(request));
-    this._requestMap[requestId] = {win: window, sessionId: this._connectedSessionId};
+    this._requestMap[requestId] = {win: window};
 
     cpmm.sendAsyncMessage("NFC:NfcATagTransceive", {
       requestId: requestId,
@@ -208,7 +204,7 @@ NfcContentHelper.prototype = {
 
     let request = Services.DOMRequest.createRequest(window);
     let requestId = btoa(this.getRequestId(request));
-    this._requestMap[requestId] = {win: window, sessionId: this._connectedSessionId};
+    this._requestMap[requestId] = {win: window};
 
     cpmm.sendAsyncMessage("NFC:Connect", {
       requestId: requestId,
@@ -226,7 +222,7 @@ NfcContentHelper.prototype = {
 
     let request = Services.DOMRequest.createRequest(window);
     let requestId = btoa(this.getRequestId(request));
-    this._requestMap[requestId] = {win: window, sessionId: this._connectedSessionId};
+    this._requestMap[requestId] = {win: window};
 
     cpmm.sendAsyncMessage("NFC:Close", {
       requestId: requestId,
@@ -367,34 +363,29 @@ NfcContentHelper.prototype = {
 
   // NFC Notifications
   handleTechDiscovered: function handleTechDiscovered(message) {
-    debug('XXXXXX TechDiscovered. Check for existing session:');
+    debug('TechDiscovered. Check for existing session:');
     this._connectedSessionId = message.sessionId;
-    debug('updated.');
     this._deliverCallback("_nfcCallbacks", "techDiscovered", [message]);
   },
 
   handleTechLost: function handleTechLost(message) {
-    debug('XXXXXX TechLost. Check for existing session:');
+    debug('TechLost. Check for existing session:');
     this._connectedSessionId = null;
-    //this._requestMap = new Array(); // As there's only one NFC device, any remaining requestIds are invalid.
     this._deliverCallback("_nfcCallbacks", "techLost", [message]);
   },
 
   handleNfcATagDiscoveredNofitication: function handleTechDiscovered(message) {
-    debug('XXXXXX NfcATagDiscovered. Check for existing session:');
+    debug('NfcATagDiscovered. Check for existing session:');
     this._connectedSessionId = message.sessionId;
     this._deliverCallback("_nfcCallbacks", "nfcATagDiscovered", [message]);
   },
 
   handleNDEFDetailsResponse: function handleNDEFDetailsResponse(message) {
     debug("NDEFDetailsResponse(" + JSON.stringify(message) + ")");
-    debug("DETAILS Request Map requestid in: " + message.requestId);
     let requester = this._requestMap[message.requestId];
     if (typeof requester === 'undefined') {
        return; // Nothing to do in this instance.
     }
-    debug("Request Map Length: ");
-    debug("DETAILS Request Map Length: " + Object.keys(this._requestMap).length);
      
     let result = message.content;
     let requestId = atob(message.requestId);
@@ -413,15 +404,7 @@ NfcContentHelper.prototype = {
     if (typeof requester === 'undefined') {
        return; // Nothing to do in this instance.
     }
-    debug("READ Request Map requestid in: " + message.requestId);
-    debug("Request Map Length");
-    debug("Request Map Length: " + Object.keys(this._requestMap).length);
 
-    debug("Requester: " + requester);
-    debug("Requester win is: " + requester.win);
-    debug("READ Requester sess is: " + requester.sessionId);
-
-    //let records = message.content;
     let result = message.content;
     let requestId = atob(message.requestId);
     let records = result.records.map(function(r) {
@@ -449,12 +432,6 @@ NfcContentHelper.prototype = {
     delete this._requestMap[message.requestId];
     let result = message.content;
     let requestId = atob(message.requestId);
-    debug("WRITE Request Map Length");
-    debug("Request Map Length: " + Object.keys(this._requestMap).length);
-
-    debug("Requester: " + requester);
-    debug("Requester win is: " + requester.win);
-    debug("WRITE Requester sess is: " + requester.sessionId);
 
     if (message.sessionId != this._connectedSessionId) {
       this.fireRequestError(requestId, message.status);
