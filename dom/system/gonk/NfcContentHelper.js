@@ -401,12 +401,12 @@ NfcContentHelper.prototype = {
     debug("NDEFDetailsResponse(" + JSON.stringify(message) + ")");
     let requester = this._sessionMap[message.sessionId];
     let result = message.content;
-    let requestId = atob(result.requestId);
+    let requestId = atob(message.requestId);
 
     if (message.sessionId != this._connectedSessionId) {
-      this.fireRequestError(requester.requestId, message.status);
+      this.fireRequestError(requestId, message.status);
     } else  {
-      this.fireRequestSuccess(message.requestId, ObjectWrapper.wrap(result, requester.win));
+      this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
     }
   },
 
@@ -417,31 +417,13 @@ NfcContentHelper.prototype = {
     //let records = message.content;
     let result = message.content;
     let requestId = atob(message.requestId);
-    /*
-    let contact = Cc["@mozilla.org/contact;1"].createInstance(Ci.nsIDOMContact);
-    let prop = {name: ["Joe Contact"], tel: [{value: "1555-1234556"}]};
-    contact.init(prop);
-    let result = [contact]; // Works!!!
-    */
-    /*
-    let result = records.map(function(r) {
-      debug("XXXXXXXXXXXXXXXXX In records map loop");
-      let ndefrecord = Cc["@mozilla.org/ndefrecord;1"].createInstance(Ci.nsIDOMMozNdefRecord);
-      let btype = atob(r.type);
-      let bid = atob(r.id);
-      let bpayload = atob(r.payload);
-      let prop = {tnf: r.tnf, type: btype, id: bid, payload: bpayload};
-      debug("XXXXXXXXXXXXXXXXX Props to be set.");
-      debug("XXXXXXXXXXXXXXXXX :" + JSON.stringify(prop));
-
-      ndefrecord.init(prop); // Init with MozNdefRecordProperties interface (no new)
-      debug("XXXXXXXXXXXXXXXXX ndefrecord init returned.");
-      return ndefrecord;
+    let records = result.records.map(function(r) {
+      r.type = atob(r.type);
+      r.id = atob(r.id);
+      r.payload = atob(r.payload);
+      return r;
     });
-    debug("Exited ndefrecords array loop");
-    debug("String: " + JSON.stringify(result));
-    debug("Firing next.");
-    */
+    let result = {records: records};
 
     if (message.sessionId != this._connectedSessionId) {
       this.fireRequestError(requestId, message.status);
