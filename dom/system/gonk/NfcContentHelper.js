@@ -391,7 +391,7 @@ NfcContentHelper.prototype = {
     let requestId = atob(message.requestId);
 
     if (message.sessionId != this._connectedSessionId) {
-      this.fireRequestError(requestId, message.status);
+      this.fireRequestError(requestId, result.status);
     } else  {
       this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
     }
@@ -416,7 +416,7 @@ NfcContentHelper.prototype = {
     let result = {records: records};
 
     if (message.sessionId != this._connectedSessionId) {
-      this.fireRequestError(requestId, message.status);
+      this.fireRequestError(requestId, result.status);
     } else  {
       this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
     }
@@ -433,8 +433,9 @@ NfcContentHelper.prototype = {
     let result = message.content;
     let requestId = atob(message.requestId);
 
-    if (message.sessionId != this._connectedSessionId) {
-      this.fireRequestError(requestId, message.status);
+    if ((message.sessionId != this._connectedSessionId) ||
+        (result.status != 'OK')) {
+      this.fireRequestError(requestId, result.status);
     } else  {
       this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
     }
@@ -451,7 +452,7 @@ NfcContentHelper.prototype = {
     let requestId = atob(result.requestId);
 
     if (message.sessionId != this._connectedSessionId) {
-      this.fireRequestError(requestId, message.status);
+      this.fireRequestError(requestId, result.status);
     } else  {
       this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
     }
@@ -468,7 +469,7 @@ NfcContentHelper.prototype = {
     let requestId = atob(result.requestId);
 
     if (message.sessionId != this._connectedSessionId) {
-      this.fireRequestError(requestId, message.status);
+      this.fireRequestError(requestId, result.status);
     } else  {
       this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
     }
@@ -485,7 +486,7 @@ NfcContentHelper.prototype = {
     let requestId = atob(result.requestId);
 
     if (message.sessionId != this._connectedSessionId) {
-      this.fireRequestError(requestId, message.status);
+      this.fireRequestError(requestId, result.status);
     } else  {
       this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
     }
@@ -502,7 +503,7 @@ NfcContentHelper.prototype = {
     let requestId = atob(result.requestId);
 
     if (message.sessionId != this._connectedSessionId) {
-      this.fireRequestError(requestId, message.status);
+      this.fireRequestError(requestId, result.status);
     } else  {
       this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
     }
