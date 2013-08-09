@@ -64,14 +64,15 @@ NdefRecord::Initialize(nsISupports* aOwner,
   tnf = (PRUint8)JSVAL_TO_INT(aArgv[0]);
 
   // Type (DOMString)
-  if ((aArgv[1] != JSVAL_NULL) && JSVAL_IS_STRING(aArgv[1])) {
+
+  if (JSVAL_IS_STRING(aArgv[1])) {
     jsstr = JSVAL_TO_STRING(aArgv[1]);
     const jschar *typechars = JS_GetStringCharsAndLength(aContext, jsstr, &length);
     if (!typechars) {
       return NS_ERROR_OUT_OF_MEMORY;
     }
     type.Assign(typechars, length);
-  } else if (aArgv[1] == JSVAL_NULL) {
+  } else if (aArgv[1].isNull()) {
     type.AssignLiteral("");
   } else {
     return NS_ERROR_INVALID_ARG;
@@ -85,7 +86,7 @@ NdefRecord::Initialize(nsISupports* aOwner,
       return NS_ERROR_OUT_OF_MEMORY;
     }
     id.Assign(idchars, length);
-  } else if (aArgv[2] == JSVAL_NULL) {
+  } else if (aArgv[2].isNull()) {
     id.AssignLiteral("");
   } else {
     return NS_ERROR_INVALID_ARG;

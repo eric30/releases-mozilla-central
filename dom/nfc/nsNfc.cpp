@@ -15,7 +15,8 @@
 
 #include "nsCharSeparatedTokenizer.h"
 #include "nsContentUtils.h"
-#include "nsDOMClassInfo.h"
+#include "nsIDOMClassInfo.h"
+#include "nsDOMEvent.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsNetUtil.h"
 #include "nsServiceManagerUtils.h"
@@ -56,6 +57,10 @@ nsNfc::Create(nsPIDOMWindow* aOwner, nsINfcContentHelper* aNfc)
   return nfc.forget();
 }
 
+DOMCI_DATA(MozNfc, nsNfc)
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(nsNfc)
+
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsNfc,
                                                   nsDOMEventTargetHelper)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
@@ -76,8 +81,6 @@ NS_INTERFACE_MAP_END_INHERITING(nsDOMEventTargetHelper)
 
 NS_IMPL_ADDREF_INHERITED(nsNfc, nsDOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(nsNfc, nsDOMEventTargetHelper)
-
-DOMCI_DATA(MozNfc, nsNfc)
 
 NS_IMPL_ISUPPORTS1(nsNfc::NfcCallback, nsINfcCallback)
 

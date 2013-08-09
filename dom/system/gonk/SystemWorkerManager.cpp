@@ -93,8 +93,8 @@ private:
   UnixSocketRawData *mRawData;
 };
 
-JSBool
-PostToNfc(JSContext *cx, unsigned argc, jsval *vp)
+bool
+PostToNfc(JSContext *cx, unsigned argc, JS::Value *vp)
 {
   NS_ASSERTION(!NS_IsMainThread(), "Expecting to be on the worker thread");
 
@@ -136,7 +136,7 @@ ConnectWorkerToNfc::RunTask(JSContext *aCx)
   // communication.
   NS_ASSERTION(!NS_IsMainThread(), "Expecting to be on the worker thread");
   NS_ASSERTION(!JS_IsRunning(aCx), "Are we being called somehow?");
-  JSObject *workerGlobal = JS_GetGlobalForScopeChain(aCx);
+  JSObject *workerGlobal = JS::CurrentGlobalOrNull(aCx);
 
   return !!JS_DefineFunction(aCx, workerGlobal, "postNfcMessage", PostToNfc, 1,
                              0);
