@@ -210,7 +210,7 @@ NfcContentHelper.prototype = {
     cpmm.sendAsyncMessage("NFC:Connect", {
       requestId: requestId,
       sessionId: this._connectedSessionId,
-      techType: techType 
+      techType: techType
     });
     return request;
   },
@@ -390,7 +390,7 @@ NfcContentHelper.prototype = {
     if (typeof requester === 'undefined') {
        return; // Nothing to do in this instance.
     }
-     
+
     let result = message.content;
     let requestId = atob(message.requestId);
 
