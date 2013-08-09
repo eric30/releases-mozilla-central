@@ -36,6 +36,7 @@ const NFC_IPC_MSG_NAMES = [
   "NFC:NDEFDetailsResponse",
   "NFC:NDEFReadResponse",
   "NFC:NDEFWriteResponse",
+  "NFC:NDEFPushResponse",
   "NFC:NfcATagDetailsResponse",
   "NFC:NfcATagTransceiveResponse",
   "NFC:ConnectResponse",
@@ -346,6 +347,9 @@ NfcContentHelper.prototype = {
       case "NFC:NDEFWriteResponse":
         this.handleNDEFWriteResponse(message.json);
         break;
+      case "NFC:NDEFPushResponse":
+        this.handleNDEFPushResponse(message.json);
+        break;
       case "NFC:NfcATagDetailsResponse":
         this.handleNfcATagDetailsResponse(message.json);
         break;
@@ -425,6 +429,24 @@ NfcContentHelper.prototype = {
 
   handleNDEFWriteResponse: function handleNDEFWriteResponse(message) {
     debug("NDEFWriteResponse(" + JSON.stringify(message) + ")");
+    let requester = this._requestMap[message.requestId];
+    if (typeof requester === 'undefined') {
+       return; // Nothing to do in this instance.
+    }
+    delete this._requestMap[message.requestId];
+    let result = message.content;
+    let requestId = atob(message.requestId);
+
+    if ((message.sessionId != this._connectedSessionId) ||
+        (result.status != 'OK')) {
+      this.fireRequestError(requestId, result.status);
+    } else  {
+      this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
+    }
+  },
+
+  handleNDEFPushResponse: function handleNDEFPushResponse(message) {
+    debug("NDEFPushResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
     if (typeof requester === 'undefined') {
        return; // Nothing to do in this instance.

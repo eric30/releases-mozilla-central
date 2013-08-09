@@ -94,6 +94,13 @@ let Nfc = {
   },
 
   /**
+   * P2P NDEF message push between a pair of NFC devices.
+   */
+  ndefPush: function ndefPush(message) {
+    postNfcMessage(JSON.stringify(message.content));
+  },
+
+  /**
    * Retrieve metadata describing the NfcA tag type, if present.
    */
   nfcATagDetails: function nfcATagDetails(message) {
@@ -118,13 +125,6 @@ let Nfc = {
    * Close connection to the NFC target. Request ID is required.
    */
   close: function close(message) {
-    postNfcMessage(JSON.stringify(message.content));
-  },
-
-  /**
-   * P2P NDEF message push between a pair of NFC devices.
-   */
-  ndefPush: function ndefPush(message) {
     postNfcMessage(JSON.stringify(message.content));
   },
 

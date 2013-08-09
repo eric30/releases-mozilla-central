@@ -33,11 +33,11 @@ const NFC_IPC_MSG_NAMES = [
   "NFC:NdefDetails",
   "NFC:NdefRead",
   "NFC:NdefWrite",
+  "NFC:NdefPush",
   "NFC:NfcATagDetails",
   "NFC:NfcATagTransceive",
   "NFC:Connect",
-  "NFC:Close",
-  "NFC:NDEFPush"
+  "NFC:Close"
 ];
 
 XPCOMUtils.defineLazyServiceGetter(this, "ppmm",
@@ -106,6 +106,9 @@ Nfc.prototype = {
       case "NDEFWriteResponse":
         ppmm.broadcastAsyncMessage("NFC:NDEFWriteResponse", message);
         break;
+      case "NDEFPushResponse":
+        ppmm.broadcastAsyncMessage("NFC:NDEFPushResponse", message);
+        break;
 
       default:
         throw new Error("Don't know about this message type: " + message.type);
@@ -158,6 +161,22 @@ Nfc.prototype = {
     };
 
     this.worker.postMessage({type: "ndefWrite", content: outMessage});
+  },
+
+  ndefPush: function ndefPush(message) {
+    var records = message.records;
+
+    debug("ndefPushRequest message: " + JSON.stringify(message));
+    var outMessage = {
+      type: "NDEFPushRequest",
+      sessionId: message.sessionId,
+      requestId: message.requestId,
+      content: {
+        records: records
+      }
+    };
+
+    this.worker.postMessage({type: "ndefPush", content: outMessage});
   },
 
   // tag read/write command message handler.
@@ -218,22 +237,6 @@ Nfc.prototype = {
     this.worker.postMessage({type: "close", content: outMessage});
   },
 
-  ndefPush: function ndefPush(message) {
-    var records = message.records;
-
-    debug("ndefPush: " + JSON.stringify(message));
-    var outMessage = {
-      type: "ndefPushRequest",
-      sessionId: message.sessionId,
-      requestId: message.requestId,
-      content: {
-        records: records
-      }
-    };
-
-    this.worker.postMessage({type: "ndefPush", content: outMessage});
-  },
-
   /**
    * Process the incoming message from a content process (NfcContentHelper.js)
    */
@@ -252,6 +255,9 @@ Nfc.prototype = {
       case "NFC:NdefWrite":
         this.ndefWrite(message.json);
         break;
+      case "NFC:NdefPush":
+        this.ndefPush(message.json);
+        break;
       case "NFC:NfcATagDetails":
         this.nfcATagDetails(message.json);
         break;
@@ -263,9 +269,6 @@ Nfc.prototype = {
         break;
       case "NFC:Close":
         this.close(message.json);
-        break;
-      case "NFC:NdefPush":
-        this.ndefPush(message.json);
         break;
     }
   },

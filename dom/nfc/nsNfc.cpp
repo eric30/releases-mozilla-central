@@ -201,6 +201,26 @@ nsNfc::NdefWrite(const JS::Value& aRecords, JSContext* aCx, nsIDOMDOMRequest** a
 }
 
 NS_IMETHODIMP
+nsNfc::NdefPush(const JS::Value& aRecords, JSContext* aCx, nsIDOMDOMRequest** aRequest)
+{
+  bool isValid;
+
+  // First parameter needs to be an array, and of type NdefRecord
+  if (ValidateNdefTag(aRecords, aCx, &isValid) != NS_OK) {
+    if (!isValid) {
+      NS_WARNING("Error: NdefPush requires an NdefRecord array type.");
+      return NS_ERROR_INVALID_ARG;
+    }
+  }
+
+  // Call to NfcContentHelper.js
+  *aRequest = nullptr;
+  nsresult rv = mNfc->NdefPush(GetOwner(), aRecords, aRequest);
+  NS_ENSURE_SUCCESS(rv, rv);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsNfc::NfcATagDetails(JSContext* aCx, nsIDOMDOMRequest** aRequest)
 {
   // Call to NfcContentHelper.js
@@ -234,26 +254,6 @@ nsNfc::Close(JSContext* aCx, nsIDOMDOMRequest** aRequest)
 {
   *aRequest = nullptr;
   nsresult rv = mNfc->Close(GetOwner(), aRequest);
-  NS_ENSURE_SUCCESS(rv, rv);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsNfc::NdefPush(const JS::Value& aRecords, JSContext* aCx, nsIDOMDOMRequest** aRequest)
-{
-  bool isValid;
-
-  // First parameter needs to be an array, and of type NdefRecord
-  if (ValidateNdefTag(aRecords, aCx, &isValid) != NS_OK) {
-    if (!isValid) {
-      NS_WARNING("Error: WriteNdefTag requires an NdefRecord array type.");
-      return NS_ERROR_INVALID_ARG;
-    }
-  }
-
-  // Call to NfcContentHelper.js
-  *aRequest = nullptr;
-  nsresult rv = mNfc->NdefPush(GetOwner(), aRecords, aRequest);
   NS_ENSURE_SUCCESS(rv, rv);
   return NS_OK;
 }
