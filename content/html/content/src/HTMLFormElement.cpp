@@ -299,6 +299,8 @@ ElementTraverser(const nsAString& key, nsIDOMHTMLInputElement* element,
   return PL_DHASH_NEXT;
 }
 
+NS_IMPL_CYCLE_COLLECTION_CLASS(HTMLFormElement)
+
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(HTMLFormElement,
                                                   nsGenericHTMLElement)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mControls)
@@ -326,14 +328,12 @@ NS_IMPL_RELEASE_INHERITED(HTMLFormElement, Element)
 
 // QueryInterface implementation for HTMLFormElement
 NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(HTMLFormElement)
-  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLElement)
   NS_INTERFACE_TABLE_INHERITED4(HTMLFormElement,
                                 nsIDOMHTMLFormElement,
                                 nsIForm,
                                 nsIWebProgressListener,
                                 nsIRadioGroupContainer)
-  NS_INTERFACE_TABLE_TO_MAP_SEGUE
-NS_ELEMENT_INTERFACE_MAP_END
+NS_INTERFACE_TABLE_TAIL_INHERITING(nsGenericHTMLElement)
 
 
 // nsIDOMHTMLFormElement
@@ -1858,12 +1858,11 @@ HTMLFormElement::CheckFormValidity(nsIMutableArray* aInvalidElements) const
   // Hold a reference to the elements so they can't be deleted while calling
   // the invalid events.
   for (uint32_t i = 0; i < len; ++i) {
-    static_cast<nsGenericHTMLElement*>(sortedControls[i])->AddRef();
+    sortedControls[i]->AddRef();
   }
 
   for (uint32_t i = 0; i < len; ++i) {
-    nsCOMPtr<nsIConstraintValidation> cvElmt =
-      do_QueryInterface((nsGenericHTMLElement*)sortedControls[i]);
+    nsCOMPtr<nsIConstraintValidation> cvElmt = do_QueryObject(sortedControls[i]);
     if (cvElmt && cvElmt->IsCandidateForConstraintValidation() &&
         !cvElmt->IsValid()) {
       ret = false;
@@ -1876,7 +1875,7 @@ HTMLFormElement::CheckFormValidity(nsIMutableArray* aInvalidElements) const
       // Add all unhandled invalid controls to aInvalidElements if the caller
       // requested them.
       if (defaultAction && aInvalidElements) {
-        aInvalidElements->AppendElement((nsGenericHTMLElement*)sortedControls[i],
+        aInvalidElements->AppendElement(ToSupports(sortedControls[i]),
                                         false);
       }
     }
@@ -2414,6 +2413,8 @@ nsFormControlList::FlushPendingNotifications()
     }
   }
 }
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(nsFormControlList)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsFormControlList)
   tmp->Clear();

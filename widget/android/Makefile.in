@@ -11,12 +11,11 @@ include $(DEPTH)/config/autoconf.mk
 
 LIBRARY_NAME    = widget_android
 EXPORT_LIBRARY  = 1
+IS_COMPONENT    = 1
+MODULE_NAME     = nsWidgetAndroidModule
 LIBXUL_LIBRARY  = 1
 FAIL_ON_WARNINGS := 1
 
-ifdef MOZ_ONLY_TOUCH_EVENTS
-DEFINES += -DMOZ_ONLY_TOUCH_EVENTS
-endif
 ifdef MOZ_WEBSMS_BACKEND
 DEFINES += -DMOZ_WEBSMS_BACKEND
 endif

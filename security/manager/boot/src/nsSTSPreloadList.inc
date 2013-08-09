@@ -7,8 +7,8 @@
 /* nsStrictTransportSecurityService.cpp, you shouldn't be #including it.     */
 /*****************************************************************************/
 
-#include "mozilla/StandardInteger.h"
-const PRTime gPreloadListExpirationTime = INT64_C(1385202156273000);
+#include <stdint.h>
+const PRTime gPreloadListExpirationTime = INT64_C(1386411284101000);
 
 class nsSTSPreload
 {
@@ -53,8 +53,8 @@ static const nsSTSPreload kSTSPreloadList[] = {
   { "factor.cc", false },
   { "forum.linode.com", false },
   { "forum.quantifiedself.com", true },
-  { "gocardless.com", true },
   { "grc.com", false },
+  { "haste.ch", true },
   { "howrandom.org", true },
   { "id.mayfirst.org", false },
   { "inertianetworks.com", true },
@@ -72,6 +72,7 @@ static const nsSTSPreload kSTSPreloadList[] = {
   { "logotype.se", true },
   { "lookout.com", false },
   { "luneta.nearbuysystems.com", false },
+  { "makeyourlaws.org", true },
   { "manager.linode.com", false },
   { "mattmccutchen.net", true },
   { "mega.co.nz", false },
@@ -85,18 +86,23 @@ static const nsSTSPreload kSTSPreloadList[] = {
   { "paste.linode.com", false },
   { "pastebin.linode.com", false },
   { "pay.gigahost.dk", true },
+  { "paymill.com", true },
+  { "paymill.de", true },
   { "piratenlogin.de", true },
   { "pixi.me", true },
   { "rapidresearch.me", true },
   { "riseup.net", true },
   { "roundcube.mayfirst.org", false },
   { "sandbox.mydigipass.com", false },
+  { "securityheaders.com", true },
   { "shodan.io", true },
   { "silentcircle.com", true },
   { "simple.com", false },
+  { "squareup.com", false },
   { "stocktrade.de", false },
   { "stripe.com", true },
   { "support.mayfirst.org", false },
+  { "surkatty.org", true },
   { "therapynotes.com", false },
   { "twitter.com", false },
   { "ubertt.org", true },
@@ -111,12 +117,12 @@ static const nsSTSPreload kSTSPreloadList[] = {
   { "www.cueup.com", false },
   { "www.cyveillance.com", true },
   { "www.entropia.de", false },
-  { "www.gov.uk", false },
   { "www.grc.com", false },
   { "www.intercom.io", false },
   { "www.irccloud.com", false },
   { "www.linode.com", false },
   { "www.lookout.com", false },
+  { "www.makeyourlaws.org", true },
   { "www.mydigipass.com", false },
   { "www.mylookout.com", false },
   { "www.noisebridge.net", false },

@@ -8,6 +8,7 @@
 
 #include "mozilla/layers/Compositor.h"
 #include "mozilla/layers/TextureClient.h"
+#include "mozilla/layers/TextureHost.h"
 #include "gfxWindowsPlatform.h"
 #include <d3d11.h>
 #include <vector>
@@ -76,7 +77,7 @@ public:
     return aType == TEXTURE_CONTENT;
   }
 
-  virtual void EnsureAllocated(gfx::IntSize aSize,
+  virtual bool EnsureAllocated(gfx::IntSize aSize,
                                gfxASurface::gfxContentType aType) MOZ_OVERRIDE;
 
   virtual gfxASurface* LockSurface() MOZ_OVERRIDE;

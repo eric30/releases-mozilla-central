@@ -10,7 +10,7 @@
 #endif
  
 #include "mozilla/DebugOnly.h"
-#include "mozilla/StandardInteger.h"
+#include <stdint.h>
 #include "mozilla/Util.h"
 
 #include "MediaDecoderStateMachine.h"
@@ -618,6 +618,10 @@ void MediaDecoderStateMachine::SendStreamData()
 
   if (mState == DECODER_STATE_DECODING_METADATA)
     return;
+
+  if (!mDecoder->IsSameOriginMedia()) {
+    return;
+  }
 
   // If there's still an audio thread alive, then we can't send any stream
   // data yet since both SendStreamData and the audio thread want to be in

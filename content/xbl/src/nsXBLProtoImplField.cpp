@@ -244,14 +244,14 @@ FieldGetterImpl(JSContext *cx, JS::CallArgs args)
   }
 
   JS::Rooted<JS::Value> v(cx);
-  if (!JS_GetPropertyById(cx, thisObj, id, v.address())) {
+  if (!JS_GetPropertyById(cx, thisObj, id, &v)) {
     return false;
   }
   args.rval().set(v);
   return true;
 }
 
-static JSBool
+static bool
 FieldGetter(JSContext *cx, unsigned argc, JS::Value *vp)
 {
   JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
@@ -280,9 +280,7 @@ FieldSetterImpl(JSContext *cx, JS::CallArgs args)
   }
 
   if (installed) {
-    JS::Rooted<JS::Value> v(cx,
-                            args.length() > 0 ? args[0] : JS::UndefinedValue());
-    if (!::JS_SetPropertyById(cx, thisObj, id, v.address())) {
+    if (!::JS_SetPropertyById(cx, thisObj, id, args.get(0))) {
       return false;
     }
   }
@@ -290,7 +288,7 @@ FieldSetterImpl(JSContext *cx, JS::CallArgs args)
   return true;
 }
 
-static JSBool
+static bool
 FieldSetter(JSContext *cx, unsigned argc, JS::Value *vp)
 {
   JS::CallArgs args = JS::CallArgsFromVp(argc, vp);

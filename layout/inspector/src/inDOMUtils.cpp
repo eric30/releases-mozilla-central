@@ -36,6 +36,7 @@
 #include "mozilla/dom/InspectorUtilsBinding.h"
 #include "nsCSSProps.h"
 #include "nsColor.h"
+#include "nsStyleSet.h"
 
 using namespace mozilla;
 using namespace mozilla::css;
@@ -55,6 +56,49 @@ NS_IMPL_ISUPPORTS1(inDOMUtils, inIDOMUtils)
 
 ///////////////////////////////////////////////////////////////////////////////
 // inIDOMUtils
+
+NS_IMETHODIMP
+inDOMUtils::GetAllStyleSheets(nsIDOMDocument *aDocument, uint32_t *aLength,
+                              nsISupports ***aSheets)
+{
+  NS_ENSURE_ARG_POINTER(aDocument);
+
+  nsCOMArray<nsISupports> sheets;
+
+  nsCOMPtr<nsIDocument> document = do_QueryInterface(aDocument);
+  MOZ_ASSERT(document);
+
+  // Get the agent, then user sheets in the style set.
+  nsIPresShell* presShell = document->GetShell();
+  if (presShell) {
+    nsStyleSet* styleSet = presShell->StyleSet();
+    nsStyleSet::sheetType sheetType = nsStyleSet::eAgentSheet;
+    for (int32_t i = 0; i < styleSet->SheetCount(sheetType); i++) {
+      sheets.AppendElement(styleSet->StyleSheetAt(sheetType, i));
+    }
+    sheetType = nsStyleSet::eUserSheet;
+    for (int32_t i = 0; i < styleSet->SheetCount(sheetType); i++) {
+      sheets.AppendElement(styleSet->StyleSheetAt(sheetType, i));
+    }
+  }
+
+  // Get the document sheets.
+  for (int32_t i = 0; i < document->GetNumberOfStyleSheets(); i++) {
+    sheets.AppendElement(document->GetStyleSheetAt(i));
+  }
+
+  nsISupports** ret = static_cast<nsISupports**>(NS_Alloc(sheets.Count() *
+                                                 sizeof(nsISupports*)));
+
+  for (int32_t i = 0; i < sheets.Count(); i++) {
+    NS_ADDREF(ret[i] = sheets[i]);
+  }
+
+  *aLength = sheets.Count();
+  *aSheets = ret;
+
+  return NS_OK;
+}
 
 NS_IMETHODIMP
 inDOMUtils::IsIgnorableWhitespace(nsIDOMCharacterData *aDataNode,
@@ -437,7 +481,7 @@ static void GetKeywordsForProperty(const nsCSSProperty aProperty,
     return;
   }
   const int32_t *keywordTable = nsCSSProps::kKeywordTableTable[aProperty];
-  if (keywordTable) {
+  if (keywordTable && keywordTable != nsCSSProps::kBoxPropSourceKTable) {
     size_t i = 0;
     while (nsCSSKeyword(keywordTable[i]) != eCSSKeyword_UNKNOWN) {
       nsCSSKeyword word = nsCSSKeyword(keywordTable[i]);
@@ -454,6 +498,9 @@ static void GetColorsForProperty(const uint32_t aParserVariant,
                                  nsTArray<nsString>& aArray)
 {
   if (aParserVariant & VARIANT_COLOR) {
+    // GetKeywordsForProperty and GetOtherValuesForProperty assume aArray is sorted,
+    // and if aArray is not empty here, then it's not going to be sorted coming out.
+    MOZ_ASSERT(aArray.Length() == 0);
     size_t size;
     const char * const *allColorNames = NS_AllColorNames(&size);
     for (size_t i = 0; i < size; i++) {
@@ -500,6 +547,9 @@ static void GetOtherValuesForProperty(const uint32_t aParserVariant,
     InsertNoDuplicates(aArray, NS_LITERAL_STRING("calc"));
     InsertNoDuplicates(aArray, NS_LITERAL_STRING("-moz-calc"));
   }
+  if (aParserVariant & VARIANT_URL) {
+    InsertNoDuplicates(aArray, NS_LITERAL_STRING("url"));
+  }
 }
 
 NS_IMETHODIMP
@@ -526,9 +576,15 @@ inDOMUtils::GetCSSValuesForProperty(const nsAString& aProperty,
   } else {
     // Property is shorthand.
     CSSPROPS_FOR_SHORTHAND_SUBPROPERTIES(subproperty, propertyID) {
+      // Get colors (once) first.
       uint32_t propertyParserVariant = nsCSSProps::ParserVariant(*subproperty);
-      // Get colors first.
-      GetColorsForProperty(propertyParserVariant, array);
+      if (propertyParserVariant & VARIANT_COLOR) {
+        GetColorsForProperty(propertyParserVariant, array);
+        break;
+      }
+    }
+    CSSPROPS_FOR_SHORTHAND_SUBPROPERTIES(subproperty, propertyID) {
+      uint32_t propertyParserVariant = nsCSSProps::ParserVariant(*subproperty);
       GetKeywordsForProperty(*subproperty, array);
       GetOtherValuesForProperty(propertyParserVariant, array);
     }
@@ -698,9 +754,9 @@ GetStatesForPseudoClass(const nsAString& aStatePseudo)
     nsEventStates(),
     nsEventStates()
   };
-  MOZ_STATIC_ASSERT(NS_ARRAY_LENGTH(sPseudoClassStates) ==
-                    nsCSSPseudoClasses::ePseudoClass_NotPseudoClass + 1,
-                    "Length of PseudoClassStates array is incorrect");
+  static_assert(NS_ARRAY_LENGTH(sPseudoClassStates) ==
+                nsCSSPseudoClasses::ePseudoClass_NotPseudoClass + 1,
+                "Length of PseudoClassStates array is incorrect");
 
   nsCOMPtr<nsIAtom> atom = do_GetAtom(aStatePseudo);
 

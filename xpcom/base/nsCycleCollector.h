@@ -54,9 +54,11 @@ void nsCycleCollector_setBeforeUnlinkCallback(CC_BeforeUnlinkCallback aCB);
 typedef void (*CC_ForgetSkippableCallback)(void);
 void nsCycleCollector_setForgetSkippableCallback(CC_ForgetSkippableCallback aCB);
 
-void nsCycleCollector_forgetSkippable(bool aRemoveChildlessNodes = false);
+void nsCycleCollector_forgetSkippable(bool aRemoveChildlessNodes = false,
+                                      bool aAsyncSnowWhiteFreeing = false);
 
-void nsCycleCollector_dispatchDeferredDeletion();
+void nsCycleCollector_dispatchDeferredDeletion(bool aContinuation = false);
+bool nsCycleCollector_doDeferredDeletion();
 
 void nsCycleCollector_collect(bool aManuallyTriggered,
                               nsCycleCollectorResults *aResults,

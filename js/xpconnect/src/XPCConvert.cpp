@@ -178,7 +178,7 @@ XPCConvert::NativeData2JS(jsval* d, const void* s,
                 nsID* iid2 = *((nsID**)s);
                 if (!iid2)
                     break;
-                RootedObject scope(cx, JS_GetGlobalForScopeChain(cx));
+                RootedObject scope(cx, JS::CurrentGlobalOrNull(cx));
                 JSObject* obj;
                 if (!(obj = xpc_NewIDObject(cx, scope, *iid2)))
                     return false;
@@ -819,7 +819,7 @@ XPCConvert::NativeInterface2JSObject(jsval* d,
     // optimal -- we could detect this and roll the functionality into a
     // single wrapper, but the current solution is good enough for now.
     AutoJSContext cx;
-    XPCWrappedNativeScope* xpcscope = GetObjectScope(JS_GetGlobalForScopeChain(cx));
+    XPCWrappedNativeScope* xpcscope = GetObjectScope(JS::CurrentGlobalOrNull(cx));
     if (!xpcscope)
         return false;
 
@@ -1315,7 +1315,7 @@ XPCConvert::JSErrorToXPCException(const char* message,
             uclinebuf ? nsDependentString(uclinebuf) : EmptyString(),
             report->lineno,
             report->uctokenptr - report->uclinebuf, report->flags,
-            "XPConnect JavaScript",
+            NS_LITERAL_CSTRING("XPConnect JavaScript"),
             nsJSUtils::GetCurrentlyRunningCodeInnerWindowID(cx));
     }
 
@@ -1372,7 +1372,7 @@ XPCConvert::NativeArray2JS(jsval* d, const void** s,
     PR_BEGIN_MACRO                                                                      \
         for (i = 0; i < count; i++) {                                                   \
             if (!NativeData2JS(current.address(), ((_t*)*s)+i, type, iid, pErr) ||      \
-                !JS_SetElement(cx, array, i, current.address()))                        \
+                !JS_SetElement(cx, array, i, &current))                                 \
                 goto failure;                                                           \
         }                                                                               \
     PR_END_MACRO
@@ -1638,7 +1638,7 @@ XPCConvert::JSArray2Native(void** d, HandleValue s,
             goto failure;                                                      \
         }                                                                      \
         for (initedCount = 0; initedCount < count; initedCount++) {            \
-            if (!JS_GetElement(cx, jsarray, initedCount, current.address()) || \
+            if (!JS_GetElement(cx, jsarray, initedCount, &current) ||          \
                 !JSData2Native(((_t*)array)+initedCount, current, type,        \
                                true, iid, pErr))                               \
                 goto failure;                                                  \

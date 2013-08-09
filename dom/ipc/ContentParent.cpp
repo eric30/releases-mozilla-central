@@ -827,28 +827,44 @@ ContentParent::TransformPreallocatedIntoApp(const nsAString& aAppManifestURL,
 void
 ContentParent::ShutDownProcess(bool aCloseWithError)
 {
-  if (!mIsDestroyed) {
-    mIsDestroyed = true;
-
     const InfallibleTArray<PIndexedDBParent*>& idbParents =
-      ManagedPIndexedDBParent();
+        ManagedPIndexedDBParent();
     for (uint32_t i = 0; i < idbParents.Length(); ++i) {
-      static_cast<IndexedDBParent*>(idbParents[i])->Disconnect();
+        static_cast<IndexedDBParent*>(idbParents[i])->Disconnect();
     }
 
-    if (aCloseWithError) {
-      AsyncChannel* channel = GetIPCChannel();
-      if (channel) {
-        channel->CloseWithError();
-      }
-    } else {
-      // Close() can only be called once: It kicks off the destruction sequence.
-      Close();
+    // If Close() fails with an error, we'll end up back in this function, but
+    // with aCloseWithError = true.  It's important that we call
+    // CloseWithError() in this case; see bug 895204.
+
+    if (!aCloseWithError && !mCalledClose) {
+        // Close() can only be called once: It kicks off the destruction
+        // sequence.
+        mCalledClose = true;
+        Close();
     }
-  }
-  // NB: must MarkAsDead() here so that this isn't accidentally
-  // returned from Get*() while in the midst of shutdown.
-  MarkAsDead();
+
+    if (aCloseWithError && !mCalledCloseWithError) {
+        AsyncChannel* channel = GetIPCChannel();
+        if (channel) {
+            mCalledCloseWithError = true;
+            channel->CloseWithError();
+        }
+    }
+
+    // NB: must MarkAsDead() here so that this isn't accidentally
+    // returned from Get*() while in the midst of shutdown.
+    MarkAsDead();
+
+    // A ContentParent object might not get freed until after XPCOM shutdown has
+    // shut down the cycle collector.  But by then it's too late to release any
+    // CC'ed objects, so we need to null them out here, while we still can.  See
+    // bug 899761.
+    mMemoryReporters.Clear();
+    if (mMessageManager) {
+      mMessageManager->Disconnect();
+      mMessageManager = nullptr;
+    }
 }
 
 void
@@ -987,7 +1003,9 @@ ContentParent::ActorDestroy(ActorDestroyReason why)
 #endif
     }
 
-    mMessageManager->Disconnect();
+    if (ppm) {
+      ppm->Disconnect();
+    }
 
     // clear the child memory reporters
     InfallibleTArray<MemoryReport> empty;
@@ -1155,9 +1173,10 @@ ContentParent::ContentParent(mozIApplication* aApp,
     , mForceKillTask(nullptr)
     , mNumDestroyingTabs(0)
     , mIsAlive(true)
-    , mIsDestroyed(false)
     , mSendPermissionUpdates(false)
     , mIsForBrowser(aIsForBrowser)
+    , mCalledClose(false)
+    , mCalledCloseWithError(false)
 {
     // No more than one of !!aApp, aIsForBrowser, and aIsForPreallocated should
     // be true.
@@ -1757,7 +1776,15 @@ ContentParent::AllocPBrowserParent(const IPCTabContext& aContext,
         return nullptr;
     }
 
-    TabParent* parent = new TabParent(this, TabContext(aContext));
+    MaybeInvalidTabContext tc(aContext);
+    if (!tc.IsValid()) {
+        NS_ERROR(nsPrintfCString("Child passed us an invalid TabContext.  (%s)  "
+                                 "Aborting AllocPBrowserParent.",
+                                 tc.GetInvalidReason()).get());
+        return nullptr;
+    }
+
+    TabParent* parent = new TabParent(this, tc.GetTabContext());
 
     // We release this ref in DeallocPBrowserParent()
     NS_ADDREF(parent);

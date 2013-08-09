@@ -476,14 +476,6 @@ class VirtualRegisterMap
     }
 };
 
-static inline AnyRegister
-GetFixedRegister(LDefinition *def, LUse *use)
-{
-    return def->type() == LDefinition::DOUBLE
-           ? AnyRegister(FloatRegister::FromCode(use->registerCode()))
-           : AnyRegister(Register::FromCode(use->registerCode()));
-}
-
 static inline bool
 IsNunbox(VirtualRegister *vreg)
 {
@@ -539,7 +531,6 @@ class LiveRangeAllocator : public RegisterAllocator
     // Allocation state
     StackSlotAllocator stackSlotAllocator;
 
-  public:
     LiveRangeAllocator(MIRGenerator *mir, LIRGenerator *lir, LIRGraph &graph, bool forLSRA)
       : RegisterAllocator(mir, lir, graph),
         liveIn(NULL),
@@ -550,7 +541,6 @@ class LiveRangeAllocator : public RegisterAllocator
 
     bool buildLivenessInfo();
 
-  protected:
     bool init();
 
     bool addFixedRangeAtHead(AnyRegister reg, CodePosition from, CodePosition to) {

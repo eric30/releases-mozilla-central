@@ -437,7 +437,7 @@ static inline jsval_layout
 BOOLEAN_TO_JSVAL_IMPL(JSBool b)
 {
     jsval_layout l;
-    MOZ_ASSERT(b == JS_TRUE || b == JS_FALSE);
+    MOZ_ASSERT(b == JS_TRUE_DEPRECATED || b == JS_FALSE_DEPRECATED);
     l.s.tag = JSVAL_TAG_BOOLEAN;
     l.s.payload.boo = b;
     return l;
@@ -664,7 +664,7 @@ static inline jsval_layout
 BOOLEAN_TO_JSVAL_IMPL(JSBool b)
 {
     jsval_layout l;
-    MOZ_ASSERT(b == JS_TRUE || b == JS_FALSE);
+    MOZ_ASSERT(b == JS_TRUE_DEPRECATED || b == JS_FALSE_DEPRECATED);
     l.asBits = ((uint64_t)(uint32_t)b) | JSVAL_SHIFTED_TAG_BOOLEAN;
     return l;
 }
@@ -1467,6 +1467,7 @@ class ValueOperations
     void *toGCThing() const { return value()->toGCThing(); }
 
     JSValueType extractNonDoubleType() const { return value()->extractNonDoubleType(); }
+    uint32_t toPrivateUint32() const { return value()->toPrivateUint32(); }
 
     JSWhyMagic whyMagic() const { return value()->whyMagic(); }
 };
@@ -1644,12 +1645,12 @@ inline Anchor<Value>::~Anchor()
 namespace detail {
 
 struct ValueAlignmentTester { char c; JS::Value v; };
-MOZ_STATIC_ASSERT(sizeof(ValueAlignmentTester) == 16,
-                  "JS::Value must be 16-byte-aligned");
+static_assert(sizeof(ValueAlignmentTester) == 16,
+              "JS::Value must be 16-byte-aligned");
 
 struct LayoutAlignmentTester { char c; jsval_layout l; };
-MOZ_STATIC_ASSERT(sizeof(LayoutAlignmentTester) == 16,
-                  "jsval_layout must be 16-byte-aligned");
+static_assert(sizeof(LayoutAlignmentTester) == 16,
+              "jsval_layout must be 16-byte-aligned");
 
 } // namespace detail
 #endif /* DEBUG */
@@ -1663,8 +1664,8 @@ MOZ_STATIC_ASSERT(sizeof(LayoutAlignmentTester) == 16,
  */
 typedef JS::Value jsval;
 
-MOZ_STATIC_ASSERT(sizeof(jsval_layout) == sizeof(JS::Value),
-                  "jsval_layout and JS::Value must have identical layouts");
+static_assert(sizeof(jsval_layout) == sizeof(JS::Value),
+              "jsval_layout and JS::Value must have identical layouts");
 
 /************************************************************************/
 

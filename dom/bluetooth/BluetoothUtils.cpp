@@ -7,6 +7,7 @@
 #include "base/basictypes.h"
 
 #include "BluetoothReplyRunnable.h"
+#include "BluetoothService.h"
 #include "BluetoothUtils.h"
 #include "jsapi.h"
 #include "mozilla/Scoped.h"
@@ -23,7 +24,7 @@ BEGIN_BLUETOOTH_NAMESPACE
 bool
 SetJsObject(JSContext* aContext,
             const BluetoothValue& aValue,
-            JSObject* aObj)
+            JS::Handle<JSObject*> aObj)
 {
   MOZ_ASSERT(aContext && aObj);
 
@@ -36,18 +37,18 @@ SetJsObject(JSContext* aContext,
     aValue.get_ArrayOfBluetoothNamedValue();
 
   for (uint32_t i = 0; i < arr.Length(); i++) {
-    JS::Value val;
+    JS::Rooted<JS::Value> val(aContext);
     const BluetoothValue& v = arr[i].value();
-    JSString* jsData;
 
     switch(v.type()) {
-      case BluetoothValue::TnsString:
-        jsData = JS_NewUCStringCopyN(aContext,
+       case BluetoothValue::TnsString: {
+        JSString* jsData = JS_NewUCStringCopyN(aContext,
                                      v.get_nsString().BeginReading(),
                                      v.get_nsString().Length());
         NS_ENSURE_TRUE(jsData, false);
         val = STRING_TO_JSVAL(jsData);
         break;
+      }
       case BluetoothValue::Tuint32_t:
         val = INT_TO_JSVAL(v.get_uint32_t());
         break;
@@ -61,7 +62,7 @@ SetJsObject(JSContext* aContext,
 
     if (!JS_SetProperty(aContext, aObj,
                         NS_ConvertUTF16toUTF8(arr[i].name()).get(),
-                        &val)) {
+                        val)) {
       NS_WARNING("Failed to set property");
       return false;
     }
@@ -109,7 +110,7 @@ BroadcastSystemMessage(const nsAString& aType,
   NS_ASSERTION(!::JS_IsExceptionPending(cx),
       "Shouldn't get here when an exception is pending!");
 
-  JSObject* obj = JS_NewObject(cx, NULL, NULL, NULL);
+  JS::RootedObject obj(cx, JS_NewObject(cx, NULL, NULL, NULL));
   if (!obj) {
     NS_WARNING("Failed to new JSObject for system message!");
     return false;
@@ -124,7 +125,9 @@ BroadcastSystemMessage(const nsAString& aType,
     do_GetService("@mozilla.org/system-message-internal;1");
   NS_ENSURE_TRUE(systemMessenger, false);
 
-  systemMessenger->BroadcastMessage(aType, OBJECT_TO_JSVAL(obj));
+  systemMessenger->BroadcastMessage(aType,
+                                    OBJECT_TO_JSVAL(obj),
+                                    JS::UndefinedValue());
 
   return true;
 }
@@ -169,6 +172,26 @@ ParseAtCommand(const nsACString& aAtCommand, const int aStart,
 
   nsCString tmp(nsDependentCSubstring(aAtCommand, begin));
   aRetValues.AppendElement(tmp);
+}
+
+void
+DispatchStatusChangedEvent(const nsAString& aType,
+                           const nsAString& aAddress,
+                           bool aStatus)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  InfallibleTArray<BluetoothNamedValue> data;
+  data.AppendElement(
+    BluetoothNamedValue(NS_LITERAL_STRING("address"), nsString(aAddress)));
+  data.AppendElement(
+    BluetoothNamedValue(NS_LITERAL_STRING("status"), aStatus));
+
+  BluetoothSignal signal(nsString(aType), NS_LITERAL_STRING(KEY_ADAPTER), data);
+
+  BluetoothService* bs = BluetoothService::Get();
+  NS_ENSURE_TRUE_VOID(bs);
+  bs->DistributeSignal(signal);
 }
 
 END_BLUETOOTH_NAMESPACE

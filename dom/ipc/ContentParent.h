@@ -430,6 +430,10 @@ private:
 
     virtual void ProcessingError(Result what) MOZ_OVERRIDE;
 
+    // If you add strong pointers to cycle collected objects here, be sure to
+    // release these objects in ShutDownProcess.  See the comment there for more
+    // details.
+
     GeckoChildProcessHost* mSubprocess;
     base::ChildPrivileges mOSPrivileges;
 
@@ -467,12 +471,14 @@ private:
     // false, but some previously scheduled IPC traffic may still pass
     // through.
     bool mIsAlive;
-    // True after the OS-level shutdown sequence has been initiated.
-    // After going true, any use of this at all, including lingering
-    // IPC traffic passing through, will cause assertions to fail.
-    bool mIsDestroyed;
+
     bool mSendPermissionUpdates;
     bool mIsForBrowser;
+
+    // These variables track whether we've called Close() and CloseWithError()
+    // on our channel.
+    bool mCalledClose;
+    bool mCalledCloseWithError;
 
     friend class CrashReporterParent;
 

@@ -78,13 +78,14 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/MemoryReporting.h"
-#include "mozilla/StandardInteger.h"
 #include "mozilla/Util.h"
 
-#include <string.h>
-#include <stdlib.h>
-#include <stdarg.h>
 #include <math.h>
+#include <stdarg.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "xpcpublic.h"
 #include "jsapi.h"
 #include "jsprf.h"
@@ -606,6 +607,8 @@ enum WatchdogTimestampCategory
     TimestampCount
 };
 
+class AsyncFreeSnowWhite;
+
 class XPCJSRuntime : public mozilla::CycleCollectedJSRuntime
 {
 public:
@@ -667,10 +670,10 @@ public:
 
     virtual bool
     DescribeCustomObjects(JSObject* aObject, js::Class* aClasp,
-                          char (&aName)[72]) const;
+                          char (&aName)[72]) const MOZ_OVERRIDE;
     virtual bool
     NoteCustomGCThingXPCOMChildren(js::Class* aClasp, JSObject* aObj,
-                                   nsCycleCollectionTraversalCallback& aCb) const;
+                                   nsCycleCollectionTraversalCallback& aCb) const MOZ_OVERRIDE;
 
     /**
      * Infrastructure for classes that need to defer part of the finalization
@@ -722,14 +725,16 @@ public:
         return mStrings[index];
     }
 
-    void TraceNativeBlackRoots(JSTracer* trc);
-    void TraceAdditionalNativeGrayRoots(JSTracer* aTracer);
-    void TraverseAdditionalNativeRoots(nsCycleCollectionNoteRootCallback& cb);
+    void TraceNativeBlackRoots(JSTracer* trc) MOZ_OVERRIDE;
+    void TraceAdditionalNativeGrayRoots(JSTracer* aTracer) MOZ_OVERRIDE;
+    void TraverseAdditionalNativeRoots(nsCycleCollectionNoteRootCallback& cb) MOZ_OVERRIDE;
     void UnmarkSkippableJSHolders();
     void PrepareForForgetSkippable() MOZ_OVERRIDE;
     void PrepareForCollection() MOZ_OVERRIDE;
+    void DispatchDeferredDeletion(bool continuation) MOZ_OVERRIDE;
 
     void CustomGCCallback(JSGCStatus status) MOZ_OVERRIDE;
+    bool CustomContextCallback(JSContext *cx, unsigned operation) MOZ_OVERRIDE;
     static void GCSliceCallback(JSRuntime *rt,
                                 JS::GCProgress progress,
                                 const JS::GCDescription &desc);
@@ -816,6 +821,8 @@ public:
 
     void AddGCCallback(xpcGCCallback cb);
     void RemoveGCCallback(xpcGCCallback cb);
+    void AddContextCallback(xpcContextCallback cb);
+    void RemoveContextCallback(xpcContextCallback cb);
 
     static void ActivityCallback(void *arg, JSBool active);
     static void CTypesActivityCallback(JSContext *cx,
@@ -863,9 +870,11 @@ private:
     XPCRootSetElem *mWrappedJSRoots;
     XPCRootSetElem *mObjectHolderRoots;
     nsTArray<xpcGCCallback> extraGCCallbacks;
+    nsTArray<xpcContextCallback> extraContextCallbacks;
     nsRefPtr<WatchdogManager> mWatchdogManager;
     JS::GCSliceCallback mPrevGCSliceCallback;
     JSObject* mJunkScope;
+    nsRefPtr<AsyncFreeSnowWhite> mAsyncSnowWhiteFreer;
 
     nsCOMPtr<nsIException>   mPendingException;
     nsCOMPtr<nsIExceptionManager> mExceptionManager;
@@ -1172,10 +1181,10 @@ extern js::Class XPC_WN_ModsAllowed_NoCall_Proto_JSClass;
 extern js::Class XPC_WN_Tearoff_JSClass;
 extern js::Class XPC_WN_NoHelper_Proto_JSClass;
 
-extern JSBool
+extern bool
 XPC_WN_CallMethod(JSContext *cx, unsigned argc, jsval *vp);
 
-extern JSBool
+extern bool
 XPC_WN_GetterSetter(JSContext *cx, unsigned argc, jsval *vp);
 
 extern JSBool
@@ -2252,18 +2261,16 @@ public:
     {
       NS_DECL_CYCLE_COLLECTION_CLASS_BODY_NO_UNLINK(XPCWrappedNative,
                                                     XPCWrappedNative)
-      static NS_METHOD RootImpl(void *p) { return NS_OK; }
-      static NS_METHOD UnlinkImpl(void *p);
-      static NS_METHOD UnrootImpl(void *p) { return NS_OK; }
+      NS_IMETHOD Root(void *p) { return NS_OK; }
+      NS_IMETHOD Unlink(void *p);
+      NS_IMETHOD Unroot(void *p) { return NS_OK; }
       static nsXPCOMCycleCollectionParticipant* GetParticipant()
       {
-        static const CCParticipantVTable<NS_CYCLE_COLLECTION_CLASSNAME(XPCWrappedNative)>
-          ::Type participant =
-          { NS_IMPL_CYCLE_COLLECTION_VTABLE(NS_CYCLE_COLLECTION_CLASSNAME(XPCWrappedNative)) };
-        return NS_PARTICIPANT_AS(nsXPCOMCycleCollectionParticipant,
-                                 &participant);
+        return &XPCWrappedNative::NS_CYCLE_COLLECTION_INNERNAME;
       }
     };
+    static NS_CYCLE_COLLECTION_INNERCLASS NS_CYCLE_COLLECTION_INNERNAME;
+
     void DeleteCycleCollectable() {}
 
     nsIPrincipal* GetObjectPrincipal() const;

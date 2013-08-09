@@ -85,7 +85,7 @@ EnterBaseline(JSContext *cx, EnterJitData &data)
     JS_ASSERT(ion::IsBaselineEnabled(cx));
     JS_ASSERT_IF(data.osrFrame, CheckFrame(data.osrFrame));
 
-    EnterIonCode enter = cx->compartment()->ionCompartment()->enterBaselineJIT();
+    EnterIonCode enter = cx->runtime()->ionRuntime()->enterBaseline();
 
     // Caller must construct |this| before invoking the Ion function.
     JS_ASSERT_IF(data.constructing, data.maxArgv[0].isObject());
@@ -709,7 +709,7 @@ BaselineScript::toggleDebugTraps(JSScript *script, jsbytecode *pc)
 
     SrcNoteLineScanner scanner(script->notes(), script->lineno);
 
-    IonContext ictx(script->compartment(), NULL);
+    IonContext ictx(script->runtimeFromMainThread(), script->compartment(), NULL);
     AutoFlushCache afc("DebugTraps");
 
     for (uint32_t i = 0; i < numPCMappingIndexEntries(); i++) {
@@ -902,7 +902,7 @@ ion::MarkActiveBaselineScripts(Zone *zone)
 {
     // First check if there is a JitActivation on the stack, so that there
     // must be a valid IonContext.
-    JitActivationIterator iter(zone->rt);
+    JitActivationIterator iter(zone->runtimeFromMainThread());
     if (iter.done())
         return;
 

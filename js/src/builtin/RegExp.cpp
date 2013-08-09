@@ -280,7 +280,7 @@ CompileRegExpObject(JSContext *cx, RegExpObjectBuilder &builder, CallArgs args)
 
     RegExpFlag flags = RegExpFlag(0);
     if (args.hasDefined(1)) {
-        RootedString flagStr(cx, ToString<CanGC>(cx, args.handleAt(1)));
+        RootedString flagStr(cx, ToString<CanGC>(cx, args[1]));
         if (!flagStr)
             return false;
         args[1].setString(flagStr);
@@ -318,14 +318,14 @@ regexp_compile_impl(JSContext *cx, CallArgs args)
     return CompileRegExpObject(cx, builder, args);
 }
 
-JSBool
+static bool
 regexp_compile(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     return CallNonGenericMethod<IsRegExp, regexp_compile_impl>(cx, args);
 }
 
-static JSBool
+static bool
 regexp_construct(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -362,7 +362,7 @@ regexp_toString_impl(JSContext *cx, CallArgs args)
     return true;
 }
 
-JSBool
+static bool
 regexp_toString(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -604,7 +604,7 @@ ExecuteRegExp(JSContext *cx, CallArgs args, MatchConduit &matches)
     RootedObject regexp(cx, &args.thisv().toObject());
 
     /* Step 2. */
-    RootedString string(cx, ToString<CanGC>(cx, args.handleOrUndefinedAt(0)));
+    RootedString string(cx, ToString<CanGC>(cx, args.get(0)));
     if (!string)
         return RegExpRunStatus_Error;
 
@@ -637,21 +637,21 @@ static bool
 regexp_exec_impl(JSContext *cx, CallArgs args)
 {
     RootedObject regexp(cx, &args.thisv().toObject());
-    RootedString string(cx, ToString<CanGC>(cx, args.handleOrUndefinedAt(0)));
+    RootedString string(cx, ToString<CanGC>(cx, args.get(0)));
     if (!string)
         return false;
 
     return regexp_exec_impl(cx, args, regexp, string, UpdateRegExpStatics);
 }
 
-JSBool
+bool
 js::regexp_exec(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     return CallNonGenericMethod(cx, IsRegExp, regexp_exec_impl, args);
 }
 
-JSBool
+bool
 js::regexp_exec_no_statics(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -678,7 +678,7 @@ regexp_test_impl(JSContext *cx, CallArgs args)
 
 /* Separate interface for use by IonMonkey. */
 bool
-js::regexp_test_raw(JSContext *cx, HandleObject regexp, HandleString input, JSBool *result)
+js::regexp_test_raw(JSContext *cx, HandleObject regexp, HandleString input, bool *result)
 {
     MatchPair match;
     MatchConduit conduit(&match);
@@ -687,14 +687,14 @@ js::regexp_test_raw(JSContext *cx, HandleObject regexp, HandleString input, JSBo
     return (status != RegExpRunStatus_Error);
 }
 
-JSBool
+bool
 js::regexp_test(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     return CallNonGenericMethod(cx, IsRegExp, regexp_test_impl, args);
 }
 
-JSBool
+bool
 js::regexp_test_no_statics(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);

@@ -862,23 +862,6 @@ public:
    */
   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const = 0;
 
-  /**
-   * Checks if a node has the same ownerDocument as this one. Note that this
-   * actually compares nodeinfo managers because nodes always have one, even
-   * when they don't have an ownerDocument. If this function returns true
-   * it doesn't mean that the nodes actually have an ownerDocument.
-   *
-   * @param aOther Other node to check
-   * @return Whether the owner documents of this node and of aOther are the
-   *         same.
-   */
-  bool HasSameOwnerDoc(nsINode *aOther)
-  {
-    // We compare nodeinfo managers because nodes always have one, even when
-    // they don't have an ownerDocument.
-    return mNodeInfo->NodeInfoManager() == aOther->mNodeInfo->NodeInfoManager();
-  }
-
   // This class can be extended by subclasses that wish to store more
   // information in the slots.
   class nsSlots
@@ -1121,12 +1104,6 @@ public:
   
     return NS_OK;
   }
-
-  /**
-   * Control if GetUserData and SetUserData methods will be exposed to
-   * unprivileged content.
-   */
-  static bool IsChromeOrXBL(JSContext* aCx, JSObject* /* unused */);
 
   void LookupPrefix(const nsAString& aNamespace, nsAString& aResult);
   bool IsDefaultNamespace(const nsAString& aNamespaceURI)

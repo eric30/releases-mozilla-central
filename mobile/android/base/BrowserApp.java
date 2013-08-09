@@ -100,6 +100,9 @@ abstract public class BrowserApp extends GeckoApp
     private AboutHome mAboutHome;
     protected Telemetry.Timer mAboutHomeStartupTimer = null;
 
+    // Set the default session restore value
+    private int mSessionRestore = -1;
+
     private static final int GECKO_TOOLS_MENU = -1;
     private static final int ADDON_MENU_OFFSET = 1000;
     private class MenuItemInfo {
@@ -111,6 +114,12 @@ abstract public class BrowserApp extends GeckoApp
         public boolean enabled = true;
         public boolean visible = true;
         public int parent;
+    }
+
+    // The types of guest mdoe dialogs we show
+    private static enum GuestModeDialog {
+        ENTERING,
+        LEAVING
     }
 
     private Vector<MenuItemInfo> mAddonMenuItemsCache;
@@ -388,12 +397,23 @@ abstract public class BrowserApp extends GeckoApp
     }
 
     @Override
+    protected int getSessionRestoreState(Bundle savedInstanceState) {
+        if (mSessionRestore > -1) {
+            return mSessionRestore;
+        }
+
+        return super.getSessionRestoreState(savedInstanceState);
+    }
+
+    @Override
     public void onCreate(Bundle savedInstanceState) {
         mAboutHomeStartupTimer = new Telemetry.Timer("FENNEC_STARTUP_TIME_ABOUTHOME");
 
         String args = getIntent().getStringExtra("args");
         if (args != null && args.contains("--guest-mode")) {
             mProfile = GeckoProfile.createGuestProfile(this);
+        } else if (GeckoProfile.maybeCleanupGuestProfile(this)) {
+            mSessionRestore = RESTORE_NORMAL;
         }
 
         super.onCreate(savedInstanceState);
@@ -505,6 +525,21 @@ abstract public class BrowserApp extends GeckoApp
             }
         });
     }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        unregisterEventListener("Prompt:ShowTop");
+    }
+
+    @Override
+    public void onPause() {
+        super.onPause();
+        // Register for Prompt:ShowTop so we can foreground this activity even if it's hidden.
+        registerEventListener("Prompt:ShowTop");
+    }
+
+
 
     private void showBookmarkDialog() {
         final Tab tab = Tabs.getInstance().getSelectedTab();
@@ -706,6 +741,11 @@ abstract public class BrowserApp extends GeckoApp
         }
         if (mBrowserToolbar != null)
             mBrowserToolbar.onDestroy();
+
+        if (mFindInPageBar != null) {
+            mFindInPageBar.onDestroy();
+            mFindInPageBar = null;
+        }
 
         if (mSharedPreferencesHelper != null) {
             mSharedPreferencesHelper.uninit();
@@ -1109,6 +1149,12 @@ abstract public class BrowserApp extends GeckoApp
                 startActivity(settingsIntent);
             } else if (event.equals("Updater:Launch")) {
                 handleUpdaterLaunch();
+            } else if (event.equals("Prompt:ShowTop")) {
+                // Bring this activity to front so the prompt is visible..
+                Intent bringToFrontIntent = new Intent();
+                bringToFrontIntent.setClassName(AppConstants.ANDROID_PACKAGE_NAME, AppConstants.BROWSER_INTENT_CLASS);
+                bringToFrontIntent.setFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+                startActivity(bringToFrontIntent);
             } else {
                 super.handleMessage(event, message);
             }
@@ -1598,8 +1644,8 @@ abstract public class BrowserApp extends GeckoApp
         MenuItem charEncoding = aMenu.findItem(R.id.char_encoding);
         MenuItem findInPage = aMenu.findItem(R.id.find_in_page);
         MenuItem desktopMode = aMenu.findItem(R.id.desktop_mode);
-        MenuItem enterGuestMode = aMenu.findItem(R.id.enter_guest_mode);
-        MenuItem exitGuestMode = aMenu.findItem(R.id.exit_guest_mode);
+        MenuItem enterGuestMode = aMenu.findItem(R.id.new_guest_session);
+        MenuItem exitGuestMode = aMenu.findItem(R.id.exit_guest_session);
 
         // Only show the "Quit" menu item on pre-ICS or television devices.
         // In ICS+, it's easy to kill an app through the task switcher.
@@ -1754,17 +1800,56 @@ abstract public class BrowserApp extends GeckoApp
             case R.id.new_private_tab:
                 addPrivateTab();
                 return true;
-            case R.id.enter_guest_mode:
-                doRestart("--guest-mode");
-                System.exit(0);
+            case R.id.new_guest_session:
+                showGuestModeDialog(GuestModeDialog.ENTERING);
                 return true;
-            case R.id.exit_guest_mode:
-                doRestart();
-                System.exit(0);
+            case R.id.exit_guest_session:
+                showGuestModeDialog(GuestModeDialog.LEAVING);
                 return true;
             default:
                 return super.onOptionsItemSelected(item);
         }
+    }
+
+    private void showGuestModeDialog(final GuestModeDialog type) {
+        final Prompt ps = new Prompt(this, new Prompt.PromptCallback() {
+            @Override
+            public void onPromptFinished(String result) {
+                try {
+                    int itemId = new JSONObject(result).getInt("button");
+                    if (itemId == 0) {
+                        String args = "";
+                        if (type == GuestModeDialog.ENTERING) {
+                            args = "--guest-mode";
+                        } else {
+                            GeckoProfile.leaveGuestSession(BrowserApp.this);
+                        }
+                        doRestart(args);
+                        System.exit(0);
+                    }
+                } catch(JSONException ex) {
+                    Log.e(LOGTAG, "Exception reading guest mode prompt result", ex);
+                }
+            }
+        });
+
+        Resources res = getResources();
+        ps.setButtons(new String[] {
+            res.getString(R.string.guest_session_dialog_continue),
+            res.getString(R.string.guest_session_dialog_cancel)
+        });
+
+        int titleString = 0;
+        int msgString = 0;
+        if (type == GuestModeDialog.ENTERING) {
+            titleString = R.string.new_guest_session_title;
+            msgString = R.string.new_guest_session_text;
+        } else {
+            titleString = R.string.exit_guest_session_title;
+            msgString = R.string.exit_guest_session_text;
+        }
+
+        ps.show(res.getString(titleString), res.getString(msgString), null, false);
     }
 
     /**

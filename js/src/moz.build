@@ -80,6 +80,7 @@ EXPORTS.js += [
 
 CPP_SOURCES += [
     'ArgumentsObject.cpp',
+    'BinaryData.cpp',
     'BytecodeCompiler.cpp',
     'BytecodeEmitter.cpp',
     'CharacterEncoding.cpp',
@@ -196,6 +197,7 @@ if CONFIG['ENABLE_ION']:
         'AliasAnalysis.cpp',
         'AsmJS.cpp',
         'AsmJSLink.cpp',
+        'AsmJSModule.cpp',
         'AsmJSSignalHandlers.cpp',
         'BacktrackingAllocator.cpp',
         'Bailouts.cpp',
@@ -324,6 +326,11 @@ if CONFIG['JS_HAS_CTYPES']:
     CPP_SOURCES += [
         'CTypes.cpp',
         'Library.cpp',
+    ]
+
+if CONFIG['MOZ_VTUNE']:
+    CSRCS += [
+        'vtune/jitprofiling.c'
     ]
 
 if CONFIG['HAVE_LINUX_PERF_EVENT_H']:

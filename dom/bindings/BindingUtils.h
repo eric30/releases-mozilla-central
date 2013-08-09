@@ -7,6 +7,8 @@
 #ifndef mozilla_dom_BindingUtils_h__
 #define mozilla_dom_BindingUtils_h__
 
+#include <algorithm>
+
 #include "jsfriendapi.h"
 #include "jswrapper.h"
 #include "mozilla/dom/BindingDeclarations.h"
@@ -18,6 +20,7 @@
 #include "mozilla/dom/workers/Workers.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/Likely.h"
+#include "nsCycleCollector.h"
 #include "nsIXPConnect.h"
 #include "nsTraceRefcnt.h"
 #include "qsObjectHelper.h"
@@ -128,9 +131,9 @@ IsDOMIfaceAndProtoClass(const js::Class* clasp)
   return IsDOMIfaceAndProtoClass(Jsvalify(clasp));
 }
 
-MOZ_STATIC_ASSERT(DOM_OBJECT_SLOT == js::PROXY_PRIVATE_SLOT,
-                  "js::PROXY_PRIVATE_SLOT doesn't match DOM_OBJECT_SLOT.  "
-                  "Expect bad things");
+static_assert(DOM_OBJECT_SLOT == js::PROXY_PRIVATE_SLOT,
+              "js::PROXY_PRIVATE_SLOT doesn't match DOM_OBJECT_SLOT.  "
+              "Expect bad things");
 template <class T>
 inline T*
 UnwrapDOMObject(JSObject* obj)
@@ -266,9 +269,9 @@ UnwrapObject(JSContext* cx, JSObject* obj, U& value)
 // The items in the protoAndIfaceArray are indexed by the prototypes::id::ID and
 // constructors::id::ID enums, in that order. The end of the prototype objects
 // should be the start of the interface objects.
-MOZ_STATIC_ASSERT((size_t)constructors::id::_ID_Start ==
-                  (size_t)prototypes::id::_ID_Count,
-                  "Overlapping or discontiguous indexes.");
+static_assert((size_t)constructors::id::_ID_Start ==
+              (size_t)prototypes::id::_ID_Count,
+              "Overlapping or discontiguous indexes.");
 const size_t kProtoAndIfaceCacheCount = constructors::id::_ID_Count;
 
 inline void
@@ -361,6 +364,12 @@ struct NamedConstructor
  *                  on objects in chrome compartments. This must be null if the
  *                  interface doesn't have any ChromeOnly properties or if the
  *                  object is being created in non-chrome compartment.
+ * defineOnGlobal controls whether properties should be defined on the given
+ *                global for the interface object (if any) and named
+ *                constructors (if any) for this interface.  This can be
+ *                false in situations where we want the properties to only
+ *                appear on privileged Xrays but not on the unprivileged
+ *                underlying global.
  *
  * At least one of protoClass, constructorClass or constructor should be
  * non-null. If constructorClass or constructor are non-null, the resulting
@@ -377,7 +386,7 @@ CreateInterfaceObjects(JSContext* cx, JS::Handle<JSObject*> global,
                        JS::Heap<JSObject*>* constructorCache, const DOMClass* domClass,
                        const NativeProperties* regularProperties,
                        const NativeProperties* chromeOnlyProperties,
-                       const char* name);
+                       const char* name, bool defineOnGlobal);
 
 /*
  * Define the unforgeable attributes on an object.
@@ -411,24 +420,6 @@ public:                                                                   \
   static bool const Value = sizeof(Check<T>(nullptr)) == sizeof(yes);     \
 };
 
-HAS_MEMBER(AddRef)
-HAS_MEMBER(Release)
-HAS_MEMBER(QueryInterface)
-
-template<typename T>
-struct IsRefCounted
-{
-  static bool const Value = HasAddRefMember<T>::Value &&
-                            HasReleaseMember<T>::Value;
-};
-
-template<typename T>
-struct IsISupports
-{
-  static bool const Value = IsRefCounted<T>::Value &&
-                            HasQueryInterfaceMember<T>::Value;
-};
-
 HAS_MEMBER(WrapObject)
 
 // HasWrapObject<T>::Value will be true if T has a WrapObject member but it's
@@ -451,7 +442,7 @@ public:
 };
 
 #ifdef DEBUG
-template <class T, bool isISupports=IsISupports<T>::Value>
+template <class T, bool isISupports=IsBaseOf<nsISupports, T>::value>
 struct
 CheckWrapperCacheCast
 {
@@ -687,7 +678,7 @@ WrapNewBindingObject(JSContext* cx, JS::Handle<JSObject*> scope, T* value,
     // 2)  If our class doesn't claim we're nsISupports we better be
     //     reinterpret_castable to nsWrapperCache.
     MOZ_ASSERT(clasp, "What happened here?");
-    MOZ_ASSERT_IF(clasp->mDOMObjectIsISupports, IsISupports<T>::Value);
+    MOZ_ASSERT_IF(clasp->mDOMObjectIsISupports, (IsBaseOf<nsISupports, T>::value));
     MOZ_ASSERT(CheckWrapperCacheCast<T>::Check());
   }
 
@@ -1132,7 +1123,7 @@ WrapNativeISupportsParent(JSContext* cx, JS::Handle<JSObject*> scope, T* p,
 
 
 // Fallback for when our parent is not a WebIDL binding object.
-template<typename T, bool isISupports=IsISupports<T>::Value >
+template<typename T, bool isISupports=IsBaseOf<nsISupports, T>::value>
 struct WrapNativeParentFallback
 {
   static inline JSObject* Wrap(JSContext* cx, JS::Handle<JSObject*> scope,
@@ -1401,9 +1392,29 @@ InitIds(JSContext* cx, const Prefable<Spec>* prefableSpecs, jsid* ids)
   return true;
 }
 
-JSBool
+bool
 QueryInterface(JSContext* cx, unsigned argc, JS::Value* vp);
-JSBool
+
+template <class T, bool isISupports=IsBaseOf<nsISupports, T>::value>
+struct
+WantsQueryInterface
+{
+  static bool Enabled(JSContext* aCx, JSObject* aGlobal)
+  {
+    return false;
+  }
+};
+template <class T>
+struct
+WantsQueryInterface<T, true>
+{
+  static bool Enabled(JSContext* aCx, JSObject* aGlobal)
+  {
+    return IsChromeOrXBL(aCx, aGlobal);
+  }
+};
+
+bool
 ThrowingConstructor(JSContext* cx, unsigned argc, JS::Value* vp);
 
 bool
@@ -1522,17 +1533,17 @@ private:
   class DepedentStringAsserter : public nsDependentString {
   public:
     static void StaticAsserts() {
-      MOZ_STATIC_ASSERT(sizeof(FakeDependentString) == sizeof(nsDependentString),
-                        "Must have right object size");
-      MOZ_STATIC_ASSERT(offsetof(FakeDependentString, mData) ==
-                          offsetof(DepedentStringAsserter, mData),
-                        "Offset of mData should match");
-      MOZ_STATIC_ASSERT(offsetof(FakeDependentString, mLength) ==
-                          offsetof(DepedentStringAsserter, mLength),
-                        "Offset of mLength should match");
-      MOZ_STATIC_ASSERT(offsetof(FakeDependentString, mFlags) ==
-                          offsetof(DepedentStringAsserter, mFlags),
-                        "Offset of mFlags should match");
+      static_assert(sizeof(FakeDependentString) == sizeof(nsDependentString),
+                    "Must have right object size");
+      static_assert(offsetof(FakeDependentString, mData) ==
+                      offsetof(DepedentStringAsserter, mData),
+                    "Offset of mData should match");
+      static_assert(offsetof(FakeDependentString, mLength) ==
+                      offsetof(DepedentStringAsserter, mLength),
+                    "Offset of mLength should match");
+      static_assert(offsetof(FakeDependentString, mFlags) ==
+                      offsetof(DepedentStringAsserter, mFlags),
+                    "Offset of mFlags should match");
     }
   };
 };
@@ -1641,7 +1652,9 @@ public:
 
 // Class used to trace sequences, with specializations for various
 // sequence types.
-template<typename T, bool isDictionary=IsBaseOf<DictionaryBase, T>::value>
+template<typename T,
+         bool isDictionary=IsBaseOf<DictionaryBase, T>::value,
+         bool isTypedArray=IsBaseOf<AllTypedArraysBase, T>::value>
 class SequenceTracer
 {
   explicit SequenceTracer() MOZ_DELETE; // Should never be instantiated
@@ -1649,13 +1662,13 @@ class SequenceTracer
 
 // sequence<object> or sequence<object?>
 template<>
-class SequenceTracer<JSObject*, false>
+class SequenceTracer<JSObject*, false, false>
 {
   explicit SequenceTracer() MOZ_DELETE; // Should never be instantiated
 
 public:
   static void TraceSequence(JSTracer* trc, JSObject** objp, JSObject** end) {
-    for ( ; objp != end; ++objp) {
+    for (; objp != end; ++objp) {
       JS_CallObjectTracer(trc, objp, "sequence<object>");
     }
   }
@@ -1663,13 +1676,13 @@ public:
 
 // sequence<any>
 template<>
-class SequenceTracer<JS::Value, false>
+class SequenceTracer<JS::Value, false, false>
 {
   explicit SequenceTracer() MOZ_DELETE; // Should never be instantiated
 
 public:
   static void TraceSequence(JSTracer* trc, JS::Value* valp, JS::Value* end) {
-    for ( ; valp != end; ++valp) {
+    for (; valp != end; ++valp) {
       JS_CallValueTracer(trc, valp, "sequence<any>");
     }
   }
@@ -1677,13 +1690,13 @@ public:
 
 // sequence<sequence<T>>
 template<typename T>
-class SequenceTracer<Sequence<T>, false>
+class SequenceTracer<Sequence<T>, false, false>
 {
   explicit SequenceTracer() MOZ_DELETE; // Should never be instantiated
 
 public:
   static void TraceSequence(JSTracer* trc, Sequence<T>* seqp, Sequence<T>* end) {
-    for ( ; seqp != end; ++seqp) {
+    for (; seqp != end; ++seqp) {
       DoTraceSequence(trc, *seqp);
     }
   }
@@ -1691,13 +1704,13 @@ public:
 
 // sequence<sequence<T>> as return value
 template<typename T>
-class SequenceTracer<nsTArray<T>, false>
+class SequenceTracer<nsTArray<T>, false, false>
 {
   explicit SequenceTracer() MOZ_DELETE; // Should never be instantiated
 
 public:
   static void TraceSequence(JSTracer* trc, nsTArray<T>* seqp, nsTArray<T>* end) {
-    for ( ; seqp != end; ++seqp) {
+    for (; seqp != end; ++seqp) {
       DoTraceSequence(trc, *seqp);
     }
   }
@@ -1705,30 +1718,48 @@ public:
 
 // sequence<someDictionary>
 template<typename T>
-class SequenceTracer<T, true>
+class SequenceTracer<T, true, false>
 {
   explicit SequenceTracer() MOZ_DELETE; // Should never be instantiated
 
 public:
   static void TraceSequence(JSTracer* trc, T* dictp, T* end) {
-    for ( ; dictp != end; ++dictp) {
+    for (; dictp != end; ++dictp) {
       dictp->TraceDictionary(trc);
     }
   }
 };
 
-// sequence<sequence<T>?>
+// sequence<SomeTypedArray>
 template<typename T>
-class SequenceTracer<Nullable<Sequence<T> >, false>
+class SequenceTracer<T, false, true>
 {
   explicit SequenceTracer() MOZ_DELETE; // Should never be instantiated
 
 public:
-  static void TraceSequence(JSTracer* trc, Nullable<Sequence<T> >* seqp,
-                            Nullable<Sequence<T> >* end) {
-    for ( ; seqp != end; ++seqp) {
+  static void TraceSequence(JSTracer* trc, T* arrayp, T* end) {
+    for (; arrayp != end; ++arrayp) {
+      arrayp->TraceSelf(trc);
+    }
+  }
+};
+
+// sequence<T?> with T? being a Nullable<T>
+template<typename T>
+class SequenceTracer<Nullable<T>, false, false>
+{
+  explicit SequenceTracer() MOZ_DELETE; // Should never be instantiated
+
+public:
+  static void TraceSequence(JSTracer* trc, Nullable<T>* seqp,
+                            Nullable<T>* end) {
+    for (; seqp != end; ++seqp) {
       if (!seqp->IsNull()) {
-        DoTraceSequence(trc, seqp->Value());
+        // Pretend like we actually have a length-one sequence here so
+        // we can do template instantiation correctly for T.
+        T& val = seqp->Value();
+        T* ptr = &val;
+        SequenceTracer<T>::TraceSequence(trc, ptr, ptr+1);
       }
     }
   }
@@ -1928,7 +1959,7 @@ enum {
   CONSTRUCTOR_XRAY_EXPANDO_SLOT
 };
 
-JSBool
+bool
 Constructor(JSContext* cx, unsigned argc, JS::Value* vp);
 
 inline bool
@@ -2069,6 +2100,10 @@ InterfaceHasInstance(JSContext* cx, JS::Handle<JSObject*> obj,
 JSBool
 InterfaceHasInstance(JSContext* cx, JS::Handle<JSObject*> obj, JS::MutableHandle<JS::Value> vp,
                      JSBool* bp);
+JSBool
+InterfaceHasInstance(JSContext* cx, int prototypeID, int depth,
+                     JS::Handle<JSObject*> instance,
+                     JSBool* bp);
 
 // Helper for lenient getters/setters to report to console.  If this
 // returns false, we couldn't even get a global.
@@ -2114,6 +2149,179 @@ inline bool ByteStringToJsval(JSContext *cx, const nsACString &str,
     }
     return NonVoidByteStringToJsval(cx, str, rval);
 }
+
+template<class T, bool isISupports=IsBaseOf<nsISupports, T>::value>
+struct PreserveWrapperHelper
+{
+  static void PreserveWrapper(T* aObject)
+  {
+    aObject->PreserveWrapper(aObject, NS_CYCLE_COLLECTION_PARTICIPANT(T));
+  }
+};
+
+template<class T>
+struct PreserveWrapperHelper<T, true>
+{
+  static void PreserveWrapper(T* aObject)
+  {
+    aObject->PreserveWrapper(reinterpret_cast<nsISupports*>(aObject));
+  }
+};
+
+template<class T>
+void PreserveWrapper(T* aObject)
+{
+  PreserveWrapperHelper<T>::PreserveWrapper(aObject);
+}
+
+template<class T, bool isISupports=IsBaseOf<nsISupports, T>::value>
+struct CastingAssertions
+{
+  static bool ToSupportsIsCorrect(T*)
+  {
+    return true;
+  }
+  static bool ToSupportsIsOnPrimaryInheritanceChain(T*, nsWrapperCache*)
+  {
+    return true;
+  }
+};
+
+template<class T>
+struct CastingAssertions<T, true>
+{
+  static bool ToSupportsIsCorrect(T* aObject)
+  {
+    return ToSupports(aObject) ==  reinterpret_cast<nsISupports*>(aObject);
+  }
+  static bool ToSupportsIsOnPrimaryInheritanceChain(T* aObject,
+                                                    nsWrapperCache* aCache)
+  {
+    return reinterpret_cast<void*>(aObject) != aCache;
+  }
+};
+
+template<class T>
+bool
+ToSupportsIsCorrect(T* aObject)
+{
+  return CastingAssertions<T>::ToSupportsIsCorrect(aObject);
+}
+
+template<class T>
+bool
+ToSupportsIsOnPrimaryInheritanceChain(T* aObject, nsWrapperCache* aCache)
+{
+  return CastingAssertions<T>::ToSupportsIsOnPrimaryInheritanceChain(aObject,
+                                                                     aCache);
+}
+
+template<class T, template <typename> class SmartPtr,
+         bool isISupports=IsBaseOf<nsISupports, T>::value>
+class DeferredFinalizer
+{
+  typedef nsTArray<SmartPtr<T> > SmartPtrArray;
+
+  static void*
+  AppendDeferredFinalizePointer(void* aData, void* aObject)
+  {
+    SmartPtrArray* pointers = static_cast<SmartPtrArray*>(aData);
+    if (!pointers) {
+      pointers = new SmartPtrArray();
+    }
+
+    T* self = static_cast<T*>(aObject);
+
+    SmartPtr<T>* defer = pointers->AppendElement();
+    Take(*defer, self);
+    return pointers;
+  }
+  static bool
+  DeferredFinalize(uint32_t aSlice, void* aData)
+  {
+    MOZ_ASSERT(aSlice > 0, "nonsensical/useless call with aSlice == 0");
+    SmartPtrArray* pointers = static_cast<SmartPtrArray*>(aData);
+    uint32_t oldLen = pointers->Length();
+    aSlice = std::min(oldLen, aSlice);
+    uint32_t newLen = oldLen - aSlice;
+    pointers->RemoveElementsAt(newLen, aSlice);
+    if (newLen == 0) {
+      delete pointers;
+      return true;
+    }
+    return false;
+  }
+
+public:
+  static void
+  AddForDeferredFinalization(T* aObject)
+  {
+    cyclecollector::DeferredFinalize(AppendDeferredFinalizePointer,
+                                     DeferredFinalize, aObject);
+  }
+};
+
+template<class T, template <typename> class SmartPtr>
+class DeferredFinalizer<T, SmartPtr, true>
+{
+public:
+  static void
+  AddForDeferredFinalization(T* aObject)
+  {
+    cyclecollector::DeferredFinalize(reinterpret_cast<nsISupports*>(aObject));
+  }
+};
+
+template<class T, template <typename> class SmartPtr>
+static void
+AddForDeferredFinalization(T* aObject)
+{
+  DeferredFinalizer<T, SmartPtr>::AddForDeferredFinalization(aObject);
+}
+
+// This returns T's CC participant if it participates in CC or null if it
+// doesn't. This also returns null for classes that don't inherit from
+// nsISupports (QI should be used to get the participant for those).
+template<class T, bool isISupports=IsBaseOf<nsISupports, T>::value>
+class GetCCParticipant
+{
+  // Helper for GetCCParticipant for classes that participate in CC.
+  template<class U>
+  static nsCycleCollectionParticipant*
+  GetHelper(int, typename U::NS_CYCLE_COLLECTION_INNERCLASS* dummy=nullptr)
+  {
+    return T::NS_CYCLE_COLLECTION_INNERCLASS::GetParticipant();
+  }
+  // Helper for GetCCParticipant for classes that don't participate in CC.
+  template<class U>
+  static nsCycleCollectionParticipant*
+  GetHelper(double)
+  {
+    return nullptr;
+  }
+
+public:
+  static nsCycleCollectionParticipant*
+  Get()
+  {
+    // Passing int() here will try to call the GetHelper that takes an int as
+    // its firt argument. If T doesn't participate in CC then substitution for
+    // the second argument (with a default value) will fail and because of
+    // SFINAE the next best match (the variant taking a double) will be called.
+    return GetHelper<T>(int());
+  }
+};
+
+template<class T>
+class GetCCParticipant<T, true>
+{
+public:
+  static MOZ_CONSTEXPR nsCycleCollectionParticipant*
+  Get()
+  {
+    return nullptr;
+  }
+};
 
 } // namespace dom
 } // namespace mozilla

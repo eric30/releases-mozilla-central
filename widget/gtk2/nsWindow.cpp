@@ -67,6 +67,7 @@
 #include "nsIServiceManager.h"
 #include "nsIStringBundle.h"
 #include "nsGfxCIID.h"
+#include "nsGtkUtils.h"
 #include "nsIObserverService.h"
 #include "mozilla/layers/LayersTypes.h"
 #include "nsIIdleServiceInternal.h"
@@ -134,6 +135,7 @@ const gint kEvents = GDK_EXPOSURE_MASK | GDK_STRUCTURE_MASK |
                      GDK_VISIBILITY_NOTIFY_MASK |
                      GDK_ENTER_NOTIFY_MASK | GDK_LEAVE_NOTIFY_MASK |
                      GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK |
+                     GDK_SCROLL_MASK |
 #ifdef MOZ_PLATFORM_MAEMO
                      GDK_POINTER_MOTION_HINT_MASK |
 #endif
@@ -282,17 +284,6 @@ static GtkWidget *gInvisibleContainer = NULL;
 // Sometimes this actually also includes the state of the modifier keys, but
 // only the button state bits are used.
 static guint gButtonState;
-
-// Some gobject functions expect functions for gpointer arguments.
-// gpointer is void* but C++ doesn't like casting functions to void*.
-template<class T> static inline gpointer
-FuncToGpointer(T aFunction)
-{
-    return reinterpret_cast<gpointer>
-        (reinterpret_cast<uintptr_t>
-         // This cast just provides a warning if T is not a function.
-         (reinterpret_cast<void (*)()>(aFunction)));
-}
 
 // nsAutoRef<pixman_region32> uses nsSimpleRef<> to know how to automatically
 // destroy regions.
@@ -2538,8 +2529,10 @@ nsWindow::OnMotionNotifyEvent(GdkEventMotion *aEvent)
             event.refPoint.x = nscoord(aEvent->x);
             event.refPoint.y = nscoord(aEvent->y);
         } else {
-            nsIntPoint point(NSToIntFloor(aEvent->x_root), NSToIntFloor(aEvent->y_root));
-            event.refPoint = point - WidgetToScreenOffset();
+            LayoutDeviceIntPoint point(NSToIntFloor(aEvent->x_root),
+                                       NSToIntFloor(aEvent->y_root));
+            event.refPoint = point -
+                LayoutDeviceIntPoint::FromUntyped(WidgetToScreenOffset());
         }
 
         modifierState = aEvent->state;
@@ -2615,8 +2608,10 @@ nsWindow::InitButtonEvent(nsMouseEvent &aEvent,
         aEvent.refPoint.x = nscoord(aGdkEvent->x);
         aEvent.refPoint.y = nscoord(aGdkEvent->y);
     } else {
-        nsIntPoint point(NSToIntFloor(aGdkEvent->x_root), NSToIntFloor(aGdkEvent->y_root));
-        aEvent.refPoint = point - WidgetToScreenOffset();
+        LayoutDeviceIntPoint point(NSToIntFloor(aGdkEvent->x_root),
+                                   NSToIntFloor(aGdkEvent->y_root));
+        aEvent.refPoint = point -
+            LayoutDeviceIntPoint::FromUntyped(WidgetToScreenOffset());
     }
 
     guint modifierState = aGdkEvent->state;
@@ -3007,7 +3002,7 @@ nsWindow::OnKeyPressEvent(GdkEventKey *aEvent)
                                       nsMouseEvent::eReal,
                                       nsMouseEvent::eContextMenuKey);
 
-        contextMenuEvent.refPoint = nsIntPoint(0, 0);
+        contextMenuEvent.refPoint = LayoutDeviceIntPoint(0, 0);
         contextMenuEvent.time = aEvent->time;
         contextMenuEvent.clickCount = 1;
         KeymapWrapper::InitInputEvent(contextMenuEvent, aEvent->state);
@@ -3098,8 +3093,10 @@ nsWindow::OnScrollEvent(GdkEventScroll *aEvent)
         // XXX we're never quite sure which GdkWindow the event came from due to our custom bubbling
         // in scroll_event_cb(), so use ScreenToWidget to translate the screen root coordinates into
         // coordinates relative to this widget.
-        nsIntPoint point(NSToIntFloor(aEvent->x_root), NSToIntFloor(aEvent->y_root));
-        wheelEvent.refPoint = point - WidgetToScreenOffset();
+        LayoutDeviceIntPoint point(NSToIntFloor(aEvent->x_root),
+                                   NSToIntFloor(aEvent->y_root));
+        wheelEvent.refPoint = point -
+            LayoutDeviceIntPoint::FromUntyped(WidgetToScreenOffset());
     }
 
     KeymapWrapper::InitInputEvent(wheelEvent, aEvent->state);
@@ -3249,7 +3246,7 @@ nsWindow::DispatchDragEvent(uint32_t aMsg, const nsIntPoint& aRefPoint,
         InitDragEvent(event);
     }
 
-    event.refPoint = aRefPoint;
+    event.refPoint = LayoutDeviceIntPoint::FromUntyped(aRefPoint);
     event.time = aTime;
 
     nsEventStatus status;

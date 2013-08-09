@@ -44,6 +44,7 @@ RUN_MOCHITEST = \
     --failure-file=$(call core_abspath,_tests/testing/mochitest/makefailures.json) \
     --testing-modules-dir=$(call core_abspath,_tests/modules) \
     --extra-profile-file=$(DIST)/plugins \
+    --build-info-json=$(call core_abspath,$(DEPTH)/mozinfo.json) \
     $(SYMBOLS_PATH) $(TEST_PATH_ARG) $(EXTRA_TEST_ARGS)
 
 RERUN_MOCHITEST = \
@@ -53,6 +54,7 @@ RERUN_MOCHITEST = \
     --run-only-tests=makefailures.json \
     --testing-modules-dir=$(call core_abspath,_tests/modules) \
     --extra-profile-file=$(DIST)/plugins \
+    --build-info-json=$(call core_abspath,$(DEPTH)/mozinfo.json) \
     $(SYMBOLS_PATH) $(TEST_PATH_ARG) $(EXTRA_TEST_ARGS)
 
 RUN_MOCHITEST_REMOTE = \
@@ -285,6 +287,7 @@ xpcshell-tests:
 	  --manifest=$(DEPTH)/_tests/xpcshell/xpcshell.ini \
 	  --build-info-json=$(DEPTH)/mozinfo.json \
 	  --no-logfiles \
+	  --test-plugin-path="$(DIST)/plugins" \
 	  --tests-root-dir=$(call core_abspath,_tests/xpcshell) \
 	  --testing-modules-dir=$(call core_abspath,_tests/modules) \
 	  --xunit-file=$(call core_abspath,_tests/xpcshell/results.xml) \

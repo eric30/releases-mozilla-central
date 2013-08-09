@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -23,10 +24,12 @@
 #include "Layers.h"
 #include "ClientLayerManager.h"
 #include "BasicLayers.h"
+#include "FrameMetrics.h"
 #include "Windows.Graphics.Display.h"
 #ifdef MOZ_CRASHREPORTER
 #include "nsExceptionHandler.h"
 #endif
+#include "UIABridgePrivate.h"
 
 using namespace Microsoft::WRL;
 using namespace Microsoft::WRL::Wrappers;
@@ -52,7 +55,21 @@ extern PRLogModuleInfo* gWindowsLog;
 
 static uint32_t gInstanceCount = 0;
 const PRUnichar* kMetroSubclassThisProp = L"MetroSubclassThisProp";
-static const UINT sDefaultBrowserMsgID = RegisterWindowMessageW(L"DefaultBrowserClosing");
+HWND MetroWidget::sICoreHwnd = NULL;
+
+namespace mozilla {
+namespace widget {
+UINT sDefaultBrowserMsgId = RegisterWindowMessageW(L"DefaultBrowserClosing");
+} }
+
+// WM_GETOBJECT id pulled from uia headers
+#define UiaRootObjectId -25
+
+namespace mozilla {
+namespace widget {
+namespace winrt {
+extern ComPtr<IUIABridge> gProviderRoot;
+} } }
 
 namespace {
 
@@ -137,6 +154,9 @@ namespace {
 
 NS_IMPL_ISUPPORTS_INHERITED0(MetroWidget, nsBaseWidget)
 
+
+nsRefPtr<mozilla::layers::APZCTreeManager> MetroWidget::sAPZC;
+
 MetroWidget::MetroWidget() :
   mTransparencyMode(eTransparencyOpaque),
   mWnd(NULL),
@@ -161,6 +181,7 @@ MetroWidget::~MetroWidget()
 
   // Global shutdown
   if (!gInstanceCount) {
+    MetroWidget::sAPZC = nullptr;
     nsTextStore::Terminate();
   } // !gInstanceCount
 }
@@ -545,7 +566,7 @@ MetroWidget::SynthesizeNativeMouseScrollEvent(nsIntPoint aPoint,
 static void
 CloseGesture()
 {
-  Log("shuting down due to close gesture.\n");
+  LogFunction();
   nsCOMPtr<nsIAppStartup> appStartup =
     do_GetService(NS_APPSTARTUP_CONTRACTID);
   if (appStartup) {
@@ -569,7 +590,7 @@ MetroWidget::StaticWindowProcedure(HWND aWnd, UINT aMsg, WPARAM aWParam, LPARAM 
 LRESULT
 MetroWidget::WindowProcedure(HWND aWnd, UINT aMsg, WPARAM aWParam, LPARAM aLParam)
 {
-  if(sDefaultBrowserMsgID == aMsg) {
+  if(sDefaultBrowserMsgId == aMsg) {
     CloseGesture();
   }
 
@@ -669,6 +690,30 @@ MetroWidget::WindowProcedure(HWND aWnd, UINT aMsg, WPARAM aWParam, LPARAM aLPara
       break;
     }
 
+    case WM_GETOBJECT:
+    {
+      DWORD dwObjId = (LPARAM)(DWORD) aLParam;
+      // Passing this to CallWindowProc can result in a failure due to a timing issue
+      // in winrt core window server code, so we call it directly here. Also, it's not
+      // clear Windows::UI::Core::WindowServer::OnAutomationProviderRequestedEvent is
+      // compatible with metro enabled desktop browsers, it makes an initial call to
+      // UiaReturnRawElementProvider passing the return result from FrameworkView
+      // OnAutomationProviderRequested as the hwnd (me scratches head) which results in
+      // GetLastError always being set to invalid handle (6) after CallWindowProc returns.
+      if (dwObjId == UiaRootObjectId) {
+        NS_ASSERTION(gProviderRoot.Get(), "gProviderRoot is null??");
+        ComPtr<IRawElementProviderSimple> simple;
+        gProviderRoot.As(&simple);
+        LRESULT res = UiaReturnRawElementProvider(aWnd, aWParam, aLParam, simple.Get());
+        if (res) {
+          return res;
+        }
+        NS_ASSERTION(res, "UiaReturnRawElementProvider failed!");
+        Log("UiaReturnRawElementProvider failed! GetLastError=%X", GetLastError());
+      }
+      break;
+    }
+
     default:
     {
       if (aWParam == WM_USER_TSF_TEXTCHANGE) {
@@ -711,6 +756,7 @@ MetroWidget::FindMetroWindow()
 
   // subclass it
   SetSubclass();
+  sICoreHwnd = mWnd;
   return;
 }
 
@@ -779,6 +825,26 @@ MetroWidget::ShouldUseBasicManager()
 {
   // toolkit or test widgets fall back on empty shadow layers
   return (mWindowType != eWindowType_toplevel);
+}
+
+bool
+MetroWidget::ShouldUseAPZC()
+{
+  const char* kPrefName = "layers.async-pan-zoom.enabled";
+  return ShouldUseOffMainThreadCompositing() &&
+         Preferences::GetBool(kPrefName, false);
+}
+
+CompositorParent* MetroWidget::NewCompositorParent(int aSurfaceWidth, int aSurfaceHeight)
+{
+  CompositorParent *compositor = nsBaseWidget::NewCompositorParent(aSurfaceWidth, aSurfaceHeight);
+
+  if (ShouldUseAPZC()) {
+    CompositorParent::SetControllerForLayerTree(compositor->RootLayerTreeId(), this);
+    MetroWidget::sAPZC = CompositorParent::GetAPZCTreeManager(compositor->RootLayerTreeId());
+  }
+
+  return compositor;
 }
 
 LayerManager*
@@ -951,10 +1017,10 @@ MetroWidget::InitEvent(nsGUIEvent& event, nsIntPoint* aPoint)
   if (!aPoint) {
     event.refPoint.x = event.refPoint.y = 0;
   } else {
-    // convert CSS pixels to device pixels for event.refPoint
-    double scale = GetDefaultScale(); 
-    event.refPoint.x = int32_t(NS_round(aPoint->x * scale));
-    event.refPoint.y = int32_t(NS_round(aPoint->y * scale));
+    CSSIntPoint cssPoint(aPoint->x, aPoint->y);
+    LayoutDeviceIntPoint layoutDeviceIntPoint = CSSIntPointToLayoutDeviceIntPoint(cssPoint);
+    event.refPoint.x = layoutDeviceIntPoint.x;
+    event.refPoint.y = layoutDeviceIntPoint.y;
   }
   event.time = ::GetMessageTime();
 }
@@ -1039,6 +1105,15 @@ double MetroWidget::GetDefaultScaleInternal()
     }
   }
   return 1.0;
+}
+
+LayoutDeviceIntPoint
+MetroWidget::CSSIntPointToLayoutDeviceIntPoint(const CSSIntPoint &aCSSPoint)
+{
+  double scale = GetDefaultScale();
+  LayoutDeviceIntPoint devPx(int32_t(NS_round(scale * aCSSPoint.x)),
+                             int32_t(NS_round(scale * aCSSPoint.y)));
+  return devPx;
 }
 
 float MetroWidget::GetDPI()
@@ -1265,4 +1340,130 @@ MetroWidget::HasPendingInputEvent()
   if (HIWORD(GetQueueStatus(QS_INPUT)))
     return true;
   return false;
+}
+
+// GeckoContentController interface impl
+
+#include "nsIBrowserDOMWindow.h"
+#include "nsIWebNavigation.h"
+#include "nsIDocShellTreeItem.h"
+#include "nsIDOMWindow.h"
+#include "nsIDOMChromeWindow.h"
+#include "nsIWindowMediator.h"
+#include "nsIInterfaceRequestorUtils.h"
+
+class RequestContentRepaintEvent : public nsRunnable
+{
+public:
+    RequestContentRepaintEvent(const FrameMetrics& aFrameMetrics) : mFrameMetrics(aFrameMetrics)
+    {
+    }
+
+    NS_IMETHOD Run() {
+        // This event shuts down the worker thread and so must be main thread.
+        MOZ_ASSERT(NS_IsMainThread());
+
+        CSSToScreenScale resolution = mFrameMetrics.CalculateResolution();
+        CSSRect compositedRect = mFrameMetrics.CalculateCompositedRectInCssPixels();
+
+        NS_ConvertASCIItoUTF16 data(nsPrintfCString("{ " \
+                                                    "  \"resolution\": %.2f, " \
+                                                    "  \"scrollId\": %d, " \
+                                                    "  \"compositedRect\": { \"width\": %d, \"height\": %d }, " \
+                                                    "  \"displayPort\":    { \"x\": %d, \"y\": %d, \"width\": %d, \"height\": %d }, " \
+                                                    "  \"scrollTo\":       { \"x\": %d, \"y\": %d }" \
+                                                    "}",
+                                                    (float)(resolution.scale / mFrameMetrics.mDevPixelsPerCSSPixel.scale),
+                                                    (int)mFrameMetrics.mScrollId,
+                                                    (int)compositedRect.width,
+                                                    (int)compositedRect.height,
+                                                    (int)mFrameMetrics.mDisplayPort.x,
+                                                    (int)mFrameMetrics.mDisplayPort.y,
+                                                    (int)mFrameMetrics.mDisplayPort.width,
+                                                    (int)mFrameMetrics.mDisplayPort.height,
+                                                    (int)mFrameMetrics.mScrollOffset.x,
+                                                    (int)mFrameMetrics.mScrollOffset.y));
+
+        MetroUtils::FireObserver("apzc-request-content-repaint", data.get());
+        return NS_OK;
+    }
+protected:
+    const FrameMetrics mFrameMetrics;
+};
+
+void
+MetroWidget::RequestContentRepaint(const FrameMetrics& aFrameMetrics)
+{
+  LogFunction();
+
+  // Send the result back to the main thread so that it can shutdown
+  nsCOMPtr<nsIRunnable> r1 = new RequestContentRepaintEvent(aFrameMetrics);
+  if (!NS_IsMainThread()) {
+    NS_DispatchToMainThread(r1);
+  } else {
+    r1->Run();
+  }
+}
+
+void
+MetroWidget::HandleDoubleTap(const CSSIntPoint& aPoint)
+{
+  LogFunction();
+
+  if (!mMetroInput) {
+    return;
+  }
+
+  mMetroInput->HandleDoubleTap(CSSIntPointToLayoutDeviceIntPoint(aPoint));
+}
+
+void
+MetroWidget::HandleSingleTap(const CSSIntPoint& aPoint)
+{
+  LogFunction();
+
+  if (!mMetroInput) {
+    return;
+  }
+
+  mMetroInput->HandleSingleTap(CSSIntPointToLayoutDeviceIntPoint(aPoint));
+}
+
+void
+MetroWidget::HandleLongTap(const CSSIntPoint& aPoint)
+{
+  LogFunction();
+
+  if (!mMetroInput) {
+    return;
+  }
+
+  mMetroInput->HandleLongTap(CSSIntPointToLayoutDeviceIntPoint(aPoint));
+}
+
+void
+MetroWidget::SendAsyncScrollDOMEvent(FrameMetrics::ViewID aScrollId, const CSSRect &aContentRect, const CSSSize &aScrollableSize)
+{
+  LogFunction();
+}
+
+void
+MetroWidget::PostDelayedTask(Task* aTask, int aDelayMs)
+{
+  LogFunction();
+  MessageLoop::current()->PostDelayedTask(FROM_HERE, aTask, aDelayMs);
+}
+
+void
+MetroWidget::HandlePanBegin()
+{
+  LogFunction();
+  MetroUtils::FireObserver("apzc-handle-pan-begin", L"");
+}
+
+void
+MetroWidget::HandlePanEnd()
+{
+  LogFunction();
+  MetroUtils::FireObserver("apzc-handle-pan-end", L"");
 }

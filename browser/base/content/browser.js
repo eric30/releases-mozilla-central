@@ -84,9 +84,6 @@ this.__defineSetter__("PluralForm", function (val) {
 XPCOMUtils.defineLazyModuleGetter(this, "TelemetryStopwatch",
   "resource://gre/modules/TelemetryStopwatch.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "AboutHomeUtils",
-  "resource:///modules/AboutHomeUtils.jsm");
-
 #ifdef MOZ_SERVICES_SYNC
 XPCOMUtils.defineLazyModuleGetter(this, "Weave",
   "resource://services-sync/main.js");
@@ -136,6 +133,9 @@ XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
 
 XPCOMUtils.defineLazyModuleGetter(this, "SitePermissions",
   "resource:///modules/SitePermissions.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "SessionStore",
+  "resource:///modules/sessionstore/SessionStore.jsm");
 
 let gInitialPages = [
   "about:blank",
@@ -728,18 +728,6 @@ const gFormSubmitObserver = {
 
 var gBrowserInit = {
   onLoad: function() {
-    // window.arguments[0]: URI to load (string), or an nsISupportsArray of
-    //                      nsISupportsStrings to load, or a xul:tab of
-    //                      a tabbrowser, which will be replaced by this
-    //                      window (for this case, all other arguments are
-    //                      ignored).
-    //                 [1]: character set (string)
-    //                 [2]: referrer (nsIURI)
-    //                 [3]: postData (nsIInputStream)
-    //                 [4]: allowThirdPartyFixup (bool)
-    if ("arguments" in window && window.arguments[0])
-      var uriToLoad = window.arguments[0];
-
     gMultiProcessBrowser = gPrefService.getBoolPref("browser.tabs.remote");
 
     var mustLoadSidebar = false;
@@ -780,6 +768,7 @@ var gBrowserInit = {
       new nsBrowserAccess();
 
     // set default character set if provided
+    // window.arguments[1]: character set (string)
     if ("arguments" in window && window.arguments.length > 1 && window.arguments[1]) {
       if (window.arguments[1].startsWith("charset=")) {
         var arrayArgComponents = window.arguments[1].split("=");
@@ -946,7 +935,7 @@ var gBrowserInit = {
     retrieveToolbarIconsizesFromTheme();
 
     // Wait until chrome is painted before executing code not critical to making the window visible
-    this._boundDelayedStartup = this._delayedStartup.bind(this, uriToLoad, mustLoadSidebar);
+    this._boundDelayedStartup = this._delayedStartup.bind(this, mustLoadSidebar);
     window.addEventListener("MozAfterPaint", this._boundDelayedStartup);
 
     this._loadHandled = true;
@@ -957,7 +946,7 @@ var gBrowserInit = {
     this._boundDelayedStartup = null;
   },
 
-  _delayedStartup: function(uriToLoad, mustLoadSidebar) {
+  _delayedStartup: function(mustLoadSidebar) {
     let tmp = {};
     Cu.import("resource://gre/modules/TelemetryTimestamps.jsm", tmp);
     let TelemetryTimestamps = tmp.TelemetryTimestamps;
@@ -976,6 +965,7 @@ var gBrowserInit = {
     socialBrowser.addEventListener("MozApplicationManifest",
                               OfflineApps, false);
 
+    let uriToLoad = this._getUriToLoad();
     var isLoadingBlank = isBlankPageURL(uriToLoad);
 
     // This pageshow listener needs to be registered before we may call
@@ -1012,6 +1002,9 @@ var gBrowserInit = {
 
         gBrowser.swapBrowsersAndCloseOther(gBrowser.selectedTab, uriToLoad);
       }
+      // window.arguments[2]: referrer (nsIURI)
+      //                 [3]: postData (nsIInputStream)
+      //                 [4]: allowThirdPartyFixup (bool)
       else if (window.arguments.length >= 3) {
         loadURI(uriToLoad, window.arguments[2], window.arguments[3] || null,
                 window.arguments[4] || false);
@@ -1099,15 +1092,6 @@ var gBrowserInit = {
       NP.trackBrowserWindow(window);
     }
 
-    // initialize the session-restore service (in case it's not already running)
-    let ss = Cc["@mozilla.org/browser/sessionstore;1"].getService(Ci.nsISessionStore);
-    ss.init(window);
-
-    // Enable the Restore Last Session command if needed
-    if (ss.canRestoreLastSession &&
-        !PrivateBrowsingUtils.isWindowPrivate(window))
-      goSetCommandEnabled("Browser:RestoreLastSession", true);
-
     PlacesToolbarHelper.init();
 
     ctrlTab.readPref();
@@ -1119,7 +1103,15 @@ var gBrowserInit = {
     // If the user manually opens the download manager before the timeout, the
     // downloads will start right away, and getting the service again won't hurt.
     setTimeout(function() {
-      Services.downloads;
+      let DownloadsCommon =
+        Cu.import("resource:///modules/DownloadsCommon.jsm", {}).DownloadsCommon;
+      if (DownloadsCommon.useJSTransfer) {
+        // Open the data link without initalizing nsIDownloadManager.
+        DownloadsCommon.initializeAllDataLinks();
+      } else {
+        // Initalizing nsIDownloadManager will trigger the data link.
+        Services.downloads;
+      }
       let DownloadTaskbarProgress =
         Cu.import("resource://gre/modules/DownloadTaskbarProgress.jsm", {}).DownloadTaskbarProgress;
       DownloadTaskbarProgress.onBrowserWindowLoad(window);
@@ -1169,7 +1161,6 @@ var gBrowserInit = {
 #endif
 
     gBrowserThumbnails.init();
-    TabView.init();
 
     setUrlAndSearchBarWidthForConditionalForwardButton();
     window.addEventListener("resize", function resizeHandler(event) {
@@ -1284,9 +1275,50 @@ var gBrowserInit = {
 #endif
 #endif
 
+    if (gMultiProcessBrowser) {
+      // Bug 862519 - Backspace doesn't work in electrolysis builds.
+      // We bypass the problem by disabling the backspace-to-go-back command.
+      document.getElementById("cmd_handleBackspace").setAttribute("disabled", true);
+    }
+
+    SessionStore.promiseInitialized.then(() => {
+      // Enable the Restore Last Session command if needed
+      if (SessionStore.canRestoreLastSession &&
+          !PrivateBrowsingUtils.isWindowPrivate(window))
+        goSetCommandEnabled("Browser:RestoreLastSession", true);
+
+      TabView.init();
+
+      setTimeout(function () { BrowserChromeTest.markAsReady(); }, 0);
+    });
+
     Services.obs.notifyObservers(window, "browser-delayed-startup-finished", "");
-    setTimeout(function () { BrowserChromeTest.markAsReady(); }, 0);
     TelemetryTimestamps.add("delayedStartupFinished");
+  },
+
+  // Returns the URI(s) to load at startup.
+  _getUriToLoad: function () {
+    // window.arguments[0]: URI to load (string), or an nsISupportsArray of
+    //                      nsISupportsStrings to load, or a xul:tab of
+    //                      a tabbrowser, which will be replaced by this
+    //                      window (for this case, all other arguments are
+    //                      ignored).
+    if (!window.arguments || !window.arguments[0])
+      return null;
+
+    let uri = window.arguments[0];
+    let sessionStartup = Cc["@mozilla.org/browser/sessionstartup;1"]
+                           .getService(Ci.nsISessionStartup);
+    let defaultArgs = Cc["@mozilla.org/browser/clh;1"]
+                        .getService(Ci.nsIBrowserHandler)
+                        .defaultArgs;
+
+    // If the given URI matches defaultArgs (the default homepage) we want
+    // to block its load if we're going to restore a session anyway.
+    if (uri == defaultArgs && sessionStartup.willOverrideHomepage)
+      return null;
+
+    return uri;
   },
 
   onUnload: function() {
@@ -2278,61 +2310,6 @@ function PageProxyClickHandler(aEvent)
 }
 
 /**
- *  Handle load of some pages (about:*) so that we can make modifications
- *  to the DOM for unprivileged pages.
- */
-function BrowserOnAboutPageLoad(doc) {
-  if (doc.documentURI.toLowerCase() == "about:home") {
-    // XXX bug 738646 - when Marketplace is launched, remove this statement and
-    // the hidden attribute set on the apps button in aboutHome.xhtml
-    if (getBoolPref("browser.aboutHome.apps", false))
-      doc.getElementById("apps").removeAttribute("hidden");
-
-    let ss = Components.classes["@mozilla.org/browser/sessionstore;1"].
-             getService(Components.interfaces.nsISessionStore);
-    if (ss.canRestoreLastSession &&
-        !PrivateBrowsingUtils.isWindowPrivate(window))
-      doc.getElementById("launcher").setAttribute("session", "true");
-
-    // Inject search engine and snippets URL.
-    let docElt = doc.documentElement;
-    // set the following attributes BEFORE searchEngineURL, which triggers to
-    // show the snippets when it's set.
-    docElt.setAttribute("snippetsURL", AboutHomeUtils.snippetsURL);
-    if (AboutHomeUtils.showKnowYourRights) {
-      docElt.setAttribute("showKnowYourRights", "true");
-      // Set pref to indicate we've shown the notification.
-      let currentVersion = Services.prefs.getIntPref("browser.rights.version");
-      Services.prefs.setBoolPref("browser.rights." + currentVersion + ".shown", true);
-    }
-    docElt.setAttribute("snippetsVersion", AboutHomeUtils.snippetsVersion);
-
-    let updateSearchEngine = function() {
-      let engine = AboutHomeUtils.defaultSearchEngine;
-      docElt.setAttribute("searchEngineName", engine.name);
-      docElt.setAttribute("searchEngineURL", engine.searchURL);
-    };
-    updateSearchEngine();
-
-    // Listen for the event that's triggered when the user changes search engine.
-    // At this point we simply reload about:home to reflect the change.
-    Services.obs.addObserver(updateSearchEngine, "browser-search-engine-modified", false);
-
-    // Remove the observer when the page is reloaded or closed.
-    doc.defaultView.addEventListener("pagehide", function removeObserver() {
-      doc.defaultView.removeEventListener("pagehide", removeObserver);
-      Services.obs.removeObserver(updateSearchEngine, "browser-search-engine-modified");
-    }, false);
-
-#ifdef MOZ_SERVICES_HEALTHREPORT
-    doc.addEventListener("AboutHomeSearchEvent", function onSearch(e) {
-      BrowserSearch.recordSearchInHealthReport(e.detail, "abouthome");
-    }, true, true);
-#endif
-  }
-}
-
-/**
  * Handle command events bubbling up from error page content
  */
 let BrowserOnClick = {
@@ -2355,9 +2332,6 @@ let BrowserOnClick = {
     }
     else if (ownerDoc.documentURI.startsWith("about:neterror")) {
       this.onAboutNetError(originalTarget, ownerDoc);
-    }
-    else if (ownerDoc.documentURI.toLowerCase() == "about:home") {
-      this.onAboutHome(originalTarget, ownerDoc);
     }
   },
 
@@ -2534,49 +2508,6 @@ let BrowserOnClick = {
     if (elmId != "errorTryAgain" || !/e=netOffline/.test(aOwnerDoc.documentURI))
       return;
     Services.io.offline = false;
-  },
-
-  onAboutHome: function BrowserOnClick_onAboutHome(aTargetElm, aOwnerDoc) {
-    let elmId = aTargetElm.getAttribute("id");
-
-    switch (elmId) {
-      case "restorePreviousSession":
-        let ss = Cc["@mozilla.org/browser/sessionstore;1"].
-                 getService(Ci.nsISessionStore);
-        if (ss.canRestoreLastSession) {
-          ss.restoreLastSession();
-        }
-        aOwnerDoc.getElementById("launcher").removeAttribute("session");
-        break;
-
-      case "downloads":
-        BrowserDownloadsUI();
-        break;
-
-      case "bookmarks":
-        PlacesCommandHook.showPlacesOrganizer("AllBookmarks");
-        break;
-
-      case "history":
-        PlacesCommandHook.showPlacesOrganizer("History");
-        break;
-
-      case "apps":
-        openUILinkIn("https://marketplace.mozilla.org/", "tab");
-        break;
-
-      case "addons":
-        BrowserOpenAddonsMgr();
-        break;
-
-      case "sync":
-        openPreferences("paneSync");
-        break;
-
-      case "settings":
-        openPreferences();
-        break;
-    }
   },
 };
 
@@ -2987,8 +2918,7 @@ const DOMLinkHandler = {
             type = type.replace(/^\s+|\s*(?:;.*)?$/g, "");
 
             if (type == "application/opensearchdescription+xml" && link.title &&
-                /^(?:https?|ftp):/i.test(link.href) &&
-                !PrivateBrowsingUtils.isWindowPrivate(window)) {
+                /^(?:https?|ftp):/i.test(link.href)) {
               var engine = { title: link.title, href: link.href };
               BrowserSearch.addEngine(engine, link.ownerDocument);
               searchAdded = true;
@@ -3917,8 +3847,10 @@ var XULBrowserWindow = {
 
         // Update starring UI
         BookmarkingUI.updateStarState();
-        SocialMark.updateMarkState();
-        SocialShare.update();
+        if (SocialUI.enabled) {
+          SocialMark.updateMarkState();
+          SocialShare.update();
+        }
       }
 
       // Show or hide browser chrome based on the whitelist
@@ -4256,6 +4188,7 @@ var TabsProgressListener = {
         Components.isSuccessCode(aStatus) &&
         doc.documentURI.startsWith("about:") &&
         !doc.documentURI.toLowerCase().startsWith("about:blank") &&
+        !doc.documentURI.toLowerCase().startsWith("about:home") &&
         !doc.documentElement.hasAttribute("hasBrowserHandlers")) {
       // STATE_STOP may be received twice for documents, thus store an
       // attribute to ensure handling it just once.
@@ -4269,9 +4202,6 @@ var TabsProgressListener = {
         if (event.target.documentElement)
           event.target.documentElement.removeAttribute("hasBrowserHandlers");
       }, true);
-
-      // We also want to make changes to page UI for unprivileged about pages.
-      BrowserOnAboutPageLoad(doc);
     }
   },
 
@@ -6381,7 +6311,7 @@ var gIdentityHandler = {
     this._encryptionLabel[this.IDENTITY_MODE_MIXED_DISPLAY_LOADED] =
       gNavigatorBundle.getString("identity.mixed_display_loaded");
     this._encryptionLabel[this.IDENTITY_MODE_MIXED_ACTIVE_LOADED] =
-      gNavigatorBundle.getString("identity.mixed_active_loaded");
+      gNavigatorBundle.getString("identity.mixed_active_loaded2");
     this._encryptionLabel[this.IDENTITY_MODE_MIXED_DISPLAY_LOADED_ACTIVE_BLOCKED] =
       gNavigatorBundle.getString("identity.mixed_display_loaded_active_blocked");
     return this._encryptionLabel;
@@ -7128,8 +7058,13 @@ XPCOMUtils.defineLazyModuleGetter(this, "gDevTools",
 XPCOMUtils.defineLazyModuleGetter(this, "gDevToolsBrowser",
                                   "resource:///modules/devtools/gDevTools.jsm");
 
-XPCOMUtils.defineLazyGetter(this, "HUDConsoleUI", function () {
-  return Cu.import("resource:///modules/HUDService.jsm", {}).HUDService.consoleUI;
+Object.defineProperty(this, "HUDService", {
+  get: function HUDService_getter() {
+    let devtools = Cu.import("resource://gre/modules/devtools/Loader.jsm", {}).devtools;
+    return devtools.require("devtools/webconsole/hudservice");
+  },
+  configurable: true,
+  enumerable: true
 });
 
 // Prompt user to restart the browser in safe mode

@@ -1,4 +1,4 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: Javascript; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -20,6 +20,8 @@ let promise = require("sdk/core/promise");
 Cu.import("resource:///modules/devtools/LayoutHelpers.jsm");
 Cu.import("resource://gre/modules/devtools/Templater.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+loader.lazyGetter(this, "AutocompletePopup", () => require("devtools/shared/autocomplete-popup").AutocompletePopup);
 
 /**
  * Vocabulary for the purposes of this file:
@@ -52,6 +54,14 @@ function MarkupView(aInspector, aFrame, aControllerWindow)
   } catch(ex) {
     this.maxChildren = DEFAULT_MAX_CHILDREN;
   }
+
+  // Creating the popup to be used to show CSS suggestions.
+  let options = {
+    fixedWidth: true,
+    autoSelect: true,
+    theme: "auto"
+  };
+  this.popup = new AutocompletePopup(this.doc.defaultView.parent.document, options);
 
   this.undo = new UndoStack();
   this.undo.installController(aControllerWindow);
@@ -149,6 +159,14 @@ MarkupView.prototype = {
     }
 
     switch(aEvent.keyCode) {
+      case Ci.nsIDOMKeyEvent.DOM_VK_H:
+        let node = this._selectedContainer.node;
+        if (node.hidden) {
+          this.walker.unhideNode(node).then(() => this.nodeChanged(node));
+        } else {
+          this.walker.hideNode(node).then(() => this.nodeChanged(node));
+        }
+        break;
       case Ci.nsIDOMKeyEvent.DOM_VK_DELETE:
       case Ci.nsIDOMKeyEvent.DOM_VK_BACK_SPACE:
         this.deleteNode(this._selectedContainer.node);
@@ -511,7 +529,7 @@ MarkupView.prototype = {
    */
   nodeChanged: function MT_nodeChanged(aNode)
   {
-    if (aNode === this._inspector.selection) {
+    if (aNode === this._inspector.selection.nodeFront) {
       this._inspector.change("markupview");
     }
   },
@@ -675,6 +693,9 @@ MarkupView.prototype = {
   {
     this.undo.destroy();
     delete this.undo;
+
+    this.popup.destroy();
+    delete this.popup;
 
     this._frame.removeEventListener("focus", this._boundFocus, false);
     delete this._boundFocus;
@@ -1130,6 +1151,8 @@ function ElementEditor(aContainer, aNode)
     element: this.newAttr,
     trigger: "dblclick",
     stopOnReturn: true,
+    contentType: InplaceEditor.CONTENT_TYPES.CSS_MIXED,
+    popup: this.markup.popup,
     done: (aVal, aCommit) => {
       if (!aCommit) {
         return;
@@ -1222,6 +1245,8 @@ ElementEditor.prototype = {
         trigger: "dblclick",
         stopOnReturn: true,
         selectAll: false,
+        contentType: InplaceEditor.CONTENT_TYPES.CSS_MIXED,
+        popup: this.markup.popup,
         start: (aEditor, aEvent) => {
           // If the editing was started inside the name or value areas,
           // select accordingly.

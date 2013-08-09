@@ -51,7 +51,8 @@ public:
    * |aContentRect| is in CSS pixels, relative to the current cssPage.
    * |aScrollableSize| is the current content width/height in CSS pixels.
    */
-  virtual void SendAsyncScrollDOMEvent(const CSSRect &aContentRect,
+  virtual void SendAsyncScrollDOMEvent(FrameMetrics::ViewID aScrollId,
+                                       const CSSRect &aContentRect,
                                        const CSSSize &aScrollableSize) = 0;
 
   /**
@@ -59,6 +60,17 @@ public:
    * in the future.
    */
   virtual void PostDelayedTask(Task* aTask, int aDelayMs) = 0;
+
+
+  /**
+   * Request any special actions be performed when panning starts
+   */
+  virtual void HandlePanBegin() {}
+
+  /**
+   * Request any special actions be performed when panning ends
+   */
+  virtual void HandlePanEnd() {}
 
   GeckoContentController() {}
   virtual ~GeckoContentController() {}

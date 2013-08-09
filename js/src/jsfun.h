@@ -52,8 +52,8 @@ class JSFunction : public JSObject
 
     static void staticAsserts() {
         JS_STATIC_ASSERT(INTERPRETED == JS_FUNCTION_INTERPRETED_BIT);
-        MOZ_STATIC_ASSERT(sizeof(JSFunction) == sizeof(js::shadow::Function),
-                          "shadow interface must match actual interface");
+        static_assert(sizeof(JSFunction) == sizeof(js::shadow::Function),
+                      "shadow interface must match actual interface");
     }
 
     uint16_t        nargs;        /* maximum number of specified arguments,
@@ -260,7 +260,7 @@ class JSFunction : public JSObject
 
     JSScript *nonLazyScript() const {
         JS_ASSERT(hasScript());
-        return JS::HandleScript::fromMarkedLocation(&u.i.s.script_);
+        return u.i.s.script_;
     }
 
     js::HeapPtrScript &mutableScript() {
@@ -322,6 +322,7 @@ class JSFunction : public JSObject
     }
 
     static unsigned offsetOfNativeOrScript() {
+        JS_STATIC_ASSERT(offsetof(U, n.native) == offsetof(U, i.s.lazy_));
         JS_STATIC_ASSERT(offsetof(U, n.native) == offsetof(U, i.s.script_));
         JS_STATIC_ASSERT(offsetof(U, n.native) == offsetof(U, nativeOrScript));
         return offsetof(JSFunction, u.nativeOrScript);
@@ -395,7 +396,7 @@ JSAPIToJSFunctionFlags(unsigned flags)
 
 namespace js {
 
-extern JSBool
+extern bool
 Function(JSContext *cx, unsigned argc, Value *vp);
 
 extern JSFunction *
@@ -489,17 +490,17 @@ ReportIncompatibleMethod(JSContext *cx, CallReceiver call, Class *clasp);
 extern void
 ReportIncompatible(JSContext *cx, CallReceiver call);
 
-JSBool
+bool
 CallOrConstructBoundFunction(JSContext *, unsigned, js::Value *);
 
 extern const JSFunctionSpec function_methods[];
 
 } /* namespace js */
 
-extern JSBool
+extern bool
 js_fun_apply(JSContext *cx, unsigned argc, js::Value *vp);
 
-extern JSBool
+extern bool
 js_fun_call(JSContext *cx, unsigned argc, js::Value *vp);
 
 extern JSObject*

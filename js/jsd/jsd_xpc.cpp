@@ -560,10 +560,10 @@ jsds_CallHookProc (JSDContext* jsdc, JSDThreadState* jsdthreadstate,
     }
     
     if (!hook)
-        return JS_TRUE;
+        return true;
 
     if (!jsds_FilterHook (jsdc, jsdthreadstate))
-        return JS_FALSE;
+        return false;
 
     JSDStackFrameInfo *native_frame = JSD_GetStackFrame (jsdc, jsdthreadstate);
     nsCOMPtr<jsdIStackFrame> frame =
@@ -573,7 +573,7 @@ jsds_CallHookProc (JSDContext* jsdc, JSDThreadState* jsdthreadstate,
     gJsds->DoUnPause(nullptr, true);
     jsdStackFrame::InvalidateAll();
 
-    return JS_TRUE;
+    return true;
 }
 
 static uint32_t
@@ -1695,7 +1695,7 @@ NS_IMETHODIMP
 jsdContext::GetGlobalObject (jsdIValue **_rval)
 {
     ASSERT_VALID_EPHEMERAL;
-    JSObject *glob = js::GetDefaultGlobalForContext(mJSCx);
+    JSObject *glob = js::DefaultObjectForContextOrNull(mJSCx);
     JSDValue *jsdv = JSD_NewValue (mJSDCx, OBJECT_TO_JSVAL(glob));
     if (!jsdv)
         return NS_ERROR_FAILURE;
@@ -3350,7 +3350,7 @@ CreateJSDGlobal(JSContext *aCx, JSClass *aClasp)
     NS_ENSURE_SUCCESS(rv, nullptr);
 
     JSPrincipals *jsPrin = nsJSPrincipals::get(nullPrin);
-    JSObject *global = JS_NewGlobalObject(aCx, aClasp, jsPrin);
+    JS::RootedObject global(aCx, JS_NewGlobalObject(aCx, aClasp, jsPrin, JS::DontFireOnNewGlobalHook));
     NS_ENSURE_TRUE(global, nullptr);
 
     // We have created a new global let's attach a private to it
@@ -3358,6 +3358,8 @@ CreateJSDGlobal(JSContext *aCx, JSClass *aClasp)
     nsCOMPtr<nsIScriptObjectPrincipal> sbp =
         new SandboxPrivate(nullPrin, global);
     JS_SetPrivate(global, sbp.forget().get());
+
+    JS_FireOnNewGlobalObject(aCx, global);
 
     return global;
 }

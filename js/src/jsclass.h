@@ -24,7 +24,7 @@ class PropertyId;
 
 // This is equal to JSFunction::class_.  Use it in places where you don't want
 // to #include jsfun.h.
-extern JS_FRIEND_DATA(js::Class*) FunctionClassPtr;
+extern JS_FRIEND_DATA(js::Class* const) FunctionClassPtr;
 
 static JS_ALWAYS_INLINE jsid
 SPECIALID_TO_JSID(const SpecialId &sid);
@@ -219,7 +219,7 @@ typedef void
 
 /*
  * The helper struct to measure the size of JS_CLASS_MEMBERS to know how much
- * we have to padd js::Class to match the size of JSClass;
+ * we have to pad js::Class to match the size of JSClass.
  */
 struct ClassSizeMeasurement
 {

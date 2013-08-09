@@ -4,15 +4,17 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "ion/AsmJSLink.h"
+
 #ifdef MOZ_VTUNE
-# include "jitprofiling.h"
+# include "vtune/VTuneWrapper.h"
 #endif
 
 #include "jscntxt.h"
 #include "jsmath.h"
+#include "jswrapper.h"
 
 #include "frontend/BytecodeCompiler.h"
-#include "ion/AsmJS.h"
 #include "ion/AsmJSModule.h"
 #include "ion/Ion.h"
 #ifdef JS_ION_PERF
@@ -23,7 +25,10 @@
 
 using namespace js;
 using namespace js::ion;
-using namespace mozilla;
+
+using mozilla::IsNaN;
+
+static const unsigned MODULE_FUN_SLOT = 0;
 
 static bool
 LinkFail(JSContext *cx, const char *str)
@@ -216,22 +221,7 @@ DynamicallyLinkModule(JSContext *cx, CallArgs args, AsmJSModule &module)
         if (!ArrayBufferObject::prepareForAsmJS(cx, heap))
             return LinkFail(cx, "Unable to prepare ArrayBuffer for asm.js use");
 
-#if defined(JS_CPU_X86)
-        void *heapOffset = (void*)heap->dataPointer();
-        void *heapLength = (void*)heap->byteLength();
-        uint8_t *code = module.functionCode();
-        for (unsigned i = 0; i < module.numHeapAccesses(); i++) {
-            const AsmJSHeapAccess &access = module.heapAccess(i);
-            JSC::X86Assembler::setPointer(access.patchLengthAt(code), heapLength);
-            JSC::X86Assembler::setPointer(access.patchOffsetAt(code), heapOffset);
-        }
-#elif defined(JS_CPU_ARM)
-        // Now the length of the array is know, patch all of the bounds check sites
-        // with the new length.
-        ion::IonContext ic(cx, NULL);
-        module.patchBoundsChecks(heap->byteLength());
-
-#endif
+        module.patchHeapAccesses(heap, cx);
     }
 
     AutoObjectVector ffis(cx);
@@ -309,8 +299,10 @@ AsmJSActivation::~AsmJSActivation()
 static const unsigned ASM_MODULE_SLOT = 0;
 static const unsigned ASM_EXPORT_INDEX_SLOT = 1;
 
-extern JSBool
-js::CallAsmJS(JSContext *cx, unsigned argc, Value *vp)
+// The JSNative for the functions nested in an asm.js module. Calling this
+// native will trampoline into generated code.
+static bool
+CallAsmJS(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs callArgs = CallArgsFromVp(argc, vp);
     RootedFunction callee(cx, &callArgs.callee().as<JSFunction>());
@@ -406,10 +398,9 @@ HandleDynamicLinkFailure(JSContext *cx, CallArgs args, AsmJSModule &module, Hand
     if (cx->isExceptionPending())
         return false;
 
-    const AsmJSModule::PostLinkFailureInfo &info = module.postLinkFailureInfo();
-
-    uint32_t length = info.bufEnd - info.bufStart;
-    Rooted<JSStableString*> src(cx, info.scriptSource->substring(cx, info.bufStart, info.bufEnd));
+    const AsmJSModuleSourceDesc &desc= module.sourceDesc();
+    uint32_t length = desc.bufEnd() - desc.bufStart();
+    Rooted<JSStableString*> src(cx, desc.scriptSource()->substring(cx, desc.bufStart(), desc.bufEnd()));
     if (!src)
         return false;
 
@@ -430,7 +421,7 @@ HandleDynamicLinkFailure(JSContext *cx, CallArgs args, AsmJSModule &module, Hand
 
     CompileOptions options(cx);
     options.setPrincipals(cx->compartment()->principals)
-           .setOriginPrincipals(info.originPrincipals)
+           .setOriginPrincipals(desc.scriptSource()->originPrincipals())
            .setCompileAndGo(false)
            .setNoScriptRval(false);
 
@@ -448,7 +439,7 @@ HandleDynamicLinkFailure(JSContext *cx, CallArgs args, AsmJSModule &module, Hand
     args2.setCallee(ObjectValue(*fun));
     args2.setThis(args.thisv());
     for (unsigned i = 0; i < argc; i++)
-        args2[i] = args[i];
+        args2[i].set(args[i]);
 
     if (!Invoke(cx, args2))
         return false;
@@ -509,8 +500,7 @@ SendFunctionsToPerf(JSContext *cx, AsmJSModule &module)
 
     unsigned long base = (unsigned long) module.functionCode();
 
-    const AsmJSModule::PostLinkFailureInfo &info = module.postLinkFailureInfo();
-    const char *filename = const_cast<char *>(info.scriptSource->filename());
+    const char *filename = module.sourceDesc().scriptSource()->filename();
 
     for (unsigned i = 0; i < module.numPerfFunctions(); i++) {
         const AsmJSModule::ProfiledFunction &func = module.perfProfiledFunction(i);
@@ -544,8 +534,7 @@ SendBlocksToPerf(JSContext *cx, AsmJSModule &module)
     AsmJSPerfSpewer spewer;
     unsigned long funcBaseAddress = (unsigned long) module.functionCode();
 
-    const AsmJSModule::PostLinkFailureInfo &info = module.postLinkFailureInfo();
-    const char *filename = const_cast<char *>(info.scriptSource->filename());
+    const char *filename = module.sourceDesc().scriptSource()->filename();
 
     for (unsigned i = 0; i < module.numPerfBlocksFunctions(); i++) {
         const AsmJSModule::ProfiledBlocksFunction &func = module.perfProfiledBlocksFunction(i);
@@ -563,23 +552,11 @@ SendBlocksToPerf(JSContext *cx, AsmJSModule &module)
 }
 #endif
 
-JSBool
-js::LinkAsmJS(JSContext *cx, unsigned argc, JS::Value *vp)
+static bool
+SendModuleToAttachedProfiler(JSContext *cx, AsmJSModule &module)
 {
-    CallArgs args = CallArgsFromVp(argc, vp);
-    RootedFunction fun(cx, &args.callee().as<JSFunction>());
-    RootedObject moduleObj(cx, &AsmJSModuleObject(fun));
-    AsmJSModule &module = AsmJSModuleObjectToModule(moduleObj);
-
-    // If linking fails, recompile the function (including emitting bytecode)
-    // as if it's normal JS code.
-    if (!DynamicallyLinkModule(cx, args, module)) {
-        RootedPropertyName name(cx, fun->name());
-        return HandleDynamicLinkFailure(cx, args, module, name);
-    }
-
 #if defined(MOZ_VTUNE)
-    if (!SendFunctionsToVTune(cx, module))
+    if (IsVTuneProfilingActive() && !SendFunctionsToVTune(cx, module))
         return false;
 #endif
 
@@ -590,43 +567,128 @@ js::LinkAsmJS(JSContext *cx, unsigned argc, JS::Value *vp)
         return false;
 #endif
 
+    return true;
+}
+
+
+static JSObject *
+CreateExportObject(JSContext *cx, HandleObject moduleObj)
+{
+    AsmJSModule &module = AsmJSModuleObjectToModule(moduleObj);
+
     if (module.numExportedFunctions() == 1) {
         const AsmJSModule::ExportedFunction &func = module.exportedFunction(0);
-        if (!func.maybeFieldName()) {
-            RootedFunction fun(cx, NewExportedFunction(cx, func, moduleObj, 0));
-            if (!fun)
-                return false;
-
-            args.rval().set(ObjectValue(*fun));
-            return true;
-        }
+        if (!func.maybeFieldName())
+            return NewExportedFunction(cx, func, moduleObj, 0);
     }
 
     gc::AllocKind allocKind = gc::GetGCObjectKind(module.numExportedFunctions());
     RootedObject obj(cx, NewBuiltinClassInstance(cx, &JSObject::class_, allocKind));
     if (!obj)
-        return false;
+        return NULL;
 
     for (unsigned i = 0; i < module.numExportedFunctions(); i++) {
         const AsmJSModule::ExportedFunction &func = module.exportedFunction(i);
 
         RootedFunction fun(cx, NewExportedFunction(cx, func, moduleObj, i));
         if (!fun)
-            return false;
+            return NULL;
 
         JS_ASSERT(func.maybeFieldName() != NULL);
         RootedId id(cx, NameToId(func.maybeFieldName()));
         RootedValue val(cx, ObjectValue(*fun));
         if (!DefineNativeProperty(cx, obj, id, val, NULL, NULL, JSPROP_ENUMERATE, 0, 0))
-            return false;
+            return NULL;
     }
+
+    return obj;
+}
+
+// Implements the semantics of an asm.js module function that has been successfully validated.
+static bool
+LinkAsmJS(JSContext *cx, unsigned argc, JS::Value *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    // The LinkAsmJS builtin (created by NewAsmJSModuleFunction) is an extended
+    // function and stores its module in an extended slot.
+    RootedFunction fun(cx, &args.callee().as<JSFunction>());
+    RootedObject moduleObj(cx,  &fun->getExtendedSlot(MODULE_FUN_SLOT).toObject());
+    AsmJSModule &module = AsmJSModuleObjectToModule(moduleObj);
+
+    // Link the module by performing the link-time validation checks in the
+    // asm.js spec and then patching the generated module to associate it with
+    // the given heap (ArrayBuffer) and a new global data segment (the closure
+    // state shared by the inner asm.js functions).
+    if (!DynamicallyLinkModule(cx, args, module)) {
+        // Linking failed, so reparse the entire asm.js module from scratch to
+        // get normal interpreted bytecode which we can simply Invoke. Very slow.
+        RootedPropertyName name(cx, fun->name());
+        return HandleDynamicLinkFailure(cx, args, module, name);
+    }
+
+    // Notify profilers so that asm.js generated code shows up with JS function
+    // names and lines in native (i.e., not SPS) profilers.
+    if (!SendModuleToAttachedProfiler(cx, module))
+        return false;
+
+    // Link-time validation succeeded, so wrap all the exported functions with
+    // CallAsmJS builtins that trampoline into the generated code.
+    JSObject *obj = CreateExportObject(cx, moduleObj);
+    if (!obj)
+        return false;
 
     args.rval().set(ObjectValue(*obj));
     return true;
+}
+
+JSFunction *
+js::NewAsmJSModuleFunction(JSContext *cx, JSFunction *origFun, HandleObject moduleObj)
+{
+    RootedPropertyName name(cx, origFun->name());
+    JSFunction *moduleFun = NewFunction(cx, NullPtr(), LinkAsmJS, origFun->nargs,
+                                        JSFunction::NATIVE_FUN, NullPtr(), name,
+                                        JSFunction::ExtendedFinalizeKind, TenuredObject);
+    if (!moduleFun)
+        return NULL;
+
+    moduleFun->setExtendedSlot(MODULE_FUN_SLOT, ObjectValue(*moduleObj));
+    return moduleFun;
 }
 
 bool
 js::IsAsmJSModuleNative(js::Native native)
 {
     return native == LinkAsmJS;
+}
+
+static bool
+IsMaybeWrappedNativeFunction(const Value &v, Native native)
+{
+    if (!v.isObject())
+        return false;
+
+    JSObject *obj = CheckedUnwrap(&v.toObject());
+    if (!obj)
+        return false;
+
+    return obj->is<JSFunction>() && obj->as<JSFunction>().maybeNative() == native;
+}
+
+bool
+js::IsAsmJSModule(JSContext *cx, unsigned argc, Value *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    bool rval = args.hasDefined(0) && IsMaybeWrappedNativeFunction(args[0], LinkAsmJS);
+    args.rval().set(BooleanValue(rval));
+    return true;
+}
+
+bool
+js::IsAsmJSFunction(JSContext *cx, unsigned argc, Value *vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    bool rval = args.hasDefined(0) && IsMaybeWrappedNativeFunction(args[0], CallAsmJS);
+    args.rval().set(BooleanValue(rval));
+    return true;
 }

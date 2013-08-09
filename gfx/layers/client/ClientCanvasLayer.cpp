@@ -81,20 +81,20 @@ ClientCanvasLayer::RenderLayer()
   }
   
   if (!mCanvasClient) {
-    TextureFlags flags = 0;
+    TextureFlags flags = TEXTURE_IMMEDIATE_UPLOAD;
     if (mNeedsYFlip) {
-      flags |= NeedsYFlip;
+      flags |= TEXTURE_NEEDS_Y_FLIP;
     }
 
     bool isCrossProcess = !(XRE_GetProcessType() == GeckoProcessType_Default);
-    //Append OwnByClient flag for streaming buffer under OOPC case
+    //Append TEXTURE_DEALLOCATE_CLIENT flag for streaming buffer under OOPC case
     if (isCrossProcess && mGLContext) {
       GLScreenBuffer* screen = mGLContext->Screen();
       if (screen && screen->Stream()) {
-        flags |= OwnByClient;
+        flags |= TEXTURE_DEALLOCATE_CLIENT;
       }
     }
-    mCanvasClient = CanvasClient::CreateCanvasClient(GetCompositableClientType(),
+    mCanvasClient = CanvasClient::CreateCanvasClient(GetCanvasClientType(),
                                                      ClientManager(), flags);
     if (!mCanvasClient) {
       return;
@@ -112,6 +112,7 @@ ClientCanvasLayer::RenderLayer()
 
   ClientManager()->Hold(this);
   mCanvasClient->Updated();
+  mCanvasClient->OnTransaction();
 }
 
 already_AddRefed<CanvasLayer>

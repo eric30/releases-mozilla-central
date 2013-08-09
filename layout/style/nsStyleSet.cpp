@@ -790,16 +790,11 @@ nsStyleSet::GetContext(nsStyleContext* aParentContext,
   if (!result) {
     result = NS_NewStyleContext(aParentContext, aPseudoTag, aPseudoType,
                                 aRuleNode, aFlags & eSkipFlexItemStyleFixup);
-    if (!result)
-      return nullptr;
     if (aVisitedRuleNode) {
       nsRefPtr<nsStyleContext> resultIfVisited =
         NS_NewStyleContext(parentIfVisited, aPseudoTag, aPseudoType,
                            aVisitedRuleNode,
                            aFlags & eSkipFlexItemStyleFixup);
-      if (!resultIfVisited) {
-        return nullptr;
-      }
       if (!parentIfVisited) {
         mRoots.AppendElement(resultIfVisited);
       }
@@ -1746,10 +1741,7 @@ nsStyleSet::ReparentStyleContext(nsStyleContext* aStyleContext,
                                  nsStyleContext* aNewParentContext,
                                  Element* aElement)
 {
-  if (!aStyleContext) {
-    NS_NOTREACHED("must have style context");
-    return nullptr;
-  }
+  MOZ_ASSERT(aStyleContext, "aStyleContext must not be null");
 
   // This short-circuit is OK because we don't call TryStartingTransition
   // during style reresolution if the style context pointer hasn't changed.

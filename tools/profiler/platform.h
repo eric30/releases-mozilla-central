@@ -39,7 +39,7 @@
 #include <pthread.h>
 #endif
 
-#include "mozilla/StandardInteger.h"
+#include <stdint.h>
 #include "mozilla/Util.h"
 #include "mozilla/unused.h"
 #include "mozilla/TimeStamp.h"
@@ -237,6 +237,8 @@ typedef  enum { UnwINVALID, UnwNATIVE, UnwPSEUDO, UnwCOMBINED }  UnwMode;
 extern UnwMode sUnwindMode;       /* what mode? */
 extern int     sUnwindInterval;   /* in milliseconds */
 extern int     sUnwindStackScan;  /* max # of dubious frames allowed */
+
+extern int     sProfileEntries;   /* how many entries do we store? */
 
 
 // ----------------------------------------------------------------------------

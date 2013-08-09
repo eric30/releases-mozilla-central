@@ -10,7 +10,7 @@
 #endif
       >
     <uses-sdk android:minSdkVersion="8"
-              android:targetSdkVersion="14"/>
+              android:targetSdkVersion="16"/>
 
 #include ../services/manifests/AnnouncementsAndroidManifest_permissions.xml.in
 #include ../services/manifests/HealthReportAndroidManifest_permissions.xml.in
@@ -28,9 +28,6 @@
 
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
-#ifdef MOZ_ANDROID_WALLPAPER
-    <uses-permission android:name="android.permission.SET_WALLPAPER"/>
-#endif
     <uses-permission android:name="@ANDROID_PACKAGE_NAME@.permissions.PASSWORD_PROVIDER"/>
     <uses-permission android:name="@ANDROID_PACKAGE_NAME@.permissions.BROWSER_PROVIDER"/>
     <uses-permission android:name="@ANDROID_PACKAGE_NAME@.permissions.FORMHISTORY_PROVIDER"/>

@@ -240,6 +240,8 @@ Telephony::DialInternal(bool isEmergency,
   return NS_OK;
 }
 
+NS_IMPL_CYCLE_COLLECTION_CLASS(Telephony)
+
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(Telephony,
                                                   nsDOMEventTargetHelper)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
@@ -394,6 +396,8 @@ Telephony::StopTone()
 
 NS_IMPL_EVENT_HANDLER(Telephony, incoming)
 NS_IMPL_EVENT_HANDLER(Telephony, callschanged)
+NS_IMPL_EVENT_HANDLER(Telephony, remoteheld)
+NS_IMPL_EVENT_HANDLER(Telephony, remoteresumed)
 
 // EventTarget
 
@@ -524,14 +528,49 @@ Telephony::EnumerateCallState(uint32_t aCallIndex, uint16_t aCallState,
 }
 
 NS_IMETHODIMP
+Telephony::SupplementaryServiceNotification(int32_t aCallIndex,
+                                            uint16_t aNotification)
+{
+  nsRefPtr<TelephonyCall> associatedCall;
+  if (!mCalls.IsEmpty() && aCallIndex != -1) {
+    for (uint32_t index = 0; index < mCalls.Length(); index++) {
+      nsRefPtr<TelephonyCall>& call = mCalls[index];
+      if (call->CallIndex() == uint32_t(aCallIndex)) {
+        associatedCall = call;
+        break;
+      }
+    }
+  }
+
+  nsresult rv;
+  switch (aNotification) {
+    case nsITelephonyProvider::NOTIFICATION_REMOTE_HELD:
+      rv = DispatchCallEvent(NS_LITERAL_STRING("remoteheld"), associatedCall);
+      break;
+    case nsITelephonyProvider::NOTIFICATION_REMOTE_RESUMED:
+      rv = DispatchCallEvent(NS_LITERAL_STRING("remoteresumed"), associatedCall);
+      break;
+    default:
+      NS_ERROR("Got a bad notification!");
+      return NS_ERROR_UNEXPECTED;
+  }
+
+  NS_ENSURE_SUCCESS(rv, rv);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 Telephony::NotifyError(int32_t aCallIndex,
                        const nsAString& aError)
 {
   nsRefPtr<TelephonyCall> callToNotify;
   if (!mCalls.IsEmpty()) {
-    // The connection is not established yet. Get the latest call object.
+    // The connection is not established yet. Get the latest dialing call object.
     if (aCallIndex == -1) {
-      callToNotify = mCalls[mCalls.Length() - 1];
+      nsRefPtr<TelephonyCall>& lastCall = mCalls[mCalls.Length() - 1];
+      if (lastCall->CallIndex() == kOutgoingPlaceholderCallIndex) {
+        callToNotify = lastCall;
+      }
     } else {
       // The connection has been established. Get the failed call.
       for (uint32_t index = 0; index < mCalls.Length(); index++) {
@@ -563,9 +602,13 @@ nsresult
 Telephony::DispatchCallEvent(const nsAString& aType,
                              nsIDOMTelephonyCall* aCall)
 {
-  // We will notify enumeration being completed by firing oncallschanged.
-  // We only ever have a null call with that event type.
-  MOZ_ASSERT(aCall || aType.EqualsLiteral("callschanged"));
+  // The call may be null in following cases:
+  //   1. callschanged when notifying enumeration being completed
+  //   2. remoteheld/remoteresumed.
+  MOZ_ASSERT(aCall ||
+             aType.EqualsLiteral("callschanged") ||
+             aType.EqualsLiteral("remoteheld") ||
+             aType.EqualsLiteral("remtoeresumed"));
 
   nsCOMPtr<nsIDOMEvent> event;
   NS_NewDOMCallEvent(getter_AddRefs(event), this, nullptr, nullptr);

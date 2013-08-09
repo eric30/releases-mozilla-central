@@ -16,6 +16,10 @@ namespace mozilla {
 namespace ipc {
   class Shmem;
 }
+namespace gfx {
+  class DataSourceSurface;
+}
+
 namespace layers {
 
 class Image;
@@ -63,6 +67,11 @@ public:
   gfxIntSize GetCbCrSize();
 
   /**
+   * Stereo mode for the image.
+   */
+  StereoMode GetStereoMode();
+
+  /**
    * Return a pointer to the begining of the data buffer.
    */
   uint8_t* GetData();
@@ -107,9 +116,11 @@ public:
    * buffer on which we want to store the image.
    */
   void InitializeBufferInfo(const gfx::IntSize& aYSize,
-                            const gfx::IntSize& aCbCrSize);
+                            const gfx::IntSize& aCbCrSize,
+                            StereoMode aStereoMode);
   void InitializeBufferInfo(const gfxIntSize& aYSize,
-                            const gfxIntSize& aCbCrSize);
+                            const gfxIntSize& aCbCrSize,
+                            StereoMode aStereoMode);
 
   bool CopyData(const uint8_t* aYData,
                 const uint8_t* aCbData, const uint8_t* aCrData,
@@ -134,6 +145,13 @@ class MOZ_STACK_CLASS YCbCrImageDataDeserializer : public YCbCrImageDataDeserial
 {
 public:
   YCbCrImageDataDeserializer(uint8_t* aData) : YCbCrImageDataDeserializerBase(aData) {}
+
+  /**
+   * Convert the YCbCr data into RGB and return a DataSourceSurface.
+   * This is a costly operation, so use it only when YCbCr compositing is
+   * not supported.
+   */
+  TemporaryRef<gfx::DataSourceSurface> ToDataSourceSurface();
 };
 
 } // namespace

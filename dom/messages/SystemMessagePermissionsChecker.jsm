@@ -71,6 +71,7 @@ this.SystemMessagePermissionsTable = {
   "icc-stkcommand": {
     "settings": ["read", "write"]
   },
+  "media-button": { },
   "notification": {
     "desktop-notification": []
   },
@@ -96,7 +97,7 @@ this.SystemMessagePermissionsTable = {
     "mobileconnection": []
   },
   "wappush-received": {
-    "sms": []
+    "wappush": []
   },
   "nfc-tech-discovered": {
     "nfc": []

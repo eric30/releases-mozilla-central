@@ -57,14 +57,14 @@ public:
 
     if (aMainRuntime) {
       JS::Rooted<JS::Value> windowPropVal(aCx);
-      if (!JS_GetProperty(aCx, aObj, sClass.name, windowPropVal.address())) {
+      if (!JS_GetProperty(aCx, aObj, sClass.name, &windowPropVal)) {
         return NULL;
       }
 
       if (!JSVAL_IS_PRIMITIVE(windowPropVal)) {
         JS::Rooted<JS::Value> protoVal(aCx);
         if (!JS_GetProperty(aCx, JSVAL_TO_OBJECT(windowPropVal), "prototype",
-                            protoVal.address())) {
+                            &protoVal)) {
           return NULL;
         }
 
@@ -204,7 +204,7 @@ protected:
   }
 
 private:
-  static JSBool
+  static bool
   Construct(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JS_ReportErrorNumber(aCx, js_GetErrorMessage, NULL, JSMSG_WRONG_CONSTRUCTOR,
@@ -248,7 +248,7 @@ private:
     return true;
   }
 
-  static JSBool
+  static bool
   StopPropagation(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JSObject* obj = JS_THIS_OBJECT(aCx, aVp);
@@ -266,7 +266,7 @@ private:
     return true;
   }
 
-  static JSBool
+  static bool
   StopImmediatePropagation(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JSObject* obj = JS_THIS_OBJECT(aCx, aVp);
@@ -283,8 +283,8 @@ private:
 
     return true;
   }
-  
-  static JSBool
+
+  static bool
   PreventDefault(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JS::Rooted<JSObject*> obj(aCx, JS_THIS_OBJECT(aCx, aVp));
@@ -304,7 +304,7 @@ private:
     return true;
   }
 
-  static JSBool
+  static bool
   InitEvent(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JS::Rooted<JSObject*> obj(aCx, JS_THIS_OBJECT(aCx, aVp));
@@ -490,7 +490,7 @@ private:
     JS_SetReservedSlot(aObj, SLOT_source, OBJECT_TO_JSVAL(aSource));
   }
 
-  static JSBool
+  static bool
   Construct(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JS_ReportErrorNumber(aCx, js_GetErrorMessage, NULL, JSMSG_WRONG_CONSTRUCTOR,
@@ -547,7 +547,7 @@ private:
     return true;
   }
 
-  static JSBool
+  static bool
   InitMessageEvent(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JS::Rooted<JSObject*> obj(aCx, JS_THIS_OBJECT(aCx, aVp));
@@ -699,7 +699,7 @@ private:
     JS_SetReservedSlot(aObj, SLOT_lineno, INT_TO_JSVAL(aLineNumber));
   }
 
-  static JSBool
+  static bool
   Construct(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JS_ReportErrorNumber(aCx, js_GetErrorMessage, NULL, JSMSG_WRONG_CONSTRUCTOR,
@@ -734,7 +734,7 @@ private:
     return true;
   }
 
-  static JSBool
+  static bool
   InitErrorEvent(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JS::Rooted<JSObject*> obj(aCx, JS_THIS_OBJECT(aCx, aVp));
@@ -879,7 +879,7 @@ private:
     JS_SetReservedSlot(aObj, SLOT_total, DOUBLE_TO_JSVAL(aTotal));
   }
 
-  static JSBool
+  static bool
   Construct(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JS_ReportErrorNumber(aCx, js_GetErrorMessage, NULL, JSMSG_WRONG_CONSTRUCTOR,
@@ -970,7 +970,7 @@ JSObject*
 CreateGenericEvent(JSContext* aCx, JS::Handle<JSString*> aType, bool aBubbles,
                    bool aCancelable, bool aMainRuntime)
 {
-  JS::Rooted<JSObject*> global(aCx, JS_GetGlobalForScopeChain(aCx));
+  JS::Rooted<JSObject*> global(aCx, JS::CurrentGlobalOrNull(aCx));
   return Event::Create(aCx, global, aType, aBubbles, aCancelable, aMainRuntime);
 }
 
@@ -979,7 +979,7 @@ CreateMessageEvent(JSContext* aCx, JSAutoStructuredCloneBuffer& aData,
                    nsTArray<nsCOMPtr<nsISupports> >& aClonedObjects,
                    bool aMainRuntime)
 {
-  JS::Rooted<JSObject*> global(aCx, JS_GetGlobalForScopeChain(aCx));
+  JS::Rooted<JSObject*> global(aCx, JS::CurrentGlobalOrNull(aCx));
   return MessageEvent::Create(aCx, global, aData, aClonedObjects, aMainRuntime);
 }
 
@@ -988,7 +988,7 @@ CreateErrorEvent(JSContext* aCx, JS::Handle<JSString*> aMessage,
                  JS::Handle<JSString*> aFilename, uint32_t aLineNumber,
                  bool aMainRuntime)
 {
-  JS::Rooted<JSObject*> global(aCx, JS_GetGlobalForScopeChain(aCx));
+  JS::Rooted<JSObject*> global(aCx, JS::CurrentGlobalOrNull(aCx));
   return ErrorEvent::Create(aCx, global, aMessage, aFilename, aLineNumber,
                             aMainRuntime);
 }
@@ -997,7 +997,7 @@ JSObject*
 CreateProgressEvent(JSContext* aCx, JSString* aType, bool aLengthComputable,
                     double aLoaded, double aTotal)
 {
-  JS::Rooted<JSObject*> global(aCx, JS_GetGlobalForScopeChain(aCx));
+  JS::Rooted<JSObject*> global(aCx, JS::CurrentGlobalOrNull(aCx));
   return ProgressEvent::Create(aCx, global, aType, aLengthComputable, aLoaded,
                                aTotal);
 }

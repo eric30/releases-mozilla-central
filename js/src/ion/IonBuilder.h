@@ -87,7 +87,8 @@ class IonBuilder : public MIRGenerator
             COND_SWITCH_CASE,   // switch() { case X: ... }
             COND_SWITCH_BODY,   // switch() { case ...: X }
             AND_OR,             // && x, || x
-            LABEL               // label: x
+            LABEL,              // label: x
+            TRY                 // try { x } catch(e) { }
         };
 
         State state;            // Current state of this control structure.
@@ -169,6 +170,9 @@ class IonBuilder : public MIRGenerator
             struct {
                 DeferredEdge *breaks;
             } label;
+            struct {
+                MBasicBlock *successor;
+            } try_;
         };
 
         inline bool isLoop() const {
@@ -192,6 +196,7 @@ class IonBuilder : public MIRGenerator
         static CFGState TableSwitch(jsbytecode *exitpc, MTableSwitch *ins);
         static CFGState CondSwitch(jsbytecode *exitpc, jsbytecode *defaultTarget);
         static CFGState Label(jsbytecode *exitpc);
+        static CFGState Try(jsbytecode *exitpc, MBasicBlock *successor);
     };
 
     static int CmpSuccessors(const void *a, const void *b);
@@ -249,6 +254,7 @@ class IonBuilder : public MIRGenerator
     ControlStatus processSwitchEnd(DeferredEdge *breaks, jsbytecode *exitpc);
     ControlStatus processAndOrEnd(CFGState &state);
     ControlStatus processLabelEnd(CFGState &state);
+    ControlStatus processTryEnd(CFGState &state);
     ControlStatus processReturn(JSOp op);
     ControlStatus processThrow();
     ControlStatus processContinue(JSOp op);
@@ -381,6 +387,7 @@ class IonBuilder : public MIRGenerator
     bool jsop_call(uint32_t argc, bool constructing);
     bool jsop_eval(uint32_t argc);
     bool jsop_ifeq(JSOp op);
+    bool jsop_try();
     bool jsop_label();
     bool jsop_condswitch();
     bool jsop_andor(JSOp op);
@@ -422,7 +429,9 @@ class IonBuilder : public MIRGenerator
     bool jsop_newobject(HandleObject baseObj);
     bool jsop_initelem();
     bool jsop_initelem_array();
+    bool jsop_initelem_getter_setter();
     bool jsop_initprop(HandlePropertyName name);
+    bool jsop_initprop_getter_setter(PropertyName *name);
     bool jsop_regexp(RegExpObject *reobj);
     bool jsop_object(JSObject *obj);
     bool jsop_lambda(JSFunction *fun);
@@ -497,7 +506,6 @@ class IonBuilder : public MIRGenerator
     InliningStatus inlineUnsafeGetReservedSlot(CallInfo &callInfo);
 
     // Parallel intrinsics.
-    InliningStatus inlineForceSequentialOrInParallelSection(CallInfo &callInfo);
     InliningStatus inlineNewParallelArray(CallInfo &callInfo);
     InliningStatus inlineParallelArray(CallInfo &callInfo);
     InliningStatus inlineParallelArrayTail(CallInfo &callInfo,
@@ -512,6 +520,10 @@ class IonBuilder : public MIRGenerator
     InliningStatus inlineHaveSameClass(CallInfo &callInfo);
     InliningStatus inlineToObject(CallInfo &callInfo);
     InliningStatus inlineDump(CallInfo &callInfo);
+
+    // Testing functions.
+    InliningStatus inlineForceSequentialOrInParallelSection(CallInfo &callInfo);
+    InliningStatus inlineBailout(CallInfo &callInfo);
 
     // Main inlining functions
     InliningStatus inlineNativeCall(CallInfo &callInfo, JSNative native);

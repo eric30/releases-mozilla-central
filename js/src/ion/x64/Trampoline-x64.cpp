@@ -206,7 +206,7 @@ IonRuntime::generateEnterJIT(JSContext *cx, EnterJitType type)
         Label error;
         masm.addPtr(Imm32(IonExitFrameLayout::SizeWithFooter()), rsp);
         masm.addPtr(Imm32(BaselineFrame::Size()), framePtr);
-        masm.branchTest32(Assembler::Zero, ReturnReg, ReturnReg, &error);
+        masm.branchIfFalseBool(ReturnReg, &error);
 
         masm.jump(reg_code);
 
@@ -312,7 +312,7 @@ IonRuntime::generateInvalidator(JSContext *cx)
     masm.lea(Operand(rsp, rbx, TimesOne, sizeof(InvalidationBailoutStack)), rsp);
 
     // Jump to shared bailout tail. The BailoutInfo pointer has to be in r9.
-    IonCode *bailoutTail = cx->compartment()->ionCompartment()->getBailoutTail();
+    IonCode *bailoutTail = cx->runtime()->ionRuntime()->getBailoutTail();
     masm.jmp(bailoutTail);
 
     Linker linker(masm);
@@ -446,7 +446,7 @@ GenerateBailoutThunk(JSContext *cx, MacroAssembler &masm, uint32_t frameClass)
     masm.lea(Operand(rsp, rcx, TimesOne, sizeof(void *)), rsp);
 
     // Jump to shared bailout tail. The BailoutInfo pointer has to be in r9.
-    IonCode *bailoutTail = cx->compartment()->ionCompartment()->getBailoutTail();
+    IonCode *bailoutTail = cx->runtime()->ionRuntime()->getBailoutTail();
     masm.jmp(bailoutTail);
 }
 
@@ -525,8 +525,15 @@ IonRuntime::generateVMWrapper(JSContext *cx, const VMFunction &f)
         break;
 
       case Type_Int32:
+      case Type_Bool:
         outReg = regs.takeAny();
         masm.reserveStack(sizeof(int32_t));
+        masm.movq(esp, outReg);
+        break;
+
+      case Type_Double:
+        outReg = regs.takeAny();
+        masm.reserveStack(sizeof(double));
         masm.movq(esp, outReg);
         break;
 
@@ -576,17 +583,17 @@ IonRuntime::generateVMWrapper(JSContext *cx, const VMFunction &f)
     masm.callWithABI(f.wrapped);
 
     // Test for failure.
-    Label failure;
     switch (f.failType()) {
       case Type_Object:
-        masm.branchTestPtr(Assembler::Zero, rax, rax, &failure);
+        masm.branchTestPtr(Assembler::Zero, rax, rax, masm.failureLabel(f.executionMode));
         break;
       case Type_Bool:
         masm.testb(rax, rax);
-        masm.j(Assembler::Zero, &failure);
+        masm.j(Assembler::Zero, masm.failureLabel(f.executionMode));
         break;
       case Type_ParallelResult:
-        masm.branchPtr(Assembler::NotEqual, rax, Imm32(TP_SUCCESS), &failure);
+        masm.branchPtr(Assembler::NotEqual, rax, Imm32(TP_SUCCESS),
+                       masm.failureLabel(f.executionMode));
         break;
       default:
         MOZ_ASSUME_UNREACHABLE("unknown failure kind");
@@ -608,6 +615,17 @@ IonRuntime::generateVMWrapper(JSContext *cx, const VMFunction &f)
         masm.freeStack(sizeof(int32_t));
         break;
 
+      case Type_Bool:
+        masm.load8ZeroExtend(Address(esp, 0), ReturnReg);
+        masm.freeStack(sizeof(int32_t));
+        break;
+
+      case Type_Double:
+        JS_ASSERT(cx->runtime()->jitSupportsFloatingPoint);
+        masm.loadDouble(Address(esp, 0), ReturnFloatReg);
+        masm.freeStack(sizeof(double));
+        break;
+
       case Type_Pointer:
         masm.loadPtr(Address(esp, 0), ReturnReg);
         masm.freeStack(sizeof(uintptr_t));
@@ -621,9 +639,6 @@ IonRuntime::generateVMWrapper(JSContext *cx, const VMFunction &f)
     masm.retn(Imm32(sizeof(IonExitFrameLayout) +
                     f.explicitStackSlots() * sizeof(void *) +
                     f.extraValuesToPop * sizeof(Value)));
-
-    masm.bind(&failure);
-    masm.handleFailure(f.executionMode);
 
     Linker linker(masm);
     IonCode *wrapper = linker.newCode(cx, JSC::OTHER_CODE);
@@ -667,7 +682,7 @@ IonRuntime::generatePreBarrier(JSContext *cx, MIRType type)
     return linker.newCode(cx, JSC::OTHER_CODE);
 }
 
-typedef bool (*HandleDebugTrapFn)(JSContext *, BaselineFrame *, uint8_t *, JSBool *);
+typedef bool (*HandleDebugTrapFn)(JSContext *, BaselineFrame *, uint8_t *, bool *);
 static const VMFunction HandleDebugTrapInfo = FunctionInfo<HandleDebugTrapFn>(HandleDebugTrap);
 
 IonCode *
@@ -692,8 +707,7 @@ IonRuntime::generateDebugTrapHandler(JSContext *cx)
     masm.movePtr(ImmWord((void *)NULL), BaselineStubReg);
     EmitEnterStubFrame(masm, scratch3);
 
-    IonCompartment *ion = cx->compartment()->ionCompartment();
-    IonCode *code = ion->getVMWrapper(HandleDebugTrapInfo);
+    IonCode *code = cx->runtime()->ionRuntime()->getVMWrapper(HandleDebugTrapInfo);
     if (!code)
         return NULL;
 

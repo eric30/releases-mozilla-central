@@ -13,6 +13,8 @@
 #include "mozilla/dom/EventTargetBinding.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/FileReaderSyncBinding.h"
+#include "mozilla/dom/ImageData.h"
+#include "mozilla/dom/ImageDataBinding.h"
 #include "mozilla/dom/TextDecoderBinding.h"
 #include "mozilla/dom/TextEncoderBinding.h"
 #include "mozilla/dom/XMLHttpRequestBinding.h"
@@ -36,7 +38,6 @@
 #include "File.h"
 #include "FileReaderSync.h"
 #include "Location.h"
-#include "ImageData.h"
 #include "Navigator.h"
 #include "Principal.h"
 #include "ScriptLoader.h"
@@ -203,7 +204,7 @@ private:
   static WorkerGlobalScope*
   GetInstancePrivate(JSContext* aCx, JSObject* aObj, const char* aFunctionName);
 
-  static JSBool
+  static bool
   Construct(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JS_ReportErrorNumber(aCx, js_GetErrorMessage, NULL, JSMSG_WRONG_CONSTRUCTOR,
@@ -249,7 +250,7 @@ private:
     return true;
   }
 
-  static JSBool
+  static bool
   UnwrapErrorEvent(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JS_ASSERT(aArgc == 1);
@@ -266,9 +267,10 @@ private:
     JS::Rooted<JSObject*> event(aCx, &JS_ARGV(aCx, aVp)[0].toObject());
 
     jsval argv[3] = { JSVAL_VOID, JSVAL_VOID, JSVAL_VOID };
-    if (!JS_GetProperty(aCx, event, "message", &argv[0]) ||
-        !JS_GetProperty(aCx, event, "filename", &argv[1]) ||
-        !JS_GetProperty(aCx, event, "lineno", &argv[2])) {
+    JS::AutoArrayRooter rootedArgv(aCx, ArrayLength(argv), argv);
+    if (!JS_GetProperty(aCx, event, "message", rootedArgv.handleAt(0)) ||
+        !JS_GetProperty(aCx, event, "filename", rootedArgv.handleAt(1)) ||
+        !JS_GetProperty(aCx, event, "lineno", rootedArgv.handleAt(2))) {
       return false;
     }
 
@@ -336,7 +338,7 @@ private:
 
     JSFunction* adaptor =
       js::NewFunctionWithReserved(aCx, UnwrapErrorEvent, 1, 0,
-                                  JS_GetGlobalForScopeChain(aCx), "unwrap");
+                                  JS::CurrentGlobalOrNull(aCx), "unwrap");
     if (!adaptor) {
       return false;
     }
@@ -385,7 +387,7 @@ private:
     return true;
   }
 
-  static JSBool
+  static bool
   Close(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JSObject* obj = JS_THIS_OBJECT(aCx, aVp);
@@ -401,7 +403,7 @@ private:
     return scope->mWorker->CloseInternal(aCx);
   }
 
-  static JSBool
+  static bool
   ImportScripts(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JSObject* obj = JS_THIS_OBJECT(aCx, aVp);
@@ -421,7 +423,7 @@ private:
     return true;
   }
 
-  static JSBool
+  static bool
   SetTimeout(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JSObject* obj = JS_THIS_OBJECT(aCx, aVp);
@@ -442,7 +444,7 @@ private:
     return scope->mWorker->SetTimeout(aCx, aArgc, aVp, false);
   }
 
-  static JSBool
+  static bool
   ClearTimeout(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JSObject* obj = JS_THIS_OBJECT(aCx, aVp);
@@ -463,7 +465,7 @@ private:
     return scope->mWorker->ClearTimeout(aCx, id);
   }
 
-  static JSBool
+  static bool
   SetInterval(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JSObject* obj = JS_THIS_OBJECT(aCx, aVp);
@@ -505,7 +507,7 @@ private:
     return scope->mWorker->ClearTimeout(aCx, id);
   }
 
-  static JSBool
+  static bool
   Dump(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JSObject* obj = JS_THIS_OBJECT(aCx, aVp);
@@ -538,7 +540,7 @@ private:
     return true;
   }
 
-  static JSBool
+  static bool
   AtoB(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JSObject* obj = JS_THIS_OBJECT(aCx, aVp);
@@ -564,7 +566,7 @@ private:
     return true;
   }
 
-  static JSBool
+  static bool
   BtoA(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JSObject* obj = JS_THIS_OBJECT(aCx, aVp);
@@ -785,7 +787,7 @@ private:
     return NULL;
   }
 
-  static JSBool
+  static bool
   Construct(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JS_ReportErrorNumber(aCx, js_GetErrorMessage, NULL, JSMSG_WRONG_CONSTRUCTOR,
@@ -830,7 +832,7 @@ private:
     }
   }
 
-  static JSBool
+  static bool
   PostMessage(JSContext* aCx, unsigned aArgc, jsval* aVp)
   {
     JSObject* obj = JS_THIS_OBJECT(aCx, aVp);
@@ -954,7 +956,7 @@ CreateDedicatedWorkerGlobalScope(JSContext* aCx)
     options.setVersion(JSVERSION_LATEST);
   JS::Rooted<JSObject*> global(aCx,
     JS_NewGlobalObject(aCx, DedicatedWorkerGlobalScope::Class(),
-                       GetWorkerPrincipal(), options));
+                       GetWorkerPrincipal(), JS::DontFireOnNewGlobalHook, options));
   if (!global) {
     return NULL;
   }
@@ -978,14 +980,14 @@ CreateDedicatedWorkerGlobalScope(JSContext* aCx)
     return NULL;
   }
 
-  JSObject* scopeProto =
-    WorkerGlobalScope::InitClass(aCx, global, eventTargetProto);
+  JS::Rooted<JSObject*> scopeProto(aCx,
+    WorkerGlobalScope::InitClass(aCx, global, eventTargetProto));
   if (!scopeProto) {
     return NULL;
   }
 
-  JSObject* dedicatedScopeProto =
-    DedicatedWorkerGlobalScope::InitClass(aCx, global, scopeProto);
+  JS::Rooted<JSObject*> dedicatedScopeProto(aCx,
+    DedicatedWorkerGlobalScope::InitClass(aCx, global, scopeProto));
   if (!dedicatedScopeProto) {
     return NULL;
   }
@@ -1011,13 +1013,13 @@ CreateDedicatedWorkerGlobalScope(JSContext* aCx)
   // Init other classes we care about.
   if (!events::InitClasses(aCx, global, false) ||
       !file::InitClasses(aCx, global) ||
-      !exceptions::InitClasses(aCx, global) ||
-      !imagedata::InitClass(aCx, global)) {
+      !exceptions::InitClasses(aCx, global)) {
     return NULL;
   }
 
   // Init other paris-bindings.
   if (!FileReaderSyncBinding_workers::GetConstructorObject(aCx, global) ||
+      !ImageDataBinding::GetConstructorObject(aCx, global) ||
       !TextDecoderBinding_workers::GetConstructorObject(aCx, global) ||
       !TextEncoderBinding_workers::GetConstructorObject(aCx, global) ||
       !XMLHttpRequestBinding_workers::GetConstructorObject(aCx, global) ||
@@ -1031,6 +1033,8 @@ CreateDedicatedWorkerGlobalScope(JSContext* aCx)
   if (!JS_DefineProfilingFunctions(aCx, global)) {
     return NULL;
   }
+
+  JS_FireOnNewGlobalObject(aCx, global);
 
   return global;
 }

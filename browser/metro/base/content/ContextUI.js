@@ -98,6 +98,7 @@ var ContextUI = {
     let shown = false;
 
     if (!this.navbarVisible) {
+      BrowserUI.updateURI();
       this.displayNavbar();
       shown = true;
     }
@@ -180,7 +181,9 @@ var ContextUI = {
 
   // Dismiss the navbar if visible.
   dismissNavbar: function dismissNavbar() {
-    Elements.navbar.dismiss();
+    if (!StartUI.isVisible) {
+      Elements.navbar.dismiss();
+    }
   },
 
   // Dismiss the tabstray if visible.

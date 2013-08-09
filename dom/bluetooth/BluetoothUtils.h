@@ -21,7 +21,7 @@ class BluetoothReplyRunnable;
 bool
 SetJsObject(JSContext* aContext,
             const BluetoothValue& aValue,
-            JSObject* aObj);
+            JS::Handle<JSObject*> aObj);
 
 nsString
 GetObjectPathFromAddress(const nsAString& aAdapterPath,
@@ -42,6 +42,11 @@ DispatchBluetoothReply(BluetoothReplyRunnable* aRunnable,
 void
 ParseAtCommand(const nsACString& aAtCommand, const int aStart,
                nsTArray<nsCString>& aRetValues);
+
+void
+DispatchStatusChangedEvent(const nsAString& aType,
+                           const nsAString& aDeviceAddress,
+                           bool aStatus);
 
 END_BLUETOOTH_NAMESPACE
 

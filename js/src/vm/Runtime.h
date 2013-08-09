@@ -7,10 +7,12 @@
 #ifndef vm_Runtime_h
 #define vm_Runtime_h
 
+#include "mozilla/Atomics.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/PodOperations.h"
 #include "mozilla/TemplateLib.h"
+#include "mozilla/ThreadLocal.h"
 
 #include <setjmp.h>
 #include <string.h>
@@ -28,6 +30,7 @@
 #include "gc/Nursery.h"
 #include "gc/Statistics.h"
 #include "gc/StoreBuffer.h"
+#include "ion/AsmJSSignalHandlers.h"
 #include "js/HashTable.h"
 #include "js/Vector.h"
 #include "vm/DateTime.h"
@@ -41,6 +44,13 @@
 #pragma warning(push)
 #pragma warning(disable:4355) /* Silence warning about "this" used in base member initializer list */
 #endif
+
+namespace js {
+
+/* Thread Local Storage slot for storing the runtime for a thread. */
+extern mozilla::ThreadLocal<PerThreadData*> TlsPerThreadData;
+
+} // namespace js
 
 struct DtoaState;
 
@@ -455,7 +465,7 @@ class PerThreadData : public PerThreadDataFriendFields,
      * thread is associated.  This is private because accessing the
      * fields of this runtime can provoke race conditions, so the
      * intention is that access will be mediated through safe
-     * functions like |associatedWith()| below.
+     * functions like |runtimeFromMainThread| and |associatedWith()| below.
      */
     JSRuntime *runtime_;
 
@@ -561,6 +571,7 @@ class PerThreadData : public PerThreadDataFriendFields,
     void removeFromThreadList();
 
     bool associatedWith(const JSRuntime *rt) { return runtime_ == rt; }
+    inline JSRuntime *runtimeFromMainThread();
 };
 
 template<class Client>
@@ -754,6 +765,14 @@ struct JSRuntime : public JS::shadow::Runtime,
 #endif
     }
 
+    bool exclusiveThreadsPresent() const {
+#ifdef JS_THREADSAFE
+        return numExclusiveThreads > 0;
+#else
+        return false;
+#endif
+    }
+
     /* Default compartment. */
     JSCompartment       *atomsCompartment;
 
@@ -781,19 +800,10 @@ struct JSRuntime : public JS::shadow::Runtime,
     void *ownerThread() const { return ownerThread_; }
     void clearOwnerThread();
     void setOwnerThread();
-    JS_FRIEND_API(void) abortIfWrongThread() const;
-#ifdef DEBUG
-    JS_FRIEND_API(void) assertValidThread() const;
-#else
-    void assertValidThread() const {}
-#endif
   private:
-    void                *ownerThread_;
+    void *ownerThread_;
+    friend bool js::CurrentThreadCanAccessRuntime(JSRuntime *rt);
   public:
-#else
-  public:
-    void abortIfWrongThread() const {}
-    void assertValidThread() const {}
 #endif
 
     /* Temporary arena pool used while compiling and decompiling. */
@@ -904,6 +914,7 @@ struct JSRuntime : public JS::shadow::Runtime,
 
     /* Context create/destroy callback. */
     JSContextCallback   cxCallback;
+    void               *cxCallbackData;
 
     /* Compartment destroy callback. */
     JSDestroyCompartmentCallback destroyCompartmentCallback;
@@ -1421,7 +1432,13 @@ struct JSRuntime : public JS::shadow::Runtime,
     // their callee.
     js::Value            ionReturnOverride_;
 
+    static mozilla::Atomic<size_t> liveRuntimesCount;
+
   public:
+    static bool hasLiveRuntimes() {
+        return liveRuntimesCount > 0;
+    }
+
     bool hasIonReturnOverride() const {
         return !ionReturnOverride_.isMagic();
     }
@@ -1667,6 +1684,13 @@ PerThreadData::setIonStackLimit(uintptr_t limit)
     ionStackLimit = limit;
 }
 
+inline JSRuntime *
+PerThreadData::runtimeFromMainThread()
+{
+    JS_ASSERT(js::CurrentThreadCanAccessRuntime(runtime_));
+    return runtime_;
+}
+
 /************************************************************************/
 
 static JS_ALWAYS_INLINE void
@@ -1787,6 +1811,8 @@ public:
         return get();
     }
 };
+
+extern const JSSecurityCallbacks NullSecurityCallbacks;
 
 } /* namespace js */
 

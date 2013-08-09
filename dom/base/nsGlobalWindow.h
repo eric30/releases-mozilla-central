@@ -54,7 +54,6 @@
 #include "nsFrameMessageManager.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/TimeStamp.h"
-#include "nsIDOMTouchEvent.h"
 #include "nsIInlineEventHandlers.h"
 #include "nsWrapperCacheInlines.h"
 #include "nsIIdleObserver.h"
@@ -63,6 +62,7 @@
 #include "mozilla/dom/Gamepad.h"
 #endif
 #include "nsIDocument.h"
+#include "nsIDOMTouchEvent.h"
 
 #include "mozilla/dom/EventTarget.h"
 #include "Units.h"
@@ -631,8 +631,6 @@ public:
 
   virtual nsresult SetArguments(nsIArray *aArguments);
 
-  static bool DOMWindowDumpEnabled();
-
   void MaybeForgiveSpamCount();
   bool IsClosedOrClosing() {
     return (mIsClosed ||
@@ -809,7 +807,7 @@ protected:
 
   // Object Management
   virtual ~nsGlobalWindow();
-  void CleanUp(bool aIgnoreModalDialog);
+  void CleanUp();
   void ClearControllers();
   nsresult FinalClose();
 
@@ -1244,7 +1242,12 @@ protected:
   nsCOMPtr<nsIURI> mLastOpenedURI;
 #endif
 
-  bool mCleanedUp, mCallCleanUpAfterModalDialogCloses;
+#ifdef MOZ_B2G
+  bool mNetworkUploadObserverEnabled;
+  bool mNetworkDownloadObserverEnabled;
+#endif // MOZ_B2G
+
+  bool mCleanedUp;
 
   nsCOMPtr<nsIDOMOfflineResourceList> mApplicationCache;
 

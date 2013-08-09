@@ -23,18 +23,15 @@
 
 namespace js {
 
+struct WorkerThread;
 struct AsmJSParallelTask;
-
+struct ParseTask;
 namespace ion {
   class IonBuilder;
 }
 
 #if defined(JS_THREADSAFE) && defined(JS_ION)
 # define JS_WORKER_THREADS
-
-struct WorkerThread;
-struct AsmJSParallelTask;
-struct ParseTask;
 
 /* Per-runtime state for off thread work items. */
 class WorkerThreadState
@@ -292,8 +289,10 @@ class AutoUnlockWorkerThreadState
 /* Pause any threads that are running jobs off thread during GC activity. */
 class AutoPauseWorkersForGC
 {
+#ifdef JS_WORKER_THREADS
     JSRuntime *runtime;
     bool needsUnpause;
+#endif
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 
   public:
@@ -308,6 +307,27 @@ PauseOffThreadParsing();
 /* Resume any paused off thread parses. */
 void
 ResumeOffThreadParsing();
+
+#ifdef JS_ION
+struct AsmJSParallelTask
+{
+    LifoAlloc lifo;         // Provider of all heap memory used for compilation.
+    void *func;             // Really, a ModuleCompiler::Func*
+    ion::MIRGenerator *mir; // Passed from main thread to worker.
+    ion::LIRGraph *lir;     // Passed from worker to main thread.
+    unsigned compileTime;
+
+    AsmJSParallelTask(size_t defaultChunkSize)
+      : lifo(defaultChunkSize), func(NULL), mir(NULL), lir(NULL), compileTime(0)
+    { }
+
+    void init(void *func, ion::MIRGenerator *mir) {
+        this->func = func;
+        this->mir = mir;
+        this->lir = NULL;
+    }
+};
+#endif
 
 struct ParseTask
 {

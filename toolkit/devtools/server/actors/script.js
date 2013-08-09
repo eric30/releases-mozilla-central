@@ -106,7 +106,7 @@ BreakpointStore.prototype = {
 
   /**
    * Get a breakpoint from the breakpoint store. Will throw an error if the
-   * breakpoint is not found unless you explicitly silence it.
+   * breakpoint is not found.
    *
    * @param Object aLocation
    *        The location of the breakpoint you are retrieving. It is an object
@@ -114,11 +114,35 @@ BreakpointStore.prototype = {
    *          - url
    *          - line
    *          - column (optional)
-   * @param bool aShouldThrow
-   *        Optional; defaults to true. Whether an error should be thrown when
-   *        there is no breakpoint at the specified locaiton.
    */
-  getBreakpoint: function BS_getBreakpoint(aLocation, aShouldThrow=true) {
+  getBreakpoint: function BS_getBreakpoint(aLocation) {
+    let { url, line, column } = aLocation;
+    dbg_assert(url != null);
+    dbg_assert(line != null);
+
+    var foundBreakpoint = this.hasBreakpoint(aLocation);
+    if (foundBreakpoint == null) {
+      throw new Error("No breakpoint at url = " + url
+          + ", line = " + line
+          + ", column = " + column);
+    }
+
+    return foundBreakpoint;
+  },
+
+  /**
+   * Checks if the breakpoint store has a requested breakpoint
+   * Returns the stored breakpoint if it exists
+   * null otherwise
+   *
+   * @param Object aLocation
+   *        The location of the breakpoint you are retrieving. It is an object
+   *        with the following properties:
+   *          - url
+   *          - line
+   *          - column (optional)
+   */
+  hasBreakpoint: function BS_hasBreakpoint(aLocation) {
     let { url, line, column } = aLocation;
     dbg_assert(url != null);
     dbg_assert(line != null);
@@ -129,11 +153,7 @@ BreakpointStore.prototype = {
       // one.
       return bp;
     }
-    if (aShouldThrow) {
-      throw new Error("No breakpoint at url = " + url
-                      + ", line = " + line
-                      + ", column = " + column);
-    }
+
     return null;
   },
 
@@ -866,8 +886,12 @@ ThreadActor.prototype = {
 
       let { url, line, column } = form.where;
       let promise = this.sources.getOriginalLocation(url, line, column)
-        .then(function (aOrigLocation) {
+        .then((aOrigLocation) => {
           form.where = aOrigLocation;
+          let source = this.sources.source(form.where.url);
+          if (source) {
+            form.source = source.form();
+          }
         });
       promises.push(promise);
     }
@@ -1078,7 +1102,8 @@ ThreadActor.prototype = {
       }
     }
     if (found) {
-      let existingBp = this.breakpointStore.getBreakpoint(actualLocation, false);
+      let existingBp = this.breakpointStore.hasBreakpoint(actualLocation);
+
       if (existingBp && existingBp.actor) {
         /**
          * We already have a breakpoint actor for the actual location, so
@@ -2648,7 +2673,6 @@ FrameActor.prototype = {
         line: this.frame.script.getOffsetLine(this.frame.offset),
         column: getOffsetColumn(this.frame.offset, this.frame.script)
       };
-      form.isBlackBoxed = this.threadActor.sources.isBlackBoxed(this.frame.script.url)
     }
 
     if (!this.frame.older) {
@@ -3189,7 +3213,7 @@ ThreadSources.prototype = {
     }
     dbg_assert(aScript.sourceMapURL, "Script should have a sourceMapURL");
     let sourceMapURL = this._normalize(aScript.sourceMapURL, aScript.url);
-    let map = this._fetchSourceMap(sourceMapURL)
+    let map = this._fetchSourceMap(sourceMapURL, aScript.url)
       .then((aSourceMap) => {
         for (let s of aSourceMap.sources) {
           this._generatedUrlsByOriginalUrl[s] = aScript.url;
@@ -3205,24 +3229,45 @@ ThreadSources.prototype = {
    * Return a promise of a SourceMapConsumer for the source map located at
    * |aAbsSourceMapURL|, which must be absolute. If there is already such a
    * promise extant, return it.
+   *
+   * @param string aAbsSourceMapURL
+   *        The source map URL, in absolute form, not relative.
+   * @param string aScriptURL
+   *        When the source map URL is a data URI, there is no sourceRoot on the
+   *        source map, and the source map's sources are relative, we resolve
+   *        them from aScriptURL.
    */
-  _fetchSourceMap: function TS__fetchSourceMap(aAbsSourceMapURL) {
+  _fetchSourceMap: function TS__fetchSourceMap(aAbsSourceMapURL, aScriptURL) {
     if (aAbsSourceMapURL in this._sourceMaps) {
       return this._sourceMaps[aAbsSourceMapURL];
-    } else {
-      let promise = fetch(aAbsSourceMapURL).then(rawSourceMap => {
-        let map = new SourceMapConsumer(rawSourceMap);
-        let base = aAbsSourceMapURL.replace(/\/[^\/]+$/, '/');
-        if (base.indexOf("data:") !== 0) {
-          map.sourceRoot = map.sourceRoot
-            ? this._normalize(map.sourceRoot, base)
-            : base;
-        }
-        return map;
-      });
-      this._sourceMaps[aAbsSourceMapURL] = promise;
-      return promise;
     }
+
+    let promise = fetch(aAbsSourceMapURL).then(rawSourceMap => {
+      let map = new SourceMapConsumer(rawSourceMap);
+      this._setSourceMapRoot(map, aAbsSourceMapURL, aScriptURL);
+      return map;
+    });
+    this._sourceMaps[aAbsSourceMapURL] = promise;
+    return promise;
+  },
+
+  /**
+   * Sets the source map's sourceRoot to be relative to the source map url.
+   */
+  _setSourceMapRoot: function TS__setSourceMapRoot(aSourceMap, aAbsSourceMapURL,
+                                                   aScriptURL) {
+    const base = this._dirname(
+      aAbsSourceMapURL.indexOf("data:") === 0
+        ? aScriptURL
+        : aAbsSourceMapURL);
+    aSourceMap.sourceRoot = aSourceMap.sourceRoot
+      ? this._normalize(aSourceMap.sourceRoot, base)
+      : base;
+  },
+
+  _dirname: function TS__dirname(aPath) {
+    return Services.io.newURI(
+      ".", null, Services.io.newURI(aPath, null, null)).spec;
   },
 
   /**

@@ -225,6 +225,7 @@ private:
 ////////////////////////////////////////////////////
 // PositionError
 ////////////////////////////////////////////////////
+DOMCI_DATA(GeoPositionError, PositionError)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(PositionError)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
@@ -718,17 +719,17 @@ nsGeolocationService::HandleMozsettingChanged(const PRUnichar* aData)
 
     JS::Rooted<JSObject*> obj(cx, &val.toObject());
     JS::Rooted<JS::Value> key(cx);
-    if (!JS_GetProperty(cx, obj, "key", key.address()) || !key.isString()) {
+    if (!JS_GetProperty(cx, obj, "key", &key) || !key.isString()) {
       return;
     }
 
     JSBool match;
-    if (!JS_StringEqualsAscii(cx, key.toString(), GEO_SETINGS_ENABLED, &match) || (match != JS_TRUE)) {
+    if (!JS_StringEqualsAscii(cx, key.toString(), GEO_SETINGS_ENABLED, &match) || !match) {
       return;
     }
 
     JS::Rooted<JS::Value> value(cx);
-    if (!JS_GetProperty(cx, obj, "value", value.address()) || !value.isBoolean()) {
+    if (!JS_GetProperty(cx, obj, "value", &value) || !value.isBoolean()) {
       return;
     }
 
@@ -999,6 +1000,8 @@ NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(Geolocation)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(Geolocation)
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(Geolocation)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(Geolocation)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mCachedPosition)

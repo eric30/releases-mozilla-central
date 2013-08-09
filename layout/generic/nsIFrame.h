@@ -33,6 +33,7 @@
 #include "mozilla/css/ImageLoader.h"
 #include "FramePropertyTable.h"
 #include "mozilla/TypedEnum.h"
+#include "nsDirection.h"
 #include <algorithm>
 
 #ifdef ACCESSIBILITY
@@ -353,11 +354,6 @@ enum nsSelectionAmount {
   eSelectWordNoSpace = 8 // select a "word" without selecting the following
                          // space, no matter what the default platform
                          // behavior is
-};
-
-enum nsDirection {
-  eDirNext    = 0,
-  eDirPrevious= 1
 };
 
 enum nsSpread {
@@ -751,24 +747,24 @@ public:
     if (aContext != mStyleContext) {
       nsStyleContext* oldStyleContext = mStyleContext;
       mStyleContext = aContext;
-      if (aContext) {
-        aContext->AddRef();
-        DidSetStyleContext(oldStyleContext);
-      }
-      if (oldStyleContext)
-        oldStyleContext->Release();
+      aContext->AddRef();
+      DidSetStyleContext(oldStyleContext);
+      oldStyleContext->Release();
     }
   }
-  
+
+  /**
+   * SetStyleContextWithoutNotification is for changes to the style
+   * context that should suppress style change processing, in other
+   * words, those that aren't really changes.  This generally means only
+   * changes that happen during frame construction.
+   */
   void SetStyleContextWithoutNotification(nsStyleContext* aContext)
   {
     if (aContext != mStyleContext) {
-      if (mStyleContext)
-        mStyleContext->Release();
+      mStyleContext->Release();
       mStyleContext = aContext;
-      if (aContext) {
-        aContext->AddRef();
-      }
+      aContext->AddRef();
     }
   }
 
@@ -985,8 +981,21 @@ public:
   /**
    * Apply the result of GetSkipSides() on this frame to an nsMargin by
    * setting to zero any sides that are skipped.
+   *
+   * @param aMargin The margin to apply the result of GetSkipSides() to.
+   * @param aReflowState An optional reflow state parameter, which is used if
+   *        ApplySkipSides() is being called in the middle of reflow.
+   *
+   * @note (See also bug 743402, comment 11) GetSkipSides() and it's sister
+   *       method, ApplySkipSides() checks to see if this frame has a previous
+   *       or next continuation to determine if a side should be skipped.
+   *       Unfortunately, this only works after reflow has been completed. In
+   *       lieu of this, during reflow, an nsHTMLReflowState parameter can be
+   *       passed in, indicating that it should be used to determine if sides
+   *       should be skipped during reflow.
    */
-  void ApplySkipSides(nsMargin& aMargin) const;
+  void ApplySkipSides(nsMargin& aMargin,
+                      const nsHTMLReflowState* aReflowState = nullptr) const;
 
   /**
    * Like the frame's rect (see |GetRect|), which is the border rect,
@@ -2406,8 +2415,16 @@ public:
   /**
    * Determine whether borders should not be painted on certain sides of the
    * frame.
+   *
+   * @note (See also bug 743402, comment 11) GetSkipSides() and it's sister
+   *       method, ApplySkipSides() checks to see if this frame has a previous
+   *       or next continuation to determine if a side should be skipped.
+   *       Unfortunately, this only works after reflow has been completed. In
+   *       lieu of this, during reflow, an nsHTMLReflowState parameter can be
+   *       passed in, indicating that it should be used to determine if sides
+   *       should be skipped during reflow.
    */
-  virtual int GetSkipSides() const { return 0; }
+  virtual int GetSkipSides(const nsHTMLReflowState* aReflowState = nullptr) const { return 0; }
 
   /**
    * @returns true if this frame is selected.

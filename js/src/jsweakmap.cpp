@@ -118,12 +118,11 @@ WeakMapBase::removeWeakMapFromList(WeakMapBase *weakmap)
 static JSObject *
 GetKeyArg(JSContext *cx, CallArgs &args)
 {
-    Value *vp = &args[0];
-    if (vp->isPrimitive()) {
+    if (args[0].isPrimitive()) {
         JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_NOT_NONNULL_OBJECT);
         return NULL;
     }
-    return &vp->toObject();
+    return &args[0].toObject();
 }
 
 JS_ALWAYS_INLINE bool
@@ -157,7 +156,7 @@ WeakMap_has_impl(JSContext *cx, CallArgs args)
     return true;
 }
 
-JSBool
+static bool
 WeakMap_has(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -178,7 +177,7 @@ WeakMap_clear_impl(JSContext *cx, CallArgs args)
     return true;
 }
 
-JSBool
+static bool
 WeakMap_clear(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -214,7 +213,7 @@ WeakMap_get_impl(JSContext *cx, CallArgs args)
     return true;
 }
 
-JSBool
+static bool
 WeakMap_get(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -247,7 +246,7 @@ WeakMap_delete_impl(JSContext *cx, CallArgs args)
     return true;
 }
 
-JSBool
+static bool
 WeakMap_delete(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -321,7 +320,7 @@ WeakMap_set_impl(JSContext *cx, CallArgs args)
     return true;
 }
 
-JSBool
+static bool
 WeakMap_set(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -342,6 +341,8 @@ JS_NondeterministicGetWeakMapKeys(JSContext *cx, JSObject *objArg, JSObject **re
         return false;
     ObjectValueMap *map = obj->as<WeakMapObject>().getMap();
     if (map) {
+        // Prevent GC from mutating the weakmap while iterating.
+        gc::AutoSuppressGC suppress(cx);
         for (ObjectValueMap::Base::Range r = map->all(); !r.empty(); r.popFront()) {
             RootedObject key(cx, r.front().key);
             if (!JS_WrapObject(cx, key.address()))
@@ -376,7 +377,7 @@ WeakMap_finalize(FreeOp *fop, JSObject *obj)
     }
 }
 
-static JSBool
+static bool
 WeakMap_construct(JSContext *cx, unsigned argc, Value *vp)
 {
     JSObject *obj = NewBuiltinClassInstance(cx, &WeakMapObject::class_);

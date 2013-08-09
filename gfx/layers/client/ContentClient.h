@@ -253,6 +253,8 @@ protected:
   // lock it now.
   virtual void LockFrontBuffer() {}
 
+  bool CreateAndAllocateDeprecatedTextureClient(RefPtr<DeprecatedTextureClient>& aClient);
+
   RefPtr<DeprecatedTextureClient> mDeprecatedTextureClient;
   RefPtr<DeprecatedTextureClient> mDeprecatedTextureClientOnWhite;
   // keep a record of texture clients we have created and need to keep
@@ -390,7 +392,7 @@ private:
 
   void NotifyBufferCreated(ContentType aType, uint32_t aFlags)
   {
-    mTextureInfo.mTextureFlags = aFlags | HostRelease;
+    mTextureInfo.mTextureFlags = aFlags | TEXTURE_DEALLOCATE_HOST;
     mContentType = aType;
 
     mForwarder->CreatedIncrementalBuffer(this,

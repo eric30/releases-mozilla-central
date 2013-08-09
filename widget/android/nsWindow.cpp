@@ -1158,21 +1158,6 @@ nsWindow::OnMouseEvent(AndroidGeckoEvent *ae)
 {
     uint32_t msg;
     switch (ae->Action()) {
-#ifndef MOZ_ONLY_TOUCH_EVENTS
-        case AndroidMotionEvent::ACTION_DOWN:
-            msg = NS_MOUSE_BUTTON_DOWN;
-            break;
-
-        case AndroidMotionEvent::ACTION_MOVE:
-            msg = NS_MOUSE_MOVE;
-            break;
-
-        case AndroidMotionEvent::ACTION_UP:
-        case AndroidMotionEvent::ACTION_CANCEL:
-            msg = NS_MOUSE_BUTTON_UP;
-            break;
-#endif
-
         case AndroidMotionEvent::ACTION_HOVER_MOVE:
             msg = NS_MOUSE_MOVE;
             break;
@@ -1310,7 +1295,7 @@ nsWindow::DispatchGestureEvent(uint32_t msg, uint32_t direction, double delta,
 
     event.modifiers = 0;
     event.time = time;
-    event.refPoint = refPoint;
+    event.refPoint = LayoutDeviceIntPoint::FromUntyped(refPoint);
 
     DispatchEvent(&event);
 }
@@ -1327,7 +1312,7 @@ nsWindow::DispatchMotionEvent(nsInputEvent &event, AndroidGeckoEvent *ae,
 
     // XXX possibly bound the range of event.refPoint here.
     //     some code may get confused.
-    event.refPoint = refPoint - offset;
+    event.refPoint = LayoutDeviceIntPoint::FromUntyped(refPoint - offset);
 
     DispatchEvent(&event);
 }
@@ -2417,11 +2402,11 @@ nsWindow::DrawWindowOverlay(LayerManager* aManager, nsIntRect aRect)
 
 // off-main-thread compositor fields and functions
 
+nsRefPtr<mozilla::layers::APZCTreeManager> nsWindow::sApzcTreeManager = 0;
 nsRefPtr<mozilla::layers::LayerManager> nsWindow::sLayerManager = 0;
 nsRefPtr<mozilla::layers::CompositorParent> nsWindow::sCompositorParent = 0;
 nsRefPtr<mozilla::layers::CompositorChild> nsWindow::sCompositorChild = 0;
 bool nsWindow::sCompositorPaused = true;
-nsRefPtr<mozilla::layers::AsyncPanZoomController> nsWindow::sApzc = 0;
 
 void
 nsWindow::SetCompositor(mozilla::layers::LayerManager* aLayerManager,
@@ -2496,52 +2481,30 @@ nsWindow::NeedsPaint()
   return nsIWidget::NeedsPaint();
 }
 
-class AndroidCompositorParent : public CompositorParent {
-public:
-    AndroidCompositorParent(nsIWidget* aWidget, bool aRenderToEGLSurface,
-                            int aSurfaceWidth, int aSurfaceHeight)
-        : CompositorParent(aWidget, aRenderToEGLSurface, aSurfaceHeight, aSurfaceHeight)
-    {
-        if (nsWindow::GetPanZoomController()) {
-            nsWindow::GetPanZoomController()->SetCompositorParent(this);
-        }
-    }
-
-    virtual void ShadowLayersUpdated(LayerTransactionParent* aLayerTree, const TargetConfig& aTargetConfig,
-                                     bool isFirstPaint) MOZ_OVERRIDE
-    {
-        CompositorParent::ShadowLayersUpdated(aLayerTree, aTargetConfig, isFirstPaint);
-        Layer* targetLayer = GetLayerManager()->GetPrimaryScrollableLayer();
-        AsyncPanZoomController* controller = nsWindow::GetPanZoomController();
-        if (targetLayer && targetLayer->AsContainerLayer() && controller) {
-            targetLayer->AsContainerLayer()->SetAsyncPanZoomController(controller);
-            controller->NotifyLayersUpdated(targetLayer->AsContainerLayer()->GetFrameMetrics(), isFirstPaint);
-        }
-    }
-};
-
 CompositorParent*
 nsWindow::NewCompositorParent(int aSurfaceWidth, int aSurfaceHeight)
 {
-    return new AndroidCompositorParent(this, true, aSurfaceWidth, aSurfaceHeight);
+    return new CompositorParent(this, true, aSurfaceWidth, aSurfaceHeight);
 }
 
-void
-nsWindow::SetPanZoomController(AsyncPanZoomController* apzc)
+mozilla::layers::APZCTreeManager*
+nsWindow::GetAPZCTreeManager()
 {
-    if (sApzc) {
-        sApzc->SetCompositorParent(nullptr);
-        sApzc = nullptr;
+    if (!sApzcTreeManager) {
+        CompositorParent* compositor = sCompositorParent;
+        if (!compositor) {
+            return nullptr;
+        }
+        uint64_t rootLayerTreeId = compositor->RootLayerTreeId();
+        CompositorParent::SetControllerForLayerTree(rootLayerTreeId, AndroidBridge::Bridge());
+        sApzcTreeManager = CompositorParent::GetAPZCTreeManager(rootLayerTreeId);
     }
-    if (apzc) {
-        sApzc = apzc;
-        sApzc->SetCompositorParent(sCompositorParent);
-    }
+    return sApzcTreeManager;
 }
 
-AsyncPanZoomController*
-nsWindow::GetPanZoomController()
+uint64_t
+nsWindow::RootLayerTreeId()
 {
-    return sApzc;
+    MOZ_ASSERT(sCompositorParent);
+    return sCompositorParent->RootLayerTreeId();
 }
-

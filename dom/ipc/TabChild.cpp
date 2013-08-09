@@ -744,8 +744,10 @@ NS_IMPL_RELEASE(TabChild)
 NS_IMETHODIMP
 TabChild::SetStatus(uint32_t aStatusType, const PRUnichar* aStatus)
 {
-  // FIXME/bug 617804: should the platform support this?
-  return NS_OK;
+  return SetStatusWithContext(aStatusType,
+      aStatus ? static_cast<const nsString &>(nsDependentString(aStatus))
+              : EmptyString(),
+      nullptr);
 }
 
 NS_IMETHODIMP
@@ -820,10 +822,13 @@ TabChild::ExitModalEventLoop(nsresult aStatus)
 
 NS_IMETHODIMP
 TabChild::SetStatusWithContext(uint32_t aStatusType,
-                                    const nsAString& aStatusText,
-                                    nsISupports* aStatusContext)
+                               const nsAString& aStatusText,
+                               nsISupports* aStatusContext)
 {
-  // FIXME/bug 617804: should the platform support this?
+  // We can only send the status after the ipc machinery is set up,
+  // mRemoteFrame is a good indicator.
+  if (mRemoteFrame)
+    SendSetStatus(aStatusType, nsString(aStatusText));
   return NS_OK;
 }
 
@@ -889,7 +894,8 @@ TabChild::GetTitle(PRUnichar** aTitle)
 NS_IMETHODIMP
 TabChild::SetTitle(const PRUnichar* aTitle)
 {
-  // FIXME/bug 617804: should the platform support this?
+  // JavaScript sends the "DOMTitleChanged" event to the parent
+  // via the message manager.
   return NS_OK;
 }
 
@@ -1029,6 +1035,20 @@ TabChild::GetDOMWindowUtils()
 {
   nsCOMPtr<nsPIDOMWindow> window = do_GetInterface(mWebNav);
   nsCOMPtr<nsIDOMWindowUtils> utils = do_GetInterface(window);
+  return utils.forget();
+}
+
+already_AddRefed<nsIDOMWindowUtils>
+TabChild::GetDOMWindowUtils(nsIContent* content)
+{
+  nsCOMPtr<nsIDOMWindowUtils> utils;
+  nsIDocument* doc = content->GetCurrentDoc();
+  if (doc) {
+    nsCOMPtr<nsIDOMWindow> window = doc->GetDefaultView();
+    if (window) {
+      utils = do_GetInterface(window);
+    }
+  }
   return utils.forget();
 }
 
@@ -1459,32 +1479,34 @@ TabChild::DispatchMessageManagerMessage(const nsAString& aMessageName,
                        aMessageName, false, &cloneData, nullptr, nullptr);
 }
 
-static void
-ScrollWindowTo(nsIDOMWindow* aWindow, const CSSPoint& aPoint)
-{
-    nsGlobalWindow* window = static_cast<nsGlobalWindow*>(aWindow);
-    nsIScrollableFrame* sf = window->GetScrollFrame();
-
-    if (sf) {
-        sf->ScrollToCSSPixelsApproximate(aPoint);
-    }
-}
-
 bool
 TabChild::RecvUpdateFrame(const FrameMetrics& aFrameMetrics)
 {
-    nsCOMPtr<nsIDOMWindowUtils> utils(GetDOMWindowUtils());
+  MOZ_ASSERT(aFrameMetrics.mScrollId != FrameMetrics::NULL_SCROLL_ID);
 
+  if (aFrameMetrics.mScrollId == FrameMetrics::ROOT_SCROLL_ID) {
     uint32_t presShellId;
+    nsCOMPtr<nsIDOMWindowUtils> utils(GetDOMWindowUtils());
     nsresult rv = utils->GetPresShellId(&presShellId);
     MOZ_ASSERT(NS_SUCCEEDED(rv));
-    if (NS_SUCCEEDED(rv) && aFrameMetrics.mPresShellId != presShellId) {
-        // We've recieved a message that is out of date and we want to ignore.
-        // However we can't reply without painting so we reply by painting the
-        // exact same thing as we did before.
-        return ProcessUpdateFrame(mLastMetrics);
+
+    if (NS_SUCCEEDED(rv) && aFrameMetrics.mPresShellId == presShellId) {
+      return ProcessUpdateFrame(aFrameMetrics);
     }
-    return ProcessUpdateFrame(aFrameMetrics);
+  } else {
+    // aFrameMetrics.mScrollId is not FrameMetrics::ROOT_SCROLL_ID,
+    // so we are trying to update a subframe. This requires special handling.
+    nsCOMPtr<nsIContent> content = nsLayoutUtils::FindContentFor(
+                                      aFrameMetrics.mScrollId);
+    if (content) {
+      return ProcessUpdateSubframe(content, aFrameMetrics);
+    }
+  }
+
+  // We've recieved a message that is out of date and we want to ignore.
+  // However we can't reply without painting so we reply by painting the
+  // exact same thing as we did before.
+  return ProcessUpdateFrame(mLastMetrics);
 }
 
 bool
@@ -1533,49 +1555,60 @@ TabChild::ProcessUpdateFrame(const FrameMetrics& aFrameMetrics)
     nsCOMPtr<nsIDOMWindowUtils> utils(GetDOMWindowUtils());
     nsCOMPtr<nsIDOMWindow> window = do_GetInterface(mWebNav);
 
+    // set the scroll port size, which determines the scroll range
     utils->SetScrollPositionClampingScrollPortSize(
       cssCompositedRect.width, cssCompositedRect.height);
-    ScrollWindowTo(window, aFrameMetrics.mScrollOffset);
-    LayoutDeviceToLayerScale resolution =
-      aFrameMetrics.CalculateResolution()
-      / aFrameMetrics.mDevPixelsPerCSSPixel
-      * ScreenToLayerScale(1);
+
+    // scroll the window to the desired spot
+    nsIScrollableFrame* sf = static_cast<nsGlobalWindow*>(window.get())->GetScrollFrame();
+    if (sf) {
+        sf->ScrollToCSSPixelsApproximate(aFrameMetrics.mScrollOffset);
+    }
+
+    // set the resolution
+    LayoutDeviceToLayerScale resolution = aFrameMetrics.CalculateResolution()
+      / aFrameMetrics.mDevPixelsPerCSSPixel * ScreenToLayerScale(1);
     utils->SetResolution(resolution.scale, resolution.scale);
 
-    SetDisplayPort(aFrameMetrics);
+    // and set the display port
+    nsCOMPtr<nsIDOMDocument> domDoc;
+    mWebNav->GetDocument(getter_AddRefs(domDoc));
+    if (domDoc) {
+      nsCOMPtr<nsIDOMElement> element;
+      domDoc->GetDocumentElement(getter_AddRefs(element));
+      if (element) {
+        utils->SetDisplayPortForElement(
+          aFrameMetrics.mDisplayPort.x, aFrameMetrics.mDisplayPort.y,
+          aFrameMetrics.mDisplayPort.width, aFrameMetrics.mDisplayPort.height,
+          element);
+      }
+    }
 
     mLastMetrics = aFrameMetrics;
-
     return true;
 }
 
-void
-TabChild::SetDisplayPort(const FrameMetrics& aFrameMetrics)
+bool
+TabChild::ProcessUpdateSubframe(nsIContent* aContent,
+                                const FrameMetrics& aMetrics)
 {
-  nsCOMPtr<nsIDOMDocument> domDoc;
-  mWebNav->GetDocument(getter_AddRefs(domDoc));
-  if (!domDoc) {
-    return;
+  // scroll the frame to the desired spot
+  nsIScrollableFrame* scrollFrame = nsLayoutUtils::FindScrollableFrameFor(aMetrics.mScrollId);
+  if (scrollFrame) {
+    scrollFrame->ScrollToCSSPixelsApproximate(aMetrics.mScrollOffset);
   }
 
-  // nsLayoutUtils::FindContentFor() doesn't provide a look-up for the root
-  // scroll idea. This is because the root scroll ID could refer to a different
-  // element in the DOM when navigating to a new document.
-  nsCOMPtr<nsIDOMElement> element;
-  if (aFrameMetrics.mScrollId == FrameMetrics::ROOT_SCROLL_ID) {
-    domDoc->GetDocumentElement(getter_AddRefs(element));
-  } else {
-    element = do_QueryInterface(nsLayoutUtils::FindContentFor(
-      aFrameMetrics.mScrollId));
-  }
-
-  if (element) {
-    nsCOMPtr<nsIDOMWindowUtils> utils(GetDOMWindowUtils());
+  nsCOMPtr<nsIDOMWindowUtils> utils(GetDOMWindowUtils(aContent));
+  nsCOMPtr<nsIDOMElement> element = do_QueryInterface(aContent);
+  if (utils && element) {
+    // and set the display port
     utils->SetDisplayPortForElement(
-      aFrameMetrics.mDisplayPort.x, aFrameMetrics.mDisplayPort.y,
-      aFrameMetrics.mDisplayPort.width, aFrameMetrics.mDisplayPort.height,
+      aMetrics.mDisplayPort.x, aMetrics.mDisplayPort.y,
+      aMetrics.mDisplayPort.width, aMetrics.mDisplayPort.height,
       element);
   }
+
+  return true;
 }
 
 bool
@@ -1679,7 +1712,7 @@ TabChild::DispatchSynthesizedMouseEvent(uint32_t aMsg, uint64_t aTime,
 
   nsMouseEvent event(true, aMsg, NULL,
       nsMouseEvent::eReal, nsMouseEvent::eNormal);
-  event.refPoint = nsIntPoint(aRefPoint.x, aRefPoint.y);
+  event.refPoint = LayoutDeviceIntPoint(aRefPoint.x, aRefPoint.y);
   event.time = aTime;
   event.button = nsMouseEvent::eLeftButton;
   event.inputSource = nsIDOMMouseEvent::MOZ_SOURCE_TOUCH;
@@ -2181,14 +2214,19 @@ TabChild::InitRenderingState()
     if (id != 0) {
         // Pushing layers transactions directly to a separate
         // compositor context.
-		PCompositorChild* compositorChild = CompositorChild::Get();
+        PCompositorChild* compositorChild = CompositorChild::Get();
         if (!compositorChild) {
           NS_WARNING("failed to get CompositorChild instance");
           return false;
         }
+        bool success;
         shadowManager =
             compositorChild->SendPLayerTransactionConstructor(mTextureFactoryIdentifier.mParentBackend,
-                                                              id, &mTextureFactoryIdentifier);
+                                                              id, &mTextureFactoryIdentifier, &success);
+        if (!success) {
+          NS_WARNING("failed to properly allocate layer transaction");
+          return false;
+        }
     } else {
         // Pushing transactions to the parent content.
         shadowManager = remoteFrame->SendPLayerTransactionConstructor();

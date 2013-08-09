@@ -30,7 +30,6 @@
 #include "PowerManager.h"
 #include "nsIDOMWakeLock.h"
 #include "nsIPowerManagerService.h"
-#include "mozilla/dom/SmsManager.h"
 #include "mozilla/dom/MobileMessageManager.h"
 #include "nsISmsService.h"
 #include "mozilla/Hal.h"
@@ -132,6 +131,8 @@ NS_INTERFACE_MAP_END
 NS_IMPL_CYCLE_COLLECTING_ADDREF(Navigator)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(Navigator)
 
+NS_IMPL_CYCLE_COLLECTION_CLASS(Navigator)
+
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(Navigator)
   tmp->Invalidate();
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mWindow)
@@ -145,7 +146,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Navigator)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mNotification)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mBatteryManager)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPowerManager)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSmsManager)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMobileMessageManager)
 #ifdef MOZ_B2G_RIL
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTelephony)
@@ -209,11 +209,6 @@ Navigator::Invalidate()
   if (mPowerManager) {
     mPowerManager->Shutdown();
     mPowerManager = nullptr;
-  }
-
-  if (mSmsManager) {
-    mSmsManager->Shutdown();
-    mSmsManager = nullptr;
   }
 
   if (mMobileMessageManager) {
@@ -973,7 +968,7 @@ Navigator::GetDeviceStorages(const nsAString& aType,
     return;
   }
 
-  nsDOMDeviceStorage::CreateDeviceStoragesFor(mWindow, aType, aStores, false);
+  nsDOMDeviceStorage::CreateDeviceStoragesFor(mWindow, aType, aStores);
 
   mDeviceStorageStores.AppendElements(aStores);
 }
@@ -981,10 +976,6 @@ Navigator::GetDeviceStorages(const nsAString& aType,
 Geolocation*
 Navigator::GetGeolocation(ErrorResult& aRv)
 {
-  if (!Preferences::GetBool("geo.enabled", true)) {
-    return nullptr;
-  }
-
   if (mGeolocation) {
     return mGeolocation;
   }
@@ -1125,19 +1116,6 @@ Navigator::RequestWakeLock(const nsAString &aTopic, ErrorResult& aRv)
   nsCOMPtr<nsIDOMMozWakeLock> wakelock;
   aRv = pmService->NewWakeLock(aTopic, mWindow, getter_AddRefs(wakelock));
   return wakelock.forget();
-}
-
-nsIDOMMozSmsManager*
-Navigator::GetMozSms()
-{
-  if (!mSmsManager) {
-    NS_ENSURE_TRUE(mWindow, nullptr);
-    NS_ENSURE_TRUE(mWindow->GetDocShell(), nullptr);
-
-    mSmsManager = SmsManager::CreateInstance(mWindow);
-  }
-
-  return mSmsManager;
 }
 
 nsIDOMMozMobileMessageManager*
@@ -1511,7 +1489,7 @@ Navigator::DoNewResolve(JSContext* aCx, JS::Handle<JSObject*> aObject,
     return true;
   }
 
-  nsScriptNameSpaceManager *nameSpaceManager =
+  nsScriptNameSpaceManager* nameSpaceManager =
     nsJSRuntime::GetNameSpaceManager();
   if (!nameSpaceManager) {
     return Throw<true>(aCx, NS_ERROR_NOT_INITIALIZED);
@@ -1546,6 +1524,15 @@ Navigator::DoNewResolve(JSContext* aCx, JS::Handle<JSObject*> aObject,
       if (name_struct->mConstructorEnabled &&
           !(*name_struct->mConstructorEnabled)(aCx, naviObj)) {
         return true;
+      }
+
+      if (name.EqualsLiteral("mozSettings")) {
+        bool hasPermission = CheckPermission("settings-read") ||
+                             CheckPermission("settings-write");
+        if (!hasPermission) {
+          aValue.setNull();
+          return true;
+        }
       }
 
       domObject = construct(aCx, naviObj);
@@ -1605,6 +1592,29 @@ Navigator::DoNewResolve(JSContext* aCx, JS::Handle<JSObject*> aObject,
   return true;
 }
 
+static PLDHashOperator
+SaveNavigatorName(const nsAString& aName, void* aClosure)
+{
+  nsTArray<nsString>* arr = static_cast<nsTArray<nsString>*>(aClosure);
+  arr->AppendElement(aName);
+  return PL_DHASH_NEXT;
+}
+
+void
+Navigator::GetOwnPropertyNames(JSContext* aCx, nsTArray<nsString>& aNames,
+                               ErrorResult& aRv)
+{
+  nsScriptNameSpaceManager *nameSpaceManager =
+    nsJSRuntime::GetNameSpaceManager();
+  if (!nameSpaceManager) {
+    NS_ERROR("Can't get namespace manager.");
+    aRv.Throw(NS_ERROR_UNEXPECTED);
+    return;
+  }
+
+  nameSpaceManager->EnumerateNavigatorNames(SaveNavigatorName, &aNames);
+}
+
 JSObject*
 Navigator::WrapObject(JSContext* cx, JS::Handle<JSObject*> scope)
 {
@@ -1646,14 +1656,6 @@ Navigator::HasWakeLockSupport(JSContext* /* unused*/, JSObject* /*unused */)
     do_GetService(POWERMANAGERSERVICE_CONTRACTID);
   // No service means no wake lock support
   return !!pmService;
-}
-
-/* static */
-bool
-Navigator::HasSmsSupport(JSContext* /* unused */, JSObject* aGlobal)
-{
-  nsCOMPtr<nsPIDOMWindow> win = GetWindowFromGlobal(aGlobal);
-  return win && SmsManager::CreationIsAllowed(win);
 }
 
 /* static */
@@ -1778,6 +1780,14 @@ bool Navigator::HasUserMediaSupport(JSContext* /* unused */,
          Preferences::GetBool("media.peerconnection.enabled", false);
 }
 #endif // MOZ_MEDIA_NAVIGATOR
+
+/* static */
+bool Navigator::HasPushNotificationsSupport(JSContext* /* unused */,
+                                            JSObject* aGlobal)
+{
+  nsCOMPtr<nsPIDOMWindow> win = GetWindowFromGlobal(aGlobal);
+  return win && Preferences::GetBool("services.push.enabled", false) && CheckPermission(win, "push");
+}
 
 /* static */
 already_AddRefed<nsPIDOMWindow>

@@ -234,6 +234,7 @@ FENNEC_JAVA_FILES = \
   menu/MenuPanel.java \
   menu/MenuPopup.java \
   preferences/SearchPreferenceCategory.java \
+  preferences/SearchEnginePreference.java \
   widget/AboutHome.java \
   widget/AboutHomeView.java \
   widget/AboutHomeSection.java \
@@ -445,7 +446,6 @@ RES_LAYOUT = \
   res/layout/autocomplete_list.xml \
   res/layout/autocomplete_list_item.xml \
   res/layout/awesomebar.xml \
-  res/layout/awesomebar_actionbar.xml \
   res/layout/awesomebar_folder_row.xml \
   res/layout/awesomebar_header_row.xml \
   res/layout/awesomebar_allpages_list.xml \
@@ -473,6 +473,7 @@ RES_LAYOUT = \
   res/layout/notification_progress.xml \
   res/layout/notification_progress_text.xml \
   res/layout/preference_rightalign_icon.xml \
+  res/layout/preference_search_tip.xml \
   res/layout/search_engine_row.xml \
   res/layout/site_setting_item.xml \
   res/layout/site_setting_title.xml \
@@ -577,6 +578,7 @@ RES_XML = \
   res/xml/preferences_search.xml \
   res/xml/preferences_privacy.xml \
   res/xml/preferences_vendor.xml \
+  res/xml/preferences_devtools.xml \
   $(SYNC_RES_XML) \
   $(NULL)
 
@@ -670,6 +672,7 @@ RES_DRAWABLE_MDPI = \
   res/drawable-mdpi/tab_thumbnail_shadow.png \
   res/drawable-mdpi/tabs_count.png \
   res/drawable-mdpi/tabs_count_foreground.png \
+  res/drawable-mdpi/tip_addsearch.png \
   res/drawable-mdpi/toast.9.png \
   res/drawable-mdpi/toast_button_focused.9.png \
   res/drawable-mdpi/toast_button_pressed.9.png \
@@ -782,6 +785,7 @@ RES_DRAWABLE_HDPI = \
   res/drawable-hdpi/tab_thumbnail_shadow.png \
   res/drawable-hdpi/tabs_count.png \
   res/drawable-hdpi/tabs_count_foreground.png \
+  res/drawable-hdpi/tip_addsearch.png \
   res/drawable-hdpi/address_bar_url_default.9.png \
   res/drawable-hdpi/address_bar_url_default_pb.9.png \
   res/drawable-hdpi/address_bar_url_pressed.9.png \
@@ -878,6 +882,7 @@ RES_DRAWABLE_XHDPI = \
   res/drawable-xhdpi/tab_thumbnail_shadow.png \
   res/drawable-xhdpi/tabs_count.png \
   res/drawable-xhdpi/tabs_count_foreground.png \
+  res/drawable-xhdpi/tip_addsearch.png \
   res/drawable-xhdpi/find_close.png \
   res/drawable-xhdpi/find_next.png \
   res/drawable-xhdpi/find_prev.png \
@@ -1369,23 +1374,25 @@ $(RESOURCES): $(RES_DIRS) $(subst res/,$(srcdir)/resources/,$(RESOURCES))
 res/values/strings.xml:
 	$(MAKE) -C locales
 
+# With multilocale builds, there will be multiple strings.xml files. We need to
+# rebuild gecko.ap_ if any of them change.
+MULTILOCALE_STRINGS_XML_FILES := $(wildcard res/values-*/strings.xml)
 all_resources = \
   res/drawable-mdpi/icon.png \
   res/drawable-hdpi/icon.png \
   res/drawable-xhdpi/icon.png \
   res/drawable-xxhdpi/icon.png \
   res/values/strings.xml \
+  $(MULTILOCALE_STRINGS_XML_FILES) \
   AndroidManifest.xml \
   $(RESOURCES) \
   $(PP_RES_XML) \
   $(NULL)
 
 R.java: $(all_resources)
-R.java: FORCE
 	$(AAPT) package -f -M AndroidManifest.xml -I $(ANDROID_SDK)/android.jar -S res -J . --custom-package org.mozilla.gecko
 
 gecko.ap_: $(all_resources)
-gecko.ap_: FORCE
 	$(AAPT) package -f -M AndroidManifest.xml -I $(ANDROID_SDK)/android.jar  -S res -F $@
 
 fennec_ids.txt: fennec-ids-generator.py R.java

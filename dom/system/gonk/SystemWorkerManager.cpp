@@ -174,7 +174,7 @@ private:
   unsigned long mClientId;
 };
 
-JSBool
+bool
 PostToRIL(JSContext *cx, unsigned argc, JS::Value *vp)
 {
   NS_ASSERTION(!NS_IsMainThread(), "Expecting to be on the worker thread");
@@ -238,7 +238,7 @@ ConnectWorkerToRIL::RunTask(JSContext *aCx)
   // communication.
   NS_ASSERTION(!NS_IsMainThread(), "Expecting to be on the worker thread");
   NS_ASSERTION(!JS_IsRunning(aCx), "Are we being called somehow?");
-  JSObject *workerGlobal = JS_GetGlobalForScopeChain(aCx);
+  JSObject *workerGlobal = JS::CurrentGlobalOrNull(aCx);
 
   return !!JS_DefineFunction(aCx, workerGlobal, "postRILMessage", PostToRIL, 1,
                              0);
@@ -246,7 +246,7 @@ ConnectWorkerToRIL::RunTask(JSContext *aCx)
 
 #ifdef MOZ_WIDGET_GONK
 
-JSBool
+bool
 DoNetdCommand(JSContext *cx, unsigned argc, JS::Value *vp)
 {
   NS_ASSERTION(!NS_IsMainThread(), "Expecting to be on the worker thread");
@@ -339,7 +339,7 @@ ConnectWorkerToNetd::RunTask(JSContext *aCx)
   // communication.
   NS_ASSERTION(!NS_IsMainThread(), "Expecting to be on the worker thread");
   NS_ASSERTION(!JS_IsRunning(aCx), "Are we being called somehow?");
-  JSObject *workerGlobal = JS_GetGlobalForScopeChain(aCx);
+  JSObject *workerGlobal = JS::CurrentGlobalOrNull(aCx);
   return !!JS_DefineFunction(aCx, workerGlobal, "postNetdCommand",
                              DoNetdCommand, 1, 0);
 }
@@ -378,7 +378,7 @@ private:
 bool
 NetdReceiver::DispatchNetdEvent::RunTask(JSContext *aCx)
 {
-  JSObject *obj = JS_GetGlobalForScopeChain(aCx);
+  JSObject *obj = JS::CurrentGlobalOrNull(aCx);
 
   JSObject *array = JS_NewUint8Array(aCx, mMessage->mSize);
   if (!array) {

@@ -158,10 +158,10 @@ PropDesc::wrapInto(JSContext *cx, HandleObject obj, const jsid &id, jsid *wrappe
     return !obj->is<ProxyObject>() || desc->makeObject(cx);
 }
 
-static ObjectElements emptyElementsHeader(0, 0);
+static const ObjectElements emptyElementsHeader(0, 0);
 
 /* Objects with no elements share one empty set of elements. */
-HeapSlot *js::emptyObjectElements =
+HeapSlot *const js::emptyObjectElements =
     reinterpret_cast<HeapSlot *>(uintptr_t(&emptyElementsHeader) + sizeof(ObjectElements));
 
 /* static */ bool
@@ -264,7 +264,7 @@ js::ObjectImpl::initializeSlotRange(uint32_t start, uint32_t length)
     HeapSlot *fixedStart, *fixedEnd, *slotsStart, *slotsEnd;
     getSlotRangeUnchecked(start, length, &fixedStart, &fixedEnd, &slotsStart, &slotsEnd);
 
-    JSRuntime *rt = runtime();
+    JSRuntime *rt = runtimeFromAnyThread();
     uint32_t offset = start;
     for (HeapSlot *sp = fixedStart; sp < fixedEnd; sp++)
         sp->init(rt, this->asObjectPtr(), HeapSlot::Slot, offset++, UndefinedValue());
@@ -275,7 +275,7 @@ js::ObjectImpl::initializeSlotRange(uint32_t start, uint32_t length)
 void
 js::ObjectImpl::initSlotRange(uint32_t start, const Value *vector, uint32_t length)
 {
-    JSRuntime *rt = runtime();
+    JSRuntime *rt = runtimeFromAnyThread();
     HeapSlot *fixedStart, *fixedEnd, *slotsStart, *slotsEnd;
     getSlotRange(start, length, &fixedStart, &fixedEnd, &slotsStart, &slotsEnd);
     for (HeapSlot *sp = fixedStart; sp < fixedEnd; sp++)
@@ -985,7 +985,7 @@ js::SetElement(JSContext *cx, Handle<ObjectImpl*> obj, Handle<ObjectImpl*> recei
                 /* Push set, receiver, and v as the sole argument. */
                 args.setCallee(setter);
                 args.setThis(ObjectValue(*current));
-                args[0] = v;
+                args[0].set(v);
 
                 *succeeded = true;
                 return Invoke(cx, args);

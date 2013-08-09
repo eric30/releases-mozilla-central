@@ -323,6 +323,8 @@ NS_TrustedNewXULElement(nsIContent** aResult, already_AddRefed<nsINodeInfo> aNod
 //----------------------------------------------------------------------
 // nsISupports interface
 
+NS_IMPL_CYCLE_COLLECTION_CLASS(nsXULElement)
+
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsXULElement,
                                                   nsStyledElement)
     {
@@ -344,7 +346,7 @@ NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(nsXULElement)
                                    new nsXULElementTearoff(this))
     NS_INTERFACE_MAP_ENTRY_TEAROFF(nsIFrameLoaderOwner,
                                    new nsXULElementTearoff(this))
-NS_ELEMENT_INTERFACE_MAP_END
+NS_INTERFACE_MAP_END_INHERITING(nsStyledElement)
 
 //----------------------------------------------------------------------
 // nsIDOMNode interface
@@ -1929,6 +1931,8 @@ nsXULElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)
     return dom::XULElementBinding::Wrap(aCx, aScope, this);
 }
 
+NS_IMPL_CYCLE_COLLECTION_CLASS(nsXULPrototypeNode)
+
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsXULPrototypeNode)
     if (tmp->mType == nsXULPrototypeNode::eType_Element) {
         static_cast<nsXULPrototypeElement*>(tmp)->Unlink();
@@ -2325,6 +2329,7 @@ nsXULPrototypeElement::Unlink()
     mNumAttributes = 0;
     delete[] mAttributes;
     mAttributes = nullptr;
+    mChildren.Clear();
 }
 
 void

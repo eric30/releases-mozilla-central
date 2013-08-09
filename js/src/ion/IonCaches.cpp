@@ -883,8 +883,6 @@ GenerateCallGetter(JSContext *cx, IonScript *ion, MacroAssembler &masm,
     // TODO: ensure stack is aligned?
     DebugOnly<uint32_t> initialStack = masm.framePushed();
 
-    Label success, exception;
-
     attacher.pushStubCodePointer(masm);
 
     if (callNative) {
@@ -923,7 +921,7 @@ GenerateCallGetter(JSContext *cx, IonScript *ion, MacroAssembler &masm,
         masm.callWithABI(JS_FUNC_TO_DATA_PTR(void *, target->native()));
 
         // Test for failure.
-        masm.branchTest32(Assembler::Zero, ReturnReg, ReturnReg, &exception);
+        masm.branchIfFalseBool(ReturnReg, masm.exceptionLabel());
 
         // Load the outparam vp[0] into output register(s).
         masm.loadValue(
@@ -966,7 +964,7 @@ GenerateCallGetter(JSContext *cx, IonScript *ion, MacroAssembler &masm,
         masm.callWithABI(JS_FUNC_TO_DATA_PTR(void *, target));
 
         // Test for failure.
-        masm.branchTest32(Assembler::Zero, ReturnReg, ReturnReg, &exception);
+        masm.branchIfFalseBool(ReturnReg, masm.exceptionLabel());
 
         // Load the outparam vp[0] into output register(s).
         masm.loadValue(
@@ -976,14 +974,6 @@ GenerateCallGetter(JSContext *cx, IonScript *ion, MacroAssembler &masm,
 
     // If generating getter call stubs, then return type MUST have been generalized
     // to MIRType_Value.
-    masm.jump(&success);
-
-    // Handle exception case.
-    masm.bind(&exception);
-    masm.handleException();
-
-    // Handle success case.
-    masm.bind(&success);
     masm.storeCallResultValue(output);
 
     // The next instruction is removing the footer of the exit frame, so there
@@ -1171,23 +1161,13 @@ GetPropertyIC::attachDOMProxyShadowed(JSContext *cx, IonScript *ion, JSObject *o
     masm.callWithABI(JS_FUNC_TO_DATA_PTR(void *, Proxy::get));
 
     // Test for failure.
-    Label exception;
-    masm.branchTest32(Assembler::Zero, ReturnReg, ReturnReg, &exception);
+    masm.branchIfFalseBool(ReturnReg, masm.exceptionLabel());
 
     // Load the outparam vp[0] into output register(s).
     masm.loadValue(
         Address(StackPointer, IonOOLProxyGetExitFrameLayout::offsetOfResult()),
         JSReturnOperand);
 
-    Label success;
-    masm.jump(&success);
-
-    // Handle exception case.
-    masm.bind(&exception);
-    masm.handleException();
-
-    // Handle success case.
-    masm.bind(&success);
     masm.storeCallResultValue(output());
 
     // The next instruction is removing the footer of the exit frame, so there
@@ -1874,8 +1854,6 @@ SetPropertyIC::attachSetterCall(JSContext *cx, IonScript *ion,
     // Ensure stack is aligned.
     DebugOnly<uint32_t> initialStack = masm.framePushed();
 
-    Label success, exception;
-
     attacher.pushStubCodePointer(masm);
 
     StrictPropertyOp target = shape->setterOp();
@@ -1918,16 +1896,7 @@ SetPropertyIC::attachSetterCall(JSContext *cx, IonScript *ion,
     masm.callWithABI(JS_FUNC_TO_DATA_PTR(void *, target));
 
     // Test for failure.
-    masm.branchTest32(Assembler::Zero, ReturnReg, ReturnReg, &exception);
-
-    masm.jump(&success);
-
-    // Handle exception case.
-    masm.bind(&exception);
-    masm.handleException();
-
-    // Handle success case.
-    masm.bind(&success);
+    masm.branchIfFalseBool(ReturnReg, masm.exceptionLabel());
 
     // The next instruction is removing the footer of the exit frame, so there
     // is no need for leaveFakeExitFrame.
@@ -2655,6 +2624,23 @@ IsElementSetInlineable(HandleObject obj, HandleValue index)
     if (!index.isInt32())
         return false;
 
+    // The object may have a setter definition,
+    // either directly, or via a prototype, or via the target object for a prototype
+    // which is a proxy, that handles a particular integer write.
+    // Scan the prototype and shape chain to make sure that this is not the case.
+    JSObject *curObj = obj;
+    while (curObj) {
+        // Ensure object is native.
+        if (!curObj->isNative())
+            return false;
+
+        // Ensure all indexed properties are stored in dense elements.
+        if (curObj->isIndexed())
+            return false;
+
+        curObj = curObj->getProto();
+    }
+
     return true;
 }
 
@@ -3002,7 +2988,7 @@ IsCacheableScopeChain(JSObject *scopeChain, JSObject *holder)
         }
     }
 
-    MOZ_ASSUME_UNREACHABLE();
+    MOZ_ASSUME_UNREACHABLE("Invalid scope chain");
 }
 
 JSObject *

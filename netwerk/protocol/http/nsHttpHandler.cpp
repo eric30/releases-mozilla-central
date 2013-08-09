@@ -98,6 +98,7 @@ static NS_DEFINE_CID(kSocketProviderServiceCID, NS_SOCKETPROVIDERSERVICE_CID);
 #define BROWSER_PREF_PREFIX     "browser.cache."
 #define DONOTTRACK_HEADER_ENABLED "privacy.donottrackheader.enabled"
 #define DONOTTRACK_HEADER_VALUE   "privacy.donottrackheader.value"
+#define DONOTTRACK_VALUE_UNSET    2
 #ifdef MOZ_TELEMETRY_ON_BY_DEFAULT
 #define TELEMETRY_ENABLED        "toolkit.telemetry.enabledPreRelease"
 #else
@@ -235,6 +236,13 @@ nsHttpHandler::~nsHttpHandler()
         mPipelineTestTimer = nullptr;
     }
 
+    if (!mDoNotTrackEnabled) {
+        Telemetry::Accumulate(Telemetry::DNT_USAGE, DONOTTRACK_VALUE_UNSET);
+    }
+    else {
+        Telemetry::Accumulate(Telemetry::DNT_USAGE, mDoNotTrackValue);
+    }
+
     gHttpHandler = nullptr;
 }
 
@@ -309,12 +317,8 @@ nsHttpHandler::Init()
 #ifdef ANDROID
     mProductSub.AssignLiteral(MOZILLA_UAVERSION);
 #else
-    mProductSub.AssignLiteral(MOZ_UA_BUILDID);
+    mProductSub.AssignLiteral("20100101");
 #endif
-    if (mProductSub.IsEmpty() && appInfo)
-        appInfo->GetPlatformBuildID(mProductSub);
-    if (mProductSub.Length() > 8)
-        mProductSub.SetLength(8);
 
 #if DEBUG
     // dump user agent prefs
@@ -479,12 +483,12 @@ nsHttpHandler::GetStreamConverterService(nsIStreamConverterService **result)
     return NS_OK;
 }
 
-nsIStrictTransportSecurityService*
-nsHttpHandler::GetSTSService()
+nsISiteSecurityService*
+nsHttpHandler::GetSSService()
 {
-    if (!mSTSService)
-      mSTSService = do_GetService(NS_STSSERVICE_CONTRACTID);
-    return mSTSService;
+    if (!mSSService)
+      mSSService = do_GetService(NS_SSSERVICE_CONTRACTID);
+    return mSSService;
 }
 
 nsICookieService *
@@ -1834,9 +1838,9 @@ NS_IMETHODIMP
 nsHttpHandler::SpeculativeConnect(nsIURI *aURI,
                                   nsIInterfaceRequestor *aCallbacks)
 {
-    nsIStrictTransportSecurityService* stss = gHttpHandler->GetSTSService();
+    nsISiteSecurityService* sss = gHttpHandler->GetSSService();
     bool isStsHost = false;
-    if (!stss)
+    if (!sss)
         return NS_OK;
 
     nsCOMPtr<nsILoadContext> loadContext = do_GetInterface(aCallbacks);
@@ -1844,7 +1848,8 @@ nsHttpHandler::SpeculativeConnect(nsIURI *aURI,
     if (loadContext && loadContext->UsePrivateBrowsing())
         flags |= nsISocketProvider::NO_PERMANENT_STORAGE;
     nsCOMPtr<nsIURI> clone;
-    if (NS_SUCCEEDED(stss->IsStsURI(aURI, flags, &isStsHost)) && isStsHost) {
+    if (NS_SUCCEEDED(sss->IsSecureURI(nsISiteSecurityService::HEADER_HSTS,
+                                      aURI, flags, &isStsHost)) && isStsHost) {
         if (NS_SUCCEEDED(aURI->Clone(getter_AddRefs(clone)))) {
             clone->SetScheme(NS_LITERAL_CSTRING("https"));
             aURI = clone.get();

@@ -438,6 +438,10 @@ pref("browser.ui.touch.weight.visited", 120); // percentage
 // The percentage of the screen that needs to be scrolled before margins are exposed.
 pref("browser.ui.show-margins-threshold", 20);
 
+// Maximum distance from the point where the user pressed where we still
+// look for text to select
+pref("browser.ui.selection.distance", 250);
+
 // plugins
 pref("plugin.disable", false);
 pref("dom.ipc.plugins.enabled", false);
@@ -757,10 +761,12 @@ pref("dom.payment.provider.0.type", "mozilla/payments/pay/v1");
 pref("dom.payment.provider.0.requestMethod", "GET");
 #endif
 
+#ifdef NIGHTLY_BUILD
 // Contacts API
 pref("dom.mozContacts.enabled", true);
 pref("dom.navigator-property.disable.mozContacts", false);
 pref("dom.global-constructor.disable.mozContact", false);
+#endif
 
 // Shortnumber matching needed for e.g. Brazil:
 // 01187654321 can be found with 87654321
@@ -777,3 +783,5 @@ pref("security.csp.speccompliant", true);
 // Enable hardware-accelerated Skia canvas
 pref("gfx.canvas.azure.backends", "skia");
 pref("gfx.canvas.azure.accelerated", true);
+
+pref("general.useragent.override.youtube.com", "Android; Tablet;#Android; Mobile;");

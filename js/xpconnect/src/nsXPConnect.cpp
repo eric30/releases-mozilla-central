@@ -35,6 +35,11 @@
 #include "XPCQuickStubs.h"
 
 #include "mozilla/dom/BindingUtils.h"
+#include "mozilla/dom/IDBIndexBinding.h"
+#include "mozilla/dom/IDBObjectStoreBinding.h"
+#include "mozilla/dom/IDBOpenDBRequestBinding.h"
+#include "mozilla/dom/IDBRequestBinding.h"
+#include "mozilla/dom/IDBTransactionBinding.h"
 #include "mozilla/dom/IDBVersionChangeEventBinding.h"
 #include "mozilla/dom/TextDecoderBinding.h"
 #include "mozilla/dom/TextEncoderBinding.h"
@@ -264,14 +269,13 @@ xpc::SystemErrorReporter(JSContext *cx, const char *message, JSErrorReport *rep)
             consoleService->LogMessage(errorObject);
     }
 
-    /* Log to stderr in debug builds. */
-#ifdef DEBUG
-    fprintf(stderr, "System JS : %s %s:%d\n"
-            "                     %s\n",
-            JSREPORT_IS_WARNING(rep->flags) ? "WARNING" : "ERROR",
-            rep->filename, rep->lineno,
-            message ? message : "<no message>");
-#endif
+    if (nsContentUtils::DOMWindowDumpEnabled()) {
+        fprintf(stderr, "System JS : %s %s:%d\n"
+                "                     %s\n",
+                JSREPORT_IS_WARNING(rep->flags) ? "WARNING" : "ERROR",
+                rep->filename, rep->lineno,
+                message ? message : "<no message>");
+    }
 
 }
 
@@ -465,7 +469,8 @@ CreateGlobalObject(JSContext *cx, JSClass *clasp, nsIPrincipal *principal,
     MOZ_ASSERT(principal);
 
     RootedObject global(cx,
-                        JS_NewGlobalObject(cx, clasp, nsJSPrincipals::get(principal), aOptions));
+                        JS_NewGlobalObject(cx, clasp, nsJSPrincipals::get(principal),
+                                           JS::DontFireOnNewGlobalHook, aOptions));
     if (!global)
         return nullptr;
     JSAutoCompartment ac(cx, global);
@@ -543,7 +548,12 @@ nsXPConnect::InitClassesWithNewWrappedGlobal(JSContext * aJSContext,
     MOZ_ASSERT(js::GetObjectClass(global)->flags & JSCLASS_DOM_GLOBAL);
 
     // Init WebIDL binding constructors wanted on all XPConnect globals.
-    if (!IDBVersionChangeEventBinding::GetConstructorObject(aJSContext, global) ||
+    if (!IDBIndexBinding::GetConstructorObject(aJSContext, global) ||
+        !IDBObjectStoreBinding::GetConstructorObject(aJSContext, global) ||
+        !IDBOpenDBRequestBinding::GetConstructorObject(aJSContext, global) ||
+        !IDBRequestBinding::GetConstructorObject(aJSContext, global) ||
+        !IDBTransactionBinding::GetConstructorObject(aJSContext, global) ||
+        !IDBVersionChangeEventBinding::GetConstructorObject(aJSContext, global) ||
         !TextDecoderBinding::GetConstructorObject(aJSContext, global) ||
         !TextEncoderBinding::GetConstructorObject(aJSContext, global) ||
         !DOMErrorBinding::GetConstructorObject(aJSContext, global)) {
@@ -1232,6 +1242,20 @@ nsXPConnect::UnregisterGCCallback(xpcGCCallback func)
     mRuntime->RemoveGCCallback(func);
 }
 
+/* [noscript, notxpcom] void registerContextCallback(in xpcContextCallback func); */
+NS_IMETHODIMP_(void)
+nsXPConnect::RegisterContextCallback(xpcContextCallback func)
+{
+    mRuntime->AddContextCallback(func);
+}
+
+/* [noscript, notxpcom] void unregisterContextCallback(in xpcContextCallback func); */
+NS_IMETHODIMP_(void)
+nsXPConnect::UnregisterContextCallback(xpcContextCallback func)
+{
+    mRuntime->RemoveContextCallback(func);
+}
+
 #ifdef MOZ_JSDEBUGGER
 void
 nsXPConnect::CheckForDebugMode(JSRuntime *rt)
@@ -1433,14 +1457,6 @@ Base64Decode(JSContext *cx, JS::Value val, JS::Value *out)
 
     *out = STRING_TO_JSVAL(str);
     return true;
-}
-
-void
-DumpJSHeap(FILE* file)
-{
-    NS_ABORT_IF_FALSE(NS_IsMainThread(), "Must dump GC heap on main thread.");
-    nsXPConnect* xpc = nsXPConnect::XPConnect();
-    js::DumpHeapComplete(xpc->GetRuntime()->Runtime(), file);
 }
 
 void
@@ -1707,3 +1723,18 @@ JS_EXPORT_API(void) DumpCompleteHeap()
 }
 
 } // extern "C"
+
+
+namespace mozilla {
+namespace dom {
+
+bool
+IsChromeOrXBL(JSContext* cx, JSObject* /* unused */)
+{
+  JSCompartment* compartment = js::GetContextCompartment(cx);
+  return AccessCheck::isChrome(compartment) ||
+         IsXBLScope(compartment);
+}
+
+} // namespace dom
+} // namespace mozilla

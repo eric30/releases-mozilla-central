@@ -38,7 +38,7 @@ ReturnKeyRange(JSContext* aCx,
   nsIXPConnect* xpc = nsContentUtils::XPConnect();
   NS_ASSERTION(xpc, "This should never be null!");
 
-  JSObject* global = JS_GetGlobalForScopeChain(aCx);
+  JSObject* global = JS::CurrentGlobalOrNull(aCx);
   if (!global) {
     NS_WARNING("Couldn't get global object!");
     return false;
@@ -106,7 +106,7 @@ GetKeyFromJSValOrThrow(JSContext* aCx,
   return true;
 }
 
-JSBool
+bool
 MakeOnlyKeyRange(JSContext* aCx,
                  unsigned aArgc,
                  jsval* aVp)
@@ -127,7 +127,7 @@ MakeOnlyKeyRange(JSContext* aCx,
   return ReturnKeyRange(aCx, aVp, keyRange);
 }
 
-JSBool
+bool
 MakeLowerBoundKeyRange(JSContext* aCx,
                        unsigned aArgc,
                        jsval* aVp)
@@ -150,7 +150,7 @@ MakeLowerBoundKeyRange(JSContext* aCx,
   return ReturnKeyRange(aCx, aVp, keyRange);
 }
 
-JSBool
+bool
 MakeUpperBoundKeyRange(JSContext* aCx,
                        unsigned aArgc,
                        jsval* aVp)
@@ -173,7 +173,7 @@ MakeUpperBoundKeyRange(JSContext* aCx,
   return ReturnKeyRange(aCx, aVp, keyRange);
 }
 
-JSBool
+bool
 MakeBoundKeyRange(JSContext* aCx,
                   unsigned aArgc,
                   jsval* aVp)
@@ -308,6 +308,8 @@ IDBKeyRange::ToSerializedKeyRange(T& aKeyRange)
   }
 }
 
+NS_IMPL_CYCLE_COLLECTION_CLASS(IDBKeyRange)
+
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(IDBKeyRange)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
@@ -416,17 +418,7 @@ IDBKeyRange::GetUpperOpen(bool* aUpperOpen)
 
 // Explicitly instantiate for all our key range types... Grumble.
 template already_AddRefed<IDBKeyRange>
-IDBKeyRange::FromSerializedKeyRange<FIXME_Bug_521898_objectstore::KeyRange>
-(const FIXME_Bug_521898_objectstore::KeyRange& aKeyRange);
-
-template already_AddRefed<IDBKeyRange>
-IDBKeyRange::FromSerializedKeyRange<FIXME_Bug_521898_index::KeyRange>
-(const FIXME_Bug_521898_index::KeyRange& aKeyRange);
+IDBKeyRange::FromSerializedKeyRange<KeyRange> (const KeyRange& aKeyRange);
 
 template void
-IDBKeyRange::ToSerializedKeyRange<FIXME_Bug_521898_objectstore::KeyRange>
-(FIXME_Bug_521898_objectstore::KeyRange& aKeyRange);
-
-template void
-IDBKeyRange::ToSerializedKeyRange<FIXME_Bug_521898_index::KeyRange>
-(FIXME_Bug_521898_index::KeyRange& aKeyRange);
+IDBKeyRange::ToSerializedKeyRange<KeyRange> (KeyRange& aKeyRange);

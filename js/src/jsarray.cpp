@@ -767,8 +767,8 @@ Class ArrayObject::class_ = {
     NULL,
     NULL,           /* checkAccess */
     NULL,           /* call        */
-    NULL,           /* construct   */
     NULL,           /* hasInstance */
+    NULL,           /* construct   */
     NULL,           /* trace       */
     {
         NULL,       /* outerObject */
@@ -872,7 +872,7 @@ array_toSource_impl(JSContext *cx, CallArgs args)
     return true;
 }
 
-JSBool
+static bool
 array_toSource(JSContext *cx, unsigned argc, Value *vp)
 {
     JS_CHECK_RECURSION(cx, return false);
@@ -910,7 +910,7 @@ array_join_sub(JSContext *cx, CallArgs &args, bool locale)
     // Steps 4 and 5
     RootedString sepstr(cx, NULL);
     if (!locale && args.hasDefined(0)) {
-        sepstr = ToString<CanGC>(cx, args.handleAt(0));
+        sepstr = ToString<CanGC>(cx, args[0]);
         if (!sepstr)
             return false;
     }
@@ -1004,7 +1004,7 @@ array_join_sub(JSContext *cx, CallArgs &args, bool locale)
 }
 
 /* ES5 15.4.4.2. NB: The algorithm here differs from the one in ES3. */
-static JSBool
+static bool
 array_toString(JSContext *cx, unsigned argc, Value *vp)
 {
     JS_CHECK_RECURSION(cx, return false);
@@ -1041,7 +1041,7 @@ array_toString(JSContext *cx, unsigned argc, Value *vp)
 }
 
 /* ES5 15.4.4.3 */
-static JSBool
+static bool
 array_toLocaleString(JSContext *cx, unsigned argc, Value *vp)
 {
     JS_CHECK_RECURSION(cx, return false);
@@ -1052,7 +1052,7 @@ array_toLocaleString(JSContext *cx, unsigned argc, Value *vp)
 }
 
 /* ES5 15.4.4.5 */
-static JSBool
+static bool
 array_join(JSContext *cx, unsigned argc, Value *vp)
 {
     JS_CHECK_RECURSION(cx, return false);
@@ -1169,7 +1169,7 @@ InitArrayElements(JSContext *cx, HandleObject obj, uint32_t start, uint32_t coun
     return true;
 }
 
-static JSBool
+static bool
 array_reverse(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -1445,8 +1445,8 @@ SortComparatorFunction::operator()(const Value &a, const Value &b, bool *lessOrE
 
     args.setCallee(fval);
     args.setThis(UndefinedValue());
-    args[0] = a;
-    args[1] = b;
+    args[0].set(a);
+    args[1].set(b);
 
     if (!fig.invoke(cx))
         return false;
@@ -1704,7 +1704,7 @@ SortNumerically(JSContext *cx, AutoValueVector *vec, size_t len, ComparatorMatch
 
 } /* namespace anonymous */
 
-JSBool
+bool
 js::array_sort(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -1900,7 +1900,7 @@ js_NewbornArrayPush(JSContext *cx, HandleObject obj, const Value &vp)
 }
 
 /* ES5 15.4.4.7 */
-JSBool
+bool
 js::array_push(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -1948,7 +1948,7 @@ js::array_push(JSContext *cx, unsigned argc, Value *vp)
 }
 
 /* ES6 20130308 draft 15.4.4.6. */
-JSBool
+bool
 js::array_pop(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -2007,7 +2007,7 @@ js::ArrayShiftMoveElements(JSObject *obj)
 }
 
 /* ES5 15.4.4.9 */
-JSBool
+bool
 js::array_shift(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -2083,7 +2083,7 @@ js::array_shift(JSContext *cx, unsigned argc, Value *vp)
     return SetLengthProperty(cx, obj, newlen);
 }
 
-static JSBool
+static bool
 array_unshift(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -2215,7 +2215,7 @@ CanOptimizeForDenseStorage(HandleObject arr, uint32_t startingIndex, uint32_t co
 }
 
 /* ES5 15.4.4.12. */
-static JSBool
+static bool
 array_splice(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -2232,7 +2232,7 @@ array_splice(JSContext *cx, unsigned argc, Value *vp)
 
     /* Step 5. */
     double relativeStart;
-    if (!ToInteger(cx, args.handleOrUndefinedAt(0), &relativeStart))
+    if (!ToInteger(cx, args.get(0), &relativeStart))
         return false;
 
     /* Step 6. */
@@ -2460,7 +2460,7 @@ js::array_concat_dense(JSContext *cx, Handle<ArrayObject*> arr1, Handle<ArrayObj
 /*
  * Python-esque sequence operations.
  */
-JSBool
+bool
 js::array_concat(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -2533,7 +2533,7 @@ js::array_concat(JSContext *cx, unsigned argc, Value *vp)
     return SetLengthProperty(cx, narr, length);
 }
 
-static JSBool
+static bool
 array_slice(JSContext *cx, unsigned argc, Value *vp)
 {
     uint32_t length, begin, end, slot;
@@ -2552,7 +2552,7 @@ array_slice(JSContext *cx, unsigned argc, Value *vp)
 
     if (args.length() > 0) {
         double d;
-        if (!ToInteger(cx, args.handleAt(0), &d))
+        if (!ToInteger(cx, args[0], &d))
             return false;
         if (d < 0) {
             d += length;
@@ -2564,7 +2564,7 @@ array_slice(JSContext *cx, unsigned argc, Value *vp)
         begin = (uint32_t)d;
 
         if (args.hasDefined(1)) {
-            if (!ToInteger(cx, args.handleAt(1), &d))
+            if (!ToInteger(cx, args[1], &d))
                 return false;
             if (d < 0) {
                 d += length;
@@ -2613,7 +2613,7 @@ array_slice(JSContext *cx, unsigned argc, Value *vp)
 }
 
 /* ES5 15.4.4.20. */
-static JSBool
+static bool
 array_filter(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -2675,9 +2675,9 @@ array_filter(JSContext *cx, unsigned argc, Value *vp)
                 return false;
             args2.setCallee(ObjectValue(*callable));
             args2.setThis(thisv);
-            args2[0] = kValue;
-            args2[1] = NumberValue(k);
-            args2[2] = ObjectValue(*obj);
+            args2[0].set(kValue);
+            args2[1].setNumber(k);
+            args2[2].setObject(*obj);
             if (!fig.invoke(cx))
                 return false;
 
@@ -2697,7 +2697,7 @@ array_filter(JSContext *cx, unsigned argc, Value *vp)
     return true;
 }
 
-static JSBool
+static bool
 array_isArray(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -2733,7 +2733,7 @@ ArrayFromCallArgs(JSContext *cx, RootedTypeObject &type, CallArgs &args)
     return true;
 }
 
-static JSBool
+static bool
 array_of(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -2761,7 +2761,7 @@ array_of(JSContext *cx, unsigned argc, Value *vp)
 
     // Step 8.
     for (unsigned k = 0; k < argc; k++) {
-        if (!JSObject::defineElement(cx, obj, k, args.handleAt(k)))
+        if (!JSObject::defineElement(cx, obj, k, args[k]))
             return false;
     }
 
@@ -2835,10 +2835,10 @@ static const JSFunctionSpec array_static_methods[] = {
          {"some",               {NULL, NULL},       2,0, "ArrayStaticSome"},
          {"reduce",             {NULL, NULL},       2,0, "ArrayStaticReduce"},
          {"reduceRight",        {NULL, NULL},       2,0, "ArrayStaticReduceRight"},
-         {"build",              {NULL, NULL},       2,0, "ArrayStaticBuild"},
     JS_FN("of",                 array_of,           0,0),
 
 #ifdef ENABLE_PARALLEL_JS
+         {"build",              {NULL, NULL},       2,0, "ArrayStaticBuild"},
     /* Parallelizable and pure static methods. */
          {"buildPar",           {NULL, NULL},       3,0, "ArrayStaticBuildPar"},
 #endif
@@ -2847,7 +2847,7 @@ static const JSFunctionSpec array_static_methods[] = {
 };
 
 /* ES5 15.4.2 */
-JSBool
+bool
 js_Array(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -3121,7 +3121,7 @@ js::NewDenseCopiedArray(JSContext *cx, uint32_t length, const Value *values,
 }
 
 #ifdef DEBUG
-JSBool
+bool
 js_ArrayInfo(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);

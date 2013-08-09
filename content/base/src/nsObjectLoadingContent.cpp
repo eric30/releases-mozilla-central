@@ -60,6 +60,7 @@
 #include "nsGUIEvent.h"
 #include "nsUnicharUtils.h"
 #include "mozilla/Preferences.h"
+#include "nsSandboxFlags.h"
 
 // Concrete classes
 #include "nsFrameLoader.h"
@@ -133,7 +134,7 @@ nsAsyncInstantiateEvent::Run()
     static_cast<nsObjectLoadingContent *>(mContent.get());
 
   // If objLC is no longer tracking this event, we've been canceled or
-  // superceded
+  // superseded
   if (objLC->mPendingInstantiateEvent != this) {
     return NS_OK;
   }
@@ -166,11 +167,11 @@ CheckPluginStopEvent::Run()
     static_cast<nsObjectLoadingContent *>(mContent.get());
 
   // If objLC is no longer tracking this event, we've been canceled or
-  // superceded
+  // superseded. We clear this before we finish - either by calling
+  // UnloadObject/StopPluginInstance, or directly if we took no action.
   if (objLC->mPendingCheckPluginStopEvent != this) {
     return NS_OK;
   }
-  objLC->mPendingCheckPluginStopEvent = nullptr;
 
   nsCOMPtr<nsIContent> content =
     do_QueryInterface(static_cast<nsIImageLoadingContent *>(objLC));
@@ -182,12 +183,29 @@ CheckPluginStopEvent::Run()
   }
 
   if (!content->GetPrimaryFrame()) {
+    LOG(("OBJLC [%p]: CheckPluginStopEvent - No frame, flushing layout", this));
+    nsIDocument* currentDoc = content->GetCurrentDoc();
+    if (currentDoc) {
+      currentDoc->FlushPendingNotifications(Flush_Layout);
+      if (objLC->mPendingCheckPluginStopEvent != this) {
+        LOG(("OBJLC [%p]: CheckPluginStopEvent - superseded in layout flush",
+             this));
+        return NS_OK;
+      } else if (content->GetPrimaryFrame()) {
+        LOG(("OBJLC [%p]: CheckPluginStopEvent - frame gained in layout flush",
+             this));
+        objLC->mPendingCheckPluginStopEvent = nullptr;
+        return NS_OK;
+      }
+    }
     // Still no frame, suspend plugin. HasNewFrame will restart us when we
     // become rendered again
     LOG(("OBJLC [%p]: Stopping plugin that lost frame", this));
     // Okay to leave loaded as a plugin, but stop the unrendered instance
     objLC->StopPluginInstance();
   }
+
+  objLC->mPendingCheckPluginStopEvent = nullptr;
   return NS_OK;
 }
 
@@ -890,7 +908,6 @@ nsObjectLoadingContent::OnStartRequest(nsIRequest *aRequest,
     return NS_BINDING_ABORTED;
   }
 
-  NS_ASSERTION(!mChannelLoaded, "mChannelLoaded set already?");
   // If we already switched to type plugin, this channel can just be passed to
   // the final listener.
   if (mType == eType_Plugin) {
@@ -912,6 +929,7 @@ nsObjectLoadingContent::OnStartRequest(nsIRequest *aRequest,
     NS_NOTREACHED("Should be type loading at this point");
     return NS_BINDING_ABORTED;
   }
+  NS_ASSERTION(!mChannelLoaded, "mChannelLoaded set already?");
   NS_ASSERTION(!mFinalListener, "mFinalListener exists already?");
 
   mChannelLoaded = true;
@@ -1461,10 +1479,10 @@ nsObjectLoadingContent::UpdateObjectParameters(bool aJavaURI)
             }
             if (domapplet || domobject) {
               if (domapplet) {
-                parent = domapplet;
+                parent = do_QueryInterface(domapplet);
               }
               else {
-                parent = domobject;
+                parent = do_QueryInterface(domobject);
               }
               nsCOMPtr<nsIDOMNode> mydomNode = do_QueryInterface(mydomElement);
               if (parent == mydomNode) {
@@ -2272,9 +2290,20 @@ nsObjectLoadingContent::OpenChannel()
     httpChan->SetReferrer(doc->GetDocumentURI());
   }
 
-  // Set up the channel's principal and such, like nsDocShell::DoURILoad does
-  nsContentUtils::SetUpChannelOwner(thisContent->NodePrincipal(),
-                                    chan, mURI, true);
+  // Set up the channel's principal and such, like nsDocShell::DoURILoad does.
+  // If the content being loaded should be sandboxed with respect to origin we
+  // create a new null principal here. nsContentUtils::SetUpChannelOwner is
+  // used with a flag to force it to be set as the channel owner.
+  nsCOMPtr<nsIPrincipal> ownerPrincipal;
+  uint32_t sandboxFlags = doc->GetSandboxFlags();
+  if (sandboxFlags & SANDBOXED_ORIGIN) {
+    ownerPrincipal = do_CreateInstance("@mozilla.org/nullprincipal;1");
+  } else {
+    // Not sandboxed - we allow the content to assume its natural owner.
+    ownerPrincipal = thisContent->NodePrincipal();
+  }
+  nsContentUtils::SetUpChannelOwner(ownerPrincipal, chan, mURI, true,
+                                    sandboxFlags & SANDBOXED_ORIGIN);
 
   nsCOMPtr<nsIScriptChannel> scriptChannel = do_QueryInterface(chan);
   if (scriptChannel) {
@@ -3140,7 +3169,7 @@ nsObjectLoadingContent::LegacyCall(JSContext* aCx,
   JS::Rooted<JSObject*> pi_obj(aCx);
   JS::Rooted<JSObject*> pi_proto(aCx);
 
-  rv = GetPluginJSObject(aCx, obj, pi, pi_obj.address(), pi_proto.address());
+  rv = GetPluginJSObject(aCx, obj, pi, &pi_obj, &pi_proto);
   if (NS_FAILED(rv)) {
     aRv.Throw(rv);
     return JS::UndefinedValue();
@@ -3206,7 +3235,7 @@ nsObjectLoadingContent::SetupProtoChain(JSContext* aCx,
   JS::Rooted<JSObject*> pi_obj(aCx); // XPConnect-wrapped peer object, when we get it.
   JS::Rooted<JSObject*> pi_proto(aCx); // 'pi.__proto__'
 
-  rv = GetPluginJSObject(aCx, aObject, pi, pi_obj.address(), pi_proto.address());
+  rv = GetPluginJSObject(aCx, aObject, pi, &pi_obj, &pi_proto);
   if (NS_FAILED(rv)) {
     return;
   }
@@ -3293,21 +3322,18 @@ nsresult
 nsObjectLoadingContent::GetPluginJSObject(JSContext *cx,
                                           JS::Handle<JSObject*> obj,
                                           nsNPAPIPluginInstance *plugin_inst,
-                                          JSObject **plugin_obj,
-                                          JSObject **plugin_proto)
+                                          JS::MutableHandle<JSObject*> plugin_obj,
+                                          JS::MutableHandle<JSObject*> plugin_proto)
 {
-  *plugin_obj = nullptr;
-  *plugin_proto = nullptr;
-
   // NB: We need an AutoEnterCompartment because we can be called from
   // nsObjectFrame when the plugin loads after the JS object for our content
   // node has been created.
   JSAutoCompartment ac(cx, obj);
 
   if (plugin_inst) {
-    plugin_inst->GetJSObject(cx, plugin_obj);
-    if (*plugin_obj) {
-      if (!::JS_GetPrototype(cx, *plugin_obj, plugin_proto)) {
+    plugin_inst->GetJSObject(cx, plugin_obj.address());
+    if (plugin_obj) {
+      if (!::JS_GetPrototype(cx, plugin_obj, plugin_proto)) {
         return NS_ERROR_UNEXPECTED;
       }
     }
@@ -3333,9 +3359,9 @@ nsObjectLoadingContent::TeardownProtoChain()
 
   // Loop over the DOM element's JS object prototype chain and remove
   // all JS objects of the class sNPObjectJSWrapperClass
-  bool removed = false;
+  DebugOnly<bool> removed = false;
   while (obj) {
-    if (!::JS_GetPrototype(cx, obj, proto.address())) {
+    if (!::JS_GetPrototype(cx, obj, &proto)) {
       return;
     }
     if (!proto) {
@@ -3345,7 +3371,7 @@ nsObjectLoadingContent::TeardownProtoChain()
     // an NP object, that counts too.
     if (JS_GetClass(js::UncheckedUnwrap(proto)) == &sNPObjectJSWrapperClass) {
       // We found an NPObject on the proto chain, get its prototype...
-      if (!::JS_GetPrototype(cx, proto, proto.address())) {
+      if (!::JS_GetPrototype(cx, proto, &proto)) {
         return;
       }
 
@@ -3374,6 +3400,19 @@ nsObjectLoadingContent::DoNewResolve(JSContext* aCx, JS::Handle<JSObject*> aObje
   }
   return true;
 }
+
+void
+nsObjectLoadingContent::GetOwnPropertyNames(JSContext* aCx,
+                                            nsTArray<nsString>& /* unused */,
+                                            ErrorResult& aRv)
+{
+  // Just like DoNewResolve, just make sure we're instantiated.  That will do
+  // the work our Enumerate hook needs to do, and we don't want to return these
+  // property names from Xrays anyway.
+  nsRefPtr<nsNPAPIPluginInstance> pi;
+  aRv = ScriptRequestPluginInstance(aCx, getter_AddRefs(pi));
+}
+
 
 // SetupProtoChainRunner implementation
 nsObjectLoadingContent::SetupProtoChainRunner::SetupProtoChainRunner(

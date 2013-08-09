@@ -32,6 +32,7 @@
 #include "nsView.h"
 #include "nsLayoutUtils.h"
 #include "nsGkAtoms.h"
+#include "nsDOMTouchEvent.h"
 
 #include "nsComponentManagerUtils.h"
 #include "nsIInterfaceRequestorUtils.h"
@@ -39,6 +40,8 @@
 
 #include "nsITreeBoxObject.h"
 #include "nsITreeColumns.h"
+
+using namespace mozilla;
 
 ////////////////////////////////////////////////////////////////////////////////
 // nsCoreUtils
@@ -72,8 +75,7 @@ nsCoreUtils::DispatchClickEvent(nsITreeBoxObject *aTreeBoxObj,
   if (!document)
     return;
 
-  nsIPresShell *presShell = nullptr;
-  presShell = document->GetShell();
+  nsCOMPtr<nsIPresShell> presShell = document->GetShell();
   if (!presShell)
     return;
 
@@ -99,52 +101,26 @@ nsCoreUtils::DispatchClickEvent(nsITreeBoxObject *aTreeBoxObj,
   tcBoxObj->GetY(&tcY);
 
   // Dispatch mouse events.
-  nsIFrame* tcFrame = tcContent->GetPrimaryFrame();
+  nsWeakFrame tcFrame = tcContent->GetPrimaryFrame();
   nsIFrame* rootFrame = presShell->GetRootFrame();
 
   nsPoint offset;
   nsIWidget *rootWidget =
     rootFrame->GetViewExternal()->GetNearestWidget(&offset);
 
-  nsPresContext* presContext = presShell->GetPresContext();
+  nsRefPtr<nsPresContext> presContext = presShell->GetPresContext();
 
   int32_t cnvdX = presContext->CSSPixelsToDevPixels(tcX + x + 1) +
     presContext->AppUnitsToDevPixels(offset.x);
   int32_t cnvdY = presContext->CSSPixelsToDevPixels(tcY + y + 1) +
     presContext->AppUnitsToDevPixels(offset.y);
 
+  // XUL is just desktop, so there is no real reason for senfing touch events.
   DispatchMouseEvent(NS_MOUSE_BUTTON_DOWN, cnvdX, cnvdY,
                      tcContent, tcFrame, presShell, rootWidget);
 
   DispatchMouseEvent(NS_MOUSE_BUTTON_UP, cnvdX, cnvdY,
                      tcContent, tcFrame, presShell, rootWidget);
-}
-
-bool
-nsCoreUtils::DispatchMouseEvent(uint32_t aEventType,
-                                nsIPresShell *aPresShell,
-                                nsIContent *aContent)
-{
-  nsIFrame *frame = aContent->GetPrimaryFrame();
-  if (!frame)
-    return false;
-
-  // Compute x and y coordinates.
-  nsPoint point;
-  nsCOMPtr<nsIWidget> widget = frame->GetNearestWidget(point);
-  if (!widget)
-    return false;
-
-  nsSize size = frame->GetSize();
-
-  nsPresContext* presContext = aPresShell->GetPresContext();
-
-  int32_t x = presContext->AppUnitsToDevPixels(point.x + size.width / 2);
-  int32_t y = presContext->AppUnitsToDevPixels(point.y + size.height / 2);
-
-  // Fire mouse event.
-  DispatchMouseEvent(aEventType, x, y, aContent, frame, aPresShell, widget);
-  return true;
 }
 
 void
@@ -155,13 +131,35 @@ nsCoreUtils::DispatchMouseEvent(uint32_t aEventType, int32_t aX, int32_t aY,
   nsMouseEvent event(true, aEventType, aRootWidget,
                      nsMouseEvent::eReal, nsMouseEvent::eNormal);
 
-  event.refPoint = nsIntPoint(aX, aY);
+  event.refPoint = LayoutDeviceIntPoint(aX, aY);
 
   event.clickCount = 1;
   event.button = nsMouseEvent::eLeftButton;
   event.time = PR_IntervalNow();
   event.inputSource = nsIDOMMouseEvent::MOZ_SOURCE_UNKNOWN;
 
+  nsEventStatus status = nsEventStatus_eIgnore;
+  aPresShell->HandleEventWithTarget(&event, aFrame, aContent, &status);
+}
+
+void
+nsCoreUtils::DispatchTouchEvent(uint32_t aEventType, int32_t aX, int32_t aY,
+                                nsIContent* aContent, nsIFrame* aFrame,
+                                nsIPresShell* aPresShell, nsIWidget* aRootWidget)
+{
+  if (!nsDOMTouchEvent::PrefEnabled())
+    return;
+
+  nsTouchEvent event(true, aEventType, aRootWidget);
+
+  event.time = PR_IntervalNow();
+
+  // XXX: Touch has an identifier of -1 to hint that it is synthesized.
+  nsRefPtr<mozilla::dom::Touch> t =
+    new mozilla::dom::Touch(-1, nsIntPoint(aX, aY),
+                            nsIntPoint(1, 1), 0.0f, 1.0f);
+  t->SetTarget(aContent);
+  event.touches.AppendElement(t);
   nsEventStatus status = nsEventStatus_eIgnore;
   aPresShell->HandleEventWithTarget(&event, aFrame, aContent, &status);
 }

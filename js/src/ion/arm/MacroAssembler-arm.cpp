@@ -4,10 +4,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "ion/arm/MacroAssembler-arm.h"
+
 #include "mozilla/DebugOnly.h"
 #include "mozilla/MathAlgorithms.h"
 
-#include "ion/arm/MacroAssembler-arm.h"
+#include "ion/Bailouts.h"
 #include "ion/BaselineFrame.h"
 #include "ion/MoveEmitter.h"
 
@@ -27,6 +29,14 @@ isValueDTRDCandidate(ValueOperand &val)
     if ((val.payloadReg().code() & 1) != 0)
         return false;
     return true;
+}
+
+void
+MacroAssemblerARM::convertBoolToInt32(Register source, Register dest)
+{
+    // Note that C++ bool is only 1 byte, so zero extend it to clear the
+    // higher-order bits.
+    ma_and(Imm32(0xff), source, dest);
 }
 
 void
@@ -341,6 +351,14 @@ MacroAssemblerARM::ma_movPatchable(Imm32 imm_, Register dest,
                                    Assembler::Condition c, RelocStyle rs, Instruction *i)
 {
     int32_t imm = imm_.value;
+    if (i) {
+        // Make sure the current instruction is not an artificial guard
+        // inserted by the assembler buffer.
+        // The InstructionIterator already does this and handles edge cases,
+        // so, just asking an iterator for its current instruction should be
+        // enough to make sure we don't accidentally inspect an artificial guard.
+        i = InstructionIterator(i).cur();
+    }
     switch(rs) {
       case L_MOVWT:
         as_movw(dest, Imm16(imm & 0xffff), c, i);
@@ -388,11 +406,11 @@ MacroAssemblerARM::ma_mov(const ImmGCPtr &ptr, Register dest)
     // before to recover the pointer, and not after.
     writeDataRelocation(ptr);
     RelocStyle rs;
-    if (hasMOVWT()) {
+    if (hasMOVWT())
         rs = L_MOVWT;
-    } else {
+    else
         rs = L_LDR;
-    }
+
     ma_movPatchable(Imm32(ptr.value), dest, Always, rs);
 }
 
@@ -1086,8 +1104,11 @@ MacroAssemblerARM::ma_dataTransferN(LoadStore ls, int size, bool IsSigned,
         if (mode == PreIndex)
             base = rn;
         JS_ASSERT(mode != PostIndex);
-        // at this point, both off - bottom and off + neg_bottom will be reasonable-ish
-        // quantities.
+        // At this point, both off - bottom and off + neg_bottom will be reasonable-ish quantities.
+        //
+        // Note a neg_bottom of 0x1000 can not be encoded as an immediate negative offset in the
+        // instruction and this occurs when bottom is zero, so this case is guarded against below.
+        // 
         if (off < 0) {
             Operand2 sub_off = Imm8(-(off-bottom)); // sub_off = bottom - off
             if (!sub_off.invalid) {
@@ -1095,7 +1116,8 @@ MacroAssemblerARM::ma_dataTransferN(LoadStore ls, int size, bool IsSigned,
                 return as_dtr(ls, size, Offset, rt, DTRAddr(ScratchRegister, DtrOffImm(bottom)), cc);
             }
             sub_off = Imm8(-(off+neg_bottom));// sub_off = -neg_bottom - off
-            if (!sub_off.invalid) {
+            if (!sub_off.invalid && bottom != 0) {
+                JS_ASSERT(neg_bottom < 0x1000);  // Guarded against by: bottom != 0
                 as_sub(ScratchRegister, rn, sub_off, NoSetCond, cc); // - sub_off = neg_bottom + off
                 return as_dtr(ls, size, Offset, rt, DTRAddr(ScratchRegister, DtrOffImm(-neg_bottom)), cc);
             }
@@ -1106,7 +1128,8 @@ MacroAssemblerARM::ma_dataTransferN(LoadStore ls, int size, bool IsSigned,
                 return as_dtr(ls, size, Offset, rt, DTRAddr(ScratchRegister, DtrOffImm(bottom)), cc);
             }
             sub_off = Imm8(off+neg_bottom);// sub_off = neg_bottom + off
-            if (!sub_off.invalid) {
+            if (!sub_off.invalid && bottom != 0) {
+                JS_ASSERT(neg_bottom < 0x1000);  // Guarded against by: bottom != 0
                 as_add(ScratchRegister, rn, sub_off, NoSetCond,  cc); // sub_off = neg_bottom + off
                 return as_dtr(ls, size, Offset, rt, DTRAddr(ScratchRegister, DtrOffImm(-neg_bottom)), cc);
             }
@@ -1118,12 +1141,15 @@ MacroAssemblerARM::ma_dataTransferN(LoadStore ls, int size, bool IsSigned,
         if (off < 256 && off > -256)
             return as_extdtr(ls, size, IsSigned, mode, rt, EDtrAddr(rn, EDtrOffImm(off)), cc);
 
-        // We cannot encode this offset in a a single extldr.  Try to encode it as
+        // We cannot encode this offset in a single extldr.  Try to encode it as
         // an add scratch, base, imm; extldr dest, [scratch, +offset].
         int bottom = off & 0xff;
         int neg_bottom = 0x100 - bottom;
-        // at this point, both off - bottom and off + neg_bottom will be reasonable-ish
-        // quantities.
+        // At this point, both off - bottom and off + neg_bottom will be reasonable-ish quantities.
+        //
+        // Note a neg_bottom of 0x100 can not be encoded as an immediate negative offset in the
+        // instruction and this occurs when bottom is zero, so this case is guarded against below.
+        // 
         if (off < 0) {
             Operand2 sub_off = Imm8(-(off-bottom)); // sub_off = bottom - off
             if (!sub_off.invalid) {
@@ -1133,7 +1159,8 @@ MacroAssemblerARM::ma_dataTransferN(LoadStore ls, int size, bool IsSigned,
                                  cc);
             }
             sub_off = Imm8(-(off+neg_bottom));// sub_off = -neg_bottom - off
-            if (!sub_off.invalid) {
+            if (!sub_off.invalid && bottom != 0) {
+                JS_ASSERT(neg_bottom < 0x100);  // Guarded against by: bottom != 0
                 as_sub(ScratchRegister, rn, sub_off, NoSetCond, cc); // - sub_off = neg_bottom + off
                 return as_extdtr(ls, size, IsSigned, Offset, rt,
                                  EDtrAddr(ScratchRegister, EDtrOffImm(-neg_bottom)),
@@ -1148,7 +1175,8 @@ MacroAssemblerARM::ma_dataTransferN(LoadStore ls, int size, bool IsSigned,
                                  cc);
             }
             sub_off = Imm8(off+neg_bottom);// sub_off = neg_bottom + off
-            if (!sub_off.invalid) {
+            if (!sub_off.invalid && bottom != 0) {
+                JS_ASSERT(neg_bottom < 0x100);  // Guarded against by: bottom != 0
                 as_add(ScratchRegister, rn, sub_off, NoSetCond,  cc); // sub_off = neg_bottom + off
                 return as_extdtr(ls, size, IsSigned, Offset, rt,
                                  EDtrAddr(ScratchRegister, EDtrOffImm(-neg_bottom)),
@@ -1414,8 +1442,11 @@ MacroAssemblerARM::ma_vdtr(LoadStore ls, const Operand &addr, VFPRegister rt, Co
     // an add scratch, base, imm; ldr dest, [scratch, +offset].
     int bottom = off & (0xff << 2);
     int neg_bottom = (0x100 << 2) - bottom;
-    // at this point, both off - bottom and off + neg_bottom will be reasonable-ish
-    // quantities.
+    // At this point, both off - bottom and off + neg_bottom will be reasonable-ish quantities.
+    //
+    // Note a neg_bottom of 0x400 can not be encoded as an immediate negative offset in the
+    // instruction and this occurs when bottom is zero, so this case is guarded against below.
+    // 
     if (off < 0) {
         Operand2 sub_off = Imm8(-(off-bottom)); // sub_off = bottom - off
         if (!sub_off.invalid) {
@@ -1423,7 +1454,8 @@ MacroAssemblerARM::ma_vdtr(LoadStore ls, const Operand &addr, VFPRegister rt, Co
             return as_vdtr(ls, rt, VFPAddr(ScratchRegister, VFPOffImm(bottom)), cc);
         }
         sub_off = Imm8(-(off+neg_bottom));// sub_off = -neg_bottom - off
-        if (!sub_off.invalid) {
+        if (!sub_off.invalid && bottom != 0) {
+            JS_ASSERT(neg_bottom < 0x400);  // Guarded against by: bottom != 0
             as_sub(ScratchRegister, base, sub_off, NoSetCond, cc); // - sub_off = neg_bottom + off
             return as_vdtr(ls, rt, VFPAddr(ScratchRegister, VFPOffImm(-neg_bottom)), cc);
         }
@@ -1434,7 +1466,8 @@ MacroAssemblerARM::ma_vdtr(LoadStore ls, const Operand &addr, VFPRegister rt, Co
             return as_vdtr(ls, rt, VFPAddr(ScratchRegister, VFPOffImm(bottom)), cc);
         }
         sub_off = Imm8(off+neg_bottom);// sub_off = neg_bottom + off
-        if (!sub_off.invalid) {
+        if (!sub_off.invalid && bottom != 0) {
+            JS_ASSERT(neg_bottom < 0x400);  // Guarded against by: bottom != 0
             as_add(ScratchRegister, base, sub_off, NoSetCond,  cc); // sub_off = neg_bottom + off
             return as_vdtr(ls, rt, VFPAddr(ScratchRegister, VFPOffImm(-neg_bottom)), cc);
         }
@@ -1526,7 +1559,13 @@ MacroAssemblerARMCompat::callWithExitFrame(IonCode *target)
     Push(Imm32(descriptor)); // descriptor
 
     addPendingJump(m_buffer.nextOffset(), target->raw(), Relocation::IONCODE);
-    ma_mov(Imm32((int) target->raw()), ScratchRegister);
+    RelocStyle rs;
+    if (hasMOVWT())
+        rs = L_MOVWT;
+    else
+        rs = L_LDR;
+
+    ma_movPatchable(Imm32((int) target->raw()), ScratchRegister, Always, rs);
     ma_callIonHalfPush(ScratchRegister);
 }
 
@@ -1538,7 +1577,13 @@ MacroAssemblerARMCompat::callWithExitFrame(IonCode *target, Register dynStack)
     Push(dynStack); // descriptor
 
     addPendingJump(m_buffer.nextOffset(), target->raw(), Relocation::IONCODE);
-    ma_mov(Imm32((int) target->raw()), ScratchRegister);
+    RelocStyle rs;
+    if (hasMOVWT())
+        rs = L_MOVWT;
+    else
+        rs = L_LDR;
+
+    ma_movPatchable(Imm32((int) target->raw()), ScratchRegister, Always, rs);
     ma_callIonHalfPush(ScratchRegister);
 }
 
@@ -1990,8 +2035,8 @@ MacroAssemblerARMCompat::store32(const Register &src, const Address &address)
 void
 MacroAssemblerARMCompat::store32(const Imm32 &src, const Address &address)
 {
-    move32(src, ScratchRegister);
-    storePtr(ScratchRegister, address);
+    move32(src, secondScratchReg_);
+    storePtr(secondScratchReg_, address);
 }
 
 void
@@ -2682,13 +2727,18 @@ MacroAssemblerARMCompat::extractTag(const BaseIndex &address, Register scratch)
 }
 
 void
-MacroAssemblerARMCompat::moveValue(const Value &val, Register type, Register data) {
+MacroAssemblerARMCompat::moveValue(const Value &val, Register type, Register data)
+{
     jsval_layout jv = JSVAL_TO_IMPL(val);
     ma_mov(Imm32(jv.s.tag), type);
-    ma_mov(Imm32(jv.s.payload.i32), data);
+    if (val.isMarkable())
+        ma_mov(ImmGCPtr(reinterpret_cast<gc::Cell *>(val.toGCThing())), data);
+    else
+        ma_mov(Imm32(jv.s.payload.i32), data);
 }
 void
-MacroAssemblerARMCompat::moveValue(const Value &val, const ValueOperand &dest) {
+MacroAssemblerARMCompat::moveValue(const Value &val, const ValueOperand &dest)
+{
     moveValue(val, dest.typeReg(), dest.payloadReg());
 }
 
@@ -2696,7 +2746,8 @@ MacroAssemblerARMCompat::moveValue(const Value &val, const ValueOperand &dest) {
 // X86/X64-common (ARM too now) interface.
 /////////////////////////////////////////////////////////////////
 void
-MacroAssemblerARMCompat::storeValue(ValueOperand val, Operand dst) {
+MacroAssemblerARMCompat::storeValue(ValueOperand val, Operand dst)
+{
     ma_str(val.payloadReg(), ToPayload(dst));
     ma_str(val.typeReg(), ToType(dst));
 }
@@ -2915,7 +2966,7 @@ MacroAssemblerARMCompat::storeTypeTag(ImmTag tag, Register base, Register index,
 
 void
 MacroAssemblerARMCompat::linkExitFrame() {
-    uint8_t *dest = ((uint8_t*)GetIonContext()->compartment->rt) + offsetof(JSRuntime, mainThread.ionTop);
+    uint8_t *dest = ((uint8_t*)GetIonContext()->runtime) + offsetof(JSRuntime, mainThread.ionTop);
     movePtr(ImmWord(dest), ScratchRegister);
     ma_str(StackPointer, Operand(ScratchRegister, 0));
 }
@@ -2969,7 +3020,13 @@ MacroAssemblerARM::ma_callIonHalfPush(const Register r)
 void
 MacroAssemblerARM::ma_call(void *dest)
 {
-    ma_mov(Imm32((uint32_t)dest), CallReg);
+    RelocStyle rs;
+    if (hasMOVWT())
+        rs = L_MOVWT;
+    else
+        rs = L_LDR;
+
+    ma_movPatchable(Imm32((uint32_t) dest), CallReg, Always, rs);
     as_blx(CallReg);
 }
 
@@ -3263,7 +3320,7 @@ MacroAssemblerARMCompat::handleFailureWithHandler(void *handler)
     passABIArg(r0);
     callWithABI(handler);
 
-    IonCode *excTail = GetIonContext()->compartment->ionCompartment()->getExceptionTail();
+    IonCode *excTail = GetIonContext()->runtime->ionRuntime()->getExceptionTail();
     branch(excTail);
 }
 
@@ -3274,12 +3331,14 @@ MacroAssemblerARMCompat::handleFailureWithHandlerTail()
     Label catch_;
     Label finally;
     Label return_;
+    Label bailout;
 
     ma_ldr(Operand(sp, offsetof(ResumeFromException, kind)), r0);
     branch32(Assembler::Equal, r0, Imm32(ResumeFromException::RESUME_ENTRY_FRAME), &entryFrame);
     branch32(Assembler::Equal, r0, Imm32(ResumeFromException::RESUME_CATCH), &catch_);
     branch32(Assembler::Equal, r0, Imm32(ResumeFromException::RESUME_FINALLY), &finally);
     branch32(Assembler::Equal, r0, Imm32(ResumeFromException::RESUME_FORCED_RETURN), &return_);
+    branch32(Assembler::Equal, r0, Imm32(ResumeFromException::RESUME_BAILOUT), &bailout);
 
     breakpoint(); // Invalid kind.
 
@@ -3324,6 +3383,14 @@ MacroAssemblerARMCompat::handleFailureWithHandlerTail()
     ma_mov(r11, sp);
     pop(r11);
     ret();
+
+    // If we are bailing out to baseline to handle an exception, jump to
+    // the bailout tail stub.
+    bind(&bailout);
+    ma_ldr(Operand(sp, offsetof(ResumeFromException, bailoutInfo)), r2);
+    ma_mov(Imm32(BAILOUT_RETURN_OK), r0);
+    ma_ldr(Operand(sp, offsetof(ResumeFromException, target)), r1);
+    jump(r1);
 }
 
 Assembler::Condition

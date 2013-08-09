@@ -46,6 +46,8 @@ using namespace mozilla;
 using namespace mozilla::dom;
 using namespace mozilla::dom::ipc;
 
+NS_IMPL_CYCLE_COLLECTION_CLASS(nsFrameMessageManager)
+
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsFrameMessageManager)
   uint32_t count = tmp->mListeners.Length();
   for (uint32_t i = 0; i < count; i++) {
@@ -399,7 +401,7 @@ nsFrameMessageManager::SendSyncMessage(const nsAString& aMessageName,
                         retval[i].Length(), &ret)) {
         return NS_ERROR_UNEXPECTED;
       }
-      NS_ENSURE_TRUE(JS_SetElement(aCx, dataArray, i, ret.address()),
+      NS_ENSURE_TRUE(JS_SetElement(aCx, dataArray, i, &ret),
                      NS_ERROR_OUT_OF_MEMORY);
     }
 
@@ -748,8 +750,7 @@ nsFrameMessageManager::ReceiveMessage(nsISupports* aTarget,
                                      thisValue.address(), nullptr, true);
         } else {
           // If the listener is a JS object which has receiveMessage function:
-          if (!JS_GetProperty(ctx, object, "receiveMessage",
-                              funval.address()) ||
+          if (!JS_GetProperty(ctx, object, "receiveMessage", &funval) ||
               !funval.isObject())
             return NS_ERROR_UNEXPECTED;
 

@@ -9,11 +9,12 @@
 
 #include "mozilla/DebugOnly.h"
 
+#include "jsopcode.h"
+
 #include "ion/arm/Assembler-arm.h"
 #include "ion/IonCaches.h"
 #include "ion/IonFrames.h"
 #include "ion/MoveResolver.h"
-#include "jsopcode.h"
 
 using mozilla::DebugOnly;
 
@@ -44,6 +45,7 @@ class MacroAssemblerARM : public Assembler
         secondScratchReg_ = reg;
     }
 
+    void convertBoolToInt32(Register source, Register dest);
     void convertInt32ToDouble(const Register &src, const FloatRegister &dest);
     void convertInt32ToDouble(const Address &src, FloatRegister dest);
     void convertUInt32ToDouble(const Register &src, const FloatRegister &dest);
@@ -515,13 +517,25 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
     void call(IonCode *c) {
         BufferOffset bo = m_buffer.nextOffset();
         addPendingJump(bo, c->raw(), Relocation::IONCODE);
-        ma_mov(Imm32((uint32_t)c->raw()), ScratchRegister);
+        RelocStyle rs;
+        if (hasMOVWT())
+            rs = L_MOVWT;
+        else
+            rs = L_LDR;
+
+        ma_movPatchable(Imm32((int) c->raw()), ScratchRegister, Always, rs);
         ma_callIonHalfPush(ScratchRegister);
     }
     void branch(IonCode *c) {
         BufferOffset bo = m_buffer.nextOffset();
         addPendingJump(bo, c->raw(), Relocation::IONCODE);
-        ma_mov(Imm32((uint32_t)c->raw()), ScratchRegister);
+        RelocStyle rs;
+        if (hasMOVWT())
+            rs = L_MOVWT;
+        else
+            rs = L_LDR;
+
+        ma_movPatchable(Imm32((int) c->raw()), ScratchRegister, Always, rs);
         ma_bx(ScratchRegister);
     }
     void branch(const Register reg) {
@@ -1183,6 +1197,9 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
         JS_ASSERT(addr.offset == 0);
         uint32_t scale = Imm32::ShiftOf(addr.scale).value;
         ma_vstr(src, addr.base, addr.index, scale);
+    }
+    void moveDouble(FloatRegister src, FloatRegister dest) {
+        ma_vmov(src, dest);
     }
 
     void storeFloat(FloatRegister src, Address addr) {

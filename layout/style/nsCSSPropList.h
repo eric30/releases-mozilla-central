@@ -1761,6 +1761,18 @@ CSS_PROP_FONT(
     offsetof(nsStyleFont, mFont.sizeAdjust),
     eStyleAnimType_float)
 CSS_PROP_FONT(
+    -moz-osx-font-smoothing,
+    osx_font_smoothing,
+    CSS_PROP_DOMPROP_PREFIXED(OSXFontSmoothing),
+    CSS_PROPERTY_PARSE_VALUE |
+        CSS_PROPERTY_APPLIES_TO_FIRST_LETTER_AND_FIRST_LINE |
+        CSS_PROPERTY_APPLIES_TO_PLACEHOLDER,
+    "layout.css.osx-font-smoothing.enabled",
+    VARIANT_HK,
+    kFontSmoothingKTable,
+    CSS_PROP_NO_OFFSET,
+    eStyleAnimType_None)
+CSS_PROP_FONT(
     font-stretch,
     font_stretch,
     FontStretch,
@@ -2265,6 +2277,16 @@ CSS_PROP_POSITION(
     kWidthKTable,
     offsetof(nsStylePosition, mMinWidth),
     eStyleAnimType_Coord)
+CSS_PROP_DISPLAY(
+    mix-blend-mode,
+    mix_blend_mode,
+    MixBlendMode,
+    CSS_PROPERTY_PARSE_VALUE,
+    "layout.css.mix-blend-mode.enabled",
+    VARIANT_HK,
+    kBlendModeKTable,
+    CSS_PROP_NO_OFFSET,
+    eStyleAnimType_None)
 CSS_PROP_DISPLAY(
     opacity,
     opacity,

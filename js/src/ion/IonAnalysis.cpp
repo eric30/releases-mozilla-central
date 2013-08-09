@@ -56,6 +56,12 @@ ion::SplitCriticalEdges(MIRGraph &graph)
 bool
 ion::EliminateDeadResumePointOperands(MIRGenerator *mir, MIRGraph &graph)
 {
+    // If we are compiling try blocks, locals and arguments may be observable
+    // from catch or finally blocks (which Ion does not compile). For now just
+    // disable the pass in this case.
+    if (graph.hasTryBlock())
+        return true;
+
     for (PostorderIterator block = graph.poBegin(); block != graph.poEnd(); block++) {
         if (mir->shouldCancel("Eliminate Dead Resume Point Operands (main loop)"))
             return false;
@@ -348,6 +354,8 @@ ion::EliminatePhis(MIRGenerator *mir, MIRGraph &graph,
     return true;
 }
 
+namespace {
+
 // The type analysis algorithm inserts conversions and box/unbox instructions
 // to make the IR graph well-typed for future passes.
 //
@@ -394,6 +402,8 @@ class TypeAnalyzer
     bool analyze();
 };
 
+} /* anonymous namespace */
+
 // Try to specialize this phi based on its non-cyclic inputs.
 static MIRType
 GuessPhiType(MPhi *phi)
@@ -416,6 +426,10 @@ GuessPhiType(MPhi *phi)
             continue;
         }
         if (type != in->type()) {
+            // Ignore operands which we've never observed.
+            if (in->resultTypeSet() && in->resultTypeSet()->empty())
+                continue;
+
             // Specialize phis with int32 and double operands as double.
             if (IsNumberType(type) && IsNumberType(in->type()))
                 type = MIRType_Double;
@@ -520,6 +534,10 @@ TypeAnalyzer::adjustPhiInputs(MPhi *phi)
                 MToDouble *toDouble = MToDouble::New(in);
                 in->block()->insertBefore(in->block()->lastIns(), toDouble);
                 phi->replaceOperand(i, toDouble);
+            } else if (in->type() == MIRType_Value) {
+                MUnbox *unbox = MUnbox::New(in, MIRType_Double, MUnbox::Fallible);
+                in->block()->insertBefore(in->block()->lastIns(), unbox);
+                phi->replaceOperand(i, unbox);
             } else {
                 JS_ASSERT(in->type() == MIRType_Double);
             }
@@ -527,8 +545,37 @@ TypeAnalyzer::adjustPhiInputs(MPhi *phi)
         return;
     }
 
-    if (phiType != MIRType_Value)
+    // If we specialized a type that's not Value, either every input is of
+    // that type or the input's typeset was unobserved (i.e. the opcode hasn't
+    // been executed yet.)
+    if (phiType != MIRType_Value) {
+        for (size_t i = 0, e = phi->numOperands(); i < e; i++) {
+            MDefinition *in = phi->getOperand(i);
+            if (in->type() == phiType)
+                continue;
+
+            if (in->isBox() && in->toBox()->input()->type() == phiType) {
+                phi->replaceOperand(i, in->toBox()->input());
+            } else {
+                // If we know this branch will fail to convert to phiType,
+                // insert a box that'll immediately fail in the fallible unbox
+                // below.
+                if (in->type() != MIRType_Value) {
+                    MBox *box = MBox::New(in);
+                    in->block()->insertBefore(in->block()->lastIns(), box);
+                    in = box;
+                }
+
+                // Be optimistic and insert unboxes when the operand is a
+                // value.
+                MUnbox *unbox = MUnbox::New(in, phiType, MUnbox::Fallible);
+                in->block()->insertBefore(in->block()->lastIns(), unbox);
+                phi->replaceOperand(i, unbox);
+            }
+        }
+
         return;
+    }
 
     // Box every typed input.
     for (size_t i = 0, e = phi->numOperands(); i < e; i++) {

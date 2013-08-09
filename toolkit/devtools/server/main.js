@@ -20,6 +20,7 @@ const DBG_STRINGS_URI = "chrome://global/locale/devtools/debugger.properties";
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 let wantLogging = Services.prefs.getBoolPref("devtools.debugger.log");
+const promptConnections = Services.prefs.getBoolPref("devtools.debugger.prompt-connection");
 
 Cu.import("resource://gre/modules/jsdebugger.jsm");
 addDebuggerToGlobal(this);
@@ -125,6 +126,13 @@ var DebuggerServer = {
    * connection.
    */
   _allowConnection: null,
+
+  /**
+   * The windowtype of the chrome window to use for actors that use the global
+   * window (i.e the global style editor). Set this to your main window type,
+   * for example "navigator:browser".
+   */
+  chromeWindowType: null,
 
   /**
    * Prompt the user to accept or decline the incoming connection. This is the
@@ -282,6 +290,7 @@ var DebuggerServer = {
    * Install Firefox-specific actors.
    */
   addBrowserActors: function DS_addBrowserActors() {
+    this.chromeWindowType = "navigator:browser";
     this.addActors("resource://gre/modules/devtools/server/actors/webbrowser.js");
     this.addActors("resource://gre/modules/devtools/server/actors/script.js");
     this.addGlobalActor(this.ChromeDebuggerActor, "chromeDebugger");
@@ -293,6 +302,7 @@ var DebuggerServer = {
     this.addActors("resource://gre/modules/devtools/server/actors/styleeditor.js");
     this.addActors("resource://gre/modules/devtools/server/actors/webapps.js");
     this.registerModule("devtools/server/actors/inspector");
+    this.registerModule("devtools/server/actors/tracer");
   },
 
   /**
@@ -434,7 +444,7 @@ var DebuggerServer = {
 
   onSocketAccepted:
   makeInfallible(function DS_onSocketAccepted(aSocket, aTransport) {
-    if (!this._allowConnection()) {
+    if (promptConnections && !this._allowConnection()) {
       return;
     }
     dumpn("New debugging connection on " + aTransport.host + ":" + aTransport.port);

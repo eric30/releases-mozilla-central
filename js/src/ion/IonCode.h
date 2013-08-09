@@ -13,7 +13,6 @@
 #include "jsinfer.h"
 
 #include "gc/Heap.h"
-#include "ion/AsmJS.h"
 #include "ion/IonTypes.h"
 
 namespace JSC {
@@ -23,6 +22,9 @@ namespace JSC {
 class JSScript;
 
 namespace js {
+
+class AsmJSModule;
+
 namespace ion {
 
 // The maximum size of any buffer associated with an assembler or code object.
@@ -47,7 +49,7 @@ class IonCode : public gc::Cell
     uint32_t jumpRelocTableBytes_;    // Size of the jump relocation table.
     uint32_t dataRelocTableBytes_;    // Size of the data relocation table.
     uint32_t preBarrierTableBytes_;   // Size of the prebarrier table.
-    JSBool invalidated_;              // Whether the code object has been invalidated.
+    bool invalidated_;                // Whether the code object has been invalidated.
                                       // This is necessary to prevent GC tracing.
 
 #if JS_BITS_PER_WORD == 32
@@ -145,6 +147,19 @@ class SafepointIndex;
 class OsiIndex;
 class IonCache;
 
+// Describes a single AsmJSModule which jumps (via an FFI exit with the given
+// index) directly into an IonScript.
+struct DependentAsmJSModuleExit
+{
+    const AsmJSModule *module;
+    size_t exitIndex;
+
+    DependentAsmJSModuleExit(const AsmJSModule *module, size_t exitIndex)
+      : module(module),
+        exitIndex(exitIndex)
+    { }
+};
+
 // An IonScript attaches Ion-generated information to a JSScript.
 struct IonScript
 {
@@ -176,6 +191,10 @@ struct IonScript
 
     // Number of times this script bailed out without invalidation.
     uint32_t numBailouts_;
+
+    // Number of times this scripted bailed out to enter a catch or
+    // finally block.
+    uint32_t numExceptionBailouts_;
 
     // Flag set when it is likely that one of our (transitive) call
     // targets is not compiled.  Used in ForkJoin.cpp to decide when
@@ -394,6 +413,12 @@ struct IonScript
     }
     bool bailoutExpected() const {
         return numBailouts_ > 0;
+    }
+    void incNumExceptionBailouts() {
+        numExceptionBailouts_++;
+    }
+    uint32_t numExceptionBailouts() const {
+        return numExceptionBailouts_;
     }
     void setHasUncompiledCallTarget() {
         hasUncompiledCallTarget_ = true;

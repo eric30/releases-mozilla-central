@@ -8,6 +8,8 @@
 #define ion_arm_Architecture_arm_h
 
 #include <limits.h>
+#include <stdint.h>
+
 // gcc appears to use __ARM_PCS_VFP to denote that the target is a hard-float target.
 #ifdef __ARM_PCS_VFP
 #define JS_CPU_ARM_HARDFP
@@ -193,8 +195,17 @@ class FloatRegisters
 
     static const uint32_t AllMask = (1 << Total) - 1;
 
-    static const uint32_t VolatileMask = AllMask;
-    static const uint32_t NonVolatileMask = 0;
+    static const uint32_t NonVolatileMask =
+        (1 << d8) |
+        (1 << d9) |
+        (1 << d10) |
+        (1 << d11) |
+        (1 << d12) |
+        (1 << d13) |
+        (1 << d14) |
+        (1 << d15);
+
+    static const uint32_t VolatileMask = AllMask & ~NonVolatileMask;
 
     static const uint32_t WrapperMask = VolatileMask;
 

@@ -198,7 +198,6 @@
 @BINPATH@/components/dom_indexeddb.xpt
 @BINPATH@/components/dom_offline.xpt
 @BINPATH@/components/dom_payment.xpt
-@BINPATH@/components/dom_push.xpt
 @BINPATH@/components/dom_json.xpt
 @BINPATH@/components/dom_browserelement.xpt
 @BINPATH@/components/dom_messages.xpt
@@ -535,6 +534,7 @@
 @BINPATH@/components/ActivityMessageConfigurator.js
 
 @BINPATH@/components/TCPSocket.js
+@BINPATH@/components/TCPServerSocket.js
 @BINPATH@/components/TCPSocketParentIntermediary.js
 @BINPATH@/components/TCPSocket.manifest
 

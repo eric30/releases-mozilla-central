@@ -840,7 +840,7 @@ Accessible::ChildAtPoint(int32_t aX, int32_t aY,
 
   nsMouseEvent dummyEvent(true, NS_MOUSE_MOVE, rootWidget,
                           nsMouseEvent::eSynthesized);
-  dummyEvent.refPoint = nsIntPoint(aX - rootRect.x, aY - rootRect.y);
+  dummyEvent.refPoint = LayoutDeviceIntPoint(aX - rootRect.x, aY - rootRect.y);
 
   nsIFrame* popupFrame = nsLayoutUtils::
     GetPopupFrameForEventCoordinates(accDocument->PresContext()->GetRootPresContext(),
@@ -2285,7 +2285,7 @@ Accessible::DispatchClickEvent(nsIContent *aContent, uint32_t aActionIndex)
   if (IsDefunct())
     return;
 
-  nsIPresShell* presShell = mDoc->PresShell();
+  nsCOMPtr<nsIPresShell> presShell = mDoc->PresShell();
 
   // Scroll into view.
   presShell->ScrollContentIntoView(aContent,
@@ -2293,13 +2293,27 @@ Accessible::DispatchClickEvent(nsIContent *aContent, uint32_t aActionIndex)
                                    nsIPresShell::ScrollAxis(),
                                    nsIPresShell::SCROLL_OVERFLOW_HIDDEN);
 
-  // Fire mouse down and mouse up events.
-  bool res = nsCoreUtils::DispatchMouseEvent(NS_MOUSE_BUTTON_DOWN, presShell,
-                                               aContent);
-  if (!res)
+  nsWeakFrame frame = aContent->GetPrimaryFrame();
+  if (!frame)
     return;
 
-  nsCoreUtils::DispatchMouseEvent(NS_MOUSE_BUTTON_UP, presShell, aContent);
+  // Compute x and y coordinates.
+  nsPoint point;
+  nsCOMPtr<nsIWidget> widget = frame->GetNearestWidget(point);
+  if (!widget)
+    return;
+
+  nsSize size = frame->GetSize();
+
+  nsRefPtr<nsPresContext> presContext = presShell->GetPresContext();
+  int32_t x = presContext->AppUnitsToDevPixels(point.x + size.width / 2);
+  int32_t y = presContext->AppUnitsToDevPixels(point.y + size.height / 2);
+
+  // Simulate a touch interaction by dispatching touch events with mouse events.
+  nsCoreUtils::DispatchTouchEvent(NS_TOUCH_START, x, y, aContent, frame, presShell, widget);
+  nsCoreUtils::DispatchMouseEvent(NS_MOUSE_BUTTON_DOWN, x, y, aContent, frame, presShell, widget);
+  nsCoreUtils::DispatchTouchEvent(NS_TOUCH_END, x, y, aContent, frame, presShell, widget);
+  nsCoreUtils::DispatchMouseEvent(NS_MOUSE_BUTTON_UP, x, y, aContent, frame, presShell, widget);
 }
 
 NS_IMETHODIMP
@@ -3338,14 +3352,14 @@ Accessible::GetLevelInternal()
 void
 Accessible::StaticAsserts() const
 {
-  MOZ_STATIC_ASSERT(eLastChildrenFlag <= (2 << kChildrenFlagsBits) - 1,
-                    "Accessible::mChildrenFlags was oversized by eLastChildrenFlag!");
-  MOZ_STATIC_ASSERT(eLastStateFlag <= (2 << kStateFlagsBits) - 1,
-                    "Accessible::mStateFlags was oversized by eLastStateFlag!");
-  MOZ_STATIC_ASSERT(eLastAccType <= (2 << kTypeBits) - 1,
-                    "Accessible::mType was oversized by eLastAccType!");
-  MOZ_STATIC_ASSERT(eLastAccGenericType <= (2 << kGenericTypesBits) - 1,
-                    "Accessible::mGenericType was oversized by eLastAccGenericType!");
+  static_assert(eLastChildrenFlag <= (2 << kChildrenFlagsBits) - 1,
+                "Accessible::mChildrenFlags was oversized by eLastChildrenFlag!");
+  static_assert(eLastStateFlag <= (2 << kStateFlagsBits) - 1,
+                "Accessible::mStateFlags was oversized by eLastStateFlag!");
+  static_assert(eLastAccType <= (2 << kTypeBits) - 1,
+                "Accessible::mType was oversized by eLastAccType!");
+  static_assert(eLastAccGenericType <= (2 << kGenericTypesBits) - 1,
+                "Accessible::mGenericType was oversized by eLastAccGenericType!");
 }
 
 

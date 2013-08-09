@@ -159,10 +159,10 @@ inline JSContext *
 xpc_UnmarkGrayContext(JSContext *cx)
 {
     if (cx) {
-        JSObject *global = js::GetDefaultGlobalForContext(cx);
+        JSObject *global = js::DefaultObjectForContextOrNull(cx);
         xpc_UnmarkGrayObject(global);
         if (global && JS_IsInRequest(JS_GetRuntime(cx))) {
-            JSObject *scope = JS_GetGlobalForScopeChain(cx);
+            JSObject *scope = JS::CurrentGlobalOrNull(cx);
             if (scope != global)
                 xpc_UnmarkGrayObject(scope);
         }
@@ -321,8 +321,6 @@ nsIPrincipal *GetObjectPrincipal(JSObject *obj);
 
 bool IsXBLScope(JSCompartment *compartment);
 
-void DumpJSHeap(FILE* file);
-
 void SetLocationForGlobal(JSObject *global, const nsACString& location);
 void SetLocationForGlobal(JSObject *global, nsIURI *locationURI);
 
@@ -459,7 +457,7 @@ inline bool IsDOMProxy(JSObject *obj)
 
 typedef JSObject*
 (*DefineInterface)(JSContext *cx, JS::Handle<JSObject*> global,
-                   JS::Handle<jsid> id, bool *enabled);
+                   JS::Handle<jsid> id, bool defineOnGlobal);
 
 typedef JSObject*
 (*ConstructNavigatorProperty)(JSContext *cx, JS::Handle<JSObject*> naviObj);
@@ -477,6 +475,12 @@ extern bool
 DefineStaticJSVals(JSContext *cx);
 void
 Register(nsScriptNameSpaceManager* aNameSpaceManager);
+
+/**
+ * A test for whether WebIDL methods that should only be visible to
+ * chrome or XBL scopes should be exposed.
+ */
+bool IsChromeOrXBL(JSContext* cx, JSObject* /* unused */);
 
 } // namespace dom
 } // namespace mozilla

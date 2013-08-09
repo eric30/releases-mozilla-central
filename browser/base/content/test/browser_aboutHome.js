@@ -7,7 +7,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "Promise",
 XPCOMUtils.defineLazyModuleGetter(this, "Task",
   "resource://gre/modules/Task.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "AboutHomeUtils",
-  "resource:///modules/AboutHomeUtils.jsm");
+  "resource:///modules/AboutHome.jsm");
 
 let gRightsVersion = Services.prefs.getIntPref("browser.rights.version");
 
@@ -106,14 +106,17 @@ let gTests = [
     let doc = gBrowser.contentDocument;
     let engineName = doc.documentElement.getAttribute("searchEngineName");
 
-    // We rely on the listener in browser.js being installed and fired before
-    // this one. If this ever changes, we should add an executeSoon() or similar.
     doc.addEventListener("AboutHomeSearchEvent", function onSearch(e) {
       is(e.detail, engineName, "Detail is search engine name");
 
-      getNumberOfSearches(engineName).then(num => {
-        is(num, numSearchesBefore + 1, "One more search recorded.");
-        deferred.resolve();
+      // We use executeSoon() to ensure that this code runs after the
+      // count has been updated in browser.js, since it uses the same
+      // event.
+      executeSoon(function () {
+        getNumberOfSearches(engineName).then(num => {
+          is(num, numSearchesBefore + 1, "One more search recorded.");
+          deferred.resolve();
+        });
       });
     }, true, true);
 
@@ -242,16 +245,82 @@ let gTests = [
     promiseBrowserAttributes(gBrowser.selectedTab).then(function() {
       // Test if the update propagated
       checkSearchUI(unusedEngines[0]);
+      searchbar.currentEngine = currEngine;
       deferred.resolve();
     });
 
-    // The following cleanup function will set currentEngine back to the previous engine
+    // The following cleanup function will set currentEngine back to the previous
+    // engine if we fail to do so above.
     registerCleanupFunction(function() {
       searchbar.currentEngine = currEngine;
     });
     // Set the current search engine to an unused one
     searchbar.currentEngine = unusedEngines[0];
     searchbar.select();
+    return deferred.promise;
+  }
+},
+
+{
+  desc: "Check POST search engine support",
+  setup: function() {},
+  run: function()
+  {
+    let deferred = Promise.defer();
+    let currEngine = Services.search.defaultEngine;
+    let searchObserver = function search_observer(aSubject, aTopic, aData) {
+      let engine = aSubject.QueryInterface(Ci.nsISearchEngine);
+      info("Observer: " + aData + " for " + engine.name);
+
+      if (aData != "engine-added")
+        return;
+
+      if (engine.name != "POST Search")
+        return;
+
+      // Ready to execute the tests!
+      let needle = "Search for something awesome.";
+      let document = gBrowser.selectedTab.linkedBrowser.contentDocument;
+      let searchText = document.getElementById("searchText");
+
+      // We're about to change the search engine. Once the change has
+      // propagated to the about:home content, we want to perform a search.
+      let mutationObserver = new MutationObserver(function (mutations) {
+        for (let mutation of mutations) {
+          if (mutation.attributeName == "searchEngineURL") {
+            searchText.value = needle;
+            searchText.focus();
+            EventUtils.synthesizeKey("VK_RETURN", {});
+          }
+        }
+      });
+      mutationObserver.observe(document.documentElement, { attributes: true });
+
+      // Change the search engine, triggering the observer above.
+      Services.search.defaultEngine = engine;
+
+      registerCleanupFunction(function() {
+        mutationObserver.disconnect();
+        Services.search.removeEngine(engine);
+        Services.search.defaultEngine = currEngine;
+      });
+
+
+      // When the search results load, check them for correctness.
+      waitForLoad(function() {
+        let loadedText = gBrowser.contentDocument.body.textContent;
+        ok(loadedText, "search page loaded");
+        is(loadedText, "searchterms=" + escape(needle.replace(/\s/g, "+")),
+           "Search text should arrive correctly");
+        deferred.resolve();
+      });
+    };
+    Services.obs.addObserver(searchObserver, "browser-search-engine-modified", false);
+    registerCleanupFunction(function () {
+      Services.obs.removeObserver(searchObserver, "browser-search-engine-modified");
+    });
+    Services.search.addEngine("http://test:80/browser/browser/base/content/test/POSTSearchEngine.xml",
+                              Ci.nsISearchEngine.DATA_XML, null, false);
     return deferred.promise;
   }
 }
@@ -441,4 +510,16 @@ function getNumberOfSearchesByDate(aEngineName, aData, aDate) {
   }
 
   return 0; // No records found.
+}
+
+function waitForLoad(cb) {
+  let browser = gBrowser.selectedBrowser;
+  browser.addEventListener("load", function listener() {
+    if (browser.currentURI.spec == "about:blank")
+      return;
+    info("Page loaded: " + browser.currentURI.spec);
+    browser.removeEventListener("load", listener, true);
+
+    cb();
+  }, true);
 }

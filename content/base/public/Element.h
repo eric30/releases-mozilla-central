@@ -27,7 +27,6 @@
 #include "nsIDOMXPathNSResolver.h"
 #include "nsPresContext.h"
 #include "nsDOMClassInfoID.h" // DOMCI_DATA
-#include "nsIInlineEventHandlers.h"
 #include "mozilla/CORSMode.h"
 #include "mozilla/Attributes.h"
 #include "nsContentUtils.h"
@@ -133,6 +132,8 @@ public:
 #endif // MOZILLA_INTERNAL_API
 
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_ELEMENT_IID)
+
+  NS_IMETHOD QueryInterface(REFNSIID aIID, void** aInstancePtr);
 
   /**
    * Method to get the full state of this element.  See nsEventStates.h for

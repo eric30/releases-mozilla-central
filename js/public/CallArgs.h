@@ -42,7 +42,7 @@ struct JSContext;
 class JSObject;
 
 /* Typedef for native functions called by the JS VM. */
-typedef JSBool
+typedef bool
 (* JSNative)(JSContext *cx, unsigned argc, JS::Value *vp);
 
 /* Typedef for native functions that may be called in parallel. */
@@ -53,7 +53,7 @@ typedef js::ParallelResult
  * Typedef for native functions that may be called either in parallel or
  * sequential execution.
  */
-typedef JSBool
+typedef bool
 (* JSThreadSafeNative)(js::ThreadSafeContext *cx, unsigned argc, JS::Value *vp);
 
 /*
@@ -61,7 +61,7 @@ typedef JSBool
  * a JSNative or a JSParallelNative.
  */
 template <JSThreadSafeNative threadSafeNative>
-inline JSBool
+inline bool
 JSNativeThreadSafeWrapper(JSContext *cx, unsigned argc, JS::Value *vp);
 
 template <JSThreadSafeNative threadSafeNative>
@@ -317,13 +317,7 @@ class MOZ_STACK_CLASS CallArgsBase :
     unsigned length() const { return argc_; }
 
     /* Returns the i-th zero-indexed argument. */
-    Value &operator[](unsigned i) const {
-        MOZ_ASSERT(i < argc_);
-        return this->argv_[i];
-    }
-
-    /* Returns a mutable handle for the i-th zero-indexed argument. */
-    MutableHandleValue handleAt(unsigned i) const {
+    MutableHandleValue operator[](unsigned i) const {
         MOZ_ASSERT(i < argc_);
         return MutableHandleValue::fromMarkedLocation(&this->argv_[i]);
     }
@@ -332,15 +326,7 @@ class MOZ_STACK_CLASS CallArgsBase :
      * Returns the i-th zero-indexed argument, or |undefined| if there's no
      * such argument.
      */
-    Value get(unsigned i) const {
-        return i < length() ? this->argv_[i] : UndefinedValue();
-    }
-
-    /*
-     * Returns the i-th zero-indexed argument as a handle, or |undefined| if
-     * there's no such argument.
-     */
-    HandleValue handleOrUndefinedAt(unsigned i) const {
+    HandleValue get(unsigned i) const {
         return i < length()
                ? HandleValue::fromMarkedLocation(&this->argv_[i])
                : UndefinedHandleValue;

@@ -28,12 +28,12 @@
  */
 
 #include "jsclone.h"
-#include "jswrapper.h"
 
 #include "mozilla/Endian.h"
 #include "mozilla/FloatingPoint.h"
 
 #include "jsdate.h"
+#include "jswrapper.h"
 
 #include "vm/TypedArrayObject.h"
 #include "vm/WrapperObject.h"
@@ -478,7 +478,7 @@ JSStructuredCloneWriter::parseTransferable()
     RootedValue v(context());
 
     for (uint32_t i = 0; i < length; ++i) {
-        if (!JS_GetElement(context(), array, i, v.address())) {
+        if (!JS_GetElement(context(), array, i, &v)) {
             return false;
         }
 

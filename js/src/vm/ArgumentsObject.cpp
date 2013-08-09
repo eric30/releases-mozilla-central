@@ -391,7 +391,7 @@ args_resolve(JSContext *cx, HandleObject obj, HandleId id, unsigned flags,
 
     RootedValue undef(cx, UndefinedValue());
     if (!baseops::DefineGeneric(cx, argsobj, id, undef, ArgGetter, ArgSetter, attrs))
-        return JS_FALSE;
+        return false;
 
     objp.set(argsobj);
     return true;
@@ -594,8 +594,8 @@ Class NormalArgumentsObject::class_ = {
     ArgumentsObject::finalize,
     NULL,                    /* checkAccess */
     NULL,                    /* call        */
-    NULL,                    /* construct   */
     NULL,                    /* hasInstance */
+    NULL,                    /* construct   */
     ArgumentsObject::trace,
     {
         NULL,       /* outerObject */
@@ -625,8 +625,8 @@ Class StrictArgumentsObject::class_ = {
     ArgumentsObject::finalize,
     NULL,                    /* checkAccess */
     NULL,                    /* call        */
-    NULL,                    /* construct   */
     NULL,                    /* hasInstance */
+    NULL,                    /* construct   */
     ArgumentsObject::trace,
     {
         NULL,       /* outerObject */

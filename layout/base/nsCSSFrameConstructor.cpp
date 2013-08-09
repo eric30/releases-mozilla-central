@@ -42,7 +42,6 @@
 #include "nsIDOMXULElement.h"
 #include "nsContainerFrame.h"
 #include "nsINameSpaceManager.h"
-#include "nsIDOMHTMLLegendElement.h"
 #include "nsIComboboxControlFrame.h"
 #include "nsIListControlFrame.h"
 #include "nsISelectControlFrame.h"
@@ -2195,9 +2194,6 @@ nsCSSFrameConstructor::PropagateScrollToViewport()
   nsStyleSet *styleSet = mPresShell->StyleSet();
   nsRefPtr<nsStyleContext> rootStyle;
   rootStyle = styleSet->ResolveStyleFor(docElement, nullptr);
-  if (!rootStyle) {
-    return nullptr;
-  }
   if (CheckOverflow(presContext, rootStyle->StyleDisplay())) {
     // tell caller we stole the overflow style from the root element
     return docElement;
@@ -2226,9 +2222,6 @@ nsCSSFrameConstructor::PropagateScrollToViewport()
 
   nsRefPtr<nsStyleContext> bodyStyle;
   bodyStyle = styleSet->ResolveStyleFor(bodyElement->AsElement(), rootStyle);
-  if (!bodyStyle) {
-    return nullptr;
-  }
 
   if (CheckOverflow(presContext, bodyStyle->StyleDisplay())) {
     // tell caller we stole the overflow style from the body element
@@ -5767,10 +5760,7 @@ nsCSSFrameConstructor::AppendFramesToParent(nsFrameConstructorState&       aStat
     }
 
     if (!aFrameList.IsEmpty()) {
-      const nsStyleDisplay* parentDisplay = aParentFrame->StyleDisplay();
-      bool positioned =
-        parentDisplay->mPosition == NS_STYLE_POSITION_RELATIVE &&
-        !aParentFrame->IsSVGText();
+      bool positioned = aParentFrame->IsRelativelyPositioned();
       nsFrameItems ibSiblings;
       CreateIBSiblings(aState, aParentFrame, positioned, aFrameList,
                        ibSiblings);
@@ -5836,7 +5826,6 @@ nsCSSFrameConstructor::IsValidSibling(nsIFrame*              aSibling,
       // XXXbz when this code is killed, the state argument to
       // ResolveStyleContext can be made non-optional.
       styleContext = ResolveStyleContext(styleParent, aContent, nullptr);
-      if (!styleContext) return false;
       const nsStyleDisplay* display = styleContext->StyleDisplay();
       aDisplay = display->mDisplay;
     }
@@ -5879,7 +5868,7 @@ nsCSSFrameConstructor::IsValidSibling(nsIFrame*              aSibling,
             nsGkAtoms::blockFrame == parentType)) {
     // Legends can be sibling of legends but not of other content in the fieldset
     nsIAtom* sibType = aSibling->GetContentInsertionFrame()->GetType();
-    nsCOMPtr<nsIDOMHTMLLegendElement> legendContent(do_QueryInterface(aContent));
+    bool legendContent = aContent->IsHTML(nsGkAtoms::legend);
 
     if ((legendContent  && (nsGkAtoms::legendFrame != sibType)) ||
         (!legendContent && (nsGkAtoms::legendFrame == sibType)))
@@ -5987,8 +5976,7 @@ GetAdjustedParentFrame(nsIFrame*       aParentFrame,
   if (nsGkAtoms::fieldSetFrame == aParentFrameType) {
     // If the parent is a fieldSet, use the fieldSet's area frame as the
     // parent unless the new content is a legend. 
-    nsCOMPtr<nsIDOMHTMLLegendElement> legendContent(do_QueryInterface(aChildContent));
-    if (!legendContent) {
+    if (!aChildContent->IsHTML(nsGkAtoms::legend)) {
       newParent = GetFieldSetBlockFrame(aParentFrame);
     }
   }
@@ -9031,7 +9019,7 @@ nsCSSFrameConstructor::ProcessChildren(nsFrameConstructorState& aState,
                   "Parent frame in ProcessChildren should be its own "
                   "content insertion frame");
   const uint32_t kMaxDepth = 2 * MAX_REFLOW_DEPTH;
-  MOZ_STATIC_ASSERT(kMaxDepth <= UINT16_MAX, "mCurrentDepth type is too narrow");
+  static_assert(kMaxDepth <= UINT16_MAX, "mCurrentDepth type is too narrow");
   AutoRestore<uint16_t> savedDepth(mCurrentDepth);
   if (mCurrentDepth != UINT16_MAX) {
     ++mCurrentDepth;
@@ -9608,9 +9596,7 @@ nsCSSFrameConstructor::CreateFloatingLetterFrame(
     if (parentStyleContext) {
       nsRefPtr<nsStyleContext> newSC;
       newSC = styleSet->ResolveStyleForNonElement(parentStyleContext);
-      if (newSC) {
-        nextTextFrame->SetStyleContext(newSC);
-      }
+      nextTextFrame->SetStyleContext(newSC);
     }
   }
 
@@ -9858,9 +9844,6 @@ nsCSSFrameConstructor::RemoveFloatingFirstLetterFrames(
   }
   nsRefPtr<nsStyleContext> newSC;
   newSC = aPresShell->StyleSet()->ResolveStyleForNonElement(parentSC);
-  if (!newSC) {
-    return NS_OK;
-  }
   nsIFrame* newTextFrame = NS_NewTextFrame(aPresShell, newSC);
   newTextFrame->Init(textContent, parentFrame, nullptr);
 
@@ -9929,9 +9912,6 @@ nsCSSFrameConstructor::RemoveFirstLetterFrames(nsPresContext* aPresContext,
       }
       nsRefPtr<nsStyleContext> newSC;
       newSC = aPresShell->StyleSet()->ResolveStyleForNonElement(parentSC);
-      if (!newSC) {
-        break;
-      }
       textFrame = NS_NewTextFrame(aPresShell, newSC);
       textFrame->Init(textContent, aFrame, nullptr);
 
@@ -10248,7 +10228,7 @@ nsCSSFrameConstructor::ConstructInline(nsFrameConstructorState& aState,
 
   bool positioned =
     NS_STYLE_DISPLAY_INLINE == aDisplay->mDisplay &&
-    NS_STYLE_POSITION_RELATIVE == aDisplay->mPosition &&
+    aDisplay->IsRelativelyPositionedStyle() &&
     !aParentFrame->IsSVGText();
 
   nsIFrame* newFrame = NS_NewInlineFrame(mPresShell, styleContext);

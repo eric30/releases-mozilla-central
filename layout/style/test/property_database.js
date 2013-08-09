@@ -2788,6 +2788,7 @@ var gCSSProperties = {
 		],
 		invalid_values: [ "auto", "none", "5" ]
 	},
+
 	"opacity": {
 		domProp: "opacity",
 		inherited: false,
@@ -4413,7 +4414,7 @@ if (SpecialPowers.getBoolPref("svg.paint-order.enabled")) {
 }
 
 if (SpecialPowers.getBoolPref("layout.css.filters.enabled")) {
-  	gCSSProperties["filter"] = {
+	gCSSProperties["filter"] = {
 		domProp: "filter",
 		inherited: false,
 		type: CSS_TYPE_LONGHAND,
@@ -4458,6 +4459,24 @@ if (SpecialPowers.getBoolPref("layout.css.filters.enabled")) {
 			"contrast(350%)",
 			"contrast(4.567)",
 
+			"drop-shadow(2px 2px)",
+			"drop-shadow(2px 2px 1px)",
+			"drop-shadow(2px 2px green)",
+			"drop-shadow(2px 2px 1px green)",
+			"drop-shadow(green 2px 2px)",
+			"drop-shadow(green 2px 2px 1px)",
+			"drop-shadow(currentColor 3px 3px)",
+			"drop-shadow(2px 2px calc(-5px))", /* clamped */
+			"drop-shadow(calc(3em - 2px) 2px green)",
+			"drop-shadow(green calc(3em - 2px) 2px)",
+			"drop-shadow(2px calc(2px + 0.2em))",
+			"drop-shadow(blue 2px calc(2px + 0.2em))",
+			"drop-shadow(2px calc(2px + 0.2em) blue)",
+			"drop-shadow(calc(-2px) calc(-2px))",
+			"drop-shadow(-2px -2px)",
+			"drop-shadow(calc(2px) calc(2px))",
+			"drop-shadow(calc(2px) calc(2px) calc(2px))",
+
 			"grayscale(0)",
 			"grayscale(50%)",
 			"grayscale(1)",
@@ -4465,6 +4484,16 @@ if (SpecialPowers.getBoolPref("layout.css.filters.enabled")) {
 			"grayscale(2)",
 			"grayscale(350%)",
 			"grayscale(4.567)",
+
+			"hue-rotate(0deg)",
+			"hue-rotate(90deg)",
+			"hue-rotate(540deg)",
+			"hue-rotate(-90deg)",
+			"hue-rotate(10grad)",
+			"hue-rotate(1.6rad)",
+			"hue-rotate(-1.6rad)",
+			"hue-rotate(0.5turn)",
+			"hue-rotate(-2turn)",
 
 			"invert(0)",
 			"invert(50%)",
@@ -4546,6 +4575,22 @@ if (SpecialPowers.getBoolPref("layout.css.filters.enabled")) {
 			"contrast(10px)",
 			"contrast(-1)",
 
+			"drop-shadow()",
+			"drop-shadow(3% 3%)",
+			"drop-shadow(2px 2px -5px)",
+			"drop-shadow(2px 2px 2px 2px)",
+			"drop-shadow(2px 2px, none)",
+			"drop-shadow(none, 2px 2px)",
+			"drop-shadow(inherit, 2px 2px)",
+			"drop-shadow(2px 2px, inherit)",
+			"drop-shadow(2 2px)",
+			"drop-shadow(2px 2)",
+			"drop-shadow(2px 2px 2)",
+			"drop-shadow(2px 2px 2px 2)",
+			"drop-shadow(calc(2px) calc(2px) calc(2px) calc(2px))",
+			"drop-shadow(green 2px 2px, blue 1px 3px 4px)",
+			"drop-shadow(blue 2px 2px, currentColor 1px 2px)",
+
 			"grayscale()",
 			"grayscale(0.5 0.5)",
 			"grayscale(0.5,)",
@@ -4553,6 +4598,16 @@ if (SpecialPowers.getBoolPref("layout.css.filters.enabled")) {
 			"grayscale(#my-filter)",
 			"grayscale(10px)",
 			"grayscale(-1)",
+
+			"hue-rotate()",
+			"hue-rotate(0)",
+			"hue-rotate(0.5 0.5)",
+			"hue-rotate(0.5,)",
+			"hue-rotate(0.5, 0.5)",
+			"hue-rotate(#my-filter)",
+			"hue-rotate(10px)",
+			"hue-rotate(-1)",
+			"hue-rotate(45deg,)",
 
 			"invert()",
 			"invert(0.5 0.5)",
@@ -4588,3 +4643,27 @@ if (SpecialPowers.getBoolPref("layout.css.filters.enabled")) {
 		]
 	};
 }
+
+if (SpecialPowers.getBoolPref("layout.css.osx-font-smoothing.enabled")) {
+	gCSSProperties["-moz-osx-font-smoothing"] = {
+		domProp: "MozOSXFontSmoothing",
+		inherited: true,
+		type: CSS_TYPE_LONGHAND,
+		initial_values: [ "auto" ],
+		other_values: [ "grayscale" ],
+		invalid_values: [ "none", "subpixel-antialiased", "antialiased" ]
+	};
+}
+
+if (SpecialPowers.getBoolPref("layout.css.mix-blend-mode.enabled")) {
+        gCSSProperties["mix-blend-mode"] = {
+        domProp: "mixBlendMode",
+        inherited: false,
+        type: CSS_TYPE_LONGHAND,
+        initial_values: [ "normal" ],
+        other_values: ["multiply", "screen", "overlay", "darken", "lighten", "color-dodge", "color-burn",
+            "hard-light", "soft-light", "difference", "exclusion", "hue", "saturation", "color", "luminosity"],
+        invalid_values: []
+    };
+}
+

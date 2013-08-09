@@ -144,7 +144,7 @@ nsNfc::ValidateNdefTag(const JS::Value& aRecords, JSContext* aCx, bool* result)
   // Check object type (by name), (TODO: by signature)
   const char *ndefRecordName = "NdefRecord";
   for (uint32_t index = 0; index < length; index++) {
-    JS::Value val;
+    JS::Rooted<JS::Value> val(aCx);
     uint32_t namelen;
     if (JS_GetElement(aCx, &obj, index, &val)) {
       const char *name = JS_GetClass(JSVAL_TO_OBJECT(val))->name;

@@ -165,9 +165,9 @@ WriteCallback(const jschar *buf, uint32_t len, void *data)
   nsJSONWriter *writer = static_cast<nsJSONWriter*>(data);
   nsresult rv =  writer->Write((const PRUnichar*)buf, (uint32_t)len);
   if (NS_FAILED(rv))
-    return JS_FALSE;
+    return false;
 
-  return JS_TRUE;
+  return true;
 }
 
 NS_IMETHODIMP
@@ -211,7 +211,7 @@ nsJSON::EncodeInternal(JSContext* cx, const JS::Value& aValue,
    */
   JS::Rooted<JS::Value> val(cx, aValue);
   JS::Rooted<JS::Value> toJSON(cx);
-  if (JS_GetProperty(cx, obj, "toJSON", toJSON.address()) &&
+  if (JS_GetProperty(cx, obj, "toJSON", &toJSON) &&
       toJSON.isObject() &&
       JS_ObjectIsCallable(cx, &toJSON.toObject())) {
     // If toJSON is implemented, it must not throw
