@@ -20,7 +20,7 @@ interface nsIDOMNdefRecord : nsISupports {
    *   tnf_external type: 0x04
    *   tnf_unknown: 0x05
    *   tnf_unchanged: 0x06
-   *   tnf_reserved: 0x06
+   *   tnf_reserved: 0x07
    */
   readonly attribute octet tnf;
 
