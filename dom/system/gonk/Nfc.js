@@ -90,11 +90,11 @@ Nfc.prototype = {
     switch (message.type) {
       case "techDiscovered":
         ppmm.broadcastAsyncMessage("NFC:TechDiscovered", message);
-        gSystemMessenger.broadcastMessage("nfc-tech-discovered", message);
+        gSystemMessenger.broadcastMessage("nfc-manager-tech-discovered", message);
         break;
       case "techLost":
         ppmm.broadcastAsyncMessage("NFC:TechLost", message);
-        gSystemMessenger.broadcastMessage("nfc-tech-lost", message);
+        gSystemMessenger.broadcastMessage("nfc-manager-tech-lost", message);
         break;
 
       case "NDEFDetailsResponse":

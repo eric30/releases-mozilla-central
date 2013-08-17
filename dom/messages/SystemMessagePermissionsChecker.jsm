@@ -99,20 +99,11 @@ this.SystemMessagePermissionsTable = {
   "wappush-received": {
     "wappush": []
   },
-  "nfc-tech-discovered": {
-    "nfc": []
+  "nfc-manager-tech-discovered": {
+    "nfc-manager": []
   },
-  "nfc-tech-lost": {
-    "nfc": []
-  },
-  "nfc-secure-element-activated": {
-    "nfc": []
-  },
-  "nfc-secure-element-transaction": {
-    "nfc": []
-  },
-  "nfc-secure-element-deactivated": {
-    "nfc": []
+  "nfc-manager-tech-lost": {
+    "nfc-manager": []
   }
 };
 

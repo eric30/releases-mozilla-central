@@ -387,10 +387,11 @@ NfcContentHelper.prototype = {
   handleNDEFDetailsResponse: function handleNDEFDetailsResponse(message) {
     debug("NDEFDetailsResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
-    if (typeof requester === 'undefined') {
+    if ((typeof requester === 'undefined') ||
+        (message.sessionId != this._connectedSessionId)) {
        return; // Nothing to do in this instance.
     }
-
+    delete this._requestMap[message.requestId];
     let result = message.content;
     let requestId = atob(message.requestId);
 
@@ -399,16 +400,16 @@ NfcContentHelper.prototype = {
     } else  {
       this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
     }
-    delete this._requestMap[message.requestId];
   },
 
   handleNDEFReadResponse: function handleNDEFReadResponse(message) {
     debug("NDEFReadResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
-    if (typeof requester === 'undefined') {
+    if ((typeof requester === 'undefined') ||
+        (message.sessionId != this._connectedSessionId)) {
        return; // Nothing to do in this instance.
     }
-
+    delete this._requestMap[message.requestId];
     let result = message.content;
     let requestId = atob(message.requestId);
     let records = result.records.map(function(r) {
@@ -424,21 +425,20 @@ NfcContentHelper.prototype = {
     } else  {
       this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
     }
-    delete this._requestMap[message.requestId];
   },
 
   handleNDEFWriteResponse: function handleNDEFWriteResponse(message) {
     debug("NDEFWriteResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
-    if (typeof requester === 'undefined') {
+    if ((typeof requester === 'undefined') ||
+        (message.sessionId != this._connectedSessionId)) {
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
     let result = message.content;
     let requestId = atob(message.requestId);
 
-    if ((message.sessionId != this._connectedSessionId) ||
-        (result.status != 'OK')) {
+    if (result.status != "OK") {
       this.fireRequestError(requestId, result.status);
     } else  {
       this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
@@ -448,15 +448,15 @@ NfcContentHelper.prototype = {
   handleNDEFPushResponse: function handleNDEFPushResponse(message) {
     debug("NDEFPushResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
-    if (typeof requester === 'undefined') {
+    if ((typeof requester === 'undefined') ||
+        (message.sessionId != this._connectedSessionId)) {
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
     let result = message.content;
     let requestId = atob(message.requestId);
 
-    if ((message.sessionId != this._connectedSessionId) ||
-        (result.status != 'OK')) {
+    if (result.status != "OK") {
       this.fireRequestError(requestId, result.status);
     } else  {
       this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
@@ -466,7 +466,8 @@ NfcContentHelper.prototype = {
   handleNfcATagDetailsResponse: function handleNfcATagDetailsResponse(message) {
     debug("NfcATagDetailsResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
-    if (typeof requester === 'undefined') {
+    if ((typeof requester === 'undefined') ||
+        (message.sessionId != this._connectedSessionId)) {
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
@@ -483,7 +484,8 @@ NfcContentHelper.prototype = {
   handleNfcATagTransceiveResponse: function handleNfcATagTransceiveResponse(message) {
     debug("NfcATagTransceiveResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
-    if (typeof requester === 'undefined') {
+    if ((typeof requester === 'undefined') ||
+        (message.sessionId != this._connectedSessionId)) {
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
@@ -500,7 +502,8 @@ NfcContentHelper.prototype = {
   handleConnectResponse: function handleConnectResponse(message) {
     debug("ConnectResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
-    if (typeof requester === 'undefined') {
+    if ((typeof requester === 'undefined') ||
+        (message.sessionId != this._connectedSessionId)) {
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
@@ -517,7 +520,8 @@ NfcContentHelper.prototype = {
   handleCloseResponse: function handleCloseResponse(message) {
     debug("CloseResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
-    if (typeof requester === 'undefined') {
+    if ((typeof requester === 'undefined') ||
+        (message.sessionId != this._connectedSessionId)) {
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
