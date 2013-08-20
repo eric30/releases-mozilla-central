@@ -74,7 +74,7 @@ Nfc.prototype = {
                                          Ci.nsINfc,
                                          Ci.nsIObserver]),
 
-
+  _connectedSessionId: null,
   onerror: function onerror(event) {
     debug("Got an error: " + event.filename + ":" +
           event.lineno + ": " + event.message + "\n");
@@ -87,12 +87,17 @@ Nfc.prototype = {
   onmessage: function onmessage(event) {
     let message = event.data;
     debug("Received message: " + JSON.stringify(message));
+
+    // TODO: Private API to post to this object which user selected activity launched in response to NFC WebActivity launch.
+    // SystemMessenger: function sendMessage(aType, aMessage, aPageURI, aManifestURI), to that specific app, not broadcast.
     switch (message.type) {
       case "techDiscovered":
+        this._connectedSessionId = message.sessionId;
         ppmm.broadcastAsyncMessage("NFC:TechDiscovered", message);
         gSystemMessenger.broadcastMessage("nfc-manager-tech-discovered", message);
         break;
       case "techLost":
+        this._connectedSessionId = null;
         ppmm.broadcastAsyncMessage("NFC:TechLost", message);
         gSystemMessenger.broadcastMessage("nfc-manager-tech-lost", message);
         break;
@@ -101,9 +106,11 @@ Nfc.prototype = {
         ppmm.broadcastAsyncMessage("NFC:NDEFDetailsResponse", message);
         break;
       case "NDEFReadResponse":
+        debug("NFC.js ReadResponse.");
         ppmm.broadcastAsyncMessage("NFC:NDEFReadResponse", message);
         break;
       case "NDEFWriteResponse":
+        debug("NFC.js WriteResponse.");
         ppmm.broadcastAsyncMessage("NFC:NDEFWriteResponse", message);
         break;
       case "NDEFPushResponse":

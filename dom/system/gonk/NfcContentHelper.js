@@ -367,21 +367,18 @@ NfcContentHelper.prototype = {
 
   // NFC Notifications
   handleTechDiscovered: function handleTechDiscovered(message) {
-    debug('TechDiscovered. Check for existing session:');
+    debug('TechDiscovered. Update Session:');
     this._connectedSessionId = message.sessionId;
-    this._deliverCallback("_nfcCallbacks", "techDiscovered", [message]);
   },
 
   handleTechLost: function handleTechLost(message) {
-    debug('TechLost. Check for existing session:');
+    debug('TechLost. Clear session:');
     this._connectedSessionId = null;
-    this._deliverCallback("_nfcCallbacks", "techLost", [message]);
   },
 
   handleNfcATagDiscoveredNofitication: function handleTechDiscovered(message) {
     debug('NfcATagDiscovered. Check for existing session:');
     this._connectedSessionId = message.sessionId;
-    this._deliverCallback("_nfcCallbacks", "nfcATagDiscovered", [message]);
   },
 
   handleNDEFDetailsResponse: function handleNDEFDetailsResponse(message) {
@@ -432,6 +429,10 @@ NfcContentHelper.prototype = {
     let requester = this._requestMap[message.requestId];
     if ((typeof requester === 'undefined') ||
         (message.sessionId != this._connectedSessionId)) {
+       debug('Returning: requester: ' + requester);
+       debug('Returning: sessionId matches?: ' + (message.sessionId == this._connectedSessionId));
+       debug('Returning: sessionId matches? sessionId: ' + message.sessionId);
+       debug('Returning: sessionId matches?: saved sessionId: ' + this._connectedSessionId);
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
@@ -450,6 +451,8 @@ NfcContentHelper.prototype = {
     let requester = this._requestMap[message.requestId];
     if ((typeof requester === 'undefined') ||
         (message.sessionId != this._connectedSessionId)) {
+       debug('Returning: requester: ' + requester);
+       debug('Returning: sessionId matches?: ' + (message.sessionId == this._connectedSessionId));
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
