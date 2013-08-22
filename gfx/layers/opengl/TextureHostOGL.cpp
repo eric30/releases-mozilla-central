@@ -4,25 +4,36 @@
 * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "TextureHostOGL.h"
-#include "ipc/AutoOpenSurface.h"
-#include "gfx2DGlue.h"
+#include "GLContext.h"                  // for GLContext, etc
+#include "SharedSurface.h"              // for SharedSurface
+#include "SharedSurfaceEGL.h"           // for SharedSurface_EGLImage
+#include "SharedSurfaceGL.h"            // for SharedSurface_GLTexture, etc
+#include "SurfaceStream.h"              // for SurfaceStream
+#include "SurfaceTypes.h"               // for SharedSurfaceType, etc
+#include "TiledLayerBuffer.h"           // for TILEDLAYERBUFFER_TILE_SIZE
+#include "gfx2DGlue.h"                  // for ContentForFormat, etc
+#include "gfxImageSurface.h"            // for gfxImageSurface
+#include "gfxPoint.h"                   // for gfxIntSize
+#include "gfxReusableSurfaceWrapper.h"  // for gfxReusableSurfaceWrapper
+#include "ipc/AutoOpenSurface.h"        // for AutoOpenSurface
+#include "mozilla/gfx/2D.h"             // for DataSourceSurface
+#include "mozilla/gfx/BaseSize.h"       // for BaseSize
+#include "mozilla/layers/CompositorOGL.h"  // for CompositorOGL
+#include "mozilla/layers/ISurfaceAllocator.h"
 #include "mozilla/layers/YCbCrImageDataSerializer.h"
-#include "GLContext.h"
-#include "gfxImageSurface.h"
-#include "SurfaceStream.h"
-#include "SharedSurface.h"
-#include "SharedSurfaceGL.h"
-#include "SharedSurfaceEGL.h"
+#include "nsPoint.h"                    // for nsIntPoint
+#include "nsRegion.h"                   // for nsIntRegion
 #ifdef XP_MACOSX
 #include "SharedSurfaceIO.h"
 #endif
-#include "mozilla/layers/CompositorOGL.h"
 
 using namespace mozilla::gl;
 using namespace mozilla::gfx;
 
 namespace mozilla {
 namespace layers {
+
+class Compositor; 
 
 TemporaryRef<DeprecatedTextureHost>
 CreateDeprecatedTextureHostOGL(SurfaceDescriptorType aDescriptorType,
@@ -149,9 +160,10 @@ TextureImageTextureSourceOGL::Update(gfx::DataSourceSurface* aSurface,
       mTexImage->GetSize() != size ||
       mTexImage->GetContentType() != gfx::ContentForFormat(aSurface->GetFormat())) {
     if (mAllowBigImage) {
-      // XXX - clarify the which size we want to use. Some use cases may
-      // require the size of the destnation surface to be different from
+      // XXX - clarify which size we want to use. IncrementalContentHost will
+      // require the size of the destination surface to be different from
       // the size of aSurface.
+      // See bug 893300 (tracks the implementation of ContentHost for new textures).
       mTexImage = mGL->CreateTextureImage(size,
                                           gfx::ContentForFormat(aSurface->GetFormat()),
                                           WrapMode(mGL, aFlags & TEXTURE_ALLOW_REPEAT),
@@ -178,10 +190,9 @@ TextureImageTextureSourceOGL::GetSize() const
 {
   if (mTexImage) {
     if (mIterating) {
-      nsIntRect rect = mTexImage->GetTileRect();
-      return gfx::IntSize(rect.width, rect.height);
+      return mTexImage->GetTileRect().Size();
     }
-    return gfx::IntSize(mTexImage->GetSize().width, mTexImage->GetSize().height);
+    return mTexImage->GetSize();
   }
   NS_WARNING("Trying to query the size of an empty TextureSource.");
   return gfx::IntSize(0, 0);
@@ -192,6 +203,11 @@ TextureImageTextureSourceOGL::GetFormat() const
 {
   MOZ_ASSERT(mTexImage);
   return mTexImage->GetTextureFormat();
+}
+
+nsIntRect TextureImageTextureSourceOGL::GetTileRect()
+{
+  return ThebesIntRect(mTexImage->GetTileRect());
 }
 
 void
@@ -256,7 +272,7 @@ SharedTextureSourceOGL::SetCompositor(CompositorOGL* aCompositor)
 bool
 SharedTextureSourceOGL::IsValid() const
 {
-  return gl() != nullptr;
+  return !!gl();
 }
 
 gl::GLContext*
@@ -308,7 +324,7 @@ SharedTextureHostOGL::Lock()
     }
 
     GLenum wrapMode = LOCAL_GL_CLAMP_TO_EDGE;
-    mTextureSource = new SharedTextureSourceOGL(nullptr, // Compositor
+    mTextureSource = new SharedTextureSourceOGL(mCompositor,
                                                 mSharedHandle,
                                                 handleDetails.mTextureFormat,
                                                 handleDetails.mTarget,
@@ -358,12 +374,16 @@ TextureImageDeprecatedTextureHostOGL::GetSize() const
 {
   if (mTexture) {
     if (mIterating) {
-      nsIntRect rect = mTexture->GetTileRect();
-      return gfx::IntSize(rect.width, rect.height);
+      return mTexture->GetTileRect().Size();
     }
-    return gfx::IntSize(mTexture->GetSize().width, mTexture->GetSize().height);
+    return mTexture->GetSize();
   }
   return gfx::IntSize(0, 0);
+}
+
+nsIntRect TextureImageDeprecatedTextureHostOGL::GetTileRect()
+{
+  return ThebesIntRect(mTexture->GetTileRect());
 }
 
 void
@@ -609,7 +629,11 @@ SurfaceStreamHostOGL::UpdateImpl(const SurfaceDescriptor& aImage,
   const SurfaceStreamDescriptor& streamDesc =
       aImage.get_SurfaceStreamDescriptor();
 
-  mStream = SurfaceStream::FromHandle(streamDesc.handle());
+  SurfaceStream *stream = SurfaceStream::FromHandle(streamDesc.handle());
+  if (stream == mStream) {
+    return;
+  }
+  mStream = stream;
   MOZ_ASSERT(mStream);
   mStreamGL = dont_AddRef(mStream->GLContext());
 }
@@ -1209,7 +1233,7 @@ GrallocDeprecatedTextureHostOGL::GetAsSurface() {
     : nullptr;
   return surf.forget();
 }
-#endif
+#endif // MOZ_WIDGET_GONK
 
 } // namespace
 } // namespace

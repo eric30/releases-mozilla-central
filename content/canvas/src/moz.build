@@ -32,9 +32,11 @@ if CONFIG['MOZ_WEBGL']:
         'WebGL2Context.cpp',
         'WebGLContext.cpp',
         'WebGLContextAsyncQueries.cpp',
+        'WebGLContextBuffers.cpp',
         'WebGLContextGL.cpp',
         'WebGLContextUtils.cpp',
         'WebGLContextReporter.cpp',
+        'WebGLContextState.cpp',
         'WebGLContextValidate.cpp',
         'WebGLContextFramebufferOperations.cpp',
         'WebGLContextVertexArray.cpp',
@@ -48,6 +50,7 @@ if CONFIG['MOZ_WEBGL']:
         'WebGLExtensionDepthTexture.cpp',
         'WebGLExtensionDrawBuffers.cpp',
         'WebGLExtensionElementIndexUint.cpp',
+        'WebGLExtensionInstancedArrays.cpp',
         'WebGLExtensionLoseContext.cpp',
         'WebGLExtensionStandardDerivatives.cpp',
         'WebGLExtensionTextureFilterAnisotropic.cpp',
@@ -70,3 +73,10 @@ else:
     CPP_SOURCES += [
         'WebGLContextNotSupported.cpp',
     ]
+
+FAIL_ON_WARNINGS = True
+
+LIBXUL_LIBRARY = True
+
+MSVC_ENABLE_PGO = True
+

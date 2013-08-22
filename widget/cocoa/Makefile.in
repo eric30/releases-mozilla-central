@@ -11,12 +11,6 @@ VPATH		= @srcdir@
 include $(DEPTH)/config/autoconf.mk
 
 EXPORT_LIBRARY	= 1
-IS_COMPONENT	= 1
-MODULE_NAME	= nsWidgetMacModule
-LIBXUL_LIBRARY = 1
-
-
-
 CMMSRCS = \
   nsBidiKeyboard.mm \
   nsClipboard.mm \
@@ -55,6 +49,7 @@ CMMSRCS = \
   GfxInfo.mm \
   WidgetTraceEvent.mm \
   NativeKeyBindings.mm \
+  nsColorPicker.mm \
   $(NULL)
 
 ifeq (x86_64,$(TARGET_CPU))

@@ -3987,6 +3987,19 @@ nsRuleNode::ComputeTextData(void* aStartStruct,
               NS_STYLE_TEXT_SIZE_ADJUST_NONE, // none value
               0, 0);
 
+  // text-orientation: enum, inherit, initial
+  SetDiscrete(*aRuleData->ValueForTextOrientation(), text->mTextOrientation,
+              canStoreInRuleTree, SETDSC_ENUMERATED,
+              parentText->mTextOrientation,
+              NS_STYLE_TEXT_ORIENTATION_AUTO, 0, 0, 0, 0);
+
+  // text-combine-horizontal: enum, inherit, initial
+  SetDiscrete(*aRuleData->ValueForTextCombineHorizontal(),
+              text->mTextCombineHorizontal,
+              canStoreInRuleTree, SETDSC_ENUMERATED,
+              parentText->mTextCombineHorizontal,
+              NS_STYLE_TEXT_COMBINE_HORIZ_NONE, 0, 0, 0, 0);
+
   COMPUTE_END_INHERITED(Text, text)
 }
 
@@ -4011,11 +4024,6 @@ nsRuleNode::ComputeTextResetData(void* aStartStruct,
                                        eStyleUnit_Enumerated);
     }
   }
-
-  // text-blink: enum, inherit, initial
-  SetDiscrete(*aRuleData->ValueForTextBlink(), text->mTextBlink,
-              canStoreInRuleTree, SETDSC_ENUMERATED, parentText->mTextBlink,
-              NS_STYLE_TEXT_BLINK_NONE, 0, 0, 0, 0);
 
   // text-decoration-line: enum (bit field), inherit, initial
   const nsCSSValue* decorationLineValue =

@@ -6,14 +6,30 @@
 #ifndef GFX_IMAGECONTAINER_H
 #define GFX_IMAGECONTAINER_H
 
-#include "mozilla/Mutex.h"
-#include "mozilla/ReentrantMonitor.h"
-#include "gfxASurface.h" // for gfxImageFormat
-#include "mozilla/layers/LayersTypes.h" // for LayersBackend
-#include "mozilla/TimeStamp.h"
-#include "ImageTypes.h"
-#include "nsTArray.h"
-#include "pratom.h"
+#include <stdint.h>                     // for uint32_t, uint8_t, uint64_t
+#include <sys/types.h>                  // for int32_t
+#include "GeckoProfilerFunc.h"          // for TimeStamp
+#include "ImageTypes.h"                 // for ImageFormat, etc
+#include "gfxASurface.h"                // for gfxASurface, etc
+#include "gfxPoint.h"                   // for gfxIntSize
+#include "mozilla/Assertions.h"         // for MOZ_ASSERT_HELPER2
+#include "mozilla/Mutex.h"              // for Mutex
+#include "mozilla/ReentrantMonitor.h"   // for ReentrantMonitorAutoEnter, etc
+#include "mozilla/TimeStamp.h"          // for TimeStamp
+#include "mozilla/layers/LayersTypes.h"  // for LayersBackend, etc
+#include "mozilla/mozalloc.h"           // for operator delete, etc
+#include "nsAutoPtr.h"                  // for nsRefPtr, nsAutoArrayPtr, etc
+#include "nsAutoRef.h"                  // for nsCountedRef
+#include "nsCOMPtr.h"                   // for already_AddRefed
+#include "nsDebug.h"                    // for NS_ASSERTION
+#include "nsISupportsImpl.h"            // for Image::Release, etc
+#include "nsRect.h"                     // for nsIntRect
+#include "nsSize.h"                     // for nsIntSize
+#include "nsTArray.h"                   // for nsTArray
+#include "nsThreadUtils.h"              // for NS_IsMainThread
+#include "mozilla/Atomics.h"
+
+class nsMainThreadSurfaceRef;
 
 #ifdef XP_WIN
 struct ID3D10Texture2D;
@@ -26,9 +42,6 @@ typedef void* HANDLE;
 namespace mozilla {
 
 class CrossProcessMutex;
-namespace ipc {
-class Shmem;
-}
 
 namespace layers {
 
@@ -103,7 +116,7 @@ public:
 protected:
   Image(void* aImplData, ImageFormat aFormat) :
     mImplData(aImplData),
-    mSerial(PR_ATOMIC_INCREMENT(&sSerialCounter)),
+    mSerial(++sSerialCounter),
     mFormat(aFormat),
     mSent(false)
   {}
@@ -113,7 +126,7 @@ protected:
   void* mImplData;
   int32_t mSerial;
   ImageFormat mFormat;
-  static int32_t sSerialCounter;
+  static mozilla::Atomic<int32_t> sSerialCounter;
   bool mSent;
 };
 

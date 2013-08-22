@@ -6,12 +6,26 @@
 #ifndef GFX_CLIENTTHEBESLAYER_H
 #define GFX_CLIENTTHEBESLAYER_H
 
-#include "ClientLayerManager.h"
-#include "ThebesLayerBuffer.h"
-#include "mozilla/layers/ContentClient.h"
+#include "ClientLayerManager.h"         // for ClientLayerManager, etc
+#include "Layers.h"                     // for ThebesLayer, etc
+#include "ThebesLayerBuffer.h"          // for ThebesLayerBuffer, etc
+#include "mozilla/Attributes.h"         // for MOZ_OVERRIDE
+#include "mozilla/RefPtr.h"             // for RefPtr
+#include "mozilla/layers/ContentClient.h"  // for ContentClient
+#include "mozilla/mozalloc.h"           // for operator delete
+#include "nsDebug.h"                    // for NS_ASSERTION
+#include "nsRegion.h"                   // for nsIntRegion
+#include "nsTraceRefcnt.h"              // for MOZ_COUNT_CTOR, etc
+#include "mozilla/layers/PLayerTransaction.h" // for ThebesLayerAttributes
+
+class gfxContext;
 
 namespace mozilla {
 namespace layers {
+
+class CompositableClient;
+class ShadowableLayer;
+class SpecificLayerAttributes;
 
 class ClientThebesLayer : public ThebesLayer, 
                           public ClientLayer {
@@ -20,7 +34,8 @@ public:
   typedef ThebesLayerBuffer::ContentType ContentType;
 
   ClientThebesLayer(ClientLayerManager* aLayerManager) :
-    ThebesLayer(aLayerManager, static_cast<ClientLayer*>(this)),
+    ThebesLayer(aLayerManager,
+                static_cast<ClientLayer*>(MOZ_THIS_IN_INITIALIZER_LIST())),
     mContentClient(nullptr)
   {
     MOZ_COUNT_CTOR(ClientThebesLayer);
@@ -28,7 +43,7 @@ public:
   virtual ~ClientThebesLayer()
   {
     if (mContentClient) {
-      mContentClient->Detach();
+      mContentClient->OnDetach();
       mContentClient = nullptr;
     }
     MOZ_COUNT_DTOR(ClientThebesLayer);

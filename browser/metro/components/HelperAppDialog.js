@@ -41,8 +41,10 @@ HelperAppLauncherDialog.prototype = {
     let displaySize = DownloadUtils.convertByteUnits(aSize);
     if (displaySize[0] > 0) // [0] is size, [1] is units
       return displaySize.join("");
-    else
-      return Strings.browser.GetStringFromName("downloadsUnknownSize");
+    else {
+      let browserBundle = Services.strings.createBundle("chrome://browser/locale/browser.properties");
+      return browserBundle.GetStringFromName("downloadsUnknownSize");
+    }
   },
 
   _getChromeWindow: function (aWindow) {
@@ -57,6 +59,7 @@ HelperAppLauncherDialog.prototype = {
   },
 
   _showDownloadInfobar: function do_showDownloadInfobar(aLauncher) {
+    Services.obs.notifyObservers(null, "dl-request", "");
     let browserBundle = Services.strings.createBundle("chrome://browser/locale/browser.properties");
 
     let runButtonText =

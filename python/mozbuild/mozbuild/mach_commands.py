@@ -17,7 +17,12 @@ from mach.decorators import (
 
 from mach.mixin.logging import LoggingMixin
 
-from mozbuild.base import MachCommandBase
+from mozbuild.base import (
+    MachCommandBase,
+    MozbuildObject,
+    MozconfigFindException,
+    MozconfigLoadException,
+)
 
 
 BUILD_WHAT_HELP = '''
@@ -99,7 +104,7 @@ class BuildProgressFooter(object):
         self._monitor = monitor
 
     def _clear_lines(self, n):
-        self._fh.write(self._t.move(self._t.height - n, 0))
+        self._fh.write(self._t.move_x(0))
         self._fh.write(self._t.clear_eos())
 
     def clear(self):
@@ -108,7 +113,9 @@ class BuildProgressFooter(object):
 
     def draw(self):
         """Draws this footer in the terminal."""
-        if not self._monitor.tiers:
+        tiers = self._monitor.tiers
+
+        if not tiers.tiers:
             return
 
         # The drawn terminal looks something like:
@@ -119,34 +126,48 @@ class BuildProgressFooter(object):
         # big comment below.
         parts = [('bold', 'TIER'), ':', ' ']
 
-        current_encountered = False
-        for tier in self._monitor.tiers:
-            if tier == self._monitor.current_tier:
+        for tier, active, finished in tiers.tier_status():
+            if active:
                 parts.extend([('underline_yellow', tier), ' '])
-                current_encountered = True
-            elif not current_encountered:
+            elif finished:
                 parts.extend([('green', tier), ' '])
             else:
                 parts.extend([tier, ' '])
 
         parts.extend([('bold', 'SUBTIER'), ':', ' '])
-        for subtier in self._monitor.subtiers:
-            if subtier in self._monitor.current_subtier_finished:
-                parts.extend([('green', subtier), ' '])
-            elif subtier in self._monitor.current_subtier_started:
+        for subtier, active, finished in tiers.current_subtier_status():
+            if active:
                 parts.extend([('underline_yellow', subtier), ' '])
+            elif finished:
+                parts.extend([('green', subtier), ' '])
             else:
                 parts.extend([subtier, ' '])
 
-        if self._monitor.current_subtier_dirs and self._monitor.current_tier_dir:
-            parts.extend([
-                ('bold', 'DIRECTORIES'), ': ',
-                '%02d' % self._monitor.current_tier_dir_index,
-                '/',
-                '%02d' % len(self._monitor.current_subtier_dirs),
-                ' ',
-                '(', ('magenta', self._monitor.current_tier_dir), ')',
-            ])
+        if tiers.active_dirs:
+            parts.extend([('bold', 'DIRECTORIES'), ': '])
+            have_dirs = False
+
+            for subtier, all_dirs, active_dirs, complete in tiers.current_dirs_status():
+                if len(all_dirs) < 2:
+                    continue
+
+                have_dirs = True
+
+                parts.extend([
+                    '%02d' % (complete + 1),
+                    '/',
+                    '%02d' % len(all_dirs),
+                    ' ',
+                    '(',
+                ])
+                for d in active_dirs:
+                    parts.extend([
+                        ('magenta', d), ' ,'
+                    ])
+                parts[-1] = ')'
+
+            if not have_dirs:
+                parts = parts[0:-2]
 
         # We don't want to write more characters than the current width of the
         # terminal otherwise wrapping may result in weird behavior. We can't
@@ -178,8 +199,9 @@ class BuildProgressFooter(object):
 
                 write_pieces.append(part)
                 written += len(part)
-
-        self._fh.write(''.join(write_pieces))
+        with self._t.location():
+            self._t.move(self._t.height-1,0)
+            self._fh.write(''.join(write_pieces))
         self._fh.flush()
 
 
@@ -201,12 +223,12 @@ class BuildOutputManager(LoggingMixin):
         self.t = terminal
         self.footer = BuildProgressFooter(terminal, monitor)
 
-        self.handler = TerminalLoggingHandler()
-        self.handler.setFormatter(log_manager.terminal_formatter)
-        self.handler.footer = self.footer
+        self._handler = TerminalLoggingHandler()
+        self._handler.setFormatter(log_manager.terminal_formatter)
+        self._handler.footer = self.footer
 
-        old = log_manager.replace_terminal_handler(self.handler)
-        self.handler.level = old.level
+        old = log_manager.replace_terminal_handler(self._handler)
+        self._handler.level = old.level
 
     def __enter__(self):
         return self
@@ -214,6 +236,8 @@ class BuildOutputManager(LoggingMixin):
     def __exit__(self, exc_type, exc_value, traceback):
         if self.footer:
             self.footer.clear()
+            # Prevents the footer from being redrawn if logging occurs.
+            self._handler.footer = None
 
     def write_line(self, line):
         if self.footer:
@@ -268,8 +292,11 @@ class Build(MachCommandBase):
         from mozbuild.controller.building import BuildMonitor
         from mozbuild.util import resolve_target_to_make
 
+        self.log_manager.register_structured_logger(logging.getLogger('mozbuild'))
+
         warnings_path = self._get_state_filename('warnings.json')
-        monitor = BuildMonitor(self.topobjdir, warnings_path)
+        monitor = self._spawn(BuildMonitor)
+        monitor.init(warnings_path)
 
         with BuildOutputManager(self.log_manager, monitor) as output:
             monitor.start()
@@ -330,6 +357,7 @@ class Build(MachCommandBase):
                     if status != 0:
                         break
             else:
+                monitor.start_resource_recording()
                 status = self._run_make(srcdir=True, filename='client.mk',
                     line_handler=output.on_line, log=False, print_directory=False,
                     allow_parallel=False, ensure_exit_code=False, num_jobs=jobs,
@@ -339,7 +367,7 @@ class Build(MachCommandBase):
                     {'count': len(monitor.warnings_database)},
                     '{count} compiler warnings present.')
 
-            monitor.finish()
+            monitor.finish(record_usage=status==0)
 
         high_finder, finder_percent = monitor.have_high_finder_usage()
         if high_finder:
@@ -354,6 +382,10 @@ class Build(MachCommandBase):
             print('We know it took a while, but your build finally finished successfully!')
         else:
             print('Your build was successful!')
+
+        if monitor.have_resource_usage:
+            print('To view resource usage of the build, run |mach '
+                'resource-usage|.')
 
         # Only for full builds because incremental builders likely don't
         # need to be burdened with this.
@@ -386,6 +418,34 @@ class Build(MachCommandBase):
 
         return status
 
+    @Command('resource-usage', category='post-build',
+        description='Show information about system resource usage for a build.')
+    @CommandArgument('--address', default='localhost',
+        help='Address the HTTP server should listen on.')
+    @CommandArgument('--port', type=int, default=0,
+        help='Port number the HTTP server should listen on.')
+    @CommandArgument('--browser', default='firefox',
+        help='Web browser to automatically open. See webbrowser Python module.')
+    def resource_usage(self, address=None, port=None, browser=None):
+        import webbrowser
+        from mozbuild.html_build_viewer import BuildViewerServer
+
+        last = self._get_state_filename('build_resources.json')
+        if not os.path.exists(last):
+            print('Build resources not available. If you have performed a '
+                'build and receive this message, the psutil Python package '
+                'likely failed to initialize properly.')
+            return 1
+
+        server = BuildViewerServer(address, port)
+        server.add_resource_json_file('last', last)
+        try:
+            webbrowser.get(browser).open_new_tab(server.url)
+        except Exception:
+            print('Please open %s in a browser.' % server.url)
+
+        print('Hit CTRL+c to stop server.')
+        server.run()
 
     @Command('clobber', category='build',
         description='Clobber the tree (delete the object directory).')
@@ -743,3 +803,83 @@ class Makefiles(MachCommandBase):
                 if f == 'Makefile.in':
                     yield os.path.join(root, f)
 
+@CommandProvider
+class MachDebug(object):
+    def __init__(self, context):
+        self.context = context
+
+    @Command('environment', category='build-dev',
+        description='Show info about the mach and build environment.')
+    @CommandArgument('--verbose', '-v', action='store_true',
+        help='Print verbose output.')
+    def environment(self, verbose=False):
+        import platform
+        print('platform:\n\t%s' % platform.platform())
+        print('python version:\n\t%s' % sys.version)
+        print('python prefix:\n\t%s' % sys.prefix)
+        print('mach cwd:\n\t%s' % self.context.cwd)
+        print('os cwd:\n\t%s' % os.getcwd())
+        print('mach directory:\n\t%s' % self.context.topdir)
+        print('state directory:\n\t%s' % self.context.state_dir)
+
+        mb = MozbuildObject(self.context.topdir, self.context.settings,
+            self.context.log_manager)
+
+        mozconfig = None
+
+        try:
+            mozconfig = mb.mozconfig
+            print('mozconfig path:\n\t%s' % mozconfig['path'])
+        except MozconfigFindException as e:
+            print('Unable to find mozconfig: %s' % e.message)
+            return 1
+
+        except MozconfigLoadException as e:
+            print('Error loading mozconfig: %s' % e.path)
+            print(e.message)
+
+            if e.output:
+                print('mozconfig evaluation output:')
+                for line in e.output:
+                    print(line)
+
+            return 1
+
+        print('object directory:\n\t%s' % mb.topobjdir)
+
+        if mozconfig:
+            print('mozconfig configure args:')
+            if mozconfig['configure_args']:
+                for arg in mozconfig['configure_args']:
+                    print('\t%s' % arg)
+
+            print('mozconfig extra make args:')
+            if mozconfig['make_extra']:
+                for arg in mozconfig['make_extra']:
+                    print('\t%s' % arg)
+
+            print('mozconfig make flags:')
+            if mozconfig['make_flags']:
+                for arg in mozconfig['make_flags']:
+                    print('\t%s' % arg)
+
+        config = None
+
+        try:
+            config = mb.config_environment
+
+        except Exception:
+            pass
+
+        if config:
+            print('config topsrcdir:\n\t%s' % config.topsrcdir)
+            print('config topobjdir:\n\t%s' % config.topobjdir)
+
+            if verbose:
+                print('config substitutions:')
+                for k in sorted(config.substs):
+                    print('\t%s: %s' % (k, config.substs[k]))
+
+                print('config defines:')
+                for k in sorted(config.defines):
+                    print('\t%s' % k)

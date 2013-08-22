@@ -659,10 +659,6 @@ static inline mozilla::css::Side operator++(mozilla::css::Side& side, int) {
 // Note: make sure that the largest NS_STYLE_TEXT_ALIGN_* value is smaller than
 // the smallest NS_STYLE_VERTICAL_ALIGN_* value below!
 
-// See nsStyleText
-#define NS_STYLE_TEXT_BLINK_NONE                0
-#define NS_STYLE_TEXT_BLINK_BLINK               1
-
 // See nsStyleText, nsStyleFont
 #define NS_STYLE_TEXT_DECORATION_LINE_NONE         0
 #define NS_STYLE_TEXT_DECORATION_LINE_UNDERLINE    NS_FONT_DECORATION_UNDERLINE
@@ -752,6 +748,18 @@ static inline mozilla::css::Side operator++(mozilla::css::Side& side, int) {
 // See nsStyleText
 #define NS_STYLE_TEXT_SIZE_ADJUST_NONE          0
 #define NS_STYLE_TEXT_SIZE_ADJUST_AUTO          1
+
+// See nsStyleText
+#define NS_STYLE_TEXT_ORIENTATION_AUTO          0
+#define NS_STYLE_TEXT_ORIENTATION_UPRIGHT       1
+#define NS_STYLE_TEXT_ORIENTATION_SIDEWAYS      2
+
+// See nsStyleText
+#define NS_STYLE_TEXT_COMBINE_HORIZ_NONE        0
+#define NS_STYLE_TEXT_COMBINE_HORIZ_ALL         1
+#define NS_STYLE_TEXT_COMBINE_HORIZ_DIGITS_2    2
+#define NS_STYLE_TEXT_COMBINE_HORIZ_DIGITS_3    3
+#define NS_STYLE_TEXT_COMBINE_HORIZ_DIGITS_4    4
 
 // See nsStyleText
 #define NS_STYLE_LINE_HEIGHT_BLOCK_HEIGHT       0

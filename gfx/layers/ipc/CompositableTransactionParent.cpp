@@ -6,20 +6,29 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "CompositableTransactionParent.h"
-#include "ShadowLayers.h"
-#include "RenderTrace.h"
-#include "ShadowLayersManager.h"
-#include "CompositableHost.h"
-#include "mozilla/layers/ContentHost.h"
-#include "ShadowLayerParent.h"
-#include "TiledLayerBuffer.h"
+#include "CompositableHost.h"           // for CompositableParent, etc
+#include "CompositorParent.h"           // for CompositorParent
+#include "Layers.h"                     // for Layer
+#include "RenderTrace.h"                // for RenderTraceInvalidateEnd, etc
+#include "TiledLayerBuffer.h"           // for TiledLayerComposer
+#include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
+#include "mozilla/RefPtr.h"             // for RefPtr
+#include "mozilla/layers/CompositorTypes.h"
+#include "mozilla/layers/ContentHost.h"  // for ContentHostBase
 #include "mozilla/layers/LayerManagerComposite.h"
+#include "mozilla/layers/LayersSurfaces.h"  // for SurfaceDescriptor
+#include "mozilla/layers/LayersTypes.h"  // for MOZ_LAYERS_LOG
+#include "mozilla/layers/TextureHost.h"  // for TextureHost
 #include "mozilla/layers/ThebesLayerComposite.h"
-#include "mozilla/layers/TextureHost.h"
-#include "CompositorParent.h"
+#include "mozilla/mozalloc.h"           // for operator delete
+#include "nsDebug.h"                    // for NS_WARNING, NS_ASSERTION
+#include "nsRegion.h"                   // for nsIntRegion
 
 namespace mozilla {
 namespace layers {
+
+class BasicTiledLayerBuffer;
+class Compositor;
 
 template<typename T>
 CompositableHost* AsCompositable(const T& op)
@@ -196,8 +205,8 @@ CompositableParentManager::ReceiveCompositableUpdate(const CompositableOperation
       TiledLayerComposer* tileComposer = compositable->AsTiledLayerComposer();
       NS_ASSERTION(tileComposer, "compositable is not a tile composer");
 
-      BasicTiledLayerBuffer* p = reinterpret_cast<BasicTiledLayerBuffer*>(op.tiledLayerBuffer());
-      tileComposer->PaintedTiledLayerBuffer(p);
+      const SurfaceDescriptorTiles& tileDesc = op.tileLayerDescriptor();
+      tileComposer->PaintedTiledLayerBuffer(this, tileDesc);
       break;
     }
     case CompositableOperation::TOpUseTexture: {
@@ -273,13 +282,12 @@ CompositableParentManager::ReceiveCompositableUpdate(const CompositableOperation
       MOZ_ASSERT(compositable);
       RefPtr<TextureHost> texture = compositable->GetTextureHost(op.textureID());
       MOZ_ASSERT(texture);
-      if (op.region().type() == MaybeRegion::TnsIntRegion) {
-        nsIntRegion region = op.region().get_nsIntRegion();
-        texture->Updated(&region);
-      } else {
-        // no region means invalidate the entire surface
-        texture->Updated(nullptr);
-      }
+
+      texture->Updated(op.region().type() == MaybeRegion::TnsIntRegion
+                       ? &op.region().get_nsIntRegion()
+                       : nullptr); // no region means invalidate the entire surface
+
+
       compositable->UseTextureHost(texture);
 
       break;

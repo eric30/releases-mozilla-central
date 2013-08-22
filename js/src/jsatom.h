@@ -9,16 +9,11 @@
 
 #include "mozilla/HashFunctions.h"
 
-#include <stddef.h>
-
-#include "jsalloc.h"
-#include "jsapi.h"
-#include "jsprvtd.h"
-#include "jspubtd.h"
-
 #include "gc/Barrier.h"
-#include "js/HashTable.h"
+#include "gc/Rooting.h"
 #include "vm/CommonPropertyNames.h"
+
+class JSAtom;
 
 struct JSIdArray {
     int length;
@@ -158,7 +153,6 @@ extern const char js_typeof_str[];
 extern const char js_void_str[];
 extern const char js_while_str[];
 extern const char js_with_str[];
-extern const char js_yield_str[];
 
 namespace js {
 
@@ -169,7 +163,7 @@ extern const char * const TypeStrings[];
  * memory. The caller must zero rt->atomState before calling this function and
  * only call it after js_InitGC successfully returns.
  */
-extern JSBool
+extern bool
 InitAtoms(JSRuntime *rt);
 
 /*
@@ -217,6 +211,14 @@ AtomizeString(ExclusiveContext *cx, JSString *str, js::InternBehavior ib = js::D
 template <AllowGC allowGC>
 extern JSAtom *
 ToAtom(ExclusiveContext *cx, typename MaybeRooted<Value, allowGC>::HandleType v);
+
+enum XDRMode {
+    XDR_ENCODE,
+    XDR_DECODE
+};
+
+template <XDRMode mode>
+class XDRState;
 
 template<XDRMode mode>
 bool

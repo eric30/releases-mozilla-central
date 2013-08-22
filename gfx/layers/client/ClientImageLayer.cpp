@@ -3,10 +3,22 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "ClientLayerManager.h"
-#include "mozilla/layers/LayerTransaction.h"
-#include "mozilla/layers/ImageClient.h"
-#include "ImageContainer.h"
+#include "ClientLayerManager.h"         // for ClientLayerManager, etc
+#include "ImageContainer.h"             // for AutoLockImage, etc
+#include "ImageLayers.h"                // for ImageLayer
+#include "gfxASurface.h"                // for gfxASurface
+#include "mozilla/Attributes.h"         // for MOZ_OVERRIDE
+#include "mozilla/RefPtr.h"             // for RefPtr
+#include "mozilla/layers/CompositorTypes.h"
+#include "mozilla/layers/ImageClient.h"  // for ImageClient, etc
+#include "mozilla/layers/LayerTransaction.h"  // for ImageLayerAttributes, etc
+#include "mozilla/mozalloc.h"           // for operator delete, etc
+#include "nsAutoPtr.h"                  // for nsRefPtr, getter_AddRefs, etc
+#include "nsCOMPtr.h"                   // for already_AddRefed
+#include "nsDebug.h"                    // for NS_ASSERTION
+#include "nsISupportsImpl.h"            // for Layer::AddRef, etc
+#include "nsRegion.h"                   // for nsIntRegion
+#include "nsTraceRefcnt.h"              // for MOZ_COUNT_CTOR, etc
 
 using namespace mozilla::gfx;
 
@@ -17,7 +29,8 @@ class ClientImageLayer : public ImageLayer,
                          public ClientLayer {
 public:
   ClientImageLayer(ClientLayerManager* aLayerManager)
-    : ImageLayer(aLayerManager, static_cast<ClientLayer*>(this))
+    : ImageLayer(aLayerManager,
+                 static_cast<ClientLayer*>(MOZ_THIS_IN_INITIALIZER_LIST()))
     , mImageClientTypeContainer(BUFFER_UNKNOWN)
   {
     MOZ_COUNT_CTOR(ClientImageLayer);
@@ -65,7 +78,7 @@ public:
   void DestroyBackBuffer()
   {
     if (mImageClient) {
-      mImageClient->Detach();
+      mImageClient->OnDetach();
       mImageClient = nullptr;
     }
   }
@@ -125,11 +138,13 @@ ClientImageLayer::RenderLayer()
     if (type == BUFFER_UNKNOWN) {
       return;
     }
+    TextureFlags flags = TEXTURE_FLAGS_DEFAULT;
+    if (mDisallowBigImage) {
+      flags |= TEXTURE_DISALLOW_BIGIMAGE;
+    }
     mImageClient = ImageClient::CreateImageClient(type,
                                                   ClientManager(),
-                                                  mDisallowBigImage
-                                                    ? TEXTURE_DISALLOW_BIGIMAGE
-                                                    : 0);
+                                                  flags);
     if (type == BUFFER_BRIDGE) {
       static_cast<ImageClientBridge*>(mImageClient.get())->SetLayer(this);
     }

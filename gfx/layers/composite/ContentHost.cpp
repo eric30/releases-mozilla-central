@@ -4,12 +4,26 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/layers/ContentHost.h"
-#include "mozilla/layers/Effects.h"
-#include "nsPrintfCString.h"
-#include "gfx2DGlue.h"
+#include "LayersLogging.h"              // for AppendToString
+#include "gfx2DGlue.h"                  // for ContentForFormat
+#include "gfxPoint.h"                   // for gfxIntSize
+#include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
+#include "mozilla/gfx/BaseRect.h"       // for BaseRect
+#include "mozilla/layers/Compositor.h"  // for Compositor
+#include "mozilla/layers/Effects.h"     // for TexturedEffect, Effect, etc
+#include "mozilla/layers/LayerTransaction.h"  // for ThebesBufferData
+#include "nsAString.h"
+#include "nsPrintfCString.h"            // for nsPrintfCString
+#include "nsString.h"                   // for nsAutoCString
+
+class gfxImageSurface;
 
 namespace mozilla {
+namespace gfx {
+class Matrix4x4;
+}
 using namespace gfx;
+
 namespace layers {
 
 ContentHostBase::ContentHostBase(const TextureInfo& aTextureInfo)
@@ -208,6 +222,8 @@ ContentHostBase::SetCompositor(Compositor* aCompositor)
   }
 }
 
+#ifdef MOZ_DUMP_PAINTING
+
 void
 ContentHostBase::Dump(FILE* aFile,
                       const char* aPrefix,
@@ -236,6 +252,8 @@ ContentHostBase::Dump(FILE* aFile,
   }
 
 }
+
+#endif
 
 ContentHostSingleBuffered::~ContentHostSingleBuffered()
 {
@@ -725,6 +743,7 @@ ContentHostDoubleBuffered::PrintInfo(nsACString& aTo, const char* aPrefix)
 }
 #endif
 
+#ifdef MOZ_DUMP_PAINTING
 void
 ContentHostDoubleBuffered::Dump(FILE* aFile,
                                 const char* aPrefix,
@@ -754,6 +773,7 @@ ContentHostDoubleBuffered::Dump(FILE* aFile,
   }
 
 }
+#endif
 
 LayerRenderState
 ContentHostBase::GetRenderState()

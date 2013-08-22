@@ -3,18 +3,30 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "ipc/AutoOpenSurface.h"
 #include "ImageHost.h"
+#include "LayersLogging.h"              // for AppendToString
+#include "composite/CompositableHost.h"  // for CompositableHost, etc
+#include "ipc/IPCMessageUtils.h"        // for null_t
+#include "mozilla/layers/Compositor.h"  // for Compositor
+#include "mozilla/layers/Effects.h"     // for TexturedEffect, Effect, etc
+#include "nsAString.h"
+#include "nsDebug.h"                    // for NS_WARNING, NS_ASSERTION
+#include "nsPrintfCString.h"            // for nsPrintfCString
+#include "nsString.h"                   // for nsAutoCString
 
-#include "mozilla/layers/Effects.h"
-#include "LayersLogging.h"
-#include "nsPrintfCString.h"
+class gfxImageSurface;
+class nsIntRegion;
 
 namespace mozilla {
+namespace gfx {
+class Matrix4x4;
+}
 
 using namespace gfx;
 
 namespace layers {
+
+class ISurfaceAllocator;
 
 ImageHost::ImageHost(const TextureInfo& aTextureInfo)
   : CompositableHost(aTextureInfo)
@@ -149,6 +161,8 @@ ImageHost::PrintInfo(nsACString& aTo, const char* aPrefix)
 }
 #endif
 
+
+#ifdef MOZ_DUMP_PAINTING
 void
 ImageHost::Dump(FILE* aFile,
                 const char* aPrefix,
@@ -165,6 +179,7 @@ ImageHost::Dump(FILE* aFile,
     fprintf(aFile, aDumpHtml ? " </li></ul> " : " ");
   }
 }
+#endif
 
 LayerRenderState
 ImageHost::GetRenderState()
@@ -356,6 +371,7 @@ DeprecatedImageHostBuffered::MakeDeprecatedTextureHost(TextureIdentifier aTextur
   }
 }
 
+#ifdef MOZ_DUMP_PAINTING
 void
 DeprecatedImageHostSingle::Dump(FILE* aFile,
                                 const char* aPrefix,
@@ -373,7 +389,6 @@ DeprecatedImageHostSingle::Dump(FILE* aFile,
   }
 }
 
-#ifdef MOZ_DUMP_PAINTING
 already_AddRefed<gfxImageSurface>
 DeprecatedImageHostSingle::GetAsSurface()
 {

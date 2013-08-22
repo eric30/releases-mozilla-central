@@ -3,16 +3,29 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/layers/PLayerTransactionParent.h"
-#include "BasicLayersImpl.h"
-#include "SharedTextureImage.h"
-#include "gfxUtils.h"
-#include "gfxSharedImageSurface.h"
-#include "mozilla/layers/ImageClient.h"
-#include "mozilla/layers/TextureClient.h"
+#include "./../mozilla-config.h"        // for MOZ_X11
+#include "BasicLayersImpl.h"            // for FillWithMask, etc
+#include "ImageContainer.h"             // for AutoLockImage, etc
+#include "ImageLayers.h"                // for ImageLayer
+#include "Layers.h"                     // for Layer (ptr only), etc
+#include "basic/BasicImplData.h"        // for BasicImplData
+#include "basic/BasicLayers.h"          // for BasicLayerManager
+#include "gfxASurface.h"                // for gfxASurface, etc
+#include "gfxContext.h"                 // for gfxContext
+#include "gfxPattern.h"                 // for gfxPattern, etc
+#include "gfxPoint.h"                   // for gfxIntSize
+#include "gfxUtils.h"                   // for gfxUtils
 #ifdef MOZ_X11
-#include "gfxXlibSurface.h"
+#include "gfxXlibSurface.h"             // for gfxXlibSurface
 #endif
+#include "mozilla/mozalloc.h"           // for operator new
+#include "nsAutoPtr.h"                  // for nsRefPtr, getter_AddRefs, etc
+#include "nsCOMPtr.h"                   // for already_AddRefed
+#include "nsDebug.h"                    // for NS_ASSERTION
+#include "nsISupportsImpl.h"            // for gfxPattern::Release, etc
+#include "nsRect.h"                     // for nsIntRect
+#include "nsRegion.h"                   // for nsIntRegion
+#include "nsTraceRefcnt.h"              // for MOZ_COUNT_CTOR, etc
 
 using namespace mozilla::gfx;
 
@@ -22,7 +35,8 @@ namespace layers {
 class BasicImageLayer : public ImageLayer, public BasicImplData {
 public:
   BasicImageLayer(BasicLayerManager* aLayerManager) :
-    ImageLayer(aLayerManager, static_cast<BasicImplData*>(this)),
+    ImageLayer(aLayerManager,
+               static_cast<BasicImplData*>(MOZ_THIS_IN_INITIALIZER_LIST())),
     mSize(-1, -1)
   {
     MOZ_COUNT_CTOR(BasicImageLayer);

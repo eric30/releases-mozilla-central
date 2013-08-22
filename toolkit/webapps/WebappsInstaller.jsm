@@ -15,6 +15,7 @@ Cu.import("resource://gre/modules/NetUtil.jsm");
 Cu.import("resource://gre/modules/osfile.jsm");
 Cu.import("resource://gre/modules/WebappOSUtils.jsm");
 Cu.import("resource://gre/modules/AppsUtils.jsm");
+Cu.import("resource://gre/modules/Task.jsm");
 
 this.WebappsInstaller = {
   shell: null,
@@ -177,7 +178,8 @@ NativeApp.prototype = {
       "registryDir": registryFolder.path,
       "app": {
         "manifest": aManifest,
-        "origin": aData.app.origin
+        "origin": aData.app.origin,
+        "manifestURL": aData.app.manifestURL
       }
     };
 
@@ -639,6 +641,7 @@ MacNativeApp.prototype = {
     writer.setString("Webapp", "Name", this.appName);
     writer.setString("Webapp", "Profile", this.appProfileDir.leafName);
     writer.writeFile();
+    applicationINI.permissions = FileUtils.PERMS_FILE;
 
     // ${InstallDir}/Contents/Info.plist
     let infoPListContent = '<?xml version="1.0" encoding="UTF-8"?>\n\
@@ -825,7 +828,7 @@ LinuxNativeApp.prototype = {
                     .getService(Ci.nsIToolkitProfileService);
 
     try {
-      this.appProfile = profSvc.createDefaultProfileForApp(this.installDir.leafName,
+      this.appProfile = profSvc.createDefaultProfileForApp(this.uniqueName,
                                                            null, null);
     } catch (ex if ex.result == Cr.NS_ERROR_ALREADY_INITIALIZED) {}
   },
@@ -956,9 +959,12 @@ LinuxNativeApp.prototype = {
  * @param aData     a string with the data to be written
  */
 function writeToFile(aFile, aData) {
-  let path = aFile.path;
-  let data = new TextEncoder().encode(aData);
-  return OS.File.writeAtomic(path, data, { tmpPath: path + ".tmp" });
+  return Task.spawn(function() {
+    let data = new TextEncoder().encode(aData);
+    let file = yield OS.File.open(aFile.path, { truncate: true }, { unixMode: FileUtils.PERMS_FILE });
+    yield file.write(data);
+    yield file.close();
+  });
 }
 
 /**

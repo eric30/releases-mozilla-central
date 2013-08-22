@@ -257,7 +257,6 @@ pref("layers.async-pan-zoom.enabled", true);
 pref("notification.feature.enabled", true);
 
 // IndexedDB
-pref("indexedDB.feature.enabled", true);
 pref("dom.indexedDB.warningQuota", 5);
 
 // prevent video elements from preloading too much data
@@ -747,3 +746,7 @@ pref("disk_space_watcher.enabled", true);
 // Enable promise
 pref("dom.promise.enabled", false);
 
+// Allow ADB to run for this many hours before disabling
+// (only applies when marionette is disabled)
+// 0 disables the timer.
+pref("b2g.adb.timeout-hours", 12);

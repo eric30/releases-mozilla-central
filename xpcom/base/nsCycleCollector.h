@@ -41,12 +41,7 @@ public:
 
 bool nsCycleCollector_init();
 
-enum CCThreadingModel {
-    CCSingleThread,
-    CCWithTraverseThread
-};
-
-nsresult nsCycleCollector_startup(CCThreadingModel aThreadingModel);
+void nsCycleCollector_startup();
 
 typedef void (*CC_BeforeUnlinkCallback)(void);
 void nsCycleCollector_setBeforeUnlinkCallback(CC_BeforeUnlinkCallback aCB);
@@ -64,7 +59,6 @@ void nsCycleCollector_collect(bool aManuallyTriggered,
                               nsCycleCollectorResults *aResults,
                               nsICycleCollectorListener *aListener);
 uint32_t nsCycleCollector_suspectedCount();
-void nsCycleCollector_shutdownThreads();
 void nsCycleCollector_shutdown();
 
 // Helpers for interacting with JS
@@ -86,7 +80,7 @@ namespace cyclecollector {
 void AddJSHolder(void* aHolder, nsScriptObjectTracer* aTracer);
 void RemoveJSHolder(void* aHolder);
 #ifdef DEBUG
-bool TestJSHolder(void* aHolder);
+bool IsJSHolder(void* aHolder);
 #endif
 
 void DeferredFinalize(DeferredFinalizeAppendFunction aAppendFunc,

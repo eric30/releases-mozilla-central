@@ -36,22 +36,16 @@ SocialUI = {
     Services.obs.addObserver(this, "social:frameworker-error", false);
     Services.obs.addObserver(this, "social:provider-set", false);
     Services.obs.addObserver(this, "social:providers-changed", false);
+    Services.obs.addObserver(this, "social:provider-reload", false);
 
     Services.prefs.addObserver("social.sidebar.open", this, false);
     Services.prefs.addObserver("social.toast-notifications.enabled", this, false);
 
     gBrowser.addEventListener("ActivateSocialFeature", this._activationEventHandler.bind(this), true, true);
 
-    SocialChatBar.init();
-    SocialMark.init();
-    SocialShare.init();
-    SocialMenu.init();
-    SocialToolbar.init();
-    SocialSidebar.init();
-
     if (!Social.initialized) {
       Social.init();
-    } else {
+    } else if (Social.enabled) {
       // social was previously initialized, so it's not going to notify us of
       // anything, so handle that now.
       this.observe(null, "social:providers-changed", null);
@@ -67,6 +61,7 @@ SocialUI = {
     Services.obs.removeObserver(this, "social:frameworker-error");
     Services.obs.removeObserver(this, "social:provider-set");
     Services.obs.removeObserver(this, "social:providers-changed");
+    Services.obs.removeObserver(this, "social:provider-reload");
 
     Services.prefs.removeObserver("social.sidebar.open", this);
     Services.prefs.removeObserver("social.toast-notifications.enabled", this);
@@ -81,6 +76,16 @@ SocialUI = {
     // manually :(
     try {
       switch (topic) {
+        case "social:provider-reload":
+          // if the reloaded provider is our current provider, fall through
+          // to social:provider-set so the ui will be reset
+          if (!Social.provider || Social.provider.origin != data)
+            return;
+          // be sure to unload the sidebar as it will not reload if the origin
+          // has not changed, it will be loaded in provider-set below. Other
+          // panels will be unloaded or handle reload.
+          SocialSidebar.unloadSidebar();
+          // fall through to social:provider-set
         case "social:provider-set":
           // Social.provider has changed (possibly to null), update any state
           // which depends on it.
@@ -88,7 +93,6 @@ SocialUI = {
           this._updateMenuItems();
 
           SocialFlyout.unload();
-          SocialChatBar.closeWindows();
           SocialChatBar.update();
           SocialShare.update();
           SocialSidebar.update();
@@ -150,7 +154,7 @@ SocialUI = {
 
   // Miscellaneous helpers
   showProfile: function SocialUI_showProfile() {
-    if (Social.haveLoggedInUser())
+    if (Social.provider.haveLoggedInUser())
       openUILinkIn(Social.provider.profile.profileURL, "tab");
     else {
       // XXX Bug 789585 will implement an API for provider-specified login pages.
@@ -346,23 +350,13 @@ SocialUI = {
 }
 
 SocialChatBar = {
-  init: function() {
-  },
-  closeWindows: function() {
-    // close all windows of type Social:Chat
-    let windows = Services.wm.getEnumerator("Social:Chat");
-    while (windows.hasMoreElements()) {
-      let win = windows.getNext();
-      win.close();
-    }
-  },
   get chatbar() {
     return document.getElementById("pinnedchats");
   },
   // Whether the chatbar is available for this window.  Note that in full-screen
   // mode chats are available, but not shown.
   get isAvailable() {
-    return SocialUI.enabled && Social.haveLoggedInUser();
+    return SocialUI.enabled;
   },
   // Does this chatbar have any chats (whether minimized, collapsed or normal)
   get hasChats() {
@@ -382,7 +376,6 @@ SocialChatBar = {
   update: function() {
     let command = document.getElementById("Social:FocusChat");
     if (!this.isAvailable) {
-      this.chatbar.removeAll();
       this.chatbar.hidden = command.hidden = true;
     } else {
       this.chatbar.hidden = command.hidden = false;
@@ -586,9 +579,6 @@ SocialFlyout = {
 }
 
 SocialShare = {
-  // Called once, after window load, when the Social.provider object is initialized
-  init: function() {},
-
   get panel() {
     return document.getElementById("social-share-panel");
   },
@@ -846,10 +836,6 @@ SocialShare = {
 };
 
 SocialMark = {
-  // Called once, after window load, when the Social.provider object is initialized
-  init: function SSB_init() {
-  },
-
   get button() {
     return document.getElementById("social-mark-button");
   },
@@ -925,9 +911,6 @@ SocialMark = {
 };
 
 SocialMenu = {
-  init: function SocialMenu_init() {
-  },
-
   populate: function SocialMenu_populate() {
     let submenu = document.getElementById("menu_social-statusarea-popup");
     let ambientMenuItems = submenu.getElementsByClassName("ambient-menuitem");
@@ -961,8 +944,10 @@ SocialMenu = {
 SocialToolbar = {
   // Called once, after window load, when the Social.provider object is
   // initialized.
-  init: function SocialToolbar_init() {
+  get _dynamicResizer() {
+    delete this._dynamicResizer;
     this._dynamicResizer = new DynamicResizeWatcher();
+    return this._dynamicResizer;
   },
 
   update: function() {
@@ -1003,22 +988,20 @@ SocialToolbar = {
     let toggleNotificationsCommand = document.getElementById("Social:ToggleNotifications");
     toggleNotificationsCommand.setAttribute("hidden", !socialEnabled);
 
-    if (!Social.haveLoggedInUser() || !socialEnabled) {
-      let parent = document.getElementById("social-notification-panel");
-      while (parent.hasChildNodes()) {
-        let frame = parent.firstChild;
-        SharedFrame.forgetGroup(frame.id);
-        parent.removeChild(frame);
-      }
+    let parent = document.getElementById("social-notification-panel");
+    while (parent.hasChildNodes()) {
+      let frame = parent.firstChild;
+      SharedFrame.forgetGroup(frame.id);
+      parent.removeChild(frame);
+    }
 
-      let tbi = document.getElementById("social-toolbar-item");
-      if (tbi) {
-        // SocialMark is the last button allways
-        let next = SocialMark.button.previousSibling;
-        while (next != this.button) {
-          tbi.removeChild(next);
-          next = SocialMark.button.previousSibling;
-        }
+    let tbi = document.getElementById("social-toolbar-item");
+    if (tbi) {
+      // SocialMark is the last button allways
+      let next = SocialMark.button.previousSibling;
+      while (next != this.button) {
+        tbi.removeChild(next);
+        next = SocialMark.button.previousSibling;
       }
     }
   },
@@ -1062,7 +1045,7 @@ SocialToolbar = {
     // provider.profile == undefined means no response yet from the provider
     // to tell us whether the user is logged in or not.
     if (!SocialUI.enabled ||
-        (!Social.haveLoggedInUser() && Social.provider.profile !== undefined)) {
+        (!Social.provider.haveLoggedInUser() && Social.provider.profile !== undefined)) {
       // Either no enabled provider, or there is a provider and it has
       // responded with a profile and the user isn't loggedin.  The icons
       // etc have already been removed by updateButtonHiddenState, so we want
@@ -1299,14 +1282,6 @@ SocialToolbar = {
 }
 
 SocialSidebar = {
-  // Called once, after window load, when the Social.provider object is initialized
-  init: function SocialSidebar_init() {
-    let sbrowser = document.getElementById("social-sidebar-browser");
-    Social.setErrorListener(sbrowser, this.setSidebarErrorMessage.bind(this));
-    // setting isAppTab causes clicks on untargeted links to open new tabs
-    sbrowser.docShell.isAppTab = true;
-  },
-
   // Whether the sidebar can be shown for this window.
   get canShow() {
     return SocialUI.enabled && Social.provider.sidebarURL;
@@ -1367,6 +1342,9 @@ SocialSidebar = {
 
       // Make sure the right sidebar URL is loaded
       if (sbrowser.getAttribute("src") != Social.provider.sidebarURL) {
+        Social.setErrorListener(sbrowser, this.setSidebarErrorMessage.bind(this));
+        // setting isAppTab causes clicks on untargeted links to open new tabs
+        sbrowser.docShell.isAppTab = true;
         sbrowser.setAttribute("src", Social.provider.sidebarURL);
         PopupNotifications.locationChange(sbrowser);
       }

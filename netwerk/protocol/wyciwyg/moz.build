@@ -10,10 +10,6 @@ XPIDL_SOURCES += [
 
 XPIDL_MODULE = 'necko_wyciwyg'
 
-XPIDL_FLAGS += [
-    '-I$(topsrcdir)/netwerk/base/public',
-]
-
 MODULE = 'necko'
 
 EXPORTS.mozilla.net += [
@@ -32,3 +28,8 @@ CPP_SOURCES += [
 IPDL_SOURCES += [
     'PWyciwygChannel.ipdl',
 ]
+
+FAIL_ON_WARNINGS = True
+
+LIBXUL_LIBRARY = True
+

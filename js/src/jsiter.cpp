@@ -169,10 +169,10 @@ struct SortComparatorIds
     bool operator()(jsid a, jsid b, bool *lessOrEqualp)
     {
         /* Pick an arbitrary total order on jsids that is stable across executions. */
-        JSString *astr = IdToString(cx, a);
+        RootedString astr(cx, IdToString(cx, a));
 	if (!astr)
 	    return false;
-        JSString *bstr = IdToString(cx, b);
+        RootedString bstr(cx, IdToString(cx, b));
         if (!bstr)
             return false;
 
@@ -730,7 +730,7 @@ js::GetIteratorObject(JSContext *cx, HandleObject obj, uint32_t flags)
     return &value.toObject();
 }
 
-JSBool
+bool
 js_ThrowStopIteration(JSContext *cx)
 {
     JS_ASSERT(!JS_IsExceptionPending(cx));
@@ -763,7 +763,7 @@ js::IteratorConstructor(JSContext *cx, unsigned argc, Value *vp)
 }
 
 JS_ALWAYS_INLINE bool
-IsIterator(const Value &v)
+IsIterator(HandleValue v)
 {
     return v.isObject() && v.toObject().hasClass(&PropertyIteratorObject::class_);
 }
@@ -808,7 +808,7 @@ static const JSFunctionSpec iterator_methods[] = {
 };
 
 static JSObject *
-iterator_iteratorObject(JSContext *cx, HandleObject obj, JSBool keysonly)
+iterator_iteratorObject(JSContext *cx, HandleObject obj, bool keysonly)
 {
     return obj;
 }
@@ -876,7 +876,7 @@ ElementIteratorObject::create(JSContext *cx, Handle<Value> target)
 }
 
 static bool
-IsElementIterator(const Value &v)
+IsElementIterator(HandleValue v)
 {
     return v.isObject() && v.toObject().is<ElementIteratorObject>();
 }
@@ -957,7 +957,7 @@ const JSFunctionSpec ElementIteratorObject::methods[] = {
     JS_FS_END
 };
 
-static JSBool
+static bool
 CloseGenerator(JSContext *cx, HandleObject genobj);
 
 bool
@@ -1287,8 +1287,8 @@ js_IteratorNext(JSContext *cx, HandleObject iterobj, MutableHandleValue rval)
     return true;
 }
 
-static JSBool
-stopiter_hasInstance(JSContext *cx, HandleObject obj, MutableHandleValue v, JSBool *bp)
+static bool
+stopiter_hasInstance(JSContext *cx, HandleObject obj, MutableHandleValue v, bool *bp)
 {
     *bp = IsStopIteration(v);
     return true;
@@ -1475,6 +1475,13 @@ js_NewGenerator(JSContext *cx, const FrameRegs &stackRegs)
     JS_ASSERT(stackRegs.stackDepth() == 0);
     StackFrame *stackfp = stackRegs.fp();
 
+    JS_ASSERT(stackfp->script()->isGenerator());
+
+    if (stackfp->script()->isStarGenerator()) {
+        JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_ES6_UNIMPLEMENTED);
+        return NULL;
+    }
+
     Rooted<GlobalObject*> global(cx, &stackfp->global());
     RootedObject obj(cx);
     {
@@ -1539,7 +1546,7 @@ typedef enum JSGeneratorOp {
  * Start newborn or restart yielding generator and perform the requested
  * operation inside its frame.
  */
-static JSBool
+static bool
 SendToGenerator(JSContext *cx, JSGeneratorOp op, HandleObject obj,
                 JSGenerator *gen, HandleValue arg)
 {
@@ -1578,7 +1585,7 @@ SendToGenerator(JSContext *cx, JSGeneratorOp op, HandleObject obj,
         break;
     }
 
-    JSBool ok;
+    bool ok;
     {
         GeneratorState state(cx, gen, futureState);
         ok = RunScript(cx, state);
@@ -1615,7 +1622,7 @@ SendToGenerator(JSContext *cx, JSGeneratorOp op, HandleObject obj,
     return false;
 }
 
-static JSBool
+static bool
 CloseGenerator(JSContext *cx, HandleObject obj)
 {
     JSGenerator *gen = obj->as<GeneratorObject>().getGenerator();
@@ -1633,7 +1640,7 @@ CloseGenerator(JSContext *cx, HandleObject obj)
 }
 
 JS_ALWAYS_INLINE bool
-IsGenerator(const Value &v)
+IsGenerator(HandleValue v)
 {
     return v.isObject() && v.toObject().is<GeneratorObject>();
 }

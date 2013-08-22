@@ -74,13 +74,17 @@ var SelectionHandler = {
             this.copySelection();
           else
             this._closeSelection();
+        } else if (this._activeType == this.TYPE_CURSOR) {
+          // attachCaret() is called in the "Gesture:SingleTap" handler in BrowserEventHandler
+          // We're guaranteed to call this first, because this observer was added last
+          this._closeSelection();
         }
         break;
       }
       case "Tab:Selected":
         this._closeSelection();
         break;
-  
+
       case "Window:Resize": {
         if (this._activeType == this.TYPE_SELECTION) {
           // Knowing when the page is done drawing is hard, so let's just cancel
@@ -174,6 +178,20 @@ var SelectionHandler = {
     };
   },
 
+  notifySelectionChanged: function sh_notifySelectionChanged(aDocument, aSelection, aReason) {
+    // If the selection was collapsed to Start or to End, always close it
+    if ((aReason & Ci.nsISelectionListener.COLLAPSETOSTART_REASON) ||
+        (aReason & Ci.nsISelectionListener.COLLAPSETOEND_REASON)) {
+      this._closeSelection();
+      return;
+    }
+
+    // If selected text no longer exists, close
+    if (!aSelection.toString()) {
+      this._closeSelection();
+    }
+  },
+
   /*
    * Called from browser.js when the user long taps on text or chooses
    * the "Select Word" context menu item. Initializes SelectionHandler,
@@ -192,16 +210,19 @@ var SelectionHandler = {
     this._contentWindow.getSelection().removeAllRanges();
 
     if (!this._domWinUtils.selectAtPoint(aX, aY, Ci.nsIDOMWindowUtils.SELECT_WORDNOSPACE)) {
-      this._onFail("failed to set selection at point");
+      this._closeSelection();
       return;
     }
 
     let selection = this._getSelection();
     // If the range didn't have any text, let's bail
-    if (!selection) {
-      this._onFail("no selection was present");
+    if (!selection || selection.rangeCount == 0) {
+      this._closeSelection();
       return;
     }
+
+    // Add a listener to end the selection if it's removed programatically
+    selection.QueryInterface(Ci.nsISelectionPrivate).addSelectionListener(this);
 
     // Initialize the cache
     this._cache = { start: {}, end: {}};
@@ -453,16 +474,6 @@ var SelectionHandler = {
   },
 
   /*
-   * Called if for any reason we fail during the selection
-   * process. Cancels the selection.
-   */
-  _onFail: function sh_onFail(aDbgMessage) {
-    if (aDbgMessage && aDbgMessage.length > 0)
-      Cu.reportError("SelectionHandler - " + aDbgMessage);
-    this._closeSelection();
-  },
-
-  /*
    * Shuts SelectionHandler down.
    */
   _closeSelection: function sh_closeSelection() {
@@ -473,7 +484,10 @@ var SelectionHandler = {
     if (this._activeType == this.TYPE_SELECTION) {
       let selection = this._getSelection();
       if (selection) {
-        selection.removeAllRanges();
+        // Remove our listener before we clear the selection
+        selection.QueryInterface(Ci.nsISelectionPrivate).removeSelectionListener(this);
+        // Clear selection without clearing the anchorNode or focusNode
+        selection.collapseToStart();
       }
     }
 

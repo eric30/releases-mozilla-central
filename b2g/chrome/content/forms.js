@@ -200,7 +200,8 @@ let FormAssistant = {
   },
 
   ignoredInputTypes: new Set([
-    'button', 'file', 'checkbox', 'radio', 'reset', 'submit', 'image'
+    'button', 'file', 'checkbox', 'radio', 'reset', 'submit', 'image',
+    'range'
   ]),
 
   isKeyboardOpened: false,
@@ -211,6 +212,7 @@ let FormAssistant = {
   scrollIntoViewTimeout: null,
   _focusedElement: null,
   _focusCounter: 0, // up one for every time we focus a new element
+  _observer: null,
   _documentEncoder: null,
   _editor: null,
   _editing: false,
@@ -229,12 +231,18 @@ let FormAssistant = {
   },
 
   setFocusedElement: function fa_setFocusedElement(element) {
+    let self = this;
+
     if (element === this.focusedElement)
       return;
 
     if (this.focusedElement) {
       this.focusedElement.removeEventListener('mousedown', this);
       this.focusedElement.removeEventListener('mouseup', this);
+      if (this._observer) {
+        this._observer.disconnect();
+        this._observer = null;
+      }
       if (!element) {
         this.focusedElement.blur();
       }
@@ -264,6 +272,24 @@ let FormAssistant = {
         // element.
         this._editor.addEditorObserver(this);
       }
+
+      // If our focusedElement is removed from DOM we want to handle it properly
+      let MutationObserver = element.ownerDocument.defaultView.MutationObserver;
+      this._observer = new MutationObserver(function(mutations) {
+        var del = [].some.call(mutations, function(m) {
+          return [].some.call(m.removedNodes, function(n) {
+            return n === element;
+          });
+        });
+        if (del && element === this.focusedElement) {
+          // item was deleted, fake a blur so all state gets set correctly
+          self.handleEvent({ target: element, type: "blur" });
+        }
+      });
+
+      this._observer.observe(element.parentNode, {
+        childList: true
+      });
     }
 
     this.focusedElement = element;
@@ -300,7 +326,10 @@ let FormAssistant = {
           break;
         }
 
-        if (target instanceof HTMLDocument || target == content) {
+        if (target instanceof HTMLDocument ||
+            // Bug 811177, we don't support editing the entire document.
+            target instanceof HTMLBodyElement ||
+            target == content) {
           break;
         }
 
@@ -334,12 +363,20 @@ let FormAssistant = {
         break;
 
       case 'mousedown':
+         if (!this.focusedElement) {
+          break;
+        }
+
         // We only listen for this event on the currently focused element.
         // When the mouse goes down, note the cursor/selection position
         this.updateSelection();
         break;
 
       case 'mouseup':
+        if (!this.focusedElement) {
+          break;
+        }
+
         // We only listen for this event on the currently focused element.
         // When the mouse goes up, see if the cursor has moved (or the
         // selection changed) since the mouse went down. If it has, we
@@ -374,11 +411,17 @@ let FormAssistant = {
         break;
 
       case "input":
-        // When the text content changes, notify the keyboard
-        this.updateSelection();
+        if (this.focusedElement) {
+          // When the text content changes, notify the keyboard
+          this.updateSelection();
+        }
         break;
 
       case "keydown":
+        if (!this.focusedElement) {
+          break;
+        }
+
         // Don't monitor the text change resulting from key event.
         this._ignoreEditActionOnce = true;
 
@@ -390,6 +433,10 @@ let FormAssistant = {
         break;
 
       case "keyup":
+        if (!this.focusedElement) {
+          break;
+        }
+
         this._ignoreEditActionOnce = false;
         break;
     }
@@ -513,11 +560,8 @@ let FormAssistant = {
       }
 
       case "Forms:GetText": {
-        let isPlainTextField = target instanceof HTMLInputElement ||
-                               target instanceof HTMLTextAreaElement;
-        let value = isPlainTextField ?
-          target.value :
-          getContentEditableText(target);
+        let value = isContentEditable(target) ? getContentEditableText(target)
+                                              : target.value;
 
         if (json.offset && json.length) {
           value = value.substr(json.offset, json.length);
@@ -622,12 +666,8 @@ let FormAssistant = {
     let element = this.focusedElement;
     let range =  getSelectionRange(element);
 
-    let isPlainTextField = element instanceof HTMLInputElement ||
-                           element instanceof HTMLTextAreaElement;
-
-    let text = isPlainTextField ?
-      element.value :
-      getContentEditableText(element);
+    let text = isContentEditable(element) ? getContentEditableText(element)
+                                          : element.value;
 
     let textAround = getTextAroundCursor(text, range);
 
@@ -652,6 +692,9 @@ let FormAssistant = {
 
   // Notify when the selection range changes
   updateSelection: function fa_updateSelection() {
+    if (!this.focusedElement) {
+      return;
+    }
     let selectionInfo = this.getSelectionInfo();
     if (selectionInfo.changed) {
       sendAsyncMessage("Forms:SelectionChange", this.getSelectionInfo());
@@ -678,6 +721,15 @@ function isContentEditable(element) {
     return true;
 
   return element.ownerDocument && element.ownerDocument.designMode == "on";
+}
+
+function isPlainTextField(element) {
+  if (!element) {
+    return false;
+  }
+
+  return element instanceof HTMLInputElement ||
+         element instanceof HTMLTextAreaElement;
 }
 
 function getJSON(element, focusCounter) {
@@ -821,6 +873,10 @@ function getDocumentEncoder(element) {
 
 // Get the visible content text of a content editable element
 function getContentEditableText(element) {
+  if (!element || !isContentEditable(element)) {
+    return null;
+  }
+
   let doc = element.ownerDocument;
   let range = doc.createRange();
   range.selectNodeContents(element);
@@ -832,8 +888,7 @@ function getContentEditableText(element) {
 function getSelectionRange(element) {
   let start = 0;
   let end = 0;
-  if (element instanceof HTMLInputElement ||
-      element instanceof HTMLTextAreaElement) {
+  if (isPlainTextField(element)) {
     // Get the selection range of <input> and <textarea> elements
     start = element.selectionStart;
     end = element.selectionEnd;
@@ -841,8 +896,12 @@ function getSelectionRange(element) {
     // Get the selection range of contenteditable elements
     let win = element.ownerDocument.defaultView;
     let sel = win.getSelection();
-    start = getContentEditableSelectionStart(element, sel);
-    end = start + getContentEditableSelectionLength(element, sel);
+    if (sel) {
+      start = getContentEditableSelectionStart(element, sel);
+      end = start + getContentEditableSelectionLength(element, sel);
+    } else {
+      dump("Failed to get window.getSelection()\n");
+    }
    }
    return [start, end];
  }
@@ -864,18 +923,17 @@ function getContentEditableSelectionLength(element, selection) {
 }
 
 function setSelectionRange(element, start, end) {
-  let isPlainTextField = element instanceof HTMLInputElement ||
-                        element instanceof HTMLTextAreaElement;
+  let isTextField = isPlainTextField(element);
 
   // Check the parameters
 
-  if (!isPlainTextField && !isContentEditable(element)) {
+  if (!isTextField && !isContentEditable(element)) {
     // Skip HTMLOptionElement and HTMLSelectElement elements, as they don't
     // support the operation of setSelectionRange
     return;
   }
 
-  let text = isPlainTextField ? element.value : getContentEditableText(element);
+  let text = isTextField ? element.value : getContentEditableText(element);
   let length = text.length;
   if (start < 0) {
     start = 0;
@@ -887,7 +945,7 @@ function setSelectionRange(element, start, end) {
     start = end;
   }
 
-  if (isPlainTextField) {
+  if (isTextField) {
     // Set the selection range of <input> and <textarea> elements
     element.setSelectionRange(start, end, "forward");
   } else {
@@ -921,8 +979,7 @@ function setSelectionRange(element, start, end) {
 function getPlaintextEditor(element) {
   let editor = null;
   // Get nsIEditor
-  if (element instanceof HTMLInputElement ||
-      element instanceof HTMLTextAreaElement) {
+  if (isPlainTextField(element)) {
     // Get from the <input> and <textarea> elements
     editor = element.QueryInterface(Ci.nsIDOMNSEditableElement).editor;
   } else if (isContentEditable(element)) {

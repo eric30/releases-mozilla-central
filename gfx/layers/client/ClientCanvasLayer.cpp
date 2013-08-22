@@ -4,10 +4,21 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "ClientCanvasLayer.h"
-#include "gfxPlatform.h"
-#include "SurfaceStream.h"
-#include "SharedSurfaceGL.h"
-#include "SharedSurfaceEGL.h"
+#include "GLContext.h"                  // for GLContext
+#include "GLScreenBuffer.h"             // for GLScreenBuffer
+#include "GeckoProfilerImpl.h"          // for PROFILER_LABEL
+#include "SharedSurfaceEGL.h"           // for SurfaceFactory_EGLImage
+#include "SharedSurfaceGL.h"            // for SurfaceFactory_GLTexture, etc
+#include "SurfaceStream.h"              // for SurfaceStream, etc
+#include "SurfaceTypes.h"               // for SurfaceStreamType
+#include "ClientLayerManager.h"         // for ClientLayerManager, etc
+#include "mozilla/gfx/Point.h"          // for IntSize
+#include "mozilla/layers/CompositorTypes.h"
+#include "mozilla/layers/LayersTypes.h"
+#include "nsCOMPtr.h"                   // for already_AddRefed
+#include "nsISupportsImpl.h"            // for Layer::AddRef, etc
+#include "nsRect.h"                     // for nsIntRect
+#include "nsXULAppAPI.h"                // for XRE_GetProcessType, etc
 #ifdef MOZ_WIDGET_GONK
 #include "SharedSurfaceGralloc.h"
 #endif
@@ -86,13 +97,13 @@ ClientCanvasLayer::RenderLayer()
       flags |= TEXTURE_NEEDS_Y_FLIP;
     }
 
-    bool isCrossProcess = !(XRE_GetProcessType() == GeckoProcessType_Default);
-    //Append TEXTURE_DEALLOCATE_CLIENT flag for streaming buffer under OOPC case
-    if (isCrossProcess && mGLContext) {
-      GLScreenBuffer* screen = mGLContext->Screen();
-      if (screen && screen->Stream()) {
-        flags |= TEXTURE_DEALLOCATE_CLIENT;
-      }
+    if (!mGLContext) {
+      // GLContext's SurfaceStream handles ownership itself,
+      // and doesn't require layers to do any deallocation.
+      flags |= TEXTURE_DEALLOCATE_HOST;
+
+      // We don't support locking for buffer surfaces currently
+      flags |= TEXTURE_IMMEDIATE_UPLOAD;
     }
     mCanvasClient = CanvasClient::CreateCanvasClient(GetCanvasClientType(),
                                                      ClientManager(), flags);

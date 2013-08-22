@@ -10,7 +10,7 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "SocialService", "resource://gre/modules/SocialService.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils", "resource://gre/modules/PrivateBrowsingUtils.jsm");
 
-this.EXPORTED_SYMBOLS = ["MozSocialAPI", "openChatWindow", "findChromeWindowForChats"];
+this.EXPORTED_SYMBOLS = ["MozSocialAPI", "openChatWindow", "findChromeWindowForChats", "closeAllChatWindows"];
 
 this.MozSocialAPI = {
   _enabled: false,
@@ -49,7 +49,7 @@ function injectController(doc, topic, data) {
       return;
     }
 
-    var containingBrowser = window.QueryInterface(Ci.nsIInterfaceRequestor)
+    let containingBrowser = window.QueryInterface(Ci.nsIInterfaceRequestor)
                                   .getInterface(Ci.nsIWebNavigation)
                                   .QueryInterface(Ci.nsIDocShell)
                                   .chromeEventHandler;
@@ -67,7 +67,7 @@ function injectController(doc, topic, data) {
     }
 
     SocialService.getProvider(doc.nodePrincipal.origin, function(provider) {
-      if (provider && provider.workerURL && provider.enabled) {
+      if (provider && provider.enabled) {
         attachToWindow(provider, window);
       }
     });
@@ -88,7 +88,7 @@ function attachToWindow(provider, targetWindow) {
     return;
   }
 
-  var port = provider.getWorkerPort(targetWindow);
+  let port = provider.workerURL ? provider.getWorkerPort(targetWindow) : null;
 
   let mozSocialObj = {
     // Use a method for backwards compat with existing providers, but we
@@ -206,12 +206,14 @@ function attachToWindow(provider, targetWindow) {
     return targetWindow.navigator.wrappedJSObject.mozSocial = contentObj;
   });
 
-  targetWindow.addEventListener("unload", function () {
-    // We want to close the port, but also want the target window to be
-    // able to use the port during an unload event they setup - so we
-    // set a timer which will fire after the unload events have all fired.
-    schedule(function () { port.close(); });
-  });
+  if (port) {
+    targetWindow.addEventListener("unload", function () {
+      // We want to close the port, but also want the target window to be
+      // able to use the port during an unload event they setup - so we
+      // set a timer which will fire after the unload events have all fired.
+      schedule(function () { port.close(); });
+    });
+  }
 
   // We allow window.close() to close the panel, so add an event handler for
   // this, then cancel the event (so the window itself doesn't die) and
@@ -314,4 +316,28 @@ this.openChatWindow =
   // getAttention is ignored if the target window is already foreground, so
   // we can call it unconditionally.
   chromeWindow.getAttention();
+}
+
+this.closeAllChatWindows =
+ function closeAllChatWindows(provider) {
+  // close all attached chat windows
+  let winEnum = Services.wm.getEnumerator("navigator:browser");
+  while (winEnum.hasMoreElements()) {
+    let win = winEnum.getNext();
+    if (!win.SocialChatBar)
+      continue;
+    let chats = [c for (c of win.SocialChatBar.chatbar.children) if (c.content.getAttribute("origin") == provider.origin)];
+    [c.close() for (c of chats)];
+  }
+
+  // close all standalone chat windows
+  winEnum = Services.wm.getEnumerator("Social:Chat");
+  while (winEnum.hasMoreElements()) {
+    let win = winEnum.getNext();
+    if (win.closed)
+      continue;
+    let origin = win.document.getElementById("chatter").content.getAttribute("origin");
+    if (provider.origin == origin)
+      win.close();
+  }
 }

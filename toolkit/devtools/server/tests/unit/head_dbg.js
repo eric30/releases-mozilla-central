@@ -18,6 +18,7 @@ Services.prefs.setBoolPref("devtools.debugger.remote-enabled", true);
 Cu.import("resource://gre/modules/devtools/dbg-server.jsm");
 Cu.import("resource://gre/modules/devtools/dbg-client.jsm");
 Cu.import("resource://gre/modules/devtools/Loader.jsm");
+Cu.import("resource://gre/modules/devtools/DevToolsUtils.jsm");
 
 function testExceptionHook(ex) {
   try {
@@ -102,7 +103,7 @@ function testGlobal(aName) {
     .createInstance(Ci.nsIPrincipal);
 
   let sandbox = Cu.Sandbox(systemPrincipal);
-  Cu.evalInSandbox("this.__name = '" + aName + "'", sandbox);
+  sandbox.__name = aName;
   return sandbox;
 }
 
@@ -346,3 +347,9 @@ function StubTransport() { }
 StubTransport.prototype.ready = function () {};
 StubTransport.prototype.send  = function () {};
 StubTransport.prototype.close = function () {};
+
+function executeSoon(aFunc) {
+  Services.tm.mainThread.dispatch({
+    run: DevToolsUtils.makeInfallible(aFunc)
+  }, Ci.nsIThread.DISPATCH_NORMAL);
+}

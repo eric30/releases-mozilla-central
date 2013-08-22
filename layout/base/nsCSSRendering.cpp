@@ -11,20 +11,17 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/HashFunctions.h"
 #include "mozilla/MathAlgorithms.h"
-#include "mozilla/Types.h"
 
 #include "nsStyleConsts.h"
 #include "nsPresContext.h"
 #include "nsIFrame.h"
 #include "nsPoint.h"
 #include "nsRect.h"
-#include "nsViewManager.h"
 #include "nsIPresShell.h"
 #include "nsFrameManager.h"
 #include "nsStyleContext.h"
 #include "nsGkAtoms.h"
 #include "nsCSSAnonBoxes.h"
-#include "nsTransform2D.h"
 #include "nsIContent.h"
 #include "nsIDocumentInlines.h"
 #include "nsIScrollableFrame.h"
@@ -34,16 +31,10 @@
 #include "nsCSSRendering.h"
 #include "nsCSSColorUtils.h"
 #include "nsITheme.h"
-#include "nsThemeConstants.h"
-#include "nsIServiceManager.h"
 #include "nsLayoutUtils.h"
-#include "nsINameSpaceManager.h"
 #include "nsBlockFrame.h"
 #include "gfxContext.h"
 #include "nsRenderingContext.h"
-#include "nsIInterfaceRequestorUtils.h"
-#include "gfxPlatform.h"
-#include "gfxImageSurface.h"
 #include "nsStyleStructInlines.h"
 #include "nsCSSFrameConstructor.h"
 #include "nsCSSProps.h"
@@ -3944,18 +3935,17 @@ nsCSSRendering::ExpandPaintingRectForDecorationLine(nsIFrame* aFrame,
   nsBlockFrame* block = nullptr;
   // Note that when we paint the decoration lines in relative positioned
   // box, we should paint them like all of the boxes are positioned as static.
-  nscoord relativeX = 0;
+  nscoord frameXInBlockAppUnits = 0;
   for (nsIFrame* f = aFrame; f; f = f->GetParent()) {
     block = do_QueryFrame(f);
     if (block) {
       break;
     }
-    relativeX += f->GetRelativeOffset(f->StyleDisplay()).x;
+    frameXInBlockAppUnits += f->GetNormalPosition().x;
   }
 
   NS_ENSURE_TRUE(block, aClippedRect);
 
-  nscoord frameXInBlockAppUnits = aFrame->GetOffsetTo(block).x - relativeX;
   nsPresContext *pc = aFrame->PresContext();
   gfxFloat frameXInBlock = pc->AppUnitsToGfxUnits(frameXInBlockAppUnits);
   int32_t rectXInBlock = int32_t(NS_round(frameXInBlock + aXInFrame));

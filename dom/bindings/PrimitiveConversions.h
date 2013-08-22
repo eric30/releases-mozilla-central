@@ -13,10 +13,12 @@
 
 #include <limits>
 #include <math.h>
+#include <stdint.h>
+
+#include "jsapi.h"
 #include "mozilla/Assertions.h"
-#include "mozilla/dom/BindingUtils.h"
+#include "mozilla/ErrorResult.h"
 #include "mozilla/FloatingPoint.h"
-#include "xpcpublic.h"
 
 namespace mozilla {
 namespace dom {
@@ -305,7 +307,7 @@ struct PrimitiveConversionTraits<bool, B> : public DisallowedConversion<bool> {}
 
 template<>
 struct PrimitiveConversionTraits<bool, eDefault> {
-  typedef JSBool jstype;
+  typedef bool jstype;
   typedef bool intermediateType;
   static inline bool converter(JSContext* /* unused */, JS::Handle<JS::Value> v,
                                jstype* retval) {

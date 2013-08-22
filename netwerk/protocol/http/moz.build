@@ -20,10 +20,6 @@ XPIDL_SOURCES += [
 
 XPIDL_MODULE = 'necko_http'
 
-XPIDL_FLAGS += [
-    '-I$(topsrcdir)/netwerk/base/public',
-]
-
 MODULE = 'necko'
 
 EXPORTS += [
@@ -83,3 +79,10 @@ IPDL_SOURCES += [
 EXTRA_JS_MODULES += [
     'UserAgentOverrides.jsm',
 ]
+
+FAIL_ON_WARNINGS = True
+
+LIBXUL_LIBRARY = True
+
+MSVC_ENABLE_PGO = True
+

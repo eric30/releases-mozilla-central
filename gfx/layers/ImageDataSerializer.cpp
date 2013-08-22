@@ -3,11 +3,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/layers/ImageDataSerializer.h"
-#include "gfxImageSurface.h"
-#include "mozilla/gfx/2D.h"
-#include "gfx2DGlue.h"
-#include "mozilla/gfx/Tools.h"
+#include "ImageDataSerializer.h"
+#include "gfx2DGlue.h"                  // for SurfaceFormatToImageFormat
+#include "gfxASurface.h"                // for gfxASurface
+#include "gfxImageSurface.h"            // for gfxImageSurface
+#include "gfxPoint.h"                   // for gfxIntSize
+#include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
+#include "mozilla/gfx/2D.h"             // for DataSourceSurface, Factory
+#include "mozilla/gfx/Tools.h"          // for GetAlignedStride, etc
+#include "mozilla/mozalloc.h"           // for operator delete, etc
 
 namespace mozilla {
 namespace layers {
@@ -41,7 +45,8 @@ struct SurfaceBufferInfo
 };
 } // anonymous namespace
 
-static SurfaceBufferInfo* GetBufferInfo(uint8_t* aBuffer)
+static SurfaceBufferInfo*
+GetBufferInfo(uint8_t* aBuffer)
 {
   return reinterpret_cast<SurfaceBufferInfo*>(aBuffer);
 }
@@ -63,7 +68,6 @@ ImageDataSerializer::ComputeMinBufferSize(gfx::IntSize aSize,
 {
   // Note that at the moment we pack the image data with the minimum possible
   // stride, we may decide to change that if we want aligned stride.
-  gfxIntSize gfxSize = gfxIntSize(aSize.width, aSize.height);
   uint32_t bufsize = aSize.height * gfx::BytesPerPixel(aFormat) * aSize.width;
   return SurfaceBufferInfo::GetOffset()
        + gfx::GetAlignedStride<16>(bufsize);

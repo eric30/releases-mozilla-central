@@ -9,6 +9,7 @@
 
 #include "prlog.h"
 #include "nsString.h"
+#include "nsIDOMDocument.h"
 #include "nsIServiceManager.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIVariant.h"
@@ -232,7 +233,6 @@ nsDOMDataTransfer::GetFiles(nsIDOMFileList** aFileList)
 
   if (!mFiles) {
     mFiles = new nsDOMFileList(static_cast<nsIDOMDataTransfer*>(this));
-    NS_ENSURE_TRUE(mFiles, NS_ERROR_OUT_OF_MEMORY);
 
     uint32_t count = mItems.Length();
 
@@ -273,7 +273,6 @@ nsDOMDataTransfer::GetTypes(nsIDOMDOMStringList** aTypes)
   *aTypes = nullptr;
 
   nsRefPtr<nsDOMStringList> types = new nsDOMStringList();
-  NS_ENSURE_TRUE(types, NS_ERROR_OUT_OF_MEMORY);
 
   if (mItems.Length()) {
     const nsTArray<TransferItem>& item = mItems[0];
@@ -423,7 +422,6 @@ nsDOMDataTransfer::MozTypesAt(uint32_t aIndex, nsIDOMDOMStringList** aTypes)
   }
 
   nsRefPtr<nsDOMStringList> types = new nsDOMStringList();
-  NS_ENSURE_TRUE(types, NS_ERROR_OUT_OF_MEMORY);
 
   if (aIndex < mItems.Length()) {
     // note that you can retrieve the types regardless of their principal
@@ -657,7 +655,6 @@ nsDOMDataTransfer::Clone(uint32_t aEventType, bool aUserCancelled,
     new nsDOMDataTransfer(aEventType, mEffectAllowed, mCursorState,
                           mIsExternal, aUserCancelled, aIsCrossDomainSubFrameDrop,
                           mClipboardType, mItems, mDragImage, mDragImageX, mDragImageY);
-  NS_ENSURE_TRUE(newDataTransfer, NS_ERROR_OUT_OF_MEMORY);
 
   *aNewDataTransfer = newDataTransfer;
   NS_ADDREF(*aNewDataTransfer);

@@ -38,7 +38,7 @@ Class BooleanObject::class_ = {
 };
 
 JS_ALWAYS_INLINE bool
-IsBoolean(const Value &v)
+IsBoolean(HandleValue v)
 {
     return v.isBoolean() || (v.isObject() && v.toObject().is<BooleanObject>());
 }
@@ -47,7 +47,7 @@ IsBoolean(const Value &v)
 JS_ALWAYS_INLINE bool
 bool_toSource_impl(JSContext *cx, CallArgs args)
 {
-    const Value &thisv = args.thisv();
+    HandleValue thisv = args.thisv();
     JS_ASSERT(IsBoolean(thisv));
 
     bool b = thisv.isBoolean() ? thisv.toBoolean() : thisv.toObject().as<BooleanObject>().unbox();
@@ -74,7 +74,7 @@ bool_toSource(JSContext *cx, unsigned argc, Value *vp)
 JS_ALWAYS_INLINE bool
 bool_toString_impl(JSContext *cx, CallArgs args)
 {
-    const Value &thisv = args.thisv();
+    HandleValue thisv = args.thisv();
     JS_ASSERT(IsBoolean(thisv));
 
     bool b = thisv.isBoolean() ? thisv.toBoolean() : thisv.toObject().as<BooleanObject>().unbox();
@@ -92,7 +92,7 @@ bool_toString(JSContext *cx, unsigned argc, Value *vp)
 JS_ALWAYS_INLINE bool
 bool_valueOf_impl(JSContext *cx, CallArgs args)
 {
-    const Value &thisv = args.thisv();
+    HandleValue thisv = args.thisv();
     JS_ASSERT(IsBoolean(thisv));
 
     bool b = thisv.isBoolean() ? thisv.toBoolean() : thisv.toObject().as<BooleanObject>().unbox();
@@ -176,7 +176,7 @@ js_InitBooleanClass(JSContext *cx, HandleObject obj)
 }
 
 JSString *
-js_BooleanToString(ExclusiveContext *cx, JSBool b)
+js_BooleanToString(ExclusiveContext *cx, bool b)
 {
     return b ? cx->names().true_ : cx->names().false_;
 }
@@ -198,8 +198,7 @@ js::ToBooleanSlow(const Value &v)
 bool
 js::BooleanGetPrimitiveValueSlow(HandleObject wrappedBool, JSContext *cx)
 {
-    JS_ASSERT(wrappedBool->is<ProxyObject>());
-    JSObject *obj = Wrapper::wrappedObject(wrappedBool);
+    JSObject *obj = wrappedBool->as<ProxyObject>().target();
     JS_ASSERT(obj);
     return obj->as<BooleanObject>().unbox();
 }

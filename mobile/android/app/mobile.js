@@ -478,10 +478,8 @@ pref("security.alternate_certificate_error_page", "certerror");
 
 pref("security.warn_viewing_mixed", false); // Warning is disabled.  See Bug 616712.
 
-#ifdef NIGHTLY_BUILD
 // Block insecure active content on https pages
 pref("security.mixed_content.block_active_content", true);
-#endif
 
 // Override some named colors to avoid inverse OS themes
 pref("ui.-moz-dialog", "#efebe7");
@@ -562,7 +560,6 @@ pref("dom.webnotifications.enabled", true);
 
 // prevent tooltips from showing up
 pref("browser.chrome.toolbar_tips", false);
-pref("indexedDB.feature.enabled", true);
 pref("dom.indexedDB.warningQuota", 5);
 
 // prevent video elements from preloading too much data
@@ -749,11 +746,6 @@ pref("browser.contentHandlers.types.3.uri", "chrome://browser/locale/region.prop
 pref("browser.contentHandlers.types.3.type", "application/vnd.mozilla.maybe.feed");
 
 #ifndef RELEASE_BUILD
-// Enable Web Audio for Firefox for Android in Nightly and Aurora
-pref("media.webaudio.enabled", true);
-#endif
-
-#ifndef RELEASE_BUILD
 pref("dom.payment.provider.0.name", "Firefox Marketplace");
 pref("dom.payment.provider.0.description", "marketplace.firefox.com");
 pref("dom.payment.provider.0.uri", "https://marketplace.firefox.com/mozpay/?req=");
@@ -785,3 +777,6 @@ pref("gfx.canvas.azure.backends", "skia");
 pref("gfx.canvas.azure.accelerated", true);
 
 pref("general.useragent.override.youtube.com", "Android; Tablet;#Android; Mobile;");
+
+// When true, phone number linkification is enabled.
+pref("browser.ui.linkify.phone", false);

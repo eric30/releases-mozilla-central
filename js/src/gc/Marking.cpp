@@ -8,7 +8,8 @@
 
 #include "mozilla/DebugOnly.h"
 
-#include "ion/IonCode.h"
+#include "jit/IonCode.h"
+#include "vm/ArgumentsObject.h"
 #include "vm/Shape.h"
 #include "vm/TypedArrayObject.h"
 
@@ -144,12 +145,10 @@ CheckMarkedThing(JSTracer *trc, T *thing)
     JS_ASSERT(MapTypeToTraceKind<T>::kind == GetGCThingTraceKind(thing));
 
     JS_ASSERT_IF(rt->gcStrictCompartmentChecking,
-                 thing->zone()->isCollecting() ||
-                 thing->zone() == rt->atomsCompartment->zone());
+                 thing->zone()->isCollecting() || rt->isAtomsZone(thing->zone()));
 
     JS_ASSERT_IF(IS_GC_MARKING_TRACER(trc) && AsGCMarker(trc)->getMarkColor() == GRAY,
-                 thing->zone()->isGCMarkingGray() ||
-                 thing->zone() == rt->atomsCompartment->zone());
+                 thing->zone()->isGCMarkingGray() || rt->isAtomsZone(thing->zone()));
 
     /*
      * Try to assert that the thing is allocated.  This is complicated by the
@@ -652,10 +651,15 @@ ShouldMarkCrossCompartment(JSTracer *trc, JSObject *src, Cell *cell)
     if (!IS_GC_MARKING_TRACER(trc))
         return true;
 
-    JS::Zone *zone = cell->tenuredZone();
     uint32_t color = AsGCMarker(trc)->getMarkColor();
-
     JS_ASSERT(color == BLACK || color == GRAY);
+
+    if (IsInsideNursery(trc->runtime, cell)) {
+        JS_ASSERT(color == BLACK);
+        return false;
+    }
+
+    JS::Zone *zone = cell->tenuredZone();
     if (color == BLACK) {
         /*
          * Having black->gray edges violates our promise to the cycle
@@ -741,7 +745,7 @@ gc::IsCellAboutToBeFinalized(Cell **thingp)
 
 #define JS_COMPARTMENT_ASSERT_STR(rt, thing)                            \
     JS_ASSERT((thing)->zone()->isGCMarking() ||                         \
-              (thing)->zone() == (rt)->atomsCompartment->zone());
+              (rt)->isAtomsZone((thing)->zone()));
 
 static void
 PushMarkStack(GCMarker *gcmarker, JSObject *thing)
@@ -1410,8 +1414,7 @@ GCMarker::processMarkStackTop(SliceBudget &budget)
         if (v.isString()) {
             JSString *str = v.toString();
             JS_COMPARTMENT_ASSERT_STR(runtime, str);
-            JS_ASSERT(str->zone() == runtime->atomsCompartment->zone() ||
-                      str->zone() == obj->zone());
+            JS_ASSERT(runtime->isAtomsZone(str->zone()) || str->zone() == obj->zone());
             if (str->markIfUnmarked())
                 ScanString(this, str);
         } else if (v.isObject()) {
@@ -1580,14 +1583,14 @@ struct UnmarkGrayTracer : public JSTracer
      * up any color mismatches involving weakmaps when it runs.
      */
     UnmarkGrayTracer(JSRuntime *rt)
-      : tracingShape(false), previousShape(NULL)
+      : tracingShape(false), previousShape(NULL), unmarkedAny(false)
     {
         JS_TracerInit(this, rt, UnmarkGrayChildren);
         eagerlyTraceWeakMaps = DoNotTraceWeakMaps;
     }
 
     UnmarkGrayTracer(JSTracer *trc, bool tracingShape)
-      : tracingShape(tracingShape), previousShape(NULL)
+      : tracingShape(tracingShape), previousShape(NULL), unmarkedAny(false)
     {
         JS_TracerInit(this, trc->runtime, UnmarkGrayChildren);
         eagerlyTraceWeakMaps = DoNotTraceWeakMaps;
@@ -1598,6 +1601,9 @@ struct UnmarkGrayTracer : public JSTracer
 
     /* If tracingShape, shape child or NULL. Otherwise, NULL. */
     void *previousShape;
+
+    /* Whether we unmarked anything. */
+    bool unmarkedAny;
 };
 
 /*
@@ -1644,10 +1650,14 @@ UnmarkGrayChildren(JSTracer *trc, void **thingp, JSGCTraceKind kind)
         return;
     }
 
-    if (!JS::GCThingIsMarkedGray(thing))
-        return;
+    UnmarkGrayTracer *tracer = static_cast<UnmarkGrayTracer *>(trc);
+    if (!IsInsideNursery(trc->runtime, thing)) {
+        if (!JS::GCThingIsMarkedGray(thing))
+            return;
 
-    UnmarkGrayGCThing(thing);
+        UnmarkGrayGCThing(thing);
+        tracer->unmarkedAny = true;
+    }
 
     /*
      * Trace children of |thing|. If |thing| and its parent are both shapes,
@@ -1656,12 +1666,12 @@ UnmarkGrayChildren(JSTracer *trc, void **thingp, JSGCTraceKind kind)
      * depth during shape tracing. It is safe to do because a shape can only
      * have one child that is a shape.
      */
-    UnmarkGrayTracer *tracer = static_cast<UnmarkGrayTracer *>(trc);
     UnmarkGrayTracer childTracer(tracer, kind == JSTRACE_SHAPE);
 
     if (kind != JSTRACE_SHAPE) {
         JS_TraceChildren(&childTracer, thing, kind);
         JS_ASSERT(!childTracer.previousShape);
+        tracer->unmarkedAny |= childTracer.unmarkedAny;
         return;
     }
 
@@ -1677,19 +1687,27 @@ UnmarkGrayChildren(JSTracer *trc, void **thingp, JSGCTraceKind kind)
         thing = childTracer.previousShape;
         childTracer.previousShape = NULL;
     } while (thing);
+    tracer->unmarkedAny |= childTracer.unmarkedAny;
 }
 
-JS_FRIEND_API(void)
+JS_FRIEND_API(bool)
 JS::UnmarkGrayGCThingRecursively(void *thing, JSGCTraceKind kind)
 {
     JS_ASSERT(kind != JSTRACE_SHAPE);
 
-    if (!JS::GCThingIsMarkedGray(thing))
-        return;
-
-    UnmarkGrayGCThing(thing);
-
     JSRuntime *rt = static_cast<Cell *>(thing)->runtimeFromMainThread();
+
+    bool unmarkedArg = false;
+    if (!IsInsideNursery(rt, thing)) {
+        if (!JS::GCThingIsMarkedGray(thing))
+            return false;
+
+        UnmarkGrayGCThing(thing);
+        unmarkedArg = true;
+    }
+
     UnmarkGrayTracer trc(rt);
     JS_TraceChildren(&trc, thing, kind);
+
+    return unmarkedArg || trc.unmarkedAny;
 }

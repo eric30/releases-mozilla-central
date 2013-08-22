@@ -4,26 +4,50 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include <map>
-
-#include "mozilla/DebugOnly.h"
-
-#include "AutoOpenSurface.h"
 #include "CompositorParent.h"
-#include "mozilla/layers/CompositorOGL.h"
-#include "mozilla/layers/BasicCompositor.h"
+#include <stdio.h>                      // for fprintf, stdout
+#include <stdint.h>                     // for uint64_t
+#include <map>                          // for _Rb_tree_iterator, etc
+#include <utility>                      // for pair
+#include "mozilla-config.h"             // for MOZ_DUMP_PAINTING
+#include "AutoOpenSurface.h"            // for AutoOpenSurface
+#include "LayerTransactionParent.h"     // for LayerTransactionParent
+#include "RenderTrace.h"                // for RenderTraceLayers
+#include "base/message_loop.h"          // for MessageLoop
+#include "base/process.h"               // for ProcessHandle
+#include "base/process_util.h"          // for OpenProcessHandle
+#include "base/task.h"                  // for CancelableTask, etc
+#include "base/thread.h"                // for Thread
+#include "base/tracked.h"               // for FROM_HERE
+#include "gfxContext.h"                 // for gfxContext
+#include "gfxPlatform.h"                // for gfxPlatform
+#include "ipc/ShadowLayersManager.h"    // for ShadowLayersManager
+#include "mozilla/AutoRestore.h"        // for AutoRestore
+#include "mozilla/DebugOnly.h"          // for DebugOnly
+#include "mozilla/gfx/Point.h"          // for IntSize
+#include "mozilla/ipc/Transport.h"      // for Transport
+#include "mozilla/layers/APZCTreeManager.h"  // for APZCTreeManager
+#include "mozilla/layers/AsyncCompositionManager.h"
+#include "mozilla/layers/BasicCompositor.h"  // for BasicCompositor
+#include "mozilla/layers/Compositor.h"  // for Compositor
+#include "mozilla/layers/CompositorOGL.h"  // for CompositorOGL
+#include "mozilla/layers/CompositorTypes.h"
+#include "mozilla/layers/LayerManagerComposite.h"
+#include "mozilla/layers/LayersTypes.h"
+#include "mozilla/layers/PLayerTransactionParent.h"
+#include "mozilla/mozalloc.h"           // for operator new, etc
+#include "nsCOMPtr.h"                   // for already_AddRefed
+#include "nsDebug.h"                    // for NS_ABORT_IF_FALSE, etc
+#include "nsIWidget.h"                  // for nsIWidget
+#include "nsRect.h"                     // for nsIntRect
+#include "nsTArray.h"                   // for nsTArray
+#include "nsThreadUtils.h"              // for NS_IsMainThread
+#include "nsTraceRefcnt.h"              // for MOZ_COUNT_CTOR, etc
+#include "nsXULAppAPI.h"                // for XRE_GetIOMessageLoop
 #ifdef XP_WIN
 #include "mozilla/layers/CompositorD3D11.h"
 #include "mozilla/layers/CompositorD3D9.h"
 #endif
-#include "LayerTransactionParent.h"
-#include "nsIWidget.h"
-#include "nsGkAtoms.h"
-#include "RenderTrace.h"
-#include "gfxPlatform.h"
-#include "mozilla/AutoRestore.h"
-#include "mozilla/layers/AsyncCompositionManager.h"
-#include "mozilla/layers/LayerManagerComposite.h"
 
 using namespace base;
 using namespace mozilla;
@@ -598,8 +622,47 @@ CompositorParent::ShadowLayersUpdated(LayerTransactionParent* aLayerTree,
   }
 }
 
+void
+CompositorParent::InitializeLayerManager(const nsTArray<LayersBackend>& aBackendHints)
+{
+  NS_ASSERTION(!mLayerManager, "Already initialised mLayerManager");
+
+  for (size_t i = 0; i < aBackendHints.Length(); ++i) {
+    RefPtr<LayerManagerComposite> layerManager;
+    if (aBackendHints[i] == LAYERS_OPENGL) {
+      layerManager =
+        new LayerManagerComposite(new CompositorOGL(mWidget,
+                                                    mEGLSurfaceSize.width,
+                                                    mEGLSurfaceSize.height,
+                                                    mUseExternalSurfaceSize));
+    } else if (aBackendHints[i] == LAYERS_BASIC) {
+      layerManager =
+        new LayerManagerComposite(new BasicCompositor(mWidget));
+#ifdef XP_WIN
+    } else if (aBackendHints[i] == LAYERS_D3D11) {
+      layerManager =
+        new LayerManagerComposite(new CompositorD3D11(mWidget));
+    } else if (aBackendHints[i] == LAYERS_D3D9) {
+      layerManager =
+        new LayerManagerComposite(new CompositorD3D9(mWidget));
+#endif
+    }
+
+    if (!layerManager) {
+      continue;
+    }
+
+    layerManager->SetCompositorID(mCompositorID);
+
+    if (layerManager->Initialize()) {
+      mLayerManager = layerManager;
+      return;
+    }
+  }
+}
+
 PLayerTransactionParent*
-CompositorParent::AllocPLayerTransactionParent(const LayersBackend& aBackendHint,
+CompositorParent::AllocPLayerTransactionParent(const nsTArray<LayersBackend>& aBackendHints,
                                                const uint64_t& aId,
                                                TextureFactoryIdentifier* aTextureFactoryIdentifier,
                                                bool *aSuccess)
@@ -610,35 +673,11 @@ CompositorParent::AllocPLayerTransactionParent(const LayersBackend& aBackendHint
   // nullptr before returning from this method, to avoid accessing it elsewhere.
   nsIntRect rect;
   mWidget->GetClientBounds(rect);
-
-  if (aBackendHint == mozilla::layers::LAYERS_OPENGL) {
-    mLayerManager =
-      new LayerManagerComposite(new CompositorOGL(mWidget,
-                                                  mEGLSurfaceSize.width,
-                                                  mEGLSurfaceSize.height,
-                                                  mUseExternalSurfaceSize));
-  } else if (aBackendHint == mozilla::layers::LAYERS_BASIC) {
-    mLayerManager =
-      new LayerManagerComposite(new BasicCompositor(mWidget));
-#ifdef XP_WIN
-  } else if (aBackendHint == mozilla::layers::LAYERS_D3D11) {
-    mLayerManager =
-      new LayerManagerComposite(new CompositorD3D11(mWidget));
-  } else if (aBackendHint == mozilla::layers::LAYERS_D3D9) {
-    mLayerManager =
-      new LayerManagerComposite(new CompositorD3D9(mWidget));
-#endif
-  } else {
-    NS_WARNING("Unsupported backend selected for Async Compositor");
-    *aSuccess = false;
-    return new LayerTransactionParent(nullptr, this, 0);
-  }
-
+  InitializeLayerManager(aBackendHints);
   mWidget = nullptr;
-  mLayerManager->SetCompositorID(mCompositorID);
 
-  if (!mLayerManager->Initialize()) {
-    NS_WARNING("Failed to init Compositor");
+  if (!mLayerManager) {
+    NS_WARNING("Failed to initialise Compositor");
     *aSuccess = false;
     return new LayerTransactionParent(nullptr, this, 0);
   }
@@ -834,7 +873,7 @@ public:
   virtual bool RecvFlushRendering() MOZ_OVERRIDE { return true; }
 
   virtual PLayerTransactionParent*
-    AllocPLayerTransactionParent(const LayersBackend& aBackendType,
+    AllocPLayerTransactionParent(const nsTArray<LayersBackend>& aBackendHints,
                                  const uint64_t& aId,
                                  TextureFactoryIdentifier* aTextureFactoryIdentifier,
                                  bool *aSuccess) MOZ_OVERRIDE;
@@ -916,7 +955,7 @@ CrossProcessCompositorParent::ActorDestroy(ActorDestroyReason aWhy)
 }
 
 PLayerTransactionParent*
-CrossProcessCompositorParent::AllocPLayerTransactionParent(const LayersBackend& aBackendType,
+CrossProcessCompositorParent::AllocPLayerTransactionParent(const nsTArray<LayersBackend>&,
                                                            const uint64_t& aId,
                                                            TextureFactoryIdentifier* aTextureFactoryIdentifier,
                                                            bool *aSuccess)

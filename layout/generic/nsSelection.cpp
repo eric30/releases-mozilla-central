@@ -129,8 +129,6 @@ struct CachedOffsetForFrame {
   bool mCanCacheFrameOffset;    // cached frame offset is valid?
 };
 
-static RangeData sEmptyData(nullptr);
-
 // Stack-class to turn on/off selection batching for table selection
 class MOZ_STACK_CLASS nsSelectionBatcher MOZ_FINAL
 {
@@ -787,7 +785,12 @@ nsFrameSelection::MoveCaret(uint32_t          aKeycode,
   }
 
   int32_t caretStyle = Preferences::GetInt("layout.selection.caret_style", 0);
-  if (caretStyle == 0) {
+  if (caretStyle == 0
+#ifdef XP_WIN
+      && aKeycode != nsIDOMKeyEvent::DOM_VK_UP
+      && aKeycode != nsIDOMKeyEvent::DOM_VK_DOWN
+#endif
+     ) {
     // Put caret at the selection edge in the |aKeycode| direction.
     caretStyle = 2;
   }
@@ -4444,6 +4447,10 @@ Selection::CollapseToStart()
   if (!firstRange)
     return NS_ERROR_FAILURE;
 
+  if (mFrameSelection) {
+    int16_t reason = mFrameSelection->PopReason() | nsISelectionListener::COLLAPSETOSTART_REASON;
+    mFrameSelection->PostReason(reason);
+  }
   return Collapse(firstRange->GetStartParent(), firstRange->StartOffset());
 }
 
@@ -4464,6 +4471,10 @@ Selection::CollapseToEnd()
   if (!lastRange)
     return NS_ERROR_FAILURE;
 
+  if (mFrameSelection) {
+    int16_t reason = mFrameSelection->PopReason() | nsISelectionListener::COLLAPSETOEND_REASON;
+    mFrameSelection->PostReason(reason);
+  }
   return Collapse(lastRange->GetEndParent(), lastRange->EndOffset());
 }
 
@@ -4512,7 +4523,8 @@ Selection::GetRangeCount(int32_t* aRangeCount)
 NS_IMETHODIMP
 Selection::GetRangeAt(int32_t aIndex, nsIDOMRange** aReturn)
 {
-  *aReturn = mRanges.SafeElementAt(aIndex, sEmptyData).mRange;
+  RangeData empty(nullptr);
+  *aReturn = mRanges.SafeElementAt(aIndex, empty).mRange;
   if (!*aReturn) {
     return NS_ERROR_DOM_INDEX_SIZE_ERR;
   }
@@ -4525,7 +4537,8 @@ Selection::GetRangeAt(int32_t aIndex, nsIDOMRange** aReturn)
 nsRange*
 Selection::GetRangeAt(int32_t aIndex)
 {
-  return mRanges.SafeElementAt(aIndex, sEmptyData).mRange;
+  RangeData empty(nullptr);
+  return mRanges.SafeElementAt(aIndex, empty).mRange;
 }
 
 /*

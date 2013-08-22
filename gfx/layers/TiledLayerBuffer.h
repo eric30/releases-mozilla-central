@@ -16,9 +16,13 @@
 //#define GFX_TILEDLAYER_DEBUG_OVERLAY
 //#define GFX_TILEDLAYER_PREF_WARNINGS
 
-#include "nsRect.h"
-#include "nsRegion.h"
-#include "nsTArray.h"
+#include <stdint.h>                     // for uint16_t, uint32_t
+#include <sys/types.h>                  // for int32_t
+#include "nsDebug.h"                    // for NS_ABORT_IF_FALSE
+#include "nsPoint.h"                    // for nsIntPoint
+#include "nsRect.h"                     // for nsIntRect
+#include "nsRegion.h"                   // for nsIntRegion
+#include "nsTArray.h"                   // for nsTArray
 
 namespace mozilla {
 namespace layers {
@@ -184,6 +188,8 @@ private:
 };
 
 class BasicTiledLayerBuffer;
+class SurfaceDescriptorTiles;
+class ISurfaceAllocator;
 
 // Shadow layers may implement this interface in order to be notified when a
 // tiled layer buffer is updated.
@@ -192,11 +198,13 @@ class TiledLayerComposer
 public:
   /**
    * Update the current retained layer with the updated layer data.
-   * The BasicTiledLayerBuffer is expected to be in the ReadLock state
-   * prior to this being called. aTiledBuffer is copy constructed and
-   * is retained until it has been uploaded/copyed and unlocked.
+   * It is expected that the tiles described by aTiledDescriptor are all in the
+   * ReadLock state, so that the locks can be adopted when recreating a
+   * BasicTiledLayerBuffer locally. This lock will be retained until the buffer
+   * has completed uploading.
    */
-  virtual void PaintedTiledLayerBuffer(const BasicTiledLayerBuffer* aTiledBuffer) = 0;
+  virtual void PaintedTiledLayerBuffer(ISurfaceAllocator* aAllocator,
+                                       const SurfaceDescriptorTiles& aTiledDescriptor) = 0;
 
   /**
    * If some part of the buffer is being rendered at a lower precision, this

@@ -17,6 +17,7 @@
 
 #include "jsapi.h"
 #include "jsatom.h"
+#include "jsautooplen.h"
 #include "jscntxt.h"
 #include "jsdbgapi.h"
 #include "jsfun.h"
@@ -26,9 +27,11 @@
 #include "jsutil.h"
 
 #include "frontend/BytecodeEmitter.h"
+#include "frontend/SharedContext.h"
 #include "gc/Marking.h"
-#include "ion/BaselineJIT.h"
-#include "ion/IonCode.h"
+#include "jit/BaselineJIT.h"
+#include "jit/IonCode.h"
+#include "vm/ArgumentsObject.h"
 #include "vm/Debugger.h"
 #include "vm/Interpreter.h"
 #include "vm/Shape.h"
@@ -164,7 +167,7 @@ Bindings::clone(JSContext *cx, InternalBindingsHandle self,
     Bindings &src = srcScript->bindings;
     ptrdiff_t off = (uint8_t *)src.bindingArray() - srcScript->data;
     JS_ASSERT(off >= 0);
-    JS_ASSERT(off <= srcScript->dataSize);
+    JS_ASSERT(size_t(off) <= srcScript->dataSize);
     Binding *dstPackedBindings = (Binding *)(dstScriptData + off);
 
     /*
@@ -405,9 +408,9 @@ js::XDRScript(XDRState<mode> *xdr, HandleObject enclosingScope, HandleScript enc
         FunHasAnyAliasedFormal,
         ArgumentsHasVarBinding,
         NeedsArgsObj,
-        IsGenerator,
         IsGeneratorExp,
         IsLegacyGenerator,
+        IsStarGenerator,
         OwnSource,
         ExplicitUseStrict,
         SelfHosted
@@ -494,12 +497,12 @@ js::XDRScript(XDRState<mode> *xdr, HandleObject enclosingScope, HandleScript enc
             scriptBits |= (1 << NeedsArgsObj);
         if (!enclosingScript || enclosingScript->scriptSource() != script->scriptSource())
             scriptBits |= (1 << OwnSource);
-        if (script->isGenerator)
-            scriptBits |= (1 << IsGenerator);
         if (script->isGeneratorExp)
             scriptBits |= (1 << IsGeneratorExp);
-        if (script->isLegacyGenerator)
+        if (script->isLegacyGenerator())
             scriptBits |= (1 << IsLegacyGenerator);
+        if (script->isStarGenerator())
+            scriptBits |= (1 << IsStarGenerator);
 
         JS_ASSERT(!script->compileAndGo);
         JS_ASSERT(!script->hasSingletons);
@@ -594,12 +597,14 @@ js::XDRScript(XDRState<mode> *xdr, HandleObject enclosingScope, HandleScript enc
             script->setArgumentsHasVarBinding();
         if (scriptBits & (1 << NeedsArgsObj))
             script->setNeedsArgsObj(true);
-        if (scriptBits & (1 << IsGenerator))
-            script->isGenerator = true;
         if (scriptBits & (1 << IsGeneratorExp))
             script->isGeneratorExp = true;
-        if (scriptBits & (1 << IsLegacyGenerator))
-            script->isLegacyGenerator = true;
+
+        if (scriptBits & (1 << IsLegacyGenerator)) {
+            JS_ASSERT(!(scriptBits & (1 << IsStarGenerator)));
+            script->setGeneratorKind(LegacyGenerator);
+        } else if (scriptBits & (1 << IsStarGenerator))
+            script->setGeneratorKind(StarGenerator);
     }
 
     JS_STATIC_ASSERT(sizeof(jsbytecode) == 1);
@@ -862,9 +867,10 @@ JSScript::initScriptCounts(JSContext *cx)
     JS_ASSERT(size_t(cursor - base) == bytes);
 
     /* Enable interrupts in any interpreter frames running on this script. */
-    InterpreterFrames *frames;
-    for (frames = cx->runtime()->interpreterFrames; frames; frames = frames->older)
-        frames->enableInterruptsIfRunning(this);
+    for (ActivationIterator iter(cx->runtime()); !iter.done(); ++iter) {
+        if (iter.activation()->isInterpreter())
+            iter.activation()->asInterpreter()->enableInterruptsIfRunning(this);
+    }
 
     return true;
 }
@@ -1588,7 +1594,7 @@ void
 js::SweepScriptData(JSRuntime *rt)
 {
     JS_ASSERT(rt->gcIsFull);
-    ScriptDataTable &table = rt->scriptDataTable;
+    ScriptDataTable &table = rt->scriptDataTable();
 
     bool keepAtoms = false;
     for (ThreadDataIter iter(rt); !iter.done(); iter.next())
@@ -1608,7 +1614,7 @@ js::SweepScriptData(JSRuntime *rt)
 void
 js::FreeScriptData(JSRuntime *rt)
 {
-    ScriptDataTable &table = rt->scriptDataTable;
+    ScriptDataTable &table = rt->scriptDataTable();
     if (!table.initialized())
         return;
 
@@ -1959,9 +1965,8 @@ JSScript::fullyInitFromEmitter(ExclusiveContext *cx, HandleScript script, Byteco
     RootedFunction fun(cx, NULL);
     if (funbox) {
         JS_ASSERT(!bce->script->noScriptRval);
-        script->isGenerator = funbox->isGenerator();
         script->isGeneratorExp = funbox->inGenexpLambda;
-        script->isLegacyGenerator = funbox->isLegacyGenerator();
+        script->setGeneratorKind(funbox->generatorKind());
         script->setFunction(funbox->function());
     }
 
@@ -1999,14 +2004,6 @@ JSScript::numNotes()
     for (sn = notes_; !SN_IS_TERMINATOR(sn); sn = SN_NEXT(sn))
         continue;
     return sn - notes_ + 1;    /* +1 for the terminator */
-}
-
-bool
-JSScript::isShortRunning()
-{
-    return length < 100 &&
-           hasAnalysis() &&
-           !analysis()->hasFunctionCalls();
 }
 
 js::GlobalObject&
@@ -2470,8 +2467,8 @@ js::CloneScript(JSContext *cx, HandleObject enclosingScope, HandleFunction fun, 
     dst->funHasAnyAliasedFormal = src->funHasAnyAliasedFormal;
     dst->hasSingletons = src->hasSingletons;
     dst->treatAsRunOnce = src->treatAsRunOnce;
-    dst->isGenerator = src->isGenerator;
     dst->isGeneratorExp = src->isGeneratorExp;
+    dst->setGeneratorKind(src->generatorKind());
 
     /* Copy over hints. */
     dst->shouldInline = src->shouldInline;
@@ -2609,9 +2606,10 @@ JSScript::ensureHasDebugScript(JSContext *cx)
      * interrupts enabled. The interrupts must stay enabled until the
      * debug state is destroyed.
      */
-    InterpreterFrames *frames;
-    for (frames = cx->runtime()->interpreterFrames; frames; frames = frames->older)
-        frames->enableInterruptsIfRunning(this);
+    for (ActivationIterator iter(cx->runtime()); !iter.done(); ++iter) {
+        if (iter.activation()->isInterpreter())
+            iter.activation()->asInterpreter()->enableInterruptsIfRunning(this);
+    }
 
     return true;
 }
@@ -2911,7 +2909,7 @@ JSScript::argumentsOptimizationFailed(JSContext *cx, HandleScript script)
     if (script->needsArgsObj())
         return true;
 
-    JS_ASSERT(!script->isGenerator);
+    JS_ASSERT(!script->isGenerator());
 
     script->needsArgsObj_ = true;
 
@@ -3003,6 +3001,7 @@ LazyScript::LazyScript(JSFunction *fun, void *table, uint32_t numFreeVariables, 
     version_(version),
     numFreeVariables_(numFreeVariables),
     numInnerFunctions_(numInnerFunctions),
+    generatorKindBits_(GeneratorKindAsBits(NotGenerator)),
     strict_(false),
     bindingsAccessedDynamically_(false),
     hasDebuggerStatement_(false),

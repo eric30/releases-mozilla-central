@@ -513,7 +513,6 @@ NO_PKG_FILES += \
 	nsinstall \
 	viewer \
 	TestGtkEmbed \
-	codesighs* \
 	elf-dynstr-gc \
 	mangle* \
 	maptsv* \
@@ -556,9 +555,7 @@ GARBAGE		+= $(DIST)/$(PACKAGE) $(PACKAGE)
 
 # The following target stages files into two directories: one directory for
 # core files, and one for optional extensions based on the information in
-# the MOZ_PKG_MANIFEST file and the following vars:
-# MOZ_NONLOCALIZED_PKG_LIST
-# MOZ_LOCALIZED_PKG_LIST
+# the MOZ_PKG_MANIFEST file.
 
 PKG_ARG = , "$(pkg)"
 
@@ -817,16 +814,6 @@ upload: checksum
 	$(PYTHON) $(MOZILLA_DIR)/build/upload.py --base-path $(DIST) \
 		$(UPLOAD_FILES) \
 		$(CHECKSUM_FILES)
-
-ifeq (WINNT,$(OS_TARGET))
-CODESIGHS_PACKAGE = $(INSTALLER_PACKAGE)
-else
-CODESIGHS_PACKAGE = $(DIST)/$(PACKAGE)
-endif
-
-codesighs:
-	$(PYTHON) $(topsrcdir)/tools/codesighs/codesighs.py \
-	  "$(DIST)/$(MOZ_PKG_DIR)" "$(CODESIGHS_PACKAGE)"
 
 ifndef MOZ_PKG_SRCDIR
 MOZ_PKG_SRCDIR = $(topsrcdir)

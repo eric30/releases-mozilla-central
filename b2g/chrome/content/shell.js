@@ -791,6 +791,7 @@ var AlertsHelper = {
 
     if (!manifestUrl || !manifestUrl.length) {
       send(null, null);
+      return;
     }
 
     // If we have a manifest URL, get the icon and title from the manifest
@@ -996,6 +997,7 @@ let RemoteDebugger = {
       }
       DebuggerServer.addActors('chrome://browser/content/dbg-browser-actors.js');
       DebuggerServer.addActors("resource://gre/modules/devtools/server/actors/webapps.js");
+      DebuggerServer.registerModule("devtools/server/actors/device");
     }
 
     let port = Services.prefs.getIntPref('devtools.debugger.remote-port') || 6000;
@@ -1102,8 +1104,12 @@ window.addEventListener('ContentStart', function cr_onContentStart() {
 });
 
 window.addEventListener('ContentStart', function update_onContentStart() {
-  let updatePrompt = Cc["@mozilla.org/updates/update-prompt;1"]
-                       .createInstance(Ci.nsIUpdatePrompt);
+  let promptCc = Cc["@mozilla.org/updates/update-prompt;1"];
+  if (!promptCc) {
+    return;
+  }
+
+  let updatePrompt = promptCc.createInstance(Ci.nsIUpdatePrompt);
   if (!updatePrompt) {
     return;
   }

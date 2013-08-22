@@ -820,7 +820,7 @@ nsGenericHTMLElement::GetEventListenerManagerForAttr(nsIAtom* aAttrName,
 #define FORWARDED_EVENT(name_, id_, type_, struct_) \
        || nsGkAtoms::on##name_ == aAttrName
 #define WINDOW_EVENT FORWARDED_EVENT
-#include "nsEventNameList.h"
+#include "nsEventNameList.h" // IWYU pragma: keep
 #undef WINDOW_EVENT
 #undef FORWARDED_EVENT
 #undef EVENT
@@ -928,7 +928,7 @@ nsGenericHTMLElement::SetOn##name_(EventHandlerNonNull* handler,              \
                                                                               \
   return nsINode::SetOn##name_(handler, error);                               \
 }
-#include "nsEventNameList.h"
+#include "nsEventNameList.h" // IWYU pragma: keep
 #undef ERROR_EVENT
 #undef FORWARDED_EVENT
 #undef EVENT
@@ -1010,7 +1010,7 @@ nsGenericHTMLElement::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
     else if (IsEventAttributeName(aAttribute)) {
       nsEventListenerManager* manager = GetListenerManager(false);
       if (manager) {
-        manager->RemoveEventHandler(aAttribute);
+        manager->RemoveEventHandler(aAttribute, EmptyString());
       }
     }
   }
@@ -1758,15 +1758,6 @@ nsGenericHTMLElement::GetUnsignedIntAttr(nsIAtom* aAttr,
   return attrVal->GetIntegerValue();
 }
 
-nsresult
-nsGenericHTMLElement::SetDoubleAttr(nsIAtom* aAttr, double aValue)
-{
-  nsAutoString value;
-  value.AppendFloat(aValue);
-
-  return SetAttr(kNameSpaceID_None, aAttr, value, true);
-}
-
 void
 nsGenericHTMLElement::GetURIAttr(nsIAtom* aAttr, nsIAtom* aBaseAttr,
                                  nsAString& aResult) const
@@ -2103,6 +2094,12 @@ Element*
 nsGenericHTMLFormElement::GetFormElement()
 {
   return mForm;
+}
+
+HTMLFieldSetElement*
+nsGenericHTMLFormElement::GetFieldSet()
+{
+  return mFieldSet;
 }
 
 nsresult

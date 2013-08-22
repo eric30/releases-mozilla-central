@@ -7,6 +7,7 @@ package org.mozilla.gecko;
 
 import org.mozilla.gecko.db.BrowserDB;
 import org.mozilla.gecko.gfx.Layer;
+import org.mozilla.gecko.home.HomePager;
 import org.mozilla.gecko.util.ThreadUtils;
 
 import org.json.JSONException;
@@ -49,11 +50,11 @@ public class Tab {
     private int mHistoryIndex;
     private int mHistorySize;
     private int mParentId;
+    private HomePager.Page mAboutHomePage;
     private boolean mExternal;
     private boolean mBookmark;
     private boolean mReadingListItem;
     private long mFaviconLoadId;
-    private String mDocumentURI;
     private String mContentType;
     private boolean mHasTouchListeners;
     private ZoomConstraints mZoomConstraints;
@@ -66,12 +67,22 @@ public class Tab {
     private boolean mDesktopMode;
     private boolean mEnteringReaderMode;
     private Context mAppContext;
+    private ErrorType mErrorType = ErrorType.NONE;
     private static final int MAX_HISTORY_LIST_SIZE = 50;
 
     public static final int STATE_DELAYED = 0;
     public static final int STATE_LOADING = 1;
     public static final int STATE_SUCCESS = 2;
     public static final int STATE_ERROR = 3;
+
+    private static final int DEFAULT_BACKGROUND_COLOR = Color.WHITE;
+
+    public enum ErrorType {
+        CERT_ERROR,  // Pages with certificate problems
+        BLOCKED,     // Pages blocked for phishing or malware warnings
+        NET_ERROR,   // All other types of error
+        NONE         // Non error pages
+    }
 
     public Tab(Context context, int id, String url, boolean external, int parentId, String title) {
         mAppContext = context.getApplicationContext();
@@ -82,6 +93,7 @@ public class Tab {
         mUserSearch = "";
         mExternal = external;
         mParentId = parentId;
+        mAboutHomePage = HomePager.Page.BOOKMARKS;
         mTitle = title == null ? "" : title;
         mFavicon = null;
         mFaviconUrl = null;
@@ -96,7 +108,6 @@ public class Tab {
         mBookmark = false;
         mReadingListItem = false;
         mFaviconLoadId = 0;
-        mDocumentURI = "";
         mContentType = "";
         mZoomConstraints = new ZoomConstraints(false);
         mPluginViews = new ArrayList<View>();
@@ -106,7 +117,7 @@ public class Tab {
         // At startup, the background is set to a color specified by LayerView
         // when the LayerView is created. Shortly after, this background color
         // will be used before the tab's content is shown.
-        mBackgroundColor = getBackgroundColorForUrl(url);
+        mBackgroundColor = DEFAULT_BACKGROUND_COLOR;
     }
 
     private ContentResolver getContentResolver() {
@@ -132,6 +143,15 @@ public class Tab {
     public int getParentId() {
         return mParentId;
     }
+
+    public HomePager.Page getAboutHomePage() {
+        return mAboutHomePage;
+    }
+
+    private void setAboutHomePage(HomePager.Page page) {
+        mAboutHomePage = page;
+    }
+
 
     // may be null if user-entered query hasn't yet been resolved to a URI
     public synchronized String getURL() {
@@ -260,12 +280,23 @@ public class Tab {
         mUserSearch = userSearch;
     }
 
-    public void setDocumentURI(String documentURI) {
-        mDocumentURI = documentURI;
+    public void setErrorType(String type) {
+        if ("blocked".equals(type))
+            setErrorType(ErrorType.BLOCKED);
+        else if ("certerror".equals(type))
+            setErrorType(ErrorType.CERT_ERROR);
+        else if ("neterror".equals(type))
+            setErrorType(ErrorType.NET_ERROR);
+        else
+            setErrorType(ErrorType.NONE);
     }
 
-    public String getDocumentURI() {
-        return mDocumentURI;
+    public void setErrorType(ErrorType type) {
+        mErrorType = type;
+    }
+
+    public ErrorType getErrorType() {
+        return mErrorType;
     }
 
     public void setContentType(String contentType) {
@@ -574,7 +605,6 @@ public class Tab {
         updateURL(uri);
         updateUserSearch(message.getString("userSearch"));
 
-        setDocumentURI(message.getString("documentURI"));
         mBaseDomain = message.optString("baseDomain");
         if (message.getBoolean("sameDocument")) {
             // We can get a location change event for the same document with an anchor tag
@@ -591,20 +621,19 @@ public class Tab {
         setReaderEnabled(false);
         setZoomConstraints(new ZoomConstraints(true));
         setHasTouchListeners(false);
-        setBackgroundColor(getBackgroundColorForUrl(uri));
+        setBackgroundColor(DEFAULT_BACKGROUND_COLOR);
+        setErrorType(ErrorType.NONE);
+
+        final String homePage = message.getString("aboutHomePage");
+        if (!TextUtils.isEmpty(homePage)) {
+            setAboutHomePage(HomePager.Page.valueOf(homePage));
+        }
 
         Tabs.getInstance().notifyListeners(this, Tabs.TabEvents.LOCATION_CHANGE, uri);
     }
 
     private boolean shouldShowProgress(String url) {
         return "about:home".equals(url) || ReaderModeUtils.isAboutReader(url);
-    }
-
-    private int getBackgroundColorForUrl(String url) {
-        if ("about:home".equals(url)) {
-            return mAppContext.getResources().getColor(R.color.background_normal);
-        }
-        return Color.WHITE;
     }
 
     void handleDocumentStart(boolean showProgress, String url) {

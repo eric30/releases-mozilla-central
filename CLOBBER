@@ -18,4 +18,4 @@
 # Modifying this file will now automatically clobber the buildbot machines \o/
 #
 
-Add an WebIDL interface for bug 892978 requires a clobber for Windows.
+Bug 904831 - MSVC_ENABLE_PGO in js/src/Makefile.in

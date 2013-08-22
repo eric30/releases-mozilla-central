@@ -94,6 +94,7 @@ webidl_files = \
   Function.webidl \
   GainNode.webidl \
   Geolocation.webidl \
+  History.webidl \
   HTMLAnchorElement.webidl \
   HTMLAppletElement.webidl \
   HTMLAreaElement.webidl \
@@ -215,6 +216,7 @@ webidl_files = \
   OfflineAudioCompletionEvent.webidl \
   OfflineAudioContext.webidl \
   OfflineResourceList.webidl \
+  OscillatorNode.webidl \
   PaintRequest.webidl \
   PaintRequestList.webidl \
   PannerNode.webidl \
@@ -223,6 +225,7 @@ webidl_files = \
   PerformanceNavigation.webidl \
   PerformanceTiming.webidl \
   PeriodicWave.webidl \
+  PhoneNumberService.webidl \
   Plugin.webidl \
   PluginArray.webidl \
   Position.webidl \
@@ -437,7 +440,11 @@ endif
 
 ifdef MOZ_B2G_RIL
 webidl_files += \
+  CallsList.webidl \
   MozStkCommandEvent.webidl \
+  Telephony.webidl \
+  TelephonyCall.webidl \
+  TelephonyCallGroup.webidl \
   $(NULL)
 endif
 
@@ -472,7 +479,10 @@ webidl_files += \
 
 ifdef MOZ_B2G_BT
 webidl_files += \
+  BluetoothAdapter.webidl \
+  BluetoothDevice.webidl \
   BluetoothDeviceEvent.webidl \
+  BluetoothManager.webidl \
   BluetoothStatusChangedEvent.webidl \
   $(NULL)
 endif
@@ -484,6 +494,7 @@ webidl_files += \
   DataErrorEvent.webidl \
   IccCardLockErrorEvent.webidl \
   MozCellBroadcastEvent.webidl \
+  MozEmergencyCbModeEvent.webidl \
   MozVoicemailEvent.webidl \
   MozWifiConnectionInfoEvent.webidl \
   MozWifiStatusChangeEvent.webidl \
@@ -525,3 +536,8 @@ else
 test_webidl_files := $(NULL)
 endif
 
+ifdef MOZ_B2G
+webidl_files += \
+  InputMethod.webidl \
+  $(NULL)
+endif

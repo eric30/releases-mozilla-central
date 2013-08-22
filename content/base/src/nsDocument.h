@@ -10,10 +10,11 @@
 #ifndef nsDocument_h___
 #define nsDocument_h___
 
+#include "nsIDocument.h"
+
 #include "nsCOMPtr.h"
 #include "nsAutoPtr.h"
 #include "nsCRT.h"
-#include "nsIDocument.h"
 #include "nsWeakReference.h"
 #include "nsWeakPtr.h"
 #include "nsVoidArray.h"
@@ -726,13 +727,16 @@ public:
   NS_IMETHOD WalkRadioGroup(const nsAString& aName,
                             nsIRadioVisitor* aVisitor,
                             bool aFlushContent) MOZ_OVERRIDE;
-  virtual void SetCurrentRadioButton(const nsAString& aName,
-                                     nsIDOMHTMLInputElement* aRadio) MOZ_OVERRIDE;
-  virtual nsIDOMHTMLInputElement* GetCurrentRadioButton(const nsAString& aName) MOZ_OVERRIDE;
-  NS_IMETHOD GetNextRadioButton(const nsAString& aName,
-                                const bool aPrevious,
-                                nsIDOMHTMLInputElement*  aFocusedRadio,
-                                nsIDOMHTMLInputElement** aRadioOut) MOZ_OVERRIDE;
+  virtual void
+    SetCurrentRadioButton(const nsAString& aName,
+                          mozilla::dom::HTMLInputElement* aRadio) MOZ_OVERRIDE;
+  virtual mozilla::dom::HTMLInputElement*
+    GetCurrentRadioButton(const nsAString& aName) MOZ_OVERRIDE;
+  NS_IMETHOD
+    GetNextRadioButton(const nsAString& aName,
+                       const bool aPrevious,
+                       mozilla::dom::HTMLInputElement*  aFocusedRadio,
+                       mozilla::dom::HTMLInputElement** aRadioOut) MOZ_OVERRIDE;
   virtual void AddToRadioGroup(const nsAString& aName,
                                nsIFormControl* aRadio) MOZ_OVERRIDE;
   virtual void RemoveFromRadioGroup(const nsAString& aName,
