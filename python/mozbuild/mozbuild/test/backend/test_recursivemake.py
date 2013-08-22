@@ -175,6 +175,9 @@ class TestRecursiveMakeBackend(BackendTester):
                 'EXTRA_PP_JS_MODULES += bar.pp.jsm',
                 'EXTRA_PP_JS_MODULES += foo.pp.jsm',
             ],
+            'FAIL_ON_WARNINGS': [
+                'FAIL_ON_WARNINGS := 1',
+            ],
             'GTEST_CMMSRCS': [
                 'GTEST_CMMSRCS += test1.mm',
                 'GTEST_CMMSRCS += test2.mm',
@@ -201,6 +204,12 @@ class TestRecursiveMakeBackend(BackendTester):
             'LIBRARY_NAME': [
                 'LIBRARY_NAME := lib_name',
             ],
+            'LIBXUL_LIBRARY': [
+                'LIBXUL_LIBRARY := 1',
+            ],
+            'MSVC_ENABLE_PGO': [
+                'MSVC_ENABLE_PGO := 1',
+            ],
             'SDK_LIBRARY': [
                 'SDK_LIBRARY += bar.sdk',
                 'SDK_LIBRARY += foo.sdk',
@@ -217,19 +226,6 @@ class TestRecursiveMakeBackend(BackendTester):
                 'SSRCS += bar.S',
                 'SSRCS += foo.S',
             ],
-            'XPIDL_FLAGS': [
-                'XPIDL_FLAGS += -Idir1',
-                'XPIDL_FLAGS += -Idir2',
-                'XPIDL_FLAGS += -Idir3',
-            ],
-            'XPIDL_MODULE': [
-                'XPIDL_MODULE := module_name'
-            ],
-            'XPIDLSRCS': [
-                'XPIDLSRCS += bar.idl',
-                'XPIDLSRCS += biz.idl',
-                'XPIDLSRCS += foo.idl',
-            ]
         }
 
         for var, val in expected.items():
@@ -280,6 +276,34 @@ class TestRecursiveMakeBackend(BackendTester):
         # Assignment[aa], append[cc], conditional[valid]
         expected = ('aa', 'bb', 'cc', 'dd', 'valid_val')
         self.assertEqual(xpclines, ["XPCSHELL_TESTS += %s" % val for val in expected])
+
+    def test_xpidl_generation(self):
+        """Ensure xpidl files and directories are written out."""
+        env = self._consume('xpidl', RecursiveMakeBackend)
+
+        # Purge manifests should contain entries.
+        purge_dir = os.path.join(env.topobjdir, '_build_manifests', 'purge')
+        install_dir = os.path.join(env.topobjdir, '_build_manifests',
+            'install')
+        self.assertTrue(os.path.isfile(os.path.join(purge_dir, 'xpidl')))
+        self.assertTrue(os.path.isfile(os.path.join(install_dir, 'dist_idl')))
+
+        m = PurgeManifest(path=os.path.join(purge_dir, 'xpidl'))
+        self.assertIn('.deps/my_module.pp', m.entries)
+        self.assertIn('xpt/my_module.xpt', m.entries)
+
+        m = InstallManifest(path=os.path.join(install_dir, 'dist_idl'))
+        self.assertEqual(len(m), 2)
+        self.assertIn('bar.idl', m)
+        self.assertIn('foo.idl', m)
+
+        m = PurgeManifest(path=os.path.join(purge_dir, 'dist_include'))
+        self.assertIn('foo.h', m.entries)
+
+        p = os.path.join(env.topobjdir, 'config/makefiles/xpidl')
+        self.assertTrue(os.path.isdir(p))
+
+        self.assertTrue(os.path.isfile(os.path.join(p, 'Makefile')))
 
     def test_xpcshell_master_manifest(self):
         """Ensure that the master xpcshell manifest is written out correctly."""

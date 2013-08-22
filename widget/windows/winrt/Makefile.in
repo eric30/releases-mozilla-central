@@ -2,7 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this file,
 # You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH		= ../../..
+DEPTH = @DEPTH@
 topsrcdir	= @top_srcdir@
 srcdir		= @srcdir@
 VPATH		= @srcdir@
@@ -11,10 +11,6 @@ include $(DEPTH)/config/autoconf.mk
 
 LIBRARY_NAME		= widget_winrt
 EXPORT_LIBRARY	= 1
-IS_COMPONENT		= 1
-MODULE_NAME			= WidgetWinRTModule
-LIBXUL_LIBRARY	= 1
-
 DEFINES		+= -DMOZ_UNICODE
 
 ifdef MOZ_ENABLE_D3D9_LAYER
@@ -36,8 +32,6 @@ LOCAL_INCLUDES	= \
 		-I$(topsrcdir)/toolkit/xre \
 		-I$(topsrcdir)/xpcom/base \
 		$(NULL)
-
-include $(topsrcdir)/config/config.mk
 
 MIDL_GENERATED_FILES = \
 	UIABridge_i.c \

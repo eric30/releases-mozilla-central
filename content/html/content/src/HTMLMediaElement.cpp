@@ -68,8 +68,6 @@
 #include "nsHostObjectProtocolHandler.h"
 #include "mozilla/dom/MediaSource.h"
 #include "MediaMetadataManager.h"
-#include "AudioStreamTrack.h"
-#include "VideoStreamTrack.h"
 
 #include "AudioChannelService.h"
 
@@ -97,6 +95,7 @@ static PRLogModuleInfo* gMediaElementEventsLog;
 #include "mozilla/Preferences.h"
 
 #include "nsIPermissionManager.h"
+#include "nsContentTypeParser.h"
 
 using namespace mozilla::layers;
 using mozilla::net::nsMediaFragmentURIParser;
@@ -279,7 +278,7 @@ void HTMLMediaElement::ReportLoadError(const char* aMsg,
                                        uint32_t aParamCount)
 {
   nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
-                                  "Media",
+                                  NS_LITERAL_CSTRING("Media"),
                                   OwnerDoc(),
                                   nsContentUtils::eDOM_PROPERTIES,
                                   aMsg,
@@ -623,10 +622,7 @@ void HTMLMediaElement::AbortExistingLoads()
   mHaveQueuedSelectResource = false;
   mSuspendedForPreloadNone = false;
   mDownloadSuspendedByCache = false;
-  mHasAudio = false;
-  mHasVideo = false;
   mSourcePointer = nullptr;
-  mLastNextFrameStatus = NEXT_FRAME_UNINITIALIZED;
 
   mChannels = 0;
   mRate = 0;
@@ -1911,7 +1907,6 @@ HTMLMediaElement::HTMLMediaElement(already_AddRefed<nsINodeInfo> aNodeInfo)
     mCurrentLoadID(0),
     mNetworkState(nsIDOMHTMLMediaElement::NETWORK_EMPTY),
     mReadyState(nsIDOMHTMLMediaElement::HAVE_NOTHING),
-    mLastNextFrameStatus(NEXT_FRAME_UNINITIALIZED),
     mLoadWaitStatus(NOT_WAITING),
     mVolume(1.0),
     mChannels(0),
@@ -1952,7 +1947,6 @@ HTMLMediaElement::HTMLMediaElement(already_AddRefed<nsINodeInfo> aNodeInfo)
     mMediaSecurityVerified(false),
     mCORSMode(CORS_NONE),
     mHasAudio(false),
-    mHasVideo(false),
     mDownloadSuspendedByCache(false),
     mAudioChannelType(AUDIO_CHANNEL_NORMAL),
     mPlayingThroughTheAudioChannel(false)
@@ -2597,12 +2591,14 @@ public:
   void DoNotifyFinished()
   {
     if (mElement) {
+      nsRefPtr<HTMLMediaElement> deathGrip = mElement;
       mElement->PlaybackEnded();
     }
   }
   void UpdateReadyStateForData()
   {
     if (mElement && mHaveCurrentData) {
+      nsRefPtr<HTMLMediaElement> deathGrip = mElement;
       mElement->UpdateReadyStateForData(
         mBlocked ? MediaDecoderOwner::NEXT_FRAME_UNAVAILABLE_BUFFERING :
                    MediaDecoderOwner::NEXT_FRAME_AVAILABLE);
@@ -2625,6 +2621,7 @@ public:
       mPendingNotifyOutput = false;
     }
     if (mElement && mHaveCurrentData) {
+      nsRefPtr<HTMLMediaElement> deathGrip = mElement;
       mElement->FireTimeUpdate(true);
     }
   }
@@ -2632,6 +2629,7 @@ public:
   {
     mHaveCurrentData = true;
     if (mElement) {
+      nsRefPtr<HTMLMediaElement> deathGrip = mElement;
       mElement->FirstFrameLoaded(false);
     }
     UpdateReadyStateForData();
@@ -2700,19 +2698,6 @@ void HTMLMediaElement::SetupSrcMediaStreamPlayback(DOMMediaStream* aStream)
   if (mPausedForInactiveDocumentOrChannel) {
     GetSrcMediaStream()->ChangeExplicitBlockerCount(1);
   }
-
-  nsAutoTArray<nsRefPtr<AudioStreamTrack>,1> audioTracks;
-  aStream->GetAudioTracks(audioTracks);
-  nsAutoTArray<nsRefPtr<VideoStreamTrack>,1> videoTracks;
-  aStream->GetVideoTracks(videoTracks);
-
-  // Clear aChannels, aRate and aTags, but set mHasAudio and mHasVideo
-  MetadataLoaded(0, 0,
-                 !audioTracks.IsEmpty(), !videoTracks.IsEmpty(),
-                 nullptr);
-  DispatchAsyncEvent(NS_LITERAL_STRING("suspend"));
-  mNetworkState = nsIDOMHTMLMediaElement::NETWORK_IDLE;
-
   ChangeDelayLoadStatus(false);
   GetSrcMediaStream()->AddAudioOutput(this);
   GetSrcMediaStream()->SetAudioOutputVolume(this, float(mMuted ? 0.0 : mVolume));
@@ -2720,7 +2705,11 @@ void HTMLMediaElement::SetupSrcMediaStreamPlayback(DOMMediaStream* aStream)
   if (container) {
     GetSrcMediaStream()->AddVideoOutput(container);
   }
-
+  ChangeReadyState(nsIDOMHTMLMediaElement::HAVE_METADATA);
+  DispatchAsyncEvent(NS_LITERAL_STRING("durationchange"));
+  DispatchAsyncEvent(NS_LITERAL_STRING("loadedmetadata"));
+  DispatchAsyncEvent(NS_LITERAL_STRING("suspend"));
+  mNetworkState = nsIDOMHTMLMediaElement::NETWORK_IDLE;
   AddRemoveSelfReference();
   // FirstFrameLoaded(false) will be called when the stream has current data,
   // to complete the setup by entering the HAVE_CURRENT_DATA state.
@@ -2777,7 +2766,6 @@ void HTMLMediaElement::MetadataLoaded(int aChannels,
   mChannels = aChannels;
   mRate = aRate;
   mHasAudio = aHasAudio;
-  mHasVideo = aHasVideo;
   mTags = aTags;
   ChangeReadyState(nsIDOMHTMLMediaElement::HAVE_METADATA);
   DispatchAsyncEvent(NS_LITERAL_STRING("durationchange"));
@@ -2797,8 +2785,10 @@ void HTMLMediaElement::MetadataLoaded(int aChannels,
 
 void HTMLMediaElement::FirstFrameLoaded(bool aResourceFullyLoaded)
 {
+  ChangeReadyState(aResourceFullyLoaded ?
+    nsIDOMHTMLMediaElement::HAVE_ENOUGH_DATA :
+    nsIDOMHTMLMediaElement::HAVE_CURRENT_DATA);
   ChangeDelayLoadStatus(false);
-  UpdateReadyStateForData(NEXT_FRAME_UNAVAILABLE);
 
   NS_ASSERTION(!mSuspendedAfterFirstFrame, "Should not have already suspended");
 
@@ -2985,8 +2975,6 @@ bool HTMLMediaElement::ShouldCheckAllowOrigin()
 
 void HTMLMediaElement::UpdateReadyStateForData(MediaDecoderOwner::NextFrameStatus aNextFrame)
 {
-  mLastNextFrameStatus = aNextFrame;
-
   if (mReadyState < nsIDOMHTMLMediaElement::HAVE_METADATA) {
     // aNextFrame might have a next frame because the decoder can advance
     // on its own thread before ResourceLoaded or MetadataLoaded gets
@@ -3008,14 +2996,6 @@ void HTMLMediaElement::UpdateReadyStateForData(MediaDecoderOwner::NextFrameStatu
     // should remain at HAVE_CURRENT_DATA in this case.
     ChangeReadyState(nsIDOMHTMLMediaElement::HAVE_ENOUGH_DATA);
     return;
-  }
-
-  if (mReadyState < nsIDOMHTMLMediaElement::HAVE_CURRENT_DATA && mHasVideo) {
-    VideoFrameContainer* container = GetVideoFrameContainer();
-    if (container && mMediaSize == nsIntSize(-1,-1)) {
-      // No frame has been set yet. Don't advance.
-      return;
-    }
   }
 
   if (aNextFrame != MediaDecoderOwner::NEXT_FRAME_AVAILABLE) {
@@ -3152,21 +3132,26 @@ void HTMLMediaElement::CheckAutoplayDataReady()
 
 VideoFrameContainer* HTMLMediaElement::GetVideoFrameContainer()
 {
-  if (mVideoFrameContainer) {
-    return mVideoFrameContainer;
+  // If we have loaded the metadata, and the size of the video is still
+  // (-1, -1), the media has no video. Don't go a create a video frame
+  // container.
+  if (mReadyState >= nsIDOMHTMLMediaElement::HAVE_METADATA &&
+      mMediaSize == nsIntSize(-1, -1)) {
+    return nullptr;
   }
+
+  if (mVideoFrameContainer)
+    return mVideoFrameContainer;
 
   // If we have a print surface, this is just a static image so
   // no image container is required
-  if (mPrintSurface) {
+  if (mPrintSurface)
     return nullptr;
-  }
 
   // Only video frames need an image container.
   nsCOMPtr<nsIDOMHTMLVideoElement> video = do_QueryObject(this);
-  if (!video) {
+  if (!video)
     return nullptr;
-  }
 
   mVideoFrameContainer =
     new VideoFrameContainer(this, LayerManager::CreateAsynchronousImageContainer());
@@ -3296,7 +3281,6 @@ void HTMLMediaElement::NotifyDecoderPrincipalChanged()
 void HTMLMediaElement::UpdateMediaSize(nsIntSize size)
 {
   mMediaSize = size;
-  UpdateReadyStateForData(mLastNextFrameStatus);
 }
 
 void HTMLMediaElement::SuspendOrResumeElement(bool aPauseElement, bool aSuspendEvents)

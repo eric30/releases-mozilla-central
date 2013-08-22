@@ -74,13 +74,13 @@ XBLFinalize(JSFreeOp *fop, JSObject *obj)
 {
   nsXBLDocumentInfo* docInfo =
     static_cast<nsXBLDocumentInfo*>(::JS_GetPrivate(obj));
-  nsContentUtils::DeferredFinalize(static_cast<nsIScriptGlobalObjectOwner*>(docInfo));
+  nsContentUtils::DeferredFinalize(docInfo);
   
   nsXBLJSClass* c = static_cast<nsXBLJSClass*>(::JS_GetClass(obj));
   c->Drop();
 }
 
-static JSBool
+static bool
 XBLEnumerate(JSContext *cx, JS::Handle<JSObject*> obj)
 {
   nsXBLPrototypeBinding* protoBinding =
@@ -94,9 +94,11 @@ uint64_t nsXBLJSClass::sIdCount = 0;
 
 nsXBLJSClass::nsXBLJSClass(const nsAFlatCString& aClassName,
                            const nsCString& aKey)
+  : LinkedListElement<nsXBLJSClass>()
+  , mRefCnt(0)
+  , mKey(aKey)
 {
-  memset(this, 0, sizeof(nsXBLJSClass));
-  next = prev = static_cast<JSCList*>(this);
+  memset(static_cast<JSClass*>(this), 0, sizeof(JSClass));
   name = ToNewCString(aClassName);
   flags =
     JSCLASS_HAS_PRIVATE | JSCLASS_PRIVATE_IS_NSISUPPORTS |
@@ -110,13 +112,12 @@ nsXBLJSClass::nsXBLJSClass(const nsAFlatCString& aClassName,
   resolve = JS_ResolveStub;
   convert = ::JS_ConvertStub;
   finalize = XBLFinalize;
-  mKey = aKey;
 }
 
 nsrefcnt
 nsXBLJSClass::Destroy()
 {
-  NS_ASSERTION(next == prev && prev == static_cast<JSCList*>(this),
+  NS_ASSERTION(!isInList(),
                "referenced nsXBLJSClass is on LRU list already!?");
 
   if (nsXBLService::gClassTable) {
@@ -130,8 +131,7 @@ nsXBLJSClass::Destroy()
     delete this;
   } else {
     // Put this most-recently-used class on end of the LRU-sorted freelist.
-    JSCList* mru = static_cast<JSCList*>(this);
-    JS_APPEND_LINK(mru, &nsXBLService::gClassLRUList);
+    nsXBLService::gClassLRUList->insertBack(this);
     nsXBLService::gClassLRUListLength++;
   }
 
@@ -178,8 +178,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsXBLBinding)
   NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb,
                                      "mPrototypeBinding->XBLDocumentInfo()");
-  cb.NoteXPCOMChild(static_cast<nsIScriptGlobalObjectOwner*>(
-                      tmp->mPrototypeBinding->XBLDocumentInfo()));
+  cb.NoteXPCOMChild(tmp->mPrototypeBinding->XBLDocumentInfo());
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mContent)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mNextBinding)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDefaultInsertionPoint)
@@ -958,27 +957,21 @@ nsXBLBinding::DoInitJSClass(JSContext *cx, JS::Handle<JSObject*> global,
       c = static_cast<nsXBLJSClass*>(nsXBLService::gClassTable->Get(&key));
     }
     if (c) {
-      // If c is on the LRU list (i.e., not linked to itself), remove it now!
-      JSCList* link = static_cast<JSCList*>(c);
-      if (c->next != link) {
-        JS_REMOVE_AND_INIT_LINK(link);
+      // If c is on the LRU list, remove it now!
+      if (c->isInList()) {
+        c->remove();
         nsXBLService::gClassLRUListLength--;
       }
     } else {
-      if (JS_CLIST_IS_EMPTY(&nsXBLService::gClassLRUList)) {
+      if (nsXBLService::gClassLRUList->isEmpty()) {
         // We need to create a struct for this class.
         c = new nsXBLJSClass(className, xblKey);
-
-        if (!c)
-          return NS_ERROR_OUT_OF_MEMORY;
       } else {
         // Pull the least recently used class struct off the list.
-        JSCList* lru = (nsXBLService::gClassLRUList).next;
-        JS_REMOVE_AND_INIT_LINK(lru);
+        c = nsXBLService::gClassLRUList->popFirst();
         nsXBLService::gClassLRUListLength--;
 
         // Remove any mapping from the old name to the class struct.
-        c = static_cast<nsXBLJSClass*>(lru);
         nsCStringKey oldKey(c->Key());
         (nsXBLService::gClassTable)->Remove(&oldKey);
 
@@ -1106,10 +1099,10 @@ nsXBLBinding::ResolveAllFields(JSContext *cx, JS::Handle<JSObject*> obj) const
 
 bool
 nsXBLBinding::LookupMember(JSContext* aCx, JS::HandleId aId,
-                           JSPropertyDescriptor* aDesc)
+                           JS::MutableHandle<JSPropertyDescriptor> aDesc)
 {
   // We should never enter this function with a pre-filled property descriptor.
-  MOZ_ASSERT(!aDesc->obj);
+  MOZ_ASSERT(!aDesc.object());
 
   // Get the string as an nsString before doing anything, so we can make
   // convenient comparisons during our search.
@@ -1149,7 +1142,7 @@ nsXBLBinding::LookupMember(JSContext* aCx, JS::HandleId aId,
 bool
 nsXBLBinding::LookupMemberInternal(JSContext* aCx, nsString& aName,
                                    JS::HandleId aNameAsId,
-                                   JSPropertyDescriptor* aDesc,
+                                   JS::MutableHandle<JSPropertyDescriptor> aDesc,
                                    JS::Handle<JSObject*> aXBLScope)
 {
   // First, see if we have a JSClass. If we don't, it means that this binding
@@ -1187,7 +1180,7 @@ nsXBLBinding::LookupMemberInternal(JSContext* aCx, nsString& aName,
   {
     return false;
   }
-  if (aDesc->obj || !mNextBinding) {
+  if (aDesc.object() || !mNextBinding) {
     return true;
   }
 

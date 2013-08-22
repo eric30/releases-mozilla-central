@@ -6,12 +6,35 @@
 #ifndef MOZILLA_GFX_TILEDCONTENTCLIENT_H
 #define MOZILLA_GFX_TILEDCONTENTCLIENT_H
 
-#include "mozilla/layers/ContentClient.h"
-#include "TiledLayerBuffer.h"
-#include "gfxPlatform.h"
+#include <stddef.h>                     // for size_t
+#include <stdint.h>                     // for uint16_t
+#include <algorithm>                    // for swap
+#include "Layers.h"                     // for LayerManager, etc
+#include "TiledLayerBuffer.h"           // for TiledLayerBuffer
+#include "Units.h"                      // for CSSPoint
+#include "gfx3DMatrix.h"                // for gfx3DMatrix
+#include "gfxASurface.h"                // for gfxASurface, etc
+#include "gfxImageSurface.h"            // for gfxImageSurface
+#include "gfxPoint.h"                   // for gfxSize
+#include "mozilla/Attributes.h"         // for MOZ_OVERRIDE
+#include "mozilla/RefPtr.h"             // for RefPtr
+#include "mozilla/layers/CompositableClient.h"  // for CompositableClient
+#include "mozilla/layers/CompositorTypes.h"  // for TextureInfo, etc
+#include "mozilla/layers/TextureClient.h"
+#include "mozilla/mozalloc.h"           // for operator delete
+#include "nsAutoPtr.h"                  // for nsRefPtr
+#include "nsPoint.h"                    // for nsIntPoint
+#include "nsRect.h"                     // for nsIntRect
+#include "nsRegion.h"                   // for nsIntRegion
+#include "nsTArray.h"                   // for nsTArray, nsTArray_Impl, etc
+#include "nsTraceRefcnt.h"              // for MOZ_COUNT_DTOR
+#include "mozilla/layers/ISurfaceAllocator.h"
+#include "gfxReusableSurfaceWrapper.h"
 
 namespace mozilla {
 namespace layers {
+
+class BasicTileDescriptor;
 
 /**
  * Represent a single tile in tiled buffer. The buffer keeps tiles,
@@ -31,6 +54,10 @@ struct BasicTiledLayerTile {
   // Placeholder
   BasicTiledLayerTile()
     : mDeprecatedTextureClient(nullptr)
+  {}
+
+  BasicTiledLayerTile(DeprecatedTextureClientTile* aTextureClient)
+    : mDeprecatedTextureClient(aTextureClient)
   {}
 
   BasicTiledLayerTile(const BasicTiledLayerTile& o) {
@@ -62,6 +89,9 @@ struct BasicTiledLayerTile {
   void ReadLock() {
     GetSurface()->ReadLock();
   }
+
+  TileDescriptor GetTileDescriptor();
+  static BasicTiledLayerTile OpenDescriptor(ISurfaceAllocator *aAllocator, const TileDescriptor& aDesc);
 
   gfxReusableSurfaceWrapper* GetSurface() {
     return mDeprecatedTextureClient->GetReusableSurfaceWrapper();
@@ -107,6 +137,29 @@ public:
     , mLastPaintOpaque(false)
   {}
 
+  BasicTiledLayerBuffer(ISurfaceAllocator* aAllocator,
+                        const nsIntRegion& aValidRegion,
+                        const nsIntRegion& aPaintedRegion,
+                        const InfallibleTArray<TileDescriptor>& aTiles,
+                        int aRetainedWidth,
+                        int aRetainedHeight,
+                        float aResolution)
+  {
+    mValidRegion = aValidRegion;
+    mPaintedRegion = aPaintedRegion;
+    mRetainedWidth = aRetainedWidth;
+    mRetainedHeight = aRetainedHeight;
+    mResolution = aResolution;
+
+    for(size_t i = 0; i < aTiles.Length(); i++) {
+      if (aTiles[i].type() == TileDescriptor::TPlaceholderTileDescriptor) {
+        mRetainedTiles.AppendElement(GetPlaceholderTile());
+      } else {
+        mRetainedTiles.AppendElement(BasicTiledLayerTile::OpenDescriptor(aAllocator, aTiles[i]));
+      }
+    }
+  }
+
   void PaintThebes(const nsIntRegion& aNewValidRegion,
                    const nsIntRegion& aPaintRegion,
                    LayerManager::DrawThebesLayerCallback aCallback,
@@ -142,14 +195,10 @@ public:
                          LayerManager::DrawThebesLayerCallback aCallback,
                          void* aCallbackData);
 
-  /**
-   * Copy this buffer duplicating the texture hosts under the tiles
-   * XXX This should go. It is a hack because we need to keep the
-   * surface wrappers alive whilst they are locked by the compositor.
-   * Once we properly implement the texture host/client architecture
-   * for tiled layers we shouldn't need this.
-   */
-  BasicTiledLayerBuffer DeepCopy() const;
+  SurfaceDescriptorTiles GetSurfaceDescriptorTiles();
+
+  static BasicTiledLayerBuffer OpenDescriptor(ISurfaceAllocator* aAllocator,
+                                              const SurfaceDescriptorTiles& aDescriptor);
 
 protected:
   BasicTiledLayerTile ValidateTile(BasicTiledLayerTile aTile,

@@ -2,7 +2,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
 // IWYU pragma: private, include "nsGkAtoms.h"
 
 /*
@@ -49,7 +48,6 @@ GK_ATOM(mozsignature, "moz-signature")
 GK_ATOM(_moz_is_glyph, "-moz-is-glyph")
 GK_ATOM(_moz_original_size, "_moz_original_size")
 GK_ATOM(_moz_target, "_moz_target")
-GK_ATOM(_moz_type, "_moz-type")
 GK_ATOM(menuactive, "_moz-menuactive")
 GK_ATOM(_poundDefault, "#default")
 GK_ATOM(_asterix, "*")
@@ -707,10 +705,12 @@ GK_ATOM(ondragover, "ondragover")
 GK_ATOM(ondragstart, "ondragstart")
 GK_ATOM(ondrop, "ondrop")
 GK_ATOM(onenabled, "onenabled")
+GK_ATOM(onemergencycbmodechange, "onemergencycbmodechange")
 GK_ATOM(onerror, "onerror")
 GK_ATOM(onfailed, "onfailed")
 GK_ATOM(onfocus, "onfocus")
 GK_ATOM(onget, "onget")
+GK_ATOM(ongroupchange, "ongroupchange")
 GK_ATOM(onhashchange, "onhashchange")
 GK_ATOM(onheadphoneschange, "onheadphoneschange")
 GK_ATOM(onheld, "onheld")

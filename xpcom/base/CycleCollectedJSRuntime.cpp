@@ -59,7 +59,6 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/DOMJSClass.h"
-#include "jsfriendapi.h"
 #include "jsprf.h"
 #include "nsCycleCollectionNoteRootCallback.h"
 #include "nsCycleCollectionParticipant.h"
@@ -259,8 +258,9 @@ private:
     if (delegateMightNeedMarking && kkind == JSTRACE_OBJECT) {
       JSObject* kdelegate = js::GetWeakmapKeyDelegate((JSObject*)k);
       if (kdelegate && !xpc_IsGrayGCThing(kdelegate)) {
-        JS::UnmarkGrayGCThingRecursively(k, JSTRACE_OBJECT);
-        tracer->mAnyMarked = true;
+        if (JS::UnmarkGrayGCThingRecursively(k, JSTRACE_OBJECT)) {
+          tracer->mAnyMarked = true;
+        }
       }
     }
 
@@ -268,8 +268,9 @@ private:
         (!k || !xpc_IsGrayGCThing(k)) &&
         (!m || !xpc_IsGrayGCThing(m)) &&
         vkind != JSTRACE_SHAPE) {
-      JS::UnmarkGrayGCThingRecursively(v, vkind);
-      tracer->mAnyMarked = true;
+      if (JS::UnmarkGrayGCThingRecursively(v, vkind)) {
+        tracer->mAnyMarked = true;
+      }
     }
   }
 
@@ -795,7 +796,7 @@ CycleCollectedJSRuntime::GCCallback(JSRuntime* aRuntime,
   self->OnGC(aStatus);
 }
 
-/* static */ JSBool
+/* static */ bool
 CycleCollectedJSRuntime::ContextCallback(JSContext* aContext,
                                          unsigned aOperation,
                                          void* aData)
@@ -893,7 +894,7 @@ CycleCollectedJSRuntime::RemoveJSHolder(void* aHolder)
 
 #ifdef DEBUG
 bool
-CycleCollectedJSRuntime::TestJSHolder(void* aHolder)
+CycleCollectedJSRuntime::IsJSHolder(void* aHolder)
 {
   return mJSHolders.Get(aHolder, nullptr);
 }
@@ -931,38 +932,6 @@ nsCycleCollectionParticipant*
 CycleCollectedJSRuntime::ZoneParticipant()
 {
     return &mJSZoneCycleCollectorGlobal;
-}
-
-bool
-CycleCollectedJSRuntime::NotifyLeaveMainThread() const
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  if (JS_IsInRequest(mJSRuntime)) {
-    return false;
-  }
-  JS_ClearRuntimeThread(mJSRuntime);
-  return true;
-}
-
-void
-CycleCollectedJSRuntime::NotifyEnterCycleCollectionThread() const
-{
-  MOZ_ASSERT(!NS_IsMainThread());
-  JS_SetRuntimeThread(mJSRuntime);
-}
-
-void
-CycleCollectedJSRuntime::NotifyLeaveCycleCollectionThread() const
-{
-  MOZ_ASSERT(!NS_IsMainThread());
-  JS_ClearRuntimeThread(mJSRuntime);
-}
-
-void
-CycleCollectedJSRuntime::NotifyEnterMainThread() const
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  JS_SetRuntimeThread(mJSRuntime);
 }
 
 nsresult

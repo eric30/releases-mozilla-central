@@ -11,10 +11,7 @@ VPATH     = @srcdir@
 include $(DEPTH)/config/autoconf.mk
 
 LIBRARY_NAME   = nkdatachan_s
-LIBXUL_LIBRARY = 1
 NO_PROFILE_GUIDED_OPTIMIZE = 1 # Don't PGO
-FAIL_ON_WARNINGS = 1
-
 LOCAL_INCLUDES = \
   -I$(topsrcdir)/xpcom/ds \
   -I$(srcdir)/../src \
@@ -39,7 +36,6 @@ DEFINES += -D__Userspace_os_$(OS_TARGET)=1
 endif
 
 
-include $(topsrcdir)/config/config.mk
 include $(topsrcdir)/config/rules.mk
 include $(topsrcdir)/ipc/chromium/chromium-config.mk
 

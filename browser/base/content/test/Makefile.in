@@ -36,15 +36,18 @@ MOCHITEST_FILES = \
         test_offline_gzip.html \
         test_offlineNotification.html \
         video.ogg \
+        offlineByDefault.js \
         $(NULL)
 
-# test_contextmenu.html is disabled on Linux due to bug 513558
+# test_contextmenu.html and test_contextmenu_input are disabled on Linux due to bug 513558
 ifndef MOZ_WIDGET_GTK
 MOCHITEST_FILES += \
         audio.ogg \
         privateBrowsingMode.js \
         subtst_contextmenu.html \
+        contextmenu_common.js \
         test_contextmenu.html \
+        test_contextmenu_input.html \
         $(NULL)
 endif
 
@@ -184,6 +187,7 @@ MOCHITEST_BROWSER_FILES = \
                  browser_bug822367.js \
                  browser_bug832435.js \
                  browser_bug839103.js \
+                 browser_bug880101.js \
                  browser_bug882977.js \
                  browser_bug887515.js \
                  browser_canonizeURL.js \

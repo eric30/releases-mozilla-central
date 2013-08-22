@@ -2,6 +2,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+// IWYU pragma: private, include "nsISupports.h"
 
 
 #ifndef nsISupportsImpl_h__
@@ -22,9 +23,6 @@
 
 #if !defined(XPCOM_GLUE_AVOID_NSPR)
 #include "prthread.h" /* needed for thread-safety checks */
-#ifdef DEBUG
-#include "nsCycleCollectorUtils.h" /* for NS_IsCycleCollectorThread */
-#endif // DEBUG
 #endif // !XPCOM_GLUE_AVOID_NSPR
 
 #include "nsDebug.h"
@@ -65,22 +63,10 @@ private:
 #define NS_DECL_OWNINGTHREAD            nsAutoOwningThread _mOwningThread;
 #define NS_ASSERT_OWNINGTHREAD(_class) \
   NS_CheckThreadSafe(_mOwningThread.GetThread(), #_class " not thread-safe")
-#define NS_ASSERT_OWNINGTHREAD_AND_NOT_CCTHREAD(_class) \
-  do { \
-    if (NS_IsCycleCollectorThread()) { \
-      MOZ_CRASH("Changing refcount of " #_class " object during Traverse is " \
-                "not permitted!"); \
-    } \
-    else { \
-      NS_ASSERT_OWNINGTHREAD(_class); \
-    } \
-  } while (0)
-
 #else // !DEBUG
 
 #define NS_DECL_OWNINGTHREAD            /* nothing */
 #define NS_ASSERT_OWNINGTHREAD(_class)  ((void)0)
-#define NS_ASSERT_OWNINGTHREAD_AND_NOT_CCTHREAD(_class)  ((void)0)
 
 #endif // DEBUG
 
@@ -287,14 +273,14 @@ public:
 
 #define NS_IMPL_CC_NATIVE_ADDREF_BODY(_class)                                 \
     MOZ_ASSERT(int32_t(mRefCnt) >= 0, "illegal refcnt");                      \
-    NS_ASSERT_OWNINGTHREAD_AND_NOT_CCTHREAD(_class);                          \
+    NS_ASSERT_OWNINGTHREAD(_class);                                           \
     nsrefcnt count = mRefCnt.incr();                                          \
     NS_LOG_ADDREF(this, count, #_class, sizeof(*this));                       \
     return count;
 
 #define NS_IMPL_CC_NATIVE_RELEASE_BODY(_class)                                \
     MOZ_ASSERT(int32_t(mRefCnt) > 0, "dup release");                          \
-    NS_ASSERT_OWNINGTHREAD_AND_NOT_CCTHREAD(_class);                          \
+    NS_ASSERT_OWNINGTHREAD(_class);                                           \
     nsrefcnt count =                                                          \
       mRefCnt.decr(static_cast<void*>(this),                                  \
                    _class::NS_CYCLE_COLLECTION_INNERCLASS::GetParticipant()); \
@@ -311,7 +297,7 @@ NS_METHOD_(nsrefcnt) _class::AddRef(void)                                     \
 NS_METHOD_(nsrefcnt) _class::Release(void)                                       \
 {                                                                                \
     MOZ_ASSERT(int32_t(mRefCnt) > 0, "dup release");                             \
-    NS_ASSERT_OWNINGTHREAD_AND_NOT_CCTHREAD(_class);                             \
+    NS_ASSERT_OWNINGTHREAD(_class);                                              \
     bool shouldDelete = false;                                                   \
     nsrefcnt count =                                                             \
       mRefCnt.decr(static_cast<void*>(this),                                     \
@@ -370,14 +356,14 @@ public:
 public:                                                                       \
   NS_METHOD_(nsrefcnt) AddRef(void) {                                         \
     MOZ_ASSERT(int32_t(mRefCnt) >= 0, "illegal refcnt");                      \
-    NS_ASSERT_OWNINGTHREAD_AND_NOT_CCTHREAD(_class);                          \
+    NS_ASSERT_OWNINGTHREAD(_class);                                           \
     ++mRefCnt;                                                                \
     NS_LOG_ADDREF(this, mRefCnt, #_class, sizeof(*this));                     \
     return mRefCnt;                                                           \
   }                                                                           \
   NS_METHOD_(nsrefcnt) Release(void) {                                        \
     MOZ_ASSERT(int32_t(mRefCnt) > 0, "dup release");                          \
-    NS_ASSERT_OWNINGTHREAD_AND_NOT_CCTHREAD(_class);                          \
+    NS_ASSERT_OWNINGTHREAD(_class);                                           \
     --mRefCnt;                                                                \
     NS_LOG_RELEASE(this, mRefCnt, #_class);                                   \
     if (mRefCnt == 0) {                                                       \
@@ -432,7 +418,7 @@ NS_IMETHODIMP_(nsrefcnt) _class::AddRef(void)                                 \
 {                                                                             \
   MOZ_ASSERT(int32_t(mRefCnt) >= 0, "illegal refcnt");                        \
   if (!mRefCnt.isThreadSafe)                                                  \
-    NS_ASSERT_OWNINGTHREAD_AND_NOT_CCTHREAD(_class);                          \
+    NS_ASSERT_OWNINGTHREAD(_class);                                           \
   nsrefcnt count = ++mRefCnt;                                                 \
   NS_LOG_ADDREF(this, count, #_class, sizeof(*this));                         \
   return count;                                                               \
@@ -476,7 +462,7 @@ NS_IMETHODIMP_(nsrefcnt) _class::Release(void)                                \
 {                                                                             \
   MOZ_ASSERT(int32_t(mRefCnt) > 0, "dup release");                            \
   if (!mRefCnt.isThreadSafe)                                                  \
-    NS_ASSERT_OWNINGTHREAD_AND_NOT_CCTHREAD(_class);                          \
+    NS_ASSERT_OWNINGTHREAD(_class);                                           \
   nsrefcnt count = --mRefCnt;                                                 \
   NS_LOG_RELEASE(this, count, #_class);                                       \
   if (count == 0) {                                                           \
@@ -524,7 +510,7 @@ NS_IMETHODIMP_(nsrefcnt) _class::Release(void)                                \
 NS_IMETHODIMP_(nsrefcnt) _class::AddRef(void)                                 \
 {                                                                             \
   MOZ_ASSERT(int32_t(mRefCnt) >= 0, "illegal refcnt");                        \
-  NS_ASSERT_OWNINGTHREAD_AND_NOT_CCTHREAD(_class);                            \
+  NS_ASSERT_OWNINGTHREAD(_class);                                             \
   nsrefcnt count = mRefCnt.incr();                                            \
   NS_LOG_ADDREF(this, count, #_class, sizeof(*this));                         \
   return count;                                                               \
@@ -534,7 +520,7 @@ NS_IMETHODIMP_(nsrefcnt) _class::AddRef(void)                                 \
 NS_IMETHODIMP_(nsrefcnt) _class::Release(void)                                \
 {                                                                             \
   MOZ_ASSERT(int32_t(mRefCnt) > 0, "dup release");                            \
-  NS_ASSERT_OWNINGTHREAD_AND_NOT_CCTHREAD(_class);                            \
+  NS_ASSERT_OWNINGTHREAD(_class);                                             \
   nsISupports *base = NS_CYCLE_COLLECTION_CLASSNAME(_class)::Upcast(this);    \
   nsrefcnt count = mRefCnt.decr(base);                                        \
   NS_LOG_RELEASE(this, count, #_class);                                       \
@@ -554,7 +540,7 @@ NS_IMETHODIMP_(void) _class::DeleteCycleCollectable(void)                     \
 NS_IMETHODIMP_(nsrefcnt) _class::Release(void)                                \
 {                                                                             \
   MOZ_ASSERT(int32_t(mRefCnt) > 0, "dup release");                            \
-  NS_ASSERT_OWNINGTHREAD_AND_NOT_CCTHREAD(_class);                            \
+  NS_ASSERT_OWNINGTHREAD(_class);                                             \
   bool shouldDelete = false;                                                  \
   nsISupports *base = NS_CYCLE_COLLECTION_CLASSNAME(_class)::Upcast(this);    \
   nsrefcnt count = mRefCnt.decr(base, &shouldDelete);                         \

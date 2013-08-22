@@ -6,17 +6,26 @@
 #ifndef MOZILLA_GFX_IMAGECLIENT_H
 #define MOZILLA_GFX_IMAGECLIENT_H
 
-#include "mozilla/layers/LayersSurfaces.h"
-#include "mozilla/layers/CompositableClient.h"
-#include "mozilla/layers/TextureClient.h"
-#include "gfxPattern.h"
+#include <stdint.h>                     // for uint32_t, uint64_t
+#include <sys/types.h>                  // for int32_t
+#include "mozilla/Attributes.h"         // for MOZ_OVERRIDE
+#include "mozilla/RefPtr.h"             // for RefPtr, TemporaryRef
+#include "mozilla/gfx/Types.h"          // for SurfaceFormat
+#include "mozilla/layers/CompositableClient.h"  // for CompositableClient
+#include "mozilla/layers/CompositorTypes.h"  // for CompositableType, etc
+#include "mozilla/layers/LayersSurfaces.h"  // for SurfaceDescriptor
+#include "mozilla/layers/TextureClient.h"  // for DeprecatedTextureClient, etc
+#include "mozilla/mozalloc.h"           // for operator delete
+#include "nsCOMPtr.h"                   // for already_AddRefed
+#include "nsRect.h"                     // for nsIntRect
 
 namespace mozilla {
 namespace layers {
 
+class CompositableForwarder;
+class Image;
 class ImageContainer;
-class ImageLayer;
-class PlanarYCbCrImage;
+class ShadowableLayer;
 
 /**
  * Image clients are used by basic image layers on the content thread, they
@@ -73,7 +82,7 @@ public:
 
   virtual bool UpdateImage(ImageContainer* aContainer, uint32_t aContentFlags);
 
-  virtual void Detach() MOZ_OVERRIDE;
+  virtual void OnDetach() MOZ_OVERRIDE;
 
   virtual void AddTextureClient(TextureClient* aTexture) MOZ_OVERRIDE;
 
@@ -89,7 +98,7 @@ protected:
 };
 
 /**
- * An image client which uses a two texture clients.
+ * An image client which uses two texture clients.
  */
 class ImageClientBuffered : public ImageClientSingle
 {
@@ -100,7 +109,7 @@ public:
 
   virtual bool UpdateImage(ImageContainer* aContainer, uint32_t aContentFlags);
 
-  virtual void Detach() MOZ_OVERRIDE;
+  virtual void OnDetach() MOZ_OVERRIDE;
 
 protected:
   RefPtr<TextureClient> mBackBuffer;

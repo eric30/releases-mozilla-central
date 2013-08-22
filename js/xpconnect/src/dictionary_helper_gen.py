@@ -284,7 +284,7 @@ def write_getter(a, iface, fd):
     if realtype.count("JS::Value"):
         fd.write("    aDict.%s = v;\n" % a.name)
     elif realtype.count("bool"):
-        fd.write("    JSBool b;\n")
+        fd.write("    bool b;\n")
         fd.write("    MOZ_ALWAYS_TRUE(JS_ValueToBoolean(aCx, v, &b));\n")
         fd.write("    aDict.%s = b;\n" % a.name)
     elif realtype.count("uint16_t"):
@@ -293,12 +293,12 @@ def write_getter(a, iface, fd):
         fd.write("    aDict.%s = u;\n" % a.name)
     elif realtype.count("int16_t"):
         fd.write("    int32_t i;\n")
-        fd.write("    NS_ENSURE_STATE(JS_ValueToECMAInt32(aCx, v, &i));\n")
+        fd.write("    NS_ENSURE_STATE(JS::ToInt32(aCx, v, &i));\n")
         fd.write("    aDict.%s = i;\n" % a.name)
     elif realtype.count("uint32_t"):
         fd.write("    NS_ENSURE_STATE(JS_ValueToECMAUint32(aCx, v, &aDict.%s));\n" % a.name)
     elif realtype.count("int32_t"):
-        fd.write("    NS_ENSURE_STATE(JS_ValueToECMAInt32(aCx, v, &aDict.%s));\n" % a.name)
+        fd.write("    NS_ENSURE_STATE(JS::ToInt32(aCx, v, &aDict.%s));\n" % a.name)
     elif realtype.count("uint64_t"):
         fd.write("    NS_ENSURE_STATE(JS::ToUint64(aCx, v, &aDict.%s));\n" % a.name)
     elif realtype.count("int64_t"):
@@ -370,7 +370,7 @@ def write_cpp(iface, fd):
                  iface.base)
         fd.write("  NS_ENSURE_SUCCESS(rv, rv);\n")
 
-    fd.write("  JSBool found = false;\n")
+    fd.write("  bool found = false;\n")
     needccx = False
     for a in attributes:
         if a.realtype.nativeType('in').count("nsIVariant"):

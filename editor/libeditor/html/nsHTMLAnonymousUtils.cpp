@@ -9,7 +9,6 @@
 #include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsComputedDOMStyle.h"
-#include "nsContentUtils.h"
 #include "nsDebug.h"
 #include "nsEditProperty.h"
 #include "nsError.h"
@@ -44,6 +43,7 @@
 #include "nsStringFwd.h"
 #include "nsUnicharUtils.h"
 #include "nscore.h"
+#include "nsContentUtils.h" // for nsAutoScriptBlocker
 
 class nsIDOMEventListener;
 class nsISelection;

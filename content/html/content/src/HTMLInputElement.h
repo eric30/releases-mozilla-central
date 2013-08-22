@@ -31,6 +31,8 @@ class nsIRadioVisitor;
 namespace mozilla {
 namespace dom {
 
+class Date;
+
 class UploadLastDir MOZ_FINAL : public nsIObserver, public nsSupportsWeakReference {
 public:
   NS_DECL_ISUPPORTS
@@ -1242,8 +1244,7 @@ private:
   {
   public:
     nsFilePickerShownCallback(HTMLInputElement* aInput,
-                              nsIFilePicker* aFilePicker,
-                              bool aMulti);
+                              nsIFilePicker* aFilePicker);
     virtual ~nsFilePickerShownCallback()
     { }
 
@@ -1254,7 +1255,6 @@ private:
   private:
     nsCOMPtr<nsIFilePicker> mFilePicker;
     nsRefPtr<HTMLInputElement> mInput;
-    bool mMulti;
   };
 };
 

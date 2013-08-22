@@ -10,10 +10,9 @@
  * utility methods for subclasses, and so forth.
  */
 
-#include "mozilla/DebugOnly.h"
-
 #include "mozilla/dom/Element.h"
 
+#include "mozilla/DebugOnly.h"
 #include "mozilla/dom/Attr.h"
 #include "nsDOMAttributeMap.h"
 #include "nsIAtom.h"
@@ -1134,7 +1133,7 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
       // The element being removed is an ancestor of the full-screen element,
       // exit full-screen state.
       nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
-                                      "DOM", OwnerDoc(),
+                                      NS_LITERAL_CSTRING("DOM"), OwnerDoc(),
                                       nsContentUtils::eDOM_PROPERTIES,
                                       "RemovedFullScreenElement");
       // Fully exit full-screen.
@@ -2433,7 +2432,7 @@ Element::MozRequestFullScreen()
   const char* error = GetFullScreenError(OwnerDoc());
   if (error) {
     nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
-                                    "DOM", OwnerDoc(),
+                                    NS_LITERAL_CSTRING("DOM"), OwnerDoc(),
                                     nsContentUtils::eDOM_PROPERTIES,
                                     error);
     nsRefPtr<nsAsyncDOMEvent> e =
@@ -3417,6 +3416,18 @@ Element::SetBoolAttr(nsIAtom* aAttr, bool aValue)
   }
 
   return UnsetAttr(kNameSpaceID_None, aAttr, true);
+}
+
+Directionality
+Element::GetComputedDirectionality() const
+{
+  nsIFrame* frame = GetPrimaryFrame();
+  if (frame) {
+    return frame->StyleVisibility()->mDirection == NS_STYLE_DIRECTION_LTR
+             ? eDir_LTR : eDir_RTL;
+  }
+
+  return GetDirectionality();
 }
 
 float

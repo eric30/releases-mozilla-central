@@ -6,25 +6,37 @@
 #ifndef MOZILLA_GFX_TEXTUREHOST_H
 #define MOZILLA_GFX_TEXTUREHOST_H
 
-#include "mozilla/layers/LayersTypes.h"
-#include "nsRect.h"
-#include "nsRegion.h"
-#include "mozilla/gfx/Rect.h"
-#include "mozilla/layers/CompositorTypes.h"
-#include "nsAutoPtr.h"
-#include "mozilla/RefPtr.h"
-#include "mozilla/layers/ISurfaceAllocator.h"
+#include <stddef.h>                     // for size_t
+#include <stdint.h>                     // for uint64_t, uint32_t, uint8_t
+#include "./../mozilla-config.h"        // for MOZ_DUMP_PAINTING
+#include "gfxASurface.h"                // for gfxASurface, etc
+#include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
+#include "mozilla/Attributes.h"         // for MOZ_OVERRIDE
+#include "mozilla/RefPtr.h"             // for RefPtr, TemporaryRef, etc
+#include "mozilla/gfx/2D.h"             // for DataSourceSurface
+#include "mozilla/gfx/Point.h"          // for IntSize, IntPoint
+#include "mozilla/gfx/Types.h"          // for SurfaceFormat, etc
+#include "mozilla/layers/CompositorTypes.h"  // for TextureFlags, etc
+#include "mozilla/layers/LayersTypes.h"  // for LayerRenderState, etc
+#include "mozilla/mozalloc.h"           // for operator delete
+#include "nsCOMPtr.h"                   // for already_AddRefed
+#include "nsDebug.h"                    // for NS_RUNTIMEABORT
+#include "nsRect.h"                     // for nsIntRect
+#include "nsRegion.h"                   // for nsIntRegion
+#include "nsTraceRefcnt.h"              // for MOZ_COUNT_CTOR, etc
+#include "nscore.h"                     // for nsACString
 
-class gfxReusableSurfaceWrapper;
 class gfxImageSurface;
+class gfxReusableSurfaceWrapper;
+struct nsIntPoint;
+struct nsIntSize;
+
 
 namespace mozilla {
-namespace gfx {
-class DataSourceSurface;
-}
+namespace ipc {
+class Shmem;
 }
 
-namespace mozilla {
 namespace layers {
 
 class Compositor;
@@ -135,7 +147,7 @@ public:
   }
 
   /**
-   * Should be overriden in order to deallocate the data that is associated
+   * Should be overridden in order to deallocate the data that is associated
    * with the rendering backend, such as GL textures.
    */
   virtual void DeallocateDeviceData() = 0;
@@ -208,6 +220,7 @@ public:
     SetUpdateSerial(0);
   }
 
+#ifdef DEBUG
   /**
    * Provide read access to the data as a DataSourceSurface.
    *
@@ -215,6 +228,8 @@ public:
    * XXX - implement everywhere and make it pure virtual.
    */
   virtual TemporaryRef<gfx::DataSourceSurface> ReadBack() { return nullptr; };
+#endif
+
 private:
   uint32_t mUpdateSerial;
 };
@@ -314,13 +329,13 @@ public:
   virtual void SetCompositor(Compositor* aCompositor) {}
 
   /**
-   * Should be overriden in order to deallocate the data that is associated
+   * Should be overridden in order to deallocate the data that is associated
    * with the rendering backend, such as GL textures.
    */
   virtual void DeallocateDeviceData() {}
 
   /**
-   * Should be overriden in order to deallocate the data that is shared with
+   * Should be overridden in order to deallocate the data that is shared with
    * the content side, such as shared memory.
    */
   virtual void DeallocateSharedData() {}
@@ -349,7 +364,7 @@ public:
 
   /**
    * Debug facility.
-   * XXX - cool kids use Moz2D
+   * XXX - cool kids use Moz2D. See bug 882113.
    */
   virtual already_AddRefed<gfxImageSurface> GetAsSurface() = 0;
 
@@ -371,7 +386,7 @@ public:
    */
   virtual LayerRenderState GetRenderState()
   {
-    // By default we return an empty render state, this should be overriden
+    // By default we return an empty render state, this should be overridden
     // by the TextureHost implementations that are used on B2G with Composer2D
     return LayerRenderState();
   }
@@ -437,9 +452,9 @@ public:
    */
   virtual gfx::SurfaceFormat GetFormat() const MOZ_OVERRIDE;
 
-  virtual already_AddRefed<gfxImageSurface> GetAsSurface() MOZ_OVERRIDE;
-
   virtual gfx::IntSize GetSize() const MOZ_OVERRIDE { return mSize; }
+
+  virtual already_AddRefed<gfxImageSurface> GetAsSurface() MOZ_OVERRIDE;
 
 protected:
   bool Upload(nsIntRegion *aRegion = nullptr);

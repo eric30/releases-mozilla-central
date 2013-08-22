@@ -4,16 +4,21 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/layers/TextureHost.h"
-#include "mozilla/layers/LayersSurfaces.h"
-#include "LayersLogging.h"
-#include "nsPrintfCString.h"
-#include "mozilla/ipc/Shmem.h"
-#include "ipc/AutoOpenSurface.h"
+#include "LayersLogging.h"              // for AppendToString
+#include "gfx2DGlue.h"                  // for ToIntSize
+#include "gfxImageSurface.h"            // for gfxImageSurface
+#include "mozilla/gfx/2D.h"             // for DataSourceSurface, Factory
+#include "mozilla/ipc/Shmem.h"          // for Shmem
+#include "mozilla/layers/Compositor.h"  // for Compositor
+#include "mozilla/layers/ISurfaceAllocator.h"  // for ISurfaceAllocator
 #include "mozilla/layers/ImageDataSerializer.h"
+#include "mozilla/layers/LayersSurfaces.h"  // for SurfaceDescriptor, etc
 #include "mozilla/layers/YCbCrImageDataSerializer.h"
-#include "gfx2DGlue.h"
-#include "mozilla/gfx/2D.h"
+#include "nsAString.h"
+#include "nsAutoPtr.h"                  // for nsRefPtr
+#include "nsPrintfCString.h"            // for nsPrintfCString
 
+struct nsIntPoint;
 
 namespace mozilla {
 namespace layers {
@@ -226,7 +231,8 @@ BufferTextureHost::Updated(const nsIntRegion* aRegion)
     mPartialUpdate = false;
   }
   if (GetFlags() & TEXTURE_IMMEDIATE_UPLOAD) {
-    MaybeUpload(mPartialUpdate ? &mMaybeUpdatedRegion : nullptr);
+    DebugOnly<bool> result = MaybeUpload(mPartialUpdate ? &mMaybeUpdatedRegion : nullptr);
+    MOZ_ASSERT(result);
   }
 }
 
@@ -380,6 +386,9 @@ BufferTextureHost::Upload(nsIntRegion *aRegion)
     }
 
     RefPtr<gfx::DataSourceSurface> surf = deserializer.GetAsSurface();
+    if (!surf) {
+      return false;
+    }
 
     if (!mFirstSource->Update(surf.get(), mFlags, aRegion)) {
       NS_WARNING("failed to update the DataTextureSource");
@@ -392,7 +401,7 @@ BufferTextureHost::Upload(nsIntRegion *aRegion)
 already_AddRefed<gfxImageSurface>
 BufferTextureHost::GetAsSurface()
 {
-  nsRefPtr<gfxImageSurface> result; 
+  nsRefPtr<gfxImageSurface> result;
   if (mFormat == gfx::FORMAT_UNKNOWN) {
     NS_WARNING("BufferTextureHost: unsupported format!");
     return nullptr;

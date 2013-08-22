@@ -1,7 +1,27 @@
-#include "ClientLayerManager.h"
-#include "gfxPlatform.h"
+/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-using namespace mozilla::layers;
+#ifndef GFX_CLIENTCONTAINERLAYER_H
+#define GFX_CLIENTCONTAINERLAYER_H
+
+#include <stdint.h>                     // for uint32_t
+#include "ClientLayerManager.h"         // for ClientLayerManager, etc
+#include "Layers.h"                     // for Layer, ContainerLayer, etc
+#include "gfx3DMatrix.h"                // for gfx3DMatrix
+#include "gfxMatrix.h"                  // for gfxMatrix
+#include "gfxPlatform.h"                // for gfxPlatform
+#include "nsDebug.h"                    // for NS_ASSERTION
+#include "nsISupportsUtils.h"           // for NS_ADDREF, NS_RELEASE
+#include "nsRegion.h"                   // for nsIntRegion
+#include "nsTArray.h"                   // for nsAutoTArray
+#include "nsTraceRefcnt.h"              // for MOZ_COUNT_CTOR, etc
+
+namespace mozilla {
+namespace layers {
+
+class ShadowableLayer;
 
 template<class Container> void
 ContainerInsertAfter(Layer* aChild, Layer* aAfter, Container* aContainer)
@@ -139,7 +159,8 @@ class ClientContainerLayer : public ContainerLayer,
 
 public:
   ClientContainerLayer(ClientLayerManager* aManager) :
-    ContainerLayer(aManager, static_cast<ClientLayer*>(this))
+    ContainerLayer(aManager,
+                   static_cast<ClientLayer*>(MOZ_THIS_IN_INITIALIZER_LIST()))
   {
     MOZ_COUNT_CTOR(ClientContainerLayer);
     mSupportsComponentAlphaChildren = true;
@@ -171,7 +192,7 @@ public:
             transform3D.Is2D(&transform) && 
             !transform.HasNonIntegerTranslation()) {
           SetSupportsComponentAlphaChildren(
-            gfxPlatform::GetPlatform()->UsesSubpixelAATextRendering());
+            gfxPlatform::ComponentAlphaEnabled());
         }
       }
     } else {
@@ -250,7 +271,8 @@ class ClientRefLayer : public RefLayer,
                        public ClientLayer {
 public:
   ClientRefLayer(ClientLayerManager* aManager) :
-    RefLayer(aManager, static_cast<ClientLayer*>(this))
+    RefLayer(aManager,
+             static_cast<ClientLayer*>(MOZ_THIS_IN_INITIALIZER_LIST()))
   {
     MOZ_COUNT_CTOR(ClientRefLayer);
   }
@@ -280,3 +302,8 @@ private:
     return static_cast<ClientLayerManager*>(mManager);
   }
 };
+
+}
+}
+
+#endif

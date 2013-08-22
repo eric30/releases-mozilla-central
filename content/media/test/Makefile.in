@@ -116,12 +116,16 @@ MOCHITEST_FILES = \
 		test_video_to_canvas.html \
 		test_audiowrite.html \
 		test_mediarecorder_creation.html \
+		test_mediarecorder_avoid_recursion.html \
+		test_mediarecorder_record_audiocontext.html \
+		test_mediarecorder_record_stopms.html \
 		test_mozHasAudio.html \
 		test_source_media.html \
 		test_autoplay_contentEditable.html \
 		test_bug448534.html \
 		test_bug463162.xhtml \
 		test_decoder_disable.html \
+		test_mediarecorder_record_no_timeslice.html \
 		test_mediarecorder_reload_crash.html \
 		test_media_selection.html \
 		test_playback.html \
@@ -142,6 +146,7 @@ MOCHITEST_FILES = \
 		test_VideoPlaybackQuality_disabled.html \
 		test_webvtt_disabled.html \
 		test_playback_rate_playpause.html \
+		test_bug895305.html \
 		$(NULL)
 
 # Disabled on Windows for frequent intermittent failures
@@ -258,6 +263,7 @@ MOCHITEST_FILES += \
 		test-6-5.1.opus \
 		test-7-6.1.opus \
 		test-8-7.1.opus \
+		vbr.mp3 \
 		video-overhang.ogg \
 		file_a4_tone.ogg \
 		detodos.opus \

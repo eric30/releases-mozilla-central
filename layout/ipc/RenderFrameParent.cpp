@@ -624,6 +624,8 @@ RenderFrameParent::RenderFrameParent(nsFrameLoader* aFrameLoader,
       CompositorParent::SetControllerForLayerTree(mLayersId, mContentController);
     }
   }
+  // Set a default RenderFrameParent
+  mFrameLoader->SetCurrentRemoteFrame(this);
 }
 
 APZCTreeManager*
@@ -862,6 +864,13 @@ RenderFrameParent::RecvDetectScrollableSubframe()
   return true;
 }
 
+bool
+RenderFrameParent::RecvUpdateHitRegion(const nsRegion& aRegion)
+{
+  mTouchRegion = aRegion;
+  return true;
+}
+
 PLayerTransactionParent*
 RenderFrameParent::AllocPLayerTransactionParent()
 {
@@ -1007,6 +1016,21 @@ RenderFrameParent::UpdateZoomConstraints(bool aAllowZoom, float aMinZoom, float 
   }
 }
 
+void
+RenderFrameParent::UpdateScrollOffset(uint32_t aPresShellId, ViewID aViewId, const CSSIntPoint& aScrollOffset)
+{
+  if (GetApzcTreeManager()) {
+    GetApzcTreeManager()->UpdateScrollOffset(ScrollableLayerGuid(mLayersId, aPresShellId, aViewId),
+                                             aScrollOffset);
+  }
+}
+
+bool
+RenderFrameParent::HitTest(const nsRect& aRect)
+{
+  return mTouchRegion.Contains(aRect);
+}
+
 }  // namespace layout
 }  // namespace mozilla
 
@@ -1022,6 +1046,14 @@ nsDisplayRemote::BuildLayer(nsDisplayListBuilder* aBuilder,
   return layer.forget();
 }
 
+void
+nsDisplayRemote::HitTest(nsDisplayListBuilder* aBuilder, const nsRect& aRect,
+                         HitTestState* aState, nsTArray<nsIFrame*> *aOutFrames)
+{
+  if (mRemoteFrame->HitTest(aRect)) {
+    aOutFrames->AppendElement(mFrame);
+  }
+}
 
 void
 nsDisplayRemoteShadow::HitTest(nsDisplayListBuilder* aBuilder, const nsRect& aRect,

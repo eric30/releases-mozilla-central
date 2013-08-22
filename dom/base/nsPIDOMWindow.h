@@ -10,24 +10,39 @@
 
 #include "nsIDOMWindow.h"
 
-#include "nsIDOMLocation.h"
-#include "nsIDOMXULCommandDispatcher.h"
-#include "nsIDOMElement.h"
-#include "nsIDOMDocument.h"
 #include "nsCOMPtr.h"
 #include "nsAutoPtr.h"
 #include "nsTArray.h"
-#include "nsIURI.h"
 #include "mozilla/dom/EventTarget.h"
-#include "js/RootingAPI.h"
 
 #define DOM_WINDOW_DESTROYED_TOPIC "dom-window-destroyed"
 #define DOM_WINDOW_FROZEN_TOPIC "dom-window-frozen"
 #define DOM_WINDOW_THAWED_TOPIC "dom-window-thawed"
 
+class JSObject;
+class nsIArray;
+class nsIContent;
+class nsIDocShell;
+class nsIDocument;
 class nsIIdleObserver;
 class nsIPrincipal;
+class nsIScriptTimeoutHandler;
+class nsIURI;
 class nsPerformance;
+class nsPIWindowRoot;
+class nsXBLPrototypeHandler;
+struct nsTimeout;
+
+namespace JS {
+template<typename> class Handle;
+}
+
+namespace mozilla {
+namespace dom {
+class AudioContext;
+class Element;
+}
+}
 
 // Popup control state enum. The values in this enum must go from most
 // permissive to least permissive so that it's safe to push state in
@@ -41,25 +56,9 @@ enum PopupControlState {
   openOverridden    // disallow window open
 };
 
-class nsIDocShell;
-class nsIContent;
-class nsIDocument;
-class nsIScriptTimeoutHandler;
-struct nsTimeout;
-class nsXBLPrototypeHandler;
-class nsIArray;
-class nsPIWindowRoot;
-
-namespace mozilla {
-namespace dom {
-class AudioContext;
-class Element;
-}
-}
-
 #define NS_PIDOMWINDOW_IID \
-{ 0xc7f20d00, 0xed38, 0x4d60, \
- { 0x90, 0xf6, 0x3e, 0xde, 0x7b, 0x71, 0xc3, 0xb3 } }
+{ 0x4f4eadf9, 0xe795, 0x48e5, \
+  { 0x89, 0x4b, 0x04, 0x40, 0xb2, 0x5d, 0xa6, 0xfa } }
 
 class nsPIDOMWindow : public nsIDOMWindowInternal
 {
@@ -385,8 +384,8 @@ public:
    * Callback for notifying a window about a modal dialog being
    * opened/closed with the window as a parent.
    */
-  virtual nsIDOMWindow *EnterModalState() = 0;
-  virtual void LeaveModalState(nsIDOMWindow *) = 0;
+  virtual void EnterModalState() = 0;
+  virtual void LeaveModalState() = 0;
 
   virtual bool CanClose() = 0;
   virtual nsresult ForceClose() = 0;
@@ -727,7 +726,7 @@ protected:
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsPIDOMWindow, NS_PIDOMWINDOW_IID)
 
-#ifdef _IMPL_NS_LAYOUT
+#ifdef MOZILLA_INTERNAL_API
 PopupControlState
 PushPopupControlState(PopupControlState aState, bool aForce);
 
@@ -748,7 +747,7 @@ PopPopupControlState(PopupControlState aState);
 class NS_AUTO_POPUP_STATE_PUSHER
 {
 public:
-#ifdef _IMPL_NS_LAYOUT
+#ifdef MOZILLA_INTERNAL_API
   NS_AUTO_POPUP_STATE_PUSHER(PopupControlState aState, bool aForce = false)
     : mOldState(::PushPopupControlState(aState, aForce))
   {
@@ -776,7 +775,7 @@ public:
 #endif
 
 protected:
-#ifndef _IMPL_NS_LAYOUT
+#ifndef MOZILLA_INTERNAL_API
   nsCOMPtr<nsPIDOMWindow> mWindow;
 #endif
   PopupControlState mOldState;

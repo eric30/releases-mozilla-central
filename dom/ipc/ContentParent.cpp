@@ -37,6 +37,7 @@
 #include "mozilla/Hal.h"
 #include "mozilla/hal_sandbox/PHalParent.h"
 #include "mozilla/ipc/TestShellParent.h"
+#include "mozilla/ipc/InputStreamUtils.h"
 #include "mozilla/layers/CompositorParent.h"
 #include "mozilla/layers/ImageBridgeParent.h"
 #include "mozilla/net/NeckoParent.h"
@@ -48,6 +49,7 @@
 #include "nsAppDirectoryServiceDefs.h"
 #include "nsAppRunner.h"
 #include "nsAutoPtr.h"
+#include "nsCDefaultURIFixup.h"
 #include "nsCExternalHandlerService.h"
 #include "nsCOMPtr.h"
 #include "nsChromeRegistryChrome.h"
@@ -76,6 +78,7 @@
 #include "nsIScriptError.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsISupportsPrimitives.h"
+#include "nsIURIFixup.h"
 #include "nsIWindowWatcher.h"
 #include "nsServiceManagerUtils.h"
 #include "nsSystemInfo.h"
@@ -163,6 +166,12 @@ public:
     {
     }
 
+    NS_IMETHOD GetProcess(nsACString& aProcess)
+    {
+      aProcess.Assign(mProcess);
+      return NS_OK;
+    }
+
 private:
     int64_t Amount() { return mAmount; }
 
@@ -183,7 +192,6 @@ private:
         return static_cast<ContentParent*>(Manager());
     }
 };
-    
 
 MemoryReportRequestParent::MemoryReportRequestParent()
 {
@@ -1008,8 +1016,7 @@ ContentParent::ActorDestroy(ActorDestroyReason why)
     }
 
     // clear the child memory reporters
-    InfallibleTArray<MemoryReport> empty;
-    SetChildMemoryReporters(empty);
+    ClearChildMemoryReporters();
 
     // remove the global remote preferences observers
     Preferences::RemoveObserver(this, "");
@@ -1177,6 +1184,7 @@ ContentParent::ContentParent(mozIApplication* aApp,
     , mIsForBrowser(aIsForBrowser)
     , mCalledClose(false)
     , mCalledCloseWithError(false)
+    , mCalledKillHard(false)
 {
     // No more than one of !!aApp, aIsForBrowser, and aIsForPreallocated should
     // be true.
@@ -1914,6 +1922,13 @@ ContentParent::GetOrCreateActorForBlob(nsIDOMBlob* aBlob)
 void
 ContentParent::KillHard()
 {
+    // On Windows, calling KillHard multiple times causes problems - the
+    // process handle becomes invalid on the first call, causing a second call
+    // to crash our process - more details in bug 890840.
+    if (mCalledKillHard) {
+        return;
+    }
+    mCalledKillHard = true;
     mForceKillTask = nullptr;
     // This ensures the process is eventually killed, but doesn't
     // immediately KILLITWITHFIRE because we want to get a minidump if
@@ -2076,6 +2091,15 @@ ContentParent::SetChildMemoryReporters(const InfallibleTArray<MemoryReport>& rep
         do_GetService("@mozilla.org/observer-service;1");
     if (obs)
         obs->NotifyObservers(nullptr, "child-memory-reporter-update", nullptr);
+}
+
+void
+ContentParent::ClearChildMemoryReporters()
+{
+    nsCOMPtr<nsIMemoryReporterManager> mgr =
+        do_GetService("@mozilla.org/memory-reporter-manager;1");
+    for (int32_t i = 0; i < mMemoryReporters.Count(); i++)
+        mgr->UnregisterReporter(mMemoryReporters[i]);
 }
 
 PTestShellParent*
@@ -2439,23 +2463,6 @@ ContentParent::RecvCloseAlert(const nsString& aName)
 }
 
 bool
-ContentParent::RecvTestPermissionFromPrincipal(const IPC::Principal& aPrincipal,
-                                               const nsCString& aType,
-                                               uint32_t* permission)
-{
-    nsCOMPtr<nsIPermissionManager> permissionManager =
-        do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
-    NS_ENSURE_TRUE(permissionManager, false);
-
-    nsresult rv = permissionManager->TestPermissionFromPrincipal(aPrincipal,
-                                                                 aType.get(),
-                                                                 permission);
-    NS_ENSURE_SUCCESS(rv, false);
-
-    return true;
-}
-
-bool
 ContentParent::RecvSyncMessage(const nsString& aMsg,
                                const ClonedMessageData& aData,
                                const InfallibleTArray<CpowEntry>& aCpows,
@@ -2762,6 +2769,27 @@ ContentParent::RecvSetFakeVolumeState(const nsString& fsName, const int32_t& fsS
   NS_WARNING("ContentParent::RecvSetFakeVolumeState shouldn't be called when MOZ_WIDGET_GONK is not defined");
   return false;
 #endif
+}
+
+bool
+ContentParent::RecvKeywordToURI(const nsCString& aKeyword, OptionalInputStreamParams* aPostData,
+                                OptionalURIParams* aURI)
+{
+  nsCOMPtr<nsIURIFixup> fixup = do_GetService(NS_URIFIXUP_CONTRACTID);
+  if (!fixup) {
+    return true;
+  }
+
+  nsCOMPtr<nsIInputStream> postData;
+  nsCOMPtr<nsIURI> uri;
+  if (NS_FAILED(fixup->KeywordToURI(aKeyword, getter_AddRefs(postData),
+                                    getter_AddRefs(uri)))) {
+    return true;
+  }
+
+  SerializeInputStream(postData, *aPostData);
+  SerializeURI(uri, *aURI);
+  return true;
 }
 
 } // namespace dom

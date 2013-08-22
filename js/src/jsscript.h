@@ -12,13 +12,14 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/PodOperations.h"
 
-#include "jsdbgapi.h"
-#include "jsinfer.h"
+#include "jsatom.h"
+#ifdef JS_THREADSAFE
+#include "jslock.h"
+#endif
 #include "jsobj.h"
 #include "jsopcode.h"
 
 #include "gc/Barrier.h"
-#include "js/RootingAPI.h"
 #include "vm/Shape.h"
 
 namespace js {
@@ -34,12 +35,19 @@ namespace ion {
 
 # define BASELINE_DISABLED_SCRIPT ((js::ion::BaselineScript *)0x1)
 
-class Shape;
-
+class BreakpointSite;
 class BindingIter;
+class RegExpObject;
+struct SourceCompressionToken;
+class Shape;
+class WatchpointMap;
 
 namespace analyze {
     class ScriptAnalysis;
+}
+
+namespace frontend {
+    class BytecodeEmitter;
 }
 
 }
@@ -406,6 +414,19 @@ class ScriptSourceObject : public JSObject
     static const uint32_t SOURCE_SLOT = 0;
 };
 
+enum GeneratorKind { NotGenerator, LegacyGenerator, StarGenerator };
+
+static inline unsigned
+GeneratorKindAsBits(GeneratorKind generatorKind) {
+    return static_cast<unsigned>(generatorKind);
+}
+
+static inline GeneratorKind
+GeneratorKindFromBits(unsigned val) {
+    JS_ASSERT(val <= StarGenerator);
+    return static_cast<GeneratorKind>(val);
+}
+
 } /* namespace js */
 
 class JSScript : public js::gc::Cell
@@ -511,7 +532,7 @@ class JSScript : public js::gc::Cell
     uint16_t        nslots;     /* vars plus maximum stack depth */
     uint16_t        staticLevel;/* static level for display maintenance */
 
-    // 8-bit fields.
+    // 4-bit fields.
 
   public:
     // The kinds of the optional arrays.
@@ -520,15 +541,16 @@ class JSScript : public js::gc::Cell
         OBJECTS,
         REGEXPS,
         TRYNOTES,
-        LIMIT
+        ARRAY_KIND_BITS
     };
-
-    typedef uint8_t ArrayBitsT;
 
   private:
     // The bits in this field indicate the presence/non-presence of several
     // optional arrays in |data|.  See the comments above Create() for details.
-    ArrayBitsT      hasArrayBits;
+    uint8_t         hasArrayBits:4;
+
+    // The GeneratorKind of the script.
+    uint8_t         generatorKindBits_:4;
 
     // 1-bit fields.
 
@@ -581,14 +603,9 @@ class JSScript : public js::gc::Cell
 #endif
     bool            invalidatedIdempotentCache:1; /* idempotent cache has triggered invalidation */
 
-    // All generators have isGenerator set to true.
-    bool            isGenerator:1;
     // If the generator was created implicitly via a generator expression,
     // isGeneratorExp will be true.
     bool            isGeneratorExp:1;
-    // Generators are either legacy-style (JS 1.7+ starless generators with
-    // StopIteration), or ES6-style (function* with boxed return values).
-    bool            isLegacyGenerator:1;
 
     bool            hasScriptCounts:1;/* script has an entry in
                                          JSCompartment::scriptCountsMap */
@@ -638,6 +655,19 @@ class JSScript : public js::gc::Cell
     bool argumentsHasVarBinding() const { return argsHasVarBinding_; }
     jsbytecode *argumentsBytecode() const { JS_ASSERT(code[0] == JSOP_ARGUMENTS); return code; }
     void setArgumentsHasVarBinding();
+
+    js::GeneratorKind generatorKind() const {
+        return js::GeneratorKindFromBits(generatorKindBits_);
+    }
+    bool isGenerator() const { return generatorKind() != js::NotGenerator; }
+    bool isLegacyGenerator() const { return generatorKind() == js::LegacyGenerator; }
+    bool isStarGenerator() const { return generatorKind() == js::StarGenerator; }
+    void setGeneratorKind(js::GeneratorKind kind) {
+        // A script only gets its generator kind set as part of initialization,
+        // so it can only transition from not being a generator.
+        JS_ASSERT(!isGenerator());
+        generatorKindBits_ = GeneratorKindAsBits(kind);
+    }
 
     /*
      * As an optimization, even when argsHasLocalBinding, the function prologue
@@ -692,10 +722,7 @@ class JSScript : public js::gc::Cell
     js::ion::IonScript *const *addressOfIonScript() const {
         return &ion;
     }
-    void setIonScript(js::ion::IonScript *ionScript) {
-        ion = ionScript;
-        updateBaselineOrIonRaw();
-    }
+    inline void setIonScript(js::ion::IonScript *ionScript);
 
     bool hasBaselineScript() const {
         return baseline && baseline != BASELINE_DISABLED_SCRIPT;
@@ -707,10 +734,7 @@ class JSScript : public js::gc::Cell
         JS_ASSERT(hasBaselineScript());
         return baseline;
     }
-    void setBaselineScript(js::ion::BaselineScript *baselineScript) {
-        baseline = baselineScript;
-        updateBaselineOrIonRaw();
-    }
+    inline void setBaselineScript(js::ion::BaselineScript *baselineScript);
 
     void updateBaselineOrIonRaw();
 
@@ -733,9 +757,7 @@ class JSScript : public js::gc::Cell
     js::ion::IonScript *maybeParallelIonScript() const {
         return parallelIon;
     }
-    void setParallelIonScript(js::ion::IonScript *ionScript) {
-        parallelIon = ionScript;
-    }
+    inline void setParallelIonScript(js::ion::IonScript *ionScript);
 
     static size_t offsetOfBaselineScript() {
         return offsetof(JSScript, baseline);
@@ -802,9 +824,6 @@ class JSScript : public js::gc::Cell
     inline bool hasAnalysis();
     inline void clearAnalysis();
     inline js::analyze::ScriptAnalysis *analysis();
-
-    /* Heuristic to check if the function is expected to be "short running". */
-    bool isShortRunning();
 
     inline void clearPropertyReadTypes();
 
@@ -1041,7 +1060,8 @@ class JSScript : public js::gc::Cell
     void markChildren(JSTracer *trc);
 };
 
-JS_STATIC_ASSERT(sizeof(JSScript::ArrayBitsT) * 8 >= JSScript::LIMIT);
+/* The array kind flags are stored in a 4-bit field; make sure they fit. */
+JS_STATIC_ASSERT(JSScript::ARRAY_KIND_BITS <= 4);
 
 /* If this fails, add/remove padding within JSScript. */
 JS_STATIC_ASSERT(sizeof(JSScript) % js::gc::CellSize == 0);
@@ -1148,7 +1168,9 @@ class LazyScript : public js::gc::Cell
     uint32_t version_ : 8;
 
     uint32_t numFreeVariables_ : 24;
-    uint32_t numInnerFunctions_ : 26;
+    uint32_t numInnerFunctions_ : 24;
+
+    uint32_t generatorKindBits_:2;
 
     // N.B. These are booleans but need to be uint32_t to pack correctly on MSVC.
     uint32_t strict_ : 1;
@@ -1212,6 +1234,23 @@ class LazyScript : public js::gc::Cell
     }
     HeapPtrFunction *innerFunctions() {
         return (HeapPtrFunction *)&freeVariables()[numFreeVariables()];
+    }
+
+    GeneratorKind generatorKind() const { return GeneratorKindFromBits(generatorKindBits_); }
+
+    bool isGenerator() const { return generatorKind() != NotGenerator; }
+
+    bool isLegacyGenerator() const { return generatorKind() == LegacyGenerator; }
+
+    bool isStarGenerator() const { return generatorKind() == StarGenerator; }
+
+    void setGeneratorKind(GeneratorKind kind) {
+        // A script only gets its generator kind set as part of initialization,
+        // so it can only transition from NotGenerator.
+        JS_ASSERT(!isGenerator());
+        // Legacy generators cannot currently be lazy.
+        JS_ASSERT(kind != LegacyGenerator);
+        generatorKindBits_ = GeneratorKindAsBits(kind);
     }
 
     bool strict() const {

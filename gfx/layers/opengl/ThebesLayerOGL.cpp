@@ -3,19 +3,38 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "ipc/AutoOpenSurface.h"
-#include "mozilla/layers/PLayerTransaction.h"
-#include "TiledLayerBuffer.h"
-
-/* This must occur *after* layers/PLayerTransaction.h to avoid typedefs conflicts. */
-#include "mozilla/Util.h"
-
-#include "ThebesLayerBuffer.h"
 #include "ThebesLayerOGL.h"
-#include "gfxUtils.h"
-#include "gfxTeeSurface.h"
-
-#include "base/message_loop.h"
+#include <stdint.h>                     // for uint32_t
+#include <sys/types.h>                  // for int32_t
+#include "mozilla-config.h"             // for MOZ_DUMP_PAINTING
+#include "GLContext.h"                  // for GLContext, etc
+#include "GLContextTypes.h"             // for GLenum
+#include "GLDefs.h"                     // for LOCAL_GL_ONE, LOCAL_GL_BGRA, etc
+#include "GLTextureImage.h"             // for TextureImage, etc
+#include "ThebesLayerBuffer.h"          // for ThebesLayerBuffer, etc
+#include "gfx3DMatrix.h"                // for gfx3DMatrix
+#include "gfxASurface.h"                // for gfxASurface, etc
+#include "gfxColor.h"                   // for gfxRGBA
+#include "gfxContext.h"                 // for gfxContext, etc
+#include "gfxImageSurface.h"            // for gfxImageSurface
+#include "gfxPlatform.h"
+#include "gfxPoint.h"                   // for gfxPoint
+#include "gfxTeeSurface.h"              // for gfxTeeSurface
+#include "gfxUtils.h"                   // for gfxUtils, etc
+#include "mozilla/Assertions.h"         // for MOZ_ASSERT_HELPER2
+#include "mozilla/Util.h"               // for ArrayLength
+#include "mozilla/gfx/BasePoint.h"      // for BasePoint
+#include "mozilla/gfx/BaseRect.h"       // for BaseRect
+#include "mozilla/gfx/BaseSize.h"       // for BaseSize
+#include "mozilla/mozalloc.h"           // for operator new
+#include "nsCOMPtr.h"                   // for already_AddRefed
+#include "nsDebug.h"                    // for NS_ASSERTION, etc
+#include "nsPoint.h"                    // for nsIntPoint
+#include "nsRect.h"                     // for nsIntRect
+#include "nsSize.h"                     // for nsIntSize
+#include "LayerManagerOGL.h"            // for LayerManagerOGL, etc
+#include "LayerManagerOGLProgram.h"     // for ShaderProgramOGL, etc
+#include "gfx2DGlue.h"
 
 namespace mozilla {
 namespace layers {
@@ -90,7 +109,7 @@ public:
 
   nsIntSize GetSize() {
     if (mTexImage)
-      return mTexImage->GetSize();
+      return ThebesIntSize(mTexImage->GetSize());
     return nsIntSize(0, 0);
   }
 
@@ -203,7 +222,7 @@ ThebesLayerBufferOGL::RenderTo(const nsIntPoint& aOffset,
     region.MoveBy(-origin);           // translate into TexImage space, buffer origin might not be at texture (0,0)
 
     // Figure out the intersecting draw region
-    nsIntSize texSize = mTexImage->GetSize();
+    nsIntSize texSize = ThebesIntSize(mTexImage->GetSize());
     nsIntRect textureRect = nsIntRect(0, 0, texSize.width, texSize.height);
     textureRect.MoveBy(region.GetBounds().TopLeft());
     nsIntRegion subregion;
@@ -235,10 +254,10 @@ ThebesLayerBufferOGL::RenderTo(const nsIntPoint& aOffset,
     bool usingTiles = (mTexImage->GetTileCount() > 1);
     do {
       if (mTexImageOnWhite) {
-        NS_ASSERTION(mTexImageOnWhite->GetTileRect() == mTexImage->GetTileRect(), "component alpha textures should be the same size.");
+        NS_ASSERTION(ThebesIntRect(mTexImageOnWhite->GetTileRect()) == ThebesIntRect(mTexImage->GetTileRect()), "component alpha textures should be the same size.");
       }
 
-      nsIntRect tileRect = mTexImage->GetTileRect();
+      nsIntRect tileRect = ThebesIntRect(mTexImage->GetTileRect());
 
       // Bind textures.
       TextureImage::ScopedBindTexture texBind(mTexImage, LOCAL_GL_TEXTURE0);
@@ -460,15 +479,13 @@ BasicBufferOGL::BeginPaint(ContentType aContentType,
     }
 
     if (mode == Layer::SURFACE_COMPONENT_ALPHA) {
-#ifdef MOZ_GFX_OPTIMIZE_MOBILE
-      mode = Layer::SURFACE_SINGLE_CHANNEL_ALPHA;
-#else
-      if (!mLayer->GetParent() || !mLayer->GetParent()->SupportsComponentAlphaChildren()) {
+      if (!gfxPlatform::ComponentAlphaEnabled() ||
+          !mLayer->GetParent() ||
+          !mLayer->GetParent()->SupportsComponentAlphaChildren()) {
         mode = Layer::SURFACE_SINGLE_CHANNEL_ALPHA;
       } else {
         contentType = gfxASurface::CONTENT_COLOR;
       }
- #endif
     }
  
     if ((aFlags & PAINT_WILL_RESAMPLE) &&

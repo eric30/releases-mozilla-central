@@ -35,10 +35,10 @@
 #include "mozilla/ipc/Netd.h"
 #include "AutoMounter.h"
 #include "TimeZoneSettingObserver.h"
+#include "AudioManager.h"
 #endif
 #include "mozilla/ipc/Ril.h"
 #include "nsIObserverService.h"
-#include "nsContentUtils.h"
 #include "nsCxPusher.h"
 #include "nsServiceManagerUtils.h"
 #include "nsThreadUtils.h"
@@ -433,6 +433,8 @@ SystemWorkerManager::Init()
   InitializeTimeZoneSettingObserver();
   rv = InitNetd(cx);
   NS_ENSURE_SUCCESS(rv, rv);
+  nsCOMPtr<nsIAudioManager> audioManager =
+    do_GetService(NS_AUDIOMANAGER_CONTRACTID);
 #endif
 
   nsCOMPtr<nsIObserverService> obs =

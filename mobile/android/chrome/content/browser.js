@@ -69,6 +69,7 @@ XPCOMUtils.defineLazyServiceGetter(this, "uuidgen",
   ["MasterPassword", "chrome://browser/content/MasterPassword.js"],
   ["PluginHelper", "chrome://browser/content/PluginHelper.js"],
   ["OfflineApps", "chrome://browser/content/OfflineApps.js"],
+  ["Linkifier", "chrome://browser/content/Linkify.js"],
 ].forEach(function (aScript) {
   let [name, script] = aScript;
   XPCOMUtils.defineLazyGetter(window, name, function() {
@@ -149,15 +150,11 @@ const kDoNotTrackPrefState = Object.freeze({
 });
 
 function dump(a) {
-  Cc["@mozilla.org/consoleservice;1"].getService(Ci.nsIConsoleService).logStringMessage(a);
-}
-
-function getBridge() {
-  return Cc["@mozilla.org/android/bridge;1"].getService(Ci.nsIAndroidBridge);
+  Services.console.logStringMessage(a);
 }
 
 function sendMessageToJava(aMessage) {
-  return getBridge().handleGeckoMessage(JSON.stringify(aMessage));
+  return Services.androidBridge.handleGeckoMessage(JSON.stringify(aMessage));
 }
 
 function doChangeMaxLineBoxWidth(aWidth) {
@@ -269,7 +266,7 @@ var BrowserApp = {
     BrowserEventHandler.init();
     ViewportHandler.init();
 
-    getBridge().browserApp = this;
+    Services.androidBridge.browserApp = this;
 
     Services.obs.addObserver(this, "Tab:Load", false);
     Services.obs.addObserver(this, "Tab:Selected", false);
@@ -672,7 +669,7 @@ var BrowserApp = {
   // off to the compositor.
   isBrowserContentDocumentDisplayed: function() {
     try {
-      if (!getBridge().isContentDocumentDisplayed())
+      if (!Services.androidBridge.isContentDocumentDisplayed())
         return false;
     } catch (e) {
       return false;
@@ -686,7 +683,7 @@ var BrowserApp = {
 
   contentDocumentChanged: function() {
     window.top.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils).isFirstPaint = true;
-    getBridge().contentDocumentChanged();
+    Services.androidBridge.contentDocumentChanged();
   },
 
   get tabs() {
@@ -782,18 +779,16 @@ var BrowserApp = {
     let referrerURI = "referrerURI" in aParams ? aParams.referrerURI : null;
     let charset = "charset" in aParams ? aParams.charset : null;
 
-    if ("showProgress" in aParams || "userSearch" in aParams) {
-      let tab = this.getTabForBrowser(aBrowser);
-      if (tab) {
-        if ("showProgress" in aParams) tab.showProgress = aParams.showProgress;
-        if ("userSearch" in aParams) tab.userSearch = aParams.userSearch;
-      }
+    let tab = this.getTabForBrowser(aBrowser);
+    if (tab) {
+      if (!tab.aboutHomePage) tab.aboutHomePage = ("aboutHomePage" in aParams) ? aParams.aboutHomePage : "";
+      if ("showProgress" in aParams) tab.showProgress = aParams.showProgress;
+      if ("userSearch" in aParams) tab.userSearch = aParams.userSearch;
     }
 
     try {
       aBrowser.loadURIWithFlags(aURI, flags, referrerURI, charset, postData);
     } catch(e) {
-      let tab = this.getTabForBrowser(aBrowser);
       if (tab) {
         let message = {
           type: "Content:LoadError",
@@ -1393,6 +1388,7 @@ var BrowserApp = {
           flags: flags,
           tabID: data.tabID,
           isPrivate: (data.isPrivate === true),
+          aboutHomePage: ("aboutHomePage" in data) ? data.aboutHomePage : "",
           pinned: (data.pinned === true),
           delayLoad: (delayLoad === true),
           desktopMode: (data.desktopMode === true)
@@ -1632,7 +1628,8 @@ var NativeWindow = {
         type: "PageActions:Add",
         id: id,
         title: aOptions.title,
-        icon: resolveGeckoURI(aOptions.icon)
+        icon: resolveGeckoURI(aOptions.icon),
+        important: "important" in aOptions ? aOptions.important : false
       });
       this._items[id] = {
         clickCallback: aOptions.clickCallback,
@@ -2564,13 +2561,14 @@ function Tab(aURL, aParams) {
   this.viewportExcludesHorizontalMargins = true;
   this.viewportExcludesVerticalMargins = true;
   this.viewportMeasureCallback = null;
-  this.lastPageSizeUsedForViewportChange = { width: 0, height: 0 };
+  this.lastPageSizeAfterViewportRemeasure = { width: 0, height: 0 };
   this.contentDocumentIsDisplayed = true;
   this.pluginDoorhangerTimeout = null;
   this.shouldShowPluginDoorhanger = true;
   this.clickToPlayPluginsActivated = false;
   this.desktopMode = false;
   this.originalURI = null;
+  this.aboutHomePage = null;
   this.savedArticle = null;
   this.hasTouchListener = false;
   this.browserWidth = 0;
@@ -3253,7 +3251,7 @@ Tab.prototype = {
 
   sendViewportUpdate: function(aPageSizeUpdate) {
     let viewport = this.getViewport();
-    let displayPort = getBridge().getDisplayPort(aPageSizeUpdate, BrowserApp.isBrowserContentDocumentDisplayed(), this.id, viewport);
+    let displayPort = Services.androidBridge.getDisplayPort(aPageSizeUpdate, BrowserApp.isBrowserContentDocumentDisplayed(), this.id, viewport);
     if (displayPort != null)
       this.setDisplayPort(displayPort);
   },
@@ -3280,15 +3278,13 @@ Tab.prototype = {
     let remeasureNeeded = false;
 
     if (hasHorizontalMargins) {
-      let screenWidth = gScreenWidth + gViewportMargins.left + gViewportMargins.right;
-      let viewportShouldExcludeHorizontalMargins = (Math.round(pageWidth) <= screenWidth);
+      let viewportShouldExcludeHorizontalMargins = (pageWidth <= gScreenWidth - 0.5);
       if (viewportShouldExcludeHorizontalMargins != this.viewportExcludesHorizontalMargins) {
         remeasureNeeded = true;
       }
     }
     if (hasVerticalMargins) {
-      let screenHeight = gScreenHeight + gViewportMargins.top + gViewportMargins.bottom;
-      let viewportShouldExcludeVerticalMargins = (Math.round(pageHeight) <= screenHeight);
+      let viewportShouldExcludeVerticalMargins = (pageHeight <= gScreenHeight - 0.5);
       if (viewportShouldExcludeVerticalMargins != this.viewportExcludesVerticalMargins) {
         remeasureNeeded = true;
       }
@@ -3305,8 +3301,8 @@ Tab.prototype = {
           let pageWidth = viewport.pageRight - viewport.pageLeft;
           let pageHeight = viewport.pageBottom - viewport.pageTop;
 
-          if (Math.abs(pageWidth - this.lastPageSizeUsedForViewportChange.width) >= 0.5 ||
-              Math.abs(pageHeight - this.lastPageSizeUsedForViewportChange.height) >= 0.5) {
+          if (Math.abs(pageWidth - this.lastPageSizeAfterViewportRemeasure.width) >= 0.5 ||
+              Math.abs(pageHeight - this.lastPageSizeAfterViewportRemeasure.height) >= 0.5) {
             this.updateViewportSize(gScreenWidth);
           }
         }.bind(this), kViewportRemeasureThrottle);
@@ -3343,17 +3339,26 @@ Tab.prototype = {
           // Ignore. Catching and ignoring exceptions here ensures that Talos succeeds.
         }
 
+        let docURI = target.documentURI;
+        let errorType = "";
+        if (docURI.startsWith("about:certerror"))
+          errorType = "certerror";
+        else if (docURI.startsWith("about:blocked"))
+          errorType = "blocked"
+        else if (docURI.startsWith("about:neterror"))
+          errorType = "neterror";
+
         sendMessageToJava({
           type: "DOMContentLoaded",
           tabID: this.id,
-          bgColor: backgroundColor
+          bgColor: backgroundColor,
+          errorType: errorType
         });
 
         // Attach a listener to watch for "click" events bubbling up from error
         // pages and other similar page. This lets us fix bugs like 401575 which
         // require error page UI to do privileged things, without letting error
         // pages have any privilege themselves.
-        let docURI = target.documentURI;
         if (docURI.startsWith("about:certerror") || docURI.startsWith("about:blocked")) {
           this.browser.addEventListener("click", ErrorPageEventHandler, true);
           let listener = function() {
@@ -3536,6 +3541,12 @@ Tab.prototype = {
           tabID: this.id
         });
 
+        if (!aEvent.persisted && Services.prefs.getBoolPref("browser.ui.linkify.phone")) {
+          if (!this._linkifier)
+            this._linkifier = new Linkifier();
+          this._linkifier.linkifyNumbers(this.browser.contentWindow.document);
+        }
+
         if (!Reader.isEnabledForParseOnLoad)
           return;
 
@@ -3637,7 +3648,6 @@ Tab.prototype = {
       fixedURI = URIFixup.createExposableURI(aLocationURI);
     } catch (ex) { }
 
-    let documentURI = contentWin.document.documentURIObject.spec;
     let contentType = contentWin.document.contentType;
 
     // If fixedURI matches browser.lastURI, we assume this isn't a real location
@@ -3654,6 +3664,7 @@ Tab.prototype = {
     this.shouldShowPluginDoorhanger = true;
     this.clickToPlayPluginsActivated = false;
     // Borrowed from desktop Firefox: http://mxr.mozilla.org/mozilla-central/source/browser/base/content/urlbarBindings.xml#174
+    let documentURI = contentWin.document.documentURIObject.spec
     let matchedURL = documentURI.match(/^((?:[a-z]+:\/\/)?(?:[^\/]+@)?)(.+?)(?::\d+)?(?:\/|$)/);
     let baseDomain = "";
     if (matchedURL) {
@@ -3675,8 +3686,8 @@ Tab.prototype = {
       tabID: this.id,
       uri: fixedURI.spec,
       userSearch: this.userSearch || "",
-      documentURI: documentURI,
       baseDomain: baseDomain,
+      aboutHomePage: this.aboutHomePage || "",
       contentType: (contentType ? contentType : ""),
       sameDocument: sameDocument
     };
@@ -3885,13 +3896,6 @@ Tab.prototype = {
         this.viewportExcludesVerticalMargins = false;
       }
 
-      // Store the page size that was used to calculate the viewport so that we
-      // can verify it's changed when we consider remeasuring in updateViewportForPageSize
-      this.lastPageSizeUsedForViewportChange = {
-        width: pageWidth,
-        height: pageHeight
-      };
-
       minScale = screenW / pageWidth;
     }
     minScale = this.clampZoom(minScale);
@@ -3920,6 +3924,14 @@ Tab.prototype = {
     this.setResolution(zoom, false);
     this.setScrollClampingSize(zoom);
     this.sendViewportUpdate();
+
+    // Store the page size that was used to calculate the viewport so that we
+    // can verify it's changed when we consider remeasuring in updateViewportForPageSize
+    let viewport = this.getViewport();
+    this.lastPageSizeAfterViewportRemeasure = {
+      width: viewport.pageRight - viewport.pageLeft,
+      height: viewport.pageBottom - viewport.pageTop
+    };
   },
 
   sendViewportMetadata: function sendViewportMetadata() {
@@ -7154,14 +7166,16 @@ let Reader = {
       this.pageAction.id = NativeWindow.pageactions.add({
         title: Strings.browser.GetStringFromName("readerMode.exit"),
         icon: "drawable://reader_active",
-        clickCallback: this.pageAction.readerModeCallback
+        clickCallback: this.pageAction.readerModeCallback,
+        important: true
       });
     } else if (tab.readerEnabled) {
       this.pageAction.id = NativeWindow.pageactions.add({
         title: Strings.browser.GetStringFromName("readerMode.enter"),
         icon: "drawable://reader",
         clickCallback:this.pageAction.readerModeCallback,
-        longClickCallback: this.pageAction.readerModeActiveCallback
+        longClickCallback: this.pageAction.readerModeActiveCallback,
+        important: true
       });
     }
   },
@@ -7631,12 +7645,24 @@ let Reader = {
 var ExternalApps = {
   _contextMenuId: -1,
 
+  // extend _getLink to pickup html5 media links.
+  _getMediaLink: function(aElement) {
+    let uri = NativeWindow.contextmenus._getLink(aElement);
+    if (uri == null && aElement.nodeType == Ci.nsIDOMNode.ELEMENT_NODE && (aElement instanceof Ci.nsIDOMHTMLMediaElement)) {
+      try {
+        let mediaSrc = aElement.currentSrc || aElement.src;
+        uri = ContentAreaUtils.makeURI(mediaSrc, null, null);
+      } catch (e) {}
+    }
+    return uri;
+  },
+
   init: function helper_init() {
     this._contextMenuId = NativeWindow.contextmenus.add(function(aElement) {
       let uri = null;
       var node = aElement;
       while (node && !uri) {
-        uri = NativeWindow.contextmenus._getLink(node);
+        uri = ExternalApps._getMediaLink(node);
         node = node.parentNode;
       }
       let apps = [];
@@ -7654,7 +7680,7 @@ var ExternalApps = {
 
   filter: {
     matches: function(aElement) {
-      let uri = NativeWindow.contextmenus._getLink(aElement);
+      let uri = ExternalApps._getMediaLink(aElement);
       let apps = [];
       if (uri) {
         apps = HelperApps.getAppsForUri(uri);
@@ -7664,7 +7690,7 @@ var ExternalApps = {
   },
 
   openExternal: function(aElement) {
-    let uri = NativeWindow.contextmenus._getLink(aElement);
+    let uri = ExternalApps._getMediaLink(aElement);
     HelperApps.openUriInApp(uri);
   }
 };

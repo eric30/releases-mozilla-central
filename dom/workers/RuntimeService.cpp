@@ -292,9 +292,6 @@ LoadJSContextOptions(const char* aPrefName, void* /* aClosure */)
   if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("werror"))) {
     commonOptions |= JSOPTION_WERROR;
   }
-  if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("typeinference"))) {
-    commonOptions |= JSOPTION_TYPE_INFERENCE;
-  }
   if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("asmjs"))) {
     commonOptions |= JSOPTION_ASMJS;
   }
@@ -307,6 +304,9 @@ LoadJSContextOptions(const char* aPrefName, void* /* aClosure */)
   if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("ion.content"))) {
     contentOptions |= JSOPTION_ION;
   }
+  if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("typeinference.content"))) {
+    contentOptions |= JSOPTION_TYPE_INFERENCE;
+  }
 
   // Chrome options.
   uint32_t chromeOptions = commonOptions;
@@ -315,6 +315,9 @@ LoadJSContextOptions(const char* aPrefName, void* /* aClosure */)
   }
   if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("ion.chrome"))) {
     chromeOptions |= JSOPTION_ION;
+  }
+  if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("typeinference.chrome"))) {
+    chromeOptions |= JSOPTION_TYPE_INFERENCE;
   }
 #ifdef DEBUG
   if (GetWorkerPref<bool>(NS_LITERAL_CSTRING("strict.debug"))) {
@@ -508,12 +511,6 @@ LoadJSGCMemoryOptions(const char* aPrefName, void* /* aClosure */)
       continue;
     }
 
-    matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX "analysis_purge_mb");
-    if (memPrefName == matchName || (!rts && index == 8)) {
-      UpdateCommonJSGCMemoryOption(rts, matchName, JSGC_ANALYSIS_PURGE_TRIGGER);
-      continue;
-    }
-
     matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX
                             "gc_allocation_threshold_mb");
     if (memPrefName == matchName || (!rts && index == 9)) {
@@ -587,7 +584,7 @@ ErrorReporter(JSContext* aCx, const char* aMessage, JSErrorReport* aReport)
   return worker->ReportError(aCx, aMessage, aReport);
 }
 
-JSBool
+bool
 OperationCallback(JSContext* aCx)
 {
   WorkerPrivate* worker = GetWorkerPrivateFromContext(aCx);
@@ -690,7 +687,7 @@ public:
   }
 };
 
-JSBool
+bool
 ContentSecurityPolicyAllows(JSContext* aCx)
 {
   WorkerPrivate* worker = GetWorkerPrivateFromContext(aCx);
@@ -801,7 +798,7 @@ CreateJSContextForWorker(WorkerPrivate* aWorkerPrivate, JSRuntime* aRuntime)
 
   JS_SetErrorReporter(workerCx, ErrorReporter);
 
-  JS_SetOperationCallback(workerCx, OperationCallback);
+  JS_SetOperationCallback(aRuntime, OperationCallback);
 
   js::SetCTypesActivityCallback(aRuntime, CTypesActivityCallback);
 
@@ -826,7 +823,8 @@ public:
   WorkerJSRuntime(WorkerPrivate* aWorkerPrivate)
   : CycleCollectedJSRuntime(WORKER_DEFAULT_RUNTIME_HEAPSIZE,
                             JS_NO_HELPER_THREADS,
-                            false)
+                            false),
+    mWorkerPrivate(aWorkerPrivate)
   {
     // We need to ensure that a JSContext outlives the cycle collector, and
     // that the internal JSContext created by ctypes is not the last JSContext
@@ -844,8 +842,11 @@ public:
     // should break all remaining cycles.  Destroying mLastJSContext will run
     // the GC the final time and finalize any JSObjects that were participating
     // in cycles that were broken during CC shutdown.
-    nsCycleCollector_shutdownThreads();
     nsCycleCollector_shutdown();
+
+    // The CC is shutdown, and this will GC, so make sure we don't try to CC
+    // again.
+    mWorkerPrivate = nullptr;
     JS_DestroyContext(mLastJSContext);
     mLastJSContext = nullptr;
   }
@@ -866,7 +867,22 @@ public:
     nsCycleCollector_doDeferredDeletion();
   }
 
+  virtual void CustomGCCallback(JSGCStatus aStatus) MOZ_OVERRIDE
+  {
+    if (!mWorkerPrivate) {
+      // We're shutting down, no need to do anything.
+      return;
+    }
+
+    mWorkerPrivate->AssertIsOnWorkerThread();
+
+    if (aStatus == JSGC_END) {
+      nsCycleCollector_collect(true, nullptr, nullptr);
+    }
+  }
+
 private:
+  WorkerPrivate* mWorkerPrivate;
   JSContext* mLastJSContext;
 };
 
@@ -890,7 +906,7 @@ public:
     workerPrivate->AssertIsOnWorkerThread();
 
     {
-      nsCycleCollector_startup(CCSingleThread);
+      nsCycleCollector_startup();
 
       WorkerJSRuntime runtime(workerPrivate);
       JSRuntime* rt = runtime.Runtime();
@@ -940,7 +956,7 @@ public:
 BEGIN_WORKERS_NAMESPACE
 
 // Entry point for the DOM.
-JSBool
+bool
 ResolveWorkerClasses(JSContext* aCx, JS::Handle<JSObject*> aObj, JS::Handle<jsid> aId,
                      unsigned aFlags, JS::MutableHandle<JSObject*> aObjp)
 {

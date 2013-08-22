@@ -9,9 +9,6 @@ VPATH           = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-LIBXUL_LIBRARY = 1
-FAIL_ON_WARNINGS = 1
-
 # For nsDependentJSString
 LOCAL_INCLUDES += \
   -I$(topsrcdir)/dom/base \
@@ -26,5 +23,3 @@ INCLUDES += \
 	-I$(srcdir)/../xpath \
 	-I$(srcdir)/../../../base/src \
 	$(NULL)
-
-DEFINES += -D_IMPL_NS_LAYOUT

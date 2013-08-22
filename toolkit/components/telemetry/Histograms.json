@@ -2557,6 +2557,12 @@
     "extended_statistics_ok": true,
     "description": "Session restore: Time spent blocking the main thread while restoring a window state (ms)"
   },
+  "FX_SESSION_RESTORE_SESSION_LENGTH": {
+    "kind": "exponential",
+    "high": "365",
+    "n_buckets": 15,
+    "description": "Session restore: Days elapsed since the session was first started"
+  },
   "INNERWINDOWS_WITH_MUTATION_LISTENERS": {
     "kind": "boolean",
     "description": "Deleted or to-be-reused innerwindow which has had mutation event listeners."
@@ -3007,18 +3013,6 @@
     "description": "The device supports touch input",
     "cpp_guard": "XP_WIN"
   },
-  "COMPONENTS_OBJECT_ACCESSED_BY_CONTENT": {
-    "kind": "flag",
-    "description": "Whether content ever accesed the Components object in this session"
-  },
-  "COMPONENTS_LOOKUPMETHOD_ACCESSED_BY_CONTENT": {
-    "kind": "flag",
-    "description": "Whether content ever accesed Components.lookupMethod in this session"
-  },
-  "COMPONENTS_INTERFACES_ACCESSED_BY_CONTENT": {
-    "kind": "flag",
-    "description": "Whether content ever accesed Components.interfaces in this session"
-  },
   "COMPONENTS_SHIM_ACCESSED_BY_CONTENT": {
     "kind": "flag",
     "description": "Whether content ever accesed the Components shim in this session"
@@ -3152,6 +3146,50 @@
     "high": "20000",
     "n_buckets": 15,
     "description": "Time (ms) for a WAL checkpoint after collecting all measurements."
+  },
+  "PDF_VIEWER_USED": {
+    "kind": "boolean",
+    "description": "How many times PDF Viewer was used"
+  },
+  "PDF_VIEWER_FALLBACK_SHOWN": {
+    "kind": "boolean",
+    "description": "How many times PDF Viewer fallback bar was shown"
+  },
+  "PDF_VIEWER_PRINT": {
+    "kind": "boolean",
+    "description": "How many times PDF Viewer print functionality was used"
+  },
+  "PDF_VIEWER_DOCUMENT_VERSION": {
+    "kind": "enumerated",
+    "n_values": 20,
+    "description": "The PDF document version (1.1, 1.2, etc.)"
+  },
+  "PDF_VIEWER_DOCUMENT_GENERATOR": {
+    "kind": "enumerated",
+    "n_values": 30,
+    "description": "The PDF document generator"
+  },
+  "PDF_VIEWER_DOCUMENT_SIZE_KB": {
+    "kind": "exponential",
+    "low": "2",
+    "high": "64 * 1024",
+    "n_buckets": 20,
+    "description": "The PDF document size (KB)"
+  },
+  "PDF_VIEWER_FORM": {
+    "kind": "boolean",
+    "description": "A PDF form expected: true for AcroForm and false for XFA"
+  },
+  "PDF_VIEWER_STREAM_TYPES": {
+    "kind": "enumerated",
+    "n_values": 9,
+    "description": "The PDF document compression stream types used"
+  },
+  "PDF_VIEWER_TIME_TO_VIEW_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": 50,
+    "description": "Time spent to display first page in PDF Viewer (ms)"
   },
   "POPUP_NOTIFICATION_MAINACTION_TRIGGERED_MS": {
     "kind": "linear",
@@ -3327,6 +3365,18 @@
     "high": "10000",
     "n_buckets": "1000",
     "description": "The time (in milliseconds) that it took a 'prototypeAndProperties' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_LOCAL_PROTOTYPESANDPROPERTIES_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'prototypesAndProperties' request to go round trip."
+  },
+  "DEVTOOLS_DEBUGGER_RDP_REMOTE_PROTOTYPESANDPROPERTIES_MS": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": "1000",
+    "description": "The time (in milliseconds) that it took a 'prototypesAndProperties' request to go round trip."
   },
   "DEVTOOLS_DEBUGGER_RDP_LOCAL_PROPERTY_MS": {
     "kind": "exponential",

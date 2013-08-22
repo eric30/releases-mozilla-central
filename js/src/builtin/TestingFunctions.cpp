@@ -11,11 +11,13 @@
 #include "jsfriendapi.h"
 #include "jsgc.h"
 #include "jsobj.h"
+#ifndef JS_MORE_DETERMINISTIC
 #include "jsprf.h"
+#endif
 #include "jswrapper.h"
 
-#include "ion/AsmJS.h"
-#include "ion/AsmJSLink.h"
+#include "jit/AsmJS.h"
+#include "jit/AsmJSLink.h"
 #include "vm/ForkJoin.h"
 #include "vm/Interpreter.h"
 
@@ -199,7 +201,7 @@ GC(JSContext *cx, unsigned argc, jsval *vp)
      * object, we collect the object's compartment (and any other compartments
      * scheduled for GC). Otherwise, we collect all compartments.
      */
-    JSBool compartment = false;
+    bool compartment = false;
     if (argc == 1) {
         Value arg = vp[2];
         if (arg.isString()) {
@@ -891,6 +893,16 @@ DisableSPSProfiling(JSContext *cx, unsigned argc, jsval *vp)
 }
 
 static bool
+EnableOsiPointRegisterChecks(JSContext *, unsigned, jsval *vp)
+{
+#ifdef CHECK_OSIPOINT_REGISTERS
+    ion::js_IonOptions.checkOsiPointRegisters = true;
+#endif
+    JS_SET_RVAL(cx, vp, JSVAL_VOID);
+    return true;
+}
+
+static bool
 DisplayName(JSContext *cx, unsigned argc, jsval *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -916,15 +928,19 @@ js::testingFunc_inParallelSection(JSContext *cx, unsigned argc, jsval *vp)
     return true;
 }
 
-static JSObject *objectMetadataFunction = NULL;
+static const char *ObjectMetadataPropertyName = "__objectMetadataFunction__";
 
 static bool
 ShellObjectMetadataCallback(JSContext *cx, JSObject **pmetadata)
 {
     Value thisv = UndefinedValue();
 
+    RootedValue fun(cx);
+    if (!JS_GetProperty(cx, cx->global(), ObjectMetadataPropertyName, &fun))
+        return false;
+
     RootedValue rval(cx);
-    if (!Invoke(cx, thisv, ObjectValue(*objectMetadataFunction), 0, NULL, &rval))
+    if (!Invoke(cx, thisv, fun, 0, NULL, &rval))
         return false;
 
     if (rval.isObject())
@@ -941,17 +957,15 @@ SetObjectMetadataCallback(JSContext *cx, unsigned argc, jsval *vp)
     args.rval().setUndefined();
 
     if (argc == 0 || !args[0].isObject() || !args[0].toObject().is<JSFunction>()) {
-        if (objectMetadataFunction)
-            JS_RemoveObjectRoot(cx, &objectMetadataFunction);
-        objectMetadataFunction = NULL;
+        if (!JS_DeleteProperty(cx, cx->global(), ObjectMetadataPropertyName))
+            return false;
         js::SetObjectMetadataCallback(cx, NULL);
         return true;
     }
 
-    if (!objectMetadataFunction && !JS_AddObjectRoot(cx, &objectMetadataFunction))
+    if (!JS_DefineProperty(cx, cx->global(), ObjectMetadataPropertyName, args[0], NULL, NULL, 0))
         return false;
 
-    objectMetadataFunction = &args[0].toObject();
     js::SetObjectMetadataCallback(cx, ShellObjectMetadataCallback);
     return true;
 }
@@ -1133,6 +1147,11 @@ static const JSFunctionSpecWithHelp TestingFunctions[] = {
     JS_FN_HELP("disableSPSProfiling", DisableSPSProfiling, 1, 0,
 "disableSPSProfiling()",
 "  Disables SPS instrumentation"),
+
+    JS_FN_HELP("enableOsiPointRegisterChecks", EnableOsiPointRegisterChecks, 0, 0,
+"enableOsiPointRegisterChecks()",
+"Emit extra code to verify live regs at the start of a VM call are not\n"
+"modified before its OsiPoint."),
 
     JS_FN_HELP("displayName", DisplayName, 1, 0,
 "displayName(fn)",

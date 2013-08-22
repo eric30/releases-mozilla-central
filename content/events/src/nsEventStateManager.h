@@ -197,12 +197,6 @@ public:
   static LayoutDeviceIntPoint GetChildProcessOffset(nsFrameLoader* aFrameLoader,
                                                     const nsEvent& aEvent);
 
-  static void MapEventCoordinatesForChildProcess(nsFrameLoader* aFrameLoader,
-                                                 nsEvent* aEvent);
-
-  static void MapEventCoordinatesForChildProcess(const LayoutDeviceIntPoint& aOffset,
-                                                 nsEvent* aEvent);
-
   // Holds the point in screen coords that a mouse event was dispatched to,
   // before we went into pointer lock mode. This is constantly updated while
   // the pointer is not locked, but we don't update it while the pointer is
@@ -222,6 +216,37 @@ public:
 
 protected:
   friend class MouseEnterLeaveDispatcher;
+
+  /**
+   * Prefs class capsules preference management.
+   */
+  class Prefs
+  {
+  public:
+    static bool KeyCausesActivation() { return sKeyCausesActivation; }
+    static bool ClickHoldContextMenu() { return sClickHoldContextMenu; }
+    static int32_t ChromeAccessModifierMask();
+    static int32_t ContentAccessModifierMask();
+
+    static void Init();
+    static int OnChange(const char* aPrefName, void*);
+    static void Shutdown();
+
+  private:
+    static bool sKeyCausesActivation;
+    static bool sClickHoldContextMenu;
+    static int32_t sGenericAccessModifierKey;
+    static int32_t sChromeAccessModifierMask;
+    static int32_t sContentAccessModifierMask;
+
+    static int32_t GetAccessModifierMask(int32_t aItemType);
+  };
+
+  /**
+   * Get appropriate access modifier mask for the aDocShell.  Returns -1 if
+   * access key isn't available.
+   */
+  static int32_t GetAccessModifierMaskFor(nsISupports* aDocShell);
 
   void UpdateCursor(nsPresContext* aPresContext, nsEvent* aEvent, nsIFrame* aTargetFrame, nsEventStatus* aStatus);
   /**
@@ -790,7 +815,6 @@ public:
   static void ClearGlobalActiveContent(nsEventStateManager* aClearer);
 
   // Functions used for click hold context menus
-  bool mClickHoldContextMenu;
   nsCOMPtr<nsITimer> mClickHoldTimer;
   void CreateClickHoldTimer ( nsPresContext* aPresContext, nsIFrame* inDownFrame,
                               nsGUIEvent* inMouseDownEvent ) ;

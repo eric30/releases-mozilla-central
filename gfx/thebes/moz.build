@@ -36,6 +36,8 @@ EXPORTS += [
     'gfxQuad.h',
     'gfxQuaternion.h',
     'gfxRect.h',
+    'gfxReusableImageSurfaceWrapper.h',
+    'gfxReusableSharedImageSurfaceWrapper.h',
     'gfxReusableSurfaceWrapper.h',
     'gfxSVGGlyphs.h',
     'gfxSharedImageSurface.h',
@@ -250,7 +252,8 @@ CPP_SOURCES += [
     'gfxPlatform.cpp',
     'gfxPlatformFontList.cpp',
     'gfxRect.cpp',
-    'gfxReusableSurfaceWrapper.cpp',
+    'gfxReusableImageSurfaceWrapper.cpp',
+    'gfxReusableSharedImageSurfaceWrapper.cpp',
     'gfxSVGGlyphs.cpp',
     'gfxScriptItemizer.cpp',
     'gfxSkipChars.cpp',
@@ -260,8 +263,14 @@ CPP_SOURCES += [
     'nsSurfaceTexture.cpp',
 ]
 
-
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     CMMSRCS += [
         'gfxMacPlatformFontList.mm',
     ]
+
+FAIL_ON_WARNINGS = not CONFIG['_MSC_VER']
+
+LIBXUL_LIBRARY = True
+
+MSVC_ENABLE_PGO = True
+

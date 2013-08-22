@@ -3089,19 +3089,11 @@ var gCSSProperties = {
 		other_values: [ "center", "justify", "start", "end", "left", "right" ],
 		invalid_values: []
 	},
-	"-moz-text-blink": {
-		domProp: "MozTextBlink",
-		inherited: false,
-		type: CSS_TYPE_LONGHAND,
-		initial_values: [ "none" ],
-		other_values: [ "blink" ],
-		invalid_values: [ "underline", "overline", "line-through", "none underline", "underline blink", "blink underline" ]
-	},
 	"text-decoration": {
 		domProp: "textDecoration",
 		inherited: false,
 		type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
-		subproperties: [ "-moz-text-blink", "-moz-text-decoration-color", "-moz-text-decoration-line", "-moz-text-decoration-style" ],
+		subproperties: [ "-moz-text-decoration-color", "-moz-text-decoration-line", "-moz-text-decoration-style" ],
 		initial_values: [ "none" ],
 		other_values: [ "underline", "overline", "line-through", "blink", "blink line-through underline", "underline overline line-through blink", "-moz-anchor-decoration", "blink -moz-anchor-decoration" ],
 		invalid_values: [ "none none", "underline none", "none underline", "blink none", "none blink", "line-through blink line-through", "underline overline line-through blink none", "underline overline line-throuh blink blink",
@@ -3121,7 +3113,7 @@ var gCSSProperties = {
 		inherited: false,
 		type: CSS_TYPE_LONGHAND,
 		initial_values: [ "none" ],
-		other_values: [ "underline", "overline", "line-through", "line-through underline", "underline overline line-through", "-moz-anchor-decoration", "-moz-anchor-decoration" ],
+		other_values: [ "underline", "overline", "line-through", "blink", "blink line-through underline", "underline overline line-through blink", "-moz-anchor-decoration", "blink -moz-anchor-decoration" ],
 		invalid_values: [ "none none", "underline none", "none underline", "line-through blink line-through", "underline overline line-through blink none", "underline overline line-throuh blink blink" ]
 	},
 	"-moz-text-decoration-style": {
@@ -4261,6 +4253,24 @@ if (SpecialPowers.getBoolPref("layout.css.vertical-text.enabled")) {
 			initial_values: [ "horizontal-tb" ],
 			other_values: [ "vertical-lr", "vertical-rl" ],
 			invalid_values: [ "10px", "30%", "justify", "auto", "1em" ]
+		},
+		"text-orientation": {
+			domProp: "textOrientation",
+			inherited: true,
+			type: CSS_TYPE_LONGHAND,
+			initial_values: [ "auto" ],
+			other_values: [ "upright", "sideways" ],
+			invalid_values: [ "none", "3em" ]
+		},
+		"text-combine-horizontal": {
+			domProp: "textCombineHorizontal",
+			inherited: true,
+			type: CSS_TYPE_LONGHAND,
+			initial_values: [ "none" ],
+			other_values: [ "all", "digits", "digits 2", "digits 3", "digits 4", "digits     3" ],
+			invalid_values: [ "auto", "all 2", "none all", "digits -3", "digits 0",
+			                  "digits 12", "none 3", "digits 3.1415", "digits3", "digits 1",
+			                  "digits 3 all", "digits foo", "digits all", "digits 3.0" ]
 		}
 	};
 	for (var prop in verticalTextProperties) {

@@ -76,7 +76,7 @@ fuzzy-if(/^Windows\x20NT\x206\.[12]/.test(http.oscpu),1,5) fuzzy-if(azureQuartz,
 fuzzy-if(Android,4,87) skip-if(B2G) == dynamic-clipPath-01.svg pass.svg
 == dynamic-clipPath-02.svg pass.svg
 == dynamic-feFlood-01.svg pass.svg
-skip-if(gtk2Widget) == dynamic-feImage-01.svg pass.svg # intermittent failures (bug 886080)
+asserts(0-1) == dynamic-feImage-01.svg pass.svg # intermittent assertions (bug 886080)
 == dynamic-fill-01.svg dynamic-fill-01-ref.svg
 skip-if(B2G) fuzzy-if(d2d,1,10000) == dynamic-filter-contents-01a.svg dynamic-filter-contents-01-ref.svg
 skip-if(B2G) fuzzy-if(d2d,1,10000) == dynamic-filter-contents-01b.svg dynamic-filter-contents-01-ref.svg
@@ -89,6 +89,7 @@ skip-if(B2G) == dynamic-marker-02.svg dynamic-marker-02-ref.svg
 skip-if(B2G) == dynamic-marker-03.svg pass.svg
 == dynamic-mask-01.svg pass.svg
 skip-if(B2G) == dynamic-mask-contents-01.svg pass.svg
+== dynamic-opacity-property-01.svg pass.svg
 skip-if(B2G) == dynamic-pattern-01.svg pass.svg
 skip-if(B2G) == dynamic-pattern-02.svg pass.svg
 skip-if(B2G) == dynamic-pattern-contents-01.svg pass.svg
@@ -199,7 +200,7 @@ pref(layout.css.masking.enabled,true) fuzzy-if(d2d,1,6400) == mask-type-04.svg m
 == nested-viewBox-01.svg pass.svg
 == nesting-invalid-01.svg nesting-invalid-01-ref.svg
 == non-scaling-stroke-01.svg non-scaling-stroke-01-ref.svg 
-fuzzy-if(Android,1,99) fuzzy-if(!contentSameGfxBackendAsCanvas,9,99) == non-scaling-stroke-02.svg non-scaling-stroke-02-ref.svg 
+fuzzy-if(Android||B2G,1,99) fuzzy-if(!contentSameGfxBackendAsCanvas,9,99) == non-scaling-stroke-02.svg non-scaling-stroke-02-ref.svg
 == non-scaling-stroke-03.svg non-scaling-stroke-03-ref.svg 
 == objectBoundingBox-and-clipPath.svg pass.svg
 # Bug 588684

@@ -15,13 +15,12 @@
 # limitations under the License.
 
 if CONFIG['MOZ_B2G_BT']:
+    LIBXUL_LIBRARY = True
     MODULE = 'dom'
     XPIDL_MODULE = 'dom_bluetooth'
     XPIDL_SOURCES += [
-        'nsIDOMBluetoothAdapter.idl',
         'nsIDOMBluetoothDevice.idl',
         'nsIDOMBluetoothDeviceEvent.idl',
-        'nsIDOMBluetoothManager.idl',
         'nsIDOMBluetoothStatusChangedEvent.idl',
     ]
 
@@ -39,12 +38,11 @@ if CONFIG['MOZ_B2G_BT']:
         'BluetoothUnixSocketConnector.cpp',
         'BluetoothA2dpManager.cpp',
         'BluetoothHfpManager.cpp',
+        'BluetoothHidManager.cpp',
         'BluetoothOppManager.cpp',
         'ObexBase.cpp',
         'BluetoothUuid.cpp',
         'BluetoothSocket.cpp',
-        'MediaMetaData.cpp',
-        'MediaPlayStatus.cpp'
     ]
 
     if CONFIG['MOZ_B2G_RIL']:
@@ -76,3 +74,6 @@ IPDL_SOURCES += [
     'ipc/PBluetooth.ipdl',
     'ipc/PBluetoothRequest.ipdl',
 ]
+
+FAIL_ON_WARNINGS = True
+

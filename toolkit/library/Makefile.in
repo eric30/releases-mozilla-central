@@ -12,7 +12,6 @@ include $(DEPTH)/config/autoconf.mk
 include $(topsrcdir)/rdf/util/src/objs.mk
 include $(topsrcdir)/intl/unicharutil/util/objs.mk
 
-MSVC_ENABLE_PGO := 1
 FORCE_SHARED_LIB = 1
 MOZILLA_INTERNAL_API = 1
 
@@ -27,7 +26,6 @@ VPATH += $(topsrcdir)/build/
 
 SHARED_LIBRARY_LIBS += \
   $(DEPTH)/media/kiss_fft/$(LIB_PREFIX)kiss_fft.$(LIB_SUFFIX) \
-  $(DEPTH)/toolkit/components/osfile/$(LIB_PREFIX)osfile_s.$(LIB_SUFFIX) \
   $(DEPTH)/toolkit/xre/$(LIB_PREFIX)xulapp_s.$(LIB_SUFFIX) \
   $(NULL)
 
@@ -57,8 +55,11 @@ SHARED_LIBRARY_LIBS += $(DEPTH)/accessible/src/xul/$(LIB_PREFIX)accessibility_xu
 endif
 endif
 
+# XXX bug 903227 COMPONENT_LIBS is useless since bug 886526, but removing it
+# reorders the static libraries which makes msvc use more memory to link
+# xul.dll.
 SHARED_LIBRARY_LIBS += \
-  $(foreach component,$(COMPONENT_LIBS),$(DEPTH)/staticlib/components/$(LIB_PREFIX)$(component).$(LIB_SUFFIX)) \
+  $(foreach component,$(COMPONENT_LIBS),$(DEPTH)/staticlib/$(LIB_PREFIX)$(component).$(LIB_SUFFIX)) \
   $(foreach lib,$(STATIC_LIBS),$(DEPTH)/staticlib/$(LIB_PREFIX)$(lib).$(LIB_SUFFIX)) \
   $(NULL)
 
@@ -89,6 +90,10 @@ STATIC_LIBS += \
   hal_s \
   dombindings_s \
   $(NULL)
+
+ifdef MOZ_CONTENT_SANDBOX #{
+STATIC_LIBS += sandbox_s
+endif #}
 
 ifdef MOZ_B2G_RIL #{
 STATIC_LIBS += mozril_s
@@ -458,11 +463,16 @@ OS_LIBS += \
   -lstagefright_omx \
   -lbinder \
   -lgui \
+  $(DEPTH)/widget/gonk/nativewindow/$(LIB_PREFIX)nativewindow.$(LIB_SUFFIX) \
   $(NULL)
 endif
 
 ifdef MOZ_WMF
 OS_LIBS += $(call EXPAND_LIBNAME,mfuuid wmcodecdspuuid strmiids)
+endif
+
+ifdef MOZ_DIRECTSHOW
+OS_LIBS += $(call EXPAND_LIBNAME,dmoguids wmcodecdspuuid strmiids msdmo)
 endif
 
 EXTRA_DEPS += \
@@ -482,19 +492,6 @@ ifneq (,$(filter OS2 WINNT,$(OS_ARCH)))
 SDK_LIBRARY = $(IMPORT_LIBRARY)
 else
 SDK_LIBRARY = $(SHARED_LIBRARY)
-endif
-
-# See bug 653662 - some builders are hitting an internal size limit on
-# incremental builds. Disable incremental linking for debug builds on VC8 or
-# on 32-bit hosts.
-# See: http://social.msdn.microsoft.com/Forums/en-US/vcgeneral/thread/c34d5c37-ca4a-4580-9c7c-4379a8c76d1f/
-ifeq ($(OS_ARCH),WINNT)
-IS_32BIT_HOST := $(if $(filter AMD64,$(PROCESSOR_ARCHITECTURE) $(PROCESSOR_ARCHITEW6432)),,yes)
-ifneq (,$(or $(filter 1400,$(_MSC_VER)),$(IS_32BIT_HOST)))
-ifdef MOZ_DEBUG
-EXTRA_DSO_LDOPTS += -INCREMENTAL:NO
-endif
-endif
 endif
 
 EXTRA_DSO_LDOPTS += $(LIBS_DIR)

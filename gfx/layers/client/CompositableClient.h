@@ -6,20 +6,24 @@
 #ifndef MOZILLA_GFX_BUFFERCLIENT_H
 #define MOZILLA_GFX_BUFFERCLIENT_H
 
-#include "mozilla/layers/PCompositableChild.h"
-#include "mozilla/layers/LayersTypes.h"
-#include "mozilla/RefPtr.h"
+#include <stdint.h>                     // for uint64_t
+#include <vector>                       // for vector
+#include "mozilla/Assertions.h"         // for MOZ_CRASH
+#include "mozilla/RefPtr.h"             // for TemporaryRef, RefCounted
+#include "mozilla/gfx/Types.h"          // for SurfaceFormat
+#include "mozilla/layers/CompositorTypes.h"
+#include "mozilla/layers/LayersTypes.h"  // for LayersBackend
+#include "mozilla/layers/PCompositableChild.h"  // for PCompositableChild
+#include "nsTraceRefcnt.h"              // for MOZ_COUNT_CTOR, etc
 
 namespace mozilla {
 namespace layers {
 
-class CompositableChild;
 class CompositableClient;
 class DeprecatedTextureClient;
 class TextureClient;
 class BufferTextureClient;
 class ImageBridgeChild;
-class ShadowableLayer;
 class CompositableForwarder;
 class CompositableChild;
 class SurfaceDescriptor;
@@ -124,18 +128,18 @@ public:
   virtual void RemoveTextureClient(TextureClient* aClient);
 
   /**
-   * A hook for the Compositable to execute whatever it held off for next trasanction.
+   * A hook for the Compositable to execute whatever it held off for next transaction.
    */
   virtual void OnTransaction();
 
   /**
    * A hook for the when the Compositable is detached from it's layer.
    */
-  virtual void Detach() {}
+  virtual void OnDetach() {}
 
 protected:
   // The textures to destroy in the next transaction;
-  std::vector<uint64_t> mTexturesToRemove;
+  nsTArray<uint64_t> mTexturesToRemove;
   uint64_t mNextTextureID;
   CompositableChild* mCompositableChild;
   CompositableForwarder* mForwarder;

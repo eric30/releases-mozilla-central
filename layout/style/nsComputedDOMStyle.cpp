@@ -41,6 +41,7 @@
 #include "nsDOMCSSDeclaration.h"
 #include "nsStyleTransformMatrix.h"
 #include "mozilla/dom/Element.h"
+#include "prtime.h"
 #include "nsWrapperCacheInlines.h"
 #include <algorithm>
 
@@ -2645,13 +2646,22 @@ nsComputedDOMStyle::DoGetTextAlignLast()
 }
 
 CSSValue*
-nsComputedDOMStyle::DoGetMozTextBlink()
+nsComputedDOMStyle::DoGetTextCombineHorizontal()
 {
-  nsROCSSPrimitiveValue* val = new nsROCSSPrimitiveValue;
+  nsROCSSPrimitiveValue *val = new nsROCSSPrimitiveValue;
+  uint8_t tch = StyleText()->mTextCombineHorizontal;
 
-  val->SetIdent(
-    nsCSSProps::ValueToKeywordEnum(StyleTextReset()->mTextBlink,
-                                   nsCSSProps::kTextBlinkKTable));
+  if (tch <= NS_STYLE_TEXT_COMBINE_HORIZ_ALL) {
+    val->SetIdent(
+      nsCSSProps::ValueToKeywordEnum(tch,
+                                     nsCSSProps::kTextCombineHorizontalKTable));
+  } else if (tch <= NS_STYLE_TEXT_COMBINE_HORIZ_DIGITS_2) {
+    val->SetString(NS_LITERAL_STRING("digits 2"));
+  } else if (tch <= NS_STYLE_TEXT_COMBINE_HORIZ_DIGITS_3) {
+    val->SetString(NS_LITERAL_STRING("digits 3"));
+  } else {
+    val->SetString(NS_LITERAL_STRING("digits 4"));
+  }
 
   return val;
 }
@@ -2686,25 +2696,14 @@ nsComputedDOMStyle::DoGetTextDecoration()
   // don't want these to appear in the computed style.
   line &= ~(NS_STYLE_TEXT_DECORATION_LINE_PREF_ANCHORS |
             NS_STYLE_TEXT_DECORATION_LINE_OVERRIDE_ALL);
-  uint8_t blink = textReset->mTextBlink;
 
-  if (blink == NS_STYLE_TEXT_BLINK_NONE &&
-      line == NS_STYLE_TEXT_DECORATION_LINE_NONE) {
+  if (line == NS_STYLE_TEXT_DECORATION_LINE_NONE) {
     val->SetIdent(eCSSKeyword_none);
   } else {
     nsAutoString str;
-    if (line != NS_STYLE_TEXT_DECORATION_LINE_NONE) {
-      nsStyleUtil::AppendBitmaskCSSValue(eCSSProperty_text_decoration_line,
-        line, NS_STYLE_TEXT_DECORATION_LINE_UNDERLINE,
-        NS_STYLE_TEXT_DECORATION_LINE_LINE_THROUGH, str);
-    }
-    if (blink != NS_STYLE_TEXT_BLINK_NONE) {
-      if (!str.IsEmpty()) {
-        str.Append(PRUnichar(' '));
-      }
-      nsStyleUtil::AppendBitmaskCSSValue(eCSSProperty_text_blink, blink,
-        NS_STYLE_TEXT_BLINK_BLINK, NS_STYLE_TEXT_BLINK_BLINK, str);
-    }
+    nsStyleUtil::AppendBitmaskCSSValue(eCSSProperty_text_decoration_line,
+      line, NS_STYLE_TEXT_DECORATION_LINE_UNDERLINE,
+      NS_STYLE_TEXT_DECORATION_LINE_BLINK, str);
     val->SetString(str);
   }
 
@@ -2745,7 +2744,7 @@ nsComputedDOMStyle::DoGetTextDecorationLine()
                   NS_STYLE_TEXT_DECORATION_LINE_OVERRIDE_ALL);
     nsStyleUtil::AppendBitmaskCSSValue(eCSSProperty_text_decoration_line,
       intValue, NS_STYLE_TEXT_DECORATION_LINE_UNDERLINE,
-      NS_STYLE_TEXT_DECORATION_LINE_LINE_THROUGH, decorationLineString);
+      NS_STYLE_TEXT_DECORATION_LINE_BLINK, decorationLineString);
     val->SetString(decorationLineString);
   }
 
@@ -2770,6 +2769,16 @@ nsComputedDOMStyle::DoGetTextIndent()
   nsROCSSPrimitiveValue *val = new nsROCSSPrimitiveValue;
   SetValueToCoord(val, StyleText()->mTextIndent, false,
                   &nsComputedDOMStyle::GetCBContentWidth);
+  return val;
+}
+
+CSSValue*
+nsComputedDOMStyle::DoGetTextOrientation()
+{
+  nsROCSSPrimitiveValue* val = new nsROCSSPrimitiveValue;
+  val->SetIdent(
+    nsCSSProps::ValueToKeywordEnum(StyleText()->mTextOrientation,
+                                   nsCSSProps::kTextOrientationKTable));
   return val;
 }
 
@@ -5073,8 +5082,10 @@ nsComputedDOMStyle::GetQueryablePropertyMap(uint32_t* aLength)
     //// COMPUTED_STYLE_MAP_ENTRY(size,                     Size),
     COMPUTED_STYLE_MAP_ENTRY(table_layout,                  TableLayout),
     COMPUTED_STYLE_MAP_ENTRY(text_align,                    TextAlign),
+    COMPUTED_STYLE_MAP_ENTRY(text_combine_horizontal,       TextCombineHorizontal),
     COMPUTED_STYLE_MAP_ENTRY(text_decoration,               TextDecoration),
     COMPUTED_STYLE_MAP_ENTRY_LAYOUT(text_indent,            TextIndent),
+    COMPUTED_STYLE_MAP_ENTRY(text_orientation,              TextOrientation),
     COMPUTED_STYLE_MAP_ENTRY(text_overflow,                 TextOverflow),
     COMPUTED_STYLE_MAP_ENTRY(text_shadow,                   TextShadow),
     COMPUTED_STYLE_MAP_ENTRY(text_transform,                TextTransform),
@@ -5140,7 +5151,6 @@ nsComputedDOMStyle::GetQueryablePropertyMap(uint32_t* aLength)
     COMPUTED_STYLE_MAP_ENTRY(stack_sizing,                  StackSizing),
     COMPUTED_STYLE_MAP_ENTRY(_moz_tab_size,                 TabSize),
     COMPUTED_STYLE_MAP_ENTRY(text_align_last,               TextAlignLast),
-    COMPUTED_STYLE_MAP_ENTRY(text_blink,                    MozTextBlink),
     COMPUTED_STYLE_MAP_ENTRY(text_decoration_color,         TextDecorationColor),
     COMPUTED_STYLE_MAP_ENTRY(text_decoration_line,          TextDecorationLine),
     COMPUTED_STYLE_MAP_ENTRY(text_decoration_style,         TextDecorationStyle),

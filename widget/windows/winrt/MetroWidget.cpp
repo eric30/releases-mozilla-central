@@ -30,6 +30,7 @@
 #include "nsExceptionHandler.h"
 #endif
 #include "UIABridgePrivate.h"
+#include "WinMouseScrollHandler.h"
 
 using namespace Microsoft::WRL;
 using namespace Microsoft::WRL::Wrappers;
@@ -162,12 +163,14 @@ MetroWidget::MetroWidget() :
   mWnd(NULL),
   mMetroWndProc(NULL),
   mTempBasicLayerInUse(false),
+  mRootLayerTreeId(),
   nsWindowBase()
 {
   // Global initialization
   if (!gInstanceCount) {
     UserActivity();
     nsTextStore::Initialize();
+    MouseScrollHandler::Initialize();
     KeyboardLayout::GetInstance()->OnLayoutChange(::GetKeyboardLayout(0));
   } // !gInstanceCount
   gInstanceCount++;
@@ -241,6 +244,7 @@ MetroWidget::Create(nsIWidget *aParent,
   // the main widget gets created first
   gTopLevelAssigned = true;
   MetroApp::SetBaseWidget(this);
+  WinUtils::SetNSWindowBasePtr(mWnd, this);
 
   if (mWidgetListener) {
     mWidgetListener->WindowActivated();
@@ -268,6 +272,14 @@ MetroWidget::Destroy()
 
   nsCOMPtr<nsIWidget> kungFuDeathGrip(this);
 
+  if (ShouldUseAPZC()) {
+    nsresult rv;
+    nsCOMPtr<nsIObserverService> observerService = do_GetService("@mozilla.org/observer-service;1", &rv);
+    if (NS_SUCCEEDED(rv)) {
+      observerService->RemoveObserver(this, "scroll-offset-changed");
+    }
+  }
+
   RemoveSubclass();
   NotifyWindowDestroyed();
 
@@ -278,6 +290,7 @@ MetroWidget::Destroy()
   // Release references to children, device context, toolkit, and app shell.
   nsBaseWidget::Destroy();
   nsBaseWidget::OnDestroy();
+  WinUtils::SetNSWindowBasePtr(mWnd, nullptr);
 
   if (mLayerManager) {
     mLayerManager->Destroy();
@@ -524,43 +537,18 @@ MetroWidget::SynthesizeNativeMouseEvent(nsIntPoint aPoint,
 
 nsresult
 MetroWidget::SynthesizeNativeMouseScrollEvent(nsIntPoint aPoint,
-                                           uint32_t aNativeMessage,
-                                           double aDeltaX,
-                                           double aDeltaY,
-                                           double aDeltaZ,
-                                           uint32_t aModifierFlags,
-                                           uint32_t aAdditionalFlags)
+                                              uint32_t aNativeMessage,
+                                              double aDeltaX,
+                                              double aDeltaY,
+                                              double aDeltaZ,
+                                              uint32_t aModifierFlags,
+                                              uint32_t aAdditionalFlags)
 {
-  Log("ENTERED SynthesizeNativeMouseScrollEvent");
-
-  int32_t mouseData = 0;
-  if (aNativeMessage == MOUSEEVENTF_WHEEL) {
-    mouseData = static_cast<int32_t>(aDeltaY);
-    Log("  Vertical scroll, delta %d", mouseData);
-  } else if (aNativeMessage == MOUSEEVENTF_HWHEEL) {
-    mouseData = static_cast<int32_t>(aDeltaX);
-    Log("  Horizontal scroll, delta %d", mouseData);
-  } else {
-    Log("ERROR Unrecognized scroll event");
-    return NS_ERROR_INVALID_ARG;
-  }
-
-  INPUT inputs[2];
-  memset(inputs, 0, 2*sizeof(INPUT));
-  inputs[0].type = inputs[1].type = INPUT_MOUSE;
-  inputs[0].mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
-  // Inexplicably, the x and y coordinates that we want to move the mouse to
-  // are specified as values in the range (0, 65535). (0,0) represents the
-  // top left of the primary monitor and (65535, 65535) represents the
-  // bottom right of the primary monitor.
-  inputs[0].mi.dx = (aPoint.x * 65535) / ::GetSystemMetrics(SM_CXSCREEN);
-  inputs[0].mi.dy = (aPoint.y * 65535) / ::GetSystemMetrics(SM_CYSCREEN);
-  inputs[1].mi.dwFlags = aNativeMessage;
-  inputs[1].mi.mouseData = mouseData;
-  SendInputs(aModifierFlags, inputs, 2);
-
-  Log("EXITING SynthesizeNativeMouseScrollEvent");
-  return NS_OK;
+  return MouseScrollHandler::SynthesizeNativeMouseScrollEvent(
+           this, aPoint, aNativeMessage,
+           (aNativeMessage == WM_MOUSEWHEEL || aNativeMessage == WM_VSCROLL) ?
+             static_cast<int32_t>(aDeltaY) : static_cast<int32_t>(aDeltaX),
+           aModifierFlags, aAdditionalFlags);
 }
 
 static void
@@ -597,8 +585,15 @@ MetroWidget::WindowProcedure(HWND aWnd, UINT aMsg, WPARAM aWParam, LPARAM aLPara
   // Indicates if we should hand messages to the default windows
   // procedure for processing.
   bool processDefault = true;
+
   // The result returned if we do not do default processing.
   LRESULT processResult = 0;
+
+  MSGResult msgResult(&processResult);
+  MouseScrollHandler::ProcessMessage(this, aMsg, aWParam, aLParam, msgResult);
+  if (msgResult.mConsumed) {
+    return processResult;
+  }
 
   switch (aMsg) {
     case WM_PAINT:
@@ -700,16 +695,17 @@ MetroWidget::WindowProcedure(HWND aWnd, UINT aMsg, WPARAM aWParam, LPARAM aLPara
       // UiaReturnRawElementProvider passing the return result from FrameworkView
       // OnAutomationProviderRequested as the hwnd (me scratches head) which results in
       // GetLastError always being set to invalid handle (6) after CallWindowProc returns.
-      if (dwObjId == UiaRootObjectId) {
-        NS_ASSERTION(gProviderRoot.Get(), "gProviderRoot is null??");
+      if (dwObjId == UiaRootObjectId && gProviderRoot) {
         ComPtr<IRawElementProviderSimple> simple;
         gProviderRoot.As(&simple);
-        LRESULT res = UiaReturnRawElementProvider(aWnd, aWParam, aLParam, simple.Get());
-        if (res) {
-          return res;
+        if (simple) {
+          LRESULT res = UiaReturnRawElementProvider(aWnd, aWParam, aLParam, simple.Get());
+          if (res) {
+            return res;
+          }
+          NS_ASSERTION(res, "UiaReturnRawElementProvider failed!");
+          Log("UiaReturnRawElementProvider failed! GetLastError=%X", GetLastError());
         }
-        NS_ASSERTION(res, "UiaReturnRawElementProvider failed!");
-        Log("UiaReturnRawElementProvider failed! GetLastError=%X", GetLastError());
       }
       break;
     }
@@ -842,6 +838,13 @@ CompositorParent* MetroWidget::NewCompositorParent(int aSurfaceWidth, int aSurfa
   if (ShouldUseAPZC()) {
     CompositorParent::SetControllerForLayerTree(compositor->RootLayerTreeId(), this);
     MetroWidget::sAPZC = CompositorParent::GetAPZCTreeManager(compositor->RootLayerTreeId());
+    mRootLayerTreeId = compositor->RootLayerTreeId();
+
+    nsresult rv;
+    nsCOMPtr<nsIObserverService> observerService = do_GetService("@mozilla.org/observer-service;1", &rv);
+    if (NS_SUCCEEDED(rv)) {
+      observerService->AddObserver(this, "scroll-offset-changed", false);
+    }
   }
 
   return compositor;
@@ -1011,16 +1014,16 @@ void MetroWidget::UserActivity()
   }
 }
 
+// InitEvent assumes physical coordinates and is used by shared win32 code. Do
+// not hand winrt event coordinates to this routine.
 void
 MetroWidget::InitEvent(nsGUIEvent& event, nsIntPoint* aPoint)
 {
   if (!aPoint) {
     event.refPoint.x = event.refPoint.y = 0;
   } else {
-    CSSIntPoint cssPoint(aPoint->x, aPoint->y);
-    LayoutDeviceIntPoint layoutDeviceIntPoint = CSSIntPointToLayoutDeviceIntPoint(cssPoint);
-    event.refPoint.x = layoutDeviceIntPoint.x;
-    event.refPoint.y = layoutDeviceIntPoint.y;
+    event.refPoint.x = aPoint->x;
+    event.refPoint.y = aPoint->y;
   }
   event.time = ::GetMessageTime();
 }
@@ -1344,14 +1347,6 @@ MetroWidget::HasPendingInputEvent()
 
 // GeckoContentController interface impl
 
-#include "nsIBrowserDOMWindow.h"
-#include "nsIWebNavigation.h"
-#include "nsIDocShellTreeItem.h"
-#include "nsIDOMWindow.h"
-#include "nsIDOMChromeWindow.h"
-#include "nsIWindowMediator.h"
-#include "nsIInterfaceRequestorUtils.h"
-
 class RequestContentRepaintEvent : public nsRunnable
 {
 public:
@@ -1466,4 +1461,31 @@ MetroWidget::HandlePanEnd()
 {
   LogFunction();
   MetroUtils::FireObserver("apzc-handle-pan-end", L"");
+}
+
+NS_IMETHODIMP
+MetroWidget::Observe(nsISupports *subject, const char *topic, const PRUnichar *data)
+{
+  NS_ENSURE_ARG_POINTER(topic);
+  if (!strcmp(topic, "scroll-offset-changed")) {
+    uint64_t scrollId;
+    int32_t presShellId;
+    CSSIntPoint scrollOffset;
+    int matched = sscanf(NS_LossyConvertUTF16toASCII(data).get(),
+                         "%llu %d (%d, %d)",
+                         &scrollId,
+                         &presShellId,
+                         &scrollOffset.x,
+                         &scrollOffset.y);
+    if (matched != 4) {
+      NS_WARNING("Malformed scroll-offset-changed message");
+      return NS_ERROR_UNEXPECTED;
+    }
+    if (MetroWidget::sAPZC) {
+      MetroWidget::sAPZC->UpdateScrollOffset(
+          ScrollableLayerGuid(mRootLayerTreeId, presShellId, scrollId),
+          scrollOffset);
+    }
+  }
+  return NS_OK;
 }

@@ -161,6 +161,7 @@ public:
     virtual bool RecvUpdateZoomConstraints(const bool& aAllowZoom,
                                            const float& aMinZoom,
                                            const float& aMaxZoom);
+    virtual bool RecvUpdateScrollOffset(const uint32_t& aPresShellId, const ViewID& aViewId, const CSSIntPoint& aScrollOffset);
     virtual bool RecvContentReceivedTouch(const bool& aPreventDefault);
     virtual PContentDialogParent* AllocPContentDialogParent(const uint32_t& aType,
                                                             const nsCString& aName,
@@ -186,6 +187,10 @@ public:
     void HandleLongTap(const CSSIntPoint& aPoint);
     void Activate();
     void Deactivate();
+
+    bool MapEventCoordinatesForChildProcess(nsEvent* aEvent);
+    void MapEventCoordinatesForChildProcess(const LayoutDeviceIntPoint& aOffset,
+                                                   nsEvent* aEvent);
 
     void SendMouseEvent(const nsAString& aType, float aX, float aY,
                         int32_t aButton, int32_t aClickCount,
@@ -215,7 +220,7 @@ public:
             const bool& stickDocument) MOZ_OVERRIDE;
     virtual bool DeallocPOfflineCacheUpdateParent(POfflineCacheUpdateParent* actor);
 
-    JSBool GetGlobalJSObject(JSContext* cx, JSObject** globalp);
+    bool GetGlobalJSObject(JSContext* cx, JSObject** globalp);
 
     NS_DECL_ISUPPORTS
     NS_DECL_NSIAUTHPROMPTPROVIDER

@@ -20,14 +20,10 @@
 
 #include "js/RootingAPI.h"
 #include "mozilla/Assertions.h"
-#include "mozilla/AutoRestore.h"
 #include "mozilla/GuardObjects.h"
 #include "mozilla/TimeStamp.h"
-#include "nsAString.h"
-#include "nsCharSeparatedTokenizer.h"
 #include "nsContentListDeclarations.h"
 #include "nsMathUtils.h"
-#include "nsReadableUtils.h"
 
 class imgICache;
 class imgIContainer;
@@ -67,7 +63,6 @@ class nsIInterfaceRequestor;
 class nsIIOService;
 class nsIJSRuntimeService;
 class nsILineBreaker;
-class nsIMIMEHeaderParam;
 class nsINameSpaceManager;
 class nsINodeInfo;
 class nsIObserver;
@@ -107,6 +102,7 @@ template<class E> class nsCOMArray;
 template<class E> class nsTArray;
 template<class K, class V> class nsDataHashtable;
 template<class K, class V> class nsRefPtrHashtable;
+template<class T> class nsReadingIterator;
 
 namespace JS {
 class Value;
@@ -143,6 +139,11 @@ class nsIBidiKeyboard;
 #endif
 
 extern const char kLoadAsData[];
+
+// Stolen from nsReadableUtils, but that's OK, since we can declare the same
+// name multiple times.
+const nsAFlatString& EmptyString();
+const nsAFlatCString& EmptyCString();
 
 enum EventNameType {
   EventNameType_None = 0x0000,
@@ -194,7 +195,7 @@ public:
   static bool     IsImageSrcSetDisabled();
 
   static bool LookupBindingMember(JSContext* aCx, nsIContent *aContent,
-                                  JS::HandleId aId, JSPropertyDescriptor* aDesc);
+                                  JS::HandleId aId, JS::MutableHandle<JSPropertyDescriptor> aDesc);
 
   /**
    * Returns the parent node of aChild crossing document boundaries.
@@ -812,26 +813,6 @@ public:
                                     = EmptyString(),
                                   uint32_t aLineNumber = 0,
                                   uint32_t aColumnNumber = 0);
-  // This overload allows passing a literal string for aCategory.
-  template<uint32_t N>
-  static nsresult ReportToConsole(uint32_t aErrorFlags,
-                                  const char (&aCategory)[N],
-                                  nsIDocument* aDocument,
-                                  PropertiesFile aFile,
-                                  const char *aMessageName,
-                                  const PRUnichar **aParams = nullptr,
-                                  uint32_t aParamsLength = 0,
-                                  nsIURI* aURI = nullptr,
-                                  const nsAFlatString& aSourceLine
-                                    = EmptyString(),
-                                  uint32_t aLineNumber = 0,
-                                  uint32_t aColumnNumber = 0)
-  {
-      nsDependentCString category(aCategory, N - 1);
-      return ReportToConsole(aErrorFlags, category, aDocument, aFile,
-                             aMessageName, aParams, aParamsLength, aURI,
-                             aSourceLine, aLineNumber, aColumnNumber);
-  }
 
   /**
    * Get the localized string named |aKey| in properties file |aFile|.
@@ -1242,11 +1223,7 @@ public:
    * @param aResult the result. Out param.
    */
   static void GetNodeTextContent(nsINode* aNode, bool aDeep,
-                                 nsAString& aResult)
-  {
-    aResult.Truncate();
-    AppendNodeTextContent(aNode, aDeep, aResult);
-  }
+                                 nsAString& aResult);
 
   /**
    * Same as GetNodeTextContents but appends the result rather than sets it.
@@ -1265,13 +1242,7 @@ public:
   /**
    * Delete strings allocated for nsContentList matches
    */
-  static void DestroyMatchString(void* aData)
-  {
-    if (aData) {
-      nsString* matchString = static_cast<nsString*>(aData);
-      delete matchString;
-    }
-  }
+  static void DestroyMatchString(void* aData);
 
   /**
    * Unbinds the content from the tree and nulls it out if it's not null.
@@ -1341,7 +1312,7 @@ public:
                                           bool aAllowData,
                                           uint32_t aContentPolicyType,
                                           nsISupports* aContext,
-                                          const nsACString& aMimeGuess = EmptyCString(),
+                                          const nsAFlatCString& aMimeGuess = EmptyCString(),
                                           nsISupports* aExtra = nullptr);
 
   /**
@@ -1503,6 +1474,12 @@ public:
    * Check whether an application should be allowed to use offline APIs.
    */
   static bool OfflineAppAllowed(nsIPrincipal *aPrincipal);
+
+  /**
+   * If offline-apps.allow_by_default is true, we set offline-app permission
+   * for the principal and return true.  Otherwise false.
+   */
+  static bool MaybeAllowOfflineAppByDefault(nsIPrincipal *aPrincipal);
 
   /**
    * Increases the count of blockers preventing scripts from running.
@@ -2047,37 +2024,7 @@ public:
    */
   static JSVersion ParseJavascriptVersion(const nsAString& aVersionStr);
 
-  static bool IsJavascriptMIMEType(const nsAString& aMIMEType)
-  {
-    // Table ordered from most to least likely JS MIME types.
-    static const char* jsTypes[] = {
-      "text/javascript",
-      "text/ecmascript",
-      "application/javascript",
-      "application/ecmascript",
-      "application/x-javascript",
-      "application/x-ecmascript",
-      "text/javascript1.0",
-      "text/javascript1.1",
-      "text/javascript1.2",
-      "text/javascript1.3",
-      "text/javascript1.4",
-      "text/javascript1.5",
-      "text/jscript",
-      "text/livescript",
-      "text/x-ecmascript",
-      "text/x-javascript",
-      nullptr
-    };
-
-    for (uint32_t i = 0; jsTypes[i]; ++i) {
-      if (aMIMEType.LowerCaseEqualsASCII(jsTypes[i])) {
-        return true;
-      }
-    }
-
-    return false;
-  }
+  static bool IsJavascriptMIMEType(const nsAString& aMIMEType);
 
   static void SplitMimeType(const nsAString& aValue, nsString& aType,
                             nsString& aParams);
@@ -2177,8 +2124,6 @@ private:
   static void* AllocClassMatchingInfo(nsINode* aRootNode,
                                       const nsString* aClasses);
 
-  static nsIDOMScriptObjectFactory *sDOMScriptObjectFactory;
-
   static nsIXPConnect *sXPConnect;
 
   static nsIScriptSecurityManager *sSecurityManager;
@@ -2259,9 +2204,6 @@ private:
   static bool sDOMWindowDumpEnabled;
 #endif
 };
-
-typedef nsCharSeparatedTokenizerTemplate<nsContentUtils::IsHTMLWhitespace>
-                                                    HTMLSplitOnSpacesTokenizer;
 
 #define NS_HOLD_JS_OBJECTS(obj, clazz)                                         \
   nsContentUtils::HoldJSObjects(NS_CYCLE_COLLECTION_UPCAST(obj, clazz),        \
@@ -2363,21 +2305,5 @@ public:
       cur = next;                                                             \
     }                                                                         \
   }
-
-class nsContentTypeParser {
-public:
-  nsContentTypeParser(const nsAString& aString);
-  ~nsContentTypeParser();
-
-  nsresult GetParameter(const char* aParameterName, nsAString& aResult);
-  nsresult GetType(nsAString& aResult)
-  {
-    return GetParameter(nullptr, aResult);
-  }
-
-private:
-  NS_ConvertUTF16toUTF8 mString;
-  nsIMIMEHeaderParam*   mService;
-};
 
 #endif /* nsContentUtils_h___ */

@@ -6,6 +6,10 @@
 
 MODULE = 'gfxipc'
 
+EXPORTS.mozilla += [
+    'GfxMessageUtils.h'
+]
+
 EXPORTS.mozilla.gfx += [
     'SharedDIB.h',
 ]
@@ -23,4 +27,6 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
 CPP_SOURCES += [
     'SharedDIB.cpp',
 ]
+
+LIBXUL_LIBRARY = True
 

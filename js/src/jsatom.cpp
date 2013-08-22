@@ -23,6 +23,7 @@
 #include "gc/Marking.h"
 #include "vm/Xdr.h"
 
+#include "jscntxtinlines.h"
 #include "jscompartmentinlines.h"
 
 #include "vm/String-inl.h"
@@ -103,7 +104,6 @@ const char js_typeof_str[]          = "typeof";
 const char js_void_str[]            = "void";
 const char js_while_str[]           = "while";
 const char js_with_str[]            = "with";
-const char js_yield_str[]           = "yield";
 
 /*
  * For a browser build from 2007-08-09 after the browser starts up there are
@@ -113,16 +113,17 @@ const char js_yield_str[]           = "yield";
  */
 #define JS_STRING_HASH_COUNT   1024
 
-JSBool
+bool
 js::InitAtoms(JSRuntime *rt)
 {
-    return rt->atoms.init(JS_STRING_HASH_COUNT);
+    AutoLockForExclusiveAccess lock(rt);
+    return rt->atoms().init(JS_STRING_HASH_COUNT);
 }
 
 void
 js::FinishAtoms(JSRuntime *rt)
 {
-    AtomSet &atoms = rt->atoms;
+    AtomSet &atoms = rt->atoms();
     if (!atoms.initialized()) {
         /*
          * We are called with uninitialized state when JS_NewRuntime fails and
@@ -180,7 +181,7 @@ void
 js::MarkAtoms(JSTracer *trc)
 {
     JSRuntime *rt = trc->runtime;
-    for (AtomSet::Range r = rt->atoms.all(); !r.empty(); r.popFront()) {
+    for (AtomSet::Range r = rt->atoms().all(); !r.empty(); r.popFront()) {
         AtomStateEntry entry = r.front();
         if (!entry.isTagged())
             continue;
@@ -194,13 +195,13 @@ js::MarkAtoms(JSTracer *trc)
 void
 js::SweepAtoms(JSRuntime *rt)
 {
-    for (AtomSet::Enum e(rt->atoms); !e.empty(); e.popFront()) {
+    for (AtomSet::Enum e(rt->atoms()); !e.empty(); e.popFront()) {
         AtomStateEntry entry = e.front();
         JSAtom *atom = entry.asPtr();
         bool isDying = IsStringAboutToBeFinalized(&atom);
 
         /* Pinned or interned key cannot be finalized. */
-        JS_ASSERT_IF(entry.isTagged(), !isDying);
+        JS_ASSERT_IF(rt->hasContexts() && entry.isTagged(), !isDying);
 
         if (isDying)
             e.removeFront();
@@ -214,7 +215,9 @@ AtomIsInterned(JSContext *cx, JSAtom *atom)
     if (StaticStrings::isStatic(atom))
         return true;
 
-    AtomSet::Ptr p = cx->runtime()->atoms.lookup(atom);
+    AutoLockForExclusiveAccess lock(cx);
+
+    AtomSet::Ptr p = cx->runtime()->atoms().lookup(atom);
     if (!p)
         return false;
 
@@ -346,16 +349,9 @@ js::AtomizeString(ExclusiveContext *cx, JSString *str,
         return &atom;
     }
 
-    const jschar *chars;
-    if (str->isLinear()) {
-        chars = str->asLinear().chars();
-    } else {
-        if (!cx->shouldBeJSContext())
-            return NULL;
-        chars = str->getChars(cx->asJSContext());
-        if (!chars)
-            return NULL;
-    }
+    const jschar *chars = str->getChars(cx);
+    if (!chars)
+        return NULL;
 
     if (JSAtom *atom = AtomizeAndCopyChars<NoGC>(cx, chars, str->length(), ib))
         return atom;

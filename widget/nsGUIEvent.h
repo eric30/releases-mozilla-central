@@ -8,10 +8,8 @@
 
 #include "mozilla/MathAlgorithms.h"
 
-#include "nsCOMArray.h"
 #include "nsPoint.h"
 #include "nsRect.h"
-#include "nsRegion.h"
 #include "nsEvent.h"
 #include "nsStringGlue.h"
 #include "nsCOMPtr.h"
@@ -25,7 +23,6 @@
 #include "nsTArray.h"
 #include "nsTraceRefcnt.h"
 #include "nsITransferable.h"
-#include "nsIVariant.h"
 #include "nsStyleConsts.h"
 #include "nsAutoPtr.h"
 #include "mozilla/dom/EventTarget.h"
@@ -688,6 +685,9 @@ public:
 
   // Additional type info for user defined events
   nsCOMPtr<nsIAtom>     userType;
+
+  nsString typeString; // always set on non-main-thread events
+
   // Event targets, needed by DOM Events
   nsCOMPtr<mozilla::dom::EventTarget> target;
   nsCOMPtr<mozilla::dom::EventTarget> currentTarget;
@@ -1345,8 +1345,7 @@ public:
     deltaMode(nsIDOMWheelEvent::DOM_DELTA_PIXEL),
     customizedByUserPrefs(false), isMomentum(false), isPixelOnlyDevice(false),
     lineOrPageDeltaX(0), lineOrPageDeltaY(0), scrollType(SCROLL_DEFAULT),
-    overflowDeltaX(0.0), overflowDeltaY(0.0),
-    viewPortIsScrollTargetParent(false)
+    overflowDeltaX(0.0), overflowDeltaY(0.0)
   {
   }
 
@@ -1425,11 +1424,6 @@ public:
   //       it would need to check the deltaX and deltaY.
   double overflowDeltaX;
   double overflowDeltaY;
-
-  // Whether or not the parent of the currently scrolled frame is the ViewPort.
-  // This is false in situations when an element on the page is being scrolled
-  // (such as a text field), but true when the 'page' is being scrolled.
-  bool viewPortIsScrollTargetParent;
 };
 
 } // namespace widget

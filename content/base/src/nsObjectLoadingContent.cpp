@@ -75,6 +75,7 @@
 #include "nsObjectFrame.h"
 #include "nsDOMClassInfo.h"
 #include "nsWrapperCacheInlines.h"
+#include "nsDOMJSUtils.h"
 
 #include "nsWidgetsCID.h"
 #include "nsContentCID.h"
@@ -1262,7 +1263,7 @@ nsObjectLoadingContent::CheckJavaCodebase()
   // the exception of URIs that represent local files
   if (NS_URIIsLocalFile(mBaseURI) &&
       nsScriptSecurityManager::GetStrictFileOriginPolicy() &&
-      !NS_RelaxStrictFileOriginPolicy(mBaseURI, principalBaseURI)) {
+      !NS_RelaxStrictFileOriginPolicy(mBaseURI, principalBaseURI, true)) {
     LOG(("OBJLC [%p]: Java failed RelaxStrictFileOriginPolicy for file URI",
          this));
     return false;

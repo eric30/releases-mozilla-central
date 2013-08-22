@@ -8,18 +8,23 @@
 #define mozilla_dom_Navigator_h
 
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/ErrorResult.h"
 #include "nsIDOMNavigator.h"
-#include "nsIDOMMobileMessageManager.h"
 #include "nsIMozNavigatorNetwork.h"
 #include "nsAutoPtr.h"
-#include "nsWeakReference.h"
-#include "DeviceStorage.h"
 #include "nsWrapperCache.h"
+#include "nsString.h"
+#include "nsTArray.h"
 
 class nsPluginArray;
 class nsMimeTypeArray;
 class nsPIDOMWindow;
 class nsIDOMMozConnection;
+class nsIDOMMozMobileMessageManager;
+class nsIDOMNavigatorSystemMessages;
+class nsIMediaStreamOptions;
+class nsDOMCameraManager;
+class nsDOMDeviceStorage;
 
 namespace mozilla {
 namespace dom {
@@ -28,29 +33,16 @@ class systemMessageCallback;
 }
 }
 
-#ifdef MOZ_MEDIA_NAVIGATOR
-#include "nsIDOMNavigatorUserMedia.h"
-#endif
-
 #ifdef MOZ_B2G_RIL
-class nsIDOMTelephony;
 class nsIDOMMozMobileConnection;
 class nsIDOMMozCellBroadcast;
 class nsIDOMMozVoicemail;
 class nsIDOMMozIccManager;
 #endif // MOZ_B2G_RIL
 
-#ifdef MOZ_B2G_BT
-class nsIDOMBluetoothManager;
-#endif // MOZ_B2G_BT
-
 #ifdef MOZ_B2G_NFC
 class nsIDOMMozNfc;
 #endif // MOZ_B2G_NFC
-
-#include "nsIDOMNavigatorSystemMessages.h"
-
-#include "DOMCameraManager.h"
 
 //*****************************************************************************
 // Navigator: Script "navigator" object
@@ -89,6 +81,18 @@ class Connection;
 class MobileConnection;
 #endif
 } // namespace Connection;
+
+#ifdef MOZ_B2G_RIL
+namespace telephony {
+class Telephony;
+} // namespace Telephony;
+#endif
+
+#ifdef MOZ_B2G_BT
+namespace bluetooth {
+class BluetoothManager;
+} // namespace bluetooth
+#endif // MOZ_B2G_BT
 
 namespace power {
 class PowerManager;
@@ -218,7 +222,7 @@ public:
                             ErrorResult& aRv);
   bool MozHasPendingMessage(const nsAString& aType, ErrorResult& aRv);
 #ifdef MOZ_B2G_RIL
-  nsIDOMTelephony* GetMozTelephony(ErrorResult& aRv);
+  telephony::Telephony* GetMozTelephony(ErrorResult& aRv);
   nsIDOMMozMobileConnection* GetMozMobileConnection(ErrorResult& aRv);
   nsIDOMMozCellBroadcast* GetMozCellBroadcast(ErrorResult& aRv);
   nsIDOMMozVoicemail* GetMozVoicemail(ErrorResult& aRv);
@@ -228,7 +232,7 @@ public:
   void GetGamepads(nsTArray<nsRefPtr<Gamepad> >& aGamepads, ErrorResult& aRv);
 #endif // MOZ_GAMEPAD
 #ifdef MOZ_B2G_BT
-  nsIDOMBluetoothManager* GetMozBluetooth(ErrorResult& aRv);
+  bluetooth::BluetoothManager* GetMozBluetooth(ErrorResult& aRv);
 #endif // MOZ_B2G_BT
 #ifdef MOZ_B2G_NFC
   nsIDOMMozNfc* GetMozNfc(ErrorResult& aRv);
@@ -256,6 +260,7 @@ public:
   // WebIDL helper methods
   static bool HasBatterySupport(JSContext* /* unused*/, JSObject* /*unused */);
   static bool HasPowerSupport(JSContext* /* unused */, JSObject* aGlobal);
+  static bool HasPhoneNumberSupport(JSContext* /* unused */, JSObject* aGlobal);
   static bool HasIdleSupport(JSContext* /* unused */, JSObject* aGlobal);
   static bool HasWakeLockSupport(JSContext* /* unused*/, JSObject* /*unused */);
   static bool HasDesktopNotificationSupport(JSContext* /* unused*/,
@@ -319,7 +324,7 @@ private:
   nsRefPtr<power::PowerManager> mPowerManager;
   nsRefPtr<MobileMessageManager> mMobileMessageManager;
 #ifdef MOZ_B2G_RIL
-  nsCOMPtr<nsIDOMTelephony> mTelephony;
+  nsRefPtr<telephony::Telephony> mTelephony;
   nsCOMPtr<nsIDOMMozVoicemail> mVoicemail;
 #endif
   nsRefPtr<network::Connection> mConnection;
@@ -329,7 +334,7 @@ private:
   nsRefPtr<icc::IccManager> mIccManager;
 #endif
 #ifdef MOZ_B2G_BT
-  nsCOMPtr<nsIDOMBluetoothManager> mBluetooth;
+  nsCOMPtr<bluetooth::BluetoothManager> mBluetooth;
 #endif
 #ifdef MOZ_B2G_NFC
   nsCOMPtr<nsIDOMMozNfc> mNfc;

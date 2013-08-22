@@ -10,10 +10,6 @@ VPATH		= @srcdir@
 include $(DEPTH)/config/autoconf.mk
 
 LIBRARY_NAME	= gkstyle_s
-MSVC_ENABLE_PGO := 1
-LIBXUL_LIBRARY	= 1
-FAIL_ON_WARNINGS = 1
-
 ifdef GNU_CC
 OS_CFLAGS := $(OS_CFLAGS) -Wshadow
 OS_CXXFLAGS := $(OS_CXXFLAGS) -Wshadow
@@ -55,4 +51,3 @@ libs:: $(_FILES)
 install:: $(_FILES)
 	$(SYSINSTALL) $(IFLAGS1) $^ $(DESTDIR)$(mozappdir)/res
 
-DEFINES += -D_IMPL_NS_LAYOUT

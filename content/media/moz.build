@@ -28,6 +28,9 @@ if CONFIG['MOZ_GSTREAMER']:
 if CONFIG['MOZ_DASH']:
     PARALLEL_DIRS += ['dash']
 
+if CONFIG['MOZ_DIRECTSHOW']:
+    PARALLEL_DIRS += ['directshow']
+
 if CONFIG['MOZ_MEDIA_PLUGINS']:
     PARALLEL_DIRS += ['plugins']
 
@@ -40,8 +43,7 @@ if CONFIG['MOZ_OMX_DECODER']:
     PARALLEL_DIRS += ['omx']
     PARALLEL_DIRS += ['omx/mediaresourcemanager']
 
-if CONFIG['MOZ_WEBSPEECH']:
-    PARALLEL_DIRS += ['webspeech']
+PARALLEL_DIRS += ['webspeech']
 
 TEST_DIRS += ['test']
 
@@ -127,3 +129,15 @@ CPP_SOURCES += [
     'VideoUtils.cpp',
     'WebVTTLoadListener.cpp',
 ]
+
+FAIL_ON_WARNINGS = True
+
+if CONFIG['CPU_ARCH'] == 'arm' and CONFIG['BUILD_ARM_NEON']:
+    CPP_SOURCES += [
+        'AudioNodeEngineNEON.cpp',
+    ]
+
+LIBXUL_LIBRARY = True
+
+MSVC_ENABLE_PGO = True
+

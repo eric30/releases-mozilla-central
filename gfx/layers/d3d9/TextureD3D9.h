@@ -9,6 +9,7 @@
 #include "mozilla/layers/Compositor.h"
 #include "mozilla/layers/TextureClient.h"
 #include "mozilla/layers/TextureHost.h"
+#include "mozilla/GfxMessageUtils.h"
 #include "gfxWindowsPlatform.h"
 #include "d3d9.h"
 #include <vector>
@@ -232,6 +233,10 @@ public:
 
   virtual gfxASurface* LockSurface() MOZ_OVERRIDE;
   virtual gfx::DrawTarget* LockDrawTarget() MOZ_OVERRIDE;
+  virtual gfx::BackendType BackendType() MOZ_OVERRIDE
+  {
+    return gfx::BACKEND_CAIRO;
+  }
   virtual void Unlock() MOZ_OVERRIDE;
 
   virtual void SetDescriptor(const SurfaceDescriptor& aDescriptor) MOZ_OVERRIDE;

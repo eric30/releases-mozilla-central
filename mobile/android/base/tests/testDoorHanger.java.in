@@ -1,6 +1,16 @@
 #filter substitution
 package @ANDROID_PACKAGE_NAME@.tests;
 
+import @ANDROID_PACKAGE_NAME@.*;
+
+import android.app.Activity;
+import android.content.SharedPreferences;
+import java.lang.reflect.Method;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
 /* This test will test if doorhangers are displayed and dismissed
    The test will test:
    * geolocation doorhangers - sharing and not sharing the location dismisses the doorhanger
@@ -37,7 +47,7 @@ public class testDoorHanger extends BaseTest {
         blockForGeckoReady();
 
         // Test geolocation notification
-        loadUrl(GEO_URL);
+        inputAndLoadUrl(GEO_URL);
         waitForText(GEO_MESSAGE);
         mAsserter.is(mSolo.searchText(GEO_MESSAGE), true, "Geolocation doorhanger has been displayed");
 
@@ -47,7 +57,7 @@ public class testDoorHanger extends BaseTest {
         mAsserter.is(mSolo.searchText(GEO_MESSAGE), false, "Geolocation doorhanger has been hidden when allowing share");
 
         // Re-trigger geolocation notification
-        loadUrl(GEO_URL);
+        inputAndLoadUrl(GEO_URL);
         waitForText(GEO_MESSAGE);
 
         // Test "Don't share" button hides the notification
@@ -55,8 +65,9 @@ public class testDoorHanger extends BaseTest {
         mSolo.clickOnButton(GEO_DENY);
         mAsserter.is(mSolo.searchText(GEO_MESSAGE), false, "Geolocation doorhanger has been hidden when denying share");
 
+        /* FIXME: disabled on fig - bug 880060 (for some reason this fails because of some raciness)
         // Re-trigger geolocation notification
-        loadUrl(GEO_URL);
+        inputAndLoadUrl(GEO_URL);
         waitForText(GEO_MESSAGE);
 
         // Add a new tab
@@ -64,9 +75,49 @@ public class testDoorHanger extends BaseTest {
 
         // Make sure doorhanger is hidden
         mAsserter.is(mSolo.searchText(GEO_MESSAGE), false, "Geolocation doorhanger notification is hidden when opening a new tab");
+        */
+
+
+        boolean offlineAllowedByDefault = true;
+        try {
+            // Save offline-allow-by-default preferences first
+            JSONArray getPrefData = new JSONArray();
+            getPrefData.put("offline-apps.allow_by_default");
+            JSONObject message = new JSONObject();
+            message.put("requestId", "testDoorHanger");
+            message.put("preferences", getPrefData);
+
+            Actions.RepeatedEventExpecter eventExpecter = mActions.expectGeckoEvent("Preferences:Data");
+            mActions.sendGeckoEvent("Preferences:Get", message.toString());
+
+            JSONObject data = null;
+            String requestId = "";
+
+            // Wait until we get the correct "Preferences:Data" event
+            while (!requestId.equals("testDoorHanger")) {
+                data = new JSONObject(eventExpecter.blockForEventData());
+                requestId = data.getString("requestId");
+            }
+            eventExpecter.unregisterListener();
+
+            JSONArray preferences = data.getJSONArray("preferences");
+            if (preferences.length() > 0) {
+                JSONObject pref = (JSONObject) preferences.get(0);
+                offlineAllowedByDefault = pref.getBoolean("value");
+            }
+
+            // Turn off offline-allow-by-default
+            JSONObject jsonPref = new JSONObject();
+            jsonPref.put("name", "offline-apps.allow_by_default");
+            jsonPref.put("type", "bool");
+            jsonPref.put("value", false);
+            mActions.sendGeckoEvent("Preferences:Set", jsonPref.toString());
+        } catch (JSONException e) {
+            mAsserter.ok(false, "exception getting preference", e.toString());
+        }
 
         // Load offline storage page
-        loadUrl(OFFLINE_STORAGE_URL);
+        inputAndLoadUrl(OFFLINE_STORAGE_URL);
         waitForText(OFFLINE_MESSAGE);
 
         // Test doorhanger dismissed when tapping "Don't share"
@@ -75,17 +126,29 @@ public class testDoorHanger extends BaseTest {
         mAsserter.is(mSolo.searchText(OFFLINE_MESSAGE), false, "Offline storage doorhanger notification is hidden when denying storage");
 
         // Load offline storage page
-        loadUrl(OFFLINE_STORAGE_URL);
+        inputAndLoadUrl(OFFLINE_STORAGE_URL);
         waitForText(OFFLINE_MESSAGE);
 
         // Test doorhanger dismissed when tapping "Allow" and is not displayed again
         mSolo.clickOnButton(OFFLINE_ALLOW);
         mAsserter.is(mSolo.searchText(OFFLINE_MESSAGE), false, "Offline storage doorhanger notification is hidden when allowing storage");
-        loadUrl(OFFLINE_STORAGE_URL);
+        inputAndLoadUrl(OFFLINE_STORAGE_URL);
         mAsserter.is(mSolo.searchText(OFFLINE_MESSAGE), false, "Offline storage doorhanger is no longer triggered");
 
+        try {
+            // Revert offline setting
+            JSONObject jsonPref = new JSONObject();
+            jsonPref.put("name", "offline-apps.allow_by_default");
+            jsonPref.put("type", "boolean");
+            jsonPref.put("value", offlineAllowedByDefault);
+            mActions.sendGeckoEvent("Preferences:Set", jsonPref.toString());
+        } catch (JSONException e) {
+            mAsserter.ok(false, "exception setting preference", e.toString());
+        }
+
+
         // Load login page
-        loadUrl(LOGIN_URL);
+        inputAndLoadUrl(LOGIN_URL);
         waitForText(LOGIN_MESSAGE);
 
         // Test doorhanger is dismissed when tapping "Don't save"
@@ -93,7 +156,7 @@ public class testDoorHanger extends BaseTest {
         mAsserter.is(mSolo.searchText(LOGIN_MESSAGE), false, "Login doorhanger notification is hidden when denying saving password");
 
         // Load login page
-        loadUrl(LOGIN_URL);
+        inputAndLoadUrl(LOGIN_URL);
         waitForText(LOGIN_MESSAGE);
 
         // Test doorhanger is dismissed when tapping "Save" and is no longer triggered
@@ -101,7 +164,7 @@ public class testDoorHanger extends BaseTest {
         mAsserter.is(mSolo.searchText(LOGIN_MESSAGE), false, "Login doorhanger notification is hidden when allowing saving password");
 
         // Reload the page and check that there is no doorhanger displayed
-        loadUrl(LOGIN_URL);
+        inputAndLoadUrl(LOGIN_URL);
         mAsserter.is(mSolo.searchText(LOGIN_MESSAGE), false, "Login doorhanger is not re-triggered");
     }
 }

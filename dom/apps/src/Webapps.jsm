@@ -420,7 +420,7 @@ this.DOMApplicationRegistry = {
           let localId = this.webapps[id].localId;
           let permMgr = Cc["@mozilla.org/permissionmanager;1"]
                           .getService(Ci.nsIPermissionManager);
-          permMgr.RemovePermissionsForApp(localId, false);
+          permMgr.removePermissionsForApp(localId, false);
           Services.cookies.removeCookiesForApp(localId, false);
           this._clearPrivateData(localId, false);
           delete this.webapps[id];
@@ -688,7 +688,8 @@ this.DOMApplicationRegistry = {
     for (let activity in root.activities) {
       let description = root.activities[activity];
       activitiesToUnregister.push({ "manifest": aApp.manifestURL,
-                                    "name": activity });
+                                    "name": activity,
+                                    "description": description });
     }
     return activitiesToUnregister;
   },

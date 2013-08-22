@@ -27,6 +27,7 @@
 #include "MediaDecoder.h"
 #include "mozAutoDocUpdate.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/AutoRestore.h"
 #include "mozilla/Base64.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/dom/DocumentFragment.h"
@@ -167,6 +168,8 @@
 #include "nsWrapperCacheInlines.h"
 #include "nsXULPopupManager.h"
 #include "xpcprivate.h" // nsXPConnect
+#include "HTMLSplitOnSpacesTokenizer.h"
+#include "nsContentTypeParser.h"
 
 #ifdef IBMBIDI
 #include "nsIBidiKeyboard.h"
@@ -186,7 +189,6 @@ using namespace mozilla;
 
 const char kLoadAsData[] = "loadAsData";
 
-nsIDOMScriptObjectFactory *nsContentUtils::sDOMScriptObjectFactory = nullptr;
 nsIXPConnect *nsContentUtils::sXPConnect;
 nsIScriptSecurityManager *nsContentUtils::sSecurityManager;
 nsIParserService *nsContentUtils::sParserService = nullptr;
@@ -1404,6 +1406,38 @@ nsContentUtils::OfflineAppAllowed(nsIPrincipal *aPrincipal)
   return NS_SUCCEEDED(rv) && allowed;
 }
 
+bool
+nsContentUtils::MaybeAllowOfflineAppByDefault(nsIPrincipal *aPrincipal)
+{
+  if (!Preferences::GetRootBranch())
+    return false;
+
+  nsresult rv;
+
+  bool allowedByDefault;
+  rv = Preferences::GetRootBranch()->GetBoolPref(
+    "offline-apps.allow_by_default", &allowedByDefault);
+  if (NS_FAILED(rv))
+    return false;
+
+  if (!allowedByDefault)
+    return false;
+
+  nsCOMPtr<nsIPermissionManager> permissionManager =
+      do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
+  if (!permissionManager)
+    return false;
+
+  rv = permissionManager->AddFromPrincipal(
+    aPrincipal, "offline-app", nsIPermissionManager::ALLOW_ACTION,
+    nsIPermissionManager::EXPIRE_NEVER, 0);
+  if (NS_FAILED(rv))
+    return false;
+
+  // We have added the permission
+  return true;
+}
+
 // static
 void
 nsContentUtils::Shutdown()
@@ -1418,7 +1452,6 @@ nsContentUtils::Shutdown()
 
   NS_IF_RELEASE(sStringBundleService);
   NS_IF_RELEASE(sConsoleService);
-  NS_IF_RELEASE(sDOMScriptObjectFactory);
   sXPConnect = nullptr;
   NS_IF_RELEASE(sSecurityManager);
   NS_IF_RELEASE(sNameSpaceManager);
@@ -1756,7 +1789,7 @@ nsContentUtils::IsImageSrcSetDisabled()
 // static
 bool
 nsContentUtils::LookupBindingMember(JSContext* aCx, nsIContent *aContent,
-                                    JS::HandleId aId, JSPropertyDescriptor* aDesc)
+                                    JS::HandleId aId, JS::MutableHandle<JSPropertyDescriptor> aDesc)
 {
   nsXBLBinding* binding = aContent->GetXBLBinding();
   if (!binding)
@@ -3190,9 +3223,12 @@ nsContentUtils::IsEventAttributeName(nsIAtom* aName, int32_t aType)
 uint32_t
 nsContentUtils::GetEventId(nsIAtom* aName)
 {
-  EventNameMapping mapping;
-  if (sAtomEventTable->Get(aName, &mapping))
-    return mapping.mId;
+  if (aName) {
+    EventNameMapping mapping;
+    if (sAtomEventTable->Get(aName, &mapping)) {
+      return mapping.mId;
+    }
+  }
 
   return NS_USER_DEFINED_EVENT;
 }
@@ -4288,7 +4324,7 @@ nsContentUtils::DropJSObjects(void* aScriptObjectHolder)
 bool
 nsContentUtils::AreJSObjectsHeld(void* aScriptObjectHolder)
 {
-  return cyclecollector::TestJSHolder(aScriptObjectHolder);
+  return cyclecollector::IsJSHolder(aScriptObjectHolder);
 }
 #endif
 
@@ -4316,7 +4352,7 @@ nsContentUtils::CheckSecurityBeforeLoad(nsIURI* aURIToLoad,
                                         bool aAllowData,
                                         uint32_t aContentPolicyType,
                                         nsISupports* aContext,
-                                        const nsACString& aMimeGuess,
+                                        const nsAFlatCString& aMimeGuess,
                                         nsISupports* aExtra)
 {
   NS_PRECONDITION(aLoadingPrincipal, "Must have a loading principal here");
@@ -6455,4 +6491,53 @@ nsContentUtils::DOMWindowDumpEnabled()
 #else
   return true;
 #endif
+}
+
+void
+nsContentUtils::GetNodeTextContent(nsINode* aNode, bool aDeep, nsAString& aResult)
+{
+  aResult.Truncate();
+  AppendNodeTextContent(aNode, aDeep, aResult);
+}
+
+void
+nsContentUtils::DestroyMatchString(void* aData)
+{
+  if (aData) {
+    nsString* matchString = static_cast<nsString*>(aData);
+    delete matchString;
+  }
+}
+
+bool
+nsContentUtils::IsJavascriptMIMEType(const nsAString& aMIMEType)
+{
+  // Table ordered from most to least likely JS MIME types.
+  static const char* jsTypes[] = {
+    "text/javascript",
+    "text/ecmascript",
+    "application/javascript",
+    "application/ecmascript",
+    "application/x-javascript",
+    "application/x-ecmascript",
+    "text/javascript1.0",
+    "text/javascript1.1",
+    "text/javascript1.2",
+    "text/javascript1.3",
+    "text/javascript1.4",
+    "text/javascript1.5",
+    "text/jscript",
+    "text/livescript",
+    "text/x-ecmascript",
+    "text/x-javascript",
+    nullptr
+  };
+
+  for (uint32_t i = 0; jsTypes[i]; ++i) {
+    if (aMIMEType.LowerCaseEqualsASCII(jsTypes[i])) {
+      return true;
+    }
+  }
+
+  return false;
 }

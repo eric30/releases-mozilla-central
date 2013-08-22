@@ -10,10 +10,6 @@ XPIDL_SOURCES += [
     'nsIMIMEService.idl',
 ]
 
-XPIDL_FLAGS += [
-    '-I$(topsrcdir)/netwerk/base/public',
-]
-
 MODULE = 'mimetype'
 
 EXPORTS += [
@@ -25,4 +21,10 @@ CPP_SOURCES += [
 ]
 
 LIBRARY_NAME = 'nkmime_s'
+
+FAIL_ON_WARNINGS = True
+
+LIBXUL_LIBRARY = True
+
+MSVC_ENABLE_PGO = True
 

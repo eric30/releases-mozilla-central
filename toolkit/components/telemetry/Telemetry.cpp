@@ -49,6 +49,9 @@
 #include "mozilla/FileUtils.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/mozPoisonWrite.h"
+#if defined(MOZ_ENABLE_PROFILER_SPS)
+#include "shared-libraries.h"
+#endif
 
 namespace {
 
@@ -619,20 +622,19 @@ IsEmpty(const Histogram *h)
 bool
 JSHistogram_Add(JSContext *cx, unsigned argc, JS::Value *vp)
 {
-  if (!argc) {
+  JS::CallArgs args = CallArgsFromVp(argc, vp);
+  if (!args.length()) {
     JS_ReportError(cx, "Expected one argument");
     return false;
   }
 
-  JS::Value v = JS_ARGV(cx, vp)[0];
-
-  if (!(JSVAL_IS_NUMBER(v) || JSVAL_IS_BOOLEAN(v))) {
+  if (!(args[0].isNumber() || args[0].isBoolean())) {
     JS_ReportError(cx, "Not a number");
     return false;
   }
 
   int32_t value;
-  if (!JS_ValueToECMAInt32(cx, v, &value)) {
+  if (!JS::ToInt32(cx, args[0], &value)) {
     return false;
   }
 
@@ -1508,9 +1510,9 @@ TelemetryImpl::GetChromeHangs(JSContext *cx, JS::Value *ret)
   if (!durationArray) {
     return NS_ERROR_FAILURE;
   }
-  JSBool ok = JS_DefineProperty(cx, fullReportObj, "durations",
-                                OBJECT_TO_JSVAL(durationArray),
-                                NULL, NULL, JSPROP_ENUMERATE);
+  bool ok = JS_DefineProperty(cx, fullReportObj, "durations",
+                              OBJECT_TO_JSVAL(durationArray),
+                              NULL, NULL, JSPROP_ENUMERATE);
   if (!ok) {
     return NS_ERROR_FAILURE;
   }
@@ -1537,9 +1539,9 @@ CreateJSStackObject(JSContext *cx, const CombinedStacks &stacks) {
   if (!moduleArray) {
     return nullptr;
   }
-  JSBool ok = JS_DefineProperty(cx, ret, "memoryMap",
-                                OBJECT_TO_JSVAL(moduleArray),
-                                NULL, NULL, JSPROP_ENUMERATE);
+  bool ok = JS_DefineProperty(cx, ret, "memoryMap",
+                              OBJECT_TO_JSVAL(moduleArray),
+                              NULL, NULL, JSPROP_ENUMERATE);
   if (!ok) {
     return nullptr;
   }

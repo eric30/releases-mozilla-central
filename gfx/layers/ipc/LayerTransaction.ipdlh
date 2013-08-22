@@ -17,6 +17,7 @@ include "mozilla/TimeStamp.h";
 include "mozilla/dom/ScreenOrientation.h";
 include "nsCSSProperty.h";
 include "gfxipc/ShadowLayerUtils.h";
+include "mozilla/GfxMessageUtils.h";
 include "ImageLayers.h";
 include "mozilla/layers/CompositorTypes.h";
 
@@ -32,7 +33,7 @@ using mozilla::dom::ScreenOrientation;
 using mozilla::layers::TextureInfo;
 using mozilla::LayerMargin;
 using mozilla::LayerPoint;
-using mozilla::layers::ImageLayer::ScaleMode;
+using mozilla::layers::ScaleMode;
 using mozilla::layers::DiagnosticTypes;
 
 namespace mozilla {
@@ -244,9 +245,7 @@ struct OpSetDiagnosticTypes { DiagnosticTypes diagnostics; };
 // Paint (buffer update)
 struct OpPaintTiledLayerBuffer {
   PCompositable compositable;
-  // Bug 747811
-  // FIXME: We need to support sharing tile across process.
-  uintptr_t tiledLayerBuffer;
+  SurfaceDescriptorTiles tileLayerDescriptor;
 };
 
 struct OpCreatedTexture {
@@ -402,7 +401,6 @@ union EditReply {
   OpContentBufferSwap;
   OpTextureSwap;
 
-  // new stuff
   ReplyTextureRemoved;
 };
 

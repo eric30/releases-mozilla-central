@@ -336,7 +336,7 @@ pref("browser.download.manager.scanWhenDone", true);
 pref("browser.download.manager.resumeOnWakeDelay", 10000);
 
 // Enables the asynchronous Downloads API in the Downloads Panel.
-pref("browser.download.useJSTransfer", false);
+pref("browser.download.useJSTransfer", true);
 
 // This allows disabling the Downloads Panel in favor of the old interface.
 pref("browser.download.useToolkitUI", false);
@@ -624,9 +624,6 @@ pref("network.protocol-handler.expose.news", false);
 pref("network.protocol-handler.expose.snews", false);
 pref("network.protocol-handler.expose.nntp", false);
 
-// Warning for about:networking page
-pref("network.warnOnAboutNetworking", true);
-
 pref("accessibility.typeaheadfind", false);
 pref("accessibility.typeaheadfind.timeout", 5000);
 pref("accessibility.typeaheadfind.linksonly", false);
@@ -808,7 +805,6 @@ pref("urlclassifier.max-complete-age", 2700);
 #endif
 
 pref("browser.geolocation.warning.infoURL", "https://www.mozilla.org/%LOCALE%/firefox/geolocation/");
-pref("browser.mixedcontent.warning.infoURL", "http://support.mozilla.org/1/%APP%/%VERSION%/%OS%/%LOCALE%/mixed-content/");
 
 pref("browser.EULA.version", 3);
 pref("browser.rights.version", 3);
@@ -1286,11 +1282,6 @@ pref("security.mixed_content.block_active_content", true);
 
 // Override the Gecko-default value of false for Firefox.
 pref("plain_text.wrap_long_lines", true);
-
-#ifndef RELEASE_BUILD
-// Enable Web Audio for Firefox Desktop in Nightly and Aurora
-pref("media.webaudio.enabled", true);
-#endif
 
 // If this turns true, Moz*Gesture events are not called stopPropagation()
 // before content.

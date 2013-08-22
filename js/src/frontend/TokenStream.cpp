@@ -10,6 +10,7 @@
 
 #include "mozilla/PodOperations.h"
 
+#include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -19,8 +20,6 @@
 #include "jscntxt.h"
 #include "jsexn.h"
 #include "jsnum.h"
-#include "jsopcode.h"
-#include "jsscript.h"
 
 #include "frontend/BytecodeCompiler.h"
 #include "js/CharacterEncoding.h"
@@ -360,7 +359,6 @@ JS_ALWAYS_INLINE void
 TokenStream::updateFlagsForEOL()
 {
     flags.isDirtyLine = false;
-    flags.sawEOL = true;
 }
 
 // This gets the next char, normalizing all EOL sequences to '\n' as it goes.
@@ -635,8 +633,13 @@ TokenStream::reportCompileErrorNumberVA(uint32_t offset, unsigned flags, unsigne
     err.report.errorNumber = errorNumber;
     err.report.filename = filename;
     err.report.originPrincipals = originPrincipals;
-    err.report.lineno = srcCoords.lineNum(offset);
-    err.report.column = srcCoords.columnIndex(offset);
+    if (offset == NoOffset) {
+        err.report.lineno = 0;
+        err.report.column = 0;
+    } else {
+        err.report.lineno = srcCoords.lineNum(offset);
+        err.report.column = srcCoords.columnIndex(offset);
+    }
 
     err.argumentsType = (flags & JSREPORT_UC) ? ArgumentsAreUnicode : ArgumentsAreASCII;
 
@@ -654,7 +657,7 @@ TokenStream::reportCompileErrorNumberVA(uint32_t offset, unsigned flags, unsigne
     // So we don't even try, leaving report.linebuf and friends zeroed.  This
     // means that any error involving a multi-line token (e.g. an unterminated
     // multi-line string literal) won't have a context printed.
-    if (err.report.lineno == lineno) {
+    if (offset != NoOffset && err.report.lineno == lineno) {
         const jschar *tokenStart = userbuf.base() + offset;
 
         // We show only a portion (a "window") of the line around the erroneous
@@ -934,10 +937,10 @@ TokenStream::checkForKeyword(const jschar *s, size_t length, TokenKind *ttp)
             return reportError(JSMSG_RESERVED_ID, kw->chars);
         }
 
-        // The keyword is not in this version. Treat it as an identifier,
-        // unless it is let or yield which we treat as TOK_STRICT_RESERVED by
-        // falling through to the code below (ES5 forbids them in strict mode).
-        if (kw->tokentype != TOK_LET && kw->tokentype != TOK_YIELD)
+        // The keyword is not in this version. Treat it as an identifier, unless
+        // it is let which we treat as TOK_STRICT_RESERVED by falling through to
+        // the code below (ES5 forbids it in strict mode).
+        if (kw->tokentype != TOK_LET)
             return true;
     }
 

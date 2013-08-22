@@ -10,9 +10,6 @@ VPATH = @srcdir@
 include $(DEPTH)/config/autoconf.mk
 
 LIBRARY_NAME = dom_indexeddb_s
-LIBXUL_LIBRARY = 1
-FAIL_ON_WARNINGS := 1
-
 LOCAL_INCLUDES = \
   -I$(topsrcdir)/caps/include \
   -I$(topsrcdir)/content/base/src \
@@ -24,11 +21,7 @@ LOCAL_INCLUDES = \
   -I$(topsrcdir)/xpcom/build \
   $(NULL)
 
-DEFINES += -D_IMPL_NS_LAYOUT
 
-# Make sure to quickstub as much as possible here! See
-# js/xpconnect/src/dom_quickstubs.qsconf.
-include $(topsrcdir)/config/config.mk
 include $(topsrcdir)/config/rules.mk
 include $(topsrcdir)/ipc/chromium/chromium-config.mk
 

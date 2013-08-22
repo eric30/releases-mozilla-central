@@ -10,7 +10,6 @@ VPATH = @srcdir@
 include $(DEPTH)/config/autoconf.mk
 
 LIBRARY_NAME = $(MODULE)_s
-LIBXUL_LIBRARY = 1
 EXPORT_LIBRARY = 1
 
 IPDLTESTS = \
@@ -60,7 +59,6 @@ IPDLTESTHDRS = $(addprefix $(srcdir)/,$(addsuffix .h,$(IPDLTESTS)))
 TESTER_TEMPLATE := $(srcdir)/IPDLUnitTests.template.cpp
 GENTESTER := $(srcdir)/genIPDLUnitTests.py
 
-include $(topsrcdir)/config/config.mk
 include $(topsrcdir)/config/rules.mk
 include $(topsrcdir)/ipc/chromium/chromium-config.mk
 

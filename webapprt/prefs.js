@@ -16,8 +16,8 @@ pref("extensions.installDistroAddons", false);
 // Disable the add-on compatibility dialog
 pref("extensions.showMismatchUI", false);
 
-// Whether or not we've ever run.  We use this to set permissions on firstrun.
-pref("webapprt.firstrun", false);
+// Set reportURL for crashes
+pref("breakpad.reportURL", "https://crash-stats.mozilla.com/report/index/");
 
 // Blocklist preferences
 pref("extensions.blocklist.enabled", true);
@@ -33,7 +33,6 @@ pref("full-screen-api.enabled", true);
 
 // IndexedDB
 pref("dom.indexedDB.enabled", true);
-pref("indexedDB.feature.enabled", true);
 pref("dom.indexedDB.warningQuota", 50);
 
 // Offline cache prefs

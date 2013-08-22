@@ -43,6 +43,7 @@ EXPORTS.mozilla.dom += [
     'MediaStreamAudioDestinationNode.h',
     'MediaStreamAudioSourceNode.h',
     'OfflineAudioCompletionEvent.h',
+    'OscillatorNode.h',
     'PannerNode.h',
     'PeriodicWave.h',
     'ScriptProcessorNode.h',
@@ -64,14 +65,17 @@ CPP_SOURCES += [
     'ChannelSplitterNode.cpp',
     'ConvolverNode.cpp',
     'DelayNode.cpp',
+    'DelayProcessor.cpp',
     'DynamicsCompressorNode.cpp',
     'EnableWebAudioCheck.cpp',
+    'FFTBlock.cpp',
     'GainNode.cpp',
     'MediaBufferDecoder.cpp',
     'MediaElementAudioSourceNode.cpp',
     'MediaStreamAudioDestinationNode.cpp',
     'MediaStreamAudioSourceNode.cpp',
     'OfflineAudioCompletionEvent.cpp',
+    'OscillatorNode.cpp',
     'PannerNode.cpp',
     'PeriodicWave.cpp',
     'ScriptProcessorNode.cpp',
@@ -79,4 +83,8 @@ CPP_SOURCES += [
     'WaveShaperNode.cpp',
     'WebAudioUtils.cpp',
 ]
+
+FAIL_ON_WARNINGS = True
+
+LIBXUL_LIBRARY = True
 

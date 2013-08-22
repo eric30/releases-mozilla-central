@@ -16,6 +16,7 @@
 #include "mozilla/Observer.h"
 #include "nsAutoPtr.h"
 #include "nsTArray.h"
+#include "nsThreadUtils.h"
 
 template <class T>
 class nsRevocableEventPtr;
@@ -161,12 +162,6 @@ protected:
 
   bool
   DoRequest(const DenyPairingConfirmationRequest& aRequest);
-
-  bool
-  DoRequest(const ConfirmAuthorizationRequest& aRequest);
-
-  bool
-  DoRequest(const DenyAuthorizationRequest& aRequest);
 
   bool
   DoRequest(const ConnectRequest& aRequest);
