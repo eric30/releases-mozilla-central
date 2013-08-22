@@ -249,10 +249,16 @@ Nfc.prototype = {
    */
   receiveMessage: function receiveMessage(message) {
     debug("Received '" + message.name + "' message from content process");
+
+    if (!message.target.assertPermission("nfc")) {
+      if (DEBUG) {
+        debug("Nfc message " + message.name +
+              " from a content process with no 'nfc' privileges.");
+      }
+      return null;
+    }
+
     switch (message.name) {
-      case "NFC:SendToNfcd":
-        this.sendToNfcd(message.json);
-        break;
       case "NFC:NdefDetails":
         this.ndefDetails(message.json);
         break;
