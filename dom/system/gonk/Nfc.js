@@ -219,14 +219,13 @@ Nfc.prototype = {
 
   // tag read/write command message handler.
   connect: function connect(message, techType) {
-    var techType = message.tech;
 
     debug("NFC connect: " + JSON.stringify(message));
     var outMessage = {
       type: "ConnectRequest",
       sessionId: message.sessionId,
       requestId: message.requestId,
-      tech: message.tech
+      techType: message.techType
     };
 
     this.worker.postMessage({type: "connect", content: outMessage});
