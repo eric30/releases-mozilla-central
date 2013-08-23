@@ -117,6 +117,13 @@ Nfc.prototype = {
         ppmm.broadcastAsyncMessage("NFC:NDEFPushResponse", message);
         break;
 
+      case "ConnectResponse":
+        ppmm.broadcastAsyncMessage("NFC:ConnectResponse", message);
+        break;
+      case "CloseResponse":
+        ppmm.broadcastAsyncMessage("NFC:CloseResponse", message);
+        break;
+
       default:
         throw new Error("Don't know about this message type: " + message.type);
     }
