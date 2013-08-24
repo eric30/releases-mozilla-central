@@ -415,9 +415,9 @@ NfcContentHelper.prototype = {
       r.payload = atob(r.payload);
       return r;
     });
-    let result = {records: records};
+    let resultA = {records: records};
 
-    if (message.sessionId != this._connectedSessionId) {
+    if (!resultA.records) {
       this.fireRequestError(requestId, result.status);
     } else  {
       this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
@@ -513,7 +513,7 @@ NfcContentHelper.prototype = {
     let result = message.content;
     let requestId = atob(message.requestId);
 
-    if (message.sessionId != this._connectedSessionId) {
+    if (message.content.status != "OK") {
       this.fireRequestError(requestId, result.status);
     } else  {
       this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
@@ -531,7 +531,8 @@ NfcContentHelper.prototype = {
     let result = message.content;
     let requestId = atob(message.requestId);
 
-    if (message.sessionId != this._connectedSessionId) {
+
+    if (message.content.status != "OK") {
       this.fireRequestError(requestId, result.status);
     } else  {
       this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
