@@ -475,7 +475,7 @@ NfcContentHelper.prototype = {
     }
     delete this._requestMap[message.requestId];
     let result = message.content;
-    let requestId = atob(result.requestId);
+    let requestId = atob(message.requestId);
 
     if (message.sessionId != this._connectedSessionId) {
       this.fireRequestError(requestId, result.status);
@@ -493,7 +493,7 @@ NfcContentHelper.prototype = {
     }
     delete this._requestMap[message.requestId];
     let result = message.content;
-    let requestId = atob(result.requestId);
+    let requestId = atob(message.requestId);
 
     if (message.sessionId != this._connectedSessionId) {
       this.fireRequestError(requestId, result.status);
@@ -511,7 +511,7 @@ NfcContentHelper.prototype = {
     }
     delete this._requestMap[message.requestId];
     let result = message.content;
-    let requestId = atob(result.requestId);
+    let requestId = atob(message.requestId);
 
     if (message.sessionId != this._connectedSessionId) {
       this.fireRequestError(requestId, result.status);
@@ -529,7 +529,7 @@ NfcContentHelper.prototype = {
     }
     delete this._requestMap[message.requestId];
     let result = message.content;
-    let requestId = atob(result.requestId);
+    let requestId = atob(message.requestId);
 
     if (message.sessionId != this._connectedSessionId) {
       this.fireRequestError(requestId, result.status);

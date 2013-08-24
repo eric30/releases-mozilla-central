@@ -101,7 +101,6 @@ Nfc.prototype = {
         ppmm.broadcastAsyncMessage("NFC:TechLost", message);
         gSystemMessenger.broadcastMessage("nfc-manager-tech-lost", message);
         break;
-
       case "NDEFDetailsResponse":
         ppmm.broadcastAsyncMessage("NFC:NDEFDetailsResponse", message);
         break;
@@ -116,7 +115,6 @@ Nfc.prototype = {
       case "NDEFPushResponse":
         ppmm.broadcastAsyncMessage("NFC:NDEFPushResponse", message);
         break;
-
       case "ConnectResponse":
         ppmm.broadcastAsyncMessage("NFC:ConnectResponse", message);
         break;
