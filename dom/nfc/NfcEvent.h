@@ -24,7 +24,7 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_FORWARD_TO_NSDOMEVENT
   NS_DECL_NSIDOMMOZNFCEVENT
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(NfcEvent, nsDOMEvent)
+  //NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(NfcEvent, nsDOMEvent)
 
   static already_AddRefed<NfcEvent>
   Create(EventTarget* aOwner, const nsAString& aMessage);
