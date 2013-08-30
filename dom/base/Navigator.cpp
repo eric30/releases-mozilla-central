@@ -1756,8 +1756,8 @@ bool
 Navigator::HasNfcSupport(JSContext* /* unused */, JSObject* aGlobal)
 {
   nsCOMPtr<nsPIDOMWindow> win = GetWindowFromGlobal(aGlobal);
-  return win && CheckPermission(win, "nfc") &&
-         Preferences::GetBool("nfc.enabled", true);
+  return win && CheckPermission(win, "nfc-read") ||
+                CheckPermission(win, "nfc-write");
 }
 #endif // MOZ_B2G_NFC
 

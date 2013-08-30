@@ -100,10 +100,10 @@ this.SystemMessagePermissionsTable = {
     "wappush": []
   },
   "nfc-manager-tech-discovered": {
-    "nfc-manager": []
+    "nfc-manager": ["read"]
   },
   "nfc-manager-tech-lost": {
-    "nfc-manager": []
+    "nfc-manager": ["read"]
   }
 };
 

@@ -254,12 +254,27 @@ Nfc.prototype = {
   receiveMessage: function receiveMessage(message) {
     debug("Received '" + message.name + "' message from content process");
 
-    if (!message.target.assertPermission("nfc")) {
+    if (!message.target.assertPermission("nfc-read")) {
       if (DEBUG) {
         debug("Nfc message " + message.name +
-              " from a content process with no 'nfc' privileges.");
+              " from a content process with no 'nfc-read' privileges.");
       }
       return null;
+    }
+
+    // Enforce NFC Write permissions.
+    switch (message.name) {
+      case "NFC:NdefWrite":
+      case "NFC:NdefPush":
+      case "NFC:NfcATagTransceive":
+        if (!message.target.assertPermission("nfc-write")) {
+          if (DEBUG) {
+            debug("Nfc message " + message.name +
+                  " from a content process with no 'nfc-write' privileges.");
+          }
+          return null;
+        }
+        break;
     }
 
     switch (message.name) {
