@@ -122,6 +122,13 @@ let Nfc = {
   },
 
   /**
+   * NFC Configuration
+   */
+  configRequest: function configRequest(message) {
+    postNfcMessage(JSON.stringify(message.content));
+  },
+
+  /**
    * Close connection to the NFC target. Request ID is required.
    */
   close: function close(message) {

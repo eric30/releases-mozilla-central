@@ -40,6 +40,10 @@ const NFC_IPC_MSG_NAMES = [
   "NFC:Close"
 ];
 
+const TOPIC_MOZSETTINGS_CHANGED      = "mozsettings-changed";
+const TOPIC_XPCOM_SHUTDOWN           = "xpcom-shutdown";
+
+
 XPCOMUtils.defineLazyServiceGetter(this, "ppmm",
                                    "@mozilla.org/parentprocessmessagemanager;1",
                                    "nsIMessageBroadcaster");
@@ -49,6 +53,11 @@ XPCOMUtils.defineLazyServiceGetter(this, "gSystemMessenger",
 XPCOMUtils.defineLazyServiceGetter(this, "gSystemWorkerManager",
                                    "@mozilla.org/telephony/system-worker-manager;1",
                                    "nsISystemWorkerManager");
+XPCOMUtils.defineLazyServiceGetter(this, "gSettingsService",
+                                   "@mozilla.org/settingsService;1",
+                                   "nsISettingsService");
+
+
 function Nfc() {
   this.worker = new ChromeWorker("resource://gre/modules/nfc_worker.js");
   this.worker.onerror = this.onerror.bind(this);
@@ -58,7 +67,12 @@ function Nfc() {
     ppmm.addMessageListener(msgname, this);
   }
 
-  Services.obs.addObserver(this, "xpcom-shutdown", false);
+  Services.obs.addObserver(this, TOPIC_MOZSETTINGS_CHANGED, false);
+  Services.obs.addObserver(this, TOPIC_XPCOM_SHUTDOWN, false);
+
+  let lock = gSettingsService.createLock();
+  lock.get("nfc.powerlevel", this);
+
   debug("Starting Worker");
   gSystemWorkerManager.registerNfcWorker(this.worker);
 }
@@ -120,6 +134,10 @@ Nfc.prototype = {
         break;
       case "CloseResponse":
         ppmm.broadcastAsyncMessage("NFC:CloseResponse", message);
+        break;
+      case "ConfigResponse":
+        // Config changes. No notifiication.
+        debug("ConfigResponse" + JSON.stringify(message));
         break;
 
       default:
@@ -309,16 +327,52 @@ Nfc.prototype = {
 
   observe: function observe(subject, topic, data) {
     switch (topic) {
-      case "xpcom-shutdown":
+      case TOPIC_XPCOM_SHUTDOWN:
         for each (let msgname in NFC_IPC_MSG_NAMES) {
           ppmm.removeMessageListener(msgname, this);
         }
         ppmm = null;
         Services.obs.removeObserver(this, "xpcom-shutdown");
         break;
+      case TOPIC_MOZSETTINGS_CHANGED:
+        let setting = JSON.parse(data);
+        debug("Setting Changed: " + JSON.stringify(setting));
+        if (setting) {
+          switch(setting.key) {
+            case "nfc.powerlevel":
+              debug("Reached NFC powerlevel setting.");
+              let powerlevel = (setting.value > 0) ? 1 : 0;
+              this.setNfcPowerConfig(powerlevel);
+            break;
+          }
+        } else {
+          debug("NFC Setting bad!!!");
+        }
+        break;
     }
-  }
+  },
 
+  /**
+   * NFC Config API. Properties is a set of name value pairs.
+   */
+  setNfcPowerConfig: function setNfcPowerConfig(powerlevel) {
+    debug("NFC setNfcPowerConfig: " + powerlevel);
+    this.setConfig({powerlevel: powerlevel});
+  },
+
+  setConfig: function setConfig(prop) {
+    // Add to property set. -1 if no change.
+    debug("In Config...");
+    let configset = {
+      powerlevel: prop.powerlevel
+    };
+    var outMessage = {
+      type: "ConfigRequest",
+      powerlevel: prop.powerlevel
+    };
+    debug("OutMessage: " + JSON.stringify(outMessage));
+    this.worker.postMessage({type: "configRequest", content: outMessage});
+  }
 };
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory([Nfc]);
