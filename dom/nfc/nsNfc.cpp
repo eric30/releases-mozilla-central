@@ -224,6 +224,15 @@ nsNfc::NdefPush(const JS::Value& aRecords, JSContext* aCx, nsIDOMDOMRequest** aR
 }
 
 NS_IMETHODIMP
+nsNfc::NdefMakeReadOnly(JSContext* aCx, nsIDOMDOMRequest** aRequest)
+{
+  *aRequest = nullptr;
+  nsresult rv = mNfc->NdefMakeReadOnly(GetOwner(), aRequest);
+  NS_ENSURE_SUCCESS(rv, rv);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsNfc::NfcATagDetails(JSContext* aCx, nsIDOMDOMRequest** aRequest)
 {
   // Call to NfcContentHelper.js

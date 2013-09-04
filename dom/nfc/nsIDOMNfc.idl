@@ -38,6 +38,10 @@ interface nsIDOMMozNfc : nsIDOMEventTarget {
   [implicit_jscontext]
   nsIDOMDOMRequest ndefPush(in jsval records);
 
+  /* Permenantly makes the NFC NDEF tag read only */
+  [implicit_jscontext]
+  nsIDOMDOMRequest ndefMakeReadOnly();
+
   /**
    * NFCA functions
    */

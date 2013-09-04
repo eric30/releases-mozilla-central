@@ -36,6 +36,7 @@ const NFC_IPC_MSG_NAMES = [
   "NFC:NDEFDetailsResponse",
   "NFC:NDEFReadResponse",
   "NFC:NDEFWriteResponse",
+  "NFC:NDEFMakeReadOnlyResponse",
   "NFC:NDEFPushResponse",
   "NFC:NfcATagDetailsResponse",
   "NFC:NfcATagTransceiveResponse",
@@ -137,6 +138,23 @@ NfcContentHelper.prototype = {
       requestId: requestId,
       sessionId: this._connectedSessionId,
       records: encodedRecords
+    });
+    return request;
+  },
+
+  ndefMakeReadOnly: function ndefMakeReadOnly(window, records) {
+    if (window == null) {
+      throw Components.Exception("Can't get window object",
+                                  Cr.NS_ERROR_UNEXPECTED);
+    }
+
+    let request = Services.DOMRequest.createRequest(window);
+    let requestId = btoa(this.getRequestId(request));
+    this._requestMap[requestId] = {win: window};
+
+    cpmm.sendAsyncMessage("NFC:NdefMakeReadOnly", {
+      requestId: requestId,
+      sessionId: this._connectedSessionId
     });
     return request;
   },
@@ -347,6 +365,9 @@ NfcContentHelper.prototype = {
       case "NFC:NDEFWriteResponse":
         this.handleNDEFWriteResponse(message.json);
         break;
+      case "NFC:NDEFMakeReadOnlyResponse":
+        this.handleNDEFReadOnlyResponse(message.json);
+        break;
       case "NFC:NDEFPushResponse":
         this.handleNDEFPushResponse(message.json);
         break;
@@ -441,6 +462,25 @@ NfcContentHelper.prototype = {
 
     if (result.status != "OK") {
       this.fireRequestError(requestId, result.status);
+    } else  {
+      this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
+    }
+  },
+
+  handleNDEFReadOnlyResponse: function handleNDEFReadOnlyResponse(message) {
+    debug("handleNDEFReadOnlyResponse(" + JSON.stringify(message) + ")");
+    let requester = this._requestMap[message.requestId];
+    if ((typeof requester === 'undefined') ||
+        (message.sessionId != this._connectedSessionId)) {
+       debug('Returning: requester: ' + requester);
+       return; // Nothing to do in this instance.
+    }
+    delete this._requestMap[message.requestId];
+    let result = message.content;
+    let requestId = atob(message.requestId);
+
+    if (result.status != "OK") {
+      this.fireRequestError(requestId, ObjectWrapper.wrap(result, requester.win));
     } else  {
       this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
     }

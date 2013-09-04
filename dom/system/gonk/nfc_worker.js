@@ -94,6 +94,13 @@ let Nfc = {
   },
 
   /**
+   * Make the NFC NDEF tag permenantly read only
+   */
+  ndefMakeReadOnly: function ndefMakeReadOnly(message) {
+    postNfcMessage(JSON.stringify(message.content));
+  },
+
+  /**
    * P2P NDEF message push between a pair of NFC devices.
    */
   ndefPush: function ndefPush(message) {

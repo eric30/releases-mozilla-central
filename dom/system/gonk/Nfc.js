@@ -33,6 +33,7 @@ const NFC_IPC_MSG_NAMES = [
   "NFC:NdefDetails",
   "NFC:NdefRead",
   "NFC:NdefWrite",
+  "NFC:NdefMakeReadOnly",
   "NFC:NdefPush",
   "NFC:NfcATagDetails",
   "NFC:NfcATagTransceive",
@@ -119,12 +120,13 @@ Nfc.prototype = {
         ppmm.broadcastAsyncMessage("NFC:NDEFDetailsResponse", message);
         break;
       case "NDEFReadResponse":
-        debug("NFC.js ReadResponse.");
         ppmm.broadcastAsyncMessage("NFC:NDEFReadResponse", message);
         break;
       case "NDEFWriteResponse":
-        debug("NFC.js WriteResponse.");
         ppmm.broadcastAsyncMessage("NFC:NDEFWriteResponse", message);
+        break;
+      case "NDEFMakeReadOnlyResponse":
+        ppmm.broadcastAsyncMessage("NFC:NDEFMakeReadOnlyResponse", message);
         break;
       case "NDEFPushResponse":
         ppmm.broadcastAsyncMessage("NFC:NDEFPushResponse", message);
@@ -191,6 +193,18 @@ Nfc.prototype = {
     };
 
     this.worker.postMessage({type: "ndefWrite", content: outMessage});
+  },
+
+  ndefMakeReadOnly: function ndefMakeReadOnly(message) {
+    debug("ndefMakeReadOnlyRequest message: " + JSON.stringify(message));
+    var outMessage = {
+      type: "NDEFMakeReadOnlyRequest",
+      sessionId: message.sessionId,
+      requestId: message.requestId
+    };
+    debug("ndefMakeReadOnlyRequest message out: " + JSON.stringify(outMessage));
+
+    this.worker.postMessage({type: "ndefMakeReadOnly", content: outMessage});
   },
 
   ndefPush: function ndefPush(message) {
@@ -283,6 +297,7 @@ Nfc.prototype = {
     // Enforce NFC Write permissions.
     switch (message.name) {
       case "NFC:NdefWrite":
+      case "NFC:NdefMakeReadOnly":
       case "NFC:NdefPush":
       case "NFC:NfcATagTransceive":
         if (!message.target.assertPermission("nfc-write")) {
@@ -304,6 +319,9 @@ Nfc.prototype = {
         break;
       case "NFC:NdefWrite":
         this.ndefWrite(message.json);
+        break;
+      case "NFC:NdefMakeReadOnly":
+        this.ndefMakeReadOnly(message.json);
         break;
       case "NFC:NdefPush":
         this.ndefPush(message.json);
