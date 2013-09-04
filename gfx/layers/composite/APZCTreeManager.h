@@ -208,8 +208,8 @@ public:
    */
   void UpdateZoomConstraints(const ScrollableLayerGuid& aGuid,
                              bool aAllowZoom,
-                             float aMinScale,
-                             float aMaxScale);
+                             const CSSToScreenScale& aMinScale,
+                             const CSSToScreenScale& aMaxScale);
 
   /**
    * Update mFrameMetrics.mScrollOffset to the given offset.
@@ -235,6 +235,17 @@ public:
    */
   void ClearTree();
 
+  /**
+   * Set the dpi value used by all AsyncPanZoomControllers.
+   * DPI defaults to 72 if not set using SetDPI() at any point.
+   */
+  static void SetDPI(float aDpiValue) { sDPI = aDpiValue; }
+
+  /**
+   * Returns the current dpi value in use.
+   */
+  static float GetDPI() { return sDPI; }
+
 protected:
   /**
    * Debug-build assertion that can be called to ensure code is running on the
@@ -258,6 +269,7 @@ private:
   AsyncPanZoomController* FindTargetAPZC(AsyncPanZoomController* aApzc, const ScrollableLayerGuid& aGuid);
   AsyncPanZoomController* GetAPZCAtPoint(AsyncPanZoomController* aApzc, const gfxPoint& aHitTestPoint);
   AsyncPanZoomController* CommonAncestor(AsyncPanZoomController* aApzc1, AsyncPanZoomController* aApzc2);
+  AsyncPanZoomController* RootAPZCForLayersId(AsyncPanZoomController* aApzc);
 
   /**
    * Recursive helper function to build the APZC tree. The tree of APZC instances has
@@ -291,6 +303,8 @@ private:
    * input delivery thread, and so does not require locking.
    */
   nsRefPtr<AsyncPanZoomController> mApzcForInputBlock;
+
+  static float sDPI;
 };
 
 }

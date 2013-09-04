@@ -69,6 +69,10 @@
 #include "AudioChannelManager.h"
 #endif
 
+#ifdef MOZ_B2G_FM
+#include "mozilla/dom/FMRadio.h"
+#endif
+
 #include "nsIDOMGlobalPropertyInitializer.h"
 #include "nsJSUtils.h"
 
@@ -201,6 +205,13 @@ Navigator::Invalidate()
     mBatteryManager->Shutdown();
     mBatteryManager = nullptr;
   }
+
+#ifdef MOZ_B2G_FM
+  if (mFMRadio) {
+    mFMRadio->Shutdown();
+    mFMRadio = nullptr;
+  }
+#endif
 
   if (mPowerManager) {
     mPowerManager->Shutdown();
@@ -465,8 +476,7 @@ Navigator::GetMimeTypes(ErrorResult& aRv)
       aRv.Throw(NS_ERROR_UNEXPECTED);
       return nullptr;
     }
-    nsWeakPtr win = do_GetWeakReference(mWindow);
-    mMimeTypes = new nsMimeTypeArray(win);
+    mMimeTypes = new nsMimeTypeArray(mWindow);
   }
 
   return mMimeTypes;
@@ -480,8 +490,7 @@ Navigator::GetPlugins(ErrorResult& aRv)
       aRv.Throw(NS_ERROR_UNEXPECTED);
       return nullptr;
     }
-    nsWeakPtr win = do_GetWeakReference(mWindow);
-    mPlugins = new nsPluginArray(win);
+    mPlugins = new nsPluginArray(mWindow);
     mPlugins->Init();
   }
 
@@ -595,8 +604,7 @@ Navigator::JavaEnabled(ErrorResult& aRv)
       aRv.Throw(NS_ERROR_UNEXPECTED);
       return false;
     }
-    nsWeakPtr win = do_GetWeakReference(mWindow);
-    mMimeTypes = new nsMimeTypeArray(win);
+    mMimeTypes = new nsMimeTypeArray(mWindow);
   }
 
   RefreshMIMEArray();
@@ -1060,6 +1068,34 @@ Navigator::GetMozNotification(ErrorResult& aRv)
   return mNotification;
 }
 
+#ifdef MOZ_B2G_FM
+
+using mozilla::dom::FMRadio;
+
+FMRadio*
+Navigator::GetMozFMRadio(ErrorResult& aRv)
+{
+  if (!mFMRadio) {
+    if (!mWindow) {
+      aRv.Throw(NS_ERROR_UNEXPECTED);
+      return nullptr;
+    }
+
+    NS_ENSURE_TRUE(mWindow->GetDocShell(), nullptr);
+
+    mFMRadio = new FMRadio();
+    mFMRadio->Init(mWindow);
+  }
+
+  return mFMRadio;
+}
+
+#endif  // MOZ_B2G_FM
+
+//*****************************************************************************
+//    Navigator::nsINavigatorBattery
+//*****************************************************************************
+
 battery::BatteryManager*
 Navigator::GetBattery(ErrorResult& aRv)
 {
@@ -1131,7 +1167,7 @@ Navigator::GetMozMobileMessage()
 
 #ifdef MOZ_B2G_RIL
 
-nsIDOMMozCellBroadcast*
+CellBroadcast*
 Navigator::GetMozCellBroadcast(ErrorResult& aRv)
 {
   if (!mCellBroadcast) {
@@ -1139,11 +1175,7 @@ Navigator::GetMozCellBroadcast(ErrorResult& aRv)
       aRv.Throw(NS_ERROR_UNEXPECTED);
       return nullptr;
     }
-
-    aRv = NS_NewCellBroadcast(mWindow, getter_AddRefs(mCellBroadcast));
-    if (aRv.Failed()) {
-      return nullptr;
-    }
+    mCellBroadcast = CellBroadcast::Create(mWindow, aRv);
   }
 
   return mCellBroadcast;
@@ -1163,7 +1195,7 @@ Navigator::GetMozTelephony(ErrorResult& aRv)
   return mTelephony;
 }
 
-nsIDOMMozVoicemail*
+Voicemail*
 Navigator::GetMozVoicemail(ErrorResult& aRv)
 {
   if (!mVoicemail) {
@@ -1749,6 +1781,16 @@ Navigator::HasBluetoothSupport(JSContext* /* unused */, JSObject* aGlobal)
   return win && bluetooth::BluetoothManager::CheckPermission(win);
 }
 #endif // MOZ_B2G_BT
+
+#ifdef MOZ_B2G_FM
+/* static */
+bool
+Navigator::HasFMRadioSupport(JSContext* /* unused */, JSObject* aGlobal)
+{
+  nsCOMPtr<nsPIDOMWindow> win = GetWindowFromGlobal(aGlobal);
+  return win && CheckPermission(win, "fmradio");
+}
+#endif // MOZ_B2G_FM
 
 #ifdef MOZ_B2G_NFC
 /* static */

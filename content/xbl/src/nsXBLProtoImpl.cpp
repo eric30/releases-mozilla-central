@@ -17,6 +17,9 @@
 #include "nsIDOMNode.h"
 #include "nsXBLPrototypeBinding.h"
 #include "nsXBLProtoImplProperty.h"
+#include "nsIURI.h"
+#include "mozilla/dom/XULElementBinding.h"
+#include "xpcpublic.h"
 
 using namespace mozilla;
 
@@ -154,6 +157,15 @@ nsXBLProtoImpl::InitTargetObjects(nsXBLPrototypeBinding* aBinding,
   JS::Rooted<JSObject*> global(cx, sgo->GetGlobalJSObject());
   nsCOMPtr<nsIXPConnectJSObjectHolder> wrapper;
   JS::Rooted<JS::Value> v(cx);
+
+  {
+    JSAutoCompartment ac(cx, global);
+    // Make sure the interface object is created before the prototype object
+    // so that XULElement is hidden from content. See bug 909340.
+    bool defineOnGlobal = dom::XULElementBinding::ConstructorEnabled(cx, global);
+    dom::XULElementBinding::GetConstructorObject(cx, global, defineOnGlobal);
+  }
+
   rv = nsContentUtils::WrapNative(cx, global, aBoundElement, v.address(),
                                   getter_AddRefs(wrapper));
   NS_ENSURE_SUCCESS(rv, rv);
@@ -397,7 +409,11 @@ nsXBLProtoImpl::Read(nsIObjectInputStream* aStream,
       }
       case XBLBinding_Serialize_Constructor:
       {
-        mConstructor = new nsXBLProtoImplAnonymousMethod();
+        nsAutoString name;
+        rv = aStream->ReadString(name);
+        NS_ENSURE_SUCCESS(rv, rv);
+
+        mConstructor = new nsXBLProtoImplAnonymousMethod(name.get());
         rv = mConstructor->Read(aStream);
         if (NS_FAILED(rv)) {
           delete mConstructor;
@@ -410,7 +426,11 @@ nsXBLProtoImpl::Read(nsIObjectInputStream* aStream,
       }
       case XBLBinding_Serialize_Destructor:
       {
-        mDestructor = new nsXBLProtoImplAnonymousMethod();
+        nsAutoString name;
+        rv = aStream->ReadString(name);
+        NS_ENSURE_SUCCESS(rv, rv);
+
+        mDestructor = new nsXBLProtoImplAnonymousMethod(name.get());
         rv = mDestructor->Read(aStream);
         if (NS_FAILED(rv)) {
           delete mDestructor;

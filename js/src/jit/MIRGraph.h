@@ -16,7 +16,7 @@
 #include "jit/MIRGenerator.h"
 
 namespace js {
-namespace ion {
+namespace jit {
 
 class MBasicBlock;
 class MIRGraph;
@@ -80,6 +80,8 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
     static MBasicBlock *NewAbortPar(MIRGraph &graph, CompileInfo &info,
                                     MBasicBlock *pred, jsbytecode *entryPc,
                                     MResumePoint *resumePoint);
+    static MBasicBlock *NewAsmJS(MIRGraph &graph, CompileInfo &info,
+                                 MBasicBlock *pred, Kind kind);
 
     bool dominates(MBasicBlock *other);
 
@@ -196,6 +198,7 @@ class MBasicBlock : public TempObject, public InlineListNode<MBasicBlock>
     // the current loop as necessary. If the backedge introduces new types for
     // phis at the loop header, returns a disabling abort.
     AbortReason setBackedge(MBasicBlock *block);
+    bool setBackedgeAsmJS(MBasicBlock *block);
 
     // Resets a LOOP_HEADER block to a NORMAL block.  This is needed when
     // optimizations remove the backedge.
@@ -541,9 +544,6 @@ class MIRGraph
     MBasicBlock *osrBlock_;
     MStart *osrStart_;
 
-    // List of compiled/inlined scripts.
-    Vector<JSScript *, 4, IonAllocPolicy> scripts_;
-
     size_t numBlocks_;
     bool hasTryBlock_;
 
@@ -664,20 +664,6 @@ class MIRGraph
     MStart *osrStart() {
         return osrStart_;
     }
-    bool addScript(JSScript *script) {
-        // The same script may be inlined multiple times, add it only once.
-        for (size_t i = 0; i < scripts_.length(); i++) {
-            if (scripts_[i] == script)
-                return true;
-        }
-        return scripts_.append(script);
-    }
-    size_t numScripts() const {
-        return scripts_.length();
-    }
-    JSScript **scripts() {
-        return scripts_.begin();
-    }
 
     bool hasTryBlock() const {
         return hasTryBlock_;
@@ -754,7 +740,7 @@ class MDefinitionIterator
 
 };
 
-} // namespace ion
+} // namespace jit
 } // namespace js
 
 #endif /* jit_MIRGraph_h */

@@ -1935,6 +1935,17 @@ CSS_PROP_POSITION(
     nullptr,
     offsetof(nsStylePosition, mHeight),
     eStyleAnimType_Coord)
+CSS_PROP_VISIBILITY(
+    image-orientation,
+    image_orientation,
+    ImageOrientation,
+    CSS_PROPERTY_PARSE_VALUE |
+        CSS_PROPERTY_VALUE_PARSER_FUNCTION,
+    "layout.css.image-orientation.enabled",
+    0,
+    kImageOrientationKTable,
+    offsetof(nsStyleVisibility, mImageOrientation),
+    eStyleAnimType_None)
 CSS_PROP_LIST(
     -moz-image-region,
     image_region,
@@ -2861,7 +2872,7 @@ CSS_PROP_DISPLAY(
     CSS_PROPERTY_PARSE_FUNCTION,
     "",
     0,
-    kDisplayKTable,
+    nullptr,
     offsetof(nsStyleDisplay, mSpecifiedTransform),
     eStyleAnimType_Custom)
 CSS_PROP_DISPLAY(

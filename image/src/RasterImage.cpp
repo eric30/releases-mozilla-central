@@ -529,11 +529,11 @@ RasterImage::Init(const char* aMimeType,
 NS_IMETHODIMP_(void)
 RasterImage::RequestRefresh(const mozilla::TimeStamp& aTime)
 {
-  if (!ShouldAnimate()) {
+  EvaluateAnimation();
+
+  if (!mAnimating) {
     return;
   }
-
-  EvaluateAnimation();
 
   FrameAnimator::RefreshResult res;
   if (mAnim) {
@@ -617,6 +617,12 @@ RasterImage::GetIntrinsicRatio(nsSize* aRatio)
 
   *aRatio = nsSize(mSize.width, mSize.height);
   return NS_OK;
+}
+
+NS_IMETHODIMP_(Orientation)
+RasterImage::GetOrientation()
+{
+  return mOrientation;
 }
 
 //******************************************************************************
@@ -1052,14 +1058,14 @@ size_t
 RasterImage::NonHeapSizeOfDecoded() const
 {
   return SizeOfDecodedWithComputedFallbackIfHeap(gfxASurface::MEMORY_IN_PROCESS_NONHEAP,
-                                                 NULL);
+                                                 nullptr);
 }
 
 size_t
 RasterImage::OutOfProcessSizeOfDecoded() const
 {
   return SizeOfDecodedWithComputedFallbackIfHeap(gfxASurface::MEMORY_OUT_OF_PROCESS,
-                                                 NULL);
+                                                 nullptr);
 }
 
 void
@@ -1202,7 +1208,7 @@ RasterImage::ApplyDecodeFlags(uint32_t aNewFlags)
 }
 
 nsresult
-RasterImage::SetSize(int32_t aWidth, int32_t aHeight)
+RasterImage::SetSize(int32_t aWidth, int32_t aHeight, Orientation aOrientation)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -1216,7 +1222,9 @@ RasterImage::SetSize(int32_t aWidth, int32_t aHeight)
 
   // if we already have a size, check the new size against the old one
   if (!mMultipart && mHasSize &&
-      ((aWidth != mSize.width) || (aHeight != mSize.height))) {
+      ((aWidth != mSize.width) ||
+       (aHeight != mSize.height) ||
+       (aOrientation != mOrientation))) {
     NS_WARNING("Image changed size on redecode! This should not happen!");
 
     // Make the decoder aware of the error so that it doesn't try to call
@@ -1230,6 +1238,7 @@ RasterImage::SetSize(int32_t aWidth, int32_t aHeight)
 
   // Set the size and flag that we have it
   mSize.SizeTo(aWidth, aHeight);
+  mOrientation = aOrientation;
   mHasSize = true;
 
   mFrameBlender.SetSize(mSize);
@@ -1448,6 +1457,8 @@ RasterImage::StopAnimation()
   if (mError)
     return NS_ERROR_FAILURE;
 
+  mAnim->SetAnimationFrameTime(TimeStamp());
+
   return NS_OK;
 }
 
@@ -1478,8 +1489,8 @@ RasterImage::ResetAnimation()
   // Note - We probably want to kick off a redecode somewhere around here when
   // we fix bug 500402.
 
-  // Update display if we were animating before
-  if (mAnimating && mStatusTracker) {
+  // Update display
+  if (mStatusTracker) {
     nsIntRect rect = mAnim->GetFirstFrameRefreshArea();
     mStatusTracker->FrameChanged(&rect);
   }
@@ -1496,11 +1507,11 @@ RasterImage::ResetAnimation()
 }
 
 //******************************************************************************
-// [notxpcom] void requestRefresh ([const] in TimeStamp aTime);
+// [notxpcom] void setAnimationStartTime ([const] in TimeStamp aTime);
 NS_IMETHODIMP_(void)
 RasterImage::SetAnimationStartTime(const mozilla::TimeStamp& aTime)
 {
-  if (mError || mAnimating || !mAnim)
+  if (mError || mAnimationMode == kDontAnimMode || mAnimating || !mAnim)
     return;
 
   mAnim->SetAnimationFrameTime(aTime);
@@ -2954,23 +2965,20 @@ RasterImage::FinishedSomeDecoding(eShutdownIntent aIntent /* = eShutdownIntent_D
     }
   }
 
-  imgStatusTracker::StatusDiff diff;
+  ImageStatusDiff diff;
   if (request) {
-    diff = image->mStatusTracker->CalculateAndApplyDifference(request->mStatusTracker);
+    diff = image->mStatusTracker->Difference(request->mStatusTracker);
+    image->mStatusTracker->ApplyDifference(diff);
+  } else {
+    diff = image->mStatusTracker->DecodeStateAsDifference();
   }
 
   {
     // Notifications can't go out with the decoding lock held.
     MutexAutoUnlock unlock(mDecodingMutex);
 
-    // Then, tell the observers what happened in the decoder.
-    // If we have no request, we have not yet created a decoder, but we still
-    // need to send out notifications.
-    if (request) {
-      image->mStatusTracker->SyncNotifyDifference(diff);
-    } else {
-      image->mStatusTracker->SyncNotifyDecodeState();
-    }
+    // Then, tell the observers what has happened.
+    image->mStatusTracker->SyncNotifyDifference(diff);
 
     // If we were a size decode and a full decode was requested, now's the time.
     if (NS_SUCCEEDED(rv) && aIntent != eShutdownIntent_Error && done &&

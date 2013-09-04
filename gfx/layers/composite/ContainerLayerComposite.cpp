@@ -116,6 +116,11 @@ ContainerRender(ContainerT* aContainer,
     } else {
       surface = compositor->CreateRenderTarget(surfaceRect, mode);
     }
+
+    if (!surface) {
+      return;
+    }
+
     compositor->SetRenderTarget(surface);
     childOffset.x = visibleRect.x;
     childOffset.y = visibleRect.y;
@@ -161,9 +166,9 @@ ContainerRender(ContainerT* aContainer,
 
     compositor->SetRenderTarget(previousTarget);
     EffectChain effectChain;
-    LayerManagerComposite::AddMaskEffect(aContainer->GetMaskLayer(),
-                                         effectChain,
-                                         !aContainer->GetTransform().CanDraw2D());
+    LayerManagerComposite::AutoAddMaskEffect autoMaskEffect(aContainer->GetMaskLayer(),
+                                                            effectChain,
+                                                            !aContainer->GetTransform().CanDraw2D());
 
     effectChain.mPrimaryEffect = new EffectRenderTarget(surface);
 
@@ -188,8 +193,6 @@ ContainerRender(ContainerT* aContainer,
                                                rect, clipRect,
                                                transform, gfx::Point(aOffset.x, aOffset.y));
   }
-
-  LayerManagerComposite::RemoveMaskEffect(aContainer->GetMaskLayer());
 }
 
 ContainerLayerComposite::ContainerLayerComposite(LayerManagerComposite *aManager)
@@ -219,75 +222,6 @@ ContainerLayerComposite::~ContainerLayerComposite()
 }
 
 void
-ContainerLayerComposite::InsertAfter(Layer* aChild, Layer* aAfter)
-{
-  NS_ASSERTION(aChild->Manager() == Manager(),
-               "Child has wrong manager");
-  NS_ASSERTION(!aChild->GetParent(),
-               "aChild already in the tree");
-  NS_ASSERTION(!aChild->GetNextSibling() && !aChild->GetPrevSibling(),
-               "aChild already has siblings?");
-  NS_ASSERTION(!aAfter ||
-               (aAfter->Manager() == Manager() &&
-                aAfter->GetParent() == this),
-               "aAfter is not our child");
-
-  aChild->SetParent(this);
-  if (aAfter == mLastChild) {
-    mLastChild = aChild;
-  }
-  if (!aAfter) {
-    aChild->SetNextSibling(mFirstChild);
-    if (mFirstChild) {
-      mFirstChild->SetPrevSibling(aChild);
-    }
-    mFirstChild = aChild;
-    NS_ADDREF(aChild);
-    DidInsertChild(aChild);
-    return;
-  }
-
-  Layer* next = aAfter->GetNextSibling();
-  aChild->SetNextSibling(next);
-  aChild->SetPrevSibling(aAfter);
-  if (next) {
-    next->SetPrevSibling(aChild);
-  }
-  aAfter->SetNextSibling(aChild);
-  NS_ADDREF(aChild);
-  DidInsertChild(aChild);
-}
-
-void
-ContainerLayerComposite::RemoveChild(Layer *aChild)
-{
-  NS_ASSERTION(aChild->Manager() == Manager(),
-               "Child has wrong manager");
-  NS_ASSERTION(aChild->GetParent() == this,
-               "aChild not our child");
-
-  Layer* prev = aChild->GetPrevSibling();
-  Layer* next = aChild->GetNextSibling();
-  if (prev) {
-    prev->SetNextSibling(next);
-  } else {
-    this->mFirstChild = next;
-  }
-  if (next) {
-    next->SetPrevSibling(prev);
-  } else {
-    this->mLastChild = prev;
-  }
-
-  aChild->SetNextSibling(nullptr);
-  aChild->SetPrevSibling(nullptr);
-  aChild->SetParent(nullptr);
-
-  this->DidRemoveChild(aChild);
-  NS_RELEASE(aChild);
-}
-
-void
 ContainerLayerComposite::Destroy()
 {
   if (!mDestroyed) {
@@ -306,51 +240,6 @@ ContainerLayerComposite::GetFirstChildComposite()
     return nullptr;
    }
   return static_cast<LayerComposite*>(mFirstChild->ImplData());
-}
-
-void
-ContainerLayerComposite::RepositionChild(Layer* aChild, Layer* aAfter)
-{
-  NS_ASSERTION(aChild->Manager() == Manager(),
-               "Child has wrong manager");
-  NS_ASSERTION(aChild->GetParent() == this,
-               "aChild not our child");
-  NS_ASSERTION(!aAfter ||
-               (aAfter->Manager() == Manager() &&
-                aAfter->GetParent() == this),
-               "aAfter is not our child");
-
-  Layer* prev = aChild->GetPrevSibling();
-  Layer* next = aChild->GetNextSibling();
-  if (prev == aAfter) {
-    // aChild is already in the correct position, nothing to do.
-    return;
-  }
-  if (prev) {
-    prev->SetNextSibling(next);
-  }
-  if (next) {
-    next->SetPrevSibling(prev);
-  }
-  if (!aAfter) {
-    aChild->SetPrevSibling(nullptr);
-    aChild->SetNextSibling(mFirstChild);
-    if (mFirstChild) {
-      mFirstChild->SetPrevSibling(aChild);
-    }
-    mFirstChild = aChild;
-    return;
-  }
-
-  Layer* afterNext = aAfter->GetNextSibling();
-  if (afterNext) {
-    afterNext->SetPrevSibling(aChild);
-  } else {
-    mLastChild = aChild;
-  }
-  aAfter->SetNextSibling(aChild);
-  aChild->SetPrevSibling(aAfter);
-  aChild->SetNextSibling(afterNext);
 }
 
 void

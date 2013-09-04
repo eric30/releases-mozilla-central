@@ -49,11 +49,16 @@
 #ifndef SAMPLER_H
 #define SAMPLER_H
 
-#include "jsfriendapi.h"
 #include "mozilla/NullPtr.h"
-#include "mozilla/TimeStamp.h"
+#include "js/TypeDecls.h"
+
+namespace mozilla {
+class TimeStamp;
+}
 
 #ifndef MOZ_ENABLE_PROFILER_SPS
+
+#include <stdint.h>
 
 // Insert a RAII in this scope to active a pseudo label. Any samples collected
 // in this scope will contain this annotation. For dynamic strings use

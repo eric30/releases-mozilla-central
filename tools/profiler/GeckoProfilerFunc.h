@@ -7,9 +7,13 @@
 #define PROFILER_FUNCS_H
 
 #include "mozilla/NullPtr.h"
+#include "js/TypeDecls.h"
 #include <stdint.h>
-#include "mozilla/TimeStamp.h"
-#include "jsfriendapi.h"
+
+namespace mozilla {
+class TimeDuration;
+class TimeStamp;
+}
 
 using mozilla::TimeStamp;
 using mozilla::TimeDuration;

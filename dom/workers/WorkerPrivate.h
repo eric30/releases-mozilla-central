@@ -15,7 +15,6 @@
 #include "nsIThreadInternal.h"
 #include "nsPIDOMWindow.h"
 
-#include "jsapi.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/CondVar.h"
 #include "mozilla/Mutex.h"
@@ -968,6 +967,9 @@ private:
 
 WorkerPrivate*
 GetWorkerPrivateFromContext(JSContext* aCx);
+
+bool
+IsCurrentThreadRunningChromeWorker();
 
 enum WorkerStructuredDataType
 {

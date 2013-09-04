@@ -1,4 +1,5 @@
-/* -*- Mode: c++; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40; -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set ts=8 sts=4 et sw=4 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -40,6 +41,7 @@
 #include "nsHashKeys.h"
 #include "nsRegion.h"
 #include "nsAutoPtr.h"
+#include "nsIMemoryReporter.h"
 #include "nsThreadUtils.h"
 #include "GLContextTypes.h"
 #include "GLTextureImage.h"
@@ -82,6 +84,42 @@ namespace mozilla {
 
 namespace mozilla {
 namespace gl {
+
+/** GLFeature::Enum
+ * We don't use typed enum to keep the implicit integer conversion.
+ * This enum should be sorted by name.
+ */
+namespace GLFeature {
+    enum Enum {
+        bind_buffer_offset,
+        blend_minmax,
+        depth_texture,
+        draw_buffers,
+        draw_instanced,
+        element_index_uint,
+        ES2_compatibility,
+        ES3_compatibility,
+        framebuffer_blit,
+        framebuffer_multisample,
+        framebuffer_object,
+        get_query_object_iv,
+        instanced_arrays,
+        occlusion_query,
+        occlusion_query_boolean,
+        occlusion_query2,
+        packed_depth_stencil,
+        query_objects,
+        robustness,
+        standard_derivatives,
+        texture_float,
+        texture_float_linear,
+        texture_non_power_of_two,
+        transform_feedback,
+        vertex_array_object,
+        EnumMax
+    };
+}
+
 typedef uintptr_t SharedTextureHandle;
 
 MOZ_BEGIN_ENUM_CLASS(ContextProfile, uint8_t)
@@ -216,14 +254,16 @@ public:
         MOZ_ASSERT(mProfile != ContextProfile::Unknown, "unknown context profile");
         MOZ_ASSERT(mVersion != 0, "unknown context version");
 
-        if (profile == ContextProfile::OpenGL) {
-            return (profile == ContextProfile::OpenGLCore ||
-                    profile == ContextProfile::OpenGLCompatibility) &&
-                   version >= mVersion;
+        if (version > mVersion) {
+            return false;
         }
 
-        return profile == mProfile &&
-               version >= mVersion;
+        if (profile == ContextProfile::OpenGL) {
+            return profile == ContextProfile::OpenGLCore ||
+                   profile == ContextProfile::OpenGLCompatibility;
+        }
+
+        return profile == mProfile;
     }
 
     /**
@@ -463,59 +503,32 @@ protected:
 
 
 // -----------------------------------------------------------------------------
-// XXX_* Extension group queries
+// Feature queries
 /*
- * This mecahnism introduces a new way to check if an extension is supported,
- * regardless if it is an ARB, EXT, OES, etc.
+ * This mecahnism introduces a new way to check if a OpenGL feature is
+ * supported, regardless of whether it is supported by an extension or natively
+ * by the context version/profile
  */
 public:
+    bool IsSupported(GLFeature::Enum feature) const {
+        return mAvailableFeatures[feature];
+    }
 
-    /**
-     * This enum should be sorted by name.
-     */
-    enum GLExtensionGroup {
-        XXX_bind_buffer_offset,
-        XXX_depth_texture,
-        XXX_draw_buffers,
-        XXX_draw_instanced,
-        XXX_element_index_uint,
-        XXX_ES2_compatibility,
-        XXX_ES3_compatibility,
-        XXX_framebuffer_blit,
-        XXX_framebuffer_multisample,
-        XXX_framebuffer_object,
-        XXX_get_query_object_iv,
-        XXX_instanced_arrays,
-        XXX_occlusion_query,
-        XXX_occlusion_query_boolean,
-        XXX_occlusion_query2,
-        XXX_packed_depth_stencil,
-        XXX_query_objects,
-        XXX_robustness,
-        XXX_standard_derivatives,
-        XXX_texture_float,
-        XXX_texture_float_linear,
-        XXX_texture_non_power_of_two,
-        XXX_transform_feedback,
-        XXX_vertex_array_object,
-        ExtensionGroup_Max
-    };
-
-    bool IsExtensionSupported(GLExtensionGroup extensionGroup) const;
-
-    static const char* GetExtensionGroupName(GLExtensionGroup extensionGroup);
+    static const char* GetFeatureName(GLFeature::Enum feature);
 
 
 private:
+    ExtensionBitset<GLFeature::EnumMax> mAvailableFeatures;
 
     /**
-     * Mark all extensions of this group as unsupported.
-     *
-     * Returns false if marking this extension group as unsupported contradicts
-     * the OpenGL version and profile. Returns true otherwise.
+     * Init features regarding OpenGL extension and context version and profile
      */
-    bool MarkExtensionGroupUnsupported(GLExtensionGroup extensionGroup);
+    void InitFeatures();
 
+    /**
+     * Mark the feature and associated extensions as unsupported
+     */
+    void MarkUnsupported(GLFeature::Enum feature);
 
 // -----------------------------------------------------------------------------
 // Robustness handling
@@ -2687,7 +2700,7 @@ public:
         if (mScreen)
             return mScreen->GetReadFB();
 
-        GLenum bindEnum = IsExtensionSupported(XXX_framebuffer_blit)
+        GLenum bindEnum = IsSupported(GLFeature::framebuffer_blit)
                             ? LOCAL_GL_READ_FRAMEBUFFER_BINDING_EXT
                             : LOCAL_GL_FRAMEBUFFER_BINDING;
 
@@ -3435,8 +3448,24 @@ public:
     nsTArray<NamedResource> mTrackedBuffers;
     nsTArray<NamedResource> mTrackedQueries;
 #endif
+};
 
+class GfxTexturesReporter MOZ_FINAL : public MemoryReporterBase
+{
 public:
+    GfxTexturesReporter()
+      : MemoryReporterBase("gfx-textures", KIND_OTHER, UNITS_BYTES,
+                           "Memory used for storing GL textures.")
+    {
+#ifdef DEBUG
+        // There must be only one instance of this class, due to |sAmount|
+        // being static.  Assert this.
+        static bool hasRun = false;
+        MOZ_ASSERT(!hasRun);
+        hasRun = true;
+#endif
+    }
+
     enum MemoryUse {
         // when memory being allocated is reported to a memory reporter
         MemoryAllocated,
@@ -3444,12 +3473,15 @@ public:
         MemoryFreed
     };
 
-    // When memory is used/freed for tile textures, call this method
-    // to update the value reported by the memory reporter.
-    static void UpdateTextureMemoryUsage(MemoryUse action,
-                                         GLenum format,
-                                         GLenum type,
-                                         uint16_t tileSize);
+    // When memory is used/freed for tile textures, call this method to update
+    // the value reported by this memory reporter.
+    static void UpdateAmount(MemoryUse action, GLenum format, GLenum type,
+                             uint16_t tileSize);
+
+private:
+    int64_t Amount() MOZ_OVERRIDE { return sAmount; }
+
+    static int64_t sAmount;
 };
 
 inline bool

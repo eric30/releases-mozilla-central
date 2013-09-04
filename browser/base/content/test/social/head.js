@@ -165,7 +165,8 @@ function runSocialTests(tests, cbPreTest, cbPostTest, cbFinish) {
     } catch (err if err instanceof StopIteration) {
       // out of items:
       (cbFinish || defaultFinishChecks)();
-      info("runSocialTests: finish test run with " + Social.providers.length + " providers");
+      is(providersAtStart, Social.providers.length,
+         "runSocialTests: finish test run with " + Social.providers.length + " providers");
       return;
     }
     // We run on a timeout as the frameworker also makes use of timeouts, so
@@ -193,12 +194,21 @@ function runSocialTests(tests, cbPreTest, cbPostTest, cbFinish) {
 // A fairly large hammer which checks all aspects of the SocialUI for
 // internal consistency.
 function checkSocialUI(win) {
+  let SocialService = Cu.import("resource://gre/modules/SocialService.jsm", {}).SocialService;
   win = win || window;
   let doc = win.document;
   let provider = Social.provider;
   let enabled = win.SocialUI.enabled;
   let active = Social.providers.length > 0 && !win.SocialUI._chromeless &&
                !PrivateBrowsingUtils.isWindowPrivate(win);
+
+  // if we have enabled providers, we should also have instances of those
+  // providers
+  if (SocialService.hasEnabledProviders) {
+    ok(Social.providers.length > 0, "providers are enabled");
+  } else {
+    is(Social.providers.length, 0, "providers are not enabled");
+  }
 
   // some local helpers to avoid log-spew for the many checks made here.
   let numGoodTests = 0, numTests = 0;
@@ -245,6 +255,7 @@ function checkSocialUI(win) {
 
   // and for good measure, check all the social commands.
   isbool(!doc.getElementById("Social:Toggle").hidden, active, "Social:Toggle visible?");
+  isbool(!doc.getElementById("Social:ToggleSidebar").hidden, enabled, "Social:ToggleSidebar visible?");
   isbool(!doc.getElementById("Social:ToggleNotifications").hidden, enabled, "Social:ToggleNotifications visible?");
   isbool(!doc.getElementById("Social:FocusChat").hidden, enabled, "Social:FocusChat visible?");
   isbool(doc.getElementById("Social:FocusChat").getAttribute("disabled"), enabled ? "false" : "true", "Social:FocusChat disabled?");
@@ -312,26 +323,6 @@ function resetBuiltinManifestPref(name) {
   Services.prefs.getDefaultBranch(null).deleteBranch(name);
   is(Services.prefs.getDefaultBranch(null).getPrefType(name),
      Services.prefs.PREF_INVALID, "default manifest removed");
-}
-
-function addWindowListener(aURL, aCallback) {
-  Services.wm.addListener({
-    onOpenWindow: function(aXULWindow) {
-      info("window opened, waiting for focus");
-      Services.wm.removeListener(this);
-
-      var domwindow = aXULWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                                .getInterface(Ci.nsIDOMWindow);
-      waitForFocus(function() {
-        is(domwindow.document.location.href, aURL, "window opened and focused");
-        executeSoon(function() {
-          aCallback(domwindow);
-        });
-      }, domwindow);
-    },
-    onCloseWindow: function(aXULWindow) { },
-    onWindowTitleChange: function(aXULWindow, aNewTitle) { }
-  });
 }
 
 function addTab(url, callback) {

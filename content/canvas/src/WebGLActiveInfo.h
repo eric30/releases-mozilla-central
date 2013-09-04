@@ -9,12 +9,11 @@
 #include "WebGLTypes.h"
 #include "nsISupports.h"
 #include "nsString.h"
-#include "jsapi.h"
+#include "js/TypeDecls.h"
 
 namespace mozilla {
 
 class WebGLActiveInfo MOZ_FINAL
-    : public nsISupports
 {
 public:
     WebGLActiveInfo(WebGLint size, WebGLenum type, const nsACString& name) :
@@ -39,7 +38,7 @@ public:
 
     JSObject* WrapObject(JSContext *cx, JS::Handle<JSObject*> scope);
 
-    NS_DECL_ISUPPORTS
+   NS_INLINE_DECL_REFCOUNTING(WebGLActiveInfo)
 
 protected:
     WebGLint mSize;

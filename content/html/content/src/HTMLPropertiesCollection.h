@@ -19,9 +19,8 @@
 #include "nsIHTMLCollection.h"
 #include "nsHashKeys.h"
 #include "nsRefPtrHashtable.h"
-#include "jsapi.h"
+#include "nsGenericHTMLElement.h"
 
-class nsGenericHTMLElement;
 class nsIDocument;
 class nsINode;
 

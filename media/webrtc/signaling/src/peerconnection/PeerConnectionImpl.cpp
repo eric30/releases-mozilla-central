@@ -4,6 +4,7 @@
 
 #include <string>
 
+#include "base/histogram.h"
 #include "vcm.h"
 #include "CSFLog.h"
 #include "ccapi_call_info.h"
@@ -36,6 +37,8 @@
 #include "nsDOMDataChannelDeclarations.h"
 
 #ifdef MOZILLA_INTERNAL_API
+#include "mozilla/TimeStamp.h"
+#include "mozilla/Telemetry.h"
 #include "nsDOMJSUtils.h"
 #include "nsIDocument.h"
 #include "nsIScriptError.h"
@@ -245,6 +248,9 @@ public:
         // providing non-fatal warnings.
         mPC->ClearSdpParseErrorMessages();
         mObserver->OnSetRemoteDescriptionSuccess();
+#ifdef MOZILLA_INTERNAL_API
+        mPC->startCallTelem();
+#endif
         break;
 
       case SETLOCALDESCERROR:
@@ -1326,6 +1332,14 @@ PeerConnectionImpl::ShutdownMedia()
   if (!mMedia)
     return;
 
+#ifdef MOZILLA_INTERNAL_API
+  // End of call to be recorded in Telemetry
+  if (!mStartTime.IsNull()){
+    mozilla::TimeDuration timeDelta = mozilla::TimeStamp::Now() - mStartTime;
+    Telemetry::Accumulate(Telemetry::WEBRTC_CALL_DURATION, timeDelta.ToSeconds());
+  }
+#endif
+
   // Forget the reference so that we can transfer it to
   // SelfDestruct().
   mMedia.forget().get()->SelfDestruct();
@@ -1543,6 +1557,22 @@ PeerConnectionImpl::GetSdpParseErrors() {
   return mSDPParseErrorMessages;
 }
 
+#ifdef MOZILLA_INTERNAL_API
+//Telemetry for when calls start
+void
+PeerConnectionImpl::startCallTelem() {
+  // Start time for calls
+  mStartTime = mozilla::TimeStamp::Now();
+
+  // Increment session call counter
+#ifdef MOZILLA_INTERNAL_API
+  int &cnt = PeerConnectionCtx::GetInstance()->mConnectionCounter;
+  Telemetry::GetHistogramById(Telemetry::WEBRTC_CALL_COUNT)->Subtract(cnt);
+  cnt++;
+  Telemetry::GetHistogramById(Telemetry::WEBRTC_CALL_COUNT)->Add(cnt);
+#endif
+}
+#endif
 
 #ifdef MOZILLA_INTERNAL_API
 static nsresult

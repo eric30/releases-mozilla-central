@@ -14,7 +14,7 @@
 #include "jit/MoveEmitter.h"
 
 using namespace js;
-using namespace ion;
+using namespace jit;
 
 using mozilla::Abs;
 
@@ -2522,11 +2522,25 @@ MacroAssemblerARMCompat::branchTestValue(Condition cond, const Address &valaddr,
 {
     JS_ASSERT(cond == Equal || cond == NotEqual);
 
-    ma_ldr(tagOf(valaddr), ScratchRegister);
-    branchPtr(cond, ScratchRegister, value.typeReg(), label);
+    // Check payload before tag, since payload is more likely to differ.
+    if (cond == NotEqual) {
+        ma_ldr(payloadOf(valaddr), ScratchRegister);
+        branchPtr(NotEqual, ScratchRegister, value.payloadReg(), label);
 
-    ma_ldr(payloadOf(valaddr), ScratchRegister);
-    branchPtr(cond, ScratchRegister, value.payloadReg(), label);
+        ma_ldr(tagOf(valaddr), ScratchRegister);
+        branchPtr(NotEqual, ScratchRegister, value.typeReg(), label);
+
+    } else {
+        Label fallthrough;
+
+        ma_ldr(payloadOf(valaddr), ScratchRegister);
+        branchPtr(NotEqual, ScratchRegister, value.payloadReg(), &fallthrough);
+
+        ma_ldr(tagOf(valaddr), ScratchRegister);
+        branchPtr(Equal, ScratchRegister, value.typeReg(), label);
+
+        bind(&fallthrough);
+    }
 }
 
 // unboxing code
@@ -2860,10 +2874,10 @@ MacroAssemblerARMCompat::loadValue(Address src, ValueOperand val)
 void
 MacroAssemblerARMCompat::tagValue(JSValueType type, Register payload, ValueOperand dest)
 {
-    JS_ASSERT(payload != dest.typeReg());
-    ma_mov(ImmType(type), dest.typeReg());
+    JS_ASSERT(dest.typeReg() != dest.payloadReg());
     if (payload != dest.payloadReg())
         ma_mov(payload, dest.payloadReg());
+    ma_mov(ImmType(type), dest.typeReg());
 }
 
 void

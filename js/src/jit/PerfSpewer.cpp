@@ -18,7 +18,7 @@
 #include "jit/RangeAnalysis.h"
 
 using namespace js;
-using namespace js::ion;
+using namespace js::jit;
 
 #define PERF_MODE_NONE  1
 #define PERF_MODE_FUNC  2
@@ -30,7 +30,7 @@ static uint32_t PerfMode = 0;
 static bool PerfChecked = false;
 
 void
-js::ion::CheckPerf() {
+js::jit::CheckPerf() {
     if (!PerfChecked) {
         const char *env = getenv("IONPERF");
         if (env == NULL) {
@@ -56,13 +56,13 @@ js::ion::CheckPerf() {
 }
 
 bool
-js::ion::PerfBlockEnabled() {
+js::jit::PerfBlockEnabled() {
     JS_ASSERT(PerfMode);
     return PerfMode == PERF_MODE_BLOCK;
 }
 
 bool
-js::ion::PerfFuncEnabled() {
+js::jit::PerfFuncEnabled() {
     JS_ASSERT(PerfMode);
     return PerfMode == PERF_MODE_FUNC;
 }
@@ -147,7 +147,7 @@ PerfSpewer::writeProfile(JSScript *script,
         if (size > 0) {
             fprintf(fp_,
                     "%lx %lx %s:%d: Func%02d\n",
-                    reinterpret_cast<unsigned long>(code->raw()),
+                    reinterpret_cast<uintptr_t>(code->raw()),
                     size,
                     script->filename(),
                     script->lineno,

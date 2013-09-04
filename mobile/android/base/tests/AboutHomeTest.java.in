@@ -107,7 +107,7 @@ abstract class AboutHomeTest extends BaseTest {
      * This method uses the predefined tags in HomePager.
      */
     protected final ListView findListViewWithTag(String tag) {
-        for (ListView listView : mSolo.getCurrentListViews()) {
+        for (ListView listView : mSolo.getCurrentViews(ListView.class)) {
             final String listTag = (String) listView.getTag();
             if (TextUtils.isEmpty(listTag)) {
                 continue;
@@ -121,35 +121,57 @@ abstract class AboutHomeTest extends BaseTest {
         return null;
     }
 
+    /**
+     * Adds a bookmark, or updates the bookmark title if the url already exists.
+     *
+     * The LocalBrowserDB.addBookmark implementation handles updating existing bookmarks.
+     * Since we don't modify bookmark keywords in tests, we don't need a separate
+     * implemention of updateBookmark.
+     */
     protected void addOrUpdateMobileBookmark(String title, String url) {
-        if (isBookmark(url)) {
-            updateBookmark(title, url, null);
-        } else {
-            addMobileBookmark(title, url);
-        }
-    }
-
-    protected void addMobileBookmark(String title, String url) {
         try {
             ContentResolver resolver = getActivity().getContentResolver();
             ClassLoader classLoader = getActivity().getClassLoader();
             Class browserDB = classLoader.loadClass("org.mozilla.gecko.db.BrowserDB");
             Method addBookmark = browserDB.getMethod("addBookmark", ContentResolver.class, String.class, String.class);
             addBookmark.invoke(null, resolver, title, url);
-            mAsserter.ok(true, "Inserting a new bookmark", "Inserter the bookmark with the title = " + title + " and the url = " + url);
+            mAsserter.ok(true, "Inserting/updating a new bookmark", "Inserting/updating the bookmark with the title = " + title + " and the url = " + url);
         } catch (Exception e) {
             mAsserter.ok(false, "Exception adding bookmark: ", e.toString());
         }
     }
 
-    protected void updateBookmark(String title, String url, String keyword) {
+    /**
+     * Updates the title and keyword of a bookmark with the given URL.
+     *
+     * Warning: This method assumes that there's only one bookmark with the given URL.
+     */
+    protected void updateBookmark(String url, String title, String keyword) {
         try {
             ContentResolver resolver = getActivity().getContentResolver();
             ClassLoader classLoader = getActivity().getClassLoader();
             Class browserDB = classLoader.loadClass("org.mozilla.gecko.db.BrowserDB");
-            Method updateBookmark = browserDB.getMethod("updateBookmark", ContentResolver.class, String.class, String.class);
-            updateBookmark.invoke(null, resolver, title, url, keyword);
-            mAsserter.ok(true, "Updating existing bookmark", "Setting the values to title = " + title + ", url = " + url + " and keyword = " + keyword);
+            Method getBookmarkForUrl = browserDB.getMethod("getBookmarkForUrl", ContentResolver.class, String.class);
+
+            // Get the id for the bookmark with the given URL.
+            Cursor c = null;
+            try {
+                c = (Cursor) getBookmarkForUrl.invoke(null, resolver, url);
+                if (!c.moveToFirst()) {
+                    mAsserter.ok(false, "Getting bookmark with url", "Couldn't find bookmark with url = " + url);
+                    return;
+                }
+
+                int id = c.getInt(c.getColumnIndexOrThrow("_id"));
+                Method updateBookmark = browserDB.getMethod("updateBookmark", ContentResolver.class, int.class, String.class, String.class, String.class);
+                updateBookmark.invoke(null, resolver, id, url, title, keyword);
+
+                mAsserter.ok(true, "Updating bookmark", "Updating bookmark with url = " + url);
+            } finally {
+                if (c != null) {
+                    c.close();
+                }
+            }
         } catch (Exception e) {
             mAsserter.ok(false, "Exception updating bookmark: ", e.toString());
         }

@@ -27,7 +27,7 @@
 #include "vm/Shape-inl.h"
 
 using namespace js;
-using namespace js::ion;
+using namespace js::jit;
 
 using mozilla::DoublesAreIdentical;
 
@@ -273,6 +273,35 @@ MDefinition::defUseCount() const
     return count;
 }
 
+bool
+MDefinition::hasOneUse() const
+{
+    MUseIterator i(uses_.begin());
+    if (i == uses_.end())
+        return false;
+    i++;
+    return i == uses_.end();
+}
+
+bool
+MDefinition::hasOneDefUse() const
+{
+    bool hasOneDefUse = false;
+    for (MUseIterator i(uses_.begin()); i != uses_.end(); i++) {
+        if (!(*i)->consumer()->isDefinition())
+            continue;
+
+        // We already have a definition use. So 1+
+        if (hasOneDefUse)
+            return false;
+
+        // We saw one definition. Loop to test if there is another.
+        hasOneDefUse = true;
+    }
+
+    return hasOneDefUse;
+}
+
 MUseIterator
 MDefinition::removeUse(MUseIterator use)
 {
@@ -363,7 +392,7 @@ MConstant::New(const Value &v)
 }
 
 types::StackTypeSet *
-ion::MakeSingletonTypeSet(JSObject *obj)
+jit::MakeSingletonTypeSet(JSObject *obj)
 {
     LifoAlloc *alloc = GetIonContext()->temp->lifoAlloc();
     types::StackTypeSet *types = alloc->new_<types::StackTypeSet>();
@@ -596,12 +625,6 @@ MUnbox::printOpcode(FILE *fp) const
     }
 }
 
-MPhi *
-MPhi::New(uint32_t slot)
-{
-    return new MPhi(slot);
-}
-
 void
 MPhi::removeOperand(size_t index)
 {
@@ -686,7 +709,7 @@ MakeMIRTypeSet(MIRType type)
 }
 
 void
-ion::MergeTypes(MIRType *ptype, types::StackTypeSet **ptypeSet,
+jit::MergeTypes(MIRType *ptype, types::StackTypeSet **ptypeSet,
                 MIRType newType, types::StackTypeSet *newTypeSet)
 {
     if (newTypeSet && newTypeSet->empty())
@@ -856,7 +879,7 @@ MPhi::addInputSlow(MDefinition *ins, bool *ptypeChange)
 uint32_t
 MPrepareCall::argc() const
 {
-    JS_ASSERT(useCount() == 1);
+    JS_ASSERT(hasOneUse());
     MCall *call = usesBegin()->consumer()->toDefinition()->toCall();
     return call->numStackArgs();
 }
@@ -2397,6 +2420,24 @@ MGetPropertyPolymorphic::mightAlias(MDefinition *store)
     return false;
 }
 
+void
+MGetPropertyCache::setBlock(MBasicBlock *block)
+{
+    MDefinition::setBlock(block);
+    // Track where we started.
+    if (!location_.pc) {
+        location_.pc = block->trackedPc();
+        location_.script = block->info().script();
+    }
+}
+
+bool
+MGetPropertyCache::updateForReplacement(MDefinition *ins) {
+    MGetPropertyCache *other = ins->toGetPropertyCache();
+    location_.append(&other->location_);
+    return true;
+}
+
 MDefinition *
 MAsmJSUnsignedToDouble::foldsTo(bool useValueNumbers)
 {
@@ -2437,7 +2478,7 @@ MAsmJSCall::New(Callee callee, const Args &args, MIRType resultType, size_t spIn
 }
 
 bool
-ion::ElementAccessIsDenseNative(MDefinition *obj, MDefinition *id)
+jit::ElementAccessIsDenseNative(MDefinition *obj, MDefinition *id)
 {
     if (obj->mightBeType(MIRType_String))
         return false;
@@ -2454,7 +2495,8 @@ ion::ElementAccessIsDenseNative(MDefinition *obj, MDefinition *id)
 }
 
 bool
-ion::ElementAccessIsTypedArray(MDefinition *obj, MDefinition *id, int *arrayType)
+jit::ElementAccessIsTypedArray(MDefinition *obj, MDefinition *id,
+                               ScalarTypeRepresentation::Type *arrayType)
 {
     if (obj->mightBeType(MIRType_String))
         return false;
@@ -2466,19 +2508,19 @@ ion::ElementAccessIsTypedArray(MDefinition *obj, MDefinition *id, int *arrayType
     if (!types)
         return false;
 
-    *arrayType = types->getTypedArrayType();
-    return *arrayType != TypedArrayObject::TYPE_MAX;
+    *arrayType = (ScalarTypeRepresentation::Type) types->getTypedArrayType();
+    return *arrayType != ScalarTypeRepresentation::TYPE_MAX;
 }
 
 bool
-ion::ElementAccessIsPacked(JSContext *cx, MDefinition *obj)
+jit::ElementAccessIsPacked(JSContext *cx, MDefinition *obj)
 {
     types::StackTypeSet *types = obj->resultTypeSet();
     return types && !types->hasObjectFlags(cx, types::OBJECT_FLAG_NON_PACKED);
 }
 
 bool
-ion::ElementAccessHasExtraIndexedProperty(JSContext *cx, MDefinition *obj)
+jit::ElementAccessHasExtraIndexedProperty(JSContext *cx, MDefinition *obj)
 {
     types::StackTypeSet *types = obj->resultTypeSet();
 
@@ -2489,7 +2531,7 @@ ion::ElementAccessHasExtraIndexedProperty(JSContext *cx, MDefinition *obj)
 }
 
 MIRType
-ion::DenseNativeElementType(JSContext *cx, MDefinition *obj)
+jit::DenseNativeElementType(JSContext *cx, MDefinition *obj)
 {
     types::StackTypeSet *types = obj->resultTypeSet();
     MIRType elementType = MIRType_None;
@@ -2519,7 +2561,7 @@ ion::DenseNativeElementType(JSContext *cx, MDefinition *obj)
 }
 
 bool
-ion::PropertyReadNeedsTypeBarrier(JSContext *cx, types::TypeObject *object, PropertyName *name,
+jit::PropertyReadNeedsTypeBarrier(JSContext *cx, types::TypeObject *object, PropertyName *name,
                                   types::StackTypeSet *observed, bool updateObserved)
 {
     // If the object being read from has types for the property which haven't
@@ -2546,7 +2588,7 @@ ion::PropertyReadNeedsTypeBarrier(JSContext *cx, types::TypeObject *object, Prop
             if (HasDataProperty(cx, obj, id, &v)) {
                 if (v.isUndefined())
                     break;
-                observed->addType(cx, types::GetValueType(cx, v));
+                observed->addType(cx, types::GetValueType(v));
             }
 
             obj = obj->getProto();
@@ -2586,7 +2628,7 @@ ion::PropertyReadNeedsTypeBarrier(JSContext *cx, types::TypeObject *object, Prop
 }
 
 bool
-ion::PropertyReadNeedsTypeBarrier(JSContext *cx, MDefinition *obj, PropertyName *name,
+jit::PropertyReadNeedsTypeBarrier(JSContext *cx, MDefinition *obj, PropertyName *name,
                                   types::StackTypeSet *observed)
 {
     if (observed->unknown())
@@ -2607,7 +2649,7 @@ ion::PropertyReadNeedsTypeBarrier(JSContext *cx, MDefinition *obj, PropertyName 
 }
 
 bool
-ion::PropertyReadIsIdempotent(JSContext *cx, MDefinition *obj, PropertyName *name)
+jit::PropertyReadIsIdempotent(JSContext *cx, MDefinition *obj, PropertyName *name)
 {
     // Determine if reading a property from obj is likely to be idempotent.
 
@@ -2633,7 +2675,7 @@ ion::PropertyReadIsIdempotent(JSContext *cx, MDefinition *obj, PropertyName *nam
 }
 
 void
-ion::AddObjectsForPropertyRead(JSContext *cx, MDefinition *obj, PropertyName *name,
+jit::AddObjectsForPropertyRead(JSContext *cx, MDefinition *obj, PropertyName *name,
                                types::StackTypeSet *observed)
 {
     // Add objects to observed which *could* be observed by reading name from obj,
@@ -2765,7 +2807,7 @@ AddTypeGuard(MBasicBlock *current, MDefinition *obj, types::TypeObject *typeObje
 }
 
 bool
-ion::PropertyWriteNeedsTypeBarrier(JSContext *cx, MBasicBlock *current, MDefinition **pobj,
+jit::PropertyWriteNeedsTypeBarrier(JSContext *cx, MBasicBlock *current, MDefinition **pobj,
                                    PropertyName *name, MDefinition **pvalue, bool canModify)
 {
     // If any value being written is not reflected in the type information for

@@ -14,7 +14,7 @@
 #include "jit/shared/MacroAssembler-x86-shared.h"
 
 namespace js {
-namespace ion {
+namespace jit {
 
 class MacroAssemblerX86 : public MacroAssemblerX86Shared
 {
@@ -175,10 +175,10 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         loadValue(Operand(src), val);
     }
     void tagValue(JSValueType type, Register payload, ValueOperand dest) {
-        JS_ASSERT(payload != dest.typeReg());
-        movl(ImmType(type), dest.typeReg());
+        JS_ASSERT(dest.typeReg() != dest.payloadReg());
         if (payload != dest.payloadReg())
             movl(payload, dest.payloadReg());
+        movl(ImmType(type), dest.typeReg());
     }
     void pushValue(ValueOperand val) {
         push(val.typeReg());
@@ -423,8 +423,17 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
                          Label *label)
     {
         JS_ASSERT(cond == Equal || cond == NotEqual);
-        branchPtr(cond, tagOf(valaddr), value.typeReg(), label);
-        branchPtr(cond, payloadOf(valaddr), value.payloadReg(), label);
+        // Check payload before tag, since payload is more likely to differ.
+        if (cond == NotEqual) {
+            branchPtr(NotEqual, payloadOf(valaddr), value.payloadReg(), label);
+            branchPtr(NotEqual, tagOf(valaddr), value.typeReg(), label);
+
+        } else {
+            Label fallthrough;
+            branchPtr(NotEqual, payloadOf(valaddr), value.payloadReg(), &fallthrough);
+            branchPtr(Equal, tagOf(valaddr), value.typeReg(), label);
+            bind(&fallthrough);
+        }
     }
 
     void cmpPtr(Register lhs, const ImmWord rhs) {
@@ -993,7 +1002,7 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
 
 typedef MacroAssemblerX86 MacroAssemblerSpecific;
 
-} // namespace ion
+} // namespace jit
 } // namespace js
 
 #endif /* jit_x86_MacroAssembler_x86_h */

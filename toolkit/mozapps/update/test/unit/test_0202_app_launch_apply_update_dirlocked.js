@@ -83,11 +83,13 @@ function symlinkUpdateFilesIntoBundleDirectory() {
   do_check_true(source2.exists());
 
   // Cleanup the symlinks when the test is finished.
-  do_register_cleanup(function() {
+  do_register_cleanup(function AUFIBD_cleanup() {
+    logTestInfo("start - unlinking symlinks");
     let ret = unlink(source.path);
     do_check_false(source.exists());
     let ret = unlink(source2.path);
     do_check_false(source2.exists());
+    logTestInfo("finish - unlinking symlinks");
   });
 
   // Now, make sure that getUpdatesRootDir returns the application bundle
@@ -102,8 +104,21 @@ function run_test() {
     return;
   }
 
+  if (IS_WIN) {
+    var version = AUS_Cc["@mozilla.org/system-info;1"]
+                  .getService(AUS_Ci.nsIPropertyBag2)
+                  .getProperty("version");
+    var isVistaOrHigher = (parseFloat(version) >= 6.0);
+    if (!isVistaOrHigher) {
+      logTestInfo("Disabled on Windows XP due to bug 909489");
+      return;
+    }
+  }
+
   do_test_pending();
   do_register_cleanup(end_test);
+
+  logTestInfo("setting up environment for the update test...");
 
   removeUpdateDirsAndFiles();
 
@@ -186,14 +201,17 @@ function run_test() {
   writeFile(updateSettingsIni, UPDATE_SETTINGS_CONTENTS);
 
   // Initiate a background update.
+  logTestInfo("update preparation completed - calling processUpdate");
   AUS_Cc["@mozilla.org/updates/update-processor;1"].
     createInstance(AUS_Ci.nsIUpdateProcessor).
     processUpdate(gActiveUpdate);
 
+  logTestInfo("processUpdate completed - calling checkUpdateApplied");
   checkUpdateApplied();
 }
 
 function end_test() {
+  logTestInfo("start - test cleanup");
   // Remove the files added by the update.
   let updateTestDir = getUpdateTestDir();
   try {
@@ -226,6 +244,7 @@ function end_test() {
   }
 
   cleanUp();
+  logTestInfo("finish - test cleanup");
 }
 
 function shouldAdjustPathsOnMac() {
@@ -260,6 +279,8 @@ function checkUpdateApplied() {
     do_timeout(CHECK_TIMEOUT_MILLI, checkUpdateApplied);
     return;
   }
+
+  logTestInfo("update state equals " + gUpdateManager.activeUpdate.state);
 
   // Don't proceed until the update status is pending.
   let status = readStatusFile();

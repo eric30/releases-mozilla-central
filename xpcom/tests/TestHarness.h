@@ -14,7 +14,7 @@
 
 #if defined(_MSC_VER) && defined(MOZ_STATIC_JS)
 /*
- * Including jsdbgapi.h may cause build break with --disable-shared-js
+ * Including js/OldDebugAPI.h may cause build break with --disable-shared-js
  * This is a workaround for bug 673616.
  */
 #define STATIC_JS_API
@@ -36,7 +36,6 @@
 #include "nsIProperties.h"
 #include "nsIObserverService.h"
 #include "nsXULAppAPI.h"
-#include "jsdbgapi.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -165,8 +164,10 @@ class ScopedXPCOM : public nsIDirectoryServiceProvider2
       }
 
       // Create a unique temporary folder to use for this test.
+      // Note that runcppunittests.py will run tests with a temp
+      // directory as the cwd, so just put something under that.
       nsCOMPtr<nsIFile> profD;
-      nsresult rv = NS_GetSpecialDirectory(NS_OS_TEMP_DIR,
+      nsresult rv = NS_GetSpecialDirectory(NS_OS_CURRENT_PROCESS_DIR,
                                            getter_AddRefs(profD));
       NS_ENSURE_SUCCESS(rv, nullptr);
 

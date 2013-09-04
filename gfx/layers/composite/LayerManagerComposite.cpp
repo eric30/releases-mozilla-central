@@ -12,7 +12,7 @@
 #include "CompositableHost.h"           // for CompositableHost
 #include "ContainerLayerComposite.h"    // for ContainerLayerComposite, etc
 #include "FrameMetrics.h"               // for FrameMetrics
-#include "GeckoProfilerImpl.h"          // for profiler_set_frame_number, etc
+#include "GeckoProfiler.h"              // for profiler_set_frame_number, etc
 #include "ImageLayerComposite.h"        // for ImageLayerComposite
 #include "Layers.h"                     // for Layer, ContainerLayer, etc
 #include "ThebesLayerComposite.h"       // for ThebesLayerComposite
@@ -660,36 +660,33 @@ LayerManagerComposite::CreateRefLayerComposite()
   return nsRefPtr<RefLayerComposite>(new RefLayerComposite(this)).forget();
 }
 
-/* static */ bool
-LayerManagerComposite::AddMaskEffect(Layer* aMaskLayer, EffectChain& aEffects, bool aIs3D)
+LayerManagerComposite::AutoAddMaskEffect::AutoAddMaskEffect(Layer* aMaskLayer,
+                                                            EffectChain& aEffects,
+                                                            bool aIs3D)
+  : mCompositable(nullptr)
 {
   if (!aMaskLayer) {
-    return false;
+    return;
   }
-  LayerComposite* maskLayerComposite = static_cast<LayerComposite*>(aMaskLayer->ImplData());
-  if (!maskLayerComposite->GetCompositableHost()) {
+
+  mCompositable = static_cast<LayerComposite*>(aMaskLayer->ImplData())->GetCompositableHost();
+  if (!mCompositable) {
     NS_WARNING("Mask layer with no compositable host");
-    return false;
+    return;
   }
 
   gfx::Matrix4x4 transform;
   ToMatrix4x4(aMaskLayer->GetEffectiveTransform(), transform);
-  return maskLayerComposite->GetCompositableHost()->AddMaskEffect(aEffects, transform, aIs3D);
+  mCompositable->AddMaskEffect(aEffects, transform, aIs3D);
 }
 
-/* static */ void
-LayerManagerComposite::RemoveMaskEffect(Layer* aMaskLayer)
+LayerManagerComposite::AutoAddMaskEffect::~AutoAddMaskEffect()
 {
-  if (!aMaskLayer) {
-    return;
-  }
-  LayerComposite* maskLayerComposite = static_cast<LayerComposite*>(aMaskLayer->ImplData());
-  if (!maskLayerComposite->GetCompositableHost()) {
-    NS_WARNING("Mask layer with no compositable host");
+  if (!mCompositable) {
     return;
   }
 
-  maskLayerComposite->GetCompositableHost()->RemoveMaskEffect();
+  mCompositable->RemoveMaskEffect();
 }
 
 TemporaryRef<DrawTarget>

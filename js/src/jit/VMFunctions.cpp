@@ -23,10 +23,10 @@
 #include "vm/StringObject-inl.h"
 
 using namespace js;
-using namespace js::ion;
+using namespace js::jit;
 
 namespace js {
-namespace ion {
+namespace jit {
 
 // Don't explicitly initialize, it's not guaranteed that this initializer will
 // run before the constructors for static VMFunctions.
@@ -458,7 +458,17 @@ JSObject *
 NewCallObject(JSContext *cx, HandleScript script,
               HandleShape shape, HandleTypeObject type, HeapSlot *slots)
 {
-    return CallObject::create(cx, script, shape, type, slots);
+    JSObject *obj = CallObject::create(cx, script, shape, type, slots);
+
+#ifdef JSGC_GENERATIONAL
+    // The JIT creates call objects in the nursery, so elides barriers for
+    // the initializing writes. The interpreter, however, may have allocated
+    // the call object tenured, so barrier as needed before re-entering.
+    if (!IsInsideNursery(cx->runtime(), obj))
+        cx->runtime()->gcStoreBuffer.putWholeCell(obj);
+#endif
+
+    return obj;
 }
 
 JSObject *
@@ -630,7 +640,7 @@ DebugPrologue(JSContext *cx, BaselineFrame *frame, bool *mustReturn)
         // debug epilogue handler as well.
         JS_ASSERT(frame->hasReturnValue());
         *mustReturn = true;
-        return ion::DebugEpilogue(cx, frame, true);
+        return jit::DebugEpilogue(cx, frame, true);
 
       case JSTRAP_THROW:
       case JSTRAP_ERROR:
@@ -766,7 +776,7 @@ HandleDebugTrap(JSContext *cx, BaselineFrame *frame, uint8_t *retAddr, bool *mus
       case JSTRAP_RETURN:
         *mustReturn = true;
         frame->setReturnValue(rval);
-        return ion::DebugEpilogue(cx, frame, true);
+        return jit::DebugEpilogue(cx, frame, true);
 
       case JSTRAP_THROW:
         cx->setPendingException(rval);
@@ -804,7 +814,7 @@ OnDebuggerStatement(JSContext *cx, BaselineFrame *frame, jsbytecode *pc, bool *m
       case JSTRAP_RETURN:
         frame->setReturnValue(rval);
         *mustReturn = true;
-        return ion::DebugEpilogue(cx, frame, true);
+        return jit::DebugEpilogue(cx, frame, true);
 
       case JSTRAP_THROW:
         cx->setPendingException(rval);
@@ -834,5 +844,5 @@ InitBaselineFrameForOsr(BaselineFrame *frame, StackFrame *interpFrame, uint32_t 
     return frame->initForOsr(interpFrame, numStackValues);
 }
 
-} // namespace ion
+} // namespace jit
 } // namespace js

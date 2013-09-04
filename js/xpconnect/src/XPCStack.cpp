@@ -7,6 +7,8 @@
 /* Implements nsIStackFrame. */
 
 #include "xpcprivate.h"
+#include "jsprf.h"
+#include "js/OldDebugAPI.h"
 
 class XPCJSStackFrame : public nsIStackFrame
 {

@@ -20,6 +20,7 @@
 #include "jscntxt.h"
 #include "jsexn.h"
 #include "jsnum.h"
+#include "jsworkers.h"
 
 #include "frontend/BytecodeCompiler.h"
 #include "js/CharacterEncoding.h"
@@ -30,6 +31,7 @@ using namespace js;
 using namespace js::frontend;
 using namespace js::unicode;
 
+using mozilla::Maybe;
 using mozilla::PodAssign;
 using mozilla::PodCopy;
 using mozilla::PodZero;
@@ -331,8 +333,7 @@ TokenStream::TokenStream(ExclusiveContext *cx, const CompileOptions &options,
 
 TokenStream::~TokenStream()
 {
-    if (sourceMap)
-        js_free(sourceMap);
+    js_free(sourceMap);
 
     JS_ASSERT_IF(originPrincipals, originPrincipals->refcount);
 }
@@ -564,7 +565,7 @@ TokenStream::reportStrictModeErrorNumberVA(uint32_t offset, bool strictMode, uns
 }
 
 void
-CompileError::throwError()
+CompileError::throwError(JSContext *cx)
 {
     // If there's a runtime exception type associated with this error
     // number, set that as the pending exception.  For errors occuring at
@@ -622,12 +623,10 @@ TokenStream::reportCompileErrorNumberVA(uint32_t offset, unsigned flags, unsigne
         warning = false;
     }
 
-    if (!this->cx->isJSContext())
-        return warning;
-
-    JSContext *cx = this->cx->asJSContext();
-
-    CompileError err(cx);
+    // On the main thread, report the error immediately. When compiling off
+    // thread, save the error so that the main thread can report it later.
+    CompileError tempErr;
+    CompileError &err = cx->isJSContext() ? tempErr : cx->addPendingCompileError();
 
     err.report.flags = flags;
     err.report.errorNumber = errorNumber;
@@ -697,7 +696,8 @@ TokenStream::reportCompileErrorNumberVA(uint32_t offset, unsigned flags, unsigne
         err.report.uctokenptr = err.report.uclinebuf + windowOffset;
     }
 
-    err.throwError();
+    if (cx->isJSContext())
+        err.throwError(cx->asJSContext());
 
     return warning;
 }
@@ -846,8 +846,7 @@ TokenStream::getSourceMappingURL(bool isMultiline, bool shouldWarnDeprecated)
 
         size_t sourceMapLength = tokenbuf.length();
 
-        if (sourceMap)
-            js_free(sourceMap);
+        js_free(sourceMap);
         sourceMap = cx->pod_malloc<jschar>(sourceMapLength + 1);
         if (!sourceMap)
             return false;

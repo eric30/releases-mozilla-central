@@ -82,6 +82,9 @@ def main(argv):
     op.add_option('--devicePort', action='store',
                   type=int, dest='device_port', default=20701,
                   help='port of remote device to test')
+    op.add_option('--deviceSerial', action='store',
+                  type='string', dest='device_serial', default=None,
+                  help='ADB device serial number of remote device to test')
     op.add_option('--deviceTransport', action='store',
                   type='string', dest='device_transport', default='sut',
                   help='The transport to use to communicate with device: [adb|sut]; default=sut')
@@ -201,7 +204,7 @@ def main(argv):
             sys.exit(1)
 
         tc = job_list[0]
-        cmd = ['gdb', '--args'] + tc.command(prefix)
+        cmd = ['gdb', '--args'] + tc.command(prefix, jittests.LIB_DIR)
         subprocess.call(cmd)
         sys.exit()
 

@@ -43,7 +43,7 @@ class JSFunction : public JSObject
         SELF_HOSTED_CTOR = 0x0200,  /* function is self-hosted builtin constructor and
                                        must be constructible but not decompilable. */
         HAS_REST         = 0x0400,  /* function has a rest (...) parameter */
-        HAS_DEFAULTS     = 0x0800,  /* function has at least one default parameter */
+        // 0x0800 is available
         INTERPRETED_LAZY = 0x1000,  /* function is interpreted but doesn't have a script yet */
         ARROW            = 0x2000,  /* ES6 '(args) => body' syntax */
         SH_WRAPPABLE     = 0x4000,  /* self-hosted function is wrappable, doesn't need to be cloned */
@@ -60,8 +60,8 @@ class JSFunction : public JSObject
                       "shadow interface must match actual interface");
     }
 
-    uint16_t        nargs;        /* maximum number of specified arguments,
-                                     reflected as f.length/f.arity */
+    uint16_t        nargs;        /* number of formal arguments
+                                     (including defaults and the rest parameter unlike f.length) */
     uint16_t        flags;        /* bitfield composed of the above Flags enum */
     union U {
         class Native {
@@ -117,10 +117,16 @@ class JSFunction : public JSObject
     bool isSelfHostedBuiltin()      const { return flags & SELF_HOSTED; }
     bool isSelfHostedConstructor()  const { return flags & SELF_HOSTED_CTOR; }
     bool hasRest()                  const { return flags & HAS_REST; }
-    bool hasDefaults()              const { return flags & HAS_DEFAULTS; }
     bool isWrappable()              const {
         JS_ASSERT_IF(flags & SH_WRAPPABLE, isSelfHostedBuiltin());
         return flags & SH_WRAPPABLE;
+    }
+
+    bool hasJITCode() const {
+        if (!hasScript())
+            return false;
+
+        return nonLazyScript()->hasBaselineScript() || nonLazyScript()->hasIonScript();
     }
 
     // Arrow functions are a little weird.
@@ -168,11 +174,6 @@ class JSFunction : public JSObject
     // Can be called multiple times by the parser.
     void setHasRest() {
         flags |= HAS_REST;
-    }
-
-    // Can be called multiple times by the parser.
-    void setHasDefaults() {
-        flags |= HAS_DEFAULTS;
     }
 
     void setIsSelfHostedBuiltin() {
@@ -287,7 +288,12 @@ class JSFunction : public JSObject
     js::GeneratorKind generatorKind() const {
         if (!isInterpreted())
             return js::NotGenerator;
-        return hasScript() ? nonLazyScript()->generatorKind() : lazyScript()->generatorKind();
+        if (hasScript())
+            return nonLazyScript()->generatorKind();
+        if (js::LazyScript *lazy = lazyScriptOrNull())
+            return lazy->generatorKind();
+        JS_ASSERT(isSelfHostedBuiltin());
+        return js::NotGenerator;
     }
 
     bool isGenerator() const { return generatorKind() != js::NotGenerator; }
@@ -416,11 +422,21 @@ namespace js {
 extern bool
 Function(JSContext *cx, unsigned argc, Value *vp);
 
+extern bool
+Generator(JSContext *cx, unsigned argc, Value *vp);
+
 extern JSFunction *
 NewFunction(ExclusiveContext *cx, HandleObject funobj, JSNative native, unsigned nargs,
             JSFunction::Flags flags, HandleObject parent, HandleAtom atom,
             gc::AllocKind allocKind = JSFunction::FinalizeKind,
             NewObjectKind newKind = GenericObject);
+
+// If proto is NULL, Function.prototype is used instead.
+extern JSFunction *
+NewFunctionWithProto(ExclusiveContext *cx, HandleObject funobj, JSNative native, unsigned nargs,
+                     JSFunction::Flags flags, HandleObject parent, HandleAtom atom,
+                     JSObject *proto, gc::AllocKind allocKind = JSFunction::FinalizeKind,
+                     NewObjectKind newKind = GenericObject);
 
 extern JSFunction *
 DefineFunction(JSContext *cx, HandleObject obj, HandleId id, JSNative native,

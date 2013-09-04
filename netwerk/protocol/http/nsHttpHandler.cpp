@@ -674,15 +674,13 @@ nsHttpHandler::InitUserAgentComponents()
     "Windows"
 #elif defined(XP_MACOSX)
     "Macintosh"
-#elif defined(MOZ_PLATFORM_MAEMO)
-    "Maemo"
 #elif defined(MOZ_X11)
     "X11"
 #endif
     );
 #endif
 
-#if defined(ANDROID) || defined(MOZ_PLATFORM_MAEMO) || defined(MOZ_B2G)
+#if defined(ANDROID) || defined(MOZ_B2G)
     nsCOMPtr<nsIPropertyBag2> infoService = do_GetService("@mozilla.org/system-info;1");
     MOZ_ASSERT(infoService, "Could not find a system info service");
 
@@ -1421,7 +1419,7 @@ PrepareAcceptLanguages(const char *i_AcceptLanguages, nsACString &o_AcceptLangua
     const char *comma;
     int32_t available;
 
-    o_Accept = nsCRT::strdup(i_AcceptLanguages);
+    o_Accept = strdup(i_AcceptLanguages);
     if (!o_Accept)
         return NS_ERROR_OUT_OF_MEMORY;
     for (p = o_Accept, n = size = 0; '\0' != *p; p++) {
@@ -1432,7 +1430,7 @@ PrepareAcceptLanguages(const char *i_AcceptLanguages, nsACString &o_AcceptLangua
     available = size + ++n * 11 + 1;
     q_Accept = new char[available];
     if (!q_Accept) {
-        nsCRT::free(o_Accept);
+        free(o_Accept);
         return NS_ERROR_OUT_OF_MEMORY;
     }
     *q_Accept = '\0';
@@ -1479,7 +1477,7 @@ PrepareAcceptLanguages(const char *i_AcceptLanguages, nsACString &o_AcceptLangua
             MOZ_ASSERT(available > 0, "allocated string not long enough");
         }
     }
-    nsCRT::free(o_Accept);
+    free(o_Accept);
 
     o_AcceptLanguages.Assign((const char *) q_Accept);
     delete [] q_Accept;

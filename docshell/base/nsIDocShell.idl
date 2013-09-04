@@ -9,9 +9,9 @@
 #include "nsIAtom.idl"
 
 %{ C++
+#include "js/TypeDecls.h"
 class nsPresContext;
 class nsIPresShell;
-struct JSContext;
 %}
 
 /**
@@ -42,7 +42,7 @@ interface nsIVariant;
 interface nsIPrivacyTransitionObserver;
 interface nsIReflowObserver;
 
-[scriptable, builtinclass, uuid(365e7446-6c4b-45ae-ae08-b7b401900093)]
+[scriptable, builtinclass, uuid(62f1b40d-1d15-4640-95dc-20caae775bd1)]
 interface nsIDocShell : nsIDocShellTreeItem
 {
   /**
@@ -259,6 +259,13 @@ interface nsIDocShell : nsIDocShellTreeItem
   attribute boolean allowWindowControl;
 
   /**
+   * True if the docshell allows its content to be handled by a content listener
+   * other than the docshell itself, including the external helper app service,
+   * and false otherwise.  Defaults to true.
+   */
+  [infallible] attribute boolean allowContentRetargeting;
+
+  /**
    * Get an enumerator over this docShell and its children.
    *
    * @param aItemType  - Only include docShells of this type, or if typeAll,
@@ -403,6 +410,22 @@ interface nsIDocShell : nsIDocShellTreeItem
 
   /* attribute to access whether error pages are enabled */
   attribute boolean useErrorPages;
+
+  /**
+   * Display a load error in a frame while keeping that frame's currentURI
+   * pointing correctly to the page where the error ocurred, rather than to
+   * the error document page. You must provide either the aURI or aURL parameter.
+   *
+   * @param  aError         The error code to be displayed
+   * @param  aURI           nsIURI of the page where the error happened
+   * @param  aURL           wstring of the page where the error happened
+   * @param  aFailedChannel The channel related to this error
+   */
+  void displayLoadError(in nsresult aError,
+                        in nsIURI aURI,
+                        in wstring aURL,
+                        [optional] in nsIChannel aFailedChannel);
+
 
   /**
    * Keeps track of the previous SHTransaction index and the current

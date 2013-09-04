@@ -15,7 +15,7 @@
 #include "jit/x64/BaselineHelpers-x64.h"
 
 using namespace js;
-using namespace js::ion;
+using namespace js::jit;
 
 // All registers to save and restore. This includes the stack pointer, since we
 // use the ability to reference register values on the stack by index.
@@ -194,7 +194,7 @@ IonRuntime::generateEnterJIT(JSContext *cx, EnterJitType type)
         masm.passABIArg(framePtr); // BaselineFrame
         masm.passABIArg(OsrFrameReg); // StackFrame
         masm.passABIArg(numStackValues);
-        masm.callWithABI(JS_FUNC_TO_DATA_PTR(void *, ion::InitBaselineFrameForOsr));
+        masm.callWithABI(JS_FUNC_TO_DATA_PTR(void *, jit::InitBaselineFrameForOsr));
 
         masm.pop(reg_code);
         masm.pop(framePtr);
@@ -287,7 +287,7 @@ IonRuntime::generateInvalidator(JSContext *cx)
     // Push registers such that we can access them from [base + code].
     masm.PushRegsInMask(AllRegs);
 
-    masm.movq(rsp, rax); // Argument to ion::InvalidationBailout.
+    masm.movq(rsp, rax); // Argument to jit::InvalidationBailout.
 
     // Make space for InvalidationBailout's frameSize outparam.
     masm.reserveStack(sizeof(size_t));
@@ -348,8 +348,6 @@ IonRuntime::generateArgumentsRectifier(JSContext *cx, ExecutionMode mode, void *
 
         masm.push(r10);
         masm.subl(Imm32(1), rcx);
-
-        masm.testl(rcx, rcx);
         masm.j(Assembler::NonZero, &undefLoopTop);
     }
 
@@ -358,19 +356,14 @@ IonRuntime::generateArgumentsRectifier(JSContext *cx, ExecutionMode mode, void *
     masm.lea(Operand(b), rcx);
 
     // Push arguments, |nargs| + 1 times (to include |this|).
+    masm.addl(Imm32(1), r8);
     {
-        Label copyLoopTop, initialSkip;
-
-        masm.jump(&initialSkip);
+        Label copyLoopTop;
 
         masm.bind(&copyLoopTop);
+        masm.push(Operand(rcx, 0x0));
         masm.subq(Imm32(sizeof(Value)), rcx);
         masm.subl(Imm32(1), r8);
-        masm.bind(&initialSkip);
-
-        masm.push(Operand(rcx, 0x0));
-
-        masm.testl(r8, r8);
         masm.j(Assembler::NonZero, &copyLoopTop);
     }
 

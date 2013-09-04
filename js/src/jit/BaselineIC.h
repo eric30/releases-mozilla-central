@@ -18,7 +18,7 @@
 #include "jit/BaselineRegisters.h"
 
 namespace js {
-namespace ion {
+namespace jit {
 
 //
 // Baseline Inline Caches are polymorphic caches that aggressively
@@ -324,11 +324,14 @@ class ICEntry
     _(Call_Scripted)            \
     _(Call_AnyScripted)         \
     _(Call_Native)              \
+    _(Call_ScriptedApplyArray)  \
     _(Call_ScriptedApplyArguments) \
                                 \
     _(GetElem_Fallback)         \
-    _(GetElem_Native)           \
-    _(GetElem_NativePrototype)  \
+    _(GetElem_NativeSlot)       \
+    _(GetElem_NativePrototypeSlot) \
+    _(GetElem_NativePrototypeCallNative) \
+    _(GetElem_NativePrototypeCallScripted) \
     _(GetElem_String)           \
     _(GetElem_Dense)            \
     _(GetElem_TypedArray)       \
@@ -731,8 +734,13 @@ class ICStub
           case Call_Scripted:
           case Call_AnyScripted:
           case Call_Native:
+          case Call_ScriptedApplyArray:
           case Call_ScriptedApplyArguments:
           case UseCount_Fallback:
+          case GetElem_NativeSlot:
+          case GetElem_NativePrototypeSlot:
+          case GetElem_NativePrototypeCallNative:
+          case GetElem_NativePrototypeCallScripted:
           case GetProp_CallScripted:
           case GetProp_CallNative:
           case GetProp_CallDOMProxyNative:
@@ -1029,6 +1037,7 @@ class ICStubCompiler
         JS_ASSERT(!regs.has(BaselineStackReg));
 #ifdef JS_CPU_ARM
         JS_ASSERT(!regs.has(BaselineTailCallReg));
+        regs.take(BaselineSecondScratchReg);
 #endif
         regs.take(BaselineFrameReg);
         regs.take(BaselineStubReg);
@@ -2836,14 +2845,22 @@ class ICGetElem_Fallback : public ICMonitoredFallbackStub
 
 class ICGetElemNativeStub : public ICMonitoredStub
 {
-    HeapPtrShape shape_;
-    HeapValue idval_;
-    uint32_t offset_;
+  public:
+    enum AccessType { FixedSlot = 0, DynamicSlot, NativeGetter, ScriptedGetter };
 
   protected:
+    HeapPtrShape shape_;
+    HeapPtrPropertyName name_;
+
+    static const unsigned NEEDS_ATOMIZE_SHIFT = 0;
+    static const uint16_t NEEDS_ATOMIZE_MASK = 0x1;
+
+    static const unsigned ACCESSTYPE_SHIFT = 1;
+    static const uint16_t ACCESSTYPE_MASK = 0x3;
+
     ICGetElemNativeStub(ICStub::Kind kind, IonCode *stubCode, ICStub *firstMonitorStub,
-                        HandleShape shape, HandleValue idval,
-                        bool isFixedSlot, uint32_t offset);
+                        HandleShape shape, HandlePropertyName name, AccessType acctype,
+                        bool needsAtomize);
 
     ~ICGetElemNativeStub();
 
@@ -2855,130 +2872,311 @@ class ICGetElemNativeStub : public ICMonitoredStub
         return offsetof(ICGetElemNativeStub, shape_);
     }
 
-    HeapValue &idval() {
-        return idval_;
+    HeapPtrPropertyName &name() {
+        return name_;
     }
-    static size_t offsetOfIdval() {
-        return offsetof(ICGetElemNativeStub, idval_);
+    static size_t offsetOfName() {
+        return offsetof(ICGetElemNativeStub, name_);
     }
 
+    AccessType accessType() const {
+        return static_cast<AccessType>((extra_ >> ACCESSTYPE_SHIFT) & ACCESSTYPE_MASK);
+    }
+
+    bool needsAtomize() const {
+        return (extra_ >> NEEDS_ATOMIZE_SHIFT) & NEEDS_ATOMIZE_MASK;
+    }
+};
+
+class ICGetElemNativeSlotStub : public ICGetElemNativeStub
+{
+  protected:
+    uint32_t offset_;
+
+    ICGetElemNativeSlotStub(ICStub::Kind kind, IonCode *stubCode, ICStub *firstMonitorStub,
+                            HandleShape shape, HandlePropertyName name,
+                            AccessType acctype, bool needsAtomize, uint32_t offset)
+      : ICGetElemNativeStub(kind, stubCode, firstMonitorStub, shape, name, acctype, needsAtomize),
+        offset_(offset)
+    {
+        JS_ASSERT(kind == GetElem_NativeSlot || kind == GetElem_NativePrototypeSlot);
+        JS_ASSERT(acctype == FixedSlot || acctype == DynamicSlot);
+    }
+
+  public:
     uint32_t offset() const {
         return offset_;
     }
-    static size_t offsetOfOffset() {
-        return offsetof(ICGetElemNativeStub, offset_);
-    }
 
-    bool isFixedSlot() const {
-        return extra_;
+    static size_t offsetOfOffset() {
+        return offsetof(ICGetElemNativeSlotStub, offset_);
     }
 };
 
-class ICGetElem_Native : public ICGetElemNativeStub
+class ICGetElemNativeGetterStub : public ICGetElemNativeStub
+{
+  protected:
+    HeapPtrFunction getter_;
+    uint32_t pcOffset_;
+
+    ICGetElemNativeGetterStub(ICStub::Kind kind, IonCode *stubCode, ICStub *firstMonitorStub,
+                            HandleShape shape, HandlePropertyName name, AccessType acctype,
+                            bool needsAtomize, HandleFunction getter, uint32_t pcOffset);
+
+  public:
+    HeapPtrFunction &getter() {
+        return getter_;
+    }
+    static size_t offsetOfGetter() {
+        return offsetof(ICGetElemNativeGetterStub, getter_);
+    }
+
+    static size_t offsetOfPCOffset() {
+        return offsetof(ICGetElemNativeGetterStub, pcOffset_);
+    }
+};
+
+class ICGetElem_NativeSlot : public ICGetElemNativeSlotStub
 {
     friend class ICStubSpace;
-    ICGetElem_Native(IonCode *stubCode, ICStub *firstMonitorStub,
-                     HandleShape shape, HandleValue idval,
-                     bool isFixedSlot, uint32_t offset)
-      : ICGetElemNativeStub(ICStub::GetElem_Native, stubCode, firstMonitorStub, shape, idval,
-                            isFixedSlot, offset)
+    ICGetElem_NativeSlot(IonCode *stubCode, ICStub *firstMonitorStub,
+                         HandleShape shape, HandlePropertyName name,
+                         AccessType acctype, bool needsAtomize, uint32_t offset)
+      : ICGetElemNativeSlotStub(ICStub::GetElem_NativeSlot, stubCode, firstMonitorStub, shape,
+                                name, acctype, needsAtomize, offset)
     {}
 
   public:
-    static inline ICGetElem_Native *New(ICStubSpace *space, IonCode *code,
-                                        ICStub *firstMonitorStub,
-                                        HandleShape shape, HandleValue idval,
-                                        bool isFixedSlot, uint32_t offset)
+    static inline ICGetElem_NativeSlot *New(ICStubSpace *space, IonCode *code,
+                                            ICStub *firstMonitorStub,
+                                            HandleShape shape, HandlePropertyName name,
+                                            AccessType acctype, bool needsAtomize, uint32_t offset)
     {
         if (!code)
             return NULL;
-        return space->allocate<ICGetElem_Native>(code, firstMonitorStub, shape, idval,
-                                                 isFixedSlot, offset);
+        return space->allocate<ICGetElem_NativeSlot>(code, firstMonitorStub, shape, name,
+                                                     acctype, needsAtomize, offset);
     }
 };
 
-class ICGetElem_NativePrototype : public ICGetElemNativeStub
+class ICGetElem_NativePrototypeSlot : public ICGetElemNativeSlotStub
 {
     friend class ICStubSpace;
     HeapPtrObject holder_;
     HeapPtrShape holderShape_;
 
-    ICGetElem_NativePrototype(IonCode *stubCode, ICStub *firstMonitorStub,
-                              HandleShape shape, HandleValue idval,
-                              bool isFixedSlot, uint32_t offset,
-                              HandleObject holder, HandleShape holderShape);
+    ICGetElem_NativePrototypeSlot(IonCode *stubCode, ICStub *firstMonitorStub,
+                                  HandleShape shape, HandlePropertyName name,
+                                  AccessType acctype, bool needsAtomize, uint32_t offset,
+                                  HandleObject holder, HandleShape holderShape);
 
   public:
-    static inline ICGetElem_NativePrototype *New(ICStubSpace *space, IonCode *code,
-                                                 ICStub *firstMonitorStub,
-                                                 HandleShape shape, HandleValue idval,
-                                                 bool isFixedSlot, uint32_t offset,
-                                                 HandleObject holder, HandleShape holderShape)
+    static inline ICGetElem_NativePrototypeSlot *New(ICStubSpace *space, IonCode *code,
+                                                     ICStub *firstMonitorStub,
+                                                     HandleShape shape, HandlePropertyName name,
+                                                     AccessType acctype, bool needsAtomize,
+                                                     uint32_t offset, HandleObject holder,
+                                                     HandleShape holderShape)
     {
         if (!code)
             return NULL;
-        return space->allocate<ICGetElem_NativePrototype>(code, firstMonitorStub, shape, idval,
-                                                          isFixedSlot, offset, holder, holderShape);
+        return space->allocate<ICGetElem_NativePrototypeSlot>(
+                    code, firstMonitorStub, shape, name, acctype, needsAtomize, offset, holder,
+                    holderShape);
     }
 
     HeapPtrObject &holder() {
         return holder_;
     }
     static size_t offsetOfHolder() {
-        return offsetof(ICGetElem_NativePrototype, holder_);
+        return offsetof(ICGetElem_NativePrototypeSlot, holder_);
     }
 
     HeapPtrShape &holderShape() {
         return holderShape_;
     }
     static size_t offsetOfHolderShape() {
-        return offsetof(ICGetElem_NativePrototype, holderShape_);
+        return offsetof(ICGetElem_NativePrototypeSlot, holderShape_);
     }
 };
 
-// Compiler for GetElem_Native and GetElem_NativePrototype stubs.
+class ICGetElemNativePrototypeCallStub : public ICGetElemNativeGetterStub
+{
+    friend class ICStubSpace;
+    HeapPtrObject holder_;
+    HeapPtrShape holderShape_;
+
+  protected:
+    ICGetElemNativePrototypeCallStub(ICStub::Kind kind, IonCode *stubCode, ICStub *firstMonitorStub,
+                                     HandleShape shape, HandlePropertyName name,
+                                     AccessType acctype, bool needsAtomize, HandleFunction getter,
+                                     uint32_t pcOffset, HandleObject holder,
+                                     HandleShape holderShape);
+
+  public:
+    HeapPtrObject &holder() {
+        return holder_;
+    }
+    static size_t offsetOfHolder() {
+        return offsetof(ICGetElemNativePrototypeCallStub, holder_);
+    }
+
+    HeapPtrShape &holderShape() {
+        return holderShape_;
+    }
+    static size_t offsetOfHolderShape() {
+        return offsetof(ICGetElemNativePrototypeCallStub, holderShape_);
+    }
+};
+
+class ICGetElem_NativePrototypeCallNative : public ICGetElemNativePrototypeCallStub
+{
+    friend class ICStubSpace;
+
+    ICGetElem_NativePrototypeCallNative(IonCode *stubCode, ICStub *firstMonitorStub,
+                                        HandleShape shape, HandlePropertyName name,
+                                        AccessType acctype, bool needsAtomize,
+                                        HandleFunction getter, uint32_t pcOffset,
+                                        HandleObject holder, HandleShape holderShape)
+      : ICGetElemNativePrototypeCallStub(GetElem_NativePrototypeCallNative,
+                                         stubCode, firstMonitorStub, shape, name,
+                                         acctype, needsAtomize, getter, pcOffset, holder,
+                                         holderShape)
+    {}
+
+  public:
+    static inline ICGetElem_NativePrototypeCallNative *New(
+                    ICStubSpace *space, IonCode *code, ICStub *firstMonitorStub,
+                    HandleShape shape, HandlePropertyName name, AccessType acctype,
+                    bool needsAtomize, HandleFunction getter, uint32_t pcOffset,
+                    HandleObject holder, HandleShape holderShape)
+    {
+        if (!code)
+            return NULL;
+        return space->allocate<ICGetElem_NativePrototypeCallNative>(
+                        code, firstMonitorStub, shape, name, acctype, needsAtomize, getter,
+                        pcOffset, holder, holderShape);
+    }
+};
+
+class ICGetElem_NativePrototypeCallScripted : public ICGetElemNativePrototypeCallStub
+{
+    friend class ICStubSpace;
+
+    ICGetElem_NativePrototypeCallScripted(IonCode *stubCode, ICStub *firstMonitorStub,
+                                        HandleShape shape, HandlePropertyName name,
+                                        AccessType acctype, bool needsAtomize,
+                                        HandleFunction getter, uint32_t pcOffset,
+                                        HandleObject holder, HandleShape holderShape)
+      : ICGetElemNativePrototypeCallStub(GetElem_NativePrototypeCallScripted,
+                                         stubCode, firstMonitorStub, shape, name,
+                                         acctype, needsAtomize, getter, pcOffset, holder,
+                                         holderShape)
+    {}
+
+  public:
+    static inline ICGetElem_NativePrototypeCallScripted *New(
+                    ICStubSpace *space, IonCode *code, ICStub *firstMonitorStub,
+                    HandleShape shape, HandlePropertyName name, AccessType acctype,
+                    bool needsAtomize, HandleFunction getter, uint32_t pcOffset,
+                    HandleObject holder, HandleShape holderShape)
+    {
+        if (!code)
+            return NULL;
+        return space->allocate<ICGetElem_NativePrototypeCallScripted>(
+                        code, firstMonitorStub, shape, name, acctype, needsAtomize, getter,
+                        pcOffset, holder, holderShape);
+    }
+};
+
+// Compiler for GetElem_NativeSlot and GetElem_NativePrototypeSlot stubs.
 class ICGetElemNativeCompiler : public ICStubCompiler
 {
     ICStub *firstMonitorStub_;
     HandleObject obj_;
     HandleObject holder_;
-    HandleValue idval_;
-    bool isFixedSlot_;
+    HandlePropertyName name_;
+    ICGetElemNativeStub::AccessType acctype_;
+    bool needsAtomize_;
     uint32_t offset_;
+    HandleFunction getter_;
+    uint32_t pcOffset_;
 
+    bool emitCallNative(MacroAssembler &masm, Register objReg);
+    bool emitCallScripted(MacroAssembler &masm, Register objReg);
     bool generateStubCode(MacroAssembler &masm);
 
   protected:
     virtual int32_t getKey() const {
-        return static_cast<int32_t>(kind) | (static_cast<int32_t>(isFixedSlot_) << 16);
+        return static_cast<int32_t>(kind) | (static_cast<int32_t>(needsAtomize_) << 16) |
+               (static_cast<int32_t>(acctype_) << 17);
     }
 
   public:
     ICGetElemNativeCompiler(JSContext *cx, ICStub::Kind kind, ICStub *firstMonitorStub,
-                            HandleObject obj, HandleObject holder, HandleValue idval,
-                            bool isFixedSlot, uint32_t offset)
+                            HandleObject obj, HandleObject holder, HandlePropertyName name,
+                            ICGetElemNativeStub::AccessType acctype, bool needsAtomize,
+                            uint32_t offset)
       : ICStubCompiler(cx, kind),
         firstMonitorStub_(firstMonitorStub),
         obj_(obj),
         holder_(holder),
-        idval_(idval),
-        isFixedSlot_(isFixedSlot),
-        offset_(offset)
+        name_(name),
+        acctype_(acctype),
+        needsAtomize_(needsAtomize),
+        offset_(offset),
+        getter_(NULL),
+        pcOffset_(0)
+    {}
+
+    ICGetElemNativeCompiler(JSContext *cx, ICStub::Kind kind, ICStub *firstMonitorStub,
+                            HandleObject obj, HandleObject holder, HandlePropertyName name,
+                            ICGetElemNativeStub::AccessType acctype, bool needsAtomize,
+                            HandleFunction getter, uint32_t pcOffset)
+      : ICStubCompiler(cx, kind),
+        firstMonitorStub_(firstMonitorStub),
+        obj_(obj),
+        holder_(holder),
+        name_(name),
+        acctype_(acctype),
+        needsAtomize_(needsAtomize),
+        offset_(0),
+        getter_(getter),
+        pcOffset_(pcOffset)
     {}
 
     ICStub *getStub(ICStubSpace *space) {
         RootedShape shape(cx, obj_->lastProperty());
-        if (kind == ICStub::GetElem_Native) {
+        if (kind == ICStub::GetElem_NativeSlot) {
             JS_ASSERT(obj_ == holder_);
-            return ICGetElem_Native::New(space, getStubCode(), firstMonitorStub_, shape, idval_,
-                                         isFixedSlot_, offset_);
+            return ICGetElem_NativeSlot::New(
+                    space, getStubCode(), firstMonitorStub_, shape, name_, acctype_, needsAtomize_,
+                    offset_);
         }
 
         JS_ASSERT(obj_ != holder_);
-        JS_ASSERT(kind == ICStub::GetElem_NativePrototype);
         RootedShape holderShape(cx, holder_->lastProperty());
-        return ICGetElem_NativePrototype::New(space, getStubCode(), firstMonitorStub_, shape,
-                                              idval_, isFixedSlot_, offset_, holder_, holderShape);
+        if (kind == ICStub::GetElem_NativePrototypeSlot) {
+            return ICGetElem_NativePrototypeSlot::New(
+                    space, getStubCode(), firstMonitorStub_, shape, name_, acctype_, needsAtomize_,
+                    offset_, holder_, holderShape);
+        }
+
+        if (kind == ICStub::GetElem_NativePrototypeCallNative) {
+            return ICGetElem_NativePrototypeCallNative::New(
+                    space, getStubCode(), firstMonitorStub_, shape, name_, acctype_, needsAtomize_,
+                    getter_, pcOffset_, holder_, holderShape);
+        }
+
+        JS_ASSERT(kind == ICStub::GetElem_NativePrototypeCallScripted);
+        if (kind == ICStub::GetElem_NativePrototypeCallScripted) {
+            return ICGetElem_NativePrototypeCallScripted::New(
+                    space, getStubCode(), firstMonitorStub_, shape, name_, acctype_, needsAtomize_,
+                    getter_, pcOffset_, holder_, holderShape);
+        }
+
+        MOZ_ASSUME_UNREACHABLE("Invalid kind.");
+        return NULL;
     }
 };
 
@@ -4911,10 +5109,16 @@ class ICCallStubCompiler : public ICStubCompiler
       : ICStubCompiler(cx, kind)
     { }
 
+    enum FunApplyThing {
+        FunApply_MagicArgs,
+        FunApply_Array
+    };
+
     void pushCallArguments(MacroAssembler &masm, GeneralRegisterSet regs, Register argcReg);
     Register guardFunApply(MacroAssembler &masm, GeneralRegisterSet regs, Register argcReg,
-                           bool checkNative, Label *failure);
+                           bool checkNative, FunApplyThing applyThing, Label *failure);
     void pushCallerArguments(MacroAssembler &masm, GeneralRegisterSet regs);
+    void pushArrayArguments(MacroAssembler &masm, Address arrayVal, GeneralRegisterSet regs);
 };
 
 class ICCall_Fallback : public ICMonitoredFallbackStub
@@ -5143,6 +5347,61 @@ class ICCall_Native : public ICMonitoredStub
 
         ICStub *getStub(ICStubSpace *space) {
             return ICCall_Native::New(space, getStubCode(), firstMonitorStub_, callee_, pcOffset_);
+        }
+    };
+};
+
+class ICCall_ScriptedApplyArray : public ICMonitoredStub
+{
+    friend class ICStubSpace;
+  public:
+    // The maximum length of an inlineable funcall array.
+    // Keep this small to avoid controllable stack overflows by attackers passing large
+    // arrays to fun.apply.
+    const static uint32_t MAX_ARGS_ARRAY_LENGTH = 16;
+
+  protected:
+    uint32_t pcOffset_;
+
+    ICCall_ScriptedApplyArray(IonCode *stubCode, ICStub *firstMonitorStub, uint32_t pcOffset)
+      : ICMonitoredStub(ICStub::Call_ScriptedApplyArray, stubCode, firstMonitorStub),
+        pcOffset_(pcOffset)
+    {}
+
+  public:
+    static inline ICCall_ScriptedApplyArray *New(ICStubSpace *space, IonCode *code,
+                                                 ICStub *firstMonitorStub, uint32_t pcOffset)
+    {
+        if (!code)
+            return NULL;
+        return space->allocate<ICCall_ScriptedApplyArray>(code, firstMonitorStub, pcOffset);
+    }
+
+    static size_t offsetOfPCOffset() {
+        return offsetof(ICCall_ScriptedApplyArray, pcOffset_);
+    }
+
+    // Compiler for this stub kind.
+    class Compiler : public ICCallStubCompiler {
+      protected:
+        ICStub *firstMonitorStub_;
+        uint32_t pcOffset_;
+        bool generateStubCode(MacroAssembler &masm);
+
+        virtual int32_t getKey() const {
+            return static_cast<int32_t>(kind);
+        }
+
+      public:
+        Compiler(JSContext *cx, ICStub *firstMonitorStub, uint32_t pcOffset)
+          : ICCallStubCompiler(cx, ICStub::Call_ScriptedApplyArray),
+            firstMonitorStub_(firstMonitorStub),
+            pcOffset_(pcOffset)
+        { }
+
+        ICStub *getStub(ICStubSpace *space) {
+            return ICCall_ScriptedApplyArray::New(space, getStubCode(), firstMonitorStub_,
+                                                      pcOffset_);
         }
     };
 };
@@ -5618,7 +5877,7 @@ class ICRetSub_Resume : public ICStub
     };
 };
 
-} // namespace ion
+} // namespace jit
 } // namespace js
 
 #endif // JS_ION

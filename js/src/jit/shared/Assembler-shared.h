@@ -11,6 +11,8 @@
 
 #include <limits.h>
 
+#include "jsworkers.h"
+
 #include "jit/IonAllocPolicy.h"
 #include "jit/Registers.h"
 #include "jit/RegisterSets.h"
@@ -21,7 +23,7 @@
 #    define JS_SMALL_BRANCH
 #endif
 namespace js {
-namespace ion {
+namespace jit {
 
 enum Scale {
     TimesOne = 0,
@@ -269,8 +271,8 @@ class Label : public LabelBase
 #ifdef DEBUG
         // Note: the condition is a hack to silence this assert when OOM testing,
         // see bug 756614.
-        if (!js_IonOptions.parallelCompilation)
-            JS_ASSERT_IF(MaybeGetIonContext() && !GetIonContext()->runtime->hadOutOfMemory, !used());
+        if (MaybeGetIonContext() && !OffThreadIonCompilationEnabled(GetIonContext()->runtime))
+            JS_ASSERT_IF(!GetIonContext()->runtime->hadOutOfMemory, !used());
 #endif
     }
 };
@@ -571,7 +573,7 @@ class CodeLocationLabel
 };
 
 
-} // namespace ion
+} // namespace jit
 } // namespace js
 
 #endif /* jit_shared_Assembler_shared_h */

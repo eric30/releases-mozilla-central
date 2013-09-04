@@ -25,6 +25,8 @@
 
 #include "mozilla/Attributes.h"
 
+#include "js/TypeDecls.h"
+
 class nsIRDFResource;
 class nsIRDFService;
 class nsPIWindowRoot;
@@ -40,7 +42,6 @@ class nsIXULPrototypeScript;
 #include "nsURIHashKey.h"
 #include "nsInterfaceHashtable.h"
 
-class JSObject;
 struct JSTracer;
 struct PRLogModuleInfo;
 
@@ -591,11 +592,11 @@ protected:
 
     static
     nsresult
-    InsertElement(nsIContent* aParent, nsIContent* aChild, bool aNotify);
+    InsertElement(nsINode* aParent, nsIContent* aChild, bool aNotify);
 
     static 
     nsresult
-    RemoveElement(nsIContent* aParent, nsIContent* aChild);
+    RemoveElement(nsINode* aParent, nsINode* aChild);
 
     /**
      * The current prototype that we are walking to construct the

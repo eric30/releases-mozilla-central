@@ -13,7 +13,7 @@
 #include "jit/MIR.h"
 
 namespace js {
-namespace ion {
+namespace jit {
 
 class MIRGenerator;
 class MIRGraph;
@@ -124,7 +124,12 @@ class LinearSum
     int32_t constant_;
 };
 
-} // namespace ion
+bool
+AnalyzeNewScriptProperties(JSContext *cx, JSFunction *fun,
+                           types::TypeObject *type, HandleObject baseobj,
+                           Vector<types::TypeNewScript::Initializer> *initializerList);
+
+} // namespace jit
 } // namespace js
 
 #endif /* jit_IonAnalysis_h */

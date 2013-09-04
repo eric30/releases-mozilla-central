@@ -66,10 +66,10 @@ var ignoreCallees = {
     "nsISupports.AddRef" : true,
     "nsISupports.Release" : true, // makes me a bit nervous; this is a bug but can happen
     "nsAXPCNativeCallContext.GetJSContext" : true,
-    "js::ion::MDefinition.op" : true, // macro generated virtuals just return a constant
-    "js::ion::MDefinition.opName" : true, // macro generated virtuals just return a constant
-    "js::ion::LInstruction.getDef" : true, // virtual but no implementation can GC
-    "js::ion::IonCache.kind" : true, // macro generated virtuals just return a constant
+    "js::jit::MDefinition.op" : true, // macro generated virtuals just return a constant
+    "js::jit::MDefinition.opName" : true, // macro generated virtuals just return a constant
+    "js::jit::LInstruction.getDef" : true, // virtual but no implementation can GC
+    "js::jit::IonCache.kind" : true, // macro generated virtuals just return a constant
     "icu_50::UObject.__deleting_dtor" : true, // destructors in ICU code can't cause GC
     "mozilla::CycleCollectedJSRuntime.DescribeCustomObjects" : true, // During tracing, cannot GC.
     "mozilla::CycleCollectedJSRuntime.NoteCustomGCThingXPCOMChildren" : true, // During tracing, cannot GC.
@@ -105,6 +105,8 @@ function ignoreEdgeUse(edge, variable)
                 return true;
             if (/~DebugOnly/.test(name))
                 return true;
+            if (/~ScopedThreadSafeStringInspector/.test(name))
+                return true;
         }
     }
 
@@ -136,6 +138,11 @@ var ignoreFunctions = {
     "PR_ErrorInstallTable" : true,
     "PR_SetThreadPrivate" : true,
     "JSObject* js::GetWeakmapKeyDelegate(JSObject*)" : true, // FIXME: mark with AutoAssertNoGC instead
+
+    // These are a little overzealous -- these destructors *can* GC if they end
+    // up wrapping a pending exception. See bug 898815 for the heavyweight fix.
+    "void js::AutoCompartment::~AutoCompartment(int32)" : true,
+    "void JSAutoCompartment::~JSAutoCompartment(int32)" : true,
 };
 
 function ignoreGCFunction(fun)

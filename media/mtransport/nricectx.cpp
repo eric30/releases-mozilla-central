@@ -82,6 +82,7 @@ extern "C" {
 #include "nricectx.h"
 #include "nricemediastream.h"
 #include "nr_socket_prsock.h"
+#include "nrinterfaceprioritizer.h"
 
 namespace mozilla {
 
@@ -317,12 +318,12 @@ RefPtr<NrIceCtx> NrIceCtx::Create(const std::string& name,
     nr_crypto_vtbl = &nr_ice_crypto_nss_vtbl;
     initialized = true;
 
-    // Set the priorites for candidate type preferences
-    NR_reg_set_uchar((char *)"ice.pref.type.srv_rflx",100);
-    NR_reg_set_uchar((char *)"ice.pref.type.peer_rflx",105);
-    NR_reg_set_uchar((char *)"ice.pref.type.prflx",99);
-    NR_reg_set_uchar((char *)"ice.pref.type.host",125);
-    NR_reg_set_uchar((char *)"ice.pref.type.relayed",126);
+    // Set the priorites for candidate type preferences.
+    // These numbers come from RFC 5245 S. 4.1.2.2
+    NR_reg_set_uchar((char *)"ice.pref.type.srv_rflx", 100);
+    NR_reg_set_uchar((char *)"ice.pref.type.peer_rflx", 110);
+    NR_reg_set_uchar((char *)"ice.pref.type.host", 126);
+    NR_reg_set_uchar((char *)"ice.pref.type.relayed", 0);
 
     if (set_interface_priorities) {
       NR_reg_set_uchar((char *)"ice.pref.interface.rl0", 255);
@@ -367,6 +368,20 @@ RefPtr<NrIceCtx> NrIceCtx::Create(const std::string& name,
     MOZ_MTLOG(ML_ERROR, "Couldn't create ICE ctx for '" << name << "'");
     return nullptr;
   }
+
+#ifdef USE_INTERFACE_PRIORITIZER
+  nr_interface_prioritizer *prioritizer = CreateInterfacePrioritizer();
+  if (!prioritizer) {
+    MOZ_MTLOG(PR_LOG_ERROR, "Couldn't create interface prioritizer.");
+    return nullptr;
+  }
+
+  r = nr_ice_ctx_set_interface_prioritizer(ctx->ctx_, prioritizer);
+  if (r) {
+    MOZ_MTLOG(PR_LOG_ERROR, "Couldn't set interface prioritizer.");
+    return nullptr;
+  }
+#endif  // USE_INTERFACE_PRIORITIZER
 
   // Create the handler objects
   ctx->ice_handler_vtbl_ = new nr_ice_handler_vtbl();

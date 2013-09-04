@@ -104,7 +104,6 @@ DOMCI_CLASS(MozMobileMessageThread)
 DOMCI_CLASS(MozConnection)
 #ifdef MOZ_B2G_RIL
 DOMCI_CLASS(MozMobileConnection)
-DOMCI_CLASS(MozCellBroadcast)
 #endif
 
 // @font-face in CSS
@@ -128,12 +127,7 @@ DOMCI_CLASS(CSSPageRule)
 DOMCI_CLASS(MediaQueryList)
 
 #ifdef MOZ_B2G_RIL
-DOMCI_CLASS(MozVoicemail)
 DOMCI_CLASS(MozIccManager)
-#endif
-
-#ifdef MOZ_B2G_FM
-DOMCI_CLASS(FMRadio)
 #endif
 
 #ifdef MOZ_B2G_BT
@@ -145,11 +139,7 @@ DOMCI_CLASS(MozNfc)
 DOMCI_CLASS(NdefRecord)
 #endif
 
-DOMCI_CLASS(CameraControl)
 DOMCI_CLASS(CameraCapabilities)
-
-DOMCI_CLASS(OpenWindowEventDetail)
-DOMCI_CLASS(AsyncScrollEventDetail)
 
 DOMCI_CLASS(LockedFile)
 

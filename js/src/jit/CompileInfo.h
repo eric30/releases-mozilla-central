@@ -12,7 +12,7 @@
 #include "jit/Registers.h"
 
 namespace js {
-namespace ion {
+namespace jit {
 
 inline unsigned
 StartArgSlot(JSScript *script, JSFunction *fun)
@@ -30,11 +30,15 @@ CountArgSlots(JSScript *script, JSFunction *fun)
 
 enum ExecutionMode {
     // Normal JavaScript execution
-    SequentialExecution = 0,
+    SequentialExecution,
 
     // JavaScript code to be executed in parallel worker threads,
     // e.g. by ParallelArray
-    ParallelExecution
+    ParallelExecution,
+
+    // MIR analysis performed when invoking 'new' on a script, to determine
+    // definite properties
+    DefinitePropertiesAnalysis
 };
 
 // Not as part of the enum so we don't get warnings about unhandled enum
@@ -240,7 +244,7 @@ class CompileInfo
     ExecutionMode executionMode_;
 };
 
-} // namespace ion
+} // namespace jit
 } // namespace js
 
 #endif /* jit_CompileInfo_h */

@@ -9,10 +9,10 @@
 
 #include <stdio.h>
 
-class JSScript;
+#include "js/TypeDecls.h"
 
 namespace js {
-namespace ion {
+namespace jit {
 
 class MDefinition;
 class MInstruction;
@@ -69,7 +69,7 @@ class JSONSpewer
     void finish();
 };
 
-} // namespace ion
+} // namespace jit
 } // namespace js
 
 #endif /* jit_JSONSpewer_h */

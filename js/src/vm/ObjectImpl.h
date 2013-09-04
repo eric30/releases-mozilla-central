@@ -14,6 +14,7 @@
 
 #include "jsfriendapi.h"
 #include "jsinfer.h"
+#include "NamespaceImports.h"
 
 #include "gc/Barrier.h"
 #include "gc/Heap.h"
@@ -1284,7 +1285,7 @@ class ObjectImpl : public gc::Cell
     }
 
     bool makeElementsSparse(JSContext *cx) {
-        NEW_OBJECT_REPRESENTATION_ONLY();
+        JS_NEW_OBJECT_REPRESENTATION_ONLY();
         MOZ_ASSUME_UNREACHABLE("NYI");
     }
 
@@ -1412,7 +1413,7 @@ class ObjectImpl : public gc::Cell
     DenseElementsResult ensureDenseElementsInitialized(JSContext *cx, uint32_t index,
                                                        uint32_t extra)
     {
-        NEW_OBJECT_REPRESENTATION_ONLY();
+        JS_NEW_OBJECT_REPRESENTATION_ONLY();
         MOZ_ASSUME_UNREACHABLE("NYI");
     }
 
@@ -1623,7 +1624,7 @@ class ObjectImpl : public gc::Cell
     }
 
     ElementsHeader & elementsHeader() const {
-        NEW_OBJECT_REPRESENTATION_ONLY();
+        JS_NEW_OBJECT_REPRESENTATION_ONLY();
         return *ElementsHeader::fromElements(elements);
     }
 

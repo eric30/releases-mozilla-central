@@ -92,6 +92,7 @@ const RIL_IPC_MSG_NAMES = [
   "RIL:GetCallForwardingOption",
   "RIL:SetCallBarringOption",
   "RIL:GetCallBarringOption",
+  "RIL:ChangeCallBarringPassword",
   "RIL:SetCallWaitingOption",
   "RIL:GetCallWaitingOption",
   "RIL:SetCallingLineIdRestriction",
@@ -109,7 +110,8 @@ const RIL_IPC_MSG_NAMES = [
   "RIL:ExitEmergencyCbMode",
   "RIL:SetVoicePrivacyMode",
   "RIL:GetVoicePrivacyMode",
-  "RIL:ConferenceCallStateChanged"
+  "RIL:ConferenceCallStateChanged",
+  "RIL:OtaStatusChanged"
 ];
 
 XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
@@ -1084,7 +1086,7 @@ RILContentHelper.prototype = {
     let requestId = this.getRequestId(request);
 
     if (DEBUG) debug("setCallBarringOption: " + JSON.stringify(option));
-    if (!this._isValidCallBarringOption(option)) {
+    if (!this._isValidCallBarringOption(option, true)) {
       this.dispatchFireRequestError(requestId, "InvalidCallBarringOption");
       return request;
     }
@@ -1099,6 +1101,31 @@ RILContentHelper.prototype = {
         serviceClass: option.serviceClass
       }
     });
+    return request;
+  },
+
+  changeCallBarringPassword: function changeCallBarringPassword(window, info) {
+    if (window == null) {
+      throw Components.Exception("Can't get window object",
+                                  Cr.NS_ERROR_UNEXPECTED);
+    }
+    let request = Services.DOMRequest.createRequest(window);
+    let requestId = this.getRequestId(request);
+
+    // Checking valid PIN for supplementary services. See TS.22.004 clause 5.2.
+    if (info.pin == null || !info.pin.match(/^\d{4}$/) ||
+        info.newPin == null || !info.newPin.match(/^\d{4}$/)) {
+      this.dispatchFireRequestError(requestId, "InvalidPassword");
+      return request;
+    }
+
+    if (DEBUG) debug("changeCallBarringPassword: " + JSON.stringify(info));
+    info.requestId = requestId;
+    cpmm.sendAsyncMessage("RIL:ChangeCallBarringPassword", {
+      clientId: 0,
+      data: info
+    });
+
     return request;
   },
 
@@ -1531,6 +1558,11 @@ RILContentHelper.prototype = {
                            "notifyDataChanged",
                            null);
         break;
+      case "RIL:OtaStatusChanged":
+        this._deliverEvent("_mobileConnectionListeners",
+                           "notifyOtaStatusChanged",
+                           [msg.json.data]);
+        break;
       case "RIL:EnumerateCalls":
         this.handleEnumerateCalls(msg.json.calls);
         break;
@@ -1656,6 +1688,9 @@ RILContentHelper.prototype = {
         this.handleGetCallBarringOption(msg.json);
         break;
       case "RIL:SetCallBarringOption":
+        this.handleSimpleRequest(msg.json.requestId, msg.json.errorMsg, null);
+        break;
+      case "RIL:ChangeCallBarringPassword":
         this.handleSimpleRequest(msg.json.requestId, msg.json.errorMsg, null);
         break;
       case "RIL:GetCallWaitingOption":
@@ -2037,10 +2072,20 @@ RILContentHelper.prototype = {
   /**
    * Helper for guarding us against invalid option for call barring.
    */
-  _isValidCallBarringOption: function _isValidCallBarringOption(option) {
-    return (option
-            && option.serviceClass != null
-            && this._isValidCallBarringProgram(option.program));
+  _isValidCallBarringOption:
+      function _isValidCallBarringOption(option, usedForSetting) {
+    if (!option ||
+        option.serviceClass == null ||
+        !this._isValidCallBarringProgram(option.program)) {
+      return false;
+    }
+
+    // For setting callbarring option, |enabled| and |password| are required.
+    if (usedForSetting && (option.enabled == null || option.password == null)) {
+      return false;
+    }
+
+    return true;
   }
 };
 

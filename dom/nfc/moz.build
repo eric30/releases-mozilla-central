@@ -24,4 +24,6 @@ if CONFIG['MOZ_B2G_NFC']:
 
 FAIL_ON_WARNINGS = True
 
+LIBRARY_NAME = 'domnfc_s'
+
 LIBXUL_LIBRARY = True

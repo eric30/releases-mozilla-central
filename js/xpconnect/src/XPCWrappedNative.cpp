@@ -14,6 +14,7 @@
 #include "XPCLog.h"
 #include "nsINode.h"
 #include "XPCQuickStubs.h"
+#include "jsprf.h"
 #include "jsproxy.h"
 #include "AccessCheck.h"
 #include "WrapperFactory.h"
@@ -422,6 +423,7 @@ XPCWrappedNative::GetNewOrUsed(xpcObjectHelper& helper,
                                XPCNativeInterface* Interface,
                                XPCWrappedNative** resultWrapper)
 {
+    MOZ_ASSERT(Interface);
     AutoJSContext cx;
     nsWrapperCache *cache = helper.GetWrapperCache();
 
@@ -455,8 +457,7 @@ XPCWrappedNative::GetNewOrUsed(xpcObjectHelper& helper,
     }
 
     if (wrapper) {
-        if (Interface &&
-            !wrapper->FindTearOff(Interface, false, &rv)) {
+        if (!wrapper->FindTearOff(Interface, false, &rv)) {
             MOZ_ASSERT(NS_FAILED(rv), "returning NS_OK on failure");
             return rv;
         }
@@ -476,8 +477,7 @@ XPCWrappedNative::GetNewOrUsed(xpcObjectHelper& helper,
     // If we are making a wrapper for the nsIClassInfo interface then
     // We *don't* want to have it use the prototype meant for instances
     // of that class.
-    bool iidIsClassInfo = Interface &&
-                          Interface->GetIID()->Equals(NS_GET_IID(nsIClassInfo));
+    bool iidIsClassInfo = Interface->GetIID()->Equals(NS_GET_IID(nsIClassInfo));
     uint32_t classInfoFlags;
     bool isClassInfoSingleton = helper.GetClassInfo() == helper.Object() &&
                                 NS_SUCCEEDED(helper.GetClassInfo()
@@ -551,7 +551,7 @@ XPCWrappedNative::GetNewOrUsed(xpcObjectHelper& helper,
         }
 
         if (wrapper) {
-            if (Interface && !wrapper->FindTearOff(Interface, false, &rv)) {
+            if (wrapper->FindTearOff(Interface, false, &rv)) {
                 MOZ_ASSERT(NS_FAILED(rv), "returning NS_OK on failure");
                 return rv;
             }
@@ -614,7 +614,7 @@ XPCWrappedNative::GetNewOrUsed(xpcObjectHelper& helper,
     if (!wrapper->Init(parent, &sciWrapper))
         return NS_ERROR_FAILURE;
 
-    if (Interface && !wrapper->FindTearOff(Interface, false, &rv)) {
+    if (!wrapper->FindTearOff(Interface, false, &rv)) {
         MOZ_ASSERT(NS_FAILED(rv), "returning NS_OK on failure");
         return rv;
     }
@@ -723,6 +723,7 @@ XPCWrappedNative::GetUsedOnly(nsISupports* Object,
 {
     AutoJSContext cx;
     MOZ_ASSERT(Object, "XPCWrappedNative::GetUsedOnly was called with a null Object");
+    MOZ_ASSERT(Interface);
 
     nsRefPtr<XPCWrappedNative> wrapper;
     nsWrapperCache* cache = nullptr;
@@ -755,7 +756,7 @@ XPCWrappedNative::GetUsedOnly(nsISupports* Object,
     }
 
     nsresult rv;
-    if (Interface && !wrapper->FindTearOff(Interface, false, &rv)) {
+    if (!wrapper->FindTearOff(Interface, false, &rv)) {
         MOZ_ASSERT(NS_FAILED(rv), "returning NS_OK on failure");
         return rv;
     }

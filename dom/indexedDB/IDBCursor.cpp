@@ -27,10 +27,12 @@
 
 #include "IndexedDatabaseInlines.h"
 #include "mozilla/dom/BindingDeclarations.h"
+#include "mozilla/dom/UnionTypes.h"
 
 USING_INDEXEDDB_NAMESPACE
 using namespace mozilla::dom::indexedDB::ipc;
 using mozilla::dom::Optional;
+using mozilla::dom::IDBObjectStoreOrIDBIndexReturnValue;
 using mozilla::ErrorResult;
 
 static_assert(sizeof(size_t) >= sizeof(IDBCursor::Direction),
@@ -322,7 +324,7 @@ IDBCursor::CreateCommon(IDBRequest* aRequest,
   cursor->mScriptOwner = database->GetScriptOwner();
 
   if (cursor->mScriptOwner) {
-    NS_HOLD_JS_OBJECTS(cursor, IDBCursor);
+    mozilla::HoldJSObjects(cursor.get());
     cursor->mRooted = true;
   }
 
@@ -388,7 +390,7 @@ IDBCursor::DropJSObjects()
   mHaveCachedValue = false;
   mRooted = false;
   mHaveValue = false;
-  NS_DROP_JS_OBJECTS(this, IDBCursor);
+  mozilla::DropJSObjects(this);
 }
 
 void
@@ -518,20 +520,17 @@ IDBCursor::GetDirection() const
 }
 
 
-already_AddRefed<nsISupports>
-IDBCursor::Source() const
+void
+IDBCursor::GetSource(IDBObjectStoreOrIDBIndexReturnValue& aSource) const
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
-  nsCOMPtr<nsISupports> source;
   if (mType == OBJECTSTORE) {
-    source = do_QueryInterface(mObjectStore);
+    aSource.SetAsIDBObjectStore() = mObjectStore;
   }
   else {
-    source = do_QueryInterface(mIndex);
+    aSource.SetAsIDBIndex() = mIndex;
   }
-
-  return source.forget();
 }
 
 JS::Value
@@ -547,7 +546,7 @@ IDBCursor::GetKey(JSContext* aCx, ErrorResult& aRv)
 
   if (!mHaveCachedKey) {
     if (!mRooted) {
-      NS_HOLD_JS_OBJECTS(this, IDBCursor);
+      mozilla::HoldJSObjects(this);
       mRooted = true;
     }
 
@@ -571,7 +570,7 @@ IDBCursor::GetPrimaryKey(JSContext* aCx, ErrorResult& aRv)
 
   if (!mHaveCachedPrimaryKey) {
     if (!mRooted) {
-      NS_HOLD_JS_OBJECTS(this, IDBCursor);
+      mozilla::HoldJSObjects(this);
       mRooted = true;
     }
 
@@ -603,7 +602,7 @@ IDBCursor::GetValue(JSContext* aCx, ErrorResult& aRv)
 
   if (!mHaveCachedValue) {
     if (!mRooted) {
-      NS_HOLD_JS_OBJECTS(this, IDBCursor);
+      mozilla::HoldJSObjects(this);
       mRooted = true;
     }
 

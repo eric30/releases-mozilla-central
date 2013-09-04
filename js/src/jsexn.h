@@ -12,6 +12,7 @@
 #define jsexn_h
 
 #include "jsapi.h"
+#include "NamespaceImports.h"
 
 /*
  * Initialize the exception constructor/prototype hierarchy.
@@ -54,7 +55,7 @@ extern JSErrorReport *
 js_ErrorFromException(jsval exn);
 
 extern const JSErrorFormatString *
-js_GetLocalizedErrorMessage(JSContext* cx, void *userRef, const char *locale,
+js_GetLocalizedErrorMessage(js::ExclusiveContext *cx, void *userRef, const char *locale,
                             const unsigned errorNumber);
 
 /*

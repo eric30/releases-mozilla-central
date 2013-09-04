@@ -15,7 +15,8 @@
 
 #include "jsprototypes.h"
 #include "jstypes.h"
-#include "jsversion.h"  // #include here so it's seen everywhere
+
+#include "js/TypeDecls.h"
 
 #if defined(JSGC_ROOT_ANALYSIS) || defined(JSGC_USE_EXACT_ROOTING) || defined(DEBUG)
 # define JSGC_TRACK_EXACT_ROOTS
@@ -23,58 +24,20 @@
 
 namespace JS {
 
-/*
- * Allow headers to reference JS::Value without #including the whole jsapi.h.
- * Unfortunately, typedefs (hence jsval) cannot be declared.
- */
-class Value;
+class AutoIdVector;
+class CallArgs;
 
 template <typename T>
 class Rooted;
 
 class JS_PUBLIC_API(AutoGCRooter);
 
+class JS_PUBLIC_API(CompileOptions);
+class JS_PUBLIC_API(CompartmentOptions);
+
 struct Zone;
 
 } /* namespace JS */
-
-/*
- * In release builds, jsid is defined to be an integral type. This
- * prevents many bugs from being caught at compile time. E.g.:
- *
- *  jsid id = ...
- *  if (id)             // error
- *    ...
- *
- *  size_t n = id;      // error
- *
- * To catch more errors, jsid is given a struct type in C++ debug builds.
- * Struct assignment and (in C++) operator== allow correct code to be mostly
- * oblivious to the change. This feature can be explicitly disabled in debug
- * builds by defining JS_NO_JSVAL_JSID_STRUCT_TYPES.
- */
-# if defined(DEBUG) && !defined(JS_NO_JSVAL_JSID_STRUCT_TYPES)
-#  define JS_USE_JSID_STRUCT_TYPES
-# endif
-
-# ifdef JS_USE_JSID_STRUCT_TYPES
-struct jsid
-{
-    size_t asBits;
-    bool operator==(jsid rhs) const { return asBits == rhs.asBits; }
-    bool operator!=(jsid rhs) const { return asBits != rhs.asBits; }
-};
-#  define JSID_BITS(id) (id.asBits)
-# else  /* defined(JS_USE_JSID_STRUCT_TYPES) */
-typedef ptrdiff_t jsid;
-#  define JSID_BITS(id) (id)
-# endif  /* defined(JS_USE_JSID_STRUCT_TYPES) */
-
-#ifdef WIN32
-typedef wchar_t   jschar;
-#else
-typedef uint16_t  jschar;
-#endif
 
 /*
  * Run-time version enumeration.  For compile-time version checking, please use
@@ -174,7 +137,6 @@ typedef enum {
 typedef struct JSClass                      JSClass;
 typedef struct JSCompartment                JSCompartment;
 typedef struct JSConstDoubleSpec            JSConstDoubleSpec;
-typedef struct JSContext                    JSContext;
 typedef struct JSCrossCompartmentCall       JSCrossCompartmentCall;
 typedef struct JSErrorReport                JSErrorReport;
 typedef struct JSExceptionState             JSExceptionState;
@@ -194,11 +156,7 @@ typedef struct JSStructuredCloneWriter      JSStructuredCloneWriter;
 typedef struct JSTracer                     JSTracer;
 
 class                                       JSFlatString;
-class                                       JSFunction;
-class                                       JSObject;
-class                                       JSScript;
 class                                       JSStableString;  // long story
-class                                       JSString;
 
 #ifdef JS_THREADSAFE
 typedef struct PRCallOnceType   JSCallOnceType;
@@ -207,9 +165,16 @@ typedef bool                    JSCallOnceType;
 #endif
 typedef bool                    (*JSInitCallback)(void);
 
+/*
+ * Generic trace operation that calls JS_CallTracer on each traceable thing
+ * stored in data.
+ */
+typedef void
+(* JSTraceDataOp)(JSTracer *trc, void *data);
+
 namespace JS {
 
-typedef void (*OffThreadCompileCallback)(JSScript *script, void *callbackData);
+typedef void (*OffThreadCompileCallback)(void *token, void *callbackData);
 
 namespace shadow {
 
@@ -270,6 +235,19 @@ enum ThingRootKind
     THING_ROOT_BINDINGS,
     THING_ROOT_PROPERTY_DESCRIPTOR,
     THING_ROOT_LIMIT
+};
+
+/*
+ * This list enumerates the different types of conceptual stacks we have in
+ * SpiderMonkey. In reality, they all share the C stack, but we allow different
+ * stack limits depending on the type of code running.
+ */
+enum StackKind
+{
+    StackForSystemCode,      // C++, such as the GC, running on behalf of the VM.
+    StackForTrustedScript,   // Script running with trusted principals.
+    StackForUntrustedScript, // Script running with untrusted principals.
+    StackKindCount
 };
 
 template <typename T>
@@ -397,7 +375,7 @@ struct PerThreadDataFriendFields
 #endif
 
     /* Limit pointer for checking native stack consumption. */
-    uintptr_t nativeStackLimit;
+    uintptr_t nativeStackLimit[StackKindCount];
 
     static const size_t RuntimeMainThreadOffset = offsetof(RuntimeDummy, mainThread);
 

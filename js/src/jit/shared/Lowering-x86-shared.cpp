@@ -14,7 +14,7 @@
 #include "jit/shared/Lowering-shared-inl.h"
 
 using namespace js;
-using namespace js::ion;
+using namespace js::jit;
 
 using mozilla::FloorLog2;
 
@@ -62,7 +62,7 @@ LIRGeneratorX86Shared::visitPowHalf(MPowHalf *ins)
 {
     MDefinition *input = ins->input();
     JS_ASSERT(input->type() == MIRType_Double);
-    LPowHalfD *lir = new LPowHalfD(useRegisterAtStart(input), temp());
+    LPowHalfD *lir = new LPowHalfD(useRegisterAtStart(input));
     return defineReuseInput(lir, ins, 0);
 }
 

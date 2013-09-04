@@ -350,6 +350,16 @@ function schedule(callback) {
 
 // Public API
 this.SocialService = {
+  get hasEnabledProviders() {
+    // used as an optimization during startup, can be used to check if further
+    // initialization should be done (e.g. creating the instances of
+    // SocialProvider and turning on UI). ActiveProviders may have changed and
+    // not yet flushed so we check the active providers array
+    for (let p in ActiveProviders._providers) {
+      return true;
+    };
+    return false;
+  },
   get enabled() {
     return SocialServiceInternal.enabled;
   },
@@ -651,13 +661,14 @@ this.SocialService = {
    * have knowledge of the currently selected provider here, we will notify
    * the front end to deal with any reload.
    */
-  updateProvider: function(aDOMDocument, aManifest, aCallback) {
-    let installOrigin = aDOMDocument.nodePrincipal.origin;
-    let installType = this.getOriginActivationType(installOrigin);
+  updateProvider: function(aUpdateOrigin, aManifest, aCallback) {
+    let originUri = Services.io.newURI(aUpdateOrigin, null, null);
+    let principal = Services.scriptSecurityManager.getNoAppCodebasePrincipal(originUri);
+    let installType = this.getOriginActivationType(aUpdateOrigin);
     // if we get data, we MUST have a valid manifest generated from the data
-    let manifest = this._manifestFromData(installType, aManifest, aDOMDocument.nodePrincipal);
+    let manifest = this._manifestFromData(installType, aManifest, principal);
     if (!manifest)
-      throw new Error("SocialService.installProvider: service configuration is invalid from " + installOrigin);
+      throw new Error("SocialService.installProvider: service configuration is invalid from " + aUpdateOrigin);
 
     // overwrite the preference
     let string = Cc["@mozilla.org/supports-string;1"].
@@ -676,10 +687,10 @@ this.SocialService = {
 
   },
 
-  uninstallProvider: function(origin) {
+  uninstallProvider: function(origin, aCallback) {
     let manifest = SocialServiceInternal.getManifestByOrigin(origin);
     let addon = new AddonWrapper(manifest);
-    addon.uninstall();
+    addon.uninstall(aCallback);
   }
 };
 
@@ -1071,12 +1082,14 @@ var SocialAddonProvider = {
     aCallback([new AddonWrapper(a) for each (a in SocialServiceInternal.manifests)]);
   },
 
-  removeAddon: function(aAddon) {
+  removeAddon: function(aAddon, aCallback) {
     AddonManagerPrivate.callAddonListeners("onUninstalling", aAddon, false);
     aAddon.pendingOperations |= AddonManager.PENDING_UNINSTALL;
     Services.prefs.clearUserPref(getPrefnameFromOrigin(aAddon.manifest.origin));
     aAddon.pendingOperations -= AddonManager.PENDING_UNINSTALL;
     AddonManagerPrivate.callAddonListeners("onUninstalled", aAddon);
+    if (aCallback)
+      schedule(aCallback);
   }
 }
 
@@ -1245,16 +1258,18 @@ AddonWrapper.prototype = {
     return val;
   },
 
-  uninstall: function() {
+  uninstall: function(aCallback) {
     let prefName = getPrefnameFromOrigin(this.manifest.origin);
     if (Services.prefs.prefHasUserValue(prefName)) {
       if (ActiveProviders.has(this.manifest.origin)) {
         SocialService.removeProvider(this.manifest.origin, function() {
-          SocialAddonProvider.removeAddon(this);
+          SocialAddonProvider.removeAddon(this, aCallback);
         }.bind(this));
       } else {
-        SocialAddonProvider.removeAddon(this);
+        SocialAddonProvider.removeAddon(this, aCallback);
       }
+    } else {
+      schedule(aCallback);
     }
   },
 

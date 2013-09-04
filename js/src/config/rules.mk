@@ -10,6 +10,10 @@ ifndef topsrcdir
 $(error topsrcdir was not set))
 endif
 
+ifndef INCLUDED_MOZCONFIG_MK
+include $(topsrcdir)/config/makefiles/mozconfig.mk
+endif
+
 # Integrate with mozbuild-generated make files. We first verify that no
 # variables provided by the automatically generated .mk files are
 # present. If they are, this is a violation of the separation of
@@ -24,6 +28,7 @@ _MOZBUILD_EXTERNAL_VARIABLES := \
   GTEST_CSRCS \
   HOST_CSRCS \
   HOST_LIBRARY_NAME \
+  LIBRARY_NAME \
   LIBXUL_LIBRARY \
   MODULE \
   MSVC_ENABLE_PGO \
@@ -427,7 +432,9 @@ UPDATE_TITLE = printf "\033]0;%s in %s\007" $(1) $(shell $(BUILD_TOOLS)/print-de
 endif
 
 ifdef MACH
+ifndef NO_BUILDSTATUS_MESSAGES
 BUILDSTATUS=@echo "BUILDSTATUS $1"
+endif
 endif
 
 # Static directories are largely independent of our build system. But, they
@@ -680,9 +687,6 @@ SUBMAKEFILES += $(addsuffix /Makefile, $(DIRS) $(TOOL_DIRS) $(PARALLEL_DIRS))
 ifndef SUPPRESS_DEFAULT_RULES
 ifndef TIERS
 default all::
-ifneq (,$(strip $(STATIC_DIRS)))
-	$(foreach dir,$(STATIC_DIRS),$(call SUBMAKE,,$(dir),1))
-endif
 	$(MAKE) export
 	$(MAKE) libs
 	$(MAKE) tools
@@ -827,10 +831,21 @@ checkout:
 clean clobber realclean clobber_all:: $(SUBMAKEFILES)
 	-$(RM) $(ALL_TRASH)
 	-$(RM) -r $(ALL_TRASH_DIRS)
-	$(foreach dir,$(PARALLEL_DIRS) $(DIRS) $(STATIC_DIRS) $(TOOL_DIRS),-$(call SUBMAKE,$@,$(dir)))
+
+ifdef TIERS
+clean clobber realclean clobber_all distclean::
+	$(foreach dir, \
+		$(foreach tier, $(TIERS), $(tier_$(tier)_staticdirs) $(tier_$(tier)_dirs)), \
+		-$(call SUBMAKE,$@,$(dir)))
+else
+clean clobber realclean clobber_all distclean::
+	$(foreach dir,$(PARALLEL_DIRS) $(DIRS) $(TOOL_DIRS),-$(call SUBMAKE,$@,$(dir)))
 
 distclean:: $(SUBMAKEFILES)
-	$(foreach dir,$(PARALLEL_DIRS) $(DIRS) $(STATIC_DIRS) $(TOOL_DIRS),-$(call SUBMAKE,$@,$(dir)))
+	$(foreach dir,$(PARALLEL_DIRS) $(DIRS) $(TOOL_DIRS),-$(call SUBMAKE,$@,$(dir)))
+endif
+
+distclean::
 	-$(RM) -r $(ALL_TRASH_DIRS)
 	-$(RM) $(ALL_TRASH)  \
 	Makefile .HSancillary \

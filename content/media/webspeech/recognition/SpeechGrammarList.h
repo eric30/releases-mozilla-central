@@ -9,14 +9,13 @@
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsWrapperCache.h"
+#include "js/TypeDecls.h"
 
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/BindingUtils.h"
 
 #include "EnableWebSpeechRecognitionCheck.h"
 #include "SpeechGrammar.h"
-
-struct JSContext;
 
 namespace mozilla {
 namespace dom {
@@ -33,7 +32,8 @@ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(SpeechGrammarList)
 
-  SpeechGrammarList* Constructor(const GlobalObject& aGlobal, ErrorResult& aRv);
+  SpeechGrammarList* Constructor(const GlobalObject& aGlobal,
+                                 ErrorResult& aRv);
 
   nsISupports* GetParentObject() const;
 

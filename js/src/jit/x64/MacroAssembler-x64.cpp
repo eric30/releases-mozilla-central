@@ -12,7 +12,7 @@
 #include "jit/MoveEmitter.h"
 
 using namespace js;
-using namespace js::ion;
+using namespace js::jit;
 
 void
 MacroAssemblerX64::loadConstantDouble(double d, const FloatRegister &dest)
@@ -314,6 +314,6 @@ Assembler::Condition
 MacroAssemblerX64::testNegativeZero(const FloatRegister &reg, const Register &scratch)
 {
     movq(reg, scratch);
-    subq(Imm32(1), scratch);
+    cmpq(scratch, Imm32(1));
     return Overflow;
 }

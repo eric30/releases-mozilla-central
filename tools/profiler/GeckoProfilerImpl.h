@@ -13,11 +13,9 @@
 #include <algorithm>
 #include "mozilla/ThreadLocal.h"
 #include "mozilla/Assertions.h"
-#include "mozilla/TimeStamp.h"
 #include "mozilla/Util.h"
 #include "nsAlgorithm.h"
 #include "nscore.h"
-#include "jsfriendapi.h"
 #include "GeckoProfilerFunc.h"
 #include "PseudoStack.h"
 #include "nsISupports.h"
@@ -37,6 +35,10 @@
 struct PseudoStack;
 class TableTicker;
 class JSCustomObject;
+
+namespace mozilla {
+class TimeStamp;
+}
 
 extern mozilla::ThreadLocal<PseudoStack *> tlsPseudoStack;
 extern mozilla::ThreadLocal<TableTicker *> tlsTicker;

@@ -10,9 +10,7 @@
 #include "mozilla/Likely.h"
 
 #include "jsapi.h"
-#include "jsfriendapi.h"
 #include "jsproxy.h"
-#include "xpcpublic.h"
 #include "nsStringGlue.h"
 
 #define DOM_PROXY_OBJECT_SLOT js::PROXY_PRIVATE_SLOT
@@ -20,12 +18,29 @@
 namespace mozilla {
 namespace dom {
 
+class DOMClass;
+
 enum {
   JSPROXYSLOT_EXPANDO = 0,
   JSPROXYSLOT_XRAY_EXPANDO
 };
 
 template<typename T> struct Prefable;
+
+extern int HandlerFamily;
+inline void* ProxyFamily() { return &HandlerFamily; }
+
+inline bool IsDOMProxy(JSObject *obj, const js::Class* clasp)
+{
+    MOZ_ASSERT(js::GetObjectClass(obj) == clasp);
+    return (js::IsObjectProxyClass(clasp) || js::IsFunctionProxyClass(clasp)) &&
+           js::GetProxyHandler(obj)->family() == ProxyFamily();
+}
+
+inline bool IsDOMProxy(JSObject *obj)
+{
+    return IsDOMProxy(obj, js::GetObjectClass(obj));
+}
 
 class BaseDOMProxyHandler : public js::BaseProxyHandler
 {

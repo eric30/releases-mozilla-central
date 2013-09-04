@@ -35,8 +35,6 @@ class systemMessageCallback;
 
 #ifdef MOZ_B2G_RIL
 class nsIDOMMozMobileConnection;
-class nsIDOMMozCellBroadcast;
-class nsIDOMMozVoicemail;
 class nsIDOMMozIccManager;
 #endif // MOZ_B2G_RIL
 
@@ -56,6 +54,10 @@ namespace dom {
 namespace battery {
 class BatteryManager;
 } // namespace battery
+
+#ifdef MOZ_B2G_FM
+class FMRadio;
+#endif
 
 class DesktopNotificationCenter;
 class MobileMessageManager;
@@ -86,6 +88,7 @@ class MobileConnection;
 namespace telephony {
 class Telephony;
 } // namespace Telephony;
+class CellBroadcast;
 #endif
 
 #ifdef MOZ_B2G_BT
@@ -93,6 +96,10 @@ namespace bluetooth {
 class BluetoothManager;
 } // namespace bluetooth
 #endif // MOZ_B2G_BT
+
+#ifdef MOZ_B2G_RIL
+class Voicemail;
+#endif
 
 namespace power {
 class PowerManager;
@@ -224,13 +231,16 @@ public:
 #ifdef MOZ_B2G_RIL
   telephony::Telephony* GetMozTelephony(ErrorResult& aRv);
   nsIDOMMozMobileConnection* GetMozMobileConnection(ErrorResult& aRv);
-  nsIDOMMozCellBroadcast* GetMozCellBroadcast(ErrorResult& aRv);
-  nsIDOMMozVoicemail* GetMozVoicemail(ErrorResult& aRv);
+  CellBroadcast* GetMozCellBroadcast(ErrorResult& aRv);
+  Voicemail* GetMozVoicemail(ErrorResult& aRv);
   nsIDOMMozIccManager* GetMozIccManager(ErrorResult& aRv);
 #endif // MOZ_B2G_RIL
 #ifdef MOZ_GAMEPAD
   void GetGamepads(nsTArray<nsRefPtr<Gamepad> >& aGamepads, ErrorResult& aRv);
 #endif // MOZ_GAMEPAD
+#ifdef MOZ_B2G_FM
+  FMRadio* GetMozFMRadio(ErrorResult& aRv);
+#endif
 #ifdef MOZ_B2G_BT
   bluetooth::BluetoothManager* GetMozBluetooth(ErrorResult& aRv);
 #endif // MOZ_B2G_BT
@@ -287,6 +297,9 @@ public:
 #ifdef MOZ_B2G_BT
   static bool HasBluetoothSupport(JSContext* /* unused */, JSObject* aGlobal);
 #endif // MOZ_B2G_BT
+#ifdef MOZ_B2G_FM
+  static bool HasFMRadioSupport(JSContext* /* unused */, JSObject* aGlobal);
+#endif // MOZ_B2G_FM
 #ifdef MOZ_B2G_NFC
   static bool HasNfcSupport(JSContext* /* unused */, JSObject* aGlobal);
 #endif // MOZ_B2G_NFC
@@ -321,16 +334,19 @@ private:
   nsRefPtr<Geolocation> mGeolocation;
   nsRefPtr<DesktopNotificationCenter> mNotification;
   nsRefPtr<battery::BatteryManager> mBatteryManager;
+#ifdef MOZ_B2G_FM
+  nsRefPtr<FMRadio> mFMRadio;
+#endif
   nsRefPtr<power::PowerManager> mPowerManager;
   nsRefPtr<MobileMessageManager> mMobileMessageManager;
 #ifdef MOZ_B2G_RIL
   nsRefPtr<telephony::Telephony> mTelephony;
-  nsCOMPtr<nsIDOMMozVoicemail> mVoicemail;
+  nsRefPtr<Voicemail> mVoicemail;
 #endif
   nsRefPtr<network::Connection> mConnection;
 #ifdef MOZ_B2G_RIL
   nsRefPtr<network::MobileConnection> mMobileConnection;
-  nsCOMPtr<nsIDOMMozCellBroadcast> mCellBroadcast;
+  nsRefPtr<CellBroadcast> mCellBroadcast;
   nsRefPtr<icc::IccManager> mIccManager;
 #endif
 #ifdef MOZ_B2G_BT

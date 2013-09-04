@@ -158,8 +158,9 @@ this.Social = {
       return;
     }
     this.initialized = true;
-
-    if (SocialService.enabled) {
+    // if SocialService.hasEnabledProviders, retreive the providers so the
+    // front-end can generate UI
+    if (SocialService.hasEnabledProviders) {
       // Retrieve the current set of providers, and set the current provider.
       SocialService.getOrderedProviderList(function (providers) {
         Social._updateProviderCache(providers);
@@ -262,8 +263,8 @@ this.Social = {
     SocialService.installProvider(doc, data, installCallback);
   },
 
-  uninstallProvider: function(origin) {
-    SocialService.uninstallProvider(origin);
+  uninstallProvider: function(origin, aCallback) {
+    SocialService.uninstallProvider(origin, aCallback);
   },
 
   // Activation functionality
@@ -455,10 +456,10 @@ SocialErrorListener.prototype = {
   },
 
   onLocationChange: function SPL_onLocationChange(aWebProgress, aRequest, aLocation, aFlags) {
-    let failure = aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_ERROR_PAGE;
-    if (failure && Social.provider.errorState != "frameworker-error") {
+    if (aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_ERROR_PAGE) {
       aRequest.cancel(Components.results.NS_BINDING_ABORTED);
-      Social.provider.errorState = "content-error";
+      if (!Social.provider.errorState)
+        Social.provider.errorState = "content-error";
       schedule(function() {
         this.setErrorMessage(aWebProgress.QueryInterface(Ci.nsIDocShell)
                               .chromeEventHandler);

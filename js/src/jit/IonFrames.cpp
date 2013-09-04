@@ -31,7 +31,7 @@
 #include "vm/Probes-inl.h"
 
 namespace js {
-namespace ion {
+namespace jit {
 
 IonFrameIterator::IonFrameIterator(const ActivationIterator &activations)
     : current_(activations.jitTop()),
@@ -117,11 +117,11 @@ IonFrameIterator::isNative() const
 }
 
 bool
-IonFrameIterator::isOOLNativeGetter() const
+IonFrameIterator::isOOLNative() const
 {
     if (type_ != IonFrame_Exit)
         return false;
-    return exitFrame()->footer()->ionCode() == ION_FRAME_OOL_NATIVE_GETTER;
+    return exitFrame()->footer()->ionCode() == ION_FRAME_OOL_NATIVE;
 }
 
 bool
@@ -133,11 +133,11 @@ IonFrameIterator::isOOLPropertyOp() const
 }
 
 bool
-IonFrameIterator::isOOLProxyGet() const
+IonFrameIterator::isOOLProxy() const
 {
     if (type_ != IonFrame_Exit)
         return false;
-    return exitFrame()->footer()->ionCode() == ION_FRAME_OOL_PROXY_GET;
+    return exitFrame()->footer()->ionCode() == ION_FRAME_OOL_PROXY;
 }
 
 bool
@@ -424,7 +424,7 @@ HandleExceptionBaseline(JSContext *cx, const IonFrameIterator &frame, ResumeFrom
 
           case JSTRAP_RETURN:
             JS_ASSERT(baselineFrame->hasReturnValue());
-            if (ion::DebugEpilogue(cx, baselineFrame, true)) {
+            if (jit::DebugEpilogue(cx, baselineFrame, true)) {
                 rfe->kind = ResumeFromException::RESUME_FORCED_RETURN;
                 rfe->framePointer = frame.fp() - BaselineFrame::FramePointerOffset;
                 rfe->stackPointer = reinterpret_cast<uint8_t *>(baselineFrame);
@@ -573,7 +573,7 @@ HandleException(ResumeFromException *rfe)
                 // If DebugEpilogue returns |true|, we have to perform a forced
                 // return, e.g. return frame->returnValue() to the caller.
                 BaselineFrame *frame = iter.baselineFrame();
-                if (ion::DebugEpilogue(cx, frame, false)) {
+                if (jit::DebugEpilogue(cx, frame, false)) {
                     JS_ASSERT(frame->hasReturnValue());
                     rfe->kind = ResumeFromException::RESUME_FORCED_RETURN;
                     rfe->framePointer = iter.fp() - BaselineFrame::FramePointerOffset;
@@ -906,11 +906,12 @@ MarkIonExitFrame(JSTracer *trc, const IonFrameIterator &frame)
         return;
     }
 
-    if (frame.isOOLNativeGetter()) {
-        IonOOLNativeGetterExitFrameLayout *oolgetter = frame.exitFrame()->oolNativeGetterExit();
-        gc::MarkIonCodeRoot(trc, oolgetter->stubCode(), "ion-ool-getter-code");
-        gc::MarkValueRoot(trc, oolgetter->vp(), "ion-ool-getter-callee");
-        gc::MarkValueRoot(trc, oolgetter->thisp(), "ion-ool-getter-this");
+    if (frame.isOOLNative()) {
+        IonOOLNativeExitFrameLayout *oolnative = frame.exitFrame()->oolNativeExit();
+        gc::MarkIonCodeRoot(trc, oolnative->stubCode(), "ion-ool-native-code");
+        gc::MarkValueRoot(trc, oolnative->vp(), "iol-ool-native-vp");
+        size_t len = oolnative->argc() + 1;
+        gc::MarkValueRootRange(trc, len, oolnative->thisp(), "ion-ool-native-thisargs");
         return;
     }
 
@@ -923,13 +924,13 @@ MarkIonExitFrame(JSTracer *trc, const IonFrameIterator &frame)
         return;
     }
 
-    if (frame.isOOLProxyGet()) {
-        IonOOLProxyGetExitFrameLayout *oolproxyget = frame.exitFrame()->oolProxyGetExit();
-        gc::MarkIonCodeRoot(trc, oolproxyget->stubCode(), "ion-ool-proxy-get-code");
-        gc::MarkValueRoot(trc, oolproxyget->vp(), "ion-ool-proxy-get-vp");
-        gc::MarkIdRoot(trc, oolproxyget->id(), "ion-ool-proxy-get-id");
-        gc::MarkObjectRoot(trc, oolproxyget->proxy(), "ion-ool-proxy-get-proxy");
-        gc::MarkObjectRoot(trc, oolproxyget->receiver(), "ion-ool-proxy-get-receiver");
+    if (frame.isOOLProxy()) {
+        IonOOLProxyExitFrameLayout *oolproxy = frame.exitFrame()->oolProxyExit();
+        gc::MarkIonCodeRoot(trc, oolproxy->stubCode(), "ion-ool-proxy-code");
+        gc::MarkValueRoot(trc, oolproxy->vp(), "ion-ool-proxy-vp");
+        gc::MarkIdRoot(trc, oolproxy->id(), "ion-ool-proxy-id");
+        gc::MarkObjectRoot(trc, oolproxy->proxy(), "ion-ool-proxy-proxy");
+        gc::MarkObjectRoot(trc, oolproxy->receiver(), "ion-ool-proxy-receiver");
         return;
     }
 
@@ -1662,5 +1663,5 @@ IonFrameIterator::dump() const
     fputc('\n', stderr);
 }
 
-} // namespace ion
+} // namespace jit
 } // namespace js

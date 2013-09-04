@@ -11,10 +11,10 @@
 #include "jit/IonLinker.h"
 
 using namespace js;
-using namespace js::ion;
+using namespace js::jit;
 
 namespace js {
-namespace ion {
+namespace jit {
 
 // ICCompare_Int32
 
@@ -28,9 +28,9 @@ ICCompare_Int32::Compiler::generateStubCode(MacroAssembler &masm)
 
     // Directly compare the int32 payload of R0 and R1.
     Assembler::Condition cond = JSOpToCondition(op, /* signed = */true);
+    masm.xorl(ScratchReg, ScratchReg);
     masm.cmpl(R0.valueReg(), R1.valueReg());
     masm.setCC(cond, ScratchReg);
-    masm.movzxbl(ScratchReg, ScratchReg);
 
     // Box the result and return
     masm.boxValue(JSVAL_TYPE_BOOLEAN, ScratchReg, R0.valueReg());
@@ -241,5 +241,5 @@ ICUnaryArith_Int32::Compiler::generateStubCode(MacroAssembler &masm)
     return true;
 }
 
-} // namespace ion
+} // namespace jit
 } // namespace js

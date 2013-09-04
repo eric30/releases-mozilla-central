@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 #include "jsalloc.h"
+#include "jspubtd.h"
 #ifdef JS_THREADSAFE
 # include "prcvar.h"
 # include "prlock.h"
@@ -19,10 +20,8 @@
 
 #include "js/Vector.h"
 
-struct JSContext;
 struct JSRuntime;
 struct JSCompartment;
-class JSScript;
 
 namespace js {
 

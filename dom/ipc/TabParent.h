@@ -9,7 +9,6 @@
 
 #include "base/basictypes.h"
 
-#include "jsapi.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/PBrowserParent.h"
 #include "mozilla/dom/PContentDialogParent.h"
@@ -23,10 +22,9 @@
 #include "nsITabParent.h"
 #include "nsWeakReference.h"
 #include "Units.h"
+#include "js/TypeDecls.h"
 
 struct gfxMatrix;
-struct JSContext;
-class JSObject;
 class mozIApplication;
 class nsFrameLoader;
 class nsIURI;
@@ -159,8 +157,8 @@ public:
     virtual bool RecvGetWidgetNativeData(WindowsHandle* aValue);
     virtual bool RecvZoomToRect(const CSSRect& aRect);
     virtual bool RecvUpdateZoomConstraints(const bool& aAllowZoom,
-                                           const float& aMinZoom,
-                                           const float& aMaxZoom);
+                                           const CSSToScreenScale& aMinZoom,
+                                           const CSSToScreenScale& aMaxZoom);
     virtual bool RecvUpdateScrollOffset(const uint32_t& aPresShellId, const ViewID& aViewId, const CSSIntPoint& aScrollOffset);
     virtual bool RecvContentReceivedTouch(const bool& aPreventDefault);
     virtual PContentDialogParent* AllocPContentDialogParent(const uint32_t& aType,

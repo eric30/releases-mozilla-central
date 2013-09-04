@@ -96,7 +96,7 @@ ImageLayerComposite::RenderLayer(const nsIntPoint& aOffset,
   mCompositor->MakeCurrent();
 
   EffectChain effectChain;
-  LayerManagerComposite::AddMaskEffect(mMaskLayer, effectChain);
+  LayerManagerComposite::AutoAddMaskEffect autoMaskEffect(mMaskLayer, effectChain);
 
   gfx::Matrix4x4 transform;
   ToMatrix4x4(GetEffectiveTransform(), transform);
@@ -108,8 +108,6 @@ ImageLayerComposite::RenderLayer(const nsIntPoint& aOffset,
                         gfx::Point(aOffset.x, aOffset.y),
                         gfx::ToFilter(mFilter),
                         clipRect);
-
-  LayerManagerComposite::RemoveMaskEffect(mMaskLayer);
 }
 
 void 
@@ -158,7 +156,7 @@ void
 ImageLayerComposite::CleanupResources()
 {
   if (mImageHost) {
-    mImageHost->Detach();
+    mImageHost->Detach(this);
   }
   mImageHost = nullptr;
 }

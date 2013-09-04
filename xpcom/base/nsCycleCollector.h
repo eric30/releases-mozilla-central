@@ -64,6 +64,7 @@ void nsCycleCollector_shutdown();
 // Helpers for interacting with JS
 void nsCycleCollector_registerJSRuntime(mozilla::CycleCollectedJSRuntime *aRt);
 void nsCycleCollector_forgetJSRuntime();
+mozilla::CycleCollectedJSRuntime* nsCycleCollector_currentJSRuntime();
 
 #define NS_CYCLE_COLLECTOR_LOGGER_CID \
 { 0x58be81b4, 0x39d2, 0x437c, \
@@ -77,8 +78,6 @@ nsCycleCollectorLoggerConstructor(nsISupports* outer,
 namespace mozilla {
 namespace cyclecollector {
 
-void AddJSHolder(void* aHolder, nsScriptObjectTracer* aTracer);
-void RemoveJSHolder(void* aHolder);
 #ifdef DEBUG
 bool IsJSHolder(void* aHolder);
 #endif

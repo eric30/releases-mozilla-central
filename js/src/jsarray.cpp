@@ -435,8 +435,6 @@ js::ArraySetLength(JSContext *cx, Handle<ArrayObject*> arr, HandleId id, unsigne
                    HandleValue value, bool setterIsStrict)
 {
     MOZ_ASSERT(id == NameToId(cx->names().length));
-    MOZ_ASSERT(attrs & JSPROP_PERMANENT);
-    MOZ_ASSERT(!(attrs & JSPROP_ENUMERATE));
 
     /* Steps 1-2 are irrelevant in our implementation. */
 
@@ -444,6 +442,21 @@ js::ArraySetLength(JSContext *cx, Handle<ArrayObject*> arr, HandleId id, unsigne
     uint32_t newLen;
     if (!CanonicalizeArrayLengthValue(cx, value, &newLen))
         return false;
+
+    // Abort if we're being asked to change enumerability or configurability.
+    // (The length property of arrays is non-configurable, so such attempts
+    // must fail.)  This behavior is spread throughout the ArraySetLength spec
+    // algorithm, but we only need check it once as our array implementation
+    // is internally so different from the spec algorithm.  (ES5 and ES6 define
+    // behavior by delegating to the default define-own-property algorithm --
+    // OrdinaryDefineOwnProperty in ES6, the default [[DefineOwnProperty]] in
+    // ES5 -- but we reimplement all the conflict-detection bits ourselves here
+    // so that we can use a customized length representation.)
+    if (!(attrs & JSPROP_PERMANENT) || (attrs & JSPROP_ENUMERATE)) {
+        if (!setterIsStrict)
+            return true;
+        return Throw(cx, id, JSMSG_CANT_REDEFINE_PROP);
+    }
 
     /* Steps 6-7. */
     bool lengthIsWritable = arr->lengthIsWritable();
@@ -932,12 +945,12 @@ array_join_sub(JSContext *cx, CallArgs &args, bool locale)
 
     // Various optimized versions of steps 7-10
     if (!locale && !seplen && obj->is<ArrayObject>() && !ObjectMayHaveExtraIndexedProperties(obj)) {
-        const Value *start = obj->getDenseElements();
-        const Value *end = start + obj->getDenseInitializedLength();
-        const Value *elem;
-        for (elem = start; elem < end; elem++) {
+        uint32_t i;
+        for (i = 0; i < obj->getDenseInitializedLength(); ++i) {
             if (!JS_CHECK_OPERATION_LIMIT(cx))
                 return false;
+
+            const Value *elem = &obj->getDenseElement(i);
 
             /*
              * Object stringifying is slow; delegate it to a separate loop to
@@ -953,7 +966,7 @@ array_join_sub(JSContext *cx, CallArgs &args, bool locale)
         }
 
         RootedValue v(cx);
-        for (uint32_t i = uint32_t(PointerRangeSize(start, elem)); i < length; i++) {
+        for (; i < length; ++i) {
             if (!JS_CHECK_OPERATION_LIMIT(cx))
                 return false;
 
@@ -1075,7 +1088,7 @@ InitArrayTypes(JSContext *cx, TypeObject *type, const Value *vector, unsigned co
         for (unsigned i = 0; i < count; i++) {
             if (vector[i].isMagic(JS_ELEMENTS_HOLE))
                 continue;
-            Type valtype = GetValueType(cx, vector[i]);
+            Type valtype = GetValueType(vector[i]);
             types->addType(cx, valtype);
         }
     }

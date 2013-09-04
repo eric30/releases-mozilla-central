@@ -11,12 +11,11 @@
 #include "nsWrapperCache.h"
 #include "nsDOMNavigationTiming.h"
 #include "nsContentUtils.h"
+#include "nsIDOMWindow.h"
+#include "js/TypeDecls.h"
 
 class nsITimedChannel;
-class nsIDOMWindow;
 class nsPerformance;
-class JSObject;
-struct JSContext;
 
 // Script "performance.timing" object
 class nsPerformanceTiming MOZ_FINAL : public nsWrapperCache

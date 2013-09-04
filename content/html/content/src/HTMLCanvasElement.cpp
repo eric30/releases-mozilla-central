@@ -5,7 +5,7 @@
 
 #include "mozilla/dom/HTMLCanvasElement.h"
 
-#include "BasicLayers.h"
+#include "Layers.h"
 #include "imgIEncoder.h"
 #include "jsapi.h"
 #include "jsfriendapi.h"
@@ -804,6 +804,7 @@ HTMLCanvasElement::GetContext(JSContext* aCx,
 
     rv = UpdateContext(aCx, aContextOptions);
     if (rv.Failed()) {
+      rv = NS_OK; // See bug 645792
       return nullptr;
     }
     mCurrentContextId.Assign(aContextId);

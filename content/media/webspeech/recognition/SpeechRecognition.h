@@ -12,8 +12,10 @@
 #include "nsString.h"
 #include "nsWrapperCache.h"
 #include "nsTArray.h"
+#include "js/TypeDecls.h"
 
-#include "MediaManager.h"
+#include "nsIDOMNavigatorUserMedia.h"
+#include "nsITimer.h"
 #include "MediaEngine.h"
 #include "MediaStreamGraph.h"
 #include "AudioSegment.h"
@@ -29,7 +31,6 @@
 
 #include "mozilla/dom/SpeechRecognitionError.h"
 
-struct JSContext;
 class nsIDOMWindow;
 
 namespace mozilla {
@@ -70,7 +71,8 @@ public:
   virtual JSObject* WrapObject(JSContext* aCx,
                                JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
-  static already_AddRefed<SpeechRecognition> Constructor(const GlobalObject& aGlobal, ErrorResult& aRv);
+  static already_AddRefed<SpeechRecognition>
+  Constructor(const GlobalObject& aGlobal, ErrorResult& aRv);
 
   already_AddRefed<SpeechGrammarList> GetGrammars(ErrorResult& aRv) const;
 

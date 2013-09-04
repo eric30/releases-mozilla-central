@@ -45,6 +45,9 @@ XPCOMUtils.defineLazyModuleGetter(this, "Task",
                                   "resource://gre/modules/Task.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
                                   "resource://gre/modules/NetUtil.jsm");
+XPCOMUtils.defineLazyServiceGetter(this, "gDownloadPlatform",
+                                   "@mozilla.org/toolkit/download-platform;1",
+                                   "mozIDownloadPlatform");
 XPCOMUtils.defineLazyServiceGetter(this, "gEnvironment",
                                    "@mozilla.org/process/environment;1",
                                    "nsIEnvironment");
@@ -54,7 +57,7 @@ XPCOMUtils.defineLazyServiceGetter(this, "gMIMEService",
 XPCOMUtils.defineLazyServiceGetter(this, "gExternalProtocolService",
                                    "@mozilla.org/uriloader/external-protocol-service;1",
                                    "nsIExternalProtocolService");
-
+ 
 XPCOMUtils.defineLazyGetter(this, "gParentalControlsService", function() {
   if ("@mozilla.org/parental-controls-service;1" in Cc) {
     return Cc["@mozilla.org/parental-controls-service;1"]
@@ -110,10 +113,13 @@ const kPrefImportedFromSqlite = "browser.download.importedFromSqlite";
 this.DownloadIntegration = {
   // For testing only
   _testMode: false,
-  dontLoad: false,
+  testPromptDownloads: 0,
+  dontLoadList: false,
+  dontLoadObservers: false,
   dontCheckParentalControls: false,
   shouldBlockInTest: false,
   dontOpenFileAndFolder: false,
+  downloadDoneCalled: false,
   _deferTestOpenFile: null,
   _deferTestShowDir: null,
 
@@ -149,7 +155,7 @@ this.DownloadIntegration = {
    */
   initializePublicDownloadList: function(aList) {
     return Task.spawn(function task_DI_initializePublicDownloadList() {
-      if (this.dontLoad) {
+      if (this.dontLoadList) {
         return;
       }
 
@@ -257,14 +263,7 @@ this.DownloadIntegration = {
         directory = this._getDirectory("DfltDwnld");
       }
 #elifdef XP_UNIX
-#ifdef MOZ_PLATFORM_MAEMO
-      // As maemo does not follow the XDG "standard" (as usually desktop
-      // Linux distros do) neither has a working $HOME/Desktop folder
-      // for us to fallback into, "$HOME/MyDocs/.documents/" is the folder
-      // we found most appropriate to be the default target folder for
-      // downloads on the platform.
-      directory = this._getDirectory("XDGDocs");
-#elifdef ANDROID
+#ifdef ANDROID
       // Android doesn't have a $HOME directory, and by default we only have
       // write access to /data/data/org.mozilla.{$APP} and /sdcard
       let directoryPath = gEnvironment.get("DOWNLOADS_DIRECTORY");
@@ -383,6 +382,28 @@ this.DownloadIntegration = {
     }
 
     return Promise.resolve(shouldBlock);
+  },
+
+  /**
+   * Performs platform-specific operations when a download is done.
+   *
+   * aParam aDownload
+   *        The Download object.
+   *
+   * @return {Promise}
+   * @resolves When all the operations completed successfully.
+   * @rejects JavaScript exception if any of the operations failed.
+   */
+  downloadDone: function(aDownload) {
+    try {
+      gDownloadPlatform.downloadDone(NetUtil.newURI(aDownload.source.url),
+                                     new FileUtils.File(aDownload.target.path),
+                                     aDownload.contentType, aDownload.source.isPrivate);
+      this.downloadDoneCalled = true;
+      return Promise.resolve();
+    } catch(ex) {
+      return Promise.reject(ex);
+    }
   },
 
   /**
@@ -616,7 +637,7 @@ this.DownloadIntegration = {
    * @resolves When the views and observers are added.
    */
   addListObservers: function DI_addListObservers(aList, aIsPrivate) {
-    if (this.dontLoad) {
+    if (this.dontLoadObservers) {
       return Promise.resolve();
     }
 
@@ -722,6 +743,11 @@ this.DownloadObserver = {
     aCancel, aDownloadsCount, aIdTitle, aIdMessageSingle, aIdMessageMultiple, aIdButton) {
     // If user has already dismissed the request, then do nothing.
     if ((aCancel instanceof Ci.nsISupportsPRBool) && aCancel.data) {
+      return;
+    }
+    // Handle test mode
+    if (DownloadIntegration.testMode) {
+      DownloadIntegration.testPromptDownloads = aDownloadsCount;
       return;
     }
     // If there are no active downloads, then do nothing.

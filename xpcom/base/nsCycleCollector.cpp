@@ -2933,10 +2933,24 @@ nsCycleCollector_forgetJSRuntime()
     }
 }
 
-void
-cyclecollector::AddJSHolder(void* aHolder, nsScriptObjectTracer* aTracer)
+mozilla::CycleCollectedJSRuntime*
+nsCycleCollector_currentJSRuntime()
 {
-    CollectorData *data = sCollectorData.get();
+    CollectorData* data = sCollectorData.get();
+    if (data) {
+        return data->mRuntime;
+    }
+    return nullptr;
+}
+
+
+namespace mozilla {
+namespace cyclecollector {
+
+void
+HoldJSObjectsImpl(void* aHolder, nsScriptObjectTracer* aTracer)
+{
+    CollectorData* data = sCollectorData.get();
 
     // We should have started the cycle collector by now.
     MOZ_ASSERT(data);
@@ -2948,9 +2962,21 @@ cyclecollector::AddJSHolder(void* aHolder, nsScriptObjectTracer* aTracer)
 }
 
 void
-cyclecollector::RemoveJSHolder(void* aHolder)
+HoldJSObjectsImpl(nsISupports* aHolder)
 {
-    CollectorData *data = sCollectorData.get();
+    nsXPCOMCycleCollectionParticipant* participant;
+    CallQueryInterface(aHolder, &participant);
+    MOZ_ASSERT(participant, "Failed to QI to nsXPCOMCycleCollectionParticipant!");
+    MOZ_ASSERT(participant->CheckForRightISupports(aHolder),
+               "The result of QIing a JS holder should be the same as ToSupports");
+
+    HoldJSObjectsImpl(aHolder, participant);
+}
+
+void
+DropJSObjectsImpl(void* aHolder)
+{
+    CollectorData* data = sCollectorData.get();
 
     // We should have started the cycle collector by now, and not completely
     // shut down.
@@ -2961,9 +2987,22 @@ cyclecollector::RemoveJSHolder(void* aHolder)
     data->mRuntime->RemoveJSHolder(aHolder);
 }
 
+void
+DropJSObjectsImpl(nsISupports* aHolder)
+{
+#ifdef DEBUG
+    nsXPCOMCycleCollectionParticipant* participant;
+    CallQueryInterface(aHolder, &participant);
+    MOZ_ASSERT(participant, "Failed to QI to nsXPCOMCycleCollectionParticipant!");
+    MOZ_ASSERT(participant->CheckForRightISupports(aHolder),
+               "The result of QIing a JS holder should be the same as ToSupports");
+#endif
+    DropJSObjectsImpl(static_cast<void*>(aHolder));
+}
+
 #ifdef DEBUG
 bool
-cyclecollector::IsJSHolder(void* aHolder)
+IsJSHolder(void* aHolder)
 {
     CollectorData *data = sCollectorData.get();
 
@@ -2978,7 +3017,7 @@ cyclecollector::IsJSHolder(void* aHolder)
 #endif
 
 void
-cyclecollector::DeferredFinalize(nsISupports* aSupports)
+DeferredFinalize(nsISupports* aSupports)
 {
     CollectorData *data = sCollectorData.get();
 
@@ -2992,9 +3031,9 @@ cyclecollector::DeferredFinalize(nsISupports* aSupports)
 }
 
 void
-cyclecollector::DeferredFinalize(DeferredFinalizeAppendFunction aAppendFunc,
-                                 DeferredFinalizeFunction aFunc,
-                                 void* aThing)
+DeferredFinalize(DeferredFinalizeAppendFunction aAppendFunc,
+                 DeferredFinalizeFunction aFunc,
+                 void* aThing)
 {
     CollectorData *data = sCollectorData.get();
 
@@ -3006,6 +3045,10 @@ cyclecollector::DeferredFinalize(DeferredFinalizeAppendFunction aAppendFunc,
 
     data->mRuntime->DeferredFinalize(aAppendFunc, aFunc, aThing);
 }
+
+} // namespace cyclecollector
+} // namespace mozilla
+
 
 void
 NS_CycleCollectorSuspect3(void *n, nsCycleCollectionParticipant *cp,

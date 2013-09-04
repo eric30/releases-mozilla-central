@@ -7,6 +7,9 @@
 #include "WebSocket.h"
 #include "mozilla/dom/WebSocketBinding.h"
 
+#include "jsapi.h"
+#include "jsfriendapi.h"
+#include "js/OldDebugAPI.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIDOMWindow.h"
 #include "nsIDocument.h"
@@ -18,7 +21,6 @@
 #include "nsError.h"
 #include "nsIScriptObjectPrincipal.h"
 #include "nsDOMClassInfoID.h"
-#include "jsapi.h"
 #include "nsIURL.h"
 #include "nsICharsetConverterManager.h"
 #include "nsIUnicodeEncoder.h"
@@ -29,10 +31,8 @@
 #include "nsIPrompt.h"
 #include "nsIStringBundle.h"
 #include "nsIConsoleService.h"
-#include "nsLayoutStatics.h"
 #include "nsIDOMCloseEvent.h"
 #include "nsICryptoHash.h"
-#include "jsdbgapi.h"
 #include "nsJSUtils.h"
 #include "nsIScriptError.h"
 #include "nsNetUtil.h"
@@ -41,7 +41,6 @@
 #include "nsDOMLists.h"
 #include "xpcpublic.h"
 #include "nsContentPolicyUtils.h"
-#include "jsfriendapi.h"
 #include "nsDOMFile.h"
 #include "nsWrapperCacheInlines.h"
 #include "nsDOMEventTargetHelper.h"
@@ -459,7 +458,6 @@ WebSocket::WebSocket()
   mInnerWindowID(0)
 {
   NS_ABORT_IF_FALSE(NS_IsMainThread(), "Not running on main thread");
-  nsLayoutStatics::AddRef();
 
   SetIsDOMBinding();
 }
@@ -472,7 +470,6 @@ WebSocket::~WebSocket()
   if (!mDisconnected) {
     Disconnect();
   }
-  nsLayoutStatics::Release();
 }
 
 JSObject*
@@ -488,29 +485,26 @@ WebSocket::WrapObject(JSContext* cx, JS::Handle<JSObject*> scope)
 // Constructor:
 already_AddRefed<WebSocket>
 WebSocket::Constructor(const GlobalObject& aGlobal,
-                       JSContext* aCx,
                        const nsAString& aUrl,
                        ErrorResult& aRv)
 {
   Sequence<nsString> protocols;
-  return WebSocket::Constructor(aGlobal, aCx, aUrl, protocols, aRv);
+  return WebSocket::Constructor(aGlobal, aUrl, protocols, aRv);
 }
 
 already_AddRefed<WebSocket>
 WebSocket::Constructor(const GlobalObject& aGlobal,
-                       JSContext* aCx,
                        const nsAString& aUrl,
                        const nsAString& aProtocol,
                        ErrorResult& aRv)
 {
   Sequence<nsString> protocols;
   protocols.AppendElement(aProtocol);
-  return WebSocket::Constructor(aGlobal, aCx, aUrl, protocols, aRv);
+  return WebSocket::Constructor(aGlobal, aUrl, protocols, aRv);
 }
 
 already_AddRefed<WebSocket>
 WebSocket::Constructor(const GlobalObject& aGlobal,
-                       JSContext* aCx,
                        const nsAString& aUrl,
                        const Sequence<nsString>& aProtocols,
                        ErrorResult& aRv)
@@ -521,7 +515,7 @@ WebSocket::Constructor(const GlobalObject& aGlobal,
   }
 
   nsCOMPtr<nsIScriptObjectPrincipal> scriptPrincipal =
-    do_QueryInterface(aGlobal.Get());
+    do_QueryInterface(aGlobal.GetAsSupports());
   if (!scriptPrincipal) {
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;
@@ -533,13 +527,13 @@ WebSocket::Constructor(const GlobalObject& aGlobal,
     return nullptr;
   }
 
-  nsCOMPtr<nsIScriptGlobalObject> sgo = do_QueryInterface(aGlobal.Get());
+  nsCOMPtr<nsIScriptGlobalObject> sgo = do_QueryInterface(aGlobal.GetAsSupports());
   if (!sgo) {
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;
   }
 
-  nsCOMPtr<nsPIDOMWindow> ownerWindow = do_QueryInterface(aGlobal.Get());
+  nsCOMPtr<nsPIDOMWindow> ownerWindow = do_QueryInterface(aGlobal.GetAsSupports());
   if (!ownerWindow) {
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;
@@ -568,7 +562,8 @@ WebSocket::Constructor(const GlobalObject& aGlobal,
   }
 
   nsRefPtr<WebSocket> webSocket = new WebSocket();
-  nsresult rv = webSocket->Init(aCx, principal, ownerWindow, aUrl, protocolArray);
+  nsresult rv = webSocket->Init(aGlobal.GetContext(), principal, ownerWindow,
+                                aUrl, protocolArray);
   if (NS_FAILED(rv)) {
     aRv.Throw(rv);
     return nullptr;

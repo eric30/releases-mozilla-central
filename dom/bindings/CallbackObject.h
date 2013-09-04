@@ -19,8 +19,8 @@
 
 #include "nsISupports.h"
 #include "nsISupportsImpl.h"
+#include "nsCycleCollectionHoldDrop.h"
 #include "nsCycleCollectionParticipant.h"
-#include "jsapi.h"
 #include "jswrapper.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/ErrorResult.h"
@@ -30,8 +30,6 @@
 #include "nsWrapperCache.h"
 #include "nsJSEnvironment.h"
 #include "xpcpublic.h"
-#include "nsLayoutStatics.h"
-#include "js/RootingAPI.h"
 
 namespace mozilla {
 namespace dom {
@@ -97,7 +95,7 @@ private:
     // Set mCallback before we hold, on the off chance that a GC could somehow
     // happen in there... (which would be pretty odd, granted).
     mCallback = aCallback;
-    NS_HOLD_JS_OBJECTS(this, CallbackObject);
+    mozilla::HoldJSObjects(this);
   }
 
 protected:
@@ -105,7 +103,7 @@ protected:
   {
     if (mCallback) {
       mCallback = nullptr;
-      NS_DROP_JS_OBJECTS(this, CallbackObject);
+      mozilla::DropJSObjects(this);
     }
   }
 

@@ -11,6 +11,7 @@ include protocol PCompositor;
 include protocol PCrashReporter;
 include protocol PExternalHelperApp;
 include protocol PDeviceStorageRequest;
+include protocol PFMRadio;
 include protocol PHal;
 include protocol PImageBridge;
 include protocol PIndexedDB;
@@ -30,7 +31,6 @@ include URIParams;
 include "mozilla/chrome/RegistryMessageUtils.h";
 include "mozilla/dom/PermissionMessageUtils.h";
 include "mozilla/dom/TabMessageUtils.h";
-include "mozilla/dom/Element.h";
 include "mozilla/HalTypes.h";
 include "mozilla/layout/RenderFrameUtils.h";
 include "mozilla/net/NeckoMessageUtils.h";
@@ -127,6 +127,40 @@ union DeviceStorageParams
   DeviceStorageAvailableParams;
 };
 
+struct FMRadioRequestEnableParams
+{
+  double frequency;
+};
+
+struct FMRadioRequestDisableParams
+{
+
+};
+
+struct FMRadioRequestSetFrequencyParams
+{
+  double frequency;
+};
+
+struct FMRadioRequestSeekParams
+{
+  bool upward;
+};
+
+struct FMRadioRequestCancelSeekParams
+{
+
+};
+
+union FMRadioRequestParams
+{
+  FMRadioRequestEnableParams;
+  FMRadioRequestDisableParams;
+  FMRadioRequestSetFrequencyParams;
+  FMRadioRequestSeekParams;
+  FMRadioRequestCancelSeekParams;
+};
+
 union PrefValue {
   nsCString;
   int32_t;
@@ -155,6 +189,7 @@ rpc protocol PContent
     manages PCrashReporter;
     manages PDeviceStorageRequest;
     manages PExternalHelperApp;
+    manages PFMRadio;
     manages PHal;
     manages PIndexedDB;
     manages PMemoryReportRequest;
@@ -269,11 +304,18 @@ child:
                    nsCString reasons);
 
     FileSystemUpdate(nsString fsName, nsString mountPoint, int32_t fsState,
-                     int32_t mountGeneration);
+                     int32_t mountGeneration, bool isMediaPresent,
+                     bool isSharing);
 
     NotifyProcessPriorityChanged(ProcessPriority priority);
     MinimizeMemoryUsage();
     CancelMinimizeMemoryUsage();
+
+    /**
+     * Used to manage nsIStyleSheetService across processes.
+     */
+    async LoadAndRegisterSheet(URIParams uri, uint32_t type);
+    async UnregisterSheet(URIParams uri, uint32_t type);
 
 parent:
     /**
@@ -312,6 +354,8 @@ parent:
     PStorage();
 
     PBluetooth();
+
+    PFMRadio();
 
     // Services remoting
 

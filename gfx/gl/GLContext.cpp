@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 20; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set ts=8 sts=4 et sw=4 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -26,6 +27,10 @@
 
 #ifdef XP_MACOSX
 #include <CoreServices/CoreServices.h>
+#endif
+
+#if defined(MOZ_WIDGET_COCOA)
+#include "nsCocoaFeatures.h"
 #endif
 
 using namespace mozilla::gfx;
@@ -109,37 +114,138 @@ static const char *sExtensionNames[] = {
     nullptr
 };
 
-static int64_t sTextureMemoryUsage = 0;
+int64_t GfxTexturesReporter::sAmount = 0;
 
-static int64_t
-GetTextureMemoryUsage()
-{
-    return sTextureMemoryUsage;
-}
-
-void
-GLContext::UpdateTextureMemoryUsage(MemoryUse action, GLenum format, GLenum type, uint16_t tileSize)
+/* static */ void
+GfxTexturesReporter::UpdateAmount(MemoryUse action, GLenum format,
+                                  GLenum type, uint16_t tileSize)
 {
     uint32_t bytesPerTexel = mozilla::gl::GetBitsPerTexel(format, type) / 8;
     int64_t bytes = (int64_t)(tileSize * tileSize * bytesPerTexel);
     if (action == MemoryFreed) {
-        sTextureMemoryUsage -= bytes;
+        sAmount -= bytes;
     } else {
-        sTextureMemoryUsage += bytes;
+        sAmount += bytes;
     }
 }
 
-NS_MEMORY_REPORTER_IMPLEMENT(TextureMemoryUsage,
-    "gfx-textures",
-    KIND_OTHER,
-    UNITS_BYTES,
-    GetTextureMemoryUsage,
-    "Memory used for storing GL textures.")
+static bool
+ParseGLVersion(GLContext* gl, unsigned int* version)
+{
+    GLenum error = gl->fGetError();
+    if (error != LOCAL_GL_NO_ERROR) {
+        MOZ_ASSERT(false, "An OpenGL error has been triggered before.");
+        return false;
+    }
 
-/*
- * XXX - we should really know the ARB/EXT variants of these
- * instead of only handling the symbol if it's exposed directly.
- */
+    /**
+     * B2G emulator bug work around: The emulator implements OpenGL ES 2.0 on
+     * OpenGL 3.2. The bug is that GetIntegerv(LOCAL_GL_{MAJOR,MINOR}_VERSION)
+     * returns OpenGL 3.2 instead of generating an error.
+     */
+    if (!gl->IsGLES())
+    {
+        /**
+         * OpenGL 3.1 and OpenGL ES 3.0 both introduce GL_{MAJOR,MINOR}_VERSION
+         * with GetIntegerv. So we first try those constants even though we
+         * might not have an OpenGL context supporting them, has this is a
+         * better way than parsing GL_VERSION.
+         */
+        GLint majorVersion = 0;
+        GLint minorVersion = 0;
+
+        gl->fGetIntegerv(LOCAL_GL_MAJOR_VERSION, &majorVersion);
+        gl->fGetIntegerv(LOCAL_GL_MINOR_VERSION, &minorVersion);
+
+        // If it's not an OpenGL (ES) 3.0 context, we will have an error
+        error = gl->fGetError();
+        if (error == LOCAL_GL_NO_ERROR &&
+            majorVersion > 0 &&
+            minorVersion >= 0)
+        {
+            *version = majorVersion * 100 + minorVersion * 10;
+            return true;
+        }
+    }
+
+    /**
+     * We were not able to use GL_{MAJOR,MINOR}_VERSION, so we parse
+     * GL_VERSION.
+     *
+     *
+     * OpenGL 2.x, 3.x, 4.x specifications:
+     *  The VERSION and SHADING_LANGUAGE_VERSION strings are laid out as follows:
+     *
+     *    <version number><space><vendor-specific information>
+     *
+     *  The version number is either of the form major_number.minor_number or
+     *  major_number.minor_number.release_number, where the numbers all have
+     *  one or more digits.
+     *
+     *
+     * OpenGL ES 2.0, 3.0 specifications:
+     *  The VERSION string is laid out as follows:
+     *
+     *     "OpenGL ES N.M vendor-specific information"
+     *
+     *  The version number is either of the form major_number.minor_number or
+     *  major_number.minor_number.release_number, where the numbers all have
+     *  one or more digits.
+     *
+     *
+     * Note:
+     *  We don't care about release_number.
+     */
+    const char* versionString = (const char*)gl->fGetString(LOCAL_GL_VERSION);
+
+    error = gl->fGetError();
+    if (error != LOCAL_GL_NO_ERROR) {
+        MOZ_ASSERT(false, "glGetString(GL_VERSION) has generated an error");
+        return false;
+    } else if (!versionString) {
+        MOZ_ASSERT(false, "glGetString(GL_VERSION) has returned 0");
+        return false;
+    }
+
+    const char kGLESVersionPrefix[] = "OpenGL ES ";
+    if (strncmp(versionString, kGLESVersionPrefix, strlen(kGLESVersionPrefix)) == 0) {
+        versionString += strlen(kGLESVersionPrefix);
+    }
+
+    const char* itr = versionString;
+    char* end = nullptr;
+    int majorVersion = (int)strtol(itr, &end, 10);
+
+    if (!end) {
+        MOZ_ASSERT(false, "Failed to parse the GL major version number.");
+        return false;
+    } else if (*end != '.') {
+        MOZ_ASSERT(false, "Failed to parse GL's major-minor version number separator.");
+        return false;
+    }
+
+    // we skip the '.' between the major and the minor version
+    itr = end + 1;
+
+    end = nullptr;
+
+    int minorVersion = (int)strtol(itr, &end, 10);
+    if (!end) {
+        MOZ_ASSERT(false, "Failed to parse GL's minor version number.");
+        return false;
+    }
+
+    if (majorVersion <= 0 || majorVersion >= 100) {
+        MOZ_ASSERT(false, "Invalid major version.");
+        return false;
+    } else if (minorVersion < 0 || minorVersion >= 10) {
+        MOZ_ASSERT(false, "Invalid minor version.");
+        return false;
+    }
+
+    *version = (unsigned int)(majorVersion * 100 + minorVersion * 10);
+    return true;
+}
 
 bool
 GLContext::InitWithPrefix(const char *prefix, bool trygl)
@@ -300,6 +406,19 @@ GLContext::InitWithPrefix(const char *prefix, bool trygl)
 
     mInitialized = LoadSymbols(&symbols[0], trygl, prefix);
 
+    if (mInitialized) {
+        unsigned int version = 0;
+
+        bool parseSuccess = ParseGLVersion(this, &version);
+        printf_stderr("OpenGL version detected: %u\n", version);
+
+        if (version >= mVersion) {
+            mVersion = version;
+        } else if (parseSuccess) {
+            MOZ_ASSERT(false, "Parsed version less than expected.");
+        }
+    }
+
     // Load OpenGL ES 2.0 symbols, or desktop if we aren't using ES 2.
     if (mInitialized) {
         if (IsGLES2()) {
@@ -424,12 +543,24 @@ GLContext::InitWithPrefix(const char *prefix, bool trygl)
 #endif
 
         InitExtensions();
+        InitFeatures();
 
         // Disable extensions with partial or incorrect support.
         if (WorkAroundDriverBugs()) {
             if (Renderer() == RendererAdrenoTM320) {
-                MarkExtensionUnsupported(OES_standard_derivatives);
+                MarkUnsupported(GLFeature::standard_derivatives);
             }
+            
+#ifdef XP_MACOSX
+            // The Mac Nvidia driver, for versions up to and including 10.8, don't seem
+            // to properly support this.  See 814839
+            // this has been fixed in Mac OS X 10.9. See 907946
+            if (Vendor() == gl::GLContext::VendorNVIDIA &&
+                !nsCocoaFeatures::OnMavericksOrLater())
+            {
+                MarkUnsupported(GLFeature::depth_texture);
+            }
+#endif
         }
 
         NS_ASSERTION(!IsExtensionSupported(GLContext::ARB_pixel_buffer_object) ||
@@ -437,6 +568,8 @@ GLContext::InitWithPrefix(const char *prefix, bool trygl)
                      "ARB_pixel_buffer_object supported without glMapBuffer/UnmapBuffer being available!");
 
         if (SupportsRobustness()) {
+            mHasRobustness = false;
+
             if (IsExtensionSupported(ARB_robustness)) {
                 SymLoadStruct robustnessSymbols[] = {
                     { (PRFuncPtr*) &mSymbols.fGetGraphicsResetStatus, { "GetGraphicsResetStatusARB", nullptr } },
@@ -446,7 +579,6 @@ GLContext::InitWithPrefix(const char *prefix, bool trygl)
                 if (!LoadSymbols(&robustnessSymbols[0], trygl, prefix)) {
                     NS_ERROR("GL supports ARB_robustness without supplying GetGraphicsResetStatusARB.");
 
-                    MarkExtensionUnsupported(ARB_robustness);
                     mSymbols.fGetGraphicsResetStatus = nullptr;
                 } else {
                     mHasRobustness = true;
@@ -462,16 +594,19 @@ GLContext::InitWithPrefix(const char *prefix, bool trygl)
                 if (!LoadSymbols(&robustnessSymbols[0], trygl, prefix)) {
                     NS_ERROR("GL supports EXT_robustness without supplying GetGraphicsResetStatusEXT.");
 
-                    MarkExtensionUnsupported(EXT_robustness);
                     mSymbols.fGetGraphicsResetStatus = nullptr;
                 } else {
                     mHasRobustness = true;
                 }
             }
+
+            if (!mHasRobustness) {
+                MarkUnsupported(GLFeature::robustness);
+            }
         }
 
         // Check for aux symbols based on extensions
-        if (IsExtensionSupported(XXX_framebuffer_blit))
+        if (IsSupported(GLFeature::framebuffer_blit))
         {
             SymLoadStruct auxSymbols[] = {
                 {
@@ -488,12 +623,12 @@ GLContext::InitWithPrefix(const char *prefix, bool trygl)
             if (!LoadSymbols(&auxSymbols[0], trygl, prefix)) {
                 NS_ERROR("GL supports framebuffer_blit without supplying glBlitFramebuffer");
 
-                MarkExtensionGroupUnsupported(XXX_framebuffer_blit);
+                MarkUnsupported(GLFeature::framebuffer_blit);
                 mSymbols.fBlitFramebuffer = nullptr;
             }
         }
 
-        if (IsExtensionSupported(XXX_framebuffer_multisample))
+        if (IsSupported(GLFeature::framebuffer_multisample))
         {
             SymLoadStruct auxSymbols[] = {
                 {
@@ -510,7 +645,7 @@ GLContext::InitWithPrefix(const char *prefix, bool trygl)
             if (!LoadSymbols(&auxSymbols[0], trygl, prefix)) {
                 NS_ERROR("GL supports framebuffer_multisample without supplying glRenderbufferStorageMultisample");
 
-                MarkExtensionGroupUnsupported(XXX_framebuffer_multisample);
+                MarkUnsupported(GLFeature::framebuffer_multisample);
                 mSymbols.fRenderbufferStorageMultisample = nullptr;
             }
         }
@@ -570,7 +705,7 @@ GLContext::InitWithPrefix(const char *prefix, bool trygl)
             if (!LoadSymbols(&vaoSymbols[0], trygl, prefix)) {
                 NS_ERROR("GL supports Vertex Array Object without supplying its functions.");
 
-                MarkExtensionGroupUnsupported(XXX_vertex_array_object);
+                MarkUnsupported(GLFeature::vertex_array_object);
                 mSymbols.fIsVertexArray = nullptr;
                 mSymbols.fGenVertexArrays = nullptr;
                 mSymbols.fBindVertexArray = nullptr;
@@ -593,7 +728,7 @@ GLContext::InitWithPrefix(const char *prefix, bool trygl)
             if (!LoadSymbols(&vaoSymbols[0], trygl, prefix)) {
                 NS_ERROR("GL supports Vertex Array Object without supplying its functions.");
 
-                MarkExtensionGroupUnsupported(XXX_vertex_array_object);
+                MarkUnsupported(GLFeature::vertex_array_object);
                 mSymbols.fIsVertexArray = nullptr;
                 mSymbols.fGenVertexArrays = nullptr;
                 mSymbols.fBindVertexArray = nullptr;
@@ -601,7 +736,7 @@ GLContext::InitWithPrefix(const char *prefix, bool trygl)
             }
         }
 
-        if (IsExtensionSupported(XXX_draw_instanced)) {
+        if (IsSupported(GLFeature::draw_instanced)) {
             SymLoadStruct drawInstancedSymbols[] = {
                 { (PRFuncPtr*) &mSymbols.fDrawArraysInstanced,
                   { "DrawArraysInstanced",
@@ -627,13 +762,13 @@ GLContext::InitWithPrefix(const char *prefix, bool trygl)
             if (!LoadSymbols(drawInstancedSymbols, trygl, prefix)) {
                 NS_ERROR("GL supports instanced draws without supplying its functions.");
 
-                MarkExtensionGroupUnsupported(XXX_draw_instanced);
+                MarkUnsupported(GLFeature::draw_instanced);
                 mSymbols.fDrawArraysInstanced = nullptr;
                 mSymbols.fDrawElementsInstanced = nullptr;
             }
         }
 
-        if (IsExtensionSupported(XXX_instanced_arrays)) {
+        if (IsSupported(GLFeature::instanced_arrays)) {
             SymLoadStruct instancedArraySymbols[] = {
                 { (PRFuncPtr*) &mSymbols.fVertexAttribDivisor,
                   { "VertexAttribDivisor",
@@ -649,12 +784,12 @@ GLContext::InitWithPrefix(const char *prefix, bool trygl)
             if (!LoadSymbols(instancedArraySymbols, trygl, prefix)) {
                 NS_ERROR("GL supports array instanced without supplying it function.");
 
-                mInitialized &= MarkExtensionGroupUnsupported(XXX_instanced_arrays);
+                MarkUnsupported(GLFeature::instanced_arrays);
                 mSymbols.fVertexAttribDivisor = nullptr;
             }
         }
 
-        if (IsExtensionSupported(XXX_transform_feedback)) {
+        if (IsSupported(GLFeature::transform_feedback)) {
             SymLoadStruct transformFeedbackSymbols[] = {
                 { (PRFuncPtr*) &mSymbols.fBindBufferBase,
                   { "BindBufferBase",
@@ -711,8 +846,8 @@ GLContext::InitWithPrefix(const char *prefix, bool trygl)
             if (!LoadSymbols(transformFeedbackSymbols, trygl, prefix)) {
                 NS_ERROR("GL supports transform feedback without supplying its functions.");
 
-                MarkExtensionGroupUnsupported(XXX_transform_feedback);
-                MarkExtensionGroupUnsupported(XXX_bind_buffer_offset);
+                MarkUnsupported(GLFeature::transform_feedback);
+                MarkUnsupported(GLFeature::bind_buffer_offset);
                 mSymbols.fBindBufferBase = nullptr;
                 mSymbols.fBindBufferRange = nullptr;
                 mSymbols.fBeginTransformFeedback = nullptr;
@@ -723,7 +858,7 @@ GLContext::InitWithPrefix(const char *prefix, bool trygl)
             }
         }
 
-        if (IsExtensionSupported(XXX_bind_buffer_offset)) {
+        if (IsSupported(GLFeature::bind_buffer_offset)) {
             SymLoadStruct bindBufferOffsetSymbols[] = {
                 { (PRFuncPtr*) &mSymbols.fBindBufferOffset,
                   { "BindBufferOffset",
@@ -738,12 +873,12 @@ GLContext::InitWithPrefix(const char *prefix, bool trygl)
             if (!LoadSymbols(bindBufferOffsetSymbols, trygl, prefix)) {
                 NS_ERROR("GL supports BindBufferOffset without supplying its function.");
 
-                MarkExtensionGroupUnsupported(XXX_bind_buffer_offset);
+                MarkUnsupported(GLFeature::bind_buffer_offset);
                 mSymbols.fBindBufferOffset = nullptr;
             }
         }
 
-        if (IsExtensionSupported(XXX_query_objects)) {
+        if (IsSupported(GLFeature::query_objects)) {
             SymLoadStruct queryObjectsSymbols[] = {
                 { (PRFuncPtr*) &mSymbols.fBeginQuery, { "BeginQuery", "BeginQueryEXT", nullptr } },
                 { (PRFuncPtr*) &mSymbols.fGenQueries, { "GenQueries", "GenQueriesEXT", nullptr } },
@@ -758,11 +893,11 @@ GLContext::InitWithPrefix(const char *prefix, bool trygl)
             if (!LoadSymbols(queryObjectsSymbols, trygl, prefix)) {
                 NS_ERROR("GL supports query objects without supplying its functions.");
 
-                mInitialized &= MarkExtensionGroupUnsupported(XXX_query_objects);
-                mInitialized &= MarkExtensionGroupUnsupported(XXX_get_query_object_iv);
-                mInitialized &= MarkExtensionGroupUnsupported(XXX_occlusion_query);
-                MarkExtensionGroupUnsupported(XXX_occlusion_query_boolean);
-                MarkExtensionGroupUnsupported(XXX_occlusion_query2);
+                MarkUnsupported(GLFeature::query_objects);
+                MarkUnsupported(GLFeature::get_query_object_iv);
+                MarkUnsupported(GLFeature::occlusion_query);
+                MarkUnsupported(GLFeature::occlusion_query_boolean);
+                MarkUnsupported(GLFeature::occlusion_query2);
                 mSymbols.fBeginQuery = nullptr;
                 mSymbols.fGenQueries = nullptr;
                 mSymbols.fDeleteQueries = nullptr;
@@ -773,7 +908,7 @@ GLContext::InitWithPrefix(const char *prefix, bool trygl)
             }
         }
 
-        if (IsExtensionSupported(XXX_get_query_object_iv)) {
+        if (IsSupported(GLFeature::get_query_object_iv)) {
             SymLoadStruct queryObjectsSymbols[] = {
                 { (PRFuncPtr*) &mSymbols.fGetQueryObjectiv, { "GetQueryObjectiv", "GetQueryObjectivEXT", nullptr } },
                 { nullptr, { nullptr } },
@@ -782,7 +917,7 @@ GLContext::InitWithPrefix(const char *prefix, bool trygl)
             if (!LoadSymbols(queryObjectsSymbols, trygl, prefix)) {
                 NS_ERROR("GL supports query objects iv getter without supplying its function.");
 
-                mInitialized &= MarkExtensionGroupUnsupported(XXX_get_query_object_iv);
+                MarkUnsupported(GLFeature::get_query_object_iv);
                 mSymbols.fGetQueryObjectiv = nullptr;
             }
         }
@@ -853,7 +988,7 @@ GLContext::InitWithPrefix(const char *prefix, bool trygl)
         mMaxTextureImageSize = mMaxTextureSize;
 
         mMaxSamples = 0;
-        if (IsExtensionSupported(XXX_framebuffer_multisample)) {
+        if (IsSupported(GLFeature::framebuffer_multisample)) {
             fGetIntegerv(LOCAL_GL_MAX_SAMPLES, (GLint*)&mMaxSamples);
         }
 
@@ -907,16 +1042,6 @@ GLContext::InitExtensions()
         // Some Adreno drivers do not report GL_OES_EGL_sync, but they really do support it.
         MarkExtensionSupported(OES_EGL_sync);
     }
-
-#ifdef XP_MACOSX
-    // The Mac Nvidia driver, for versions up to and including 10.8, don't seem
-    // to properly support this.  See 814839
-    if (WorkAroundDriverBugs() &&
-        Vendor() == gl::GLContext::VendorNVIDIA)
-    {
-        MarkExtensionUnsupported(gl::GLContext::EXT_packed_depth_stencil);
-    }
-#endif
 
 #ifdef DEBUG
     firstRun = false;
@@ -992,7 +1117,7 @@ void
 GLContext::PlatformStartup()
 {
   CacheCanUploadNPOT();
-  NS_RegisterMemoryReporter(new NS_MEMORY_REPORTER_NAME(TextureMemoryUsage));
+  NS_RegisterMemoryReporter(new GfxTexturesReporter());
 }
 
 void

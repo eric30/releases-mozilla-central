@@ -118,7 +118,7 @@ ThebesLayerComposite::RenderLayer(const nsIntPoint& aOffset,
 #endif
 
   EffectChain effectChain;
-  LayerManagerComposite::AddMaskEffect(mMaskLayer, effectChain);
+  LayerManagerComposite::AutoAddMaskEffect autoMaskEffect(mMaskLayer, effectChain);
 
   nsIntRegion visibleRegion = GetEffectiveVisibleRegion();
 
@@ -151,7 +151,6 @@ ThebesLayerComposite::RenderLayer(const nsIntPoint& aOffset,
     mValidRegion = tiledLayerProps.mValidRegion;
   }
 
-  LayerManagerComposite::RemoveMaskEffect(mMaskLayer);
   mCompositeManager->GetCompositor()->MakeCurrent();
 }
 
@@ -169,7 +168,7 @@ void
 ThebesLayerComposite::CleanupResources()
 {
   if (mBuffer) {
-    mBuffer->Detach();
+    mBuffer->Detach(this);
   }
   mBuffer = nullptr;
 }

@@ -20,7 +20,7 @@ namespace js {
 };
 
 namespace js {
-namespace ion {
+namespace jit {
 
 enum FrameType
 {
@@ -143,9 +143,9 @@ class IonFrameIterator
         return type_ == IonFrame_BaselineStub;
     }
     bool isNative() const;
-    bool isOOLNativeGetter() const;
+    bool isOOLNative() const;
     bool isOOLPropertyOp() const;
-    bool isOOLProxyGet() const;
+    bool isOOLProxy() const;
     bool isDOMExit() const;
     bool isEntry() const {
         return type_ == IonFrame_Entry;
@@ -500,7 +500,7 @@ class InlineFrameIteratorMaybeGC
 typedef InlineFrameIteratorMaybeGC<CanGC> InlineFrameIterator;
 typedef InlineFrameIteratorMaybeGC<NoGC> InlineFrameIteratorNoGC;
 
-} // namespace ion
+} // namespace jit
 } // namespace js
 
 #endif // JS_ION

@@ -17,7 +17,7 @@
 #include "vm/StringObject-inl.h"
 
 namespace js {
-namespace ion {
+namespace jit {
 
 IonBuilder::InliningStatus
 IonBuilder::inlineNativeCall(CallInfo &callInfo, JSNative native)
@@ -1004,7 +1004,7 @@ IonBuilder::inlineUnsafePutElements(CallInfo &callInfo)
 
         // We can only inline setelem on dense arrays that do not need type
         // barriers and on typed arrays.
-        int arrayType;
+        ScalarTypeRepresentation::Type arrayType;
         if ((!ElementAccessIsDenseNative(obj, id) ||
              PropertyWriteNeedsTypeBarrier(cx, current, &obj, NULL,
                                            &elem, /* canModify = */ false)) &&
@@ -1035,7 +1035,7 @@ IonBuilder::inlineUnsafePutElements(CallInfo &callInfo)
             continue;
         }
 
-        int arrayType;
+        ScalarTypeRepresentation::Type arrayType;
         if (ElementAccessIsTypedArray(obj, id, &arrayType)) {
             if (!inlineUnsafeSetTypedArrayElement(callInfo, base, arrayType))
                 return InliningStatus_Error;
@@ -1072,7 +1072,7 @@ IonBuilder::inlineUnsafeSetDenseArrayElement(CallInfo &callInfo, uint32_t base)
 bool
 IonBuilder::inlineUnsafeSetTypedArrayElement(CallInfo &callInfo,
                                              uint32_t base,
-                                             int arrayType)
+                                             ScalarTypeRepresentation::Type arrayType)
 {
     // Note: we do not check the conditions that are asserted as true
     // in intrinsic_UnsafePutElements():
@@ -1102,7 +1102,7 @@ IonBuilder::inlineForceSequentialOrInParallelSection(CallInfo &callInfo)
         // access the "in warmup" flag of the runtime.
         return InliningStatus_NotInlined;
 
-      case ParallelExecution:
+      case ParallelExecution: {
         // During Parallel Exec, we always force sequential, so
         // replace with true.  This permits UCE to eliminate the
         // entire path as dead, which is important.
@@ -1111,6 +1111,9 @@ IonBuilder::inlineForceSequentialOrInParallelSection(CallInfo &callInfo)
         current->add(ins);
         current->push(ins);
         return InliningStatus_Inlined;
+      }
+
+      default:;
     }
 
     MOZ_ASSUME_UNREACHABLE("Invalid execution mode");
@@ -1285,6 +1288,7 @@ IonBuilder::inlineNewDenseArray(CallInfo &callInfo)
         return inlineNewDenseArrayForSequentialExecution(callInfo);
       case ParallelExecution:
         return inlineNewDenseArrayForParallelExecution(callInfo);
+      default:;
     }
 
     MOZ_ASSUME_UNREACHABLE("unknown ExecutionMode");
@@ -1516,5 +1520,5 @@ IonBuilder::inlineBailout(CallInfo &callInfo)
     return InliningStatus_Inlined;
 }
 
-} // namespace ion
+} // namespace jit
 } // namespace js

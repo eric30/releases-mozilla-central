@@ -250,7 +250,7 @@ void StateMachineTracker::EnsureGlobalStateMachine()
   ReentrantMonitorAutoEnter mon(mMonitor);
   if (mStateMachineCount == 0) {
     NS_ASSERTION(!mStateMachineThread, "Should have null state machine thread!");
-    DebugOnly<nsresult> rv = NS_NewNamedThread("Media State", &mStateMachineThread, nullptr);
+    DebugOnly<nsresult> rv = NS_NewNamedThread("Media State", &mStateMachineThread);
     NS_ABORT_IF_FALSE(NS_SUCCEEDED(rv), "Can't create media state machine thread");
   }
   mStateMachineCount++;
@@ -2267,12 +2267,12 @@ nsresult MediaDecoderStateMachine::RunStateMachine()
       // data to begin playback, or if we've not downloaded a reasonable
       // amount of data inside our buffering time.
       TimeDuration elapsed = now - mBufferingStart;
-      bool isLiveStream = mDecoder->GetResource()->GetLength() == -1;
+      bool isLiveStream = resource->GetLength() == -1;
       if ((isLiveStream || !mDecoder->CanPlayThrough()) &&
             elapsed < TimeDuration::FromSeconds(mBufferingWait * mPlaybackRate) &&
             (mQuickBuffering ? HasLowDecodedData(QUICK_BUFFERING_LOW_DATA_USECS)
                             : (GetUndecodedData() < mBufferingWait * mPlaybackRate * USECS_PER_S)) &&
-            !resource->IsDataCachedToEndOfResource(mDecoder->mDecoderPosition) &&
+            !mDecoder->IsDataCachedToEndOfResource() &&
             !resource->IsSuspended())
       {
         LOG(PR_LOG_DEBUG,
@@ -2516,7 +2516,7 @@ void MediaDecoderStateMachine::AdvanceFrame()
   if (mState == DECODER_STATE_DECODING &&
       mDecoder->GetState() == MediaDecoder::PLAY_STATE_PLAYING &&
       HasLowDecodedData(remainingTime + EXHAUSTED_DATA_MARGIN_USECS) &&
-      !resource->IsDataCachedToEndOfResource(mDecoder->mDecoderPosition) &&
+      !mDecoder->IsDataCachedToEndOfResource() &&
       !resource->IsSuspended() &&
       (JustExitedQuickBuffering() || HasLowUndecodedData()))
   {
