@@ -142,7 +142,7 @@ NfcContentHelper.prototype = {
     return request;
   },
 
-  ndefMakeReadOnly: function ndefMakeReadOnly(window, records) {
+  ndefMakeReadOnly: function ndefMakeReadOnly(window) {
     if (window == null) {
       throw Components.Exception("Can't get window object",
                                   Cr.NS_ERROR_UNEXPECTED);
