@@ -84,43 +84,6 @@ NS_IMPL_RELEASE_INHERITED(nsNfc, nsDOMEventTargetHelper)
 
 NS_IMPL_ISUPPORTS1(nsNfc::NfcCallback, nsINfcCallback)
 
-NS_IMPL_EVENT_HANDLER(nsNfc, techdiscovered)
-NS_IMPL_EVENT_HANDLER(nsNfc, techlost)
-
-NS_IMETHODIMP
-nsNfc::TechDiscovered(const JS::Value& aTagMetadata, JSContext* aCx)
-{
-  // Parse JSON
-  nsString message;
-  nsresult rv;
-
-  nsCOMPtr<nsIJSON> json(new nsJSON());
-  rv = json->EncodeFromJSVal((jsval*)&aTagMetadata, aCx, message);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Dispatch incoming event.
-  nsRefPtr<NfcEvent> event = NfcEvent::Create(this, message);
-  NS_ASSERTION(event, "This should never fail!");
-
-  return event->Dispatch(this, NS_LITERAL_STRING("techdiscovered"));
-}
-
-NS_IMETHODIMP
-nsNfc::TechLost(const JS::Value& aNfcHandle, JSContext* aCx) {
-  nsString message;
-  nsresult rv;
-
-  nsCOMPtr<nsIJSON> json(new nsJSON());
-  rv = json->EncodeFromJSVal((jsval*)&aNfcHandle, aCx, message);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Dispatch incoming event.
-  nsRefPtr<NfcEvent> event = NfcEvent::Create(this, message);
-  NS_ASSERTION(event, "This should never fail!");
-
-  return event->Dispatch(this, NS_LITERAL_STRING("techlost"));
-}
-
 NS_IMETHODIMP
 nsNfc::ValidateNdefTag(const JS::Value& aRecords, JSContext* aCx, bool* result)
 {
@@ -284,12 +247,6 @@ nsresult
 NS_NewNfc(nsPIDOMWindow* aWindow, nsIDOMMozNfc** aNfc)
 {
   NS_ASSERTION(aWindow, "Null pointer!");
-
-  // Check if Nfc exists and return null if it doesn't
-  if(!mozilla::dom::gonk::SystemWorkerManager::IsNfcEnabled()) {
-    *aNfc = nullptr;
-    return NS_OK;
-  }
 
   // Make sure we're dealing with an inner window.
   nsPIDOMWindow* innerWindow = aWindow->IsInnerWindow() ?

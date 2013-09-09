@@ -618,13 +618,6 @@ SystemWorkerManager::RegisterNfcWorker(const JS::Value& aWorker,
 #ifdef MOZ_B2G_NFC
   NS_ENSURE_TRUE(!JSVAL_IS_PRIMITIVE(aWorker), NS_ERROR_UNEXPECTED);
 
-  // Check a system property to see if NFC is enabled.
-  bool isNfcEnabled = IsNfcEnabled();
-  if (!isNfcEnabled) {
-    NS_WARNING("NFC Property not enabled.");
-    return NS_ERROR_FAILURE;
-  }
-
   if (mNfcConsumer) {
     NS_WARNING("NfcConsumer already registered");
     return NS_ERROR_FAILURE;
@@ -700,20 +693,6 @@ SystemWorkerManager::InitWifi(JSContext *cx)
   mWifiWorker = worker;
   return NS_OK;
 }
-
-#ifdef MOZ_B2G_NFC
-// static
-bool SystemWorkerManager::IsNfcEnabled()
-{
-  char propBuf[PROPERTY_VALUE_MAX];
-  property_get("nfc.enabled", propBuf, "false");
-  if (strcmp(propBuf, "false") == 0) {
-    return false;
-  } else {
-    return true;
-  }
-}
-#endif
 
 NS_IMPL_ISUPPORTS3(SystemWorkerManager,
                    nsIObserver,

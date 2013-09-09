@@ -12,12 +12,6 @@
 interface nsIDOMMozNfc : nsIDOMEventTarget {
 
   [implicit_jscontext]
-  attribute jsval ontechdiscovered;
-
-  [implicit_jscontext]
-  attribute jsval ontechlost;
-
-  [implicit_jscontext]
   boolean validateNdefTag(in jsval records);
 
   /* Get metadata details of the discovered and connected NDEF message */
