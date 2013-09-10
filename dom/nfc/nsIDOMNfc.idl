@@ -51,10 +51,4 @@ interface nsIDOMMozNfc : nsIDOMEventTarget {
 
   [implicit_jscontext]
   nsIDOMDOMRequest close();
-
-  /**
-   * Only for debug/development purposes to send a unfiltered
-   * message to the nfcd socket
-   */
-  void sendToNfcd(in DOMString message);
 };

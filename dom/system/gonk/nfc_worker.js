@@ -66,13 +66,6 @@ let Nfc = {
   },
 
   /**
-   * Debug only
-   */
-  directMessage: function directMessage(message) {
-    postNfcMessage(message.content);
-  },
-
-  /**
    * Retrieve metadata describing the NDEF formatted data, if present.
    */
   ndefDetails: function ndefDetails(message) {

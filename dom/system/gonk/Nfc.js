@@ -29,7 +29,6 @@ const NFC_CID =
   Components.ID("{2ff24790-5e74-11e1-b86c-0800200c9a66}");
 
 const NFC_IPC_MSG_NAMES = [
-  "NFC:SendToNfcd",
   "NFC:NdefDetails",
   "NFC:NdefRead",
   "NFC:NdefWrite",
@@ -138,7 +137,7 @@ Nfc.prototype = {
         ppmm.broadcastAsyncMessage("NFC:CloseResponse", message);
         break;
       case "ConfigResponse":
-        // Config changes. No notifiication.
+        // Config changes. No notification.
         debug("ConfigResponse" + JSON.stringify(message));
         break;
 
@@ -150,10 +149,6 @@ Nfc.prototype = {
   // nsINfcWorker
 
   worker: null,
-
-  sendToNfcd: function sendToNfcd(message) {
-    this.worker.postMessage({type: "directMessage", content: message});
-  },
 
   ndefDetails: function ndefDetails(message) {
     debug("ndefDetailsRequest message: " + JSON.stringify(message));

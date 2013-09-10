@@ -70,10 +70,6 @@ NfcContentHelper.prototype = {
   _requestMap: null,
   _connectedSessionId: null,
 
-  sendToNfcd: function sendToNfcd(message) {
-    cpmm.sendAsyncMessage("NFC:SendToNfcd", message);
-  },
-
   encodeNdefRecords: function encodeNdefRecords(records) {
     var encodedRecords = new Array();
     for(var i=0; i < records.length; i++) {

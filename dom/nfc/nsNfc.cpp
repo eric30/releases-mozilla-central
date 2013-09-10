@@ -233,16 +233,6 @@ nsNfc::Close(JSContext* aCx, nsIDOMDOMRequest** aRequest)
   return NS_OK;
 }
 
-// TODO: make private
-NS_IMETHODIMP
-nsNfc::SendToNfcd(const nsAString& message)
-{
-  nsresult rv = mNfc->SendToNfcd(message);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  return NS_OK;
-}
-
 nsresult
 NS_NewNfc(nsPIDOMWindow* aWindow, nsIDOMMozNfc** aNfc)
 {
