@@ -136,4 +136,8 @@ interface BluetoothAdapter : EventTarget {
   DOMRequest sendMediaMetaData(optional MediaMetaData mediaMetaData);
   [Creator,Throws]
   DOMRequest sendMediaPlayStatus(optional MediaPlayStatus mediaPlayStatus);
+  
+  // New API for creating new sockets
+  [Creator, Throws]
+  DOMRequest createRfcommSocket(DOMString deviceAddress, DOMString serviceUuid);
 };

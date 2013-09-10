@@ -142,6 +142,11 @@ public:
   already_AddRefed<DOMRequest>
     SendMediaPlayStatus(const MediaPlayStatus& aMediaPlayStatus, ErrorResult& aRv);
 
+  // New API for creating new sockets
+  already_AddRefed<DOMRequest>
+    CreateRfcommSocket(const nsAString& aDeviceAddress, const nsAString& aServiceUuid,
+                       ErrorResult& aRv);
+
   IMPL_EVENT_HANDLER(devicefound);
   IMPL_EVENT_HANDLER(a2dpstatuschanged);
   IMPL_EVENT_HANDLER(hfpstatuschanged);

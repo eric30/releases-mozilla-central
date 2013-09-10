@@ -22,6 +22,7 @@
 
 #include "BluetoothAdapter.h"
 #include "BluetoothDevice.h"
+#include "BluetoothNewSocket.h"
 #include "BluetoothReplyRunnable.h"
 #include "BluetoothService.h"
 #include "BluetoothUtils.h"
@@ -872,6 +873,23 @@ BluetoothAdapter::IsScoConnected(ErrorResult& aRv)
     return nullptr;
   }
   bs->IsScoConnected(results);
+
+  return request.forget();
+}
+
+already_AddRefed<DOMRequest>
+BluetoothAdapter::CreateRfcommSocket(const nsAString& aDeviceAddress,
+                                     const nsAString& aServiceUuid,
+                                     ErrorResult& aRv)
+{
+  nsCOMPtr<nsPIDOMWindow> win = GetOwner();
+  if (!win) {
+    aRv.Throw(NS_ERROR_FAILURE);
+    return nullptr;
+  }
+
+  nsRefPtr<DOMRequest> request = new DOMRequest(win);
+  //nsRefPtr<BluetoothNewSocket> socket = new BluetoothNewSocket(win);
 
   return request.forget();
 }
