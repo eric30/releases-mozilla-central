@@ -491,6 +491,7 @@ webidl_files += \
   BluetoothDeviceEvent.webidl \
   BluetoothManager.webidl \
   BluetoothStatusChangedEvent.webidl \
+  BluetoothNewSocket.webidl \
   $(NULL)
 endif
 

@@ -44,7 +44,8 @@ if CONFIG['MOZ_B2G_BT']:
         'ObexBase.cpp',
         'BluetoothUuid.cpp',
         'BluetoothSocket.cpp',
-        'BluetoothProfileController.cpp'
+        'BluetoothProfileController.cpp',
+        'BluetoothNewSocket.cpp'
     ]
 
     if CONFIG['MOZ_B2G_RIL']:
