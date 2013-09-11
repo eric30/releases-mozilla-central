@@ -14,6 +14,10 @@
 #include "nsIDOMNdefRecord.h"
 #include "nsIJSNativeInitializer.h"
 
+#include "nsCycleCollectionHoldDrop.h"
+#include "nsTraceRefcnt.h"
+#include "js/GCAPI.h"
+
 namespace mozilla {
 namespace dom {
 namespace nfc {
@@ -25,8 +29,10 @@ class NdefRecord MOZ_FINAL : public nsIDOMNdefRecord,
                              public nsIJSNativeInitializer
 {
 public:
-  NS_DECL_ISUPPORTS
   NS_DECL_NSIDOMNDEFRECORD
+
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(NdefRecord, nsIDOMNdefRecord);
 
   NdefRecord();
   static nsresult NewNdefRecord(nsISupports* *aNewRecord);
@@ -35,12 +41,16 @@ public:
                      JSObject* aObject,
                      const JS::CallArgs &aArgv);
 
-  virtual ~NdefRecord() {}
+  virtual ~NdefRecord();
+
+private:
+  void HoldData();
+  void DropData();
 
   PRUint8 tnf;
   nsString type;
   nsString id;
-  jsval payload;
+  JS::Heap<JS::Value> payload;
 };
 
 } // namespace nfc

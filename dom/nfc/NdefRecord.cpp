@@ -12,15 +12,29 @@ using namespace mozilla::dom::nfc;
 
 DOMCI_DATA(NdefRecord, NdefRecord)
 
-NS_INTERFACE_MAP_BEGIN(NdefRecord)
+NS_IMPL_CYCLE_COLLECTING_ADDREF(NdefRecord)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(NdefRecord)
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(NdefRecord)
+
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(NdefRecord)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDOMNdefRecord)
   NS_INTERFACE_MAP_ENTRY(nsIDOMNdefRecord)
   NS_INTERFACE_MAP_ENTRY(nsIJSNativeInitializer)
   NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(NdefRecord)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_ADDREF(NdefRecord)
-NS_IMPL_RELEASE(NdefRecord)
+NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(NdefRecord)
+  NS_IMPL_CYCLE_COLLECTION_TRACE_JSVAL_MEMBER_CALLBACK(payload)
+NS_IMPL_CYCLE_COLLECTION_TRACE_END
+
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(NdefRecord)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(NdefRecord)
+  tmp->DropData();
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 /********************************
  * Constructors/Destructors
@@ -28,10 +42,12 @@ NS_IMPL_RELEASE(NdefRecord)
 
 NdefRecord::NdefRecord()
 {
-  tnf = 0;
-  type.AssignLiteral("");
-  id.AssignLiteral("");
-  payload = JSVAL_NULL;
+  MOZ_COUNT_CTOR(NdefRecord);
+}
+
+NdefRecord::~NdefRecord() {
+  MOZ_COUNT_DTOR(NdefRecord);
+  DropData();
 }
 
 /* static */
@@ -64,7 +80,6 @@ NdefRecord::Initialize(nsISupports* aOwner,
   tnf = (PRUint8)JSVAL_TO_INT(aArgv[0]);
 
   // Type (DOMString)
-
   if (JSVAL_IS_STRING(aArgv[1])) {
     jsstr = JSVAL_TO_STRING(aArgv[1]);
     const jschar *typechars = JS_GetStringCharsAndLength(aContext, jsstr, &length);
@@ -92,9 +107,14 @@ NdefRecord::Initialize(nsISupports* aOwner,
     return NS_ERROR_INVALID_ARG;
   }
 
-  // Payload (jsval), is already a JSVAL
-  payload = aArgv[3];
+  // Payload (jsval), store in JS::Heap<JS::Value>
+  if (JSVAL_IS_STRING(aArgv[3])) {
+    payload = aArgv[3];
+  } else {
+    return NS_ERROR_INVALID_ARG;
+  }
 
+  HoldData();
   return NS_OK;
 }
 
@@ -128,6 +148,25 @@ NdefRecord::GetId(nsAString& aId)
 NS_IMETHODIMP
 NdefRecord::GetPayload(JS::Value* aPayload)
 {
+  JS::ExposeValueToActiveJS(payload);
   *aPayload = payload;
   return NS_OK;
+}
+
+/**
+ * Private, GC
+ */
+void
+NdefRecord::HoldData()
+{
+  mozilla::HoldJSObjects(this);
+}
+
+void
+NdefRecord::DropData()
+{
+  if (!JSVAL_IS_NULL(payload)) {
+    payload = JSVAL_NULL;
+    mozilla::DropJSObjects(this);
+  }
 }
