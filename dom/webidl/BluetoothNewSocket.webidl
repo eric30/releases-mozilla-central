@@ -5,7 +5,8 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 interface BluetoothNewSocket : EventTarget {
-  readonly attribute DOMString name;
+  readonly attribute DOMString address;
+  readonly attribute DOMString serviceUuid;
 
   [Creator, Throws]
   DOMRequest open(DOMString deviceAddress, DOMString serviceUuid);

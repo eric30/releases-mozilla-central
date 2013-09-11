@@ -881,9 +881,11 @@ class GetSocketTask : public BluetoothReplyRunnable
 {
 public:
   GetSocketTask(BluetoothAdapter* aAdapter,
-                nsIDOMDOMRequest* aReq) :
-    BluetoothReplyRunnable(aReq),
-    mAdapterPtr(aAdapter)
+                const nsAString& aAddress,
+                nsIDOMDOMRequest* aReq)
+    : BluetoothReplyRunnable(aReq)
+    , mAdapterPtr(aAdapter)
+    , mAddress(aAddress)
   {
   }
 
@@ -895,7 +897,8 @@ public:
     const BluetoothValue& v = mReply->get_BluetoothReplySuccess().value();
     BT_LOG("Type of BluetoothValue: %d", v.type());
 
-    nsRefPtr<BluetoothNewSocket> socket = new BluetoothNewSocket(mAdapterPtr->GetOwner());
+    nsRefPtr<BluetoothNewSocket> socket =
+      new BluetoothNewSocket(mAdapterPtr->GetOwner(), mAddress);
 
     BT_LOG("Socket created");
 
@@ -926,6 +929,7 @@ public:
 
 private:
   nsRefPtr<BluetoothAdapter> mAdapterPtr;
+  nsString mAddress;
 };
 
 already_AddRefed<DOMRequest>
@@ -941,7 +945,7 @@ BluetoothAdapter::CreateRfcommSocket(const nsAString& aDeviceAddress,
 
   nsRefPtr<DOMRequest> request = new DOMRequest(win);
   nsRefPtr<BluetoothReplyRunnable> results =
-    new GetSocketTask(this, request);
+    new GetSocketTask(this, aDeviceAddress, request);
 
   DispatchBluetoothReply(results, BluetoothValue(true), EmptyString());
 

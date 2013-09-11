@@ -13,8 +13,10 @@ NS_INTERFACE_MAP_END_INHERITING(nsDOMEventTargetHelper)
 NS_IMPL_ADDREF_INHERITED(BluetoothNewSocket, nsDOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(BluetoothNewSocket, nsDOMEventTargetHelper)
 
-BluetoothNewSocket::BluetoothNewSocket(nsPIDOMWindow* aWindow)
+BluetoothNewSocket::BluetoothNewSocket(nsPIDOMWindow* aWindow,
+                                       const nsAString& aAddress)
   : nsDOMEventTargetHelper(aWindow)
+  , mAddress(aAddress)
 {
   MOZ_ASSERT(aWindow);
   MOZ_ASSERT(IsDOMBinding());

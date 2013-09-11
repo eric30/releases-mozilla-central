@@ -25,12 +25,17 @@ class BluetoothNewSocket : public nsDOMEventTargetHelper
 public:
   NS_DECL_ISUPPORTS_INHERITED
   
-  BluetoothNewSocket(nsPIDOMWindow* aOwner);
+  BluetoothNewSocket(nsPIDOMWindow* aOwner, const nsAString& aAddress);
   ~BluetoothNewSocket();
 
-  void GetName(nsString& aName) const
+  void GetAddress(nsString& aAddress) const
   {
-    aName = mName;
+    aAddress = mAddress;
+  }
+  
+  void GetServiceUuid(nsString& aServiceUuid) const
+  {
+    aServiceUuid = mServiceUuid;
   }
 
   already_AddRefed<DOMRequest>
@@ -46,7 +51,8 @@ public:
     WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
 private:
-  nsString mName;
+  nsString mAddress;
+  nsString mServiceUuid;
 };
 
 END_BLUETOOTH_NAMESPACE
