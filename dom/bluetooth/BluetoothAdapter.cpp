@@ -877,6 +877,57 @@ BluetoothAdapter::IsScoConnected(ErrorResult& aRv)
   return request.forget();
 }
 
+class GetSocketTask : public BluetoothReplyRunnable
+{
+public:
+  GetSocketTask(BluetoothAdapter* aAdapter,
+                nsIDOMDOMRequest* aReq) :
+    BluetoothReplyRunnable(aReq),
+    mAdapterPtr(aAdapter)
+  {
+  }
+
+  bool
+  ParseSuccessfulReply(JS::Value* aValue)
+  {
+    *aValue = JSVAL_VOID;
+
+    const BluetoothValue& v = mReply->get_BluetoothReplySuccess().value();
+    BT_LOG("Type of BluetoothValue: %d", v.type());
+
+    nsRefPtr<BluetoothNewSocket> socket = new BluetoothNewSocket(mAdapterPtr->GetOwner());
+
+    BT_LOG("Socket created");
+
+    nsresult rv;
+    nsIScriptContext* sc = mAdapterPtr->GetContextForEventHandlers(&rv);
+    if (!sc) {
+      return false;
+    }
+
+    AutoPushJSContext cx(sc->GetNativeContext());
+
+    JS::Rooted<JSObject*> global(cx, sc->GetWindowProxy());
+    rv = nsContentUtils::WrapNative(cx, global, socket, aValue);
+    if (NS_FAILED(rv)) {
+      return false;
+    }
+
+    BT_LOG("Return true");
+    return true;
+  }
+
+  void
+  ReleaseMembers()
+  {
+    BluetoothReplyRunnable::ReleaseMembers();
+    mAdapterPtr = nullptr;
+  }
+
+private:
+  nsRefPtr<BluetoothAdapter> mAdapterPtr;
+};
+
 already_AddRefed<DOMRequest>
 BluetoothAdapter::CreateRfcommSocket(const nsAString& aDeviceAddress,
                                      const nsAString& aServiceUuid,
@@ -889,7 +940,10 @@ BluetoothAdapter::CreateRfcommSocket(const nsAString& aDeviceAddress,
   }
 
   nsRefPtr<DOMRequest> request = new DOMRequest(win);
-  //nsRefPtr<BluetoothNewSocket> socket = new BluetoothNewSocket(win);
+  nsRefPtr<BluetoothReplyRunnable> results =
+    new GetSocketTask(this, request);
+
+  DispatchBluetoothReply(results, BluetoothValue(true), EmptyString());
 
   return request.forget();
 }

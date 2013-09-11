@@ -24,6 +24,9 @@ class BluetoothNewSocket : public nsDOMEventTargetHelper
 {
 public:
   NS_DECL_ISUPPORTS_INHERITED
+  
+  BluetoothNewSocket(nsPIDOMWindow* aOwner);
+  ~BluetoothNewSocket();
 
   void GetName(nsString& aName) const
   {
@@ -43,9 +46,6 @@ public:
     WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
 private:
-  BluetoothNewSocket(nsPIDOMWindow* aOwner);
-  ~BluetoothNewSocket();
-
   nsString mName;
 };
 
