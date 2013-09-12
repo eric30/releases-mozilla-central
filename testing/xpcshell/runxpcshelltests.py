@@ -789,8 +789,9 @@ class XPCShellTests(object):
         """
         # Make assertions fatal
         self.env["XPCOM_DEBUG_BREAK"] = "stack-and-abort"
-        # Enable crash reporting
-        self.env["MOZ_CRASHREPORTER"] = "1"
+        # Crash reporting interferes with debugging
+        if not self.debuggerInfo:
+            self.env["MOZ_CRASHREPORTER"] = "1"
         # Don't launch the crash reporter client
         self.env["MOZ_CRASHREPORTER_NO_REPORT"] = "1"
         # Capturing backtraces is very slow on some platforms, and it's
@@ -1331,10 +1332,11 @@ class XPCShellTests(object):
             for test in running_tests:
                 if test.done:
                     done_tests.add(test)
-                    test.join()
+                    test.join(1) # join with timeout so we don't hang on blocked threads
                     # if the test had trouble, we will try running it again
                     # at the end of the run
-                    if test.retry:
+                    if test.retry or test.is_alive():
+                        # if the join call timed out, test.is_alive => True
                         self.try_again_list.append(test.test_object)
                         continue
                     # did the test encounter any exception?

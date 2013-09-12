@@ -4,15 +4,9 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH		= @DEPTH@
-topsrcdir	= @top_srcdir@
-srcdir		= @srcdir@
-
 TOPLEVEL_BUILD := 1
 
 run_for_side_effects := $(shell echo "MAKE: $(MAKE)")
-include $(DEPTH)/config/autoconf.mk
-
 STATIC_LIBRARY_NAME = js_static
 LIBS		= $(NSPR_LIBS)
 
@@ -177,6 +171,7 @@ MOZILLA_DTRACE_SRC = $(srcdir)/devtools/javascript-trace.d
 endif
 
 default::
+	$(call py_action,process_install_manifest,--no-remove $(DIST)/include _build_manifests/install/dist_include)
 
 ifneq (,$(CROSS_COMPILE)$(filter-out WINNT OS2,$(OS_ARCH)))
 # nsinstall doesn't get built until we enter config/ in the exports phase,
@@ -201,13 +196,25 @@ symverscript: symverscript.in
 EXTRA_DEPS += symverscript
 endif
 
+export_files = js-config.h
+ifdef HAVE_DTRACE
+export_files += $(CURDIR)/javascript-trace.h
+endif
+
+INSTALL_TARGETS += jsconfig
+jsconfig_FILES = $(export_files)
+jsconfig_DEST = $(DIST)/include
+jsconfig_TARGET := export
+
+.PHONY: buildffi buildicu
+buildffi buildicu:
+compile:: buildffi buildicu
+
 include $(topsrcdir)/config/rules.mk
 
 ifdef JS_HAS_CTYPES
 ifndef MOZ_NATIVE_FFI
-# Build libffi proper as part of the 'exports' target, so things get built
-# in the right order.
-export::
+buildffi:
 		$(call SUBMAKE,,ctypes/libffi)
 
 distclean clean::
@@ -247,14 +254,12 @@ ifeq ($(OS_ARCH),WINNT)
                      cp -p intl/icu/lib/s$(libname)$(ICU_LIB_SUFFIX).lib intl/icu/lib/$(libname).lib;)
 endif
 
-# - Build ICU as part of the "export" target, so things get built
-#   in the right order.
 # - ICU requires GNU make according to its readme.html. pymake can't be used
 #   because it doesn't support order only dependencies.
 # - Force ICU to use the standard suffix for object files because expandlibs
 #   will discard all files with a non-standard suffix (bug 857450).
 # - Options for genrb: -k strict parsing; -R omit collation tailoring rules.
-export::
+buildicu:
 	$(GMAKE) $(ICU_GMAKE_OPTIONS) -C intl/icu STATIC_O=$(OBJ_SUFFIX) GENRBOPTS='-k -R'
 	$(ICU_LIB_RENAME)
 

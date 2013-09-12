@@ -32,6 +32,8 @@
 
 /************************************************************************/
 
+struct JSTracer;
+
 namespace JS {
 
 class Latin1CharsZ;
@@ -1357,28 +1359,6 @@ JS_IsInRequest(JSRuntime *rt);
 
 namespace js {
 
-inline bool
-IsPoisonedId(jsid iden)
-{
-    if (JSID_IS_STRING(iden))
-        return JS::IsPoisonedPtr(JSID_TO_STRING(iden));
-    if (JSID_IS_OBJECT(iden))
-        return JS::IsPoisonedPtr(JSID_TO_OBJECT(iden));
-    return false;
-}
-
-template <> struct GCMethods<jsid>
-{
-    static jsid initial() { return JSID_VOID; }
-    static ThingRootKind kind() { return THING_ROOT_ID; }
-    static bool poisoned(jsid id) { return IsPoisonedId(id); }
-    static bool needsPostBarrier(jsid id) { return false; }
-#ifdef JSGC_GENERATIONAL
-    static void postBarrier(jsid *idp) {}
-    static void relocate(jsid *idp) {}
-#endif
-};
-
 void
 AssertHeapIsIdle(JSRuntime *rt);
 
@@ -1526,16 +1506,18 @@ JS_StringToVersion(const char *string);
 
 /* JS_BIT(10) is currently unused. */
 
-/* JS_BIT(11) is currently unused. */
+#define JSOPTION_NO_DEFAULT_COMPARTMENT_OBJECT JS_BIT(11)     /* This JSContext does not use a
+                                                                 default compartment object. Such
+                                                                 an object will not be set implicitly,
+                                                                 and attempts to get or set it will
+                                                                 assert. */
 
 #define JSOPTION_NO_SCRIPT_RVAL JS_BIT(12)      /* A promise to the compiler
                                                    that a null rval out-param
                                                    will be passed to each call
                                                    to JS_ExecuteScript. */
-#define JSOPTION_UNROOTED_GLOBAL JS_BIT(13)     /* The GC will not root the
-                                                   contexts' default compartment
-                                                   object, leaving that up to the
-                                                   embedding. */
+
+/* JS_BIT(13) is currently unused. */
 
 #define JSOPTION_BASELINE       JS_BIT(14)      /* Baseline compiler. */
 
@@ -1988,187 +1970,6 @@ JSVAL_TRACE_KIND(jsval v)
     return (JSGCTraceKind) JSVAL_TRACE_KIND_IMPL(JSVAL_TO_IMPL(v));
 }
 
-/*
- * Tracer callback, called for each traceable thing directly referenced by a
- * particular object or runtime structure. It is the callback responsibility
- * to ensure the traversal of the full object graph via calling eventually
- * JS_TraceChildren on the passed thing. In this case the callback must be
- * prepared to deal with cycles in the traversal graph.
- *
- * kind argument is one of JSTRACE_OBJECT, JSTRACE_STRING or a tag denoting
- * internal implementation-specific traversal kind. In the latter case the only
- * operations on thing that the callback can do is to call JS_TraceChildren or
- * JS_GetTraceThingInfo.
- *
- * If eagerlyTraceWeakMaps is true, when we trace a WeakMap visit all
- * of its mappings.  This should be used in cases where the tracer
- * wants to use the existing liveness of entries.
- */
-typedef void
-(* JSTraceCallback)(JSTracer *trc, void **thingp, JSGCTraceKind kind);
-
-enum WeakMapTraceKind {
-    DoNotTraceWeakMaps = 0,
-    TraceWeakMapValues = 1,
-    TraceWeakMapKeysValues = 2
-};
-
-struct JSTracer {
-    JSRuntime           *runtime;
-    JSTraceCallback     callback;
-    JSTraceNamePrinter  debugPrinter;
-    const void          *debugPrintArg;
-    size_t              debugPrintIndex;
-    WeakMapTraceKind    eagerlyTraceWeakMaps;
-#ifdef JS_GC_ZEAL
-    void                *realLocation;
-#endif
-};
-
-/*
- * Set debugging information about a reference to a traceable thing to prepare
- * for the following call to JS_CallTracer.
- *
- * When printer is null, arg must be const char * or char * C string naming
- * the reference and index must be either (size_t)-1 indicating that the name
- * alone describes the reference or it must be an index into some array vector
- * that stores the reference.
- *
- * When printer callback is not null, the arg and index arguments are
- * available to the callback as debugPrintArg and debugPrintIndex fields
- * of JSTracer.
- *
- * The storage for name or callback's arguments needs to live only until
- * the following call to JS_CallTracer returns.
- */
-# define JS_SET_TRACING_DETAILS(trc, printer, arg, index)                     \
-    JS_BEGIN_MACRO                                                            \
-        (trc)->debugPrinter = (printer);                                      \
-        (trc)->debugPrintArg = (arg);                                         \
-        (trc)->debugPrintIndex = (index);                                     \
-    JS_END_MACRO
-
-/*
- * Sets the real location for a marked reference, when passing the address
- * directly is not feasable.
- *
- * FIXME: This is currently overcomplicated by our need to nest calls for Values
- * stored as keys in hash tables, but will get simplified once we can rekey
- * in-place.
- */
-#ifdef JS_GC_ZEAL
-# define JS_SET_TRACING_LOCATION(trc, location)                               \
-    JS_BEGIN_MACRO                                                            \
-        if (!(trc)->realLocation || !(location))                              \
-            (trc)->realLocation = (location);                                 \
-    JS_END_MACRO
-# define JS_UNSET_TRACING_LOCATION(trc)                                       \
-    JS_BEGIN_MACRO                                                            \
-        (trc)->realLocation = NULL;                                           \
-    JS_END_MACRO
-#else
-# define JS_SET_TRACING_LOCATION(trc, location)                               \
-    JS_BEGIN_MACRO                                                            \
-    JS_END_MACRO
-# define JS_UNSET_TRACING_LOCATION(trc)                                       \
-    JS_BEGIN_MACRO                                                            \
-    JS_END_MACRO
-#endif
-
-
-/*
- * Convenience macro to describe the argument of JS_CallTracer using C string
- * and index.
- */
-# define JS_SET_TRACING_INDEX(trc, name, index)                               \
-    JS_SET_TRACING_DETAILS(trc, NULL, name, index)
-
-/*
- * Convenience macro to describe the argument of JS_CallTracer using C string.
- */
-# define JS_SET_TRACING_NAME(trc, name)                                       \
-    JS_SET_TRACING_DETAILS(trc, NULL, name, (size_t)-1)
-
-/*
- * The JS_Call*Tracer family of functions traces the given GC thing reference.
- * This performs the tracing action configured on the given JSTracer:
- * typically calling the JSTracer::callback or marking the thing as live.
- *
- * The argument to JS_Call*Tracer is an in-out param: when the function
- * returns, the garbage collector might have moved the GC thing. In this case,
- * the reference passed to JS_Call*Tracer will be updated to the object's new
- * location. Callers of this method are responsible for updating any state
- * that is dependent on the object's address. For example, if the object's
- * address is used as a key in a hashtable, then the object must be removed
- * and re-inserted with the correct hash.
- */
-extern JS_PUBLIC_API(void)
-JS_CallValueTracer(JSTracer *trc, JS::Value *valuep, const char *name);
-
-extern JS_PUBLIC_API(void)
-JS_CallIdTracer(JSTracer *trc, jsid *idp, const char *name);
-
-extern JS_PUBLIC_API(void)
-JS_CallObjectTracer(JSTracer *trc, JSObject **objp, const char *name);
-
-extern JS_PUBLIC_API(void)
-JS_CallStringTracer(JSTracer *trc, JSString **strp, const char *name);
-
-extern JS_PUBLIC_API(void)
-JS_CallScriptTracer(JSTracer *trc, JSScript **scriptp, const char *name);
-
-extern JS_PUBLIC_API(void)
-JS_CallHeapValueTracer(JSTracer *trc, JS::Heap<JS::Value> *valuep, const char *name);
-
-extern JS_PUBLIC_API(void)
-JS_CallHeapIdTracer(JSTracer *trc, JS::Heap<jsid> *idp, const char *name);
-
-extern JS_PUBLIC_API(void)
-JS_CallHeapObjectTracer(JSTracer *trc, JS::Heap<JSObject *> *objp, const char *name);
-
-extern JS_PUBLIC_API(void)
-JS_CallHeapStringTracer(JSTracer *trc, JS::Heap<JSString *> *strp, const char *name);
-
-extern JS_PUBLIC_API(void)
-JS_CallHeapScriptTracer(JSTracer *trc, JS::Heap<JSScript *> *scriptp, const char *name);
-
-template <typename HashSetEnum>
-inline void
-JS_CallHashSetObjectTracer(JSTracer *trc, HashSetEnum &e, JSObject *const &key, const char *name)
-{
-    JSObject *updated = key;
-    JS_SET_TRACING_LOCATION(trc, reinterpret_cast<void *>(&const_cast<JSObject *&>(key)));
-    JS_CallObjectTracer(trc, &updated, name);
-    if (updated != key)
-        e.rekeyFront(key, updated);
-}
-
-/*
- * Trace an object that is known to always be tenured.  No post barriers are
- * required in this case.
- */
-extern JS_PUBLIC_API(void)
-JS_CallTenuredObjectTracer(JSTracer *trc, JS::TenuredHeap<JSObject *> *objp, const char *name);
-
-/*
- * API for JSTraceCallback implementations.
- */
-extern JS_PUBLIC_API(void)
-JS_TracerInit(JSTracer *trc, JSRuntime *rt, JSTraceCallback callback);
-
-extern JS_PUBLIC_API(void)
-JS_TraceChildren(JSTracer *trc, void *thing, JSGCTraceKind kind);
-
-extern JS_PUBLIC_API(void)
-JS_TraceRuntime(JSTracer *trc);
-
-extern JS_PUBLIC_API(void)
-JS_GetTraceThingInfo(char *buf, size_t bufsize, JSTracer *trc,
-                     void *thing, JSGCTraceKind kind, bool includeDetails);
-
-extern JS_PUBLIC_API(const char *)
-JS_GetTraceEdgeName(JSTracer *trc, char *buffer, int bufferSize);
-
 #ifdef DEBUG
 
 /*
@@ -2209,6 +2010,12 @@ JS_SetFinalizeCallback(JSRuntime *rt, JSFinalizeCallback cb);
 
 extern JS_PUBLIC_API(bool)
 JS_IsGCMarkingTracer(JSTracer *trc);
+
+/* For assertions only. */
+#ifdef DEBUG
+extern JS_PUBLIC_API(bool)
+JS_IsMarkingGray(JSTracer *trc);
+#endif
 
 /*
  * JS_IsAboutToBeFinalized checks if the given object is going to be finalized
@@ -2589,7 +2396,7 @@ struct JSFunctionSpec {
 
 extern JS_PUBLIC_API(JSObject *)
 JS_InitClass(JSContext *cx, JSObject *obj, JSObject *parent_proto,
-             JSClass *clasp, JSNative constructor, unsigned nargs,
+             const JSClass *clasp, JSNative constructor, unsigned nargs,
              const JSPropertySpec *ps, const JSFunctionSpec *fs,
              const JSPropertySpec *static_ps, const JSFunctionSpec *static_fs);
 
@@ -2600,11 +2407,11 @@ JS_InitClass(JSContext *cx, JSObject *obj, JSObject *parent_proto,
 extern JS_PUBLIC_API(bool)
 JS_LinkConstructorAndPrototype(JSContext *cx, JSObject *ctor, JSObject *proto);
 
-extern JS_PUBLIC_API(JSClass *)
+extern JS_PUBLIC_API(const JSClass *)
 JS_GetClass(JSObject *obj);
 
 extern JS_PUBLIC_API(bool)
-JS_InstanceOf(JSContext *cx, JSObject *obj, JSClass *clasp, jsval *argv);
+JS_InstanceOf(JSContext *cx, JSObject *obj, const JSClass *clasp, jsval *argv);
 
 extern JS_PUBLIC_API(bool)
 JS_HasInstance(JSContext *cx, JSObject *obj, jsval v, bool *bp);
@@ -2616,7 +2423,7 @@ extern JS_PUBLIC_API(void)
 JS_SetPrivate(JSObject *obj, void *data);
 
 extern JS_PUBLIC_API(void *)
-JS_GetInstancePrivate(JSContext *cx, JSObject *obj, JSClass *clasp,
+JS_GetInstancePrivate(JSContext *cx, JSObject *obj, const JSClass *clasp,
                       jsval *argv);
 
 extern JS_PUBLIC_API(bool)
@@ -2644,35 +2451,36 @@ JS_GetObjectId(JSContext *cx, JSObject *obj, jsid *idp);
 
 namespace JS {
 
-enum {
-    FreshZone,
-    SystemZone,
-    SpecificZones
+enum ZoneSpecifier {
+    FreshZone = 0,
+    SystemZone = 1
 };
 
-typedef uintptr_t ZoneSpecifier;
-
-inline ZoneSpecifier
-SameZoneAs(JSObject *obj)
+class JS_PUBLIC_API(CompartmentOptions)
 {
-    JS_ASSERT(uintptr_t(obj) > SpecificZones);
-    return ZoneSpecifier(obj);
-}
+    union {
+        ZoneSpecifier spec;
+        void *pointer; // js::Zone* is not exposed in the API.
+    } zone_;
+    JSVersion version_;
 
-struct JS_PUBLIC_API(CompartmentOptions) {
-    ZoneSpecifier zoneSpec;
-    JSVersion version;
+  public:
     bool invisibleToDebugger;
 
-    explicit CompartmentOptions() : zoneSpec(JS::FreshZone)
-                                  , version(JSVERSION_UNKNOWN)
-                                  , invisibleToDebugger(false)
-    {}
+    explicit CompartmentOptions()
+      : version_(JSVERSION_UNKNOWN)
+      , invisibleToDebugger(false)
+    {
+        zone_.spec = JS::FreshZone;
+    }
 
-    CompartmentOptions &setZone(ZoneSpecifier spec) { zoneSpec = spec; return *this; }
-    CompartmentOptions &setVersion(JSVersion version_) {
-        JS_ASSERT(version_ != JSVERSION_UNKNOWN);
-        version = version_;
+    CompartmentOptions &setZone(ZoneSpecifier spec);
+
+    CompartmentOptions &setSameZoneAs(JSObject *obj);
+
+    CompartmentOptions &setVersion(JSVersion aVersion) {
+        MOZ_ASSERT(aVersion != JSVERSION_UNKNOWN);
+        version_ = aVersion;
         return *this;
     }
 
@@ -2683,6 +2491,15 @@ struct JS_PUBLIC_API(CompartmentOptions) {
     CompartmentOptions &setInvisibleToDebugger(bool invisible) {
         invisibleToDebugger = invisible;
         return *this;
+    }
+
+    ZoneSpecifier zoneSpecifier() const { return zone_.spec; }
+
+    JSVersion version() const { return version_; }
+
+    void *zonePointer() const {
+        JS_ASSERT(uintptr_t(zone_.pointer) > uintptr_t(JS::SystemZone));
+        return zone_.pointer;
     }
 };
 
@@ -2714,7 +2531,7 @@ enum OnNewGlobalHookOption {
 } /* namespace JS */
 
 extern JS_PUBLIC_API(JSObject *)
-JS_NewGlobalObject(JSContext *cx, JSClass *clasp, JSPrincipals *principals,
+JS_NewGlobalObject(JSContext *cx, const JSClass *clasp, JSPrincipals *principals,
                    JS::OnNewGlobalHookOption hookOption,
                    const JS::CompartmentOptions &options = JS::CompartmentOptions());
 
@@ -2722,7 +2539,7 @@ extern JS_PUBLIC_API(void)
 JS_FireOnNewGlobalObject(JSContext *cx, JS::HandleObject global);
 
 extern JS_PUBLIC_API(JSObject *)
-JS_NewObject(JSContext *cx, JSClass *clasp, JSObject *proto, JSObject *parent);
+JS_NewObject(JSContext *cx, const JSClass *clasp, JSObject *proto, JSObject *parent);
 
 /* Queries the [[Extensible]] property of the object. */
 extern JS_PUBLIC_API(bool)
@@ -2739,7 +2556,7 @@ JS_GetObjectRuntime(JSObject *obj);
  * proto if proto's actual parameter value is null.
  */
 extern JS_PUBLIC_API(JSObject *)
-JS_NewObjectWithGivenProto(JSContext *cx, JSClass *clasp, JSObject *proto,
+JS_NewObjectWithGivenProto(JSContext *cx, const JSClass *clasp, JSObject *proto,
                            JSObject *parent);
 
 /*
@@ -2763,7 +2580,7 @@ extern JS_PUBLIC_API(JSObject *)
 JS_New(JSContext *cx, JSObject *ctor, unsigned argc, jsval *argv);
 
 extern JS_PUBLIC_API(JSObject *)
-JS_DefineObject(JSContext *cx, JSObject *obj, const char *name, JSClass *clasp,
+JS_DefineObject(JSContext *cx, JSObject *obj, const char *name, const JSClass *clasp,
                 JSObject *proto, unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
@@ -2782,45 +2599,6 @@ JS_DefinePropertyById(JSContext *cx, JSObject *obj, jsid id, jsval value,
 
 extern JS_PUBLIC_API(bool)
 JS_DefineOwnProperty(JSContext *cx, JSObject *obj, jsid id, jsval descriptor, bool *bp);
-
-/*
- * Determine the attributes (JSPROP_* flags) of a property on a given object.
- *
- * If the object does not have a property by that name, *foundp will be
- * false and the value of *attrsp is undefined.
- */
-extern JS_PUBLIC_API(bool)
-JS_GetPropertyAttributes(JSContext *cx, JSObject *obj, const char *name,
-                         unsigned *attrsp, bool *foundp);
-
-/*
- * The same, but if the property is native, return its getter and setter via
- * *getterp and *setterp, respectively (and only if the out parameter pointer
- * is not null).
- */
-extern JS_PUBLIC_API(bool)
-JS_GetPropertyAttrsGetterAndSetter(JSContext *cx, JSObject *obj,
-                                   const char *name,
-                                   unsigned *attrsp, bool *foundp,
-                                   JSPropertyOp *getterp,
-                                   JSStrictPropertyOp *setterp);
-
-extern JS_PUBLIC_API(bool)
-JS_GetPropertyAttrsGetterAndSetterById(JSContext *cx, JSObject *obj,
-                                       jsid id,
-                                       unsigned *attrsp, bool *foundp,
-                                       JSPropertyOp *getterp,
-                                       JSStrictPropertyOp *setterp);
-
-/*
- * Set the attributes of a property on a given object.
- *
- * If the object does not have a property by that name, *foundp will be
- * false and nothing will be altered.
- */
-extern JS_PUBLIC_API(bool)
-JS_SetPropertyAttributes(JSContext *cx, JSObject *obj, const char *name,
-                         unsigned attrs, bool *foundp);
 
 extern JS_PUBLIC_API(bool)
 JS_DefinePropertyWithTinyId(JSContext *cx, JSObject *obj, const char *name,
@@ -3005,9 +2783,17 @@ class MutableHandleBase<JSPropertyDescriptor>
 
 } /* namespace js */
 
+extern JS_PUBLIC_API(bool)
+JS_GetOwnPropertyDescriptorById(JSContext *cx, JSObject *objArg, jsid id, unsigned flags,
+                                JS::MutableHandle<JSPropertyDescriptor> desc);
+
+extern JS_PUBLIC_API(bool)
+JS_GetOwnPropertyDescriptor(JSContext *cx, JSObject *objArg, const char *name, unsigned flags,
+                            JS::MutableHandle<JSPropertyDescriptor> desc);
+
 /*
- * Like JS_GetPropertyAttrsGetterAndSetterById but will return a property on
- * an object on the prototype chain (returned in objp). If data->obj is null,
+ * Like JS_GetOwnPropertyDescriptorById but will return a property on
+ * an object on the prototype chain (returned in desc->obj). If desc->obj is null,
  * then this property was not found on the prototype chain.
  */
 extern JS_PUBLIC_API(bool)
@@ -3015,21 +2801,14 @@ JS_GetPropertyDescriptorById(JSContext *cx, JSObject *obj, jsid id, unsigned fla
                              JS::MutableHandle<JSPropertyDescriptor> desc);
 
 extern JS_PUBLIC_API(bool)
-JS_GetOwnPropertyDescriptor(JSContext *cx, JSObject *obj, jsid id, JS::MutableHandle<JS::Value> vp);
+JS_GetPropertyDescriptor(JSContext *cx, JSObject *obj, const char *name, unsigned flags,
+                         JS::MutableHandle<JSPropertyDescriptor> desc);
 
 extern JS_PUBLIC_API(bool)
 JS_GetProperty(JSContext *cx, JSObject *obj, const char *name, JS::MutableHandle<JS::Value> vp);
 
 extern JS_PUBLIC_API(bool)
-JS_GetPropertyDefault(JSContext *cx, JSObject *obj, const char *name, jsval def,
-                      JS::MutableHandle<JS::Value> vp);
-
-extern JS_PUBLIC_API(bool)
 JS_GetPropertyById(JSContext *cx, JSObject *obj, jsid id, JS::MutableHandle<JS::Value> vp);
-
-extern JS_PUBLIC_API(bool)
-JS_GetPropertyByIdDefault(JSContext *cx, JSObject *obj, jsid id, jsval def,
-                          JS::MutableHandle<JS::Value> vp);
 
 extern JS_PUBLIC_API(bool)
 JS_ForwardGetPropertyTo(JSContext *cx, JSObject *obj, jsid id, JSObject *onBehalfOf,
@@ -3058,41 +2837,6 @@ JS_DefineUCProperty(JSContext *cx, JSObject *obj,
                     const jschar *name, size_t namelen, jsval value,
                     JSPropertyOp getter, JSStrictPropertyOp setter,
                     unsigned attrs);
-
-/*
- * Determine the attributes (JSPROP_* flags) of a property on a given object.
- *
- * If the object does not have a property by that name, *foundp will be
- * false and the value of *attrsp is undefined.
- */
-extern JS_PUBLIC_API(bool)
-JS_GetUCPropertyAttributes(JSContext *cx, JSObject *obj,
-                           const jschar *name, size_t namelen,
-                           unsigned *attrsp, bool *foundp);
-
-/*
- * The same, but if the property is native, return its getter and setter via
- * *getterp and *setterp, respectively (and only if the out parameter pointer
- * is not null).
- */
-extern JS_PUBLIC_API(bool)
-JS_GetUCPropertyAttrsGetterAndSetter(JSContext *cx, JSObject *obj,
-                                     const jschar *name, size_t namelen,
-                                     unsigned *attrsp, bool *foundp,
-                                     JSPropertyOp *getterp,
-                                     JSStrictPropertyOp *setterp);
-
-/*
- * Set the attributes of a property on a given object.
- *
- * If the object does not have a property by that name, *foundp will be
- * false and nothing will be altered.
- */
-extern JS_PUBLIC_API(bool)
-JS_SetUCPropertyAttributes(JSContext *cx, JSObject *obj,
-                           const jschar *name, size_t namelen,
-                           unsigned attrs, bool *foundp);
-
 
 extern JS_PUBLIC_API(bool)
 JS_DefineUCPropertyWithTinyId(JSContext *cx, JSObject *obj,
@@ -4083,7 +3827,7 @@ class JSAutoByteString
         return mBytes;
     }
 
-    char *encodeLatin1(js::ContextFriendFields *cx, JSString *str);
+    char *encodeLatin1(js::ExclusiveContext *cx, JSString *str);
 
     char *encodeUtf8(JSContext *cx, JSString *str) {
         JS_ASSERT(!mBytes);
@@ -4489,7 +4233,7 @@ JS_IsConstructing(JSContext *cx, const jsval *vp)
  * [[Prototype]].
  */
 extern JS_PUBLIC_API(JSObject *)
-JS_NewObjectForConstructor(JSContext *cx, JSClass *clasp, const jsval *vp);
+JS_NewObjectForConstructor(JSContext *cx, const JSClass *clasp, const jsval *vp);
 
 /************************************************************************/
 
@@ -4571,12 +4315,5 @@ JS_DecodeScript(JSContext *cx, const void *data, uint32_t length,
 extern JS_PUBLIC_API(JSObject *)
 JS_DecodeInterpretedFunction(JSContext *cx, const void *data, uint32_t length,
                              JSPrincipals *principals, JSPrincipals *originPrincipals);
-
-namespace JS {
-
-extern JS_PUBLIC_DATA(const Handle<jsid>) JSID_VOIDHANDLE;
-extern JS_PUBLIC_DATA(const Handle<jsid>) JSID_EMPTYHANDLE;
-
-} /* namespace JS */
 
 #endif /* jsapi_h */

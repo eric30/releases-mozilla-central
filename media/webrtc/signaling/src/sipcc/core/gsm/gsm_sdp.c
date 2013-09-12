@@ -4,6 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include <errno.h>
+
 #include "cpr_in.h"
 #include "cpr_rand.h"
 #include "cpr_stdlib.h"
@@ -100,6 +102,39 @@ gsmsdp_add_remote_track(uint16_t idx, uint16_t track,
 extern cc_media_cap_table_t g_media_table;
 
 extern boolean g_disable_mass_reg_debug_print;
+
+/*
+ * gsmsdp_requires_two_dc_components
+ *
+ * returns TRUE if we are talking to Firefox and it's
+ * a version that required two components for datachannel.
+ */
+static boolean gsmsdp_requires_two_dc_components(void *sdp) {
+#define FIRST_VERSION_TO_USE_ONE_DC_COMPONENT 26
+    const char *owner_name = sdp_get_owner_username(sdp);
+    unsigned long remote_version;
+    char* strtoul_end;
+
+    if (strncmp(owner_name, SIPSDP_ORIGIN_APPNAME,
+        strlen(SIPSDP_ORIGIN_APPNAME)) == 0) {
+        /* This means we are talking to firefox, now read the major version */
+        errno = 0;
+        remote_version = strtoul(owner_name + strlen(SIPSDP_ORIGIN_APPNAME),
+            &strtoul_end, 10);
+        if (errno ||
+            strtoul_end == (owner_name + strlen(SIPSDP_ORIGIN_APPNAME)) ||
+            !remote_version) {
+            /* Unable to parse remote, must not be earlier firefox */
+            return FALSE;
+        }
+
+        return (remote_version < FIRST_VERSION_TO_USE_ONE_DC_COMPONENT) ?
+            TRUE : FALSE;
+    }
+
+    return FALSE;
+}
+
 /**
  * A wraper function to return the media capability supported by
  * the platform and session. This is a convient place if policy
@@ -527,6 +562,9 @@ gsmsdp_init_media (fsmdef_media_t *media)
     media->video = NULL;
     media->candidate_ct = 0;
     media->rtcp_mux = FALSE;
+
+    /* ACTPASS is the value we put in every offer */
+    media->setup = SDP_SETUP_ACTPASS;
 
     media->local_datachannel_port = 0;
     media->remote_datachannel_port = 0;
@@ -1816,6 +1854,71 @@ gsmsdp_set_rtcp_mux_attribute (sdp_attr_e sdp_attr, uint16_t level, void *sdp_p,
     }
 
     result = sdp_attr_set_rtcp_mux_attribute(sdp_p, level, 0, sdp_attr, a_instance, rtcp_mux);
+    if (result != SDP_SUCCESS) {
+        GSM_ERR_MSG("Failed to set attribute");
+    }
+}
+
+/*
+ * gsmsdp_set_setup_attribute
+ *
+ * Description:
+ *
+ * Adds a setup attribute to the specified SDP.
+ *
+ * Parameters:
+ *
+ * level        - The media level of the SDP where the media attribute exists.
+ * sdp_p        - Pointer to the SDP to set the ice candidate attribute against.
+ * setup_type   - Value for the a=setup line
+ */
+static void
+gsmsdp_set_setup_attribute(uint16_t level,
+  void *sdp_p, sdp_setup_type_e setup_type) {
+    uint16_t a_instance = 0;
+    sdp_result_e result;
+
+    result = sdp_add_new_attr(sdp_p, level, 0, SDP_ATTR_SETUP, &a_instance);
+    if (result != SDP_SUCCESS) {
+        GSM_ERR_MSG("Failed to add attribute");
+        return;
+    }
+
+    result = sdp_attr_set_setup_attribute(sdp_p, level, 0,
+      a_instance, setup_type);
+    if (result != SDP_SUCCESS) {
+        GSM_ERR_MSG("Failed to set attribute");
+    }
+}
+
+/*
+ * gsmsdp_set_connection_attribute
+ *
+ * Description:
+ *
+ * Adds a connection attribute to the specified SDP.
+ *
+ * Parameters:
+ *
+ * level        - The media level of the SDP where the media attribute exists.
+ * sdp_p        - Pointer to the SDP to set the ice candidate attribute against.
+ * connection_type - Value for the a=connection line
+ */
+static void
+gsmsdp_set_connection_attribute(uint16_t level,
+  void *sdp_p, sdp_connection_type_e connection_type) {
+    uint16_t a_instance = 0;
+    sdp_result_e result;
+
+    result = sdp_add_new_attr(sdp_p, level, 0, SDP_ATTR_CONNECTION,
+      &a_instance);
+    if (result != SDP_SUCCESS) {
+        GSM_ERR_MSG("Failed to add attribute");
+        return;
+    }
+
+    result = sdp_attr_set_connection_attribute(sdp_p, level, 0,
+      a_instance, connection_type);
     if (result != SDP_SUCCESS) {
         GSM_ERR_MSG("Failed to set attribute");
     }
@@ -4439,21 +4542,21 @@ gsmsdp_add_rtcp_fb (int level, sdp_t *sdp_p,
 
             /* Add requested a=rtcp-fb:nack attributes */
             for (j = 0; j < SDP_MAX_RTCP_FB_NACK; j++) {
-                if (types & SDP_RTCP_FB_NACK_TO_BITMAP(j)) {
+                if (types & sdp_rtcp_fb_nack_to_bitmap(j)) {
                     gsmsdp_set_rtcp_fb_nack_attribute(level, sdp_p, pt, j);
                 }
             }
 
             /* Add requested a=rtcp-fb:ack attributes */
             for (j = 0; j < SDP_MAX_RTCP_FB_ACK; j++) {
-                if (types & SDP_RTCP_FB_ACK_TO_BITMAP(j)) {
+                if (types & sdp_rtcp_fb_ack_to_bitmap(j)) {
                     gsmsdp_set_rtcp_fb_nack_attribute(level, sdp_p, pt, j);
                 }
             }
 
             /* Add requested a=rtcp-fb:ccm attributes */
             for (j = 0; j < SDP_MAX_RTCP_FB_CCM; j++) {
-                if (types & SDP_RTCP_FB_CCM_TO_BITMAP(j)) {
+                if (types & sdp_rtcp_fb_ccm_to_bitmap(j)) {
                     gsmsdp_set_rtcp_fb_ccm_attribute(level, sdp_p, pt, j);
                 }
             }
@@ -4523,7 +4626,7 @@ gsmsdp_negotiate_rtcp_fb (cc_sdp_t *cc_sdp_p,
             nack_type = sdp_attr_get_rtcp_fb_nack(cc_sdp_p->dest_sdp,
                                                   level, remote_pt, i);
             if (nack_type >= 0 && nack_type < SDP_MAX_RTCP_FB_NACK) {
-                fb_types |= SDP_RTCP_FB_NACK_TO_BITMAP(nack_type);
+                fb_types |= sdp_rtcp_fb_nack_to_bitmap(nack_type);
             }
             i++;
         } while (nack_type != SDP_RTCP_FB_NACK_NOT_FOUND);
@@ -4534,7 +4637,7 @@ gsmsdp_negotiate_rtcp_fb (cc_sdp_t *cc_sdp_p,
             ack_type = sdp_attr_get_rtcp_fb_ack(cc_sdp_p->dest_sdp,
                                                 level, remote_pt, i);
             if (ack_type >= 0 && ack_type < SDP_MAX_RTCP_FB_ACK) {
-                fb_types |= SDP_RTCP_FB_ACK_TO_BITMAP(ack_type);
+                fb_types |= sdp_rtcp_fb_ack_to_bitmap(ack_type);
             }
             i++;
         } while (ack_type != SDP_RTCP_FB_ACK_NOT_FOUND);
@@ -4545,7 +4648,7 @@ gsmsdp_negotiate_rtcp_fb (cc_sdp_t *cc_sdp_p,
             ccm_type = sdp_attr_get_rtcp_fb_ccm(cc_sdp_p->dest_sdp,
                                                 level, remote_pt, i);
             if (ccm_type >= 0 && ccm_type < SDP_MAX_RTCP_FB_CCM) {
-                fb_types |= SDP_RTCP_FB_CCM_TO_BITMAP(ccm_type);
+                fb_types |= sdp_rtcp_fb_ccm_to_bitmap(ccm_type);
             }
             i++;
         } while (ccm_type != SDP_RTCP_FB_CCM_NOT_FOUND);
@@ -4556,9 +4659,9 @@ gsmsdp_negotiate_rtcp_fb (cc_sdp_t *cc_sdp_p,
         switch (codec) {
             case RTP_VP8:
                 fb_types &=
-                  SDP_RTCP_FB_NACK_TO_BITMAP(SDP_RTCP_FB_NACK_BASIC) |
-                  SDP_RTCP_FB_NACK_TO_BITMAP(SDP_RTCP_FB_NACK_PLI) |
-                  SDP_RTCP_FB_CCM_TO_BITMAP(SDP_RTCP_FB_CCM_FIR);
+                  sdp_rtcp_fb_nack_to_bitmap(SDP_RTCP_FB_NACK_BASIC) |
+                  sdp_rtcp_fb_nack_to_bitmap(SDP_RTCP_FB_NACK_PLI) |
+                  sdp_rtcp_fb_ccm_to_bitmap(SDP_RTCP_FB_CCM_FIR);
                 break;
             default:
                 fb_types = 0;
@@ -4641,6 +4744,7 @@ gsmsdp_negotiate_media_lines (fsm_fcb_t *fcb_p, cc_sdp_t *sdp_p, boolean initial
     sdp_result_e    sdp_res;
     boolean         created_media_stream = FALSE;
     int             lsm_rc;
+    sdp_setup_type_e remote_setup_type;
 
     config_get_value(CFGID_SDPMODE, &sdpmode, sizeof(sdpmode));
 
@@ -4938,6 +5042,40 @@ gsmsdp_negotiate_media_lines (fsm_fcb_t *fcb_p, cc_sdp_t *sdp_p, boolean initial
 
               if (sdpmode) {
                   int j;
+
+                  /* Find the remote a=setup value */
+                  sdp_res = sdp_attr_get_setup_attribute(
+                      sdp_p->dest_sdp, i, 0, 1, &remote_setup_type);
+
+
+                  /* setup attribute
+                     We are setting our local SDP to be ACTIVE if the value
+                     in the remote SDP is missing, PASSIVE or ACTPASS.
+                     If the remote value is ACTIVE, then we will respond
+                     with PASSIVE.
+                     If the remote value is HOLDCONN we will respond with
+                     HOLDCONN and set the direction to INACTIVE
+                     The DTLS role will then be set when the TransportFlow
+                     is created */
+                  media->setup = SDP_SETUP_ACTIVE;
+
+                  if (sdp_res == SDP_SUCCESS) {
+                      if (remote_setup_type == SDP_SETUP_ACTIVE) {
+                          media->setup = SDP_SETUP_PASSIVE;
+                      } else if (remote_setup_type == SDP_SETUP_HOLDCONN) {
+                          media->setup = SDP_SETUP_HOLDCONN;
+                          media->direction = SDP_DIRECTION_INACTIVE;
+                      }
+                  }
+
+                  gsmsdp_set_setup_attribute(media->level, dcb_p->sdp->src_sdp,
+                    media->setup);
+
+                  /* TODO(ehugg) we are not yet supporting existing connections
+                     See bug 857115.  We currently always respond with
+                     connection:new */
+                  gsmsdp_set_connection_attribute(media->level,
+                    dcb_p->sdp->src_sdp, SDP_CONNECTION_NEW);
 
                   /* Set ICE */
                   for (j=0; j<media->candidate_ct; j++) {
@@ -5451,10 +5589,17 @@ gsmsdp_add_media_line (fsmdef_dcb_t *dcb_p, const cc_media_cap_t *media_cap,
           /* Add supported rtcp-fb types */
           if (media_cap->type == SDP_MEDIA_VIDEO) {
               gsmsdp_add_rtcp_fb (level, dcb_p->sdp->src_sdp, RTP_VP8,
-                  SDP_RTCP_FB_NACK_TO_BITMAP(SDP_RTCP_FB_NACK_BASIC) |
-                  SDP_RTCP_FB_NACK_TO_BITMAP(SDP_RTCP_FB_NACK_PLI) |
-                  SDP_RTCP_FB_CCM_TO_BITMAP(SDP_RTCP_FB_CCM_FIR));
+                  sdp_rtcp_fb_nack_to_bitmap(SDP_RTCP_FB_NACK_BASIC) |
+                  sdp_rtcp_fb_nack_to_bitmap(SDP_RTCP_FB_NACK_PLI) |
+                  sdp_rtcp_fb_ccm_to_bitmap(SDP_RTCP_FB_CCM_FIR));
           }
+
+          /* setup and connection attributes */
+          gsmsdp_set_setup_attribute(level, dcb_p->sdp->src_sdp, media->setup);
+
+          /* This is a new media line so we should send connection:new */
+          gsmsdp_set_connection_attribute(level, dcb_p->sdp->src_sdp,
+            SDP_CONNECTION_NEW);
 
           /*
            * wait until here to set ICE candidates as SDP is now initialized
@@ -6833,6 +6978,30 @@ gsmsdp_install_peer_ice_attributes(fsm_fcb_t *fcb_p)
     GSMSDP_FOR_ALL_MEDIA(media, dcb_p) {
       if (!GSMSDP_MEDIA_ENABLED(media))
         continue;
+
+      /* If we are muxing, disable the second
+         component of the ICE stream */
+      if (media->rtcp_mux) {
+        vcm_res = vcmDisableRtcpComponent(dcb_p->peerconnection,
+          media->level);
+
+        if (vcm_res) {
+          return (CC_CAUSE_SETTING_ICE_SESSION_PARAMETERS_FAILED);
+        }
+      }
+
+      /* If this is Datachannel and we are talking to anything other
+         than an older version of Firefox then disable the second component
+         of the ICE stream */
+      if (media->type == DATA &&
+          !gsmsdp_requires_two_dc_components(sdp_p->dest_sdp)) {
+        vcm_res = vcmDisableRtcpComponent(dcb_p->peerconnection,
+          media->level);
+
+        if (vcm_res) {
+          return CC_CAUSE_SETTING_ICE_SESSION_PARAMETERS_FAILED;
+        }
+      }
 
       sdp_res = sdp_attr_get_ice_attribute(sdp_p->dest_sdp, media->level, 0,
         SDP_ATTR_ICE_UFRAG, 1, &ufrag);

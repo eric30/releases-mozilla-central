@@ -458,6 +458,7 @@ class IonBuilder : public MIRGenerator
     bool jsop_getprop(HandlePropertyName name);
     bool jsop_setprop(HandlePropertyName name);
     bool jsop_delprop(HandlePropertyName name);
+    bool jsop_delelem();
     bool jsop_newarray(uint32_t count);
     bool jsop_newobject(HandleObject baseObj);
     bool jsop_initelem();
@@ -515,6 +516,7 @@ class IonBuilder : public MIRGenerator
     InliningStatus inlineMathPow(CallInfo &callInfo);
     InliningStatus inlineMathRandom(CallInfo &callInfo);
     InliningStatus inlineMathImul(CallInfo &callInfo);
+    InliningStatus inlineMathFRound(CallInfo &callInfo);
     InliningStatus inlineMathFunction(CallInfo &callInfo, MMathFunction::Function function);
 
     // String natives.
@@ -558,6 +560,7 @@ class IonBuilder : public MIRGenerator
     // Testing functions.
     InliningStatus inlineForceSequentialOrInParallelSection(CallInfo &callInfo);
     InliningStatus inlineBailout(CallInfo &callInfo);
+    InliningStatus inlineAssertFloat32(CallInfo &callInfo);
 
     // Main inlining functions
     InliningStatus inlineNativeCall(CallInfo &callInfo, JSNative native);

@@ -525,7 +525,7 @@ class Marionette(object):
             # flagging the error.
             sys.exit()
 
-    def wait_for_port(self, timeout=3000):
+    def wait_for_port(self, timeout=30):
         starttime = datetime.datetime.now()
         while datetime.datetime.now() - starttime < datetime.timedelta(seconds=timeout):
             try:
@@ -1255,4 +1255,7 @@ class Marionette(object):
         '''
         if element is not None:
             element = element.id
-        return self._send_message("screenShot", 'value', element=element, highlights=highlights)
+        lights = None
+        if highlights is not None:
+            lights = [highlight.id for highlight in highlights if highlights]
+        return self._send_message("screenShot", 'value', element=element, highlights=lights)

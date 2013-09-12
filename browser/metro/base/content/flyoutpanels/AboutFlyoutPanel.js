@@ -47,7 +47,16 @@ let AboutFlyoutPanel = {
 #endif
   },
 
-  handleEvent: function Appbar_handleEvent(aEvent) {
+  onPolicyClick: function(aEvent) {
+    if (aEvent.button != 0) {
+      return;
+    }
+    FlyoutPanelsUI.hide();
+    let url = Services.urlFormatter.formatURLPref("app.privacyURL");
+    BrowserUI.addAndShowTab(url, Browser.selectedTab);
+  },
+
+  handleEvent: function(aEvent) {
     switch (aEvent.type) {
       case 'MozFlyoutPanelShowing':
 #ifdef MOZ_UPDATER
@@ -256,19 +265,6 @@ appUpdater.prototype =
       if (cancelQuit.data)
         return;
 
-      // It's not possible for the Metro browser to restart itself.
-      // The Windows background process ensures only one instance exists.
-      // So start the update while the browser is open and close the browser
-      // right after.
-      try {
-        Components.classes["@mozilla.org/updates/update-processor;1"].
-          createInstance(Components.interfaces.nsIUpdateProcessor).
-          processUpdate(null);
-      } catch (e) {
-        // If there was an error just close down and the next startup
-        // will do this.
-      }
-
       let appStartup = Components.classes["@mozilla.org/toolkit/app-startup;1"].
                        getService(Components.interfaces.nsIAppStartup);
 
@@ -278,7 +274,8 @@ appUpdater.prototype =
         return;
       }
 
-      appStartup.quit(Components.interfaces.nsIAppStartup.eAttemptQuit);
+      appStartup.quit(Components.interfaces.nsIAppStartup.eAttemptQuit |
+                      Components.interfaces.nsIAppStartup.eRestart);
       return;
     }
 

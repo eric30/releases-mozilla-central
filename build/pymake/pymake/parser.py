@@ -361,7 +361,7 @@ def _checktime(path, stmts):
 
     return True
 
-_parsecache = util.MostUsedCache(15, _parsefile, _checktime)
+_parsecache = util.MostUsedCache(50, _parsefile, _checktime)
 
 def parsefile(pathname):
     """
@@ -371,6 +371,9 @@ def parsefile(pathname):
 
     pathname = os.path.realpath(pathname)
     return _parsecache.get(pathname)
+
+# colon followed by anything except a slash (Windows path detection)
+_depfilesplitter = re.compile(r':(?![\\/])')
 
 def parsedepfile(pathname):
     """
@@ -394,7 +397,7 @@ def parsedepfile(pathname):
     pathname = os.path.realpath(pathname)
     stmts = parserdata.StatementList()
     for line in continuation_iter(open(pathname).readlines()):
-        target, deps = line.split(":", 1)
+        target, deps = _depfilesplitter.split(line, 1)
         stmts.append(parserdata.Rule(data.StringExpansion(target, None),
                                      data.StringExpansion(deps, None), False))
     return stmts

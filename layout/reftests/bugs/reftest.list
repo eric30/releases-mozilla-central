@@ -1171,8 +1171,8 @@ fuzzy(127,2) == 448193.html 448193-ref.html
 != 449149-1a.html about:blank
 != 449149-1b.html about:blank
 # Retry the above with XBL scopes
-test-pref(dom.use_xbl_scopes_for_remote_xul,true) fails-if(Android) != 449149-1a.html about:blank
-test-pref(dom.use_xbl_scopes_for_remote_xul,true) fails-if(Android) != 449149-1b.html about:blank
+test-pref(dom.use_xbl_scopes_for_remote_xul,true) != 449149-1a.html about:blank
+test-pref(dom.use_xbl_scopes_for_remote_xul,true) != 449149-1b.html about:blank
 == 449149-2.html 449149-2-ref.html
 == 449171-1.html 449171-ref.html
 == 449362-1.html 449362-1-ref.html
@@ -1340,7 +1340,7 @@ random-if(winWidget) == 482659-1a.html 482659-1-ref.html
 == 487539-1.html about:blank
 == 488390-1.html 488390-1-ref.html
 == 488649-1.html 488649-1-ref.html
-fails-if(Android) == 488685-1.html 488685-1-ref.html
+== 488685-1.html 488685-1-ref.html
 == 488692-1.html 488692-1-ref.html
 == 489868-1.svg 489868-1-ref.svg
 == 490173-1.html 490173-1-ref.html
@@ -1370,7 +1370,7 @@ fails-if(Android) == 488685-1.html 488685-1-ref.html
 == 495385-2c.html 495385-2-ref.html
 == 495385-2d.html 495385-2-ref.html
 == 495385-2e.html 495385-2-ref.html
-== 495385-2f.xhtml 495385-2-ref.html
+pref(dom.use_xbl_scopes_for_remote_xul,true) == 495385-2f.xhtml 495385-2-ref.html
 == 495385-2g.html 495385-2-ref.html
 == 495385-2h.html 495385-2-ref.html
 == 495385-2i.html 495385-2-ref.html

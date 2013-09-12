@@ -117,11 +117,7 @@ IDBTransaction::CreateInternal(IDBDatabase* aDatabase,
 
   IndexedDBTransactionChild* actor = nullptr;
 
-  transaction->mCreatedFileInfos.Init();
-
   if (IndexedDatabaseManager::IsMainProcess()) {
-    transaction->mCachedStatements.Init();
-
     if (aMode != IDBTransaction::VERSION_CHANGE) {
       TransactionThreadPool* pool = TransactionThreadPool::GetOrCreate();
       NS_ENSURE_TRUE(pool, nullptr);
@@ -365,8 +361,8 @@ IDBTransaction::GetOrCreateConnection(mozIStorageConnection** aResult)
 
   if (!mConnection) {
     nsCOMPtr<mozIStorageConnection> connection =
-      IDBFactory::GetConnection(mDatabase->FilePath(),
-                                mDatabase->Origin());
+      IDBFactory::GetConnection(mDatabase->FilePath(), mDatabase->Type(),
+                                mDatabase->Group(), mDatabase->Origin());
     NS_ENSURE_TRUE(connection, NS_ERROR_FAILURE);
 
     nsresult rv;
@@ -376,9 +372,6 @@ IDBTransaction::GetOrCreateConnection(mozIStorageConnection** aResult)
     if (mMode != IDBTransaction::READ_ONLY) {
       function = new UpdateRefcountFunction(Database()->Manager());
       NS_ENSURE_TRUE(function, NS_ERROR_OUT_OF_MEMORY);
-
-      rv = function->Init();
-      NS_ENSURE_SUCCESS(rv, rv);
 
       rv = connection->CreateFunction(
         NS_LITERAL_CSTRING("update_refcount"), 2, function);
@@ -985,14 +978,6 @@ CommitHelper::RevertAutoIncrementCounts()
     ObjectStoreInfo* info = mAutoIncrementObjectStores[i]->Info();
     info->nextAutoIncrementId = info->comittedAutoIncrementId;
   }
-}
-
-nsresult
-UpdateRefcountFunction::Init()
-{
-  mFileInfoEntries.Init();
-
-  return NS_OK;
 }
 
 NS_IMPL_ISUPPORTS1(UpdateRefcountFunction, mozIStorageFunction)

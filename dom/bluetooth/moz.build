@@ -44,11 +44,12 @@ if CONFIG['MOZ_B2G_BT']:
         'ObexBase.cpp',
         'BluetoothUuid.cpp',
         'BluetoothSocket.cpp',
+        'BluetoothProfileController.cpp'
     ]
 
     if CONFIG['MOZ_B2G_RIL']:
         CPP_SOURCES += [
-            'BluetoothTelephonyListener.cpp',
+            'BluetoothRilListener.cpp',
         ]
 
     if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':

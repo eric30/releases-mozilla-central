@@ -25,7 +25,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/Telemetry.h"
 #include "BatteryManager.h"
-#include "PowerManager.h"
+#include "mozilla/dom/PowerManager.h"
 #include "nsIDOMWakeLock.h"
 #include "nsIPowerManagerService.h"
 #include "mozilla/dom/MobileMessageManager.h"
@@ -54,7 +54,7 @@
 #include "MediaManager.h"
 #endif
 #ifdef MOZ_B2G_RIL
-#include "Telephony.h"
+#include "mozilla/dom/Telephony.h"
 #endif
 #ifdef MOZ_B2G_BT
 #include "BluetoothManager.h"
@@ -79,8 +79,6 @@
 #include "nsScriptNameSpaceManager.h"
 
 #include "mozilla/dom/NavigatorBinding.h"
-
-using namespace mozilla::dom::power;
 
 // This should not be in the namespace.
 DOMCI_DATA(Navigator, mozilla::dom::Navigator)
@@ -1113,7 +1111,7 @@ Navigator::GetBattery(ErrorResult& aRv)
   return mBatteryManager;
 }
 
-nsIDOMMozPowerManager*
+PowerManager*
 Navigator::GetMozPower(ErrorResult& aRv)
 {
   if (!mPowerManager) {
@@ -1181,7 +1179,7 @@ Navigator::GetMozCellBroadcast(ErrorResult& aRv)
   return mCellBroadcast;
 }
 
-telephony::Telephony*
+Telephony*
 Navigator::GetMozTelephony(ErrorResult& aRv)
 {
   if (!mTelephony) {
@@ -1189,7 +1187,7 @@ Navigator::GetMozTelephony(ErrorResult& aRv)
       aRv.Throw(NS_ERROR_UNEXPECTED);
       return nullptr;
     }
-    mTelephony = telephony::Telephony::Create(mWindow, aRv);
+    mTelephony = Telephony::Create(mWindow, aRv);
   }
 
   return mTelephony;
@@ -1519,7 +1517,7 @@ Navigator::DoNewResolve(JSContext* aCx, JS::Handle<JSObject*> aObject,
 
   nsScriptNameSpaceManager* nameSpaceManager = GetNameSpaceManager();
   if (!nameSpaceManager) {
-    return Throw<true>(aCx, NS_ERROR_NOT_INITIALIZED);
+    return Throw(aCx, NS_ERROR_NOT_INITIALIZED);
   }
 
   nsDependentJSString name(aId);
@@ -1538,7 +1536,7 @@ Navigator::DoNewResolve(JSContext* aCx, JS::Handle<JSObject*> aObject,
                                   js::CheckedUnwrap(aObject,
                                                     /* stopAtOuter = */ false));
     if (!naviObj) {
-      return Throw<true>(aCx, NS_ERROR_DOM_SECURITY_ERR);
+      return Throw(aCx, NS_ERROR_DOM_SECURITY_ERR);
     }
 
     JS::Rooted<JSObject*> domObject(aCx);
@@ -1564,7 +1562,7 @@ Navigator::DoNewResolve(JSContext* aCx, JS::Handle<JSObject*> aObject,
 
       domObject = construct(aCx, naviObj);
       if (!domObject) {
-        return Throw<true>(aCx, NS_ERROR_FAILURE);
+        return Throw(aCx, NS_ERROR_FAILURE);
       }
     }
 
@@ -1583,7 +1581,7 @@ Navigator::DoNewResolve(JSContext* aCx, JS::Handle<JSObject*> aObject,
 
   nsCOMPtr<nsISupports> native(do_CreateInstance(name_struct->mCID, &rv));
   if (NS_FAILED(rv)) {
-    return Throw<true>(aCx, rv);
+    return Throw(aCx, rv);
   }
 
   JS::Rooted<JS::Value> prop_val(aCx, JS::UndefinedValue()); // Property value.
@@ -1592,12 +1590,12 @@ Navigator::DoNewResolve(JSContext* aCx, JS::Handle<JSObject*> aObject,
 
   if (gpi) {
     if (!mWindow) {
-      return Throw<true>(aCx, NS_ERROR_UNEXPECTED);
+      return Throw(aCx, NS_ERROR_UNEXPECTED);
     }
 
     rv = gpi->Init(mWindow, prop_val.address());
     if (NS_FAILED(rv)) {
-      return Throw<true>(aCx, rv);
+      return Throw(aCx, rv);
     }
   }
 
@@ -1607,12 +1605,12 @@ Navigator::DoNewResolve(JSContext* aCx, JS::Handle<JSObject*> aObject,
                                     getter_AddRefs(holder), true);
 
     if (NS_FAILED(rv)) {
-      return Throw<true>(aCx, rv);
+      return Throw(aCx, rv);
     }
   }
 
   if (!JS_WrapValue(aCx, prop_val.address())) {
-    return Throw<true>(aCx, NS_ERROR_UNEXPECTED);
+    return Throw(aCx, NS_ERROR_UNEXPECTED);
   }
 
   aValue.set(prop_val);
@@ -1731,7 +1729,7 @@ bool
 Navigator::HasTelephonySupport(JSContext* /* unused */, JSObject* aGlobal)
 {
   nsCOMPtr<nsPIDOMWindow> win = GetWindowFromGlobal(aGlobal);
-  return win && telephony::Telephony::CheckPermission(win);
+  return win && Telephony::CheckPermission(win);
 }
 
 /* static */

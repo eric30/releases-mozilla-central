@@ -9,11 +9,14 @@
 
 #include "mozilla/HashFunctions.h"
 
+#include "jsalloc.h"
+
 #include "gc/Barrier.h"
 #include "gc/Rooting.h"
 #include "vm/CommonPropertyNames.h"
 
 class JSAtom;
+class JSAutoByteString;
 
 struct JSIdArray {
     int length;
@@ -195,6 +198,11 @@ enum InternBehavior
     DoNotInternAtom = false,
     InternAtom = true
 };
+
+template <AllowGC allowGC>
+extern JSAtom *
+AtomizeMaybeGC(ExclusiveContext *cx, const char *bytes, size_t length,
+               js::InternBehavior ib = js::DoNotInternAtom);
 
 extern JSAtom *
 Atomize(ExclusiveContext *cx, const char *bytes, size_t length,

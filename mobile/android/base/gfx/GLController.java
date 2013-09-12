@@ -8,6 +8,7 @@ package org.mozilla.gecko.gfx;
 import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.GeckoEvent;
 import org.mozilla.gecko.GeckoThread;
+import org.mozilla.gecko.mozglue.GeneratableAndroidBridgeTarget;
 import org.mozilla.gecko.util.ThreadUtils;
 
 import android.util.Log;
@@ -85,6 +86,7 @@ public class GLController {
 
     synchronized void surfaceDestroyed() {
         ThreadUtils.assertOnUiThread();
+        Log.w(LOGTAG, "GLController::surfaceDestroyed() with mCompositorCreated=" + mCompositorCreated);
 
         mSurfaceValid = false;
         mEGLSurface = null;
@@ -100,10 +102,12 @@ public class GLController {
         if (mCompositorCreated) {
             GeckoAppShell.sendEventToGeckoSync(GeckoEvent.createCompositorPauseEvent());
         }
+        Log.w(LOGTAG, "done GLController::surfaceDestroyed()");
     }
 
     synchronized void surfaceChanged(int newWidth, int newHeight) {
         ThreadUtils.assertOnUiThread();
+        Log.w(LOGTAG, "GLController::surfaceChanged(" + newWidth + ", " + newHeight + ") with mSurfaceValid=" + mSurfaceValid);
 
         mWidth = newWidth;
         mHeight = newHeight;
@@ -113,6 +117,7 @@ public class GLController {
             // paused (e.g. during an orientation change), to make the compositor
             // aware of the changed surface.
             resumeCompositor(mWidth, mHeight);
+            Log.w(LOGTAG, "done GLController::surfaceChanged with compositor resume");
             return;
         }
         mSurfaceValid = true;
@@ -130,6 +135,7 @@ public class GLController {
         mView.post(new Runnable() {
             @Override
             public void run() {
+                Log.w(LOGTAG, "GLController::surfaceChanged, creating compositor; mCompositorCreated=" + mCompositorCreated + ", mSurfaceValid=" + mSurfaceValid);
                 // If we haven't yet created the compositor, and the GfxInfoThread
                 // isn't done it's data gathering activities, then postpone creating
                 // the compositor a little bit more. Don't block though, since this is
@@ -171,12 +177,14 @@ public class GLController {
 
     void createCompositor() {
         ThreadUtils.assertOnUiThread();
+        Log.w(LOGTAG, "GLController::createCompositor with mCompositorCreated=" + mCompositorCreated);
 
         if (mCompositorCreated) {
             // If the compositor has already been created, just resume it instead. We don't need
             // to block here because if the surface is destroyed before the compositor grabs it,
             // we can handle that gracefully (i.e. the compositor will remain paused).
             resumeCompositor(mWidth, mHeight);
+            Log.w(LOGTAG, "done GLController::createCompositor with compositor resume");
             return;
         }
 
@@ -187,9 +195,11 @@ public class GLController {
         if (mEGLSurface != null && GeckoThread.checkLaunchState(GeckoThread.LaunchState.GeckoRunning)) {
             GeckoAppShell.sendEventToGeckoSync(GeckoEvent.createCompositorCreateEvent(mWidth, mHeight));
         }
+        Log.w(LOGTAG, "done GLController::createCompositor");
     }
 
     void compositorCreated() {
+        Log.w(LOGTAG, "GLController::compositorCreated");
         // This is invoked on the compositor thread, while the java UI thread
         // is blocked on the gecko sync event in createCompositor() above
         mCompositorCreated = true;
@@ -253,7 +263,7 @@ public class GLController {
         throw new GLControllerException("No suitable EGL configuration found");
     }
 
-    /* This function is invoked by JNI on the compositor thread */
+    @GeneratableAndroidBridgeTarget(allowMultithread = true, stubName = "ProvideEGLSurfaceWrapper")
     private EGLSurface provideEGLSurface() {
         return mEGLSurface;
     }
@@ -263,6 +273,7 @@ public class GLController {
     }
 
     void resumeCompositor(int width, int height) {
+        Log.w(LOGTAG, "GLController::resumeCompositor(" + width + ", " + height + ") and mCompositorCreated=" + mCompositorCreated);
         // Asking Gecko to resume the compositor takes too long (see
         // https://bugzilla.mozilla.org/show_bug.cgi?id=735230#c23), so we
         // resume the compositor directly. We still need to inform Gecko about
@@ -273,6 +284,7 @@ public class GLController {
             GeckoAppShell.scheduleResumeComposition(width, height);
             GeckoAppShell.sendEventToGecko(GeckoEvent.createCompositorResumeEvent());
         }
+        Log.w(LOGTAG, "done GLController::resumeCompositor");
     }
 
     public static class GLControllerException extends RuntimeException {

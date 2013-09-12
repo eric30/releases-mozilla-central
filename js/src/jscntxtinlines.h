@@ -18,7 +18,7 @@
 #include "vm/Interpreter.h"
 #include "vm/ProxyObject.h"
 
-#include "vm/ObjectImpl-inl.h"
+#include "gc/Barrier-inl.h"
 
 namespace js {
 
@@ -352,8 +352,8 @@ inline void
 ExclusiveContext::maybePause() const
 {
 #ifdef JS_WORKER_THREADS
-    if (workerThread)
-        workerThread->maybePause();
+    if (workerThread())
+        workerThread()->maybePause();
 #endif
 }
 
@@ -438,14 +438,18 @@ JSContext::setPendingException(js::Value v) {
 inline void
 JSContext::setDefaultCompartmentObject(JSObject *obj)
 {
+    JS_ASSERT(!hasOption(JSOPTION_NO_DEFAULT_COMPARTMENT_OBJECT));
     defaultCompartmentObject_ = obj;
 }
 
 inline void
 JSContext::setDefaultCompartmentObjectIfUnset(JSObject *obj)
 {
-    if (!defaultCompartmentObject_)
+    if (!hasOption(JSOPTION_NO_DEFAULT_COMPARTMENT_OBJECT) &&
+        !defaultCompartmentObject_)
+    {
         setDefaultCompartmentObject(obj);
+    }
 }
 
 inline void

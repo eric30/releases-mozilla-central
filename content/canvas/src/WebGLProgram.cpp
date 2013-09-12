@@ -7,6 +7,7 @@
 #include "WebGLShader.h"
 #include "WebGLProgram.h"
 #include "mozilla/dom/WebGLRenderingContextBinding.h"
+#include "GLContext.h"
 
 using namespace mozilla;
 
@@ -135,7 +136,6 @@ WebGLProgram::MapIdentifier(const nsACString& name, nsCString *mappedName) {
     if (!mIdentifierMap) {
         // if the identifier map doesn't exist yet, build it now
         mIdentifierMap = new CStringMap;
-        mIdentifierMap->Init();
         for (size_t i = 0; i < mAttachedShaders.Length(); i++) {
             for (size_t j = 0; j < mAttachedShaders[i]->mAttributes.Length(); j++) {
                 const WebGLMappedIdentifier& attrib = mAttachedShaders[i]->mAttributes[j];
@@ -181,7 +181,6 @@ WebGLProgram::ReverseMapIdentifier(const nsACString& name, nsCString *reverseMap
     if (!mIdentifierReverseMap) {
         // if the identifier reverse map doesn't exist yet, build it now
         mIdentifierReverseMap = new CStringMap;
-        mIdentifierReverseMap->Init();
         for (size_t i = 0; i < mAttachedShaders.Length(); i++) {
             for (size_t j = 0; j < mAttachedShaders[i]->mAttributes.Length(); j++) {
                 const WebGLMappedIdentifier& attrib = mAttachedShaders[i]->mAttributes[j];

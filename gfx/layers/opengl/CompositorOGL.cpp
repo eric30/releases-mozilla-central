@@ -9,6 +9,7 @@
 #include <stdlib.h>                     // for free, malloc
 #include "FPSCounter.h"                 // for FPSState, FPSCounter
 #include "GLContextProvider.h"          // for GLContextProvider
+#include "GLContext.h"                  // for GLContext
 #include "LayerManagerOGL.h"            // for BUFFER_OFFSET
 #include "Layers.h"                     // for WriteSnapshotToDumpFile
 #include "gfx2DGlue.h"                  // for ThebesFilter
@@ -43,6 +44,7 @@
 #if MOZ_ANDROID_OMTC
 #include "TexturePoolOGL.h"
 #endif
+#include "GeckoProfiler.h"
 
 
 namespace mozilla {
@@ -104,15 +106,11 @@ DrawWithVertexBuffer2(GLContext *aGLContext, VBOArena &aVBOs,
 }
 
 void
-FPSState::DrawFPS(TimeStamp aNow,
-                  GLContext* context, ShaderProgramOGL* copyprog)
+FPSState::DrawCounter(float offset,
+                      unsigned value,
+                      GLContext* context,
+                      ShaderProgramOGL* copyprog)
 {
-  int fps = int(mCompositionFps.AddFrameAndGetFps(aNow));
-  int txnFps = int(mTransactionFps.GetFpsAt(aNow));
-
-  GLint viewport[4];
-  context->fGetIntegerv(LOCAL_GL_VIEWPORT, viewport);
-
   if (!mTexture) {
     // Bind the number of textures we need, in this case one.
     context->fGenTextures(1, &mTexture);
@@ -142,7 +140,8 @@ FPSState::DrawFPS(TimeStamp aNow,
     free(buf);
   }
 
-  mVBOs.Reset();
+  GLint viewport[4];
+  context->fGetIntegerv(LOCAL_GL_VIEWPORT, viewport);
 
   struct Vertex2D {
     float x,y;
@@ -150,49 +149,26 @@ FPSState::DrawFPS(TimeStamp aNow,
   float oneOverVP2 = 1.0 / viewport[2];
   float oneOverVP3 = 1.0 / viewport[3];
   const Vertex2D vertices[] = {
-    { -1.0f, 1.0f - 42.f * oneOverVP3 },
-    { -1.0f, 1.0f},
-    { -1.0f + 22.f * oneOverVP2, 1.0f - 42.f * oneOverVP3 },
-    { -1.0f + 22.f * oneOverVP2, 1.0f },
+    { -1.0f + (offset +  0.f) * oneOverVP2, 1.0f - 42.f * oneOverVP3 },
+    { -1.0f + (offset +  0.f) * oneOverVP2, 1.0f},
+    { -1.0f + (offset + 22.f) * oneOverVP2, 1.0f - 42.f * oneOverVP3 },
+    { -1.0f + (offset + 22.f) * oneOverVP2, 1.0f },
 
-    {  -1.0f + 22.f * oneOverVP2, 1.0f - 42.f * oneOverVP3 },
-    {  -1.0f + 22.f * oneOverVP2, 1.0f },
-    {  -1.0f + 44.f * oneOverVP2, 1.0f - 42.f * oneOverVP3 },
-    {  -1.0f + 44.f * oneOverVP2, 1.0f },
+    { -1.0f + (offset + 22.f) * oneOverVP2, 1.0f - 42.f * oneOverVP3 },
+    { -1.0f + (offset + 22.f) * oneOverVP2, 1.0f },
+    { -1.0f + (offset + 44.f) * oneOverVP2, 1.0f - 42.f * oneOverVP3 },
+    { -1.0f + (offset + 44.f) * oneOverVP2, 1.0f },
 
-    { -1.0f + 44.f * oneOverVP2, 1.0f - 42.f * oneOverVP3 },
-    { -1.0f + 44.f * oneOverVP2, 1.0f },
-    { -1.0f + 66.f * oneOverVP2, 1.0f - 42.f * oneOverVP3 },
-    { -1.0f + 66.f * oneOverVP2, 1.0f }
+    { -1.0f + (offset + 44.f) * oneOverVP2, 1.0f - 42.f * oneOverVP3 },
+    { -1.0f + (offset + 44.f) * oneOverVP2, 1.0f },
+    { -1.0f + (offset + 66.f) * oneOverVP2, 1.0f - 42.f * oneOverVP3 },
+    { -1.0f + (offset + 66.f) * oneOverVP2, 1.0f }
   };
 
-  const Vertex2D vertices2[] = {
-    { -1.0f + 80.f * oneOverVP2, 1.0f - 42.f * oneOverVP3 },
-    { -1.0f + 80.f * oneOverVP2, 1.0f },
-    { -1.0f + 102.f * oneOverVP2, 1.0f - 42.f * oneOverVP3 },
-    { -1.0f + 102.f * oneOverVP2, 1.0f },
+  unsigned v1   = value % 10;
+  unsigned v10  = (value % 100) / 10;
+  unsigned v100 = (value % 1000) / 100;
 
-    { -1.0f + 102.f * oneOverVP2, 1.0f - 42.f * oneOverVP3 },
-    { -1.0f + 102.f * oneOverVP2, 1.0f },
-    { -1.0f + 124.f * oneOverVP2, 1.0f - 42.f * oneOverVP3 },
-    { -1.0f + 124.f * oneOverVP2, 1.0f },
-
-    { -1.0f + 124.f * oneOverVP2, 1.0f - 42.f * oneOverVP3 },
-    { -1.0f + 124.f * oneOverVP2, 1.0f },
-    { -1.0f + 146.f * oneOverVP2, 1.0f - 42.f * oneOverVP3 },
-    { -1.0f + 146.f * oneOverVP2, 1.0f },
-  };
-
-  int v1   = fps % 10;
-  int v10  = (fps % 100) / 10;
-  int v100 = (fps % 1000) / 100;
-
-  int txn1 = txnFps % 10;
-  int txn10  = (txnFps % 100) / 10;
-  int txn100 = (txnFps % 1000) / 100;
-
-  // Feel free to comment these texture coordinates out and use one
-  // of the ones below instead, or play around with your own values.
   const GLfloat texCoords[] = {
     (v100 * 4.f) / 64, 7.f / 8,
     (v100 * 4.f) / 64, 0.0f,
@@ -208,23 +184,6 @@ FPSState::DrawFPS(TimeStamp aNow,
     (v1 * 4.f) / 64, 0.0f,
     (v1 * 4.f + 4) / 64, 7.f / 8,
     (v1 * 4.f + 4) / 64, 0.0f,
-  };
-
-  const GLfloat texCoords2[] = {
-    (txn100 * 4.f) / 64, 7.f / 8,
-    (txn100 * 4.f) / 64, 0.0f,
-    (txn100 * 4.f + 4) / 64, 7.f / 8,
-    (txn100 * 4.f + 4) / 64, 0.0f,
-
-    (txn10 * 4.f) / 64, 7.f / 8,
-    (txn10 * 4.f) / 64, 0.0f,
-    (txn10 * 4.f + 4) / 64, 7.f / 8,
-    (txn10 * 4.f + 4) / 64, 0.0f,
-
-    (txn1 * 4.f) / 64, 7.f / 8,
-    (txn1 * 4.f) / 64, 0.0f,
-    (txn1 * 4.f + 4) / 64, 7.f / 8,
-    (txn1 * 4.f + 4) / 64, 0.0f,
   };
 
   // Turn necessary features on
@@ -248,10 +207,21 @@ FPSState::DrawFPS(TimeStamp aNow,
                         LOCAL_GL_TRIANGLE_STRIP, 12,
                         vcattr, (GLfloat *) vertices,
                         tcattr, (GLfloat *) texCoords);
-  DrawWithVertexBuffer2(context, mVBOs,
-                        LOCAL_GL_TRIANGLE_STRIP, 12,
-                        vcattr, (GLfloat *) vertices2,
-                        tcattr, (GLfloat *) texCoords2);
+}
+
+void
+FPSState::DrawFPS(TimeStamp aNow,
+                  unsigned aFillRatio,
+                  GLContext* context, ShaderProgramOGL* copyprog)
+{
+  mVBOs.Reset();
+
+  unsigned fps = unsigned(mCompositionFps.AddFrameAndGetFps(aNow));
+  unsigned txnFps = unsigned(mTransactionFps.GetFpsAt(aNow));
+
+  DrawCounter(0, fps, context, copyprog);
+  DrawCounter(80, txnFps, context, copyprog);
+  DrawCounter(160, aFillRatio, context, copyprog);
 }
 
 #ifdef CHECK_CURRENT_PROGRAM
@@ -779,6 +749,7 @@ CompositorOGL::BeginFrame(const Rect *aClipRectIn, const gfxMatrix& aTransform,
                           const Rect& aRenderBounds, Rect *aClipRectOut,
                           Rect *aRenderBoundsOut)
 {
+  PROFILER_LABEL("CompositorOGL", "BeginFrame");
   MOZ_ASSERT(!mFrameInProgress, "frame still in progress (should have called EndFrame or AbortFrame");
 
   mVBOs.Reset();
@@ -825,6 +796,9 @@ CompositorOGL::BeginFrame(const Rect *aClipRectIn, const gfxMatrix& aTransform,
   } else {
     MakeCurrent();
   }
+
+  mPixelsPerFrame = width * height;
+  mPixelsFilled = 0;
 
 #if MOZ_ANDROID_OMTC
   TexturePoolOGL::Fill(gl());
@@ -1009,6 +983,7 @@ CompositorOGL::DrawQuad(const Rect& aRect, const Rect& aClipRect,
                         Float aOpacity, const gfx::Matrix4x4 &aTransform,
                         const Point& aOffset)
 {
+  PROFILER_LABEL("CompositorOGL", "DrawQuad");
   MOZ_ASSERT(mFrameInProgress, "frame not started");
 
   IntRect intClipRect;
@@ -1048,6 +1023,8 @@ CompositorOGL::DrawQuad(const Rect& aRect, const Rect& aClipRect,
   } else {
     maskType = MaskNone;
   }
+
+  mPixelsFilled += aRect.width * aRect.height;
 
   ShaderProgramType programType = GetProgramTypeForEffect(aEffectChain.mPrimaryEffect);
   ShaderProgramOGL *program = GetProgram(programType, maskType);
@@ -1273,6 +1250,7 @@ CompositorOGL::DrawQuad(const Rect& aRect, const Rect& aClipRect,
 void
 CompositorOGL::EndFrame()
 {
+  PROFILER_LABEL("CompositorOGL", "BeginFrame");
   MOZ_ASSERT(mCurrentRenderTarget == mWindowRenderTarget, "Rendering target not properly restored");
 
 #ifdef MOZ_DUMP_PAINTING
@@ -1309,7 +1287,13 @@ CompositorOGL::EndFrame()
   }
 
   if (mFPS) {
-    mFPS->DrawFPS(TimeStamp::Now(), mGLContext, GetProgram(Copy2DProgramType));
+    float fillRatio = 0;
+    if (mPixelsFilled > 0 && mPixelsPerFrame > 0) {
+      fillRatio = 100.0f * float(mPixelsFilled) / float(mPixelsPerFrame);
+      if (fillRatio > 999.0f)
+        fillRatio = 999.0f;
+    }
+    mFPS->DrawFPS(TimeStamp::Now(), unsigned(fillRatio), mGLContext, GetProgram(Copy2DProgramType));
   }
 
   mGLContext->SwapBuffers();
@@ -1445,6 +1429,95 @@ CompositorOGL::CreateDataTextureSource(TextureFlags aFlags)
                                      !(aFlags & TEXTURE_DISALLOW_BIGIMAGE));
   return result;
 }
+
+bool
+CompositorOGL::SupportsPartialTextureUpdate()
+{
+  return mGLContext->CanUploadSubTextures();
+}
+
+int32_t
+CompositorOGL::GetMaxTextureSize() const
+{
+  MOZ_ASSERT(mGLContext);
+  GLint texSize = 0;
+  mGLContext->fGetIntegerv(LOCAL_GL_MAX_TEXTURE_SIZE,
+                            &texSize);
+  MOZ_ASSERT(texSize != 0);
+  return texSize;
+}
+
+void
+CompositorOGL::MakeCurrent(MakeCurrentFlags aFlags) {
+  if (mDestroyed) {
+    NS_WARNING("Call on destroyed layer manager");
+    return;
+  }
+  mGLContext->MakeCurrent(aFlags & ForceMakeCurrent);
+}
+
+void
+CompositorOGL::BindQuadVBO() {
+  mGLContext->fBindBuffer(LOCAL_GL_ARRAY_BUFFER, mQuadVBO);
+}
+
+void
+CompositorOGL::QuadVBOVerticesAttrib(GLuint aAttribIndex) {
+  mGLContext->fVertexAttribPointer(aAttribIndex, 2,
+                                    LOCAL_GL_FLOAT, LOCAL_GL_FALSE, 0,
+                                    (GLvoid*) QuadVBOVertexOffset());
+}
+
+void
+CompositorOGL::QuadVBOTexCoordsAttrib(GLuint aAttribIndex) {
+  mGLContext->fVertexAttribPointer(aAttribIndex, 2,
+                                    LOCAL_GL_FLOAT, LOCAL_GL_FALSE, 0,
+                                    (GLvoid*) QuadVBOTexCoordOffset());
+}
+
+void
+CompositorOGL::QuadVBOFlippedTexCoordsAttrib(GLuint aAttribIndex) {
+  mGLContext->fVertexAttribPointer(aAttribIndex, 2,
+                                    LOCAL_GL_FLOAT, LOCAL_GL_FALSE, 0,
+                                    (GLvoid*) QuadVBOFlippedTexCoordOffset());
+}
+
+void
+CompositorOGL::BindAndDrawQuad(GLuint aVertAttribIndex,
+                               GLuint aTexCoordAttribIndex,
+                               bool aFlipped)
+{
+  BindQuadVBO();
+  QuadVBOVerticesAttrib(aVertAttribIndex);
+
+  if (aTexCoordAttribIndex != GLuint(-1)) {
+    if (aFlipped)
+      QuadVBOFlippedTexCoordsAttrib(aTexCoordAttribIndex);
+    else
+      QuadVBOTexCoordsAttrib(aTexCoordAttribIndex);
+
+    mGLContext->fEnableVertexAttribArray(aTexCoordAttribIndex);
+  }
+
+  mGLContext->fEnableVertexAttribArray(aVertAttribIndex);
+  mGLContext->fDrawArrays(LOCAL_GL_TRIANGLE_STRIP, 0, 4);
+  mGLContext->fDisableVertexAttribArray(aVertAttribIndex);
+
+  if (aTexCoordAttribIndex != GLuint(-1)) {
+    mGLContext->fDisableVertexAttribArray(aTexCoordAttribIndex);
+  }
+}
+
+void
+CompositorOGL::BindAndDrawQuad(ShaderProgramOGL *aProg,
+                               bool aFlipped)
+{
+  NS_ASSERTION(aProg->HasInitialized(), "Shader program not correctly initialized");
+  BindAndDrawQuad(aProg->AttribLocation(ShaderProgramOGL::VertexCoordAttrib),
+                  aProg->AttribLocation(ShaderProgramOGL::TexCoordAttrib),
+                  aFlipped);
+}
+
 
 } /* layers */
 } /* mozilla */

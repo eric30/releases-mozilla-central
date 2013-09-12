@@ -15,6 +15,7 @@
     _(Integer)                      \
     _(Pointer)                      \
     _(Double)                       \
+    _(Float32)                      \
     _(Value)                        \
     _(Parameter)                    \
     _(Callee)                       \
@@ -57,6 +58,7 @@
     _(GetArgumentsObjectArg)        \
     _(SetArgumentsObjectArg)        \
     _(ReturnFromCtor)               \
+    _(ComputeThis)                  \
     _(BitNotI)                      \
     _(BitNotV)                      \
     _(BitOpI)                       \
@@ -92,6 +94,7 @@
     _(MinMaxD)                      \
     _(NegI)                         \
     _(NegD)                         \
+    _(NegF)                         \
     _(AbsI)                         \
     _(AbsD)                         \
     _(SqrtD)                        \
@@ -108,6 +111,7 @@
     _(SubI)                         \
     _(MulI)                         \
     _(MathD)                        \
+    _(MathF)                        \
     _(ModD)                         \
     _(BinaryV)                      \
     _(Concat)                       \
@@ -115,8 +119,12 @@
     _(CharCodeAt)                   \
     _(FromCharCode)                 \
     _(Int32ToDouble)                \
+    _(Float32ToDouble)              \
+    _(DoubleToFloat32)              \
+    _(Int32ToFloat32)               \
     _(ValueToDouble)                \
     _(ValueToInt32)                 \
+    _(ValueToFloat32)               \
     _(DoubleToInt32)                \
     _(TruncateDToInt32)             \
     _(IntToString)                  \
@@ -143,7 +151,8 @@
     _(GuardObjectType)              \
     _(GuardClass)                   \
     _(GuardThreadLocalObject)       \
-    _(TypeBarrier)                  \
+    _(TypeBarrierV)                 \
+    _(TypeBarrierO)                 \
     _(MonitorTypes)                 \
     _(PostWriteBarrierO)            \
     _(PostWriteBarrierV)            \
@@ -196,6 +205,7 @@
     _(CallInitElementArray)         \
     _(CallSetProperty)              \
     _(CallDeleteProperty)           \
+    _(CallDeleteElement)           \
     _(SetPropertyCacheV)            \
     _(SetPropertyCacheT)            \
     _(SetElementCacheV)             \
@@ -247,6 +257,7 @@
     _(CheckInterruptPar)            \
     _(AssertRangeI)                 \
     _(AssertRangeD)                 \
+    _(AssertRangeF)                 \
     _(AssertRangeV)
 
 #if defined(JS_CPU_X86)

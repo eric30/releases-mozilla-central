@@ -17,7 +17,7 @@ let EventEmitter = require("devtools/shared/event-emitter");
 let {editableField, InplaceEditor} = require("devtools/shared/inplace-editor");
 let promise = require("sdk/core/promise");
 
-Cu.import("resource:///modules/devtools/LayoutHelpers.jsm");
+Cu.import("resource://gre/modules/devtools/LayoutHelpers.jsm");
 Cu.import("resource://gre/modules/devtools/Templater.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -52,6 +52,8 @@ function MarkupView(aInspector, aFrame, aControllerWindow)
   this._frame = aFrame;
   this.doc = this._frame.contentDocument;
   this._elt = this.doc.querySelector("#root");
+
+  this.layoutHelpers = new LayoutHelpers(this.doc.defaultView);
 
   try {
     this.maxChildren = Services.prefs.getIntPref("devtools.markup.pagesize");
@@ -406,7 +408,7 @@ MarkupView.prototype = {
       return this._ensureVisible(aNode);
     }).then(() => {
       // Why is this not working?
-      LayoutHelpers.scrollIntoViewIfNeeded(this._containers.get(aNode).editor.elt, centered);
+      this.layoutHelpers.scrollIntoViewIfNeeded(this._containers.get(aNode).editor.elt, centered);
     });
   },
 
@@ -1231,7 +1233,7 @@ ElementEditor.prototype = {
     // Double quotes need to be handled specially to prevent DOMParser failing.
     // name="v"a"l"u"e" when editing -> name='v"a"l"u"e"'
     // name="v'a"l'u"e" when editing -> name="v'a&quot;l'u&quot;e"
-    let editValueDisplayed = aAttr.value;
+    let editValueDisplayed = aAttr.value || "";
     let hasDoubleQuote = editValueDisplayed.contains('"');
     let hasSingleQuote = editValueDisplayed.contains("'");
     let initial = aAttr.name + '="' + editValueDisplayed + '"';

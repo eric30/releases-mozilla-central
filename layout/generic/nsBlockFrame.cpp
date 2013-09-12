@@ -1046,8 +1046,6 @@ nsBlockFrame::Reflow(nsPresContext*           aPresContext,
 #endif
   }
 
-  CheckFloats(state);
-
   // Place the "marker" (bullet) frame if it is placed next to a block
   // child.
   //
@@ -1090,6 +1088,8 @@ nsBlockFrame::Reflow(nsPresContext*           aPresContext,
     }
     // Otherwise just leave the bullet where it is, up against our top padding.
   }
+
+  CheckFloats(state);
 
   // Compute our final size
   nscoord bottomEdgeOfChildren;
@@ -2582,9 +2582,7 @@ nsBlockFrame::SlideLine(nsBlockReflowState& aState,
 
   if (aLine->IsBlock()) {
     if (aDY) {
-      nsPoint p = kid->GetPosition();
-      p.y += aDY;
-      kid->SetPosition(p);
+      kid->MovePositionBy(nsPoint(0, aDY));
     }
 
     // Make sure the frame's view and any child views are updated
@@ -2598,9 +2596,7 @@ nsBlockFrame::SlideLine(nsBlockReflowState& aState,
     int32_t n = aLine->GetChildCount();
     while (--n >= 0) {
       if (aDY) {
-        nsPoint p = kid->GetPosition();
-        p.y += aDY;
-        kid->SetPosition(p);
+        kid->MovePositionBy(nsPoint(0, aDY));
       }
       // Make sure the frame's view and any child views are updated
       ::PlaceFrameView(kid);

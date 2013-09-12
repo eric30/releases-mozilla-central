@@ -66,7 +66,7 @@ NS_IMETHODIMP
 nsSecurityNameSet::InitializeNameSet(nsIScriptContext* aScriptContext)
 {
     AutoJSContext cx;
-    JS::Rooted<JSObject*> global(cx, aScriptContext->GetNativeGlobal());
+    JS::Rooted<JSObject*> global(cx, aScriptContext->GetWindowProxy());
     JSAutoCompartment ac(cx, global);
 
     /*
@@ -81,7 +81,7 @@ nsSecurityNameSet::InitializeNameSet(nsIScriptContext* aScriptContext)
             break;
         obj = proto;
     }
-    JSClass *objectClass = JS_GetClass(obj);
+    const JSClass *objectClass = JS_GetClass(obj);
 
     JS::Rooted<JS::Value> v(cx);
     if (!JS_GetProperty(cx, global, "netscape", &v))

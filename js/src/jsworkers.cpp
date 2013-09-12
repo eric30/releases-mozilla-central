@@ -14,6 +14,7 @@
 #include "frontend/BytecodeCompiler.h"
 #include "jit/ExecutionModeInlines.h"
 #include "jit/IonBuilder.h"
+#include "vm/Debugger.h"
 
 #include "jscntxtinlines.h"
 #include "jscompartmentinlines.h"
@@ -165,7 +166,7 @@ js::CancelOffThreadIonCompile(JSCompartment *compartment, JSScript *script)
     }
 }
 
-static JSClass workerGlobalClass = {
+static const JSClass workerGlobalClass = {
     "internal-worker-global", JSCLASS_GLOBAL_FLAGS,
     JS_PropertyStub,  JS_DeletePropertyStub,
     JS_PropertyStub,  JS_StrictPropertyStub,
@@ -499,12 +500,40 @@ WorkerThreadState::canStartCompressionTask()
     return !compressionWorklist.empty();
 }
 
+static void
+CallNewScriptHookForAllScripts(JSContext *cx, HandleScript script)
+{
+    // We should never hit this, since nested scripts are also constructed via
+    // BytecodeEmitter instances on the stack.
+    JS_CHECK_RECURSION(cx, return);
+
+    // Recurse to any nested scripts.
+    if (script->hasObjects()) {
+        ObjectArray *objects = script->objects();
+        for (size_t i = 0; i < objects->length; i++) {
+            JSObject *obj = objects->vector[i];
+            if (obj->is<JSFunction>()) {
+                JSFunction *fun = &obj->as<JSFunction>();
+                if (fun->hasScript()) {
+                    RootedScript nested(cx, fun->nonLazyScript());
+                    CallNewScriptHookForAllScripts(cx, nested);
+                }
+            }
+        }
+    }
+
+    // The global new script hook is called on every script that was compiled.
+    RootedFunction function(cx, script->function());
+    CallNewScriptHook(cx, script, function);
+}
+
 JSScript *
 WorkerThreadState::finishParseTask(JSContext *maybecx, JSRuntime *rt, void *token)
 {
     ParseTask *parseTask = NULL;
 
     // The token is a ParseTask* which should be in the finished list.
+    // Find and remove its entry.
     {
         AutoLockWorkerThreadState lock(*rt->workerThreadState);
         for (size_t i = 0; i < parseFinishedList.length(); i++) {
@@ -548,15 +577,27 @@ WorkerThreadState::finishParseTask(JSContext *maybecx, JSRuntime *rt, void *toke
     // Move the parsed script and all its contents into the desired compartment.
     gc::MergeCompartments(parseTask->cx->compartment(), parseTask->scopeChain->compartment());
 
+    RootedScript script(rt, parseTask->script);
+
     // If we have a context, report any error or warnings generated during the
-    // parse.
+    // parse, and inform the debugger about the compiled scripts.
     if (maybecx) {
         AutoCompartment ac(maybecx, parseTask->scopeChain);
         for (size_t i = 0; i < parseTask->errors.length(); i++)
             parseTask->errors[i]->throwError(maybecx);
+
+        if (script) {
+            // The Debugger only needs to be told about the topmost script that was compiled.
+            GlobalObject *compileAndGoGlobal = NULL;
+            if (script->compileAndGo)
+                compileAndGoGlobal = &script->global();
+            Debugger::onNewScript(maybecx, script, compileAndGoGlobal);
+
+            // The NewScript hook needs to be called for all compiled scripts.
+            CallNewScriptHookForAllScripts(maybecx, script);
+        }
     }
 
-    JSScript *script = parseTask->script;
     js_delete(parseTask);
     return script;
 }
@@ -650,6 +691,13 @@ WorkerThread::handleIonWorkload(WorkerThreadState &state)
     DebugOnly<jit::ExecutionMode> executionMode = ionBuilder->info().executionMode();
     JS_ASSERT(GetIonScript(ionBuilder->script(), executionMode) == ION_COMPILING_SCRIPT);
 
+#if JS_TRACE_LOGGING
+    AutoTraceLog logger(TraceLogging::getLogger(TraceLogging::ION_BACKGROUND_COMPILER),
+                        TraceLogging::ION_COMPILE_START,
+                        TraceLogging::ION_COMPILE_STOP,
+                        ionBuilder->script());
+#endif
+
     state.unlock();
     {
         jit::IonContext ictx(runtime, ionBuilder->script()->compartment(), &ionBuilder->temp());
@@ -673,8 +721,8 @@ WorkerThread::handleIonWorkload(WorkerThreadState &state)
 void
 ExclusiveContext::setWorkerThread(WorkerThread *workerThread)
 {
-    this->workerThread = workerThread;
-    this->perThreadData = workerThread->threadData.addr();
+    workerThread_ = workerThread;
+    perThreadData = workerThread->threadData.addr();
 }
 
 frontend::CompileError &
@@ -683,7 +731,7 @@ ExclusiveContext::addPendingCompileError()
     frontend::CompileError *error = js_new<frontend::CompileError>();
     if (!error)
         MOZ_CRASH();
-    if (!workerThread->parseTask->errors.append(error))
+    if (!workerThread()->parseTask->errors.append(error))
         MOZ_CRASH();
     return *error;
 }
@@ -781,8 +829,24 @@ SourceCompressionTask::complete()
         WorkerThreadState &state = *cx->workerThreadState();
         AutoLockWorkerThreadState lock(state);
 
+        // If this compression task is itself being completed on a worker
+        // thread, treat the thread as paused while waiting for the completion.
+        // Otherwise we will not wake up and mark this as paused due to the
+        // loop in AutoPauseWorkersForGC.
+        if (cx->workerThread()) {
+            state.numPaused++;
+            if (state.numPaused == state.numThreads)
+                state.notify(WorkerThreadState::MAIN);
+        }
+
         while (state.compressionInProgress(this))
             state.wait(WorkerThreadState::MAIN);
+
+        if (cx->workerThread()) {
+            state.numPaused--;
+            if (state.shouldPause)
+                cx->workerThread()->pause();
+        }
 
         ss->ready_ = true;
 

@@ -84,13 +84,6 @@ class MobileConnection;
 #endif
 } // namespace Connection;
 
-#ifdef MOZ_B2G_RIL
-namespace telephony {
-class Telephony;
-} // namespace Telephony;
-class CellBroadcast;
-#endif
-
 #ifdef MOZ_B2G_BT
 namespace bluetooth {
 class BluetoothManager;
@@ -98,12 +91,12 @@ class BluetoothManager;
 #endif // MOZ_B2G_BT
 
 #ifdef MOZ_B2G_RIL
+class CellBroadcast;
+class Telephony;
 class Voicemail;
 #endif
 
-namespace power {
 class PowerManager;
-} // namespace power
 
 namespace time {
 class TimeManager;
@@ -203,7 +196,7 @@ public:
   {
     aRv = GetBuildID(aBuildID);
   }
-  nsIDOMMozPowerManager* GetMozPower(ErrorResult& aRv);
+  PowerManager* GetMozPower(ErrorResult& aRv);
   bool JavaEnabled(ErrorResult& aRv);
   bool TaintEnabled()
   {
@@ -229,7 +222,7 @@ public:
                             ErrorResult& aRv);
   bool MozHasPendingMessage(const nsAString& aType, ErrorResult& aRv);
 #ifdef MOZ_B2G_RIL
-  telephony::Telephony* GetMozTelephony(ErrorResult& aRv);
+  Telephony* GetMozTelephony(ErrorResult& aRv);
   nsIDOMMozMobileConnection* GetMozMobileConnection(ErrorResult& aRv);
   CellBroadcast* GetMozCellBroadcast(ErrorResult& aRv);
   Voicemail* GetMozVoicemail(ErrorResult& aRv);
@@ -337,10 +330,10 @@ private:
 #ifdef MOZ_B2G_FM
   nsRefPtr<FMRadio> mFMRadio;
 #endif
-  nsRefPtr<power::PowerManager> mPowerManager;
+  nsRefPtr<PowerManager> mPowerManager;
   nsRefPtr<MobileMessageManager> mMobileMessageManager;
 #ifdef MOZ_B2G_RIL
-  nsRefPtr<telephony::Telephony> mTelephony;
+  nsRefPtr<Telephony> mTelephony;
   nsRefPtr<Voicemail> mVoicemail;
 #endif
   nsRefPtr<network::Connection> mConnection;

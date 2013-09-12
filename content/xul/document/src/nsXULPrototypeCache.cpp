@@ -23,6 +23,7 @@
 #include "nsAppDirectoryServiceDefs.h"
 
 #include "jsapi.h"
+#include "js/Tracer.h"
 
 #include "mozilla/Preferences.h"
 #include "mozilla/scache/StartupCache.h"
@@ -89,15 +90,6 @@ nsXULPrototypeCache::GetInstance()
 {
     if (!sInstance) {
         NS_ADDREF(sInstance = new nsXULPrototypeCache());
-
-        sInstance->mPrototypeTable.Init();
-        sInstance->mStyleSheetTable.Init();
-        sInstance->mScriptTable.Init();
-        sInstance->mXBLDocTable.Init();
-
-        sInstance->mCacheURITable.Init();
-        sInstance->mInputStreamTable.Init();
-        sInstance->mOutputStreamTable.Init();
 
         UpdategDisableXULCache();
 

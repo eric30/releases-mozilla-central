@@ -226,8 +226,6 @@ class JS_PUBLIC_API(DirectProxyHandler) : public BaseProxyHandler
                                    unsigned indent) MOZ_OVERRIDE;
     virtual bool regexp_toShared(JSContext *cx, HandleObject proxy,
                                  RegExpGuard *g) MOZ_OVERRIDE;
-    virtual bool defaultValue(JSContext *cx, HandleObject obj, JSType hint,
-                              MutableHandleValue vp) MOZ_OVERRIDE;
     virtual JSObject *weakmapKeyDelegate(JSObject *proxy);
 };
 
@@ -282,9 +280,9 @@ class Proxy
 
 // These are equal to |&{Function,Object,OuterWindow}ProxyObject::class_|.  Use
 // them in places where you don't want to #include vm/ProxyObject.h.
-extern JS_FRIEND_DATA(js::Class* const) FunctionProxyClassPtr;
-extern JS_FRIEND_DATA(js::Class* const) ObjectProxyClassPtr;
-extern JS_FRIEND_DATA(js::Class* const) OuterWindowProxyClassPtr;
+extern JS_FRIEND_DATA(const js::Class* const) FunctionProxyClassPtr;
+extern JS_FRIEND_DATA(const js::Class* const) ObjectProxyClassPtr;
+extern JS_FRIEND_DATA(const js::Class* const) OuterWindowProxyClassPtr;
 
 inline bool IsObjectProxyClass(const Class *clasp)
 {

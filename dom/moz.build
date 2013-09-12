@@ -72,7 +72,9 @@ PARALLEL_DIRS += [
     'camera',
     'audiochannel',
     'promise',
-    'wappush'
+    'wappush',
+    'telephony',
+    'webidl',
 ]
 
 if CONFIG['OS_ARCH'] == 'WINNT':
@@ -80,7 +82,6 @@ if CONFIG['OS_ARCH'] == 'WINNT':
 
 if CONFIG['MOZ_B2G_RIL']:
     PARALLEL_DIRS += [
-        'telephony',
         'wifi',
         'icc',
         'cellbroadcast',

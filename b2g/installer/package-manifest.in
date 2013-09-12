@@ -164,7 +164,6 @@
 @BINPATH@/components/dom_base.xpt
 @BINPATH@/components/dom_system.xpt
 #ifdef MOZ_B2G_RIL
-@BINPATH@/components/dom_telephony.xpt
 @BINPATH@/components/dom_voicemail.xpt
 @BINPATH@/components/dom_wifi.xpt
 @BINPATH@/components/dom_system_gonk.xpt
@@ -206,6 +205,7 @@
 @BINPATH@/components/dom_mobilemessage.xpt
 @BINPATH@/components/dom_storage.xpt
 @BINPATH@/components/dom_stylesheets.xpt
+@BINPATH@/components/dom_telephony.xpt
 @BINPATH@/components/dom_threads.xpt
 @BINPATH@/components/dom_traversal.xpt
 @BINPATH@/components/dom_views.xpt
@@ -309,9 +309,7 @@
 #endif
 @BINPATH@/components/uconv.xpt
 @BINPATH@/components/unicharutil.xpt
-#ifdef MOZ_UPDATER
 @BINPATH@/components/update.xpt
-#endif
 @BINPATH@/components/uriloader.xpt
 @BINPATH@/components/urlformatter.xpt
 @BINPATH@/components/webBrowser_core.xpt
@@ -473,6 +471,8 @@
 @BINPATH@/components/NetworkStatsManager.manifest
 @BINPATH@/components/NetworkInterfaceListService.manifest
 @BINPATH@/components/NetworkInterfaceListService.js
+@BINPATH@/components/TelephonyProvider.manifest
+@BINPATH@/components/TelephonyProvider.js
 #endif
 #ifdef MOZ_B2G_NFC
 @BINPATH@/components/Nfc.manifest
@@ -740,6 +740,7 @@ bin/components/@DLL_PREFIX@nkgnomevfs@DLL_SUFFIX@
 #ifdef MOZ_UPDATER
 @BINPATH@/components/UpdatePrompt.js
 #endif
+@BINPATH@/components/WebappsUpdateTimer.js
 @BINPATH@/components/MozKeyboard.js
 @BINPATH@/components/DirectoryProvider.js
 @BINPATH@/components/ActivitiesGlue.js

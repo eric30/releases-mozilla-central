@@ -7,10 +7,8 @@
 
 /* Call context. */
 
-#include "mozilla/Util.h"
-#include "AccessCheck.h"
-
 #include "xpcprivate.h"
+#include "jswrapper.h"
 
 using namespace mozilla;
 using namespace xpc;
@@ -70,7 +68,7 @@ XPCCallContext::XPCCallContext(XPCContext::LangType callerLanguage,
             return;
         }
     } else {
-        js::Class *clasp = js::GetObjectClass(unwrapped);
+        const js::Class *clasp = js::GetObjectClass(unwrapped);
         if (IS_WN_CLASS(clasp)) {
             mWrapper = XPCWrappedNative::Get(unwrapped);
         } else if (IS_TEAROFF_CLASS(clasp)) {

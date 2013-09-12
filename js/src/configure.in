@@ -149,6 +149,7 @@ if test "$JS_STANDALONE" = no; then
   JS_STANDALONE=
 else
   JS_STANDALONE=1
+  AC_DEFINE(JS_STANDALONE)
 fi
 AC_SUBST(JS_STANDALONE)
 
@@ -4305,6 +4306,9 @@ if test -n "$ENABLE_INTL_API" -a -z "$MOZ_NATIVE_ICU"; then
     fi
     if test -z "$MOZ_OPTIMIZE"; then
         ICU_BUILD_OPTS="$ICU_BUILD_OPTS --disable-release"
+    else
+        ICU_CFLAGS="$ICU_CFLAGS $MOZ_OPTIMIZE_FLAGS"
+        ICU_CXXFLAGS="$ICU_CXXFLAGS $MOZ_OPTIMIZE_FLAGS"
     fi
 
     abs_srcdir=`(cd $srcdir; pwd)`
@@ -4338,7 +4342,7 @@ AC_SUBST(ac_configure_args)
 dnl Spit out some output
 dnl ========================================================
 
-AC_OUTPUT([js-confdefs.h Makefile config/autoconf.mk config/emptyvars.mk])
+AC_OUTPUT([js-confdefs.h config/autoconf.mk config/emptyvars.mk])
 
 # Produce the js-config script at configure time; see the comments for
 # 'js*-config' in Makefile.in.

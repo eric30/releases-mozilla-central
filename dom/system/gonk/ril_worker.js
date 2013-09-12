@@ -96,7 +96,99 @@ let RILQUIRKS_HAVE_QUERY_ICC_LOCK_RETRY_COUNT = libcutils.property_get("ro.moz.r
 // Marker object.
 let PENDING_NETWORK_TYPE = {};
 
-let Buf = require("resource://gre/modules/workers/worker_buf.js");
+let Buf = {
+  __proto__: (function(){
+    return require("resource://gre/modules/workers/worker_buf.js").Buf;
+  })(),
+
+  mToken: 0,
+  mTokenRequestMap: null,
+
+  init: function init() {
+    this._init();
+
+    // This gets incremented each time we send out a parcel.
+    this.mToken = 1;
+
+    // Maps tokens we send out with requests to the request type, so that
+    // when we get a response parcel back, we know what request it was for.
+    this.mTokenRequestMap = {};
+  },
+
+  /**
+   * Process one parcel.
+   */
+  processParcel: function processParcel() {
+    let response_type = this.readUint32();
+
+    let request_type, options;
+    if (response_type == RESPONSE_TYPE_SOLICITED) {
+      let token = this.readUint32();
+      let error = this.readUint32();
+
+      options = this.mTokenRequestMap[token];
+      if (!options) {
+        if (DEBUG) {
+          debug("Suspicious uninvited request found: " + token + ". Ignored!");
+        }
+        return;
+      }
+
+      delete this.mTokenRequestMap[token];
+      request_type = options.rilRequestType;
+
+      options.rilRequestError = error;
+      if (DEBUG) {
+        debug("Solicited response for request type " + request_type +
+              ", token " + token + ", error " + error);
+      }
+    } else if (response_type == RESPONSE_TYPE_UNSOLICITED) {
+      request_type = this.readUint32();
+      if (DEBUG) debug("Unsolicited response for request type " + request_type);
+    } else {
+      if (DEBUG) debug("Unknown response type: " + response_type);
+      return;
+    }
+
+    RIL.handleParcel(request_type, this.mReadAvailable, options);
+  },
+
+  /**
+   * Start a new outgoing parcel.
+   *
+   * @param type
+   *        Integer specifying the request type.
+   * @param options [optional]
+   *        Object containing information about the request, e.g. the
+   *        original main thread message object that led to the RIL request.
+   */
+  newParcel: function newParcel(type, options) {
+    if (DEBUG) debug("New outgoing parcel of type " + type);
+
+    // We're going to leave room for the parcel size at the beginning.
+    this.mOutgoingIndex = this.PARCEL_SIZE_SIZE;
+    this.writeUint32(type);
+    this.writeUint32(this.mToken);
+
+    if (!options) {
+      options = {};
+    }
+    options.rilRequestType = type;
+    options.rilRequestError = null;
+    this.mTokenRequestMap[this.mToken] = options;
+    this.mToken++;
+    return this.mToken;
+  },
+
+  simpleRequest: function simpleRequest(type, options) {
+    this.newParcel(type, options);
+    this.sendParcel();
+  },
+
+  onSendParcel: function onSendParcel(parcel) {
+    postRILMessage(CLIENT_ID, parcel);
+  }
+};
 
 /**
  * The RIL state machine.
@@ -260,6 +352,14 @@ let RIL = {
      * being processed
      */
     this._processingNetworkInfo = false;
+
+    /**
+     * Multiple requestNetworkInfo() in a row before finishing the first
+     * request, hence we need to fire requestNetworkInfo() again after
+     * gathering all necessary stuffs. This is to make sure that ril_worker
+     * gets precise network information.
+     */
+    this._needRepollNetworkInfo = false;
 
     /**
      * Pending messages to be send in batch from requestNetworkInfo()
@@ -1038,6 +1138,7 @@ let RIL = {
   requestNetworkInfo: function requestNetworkInfo() {
     if (this._processingNetworkInfo) {
       if (DEBUG) debug("Network info requested, but we're already requesting network info.");
+      this._needRepollNetworkInfo = true;
       return;
     }
 
@@ -1222,6 +1323,10 @@ let RIL = {
     Buf.simpleRequest(REQUEST_EXIT_EMERGENCY_CALLBACK_MODE, options);
   },
 
+  getCdmaSubscription: function getCdmaSubscription() {
+    Buf.simpleRequest(REQUEST_CDMA_SUBSCRIPTION);
+  },
+
   exitEmergencyCbMode: function exitEmergencyCbMode(options) {
     // The function could be called by an API from RadioInterfaceLayer or by
     // ril_worker itself. From ril_worker, we won't pass the parameter
@@ -1253,10 +1358,7 @@ let RIL = {
    */
   dial: function dial(options) {
     let onerror = (function onerror(errorMsg) {
-      options.callIndex = -1;
-      options.rilMessageType = "callError";
-      options.errorMsg = errorMsg;
-      this.sendChromeMessage(options);
+      this._sendCallError(-1, errorMsg);
     }).bind(this);
 
     if (this._isEmergencyNumber(options.number)) {
@@ -2837,6 +2939,9 @@ let RIL = {
       if (newCardState == this.cardState) {
         return;
       }
+      this.iccInfo = {iccType: null};
+      ICCUtilsHelper.handleICCInfoChange();
+
       this.cardState = newCardState;
       this.sendChromeMessage({rilMessageType: "cardstatechange",
                               cardState: this.cardState});
@@ -2888,6 +2993,8 @@ let RIL = {
     // This was moved down from CARD_APPSTATE_READY
     this.requestNetworkInfo();
     if (newCardState == GECKO_CARDSTATE_READY) {
+      this.iccInfo.iccType = GECKO_CARD_TYPE[this.appType];
+
       // For type SIM, we need to check EF_phase first.
       // Other types of ICC we can send Terminal_Profile immediately.
       if (this.appType == CARD_APPTYPE_SIM) {
@@ -3040,6 +3147,11 @@ let RIL = {
     RIL._processingNetworkInfo = false;
     for (let i = 0; i < NETWORK_INFO_MESSAGE_TYPES.length; i++) {
       delete RIL._pendingNetworkInfo[NETWORK_INFO_MESSAGE_TYPES[i]];
+    }
+
+    if (RIL._needRepollNetworkInfo) {
+      RIL._needRepollNetworkInfo = false;
+      RIL.requestNetworkInfo();
     }
   },
 
@@ -3537,7 +3649,15 @@ let RIL = {
     this.sendChromeMessage(message);
   },
 
+  _sendCallError: function _sendCallError(callIndex, errorMsg) {
+    this.sendChromeMessage({rilMessageType: "callError",
+                           callIndex: callIndex,
+                           errorMsg: errorMsg});
+  },
+
   _sendDataCallError: function _sendDataCallError(message, errorCode) {
+    // Should not include token for unsolicited response.
+    delete message.rilMessageToken;
     message.rilMessageType = "datacallerror";
     if (errorCode == ERROR_GENERIC_FAILURE) {
       message.errorMsg = RIL_ERROR_TO_GECKO_ERROR[errorCode];
@@ -3682,24 +3802,16 @@ let RIL = {
   },
 
   _handleChangedEmergencyCbMode: function _handleChangedEmergencyCbMode(active) {
-    if (this._isInEmergencyCbMode === active) {
-      return;
-    }
-
-    if (active) {
-      // Start a new timeout event when enter the mode.
-      let ril = this;
-      this._cancelEmergencyCbModeTimeout();
-      this._exitEmergencyCbModeTimeoutID = setTimeout(function() {
-          ril.exitEmergencyCbMode();
-      }, EMERGENCY_CB_MODE_TIMEOUT_MS);
-    } else {
-      // Clear the timeout event when exit mode.
-      this._cancelEmergencyCbModeTimeout();
-    }
-
-    // Keep current mode and write to property.
     this._isInEmergencyCbMode = active;
+
+    // Clear the existed timeout event.
+    this._cancelEmergencyCbModeTimeout();
+
+    // Start a new timeout event when entering the mode.
+    if (active) {
+      this._exitEmergencyCbModeTimeoutID = setTimeout(
+          this.exitEmergencyCbMode.bind(this), EMERGENCY_CB_MODE_TIMEOUT_MS);
+    }
 
     let message = {rilMessageType: "emergencyCbModeChange",
                    active: active,
@@ -4872,9 +4984,8 @@ RIL[REQUEST_LAST_CALL_FAIL_CAUSE] = function REQUEST_LAST_CALL_FAIL_CAUSE(length
       this._handleDisconnectedCall(options);
       break;
     default:
-      options.rilMessageType = "callError";
-      options.errorMsg = RIL_CALL_FAILCAUSE_TO_GECKO_CALL_ERROR[failCause];
-      this.sendChromeMessage(options);
+      this._sendCallError(options.callIndex,
+                          RIL_CALL_FAILCAUSE_TO_GECKO_CALL_ERROR[failCause]);
       break;
   }
 };
@@ -5671,7 +5782,21 @@ RIL[REQUEST_GSM_SMS_BROADCAST_ACTIVATION] = null;
 RIL[REQUEST_CDMA_GET_BROADCAST_SMS_CONFIG] = null;
 RIL[REQUEST_CDMA_SET_BROADCAST_SMS_CONFIG] = null;
 RIL[REQUEST_CDMA_SMS_BROADCAST_ACTIVATION] = null;
-RIL[REQUEST_CDMA_SUBSCRIPTION] = null;
+RIL[REQUEST_CDMA_SUBSCRIPTION] = function REQUEST_CDMA_SUBSCRIPTION(length, options) {
+  if (options.rilRequestError) {
+    return;
+  }
+
+  let result = Buf.readStringList();
+
+  this.iccInfo.mdn = result[0];
+  // The result[1] is Home SID. (Already be handled in readCDMAHome())
+  // The result[2] is Home NID. (Already be handled in readCDMAHome())
+  this.iccInfo.min = result[3];
+  // The result[4] is PRL version.
+
+  ICCUtilsHelper.handleICCInfoChange();
+};
 RIL[REQUEST_CDMA_WRITE_SMS_TO_RUIM] = null;
 RIL[REQUEST_CDMA_DELETE_SMS_ON_RUIM] = null;
 RIL[REQUEST_DEVICE_IDENTITY] = function REQUEST_DEVICE_IDENTITY(length, options) {
@@ -6028,7 +6153,11 @@ RIL[UNSOLICITED_CDMA_OTA_PROVISION_STATUS] = function UNSOLICITED_CDMA_OTA_PROVI
   this.sendChromeMessage({rilMessageType: "otastatuschange",
                           status: status});
 };
-RIL[UNSOLICITED_CDMA_INFO_REC] = null;
+RIL[UNSOLICITED_CDMA_INFO_REC] = function UNSOLICITED_CDMA_INFO_REC(length) {
+  let record = CdmaPDUHelper.decodeInformationRecord();
+  record.rilMessageType = "cdma-info-rec-received";
+  this.sendChromeMessage(record);
+};
 RIL[UNSOLICITED_OEM_HOOK_RAW] = null;
 RIL[UNSOLICITED_RINGBACK_TONE] = null;
 RIL[UNSOLICITED_RESEND_INCALL_MUTE] = null;
@@ -9133,6 +9262,118 @@ let CdmaPDUHelper = {
     }
 
     return result;
+  },
+
+  /**
+   * Decode information record parcel.
+   */
+  decodeInformationRecord: function cdma_decodeInformationRecord() {
+    let record = {};
+    let numOfRecords = Buf.readUint32();
+
+    let type;
+    for (let i = 0; i < numOfRecords; i++) {
+      type = Buf.readUint32();
+
+      switch (type) {
+        /*
+         * Every type is encaped by ril, except extended display
+         */
+        case PDU_CDMA_INFO_REC_TYPE_DISPLAY:
+          record.display = Buf.readString();
+          break;
+        case PDU_CDMA_INFO_REC_TYPE_CALLED_PARTY_NUMBER:
+          record.calledNumber = {};
+          record.calledNumber.number = Buf.readString();
+          record.calledNumber.type = Buf.readUint32();
+          record.calledNumber.plan = Buf.readUint32();
+          record.calledNumber.pi = Buf.readUint32();
+          record.calledNumber.si = Buf.readUint32();
+          break;
+        case PDU_CDMA_INFO_REC_TYPE_CALLING_PARTY_NUMBER:
+          record.callingNumber = {};
+          record.callingNumber.number = Buf.readString();
+          record.callingNumber.type = Buf.readUint32();
+          record.callingNumber.plan = Buf.readUint32();
+          record.callingNumber.pi = Buf.readUint32();
+          record.callingNumber.si = Buf.readUint32();
+          break;
+        case PDU_CDMA_INFO_REC_TYPE_CONNECTED_NUMBER:
+          record.connectedNumber = {};
+          record.connectedNumber.number = Buf.readString();
+          record.connectedNumber.type = Buf.readUint32();
+          record.connectedNumber.plan = Buf.readUint32();
+          record.connectedNumber.pi = Buf.readUint32();
+          record.connectedNumber.si = Buf.readUint32();
+          break;
+        case PDU_CDMA_INFO_REC_TYPE_SIGNAL:
+          record.signal = {};
+          record.signal.present = Buf.readUint32();
+          record.signal.type = Buf.readUint32();
+          record.signal.alertPitch = Buf.readUint32();
+          record.signal.signal = Buf.readUint32();
+          break;
+        case PDU_CDMA_INFO_REC_TYPE_REDIRECTING_NUMBER:
+          record.redirect = {};
+          record.redirect.number = Buf.readString();
+          record.redirect.type = Buf.readUint32();
+          record.redirect.plan = Buf.readUint32();
+          record.redirect.pi = Buf.readUint32();
+          record.redirect.si = Buf.readUint32();
+          record.redirect.reason = Buf.readUint32();
+          break;
+        case PDU_CDMA_INFO_REC_TYPE_LINE_CONTROL:
+          record.lineControl = {};
+          record.lineControl.polarityIncluded = Buf.readUint32();
+          record.lineControl.toggle = Buf.readUint32();
+          record.lineControl.recerse = Buf.readUint32();
+          record.lineControl.powerDenial = Buf.readUint32();
+          break;
+        case PDU_CDMA_INFO_REC_TYPE_EXTENDED_DISPLAY:
+          let length = Buf.readUint32();
+          /*
+           * Extended display is still in format defined in
+           * C.S0005-F v1.0, 3.7.5.16
+           */
+          record.extendedDisplay = {};
+
+          let headerByte = Buf.readUint32();
+          length--;
+          // Based on spec, headerByte must be 0x80 now
+          record.extendedDisplay.indicator = (headerByte >> 7);
+          record.extendedDisplay.type = (headerByte & 0x7F);
+          record.extendedDisplay.records = [];
+
+          while (length > 0) {
+            let display = {};
+
+            display.tag = Buf.readUint32();
+            length--;
+            if (display.tag !== INFO_REC_EXTENDED_DISPLAY_BLANK &&
+                display.tag !== INFO_REC_EXTENDED_DISPLAY_SKIP) {
+              display.content = Buf.readString();
+              length -= (display.content.length + 1);
+            }
+
+            record.extendedDisplay.records.push(display);
+          }
+          break;
+        case PDU_CDMA_INFO_REC_TYPE_T53_CLIR:
+          record.cause = Buf.readUint32();
+          break;
+        case PDU_CDMA_INFO_REC_TYPE_T53_AUDIO_CONTROL:
+          record.audioControl = {};
+          record.audioControl.upLink = Buf.readUint32();
+          record.audioControl.downLink = Buf.readUint32();
+          break;
+        case PDU_CDMA_INFO_REC_TYPE_T53_RELEASE:
+          // Fall through
+        default:
+          throw new Error("UNSOLICITED_CDMA_INFO_REC(), Unsupported information record type " + record.type + "\n");
+      }
+    }
+
+    return record;
   }
 };
 
@@ -10985,11 +11226,11 @@ let ICCRecordHelper = {
     function callback(options) {
       let contact = GsmPDUHelper.readAlphaIdDiallingNumber(options.recordSize);
       if (!contact ||
-          (RIL.iccInfo.mbdn !== undefined &&
-           RIL.iccInfo.mbdn === contact.number)) {
+          (RIL.iccInfoPrivate.mbdn !== undefined &&
+           RIL.iccInfoPrivate.mbdn === contact.number)) {
         return;
       }
-      RIL.iccInfo.mbdn = contact.number;
+      RIL.iccInfoPrivate.mbdn = contact.number;
       if (DEBUG) {
         debug("MBDN, alphaId="+contact.alphaId+" number="+contact.number);
       }
@@ -12668,6 +12909,7 @@ let RuimRecordHelper = {
     RIL.getIMSI();
     this.readCST();
     this.readCDMAHome();
+    RIL.getCdmaSubscription();
   },
 
   /**
@@ -12792,9 +13034,6 @@ let RuimRecordHelper = {
 // Initialize buffers. This is a separate function so that unit tests can
 // re-initialize the buffers at will.
 Buf.init();
-Buf.setOutputStream(function (parcel) {
-  postRILMessage(CLIENT_ID, parcel);
-});
 
 function onRILMessage(data) {
   Buf.processIncoming(data);

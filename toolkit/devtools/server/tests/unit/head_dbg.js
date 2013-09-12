@@ -15,10 +15,21 @@ Services.prefs.setBoolPref("devtools.debugger.log", true);
 // Enable remote debugging for the relevant tests.
 Services.prefs.setBoolPref("devtools.debugger.remote-enabled", true);
 
-Cu.import("resource://gre/modules/devtools/dbg-server.jsm");
-Cu.import("resource://gre/modules/devtools/dbg-client.jsm");
-Cu.import("resource://gre/modules/devtools/Loader.jsm");
 Cu.import("resource://gre/modules/devtools/DevToolsUtils.jsm");
+
+function tryImport(url) {
+  try {
+    Cu.import(url);
+  } catch (e) {
+    dump("Error importing " + url + "\n");
+    dump(DevToolsUtils.safeErrorString(e) + "\n");
+    throw e;
+  }
+}
+
+tryImport("resource://gre/modules/devtools/dbg-server.jsm");
+tryImport("resource://gre/modules/devtools/dbg-client.jsm");
+tryImport("resource://gre/modules/devtools/Loader.jsm");
 
 function testExceptionHook(ex) {
   try {
@@ -201,8 +212,8 @@ function finishClient(aClient)
 /**
  * Takes a relative file path and returns the absolute file url for it.
  */
-function getFileUrl(aName) {
-  let file = do_get_file(aName);
+function getFileUrl(aName, aAllowMissing=false) {
+  let file = do_get_file(aName, aAllowMissing);
   return Services.io.newFileURI(file).spec;
 }
 
@@ -210,9 +221,9 @@ function getFileUrl(aName) {
  * Returns the full path of the file with the specified name in a
  * platform-independent and URL-like form.
  */
-function getFilePath(aName)
+function getFilePath(aName, aAllowMissing=false)
 {
-  let file = do_get_file(aName);
+  let file = do_get_file(aName, aAllowMissing);
   let path = Services.io.newFileURI(file).spec;
   let filePrePath = "file://";
   if ("nsILocalFileWin" in Ci &&

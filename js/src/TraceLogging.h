@@ -10,6 +10,11 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "jsalloc.h"
+
+#include "js/HashTable.h"
+#include "js/TypeDecls.h"
+
 namespace JS {
 class CompileOptions;
 }
@@ -41,45 +46,69 @@ class TraceLogging
         INFO_ENGINE_IONMONKEY,
         INFO
     };
+    enum Logger {
+        DEFAULT,
+        ION_BACKGROUND_COMPILER,
+
+        LAST_LOGGER
+    };
 
   private:
     struct Entry {
         uint64_t tick_;
-        char* file_;
+        char* text_;
+        uint32_t textId_;
         uint32_t lineno_;
         uint8_t type_;
 
-        Entry(uint64_t tick, char* file, uint32_t lineno, Type type)
-            : tick_(tick), file_(file), lineno_(lineno), type_((uint8_t)type) {}
+        Entry(uint64_t tick, char* text, uint32_t textId, uint32_t lineno, Type type)
+            : tick_(tick),
+              text_(text),
+              textId_(textId),
+              lineno_(lineno),
+              type_((uint8_t)type) {}
 
         uint64_t tick() const { return tick_; }
-        char *file() const { return file_; }
+        char *text() const { return text_; }
+        uint32_t textId() const { return textId_; }
         uint32_t lineno() const { return lineno_; }
         Type type() const { return (Type) type_; }
     };
 
+    typedef HashMap<const char *,
+                        uint32_t,
+                        PointerHasher<const char *, 3>,
+                        SystemAllocPolicy> TextHashMap;
+
     uint64_t loggingTime;
+    TextHashMap textMap;
+    uint32_t nextTextId;
     Entry *entries;
     unsigned int curEntry;
     unsigned int numEntries;
     int fileno;
     FILE *out;
+    Logger id;
 
-    static const char * const type_name[];
-    static TraceLogging* _defaultLogger;
+    static bool atexitSet;
+    static const char * const typeName[];
+    static TraceLogging* loggers[];
+    static uint64_t startupTime;
   public:
-    TraceLogging();
+    TraceLogging(Logger id);
     ~TraceLogging();
 
-    void log(Type type, const char* filename, unsigned int line);
+    void log(Type type, const char* text = NULL, unsigned int number = 0);
     void log(Type type, const JS::CompileOptions &options);
     void log(Type type, JSScript* script);
     void log(const char* log);
-    void log(Type type);
     void flush();
 
-    static TraceLogging* defaultLogger();
-    static void releaseDefaultLogger();
+    static TraceLogging* getLogger(Logger id);
+    static TraceLogging* defaultLogger() {
+        return getLogger(DEFAULT);
+    }
+    static void releaseLoggers();
 
   private:
     void grow();

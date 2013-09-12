@@ -27,8 +27,8 @@ class nsIDOMWindow;
 class nsIURI;
 
 #define NS_ISCRIPTCONTEXT_IID \
-{ 0x1d931a17, 0x453a, 0x47fb, \
-  { 0x94, 0x66, 0x2d, 0x3e, 0xd1, 0xef, 0x7a, 0xc5 } }
+{ 0xf3859ce7, 0x7551, 0x4760, \
+  { 0x84, 0x29, 0x64, 0x4f, 0x26, 0x1e, 0xdb, 0x91 } }
 
 /* This MUST match JSVERSION_DEFAULT.  This version stuff if we don't
    know what language we have is a little silly... */
@@ -58,12 +58,15 @@ public:
    * @param aRetValue the result of executing the script.  Pass null if you
    *                  don't care about the result.  Note that asking for a
    *                  result will deoptimize your script somewhat in many cases.
+   * @param aOffThreadToken if specified, the result of compiling the script
+   *                        on another thread.
    */
   virtual nsresult EvaluateString(const nsAString& aScript,
                                   JS::Handle<JSObject*> aScopeObject,
                                   JS::CompileOptions& aOptions,
                                   bool aCoerceToString,
-                                  JS::Value* aRetValue) = 0;
+                                  JS::Value* aRetValue,
+                                  void **aOffThreadToken = nullptr) = 0;
 
   /**
    * Bind an already-compiled event handler function to the given
@@ -102,12 +105,6 @@ public:
    *
    **/
   virtual JSContext* GetNativeContext() = 0;
-
-  /**
-   * Return the native global object for this context.
-   *
-   **/
-  virtual JSObject* GetNativeGlobal() = 0;
 
   /**
    * Initialize the context generally. Does not create a global object.
@@ -165,6 +162,13 @@ public:
    * Tell the context we're done reinitializing it.
    */
   virtual void DidInitializeContext() = 0;
+
+  /**
+   * Access the Window Proxy. The setter should only be called by nsGlobalWindow.
+   */
+  virtual void SetWindowProxy(JS::Handle<JSObject*> aWindowProxy) = 0;
+  virtual JSObject* GetWindowProxy() = 0;
+  virtual JSObject* GetWindowProxyPreserveColor() = 0;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsIScriptContext, NS_ISCRIPTCONTEXT_IID)

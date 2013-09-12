@@ -15,6 +15,8 @@
 
 #include "jsobjinlines.h"
 
+#include "vm/ObjectImpl-inl.h"
+
 using namespace js;
 using namespace js::types;
 
@@ -87,8 +89,8 @@ obj_propertyIsEnumerable(JSContext *cx, unsigned argc, Value *vp)
 }
 
 #if JS_HAS_TOSOURCE
-bool
-js::obj_toSource(JSContext *cx, unsigned argc, Value *vp)
+static bool
+obj_toSource(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     JS_CHECK_RECURSION(cx, return false);
@@ -97,25 +99,31 @@ js::obj_toSource(JSContext *cx, unsigned argc, Value *vp)
     if (!obj)
         return false;
 
+    JSString *str = ObjectToSource(cx, obj);
+    if (!str)
+        return false;
+
+    args.rval().setString(str);
+    return true;
+}
+
+JSString *
+js::ObjectToSource(JSContext *cx, HandleObject obj)
+{
     /* If outermost, we need parentheses to be an expression, not a block. */
     bool outermost = (cx->cycleDetectorSet.count() == 0);
 
     AutoCycleDetector detector(cx, obj);
     if (!detector.init())
-        return false;
-    if (detector.foundCycle()) {
-        JSString *str = js_NewStringCopyZ<CanGC>(cx, "{}");
-        if (!str)
-            return false;
-        args.rval().setString(str);
-        return true;
-    }
+        return NULL;
+    if (detector.foundCycle())
+        return js_NewStringCopyZ<CanGC>(cx, "{}");
 
     StringBuffer buf(cx);
     if (outermost && !buf.append('('))
-        return false;
+        return NULL;
     if (!buf.append('{'))
-        return false;
+        return NULL;
 
     RootedValue v0(cx), v1(cx);
     MutableHandleValue val[2] = {&v0, &v1};
@@ -125,7 +133,7 @@ js::obj_toSource(JSContext *cx, unsigned argc, Value *vp)
 
     AutoIdVector idv(cx);
     if (!GetPropertyNames(cx, obj, JSITER_OWNONLY, &idv))
-        return false;
+        return NULL;
 
     bool comma = false;
     for (size_t i = 0; i < idv.length(); ++i) {
@@ -133,7 +141,7 @@ js::obj_toSource(JSContext *cx, unsigned argc, Value *vp)
         RootedObject obj2(cx);
         RootedShape shape(cx);
         if (!JSObject::lookupGeneric(cx, obj, id, &obj2, &shape))
-            return false;
+            return NULL;
 
         /*  Decide early whether we prefer get/set or old getter/setter syntax. */
         int valcnt = 0;
@@ -158,7 +166,7 @@ js::obj_toSource(JSContext *cx, unsigned argc, Value *vp)
                 valcnt = 1;
                 gsop[0].set(NULL);
                 if (!JSObject::getGeneric(cx, obj, obj, id, val[0]))
-                    return false;
+                    return NULL;
             }
         }
 
@@ -166,10 +174,10 @@ js::obj_toSource(JSContext *cx, unsigned argc, Value *vp)
         RootedValue idv(cx, IdToValue(id));
         JSString *s = ToString<CanGC>(cx, idv);
         if (!s)
-            return false;
+            return NULL;
         Rooted<JSLinearString*> idstr(cx, s->ensureLinear(cx));
         if (!idstr)
-            return false;
+            return NULL;
 
         /*
          * If id is a string that's not an identifier, or if it's a negative
@@ -181,7 +189,7 @@ js::obj_toSource(JSContext *cx, unsigned argc, Value *vp)
         {
             s = js_QuoteString(cx, idstr, jschar('\''));
             if (!s || !(idstr = s->ensureLinear(cx)))
-                return false;
+                return NULL;
         }
 
         for (int j = 0; j < valcnt; j++) {
@@ -195,10 +203,10 @@ js::obj_toSource(JSContext *cx, unsigned argc, Value *vp)
             /* Convert val[j] to its canonical source form. */
             RootedString valstr(cx, ValueToSource(cx, val[j]));
             if (!valstr)
-                return false;
+                return NULL;
             const jschar *vchars = valstr->getChars(cx);
             if (!vchars)
-                return false;
+                return NULL;
             size_t vlength = valstr->length();
 
             /*
@@ -237,33 +245,29 @@ js::obj_toSource(JSContext *cx, unsigned argc, Value *vp)
             }
 
             if (comma && !buf.append(", "))
-                return false;
+                return NULL;
             comma = true;
 
             if (gsop[j])
                 if (!buf.append(gsop[j]) || !buf.append(' '))
-                    return false;
+                    return NULL;
 
             if (!buf.append(idstr))
-                return false;
+                return NULL;
             if (!buf.append(gsop[j] ? ' ' : ':'))
-                return false;
+                return NULL;
 
             if (!buf.append(vchars, vlength))
-                return false;
+                return NULL;
         }
     }
 
     if (!buf.append('}'))
-        return false;
+        return NULL;
     if (outermost && !buf.append(')'))
-        return false;
+        return NULL;
 
-    JSString *str = buf.finishString();
-    if (!str)
-        return false;
-    args.rval().setString(str);
-    return true;
+    return buf.finishString();
 }
 #endif /* JS_HAS_TOSOURCE */
 

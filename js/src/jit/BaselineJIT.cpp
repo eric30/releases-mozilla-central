@@ -85,7 +85,16 @@ IsJSDEnabled(JSContext *cx)
 static IonExecStatus
 EnterBaseline(JSContext *cx, EnterJitData &data)
 {
-    JS_CHECK_RECURSION(cx, return IonExec_Aborted);
+    if (data.osrFrame) {
+        // Check for potential stack overflow before OSR-ing.
+        uint8_t spDummy;
+        uint32_t extra = BaselineFrame::Size() + (data.osrNumStackValues * sizeof(Value));
+        uint8_t *checkSp = (&spDummy) - extra;
+        JS_CHECK_RECURSION_WITH_SP(cx, checkSp, return IonExec_Aborted);
+    } else {
+        JS_CHECK_RECURSION(cx, return IonExec_Aborted);
+    }
+
     JS_ASSERT(jit::IsBaselineEnabled(cx));
     JS_ASSERT_IF(data.osrFrame, CheckFrame(data.osrFrame));
 
@@ -100,7 +109,7 @@ EnterBaseline(JSContext *cx, EnterJitData &data)
         IonContext ictx(cx, NULL);
         JitActivation activation(cx, data.constructing);
         JSAutoResolveFlags rf(cx, RESOLVE_INFER);
-        AutoFlushInhibitor afi(cx->compartment()->ionCompartment());
+        AutoFlushInhibitor afi(cx->runtime()->ionRuntime());
 
         if (data.osrFrame)
             data.osrFrame->setRunningInJit();
@@ -242,6 +251,9 @@ CanEnterBaselineJIT(JSContext *cx, HandleScript script, bool osr)
         return Method_Skipped;
 
     if (script->length > BaselineScript::MAX_JSSCRIPT_LENGTH)
+        return Method_CantCompile;
+
+    if (script->nslots > BaselineScript::MAX_JSSCRIPT_SLOTS)
         return Method_CantCompile;
 
     if (!cx->compartment()->ensureIonCompartmentExists(cx))
@@ -723,8 +735,9 @@ BaselineScript::toggleDebugTraps(JSScript *script, jsbytecode *pc)
 
     SrcNoteLineScanner scanner(script->notes(), script->lineno);
 
-    IonContext ictx(script->runtimeFromMainThread(), script->compartment(), NULL);
-    AutoFlushCache afc("DebugTraps");
+    JSRuntime *rt = script->runtimeFromMainThread();
+    IonContext ictx(rt, script->compartment(), NULL);
+    AutoFlushCache afc("DebugTraps", rt->ionRuntime());
 
     for (uint32_t i = 0; i < numPCMappingIndexEntries(); i++) {
         PCMappingIndexEntry &entry = pcMappingIndexEntry(i);

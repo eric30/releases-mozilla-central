@@ -234,9 +234,11 @@ ResponsiveUI.prototype = {
    onPageUnload: function() {
      if (this.closing)
        return;
-     this.touchEnableBefore = this.touchEventHandler.enabled;
-     this.disableTouch();
-     delete this.touchEventHandler;
+     if (this.touchEventHandler) {
+       this.touchEnableBefore = this.touchEventHandler.enabled;
+       this.disableTouch();
+       delete this.touchEventHandler;
+     }
    },
 
   /**
@@ -436,7 +438,7 @@ ResponsiveUI.prototype = {
     this.resizeBarH.className = "devtools-responsiveui-resizebarH";
     this.resizeBarH.setAttribute("bottom", "0");
     this.resizeBarH.setAttribute("left", "0");
-    this.resizeBarV.setAttribute("tooltiptext", resizerTooltip);
+    this.resizeBarH.setAttribute("tooltiptext", resizerTooltip);
     this.resizeBarH.onmousedown = this.bound_startResizing;
 
     this.container.insertBefore(this.toolbar, this.stack);

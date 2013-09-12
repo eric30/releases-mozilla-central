@@ -23,6 +23,7 @@
 #include "nsIEditor.h"
 #include "nsIFormControl.h"
 #include "nsINameSpaceManager.h"
+#include "nsIPersistentProperties2.h"
 #include "nsISelectionController.h"
 #include "jsapi.h"
 #include "nsIServiceManager.h"
@@ -462,22 +463,6 @@ HTMLTextFieldAccessible::GetEditor() const
   editableElt->GetEditor(getter_AddRefs(editor));
 
   return editor.forget();
-}
-
-void
-HTMLTextFieldAccessible::CacheChildren()
-{
-  // XXX: textarea shouldn't contain anything but text leafs. Currently it may
-  // contain a trailing fake HTML br element added for layout needs. We don't
-  // need to expose it since it'd be confusing for AT.
-  TreeWalker walker(this, mContent);
-  Accessible* child = nullptr;
-  while ((child = walker.NextChild())) {
-    if (child->IsTextLeaf())
-      AppendChild(child);
-    else
-      Document()->UnbindFromDocument(child);
-  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////

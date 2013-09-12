@@ -684,7 +684,7 @@ nsFlexContainerFrame::AppendFlexItemForChild(
                                   aChildFrame,
                                   nsSize(aParentReflowState.ComputedWidth(),
                                          NS_UNCONSTRAINEDSIZE),
-                                  -1, -1, false);
+                                  -1, -1, nsHTMLReflowState::CALLER_WILL_INIT);
       childRSForMeasuringHeight.mFlags.mIsFlexContainerMeasuringHeight = true;
       childRSForMeasuringHeight.Init(aPresContext);
 
@@ -1095,26 +1095,6 @@ nsIAtom*
 nsFlexContainerFrame::GetType() const
 {
   return nsGkAtoms::flexContainerFrame;
-}
-
-/* virtual */
-int
-nsFlexContainerFrame::GetSkipSides(const nsHTMLReflowState* aReflowState) const
-{
-  // (same as nsBlockFrame's GetSkipSides impl)
-  if (IS_TRUE_OVERFLOW_CONTAINER(this)) {
-    return (1 << NS_SIDE_TOP) | (1 << NS_SIDE_BOTTOM);
-  }
-
-  int skip = 0;
-  if (GetPrevInFlow()) {
-    skip |= 1 << NS_SIDE_TOP;
-  }
-  nsIFrame* nif = GetNextInFlow();
-  if (nif && !IS_TRUE_OVERFLOW_CONTAINER(nif)) {
-    skip |= 1 << NS_SIDE_BOTTOM;
-  }
-  return skip;
 }
 
 #ifdef DEBUG

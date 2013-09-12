@@ -16,8 +16,9 @@
 #include "jit/BaselineFrame.h"
 #include "vm/ScopeObject.h"
 
+#include "jsobjinlines.h"
+
 #include "jit/BaselineFrame-inl.h"
-#include "jit/IonFrameIterator-inl.h"
 
 namespace js {
 
@@ -840,7 +841,7 @@ Activation::~Activation()
 }
 
 InterpreterActivation::InterpreterActivation(JSContext *cx, StackFrame *entry, FrameRegs &regs,
-                                             int *const switchMask)
+                                             jsbytecode *const switchMask)
   : Activation(cx, Interpreter),
     entry_(entry),
     regs_(regs),

@@ -8,15 +8,14 @@
 #define GLCONTEXT_H_
 
 #include <stdio.h>
-#include <algorithm>
-#if defined(XP_UNIX)
 #include <stdint.h>
-#endif
-#include <string.h>
 #include <ctype.h>
-#include <set>
-#include <stack>
 #include <map>
+#include <bitset>
+
+#ifdef DEBUG
+#include <string.h>
+#endif
 
 #ifdef WIN32
 #include <windows.h>
@@ -28,35 +27,21 @@
 
 #include "GLDefs.h"
 #include "GLLibraryLoader.h"
-#include "gfxASurface.h"
 #include "gfxImageSurface.h"
-#include "gfxContext.h"
-#include "gfxRect.h"
 #include "gfx3DMatrix.h"
 #include "nsISupportsImpl.h"
-#include "prlink.h"
 #include "plstr.h"
-
 #include "nsDataHashtable.h"
 #include "nsHashKeys.h"
-#include "nsRegion.h"
 #include "nsAutoPtr.h"
-#include "nsIMemoryReporter.h"
-#include "nsThreadUtils.h"
 #include "GLContextTypes.h"
 #include "GLTextureImage.h"
 #include "SurfaceTypes.h"
 #include "GLScreenBuffer.h"
-
-typedef char realGLboolean;
-
 #include "GLContextSymbols.h"
-
-#include "mozilla/mozalloc.h"
-#include "mozilla/Preferences.h"
-#include <stdint.h>
-#include "mozilla/Mutex.h"
 #include "mozilla/GenericRefCounted.h"
+
+class nsIntRegion;
 
 namespace android {
     class GraphicBuffer;
@@ -120,8 +105,6 @@ namespace GLFeature {
     };
 }
 
-typedef uintptr_t SharedTextureHandle;
-
 MOZ_BEGIN_ENUM_CLASS(ContextProfile, uint8_t)
     Unknown = 0,
     OpenGL, // only for IsAtLeast's <profile> parameter
@@ -129,7 +112,6 @@ MOZ_BEGIN_ENUM_CLASS(ContextProfile, uint8_t)
     OpenGLCompatibility,
     OpenGLES
 MOZ_END_ENUM_CLASS(ContextProfile)
-
 
 class GLContext
     : public GLLibraryLoader
@@ -157,21 +139,8 @@ public:
         RendererSGX530,
         RendererSGX540,
         RendererTegra,
+        RendererAndroidEmulator,
         RendererOther
-    };
-
-    enum ContextFlags {
-        ContextFlagsNone = 0x0,
-        ContextFlagsGlobal = 0x1,
-        ContextFlagsMesaLLVMPipe = 0x2
-    };
-
-    enum GLContextType {
-        ContextTypeUnknown,
-        ContextTypeWGL,
-        ContextTypeCGL,
-        ContextTypeGLX,
-        ContextTypeEGL
     };
 
 
@@ -440,66 +409,41 @@ public:
 
 public:
 
-    // this should just be a std::bitset, but that ended up breaking
-    // MacOS X builds; see bug 584919.  We can replace this with one
-    // later on.  This is handy to use in WebGL contexts as well,
-    // so making it public.
-    template<size_t Size>
-    struct ExtensionBitset
+    template<size_t N>
+    static void InitializeExtensionsBitSet(std::bitset<N>& extensionsBitset, const char* extStr, const char** extList, bool verbose = false)
     {
-        ExtensionBitset()
-        {
-            for (size_t i = 0; i < Size; ++i)
-                extensions[i] = false;
-        }
+        char* exts = strdup(extStr);
 
-        void Load(const char* extStr, const char** extList, bool verbose = false)
-        {
-            char* exts = strdup(extStr);
+        if (verbose)
+            printf_stderr("Extensions: %s\n", exts);
 
-            if (verbose)
-                printf_stderr("Extensions: %s\n", exts);
-
-            char* cur = exts;
-            bool done = false;
-            while (!done) {
-                char* space = strchr(cur, ' ');
-                if (space) {
-                    *space = '\0';
-                } else {
-                    done = true;
-                }
-
-                for (int i = 0; extList[i]; ++i) {
-                    if (PL_strcasecmp(cur, extList[i]) == 0) {
-                        if (verbose)
-                            printf_stderr("Found extension %s\n", cur);
-                        extensions[i] = 1;
-                    }
-                }
-
-                cur = space + 1;
+        char* cur = exts;
+        bool done = false;
+        while (!done) {
+            char* space = strchr(cur, ' ');
+            if (space) {
+                *space = '\0';
+            } else {
+                done = true;
             }
 
-            free(exts);
+            for (int i = 0; extList[i]; ++i) {
+                if (PL_strcasecmp(cur, extList[i]) == 0) {
+                    if (verbose)
+                        printf_stderr("Found extension %s\n", cur);
+                    extensionsBitset[i] = true;
+                }
+            }
+
+            cur = space + 1;
         }
 
-        bool& operator[](size_t index) {
-            MOZ_ASSERT(index < Size, "out of range");
-            return extensions[index];
-        }
-
-        const bool& operator[](size_t index) const {
-            MOZ_ASSERT(index < Size, "out of range");
-            return extensions[index];
-        }
-
-        bool extensions[Size];
-    };
+        free(exts);
+    }
 
 
 protected:
-    ExtensionBitset<Extensions_Max> mAvailableExtensions;
+    std::bitset<Extensions_Max> mAvailableExtensions;
 
 
 // -----------------------------------------------------------------------------
@@ -518,7 +462,7 @@ public:
 
 
 private:
-    ExtensionBitset<GLFeature::EnumMax> mAvailableFeatures;
+    std::bitset<GLFeature::EnumMax> mAvailableFeatures;
 
     /**
      * Init features regarding OpenGL extension and context version and profile
@@ -622,6 +566,9 @@ private:
 // -----------------------------------------------------------------------------
 // MOZ_GL_DEBUG implementation
 private:
+
+#undef BEFORE_GL_CALL
+#undef AFTER_GL_CALL
 
 #ifdef DEBUG
 
@@ -2320,64 +2267,13 @@ public:
 protected:
     GLContext(const SurfaceCaps& caps,
               GLContext* sharedContext = nullptr,
-              bool isOffscreen = false)
-      : mInitialized(false),
-        mIsOffscreen(isOffscreen),
-        mIsGlobalSharedContext(false),
-        mContextLost(false),
-        mVersion(0),
-        mProfile(ContextProfile::Unknown),
-        mVendor(-1),
-        mRenderer(-1),
-        mHasRobustness(false),
-#ifdef DEBUG
-        mGLError(LOCAL_GL_NO_ERROR),
-#endif
-        mTexBlit_Buffer(0),
-        mTexBlit_VertShader(0),
-        mTex2DBlit_FragShader(0),
-        mTex2DRectBlit_FragShader(0),
-        mTex2DBlit_Program(0),
-        mTex2DRectBlit_Program(0),
-        mTexBlit_UseDrawNotCopy(false),
-        mSharedContext(sharedContext),
-        mFlipped(false),
-        mBlitProgram(0),
-        mBlitFramebuffer(0),
-        mCaps(caps),
-        mScreen(nullptr),
-        mLockedSurface(nullptr),
-        mMaxTextureSize(0),
-        mMaxCubeMapTextureSize(0),
-        mMaxTextureImageSize(0),
-        mMaxRenderbufferSize(0),
-        mNeedsTextureSizeChecks(false),
-        mWorkAroundDriverBugs(true)
-    {
-        mUserData.Init();
-        mOwningThread = NS_GetCurrentThread();
-
-        mTexBlit_UseDrawNotCopy = Preferences::GetBool("gl.blit-draw-not-copy", false);
-    }
+              bool isOffscreen = false);
 
 
 // -----------------------------------------------------------------------------
 // Destructor
 public:
-    virtual ~GLContext() {
-        NS_ASSERTION(IsDestroyed(), "GLContext implementation must call MarkDestroyed in destructor!");
-#ifdef DEBUG
-        if (mSharedContext) {
-            GLContext *tip = mSharedContext;
-            while (tip->mSharedContext)
-                tip = tip->mSharedContext;
-            tip->SharedContextDestroyed(this);
-            tip->ReportOutstandingNames();
-        } else {
-            ReportOutstandingNames();
-        }
-#endif
-    }
+    virtual ~GLContext();
 
 
 // -----------------------------------------------------------------------------
@@ -2457,18 +2353,8 @@ public:
      * Returns true if the thread on which this context was created is the currently
      * executing thread.
      */
-    bool IsOwningThreadCurrent() { return NS_GetCurrentThread() == mOwningThread; }
-
-    void DispatchToOwningThread(nsIRunnable *event) {
-        // Before dispatching, we need to ensure we're not in the middle of
-        // shutting down. Dispatching runnables in the middle of shutdown
-        // (that is, when the main thread is no longer get-able) can cause them
-        // to leak. See Bug 741319, and Bug 744115.
-        nsCOMPtr<nsIThread> mainThread;
-        if (NS_SUCCEEDED(NS_GetMainThread(getter_AddRefs(mainThread)))) {
-            mOwningThread->Dispatch(event, NS_DISPATCH_NORMAL);
-        }
-    }
+    bool IsOwningThreadCurrent();
+    void DispatchToOwningThread(nsIRunnable *event);
 
     virtual EGLContext GetEGLContext() { return nullptr; }
     virtual GLLibraryEGL* GetLibraryEGL() { return nullptr; }
@@ -2592,22 +2478,6 @@ public:
      * Only valid if IsOffscreen() returns true.
      */
     const gfxIntSize& OffscreenSize() const;
-
-
-    enum SharedTextureShareType {
-        SameProcess = 0,
-        CrossProcess
-    };
-
-    enum SharedTextureBufferType {
-        TextureID
-#ifdef MOZ_WIDGET_ANDROID
-        , SurfaceTexture
-#endif
-#ifdef XP_MACOSX
-        , IOSurface
-#endif
-    };
 
     /*
      * Create a new shared GLContext content handle, using the passed buffer as a source.
@@ -3258,11 +3128,7 @@ protected:
 
     void InitExtensions();
 
-    bool IsOffscreenSizeAllowed(const gfxIntSize& aSize) const {
-        int32_t biggerDimension = std::max(aSize.width, aSize.height);
-        int32_t maxAllowed = std::min(mMaxRenderbufferSize, mMaxTextureSize);
-        return biggerDimension <= maxAllowed;
-    }
+    bool IsOffscreenSizeAllowed(const gfxIntSize& aSize) const;
 
     nsTArray<nsIntRect> mViewportStack;
     nsTArray<nsIntRect> mScissorStack;
@@ -3450,63 +3316,7 @@ public:
 #endif
 };
 
-class GfxTexturesReporter MOZ_FINAL : public MemoryReporterBase
-{
-public:
-    GfxTexturesReporter()
-      : MemoryReporterBase("gfx-textures", KIND_OTHER, UNITS_BYTES,
-                           "Memory used for storing GL textures.")
-    {
-#ifdef DEBUG
-        // There must be only one instance of this class, due to |sAmount|
-        // being static.  Assert this.
-        static bool hasRun = false;
-        MOZ_ASSERT(!hasRun);
-        hasRun = true;
-#endif
-    }
-
-    enum MemoryUse {
-        // when memory being allocated is reported to a memory reporter
-        MemoryAllocated,
-        // when memory being freed is reported to a memory reporter
-        MemoryFreed
-    };
-
-    // When memory is used/freed for tile textures, call this method to update
-    // the value reported by this memory reporter.
-    static void UpdateAmount(MemoryUse action, GLenum format, GLenum type,
-                             uint16_t tileSize);
-
-private:
-    int64_t Amount() MOZ_OVERRIDE { return sAmount; }
-
-    static int64_t sAmount;
-};
-
-inline bool
-DoesStringMatch(const char* aString, const char *aWantedString)
-{
-    if (!aString || !aWantedString)
-        return false;
-
-    const char *occurrence = strstr(aString, aWantedString);
-
-    // aWanted not found
-    if (!occurrence)
-        return false;
-
-    // aWantedString preceded by alpha character
-    if (occurrence != aString && isalpha(*(occurrence-1)))
-        return false;
-
-    // aWantedVendor followed by alpha character
-    const char *afterOccurrence = occurrence + strlen(aWantedString);
-    if (isalpha(*afterOccurrence))
-        return false;
-
-    return true;
-}
+bool DoesStringMatch(const char* aString, const char *aWantedString);
 
 //RAII via CRTP!
 template <class Derived>
@@ -3852,28 +3662,6 @@ public:
         return mComplete;
     }
 };
-
-
-class TextureGarbageBin {
-    NS_INLINE_DECL_THREADSAFE_REFCOUNTING(TextureGarbageBin)
-
-protected:
-    GLContext* mGL;
-    Mutex mMutex;
-    std::stack<GLuint> mGarbageTextures;
-
-public:
-    TextureGarbageBin(GLContext* gl)
-        : mGL(gl)
-        , mMutex("TextureGarbageBin mutex")
-    {}
-
-    void GLContextTeardown();
-    void Trash(GLuint tex);
-    void EmptyGarbage();
-};
-
-uint32_t GetBitsPerTexel(GLenum format, GLenum type);
 
 } /* namespace gl */
 } /* namespace mozilla */

@@ -19,6 +19,13 @@ function test() {
 
 var tests = {
   testStatusIcons: function(next) {
+    let icon = {
+      name: "testIcon",
+      iconURL: "chrome://browser/skin/Info.png",
+      contentPanel: "https://example.com/browser/browser/base/content/test/social/social_panel.html",
+      counter: 1
+    };
+
     let iconsReady = false;
     let gotSidebarMessage = false;
 
@@ -28,15 +35,14 @@ var tests = {
     }
 
     function triggerIconPanel() {
+      let pButton = document.getElementById("social-provider-button");
       waitForCondition(function() {
-        let mButton = document.getElementById("social-mark-button");
-        let pButton = document.getElementById("social-provider-button");
         // wait for a new button to be inserted inbetween the provider and mark
         // button
-        return pButton.nextSibling != mButton;
+        return !!pButton.nextSibling;
       }, function() {
         // Click the button to trigger its contentPanel
-        let statusIcon = document.getElementById("social-provider-button").nextSibling;
+        let statusIcon = pButton.nextSibling;
         EventUtils.synthesizeMouseAtCenter(statusIcon, {});
       }, "Status icon didn't become non-hidden");
     }
@@ -71,7 +77,7 @@ var tests = {
           ok(true, "got sidebar message");
           gotSidebarMessage = true;
           // load a status panel
-          port.postMessage({topic: "test-ambient-notification"});
+          port.postMessage({topic: "test-ambient-notification", data: icon});
           checkNext();
           break;
       }

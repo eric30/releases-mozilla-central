@@ -40,6 +40,12 @@ namespace mozilla {
 }
 #endif
 
+#if defined(__cplusplus) && __cplusplus >= 201103L
+typedef struct Timecard Timecard;
+#else
+#include "timecard.h"
+#endif
+
 using namespace mozilla;
 
 namespace sipcc {
@@ -159,12 +165,6 @@ public:
     kIceFailed
   };
 
-  enum Role {
-    kRoleUnknown,
-    kRoleOfferer,
-    kRoleAnswerer
-  };
-
   enum Error {
     kNoError                          = 0,
     kInvalidConstraintsType           = 1,
@@ -188,11 +188,6 @@ public:
     const JS::Value& aConstraints, MediaConstraints* aObj, JSContext* aCx);
   static already_AddRefed<DOMMediaStream> MakeMediaStream(nsPIDOMWindow* aWindow,
                                                           uint32_t aHint);
-
-  Role GetRole() const {
-    PC_AUTO_ENTER_API_CALL_NO_CHECK();
-    return mRole;
-  }
 
   nsresult CreateRemoteSourceStreamInfo(nsRefPtr<RemoteSourceStreamInfo>* aInfo);
 
@@ -328,8 +323,10 @@ private:
   // ICE callbacks run on the right thread.
   nsresult IceStateChange_m(IceState aState);
 
-  // The role we are adopting
-  Role mRole;
+  // Timecard used to measure processing time. This should be the first class
+  // attribute so that we accurately measure the time required to instantiate
+  // any other attributes of this class.
+  Timecard *mTimeCard;
 
   // The call
   CSF::CC_CallPtr mCall;

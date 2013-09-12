@@ -7,17 +7,15 @@
 #include "MediaRecorder.h"
 #include "GeneratedEvents.h"
 #include "MediaEncoder.h"
-#include "mozilla/Util.h"
 #include "nsDOMEventTargetHelper.h"
-#include "nsDOMFile.h"
 #include "nsError.h"
 #include "nsIDocument.h"
-#include "nsIDOMBlobEvent.h"
 #include "nsIDOMRecordErrorEvent.h"
-#include "nsIScriptObjectPrincipal.h"
-#include "nsIScriptSecurityManager.h"
-#include "nsAString.h"
 #include "nsTArray.h"
+#include "DOMMediaStream.h"
+#include "EncodedBufferCache.h"
+#include "nsIDOMFile.h"
+#include "mozilla/dom/BlobEvent.h"
 
 namespace mozilla {
 
@@ -150,7 +148,7 @@ MediaRecorder::ExtractEncodedData()
   do {
     nsTArray<nsTArray<uint8_t> > outputBufs;
     mEncoder->GetEncodedData(&outputBufs, mMimeType);
-    for (uint i = 0; i < outputBufs.Length(); i++) {
+    for (uint32_t i = 0; i < outputBufs.Length(); i++) {
       mEncodedBufferCache->AppendBuffer(outputBufs[i]);
     }
 
@@ -312,20 +310,14 @@ MediaRecorder::CreateAndDispatchBlobEvent()
     return NS_ERROR_DOM_SECURITY_ERR;
   }
 
-  nsCOMPtr<nsIDOMBlob> blob;
-  blob = mEncodedBufferCache->ExtractBlob(mMimeType);
-
-  // create an event that uses the MessageEvent interface,
-  // which does not bubble, is not cancelable, and has no default action
-  nsCOMPtr<nsIDOMEvent> event;
-  nsresult rv = NS_NewDOMBlobEvent(getter_AddRefs(event), this, nullptr, nullptr);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  nsCOMPtr<nsIDOMBlobEvent> blobEvent = do_QueryInterface(event);
-  rv = blobEvent->InitBlobEvent(NS_LITERAL_STRING("dataavailable"),
-    false, false, blob);
-  NS_ENSURE_SUCCESS(rv, rv);
-
+  BlobEventInitInitializer init;
+  init.mBubbles = false;
+  init.mCancelable = false;
+  init.mData = mEncodedBufferCache->ExtractBlob(mMimeType);
+  nsRefPtr<BlobEvent> event =
+    BlobEvent::Constructor(this,
+                           NS_LITERAL_STRING("dataavailable"),
+                           init);
   event->SetTrusted(true);
   return DispatchDOMEvent(nullptr, event, nullptr, nullptr);
 }

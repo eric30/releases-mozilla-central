@@ -7,30 +7,31 @@
 
 #include "nsCOMPtr.h"
 #include "nsTArray.h"
-#include "nsIDOMPowerManager.h"
 #include "nsIDOMWakeLockListener.h"
 #include "nsIDOMWindow.h"
 #include "nsWeakReference.h"
 #include "nsCycleCollectionParticipant.h"
+#include "nsWrapperCache.h"
 
 class nsPIDOMWindow;
 
 namespace mozilla {
-namespace dom {
-namespace power {
+class ErrorResult;
 
-class PowerManager
-  : public nsIDOMMozPowerManager
-  , public nsIDOMMozWakeLockListener
+namespace dom {
+
+class PowerManager MOZ_FINAL : public nsIDOMMozWakeLockListener
+                             , public nsWrapperCache
 {
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(PowerManager, nsIDOMMozPowerManager)
-  NS_DECL_NSIDOMMOZPOWERMANAGER
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(PowerManager)
   NS_DECL_NSIDOMMOZWAKELOCKLISTENER
 
-  PowerManager() {};
-  virtual ~PowerManager() {};
+  PowerManager()
+  {
+    SetIsDOMBinding();
+  }
 
   nsresult Init(nsIDOMWindow *aWindow);
   nsresult Shutdown();
@@ -39,13 +40,31 @@ public:
 
   static already_AddRefed<PowerManager> CreateInstance(nsPIDOMWindow*);
 
-private:
+  // WebIDL
+  nsIDOMWindow* GetParentObject() const
+  {
+    return mWindow;
+  }
+  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  void Reboot(ErrorResult& aRv);
+  void FactoryReset();
+  void PowerOff(ErrorResult& aRv);
+  void AddWakeLockListener(nsIDOMMozWakeLockListener* aListener);
+  void RemoveWakeLockListener(nsIDOMMozWakeLockListener* aListener);
+  void GetWakeLockState(const nsAString& aTopic, nsAString& aState,
+                        ErrorResult& aRv);
+  bool ScreenEnabled();
+  void SetScreenEnabled(bool aEnabled);
+  double ScreenBrightness();
+  void SetScreenBrightness(double aBrightness, ErrorResult& aRv);
+  bool CpuSleepAllowed();
+  void SetCpuSleepAllowed(bool aAllowed);
 
-  nsWeakPtr mWindow;
+private:
+  nsCOMPtr<nsIDOMWindow> mWindow;
   nsTArray<nsCOMPtr<nsIDOMMozWakeLockListener> > mListeners;
 };
 
-} // namespace power
 } // namespace dom
 } // namespace mozilla
 

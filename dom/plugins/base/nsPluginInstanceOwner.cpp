@@ -58,6 +58,7 @@ using mozilla::DefaultXDisplay;
 #include "nsIDocShell.h"
 #include "ImageContainer.h"
 #include "nsIDOMHTMLCollection.h"
+#include "GLContext.h"
 
 #include "nsContentCID.h"
 #include "nsWidgetsCID.h"
@@ -170,7 +171,7 @@ nsPluginInstanceOwner::GetImageContainer()
 
   SharedTextureImage::Data data;
   data.mHandle = mInstance->CreateSharedHandle();
-  data.mShareType = mozilla::gl::GLContext::SameProcess;
+  data.mShareType = mozilla::gl::SameProcess;
   data.mInverted = mInstance->Inverted();
 
   LayoutDeviceRect r = GetPluginRect();
@@ -942,10 +943,9 @@ NS_IMETHODIMP nsPluginInstanceOwner::GetDocumentEncoding(const char* *result)
   } else {
     if (!gCharsetMap) {
       const int NUM_CHARSETS = sizeof(charsets) / sizeof(moz2javaCharset);
-      gCharsetMap = new nsDataHashtable<nsDepCharHashKey, const char*>();
+      gCharsetMap = new nsDataHashtable<nsDepCharHashKey, const char*>(NUM_CHARSETS);
       if (!gCharsetMap)
         return NS_ERROR_OUT_OF_MEMORY;
-      gCharsetMap->Init(NUM_CHARSETS);
       for (uint16_t i = 0; i < NUM_CHARSETS; i++) {
         gCharsetMap->Put(charsets[i].mozName, charsets[i].javaName);
       }
@@ -1681,10 +1681,10 @@ already_AddRefed<ImageContainer> nsPluginInstanceOwner::GetImageContainerForVide
 
   SharedTextureImage::Data data;
 
-  data.mShareType = gl::GLContext::SameProcess;
+  data.mShareType = gl::SameProcess;
   data.mHandle = mInstance->GLContext()->CreateSharedHandle(data.mShareType,
                                                             aVideoInfo->mSurfaceTexture,
-                                                            gl::GLContext::SurfaceTexture);
+                                                            gl::SurfaceTexture);
 
   // The logic below for Honeycomb is just a guess, but seems to work. We don't have a separate
   // inverted flag for video.

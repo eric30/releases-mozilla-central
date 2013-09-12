@@ -11,7 +11,7 @@ const promise = require("sdk/core/promise");
 
 let {CssLogic} = require("devtools/styleinspector/css-logic");
 let {InplaceEditor, editableField, editableItem} = require("devtools/shared/inplace-editor");
-let {ELEMENT_STYLE} = require("devtools/server/actors/styles");
+let {ELEMENT_STYLE, PSEUDO_ELEMENTS} = require("devtools/server/actors/styles");
 
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -67,7 +67,7 @@ function createDummyDocument() {
   docShell.createAboutBlankContentViewer(Cc["@mozilla.org/nullprincipal;1"].createInstance(Ci.nsIPrincipal));
   let window = docShell.contentViewer.DOMDocument.defaultView;
   window.location = "data:text/html,<html></html>";
-  let deferred = promise.defer()
+  let deferred = promise.defer();
   eventTarget.addEventListener("DOMContentLoaded", function handler(event) {
     eventTarget.removeEventListener("DOMContentLoaded", handler, false);
     deferred.resolve(window.document);
@@ -125,8 +125,6 @@ function ElementStyle(aElement, aStore, aPageStyle)
   if (!("disabled" in this.store)) {
     this.store.disabled = new WeakMap();
   }
-
-  let doc = aElement.ownerDocument;
 
   // To figure out how shorthand properties are interpreted by the
   // engine, we will set properties on a dummy element and observe
@@ -203,7 +201,9 @@ ElementStyle.prototype = {
         }
 
         // Mark overridden computed styles.
-        this.markOverridden();
+        this.markOverriddenAll();
+
+        this._sortRulesForPseudoElement();
 
         // We're done with the previous list of rules.
         delete this._refreshRules;
@@ -214,6 +214,16 @@ ElementStyle.prototype = {
     this.populated = populated;
     return this.populated;
   },
+
+  /**
+   * Put pseudo elements in front of others.
+   */
+   _sortRulesForPseudoElement: function ElementStyle_sortRulesForPseudoElement()
+   {
+      this.rules = this.rules.sort((a, b) => {
+        return (a.pseudoElement || "z") > (b.pseudoElement || "z");
+      });
+   },
 
   /**
    * Add a rule if it's one we care about.  Filters out duplicates and
@@ -266,22 +276,38 @@ ElementStyle.prototype = {
   },
 
   /**
-   * Mark the properties listed in this.rules with an overridden flag
-   * if an earlier property overrides it.
+   * Calls markOverridden with all supported pseudo elements
    */
-  markOverridden: function ElementStyle_markOverridden()
+  markOverriddenAll: function ElementStyle_markOverriddenAll()
+  {
+    this.markOverridden();
+    for (let pseudo of PSEUDO_ELEMENTS) {
+      this.markOverridden(pseudo);
+    }
+  },
+
+  /**
+   * Mark the properties listed in this.rules for a given pseudo element
+   * with an overridden flag if an earlier property overrides it.
+   * @param {string} pseudo
+   *        Which pseudo element to flag as overridden.
+   *        Empty string or undefined will default to no pseudo element.
+   */
+  markOverridden: function ElementStyle_markOverridden(pseudo="")
   {
     // Gather all the text properties applied by these rules, ordered
     // from more- to less-specific.
     let textProps = [];
-    for each (let rule in this.rules) {
-      textProps = textProps.concat(rule.textProps.slice(0).reverse());
+    for (let rule of this.rules) {
+      if (rule.pseudoElement == pseudo) {
+        textProps = textProps.concat(rule.textProps.slice(0).reverse());
+      }
     }
 
     // Gather all the computed properties applied by those text
     // properties.
     let computedProps = [];
-    for each (let textProp in textProps) {
+    for (let textProp of textProps) {
       computedProps = computedProps.concat(textProp.computed);
     }
 
@@ -302,12 +328,12 @@ ElementStyle.prototype = {
     // _overriddenDirty will be set on each prop, indicating whether its
     // dirty status changed during this pass.
     let taken = {};
-    for each (let computedProp in computedProps) {
+    for (let computedProp of computedProps) {
       let earlier = taken[computedProp.name];
       let overridden;
-      if (earlier
-          && computedProp.priority === "important"
-          && earlier.priority !== "important") {
+      if (earlier &&
+          computedProp.priority === "important" &&
+          earlier.priority !== "important") {
         // New property is higher priority.  Mark the earlier property
         // overridden (which will reverse its dirty state).
         earlier._overriddenDirty = !earlier._overriddenDirty;
@@ -328,7 +354,7 @@ ElementStyle.prototype = {
     // computed properties are marked overridden.  Update the text
     // property's associated editor, if any.  This will clear the
     // _overriddenDirty state on all computed properties.
-    for each (let textProp in textProps) {
+    for (let textProp of textProps) {
       // _updatePropertyOverridden will return true if the
       // overridden state has changed for the text property.
       if (this._updatePropertyOverridden(textProp)) {
@@ -384,6 +410,7 @@ function Rule(aElementStyle, aOptions)
   this.domRule = aOptions.rule || null;
   this.style = aOptions.rule;
   this.matchedSelectors = aOptions.matchedSelectors || [];
+  this.pseudoElement = aOptions.pseudoElement || "";
 
   this.inherited = aOptions.inherited || null;
   this._modificationDepth = 0;
@@ -516,7 +543,6 @@ Rule.prototype = {
 
       aModifications.setProperty(prop.name, prop.value, prop.priority);
 
-
       prop.updateComputed();
     }
 
@@ -545,20 +571,19 @@ Rule.prototype = {
             name: textProp.name,
             value: "",
             priority: ""
-          }
+          };
         }
 
         if (aName && textProp.name == aName) {
           store.userProperties.setProperty(
-            this.style, textProp.name,
-            null,
-            cssProp.value,
-            textProp.value);
+            this.style,
+            textProp.name,
+            cssProp.value);
         }
         textProp.priority = cssProp.priority;
       }
 
-      this.elementStyle.markOverridden();
+      this.elementStyle.markOverriddenAll();
 
       if (promise === this._applyingModifications) {
         this._applyingModifications = null;
@@ -642,7 +667,6 @@ Rule.prototype = {
     let props = [];
 
     for (let line of lines) {
-      dump("line: " + line + "\n");
       let [, name, value, priority] = CSS_PROP_RE.exec(line) || []
       if (!name || !value) {
         continue;
@@ -970,7 +994,7 @@ TextProperty.prototype = {
 function CssRuleView(aDoc, aStore, aPageStyle)
 {
   this.doc = aDoc;
-  this.store = aStore;
+  this.store = aStore || {};
   this.pageStyle = aPageStyle;
   this.element = this.doc.createElementNS(HTML_NS, "div");
   this.element.className = "ruleview devtools-monospace";
@@ -1017,7 +1041,9 @@ CssRuleView.prototype = {
       this.element.parentNode.removeChild(this.element);
     }
 
-    this.elementStyle.destroy();
+    if (this.elementStyle) {
+      this.elementStyle.destroy();
+    }
 
     this.popup.destroy();
   },
@@ -1078,6 +1104,7 @@ CssRuleView.prototype = {
       }
       this._createEditors();
 
+
       // Notify anyone that cares that we refreshed.
       var evt = this.doc.createEvent("Events");
       evt.initEvent("CssRuleViewRefreshed", true, false);
@@ -1133,6 +1160,64 @@ CssRuleView.prototype = {
   },
 
   /**
+   * Text for header that shows above rules for this element
+   */
+  get selectedElementLabel ()
+  {
+    if (this._selectedElementLabel) {
+      return this._selectedElementLabel;
+    }
+    this._selectedElementLabel = CssLogic.l10n("rule.selectedElement");
+    return this._selectedElementLabel;
+  },
+
+  /**
+   * Text for header that shows above rules for pseudo elements
+   */
+  get pseudoElementLabel ()
+  {
+    if (this._pseudoElementLabel) {
+      return this._pseudoElementLabel;
+    }
+    this._pseudoElementLabel = CssLogic.l10n("rule.pseudoElement");
+    return this._pseudoElementLabel;
+  },
+
+  togglePseudoElementVisibility: function(value)
+  {
+    this._showPseudoElements = !!value;
+    let isOpen = this.showPseudoElements;
+
+    Services.prefs.setBoolPref("devtools.inspector.show_pseudo_elements",
+      isOpen);
+
+    this.element.classList.toggle("show-pseudo-elements", isOpen);
+
+    if (this.pseudoElementTwisty) {
+      if (isOpen) {
+        this.pseudoElementTwisty.setAttribute("open", "true");
+      }
+      else {
+        this.pseudoElementTwisty.removeAttribute("open");
+      }
+    }
+  },
+
+  get showPseudoElements ()
+  {
+    if (this._showPseudoElements === undefined) {
+      this._showPseudoElements =
+        Services.prefs.getBoolPref("devtools.inspector.show_pseudo_elements");
+    }
+    return this._showPseudoElements;
+  },
+
+  _getRuleViewHeaderClassName: function(isPseudo) {
+    let baseClassName = "theme-gutter ruleview-header";
+    return isPseudo ? baseClassName + " ruleview-expandable-header" : baseClassName;
+  },
+
+  /**
    * Creates editor UI for each of the rules in _elementStyle.
    */
   _createEditors: function CssRuleView_createEditors()
@@ -1140,18 +1225,51 @@ CssRuleView.prototype = {
     // Run through the current list of rules, attaching
     // their editors in order.  Create editors if needed.
     let lastInheritedSource = "";
+    let seenPseudoElement = false;
+    let seenNormalElement = false;
+
     for (let rule of this._elementStyle.rules) {
       if (rule.domRule.system) {
         continue;
       }
 
+      // Only print header for this element if there are pseudo elements
+      if (seenPseudoElement && !seenNormalElement && !rule.pseudoElement) {
+        seenNormalElement = true;
+        let div = this.doc.createElementNS(HTML_NS, "div");
+        div.className = this._getRuleViewHeaderClassName();
+        div.textContent = this.selectedElementLabel;
+        this.element.appendChild(div);
+      }
+
       let inheritedSource = rule.inheritedSource;
       if (inheritedSource != lastInheritedSource) {
-        let h2 = this.doc.createElementNS(HTML_NS, "div");
-        h2.className = "ruleview-rule-inheritance theme-gutter";
-        h2.textContent = inheritedSource;
+        let div = this.doc.createElementNS(HTML_NS, "div");
+        div.className = this._getRuleViewHeaderClassName();
+        div.textContent = inheritedSource;
         lastInheritedSource = inheritedSource;
-        this.element.appendChild(h2);
+        this.element.appendChild(div);
+      }
+
+      if (!seenPseudoElement && rule.pseudoElement) {
+        seenPseudoElement = true;
+
+        let div = this.doc.createElementNS(HTML_NS, "div");
+        div.className = this._getRuleViewHeaderClassName(true);
+        div.textContent = this.pseudoElementLabel;
+        div.addEventListener("dblclick", () => {
+          this.togglePseudoElementVisibility(!this.showPseudoElements);
+        }, false);
+
+        let twisty = this.pseudoElementTwisty =
+          this.doc.createElementNS(HTML_NS, "span");
+        twisty.className = "ruleview-expander theme-twisty";
+        twisty.addEventListener("click", () => {
+          this.togglePseudoElementVisibility(!this.showPseudoElements);
+        }, false);
+
+        div.insertBefore(twisty, div.firstChild);
+        this.element.appendChild(div);
       }
 
       if (!rule.editor) {
@@ -1160,6 +1278,8 @@ CssRuleView.prototype = {
 
       this.element.appendChild(rule.editor.element);
     }
+
+    this.togglePseudoElementVisibility(this.showPseudoElements);
   },
 
   /**
@@ -1227,6 +1347,9 @@ RuleEditor.prototype = {
     this.element = this.doc.createElementNS(HTML_NS, "div");
     this.element.className = "ruleview-rule theme-separator";
     this.element._ruleEditor = this;
+    if (this.rule.pseudoElement) {
+      this.element.classList.add("ruleview-rule-pseudo-element");
+    }
 
     // Give a relative position for the inplace editor's measurement
     // span to be placed absolutely against.
@@ -1358,12 +1481,15 @@ RuleEditor.prototype = {
    *        Property value.
    * @param {string} aPriority
    *        Property priority.
+   * @return {TextProperty}
+   *        The new property
    */
   addProperty: function RuleEditor_addProperty(aName, aValue, aPriority)
   {
     let prop = this.rule.createProperty(aName, aValue, aPriority);
     let editor = new TextPropertyEditor(this, prop);
     this.propertyList.appendChild(editor.element);
+    return prop;
   },
 
   /**
@@ -1875,7 +2001,7 @@ TextPropertyEditor.prototype = {
  */
 function UserProperties()
 {
-  this.weakMap = new WeakMap();
+  this.map = new Map();
 }
 
 UserProperties.prototype = {
@@ -1886,28 +2012,26 @@ UserProperties.prototype = {
    *        The CSSStyleDeclaration against which the property is mapped.
    * @param {string} aName
    *        The name of the property to get.
-   * @param {string} aComputedValue
-   *        The computed value of the property.  The user value will only be
-   *        returned if the computed value hasn't changed since, and this will
-   *        be returned as the default if no user value is available.
+   * @param {string} aDefault
+   *        The value to return if the property is has been changed outside of
+   *        the rule view.
    * @return {string}
    *          The property value if it has previously been set by the user, null
    *          otherwise.
    */
-  getProperty: function UP_getProperty(aStyle, aName, aComputedValue) {
-    let entry = this.weakMap.get(aStyle, null);
+  getProperty: function(aStyle, aName, aDefault) {
+    let key = this.getKey(aStyle);
+    let entry = this.map.get(key, null);
 
     if (entry && aName in entry) {
       let item = entry[aName];
-      if (item.computed != aComputedValue) {
+      if (item != aDefault) {
         delete entry[aName];
-        return aComputedValue;
+        return aDefault;
       }
-
-      return item.user;
+      return item;
     }
-    return aComputedValue;
-
+    return aDefault;
   },
 
   /**
@@ -1917,20 +2041,18 @@ UserProperties.prototype = {
    *        The CSSStyleDeclaration against which the property is to be mapped.
    * @param {String} aName
    *        The name of the property to set.
-   * @param {String} aComputedValue
-   *        The computed property value.  The user value will not be used if the
-   *        computed value changes.
    * @param {String} aUserValue
    *        The value of the property to set.
    */
-  setProperty: function UP_setProperty(aStyle, aName, aComputedValue, aUserValue) {
-    let entry = this.weakMap.get(aStyle, null);
+  setProperty: function(aStyle, aName, aUserValue) {
+    let key = this.getKey(aStyle);
+    let entry = this.map.get(key, null);
     if (entry) {
-      entry[aName] = { computed: aComputedValue, user: aUserValue };
+      entry[aName] = aUserValue;
     } else {
       let props = {};
-      props[aName] = { computed: aComputedValue, user: aUserValue };
-      this.weakMap.set(aStyle, props);
+      props[aName] = aUserValue;
+      this.map.set(key, props);
     }
   },
 
@@ -1942,9 +2064,14 @@ UserProperties.prototype = {
    * @param {String} aName
    *        The name of the property to check.
    */
-  contains: function UP_contains(aStyle, aName) {
-    let entry = this.weakMap.get(aStyle, null);
+  contains: function(aStyle, aName) {
+    let key = this.getKey(aStyle);
+    let entry = this.map.get(key, null);
     return !!entry && aName in entry;
+  },
+
+  getKey: function(aStyle) {
+    return aStyle.href + ":" + aStyle.line;
   },
 };
 

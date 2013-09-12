@@ -7,7 +7,6 @@
 #ifndef vm_TypedArrayObject_h
 #define vm_TypedArrayObject_h
 
-#include "jsapi.h"
 #include "jsobj.h"
 
 #include "builtin/TypeRepresentation.h"
@@ -53,9 +52,9 @@ class ArrayBufferObject : public JSObject
     static bool fun_slice_impl(JSContext *cx, CallArgs args);
 
   public:
-    static Class class_;
+    static const Class class_;
 
-    static Class protoClass;
+    static const Class protoClass;
     static const JSFunctionSpec jsfuncs[];
 
     static bool byteLengthGetter(JSContext *cx, unsigned argc, Value *vp);
@@ -125,21 +124,8 @@ class ArrayBufferObject : public JSObject
 
     static bool obj_getGenericAttributes(JSContext *cx, HandleObject obj,
                                          HandleId id, unsigned *attrsp);
-    static bool obj_getPropertyAttributes(JSContext *cx, HandleObject obj,
-                                          HandlePropertyName name, unsigned *attrsp);
-    static bool obj_getElementAttributes(JSContext *cx, HandleObject obj,
-                                         uint32_t index, unsigned *attrsp);
-    static bool obj_getSpecialAttributes(JSContext *cx, HandleObject obj,
-                                         HandleSpecialId sid, unsigned *attrsp);
-
     static bool obj_setGenericAttributes(JSContext *cx, HandleObject obj,
                                          HandleId id, unsigned *attrsp);
-    static bool obj_setPropertyAttributes(JSContext *cx, HandleObject obj,
-                                          HandlePropertyName name, unsigned *attrsp);
-    static bool obj_setElementAttributes(JSContext *cx, HandleObject obj,
-                                         uint32_t index, unsigned *attrsp);
-    static bool obj_setSpecialAttributes(JSContext *cx, HandleObject obj,
-                                         HandleSpecialId sid, unsigned *attrsp);
 
     static bool obj_deleteProperty(JSContext *cx, HandleObject obj, HandlePropertyName name,
                                    bool *succeeded);
@@ -282,8 +268,8 @@ class TypedArrayObject : public ArrayBufferViewObject
     static const size_t DATA_SLOT      = 7; // private slot, based on alloc kind
 
   public:
-    static Class classes[ScalarTypeRepresentation::TYPE_MAX];
-    static Class protoClasses[ScalarTypeRepresentation::TYPE_MAX];
+    static const Class classes[ScalarTypeRepresentation::TYPE_MAX];
+    static const Class protoClasses[ScalarTypeRepresentation::TYPE_MAX];
 
     static bool obj_lookupGeneric(JSContext *cx, HandleObject obj, HandleId id,
                                   MutableHandleObject objp, MutableHandleShape propp);
@@ -296,21 +282,8 @@ class TypedArrayObject : public ArrayBufferViewObject
 
     static bool obj_getGenericAttributes(JSContext *cx, HandleObject obj,
                                          HandleId id, unsigned *attrsp);
-    static bool obj_getPropertyAttributes(JSContext *cx, HandleObject obj,
-                                          HandlePropertyName name, unsigned *attrsp);
-    static bool obj_getElementAttributes(JSContext *cx, HandleObject obj,
-                                         uint32_t index, unsigned *attrsp);
-    static bool obj_getSpecialAttributes(JSContext *cx, HandleObject obj,
-                                         HandleSpecialId sid, unsigned *attrsp);
-
     static bool obj_setGenericAttributes(JSContext *cx, HandleObject obj,
                                          HandleId id, unsigned *attrsp);
-    static bool obj_setPropertyAttributes(JSContext *cx, HandleObject obj,
-                                          HandlePropertyName name, unsigned *attrsp);
-    static bool obj_setElementAttributes(JSContext *cx, HandleObject obj,
-                                         uint32_t index, unsigned *attrsp);
-    static bool obj_setSpecialAttributes(JSContext *cx, HandleObject obj,
-                                         HandleSpecialId sid, unsigned *attrsp);
 
     static Value bufferValue(TypedArrayObject *tarr) {
         return tarr->getFixedSlot(BUFFER_SLOT);
@@ -432,7 +405,7 @@ class DataViewObject : public ArrayBufferViewObject
     static const size_t DATA_SLOT      = 7; // private slot, based on alloc kind
 
   private:
-    static Class protoClass;
+    static const Class protoClass;
 
     static bool is(HandleValue v) {
         return v.isObject() && v.toObject().hasClass(&class_);
@@ -451,7 +424,7 @@ class DataViewObject : public ArrayBufferViewObject
     defineGetter(JSContext *cx, PropertyName *name, HandleObject proto);
 
   public:
-    static Class class_;
+    static const Class class_;
 
     static Value byteOffsetValue(DataViewObject *view) {
         Value v = view->getReservedSlot(BYTEOFFSET_SLOT);

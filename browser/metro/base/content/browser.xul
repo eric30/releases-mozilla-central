@@ -47,7 +47,6 @@
   <script type="application/javascript" src="chrome://browser/content/Util.js"/>
   <script type="application/javascript" src="chrome://browser/content/input.js"/>
   <script type="application/javascript" src="chrome://browser/content/appbar.js"/>
-  <script type="application/javascript" src="chrome://browser/content/apzc.js"/>
   <broadcasterset id="broadcasterset">
     <broadcaster id="bcast_contentShowing" disabled="false"/>
     <broadcaster id="bcast_urlbarState" mode="editing"/>
@@ -206,7 +205,7 @@
               observes="cmd_back"></html:div>
 
     <!-- Navigation bar -->
-    <appbar id="navbar" mousethrough="never" observes="bcast_windowState">
+    <appbar id="navbar" mousethrough="never">
       <hbox id="progress-container" layer="true">
         <hbox id="progress-control" />
       </hbox>
@@ -419,7 +418,7 @@
 #endif
 #endif
       <label id="about-policy-label"
-            onclick="if (event.button == 0) { BrowserUI.onAboutPolicyClick(); }"
+            onclick="FlyoutPanelsUI.AboutFlyoutPanel.onPolicyClick(event);"
             class="text-link" value="&aboutHeader.policy.label;"/>
     </flyoutpanel>
 

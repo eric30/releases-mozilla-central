@@ -1285,7 +1285,7 @@ JSContext::mark(JSTracer *trc)
     /* Stack frames and slots are traced by StackSpace::mark. */
 
     /* Mark other roots-by-definition in the JSContext. */
-    if (defaultCompartmentObject_ && !hasOption(JSOPTION_UNROOTED_GLOBAL))
+    if (defaultCompartmentObject_)
         MarkObjectRoot(trc, &defaultCompartmentObject_, "default compartment object");
     if (isExceptionPending())
         MarkValueRoot(trc, &exception, "exception");
@@ -1301,8 +1301,8 @@ JSContext::findVersion() const
     if (JSScript *script = currentScript(NULL, ALLOW_CROSS_COMPARTMENT))
         return script->getVersion();
 
-    if (compartment() && compartment()->options().version != JSVERSION_UNKNOWN)
-        return compartment()->options().version;
+    if (compartment() && compartment()->options().version() != JSVERSION_UNKNOWN)
+        return compartment()->options().version();
 
     return runtime()->defaultVersion();
 }

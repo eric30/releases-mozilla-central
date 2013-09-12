@@ -21,6 +21,7 @@
 #include "nsIAccessibleRelation.h"
 #include "nsIAutoCompleteInput.h"
 #include "nsIAutoCompletePopup.h"
+#include "nsIBoxObject.h"
 #include "nsIDOMXULElement.h"
 #include "nsIDOMXULMenuListElement.h"
 #include "nsIDOMXULMultSelectCntrlEl.h"
@@ -40,7 +41,8 @@ using namespace mozilla::a11y;
 XULTreeAccessible::
   XULTreeAccessible(nsIContent* aContent, DocAccessible* aDoc,
                     nsTreeBodyFrame* aTreeFrame) :
-  AccessibleWrap(aContent, aDoc)
+  AccessibleWrap(aContent, aDoc),
+  mAccessibleCache(kDefaultTreeCacheSize)
 {
   mType = eXULTreeType;
   mGenericTypes |= eSelect;
@@ -58,8 +60,6 @@ XULTreeAccessible::
     if (autoCompletePopupElm)
       mGenericTypes |= eAutoCompletePopup;
   }
-
-  mAccessibleCache.Init(kDefaultTreeCacheSize);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -40,7 +40,7 @@ GetterSetterWriteBarrierPostRemove(JSRuntime *rt, JSObject **objp)
 }
 
 inline
-BaseShape::BaseShape(JSCompartment *comp, Class *clasp, JSObject *parent, JSObject *metadata,
+BaseShape::BaseShape(JSCompartment *comp, const Class *clasp, JSObject *parent, JSObject *metadata,
                      uint32_t objectFlags)
 {
     JS_ASSERT(!(objectFlags & ~OBJECT_FLAG_MASK));
@@ -53,7 +53,7 @@ BaseShape::BaseShape(JSCompartment *comp, Class *clasp, JSObject *parent, JSObje
 }
 
 inline
-BaseShape::BaseShape(JSCompartment *comp, Class *clasp, JSObject *parent, JSObject *metadata,
+BaseShape::BaseShape(JSCompartment *comp, const Class *clasp, JSObject *parent, JSObject *metadata,
                      uint32_t objectFlags, uint8_t attrs,
                      PropertyOp rawGetter, StrictPropertyOp rawSetter)
 {
@@ -122,7 +122,7 @@ BaseShape::operator=(const BaseShape &other)
 }
 
 inline
-StackBaseShape::StackBaseShape(ExclusiveContext *cx, Class *clasp,
+StackBaseShape::StackBaseShape(ExclusiveContext *cx, const Class *clasp,
                                JSObject *parent, JSObject *metadata, uint32_t objectFlags)
   : flags(objectFlags),
     clasp(clasp),
@@ -362,70 +362,12 @@ EmptyShape::EmptyShape(UnownedBaseShape *base, uint32_t nfixed)
 }
 
 inline void
-Shape::writeBarrierPre(Shape *shape)
-{
-#ifdef JSGC_INCREMENTAL
-    if (!shape || !shape->runtimeFromAnyThread()->needsBarrier())
-        return;
-
-    JS::Zone *zone = shape->zone();
-    if (zone->needsBarrier()) {
-        Shape *tmp = shape;
-        MarkShapeUnbarriered(zone->barrierTracer(), &tmp, "write barrier");
-        JS_ASSERT(tmp == shape);
-    }
-#endif
-}
-
-inline void
-Shape::readBarrier(Shape *shape)
-{
-#ifdef JSGC_INCREMENTAL
-    JS::Zone *zone = shape->zone();
-    if (zone->needsBarrier()) {
-        Shape *tmp = shape;
-        MarkShapeUnbarriered(zone->barrierTracer(), &tmp, "read barrier");
-        JS_ASSERT(tmp == shape);
-    }
-#endif
-}
-
-inline void
 Shape::markChildren(JSTracer *trc)
 {
     MarkBaseShape(trc, &base_, "base");
     gc::MarkId(trc, &propidRef(), "propid");
     if (parent)
         MarkShape(trc, &parent, "parent");
-}
-
-inline void
-BaseShape::writeBarrierPre(BaseShape *base)
-{
-#ifdef JSGC_INCREMENTAL
-    if (!base || !base->runtimeFromAnyThread()->needsBarrier())
-        return;
-
-    JS::Zone *zone = base->zone();
-    if (zone->needsBarrier()) {
-        BaseShape *tmp = base;
-        MarkBaseShapeUnbarriered(zone->barrierTracer(), &tmp, "write barrier");
-        JS_ASSERT(tmp == base);
-    }
-#endif
-}
-
-inline void
-BaseShape::readBarrier(BaseShape *base)
-{
-#ifdef JSGC_INCREMENTAL
-    JS::Zone *zone = base->zone();
-    if (zone->needsBarrier()) {
-        BaseShape *tmp = base;
-        MarkBaseShapeUnbarriered(zone->barrierTracer(), &tmp, "read barrier");
-        JS_ASSERT(tmp == base);
-    }
-#endif
 }
 
 inline void

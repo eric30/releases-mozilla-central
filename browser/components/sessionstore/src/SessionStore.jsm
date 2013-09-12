@@ -256,18 +256,6 @@ this.SessionStore = {
     SessionStoreInternal.deleteTabValue(aTab, aKey);
   },
 
-  getGlobalValue: function ss_getGlobalValue(aKey) {
-    return SessionStoreInternal.getGlobalValue(aKey);
-  },
-
-  setGlobalValue: function ss_setGlobalValue(aKey, aStringValue) {
-    SessionStoreInternal.setGlobalValue(aKey, aStringValue);
-  },
-
-  deleteGlobalValue: function ss_deleteGlobalValue(aKey) {
-    SessionStoreInternal.deleteGlobalValue(aKey);
-  },
-
   persistTabAttribute: function ss_persistTabAttribute(aName) {
     SessionStoreInternal.persistTabAttribute(aName);
   },
@@ -325,9 +313,6 @@ let SessionStoreInternal = {
 
   // states for all recently closed windows
   _closedWindows: [],
-
-  // state saved globally for a session
-  _globalValues: {},
 
   // collection of session states yet to be restored
   _statesToRestore: {},
@@ -693,12 +678,12 @@ let SessionStoreInternal = {
         break;
       case "TabPinned":
         // If possible, update cached data without having to invalidate it
-        TabStateCache.update(aEvent.originalTarget, "pinned", true);
+        TabStateCache.updateField(aEvent.originalTarget, "pinned", true);
         this.saveStateDelayed(win);
         break;
       case "TabUnpinned":
         // If possible, update cached data without having to invalidate it
-        TabStateCache.update(aEvent.originalTarget, "pinned", false);
+        TabStateCache.updateField(aEvent.originalTarget, "pinned", false);
         this.saveStateDelayed(win);
         break;
     }
@@ -1345,7 +1330,7 @@ let SessionStoreInternal = {
     }
 
     // If possible, update cached data without having to invalidate it
-    TabStateCache.update(aTab, "hidden", false);
+    TabStateCache.updateField(aTab, "hidden", false);
 
     // Default delay of 2 seconds gives enough time to catch multiple TabShow
     // events due to changing groups in Panorama.
@@ -1360,7 +1345,7 @@ let SessionStoreInternal = {
     }
 
     // If possible, update cached data without having to invalidate it
-    TabStateCache.update(aTab, "hidden", true);
+    TabStateCache.updateField(aTab, "hidden", true);
 
     // Default delay of 2 seconds gives enough time to catch multiple TabHide
     // events due to changing groups in Panorama.
@@ -1634,6 +1619,9 @@ let SessionStoreInternal = {
   },
 
   getWindowValue: function ssi_getWindowValue(aWindow, aKey) {
+    if (this._disabledForMultiProcess)
+      return "";
+
     if ("__SSi" in aWindow) {
       var data = this._windows[aWindow.__SSi].extData || {};
       return data[aKey] || "";
@@ -1680,7 +1668,6 @@ let SessionStoreInternal = {
   },
 
   setTabValue: function ssi_setTabValue(aTab, aKey, aStringValue) {
-    TabStateCache.delete(aTab);
     // If the tab hasn't been restored, then set the data there, otherwise we
     // could lose newly added data.
     let saveTo;
@@ -1694,12 +1681,13 @@ let SessionStoreInternal = {
       aTab.__SS_extdata = {};
       saveTo = aTab.__SS_extdata;
     }
+
     saveTo[aKey] = aStringValue;
+    TabStateCache.updateField(aTab, "extData", saveTo);
     this.saveStateDelayed(aTab.ownerDocument.defaultView);
   },
 
   deleteTabValue: function ssi_deleteTabValue(aTab, aKey) {
-    TabStateCache.delete(aTab);
     // We want to make sure that if data is accessed early, we attempt to delete
     // that data from __SS_data as well. Otherwise we'll throw in cases where
     // data can be set or read.
@@ -1711,23 +1699,19 @@ let SessionStoreInternal = {
       deleteFrom = aTab.linkedBrowser.__SS_data.extData;
     }
 
-    if (deleteFrom && deleteFrom[aKey])
+    if (deleteFrom && aKey in deleteFrom) {
       delete deleteFrom[aKey];
-    this.saveStateDelayed(aTab.ownerDocument.defaultView);
-  },
 
-  getGlobalValue: function ssi_getGlobalValue(aKey) {
-    return this._globalValues[aKey] || "";
-  },
+      // Keep the extData object only if it is not empty, to save
+      // a little disk space when serializing the tab state later.
+      if (Object.keys(deleteFrom).length) {
+        TabStateCache.updateField(aTab, "extData", deleteFrom);
+      } else {
+        TabStateCache.removeField(aTab, "extData");
+      }
 
-  setGlobalValue: function ssi_setGlobalValue(aKey, aStringValue) {
-    this._globalValues[aKey] = aStringValue;
-    this.saveStateDelayed();
-  },
-
-  deleteGlobalValue: function ssi_deleteGlobalValue(aKey) {
-    delete this._globalValues[aKey];
-    this.saveStateDelayed();
+      this.saveStateDelayed(aTab.ownerDocument.defaultView);
+    }
   },
 
   persistTabAttribute: function ssi_persistTabAttribute(aName) {
@@ -1824,8 +1808,9 @@ let SessionStoreInternal = {
       this._capClosedWindows();
     }
 
-    this._setGlobalValuesFromState(aState);
-    this._restoreScratchPads();
+    if (lastSessionState.scratchpads) {
+      ScratchpadManager.restoreSession(lastSessionState.scratchpads);
+    }
 
     // Set data that persists between sessions
     this._recentCrashes = lastSessionState.session &&
@@ -1835,26 +1820,6 @@ let SessionStoreInternal = {
     this._updateSessionStartTime(lastSessionState);
 
     this._lastSessionState = null;
-  },
-
-  _setGlobalValuesFromState: function ssi_setGlobalValuesFromState(aState) {
-    if (aState && aState.global) {
-      this._globalValues = aState.global;
-    }
-  },
-
-  _restoreScratchPads: function ssi_restoreScratchPads() {
-    let scratchpads;
-    try {
-      scratchpads = JSON.parse(this.getGlobalValue('scratchpads'));
-    } catch (ex) {
-      // Ignore any errors when attempting to decode the scratchpads.
-      Cu.reportError(ex);
-    }
-
-    if (scratchpads) {
-      ScratchpadManager.restoreSession(scratchpads);
-    }
   },
 
   /**
@@ -2487,14 +2452,14 @@ let SessionStoreInternal = {
     };
 
     // get open Scratchpad window states too
-    this.setGlobalValue('scratchpads', JSON.stringify(ScratchpadManager.getSessionState()));
+    var scratchpads = ScratchpadManager.getSessionState();
 
     let state = {
       windows: total,
       selectedWindow: ix + 1,
       _closedWindows: lastClosedWindowsCopy,
       session: session,
-      global: this._globalValues
+      scratchpads: scratchpads
     };
 
     // Persist the last session if we deferred restoring it
@@ -2738,8 +2703,9 @@ let SessionStoreInternal = {
     this.restoreHistoryPrecursor(aWindow, tabs, winData.tabs,
       (overwriteTabs ? (parseInt(winData.selected) || 1) : 0), 0, 0);
 
-    this._setGlobalValuesFromState(aState);
-    this._restoreScratchPads();
+    if (aState.scratchpads) {
+      ScratchpadManager.restoreSession(aState.scratchpads);
+    }
 
     // set smoothScroll back to the original value
     tabstrip.smoothScroll = smoothScroll;
@@ -4686,11 +4652,27 @@ let TabStateCache = {
    * @param {string} aField The field to update.
    * @param {*} aValue The new value to place in the field.
    */
-  update: function(aKey, aField, aValue) {
+  updateField: function(aKey, aField, aValue) {
     let key = this._normalizeToBrowser(aKey);
     let data = this._data.get(key);
     if (data) {
       data[aField] = aValue;
+    }
+    TabStateCacheTelemetry.recordAccess(!!data);
+  },
+
+  /**
+   * Remove a given field from a cached tab state.
+   *
+   * @param {XULElement} aKey The tab or the associated browser.
+   * If the tab/browser is not present, do nothing.
+   * @param {string} aField The field to remove.
+   */
+  removeField: function(aKey, aField) {
+    let key = this._normalizeToBrowser(aKey);
+    let data = this._data.get(key);
+    if (data && aField in data) {
+      delete data[aField];
     }
     TabStateCacheTelemetry.recordAccess(!!data);
   },
@@ -4748,6 +4730,7 @@ let TabStateCacheTelemetry = {
       // Avoid double initialization
       return;
     }
+    this._initialized = true;
     Services.obs.addObserver(this, "profile-before-change", false);
   },
 

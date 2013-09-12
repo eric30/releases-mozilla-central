@@ -45,6 +45,9 @@ MapFrameRectToFilterSpace(const nsRect* aRect,
 {
   nsIntRect rect(0, 0, aFilterRes.width, aFilterRes.height);
   if (aRect) {
+    if (aRect->IsEmpty()) {
+      return nsIntRect();
+    }
     gfxRect rectInCSSPx =
       nsLayoutUtils::RectToGfxRect(*aRect, aAppUnitsPerCSSPx);
     gfxRect rectInFilterSpace =
@@ -121,7 +124,8 @@ public:
                        const nsRect *aPostFilterDirtyRect,
                        const nsRect *aPreFilterDirtyRect,
                        const nsRect *aOverridePreFilterVisualOverflowRect,
-                       const gfxRect *aOverrideBBox = nullptr);
+                       const gfxRect *aOverrideBBox = nullptr,
+                       nsIFrame* aTransformRoot = nullptr);
   ~nsAutoFilterInstance() {}
 
   // If this returns null, then draw nothing. Either the filter draws
@@ -138,7 +142,8 @@ nsAutoFilterInstance::nsAutoFilterInstance(nsIFrame *aTarget,
                                            const nsRect *aPostFilterDirtyRect,
                                            const nsRect *aPreFilterDirtyRect,
                                            const nsRect *aPreFilterVisualOverflowRectOverride,
-                                           const gfxRect *aOverrideBBox)
+                                           const gfxRect *aOverrideBBox,
+                                           nsIFrame* aTransformRoot)
 {
   const SVGFilterElement *filter = aFilterFrame->GetFilterContent();
 
@@ -276,7 +281,8 @@ nsAutoFilterInstance::nsAutoFilterInstance(nsIFrame *aTarget,
                             nsIntSize(filterRes.width, filterRes.height),
                             filterToDeviceSpace, filterToFrameSpaceInCSSPx,
                             preFilterVisualOverflowRect, postFilterDirtyRect,
-                            preFilterDirtyRect, primitiveUnits);
+                            preFilterDirtyRect, primitiveUnits,
+                            aTransformRoot);
 }
 
 uint16_t
@@ -436,10 +442,12 @@ nsresult
 nsSVGFilterFrame::PaintFilteredFrame(nsRenderingContext *aContext,
                                      nsIFrame *aFilteredFrame,
                                      nsSVGFilterPaintCallback *aPaintCallback,
-                                     const nsRect *aDirtyArea)
+                                     const nsRect *aDirtyArea,
+                                     nsIFrame* aTransformRoot)
 {
   nsAutoFilterInstance instance(aFilteredFrame, this, aPaintCallback,
-                                aDirtyArea, nullptr, nullptr);
+                                aDirtyArea, nullptr, nullptr, nullptr,
+                                aTransformRoot);
   if (!instance.get()) {
     return NS_OK;
   }
@@ -456,6 +464,9 @@ static nsRect
 TransformFilterSpaceToFrameSpace(nsSVGFilterInstance *aInstance,
                                  nsIntRect *aRect)
 {
+  if (aRect->IsEmpty()) {
+    return nsRect();
+  }
   gfxMatrix m = aInstance->GetFilterSpaceToFrameSpaceInCSSPxTransform();
   gfxRect r(aRect->x, aRect->y, aRect->width, aRect->height);
   r = m.TransformBounds(r);
@@ -466,6 +477,10 @@ nsRect
 nsSVGFilterFrame::GetPostFilterDirtyArea(nsIFrame *aFilteredFrame,
                                          const nsRect& aPreFilterDirtyRect)
 {
+  if (aPreFilterDirtyRect.IsEmpty()) {
+    return nsRect();
+  }
+
   nsAutoFilterInstance instance(aFilteredFrame, this, nullptr, nullptr,
                                 &aPreFilterDirtyRect, nullptr);
   if (!instance.get()) {

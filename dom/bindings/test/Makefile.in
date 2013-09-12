@@ -2,12 +2,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this file,
 # You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH = @DEPTH@
-topsrcdir = @top_srcdir@
-srcdir = @srcdir@
-VPATH = @srcdir@
-relativesrcdir = @relativesrcdir@
-
 # Do NOT export this library.  We don't actually want our test code
 # being added to libxul or anything.
 
@@ -16,13 +10,11 @@ ifdef .PYMAKE
 .NOTPARALLEL:
 endif
 
-include $(DEPTH)/config/autoconf.mk
-
 # Need this to find all our DOM source files.
 include $(topsrcdir)/dom/dom-config.mk
 
 # And need this for $(test_webidl_files)
-include $(topsrcdir)/dom/webidl/WebIDL.mk
+include ../webidlsrcs.mk
 
 # But the webidl actually lives in our parent dir
 test_webidl_files := $(addprefix ../,$(test_webidl_files))
@@ -75,7 +67,6 @@ MOCHITEST_FILES := \
   test_ByteString.html \
   test_exception_messages.html \
   test_bug707564.html \
-  test_bug907548.html \
   test_defineProperty.html \
   $(NULL)
 

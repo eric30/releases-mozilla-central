@@ -294,13 +294,13 @@ class ExclusiveContext : public ThreadSafeContext
     friend class jit::IonContext;
 
     // The worker on which this context is running, if this is not a JSContext.
-    WorkerThread *workerThread;
+    WorkerThread *workerThread_;
 
   public:
 
     ExclusiveContext(JSRuntime *rt, PerThreadData *pt, ContextKind kind)
       : ThreadSafeContext(rt, pt, kind),
-        workerThread(NULL),
+        workerThread_(NULL),
         enterCompartmentDepth_(0)
     {}
 
@@ -336,6 +336,7 @@ class ExclusiveContext : public ThreadSafeContext
     inline void leaveCompartment(JSCompartment *oldCompartment);
 
     void setWorkerThread(WorkerThread *workerThread);
+    WorkerThread *workerThread() const { return workerThread_; }
 
     // If required, pause this thread until notified to continue by the main thread.
     inline void maybePause() const;
@@ -355,8 +356,8 @@ class ExclusiveContext : public ThreadSafeContext
 
     // Zone local methods that can be used freely from an ExclusiveContext.
     inline bool typeInferenceEnabled() const;
-    types::TypeObject *getNewType(Class *clasp, TaggedProto proto, JSFunction *fun = NULL);
-    types::TypeObject *getLazyType(Class *clasp, TaggedProto proto);
+    types::TypeObject *getNewType(const Class *clasp, TaggedProto proto, JSFunction *fun = NULL);
+    types::TypeObject *getLazyType(const Class *clasp, TaggedProto proto);
     inline js::LifoAlloc &typeLifoAlloc();
 
     // Current global. This is only safe to use within the scope of the
@@ -449,7 +450,10 @@ struct JSContext : public js::ExclusiveContext,
   public:
     inline void setDefaultCompartmentObject(JSObject *obj);
     inline void setDefaultCompartmentObjectIfUnset(JSObject *obj);
-    JSObject *maybeDefaultCompartmentObject() const { return defaultCompartmentObject_; }
+    JSObject *maybeDefaultCompartmentObject() const {
+        JS_ASSERT(!hasOption(JSOPTION_NO_DEFAULT_COMPARTMENT_OBJECT));
+        return defaultCompartmentObject_;
+    }
 
     /* Wrap cx->exception for the current compartment. */
     void wrapPendingException();

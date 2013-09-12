@@ -102,7 +102,7 @@ var interfaceNamesInGlobalScope =
     {name: "BluetoothStatusChangedEvent", b2g: true},
     {name: "BoxObject", xbl: true},
     {name: "BrowserFeedWriter", desktop: true},
-    {name: "CallEvent", b2g: true},
+    "CallEvent",
     "CameraCapabilities",
     "CameraControl",
     "CameraManager",
@@ -315,7 +315,6 @@ var interfaceNamesInGlobalScope =
     "MouseScrollEvent",
     {name: "MozActivity", b2g: true},
     "MozApplicationEvent",
-    "MozCanvasPrintState",
     {name: "MozCellBroadcast", b2g: true},
     {name: "MozCellBroadcastEvent", b2g: true},
     "MozConnection",
@@ -383,7 +382,6 @@ var interfaceNamesInGlobalScope =
     "ProcessingInstruction",
     "ProgressEvent",
     {name: "Promise", b2g: false, release: false},
-    {name: "PromiseResolver", b2g: false, release: false},
     "PropertyNodeList",
     "Range",
     "RecordErrorEvent",
@@ -531,9 +529,9 @@ var interfaceNamesInGlobalScope =
     "SVGViewElement",
     "SVGZoomAndPan",
     "SVGZoomEvent",
-    {name: "Telephony", b2g: true},
-    {name: "TelephonyCall", b2g: true},
-    {name: "TelephonyCallGroup", b2g: true},
+    "Telephony",
+    "TelephonyCall",
+    "TelephonyCallGroup",
     "Text",
     "TextDecoder",
     "TextEncoder",
@@ -639,7 +637,9 @@ function runTest(isXBLScope) {
       continue;
     }
     ok(interfaceMap[name],
-       "If this is failing: DANGER, are you sure you want to expose the new interface " + name + " to all webpages as a property on the window?");
+       "If this is failing: DANGER, are you sure you want to expose the new interface " + name +
+       " to all webpages as a property on the window? Do not make a change to this file without a " +
+       " review from a DOM peer for that specific change!!! (or a JS peer for changes to ecmaGlobals)");
     delete interfaceMap[name];
   }
   for (var name of Object.keys(interfaceMap)) {

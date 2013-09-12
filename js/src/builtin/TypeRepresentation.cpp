@@ -25,8 +25,9 @@ using namespace mozilla;
 ///////////////////////////////////////////////////////////////////////////
 // Class def'n for the owner object
 
-Class TypeRepresentation::class_ = {
+const Class TypeRepresentation::class_ = {
     "TypeRepresentation",
+    JSCLASS_IMPLEMENTS_BARRIERS |
     JSCLASS_HAS_PRIVATE,
     JS_PropertyStub,         /* addProperty */
     JS_DeletePropertyStub,   /* delProperty */
@@ -226,7 +227,7 @@ StructTypeRepresentation::init(JSContext *cx,
         uint32_t alignedSize = alignTo(totalSize, fieldTypeRepr->alignment());
         if (alignedSize < totalSize) {
             JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL,
-                                 JSMSG_BINARYDATA_TOO_BIG);
+                                 JSMSG_TYPEDOBJECT_TOO_BIG);
             return false;
         }
 
@@ -236,7 +237,7 @@ StructTypeRepresentation::init(JSContext *cx,
         uint32_t incrementedSize = alignedSize + fieldTypeRepr->size();
         if (incrementedSize < alignedSize) {
             JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL,
-                                 JSMSG_BINARYDATA_TOO_BIG);
+                                 JSMSG_TYPEDOBJECT_TOO_BIG);
             return false;
         }
 
@@ -246,7 +247,7 @@ StructTypeRepresentation::init(JSContext *cx,
     uint32_t alignedSize = alignTo(totalSize, alignment_);
     if (alignedSize < totalSize) {
         JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL,
-                             JSMSG_BINARYDATA_TOO_BIG);
+                             JSMSG_TYPEDOBJECT_TOO_BIG);
         return false;
     }
 
@@ -326,7 +327,7 @@ ArrayTypeRepresentation::Create(JSContext *cx,
     int32_t temp;
     if (!SafeMul(element->size(), length, &temp)) {
         JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL,
-                             JSMSG_BINARYDATA_TOO_BIG);
+                             JSMSG_TYPEDOBJECT_TOO_BIG);
         return NULL;
     }
 

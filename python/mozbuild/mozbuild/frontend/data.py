@@ -161,14 +161,77 @@ class Exports(SandboxDerived):
     this object fills that role. It just has a reference to the underlying
     HierarchicalStringList, which is created when parsing EXPORTS.
     """
-    __slots__ = ('exports')
+    __slots__ = ('exports', 'dist_install')
 
-    def __init__(self, sandbox, exports):
+    def __init__(self, sandbox, exports, dist_install=True):
         SandboxDerived.__init__(self, sandbox)
         self.exports = exports
+        self.dist_install = dist_install
+
 
 class IPDLFile(SandboxDerived):
     """Describes an individual .ipdl source file."""
+
+    __slots__ = (
+        'basename',
+    )
+
+    def __init__(self, sandbox, path):
+        SandboxDerived.__init__(self, sandbox)
+
+        self.basename = path
+
+class WebIDLFile(SandboxDerived):
+    """Describes an individual .webidl source file."""
+
+    __slots__ = (
+        'basename',
+    )
+
+    def __init__(self, sandbox, path):
+        SandboxDerived.__init__(self, sandbox)
+
+        self.basename = path
+
+class GeneratedEventWebIDLFile(SandboxDerived):
+    """Describes an individual .webidl source file."""
+
+    __slots__ = (
+        'basename',
+    )
+
+    def __init__(self, sandbox, path):
+        SandboxDerived.__init__(self, sandbox)
+
+        self.basename = path
+
+class TestWebIDLFile(SandboxDerived):
+    """Describes an individual test-only .webidl source file."""
+
+    __slots__ = (
+        'basename',
+    )
+
+    def __init__(self, sandbox, path):
+        SandboxDerived.__init__(self, sandbox)
+
+        self.basename = path
+
+class PreprocessedWebIDLFile(SandboxDerived):
+    """Describes an individual .webidl source file that requires preprocessing."""
+
+    __slots__ = (
+        'basename',
+    )
+
+    def __init__(self, sandbox, path):
+        SandboxDerived.__init__(self, sandbox)
+
+        self.basename = path
+
+class GeneratedWebIDLFile(SandboxDerived):
+    """Describes an individual .webidl source file that is generated from
+    build rules."""
 
     __slots__ = (
         'basename',
@@ -207,3 +270,15 @@ class XpcshellManifests(SandboxDerived):
     def __init__(self, sandbox, manifests):
         SandboxDerived.__init__(self, sandbox)
         self.xpcshell_manifests = manifests
+
+class LocalInclude(SandboxDerived):
+    """Describes an individual local include path."""
+
+    __slots__ = (
+        'path',
+    )
+
+    def __init__(self, sandbox, path):
+        SandboxDerived.__init__(self, sandbox)
+
+        self.path = path

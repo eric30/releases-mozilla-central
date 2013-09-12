@@ -22,22 +22,34 @@
 using namespace js;
 
 void
-AsmJSModule::patchHeapAccesses(ArrayBufferObject *heap, JSContext *cx)
+AsmJSModule::initHeap(Handle<ArrayBufferObject*> heap, JSContext *cx)
 {
+    JS_ASSERT(linked_);
+    JS_ASSERT(!maybeHeap_);
+    maybeHeap_ = heap;
+    heapDatum() = heap->dataPointer();
+
     JS_ASSERT(IsPowerOfTwo(heap->byteLength()));
 #if defined(JS_CPU_X86)
-    void *heapOffset = (void*)heap->dataPointer();
+    uint8_t *heapOffset = heap->dataPointer();
     void *heapLength = (void*)heap->byteLength();
     for (unsigned i = 0; i < heapAccesses_.length(); i++) {
-        JSC::X86Assembler::setPointer(heapAccesses_[i].patchLengthAt(code_), heapLength);
-        JSC::X86Assembler::setPointer(heapAccesses_[i].patchOffsetAt(code_), heapOffset);
+        const jit::AsmJSHeapAccess &access = heapAccesses_[i];
+        if (access.hasLengthCheck())
+            JSC::X86Assembler::setPointer(access.patchLengthAt(code_), heapLength);
+        void *addr = access.patchOffsetAt(code_);
+        uint32_t disp = reinterpret_cast<uint32_t>(JSC::X86Assembler::getPointer(addr));
+        JSC::X86Assembler::setPointer(addr, (void *)(heapOffset + disp));
     }
 #elif defined(JS_CPU_ARM)
-    jit::IonContext ic(cx, NULL);
-    jit::AutoFlushCache afc("patchBoundsCheck");
-    uint32_t bits = mozilla::CeilingLog2(heap->byteLength());
-    for (unsigned i = 0; i < heapAccesses_.length(); i++)
-        jit::Assembler::updateBoundsCheck(bits, (jit::Instruction*)(heapAccesses_[i].offset() + code_));
+    uint32_t heapLength = heap->byteLength();
+    for (unsigned i = 0; i < heapAccesses_.length(); i++) {
+        jit::Assembler::updateBoundsCheck(heapLength,
+                                          (jit::Instruction*)(heapAccesses_[i].offset() + code_));
+    }
+    // We already know the exact extent of areas that need to be patched, just make sure we
+    // flush all of them at once.
+    jit::AutoFlushCache::updateTop(uintptr_t(code_), pod.codeBytes_);
 #endif
 }
 
@@ -153,7 +165,7 @@ AsmJSModuleObject_trace(JSTracer *trc, JSObject *obj)
     obj->as<AsmJSModuleObject>().module().trace(trc);
 }
 
-Class AsmJSModuleObject::class_ = {
+const Class AsmJSModuleObject::class_ = {
     "AsmJSModuleObject",
     JSCLASS_IS_ANONYMOUS | JSCLASS_IMPLEMENTS_BARRIERS |
     JSCLASS_HAS_RESERVED_SLOTS(AsmJSModuleObject::RESERVED_SLOTS),

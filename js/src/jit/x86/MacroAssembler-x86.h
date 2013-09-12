@@ -33,9 +33,17 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         Double(double value) : value(value) {}
     };
     Vector<Double, 0, SystemAllocPolicy> doubles_;
+    struct Float {
+        float value;
+        AbsoluteLabel uses;
+        Float(float value) : value(value) {}
+    };
+    Vector<Float, 0, SystemAllocPolicy> floats_;
 
     typedef HashMap<double, size_t, DefaultHasher<double>, SystemAllocPolicy> DoubleMap;
     DoubleMap doubleMap_;
+    typedef HashMap<float, size_t, DefaultHasher<float>, SystemAllocPolicy> FloatMap;
+    FloatMap floatMap_;
 
   protected:
     MoveResolver moveResolver_;
@@ -113,12 +121,26 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         moveValue(val, dest.typeReg(), dest.payloadReg());
     }
     void moveValue(const ValueOperand &src, const ValueOperand &dest) {
-        JS_ASSERT(src.typeReg() != dest.payloadReg());
-        JS_ASSERT(src.payloadReg() != dest.typeReg());
-        if (src.typeReg() != dest.typeReg())
-            movl(src.typeReg(), dest.typeReg());
-        if (src.payloadReg() != dest.payloadReg())
-            movl(src.payloadReg(), dest.payloadReg());
+        Register s0 = src.typeReg(), d0 = dest.typeReg(),
+                 s1 = src.payloadReg(), d1 = dest.payloadReg();
+
+        // Either one or both of the source registers could be the same as a
+        // destination register.
+        if (s1 == d0) {
+            if (s0 == d1) {
+                // If both are, this is just a swap of two registers.
+                xchgl(d0, d1);
+                return;
+            }
+            // If only one is, copy that source first.
+            mozilla::Swap(s0, s1);
+            mozilla::Swap(d0, d1);
+        }
+
+        if (s0 != d0)
+            movl(s0, d0);
+        if (s1 != d1)
+            movl(s1, d1);
     }
 
     /////////////////////////////////////////////////////////////////
@@ -725,6 +747,10 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
     void unboxBoolean(const Address &src, const Register &dest) {
         movl(payloadOf(src), dest);
     }
+    void unboxObject(const ValueOperand &src, const Register &dest) {
+        if (src.payloadReg() != dest)
+            movl(src.payloadReg(), dest);
+    }
     void unboxDouble(const ValueOperand &src, const FloatRegister &dest) {
         JS_ASSERT(dest != ScratchFloatReg);
         if (Assembler::HasSSE41()) {
@@ -751,6 +777,12 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
             movd(scratch, ScratchFloatReg);
             unpcklps(ScratchFloatReg, dest);
         }
+    }
+    void unboxString(const ValueOperand &src, const Register &dest) {
+        movl(src.payloadReg(), dest);
+    }
+    void unboxString(const Address &src, const Register &dest) {
+        movl(payloadOf(src), dest);
     }
     void unboxValue(const ValueOperand &src, AnyRegister dest) {
         if (dest.isFloat()) {
@@ -802,16 +834,30 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
     void boolValueToDouble(const ValueOperand &operand, const FloatRegister &dest) {
         cvtsi2sd(operand.payloadReg(), dest);
     }
+    void boolValueToFloat32(const ValueOperand &operand, const FloatRegister &dest) {
+        cvtsi2ss(operand.payloadReg(), dest);
+    }
     void int32ValueToDouble(const ValueOperand &operand, const FloatRegister &dest) {
         cvtsi2sd(operand.payloadReg(), dest);
     }
+    void int32ValueToFloat32(const ValueOperand &operand, const FloatRegister &dest) {
+        cvtsi2ss(operand.payloadReg(), dest);
+    }
 
     void loadConstantDouble(double d, const FloatRegister &dest);
+    void loadConstantFloat32(float f, const FloatRegister &dest);
     void loadStaticDouble(const double *dp, const FloatRegister &dest);
+    void loadStaticFloat32(const float *dp, const FloatRegister &dest);
 
     void branchTruncateDouble(const FloatRegister &src, const Register &dest, Label *fail) {
         const uint32_t IndefiniteIntegerValue = 0x80000000;
         cvttsd2si(src, dest);
+        cmpl(dest, Imm32(IndefiniteIntegerValue));
+        j(Assembler::Equal, fail);
+    }
+    void branchTruncateFloat32(const FloatRegister &src, const Register &dest, Label *fail) {
+        const uint32_t IndefiniteIntegerValue = 0x80000000;
+        cvttss2si(src, dest);
         cmpl(dest, Imm32(IndefiniteIntegerValue));
         j(Assembler::Equal, fail);
     }
@@ -893,6 +939,20 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         // correct the double value by adding 0x80000000.
         static const double NegativeOne = 2147483648.0;
         addsd(Operand(&NegativeOne), dest);
+    }
+
+    // Note: this function clobbers the source register.
+    void convertUInt32ToFloat32(const Register &src, const FloatRegister &dest) {
+        // src is [0, 2^32-1]
+        subl(Imm32(0x80000000), src);
+
+        // Do it the GCC way
+        cvtsi2ss(src, dest);
+
+        // dest is now a double with the int range.
+        // correct the double value by adding 0x80000000.
+        static const float NegativeOne = 2147483648.f;
+        addss(Operand(&NegativeOne), dest);
     }
 
     void inc64(AbsoluteAddress dest) {

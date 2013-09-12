@@ -231,8 +231,18 @@ VARIABLES = {
         Implies MOZILLA_INTERNAL_API and FORCE_STATIC_LIB.
         """),
 
+    'LOCAL_INCLUDES': (StrictOrderingOnAppendList, list, [],
+        """Additional directories to be searched for include files by the compiler.
+        """),
+
     'MSVC_ENABLE_PGO': (bool, bool, False,
         """Whether profile-guided optimization is enabled in this directory.
+        """),
+
+    'OS_LIBS': (list, list, [],
+        """System link libraries.
+
+        This variable contains a list of system libaries to link against.
         """),
 
     'SDK_LIBRARY': (StrictOrderingOnAppendList, list, [],
@@ -388,6 +398,37 @@ VARIABLES = {
 
         These are .ipdl files that will be parsed and converted to .cpp files.
         """),
+
+    'WEBIDL_FILES': (list, list, [],
+        """WebIDL source files.
+
+        These will be parsed and converted to .cpp and .h files.
+        """),
+
+    'GENERATED_EVENTS_WEBIDL_FILES': (StrictOrderingOnAppendList, list, [],
+        """WebIDL source files for generated events.
+
+        These will be parsed and converted to .cpp and .h files.
+        """),
+
+    'TEST_WEBIDL_FILES': (StrictOrderingOnAppendList, list, [],
+         """Test WebIDL source files.
+
+         These will be parsed and converted to .cpp and .h files if tests are
+         enabled.
+         """),
+
+    'GENERATED_WEBIDL_FILES': (StrictOrderingOnAppendList, list, [],
+         """Generated WebIDL source files.
+
+         These will be generated from some other files.
+         """),
+
+    'PREPROCESSED_WEBIDL_FILES': (StrictOrderingOnAppendList, list, [],
+         """Preprocessed WebIDL source files.
+
+         These will be preprocessed before being parsed and converted.
+         """),
 
     'XPCSHELL_TESTS_MANIFESTS': (StrictOrderingOnAppendList, list, [],
         """XPCSHELL Test Manifest list

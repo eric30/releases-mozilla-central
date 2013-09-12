@@ -12,6 +12,7 @@ const Cr = Components.results;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/WebappsUpdater.jsm");
 
 const VERBOSE = 1;
 let log =
@@ -212,9 +213,30 @@ UpdatePrompt.prototype = {
       return;
     }
 
+#ifdef MOZ_B2G_RIL
+    let window = Services.wm.getMostRecentWindow("navigator:browser");
+    let pinReq = window.navigator.mozIccManager.getCardLock("pin");
+    pinReq.onsuccess = function(e) {
+      if (e.target.result.enabled) {
+        // The SIM is pin locked. Don't use a fallback timer. This means that
+        // the user has to press Install to apply the update. If we use the
+        // timer, and the timer reboots the phone, then the phone will be
+        // unusable until the SIM is unlocked.
+        log("SIM is pin locked. Not starting fallback timer.");
+      } else {
+        // This means that no pin lock is enabled, so we go ahead and start
+        // the fallback timer.
+        this._applyPromptTimer = this.createTimer(this.applyPromptTimeout);
+      }
+    }.bind(this);
+    pinReq.onerror = function(e) {
+      this._applyPromptTimer = this.createTimer(this.applyPromptTimeout);
+    }.bind(this);
+#else
     // Schedule a fallback timeout in case the UI is unable to respond or show
     // a prompt for some reason.
     this._applyPromptTimer = this.createTimer(this.applyPromptTimeout);
+#endif
   },
 
   _copyProperties: ["appVersion", "buildID", "detailsURL", "displayVersion",
@@ -428,61 +450,6 @@ UpdatePrompt.prototype = {
     }
   },
 
-  appsUpdated: function UP_appsUpdated(aApps) {
-    log("appsUpdated: " + aApps.length + " apps to update");
-    let lock = Services.settings.createLock();
-    lock.set("apps.updateStatus", "check-complete", null);
-    this.sendChromeEvent("apps-update-check", { apps: aApps });
-    this._checkingApps = false;
-  },
-
-  // Trigger apps update check and wait for all to be done before
-  // notifying gaia.
-  onUpdateCheckStart: function UP_onUpdateCheckStart() {
-    log("onUpdateCheckStart (" + this._checkingApps + ")");
-    // Don't start twice.
-    if (this._checkingApps) {
-      return;
-    }
-
-    this._checkingApps = true;
-
-    let self = this;
-
-    let window = Services.wm.getMostRecentWindow("navigator:browser");
-    let all = window.navigator.mozApps.mgmt.getAll();
-
-    all.onsuccess = function() {
-      let appsCount = this.result.length;
-      let appsChecked = 0;
-      let appsToUpdate = [];
-      this.result.forEach(function updateApp(aApp) {
-        let update = aApp.checkForUpdate();
-        update.onsuccess = function() {
-          if (aApp.downloadAvailable) {
-            appsToUpdate.push(aApp.manifestURL);
-          }
-
-          appsChecked += 1;
-          if (appsChecked == appsCount) {
-            self.appsUpdated(appsToUpdate);
-          }
-        }
-        update.onerror = function() {
-          appsChecked += 1;
-          if (appsChecked == appsCount) {
-            self.appsUpdated(appsToUpdate);
-          }
-        }
-      });
-    }
-
-    all.onerror = function() {
-      // Could not get the app list, just notify to update nothing.
-      self.appsUpdated([]);
-    }
-  },
-
   // nsIObserver
 
   observe: function UP_observe(aSubject, aTopic, aData) {
@@ -496,7 +463,7 @@ UpdatePrompt.prototype = {
         Services.obs.removeObserver(this, "quit-application");
         break;
       case "update-check-start":
-        this.onUpdateCheckStart();
+        WebappsUpdater.updateApps();
         break;
     }
   },

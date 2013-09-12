@@ -14,7 +14,7 @@
 #include "mozilla/TimeStamp.h"          // for TimeStamp
 #include "mozilla/dom/ScreenOrientation.h"  // for ScreenOrientation
 #include "mozilla/gfx/BasePoint.h"      // for BasePoint
-#include "mozilla/layers/LayerTransaction.h"  // for TargetConfig
+#include "mozilla/layers/LayersMessages.h"  // for TargetConfig
 #include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsISupportsImpl.h"            // for LayerManager::AddRef, etc
 #include "nsTraceRefcnt.h"              // for MOZ_COUNT_CTOR, etc
@@ -30,7 +30,7 @@ class AutoResolveRefLayers;
 // Represents (affine) transforms that are calculated from a content view.
 struct ViewTransform {
   ViewTransform(LayerPoint aTranslation = LayerPoint(),
-                LayoutDeviceToScreenScale aScale = LayoutDeviceToScreenScale())
+                ParentLayerToScreenScale aScale = ParentLayerToScreenScale())
     : mTranslation(aTranslation)
     , mScale(aScale)
   {}
@@ -51,7 +51,7 @@ struct ViewTransform {
   }
 
   LayerPoint mTranslation;
-  LayoutDeviceToScreenScale mScale;
+  ParentLayerToScreenScale mScale;
 };
 
 /**

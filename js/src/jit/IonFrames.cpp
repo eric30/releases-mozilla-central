@@ -25,7 +25,6 @@
 #include "vm/Interpreter.h"
 
 #include "jsfuninlines.h"
-#include "jsscriptinlines.h"
 
 #include "jit/IonFrameIterator-inl.h"
 #include "vm/Probes-inl.h"
@@ -536,8 +535,15 @@ HandleException(ResumeFromException *rfe)
             InlineFrameIterator frames(cx, &iter);
             for (;;) {
                 HandleExceptionIon(cx, frames, rfe, &overrecursed);
-                if (rfe->kind != ResumeFromException::RESUME_ENTRY_FRAME)
+
+                if (rfe->kind == ResumeFromException::RESUME_BAILOUT) {
+                    IonScript *ionScript = NULL;
+                    if (iter.checkInvalidation(&ionScript))
+                        ionScript->decref(cx->runtime()->defaultFreeOp());
                     return;
+                }
+
+                JS_ASSERT(rfe->kind == ResumeFromException::RESUME_ENTRY_FRAME);
 
                 // When profiling, each frame popped needs a notification that
                 // the function has exited, so invoke the probe that a function
@@ -1241,6 +1247,22 @@ SnapshotIterator::slotValue(const Slot &slot)
       case SnapshotReader::DOUBLE_REG:
         return DoubleValue(machine_.read(slot.floatReg()));
 
+      case SnapshotReader::FLOAT32_REG:
+      {
+        double asDouble = machine_.read(slot.floatReg());
+        // The register contains the encoding of a float32. We just read
+        // the bits without making any conversion.
+        float asFloat = *(float*) &asDouble;
+        return DoubleValue(asFloat);
+      }
+
+      case SnapshotReader::FLOAT32_STACK:
+      {
+        double asDouble = ReadFrameDoubleSlot(fp_, slot.stackSlot());
+        float asFloat = *(float*) &asDouble; // no conversion, see comment above.
+        return DoubleValue(asFloat);
+      }
+
       case SnapshotReader::TYPED_REG:
         return FromTypedPayload(slot.knownType(), machine_.read(slot.reg()));
 
@@ -1358,9 +1380,9 @@ InlineFrameIteratorMaybeGC<allowGC>::findNextFrame()
         if (JSOp(*pc_) == JSOP_FUNCALL) {
             JS_ASSERT(GET_ARGC(pc_) > 0);
             numActualArgs_ = GET_ARGC(pc_) - 1;
-        } else if (IsGetterPC(pc_)) {
+        } else if (IsGetPropPC(pc_)) {
             numActualArgs_ = 0;
-        } else if (IsSetterPC(pc_)) {
+        } else if (IsSetPropPC(pc_)) {
             numActualArgs_ = 1;
         }
 
@@ -1427,7 +1449,7 @@ InlineFrameIteratorMaybeGC<allowGC>::isConstructing() const
         ++parent;
 
         // Inlined Getters and Setters are never constructing.
-        if (IsGetterPC(parent.pc()) || IsSetterPC(parent.pc()))
+        if (IsGetPropPC(parent.pc()) || IsSetPropPC(parent.pc()))
             return false;
 
         // In the case of a JS frame, look up the pc from the snapshot.
@@ -1456,7 +1478,7 @@ IonFrameIterator::isConstructing() const
         InlineFrameIterator inlinedParent(GetIonContext()->cx, &parent);
 
         //Inlined Getters and Setters are never constructing.
-        if (IsGetterPC(inlinedParent.pc()) || IsSetterPC(inlinedParent.pc()))
+        if (IsGetPropPC(inlinedParent.pc()) || IsSetPropPC(inlinedParent.pc()))
             return false;
 
         JS_ASSERT(IsCallPC(inlinedParent.pc()));
@@ -1468,8 +1490,9 @@ IonFrameIterator::isConstructing() const
         jsbytecode *pc;
         parent.baselineScriptAndPc(NULL, &pc);
 
-        //Inlined Getters and Setters are never constructing.
-        if (IsGetterPC(pc) || IsSetterPC(pc))
+        // Inlined Getters and Setters are never constructing.
+        // Baseline may call getters from [GET|SET]PROP or [GET|SET]ELEM ops.
+        if (IsGetPropPC(pc) || IsSetPropPC(pc) || IsGetElemPC(pc) || IsSetElemPC(pc))
             return false;
 
         JS_ASSERT(IsCallPC(pc));

@@ -122,6 +122,21 @@ typedef AutoValueVector NodeVector;
 
 namespace {
 
+/* Set 'result' to obj[id] if any such property exists, else defaultValue. */
+static bool
+GetPropertyDefault(JSContext *cx, HandleObject obj, HandleId id, HandleValue defaultValue,
+                   MutableHandleValue result)
+{
+    bool found;
+    if (!JSObject::hasProperty(cx, obj, id, &found))
+        return false;
+    if (!found) {
+        result.set(defaultValue);
+        return true;
+    }
+    return JSObject::getGeneric(cx, obj, obj, id, result);
+}
+
 /*
  * Builder class that constructs JavaScript AST node objects. See:
  *
@@ -175,7 +190,7 @@ class NodeBuilder
             if (!atom)
                 return false;
             RootedId id(cx, AtomToId(atom));
-            if (!baseops::GetPropertyDefault(cx, userobj, id, nullVal, &funv))
+            if (!GetPropertyDefault(cx, userobj, id, nullVal, &funv))
                 return false;
 
             if (funv.isNullOrUndefined()) {
@@ -1475,6 +1490,8 @@ NodeBuilder::function(ASTType type, TokenPos *pos,
                    dst);
 }
 
+namespace {
+
 /*
  * Serialization of parse nodes to JavaScript objects.
  *
@@ -1585,6 +1602,8 @@ class ASTSerializer
 
     bool program(ParseNode *pn, MutableHandleValue dst);
 };
+
+} /* anonymous namespace */
 
 AssignmentOperator
 ASTSerializer::aop(JSOp op)
@@ -2991,7 +3010,7 @@ reflect_parse(JSContext *cx, uint32_t argc, jsval *vp)
         /* config.loc */
         RootedId locId(cx, NameToId(cx->names().loc));
         RootedValue trueVal(cx, BooleanValue(true));
-        if (!baseops::GetPropertyDefault(cx, config, locId, trueVal, &prop))
+        if (!GetPropertyDefault(cx, config, locId, trueVal, &prop))
             return false;
 
         loc = ToBoolean(prop);
@@ -3000,7 +3019,7 @@ reflect_parse(JSContext *cx, uint32_t argc, jsval *vp)
             /* config.source */
             RootedId sourceId(cx, NameToId(cx->names().source));
             RootedValue nullVal(cx, NullValue());
-            if (!baseops::GetPropertyDefault(cx, config, sourceId, nullVal, &prop))
+            if (!GetPropertyDefault(cx, config, sourceId, nullVal, &prop))
                 return false;
 
             if (!prop.isNullOrUndefined()) {
@@ -3022,7 +3041,7 @@ reflect_parse(JSContext *cx, uint32_t argc, jsval *vp)
             /* config.line */
             RootedId lineId(cx, NameToId(cx->names().line));
             RootedValue oneValue(cx, Int32Value(1));
-            if (!baseops::GetPropertyDefault(cx, config, lineId, oneValue, &prop) ||
+            if (!GetPropertyDefault(cx, config, lineId, oneValue, &prop) ||
                 !ToUint32(cx, prop, &lineno)) {
                 return false;
             }
@@ -3031,7 +3050,7 @@ reflect_parse(JSContext *cx, uint32_t argc, jsval *vp)
         /* config.builder */
         RootedId builderId(cx, NameToId(cx->names().builder));
         RootedValue nullVal(cx, NullValue());
-        if (!baseops::GetPropertyDefault(cx, config, builderId, nullVal, &prop))
+        if (!GetPropertyDefault(cx, config, builderId, nullVal, &prop))
             return false;
 
         if (!prop.isNullOrUndefined()) {

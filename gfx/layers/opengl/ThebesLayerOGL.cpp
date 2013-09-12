@@ -6,7 +6,6 @@
 #include "ThebesLayerOGL.h"
 #include <stdint.h>                     // for uint32_t
 #include <sys/types.h>                  // for int32_t
-#include "mozilla-config.h"             // for MOZ_DUMP_PAINTING
 #include "GLContext.h"                  // for GLContext, etc
 #include "GLContextTypes.h"             // for GLenum
 #include "GLDefs.h"                     // for LOCAL_GL_ONE, LOCAL_GL_BGRA, etc
@@ -356,13 +355,16 @@ public:
   }
 
   // ThebesLayerBuffer interface
-  virtual already_AddRefed<gfxASurface>
-  CreateBuffer(ContentType aType, const nsIntRect& aRect, uint32_t aFlags, gfxASurface**)
+  void
+  CreateBuffer(ContentType aType, const nsIntRect& aRect, uint32_t aFlags,
+               gfxASurface** aBlackSurface, gfxASurface** aWhiteSurface,
+               RefPtr<gfx::DrawTarget>* aBlackDT, RefPtr<gfx::DrawTarget>* aWhiteDT) MOZ_OVERRIDE
   {
     NS_ASSERTION(gfxASurface::CONTENT_ALPHA != aType,"ThebesBuffer has color");
 
     mTexImage = CreateClampOrRepeatTextureImage(gl(), aRect.Size(), aType, aFlags);
-    return mTexImage ? mTexImage->GetBackingSurface() : nullptr;
+    nsRefPtr<gfxASurface> ret = mTexImage ? mTexImage->GetBackingSurface() : nullptr;
+    *aBlackSurface = ret.forget().get();
   }
 
   virtual nsIntPoint GetOriginOffset() {

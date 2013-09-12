@@ -8,7 +8,7 @@
 
 #include <stddef.h>                     // for size_t
 #include <stdint.h>                     // for uint32_t, uint8_t, uint64_t
-#include "GLContext.h"                  // for GLContext (ptr only), etc
+#include "GLContextTypes.h"             // for GLContext (ptr only), etc
 #include "GLTextureImage.h"             // for TextureImage
 #include "ImageContainer.h"             // for PlanarYCbCrImage, etc
 #include "ImageTypes.h"                 // for StereoMode
@@ -106,7 +106,7 @@ public:
 
   virtual bool Lock(OpenMode aMode)
   {
-    return true;
+    return IsValid();
   }
 
   virtual void Unlock() {}
@@ -158,6 +158,15 @@ public:
   bool IsSharedWithCompositor() const { return mShared; }
 
   bool ShouldDeallocateInDestructor() const;
+
+  /**
+   * If this method returns false users of TextureClient are not allowed
+   * to access the shared data.
+   */
+  bool IsValid() const { return mValid; }
+
+  void MarkInvalid() { mValid = false; }
+
 protected:
   void AddFlags(TextureFlags  aFlags)
   {
@@ -175,6 +184,7 @@ protected:
   uint64_t mID;
   TextureFlags mFlags;
   bool mShared;
+  bool mValid;
 };
 
 /**

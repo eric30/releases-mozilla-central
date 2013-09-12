@@ -47,7 +47,7 @@ struct SelfHostedClass
      */
     static JSObject *newPrototype(JSContext *cx, uint32_t numSlots);
 
-    static bool is(JSContext *cx, Class *clasp);
+    static bool is(JSContext *cx, const Class *clasp);
 
     SelfHostedClass(const char *name, uint32_t numSlots);
 };
@@ -72,7 +72,7 @@ SelfHostedClass::newPrototype(JSContext *cx, uint32_t numSlots)
 }
 
 bool
-SelfHostedClass::is(JSContext *cx, Class *clasp)
+SelfHostedClass::is(JSContext *cx, const Class *clasp)
 {
     SelfHostedClass *shClass = cx->runtime()->selfHostedClasses();
     while (shClass) {
@@ -104,7 +104,7 @@ selfHosting_ErrorReporter(JSContext *cx, const char *message, JSErrorReport *rep
     PrintError(cx, stderr, message, report, true);
 }
 
-static JSClass self_hosting_global_class = {
+static const JSClass self_hosting_global_class = {
     "self-hosting-global", JSCLASS_GLOBAL_FLAGS,
     JS_PropertyStub,  JS_DeletePropertyStub,
     JS_PropertyStub,  JS_StrictPropertyStub,
@@ -682,12 +682,17 @@ bool
 JSRuntime::initSelfHosting(JSContext *cx)
 {
     JS_ASSERT(!selfHostingGlobal_);
-    RootedObject savedGlobal(cx, js::DefaultObjectForContextOrNull(cx));
+
+    bool receivesDefaultObject = !cx->hasOption(JSOPTION_NO_DEFAULT_COMPARTMENT_OBJECT);
+    RootedObject savedGlobal(cx, receivesDefaultObject
+                                 ? js::DefaultObjectForContextOrNull(cx)
+                                 : NULL);
     if (!(selfHostingGlobal_ = JS_NewGlobalObject(cx, &self_hosting_global_class,
                                                   NULL, JS::DontFireOnNewGlobalHook)))
         return false;
     JSAutoCompartment ac(cx, selfHostingGlobal_);
-    js::SetDefaultObjectForContext(cx, selfHostingGlobal_);
+    if (receivesDefaultObject)
+        js::SetDefaultObjectForContext(cx, selfHostingGlobal_);
     Rooted<GlobalObject*> shg(cx, &selfHostingGlobal_->as<GlobalObject>());
     /*
      * During initialization of standard classes for the self-hosting global,
@@ -756,7 +761,8 @@ JSRuntime::initSelfHosting(JSContext *cx)
         ok = Evaluate(cx, shg, options, src, srcLen, &rv);
     }
     JS_SetErrorReporter(cx, oldReporter);
-    js::SetDefaultObjectForContext(cx, savedGlobal);
+    if (receivesDefaultObject)
+        js::SetDefaultObjectForContext(cx, savedGlobal);
     return ok;
 }
 

@@ -4,7 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "vm/RegExpObject-inl.h"
+#include "vm/RegExpObject.h"
 
 #include "mozilla/MemoryReporting.h"
 
@@ -209,7 +209,7 @@ regexp_trace(JSTracer *trc, JSObject *obj)
         obj->setPrivate(NULL);
 }
 
-Class RegExpObject::class_ = {
+const Class RegExpObject::class_ = {
     js_RegExp_str,
     JSCLASS_HAS_PRIVATE | JSCLASS_IMPLEMENTS_BARRIERS |
     JSCLASS_HAS_RESERVED_SLOTS(RegExpObject::RESERVED_SLOTS) |

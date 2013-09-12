@@ -6,7 +6,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/Attributes.h"
-#include "mozilla/GuardObjects.h"
 
 #include "jswrapper.h"
 
@@ -15,8 +14,6 @@
 // Because they work so differently from the rest of the wrapper hierarchy,
 // we pull them out of the Wrapper inheritance hierarchy and create a
 // little world around them.
-
-class XPCWrappedNative;
 
 namespace xpc {
 
@@ -28,7 +25,7 @@ holder_set(JSContext *cx, JS::HandleObject holder, JS::HandleId id, bool strict,
 
 namespace XrayUtils {
 
-extern JSClass HolderClass;
+extern const JSClass HolderClass;
 
 bool CloneExpandoChain(JSContext *cx, JSObject *src, JSObject *dst);
 
@@ -48,7 +45,6 @@ HasNativeProperty(JSContext *cx, JS::HandleObject wrapper, JS::HandleId id,
 
 class XrayTraits;
 class XPCWrappedNativeXrayTraits;
-class ProxyXrayTraits;
 class DOMXrayTraits;
 
 
@@ -119,8 +115,6 @@ class XrayWrapper : public Base {
 #define PermissiveXrayDOM xpc::XrayWrapper<js::CrossCompartmentWrapper, xpc::DOMXrayTraits>
 #define SecurityXrayDOM xpc::XrayWrapper<js::CrossCompartmentSecurityWrapper, xpc::DOMXrayTraits>
 #define SCSecurityXrayXPCWN xpc::XrayWrapper<js::SameCompartmentSecurityWrapper, xpc::XPCWrappedNativeXrayTraits>
-#define SCPermissiveXrayXPCWN xpc::XrayWrapper<js::Wrapper, xpc::XPCWrappedNativeXrayTraits>
-#define SCPermissiveXrayDOM xpc::XrayWrapper<js::Wrapper, xpc::DOMXrayTraits>
 
 class SandboxProxyHandler : public js::Wrapper {
 public:

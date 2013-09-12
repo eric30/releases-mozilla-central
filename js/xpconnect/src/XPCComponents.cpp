@@ -7,43 +7,27 @@
 
 /* The "Components" xpcom objects for JavaScript. */
 
-#include "mozilla/unused.h"
-
 #include "xpcprivate.h"
-#include "XPCQuickStubs.h"
-#include "nsReadableUtils.h"
 #include "xpcIJSModuleLoader.h"
-#include "nsIScriptObjectPrincipal.h"
-#include "nsIDOMWindow.h"
 #include "XPCJSWeakReference.h"
-#include "XPCWrapper.h"
-#include "jsproxy.h"
-#include "js/OldDebugAPI.h"
 #include "WrapperFactory.h"
-#include "XrayWrapper.h"
-#include "nsNullPrincipal.h"
 #include "nsJSUtils.h"
 #include "mozJSComponentLoader.h"
 #include "nsContentUtils.h"
-#include "nsCxPusher.h"
 #include "jsfriendapi.h"
-#include "AccessCheck.h"
-#include "mozilla/dom/BindingUtils.h"
-#include "mozilla/Preferences.h"
-#include "nsPrincipal.h"
 #include "mozilla/Attributes.h"
-#include "nsIScriptContext.h"
 #include "nsJSEnvironment.h"
-#include "nsXMLHttpRequest.h"
-#include "mozilla/Telemetry.h"
 #include "mozilla/XPTInterfaceInfoManager.h"
-#include "nsDOMClassInfoID.h"
-#include "nsGlobalWindow.h"
+#include "mozilla/dom/DOMException.h"
+#include "mozilla/dom/DOMExceptionBinding.h"
+#include "mozilla/dom/BindingUtils.h"
+#include "nsZipArchive.h"
 
 using namespace mozilla;
 using namespace JS;
 using namespace js;
 using namespace xpc;
+using mozilla::dom::Exception;
 
 /***************************************************************************/
 // stuff used by all
@@ -1945,7 +1929,7 @@ nsXPCComponents_Exception::CallOrConstruct(nsIXPConnectWrappedNative *wrapper,
     // Do the security check if necessary
 
     nsIXPCSecurityManager* sm = xpc->GetDefaultSecurityManager();
-    if (sm && NS_FAILED(sm->CanCreateInstance(cx, nsXPCException::GetCID()))) {
+    if (sm && NS_FAILED(sm->CanCreateInstance(cx, Exception::GetCID()))) {
         // the security manager vetoed. It should have set an exception.
         *_retval = false;
         return NS_OK;
@@ -1956,11 +1940,9 @@ nsXPCComponents_Exception::CallOrConstruct(nsIXPConnectWrappedNative *wrapper,
     if (!parser.parse(args))
         return ThrowAndFail(NS_ERROR_XPC_BAD_CONVERT_JS, cx, _retval);
 
-    nsCOMPtr<nsIException> e;
-    nsXPCException::NewException(parser.eMsg, parser.eResult, parser.eStack,
-                                 parser.eData, getter_AddRefs(e));
-    if (!e)
-        return ThrowAndFail(NS_ERROR_XPC_UNEXPECTED, cx, _retval);
+    nsCOMPtr<nsIException> e = new Exception(parser.eMsg, parser.eResult,
+                                             nullptr, parser.eStack,
+                                             parser.eData);
 
     nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
     RootedObject newObj(cx);
@@ -1983,9 +1965,14 @@ nsXPCComponents_Exception::HasInstance(nsIXPConnectWrappedNative *wrapper,
                                        const jsval &val, bool *bp,
                                        bool *_retval)
 {
+    using namespace mozilla::dom;
+
     RootedValue v(cx, val);
-    if (bp)
-        *bp = JSValIsInterfaceOfType(cx, v, NS_GET_IID(nsIException));
+    if (bp) {
+        Exception* e;
+        *bp = NS_SUCCEEDED(UNWRAP_OBJECT(Exception, cx, v.toObjectOrNull(), e)) ||
+              JSValIsInterfaceOfType(cx, v, NS_GET_IID(nsIException));
+    }
     return NS_OK;
 }
 
@@ -2635,70 +2622,6 @@ nsXPCComponents_Utils::GetSandbox(nsIXPCComponents_utils_Sandbox **aSandbox)
     return NS_OK;
 }
 
-/* void lookupMethod (); */
-NS_IMETHODIMP
-nsXPCComponents_Utils::LookupMethod(const JS::Value& object,
-                                    const JS::Value& name,
-                                    JSContext *cx,
-                                    JS::Value *retval)
-{
-    // first param must be a JSObject
-    if (!object.isObject())
-        return NS_ERROR_XPC_BAD_CONVERT_JS;
-    JS::RootedObject obj(cx, &object.toObject());
-
-    // second param must be a string.
-    if (!JSVAL_IS_STRING(name))
-        return NS_ERROR_XPC_BAD_CONVERT_JS;
-    JSString *methodName = name.toString();
-    RootedId methodId(cx, INTERNED_STRING_TO_JSID(cx, JS_InternJSString(cx, methodName)));
-
-    // If |obj| is a security wrapper, try to unwrap it. If this fails, we
-    // don't have full acccess to the object, in which case we throw.
-    // Otherwise, enter a compartment, since we may have just unwrapped a CCW.
-    obj = js::CheckedUnwrap(obj);
-    if (!obj) {
-        JS_ReportError(cx, "Permission denied to unwrap object");
-        return NS_ERROR_XPC_BAD_CONVERT_JS;
-    }
-    {
-        // Enter the target compartment.
-        JSAutoCompartment ac(cx, obj);
-
-        // Now, try to create an Xray wrapper around the object. This won't work
-        // if the object isn't Xray-able. In that case, we throw.
-        JSObject *xray = WrapperFactory::WrapForSameCompartmentXray(cx, obj);
-        if (!xray)
-            return NS_ERROR_XPC_BAD_CONVERT_JS;
-
-        // Alright, now do the lookup.
-        *retval = UndefinedValue();
-        Rooted<JSPropertyDescriptor> desc(cx);
-        if (!JS_GetPropertyDescriptorById(cx, xray, methodId, 0, &desc))
-            return NS_ERROR_FAILURE;
-
-        // First look for a method value. If that's not there, try a getter,
-        // since historically lookupMethod also works for getters.
-        JSObject *methodObj = desc.value().isObject() ? &desc.value().toObject() : NULL;
-        if (!methodObj && desc.hasGetterObject())
-            methodObj = desc.getterObject();
-
-        // Callers of this function seem to expect bound methods. Make it happen.
-        // Note that this is unnecessary until bug 658909 is fixed.
-        if (methodObj && JS_ObjectIsCallable(cx, methodObj))
-            methodObj = JS_BindCallable(cx, methodObj, obj);
-
-        // Set the return value if appropriate.
-        *retval = methodObj ? ObjectValue(*methodObj) : UndefinedValue();
-    }
-
-    // Now that we've left the target compartment, wrap for the caller.
-    if (!JS_WrapValue(cx, retval))
-        return NS_ERROR_FAILURE;;
-
-    return NS_OK;
-}
-
 /* void reportError (); */
 NS_IMETHODIMP
 nsXPCComponents_Utils::ReportError(const JS::Value &errorArg, JSContext *cx)
@@ -2811,7 +2734,7 @@ nsXPCComponents_Utils::EvalInSandbox(const nsAString& source,
 
     // Optional fourth and fifth arguments: filename and line number.
     nsXPIDLCString filename;
-    int32_t lineNo = (optionalArgc >= 3) ? lineNumber : 0;
+    int32_t lineNo = (optionalArgc >= 3) ? lineNumber : 1;
     if (optionalArgc >= 2) {
         JSString *filenameStr = JS_ValueToString(cx, filenameVal);
         if (!filenameStr)
@@ -2840,6 +2763,46 @@ nsXPCComponents_Utils::EvalInSandbox(const nsAString& source,
                                      jsVersion, false, &rval);
     NS_ENSURE_SUCCESS(rv, rv);
     *retval = rval;
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsXPCComponents_Utils::GetSandboxMetadata(const JS::Value &sandboxVal,
+                                          JSContext *cx, JS::Value *rval)
+{
+    if (!sandboxVal.isObject())
+        return NS_ERROR_INVALID_ARG;
+
+    RootedObject sandbox(cx, &sandboxVal.toObject());
+    sandbox = js::CheckedUnwrap(sandbox);
+    if (!sandbox || !xpc::IsSandbox(sandbox))
+        return NS_ERROR_INVALID_ARG;
+
+    RootedValue metadata(cx);
+    nsresult rv = xpc::GetSandboxMetadata(cx, sandbox, &metadata);
+    NS_ENSURE_SUCCESS(rv, rv);
+    *rval = metadata;
+
+    return NS_OK;
+}
+
+NS_IMETHODIMP
+nsXPCComponents_Utils::SetSandboxMetadata(const JS::Value &sandboxVal,
+                                          const JS::Value &metadataVal,
+                                          JSContext *cx)
+{
+    if (!sandboxVal.isObject())
+        return NS_ERROR_INVALID_ARG;
+
+    RootedObject sandbox(cx, &sandboxVal.toObject());
+    sandbox = js::CheckedUnwrap(sandbox);
+    if (!sandbox || !xpc::IsSandbox(sandbox))
+        return NS_ERROR_INVALID_ARG;
+
+    RootedValue metadata(cx, metadataVal);
+    nsresult rv = xpc::SetSandboxMetadata(cx, sandbox, metadata);
+    NS_ENSURE_SUCCESS(rv, rv);
+
     return NS_OK;
 }
 
@@ -3253,7 +3216,7 @@ nsXPCComponents_Utils::CanCreateWrapper(const nsIID * iid, char **_retval)
 NS_IMETHODIMP
 nsXPCComponents_Utils::CanCallMethod(const nsIID * iid, const PRUnichar *methodName, char **_retval)
 {
-    static const char* const allowed[] = { "lookupMethod", "evalInSandbox", nullptr };
+    static const char* const allowed[] = { "evalInSandbox", nullptr };
     *_retval = CheckAccessList(methodName, allowed);
     return NS_OK;
 }
@@ -3719,23 +3682,6 @@ nsXPCComponents::AttachComponentsObject(JSContext* aCx,
                                  nullptr, nullptr, JSPROP_PERMANENT | JSPROP_READONLY);
 }
 
-/* void lookupMethod (); */
-NS_IMETHODIMP
-nsXPCComponents::LookupMethod(const JS::Value& object,
-                              const JS::Value& name,
-                              JSContext *cx,
-                              JS::Value *retval)
-{
-    NS_WARNING("Components.lookupMethod deprecated, use Components.utils.lookupMethod");
-
-    nsCOMPtr<nsIXPCComponents_Utils> utils;
-    nsresult rv = GetUtils(getter_AddRefs(utils));
-    if (NS_FAILED(rv))
-        return rv;
-
-    return utils->LookupMethod(object, name, cx, retval);
-}
-
 /* void reportError (); */
 NS_IMETHODIMP nsXPCComponents::ReportError(const JS::Value &error, JSContext *cx)
 {
@@ -3762,7 +3708,7 @@ nsXPCComponents::CanCreateWrapper(const nsIID * iid, char **_retval)
 NS_IMETHODIMP
 nsXPCComponents::CanCallMethod(const nsIID * iid, const PRUnichar *methodName, char **_retval)
 {
-    static const char* const allowed[] = { "isSuccessCode", "lookupMethod", nullptr };
+    static const char* const allowed[] = { "isSuccessCode", nullptr };
     *_retval = CheckAccessList(methodName, allowed);
     return NS_OK;
 }

@@ -229,7 +229,14 @@ public class BrowserSearch extends HomeFragment
         mList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
             public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
-                // Account for the search engines
+                // Perform the user-entered search if the user clicks on a search engine row.
+                // This row will be disabled if suggestions (in addition to the user-entered term) are showing.
+                if (view instanceof SearchEngineRow) {
+                    ((SearchEngineRow) view).performUserEnteredSearch();
+                    return;
+                }
+
+                // Account for the search engine rows.
                 position -= getSuggestEngineCount();
                 final Cursor c = mAdapter.getCursor(position);
                 final String url = c.getString(c.getColumnIndexOrThrow(URLColumns.URL));
@@ -242,9 +249,13 @@ public class BrowserSearch extends HomeFragment
         mList.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
             @Override
             public boolean onItemLongClick(AdapterView<?> parent, View view, int position, long id) {
-                // Account for the search engines
-                position -= getSuggestEngineCount();
+                // Don't do anything when the user long-clicks on a search engine row.
+                if (view instanceof SearchEngineRow) {
+                    return true;
+                }
 
+                // Account for the search engine rows.
+                position -= getSuggestEngineCount();
                 return mList.onItemLongClick(parent, view, position, id);
             }
         });
@@ -446,6 +457,12 @@ public class BrowserSearch extends HomeFragment
     }
 
     private void showSuggestionsOptIn() {
+        // Return if the ViewStub was already inflated - an inflated ViewStub is removed from the
+        // View hierarchy so a second call to findViewById will return null.
+        if (mSuggestionsOptInPrompt != null) {
+            return;
+        }
+
         mSuggestionsOptInPrompt = ((ViewStub) mView.findViewById(R.id.suggestions_opt_in_prompt)).inflate();
 
         TextView promptText = (TextView) mSuggestionsOptInPrompt.findViewById(R.id.suggestions_prompt_title);

@@ -82,17 +82,6 @@ function _Worker(browserPromise, options) {
 }
 
 _Worker.prototype = {
-  reload: function() {
-    // In the future, it would be nice to just throw away the browser element
-    // and re-create from scratch.  The complication there would be the need
-    // to reconnect existing ports - but even that might be managable.
-    // However, bug 899908 calls for 'reload' to be dropped, so let's do that
-    // instead!
-    this.browserPromise.then(browser => {
-      browser.messageManager.sendAsyncMessage("frameworker:reload");
-    });
-  },
-
   // Message handler.
   receiveMessage: function(msg) {
     switch (msg.name) {
@@ -127,12 +116,16 @@ WorkerHandle.prototype = {
       return;
     }
     delete workerCache[url];
+    // close all the ports we have handed out.
+    for (let [portid, port] of this._worker.ports) {
+      port.close();
+    }
+    this._worker.ports.clear();
+    this._worker.ports = null;
     this._worker.browserPromise.then(browser => {
       browser.parentNode.removeChild(browser);
     });
     // wipe things out just incase other reference have snuck out somehow...
-    this._worker.ports.clear();
-    this._worker.ports = null;
     this._worker.browserPromise = null;
     this._worker = null;
   }

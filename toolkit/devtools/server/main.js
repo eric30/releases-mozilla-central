@@ -43,6 +43,9 @@ if (this.require) {
 
 const DBG_STRINGS_URI = "chrome://global/locale/devtools/debugger.properties";
 
+const nsFile = CC("@mozilla.org/file/local;1", "nsIFile", "initWithPath");
+Cu.import("resource://gre/modules/reflect.jsm");
+Cu.import("resource://gre/modules/devtools/DevToolsUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 let wantLogging = Services.prefs.getBoolPref("devtools.debugger.log");
@@ -71,6 +74,7 @@ loadSubScript.call(this, "resource://gre/modules/commonjs/sdk/core/promise.js");
 this.require = loaderRequire;
 
 Cu.import("resource://gre/modules/devtools/SourceMap.jsm");
+const escodegen = localRequire("escodegen/escodegen");
 
 loadSubScript.call(this, "resource://gre/modules/devtools/DevToolsUtils.js");
 
@@ -92,6 +96,9 @@ loadSubScript.call(this, "resource://gre/modules/devtools/server/transport.js");
 const ServerSocket = CC("@mozilla.org/network/server-socket;1",
                         "nsIServerSocket",
                         "initSpecialConnection");
+const UnixDomainServerSocket = CC("@mozilla.org/network/server-socket;1",
+                                  "nsIServerSocket",
+                                  "initWithFilename");
 
 var gRegisteredModules = Object.create(null);
 
@@ -176,6 +183,19 @@ var DebuggerServer = {
    * for example "navigator:browser".
    */
   chromeWindowType: null,
+
+  /**
+   * Set that to a function that will be called anytime a new connection
+   * is opened or one is closed.
+   */
+  onConnectionChange: null,
+
+  _fireConnectionChange: function(aWhat) {
+    if (this.onConnectionChange &&
+        typeof this.onConnectionChange === "function") {
+      this.onConnectionChange(aWhat);
+    }
+  },
 
   /**
    * Prompt the user to accept or decline the incoming connection. This is the
@@ -275,6 +295,9 @@ var DebuggerServer = {
     delete this._allowConnection;
     this._transportInitialized = false;
     this._initialized = false;
+
+    this._fireConnectionChange("closed");
+
     dumpn("Debugger server is shut down.");
   },
 
@@ -330,8 +353,8 @@ var DebuggerServer = {
   /**
    * Install Firefox-specific actors.
    */
-  addBrowserActors: function DS_addBrowserActors() {
-    this.chromeWindowType = "navigator:browser";
+  addBrowserActors: function(aWindowType) {
+    this.chromeWindowType = aWindowType ? aWindowType : "navigator:browser";
     this.addActors("resource://gre/modules/devtools/server/actors/webbrowser.js");
     this.addActors("resource://gre/modules/devtools/server/actors/script.js");
     this.addGlobalActor(this.ChromeDebuggerActor, "chromeDebugger");
@@ -362,18 +385,19 @@ var DebuggerServer = {
       this.addActors("resource://gre/modules/devtools/server/actors/styleeditor.js");
       this.registerModule("devtools/server/actors/inspector");
     }
-    if (!("ContentTabActor" in DebuggerServer)) {
+    if (!("ContentAppActor" in DebuggerServer)) {
       this.addActors("resource://gre/modules/devtools/server/actors/childtab.js");
     }
   },
 
   /**
-   * Listens on the given port for remote debugger connections.
+   * Listens on the given port or socket file for remote debugger connections.
    *
-   * @param aPort int
-   *        The port to listen on.
+   * @param aPortOrPath int, string
+   *        If given an integer, the port to listen on.
+   *        Otherwise, the path to the unix socket domain file to listen on.
    */
-  openListener: function DS_openListener(aPort) {
+  openListener: function DS_openListener(aPortOrPath) {
     if (!Services.prefs.getBoolPref("devtools.debugger.remote-enabled")) {
       return false;
     }
@@ -391,11 +415,21 @@ var DebuggerServer = {
     }
 
     try {
-      let socket = new ServerSocket(aPort, flags, 4);
+      let backlog = 4;
+      let socket;
+      let port = Number(aPortOrPath);
+      if (port) {
+        socket = new ServerSocket(port, flags, backlog);
+      } else {
+        let file = nsFile(aPortOrPath);
+        if (file.exists())
+          file.remove(false);
+        socket = new UnixDomainServerSocket(file, parseInt("600", 8), backlog);
+      }
       socket.asyncListen(this);
       this._listener = socket;
     } catch (e) {
-      dumpn("Could not start debugging listener on port " + aPort + ": " + e);
+      dumpn("Could not start debugging listener on '" + aPortOrPath + "': " + e);
       throw Cr.NS_ERROR_NOT_AVAILABLE;
     }
     this._socketConnections++;
@@ -546,6 +580,7 @@ var DebuggerServer = {
     }
     aTransport.ready();
 
+    this._fireConnectionChange("opened");
     return conn;
   },
 
@@ -554,6 +589,7 @@ var DebuggerServer = {
    */
   _connectionClosed: function DS_connectionClosed(aConnection) {
     delete this._connections[aConnection.prefix];
+    this._fireConnectionChange("closed");
   },
 
   // DebuggerServer extension API.

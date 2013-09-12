@@ -2,12 +2,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH     = @DEPTH@
-topsrcdir = @top_srcdir@
-srcdir    = @srcdir@
-VPATH     = @srcdir@
-relativesrcdir = @relativesrcdir@
-
 include $(topsrcdir)/config/config.mk
 
 # special case some locale codes, he and id
@@ -67,6 +61,7 @@ strings-xml-preqs =\
 
 $(dir-strings-xml)/strings.xml: $(strings-xml-preqs)
 	$(NSINSTALL) -D $(dir-strings-xml)
+	$(TOUCH) $(call mkdir_deps,$(dir-strings-xml))
 	$(PYTHON) $(topsrcdir)/config/Preprocessor.py \
       $(DEFINES) \
 	  -DBRANDPATH="$(BRANDPATH)" \
@@ -76,5 +71,3 @@ $(dir-strings-xml)/strings.xml: $(strings-xml-preqs)
 	  -DMOZ_APP_DISPLAYNAME="@MOZ_APP_DISPLAYNAME@" \
       $< \
 	  > $@
-
-include $(topsrcdir)/config/rules.mk

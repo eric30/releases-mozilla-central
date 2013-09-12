@@ -8,14 +8,12 @@
 #include "mozilla/dom/DOMJSClass.h"
 #include "mozilla/dom/BindingUtils.h"
 
+#include "jsapi.h"
 #include "EventTarget.h"
 #include "RuntimeService.h"
 #include "WorkerPrivate.h"
 
 #include "WorkerInlines.h"
-
-#define PROPERTY_FLAGS \
-  (JSPROP_ENUMERATE | JSPROP_SHARED)
 
 #define FUNCTION_FLAGS \
   JSPROP_ENUMERATE
@@ -29,20 +27,10 @@ namespace {
 
 class Worker
 {
-  static DOMJSClass sClass;
-  static DOMIfaceAndProtoJSClass sProtoClass;
+  static const DOMJSClass sClass;
+  static const DOMIfaceAndProtoJSClass sProtoClass;
   static const JSPropertySpec sProperties[];
   static const JSFunctionSpec sFunctions[];
-
-  enum
-  {
-    STRING_onerror = 0,
-    STRING_onmessage,
-
-    STRING_COUNT
-  };
-
-  static const char* const sEventStrings[STRING_COUNT];
 
 protected:
   enum {
@@ -52,19 +40,19 @@ protected:
   };
 
 public:
-  static JSClass*
+  static const JSClass*
   Class()
   {
     return sClass.ToJSClass();
   }
 
-  static JSClass*
+  static const JSClass*
   ProtoClass()
   {
     return sProtoClass.ToJSClass();
   }
 
-  static DOMClass*
+  static const DOMClass*
   DOMClassStruct()
   {
     return &sClass.mClass;
@@ -83,7 +71,7 @@ public:
     }
 
     js::SetReservedSlot(proto, DOM_PROTO_INSTANCE_CLASS_SLOT,
-                        JS::PrivateValue(DOMClassStruct()));
+                        JS::PrivateValue(const_cast<DOMClass *>(DOMClassStruct())));
 
     if (!aMainRuntime) {
       WorkerPrivate* parent = GetWorkerPrivateFromContext(aCx);
@@ -105,7 +93,7 @@ public:
 protected:
   static bool
   ConstructInternal(JSContext* aCx, unsigned aArgc, jsval* aVp,
-                    bool aIsChromeWorker, JSClass* aClass)
+                    bool aIsChromeWorker, const JSClass* aClass)
   {
     if (!aArgc) {
       JS_ReportError(aCx, "Constructor requires at least one argument!");
@@ -176,58 +164,108 @@ private:
   ~Worker();
 
   static bool
-  GetEventListener(JSContext* aCx, JS::Handle<JSObject*> aObj, JS::Handle<jsid> aIdval,
-                   JS::MutableHandle<JS::Value> aVp)
+  IsWorker(JS::Handle<JS::Value> v)
   {
-    JS_ASSERT(JSID_IS_INT(aIdval));
-    JS_ASSERT(JSID_TO_INT(aIdval) >= 0 && JSID_TO_INT(aIdval) < STRING_COUNT);
+    return v.isObject() && ClassIsWorker(JS_GetClass(&v.toObject()));
+  }
 
-    const char* name = sEventStrings[JSID_TO_INT(aIdval)];
-    WorkerPrivate* worker = GetInstancePrivate(aCx, aObj, name);
-    if (!worker) {
-      return !JS_IsExceptionPending(aCx);
-    }
+  static bool
+  GetEventListener(JSContext* aCx, const JS::CallArgs aArgs,
+                   const nsAString &aNameStr)
+  {
+    WorkerPrivate* worker =
+      GetInstancePrivate(aCx, &aArgs.thisv().toObject(),
+                         NS_ConvertUTF16toUTF8(aNameStr).get());
+    MOZ_ASSERT(worker);
 
-    NS_ConvertASCIItoUTF16 nameStr(name + 2);
     ErrorResult rv;
-    JS::Rooted<JSObject*> listener(aCx, worker->GetEventListener(nameStr, rv));
+    JS::Rooted<JSObject*> listener(aCx, worker->GetEventListener(Substring(aNameStr, 2), rv));
 
     if (rv.Failed()) {
       JS_ReportError(aCx, "Failed to get listener!");
+      return false;
     }
 
-    aVp.set(listener ? OBJECT_TO_JSVAL(listener) : JSVAL_NULL);
+    aArgs.rval().setObjectOrNull(listener);
     return true;
   }
 
   static bool
-  SetEventListener(JSContext* aCx, JS::Handle<JSObject*> aObj, JS::Handle<jsid> aIdval,
-                   bool aStrict, JS::MutableHandle<JS::Value> aVp)
+  GetOnerrorImpl(JSContext* aCx, JS::CallArgs aArgs)
   {
-    JS_ASSERT(JSID_IS_INT(aIdval));
-    JS_ASSERT(JSID_TO_INT(aIdval) >= 0 && JSID_TO_INT(aIdval) < STRING_COUNT);
+    return GetEventListener(aCx, aArgs, NS_LITERAL_STRING("onerror"));
+  }
 
-    const char* name = sEventStrings[JSID_TO_INT(aIdval)];
-    WorkerPrivate* worker = GetInstancePrivate(aCx, aObj, name);
-    if (!worker) {
-      return !JS_IsExceptionPending(aCx);
-    }
+  static bool
+  GetOnerror(JSContext* aCx, unsigned aArgc, JS::Value* aVp)
+  {
+    JS::CallArgs args = JS::CallArgsFromVp(aArgc, aVp);
+    return JS::CallNonGenericMethod<IsWorker, GetOnerrorImpl>(aCx, args);
+  }
+
+  static bool
+  GetOnmessageImpl(JSContext* aCx, JS::CallArgs aArgs)
+  {
+    return GetEventListener(aCx, aArgs, NS_LITERAL_STRING("onmessage"));
+  }
+
+  static bool
+  GetOnmessage(JSContext* aCx, unsigned aArgc, JS::Value* aVp)
+  {
+    JS::CallArgs args = JS::CallArgsFromVp(aArgc, aVp);
+    return JS::CallNonGenericMethod<IsWorker, GetOnmessageImpl>(aCx, args);
+  }
+
+  static bool
+  SetEventListener(JSContext* aCx, JS::CallArgs aArgs,
+                   const nsAString& aNameStr)
+  {
+    WorkerPrivate* worker =
+      GetInstancePrivate(aCx, &aArgs.thisv().toObject(),
+                         NS_ConvertUTF16toUTF8(aNameStr).get());
+    MOZ_ASSERT(worker);
 
     JS::Rooted<JSObject*> listener(aCx);
-    if (!JS_ValueToObject(aCx, aVp, listener.address())) {
+    if (!JS_ValueToObject(aCx, aArgs.get(0), listener.address())) {
       return false;
     }
 
-    NS_ConvertASCIItoUTF16 nameStr(name + 2);
     ErrorResult rv;
-    worker->SetEventListener(nameStr, listener, rv);
+    worker->SetEventListener(Substring(aNameStr, 2), listener, rv);
 
     if (rv.Failed()) {
       JS_ReportError(aCx, "Failed to set listener!");
       return false;
     }
 
+    aArgs.rval().setUndefined();
     return true;
+  }
+
+  static bool
+  SetOnerrorImpl(JSContext* aCx, JS::CallArgs aArgs)
+  {
+    return SetEventListener(aCx, aArgs, NS_LITERAL_STRING("onerror"));
+  }
+
+  static bool
+  SetOnerror(JSContext* aCx, unsigned aArgc, JS::Value* aVp)
+  {
+    JS::CallArgs args = JS::CallArgsFromVp(aArgc, aVp);
+    return JS::CallNonGenericMethod<IsWorker, SetOnerrorImpl>(aCx, args);
+  }
+
+  static bool
+  SetOnmessageImpl(JSContext* aCx, JS::CallArgs aArgs)
+  {
+    return SetEventListener(aCx, aArgs, NS_LITERAL_STRING("onmessage"));
+  }
+
+  static bool
+  SetOnmessage(JSContext* aCx, unsigned aArgc, JS::Value* aVp)
+  {
+    JS::CallArgs args = JS::CallArgsFromVp(aArgc, aVp);
+    return JS::CallNonGenericMethod<IsWorker, SetOnmessageImpl>(aCx, args);
   }
 
   static bool
@@ -270,7 +308,12 @@ private:
       return !JS_IsExceptionPending(aCx);
     }
 
-    return worker->Terminate(aCx);
+    if (!worker->Terminate(aCx)) {
+      return false;
+    }
+
+    JS_RVAL(aCx, aVp).setUndefined();
+    return true;
   }
 
   static bool
@@ -303,7 +346,7 @@ private:
   }
 };
 
-DOMJSClass Worker::sClass = {
+const DOMJSClass Worker::sClass = {
   {
     "Worker",
     JSCLASS_IS_DOMJSCLASS | JSCLASS_HAS_RESERVED_SLOTS(3) |
@@ -319,7 +362,7 @@ DOMJSClass Worker::sClass = {
   }
 };
 
-DOMIfaceAndProtoJSClass Worker::sProtoClass = {
+const DOMIfaceAndProtoJSClass Worker::sProtoClass = {
   {
     // XXXbz we use "Worker" here to match sClass so that we can
     // js::InitClassWithReserved this JSClass and then call
@@ -350,11 +393,9 @@ DOMIfaceAndProtoJSClass Worker::sProtoClass = {
 };
 
 const JSPropertySpec Worker::sProperties[] = {
-  { sEventStrings[STRING_onerror], STRING_onerror, PROPERTY_FLAGS,
-    JSOP_WRAPPER(GetEventListener), JSOP_WRAPPER(SetEventListener) },
-  { sEventStrings[STRING_onmessage], STRING_onmessage, PROPERTY_FLAGS,
-    JSOP_WRAPPER(GetEventListener), JSOP_WRAPPER(SetEventListener) },
-  { 0, 0, 0, JSOP_NULLWRAPPER, JSOP_NULLWRAPPER }
+  JS_PSGS("onerror", GetOnerror, SetOnerror, JSPROP_ENUMERATE),
+  JS_PSGS("onmessage", GetOnmessage, SetOnmessage, JSPROP_ENUMERATE),
+  JS_PS_END
 };
 
 const JSFunctionSpec Worker::sFunctions[] = {
@@ -363,30 +404,25 @@ const JSFunctionSpec Worker::sFunctions[] = {
   JS_FS_END
 };
 
-const char* const Worker::sEventStrings[STRING_COUNT] = {
-  "onerror",
-  "onmessage"
-};
-
 class ChromeWorker : public Worker
 {
-  static DOMJSClass sClass;
-  static DOMIfaceAndProtoJSClass sProtoClass;
+  static const DOMJSClass sClass;
+  static const DOMIfaceAndProtoJSClass sProtoClass;
 
 public:
-  static JSClass*
+  static const JSClass*
   Class()
   {
     return sClass.ToJSClass();
   }
 
-  static JSClass*
+  static const JSClass*
   ProtoClass()
   {
     return sProtoClass.ToJSClass();
   }
 
-  static DOMClass*
+  static const DOMClass*
   DOMClassStruct()
   {
     return &sClass.mClass;
@@ -404,7 +440,7 @@ public:
     }
 
     js::SetReservedSlot(proto, DOM_PROTO_INSTANCE_CLASS_SLOT,
-                        JS::PrivateValue(DOMClassStruct()));
+                        JS::PrivateValue(const_cast<DOMClass *>(DOMClassStruct())));
 
     if (!aMainRuntime) {
       WorkerPrivate* parent = GetWorkerPrivateFromContext(aCx);
@@ -431,7 +467,7 @@ private:
   GetInstancePrivate(JSContext* aCx, JSObject* aObj, const char* aFunctionName)
   {
     if (aObj) {
-      JSClass* classPtr = JS_GetClass(aObj);
+      const JSClass* classPtr = JS_GetClass(aObj);
       if (classPtr == Class()) {
         return UnwrapDOMObject<WorkerPrivate>(aObj);
       }
@@ -467,7 +503,7 @@ private:
   }
 };
 
-DOMJSClass ChromeWorker::sClass = {
+const DOMJSClass ChromeWorker::sClass = {
   { "ChromeWorker",
     JSCLASS_IS_DOMJSCLASS | JSCLASS_HAS_RESERVED_SLOTS(3) |
     JSCLASS_IMPLEMENTS_BARRIERS,
@@ -482,7 +518,7 @@ DOMJSClass ChromeWorker::sClass = {
   }
 };
 
-DOMIfaceAndProtoJSClass ChromeWorker::sProtoClass = {
+const DOMIfaceAndProtoJSClass ChromeWorker::sProtoClass = {
   {
     // XXXbz we use "ChromeWorker" here to match sClass so that we can
     // js::InitClassWithReserved this JSClass and then call
@@ -516,8 +552,8 @@ WorkerPrivate*
 Worker::GetInstancePrivate(JSContext* aCx, JSObject* aObj,
                            const char* aFunctionName)
 {
-  JSClass* classPtr = JS_GetClass(aObj);
-  if (classPtr == Class() || classPtr == ChromeWorker::Class()) {
+  const JSClass* classPtr = JS_GetClass(aObj);
+  if (ClassIsWorker(classPtr)) {
     return UnwrapDOMObject<WorkerPrivate>(aObj);
   }
 
@@ -570,9 +606,16 @@ InitClass(JSContext* aCx, JSObject* aGlobal, JSObject* aProto,
 } // namespace chromeworker
 
 bool
-ClassIsWorker(JSClass* aClass)
+ClassIsWorker(const JSClass* aClass)
 {
   return Worker::Class() == aClass || ChromeWorker::Class() == aClass;
+}
+
+bool
+GetterOnlyJSNative(JSContext* aCx, unsigned aArgc, JS::Value* aVp)
+{
+    JS_ReportErrorNumber(aCx, js_GetErrorMessage, nullptr, JSMSG_GETTER_ONLY);
+    return false;
 }
 
 END_WORKERS_NAMESPACE

@@ -117,12 +117,14 @@ struct NativeIterator
 class PropertyIteratorObject : public JSObject
 {
   public:
-    static Class class_;
+    static const Class class_;
 
     NativeIterator *getNativeIterator() const {
         return static_cast<js::NativeIterator *>(getPrivate());
     }
-    inline void setNativeIterator(js::NativeIterator *ni);
+    void setNativeIterator(js::NativeIterator *ni) {
+        setPrivate(ni);
+    }
 
     size_t sizeOfMisc(mozilla::MallocSizeOf mallocSizeOf) const;
 
@@ -145,7 +147,7 @@ class PropertyIteratorObject : public JSObject
 class ElementIteratorObject : public JSObject
 {
   public:
-    static Class class_;
+    static const Class class_;
 
     static JSObject *create(JSContext *cx, Handle<Value> target);
     static const JSFunctionSpec methods[];
@@ -350,13 +352,6 @@ struct JSGenerator
 
 extern JSObject *
 js_NewGenerator(JSContext *cx, const js::FrameRegs &regs);
-
-namespace js {
-
-bool
-GeneratorHasMarkableFrame(JSGenerator *gen);
-
-} /* namespace js */
 
 extern JSObject *
 js_InitIteratorClasses(JSContext *cx, js::HandleObject obj);

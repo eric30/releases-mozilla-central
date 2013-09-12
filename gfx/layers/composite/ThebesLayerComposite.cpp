@@ -4,7 +4,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "ThebesLayerComposite.h"
-#include "mozilla-config.h"             // for MOZ_DUMP_PAINTING
 #include "CompositableHost.h"           // for TiledLayerProperties, etc
 #include "FrameMetrics.h"               // for FrameMetrics
 #include "Units.h"                      // for CSSRect, LayerPixel, etc
@@ -29,6 +28,7 @@
 #include "nsSize.h"                     // for nsIntSize
 #include "nsString.h"                   // for nsAutoCString
 #include "nsTraceRefcnt.h"              // for MOZ_COUNT_CTOR, etc
+#include "GeckoProfiler.h"
 
 namespace mozilla {
 namespace layers {
@@ -101,6 +101,7 @@ ThebesLayerComposite::RenderLayer(const nsIntPoint& aOffset,
   if (!mBuffer || !mBuffer->IsAttached()) {
     return;
   }
+  PROFILER_LABEL("ThebesLayerComposite", "RenderLayer");
 
   MOZ_ASSERT(mBuffer->GetCompositor() == mCompositeManager->GetCompositor() &&
              mBuffer->GetLayer() == this,

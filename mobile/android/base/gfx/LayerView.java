@@ -12,6 +12,7 @@ import org.mozilla.gecko.PrefsHelper;
 import org.mozilla.gecko.R;
 import org.mozilla.gecko.TouchEventInterceptor;
 import org.mozilla.gecko.ZoomConstraints;
+import org.mozilla.gecko.mozglue.GeneratableAndroidBridgeTarget;
 import org.mozilla.gecko.util.EventDispatcher;
 
 import android.content.Context;
@@ -401,6 +402,14 @@ public class LayerView extends FrameLayout {
         mRenderer.removeLayer(layer);
     }
 
+    public void postRenderTask(RenderTask task) {
+        mRenderer.postRenderTask(task);
+    }
+
+    public void removeRenderTask(RenderTask task) {
+        mRenderer.removeRenderTask(task);
+    }
+
     public int getMaxTextureSize() {
         return mRenderer.getMaxTextureSize();
     }
@@ -435,18 +444,20 @@ public class LayerView extends FrameLayout {
         return mGLController;
     }
 
-    private Bitmap getDrawable(int resId) {
+    private Bitmap getDrawable(String name) {
         BitmapFactory.Options options = new BitmapFactory.Options();
         options.inScaled = false;
-        return BitmapUtils.decodeResource(getContext(), resId, options);
+        Context context = getContext();
+        int resId = context.getResources().getIdentifier(name, "drawable", context.getPackageName());
+        return BitmapUtils.decodeResource(context, resId, options);
     }
 
     Bitmap getShadowPattern() {
-        return getDrawable(R.drawable.shadow);
+        return getDrawable("shadow");
     }
 
     Bitmap getScrollbarImage() {
-        return getDrawable(R.drawable.scrollbar);
+        return getDrawable("scrollbar");
     }
 
     /* When using a SurfaceView (mSurfaceView != null), resizing happens in two
@@ -497,7 +508,7 @@ public class LayerView extends FrameLayout {
         return mTextureView.getSurfaceTexture();
     }
 
-    /** This function is invoked by Gecko (compositor thread) via JNI; be careful when modifying signature. */
+    @GeneratableAndroidBridgeTarget(allowMultithread = true, stubName = "RegisterCompositorWrapper")
     public static GLController registerCxxCompositor() {
         try {
             LayerView layerView = GeckoAppShell.getLayerView();

@@ -1239,8 +1239,8 @@
 
     SimpleTest.waitForExplicitFinish();
     addA11yLoadEvent(doTest);
+    setTestPluginEnabledState(SpecialPowers.Ci.nsIPluginTag.STATE_ENABLED);
 
-  
     </script>
 </head>
 <body>
@@ -1298,7 +1298,8 @@
     <p>This is a quotation taken from the Mozilla Developer Center.</p>
   </blockquote>
 
-  <p id="br_container"><br></p>
+  <!--  two BRs, one will be eaten -->
+  <p id="br_container"><br><br></p>
 
   <button id="button">button</button>
   <form>

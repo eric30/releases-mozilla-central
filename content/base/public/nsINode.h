@@ -46,6 +46,7 @@ class nsIURI;
 class nsNodeSupportsWeakRefTearoff;
 class nsNodeWeakReference;
 class nsXPCClassInfo;
+class nsDOMMutationObserver;
 
 namespace mozilla {
 namespace dom {
@@ -1474,6 +1475,8 @@ public:
   // aObject alive anymore.
   void UnbindObject(nsISupports* aObject);
 
+  void GetBoundMutationObservers(nsTArray<nsRefPtr<nsDOMMutationObserver> >& aResult);
+
   /**
    * Returns the length of this node, as specified at
    * <http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#concept-node-length>
@@ -1738,6 +1741,18 @@ inline nsINode* NODE_FROM(C& aContent, D& aDocument)
 }
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsINode, NS_INODE_IID)
+
+inline nsISupports*
+ToSupports(nsINode* aPointer)
+{
+  return aPointer;
+}
+
+inline nsISupports*
+ToCanonicalSupports(nsINode* aPointer)
+{
+  return aPointer;
+}
 
 #define NS_FORWARD_NSIDOMNODE_TO_NSINODE_HELPER(...) \
   NS_IMETHOD GetNodeName(nsAString& aNodeName) __VA_ARGS__ \

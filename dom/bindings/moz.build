@@ -21,12 +21,14 @@ EXPORTS.mozilla.dom += [
     'DOMJSProxyHandler.h',
     'Date.h',
     'Errors.msg',
-    'GeneratedAtomList.h',
+    'Exceptions.h',
     'JSSlots.h',
     'NonRefcountedDOMObject.h',
     'Nullable.h',
+    'OwningNonNull.h',
     'PrimitiveConversions.h',
     'TypedArray.h',
+    'UnionMember.h',
 ]
 
 FAIL_ON_WARNINGS = True

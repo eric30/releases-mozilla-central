@@ -641,6 +641,10 @@ pref("plugins.update.notifyUser", false);
 
 pref("plugins.click_to_play", true);
 
+// let all plugins except Flash default to click-to-play
+pref("plugin.default.state", 1);
+pref("plugin.state.flash", 2);
+
 // display door hanger if flash not installed
 pref("plugins.notifyMissingFlash", true);
 
@@ -1062,6 +1066,10 @@ pref("devtools.toolbar.visible", false);
 pref("devtools.gcli.allowSet", false);
 pref("devtools.commands.dir", "");
 
+// Disable the app manager
+pref("devtools.appmanager.enabled", true);
+pref("devtools.appmanager.simulatorInstallPage", "https://addons.mozilla.org/firefox/addon/firefox-os-simulator/");
+
 // Toolbox preferences
 pref("devtools.toolbox.footer.height", 250);
 pref("devtools.toolbox.sidebar.width", 500);
@@ -1075,6 +1083,7 @@ pref("devtools.inspector.enabled", true);
 pref("devtools.inspector.activeSidebar", "ruleview");
 pref("devtools.inspector.markupPreview", false);
 pref("devtools.inspector.remote", false);
+pref("devtools.inspector.show_pseudo_elements", true);
 
 // Enable the Layout View
 pref("devtools.layoutview.enabled", true);
@@ -1092,6 +1101,7 @@ pref("devtools.debugger.chrome-debugging-port", 6080);
 pref("devtools.debugger.remote-host", "localhost");
 pref("devtools.debugger.remote-timeout", 20000);
 pref("devtools.debugger.pause-on-exceptions", false);
+pref("devtools.debugger.ignore-caught-exceptions", true);
 pref("devtools.debugger.source-maps-enabled", true);
 
 // The default Debugger UI settings

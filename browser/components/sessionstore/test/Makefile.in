@@ -2,14 +2,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH		= @DEPTH@
-topsrcdir	= @top_srcdir@
-srcdir		= @srcdir@
-VPATH		= @srcdir@
-relativesrcdir  = @relativesrcdir@
-
-include $(DEPTH)/config/autoconf.mk
-
 # browser_506482.js is disabled because of frequent failures (bug 538672)
 # browser_526613.js is disabled because of frequent failures (bug 534489)
 # browser_589246.js is disabled for leaking browser windows (bug 752467)
@@ -24,7 +16,6 @@ MOCHITEST_BROWSER_FILES = \
 	browser_form_restore_events_sample.html \
 	browser_formdata_format.js \
 	browser_formdata_format_sample.html \
-	browser_global_store.js \
 	browser_input.js \
 	browser_input_sample.html \
 	browser_pageshow.js \
@@ -169,5 +160,3 @@ MOCHITEST_BROWSER_FILES += \
 	browser_625016.js \
 	$(NULL)
 endif
-
-include $(topsrcdir)/config/rules.mk

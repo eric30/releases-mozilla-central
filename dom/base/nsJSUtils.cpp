@@ -14,6 +14,7 @@
 #include "nsJSUtils.h"
 #include "jsapi.h"
 #include "js/OldDebugAPI.h"
+#include "jsfriendapi.h"
 #include "nsIScriptContext.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIXPConnect.h"
@@ -46,7 +47,7 @@ nsJSUtils::GetCallingLocation(JSContext* aContext, const char* *aFilename,
 nsIScriptGlobalObject *
 nsJSUtils::GetStaticScriptGlobal(JSObject* aObj)
 {
-  JSClass* clazz;
+  const JSClass* clazz;
   JSObject* glob = aObj; // starting point for search
 
   if (!glob)
@@ -140,7 +141,11 @@ nsJSUtils::ReportPendingException(JSContext *aContext)
   if (JS_IsExceptionPending(aContext)) {
     bool saved = JS_SaveFrameChain(aContext);
     {
-      JSAutoCompartment ac(aContext, js::DefaultObjectForContextOrNull(aContext));
+      nsIScriptContext* scx = GetScriptContextFromJSContext(aContext);
+      JS::Rooted<JSObject*> scope(aContext);
+      scope = scx ? scx->GetWindowProxy()
+                  : js::DefaultObjectForContextOrNull(aContext);
+      JSAutoCompartment ac(aContext, scope);
       JS_ReportPendingException(aContext);
     }
     if (saved) {
@@ -172,7 +177,9 @@ nsJSUtils::CompileFunction(JSContext* aCx,
   aOptions.setPrincipals(p);
 
   // Do the junk Gecko is supposed to do before calling into JSAPI.
-  xpc_UnmarkGrayObject(aTarget);
+  if (aTarget) {
+    JS::ExposeObjectToActiveJS(aTarget);
+  }
 
   // Compile.
   JSFunction* fun = JS::CompileFunction(aCx, aTarget, aOptions,
@@ -216,7 +223,8 @@ nsJSUtils::EvaluateString(JSContext* aCx,
                           JS::Handle<JSObject*> aScopeObject,
                           JS::CompileOptions& aCompileOptions,
                           EvaluateOptions& aEvaluateOptions,
-                          JS::Value* aRetValue)
+                          JS::Value* aRetValue,
+                          void **aOffThreadToken)
 {
   PROFILER_LABEL("JS", "EvaluateString");
   MOZ_ASSERT_IF(aCompileOptions.versionSet,
@@ -233,7 +241,7 @@ nsJSUtils::EvaluateString(JSContext* aCx,
     *aRetValue = JSVAL_VOID;
   }
 
-  xpc_UnmarkGrayObject(aScopeObject);
+  JS::ExposeObjectToActiveJS(aScopeObject);
   nsAutoMicroTask mt;
 
   JSPrincipals* p = JS_GetCompartmentPrincipals(js::GetObjectCompartment(aScopeObject));
@@ -258,9 +266,20 @@ nsJSUtils::EvaluateString(JSContext* aCx,
     JSAutoCompartment ac(aCx, aScopeObject);
 
     JS::RootedObject rootedScope(aCx, aScopeObject);
-    ok = JS::Evaluate(aCx, rootedScope, aCompileOptions,
-                      PromiseFlatString(aScript).get(),
-                      aScript.Length(), aRetValue);
+    if (aOffThreadToken) {
+      JSScript *script = JS::FinishOffThreadScript(aCx, JS_GetRuntime(aCx), *aOffThreadToken);
+      *aOffThreadToken = nullptr; // Mark the token as having been finished.
+      if (script) {
+        ok = JS_ExecuteScript(aCx, rootedScope, script, aRetValue);
+      } else {
+        ok = false;
+      }
+    } else {
+      ok = JS::Evaluate(aCx, rootedScope, aCompileOptions,
+                        PromiseFlatString(aScript).get(),
+                        aScript.Length(), aRetValue);
+    }
+
     if (ok && aEvaluateOptions.coerceToString && !aRetValue->isUndefined()) {
       JSString* str = JS_ValueToString(aCx, *aRetValue);
       ok = !!str;
@@ -286,4 +305,20 @@ nsJSUtils::EvaluateString(JSContext* aCx,
   if (aRetValue && !JS_WrapValue(aCx, aRetValue))
     return NS_ERROR_OUT_OF_MEMORY;
   return rv;
+}
+
+//
+// nsDOMJSUtils.h
+//
+
+JSObject* GetDefaultScopeFromJSContext(JSContext *cx)
+{
+  // DOM JSContexts don't store their default compartment object on
+  // the cx, so in those cases we need to fetch it via the scx
+  // instead.
+  nsIScriptContext *scx = GetScriptContextFromJSContext(cx);
+  if (scx) {
+    return scx->GetWindowProxy();
+  }
+  return js::DefaultObjectForContextOrNull(cx);
 }

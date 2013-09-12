@@ -432,12 +432,6 @@ class IonCompartment
         }
     }
 
-    AutoFlushCache *flusher() {
-        return rt->flusher();
-    }
-    void setFlusher(AutoFlushCache *fl) {
-        rt->setFlusher(fl);
-    }
     OptimizedICStubSpace *optimizedStubSpace() {
         return &optimizedStubSpace_;
     }
@@ -446,6 +440,12 @@ class IonCompartment
 // Called from JSCompartment::discardJitCode().
 void InvalidateAll(FreeOp *fop, JS::Zone *zone);
 void FinishInvalidation(FreeOp *fop, JSScript *script);
+
+// On windows systems, really large frames need to be incrementally touched.
+// The following constant defines the minimum increment of the touch.
+#ifdef XP_WIN
+const unsigned WINDOWS_BIG_FRAME_TOUCH_INCREMENT = 4096 - 1;
+#endif
 
 } // namespace jit
 } // namespace js

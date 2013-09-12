@@ -15,12 +15,18 @@ from .data import (
     ConfigFileSubstitution,
     DirectoryTraversal,
     Exports,
+    GeneratedEventWebIDLFile,
+    GeneratedWebIDLFile,
     IPDLFile,
+    LocalInclude,
+    PreprocessedWebIDLFile,
     Program,
     ReaderSummary,
+    TestWebIDLFile,
     VariablePassthru,
     XPIDLFile,
     XpcshellManifests,
+    WebIDLFile,
 )
 
 from .reader import (
@@ -140,6 +146,7 @@ class TreeMetadataEmitter(LoggingMixin):
             MODULE='MODULE',
             MSVC_ENABLE_PGO='MSVC_ENABLE_PGO',
             NO_DIST_INSTALL='NO_DIST_INSTALL',
+            OS_LIBS='OS_LIBS',
             SDK_LIBRARY='SDK_LIBRARY',
             SHARED_LIBRARY_LIBS='SHARED_LIBRARY_LIBS',
             SIMPLE_PROGRAMS='SIMPLE_PROGRAMS',
@@ -154,7 +161,8 @@ class TreeMetadataEmitter(LoggingMixin):
 
         exports = sandbox.get('EXPORTS')
         if exports:
-            yield Exports(sandbox, exports)
+            yield Exports(sandbox, exports,
+                dist_install=not sandbox.get('NO_DIST_INSTALL', False))
 
         program = sandbox.get('PROGRAM')
         if program:
@@ -165,6 +173,24 @@ class TreeMetadataEmitter(LoggingMixin):
 
         for ipdl in sandbox.get('IPDL_SOURCES', []):
             yield IPDLFile(sandbox, ipdl)
+
+        for local_include in sandbox.get('LOCAL_INCLUDES', []):
+            yield LocalInclude(sandbox, local_include)
+
+        for webidl in sandbox.get('WEBIDL_FILES', []):
+            yield WebIDLFile(sandbox, webidl)
+
+        for webidl in sandbox.get('GENERATED_EVENTS_WEBIDL_FILES', []):
+            yield GeneratedEventWebIDLFile(sandbox, webidl)
+
+        for webidl in sandbox.get('TEST_WEBIDL_FILES', []):
+            yield TestWebIDLFile(sandbox, webidl)
+
+        for webidl in sandbox.get('PREPROCESSED_WEBIDL_FILES', []):
+            yield PreprocessedWebIDLFile(sandbox, webidl)
+
+        for webidl in sandbox.get('GENERATED_WEBIDL_FILES', []):
+            yield GeneratedWebIDLFile(sandbox, webidl)
 
     def _emit_directory_traversal_from_sandbox(self, sandbox):
         o = DirectoryTraversal(sandbox)

@@ -9,10 +9,8 @@
 #include "jit/IonSpewer.h"
 #include "vm/ArrayObject.h"
 
-#include "jsfuninlines.h"
 #include "jsgcinlines.h"
 #include "jsobjinlines.h"
-#include "jsscriptinlines.h"
 
 using namespace js;
 using namespace jit;
@@ -211,7 +209,7 @@ jit::IntToStringPar(ForkJoinSlice *slice, int i, MutableHandleString out)
 ParallelResult
 jit::DoubleToStringPar(ForkJoinSlice *slice, double d, MutableHandleString out)
 {
-    JSString *str = js_NumberToString<NoGC>(slice, d);
+    JSString *str = NumberToString<NoGC>(slice, d);
     if (!str)
         return TP_RETRY_SEQUENTIALLY;
     out.set(str);

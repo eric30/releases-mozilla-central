@@ -716,6 +716,210 @@ ThreadActor.prototype = {
   },
 
   /**
+   * Handle resume requests that include a forceCompletion request.
+   *
+   * @param Object aRequest
+   *        The request packet received over the RDP.
+   * @returns A response packet.
+   */
+  _forceCompletion: function TA__forceCompletion(aRequest) {
+    // TODO: remove this when Debugger.Frame.prototype.pop is implemented in
+    // bug 736733.
+    return {
+      error: "notImplemented",
+      message: "forced completion is not yet implemented."
+    };
+  },
+
+  _makeOnEnterFrame: function TA__makeOnEnterFrame({ pauseAndRespond }) {
+    return aFrame => {
+      const generatedLocation = getFrameLocation(aFrame);
+      let { url } = this.synchronize(this.sources.getOriginalLocation(
+        generatedLocation));
+
+      return this.sources.isBlackBoxed(url)
+        ? undefined
+        : pauseAndRespond(aFrame);
+    };
+  },
+
+  _makeOnPop: function TA__makeOnPop({ thread, pauseAndRespond, createValueGrip }) {
+    return function (aCompletion) {
+      // onPop is called with 'this' set to the current frame.
+
+      const generatedLocation = getFrameLocation(this);
+      const { url } = thread.synchronize(thread.sources.getOriginalLocation(
+        generatedLocation));
+
+      if (thread.sources.isBlackBoxed(url)) {
+        return undefined;
+      }
+
+      // Note that we're popping this frame; we need to watch for
+      // subsequent step events on its caller.
+      this.reportedPop = true;
+
+      return pauseAndRespond(this, aPacket => {
+        aPacket.why.frameFinished = {};
+        if (!aCompletion) {
+          aPacket.why.frameFinished.terminated = true;
+        } else if (aCompletion.hasOwnProperty("return")) {
+          aPacket.why.frameFinished.return = createValueGrip(aCompletion.return);
+        } else if (aCompletion.hasOwnProperty("yield")) {
+          aPacket.why.frameFinished.return = createValueGrip(aCompletion.yield);
+        } else {
+          aPacket.why.frameFinished.throw = createValueGrip(aCompletion.throw);
+        }
+        return aPacket;
+      });
+    };
+  },
+
+  _makeOnStep: function TA__makeOnStep({ thread, pauseAndRespond, startFrame,
+                                         startLocation }) {
+    return function () {
+      // onStep is called with 'this' set to the current frame.
+
+      const generatedLocation = getFrameLocation(this);
+      const newLocation = thread.synchronize(thread.sources.getOriginalLocation(
+        generatedLocation));
+
+      // Cases when we should pause because we have executed enough to consider
+      // a "step" to have occured:
+      //
+      // 1.1. We change frames.
+      // 1.2. We change URLs (can happen without changing frames thanks to
+      //      source mapping).
+      // 1.3. We change lines.
+      //
+      // Cases when we should always continue execution, even if one of the
+      // above cases is true:
+      //
+      // 2.1. We are in a source mapped region, but inside a null mapping
+      //      (doesn't correlate to any region of original source)
+      // 2.2. The source we are in is black boxed.
+
+      // Cases 2.1 and 2.2
+      if (newLocation.url == null
+          || thread.sources.isBlackBoxed(newLocation.url)) {
+        return undefined;
+      }
+
+      // Cases 1.1, 1.2 and 1.3
+      if (this !== startFrame
+          || startLocation.url !== newLocation.url
+          || startLocation.line !== newLocation.line) {
+        return pauseAndRespond(this);
+      }
+
+      // Otherwise, let execution continue (we haven't executed enough code to
+      // consider this a "step" yet).
+      return undefined;
+    };
+  },
+
+  /**
+   * Define the JS hook functions for stepping.
+   */
+  _makeSteppingHooks: function TA__makeSteppingHooks(aStartLocation) {
+    // Bind these methods and state because some of the hooks are called
+    // with 'this' set to the current frame. Rather than repeating the
+    // binding in each _makeOnX method, just do it once here and pass it
+    // in to each function.
+    const steppingHookState = {
+      pauseAndRespond: (aFrame, onPacket=(k)=>k) => {
+        this._pauseAndRespond(aFrame, { type: "resumeLimit" }, onPacket);
+      },
+      createValueGrip: this.createValueGrip.bind(this),
+      thread: this,
+      startFrame: this.youngestFrame,
+      startLocation: aStartLocation
+    };
+
+    return {
+      onEnterFrame: this._makeOnEnterFrame(steppingHookState),
+      onPop: this._makeOnPop(steppingHookState),
+      onStep: this._makeOnStep(steppingHookState)
+    };
+  },
+
+  /**
+   * Handle attaching the various stepping hooks we need to attach when we
+   * receive a resume request with a resumeLimit property.
+   *
+   * @param Object aRequest
+   *        The request packet received over the RDP.
+   * @returns A promise that resolves to true once the hooks are attached, or is
+   *          rejected with an error packet.
+   */
+  _handleResumeLimit: function TA__handleResumeLimit(aRequest) {
+    let steppingType = aRequest.resumeLimit.type;
+    if (["step", "next", "finish"].indexOf(steppingType) == -1) {
+      return reject({ error: "badParameterType",
+                      message: "Unknown resumeLimit type" });
+    }
+
+    const generatedLocation = getFrameLocation(this.youngestFrame);
+    return this.sources.getOriginalLocation(generatedLocation)
+      .then(originalLocation => {
+        const { onEnterFrame, onPop, onStep } = this._makeSteppingHooks(originalLocation);
+
+        // Make sure there is still a frame on the stack if we are to continue
+        // stepping.
+        let stepFrame = this._getNextStepFrame(this.youngestFrame);
+        if (stepFrame) {
+          switch (steppingType) {
+            case "step":
+              this.dbg.onEnterFrame = onEnterFrame;
+              // Fall through.
+            case "next":
+              stepFrame.onStep = onStep;
+              stepFrame.onPop = onPop;
+              break;
+            case "finish":
+              stepFrame.onPop = onPop;
+          }
+        }
+
+        return true;
+      });
+  },
+
+  /**
+   * Clear the onStep and onPop hooks from the given frame and all of the frames
+   * below it.
+   *
+   * @param Debugger.Frame aFrame
+   *        The frame we want to clear the stepping hooks from.
+   */
+  _clearSteppingHooks: function TA__clearSteppingHooks(aFrame) {
+    while (aFrame) {
+      aFrame.onStep = undefined;
+      aFrame.onPop = undefined;
+      aFrame = aFrame.older;
+    }
+  },
+
+  /**
+   * Listen to the debuggee's DOM events if we received a request to do so.
+   *
+   * @param Object aRequest
+   *        The resume request packet received over the RDP.
+   */
+  _maybeListenToEvents: function TA__maybeListenToEvents(aRequest) {
+    // Break-on-DOMEvents is only supported in content debugging.
+    let events = aRequest.pauseOnDOMEvents;
+    if (this.global && events &&
+        (events == "*" ||
+        (Array.isArray(events) && events.length))) {
+      this._pauseOnDOMEvents = events;
+      let els = Cc["@mozilla.org/eventlistenerservice;1"]
+                .getService(Ci.nsIEventListenerService);
+      els.addListenerForAllEvents(this.global, this._allEventsListener, true);
+    }
+  },
+
+  /**
    * Handle a protocol request to resume execution of the debuggee.
    */
   onResume: function TA_onResume(aRequest) {
@@ -740,156 +944,36 @@ ThreadActor.prototype = {
     }
 
     if (aRequest && aRequest.forceCompletion) {
-      // TODO: remove this when Debugger.Frame.prototype.pop is implemented in
-      // bug 736733.
-      if (typeof this.frame.pop != "function") {
-        return { error: "notImplemented",
-                 message: "forced completion is not yet implemented." };
+      return this._forceCompletion(aRequest);
+    }
+
+    let resumeLimitHandled;
+    if (aRequest && aRequest.resumeLimit) {
+      resumeLimitHandled = this._handleResumeLimit(aRequest)
+    } else {
+      this._clearSteppingHooks(this.youngestFrame);
+      resumeLimitHandled = resolve(true);
+    }
+
+    return resumeLimitHandled.then(() => {
+      if (aRequest) {
+        this._options.pauseOnExceptions = aRequest.pauseOnExceptions;
+        this._options.ignoreCaughtExceptions = aRequest.ignoreCaughtExceptions;
+        this.maybePauseOnExceptions();
+        this._maybeListenToEvents(aRequest);
       }
 
-      this.dbg.getNewestFrame().pop(aRequest.completionValue);
       let packet = this._resumed();
       this._popThreadPause();
-      return { type: "resumeLimit", frameFinished: aRequest.forceCompletion };
-    }
-
-    if (aRequest && aRequest.resumeLimit) {
-      // Bind these methods because some of the hooks are called with 'this'
-      // set to the current frame.
-      let pauseAndRespond = (aFrame, onPacket=function (k) k) => {
-        this._pauseAndRespond(aFrame, { type: "resumeLimit" }, onPacket);
-      };
-      let createValueGrip = this.createValueGrip.bind(this);
-
-      let startFrame = this.youngestFrame;
-      let startLine;
-      if (this.youngestFrame.script) {
-        let offset = this.youngestFrame.offset;
-        startLine = this.youngestFrame.script.getOffsetLine(offset);
-      }
-
-      // Define the JS hook functions for stepping.
-
-      let onEnterFrame = aFrame => {
-        let { url } = this.synchronize(this.sources.getOriginalLocation({
-          url: aFrame.script.url,
-          line: aFrame.script.getOffsetLine(aFrame.offset),
-          column: getOffsetColumn(aFrame.offset, aFrame.script)
-        }));
-
-        return this.sources.isBlackBoxed(url)
-          ? undefined
-          : pauseAndRespond(aFrame);
-      };
-
-      let thread = this;
-
-      let onPop = function TA_onPop(aCompletion) {
-        // onPop is called with 'this' set to the current frame.
-
-        let { url } = thread.synchronize(thread.sources.getOriginalLocation({
-          url: this.script.url,
-          line: this.script.getOffsetLine(this.offset),
-          column: getOffsetColumn(this.offset, this.script)
-        }));
-
-        if (thread.sources.isBlackBoxed(url)) {
-          return undefined;
-        }
-
-        // Note that we're popping this frame; we need to watch for
-        // subsequent step events on its caller.
-        this.reportedPop = true;
-
-        return pauseAndRespond(this, aPacket => {
-          aPacket.why.frameFinished = {};
-          if (!aCompletion) {
-            aPacket.why.frameFinished.terminated = true;
-          } else if (aCompletion.hasOwnProperty("return")) {
-            aPacket.why.frameFinished.return = createValueGrip(aCompletion.return);
-          } else if (aCompletion.hasOwnProperty("yield")) {
-            aPacket.why.frameFinished.return = createValueGrip(aCompletion.yield);
-          } else {
-            aPacket.why.frameFinished.throw = createValueGrip(aCompletion.throw);
-          }
-          return aPacket;
-        });
-      };
-
-      let onStep = function TA_onStep() {
-        // onStep is called with 'this' set to the current frame.
-
-        let { url } = thread.synchronize(thread.sources.getOriginalLocation({
-          url: this.script.url,
-          line: this.script.getOffsetLine(this.offset),
-          column: getOffsetColumn(this.offset, this.script)
-        }));
-
-        if (thread.sources.isBlackBoxed(url)) {
-          return undefined;
-        }
-
-        // If we've changed frame or line, then report that.
-        if (this !== startFrame ||
-            (this.script &&
-             this.script.getOffsetLine(this.offset) != startLine)) {
-          return pauseAndRespond(this);
-        }
-
-        // Otherwise, let execution continue.
-        return undefined;
-      };
-
-      let steppingType = aRequest.resumeLimit.type;
-      if (["step", "next", "finish"].indexOf(steppingType) == -1) {
-            return { error: "badParameterType",
-                     message: "Unknown resumeLimit type" };
-      }
-      // Make sure there is still a frame on the stack if we are to continue
-      // stepping.
-      let stepFrame = this._getNextStepFrame(startFrame);
-      if (stepFrame) {
-        switch (steppingType) {
-          case "step":
-            this.dbg.onEnterFrame = onEnterFrame;
-            // Fall through.
-          case "next":
-            stepFrame.onStep = onStep;
-            stepFrame.onPop = onPop;
-            break;
-          case "finish":
-            stepFrame.onPop = onPop;
-        }
-      }
-    } else {
-      // Clear any previous stepping hooks on a plain resumption.
-      let frame = this.youngestFrame;
-      while (frame) {
-        frame.onStep = undefined;
-        frame.onPop = undefined;
-        frame = frame.older;
-      }
-    }
-
-    if (aRequest) {
-      this._options.pauseOnExceptions = aRequest.pauseOnExceptions;
-      this._options.ignoreCaughtExceptions = aRequest.ignoreCaughtExceptions;
-      this.maybePauseOnExceptions();
-      // Break-on-DOMEvents is only supported in content debugging.
-      let events = aRequest.pauseOnDOMEvents;
-      if (this.global && events &&
-          (events == "*" ||
-          (Array.isArray(events) && events.length))) {
-        this._pauseOnDOMEvents = events;
-        let els = Cc["@mozilla.org/eventlistenerservice;1"]
-                  .getService(Ci.nsIEventListenerService);
-        els.addListenerForAllEvents(this.global, this._allEventsListener, true);
-      }
-    }
-
-    let packet = this._resumed();
-    this._popThreadPause();
-    return packet;
+      return packet;
+    }, error => {
+      return error instanceof Error
+        ? { error: "unknownError",
+            message: safeErrorString(error) }
+        // It is a known error, and the promise was rejected with an error
+        // packet.
+        : error;
+    });
   },
 
   /**
@@ -1374,18 +1458,23 @@ ThreadActor.prototype = {
   _findClosestOffsetMappings: function TA__findClosestOffsetMappings(aTargetLocation,
                                                                      aScript,
                                                                      aScriptsAndOffsetMappings) {
-    let offsetMappings = aScript.getAllColumnOffsets()
-      .filter(({ lineNumber }) => lineNumber === aTargetLocation.line);
-
     // If we are given a column, we will try and break only at that location,
     // otherwise we will break anytime we get on that line.
 
     if (aTargetLocation.column == null) {
+      let offsetMappings = aScript.getLineOffsets(aTargetLocation.line)
+        .map(o => ({
+          line: aTargetLocation.line,
+          offset: o
+        }));
       if (offsetMappings.length) {
         aScriptsAndOffsetMappings.set(aScript, offsetMappings);
       }
       return;
     }
+
+    let offsetMappings = aScript.getAllColumnOffsets()
+      .filter(({ lineNumber }) => lineNumber === aTargetLocation.line);
 
     // Attempt to find the current closest offset distance from the target
     // location by grabbing any offset mapping in the map by doing one iteration
@@ -1941,11 +2030,9 @@ ThreadActor.prototype = {
   onDebuggerStatement: function TA_onDebuggerStatement(aFrame) {
     // Don't pause if we are currently stepping (in or over) or the frame is
     // black-boxed.
-    let { url } = this.synchronize(this.sources.getOriginalLocation({
-      url: aFrame.script.url,
-      line: aFrame.script.getOffsetLine(aFrame.offset),
-      column: getOffsetColumn(aFrame.offset, aFrame.script)
-    }));
+    const generatedLocation = getFrameLocation(aFrame);
+    const { url } = this.synchronize(this.sources.getOriginalLocation(
+      generatedLocation));
 
     return this.sources.isBlackBoxed(url) || aFrame.onStep
       ? undefined
@@ -1974,11 +2061,9 @@ ThreadActor.prototype = {
       return undefined;
     }
 
-    let { url } = this.synchronize(this.sources.getOriginalLocation({
-      url: aFrame.script.url,
-      line: aFrame.script.getOffsetLine(aFrame.offset),
-      column: getOffsetColumn(aFrame.offset, aFrame.script)
-    }));
+    const generatedLocation = getFrameLocation(aFrame);
+    const { url } = this.synchronize(this.sources.getOriginalLocation(
+      generatedLocation));
 
     if (this.sources.isBlackBoxed(url)) {
       return undefined;
@@ -2213,11 +2298,19 @@ PauseScopedActor.prototype = {
  *        The current thread actor.
  * @param aSourceMap SourceMapConsumer
  *        Optional. The source map that introduced this source, if available.
+ * @param aGeneratedSource String
+ *        Optional, passed in when aSourceMap is also passed in. The generated
+ *        source url that introduced this source.
  */
-function SourceActor(aUrl, aThreadActor, aSourceMap=null) {
+function SourceActor(aUrl, aThreadActor, aSourceMap=null, aGeneratedSource=null) {
   this._threadActor = aThreadActor;
   this._url = aUrl;
   this._sourceMap = aSourceMap;
+  this._generatedSource = aGeneratedSource;
+
+  this.onSource = this.onSource.bind(this);
+  this._invertSourceMap = this._invertSourceMap.bind(this);
+  this._saveMap = this._saveMap.bind(this);
 }
 
 SourceActor.prototype = {
@@ -2236,33 +2329,35 @@ SourceActor.prototype = {
     };
   },
 
-  disconnect: function LSA_disconnect() {
+  disconnect: function SA_disconnect() {
     if (this.registeredPool && this.registeredPool.sourceActors) {
       delete this.registeredPool.sourceActors[this.actorID];
     }
   },
 
-  /**
-   * Handler for the "source" packet.
-   */
-  onSource: function SA_onSource(aRequest) {
+  _getSourceText: function SA__getSourceText() {
     let sourceContent = null;
     if (this._sourceMap) {
       sourceContent = this._sourceMap.sourceContentFor(this._url);
     }
 
     if (sourceContent) {
-      return {
-        from: this.actorID,
-        source: this.threadActor.createValueGrip(
-          sourceContent, this.threadActor.threadLifetimePool)
-      };
+      return resolve({
+        content: sourceContent
+      });
     }
 
     // XXX bug 865252: Don't load from the cache if this is a source mapped
     // source because we can't guarantee that the cache has the most up to date
     // content for this source like we can if it isn't source mapped.
-    return fetch(this._url, { loadFromCache: !this._sourceMap })
+    return fetch(this._url, { loadFromCache: !this._sourceMap });
+  },
+
+  /**
+   * Handler for the "source" packet.
+   */
+  onSource: function SA_onSource(aRequest) {
+    return this._getSourceText()
       .then(({ content, contentType }) => {
         return {
           from: this.actorID,
@@ -2280,6 +2375,109 @@ SourceActor.prototype = {
             + safeErrorString(aError)
         };
       });
+  },
+
+  /**
+   * Handler for the "prettyPrint" packet.
+   */
+  onPrettyPrint: function ({ indent }) {
+    return this._getSourceText()
+      .then(this._parseAST)
+      .then(this._generatePrettyCodeAndMap(indent))
+      .then(this._invertSourceMap)
+      .then(this._saveMap)
+      .then(this.onSource)
+      .then(null, error => ({
+        from: this.actorID,
+        error: "prettyPrintError",
+        message: DevToolsUtils.safeErrorString(error)
+      }));
+  },
+
+  /**
+   * Parse the source content into an AST.
+   */
+  _parseAST: function SA__parseAST({ content}) {
+    return Reflect.parse(content);
+  },
+
+  /**
+   * Take the number of spaces to indent and return a function that takes an AST
+   * and generates code and a source map from the ugly code to the pretty code.
+   */
+  _generatePrettyCodeAndMap: function SA__generatePrettyCodeAndMap(aNumSpaces) {
+    let indent = "";
+    for (let i = 0; i < aNumSpaces; i++) {
+      indent += " ";
+    }
+    return aAST => escodegen.generate(aAST, {
+      format: {
+        indent: {
+          style: indent
+        }
+      },
+      sourceMap: this._url,
+      sourceMapWithCode: true
+    });
+  },
+
+  /**
+   * Invert a source map. So if a source map maps from a to b, return a new
+   * source map from b to a. We need to do this because the source map we get
+   * from _generatePrettyCodeAndMap goes the opposite way we want it to for
+   * debugging.
+   */
+  _invertSourceMap: function SA__invertSourceMap({ code, map }) {
+    const smc = new SourceMapConsumer(map.toJSON());
+    const invertedMap = new SourceMapGenerator({
+      file: this._url
+    });
+
+    smc.eachMapping(m => {
+      if (!m.originalLine || !m.originalColumn) {
+        return;
+      }
+      const invertedMapping = {
+        source: m.source,
+        name: m.name,
+        original: {
+          line: m.generatedLine,
+          column: m.generatedColumn
+        },
+        generated: {
+          line: m.originalLine,
+          column: m.originalColumn
+        }
+      };
+      invertedMap.addMapping(invertedMapping);
+    });
+
+    invertedMap.setSourceContent(this._url, code);
+
+    return {
+      code: code,
+      map: new SourceMapConsumer(invertedMap.toJSON())
+    };
+  },
+
+  /**
+   * Save the source map back to our thread's ThreadSources object so that
+   * stepping, breakpoints, debugger statements, etc can use it. If we are
+   * pretty printing a source mapped source, we need to compose the existing
+   * source map with our new one.
+   */
+  _saveMap: function SA__saveMap({ map }) {
+    if (this._sourceMap) {
+      // Compose the source maps
+      this._sourceMap = SourceMapGenerator.fromSourceMap(this._sourceMap);
+      this._sourceMap.applySourceMap(map, this._url);
+      this._sourceMap = new SourceMapConsumer(this._sourceMap.toJSON());
+      this._threadActor.sources.saveSourceMap(this._sourceMap,
+                                              this._generatedSource);
+    } else {
+      this._sourceMap = map;
+      this._threadActor.sources.saveSourceMap(this._sourceMap, this._url);
+    }
   },
 
   /**
@@ -2312,7 +2510,8 @@ SourceActor.prototype = {
 SourceActor.prototype.requestTypes = {
   "source": SourceActor.prototype.onSource,
   "blackbox": SourceActor.prototype.onBlackBox,
-  "unblackbox": SourceActor.prototype.onUnblackBox
+  "unblackbox": SourceActor.prototype.onUnblackBox,
+  "prettyPrint": SourceActor.prototype.onPrettyPrint
 };
 
 
@@ -2919,11 +3118,7 @@ FrameActor.prototype = {
     form.this = this.threadActor.createValueGrip(this.frame.this);
     form.arguments = this._args();
     if (this.frame.script) {
-      form.where = {
-        url: this.frame.script.url,
-        line: this.frame.script.getOffsetLine(this.frame.offset),
-        column: getOffsetColumn(this.frame.offset, this.frame.script)
-      };
+      form.where = getFrameLocation(this.frame);
     }
 
     if (!this.frame.older) {
@@ -3376,8 +3571,6 @@ function ThreadSources(aThreadActor, aUseSourceMaps, aAllowPredicate,
   this._allow = aAllowPredicate;
   this._onNewSource = aOnNewSource;
 
-  // source map URL --> promise of SourceMapConsumer
-  this._sourceMaps = Object.create(null);
   // generated source url --> promise of SourceMapConsumer
   this._sourceMapsByGeneratedSource = Object.create(null);
   // original source url --> promise of SourceMapConsumer
@@ -3407,9 +3600,12 @@ ThreadSources.prototype = {
    *        The source URL.
    * @param optional SourceMapConsumer aSourceMap
    *        The source map that introduced this source, if any.
+   * @param optional String aGeneratedSource
+   *        The generated source url that introduced this source via source map,
+   *        if any.
    * @returns a SourceActor representing the source at aURL or null.
    */
-  source: function TS_source(aURL, aSourceMap=null) {
+  source: function TS_source(aURL, aSourceMap=null, aGeneratedSource=null) {
     if (!this._allow(aURL)) {
       return null;
     }
@@ -3418,7 +3614,7 @@ ThreadSources.prototype = {
       return this._sourceActors[aURL];
     }
 
-    let actor = new SourceActor(aURL, this._thread, aSourceMap);
+    let actor = new SourceActor(aURL, this._thread, aSourceMap, aGeneratedSource);
     this._thread.threadLifetimePool.addActor(actor);
     this._sourceActors[aURL] = actor;
     try {
@@ -3445,12 +3641,11 @@ ThreadSources.prototype = {
     return this.sourceMap(aScript)
       .then((aSourceMap) => {
         return [
-          this.source(s, aSourceMap) for (s of aSourceMap.sources)
+          this.source(s, aSourceMap, aScript.url) for (s of aSourceMap.sources)
         ];
       })
       .then(null, (e) => {
         reportError(e);
-        delete this._sourceMaps[this._normalize(aScript.sourceMapURL, aScript.url)];
         delete this._sourceMapsByGeneratedSource[aScript.url];
         return [this.source(aScript.url)];
       })
@@ -3465,21 +3660,25 @@ ThreadSources.prototype = {
    * |aScript| must have a non-null sourceMapURL.
    */
   sourceMap: function TS_sourceMap(aScript) {
-    if (aScript.url in this._sourceMapsByGeneratedSource) {
-      return this._sourceMapsByGeneratedSource[aScript.url];
-    }
     dbg_assert(aScript.sourceMapURL, "Script should have a sourceMapURL");
     let sourceMapURL = this._normalize(aScript.sourceMapURL, aScript.url);
     let map = this._fetchSourceMap(sourceMapURL, aScript.url)
-      .then((aSourceMap) => {
-        for (let s of aSourceMap.sources) {
-          this._generatedUrlsByOriginalUrl[s] = aScript.url;
-          this._sourceMapsByOriginalSource[s] = resolve(aSourceMap);
-        }
-        return aSourceMap;
-      });
+      .then(aSourceMap => this.saveSourceMap(aSourceMap, aScript.url));
     this._sourceMapsByGeneratedSource[aScript.url] = map;
     return map;
+  },
+
+  /**
+   * Save the given source map so that we can use it to query source locations
+   * down the line.
+   */
+  saveSourceMap: function TS_saveSourceMap(aSourceMap, aGeneratedSource) {
+    this._sourceMapsByGeneratedSource[aGeneratedSource] = resolve(aSourceMap);
+    for (let s of aSourceMap.sources) {
+      this._generatedUrlsByOriginalUrl[s] = aGeneratedSource;
+      this._sourceMapsByOriginalSource[s] = resolve(aSourceMap);
+    }
+    return aSourceMap;
   },
 
   /**
@@ -3495,17 +3694,12 @@ ThreadSources.prototype = {
    *        them from aScriptURL.
    */
   _fetchSourceMap: function TS__fetchSourceMap(aAbsSourceMapURL, aScriptURL) {
-    if (aAbsSourceMapURL in this._sourceMaps) {
-      return this._sourceMaps[aAbsSourceMapURL];
-    }
-
-    let promise = fetch(aAbsSourceMapURL).then(({ content }) => {
-      let map = new SourceMapConsumer(content);
-      this._setSourceMapRoot(map, aAbsSourceMapURL, aScriptURL);
-      return map;
-    });
-    this._sourceMaps[aAbsSourceMapURL] = promise;
-    return promise;
+    return fetch(aAbsSourceMapURL, { loadFromCache: false })
+      .then(({ content }) => {
+        let map = new SourceMapConsumer(content);
+        this._setSourceMapRoot(map, aAbsSourceMapURL, aScriptURL);
+        return map;
+      });
   },
 
   /**
@@ -3670,6 +3864,26 @@ function getOffsetColumn(aOffset, aScript) {
 }
 
 /**
+ * Return the non-source-mapped location of the given Debugger.Frame. If the
+ * frame does not have a script, the location's properties are all null.
+ *
+ * @param Debugger.Frame aFrame
+ *        The frame whose location we are getting.
+ * @returns Object
+ *          Returns an object of the form { url, line, column }
+ */
+function getFrameLocation(aFrame) {
+  if (!aFrame.script) {
+    return { url: null, line: null, column: null };
+  }
+  return {
+    url: aFrame.script.url,
+    line: aFrame.script.getOffsetLine(aFrame.offset),
+    column: getOffsetColumn(aFrame.offset, aFrame.script)
+  }
+}
+
+/**
  * Utility function for updating an object with the properties of another
  * object.
  *
@@ -3731,7 +3945,10 @@ function fetch(aURL, aOptions={ loadFromCache: true }) {
       try {
         NetUtil.asyncFetch(url, function onFetch(aStream, aStatus, aRequest) {
           if (!Components.isSuccessCode(aStatus)) {
-            deferred.reject(new Error("Request failed: " + url));
+            deferred.reject(new Error("Request failed with status code = "
+                                      + aStatus
+                                      + " after NetUtil.asyncFetch for url = "
+                                      + url));
             return;
           }
 
@@ -3741,7 +3958,7 @@ function fetch(aURL, aOptions={ loadFromCache: true }) {
           aStream.close();
         });
       } catch (ex) {
-        deferred.reject(new Error("Request failed: " + url));
+        deferred.reject(ex);
       }
       break;
 
@@ -3759,7 +3976,10 @@ function fetch(aURL, aOptions={ loadFromCache: true }) {
       let streamListener = {
         onStartRequest: function(aRequest, aContext, aStatusCode) {
           if (!Components.isSuccessCode(aStatusCode)) {
-            deferred.reject(new Error("Request failed: " + url));
+            deferred.reject(new Error("Request failed with status code = "
+                                      + aStatusCode
+                                      + " in onStartRequest handler for url = "
+                                      + url));
           }
         },
         onDataAvailable: function(aRequest, aContext, aStream, aOffset, aCount) {
@@ -3767,7 +3987,10 @@ function fetch(aURL, aOptions={ loadFromCache: true }) {
         },
         onStopRequest: function(aRequest, aContext, aStatusCode) {
           if (!Components.isSuccessCode(aStatusCode)) {
-            deferred.reject(new Error("Request failed: " + url));
+            deferred.reject(new Error("Request failed with status code = "
+                                      + aStatusCode
+                                      + " in onStopRequest handler for url = "
+                                      + url));
             return;
           }
 

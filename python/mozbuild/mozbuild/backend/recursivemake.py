@@ -20,28 +20,21 @@ from .common import CommonBackend
 from ..frontend.data import (
     ConfigFileSubstitution,
     DirectoryTraversal,
-    IPDLFile,
-    SandboxDerived,
-    VariablePassthru,
     Exports,
+    GeneratedEventWebIDLFile,
+    GeneratedWebIDLFile,
+    IPDLFile,
+    LocalInclude,
+    PreprocessedWebIDLFile,
     Program,
+    SandboxDerived,
+    TestWebIDLFile,
+    VariablePassthru,
     XPIDLFile,
     XpcshellManifests,
+    WebIDLFile,
 )
 from ..util import FileAvoidWrite
-
-
-STUB_MAKEFILE = '''
-# THIS FILE WAS AUTOMATICALLY GENERATED. DO NOT MODIFY BY HAND.
-
-DEPTH          := {depth}
-topsrcdir      := {topsrc}
-srcdir         := {src}
-VPATH          := {src}
-relativesrcdir := {relsrc}
-
-include {topsrc}/config/rules.mk
-'''.lstrip()
 
 
 class BackendMakeFile(object):
@@ -134,6 +127,11 @@ class RecursiveMakeBackend(CommonBackend):
 
         self._backend_files = {}
         self._ipdl_sources = set()
+        self._webidl_sources = set()
+        self._generated_events_webidl_sources = set()
+        self._test_webidl_sources = set()
+        self._preprocessed_webidl_sources = set()
+        self._generated_webidl_sources = set()
 
         def detailed(summary):
             return '{:d} total backend files. {:d} created; {:d} updated; {:d} unchanged'.format(
@@ -149,11 +147,8 @@ class RecursiveMakeBackend(CommonBackend):
         self.backend_input_files.add(os.path.join(self.environment.topobjdir,
             'config', 'autoconf.mk'))
 
-        self._install_manifests = dict()
-
         self._purge_manifests = dict(
             dist_bin=PurgeManifest(relpath='dist/bin'),
-            dist_include=PurgeManifest(relpath='dist/include'),
             dist_private=PurgeManifest(relpath='dist/private'),
             dist_public=PurgeManifest(relpath='dist/public'),
             dist_sdk=PurgeManifest(relpath='dist/sdk'),
@@ -163,6 +158,7 @@ class RecursiveMakeBackend(CommonBackend):
 
         self._install_manifests = dict(
             dist_idl=InstallManifest(),
+            dist_include=InstallManifest(),
         )
 
     def _update_from_avoid_write(self, result):
@@ -208,16 +204,41 @@ class RecursiveMakeBackend(CommonBackend):
                 else:
                     backend_file.write('%s := %s\n' % (k, v))
         elif isinstance(obj, Exports):
-            self._process_exports(obj.exports, backend_file)
+            self._process_exports(obj, obj.exports, backend_file)
 
         elif isinstance(obj, IPDLFile):
             self._ipdl_sources.add(mozpath.join(obj.srcdir, obj.basename))
+
+        elif isinstance(obj, WebIDLFile):
+            self._webidl_sources.add(mozpath.join(obj.srcdir, obj.basename))
+            self._process_webidl_basename(obj.basename)
+
+        elif isinstance(obj, GeneratedEventWebIDLFile):
+            self._generated_events_webidl_sources.add(mozpath.join(obj.srcdir, obj.basename))
+
+        elif isinstance(obj, TestWebIDLFile):
+            self._test_webidl_sources.add(mozpath.join(obj.srcdir,
+                                                       obj.basename))
+            # Test WebIDL files are not exported.
+
+        elif isinstance(obj, GeneratedWebIDLFile):
+            self._generated_webidl_sources.add(mozpath.join(obj.srcdir,
+                                                            obj.basename))
+            self._process_webidl_basename(obj.basename)
+
+        elif isinstance(obj, PreprocessedWebIDLFile):
+            self._preprocessed_webidl_sources.add(mozpath.join(obj.srcdir,
+                                                               obj.basename))
+            self._process_webidl_basename(obj.basename)
 
         elif isinstance(obj, Program):
             self._process_program(obj.program, backend_file)
 
         elif isinstance(obj, XpcshellManifests):
             self._process_xpcshell_manifests(obj, backend_file)
+
+        elif isinstance(obj, LocalInclude):
+            self._process_local_include(obj.path, backend_file)
 
         self._backend_files[obj.srcdir] = backend_file
 
@@ -239,13 +260,10 @@ class RecursiveMakeBackend(CommonBackend):
 
             # If Makefile.in exists, use it as a template. Otherwise, create a
             # stub.
-            if os.path.exists(makefile_in):
+            stub = not os.path.exists(makefile_in)
+            if not stub:
                 self.log(logging.DEBUG, 'substitute_makefile',
                     {'path': makefile}, 'Substituting makefile: {path}')
-
-                self._update_from_avoid_write(
-                    bf.environment.create_config_file(makefile))
-                self.summary.managed_count += 1
 
                 # Adding the Makefile.in here has the desired side-effect that
                 # if the Makefile.in disappears, this will force moz.build
@@ -257,17 +275,9 @@ class RecursiveMakeBackend(CommonBackend):
                 self.log(logging.DEBUG, 'stub_makefile',
                     {'path': makefile}, 'Creating stub Makefile: {path}')
 
-                params = {
-                    'topsrc': bf.environment.get_top_srcdir(makefile),
-                    'src': bf.environment.get_file_srcdir(makefile),
-                    'depth': bf.environment.get_depth(makefile),
-                    'relsrc': bf.environment.get_relative_srcdir(makefile),
-                }
-
-                aw = FileAvoidWrite(makefile)
-                aw.write(STUB_MAKEFILE.format(**params))
-                self._update_from_avoid_write(aw.close())
-                self.summary.managed_count += 1
+            self._update_from_avoid_write(
+                bf.environment.create_makefile(makefile, stub=stub))
+            self.summary.managed_count += 1
 
             self._update_from_avoid_write(bf.close())
             self.summary.managed_count += 1
@@ -292,6 +302,24 @@ class RecursiveMakeBackend(CommonBackend):
             for p in self._ipdl_sources))))
 
         self._update_from_avoid_write(ipdls.close())
+        self.summary.managed_count += 1
+
+        # Write out master lists of WebIDL source files.
+        webidls = FileAvoidWrite(os.path.join(self.environment.topobjdir,
+              'dom', 'bindings', 'webidlsrcs.mk'))
+
+        for webidl in sorted(self._webidl_sources):
+            webidls.write('webidl_files += %s\n' % os.path.basename(webidl))
+        for webidl in sorted(self._generated_events_webidl_sources):
+            webidls.write('generated_events_webidl_files += %s\n' % os.path.basename(webidl))
+        for webidl in sorted(self._test_webidl_sources):
+            webidls.write('test_webidl_files += %s\n' % os.path.basename(webidl))
+        for webidl in sorted(self._generated_webidl_sources):
+            webidls.write('generated_webidl_files += %s\n' % os.path.basename(webidl))
+        for webidl in sorted(self._preprocessed_webidl_sources):
+            webidls.write('preprocessed_webidl_files += %s\n' % os.path.basename(webidl))
+
+        self._update_from_avoid_write(webidls.close())
         self.summary.managed_count += 1
 
         # Write out a dependency file used to determine whether a config.status
@@ -367,48 +395,46 @@ class RecursiveMakeBackend(CommonBackend):
             fh.write('PARALLEL_DIRS += %s\n' %
                 ' '.join(obj.parallel_external_make_dirs))
 
-    def _process_exports(self, exports, backend_file, namespace=""):
+    def _process_exports(self, obj, exports, backend_file, namespace=""):
+        # This may not be needed, but is present for backwards compatibility
+        # with the old make rules, just in case.
+        if not obj.dist_install:
+            return
+
         strings = exports.get_strings()
         if namespace:
-            if strings:
-                backend_file.write('EXPORTS_NAMESPACES += %s\n' % namespace)
-            export_name = 'EXPORTS_%s' % namespace
             namespace += '/'
-        else:
-            export_name = 'EXPORTS'
 
-        # Iterate over the list of export filenames, printing out an EXPORTS
-        # declaration for each.
-        if strings:
-            backend_file.write('%s += %s\n' % (export_name, ' '.join(strings)))
+        for s in strings:
+            source = os.path.normpath(os.path.join(obj.srcdir, s))
+            dest = '%s%s' % (namespace, os.path.basename(s))
+            self._install_manifests['dist_include'].add_symlink(source, dest)
 
-            for s in strings:
-                p = '%s%s' % (namespace, s)
-                self._purge_manifests['dist_include'].add(p)
+            if not os.path.exists(source):
+                raise Exception('File listed in EXPORTS does not exist: %s' % source)
 
         children = exports.get_children()
         for subdir in sorted(children):
-            self._process_exports(children[subdir], backend_file,
-                                  namespace=namespace + subdir)
+            self._process_exports(obj, children[subdir], backend_file,
+                namespace=namespace + subdir)
 
     def _handle_idl_manager(self, manager):
         build_files = self._purge_manifests['xpidl']
 
         for p in ('Makefile', 'backend.mk', '.deps/.mkdir.done',
-            'headers/.mkdir.done', 'xpt/.mkdir.done'):
+            'xpt/.mkdir.done'):
             build_files.add(p)
 
         for idl in manager.idls.values():
             self._install_manifests['dist_idl'].add_symlink(idl['source'],
                 idl['basename'])
-            self._purge_manifests['dist_include'].add('%s.h' % idl['root'])
-            build_files.add(mozpath.join('headers', '%s.h' % idl['root']))
+            self._install_manifests['dist_include'].add_optional_exists('%s.h'
+                % idl['root'])
 
         for module in manager.modules:
             build_files.add(mozpath.join('xpt', '%s.xpt' % module))
             build_files.add(mozpath.join('.deps', '%s.pp' % module))
 
-        headers = sorted('%s.h' % idl['root'] for idl in manager.idls.values())
         modules = manager.modules
         xpt_modules = sorted(modules.keys())
         rules = []
@@ -433,13 +459,6 @@ class RecursiveMakeBackend(CommonBackend):
                 '',
             ])
 
-            # Set up linkage so make knows headers come from $(idlprocess).
-            h = ['$(idl_headers_dir)/%s.h' % dep for dep in deps]
-            rules.extend([
-                '%s: $(idl_xpt_dir)/%s.xpt' % (' '.join(h), module),
-                '',
-            ])
-
         # Create dependency for output header so we force regeneration if the
         # header was deleted. This ideally should not be necessary. However,
         # some processes (such as PGO at the time this was implemented) wipe
@@ -450,7 +469,6 @@ class RecursiveMakeBackend(CommonBackend):
         result = self.environment.create_config_file(out_path, extra=dict(
             xpidl_rules='\n'.join(rules),
             xpidl_modules=' '.join(xpt_modules),
-            xpidl_headers=' '.join(headers),
         ))
         self._update_from_avoid_write(result)
         self.summary.managed_count += 1
@@ -463,12 +481,23 @@ class RecursiveMakeBackend(CommonBackend):
     def _process_program(self, program, backend_file):
         backend_file.write('PROGRAM = %s\n' % program)
 
+    def _process_webidl_basename(self, basename):
+        header = 'mozilla/dom/%sBinding.h' % os.path.splitext(basename)[0]
+        self._install_manifests['dist_include'].add_optional_exists(header)
+
     def _process_xpcshell_manifests(self, obj, backend_file, namespace=""):
         manifest = obj.xpcshell_manifests
         backend_file.write('XPCSHELL_TESTS += %s\n' % os.path.dirname(manifest))
         if obj.relativedir != '':
             manifest = '%s/%s' % (obj.relativedir, manifest)
         self.xpcshell_manifests.append(manifest)
+
+    def _process_local_include(self, local_include, backend_file):
+        if local_include.startswith('/'):
+            path = '$(topsrcdir)'
+        else:
+            path = '$(srcdir)/'
+        backend_file.write('LOCAL_INCLUDES += -I%s%s\n' % (path, local_include))
 
     def _write_manifests(self, dest, manifests):
         man_dir = os.path.join(self.environment.topobjdir, '_build_manifests',

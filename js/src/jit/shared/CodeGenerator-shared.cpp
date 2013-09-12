@@ -162,15 +162,23 @@ CodeGeneratorShared::encodeSlots(LSnapshot *snapshot, MResumePoint *resumePoint,
           case MIRType_Object:
           case MIRType_Boolean:
           case MIRType_Double:
+          case MIRType_Float32:
           {
             LAllocation *payload = snapshot->payloadOfSlot(i);
-            JSValueType type = ValueTypeFromMIRType(mir->type());
+            JSValueType valueType = ValueTypeFromMIRType(type);
             if (payload->isMemory()) {
-                snapshots_.addSlot(type, ToStackIndex(payload));
+                if (type == MIRType_Float32)
+                    snapshots_.addFloat32Slot(ToStackIndex(payload));
+                else
+                    snapshots_.addSlot(valueType, ToStackIndex(payload));
             } else if (payload->isGeneralReg()) {
-                snapshots_.addSlot(type, ToRegister(payload));
+                snapshots_.addSlot(valueType, ToRegister(payload));
             } else if (payload->isFloatReg()) {
-                snapshots_.addSlot(ToFloatRegister(payload));
+                FloatRegister reg = ToFloatRegister(payload);
+                if (type == MIRType_Float32)
+                    snapshots_.addFloat32Slot(reg);
+                else
+                    snapshots_.addSlot(reg);
             } else {
                 MConstant *constant = mir->toConstant();
                 const Value &v = constant->value();
@@ -276,7 +284,9 @@ CodeGeneratorShared::encode(LSnapshot *snapshot)
                 // include the this. When inlining that is not included.
                 // So the exprStackSlots will be one less.
                 JS_ASSERT(stackDepth - exprStack <= 1);
-            } else if (JSOp(*bailPC) != JSOP_FUNAPPLY && !IsGetterPC(bailPC) && !IsSetterPC(bailPC)) {
+            } else if (JSOp(*bailPC) != JSOP_FUNAPPLY &&
+                       !IsGetPropPC(bailPC) && !IsSetPropPC(bailPC))
+            {
                 // For fun.apply({}, arguments) the reconstructStackDepth will
                 // have stackdepth 4, but it could be that we inlined the
                 // funapply. In that case exprStackSlots, will have the real
@@ -665,11 +675,20 @@ class OutOfLineTruncateSlow : public OutOfLineCodeBase<CodeGeneratorShared>
     }
 };
 
-bool
-CodeGeneratorShared::emitTruncateDouble(const FloatRegister &src, const Register &dest)
+OutOfLineCode *
+CodeGeneratorShared::oolTruncateDouble(const FloatRegister &src, const Register &dest)
 {
     OutOfLineTruncateSlow *ool = new OutOfLineTruncateSlow(src, dest);
     if (!addOutOfLineCode(ool))
+        return NULL;
+    return ool;
+}
+
+bool
+CodeGeneratorShared::emitTruncateDouble(const FloatRegister &src, const Register &dest)
+{
+    OutOfLineCode *ool = oolTruncateDouble(src, dest);
+    if (!ool)
         return false;
 
     masm.branchTruncateDouble(src, dest, ool->entry());

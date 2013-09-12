@@ -22,6 +22,21 @@
 #define SECCOMP_WHITELIST_ADD
 #endif
 
+/**
+ * Bug 909658: no __NR_recv, __NR_msgget, __NR_semget in emulator-x86.
+ *
+ * These system calls are not defined on i386.
+ */
+#if defined(__i386__)
+#define SECCOMP_WHITELIST_ADD_i386 \
+  ALLOW_SYSCALL(ipc),
+#else
+#define SECCOMP_WHITELIST_ADD_i386 \
+  ALLOW_SYSCALL(recv), \
+  ALLOW_SYSCALL(msgget), \
+  ALLOW_SYSCALL(msgget),
+#endif
+
 /* Most used system calls should be at the top of the whitelist
  * for performance reasons. The whitelist BPF filter exits after
  * processing any ALLOW_SYSCALL macro.
@@ -40,9 +55,7 @@
  */
 #define SECCOMP_WHITELIST \
   /* These are calls we're ok to allow */ \
-  ALLOW_SYSCALL(recv), \
-  ALLOW_SYSCALL(msgget), \
-  ALLOW_SYSCALL(semget), \
+  SECCOMP_WHITELIST_ADD_i386 \
   ALLOW_SYSCALL(read), \
   ALLOW_SYSCALL(write), \
   ALLOW_SYSCALL(brk), \
@@ -69,18 +82,24 @@
   ALLOW_SYSCALL(munmap), \
   ALLOW_SYSCALL(mmap2), \
   ALLOW_SYSCALL(mprotect), \
+  ALLOW_SYSCALL(dup), \
+  ALLOW_SYSCALL(getuid32), \
+  ALLOW_SYSCALL(nanosleep), \
   /* Must remove all of the following in the future, when no longer used */ \
   /* open() is for some legacy APIs such as font loading. */ \
+  /* See bug 906996 for removing unlink(). */ \
   ALLOW_SYSCALL(open), \
   ALLOW_SYSCALL(fstat64), \
   ALLOW_SYSCALL(stat64), \
   ALLOW_SYSCALL(prctl), \
   ALLOW_SYSCALL(access), \
   ALLOW_SYSCALL(getdents64), \
+  ALLOW_SYSCALL(unlink), \
   /* Should remove all of the following in the future, if possible */ \
   ALLOW_SYSCALL(getpriority), \
   ALLOW_SYSCALL(setpriority), \
   ALLOW_SYSCALL(sigprocmask), \
+  ALLOW_SYSCALL(sched_setscheduler), \
   /* Always last and always OK calls */ \
   SECCOMP_WHITELIST_ADD \
   /* restart_syscall is called internally, generally when debugging */ \

@@ -3,19 +3,21 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH		= @DEPTH@
-topsrcdir	= @top_srcdir@
-srcdir		= @srcdir@
-VPATH		= @srcdir@
-
-include $(DEPTH)/config/autoconf.mk
-
 # On OS/2, SHORT_LIBNAME is used to generate a library with an 8.3 filename,
 # e.g. dist/bin/components/xpcomsmp.dll
 SHORT_LIBNAME	= xpcomsmp
 
 # IS_COMPONENT indicates that this makefile builds a component shared library.
 IS_COMPONENT	= 1
+
+# NOTE:
+####################################################################
+# Variable assignment(s) should be maintained within moz.build files 
+# whenever possible. Migrate existing Makefile.in content into the 
+# corresponding moz.build file, then run 'mach configure' to determine 
+# if the variable is suppported. If not supported / not yet converted- 
+# open a Build::Config bug requesting conversion of the variable.
+####################################################################
 
 # If this is Makefile builds a component, MODULE_NAME must match the module
 # name specified in NS_IMPL_NSGETMODULE

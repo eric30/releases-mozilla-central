@@ -6,8 +6,7 @@
 #ifndef GFX_IMAGELAYEROGL_H
 #define GFX_IMAGELAYEROGL_H
 
-#include "GLContext.h"                  // for GLContext
-#include "GLContextTypes.h"             // for GLuint
+#include "GLContextTypes.h"             // for GLContext, GLuint
 #include "ImageContainer.h"             // for ImageBackendData, etc
 #include "ImageLayers.h"                // for ImageLayer
 #include "LayerManagerOGL.h"            // for LayerOGL
@@ -45,8 +44,8 @@ class GLTexture
   typedef mozilla::gl::GLContext GLContext;
 
 public:
-  GLTexture() : mTexture(0) {}
-  ~GLTexture() { Release(); }
+  GLTexture();
+  ~GLTexture();
 
   /**
    * Allocate the texture. This can only be called on the main thread.

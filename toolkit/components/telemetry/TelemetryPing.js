@@ -8,6 +8,7 @@ const Ci = Components.interfaces;
 const Cr = Components.results;
 const Cu = Components.utils;
 
+Cu.import("resource://gre/modules/debug.js");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 #ifndef MOZ_WIDGET_GONK
@@ -53,11 +54,11 @@ const TELEMETRY_DELAY = 60000;
 // We used to measure "explicit" too, but it could cause hangs, and the data
 // was always really noisy anyway.  See bug 859657.
 const MEM_HISTOGRAMS = {
-  "js-gc-heap": "MEMORY_JS_GC_HEAP",
-  "js-compartments/system": "MEMORY_JS_COMPARTMENTS_SYSTEM",
-  "js-compartments/user": "MEMORY_JS_COMPARTMENTS_USER",
+  "js-main-runtime-gc-heap": "MEMORY_JS_GC_HEAP",
+  "redundant/js-main-runtime-compartments/system": "MEMORY_JS_COMPARTMENTS_SYSTEM",
+  "redundant/js-main-runtime-compartments/user": "MEMORY_JS_COMPARTMENTS_USER",
   "js-main-runtime-temporary-peak": "MEMORY_JS_MAIN_RUNTIME_TEMPORARY_PEAK",
-  "resident-fast": "MEMORY_RESIDENT",
+  "redundant/resident-fast": "MEMORY_RESIDENT",
   "vsize": "MEMORY_VSIZE",
   "storage-sqlite": "MEMORY_STORAGE_SQLITE",
   "images-content-used-uncompressed":
@@ -458,15 +459,32 @@ TelemetryPing.prototype = {
     let e = mgr.enumerateReporters();
     while (e.hasMoreElements()) {
       let mr = e.getNext().QueryInterface(Ci.nsIMemoryReporter);
-      let id = MEM_HISTOGRAMS[mr.path];
+      let id = MEM_HISTOGRAMS[mr.name];
       if (!id) {
         continue;
       }
 
-      // Reading mr.amount might throw an exception.  If so, just ignore that
+      // collectReports might throw an exception.  If so, just ignore that
       // memory reporter; we're not getting useful data out of it.
       try {
-        this.handleMemoryReport(id, mr.path, mr.units, mr.amount);
+        // Bind handleMemoryReport() so it can be called inside the closure
+        // used as the callback.
+        let boundHandleMemoryReport = this.handleMemoryReport.bind(this);
+
+        // Reporters used for telemetry should be uni-reporters!  we assert if
+        // they make more than one report.
+        let hasReported = false;
+
+        function h(process, path, kind, units, amount, desc) {
+          if (!hasReported) {
+            boundHandleMemoryReport(id, path, units, amount);
+            hasReported = true;
+          } else {
+            NS_ASSERT(false,
+                      "reporter " + mr.name + " has made more than one report");
+          }
+        }
+        mr.collectReports(h, null);
       }
       catch (e) {
       }
@@ -474,11 +492,7 @@ TelemetryPing.prototype = {
     histogram.add(new Date() - startTime);
   },
 
-  handleMemoryReport: function handleMemoryReport(id, path, units, amount) {
-    if (amount == -1) {
-      return;
-    }
-
+  handleMemoryReport: function(id, path, units, amount) {
     let val;
     if (units == Ci.nsIMemoryReporter.UNITS_BYTES) {
       val = Math.floor(amount / 1024);

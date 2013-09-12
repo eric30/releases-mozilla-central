@@ -11,12 +11,15 @@
 
 #include "mozilla/MemoryReporting.h"
 
+#include "jsalloc.h"
 #include "jsfriendapi.h"
 
 #include "ds/IdValuePair.h"
 #include "ds/LifoAlloc.h"
 #include "gc/Barrier.h"
+#include "gc/Marking.h"
 #include "js/Utility.h"
+#include "js/Vector.h"
 
 namespace js {
 
@@ -509,7 +512,7 @@ class TypeSet
     inline TypeObjectKey *getObject(unsigned i) const;
     inline JSObject *getSingleObject(unsigned i) const;
     inline TypeObject *getTypeObject(unsigned i) const;
-    inline TypeObject *getTypeOrSingleObject(JSContext *cx, unsigned i) const;
+    inline bool getTypeOrSingleObject(JSContext *cx, unsigned i, TypeObject **obj) const;
 
     void setOwnProperty(bool configurable) {
         flags |= TYPE_FLAG_OWN_PROPERTY;
@@ -611,7 +614,7 @@ class StackTypeSet : public TypeSet
     bool hasObjectFlags(JSContext *cx, TypeObjectFlags flags);
 
     /* Get the class shared by all objects in this set, or NULL. */
-    Class *getKnownClass();
+    const Class *getKnownClass();
 
     /* Get the prototype shared by all objects in this set, or NULL. */
     JSObject *getCommonPrototype();
@@ -621,6 +624,9 @@ class StackTypeSet : public TypeSet
 
     /* Whether all objects have JSCLASS_IS_DOMJSCLASS set. */
     bool isDOMClass();
+
+    /* Whether clasp->isCallable() is true for one or more objects in this set. */
+    bool maybeCallable();
 
     /* Get the single value which can appear in this type set, otherwise NULL. */
     JSObject *getSingleton();
@@ -852,13 +858,13 @@ struct Property
 };
 
 struct TypeNewScript;
-struct TypeBinaryData;
+struct TypeTypedObject;
 
 struct TypeObjectAddendum
 {
     enum Kind {
         NewScript,
-        BinaryData
+        TypedObject
     };
 
     TypeObjectAddendum(Kind kind);
@@ -874,16 +880,17 @@ struct TypeObjectAddendum
         return (TypeNewScript*) this;
     }
 
-    bool isBinaryData() {
-        return kind == BinaryData;
+    bool isTypedObject() {
+        return kind == TypedObject;
     }
 
-    TypeBinaryData *asBinaryData() {
-        JS_ASSERT(isBinaryData());
-        return (TypeBinaryData*) this;
+    TypeTypedObject *asTypedObject() {
+        JS_ASSERT(isTypedObject());
+        return (TypeTypedObject*) this;
     }
 
-    static inline void writeBarrierPre(TypeObjectAddendum *newScript);
+    static inline void writeBarrierPre(TypeObjectAddendum *type);
+
     static void writeBarrierPost(TypeObjectAddendum *newScript, void *addr) {}
 };
 
@@ -937,9 +944,9 @@ struct TypeNewScript : public TypeObjectAddendum
     static inline void writeBarrierPre(TypeNewScript *newScript);
 };
 
-struct TypeBinaryData : public TypeObjectAddendum
+struct TypeTypedObject : public TypeObjectAddendum
 {
-    TypeBinaryData(TypeRepresentation *repr);
+    TypeTypedObject(TypeRepresentation *repr);
 
     TypeRepresentation *const typeRepr;
 };
@@ -974,7 +981,7 @@ struct TypeBinaryData : public TypeObjectAddendum
 struct TypeObject : gc::Cell
 {
     /* Class shared by objects using this type. */
-    Class *clasp;
+    const Class *clasp;
 
     /* Prototype shared by objects using this type. */
     HeapPtrObject proto;
@@ -1018,12 +1025,12 @@ struct TypeObject : gc::Cell
         return addendum->asNewScript();
     }
 
-    bool hasBinaryData() {
-        return addendum && addendum->isBinaryData();
+    bool hasTypedObject() {
+        return addendum && addendum->isTypedObject();
     }
 
-    TypeBinaryData *binaryData() {
-        return addendum->asBinaryData();
+    TypeTypedObject *typedObject() {
+        return addendum->asTypedObject();
     }
 
     /*
@@ -1033,7 +1040,7 @@ struct TypeObject : gc::Cell
      * this addendum must already be associated with the same TypeRepresentation,
      * and the method has no effect.
      */
-    bool addBinaryDataAddendum(JSContext *cx, TypeRepresentation *repr);
+    bool addTypedObjectAddendum(JSContext *cx, TypeRepresentation *repr);
 
     /*
      * Properties of this object. This may contain JSID_VOID, representing the
@@ -1074,7 +1081,7 @@ struct TypeObject : gc::Cell
     uint32_t padding;
 #endif
 
-    inline TypeObject(Class *clasp, TaggedProto proto, bool isFunction, bool unknown);
+    inline TypeObject(const Class *clasp, TaggedProto proto, bool isFunction, bool unknown);
 
     bool isFunction() { return !!(flags & OBJECT_FLAG_FUNCTION); }
 
@@ -1107,6 +1114,9 @@ struct TypeObject : gc::Cell
     inline unsigned getPropertyCount();
     inline Property *getProperty(unsigned i);
 
+    /* Get the typed array element type if clasp is a typed array. */
+    inline int getTypedArrayType();
+
     /*
      * Get the global object which all objects of this type are parented to,
      * or NULL if there is none known.
@@ -1129,7 +1139,7 @@ struct TypeObject : gc::Cell
     void markUnknown(ExclusiveContext *cx);
     void clearAddendum(ExclusiveContext *cx);
     void clearNewScriptAddendum(ExclusiveContext *cx);
-    void clearBinaryDataAddendum(ExclusiveContext *cx);
+    void clearTypedObjectAddendum(ExclusiveContext *cx);
     void getFromPrototypes(JSContext *cx, jsid id, HeapTypeSet *types, bool force = false);
 
     void print();
@@ -1147,10 +1157,34 @@ struct TypeObject : gc::Cell
     void finalize(FreeOp *fop) {}
 
     JS::Zone *zone() const { return tenuredZone(); }
+    JS::shadow::Zone *shadowZone() const { return JS::shadow::Zone::asShadowZone(zone()); }
 
-    static inline void writeBarrierPre(TypeObject *type);
+    static void writeBarrierPre(TypeObject *type) {
+#ifdef JSGC_INCREMENTAL
+        if (!type || !type->shadowRuntimeFromAnyThread()->needsBarrier())
+            return;
+
+        JS::shadow::Zone *shadowZone = type->shadowZone();
+        if (shadowZone->needsBarrier()) {
+            TypeObject *tmp = type;
+            js::gc::MarkTypeObjectUnbarriered(shadowZone->barrierTracer(), &tmp, "write barrier");
+            JS_ASSERT(tmp == type);
+        }
+#endif
+    }
+
     static void writeBarrierPost(TypeObject *type, void *addr) {}
-    static inline void readBarrier(TypeObject *type);
+
+    static void readBarrier(TypeObject *type) {
+#ifdef JSGC_INCREMENTAL
+        JS::shadow::Zone *shadowZone = type->shadowZone();
+        if (shadowZone->needsBarrier()) {
+            TypeObject *tmp = type;
+            MarkTypeObjectUnbarriered(shadowZone->barrierTracer(), &tmp, "read barrier");
+            JS_ASSERT(tmp == type);
+        }
+#endif
+    }
 
     static inline ThingRootKind rootKind() { return THING_ROOT_TYPE_OBJECT; }
 
@@ -1170,10 +1204,10 @@ struct TypeObject : gc::Cell
 struct TypeObjectEntry : DefaultHasher<ReadBarriered<TypeObject> >
 {
     struct Lookup {
-        Class *clasp;
+        const Class *clasp;
         TaggedProto proto;
 
-        Lookup(Class *clasp, TaggedProto proto) : clasp(clasp), proto(proto) {}
+        Lookup(const Class *clasp, TaggedProto proto) : clasp(clasp), proto(proto) {}
     };
 
     static inline HashNumber hash(const Lookup &lookup);
@@ -1463,7 +1497,7 @@ struct TypeCompartment
      * or JSProto_Object to indicate a type whose class is unknown (not just
      * js_ObjectClass).
      */
-    TypeObject *newTypeObject(ExclusiveContext *cx, Class *clasp, Handle<TaggedProto> proto,
+    TypeObject *newTypeObject(ExclusiveContext *cx, const Class *clasp, Handle<TaggedProto> proto,
                               bool unknown = false);
 
     /* Get or make an object for an allocation site, and add to the allocation site table. */

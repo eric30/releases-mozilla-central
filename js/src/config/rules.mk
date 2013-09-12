@@ -10,15 +10,18 @@ ifndef topsrcdir
 $(error topsrcdir was not set))
 endif
 
-ifndef INCLUDED_MOZCONFIG_MK
-include $(topsrcdir)/config/makefiles/mozconfig.mk
+# Define an include-at-most-once flag
+ifdef INCLUDED_RULES_MK
+$(error Do not include rules.mk twice!)
 endif
+INCLUDED_RULES_MK = 1
 
 # Integrate with mozbuild-generated make files. We first verify that no
 # variables provided by the automatically generated .mk files are
 # present. If they are, this is a violation of the separation of
 # responsibility between Makefile.in and mozbuild files.
 _MOZBUILD_EXTERNAL_VARIABLES := \
+  CMMSRCS \
   CPP_UNIT_TESTS \
   DIRS \
   EXTRA_PP_COMPONENTS \
@@ -51,11 +54,11 @@ ifndef EXTERNALLY_MANAGED_MAKE_FILE
 # scenarios.
 _current_makefile = $(CURDIR)/$(firstword $(MAKEFILE_LIST))
 
-$(foreach var,$(_MOZBUILD_EXTERNAL_VARIABLES),$(if $($(var)),\
+$(foreach var,$(_MOZBUILD_EXTERNAL_VARIABLES),$(if $(filter file override,$(subst $(NULL) ,_,$(origin $(var)))),\
     $(error Variable $(var) is defined in $(_current_makefile). It should only be defined in moz.build files),\
     ))
 
-$(foreach var,$(_DEPRECATED_VARIABLES),$(if $($(var)),\
+$(foreach var,$(_DEPRECATED_VARIABLES),$(if $(filter file override,$(subst $(NULL) ,_,$(origin $(var)))),\
     $(error Variable $(var) is defined in $(_current_makefile). This variable has been deprecated. It does nothing. It must be removed in order to build)\
     ))
 
@@ -433,7 +436,10 @@ endif
 
 ifdef MACH
 ifndef NO_BUILDSTATUS_MESSAGES
-BUILDSTATUS=@echo "BUILDSTATUS $1"
+define BUILDSTATUS
+@echo "BUILDSTATUS $1"
+
+endef
 endif
 endif
 
@@ -454,7 +460,6 @@ $(call SUBMAKE,$(4),$(3),$(5))
 $(call BUILDSTATUS,TIERDIR_FINISH $(1) $(2) $(3))
 
 endef # Ths empty line is important.
-
 
 ifneq (,$(strip $(DIRS)))
 LOOP_OVER_DIRS = \
@@ -685,20 +690,11 @@ SUBMAKEFILES += $(addsuffix /Makefile, $(DIRS) $(TOOL_DIRS) $(PARALLEL_DIRS))
 # of something else. Makefiles which use this var *must* provide a sensible
 # default rule before including rules.mk
 ifndef SUPPRESS_DEFAULT_RULES
-ifndef TIERS
 default all::
 	$(MAKE) export
+	$(MAKE) compile
 	$(MAKE) libs
 	$(MAKE) tools
-
-# Do depend as well
-alldep::
-	$(MAKE) export
-	$(MAKE) depend
-	$(MAKE) libs
-	$(MAKE) tools
-
-endif # TIERS
 endif # SUPPRESS_DEFAULT_RULES
 
 ifeq ($(findstring s,$(filter-out --%, $(MAKEFLAGS))),)
@@ -712,10 +708,7 @@ endif
 # Do everything from scratch
 everything::
 	$(MAKE) clean
-	$(MAKE) alldep
-
-# Add dummy depend target for tinderboxes
-depend::
+	$(MAKE) all
 
 # Target to only regenerate makefiles
 makefiles: $(SUBMAKEFILES)
@@ -724,35 +717,6 @@ ifneq (,$(DIRS)$(TOOL_DIRS)$(PARALLEL_DIRS))
 	$(LOOP_OVER_DIRS)
 	$(LOOP_OVER_TOOL_DIRS)
 endif
-
-#########################
-# Tier traversal handling
-#########################
-define CREATE_SUBTIER_TRAVERSAL_RULE
-PARALLEL_DIRS_$(1) = $$(addsuffix _$(1),$$(PARALLEL_DIRS))
-
-.PHONY: $(1) $$(PARALLEL_DIRS_$(1))
-
-ifdef PARALLEL_DIRS
-$(1):: $$(PARALLEL_DIRS_$(1))
-
-$$(PARALLEL_DIRS_$(1)): %_$(1): %/Makefile
-	+@$$(call SUBMAKE,$(1),$$*)
-endif
-
-endef
-
-$(foreach subtier,export libs tools,$(eval $(call CREATE_SUBTIER_TRAVERSAL_RULE,$(subtier))))
-
-export:: $(SUBMAKEFILES) $(MAKE_DIRS)
-	$(LOOP_OVER_DIRS)
-	$(LOOP_OVER_TOOL_DIRS)
-
-
-tools:: $(SUBMAKEFILES) $(MAKE_DIRS)
-	$(LOOP_OVER_DIRS)
-	$(foreach dir,$(TOOL_DIRS),$(call SUBMAKE,libs,$(dir)))
-
 
 ifneq (,$(filter-out %.$(LIB_SUFFIX),$(SHARED_LIBRARY_LIBS)))
 $(error SHARED_LIBRARY_LIBS must contain .$(LIB_SUFFIX) files only)
@@ -767,6 +731,8 @@ GLOBAL_DEPS += Makefile.in
 endif
 
 ##############################################
+compile:: $(OBJS) $(HOST_OBJS)
+
 include $(topsrcdir)/config/makefiles/target_libs.mk
 
 ##############################################
@@ -1754,7 +1720,7 @@ documentation:
 	$(DOXYGEN) $(DEPTH)/config/doxygen.cfg
 
 ifdef ENABLE_TESTS
-check:: $(SUBMAKEFILES) $(MAKE_DIRS)
+check:: $(SUBMAKEFILES)
 	$(LOOP_OVER_PARALLEL_DIRS)
 	$(LOOP_OVER_DIRS)
 	$(LOOP_OVER_TOOL_DIRS)

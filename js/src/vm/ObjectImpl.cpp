@@ -12,21 +12,7 @@
 
 #include "jsobjinlines.h"
 
-#include "gc/Barrier-inl.h"
-
 using namespace js;
-
-bool
-js::ObjectImpl::uninlinedIsNative() const
-{
-    return isNative();
-}
-
-uint32_t
-js::ObjectImpl::uninlinedSlotSpan() const
-{
-    return slotSpan();
-}
 
 PropDesc::PropDesc()
   : pd_(UndefinedValue()),
@@ -298,6 +284,12 @@ js::ObjectImpl::copySlotRange(uint32_t start, const Value *vector, uint32_t leng
 
 #ifdef DEBUG
 bool
+js::ObjectImpl::isProxy() const
+{
+    return asObjectPtr()->is<ProxyObject>();
+}
+
+bool
 js::ObjectImpl::slotInRange(uint32_t slot, SentinelAllowed sentinel) const
 {
     uint32_t capacity = numFixedSlots() + numDynamicSlots();
@@ -346,7 +338,7 @@ js::ObjectImpl::markChildren(JSTracer *trc)
 
     MarkShape(trc, &shape_, "shape");
 
-    Class *clasp = type_->clasp;
+    const Class *clasp = type_->clasp;
     JSObject *obj = asObjectPtr();
     if (clasp->trace)
         clasp->trace(trc, obj);
@@ -573,7 +565,7 @@ js::GetOwnProperty(JSContext *cx, Handle<ObjectImpl*> obj, PropertyId pid_, unsi
     RootedShape shape(cx, obj->nativeLookup(cx, pid));
     if (!shape) {
         /* Not found: attempt to resolve it. */
-        Class *clasp = obj->getClass();
+        const Class *clasp = obj->getClass();
         JSResolveOp resolve = clasp->resolve;
         if (resolve != JS_ResolveStub) {
             Rooted<jsid> id(cx, pid.get().asId());

@@ -400,8 +400,12 @@ class TypedRegisterSet
 #endif
     }
     T getAny() const {
-        JS_ASSERT(!empty());
-        return T::FromCode(mozilla::FloorLog2(bits_));
+        // The choice of first or last here is mostly arbitrary, as they are
+        // about the same speed on popular architectures. We choose first, as
+        // it has the advantage of using the "lower" registers more often. These
+        // registers are sometimes more efficient (e.g. optimized encodings for
+        // EAX on x86).
+        return getFirst();
     }
     T getFirst() const {
         JS_ASSERT(!empty());
@@ -804,11 +808,13 @@ class AsmJSHeapAccess
 
   public:
 #if defined(JS_CPU_X86) || defined(JS_CPU_X64)
+    // If 'cmp' equals 'offset' or if it is not supplied then the
+    // cmpDelta_ is zero indicating that there is no length to patch.
     AsmJSHeapAccess(uint32_t offset, uint32_t after, ArrayBufferView::ViewType vt,
                     AnyRegister loadedReg, uint32_t cmp = UINT32_MAX)
       : offset_(offset),
 # if defined(JS_CPU_X86)
-        cmpDelta_(offset - cmp),
+        cmpDelta_(cmp == UINT32_MAX ? 0 : offset - cmp),
 # endif
         opLength_(after - offset),
         isFloat32Load_(vt == ArrayBufferView::TYPE_FLOAT32),
@@ -817,7 +823,7 @@ class AsmJSHeapAccess
     AsmJSHeapAccess(uint32_t offset, uint8_t after, uint32_t cmp = UINT32_MAX)
       : offset_(offset),
 # if defined(JS_CPU_X86)
-        cmpDelta_(offset - cmp),
+        cmpDelta_(cmp == UINT32_MAX ? 0 : offset - cmp),
 # endif
         opLength_(after - offset),
         isFloat32Load_(false),
@@ -832,6 +838,7 @@ class AsmJSHeapAccess
     uint32_t offset() const { return offset_; }
     void setOffset(uint32_t offset) { offset_ = offset; }
 #if defined(JS_CPU_X86)
+    bool hasLengthCheck() const { return cmpDelta_ > 0; }
     void *patchLengthAt(uint8_t *code) const { return code + (offset_ - cmpDelta_); }
     void *patchOffsetAt(uint8_t *code) const { return code + (offset_ + opLength_); }
 #endif

@@ -375,6 +375,13 @@ let gDevToolsBrowser = {
   },
 
   /**
+   * Open the App Manager
+   */
+  openAppManager: function(gBrowser) {
+    gBrowser.selectedTab = gBrowser.addTab("about:app-manager");
+  },
+
+  /**
    * Add this DevTools's presence to a browser window's document
    *
    * @param {XULDocument} doc

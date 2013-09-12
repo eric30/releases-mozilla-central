@@ -2,13 +2,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH           = @DEPTH@
-topsrcdir       = @top_srcdir@
-srcdir          = @srcdir@
-VPATH           = @srcdir@
-
-include $(DEPTH)/config/autoconf.mk
-
 ifdef GNU_CC
 ifeq ($(OS_TARGET),Android)
 MODULE_OPTIMIZE_FLAGS = -O2
@@ -93,6 +86,11 @@ endif
 
 LOCAL_INCLUDES  += -I$(srcdir)
 
+INSTALL_TARGETS += cairo_features
+cairo_features_FILES := cairo-features.h
+cairo_features_DEST = $(DIST)/include/cairo
+cairo_features_TARGET := export
+
 include $(topsrcdir)/config/rules.mk
 
 ifdef GNU_CC
@@ -125,4 +123,3 @@ endif
 ifdef MOZ_TREE_FREETYPE
 DEFINES += -DHAVE_FT_LIBRARY_SETLCDFILTER -DFT_LCD_FILTER_H="$(topsrcdir)/modules/freetype2/include/freetype/ftlcdfil.h"
 endif
-

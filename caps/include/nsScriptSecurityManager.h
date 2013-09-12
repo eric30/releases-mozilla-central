@@ -488,9 +488,6 @@ private:
     InitDomainPolicy(JSContext* cx, const char* aPolicyName,
                      DomainPolicy* aDomainPolicy);
 
-    // JS strings we need to clean up on shutdown
-    static jsid sEnabledID;
-
     inline void
     ScriptSecurityPrefChanged();
 
@@ -529,9 +526,9 @@ public:
 namespace mozilla {
 
 void
-GetExtendedOrigin(nsIURI* aURI, uint32_t aAppid,
-                  bool aInMozBrowser,
-                  nsACString& aExtendedOrigin);
+GetJarPrefix(uint32_t aAppid,
+             bool aInMozBrowser,
+             nsACString& aJarPrefix);
 
 } // namespace mozilla
 

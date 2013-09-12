@@ -22,10 +22,9 @@ using namespace mozilla;
 nsWindowMemoryReporter::nsWindowMemoryReporter()
   : mCheckForGhostWindowsCallbackPending(false)
 {
-  mDetachedWindows.Init();
 }
 
-NS_IMPL_ISUPPORTS3(nsWindowMemoryReporter, nsIMemoryMultiReporter, nsIObserver,
+NS_IMPL_ISUPPORTS3(nsWindowMemoryReporter, nsIMemoryReporter, nsIObserver,
                    nsSupportsWeakReference)
 
 /* static */
@@ -34,7 +33,7 @@ nsWindowMemoryReporter::Init()
 {
   // The memory reporter manager will own this object.
   nsRefPtr<nsWindowMemoryReporter> windowReporter = new nsWindowMemoryReporter();
-  NS_RegisterMemoryMultiReporter(windowReporter);
+  NS_RegisterMemoryReporter(windowReporter);
 
   nsCOMPtr<nsIObserverService> os = services::GetObserverService();
   if (os) {
@@ -46,13 +45,13 @@ nsWindowMemoryReporter::Init()
                     /* weakRef = */ true);
   }
 
-  nsRefPtr<GhostURLsReporter> ghostMultiReporter =
+  nsRefPtr<GhostURLsReporter> ghostURLsReporter =
     new GhostURLsReporter(windowReporter);
-  NS_RegisterMemoryMultiReporter(ghostMultiReporter);
+  NS_RegisterMemoryReporter(ghostURLsReporter);
 
-  nsRefPtr<NumGhostsReporter> ghostReporter =
+  nsRefPtr<NumGhostsReporter> numGhostsReporter =
     new NumGhostsReporter(windowReporter);
-  NS_RegisterMemoryReporter(ghostReporter);
+  NS_RegisterMemoryReporter(numGhostsReporter);
 }
 
 static already_AddRefed<nsIURI>
@@ -122,7 +121,7 @@ CollectWindowReports(nsGlobalWindow *aWindow,
                      nsTHashtable<nsUint64HashKey> *aGhostWindowIDs,
                      WindowPaths *aWindowPaths,
                      WindowPaths *aTopWindowPaths,
-                     nsIMemoryMultiReporterCallback *aCb,
+                     nsIMemoryReporterCallback *aCb,
                      nsISupports *aClosure)
 {
   nsAutoCString windowPath("explicit/");
@@ -320,7 +319,7 @@ nsWindowMemoryReporter::GetName(nsACString &aName)
 }
 
 NS_IMETHODIMP
-nsWindowMemoryReporter::CollectReports(nsIMemoryMultiReporterCallback* aCb,
+nsWindowMemoryReporter::CollectReports(nsIMemoryReporterCallback* aCb,
                                        nsISupports* aClosure)
 {
   nsGlobalWindow::WindowByIdTable* windowsById =
@@ -334,14 +333,11 @@ nsWindowMemoryReporter::CollectReports(nsIMemoryMultiReporterCallback* aCb,
 
   // Get the IDs of all the "ghost" windows.
   nsTHashtable<nsUint64HashKey> ghostWindows;
-  ghostWindows.Init();
   CheckForGhostWindows(&ghostWindows);
 
   WindowPaths windowPaths;
-  windowPaths.Init();
 
   WindowPaths topWindowPaths;
-  topWindowPaths.Init();
 
   // Collect window memory usage.
   nsWindowSizes windowTotalSizes(NULL);
@@ -356,9 +352,9 @@ nsWindowMemoryReporter::CollectReports(nsIMemoryMultiReporterCallback* aCb,
   }
 
   // Report JS memory usage.  We do this from here because the JS memory
-  // multi-reporter needs to be passed |windowPaths|.
-  nsresult rv = xpc::JSMemoryMultiReporter::CollectReports(&windowPaths, &topWindowPaths,
-                                                           aCb, aClosure);
+  // reporter needs to be passed |windowPaths|.
+  nsresult rv = xpc::JSReporter::CollectReports(&windowPaths, &topWindowPaths,
+                                                aCb, aClosure);
   NS_ENSURE_SUCCESS(rv, rv);
 
 #define REPORT(_path, _amount, _desc)                                         \
@@ -650,7 +646,6 @@ nsWindowMemoryReporter::CheckForGhostWindows(
   }
 
   nsTHashtable<nsCStringHashKey> nonDetachedWindowDomains;
-  nonDetachedWindowDomains.Init();
 
   // Populate nonDetachedWindowDomains.
   GetNonDetachedWindowDomainsEnumeratorData nonDetachedEnumData =
@@ -668,7 +663,7 @@ nsWindowMemoryReporter::CheckForGhostWindows(
 }
 
 NS_IMPL_ISUPPORTS1(nsWindowMemoryReporter::GhostURLsReporter,
-                   nsIMemoryMultiReporter)
+                   nsIMemoryReporter)
 
 nsWindowMemoryReporter::
 GhostURLsReporter::GhostURLsReporter(
@@ -681,13 +676,13 @@ NS_IMETHODIMP
 nsWindowMemoryReporter::
 GhostURLsReporter::GetName(nsACString& aName)
 {
-  aName.AssignLiteral("ghost-windows");
+  aName.AssignLiteral("ghost-windows-multi");
   return NS_OK;
 }
 
 struct ReportGhostWindowsEnumeratorData
 {
-  nsIMemoryMultiReporterCallback* callback;
+  nsIMemoryReporterCallback* callback;
   nsISupports* closure;
   nsresult rv;
 };
@@ -721,7 +716,7 @@ ReportGhostWindowsEnumerator(nsUint64HashKey* aIDHashKey, void* aClosure)
     nsIMemoryReporter::KIND_OTHER,
     nsIMemoryReporter::UNITS_COUNT,
     /* amount = */ 1,
-    /* desc = */ EmptyCString(),
+    /* description = */ NS_LITERAL_CSTRING("A ghost window."),
     data->closure);
 
   if (NS_FAILED(rv) && NS_SUCCEEDED(data->rv)) {
@@ -734,12 +729,11 @@ ReportGhostWindowsEnumerator(nsUint64HashKey* aIDHashKey, void* aClosure)
 NS_IMETHODIMP
 nsWindowMemoryReporter::
 GhostURLsReporter::CollectReports(
-  nsIMemoryMultiReporterCallback* aCb,
+  nsIMemoryReporterCallback* aCb,
   nsISupports* aClosure)
 {
   // Get the IDs of all the ghost windows in existance.
   nsTHashtable<nsUint64HashKey> ghostWindows;
-  ghostWindows.Init();
   mWindowReporter->CheckForGhostWindows(&ghostWindows);
 
   ReportGhostWindowsEnumeratorData reportGhostWindowsEnumData =
@@ -752,30 +746,10 @@ GhostURLsReporter::CollectReports(
   return reportGhostWindowsEnumData.rv;
 }
 
-NS_IMETHODIMP
-nsWindowMemoryReporter::
-NumGhostsReporter::GetDescription(nsACString& aDesc)
-{
-  nsPrintfCString str(
-"The number of ghost windows present (the number of nodes underneath \
-explicit/window-objects/top(none)/ghost, modulo race conditions).  A ghost \
-window is not shown in any tab, does not share a domain with any non-detached \
-windows, and has met these criteria for at least %ds \
-(memory.ghost_window_timeout_seconds) or has survived a round of about:memory's \
-minimize memory usage button.\n\n\
-Ghost windows can happen legitimately, but they are often indicative of leaks \
-in the browser or add-ons.",
-  mWindowReporter->GetGhostTimeout());
-
-  aDesc.Assign(str);
-  return NS_OK;
-}
-
 int64_t
 nsWindowMemoryReporter::NumGhostsReporter::Amount()
 {
   nsTHashtable<nsUint64HashKey> ghostWindows;
-  ghostWindows.Init();
   mWindowReporter->CheckForGhostWindows(&ghostWindows);
   return ghostWindows.Count();
 }

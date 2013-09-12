@@ -34,6 +34,12 @@
     "n_buckets": 50,
     "description": "Time spent on one cycle collection (ms)"
   },
+  "CYCLE_COLLECTOR_WORKER": {
+    "kind": "exponential",
+    "high": "10000",
+    "n_buckets": 50,
+    "description": "Time spent on one cycle collection in a worker (ms)"
+  },
   "CYCLE_COLLECTOR_FULL": {
     "kind": "exponential",
     "high": "10000",
@@ -54,11 +60,23 @@
     "n_buckets": 50,
     "description": "Number of ref counted objects visited by the cycle collector"
   },
+  "CYCLE_COLLECTOR_WORKER_VISITED_REF_COUNTED": {
+    "kind": "exponential",
+    "high": "300000",
+    "n_buckets": 50,
+    "description": "Number of ref counted objects visited by the cycle collector in a worker"
+  },
   "CYCLE_COLLECTOR_VISITED_GCED": {
     "kind": "exponential",
     "high": "300000",
     "n_buckets": 50,
     "description": "Number of JS objects visited by the cycle collector"
+  },
+  "CYCLE_COLLECTOR_WORKER_VISITED_GCED": {
+    "kind": "exponential",
+    "high": "300000",
+    "n_buckets": 50,
+    "description": "Number of JS objects visited by the cycle collector in a worker"
   },
   "CYCLE_COLLECTOR_COLLECTED": {
     "kind": "exponential",
@@ -66,9 +84,19 @@
     "n_buckets": 50,
     "description": "Number of objects collected by the cycle collector"
   },
+  "CYCLE_COLLECTOR_WORKER_COLLECTED": {
+    "kind": "exponential",
+    "high": "100000",
+    "n_buckets": 50,
+    "description": "Number of objects collected by the cycle collector in a worker"
+  },
   "CYCLE_COLLECTOR_NEED_GC": {
     "kind": "boolean",
     "description": "Needed garbage collection before cycle collection."
+  },
+  "CYCLE_COLLECTOR_WORKER_NEED_GC": {
+    "kind": "boolean",
+    "description": "Needed garbage collection before cycle collection in a worker."
   },
   "CYCLE_COLLECTOR_TIME_BETWEEN": {
     "kind": "exponential",
@@ -85,6 +113,10 @@
   "CYCLE_COLLECTOR_OOM": {
     "kind": "flag",
     "description": "Set if the cycle collector ran out of memory at some point"
+  },
+  "CYCLE_COLLECTOR_WORKER_OOM": {
+    "kind": "flag",
+    "description": "Set if the cycle collector in a worker ran out of memory at some point"
   },
   "CYCLE_COLLECTOR_ASYNC_SNOW_WHITE_FREEING": {
     "kind": "exponential",
@@ -3201,6 +3233,20 @@
     "n_buckets": 50,
     "description": "Time spent to display first page in PDF Viewer (ms)"
   },
+  "PLUGINS_NOTIFICATION_SHOWN": {
+    "kind": "boolean",
+    "description": "The number of times the click-to-activate notification was shown: false: shown by in-content activation true: shown by location bar activation"
+  },
+  "PLUGINS_NOTIFICATION_PLUGIN_COUNT": {
+    "kind": "enumerated",
+    "n_values": 5,
+    "description": "The number of plugins present in the click-to-activate notification, minus one (1, 2, 3, 4, more than 4)"
+  },
+  "PLUGINS_NOTIFICATION_USER_ACTION": {
+    "kind": "enumerated",
+    "n_values": 3,
+    "description": "User actions taken in the plugin notification: 0: allownow 1: allowalways 2: block"
+  },
   "POPUP_NOTIFICATION_MAINACTION_TRIGGERED_MS": {
     "kind": "linear",
     "low": 25,
@@ -3878,6 +3924,11 @@
     "kind": "enumerated",
     "n_values": 4,
     "description": "Accumulates type of content (mixed, mixed passive, unmixed) per page load"
+  },
+  "MIXED_CONTENT_UNBLOCK_COUNTER": {
+    "kind": "enumerated",
+    "n_values": 3,
+    "description": "A simple counter of daily mixed-content unblock operations and top documents loaded"
   },
   "NTLM_MODULE_USED": {
     "kind": "enumerated",

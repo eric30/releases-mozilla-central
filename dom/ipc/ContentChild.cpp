@@ -96,6 +96,7 @@
 
 #include "mozilla/dom/indexedDB/PIndexedDBChild.h"
 #include "mozilla/dom/mobilemessage/SmsChild.h"
+#include "mozilla/dom/telephony/TelephonyChild.h"
 #include "mozilla/dom/devicestorage/DeviceStorageRequestChild.h"
 #include "mozilla/dom/bluetooth/PBluetoothChild.h"
 #include "mozilla/dom/PFMRadioChild.h"
@@ -126,6 +127,7 @@ using namespace mozilla::dom::devicestorage;
 using namespace mozilla::dom::ipc;
 using namespace mozilla::dom::mobilemessage;
 using namespace mozilla::dom::indexedDB;
+using namespace mozilla::dom::telephony;
 using namespace mozilla::hal_sandbox;
 using namespace mozilla::ipc;
 using namespace mozilla::layers;
@@ -398,7 +400,7 @@ ContentChild::AllocPMemoryReportRequestChild()
 }
 
 // This is just a wrapper for InfallibleTArray<MemoryReport> that implements
-// nsISupports, so it can be passed to nsIMemoryMultiReporter::CollectReports.
+// nsISupports, so it can be passed to nsIMemoryReporter::CollectReports.
 class MemoryReportsWrapper MOZ_FINAL : public nsISupports {
 public:
     NS_DECL_ISUPPORTS
@@ -407,7 +409,7 @@ public:
 };
 NS_IMPL_ISUPPORTS0(MemoryReportsWrapper)
 
-class MemoryReportCallback MOZ_FINAL : public nsIMemoryMultiReporterCallback
+class MemoryReportCallback MOZ_FINAL : public nsIMemoryReporterCallback
 {
 public:
     NS_DECL_ISUPPORTS
@@ -435,53 +437,28 @@ private:
 };
 NS_IMPL_ISUPPORTS1(
   MemoryReportCallback
-, nsIMemoryMultiReporterCallback
+, nsIMemoryReporterCallback
 )
 
 bool
 ContentChild::RecvPMemoryReportRequestConstructor(PMemoryReportRequestChild* child)
 {
-    
     nsCOMPtr<nsIMemoryReporterManager> mgr = do_GetService("@mozilla.org/memory-reporter-manager;1");
 
     InfallibleTArray<MemoryReport> reports;
 
     nsPrintfCString process("Content (%d)", getpid());
 
-    // First do the vanilla memory reporters.
+    // Run each reporter.  The callback will turn each measurement into a
+    // MemoryReport.
     nsCOMPtr<nsISimpleEnumerator> e;
     mgr->EnumerateReporters(getter_AddRefs(e));
-    bool more;
-    while (NS_SUCCEEDED(e->HasMoreElements(&more)) && more) {
-      nsCOMPtr<nsIMemoryReporter> r;
-      e->GetNext(getter_AddRefs(r));
-
-      nsCString path;
-      int32_t kind;
-      int32_t units;
-      int64_t amount;
-      nsCString desc;
-
-      if (NS_SUCCEEDED(r->GetPath(path)) &&
-          NS_SUCCEEDED(r->GetKind(&kind)) &&
-          NS_SUCCEEDED(r->GetUnits(&units)) &&
-          NS_SUCCEEDED(r->GetAmount(&amount)) &&
-          NS_SUCCEEDED(r->GetDescription(desc)))
-      {
-        MemoryReport memreport(process, path, kind, units, amount, desc);
-        reports.AppendElement(memreport);
-      }
-    }
-
-    // Then do the memory multi-reporters, by calling CollectReports on each
-    // one, whereupon the callback will turn each measurement into a
-    // MemoryReport.
-    mgr->EnumerateMultiReporters(getter_AddRefs(e));
     nsRefPtr<MemoryReportsWrapper> wrappedReports =
         new MemoryReportsWrapper(&reports);
     nsRefPtr<MemoryReportCallback> cb = new MemoryReportCallback(process);
+    bool more;
     while (NS_SUCCEEDED(e->HasMoreElements(&more)) && more) {
-      nsCOMPtr<nsIMemoryMultiReporter> r;
+      nsCOMPtr<nsIMemoryReporter> r;
       e->GetNext(getter_AddRefs(r));
       r->CollectReports(cb, wrappedReports);
     }
@@ -919,6 +896,19 @@ ContentChild::DeallocPSmsChild(PSmsChild* aSms)
     return true;
 }
 
+PTelephonyChild*
+ContentChild::AllocPTelephonyChild()
+{
+    MOZ_CRASH("No one should be allocating PTelephonyChild actors");
+}
+
+bool
+ContentChild::DeallocPTelephonyChild(PTelephonyChild* aActor)
+{
+    delete aActor;
+    return true;
+}
+
 PStorageChild*
 ContentChild::AllocPStorageChild()
 {
@@ -1336,7 +1326,6 @@ ContentChild::RecvNotifyProcessPriorityChanged(
     NS_ENSURE_TRUE(os, true);
 
     nsRefPtr<nsHashPropertyBag> props = new nsHashPropertyBag();
-    props->Init();
     props->SetPropertyAsInt32(NS_LITERAL_STRING("priority"),
                               static_cast<int32_t>(aPriority));
 

@@ -3,8 +3,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
-
 #include "jsapi.h"
 #include "jsfriendapi.h"
 #include "jsprf.h"
@@ -13,6 +11,7 @@
 #include "XPCInlines.h"
 #include "XPCQuickStubs.h"
 #include "mozilla/dom/BindingUtils.h"
+#include "mozilla/dom/Exceptions.h"
 
 using namespace mozilla;
 using namespace JS;
@@ -72,8 +71,8 @@ HasBitInInterfacesBitmap(JSObject *obj, uint32_t interfaceBit)
 {
     MOZ_ASSERT(IS_WN_REFLECTOR(obj), "Not a wrapper?");
 
-    XPCWrappedNativeJSClass *clasp =
-      (XPCWrappedNativeJSClass*)js::GetObjectClass(obj);
+    const XPCWrappedNativeJSClass *clasp =
+      (const XPCWrappedNativeJSClass*)js::GetObjectClass(obj);
     return (clasp->interfacesBitmap & (1 << interfaceBit)) != 0;
 }
 
@@ -84,7 +83,7 @@ PointerFinalize(JSFreeOp *fop, JSObject *obj)
     delete popp;
 }
 
-JSClass
+const JSClass
 PointerHolderClass = {
     "Pointer", JSCLASS_HAS_PRIVATE,
     JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
@@ -250,7 +249,7 @@ ThrowCallFailed(JSContext *cx, nsresult rv,
                          format, rv, ifaceName, memberName);
     }
 
-    XPCThrower::BuildAndThrowException(cx, rv, sz);
+    dom::Throw(cx, rv, sz);
 
     if (sz)
         JS_smprintf_free(sz);
@@ -336,7 +335,7 @@ ThrowBadArg(JSContext *cx, nsresult rv, const char *ifaceName,
     sz = JS_smprintf("%s arg %u [%s.%s]",
                      format, (unsigned int) paramnum, ifaceName, memberName);
 
-    XPCThrower::BuildAndThrowException(cx, rv, sz);
+    dom::Throw(cx, rv, sz);
 
     if (sz)
         JS_smprintf_free(sz);
@@ -553,7 +552,7 @@ getWrapper(JSContext *cx,
     // object reflection of a particular interface (ie, |foo.nsIBar|). These
     // JS objects are parented to their wrapper, so we snag the tearoff object
     // along the way (if desired), and then set |obj| to its parent.
-    js::Class* clasp = js::GetObjectClass(obj);
+    const js::Class* clasp = js::GetObjectClass(obj);
     if (clasp == &XPC_WN_Tearoff_JSClass) {
         *tearoff = (XPCWrappedNativeTearOff*) js::GetObjectPrivate(obj);
         obj = js::GetObjectParent(obj);

@@ -5,10 +5,11 @@
 #include "SmsChild.h"
 #include "SmsMessage.h"
 #include "MmsMessage.h"
-#include "Constants.h"
+#include "SmsSegmentInfo.h"
 #include "nsIObserverService.h"
 #include "mozilla/Services.h"
 #include "mozilla/dom/ContentChild.h"
+#include "mozilla/dom/mobilemessage/Constants.h" // For MessageType
 #include "MobileMessageThread.h"
 
 using namespace mozilla;
@@ -22,7 +23,7 @@ CreateMessageFromMessageData(const MobileMessageData& aData)
 {
   nsCOMPtr<nsISupports> message;
 
-  switch(aData. type()) {
+  switch(aData.type()) {
     case MobileMessageData::TMmsMessageData:
       message = new MmsMessage(aData.get_MmsMessageData());
       break;
@@ -202,6 +203,17 @@ SmsRequestChild::Recv__delete__(const MessageReply& aReply)
       break;
     case MessageReply::TReplyMarkeMessageReadFail:
       mReplyRequest->NotifyMarkMessageReadFailed(aReply.get_ReplyMarkeMessageReadFail().error());
+      break;
+    case MessageReply::TReplyGetSegmentInfoForText: {
+        const SmsSegmentInfoData& data =
+          aReply.get_ReplyGetSegmentInfoForText().infoData();
+        nsCOMPtr<nsIDOMMozSmsSegmentInfo> info = new SmsSegmentInfo(data);
+        mReplyRequest->NotifySegmentInfoForTextGot(info);
+      }
+      break;
+    case MessageReply::TReplyGetSegmentInfoForTextFail:
+      mReplyRequest->NotifyGetSegmentInfoForTextFailed(
+        aReply.get_ReplyGetSegmentInfoForTextFail().error());
       break;
     default:
       MOZ_CRASH("Received invalid response parameters!");

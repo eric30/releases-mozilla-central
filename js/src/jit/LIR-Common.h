@@ -188,6 +188,22 @@ class LDouble : public LInstructionHelper<1, 0, 0>
     }
 };
 
+// Constant float32.
+class LFloat32 : public LInstructionHelper<1, 0, 0>
+{
+    float f_;
+  public:
+    LIR_HEADER(Float32);
+
+    LFloat32(float f)
+      : f_(f)
+    { }
+
+    float getFloat() const {
+        return f_;
+    }
+};
+
 // A constant Value.
 class LValue : public LInstructionHelper<BOX_PIECES, 0, 0>
 {
@@ -706,12 +722,20 @@ class LDefFun : public LCallInstructionHelper<0, 1, 0>
     }
 };
 
-class LTypeOfV : public LInstructionHelper<1, BOX_PIECES, 0>
+class LTypeOfV : public LInstructionHelper<1, BOX_PIECES, 1>
 {
   public:
     LIR_HEADER(TypeOfV)
 
+    LTypeOfV(const LDefinition &tempToUnbox) {
+        setTemp(0, tempToUnbox);
+    }
+
     static const size_t Input = 0;
+
+    const LDefinition *tempToUnbox() {
+        return getTemp(0);
+    }
 
     MTypeOf *mir() const {
         return mir_->toTypeOf();
@@ -886,6 +910,22 @@ class LReturnFromCtor : public LInstructionHelper<1, BOX_PIECES + 1, 0>
 
     static const size_t ValueIndex = 0;
     static const size_t ObjectIndex = BOX_PIECES;
+};
+
+class LComputeThis : public LInstructionHelper<1, BOX_PIECES, 0>
+{
+  public:
+    LIR_HEADER(ComputeThis)
+
+    static const size_t ValueIndex = 0;
+
+    const LDefinition *output() {
+        return getDef(0);
+    }
+
+    MComputeThis *mir() const {
+        return mir_->toComputeThis();
+    }
 };
 
 // Writes a typed argument for a function call to the frame's argument vector.
@@ -2102,6 +2142,16 @@ class LNegD : public LInstructionHelper<1, 1, 0>
     }
 };
 
+// Negative of a float32.
+class LNegF : public LInstructionHelper<1, 1, 0>
+{
+  public:
+    LIR_HEADER(NegF)
+    LNegF(const LAllocation &num) {
+        setOperand(0, num);
+    }
+};
+
 // Absolute value of an integer.
 class LAbsI : public LInstructionHelper<1, 1, 0>
 {
@@ -2302,6 +2352,23 @@ class LMathD : public LBinaryMath<0>
     }
 };
 
+// Performs an add, sub, mul, or div on two double values.
+class LMathF: public LBinaryMath<0>
+{
+    JSOp jsop_;
+
+  public:
+    LIR_HEADER(MathF)
+
+    LMathF(JSOp jsop)
+      : jsop_(jsop)
+    { }
+
+    JSOp jsop() const {
+        return jsop_;
+    }
+};
+
 class LModD : public LBinaryMath<1>
 {
   public:
@@ -2458,6 +2525,39 @@ class LInt32ToDouble : public LInstructionHelper<1, 1, 0>
     }
 };
 
+// Convert a 32-bit float to a double.
+class LFloat32ToDouble : public LInstructionHelper<1, 1, 0>
+{
+  public:
+    LIR_HEADER(Float32ToDouble)
+
+    LFloat32ToDouble(const LAllocation &input) {
+        setOperand(0, input);
+    }
+};
+
+// Convert a double to a 32-bit float.
+class LDoubleToFloat32 : public LInstructionHelper<1, 1, 0>
+{
+  public:
+    LIR_HEADER(DoubleToFloat32)
+
+    LDoubleToFloat32(const LAllocation &input) {
+        setOperand(0, input);
+    }
+};
+
+// Convert a 32-bit integer to a float32.
+class LInt32ToFloat32 : public LInstructionHelper<1, 1, 0>
+{
+  public:
+    LIR_HEADER(Int32ToFloat32)
+
+    LInt32ToFloat32(const LAllocation &input) {
+        setOperand(0, input);
+    }
+};
+
 // Convert a value to a double.
 class LValueToDouble : public LInstructionHelper<1, BOX_PIECES, 0>
 {
@@ -2467,6 +2567,18 @@ class LValueToDouble : public LInstructionHelper<1, BOX_PIECES, 0>
 
     MToDouble *mir() {
         return mir_->toToDouble();
+    }
+};
+
+// Convert a value to a float32.
+class LValueToFloat32 : public LInstructionHelper<1, BOX_PIECES, 0>
+{
+  public:
+    LIR_HEADER(ValueToFloat32)
+    static const size_t Input = 0;
+
+    MToFloat32 *mir() {
+        return mir_->toToFloat32();
     }
 };
 
@@ -3559,6 +3671,9 @@ class LClampVToUint8 : public LInstructionHelper<1, BOX_PIECES, 1>
     const LDefinition *tempFloat() {
         return getTemp(0);
     }
+    const MClampToUint8 *mir() const {
+        return mir_->toClampToUint8();
+    }
 };
 
 // Load a boxed value from an object's fixed slot.
@@ -4110,6 +4225,19 @@ class LCallDeleteProperty : public LCallInstructionHelper<1, BOX_PIECES, 0>
     }
 };
 
+class LCallDeleteElement : public LCallInstructionHelper<1, 2 * BOX_PIECES, 0>
+{
+  public:
+    LIR_HEADER(CallDeleteElement)
+
+    static const size_t Value = 0;
+    static const size_t Index = BOX_PIECES;
+
+    MDeleteElement *mir() const {
+        return mir_->toDeleteElement();
+    }
+};
+
 // Patchable jump to stubs generated for a SetProperty cache, which stores a
 // boxed value.
 class LSetPropertyCacheV : public LInstructionHelper<0, 1 + BOX_PIECES, 1>
@@ -4155,7 +4283,7 @@ class LSetPropertyCacheT : public LInstructionHelper<0, 2, 1>
     }
 };
 
-class LSetElementCacheV : public LInstructionHelper<0, 1 + 2 * BOX_PIECES, 2>
+class LSetElementCacheV : public LInstructionHelper<0, 1 + 2 * BOX_PIECES, 3>
 {
   public:
     LIR_HEADER(SetElementCacheV);
@@ -4164,11 +4292,12 @@ class LSetElementCacheV : public LInstructionHelper<0, 1 + 2 * BOX_PIECES, 2>
     static const size_t Value = 1 + BOX_PIECES;
 
     LSetElementCacheV(const LAllocation &object, const LDefinition &tempToUnboxIndex,
-                      const LDefinition &temp)
+                      const LDefinition &temp, const LDefinition &tempFloat)
     {
         setOperand(0, object);
         setTemp(0, tempToUnboxIndex);
         setTemp(1, temp);
+        setTemp(2, tempFloat);
     }
     const MSetElementCache *mir() const {
         return mir_->toSetElementCache();
@@ -4183,9 +4312,12 @@ class LSetElementCacheV : public LInstructionHelper<0, 1 + 2 * BOX_PIECES, 2>
     const LDefinition *temp() {
         return getTemp(1);
     }
+    const LDefinition *tempFloat() {
+        return getTemp(2);
+    }
 };
 
-class LSetElementCacheT : public LInstructionHelper<0, 2 + BOX_PIECES, 2>
+class LSetElementCacheT : public LInstructionHelper<0, 2 + BOX_PIECES, 3>
 {
   public:
     LIR_HEADER(SetElementCacheT);
@@ -4193,11 +4325,13 @@ class LSetElementCacheT : public LInstructionHelper<0, 2 + BOX_PIECES, 2>
     static const size_t Index = 2;
 
     LSetElementCacheT(const LAllocation &object, const LAllocation &value,
-                      const LDefinition &tempToUnboxIndex, const LDefinition &temp) {
+                      const LDefinition &tempToUnboxIndex,
+                      const LDefinition &temp, const LDefinition &tempFloat) {
         setOperand(0, object);
         setOperand(1, value);
         setTemp(0, tempToUnboxIndex);
         setTemp(1, temp);
+        setTemp(2, tempFloat);
     }
     const MSetElementCache *mir() const {
         return mir_->toSetElementCache();
@@ -4214,6 +4348,9 @@ class LSetElementCacheT : public LInstructionHelper<0, 2 + BOX_PIECES, 2>
     }
     const LDefinition *temp() {
         return getTemp(1);
+    }
+    const LDefinition *tempFloat() {
+        return getTemp(2);
     }
 };
 
@@ -4436,12 +4573,12 @@ class LGuardThreadLocalObject : public LCallInstructionHelper<0, 2, 1>
 };
 
 // Guard that a value is in a TypeSet.
-class LTypeBarrier : public LInstructionHelper<0, BOX_PIECES, 1>
+class LTypeBarrierV : public LInstructionHelper<0, BOX_PIECES, 1>
 {
   public:
-    LIR_HEADER(TypeBarrier)
+    LIR_HEADER(TypeBarrierV)
 
-    LTypeBarrier(const LDefinition &temp) {
+    LTypeBarrierV(const LDefinition &temp) {
         setTemp(0, temp);
     }
 
@@ -4449,6 +4586,27 @@ class LTypeBarrier : public LInstructionHelper<0, BOX_PIECES, 1>
 
     const MTypeBarrier *mir() const {
         return mir_->toTypeBarrier();
+    }
+    const LDefinition *temp() {
+        return getTemp(0);
+    }
+};
+
+// Guard that a object is in a TypeSet.
+class LTypeBarrierO : public LInstructionHelper<0, 1, 1>
+{
+  public:
+    LIR_HEADER(TypeBarrierO)
+
+    LTypeBarrierO(const LAllocation &obj, const LDefinition &temp) {
+        setOperand(0, obj);
+        setTemp(0, temp);
+    }
+    const MTypeBarrier *mir() const {
+        return mir_->toTypeBarrier();
+    }
+    const LAllocation *object() {
+        return getOperand(0);
     }
     const LDefinition *temp() {
         return getTemp(0);
@@ -4950,6 +5108,32 @@ class LAssertRangeD : public LInstructionHelper<0, 1, 1>
     LIR_HEADER(AssertRangeD)
 
     LAssertRangeD(const LAllocation &input, const LDefinition &temp) {
+        setOperand(0, input);
+        setTemp(0, temp);
+    }
+
+    const LAllocation *input() {
+        return getOperand(0);
+    }
+
+    const LDefinition *temp() {
+        return getTemp(0);
+    }
+
+    MAssertRange *mir() {
+        return mir_->toAssertRange();
+    }
+    Range *range() {
+        return mir()->range();
+    }
+};
+
+class LAssertRangeF : public LInstructionHelper<0, 1, 1>
+{
+  public:
+    LIR_HEADER(AssertRangeF)
+
+    LAssertRangeF(const LAllocation &input, const LDefinition &temp) {
         setOperand(0, input);
         setTemp(0, temp);
     }

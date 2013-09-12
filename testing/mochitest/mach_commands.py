@@ -65,6 +65,11 @@ class MochitestRunner(MozbuildObject):
             # TODO Find adb automatically if it isn't on the path
             raise Exception(ADB_NOT_FOUND % ('mochitest-remote', b2g_home))
 
+        # Need to call relpath before os.chdir() below.
+        test_path = ''
+        if test_file:
+            test_path = self._wrap_path_argument(test_file).relpath()
+
         # TODO without os.chdir, chained imports fail below
         os.chdir(self.mochitest_dir)
 
@@ -86,8 +91,12 @@ class MochitestRunner(MozbuildObject):
         options.httpdPath = self.mochitest_dir
         options.xrePath = xre_path
 
-        if test_file:
-            options.testPath = test_file
+        if test_path:
+            test_root_file = mozpack.path.join(self.mochitest_dir, 'tests', test_path)
+            if not os.path.exists(test_root_file):
+                print('Specified test path does not exist: %s' % test_root_file)
+                return 1
+            options.testPath = test_path
         else:
             options.testManifest = 'b2g.json'
 
@@ -98,7 +107,8 @@ class MochitestRunner(MozbuildObject):
 
     def run_desktop_test(self, suite=None, test_file=None, debugger=None,
         debugger_args=None, shuffle=False, keep_open=False, rerun_failures=False,
-        no_autorun=False, repeat=0, run_until_failure=False, slow=False):
+        no_autorun=False, repeat=0, run_until_failure=False, slow=False,
+        chunk_by_dir=0, total_chunks=None, this_chunk=None):
         """Runs a mochitest.
 
         test_file is a path to a test file. It can be a relative path from the
@@ -204,6 +214,9 @@ class MochitestRunner(MozbuildObject):
         options.testingModulesDir = os.path.join(self.tests_dir, 'modules')
         options.extraProfileFiles.append(os.path.join(self.distdir, 'plugins'))
         options.symbolsPath = os.path.join(self.distdir, 'crashreporter-symbols')
+        options.chunkByDir = chunk_by_dir
+        options.totalChunks = total_chunks
+        options.thisChunk = this_chunk
 
         options.failureFile = failure_file_path
 
@@ -314,6 +327,18 @@ def MochitestCommand(func):
     slow = CommandArgument('--slow', action='store_true',
         help='Delay execution between tests.')
     func = slow(func)
+
+    chunk_dir = CommandArgument('--chunk-by-dir', type=int,
+        help='Group tests together in chunks by this many top directories.')
+    func = chunk_dir(func)
+
+    chunk_total = CommandArgument('--total-chunks', type=int,
+        help='Total number of chunks to split tests into.')
+    func = chunk_total(func)
+
+    this_chunk = CommandArgument('--this-chunk', type=int,
+        help='If running tests by chunks, the number of the chunk to run.')
+    func = this_chunk(func)
 
     path = CommandArgument('test_file', default=None, nargs='?',
         metavar='TEST',

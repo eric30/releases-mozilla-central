@@ -2,6 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/**
+ * WARNING: BackgroundPageThumbs.jsm is currently excluded from release builds.
+ * If you use it, you must also exclude your caller when RELEASE_BUILD is
+ * defined, as described here:
+ * https://wiki.mozilla.org/Platform/Channel-specific_build_defines
+ */
+
 const EXPORTED_SYMBOLS = [
   "BackgroundPageThumbs",
 ];
@@ -10,13 +17,17 @@ const DEFAULT_CAPTURE_TIMEOUT = 30000; // ms
 const DESTROY_BROWSER_TIMEOUT = 60000; // ms
 const FRAME_SCRIPT_URL = "chrome://global/content/backgroundPageThumbsContent.js";
 
+// If a request for a thumbnail comes in and we find one that is "stale"
+// (or don't find one at all) we automatically queue a request to generate a
+// new one.
+const MAX_THUMBNAIL_AGE_SECS = 172800; // 2 days == 60*60*24*2 == 172800 secs.
+
 const TELEMETRY_HISTOGRAM_ID_PREFIX = "FX_THUMBNAILS_BG_";
 
 // possible FX_THUMBNAILS_BG_CAPTURE_DONE_REASON telemetry values
 const TEL_CAPTURE_DONE_OK = 0;
 const TEL_CAPTURE_DONE_TIMEOUT = 1;
-const TEL_CAPTURE_DONE_PB_BEFORE_START = 2;
-const TEL_CAPTURE_DONE_PB_AFTER_START = 3;
+// 2 and 3 were used when we had special handling for private-browsing.
 
 const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 const HTML_NS = "http://www.w3.org/1999/xhtml";
@@ -25,7 +36,6 @@ const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
 Cu.import("resource://gre/modules/PageThumbs.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
 
 const BackgroundPageThumbs = {
 
@@ -33,6 +43,11 @@ const BackgroundPageThumbs = {
    * Asynchronously captures a thumbnail of the given URL.
    *
    * The page is loaded anonymously, and plug-ins are disabled.
+   *
+   * WARNING: BackgroundPageThumbs.jsm is currently excluded from release
+   * builds.  If you use it, you must also exclude your caller when
+   * RELEASE_BUILD is defined, as described here:
+   * https://wiki.mozilla.org/Platform/Channel-specific_build_defines
    *
    * @param url      The URL to capture.
    * @param options  An optional object that configures the capture.  Its
@@ -72,6 +87,37 @@ const BackgroundPageThumbs = {
   },
 
   /**
+   * Checks if an existing thumbnail for the specified URL is either missing
+   * or stale, and if so, queues a background request to capture it.  That
+   * capture process will send a notification via the observer service on
+   * capture, so consumers should watch for such observations if they want to
+   * be notified of an updated thumbnail.
+   *
+   * WARNING: BackgroundPageThumbs.jsm is currently excluded from release
+   * builds.  If you use it, you must also exclude your caller when
+   * RELEASE_BUILD is defined, as described here:
+   * https://wiki.mozilla.org/Platform/Channel-specific_build_defines
+   *
+   * @param url      The URL to capture.
+   * @param options  An optional object that configures the capture.  See
+   *                 capture() for description.
+   */
+  captureIfStale: function PageThumbs_captureIfStale(url, options={}) {
+    PageThumbsStorage.isFileRecentForURL(url, MAX_THUMBNAIL_AGE_SECS).then(
+      result => {
+        if (result.ok) {
+          if (options.onDone)
+            options.onDone(url);
+          return;
+        }
+        this.capture(url, options);
+      }, err => {
+        if (options.onDone)
+          options.onDone(url);
+      });
+  },
+
+  /**
    * Ensures that initialization of the thumbnail browser's parent window has
    * begun.
    *
@@ -88,32 +134,20 @@ const BackgroundPageThumbs = {
 
     this._startedParentWinInit = true;
 
-    PrivateBrowsingUtils.whenHiddenPrivateWindowReady(function (parentWin) {
-      parentWin.addEventListener("unload", function (event) {
-        if (event.target == parentWin.document)
-          this._destroy();
-      }.bind(this), true);
-
-      if (canHostBrowser(parentWin)) {
-        this._parentWin = parentWin;
-        this._processCaptureQueue();
-        return;
-      }
-
-      // Otherwise, create an html:iframe, stick it in the parent document, and
-      // use it to host the browser.  about:blank will not have the system
-      // principal, so it can't host, but a document with a chrome URI will.
-      let iframe = parentWin.document.createElementNS(HTML_NS, "iframe");
-      iframe.setAttribute("src", "chrome://global/content/mozilla.xhtml");
-      let onLoad = function onLoadFn() {
-        iframe.removeEventListener("load", onLoad, true);
-        this._parentWin = iframe.contentWindow;
-        this._processCaptureQueue();
-      }.bind(this);
-      iframe.addEventListener("load", onLoad, true);
-      parentWin.document.documentElement.appendChild(iframe);
-      this._hostIframe = iframe;
-    }.bind(this));
+    // Create an html:iframe, stick it in the parent document, and
+    // use it to host the browser.  about:blank will not have the system
+    // principal, so it can't host, but a document with a chrome URI will.
+    let hostWindow = Services.appShell.hiddenDOMWindow;
+    let iframe = hostWindow.document.createElementNS(HTML_NS, "iframe");
+    iframe.setAttribute("src", "chrome://global/content/mozilla.xhtml");
+    let onLoad = function onLoadFn() {
+      iframe.removeEventListener("load", onLoad, true);
+      this._parentWin = iframe.contentWindow;
+      this._processCaptureQueue();
+    }.bind(this);
+    iframe.addEventListener("load", onLoad, true);
+    hostWindow.document.documentElement.appendChild(iframe);
+    this._hostIframe = iframe;
 
     return false;
   },
@@ -144,7 +178,6 @@ const BackgroundPageThumbs = {
     let browser = this._parentWin.document.createElementNS(XUL_NS, "browser");
     browser.setAttribute("type", "content");
     browser.setAttribute("remote", "true");
-    browser.setAttribute("privatebrowsing", "true");
 
     // Size the browser.  Make its aspect ratio the same as the canvases' that
     // the thumbnails are drawn into; the canvases' aspect ratio is the same as
@@ -161,6 +194,26 @@ const BackgroundPageThumbs = {
     browser.style.height = (bwidth * sheight.value / swidth.value) + "px";
 
     this._parentWin.document.documentElement.appendChild(browser);
+
+    // an event that is sent if the remote process crashes - no need to remove
+    // it as we want it to be there as long as the browser itself lives.
+    browser.addEventListener("oop-browser-crashed", () => {
+      Cu.reportError("BackgroundThumbnails remote process crashed - recovering");
+      this._destroyBrowser();
+      let curCapture = this._captureQueue.length ? this._captureQueue[0] : null;
+      // we could retry the pending capture, but it's possible the crash
+      // was due directly to it, so trying again might just crash again.
+      // We could keep a flag to indicate if it previously crashed, but
+      // "resetting" the capture requires more work - so for now, we just
+      // discard it.
+      if (curCapture && curCapture.pending) {
+        curCapture._done(null);
+        // _done automatically continues queue processing.
+      }
+      // else: we must have been idle and not currently doing a capture (eg,
+      // maybe a GC or similar crashed) - so there's no need to attempt a
+      // queue restart - the next capture request will set everything up.
+    });
 
     browser.messageManager.loadFrameScript(FRAME_SCRIPT_URL, false);
     this._thumbBrowser = browser;
@@ -193,7 +246,8 @@ const BackgroundPageThumbs = {
   },
 
   /**
-   * Called when the current capture completes or times out.
+   * Called when the current capture completes or fails (eg, times out, remote
+   * process crashes.)
    */
   _onCaptureOrTimeout: function (capture) {
     // Since timeouts start as an item is being processed, only the first
@@ -250,20 +304,6 @@ Capture.prototype = {
     this.startDate = new Date();
     tel("CAPTURE_QUEUE_TIME_MS", this.startDate - this.creationDate);
 
-    // The thumbnail browser uses private browsing mode and therefore shares
-    // browsing state with private windows.  To avoid capturing sites that the
-    // user is logged into in private browsing windows, (1) observe window
-    // openings, and if a private window is opened during capture, discard the
-    // capture when it finishes, and (2) don't start the capture at all if a
-    // private window is open already.
-    Services.ww.registerNotification(this);
-    if (isPrivateBrowsingActive()) {
-      tel("CAPTURE_DONE_REASON", TEL_CAPTURE_DONE_PB_BEFORE_START);
-      // Captures should always finish asyncly.
-      schedule(() => this._done(null));
-      return;
-    }
-
     // timeout timer
     let timeout = typeof(this.options.timeout) == "number" ?
                   this.options.timeout :
@@ -317,20 +357,10 @@ Capture.prototype = {
     this._done(null);
   },
 
-  // Called when the window watcher notifies us.
-  observe: function (subj, topic, data) {
-    if (topic == "domwindowopened" &&
-        PrivateBrowsingUtils.isWindowPrivate(subj))
-      this._privateWinOpenedDuringCapture = true;
-  },
-
   _done: function (data) {
     // Note that _done will be called only once, by either receiveMessage or
     // notify, since it calls destroy, which cancels the timeout timer and
     // removes the didCapture message listener.
-
-    this.captureCallback(this);
-    this.destroy();
 
     if (data && data.telemetry) {
       // Telemetry is currently disabled in the content process (bug 680508).
@@ -339,7 +369,9 @@ Capture.prototype = {
       }
     }
 
-    let callOnDones = function callOnDonesFn() {
+    let done = () => {
+      this.captureCallback(this);
+      this.destroy();
       for (let callback of this.doneCallbacks) {
         try {
           callback.call(this.options, this.url);
@@ -348,52 +380,19 @@ Capture.prototype = {
           Cu.reportError(err);
         }
       }
-    }.bind(this);
+    };
 
-    if (!data || this._privateWinOpenedDuringCapture) {
-      if (this._privateWinOpenedDuringCapture)
-        tel("CAPTURE_DONE_REASON", TEL_CAPTURE_DONE_PB_AFTER_START);
-      callOnDones();
+    if (!data) {
+      done();
       return;
     }
+
     PageThumbs._store(this.url, data.finalURL, data.imageData, data.wasErrorResponse)
-              .then(callOnDones);
+              .then(done, done);
   },
 };
 
 Capture.nextID = 0;
-
-/**
- * Returns true if the given window is suitable for hosting our xul:browser.
- *
- * @param win  The window.
- * @return     True if the window can host the browser, false otherwise.
- */
-function canHostBrowser(win) {
-  // The host document needs to have the system principal since, like all code
-  // intended to be used in chrome, the browser binding does lots of things that
-  // assume it has it.  The document must also allow XUL children.  So check for
-  // both the system principal and the "allowXULXBL" permission.  (It turns out
-  // that allowXULXBL is satisfied by the system principal alone, making that
-  // check not strictly necessary, but it's here for robustness.)
-  let principal = win.document.nodePrincipal;
-  if (!Services.scriptSecurityManager.isSystemPrincipal(principal))
-    return false;
-  let permResult = Services.perms.testPermissionFromPrincipal(principal,
-                                                              "allowXULXBL");
-  return permResult == Ci.nsIPermissionManager.ALLOW_ACTION;
-}
-
-/**
- * Returns true if there are any private windows.
- */
-function isPrivateBrowsingActive() {
-  let wins = Services.ww.getWindowEnumerator();
-  while (wins.hasMoreElements())
-    if (PrivateBrowsingUtils.isWindowPrivate(wins.getNext()))
-      return true;
-  return false;
-}
 
 /**
  * Adds a value to one of this module's telemetry histograms.

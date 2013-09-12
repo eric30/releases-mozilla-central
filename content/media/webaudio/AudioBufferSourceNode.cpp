@@ -6,6 +6,7 @@
 
 #include "AudioBufferSourceNode.h"
 #include "mozilla/dom/AudioBufferSourceNodeBinding.h"
+#include "mozilla/dom/AudioParam.h"
 #include "nsMathUtils.h"
 #include "AudioNodeEngine.h"
 #include "AudioNodeStream.h"
@@ -412,7 +413,7 @@ public:
     // We've finished if we've gone past mStop, or if we're past mDuration when
     // looping is disabled.
     if (currentPosition >= mStop ||
-        (!mLoop && currentPosition - mStart + mOffset > mDuration)) {
+        (!mLoop && currentPosition - mStart + mOffset >= mDuration)) {
       *aFinished = true;
     }
   }

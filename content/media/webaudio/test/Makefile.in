@@ -2,14 +2,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH          := @DEPTH@
-topsrcdir      := @top_srcdir@
-srcdir         := @srcdir@
-VPATH          := @srcdir@
-relativesrcdir := @relativesrcdir@
-
-include $(DEPTH)/config/autoconf.mk
-
 MOCHITEST_FILES := \
   audioBufferSourceNodeNeutered_worker.js \
   webaudio.js \
@@ -57,10 +49,12 @@ MOCHITEST_FILES := \
   test_channelSplitterNode.html \
   test_channelSplitterNodeWithVolume.html \
   test_convolverNode.html \
+  test_convolverNodeChannelCount.html \
   test_convolverNodeWithGain.html \
   test_convolverNode_mono_mono.html \
   test_currentTime.html \
   test_delayNode.html \
+  test_delayNodeAtMax.html \
   test_delayNodeSmallMaxDelay.html \
   test_delayNodeWithGain.html \
   test_dynamicsCompressorNode.html \
@@ -82,6 +76,7 @@ MOCHITEST_FILES := \
   test_oscillatorNode.html \
   test_oscillatorNodeStart.html \
   test_pannerNode.html \
+  test_pannerNodeAbove.html \
   test_pannerNode_equalPower.html \
   test_periodicWave.html \
   test_scriptProcessorNode.html \
@@ -112,10 +107,8 @@ MOCHITEST_FILES := \
   audio-quad.wav \
   $(NULL)
 
-ifneq ($(MOZ_DEBUG)+$(MOZ_WIDGET_TOOLKIT),+gtk2) # bug 911777
+ifneq ($(OS_TARGET),Android) # bug 912474
 MOCHITEST_FILES += \
-  test_delayNodeAtMax.html \
+  test_pannerNodeChannelCount.html \
   $(NULL)
 endif
-
-include $(topsrcdir)/config/rules.mk

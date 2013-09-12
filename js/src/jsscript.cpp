@@ -33,14 +33,13 @@
 #include "js/OldDebugAPI.h"
 #include "vm/ArgumentsObject.h"
 #include "vm/Debugger.h"
-#include "vm/Interpreter.h"
 #include "vm/Shape.h"
 #include "vm/Xdr.h"
 
 #include "jsfuninlines.h"
 #include "jsinferinlines.h"
+#include "jsobjinlines.h"
 
-#include "vm/Runtime-inl.h"
 #include "vm/ScopeObject-inl.h"
 #include "vm/Stack-inl.h"
 
@@ -943,7 +942,7 @@ ScriptSourceObject::finalize(FreeOp *fop, JSObject *obj)
     obj->as<ScriptSourceObject>().setSource(NULL);
 }
 
-Class ScriptSourceObject::class_ = {
+const Class ScriptSourceObject::class_ = {
     "ScriptSource",
     JSCLASS_HAS_RESERVED_SLOTS(1) | JSCLASS_IS_ANONYMOUS,
     JS_PropertyStub,        /* addProperty */

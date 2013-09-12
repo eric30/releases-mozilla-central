@@ -40,8 +40,6 @@
 #include "jsinferinlines.h"
 #include "jsobjinlines.h"
 
-#include "vm/GlobalObject-inl.h"
-
 #if JS_USE_NEW_OBJECT_REPRESENTATION
 // See the comment above OldObjectRepresentationHack.
 #  error "TypedArray support for new object representation unimplemented."
@@ -1021,32 +1019,6 @@ ArrayBufferObject::obj_getGenericAttributes(JSContext *cx, HandleObject obj,
 }
 
 bool
-ArrayBufferObject::obj_getPropertyAttributes(JSContext *cx, HandleObject obj,
-                                             HandlePropertyName name, unsigned *attrsp)
-{
-    Rooted<jsid> id(cx, NameToId(name));
-    return obj_getGenericAttributes(cx, obj, id, attrsp);
-}
-
-bool
-ArrayBufferObject::obj_getElementAttributes(JSContext *cx, HandleObject obj,
-                                            uint32_t index, unsigned *attrsp)
-{
-    RootedObject delegate(cx, ArrayBufferDelegate(cx, obj));
-    if (!delegate)
-        return false;
-    return baseops::GetElementAttributes(cx, delegate, index, attrsp);
-}
-
-bool
-ArrayBufferObject::obj_getSpecialAttributes(JSContext *cx, HandleObject obj,
-                                            HandleSpecialId sid, unsigned *attrsp)
-{
-    Rooted<jsid> id(cx, SPECIALID_TO_JSID(sid));
-    return obj_getGenericAttributes(cx, obj, id, attrsp);
-}
-
-bool
 ArrayBufferObject::obj_setGenericAttributes(JSContext *cx, HandleObject obj,
                                             HandleId id, unsigned *attrsp)
 {
@@ -1054,32 +1026,6 @@ ArrayBufferObject::obj_setGenericAttributes(JSContext *cx, HandleObject obj,
     if (!delegate)
         return false;
     return baseops::SetAttributes(cx, delegate, id, attrsp);
-}
-
-bool
-ArrayBufferObject::obj_setPropertyAttributes(JSContext *cx, HandleObject obj,
-                                             HandlePropertyName name, unsigned *attrsp)
-{
-    Rooted<jsid> id(cx, NameToId(name));
-    return obj_setGenericAttributes(cx, obj, id, attrsp);
-}
-
-bool
-ArrayBufferObject::obj_setElementAttributes(JSContext *cx, HandleObject obj,
-                                            uint32_t index, unsigned *attrsp)
-{
-    RootedObject delegate(cx, ArrayBufferDelegate(cx, obj));
-    if (!delegate)
-        return false;
-    return baseops::SetElementAttributes(cx, delegate, index, attrsp);
-}
-
-bool
-ArrayBufferObject::obj_setSpecialAttributes(JSContext *cx, HandleObject obj,
-                                            HandleSpecialId sid, unsigned *attrsp)
-{
-    Rooted<jsid> id(cx, SPECIALID_TO_JSID(sid));
-    return obj_setGenericAttributes(cx, obj, id, attrsp);
 }
 
 bool
@@ -1232,55 +1178,7 @@ TypedArrayObject::obj_getGenericAttributes(JSContext *cx, HandleObject obj, Hand
 }
 
 bool
-TypedArrayObject::obj_getPropertyAttributes(JSContext *cx, HandleObject obj,
-                                            HandlePropertyName name, unsigned *attrsp)
-{
-    *attrsp = JSPROP_PERMANENT | JSPROP_ENUMERATE;
-    return true;
-}
-
-bool
-TypedArrayObject::obj_getElementAttributes(JSContext *cx, HandleObject obj, uint32_t index,
-                                           unsigned *attrsp)
-{
-    *attrsp = JSPROP_PERMANENT | JSPROP_ENUMERATE;
-    return true;
-}
-
-bool
-TypedArrayObject::obj_getSpecialAttributes(JSContext *cx, HandleObject obj, HandleSpecialId sid,
-                                           unsigned *attrsp)
-{
-    Rooted<jsid> id(cx, SPECIALID_TO_JSID(sid));
-    return obj_getGenericAttributes(cx, obj, id, attrsp);
-}
-
-bool
 TypedArrayObject::obj_setGenericAttributes(JSContext *cx, HandleObject obj, HandleId id,
-                                           unsigned *attrsp)
-{
-    JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_CANT_SET_ARRAY_ATTRS);
-    return false;
-}
-
-bool
-TypedArrayObject::obj_setPropertyAttributes(JSContext *cx, HandleObject obj,
-                                            HandlePropertyName name, unsigned *attrsp)
-{
-    JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_CANT_SET_ARRAY_ATTRS);
-    return false;
-}
-
-bool
-TypedArrayObject::obj_setElementAttributes(JSContext *cx, HandleObject obj, uint32_t index,
-                                           unsigned *attrsp)
-{
-    JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_CANT_SET_ARRAY_ATTRS);
-    return false;
-}
-
-bool
-TypedArrayObject::obj_setSpecialAttributes(JSContext *cx, HandleObject obj, HandleSpecialId sid,
                                            unsigned *attrsp)
 {
     JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_CANT_SET_ARRAY_ATTRS);
@@ -1438,12 +1336,12 @@ class TypedArrayObjectTemplate : public TypedArrayObject
 
     static const size_t BYTES_PER_ELEMENT = sizeof(ThisType);
 
-    static inline Class *protoClass()
+    static inline const Class *protoClass()
     {
         return &TypedArrayObject::protoClasses[ArrayTypeID()];
     }
 
-    static inline Class *fastClass()
+    static inline const Class *fastClass()
     {
         return &TypedArrayObject::classes[ArrayTypeID()];
     }
@@ -3440,7 +3338,7 @@ TypedArrayObject::copyTypedArrayElement(uint32_t index, MutableHandleValue vp)
  * ArrayBufferObject (base)
  */
 
-Class ArrayBufferObject::protoClass = {
+const Class ArrayBufferObject::protoClass = {
     "ArrayBufferPrototype",
     JSCLASS_HAS_PRIVATE |
     JSCLASS_HAS_RESERVED_SLOTS(ARRAYBUFFER_RESERVED_SLOTS) |
@@ -3454,7 +3352,7 @@ Class ArrayBufferObject::protoClass = {
     JS_ConvertStub
 };
 
-Class ArrayBufferObject::class_ = {
+const Class ArrayBufferObject::class_ = {
     "ArrayBuffer",
     JSCLASS_HAS_PRIVATE |
     JSCLASS_IMPLEMENTS_BARRIERS |
@@ -3494,13 +3392,7 @@ Class ArrayBufferObject::class_ = {
         ArrayBufferObject::obj_setElement,
         ArrayBufferObject::obj_setSpecial,
         ArrayBufferObject::obj_getGenericAttributes,
-        ArrayBufferObject::obj_getPropertyAttributes,
-        ArrayBufferObject::obj_getElementAttributes,
-        ArrayBufferObject::obj_getSpecialAttributes,
         ArrayBufferObject::obj_setGenericAttributes,
-        ArrayBufferObject::obj_setPropertyAttributes,
-        ArrayBufferObject::obj_setElementAttributes,
-        ArrayBufferObject::obj_setSpecialAttributes,
         ArrayBufferObject::obj_deleteProperty,
         ArrayBufferObject::obj_deleteElement,
         ArrayBufferObject::obj_deleteSpecial,
@@ -3559,7 +3451,7 @@ const JSFunctionSpec _typedArray##Object::jsfuncs[] = {                         
   {                                                                                          \
       if (!(obj = CheckedUnwrap(obj)))                                                       \
           return false;                                                                      \
-      Class *clasp = obj->getClass();                                                        \
+      const Class *clasp = obj->getClass();                                                  \
       return (clasp == &TypedArrayObject::classes[TypedArrayObjectTemplate<NativeType>::ArrayTypeID()]); \
   }
 
@@ -3581,7 +3473,7 @@ IMPL_TYPED_ARRAY_JSAPI_CONSTRUCTORS(Float64, double)
       if (!(obj = CheckedUnwrap(obj)))                                                      \
           return NULL;                                                                      \
                                                                                             \
-      Class *clasp = obj->getClass();                                                       \
+      const Class *clasp = obj->getClass();                                                 \
       if (clasp != &TypedArrayObject::classes[TypedArrayObjectTemplate<InternalType>::ArrayTypeID()]) \
           return NULL;                                                                      \
                                                                                             \
@@ -3662,13 +3554,7 @@ IMPL_TYPED_ARRAY_COMBINED_UNWRAPPERS(Float64, double, double)
         _typedArray##Object::obj_setElement,                                   \
         _typedArray##Object::obj_setSpecial,                                   \
         _typedArray##Object::obj_getGenericAttributes,                         \
-        _typedArray##Object::obj_getPropertyAttributes,                        \
-        _typedArray##Object::obj_getElementAttributes,                         \
-        _typedArray##Object::obj_getSpecialAttributes,                         \
         _typedArray##Object::obj_setGenericAttributes,                         \
-        _typedArray##Object::obj_setPropertyAttributes,                        \
-        _typedArray##Object::obj_setElementAttributes,                         \
-        _typedArray##Object::obj_setSpecialAttributes,                         \
         _typedArray##Object::obj_deleteProperty,                               \
         _typedArray##Object::obj_deleteElement,                                \
         _typedArray##Object::obj_deleteSpecial,                                \
@@ -3741,7 +3627,7 @@ IMPL_TYPED_ARRAY_STATICS(Float32Array);
 IMPL_TYPED_ARRAY_STATICS(Float64Array);
 IMPL_TYPED_ARRAY_STATICS(Uint8ClampedArray);
 
-Class TypedArrayObject::classes[ScalarTypeRepresentation::TYPE_MAX] = {
+const Class TypedArrayObject::classes[ScalarTypeRepresentation::TYPE_MAX] = {
     IMPL_TYPED_ARRAY_FAST_CLASS(Int8Array),
     IMPL_TYPED_ARRAY_FAST_CLASS(Uint8Array),
     IMPL_TYPED_ARRAY_FAST_CLASS(Int16Array),
@@ -3753,7 +3639,7 @@ Class TypedArrayObject::classes[ScalarTypeRepresentation::TYPE_MAX] = {
     IMPL_TYPED_ARRAY_FAST_CLASS(Uint8ClampedArray)
 };
 
-Class TypedArrayObject::protoClasses[ScalarTypeRepresentation::TYPE_MAX] = {
+const Class TypedArrayObject::protoClasses[ScalarTypeRepresentation::TYPE_MAX] = {
     IMPL_TYPED_ARRAY_PROTO_CLASS(Int8Array),
     IMPL_TYPED_ARRAY_PROTO_CLASS(Uint8Array),
     IMPL_TYPED_ARRAY_PROTO_CLASS(Int16Array),
@@ -3819,7 +3705,7 @@ InitArrayBufferClass(JSContext *cx)
     return arrayBufferProto;
 }
 
-Class DataViewObject::protoClass = {
+const Class DataViewObject::protoClass = {
     "DataViewPrototype",
     JSCLASS_HAS_PRIVATE |
     JSCLASS_HAS_RESERVED_SLOTS(DataViewObject::RESERVED_SLOTS) |
@@ -3833,7 +3719,7 @@ Class DataViewObject::protoClass = {
     JS_ConvertStub
 };
 
-Class DataViewObject::class_ = {
+const Class DataViewObject::class_ = {
     "DataView",
     JSCLASS_HAS_PRIVATE |
     JSCLASS_IMPLEMENTS_BARRIERS |

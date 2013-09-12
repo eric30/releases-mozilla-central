@@ -6,9 +6,8 @@
 #ifndef GFX_CANVASLAYEROGL_H
 #define GFX_CANVASLAYEROGL_H
 
-#include "GLContext.h"                  // for GLContext
-#include "GLContextTypes.h"             // for GLuint, GLenum
-#include "GLDefs.h"                     // for LOCAL_GL_TEXTURE_2D
+#include "GLContextTypes.h"             // for GLContext
+#include "GLDefs.h"                     // for GLuint, LOCAL_GL_TEXTURE_2D
 #include "LayerManagerOGL.h"            // for LayerOGL::GLContext, etc
 #include "Layers.h"                     // for CanvasLayer, etc
 #include "gfxASurface.h"                // for gfxASurface, etc
@@ -20,7 +19,6 @@
 #include "mozilla/mozalloc.h"           // for operator delete, etc
 #include "nsAutoPtr.h"                  // for nsRefPtr
 #include "opengl/LayerManagerOGLProgram.h"  // for ShaderProgramType, etc
-#include "./../mozilla-config.h"        // for GL_PROVIDER_GLX
 #if defined(GL_PROVIDER_GLX)
 #include "GLXLibrary.h"
 #include "mozilla/X11Util.h"

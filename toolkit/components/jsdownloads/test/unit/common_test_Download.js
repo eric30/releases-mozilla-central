@@ -66,31 +66,6 @@ function promiseDownloadMidway(aDownload) {
 }
 
 /**
- * Waits for a download to finish, in case it has not finished already.
- *
- * @param aDownload
- *        The Download object to wait upon.
- *
- * @return {Promise}
- * @resolves When the download has finished successfully.
- * @rejects JavaScript exception if the download failed.
- */
-function promiseDownloadStopped(aDownload) {
-  if (!aDownload.stopped) {
-    // The download is in progress, wait for the current attempt to finish and
-    // report any errors that may occur.
-    return aDownload.start();
-  }
-
-  if (aDownload.succeeded) {
-    return Promise.resolve();
-  }
-
-  // The download failed or was canceled.
-  return Promise.reject(aDownload.error || new Error("Download canceled."));
-}
-
-/**
  * Creates and starts a new download, configured to keep partial data, and
  * returns only when the first part of "interruptible_resumable.txt" has been
  * saved to disk.  You must call "continueResponses" to allow the interruptible
@@ -1625,12 +1600,39 @@ add_task(function test_contentType() {
 });
 
 /**
+ * Tests that the serialization/deserialization of the startTime Date
+ * object works correctly.
+ */
+add_task(function test_toSerializable_startTime()
+{
+  let download1 = yield promiseStartDownload(httpUrl("source.txt"));
+  yield promiseDownloadStopped(download1);
+
+  let serializable = download1.toSerializable();
+  let reserialized = JSON.parse(JSON.stringify(serializable));
+
+  let download2 = yield Downloads.createDownload(reserialized);
+
+  do_check_eq(download1.startTime.constructor.name, "Date");
+  do_check_eq(download2.startTime.constructor.name, "Date");
+  do_check_eq(download1.startTime.toJSON(), download2.startTime.toJSON());
+});
+
+/**
  * This test will call the platform specific operations within
  * DownloadPlatform::DownloadDone. While there is no test to verify the
  * specific behaviours, this at least ensures that there is no error or crash.
  */
 add_task(function test_platform_integration()
 {
+  let downloadFiles = [];
+  function cleanup() {
+    for (let file of downloadFiles) {
+      file.remove(true);
+    }
+  }
+  do_register_cleanup(cleanup);
+
   for (let isPrivate of [false, true]) {
     DownloadIntegration.downloadDoneCalled = false;
 
@@ -1641,6 +1643,7 @@ add_task(function test_platform_integration()
     let targetFile = yield DownloadIntegration.getSystemDownloadsDirectory();
     targetFile = targetFile.clone();
     targetFile.append("test" + (Math.floor(Math.random() * 1000000)));
+    downloadFiles.push(targetFile);
 
     let download;
     if (gUseLegacySaver) {
@@ -1666,4 +1669,62 @@ add_task(function test_platform_integration()
 
     yield promiseVerifyContents(download.target.path, TEST_DATA_SHORT);
   }
+});
+
+/**
+ * Checks that downloads are added to browsing history when they start.
+ */
+add_task(function test_history()
+{
+  mustInterruptResponses();
+
+  // We will wait for the visit to be notified during the download.
+  yield promiseClearHistory();
+  let promiseVisit = promiseWaitForVisit(httpUrl("interruptible.txt"));
+
+  // Start a download that is not allowed to finish yet.
+  let download = yield promiseStartDownload(httpUrl("interruptible.txt"));
+
+  // The history notifications should be received before the download completes.
+  let [time, transitionType] = yield promiseVisit;
+  do_check_eq(time, download.startTime.getTime() * 1000);
+  do_check_eq(transitionType, Ci.nsINavHistoryService.TRANSITION_DOWNLOAD);
+
+  // Restart and complete the download after clearing history.
+  yield promiseClearHistory();
+  download.cancel();
+  continueResponses();
+  yield download.start();
+
+  // The restart should not have added a new history visit.
+  do_check_false(yield promiseIsURIVisited(httpUrl("interruptible.txt")));
+});
+
+/**
+ * Checks that downloads started by nsIHelperAppService are added to the
+ * browsing history when they start.
+ */
+add_task(function test_history_tryToKeepPartialData()
+{
+  // We will wait for the visit to be notified during the download.
+  yield promiseClearHistory();
+  let promiseVisit =
+      promiseWaitForVisit(httpUrl("interruptible_resumable.txt"));
+
+  // Start a download that is not allowed to finish yet.
+  let beforeStartTimeMs = Date.now();
+  let download = yield promiseStartDownload_tryToKeepPartialData();
+
+  // The history notifications should be received before the download completes.
+  let [time, transitionType] = yield promiseVisit;
+  do_check_eq(transitionType, Ci.nsINavHistoryService.TRANSITION_DOWNLOAD);
+
+  // The time set by nsIHelperAppService may be different than the start time in
+  // the download object, thus we only check that it is a meaningful time.  Note
+  // that we subtract one second from the earliest time to account for rounding.
+  do_check_true(time >= beforeStartTimeMs * 1000 - 1000000);
+
+  // Complete the download before finishing the test.
+  continueResponses();
+  yield promiseDownloadStopped(download);
 });

@@ -814,6 +814,17 @@ JSStructuredCloneWriter::traverseObject(HandleObject obj)
     return out.writePair(obj->is<ArrayObject>() ? SCTAG_ARRAY_OBJECT : SCTAG_OBJECT_OBJECT, 0);
 }
 
+static bool
+PrimitiveToObject(JSContext *cx, Value *vp)
+{
+    JSObject *obj = PrimitiveToObject(cx, *vp);
+    if (!obj)
+        return false;
+
+    vp->setObject(*obj);
+    return true;
+}
+
 bool
 JSStructuredCloneWriter::startWrite(const Value &v)
 {
@@ -1179,7 +1190,7 @@ JSStructuredCloneReader::startRead(Value *vp)
       case SCTAG_BOOLEAN:
       case SCTAG_BOOLEAN_OBJECT:
         vp->setBoolean(!!data);
-        if (tag == SCTAG_BOOLEAN_OBJECT && !js_PrimitiveToObject(context(), vp))
+        if (tag == SCTAG_BOOLEAN_OBJECT && !PrimitiveToObject(context(), vp))
             return false;
         break;
 
@@ -1189,7 +1200,7 @@ JSStructuredCloneReader::startRead(Value *vp)
         if (!str)
             return false;
         vp->setString(str);
-        if (tag == SCTAG_STRING_OBJECT && !js_PrimitiveToObject(context(), vp))
+        if (tag == SCTAG_STRING_OBJECT && !PrimitiveToObject(context(), vp))
             return false;
         break;
       }
@@ -1199,7 +1210,7 @@ JSStructuredCloneReader::startRead(Value *vp)
         if (!in.readDouble(&d) || !checkDouble(d))
             return false;
         vp->setDouble(d);
-        if (!js_PrimitiveToObject(context(), vp))
+        if (!PrimitiveToObject(context(), vp))
             return false;
         break;
       }
@@ -1488,15 +1499,35 @@ JS_StructuredClone(JSContext *cx, JS::Value valueArg, JS::Value *vp,
     RootedValue value(cx, valueArg);
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
-    assertSameCompartment(cx, value);
+
+    // Strings are associated with zones, not compartments,
+    // so we copy the string by wrapping it.
+    if (value.isString()) {
+      RootedString strValue(cx, value.toString());
+      if (!cx->compartment()->wrap(cx, strValue.address())) {
+        return false;
+      }
+      *vp = JS::StringValue(strValue);
+      return true;
+    }
 
     const JSStructuredCloneCallbacks *callbacks =
         optionalCallbacks ?
         optionalCallbacks :
         cx->runtime()->structuredCloneCallbacks;
+
     JSAutoStructuredCloneBuffer buf;
-    return buf.write(cx, value, callbacks, closure) &&
-           buf.read(cx, vp, callbacks, closure);
+    {
+        mozilla::Maybe<AutoCompartment> ac;
+        if (value.isObject()) {
+            ac.construct(cx, &value.toObject());
+        }
+
+        if (!buf.write(cx, value, callbacks, closure))
+            return false;
+    }
+
+    return buf.read(cx, vp, callbacks, closure);
 }
 
 void

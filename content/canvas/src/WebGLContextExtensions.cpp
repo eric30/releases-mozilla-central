@@ -9,7 +9,7 @@
 #include "GLContext.h"
 
 #include "nsString.h"
-
+#include "mozilla/Preferences.h"
 #include "AccessCheck.h"
 
 using namespace mozilla;
@@ -136,7 +136,7 @@ CompareWebGLExtensionName(const nsACString& name, const char *other)
 JSObject*
 WebGLContext::GetExtension(JSContext *cx, const nsAString& aName, ErrorResult& rv)
 {
-    if (!IsContextStable())
+    if (IsContextLost())
         return nullptr;
 
     NS_LossyConvertUTF16toASCII name(aName);
@@ -257,7 +257,7 @@ void
 WebGLContext::GetSupportedExtensions(JSContext *cx, Nullable< nsTArray<nsString> > &retval)
 {
     retval.SetNull();
-    if (!IsContextStable())
+    if (IsContextLost())
         return;
 
     nsTArray<nsString>& arr = retval.SetValue();
