@@ -72,6 +72,7 @@ function Nfc() {
 
   let lock = gSettingsService.createLock();
   lock.get("nfc.powerlevel", this);
+  this.powerlevel = 0; // default to off (FIXME: add get preference)
 
   debug("Starting Worker");
   gSystemWorkerManager.registerNfcWorker(this.worker);
@@ -101,19 +102,24 @@ Nfc.prototype = {
   onmessage: function onmessage(event) {
     let message = event.data;
     debug("Received message: " + JSON.stringify(message));
+    if (this.powerlevel < 1) {
+      debug("Nfc is not enabled.");
+      return null;
+    }
+
 
     // TODO: Private API to post to this object which user selected activity launched in response to NFC WebActivity launch.
     // SystemMessenger: function sendMessage(aType, aMessage, aPageURI, aManifestURI), to that specific app, not broadcast.
     switch (message.type) {
       case "techDiscovered":
         this._connectedSessionId = message.sessionId;
-        ppmm.broadcastAsyncMessage("NFC:TechDiscovered", message);
         gSystemMessenger.broadcastMessage("nfc-manager-tech-discovered", message);
+        ppmm.broadcastAsyncMessage("NFC:TechDiscovered", message);
         break;
       case "techLost":
         this._connectedSessionId = null;
-        ppmm.broadcastAsyncMessage("NFC:TechLost", message);
         gSystemMessenger.broadcastMessage("nfc-manager-tech-lost", message);
+        ppmm.broadcastAsyncMessage("NFC:TechLost", message);
         break;
       case "NDEFDetailsResponse":
         ppmm.broadcastAsyncMessage("NFC:NDEFDetailsResponse", message);
@@ -149,6 +155,7 @@ Nfc.prototype = {
   // nsINfcWorker
 
   worker: null,
+  powerlevel: 0,
 
   ndefDetails: function ndefDetails(message) {
     debug("ndefDetailsRequest message: " + JSON.stringify(message));
@@ -281,6 +288,11 @@ Nfc.prototype = {
   receiveMessage: function receiveMessage(message) {
     debug("Received '" + message.name + "' message from content process");
 
+    if (this.powerlevel < 1) {
+      debug("Nfc is not enabled.");
+      return null;
+    }
+
     if (!message.target.assertPermission("nfc-read")) {
       if (DEBUG) {
         debug("Nfc message " + message.name +
@@ -370,6 +382,7 @@ Nfc.prototype = {
    */
   setNfcPowerConfig: function setNfcPowerConfig(powerlevel) {
     debug("NFC setNfcPowerConfig: " + powerlevel);
+    this.powerlevel = powerlevel;
     this.setConfig({powerlevel: powerlevel});
   },
 
