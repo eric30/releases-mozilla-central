@@ -9,5 +9,5 @@ interface BluetoothNewSocket : EventTarget {
   readonly attribute DOMString serviceUuid;
 
   [Creator, Throws]
-  DOMRequest open(DOMString deviceAddress, DOMString serviceUuid);
+  DOMRequest open(DOMString serviceUuid);
 };

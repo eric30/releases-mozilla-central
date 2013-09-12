@@ -9,6 +9,7 @@
 
 #include "mozilla/Attributes.h"
 #include "BluetoothCommon.h"
+#include "BluetoothSocketObserver.h"
 #include "nsCOMPtr.h"
 #include "nsDOMEventTargetHelper.h"
 
@@ -20,7 +21,10 @@ namespace dom {
 
 BEGIN_BLUETOOTH_NAMESPACE
 
+class BluetoothReplyRunnable;
+
 class BluetoothNewSocket : public nsDOMEventTargetHelper
+                         , public BluetoothSocketObserver
 {
 public:
   NS_DECL_ISUPPORTS_INHERITED
@@ -39,8 +43,7 @@ public:
   }
 
   already_AddRefed<DOMRequest>
-    Open(const nsAString& aDeviceAddress, const nsAString& aServiceUuid,
-         ErrorResult& aRv);
+    Open(const nsAString& aServiceUuid, ErrorResult& aRv);
 
   nsPIDOMWindow* GetParentObject() const
   {
@@ -50,9 +53,18 @@ public:
   virtual JSObject*
     WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
+  // The following functions are inherited from BluetoothSocketObserver
+  void ReceiveSocketData(
+    BluetoothSocket* aSocket,
+    nsAutoPtr<mozilla::ipc::UnixSocketRawData>& aMessage) MOZ_OVERRIDE;
+  virtual void OnSocketConnectSuccess(BluetoothSocket* aSocket) MOZ_OVERRIDE;
+  virtual void OnSocketConnectError(BluetoothSocket* aSocket) MOZ_OVERRIDE;
+  virtual void OnSocketDisconnect(BluetoothSocket* aSocket) MOZ_OVERRIDE;
+
 private:
   nsString mAddress;
   nsString mServiceUuid;
+  nsRefPtr<BluetoothReplyRunnable> mRunnable;
 };
 
 END_BLUETOOTH_NAMESPACE

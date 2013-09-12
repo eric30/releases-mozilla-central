@@ -20,9 +20,7 @@ extern bool gBluetoothDebugFlag;
 #include <android/log.h>
 #define BT_LOG(args...)                                              \
   do {                                                               \
-    if (gBluetoothDebugFlag) {                                       \
       __android_log_print(ANDROID_LOG_INFO, "GeckoBluetooth", args); \
-    }                                                                \
   } while(0)
 
 #define BT_WARNING(args...)                                          \
