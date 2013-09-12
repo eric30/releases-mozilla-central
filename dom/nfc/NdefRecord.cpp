@@ -7,6 +7,7 @@
 
 #include "NdefRecord.h"
 #include "nsIDOMClassInfo.h"
+#include "mozilla/HoldDropJSObjects.h"
 
 using namespace mozilla::dom::nfc;
 

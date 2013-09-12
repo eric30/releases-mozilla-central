@@ -14,7 +14,7 @@
 #include "nsIDOMNdefRecord.h"
 #include "nsIJSNativeInitializer.h"
 
-#include "nsCycleCollectionHoldDrop.h"
+#include "nsCycleCollectionParticipant.h"
 #include "nsTraceRefcnt.h"
 #include "js/GCAPI.h"
 
