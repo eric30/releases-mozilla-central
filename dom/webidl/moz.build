@@ -217,7 +217,6 @@ WEBIDL_FILES = [
     'MutationEvent.webidl',
     'MutationObserver.webidl',
     'NetDashboard.webidl',
-    'MozNfcEvent.webidl',
     'Node.webidl',
     'NodeFilter.webidl',
     'NodeIterator.webidl',
@@ -454,6 +453,11 @@ if CONFIG['MOZ_B2G_RIL']:
     WEBIDL_FILES += [
         'MozStkCommandEvent.webidl',
         'MozVoicemail.webidl',
+    ]
+
+if CONFIG['MOZ_B2G_NFC']:
+    WEBIDL_FILES += [
+         'MozNfcEvent.webidl',
     ]
 
 WEBIDL_FILES += [
