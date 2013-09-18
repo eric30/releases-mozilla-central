@@ -24,7 +24,7 @@
 
 #include "NfcEvent.h"
 
-using namespace mozilla::dom::nfc;
+using namespace mozilla::dom;
 
 nsNfc::nsNfc()
 {
@@ -87,10 +87,11 @@ NS_IMPL_ISUPPORTS1(nsNfc::NfcCallback, nsINfcCallback)
 NS_IMETHODIMP
 nsNfc::ValidateNdefTag(const JS::Value& aRecords, JSContext* aCx, bool* result)
 {
+  NS_WARNING("error: ValidateNdefTag.");
   JSObject &obj = aRecords.toObject();
   // Check if array
   if (!JS_IsArrayObject(aCx, &obj)) {
-    NS_WARNING("error: NdefRecord object array is required.");
+    NS_WARNING("error: MozNdefRecord object array is required.");
     *result = false;
     return NS_OK;
   }
@@ -108,7 +109,7 @@ nsNfc::ValidateNdefTag(const JS::Value& aRecords, JSContext* aCx, bool* result)
   }
 
   // Check object type (by name), (TODO: by signature)
-  const char *ndefRecordName = "NdefRecord";
+  const char *ndefRecordName = "MozNdefRecord";
   for (uint32_t index = 0; index < length; index++) {
     JS::Rooted<JS::Value> val(aCx);
     uint32_t namelen;

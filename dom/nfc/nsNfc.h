@@ -24,7 +24,6 @@ NS_NewNfc(nsPIDOMWindow* aWindow, nsIDOMMozNfc** aNfc);
 
 namespace mozilla {
 namespace dom {
-namespace nfc {
 
 class nsNfc : public nsDOMEventTargetHelper
             , public nsIDOMMozNfc
@@ -77,7 +76,6 @@ private:
   };
 };
 
-} /* namespace nfc */
 } /* namespace dom */
 } /* namespace mozilla */
 

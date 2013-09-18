@@ -1,16 +1,13 @@
+/* -*- Mode: IDL; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /* Copyright © 2013 Deutsche Telekom, Inc. */
 
-#include "nsISupports.idl"
-
-/**
- * NFC NdefRecord structure.
- */
-[scriptable, builtinclass, uuid(42a70160-c4a3-11e1-9b21-0800200c9a66)]
-interface nsIDOMNdefRecord : nsISupports {
+[Constructor(octet tnf, DOMString type, DOMString id, any payload)]
+interface MozNdefRecord
+{
   /**
    * Type Name Field (3-bits) - Specifies the NDEF record type in general.
    *   tnf_empty: 0x00
@@ -37,5 +34,6 @@ interface nsIDOMNdefRecord : nsISupports {
   /**
    * payload - Binary data blob. The meaning of this field is application dependent.
    */
-  readonly attribute jsval payload;
+  [Throws]
+  readonly attribute any payload;
 };

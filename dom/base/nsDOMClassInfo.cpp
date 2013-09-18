@@ -182,7 +182,6 @@
 #ifdef MOZ_B2G_NFC
 #include "nsNfc.h"
 #include "nsIDOMNfc.h"
-#include "NdefRecord.h"
 #endif
 
 #include "nsIDOMCameraManager.h"
@@ -539,8 +538,6 @@ static nsDOMClassInfoData sClassInfoData[] = {
 #ifdef MOZ_B2G_NFC
   NS_DEFINE_CLASSINFO_DATA(MozNfc, nsEventTargetSH,
                            EVENTTARGET_SCRIPTABLE_FLAGS)
-  NS_DEFINE_CLASSINFO_DATA(NdefRecord, nsDOMGenericSH,
-                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
 #endif
 
   NS_DEFINE_CLASSINFO_DATA(CameraCapabilities, nsDOMGenericSH,
@@ -599,9 +596,6 @@ static const nsConstructorFuncMapData kConstructorFuncMap[] =
   NS_DEFINE_CONSTRUCTOR_FUNC_DATA(File, nsDOMMultipartFile::NewFile)
   NS_DEFINE_CONSTRUCTOR_FUNC_DATA(MozSmsFilter, SmsFilter::NewSmsFilter)
   NS_DEFINE_CONSTRUCTOR_FUNC_DATA(XSLTProcessor, XSLTProcessorCtor)
-#ifdef MOZ_B2G_NFC
-  NS_DEFINE_CONSTRUCTOR_FUNC_DATA(NdefRecord, nfc::NdefRecord::NewNdefRecord)
-#endif
 };
 #undef NS_DEFINE_CONSTRUCTOR_FUNC_DATA
 
@@ -1395,9 +1389,6 @@ nsDOMClassInfo::Init()
   DOM_CLASSINFO_MAP_BEGIN(MozNfc, nsIDOMMozNfc)
     DOM_CLASSINFO_MAP_ENTRY(nsIDOMMozNfc)
     DOM_CLASSINFO_MAP_ENTRY(nsIDOMEventTarget)
-  DOM_CLASSINFO_MAP_END
-  DOM_CLASSINFO_MAP_BEGIN(NdefRecord, nsIDOMNdefRecord)
-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMNdefRecord)
   DOM_CLASSINFO_MAP_END
 #endif
 
