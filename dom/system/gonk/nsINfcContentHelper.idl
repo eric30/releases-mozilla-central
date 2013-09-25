@@ -6,6 +6,7 @@
 #include "nsIDOMDOMRequest.idl"
 
 interface nsINfcCallback;
+interface nsIVariant;
 
 [scriptable, uuid(28c8f240-da8c-11e1-9b23-0800200c9a66)]
 interface nsINfcContentHelper : nsISupports
@@ -15,14 +16,14 @@ interface nsINfcContentHelper : nsISupports
 
   nsIDOMDOMRequest ndefDetails(in nsIDOMWindow window);
   nsIDOMDOMRequest ndefRead(in nsIDOMWindow window);
-  nsIDOMDOMRequest ndefWrite(in nsIDOMWindow window, in jsval records);
+  nsIDOMDOMRequest ndefWrite(in nsIDOMWindow window, in nsIVariant records);
   nsIDOMDOMRequest ndefMakeReadOnly(in nsIDOMWindow window);
 
   nsIDOMDOMRequest ndefPush(in nsIDOMWindow window, in jsval records);
 
 
   nsIDOMDOMRequest nfcATagDetails(in nsIDOMWindow window);
-  nsIDOMDOMRequest nfcATagTransceive(in nsIDOMWindow window, in jsval params); // NFCA transceive
+  nsIDOMDOMRequest nfcATagTransceive(in nsIDOMWindow window, in nsIVariant params); // NFCA transceive
 
   nsIDOMDOMRequest connect(in nsIDOMWindow window, in unsigned long techType);
   nsIDOMDOMRequest close(in nsIDOMWindow window);

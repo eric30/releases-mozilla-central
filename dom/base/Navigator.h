@@ -38,10 +38,6 @@ class nsIDOMMozMobileConnection;
 class nsIDOMMozIccManager;
 #endif // MOZ_B2G_RIL
 
-#ifdef MOZ_B2G_NFC
-class nsIDOMMozNfc;
-#endif // MOZ_B2G_NFC
-
 //*****************************************************************************
 // Navigator: Script "navigator" object
 //*****************************************************************************
@@ -237,9 +233,6 @@ public:
 #ifdef MOZ_B2G_BT
   bluetooth::BluetoothManager* GetMozBluetooth(ErrorResult& aRv);
 #endif // MOZ_B2G_BT
-#ifdef MOZ_B2G_NFC
-  nsIDOMMozNfc* GetMozNfc(ErrorResult& aRv);
-#endif // MOZ_B2G_NFC
 #ifdef MOZ_TIME_MANAGER
   time::TimeManager* GetMozTime(ErrorResult& aRv);
 #endif // MOZ_TIME_MANAGER
@@ -344,9 +337,6 @@ private:
 #endif
 #ifdef MOZ_B2G_BT
   nsCOMPtr<bluetooth::BluetoothManager> mBluetooth;
-#endif
-#ifdef MOZ_B2G_NFC
-  nsCOMPtr<nsIDOMMozNfc> mNfc;
 #endif
 #ifdef MOZ_AUDIO_CHANNEL_MANAGER
   nsRefPtr<system::AudioChannelManager> mAudioChannelManager;

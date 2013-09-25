@@ -282,8 +282,6 @@ partial interface Navigator {
 #endif // MOZ_B2G_RIL
 
 #ifdef MOZ_B2G_NFC
-// nsIMozNavigatorNfc
-interface MozNfc;
 partial interface Navigator {
    [Throws, Func="Navigator::HasNfcSupport"]
    readonly attribute MozNfc? mozNfc;

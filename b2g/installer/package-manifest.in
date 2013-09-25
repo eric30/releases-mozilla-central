@@ -476,6 +476,8 @@
 @BINPATH@/components/TelephonyProvider.js
 #endif
 #ifdef MOZ_B2G_NFC
+@BINPATH@/components/nsNfc.manifest
+@BINPATH@/components/nsNfc.js
 @BINPATH@/components/Nfc.manifest
 @BINPATH@/components/Nfc.js
 @BINPATH@/components/NfcContentHelper.js

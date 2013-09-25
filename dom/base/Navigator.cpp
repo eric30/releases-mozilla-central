@@ -59,10 +59,6 @@
 #ifdef MOZ_B2G_BT
 #include "BluetoothManager.h"
 #endif
-#ifdef MOZ_B2G_NFC
-#include "nsIDOMNfc.h"
-#include "nsNfc.h"
-#endif
 #include "DOMCameraManager.h"
 
 #ifdef MOZ_AUDIO_CHANNEL_MANAGER
@@ -158,9 +154,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Navigator)
 #ifdef MOZ_B2G_BT
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mBluetooth)
 #endif
-#ifdef MOZ_B2G_NFC
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mNfc)
-#endif
 #ifdef MOZ_AUDIO_CHANNEL_MANAGER
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAudioChannelManager)
 #endif
@@ -255,12 +248,6 @@ Navigator::Invalidate()
 #ifdef MOZ_B2G_BT
   if (mBluetooth) {
     mBluetooth = nullptr;
-  }
-#endif
-
-#ifdef MOZ_B2G_NFC
-  if (mNfc) {
-    mNfc = nullptr;
   }
 #endif
 
@@ -1303,26 +1290,6 @@ Navigator::GetMozBluetooth(ErrorResult& aRv)
 }
 #endif //MOZ_B2G_BT
 
-#ifdef MOZ_B2G_NFC
-nsIDOMMozNfc*
-Navigator::GetMozNfc(ErrorResult& aRv)
-{
-  if (!mNfc) {
-    if (!mWindow) {
-      aRv.Throw(NS_ERROR_UNEXPECTED);
-      return nullptr;
-    }
-    nsresult rv = NS_NewNfc(mWindow, getter_AddRefs(mNfc));
-    if (NS_FAILED(rv)) {
-      aRv.Throw(rv);
-      return nullptr;
-    }
-  }
-
-  return mNfc;
-}
-#endif //MOZ_B2G_NFC
-
 nsresult
 Navigator::EnsureMessagesManager()
 {
@@ -1795,6 +1762,7 @@ Navigator::HasFMRadioSupport(JSContext* /* unused */, JSObject* aGlobal)
 bool
 Navigator::HasNfcSupport(JSContext* /* unused */, JSObject* aGlobal)
 {
+  NS_WARNING("XXXXXX Checking NFC Support");
   nsCOMPtr<nsPIDOMWindow> win = GetWindowFromGlobal(aGlobal);
   return win && CheckPermission(win, "nfc-read") ||
                 CheckPermission(win, "nfc-write");

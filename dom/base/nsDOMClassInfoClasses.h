@@ -127,10 +127,6 @@ DOMCI_CLASS(MozIccManager)
 DOMCI_CLASS(BluetoothDevice)
 #endif
 
-#ifdef MOZ_B2G_NFC
-DOMCI_CLASS(MozNfc)
-#endif
-
 DOMCI_CLASS(CameraCapabilities)
 
 DOMCI_CLASS(LockedFile)

@@ -179,11 +179,6 @@
 #include "BluetoothDevice.h"
 #endif
 
-#ifdef MOZ_B2G_NFC
-#include "nsNfc.h"
-#include "nsIDOMNfc.h"
-#endif
-
 #include "nsIDOMCameraManager.h"
 #include "nsIDOMGlobalObjectConstructor.h"
 #include "nsIDOMLockedFile.h"
@@ -532,11 +527,6 @@ static nsDOMClassInfoData sClassInfoData[] = {
 
 #ifdef MOZ_B2G_BT
   NS_DEFINE_CLASSINFO_DATA(BluetoothDevice, nsEventTargetSH,
-                           EVENTTARGET_SCRIPTABLE_FLAGS)
-#endif
-
-#ifdef MOZ_B2G_NFC
-  NS_DEFINE_CLASSINFO_DATA(MozNfc, nsEventTargetSH,
                            EVENTTARGET_SCRIPTABLE_FLAGS)
 #endif
 
@@ -1382,13 +1372,6 @@ nsDOMClassInfo::Init()
 #ifdef MOZ_B2G_BT
   DOM_CLASSINFO_MAP_BEGIN(BluetoothDevice, nsIDOMBluetoothDevice)
     DOM_CLASSINFO_MAP_ENTRY(nsIDOMBluetoothDevice)
-  DOM_CLASSINFO_MAP_END
-#endif
-
-#ifdef MOZ_B2G_NFC
-  DOM_CLASSINFO_MAP_BEGIN(MozNfc, nsIDOMMozNfc)
-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMMozNfc)
-    DOM_CLASSINFO_MAP_ENTRY(nsIDOMEventTarget)
   DOM_CLASSINFO_MAP_END
 #endif
 
