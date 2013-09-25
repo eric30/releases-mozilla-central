@@ -50,6 +50,7 @@ using IPC::Principal;
 using mozilla::null_t;
 using mozilla::void_t;
 using mozilla::dom::AudioChannelType;
+using mozilla::dom::AudioChannelState;
 using mozilla::dom::BlobConstructorParams;
 using mozilla::dom::NativeThreadId;
 using mozilla::hal::ProcessPriority;
@@ -319,6 +320,7 @@ child:
     async LoadAndRegisterSheet(URIParams uri, uint32_t type);
     async UnregisterSheet(URIParams uri, uint32_t type);
 
+    NotifyPhoneStateChange(nsString newState);
 parent:
     /**
      * Tell the content process some attributes of itself.  This is
@@ -396,7 +398,8 @@ parent:
 
     PExternalHelperApp(OptionalURIParams uri, nsCString aMimeContentType,
                        nsCString aContentDisposition, bool aForceSave,
-                       int64_t aContentLength, OptionalURIParams aReferrer);
+                       int64_t aContentLength, OptionalURIParams aReferrer,
+                       nullable PBrowser aBrowser);
 
     AddGeolocationListener(Principal principal, bool highAccuracy);
     RemoveGeolocationListener();
@@ -435,15 +438,18 @@ parent:
     async FirstIdle();
 
     // Get Muted from the main AudioChannelService.
-    sync AudioChannelGetMuted(AudioChannelType aType, bool aElementHidden,
+    sync AudioChannelGetState(AudioChannelType aType, bool aElementHidden,
                               bool aElementWasHidden)
-        returns (bool value);
+        returns (AudioChannelState value);
 
-    sync AudioChannelRegisterType(AudioChannelType aType);
+    sync AudioChannelRegisterType(AudioChannelType aType, bool aWithVideo);
     sync AudioChannelUnregisterType(AudioChannelType aType,
-                                    bool aElementHidden);
+                                    bool aElementHidden,
+                                    bool aWithVideo);
 
     async AudioChannelChangedNotification();
+    async AudioChannelChangeDefVolChannel(AudioChannelType aType,
+                                          bool aHidden);
 
     async FilePathUpdateNotify(nsString aType,
                                nsString aStorageName,

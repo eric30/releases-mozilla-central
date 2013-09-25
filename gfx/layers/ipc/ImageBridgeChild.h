@@ -114,7 +114,7 @@ public:
    */
   static void StartUp();
 
-  static PImageBridgeChild*
+  static bool
   StartUpInChildProcess(Transport* aTransport, ProcessId aOtherProcess);
 
   /**
@@ -239,6 +239,15 @@ public:
   static void DispatchReleaseImageClient(ImageClient* aClient);
   static void DispatchImageClientUpdate(ImageClient* aClient, ImageContainer* aContainer);
 
+  /**
+   * Flush all Images sent to CompositableHost.
+   */
+  static void FlushImage(ImageClient* aClient, ImageContainer* aContainer);
+
+  /**
+   * Must be called on the ImageBridgeChild's thread.
+   */
+  static void FlushImageNow(ImageClient* aClient, ImageContainer* aContainer);
 
   // CompositableForwarder
 

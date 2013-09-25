@@ -13,6 +13,10 @@
 #endif // MOZ_LOGGING
 #include "prlog.h"
 
+#include "mozilla/MiscEvents.h"
+#include "mozilla/MouseEvents.h"
+#include "mozilla/TextEvents.h"
+
 #include "nsChildView.h"
 #include "nsObjCExceptions.h"
 #include "nsBidiUtils.h"
@@ -2076,9 +2080,9 @@ TextInputHandler::InsertText(NSAttributedString* aAttrString,
 
   // Remove basic modifiers from keypress event because if they are included,
   // nsPlaintextEditor ignores the event.
-  keypressEvent.modifiers &= ~(widget::MODIFIER_CONTROL |
-                               widget::MODIFIER_ALT |
-                               widget::MODIFIER_META);
+  keypressEvent.modifiers &= ~(MODIFIER_CONTROL |
+                               MODIFIER_ALT |
+                               MODIFIER_META);
 
   // TODO:
   // If mCurrentKeyEvent.mKeyEvent is null and when we implement textInput

@@ -453,3 +453,183 @@ assertEq(new Int32Array(buf)[0], 1);
 
 // Bug 882012
 assertEq(asmLink(asmCompile('stdlib', 'foreign', 'heap', USE_ASM + "var id=foreign.id;var doubles=new stdlib.Float64Array(heap);function g(){doubles[0]=+id(2.0);return +doubles[0];}return g"), this, {id: function(x){return x;}}, BUF_64KB)(), 2.0);
+
+
+// Some literal constant paths.
+
+var buf = new ArrayBuffer(8192);
+assertAsmTypeFail('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u32[0>>4294967295]|0; } return f');
+assertAsmTypeFail('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u32[0>>-1]|0; } return f');
+assertAsmTypeFail('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u32[0>>0x80000000]|0; } return f');
+assertAsmTypeFail('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u32[0>>-2147483648]|0; } return f');
+
+new Uint32Array(buf)[0] = 0xAA;
+new Uint32Array(buf)[0x5A>>2] = 0xA5;
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u32[(0x5A&4294967295)>>2]|0; } return f'), this, null, buf)(),0xA5);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'const i=4294967295; function f() { return u32[(0x5A&i)>>2]|0; } return f'), this, null, buf)(),0xA5);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u32[(0x5A&-1)>>2]|0; } return f'), this, null, buf)(),0xA5);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'const i=-1; function f() { return u32[(0x5A&i)>>2]|0; } return f'), this, null, buf)(),0xA5);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u32[(0x5A&0x80000000)>>2]|0; } return f'), this, null, buf)(),0xAA);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'const i=0x80000000; function f() { return u32[(0x5A&i)>>2]|0; } return f'), this, null, buf)(),0xAA);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u32[(0x5A&-2147483648)>>2]|0; } return f'), this, null, buf)(),0xAA);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'const i=-2147483648; function f() { return u32[(0x5A&i)>>2]|0; } return f'), this, null, buf)(),0xAA);
+
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u32[(4294967295&0x5A)>>2]|0; } return f'), this, null, buf)(),0xA5);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'const i=4294967295; function f() { return u32[(i&0x5A)>>2]|0; } return f'), this, null, buf)(),0xA5);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u32[(-1&0x5A)>>2]|0; } return f'), this, null, buf)(),0xA5);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'const i=-1; function f() { return u32[(i&0x5A)>>2]|0; } return f'), this, null, buf)(),0xA5);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u32[(0x80000000&0x5A)>>2]|0; } return f'), this, null, buf)(),0xAA);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'const i=0x80000000; function f() { return u32[(i&0x5A)>>2]|0; } return f'), this, null, buf)(),0xAA);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u32[(-2147483648&0x5A)>>2]|0; } return f'), this, null, buf)(),0xAA);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'const i=-2147483648; function f() { return u32[(-2147483648&0x5A)>>2]|0; } return f'), this, null, buf)(),0xAA);
+
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u32[4294967295>>2]|0; } return f'), this, null, buf)(),0);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'const i=4294967295; function f() { return u32[i>>2]|0; } return f'), this, null, buf)(),0);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u32[-1>>2]|0; } return f'), this, null, buf)(),0);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'const i=-1; function f() { return u32[i>>2]|0; } return f'), this, null, buf)(),0);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u32[0x80000000>>2]|0; } return f'), this, null, buf)(),0);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'const i=0x80000000; function f() { return u32[i>>2]|0; } return f'), this, null, buf)(),0);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u32[-2147483648>>2]|0; } return f'), this, null, buf)(),0);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'const i=-2147483648; function f() { return u32[-2147483648>>2]|0; } return f'), this, null, buf)(),0);
+
+var buf = new ArrayBuffer(8192);
+new Uint8Array(buf)[0] = 0xAA;
+new Uint8Array(buf)[0x5A] = 0xA5;
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u8[0x5A&4294967295]|0; } return f'), this, null, buf)(),0xA5);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'const i=4294967295; function f() { return u8[0x5A&i]|0; } return f'), this, null, buf)(),0xA5);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u8[0x5A&-1]|0; } return f'), this, null, buf)(),0xA5);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'const i=-1; function f() { return u8[0x5A&i]|0; } return f'), this, null, buf)(),0xA5);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u8[0x5A&0x80000000]|0; } return f'), this, null, buf)(),0xAA);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'const i=0x80000000; function f() { return u8[0x5A&i]|0; } return f'), this, null, buf)(),0xAA);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u8[0x5A&-2147483648]|0; } return f'), this, null, buf)(),0xAA);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'const i=-2147483648; function f() { return u8[0x5A&i]|0; } return f'), this, null, buf)(),0xAA);
+
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u8[4294967295&0x5A]|0; } return f'), this, null, buf)(),0xA5);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'const i=4294967295; function f() { return u8[i&0x5A]|0; } return f'), this, null, buf)(),0xA5);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u8[-1&0x5A]|0; } return f'), this, null, buf)(),0xA5);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'const i=-1; function f() { return u8[i&0x5A]|0; } return f'), this, null, buf)(),0xA5);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u8[0x80000000&0x5A]|0; } return f'), this, null, buf)(),0xAA);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'const i=0x80000000; function f() { return u8[i&0x5A]|0; } return f'), this, null, buf)(),0xAA);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u8[-2147483648&0x5A]|0; } return f'), this, null, buf)(),0xAA);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'const i=-2147483648; function f() { return u8[i&0x5A]|0; } return f'), this, null, buf)(),0xAA);
+
+assertAsmTypeFail('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u8[4294967295]|0; } return f');
+assertAsmTypeFail('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'const i=4294967295; function f() { return u8[i]|0; } return f');
+assertAsmTypeFail('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u8[-1]|0; } return f');
+assertAsmTypeFail('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'const i=-1; function f() { return u8[i]|0; } return f');
+assertAsmTypeFail('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u8[0x80000000]|0; } return f');
+assertAsmTypeFail('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'const i=0x80000000; function f() { return u8[i]|0; } return f');
+assertAsmTypeFail('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u8[-2147483648]|0; } return f');
+assertAsmTypeFail('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'const i=-2147483648; function f() { return u8[i]|0; } return f');
+
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u8[4294967295>>0]|0; } return f'), this, null, buf)(),0);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'const i=4294967295; function f() { return u8[i>>0]|0; } return f'), this, null, buf)(),0);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u8[-1>>0]|0; } return f'), this, null, buf)(),0);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'const i=-1; function f() { return u8[i>>0]|0; } return f'), this, null, buf)(),0);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u8[0x80000000>>0]|0; } return f'), this, null, buf)(),0);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'const i=0x80000000; function f() { return u8[i>>0]|0; } return f'), this, null, buf)(),0);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u8[-2147483648>>0]|0; } return f'), this, null, buf)(),0);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'const i=-2147483648; function f() { return u8[i>>0]|0; } return f'), this, null, buf)(),0);
+
+// GVN checks
+var buf = new ArrayBuffer(8192);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'var i=0; function f() { var x = 0, y = 0; u8[0] = 1; u8[1] = 2; x = 0|u8[i]; i = x; y = 0|u8[i]; return y|0;} return f'), this, null, buf)(),2);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'var i=0; function f() { var x = 0, y = 0; u8[0] = 1; u8[1] = 2; x = 0|u8[i]; y = 0|u8[i]; return (x+y)|0;} return f'), this, null, buf)(),2);
+
+// Heap length constraints
+var buf = new ArrayBuffer(0x0fff);
+assertAsmLinkAlwaysFail(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf);
+var buf = new ArrayBuffer(0x1000);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0),0);
+var buf = new ArrayBuffer(0x1010);
+assertAsmLinkFail(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf);
+var buf = new ArrayBuffer(0x2000);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0),0);
+var buf = new ArrayBuffer(0xfe000);
+new Uint8Array(buf)[0xfdfff] = 0xAA;
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0),0);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0xfdfff),0xAA);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0xfe000),0);
+var buf = new ArrayBuffer(0xfe010);
+assertAsmLinkFail(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf);
+var buf = new ArrayBuffer(0xff000);
+new Uint8Array(buf)[0xfefff] = 0xAA;
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0),0);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0xfefff),0xAA);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0xff000),0);
+var buf = new ArrayBuffer(0xff800);
+assertAsmLinkFail(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf);
+var buf = new ArrayBuffer(0x100000);
+new Uint8Array(buf)[0xfffff] = 0xAA;
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0),0);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0xfffff),0xAA);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0x100000),0);
+var buf = new ArrayBuffer(0x104000);
+new Uint8Array(buf)[0x103fff] = 0xAA;
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u8[0x103fff]|0; } return f'), this, null, buf)(),0xAA);
+var buf = new ArrayBuffer(0x3f8000);
+new Uint8Array(buf)[0x3f7fff] = 0xAA;
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0),0);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0x3f7fff),0xAA);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0x3f8000),0);
+var buf = new ArrayBuffer(0x3fc000); // 4080K
+new Uint8Array(buf)[0x3fbfff] = 0xAA;
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0),0);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0x3fbfff),0xAA);
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0x3fc000),0);
+var buf = new ArrayBuffer(0x3fe000);
+assertAsmLinkFail(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf);
+var buf = new ArrayBuffer(0x410000);
+new Uint8Array(buf)[0x40ffff] = 0xAA;
+assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u8[0x40ffff]|0; } return f'), this, null, buf)(),0xAA);
+// The rest are getting too large for regular testing.
+//var buf = new ArrayBuffer(0xfe8000);
+//assertAsmLinkFail(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf);
+//var buf = new ArrayBuffer(0xff0000); // 16302K
+//new Uint8Array(buf)[0xfeffff] = 0xAA;
+//assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0),0);
+//assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0xfeffff),0xAA);
+//assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0xff0000),0);
+//var buf = new ArrayBuffer(0xff8000);
+//assertAsmLinkFail(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf);
+//var buf = new ArrayBuffer(0x3fb0000);
+//assertAsmLinkFail(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf);
+//var buf = new ArrayBuffer(0x3fc0000); // 65280K
+//new Uint8Array(buf)[0x3fbffff] = 0xAA;
+//assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0),0);
+//assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0x3fbffff),0xAA);
+//assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0x3fc0000),0);
+//var buf = new ArrayBuffer(0x3fe0000);
+//assertAsmLinkFail(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf);
+//var buf = new ArrayBuffer(0xfe80000);
+//assertAsmLinkFail(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf);
+//var buf = new ArrayBuffer(0xff00000); // 255M
+//new Uint8Array(buf)[0xfeffff] = 0xAA;
+//assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0),0);
+//assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0xfeffff),0xAA);
+//assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0xff00000),0);
+//var buf = new ArrayBuffer(0xff80000);
+//assertAsmLinkFail(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf);
+//var buf = new ArrayBuffer(0x10400000);
+//new Uint8Array(buf)[0x103fffff] = 0xAA;
+//assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f() { return u8[0x103fffff]|0; } return f'), this, null, buf)(),0xAA);
+//var buf = new ArrayBuffer(0x3fa00000);
+//assertAsmLinkFail(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf);
+//var buf = new ArrayBuffer(0x3fc00000); // 1020M
+//new Uint8Array(buf)[0x3fbfffff] = 0xAA;
+//assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0),0);
+//assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0x3fbfffff),0xAA);
+//assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0x3fc00000),0);
+//var buf = new ArrayBuffer(0x3fe00000);
+//assertAsmLinkFail(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf);
+//var buf = new ArrayBuffer(0x40000000); // 1024M
+//new Uint8Array(buf)[0x3fffffff] = 0xAA;
+//assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0),0);
+//assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0x3fffffff),0xAA);
+//assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0x40000000),0);
+//var buf = new ArrayBuffer(0x4f000000); // 1264M - currently the largest possible heap length.
+//new Uint8Array(buf)[0x4effffff] = 0xAA;
+//assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0),0);
+//assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0x4effffff),0xAA);
+//assertEq(asmLink(asmCompile('glob', 'imp', 'b', USE_ASM + HEAP_IMPORTS + 'function f(i) { i=i|0; return u8[i]|0; } return f'), this, null, buf)(0x4f000000),0);
+

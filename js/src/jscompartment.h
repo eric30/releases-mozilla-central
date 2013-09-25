@@ -185,11 +185,6 @@ struct JSCompartment
 
 
     int64_t                      lastCodeRelease;
-
-    /* Pools for analysis and type information in this compartment. */
-    static const size_t ANALYSIS_LIFO_ALLOC_PRIMARY_CHUNK_SIZE = 32 * 1024;
-    js::LifoAlloc                analysisLifoAlloc;
-
     bool                         activeAnalysis;
 
     /* Type information about the scripts and objects in this compartment. */
@@ -209,7 +204,16 @@ struct JSCompartment
     js::RegExpCompartment        regExps;
 
     /* Set of all currently living type representations. */
-    js::TypeRepresentationSet    typeReprs;
+    js::TypeRepresentationHash   typeReprs;
+
+    /*
+     * For generational GC, record whether a write barrier has added this
+     * compartment's global to the store buffer since the last minor GC.
+     *
+     * This is used to avoid adding it to the store buffer on every write, which
+     * can quickly fill the buffer and also cause performance problems.
+     */
+    bool                         globalWriteBarriered;
 
   private:
     void sizeOfTypeInferenceData(JS::TypeInferenceSizes *stats, mozilla::MallocSizeOf mallocSizeOf);

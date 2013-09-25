@@ -10,16 +10,16 @@
 #include "FrameMetrics.h"               // for FrameMetrics, etc
 #include "Units.h"                      // for CSSPoint, CSSRect, etc
 #include "gfxPoint.h"                   // for gfxPoint
+#include "gfx3DMatrix.h"                // for gfx3DMatrix
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT_HELPER2
+#include "mozilla/EventForwards.h"      // for nsInputEvent, nsEventStatus
 #include "mozilla/Monitor.h"            // for Monitor
 #include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsCOMPtr.h"                   // for already_AddRefed
-#include "nsEvent.h"                    // for nsEventStatus
 #include "nsISupportsImpl.h"
 #include "nsTraceRefcnt.h"              // for MOZ_COUNT_CTOR, etc
 
 class gfx3DMatrix;
-class nsInputEvent;
 template <class E> class nsTArray;
 
 namespace mozilla {
@@ -146,17 +146,30 @@ public:
   nsEventStatus ReceiveInputEvent(const InputData& aEvent);
 
   /**
-   * Special handler for nsInputEvents. Also sets |aOutEvent| (which is assumed
-   * to be an already-existing instance of an nsInputEvent which may be an
-   * nsTouchEvent) to have its touch points in DOM space. This is so that the
-   * touches can be passed through the DOM and content can handle them.
+   * nsInputEvent handler. Sets |aOutEvent| (which is assumed to be an
+   * already-existing instance of an nsInputEvent which may be an
+   * nsTouchEvent) to have its coordinates in DOM space. This is so that the
+   * event can be passed through the DOM and content can handle them.
    *
    * NOTE: Be careful of invoking the nsInputEvent variant. This can only be
    * called on the main thread. See widget/InputData.h for more information on
    * why we have InputData and nsInputEvent separated.
+   * NOTE: On unix, mouse events are treated as touch and are forwarded
+   * to the appropriate apz as such.
+   *
+   * @param aEvent input event object, will not be modified
+   * @param aOutEvent event object transformed to DOM coordinate space.
    */
   nsEventStatus ReceiveInputEvent(const nsInputEvent& aEvent,
                                   nsInputEvent* aOutEvent);
+
+  /**
+   * nsInputEvent handler with inline dom transform of the passed in
+   * nsInputEvent. Must be called on the main thread.
+   *
+   * @param aEvent input event object
+   */
+  nsEventStatus ReceiveInputEvent(nsInputEvent& aEvent);
 
   /**
    * Updates the composition bounds, i.e. the dimensions of the final size of
@@ -236,6 +249,11 @@ public:
   void ClearTree();
 
   /**
+   * Tests if a screen point intersect an apz in the tree.
+   */
+  bool HitTestAPZC(const ScreenPoint& aPoint);
+
+  /**
    * Set the dpi value used by all AsyncPanZoomControllers.
    * DPI defaults to 72 if not set using SetDPI() at any point.
    */
@@ -245,6 +263,18 @@ public:
    * Returns the current dpi value in use.
    */
   static float GetDPI() { return sDPI; }
+
+  /**
+   * This is a callback for AsyncPanZoomController to call when a touch-move
+   * event causes overscroll. The overscroll will be passed on to the parent
+   * APZC. |aStartPoint| and |aEndPoint| are in |aAPZC|'s transformed screen
+   * coordinates (i.e. the same coordinates in which touch points are given to
+   * APZCs). The amount of the overscroll is represented by two points rather
+   * than a displacement because with certain 3D transforms, the same
+   * displacement between different points in transformed coordinates can
+   * represent different displacements in untransformed coordinates.
+   */
+  void HandleOverscroll(AsyncPanZoomController* aAPZC, ScreenPoint aStartPoint, ScreenPoint aEndPoint);
 
 protected:
   /**
@@ -270,6 +300,10 @@ private:
   AsyncPanZoomController* GetAPZCAtPoint(AsyncPanZoomController* aApzc, const gfxPoint& aHitTestPoint);
   AsyncPanZoomController* CommonAncestor(AsyncPanZoomController* aApzc1, AsyncPanZoomController* aApzc2);
   AsyncPanZoomController* RootAPZCForLayersId(AsyncPanZoomController* aApzc);
+  AsyncPanZoomController* GetTouchInputBlockAPZC(const nsTouchEvent& aEvent, ScreenPoint aPoint);
+  nsEventStatus ProcessTouchEvent(const nsTouchEvent& touchEvent, nsTouchEvent* aOutEvent);
+  nsEventStatus ProcessMouseEvent(const nsMouseEvent& mouseEvent, nsMouseEvent* aOutEvent);
+  nsEventStatus ProcessEvent(const nsInputEvent& inputEvent, nsInputEvent* aOutEvent);
 
   /**
    * Recursive helper function to build the APZC tree. The tree of APZC instances has
@@ -303,6 +337,14 @@ private:
    * input delivery thread, and so does not require locking.
    */
   nsRefPtr<AsyncPanZoomController> mApzcForInputBlock;
+  /* The transform from root screen coordinates into mApzcForInputBlock's
+   * screen coordinates, as returned through the 'aTransformToApzcOut' parameter
+   * of GetInputTransform(), at the start of the input block. This is cached
+   * because this transform can change over the course of the input block,
+   * but for some operations we need to use the initial tranform.
+   * Meaningless if mApzcForInputBlock is nullptr.
+   */
+  gfx3DMatrix mCachedTransformToApzcForInputBlock;
 
   static float sDPI;
 };

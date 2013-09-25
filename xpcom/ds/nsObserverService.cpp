@@ -5,17 +5,11 @@
 
 #include "prlog.h"
 #include "nsAutoPtr.h"
-#include "nsIFactory.h"
-#include "nsIServiceManager.h"
-#include "nsIComponentManager.h"
 #include "nsIObserverService.h"
 #include "nsIObserver.h"
-#include "nsISimpleEnumerator.h"
 #include "nsObserverService.h"
 #include "nsObserverList.h"
-#include "nsHashtable.h"
 #include "nsThreadUtils.h"
-#include "nsIWeakReference.h"
 #include "nsEnumeratorUtils.h"
 #include "nsIMemoryReporter.h"
 #include "mozilla/net/NeckoCommon.h"
@@ -54,7 +48,7 @@ public:
     NS_DECL_ISUPPORTS
     NS_DECL_NSIMEMORYREPORTER
 protected:
-    static const size_t kSuspectReferentCount = 1000;
+    static const size_t kSuspectReferentCount = 100;
     static PLDHashOperator CountReferents(nsObserverList* aObserverList,
                                           void* aClosure);
 };
@@ -154,8 +148,10 @@ ObserverServiceReporter::CollectReports(nsIMemoryReporterCallback* cb,
             nsIMemoryReporter::KIND_OTHER,
             nsIMemoryReporter::UNITS_COUNT,
             suspect.referentCount,
-            NS_LITERAL_CSTRING("A topic with a suspiciously large number "
-                               "referents (symptom of a leak)."),
+            NS_LITERAL_CSTRING("A topic with a suspiciously large number of "
+                               "referents.  This may be symptomatic of a leak "
+                               "if the number of referents is high with "
+                               "respect to the number of windows."),
             aClosure);
 
         NS_ENSURE_SUCCESS(rv, rv);

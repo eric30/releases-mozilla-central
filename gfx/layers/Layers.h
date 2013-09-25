@@ -12,7 +12,8 @@
 #include "FrameMetrics.h"               // for FrameMetrics
 #include "Units.h"                      // for LayerMargin, LayerPoint
 #include "gfx3DMatrix.h"                // for gfx3DMatrix
-#include "gfxASurface.h"                // for gfxASurface, etc
+#include "gfxContext.h"                 // for GraphicsOperator
+#include "gfxTypes.h"
 #include "gfxColor.h"                   // for gfxRGBA
 #include "gfxMatrix.h"                  // for gfxMatrix
 #include "gfxPattern.h"                 // for gfxPattern, etc
@@ -20,6 +21,7 @@
 #include "gfxRect.h"                    // for gfxRect
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT_HELPER2, etc
 #include "mozilla/DebugOnly.h"          // for DebugOnly
+#include "mozilla/EventForwards.h"      // for nsPaintEvent
 #include "mozilla/RefPtr.h"             // for TemporaryRef
 #include "mozilla/TimeStamp.h"          // for TimeStamp, TimeDuration
 #include "mozilla/gfx/BaseMargin.h"     // for BaseMargin
@@ -44,9 +46,8 @@
 #include "nscore.h"                     // for nsACString, nsAString
 #include "prlog.h"                      // for PRLogModuleInfo
 
-
+class gfxASurface;
 class gfxContext;
-class nsPaintEvent;
 
 extern uint8_t gLayerManagerLayerBuilder;
 
@@ -395,7 +396,7 @@ public:
    */
   virtual already_AddRefed<gfxASurface>
     CreateOptimalSurface(const gfxIntSize &aSize,
-                         gfxASurface::gfxImageFormat imageFormat);
+                         gfxImageFormat imageFormat);
 
   /**
    * Creates a surface for alpha masks which is optimized for inter-operating
@@ -732,6 +733,29 @@ public:
     }
   }
 
+  void SetMixBlendMode(gfxContext::GraphicsOperator aMixBlendMode)
+  {
+    if (mMixBlendMode != aMixBlendMode) {
+      MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) MixBlendMode", this));
+      mMixBlendMode = aMixBlendMode;
+      Mutated();
+    }
+  }
+  
+  void SetForceIsolatedGroup(bool aForceIsolatedGroup)
+  {
+    if(mForceIsolatedGroup != aForceIsolatedGroup) {
+      MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) ForceIsolatedGroup", this));
+      mForceIsolatedGroup = aForceIsolatedGroup;
+      Mutated();
+    }
+  }
+  
+  bool GetForceIsolatedGroup() const
+  {
+    return mForceIsolatedGroup;
+  }
+
   /**
    * CONSTRUCTION PHASE ONLY
    * Set a clip rect which will be applied to this layer as it is
@@ -909,8 +933,35 @@ public:
     }
   }
 
+  /**
+   * CONSTRUCTION PHASE ONLY
+   * If a layer is "sticky position", |aScrollId| holds the scroll identifier
+   * of the scrollable content that contains it. The difference between the two
+   * rectangles |aOuter| and |aInner| is treated as two intervals in each
+   * dimension, with the current scroll position at the origin. For each
+   * dimension, while that component of the scroll position lies within either
+   * interval, the layer should not move relative to its scrolling container.
+   */
+  void SetStickyPositionData(FrameMetrics::ViewID aScrollId, LayerRect aOuter,
+                             LayerRect aInner)
+  {
+    if (!mStickyPositionData ||
+        !mStickyPositionData->mOuter.IsEqualEdges(aOuter) ||
+        !mStickyPositionData->mInner.IsEqualEdges(aInner)) {
+      MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) StickyPositionData", this));
+      if (!mStickyPositionData) {
+        mStickyPositionData = new StickyPositionData;
+      }
+      mStickyPositionData->mScrollId = aScrollId;
+      mStickyPositionData->mOuter = aOuter;
+      mStickyPositionData->mInner = aInner;
+      Mutated();
+    }
+  }
+
   // These getters can be used anytime.
   float GetOpacity() { return mOpacity; }
+  gfxContext::GraphicsOperator GetMixBlendMode() const { return mMixBlendMode; }
   const nsIntRect* GetClipRect() { return mUseClipRect ? &mClipRect : nullptr; }
   uint32_t GetContentFlags() { return mContentFlags; }
   const nsIntRegion& GetVisibleRegion() { return mVisibleRegion; }
@@ -926,8 +977,12 @@ public:
   float GetPostXScale() const { return mPostXScale; }
   float GetPostYScale() const { return mPostYScale; }
   bool GetIsFixedPosition() { return mIsFixedPosition; }
+  bool GetIsStickyPosition() { return mStickyPositionData; }
   LayerPoint GetFixedPositionAnchor() { return mAnchor; }
   const LayerMargin& GetFixedPositionMargins() { return mMargins; }
+  FrameMetrics::ViewID GetStickyScrollContainerId() { return mStickyPositionData->mScrollId; }
+  const LayerRect& GetStickyScrollRangeOuter() { return mStickyPositionData->mOuter; }
+  const LayerRect& GetStickyScrollRangeInner() { return mStickyPositionData->mInner; }
   Layer* GetMaskLayer() const { return mMaskLayer; }
 
   // Note that all lengths in animation data are either in CSS pixels or app
@@ -1072,11 +1127,18 @@ public:
   // accounting for this layer possibly being a shadow.
   const nsIntRect* GetEffectiveClipRect();
   const nsIntRegion& GetEffectiveVisibleRegion();
+
   /**
    * Returns the product of the opacities of this layer and all ancestors up
    * to and excluding the nearest ancestor that has UseIntermediateSurface() set.
    */
   float GetEffectiveOpacity();
+  
+  /**
+   * Returns the blendmode of this layer.
+   */
+  gfxContext::GraphicsOperator GetEffectiveMixBlendMode();
+  
   /**
    * This returns the effective transform computed by
    * ComputeEffectiveTransforms. Typically this is a transform that transforms
@@ -1274,6 +1336,8 @@ protected:
   AnimationArray mAnimations;
   InfallibleTArray<AnimData> mAnimationData;
   float mOpacity;
+  gfxContext::GraphicsOperator mMixBlendMode;
+  bool mForceIsolatedGroup;
   nsIntRect mClipRect;
   nsIntRect mTileSourceRect;
   nsIntRegion mInvalidRegion;
@@ -1283,6 +1347,12 @@ protected:
   bool mIsFixedPosition;
   LayerPoint mAnchor;
   LayerMargin mMargins;
+  struct StickyPositionData {
+    FrameMetrics::ViewID mScrollId;
+    LayerRect mOuter;
+    LayerRect mInner;
+  };
+  nsAutoPtr<StickyPositionData> mStickyPositionData;
   DebugOnly<uint32_t> mDebugColorIndex;
   // If this layer is used for OMTA, then this counter is used to ensure we
   // stay in sync with the animation manager

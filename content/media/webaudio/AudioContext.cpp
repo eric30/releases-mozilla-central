@@ -38,8 +38,25 @@
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_2(AudioContext, nsDOMEventTargetHelper,
-                                     mDestination, mListener)
+NS_IMPL_CYCLE_COLLECTION_CLASS(AudioContext)
+
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(AudioContext)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mDestination)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mListener)
+  if (!tmp->mIsStarted) {
+    NS_IMPL_CYCLE_COLLECTION_UNLINK(mActiveNodes)
+  }
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END_INHERITED(nsDOMEventTargetHelper)
+
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(AudioContext, nsDOMEventTargetHelper)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDestination)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mListener)
+  if (!tmp->mIsStarted) {
+    MOZ_ASSERT(tmp->mIsOffline,
+               "Online AudioContexts should always be started");
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mActiveNodes)
+  }
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_ADDREF_INHERITED(AudioContext, nsDOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(AudioContext, nsDOMEventTargetHelper)
@@ -59,6 +76,8 @@ AudioContext::AudioContext(nsPIDOMWindow* aWindow,
                                           aLength, aSampleRate))
   , mNumberOfChannels(aNumberOfChannels)
   , mIsOffline(aIsOffline)
+  , mIsStarted(!aIsOffline)
+  , mIsShutDown(false)
 {
   // Actually play audio
   mDestination->Stream()->AddAudioOutput(&gWebAudioOutputKey);
@@ -135,7 +154,6 @@ AudioContext::CreateBufferSource()
 {
   nsRefPtr<AudioBufferSourceNode> bufferNode =
     new AudioBufferSourceNode(this);
-  mAudioBufferSourceNodes.PutEntry(bufferNode);
   return bufferNode.forget();
 }
 
@@ -247,7 +265,6 @@ AudioContext::CreateScriptProcessor(uint32_t aBufferSize,
   nsRefPtr<ScriptProcessorNode> scriptProcessor =
     new ScriptProcessorNode(this, aBufferSize, aNumberOfInputChannels,
                             aNumberOfOutputChannels);
-  mScriptProcessorNodes.PutEntry(scriptProcessor);
   return scriptProcessor.forget();
 }
 
@@ -377,7 +394,6 @@ AudioContext::CreateOscillator()
 {
   nsRefPtr<OscillatorNode> oscillatorNode =
     new OscillatorNode(this);
-  mOscillatorNodes.PutEntry(oscillatorNode);
   return oscillatorNode.forget();
 }
 
@@ -394,8 +410,11 @@ AudioContext::CreatePeriodicWave(const Float32Array& aRealData,
   }
 
   nsRefPtr<PeriodicWave> periodicWave =
-    new PeriodicWave(this, aRealData.Data(), aRealData.Length(),
-                     aImagData.Data(), aImagData.Length());
+    new PeriodicWave(this, aRealData.Data(), aImagData.Data(),
+                     aImagData.Length(), aRv);
+  if (aRv.Failed()) {
+    return nullptr;
+  }
   return periodicWave.forget();
 }
 
@@ -440,9 +459,22 @@ AudioContext::RemoveFromDecodeQueue(WebAudioDecodeJob* aDecodeJob)
 }
 
 void
+AudioContext::RegisterActiveNode(AudioNode* aNode)
+{
+  if (!mIsShutDown) {
+    mActiveNodes.PutEntry(aNode);
+  }
+}
+
+void
+AudioContext::UnregisterActiveNode(AudioNode* aNode)
+{
+  mActiveNodes.RemoveEntry(aNode);
+}
+
+void
 AudioContext::UnregisterAudioBufferSourceNode(AudioBufferSourceNode* aNode)
 {
-  mAudioBufferSourceNodes.RemoveEntry(aNode);
   UpdatePannerSource();
 }
 
@@ -453,18 +485,6 @@ AudioContext::UnregisterPannerNode(PannerNode* aNode)
   if (mListener) {
     mListener->UnregisterPannerNode(aNode);
   }
-}
-
-void
-AudioContext::UnregisterOscillatorNode(OscillatorNode* aNode)
-{
-  mOscillatorNodes.RemoveEntry(aNode);
-}
-
-void
-AudioContext::UnregisterScriptProcessorNode(ScriptProcessorNode* aNode)
-{
-  mScriptProcessorNodes.RemoveEntry(aNode);
 }
 
 static PLDHashOperator
@@ -495,7 +515,10 @@ AudioContext::Graph() const
 MediaStream*
 AudioContext::DestinationStream() const
 {
-  return Destination()->Stream();
+  if (Destination()) {
+    return Destination()->Stream();
+  }
+  return nullptr;
 }
 
 double
@@ -504,57 +527,20 @@ AudioContext::CurrentTime() const
   return MediaTimeToSeconds(Destination()->Stream()->GetCurrentTime());
 }
 
-template <class T>
-static PLDHashOperator
-GetHashtableEntry(nsPtrHashKey<T>* aEntry, void* aData)
-{
-  nsTArray<T*>* array = static_cast<nsTArray<T*>*>(aData);
-  array->AppendElement(aEntry->GetKey());
-  return PL_DHASH_NEXT;
-}
-
-template <class T>
-static void
-GetHashtableElements(nsTHashtable<nsPtrHashKey<T> >& aHashtable, nsTArray<T*>& aArray)
-{
-  aHashtable.EnumerateEntries(&GetHashtableEntry<T>, &aArray);
-}
-
 void
 AudioContext::Shutdown()
 {
+  mIsShutDown = true;
+
   Suspend();
 
-  // Stop all audio buffer source nodes, to make sure that they release
-  // their self-references.
-  // We first gather an array of the nodes and then call Stop on each one,
-  // since Stop may delete the object and therefore trigger a re-entrant
-  // hashtable call to remove the pointer from the hashtable, which is
-  // not safe.
-  nsTArray<AudioBufferSourceNode*> sourceNodes;
-  GetHashtableElements(mAudioBufferSourceNodes, sourceNodes);
-  for (uint32_t i = 0; i < sourceNodes.Length(); ++i) {
-    ErrorResult rv;
-    sourceNodes[i]->Stop(0.0, rv, true);
-  }
-  // Stop all Oscillator nodes to make sure they release their
-  // playing reference.
-  nsTArray<OscillatorNode*> oscNodes;
-  GetHashtableElements(mOscillatorNodes, oscNodes);
-  for (uint32_t i = 0; i < oscNodes.Length(); ++i) {
-    ErrorResult rv;
-    oscNodes[i]->Stop(0.0, rv);
-  }
-  // Stop all script processor nodes, to make sure that they release
-  // their self-references.
-  nsTArray<ScriptProcessorNode*> spNodes;
-  GetHashtableElements(mScriptProcessorNodes, spNodes);
-  for (uint32_t i = 0; i < spNodes.Length(); ++i) {
-    spNodes[i]->Stop();
-  }
+  // Release references to active nodes.
+  // Active AudioNodes don't unregister in destructors, at which point the
+  // Node is already unregistered.
+  mActiveNodes.Clear();
 
   // For offline contexts, we can destroy the MediaStreamGraph at this point.
-  if (mIsOffline) {
+  if (mIsOffline && mDestination) {
     mDestination->OfflineShutdown();
   }
 }
@@ -595,10 +581,15 @@ AudioContext::GetJSContext() const
 }
 
 void
-AudioContext::StartRendering()
+AudioContext::StartRendering(ErrorResult& aRv)
 {
   MOZ_ASSERT(mIsOffline, "This should only be called on OfflineAudioContext");
+  if (mIsStarted) {
+    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    return;
+  }
 
+  mIsStarted = true;
   mDestination->StartRendering();
 }
 

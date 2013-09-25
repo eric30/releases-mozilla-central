@@ -31,6 +31,7 @@ struct nsGenConInitializer;
 class nsICSSAnonBoxPseudo;
 class nsPageContentFrame;
 struct PendingBinding;
+class nsGenericDOMDataNode;
 
 class nsFrameConstructorState;
 class nsFrameConstructorSaveState;
@@ -198,6 +199,13 @@ public:
   nsresult CharacterDataChanged(nsIContent* aContent,
                                 CharacterDataChangeInfo* aInfo);
 
+  // If aContent is a text node that has been optimized away due to being
+  // whitespace next to a block boundary (or for some other reason), stop
+  // doing that and create a frame for it if it should have one. This recreates
+  // frames so be careful (although this should not change actual layout).
+  // Returns the frame for aContent if there is one.
+  nsIFrame* EnsureFrameForTextNode(nsGenericDOMDataNode* aContent);
+
   // generate the child frames and process bindings
   nsresult GenerateChildFrames(nsIFrame* aFrame);
 
@@ -339,7 +347,7 @@ private:
 
   /**
    * Create a content node for the given generated content style.
-   * The caller takes care of making it SetNativeAnonymous, binding it
+   * The caller takes care of making it SetIsNativeAnonymousRoot, binding it
    * to the document, and creating frames for it.
    * @param aParentContent is the node that has the before/after style
    * @param aStyleContext is the 'before' or 'after' pseudo-element
@@ -1216,17 +1224,40 @@ private:
                        Element* aElement,
                        nsStyleContext* aStyleContext);
 
-// SVG - rods
   /**
-   * Construct an nsSVGOuterSVGFrame, the anonymous child that wraps its real
-   * children, and its descendant frames.  This is the FrameConstructionData
-   * callback used for the job.
+   * Constructs an outer frame, an anonymous child that wraps its real
+   * children, and its descendant frames.  This is used by both ConstructOuterSVG
+   * and ConstructMarker, which both want an anonymous block child for their
+   * children to go in to.
+   */
+  nsIFrame* ConstructFrameWithAnonymousChild(
+                                  nsFrameConstructorState& aState,
+                                  FrameConstructionItem&   aItem,
+                                  nsIFrame*                aParentFrame,
+                                  const nsStyleDisplay*    aDisplay,
+                                  nsFrameItems&            aFrameItems,
+                                  FrameCreationFunc        aConstructor,
+                                  FrameCreationFunc        aInnerConstructor,
+                                  nsICSSAnonBoxPseudo*     aInnerPseudo,
+                                  bool                     aCandidateRootFrame);
+
+  /**
+   * Construct an nsSVGOuterSVGFrame.
    */
   nsIFrame* ConstructOuterSVG(nsFrameConstructorState& aState,
                               FrameConstructionItem&   aItem,
                               nsIFrame*                aParentFrame,
                               const nsStyleDisplay*    aDisplay,
                               nsFrameItems&            aFrameItems);
+
+  /**
+   * Construct an nsSVGMarkerFrame.
+   */
+  nsIFrame* ConstructMarker(nsFrameConstructorState& aState,
+                            FrameConstructionItem&   aItem,
+                            nsIFrame*                aParentFrame,
+                            const nsStyleDisplay*    aDisplay,
+                            nsFrameItems&            aFrameItems);
 
   static const FrameConstructionData* FindSVGData(Element* aElement,
                                                   nsIAtom* aTag,

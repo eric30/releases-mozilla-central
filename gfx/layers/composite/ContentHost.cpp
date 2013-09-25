@@ -229,28 +229,26 @@ ContentHostBase::Dump(FILE* aFile,
                       const char* aPrefix,
                       bool aDumpHtml)
 {
+  if (!aDumpHtml) {
+    return;
+  }
   if (!aFile) {
     aFile = stderr;
   }
-  if (aDumpHtml) {
-    fprintf(aFile, "<ul>");
-  }
+  fprintf(aFile, "<ul>");
   if (mDeprecatedTextureHost) {
     fprintf(aFile, "%s", aPrefix);
-    fprintf(aFile, aDumpHtml ? "<li> <a href=" : "Front buffer: ");
+    fprintf(aFile, "<li> <a href=");
     DumpDeprecatedTextureHost(aFile, mDeprecatedTextureHost);
-    fprintf(aFile, aDumpHtml ? "> Front buffer </a></li> " : " ");
+    fprintf(aFile, "> Front buffer </a></li> ");
   }
   if (mDeprecatedTextureHostOnWhite) {
     fprintf(aFile, "%s", aPrefix);
-    fprintf(aFile, aDumpHtml ? "<li> <a href=" : "DeprecatedTextureHost on white: ");
+    fprintf(aFile, "<li> <a href=");
     DumpDeprecatedTextureHost(aFile, mDeprecatedTextureHostOnWhite);
-    fprintf(aFile, aDumpHtml ? "> Front buffer on white </a> </li> " : " ");
+    fprintf(aFile, "> Front buffer on white </a> </li> ");
   }
-  if (aDumpHtml) {
-    fprintf(aFile, "</ul>");
-  }
-
+  fprintf(aFile, "</ul>");
 }
 
 #endif
@@ -274,7 +272,8 @@ ContentHostSingleBuffered::EnsureDeprecatedTextureHost(TextureIdentifier aTextur
 
   *newHost = DeprecatedTextureHost::CreateDeprecatedTextureHost(aSurface.type(),
                                             aTextureInfo.mDeprecatedTextureHostFlags,
-                                            aTextureInfo.mTextureFlags);
+                                            aTextureInfo.mTextureFlags,
+                                            this);
 
   (*newHost)->SetBuffer(new SurfaceDescriptor(aSurface), aAllocator);
   Compositor* compositor = GetCompositor();
@@ -341,9 +340,9 @@ ContentHostSingleBuffered::UpdateThebes(const ThebesBufferData& aData,
   MOZ_ASSERT((destBounds.y % size.height) + destBounds.height <= size.height,
                "updated region lies across rotation boundaries!");
 
-  mDeprecatedTextureHost->Update(*mDeprecatedTextureHost->GetBuffer(), &destRegion);
+  mDeprecatedTextureHost->Update(*mDeprecatedTextureHost->LockSurfaceDescriptor(), &destRegion);
   if (mDeprecatedTextureHostOnWhite) {
-    mDeprecatedTextureHostOnWhite->Update(*mDeprecatedTextureHostOnWhite->GetBuffer(), &destRegion);
+    mDeprecatedTextureHostOnWhite->Update(*mDeprecatedTextureHostOnWhite->LockSurfaceDescriptor(), &destRegion);
   }
   mInitialised = true;
 
@@ -365,7 +364,8 @@ ContentHostDoubleBuffered::EnsureDeprecatedTextureHost(TextureIdentifier aTextur
 {
   RefPtr<DeprecatedTextureHost> newHost = DeprecatedTextureHost::CreateDeprecatedTextureHost(aSurface.type(),
                                                                aTextureInfo.mDeprecatedTextureHostFlags,
-                                                               aTextureInfo.mTextureFlags);
+                                                               aTextureInfo.mTextureFlags,
+                                                               this);
 
   newHost->SetBuffer(new SurfaceDescriptor(aSurface), aAllocator);
 
@@ -461,9 +461,9 @@ ContentHostDoubleBuffered::UpdateThebes(const ThebesBufferData& aData,
   mDeprecatedTextureHostOnWhite = mBackHostOnWhite;
   mBackHostOnWhite = oldFront;
 
-  mDeprecatedTextureHost->Update(*mDeprecatedTextureHost->GetBuffer());
+  mDeprecatedTextureHost->Update(*mDeprecatedTextureHost->LockSurfaceDescriptor());
   if (mDeprecatedTextureHostOnWhite) {
-    mDeprecatedTextureHostOnWhite->Update(*mDeprecatedTextureHostOnWhite->GetBuffer());
+    mDeprecatedTextureHostOnWhite->Update(*mDeprecatedTextureHostOnWhite->LockSurfaceDescriptor());
   }
   mInitialised = true;
 
@@ -522,7 +522,8 @@ ContentHostIncremental::TextureCreationRequest::Execute(ContentHostIncremental* 
   RefPtr<DeprecatedTextureHost> newHost =
     DeprecatedTextureHost::CreateDeprecatedTextureHost(SurfaceDescriptor::TShmem,
                                    mTextureInfo.mDeprecatedTextureHostFlags,
-                                   mTextureInfo.mTextureFlags);
+                                   mTextureInfo.mTextureFlags,
+                                   nullptr);
   Compositor* compositor = aHost->GetCompositor();
   if (compositor) {
     newHost->SetCompositor(compositor);
@@ -532,7 +533,8 @@ ContentHostIncremental::TextureCreationRequest::Execute(ContentHostIncremental* 
     newHostOnWhite =
       DeprecatedTextureHost::CreateDeprecatedTextureHost(SurfaceDescriptor::TShmem,
                                      mTextureInfo.mDeprecatedTextureHostFlags,
-                                     mTextureInfo.mTextureFlags);
+                                     mTextureInfo.mTextureFlags,
+                                     nullptr);
     Compositor* compositor = aHost->GetCompositor();
     if (compositor) {
       newHostOnWhite->SetCompositor(compositor);
@@ -750,28 +752,26 @@ ContentHostDoubleBuffered::Dump(FILE* aFile,
                                 bool aDumpHtml)
 {
   ContentHostBase::Dump(aFile, aPrefix, aDumpHtml);
+  if (!aDumpHtml) {
+    return;
+  }
   if (!aFile) {
     aFile = stderr;
   }
-  if (aDumpHtml) {
-    fprintf(aFile, "<ul>");
-  }
+  fprintf(aFile, "<ul>");
   if (mBackHost) {
     fprintf(aFile, "%s", aPrefix);
-    fprintf(aFile, aDumpHtml ? "<li> <a href=" : "Back buffer: ");
+    fprintf(aFile, "<li> <a href=");
     DumpDeprecatedTextureHost(aFile, mBackHost);
-    fprintf(aFile, aDumpHtml ? " >Back buffer</a></li>" : " ");
+    fprintf(aFile, " >Back buffer</a></li>");
   }
   if (mBackHostOnWhite) {
     fprintf(aFile, "%s", aPrefix);
-    fprintf(aFile, aDumpHtml ? "<li> <a href=" : "Back buffer on white: ");
+    fprintf(aFile, "<li> <a href=");
     DumpDeprecatedTextureHost(aFile, mBackHostOnWhite);
-    fprintf(aFile, aDumpHtml ? " >Back buffer on white</a> </li>" : " ");
+    fprintf(aFile, " >Back buffer on white</a> </li>");
   }
-  if (aDumpHtml) {
-    fprintf(aFile, "</ul>");
-  }
-
+  fprintf(aFile, "</ul>");
 }
 #endif
 

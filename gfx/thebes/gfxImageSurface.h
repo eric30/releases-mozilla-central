@@ -8,6 +8,7 @@
 
 #include "mozilla/MemoryReporting.h"
 #include "gfxASurface.h"
+#include "nsAutoPtr.h"
 #include "gfxPoint.h"
 
 // ARGB -- raw buffer.. wont be changed.. good for storing data.
@@ -149,7 +150,8 @@ protected:
     friend class gfxImageSurface;
     gfxSubimageSurface(gfxImageSurface* aParent,
                        unsigned char* aData,
-                       const gfxIntSize& aSize);
+                       const gfxIntSize& aSize,
+                       gfxImageFormat aFormat);
 private:
     nsRefPtr<gfxImageSurface> mParent;
 };

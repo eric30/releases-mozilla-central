@@ -54,7 +54,7 @@ using mozilla::dom::PerThreadAtomCache;
 
 /***************************************************************************/
 
-const char* XPCJSRuntime::mStrings[] = {
+const char* const XPCJSRuntime::mStrings[] = {
     "constructor",          // IDX_CONSTRUCTOR
     "toString",             // IDX_TO_STRING
     "toSource",             // IDX_TO_SOURCE
@@ -1209,7 +1209,15 @@ xpc::SimulateActivityCallback(bool aActive)
     XPCJSRuntime::ActivityCallback(XPCJSRuntime::Get(), aActive);
 }
 
-//static
+// static
+JSContext*
+XPCJSRuntime::DefaultJSContextCallback(JSRuntime *rt)
+{
+    MOZ_ASSERT(rt == Get()->Runtime());
+    return Get()->GetJSContextStack()->GetSafeJSContext();
+}
+
+// static
 void
 XPCJSRuntime::ActivityCallback(void *arg, bool active)
 {
@@ -1416,6 +1424,16 @@ XPCJSRuntime::~XPCJSRuntime()
     }
 #endif
 
+    auto rtPrivate = static_cast<PerThreadAtomCache*>(JS_GetRuntimePrivate(Runtime()));
+    delete rtPrivate;
+    JS_SetRuntimePrivate(Runtime(), nullptr);
+
+    // Tell the superclas to destroy the JSRuntime. We need to do this here,
+    // because destroying the runtime runs one final rambo GC, which sometimes
+    // calls various finalizers that assume that XPCJSRuntime is still
+    // operational. We have bug 911303 on file for fixing this.
+    DestroyRuntime();
+
     // clean up and destroy maps...
     if (mWrappedJSMap) {
 #ifdef XPC_DUMP_AT_SHUTDOWN
@@ -1423,7 +1441,7 @@ XPCJSRuntime::~XPCJSRuntime()
         if (count)
             printf("deleting XPCJSRuntime with %d live wrapped JSObject\n", (int)count);
 #endif
-        mWrappedJSMap->ShutdownMarker(Runtime());
+        mWrappedJSMap->ShutdownMarker();
         delete mWrappedJSMap;
     }
 
@@ -1524,10 +1542,6 @@ XPCJSRuntime::~XPCJSRuntime()
         MOZ_ASSERT(!mScratchStrings[i].mInUse, "Uh, string wrapper still in use!");
     }
 #endif
-
-    auto rtPrivate = static_cast<PerThreadAtomCache*>(JS_GetRuntimePrivate(Runtime()));
-    delete rtPrivate;
-    JS_SetRuntimePrivate(Runtime(), nullptr);
 }
 
 static void
@@ -1561,67 +1575,35 @@ GetCompartmentName(JSCompartment *c, nsCString &name, bool replaceSlashes)
     }
 }
 
-// Telemetry relies on this being a uni-reporter (rather than part of the "js"
-// reporter).
-class JSMainRuntimeGCHeapReporter MOZ_FINAL : public MemoryUniReporter
+static int64_t
+JSMainRuntimeGCHeapDistinguishedAmount()
 {
-public:
-    JSMainRuntimeGCHeapReporter()
-      : MemoryUniReporter("js-main-runtime-gc-heap", KIND_OTHER, UNITS_BYTES,
-"Memory used by the garbage-collected heap in the main JSRuntime.")
-    {}
-private:
-    int64_t Amount() MOZ_OVERRIDE
-    {
-        JSRuntime *rt = nsXPConnect::GetRuntimeInstance()->Runtime();
-        return int64_t(JS_GetGCParameter(rt, JSGC_TOTAL_CHUNKS)) *
-               js::gc::ChunkSize;
-    }
-};
+    JSRuntime *rt = nsXPConnect::GetRuntimeInstance()->Runtime();
+    return int64_t(JS_GetGCParameter(rt, JSGC_TOTAL_CHUNKS)) *
+           js::gc::ChunkSize;
+}
 
-// Nb: js-main-runtime-compartments/system + js-main-runtime-compartments/user
-// could be different to the number of compartments reported by JSReporter if a
-// garbage collection occurred between them being consulted.  We could move
-// these reporters into JSReporter to avoid that problem, but then we couldn't
-// easily report them via telemetry, so we live with the small risk of
-// inconsistencies.
-
-class RedundantJSMainRuntimeCompartmentsSystemReporter MOZ_FINAL : public MemoryUniReporter
+static int64_t
+JSMainRuntimeTemporaryPeakDistinguishedAmount()
 {
-public:
-    // An empty description is ok because this is a "redundant/"-prefixed
-    // reporter and so is ignored by about:memory.
-    RedundantJSMainRuntimeCompartmentsSystemReporter()
-      : MemoryUniReporter("redundant/js-main-runtime-compartments/system",
-                          KIND_OTHER, UNITS_COUNT, "")
-    {}
-private:
-    int64_t Amount() MOZ_OVERRIDE
-    {
-        JSRuntime *rt = nsXPConnect::GetRuntimeInstance()->Runtime();
-        return JS::SystemCompartmentCount(rt);
-    }
-};
+    JSRuntime *rt = nsXPConnect::GetRuntimeInstance()->Runtime();
+    return JS::PeakSizeOfTemporary(rt);
+}
 
-class RedundantJSMainRuntimeCompartmentsUserReporter MOZ_FINAL : public MemoryUniReporter
+static int64_t
+JSMainRuntimeCompartmentsSystemDistinguishedAmount()
 {
-public:
-    // An empty description is ok because this is a "redundant/"-prefixed
-    // reporter and so is ignored by about:memory.
-    RedundantJSMainRuntimeCompartmentsUserReporter()
-      : MemoryUniReporter("redundant/js-main-runtime-compartments/user",
-                          KIND_OTHER, UNITS_COUNT,
-"The number of JavaScript compartments for user code in the main JSRuntime.")
-    {}
-private:
-    int64_t Amount() MOZ_OVERRIDE
-    {
-        JSRuntime *rt = nsXPConnect::GetRuntimeInstance()->Runtime();
-        return JS::UserCompartmentCount(rt);
-    }
-};
+    JSRuntime *rt = nsXPConnect::GetRuntimeInstance()->Runtime();
+    return JS::SystemCompartmentCount(rt);
+}
 
-// This is also a single reporter so it can be used by telemetry.
+static int64_t
+JSMainRuntimeCompartmentsUserDistinguishedAmount()
+{
+    JSRuntime *rt = nsXPConnect::GetRuntimeInstance()->Runtime();
+    return JS::UserCompartmentCount(rt);
+}
+
 class JSMainRuntimeTemporaryPeakReporter MOZ_FINAL : public MemoryUniReporter
 {
 public:
@@ -1634,8 +1616,7 @@ public:
 private:
     int64_t Amount() MOZ_OVERRIDE
     {
-        JSRuntime *rt = nsXPConnect::GetRuntimeInstance()->Runtime();
-        return JS::PeakSizeOfTemporary(rt);
+        return JSMainRuntimeTemporaryPeakDistinguishedAmount();
     }
 };
 
@@ -2158,11 +2139,6 @@ ReportCompartmentStats(const JS::CompartmentStats &cStats,
     ZCREPORT_BYTES(cJSPathPrefix + NS_LITERAL_CSTRING("type-inference/type-results"),
                    cStats.typeInference.typeResults,
                    "Memory used by dynamic type results produced by scripts.");
-
-    ZCREPORT_BYTES(cJSPathPrefix + NS_LITERAL_CSTRING("type-inference/analysis-pool"),
-                   cStats.typeInference.analysisPool,
-                   "Memory holding transient analysis information used during type inference and "
-                   "compilation.");
 
     ZCREPORT_BYTES(cJSPathPrefix + NS_LITERAL_CSTRING("type-inference/pending-arrays"),
                    cStats.typeInference.pendingArrays,
@@ -2773,102 +2749,103 @@ PreserveWrapper(JSContext *cx, JSObject *obj)
 }
 
 static nsresult
-ReadSourceFromFilename(JSContext *cx, const char *filename, jschar **src, uint32_t *len)
+ReadSourceFromFilename(JSContext *cx, const char *filename, jschar **src, size_t *len)
 {
-  nsresult rv;
+    nsresult rv;
 
-  // mozJSSubScriptLoader prefixes the filenames of the scripts it loads with
-  // the filename of its caller. Axe that if present.
-  const char *arrow;
-  while ((arrow = strstr(filename, " -> ")))
-    filename = arrow + strlen(" -> ");
+    // mozJSSubScriptLoader prefixes the filenames of the scripts it loads with
+    // the filename of its caller. Axe that if present.
+    const char *arrow;
+    while ((arrow = strstr(filename, " -> ")))
+        filename = arrow + strlen(" -> ");
 
-  // Get the URI.
-  nsCOMPtr<nsIURI> uri;
-  rv = NS_NewURI(getter_AddRefs(uri), filename);
-  NS_ENSURE_SUCCESS(rv, rv);
+    // Get the URI.
+    nsCOMPtr<nsIURI> uri;
+    rv = NS_NewURI(getter_AddRefs(uri), filename);
+    NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<nsIChannel> scriptChannel;
-  rv = NS_NewChannel(getter_AddRefs(scriptChannel), uri);
-  NS_ENSURE_SUCCESS(rv, rv);
+    nsCOMPtr<nsIChannel> scriptChannel;
+    rv = NS_NewChannel(getter_AddRefs(scriptChannel), uri);
+    NS_ENSURE_SUCCESS(rv, rv);
 
-  // Only allow local reading.
-  nsCOMPtr<nsIURI> actualUri;
-  rv = scriptChannel->GetURI(getter_AddRefs(actualUri));
-  NS_ENSURE_SUCCESS(rv, rv);
-  nsCString scheme;
-  rv = actualUri->GetScheme(scheme);
-  NS_ENSURE_SUCCESS(rv, rv);
-  if (!scheme.EqualsLiteral("file") && !scheme.EqualsLiteral("jar"))
+    // Only allow local reading.
+    nsCOMPtr<nsIURI> actualUri;
+    rv = scriptChannel->GetURI(getter_AddRefs(actualUri));
+    NS_ENSURE_SUCCESS(rv, rv);
+    nsCString scheme;
+    rv = actualUri->GetScheme(scheme);
+    NS_ENSURE_SUCCESS(rv, rv);
+    if (!scheme.EqualsLiteral("file") && !scheme.EqualsLiteral("jar"))
+        return NS_OK;
+
+    nsCOMPtr<nsIInputStream> scriptStream;
+    rv = scriptChannel->Open(getter_AddRefs(scriptStream));
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    uint64_t rawLen;
+    rv = scriptStream->Available(&rawLen);
+    NS_ENSURE_SUCCESS(rv, rv);
+    if (!rawLen)
+        return NS_ERROR_FAILURE;
+
+    // Technically, this should be SIZE_MAX, but we don't run on machines
+    // where that would be less than UINT32_MAX, and the latter is already
+    // well beyond a reasonable limit.
+    if (rawLen > UINT32_MAX)
+        return NS_ERROR_FILE_TOO_BIG;
+
+    // Allocate an internal buf the size of the file.
+    nsAutoArrayPtr<unsigned char> buf(new unsigned char[rawLen]);
+    if (!buf)
+        return NS_ERROR_OUT_OF_MEMORY;
+
+    unsigned char *ptr = buf, *end = ptr + rawLen;
+    while (ptr < end) {
+        uint32_t bytesRead;
+        rv = scriptStream->Read(reinterpret_cast<char *>(ptr), end - ptr, &bytesRead);
+        if (NS_FAILED(rv))
+            return rv;
+        MOZ_ASSERT(bytesRead > 0, "stream promised more bytes before EOF");
+        ptr += bytesRead;
+    }
+
+    nsString decoded;
+    rv = nsScriptLoader::ConvertToUTF16(scriptChannel, buf, rawLen, EmptyString(), NULL, decoded);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    // Copy to JS engine.
+    *len = decoded.Length();
+    *src = static_cast<jschar *>(JS_malloc(cx, decoded.Length()*sizeof(jschar)));
+    if (!*src)
+        return NS_ERROR_FAILURE;
+    memcpy(*src, decoded.get(), decoded.Length()*sizeof(jschar));
+
     return NS_OK;
-
-  nsCOMPtr<nsIInputStream> scriptStream;
-  rv = scriptChannel->Open(getter_AddRefs(scriptStream));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  uint64_t rawLen;
-  rv = scriptStream->Available(&rawLen);
-  NS_ENSURE_SUCCESS(rv, rv);
-  if (!rawLen)
-    return NS_ERROR_FAILURE;
-  if (rawLen > UINT32_MAX)
-    return NS_ERROR_FILE_TOO_BIG;
-
-  // Allocate an internal buf the size of the file.
-  nsAutoArrayPtr<unsigned char> buf(new unsigned char[rawLen]);
-  if (!buf)
-    return NS_ERROR_OUT_OF_MEMORY;
-
-  unsigned char *ptr = buf, *end = ptr + rawLen;
-  while (ptr < end) {
-    uint32_t bytesRead;
-    rv = scriptStream->Read(reinterpret_cast<char *>(ptr), end - ptr, &bytesRead);
-    if (NS_FAILED(rv))
-      return rv;
-    MOZ_ASSERT(bytesRead > 0, "stream promised more bytes before EOF");
-    ptr += bytesRead;
-  }
-
-  nsString decoded;
-  rv = nsScriptLoader::ConvertToUTF16(scriptChannel, buf, rawLen, EmptyString(), NULL, decoded);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // Copy to JS engine.
-  *len = decoded.Length();
-  *src = static_cast<jschar *>(JS_malloc(cx, decoded.Length()*sizeof(jschar)));
-  if (!*src)
-    return NS_ERROR_FAILURE;
-  memcpy(*src, decoded.get(), decoded.Length()*sizeof(jschar));
-
-  return NS_OK;
 }
 
-/*
-  The JS engine calls this function when it needs the source for a chrome JS
-  function. See the comment in the XPCJSRuntime constructor.
-*/
-static bool
-SourceHook(JSContext *cx, JS::Handle<JSScript*> script, jschar **src,
-           uint32_t *length)
-{
-  *src = NULL;
-  *length = 0;
+// The JS engine calls this object's 'load' member function when it needs
+// the source for a chrome JS function. See the comment in the XPCJSRuntime
+// constructor.
+class XPCJSSourceHook: public js::SourceHook {
+    bool load(JSContext *cx, const char *filename, jschar **src, size_t *length) {
+        *src = NULL;
+        *length = 0;
 
-  if (!nsContentUtils::IsCallerChrome())
-    return true;
+        if (!nsContentUtils::IsCallerChrome())
+            return true;
 
-  const char *filename = JS_GetScriptFilename(cx, script);
-  if (!filename)
-    return true;
+        if (!filename)
+            return true;
 
-  nsresult rv = ReadSourceFromFilename(cx, filename, src, length);
-  if (NS_FAILED(rv)) {
-    xpc::Throw(cx, rv);
-    return false;
-  }
+        nsresult rv = ReadSourceFromFilename(cx, filename, src, length);
+        if (NS_FAILED(rv)) {
+            xpc::Throw(cx, rv);
+            return false;
+        }
 
-  return true;
-}
+        return true;
+    }
+};
 
 XPCJSRuntime::XPCJSRuntime(nsXPConnect* aXPConnect)
    : CycleCollectedJSRuntime(32L * 1024L * 1024L, JS_USE_HELPER_THREADS),
@@ -3017,6 +2994,7 @@ XPCJSRuntime::XPCJSRuntime(nsXPConnect* aXPConnect)
         stack->sampleRuntime(runtime);
 #endif
     JS_SetAccumulateTelemetryCallback(runtime, AccumulateTelemetryCallback);
+    js::SetDefaultJSContextCallback(runtime, DefaultJSContextCallback);
     js::SetActivityCallback(runtime, ActivityCallback, this);
     js::SetCTypesActivityCallback(runtime, CTypesActivityCallback);
     JS_SetOperationCallback(runtime, OperationCallback);
@@ -3037,7 +3015,7 @@ XPCJSRuntime::XPCJSRuntime(nsXPConnect* aXPConnect)
     // compileAndGo mode and compiled function bodies (from
     // JS_CompileFunction*). In practice, this means content scripts and event
     // handlers.
-    JS_SetSourceHook(runtime, SourceHook);
+    js::SetSourceHook(runtime, new XPCJSSourceHook);
 
     // Set up locale information and callbacks for the newly-created runtime so
     // that the various toLocaleString() methods, localeCompare(), and other
@@ -3045,11 +3023,13 @@ XPCJSRuntime::XPCJSRuntime(nsXPConnect* aXPConnect)
     if (!xpc_LocalizeRuntime(runtime))
         NS_RUNTIMEABORT("xpc_LocalizeRuntime failed.");
 
-    NS_RegisterMemoryReporter(new JSMainRuntimeGCHeapReporter());
-    NS_RegisterMemoryReporter(new RedundantJSMainRuntimeCompartmentsSystemReporter());
-    NS_RegisterMemoryReporter(new RedundantJSMainRuntimeCompartmentsUserReporter());
-    NS_RegisterMemoryReporter(new JSMainRuntimeTemporaryPeakReporter());
+    // Register memory reporters and distinguished amount functions.
     NS_RegisterMemoryReporter(new JSMainRuntimeCompartmentsReporter);
+    NS_RegisterMemoryReporter(new JSMainRuntimeTemporaryPeakReporter());
+    RegisterJSMainRuntimeGCHeapDistinguishedAmount(JSMainRuntimeGCHeapDistinguishedAmount);
+    RegisterJSMainRuntimeTemporaryPeakDistinguishedAmount(JSMainRuntimeTemporaryPeakDistinguishedAmount);
+    RegisterJSMainRuntimeCompartmentsSystemDistinguishedAmount(JSMainRuntimeCompartmentsSystemDistinguishedAmount);
+    RegisterJSMainRuntimeCompartmentsUserDistinguishedAmount(JSMainRuntimeCompartmentsUserDistinguishedAmount);
 
     // Install a JavaScript 'debugger' keyword handler in debug builds only
 #ifdef DEBUG

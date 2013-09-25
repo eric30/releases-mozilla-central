@@ -485,7 +485,7 @@ typedef uint32_t nsReflowStatus;
 
 // Construct a line-break-before status. Note that there is no
 // completion status for a line-break before because we *know* that
-// the frame will be reflowed later and hence it's current completion
+// the frame will be reflowed later and hence its current completion
 // status doesn't matter.
 #define NS_INLINE_LINE_BREAK_BEFORE()                                   \
   (NS_INLINE_BREAK | NS_INLINE_BREAK_BEFORE |                           \
@@ -870,6 +870,12 @@ public:
    * Move the frame, accounting for relative positioning. Use this when
    * adjusting the frame's position by a known amount, to properly update its
    * saved normal position (see GetNormalPosition below).
+   *
+   * This must be used only when moving a frame *after*
+   * nsHTMLReflowState::ApplyRelativePositioning is called.  When moving
+   * a frame during the reflow process prior to calling
+   * nsHTMLReflowState::ApplyRelativePositioning, the position should
+   * simply be adjusted directly (e.g., using SetPosition()).
    */
   void MovePositionBy(const nsPoint& aTranslation);
 
@@ -1002,7 +1008,7 @@ public:
    * @param aReflowState An optional reflow state parameter, which is used if
    *        ApplySkipSides() is being called in the middle of reflow.
    *
-   * @note (See also bug 743402, comment 11) GetSkipSides() and it's sister
+   * @note (See also bug 743402, comment 11) GetSkipSides() and its sister
    *       method, ApplySkipSides() checks to see if this frame has a previous
    *       or next continuation to determine if a side should be skipped.
    *       Unfortunately, this only works after reflow has been completed. In
@@ -1484,10 +1490,10 @@ public:
   NS_IMETHOD SetPrevContinuation(nsIFrame*) = 0;
   virtual nsIFrame* GetNextContinuation() const = 0;
   NS_IMETHOD SetNextContinuation(nsIFrame*) = 0;
-  virtual nsIFrame* GetFirstContinuation() const {
+  virtual nsIFrame* FirstContinuation() const {
     return const_cast<nsIFrame*>(this);
   }
-  virtual nsIFrame* GetLastContinuation() const {
+  virtual nsIFrame* LastContinuation() const {
     return const_cast<nsIFrame*>(this);
   }
 
@@ -1512,14 +1518,14 @@ public:
   /**
    * Return the first frame in our current flow. 
    */
-  virtual nsIFrame* GetFirstInFlow() const {
+  virtual nsIFrame* FirstInFlow() const {
     return const_cast<nsIFrame*>(this);
   }
 
   /**
    * Return the last frame in our current flow.
    */
-  virtual nsIFrame* GetLastInFlow() const {
+  virtual nsIFrame* LastInFlow() const {
     return const_cast<nsIFrame*>(this);
   }
 
@@ -2420,7 +2426,7 @@ public:
    * Determine whether borders should not be painted on certain sides of the
    * frame.
    *
-   * @note (See also bug 743402, comment 11) GetSkipSides() and it's sister
+   * @note (See also bug 743402, comment 11) GetSkipSides() and its sister
    *       method, ApplySkipSides() checks to see if this frame has a previous
    *       or next continuation to determine if a side should be skipped.
    *       Unfortunately, this only works after reflow has been completed. In

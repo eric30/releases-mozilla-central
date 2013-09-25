@@ -13,6 +13,8 @@
 using namespace js;
 using namespace js::jit;
 
+using JS::DoubleNaNValue;
+
 MDefinition *
 BoxInputsPolicy::boxAt(MInstruction *at, MDefinition *operand)
 {
@@ -28,7 +30,7 @@ BoxInputsPolicy::alwaysBoxAt(MInstruction *at, MDefinition *operand)
     // Replace Float32 by double
     if (operand->type() == MIRType_Float32) {
         MInstruction *replace = MToDouble::New(operand);
-        operand->block()->insertBefore(at, replace);
+        at->block()->insertBefore(at, replace);
         boxedOperand = replace;
     }
     MBox *box = MBox::New(boxedOperand);
@@ -414,6 +416,7 @@ IntPolicy<Op>::staticAdjustInputs(MInstruction *def)
 
 template bool IntPolicy<0>::staticAdjustInputs(MInstruction *def);
 template bool IntPolicy<1>::staticAdjustInputs(MInstruction *def);
+template bool IntPolicy<2>::staticAdjustInputs(MInstruction *def);
 
 template <unsigned Op>
 bool
@@ -621,7 +624,7 @@ StoreTypedArrayPolicy::adjustValueInput(MInstruction *ins, int arrayType,
       case MIRType_Object:
       case MIRType_Undefined:
         value->setFoldedUnchecked();
-        value = MConstant::New(DoubleValue(js_NaN));
+        value = MConstant::New(DoubleNaNValue());
         ins->block()->insertBefore(ins, value->toInstruction());
         break;
       case MIRType_String:
@@ -650,6 +653,11 @@ StoreTypedArrayPolicy::adjustValueInput(MInstruction *ins, int arrayType,
       case ScalarTypeRepresentation::TYPE_INT32:
       case ScalarTypeRepresentation::TYPE_UINT32:
         if (value->type() != MIRType_Int32) {
+            // Workaround for bug 915903
+            if (value->type() == MIRType_Float32) {
+                value = MToDouble::New(value);
+                ins->block()->insertBefore(ins, value->toInstruction());
+            }
             value = MTruncateToInt32::New(value);
             ins->block()->insertBefore(ins, value->toInstruction());
         }

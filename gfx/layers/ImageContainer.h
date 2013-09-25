@@ -25,10 +25,61 @@
 #include "nsRect.h"                     // for nsIntRect
 #include "nsSize.h"                     // for nsIntSize
 #include "nsTArray.h"                   // for nsTArray
-#include "nsThreadUtils.h"              // for NS_IsMainThread
 #include "mozilla/Atomics.h"
+#include "nsThreadUtils.h"
 
+#ifndef XPCOM_GLUE_AVOID_NSPR
+/**
+ * We need to be able to hold a reference to a gfxASurface from Image
+ * subclasses. This is potentially a problem since Images can be addrefed
+ * or released off the main thread. We can ensure that we never AddRef
+ * a gfxASurface off the main thread, but we might want to Release due
+ * to an Image being destroyed off the main thread.
+ *
+ * We use nsCountedRef<nsMainThreadSurfaceRef> to reference the
+ * gfxASurface. When AddRefing, we assert that we're on the main thread.
+ * When Releasing, if we're not on the main thread, we post an event to
+ * the main thread to do the actual release.
+ */
 class nsMainThreadSurfaceRef;
+
+template <>
+class nsAutoRefTraits<nsMainThreadSurfaceRef> {
+public:
+  typedef gfxASurface* RawRef;
+
+  /**
+   * The XPCOM event that will do the actual release on the main thread.
+   */
+  class SurfaceReleaser : public nsRunnable {
+  public:
+    SurfaceReleaser(RawRef aRef) : mRef(aRef) {}
+    NS_IMETHOD Run() {
+      mRef->Release();
+      return NS_OK;
+    }
+    RawRef mRef;
+  };
+
+  static RawRef Void() { return nullptr; }
+  static void Release(RawRef aRawRef)
+  {
+    if (NS_IsMainThread()) {
+      aRawRef->Release();
+      return;
+    }
+    nsCOMPtr<nsIRunnable> runnable = new SurfaceReleaser(aRawRef);
+    NS_DispatchToMainThread(runnable);
+  }
+  static void AddRef(RawRef aRawRef)
+  {
+    NS_ASSERTION(NS_IsMainThread(),
+                 "Can only add a reference on the main thread");
+    aRawRef->AddRef();
+  }
+};
+
+#endif
 
 #ifdef XP_WIN
 struct ID3D10Texture2D;
@@ -332,6 +383,14 @@ public:
    * PImageBridge protcol without using the main thread.
    */
   void SetCurrentImage(Image* aImage);
+
+  /**
+   * Clear the current image.
+   * This function is expect to be called only from a CompositableClient
+   * that belongs to ImageBridgeChild. Created to prevent dead lock.
+   * See Bug 901224.
+   */
+  void ClearCurrentImage();
 
   /**
    * Set an Image as the current image to display. The Image must have
@@ -771,14 +830,14 @@ protected:
 
   already_AddRefed<gfxASurface> GetAsSurface();
 
-  void SetOffscreenFormat(gfxASurface::gfxImageFormat aFormat) { mOffscreenFormat = aFormat; }
-  gfxASurface::gfxImageFormat GetOffscreenFormat();
+  void SetOffscreenFormat(gfxImageFormat aFormat) { mOffscreenFormat = aFormat; }
+  gfxImageFormat GetOffscreenFormat();
 
   nsAutoArrayPtr<uint8_t> mBuffer;
   uint32_t mBufferSize;
   Data mData;
   gfxIntSize mSize;
-  gfxASurface::gfxImageFormat mOffscreenFormat;
+  gfxImageFormat mOffscreenFormat;
   nsCountedRef<nsMainThreadSurfaceRef> mSurface;
   nsRefPtr<BufferRecycleBin> mRecycleBin;
 };
@@ -809,7 +868,6 @@ public:
 
   virtual already_AddRefed<gfxASurface> GetAsSurface()
   {
-    NS_ASSERTION(NS_IsMainThread(), "Must be main thread");
     nsRefPtr<gfxASurface> surface = mSurface.get();
     return surface.forget();
   }

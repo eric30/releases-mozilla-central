@@ -3,8 +3,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/ContentEvents.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/MathAlgorithms.h"
+#include "mozilla/MouseEvents.h"
 #include "mozilla/Likely.h"
 
 #include "nsCOMPtr.h"
@@ -21,7 +23,6 @@
 #include "nsIContent.h"
 #include "nsStyleContext.h"
 #include "nsIBoxObject.h"
-#include "nsGUIEvent.h"
 #include "nsAsyncDOMEvent.h"
 #include "nsIDOMDataContainerEvent.h"
 #include "nsIDOMMouseEvent.h"
@@ -128,7 +129,8 @@ nsTreeBodyFrame::nsTreeBodyFrame(nsIPresShell* aPresShell, nsStyleContext* aCont
  mHasFixedRowCount(false),
  mVerticalOverflow(false),
  mHorizontalOverflow(false),
- mReflowCallbackPosted(false)
+ mReflowCallbackPosted(false),
+ mCheckingOverflow(false)
 {
   mColumns = new nsTreeColumns(this);
 }
@@ -916,8 +918,11 @@ nsTreeBodyFrame::CheckOverflow(const ScrollParts& aParts)
       }
     }
   }
- 
+
+  nsWeakFrame weakFrame(this);
+
   nsRefPtr<nsPresContext> presContext = PresContext();
+  nsCOMPtr<nsIPresShell> presShell = presContext->GetPresShell();
   nsCOMPtr<nsIContent> content = mContent;
 
   if (verticalOverflowChanged) {
@@ -934,6 +939,22 @@ nsTreeBodyFrame::CheckOverflow(const ScrollParts& aParts)
     event.orient = nsScrollPortEvent::horizontal;
     nsEventDispatcher::Dispatch(content, presContext, &event);
   }
+
+  // The synchronous event dispatch above can trigger reflow notifications.
+  // Flush those explicitly now, so that we can guard against potential infinite
+  // recursion. See bug 905909.
+  if (!weakFrame.IsAlive()) {
+    return;
+  }
+  NS_ASSERTION(!mCheckingOverflow, "mCheckingOverflow should not already be set");
+  // Don't use AutoRestore since we want to not touch mCheckingOverflow if we fail
+  // the weakFrame.IsAlive() check below
+  mCheckingOverflow = true;
+  presShell->FlushPendingNotifications(Flush_Layout);
+  if (!weakFrame.IsAlive()) {
+    return;
+  }
+  mCheckingOverflow = false;
 }
 
 void
@@ -3505,7 +3526,7 @@ nsTreeBodyFrame::PaintImage(int32_t              aRowIndex,
 
     gfxContext* ctx = aRenderingContext.ThebesContext();
     if (opacity != 1.0f) {
-      ctx->PushGroup(gfxASurface::CONTENT_COLOR_ALPHA);
+      ctx->PushGroup(GFX_CONTENT_COLOR_ALPHA);
     }
 
     nsLayoutUtils::DrawImage(&aRenderingContext, image,
@@ -3622,7 +3643,7 @@ nsTreeBodyFrame::PaintText(int32_t              aRowIndex,
 
   gfxContext* ctx = aRenderingContext.ThebesContext();
   if (opacity != 1.0f) {
-    ctx->PushGroup(gfxASurface::CONTENT_COLOR_ALPHA);
+    ctx->PushGroup(GFX_CONTENT_COLOR_ALPHA);
   }
 
   nsLayoutUtils::DrawString(this, &aRenderingContext, text.get(), text.Length(),
@@ -4645,7 +4666,17 @@ nsTreeBodyFrame::FullScrollbarsUpdate(bool aNeedsFullInvalidation)
   }
   InvalidateScrollbars(parts, weakColumnsFrame);
   NS_ENSURE_TRUE(weakFrame.IsAlive(), false);
-  nsContentUtils::AddScriptRunner(new nsOverflowChecker(this));
+
+  // Overflow checking dispatches synchronous events, which can cause infinite
+  // recursion during reflow. Do the first overflow check synchronously, but
+  // force any nested checks to round-trip through the event loop. See bug
+  // 905909.
+  nsRefPtr<nsOverflowChecker> checker = new nsOverflowChecker(this);
+  if (!mCheckingOverflow) {
+    nsContentUtils::AddScriptRunner(checker);
+  } else {
+    NS_DispatchToCurrentThread(checker);
+  }
   return weakFrame.IsAlive();
 }
 

@@ -322,7 +322,7 @@ public:
     // outputs.
     request->dstFrame = new imgFrame();
     nsresult rv = request->dstFrame->Init(0, 0, request->dstSize.width, request->dstSize.height,
-                                          gfxASurface::ImageFormatARGB32);
+                                          gfxImageFormatARGB32);
 
     if (NS_FAILED(rv) || !request->GetSurfaces(aSrcFrame)) {
       return;
@@ -401,6 +401,7 @@ RasterImage::RasterImage(imgStatusTracker* aStatusTracker,
   mFinishing(false),
   mInUpdateImageContainer(false),
   mWantFullDecode(false),
+  mPendingError(false),
   mScaleRequest(nullptr)
 {
   // Set up the discard tracker node.
@@ -854,7 +855,7 @@ RasterImage::CopyFrame(uint32_t aWhichFrame,
   // Create a 32-bit image surface of our size, but draw using the frame's
   // rect, implicitly padding the frame out to the image's size.
   nsRefPtr<gfxImageSurface> imgsurface = new gfxImageSurface(gfxIntSize(mSize.width, mSize.height),
-                                                             gfxASurface::ImageFormatARGB32);
+                                                             gfxImageFormatARGB32);
   gfxContext ctx(imgsurface);
   ctx.SetOperator(gfxContext::OPERATOR_SOURCE);
   ctx.Rectangle(framerect);
@@ -1029,7 +1030,7 @@ RasterImage::HeapSizeOfSourceWithComputedFallback(MallocSizeOf aMallocSizeOf) co
 }
 
 size_t
-RasterImage::SizeOfDecodedWithComputedFallbackIfHeap(gfxASurface::MemoryLocation aLocation,
+RasterImage::SizeOfDecodedWithComputedFallbackIfHeap(gfxMemoryLocation aLocation,
                                                      MallocSizeOf aMallocSizeOf) const
 {
   size_t n = mFrameBlender.SizeOfDecodedWithComputedFallbackIfHeap(aLocation, aMallocSizeOf);
@@ -1044,21 +1045,21 @@ RasterImage::SizeOfDecodedWithComputedFallbackIfHeap(gfxASurface::MemoryLocation
 size_t
 RasterImage::HeapSizeOfDecodedWithComputedFallback(MallocSizeOf aMallocSizeOf) const
 {
-  return SizeOfDecodedWithComputedFallbackIfHeap(gfxASurface::MEMORY_IN_PROCESS_HEAP,
+  return SizeOfDecodedWithComputedFallbackIfHeap(GFX_MEMORY_IN_PROCESS_HEAP,
                                                  aMallocSizeOf);
 }
 
 size_t
 RasterImage::NonHeapSizeOfDecoded() const
 {
-  return SizeOfDecodedWithComputedFallbackIfHeap(gfxASurface::MEMORY_IN_PROCESS_NONHEAP,
+  return SizeOfDecodedWithComputedFallbackIfHeap(GFX_MEMORY_IN_PROCESS_NONHEAP,
                                                  nullptr);
 }
 
 size_t
 RasterImage::OutOfProcessSizeOfDecoded() const
 {
-  return SizeOfDecodedWithComputedFallbackIfHeap(gfxASurface::MEMORY_OUT_OF_PROCESS,
+  return SizeOfDecodedWithComputedFallbackIfHeap(GFX_MEMORY_OUT_OF_PROCESS,
                                                  nullptr);
 }
 
@@ -1118,7 +1119,7 @@ nsresult
 RasterImage::InternalAddFrame(uint32_t framenum,
                               int32_t aX, int32_t aY,
                               int32_t aWidth, int32_t aHeight,
-                              gfxASurface::gfxImageFormat aFormat,
+                              gfxImageFormat aFormat,
                               uint8_t aPaletteDepth,
                               uint8_t **imageData,
                               uint32_t *imageLength,
@@ -1243,7 +1244,7 @@ RasterImage::SetSize(int32_t aWidth, int32_t aHeight, Orientation aOrientation)
 nsresult
 RasterImage::EnsureFrame(uint32_t aFrameNum, int32_t aX, int32_t aY,
                          int32_t aWidth, int32_t aHeight,
-                         gfxASurface::gfxImageFormat aFormat,
+                         gfxImageFormat aFormat,
                          uint8_t aPaletteDepth,
                          uint8_t **imageData, uint32_t *imageLength,
                          uint32_t **paletteData, uint32_t *paletteLength,
@@ -1318,7 +1319,7 @@ RasterImage::EnsureFrame(uint32_t aFrameNum, int32_t aX, int32_t aY,
 nsresult
 RasterImage::EnsureFrame(uint32_t aFramenum, int32_t aX, int32_t aY,
                          int32_t aWidth, int32_t aHeight,
-                         gfxASurface::gfxImageFormat aFormat,
+                         gfxImageFormat aFormat,
                          uint8_t** imageData, uint32_t* imageLength,
                          imgFrame** aFrame)
 {
@@ -2028,7 +2029,7 @@ RasterImage::InitDecoder(bool aDoSizeDecode, bool aIsSynchronous /* = false */)
     // frame.  By default, we create an ARGB frame with no offset. If decoders
     // need a different type, they need to ask for it themselves.
     mDecoder->NeedNewFrame(0, 0, 0, mSize.width, mSize.height,
-                           gfxASurface::ImageFormatARGB32);
+                           gfxImageFormatARGB32);
     mDecoder->AllocateFrame();
   }
   mDecoder->Init();
@@ -2822,13 +2823,19 @@ RasterImage::DoError()
   if (mError)
     return;
 
+  // We can't safely handle errors off-main-thread, so dispatch a worker to do it.
+  if (!NS_IsMainThread()) {
+    HandleErrorWorker::DispatchIfNeeded(this);
+    return;
+  }
+
   // If we're mid-decode, shut down the decoder.
   if (mDecoder) {
     MutexAutoLock lock(mDecodingMutex);
     FinishedSomeDecoding(eShutdownIntent_Error);
   }
 
-  // Put the container in an error state
+  // Put the container in an error state.
   mError = true;
 
   if (mDecodeRequest) {
@@ -2839,6 +2846,30 @@ RasterImage::DoError()
 
   // Log our error
   LOG_CONTAINER_ERROR;
+}
+
+/* static */ void
+RasterImage::HandleErrorWorker::DispatchIfNeeded(RasterImage* aImage)
+{
+  if (!aImage->mPendingError) {
+    aImage->mPendingError = true;
+    nsRefPtr<HandleErrorWorker> worker = new HandleErrorWorker(aImage);
+    NS_DispatchToMainThread(worker);
+  }
+}
+
+RasterImage::HandleErrorWorker::HandleErrorWorker(RasterImage* aImage)
+  : mImage(aImage)
+{
+  MOZ_ASSERT(mImage, "Should have image");
+}
+
+NS_IMETHODIMP
+RasterImage::HandleErrorWorker::Run()
+{
+  mImage->DoError();
+
+  return NS_OK;
 }
 
 // nsIInputStream callback to copy the incoming image data directly to the
@@ -3188,6 +3219,7 @@ RasterImage::DecodePool::DecodeJob::Run()
   // this request to the back of the list.
   else if (mImage->mDecoder &&
            !mImage->mError &&
+           !mImage->mPendingError &&
            !mImage->IsDecodeFinished() &&
            bytesDecoded < mRequest->mBytesToDecode &&
            bytesDecoded > 0) {

@@ -22,6 +22,7 @@ AudioChannelAgent::AudioChannelAgent()
   : mAudioChannelType(AUDIO_AGENT_CHANNEL_ERROR)
   , mIsRegToService(false)
   , mVisible(true)
+  , mWithVideo(false)
 {
 }
 
@@ -54,10 +55,18 @@ AudioChannelAgent::InitWithWeakCallback(int32_t channelType,
   return InitInternal(channelType, callback, /* useWeakRef = */ true);
 }
 
+NS_IMETHODIMP
+AudioChannelAgent::InitWithVideo(int32_t channelType,
+                                 nsIAudioChannelAgentCallback *callback,
+                                 bool aUseWeakRef)
+{
+  return InitInternal(channelType, callback, aUseWeakRef, true);
+}
+
 nsresult
 AudioChannelAgent::InitInternal(int32_t aChannelType,
                                 nsIAudioChannelAgentCallback *aCallback,
-                                bool aUseWeakRef)
+                                bool aUseWeakRef, bool aWithVideo)
 {
   // We syncd the enum of channel type between nsIAudioChannelAgent.idl and
   // AudioChannelCommon.h the same.
@@ -91,11 +100,13 @@ AudioChannelAgent::InitInternal(int32_t aChannelType,
     mCallback = aCallback;
   }
 
+  mWithVideo = aWithVideo;
+
   return NS_OK;
 }
 
 /* boolean startPlaying (); */
-NS_IMETHODIMP AudioChannelAgent::StartPlaying(bool *_retval)
+NS_IMETHODIMP AudioChannelAgent::StartPlaying(int32_t *_retval)
 {
   AudioChannelService *service = AudioChannelService::GetAudioChannelService();
   if (mAudioChannelType == AUDIO_AGENT_CHANNEL_ERROR ||
@@ -104,8 +115,8 @@ NS_IMETHODIMP AudioChannelAgent::StartPlaying(bool *_retval)
   }
 
   service->RegisterAudioChannelAgent(this,
-    static_cast<AudioChannelType>(mAudioChannelType));
-  *_retval = !service->GetMuted(this, !mVisible);
+    static_cast<AudioChannelType>(mAudioChannelType), mWithVideo);
+  *_retval = service->GetState(this, !mVisible);
   mIsRegToService = true;
   return NS_OK;
 }
@@ -134,7 +145,7 @@ NS_IMETHODIMP AudioChannelAgent::SetVisibilityState(bool visible)
   mVisible = visible;
   if (mIsRegToService && oldVisibility != mVisible && callback) {
     AudioChannelService *service = AudioChannelService::GetAudioChannelService();
-    callback->CanPlayChanged(!service->GetMuted(this, !mVisible));
+    callback->CanPlayChanged(service->GetState(this, !mVisible));
   }
   return NS_OK;
 }
@@ -144,7 +155,7 @@ void AudioChannelAgent::NotifyAudioChannelStateChanged()
   nsCOMPtr<nsIAudioChannelAgentCallback> callback = GetCallback();
   if (callback) {
     AudioChannelService *service = AudioChannelService::GetAudioChannelService();
-    callback->CanPlayChanged(!service->GetMuted(this, !mVisible));
+    callback->CanPlayChanged(service->GetState(this, !mVisible));
   }
 }
 

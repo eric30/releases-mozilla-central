@@ -810,6 +810,22 @@ gfxUserFontSet::UserFontCache::Entry::RemoveIfPrivate(Entry* aEntry,
     return aEntry->mPrivate ? PL_DHASH_REMOVE : PL_DHASH_NEXT;
 }
 
+PLDHashOperator
+gfxUserFontSet::UserFontCache::Entry::RemoveIfMatches(Entry* aEntry,
+                                                      void* aUserData)
+{
+    return aEntry->GetFontEntry() == static_cast<gfxFontEntry*>(aUserData) ?
+        PL_DHASH_REMOVE : PL_DHASH_NEXT;
+}
+
+PLDHashOperator
+gfxUserFontSet::UserFontCache::Entry::DisconnectSVG(Entry* aEntry,
+                                                    void* aUserData)
+{
+    aEntry->GetFontEntry()->DisconnectSVG();
+    return PL_DHASH_NEXT;
+}
+
 NS_IMETHODIMP
 gfxUserFontSet::UserFontCache::Flusher::Observe(nsISupports* aSubject,
                                                 const char* aTopic,
@@ -823,6 +839,8 @@ gfxUserFontSet::UserFontCache::Flusher::Observe(nsISupports* aSubject,
         sUserFonts->Clear();
     } else if (!strcmp(aTopic, "last-pb-context-exited")) {
         sUserFonts->EnumerateEntries(Entry::RemoveIfPrivate, nullptr);
+    } else if (!strcmp(aTopic, "xpcom-shutdown")) {
+        sUserFonts->EnumerateEntries(Entry::DisconnectSVG, nullptr);
     } else {
         NS_NOTREACHED("unexpected topic");
     }
@@ -874,12 +892,18 @@ gfxUserFontSet::UserFontCache::CacheFont(gfxFontEntry *aFontEntry)
             obs->AddObserver(flusher, NS_CACHESERVICE_EMPTYCACHE_TOPIC_ID,
                              false);
             obs->AddObserver(flusher, "last-pb-context-exited", false);
+            obs->AddObserver(flusher, "xpcom-shutdown", false);
         }
     }
 
     gfxUserFontData *data = aFontEntry->mUserFontData;
     sUserFonts->PutEntry(Key(data->mURI, data->mPrincipal, aFontEntry,
                              data->mPrivate));
+
+#ifdef DEBUG_USERFONT_CACHE
+    printf("userfontcache added fontentry: %p\n", aFontEntry);
+    Dump();
+#endif
 }
 
 void
@@ -891,11 +915,16 @@ gfxUserFontSet::UserFontCache::ForgetFont(gfxFontEntry *aFontEntry)
         return;
     }
 
-    gfxUserFontData *data = aFontEntry->mUserFontData;
-    if (data) {
-        sUserFonts->RemoveEntry(Key(data->mURI, data->mPrincipal, aFontEntry,
-                                    data->mPrivate));
-    }
+    // We can't simply use RemoveEntry here because it's possible the principal
+    // may have changed since the font was cached, in which case the lookup
+    // would no longer find the entry (bug 838105).
+    sUserFonts->EnumerateEntries(
+        gfxUserFontSet::UserFontCache::Entry::RemoveIfMatches, aFontEntry);
+
+#ifdef DEBUG_USERFONT_CACHE
+    printf("userfontcache removed fontentry: %p\n", aFontEntry);
+    Dump();
+#endif
 }
 
 gfxFontEntry*
@@ -925,3 +954,52 @@ gfxUserFontSet::UserFontCache::Shutdown()
         sUserFonts = nullptr;
     }
 }
+
+#ifdef DEBUG_USERFONT_CACHE
+
+PLDHashOperator
+gfxUserFontSet::UserFontCache::Entry::DumpEntry(Entry* aEntry, void* aUserData)
+{
+    nsresult rv;
+
+    nsAutoCString principalURISpec;
+
+    nsCOMPtr<nsIURI> principalURI;
+    rv = aEntry->mPrincipal->GetURI(getter_AddRefs(principalURI));
+    if (NS_SUCCEEDED(rv)) {
+        principalURI->GetSpec(principalURISpec);
+    }
+
+    bool setDomain = false;
+    nsCOMPtr<nsIURI> domainURI;
+
+    aEntry->mPrincipal->GetDomain(getter_AddRefs(domainURI));
+    if (domainURI) {
+        setDomain = true;
+    }
+
+    NS_ASSERTION(aEntry->mURI, "null URI in userfont cache entry");
+
+    printf("userfontcache fontEntry: %p fonturihash: %8.8x family: %s domainset: %s principal: [%s]\n",
+            aEntry->mFontEntry,
+            nsURIHashKey::HashKey(aEntry->mURI),
+            NS_ConvertUTF16toUTF8(aEntry->mFontEntry->FamilyName()).get(),
+            (setDomain ? "true" : "false"),
+            principalURISpec.get()
+           );
+    return PL_DHASH_NEXT;
+}
+
+void
+gfxUserFontSet::UserFontCache::Dump()
+{
+    if (!sUserFonts) {
+        return;
+    }
+
+    printf("userfontcache dump count: %d ========\n", sUserFonts->Count());
+    sUserFonts->EnumerateEntries(Entry::DumpEntry, nullptr);
+    printf("userfontcache dump ==================\n");
+}
+
+#endif

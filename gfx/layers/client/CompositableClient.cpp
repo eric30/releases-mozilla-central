@@ -10,6 +10,7 @@
 #include "mozilla/layers/TextureClient.h"  // for DeprecatedTextureClient, etc
 #include "mozilla/layers/TextureClientOGL.h"
 #include "mozilla/mozalloc.h"           // for operator delete, etc
+#include "gfxASurface.h"                // for gfxContentType
 #ifdef XP_WIN
 #include "mozilla/layers/TextureD3D9.h"
 #include "mozilla/layers/TextureD3D11.h"
@@ -32,7 +33,24 @@ CompositableClient::~CompositableClient()
 {
   MOZ_COUNT_DTOR(CompositableClient);
   Destroy();
+
+  FlushTexturesToRemoveCallbacks();
+
   MOZ_ASSERT(mTexturesToRemove.Length() == 0, "would leak textures pending for deletion");
+}
+
+void
+CompositableClient::FlushTexturesToRemoveCallbacks()
+{
+  std::map<uint64_t,TextureClientData*>::iterator it
+    = mTexturesToRemoveCallbacks.begin();
+  std::map<uint64_t,TextureClientData*>::iterator stop
+    = mTexturesToRemoveCallbacks.end();
+  for (; it != stop; ++it) {
+    it->second->DeallocateSharedData(GetForwarder());
+    delete it->second;
+  }
+  mTexturesToRemoveCallbacks.clear();
 }
 
 LayersBackend
@@ -90,7 +108,8 @@ CompositableChild::Destroy()
 }
 
 TemporaryRef<DeprecatedTextureClient>
-CompositableClient::CreateDeprecatedTextureClient(DeprecatedTextureClientType aDeprecatedTextureClientType)
+CompositableClient::CreateDeprecatedTextureClient(DeprecatedTextureClientType aDeprecatedTextureClientType,
+                                                  gfxContentType aContentType)
 {
   MOZ_ASSERT(GetForwarder(), "Can't create a texture client if the compositable is not connected to the compositor.");
   LayersBackend parentBackend = GetForwarder()->GetCompositorBackendType();
@@ -128,7 +147,11 @@ CompositableClient::CreateDeprecatedTextureClient(DeprecatedTextureClientType aD
     }
     if (parentBackend == LAYERS_D3D9 &&
         !GetForwarder()->ForwardsToDifferentProcess()) {
-      result = new DeprecatedTextureClientD3D9(GetForwarder(), GetTextureInfo());
+      if (aContentType == GFX_CONTENT_COLOR_ALPHA) {
+        result = new DeprecatedTextureClientDIB(GetForwarder(), GetTextureInfo());
+      } else {
+        result = new DeprecatedTextureClientD3D9(GetForwarder(), GetTextureInfo());
+      }
       break;
     }
 #endif
@@ -206,16 +229,36 @@ void
 CompositableClient::RemoveTextureClient(TextureClient* aClient)
 {
   MOZ_ASSERT(aClient);
-  mTexturesToRemove.AppendElement(aClient->GetID());
+  mTexturesToRemove.AppendElement(TextureIDAndFlags(aClient->GetID(),
+                                                    aClient->GetFlags()));
+  if (!(aClient->GetFlags() & TEXTURE_DEALLOCATE_HOST)) {
+    TextureClientData* data = aClient->DropTextureData();
+    if (data) {
+      mTexturesToRemoveCallbacks[aClient->GetID()] = data;
+    }
+  }
   aClient->ClearID();
   aClient->MarkInvalid();
+}
+
+void
+CompositableClient::OnReplyTextureRemoved(uint64_t aTextureID)
+{
+  std::map<uint64_t,TextureClientData*>::iterator it
+    = mTexturesToRemoveCallbacks.find(aTextureID);
+  if (it != mTexturesToRemoveCallbacks.end()) {
+    it->second->DeallocateSharedData(GetForwarder());
+    delete it->second;
+    mTexturesToRemoveCallbacks.erase(it);
+  }
 }
 
 void
 CompositableClient::OnTransaction()
 {
   for (unsigned i = 0; i < mTexturesToRemove.Length(); ++i) {
-    mForwarder->RemoveTexture(this, mTexturesToRemove[i]);
+    const TextureIDAndFlags& texture = mTexturesToRemove[i];
+    mForwarder->RemoveTexture(this, texture.mID, texture.mFlags);
   }
   mTexturesToRemove.Clear();
 }

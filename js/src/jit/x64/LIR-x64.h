@@ -54,22 +54,29 @@ class LUnbox : public LUnboxBase {
     { }
 };
 
-class LUnboxDouble : public LUnboxBase {
-  public:
-    LIR_HEADER(UnboxDouble)
+class LUnboxFloatingPoint : public LUnboxBase {
+    MIRType type_;
 
-    LUnboxDouble(const LAllocation &input)
-      : LUnboxBase(input)
+  public:
+    LIR_HEADER(UnboxFloatingPoint)
+
+    LUnboxFloatingPoint(const LAllocation &input, MIRType type)
+      : LUnboxBase(input),
+        type_(type)
     { }
+
+    MIRType type() const {
+        return type_;
+    }
 };
 
 // Convert a 32-bit unsigned integer to a double.
-class LUInt32ToDouble : public LInstructionHelper<1, 1, 0>
+class LAsmJSUInt32ToDouble : public LInstructionHelper<1, 1, 0>
 {
   public:
-    LIR_HEADER(UInt32ToDouble)
+    LIR_HEADER(AsmJSUInt32ToDouble)
 
-    LUInt32ToDouble(const LAllocation &input) {
+    LAsmJSUInt32ToDouble(const LAllocation &input) {
         setOperand(0, input);
     }
 };

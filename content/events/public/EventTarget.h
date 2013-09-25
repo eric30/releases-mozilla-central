@@ -40,12 +40,12 @@ public:
   using nsIDOMEventTarget::RemoveEventListener;
   using nsIDOMEventTarget::DispatchEvent;
   virtual void AddEventListener(const nsAString& aType,
-                                nsIDOMEventListener* aCallback,
+                                EventListener* aCallback,
                                 bool aCapture,
                                 const Nullable<bool>& aWantsUntrusted,
                                 ErrorResult& aRv) = 0;
   virtual void RemoveEventListener(const nsAString& aType,
-                                   nsIDOMEventListener* aCallback,
+                                   EventListener* aCallback,
                                    bool aCapture,
                                    ErrorResult& aRv);
   bool DispatchEvent(nsDOMEvent& aEvent, ErrorResult& aRv);
@@ -74,7 +74,7 @@ protected:
   EventHandlerNonNull* GetEventHandler(nsIAtom* aType,
                                        const nsAString& aTypeString);
   void SetEventHandler(nsIAtom* aType, const nsAString& aTypeString,
-                       EventHandlerNonNull* aHandler, ErrorResult& rv);
+                       EventHandlerNonNull* aHandler);
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(EventTarget, NS_EVENTTARGET_IID)

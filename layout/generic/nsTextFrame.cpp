@@ -11,6 +11,7 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Likely.h"
 #include "mozilla/MathAlgorithms.h"
+#include "mozilla/TextEvents.h"
 
 #include "nsCOMPtr.h"
 #include "nsBlockFrame.h"
@@ -147,6 +148,28 @@ NS_DECLARE_FRAME_PROPERTY(OffsetToFrameProperty, nullptr)
 NS_DECLARE_FRAME_PROPERTY(UninflatedTextRunProperty, nullptr)
 
 NS_DECLARE_FRAME_PROPERTY(FontSizeInflationProperty, nullptr)
+
+class GlyphObserver : public gfxFont::GlyphChangeObserver {
+public:
+  GlyphObserver(gfxFont* aFont, nsTextFrame* aFrame)
+    : gfxFont::GlyphChangeObserver(aFont), mFrame(aFrame) {}
+  virtual void NotifyGlyphsChanged() MOZ_OVERRIDE;
+private:
+  nsTextFrame* mFrame;
+};
+
+static void DestroyGlyphObserverList(void* aPropertyValue)
+{
+  delete static_cast<nsTArray<nsAutoPtr<GlyphObserver> >*>(aPropertyValue);
+}
+
+/**
+ * This property is set on text frames with TEXT_IN_TEXTRUN_USER_DATA set that
+ * have potentially-animated glyphs.
+ * The only reason this list is in a property is to automatically destroy the
+ * list when the frame is deleted, unregistering the observers.
+ */
+NS_DECLARE_FRAME_PROPERTY(TextFrameGlyphObservers, DestroyGlyphObserverList);
 
 // The following flags are set during reflow
 
@@ -506,6 +529,26 @@ UnhookTextRunFromFrames(gfxTextRun* aTextRun, nsTextFrame* aStartContinuation)
   }
 }
 
+void
+GlyphObserver::NotifyGlyphsChanged()
+{
+  nsIPresShell* shell = mFrame->PresContext()->PresShell();
+  for (nsIFrame* f = mFrame; f;
+       f = nsLayoutUtils::GetNextContinuationOrSpecialSibling(f)) {
+    if (f != mFrame && f->HasAnyStateBits(TEXT_IN_TEXTRUN_USER_DATA)) {
+      // f will have its own GlyphObserver (if needed) so we can stop here.
+      break;
+    }
+    f->InvalidateFrame();
+    // Theoretically we could just update overflow areas, perhaps using
+    // OverflowChangedTracker, but that would do a bunch of work eagerly that
+    // we should probably do lazily here since there could be a lot
+    // of text frames affected and we'd like to coalesce the work. So that's
+    // not easy to do well.
+    shell->FrameNeedsReflow(f, nsIPresShell::eResize, NS_FRAME_IS_DIRTY);
+  }
+}
+
 class FrameTextRunCache;
 
 static FrameTextRunCache *gTextRuns = nullptr;
@@ -613,7 +656,7 @@ int32_t nsTextFrame::GetInFlowContentLength() {
     return flowLength->mEndFlowOffset - mContentOffset;
   }
 
-  nsTextFrame* nextBidi = static_cast<nsTextFrame*>(GetLastInFlow()->GetNextContinuation());
+  nsTextFrame* nextBidi = static_cast<nsTextFrame*>(LastInFlow()->GetNextContinuation());
   int32_t endFlow = nextBidi ? nextBidi->GetContentOffset() : mContent->TextLength();
 
   if (!flowLength) {
@@ -772,6 +815,63 @@ IsAllNewlines(const nsTextFragment* aFrag)
   return true;
 }
 
+static void
+CreateObserverForAnimatedGlyphs(nsTextFrame* aFrame, const nsTArray<gfxFont*>& aFonts)
+{
+  if (!(aFrame->GetStateBits() & TEXT_IN_TEXTRUN_USER_DATA)) {
+    // Maybe the textrun was created for uninflated text.
+    return;
+  }
+
+  nsTArray<nsAutoPtr<GlyphObserver> >* observers =
+    new nsTArray<nsAutoPtr<GlyphObserver> >();
+  for (uint32_t i = 0, count = aFonts.Length(); i < count; ++i) {
+    observers->AppendElement(new GlyphObserver(aFonts[i], aFrame));
+  }
+  aFrame->Properties().Set(TextFrameGlyphObservers(), observers);
+  // We are lazy and don't try to remove a property value that might be
+  // obsolete due to style changes or font selection changes. That is
+  // likely to be rarely needed, and we don't want to eat the overhead of
+  // doing it for the overwhelmingly common case of no property existing.
+  // (And we're out of state bits to conveniently use for a fast property
+  // existence check.) The only downside is that in some rare cases we might
+  // keep fonts alive for longer than necessary, or unnecessarily invalidate
+  // frames.
+}
+
+static void
+CreateObserversForAnimatedGlyphs(gfxTextRun* aTextRun)
+{
+  if (!aTextRun->GetUserData()) {
+    return;
+  }
+  nsTArray<gfxFont*> fontsWithAnimatedGlyphs;
+  uint32_t numGlyphRuns;
+  const gfxTextRun::GlyphRun* glyphRuns =
+    aTextRun->GetGlyphRuns(&numGlyphRuns);
+  for (uint32_t i = 0; i < numGlyphRuns; ++i) {
+    gfxFont* font = glyphRuns[i].mFont;
+    if (font->GlyphsMayChange() && !fontsWithAnimatedGlyphs.Contains(font)) {
+      fontsWithAnimatedGlyphs.AppendElement(font);
+    }
+  }
+  if (fontsWithAnimatedGlyphs.IsEmpty()) {
+    return;
+  }
+
+  if (aTextRun->GetFlags() & nsTextFrameUtils::TEXT_IS_SIMPLE_FLOW) {
+    CreateObserverForAnimatedGlyphs(static_cast<nsTextFrame*>(
+      static_cast<nsIFrame*>(aTextRun->GetUserData())), fontsWithAnimatedGlyphs);
+  } else {
+    TextRunUserData* userData =
+      static_cast<TextRunUserData*>(aTextRun->GetUserData());
+    for (uint32_t i = 0; i < userData->mMappedFlowCount; ++i) {
+      CreateObserverForAnimatedGlyphs(userData->mMappedFlows[i].mStartFrame,
+                                      fontsWithAnimatedGlyphs);
+    }
+  }
+}
+
 /**
  * This class accumulates state as we scan a paragraph of text. It detects
  * textrun boundaries (changes from text to non-text, hard
@@ -927,6 +1027,10 @@ public:
           static_cast<nsTransformedTextRun*>(mTextRun);
         transformedTextRun->FinishSettingProperties(mContext);
       }
+      // The way nsTransformedTextRun is implemented, its glyph runs aren't
+      // available until after nsTransformedTextRun::FinishSettingProperties()
+      // is called. So that's why we defer checking for animated glyphs to here.
+      CreateObserversForAnimatedGlyphs(mTextRun);
     }
 
     gfxTextRun*  mTextRun;
@@ -3820,8 +3924,8 @@ public:
     AddStateBits(NS_FRAME_IS_FLUID_CONTINUATION);
     return NS_OK;
   }
-  virtual nsIFrame* GetFirstInFlow() const;
-  virtual nsIFrame* GetFirstContinuation() const;
+  virtual nsIFrame* FirstInFlow() const MOZ_OVERRIDE;
+  virtual nsIFrame* FirstContinuation() const MOZ_OVERRIDE;
 
   virtual void AddInlineMinWidth(nsRenderingContext *aRenderingContext,
                                  InlineMinWidthData *aData);
@@ -3943,7 +4047,7 @@ nsContinuingTextFrame::DestroyFrom(nsIFrame* aDestructRoot)
 }
 
 nsIFrame*
-nsContinuingTextFrame::GetFirstInFlow() const
+nsContinuingTextFrame::FirstInFlow() const
 {
   // Can't cast to |nsContinuingTextFrame*| because the first one isn't.
   nsIFrame *firstInFlow,
@@ -3953,11 +4057,12 @@ nsContinuingTextFrame::GetFirstInFlow() const
     firstInFlow = previous;
     previous = firstInFlow->GetPrevInFlow();
   } while (previous);
+  MOZ_ASSERT(firstInFlow, "post-condition failed");
   return firstInFlow;
 }
 
 nsIFrame*
-nsContinuingTextFrame::GetFirstContinuation() const
+nsContinuingTextFrame::FirstContinuation() const
 {
   // Can't cast to |nsContinuingTextFrame*| because the first one isn't.
   nsIFrame *firstContinuation,
@@ -3970,6 +4075,7 @@ nsContinuingTextFrame::GetFirstContinuation() const
     firstContinuation = previous;
     previous = firstContinuation->GetPrevContinuation();
   } while (previous);
+  MOZ_ASSERT(firstContinuation, "post-condition failed");
   return firstContinuation;
 }
 
@@ -4095,25 +4201,26 @@ nsTextFrame::GetCursor(const nsPoint& aPoint,
 }
 
 nsIFrame*
-nsTextFrame::GetLastInFlow() const
+nsTextFrame::LastInFlow() const
 {
   nsTextFrame* lastInFlow = const_cast<nsTextFrame*>(this);
   while (lastInFlow->GetNextInFlow())  {
     lastInFlow = static_cast<nsTextFrame*>(lastInFlow->GetNextInFlow());
   }
-  NS_POSTCONDITION(lastInFlow, "illegal state in flow chain.");
+  MOZ_ASSERT(lastInFlow, "post-condition failed");
   return lastInFlow;
 }
 
 nsIFrame*
-nsTextFrame::GetLastContinuation() const
+nsTextFrame::LastContinuation() const
 {
-  nsTextFrame* lastInFlow = const_cast<nsTextFrame*>(this);
-  while (lastInFlow->mNextContinuation)  {
-    lastInFlow = static_cast<nsTextFrame*>(lastInFlow->mNextContinuation);
+  nsTextFrame* lastContinuation = const_cast<nsTextFrame*>(this);
+  while (lastContinuation->mNextContinuation)  {
+    lastContinuation =
+      static_cast<nsTextFrame*>(lastContinuation->mNextContinuation);
   }
-  NS_POSTCONDITION(lastInFlow, "illegal state in continuation chain.");
-  return lastInFlow;
+  MOZ_ASSERT(lastContinuation, "post-condition failed");
+  return lastContinuation;
 }
 
 void
@@ -5484,7 +5591,7 @@ nsTextFrame::PaintTextWithSelection(gfxContext* aCtx,
     uint32_t aContentOffset, uint32_t aContentLength,
     nsTextPaintStyle& aTextPaintStyle,
     const nsCharClipDisplayItem::ClipEdges& aClipEdges,
-    gfxTextObjectPaint* aObjectPaint,
+    gfxTextContextPaint* aContextPaint,
     nsTextFrame::DrawPathCallbacks* aCallbacks)
 {
   NS_ASSERTION(GetContent()->IsSelectionDescendant(), "wrong paint path");
@@ -5698,7 +5805,7 @@ void
 nsTextFrame::PaintText(nsRenderingContext* aRenderingContext, nsPoint aPt,
                        const nsRect& aDirtyRect,
                        const nsCharClipDisplayItem& aItem,
-                       gfxTextObjectPaint* aObjectPaint,
+                       gfxTextContextPaint* aContextPaint,
                        nsTextFrame::DrawPathCallbacks* aCallbacks)
 {
   // Don't pass in aRenderingContext here, because we need a *reference*
@@ -5741,7 +5848,7 @@ nsTextFrame::PaintText(nsRenderingContext* aRenderingContext, nsPoint aPt,
       tmp.ConvertSkippedToOriginal(startOffset + maxLength) - contentOffset;
     if (PaintTextWithSelection(ctx, framePt, textBaselinePt, dirtyRect,
                                provider, contentOffset, contentLength,
-                               textPaintStyle, clipEdges, aObjectPaint,
+                               textPaintStyle, clipEdges, aContextPaint,
                                aCallbacks)) {
       return;
     }
@@ -5770,7 +5877,7 @@ nsTextFrame::PaintText(nsRenderingContext* aRenderingContext, nsPoint aPt,
   DrawText(ctx, dirtyRect, framePt, textBaselinePt, startOffset, maxLength, provider,
            textPaintStyle, foregroundColor, clipEdges, advanceWidth,
            (GetStateBits() & TEXT_HYPHEN_BREAK) != 0,
-           nullptr, aObjectPaint, aCallbacks);
+           nullptr, aContextPaint, aCallbacks);
 }
 
 static void
@@ -5781,7 +5888,7 @@ DrawTextRun(gfxTextRun* aTextRun,
             PropertyProvider* aProvider,
             nscolor aTextColor,
             gfxFloat* aAdvanceWidth,
-            gfxTextObjectPaint* aObjectPaint,
+            gfxTextContextPaint* aContextPaint,
             nsTextFrame::DrawPathCallbacks* aCallbacks)
 {
   gfxFont::DrawMode drawMode = aCallbacks ? gfxFont::GLYPH_PATH :
@@ -5789,12 +5896,12 @@ DrawTextRun(gfxTextRun* aTextRun,
   if (aCallbacks) {
     aCallbacks->NotifyBeforeText(aTextColor);
     aTextRun->Draw(aCtx, aTextBaselinePt, drawMode, aOffset, aLength,
-                   aProvider, aAdvanceWidth, aObjectPaint, aCallbacks);
+                   aProvider, aAdvanceWidth, aContextPaint, aCallbacks);
     aCallbacks->NotifyAfterText();
   } else {
     aCtx->SetColor(gfxRGBA(aTextColor));
     aTextRun->Draw(aCtx, aTextBaselinePt, drawMode, aOffset, aLength,
-                   aProvider, aAdvanceWidth, aObjectPaint);
+                   aProvider, aAdvanceWidth, aContextPaint);
   }
 }
 
@@ -5806,11 +5913,11 @@ nsTextFrame::DrawTextRun(gfxContext* const aCtx,
                          nscolor aTextColor,
                          gfxFloat& aAdvanceWidth,
                          bool aDrawSoftHyphen,
-                         gfxTextObjectPaint* aObjectPaint,
+                         gfxTextContextPaint* aContextPaint,
                          nsTextFrame::DrawPathCallbacks* aCallbacks)
 {
   ::DrawTextRun(mTextRun, aCtx, aTextBaselinePt, aOffset, aLength, &aProvider,
-                aTextColor, &aAdvanceWidth, aObjectPaint, aCallbacks);
+                aTextColor, &aAdvanceWidth, aContextPaint, aCallbacks);
 
   if (aDrawSoftHyphen) {
     // Don't use ctx as the context, because we need a reference context here,
@@ -5824,7 +5931,7 @@ nsTextFrame::DrawTextRun(gfxContext* const aCtx,
       ::DrawTextRun(hyphenTextRun.get(), aCtx,
                     gfxPoint(hyphenBaselineX, aTextBaselinePt.y),
                     0, hyphenTextRun->GetLength(),
-                    nullptr, aTextColor, nullptr, aObjectPaint, aCallbacks);
+                    nullptr, aTextColor, nullptr, aContextPaint, aCallbacks);
     }
   }
 }
@@ -5842,7 +5949,7 @@ nsTextFrame::DrawTextRunAndDecorations(
     bool aDrawSoftHyphen,
     const TextDecorations& aDecorations,
     const nscolor* const aDecorationOverrideColor,
-    gfxTextObjectPaint* aObjectPaint,
+    gfxTextContextPaint* aContextPaint,
     nsTextFrame::DrawPathCallbacks* aCallbacks)
 {
     const gfxFloat app = aTextStyle.PresContext()->AppUnitsPerDevPixel();
@@ -5907,7 +6014,7 @@ nsTextFrame::DrawTextRunAndDecorations(
     // CSS 2.1 mandates that text be painted after over/underlines, and *then*
     // line-throughs
     DrawTextRun(aCtx, aTextBaselinePt, aOffset, aLength, aProvider, aTextColor,
-                aAdvanceWidth, aDrawSoftHyphen, aObjectPaint, aCallbacks);
+                aAdvanceWidth, aDrawSoftHyphen, aContextPaint, aCallbacks);
 
     // Line-throughs
     for (uint32_t i = aDecorations.mStrikes.Length(); i-- > 0; ) {
@@ -5943,7 +6050,7 @@ nsTextFrame::DrawText(
     gfxFloat& aAdvanceWidth,
     bool aDrawSoftHyphen,
     const nscolor* const aDecorationOverrideColor,
-    gfxTextObjectPaint* aObjectPaint,
+    gfxTextContextPaint* aContextPaint,
     nsTextFrame::DrawPathCallbacks* aCallbacks)
 {
   TextDecorations decorations;
@@ -5958,10 +6065,10 @@ nsTextFrame::DrawText(
     DrawTextRunAndDecorations(aCtx, aDirtyRect, aFramePt, aTextBaselinePt, aOffset, aLength,
                               aProvider, aTextStyle, aTextColor, aClipEdges, aAdvanceWidth,
                               aDrawSoftHyphen, decorations,
-                              aDecorationOverrideColor, aObjectPaint, aCallbacks);
+                              aDecorationOverrideColor, aContextPaint, aCallbacks);
   } else {
     DrawTextRun(aCtx, aTextBaselinePt, aOffset, aLength, aProvider,
-                aTextColor, aAdvanceWidth, aDrawSoftHyphen, aObjectPaint, aCallbacks);
+                aTextColor, aAdvanceWidth, aDrawSoftHyphen, aContextPaint, aCallbacks);
   }
 }
 

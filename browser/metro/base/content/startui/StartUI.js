@@ -26,7 +26,7 @@ var StartUI = {
     document.getElementById("bcast_preciseInput").setAttribute("input",
       this.chromeWin.InputSourceHelper.isPrecise ? "precise" : "imprecise");
 
-    this._adjustDOMforViewState();
+    this._adjustDOMforViewState(this.chromeWin.ContentAreaObserver.viewstate);
 
     TopSitesStartView.init();
     BookmarksStartView.init();
@@ -62,11 +62,8 @@ var StartUI = {
   onClick: function onClick(aEvent) {
     // If someone clicks / taps in empty grid space, take away
     // focus from the nav bar edit so the soft keyboard will hide.
-    if (this.chromeWin.BrowserUI.blurNavBar()) {
-      // Advanced notice to CAO, so we can shuffle the nav bar in advance
-      // of the keyboard transition.
-      this.chromeWin.ContentAreaObserver.navBarWillBlur();
-    }
+    this.chromeWin.BrowserUI.blurNavBar();
+
     if (aEvent.button == 0) {
       this.chromeWin.ContextUI.dismissTabs();
     }
@@ -82,6 +79,10 @@ var StartUI = {
       expandedSection.removeAttribute("expanded")
 
     section.setAttribute("expanded", "true");
+  },
+
+  _adjustDOMforViewState: function(aState) {
+    document.getElementById("bcast_windowState").setAttribute("viewstate", aState);
   },
 
   handleEvent: function handleEvent(aEvent) {
@@ -106,33 +107,6 @@ var StartUI = {
         aEvent.preventDefault();
         aEvent.stopPropagation();
         break;
-    }
-  },
-
-  _adjustDOMforViewState: function(aState) {
-    let currViewState = aState;
-    if (!currViewState && Services.metro.immersive) {
-      switch (Services.metro.snappedState) {
-        case Ci.nsIWinMetroUtils.fullScreenLandscape:
-          currViewState = "landscape";
-          break;
-        case Ci.nsIWinMetroUtils.fullScreenPortrait:
-          currViewState = "portrait";
-          break;
-        case Ci.nsIWinMetroUtils.filled:
-          currViewState = "filled";
-          break;
-        case Ci.nsIWinMetroUtils.snapped:
-          currViewState = "snapped";
-          break;
-      }
-    }
-
-    document.getElementById("bcast_windowState").setAttribute("viewstate", currViewState);
-    if (currViewState == "snapped") {
-      document.getElementById("start-topsites-grid").removeAttribute("tiletype");
-    } else {
-      document.getElementById("start-topsites-grid").setAttribute("tiletype", "thumbnail");
     }
   },
 

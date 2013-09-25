@@ -62,8 +62,8 @@ struct DCFromContext {
         nsRefPtr<gfxASurface> aSurface = aContext->CurrentSurface();
         NS_ASSERTION(aSurface || !aContext->IsCairo(), "DCFromContext: null surface");
         if (aSurface &&
-            (aSurface->GetType() == gfxASurface::SurfaceTypeWin32 ||
-             aSurface->GetType() == gfxASurface::SurfaceTypeWin32Printing))
+            (aSurface->GetType() == gfxSurfaceTypeWin32 ||
+             aSurface->GetType() == gfxSurfaceTypeWin32Printing))
         {
             dc = static_cast<gfxWindowsSurface*>(aSurface.get())->GetDC();
             needsRelease = false;
@@ -126,10 +126,10 @@ public:
     virtual gfxPlatformFontList* CreatePlatformFontList();
 
     already_AddRefed<gfxASurface> CreateOffscreenSurface(const gfxIntSize& size,
-                                                         gfxASurface::gfxContentType contentType);
+                                                         gfxContentType contentType);
     virtual already_AddRefed<gfxASurface>
       CreateOffscreenImageSurface(const gfxIntSize& aSize,
-                                  gfxASurface::gfxContentType aContentType);
+                                  gfxContentType aContentType);
 
     virtual mozilla::TemporaryRef<mozilla::gfx::ScaledFont>
       GetScaledFontForFont(mozilla::gfx::DrawTarget* aTarget, gfxFont *aFont);
@@ -246,7 +246,8 @@ public:
         kWindowsServer2003 = 0x50002,
         kWindowsVista = 0x60000,
         kWindows7 = 0x60001,
-        kWindows8 = 0x60002
+        kWindows8 = 0x60002,
+        kWindows8_1 = 0x60003
     };
 
     static int32_t WindowsOSVersion(int32_t *aBuildNum = nullptr);

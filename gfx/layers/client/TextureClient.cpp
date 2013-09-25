@@ -35,6 +35,78 @@ using namespace mozilla::gl;
 namespace mozilla {
 namespace layers {
 
+class ShmemTextureClientData : public TextureClientData
+{
+public:
+  ShmemTextureClientData(ipc::Shmem& aShmem)
+  : mShmem(aShmem)
+  {
+    MOZ_COUNT_CTOR(ShmemTextureClientData);
+  }
+
+  ~ShmemTextureClientData()
+  {
+    MOZ_COUNT_CTOR(ShmemTextureClientData);
+  }
+
+  virtual void DeallocateSharedData(ISurfaceAllocator* allocator)
+  {
+    allocator->DeallocShmem(mShmem);
+    mShmem = ipc::Shmem();
+  }
+
+private:
+  ipc::Shmem mShmem;
+};
+
+class MemoryTextureClientData : public TextureClientData
+{
+public:
+  MemoryTextureClientData(uint8_t* aBuffer)
+  : mBuffer(aBuffer)
+  {
+    MOZ_COUNT_CTOR(MemoryTextureClientData);
+  }
+
+  ~MemoryTextureClientData()
+  {
+    MOZ_ASSERT(!mBuffer, "Forgot to deallocate the shared texture data?");
+    MOZ_COUNT_CTOR(MemoryTextureClientData);
+  }
+
+  virtual void DeallocateSharedData(ISurfaceAllocator*)
+  {
+    delete[] mBuffer;
+  }
+
+private:
+  uint8_t* mBuffer;
+};
+
+TextureClientData*
+MemoryTextureClient::DropTextureData()
+{
+  if (!mBuffer) {
+    return nullptr;
+  }
+  TextureClientData* result = new MemoryTextureClientData(mBuffer);
+  MarkInvalid();
+  mBuffer = nullptr;
+  return result;
+}
+
+TextureClientData*
+ShmemTextureClient::DropTextureData()
+{
+  if (!mShmem.IsReadable()) {
+    return nullptr;
+  }
+  TextureClientData* result = new ShmemTextureClientData(mShmem);
+  MarkInvalid();
+  mShmem = ipc::Shmem();
+  return result;
+}
+
 TextureClient::TextureClient(TextureFlags aFlags)
   : mID(0)
   , mFlags(aFlags)
@@ -51,15 +123,11 @@ TextureClient::ShouldDeallocateInDestructor() const
   if (!IsAllocated()) {
     return false;
   }
-  if (GetFlags() & TEXTURE_DEALLOCATE_CLIENT) {
-    return true;
-  }
 
   // If we're meant to be deallocated by the host,
   // but we haven't been shared yet, then we should
   // deallocate on the client instead.
-  return (GetFlags() & TEXTURE_DEALLOCATE_HOST) &&
-         !IsSharedWithCompositor();
+  return !IsSharedWithCompositor();
 }
 
 bool
@@ -315,6 +383,11 @@ DeprecatedTextureClientShmem::DeprecatedTextureClientShmem(CompositableForwarder
 {
 }
 
+DeprecatedTextureClientShmem::~DeprecatedTextureClientShmem()
+{
+  ReleaseResources();
+}
+
 void
 DeprecatedTextureClientShmem::ReleaseResources()
 {
@@ -338,7 +411,7 @@ DeprecatedTextureClientShmem::ReleaseResources()
 
 bool
 DeprecatedTextureClientShmem::EnsureAllocated(gfx::IntSize aSize,
-                                    gfxASurface::gfxContentType aContentType)
+                                    gfxContentType aContentType)
 {
   if (aSize != mSize ||
       aContentType != mContentType ||
@@ -352,7 +425,7 @@ DeprecatedTextureClientShmem::EnsureAllocated(gfx::IntSize aSize,
                                             mContentType, &mDescriptor)) {
       NS_WARNING("creating SurfaceDescriptor failed!");
     }
-    if (mContentType == gfxASurface::CONTENT_COLOR_ALPHA) {
+    if (mContentType == GFX_CONTENT_COLOR_ALPHA) {
       gfxASurface* surface = GetSurface();
       if (!surface) {
         return false;
@@ -487,7 +560,7 @@ DeprecatedTextureClientShmemYCbCr::SetDescriptorFromReply(const SurfaceDescripto
 
 bool
 DeprecatedTextureClientShmemYCbCr::EnsureAllocated(gfx::IntSize aSize,
-                                         gfxASurface::gfxContentType aType)
+                                         gfxContentType aType)
 {
   NS_RUNTIMEABORT("not enough arguments to do this (need both Y and CbCr sizes)");
   return false;
@@ -504,7 +577,7 @@ DeprecatedTextureClientTile::DeprecatedTextureClientTile(CompositableForwarder* 
 }
 
 bool
-DeprecatedTextureClientTile::EnsureAllocated(gfx::IntSize aSize, gfxASurface::gfxContentType aType)
+DeprecatedTextureClientTile::EnsureAllocated(gfx::IntSize aSize, gfxContentType aType)
 {
   if (!mSurface ||
       mSurface->Format() != gfxPlatform::GetPlatform()->OptimalFormatForContent(aType)) {
@@ -514,7 +587,7 @@ DeprecatedTextureClientTile::EnsureAllocated(gfx::IntSize aSize, gfxASurface::gf
     // performance regression.
     gfxImageSurface* tmpTile = new gfxImageSurface(gfxIntSize(aSize.width, aSize.height),
                                                    gfxPlatform::GetPlatform()->OptimalFormatForContent(aType),
-                                                   aType != gfxASurface::CONTENT_COLOR);
+                                                   aType != GFX_CONTENT_COLOR);
     mSurface = new gfxReusableImageSurfaceWrapper(tmpTile);
 #else
     nsRefPtr<gfxSharedImageSurface> sharedImage =
@@ -553,11 +626,11 @@ bool AutoLockShmemClient::Update(Image* aImage,
 
   gfxIntSize size = aImage->GetSize();
 
-  gfxASurface::gfxContentType contentType = aSurface->GetContentType();
+  gfxContentType contentType = aSurface->GetContentType();
   bool isOpaque = (aContentFlags & Layer::CONTENT_OPAQUE);
-  if (contentType != gfxASurface::CONTENT_ALPHA &&
+  if (contentType != GFX_CONTENT_ALPHA &&
       isOpaque) {
-    contentType = gfxASurface::CONTENT_COLOR;
+    contentType = GFX_CONTENT_COLOR;
   }
   mDeprecatedTextureClient->EnsureAllocated(gfx::IntSize(size.width, size.height), contentType);
 

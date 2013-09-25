@@ -212,16 +212,18 @@ if test -n "$gonkdir" ; then
         MOZ_B2G_NFC=1
         MOZ_B2G_CAMERA=1
         MOZ_OMX_DECODER=1
-        AC_DEFINE(MOZ_OMX_DECODER)
         AC_SUBST(MOZ_OMX_DECODER)
         ;;
     18)
-        GONK_INCLUDES="-I$gonkdir/frameworks/native/include"
+        GONK_INCLUDES="-I$gonkdir/frameworks/native/include -I$gonkdir/frameworks/av/include -I$gonkdir/frameworks/av/include/media -I$gonkdir/frameworks/av/include/camera -I$gonkdir/frameworks/native/include/media/openmax -I$gonkdir/frameworks/av/media/libstagefright/include"
         if test -d "$gonkdir/external/bluetooth/bluez"; then
             GONK_INCLUDES+=" -I$gonkdir/external/dbus -I$gonkdir/external/bluetooth/bluez/lib"
-            MOZ_B2G_NFC=1
             MOZ_B2G_BT=1
         fi
+        MOZ_B2G_NFC=1
+        MOZ_B2G_CAMERA=1
+        MOZ_OMX_DECODER=1
+        AC_SUBST(MOZ_OMX_DECODER)
         ;;
     *)
         AC_MSG_ERROR([Unsupported platform version: $ANDROID_VERSION])
@@ -721,16 +723,6 @@ else
     AC_MSG_RESULT([yes])
 fi
 
-MOZ_ARG_WITH_BOOL(system-ply,
-[  --with-system-ply       Use system installed python ply library],
-    [if $PYTHON -c 'import ply' 2>&5; then
-         MOZ_SYSTEM_PLY=1
-     else
-         AC_MSG_ERROR([python ply library is not found but --with-system-ply was requested])
-     fi])
-
-AC_SUBST(MOZ_SYSTEM_PLY)
-
 if test -z "$COMPILE_ENVIRONMENT"; then
     NSINSTALL_BIN='$(PYTHON) $(topsrcdir)/config/nsinstall.py'
 fi
@@ -1222,8 +1214,10 @@ MOZ_ARG_ENABLE_BOOL(address-sanitizer,
 if test -n "$MOZ_ASAN"; then
     MOZ_LLVM_HACKS=1
     AC_DEFINE(MOZ_ASAN)
+    MOZ_PATH_PROG(LLVM_SYMBOLIZER, llvm-symbolizer)
 fi
 AC_SUBST(MOZ_ASAN)
+AC_SUBST(LLVM_SYMBOLIZER)
 
 dnl ========================================================
 dnl = Enable hacks required for LLVM instrumentations
@@ -1245,7 +1239,12 @@ dnl ========================================================
 if test "$GNU_CC"; then
     # Per bug 719659 comment 2, some of the headers on ancient build machines
     # may require gnu89 inline semantics.  But otherwise, we use C99.
-    CFLAGS="$CFLAGS -std=gnu99 -fgnu89-inline"
+    # But on OS X we just use C99 plus GNU extensions, in order to fix
+    # bug 917526.
+    CFLAGS="$CFLAGS -std=gnu99"
+    if test "${OS_ARCH}" != Darwin; then
+        CFLAGS="$CFLAGS -fgnu89-inline"
+    fi
     # FIXME: Let us build with strict aliasing. bug 414641.
     CFLAGS="$CFLAGS -fno-strict-aliasing"
     MKSHLIB='$(CXX) $(CXXFLAGS) $(DSO_PIC_CFLAGS) $(DSO_LDOPTS) -Wl,-h,$(notdir $@) -o $@'
@@ -1943,6 +1942,7 @@ ia64*-hpux*)
         _PLATFORM_DEFAULT_TOOLKIT=cairo-gonk
         MOZ_B2G_RIL=1
         MOZ_B2G_FM=1
+        MOZ_SYNTH_PICO=1
     else
         _PLATFORM_DEFAULT_TOOLKIT=cairo-android
         MOZ_LINKER=1
@@ -2057,6 +2057,12 @@ ia64*-hpux*)
         _DEFINES_CXXFLAGS='-FI $(DEPTH)/dist/include/mozilla-config.h -DMOZILLA_CLIENT'
         CFLAGS="$CFLAGS -W3 -Gy -Fd\$(COMPILE_PDBFILE)"
         CXXFLAGS="$CXXFLAGS -W3 -Gy -Fd\$(COMPILE_PDBFILE)"
+        if test "$_CC_SUITE" -ge "12"; then
+            dnl VS2013+ requires -FS when parallel building by make -jN.
+            dnl If nothing, compiler sometimes causes C1041 error.
+            CFLAGS="$CFLAGS -FS"
+            CXXFLAGS="$CXXFLAGS -FS"
+        fi
         # khuey says we can safely ignore MSVC warning C4251
         # MSVC warning C4244 (implicit type conversion may lose data) warns
         # and requires workarounds for perfectly valid code.  Also, GCC/clang
@@ -2595,77 +2601,6 @@ fi
 
 MOZ_CXX11
 
-AC_LANG_CPLUSPLUS
-
-dnl Check for usable char16_t (2 bytes, unsigned)
-dnl (we might not need the unsignedness check anymore)
-AC_CACHE_CHECK(for usable char16_t (2 bytes, unsigned),
-    ac_cv_have_usable_char16_t,
-    [AC_TRY_COMPILE([$configure_static_assert_macros],
-                    [CONFIGURE_STATIC_ASSERT(sizeof(char16_t) == 2);
-                     CONFIGURE_STATIC_ASSERT(char16_t(-1) > char16_t(0));
-                     CONFIGURE_STATIC_ASSERT(sizeof((u"hello")[0]) == 2);
-                     CONFIGURE_STATIC_ASSERT(sizeof(u'a') == 2);
-                     CONFIGURE_STATIC_ASSERT(u'\xFFFF' > u'\x0')],
-                    ac_cv_have_usable_char16_t="yes",
-                    ac_cv_have_usable_char16_t="no")])
-if test "$ac_cv_have_usable_char16_t" = "yes"; then
-    AC_DEFINE(HAVE_CPP_CHAR16_T)
-    HAVE_CPP_CHAR16_T=1
-elif test "$GNU_CXX"; then
-    CXXFLAGS="$_SAVE_CXXFLAGS"
-fi
-
-dnl Check for usable wchar_t (2 bytes, unsigned)
-dnl (we really don't need the unsignedness check anymore)
-dnl ========================================================
-
-AC_CACHE_CHECK(for usable wchar_t (2 bytes, unsigned),
-    ac_cv_have_usable_wchar_v2,
-    [AC_TRY_COMPILE([#include <stddef.h>
-                     $configure_static_assert_macros],
-                    [CONFIGURE_STATIC_ASSERT(sizeof(wchar_t) == 2);
-                     CONFIGURE_STATIC_ASSERT((wchar_t)-1 > (wchar_t) 0)],
-                    ac_cv_have_usable_wchar_v2="yes",
-                    ac_cv_have_usable_wchar_v2="no")])
-if test "$ac_cv_have_usable_wchar_v2" = "yes"; then
-    AC_DEFINE(HAVE_CPP_2BYTE_WCHAR_T)
-    HAVE_CPP_2BYTE_WCHAR_T=1
-elif test "$ac_cv_have_usable_char16_t" != "yes"; then
-dnl This is really gcc-only
-dnl Do this test using CXX only since some versions of gcc
-dnl 2.95-2.97 have a signed wchar_t in c++ only and some versions
-dnl only have short-wchar support for c++.
-dnl Note that we assume that mac & win32 have short wchar (see nscore.h)
-
-    _SAVE_CXXFLAGS=$CXXFLAGS
-    CXXFLAGS="$CXXFLAGS -fshort-wchar"
-
-    AC_CACHE_CHECK(for compiler -fshort-wchar option,
-        ac_cv_have_usable_wchar_option_v2,
-        [AC_TRY_LINK([#include <stddef.h>
-                      $configure_static_assert_macros],
-                     [CONFIGURE_STATIC_ASSERT(sizeof(wchar_t) == 2);
-                      CONFIGURE_STATIC_ASSERT((wchar_t)-1 > (wchar_t) 0)],
-                     ac_cv_have_usable_wchar_option_v2="yes",
-                     ac_cv_have_usable_wchar_option_v2="no")])
-
-    if test "$ac_cv_have_usable_wchar_option_v2" = "yes"; then
-        AC_DEFINE(HAVE_CPP_2BYTE_WCHAR_T)
-        HAVE_CPP_2BYTE_WCHAR_T=1
-        if test "$OS_TARGET" = Android; then
-            WCHAR_CFLAGS="-fshort-wchar -Wl,--no-wchar-size-warning"
-            CXXFLAGS="$CXXFLAGS -Wl,--no-wchar-size-warning"
-            CFLAGS="$CFLAGS -Wl,--no-wchar-size-warning"
-            DSO_LDOPTS="$DSO_LDOPTS -Wl,--no-wchar-size-warning"
-        else
-            WCHAR_CFLAGS="-fshort-wchar"
-        fi
-    else
-        CXXFLAGS=$_SAVE_CXXFLAGS
-    fi
-fi
-
 AC_LANG_C
 
 dnl Check for .hidden assembler directive and visibility attribute.
@@ -3158,7 +3093,7 @@ dnl Checks for library functions.
 dnl ========================================================
 AC_PROG_GCC_TRADITIONAL
 AC_FUNC_MEMCMP
-AC_CHECK_FUNCS(random strerror lchown fchmod snprintf memmove rint stat64 lstat64 truncate64 setbuf isatty)
+AC_CHECK_FUNCS(random strerror lchown fchmod snprintf memmove stat64 lstat64 truncate64 setbuf isatty)
 AC_CHECK_FUNCS(statvfs64 statvfs statfs64 statfs)
 AC_CHECK_FUNCS(flockfile getpagesize)
 AC_CHECK_FUNCS(localtime_r strtok_r)
@@ -5455,6 +5390,22 @@ if test -n "$MOZ_MEDIA_PLUGINS"; then
 fi
 
 dnl ========================================================
+dnl = Disable platform MP3 decoder on OSX
+dnl ========================================================
+if test "$MOZ_WIDGET_TOOLKIT" = "cocoa"; then
+  MOZ_APPLEMEDIA=1
+fi
+
+MOZ_ARG_DISABLE_BOOL(apple-media,
+[  --disable-apple-media  Disable support for Apple AudioToolbox/VideoToolbox],
+    MOZ_APPLEMEDIA=,
+    MOZ_APPLEMEDIA=1)
+
+if test -n "$MOZ_APPLEMEDIA"; then
+  AC_DEFINE(MOZ_APPLEMEDIA)
+fi
+
+dnl ========================================================
 dnl = Enable getUserMedia support
 dnl ========================================================
 MOZ_ARG_ENABLE_BOOL(media-navigator,
@@ -7472,6 +7423,18 @@ fi
 AC_SUBST(MOZ_B2G_NFC)
 
 dnl ========================================================
+dnl = Enable Pico Speech Synthesis (Gonk usually)
+dnl ========================================================
+MOZ_ARG_ENABLE_BOOL(synth-pico,
+[  --enable-synth-pico  Set compile flags necessary for compiling Pico Web Speech API ],
+    MOZ_SYNTH_PICO=1,
+    MOZ_SYNTH_PICO= )
+if test -n "$MOZ_SYNTH_PICO"; then
+    AC_DEFINE(MOZ_SYNTH_PICO)
+fi
+AC_SUBST(MOZ_SYNTH_PICO)
+
+dnl ========================================================
 dnl = Enable Support for Time Manager API
 dnl ========================================================
 if test -n "$MOZ_TIME_MANAGER"; then
@@ -8763,6 +8726,7 @@ AC_SUBST(MOZ_DASH)
 AC_SUBST(MOZ_WMF)
 AC_SUBST(MOZ_DIRECTSHOW)
 AC_SUBST(MOZ_MEDIA_PLUGINS)
+AC_SUBST(MOZ_APPLEMEDIA)
 AC_SUBST(MOZ_OMX_PLUGIN)
 AC_SUBST(MOZ_VP8_ERROR_CONCEALMENT)
 AC_SUBST(MOZ_VP8_ENCODER)
@@ -8881,9 +8845,7 @@ dnl ========================================================
 dnl The following defines are used by xpcom
 _NON_GLOBAL_ACDEFINES="$_NON_GLOBAL_ACDEFINES
 CPP_THROW_NEW
-HAVE_CPP_2BYTE_WCHAR_T
 HAVE_CPP_AMBIGUITY_RESOLVING_USING
-HAVE_CPP_CHAR16_T
 HAVE_CPP_DYNAMIC_CAST_TO_VOID_PTR
 HAVE_CPP_PARTIAL_SPECIALIZATION
 HAVE_CPP_TROUBLE_COMPARING_TO_ZERO
@@ -9326,6 +9288,7 @@ export STLPORT_CPPFLAGS
 export STLPORT_LDFLAGS
 export STLPORT_LIBS
 export JS_STANDALONE=no
+export MOZ_LINKER
 
 if ! test -e js; then
     mkdir js

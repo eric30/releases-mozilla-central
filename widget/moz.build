@@ -55,7 +55,7 @@ TEST_TOOL_DIRS += ['tests']
 # source tree.
 #
 if CONFIG['MOZ_ENABLE_GTK']:
-    DIRS += ['gtk2']
+    DIRS += ['gtk']
 
     if CONFIG['MOZ_X11']:
         DIRS += ['gtkxtbin']
@@ -99,8 +99,6 @@ MODULE = 'widget'
 
 EXPORTS += [
     'InputData.h',
-    'nsEvent.h',
-    'nsGUIEvent.h',
     'nsIDeviceContextSpec.h',
     'nsINativeKeyBindings.h',
     'nsIPluginWidget.h',
@@ -112,7 +110,14 @@ EXPORTS += [
 ]
 
 EXPORTS.mozilla += [
+    'BasicEvents.h',
+    'ContentEvents.h',
+    'EventForwards.h',
     'LookAndFeel.h',
+    'MiscEvents.h',
+    'MouseEvents.h',
+    'TextEvents.h',
+    'TouchEvents.h',
     'WidgetUtils.h',
 ]
 

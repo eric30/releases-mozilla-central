@@ -172,6 +172,7 @@
 
   <stack id="stack" flex="1">
     <observes element="bcast_urlbarState" attribute="*"/>
+    <observes element="bcast_windowState" attribute="*"/>
     <!-- Page Area -->
     <vbox id="page">
       <vbox id="tray" class="tray-toolbar" observes="bcast_windowState" >
@@ -196,6 +197,9 @@
 
         <!-- Content touch selection overlay -->
         <box class="selection-overlay-hidden" id="content-selection-overlay"/>
+
+        <!-- Overlay to dim screen when autocomplete shows up -->
+        <hbox id="autocomplete-overlay" onclick="ContextUI.dismiss()"/>
       </stack>
     </vbox>
 
@@ -205,7 +209,7 @@
               observes="cmd_back"></html:div>
 
     <!-- Navigation bar -->
-    <appbar id="navbar" mousethrough="never">
+    <appbar id="navbar" mousethrough="never" visible="true">
       <hbox id="progress-container" layer="true">
         <hbox id="progress-control" />
       </hbox>
@@ -251,7 +255,7 @@
             <observes element="bcast_urlbarState" attribute="*"/>
             <hbox id="toolbar-context-page" pack="end">
               <circularprogressindicator id="download-progress"
-                                     oncommand="Appbar.onDownloadButton()"/>
+                                     oncommand="MetroDownloadsView.onDownloadButton()"/>
               <toolbarbutton id="star-button" class="appbar-primary"
                              type="checkbox"
                              oncommand="Appbar.onStarButton()"/>

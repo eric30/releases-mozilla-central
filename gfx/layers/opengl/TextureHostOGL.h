@@ -8,11 +8,12 @@
 
 #include <stddef.h>                     // for size_t
 #include <stdint.h>                     // for uint64_t
+#include "CompositableHost.h"
 #include "GLContextTypes.h"             // for GLContext
 #include "GLDefs.h"                     // for GLenum, LOCAL_GL_CLAMP_TO_EDGE, etc
 #include "GLTextureImage.h"             // for TextureImage
 #include "gfx3DMatrix.h"                // for gfx3DMatrix
-#include "gfxASurface.h"                // for gfxASurface, etc
+#include "gfxTypes.h"
 #include "mozilla/GfxMessageUtils.h"    // for gfxContentType
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
 #include "mozilla/Attributes.h"         // for MOZ_OVERRIDE
@@ -52,6 +53,30 @@ namespace layers {
 class Compositor;
 class CompositorOGL;
 class TextureImageDeprecatedTextureHostOGL;
+
+/**
+ * CompositableQuirks implementation for the Gonk OpenGL backend.
+ * Share a same texture between TextureHosts in the same CompositableHost.
+ * By shareing the texture among the TextureHosts, number of texture allocations
+ * can be reduced than texture allocation in every TextureHosts.
+ * From Bug 912134, use only one texture among all TextureHosts degrade
+ * the rendering performance.
+ * CompositableQuirksGonkOGL chooses in a middile of them.
+ */
+class CompositableQuirksGonkOGL : public CompositableQuirks
+{
+public:
+  CompositableQuirksGonkOGL();
+  virtual ~CompositableQuirksGonkOGL();
+
+  virtual void SetCompositor(Compositor* aCompositor) MOZ_OVERRIDE;
+  GLuint GetTexture();
+  void DeleteTextureIfPresent();
+  gl::GLContext* gl() const;
+protected:
+  RefPtr<CompositorOGL> mCompositor;
+  GLuint mTexture;
+};
 
 /*
  * TextureHost implementations for the OpenGL backend.
@@ -571,7 +596,7 @@ class SharedDeprecatedTextureHostOGL : public DeprecatedTextureHost
                            , public TextureSourceOGL
 {
 public:
-  typedef gfxASurface::gfxContentType ContentType;
+  typedef gfxContentType ContentType;
   typedef mozilla::gl::GLContext GLContext;
   typedef mozilla::gl::TextureImage TextureImage;
 
@@ -639,8 +664,8 @@ public:
   ContentType GetContentType()
   {
     return (mFormat == gfx::FORMAT_B8G8R8A8) ?
-             gfxASurface::CONTENT_COLOR_ALPHA :
-             gfxASurface::CONTENT_COLOR;
+             GFX_CONTENT_COLOR_ALPHA :
+             GFX_CONTENT_COLOR;
   }
 
   virtual gfx3DMatrix GetTextureTransform() MOZ_OVERRIDE;
@@ -667,7 +692,7 @@ class SurfaceStreamHostOGL : public DeprecatedTextureHost
                            , public TextureSourceOGL
 {
 public:
-  typedef gfxASurface::gfxContentType ContentType;
+  typedef gfxContentType ContentType;
   typedef mozilla::gl::GLContext GLContext;
   typedef mozilla::gl::TextureImage TextureImage;
 
@@ -722,8 +747,8 @@ public:
   GLuint GetTextureID() { return mTextureHandle; }
   ContentType GetContentType() {
     return (mFormat == gfx::FORMAT_B8G8R8A8) ?
-             gfxASurface::CONTENT_COLOR_ALPHA :
-             gfxASurface::CONTENT_COLOR;
+             GFX_CONTENT_COLOR_ALPHA :
+             GFX_CONTENT_COLOR;
   }
 
   virtual already_AddRefed<gfxImageSurface> GetAsSurface() MOZ_OVERRIDE;
@@ -895,6 +920,8 @@ public:
   }
 
   virtual LayerRenderState GetRenderState() MOZ_OVERRIDE;
+
+  GLuint GetGLTexture();
 
 private:
   gl::GLContext* gl() const;

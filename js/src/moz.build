@@ -248,6 +248,7 @@ if CONFIG['ENABLE_ION']:
         'Snapshots.cpp',
         'StupidAllocator.cpp',
         'TypePolicy.cpp',
+        'TypeRepresentationSet.cpp',
         'UnreachableCodeElimination.cpp',
         'VMFunctions.cpp',
         'ValueNumbering.cpp',
@@ -349,3 +350,7 @@ else:
 
 MSVC_ENABLE_PGO = True
 
+HOST_CPPSRCS += [
+    'jskwgen.cpp',
+    'jsoplengen.cpp',
+]

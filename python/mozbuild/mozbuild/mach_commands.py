@@ -4,6 +4,7 @@
 
 from __future__ import print_function, unicode_literals
 
+import itertools
 import logging
 import operator
 import os
@@ -160,11 +161,12 @@ class BuildProgressFooter(object):
                     ' ',
                     '(',
                 ])
-                for d in active_dirs:
-                    parts.extend([
-                        ('magenta', d), ' ,'
-                    ])
-                parts[-1] = ')'
+                if active_dirs:
+                    commas = [', '] * (len(active_dirs) - 1)
+                    magenta_dirs = [('magenta', d) for d in active_dirs]
+                    parts.extend(i.next() for i in itertools.cycle((iter(magenta_dirs),
+                                                                    iter(commas))))
+                parts.append(')')
 
             if not have_dirs:
                 parts = parts[0:-2]
@@ -911,3 +913,37 @@ class MachDebug(object):
                 print('config defines:')
                 for k in sorted(config.defines):
                     print('\t%s' % k)
+
+
+@CommandProvider
+class Documentation(MachCommandBase):
+    """Helps manage in-tree documentation."""
+
+    @Command('build-docs', category='build-dev',
+        description='Generate documentation for the tree.')
+    @CommandArgument('--format', default='html',
+        help='Documentation format to write.')
+    @CommandArgument('outdir', default='<DEFAULT>', nargs='?',
+        help='Where to write output.')
+    def build_docs(self, format=None, outdir=None):
+        self._activate_virtualenv()
+
+        self.virtualenv_manager.install_pip_package('mdn-sphinx-theme==0.3')
+
+        import sphinx
+
+        if outdir == '<DEFAULT>':
+            outdir = os.path.join(self.topobjdir, 'docs', format)
+
+        args = [
+            sys.argv[0],
+            '-b', format,
+            os.path.join(self.topsrcdir, 'build', 'docs'),
+            outdir,
+        ]
+
+        result = sphinx.main(args)
+
+        print('Docs written to %s.' % outdir)
+
+        return result

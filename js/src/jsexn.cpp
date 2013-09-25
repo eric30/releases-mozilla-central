@@ -981,7 +981,8 @@ js_ErrorToException(JSContext *cx, const char *message, JSErrorReport *reportp,
         return false;
     }
 
-    JS_SetPendingException(cx, OBJECT_TO_JSVAL(errObject));
+    RootedValue errValue(cx, OBJECT_TO_JSVAL(errObject));
+    JS_SetPendingException(cx, errValue);
 
     /* Flag the error report passed in to indicate an exception was raised. */
     reportp->flags |= JSREPORT_EXCEPTION;
@@ -1015,13 +1016,10 @@ js_ReportUncaughtException(JSContext *cx)
 {
     JSErrorReport *reportp, report;
 
-    if (!JS_IsExceptionPending(cx))
+    if (!cx->isExceptionPending())
         return true;
 
-    RootedValue exn(cx);
-    if (!JS_GetPendingException(cx, exn.address()))
-        return false;
-
+    RootedValue exn(cx, cx->getPendingException());
     AutoValueVector roots(cx);
     roots.resize(6);
 
@@ -1125,9 +1123,9 @@ js_ReportUncaughtException(JSContext *cx)
         /* Pass the exception object. */
         JS_SetPendingException(cx, exn);
         js_ReportErrorAgain(cx, bytes, reportp);
-        JS_ClearPendingException(cx);
     }
 
+    JS_ClearPendingException(cx);
     return true;
 }
 

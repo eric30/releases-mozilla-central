@@ -192,7 +192,7 @@ nsMathMLFrame::GetPresentationDataFrom(nsIFrame*           aFrame,
         aPresentationData.flags |= NS_MATHML_DISPLAYSTYLE;
       }
       FindAttrDisplaystyle(content, aPresentationData);
-      aPresentationData.mstyle = frame->GetFirstContinuation();
+      aPresentationData.mstyle = frame->FirstContinuation();
       break;
     }
     frame = frame->GetParent();
@@ -345,9 +345,6 @@ nsMathMLFrame::ParseNumericValue(const nsString&   aString,
 // Utils to map attributes into CSS rules (work-around to bug 69409 which
 // is not scheduled to be fixed anytime soon)
 //
-
-static const int32_t kMathMLversion1 = 1;
-static const int32_t kMathMLversion2 = 2;
 
 struct
 nsCSSMapping {

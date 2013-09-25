@@ -3,18 +3,11 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-include $(srcdir)/objs.mk
-
-EXTRA_DEPS += $(srcdir)/objs.mk
 
 DIST_INSTALL	= 1
 
 LOCAL_INCLUDES	= \
 		-I$(srcdir)/../build \
-		$(NULL)
-
-SDK_LIBRARY     =                        \
-		$(LIB_PREFIX)xpcomglue_s.$(LIB_SUFFIX) \
 		$(NULL)
 
 FORCE_STATIC_LIB = 1

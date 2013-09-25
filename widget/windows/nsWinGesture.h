@@ -14,7 +14,8 @@
 #include <winuser.h>
 #include <tpcshrd.h>
 #include "nsPoint.h"
-#include "nsGUIEvent.h"
+#include "mozilla/EventForwards.h"
+#include "mozilla/TouchEvents.h"
 
 // Desktop builds target apis for 502. Win8 Metro builds target 602.
 #if WINVER < 0x0602
@@ -211,7 +212,7 @@ public:
   // Pan processing
   bool IsPanEvent(LPARAM lParam);
   bool ProcessPanMessage(HWND hWnd, WPARAM wParam, LPARAM lParam);
-  bool PanDeltaToPixelScroll(mozilla::widget::WheelEvent& aWheelEvent);
+  bool PanDeltaToPixelScroll(mozilla::WheelEvent& aWheelEvent);
   void UpdatePanFeedbackX(HWND hWnd, int32_t scrollOverflow, bool& endFeedback);
   void UpdatePanFeedbackY(HWND hWnd, int32_t scrollOverflow, bool& endFeedback);
   void PanFeedbackFinalize(HWND hWnd, bool endFeedback);

@@ -197,7 +197,7 @@ public:
    */
   nsresult EnsureFrame(uint32_t aFramenum, int32_t aX, int32_t aY,
                        int32_t aWidth, int32_t aHeight,
-                       gfxASurface::gfxImageFormat aFormat,
+                       gfxImageFormat aFormat,
                        uint8_t aPaletteDepth,
                        uint8_t** imageData,
                        uint32_t* imageLength,
@@ -211,7 +211,7 @@ public:
    */
   nsresult EnsureFrame(uint32_t aFramenum, int32_t aX, int32_t aY,
                        int32_t aWidth, int32_t aHeight,
-                       gfxASurface::gfxImageFormat aFormat,
+                       gfxImageFormat aFormat,
                        uint8_t** imageData,
                        uint32_t* imageLength,
                        imgFrame** aFrame);
@@ -539,7 +539,7 @@ private:
   imgFrame* GetCurrentImgFrame();
   uint32_t GetCurrentImgFrameIndex() const;
 
-  size_t SizeOfDecodedWithComputedFallbackIfHeap(gfxASurface::MemoryLocation aLocation,
+  size_t SizeOfDecodedWithComputedFallbackIfHeap(gfxMemoryLocation aLocation,
                                                  mozilla::MallocSizeOf aMallocSizeOf) const;
 
   void EnsureAnimExists();
@@ -549,7 +549,7 @@ private:
                                   uint32_t **paletteData, uint32_t *paletteLength,
                                   imgFrame** aRetFrame);
   nsresult InternalAddFrame(uint32_t framenum, int32_t aX, int32_t aY, int32_t aWidth, int32_t aHeight,
-                            gfxASurface::gfxImageFormat aFormat, uint8_t aPaletteDepth,
+                            gfxImageFormat aFormat, uint8_t aPaletteDepth,
                             uint8_t **imageData, uint32_t *imageLength,
                             uint32_t **paletteData, uint32_t *paletteLength,
                             imgFrame** aRetFrame);
@@ -667,6 +667,11 @@ private: // data
   // off a full decode.
   bool                       mWantFullDecode:1;
 
+  // Set when a decode worker detects an error off-main-thread. Once the error
+  // is handled on the main thread, mError is set, but mPendingError is used to
+  // stop decode work immediately.
+  bool                       mPendingError:1;
+
   // Decoding
   nsresult WantDecodedFrames();
   nsresult SyncDecode();
@@ -699,8 +704,28 @@ private: // data
 
   nsresult ShutdownDecoder(eShutdownIntent aIntent);
 
-  // Helpers
+  // Error handling.
   void DoError();
+
+  class HandleErrorWorker : public nsRunnable
+  {
+  public:
+    /**
+     * Called from decoder threads when DoError() is called, since errors can't
+     * be handled safely off-main-thread. Dispatches an event which reinvokes
+     * DoError on the main thread if there isn't one already pending.
+     */
+    static void DispatchIfNeeded(RasterImage* aImage);
+
+    NS_IMETHOD Run();
+
+  private:
+    HandleErrorWorker(RasterImage* aImage);
+
+    nsRefPtr<RasterImage> mImage;
+  };
+
+  // Helpers
   bool CanDiscard();
   bool CanForciblyDiscard();
   bool DiscardingActive();

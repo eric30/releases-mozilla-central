@@ -601,6 +601,10 @@ var shell = {
 
     this.sendEvent(window, 'ContentStart');
 
+#ifdef MOZ_B2G_RIL
+    Cu.import('resource://gre/modules/OperatorApps.jsm');
+#endif
+
     content.addEventListener('load', function shell_homeLoaded() {
       content.removeEventListener('load', shell_homeLoaded);
       shell.isHomeLoaded = true;
@@ -631,9 +635,18 @@ Services.obs.addObserver(function onSystemMessageOpenApp(subject, topic, data) {
   shell.openAppForSystemMessage(msg);
 }, 'system-messages-open-app', false);
 
-Services.obs.addObserver(function(aSubject, aTopic, aData) {
+Services.obs.addObserver(function onInterAppCommConnect(subject, topic, data) {
+  data = JSON.parse(data);
+  shell.sendChromeEvent({ type: "inter-app-comm-permission",
+                          chromeEventID: data.callerID,
+                          manifestURL: data.manifestURL,
+                          keyword: data.keyword,
+                          peers: data.appsToSelect });
+}, 'inter-app-comm-select-app', false);
+
+Services.obs.addObserver(function onFullscreenOriginChange(subject, topic, data) {
   shell.sendChromeEvent({ type: "fullscreenoriginchange",
-                          fullscreenorigin: aData });
+                          fullscreenorigin: data });
 }, "fullscreen-origin-change", false);
 
 Services.obs.addObserver(function onWebappsStart(subject, topic, data) {
@@ -699,6 +712,16 @@ var CustomEventManager = {
         break;
       case 'captive-portal-login-cancel':
         CaptivePortalLoginHelper.handleEvent(detail);
+        break;
+      case 'inter-app-comm-permission':
+        Services.obs.notifyObservers(null, 'inter-app-comm-select-app-result',
+          JSON.stringify({ callerID: detail.chromeEventID,
+                           keyword: detail.keyword,
+                           manifestURL: detail.manifestURL,
+                           selectedApps: detail.peers }));
+        break;
+      case 'inputmethod-update-layouts':
+        KeyboardHelper.handleEvent(detail);
         break;
     }
   }
@@ -1024,10 +1047,13 @@ let RemoteDebugger = {
       DebuggerServer.addActors('chrome://browser/content/dbg-browser-actors.js');
       DebuggerServer.addActors("resource://gre/modules/devtools/server/actors/webapps.js");
       DebuggerServer.registerModule("devtools/server/actors/device");
+      DebuggerServer.registerModule("devtools/server/actors/inspector")
 
+#ifdef MOZ_WIDGET_GONK
       DebuggerServer.onConnectionChange = function(what) {
         AdbController.updateState();
       }
+#endif
     }
 
     let path = Services.prefs.getCharPref("devtools.debugger.unix-domain-socket") ||
@@ -1051,6 +1077,12 @@ let RemoteDebugger = {
     }
   }
 }
+
+let KeyboardHelper = {
+  handleEvent: function keyboard_handleEvent(detail) {
+    Keyboard.setLayouts(detail.layouts);
+  }
+};
 
 // This is the backend for Gaia's screenshot feature.  Gaia requests a
 // screenshot by sending a mozContentEvent with detail.type set to
@@ -1189,6 +1221,15 @@ window.addEventListener('ContentStart', function update_onContentStart() {
 }, "audio-channel-changed", false);
 })();
 
+(function defaultVolumeChannelChangedTracker() {
+  Services.obs.addObserver(function(aSubject, aTopic, aData) {
+    shell.sendChromeEvent({
+      type: 'default-volume-channel-changed',
+      channel: aData
+    });
+}, "default-volume-channel-changed", false);
+})();
+
 (function visibleAudioChannelChangedTracker() {
   Services.obs.addObserver(function(aSubject, aTopic, aData) {
     shell.sendChromeEvent({
@@ -1301,3 +1342,56 @@ let SensorsListener = {
 
 SensorsListener.init();
 #endif
+
+// Calling this observer will cause a shutdown an a profile reset.
+// Use eg. : Services.obs.notifyObservers(null, 'b2g-reset-profile', null);
+Services.obs.addObserver(function resetProfile(subject, topic, data) {
+  Services.obs.removeObserver(resetProfile, topic);
+
+  // Listening for 'profile-before-change2' which is late in the shutdown
+  // sequence, but still has xpcom access.
+  Services.obs.addObserver(function clearProfile(subject, topic, data) {
+    Services.obs.removeObserver(clearProfile, topic);
+#ifdef MOZ_WIDGET_GONK
+    let json = Cc['@mozilla.org/file/local;1'].createInstance(Ci.nsIFile);
+    json.initWithPath('/system/b2g/webapps/webapps.json');
+    let toRemove = json.exists()
+      // This is a user build, just rm -r /data/local /data/b2g/mozilla
+      ? ['/data/local', '/data/b2g/mozilla']
+      // This is an eng build. We clear the profile and a set of files
+      // under /data/local.
+      : ['/data/b2g/mozilla',
+         '/data/local/permissions.sqlite',
+         '/data/local/storage',
+         '/data/local/OfflineCache'];
+
+    toRemove.forEach(function(dir) {
+      try {
+        let file = Cc['@mozilla.org/file/local;1'].createInstance(Ci.nsIFile);
+        file.initWithPath(dir);
+        file.remove(true);
+      } catch(e) { dump(e); }
+    });
+#else
+    // Desktop builds.
+    let profile = Services.dirsvc.get('ProfD', Ci.nsIFile);
+
+    // We don't want to remove everything from the profile, since this
+    // would prevent us from starting up.
+    let whitelist = ['defaults', 'extensions', 'settings.json',
+                     'user.js', 'webapps'];
+    let enumerator = profile.directoryEntries;
+    while (enumerator.hasMoreElements()) {
+      let file = enumerator.getNext().QueryInterface(Ci.nsIFile);
+      if (whitelist.indexOf(file.leafName) == -1) {
+        file.remove(true);
+      }
+    }
+#endif
+  },
+  'profile-before-change2', false);
+
+  let appStartup = Cc['@mozilla.org/toolkit/app-startup;1']
+                     .getService(Ci.nsIAppStartup);
+  appStartup.quit(Ci.nsIAppStartup.eForceQuit);
+}, 'b2g-reset-profile', false);

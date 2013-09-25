@@ -127,8 +127,8 @@ struct Zone : public JS::shadow::Zone,
 
     void setNeedsBarrier(bool needs, ShouldUpdateIon updateIon);
 
-    static size_t OffsetOfNeedsBarrier() {
-        return offsetof(Zone, needsBarrier_);
+    const bool *AddressOfNeedsBarrier() const {
+        return &needsBarrier_;
     }
 
   public:
@@ -289,7 +289,7 @@ struct Zone : public JS::shadow::Zone,
         return runtimeFromMainThread()->onOutOfMemory(p, nbytes);
     }
     void reportAllocationOverflow() {
-        js_ReportAllocationOverflow(NULL);
+        js_ReportAllocationOverflow(nullptr);
     }
 
     void markTypes(JSTracer *trc);

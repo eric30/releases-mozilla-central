@@ -21,6 +21,7 @@
 #include "mozilla/dom/quota/OriginOrPatternString.h"
 #include "mozilla/dom/quota/QuotaManager.h"
 #include "mozilla/dom/TabChild.h"
+#include "mozilla/Preferences.h"
 #include "mozilla/storage.h"
 #include "nsComponentManagerUtils.h"
 #include "nsCharSeparatedTokenizer.h"
@@ -43,8 +44,11 @@
 #include "IndexedDatabaseManager.h"
 #include "Key.h"
 #include "ProfilerHelpers.h"
+#include "nsNetUtil.h"
 
 #include "ipc/IndexedDBChild.h"
+
+#define PREF_INDEXEDDB_ENABLED "dom.indexedDB.enabled"
 
 USING_INDEXEDDB_NAMESPACE
 USING_QUOTA_NAMESPACE
@@ -56,6 +60,7 @@ using mozilla::dom::NonNull;
 using mozilla::dom::Optional;
 using mozilla::dom::TabChild;
 using mozilla::ErrorResult;
+using mozilla::Preferences;
 
 namespace {
 
@@ -148,7 +153,7 @@ IDBFactory::Create(nsPIDOMWindow* aWindow,
   factory->mContentParent = aContentParent;
 
   if (!IndexedDatabaseManager::IsMainProcess()) {
-    TabChild* tabChild = GetTabChildFrom(aWindow);
+    TabChild* tabChild = TabChild::GetFrom(aWindow);
     NS_ENSURE_TRUE(tabChild, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
     IndexedDBChild* actor = new IndexedDBChild(origin);
@@ -187,10 +192,8 @@ IDBFactory::Create(JSContext* aCx,
   nsCString origin;
   StoragePrivilege privilege;
   PersistenceType defaultPersistenceType;
-  nsresult rv =
-    QuotaManager::GetInfoFromWindow(nullptr, &group, &origin, &privilege,
-                                    &defaultPersistenceType);
-  NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+  QuotaManager::GetInfoForChrome(&group, &origin, &privilege,
+                                 &defaultPersistenceType);
 
   nsRefPtr<IDBFactory> factory = new IDBFactory();
   factory->mGroup = group;
@@ -227,6 +230,15 @@ IDBFactory::Create(ContentParent* aContentParent,
 
   NS_ASSERTION(!nsContentUtils::GetCurrentJSContext(), "Should be called from C++");
 
+  // We need to get this information before we push a null principal to avoid
+  // IsCallerChrome() assertion in quota manager.
+  nsCString group;
+  nsCString origin;
+  StoragePrivilege privilege;
+  PersistenceType defaultPersistenceType;
+  QuotaManager::GetInfoForChrome(&group, &origin, &privilege,
+                                 &defaultPersistenceType);
+
   nsCOMPtr<nsIPrincipal> principal =
     do_CreateInstance("@mozilla.org/nullprincipal;1");
   NS_ENSURE_TRUE(principal, NS_ERROR_FAILURE);
@@ -249,9 +261,13 @@ IDBFactory::Create(ContentParent* aContentParent,
 
   JSAutoCompartment ac(cx, global);
 
-  nsRefPtr<IDBFactory> factory;
-  rv = Create(cx, global, aContentParent, getter_AddRefs(factory));
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsRefPtr<IDBFactory> factory = new IDBFactory();
+  factory->mGroup = group;
+  factory->mASCIIOrigin = origin;
+  factory->mPrivilege = privilege;
+  factory->mDefaultPersistenceType = defaultPersistenceType;
+  factory->mOwningObject = global;
+  factory->mContentParent = aContentParent;
 
   mozilla::HoldJSObjects(factory.get());
   factory->mRootedOwningObject = true;
@@ -554,8 +570,6 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(IDBFactory)
   NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mOwningObject)
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
-DOMCI_DATA(IDBFactory, IDBFactory)
-
 nsresult
 IDBFactory::OpenInternal(const nsAString& aName,
                          int64_t aVersion,
@@ -602,22 +616,28 @@ IDBFactory::OpenInternal(const nsAString& aName,
     rv = openHelper->Init();
     NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
-    if (aPersistenceType == PERSISTENCE_TYPE_PERSISTENT) {
-      nsRefPtr<CheckPermissionsHelper> permissionHelper =
-        new CheckPermissionsHelper(openHelper, window);
-
-      QuotaManager* quotaManager = QuotaManager::Get();
-      NS_ASSERTION(quotaManager, "This should never be null!");
-
-      rv = quotaManager->
-        WaitForOpenAllowed(OriginOrPatternString::FromOrigin(aASCIIOrigin),
-                           Nullable<PersistenceType>(aPersistenceType),
-                           openHelper->Id(), permissionHelper);
+    if (!Preferences::GetBool(PREF_INDEXEDDB_ENABLED)) {
+      openHelper->SetError(NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR);
+      rv = openHelper->WaitForOpenAllowed();
     }
     else {
-      NS_ASSERTION(aPersistenceType == PERSISTENCE_TYPE_TEMPORARY, "Huh?");
+      if (mPrivilege != Chrome &&
+          aPersistenceType == PERSISTENCE_TYPE_PERSISTENT) {
+        nsRefPtr<CheckPermissionsHelper> permissionHelper =
+          new CheckPermissionsHelper(openHelper, window);
 
-      rv = openHelper->WaitForOpenAllowed();
+        QuotaManager* quotaManager = QuotaManager::Get();
+        NS_ASSERTION(quotaManager, "This should never be null!");
+
+        rv = quotaManager->
+          WaitForOpenAllowed(OriginOrPatternString::FromOrigin(aASCIIOrigin),
+                             Nullable<PersistenceType>(aPersistenceType),
+                             openHelper->Id(), permissionHelper);
+      }
+      else {
+        // Chrome and temporary storage doesn't need to check the permission.
+        rv = openHelper->WaitForOpenAllowed();
+      }
     }
     NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
   }

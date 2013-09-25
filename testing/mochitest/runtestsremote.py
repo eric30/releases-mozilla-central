@@ -31,7 +31,8 @@ class RemoteOptions(MochitestOptions):
 
     def __init__(self, automation, **kwargs):
         defaults = {}
-        MochitestOptions.__init__(self, automation)
+        self._automation = automation or Automation()
+        MochitestOptions.__init__(self)
 
         self.add_option("--remote-app-path", action="store",
                     type = "string", dest = "remoteAppPath",
@@ -118,16 +119,13 @@ class RemoteOptions(MochitestOptions):
         defaults["closeWhenDone"] = True
         defaults["testPath"] = ""
         defaults["app"] = None
+        defaults["utilityPath"] = None
 
         self.set_defaults(**defaults)
 
     def verifyRemoteOptions(self, options, automation):
         if not options.remoteTestRoot:
             options.remoteTestRoot = automation._devicemanager.getDeviceRoot()
-        productRoot = options.remoteTestRoot + "/" + automation._product
-
-        if (options.utilityPath == self._automation.DIST_BIN):
-            options.utilityPath = productRoot + "/bin"
 
         if options.remoteWebServer == None:
             if os.name != "nt":
@@ -161,10 +159,7 @@ class RemoteOptions(MochitestOptions):
 
         # Only reset the xrePath if it wasn't provided
         if (options.xrePath == None):
-            if (automation._product == "fennec"):
-                options.xrePath = productRoot + "/xulrunner"
-            else:
-                options.xrePath = options.utilityPath
+            options.xrePath = options.utilityPath
 
         if (options.pidFile != ""):
             f = open(options.pidFile, 'w')
@@ -233,9 +228,10 @@ class MochiRemote(Mochitest):
 
     def __init__(self, automation, devmgr, options):
         self._automation = automation
-        Mochitest.__init__(self, self._automation)
+        Mochitest.__init__(self)
         self._dm = devmgr
         self.runSSLTunnel = False
+        self.environment = self._automation.environment
         self.remoteProfile = options.remoteTestRoot + "/profile"
         self._automation.setRemoteProfile(self.remoteProfile)
         self.remoteLog = options.remoteLogFile
@@ -292,15 +288,15 @@ class MochiRemote(Mochitest):
         if options.xrePath == None:
             log.error("unable to find xulrunner path for %s, please specify with --xre-path", os.name)
             sys.exit(1)
-        paths.append("bin")
-        paths.append(os.path.join("..", "bin"))
 
         xpcshell = "xpcshell"
         if (os.name == "nt"):
             xpcshell += ".exe"
       
-        if (options.utilityPath):
-            paths.insert(0, options.utilityPath)
+        if options.utilityPath:
+            paths = [options.utilityPath, options.xrePath]
+        else:
+            paths = [options.xrePath]
         options.utilityPath = self.findPath(paths, xpcshell)
         if options.utilityPath == None:
             log.error("unable to find utility path for %s, please specify with --utility-path", os.name)
@@ -319,7 +315,7 @@ class MochiRemote(Mochitest):
             sys.exit(1)
 
         options.profilePath = tempfile.mkdtemp()
-        self.server = MochitestServer(localAutomation, options)
+        self.server = MochitestServer(options)
         self.server.start()
 
         if (options.pidFile != ""):
@@ -429,7 +425,7 @@ class MochiRemote(Mochitest):
         if fail_found:
             result = 1
         if not end_found:
-            log.error("missing end of test marker (process crashed?)")
+            log.error("Automation Error: Missing end of test marker (process crashed?)")
             result = 1
         return result
 
@@ -505,7 +501,8 @@ class MochiRemote(Mochitest):
             for key, value in browserEnv.items():
                 try:
                     value.index(',')
-                    log.error("Found a ',' in our value, unable to process value.")
+                    log.error("buildRobotiumConfig: browserEnv - Found a ',' in our value, unable to process value. key=%s,value=%s", key, value)
+                    log.error("browserEnv=%s", browserEnv)
                 except ValueError, e:
                     envstr += "%s%s=%s" % (delim, key, value)
                     delim = ","
@@ -522,7 +519,16 @@ class MochiRemote(Mochitest):
         self.buildRobotiumConfig(options, browserEnv)
         return browserEnv
 
-        
+    def runApp(self, *args, **kwargs):
+        """front-end automation.py's `runApp` functionality until FennecRunner is written"""
+
+        # automation.py/remoteautomation `runApp` takes the profile path,
+        # whereas runtest.py's `runApp` takes a mozprofile object.
+        if 'profileDir' not in kwargs and 'profile' in kwargs:
+            kwargs['profileDir'] = kwargs.pop('profile').profile
+
+        return self._automation.runApp(*args, **kwargs)
+
 def main():
     auto = RemoteAutomation(None, "fennec")
     parser = RemoteOptions(auto)

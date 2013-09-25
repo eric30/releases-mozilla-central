@@ -23,7 +23,7 @@
 #include "nsIWindowWatcher.h"
 #include "nsNetUtil.h"
 #include "nsRect.h"
-#include "nsStringGlue.h"
+#include "nsString.h"
 #include "nsWeakReference.h"
 #include "nsIWebBrowser.h"
 #include "nsIObserverService.h"
@@ -34,12 +34,12 @@
 #include "nsIDOMMouseEvent.h"
 #include "nsIDOMWheelEvent.h"
 #include "nsView.h"
-#include "nsGUIEvent.h"
 #include "nsViewManager.h"
 #include "nsIContentPolicy.h"
 #include "nsIDocShellTreeItem.h"
 #include "nsIContent.h"
 #include "nsITimer.h"
+#include "mozilla/MouseEvents.h"
 
 using namespace mozilla;
 
@@ -234,7 +234,7 @@ nsWidgetUtils::MouseMove(nsIDOMEvent* aDOMEvent)
       return NS_OK;
 
   nsEventStatus status;
-  widget::WheelEvent wheelEvent(true, NS_WHEEL_WHEEL, mWidget);
+  WheelEvent wheelEvent(true, NS_WHEEL_WHEEL, mWidget);
   wheelEvent.deltaMode = nsIDOMWheelEvent::DOM_DELTA_LINE;
   wheelEvent.deltaX = wheelEvent.lineOrPageDeltaX = dx;
   wheelEvent.deltaY = wheelEvent.lineOrPageDeltaY = dy;

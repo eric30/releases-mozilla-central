@@ -8,6 +8,7 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource:///modules/devtools/gDevTools.jsm");
 
 const {Simulator} = Cu.import("resource://gre/modules/devtools/Simulator.jsm")
+const {Devices} = Cu.import("resource://gre/modules/devtools/Devices.jsm");
 const {devtools} = Cu.import("resource://gre/modules/devtools/Loader.jsm", {});
 const {require} = devtools;
 
@@ -15,6 +16,7 @@ const {ConnectionManager, Connection} = require("devtools/client/connection-mana
 const ConnectionStore = require("devtools/app-manager/connection-store");
 const DeviceStore = require("devtools/app-manager/device-store");
 const simulatorsStore = require("devtools/app-manager/simulators-store");
+const adbStore = require("devtools/app-manager/builtin-adb-store");
 
 let UI = {
   init: function() {
@@ -46,6 +48,7 @@ let UI = {
       "device": new DeviceStore(this.connection),
       "connection": new ConnectionStore(this.connection),
       "simulators": simulatorsStore,
+      "adb": adbStore
     });
 
     let pre = document.querySelector("#logs > pre");
@@ -58,6 +61,9 @@ let UI = {
 
     this.template = new Template(document.body, this.store, Utils.l10n);
     this.template.start();
+
+    this._onSimulatorConnected = this._onSimulatorConnected.bind(this);
+    this._onSimulatorDisconnected = this._onSimulatorDisconnected.bind(this);
   },
 
   useFloatingScrollbarsIfNeeded: function() {
@@ -109,7 +115,7 @@ let UI = {
   },
 
   installSimulator: function() {
-    let url = Services.prefs.getCharPref("devtools.appmanager.simulatorInstallPage");
+    let url = "https://developer.mozilla.org/docs/Mozilla/Firefox_OS/Using_the_App_Manager#Simulator";
     window.open(url);
   },
 
@@ -133,13 +139,31 @@ let UI = {
         this.connection.log("Simulator ready. Connecting.");
         this.connection.port = port;
         this.connection.host = "localhost";
-        this.connection.once("connected", function() {
-          this.connection.log("Connected to simulator.");
-          this.connection.keepConnecting = false;
-        });
+        this.connection.once("connected",
+                             this._onSimulatorConnected);
+        this.connection.once("disconnected",
+                             this._onSimulatorDisconnected);
         this.connection.keepConnecting = true;
         this.connection.connect();
       });
     document.body.classList.remove("show-simulators");
+  },
+
+  _onSimulatorConnected: function() {
+    this.connection.log("Connected to simulator.");
+    this.connection.keepConnecting = false;
+  },
+
+  _onSimulatorDisconnected: function() {
+    this.connection.off("connected", this._onSimulatorConnected);
+  },
+
+  connectToAdbDevice: function(name) {
+    let device = Devices.getByName(name);
+    device.connect().then((port) => {
+      this.connection.host = "localhost";
+      this.connection.port = port;
+      this.connect();
+    });
   },
 }

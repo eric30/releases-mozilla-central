@@ -79,7 +79,10 @@ public:
     mClientBounds = aClientBounds;
     mTargetOrientation = aOrientation;
   }
-
+  void MarkSyncTransaction()
+  {
+    mSwapRequired = true;
+  }
   void AddEdit(const Edit& aEdit)
   {
     NS_ABORT_IF_FALSE(!Finished(), "forgot BeginTransaction?");
@@ -405,10 +408,12 @@ ShadowLayerForwarder::RemoveTexture(CompositableClient* aCompositable,
                                     uint64_t aTexture,
                                     TextureFlags aFlags)
 {
-  mTxn->AddEdit(OpRemoveTexture(nullptr,
-                aCompositable->GetIPDLActor(),
-                aTexture,
-                aFlags));
+  mTxn->AddEdit(OpRemoveTexture(nullptr, aCompositable->GetIPDLActor(),
+                                aTexture,
+                                aFlags));
+  if (!(aFlags & TEXTURE_DEALLOCATE_HOST)) {
+    mTxn->MarkSyncTransaction();
+  }
 }
 
 void
@@ -426,7 +431,6 @@ ShadowLayerForwarder::UpdatedTexture(CompositableClient* aCompositable,
     mTxn->AddNoSwapPaint(OpUpdateTexture(nullptr, aCompositable->GetIPDLActor(),
                                          aTexture->GetID(),
                                          region));
-
   }
 }
 
@@ -492,6 +496,12 @@ ShadowLayerForwarder::EndTransaction(InfallibleTArray<EditReply>* aReplies)
     common.isFixedPosition() = mutant->GetIsFixedPosition();
     common.fixedPositionAnchor() = mutant->GetFixedPositionAnchor();
     common.fixedPositionMargin() = mutant->GetFixedPositionMargins();
+    common.isStickyPosition() = mutant->GetIsStickyPosition();
+    if (mutant->GetIsStickyPosition()) {
+      common.stickyScrollContainerId() = mutant->GetStickyScrollContainerId();
+      common.stickyScrollRangeOuter() = mutant->GetStickyScrollRangeOuter();
+      common.stickyScrollRangeInner() = mutant->GetStickyScrollRangeInner();
+    }
     if (Layer* maskLayer = mutant->GetMaskLayer()) {
       common.maskLayerChild() = Shadow(maskLayer->AsShadowableLayer());
     } else {
@@ -587,8 +597,8 @@ ShadowLayerForwarder::OpenDescriptor(OpenMode aMode,
     return surf.forget();
   } case SurfaceDescriptor::TRGBImage: {
     const RGBImage& rgb = aSurface.get_RGBImage();
-    gfxASurface::gfxImageFormat rgbFormat
-      = static_cast<gfxASurface::gfxImageFormat>(rgb.rgbFormat());
+    gfxImageFormat rgbFormat
+      = static_cast<gfxImageFormat>(rgb.rgbFormat());
     uint32_t stride = gfxASurface::BytesPerPixel(rgbFormat) * rgb.picture().width;
     nsIntSize size(rgb.picture().width, rgb.picture().height);
     surf = new gfxImageSurface(rgb.data().get<uint8_t>(),
@@ -599,8 +609,8 @@ ShadowLayerForwarder::OpenDescriptor(OpenMode aMode,
   }
   case SurfaceDescriptor::TMemoryImage: {
     const MemoryImage& image = aSurface.get_MemoryImage();
-    gfxASurface::gfxImageFormat format
-      = static_cast<gfxASurface::gfxImageFormat>(image.format());
+    gfxImageFormat format
+      = static_cast<gfxImageFormat>(image.format());
     surf = new gfxImageSurface((unsigned char *)image.data(),
                                image.size(),
                                image.stride(),
@@ -657,13 +667,13 @@ ShadowLayerForwarder::GetDescriptorSurfaceImageFormat(
   }
 
   nsRefPtr<gfxASurface> surface = OpenDescriptor(aMode, aDescriptor);
-  NS_ENSURE_TRUE(surface, gfxASurface::ImageFormatUnknown);
+  NS_ENSURE_TRUE(surface, gfxImageFormatUnknown);
 
   nsRefPtr<gfxImageSurface> img = surface->GetAsImageSurface();
-  NS_ENSURE_TRUE(img, gfxASurface::ImageFormatUnknown);
+  NS_ENSURE_TRUE(img, gfxImageFormatUnknown);
 
   format = img->Format();
-  NS_ASSERTION(format != gfxASurface::ImageFormatUnknown,
+  NS_ASSERTION(format != gfxImageFormatUnknown,
                "ImageSurface RGB format should be known");
 
   *aSurface = surface.forget().get();
@@ -781,7 +791,7 @@ AutoOpenSurface::ImageFormat()
     nsRefPtr<gfxImageSurface> img = mSurface->GetAsImageSurface();
     if (img) {
       gfxImageFormat format = img->Format();
-      NS_ASSERTION(format != gfxASurface::ImageFormatUnknown,
+      NS_ASSERTION(format != gfxImageFormatUnknown,
                    "ImageSurface RGB format should be known");
 
       return format;

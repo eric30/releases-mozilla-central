@@ -6,6 +6,7 @@
 
 #include "nsLayoutUtils.h"
 
+#include "mozilla/BasicEvents.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Util.h"
 #include "nsPresContext.h"
@@ -22,7 +23,6 @@
 #include "nsPlaceholderFrame.h"
 #include "nsIScrollableFrame.h"
 #include "nsIDOMEvent.h"
-#include "nsGUIEvent.h"
 #include "nsDisplayList.h"
 #include "nsRegion.h"
 #include "nsFrameManager.h"
@@ -114,18 +114,6 @@ typedef FrameMetrics::ViewID ViewID;
 
 static ViewID sScrollIdCounter = FrameMetrics::START_SCROLL_ID;
 
-// These are indices into kDisplayKTable.  They'll be initialized
-// the first time that FlexboxEnabledPrefChangeCallback() is invoked.
-static int32_t sIndexOfFlexInDisplayTable;
-static int32_t sIndexOfInlineFlexInDisplayTable;
-// This tracks whether those ^^ indices have been initialized
-static bool sAreFlexKeywordIndicesInitialized = false;
-
-// This is an index into kPositionKTable. It will be initialized
-// the first time that StickyEnabledPrefChangeCallback() is invoked.
-static int32_t sIndexOfStickyInPositionTable;
-static bool sIsStickyKeywordIndexInitialized = false;
-
 typedef nsDataHashtable<nsUint64HashKey, nsIContent*> ContentMap;
 static ContentMap* sContentMap = nullptr;
 static ContentMap& GetContentMap() {
@@ -146,6 +134,10 @@ FlexboxEnabledPrefChangeCallback(const char* aPrefName, void* aClosure)
              "We only registered this callback for a single pref, so it "
              "should only be called for that pref");
 
+  static int32_t sIndexOfFlexInDisplayTable;
+  static int32_t sIndexOfInlineFlexInDisplayTable;
+  static bool sAreFlexKeywordIndicesInitialized; // initialized to false
+
   bool isFlexboxEnabled =
     Preferences::GetBool(FLEXBOX_ENABLED_PREF_NAME, false);
 
@@ -155,9 +147,14 @@ FlexboxEnabledPrefChangeCallback(const char* aPrefName, void* aClosure)
     sIndexOfFlexInDisplayTable =
       nsCSSProps::FindIndexOfKeyword(eCSSKeyword_flex,
                                      nsCSSProps::kDisplayKTable);
+    MOZ_ASSERT(sIndexOfFlexInDisplayTable >= 0,
+               "Couldn't find flex in kDisplayKTable");
+
     sIndexOfInlineFlexInDisplayTable =
       nsCSSProps::FindIndexOfKeyword(eCSSKeyword_inline_flex,
                                      nsCSSProps::kDisplayKTable);
+    MOZ_ASSERT(sIndexOfInlineFlexInDisplayTable >= 0,
+               "Couldn't find inline-flex in kDisplayKTable");
 
     sAreFlexKeywordIndicesInitialized = true;
   }
@@ -186,6 +183,9 @@ StickyEnabledPrefChangeCallback(const char* aPrefName, void* aClosure)
                      NS_ARRAY_LENGTH(STICKY_ENABLED_PREF_NAME)) == 0,
              "We only registered this callback for a single pref, so it "
              "should only be called for that pref");
+
+  static int32_t sIndexOfStickyInPositionTable;
+  static bool sIsStickyKeywordIndexInitialized; // initialized to false
 
   bool isStickyEnabled =
     Preferences::GetBool(STICKY_ENABLED_PREF_NAME, false);
@@ -552,10 +552,10 @@ nsLayoutUtils::GetCriticalDisplayPort(nsIContent* aContent, nsRect* aResult)
 }
 
 nsIFrame*
-nsLayoutUtils::GetLastContinuationWithChild(nsIFrame* aFrame)
+nsLayoutUtils::LastContinuationWithChild(nsIFrame* aFrame)
 {
   NS_PRECONDITION(aFrame, "NULL frame pointer");
-  aFrame = aFrame->GetLastContinuation();
+  aFrame = aFrame->LastContinuation();
   while (!aFrame->GetFirstPrincipalChild() &&
          aFrame->GetPrevContinuation()) {
     aFrame = aFrame->GetPrevContinuation();
@@ -606,13 +606,13 @@ GetLastChildFrame(nsIFrame*       aFrame,
 
   // Get the last continuation frame that's a parent
   nsIFrame* lastParentContinuation =
-    nsLayoutUtils::GetLastContinuationWithChild(aFrame);
+    nsLayoutUtils::LastContinuationWithChild(aFrame);
   nsIFrame* lastChildFrame =
     lastParentContinuation->GetLastChild(nsIFrame::kPrincipalList);
   if (lastChildFrame) {
     // Get the frame's first continuation. This matters in case the frame has
     // been continued across multiple lines or split by BiDi resolution.
-    lastChildFrame = lastChildFrame->GetFirstContinuation();
+    lastChildFrame = lastChildFrame->FirstContinuation();
 
     // If the last child frame is a pseudo-frame, then return its last child.
     // Note that the frame we create for the generated content is also a
@@ -2519,7 +2519,7 @@ nsLayoutUtils::GetNextContinuationOrSpecialSibling(nsIFrame *aFrame)
   if ((aFrame->GetStateBits() & NS_FRAME_IS_SPECIAL) != 0) {
     // We only store the "special sibling" annotation with the first
     // frame in the continuation chain. Walk back to find that frame now.
-    aFrame = aFrame->GetFirstContinuation();
+    aFrame = aFrame->FirstContinuation();
 
     void* value = aFrame->Properties().Get(nsIFrame::IBSplitSpecialSibling());
     return static_cast<nsIFrame*>(value);
@@ -2529,9 +2529,9 @@ nsLayoutUtils::GetNextContinuationOrSpecialSibling(nsIFrame *aFrame)
 }
 
 nsIFrame*
-nsLayoutUtils::GetFirstContinuationOrSpecialSibling(nsIFrame *aFrame)
+nsLayoutUtils::FirstContinuationOrSpecialSibling(nsIFrame *aFrame)
 {
-  nsIFrame *result = aFrame->GetFirstContinuation();
+  nsIFrame *result = aFrame->FirstContinuation();
   if (result->GetStateBits() & NS_FRAME_IS_SPECIAL) {
     while (true) {
       nsIFrame *f = static_cast<nsIFrame*>
@@ -4116,7 +4116,7 @@ nsLayoutUtils::DrawPixelSnapped(nsRenderingContext* aRenderingContext,
   gfxUtils::DrawPixelSnapped(ctx, aDrawable,
                              drawingParams.mUserSpaceToImageSpace, subimage,
                              sourceRect, imageRect, drawingParams.mFillRect,
-                             gfxASurface::ImageFormatARGB32, aFilter);
+                             gfxImageFormatARGB32, aFilter);
 }
 
 /* static */ nsresult
@@ -4628,17 +4628,17 @@ nsLayoutUtils::SurfaceFromElement(nsIImageLoadingContent* aElement,
   if (NS_FAILED(rv) || NS_FAILED(rv2))
     return result;
 
-  if (wantImageSurface && framesurf->GetType() != gfxASurface::SurfaceTypeImage) {
+  if (wantImageSurface && framesurf->GetType() != gfxSurfaceTypeImage) {
     forceCopy = true;
   }
 
   nsRefPtr<gfxASurface> gfxsurf = framesurf;
   if (forceCopy) {
     if (wantImageSurface) {
-      gfxsurf = new gfxImageSurface (gfxIntSize(imgWidth, imgHeight), gfxASurface::ImageFormatARGB32);
+      gfxsurf = new gfxImageSurface (gfxIntSize(imgWidth, imgHeight), gfxImageFormatARGB32);
     } else {
       gfxsurf = gfxPlatform::GetPlatform()->CreateOffscreenSurface(gfxIntSize(imgWidth, imgHeight),
-                                                                   gfxASurface::CONTENT_COLOR_ALPHA);
+                                                                   GFX_CONTENT_COLOR_ALPHA);
     }
 
     nsRefPtr<gfxContext> ctx = new gfxContext(gfxsurf);
@@ -4699,14 +4699,14 @@ nsLayoutUtils::SurfaceFromElement(HTMLCanvasElement* aElement,
       surf = nullptr;
   }
 
-  if (surf && wantImageSurface && surf->GetType() != gfxASurface::SurfaceTypeImage)
+  if (surf && wantImageSurface && surf->GetType() != gfxSurfaceTypeImage)
     surf = nullptr;
 
   if (!surf) {
     if (wantImageSurface) {
-      surf = new gfxImageSurface(size, gfxASurface::ImageFormatARGB32);
+      surf = new gfxImageSurface(size, gfxImageFormatARGB32);
     } else {
-      surf = gfxPlatform::GetPlatform()->CreateOffscreenSurface(size, gfxASurface::CONTENT_COLOR_ALPHA);
+      surf = gfxPlatform::GetPlatform()->CreateOffscreenSurface(size, GFX_CONTENT_COLOR_ALPHA);
     }
 
     if (!surf)
@@ -4767,9 +4767,9 @@ nsLayoutUtils::SurfaceFromElement(HTMLVideoElement* aElement,
   if (!surf)
     return result;
 
-  if (wantImageSurface && surf->GetType() != gfxASurface::SurfaceTypeImage) {
+  if (wantImageSurface && surf->GetType() != gfxSurfaceTypeImage) {
     nsRefPtr<gfxImageSurface> imgSurf =
-      new gfxImageSurface(size, gfxASurface::ImageFormatARGB32);
+      new gfxImageSurface(size, gfxImageFormatARGB32);
 
     nsRefPtr<gfxContext> ctx = new gfxContext(imgSurf);
     ctx->SetOperator(gfxContext::OPERATOR_SOURCE);
@@ -5460,3 +5460,73 @@ nsLayoutUtils::GetBoxShadowRectForFrame(nsIFrame* aFrame,
   return shadows;
 }
 
+/* static */ void
+nsLayoutUtils::UpdateImageVisibilityForFrame(nsIFrame* aImageFrame)
+{
+#ifdef DEBUG
+  nsIAtom* type = aImageFrame->GetType();
+  MOZ_ASSERT(type == nsGkAtoms::imageFrame ||
+             type == nsGkAtoms::imageControlFrame ||
+             type == nsGkAtoms::svgImageFrame, "wrong type of frame");
+#endif
+
+  nsCOMPtr<nsIImageLoadingContent> content = do_QueryInterface(aImageFrame->GetContent());
+  if (!content) {
+    return;
+  }
+
+  nsIPresShell* presShell = aImageFrame->PresContext()->PresShell();
+  if (presShell->AssumeAllImagesVisible()) {
+    presShell->EnsureImageInVisibleList(content);
+    return;
+  }
+
+  bool visible = true;
+  nsIFrame* f = aImageFrame->GetParent();
+  nsRect rect = aImageFrame->GetContentRectRelativeToSelf();
+  nsIFrame* rectFrame = aImageFrame;
+  while (f) {
+    nsIScrollableFrame* sf = do_QueryFrame(f);
+    if (sf) {
+      nsRect transformedRect =
+        nsLayoutUtils::TransformFrameRectToAncestor(rectFrame, rect, f);
+      if (!sf->IsRectNearlyVisible(transformedRect)) {
+        visible = false;
+        break;
+      }
+      // Move transformedRect to be contained in the scrollport as best we can
+      // (it might not fit) to pretend that it was scrolled into view.
+      nsRect scrollPort = sf->GetScrollPortRect();
+      if (transformedRect.XMost() > scrollPort.XMost()) {
+        transformedRect.x -= transformedRect.XMost() - scrollPort.XMost();
+      }
+      if (transformedRect.x < scrollPort.x) {
+        transformedRect.x = scrollPort.x;
+      }
+      if (transformedRect.YMost() > scrollPort.YMost()) {
+        transformedRect.y -= transformedRect.YMost() - scrollPort.YMost();
+      }
+      if (transformedRect.y < scrollPort.y) {
+        transformedRect.y = scrollPort.y;
+      }
+      transformedRect.width = std::min(transformedRect.width, scrollPort.width);
+      transformedRect.height = std::min(transformedRect.height, scrollPort.height);
+      rect = transformedRect;
+      rectFrame = f;
+    }
+    nsIFrame* parent = f->GetParent();
+    if (!parent) {
+      parent = nsLayoutUtils::GetCrossDocParentFrame(f);
+      if (parent && parent->PresContext()->IsChrome()) {
+        break;
+      }
+    }
+    f = parent;
+  }
+
+  if (visible) {
+    presShell->EnsureImageInVisibleList(content);
+  } else {
+    presShell->RemoveImageFromVisibleList(content);
+  }
+}

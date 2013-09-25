@@ -62,12 +62,19 @@ LIRGeneratorARM::lowerConstantDouble(double d, MInstruction *mir)
 }
 
 bool
+LIRGeneratorARM::lowerConstantFloat32(float d, MInstruction *mir)
+{
+    return define(new LFloat32(d), mir);
+}
+
+bool
 LIRGeneratorARM::visitConstant(MConstant *ins)
 {
-    if (ins->type() == MIRType_Double) {
-        LDouble *lir = new LDouble(ins->value().toDouble());
-        return define(lir, ins);
-    }
+    if (ins->type() == MIRType_Double)
+        return lowerConstantDouble(ins->value().toDouble(), ins);
+
+    if (ins->type() == MIRType_Float32)
+        return lowerConstantFloat32(ins->value().toDouble(), ins);
 
     // Emit non-double constants at their uses.
     if (ins->canEmitAtUses())
@@ -82,8 +89,9 @@ LIRGeneratorARM::visitBox(MBox *box)
     MDefinition *inner = box->getOperand(0);
 
     // If the box wrapped a double, it needs a new register.
-    if (inner->type() == MIRType_Double)
-        return defineBox(new LBoxDouble(useRegisterAtStart(inner), tempCopy(inner, 0)), box);
+    if (IsFloatingPointType(inner->type()))
+        return defineBox(new LBoxFloatingPoint(useRegisterAtStart(inner), tempCopy(inner, 0),
+                                               inner->type()), box);
 
     if (box->canEmitAtUses())
         return emitAtUses(box);
@@ -123,11 +131,11 @@ LIRGeneratorARM::visitUnbox(MUnbox *unbox)
     if (!ensureDefined(inner))
         return false;
 
-    if (unbox->type() == MIRType_Double) {
-        LUnboxDouble *lir = new LUnboxDouble();
+    if (IsFloatingPointType(unbox->type())) {
+        LUnboxFloatingPoint *lir = new LUnboxFloatingPoint(unbox->type());
         if (unbox->fallible() && !assignSnapshot(lir, unbox->bailoutKind()))
             return false;
-        if (!useBox(lir, LUnboxDouble::Input, inner))
+        if (!useBox(lir, LUnboxFloatingPoint::Input, inner))
             return false;
         return define(lir, unbox);
     }

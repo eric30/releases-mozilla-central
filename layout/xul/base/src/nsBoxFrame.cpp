@@ -67,6 +67,8 @@
 // Needed for Print Preview
 #include "nsIURI.h"
 
+#include "mozilla/TouchEvents.h"
+
 using namespace mozilla;
 using namespace mozilla::dom;
 
@@ -1236,6 +1238,13 @@ nsBoxFrame::AttributeChanged(int32_t aNameSpaceID,
   // The old value has been unregistered in nsXULElement::SetAttr
   else if (aAttribute == nsGkAtoms::accesskey) {
     RegUnregAccessKey(true);
+  }
+  else if (aAttribute == nsGkAtoms::rows &&
+           tag == nsGkAtoms::tree) {
+    // Reflow ourselves and all our children if "rows" changes, since
+    // nsTreeBodyFrame's layout reads this from its parent (this frame).
+    PresContext()->PresShell()->
+      FrameNeedsReflow(this, nsIPresShell::eStyleChange, NS_FRAME_IS_DIRTY);
   }
 
   return rv;

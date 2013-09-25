@@ -57,44 +57,6 @@ private:
   bool mHeld;
 };
 
-template<class T>
-class SelfCountedReference {
-public:
-  SelfCountedReference() : mRefCnt(0) {}
-  ~SelfCountedReference()
-  {
-    NS_ASSERTION(mRefCnt == 0, "Forgot to drop the self reference?");
-  }
-
-  void Take(T* t)
-  {
-    if (mRefCnt++ == 0) {
-      t->AddRef();
-    }
-  }
-  void Drop(T* t)
-  {
-    if (mRefCnt > 0) {
-      --mRefCnt;
-      if (mRefCnt == 0) {
-        t->Release();
-      }
-    }
-  }
-  void ForceDrop(T* t)
-  {
-    if (mRefCnt > 0) {
-      mRefCnt = 0;
-      t->Release();
-    }
-  }
-
-  operator bool() const { return mRefCnt > 0; }
-
-private:
-  nsrefcnt mRefCnt;
-};
-
 /**
  * The DOM object representing a Web Audio AudioNode.
  *
@@ -102,9 +64,9 @@ private:
  * real-time processing and output of this AudioNode.
  *
  * We track the incoming and outgoing connections to other AudioNodes.
- * Outgoing connections have strong ownership.  Also, AudioNodes add self
- * references if they produce sound on their output even when they have silent
- * or no input.
+ * Outgoing connections have strong ownership.  Also, AudioNodes that will
+ * produce sound on their output even when they have silent or no input ask
+ * the AudioContext to keep them alive until the context is finished.
  */
 class AudioNode : public nsDOMEventTargetHelper,
                   public EnableWebAudioCheck
@@ -127,6 +89,10 @@ public:
                                            nsDOMEventTargetHelper)
 
   virtual AudioBufferSourceNode* AsAudioBufferSourceNode() {
+    return nullptr;
+  }
+
+  virtual const DelayNode* AsDelayNode() const {
     return nullptr;
   }
 
@@ -208,10 +174,29 @@ public:
   {
     return mInputNodes;
   }
+  const nsTArray<nsRefPtr<AudioNode> >& OutputNodes() const
+  {
+    return mOutputNodes;
+  }
+  const nsTArray<nsRefPtr<AudioParam> >& OutputParams() const
+  {
+    return mOutputParams;
+  }
 
   void RemoveOutputParam(AudioParam* aParam);
 
   virtual void NotifyInputConnected() {}
+
+  // MarkActive() asks the context to keep the AudioNode alive until the
+  // context is finished.  This takes care of "playing" references and
+  // "tail-time" references.
+  void MarkActive() { Context()->RegisterActiveNode(this); }
+  // Active nodes call MarkInactive() when they have finished producing sound
+  // for the foreseeable future.
+  // Do not call MarkInactive from a node destructor.  If the destructor is
+  // called, then the node is already inactive.
+  // MarkInactive() may delete |this|.
+  void MarkInactive() { Context()->UnregisterActiveNode(this); }
 
 private:
   friend class AudioBufferSourceNode;

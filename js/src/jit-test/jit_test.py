@@ -63,13 +63,13 @@ def main(argv):
                   help='Run all tests with valgrind, if valgrind is in $PATH.')
     op.add_option('--jitflags', dest='jitflags', default='',
                   help='Example: --jitflags=m,mn to run each test with "-m" and "-m -n" [default="%default"]. ' +
-                       'Long flags, such as "--no-jm", should be set using --args.')
+                       'Long flags, such as "--ion-eager", should be set using --args.')
     op.add_option('--avoid-stdio', dest='avoid_stdio', action='store_true',
                   help='Use js-shell file indirection instead of piping stdio.')
     op.add_option('--write-failure-output', dest='write_failure_output', action='store_true',
                   help='With --write-failures=FILE, additionally write the output of failed tests to [FILE]')
     op.add_option('--ion', dest='ion', action='store_true',
-                  help='Run tests once with --ion-eager and once with --no-jm (ignores --jitflags)')
+                  help='Run tests once with --ion-eager and once with --baseline-eager (ignores --jitflags)')
     op.add_option('--tbpl', dest='tbpl', action='store_true',
                   help='Run tests with all IonMonkey option combinations (ignores --jitflags)')
     op.add_option('-j', '--worker-count', dest='max_jobs', type=int, default=max_jobs_default,
@@ -193,7 +193,7 @@ def main(argv):
     prefix = [os.path.abspath(args[0])] + shlex.split(options.shell_args)
     prolog = os.path.join(jittests.LIB_DIR, 'prolog.js')
     if options.remote:
-        prolog = posixpath.join(options.remote_test_root, 'jit-tests/lib/prolog.js')
+        prolog = posixpath.join(options.remote_test_root, 'jit-tests', 'jit-tests', 'lib', 'prolog.js')
 
     prefix += ['-f', prolog]
     if options.debug:

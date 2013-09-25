@@ -52,7 +52,7 @@
  *  Mihai Sucan (Mozilla Corp.)
  */
 
-const {Cc, Ci, Cu} = require("chrome");
+const {components, Cc, Ci, Cu} = require("chrome");
 loader.lazyImporter(this, "NetUtil", "resource://gre/modules/NetUtil.jsm");
 
 /**
@@ -244,7 +244,7 @@ let NetworkHelper = {
       Ci.nsICachingChannel.LOAD_BYPASS_LOCAL_CACHE_IF_BUSY;
 
     NetUtil.asyncFetch(channel, function (aInputStream, aStatusCode, aRequest) {
-      if (!Components.isSuccessCode(aStatusCode)) {
+      if (!components.isSuccessCode(aStatusCode)) {
         aCallback(null);
         return;
       }
@@ -420,7 +420,11 @@ let NetworkHelper = {
       return true;
     }
 
-    if (/^application\/[a-z-]+\+xml$/.test(aMimeType)) {
+    // XML and JSON often come with custom MIME types, so in addition to the
+    // standard "application/xml" and "application/json", we also look for
+    // variants like "application/x-bigcorp-xml" by checking for either string
+    // after any word boundary.
+    if (/^application\/[a-z-]+\b(xml|json)/.test(aMimeType)) {
       return true;
     }
 

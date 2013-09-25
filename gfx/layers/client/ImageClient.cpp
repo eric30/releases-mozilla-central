@@ -97,6 +97,28 @@ TextureInfo ImageClientSingle::GetTextureInfo() const
   return TextureInfo(COMPOSITABLE_IMAGE);
 }
 
+void
+ImageClientSingle::FlushImage()
+{
+  if (mFrontBuffer) {
+    RemoveTextureClient(mFrontBuffer);
+    mFrontBuffer = nullptr;
+  }
+}
+
+void
+ImageClientBuffered::FlushImage()
+{
+  if (mFrontBuffer) {
+    RemoveTextureClient(mFrontBuffer);
+    mFrontBuffer = nullptr;
+  }
+  if (mBackBuffer) {
+    RemoveTextureClient(mBackBuffer);
+    mBackBuffer = nullptr;
+  }
+}
+
 bool
 ImageClientSingle::UpdateImage(ImageContainer* aContainer,
                                uint32_t aContentFlags)
@@ -201,7 +223,7 @@ ImageClientSingle::UpdateImage(ImageContainer* aContainer,
 
     bool bufferCreated = false;
     if (!mFrontBuffer) {
-      gfxASurface::gfxImageFormat format
+      gfxImageFormat format
         = gfxPlatform::GetPlatform()->OptimalFormatForContent(surface->GetContentType());
       mFrontBuffer = CreateBufferTextureClient(gfx::ImageFormatToSurfaceFormat(format),
                                                TEXTURE_DEALLOCATE_HOST);
@@ -427,7 +449,7 @@ DeprecatedImageClientSingle::UpdateImage(ImageContainer* aContainer,
 void
 DeprecatedImageClientSingle::Updated()
 {
-  mForwarder->UpdateTexture(this, 1, mDeprecatedTextureClient->GetDescriptor());
+  mForwarder->UpdateTexture(this, 1, mDeprecatedTextureClient->LockSurfaceDescriptor());
 }
 
 ImageClientBridge::ImageClientBridge(CompositableForwarder* aFwd,

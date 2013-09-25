@@ -37,6 +37,8 @@ pref("layers.offmainthreadcomposition.enabled", true);
 pref("layers.async-pan-zoom.enabled", true);
 pref("layers.componentalpha.enabled", false);
 pref("gfx.azpc.touch_start_tolerance", "0.1"); // dpi * tolerance = pixel threshold
+pref("gfx.azpc.pan_repaint_interval", "50");   // prefer 20 fps
+pref("gfx.azpc.fling_repaint_interval", "50"); // prefer 20 fps
 pref("gfx.axis.fling_friction", "0.002");
 
 // Enable Microsoft TSF support by default for imes.
@@ -375,6 +377,9 @@ pref("geo.wifi.uri", "https://www.googleapis.com/geolocation/v1/geolocate?key=%G
 // JS error console
 pref("devtools.errorconsole.enabled", false);
 
+// snapped view
+pref("browser.ui.snapped.maxWidth", 600);
+
 // kinetic tweakables
 pref("browser.ui.kinetic.updateInterval", 16);
 pref("browser.ui.kinetic.exponentialC", 1400);
@@ -652,3 +657,10 @@ pref("full-screen-api.content-only", true);
 // the window, the window size doesn't change. This pref has no effect when
 // running in actual Metro mode, as the widget will already be fullscreen then.
 pref("full-screen-api.ignore-widgets", true);
+
+// image visibility prefs.
+// image visibility tries to only keep images near the viewport decoded instead
+// of keeping all images decoded.
+pref("layout.imagevisibility.enabled", true);
+pref("layout.imagevisibility.numscrollportwidths", 1);
+pref("layout.imagevisibility.numscrollportheights", 1);

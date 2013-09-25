@@ -593,14 +593,8 @@ HyperTextAccessible::DOMPointToHypertextOffset(nsINode* aNode,
     // addTextOffset, to put us after the embedded object char. We'll only treat the offset as
     // before the embedded object char if we end at the very beginning of the child.
     addTextOffset = addTextOffset > 0;
-    }
-    else {
-      // Start offset, inclusive
-      // Make sure the offset lands on the embedded object character in order to indicate
-      // the true inner offset is inside the subtree for that link
-      addTextOffset =
-        (nsAccUtils::TextLength(descendantAcc) == addTextOffset) ? 1 : 0;
-    }
+    } else
+      addTextOffset = 0;
 
     descendantAcc = parentAcc;
   }
@@ -781,7 +775,7 @@ HyperTextAccessible::FindOffset(int32_t aOffset, nsDirection aDirection,
       return -1;
 
     // We're on the last continuation since we're on the last character.
-    frameAtOffset = frameAtOffset->GetLastContinuation();
+    frameAtOffset = frameAtOffset->LastContinuation();
   }
 
   // Return hypertext offset of the boundary of the found word.

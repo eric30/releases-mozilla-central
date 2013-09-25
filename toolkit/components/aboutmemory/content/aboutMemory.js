@@ -48,11 +48,16 @@ XPCOMUtils.defineLazyGetter(this, "nsGzipConverter",
 let gMgr = Cc["@mozilla.org/memory-reporter-manager;1"]
              .getService(Ci.nsIMemoryReporterManager);
 
+// We need to know about "child-memory-reporter-update" events from child
+// processes.
+let gOs = Cc["@mozilla.org/observer-service;1"]
+            .getService(Ci.nsIObserverService);
+gOs.addObserver(updateAboutMemoryFromReporters,
+                "child-memory-reporter-update", false);
+
 let gUnnamedProcessStr = "Main Process";
 
 let gIsDiff = false;
-
-let gChildMemoryListener = undefined;
 
 //---------------------------------------------------------------------------
 
@@ -115,28 +120,10 @@ function debug(x)
 
 //---------------------------------------------------------------------------
 
-function addChildObserversAndUpdate(aUpdateFn)
-{
-  let os = Cc["@mozilla.org/observer-service;1"]
-             .getService(Ci.nsIObserverService);
-  os.notifyObservers(null, "child-memory-reporter-request", null);
-
-  gChildMemoryListener = aUpdateFn;
-  os.addObserver(gChildMemoryListener, "child-memory-reporter-update", false);
-
-  gChildMemoryListener();
-}
-
 function onUnload()
 {
-  // We need to check if the observer has been added before removing; in some
-  // circumstances (e.g. reloading the page quickly) it might not have because
-  // onLoad might not fire.
-  if (gChildMemoryListener) {
-    let os = Cc["@mozilla.org/observer-service;1"]
-               .getService(Ci.nsIObserverService);
-    os.removeObserver(gChildMemoryListener, "child-memory-reporter-update");
-  }
+  gOs.removeObserver(updateAboutMemoryFromReporters,
+                     "child-memory-reporter-update");
 }
 
 //---------------------------------------------------------------------------
@@ -144,32 +131,21 @@ function onUnload()
 /**
  * Iterates over each reporter.
  *
- * @param aIgnoreReporter
- *        Function that indicates if we should skip an entire reporter, based
- *        on its name.
- * @param aIgnoreReport
- *        Function that indicates if we should skip a single report from a
- *        reporter, based on its path.
  * @param aHandleReport
  *        The function that's called for each non-skipped report.
  */
-function processMemoryReporters(aIgnoreReporter, aIgnoreReport, aHandleReport)
+function processMemoryReporters(aHandleReport)
 {
   let handleReport = function(aProcess, aUnsafePath, aKind, aUnits,
                               aAmount, aDescription) {
-    if (!aIgnoreReport(aUnsafePath)) {
-      aHandleReport(aProcess, aUnsafePath, aKind, aUnits, aAmount,
-                    aDescription, /* presence = */ undefined);
-    }
+    aHandleReport(aProcess, aUnsafePath, aKind, aUnits, aAmount,
+                  aDescription, /* presence = */ undefined);
   }
 
   let e = gMgr.enumerateReporters();
   while (e.hasMoreElements()) {
     let mr = e.getNext().QueryInterface(Ci.nsIMemoryReporter);
-    if (!aIgnoreReporter(mr.name)) {
-      // |collectReports| never passes in a |presence| argument.
-      mr.collectReports(handleReport, null);
-    }
+    mr.collectReports(handleReport, null);
   }
 }
 
@@ -178,22 +154,17 @@ function processMemoryReporters(aIgnoreReporter, aIgnoreReport, aHandleReport)
  *
  * @param aReports
  *        Array of reports, read from a file or the clipboard.
- * @param aIgnoreReport
- *        Function that indicates if we should skip a single report, based
- *        on its path.
  * @param aHandleReport
  *        The function that's called for each report.
  */
-function processMemoryReportsFromFile(aReports, aIgnoreReport, aHandleReport)
+function processMemoryReportsFromFile(aReports, aHandleReport)
 {
   // Process each memory reporter with aHandleReport.
 
   for (let i = 0; i < aReports.length; i++) {
     let r = aReports[i];
-    if (!aIgnoreReport(r.path)) {
-      aHandleReport(r.process, r.path, r.kind, r.units, r.amount,
-                    r.description, r._presence);
-    }
+    aHandleReport(r.process, r.path, r.kind, r.units, r.amount,
+                  r.description, r._presence);
   }
 }
 
@@ -212,7 +183,6 @@ let gVerbose;
 // Values for the second argument to updateMainAndFooter.
 let HIDE_FOOTER = 0;
 let SHOW_FOOTER = 1;
-let IGNORE_FOOTER = 2;
 
 function updateMainAndFooter(aMsg, aFooterAction, aClassName)
 {
@@ -239,7 +209,6 @@ function updateMainAndFooter(aMsg, aFooterAction, aClassName)
   switch (aFooterAction) {
    case HIDE_FOOTER:   gFooter.classList.add('hidden');    break;
    case SHOW_FOOTER:   gFooter.classList.remove('hidden'); break;
-   case IGNORE_FOOTER:                                     break;
    default: assertInput(false, "bad footer action in updateMainAndFooter");
   }
 }
@@ -273,8 +242,7 @@ function appendElementWithText(aP, aTagName, aClassName, aText)
 
 //---------------------------------------------------------------------------
 
-const kTreeDescriptions = {
-  'explicit' :
+const explicitTreeDescription =
 "This tree covers explicit memory allocations by the application.  It includes \
 \n\n\
 * allocations made at the operating system level (via calls to functions such as \
@@ -291,69 +259,7 @@ and thread stacks. \
 \n\n\
 'explicit' is not guaranteed to cover every explicit allocation, but it does cover \
 most (including the entire heap), and therefore it is the single best number to \
-focus on when trying to reduce memory usage.",
-
-  'rss':
-"This tree shows how much space in physical memory each of the process's \
-mappings is currently using (the mapping's 'resident set size', or 'RSS'). \
-This is a good measure of the 'cost' of the mapping, although it does not \
-take into account the fact that shared libraries may be mapped by multiple \
-processes but appear only once in physical memory. \
-\n\n\
-Note that the 'rss' value here might not equal the value for 'resident' \
-under 'Other Measurements' because the two measurements are not taken at \
-exactly the same time.",
-
-  'pss':
-"This tree shows how much space in physical memory can be 'blamed' on this \
-process.  For each mapping, its 'proportional set size' (PSS) is the \
-mapping's resident size divided by the number of processes which use the \
-mapping.  So if a mapping is private to this process, its PSS should equal \
-its RSS.  But if a mapping is shared between three processes, its PSS in each \
-of the processes would be 1/3 its RSS.",
-
-  'size':
-"This tree shows how much virtual addres space each of the process's mappings \
-takes up (a.k.a. the mapping's 'vsize').  A mapping may have a large size but use \
-only a small amount of physical memory; the resident set size of a mapping is \
-a better measure of the mapping's 'cost'. \
-\n\n\
-Note that the 'size' value here might not equal the value for 'vsize' under \
-'Other Measurements' because the two measurements are not taken at exactly \
-the same time.",
-
-  'swap':
-"This tree shows how much space in the swap file each of the process's \
-mappings is currently using. Mappings which are not in the swap file (i.e., \
-nodes which would have a value of 0 in this tree) are omitted."
-};
-
-const kSectionNames = {
-  'explicit': 'Explicit Allocations',
-  'rss':      'Resident Set Size (RSS) Breakdown',
-  'pss':      'Proportional Set Size (PSS) Breakdown',
-  'size':     'Virtual Size Breakdown',
-  'swap':     'Swap Breakdown',
-  'other':    'Other Measurements'
-};
-
-const kSmapsTreeNames    = ['rss',  'pss',  'size',  'swap' ];
-const kSmapsTreePrefixes = ['rss/', 'pss/', 'size/', 'swap/'];
-
-function isExplicitPath(aUnsafePath)
-{
-  return aUnsafePath.startsWith("explicit/");
-}
-
-function isSmapsPath(aUnsafePath)
-{
-  for (let i = 0; i < kSmapsTreePrefixes.length; i++) {
-    if (aUnsafePath.startsWith(kSmapsTreePrefixes[i])) {
-      return true;
-    }
-  }
-  return false;
-}
+focus on when trying to reduce memory usage.";
 
 //---------------------------------------------------------------------------
 
@@ -530,7 +436,12 @@ function doMMU()
 
 function doMeasure()
 {
-  addChildObserversAndUpdate(updateAboutMemoryFromReporters);
+  // Notify any children that they should measure memory consumption, then
+  // update the page.  If any reports come back from children,
+  // updateAboutMemoryFromReporters() will be called again and the page will
+  // regenerate.
+  gOs.notifyObservers(null, "child-memory-reporter-request", null);
+  updateAboutMemoryFromReporters();
 }
 
 /**
@@ -546,8 +457,7 @@ function updateAboutMemoryFromReporters()
 
   try {
     // Process the reports from the memory reporters.
-    appendAboutMemoryMain(processMemoryReporters, gMgr.hasMozMallocUsableSize,
-                          /* forceShowSmaps = */ false);
+    appendAboutMemoryMain(processMemoryReporters, gMgr.hasMozMallocUsableSize);
 
   } catch (ex) {
     handleException(ex);
@@ -555,6 +465,9 @@ function updateAboutMemoryFromReporters()
 }
 
 // Increment this if the JSON format changes.
+//
+// If/when this changes to 2, the beLenient() function and its use can be
+// removed.
 var gCurrentFileFormatVersion = 1;
 
 /**
@@ -573,11 +486,10 @@ function updateAboutMemoryFromJSONObject(aObj)
                 "missing 'hasMozMallocUsableSize' property");
     assertInput(aObj.reports && aObj.reports instanceof Array,
                 "missing or non-array 'reports' property");
-    let process = function(aIgnoreReporter, aIgnoreReport, aHandleReport) {
-      processMemoryReportsFromFile(aObj.reports, aIgnoreReport, aHandleReport);
+    let process = function(aHandleReport) {
+      processMemoryReportsFromFile(aObj.reports, aHandleReport);
     }
-    appendAboutMemoryMain(process, aObj.hasMozMallocUsableSize,
-                          /* forceShowSmaps = */ true);
+    appendAboutMemoryMain(process, aObj.hasMozMallocUsableSize);
   } catch (ex) {
     handleException(ex);
   }
@@ -765,6 +677,8 @@ DReport.prototype = {
     //
     // In those cases, we just use the description from the first-encountered
     // one, which is what about:memory also does.
+    // (Note: reports with those paths are no longer generated, but allowing
+    // the descriptions to differ seems reasonable.)
   },
 
   merge: function(aJr) {
@@ -930,14 +844,10 @@ function PColl()
  *        file.
  * @param aHasMozMallocUsableSize
  *        Boolean indicating if moz_malloc_usable_size works.
- * @param aForceShowSmaps
- *        True if we should show the smaps memory reporters even if we're not
- *        in verbose mode.
  */
-function appendAboutMemoryMain(aProcessReports, aHasMozMallocUsableSize,
-                               aForceShowSmaps)
+function appendAboutMemoryMain(aProcessReports, aHasMozMallocUsableSize)
 {
-  let pcollsByProcess = getPCollsByProcess(aProcessReports, aForceShowSmaps);
+  let pcollsByProcess = getPCollsByProcess(aProcessReports);
 
   // Sort the processes.
   let processes = Object.keys(pcollsByProcess);
@@ -998,12 +908,9 @@ function appendAboutMemoryMain(aProcessReports, aHasMozMallocUsableSize,
  * @param aProcessReports
  *        Function that extracts the memory reports from the reporters or from
  *        file.
- * @param aForceShowSmaps
- *        True if we should show the smaps memory reporters even if we're not
- *        in verbose mode.
  * @return The table of PColls by process.
  */
-function getPCollsByProcess(aProcessReports, aForceShowSmaps)
+function getPCollsByProcess(aProcessReports)
 {
   let pcollsByProcess = {};
 
@@ -1012,49 +919,46 @@ function getPCollsByProcess(aProcessReports, aForceShowSmaps)
   // be in parentheses, so a ')' might appear after the '.'.)
   const gSentenceRegExp = /^[A-Z].*\.\)?$/m;
 
-  // Ignore the "smaps" reporter in non-verbose mode unless we're reading from
-  // a file or the clipboard.  (Note that reports from these reporters can
-  // reach here via a "content-child" reporter if they were in a child
-  // process.)
-  //
-  // Ignore any "redundant/"-prefixed reporters and reports, which are only
-  // used by telemetry.
-
-  function ignoreReporter(aName)
-  {
-    return (aName === "smaps" && !gVerbose.checked && !aForceShowSmaps) ||
-           aName.startsWith("redundant/");
-  }
-
-  function ignoreReport(aUnsafePath)
-  {
-    return (isSmapsPath(aUnsafePath) && !gVerbose.checked && !aForceShowSmaps) ||
-           aUnsafePath.startsWith("redundant/");
-  }
-
   function handleReport(aProcess, aUnsafePath, aKind, aUnits, aAmount,
                         aDescription, aPresence)
   {
-    if (isExplicitPath(aUnsafePath)) {
+    if (aUnsafePath.startsWith("explicit/")) {
       assertInput(aKind === KIND_HEAP || aKind === KIND_NONHEAP,
                   "bad explicit kind");
       assertInput(aUnits === UNITS_BYTES, "bad explicit units");
       assertInput(gSentenceRegExp.test(aDescription),
                   "non-sentence explicit description");
 
-    } else if (isSmapsPath(aUnsafePath)) {
-      assertInput(aKind === KIND_NONHEAP, "bad smaps kind");
-      assertInput(aUnits === UNITS_BYTES, "bad smaps units");
-      assertInput(aDescription !== "", "empty smaps description");
-
     } else {
-      assertInput(gSentenceRegExp.test(aDescription),
-                  "non-sentence other description");
+      const kLenientPrefixes =
+        ['rss/', 'pss/', 'size/', 'swap/', 'compartments/', 'ghost-windows/'];
+      let beLenient = function(aUnsafePath) {
+        for (let i = 0; i < kLenientPrefixes.length; i++) {
+          if (aUnsafePath.startsWith(kLenientPrefixes[i])) {
+            return true;
+          }
+        }
+        return false;
+      }
+
+      // In general, non-explicit reports should have a description that is a
+      // complete sentence.  However, we want to be able to read old saved
+      // reports, so we are lenient in a couple of situations where we used to
+      // allow non-sentence descriptions:
+      // - smaps reports (which were removed in bug 912165);
+      // - compartment and ghost-window reports (which had empty descriptions
+      //   prior to bug 911641).
+      if (!beLenient(aUnsafePath)) {
+        assertInput(gSentenceRegExp.test(aDescription),
+                    "non-sentence other description: " + aUnsafePath + ", " +
+                    aDescription);
+      }
     }
 
     assert(aPresence === undefined ||
            aPresence == DReport.PRESENT_IN_FIRST_ONLY ||
-           aPresence == DReport.PRESENT_IN_SECOND_ONLY);
+           aPresence == DReport.PRESENT_IN_SECOND_ONLY,
+           "bad presence");
 
     let process = aProcess === "" ? gUnnamedProcessStr : aProcess;
     let unsafeNames = aUnsafePath.split('/');
@@ -1112,7 +1016,7 @@ function getPCollsByProcess(aProcessReports, aForceShowSmaps)
     }
   }
 
-  aProcessReports(ignoreReporter, ignoreReport, handleReport);
+  aProcessReports(handleReport);
 
   return pcollsByProcess;
 }
@@ -1434,38 +1338,25 @@ function appendProcessAboutMemoryElements(aP, aProcess, aTrees, aDegenerates,
   let hasKnownHeapAllocated;
   {
     let treeName = "explicit";
-    let pre = appendSectionHeader(aP, kSectionNames[treeName]);
+    let pre = appendSectionHeader(aP, "Explicit Allocations");
     let t = aTrees[treeName];
     if (t) {
       fillInTree(t);
+      // Using the "heap-allocated" reporter here instead of
+      // nsMemoryReporterManager.heapAllocated goes against the usual pattern.
+      // But the "heap-allocated" node will go in the tree like the others, so
+      // we have to deal with it, and once we're dealing with it, it's easier
+      // to keep doing so rather than switching to the distinguished amount.
       hasKnownHeapAllocated =
         aDegenerates &&
         addHeapUnclassifiedNode(t, aDegenerates["heap-allocated"], aHeapTotal);
       sortTreeAndInsertAggregateNodes(t._amount, t);
-      t._description = kTreeDescriptions[treeName];
+      t._description = explicitTreeDescription;
       appendTreeElements(pre, t, aProcess, "");
       delete aTrees[treeName];
     }
     appendTextNode(aP, "\n");  // gives nice spacing when we cut and paste
   }
-
-  // The smaps trees, which are only present in aTrees in verbose mode or when
-  // we're reading from a file or the clipboard.
-  kSmapsTreeNames.forEach(function(aTreeName) {
-    // |t| will be undefined if we don't have any reports for the given
-    // unsafePath.
-    let t = aTrees[aTreeName];
-    if (t) {
-      let pre = appendSectionHeader(aP, kSectionNames[aTreeName]);
-      fillInTree(t);
-      sortTreeAndInsertAggregateNodes(t._amount, t);
-      t._description = kTreeDescriptions[aTreeName];
-      t._hideKids = true;   // smaps trees are always initially collapsed
-      appendTreeElements(pre, t, aProcess, "");
-      delete aTrees[aTreeName];
-      appendTextNode(aP, "\n");  // gives nice spacing when we cut and paste
-    }
-  });
 
   // Fill in and sort all the non-degenerate other trees.
   let otherTrees = [];
@@ -1494,7 +1385,7 @@ function appendProcessAboutMemoryElements(aP, aProcess, aTrees, aDegenerates,
   otherDegenerates.sort(TreeNode.compareUnsafeNames);
 
   // Now generate the elements, putting non-degenerate trees first.
-  let pre = appendSectionHeader(aP, kSectionNames['other']);
+  let pre = appendSectionHeader(aP, "Other Measurements");
   for (let i = 0; i < otherTrees.length; i++) {
     let t = otherTrees[i];
     appendTreeElements(pre, t, aProcess, "");
@@ -1845,7 +1736,9 @@ function appendTreeElements(aP, aRoot, aProcess, aPadText)
       tIsInvalid = true;
       let unsafePath = aUnsafeNames.join("/");
       gUnsafePathsWithInvalidValuesForThisProcess.push(unsafePath);
-      reportAssertionFailure("Invalid value for " + flipBackslashes(unsafePath));
+      reportAssertionFailure("Invalid value (" + aT._amount + " / " +
+                             aRoot._amount + ") for " +
+                             flipBackslashes(unsafePath));
     }
 
     // For non-leaf nodes, the entire sub-tree is put within a span so it can

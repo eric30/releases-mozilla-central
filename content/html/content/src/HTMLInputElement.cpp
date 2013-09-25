@@ -7,7 +7,6 @@
 
 #include "mozilla/DebugOnly.h"
 #include "mozilla/dom/Date.h"
-#include "mozilla/dom/HTMLInputElementBinding.h"
 #include "nsAsyncDOMEvent.h"
 #include "nsAttrValueInlines.h"
 
@@ -43,7 +42,6 @@
 #include "nsIServiceManager.h"
 #include "nsError.h"
 #include "nsIEditor.h"
-#include "nsGUIEvent.h"
 #include "nsIIOService.h"
 #include "nsDocument.h"
 #include "nsAttrValueOrString.h"
@@ -59,7 +57,10 @@
 #include "nsLayoutUtils.h"
 
 #include "nsIDOMMutationEvent.h"
-#include "nsMutationEvent.h"
+#include "mozilla/ContentEvents.h"
+#include "mozilla/MutationEvent.h"
+#include "mozilla/TextEvents.h"
+#include "mozilla/TouchEvents.h"
 #include "nsEventListenerManager.h"
 
 #include "nsRuleData.h"
@@ -102,6 +103,8 @@
 #include "nsIColorPicker.h"
 #include "nsIStringEnumerator.h"
 #include "HTMLSplitOnSpacesTokenizer.h"
+#include "nsIController.h"
+#include "nsIMIMEInfo.h"
 
 // input type=date
 #include "js/Date.h"
@@ -3009,7 +3012,7 @@ HTMLInputElement::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
   // DOMActivate that was dispatched directly, this will be set, but if we're
   // a DOMActivate dispatched from click handling, it will not be set.
   bool outerActivateEvent =
-    (NS_IS_MOUSE_LEFT_CLICK(aVisitor.mEvent) ||
+    (aVisitor.mEvent->IsLeftClickEvent() ||
      (aVisitor.mEvent->message == NS_UI_ACTIVATE && !mInInternalActivate));
 
   if (outerActivateEvent) {
@@ -3239,7 +3242,7 @@ HTMLInputElement::MaybeInitPickers(nsEventChainPostVisitor& aVisitor)
   // - it's the left mouse button.
   // We do not prevent non-trusted click because authors can already use
   // .click(). However, the pickers will follow the rules of popup-blocking.
-  if (NS_IS_MOUSE_LEFT_CLICK(aVisitor.mEvent) &&
+  if (aVisitor.mEvent->IsLeftClickEvent() &&
       !aVisitor.mEvent->mFlags.mDefaultPrevented) {
     if (mType == NS_FORM_INPUT_FILE) {
       return InitFilePicker(FILE_PICKER_FILE);
@@ -3293,7 +3296,7 @@ HTMLInputElement::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
   // the click.
   if (aVisitor.mEventStatus != nsEventStatus_eConsumeNoDefault &&
       !IsSingleLineTextControl(true) &&
-      NS_IS_MOUSE_LEFT_CLICK(aVisitor.mEvent) &&
+      aVisitor.mEvent->IsLeftClickEvent() &&
       !ShouldPreventDOMActivateDispatch(aVisitor.mEvent->originalTarget)) {
     nsUIEvent actEvent(aVisitor.mEvent->mFlags.mIsTrusted, NS_UI_ACTIVATE, 1);
 
@@ -4272,8 +4275,8 @@ HTMLInputElement::ParseAttribute(int32_t aNamespaceID,
         newType = aResult.GetEnumValue();
         if ((IsExperimentalMobileType(newType) &&
              !Preferences::GetBool("dom.experimental_forms", false)) ||
-            (newType == NS_FORM_INPUT_RANGE &&
-             !Preferences::GetBool("dom.experimental_forms_range", false)) ||
+            (newType == NS_FORM_INPUT_NUMBER &&
+             !Preferences::GetBool("dom.forms.number", false)) ||
             (newType == NS_FORM_INPUT_COLOR &&
              !Preferences::GetBool("dom.forms.color", false))) {
           newType = kInputDefaultType->value;
@@ -4504,6 +4507,11 @@ HTMLInputElement::SetSelectionRange(int32_t aSelectionStart,
       if (!aRv.Failed()) {
         aRv = textControlFrame->ScrollSelectionIntoView();
       }
+
+      nsContentUtils::DispatchTrustedEvent(OwnerDoc(),
+                                           static_cast<nsIDOMHTMLInputElement*>(this),
+                                           NS_LITERAL_STRING("select"), true,
+                                           false);
     }
   }
 }
@@ -4519,6 +4527,113 @@ HTMLInputElement::SetSelectionRange(int32_t aSelectionStart,
 
   SetSelectionRange(aSelectionStart, aSelectionEnd, direction, rv);
   return rv.ErrorCode();
+}
+
+void
+HTMLInputElement::SetRangeText(const nsAString& aReplacement, ErrorResult& aRv)
+{
+  if (!SupportsSetRangeText()) {
+    aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
+    return;
+  }
+
+  int32_t start, end;
+  aRv = GetSelectionRange(&start, &end);
+  if (aRv.Failed()) {
+    nsTextEditorState* state = GetEditorState();
+    if (state && state->IsSelectionCached()) {
+      start = state->GetSelectionProperties().mStart;
+      end = state->GetSelectionProperties().mEnd;
+      aRv = NS_OK;
+    }
+  }
+
+  SetRangeText(aReplacement, start, end, mozilla::dom::SelectionMode::Preserve,
+               aRv, start, end);
+}
+
+void
+HTMLInputElement::SetRangeText(const nsAString& aReplacement, uint32_t aStart,
+                               uint32_t aEnd, const SelectionMode& aSelectMode,
+                               ErrorResult& aRv, int32_t aSelectionStart,
+                               int32_t aSelectionEnd)
+{
+  if (!SupportsSetRangeText()) {
+    aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
+    return;
+  }
+
+  if (aStart > aEnd) {
+    aRv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
+    return;
+  }
+
+  nsAutoString value;
+  GetValueInternal(value);
+  uint32_t inputValueLength = value.Length();
+
+  if (aStart > inputValueLength) {
+    aStart = inputValueLength;
+  }
+
+  if (aEnd > inputValueLength) {
+    aEnd = inputValueLength;
+  }
+
+  if (aSelectionStart == -1 && aSelectionEnd == -1) {
+      aRv = GetSelectionRange(&aSelectionStart, &aSelectionEnd);
+      if (aRv.Failed()) {
+        nsTextEditorState* state = GetEditorState();
+        if (state && state->IsSelectionCached()) {
+          aSelectionStart = state->GetSelectionProperties().mStart;
+          aSelectionEnd = state->GetSelectionProperties().mEnd;
+          aRv = NS_OK;
+        }
+      }
+  }
+
+  if (aStart < aEnd) {
+    value.Replace(aStart, aEnd - aStart, aReplacement);
+    SetValueInternal(value, false, false);
+  }
+
+  uint32_t newEnd = aStart + aReplacement.Length();
+  int32_t delta =  aReplacement.Length() - (aEnd - aStart);
+
+  switch (aSelectMode) {
+    case mozilla::dom::SelectionMode::Select:
+    {
+      aSelectionStart = aStart;
+      aSelectionEnd = newEnd;
+    }
+    break;
+    case mozilla::dom::SelectionMode::Start:
+    {
+      aSelectionStart = aSelectionEnd = aStart;
+    }
+    break;
+    case mozilla::dom::SelectionMode::End:
+    {
+      aSelectionStart = aSelectionEnd = newEnd;
+    }
+    break;
+    case mozilla::dom::SelectionMode::Preserve:
+    {
+      if ((uint32_t)aSelectionStart > aEnd)
+        aSelectionStart += delta;
+      else if ((uint32_t)aSelectionStart > aStart)
+       aSelectionStart = aStart;
+
+      if ((uint32_t)aSelectionEnd > aEnd)
+        aSelectionEnd += delta;
+      else if ((uint32_t)aSelectionEnd > aStart)
+        aSelectionEnd = newEnd;
+    }
+    break;
+  }
+
+  Optional<nsAString> direction;
+  SetSelectionRange(aSelectionStart, aSelectionEnd, direction, aRv);
 }
 
 int32_t
@@ -6096,7 +6211,7 @@ HTMLInputElement::IsValidEmailAddressList(const nsAString& aValue)
     }
   }
 
-  return !tokenizer.lastTokenEndedWithSeparator();
+  return !tokenizer.separatorAfterCurrentToken();
 }
 
 //static

@@ -9,7 +9,7 @@
 #include "nsIAndroidBridge.h"
 #include "nsIDOMKeyEvent.h"
 #include "nsIWidget.h"
-#include "nsGUIEvent.h"
+#include "mozilla/TouchEvents.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -61,6 +61,7 @@ jfieldID AndroidGeckoEvent::jScreenOrientationField = 0;
 jfieldID AndroidGeckoEvent::jByteBufferField = 0;
 jfieldID AndroidGeckoEvent::jWidthField = 0;
 jfieldID AndroidGeckoEvent::jHeightField = 0;
+jfieldID AndroidGeckoEvent::jPrefNamesField = 0;
 
 jclass AndroidGeckoEvent::jDomKeyLocationClass = 0;
 jfieldID AndroidGeckoEvent::jDomKeyLocationValueField = 0;
@@ -204,6 +205,7 @@ AndroidGeckoEvent::InitGeckoEventClass(JNIEnv *jEnv)
     jByteBufferField = getField("mBuffer", "Ljava/nio/ByteBuffer;");
     jWidthField = getField("mWidth", "I");
     jHeightField = getField("mHeight", "I");
+    jPrefNamesField = getField("mPrefNames", "[Ljava/lang/String;");
 
     // Init GeckoEvent.DomKeyLocation enum
     jDomKeyLocationClass = getClassGlobalRef("org/mozilla/gecko/GeckoEvent$DomKeyLocation");
@@ -414,6 +416,21 @@ AndroidGeckoEvent::ReadFloatArray(nsTArray<float> &aVals,
 }
 
 void
+AndroidGeckoEvent::ReadStringArray(nsTArray<nsString> &array,
+                                   JNIEnv *jenv,
+                                   jfieldID field)
+{
+    jarray jArray = (jarray)jenv->GetObjectField(wrapped_obj, field);
+    jsize length = jenv->GetArrayLength(jArray);
+    jobjectArray jStringArray = (jobjectArray)jArray;
+    nsString *strings = array.AppendElements(length);
+    for (jsize i = 0; i < length; ++i) {
+        jstring javastring = (jstring) jenv->GetObjectArrayElement(jStringArray, i);
+        ReadStringFromJString(strings[i], jenv, javastring);
+    }
+}
+
+void
 AndroidGeckoEvent::ReadRectField(JNIEnv *jenv)
 {
     AndroidRect r(jenv, jenv->GetObjectField(wrappedObject(), jRectField));
@@ -428,45 +445,38 @@ AndroidGeckoEvent::ReadRectField(JNIEnv *jenv)
 }
 
 void
-AndroidGeckoEvent::ReadCharactersField(JNIEnv *jenv)
+AndroidGeckoEvent::ReadStringFromJString(nsString &aString, JNIEnv *jenv,
+                                         jstring s)
 {
-    jstring s = (jstring) jenv->GetObjectField(wrapped_obj, jCharactersField);
     if (!s) {
-        mCharacters.SetIsVoid(true);
+        aString.SetIsVoid(true);
         return;
     }
 
     int len = jenv->GetStringLength(s);
-    mCharacters.SetLength(len);
-    jenv->GetStringRegion(s, 0, len, mCharacters.BeginWriting());
+    aString.SetLength(len);
+    jenv->GetStringRegion(s, 0, len, aString.BeginWriting());
+}
+
+void
+AndroidGeckoEvent::ReadCharactersField(JNIEnv *jenv)
+{
+    jstring s = (jstring) jenv->GetObjectField(wrapped_obj, jCharactersField);
+    ReadStringFromJString(mCharacters, jenv, s);
 }
 
 void
 AndroidGeckoEvent::ReadCharactersExtraField(JNIEnv *jenv)
 {
     jstring s = (jstring) jenv->GetObjectField(wrapped_obj, jCharactersExtraField);
-    if (!s) {
-        mCharactersExtra.SetIsVoid(true);
-        return;
-    }
-
-    int len = jenv->GetStringLength(s);
-    mCharactersExtra.SetLength(len);
-    jenv->GetStringRegion(s, 0, len, mCharactersExtra.BeginWriting());
+    ReadStringFromJString(mCharactersExtra, jenv, s);
 }
 
 void
 AndroidGeckoEvent::ReadDataField(JNIEnv *jenv)
 {
     jstring s = (jstring) jenv->GetObjectField(wrapped_obj, jDataField);
-    if (!s) {
-        mData.SetIsVoid(true);
-        return;
-    }
-
-    int len = jenv->GetStringLength(s);
-    mData.SetLength(len);
-    jenv->GetStringRegion(s, 0, len, mData.BeginWriting());
+    ReadStringFromJString(mData, jenv, s);
 }
 
 void
@@ -655,6 +665,18 @@ AndroidGeckoEvent::Init(JNIEnv *jenv, jobject jobj)
             break;
         }
 
+        case PREFERENCES_OBSERVE:
+        case PREFERENCES_GET: {
+            ReadStringArray(mPrefNames, jenv, jPrefNamesField);
+            mCount = jenv->GetIntField(jobj, jCountField);
+            break;
+        }
+
+        case PREFERENCES_REMOVE_OBSERVERS: {
+            mCount = jenv->GetIntField(jobj, jCountField);
+            break;
+        }
+
         default:
             break;
     }
@@ -735,12 +757,13 @@ AndroidGeckoEvent::MakeTouchEvent(nsIWidget* widget)
         // into Gecko (as opposed to going through the AsyncPanZoomController),
         // and the Points() array has points in CSS pixels, which we need
         // to convert.
+        CSSToLayoutDeviceScale scale = widget->GetDefaultScale();
         nsIntPoint pt(
-            (Points()[i].x * widget->GetDefaultScale()) - offset.x,
-            (Points()[i].y * widget->GetDefaultScale()) - offset.y);
+            (Points()[i].x * scale.scale) - offset.x,
+            (Points()[i].y * scale.scale) - offset.y);
         nsIntPoint radii(
-            PointRadii()[i].x * widget->GetDefaultScale(),
-            PointRadii()[i].y * widget->GetDefaultScale());
+            PointRadii()[i].x * scale.scale,
+            PointRadii()[i].y * scale.scale);
         nsRefPtr<Touch> t = new Touch(PointIndicies()[i],
                                       pt,
                                       radii,

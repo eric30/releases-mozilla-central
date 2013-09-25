@@ -17,6 +17,7 @@
 #include "mozilla/Services.h"
 #include "mozilla/StaticPtr.h"
 #include "nsIObserverService.h"
+#include "MainThreadUtils.h"
 
 using namespace mozilla;
 USING_BLUETOOTH_NAMESPACE
@@ -236,7 +237,7 @@ BluetoothHidManager::NotifyStatusChanged()
     BluetoothNamedValue(NS_LITERAL_STRING("address"), v));
 
   if (!BroadcastSystemMessage(type, parameters)) {
-    NS_WARNING("Failed to broadcast system message to settings");
+    BT_WARNING("Failed to broadcast system message to settings");
     return;
   }
 }

@@ -86,7 +86,6 @@
 #include "mozilla/Util.h"
 
 #include <math.h>
-#include <stdarg.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -128,7 +127,7 @@
 #include "nsXPIDLString.h"
 #include "nsAutoJSValHolder.h"
 
-#include "nsThreadUtils.h"
+#include "MainThreadUtils.h"
 #include "nsIJSEngineTelemetryStats.h"
 
 #include "nsIConsoleService.h"
@@ -765,6 +764,7 @@ public:
     void AddContextCallback(xpcContextCallback cb);
     void RemoveContextCallback(xpcContextCallback cb);
 
+    static JSContext* DefaultJSContextCallback(JSRuntime *rt);
     static void ActivityCallback(void *arg, bool active);
     static void CTypesActivityCallback(JSContext *cx,
                                        js::CTypesActivityType type);
@@ -786,7 +786,7 @@ private:
 
     void ReleaseIncrementally(nsTArray<nsISupports *> &array);
 
-    static const char* mStrings[IDX_TOTAL_COUNT];
+    static const char* const mStrings[IDX_TOTAL_COUNT];
     jsid mStrIDs[IDX_TOTAL_COUNT];
     jsval mStrJSVals[IDX_TOTAL_COUNT];
 
@@ -2705,7 +2705,7 @@ public:
     nsXPCWrappedJS* FindInherited(REFNSIID aIID);
 
     bool IsValid() const {return mJSObj != nullptr;}
-    void SystemIsBeingShutDown(JSRuntime* rt);
+    void SystemIsBeingShutDown();
 
     // This is used by XPCJSRuntime::GCCallback to find wrappers that no
     // longer root their JSObject and are only still alive because they
@@ -3086,7 +3086,6 @@ class XPCJSContextStack
 public:
     XPCJSContextStack()
       : mSafeJSContext(NULL)
-      , mOwnSafeJSContext(NULL)
     { }
 
     virtual ~XPCJSContextStack();
@@ -3119,7 +3118,6 @@ private:
 
     AutoInfallibleTArray<XPCJSContextInfo, 16> mStack;
     JSContext*  mSafeJSContext;
-    JSContext*  mOwnSafeJSContext;
 };
 
 /***************************************************************************/
@@ -3569,6 +3567,14 @@ xpc_GetSafeJSContext()
 
 namespace xpc {
 
+// JSNatives to expose atob and btoa in various non-DOM XPConnect scopes.
+bool
+Atob(JSContext *cx, unsigned argc, jsval *vp);
+
+bool
+Btoa(JSContext *cx, unsigned argc, jsval *vp);
+
+
 // Helper function that creates a JSFunction that wraps a native function that
 // forwards the call to the original 'callable'. If the 'doclone' argument is
 // set, it also structure clones non-native arguments for extra security.
@@ -3589,13 +3595,15 @@ bool
 IsSandbox(JSObject *obj);
 
 struct SandboxOptions {
-    struct DOMConstructors {
-        DOMConstructors() { mozilla::PodZero(this); }
+    struct GlobalProperties {
+        GlobalProperties() { mozilla::PodZero(this); }
         bool Parse(JSContext* cx, JS::HandleObject obj);
         bool Define(JSContext* cx, JS::HandleObject obj);
         bool XMLHttpRequest;
         bool TextDecoder;
         bool TextEncoder;
+        bool atob;
+        bool btoa;
     };
 
     SandboxOptions(JSContext *cx)
@@ -3613,7 +3621,7 @@ struct SandboxOptions {
     JS::RootedObject proto;
     nsCString sandboxName;
     JS::RootedObject sameZoneAs;
-    DOMConstructors DOMConstructors;
+    GlobalProperties GlobalProperties;
     JS::RootedValue metadata;
 };
 

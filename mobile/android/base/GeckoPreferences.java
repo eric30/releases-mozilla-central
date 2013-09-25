@@ -8,6 +8,7 @@ package org.mozilla.gecko;
 import org.mozilla.gecko.background.announcements.AnnouncementsConstants;
 import org.mozilla.gecko.background.common.GlobalConstants;
 import org.mozilla.gecko.background.healthreport.HealthReportConstants;
+import org.mozilla.gecko.preferences.SearchEnginePreference;
 import org.mozilla.gecko.util.GeckoEventListener;
 import org.mozilla.gecko.GeckoPreferenceFragment;
 import org.mozilla.gecko.util.ThreadUtils;
@@ -44,8 +45,11 @@ import android.text.TextWatcher;
 import android.util.Log;
 import android.view.MenuItem;
 import android.view.View;
+import android.widget.AdapterView;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ListAdapter;
+import android.widget.ListView;
 import android.widget.Toast;
 
 import java.util.ArrayList;
@@ -77,6 +81,7 @@ public class GeckoPreferences
     private static String PREFS_HEALTHREPORT_LINK = NON_PREF_PREFIX + "healthreport.link";
     private static String PREFS_DEVTOOLS_REMOTE_ENABLED = "devtools.debugger.remote-enabled";
     private static String PREFS_DISPLAY_REFLOW_ON_ZOOM = "browser.zoom.reflowOnZoom";
+    private static String PREFS_SYNC = NON_PREF_PREFIX + "sync";
 
     public static String PREFS_RESTORE_SESSION = NON_PREF_PREFIX + "restoreSession3";
 
@@ -86,9 +91,15 @@ public class GeckoPreferences
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        // For fragment-capable devices, display the default fragment if no explicit fragment to show.
+
+        // For Android v11+ where we use Fragments (v11+ only due to bug 866352),
+        // check that PreferenceActivity.EXTRA_SHOW_FRAGMENT has been set
+        // (or set it) before super.onCreate() is called so Android can display
+        // the correct Fragment resource.
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.HONEYCOMB &&
             !getIntent().hasExtra(PreferenceActivity.EXTRA_SHOW_FRAGMENT)) {
+            // Set up the default fragment if there is no explicit fragment to show.
             setupTopLevelFragmentIntent();
         }
 
@@ -96,6 +107,10 @@ public class GeckoPreferences
 
         // Use setResourceToOpen to specify these extras.
         Bundle intentExtras = getIntent().getExtras();
+
+        // For versions of Android lower than Honeycomb, use xml resources instead of
+        // Fragments because of an Android bug in ActionBar (described in bug 866352 and
+        // fixed in bug 833625).
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.HONEYCOMB) {
             int res = 0;
             if (intentExtras != null && intentExtras.containsKey(INTENT_EXTRA_RESOURCES)) {
@@ -117,6 +132,25 @@ public class GeckoPreferences
         }
 
         registerEventListener("Sanitize:Finished");
+
+        // Add handling for long-press click.
+        // This is only for Android 3.0 and below (which use the long-press-context-menu paradigm).
+        final ListView mListView = getListView();
+        mListView.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
+            @Override
+            public boolean onItemLongClick(AdapterView<?> parent, View view, int position, long id) {
+                // Call long-click handler if it the item implements it.
+                final ListAdapter listAdapter = ((ListView) parent).getAdapter();
+                final Object listItem = listAdapter.getItem(position);
+
+                // Only SearchEnginePreference handles long clicks.
+                if (listItem instanceof SearchEnginePreference && listItem instanceof View.OnLongClickListener) {
+                    final View.OnLongClickListener longClickListener = (View.OnLongClickListener) listItem;
+                    return longClickListener.onLongClick(view);
+                }
+                return false;
+            }
+        });
 
         if (Build.VERSION.SDK_INT >= 14)
             getActionBar().setHomeButtonEnabled(true);
@@ -342,6 +376,11 @@ public class GeckoPreferences
                     CharSequence selectedEntry = listPref.getEntry();
                     listPref.setSummary(selectedEntry);
                     continue;
+                } else if (PREFS_SYNC.equals(key) && GeckoProfile.get(this).inGuestMode()) {
+                    // Don't show sync prefs while in guest mode.
+                    preferences.removePreference(pref);
+                    i--;
+                    continue;
                 }
 
                 // Some Preference UI elements are not actually preferences,
@@ -379,6 +418,11 @@ public class GeckoPreferences
         return sIsCharEncodingEnabled;
     }
 
+    public static void broadcastAction(final Context context, final Intent intent) {
+        fillIntentWithProfileInfo(context, intent);
+        context.sendBroadcast(intent, GlobalConstants.PER_ANDROID_PACKAGE_PERMISSION);
+    }
+
     /**
      * Broadcast an intent with <code>pref</code>, <code>branch</code>, and
      * <code>enabled</code> extras. This is intended to represent the
@@ -391,24 +435,23 @@ public class GeckoPreferences
                                            final String action,
                                            final String pref,
                                            final boolean value) {
-        final Intent intent = new Intent(action);
-        intent.setAction(action);
-        intent.putExtra("pref", pref);
-        intent.putExtra("branch", GeckoApp.PREFS_NAME);
-        intent.putExtra("enabled", value);
+        final Intent intent = new Intent(action)
+                .putExtra("pref", pref)
+                .putExtra("branch", GeckoApp.PREFS_NAME)
+                .putExtra("enabled", value);
+        broadcastAction(context, intent);
+    }
 
+    private static void fillIntentWithProfileInfo(final Context context, final Intent intent) {
         // There is a race here, but GeckoProfile returns the default profile
         // when Gecko is not explicitly running for a different profile.  In a
         // multi-profile world, this will need to be updated (possibly to
         // broadcast settings for all profiles).  See Bug 882182.
         GeckoProfile profile = GeckoProfile.get(context);
         if (profile != null) {
-            intent.putExtra("profileName", profile.getName());
-            intent.putExtra("profilePath", profile.getDir().getAbsolutePath());
+            intent.putExtra("profileName", profile.getName())
+                  .putExtra("profilePath", profile.getDir().getAbsolutePath());
         }
-
-        Log.d(LOGTAG, "Broadcast: " + action + ", " + pref + ", " + GeckoApp.PREFS_NAME + ", " + value);
-        context.sendBroadcast(intent, GlobalConstants.PER_ANDROID_PACKAGE_PERMISSION);
     }
 
     /**
@@ -449,6 +492,11 @@ public class GeckoPreferences
     public static void broadcastHealthReportUploadPref(final Context context) {
         final boolean value = getBooleanPref(context, PREFS_HEALTHREPORT_UPLOAD_ENABLED, true);
         broadcastHealthReportUploadPref(context, value);
+    }
+
+    public static void broadcastHealthReportPrune(final Context context) {
+        final Intent intent = new Intent(HealthReportConstants.ACTION_HEALTHREPORT_PRUNE);
+        broadcastAction(context, intent);
     }
 
     /**
@@ -676,9 +724,7 @@ public class GeckoPreferences
 
     // Initialize preferences by requesting the preference values from Gecko
     private int getGeckoPreferences(final PreferenceGroup screen, ArrayList<String> prefs) {
-        JSONArray jsonPrefs = new JSONArray(prefs);
-
-        return PrefsHelper.getPrefs(jsonPrefs, new PrefsHelper.PrefHandlerBase() {
+        return PrefsHelper.getPrefs(prefs, new PrefsHelper.PrefHandlerBase() {
             private Preference getField(String prefName) {
                 return screen.findPreference(prefName);
             }

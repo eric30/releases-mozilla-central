@@ -268,6 +268,8 @@ struct ThreadSafeContext : ContextFriendFields,
     FreeOp *defaultFreeOp() { return runtime_->defaultFreeOp(); }
     bool useHelperThreads() { return runtime_->useHelperThreads(); }
     size_t helperThreadCount() { return runtime_->helperThreadCount(); }
+    void *runtimeAddressForJit() { return runtime_; }
+    void *stackLimitAddress(StackKind kind) { return &runtime_->mainThread.nativeStackLimit[kind]; }
 
     // GCs cannot happen while non-main threads are running.
     uint64_t gcNumber() { return runtime_->gcNumber; }
@@ -496,7 +498,6 @@ struct JSContext : public js::ExclusiveContext,
     bool hasWErrorOption() const { return hasOption(JSOPTION_WERROR); }
 
     js::LifoAlloc &tempLifoAlloc() { return runtime()->tempLifoAlloc; }
-    inline js::LifoAlloc &analysisLifoAlloc();
 
 #ifdef JS_THREADSAFE
     unsigned            outstandingRequests;/* number of JS_BeginRequest calls

@@ -56,8 +56,8 @@ InspectorPanel.prototype = {
   _deferredOpen: function(defaultSelection) {
     let deferred = promise.defer();
 
-    this.onNavigatedAway = this.onNavigatedAway.bind(this);
-    this.target.on("navigate", this.onNavigatedAway);
+    this.onNewRoot = this.onNewRoot.bind(this);
+    this.walker.on("new-root", this.onNewRoot);
 
     this.nodemenu = this.panelDoc.getElementById("inspector-node-popup");
     this.lastNodemenuItem = this.nodemenu.lastChild;
@@ -168,7 +168,7 @@ InspectorPanel.prototype = {
     // as default selected, else set documentElement
     return walker.getRootNode().then(aRootNode => {
       rootNode = aRootNode;
-      return walker.querySelector(aRootNode, this.selectionCssSelector);
+      return walker.querySelector(rootNode, this.selectionCssSelector);
     }).then(front => {
       if (front) {
         return front;
@@ -292,9 +292,9 @@ InspectorPanel.prototype = {
   },
 
   /**
-   * Reset the inspector on navigate away.
+   * Reset the inspector on new root mutation.
    */
-  onNavigatedAway: function InspectorPanel_onNavigatedAway() {
+  onNewRoot: function InspectorPanel_onNewRoot() {
     this._defaultNode = null;
     this.selection.setNodeFront(null);
     this._destroyMarkup();
@@ -447,7 +447,15 @@ InspectorPanel.prototype = {
     if (this._destroyPromise) {
       return this._destroyPromise;
     }
+
+    if (this.highlighter) {
+      this.highlighter.off("locked", this.onLockStateChanged);
+      this.highlighter.off("unlocked", this.onLockStateChanged);
+      this.highlighter.destroy();
+    }
+
     if (this.walker) {
+      this.walker.off("new-root", this.onNewRoot);
       this._destroyPromise = this.walker.release().then(null, console.error);
       delete this.walker;
       delete this.pageStyle;
@@ -461,14 +469,6 @@ InspectorPanel.prototype = {
     if (this.browser) {
       this.browser.removeEventListener("resize", this.scheduleLayoutChange, true);
       this.browser = null;
-    }
-
-    this.target.off("navigate", this.onNavigatedAway);
-
-    if (this.highlighter) {
-      this.highlighter.off("locked", this.onLockStateChanged);
-      this.highlighter.off("unlocked", this.onLockStateChanged);
-      this.highlighter.destroy();
     }
 
     this.target.off("thread-paused", this.updateDebuggerPausedWarning);

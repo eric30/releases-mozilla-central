@@ -9,9 +9,8 @@ let Cu = Components.utils;
 
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-
-XPCOMUtils.defineLazyModuleGetter(this, "FormHistory",
-                                  "resource://gre/modules/FormHistory.jsm");
+Cu.import("resource://gre/modules/LoadContextInfo.jsm");
+Cu.import("resource://gre/modules/FormHistory.jsm");
 
 function dump(a) {
   Services.console.logStringMessage(a);
@@ -68,9 +67,9 @@ Sanitizer.prototype = {
     cache: {
       clear: function ()
       {
-        var cacheService = Cc["@mozilla.org/network/cache-service;1"].getService(Ci.nsICacheService);
+        var cache = Cc["@mozilla.org/netwerk/cache-storage-service;1"].getService(Ci.nsICacheStorageService);
         try {
-          cacheService.evictEntries(Ci.nsICache.STORE_ANYWHERE);
+          cache.clear();
         } catch(er) {}
 
         let imageCache = Cc["@mozilla.org/image/tools;1"].getService(Ci.imgITools)
@@ -126,9 +125,10 @@ Sanitizer.prototype = {
     offlineApps: {
       clear: function ()
       {
-        var cacheService = Cc["@mozilla.org/network/cache-service;1"].getService(Ci.nsICacheService);
+        var cacheService = Cc["@mozilla.org/netwerk/cache-storage-service;1"].getService(Ci.nsICacheStorageService);
+        var appCacheStorage = cacheService.appCacheStorage(LoadContextInfo.default, null);
         try {
-          cacheService.evictEntries(Ci.nsICache.STORE_OFFLINE);
+          appCacheStorage.asyncEvictStorage(null);
         } catch(er) {}
       },
 

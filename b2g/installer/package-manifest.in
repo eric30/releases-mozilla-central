@@ -119,6 +119,7 @@
 @BINPATH@/mozsqlt3@DLL_SUFFIX@
 #endif
 @BINPATH@/blocklist.xml
+@BINPATH@/ua-update.json
 #ifdef XP_UNIX
 #ifndef XP_MACOSX
 @BINPATH@/run-mozilla.sh
@@ -256,6 +257,7 @@
 @BINPATH@/components/mozfind.xpt
 @BINPATH@/components/necko_about.xpt
 @BINPATH@/components/necko_cache.xpt
+@BINPATH@/components/necko_cache2.xpt
 @BINPATH@/components/necko_cookie.xpt
 @BINPATH@/components/necko_dns.xpt
 @BINPATH@/components/necko_file.xpt
@@ -379,6 +381,8 @@
 @BINPATH@/components/PeerConnection.js
 @BINPATH@/components/PeerConnection.manifest
 #endif
+@BINPATH@/components/HttpDataUsage.manifest
+@BINPATH@/components/HttpDataUsage.js
 @BINPATH@/components/SiteSpecificUserAgent.js
 @BINPATH@/components/SiteSpecificUserAgent.manifest
 @BINPATH@/components/storage-Legacy.js
@@ -454,6 +458,9 @@
 @BINPATH@/components/SettingsManager.manifest
 @BINPATH@/components/SettingsService.js
 @BINPATH@/components/SettingsService.manifest
+@BINPATH@/components/webvtt.xpt
+@BINPATH@/components/WebVTT.manifest
+@BINPATH@/components/WebVTTParserWrapper.js
 #ifdef MOZ_B2G_RIL
 @BINPATH@/components/NetworkManager.manifest
 @BINPATH@/components/NetworkManager.js
@@ -474,6 +481,8 @@
 @BINPATH@/components/NetworkInterfaceListService.js
 @BINPATH@/components/TelephonyProvider.manifest
 @BINPATH@/components/TelephonyProvider.js
+@BINPATH@/components/NetworkStatsServiceProxy.manifest
+@BINPATH@/components/NetworkStatsServiceProxy.js
 #endif
 #ifdef MOZ_B2G_NFC
 @BINPATH@/components/nsNfc.manifest
@@ -514,6 +523,11 @@
 @BINPATH@/components/Push.js
 @BINPATH@/components/Push.manifest
 @BINPATH@/components/PushServiceLauncher.js
+
+@BINPATH@/components/InterAppComm.manifest
+@BINPATH@/components/InterAppCommService.js
+@BINPATH@/components/InterAppConnection.js
+@BINPATH@/components/InterAppMessagePort.js
 
 @BINPATH@/components/nsDOMIdentity.js
 @BINPATH@/components/nsIDService.js

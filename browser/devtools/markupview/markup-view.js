@@ -8,19 +8,22 @@ const {Cc, Cu, Ci} = require("chrome");
 
 // Page size for pageup/pagedown
 const PAGE_SIZE = 10;
-
 const PREVIEW_AREA = 700;
 const DEFAULT_MAX_CHILDREN = 100;
+const COLLAPSE_ATTRIBUTE_LENGTH = 120;
+const COLLAPSE_DATA_URL_REGEX = /^data.+base64/;
+const COLLAPSE_DATA_URL_LENGTH = 60;
+const CONTAINER_FLASHING_DURATION = 500;
 
-let {UndoStack} = require("devtools/shared/undo");
-let EventEmitter = require("devtools/shared/event-emitter");
-let {editableField, InplaceEditor} = require("devtools/shared/inplace-editor");
-let promise = require("sdk/core/promise");
+const {UndoStack} = require("devtools/shared/undo");
+const {editableField, InplaceEditor} = require("devtools/shared/inplace-editor");
+const {gDevTools} = Cu.import("resource:///modules/devtools/gDevTools.jsm", {});
+const {colorUtils} = require("devtools/css-color");
+const promise = require("sdk/core/promise");
 
 Cu.import("resource://gre/modules/devtools/LayoutHelpers.jsm");
 Cu.import("resource://gre/modules/devtools/Templater.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 loader.lazyGetter(this, "DOMParser", function() {
  return Cc["@mozilla.org/xmlextras/domparser;1"].createInstance(Ci.nsIDOMParser);
@@ -75,7 +78,7 @@ function MarkupView(aInspector, aFrame, aControllerWindow)
   this._containers = new WeakMap();
 
   this._boundMutationObserver = this._mutationObserver.bind(this);
-  this.walker.on("mutations", this._boundMutationObserver)
+  this.walker.on("mutations", this._boundMutationObserver);
 
   this._boundOnNewSelection = this._onNewSelection.bind(this);
   this._inspector.selection.on("new-node-front", this._boundOnNewSelection);
@@ -86,6 +89,9 @@ function MarkupView(aInspector, aFrame, aControllerWindow)
 
   this._boundFocus = this._onFocus.bind(this);
   this._frame.addEventListener("focus", this._boundFocus, false);
+
+  this._handlePrefChange = this._handlePrefChange.bind(this);
+  gDevTools.on("pref-changed", this._handlePrefChange);
 
   this._initPreview();
 }
@@ -110,6 +116,33 @@ MarkupView.prototype = {
   getContainer: function MT_getContainer(aNode)
   {
     return this._containers.get(aNode);
+  },
+
+  _handlePrefChange: function(event, data) {
+    if (data.pref == "devtools.defaultColorUnit") {
+      this.update();
+    }
+  },
+
+  update: function() {
+    let updateChildren = function(node) {
+      this.getContainer(node).update();
+      for (let child of node.treeChildren()) {
+        updateChildren(child);
+      }
+    }.bind(this);
+
+    // Start with the documentElement
+    let documentElement;
+    for (let node of this._rootNode.treeChildren()) {
+      if (node.isDocumentElement === true) {
+        documentElement = node;
+        break;
+      }
+    }
+
+    // Recursively update each node starting with documentElement.
+    updateChildren(documentElement);
   },
 
   /**
@@ -192,7 +225,8 @@ MarkupView.prototype = {
         }
         break;
       case Ci.nsIDOMKeyEvent.DOM_VK_RIGHT:
-        if (!this._selectedContainer.expanded) {
+        if (!this._selectedContainer.expanded &&
+            this._selectedContainer.hasChildren) {
           this._expandContainer(this._selectedContainer);
         } else {
           let next = this._selectionWalker().nextNode();
@@ -324,9 +358,11 @@ MarkupView.prototype = {
    *
    * @param DOMNode aNode
    *        The node in the content document.
+   * @param boolean aFlashNode
+   *        Whether the newly imported node should be flashed
    * @returns MarkupContainer The MarkupContainer object for this element.
    */
-  importNode: function MT_importNode(aNode)
+  importNode: function MT_importNode(aNode, aFlashNode)
   {
     if (!aNode) {
       return null;
@@ -342,6 +378,9 @@ MarkupView.prototype = {
       this._rootNode = aNode;
     } else {
       var container = new MarkupContainer(this, aNode);
+      if (aFlashNode) {
+        container.flashMutation();
+      }
     }
 
     this._containers.set(aNode, container);
@@ -365,7 +404,7 @@ MarkupView.prototype = {
       if (mutation.type === "documentUnload") {
         // Treat this as a childList change of the child (maybe the protocol
         // should do this).
-        type = "childList"
+        type = "childList";
         target = mutation.targetParent;
         if (!target) {
           continue;
@@ -379,17 +418,64 @@ MarkupView.prototype = {
         continue;
       }
       if (type === "attributes" || type === "characterData") {
-        container.update();
+        container.update(false);
       } else if (type === "childList") {
         container.childrenDirty = true;
-        this._updateChildren(container);
+        // Update the children to take care of changes in the DOM
+        // Passing true as the last parameter asks for mutation flashing of the
+        // new nodes
+        this._updateChildren(container, {flash: true});
       }
     }
     this._waitForChildren().then(() => {
+      this._flashMutatedNodes(aMutations);
       this._inspector.emit("markupmutation");
     });
   },
 
+  /**
+   * Given a list of mutations returned by the mutation observer, flash the
+   * corresponding containers to attract attention.
+   */
+  _flashMutatedNodes: function MT_flashMutatedNodes(aMutations)
+  {
+    let addedOrEditedContainers = new Set();
+    let removedContainers = new Set();
+
+    for (let {type, target, added, removed} of aMutations) {
+      let container = this._containers.get(target);
+
+      if (container) {
+        if (type === "attributes" || type === "characterData") {
+          addedOrEditedContainers.add(container);
+        } else if (type === "childList") {
+          // If there has been removals, flash the parent
+          if (removed.length) {
+            removedContainers.add(container);
+          }
+
+          // If there has been additions, flash the nodes
+          added.forEach(added => {
+            let addedContainer = this._containers.get(added);
+            addedOrEditedContainers.add(addedContainer);
+
+            // The node may be added as a result of an append, in which case it
+            // it will have been removed from another container first, but in
+            // these cases we don't want to flash both the removal and the
+            // addition
+            removedContainers.delete(container);
+          });
+        }
+      }
+    }
+
+    for (let container of removedContainers) {
+      container.flashMutation();
+    }
+    for (let container of addedOrEditedContainers) {
+      container.flashMutation();
+    }
+  },
 
   /**
    * Make sure the given node's parents are expanded and the
@@ -417,9 +503,9 @@ MarkupView.prototype = {
    */
   _expandContainer: function MT__expandContainer(aContainer)
   {
-    return this._updateChildren(aContainer, true).then(() => {
+    return this._updateChildren(aContainer, {expand: true}).then(() => {
       aContainer.expanded = true;
-    })
+    });
   },
 
   /**
@@ -511,7 +597,7 @@ MarkupView.prototype = {
       if (!container.elt.parentNode) {
         let parentContainer = this._containers.get(parent);
         parentContainer.childrenDirty = true;
-        this._updateChildren(parentContainer, node);
+        this._updateChildren(parentContainer, {expand: node});
       }
 
       node = parent;
@@ -574,11 +660,18 @@ MarkupView.prototype = {
    *    grab a subset).
    *    container.childrenDirty should be set in that case too!
    *
-   * This method returns a promise that will be resolved when the children
-   * are ready (which may be immediately).
+   * @param MarkupContainer aContainer
+   *        The markup container whose children need updating
+   * @param Object options
+   *        Options are {expand:boolean,flash:boolean}
+   * @return a promise that will be resolved when the children are ready
+   * (which may be immediately).
    */
-  _updateChildren: function(aContainer, aExpand)
+  _updateChildren: function(aContainer, options)
   {
+    let expand = options && options.expand;
+    let flash = options && options.flash;
+
     aContainer.hasChildren = aContainer.node.hasChildren;
 
     if (!this._queuedChildUpdates) {
@@ -604,7 +697,7 @@ MarkupView.prototype = {
     // If we're not expanded (or asked to update anyway), we're done for
     // now.  Note that this will leave the childrenDirty flag set, so when
     // expanded we'll refresh the child list.
-    if (!(aContainer.expanded || aExpand)) {
+    if (!(aContainer.expanded || expand)) {
       return promise.resolve(aContainer);
     }
 
@@ -625,13 +718,13 @@ MarkupView.prototype = {
       // If children are dirty, we got a change notification for this node
       // while the request was in progress, we need to do it again.
       if (aContainer.childrenDirty) {
-        return this._updateChildren(aContainer, centered);
+        return this._updateChildren(aContainer, {expand: centered});
       }
 
       let fragment = this.doc.createDocumentFragment();
 
       for (let child of children.nodes) {
-        let container = this.importNode(child);
+        let container = this.importNode(child, flash);
         fragment.appendChild(container.elt);
       }
 
@@ -697,6 +790,8 @@ MarkupView.prototype = {
    */
   destroy: function MT_destroy()
   {
+    gDevTools.off("pref-changed", this._handlePrefChange);
+
     this.undo.destroy();
     delete this.undo;
 
@@ -807,8 +902,7 @@ MarkupView.prototype = {
       this._updatePreview();
       this._previewBar.classList.remove("hide");
     }.bind(this), 1000);
-  },
-
+  }
 };
 
 
@@ -823,8 +917,7 @@ MarkupView.prototype = {
  * @param DOMNode aNode
  *        The node to display.
  */
-function MarkupContainer(aMarkupView, aNode)
-{
+function MarkupContainer(aMarkupView, aNode) {
   this.markup = aMarkupView;
   this.doc = this.markup.doc;
   this.undo = this.markup.undo;
@@ -839,48 +932,43 @@ function MarkupContainer(aMarkupView, aNode)
   } else if (aNode.nodeType == Ci.nsIDOMNode.DOCUMENT_TYPE_NODE) {
     this.editor = new DoctypeEditor(this, aNode);
   } else {
-    this.editor = new GenericEditor(this.markup, aNode);
+    this.editor = new GenericEditor(this, aNode);
   }
 
   // The template will fill the following properties
   this.elt = null;
   this.expander = null;
-  this.codeBox = null;
+  this.highlighter = null;
+  this.tagLine = null;
   this.children = null;
   this.markup.template("container", this);
   this.elt.container = this;
   this.children.container = this;
 
-  this.expander.addEventListener("click", function() {
-    this.markup.navigate(this);
+  // Expanding/collapsing the node on dblclick of the whole tag-line element
+  this._onToggle = this._onToggle.bind(this);
+  this.elt.addEventListener("dblclick", this._onToggle, false);
+  this.expander.addEventListener("click", this._onToggle, false);
 
-    this.markup.setNodeExpanded(this.node, !this.expanded);
-  }.bind(this));
+  // Dealing with the highlighting of the row via javascript rather than :hover
+  // This is to allow highlighting the closing tag-line as well as reusing the
+  // theme css classes (which wouldn't have been possible with a :hover pseudo)
+  this._onMouseOver = this._onMouseOver.bind(this);
+  this.elt.addEventListener("mouseover", this._onMouseOver, false);
 
-  this.codeBox.insertBefore(this.editor.elt, this.children);
+  this._onMouseOut = this._onMouseOut.bind(this);
+  this.elt.addEventListener("mouseout", this._onMouseOut, false);
 
-  this.editor.elt.addEventListener("mousedown", function(evt) {
-    this.markup.navigate(this);
-  }.bind(this), false);
+  // Appending the editor element and attaching event listeners
+  this.tagLine.appendChild(this.editor.elt);
 
-  if (this.editor.summaryElt) {
-    this.editor.summaryElt.addEventListener("click", function(evt) {
-      this.markup.navigate(this);
-      this.markup.expandNode(this.node);
-    }.bind(this), false);
-    this.codeBox.appendChild(this.editor.summaryElt);
-  }
-
-  if (this.editor.closeElt) {
-    this.editor.closeElt.addEventListener("mousedown", function(evt) {
-      this.markup.navigate(this);
-    }.bind(this), false);
-    this.codeBox.appendChild(this.editor.closeElt);
-  }
+  this.elt.addEventListener("mousedown", this._onMouseDown.bind(this), false);
 }
 
 MarkupContainer.prototype = {
-  toString: function() { return "[MarkupContainer for " + this.node + "]" },
+  toString: function() {
+    return "[MarkupContainer for " + this.node + "]";
+  },
 
   /**
    * True if the current node has children.  The MarkupView
@@ -909,21 +997,137 @@ MarkupContainer.prototype = {
    * True if the node has been visually expanded in the tree.
    */
   get expanded() {
-    return this.children.hasAttribute("expanded");
+    return !this.elt.classList.contains("collapsed");
   },
 
   set expanded(aValue) {
-    if (aValue) {
+    if (aValue && this.elt.classList.contains("collapsed")) {
+      // Expanding a node means cloning its "inline" closing tag into a new
+      // tag-line that the user can interact with and showing the children.
+      if (this.editor instanceof ElementEditor) {
+        let closingTag = this.elt.querySelector(".close");
+        if (closingTag) {
+          if (!this.closeTagLine) {
+            let line = this.markup.doc.createElement("div");
+            line.classList.add("tag-line");
+
+            let highlighter = this.markup.doc.createElement("div");
+            highlighter.classList.add("highlighter");
+            line.appendChild(highlighter);
+
+            line.appendChild(closingTag.cloneNode(true));
+            line.addEventListener("mouseover", this._onMouseOver, false);
+            line.addEventListener("mouseout", this._onMouseOut, false);
+
+            this.closeTagLine = line;
+          }
+          this.elt.appendChild(this.closeTagLine);
+        }
+      }
+      this.elt.classList.remove("collapsed");
       this.expander.setAttribute("open", "");
-      this.children.setAttribute("expanded", "");
-      if (this.editor.summaryElt) {
-        this.editor.summaryElt.setAttribute("expanded", "");
+      this.highlighted = false;
+    } else if (!aValue) {
+      if (this.editor instanceof ElementEditor && this.closeTagLine) {
+        this.elt.removeChild(this.closeTagLine);
+      }
+      this.elt.classList.add("collapsed");
+      this.expander.removeAttribute("open");
+    }
+  },
+
+  _onToggle: function(event) {
+    this.markup.navigate(this);
+    if(this.hasChildren) {
+      this.markup.setNodeExpanded(this.node, !this.expanded);
+    }
+    event.stopPropagation();
+  },
+
+  _onMouseOver: function(event) {
+    this.highlighted = true;
+    event.stopPropagation();
+  },
+
+  _onMouseOut: function(event) {
+    this.highlighted = false;
+    event.stopPropagation();
+  },
+
+  _onMouseDown: function(event) {
+    this.highlighted = false;
+    this.markup.navigate(this);
+    event.stopPropagation();
+  },
+
+  /**
+   * Temporarily flash the container to attract attention.
+   * Used for markup mutations.
+   */
+  flashMutation: function() {
+    if (!this.selected) {
+      let contentWin = this.markup._frame.contentWindow;
+      this.flashed = true;
+      if (this._flashMutationTimer) {
+        contentWin.clearTimeout(this._flashMutationTimer);
+        this._flashMutationTimer = null;
+      }
+      this._flashMutationTimer = contentWin.setTimeout(() => {
+        this.flashed = false;
+      }, CONTAINER_FLASHING_DURATION);
+    }
+  },
+
+  set flashed(aValue) {
+    if (aValue) {
+      // Make sure the animation class is not here
+      this.highlighter.classList.remove("flash-out");
+
+      // Change the background
+      this.highlighter.classList.add("theme-bg-contrast");
+
+      // Change the text color
+      this.editor.elt.classList.add("theme-fg-contrast");
+      [].forEach.call(
+        this.editor.elt.querySelectorAll("[class*=theme-fg-color]"),
+        span => span.classList.add("theme-fg-contrast")
+      );
+    } else {
+      // Add the animation class to smoothly remove the background
+      this.highlighter.classList.add("flash-out");
+
+      // Remove the background
+      this.highlighter.classList.remove("theme-bg-contrast");
+
+      // Remove the text color
+      this.editor.elt.classList.remove("theme-fg-contrast");
+      [].forEach.call(
+        this.editor.elt.querySelectorAll("[class*=theme-fg-color]"),
+        span => span.classList.remove("theme-fg-contrast")
+      );
+    }
+  },
+
+  _highlighted: false,
+
+  /**
+   * Highlight the currently hovered tag + its closing tag if necessary
+   * (that is if the tag is expanded)
+   */
+  set highlighted(aValue) {
+    this.highlighter.classList.remove("flash-out");
+    this._highlighted = aValue;
+    if (aValue) {
+      if (!this.selected) {
+        this.highlighter.classList.add("theme-bg-darker");
+      }
+      if (this.closeTagLine) {
+        this.closeTagLine.querySelector(".highlighter").classList.add("theme-bg-darker");
       }
     } else {
-      this.expander.removeAttribute("open");
-      this.children.removeAttribute("expanded");
-      if (this.editor.summaryElt) {
-        this.editor.summaryElt.removeAttribute("expanded");
+      this.highlighter.classList.remove("theme-bg-darker");
+      if (this.closeTagLine) {
+        this.closeTagLine.querySelector(".highlighter").classList.remove("theme-bg-darker");
       }
     }
   },
@@ -931,8 +1135,7 @@ MarkupContainer.prototype = {
   /**
    * True if the container is visible in the markup tree.
    */
-  get visible()
-  {
+  get visible() {
     return this.elt.getBoundingClientRect().height > 0;
   },
 
@@ -946,18 +1149,15 @@ MarkupContainer.prototype = {
   },
 
   set selected(aValue) {
+    this.highlighter.classList.remove("flash-out");
     this._selected = aValue;
     this.editor.selected = aValue;
     if (this._selected) {
-      this.editor.elt.classList.add("theme-selected");
-      if (this.editor.closeElt) {
-        this.editor.closeElt.classList.add("theme-selected");
-      }
+      this.tagLine.setAttribute("selected", "");
+      this.highlighter.classList.add("theme-selected");
     } else {
-      this.editor.elt.classList.remove("theme-selected");
-      if (this.editor.closeElt) {
-        this.editor.closeElt.classList.remove("theme-selected");
-      }
+      this.tagLine.removeAttribute("selected");
+      this.highlighter.classList.remove("theme-selected");
     }
   },
 
@@ -965,30 +1165,28 @@ MarkupContainer.prototype = {
    * Update the container's editor to the current state of the
    * viewed node.
    */
-  update: function MC_update()
-  {
+  update: function(parseColors=true) {
     if (this.editor.update) {
-      this.editor.update();
+      this.editor.update(parseColors);
     }
   },
 
   /**
    * Try to put keyboard focus on the current editor.
    */
-  focus: function MC_focus()
-  {
+  focus: function() {
     let focusable = this.editor.elt.querySelector("[tabindex]");
     if (focusable) {
       focusable.focus();
     }
-  },
-}
+  }
+};
+
 
 /**
  * Dummy container node used for the root document element.
  */
-function RootContainer(aMarkupView, aNode)
-{
+function RootContainer(aMarkupView, aNode) {
   this.doc = aMarkupView.doc;
   this.elt = this.doc.createElement("ul");
   this.elt.container = this;
@@ -996,6 +1194,12 @@ function RootContainer(aMarkupView, aNode)
   this.node = aNode;
   this.toString = function() { return "[root container]"}
 }
+
+RootContainer.prototype = {
+  hasChildren: true,
+  expanded: true,
+  update: function() {}
+};
 
 /**
  * Creates an editor for simple nodes.
@@ -1117,26 +1321,18 @@ function ElementEditor(aContainer, aNode)
   this.markup = this.container.markup;
   this.node = aNode;
 
-  this.attrs = { };
+  this.attrs = {};
 
   // The templates will fill the following properties
   this.elt = null;
   this.tag = null;
+  this.closeTag = null;
   this.attrList = null;
   this.newAttr = null;
-  this.summaryElt = null;
   this.closeElt = null;
 
   // Create the main editor
   this.template("element", this);
-
-  if (this.node.hasChildren) {
-    // Create the summary placeholder
-    this.template("elementContentSummary", this);
-  }
-
-  // Create the closing tag
-  this.template("elementClose", this);
 
   this.rawNode = aNode.rawNode();
 
@@ -1190,7 +1386,7 @@ ElementEditor.prototype = {
   /**
    * Update the state of the editor from the node.
    */
-  update: function EE_update()
+  update: function EE_update(parseColors=true)
   {
     let attrs = this.node.attributes;
     if (!attrs) {
@@ -1209,10 +1405,13 @@ ElementEditor.prototype = {
 
     // Get the attribute editor for each attribute that exists on
     // the node and show it.
-    for (let i = 0; i < attrs.length; i++) {
-      let attr = this._createAttribute(attrs[i]);
-      if (!attr.inplaceEditor) {
-        attr.style.removeProperty("display");
+    for (let attr of attrs) {
+      if (parseColors && typeof attr.value !== "undefined") {
+        attr.value = colorUtils.processCSSString(attr.value);
+      }
+      let attribute = this._createAttribute(attr);
+      if (!attribute.inplaceEditor) {
+        attribute.style.removeProperty("display");
       }
     }
   },
@@ -1273,7 +1472,7 @@ ElementEditor.prototype = {
         }
       },
       done: (aVal, aCommit) => {
-        if (!aCommit) {
+        if (!aCommit || aVal === initial) {
           return;
         }
 
@@ -1317,8 +1516,16 @@ ElementEditor.prototype = {
 
     this.attrs[aAttr.name] = attr;
 
+    let collapsedValue;
+    if (aAttr.value.match(COLLAPSE_DATA_URL_REGEX)) {
+      collapsedValue = truncateString(aAttr.value, COLLAPSE_DATA_URL_LENGTH);
+    }
+    else {
+      collapsedValue = truncateString(aAttr.value, COLLAPSE_ATTRIBUTE_LENGTH);
+    }
+
     name.textContent = aAttr.name;
-    val.textContent = aAttr.value;
+    val.textContent = collapsedValue;
 
     return attr;
   },
@@ -1338,7 +1545,6 @@ ElementEditor.prototype = {
     for (let attr of attrs) {
       // Create an attribute editor next to the current attribute if needed.
       this._createAttribute(attr, aAttrNode ? aAttrNode.nextSibling : null);
-
       this._saveAttribute(attr.name, aUndoMods);
       aDoMods.setAttribute(attr.name, attr.value);
     }
@@ -1414,20 +1620,21 @@ ElementEditor.prototype = {
       });
     }).then(null, console.error);
   }
-}
-
-
-
-RootContainer.prototype = {
-  hasChildren: true,
-  expanded: true,
-  update: function RC_update() {}
 };
 
 function nodeDocument(node) {
   return node.ownerDocument || (node.nodeType == Ci.nsIDOMNode.DOCUMENT_NODE ? node : null);
 }
 
+function truncateString(str, maxLength) {
+  if (str.length <= maxLength) {
+    return str;
+  }
+
+  return str.substring(0, Math.ceil(maxLength / 2)) +
+         "…" +
+         str.substring(str.length - Math.floor(maxLength / 2));
+}
 /**
  * Parse attribute names and values from a string.
  *
@@ -1439,7 +1646,6 @@ function nodeDocument(node) {
  *         An array of attribute names and their values.
  */
 function parseAttributeValues(attr, doc) {
-
   attr = attr.trim();
 
   // Handle bad user inputs by appending a " or ' if it fails to parse without them.
@@ -1464,19 +1670,6 @@ function parseAttributeValues(attr, doc) {
 
   // Attributes return from DOMParser in reverse order from how they are entered.
   return attributes.reverse();
-}
-
-/**
- * A tree walker filter for avoiding empty whitespace text nodes.
- */
-function whitespaceTextFilter(aNode)
-{
-    if (aNode.nodeType == Ci.nsIDOMNode.TEXT_NODE &&
-        !/[^\s]/.exec(aNode.nodeValue)) {
-      return Ci.nsIDOMNodeFilter.FILTER_SKIP;
-    } else {
-      return Ci.nsIDOMNodeFilter.FILTER_ACCEPT;
-    }
 }
 
 loader.lazyGetter(MarkupView.prototype, "strings", () => Services.strings.createBundle(

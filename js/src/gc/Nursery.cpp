@@ -11,6 +11,7 @@
 
 #include "jscompartment.h"
 #include "jsgc.h"
+#include "jsinfer.h"
 #include "jsutil.h"
 
 #include "gc/GCInternals.h"
@@ -102,7 +103,7 @@ js::Nursery::allocate(size_t size)
 
     if (position() + size > currentEnd()) {
         if (currentChunk_ + 1 == numActiveChunks_)
-            return NULL;
+            return nullptr;
         setCurrentChunk(currentChunk_ + 1);
     }
 
@@ -236,7 +237,7 @@ class MinorCollectionTracer : public JSTracer
     JS_ALWAYS_INLINE void insertIntoFixupList(RelocationOverlay *entry) {
         *tail = entry;
         tail = &entry->next_;
-        *tail = NULL;
+        *tail = nullptr;
     }
 
     MinorCollectionTracer(JSRuntime *rt, Nursery *nursery)
@@ -244,7 +245,7 @@ class MinorCollectionTracer : public JSTracer
         nursery(nursery),
         session(rt, MinorCollecting),
         tenuredSize(0),
-        head(NULL),
+        head(nullptr),
         tail(&head),
         savedRuntimeNeedBarrier(rt->needsBarrier()),
         disableStrictProxyChecking(rt)
@@ -349,12 +350,38 @@ js::Nursery::forwardBufferPointer(HeapSlot **pSlotsElems)
     JS_ASSERT(!isInside(*pSlotsElems));
 }
 
+static void
+MaybeInvalidateScriptUsedWithNew(JSRuntime *rt, types::TypeObject *type)
+{
+    types::TypeNewScript *newScript = type->newScript();
+    if (!newScript)
+        return;
+
+    JSScript *script = newScript->fun->nonLazyScript();
+    if (script && script->hasIonScript()) {
+        for (ContextIter cx(rt); !cx.done(); cx.next())
+            jit::Invalidate(cx, script);
+    }
+}
+
 void
 js::Nursery::collectToFixedPoint(MinorCollectionTracer *trc)
 {
     for (RelocationOverlay *p = trc->head; p; p = p->next()) {
         JSObject *obj = static_cast<JSObject*>(p->forwardingAddress());
         traceObject(trc, obj);
+
+        /*
+         * Increment tenure count and recompile the script for pre-tenuring if
+         * long-lived. Attempt to distinguish between tenuring because the
+         * object is long lived and tenuring while the nursery is still
+         * smaller than the working set size.
+         */
+        if (isFullyGrown() && !obj->hasLazyType() && obj->type()->hasNewScript() &&
+            obj->type()->incrementTenureCount())
+        {
+            MaybeInvalidateScriptUsedWithNew(trc->runtime, obj->type());
+        }
     }
 }
 

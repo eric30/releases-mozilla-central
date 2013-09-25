@@ -1046,15 +1046,17 @@ void MediaDecoder::NotifyPrincipalChanged()
   }
 }
 
-void MediaDecoder::NotifyBytesConsumed(int64_t aBytes)
+void MediaDecoder::NotifyBytesConsumed(int64_t aBytes, int64_t aOffset)
 {
   ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
   NS_ENSURE_TRUE_VOID(mDecoderStateMachine);
-  MOZ_ASSERT(OnStateMachineThread() || OnDecodeThread());
-  if (!mIgnoreProgressData) {
-    mDecoderPosition += aBytes;
+  if (mIgnoreProgressData) {
+    return;
+  }
+  if (aOffset >= mDecoderPosition) {
     mPlaybackStatistics.AddBytes(aBytes);
   }
+  mDecoderPosition = aOffset + aBytes;
 }
 
 void MediaDecoder::UpdateReadyStateForData()
@@ -1274,7 +1276,6 @@ void MediaDecoder::SetMediaDuration(int64_t aDuration)
 
 void MediaDecoder::UpdateEstimatedMediaDuration(int64_t aDuration)
 {
-  MOZ_ASSERT(NS_IsMainThread());
   if (mPlayState <= PLAY_STATE_LOADING) {
     return;
   }
@@ -1725,6 +1726,14 @@ bool
 MediaDecoder::IsWMFEnabled()
 {
   return WMFDecoder::IsEnabled();
+}
+#endif
+
+#ifdef MOZ_APPLEMEDIA
+bool
+MediaDecoder::IsAppleMP3Enabled()
+{
+  return Preferences::GetBool("media.apple.mp3.enabled");
 }
 #endif
 

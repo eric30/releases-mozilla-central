@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/layers/TextureHost.h"
+#include "CompositableHost.h"           // for CompositableHost
 #include "LayersLogging.h"              // for AppendToString
 #include "gfx2DGlue.h"                  // for ToIntSize
 #include "gfxImageSurface.h"            // for gfxImageSurface
@@ -45,13 +46,21 @@ TemporaryRef<DeprecatedTextureHost> CreateDeprecatedTextureHostD3D11(SurfaceDesc
 /* static */ TemporaryRef<DeprecatedTextureHost>
 DeprecatedTextureHost::CreateDeprecatedTextureHost(SurfaceDescriptorType aDescriptorType,
                                            uint32_t aDeprecatedTextureHostFlags,
-                                           uint32_t aTextureFlags)
+                                           uint32_t aTextureFlags,
+                                           CompositableHost* aCompositableHost)
 {
   switch (Compositor::GetBackend()) {
     case LAYERS_OPENGL:
-      return CreateDeprecatedTextureHostOGL(aDescriptorType,
+      {
+      RefPtr<DeprecatedTextureHost> result;
+      result = CreateDeprecatedTextureHostOGL(aDescriptorType,
                                         aDeprecatedTextureHostFlags,
                                         aTextureFlags);
+      if (aCompositableHost) {
+        result->SetCompositableQuirks(aCompositableHost->GetCompositableQuirks());
+      }
+      return result;
+      }
 #ifdef XP_WIN
     case LAYERS_D3D9:
       return CreateDeprecatedTextureHostD3D9(aDescriptorType,
@@ -135,6 +144,51 @@ CreateBackendIndependentTextureHost(uint64_t aID,
   return result;
 }
 
+void TextureHost::SetCompositableQuirks(CompositableQuirks* aQuirks)
+{
+    mQuirks = aQuirks;
+}
+
+
+TextureHost::TextureHost(uint64_t aID,
+                         TextureFlags aFlags)
+    : mID(aID)
+    , mNextTexture(nullptr)
+    , mFlags(aFlags)
+{}
+
+TextureHost::~TextureHost()
+{
+}
+
+#ifdef MOZ_LAYERS_HAVE_LOG
+
+void
+TextureHost::PrintInfo(nsACString& aTo, const char* aPrefix)
+{
+  aTo += aPrefix;
+  aTo += nsPrintfCString("%s (0x%p)", Name(), this);
+  AppendToString(aTo, GetSize(), " [size=", "]");
+  AppendToString(aTo, GetFormat(), " [format=", "]");
+  AppendToString(aTo, mFlags, " [flags=", "]");
+}
+
+#endif
+
+void TextureSource::SetCompositableQuirks(CompositableQuirks* aQuirks)
+{
+    mQuirks = aQuirks;
+}
+
+TextureSource::TextureSource()
+{
+    MOZ_COUNT_CTOR(TextureSource);
+}
+TextureSource::~TextureSource()
+{
+    MOZ_COUNT_DTOR(TextureSource);
+}
+
 DeprecatedTextureHost::DeprecatedTextureHost()
   : mFlags(0)
   , mBuffer(nullptr)
@@ -191,12 +245,6 @@ DeprecatedTextureHost::SwapTextures(const SurfaceDescriptor& aImage,
 }
 
 #ifdef MOZ_LAYERS_HAVE_LOG
-void
-TextureSource::PrintInfo(nsACString& aTo, const char* aPrefix)
-{
-  aTo += aPrefix;
-  aTo += nsPrintfCString("UnknownTextureSource (0x%p)", this);
-}
 
 void
 DeprecatedTextureHost::PrintInfo(nsACString& aTo, const char* aPrefix)
@@ -422,7 +470,7 @@ BufferTextureHost::GetAsSurface()
     result = new gfxImageSurface(yuvDeserializer.GetYData(),
                                  yuvDeserializer.GetYSize(),
                                  yuvDeserializer.GetYStride(),
-                                 gfxASurface::ImageFormatA8);
+                                 gfxImageFormatA8);
   } else {
     ImageDataDeserializer deserializer(GetBuffer());
     if (!deserializer.IsValid()) {

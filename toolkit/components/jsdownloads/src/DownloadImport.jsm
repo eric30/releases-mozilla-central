@@ -106,7 +106,7 @@ this.DownloadImport.prototype = {
 
             let autoResume = false;
             try {
-              autoResume = (row.getResultByName("autoResume") == 1);
+              autoResume = row.getResultByName("autoResume");
             } catch (ex) {
               // autoResume wasn't present in schema version 7
             }
@@ -170,7 +170,7 @@ this.DownloadImport.prototype = {
 
             let download = yield Downloads.createDownload(downloadOptions);
 
-            this.list.add(download);
+            yield this.list.add(download);
 
             if (resumeDownload) {
               download.start();

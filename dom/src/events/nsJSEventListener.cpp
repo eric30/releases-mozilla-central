@@ -10,7 +10,6 @@
 #include "nsIScriptContext.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIXPConnect.h"
-#include "nsGUIEvent.h"
 #include "nsIMutableArray.h"
 #include "nsVariant.h"
 #include "nsIDOMBeforeUnloadEvent.h"
@@ -18,6 +17,7 @@
 #include "xpcpublic.h"
 #include "nsJSEnvironment.h"
 #include "nsDOMJSUtils.h"
+#include "mozilla/ContentEvents.h"
 #include "mozilla/Likely.h"
 #include "mozilla/dom/UnionTypes.h"
 #include "nsDOMEvent.h"
@@ -273,7 +273,7 @@ NS_NewJSEventListener(nsIScriptContext* aContext, JSObject* aScopeObject,
 {
   MOZ_ASSERT(aContext || aHandler.HasEventHandler(),
              "Must have a handler if we don't have an nsIScriptContext");
-  NS_ENSURE_ARG(aEventType);
+  NS_ENSURE_ARG(aEventType || !NS_IsMainThread());
   nsJSEventListener* it =
     new nsJSEventListener(aContext, aScopeObject, aTarget, aEventType,
                           aHandler);

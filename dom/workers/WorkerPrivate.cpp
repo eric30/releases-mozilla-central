@@ -33,6 +33,7 @@
 #include "js/OldDebugAPI.h"
 #include "js/MemoryMetrics.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/ContentEvents.h"
 #include "mozilla/Likely.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/ImageData.h"
@@ -42,7 +43,6 @@
 #include "nsCxPusher.h"
 #include "nsError.h"
 #include "nsDOMJSUtils.h"
-#include "nsGUIEvent.h"
 #include "nsJSEnvironment.h"
 #include "nsJSUtils.h"
 #include "nsNetUtil.h"
@@ -85,9 +85,6 @@ using namespace mozilla::dom;
 NS_MEMORY_REPORTER_MALLOC_SIZEOF_FUN(JsWorkerMallocSizeOf)
 
 namespace {
-
-const char gErrorChars[] = "error";
-const char gMessageChars[] = "message";
 
 template <class T>
 class AutoPtrComparator
@@ -2690,7 +2687,7 @@ WorkerPrivate::Create(JSContext* aCx, JS::Handle<JSObject*> aObj, WorkerPrivate*
 
       // We're being created outside of a window. Need to figure out the script
       // that is creating us in order for us to use relative URIs later on.
-      JSScript *script;
+      JS::RootedScript script(aCx);
       if (JS_DescribeScriptedCaller(aCx, &script, nullptr)) {
         if (NS_FAILED(NS_NewURI(getter_AddRefs(baseURI),
                                 JS_GetScriptFilename(aCx, script)))) {

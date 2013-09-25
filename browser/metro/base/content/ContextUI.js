@@ -128,6 +128,7 @@ var ContextUI = {
     // No assurances this will hide the nav bar. It may have the
     // 'startpage' property set. This removes the 'visible' property.
     if (this.navbarVisible) {
+      BrowserUI.blurNavBar();
       this.dismissNavbar();
       dismissed = true;
     }
@@ -183,6 +184,7 @@ var ContextUI = {
   // Dismiss the navbar if visible.
   dismissNavbar: function dismissNavbar() {
     if (!BrowserUI.isStartTabVisible) {
+      Elements.autocomplete.closePopup();
       Elements.navbar.dismiss();
       ContentAreaObserver.updateContentArea();
     }

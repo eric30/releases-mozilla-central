@@ -7,7 +7,7 @@
 #if !defined(DirectShowReader_h_)
 #define DirectShowReader_h_
 
-#include "Windows.h" // HRESULT, DWORD
+#include "windows.h" // HRESULT, DWORD
 #include "MediaDecoderReader.h"
 #include "mozilla/RefPtr.h"
 #include "MP3FrameParser.h"
@@ -77,10 +77,9 @@ public:
 
 private:
 
-  // Calls mAudioQueue.Finish(), and notifies the filter graph that playback
-  // is complete. aStatus is the code to send to the filter graph.
-  // Always returns false, so that we can just "return Finish()" from
-  // DecodeAudioData().
+  // Notifies the filter graph that playback is complete. aStatus is
+  // the code to send to the filter graph. Always returns false, so
+  // that we can just "return Finish()" from DecodeAudioData().
   bool Finish(HRESULT aStatus);
 
   // DirectShow filter graph, and associated playback and seeking

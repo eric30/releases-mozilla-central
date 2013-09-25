@@ -2532,7 +2532,7 @@ WebGLContext::SurfaceFromElementResultToImageSurface(nsLayoutUtils::SurfaceFromE
 {
     if (!res.mSurface)
         return NS_ERROR_FAILURE;
-    if (res.mSurface->GetType() != gfxASurface::SurfaceTypeImage) {
+    if (res.mSurface->GetType() != gfxSurfaceTypeImage) {
         // SurfaceFromElement lied!
         return NS_ERROR_FAILURE;
     }
@@ -2578,16 +2578,16 @@ WebGLContext::SurfaceFromElementResultToImageSurface(nsLayoutUtils::SurfaceFromE
     *imageOut = surf;
 
     switch (surf->Format()) {
-        case gfxASurface::ImageFormatARGB32:
+        case gfxImageFormatARGB32:
             *format = WebGLTexelConversions::BGRA8; // careful, our ARGB means BGRA
             break;
-        case gfxASurface::ImageFormatRGB24:
+        case gfxImageFormatRGB24:
             *format = WebGLTexelConversions::BGRX8; // careful, our RGB24 is not tightly packed. Whence BGRX8.
             break;
-        case gfxASurface::ImageFormatA8:
+        case gfxImageFormatA8:
             *format = WebGLTexelConversions::A8;
             break;
-        case gfxASurface::ImageFormatRGB16_565:
+        case gfxImageFormatRGB16_565:
             *format = WebGLTexelConversions::RGB565;
             break;
         default:
@@ -3018,6 +3018,15 @@ WebGLContext::CompileShader(WebGLShader *shader)
         // If underlying GLES doesn't have highp in frag shaders, it should complain anyways.
         resources.FragmentPrecisionHigh = mDisableFragHighP ? 0 : 1;
 
+        if (gl->WorkAroundDriverBugs()) {
+#ifdef XP_MACOSX
+            if (gl->Vendor() == gl::GLContext::VendorNVIDIA) {
+                // Work around bug 890432
+                resources.MaxExpressionComplexity = 1000;
+            }
+#endif
+        }
+
         // We're storing an actual instance of StripComments because, if we don't, the 
         // cleanSource nsAString instance will be destroyed before the reference is
         // actually used.
@@ -3098,6 +3107,10 @@ WebGLContext::CompileShader(WebGLShader *shader)
         int compileOptions = SH_ATTRIBUTES_UNIFORMS |
                              SH_ENFORCE_PACKING_RESTRICTIONS;
 
+        if (resources.MaxExpressionComplexity > 0) {
+            compileOptions |= SH_LIMIT_EXPRESSION_COMPLEXITY;
+        }
+
         // We want to do this everywhere, but:
 #ifndef XP_MACOSX // To do this on Mac, we need to do it only on Mac OSX > 10.6 as this
                   // causes the shader compiler in 10.6 to crash
@@ -3107,6 +3120,7 @@ WebGLContext::CompileShader(WebGLShader *shader)
         if (useShaderSourceTranslation) {
             compileOptions |= SH_OBJECT_CODE
                             | SH_MAP_LONG_VARIABLE_NAMES;
+
 #ifdef XP_MACOSX
             if (gl->WorkAroundDriverBugs()) {
                 // Work around bug 665578 and bug 769810

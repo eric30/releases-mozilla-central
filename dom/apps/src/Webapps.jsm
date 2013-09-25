@@ -60,6 +60,11 @@ XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
                                    "@mozilla.org/childprocessmessagemanager;1",
                                    "nsIMessageSender");
 
+XPCOMUtils.defineLazyGetter(this, "interAppCommService", function() {
+  return Cc["@mozilla.org/inter-app-communication-service;1"]
+         .getService(Ci.nsIInterAppCommService);
+});
+
 XPCOMUtils.defineLazyGetter(this, "msgmgr", function() {
   return Cc["@mozilla.org/system-message-internal;1"]
          .getService(Ci.nsISystemMessagesInternal);
@@ -93,11 +98,6 @@ this.DOMApplicationRegistry = {
   webapps: { },
   children: [ ],
   allAppsLaunchable: false,
-#ifdef MOZ_OFFICIAL_BRANDING
-  get allowSideloadingCertified() false,
-#else
-  get allowSideloadingCertified() true,
-#endif
 
   init: function() {
     this.messages = ["Webapps:Install", "Webapps:Uninstall",
@@ -530,6 +530,8 @@ this.DOMApplicationRegistry = {
 
   // |aEntryPoint| is either the entry_point name or the null in which case we
   // use the root of the manifest.
+  //
+  // TODO Bug 908094 Refine _registerSystemMessagesForEntryPoint(...).
   _registerSystemMessagesForEntryPoint: function(aManifest, aApp, aEntryPoint) {
     let root = aManifest;
     if (aEntryPoint && aManifest.entry_points[aEntryPoint]) {
@@ -571,6 +573,69 @@ this.DOMApplicationRegistry = {
     });
   },
 
+  // |aEntryPoint| is either the entry_point name or the null in which case we
+  // use the root of the manifest.
+  //
+  // TODO Bug 908094 Refine _registerInterAppConnectionsForEntryPoint(...).
+  _registerInterAppConnectionsForEntryPoint: function(aManifest, aApp,
+                                                      aEntryPoint) {
+    let root = aManifest;
+    if (aEntryPoint && aManifest.entry_points[aEntryPoint]) {
+      root = aManifest.entry_points[aEntryPoint];
+    }
+
+    let connections = root.connections;
+    if (!connections) {
+      return;
+    }
+
+    if ((typeof connections) !== "object") {
+      debug("|connections| is not an object. Skipping: " + connections);
+      return;
+    }
+
+    let manifest = new ManifestHelper(aManifest, aApp.origin);
+    let launchPathURI = Services.io.newURI(manifest.fullLaunchPath(aEntryPoint),
+                                           null, null);
+    let manifestURI = Services.io.newURI(aApp.manifestURL, null, null);
+
+    for (let keyword in connections) {
+      let connection = connections[keyword];
+
+      // Resolve the handler path from origin. If |handler_path| is absent,
+      // use |launch_path| as default.
+      let fullHandlerPath;
+      let handlerPath = connection.handler_path;
+      if (handlerPath) {
+        try {
+          fullHandlerPath = manifest.resolveFromOrigin(handlerPath);
+        } catch(e) {
+          debug("Connection's handler path is invalid. Skipping: keyword: " +
+                keyword + " handler_path: " + handlerPath);
+          continue;
+        }
+      }
+      let handlerPageURI = fullHandlerPath
+                           ? Services.io.newURI(fullHandlerPath, null, null)
+                           : launchPathURI;
+
+      if (SystemMessagePermissionsChecker
+            .isSystemMessagePermittedToRegister("connection",
+                                                aApp.origin,
+                                                aManifest)) {
+        msgmgr.registerPage("connection", handlerPageURI, manifestURI);
+      }
+
+      interAppCommService.
+        registerConnection(keyword,
+                           handlerPageURI,
+                           manifestURI,
+                           connection.description,
+                           AppsUtils.getAppManifestStatus(manifest),
+                           connection.rules);
+    }
+  },
+
   _registerSystemMessages: function(aManifest, aApp) {
     this._registerSystemMessagesForEntryPoint(aManifest, aApp, null);
 
@@ -580,6 +645,19 @@ this.DOMApplicationRegistry = {
 
     for (let entryPoint in aManifest.entry_points) {
       this._registerSystemMessagesForEntryPoint(aManifest, aApp, entryPoint);
+    }
+  },
+
+  _registerInterAppConnections: function(aManifest, aApp) {
+    this._registerInterAppConnectionsForEntryPoint(aManifest, aApp, null);
+
+    if (!aManifest.entry_points) {
+      return;
+    }
+
+    for (let entryPoint in aManifest.entry_points) {
+      this._registerInterAppConnectionsForEntryPoint(aManifest, aApp,
+                                                     entryPoint);
     }
   },
 
@@ -745,6 +823,7 @@ this.DOMApplicationRegistry = {
           app.redirects = this.sanitizeRedirects(manifest.redirects);
         }
         this._registerSystemMessages(manifest, app);
+        this._registerInterAppConnections(manifest, app);
         appsToRegister.push({ manifest: manifest, app: app });
       }, this);
       this._registerActivitiesForApps(appsToRegister, aRunUpdate);
@@ -803,8 +882,11 @@ this.DOMApplicationRegistry = {
     }
   },
 
-  addMessageListener: function(aMsgNames, aMm) {
+  addMessageListener: function(aMsgNames, aApp, aMm) {
     aMsgNames.forEach(function (aMsgName) {
+      let man = aApp && aApp.manifestURL;
+      debug("Adding messageListener for: " + aMsgName + "App: " +
+            man);
       if (!(aMsgName in this.children)) {
         this.children[aMsgName] = [];
       }
@@ -822,6 +904,26 @@ this.DOMApplicationRegistry = {
           mm: aMm,
           refCount: 1
         });
+
+        // If it wasn't registered before, let's update its state
+        if ((aMsgName === 'Webapps:PackageEvent') ||
+            (aMsgName === 'Webapps:OfflineCache')) {
+          if (man) {
+            let app = this.getAppByManifestURL(aApp.manifestURL);
+            if (app && ((aApp.installState !== app.installState) ||
+                        (aApp.downloading !== app.downloading))) {
+              debug("Got a registration from an outdated app: " +
+                    aApp.manifestURL);
+              let aEvent ={
+                type: app.installState,
+                app: app,
+                manifestURL: app.manifestURL,
+                manifest: app.manifest
+              };
+              aMm.sendAsyncMessage(aMsgName, aEvent);
+            }
+          }
+        }
       }
     }, this);
   },
@@ -920,7 +1022,7 @@ this.DOMApplicationRegistry = {
         this.doInstallPackage(msg, mm);
         break;
       case "Webapps:RegisterForMessages":
-        this.addMessageListener(msg, mm);
+        this.addMessageListener(msg.messages, msg.app, mm);
         break;
       case "Webapps:UnregisterForMessages":
         this.removeMessageListener(msg, mm);
@@ -929,7 +1031,7 @@ this.DOMApplicationRegistry = {
         this.removeMessageListener(["Webapps:Internal:AllMessages"], mm);
         break;
       case "Webapps:GetList":
-        this.addMessageListener(["Webapps:AddApp", "Webapps:RemoveApp"], mm);
+        this.addMessageListener(["Webapps:AddApp", "Webapps:RemoveApp"], null, mm);
         return this.webapps;
       case "Webapps:Download":
         this.startDownload(msg.manifestURL);
@@ -1396,6 +1498,7 @@ this.DOMApplicationRegistry = {
       }
       this._registerSystemMessages(aNewManifest, aApp);
       this._registerActivities(aNewManifest, aApp, true);
+      this._registerInterAppConnections(aNewManifest, aApp);
     } else {
       // Nothing else to do but notifying we're ready.
       this.notifyAppsRegistryReady();
@@ -1870,8 +1973,8 @@ this.DOMApplicationRegistry = {
         }
 
         // Disallow reinstalls from the same manifest URL for now.
-        if (this._appIdForManifestURL(app.manifestURL) !== null &&
-            this._isLaunchable(app)) {
+        let id = this._appIdForManifestURL(app.manifestURL);
+        if (id !== null && this._isLaunchable(this.webapps[id])) {
           sendError("REINSTALL_FORBIDDEN");
           return;
         }
@@ -1989,7 +2092,7 @@ this.DOMApplicationRegistry = {
                                   app: app,
                                   manifest: aManifest });
           if (installSuccessCallback) {
-            installSuccessCallback(aManifest);
+            installSuccessCallback(aManifest, zipFile.path);
           }
         }).bind(this));
       }).bind(this));
@@ -2115,6 +2218,12 @@ this.DOMApplicationRegistry = {
     }
 
     if (manifest.package_path) {
+      // If it is a local app then it must been installed from a local file
+      // instead of web.
+      let origPath = jsonManifest.package_path;
+      if (aData.app.localInstallPath) {
+        jsonManifest.package_path = "file://" + aData.app.localInstallPath;
+      }
       // origin for install apps is meaningless here, since it's app:// and this
       // can't be used to resolve package paths.
       manifest = new ManifestHelper(jsonManifest, app.manifestURL);
@@ -2123,12 +2232,23 @@ this.DOMApplicationRegistry = {
         manifest: manifest,
         app: appObject,
         callback: aInstallSuccessCallback
+      };
+
+      if (aData.app.localInstallPath) {
+        // if it's a local install, there's no content process so just
+        // ack the install
+        this.onInstallSuccessAck(app.manifestURL);
       }
     }
   },
 
   _nextLocalId: function() {
     let id = Services.prefs.getIntPref("dom.mozApps.maxLocalId") + 1;
+
+    while (this.getManifestURLByLocalId(id)) {
+      id++;
+    }
+
     Services.prefs.setIntPref("dom.mozApps.maxLocalId", id);
     Services.prefs.savePrefFile(null);
     return id;
@@ -2210,6 +2330,14 @@ this.DOMApplicationRegistry = {
     // If we fail at any step, we backout the previous ones and return an error.
 
     debug("downloadPackage " + JSON.stringify(aApp));
+
+    let fullPackagePath = aManifest.fullPackagePath();
+
+    // Check if it's a local file install (we've downloaded/sideloaded the
+    // package already or it did exist on the build).
+
+    let isLocalFileInstall =
+      Services.io.extractScheme(fullPackagePath) === 'file';
 
     let id = this._appIdForManifestURL(aApp.manifestURL);
     let app = this.webapps[id];
@@ -2302,10 +2430,17 @@ this.DOMApplicationRegistry = {
     function download() {
       debug("About to download " + aManifest.fullPackagePath());
 
-      let requestChannel = NetUtil.newChannel(aManifest.fullPackagePath())
-                                  .QueryInterface(Ci.nsIHttpChannel);
-      requestChannel.loadFlags |= Ci.nsIRequest.INHIBIT_CACHING;
-      if (app.packageEtag) {
+      let requestChannel;
+      if (isLocalFileInstall) {
+        requestChannel = NetUtil.newChannel(aManifest.fullPackagePath())
+                                .QueryInterface(Ci.nsIFileChannel);
+      } else {
+        requestChannel = NetUtil.newChannel(aManifest.fullPackagePath())
+                                .QueryInterface(Ci.nsIHttpChannel);
+        requestChannel.loadFlags |= Ci.nsIRequest.INHIBIT_CACHING;
+      }
+
+      if (app.packageEtag && !isLocalFileInstall) {
         debug("Add If-None-Match header: " + app.packageEtag);
         requestChannel.setRequestHeader("If-None-Match", app.packageEtag, false);
       }
@@ -2501,8 +2636,11 @@ this.DOMApplicationRegistry = {
                 let signedAppOriginsStr =
                   Services.prefs.getCharPref(
                     "dom.mozApps.signed_apps_installable_from");
-                let isSignedAppOrigin
-                  = signedAppOriginsStr.split(",").indexOf(aApp.installOrigin) > -1;
+                // If it's a local install and it's signed then we assume
+                // the app origin is a valid signer.
+                let isSignedAppOrigin = (isSigned && isLocalFileInstall) ||
+                                         signedAppOriginsStr.split(",").
+                                               indexOf(aApp.installOrigin) > -1;
                 if (!isSigned && isSignedAppOrigin) {
                   // Packaged apps installed from these origins must be signed;
                   // if not, assume somebody stripped the signature.
@@ -2554,8 +2692,10 @@ this.DOMApplicationRegistry = {
                   throw "INSTALL_FROM_DENIED";
                 }
 
-                let maxStatus = isSigned ? Ci.nsIPrincipal.APP_STATUS_PRIVILEGED
-                                         : Ci.nsIPrincipal.APP_STATUS_INSTALLED;
+                // Local file installs can be privileged even without the signature.
+                let maxStatus = isSigned || isLocalFileInstall
+                                   ? Ci.nsIPrincipal.APP_STATUS_PRIVILEGED
+                                   : Ci.nsIPrincipal.APP_STATUS_INSTALLED;
 
                 if (AppsUtils.getAppManifestStatus(manifest) > maxStatus) {
                   throw "INVALID_SECURITY_LEVEL";
@@ -2858,7 +2998,8 @@ this.DOMApplicationRegistry = {
     let tmp = [];
 
     for (let appId in this.webapps) {
-      if (this.webapps[appId].manifestURL == aData.manifestURL) {
+      if (this.webapps[appId].manifestURL == aData.manifestURL &&
+          this._isLaunchable(this.webapps[appId])) {
         aData.app = AppsUtils.cloneAppObject(this.webapps[appId]);
         tmp.push({ id: appId });
         break;

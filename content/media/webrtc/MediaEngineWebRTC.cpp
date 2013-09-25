@@ -94,15 +94,10 @@ MediaEngineWebRTC::EnumerateVideoDevices(nsTArray<nsRefPtr<MediaEngineVideoSourc
   // get the JVM
   JavaVM *jvm = mozilla::AndroidBridge::Bridge()->GetVM();
 
-  JNIEnv *env;
-  jint res = jvm->AttachCurrentThread(&env, NULL);
-
   if (webrtc::VideoEngine::SetAndroidObjects(jvm, (void*)context) != 0) {
     LOG(("VieCapture:SetAndroidObjects Failed"));
     return;
   }
-
-  env->DeleteGlobalRef(context);
 #endif
 
   if (!mVideoEngine) {
@@ -246,6 +241,22 @@ MediaEngineWebRTC::EnumerateAudioDevices(nsTArray<nsRefPtr<MediaEngineAudioSourc
     if (!mVoiceEngine) {
       return;
     }
+  }
+
+  PRLogModuleInfo *logs = GetWebRTCLogInfo();
+  if (!gWebrtcTraceLoggingOn && logs && logs->level > 0) {
+    // no need to a critical section or lock here
+    gWebrtcTraceLoggingOn = 1;
+
+    const char *file = PR_GetEnv("WEBRTC_TRACE_FILE");
+    if (!file) {
+      file = "WebRTC.log";
+    }
+
+    LOG(("Logging webrtc to %s level %d", __FUNCTION__, file, logs->level));
+
+    mVoiceEngine->SetTraceFilter(logs->level);
+    mVoiceEngine->SetTraceFile(file);
   }
 
   ptrVoEBase = webrtc::VoEBase::GetInterface(mVoiceEngine);

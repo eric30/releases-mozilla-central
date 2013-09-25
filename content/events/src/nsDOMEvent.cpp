@@ -14,7 +14,12 @@
 #include "nsIContent.h"
 #include "nsIPresShell.h"
 #include "nsIDocument.h"
-#include "nsMutationEvent.h"
+#include "mozilla/ContentEvents.h"
+#include "mozilla/MiscEvents.h"
+#include "mozilla/MouseEvents.h"
+#include "mozilla/MutationEvent.h"
+#include "mozilla/TextEvents.h"
+#include "mozilla/TouchEvents.h"
 #include "nsContentUtils.h"
 #include "nsJSEnvironment.h"
 #include "mozilla/Preferences.h"
@@ -23,6 +28,7 @@
 #include "nsDOMEventTargetHelper.h"
 #include "nsPIWindowRoot.h"
 #include "nsGlobalWindow.h"
+#include "nsDeviceContext.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -601,10 +607,8 @@ nsDOMEvent::DuplicatePrivateData()
     }
     case NS_WHEEL_EVENT:
     {
-      widget::WheelEvent* oldWheelEvent =
-        static_cast<widget::WheelEvent*>(mEvent);
-      widget::WheelEvent* wheelEvent =
-        new widget::WheelEvent(false, msg, nullptr);
+      WheelEvent* oldWheelEvent = static_cast<WheelEvent*>(mEvent);
+      WheelEvent* wheelEvent = new WheelEvent(false, msg, nullptr);
       wheelEvent->AssignWheelEventData(*oldWheelEvent, true);
       newEvent = wheelEvent;
       break;

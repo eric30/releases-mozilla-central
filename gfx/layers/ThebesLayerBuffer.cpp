@@ -125,7 +125,7 @@ RotatedBuffer::DrawBufferQuadrant(gfxContext* aTarget,
       aTarget->SetMatrix(*aMaskTransform);
       aTarget->Mask(aMask);
     } else {
-      aTarget->PushGroup(gfxASurface::CONTENT_COLOR_ALPHA);
+      aTarget->PushGroup(GFX_CONTENT_COLOR_ALPHA);
       aTarget->Paint(aOpacity);
       aTarget->PopGroupToSource();
       aTarget->SetMatrix(*aMaskTransform);
@@ -203,9 +203,10 @@ RotatedBuffer::DrawBufferQuadrant(gfx::DrawTarget* aTarget,
   }
 
   if (aMask) {
-    SurfacePattern mask(aMask, EXTEND_CLAMP, *aMaskTransform);
-
-    aTarget->Mask(source, mask, DrawOptions(aOpacity, aOperator));
+    Matrix oldTransform = aTarget->GetTransform();
+    aTarget->SetTransform(*aMaskTransform);
+    aTarget->MaskSurface(source, aMask, Point(0, 0), DrawOptions(aOpacity, aOperator));
+    aTarget->SetTransform(oldTransform);
   } else {
     aTarget->FillRect(gfx::Rect(fillRect.x, fillRect.y,
                                 fillRect.width, fillRect.height),
@@ -398,7 +399,7 @@ ThebesLayerBuffer::GetContextForQuadrantUpdate(const nsIntRect& aBounds, Context
   return ctx.forget();
 }
 
-gfxASurface::gfxContentType
+gfxContentType
 ThebesLayerBuffer::BufferContentType()
 {
   if (mBuffer) {
@@ -410,15 +411,15 @@ ThebesLayerBuffer::BufferContentType()
   if (mDTBuffer) {
     switch (mDTBuffer->GetFormat()) {
     case FORMAT_A8:
-      return gfxASurface::CONTENT_ALPHA;
+      return GFX_CONTENT_ALPHA;
     case FORMAT_B8G8R8A8:
     case FORMAT_R8G8B8A8:
-      return gfxASurface::CONTENT_COLOR_ALPHA;
+      return GFX_CONTENT_COLOR_ALPHA;
     default:
-      return gfxASurface::CONTENT_COLOR;
+      return GFX_CONTENT_COLOR;
     }
   }
-  return gfxASurface::CONTENT_SENTINEL;
+  return GFX_CONTENT_SENTINEL;
 }
 
 bool
@@ -506,6 +507,20 @@ ComputeBufferRect(const nsIntRect& aRequestedRect)
   // rendering glitch, and guarantees image rows can be SIMD'd for
   // even r5g6b5 surfaces pretty much everywhere.
   rect.width = std::max(aRequestedRect.width, 64);
+#ifdef MOZ_WIDGET_GONK
+  // Set a minumum height to guarantee a minumum height of buffers we
+  // allocate. Some GL implementations fail to render gralloc textures
+  // with a height 9px-16px. It happens on Adreno 200. Adreno 320 does not
+  // have this problem. 32 is choosed as alignment of gralloc buffers.
+  // See Bug 873937.
+  // Increase the height only when the requested height is more than 0.
+  // See Bug 895976.
+  // XXX it might be better to disable it on the gpu that does not have
+  // the height problem.
+  if (rect.height > 0) {
+    rect.height = std::max(aRequestedRect.height, 32);
+  }
+#endif
   return rect;
 }
 
@@ -561,7 +576,7 @@ ThebesLayerBuffer::BeginPaint(ThebesLayer* aLayer, ContentType aContentType,
           !gfxPlatform::ComponentAlphaEnabled()) {
         mode = Layer::SURFACE_SINGLE_CHANNEL_ALPHA;
       } else {
-        contentType = gfxASurface::CONTENT_COLOR;
+        contentType = GFX_CONTENT_COLOR;
       }
 #endif
     }
@@ -571,7 +586,7 @@ ThebesLayerBuffer::BeginPaint(ThebesLayer* aLayer, ContentType aContentType,
          neededRegion.GetNumRects() > 1)) {
       // The area we add to neededRegion might not be painted opaquely
       if (mode == Layer::SURFACE_OPAQUE) {
-        contentType = gfxASurface::CONTENT_COLOR_ALPHA;
+        contentType = GFX_CONTENT_COLOR_ALPHA;
         mode = Layer::SURFACE_SINGLE_CHANNEL_ALPHA;
       }
 
@@ -584,7 +599,7 @@ ThebesLayerBuffer::BeginPaint(ThebesLayer* aLayer, ContentType aContentType,
     // have transitioned into/out of component alpha, then we need to recreate it.
     if (HaveBuffer() &&
         (contentType != BufferContentType() ||
-         mode == Layer::SURFACE_COMPONENT_ALPHA) != (HaveBufferOnWhite())) {
+        (mode == Layer::SURFACE_COMPONENT_ALPHA) != HaveBufferOnWhite())) {
 
       // We're effectively clearing the valid region, so we need to draw
       // the entire needed region now.
@@ -785,7 +800,7 @@ ThebesLayerBuffer::BeginPaint(ThebesLayer* aLayer, ContentType aContentType,
       FillSurface(mBufferOnWhite, result.mRegionToDraw, topLeft, gfxRGBA(1.0, 1.0, 1.0, 1.0));
     }
     gfxUtils::ClipToRegionSnapped(result.mContext, result.mRegionToDraw);
-  } else if (contentType == gfxASurface::CONTENT_COLOR_ALPHA && !isClear) {
+  } else if (contentType == GFX_CONTENT_COLOR_ALPHA && !isClear) {
     if (IsAzureBuffer()) {
       nsIntRegionRectIterator iter(result.mRegionToDraw);
       const nsIntRect *iterRect;

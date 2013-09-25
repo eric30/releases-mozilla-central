@@ -2655,7 +2655,7 @@ nsPresContext::IsCrossProcessRootContentDocument()
     return true;
   }
 
-  TabChild* tabChild = GetTabChildFrom(mShell);
+  TabChild* tabChild = TabChild::GetFrom(mShell);
   return (tabChild && tabChild->IsRootContentDocument());
 }
 
@@ -2670,6 +2670,24 @@ bool nsPresContext::GetPaintFlashing() const
     mPaintFlashingInitialized = true;
   }
   return mPaintFlashing;
+}
+
+int32_t
+nsPresContext::AppUnitsPerDevPixel() const
+{
+  return mDeviceContext->AppUnitsPerDevPixel();
+}
+
+nscoord
+nsPresContext::GfxUnitsToAppUnits(gfxFloat aGfxUnits) const
+{
+  return mDeviceContext->GfxUnitsToAppUnits(aGfxUnits);
+}
+
+gfxFloat
+nsPresContext::AppUnitsToGfxUnits(nscoord aAppUnits) const
+{
+  return mDeviceContext->AppUnitsToGfxUnits(aAppUnits);
 }
 
 nsRootPresContext::nsRootPresContext(nsIDocument* aDocument,

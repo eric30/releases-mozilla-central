@@ -15,9 +15,9 @@
 using namespace js;
 using namespace js::crash;
 
-const static int stack_snapshot_max_size = 32768;
-
 #if defined(XP_WIN)
+
+static const int stack_snapshot_max_size = 32768;
 
 #include <windows.h>
 

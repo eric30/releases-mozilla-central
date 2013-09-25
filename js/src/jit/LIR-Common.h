@@ -7,13 +7,14 @@
 #ifndef jit_LIR_Common_h
 #define jit_LIR_Common_h
 
-#include "jit/RangeAnalysis.h"
 #include "jit/shared/Assembler-shared.h"
 
 // This file declares LIR instructions that are common to every platform.
 
 namespace js {
 namespace jit {
+
+class Range;
 
 template <size_t Temps, size_t ExtraUses = 0>
 class LBinaryMath : public LInstructionHelper<1, 2 + ExtraUses, Temps>
@@ -497,6 +498,32 @@ public:
 
     const LAllocation *getTemp1() {
         return getTemp(1)->output();
+    }
+};
+
+class LNewDerivedTypedObject : public LCallInstructionHelper<1, 3, 0>
+{
+  public:
+    LIR_HEADER(NewDerivedTypedObject);
+
+    LNewDerivedTypedObject(const LAllocation &type,
+                           const LAllocation &owner,
+                           const LAllocation &offset) {
+        setOperand(0, type);
+        setOperand(1, owner);
+        setOperand(2, offset);
+    }
+
+    const LAllocation *type() {
+        return getOperand(0);
+    }
+
+    const LAllocation *owner() {
+        return getOperand(1);
+    }
+
+    const LAllocation *offset() {
+        return getOperand(2);
     }
 };
 
@@ -2409,19 +2436,18 @@ class LBinaryV : public LCallInstructionHelper<BOX_PIECES, 2 * BOX_PIECES, 0>
 };
 
 // Adds two string, returning a string.
-class LConcat : public LInstructionHelper<1, 2, 4>
+class LConcat : public LInstructionHelper<1, 2, 3>
 {
   public:
     LIR_HEADER(Concat)
 
     LConcat(const LAllocation &lhs, const LAllocation &rhs, const LDefinition &temp1,
-            const LDefinition &temp2, const LDefinition &temp3, const LDefinition &temp4) {
+            const LDefinition &temp2, const LDefinition &temp3) {
         setOperand(0, lhs);
         setOperand(1, rhs);
         setTemp(0, temp1);
         setTemp(1, temp2);
         setTemp(2, temp3);
-        setTemp(3, temp4);
     }
 
     const LAllocation *lhs() {
@@ -2439,25 +2465,21 @@ class LConcat : public LInstructionHelper<1, 2, 4>
     const LDefinition *temp3() {
         return this->getTemp(2);
     }
-    const LDefinition *temp4() {
-        return this->getTemp(3);
-    }
 };
 
-class LConcatPar : public LInstructionHelper<1, 3, 3>
+class LConcatPar : public LInstructionHelper<1, 3, 2>
 {
   public:
     LIR_HEADER(ConcatPar)
 
     LConcatPar(const LAllocation &slice, const LAllocation &lhs, const LAllocation &rhs,
-               const LDefinition &temp1, const LDefinition &temp2, const LDefinition &temp3)
+               const LDefinition &temp1, const LDefinition &temp2)
     {
         setOperand(0, slice);
         setOperand(1, lhs);
         setOperand(2, rhs);
         setTemp(0, temp1);
         setTemp(1, temp2);
-        setTemp(2, temp3);
     }
 
     const LAllocation *forkJoinSlice() {
@@ -2474,9 +2496,6 @@ class LConcatPar : public LInstructionHelper<1, 3, 3>
     }
     const LDefinition *temp2() {
         return this->getTemp(1);
-    }
-    const LDefinition *temp3() {
-        return this->getTemp(2);
     }
 };
 
@@ -2774,6 +2793,22 @@ class LOsrScopeChain : public LInstructionHelper<1, 1, 0>
     }
 };
 
+// Materialize a JSObject ArgumentsObject stored in an interpreter frame for OSR.
+class LOsrArgumentsObject : public LInstructionHelper<1, 1, 0>
+{
+  public:
+    LIR_HEADER(OsrArgumentsObject)
+
+    LOsrArgumentsObject(const LAllocation &entry)
+    {
+        setOperand(0, entry);
+    }
+
+    const MOsrArgumentsObject *mir() {
+        return mir_->toOsrArgumentsObject();
+    }
+};
+
 class LRegExp : public LCallInstructionHelper<1, 0, 0>
 {
   public:
@@ -3034,6 +3069,20 @@ class LTypedArrayElements : public LInstructionHelper<1, 1, 0>
     LIR_HEADER(TypedArrayElements)
 
     LTypedArrayElements(const LAllocation &object) {
+        setOperand(0, object);
+    }
+    const LAllocation *object() {
+        return getOperand(0);
+    }
+};
+
+// Load a typed array's elements vector.
+class LTypedObjectElements : public LInstructionHelper<1, 1, 0>
+{
+  public:
+    LIR_HEADER(TypedObjectElements)
+
+    LTypedObjectElements(const LAllocation &object) {
         setOperand(0, object);
     }
     const LAllocation *object() {
@@ -4679,6 +4728,24 @@ class LPostWriteBarrierV : public LInstructionHelper<0, 1 + BOX_PIECES, 1>
     }
 };
 
+// Generational write barrier used when writing to multiple slots in an object.
+class LPostWriteBarrierAllSlots : public LInstructionHelper<0, 1, 0>
+{
+  public:
+    LIR_HEADER(PostWriteBarrierAllSlots)
+
+    LPostWriteBarrierAllSlots(const LAllocation &obj) {
+        setOperand(0, obj);
+    }
+
+    const MPostWriteBarrier *mir() const {
+        return mir_->toPostWriteBarrier();
+    }
+    const LAllocation *object() {
+        return getOperand(0);
+    }
+};
+
 // Guard against an object's class.
 class LGuardClass : public LInstructionHelper<0, 1, 1>
 {
@@ -5097,7 +5164,7 @@ class LAssertRangeI : public LInstructionHelper<0, 1, 0>
     MAssertRange *mir() {
         return mir_->toAssertRange();
     }
-    Range *range() {
+    const Range *range() {
         return mir()->range();
     }
 };
@@ -5123,7 +5190,7 @@ class LAssertRangeD : public LInstructionHelper<0, 1, 1>
     MAssertRange *mir() {
         return mir_->toAssertRange();
     }
-    Range *range() {
+    const Range *range() {
         return mir()->range();
     }
 };
@@ -5149,7 +5216,7 @@ class LAssertRangeF : public LInstructionHelper<0, 1, 1>
     MAssertRange *mir() {
         return mir_->toAssertRange();
     }
-    Range *range() {
+    const Range *range() {
         return mir()->range();
     }
 };
@@ -5182,7 +5249,7 @@ class LAssertRangeV : public LInstructionHelper<0, BOX_PIECES, 3>
     MAssertRange *mir() {
         return mir_->toAssertRange();
     }
-    Range *range() {
+    const Range *range() {
         return mir()->range();
     }
 };

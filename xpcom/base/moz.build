@@ -75,7 +75,6 @@ EXPORTS.mozilla += [
     'AvailableMemoryTracker.h',
     'ClearOnShutdown.h',
     'CycleCollectedJSRuntime.h',
-    'MapsMemoryReporter.h',
     'StackWalk.h',
     'StaticMutex.h',
     'StaticPtr.h',
@@ -92,7 +91,6 @@ CPP_SOURCES += [
     'nsConsoleService.cpp',
     'nsCycleCollector.cpp',
     'nsDebugImpl.cpp',
-    'nsErrorAsserts.cpp',
     'nsErrorService.cpp',
     'nsGZFileWriter.cpp',
     'nsInterfaceRequestorAgg.cpp',
@@ -107,11 +105,6 @@ CPP_SOURCES += [
     'nsUUIDGenerator.cpp',
     'nsVersionComparatorImpl.cpp',
 ]
-
-if CONFIG['OS_ARCH'] == 'Linux':
-    CPP_SOURCES += [
-        'MapsMemoryReporter.cpp',
-    ]
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     CPP_SOURCES += [

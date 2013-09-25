@@ -64,6 +64,8 @@ pref("browser.cache.memory.enable", true);
 #endif
 pref("browser.cache.memory.capacity", 1024); // kilobytes
 
+pref("browser.cache.memory_limit", 5120); // 5 MB
+
 /* image cache prefs */
 pref("image.cache.size", 1048576); // bytes
 pref("image.high_quality_downscaling.enabled", false);
@@ -162,6 +164,7 @@ pref("layout.spellcheckDefault", 0);
 
 /* new html5 forms */
 pref("dom.experimental_forms", true);
+pref("dom.forms.number", true);
 
 /* extension manager and xpinstall */
 pref("xpinstall.whitelist.add", "addons.mozilla.org");
@@ -716,7 +719,9 @@ pref("app.orientation.default", "");
 // back to the system.
 pref("memory.free_dirty_pages", true);
 
-pref("layout.imagevisibility.enabled", false);
+pref("layout.imagevisibility.enabled", true);
+pref("layout.imagevisibility.numscrollportwidths", 1);
+pref("layout.imagevisibility.numscrollportheights", 1);
 
 pref("layers.force-tiles", true);
 
@@ -783,3 +788,4 @@ pref("general.useragent.override.youtube.com", "Android; Tablet;#Android; Mobile
 
 // When true, phone number linkification is enabled.
 pref("browser.ui.linkify.phone", false);
+

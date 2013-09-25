@@ -113,19 +113,10 @@ MediaConduitErrorCode WebrtcVideoConduit::Init()
   // get the JVM
   JavaVM *jvm = jsjni_GetVM();
 
-  JNIEnv* env;
-  if (jvm->GetEnv((void**)&env, JNI_VERSION_1_4) != JNI_OK) {
-      CSFLogError(logTag,  "%s: could not get Java environment", __FUNCTION__);
-      return kMediaConduitSessionNotInited;
-  }
-  jvm->AttachCurrentThread(&env, nullptr);
-
   if (webrtc::VideoEngine::SetAndroidObjects(jvm, (void*)context) != 0) {
     CSFLogError(logTag,  "%s: could not set Android objects", __FUNCTION__);
     return kMediaConduitSessionNotInited;
   }
-
-  env->DeleteGlobalRef(context);
 #endif
 
   if( !(mVideoEngine = webrtc::VideoEngine::Create()) )
@@ -574,6 +565,21 @@ WebrtcVideoConduit::ConfigureRecvMediaCodecs(
     }
   }
 
+  switch (kf_request) {
+    case webrtc::kViEKeyFrameRequestNone:
+      mFrameRequestMethod = FrameRequestNone;
+      break;
+    case webrtc::kViEKeyFrameRequestPliRtcp:
+      mFrameRequestMethod = FrameRequestPli;
+      break;
+    case webrtc::kViEKeyFrameRequestFirRtcp:
+      mFrameRequestMethod = FrameRequestFir;
+      break;
+    default:
+      MOZ_ASSERT(PR_FALSE);
+      mFrameRequestMethod = FrameRequestUnknown;
+  }
+
   if(use_nack_basic)
   {
     CSFLogDebug(logTag, "Enabling NACK (recv) for video stream\n");
@@ -584,6 +590,7 @@ WebrtcVideoConduit::ConfigureRecvMediaCodecs(
       return kMediaConduitNACKStatusError;
     }
   }
+  mUsingNackBasic = use_nack_basic;
 
   //Start Receive on the video engine
   if(mPtrViEBase->StartReceive(mChannel) == -1)

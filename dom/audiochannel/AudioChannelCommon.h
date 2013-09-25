@@ -13,6 +13,7 @@ namespace dom {
 // The audio channel. Read the nsIHTMLMediaElement.idl for a description
 // about this attribute.
 enum AudioChannelType {
+  AUDIO_CHANNEL_DEFAULT = -1,
   AUDIO_CHANNEL_NORMAL = 0,
   AUDIO_CHANNEL_CONTENT,
   AUDIO_CHANNEL_NOTIFICATION,
@@ -23,6 +24,12 @@ enum AudioChannelType {
   AUDIO_CHANNEL_LAST
 };
 
+enum AudioChannelState {
+  AUDIO_CHANNEL_STATE_NORMAL = 0,
+  AUDIO_CHANNEL_STATE_MUTED,
+  AUDIO_CHANNEL_STATE_FADED,
+  AUDIO_CHANNEL_STATE_LAST
+};
 } // namespace dom
 } // namespace mozilla
 

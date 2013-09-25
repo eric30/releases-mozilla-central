@@ -50,7 +50,6 @@
 using namespace mozilla;
 using namespace mozilla::dom;
 
-static const unsigned short SVG_FECOMPONENTTRANSFER_TYPE_UNKNOWN  = 0;
 static const unsigned short SVG_FECOMPONENTTRANSFER_TYPE_IDENTITY = 1;
 static const unsigned short SVG_FECOMPONENTTRANSFER_TYPE_TABLE    = 2;
 static const unsigned short SVG_FECOMPONENTTRANSFER_TYPE_DISCRETE = 3;
@@ -156,9 +155,9 @@ nsSVGFE::SetupScalingFilter(nsSVGFilterInstance *aInstance,
                                  nsIntRect(nsIntPoint(), scaledSize));
 
   result.mSource = new gfxImageSurface(scaledSize,
-                                       gfxASurface::ImageFormatARGB32);
+                                       gfxImageFormatARGB32);
   result.mTarget = new gfxImageSurface(scaledSize,
-                                       gfxASurface::ImageFormatARGB32);
+                                       gfxImageFormatARGB32);
   if (!result.mSource || result.mSource->CairoStatus() ||
       !result.mTarget || result.mTarget->CairoStatus()) {
     result.mSource = nullptr;

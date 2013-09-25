@@ -177,21 +177,25 @@ ImageContainer::SetCurrentImageInternal(Image *aImage)
 }
 
 void
-ImageContainer::SetCurrentImage(Image *aImage)
+ImageContainer::ClearCurrentImage()
 {
   ReentrantMonitorAutoEnter mon(mReentrantMonitor);
-  if (IsAsync()) {
-    if (aImage) {
-      ImageBridgeChild::DispatchImageClientUpdate(mImageClient, this);
-    } else {
-      // here we used to have a SetIdle() call on the image bridge to tell
-      // the compositor that the video element is not going to be seen for
-      // moment and that it can release its shared memory. It was causing
-      // crashes so it has been removed.
-      // This may be reimplemented after 858914 lands.
-    }
+  SetCurrentImageInternal(nullptr);
+}
+
+void
+ImageContainer::SetCurrentImage(Image *aImage)
+{
+  if (IsAsync() && !aImage) {
+    // Let ImageClient to release all TextureClients.
+    ImageBridgeChild::FlushImage(mImageClient, this);
+    return;
   }
 
+  ReentrantMonitorAutoEnter mon(mReentrantMonitor);
+  if (IsAsync()) {
+    ImageBridgeChild::DispatchImageClientUpdate(mImageClient, this);
+  }
   SetCurrentImageInternal(aImage);
 }
 
@@ -274,8 +278,8 @@ ImageContainer::LockCurrentAsSurface(gfxIntSize *aSize, Image** aCurrentImage)
       nsRefPtr<gfxImageSurface> newSurf =
         new gfxImageSurface(mRemoteData->mBitmap.mData, mRemoteData->mSize, mRemoteData->mBitmap.mStride,
                             mRemoteData->mFormat == RemoteImageData::BGRX32 ?
-                                                   gfxASurface::ImageFormatARGB32 :
-                                                   gfxASurface::ImageFormatRGB24);
+                                                   gfxImageFormatARGB32 :
+                                                   gfxImageFormatRGB24);
 
       *aSize = newSurf->GetSize();
     
@@ -406,7 +410,7 @@ ImageContainer::EnsureActiveImage()
 PlanarYCbCrImage::PlanarYCbCrImage(BufferRecycleBin *aRecycleBin)
   : Image(nullptr, PLANAR_YCBCR)
   , mBufferSize(0)
-  , mOffscreenFormat(gfxASurface::ImageFormatUnknown)
+  , mOffscreenFormat(gfxImageFormatUnknown)
   , mRecycleBin(aRecycleBin)
 {
 }
@@ -482,10 +486,10 @@ PlanarYCbCrImage::SetData(const Data &aData)
   CopyData(aData);
 }
 
-gfxASurface::gfxImageFormat
+gfxImageFormat
 PlanarYCbCrImage::GetOffscreenFormat()
 {
-  return mOffscreenFormat == gfxASurface::ImageFormatUnknown ?
+  return mOffscreenFormat == gfxImageFormatUnknown ?
     gfxPlatform::GetPlatform()->GetOffscreenFormat() :
     mOffscreenFormat;
 }
@@ -516,7 +520,7 @@ PlanarYCbCrImage::GetAsSurface()
     return result.forget();
   }
 
-  gfxASurface::gfxImageFormat format = GetOffscreenFormat();
+  gfxImageFormat format = GetOffscreenFormat();
   gfxIntSize size(mSize);
   gfxUtils::GetYCbCrToRGBDestFormatAndSize(mData, format, size);
   if (size.width > PlanarYCbCrImage::MAX_DIMENSION ||
@@ -542,7 +546,7 @@ RemoteBitmapImage::GetAsSurface()
 {
   nsRefPtr<gfxImageSurface> newSurf =
     new gfxImageSurface(mSize,
-    mFormat == RemoteImageData::BGRX32 ? gfxASurface::ImageFormatRGB24 : gfxASurface::ImageFormatARGB32);
+    mFormat == RemoteImageData::BGRX32 ? gfxImageFormatRGB24 : gfxImageFormatARGB32);
 
   for (int y = 0; y < mSize.height; y++) {
     memcpy(newSurf->Data() + newSurf->Stride() * y,

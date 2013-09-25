@@ -724,25 +724,26 @@ var ProgressListener = Class({
     this.webProgress = null;
   },
 
-  onStateChange: makeInfallible(function stateChange(progress, request, flag, status) {
+  onStateChange: makeInfallible(function stateChange(progress, request, flags, status) {
     if (!this.webProgress) {
       console.warn("got an onStateChange after destruction");
       return;
     }
 
-    let isWindow = flag & Ci.nsIWebProgressListener.STATE_IS_WINDOW;
-    let isDocument = flag & Ci.nsIWebProgressListener.STATE_IS_DOCUMENT;
+    let isWindow = flags & Ci.nsIWebProgressListener.STATE_IS_WINDOW;
+    let isDocument = flags & Ci.nsIWebProgressListener.STATE_IS_DOCUMENT;
     if (!(isWindow || isDocument)) {
       return;
     }
 
-    if (isDocument && (flag & Ci.nsIWebProgressListener.STATE_START)) {
+    if (isDocument && (flags & Ci.nsIWebProgressListener.STATE_START)) {
       events.emit(this, "windowchange-start", progress.DOMWindow);
     }
-    if (isWindow && (flag & Ci.nsIWebProgressListener.STATE_STOP)) {
+    if (isWindow && (flags & Ci.nsIWebProgressListener.STATE_STOP)) {
       events.emit(this, "windowchange-stop", progress.DOMWindow);
     }
   }),
+
   onProgressChange: function() {},
   onSecurityChange: function() {},
   onStatusChange: function() {},
@@ -817,6 +818,7 @@ var WalkerActor = protocol.ActorClass({
     this._activePseudoClassLocks = null;
     this.progressListener.destroy();
     this.rootDoc = null;
+    events.emit(this, "destroyed");
     protocol.Actor.prototype.destroy.call(this);
   },
 
@@ -923,7 +925,6 @@ var WalkerActor = protocol.ActorClass({
   },
 
   highlight: method(function(node) {
-    this._installHelperSheet(node);
     this._unhighlight();
 
     if (!node ||
@@ -932,6 +933,7 @@ var WalkerActor = protocol.ActorClass({
       return;
     }
 
+    this._installHelperSheet(node);
     this.layoutHelpers.scrollIntoViewIfNeeded(node.rawNode);
     DOMUtils.addPseudoClassLock(node.rawNode, HIGHLIGHTED_PSEUDO_CLASS);
     this._highlightTimeout = setTimeout(this._unhighlight.bind(this), HIGHLIGHTED_TIMEOUT);
@@ -1735,7 +1737,8 @@ var WalkerActor = protocol.ActorClass({
 
   onFrameLoad: function(window) {
     let frame = this.layoutHelpers.getFrameElement(window);
-    if (!frame && !this.rootDoc) {
+    let isTopLevel = this.layoutHelpers.isTopLevelWindow(window);
+    if (!frame && !this.rootDoc && isTopLevel) {
       this.rootDoc = window.document;
       this.rootNode = this.document();
       this.queueMutation({
@@ -1848,7 +1851,7 @@ var WalkerFront = exports.WalkerFront = protocol.FrontClass(WalkerActor, {
   }),
 
   initialize: function(client, form) {
-    this._rootNodeDeferred = promise.defer();
+    this._createRootNodePromise();
     protocol.Front.prototype.initialize.call(this, client, form);
     this._orphaned = new Set();
     this._retainedOrphans = new Set();
@@ -1873,6 +1876,17 @@ var WalkerFront = exports.WalkerFront = protocol.FrontClass(WalkerActor, {
    */
   getRootNode: function() {
     return this._rootNodeDeferred.promise;
+  },
+
+  /**
+   * Create the root node promise, triggering the "new-root" notification
+   * on resolution.
+   */
+  _createRootNodePromise: function() {
+    this._rootNodeDeferred = promise.defer();
+    this._rootNodeDeferred.promise.then(() => {
+      events.emit(this, "new-root");
+    });
   },
 
   /**
@@ -2047,8 +2061,7 @@ var WalkerFront = exports.WalkerFront = protocol.FrontClass(WalkerActor, {
           }
         } else if (change.type === "documentUnload") {
           if (targetFront === this.rootNode) {
-            this.rootNode = null;
-            this._rootNodeDeferred = promise.defer();
+            this._createRootNodePromise();
           }
 
           // We try to give fronts instead of actorIDs, but these fronts need
@@ -2198,6 +2211,10 @@ var InspectorActor = protocol.ActorClass({
       let tabActor = this.tabActor;
       window.removeEventListener("DOMContentLoaded", domReady, true);
       this.walker = WalkerActor(this.conn, tabActor, options);
+      events.once(this.walker, "destroyed", () => {
+        this._walkerPromise = null;
+        this._pageStylePromise = null;
+      });
       deferred.resolve(this.walker);
     };
 

@@ -26,6 +26,8 @@
 #include "nsPoint.h"                    // for nsIntPoint
 #include "nsRect.h"                     // for nsIntRect
 #include "nsTArray.h"                   // for nsTArray, nsTArray_Impl
+#include "AutoMaskData.h"
+
 struct gfxMatrix;
 
 using namespace mozilla::gfx;
@@ -64,7 +66,7 @@ SetAntialiasingFlags(Layer* aLayer, gfxContext* aTarget)
                             dt->GetOpaqueRect().Contains(intTransformedBounds));
   } else {
     nsRefPtr<gfxASurface> surface = aTarget->CurrentSurface();
-    if (surface->GetContentType() != gfxASurface::CONTENT_COLOR_ALPHA) {
+    if (surface->GetContentType() != GFX_CONTENT_COLOR_ALPHA) {
       // Destination doesn't have alpha channel; no need to set any special flags
       return;
     }
@@ -87,7 +89,6 @@ BasicThebesLayer::PaintThebes(gfxContext* aContext,
   PROFILER_LABEL("BasicThebesLayer", "PaintThebes");
   NS_ASSERTION(BasicManager()->InDrawing(),
                "Can only draw in drawing phase");
-  nsRefPtr<gfxASurface> targetSurface = aContext->CurrentSurface();
 
   if (!mContentClient) {
     // we pass a null pointer for the Forwarder argument, which means
@@ -106,10 +107,11 @@ BasicThebesLayer::PaintThebes(gfxContext* aContext,
 
   bool canUseOpaqueSurface = CanUseOpaqueSurface();
   ContentType contentType =
-    canUseOpaqueSurface ? gfxASurface::CONTENT_COLOR :
-                          gfxASurface::CONTENT_COLOR_ALPHA;
+    canUseOpaqueSurface ? GFX_CONTENT_COLOR :
+                          GFX_CONTENT_COLOR_ALPHA;
   float opacity = GetEffectiveOpacity();
-  
+  gfxContext::GraphicsOperator mixBlendMode = GetEffectiveMixBlendMode();
+
   if (!BasicManager()->IsRetained()) {
     NS_ASSERTION(readbackUpdates.IsEmpty(), "Can't do readback for non-retained layer");
 
@@ -130,13 +132,13 @@ BasicThebesLayer::PaintThebes(gfxContext* aContext,
 
       bool needsClipToVisibleRegion = GetClipToVisibleRegion();
       bool needsGroup =
-          opacity != 1.0 || GetOperator() != gfxContext::OPERATOR_OVER || aMaskLayer;
+          opacity != 1.0 || GetOperator() != gfxContext::OPERATOR_OVER || mixBlendMode != gfxContext::OPERATOR_OVER || aMaskLayer;
       nsRefPtr<gfxContext> groupContext;
       if (needsGroup) {
         groupContext =
           BasicManager()->PushGroupForLayer(aContext, this, toDraw,
                                             &needsClipToVisibleRegion);
-        if (GetOperator() != gfxContext::OPERATOR_OVER) {
+        if (GetOperator() != gfxContext::OPERATOR_OVER || mixBlendMode != gfxContext::OPERATOR_OVER) {
           needsClipToVisibleRegion = true;
         }
       } else {
@@ -149,7 +151,7 @@ BasicThebesLayer::PaintThebes(gfxContext* aContext,
         if (needsClipToVisibleRegion) {
           gfxUtils::ClipToRegion(aContext, toDraw);
         }
-        AutoSetOperator setOperator(aContext, GetOperator());
+        AutoSetOperator setOptimizedOperator(aContext, mixBlendMode != gfxContext::OPERATOR_OVER ? mixBlendMode : GetOperator());
         PaintWithMask(aContext, opacity, aMaskLayer);
       }
 

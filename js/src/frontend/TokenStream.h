@@ -311,7 +311,7 @@ struct CompileError {
     char *message;
     ErrorArgumentsType argumentsType;
     CompileError()
-      : message(NULL), argumentsType(ArgumentsAreUnicode)
+      : message(nullptr), argumentsType(ArgumentsAreUnicode)
     {
         mozilla::PodZero(&report);
     }
@@ -596,16 +596,20 @@ class MOZ_STACK_CLASS TokenStream
         return pos.buf - userbuf.base();
     }
 
-    bool hasSourceMap() const {
-        return sourceMap != NULL;
+    bool hasSourceURL() const {
+        return sourceURL_ != nullptr;
     }
 
-    // Give up responsibility for managing the sourceMap filename's memory.
-    jschar *releaseSourceMap() {
-        JS_ASSERT(hasSourceMap());
-        jschar *sm = sourceMap;
-        sourceMap = NULL;
-        return sm;
+    jschar *sourceURL() {
+        return sourceURL_;
+    }
+
+    bool hasSourceMapURL() const {
+        return sourceMapURL_ != nullptr;
+    }
+
+    jschar *sourceMapURL() {
+        return sourceMapURL_;
     }
 
     // If the name at s[0:length] is not a keyword in this version, return
@@ -732,15 +736,15 @@ class MOZ_STACK_CLASS TokenStream
         }
 
         jschar getRawChar() {
-            return *ptr++;      // this will NULL-crash if poisoned
+            return *ptr++;      // this will nullptr-crash if poisoned
         }
 
         jschar peekRawChar() const {
-            return *ptr;        // this will NULL-crash if poisoned
+            return *ptr;        // this will nullptr-crash if poisoned
         }
 
         bool matchRawChar(jschar c) {
-            if (*ptr == c) {    // this will NULL-crash if poisoned
+            if (*ptr == c) {    // this will nullptr-crash if poisoned
                 ptr++;
                 return true;
             }
@@ -775,7 +779,7 @@ class MOZ_STACK_CLASS TokenStream
 #ifdef DEBUG
         // Poison the TokenBuf so it cannot be accessed again.
         void poison() {
-            ptr = NULL;
+            ptr = nullptr;
         }
 #endif
 
@@ -807,6 +811,12 @@ class MOZ_STACK_CLASS TokenStream
     bool matchUnicodeEscapeIdStart(int32_t *c);
     bool matchUnicodeEscapeIdent(int32_t *c);
     bool peekChars(int n, jschar *cp);
+
+    bool getDirectives(bool isMultiline, bool shouldWarnDeprecated);
+    bool getDirective(bool isMultiline, bool shouldWarnDeprecated,
+                      const char *directive, int directiveLength,
+                      const char *errorMsgPragma, jschar **destination);
+    bool getSourceURL(bool isMultiline, bool shouldWarnDeprecated);
     bool getSourceMappingURL(bool isMultiline, bool shouldWarnDeprecated);
 
     // |expect| cannot be an EOL char.
@@ -844,10 +854,11 @@ class MOZ_STACK_CLASS TokenStream
     unsigned            lineno;             // current line number
     Flags               flags;              // flags -- see above
     const jschar        *linebase;          // start of current line;  points into userbuf
-    const jschar        *prevLinebase;      // start of previous line;  NULL if on the first line
+    const jschar        *prevLinebase;      // start of previous line;  nullptr if on the first line
     TokenBuf            userbuf;            // user input buffer
     const char          *filename;          // input filename or null
-    jschar              *sourceMap;         // source map's filename or null
+    jschar              *sourceURL_;        // the user's requested source URL or null
+    jschar              *sourceMapURL_;     // source map's filename or null
     CharBuffer          tokenbuf;           // current token string buffer
     bool                maybeEOL[256];      // probabilistic EOL lookup table
     bool                maybeStrSpecial[256];   // speeds up string scanning

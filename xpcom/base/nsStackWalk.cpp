@@ -6,9 +6,9 @@
 
 /* API for getting a stack trace of the C/C++ stack on the current thread */
 
-#include "mozilla/Util.h"
+#include "mozilla/Assertions.h"
+#include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/StackWalk.h"
-#include "nsDebug.h"
 #include "nsStackWalkPrivate.h"
 
 #include "nsStackWalk.h"
@@ -42,7 +42,6 @@ static CriticalAddress gCriticalAddress;
 
 #if NSSTACKWALK_SUPPORTS_MACOSX
 #include <pthread.h>
-#include <errno.h>
 #include <CoreServices/CoreServices.h>
 
 typedef void
@@ -178,6 +177,7 @@ StackWalkInitCriticalAddress()
 #include <stdio.h>
 #include <malloc.h>
 #include "plstr.h"
+#include "mozilla/Util.h"
 
 #include "nspr.h"
 #include <imagehlp.h>
@@ -814,7 +814,6 @@ NS_FormatCodeAddressDetails(void *aPC, const nsCodeAddressDetails *aDetails,
 
 #include <stdlib.h>
 #include <string.h>
-#include <math.h>
 #include "nscore.h"
 #include <stdio.h>
 #include "plstr.h"
@@ -831,7 +830,6 @@ NS_FormatCodeAddressDetails(void *aPC, const nsCodeAddressDetails *aDetails,
 // Yes, this is a gcc only hack
 #if defined(MOZ_DEMANGLE_SYMBOLS)
 #include <cxxabi.h>
-#include <stdlib.h> // for free()
 #endif // MOZ_DEMANGLE_SYMBOLS
 
 void DemangleSymbol(const char * aSymbol, 
@@ -1320,10 +1318,11 @@ NS_FormatCodeAddressDetails(void *aPC, const nsCodeAddressDetails *aDetails,
   if (!aDetails->library[0]) {
     snprintf(aBuffer, aBufferSize, "UNKNOWN %p\n", aPC);
   } else if (!aDetails->function[0]) {
-    snprintf(aBuffer, aBufferSize, "UNKNOWN [%s +0x%08lX]\n",
+    snprintf(aBuffer, aBufferSize, "UNKNOWN [%s +0x%08" PRIxPTR "]\n",
                                    aDetails->library, aDetails->loffset);
   } else {
-    snprintf(aBuffer, aBufferSize, "%s+0x%08lX [%s +0x%08lX]\n",
+    snprintf(aBuffer, aBufferSize, "%s+0x%08" PRIxPTR
+                                   " [%s +0x%08" PRIxPTR "]\n",
                                    aDetails->function, aDetails->foffset,
                                    aDetails->library, aDetails->loffset);
   }

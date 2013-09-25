@@ -148,7 +148,6 @@ bool MediaPluginReader::DecodeVideoFrame(bool &aKeyframeSkip,
         mVideoQueue.Push(mLastVideoFrame);
         mLastVideoFrame = NULL;
       }
-      mVideoQueue.Finish();
       return false;
     }
     mVideoSeekTimeUs = -1;
@@ -292,7 +291,6 @@ bool MediaPluginReader::DecodeAudioData()
   // Read next frame
   MPAPI::AudioFrame frame;
   if (!mPlugin->ReadAudio(mPlugin, &frame, mAudioSeekTimeUs)) {
-    mAudioQueue.Finish();
     return false;
   }
   mAudioSeekTimeUs = -1;
@@ -365,7 +363,7 @@ MediaPluginReader::ImageBufferCallback::operator()(size_t aWidth, size_t aHeight
     case MPAPI::RGB565:
       rgbImage = mozilla::layers::CreateSharedRGBImage(mImageContainer,
                                                        nsIntSize(aWidth, aHeight),
-                                                       gfxASurface::ImageFormatRGB16_565);
+                                                       gfxImageFormatRGB16_565);
       if (!rgbImage) {
         NS_WARNING("Could not create rgb image");
         return nullptr;

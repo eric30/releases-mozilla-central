@@ -8,7 +8,6 @@
 
 #include <ostream>
 #include "GeckoProfilerImpl.h"
-#include "JSAObjectBuilder.h"
 #include "platform.h"
 #include "mozilla/Mutex.h"
 
@@ -22,6 +21,7 @@ public:
   // aTagData must not need release (i.e. be a string from the text segment)
   ProfileEntry(char aTagName, const char *aTagData);
   ProfileEntry(char aTagName, void *aTagPtr);
+  ProfileEntry(char aTagName, ProfilerMarker *aTagMarker);
   ProfileEntry(char aTagName, double aTagFloat);
   ProfileEntry(char aTagName, uintptr_t aTagOffset);
   ProfileEntry(char aTagName, Address aTagAddress);
@@ -33,6 +33,10 @@ public:
   bool is_ent(char tagName);
   void* get_tagPtr();
   void log();
+  const ProfilerMarker* getMarker() {
+    MOZ_ASSERT(mTagName == 'm');
+    return mTagMarker;
+  }
 
   char getTagName() const { return mTagName; }
 
@@ -42,6 +46,7 @@ private:
     const char* mTagData;
     char        mTagChars[sizeof(void*)];
     void*       mTagPtr;
+    ProfilerMarker* mTagMarker;
     double      mTagFloat;
     Address     mTagAddress;
     uintptr_t   mTagOffset;
@@ -68,16 +73,20 @@ public:
   friend std::ostream& operator<<(std::ostream& stream,
                                   const ThreadProfile& profile);
   void ToStreamAsJSON(std::ostream& stream);
-  JSCustomObject *ToJSObject(JSContext *aCx);
+  JSObject *ToJSObject(JSContext *aCx);
   PseudoStack* GetPseudoStack();
   mozilla::Mutex* GetMutex();
-  void BuildJSObject(JSAObjectBuilder& b, JSCustomObject* profile);
+  template <typename Builder> void BuildJSObject(Builder& b, typename Builder::ObjectHandle profile);
 
   bool IsMainThread() const { return mIsMainThread; }
   const char* Name() const { return mName; }
   int ThreadId() const { return mThreadId; }
 
   PlatformData* GetPlatformData() { return mPlatformData; }
+  int GetGenerationID() const { return mGeneration; }
+  bool HasGenerationExpired(int aGenID) {
+    return aGenID + 2 <= mGeneration;
+  }
   void* GetStackTop() const { return mStackTop; }
 private:
   // Circular buffer 'Keep One Slot Open' implementation
@@ -93,6 +102,8 @@ private:
   int            mThreadId;
   bool           mIsMainThread;
   PlatformData*  mPlatformData;  // Platform specific data.
+  int            mGeneration;
+  int            mPendingGenerationFlush;
   void* const    mStackTop;
 };
 

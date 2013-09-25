@@ -24,6 +24,7 @@ class nsIScrollPositionListener;
 class nsIFrame;
 class nsPresContext;
 class nsIContent;
+class nsRenderingContext;
 
 /**
  * Interface for frames that are scrollable. This interface exposes
@@ -262,6 +263,11 @@ public:
    * @see nsIStatefulFrame::RestoreState
    */
   virtual void ClearDidHistoryRestore() = 0;
+  /**
+   * Determine if the passed in rect is nearly visible according to the image
+   * visibility heuristics for how close it is to the visible scrollport.
+   */
+  virtual bool IsRectNearlyVisible(const nsRect& aRect) = 0;
 };
 
 #endif

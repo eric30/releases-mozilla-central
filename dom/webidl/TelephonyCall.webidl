@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
+[Pref="dom.telephony.enabled"]
 interface TelephonyCall : EventTarget {
   readonly attribute DOMString number;
 
@@ -31,30 +32,18 @@ interface TelephonyCall : EventTarget {
   [Throws]
   void resume();
 
-  [SetterThrows]
   attribute EventHandler onstatechange;
-  [SetterThrows]
   attribute EventHandler ondialing;
-  [SetterThrows]
   attribute EventHandler onalerting;
-  [SetterThrows]
   attribute EventHandler onconnecting;
-  [SetterThrows]
   attribute EventHandler onconnected;
-  [SetterThrows]
   attribute EventHandler ondisconnecting;
-  [SetterThrows]
   attribute EventHandler ondisconnected;
-  [SetterThrows]
   attribute EventHandler onholding;
-  [SetterThrows]
   attribute EventHandler onheld;
-  [SetterThrows]
   attribute EventHandler onresuming;
-  [SetterThrows]
   attribute EventHandler onerror;
 
   // Fired whenever the group attribute changes.
-  [SetterThrows]
   attribute EventHandler ongroupchange;
 };

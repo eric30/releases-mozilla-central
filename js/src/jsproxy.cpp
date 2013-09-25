@@ -76,7 +76,7 @@ js::assertEnteredPolicy(JSContext *cx, JSObject *proxy, jsid id)
 }
 #endif
 
-BaseProxyHandler::BaseProxyHandler(void *family)
+BaseProxyHandler::BaseProxyHandler(const void *family)
   : mFamily(family),
     mHasPrototype(false),
     mHasPolicy(false)
@@ -524,7 +524,7 @@ DirectProxyHandler::weakmapKeyDelegate(JSObject *proxy)
     return UncheckedUnwrap(proxy);
 }
 
-DirectProxyHandler::DirectProxyHandler(void *family)
+DirectProxyHandler::DirectProxyHandler(const void *family)
   : BaseProxyHandler(family)
 {
 }
@@ -785,7 +785,8 @@ class ScriptedIndirectProxyHandler : public BaseProxyHandler
 
 } /* anonymous namespace */
 
-static int sScriptedIndirectProxyHandlerFamily = 0;
+// This variable exists solely to provide a unique address for use as an identifier.
+static const char sScriptedIndirectProxyHandlerFamily = 0;
 
 ScriptedIndirectProxyHandler::ScriptedIndirectProxyHandler()
         : BaseProxyHandler(&sScriptedIndirectProxyHandlerFamily)
@@ -1083,7 +1084,8 @@ class ScriptedDirectProxyHandler : public DirectProxyHandler {
     static ScriptedDirectProxyHandler singleton;
 };
 
-static int sScriptedDirectProxyHandlerFamily = 0;
+// This variable exists solely to provide a unique address for use as an identifier.
+static const char sScriptedDirectProxyHandlerFamily = 0;
 
 // Aux.2 FromGenericPropertyDescriptor(Desc)
 static bool
@@ -3190,7 +3192,7 @@ const Class* const js::FunctionProxyClassPtr = &FunctionProxyObject::class_;
 
 /* static */ ProxyObject *
 ProxyObject::New(JSContext *cx, BaseProxyHandler *handler, HandleValue priv, TaggedProto proto_,
-                 JSObject *parent_, ProxyCallable callable)
+                 JSObject *parent_, ProxyCallable callable, bool singleton)
 {
     Rooted<TaggedProto> proto(cx, proto_);
     RootedObject parent(cx, parent_);
@@ -3209,14 +3211,14 @@ ProxyObject::New(JSContext *cx, BaseProxyHandler *handler, HandleValue priv, Tag
      * their properties and so that we don't need to walk the compartment if
      * their prototype changes later.
      */
-    if (proto.isObject()) {
+    if (proto.isObject() && !singleton) {
         RootedObject protoObj(cx, proto.toObject());
         if (!JSObject::setNewTypeUnknown(cx, clasp, protoObj))
             return NULL;
     }
 
     NewObjectKind newKind =
-        clasp == &OuterWindowProxyObject::class_ ? SingletonObject : GenericObject;
+        (clasp == &OuterWindowProxyObject::class_ || singleton) ? SingletonObject : GenericObject;
     gc::AllocKind allocKind = gc::GetGCObjectKind(clasp);
     if (handler->finalizeInBackground(priv))
         allocKind = GetBackgroundAllocKind(allocKind);
@@ -3237,9 +3239,9 @@ ProxyObject::New(JSContext *cx, BaseProxyHandler *handler, HandleValue priv, Tag
 
 JS_FRIEND_API(JSObject *)
 js::NewProxyObject(JSContext *cx, BaseProxyHandler *handler, HandleValue priv, JSObject *proto_,
-                   JSObject *parent_, ProxyCallable callable)
+                   JSObject *parent_, ProxyCallable callable, bool singleton)
 {
-    return ProxyObject::New(cx, handler, priv, TaggedProto(proto_), parent_, callable);
+    return ProxyObject::New(cx, handler, priv, TaggedProto(proto_), parent_, callable, singleton);
 }
 
 static ProxyObject *

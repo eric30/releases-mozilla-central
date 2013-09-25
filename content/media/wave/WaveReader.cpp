@@ -208,7 +208,6 @@ bool WaveReader::DecodeAudioData()
   nsAutoArrayPtr<char> dataBuffer(new char[static_cast<size_t>(readSize)]);
 
   if (!ReadAll(dataBuffer, readSize)) {
-    mAudioQueue.Finish();
     return false;
   }
 
@@ -310,7 +309,6 @@ WaveReader::ReadAll(char* aBuf, int64_t aSize, int64_t* aBytesRead)
     if (read == 0) {
       return false;
     }
-    mDecoder->NotifyBytesConsumed(read);
     got += read;
     if (aBytesRead) {
       *aBytesRead = got;

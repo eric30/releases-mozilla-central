@@ -120,7 +120,17 @@ namespace js {
 
 class PropertyName;
 
+#ifdef DEBUG
+bool
+RuntimeFromMainThreadIsHeapMajorCollecting(JS::shadow::Zone *shadowZone);
+#endif
+
 namespace gc {
+
+template <typename T>
+void
+MarkUnbarriered(JSTracer *trc, T **thingp, const char *name);
+
 // Direct value access used by the write barriers and the jits.
 void
 MarkValueUnbarriered(JSTracer *trc, Value *v, const char *name);
@@ -131,10 +141,63 @@ void
 MarkObjectUnbarriered(JSTracer *trc, JSObject **obj, const char *name);
 void
 MarkStringUnbarriered(JSTracer *trc, JSString **str, const char *name);
-}
 
-// Note: these functions must be equivalent to the zone() functions implemented
-// by all the subclasses of Cell.
+// Note that some subclasses (e.g. ObjectImpl) specialize some of these
+// methods.
+template <typename T>
+class BarrieredCell : public gc::Cell
+{
+  public:
+    JS_ALWAYS_INLINE JS::Zone *zone() const { return tenuredZone(); }
+    JS_ALWAYS_INLINE JS::shadow::Zone *shadowZone() const { return JS::shadow::Zone::asShadowZone(zone()); }
+    bool isInsideZone(JS::Zone *zone_) const { return tenuredIsInsideZone(zone_); }
+
+    static JS_ALWAYS_INLINE void readBarrier(T *thing) {
+#ifdef JSGC_INCREMENTAL
+        JS::shadow::Zone *shadowZone = thing->shadowZone();
+        if (shadowZone->needsBarrier()) {
+            MOZ_ASSERT(!RuntimeFromMainThreadIsHeapMajorCollecting(shadowZone));
+            T *tmp = thing;
+            js::gc::MarkUnbarriered<T>(shadowZone->barrierTracer(), &tmp, "read barrier");
+            JS_ASSERT(tmp == thing);
+        }
+#endif
+    }
+
+    static JS_ALWAYS_INLINE bool needWriteBarrierPre(JS::Zone *zone) {
+#ifdef JSGC_INCREMENTAL
+        return JS::shadow::Zone::asShadowZone(zone)->needsBarrier();
+#else
+        return false;
+#endif
+    }
+
+    static JS_ALWAYS_INLINE bool isNullLike(T *thing) { return !thing; }
+
+    static JS_ALWAYS_INLINE void writeBarrierPre(T *thing) {
+#ifdef JSGC_INCREMENTAL
+        if (isNullLike(thing) || !thing->shadowRuntimeFromAnyThread()->needsBarrier())
+            return;
+
+        JS::shadow::Zone *shadowZone = thing->shadowZone();
+        if (shadowZone->needsBarrier()) {
+            MOZ_ASSERT(!RuntimeFromMainThreadIsHeapMajorCollecting(shadowZone));
+            T *tmp = thing;
+            js::gc::MarkUnbarriered<T>(shadowZone->barrierTracer(), &tmp, "write barrier");
+            JS_ASSERT(tmp == thing);
+        }
+#endif
+    }
+
+    static void writeBarrierPost(T *thing, void *addr) {}
+    static void writeBarrierPostRelocate(T *thing, void *addr) {}
+    static void writeBarrierPostRemove(T *thing, void *addr) {}
+};
+
+} // namespace gc
+
+// Note: the following Zone-getting functions must be equivalent to the zone()
+// and shadowZone() functions implemented by the subclasses of BarrieredCell.
 
 JS::Zone *
 ZoneOfObject(const JSObject &obj);
@@ -187,7 +250,7 @@ class EncapsulatedPtr
     };
 
   public:
-    EncapsulatedPtr() : value(NULL) {}
+    EncapsulatedPtr() : value(nullptr) {}
     EncapsulatedPtr(T *v) : value(v) {}
     explicit EncapsulatedPtr(const EncapsulatedPtr<T> &v) : value(v.value) {}
 
@@ -198,10 +261,10 @@ class EncapsulatedPtr
         this->value = v;
     }
 
-    /* Use to set the pointer to NULL. */
+    /* Use to set the pointer to nullptr. */
     void clear() {
         pre();
-        value = NULL;
+        value = nullptr;
     }
 
     EncapsulatedPtr<T, Unioned> &operator=(T *v) {
@@ -243,7 +306,7 @@ template <class T, class Unioned = uintptr_t>
 class HeapPtr : public EncapsulatedPtr<T, Unioned>
 {
   public:
-    HeapPtr() : EncapsulatedPtr<T>(NULL) {}
+    HeapPtr() : EncapsulatedPtr<T>(nullptr) {}
     explicit HeapPtr(T *v) : EncapsulatedPtr<T>(v) { post(); }
     explicit HeapPtr(const HeapPtr<T> &v)
       : EncapsulatedPtr<T>(v) { post(); }
@@ -315,7 +378,7 @@ template <class T>
 class RelocatablePtr : public EncapsulatedPtr<T>
 {
   public:
-    RelocatablePtr() : EncapsulatedPtr<T>(NULL) {}
+    RelocatablePtr() : EncapsulatedPtr<T>(nullptr) {}
     explicit RelocatablePtr(T *v) : EncapsulatedPtr<T>(v) {
         if (v)
             post();
@@ -986,13 +1049,13 @@ class ReadBarriered
     T *value;
 
   public:
-    ReadBarriered() : value(NULL) {}
+    ReadBarriered() : value(nullptr) {}
     ReadBarriered(T *value) : value(value) {}
     ReadBarriered(const Rooted<T*> &rooted) : value(rooted) {}
 
     T *get() const {
         if (!value)
-            return NULL;
+            return nullptr;
         T::readBarrier(value);
         return value;
     }
@@ -1024,11 +1087,6 @@ class ReadBarrieredValue
 
     inline JSObject &toObject() const;
 };
-
-#ifdef DEBUG
-bool
-RuntimeFromMainThreadIsHeapMajorCollecting(JS::shadow::Zone *shadowZone);
-#endif
 
 } /* namespace js */
 

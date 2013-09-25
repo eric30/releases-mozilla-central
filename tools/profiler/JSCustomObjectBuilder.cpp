@@ -7,7 +7,7 @@
 
 #include "mozilla/Util.h" // for ArrayLength
 #include "nsDataHashtable.h"
-#include "nsStringGlue.h"
+#include "nsString.h"
 #include "nsTArray.h"
 #include "nsUTF8Utils.h"
 
@@ -229,10 +229,6 @@ PLDHashOperator HashTableFree(const nsACString& aKey, PropertyValue* aValue, voi
 JSCustomObject::~JSCustomObject()
 {
   mProperties.EnumerateRead(HashTableFree, nullptr);
-}
-
-JSAObjectBuilder::~JSAObjectBuilder()
-{
 }
 
 JSCustomObjectBuilder::JSCustomObjectBuilder()

@@ -19,8 +19,10 @@
 #include "mozilla/LookAndFeel.h" // for system colors
 
 #include "nsString.h"
-#include "nsReadableUtils.h"
 #include "nsStaticNameTable.h"
+#include "nsStyleConsts.h"
+#include "gfxFontConstants.h"
+#include "nsStyleStruct.h"
 
 #include "mozilla/Preferences.h"
 
@@ -793,7 +795,7 @@ const int32_t nsCSSProps::kClearKTable[] = {
   eCSSKeyword_UNKNOWN,-1
 };
 
-// See also kObjectPatternKTable for SVG paint-specific values
+// See also kContextPatternKTable for SVG paint-specific values
 const int32_t nsCSSProps::kColorKTable[] = {
   eCSSKeyword_activeborder, LookAndFeel::eColorID_activeborder,
   eCSSKeyword_activecaption, LookAndFeel::eColorID_activecaption,
@@ -848,7 +850,6 @@ const int32_t nsCSSProps::kColorKTable[] = {
   eCSSKeyword__moz_mac_menutextdisable, LookAndFeel::eColorID__moz_mac_menutextdisable,
   eCSSKeyword__moz_mac_menutextselect, LookAndFeel::eColorID__moz_mac_menutextselect,
   eCSSKeyword__moz_mac_disabledtoolbartext, LookAndFeel::eColorID__moz_mac_disabledtoolbartext,
-  eCSSKeyword__moz_mac_alternateprimaryhighlight, LookAndFeel::eColorID__moz_mac_alternateprimaryhighlight,
   eCSSKeyword__moz_mac_secondaryhighlight, LookAndFeel::eColorID__moz_mac_secondaryhighlight,
   eCSSKeyword__moz_menuhover, LookAndFeel::eColorID__moz_menuhover,
   eCSSKeyword__moz_menuhovertext, LookAndFeel::eColorID__moz_menuhovertext,
@@ -1268,15 +1269,15 @@ const int32_t nsCSSProps::kListStyleKTable[] = {
   eCSSKeyword_UNKNOWN,-1
 };
 
-const int32_t nsCSSProps::kObjectOpacityKTable[] = {
-  eCSSKeyword__moz_objectfillopacity, NS_STYLE_OBJECT_FILL_OPACITY,
-  eCSSKeyword__moz_objectstrokeopacity, NS_STYLE_OBJECT_STROKE_OPACITY,
+const int32_t nsCSSProps::kContextOpacityKTable[] = {
+  eCSSKeyword_context_fill_opacity, NS_STYLE_CONTEXT_FILL_OPACITY,
+  eCSSKeyword_context_stroke_opacity, NS_STYLE_CONTEXT_STROKE_OPACITY,
   eCSSKeyword_UNKNOWN,-1
 };
 
-const int32_t nsCSSProps::kObjectPatternKTable[] = {
-  eCSSKeyword__moz_objectfill, NS_COLOR_OBJECTFILL,
-  eCSSKeyword__moz_objectstroke, NS_COLOR_OBJECTSTROKE,
+const int32_t nsCSSProps::kContextPatternKTable[] = {
+  eCSSKeyword_context_fill, NS_COLOR_CONTEXT_FILL,
+  eCSSKeyword_context_stroke, NS_COLOR_CONTEXT_STROKE,
   eCSSKeyword_UNKNOWN,-1
 };
 
@@ -1746,8 +1747,8 @@ const int32_t nsCSSProps::kStrokeLinejoinKTable[] = {
 
 // Lookup table to store the sole objectValue keyword to let SVG glyphs inherit
 // certain stroke-* properties from the outer text object
-const int32_t nsCSSProps::kStrokeObjectValueKTable[] = {
-  eCSSKeyword__moz_objectvalue, NS_STYLE_STROKE_PROP_OBJECTVALUE,
+const int32_t nsCSSProps::kStrokeContextValueKTable[] = {
+  eCSSKeyword_context_value, NS_STYLE_STROKE_PROP_CONTEXT_VALUE,
   eCSSKeyword_UNKNOWN, -1
 };
 

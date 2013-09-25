@@ -10,9 +10,9 @@
 #include "nsIDOMUIEvent.h"
 #include "nsDOMEvent.h"
 #include "nsLayoutUtils.h"
-#include "nsEvent.h"
 #include "mozilla/dom/UIEventBinding.h"
-#include "Units.h"
+#include "nsPresContext.h"
+#include "nsDeviceContext.h"
 
 class nsDOMUIEvent : public nsDOMEvent,
                      public nsIDOMUIEvent
@@ -158,7 +158,7 @@ protected:
   bool mIsPointerLocked;
   CSSIntPoint mLastClientPoint;
 
-  typedef mozilla::widget::Modifiers Modifiers;
+  typedef mozilla::Modifiers Modifiers;
   static Modifiers ComputeModifierState(const nsAString& aModifiersList);
   bool GetModifierStateInternal(const nsAString& aKey);
 };

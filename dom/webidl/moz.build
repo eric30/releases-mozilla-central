@@ -101,6 +101,7 @@ WEBIDL_FILES = [
     'Function.webidl',
     'GainNode.webidl',
     'Geolocation.webidl',
+    'GetUserMediaRequest.webidl',
     'History.webidl',
     'HTMLAnchorElement.webidl',
     'HTMLAppletElement.webidl',
@@ -186,6 +187,10 @@ WEBIDL_FILES = [
     'ImageData.webidl',
     'ImageDocument.webidl',
     'InspectorUtils.webidl',
+    'InterAppConnection.webidl',
+    'InterAppConnectionRequest.webidl',
+    'InterAppMessageEvent.webidl',
+    'InterAppMessagePort.webidl',
     'KeyboardEvent.webidl',
     'KeyEvent.webidl',
     'LinkStyle.webidl',
@@ -198,7 +203,6 @@ WEBIDL_FILES = [
     'MediaStream.webidl',
     'MediaStreamAudioDestinationNode.webidl',
     'MediaStreamAudioSourceNode.webidl',
-    'MediaStreamEvent.webidl',
     'MediaStreamTrack.webidl',
     'MessageChannel.webidl',
     'MessageEvent.webidl',
@@ -248,10 +252,8 @@ WEBIDL_FILES = [
     'Rect.webidl',
     'RGBColor.webidl',
     'RTCConfiguration.webidl',
-    'RTCDataChannelEvent.webidl',
     'RTCIceCandidate.webidl',
     'RTCPeerConnection.webidl',
-    'RTCPeerConnectionIceEvent.webidl',
     'RTCSessionDescription.webidl',
     'Screen.webidl',
     'ScriptProcessorNode.webidl',
@@ -390,6 +392,8 @@ WEBIDL_FILES = [
     'URLUtils.webidl',
     'URLUtilsReadOnly.webidl',
     'VTTCue.webidl',
+    'VTTRegion.webidl',
+    'VTTRegionList.webidl',
     'ValidityState.webidl',
     'VideoPlaybackQuality.webidl',
     'VideoStreamTrack.webidl',
@@ -465,7 +469,6 @@ if CONFIG['MOZ_B2G_NFC']:
 WEBIDL_FILES += [
     'CloseEvent.webidl',
     'CustomEvent.webidl',
-    'DeviceLightEvent.webidl',
     'DeviceOrientationEvent.webidl',
     'DeviceStorageChangeEvent.webidl',
     'DOMTransactionEvent.webidl',
@@ -486,7 +489,6 @@ WEBIDL_FILES += [
     'StyleRuleChangeEvent.webidl',
     'StyleSheetApplicableStateChangeEvent.webidl',
     'StyleSheetChangeEvent.webidl',
-    'UserProximityEvent.webidl',
 ]
 
 if CONFIG['MOZ_B2G_BT']:
@@ -541,7 +543,12 @@ if CONFIG['MOZ_B2G']:
 
 GENERATED_EVENTS_WEBIDL_FILES = [
     'BlobEvent.webidl',
+    'DeviceLightEvent.webidl',
     'DeviceProximityEvent.webidl',
+    'MediaStreamEvent.webidl',
+    'RTCDataChannelEvent.webidl',
+    'RTCPeerConnectionIceEvent.webidl',
+    'UserProximityEvent.webidl',
 ]
 
 if CONFIG['MOZ_GAMEPAD']:

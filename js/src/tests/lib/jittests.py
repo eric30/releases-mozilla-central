@@ -25,8 +25,10 @@ from results import TestOutput
 
 TESTS_LIB_DIR = os.path.dirname(os.path.abspath(__file__))
 JS_DIR = os.path.dirname(os.path.dirname(TESTS_LIB_DIR))
+TOP_SRC_DIR = os.path.dirname(os.path.dirname(JS_DIR))
 TEST_DIR = os.path.join(JS_DIR, 'jit-test', 'tests')
 LIB_DIR = os.path.join(JS_DIR, 'jit-test', 'lib') + os.path.sep
+ECMA6_DIR = posixpath.join(JS_DIR, 'tests', 'ecma_6')
 
 # Backported from Python 3.1 posixpath.py
 def _relpath(path, start=None):
@@ -69,7 +71,14 @@ class Test:
     del valgrinds
 
     def __init__(self, path):
-        self.path = path       # path to test file
+        # Absolute path of the test file.
+        self.path = path
+
+        # Path relative to the top mozilla/ directory.
+        self.relpath_top = os.path.relpath(path, TOP_SRC_DIR)
+
+        # Path relative to mozilla/js/src/.
+        self.relpath_js = os.path.relpath(path, JS_DIR)
 
         self.jitflags = []     # jit flags to enable
         self.slow = False      # True means the test is slow-running
@@ -131,14 +140,8 @@ class Test:
                         test.valgrind = options.valgrind
                     elif name == 'tz-pacific':
                         test.tz_pacific = True
-                    elif name == 'mjitalways':
-                        test.jitflags.append('--always-mjit')
                     elif name == 'debug':
                         test.jitflags.append('--debugjit')
-                    elif name == 'mjit':
-                        test.jitflags.append('--jm')
-                    elif name == 'no-jm':
-                        test.jitflags.append('--no-jm')
                     elif name == 'ion-eager':
                         test.jitflags.append('--ion-eager')
                     elif name == 'no-ion':
@@ -322,7 +325,16 @@ def run_test_remote(test, device, prefix, options):
 def check_output(out, err, rc, test):
     if test.expect_error:
         # The shell exits with code 3 on uncaught exceptions.
-        return test.expect_error in err and rc == 3
+        # Sometimes 0 is returned on Windows for unknown reasons.
+        # See bug 899697.
+        if sys.platform in ['win32', 'cygwin']:
+            if rc != 3 and rc != 0:
+                return False
+        else:
+            if rc != 3:
+                return False
+
+        return test.expect_error in err
 
     for line in out.split('\n'):
         if line.startswith('Trace stats check failed'):
@@ -339,20 +351,30 @@ def check_output(out, err, rc, test):
 
     return True
 
-def print_tinderbox(label, test, message=None):
+def print_tinderbox(ok, res):
     # Output test failures in a TBPL parsable format, eg:
-    # TEST-PASS | /foo/bar/baz.js | --no-jm
+    # TEST-PASS | /foo/bar/baz.js | --ion-eager
     # TEST-UNEXPECTED-FAIL | /foo/bar/baz.js | --no-ion: Assertion failure: ...
+    # INFO exit-status     : 3
+    # INFO timed-out       : False
+    # INFO stdout          > foo
+    # INFO stdout          > bar
+    # INFO stdout          > baz
+    # INFO stderr         2> TypeError: or something
     # TEST-UNEXPECTED-FAIL | jit_test.py: Test execution interrupted by user
-    if (test != None):
-        jitflags = " ".join(test.jitflags)
-        result = "%s | %s | %s" % (label, test.path, jitflags)
-    else:
-        result = "%s | jit_test.py" % label
+    label = "TEST-PASS" if ok else "TEST-UNEXPECTED-FAIL"
+    jitflags = " ".join(res.test.jitflags)
+    print("%s | %s | %s" % (label, res.test.relpath_top, jitflags))
+    if ok:
+        return
 
-    if message:
-        result += ": " + message
-    print(result)
+    # For failed tests, print as much information as we have, to aid debugging.
+    print("INFO exit-status     : {}".format(res.rc))
+    print("INFO timed-out       : {}".format(res.timed_out))
+    for line in res.out.split('\n'):
+        print("INFO stdout          > " + line)
+    for line in res.out.split('\n'):
+        print("INFO stderr         2> " + line)
 
 def wrap_parallel_run_test(test, prefix, resultQueue, options):
     # Ignore SIGINT in the child
@@ -528,7 +550,6 @@ def process_test_results(results, num_tests, options):
     doing = 'before starting'
     try:
         for i, res in enumerate(results):
-
             if options.show_output:
                 sys.stdout.write(res.out)
                 sys.stdout.write(res.err)
@@ -537,26 +558,17 @@ def process_test_results(results, num_tests, options):
                 sys.stdout.write(res.err)
 
             ok = check_output(res.out, res.err, res.rc, res.test)
-            doing = 'after %s' % res.test.path
+            doing = 'after %s' % res.test.relpath_js
             if not ok:
                 failures.append(res)
                 if res.timed_out:
-                    pb.message("TIMEOUT - %s" % res.test.path)
+                    pb.message("TIMEOUT - %s" % res.test.relpath_js)
                     timeouts += 1
                 else:
-                    pb.message("FAIL - %s" % res.test.path)
+                    pb.message("FAIL - %s" % res.test.relpath_js)
 
             if options.tinderbox:
-                if ok:
-                    print_tinderbox("TEST-PASS", res.test);
-                else:
-                    lines = [ _ for _ in res.out.split('\n') + res.err.split('\n')
-                              if _ != '' ]
-                    if len(lines) >= 1:
-                        msg = lines[-1]
-                    else:
-                        msg = ''
-                    print_tinderbox("TEST-UNEXPECTED-FAIL", res.test, msg);
+                print_tinderbox(ok, res)
 
             n = i + 1
             pb.update(n, {
@@ -567,7 +579,8 @@ def process_test_results(results, num_tests, options):
             )
         complete = True
     except KeyboardInterrupt:
-        print_tinderbox("TEST-UNEXPECTED-FAIL", None, "Test execution interrupted by user");
+        print("TEST-UNEXPECTED-FAIL | jit_test.py" +
+              " : Test execution interrupted by user")
 
     pb.finish(True)
     return print_test_summary(num_tests, failures, complete, doing, options)
@@ -616,15 +629,18 @@ def run_tests_remote(tests, prefix, options):
             sys.exit(1)
 
     # Update the test root to point to our test directory.
-    options.remote_test_root = posixpath.join(options.remote_test_root, 'jit-tests')
+    jit_tests_dir = posixpath.join(options.remote_test_root, 'jit-tests')
+    options.remote_test_root = posixpath.join(jit_tests_dir, 'jit-tests')
 
     # Push js shell and libraries.
-    if dm.dirExists(options.remote_test_root):
-        dm.removeDir(options.remote_test_root)
-    dm.mkDir(options.remote_test_root)
+    if dm.dirExists(jit_tests_dir):
+        dm.removeDir(jit_tests_dir)
+    dm.mkDirs(options.remote_test_root)
     push_libs(options, dm)
     push_progs(options, dm, [prefix[0]])
     dm.chmodDir(options.remote_test_root)
+
+    dm.pushDir(ECMA6_DIR, posixpath.join(jit_tests_dir, 'tests', 'ecma_6'), timeout=600)
     dm.pushDir(os.path.dirname(TEST_DIR), options.remote_test_root, timeout=600)
     prefix[0] = os.path.join(options.remote_test_root, 'js')
 

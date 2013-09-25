@@ -78,13 +78,6 @@ class Bytecode
     /* Whether this is a catch/finally entry point. */
     bool exceptionEntry : 1;
 
-    /*
-     * Dynamically observed state about the execution of this opcode. These are
-     * hints about the script for use during compilation.
-     */
-    bool arrayWriteHole: 1;     /* SETELEM which has written to an array hole. */
-    bool accessGetter: 1;       /* Property read on a shape with a getter hook. */
-
     /* Stack depth before this opcode. */
     uint32_t stackDepth;
 
@@ -225,17 +218,14 @@ FollowBranch(JSContext *cx, JSScript *script, unsigned offset)
 }
 
 /* Common representation of slots throughout analyses and the compiler. */
-static inline uint32_t CalleeSlot() {
+static inline uint32_t ThisSlot() {
     return 0;
 }
-static inline uint32_t ThisSlot() {
-    return 1;
-}
 static inline uint32_t ArgSlot(uint32_t arg) {
-    return 2 + arg;
+    return 1 + arg;
 }
 static inline uint32_t LocalSlot(JSScript *script, uint32_t local) {
-    return 2 + (script->function() ? script->function()->nargs : 0) + local;
+    return 1 + (script->function() ? script->function()->nargs : 0) + local;
 }
 static inline uint32_t TotalSlots(JSScript *script) {
     return LocalSlot(script, 0) + script->nfixed;
@@ -622,8 +612,6 @@ class ScriptAnalysis
 
     bool *escapedSlots;
 
-    types::StackTypeSet *undefinedTypeSet;
-
     /* Which analyses have been performed. */
     bool ranBytecode_;
     bool ranSSA_;
@@ -638,10 +626,10 @@ class ScriptAnalysis
 
     bool usesScopeChain_:1;
     bool localsAliasStack_:1;
-    bool isIonInlineable:1;
     bool canTrackVars:1;
     bool hasLoops_:1;
     bool hasTryFinally_:1;
+    bool argumentsContentsObserved_:1;
 
     uint32_t numReturnSites_;
 
@@ -669,9 +657,6 @@ class ScriptAnalysis
 
     bool OOM() const { return outOfMemory; }
     bool failed() const { return hadFailure; }
-    bool ionInlineable() const { return isIonInlineable; }
-    bool ionInlineable(uint32_t argc) const { return isIonInlineable && argc == script_->function()->nargs; }
-    void setIonUninlineable() { isIonInlineable = false; }
 
     /* Whether the script has a |finally| block. */
     bool hasTryFinally() const { return hasTryFinally_; }
@@ -828,18 +813,6 @@ class ScriptAnalysis
     void mergeAllExceptionTargets(JSContext *cx, SSAValueInfo *values,
                                   const Vector<uint32_t> &exceptionTargets);
     void freezeNewValues(JSContext *cx, uint32_t offset);
-
-    struct TypeInferenceState {
-        Vector<SSAPhiNode *> phiNodes;
-        bool hasHole;
-        types::StackTypeSet *forTypes;
-        bool hasPropertyReadTypes;
-        uint32_t propertyReadIndex;
-        TypeInferenceState(JSContext *cx)
-            : phiNodes(cx), hasHole(false), forTypes(NULL),
-              hasPropertyReadTypes(false), propertyReadIndex(0)
-        {}
-    };
 
     typedef Vector<SSAValue, 16> SeenVector;
     bool needsArgsObj(JSContext *cx, SeenVector &seen, const SSAValue &v);

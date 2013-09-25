@@ -101,6 +101,7 @@ class CodeGeneratorARM : public CodeGeneratorShared
     virtual bool visitNotD(LNotD *ins);
 
     virtual bool visitMathD(LMathD *math);
+    virtual bool visitMathF(LMathF *math);
     virtual bool visitFloor(LFloor *lir);
     virtual bool visitRound(LRound *lir);
     virtual bool visitTruncateDToInt32(LTruncateDToInt32 *ins);
@@ -130,11 +131,12 @@ class CodeGeneratorARM : public CodeGeneratorShared
 
   public:
     bool visitBox(LBox *box);
-    bool visitBoxDouble(LBoxDouble *box);
+    bool visitBoxFloatingPoint(LBoxFloatingPoint *box);
     bool visitUnbox(LUnbox *unbox);
     bool visitValue(LValue *value);
     bool visitOsrValue(LOsrValue *value);
     bool visitDouble(LDouble *ins);
+    bool visitFloat32(LFloat32 *ins);
 
     bool visitLoadSlotV(LLoadSlotV *load);
     bool visitLoadSlotT(LLoadSlotT *load);
@@ -151,6 +153,7 @@ class CodeGeneratorARM : public CodeGeneratorShared
 
     bool visitNegI(LNegI *lir);
     bool visitNegD(LNegD *lir);
+    bool visitNegF(LNegF *lir);
     bool visitLoadTypedArrayElementStatic(LLoadTypedArrayElementStatic *ins);
     bool visitStoreTypedArrayElementStatic(LStoreTypedArrayElementStatic *ins);
     bool visitAsmJSLoadHeap(LAsmJSLoadHeap *ins);

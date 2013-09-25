@@ -63,6 +63,7 @@ CompositorD3D11::CompositorD3D11(nsIWidget* aWidget)
   : mAttachments(nullptr)
   , mWidget(aWidget)
   , mHwnd(nullptr)
+  , mDisableSequenceForNextFrame(false)
 {
   sBackend = LAYERS_D3D11;
 }
@@ -270,7 +271,7 @@ CompositorD3D11::Initialize()
     swapDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     // Use double buffering to enable flip
     swapDesc.BufferCount = 2;
-    swapDesc.Scaling = DXGI_SCALING_STRETCH;
+    swapDesc.Scaling = DXGI_SCALING_NONE;
     // All Metro style apps must use this SwapEffect
     swapDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
     swapDesc.Flags = 0;
@@ -689,13 +690,13 @@ CompositorD3D11::EndFrame()
   nsIntSize oldSize = mSize;
   EnsureSize();
   if (oldSize == mSize) {
-    mSwapChain->Present(0, 0);
-
+    mSwapChain->Present(0, mDisableSequenceForNextFrame ? DXGI_PRESENT_DO_NOT_SEQUENCE : 0);
+    mDisableSequenceForNextFrame = false;
     if (mTarget) {
       PaintToTarget();
     }
   }
-
+  
   mCurrentRT = nullptr;
 }
 
@@ -749,16 +750,15 @@ CompositorD3D11::VerifyBufferSize()
 
   mDefaultRT = nullptr;
 
-  if (gfxWindowsPlatform::IsOptimus()) {
-    mSwapChain->ResizeBuffers(1, mSize.width, mSize.height,
-                              DXGI_FORMAT_B8G8R8A8_UNORM,
-                              0);
-#ifdef MOZ_METRO
-  } else if (IsRunningInWindowsMetro()) {
+  if (IsRunningInWindowsMetro()) {
     mSwapChain->ResizeBuffers(2, mSize.width, mSize.height,
                               DXGI_FORMAT_B8G8R8A8_UNORM,
                               0);
-#endif
+    mDisableSequenceForNextFrame = true;
+  } else if (gfxWindowsPlatform::IsOptimus()) {
+    mSwapChain->ResizeBuffers(1, mSize.width, mSize.height,
+                              DXGI_FORMAT_B8G8R8A8_UNORM,
+                              0);
   } else {
     mSwapChain->ResizeBuffers(1, mSize.width, mSize.height,
                               DXGI_FORMAT_B8G8R8A8_UNORM,
@@ -912,7 +912,7 @@ CompositorD3D11::PaintToTarget()
     new gfxImageSurface((unsigned char*)map.pData,
                         gfxIntSize(bbDesc.Width, bbDesc.Height),
                         map.RowPitch,
-                        gfxASurface::ImageFormatARGB32);
+                        gfxImageFormatARGB32);
 
   mTarget->SetSource(tmpSurface);
   mTarget->SetOperator(gfxContext::OPERATOR_SOURCE);

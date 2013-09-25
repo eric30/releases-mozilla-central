@@ -59,7 +59,7 @@ class HashKeyRef : public BufferableRef
             return;
         JS_SET_TRACING_LOCATION(trc, (void*)&*p);
         Mark(trc, &key, "HashKeyRef");
-        map->rekey(prior, key);
+        map->rekeyIfMoved(prior, key);
     }
 };
 
@@ -72,10 +72,10 @@ typedef HashSet<void *, PointerHasher<void *, 3>, SystemAllocPolicy> EdgeSet;
 class StoreBuffer
 {
     /* The size of a single block of store buffer storage space. */
-    const static size_t ChunkSize = 1 << 16; /* 64KiB */
+    static const size_t ChunkSize = 1 << 16; /* 64KiB */
 
     /* The size at which a block is about to overflow. */
-    const static size_t MinAvailableSize = (size_t)(ChunkSize * 1.0 / 8.0);
+    static const size_t MinAvailableSize = (size_t)(ChunkSize * 1.0 / 8.0);
 
     /*
      * This buffer holds only a single type of edge. Using this buffer is more
@@ -258,7 +258,7 @@ class StoreBuffer
         bool operator==(const ValueEdge &other) const { return edge == other.edge; }
         bool operator!=(const ValueEdge &other) const { return edge != other.edge; }
 
-        void *deref() const { return edge->isGCThing() ? edge->toGCThing() : NULL; }
+        void *deref() const { return edge->isGCThing() ? edge->toGCThing() : nullptr; }
         void *location() const { return (void *)untagged().edge; }
 
         bool inRememberedSet(const Nursery &nursery) const {

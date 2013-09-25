@@ -6,13 +6,13 @@
 #include "nsView.h"
 
 #include "mozilla/Attributes.h"
+#include "mozilla/BasicEvents.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Likely.h"
 #include "mozilla/Poison.h"
 #include "nsIWidget.h"
 #include "nsViewManager.h"
 #include "nsIFrame.h"
-#include "nsGUIEvent.h"
 #include "nsPresArena.h"
 #include "nsXULPopupManager.h"
 #include "nsIWidgetListener.h"
@@ -339,9 +339,9 @@ void nsView::DoResetWidgetBounds(bool aMoveOnly,
   // unscaledAppUnitsPerDevPixel value. On platforms where the device-pixel
   // scale is uniform across all displays (currently all except OS X), we'll
   // always use the precise value from mWindow->GetDefaultScale here.
-  double scale = widget->GetDefaultScale();
-  if (NSToIntRound(60.0 / scale) == dx->UnscaledAppUnitsPerDevPixel()) {
-    invScale = 1.0 / scale;
+  CSSToLayoutDeviceScale scale = widget->GetDefaultScale();
+  if (NSToIntRound(60.0 / scale.scale) == dx->UnscaledAppUnitsPerDevPixel()) {
+    invScale = 1.0 / scale.scale;
   } else {
     invScale = dx->UnscaledAppUnitsPerDevPixel() / 60.0;
   }

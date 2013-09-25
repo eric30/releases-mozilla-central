@@ -468,7 +468,10 @@ ICTypeMonitor_Fallback::resetMonitorStubChain(Zone *zone)
         // We are removing edges from monitored stubs to gcthings (IonCode).
         // Perform one final trace of all monitor stubs for incremental GC,
         // as it must know about those edges.
-        this->trace(zone->barrierTracer());
+        if (hasFallbackStub_) {
+            for (ICStub *s = firstMonitorStub_; !s->isTypeMonitor_Fallback(); s = s->next())
+                s->trace(zone->barrierTracer());
+        }
     }
 
     firstMonitorStub_ = this;
@@ -685,7 +688,7 @@ ICStubCompiler::emitPostWriteBarrierSlot(MacroAssembler &masm, Register obj, Reg
     saveRegs = GeneralRegisterSet::Intersect(saveRegs, GeneralRegisterSet::Volatile());
     masm.PushRegsInMask(saveRegs);
     masm.setupUnalignedABICall(2, scratch);
-    masm.movePtr(ImmWord(cx->runtime()), scratch);
+    masm.movePtr(ImmPtr(cx->runtime()), scratch);
     masm.passABIArg(scratch);
     masm.passABIArg(obj);
     masm.callWithABI(JS_FUNC_TO_DATA_PTR(void *, PostWriteBarrier));
@@ -847,9 +850,13 @@ PrepareOsrTempData(JSContext *cx, ICUseCount_Fallback *stub, BaselineFrame *fram
     // Copy formal args and thisv.
     memcpy(stackFrameStart, frame->argv() - 1, (numFormalArgs + 1) * sizeof(Value));
 
-    // Initialize ScopeChain, Exec, and Flags fields in StackFrame struct.
+    // Initialize ScopeChain, Exec, ArgsObj, and Flags fields in StackFrame struct.
     uint8_t *stackFrame = info->stackFrame;
     *((JSObject **) (stackFrame + StackFrame::offsetOfScopeChain())) = frame->scopeChain();
+    if (frame->script()->needsArgsObj()) {
+        JS_ASSERT(frame->hasArgsObj());
+        *((JSObject **) (stackFrame + StackFrame::offsetOfArgumentsObject())) = &frame->argsObj();
+    }
     if (frame->isFunctionFrame()) {
         // Store the function in exec field, and StackFrame::FUNCTION for flags.
         *((JSFunction **) (stackFrame + StackFrame::offsetOfExec())) = frame->fun();
@@ -971,7 +978,7 @@ ICUseCount_Fallback::Compiler::generateStubCode(MacroAssembler &masm)
         leaveStubFrame(masm);
 
         // If no IonCode was found, then skip just exit the IC.
-        masm.branchPtr(Assembler::Equal, R0.scratchReg(), ImmWord((void*) NULL), &noCompiledCode);
+        masm.branchPtr(Assembler::Equal, R0.scratchReg(), ImmPtr(NULL), &noCompiledCode);
     }
 
     // Get a scratch register.
@@ -2879,7 +2886,7 @@ ICBinaryArith_BooleanWithInt32::Compiler::generateStubCode(MacroAssembler &masm)
 
         masm.bind(&fixOverflow);
         masm.sub32(rhsReg, lhsReg);
-        masm.jump(&failure);
+        // Proceed to failure below.
         break;
       }
       case JSOP_SUB: {
@@ -2892,7 +2899,7 @@ ICBinaryArith_BooleanWithInt32::Compiler::generateStubCode(MacroAssembler &masm)
 
         masm.bind(&fixOverflow);
         masm.add32(rhsReg, lhsReg);
-        masm.jump(&failure);
+        // Proceed to failure below.
         break;
       }
       case JSOP_BITOR: {
@@ -3198,7 +3205,7 @@ GenerateDOMProxyChecks(JSContext *cx, MacroAssembler &masm, Register object,
     // expando object at all, in which case the presence of a non-undefined
     // expando value in the incoming object is automatically a failure.
     masm.loadPtr(*checkExpandoShapeAddr, scratch);
-    masm.branchPtr(Assembler::Equal, scratch, ImmWord((void*)NULL), &failDOMProxyCheck);
+    masm.branchPtr(Assembler::Equal, scratch, ImmPtr(NULL), &failDOMProxyCheck);
 
     // Otherwise, ensure that the incoming object has an object for its expando value and that
     // the shape matches.
@@ -3798,7 +3805,7 @@ TryAttachGetElemStub(JSContext *cx, HandleScript script, jsbytecode *pc, ICGetEl
 
     if (obj->isNative()) {
         // Check for NativeObject[int] dense accesses.
-        if (rhs.isInt32()) {
+        if (rhs.isInt32() && rhs.toInt32() >= 0) {
             IonSpew(IonSpew_BaselineIC, "  Generating GetElem(Native[Int32] dense) stub");
             ICGetElem_Dense::Compiler compiler(cx, stub->fallbackMonitorStub()->firstMonitorStub(),
                                                obj->lastProperty());
@@ -4285,7 +4292,7 @@ ICGetElem_String::Compiler::generateStubCode(MacroAssembler &masm)
                   &failure);
 
     // Load static string.
-    masm.movePtr(ImmWord(&cx->runtime()->staticStrings.unitStaticTable), str);
+    masm.movePtr(ImmPtr(&cx->runtime()->staticStrings.unitStaticTable), str);
     masm.loadPtr(BaseIndex(str, scratchReg, ScalePointer), str);
 
     // Return.
@@ -4484,7 +4491,7 @@ ICGetElem_Arguments::Compiler::generateStubCode(MacroAssembler &masm)
     masm.loadPtr(BaseIndex(scratchReg, tempReg, ScaleFromElemWidth(sizeof(size_t))), scratchReg);
 
     // Don't bother testing specific bit, if any bit is set in the word, fail.
-    masm.branchPtr(Assembler::NotEqual, scratchReg, ImmWord((size_t)0), &failureReconstructInputs);
+    masm.branchPtr(Assembler::NotEqual, scratchReg, ImmPtr(NULL), &failureReconstructInputs);
 
     // Load the value.  use scratchReg and tempReg to form a ValueOperand to load into.
     masm.addPtr(Imm32(ArgumentsData::offsetOfArgs()), argData);
@@ -4815,6 +4822,16 @@ ICSetElem_Fallback::Compiler::generateStubCode(MacroAssembler &masm)
     masm.pushBaselineFramePtr(BaselineFrameReg, R0.scratchReg());
 
     return tailCallVM(DoSetElemFallbackInfo, masm);
+}
+
+void
+BaselineScript::noteArrayWriteHole(uint32_t pcOffset)
+{
+    ICEntry &entry = icEntryFromPCOffset(pcOffset);
+    ICFallbackStub *stub = entry.fallbackStub();
+
+    if (stub->isSetElem_Fallback())
+        stub->toSetElem_Fallback()->noteArrayWriteHole();
 }
 
 //
@@ -5951,13 +5968,8 @@ DoGetPropFallback(JSContext *cx, BaselineFrame *frame, ICGetProp_Fallback *stub,
     if (!obj)
         return false;
 
-    if (obj->getOps()->getProperty) {
-        if (!JSObject::getGeneric(cx, obj, obj, id, res))
-            return false;
-    } else {
-        if (!GetPropertyHelper(cx, obj, id, 0, res))
-            return false;
-    }
+    if (!JSObject::getGeneric(cx, obj, obj, id, res))
+        return false;
 
 #if JS_HAS_NO_SUCH_METHOD
     // Handle objects with __noSuchMethod__.
@@ -6098,9 +6110,11 @@ ICGetProp_TypedArrayLength::Compiler::generateStubCode(MacroAssembler &masm)
 
     // Implement the negated version of JSObject::isTypedArray predicate.
     masm.loadObjClass(obj, scratch);
-    masm.branchPtr(Assembler::Below, scratch, ImmWord(&TypedArrayObject::classes[0]), &failure);
+    masm.branchPtr(Assembler::Below, scratch, ImmPtr(&TypedArrayObject::classes[0]),
+                   &failure);
     masm.branchPtr(Assembler::AboveOrEqual, scratch,
-                   ImmWord(&TypedArrayObject::classes[ScalarTypeRepresentation::TYPE_MAX]), &failure);
+                   ImmPtr(&TypedArrayObject::classes[ScalarTypeRepresentation::TYPE_MAX]),
+                   &failure);
 
     // Load length from fixed slot.
     masm.loadValue(Address(obj, TypedArrayObject::lengthOffset()), R0);
@@ -7696,7 +7710,7 @@ ICCallStubCompiler::guardFunApply(MacroAssembler &masm, GeneralRegisterSet regs,
                             failure);
     masm.loadPtr(Address(callee, JSFunction::offsetOfNativeOrScript()), callee);
 
-    masm.branchPtr(Assembler::NotEqual, callee, ImmWord((void*) js_fun_apply), failure);
+    masm.branchPtr(Assembler::NotEqual, callee, ImmPtr(js_fun_apply), failure);
 
     // Load the |thisv|, ensure that it's a scripted function with a valid baseline or ion
     // script, or a native function.
@@ -7916,7 +7930,7 @@ ICCallScriptedCompiler::generateStubCode(MacroAssembler &masm)
         masm.loadBaselineOrIonRaw(callee, code, SequentialExecution, &failure);
     } else {
         Address scriptCode(callee, JSScript::offsetOfBaselineOrIonRaw());
-        masm.branchPtr(Assembler::Equal, scriptCode, ImmWord((void *)NULL), &failure);
+        masm.branchPtr(Assembler::Equal, scriptCode, ImmPtr(NULL), &failure);
     }
 
     // We no longer need R1.

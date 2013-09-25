@@ -478,9 +478,10 @@ public:
   // changed. Called on main thread only.
   virtual void NotifyPrincipalChanged();
 
-  // Called by the decode thread to keep track of the number of bytes read
-  // from the resource.
-  void NotifyBytesConsumed(int64_t aBytes) MOZ_FINAL MOZ_OVERRIDE;
+  // Called by the MediaResource to keep track of the number of bytes read
+  // from the resource. Called on the main by an event runner dispatched
+  // by the MediaResource read functions.
+  void NotifyBytesConsumed(int64_t aBytes, int64_t aOffset) MOZ_FINAL MOZ_OVERRIDE;
 
   int64_t GetEndMediaTime() const MOZ_FINAL MOZ_OVERRIDE;
 
@@ -784,6 +785,10 @@ public:
 
 #ifdef MOZ_WMF
   static bool IsWMFEnabled();
+#endif
+
+#ifdef MOZ_APPLEMEDIA
+  static bool IsAppleMP3Enabled();
 #endif
 
   // Schedules the state machine to run one cycle on the shared state

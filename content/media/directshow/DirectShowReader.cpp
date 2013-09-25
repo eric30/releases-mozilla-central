@@ -214,7 +214,6 @@ DirectShowReader::Finish(HRESULT aStatus)
   MOZ_ASSERT(mDecoder->OnDecodeThread(), "Should be on decode thread.");
 
   LOG("DirectShowReader::Finish(0x%x)", aStatus);
-  mAudioQueue.Finish();
   // Notify the filter graph of end of stream.
   RefPtr<IMediaEventSink> eventSink;
   HRESULT hr = mGraph->QueryInterface(static_cast<IMediaEventSink**>(byRef(eventSink)));
@@ -278,12 +277,6 @@ DirectShowReader::DecodeAudioData()
                                  numFrames,
                                  buffer.forget(),
                                  mNumChannels));
-
-  uint32_t bytesConsumed = mSourceFilter->GetAndResetBytesConsumedCount();
-  if (bytesConsumed > 0) {
-    mDecoder->NotifyBytesConsumed(bytesConsumed);
-  }
-
   return true;
 }
 

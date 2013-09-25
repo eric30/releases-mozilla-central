@@ -41,8 +41,9 @@ interface nsIDOMClientRect;
 interface nsIURI;
 interface nsIDOMEventTarget;
 interface nsIRunnable;
+interface nsICompositionStringSynthesizer;
 
-[scriptable, uuid(d18a8d69-7609-4165-ae20-af8aead36833)]
+[scriptable, uuid(a1383ae5-e828-4c9a-929d-5293e61beb64)]
 interface nsIDOMWindowUtils : nsISupports {
 
   /**
@@ -652,6 +653,13 @@ interface nsIDOMWindowUtils : nsISupports {
   void getScrollXY(in boolean aFlushLayout, out long aScrollX, out long aScrollY);
 
   /**
+   * Sets the scroll position of the root scroll frame of the window.
+   * Returns true on success, false on error (if the window didn't have a root
+   * scroll frame).
+   */
+  boolean scrollToCSSPixelsApproximate(in float aX, in float aY);
+
+  /**
    * Returns the scrollbar width of the window's scroll frame.
    *
    * @param aFlushLayout flushes layout if true. Otherwise, no flush occurs.
@@ -787,44 +795,12 @@ interface nsIDOMWindowUtils : nsISupports {
                             in AString aLocale);
 
   /**
-   * Synthesize a text event to the window.
+   * Creating synthesizer of composition string on the window.
    *
    * Cannot be accessed from unprivileged context (not content-accessible)
    * Will throw a DOM security error if called without chrome privileges.
-   *
-   * Currently, this method doesn't support 4 or more clauses composition
-   * string.
-   *
-   * @param aCompositionString  composition string
-   * @param a*ClauseLengh       the length of nth clause, set 0 when you
-   *                            don't need second or third clause.
-   * @param a*ClauseAttr        the attribute of nth clause, uese following
-   *                            const values.
-   * @param aCaretStart         the caret position in the composition string,
-   *                            if you set negative value, this method don't
-   *                            set the caret position to the event.
-   * @param aCaretLength        the caret length, if this is one or more,
-   *                            the caret will be wide caret, otherwise,
-   *                            it's collapsed.
-   *                            XXX nsEditor doesn't support wide caret yet.
    */
-
-  // NOTE: These values must be same to NS_TEXTRANGE_* in nsGUIEvent.h
-
-  const unsigned long COMPOSITION_ATTR_RAWINPUT              = 0x02;
-  const unsigned long COMPOSITION_ATTR_SELECTEDRAWTEXT       = 0x03;
-  const unsigned long COMPOSITION_ATTR_CONVERTEDTEXT         = 0x04;
-  const unsigned long COMPOSITION_ATTR_SELECTEDCONVERTEDTEXT = 0x05;
-
-  void sendTextEvent(in AString aCompositionString,
-                     in long aFirstClauseLength,
-                     in unsigned long aFirstClauseAttr,
-                     in long aSecondClauseLength,
-                     in unsigned long aSecondClauseAttr,
-                     in long aThirdClauseLength,
-                     in unsigned long aThirdClauseAttr,
-                     in long aCaretStart,
-                     in long aCaretLength);
+  nsICompositionStringSynthesizer createCompositionStringSynthesizer();
 
   /**
    * Synthesize a query content event. Note that the result value returned here
@@ -839,7 +815,7 @@ interface nsIDOMWindowUtils : nsISupports {
                                                    in long aX,
                                                    in long aY);
 
-  // NOTE: following values are same as NS_QUERY_* in nsGUIEvent.h
+  // NOTE: following values are same as NS_QUERY_* in BasicEvents.h
 
   /**
    * QUERY_SELECTED_TEXT queries the first selection range's information.

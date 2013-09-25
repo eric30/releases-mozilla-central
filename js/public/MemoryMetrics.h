@@ -11,6 +11,7 @@
 // change in the future. Depend on them at your own risk.
 
 #include "mozilla/MemoryReporting.h"
+#include "mozilla/NullPtr.h"
 #include "mozilla/PodOperations.h"
 
 #include <string.h>
@@ -132,7 +133,6 @@ struct TypeInferenceSizes
 {
     size_t typeScripts;
     size_t typeResults;
-    size_t analysisPool;
     size_t pendingArrays;
     size_t allocationSiteTables;
     size_t arrayTypeTables;
@@ -143,7 +143,6 @@ struct TypeInferenceSizes
     void add(TypeInferenceSizes &sizes) {
         this->typeScripts          += sizes.typeScripts;
         this->typeResults          += sizes.typeResults;
-        this->analysisPool         += sizes.analysisPool;
         this->pendingArrays        += sizes.pendingArrays;
         this->allocationSiteTables += sizes.allocationSiteTables;
         this->arrayTypeTables      += sizes.arrayTypeTables;
@@ -320,7 +319,7 @@ struct ZoneStats : js::ZoneStatsPod
 struct CompartmentStats
 {
     CompartmentStats()
-      : extra(NULL),
+      : extra(nullptr),
         gcHeapObjectsOrdinary(0),
         gcHeapObjectsFunction(0),
         gcHeapObjectsDenseArray(0),
@@ -465,7 +464,7 @@ struct RuntimeStats
         zTotals(),
         compartmentStatsVector(),
         zoneStatsVector(),
-        currZoneStats(NULL),
+        currZoneStats(nullptr),
         mallocSizeOf_(mallocSizeOf)
     {}
 

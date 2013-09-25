@@ -8,10 +8,12 @@
 #include <errno.h>
 
 #include "IOInterposer.h"
+#include "NSPRInterposer.h"
 #include "ProfilerIOInterposeObserver.h"
 #include "platform.h"
 #include "PlatformMacros.h"
 #include "prenv.h"
+#include "mozilla/StaticPtr.h"
 #include "mozilla/ThreadLocal.h"
 #include "PseudoStack.h"
 #include "TableTicker.h"
@@ -21,6 +23,7 @@
 #include "nsDirectoryServiceDefs.h"
 #include "mozilla/Services.h"
 #include "nsThreadUtils.h"
+#include "ProfilerMarkers.h"
 
 #if defined(SPS_OS_android) && !defined(MOZ_WIDGET_GONK)
   #include "AndroidBridge.h"
@@ -58,7 +61,8 @@ mozilla::Mutex* Sampler::sRegisteredThreadsMutex = nullptr;
 
 TableTicker* Sampler::sActiveSampler;
 
-static mozilla::ProfilerIOInterposeObserver* sInterposeObserver = nullptr;
+static mozilla::StaticAutoPtr<mozilla::ProfilerIOInterposeObserver>
+                                                            sInterposeObserver;
 
 void Sampler::Startup() {
   sRegisteredThreads = new std::vector<ThreadInfo*>();
@@ -87,6 +91,113 @@ ThreadInfo::~ThreadInfo() {
     delete mProfile;
 
   Sampler::FreePlatformData(mPlatformData);
+}
+
+ProfilerMarker::ProfilerMarker(const char* aMarkerName,
+    ProfilerMarkerPayload* aPayload)
+  : mMarkerName(strdup(aMarkerName))
+  , mPayload(aPayload)
+{
+}
+
+ProfilerMarker::~ProfilerMarker() {
+  free(mMarkerName);
+  delete mPayload;
+}
+
+void
+ProfilerMarker::SetGeneration(int aGenID) {
+  mGenID = aGenID;
+}
+
+template<typename Builder> void
+ProfilerMarker::BuildJSObject(Builder& b, typename Builder::ArrayHandle markers) const {
+  typename Builder::RootedObject marker(b.context(), b.CreateObject());
+  b.DefineProperty(marker, "name", GetMarkerName());
+  // TODO: Store the callsite for this marker if available:
+  // if have location data
+  //   b.DefineProperty(marker, "location", ...);
+  if (mPayload) {
+    typename Builder::RootedObject markerData(b.context(),
+                                              mPayload->PreparePayload(b));
+    b.DefineProperty(marker, "data", markerData);
+  }
+  b.ArrayPush(markers, marker);
+}
+
+template void
+ProfilerMarker::BuildJSObject<JSCustomObjectBuilder>(JSCustomObjectBuilder& b,
+                              JSCustomObjectBuilder::ArrayHandle markers) const;
+template void
+ProfilerMarker::BuildJSObject<JSObjectBuilder>(JSObjectBuilder& b,
+                                    JSObjectBuilder::ArrayHandle markers) const;
+
+void
+ProfilerMarkerLinkedList::insert(ProfilerMarker* elem) {
+  if (!mTail) {
+    mHead = elem;
+    mTail = elem;
+  } else {
+    mTail->mNext = elem;
+    mTail = elem;
+  }
+  elem->mNext = nullptr;
+}
+
+ProfilerMarker*
+ProfilerMarkerLinkedList::popHead() {
+  if (!mHead) {
+    MOZ_ASSERT(false);
+    return nullptr;
+  }
+
+  ProfilerMarker* head = mHead;
+
+  mHead = head->mNext;
+  if (!mHead) {
+    mTail = nullptr;
+  }
+
+  return head;
+}
+
+PendingMarkers::~PendingMarkers() {
+  clearMarkers();
+  if (mSignalLock != false) {
+    // We're releasing the pseudostack while it's still in use.
+    // The label macros keep a non ref counted reference to the
+    // stack to avoid a TLS. If these are not all cleared we will
+    // get a use-after-free so better to crash now.
+    abort();
+  }
+}
+
+void
+PendingMarkers::addMarker(ProfilerMarker *aMarker) {
+  mSignalLock = true;
+  STORE_SEQUENCER();
+
+  MOZ_ASSERT(aMarker);
+  mPendingMarkers.insert(aMarker);
+
+  // Clear markers that have been overwritten
+  while (mStoredMarkers.peek() &&
+         mStoredMarkers.peek()->HasExpired(mGenID)) {
+    delete mStoredMarkers.popHead();
+  } 
+  STORE_SEQUENCER();
+  mSignalLock = false;
+}
+
+void
+PendingMarkers::updateGeneration(int aGenID) {
+  mGenID = aGenID;
+}
+
+void
+PendingMarkers::addStoredMarker(ProfilerMarker *aStoredMarker) {
+  aStoredMarker->SetGeneration(mGenID);
+  mStoredMarkers.insert(aStoredMarker);
 }
 
 bool sps_version2()
@@ -293,7 +404,7 @@ void mozilla_sampler_init(void* stackTop)
   PseudoStack *stack = new PseudoStack();
   tlsPseudoStack.set(stack);
 
-  Sampler::RegisterCurrentThread("Gecko", stack, true, stackTop);
+  Sampler::RegisterCurrentThread("GeckoMain", stack, true, stackTop);
 
   // Read mode settings from MOZ_PROFILER_MODE and interval
   // settings from MOZ_PROFILER_INTERVAL and stack-scan threshhold
@@ -303,8 +414,10 @@ void mozilla_sampler_init(void* stackTop)
   // Allow the profiler to be started using signals
   OS::RegisterStartHandler();
 
-  // Initialize (but don't enable) I/O interposing
-  sInterposeObserver = new mozilla::ProfilerIOInterposeObserver();
+  // Initialize I/O interposing
+  mozilla::IOInterposer::Init();
+  // Initialize NSPR I/O Interposing
+  mozilla::InitNSPRIOInterposing();
 
   // We can't open pref so we use an environment variable
   // to know if we should trigger the profiler on startup
@@ -353,9 +466,15 @@ void mozilla_sampler_shutdown()
 
   profiler_stop();
 
-  delete sInterposeObserver;
+  // Unregister IO interpose observer
+  mozilla::IOInterposer::Unregister(mozilla::IOInterposeObserver::OpAll,
+                                    sInterposeObserver);
+  // mozilla_sampler_shutdown is only called at shutdown, and late-write checks
+  // might need the IO interposer, so we don't clear it. Don't worry it's
+  // designed not to report leaks.
+  // mozilla::IOInterposer::Clear();
+  mozilla::ClearNSPRIOInterposing();
   sInterposeObserver = nullptr;
-  mozilla::IOInterposer::ClearInstance();
 
   Sampler::Shutdown();
 
@@ -499,7 +618,12 @@ void mozilla_sampler_start(int aProfileEntries, double aInterval,
 #endif
 
   if (t->AddMainThreadIO()) {
-    mozilla::IOInterposer::GetInstance()->Enable(true);
+    if (!sInterposeObserver) {
+      // Lazily create IO interposer observer
+      sInterposeObserver = new mozilla::ProfilerIOInterposeObserver();
+    }
+    mozilla::IOInterposer::Register(mozilla::IOInterposeObserver::OpAll,
+                                    sInterposeObserver);
   }
 
   sIsProfiling = true;
@@ -544,7 +668,8 @@ void mozilla_sampler_stop()
     uwt__deinit();
   }
 
-  mozilla::IOInterposer::GetInstance()->Enable(false);
+  mozilla::IOInterposer::Unregister(mozilla::IOInterposeObserver::OpAll,
+                                    sInterposeObserver);
 
   sIsProfiling = false;
 

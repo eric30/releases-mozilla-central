@@ -29,11 +29,12 @@ public:
   NS_DECL_NSITIMERCALLBACK
 
   /**
-   * Returns the AudioChannelServce singleton. Only to be called from main thread.
+   * Returns the AudioChannelServce singleton. Only to be called from main
+   * thread.
+   *
    * @return NS_OK on proper assignment, NS_ERROR_FAILURE otherwise.
    */
-  static AudioChannelService*
-  GetAudioChannelService();
+  static AudioChannelService* GetAudioChannelService();
 
   /**
    * Shutdown the singleton.
@@ -45,18 +46,21 @@ public:
    * this service, sharing the AudioChannelType.
    */
   virtual void RegisterAudioChannelAgent(AudioChannelAgent* aAgent,
-                                         AudioChannelType aType);
+                                         AudioChannelType aType,
+                                         bool aWithVideo);
 
   /**
-   * Any  audio channel agent that stops playing should unregister itself to
+   * Any audio channel agent that stops playing should unregister itself to
    * this service.
    */
   virtual void UnregisterAudioChannelAgent(AudioChannelAgent* aAgent);
 
   /**
-   * Return true if this type should be muted.
+   * Return the state to indicate this agent should keep playing/
+   * fading volume/muted.
    */
-  virtual bool GetMuted(AudioChannelAgent* aAgent, bool aElementHidden);
+  virtual AudioChannelState GetState(AudioChannelAgent* aAgent,
+                                     bool aElementHidden);
 
   /**
    * Return true if there is a content channel active in this process
@@ -65,10 +69,17 @@ public:
   virtual bool ContentOrNormalChannelIsActive();
 
   /**
-   * Return true iff a normal or content channel is active for the given process
-   * ID.
+   * Return true if a normal or content channel is active for the given
+   * process ID.
    */
   virtual bool ProcessContentOrNormalChannelIsActive(uint64_t aChildID);
+
+  /***
+   * AudioChannelManager calls this function to notify the default channel used
+   * to adjust volume when there is no any active channel.
+   */
+  virtual void SetDefaultVolumeControlChannel(AudioChannelType aType,
+                                              bool aHidden);
 
 protected:
   void Notify();
@@ -80,18 +91,23 @@ protected:
   void SendAudioChannelChangedNotification(uint64_t aChildID);
 
   /* Register/Unregister IPC types: */
-  void RegisterType(AudioChannelType aType, uint64_t aChildID);
+  void RegisterType(AudioChannelType aType, uint64_t aChildID, bool aWithVideo);
   void UnregisterType(AudioChannelType aType, bool aElementHidden,
-                      uint64_t aChildID);
+                      uint64_t aChildID, bool aWithVideo);
   void UnregisterTypeInternal(AudioChannelType aType, bool aElementHidden,
-                              uint64_t aChildID);
+                              uint64_t aChildID, bool aWithVideo);
 
-  bool GetMutedInternal(AudioChannelType aType, uint64_t aChildID,
-                        bool aElementHidden, bool aElementWasHidden);
+  AudioChannelState GetStateInternal(AudioChannelType aType, uint64_t aChildID,
+                                     bool aElementHidden,
+                                     bool aElementWasHidden);
 
   /* Update the internal type value following the visibility changes */
   void UpdateChannelType(AudioChannelType aType, uint64_t aChildID,
                          bool aElementHidden, bool aElementWasHidden);
+
+  /* Send the default-volume-channel-changed notification */
+  void SetDefaultVolumeControlChannelInternal(AudioChannelType aType,
+                                              bool aHidden, uint64_t aChildID);
 
   AudioChannelService();
   virtual ~AudioChannelService();
@@ -116,6 +132,9 @@ protected:
 
   bool ChannelsActiveWithHigherPriorityThan(AudioChannelInternalType aType);
 
+  bool CheckVolumeFadedCondition(AudioChannelInternalType aType,
+                                 bool aElementHidden);
+
   const char* ChannelName(AudioChannelType aType);
 
   AudioChannelInternalType GetInternalType(AudioChannelType aType,
@@ -125,15 +144,18 @@ protected:
   public:
     AudioChannelAgentData(AudioChannelType aType,
                           bool aElementHidden,
-                          bool aMuted)
+                          AudioChannelState aState,
+                          bool aWithVideo)
     : mType(aType)
     , mElementHidden(aElementHidden)
-    , mMuted(aMuted)
+    , mState(aState)
+    , mWithVideo(aWithVideo)
     {}
 
     AudioChannelType mType;
     bool mElementHidden;
-    bool mMuted;
+    AudioChannelState mState;
+    const bool mWithVideo;
   };
 
   static PLDHashOperator
@@ -148,11 +170,14 @@ protected:
   AudioChannelType mCurrentVisibleHigherChannel;
 
   nsTArray<uint64_t> mActiveContentChildIDs;
+  nsTArray<uint64_t> mWithVideoChildIDs;
   bool mActiveContentChildIDsFrozen;
 
   nsCOMPtr<nsITimer> mDeferTelChannelTimer;
   bool mTimerElementHidden;
   uint64_t mTimerChildID;
+
+  uint64_t mDefChannelChildID;
 
   // This is needed for IPC comunication between
   // AudioChannelServiceChild and this class.

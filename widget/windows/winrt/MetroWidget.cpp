@@ -31,6 +31,9 @@
 #endif
 #include "UIABridgePrivate.h"
 #include "WinMouseScrollHandler.h"
+#include "InputData.h"
+#include "mozilla/TextEvents.h"
+#include "mozilla/TouchEvents.h"
 
 using namespace Microsoft::WRL;
 using namespace Microsoft::WRL::Wrappers;
@@ -978,6 +981,60 @@ CompositorParent* MetroWidget::NewCompositorParent(int aSurfaceWidth, int aSurfa
   return compositor;
 }
 
+void
+MetroWidget::ApzContentConsumingTouch()
+{
+  LogFunction();
+  if (!MetroWidget::sAPZC) {
+    return;
+  }
+  MetroWidget::sAPZC->ContentReceivedTouch(mRootLayerTreeId, true);
+}
+
+void
+MetroWidget::ApzContentIgnoringTouch()
+{
+  LogFunction();
+  if (!MetroWidget::sAPZC) {
+    return;
+  }
+  MetroWidget::sAPZC->ContentReceivedTouch(mRootLayerTreeId, false);
+}
+
+bool
+MetroWidget::HitTestAPZC(ScreenPoint& pt)
+{
+  if (!MetroWidget::sAPZC) {
+    return false;
+  }
+  return MetroWidget::sAPZC->HitTestAPZC(pt);
+}
+
+nsEventStatus
+MetroWidget::ApzReceiveInputEvent(nsInputEvent* aEvent)
+{
+  MOZ_ASSERT(aEvent);
+
+  if (!MetroWidget::sAPZC) {
+    return nsEventStatus_eIgnore;
+  }
+  nsInputEvent& event = static_cast<nsInputEvent&>(*aEvent);
+  return MetroWidget::sAPZC->ReceiveInputEvent(event);
+}
+
+nsEventStatus
+MetroWidget::ApzReceiveInputEvent(nsInputEvent* aInEvent, nsInputEvent* aOutEvent)
+{
+  MOZ_ASSERT(aInEvent);
+  MOZ_ASSERT(aOutEvent);
+
+  if (!MetroWidget::sAPZC) {
+    return nsEventStatus_eIgnore;
+  }
+  nsInputEvent& event = static_cast<nsInputEvent&>(*aInEvent);
+  return MetroWidget::sAPZC->ReceiveInputEvent(event, aOutEvent);
+}
+
 LayerManager*
 MetroWidget::GetLayerManager(PLayerTransactionChild* aShadowManager,
                              LayersBackend aBackendHint,
@@ -1170,7 +1227,7 @@ MetroWidget::DispatchWindowEvent(nsGUIEvent* aEvent)
 NS_IMETHODIMP
 MetroWidget::DispatchEvent(nsGUIEvent* event, nsEventStatus & aStatus)
 {
-  if (NS_IS_INPUT_EVENT(event)) {
+  if (event->IsInputDerivedEvent()) {
     UserActivity();
   }
 
@@ -1243,9 +1300,9 @@ double MetroWidget::GetDefaultScaleInternal()
 LayoutDeviceIntPoint
 MetroWidget::CSSIntPointToLayoutDeviceIntPoint(const CSSIntPoint &aCSSPoint)
 {
-  double scale = GetDefaultScale();
-  LayoutDeviceIntPoint devPx(int32_t(NS_round(scale * aCSSPoint.x)),
-                             int32_t(NS_round(scale * aCSSPoint.y)));
+  CSSToLayoutDeviceScale scale = GetDefaultScale();
+  LayoutDeviceIntPoint devPx(int32_t(NS_round(scale.scale * aCSSPoint.x)),
+                             int32_t(NS_round(scale.scale * aCSSPoint.y)));
   return devPx;
 }
 

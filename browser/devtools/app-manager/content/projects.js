@@ -14,7 +14,7 @@ const {AppProjects} = require("devtools/app-manager/app-projects");
 const {AppValidator} = require("devtools/app-manager/app-validator");
 const {Services} = Cu.import("resource://gre/modules/Services.jsm");
 const {FileUtils} = Cu.import("resource://gre/modules/FileUtils.jsm");
-const {installHosted, installPackaged} = require("devtools/app-actor-front");
+const {installHosted, installPackaged, getTargetForApp} = require("devtools/app-actor-front");
 
 const promise = require("sdk/core/promise");
 
@@ -39,10 +39,8 @@ let UI = {
     this.template = new Template(document.body, AppProjects.store, Utils.l10n);
     this.template.start();
 
-    AppProjects.store.on("set", (event,path,value) => {
-      if (path == "projects") {
-        AppProjects.store.object.projects.forEach(UI.validate);
-      }
+    AppProjects.load().then(() => {
+      AppProjects.store.object.projects.forEach(UI.validate);
     });
   },
 
@@ -116,45 +114,89 @@ let UI = {
 
   validate: function(project) {
     let validation = new AppValidator(project);
-    validation.validate()
-              .then(function () {
-                if (validation.manifest) {
-                  project.name = validation.manifest.name;
-                  project.icon = UI._getLocalIconURL(project, validation.manifest);
-                  project.manifest = validation.manifest;
-                }
+    return validation.validate()
+      .then(function () {
+        if (validation.manifest) {
+          project.name = validation.manifest.name;
+          project.icon = UI._getLocalIconURL(project, validation.manifest);
+          project.manifest = validation.manifest;
+        }
 
-                project.validationStatus = "valid";
+        project.validationStatus = "valid";
 
-                if (validation.warnings.length > 0) {
-                  project.warningsCount = validation.warnings.length;
-                  project.warnings = validation.warnings.join(",\n ");
-                  project.validationStatus = "warning";
-                } else {
-                  project.warnings = "";
-                  project.warningsCount = 0;
-                }
+        if (validation.warnings.length > 0) {
+          project.warningsCount = validation.warnings.length;
+          project.warnings = validation.warnings.join(",\n ");
+          project.validationStatus = "warning";
+        } else {
+          project.warnings = "";
+          project.warningsCount = 0;
+        }
 
-                if (validation.errors.length > 0) {
-                  project.errorsCount = validation.errors.length;
-                  project.errors = validation.errors.join(",\n ");
-                  project.validationStatus = "error";
-                } else {
-                  project.errors = "";
-                  project.errorsCount = 0;
-                }
+        if (validation.errors.length > 0) {
+          project.errorsCount = validation.errors.length;
+          project.errors = validation.errors.join(",\n ");
+          project.validationStatus = "error";
+        } else {
+          project.errors = "";
+          project.errorsCount = 0;
+        }
 
-              });
+      });
 
   },
 
-  update: function(location) {
+  update: function(button, location) {
+    button.disabled = true;
     let project = AppProjects.get(location);
-    this.validate(project);
+    this.validate(project)
+        .then(() => {
+           // Install the app to the device if we are connected,
+           // and there is no error
+           if (project.errorsCount == 0 && this.listTabsResponse) {
+             return this.install(project);
+           }
+         })
+        .then(
+         () => {
+           button.disabled = false;
+         },
+         (res) => {
+           button.disabled = false;
+           let message = res.error + ": " + res.message;
+           alert(message);
+           this.connection.log(message);
+         });
   },
 
-  remove: function(location) {
-    AppProjects.remove(location);
+  remove: function(location, event) {
+    if (event) {
+      // We don't want the "click" event to be propagated to the project item.
+      // That would trigger `selectProject()`.
+      event.stopPropagation();
+    }
+
+    let item = document.getElementById(location);
+
+    let toSelect = document.querySelector(".project-item.selected");
+    toSelect = toSelect ? toSelect.id : "";
+
+    if (toSelect == location) {
+      toSelect = null;
+      let sibling;
+      if (item.previousElementSibling) {
+        sibling = item.previousElementSibling;
+      } else {
+        sibling = item.nextElementSibling;
+      }
+      if (sibling && !!AppProjects.get(sibling.id)) {
+        toSelect = sibling.id;
+      }
+    }
+
+    AppProjects.remove(location).then(() => {
+      this.selectProject(toSelect);
+    });
   },
 
   _getProjectManifestURL: function (project) {
@@ -165,11 +207,7 @@ let UI = {
     }
   },
 
-  install: function(button, location) {
-    button.dataset.originalTextContent = button.textContent;
-    button.textContent = Utils.l10n("project.installing");
-    button.disabled = true;
-    let project = AppProjects.get(location);
+  install: function(project) {
     let install;
     if (project.type == "packaged") {
       install = installPackaged(this.connection.client, this.listTabsResponse.webappsActor, project.location, project.packagedAppOrigin);
@@ -183,89 +221,110 @@ let UI = {
       };
       install = installHosted(this.connection.client, this.listTabsResponse.webappsActor, appId, metadata, project.manifest);
     }
-    install.then(function () {
-      button.disabled = false;
-      button.textContent = Utils.l10n("project.installed");
-      setTimeout(function() {
-        button.textContent = button.dataset.originalTextContent;
-      }, 1500);
-    },
-    function (res) {
-      button.disabled = false;
-      let message = res.error + ": " + res.message;
-      alert(message);
-      this.connection.log(message);
-    });
+    return install;
   },
 
-  start: function(location) {
-    let project = AppProjects.get(location);
+  start: function(project) {
+    let deferred = promise.defer();
     let request = {
       to: this.listTabsResponse.webappsActor,
       type: "launch",
       manifestURL: this._getProjectManifestURL(project)
     };
     this.connection.client.request(request, (res) => {
-
+      if (res.error)
+        deferred.reject(res.error);
+      else
+        deferred.resolve(res);
     });
+    return deferred.promise;
   },
 
   stop: function(location) {
     let project = AppProjects.get(location);
+    let deferred = promise.defer();
     let request = {
       to: this.listTabsResponse.webappsActor,
       type: "close",
       manifestURL: this._getProjectManifestURL(project)
     };
     this.connection.client.request(request, (res) => {
-
-    });
-  },
-
-  _getTargetForApp: function(manifest) { // FIXME <- will be implemented in bug 912476
-    if (!this.listTabsResponse)
-      return null;
-    let actor = this.listTabsResponse.webappsActor;
-    let deferred = promise.defer();
-    let request = {
-      to: actor,
-      type: "getAppActor",
-      manifestURL: manifest,
-    }
-    this.connection.client.request(request, (res) => {
-      if (res.error) {
-        deferred.reject(res.error);
-      } else {
-        let options = {
-          form: res.actor,
-          client: this.connection.client,
-          chrome: false
-        };
-
-        devtools.TargetFactory.forRemoteTab(options).then((target) => {
-          deferred.resolve(target)
-        }, (error) => {
-          deferred.reject(error);
-        });
-      }
+      promive.resolve(res);
     });
     return deferred.promise;
   },
 
-  openToolbox: function(location) {
+  debug: function(button, location) {
+    button.disabled = true;
     let project = AppProjects.get(location);
-    let manifest = this._getProjectManifestURL(project);
-    this._getTargetForApp(manifest).then((target) => {
+
+    let onFailedToStart = (error) => {
+      // If not installed, install and open it
+      if (error == "NO_SUCH_APP") {
+        return this.install(project);
+      } else {
+        throw error;
+      }
+    };
+    let onStarted = () => {
+      // Once we asked the app to launch, the app isn't necessary completely loaded.
+      // launch request only ask the app to launch and immediatly returns.
+      // We have to keep trying to get app tab actors required to create its target.
+      let deferred = promise.defer();
+      let loop = (count) => {
+        // Ensure not looping for ever
+        if (count >= 100) {
+          deferred.reject("Unable to connect to the app");
+          return;
+        }
+        // Also, in case the app wasn't installed yet, we also have to keep asking the
+        // app to launch, as launch request made right after install may race.
+        this.start(project);
+        getTargetForApp(
+          this.connection.client,
+          this.listTabsResponse.webappsActor,
+          this._getProjectManifestURL(project)).
+            then(deferred.resolve,
+                 (err) => {
+                   if (err == "appNotFound")
+                     setTimeout(loop, 500, count + 1);
+                   else
+                     deferred.reject(err);
+                 });
+      };
+      loop(0);
+      return deferred.promise;
+    };
+    let onTargetReady = (target) => {
+      // Finally, when it's finally opened, display the toolbox
+      let deferred = promise.defer();
       gDevTools.showToolbox(target,
                             null,
                             devtools.Toolbox.HostType.WINDOW).then(toolbox => {
         this.connection.once(Connection.Events.DISCONNECTED, () => {
           toolbox.destroy();
         });
+        deferred.resolve(toolbox);
       });
-    }, console.error);
-  },
+      return deferred.promise;
+    };
 
+    // First try to open the app
+    this.start(project)
+        .then(null, onFailedToStart)
+        .then(onStarted)
+        .then(onTargetReady)
+        .then(() => {
+           // And only when the toolbox is opened, release the button
+           button.disabled = false;
+         },
+         (err) => {
+           button.disabled = false;
+           let message = err.error ? err.error + ": " + err.message : String(err);
+           alert(message);
+           this.connection.log(message);
+         });
+  },
 
   reveal: function(location) {
     let project = AppProjects.get(location);
@@ -286,15 +345,20 @@ let UI = {
         break;
       }
     }
-    if (idx == projects.length) {
-      // Not found
-      return;
-    }
 
     let oldButton = document.querySelector(".project-item.selected");
     if (oldButton) {
       oldButton.classList.remove("selected");
     }
+
+    if (idx == projects.length) {
+      // Not found. Empty lense.
+      let lense = document.querySelector("#lense");
+      lense.setAttribute("template-for", '{"path":"","childSelector":""}');
+      this.template._processFor(lense);
+      return;
+    }
+
     let button = document.getElementById(location);
     button.classList.add("selected");
 

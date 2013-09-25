@@ -11,7 +11,6 @@
 #include "MediaDecoderOwner.h"
 #include "nsIChannel.h"
 #include "nsIHttpChannel.h"
-#include "nsThreadUtils.h"
 #include "nsIDOMRange.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsILoadGroup.h"
@@ -45,6 +44,7 @@ class MediaDecoder;
 
 class nsITimer;
 class nsRange;
+class nsIRunnable;
 
 namespace mozilla {
 namespace dom {
@@ -530,6 +530,12 @@ public:
     mTextTracks->AddTextTrack(aTextTrack);
   }
 
+  void RemoveTextTrack(TextTrack* aTextTrack) {
+    if (mTextTracks) {
+      mTextTracks->RemoveTextTrack(*aTextTrack);
+    }
+  }
+
 protected:
   class MediaLoadListener;
   class StreamListener;
@@ -812,7 +818,7 @@ protected:
   void SetMutedInternal(uint32_t aMuted);
   /**
    * Update the volume of the output audio stream to match the element's
-   * current mMuted/mVolume state.
+   * current mMuted/mVolume/mAudioChannelFaded state.
    */
   void SetVolumeInternal();
 
@@ -841,8 +847,8 @@ protected:
   // Check the permissions for audiochannel.
   bool CheckAudioChannelPermissions(const nsAString& aType);
 
-  // This method does the check for muting/unmuting the audio channel.
-  nsresult UpdateChannelMuteState(bool aCanPlay);
+  // This method does the check for muting/fading/unmuting the audio channel.
+  nsresult UpdateChannelMuteState(mozilla::dom::AudioChannelState aCanPlay);
 
   // Update the audio channel playing state
   virtual void UpdateAudioChannelPlayingState();
@@ -1126,6 +1132,9 @@ protected:
 
   // Audio Channel Type.
   AudioChannelType mAudioChannelType;
+
+  // The audio channel has been faded.
+  bool mAudioChannelFaded;
 
   // Is this media element playing?
   bool mPlayingThroughTheAudioChannel;

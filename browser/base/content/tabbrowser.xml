@@ -163,8 +163,7 @@
           let findBar = document.createElementNS(this.namespaceURI, "findbar");
           let browser = this.getBrowserForTab(aTab);
           let browserContainer = this.getBrowserContainer(browser);
-          findBar.setAttribute("position", "top");
-          browserContainer.insertBefore(findBar, browserContainer.firstChild);
+          browserContainer.appendChild(findBar);
 
           // Force a style flush to ensure that our binding is attached.
           findBar.clientTop;
@@ -179,6 +178,27 @@
           aTab.dispatchEvent(event);
 
           return findBar;
+        ]]></body>
+      </method>
+
+      <method name="getStatusPanel">
+        <body><![CDATA[
+          if (!this._statusPanel) {
+            this._statusPanel = document.createElementNS(this.namespaceURI, "statuspanel");
+            this._statusPanel.setAttribute("inactive", "true");
+            this._appendStatusPanel();
+          }
+          return this._statusPanel;
+        ]]></body>
+      </method>
+
+      <method name="_appendStatusPanel">
+        <body><![CDATA[
+          if (this._statusPanel) {
+            let browser = this.selectedBrowser;
+            let browserContainer = this.getBrowserContainer(browser);
+            browserContainer.insertBefore(this._statusPanel, browser.parentNode.nextSibling);
+          }
         ]]></body>
       </method>
 
@@ -987,6 +1007,8 @@
                 backForwardContainer.removeAttribute("switchingtabs");
               });
             }
+
+            this._appendStatusPanel();
 
             if (updatePageReport)
               this.mCurrentBrowser.updatePageReport();
@@ -2728,6 +2750,10 @@
 
       <property name="currentURI"
                 onget="return this.mCurrentBrowser.currentURI;"
+                readonly="true"/>
+
+      <property name="finder"
+                onget="return this.mCurrentBrowser.finder"
                 readonly="true"/>
 
       <property name="docShell"
@@ -4878,17 +4904,16 @@
 
       <method name="_calcMouseTargetRect">
         <body><![CDATA[
-          let alignRight = false;
+          let container = this.parentNode;
+          let alignRight = (getComputedStyle(container).direction == "rtl");
+          let panelRect = this.getBoundingClientRect();
+          let containerRect = container.getBoundingClientRect();
 
-          if (getComputedStyle(document.documentElement).direction == "rtl")
-            alignRight = !alignRight;
-
-          let rect = this.getBoundingClientRect();
           this._mouseTargetRect = {
-            top:    rect.top,
-            bottom: rect.bottom,
-            left:   alignRight ? window.innerWidth - rect.width : 0,
-            right:  alignRight ? window.innerWidth : rect.width
+            top:    panelRect.top,
+            bottom: panelRect.bottom,
+            left:   alignRight ? containerRect.right - panelRect.width : containerRect.left,
+            right:  alignRight ? containerRect.right : containerRect.left + panelRect.width
           };
         ]]></body>
       </method>

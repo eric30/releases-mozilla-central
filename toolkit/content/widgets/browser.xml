@@ -296,11 +296,24 @@
         </body>
       </method>
 
+      <field name="_finder">null</field>
+
+      <property name="finder" readonly="true">
+        <getter><![CDATA[
+          if (!this._finder) {
+            if (!this.docShell)
+              return null;
+
+            let Finder = Components.utils.import("resource://gre/modules/Finder.jsm", {}).Finder;
+            this._finder = new Finder(this.docShell);
+          }
+          return this._finder;
+        ]]></getter>
+      </property>
+
       <field name="_fastFind">null</field>
-      <property name="fastFind"
-                readonly="true">
-        <getter>
-        <![CDATA[
+      <property name="fastFind" readonly="true">
+        <getter><![CDATA[
           if (!this._fastFind) {
             if (!("@mozilla.org/typeaheadfind;1" in Components.classes))
               return null;
@@ -317,9 +330,11 @@
             this._fastFind.init(this.docShell);
           }
           return this._fastFind;
-        ]]>
-        </getter>
+        ]]></getter>
       </property>
+
+      <field name="_lastSearchString">null</field>
+      <field name="_lastSearchHighlight">false</field>
 
       <property name="webProgress"
                 readonly="true"
@@ -840,8 +855,6 @@
               // Elements or non-html elements such as svg or Document nodes
               // also make sure to skip select elements that are not multiline
               if (!(this._scrollable instanceof HTMLElement) ||
-                  (this._scrollable instanceof HTMLHtmlElement) ||
-                  (this._scrollable instanceof HTMLBodyElement) ||
                   ((this._scrollable instanceof HTMLSelectElement) && !this._scrollable.multiple)) {
                 continue;
               }
@@ -855,16 +868,14 @@
               // we already discarded non-multiline selects so allow vertical
               // scroll for multiline ones directly without checking for a
               // overflow property
-              var scrollVert = this._scrollable.clientHeight > 0 &&
-                               this._scrollable.scrollHeight > this._scrollable.clientHeight &&
+              var scrollVert = this._scrollable.scrollTopMax &&
                                (this._scrollable instanceof HTMLSelectElement ||
                                 scrollingAllowed.indexOf(overflowy) >= 0);
 
               // do not allow horizontal scrolling for select elements, it leads
               // to visual artifacts and is not the expected behavior anyway
               if (!(this._scrollable instanceof HTMLSelectElement) &&
-                  this._scrollable.clientWidth > 0 &&
-                  this._scrollable.scrollWidth > this._scrollable.clientWidth &&
+                  this._scrollable.scrollLeftMax &&
                   scrollingAllowed.indexOf(overflowx) >= 0) {
                 this._autoScrollPopup.setAttribute("scrolldir", scrollVert ? "NSEW" : "EW");
                 break;

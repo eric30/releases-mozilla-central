@@ -15,7 +15,6 @@
 #include "nsGkAtoms.h"
 #include "nsMenuFrame.h"
 #include "nsMenuPopupFrame.h"
-#include "nsGUIEvent.h"
 #include "nsUnicharUtils.h"
 #include "nsPIDOMWindow.h"
 #include "nsIInterfaceRequestorUtils.h"
@@ -26,6 +25,7 @@
 #endif
 #include "nsContentUtils.h"
 #include "nsUTF8Utils.h"
+#include "mozilla/TextEvents.h"
 
 
 //
@@ -149,7 +149,7 @@ nsMenuBarFrame::ToggleMenuActiveState()
       // Activate the menu bar
       SetActive(true);
 
-#ifdef MOZ_WIDGET_GTK2
+#if (MOZ_WIDGET_GTK == 2)
       firstFrame->OpenMenu(true);
 #else
       firstFrame->SelectMenu(true);

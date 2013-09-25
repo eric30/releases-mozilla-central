@@ -6,19 +6,19 @@
 
 #include "mozilla/AvailableMemoryTracker.h"
 
+#if defined(XP_WIN)
 #include "prinrval.h"
 #include "prenv.h"
-
 #include "nsIMemoryReporter.h"
+#include "nsMemoryPressure.h"
+#endif
+
 #include "nsIObserver.h"
 #include "nsIObserverService.h"
 #include "nsIRunnable.h"
 #include "nsISupports.h"
-#include "nsMemoryPressure.h"
-#include "nsPrintfCString.h"
-#include "nsThread.h"
+#include "nsThreadUtils.h"
 
-#include "mozilla/Atomics.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
 
@@ -325,6 +325,12 @@ CreateDIBSectionHook(HDC aDC,
   return result;
 }
 
+static int64_t
+LowMemoryEventsVirtualDistinguishedAmount()
+{
+  return sNumLowVirtualMemEvents;
+}
+
 class LowMemoryEventsVirtualReporter MOZ_FINAL : public MemoryUniReporter
 {
 public:
@@ -345,7 +351,7 @@ private:
     // force-disable virtual-memory tracking there.
     MOZ_ASSERT(sizeof(void*) == 4);
 
-    return sNumLowVirtualMemEvents;
+    return LowMemoryEventsVirtualDistinguishedAmount();
   }
 };
 
@@ -366,6 +372,12 @@ private:
   int64_t Amount() MOZ_OVERRIDE { return sNumLowCommitSpaceEvents; }
 };
 
+static int64_t
+LowMemoryEventsPhysicalDistinguishedAmount()
+{
+  return sNumLowPhysicalMemEvents;
+}
+
 class LowMemoryEventsPhysicalReporter MOZ_FINAL : public MemoryUniReporter
 {
 public:
@@ -380,7 +392,7 @@ public:
   {}
 
 private:
-  int64_t Amount() MOZ_OVERRIDE { return sNumLowPhysicalMemEvents; }
+  int64_t Amount() MOZ_OVERRIDE { return LowMemoryEventsPhysicalDistinguishedAmount(); }
 };
 
 #endif // defined(XP_WIN)
@@ -503,6 +515,8 @@ void Activate()
   if (sizeof(void*) == 4) {
     NS_RegisterMemoryReporter(new LowMemoryEventsVirtualReporter());
   }
+  RegisterLowMemoryEventsVirtualDistinguishedAmount(LowMemoryEventsVirtualDistinguishedAmount);
+  RegisterLowMemoryEventsPhysicalDistinguishedAmount(LowMemoryEventsPhysicalDistinguishedAmount);
   sHooksActive = true;
 #endif
 

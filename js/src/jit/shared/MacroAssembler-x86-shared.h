@@ -205,6 +205,9 @@ class MacroAssemblerX86Shared : public Assembler
         framePushed_ += sizeof(word.value);
         return pushWithPatch(word);
     }
+    CodeOffsetLabel PushWithPatch(const ImmPtr &imm) {
+        return PushWithPatch(ImmWord(uintptr_t(imm.value)));
+    }
 
     template <typename T>
     void Pop(const T &t) {
@@ -235,21 +238,43 @@ class MacroAssemblerX86Shared : public Assembler
     void jump(Register reg) {
         jmp(Operand(reg));
     }
+    void jump(const Address &addr) {
+        jmp(Operand(addr));
+    }
 
     void convertInt32ToDouble(const Register &src, const FloatRegister &dest) {
+        // cvtsi2sd and friends write only part of their output register, which
+        // causes slowdowns on out-of-order processors. Explicitly break
+        // dependencies with xorpd (and xorps elsewhere), which are handled
+        // specially in modern CPUs, for this purpose. See sections 8.14, 9.8,
+        // 10.8, 12.9, 13.16, 14.14, and 15.8 of Agner's Microarchitecture
+        // document.
+        zeroDouble(dest);
         cvtsi2sd(src, dest);
     }
     void convertInt32ToDouble(const Address &src, FloatRegister dest) {
+        convertInt32ToDouble(Operand(src), dest);
+    }
+    void convertInt32ToDouble(const Operand &src, FloatRegister dest) {
+        // Clear the output register first to break dependencies; see above;
+        zeroDouble(dest);
         cvtsi2sd(Operand(src), dest);
     }
     void convertInt32ToFloat32(const Register &src, const FloatRegister &dest) {
+        // Clear the output register first to break dependencies; see above;
+        zeroFloat32(dest);
         cvtsi2ss(src, dest);
     }
     void convertInt32ToFloat32(const Address &src, FloatRegister dest) {
-        cvtsi2ss(Operand(src), dest);
+        convertInt32ToFloat32(Operand(src), dest);
+    }
+    void convertInt32ToFloat32(const Operand &src, FloatRegister dest) {
+        // Clear the output register first to break dependencies; see above;
+        zeroFloat32(dest);
+        cvtsi2ss(src, dest);
     }
     Condition testDoubleTruthy(bool truthy, const FloatRegister &reg) {
-        xorpd(ScratchFloatReg, ScratchFloatReg);
+        zeroDouble(ScratchFloatReg);
         ucomisd(ScratchFloatReg, reg);
         return truthy ? NonZero : Zero;
     }
@@ -322,6 +347,9 @@ class MacroAssemblerX86Shared : public Assembler
     void zeroDouble(FloatRegister reg) {
         xorpd(reg, reg);
     }
+    void zeroFloat32(FloatRegister reg) {
+        xorps(reg, reg);
+    }
     void negateDouble(FloatRegister reg) {
         // From MacroAssemblerX86Shared::maybeInlineDouble
         pcmpeqw(ScratchFloatReg, ScratchFloatReg);
@@ -389,6 +417,12 @@ class MacroAssemblerX86Shared : public Assembler
     void storeFloat(FloatRegister src, const BaseIndex &dest) {
         movss(src, Operand(dest));
     }
+    void storeFloat(FloatRegister src, const Operand &dest) {
+        movss(src, dest);
+    }
+    void moveFloat(FloatRegister src, FloatRegister dest) {
+        movss(src, dest);
+    }
 
     // Checks whether a double is representable as a 32-bit integer. If so, the
     // integer is written to the output register. Otherwise, a bailout is taken to
@@ -451,6 +485,17 @@ class MacroAssemblerX86Shared : public Assembler
         // constant pool loads for double constants, this is probably only
         // worthwhile in cases where a load is likely to be delayed.
 
+        return false;
+    }
+
+    bool maybeInlineFloat(float f, const FloatRegister &dest) {
+        uint32_t u = mozilla::BitwiseCast<uint32_t>(f);
+
+        // See comment above
+        if (u == 0) {
+            xorps(dest, dest);
+            return true;
+        }
         return false;
     }
 
@@ -528,7 +573,7 @@ class MacroAssemblerX86Shared : public Assembler
     bool buildOOLFakeExitFrame(void *fakeReturnAddr) {
         uint32_t descriptor = MakeFrameDescriptor(framePushed(), IonFrame_OptimizedJS);
         Push(Imm32(descriptor));
-        Push(ImmWord(fakeReturnAddr));
+        Push(ImmPtr(fakeReturnAddr));
         return true;
     }
 

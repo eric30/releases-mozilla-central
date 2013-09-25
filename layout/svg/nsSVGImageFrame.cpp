@@ -20,6 +20,7 @@
 #include "SVGImageContext.h"
 #include "mozilla/dom/SVGImageElement.h"
 #include "nsContentUtils.h"
+#include "nsIReflowCallback.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -42,13 +43,15 @@ private:
 
 typedef nsSVGPathGeometryFrame nsSVGImageFrameBase;
 
-class nsSVGImageFrame : public nsSVGImageFrameBase
+class nsSVGImageFrame : public nsSVGImageFrameBase,
+                        public nsIReflowCallback
 {
   friend nsIFrame*
   NS_NewSVGImageFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 
 protected:
-  nsSVGImageFrame(nsStyleContext* aContext) : nsSVGImageFrameBase(aContext) {}
+  nsSVGImageFrame(nsStyleContext* aContext) : nsSVGImageFrameBase(aContext),
+                                              mReflowCallbackPosted(false) {}
   virtual ~nsSVGImageFrame();
 
 public:
@@ -86,6 +89,10 @@ public:
   }
 #endif
 
+  // nsIReflowCallback
+  virtual bool ReflowFinished() MOZ_OVERRIDE;
+  virtual void ReflowCallbackCanceled() MOZ_OVERRIDE;
+
 private:
   gfxMatrix GetRasterImageTransform(int32_t aNativeWidth,
                                     int32_t aNativeHeight,
@@ -99,6 +106,8 @@ private:
   nsCOMPtr<imgINotificationObserver> mListener;
 
   nsCOMPtr<imgIContainer> mImageContainer;
+
+  bool mReflowCallbackPosted;
 
   friend class nsSVGImageListener;
 };
@@ -153,6 +162,11 @@ nsSVGImageFrame::Init(nsIContent* aContent,
 /* virtual */ void
 nsSVGImageFrame::DestroyFrom(nsIFrame* aDestructRoot)
 {
+  if (mReflowCallbackPosted) {
+    PresContext()->PresShell()->CancelReflowCallback(this);
+    mReflowCallbackPosted = false;
+  }
+
   nsCOMPtr<nsIImageLoadingContent> imageLoader =
     do_QueryInterface(nsFrame::mContent);
 
@@ -328,8 +342,8 @@ nsSVGImageFrame::PaintSVG(nsRenderingContext *aContext,
       opacity = StyleDisplay()->mOpacity;
     }
 
-    if (opacity != 1.0f) {
-      ctx->PushGroup(gfxASurface::CONTENT_COLOR_ALPHA);
+    if (opacity != 1.0f || StyleDisplay()->mMixBlendMode != NS_STYLE_BLEND_NORMAL) {
+      ctx->PushGroup(GFX_CONTENT_COLOR_ALPHA);
     }
 
     nscoord appUnitsPerDevPx = PresContext()->AppUnitsPerDevPixel();
@@ -382,7 +396,7 @@ nsSVGImageFrame::PaintSVG(nsRenderingContext *aContext,
         drawFlags);
     }
 
-    if (opacity != 1.0f) {
+    if (opacity != 1.0f || StyleDisplay()->mMixBlendMode != NS_STYLE_BLEND_NORMAL) {
       ctx->PopGroupToSource();
       ctx->SetOperator(gfxContext::OPERATOR_OVER);
       ctx->Paint(opacity);
@@ -491,6 +505,12 @@ nsSVGImageFrame::ReflowSVG()
     // FinishAndStoreOverflow (subsequent filter changes are handled off
     // nsChangeHint_UpdateEffects):
     nsSVGEffects::UpdateEffects(this);
+
+    if (!mReflowCallbackPosted) {
+      nsIPresShell* shell = PresContext()->PresShell();
+      mReflowCallbackPosted = true;
+      shell->PostReflowCallback(this);
+    }
   }
 
   nsRect overflow = nsRect(nsPoint(0,0), mRect.Size());
@@ -505,6 +525,22 @@ nsSVGImageFrame::ReflowSVG()
   if (!(GetParent()->GetStateBits() & NS_FRAME_FIRST_REFLOW)) {
     InvalidateFrame();
   }
+}
+
+bool
+nsSVGImageFrame::ReflowFinished()
+{
+  mReflowCallbackPosted = false;
+
+  nsLayoutUtils::UpdateImageVisibilityForFrame(this);
+
+  return false;
+}
+
+void
+nsSVGImageFrame::ReflowCallbackCanceled()
+{
+  mReflowCallbackPosted = false;
 }
 
 uint16_t

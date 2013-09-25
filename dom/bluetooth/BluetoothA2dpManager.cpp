@@ -19,6 +19,7 @@
 #include "mozilla/StaticPtr.h"
 #include "nsIAudioManager.h"
 #include "nsIObserverService.h"
+#include "MainThreadUtils.h"
 
 
 using namespace mozilla;
@@ -325,6 +326,8 @@ BluetoothA2dpManager::HandleSinkPropertyChanged(const BluetoothSignal& aSignal)
         OnDisconnect(EmptyString());
       }
       break;
+    default:
+      break;
   }
 }
 
@@ -341,7 +344,7 @@ BluetoothA2dpManager::NotifyConnectionStatusChanged()
   if (NS_FAILED(obs->NotifyObservers(this,
                                      BLUETOOTH_A2DP_STATUS_CHANGED_ID,
                                      mDeviceAddress.get()))) {
-    NS_WARNING("Failed to notify bluetooth-a2dp-status-changed observsers!");
+    BT_WARNING("Failed to notify bluetooth-a2dp-status-changed observsers!");
   }
 
   // Dispatch an event of status change

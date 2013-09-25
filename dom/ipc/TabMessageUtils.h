@@ -61,8 +61,15 @@ struct ParamTraits<mozilla::dom::RemoteDOMEvent>
 template <>
 struct ParamTraits<mozilla::dom::AudioChannelType>
   : public EnumSerializer<mozilla::dom::AudioChannelType,
-                          mozilla::dom::AUDIO_CHANNEL_NORMAL,
+                          mozilla::dom::AUDIO_CHANNEL_DEFAULT,
                           mozilla::dom::AUDIO_CHANNEL_LAST>
+{ };
+
+template <>
+struct ParamTraits<mozilla::dom::AudioChannelState>
+  : public EnumSerializer<mozilla::dom::AudioChannelState,
+                           mozilla::dom::AUDIO_CHANNEL_STATE_NORMAL,
+                           mozilla::dom::AUDIO_CHANNEL_STATE_LAST>
 { };
 
 }

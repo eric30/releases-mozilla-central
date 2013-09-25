@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
+[Pref="dom.telephony.enabled"]
 interface Telephony : EventTarget {
   [Throws]
   TelephonyCall dial(DOMString number);
@@ -26,12 +27,8 @@ interface Telephony : EventTarget {
   [Throws]
   void stopTone();
 
-  [SetterThrows]
   attribute EventHandler onincoming;
-  [SetterThrows]
   attribute EventHandler oncallschanged;
-  [SetterThrows]
   attribute EventHandler onremoteheld;
-  [SetterThrows]
   attribute EventHandler onremoteresumed;
 };

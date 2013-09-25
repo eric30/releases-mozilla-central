@@ -944,6 +944,10 @@ class StackFrame
         return offsetof(StackFrame, scopeChain_);
     }
 
+    static size_t offsetOfArgumentsObject() {
+        return offsetof(StackFrame, argsObj_);
+    }
+
     static ptrdiff_t offsetOfThis(JSFunction *fun) {
         return fun == NULL
                ? -1 * ptrdiff_t(sizeof(Value))
@@ -1058,7 +1062,7 @@ class InterpreterStack
     friend class FrameGuard;
     friend class InterpreterActivation;
 
-    const static size_t DEFAULT_CHUNK_SIZE = 4 * 1024;
+    static const size_t DEFAULT_CHUNK_SIZE = 4 * 1024;
     LifoAlloc allocator_;
 
     // Number of interpreter frames on the stack, for over-recursion checks.
