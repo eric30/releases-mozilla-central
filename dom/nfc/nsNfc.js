@@ -36,10 +36,6 @@ mozNfc.prototype = {
     return ObjectWrapper.wrap(obj, this._window);
   },
 
-  doSomething: function doSomething() {
-    debug("called doSomething!!!");
-  },
-
   init: function init(aWindow) {
     debug("XXXXXXXXXX init called XXXXXXXXXXXX");
     this._window = aWindow;
@@ -53,6 +49,9 @@ mozNfc.prototype = {
   },
   writeNDEF: function writeNDEF(records) {
     return this._nfcContentHelper.ndefWrite(this._window, records);
+  },
+  makeReadOnlyNDEF: function makeReadOnlyNDEF() {
+    return this._nfcContentHelper.ndefMakeReadOnly(this._window);
   },
 
   connect: function connect_with_type(int_tech_type) {

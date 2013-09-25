@@ -5,7 +5,7 @@
 
 /* Copyright © 2013 Deutsche Telekom, Inc. */
 
-[Constructor(octet tnf, DOMString type, DOMString id, any payload)]
+[Constructor(octet tnf, DOMString type, DOMString id, DOMString payload)]
 interface MozNdefRecord
 {
   /**
@@ -34,6 +34,5 @@ interface MozNdefRecord
   /**
    * payload - Binary data blob. The meaning of this field is application dependent.
    */
-  [Throws]
-  readonly attribute any payload;
+  readonly attribute DOMString payload;
 };

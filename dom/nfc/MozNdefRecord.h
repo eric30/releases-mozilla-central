@@ -25,8 +25,8 @@ struct JSContext;
 namespace mozilla {
 namespace dom {
 
-class MozNdefRecord MOZ_FINAL : public nsISupports /* Change nativeOwnership in the binding configuration if you don't want this */,
-                                public nsWrapperCache /* Change wrapperCache in the binding configuration if you don't want this */
+class MozNdefRecord MOZ_FINAL : public nsISupports,
+                                public nsWrapperCache
 {
 public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -34,18 +34,18 @@ public:
 
 public:
 
-  MozNdefRecord(uint8_t aTnf, const nsAString& aType, const nsAString& aId, const JS::Value aPlayload);
+  MozNdefRecord(nsPIDOMWindow* aWindow, uint8_t aTnf, const nsAString& aType, const nsAString& aId, const nsAString& aPlayload);
 
   ~MozNdefRecord();
 
   nsIDOMWindow* GetParentObject() const
   {
-    return NULL;
+    return mWindow;
   }
 
   virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
-  static already_AddRefed<MozNdefRecord> Constructor(const GlobalObject& aGlobal, JSContext* cx, uint8_t aTnf, const nsAString& aType, const nsAString& aId, JS::Handle<JS::Value> aPayload, ErrorResult& aRv);
+  static already_AddRefed<MozNdefRecord> Constructor(const GlobalObject& aGlobal, uint8_t aTnf, const nsAString& aType, const nsAString& aId, const nsAString& aPayload, ErrorResult& aRv);
 
   uint8_t Tnf() const
   {
@@ -62,26 +62,19 @@ public:
     aId = mId;
   }
 
-  JS::Value GetPayload(JSContext* cx, ErrorResult& aRv) const
+  void GetPayload(nsString& aPayload) const
   {
-    return GetPayloadObject();
-  }
-
-  JS::Value GetPayloadObject() const
-  {
-    JS::ExposeValueToActiveJS(mPayload);
-    return mPayload;
+    aPayload = mPayload;
   }
 
 private:
   MozNdefRecord() MOZ_DELETE;
-  void HoldData();
-  void DropData();
+  nsRefPtr<nsPIDOMWindow> mWindow;
 
   uint8_t mTnf;
   nsString mType;
   nsString mId;
-  JS::Heap<JS::Value> mPayload;
+  nsString mPayload;
 };
 
 } // namespace dom

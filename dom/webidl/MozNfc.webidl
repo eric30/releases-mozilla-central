@@ -8,8 +8,6 @@
  NavigatorProperty="mozNfc"]
 interface MozNfc : EventTarget {
 
-   boolean doSomething();
-
    /**
     * NDEF Functions
     */

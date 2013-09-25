@@ -5,7 +5,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "MozNdefRecord.h"
-#include "mozilla/HoldDropJSObjects.h"
 #include "mozilla/dom/MozNdefRecordBinding.h"
 #include "nsContentUtils.h"
 
@@ -13,7 +12,7 @@ namespace mozilla {
 namespace dom {
 
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_0(MozNdefRecord)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(MozNdefRecord, mWindow)
 NS_IMPL_CYCLE_COLLECTING_ADDREF(MozNdefRecord)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(MozNdefRecord)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(MozNdefRecord)
@@ -23,8 +22,8 @@ NS_INTERFACE_MAP_END
 
 /* static */
 already_AddRefed<MozNdefRecord>
-MozNdefRecord::Constructor(const GlobalObject& aGlobal, JSContext* cx,
-  uint8_t aTnf, const nsAString& aType, const nsAString& aId, JS::Handle<JS::Value> aPayload,
+MozNdefRecord::Constructor(const GlobalObject& aGlobal,
+  uint8_t aTnf, const nsAString& aType, const nsAString& aId, const nsAString& aPayload,
   ErrorResult& aRv)
 {
   nsCOMPtr<nsPIDOMWindow> win = do_QueryInterface(aGlobal.GetAsSupports());
@@ -34,26 +33,24 @@ MozNdefRecord::Constructor(const GlobalObject& aGlobal, JSContext* cx,
     return nullptr;
   }
 
-  nsRefPtr<MozNdefRecord> ndefrecord = new MozNdefRecord(aTnf, aType, aId, aPayload);
-
+  nsRefPtr<MozNdefRecord> ndefrecord = new MozNdefRecord(win, aTnf, aType, aId, aPayload);
   return ndefrecord.forget();
 }
 
-MozNdefRecord::MozNdefRecord(uint8_t aTnf, const nsAString& aType, const nsAString& aId, JS::Value aPayload)
+MozNdefRecord::MozNdefRecord(nsPIDOMWindow* aWindow, uint8_t aTnf, const nsAString& aType, const nsAString& aId, const nsAString& aPayload)
   : mTnf(aTnf)
   , mType(aType)
   , mId(aId)
   , mPayload(aPayload)
 {
+  mWindow = aWindow;
   SetIsDOMBinding();
   MOZ_COUNT_CTOR(MozNdefRecord);
-  HoldData();
 }
 
 MozNdefRecord::~MozNdefRecord()
 {
   MOZ_COUNT_DTOR(MozNdefRecord);
-  DropData();
 }
 
 JSObject*
@@ -61,22 +58,6 @@ MozNdefRecord::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
   return MozNdefRecordBinding::Wrap(aCx, aScope, this);
 }
-
-void
-MozNdefRecord::HoldData()
-{
-  mozilla::HoldJSObjects(this);
-}
-
-void
-MozNdefRecord::DropData()
-{
-  if (!JSVAL_IS_NULL(mPayload)) {
-    mPayload = JSVAL_NULL;
-    mozilla::DropJSObjects(this);
-  }
-}
-
 
 } // namespace dom
 } // namespace mozilla
