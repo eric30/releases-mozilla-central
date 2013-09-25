@@ -91,10 +91,10 @@ this.SystemMessagePermissionsTable = {
     "mobileconnection": []
   },
   "nfc-manager-tech-discovered": {
-    "nfc-manager": ["read"]
+    "nfc-manager": []
   },
   "nfc-manager-tech-lost": {
-    "nfc-manager": ["read"]
+    "nfc-manager": []
   }
 };
 
