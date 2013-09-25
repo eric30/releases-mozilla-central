@@ -729,10 +729,6 @@ GK_ATOM(onkeyup, "onkeyup")
 GK_ATOM(onlevelchange, "onlevelchange")
 GK_ATOM(onLoad, "onLoad")
 GK_ATOM(onload, "onload")
-#ifdef MOZ_B2G_NFC
-GK_ATOM(ontechdiscovered, "ontechdiscovered")
-GK_ATOM(ontechlost, "ontechlost")
-#endif
 GK_ATOM(onpopstate, "onpopstate")
 GK_ATOM(only, "only")               // this one is not an event
 GK_ATOM(onmessage, "onmessage")
@@ -784,11 +780,6 @@ GK_ATOM(onMozBeforeResize, "onMozBeforeResize")
 GK_ATOM(onresize, "onresize")
 GK_ATOM(onscostatuschanged, "onscostatuschanged")
 GK_ATOM(onscroll, "onscroll")
-#ifdef MOZ_B2G_NFC
-GK_ATOM(onsecureelementactivated, "onsecureelementactivated")
-GK_ATOM(onsecureelementdeactivated, "onsecureelementdeactivated")
-GK_ATOM(onsecureelementtransaction, "onsecureelementtransaction")
-#endif
 GK_ATOM(onselect, "onselect")
 GK_ATOM(onsending, "onsending")
 GK_ATOM(onsent, "onsent")
