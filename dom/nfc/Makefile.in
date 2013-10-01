@@ -4,11 +4,4 @@
 #
 # Copyright © 2013 Deutsche Telekom, Inc.
 
-DEPTH            = ../..
-topsrcdir        = @top_srcdir@
-srcdir           = @srcdir@
-VPATH            = @srcdir@
-
-include $(DEPTH)/config/autoconf.mk
-
 include $(topsrcdir)/dom/dom-config.mk

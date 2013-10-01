@@ -108,7 +108,7 @@ ifdef MOZ_B2G_CAMERA #{
 OS_LIBS += -lstagefright -lstagefright_omx
 endif #}
 
-ifdef MOZ_B2G_NFC #{
+ifdef MOZ_NFC #{
 STATIC_LIBS += moznfc_s
 endif #}
 

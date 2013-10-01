@@ -19,7 +19,7 @@
 
 #include "nsINetworkManager.h"
 #include "nsIWifi.h"
-#ifdef MOZ_B2G_NFC
+#ifdef MOZ_NFC
 #include "nsINfc.h"
 #include "mozilla/ipc/Nfc.h"
 #include "Nfc.h"
@@ -61,14 +61,14 @@ namespace {
 NS_DEFINE_CID(kWifiWorkerCID, NS_WIFIWORKER_CID);
 NS_DEFINE_CID(kNetworkManagerCID, NS_NETWORKMANAGER_CID);
 
-#ifdef MOZ_B2G_NFC
+#ifdef MOZ_NFC
 NS_DEFINE_CID(kNfcWorkerCID, NS_NFC_CID);
 #endif
 
 // Doesn't carry a reference, we're owned by services.
 SystemWorkerManager *gInstance = nullptr;
 
-#ifdef MOZ_B2G_NFC // {
+#ifdef MOZ_NFC // {
 class ConnectWorkerToNfc : public WorkerTask
 {
 public:
@@ -142,7 +142,7 @@ ConnectWorkerToNfc::RunTask(JSContext *aCx)
                              0);
 }
 
-#endif // } MOZ_B2G_NFC
+#endif // } MOZ_NFC
 
 class ConnectWorkerToRIL : public WorkerTask
 {
@@ -488,7 +488,7 @@ SystemWorkerManager::Shutdown()
     obs->RemoveObserver(this, WORKERS_SHUTDOWN_TOPIC);
   }
 
-#ifdef MOZ_B2G_NFC
+#ifdef MOZ_NFC
 
   if (mNfcConsumer) {
     mNfcConsumer->Shutdown();
@@ -541,7 +541,7 @@ SystemWorkerManager::SendRilRawData(unsigned long aClientId,
   return gInstance->mRilConsumers[aClientId]->SendSocketData(aRaw);
 }
 
-#ifdef MOZ_B2G_NFC
+#ifdef MOZ_NFC
 bool
 SystemWorkerManager::SendNfcRawData(UnixSocketRawData* aRaw)
 {
@@ -553,7 +553,7 @@ SystemWorkerManager::SendNfcRawData(UnixSocketRawData* aRaw)
   }
   return gInstance->mNfcConsumer->SendSocketData(aRaw);
 }
-#endif // MOZ_B2G_NFC
+#endif // MOZ_NFC
 
 NS_IMETHODIMP
 SystemWorkerManager::GetInterface(const nsIID &aIID, void **aResult)
@@ -614,7 +614,7 @@ nsresult
 SystemWorkerManager::RegisterNfcWorker(const JS::Value& aWorker,
                                        JSContext *aCx)
 {
-#ifdef MOZ_B2G_NFC
+#ifdef MOZ_NFC
   NS_ENSURE_TRUE(!JSVAL_IS_PRIMITIVE(aWorker), NS_ERROR_UNEXPECTED);
 
   if (mNfcConsumer) {
@@ -644,7 +644,7 @@ SystemWorkerManager::RegisterNfcWorker(const JS::Value& aWorker,
   // We're keeping as much of this implementation as possible in JS, so the real
   // worker lives in Nfc.js. All we do here is hold it alive and
   // hook it up to the NFC thread.
-#endif // MOZ_B2G_NFC
+#endif // MOZ_NFC
   return NS_OK;
 }
 

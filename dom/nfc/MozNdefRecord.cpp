@@ -13,7 +13,6 @@
 namespace mozilla {
 namespace dom {
 
-
 NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(MozNdefRecord, mWindow)
 NS_IMPL_CYCLE_COLLECTING_ADDREF(MozNdefRecord)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(MozNdefRecord)

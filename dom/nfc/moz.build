@@ -5,9 +5,8 @@
 #
 # Copyright © 2013 Deutsche Telekom, Inc.
 
-if CONFIG['MOZ_B2G_NFC']:
+if CONFIG['MOZ_NFC']:
     MODULE = 'dom'
-    XPIDL_MODULE = 'dom_nfc'
     EXPORTS.mozilla.dom += [
         'MozNdefRecord.h',
     ]
@@ -21,6 +20,6 @@ if CONFIG['MOZ_B2G_NFC']:
 
 FAIL_ON_WARNINGS = True
 
-LIBRARY_NAME = 'domnfc_s'
+LIBRARY_NAME = 'dom_nfc_s'
 
 LIBXUL_LIBRARY = True

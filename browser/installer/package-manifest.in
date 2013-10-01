@@ -197,7 +197,7 @@
 @BINPATH@/components/dom_geolocation.xpt
 @BINPATH@/components/dom_media.xpt
 @BINPATH@/components/dom_network.xpt
-#ifdef MOZ_B2G_NFC
+#ifdef MOZ_NFC
 @BINPATH@/components/dom_nfc.xpt
 #endif
 @BINPATH@/components/dom_notification.xpt
@@ -461,7 +461,7 @@
 @BINPATH@/components/DOMWifiManager.js
 @BINPATH@/components/DOMWifiManager.manifest
 #endif
-#ifdef MOZ_B2G_NFC
+#ifdef MOZ_NFC
 @BINPATH@/components/nsNfc.manifest
 @BINPATH@/components/nsNfc.js
 @BINPATH@/components/Nfc.manifest

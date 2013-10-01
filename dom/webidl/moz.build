@@ -459,7 +459,7 @@ if CONFIG['MOZ_B2G_RIL']:
         'MozVoicemail.webidl',
     ]
 
-if CONFIG['MOZ_B2G_NFC']:
+if CONFIG['MOZ_NFC']:
     WEBIDL_FILES += [
          'MozNfc.webidl',
          'MozNdefRecord.webidl',
