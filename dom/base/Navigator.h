@@ -175,8 +175,8 @@ public:
   // The XPCOM GetDoNotTrack is ok
   Geolocation* GetGeolocation(ErrorResult& aRv);
   battery::BatteryManager* GetBattery(ErrorResult& aRv);
-  void Vibrate(uint32_t aDuration, ErrorResult& aRv);
-  void Vibrate(const nsTArray<uint32_t>& aDuration, ErrorResult& aRv);
+  bool Vibrate(uint32_t aDuration);
+  bool Vibrate(const nsTArray<uint32_t>& aDuration);
   void GetAppCodeName(nsString& aAppCodeName, ErrorResult& aRv)
   {
     aRv = GetAppCodeName(aAppCodeName);
@@ -302,6 +302,8 @@ public:
 
   static bool HasPushNotificationsSupport(JSContext* /* unused */,
                                           JSObject* aGlobal);
+
+  static bool HasInputMethodSupport(JSContext* /* unused */, JSObject* aGlobal);
 
   nsPIDOMWindow* GetParentObject() const
   {

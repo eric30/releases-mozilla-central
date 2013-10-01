@@ -21,9 +21,8 @@ class PropertyProvider;
 // reflow
 #define TEXT_HAS_NONCOLLAPSED_CHARACTERS NS_FRAME_STATE_BIT(31)
 
-// This state bit is set on frames which are forced to trim their leading and
-// trailing whitespaces
-#define TEXT_FORCE_TRIM_WHITESPACE       NS_FRAME_STATE_BIT(32)
+// This state bit is set on children of token MathML elements
+#define TEXT_IS_IN_TOKEN_MATHML          NS_FRAME_STATE_BIT(32)
 
 #define TEXT_HAS_FONT_INFLATION          NS_FRAME_STATE_BIT(61)
 
@@ -71,7 +70,7 @@ public:
   virtual nsIFrame* GetNextContinuation() const MOZ_OVERRIDE {
     return mNextContinuation;
   }
-  NS_IMETHOD SetNextContinuation(nsIFrame* aNextContinuation) MOZ_OVERRIDE {
+  virtual void SetNextContinuation(nsIFrame* aNextContinuation) MOZ_OVERRIDE {
     NS_ASSERTION (!aNextContinuation || GetType() == aNextContinuation->GetType(),
                   "setting a next continuation with incorrect type!");
     NS_ASSERTION (!nsSplittableFrame::IsInNextContinuationChain(aNextContinuation, this),
@@ -79,14 +78,13 @@ public:
     mNextContinuation = aNextContinuation;
     if (aNextContinuation)
       aNextContinuation->RemoveStateBits(NS_FRAME_IS_FLUID_CONTINUATION);
-    return NS_OK;
   }
   virtual nsIFrame* GetNextInFlowVirtual() const MOZ_OVERRIDE { return GetNextInFlow(); }
   nsIFrame* GetNextInFlow() const {
     return mNextContinuation && (mNextContinuation->GetStateBits() & NS_FRAME_IS_FLUID_CONTINUATION) ? 
       mNextContinuation : nullptr;
   }
-  NS_IMETHOD SetNextInFlow(nsIFrame* aNextInFlow) MOZ_OVERRIDE {
+  virtual void SetNextInFlow(nsIFrame* aNextInFlow) MOZ_OVERRIDE {
     NS_ASSERTION (!aNextInFlow || GetType() == aNextInFlow->GetType(),
                   "setting a next in flow with incorrect type!");
     NS_ASSERTION (!nsSplittableFrame::IsInNextContinuationChain(aNextInFlow, this),
@@ -94,7 +92,6 @@ public:
     mNextContinuation = aNextInFlow;
     if (aNextInFlow)
       aNextInFlow->AddStateBits(NS_FRAME_IS_FLUID_CONTINUATION);
-    return NS_OK;
   }
   virtual nsIFrame* LastInFlow() const MOZ_OVERRIDE;
   virtual nsIFrame* LastContinuation() const MOZ_OVERRIDE;

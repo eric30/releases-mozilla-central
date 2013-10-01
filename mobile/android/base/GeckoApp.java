@@ -835,18 +835,24 @@ abstract public class GeckoApp
     void showButtonToast(final String message, final String buttonText,
                          final String buttonIcon, final String buttonId) {
         BitmapUtils.getDrawable(GeckoApp.this, buttonIcon, new BitmapUtils.BitmapLoader() {
-            public void onBitmapFound(Drawable d) {
-                mToast.show(false, message, buttonText, d, new ButtonToast.ToastListener() {
-                    @Override
-                    public void onButtonClicked() {
-                        GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Toast:Click", buttonId));
-                    }
+            public void onBitmapFound(final Drawable d) {
 
+                ThreadUtils.postToUiThread(new Runnable() {
                     @Override
-                    public void onToastHidden(ButtonToast.ReasonHidden reason) {
-                        if (reason == ButtonToast.ReasonHidden.TIMEOUT) {
-                            GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Toast:Hidden", buttonId));
-                        }
+                    public void run() {
+                        mToast.show(false, message, buttonText, d, new ButtonToast.ToastListener() {
+                            @Override
+                            public void onButtonClicked() {
+                                GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Toast:Click", buttonId));
+                            }
+
+                            @Override
+                            public void onToastHidden(ButtonToast.ReasonHidden reason) {
+                                if (reason == ButtonToast.ReasonHidden.TIMEOUT) {
+                                    GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Toast:Hidden", buttonId));
+                                }
+                            }
+                        });
                     }
                 });
             }
@@ -2132,8 +2138,6 @@ abstract public class GeckoApp
             Intent intent = new Intent(action);
             intent.setClassName(AppConstants.ANDROID_PACKAGE_NAME, RESTARTER_CLASS);
             /* TODO: addEnvToIntent(intent); */
-            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK |
-                            Intent.FLAG_ACTIVITY_MULTIPLE_TASK);
             if (args != null)
                 intent.putExtra("args", args);
             intent.putExtra("didRestart", true);

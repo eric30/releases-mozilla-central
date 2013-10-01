@@ -302,14 +302,15 @@ NS_IMPL_ISUPPORTS3(VectorImage,
 // Constructor / Destructor
 
 VectorImage::VectorImage(imgStatusTracker* aStatusTracker,
-                         nsIURI* aURI /* = nullptr */) :
-  ImageResource(aStatusTracker, aURI), // invoke superclass's constructor
+                         ImageURL* aURI /* = nullptr */) :
+  ImageResource(aURI), // invoke superclass's constructor
   mIsInitialized(false),
   mIsFullyLoaded(false),
   mIsDrawing(false),
   mHaveAnimations(false),
   mHasPendingInvalidation(false)
 {
+  mStatusTrackerInit = new imgStatusTrackerInit(this, aStatusTracker);
 }
 
 VectorImage::~VectorImage()
@@ -525,7 +526,7 @@ VectorImage::GetIntrinsicSize(nsSize* aSize)
     return NS_ERROR_FAILURE;
 
   *aSize = nsSize(-1, -1);
-  nsIFrame::IntrinsicSize rfSize = rootFrame->GetIntrinsicSize();
+  IntrinsicSize rfSize = rootFrame->GetIntrinsicSize();
   if (rfSize.width.GetUnit() == eStyleUnit_Coord)
     aSize->width = rfSize.width.GetCoordValue();
   if (rfSize.height.GetUnit() == eStyleUnit_Coord)

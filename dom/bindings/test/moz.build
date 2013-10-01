@@ -8,6 +8,7 @@ MODULE = 'dom'
 
 CPP_SOURCES += [
     '$(subst .webidl,Binding.cpp,$(test_webidl_files))',
+    '$(subst .webidl,Binding.cpp,$(preprocessed_test_webidl_files))',
 ]
 
 LIBXUL_LIBRARY = True
@@ -15,4 +16,8 @@ LIBXUL_LIBRARY = True
 # being added to libxul or anything.
 
 LIBRARY_NAME = 'dombindings_test_s'
+
+MOCHITEST_MANIFESTS += ['mochitest.ini']
+
+MOCHITEST_CHROME_MANIFESTS += ['chrome.ini']
 

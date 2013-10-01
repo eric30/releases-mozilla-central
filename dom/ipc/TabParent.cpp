@@ -621,7 +621,7 @@ TabParent::MapEventCoordinatesForChildProcess(
     aEvent->refPoint = aOffset;
   } else {
     aEvent->refPoint = LayoutDeviceIntPoint();
-    nsTouchEvent* touchEvent = static_cast<nsTouchEvent*>(aEvent);
+    WidgetTouchEvent* touchEvent = static_cast<WidgetTouchEvent*>(aEvent);
     // Then offset all the touch points by that distance, to put them
     // in the space where top-left is 0,0.
     const nsTArray< nsRefPtr<Touch> >& touches = touchEvent->touches;
@@ -673,7 +673,7 @@ bool TabParent::SendRealKeyEvent(nsKeyEvent& event)
   return PBrowserParent::SendRealKeyEvent(e);
 }
 
-bool TabParent::SendRealTouchEvent(nsTouchEvent& event)
+bool TabParent::SendRealTouchEvent(WidgetTouchEvent& event)
 {
   if (mIsDestroyed) {
     return false;
@@ -699,7 +699,7 @@ bool TabParent::SendRealTouchEvent(nsTouchEvent& event)
     ++mEventCaptureDepth;
   }
 
-  nsTouchEvent e(event);
+  WidgetTouchEvent e(event);
   // PresShell::HandleEventInternal adds touches on touch end/cancel.
   // This confuses remote content into thinking that the added touches
   // are part of the touchend/cancel, when actually they're not.
@@ -736,7 +736,7 @@ TabParent::TryCapture(const nsGUIEvent& aEvent)
     return false;
   }
 
-  nsTouchEvent event(static_cast<const nsTouchEvent&>(aEvent));
+  WidgetTouchEvent event(static_cast<const WidgetTouchEvent&>(aEvent));
 
   bool isTouchPointUp = (event.message == NS_TOUCH_END ||
                          event.message == NS_TOUCH_CANCEL);
@@ -892,6 +892,28 @@ TabParent::RecvNotifyIMETextHint(const nsString& aText)
 {
   // Replace our cache with new text
   mIMECacheText = aText;
+  return true;
+}
+
+bool
+TabParent::RecvRequestFocus(const bool& aCanRaise)
+{
+  nsCOMPtr<nsIFocusManager> fm = nsFocusManager::GetFocusManager();
+  if (!fm) {
+    return true;
+  }
+
+  nsCOMPtr<nsIContent> content = do_QueryInterface(mFrameElement);
+  if (!content || !content->OwnerDoc()) {
+    return true;
+  }
+
+  uint32_t flags = nsIFocusManager::FLAG_NOSCROLL;
+  if (aCanRaise)
+    flags |= nsIFocusManager::FLAG_RAISE;
+
+  nsCOMPtr<nsIDOMElement> node = do_QueryInterface(mFrameElement);
+  fm->SetFocus(node, flags);
   return true;
 }
 

@@ -18,7 +18,6 @@ except ImportError:
 here = os.path.abspath(os.path.dirname(__file__))
 sys.path.insert(0, here)
 
-from b2gautomation import B2GDesktopAutomation
 from runtests import Mochitest
 from runtests import MochitestUtilsMixin
 from runtests import MochitestOptions
@@ -136,7 +135,10 @@ class B2GMochitest(MochitestUtilsMixin):
                             'test_script_args': self.test_script_args }
             self.runner = B2GRunner(**runner_args)
             self.runner.start(outputTimeout=timeout)
-            self.runner.wait()
+            status = self.runner.wait()
+            if status is None:
+                # the runner has timed out
+                status = 124
         except KeyboardInterrupt:
             log.info("runtests.py | Received keyboard interrupt.\n");
             status = -1
@@ -225,9 +227,9 @@ class B2GDeviceMochitest(B2GMochitest):
 
 class B2GDesktopMochitest(B2GMochitest, Mochitest):
 
-    def __init__(self, automation, marionette, profile_data_dir):
+    def __init__(self, marionette, profile_data_dir):
         B2GMochitest.__init__(self, marionette, out_of_process=False, profile_data_dir=profile_data_dir)
-        Mochitest.__init__(self, automation)
+        Mochitest.__init__(self)
 
     def runMarionetteScript(self, marionette, test_script, test_script_args):
         assert(marionette.wait_for_port())
@@ -337,8 +339,6 @@ def run_remote_mochitests(parser, options):
     sys.exit(retVal)
 
 def run_desktop_mochitests(parser, options):
-    automation = B2GDesktopAutomation()
-
     # create our Marionette instance
     kwargs = {}
     if options.marionette:
@@ -346,9 +346,7 @@ def run_desktop_mochitests(parser, options):
         kwargs['host'] = host
         kwargs['port'] = int(port)
     marionette = Marionette.getMarionetteOrExit(**kwargs)
-    automation.marionette = marionette
-
-    mochitest = B2GDesktopMochitest(automation, marionette, options.profile_data_dir)
+    mochitest = B2GDesktopMochitest(marionette, options.profile_data_dir)
 
     # b2g desktop builds don't always have a b2g-bin file
     if options.app[-4:] == '-bin':
@@ -361,10 +359,6 @@ def run_desktop_mochitests(parser, options):
     if options.desktop and not options.profile:
         raise Exception("must specify --profile when specifying --desktop")
 
-    automation.setServerInfo(options.webServer,
-                             options.httpPort,
-                             options.sslPort,
-                             options.webSocketPort)
     sys.exit(mochitest.runTests(options, onLaunch=mochitest.startTests))
 
 def main():

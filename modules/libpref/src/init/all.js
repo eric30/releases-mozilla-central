@@ -230,6 +230,7 @@ pref("media.navigator.video.default_minfps",10);
 pref("media.peerconnection.enabled", true);
 pref("media.navigator.permission.disabled", false);
 pref("media.peerconnection.default_iceservers", "[{\"url\": \"stun:23.21.150.121\"}]");
+pref("media.peerconnection.trickle_ice", true);
 pref("media.peerconnection.use_document_iceservers", true);
 // These values (aec, agc, and noice) are from media/webrtc/trunk/webrtc/common_types.h
 // kXxxUnchanged = 0, kXxxDefault = 1, and higher values are specific to each 
@@ -481,6 +482,9 @@ pref("toolkit.telemetry.debugSlowSql", false);
 // Identity module
 pref("toolkit.identity.enabled", false);
 pref("toolkit.identity.debug", false);
+
+// AsyncShutdown delay before crashing in case of shutdown freeze
+pref("toolkit.asyncshutdown.timeout.crash", 60000);
 
 // Enable deprecation warnings.
 pref("devtools.errorconsole.deprecation_warnings", true);
@@ -1091,8 +1095,8 @@ pref("network.http.bypass-cachelock-threshold", 250);
 
 // Try and use SPDY when using SSL
 pref("network.http.spdy.enabled", true);
-pref("network.http.spdy.enabled.v2", true);
 pref("network.http.spdy.enabled.v3", true);
+pref("network.http.spdy.enabled.v3-1", true);
 pref("network.http.spdy.chunk-size", 4096);
 pref("network.http.spdy.timeout", 180);
 pref("network.http.spdy.coalesce-hostnames", true);
@@ -4043,6 +4047,9 @@ pref("image.mem.discardable", true);
 // them to be decoded on demand when they are drawn.
 pref("image.mem.decodeondraw", true);
 
+// Allows image locking of decoded image data in content processes.
+pref("image.mem.allow_locking_in_content_processes", true);
+
 // Minimum timeout for image discarding (in milliseconds). The actual time in
 // which an image must inactive for it to be discarded will vary between this
 // value and twice this value.
@@ -4398,9 +4405,6 @@ pref("dom.mms.retrievalRetryIntervals", "60000,300000,600000,1800000");
 // Debug enabler for MMS.
 pref("mms.debugging.enabled", false);
 
-// Number of RadioInterface instances to create.
-pref("ril.numRadioInterfaces", 1);
-
 // If the user puts a finger down on an element and we think the user
 // might be executing a pan gesture, how long do we wait before
 // tentatively deciding the gesture is actually a tap and activating
@@ -4423,8 +4427,17 @@ pref("dom.forms.inputmode", false);
 pref("dom.forms.inputmode", true);
 #endif
 
+// InputMethods for soft keyboards in B2G
+pref("dom.mozInputMethod.enabled", false);
+
 // Telephony API
 pref("dom.telephony.enabled", false);
 
 // DOM Inter-App Communication API.
 pref("dom.inter-app-communication-api.enabled", false);
+
+// The tables used for Safebrowsing phishing and malware checks.
+pref("urlclassifier.malware_table", "goog-malware-shavar");
+pref("urlclassifier.phish_table", "goog-phish-shavar");
+pref("urlclassifier.download_block_table", "goog-badbinurl-shavar");
+pref("urlclassifier.download_allow_table", "goog-downloadwhite-digest256");

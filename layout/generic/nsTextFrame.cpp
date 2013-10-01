@@ -212,10 +212,10 @@ NS_DECLARE_FRAME_PROPERTY(TextFrameGlyphObservers, DestroyGlyphObserverList);
 #define TEXT_IN_TEXTRUN_USER_DATA  NS_FRAME_STATE_BIT(29)
 
 // nsTextFrame.h has
-// #define TEXT_HAS_NONCOLLAPSED_CHARACTERS NS_FRAME_STATE_BIT(30)
+// #define TEXT_HAS_NONCOLLAPSED_CHARACTERS NS_FRAME_STATE_BIT(31)
 
 // nsTextFrame.h has
-// #define TEXT_FORCE_TRIM_WHITESPACE       NS_FRAME_STATE_BIT(31)
+// #define TEXT_IS_IN_TOKEN_MATHML          NS_FRAME_STATE_BIT(32)
 
 // Set when this text frame is mentioned in the userdata for the
 // uninflated textrun property
@@ -3902,27 +3902,25 @@ public:
   virtual nsIFrame* GetPrevContinuation() const {
     return mPrevContinuation;
   }
-  NS_IMETHOD SetPrevContinuation(nsIFrame* aPrevContinuation) {
+  virtual void SetPrevContinuation(nsIFrame* aPrevContinuation) {
     NS_ASSERTION (!aPrevContinuation || GetType() == aPrevContinuation->GetType(),
                   "setting a prev continuation with incorrect type!");
     NS_ASSERTION (!nsSplittableFrame::IsInPrevContinuationChain(aPrevContinuation, this),
                   "creating a loop in continuation chain!");
     mPrevContinuation = aPrevContinuation;
     RemoveStateBits(NS_FRAME_IS_FLUID_CONTINUATION);
-    return NS_OK;
   }
   virtual nsIFrame* GetPrevInFlowVirtual() const { return GetPrevInFlow(); }
   nsIFrame* GetPrevInFlow() const {
     return (GetStateBits() & NS_FRAME_IS_FLUID_CONTINUATION) ? mPrevContinuation : nullptr;
   }
-  NS_IMETHOD SetPrevInFlow(nsIFrame* aPrevInFlow) {
+  virtual void SetPrevInFlow(nsIFrame* aPrevInFlow) MOZ_OVERRIDE {
     NS_ASSERTION (!aPrevInFlow || GetType() == aPrevInFlow->GetType(),
                   "setting a prev in flow with incorrect type!");
     NS_ASSERTION (!nsSplittableFrame::IsInPrevContinuationChain(aPrevInFlow, this),
                   "creating a loop in continuation chain!");
     mPrevContinuation = aPrevInFlow;
     AddStateBits(NS_FRAME_IS_FLUID_CONTINUATION);
-    return NS_OK;
   }
   virtual nsIFrame* FirstInFlow() const MOZ_OVERRIDE;
   virtual nsIFrame* FirstContinuation() const MOZ_OVERRIDE;
@@ -7671,7 +7669,7 @@ nsTextFrame::ReflowText(nsLineLayout& aLineLayout, nscoord aAvailableWidth,
     }
   }
   if ((atStartOfLine && !textStyle->WhiteSpaceIsSignificant()) ||
-      (GetStateBits() & TEXT_FORCE_TRIM_WHITESPACE)) {
+      (GetStateBits() & TEXT_IS_IN_TOKEN_MATHML)) {
     // Skip leading whitespace. Make sure we don't skip a 'pre-line'
     // newline if there is one.
     int32_t skipLength = newLineOffset >= 0 ? length - 1 : length;
@@ -7837,7 +7835,7 @@ nsTextFrame::ReflowText(nsLineLayout& aLineLayout, nscoord aAvailableWidth,
   gfxFloat trimmedWidth = 0;
   gfxFloat availWidth = aAvailableWidth;
   bool canTrimTrailingWhitespace = !textStyle->WhiteSpaceIsSignificant() ||
-                                   (GetStateBits() & TEXT_FORCE_TRIM_WHITESPACE);
+                                   (GetStateBits() & TEXT_IS_IN_TOKEN_MATHML);
   int32_t unusedOffset;  
   gfxBreakPriority breakPriority;
   aLineLayout.GetLastOptionalBreakPosition(&unusedOffset, &breakPriority);
@@ -7907,11 +7905,11 @@ nsTextFrame::ReflowText(nsLineLayout& aLineLayout, nscoord aAvailableWidth,
     // to trim it off again in TrimTrailingWhiteSpace, and we'd like to avoid
     // having to re-do it.)
     if (brokeText ||
-        (GetStateBits() & TEXT_FORCE_TRIM_WHITESPACE)) {
+        (GetStateBits() & TEXT_IS_IN_TOKEN_MATHML)) {
       // We're definitely going to break so our trailing whitespace should
       // definitely be trimmed. Record that we've already done it.
       AddStateBits(TEXT_TRIMMED_TRAILING_WHITESPACE);
-    } else if (!(GetStateBits() & TEXT_FORCE_TRIM_WHITESPACE)) {
+    } else if (!(GetStateBits() & TEXT_IS_IN_TOKEN_MATHML)) {
       // We might not be at the end of the line. (Note that even if this frame
       // ends in breakable whitespace, it might not be at the end of the line
       // because it might be followed by breakable, but preformatted, whitespace.)

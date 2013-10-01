@@ -31,7 +31,6 @@ typedef int cc_causes_t;
 #define  CC_CALL_FORWARDED  CC_CALL_TYPE_FORWARDED
 #define  CC_CALL_NONE       CC_CALL_TYPE_NONE
 #define  CC_CALL_INCOMING   CC_CALL_TYPE_INCOMING
-#define  SDP_SIZE           4096   /* must increase this */
 #define  CANDIDATE_SIZE     150
 #define  MID_SIZE           150
 
@@ -103,6 +102,7 @@ typedef enum {
     CC_FEATURE_ADDSTREAM,
     CC_FEATURE_REMOVESTREAM,
     CC_FEATURE_ADDICECANDIDATE,
+    CC_FEATURE_FOUNDICECANDIDATE,
     CC_FEATURE_MAX
 } group_cc_feature_t;
 
@@ -168,6 +168,7 @@ static const char *const cc_feature_names[] = {
     "ADDSTREAM",
     "REMOVESTREAM",
     "ADDICECANDIDATE",
+    "FOUNDICECANDIDATE",
     "MAX"
 };
 
@@ -241,6 +242,7 @@ typedef enum cc_msgs_t_ {
     CC_MSG_ADDSTREAM,
     CC_MSG_REMOVESTREAM,
     CC_MSG_ADDCANDIDATE,
+    CC_MSG_FOUNDCANDIDATE,
     CC_MSG_AUDIT_ACK,
     CC_MSG_OPTIONS,
     CC_MSG_OPTIONS_ACK,
@@ -280,6 +282,7 @@ static const char *const cc_msg_names[] = {
     "ADDSTREAM",
     "REMOVESTREAM",
     "ADDCANDIDATE",
+    "FOUNDCANDIDATE",
     "AUDIT_ACK",
     "OPTIONS",
     "OPTIONS_ACK",
@@ -960,7 +963,7 @@ typedef struct cc_feature_t_ {
     cc_feature_data_t    data;
     boolean              data_valid;
     cc_jsep_action_t     action;
-    char                 sdp[SDP_SIZE];
+    char                *sdp;
     Timecard            *timecard;
 } cc_feature_t;
 

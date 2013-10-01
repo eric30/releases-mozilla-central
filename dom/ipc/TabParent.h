@@ -145,6 +145,7 @@ public:
                                      const nsString& aActionHint,
                                      const int32_t& aCause,
                                      const int32_t& aFocusChange);
+    virtual bool RecvRequestFocus(const bool& aCanRaise);
     virtual bool RecvSetCursor(const uint32_t& aValue);
     virtual bool RecvSetBackgroundColor(const nscolor& aValue);
     virtual bool RecvSetStatus(const uint32_t& aType, const nsString& aStatus);
@@ -195,7 +196,7 @@ public:
     bool SendRealMouseEvent(nsMouseEvent& event);
     bool SendMouseWheelEvent(mozilla::WheelEvent& event);
     bool SendRealKeyEvent(nsKeyEvent& event);
-    bool SendRealTouchEvent(nsTouchEvent& event);
+    bool SendRealTouchEvent(WidgetTouchEvent& event);
 
     virtual PDocumentRendererParent*
     AllocPDocumentRendererParent(const nsRect& documentRect, const gfxMatrix& transform,

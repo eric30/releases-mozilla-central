@@ -475,7 +475,7 @@ Element::GetStyledFrame()
 }
 
 nsIScrollableFrame*
-Element::GetScrollFrame(nsIFrame **aStyledFrame)
+Element::GetScrollFrame(nsIFrame **aStyledFrame, bool aFlushLayout)
 {
   // it isn't clear what to return for SVG nodes, so just return nothing
   if (IsSVG()) {
@@ -485,7 +485,11 @@ Element::GetScrollFrame(nsIFrame **aStyledFrame)
     return nullptr;
   }
 
-  nsIFrame* frame = GetStyledFrame();
+  // Inline version of GetStyledFrame to use Flush_None if needed.
+  nsIFrame* frame = GetPrimaryFrame(aFlushLayout ? Flush_Layout : Flush_None);
+  if (frame) {
+    frame = nsLayoutUtils::GetStyleFrame(frame);
+  }
 
   if (aStyledFrame) {
     *aStyledFrame = frame;
@@ -541,6 +545,28 @@ Element::ScrollIntoView(bool aTop)
                                      nsIPresShell::SCROLL_ALWAYS),
                                    nsIPresShell::ScrollAxis(),
                                    nsIPresShell::SCROLL_OVERFLOW_HIDDEN);
+}
+
+bool
+Element::ScrollByNoFlush(int32_t aDx, int32_t aDy)
+{
+  nsIScrollableFrame* sf = GetScrollFrame(nullptr, false);
+  if (!sf) {
+    return false;
+  }
+
+  nsWeakFrame weakRef(sf->GetScrolledFrame());
+
+  CSSIntPoint before = sf->GetScrollPositionCSSPixels();
+  sf->ScrollToCSSPixelsApproximate(CSSIntPoint(before.x + aDx, before.y + aDy));
+
+  // The frame was destroyed, can't keep on scrolling.
+  if (!weakRef.IsAlive()) {
+    return false;
+  }
+
+  CSSIntPoint after = sf->GetScrollPositionCSSPixels();
+  return (before != after);
 }
 
 static nsSize GetScrollRectSizeForOverflowVisibleFrame(nsIFrame* aFrame)
@@ -1450,7 +1476,9 @@ Element::GetPrimaryFrame(mozFlushType aType)
 
   // Cause a flush, so we get up-to-date frame
   // information
-  doc->FlushPendingNotifications(aType);
+  if (aType != Flush_None) {
+    doc->FlushPendingNotifications(aType);
+  }
 
   return GetPrimaryFrame();
 }
@@ -1730,7 +1758,7 @@ Element::SetAttrAndNotify(int32_t aNamespaceID,
   }
 
   if (aFireMutation) {
-    nsMutationEvent mutation(true, NS_MUTATION_ATTRMODIFIED);
+    InternalMutationEvent mutation(true, NS_MUTATION_ATTRMODIFIED);
 
     nsAutoString ns;
     nsContentUtils::NameSpaceManager()->GetNameSpaceURI(aNamespaceID, ns);
@@ -1911,7 +1939,7 @@ Element::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aName,
   }
 
   if (hasMutationListeners) {
-    nsMutationEvent mutation(true, NS_MUTATION_ATTRMODIFIED);
+    InternalMutationEvent mutation(true, NS_MUTATION_ATTRMODIFIED);
 
     mutation.mRelatedNode = attrNode;
     mutation.mAttrName = aName;
@@ -2138,7 +2166,7 @@ Element::PreHandleEventForLinks(nsEventChainPreVisitor& aVisitor)
     // FALL THROUGH
   case NS_FOCUS_CONTENT:
     if (aVisitor.mEvent->eventStructType != NS_FOCUS_EVENT ||
-        !static_cast<nsFocusEvent*>(aVisitor.mEvent)->isRefocus) {
+        !static_cast<InternalFocusEvent*>(aVisitor.mEvent)->isRefocus) {
       nsAutoString target;
       GetLinkTarget(target);
       nsContentUtils::TriggerLink(this, aVisitor.mPresContext, absURI, target,

@@ -11,7 +11,6 @@
 
 #include "jit/IonCompartment.h"
 #include "jit/IonFrames.h"
-#include "jit/ParallelFunctions.h"
 #include "jit/RangeAnalysis.h"
 
 #include "jit/shared/CodeGenerator-shared-inl.h"
@@ -226,7 +225,7 @@ CodeGeneratorX86Shared::visitAsmJSPassStackArg(LAsmJSPassStackArg *ins)
     const MAsmJSPassStackArg *mir = ins->mir();
     Address dst(StackPointer, mir->spOffset());
     if (ins->arg()->isConstant()) {
-        masm.store32(Imm32(ToInt32(ins->arg())), dst);
+        masm.storePtr(ImmWord(ToInt32(ins->arg())), dst);
     } else {
         if (ins->arg()->isGeneralReg())
             masm.storePtr(ToRegister(ins->arg()), dst);
@@ -796,7 +795,7 @@ CodeGeneratorX86Shared::visitDivI(LDivI *ins)
     JS_ASSERT(output == eax);
 
     Label done;
-    ReturnZero *ool = NULL;
+    ReturnZero *ool = nullptr;
 
     // Handle divide by zero.
     if (mir->canBeDivideByZero()) {
@@ -953,8 +952,8 @@ CodeGeneratorX86Shared::visitModI(LModI *ins)
     }
 
     Label done;
-    ReturnZero *ool = NULL;
-    ModOverflowCheck *overflow = NULL;
+    ReturnZero *ool = nullptr;
+    ModOverflowCheck *overflow = nullptr;
 
     // Prevent divide by zero.
     if (ins->mir()->canBeDivideByZero()) {

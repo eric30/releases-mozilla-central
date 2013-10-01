@@ -87,8 +87,13 @@ class Message : public Pickle {
   }
 
   // True if this is a synchronous message.
-  bool is_rpc() const {
-    return (header()->flags & RPC_BIT) != 0;
+  bool is_interrupt() const {
+    return (header()->flags & INTERRUPT_BIT) != 0;
+  }
+
+  // True if this is an urgent message.
+  bool is_urgent() const {
+    return (header()->flags & URGENT_BIT) != 0;
   }
 
   // True if compression is enabled for this message.
@@ -148,22 +153,22 @@ class Message : public Pickle {
     header()->routing = new_id;
   }
 
-  uint32_t rpc_remote_stack_depth_guess() const {
-    return header()->rpc_remote_stack_depth_guess;
+  uint32_t interrupt_remote_stack_depth_guess() const {
+    return header()->interrupt_remote_stack_depth_guess;
   }
 
-  void set_rpc_remote_stack_depth_guess(uint32_t depth) {
-    DCHECK(is_rpc());
-    header()->rpc_remote_stack_depth_guess = depth;
+  void set_interrupt_remote_stack_depth_guess(uint32_t depth) {
+    DCHECK(is_interrupt());
+    header()->interrupt_remote_stack_depth_guess = depth;
   }
 
-  uint32_t rpc_local_stack_depth() const {
-    return header()->rpc_local_stack_depth;
+  uint32_t interrupt_local_stack_depth() const {
+    return header()->interrupt_local_stack_depth;
   }
 
-  void set_rpc_local_stack_depth(uint32_t depth) {
-    DCHECK(is_rpc());
-    header()->rpc_local_stack_depth = depth;
+  void set_interrupt_local_stack_depth(uint32_t depth) {
+    DCHECK(is_interrupt());
+    header()->interrupt_local_stack_depth = depth;
   }
 
   int32_t seqno() const {
@@ -266,8 +271,12 @@ class Message : public Pickle {
     header()->flags |= SYNC_BIT;
   }
 
-  void set_rpc() {
-    header()->flags |= RPC_BIT;
+  void set_interrupt() {
+    header()->flags |= INTERRUPT_BIT;
+  }
+
+  void set_urgent() {
+    header()->flags |= URGENT_BIT;
   }
 
 #if !defined(OS_MACOSX)
@@ -283,8 +292,9 @@ class Message : public Pickle {
     UNBLOCK_BIT     = 0x0020,
     PUMPING_MSGS_BIT= 0x0040,
     HAS_SENT_TIME_BIT = 0x0080,
-    RPC_BIT         = 0x0100,
-    COMPRESS_BIT    = 0x0200
+    INTERRUPT_BIT   = 0x0100,
+    COMPRESS_BIT    = 0x0200,
+    URGENT_BIT      = 0x0400
   };
 
   struct Header : Pickle::Header {
@@ -298,9 +308,9 @@ class Message : public Pickle {
 # endif
 #endif
     // For RPC messages, a guess at what the *other* side's stack depth is.
-    uint32_t rpc_remote_stack_depth_guess;
+    uint32_t interrupt_remote_stack_depth_guess;
     // The actual local stack depth.
-    uint32_t rpc_local_stack_depth;
+    uint32_t interrupt_local_stack_depth;
     // Sequence number
     int32_t seqno;
   };

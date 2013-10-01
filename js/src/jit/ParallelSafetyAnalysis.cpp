@@ -10,6 +10,7 @@
 #include "jit/IonAnalysis.h"
 #include "jit/IonSpewer.h"
 #include "jit/MIR.h"
+#include "jit/MIRGenerator.h"
 #include "jit/MIRGraph.h"
 #include "jit/UnreachableCodeElimination.h"
 
@@ -89,7 +90,7 @@ class ParallelSafetyVisitor : public MInstructionVisitor
     ParallelSafetyVisitor(MIRGraph &graph)
       : graph_(graph),
         unsafe_(false),
-        slice_(NULL)
+        slice_(nullptr)
     { }
 
     void clearUnsafe() { unsafe_ = false; }
@@ -247,7 +248,8 @@ class ParallelSafetyVisitor : public MInstructionVisitor
     UNSAFE_OP(IteratorEnd)
     SAFE_OP(StringLength)
     SAFE_OP(ArgumentsLength)
-    SAFE_OP(GetArgument)
+    SAFE_OP(GetFrameArgument)
+    UNSAFE_OP(SetFrameArgument)
     UNSAFE_OP(RunOncePrologue)
     CUSTOM_OP(Rest)
     SAFE_OP(RestPar)
@@ -326,7 +328,7 @@ ParallelSafetyAnalysis::analyze()
             // if we encounter an inherently unsafe operation, in
             // which case we will transform this block into a bailout
             // block.
-            MInstruction *instr = NULL;
+            MInstruction *instr = nullptr;
             for (MInstructionIterator ins(block->begin());
                  ins != block->end() && !visitor.unsafe();)
             {
@@ -411,14 +413,14 @@ ParallelSafetyAnalysis::removeResumePointOperands()
     // But the call to foo() is dead and has been removed, leading to
     // an inconsistent IR and assertions at codegen time.
 
-    MConstant *udef = NULL;
+    MConstant *udef = nullptr;
     for (ReversePostorderIterator block(graph_.rpoBegin()); block != graph_.rpoEnd(); block++) {
         if (udef)
             replaceOperandsOnResumePoint(block->entryResumePoint(), udef);
 
         for (MInstructionIterator ins(block->begin()); ins != block->end(); ins++) {
             if (ins->isStart()) {
-                JS_ASSERT(udef == NULL);
+                JS_ASSERT(udef == nullptr);
                 udef = MConstant::New(UndefinedValue());
                 block->insertAfter(*ins, udef);
             } else if (udef) {
@@ -473,7 +475,7 @@ ParallelSafetyVisitor::convertToBailout(MBasicBlock *block, MInstruction *ins)
 
         // if `block` had phis, we are replacing it with `bailBlock` which does not
         if (pred->successorWithPhis() == block)
-            pred->setSuccessorWithPhis(NULL, 0);
+            pred->setSuccessorWithPhis(nullptr, 0);
 
         // redirect the predecessor to the bailout block
         uint32_t succIdx = pred->getSuccessorIndex(block);
@@ -557,7 +559,7 @@ ParallelSafetyVisitor::visitRest(MRest *ins)
 bool
 ParallelSafetyVisitor::visitMathFunction(MMathFunction *ins)
 {
-    return replace(ins, MMathFunction::New(ins->input(), ins->function(), NULL));
+    return replace(ins, MMathFunction::New(ins->input(), ins->function(), nullptr));
 }
 
 bool
@@ -780,10 +782,8 @@ static bool
 AddCallTarget(HandleScript script, CallTargetVector &targets);
 
 bool
-jit::AddPossibleCallees(MIRGraph &graph, CallTargetVector &targets)
+jit::AddPossibleCallees(JSContext *cx, MIRGraph &graph, CallTargetVector &targets)
 {
-    JSContext *cx = GetIonContext()->cx;
-
     for (ReversePostorderIterator block(graph.rpoBegin()); block != graph.rpoEnd(); block++) {
         for (MInstructionIterator ins(block->begin()); ins != block->end(); ins++)
         {
@@ -797,8 +797,8 @@ jit::AddPossibleCallees(MIRGraph &graph, CallTargetVector &targets)
                 JS_ASSERT_IF(!target->isInterpreted(), target->hasParallelNative());
 
                 if (target->isInterpreted()) {
-                    RootedScript script(cx, target->nonLazyScript());
-                    if (!AddCallTarget(script, targets))
+                    RootedScript script(cx, target->getOrCreateScript(cx));
+                    if (!script || !AddCallTarget(script, targets))
                         return false;
                 }
 

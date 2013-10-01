@@ -157,7 +157,6 @@ FENNEC_JAVA_FILES = \
   TextSelectionHandle.java \
   ThumbnailHelper.java \
   TouchEventInterceptor.java \
-  UpdateServiceHelper.java \
   VideoPlayer.java \
   WebAppAllocator.java \
   WebAppImpl.java \
@@ -194,6 +193,7 @@ FENNEC_JAVA_FILES = \
   gfx/LayerView.java \
   gfx/NativePanZoomController.java \
   gfx/NinePatchTileLayer.java \
+  gfx/Overscroll.java \
   gfx/PanningPerfAPI.java \
   gfx/PanZoomController.java \
   gfx/PanZoomTarget.java \
@@ -252,6 +252,8 @@ FENNEC_JAVA_FILES = \
   menu/MenuPopup.java \
   preferences/SearchPreferenceCategory.java \
   preferences/SearchEnginePreference.java \
+  updater/UpdateServiceHelper.java \
+  updater/UpdateService.java \
   widget/ActivityChooserModel.java \
   widget/ButtonToast.java \
   widget/ArrowPopup.java \
@@ -266,7 +268,6 @@ FENNEC_JAVA_FILES = \
   widget/TwoWayView.java \
   GeckoNetworkManager.java \
   GeckoScreenOrientationListener.java \
-  UpdateService.java \
   GeckoUpdateReceiver.java \
   ReferrerReceiver.java \
   $(NULL)
@@ -666,7 +667,6 @@ RES_DRAWABLE_MDPI = \
   res/drawable-mdpi/icon_most_recent.png \
   res/drawable-mdpi/icon_most_recent_empty.png \
   res/drawable-mdpi/icon_most_visited.png \
-  res/drawable-mdpi/icon_most_visited_empty.png \
   res/drawable-mdpi/icon_openinapp.png \
   res/drawable-mdpi/icon_pageaction.png \
   res/drawable-mdpi/icon_reading_list_empty.png \
@@ -782,7 +782,6 @@ RES_DRAWABLE_HDPI = \
   res/drawable-hdpi/icon_most_recent.png \
   res/drawable-hdpi/icon_most_recent_empty.png \
   res/drawable-hdpi/icon_most_visited.png \
-  res/drawable-hdpi/icon_most_visited_empty.png \
   res/drawable-hdpi/icon_openinapp.png \
   res/drawable-hdpi/icon_pageaction.png \
   res/drawable-hdpi/icon_reading_list_empty.png \
@@ -884,7 +883,6 @@ RES_DRAWABLE_XHDPI = \
   res/drawable-xhdpi/icon_most_recent.png \
   res/drawable-xhdpi/icon_most_recent_empty.png \
   res/drawable-xhdpi/icon_most_visited.png \
-  res/drawable-xhdpi/icon_most_visited_empty.png \
   res/drawable-xhdpi/icon_openinapp.png \
   res/drawable-xhdpi/icon_pageaction.png \
   res/drawable-xhdpi/icon_reading_list_empty.png \
