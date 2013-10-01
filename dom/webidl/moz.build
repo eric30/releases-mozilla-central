@@ -462,7 +462,6 @@ if CONFIG['MOZ_B2G_RIL']:
 if CONFIG['MOZ_B2G_NFC']:
     WEBIDL_FILES += [
          'MozNfc.webidl',
-         'MozNfcEvent.webidl',
          'MozNdefRecord.webidl',
     ]
 

@@ -8,15 +8,11 @@
 if CONFIG['MOZ_B2G_NFC']:
     MODULE = 'dom'
     XPIDL_MODULE = 'dom_nfc'
-    XPIDL_SOURCES += [
-        'nsIDOMNfcEvent.idl',
-    ]
     EXPORTS.mozilla.dom += [
         'MozNdefRecord.h',
     ]
     CPP_SOURCES += [
         'MozNdefRecord.cpp',
-        'NfcEvent.cpp',
     ]
     EXTRA_COMPONENTS += [
       'nsNfc.js',

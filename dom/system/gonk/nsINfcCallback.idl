@@ -9,12 +9,5 @@
 [scriptable, uuid(999fa430-6180-11e1-b86c-0800200c9a66)]
 interface nsINfcCallback : nsISupports
 {
-  /* Sets a callback to notifiy when NDEF Push message communication is available for use. */
-  //[implicit_jscontext] boolean registerNDEFPushMessageCallback(
-  //                               in nsINdefPushMessageCallback aCallback);
-  /* Foreground dispatch allows the app, if in the foreground, to get routed all
-     NFC messages. Useful for applications that write NFC tags. Privilaged API.
-   */
-  //[implicit_jscontext] boolean registerForegroundDispatch(
-  //                               in nsIForegroundDispatchCallback aCallback);
+  // TBD: onpeerfound, onpeerlost, onforegrounddispatch
 };

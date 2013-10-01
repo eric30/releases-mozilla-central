@@ -19,12 +19,6 @@ interface nsINfcContentHelper : nsISupports
   nsIDOMDOMRequest ndefWrite(in nsIDOMWindow window, in nsIVariant records);
   nsIDOMDOMRequest ndefMakeReadOnly(in nsIDOMWindow window);
 
-  nsIDOMDOMRequest ndefPush(in nsIDOMWindow window, in jsval records);
-
-
-  nsIDOMDOMRequest nfcATagDetails(in nsIDOMWindow window);
-  nsIDOMDOMRequest nfcATagTransceive(in nsIDOMWindow window, in nsIVariant params); // NFCA transceive
-
   nsIDOMDOMRequest connect(in nsIDOMWindow window, in unsigned long techType);
   nsIDOMDOMRequest close(in nsIDOMWindow window);
 

@@ -37,9 +37,6 @@ const NFC_IPC_MSG_NAMES = [
   "NFC:NDEFReadResponse",
   "NFC:NDEFWriteResponse",
   "NFC:NDEFMakeReadOnlyResponse",
-  "NFC:NDEFPushResponse",
-  "NFC:NfcATagDetailsResponse",
-  "NFC:NfcATagTransceiveResponse",
   "NFC:ConnectResponse",
   "NFC:CloseResponse"
 ];
@@ -151,62 +148,6 @@ NfcContentHelper.prototype = {
     cpmm.sendAsyncMessage("NFC:NdefMakeReadOnly", {
       requestId: requestId,
       sessionId: this._connectedSessionId
-    });
-    return request;
-  },
-
-  ndefPush: function ndefPush(window, records) {
-    debug("ndefPush");
-    if (window == null) {
-      throw Components.Exception("Can't get window object",
-                                  Cr.NS_ERROR_UNEXPECTED);
-    }
-
-    let request = Services.DOMRequest.createRequest(window);
-    let requestId = btoa(this.getRequestId(request));
-    this._requestMap[requestId] = {win: window};
-
-    let encodedRecords = this.encodeNdefRecords(records);
-
-    cpmm.sendAsyncMessage("NFC:NdefPush", {
-      requestId: requestId,
-      sessionId: this._connectedSessionId,
-      records: encodedRecords
-    });
-    return request;
-  },
-
-  nfcATagDetails: function nfcATagDetails(window) {
-    if (window == null) {
-      throw Components.Exception("Can't get window object",
-                                  Cr.NS_ERROR_UNEXPECTED);
-    }
-
-    let request = Services.DOMRequest.createRequest(window);
-    let requestId = btoa(this.getRequestId(request));
-    this._requestMap[requestId] = {win: window};
-
-    cpmm.sendAsyncMessage("NFC:NfcATagDetails", {
-      requestId: requestId,
-      sessionId: this._connectedSessionId
-    });
-    return request;
-  },
-
-  nfcATagTransceive: function nfcATagTransceive(window, params) {
-    if (window == null) {
-      throw Components.Exception("Can't get window object",
-                                  Cr.NS_ERROR_UNEXPECTED);
-    }
-
-    let request = Services.DOMRequest.createRequest(window);
-    let requestId = btoa(this.getRequestId(request));
-    this._requestMap[requestId] = {win: window};
-
-    cpmm.sendAsyncMessage("NFC:NfcATagTransceive", {
-      requestId: requestId,
-      sessionId: this._connectedSessionId,
-      params: params
     });
     return request;
   },
@@ -364,15 +305,6 @@ NfcContentHelper.prototype = {
       case "NFC:NDEFMakeReadOnlyResponse":
         this.handleNDEFReadOnlyResponse(message.json);
         break;
-      case "NFC:NDEFPushResponse":
-        this.handleNDEFPushResponse(message.json);
-        break;
-      case "NFC:NfcATagDetailsResponse":
-        this.handleNfcATagDetailsResponse(message.json);
-        break;
-      case "NFC:NfcATagTransceiveResponse":
-        this.handleNfcATagTransceiveResponse(message.json);
-        break;
       case "NFC:ConnectResponse":
         this.handleConnectResponse(message.json);
         break;
@@ -477,62 +409,6 @@ NfcContentHelper.prototype = {
 
     if (result.status != "OK") {
       this.fireRequestError(requestId, ObjectWrapper.wrap(result, requester.win));
-    } else  {
-      this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
-    }
-  },
-
-  handleNDEFPushResponse: function handleNDEFPushResponse(message) {
-    debug("NDEFPushResponse(" + JSON.stringify(message) + ")");
-    let requester = this._requestMap[message.requestId];
-    if ((typeof requester === 'undefined') ||
-        (message.sessionId != this._connectedSessionId)) {
-       debug('Returning: requester: ' + requester);
-       debug('Returning: sessionId matches?: ' + (message.sessionId == this._connectedSessionId));
-       return; // Nothing to do in this instance.
-    }
-    delete this._requestMap[message.requestId];
-    let result = message.content;
-    let requestId = atob(message.requestId);
-
-    if (result.status != "OK") {
-      this.fireRequestError(requestId, result.status);
-    } else  {
-      this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
-    }
-  },
-
-  handleNfcATagDetailsResponse: function handleNfcATagDetailsResponse(message) {
-    debug("NfcATagDetailsResponse(" + JSON.stringify(message) + ")");
-    let requester = this._requestMap[message.requestId];
-    if ((typeof requester === 'undefined') ||
-        (message.sessionId != this._connectedSessionId)) {
-       return; // Nothing to do in this instance.
-    }
-    delete this._requestMap[message.requestId];
-    let result = message.content;
-    let requestId = atob(message.requestId);
-
-    if (message.sessionId != this._connectedSessionId) {
-      this.fireRequestError(requestId, result.status);
-    } else  {
-      this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
-    }
-  },
-
-  handleNfcATagTransceiveResponse: function handleNfcATagTransceiveResponse(message) {
-    debug("NfcATagTransceiveResponse(" + JSON.stringify(message) + ")");
-    let requester = this._requestMap[message.requestId];
-    if ((typeof requester === 'undefined') ||
-        (message.sessionId != this._connectedSessionId)) {
-       return; // Nothing to do in this instance.
-    }
-    delete this._requestMap[message.requestId];
-    let result = message.content;
-    let requestId = atob(message.requestId);
-
-    if (message.sessionId != this._connectedSessionId) {
-      this.fireRequestError(requestId, result.status);
     } else  {
       this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
     }

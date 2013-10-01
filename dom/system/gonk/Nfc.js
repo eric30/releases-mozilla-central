@@ -33,9 +33,6 @@ const NFC_IPC_MSG_NAMES = [
   "NFC:NdefRead",
   "NFC:NdefWrite",
   "NFC:NdefMakeReadOnly",
-  "NFC:NdefPush",
-  "NFC:NfcATagDetails",
-  "NFC:NfcATagTransceive",
   "NFC:Connect",
   "NFC:Close"
 ];
@@ -133,9 +130,6 @@ Nfc.prototype = {
       case "NDEFMakeReadOnlyResponse":
         ppmm.broadcastAsyncMessage("NFC:NDEFMakeReadOnlyResponse", message);
         break;
-      case "NDEFPushResponse":
-        ppmm.broadcastAsyncMessage("NFC:NDEFPushResponse", message);
-        break;
       case "ConnectResponse":
         ppmm.broadcastAsyncMessage("NFC:ConnectResponse", message);
         break;
@@ -209,53 +203,6 @@ Nfc.prototype = {
     this.worker.postMessage({type: "ndefMakeReadOnly", content: outMessage});
   },
 
-  ndefPush: function ndefPush(message) {
-    var records = message.records;
-
-    debug("ndefPushRequest message: " + JSON.stringify(message));
-    var outMessage = {
-      type: "NDEFPushRequest",
-      sessionId: message.sessionId,
-      requestId: message.requestId,
-      content: {
-        records: records
-      }
-    };
-
-    this.worker.postMessage({type: "ndefPush", content: outMessage});
-  },
-
-  // tag read/write command message handler.
-  nfcATagDetails: function nfcATagDetails(message) {
-    var params = message.params;
-
-    debug("nfcATagDetails: " + JSON.stringify(message));
-    var outMessage = {
-      type: "NfcATagDetailsRequest",
-      sessionId: message.sessionId,
-      requestId: message.requestId
-    };
-
-    this.worker.postMessage({type: "nfcATagDetails", content: outMessage});
-  },
-
-  // tag read/write command message handler.
-  nfcATagTransceive: function nfcATagTransceive(params) {
-    var params = message.params;
-
-    debug("nfcATagTransceive: " + JSON.stringify(message));
-    var outMessage = {
-      type: "NfcATagTransceiveRequest",
-      sessionId: message.sessionId,
-      requestId: message.requestId,
-      content: {
-        params: params
-      }
-    };
-
-    this.worker.postMessage({type: "nfcATagTransceive", content: outMessage});
-  },
-
   // tag read/write command message handler.
   connect: function connect(message, techType) {
 
@@ -305,8 +252,6 @@ Nfc.prototype = {
     switch (message.name) {
       case "NFC:NdefWrite":
       case "NFC:NdefMakeReadOnly":
-      case "NFC:NdefPush":
-      case "NFC:NfcATagTransceive":
         if (!message.target.assertPermission("nfc-write")) {
           if (DEBUG) {
             debug("Nfc message " + message.name +
@@ -329,15 +274,6 @@ Nfc.prototype = {
         break;
       case "NFC:NdefMakeReadOnly":
         this.ndefMakeReadOnly(message.json);
-        break;
-      case "NFC:NdefPush":
-        this.ndefPush(message.json);
-        break;
-      case "NFC:NfcATagDetails":
-        this.nfcATagDetails(message.json);
-        break;
-      case "NFC:NfcATagTransceive":
-        this.nfcATagTransceive(message.json);
         break;
       case "NFC:Connect":
         this.connect(message.json);

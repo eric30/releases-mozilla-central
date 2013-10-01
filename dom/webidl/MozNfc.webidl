@@ -25,10 +25,6 @@ interface MozNfc : EventTarget {
    /* Permanently make a physical NFC tag read only */
    DOMRequest makeReadOnlyNDEF();
 
-   /* Sets a callback to notifiy when NDEF Push message communication is available for use. (future API)
-   boolean registerNDEFPushMessageCallback(in nsINdefPushMessageCallback aCallback);
-   */
-
    /**
     * NFCA functions (future API)
     */
@@ -45,10 +41,5 @@ interface MozNfc : EventTarget {
    DOMRequest connect(unsigned long techType);
 
    DOMRequest close();
-
-   /* Foreground dispatch allows the app, if in the foreground, to get routed all
-      NFC messages. Useful for applications that write NFC tags. Privilaged API. (future API)
-   boolean registerForegroundDispatch(in nsIForegroundDispatchCallback aCallback);
-   */
 
 };
