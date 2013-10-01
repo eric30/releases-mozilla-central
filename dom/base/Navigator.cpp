@@ -1762,10 +1762,9 @@ Navigator::HasFMRadioSupport(JSContext* /* unused */, JSObject* aGlobal)
 bool
 Navigator::HasNfcSupport(JSContext* /* unused */, JSObject* aGlobal)
 {
-  NS_WARNING("XXXXXX Checking NFC Support");
   nsCOMPtr<nsPIDOMWindow> win = GetWindowFromGlobal(aGlobal);
-  return win && CheckPermission(win, "nfc-read") ||
-                CheckPermission(win, "nfc-write");
+  return win && (CheckPermission(win, "nfc-read") ||
+                 CheckPermission(win, "nfc-write"));
 }
 #endif // MOZ_B2G_NFC
 
