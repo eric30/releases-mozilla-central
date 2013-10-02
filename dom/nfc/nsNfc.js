@@ -69,4 +69,4 @@ mozNfc.prototype = {
                                          Ci.nsIDOMGlobalPropertyInitializer]),
 };
 
-this.NSGetFactory = XPCOMUtils.generateNSGetFactory([mozNfc])
+this.NSGetFactory = XPCOMUtils.generateNSGetFactory([mozNfc]);
