@@ -43,17 +43,17 @@ mozNfc.prototype = {
     this._window = aWindow;
   },
 
-  detailsNDEF: function detailsNDEF() {
-    return this._nfcContentHelper.ndefDetails(this._window);
+  getDetailsNDEF: function getDetailsNDEF() {
+    return this._nfcContentHelper.getDetailsNDEF(this._window);
   },
   readNDEF: function readNDEF() {
-    return this._nfcContentHelper.ndefRead(this._window);
+    return this._nfcContentHelper.readNDEF(this._window);
   },
   writeNDEF: function writeNDEF(records) {
-    return this._nfcContentHelper.ndefWrite(this._window, records);
+    return this._nfcContentHelper.writeNDEF(this._window, records);
   },
   makeReadOnlyNDEF: function makeReadOnlyNDEF() {
-    return this._nfcContentHelper.ndefMakeReadOnly(this._window);
+    return this._nfcContentHelper.makeReadOnlyNDEF(this._window);
   },
 
   connect: function connect_with_type(int_tech_type) {

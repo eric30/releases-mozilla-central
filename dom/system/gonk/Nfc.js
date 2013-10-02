@@ -29,13 +29,18 @@ const NFC_CID =
   Components.ID("{2ff24790-5e74-11e1-b86c-0800200c9a66}");
 
 const NFC_IPC_MSG_NAMES = [
-  "NFC:NdefDetails",
-  "NFC:NdefRead",
-  "NFC:NdefWrite",
-  "NFC:NdefMakeReadOnly",
+  "NFC:GetDetailsNDEF",
+  "NFC:ReadNDEF",
+  "NFC:WriteNDEF",
+  "NFC:MakeReadOnlyNDEF",
   "NFC:Connect",
   "NFC:Close"
 ];
+
+// NFC powerlevels must match config PDUs.
+const NFC_POWER_LEVEL_DISABLED       = 0;
+const NFC_POWER_LEVEL_LOW            = 1;
+const NFC_POWER_LEVEL_ENABLED        = 2;
 
 const TOPIC_MOZSETTINGS_CHANGED      = "mozsettings-changed";
 const TOPIC_XPCOM_SHUTDOWN           = "xpcom-shutdown";
@@ -56,6 +61,7 @@ XPCOMUtils.defineLazyServiceGetter(this, "gSettingsService",
 
 
 function Nfc() {
+  debug("Starting Worker");
   this.worker = new ChromeWorker("resource://gre/modules/nfc_worker.js");
   this.worker.onerror = this.onerror.bind(this);
   this.worker.onmessage = this.onmessage.bind(this);
@@ -69,9 +75,8 @@ function Nfc() {
 
   let lock = gSettingsService.createLock();
   lock.get("nfc.powerlevel", this);
-  this.powerlevel = 0; // default to off (FIXME: add get preference)
+  this.powerLevel = NFC_POWER_LEVEL_DISABLED; // default to off (FIXME: add get settings preference)
 
-  debug("Starting Worker");
   gSystemWorkerManager.registerNfcWorker(this.worker);
 }
 Nfc.prototype = {
@@ -99,8 +104,8 @@ Nfc.prototype = {
   onmessage: function onmessage(event) {
     let message = event.data;
     debug("Received message: " + JSON.stringify(message));
-    if (this.powerlevel < 1) {
-      debug("Nfc is not enabled.");
+    if (this.powerLevel <= NFC_POWER_LEVEL_DISABLED) {
+      debug("NFC is not enabled.");
       return null;
     }
 
@@ -149,37 +154,37 @@ Nfc.prototype = {
   // nsINfcWorker
 
   worker: null,
-  powerlevel: 0,
+  powerLevel: NFC_POWER_LEVEL_DISABLED,
 
-  ndefDetails: function ndefDetails(message) {
-    debug("ndefDetailsRequest message: " + JSON.stringify(message));
-    var outMessage = {
+  getDetailsNDEF: function getDetailsNDEF(message) {
+    debug("NDEFDetailsRequest message: " + JSON.stringify(message));
+    let outMessage = {
       type: "NDEFDetailsRequest",
       sessionId: message.sessionId,
       requestId: message.requestId
     };
-    debug("ndefDetailsRequest message out: " + JSON.stringify(outMessage));
+    debug("NDEFDetailsRequest message out: " + JSON.stringify(outMessage));
 
-    this.worker.postMessage({type: "ndefDetails", content: outMessage});
+    this.worker.postMessage({type: "getDetailsNDEF", content: outMessage});
   },
 
-  ndefRead: function ndefRead(message) {
-    debug("ndefReadRequest message: " + JSON.stringify(message));
-    var outMessage = {
+  readNDEF: function readNDEF(message) {
+    debug("NDEFReadRequest message: " + JSON.stringify(message));
+    let outMessage = {
       type: "NDEFReadRequest",
       sessionId: message.sessionId,
       requestId: message.requestId
     };
 
-    debug("ndefReadRequest message out: " + JSON.stringify(outMessage));
-    this.worker.postMessage({type: "ndefRead", content: outMessage});
+    debug("NDEFReadRequest message out: " + JSON.stringify(outMessage));
+    this.worker.postMessage({type: "readNDEF", content: outMessage});
   },
 
-  ndefWrite: function ndefWrite(message) {
-    var records = message.records;
+  writeNDEF: function writeNDEF(message) {
+    let records = message.records;
 
-    debug("ndefWriteRequest message: " + JSON.stringify(message));
-    var outMessage = {
+    debug("NDEFWriteRequest message: " + JSON.stringify(message));
+    let outMessage = {
       type: "NDEFWriteRequest",
       sessionId: message.sessionId,
       requestId: message.requestId,
@@ -188,26 +193,26 @@ Nfc.prototype = {
       }
     };
 
-    this.worker.postMessage({type: "ndefWrite", content: outMessage});
+    this.worker.postMessage({type: "writeNDEF", content: outMessage});
   },
 
-  ndefMakeReadOnly: function ndefMakeReadOnly(message) {
-    debug("ndefMakeReadOnlyRequest message: " + JSON.stringify(message));
-    var outMessage = {
+  makeReadOnlyNDEF: function makeReadOnlyNDEF(message) {
+    debug("NDEFMakeReadOnlyRequest message: " + JSON.stringify(message));
+    let outMessage = {
       type: "NDEFMakeReadOnlyRequest",
       sessionId: message.sessionId,
       requestId: message.requestId
     };
-    debug("ndefMakeReadOnlyRequest message out: " + JSON.stringify(outMessage));
+    debug("NDEFMakeReadOnlyRequest message out: " + JSON.stringify(outMessage));
 
-    this.worker.postMessage({type: "ndefMakeReadOnly", content: outMessage});
+    this.worker.postMessage({type: "makeReadOnlyNDEF", content: outMessage});
   },
 
   // tag read/write command message handler.
   connect: function connect(message, techType) {
 
     debug("NFC connect: " + JSON.stringify(message));
-    var outMessage = {
+    let outMessage = {
       type: "ConnectRequest",
       sessionId: message.sessionId,
       requestId: message.requestId,
@@ -220,7 +225,7 @@ Nfc.prototype = {
   // tag read/write command message handler.
   close: function close(message) {
     debug("NFC close: " + JSON.stringify(message));
-    var outMessage = {
+    let outMessage = {
       type: "CloseRequest",
       sessionId: message.sessionId,
       requestId: message.requestId
@@ -235,14 +240,14 @@ Nfc.prototype = {
   receiveMessage: function receiveMessage(message) {
     debug("Received '" + message.name + "' message from content process");
 
-    if (this.powerlevel < 1) {
-      debug("Nfc is not enabled.");
+    if (this.powerLevel < NFC_POWER_LEVEL_ENABLED) {
+      debug("NFC is not enabled.");
       return null;
     }
 
     if (!message.target.assertPermission("nfc-read")) {
       if (DEBUG) {
-        debug("Nfc message " + message.name +
+        debug("NFC message " + message.name +
               " from a content process with no 'nfc-read' privileges.");
       }
       return null;
@@ -250,11 +255,12 @@ Nfc.prototype = {
 
     // Enforce NFC Write permissions.
     switch (message.name) {
-      case "NFC:NdefWrite":
-      case "NFC:NdefMakeReadOnly":
+      case "NFC:WriteNDEF":
+        // Fall through...
+      case "NFC:MakeReadOnlyNDEF":
         if (!message.target.assertPermission("nfc-write")) {
           if (DEBUG) {
-            debug("Nfc message " + message.name +
+            debug("NFC message " + message.name +
                   " from a content process with no 'nfc-write' privileges.");
           }
           return null;
@@ -263,17 +269,17 @@ Nfc.prototype = {
     }
 
     switch (message.name) {
-      case "NFC:NdefDetails":
-        this.ndefDetails(message.json);
+      case "NFC:GetDetailsNDEF":
+        this.getDetailsNDEF(message.json);
         break;
-      case "NFC:NdefRead":
-        this.ndefRead(message.json);
+      case "NFC:ReadNDEF":
+        this.readNDEF(message.json);
         break;
-      case "NFC:NdefWrite":
-        this.ndefWrite(message.json);
+      case "NFC:WriteNDEF":
+        this.writeNDEF(message.json);
         break;
-      case "NFC:NdefMakeReadOnly":
-        this.ndefMakeReadOnly(message.json);
+      case "NFC:MakeReadOnlyNDEF":
+        this.makeReadOnlyNDEF(message.json);
         break;
       case "NFC:Connect":
         this.connect(message.json);
@@ -297,13 +303,16 @@ Nfc.prototype = {
         break;
       case TOPIC_MOZSETTINGS_CHANGED:
         let setting = JSON.parse(data);
-        debug("Setting Changed: " + JSON.stringify(setting));
         if (setting) {
           switch(setting.key) {
             case "nfc.powerlevel":
-              debug("Reached NFC powerlevel setting.");
-              let powerlevel = (setting.value > 0) ? 1 : 0;
-              this.setNfcPowerConfig(powerlevel);
+              // FIXME: Define Config PDU for NFC power levels
+              debug("Setting NFC power level to: " + setting.value);
+              let powerLevel = ((setting.value >= NFC_POWER_LEVEL_DISABLED) &&
+                                (setting.value <= NFC_POWER_LEVEL_ENABLED)) ?
+                                    setting.value
+                                  : NFC_POWER_LEVEL_DISABLED;
+              this.setNFCPowerConfig(powerLevel);
             break;
           }
         } else {
@@ -316,21 +325,22 @@ Nfc.prototype = {
   /**
    * NFC Config API. Properties is a set of name value pairs.
    */
-  setNfcPowerConfig: function setNfcPowerConfig(powerlevel) {
-    debug("NFC setNfcPowerConfig: " + powerlevel);
-    this.powerlevel = powerlevel;
-    this.setConfig({powerlevel: powerlevel});
+  setNFCPowerConfig: function setNFCPowerConfig(powerLevel) {
+    debug("NFC setNFCPowerConfig: " + powerLevel);
+    this.powerLevel = powerLevel;
+    // Just one param for now.
+    this.setConfig({powerLevel: powerLevel});
   },
 
   setConfig: function setConfig(prop) {
     // Add to property set. -1 if no change.
     debug("In Config...");
     let configset = {
-      powerlevel: prop.powerlevel
+      powerLevel: prop.powerLevel
     };
-    var outMessage = {
+    let outMessage = {
       type: "ConfigRequest",
-      powerlevel: prop.powerlevel
+      powerLevel: prop.powerLevel
     };
     debug("OutMessage: " + JSON.stringify(outMessage));
     this.worker.postMessage({type: "configRequest", content: outMessage});

@@ -14,14 +14,11 @@ interface nsINfcContentHelper : nsISupports
   void registerNfcCallback(in nsINfcCallback callback);
   void unregisterNfcCallback(in nsINfcCallback callback);
 
-  nsIDOMDOMRequest ndefDetails(in nsIDOMWindow window);
-  nsIDOMDOMRequest ndefRead(in nsIDOMWindow window);
-  nsIDOMDOMRequest ndefWrite(in nsIDOMWindow window, in nsIVariant records);
-  nsIDOMDOMRequest ndefMakeReadOnly(in nsIDOMWindow window);
+  nsIDOMDOMRequest getDetailsNDEF(in nsIDOMWindow window);
+  nsIDOMDOMRequest readNDEF(in nsIDOMWindow window);
+  nsIDOMDOMRequest writeNDEF(in nsIDOMWindow window, in nsIVariant records);
+  nsIDOMDOMRequest makeReadOnlyNDEF(in nsIDOMWindow window);
 
   nsIDOMDOMRequest connect(in nsIDOMWindow window, in unsigned long techType);
   nsIDOMDOMRequest close(in nsIDOMWindow window);
-
-  // DEBUG only:
-  void sendToNfcd(in DOMString message);
 };

@@ -13,7 +13,7 @@ interface MozNfc : EventTarget {
     */
 
    /* Get metadata details of the discovered and connected NDEF message */
-   DOMRequest detailsNDEF();
+   DOMRequest getDetailsNDEF();
 
    /* NDEF Read returns an array of NDEF Records consisting of 1 or more elements */
    DOMRequest readNDEF();
@@ -24,15 +24,6 @@ interface MozNfc : EventTarget {
 
    /* Permanently make a physical NFC tag read only */
    DOMRequest makeReadOnlyNDEF();
-
-   /**
-    * NFCA functions (future API)
-    */
-
-   DOMRequest detailsNfcATag();
-
-   [Throws]
-   DOMRequest transceiveNfcATag(sequence<octet> buf);
 
    /**
     * Generic tag/tech functions

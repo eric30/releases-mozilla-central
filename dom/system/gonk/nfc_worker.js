@@ -68,49 +68,28 @@ let Nfc = {
   /**
    * Retrieve metadata describing the NDEF formatted data, if present.
    */
-  ndefDetails: function ndefDetails(message) {
+  getDetailsNDEF: function ndefDetails(message) {
     postNfcMessage(JSON.stringify(message.content));
   },
 
   /**
    * Read and return NDEF data, if present.
    */
-  ndefRead: function ndefRead(message) {
+  readNDEF: function ndefRead(message) {
     postNfcMessage(JSON.stringify(message.content));
   },
 
   /**
    * Write to a target that accepts NDEF formattable data
    */
-  ndefWrite: function ndefWrite(message) {
+  writeNDEF: function ndefWrite(message) {
     postNfcMessage(JSON.stringify(message.content));
   },
 
   /**
    * Make the NFC NDEF tag permenantly read only
    */
-  ndefMakeReadOnly: function ndefMakeReadOnly(message) {
-    postNfcMessage(JSON.stringify(message.content));
-  },
-
-  /**
-   * P2P NDEF message push between a pair of NFC devices.
-   */
-  ndefPush: function ndefPush(message) {
-    postNfcMessage(JSON.stringify(message.content));
-  },
-
-  /**
-   * Retrieve metadata describing the NfcA tag type, if present.
-   */
-  nfcATagDetails: function nfcATagDetails(message) {
-    postNfcMessage(JSON.stringify(message.requestId)); // Just request ID.
-  },
-
-  /**
-   *  Excahnge PDUs with the NFC target. Request ID is required.
-   */
-  nfcATagTransceive: function nfcATagTransceive(message) {
+  makeReadOnlyNDEF: function ndefMakeReadOnly(message) {
     postNfcMessage(JSON.stringify(message.content));
   },
 
