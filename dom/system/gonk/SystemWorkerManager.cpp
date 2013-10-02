@@ -72,13 +72,13 @@ SystemWorkerManager *gInstance = nullptr;
 class ConnectWorkerToNfc : public WorkerTask
 {
 public:
-  virtual bool RunTask(JSContext *aCx);
+  virtual bool RunTask(JSContext* aCx);
 };
 
 class SendNfcSocketDataTask : public nsRunnable
 {
 public:
-  SendNfcSocketDataTask(UnixSocketRawData *aRawData)
+  SendNfcSocketDataTask(UnixSocketRawData* aRawData)
     : mRawData(aRawData)
   { }
 
@@ -90,11 +90,11 @@ public:
   }
 
 private:
-  UnixSocketRawData *mRawData;
+  UnixSocketRawData* mRawData;
 };
 
 bool
-PostToNfc(JSContext *cx, unsigned argc, JS::Value *vp)
+PostToNfc(JSContext* cx, unsigned argc, JS::Value* vp)
 {
   NS_ASSERTION(!NS_IsMainThread(), "Expecting to be on the worker thread");
 
@@ -106,7 +106,7 @@ PostToNfc(JSContext *cx, unsigned argc, JS::Value *vp)
   jsval v = JS_ARGV(cx, vp)[0];
 
   JSAutoByteString abs;
-  void *data;
+  void* data;
   size_t size;
   if (JSVAL_IS_STRING(v)) {
     JSString *str = JSVAL_TO_STRING(v);
@@ -130,13 +130,13 @@ PostToNfc(JSContext *cx, unsigned argc, JS::Value *vp)
 }
 
 bool
-ConnectWorkerToNfc::RunTask(JSContext *aCx)
+ConnectWorkerToNfc::RunTask(JSContext* aCx)
 {
   // Set up the postNfcMessage on the function for worker -> NFC thread
   // communication.
   NS_ASSERTION(!NS_IsMainThread(), "Expecting to be on the worker thread");
   NS_ASSERTION(!JS_IsRunning(aCx), "Are we being called somehow?");
-  JSObject *workerGlobal = JS::CurrentGlobalOrNull(aCx);
+  JSObject* workerGlobal = JS::CurrentGlobalOrNull(aCx);
 
   return !!JS_DefineFunction(aCx, workerGlobal, "postNfcMessage", PostToNfc, 1,
                              0);
@@ -612,7 +612,7 @@ SystemWorkerManager::RegisterRilWorker(unsigned int aClientId,
 
 nsresult
 SystemWorkerManager::RegisterNfcWorker(const JS::Value& aWorker,
-                                       JSContext *aCx)
+                                       JSContext* aCx)
 {
 #ifdef MOZ_NFC
   NS_ENSURE_TRUE(!JSVAL_IS_PRIMITIVE(aWorker), NS_ERROR_UNEXPECTED);
@@ -625,7 +625,7 @@ SystemWorkerManager::RegisterNfcWorker(const JS::Value& aWorker,
   JSAutoRequest ar(aCx);
   JSAutoCompartment ac(aCx, JSVAL_TO_OBJECT(aWorker));
 
-  WorkerCrossThreadDispatcher *wctd =
+  WorkerCrossThreadDispatcher* wctd =
     GetWorkerCrossThreadDispatcher(aCx, aWorker);
   if (!wctd) {
     NS_WARNING("Failed to GetWorkerCrossThreadDispatcher for nfc");

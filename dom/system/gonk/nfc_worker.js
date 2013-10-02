@@ -137,7 +137,7 @@ if (!this.debug) {
 function onNfcMessage(data) {
   let nfcJsonStr = "";
   // convert uint8 typed array to a string
-  for (var i=0; i<data.byteLength - 1; i++) {
+  for (let i = 0; i < data.byteLength - 1; i++) {
     nfcJsonStr += String.fromCharCode(data[i]);
   }
   debug("onNfcMessage: " + nfcJsonStr);
