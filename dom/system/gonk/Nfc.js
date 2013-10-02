@@ -151,7 +151,7 @@ Nfc.prototype = {
         ppmm.broadcastAsyncMessage("NFC:CloseResponse", message);
         break;
       case "ConfigResponse":
-        // Config changes. No notification.
+        // NFC Config change response. TODO: notify settings UI Bug 904246
         debug("ConfigResponse" + JSON.stringify(message));
         break;
       default:
