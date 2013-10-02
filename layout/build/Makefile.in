@@ -137,10 +137,6 @@ SHARED_LIBRARY_LIBS	+= \
   $(NULL)
 endif #}
 
-ifdef MOZ_NFC #{
-SHARED_LIBRARY_LIBS     += $(DEPTH)/dom/nfc/$(LIB_PREFIX)dom_nfc_s.$(LIB_SUFFIX)
-endif #}
-
 ifdef MOZ_OGG
 SHARED_LIBRARY_LIBS 	+= \
 	$(DEPTH)/content/media/ogg/$(LIB_PREFIX)gkconogg_s.$(LIB_SUFFIX) \
@@ -342,10 +338,6 @@ endif #}
 
 ifdef MOZ_B2G_BT #{
 LOCAL_INCLUDES	+= -I$(topsrcdir)/dom/bluetooth
-endif #}
-
-ifdef MOZ_NFC #{
-LOCAL_INCLUDES  += -I$(topsrcdir)/dom/nfc
 endif #}
 
 ifdef MOZ_WEBSPEECH #{
