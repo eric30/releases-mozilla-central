@@ -22,7 +22,16 @@ const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
-const DEBUG = true; // set to true to see debug messages
+const DEBUG = false; // set to true to see debug messages
+
+let debug;
+if (DEBUG) {
+  debug = function (s) {
+    dump("-*- Nfc: " + s + "\n");
+  };
+} else {
+  debug = function (s) {};
+}
 
 const NFC_CONTRACTID = "@mozilla.org/nfc;1";
 const NFC_CID =
@@ -145,7 +154,6 @@ Nfc.prototype = {
         // Config changes. No notification.
         debug("ConfigResponse" + JSON.stringify(message));
         break;
-
       default:
         throw new Error("Don't know about this message type: " + message.type);
     }
@@ -157,7 +165,6 @@ Nfc.prototype = {
   powerLevel: NFC_POWER_LEVEL_DISABLED,
 
   getDetailsNDEF: function getDetailsNDEF(message) {
-    debug("NDEFDetailsRequest message: " + JSON.stringify(message));
     let outMessage = {
       type: "NDEFDetailsRequest",
       sessionId: message.sessionId,
@@ -169,7 +176,6 @@ Nfc.prototype = {
   },
 
   readNDEF: function readNDEF(message) {
-    debug("NDEFReadRequest message: " + JSON.stringify(message));
     let outMessage = {
       type: "NDEFReadRequest",
       sessionId: message.sessionId,
@@ -183,7 +189,6 @@ Nfc.prototype = {
   writeNDEF: function writeNDEF(message) {
     let records = message.records;
 
-    debug("NDEFWriteRequest message: " + JSON.stringify(message));
     let outMessage = {
       type: "NDEFWriteRequest",
       sessionId: message.sessionId,
@@ -197,7 +202,6 @@ Nfc.prototype = {
   },
 
   makeReadOnlyNDEF: function makeReadOnlyNDEF(message) {
-    debug("NDEFMakeReadOnlyRequest message: " + JSON.stringify(message));
     let outMessage = {
       type: "NDEFMakeReadOnlyRequest",
       sessionId: message.sessionId,
@@ -210,8 +214,6 @@ Nfc.prototype = {
 
   // tag read/write command message handler.
   connect: function connect(message, techType) {
-
-    debug("NFC connect: " + JSON.stringify(message));
     let outMessage = {
       type: "ConnectRequest",
       sessionId: message.sessionId,
@@ -224,7 +226,6 @@ Nfc.prototype = {
 
   // tag read/write command message handler.
   close: function close(message) {
-    debug("NFC close: " + JSON.stringify(message));
     let outMessage = {
       type: "CloseRequest",
       sessionId: message.sessionId,
@@ -246,10 +247,8 @@ Nfc.prototype = {
     }
 
     if (!message.target.assertPermission("nfc-read")) {
-      if (DEBUG) {
-        debug("NFC message " + message.name +
-              " from a content process with no 'nfc-read' privileges.");
-      }
+      debug("NFC message " + message.name +
+            " from a content process with no 'nfc-read' privileges.");
       return null;
     }
 
@@ -259,10 +258,8 @@ Nfc.prototype = {
         // Fall through...
       case "NFC:MakeReadOnlyNDEF":
         if (!message.target.assertPermission("nfc-write")) {
-          if (DEBUG) {
-            debug("NFC message " + message.name +
-                  " from a content process with no 'nfc-write' privileges.");
-          }
+          debug("NFC message " + message.name +
+                " from a content process with no 'nfc-write' privileges.");
           return null;
         }
         break;
@@ -334,7 +331,7 @@ Nfc.prototype = {
 
   setConfig: function setConfig(prop) {
     // Add to property set. -1 if no change.
-    debug("In Config...");
+    debug("setConfig...");
     let configset = {
       powerLevel: prop.powerLevel
     };
@@ -348,12 +345,3 @@ Nfc.prototype = {
 };
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory([Nfc]);
-
-let debug;
-if (DEBUG) {
-  debug = function (s) {
-    dump("-*- Nfc: " + s + "\n");
-  };
-} else {
-  debug = function (s) {};
-}

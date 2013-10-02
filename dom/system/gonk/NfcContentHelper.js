@@ -24,7 +24,16 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/ObjectWrapper.jsm");
 Cu.import("resource://gre/modules/DOMRequestHelper.jsm");
 
-const DEBUG = true; // set to true to see debug messages
+const DEBUG = false; // set to true to see debug messages
+
+let debug;
+if (DEBUG) {
+  debug = function (s) {
+    dump("-*- RILContentHelper: " + s + "\n");
+  };
+} else {
+  debug = function (s) {};
+}
 
 const NFCCONTENTHELPER_CID =
   Components.ID("{4d72c120-da5f-11e1-9b23-0800200c9a66}");
@@ -199,7 +208,7 @@ NfcContentHelper.prototype = {
     }
 
     callbacks.push(callback);
-    if (DEBUG) debug("Registered " + callbackType + " callback: " + callback);
+    debug("Registered " + callbackType + " callback: " + callback);
   },
 
   unregisterCallback: function unregisterCallback(callbackType, callback) {
@@ -211,7 +220,7 @@ NfcContentHelper.prototype = {
     let index = callbacks.indexOf(callback);
     if (index != -1) {
       callbacks.splice(index, 1);
-      if (DEBUG) debug("Unregistered telephony callback: " + callback);
+      debug("Unregistered telephony callback: " + callback);
     }
   },
 
@@ -240,17 +249,13 @@ NfcContentHelper.prototype = {
   fireRequestSuccess: function fireRequestSuccess(requestId, result) {
     let request = this.takeRequest(requestId);
     if (!request) {
-      if (DEBUG) {
-        debug("not firing success for id: " + requestId +
-              ", result: " + JSON.stringify(result));
-      }
+      debug("not firing success for id: " + requestId +
+            ", result: " + JSON.stringify(result));
       return;
     }
 
-    if (DEBUG) {
-      debug("fire request success, id: " + requestId +
-            ", result: " + JSON.stringify(result));
-    }
+    debug("fire request success, id: " + requestId +
+          ", result: " + JSON.stringify(result));
     Services.DOMRequest.fireSuccess(request, result);
   },
 
@@ -264,17 +269,13 @@ NfcContentHelper.prototype = {
   fireRequestError: function fireRequestError(requestId, error) {
     let request = this.takeRequest(requestId);
     if (!request) {
-      if (DEBUG) {
-        debug("not firing error for id: " + requestId +
-              ", error: " + JSON.stringify(error));
-      }
+      debug("not firing error for id: " + requestId +
+            ", error: " + JSON.stringify(error));
       return;
     }
 
-    if (DEBUG) {
-      debug("fire request error, id: " + requestId +
-            ", result: " + JSON.stringify(error));
-    }
+    debug("fire request error, id: " + requestId +
+          ", result: " + JSON.stringify(error));
     Services.DOMRequest.fireError(request, error);
   },
 
@@ -472,12 +473,3 @@ NfcContentHelper.prototype = {
 };
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory([NfcContentHelper]);
-
-let debug;
-if (DEBUG) {
-  debug = function (s) {
-    dump("-*- NfcContentHelper: " + s + "\n");
-  };
-} else {
-  debug = function (s) {};
-}
