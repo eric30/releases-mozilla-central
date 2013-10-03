@@ -296,14 +296,13 @@ Nfc.prototype = {
           ppmm.removeMessageListener(msgname, this);
         }
         ppmm = null;
-        Services.obs.removeObserver(this, "xpcom-shutdown");
+        Services.obs.removeObserver(this, TOPIC_XPCOM_SHUTDOWN);
         break;
       case TOPIC_MOZSETTINGS_CHANGED:
         let setting = JSON.parse(data);
         if (setting) {
           switch(setting.key) {
             case "nfc.powerlevel":
-              // FIXME: Define Config PDU for NFC power levels
               debug("Setting NFC power level to: " + setting.value);
               let powerLevel = ((setting.value >= NFC_POWER_LEVEL_DISABLED) &&
                                 (setting.value <= NFC_POWER_LEVEL_ENABLED)) ?
