@@ -124,8 +124,8 @@ Nfc.prototype = {
     switch (message.type) {
       case "techDiscovered":
         this._connectedSessionId = message.sessionId;
-        gSystemMessenger.broadcastMessage("nfc-manager-tech-discovered", message);
         ppmm.broadcastAsyncMessage("NFC:TechDiscovered", message);
+        gSystemMessenger.broadcastMessage("nfc-manager-tech-discovered", message);
         break;
       case "techLost":
         this._connectedSessionId = null;
@@ -151,7 +151,7 @@ Nfc.prototype = {
         ppmm.broadcastAsyncMessage("NFC:CloseResponse", message);
         break;
       case "ConfigResponse":
-        // NFC Config change response. TODO: notify settings UI Bug 904246
+        gSystemMessenger.broadcastMessage("nfc-powerlevel-change", message);
         debug("ConfigResponse" + JSON.stringify(message));
         break;
       default:

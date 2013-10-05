@@ -96,6 +96,9 @@ this.SystemMessagePermissionsTable = {
   },
   "nfc-manager-tech-lost": {
     "nfc-manager": []
+  },
+  "nfc-powerlevel-change": {
+    "settings": ["read", "write"]
   }
 };
 
