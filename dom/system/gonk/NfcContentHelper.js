@@ -24,12 +24,12 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/ObjectWrapper.jsm");
 Cu.import("resource://gre/modules/DOMRequestHelper.jsm");
 
-const DEBUG = false; // set to true to see debug messages
+const DEBUG = true; // set to true to see debug messages
 
 let debug;
 if (DEBUG) {
   debug = function (s) {
-    dump("-*- RILContentHelper: " + s + "\n");
+    dump("-*- NfcContentHelper: " + s + "\n");
   };
 } else {
   debug = function (s) {};
@@ -83,9 +83,9 @@ NfcContentHelper.prototype = {
       var record = records[i];
       encodedRecords.push({
         tnf: record.tnf,
-        type: btoa(record.type),
-        id: btoa(record.id),
-        payload: btoa(record.payload),
+        type: record.type,
+        id: record.id,
+        payload: record.payload,
       });
     }
     return encodedRecords;
@@ -318,8 +318,8 @@ NfcContentHelper.prototype = {
 
   // NFC Notifications
   handleTechDiscovered: function handleTechDiscovered(message) {
-    debug('TechDiscovered. Update Session:');
     this._connectedSessionId = message.sessionId;
+    debug('TechDiscovered. Updated SessionId:' + this._connectedSessionId);
   },
 
   handleTechLost: function handleTechLost(message) {
@@ -356,9 +356,21 @@ NfcContentHelper.prototype = {
     let result = message.content;
     let requestId = atob(message.requestId);
     let records = result.records.map(function(r) {
-      r.type = atob(r.type);
-      r.id = atob(r.id);
-      r.payload = atob(r.payload);
+      let type = "";
+      for (let i = 0; i < r.type.length; i++) {
+        type += String.fromCharCode(r.type[i]);
+      }
+      r.type = type;
+      let id = "";
+      for (let i = 0; i < r.id.length; i++) {
+        id += String.fromCharCode(r.id[i]);
+      }
+      r.id = id;
+      let payload = "";
+      for (let i = 0; i < r.payload.length; i++) {
+        payload += String.fromCharCode(r.payload[i]);
+      }
+      r.payload = payload;
       return r;
     });
     let resultA = {records: records};
@@ -408,11 +420,32 @@ NfcContentHelper.prototype = {
     }
   },
 
+  handleNDEFPushResponse: function handleNDEFPushResponse(message) {
+    debug("NDEFPushResponse(" + JSON.stringify(message) + ")");
+    let requester = this._requestMap[message.requestId];
+    if ((typeof requester === 'undefined') ||
+        (message.sessionId != this._connectedSessionId)) {
+       debug('Returning: requester: ' + requester);
+       debug('Returning: sessionId matches?: ' + (message.sessionId == this._connectedSessionId));
+       return; // Nothing to do in this instance.
+    }
+    delete this._requestMap[message.requestId];
+    let result = message.content;
+    let requestId = atob(message.requestId);
+
+    if (result.status != "OK") {
+      this.fireRequestError(requestId, result.status);
+    } else  {
+      this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
+    }
+  },
+
   handleConnectResponse: function handleConnectResponse(message) {
     debug("ConnectResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
     if ((typeof requester === 'undefined') ||
         (message.sessionId != this._connectedSessionId)) {
+       debug('ConnectResponse return requester='+requester+" message.sessionId="+message.sessionId+" this._connectedSessionId="+this._connectedSessionId);
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];

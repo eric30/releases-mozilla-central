@@ -22,7 +22,7 @@ const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
-const DEBUG = false; // set to true to see debug messages
+const DEBUG = true; // set to true to see debug messages
 
 let debug;
 if (DEBUG) {
@@ -124,13 +124,17 @@ Nfc.prototype = {
     switch (message.type) {
       case "techDiscovered":
         this._connectedSessionId = message.sessionId;
+        /**
+         * TODO: Race Condition ? Notify Content process of 'TechDiscovered' first before
+         * notifying system app of 'nfc-manager-tech-discovered'.
+         */
         ppmm.broadcastAsyncMessage("NFC:TechDiscovered", message);
         gSystemMessenger.broadcastMessage("nfc-manager-tech-discovered", message);
         break;
       case "techLost":
         this._connectedSessionId = null;
-        gSystemMessenger.broadcastMessage("nfc-manager-tech-lost", message);
         ppmm.broadcastAsyncMessage("NFC:TechLost", message);
+        gSystemMessenger.broadcastMessage("nfc-manager-tech-lost", message);
         break;
       case "NDEFDetailsResponse":
         ppmm.broadcastAsyncMessage("NFC:NDEFDetailsResponse", message);
