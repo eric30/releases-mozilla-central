@@ -84,7 +84,9 @@ function Nfc() {
 
   let lock = gSettingsService.createLock();
   lock.get("nfc.powerlevel", this);
-  this.powerLevel = NFC_POWER_LEVEL_DISABLED; // default to off (FIXME: add get settings preference)
+  this.powerLevel = NFC_POWER_LEVEL_DISABLED;
+  lock.get("nfc.enabled", this);
+  this.enabled = false;
 
   gSystemWorkerManager.registerNfcWorker(this.worker);
 }
@@ -113,11 +115,10 @@ Nfc.prototype = {
   onmessage: function onmessage(event) {
     let message = event.data;
     debug("Received message: " + JSON.stringify(message));
-    if (this.powerLevel <= NFC_POWER_LEVEL_DISABLED) {
+    if (!this.enabled) {
       debug("NFC is not enabled.");
       return null;
     }
-
 
     // TODO: Private API to post to this object which user selected activity launched in response to NFC WebActivity launch.
     // SystemMessenger: function sendMessage(aType, aMessage, aPageURI, aManifestURI), to that specific app, not broadcast.
@@ -241,7 +242,7 @@ Nfc.prototype = {
   receiveMessage: function receiveMessage(message) {
     debug("Received '" + message.name + "' message from content process");
 
-    if (this.powerLevel < NFC_POWER_LEVEL_ENABLED) {
+    if (!this.enabled) {
       debug("NFC is not enabled.");
       return null;
     }
@@ -304,12 +305,23 @@ Nfc.prototype = {
           switch(setting.key) {
             case "nfc.powerlevel":
               debug("Setting NFC power level to: " + setting.value);
-              let powerLevel = ((setting.value >= NFC_POWER_LEVEL_DISABLED) &&
+              this.powerLevel = ((setting.value >= NFC_POWER_LEVEL_DISABLED) &&
                                 (setting.value <= NFC_POWER_LEVEL_ENABLED)) ?
                                     setting.value
                                   : NFC_POWER_LEVEL_DISABLED;
-              this.setNFCPowerConfig(powerLevel);
-            break;
+              this.setNFCPowerConfig(this.powerLevel);
+              break;
+            case "nfc.enabled":
+              // General power setting
+              debug("Updating NFC enabled: " + setting.value);
+              if (setting.value) {
+                this.setNFCPowerConfig(NFC_POWER_LEVEL_ENABLED);
+                this.enabled = true;
+              } else {
+                this.setNFCPowerConfig(NFC_POWER_LEVEL_DISABLED);
+                this.enabled = false;
+              }
+              break;
           }
         } else {
           debug("NFC Setting bad!!!");
