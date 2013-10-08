@@ -81,6 +81,7 @@ EXTRA_COMPONENTS += [
 
 EXTRA_JS_MODULES += [
     'net_worker.js',
+    'nfc_consts.js',
     'nfc_worker.js',
     'ril_consts.js',
     'ril_worker.js',

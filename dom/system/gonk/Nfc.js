@@ -125,13 +125,17 @@ Nfc.prototype = {
     switch (message.type) {
       case "techDiscovered":
         this._connectedSessionId = message.sessionId;
+        /**
+         * TODO: Race Condition ? Notify Content process of 'TechDiscovered' first before
+         * notifying system app of 'nfc-manager-tech-discovered'.
+         */
         ppmm.broadcastAsyncMessage("NFC:TechDiscovered", message);
         gSystemMessenger.broadcastMessage("nfc-manager-tech-discovered", message);
         break;
       case "techLost":
         this._connectedSessionId = null;
-        gSystemMessenger.broadcastMessage("nfc-manager-tech-lost", message);
         ppmm.broadcastAsyncMessage("NFC:TechLost", message);
+        gSystemMessenger.broadcastMessage("nfc-manager-tech-lost", message);
         break;
       case "NDEFDetailsResponse":
         ppmm.broadcastAsyncMessage("NFC:NDEFDetailsResponse", message);
