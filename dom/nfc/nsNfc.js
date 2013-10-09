@@ -6,7 +6,7 @@
 
 "use strict";
 
-const DEBUG = true;
+const DEBUG = false;
 function debug(s) {
   if (DEBUG) dump("-*- Nfc DOM: " + s + "\n");
 }
@@ -19,16 +19,10 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/ObjectWrapper.jsm");
 
-XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
-                                   "@mozilla.org/childprocessmessagemanager;1",
-                                   "nsIMessageSender");
-
-
-let myGlobal = this;
-
 function mozNfc() {
   debug("XXXX In mozNfc Constructor");
-  this._nfcContentHelper = Cc["@mozilla.org/nfc/content-helper;1"].getService(Ci.nsINfcContentHelper);
+  this._nfcContentHelper = Cc["@mozilla.org/nfc/content-helper;1"]
+                             .getService(Ci.nsINfcContentHelper);
 }
 
 mozNfc.prototype = {

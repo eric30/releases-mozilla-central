@@ -24,21 +24,23 @@ NS_INTERFACE_MAP_END
 /* static */
 already_AddRefed<MozNdefRecord>
 MozNdefRecord::Constructor(const GlobalObject& aGlobal,
-  uint8_t aTnf, const nsAString& aType, const nsAString& aId, const nsAString& aPayload,
-  ErrorResult& aRv)
+                           uint8_t aTnf, const nsAString& aType,
+                           const nsAString& aId, const nsAString& aPayload,
+                           ErrorResult& aRv)
 {
   nsCOMPtr<nsPIDOMWindow> win = do_QueryInterface(aGlobal.GetAsSupports());
-  nsIDocument* doc;
-  if (!win || !(doc = win->GetExtantDoc())) {
+  if (!win) {
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;
   }
-
-  nsRefPtr<MozNdefRecord> ndefrecord = new MozNdefRecord(win, aTnf, aType, aId, aPayload);
+  nsRefPtr<MozNdefRecord> ndefrecord =
+    new MozNdefRecord(win, aTnf, aType, aId, aPayload);
   return ndefrecord.forget();
 }
 
-MozNdefRecord::MozNdefRecord(nsPIDOMWindow* aWindow, uint8_t aTnf, const nsAString& aType, const nsAString& aId, const nsAString& aPayload)
+MozNdefRecord::MozNdefRecord(nsPIDOMWindow* aWindow,
+                             uint8_t aTnf, const nsAString& aType,
+                             const nsAString& aId, const nsAString& aPayload)
   : mTnf(aTnf)
   , mType(aType)
   , mId(aId)
