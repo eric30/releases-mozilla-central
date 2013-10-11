@@ -14,6 +14,8 @@ interface nsINfcContentHelper : nsISupports
   void registerNfcCallback(in nsINfcCallback callback);
   void unregisterNfcCallback(in nsINfcCallback callback);
 
+  boolean setSessionToken(in DOMString sessionToken);
+
   nsIDOMDOMRequest getDetailsNDEF(in nsIDOMWindow window);
   nsIDOMDOMRequest readNDEF(in nsIDOMWindow window);
   nsIDOMDOMRequest writeNDEF(in nsIDOMWindow window, in nsIVariant records);

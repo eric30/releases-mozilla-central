@@ -7,30 +7,24 @@
 [JSImplementation="@mozilla.org/navigatorNfc;1",
  NavigatorProperty="mozNfc"]
 interface MozNfc : EventTarget {
+   MozNFCTag getNFCTag(unsigned long sessionId);
+   /*DOMRequest getNFCPeer(unsigned long sessionId);*/
 
-   /**
-    * NDEF Functions
-    */
+   /*attribute EventHandler onpeerfound;
+   attribute EventHandler onpeerlost;
+   attribute EventHandler onforegrounddispatch;*/
+};
 
-   /* Get metadata details of the discovered and connected NDEF message */
-   DOMRequest getDetailsNDEF();
-
-   /* NDEF Read returns an array of NDEF Records consisting of 1 or more elements */
-   DOMRequest readNDEF();
-
-   /* NDEF Write records that is an array of 1 or more records */
-   [Throws]
-   DOMRequest writeNDEF(sequence<MozNdefRecord> records);
-
-   /* Permanently make a physical NFC tag read only */
-   DOMRequest makeReadOnlyNDEF();
-
-   /**
-    * Generic tag/tech functions
-    */
-   [Throws]
-   DOMRequest connect(unsigned long techType);
-
-   DOMRequest close();
-
+// Hack expected values
+enum NFCTechTypes {
+  "P2P",
+  "1",
+  "NDEF_FORMATTABLE",
+  "3",
+  "4",
+  "5",
+  "NDEF",
+  "7",
+  "8",
+  "MIFARE_ULTRALIGHT"
 };

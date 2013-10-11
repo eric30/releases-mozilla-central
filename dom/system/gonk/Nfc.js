@@ -22,7 +22,7 @@ const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
-const DEBUG = false; // set to true to see debug messages
+const DEBUG = true; // set to true to see debug messages
 
 let debug;
 if (DEBUG) {
@@ -38,6 +38,7 @@ const NFC_CID =
   Components.ID("{2ff24790-5e74-11e1-b86c-0800200c9a66}");
 
 const NFC_IPC_MSG_NAMES = [
+  "NFC:SetSessionToken",
   "NFC:GetDetailsNDEF",
   "NFC:ReadNDEF",
   "NFC:WriteNDEF",
@@ -68,7 +69,6 @@ XPCOMUtils.defineLazyServiceGetter(this, "gSettingsService",
                                    "@mozilla.org/settingsService;1",
                                    "nsISettingsService");
 
-
 function Nfc() {
   debug("Starting Worker");
   this.worker = new ChromeWorker("resource://gre/modules/nfc_worker.js");
@@ -86,7 +86,7 @@ function Nfc() {
   lock.get("nfc.powerlevel", this);
   this.powerLevel = NFC_POWER_LEVEL_DISABLED;
   lock.get("nfc.enabled", this);
-  this.enabled = false;
+  this.sessionMap = [];
 
   gSystemWorkerManager.registerNfcWorker(this.worker);
 }
@@ -164,6 +164,14 @@ Nfc.prototype = {
 
   worker: null,
   powerLevel: NFC_POWER_LEVEL_DISABLED,
+
+  sessionMap: null,
+
+  setSessionToken: function setSessionToken(message) {
+    debug("setSessionToken" + JSON.stringify(message));
+    // store session and event target
+    this.sessionMap[message.sessionId] = null; // Need AppID
+  },
 
   getDetailsNDEF: function getDetailsNDEF(message) {
     let outMessage = {
@@ -267,6 +275,9 @@ Nfc.prototype = {
     }
 
     switch (message.name) {
+      case "NFC:SetSessionToken":
+        this.setSessionToken(message.json);
+        break;
       case "NFC:GetDetailsNDEF":
         this.getDetailsNDEF(message.json);
         break;

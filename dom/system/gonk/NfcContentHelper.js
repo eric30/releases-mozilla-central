@@ -24,12 +24,12 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/ObjectWrapper.jsm");
 Cu.import("resource://gre/modules/DOMRequestHelper.jsm");
 
-const DEBUG = false; // set to true to see debug messages
+const DEBUG = true; // set to true to see debug messages
 
 let debug;
 if (DEBUG) {
   debug = function (s) {
-    dump("-*- RILContentHelper: " + s + "\n");
+    dump("-*- NfcContentHelper: " + s + "\n");
   };
 } else {
   debug = function (s) {};
@@ -91,6 +91,21 @@ NfcContentHelper.prototype = {
     return encodedRecords;
   },
 
+  // NFC interface:
+  setSessionToken: function setSession(sessionToken) {
+    if (sessionToken== null) {
+      throw Components.Exception("No session token!",
+                                  Cr.NS_ERROR_UNEXPECTED);
+      return false;
+    }
+    // Report session to Nfc.js only.
+    cpmm.sendAsyncMessage("NFC:SetSessionToken", {
+      sessionToken: sessionToken,
+    });
+    return true;
+  },
+
+  // NFCTag interface
   getDetailsNDEF: function getDetailsNDEF(window) {
     if (window == null) {
       throw Components.Exception("Can't get window object",
