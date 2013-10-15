@@ -24,7 +24,7 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/ObjectWrapper.jsm");
 Cu.import("resource://gre/modules/DOMRequestHelper.jsm");
 
-const DEBUG = true; // set to true to see debug messages
+const DEBUG = false; // set to true to see debug messages
 
 let debug;
 if (DEBUG) {
@@ -258,7 +258,6 @@ NfcContentHelper.prototype = {
   },
 
   // nsIMessageListener
-
 
   fireRequestSuccess: function fireRequestSuccess(requestId, result) {
     let request = this.takeRequest(requestId);

@@ -22,7 +22,7 @@ const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
-const DEBUG = true; // set to true to see debug messages
+const DEBUG = false; // set to true to see debug messages
 
 let debug;
 if (DEBUG) {
@@ -54,6 +54,7 @@ const NFC_POWER_LEVEL_ENABLED        = 2;
 
 const TOPIC_MOZSETTINGS_CHANGED      = "mozsettings-changed";
 const TOPIC_XPCOM_SHUTDOWN           = "xpcom-shutdown";
+const SETTING_NFC_ENABLED            = "nfc.enabled";
 
 
 XPCOMUtils.defineLazyServiceGetter(this, "ppmm",
@@ -88,8 +89,7 @@ function Nfc() {
   let lock = gSettingsService.createLock();
   lock.get("nfc.powerlevel", this);
   this.powerLevel = NFC_POWER_LEVEL_DISABLED;
-  lock.get("nfc.enabled", this);
-  // Maps sessionIds (that generate from nfcd) with a target in child process
+  lock.get(SETTING_NFC_ENABLED, this);
   this.sessionMap = [];
   // Maps sessionIds (that generate from nfcd) with a unique guid
   this.tokenSessionMap = {};
@@ -107,9 +107,11 @@ Nfc.prototype = {
 
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIWorkerHolder,
                                          Ci.nsINfc,
-                                         Ci.nsIObserver]),
+                                         Ci.nsIObserver,
+                                         Ci.nsISettingsServiceCallback]),
 
   _connectedSessionId: null,
+  _enabled: false,
   onerror: function onerror(event) {
     debug("Got an error: " + event.filename + ":" +
           event.lineno + ": " + event.message + "\n");
@@ -122,7 +124,7 @@ Nfc.prototype = {
   onmessage: function onmessage(event) {
     let message = event.data;
     debug("Received message: " + JSON.stringify(message));
-    if (!this.enabled) {
+    if (!this._enabled) {
       debug("NFC is not enabled.");
       return null;
     }
@@ -314,7 +316,7 @@ Nfc.prototype = {
   receiveMessage: function receiveMessage(message) {
     debug("Received '" + message.name + "' message from content process");
 
-    if (!this.enabled) {
+    if (!this._enabled) {
       debug("NFC is not enabled.");
       return null;
     }
@@ -395,7 +397,30 @@ Nfc.prototype = {
     }
   },
 
-  // nsIObserver
+  /**
+   * nsISettingsServiceCallback
+   */
+
+  handle: function handle(aName, aResult) {
+    switch(aName) {
+      case SETTING_NFC_ENABLED:
+        debug("'nfc.enabled' is now " + aResult);
+        this._enabled = aResult;
+        // General power setting
+        if (this._enabled) {
+          this.setNFCPowerConfig(NFC_POWER_LEVEL_ENABLED);
+          this._enabled = true;
+        } else {
+          this.setNFCPowerConfig(NFC_POWER_LEVEL_DISABLED);
+          this._enabled = false;
+        }
+      break;
+    }
+  },
+
+  /**
+   * nsIObserver
+   */
 
   observe: function observe(subject, topic, data) {
     switch (topic) {
@@ -409,29 +434,8 @@ Nfc.prototype = {
       case TOPIC_MOZSETTINGS_CHANGED:
         let setting = JSON.parse(data);
         if (setting) {
-          switch(setting.key) {
-            case "nfc.powerlevel":
-              debug("Setting NFC power level to: " + setting.value);
-              this.powerLevel = ((setting.value >= NFC_POWER_LEVEL_DISABLED) &&
-                                (setting.value <= NFC_POWER_LEVEL_ENABLED)) ?
-                                    setting.value
-                                  : NFC_POWER_LEVEL_DISABLED;
-              this.setNFCPowerConfig(this.powerLevel);
-              break;
-            case "nfc.enabled":
-              // General power setting
-              debug("Updating NFC enabled: " + setting.value);
-              if (setting.value) {
-                this.setNFCPowerConfig(NFC_POWER_LEVEL_ENABLED);
-                this.enabled = true;
-              } else {
-                this.setNFCPowerConfig(NFC_POWER_LEVEL_DISABLED);
-                this.enabled = false;
-              }
-              break;
-          }
-        } else {
-          debug("NFC Setting bad!!!");
+          let setting = JSON.parse(data);
+          this.handle(setting.key, setting.value);
         }
         break;
     }

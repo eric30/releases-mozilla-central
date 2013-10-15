@@ -14,17 +14,3 @@ interface MozNfc : EventTarget {
    attribute EventHandler onpeerlost;
    attribute EventHandler onforegrounddispatch;*/
 };
-
-// Hack expected values
-enum NFCTechTypes {
-  "P2P",
-  "1",
-  "NDEF_FORMATTABLE",
-  "3",
-  "4",
-  "5",
-  "NDEF",
-  "7",
-  "8",
-  "MIFARE_ULTRALIGHT"
-};

@@ -4,6 +4,13 @@
 
  /* Copyright © 2013 Deutsche Telekom, Inc. */
 
+enum NFCTechType {
+  "P2P",
+  "NDEF_FORMATTABLE",
+  "NDEF",
+  "MIFARE_ULTRALIGHT"
+};
+
 [Constructor(DOMString sessionId),
  JSImplementation="@mozilla.org/nfc/NFCTag;1"]
 interface MozNFCTag : EventTarget {
@@ -14,9 +21,9 @@ interface MozNFCTag : EventTarget {
 
   DOMRequest getDetailsNDEF();
   DOMRequest readNDEF();
-  DOMRequest writeNDEF();
+  DOMRequest writeNDEF(sequence<MozNdefRecord> records);
   DOMRequest makeReadOnlyNDEF();
 
-  DOMRequest connect(unsigned long techType);
+  DOMRequest connect(NFCTechType techType);
   DOMRequest close();
 };
