@@ -346,6 +346,7 @@ NfcContentHelper.prototype = {
     let requester = this._requestMap[message.requestId];
     if ((typeof requester === 'undefined') ||
         (message.sessionId != this._connectedSessionId)) {
+       debug("Missing sessionId or requester");
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
@@ -427,6 +428,7 @@ NfcContentHelper.prototype = {
     let requester = this._requestMap[message.requestId];
     if ((typeof requester === 'undefined') ||
         (message.sessionId != this._connectedSessionId)) {
+       debug('Returning: requester: ' + requester);
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];

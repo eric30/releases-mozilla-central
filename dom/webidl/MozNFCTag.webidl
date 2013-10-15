@@ -21,7 +21,7 @@ interface MozNFCTag : EventTarget {
 
   DOMRequest getDetailsNDEF();
   DOMRequest readNDEF();
-  DOMRequest writeNDEF();
+  DOMRequest writeNDEF(sequence<MozNdefRecord> records);
   DOMRequest makeReadOnlyNDEF();
 
   DOMRequest connect(NFCTechType techType);
