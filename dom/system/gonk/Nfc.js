@@ -68,6 +68,9 @@ XPCOMUtils.defineLazyServiceGetter(this, "gSystemWorkerManager",
 XPCOMUtils.defineLazyServiceGetter(this, "gSettingsService",
                                    "@mozilla.org/settingsService;1",
                                    "nsISettingsService");
+XPCOMUtils.defineLazyServiceGetter(this, "UUIDGenerator",
+                                    "@mozilla.org/uuid-generator;1",
+                                    "nsIUUIDGenerator");
 
 function Nfc() {
   debug("Starting Worker");
@@ -86,10 +89,14 @@ function Nfc() {
   lock.get("nfc.powerlevel", this);
   this.powerLevel = NFC_POWER_LEVEL_DISABLED;
   lock.get("nfc.enabled", this);
+  // Maps sessionIds (that generate from nfcd) with a target in child process
   this.sessionMap = [];
+  // Maps sessionIds (that generate from nfcd) with a unique guid
+  this.tokenSessionMap = {};
 
   gSystemWorkerManager.registerNfcWorker(this.worker);
 }
+
 Nfc.prototype = {
 
   classID:   NFC_CID,
@@ -125,35 +132,33 @@ Nfc.prototype = {
     switch (message.type) {
       case "techDiscovered":
         this._connectedSessionId = message.sessionId;
-        /**
-         * TODO: Race Condition ? Notify Content process of 'TechDiscovered' first before
-         * notifying system app of 'nfc-manager-tech-discovered'.
-         */
-        ppmm.broadcastAsyncMessage("NFC:TechDiscovered", message);
+        this.tokenSessionMap[this._connectedSessionId] = UUIDGenerator.generateUUID().toString();
+        // Update the upper layers with a session token (alias)
+        message.sessionId = this.tokenSessionMap[this._connectedSessionId];
         gSystemMessenger.broadcastMessage("nfc-manager-tech-discovered", message);
         break;
       case "techLost":
         this._connectedSessionId = null;
-        ppmm.broadcastAsyncMessage("NFC:TechLost", message);
+        delete this.tokenSessionMap[this._connectedSessionId];
         gSystemMessenger.broadcastMessage("nfc-manager-tech-lost", message);
         break;
       case "NDEFDetailsResponse":
-        ppmm.broadcastAsyncMessage("NFC:NDEFDetailsResponse", message);
+        this.handleNDEFDetailsResponse(message);
         break;
       case "NDEFReadResponse":
-        ppmm.broadcastAsyncMessage("NFC:NDEFReadResponse", message);
+        this.handleNDEFReadResponse(message);
         break;
       case "NDEFWriteResponse":
-        ppmm.broadcastAsyncMessage("NFC:NDEFWriteResponse", message);
+        this.handleNDEFWriteResponse(message);
         break;
       case "NDEFMakeReadOnlyResponse":
-        ppmm.broadcastAsyncMessage("NFC:NDEFMakeReadOnlyResponse", message);
+        this.handleNDEFReadOnlyResponse(message);
         break;
       case "ConnectResponse":
-        ppmm.broadcastAsyncMessage("NFC:ConnectResponse", message);
+        this.handleConnectResponse(message);
         break;
       case "CloseResponse":
-        ppmm.broadcastAsyncMessage("NFC:CloseResponse", message);
+        this.handleCloseResponse(message);
         break;
       case "ConfigResponse":
         gSystemMessenger.broadcastMessage("nfc-powerlevel-change", message);
@@ -170,12 +175,65 @@ Nfc.prototype = {
   powerLevel: NFC_POWER_LEVEL_DISABLED,
 
   sessionMap: null,
+  tokenSessionMap: null,
 
   setSessionToken: function setSessionToken(message) {
     debug("setSessionToken" + JSON.stringify(message));
     // store session and event target
     this.sessionMap[message.sessionId] = null; // Need AppID
   },
+
+  // Response Handlers from 'nfcd'
+
+  handleNDEFDetailsResponse: function handleNDEFDetailsResponse(message) {
+    debug("handleNDEFDetailsResponse : message.sessionId   " + message.sessionId + "this._connectedSessionId   " + this._connectedSessionId );
+
+    message.sessionId = this.tokenSessionMap[this._connectedSessionId];
+    ppmm.broadcastAsyncMessage("NFC:NDEFDetailsResponse", message);
+  },
+
+  handleNDEFReadResponse: function handleNDEFReadResponse(message) {
+    debug("handleNDEFReadResponse : message.sessionId   " + message.sessionId + "this._connectedSessionId   " + this._connectedSessionId);
+
+    message.sessionId = this.tokenSessionMap[this._connectedSessionId];
+    ppmm.broadcastAsyncMessage("NFC:NDEFReadResponse", message)
+  },
+
+  handleNDEFWriteResponse: function handleNDEFWriteResponse(message) {
+    debug("handleNDEFWriteResponse : message.sessionId   " + message.sessionId + "this._connectedSessionId   " + this._connectedSessionId);
+
+    message.sessionId = this.tokenSessionMap[this._connectedSessionId];
+    ppmm.broadcastAsyncMessage("NFC:NDEFWriteResponse", message);
+  },
+
+  handleNDEFReadOnlyResponse: function handleNDEFReadOnlyResponse(message) {
+    debug("handleNDEFReadOnlyResponse : message.sessionId   " + message.sessionId + "this._connectedSessionId   " + this._connectedSessionId);
+
+    message.sessionId = this.tokenSessionMap[this._connectedSessionId];
+    ppmm.broadcastAsyncMessage("NFC:NDEFMakeReadOnlyResponse", message);
+  },
+
+  handleNDEFPushResponse: function handleNDEFPushResponse(message) {
+    // TBD:
+  },
+
+  handleConnectResponse: function handleConnectResponse(message) {
+    debug("handleConnectResponse : message.sessionId   " + message.sessionId + "this._connectedSessionId   " + this._connectedSessionId);
+
+    message.sessionId = this.tokenSessionMap[this._connectedSessionId];
+    ppmm.broadcastAsyncMessage("NFC:ConnectResponse", message);
+  },
+
+  handleCloseResponse: function handleCloseResponse(message) {
+    debug("handleCloseResponse : message.sessionId   " + message.sessionId + "this._connectedSessionId   " + this._connectedSessionId);
+
+    message.sessionId = this.tokenSessionMap[this._connectedSessionId];
+    ppmm.broadcastAsyncMessage("NFC:CloseResponse", message);
+  },
+
+  // End of Response Handlers
+
+  // Request Handlers to 'nfcd'
 
   getDetailsNDEF: function getDetailsNDEF(message) {
     let outMessage = {
@@ -248,6 +306,8 @@ Nfc.prototype = {
     this.worker.postMessage({type: "close", content: outMessage});
   },
 
+  // End of Request Handlers
+
   /**
    * Process the incoming message from a content process (NfcContentHelper.js)
    */
@@ -277,6 +337,38 @@ Nfc.prototype = {
         }
         break;
     }
+
+    // Check the sessionId except for message(s) : "NFC:SetSessionToken"
+    if ((message.sessionId !== this._connectedSessionId) &&
+        ((message.sessionId !== 'undefined') || (message.sessionId !== undefined)) ) {
+      debug("Invalid Session : " + message.sessionId + " Expected Session: " +
+        this._connectedSessionId);
+      //return;
+    }
+    if (message.sessionId === this._connectedSessionId) {
+       debug("Valid Session 1:");
+    }
+    if (message.sessionId === 'undefined') {
+       debug("Valid Session 2:");
+    }
+
+    if (message.sessionId === undefined) {
+       debug("Valid Session 3:");
+    }
+
+    if (message.sessionId !== undefined) {
+       debug("Valid Session 4:");
+    }
+
+    if (message.sessionId !== 'undefined') {
+       debug("Valid Session 5:");
+    }
+
+    if (this.tokenSessionMap[message.sessionId] === this.tokenSessionMap[this._connectedSessionId]) {
+       debug("Valid Session 6:");
+    }
+
+    debug("token: " + this.tokenSessionMap[this._connectedSessionId]);
 
     switch (message.name) {
       case "NFC:SetSessionToken":

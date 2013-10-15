@@ -38,12 +38,13 @@ MozNFCTag.prototype = {
   },
 
   __init: function(aSessionToken) {
+    debug("Init : " + aSessionToken);
     this.setSessionToken(aSessionToken);
   },
 
   // ChromeOnly interface
   setSessionToken: function setSessionToken(aSessionToken) {
-    debug("Setting session token");
+    debug("Setting session token : " + aSessionToken);
     this.session = aSessionToken;
     // report to NFC worker:
     return this._nfcContentHelper.setSessionToken(aSessionToken);
@@ -51,22 +52,22 @@ MozNFCTag.prototype = {
 
   // NFCTag interface:
   getDetailsNDEF: function getDetailsNDEF() {
-    return this._nfcContentHelper.getDetailsNDEF(this._window);
+    return this._nfcContentHelper.getDetailsNDEF(this._window, this.session);
   },
   readNDEF: function readNDEF() {
-    return this._nfcContentHelper.readNDEF(this._window);
+    return this._nfcContentHelper.readNDEF(this._window, this.session);
   },
   writeNDEF: function writeNDEF(records) {
-    return this._nfcContentHelper.writeNDEF(this._window, records);
+    return this._nfcContentHelper.writeNDEF(this._window, records, this.session);
   },
   makeReadOnlyNDEF: function makeReadOnlyNDEF() {
-    return this._nfcContentHelper.makeReadOnlyNDEF(this._window);
+    return this._nfcContentHelper.makeReadOnlyNDEF(this._window, this.session);
   },
   connect: function connect(int_tech_type) {
-    return this._nfcContentHelper.connect(this._window, int_tech_type);
+    return this._nfcContentHelper.connect(this._window, int_tech_type, this.session);
   },
   close: function close() {
-    return this._nfcContentHelper.close(this._window);
+    return this._nfcContentHelper.close(this._window, this.session);
   },
 
   classID: Components.ID("{4e1e2e90-3137-11e3-aa6e-0800200c9a66}"),

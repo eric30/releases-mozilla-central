@@ -74,7 +74,6 @@ NfcContentHelper.prototype = {
   }),
 
   _requestMap: null,
-  _connectedSessionId: null,
 
   // FIXME: btoa's will be unneeded when binary nfcd/gonk protocol is merged.
   encodeNdefRecords: function encodeNdefRecords(records) {
@@ -106,7 +105,7 @@ NfcContentHelper.prototype = {
   },
 
   // NFCTag interface
-  getDetailsNDEF: function getDetailsNDEF(window) {
+  getDetailsNDEF: function getDetailsNDEF(window, sessionToken) {
     if (window == null) {
       throw Components.Exception("Can't get window object",
                                   Cr.NS_ERROR_UNEXPECTED);
@@ -118,12 +117,12 @@ NfcContentHelper.prototype = {
 
     cpmm.sendAsyncMessage("NFC:GetDetailsNDEF", {
       requestId: requestId,
-      sessionId: this._connectedSessionId
+      sessionId: sessionToken
     });
     return request;
   },
 
-  readNDEF: function readNDEF(window) {
+  readNDEF: function readNDEF(window, sessionToken) {
     if (window == null) {
       throw Components.Exception("Can't get window object",
                                   Cr.NS_ERROR_UNEXPECTED);
@@ -135,12 +134,12 @@ NfcContentHelper.prototype = {
 
     cpmm.sendAsyncMessage("NFC:ReadNDEF", {
       requestId: requestId,
-      sessionId: this._connectedSessionId
+      sessionId: sessionToken
     });
     return request;
   },
 
-  writeNDEF: function writeNDEF(window, records) {
+  writeNDEF: function writeNDEF(window, records, sessionToken) {
     if (window == null) {
       throw Components.Exception("Can't get window object",
                                   Cr.NS_ERROR_UNEXPECTED);
@@ -154,13 +153,13 @@ NfcContentHelper.prototype = {
 
     cpmm.sendAsyncMessage("NFC:WriteNDEF", {
       requestId: requestId,
-      sessionId: this._connectedSessionId,
+      sessionId: sessionToken,
       records: encodedRecords
     });
     return request;
   },
 
-  makeReadOnlyNDEF: function makeReadOnlyNDEF(window) {
+  makeReadOnlyNDEF: function makeReadOnlyNDEF(window, sessionToken) {
     if (window == null) {
       throw Components.Exception("Can't get window object",
                                   Cr.NS_ERROR_UNEXPECTED);
@@ -172,12 +171,12 @@ NfcContentHelper.prototype = {
 
     cpmm.sendAsyncMessage("NFC:MakeReadOnlyNDEF", {
       requestId: requestId,
-      sessionId: this._connectedSessionId
+      sessionId: sessionToken
     });
     return request;
   },
 
-  connect: function connect(window, techType) {
+  connect: function connect(window, techType, sessionToken) {
     if (window == null) {
       throw Components.Exception("Can't get window object",
                                   Cr.NS_ERROR_UNEXPECTED);
@@ -189,13 +188,13 @@ NfcContentHelper.prototype = {
 
     cpmm.sendAsyncMessage("NFC:Connect", {
       requestId: requestId,
-      sessionId: this._connectedSessionId,
+      sessionId: sessionToken,
       techType: techType
     });
     return request;
   },
 
-  close: function close(window) {
+  close: function close(window, sessionToken) {
     if (window == null) {
       throw Components.Exception("Can't get window object",
                                   Cr.NS_ERROR_UNEXPECTED);
@@ -207,7 +206,7 @@ NfcContentHelper.prototype = {
 
     cpmm.sendAsyncMessage("NFC:Close", {
       requestId: requestId,
-      sessionId: this._connectedSessionId
+      sessionId: sessionToken
     });
     return request;
   },
@@ -304,12 +303,6 @@ NfcContentHelper.prototype = {
   receiveMessage: function receiveMessage(message) {
     debug("Message received: " + JSON.stringify(message));
     switch (message.name) {
-      case "NFC:TechDiscovered":
-        this.handleTechDiscovered(message.json);
-        break;
-      case "NFC:TechLost":
-        this.handleTechLost(message.json);
-        break;
       case "NFC:NDEFDetailsResponse":
         this.handleNDEFDetailsResponse(message.json);
         break;
@@ -331,29 +324,17 @@ NfcContentHelper.prototype = {
     }
   },
 
-  // NFC Notifications
-  handleTechDiscovered: function handleTechDiscovered(message) {
-    this._connectedSessionId = message.sessionId;
-    debug('TechDiscovered. Updated SessionId:' + this._connectedSessionId);
-  },
-
-  handleTechLost: function handleTechLost(message) {
-    debug('TechLost. Clear session:');
-    this._connectedSessionId = null;
-  },
-
   handleNDEFDetailsResponse: function handleNDEFDetailsResponse(message) {
     debug("NDEFDetailsResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
-    if ((typeof requester === 'undefined') ||
-        (message.sessionId != this._connectedSessionId)) {
+    if (typeof requester === 'undefined') {
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
     let result = message.content;
     let requestId = atob(message.requestId);
 
-    if (message.sessionId != this._connectedSessionId) {
+    if (message.content.status != "OK") {
       this.fireRequestError(requestId, result.status);
     } else  {
       this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
@@ -363,8 +344,7 @@ NfcContentHelper.prototype = {
   handleNDEFReadResponse: function handleNDEFReadResponse(message) {
     debug("NDEFReadResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
-    if ((typeof requester === 'undefined') ||
-        (message.sessionId != this._connectedSessionId)) {
+    if (typeof requester === 'undefined') {
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
@@ -400,8 +380,7 @@ NfcContentHelper.prototype = {
   handleNDEFWriteResponse: function handleNDEFWriteResponse(message) {
     debug("NDEFWriteResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
-    if ((typeof requester === 'undefined') ||
-        (message.sessionId != this._connectedSessionId)) {
+    if (typeof requester === 'undefined') {
        debug('Returning: requester: ' + requester);
        return; // Nothing to do in this instance.
     }
@@ -419,8 +398,7 @@ NfcContentHelper.prototype = {
   handleNDEFReadOnlyResponse: function handleNDEFReadOnlyResponse(message) {
     debug("NDEFReadOnlyResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
-    if ((typeof requester === 'undefined') ||
-        (message.sessionId != this._connectedSessionId)) {
+    if (typeof requester === 'undefined') {
        debug('Returning: requester: ' + requester);
        return; // Nothing to do in this instance.
     }
@@ -438,10 +416,8 @@ NfcContentHelper.prototype = {
   handleNDEFPushResponse: function handleNDEFPushResponse(message) {
     debug("NDEFPushResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
-    if ((typeof requester === 'undefined') ||
-        (message.sessionId != this._connectedSessionId)) {
-       debug('Returning: requester: ' + requester);
-       debug('Returning: sessionId matches?: ' + (message.sessionId == this._connectedSessionId));
+    if (typeof requester === 'undefined') {
+       debug('ConnectResponse return requester='+requester+" message.sessionId="+message.sessionId);
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
@@ -458,9 +434,8 @@ NfcContentHelper.prototype = {
   handleConnectResponse: function handleConnectResponse(message) {
     debug("ConnectResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
-    if ((typeof requester === 'undefined') ||
-        (message.sessionId != this._connectedSessionId)) {
-       debug('ConnectResponse return requester='+requester+" message.sessionId="+message.sessionId+" this._connectedSessionId="+this._connectedSessionId);
+    if (typeof requester === 'undefined') {
+       debug('ConnectResponse return requester='+requester+" message.sessionId="+message.sessionId);
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
@@ -477,8 +452,7 @@ NfcContentHelper.prototype = {
   handleCloseResponse: function handleCloseResponse(message) {
     debug("CloseResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
-    if ((typeof requester === 'undefined') ||
-        (message.sessionId != this._connectedSessionId)) {
+    if (typeof requester === 'undefined') {
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
@@ -491,9 +465,6 @@ NfcContentHelper.prototype = {
     } else  {
       this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
     }
-
-    // Cleanup lost session.
-    this._connectedSessionId = null;
   },
 
   _deliverCallback: function _deliverCallback(callbackType, name, args) {
