@@ -24,6 +24,12 @@ function MozNFCTag() {
   this._nfcContentHelper = Cc["@mozilla.org/nfc/content-helper;1"]
                              .getService(Ci.nsINfcContentHelper);
   this.session = null;
+  // Map WebIDL declared enum map names to integer (FIXME: Get full list of NFCD tech types!)
+  this._techTypesMap = [];
+  this._techTypesMap['P2P'] = 0;
+  this._techTypesMap['NDEF_FORMATTABLE'] = 2;
+  this._techTypesMap['NDEF'] = 6;
+  this._techTypesMap['MIFARE_ULTRALIGHT'] = 9;
 }
 MozNFCTag.prototype = {
   _nfcContentHelper: null,
@@ -49,6 +55,8 @@ MozNFCTag.prototype = {
     return this._nfcContentHelper.setSessionToken(aSessionToken);
   },
 
+  _techTypesMap: null,
+
   // NFCTag interface:
   getDetailsNDEF: function getDetailsNDEF() {
     return this._nfcContentHelper.getDetailsNDEF(this._window);
@@ -62,7 +70,8 @@ MozNFCTag.prototype = {
   makeReadOnlyNDEF: function makeReadOnlyNDEF() {
     return this._nfcContentHelper.makeReadOnlyNDEF(this._window);
   },
-  connect: function connect(int_tech_type) {
+  connect: function connect(enum_tech_type) {
+    let int_tech_type = this._techTypesMap[enum_tech_type];
     return this._nfcContentHelper.connect(this._window, int_tech_type);
   },
   close: function close() {
