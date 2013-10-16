@@ -48,6 +48,16 @@ mozNfc.prototype = {
     }
   },
 
+  getNFCPeer: function getNFCPeer(sessionToken) {
+    let nfcPeer = new this._window.MozNFCPeer(sessionToken);
+    if (nfcPeer) {
+      return nfcPeer;
+    } else {
+      debug("Error: Unable to create NFCPeer");
+      return null;
+    }
+  },
+
   // get/set onpeerfound/lost onforegrounddispatch
 
   classID: Components.ID("{6ff2b290-2573-11e3-8224-0800200c9a66}"),

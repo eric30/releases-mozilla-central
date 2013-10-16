@@ -459,9 +459,6 @@ NfcContentHelper.prototype = {
     } else  {
       this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
     }
-
-    // Cleanup lost session.
-    this._connectedSessionId = null;
   },
 
   _deliverCallback: function _deliverCallback(callbackType, name, args) {

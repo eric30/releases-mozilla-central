@@ -7,8 +7,8 @@
 [JSImplementation="@mozilla.org/navigatorNfc;1",
  NavigatorProperty="mozNfc"]
 interface MozNfc : EventTarget {
-   MozNFCTag getNFCTag(unsigned long sessionId);
-   /*DOMRequest getNFCPeer(unsigned long sessionId);*/
+   MozNFCTag getNFCTag(DOMString sessionId);
+   MozNFCPeer getNFCPeer(DOMString sessionId);
 
    /*attribute EventHandler onpeerfound;
    attribute EventHandler onpeerlost;
