@@ -24,7 +24,11 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/ObjectWrapper.jsm");
 Cu.import("resource://gre/modules/DOMRequestHelper.jsm");
 
-const DEBUG = false; // set to true to see debug messages
+var NFC = {};
+Cu.import("resource://gre/modules/nfc_consts.js", NFC);
+
+// set to true to in nfc_consts.js to see debug messages
+var DEBUG = NFC.DEBUG_CONTENT_HELPER;
 
 let debug;
 if (DEBUG) {
@@ -97,6 +101,7 @@ NfcContentHelper.prototype = {
                                   Cr.NS_ERROR_UNEXPECTED);
       return false;
     }
+    debug("setSessionToken: SessionToken " + sessionToken);
     // Report session to Nfc.js only.
     cpmm.sendAsyncMessage("NFC:SetSessionToken", {
       sessionToken: sessionToken,
@@ -110,7 +115,7 @@ NfcContentHelper.prototype = {
       throw Components.Exception("Can't get window object",
                                   Cr.NS_ERROR_UNEXPECTED);
     }
-
+    debug("getDetailsNDEF: SessionToken " + sessionToken);
     let request = Services.DOMRequest.createRequest(window);
     let requestId = btoa(this.getRequestId(request));
     this._requestMap[requestId] = {win: window};
@@ -127,7 +132,7 @@ NfcContentHelper.prototype = {
       throw Components.Exception("Can't get window object",
                                   Cr.NS_ERROR_UNEXPECTED);
     }
-
+    debug("readNDEF: SessionToken " + sessionToken);
     let request = Services.DOMRequest.createRequest(window);
     let requestId = btoa(this.getRequestId(request));
     this._requestMap[requestId] = {win: window};
@@ -181,7 +186,7 @@ NfcContentHelper.prototype = {
       throw Components.Exception("Can't get window object",
                                   Cr.NS_ERROR_UNEXPECTED);
     }
-
+    debug("connect: SessionToken " + sessionToken);
     let request = Services.DOMRequest.createRequest(window);
     let requestId = btoa(this.getRequestId(request));
     this._requestMap[requestId] = {win: window};
@@ -199,7 +204,7 @@ NfcContentHelper.prototype = {
       throw Components.Exception("Can't get window object",
                                   Cr.NS_ERROR_UNEXPECTED);
     }
-
+    debug("close: SessionToken " + sessionToken);
     let request = Services.DOMRequest.createRequest(window);
     let requestId = btoa(this.getRequestId(request));
     this._requestMap[requestId] = {win: window};

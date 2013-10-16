@@ -6,7 +6,7 @@
 
 "use strict";
 
-const DEBUG = false;
+const DEBUG = true;
 function debug(s) {
   if (DEBUG) dump("-*- Nfc MozNFCTag: " + s + "\n");
 }
@@ -73,7 +73,7 @@ MozNFCTag.prototype = {
   },
   connect: function connect(enum_tech_type) {
     let int_tech_type = this._techTypesMap[enum_tech_type];
-    return this._nfcContentHelper.connect(this._window, int_tech_type);
+    return this._nfcContentHelper.connect(this._window, int_tech_type, this.session);
   },
   close: function close() {
     return this._nfcContentHelper.close(this._window, this.session);

@@ -20,7 +20,8 @@
 importScripts("systemlibs.js", "nfc_consts.js");
 importScripts("resource://gre/modules/workers/require.js");
 
-let DEBUG = true;
+// set to true in nfc_consts.js to see debug messages
+let DEBUG = DEBUG_WORKER;
 
 function getPaddingLen(len) {
   return (len % 4) ? (4 - len % 4) : 0;
@@ -53,7 +54,7 @@ let Buf = {
   newParcel: function newParcel(type, callback) {
     if (DEBUG) debug("New outgoing parcel of type " + type);
 
-    if(this.mCallback) debug("Warning! Callback override :"+ type + this.mCallback);
+    if(this.mCallback) debug("Warning! Callback override :"+ type );
     /**
      * TODO: This needs to be fixed. A map of NFC_RESPONSE_XXX and RequestID
      *       needs to be maintained ?? For Generic Responses (1000) ,

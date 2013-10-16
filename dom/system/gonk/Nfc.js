@@ -22,7 +22,11 @@ const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
-const DEBUG = false; // set to true to see debug messages
+var NFC = {};
+Cu.import("resource://gre/modules/nfc_consts.js", NFC);
+
+// set to true in nfc_consts.js to see debug messages
+var DEBUG = NFC.DEBUG_NFC;
 
 let debug;
 if (DEBUG) {
@@ -191,6 +195,7 @@ Nfc.prototype = {
     debug("handleNDEFDetailsResponse : message.sessionId   " + message.sessionId + "this._connectedSessionId   " + this._connectedSessionId );
 
     message.sessionId = this.tokenSessionMap[this._connectedSessionId];
+    debug("Received message: " + JSON.stringify(message));
     ppmm.broadcastAsyncMessage("NFC:NDEFDetailsResponse", message);
   },
 
@@ -198,6 +203,7 @@ Nfc.prototype = {
     debug("handleNDEFReadResponse : message.sessionId   " + message.sessionId + "this._connectedSessionId   " + this._connectedSessionId);
 
     message.sessionId = this.tokenSessionMap[this._connectedSessionId];
+    debug("Received message: " + JSON.stringify(message));
     ppmm.broadcastAsyncMessage("NFC:NDEFReadResponse", message)
   },
 
@@ -205,6 +211,7 @@ Nfc.prototype = {
     debug("handleNDEFWriteResponse : message.sessionId   " + message.sessionId + "this._connectedSessionId   " + this._connectedSessionId);
 
     message.sessionId = this.tokenSessionMap[this._connectedSessionId];
+    debug("Received message: " + JSON.stringify(message));
     ppmm.broadcastAsyncMessage("NFC:NDEFWriteResponse", message);
   },
 
@@ -212,17 +219,15 @@ Nfc.prototype = {
     debug("handleNDEFReadOnlyResponse : message.sessionId   " + message.sessionId + "this._connectedSessionId   " + this._connectedSessionId);
 
     message.sessionId = this.tokenSessionMap[this._connectedSessionId];
+    debug("Received message: " + JSON.stringify(message));
     ppmm.broadcastAsyncMessage("NFC:NDEFMakeReadOnlyResponse", message);
-  },
-
-  handleNDEFPushResponse: function handleNDEFPushResponse(message) {
-    // TBD:
   },
 
   handleConnectResponse: function handleConnectResponse(message) {
     debug("handleConnectResponse : message.sessionId   " + message.sessionId + "this._connectedSessionId   " + this._connectedSessionId);
 
     message.sessionId = this.tokenSessionMap[this._connectedSessionId];
+    debug("Received message: " + JSON.stringify(message));
     ppmm.broadcastAsyncMessage("NFC:ConnectResponse", message);
   },
 
@@ -230,6 +235,7 @@ Nfc.prototype = {
     debug("handleCloseResponse : message.sessionId   " + message.sessionId + "this._connectedSessionId   " + this._connectedSessionId);
 
     message.sessionId = this.tokenSessionMap[this._connectedSessionId];
+    debug("Received message: " + JSON.stringify(message));
     ppmm.broadcastAsyncMessage("NFC:CloseResponse", message);
   },
 
@@ -314,7 +320,7 @@ Nfc.prototype = {
    * Process the incoming message from a content process (NfcContentHelper.js)
    */
   receiveMessage: function receiveMessage(message) {
-    debug("Received '" + message.name + "' message from content process");
+    debug("Received '" + JSON.stringify(message) + "' message from content process");
 
     if (!this._enabled) {
       debug("NFC is not enabled.");
@@ -341,36 +347,19 @@ Nfc.prototype = {
     }
 
     // Check the sessionId except for message(s) : "NFC:SetSessionToken"
-    if ((message.sessionId !== this._connectedSessionId) &&
-        ((message.sessionId !== 'undefined') || (message.sessionId !== undefined)) ) {
-      debug("Invalid Session : " + message.sessionId + " Expected Session: " +
-        this._connectedSessionId);
-      //return;
-    }
-    if (message.sessionId === this._connectedSessionId) {
-       debug("Valid Session 1:");
-    }
-    if (message.sessionId === 'undefined') {
-       debug("Valid Session 2:");
-    }
+    switch (message.name) {
+       case "NFC:SetSessionToken":
+         break;
+       default:
+         if (message.json.sessionId !== this.tokenSessionMap[this._connectedSessionId]) {
+           debug("Invalid Session : " + message.sessionId + " Expected Session: " +
+                 this._connectedSessionId);
+           return;
+         }
 
-    if (message.sessionId === undefined) {
-       debug("Valid Session 3:");
+         debug("Received Message: " + message.name + "Session Token: " +
+               this.tokenSessionMap[this._connectedSessionId]);
     }
-
-    if (message.sessionId !== undefined) {
-       debug("Valid Session 4:");
-    }
-
-    if (message.sessionId !== 'undefined') {
-       debug("Valid Session 5:");
-    }
-
-    if (this.tokenSessionMap[message.sessionId] === this.tokenSessionMap[this._connectedSessionId]) {
-       debug("Valid Session 6:");
-    }
-
-    debug("token: " + this.tokenSessionMap[this._connectedSessionId]);
 
     switch (message.name) {
       case "NFC:SetSessionToken":
@@ -393,6 +382,9 @@ Nfc.prototype = {
         break;
       case "NFC:Close":
         this.close(message.json);
+        break;
+      default:
+        debug("UnSupported : Message Name " + message.name);
         break;
     }
   },
