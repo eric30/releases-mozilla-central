@@ -101,7 +101,6 @@ NfcContentHelper.prototype = {
                                   Cr.NS_ERROR_UNEXPECTED);
       return false;
     }
-    debug("setSessionToken: SessionToken " + sessionToken);
     // Report session to Nfc.js only.
     cpmm.sendAsyncMessage("NFC:SetSessionToken", {
       sessionToken: sessionToken,
@@ -115,7 +114,6 @@ NfcContentHelper.prototype = {
       throw Components.Exception("Can't get window object",
                                   Cr.NS_ERROR_UNEXPECTED);
     }
-    debug("getDetailsNDEF: SessionToken " + sessionToken);
     let request = Services.DOMRequest.createRequest(window);
     let requestId = btoa(this.getRequestId(request));
     this._requestMap[requestId] = {win: window};
@@ -132,7 +130,6 @@ NfcContentHelper.prototype = {
       throw Components.Exception("Can't get window object",
                                   Cr.NS_ERROR_UNEXPECTED);
     }
-    debug("readNDEF: SessionToken " + sessionToken);
     let request = Services.DOMRequest.createRequest(window);
     let requestId = btoa(this.getRequestId(request));
     this._requestMap[requestId] = {win: window};
@@ -186,7 +183,6 @@ NfcContentHelper.prototype = {
       throw Components.Exception("Can't get window object",
                                   Cr.NS_ERROR_UNEXPECTED);
     }
-    debug("connect: SessionToken " + sessionToken);
     let request = Services.DOMRequest.createRequest(window);
     let requestId = btoa(this.getRequestId(request));
     this._requestMap[requestId] = {win: window};
@@ -204,7 +200,6 @@ NfcContentHelper.prototype = {
       throw Components.Exception("Can't get window object",
                                   Cr.NS_ERROR_UNEXPECTED);
     }
-    debug("close: SessionToken " + sessionToken);
     let request = Services.DOMRequest.createRequest(window);
     let requestId = btoa(this.getRequestId(request));
     this._requestMap[requestId] = {win: window};
