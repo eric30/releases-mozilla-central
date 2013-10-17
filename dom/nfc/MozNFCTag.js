@@ -1,8 +1,9 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
- * You can obtain one at http://mozilla.org/MPL/2.0/. */
-
-/* Copyright © 2013, Deutsche Telekom, Inc. */
+ * You can obtain one at http://mozilla.org/MPL/2.0/.
+ *
+ * Copyright © 2013, Deutsche Telekom, Inc.
+ */
 
 "use strict";
 
@@ -17,26 +18,29 @@ const Cu = Components.utils;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/ObjectWrapper.jsm");
 
 function MozNFCTag() {
   debug("XXXX In MozNFCTag Constructor");
   this._nfcContentHelper = Cc["@mozilla.org/nfc/content-helper;1"]
                              .getService(Ci.nsINfcContentHelper);
   this.session = null;
-  // Map WebIDL declared enum map names to integer (FIXME: Get full list of NFCD tech types!)
+  // Map WebIDL declared enum map names to integer
   this._techTypesMap = [];
-  this._techTypesMap['P2P'] = 0;
-  this._techTypesMap['NDEF_FORMATTABLE'] = 2;
-  this._techTypesMap['NDEF'] = 6;
-  this._techTypesMap['MIFARE_ULTRALIGHT'] = 9;
+  this._techTypesMap['NFC_A'] = 0;
+  this._techTypesMap['NFC_B'] = 1;
+  this._techTypesMap['NFC_ISO_DEP'] = 2;
+  this._techTypesMap['NFC_F'] = 3;
+  this._techTypesMap['NFC_V'] = 4;
+  this._techTypesMap['NDEF'] = 5;
+  this._techTypesMap['NDEF_FORMATABLE'] = 6;
+  this._techTypesMap['MIFARE_CLASSIC'] = 7;
+  this._techTypesMap['MIFARE_ULTRALIGHT'] = 8;
+  this._techTypesMap['NFC_BARCODE'] = 9;
+  this._techTypesMap['P2P'] = 10;
 }
 MozNFCTag.prototype = {
   _nfcContentHelper: null,
   _window: null,
-  _wrap: function _wrap(obj) {
-    return ObjectWrapper.wrap(obj, this._window);
-  },
 
   init: function init(aWindow) {
     debug("XXXXXXXXXX init called XXXXXXXXXXXX");
