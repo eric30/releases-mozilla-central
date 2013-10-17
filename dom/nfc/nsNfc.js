@@ -6,7 +6,7 @@
 
 "use strict";
 
-const DEBUG = true;
+const DEBUG = false;
 function debug(s) {
   if (DEBUG) dump("-*- Nfc DOM: " + s + "\n");
 }
@@ -19,16 +19,11 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/ObjectWrapper.jsm");
 
-XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
-                                   "@mozilla.org/childprocessmessagemanager;1",
-                                   "nsIMessageSender");
-
-
-let myGlobal = this;
-
 function mozNfc() {
   debug("XXXX In mozNfc Constructor");
-  this._nfcContentHelper = Cc["@mozilla.org/nfc/content-helper;1"].getService(Ci.nsINfcContentHelper);
+  // TODO: This isn't needed if NFCTag has it's own content helper.
+  //this._nfcContentHelper = Cc["@mozilla.org/nfc/content-helper;1"]
+  //                           .getService(Ci.nsINfcContentHelper);
 }
 
 mozNfc.prototype = {
@@ -43,25 +38,17 @@ mozNfc.prototype = {
     this._window = aWindow;
   },
 
-  getDetailsNDEF: function getDetailsNDEF() {
-    return this._nfcContentHelper.getDetailsNDEF(this._window);
-  },
-  readNDEF: function readNDEF() {
-    return this._nfcContentHelper.readNDEF(this._window);
-  },
-  writeNDEF: function writeNDEF(records) {
-    return this._nfcContentHelper.writeNDEF(this._window, records);
-  },
-  makeReadOnlyNDEF: function makeReadOnlyNDEF() {
-    return this._nfcContentHelper.makeReadOnlyNDEF(this._window);
+  getNFCTag: function getNFCTag(sessionToken) {
+    let nfcTag = new this._window.MozNFCTag(sessionToken);
+    if (nfcTag) {
+      return nfcTag;
+    } else {
+      debug("Error: Unable to create NFCTag");
+      return null;
+    }
   },
 
-  connect: function connect_with_type(int_tech_type) {
-    return this._nfcContentHelper.connect(this._window, int_tech_type);
-  },
-  close: function close() {
-    return this._nfcContentHelper.close(this._window);
-  },
+  // get/set onpeerfound/lost onforegrounddispatch
 
   classID: Components.ID("{6ff2b290-2573-11e3-8224-0800200c9a66}"),
   contractID: "@mozilla.org/navigatorNfc;1",

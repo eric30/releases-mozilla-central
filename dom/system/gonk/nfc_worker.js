@@ -20,7 +20,8 @@
 importScripts("systemlibs.js", "nfc_consts.js");
 importScripts("resource://gre/modules/workers/require.js");
 
-let DEBUG = true;
+// set to true in nfc_consts.js to see debug messages
+let DEBUG = DEBUG_WORKER;
 
 function getPaddingLen(len) {
   return (len % 4) ? (4 - len % 4) : 0;
@@ -53,7 +54,7 @@ let Buf = {
   newParcel: function newParcel(type, callback) {
     if (DEBUG) debug("New outgoing parcel of type " + type);
 
-    if(this.mCallback) debug("Warning! Callback override :"+ type);
+    if(this.mCallback) debug("Warning! Callback override :"+ type );
     /**
      * TODO: This needs to be fixed. A map of NFC_RESPONSE_XXX and RequestID
      *       needs to be maintained ?? For Generic Responses (1000) ,
@@ -176,12 +177,12 @@ let Nfc = {
   writeNDEF: function writeNDEF(message) {
     let cb = function callback() {
       debug("ndefWrite callback");
-      message.content.status = "OK";
       message.type = "NDEFWriteResponse";
       let error = Buf.readInt32();
       let sessionId = Buf.readInt32();
       message.requestId = message.content.requestId;
       message.sessionId = sessionId;
+      message.content.status = (error === 0) ? GECKO_NFC_ERROR_SUCCESS : GECKO_NFC_ERROR_GENERIC_FAILURE;
       this.sendDOMMessage(message);
     };
 
@@ -251,12 +252,12 @@ let Nfc = {
   makeReadOnlyNDEF: function makeReadOnlyNDEF(message) {
     let cb = function callback() {
       debug("ndefWrite callback");
-      message.content.status = "OK";
       message.type = "NDEFMakeReadOnlyResponse";
       let error = Buf.readInt32();
       let sessionId = Buf.readInt32();
       message.requestId = message.content.requestId;
       message.sessionId = sessionId;
+      message.content.status = (error === 0) ? GECKO_NFC_ERROR_SUCCESS : GECKO_NFC_ERROR_GENERIC_FAILURE;
       this.sendDOMMessage(message);
     };
     Buf.newParcel(NFC_REQUEST_MAKE_NDEF_READ_ONLY, cb);
@@ -270,7 +271,6 @@ let Nfc = {
   getDetailsNDEF: function getDetailsNDEF(message) {
     let cb = function callback() {
       debug("ndefWrite callback");
-      message.content.status = "OK";
       message.type = "NDEFDetailsResponse";
       let error = Buf.readInt32();
       let sessionId = Buf.readInt32();
@@ -280,19 +280,12 @@ let Nfc = {
       message.sessionId = sessionId;
       message.maxSupportedLength = maxSupportedLength;
       message.mode = mode;
+      message.content.status = (error === 0) ? GECKO_NFC_ERROR_SUCCESS : GECKO_NFC_ERROR_GENERIC_FAILURE;
       this.sendDOMMessage(message);
     };
     Buf.newParcel(NFC_REQUEST_GET_DETAILS, cb);
     Buf.writeInt32(message.content.sessionId);
     Buf.sendParcel();
-  },
-
-  /**
-   * P2P NDEF message push between a pair of NFC devices.
-   */
-  pushNDEF: function pushNDEF(message) {
-    //TODO
-    //postNfcMessage(JSON.stringify(message.content));
   },
 
 
@@ -302,12 +295,12 @@ let Nfc = {
   connect: function connect(message) {
     debug("connect message=.."+JSON.stringify(message));
     let cb = function callback() {
-      message.content.status = "OK";
       message.type = "ConnectResponse";
       let error = Buf.readInt32();
       let sessionId = Buf.readInt32();
       message.requestId = message.content.requestId;
       message.sessionId = sessionId;
+      message.content.status = (error === 0) ? GECKO_NFC_ERROR_SUCCESS : GECKO_NFC_ERROR_GENERIC_FAILURE;
       this.sendDOMMessage(message);
     };
     Buf.newParcel(NFC_REQUEST_CONNECT, cb);
@@ -328,12 +321,12 @@ let Nfc = {
    */
   close: function close(message) {
     let cb = function callback() {
-      message.content.status = "OK";
       message.type = "CloseResponse";
       let error = Buf.readInt32();
       let sessionId = Buf.readInt32();
       message.requestId = message.content.requestId;
       message.sessionId = sessionId;
+      message.content.status = (error === 0) ? GECKO_NFC_ERROR_SUCCESS : GECKO_NFC_ERROR_GENERIC_FAILURE;
       this.sendDOMMessage(message);
     };
 

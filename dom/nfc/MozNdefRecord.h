@@ -14,12 +14,9 @@
 #include "nsCycleCollectionParticipant.h"
 #include "nsWrapperCache.h"
 #include "jsapi.h"
-#include "nsTraceRefcnt.h"
-#include "js/GCAPI.h"
 
 #include "nsIDocument.h"
 
-//#include "nsDOMEventTargetHelper.h"
 #include "mozilla/dom/MozNdefRecordBinding.h"
 
 struct JSContext;
@@ -36,7 +33,9 @@ public:
 
 public:
 
-  MozNdefRecord(nsPIDOMWindow* aWindow, uint8_t aTnf, const nsAString& aType, const nsAString& aId, const nsAString& aPlayload);
+  MozNdefRecord(nsPIDOMWindow* aWindow,
+                uint8_t aTnf, const nsAString& aType,
+                const nsAString& aId, const nsAString& aPlayload);
 
   ~MozNdefRecord();
 
@@ -45,9 +44,15 @@ public:
     return mWindow;
   }
 
-  virtual JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+  virtual JSObject* WrapObject(JSContext* aCx,
+                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
-  static already_AddRefed<MozNdefRecord> Constructor(const GlobalObject& aGlobal, uint8_t aTnf, const nsAString& aType, const nsAString& aId, const nsAString& aPayload, ErrorResult& aRv);
+  static already_AddRefed<MozNdefRecord> Constructor(
+                                           const GlobalObject& aGlobal,
+                                           uint8_t aTnf, const nsAString& aType,
+                                           const nsAString& aId,
+                                           const nsAString& aPayload,
+                                           ErrorResult& aRv);
 
   uint8_t Tnf() const
   {

@@ -7,30 +7,10 @@
 [JSImplementation="@mozilla.org/navigatorNfc;1",
  NavigatorProperty="mozNfc"]
 interface MozNfc : EventTarget {
+   MozNFCTag getNFCTag(DOMString sessionId);
+   /*DOMRequest getNFCPeer(unsigned long sessionId);*/
 
-   /**
-    * NDEF Functions
-    */
-
-   /* Get metadata details of the discovered and connected NDEF message */
-   DOMRequest getDetailsNDEF();
-
-   /* NDEF Read returns an array of NDEF Records consisting of 1 or more elements */
-   DOMRequest readNDEF();
-
-   /* NDEF Write records that is an array of 1 or more records */
-   [Throws]
-   DOMRequest writeNDEF(sequence<MozNdefRecord> records);
-
-   /* Permanently make a physical NFC tag read only */
-   DOMRequest makeReadOnlyNDEF();
-
-   /**
-    * Generic tag/tech functions
-    */
-   [Throws]
-   DOMRequest connect(unsigned long techType);
-
-   DOMRequest close();
-
+   /*attribute EventHandler onpeerfound;
+   attribute EventHandler onpeerlost;
+   attribute EventHandler onforegrounddispatch;*/
 };
