@@ -162,7 +162,7 @@ let Nfc = {
       message.requestId = message.content.requestId;
       message.sessionId = sessionId;
       message.content.records = records;
-      message.type = "NDEFReadResponse";
+      message.type = "ReadNDEFResponse";
       this.sendDOMMessage(message);
     }
 
@@ -177,7 +177,7 @@ let Nfc = {
   writeNDEF: function writeNDEF(message) {
     let cb = function callback() {
       debug("ndefWrite callback");
-      message.type = "NDEFWriteResponse";
+      message.type = "WriteNDEFResponse";
       let error = Buf.readInt32();
       let sessionId = Buf.readInt32();
       message.requestId = message.content.requestId;
@@ -189,7 +189,7 @@ let Nfc = {
     debug("ndefWrite message="+JSON.stringify(message));
     Buf.newParcel(NFC_REQUEST_WRITE_NDEF, cb);
     Buf.writeInt32(message.content.sessionId);
-    let records = message.content.content.records;
+    let records = message.content.records;
     let numRecords = records.length;
     debug("ndefWrite numRecords="+numRecords);
     Buf.writeInt32(numRecords);
@@ -252,7 +252,7 @@ let Nfc = {
   makeReadOnlyNDEF: function makeReadOnlyNDEF(message) {
     let cb = function callback() {
       debug("ndefWrite callback");
-      message.type = "NDEFMakeReadOnlyResponse";
+      message.type = "MakeReadOnlyNDEFResponse";
       let error = Buf.readInt32();
       let sessionId = Buf.readInt32();
       message.requestId = message.content.requestId;
@@ -271,7 +271,7 @@ let Nfc = {
   getDetailsNDEF: function getDetailsNDEF(message) {
     let cb = function callback() {
       debug("ndefWrite callback");
-      message.type = "NDEFDetailsResponse";
+      message.type = "DetailsNDEFResponse";
       let error = Buf.readInt32();
       let sessionId = Buf.readInt32();
       let maxSupportedLength = Buf.readInt32();

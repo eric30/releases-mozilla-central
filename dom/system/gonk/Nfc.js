@@ -342,11 +342,11 @@ Nfc.prototype = {
         break;
       case "ConnectResponse":
         // Fall through.
-      case "NDEFReadResponse":
-      case "NDEFDetailsResponse":
       case "CloseResponse":
-      case "NDEFMakeReadOnlyResponse":
-      case "NDEFWriteResponse":
+      case "DetailsNDEFResponse":
+      case "ReadNDEFResponse":
+      case "MakeReadOnlyNDEFResponse":
+      case "WriteNDEFResponse":
         message.sessionId = this.tokenSessionMap[this._connectedSessionId];
         gMessageManager.sendNfcResponseMessage("NFC:" + message.type, message)
         break;
@@ -377,16 +377,15 @@ Nfc.prototype = {
     switch (message.name) {
       case "NFC:Connect": // Fall through
       case "NFC:Close":
+/*
         if (!message.target.assertPermission("nfc")) {
           debug("NFC message " + message.name +
                 " from a content process with no 'nfc' privileges.");
           return null;
         }
         break;
-    }
-
-    // Enforce NFC read permissions.
-    switch (message.name) {
+*/
+      // Check Read permissions
       case "NFC:GetDetailsNDEF": // Fall through
       case "NFC:ReadNDEF":
         if (!message.target.assertPermission("nfc-read")) {
@@ -395,10 +394,7 @@ Nfc.prototype = {
           return null;
         }
         break;
-    }
-
-    // Enforce NFC Write permissions.
-    switch (message.name) {
+        // Check Writepermissions
       case "NFC:WriteNDEF": // Fall through
       case "NFC:MakeReadOnlyNDEF":
         if (!message.target.assertPermission("nfc-write")) {
