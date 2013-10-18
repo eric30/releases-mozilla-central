@@ -7,7 +7,7 @@
 
 "use strict";
 
-const DEBUG = true;
+const DEBUG = false;
 function debug(s) {
   if (DEBUG) dump("-*- Nfc MozNFCTag: " + s + "\n");
 }
@@ -43,18 +43,16 @@ MozNFCTag.prototype = {
   _window: null,
 
   init: function init(aWindow) {
-    debug("XXXXXXXXXX init called XXXXXXXXXXXX");
     this._window = aWindow;
   },
 
   __init: function(aSessionToken) {
-    debug("Init : " + aSessionToken);
     this.setSessionToken(aSessionToken);
   },
 
   // ChromeOnly interface
   setSessionToken: function setSessionToken(aSessionToken) {
-    debug("Setting session token : " + aSessionToken);
+    debug("Setting session token.");
     this.session = aSessionToken;
     // report to NFC worker:
     return this._nfcContentHelper.setSessionToken(aSessionToken);

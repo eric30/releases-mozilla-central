@@ -287,7 +287,7 @@ function Nfc() {
   this.powerLevel = NFC_POWER_LEVEL_DISABLED;
   lock.get(SETTING_NFC_ENABLED, this);
   this.sessionMap = [];
-  // Maps sessionIds (that generate from nfcd) with a unique guid
+  // Maps sessionIds (that are generated from nfcd) with a unique guid
   this.tokenSessionMap = {};
 
   gSystemWorkerManager.registerNfcWorker(this.worker);
@@ -364,10 +364,6 @@ Nfc.prototype = {
 
   sessionMap: null,
   tokenSessionMap: null,
-
-  setSessionToken: function setSessionToken(message) {
-    // Do nothing...
-  },
 
   /*
    * Request Handlers to 'nfcd'
