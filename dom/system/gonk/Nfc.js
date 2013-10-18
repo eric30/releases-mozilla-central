@@ -377,28 +377,18 @@ Nfc.prototype = {
     switch (message.name) {
       case "NFC:Connect": // Fall through
       case "NFC:Close":
-/*
-        if (!message.target.assertPermission("nfc")) {
-          debug("NFC message " + message.name +
-                " from a content process with no 'nfc' privileges.");
-          return null;
-        }
-        break;
-*/
-      // Check Read permissions
-      case "NFC:GetDetailsNDEF": // Fall through
+      case "NFC:GetDetailsNDEF":
       case "NFC:ReadNDEF":
         if (!message.target.assertPermission("nfc-read")) {
-          debug("NFC message " + message.name +
+          throw new Error("NFC message " + message.name +
                 " from a content process with no 'nfc-read' privileges.");
           return null;
         }
         break;
-        // Check Writepermissions
       case "NFC:WriteNDEF": // Fall through
       case "NFC:MakeReadOnlyNDEF":
         if (!message.target.assertPermission("nfc-write")) {
-          debug("NFC message " + message.name +
+          throw new Error("NFC message " + message.name +
                 " from a content process with no 'nfc-write' privileges.");
           return null;
         }
