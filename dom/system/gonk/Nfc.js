@@ -137,7 +137,7 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
       }
 
       targets.push(target);
-      if (DEBUG) debug("Registered " + topic + " target: " + target);
+      if (DEBUG) debug("Registered :" + topic + " target: " + target);
     },
 
     _unregisterMessageTarget: function _unregisterMessageTarget(topic, target) {
@@ -152,6 +152,21 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
       // Unregister the target for a specified topic.
       let targets = this.targetsByTopic[topic];
       if (!targets) {
+        return;
+      }
+
+      if (target == null) {
+        if (DEBUG) debug("Unregistered all targets for the " + topic + " targets: " + targets);
+        targets = [];
+        let list = this.topics;
+        if (DEBUG) debug("Topic List : " + list);
+        if (topic !== null) {
+          var index = list.indexOf(topic);
+          if (index > -1) {
+            list.splice(index, 1);
+            if (DEBUG) debug("Updated topic list : " + list);
+          }
+        }
         return;
       }
 
@@ -234,10 +249,11 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
 
       switch (msg.name) {
         case "NFC:SetSessionToken":
-          this._registerMessageTarget("nfc", msg.target);
+          this._registerMessageTarget(this.nfc.tokenSessionMap[this.nfc._connectedSessionId], msg.target);
+          if (DEBUG) debug("Registering target for this SessionToken / Topic : " + this.nfc.tokenSessionMap[this.nfc._connectedSessionId]);
           return null;
         default:
-          if (DEBUG) debug("Not registering any target for this msg type : " + msg.name);
+          if (DEBUG) debug("Not registering target for this SessionToken / Topic : : " + msg.name);
       }
 
       // what do we do here? Maybe pass to Nfc.receiveMessage(msg)
@@ -262,7 +278,7 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
 
     sendNfcResponseMessage: function sendNfcResponseMessage(message, data) {
       if (DEBUG) debug("sendNfcResponseMessage :" + message);
-      this._sendTargetMessage("nfc", message, data);
+      this._sendTargetMessage(this.nfc.tokenSessionMap[this.nfc._connectedSessionId], message, data);
     }
   };
 });
@@ -335,9 +351,12 @@ Nfc.prototype = {
         gSystemMessenger.broadcastMessage("nfc-manager-tech-discovered", message);
         break;
       case "techLost":
+        gMessageManager._unregisterMessageTarget(this.tokenSessionMap[this._connectedSessionId], null);
+        // Update the upper layers with a session token (alias)
+        message.sessionId = this.tokenSessionMap[this._connectedSessionId];
+        gSystemMessenger.broadcastMessage("nfc-manager-tech-lost", message);
         this._connectedSessionId = null;
         delete this.tokenSessionMap[this._connectedSessionId];
-        gSystemMessenger.broadcastMessage("nfc-manager-tech-lost", message);
         break;
      case "ConfigResponse":
         gSystemMessenger.broadcastMessage("nfc-powerlevel-change", message);

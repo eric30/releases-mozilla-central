@@ -44,8 +44,6 @@ const NFCCONTENTHELPER_CID =
 
 
 const NFC_IPC_MSG_NAMES = [
-  "NFC:TechDiscovered",
-  "NFC:TechLost",
   "NFC:NDEFDetailsResponse",
   "NFC:NDEFReadResponse",
   "NFC:NDEFWriteResponse",
