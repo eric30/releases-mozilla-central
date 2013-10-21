@@ -303,7 +303,7 @@ function Nfc() {
   this.powerLevel = NFC_POWER_LEVEL_DISABLED;
   lock.get(SETTING_NFC_ENABLED, this);
   this.sessionMap = [];
-  // Maps sessionIds (that generate from nfcd) with a unique guid
+  // Maps sessionIds (that are generated from nfcd) with a unique guid
   this.tokenSessionMap = {};
 
   gSystemWorkerManager.registerNfcWorker(this.worker);
@@ -337,10 +337,8 @@ Nfc.prototype = {
     let message = event.data;
     debug("Received message: " + JSON.stringify(message));
     if (!this._enabled) {
-      debug("NFC is not enabled.");
-      return null;
+      throw new Error("NFC is not enabled.");
     }
-
 
     switch (message.type) {
       case "techDiscovered":
@@ -363,11 +361,11 @@ Nfc.prototype = {
         break;
       case "ConnectResponse":
         // Fall through.
-      case "NDEFReadResponse":
-      case "NDEFDetailsResponse":
       case "CloseResponse":
-      case "NDEFMakeReadOnlyResponse":
-      case "NDEFWriteResponse":
+      case "DetailsNDEFResponse":
+      case "ReadNDEFResponse":
+      case "MakeReadOnlyNDEFResponse":
+      case "WriteNDEFResponse":
         message.sessionId = this.tokenSessionMap[this._connectedSessionId];
         gMessageManager.sendNfcResponseMessage("NFC:" + message.type, message)
         break;
@@ -384,82 +382,6 @@ Nfc.prototype = {
   sessionMap: null,
   tokenSessionMap: null,
 
-  setSessionToken: function setSessionToken(message) {
-    // Do nothing...
-  },
-
-  /*
-   * Request Handlers to 'nfcd'
-   */
-
-  getDetailsNDEF: function getDetailsNDEF(message) {
-    let outMessage = {
-      type: "NDEFDetailsRequest",
-      sessionId: message.sessionId,
-      requestId: message.requestId
-    };
-
-    this.worker.postMessage({type: "getDetailsNDEF", content: outMessage});
-  },
-
-  readNDEF: function readNDEF(message) {
-    let outMessage = {
-      type: "NDEFReadRequest",
-      sessionId: message.sessionId,
-      requestId: message.requestId
-    };
-
-    this.worker.postMessage({type: "readNDEF", content: outMessage});
-  },
-
-  writeNDEF: function writeNDEF(message) {
-    let records = message.records;
-
-    let outMessage = {
-      type: "NDEFWriteRequest",
-      sessionId: message.sessionId,
-      requestId: message.requestId,
-      content: {
-        records: records
-      }
-    };
-
-    this.worker.postMessage({type: "writeNDEF", content: outMessage});
-  },
-
-  makeReadOnlyNDEF: function makeReadOnlyNDEF(message) {
-    let outMessage = {
-      type: "NDEFMakeReadOnlyRequest",
-      sessionId: message.sessionId,
-      requestId: message.requestId
-    };
-
-    this.worker.postMessage({type: "makeReadOnlyNDEF", content: outMessage});
-  },
-
-  // tag read/write command message handler.
-  connect: function connect(message, techType) {
-    let outMessage = {
-      type: "ConnectRequest",
-      sessionId: message.sessionId,
-      requestId: message.requestId,
-      techType: message.techType
-    };
-
-    this.worker.postMessage({type: "connect", content: outMessage});
-  },
-
-  // tag read/write command message handler.
-  close: function close(message) {
-    let outMessage = {
-      type: "CloseRequest",
-      sessionId: message.sessionId,
-      requestId: message.requestId
-    };
-
-    this.worker.postMessage({type: "close", content: outMessage});
-  },
-
   /**
    * Process the incoming message from a content process (NfcContentHelper.js)
    */
@@ -467,24 +389,25 @@ Nfc.prototype = {
     debug("Received '" + JSON.stringify(message) + "' message from content process");
 
     if (!this._enabled) {
-      debug("NFC is not enabled.");
-      return null;
+      throw new Error("NFC is not enabled.");
     }
 
-    // 'nfc-read' is the minimum permission that target should have
-    if (!message.target.assertPermission("nfc-read")) {
-      debug("NFC message " + message.name +
-            " from a content process with no 'nfc-read' privileges.");
-      return null;
-    }
-
-    // Enforce NFC Write permissions.
+    // Enforce bare minimums for NFC permissions
     switch (message.name) {
-      case "NFC:WriteNDEF":
-        // Fall through...
+      case "NFC:Connect": // Fall through
+      case "NFC:Close":
+      case "NFC:GetDetailsNDEF":
+      case "NFC:ReadNDEF":
+        if (!message.target.assertPermission("nfc-read")) {
+          throw new Error("NFC message " + message.name +
+                " from a content process with no 'nfc-read' privileges.");
+          return null;
+        }
+        break;
+      case "NFC:WriteNDEF": // Fall through
       case "NFC:MakeReadOnlyNDEF":
         if (!message.target.assertPermission("nfc-write")) {
-          debug("NFC message " + message.name +
+          throw new Error("NFC message " + message.name +
                 " from a content process with no 'nfc-write' privileges.");
           return null;
         }
@@ -507,26 +430,23 @@ Nfc.prototype = {
     }
 
     switch (message.name) {
-      case "NFC:SetSessionToken":
-        this.setSessionToken(message.json);
-        break;
       case "NFC:GetDetailsNDEF":
-        this.getDetailsNDEF(message.json);
+        this.worker.postMessage({type: "getDetailsNDEF", content: message.json});
         break;
       case "NFC:ReadNDEF":
-        this.readNDEF(message.json);
+        this.worker.postMessage({type: "readNDEF", content: message.json});
         break;
       case "NFC:WriteNDEF":
-        this.writeNDEF(message.json);
+        this.worker.postMessage({type: "writeNDEF", content: message.json});
         break;
       case "NFC:MakeReadOnlyNDEF":
-        this.makeReadOnlyNDEF(message.json);
+        this.worker.postMessage({type: "makeReadOnlyNDEF", content: message.json});
         break;
       case "NFC:Connect":
-        this.connect(message.json);
+        this.worker.postMessage({type: "connect", content: message.json});
         break;
       case "NFC:Close":
-        this.close(message.json);
+        this.worker.postMessage({type: "close", content: message.json});
         break;
       default:
         debug("UnSupported : Message Name " + message.name);

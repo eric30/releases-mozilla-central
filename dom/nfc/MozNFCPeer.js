@@ -29,7 +29,6 @@ MozNFCPeer.prototype = {
   _window: null,
 
   init: function init(aWindow) {
-    debug("XXXXXXXXXX init called XXXXXXXXXXXX");
     this._window = aWindow;
   },
 
@@ -39,7 +38,7 @@ MozNFCPeer.prototype = {
 
   // ChromeOnly interface
   setSessionToken: function setSessionToken(aSessionToken) {
-    debug("Setting session token");
+    debug("Setting session token.");
     this.session = aSessionToken;
     // report to NFC worker:
     return this._nfcContentHelper.setSessionToken(aSessionToken);

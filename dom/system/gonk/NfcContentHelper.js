@@ -42,12 +42,11 @@ if (DEBUG) {
 const NFCCONTENTHELPER_CID =
   Components.ID("{4d72c120-da5f-11e1-9b23-0800200c9a66}");
 
-
 const NFC_IPC_MSG_NAMES = [
-  "NFC:NDEFDetailsResponse",
-  "NFC:NDEFReadResponse",
-  "NFC:NDEFWriteResponse",
-  "NFC:NDEFMakeReadOnlyResponse",
+  "NFC:DetailsNDEFResponse",
+  "NFC:ReadNDEFResponse",
+  "NFC:WriteNDEFResponse",
+  "NFC:MakeReadOnlyNDEFResponse",
   "NFC:ConnectResponse",
   "NFC:CloseResponse"
 ];
@@ -300,17 +299,17 @@ NfcContentHelper.prototype = {
   receiveMessage: function receiveMessage(message) {
     debug("Message received: " + JSON.stringify(message));
     switch (message.name) {
-      case "NFC:NDEFDetailsResponse":
-        this.handleNDEFDetailsResponse(message.json);
+      case "NFC:DetailsNDEFResponse":
+        this.handleDetailsNDEFResponse(message.json);
         break;
-      case "NFC:NDEFReadResponse":
-        this.handleNDEFReadResponse(message.json);
+      case "NFC:ReadNDEFResponse":
+        this.handleReadNDEFResponse(message.json);
         break;
-      case "NFC:NDEFWriteResponse":
-        this.handleNDEFWriteResponse(message.json);
+      case "NFC:WriteNDEFResponse":
+        this.handleWriteNDEFResponse(message.json);
         break;
-      case "NFC:NDEFMakeReadOnlyResponse":
-        this.handleNDEFReadOnlyResponse(message.json);
+      case "NFC:MakeReadOnlyNDEFResponse":
+        this.handleMakeReadOnlyNDEFResponse(message.json);
         break;
       case "NFC:ConnectResponse":
         this.handleConnectResponse(message.json);
@@ -321,8 +320,8 @@ NfcContentHelper.prototype = {
     }
   },
 
-  handleNDEFDetailsResponse: function handleNDEFDetailsResponse(message) {
-    debug("NDEFDetailsResponse(" + JSON.stringify(message) + ")");
+  handleDetailsNDEFResponse: function handleDetailsNDEFResponse(message) {
+    debug("DetailsNDEFResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
     if (typeof requester === 'undefined') {
        return; // Nothing to do in this instance.
@@ -338,8 +337,8 @@ NfcContentHelper.prototype = {
     }
   },
 
-  handleNDEFReadResponse: function handleNDEFReadResponse(message) {
-    debug("NDEFReadResponse(" + JSON.stringify(message) + ")");
+  handleReadNDEFResponse: function handleReadNDEFResponse(message) {
+    debug("ReadNDEFResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
     if (typeof requester === 'undefined') {
        return; // Nothing to do in this instance.
@@ -374,8 +373,8 @@ NfcContentHelper.prototype = {
     }
   },
 
-  handleNDEFWriteResponse: function handleNDEFWriteResponse(message) {
-    debug("NDEFWriteResponse(" + JSON.stringify(message) + ")");
+  handleWriteNDEFResponse: function handleWriteNDEFResponse(message) {
+    debug("WriteNDEFResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
     if (typeof requester === 'undefined') {
        debug('Returning: requester: ' + requester);
@@ -392,8 +391,8 @@ NfcContentHelper.prototype = {
     }
   },
 
-  handleNDEFReadOnlyResponse: function handleNDEFReadOnlyResponse(message) {
-    debug("NDEFReadOnlyResponse(" + JSON.stringify(message) + ")");
+  handleMakeReadOnlyNDEFResponse: function handleReadOnlyNDEFResponse(message) {
+    debug("MakeReadOnlyNDEFResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
     if (typeof requester === 'undefined') {
        debug('Returning: requester: ' + requester);
@@ -405,24 +404,6 @@ NfcContentHelper.prototype = {
 
     if (result.status != "OK") {
       this.fireRequestError(requestId, ObjectWrapper.wrap(result, requester.win));
-    } else  {
-      this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
-    }
-  },
-
-  handleNDEFPushResponse: function handleNDEFPushResponse(message) {
-    debug("NDEFPushResponse(" + JSON.stringify(message) + ")");
-    let requester = this._requestMap[message.requestId];
-    if (typeof requester === 'undefined') {
-       debug('ConnectResponse return requester='+requester+" message.sessionId="+message.sessionId);
-       return; // Nothing to do in this instance.
-    }
-    delete this._requestMap[message.requestId];
-    let result = message.content;
-    let requestId = atob(message.requestId);
-
-    if (result.status != "OK") {
-      this.fireRequestError(requestId, result.status);
     } else  {
       this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
     }
