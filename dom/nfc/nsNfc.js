@@ -21,9 +21,6 @@ Cu.import("resource://gre/modules/ObjectWrapper.jsm");
 
 function mozNfc() {
   debug("XXXX In mozNfc Constructor");
-  // TODO: This isn't needed if NFCTag has it's own content helper.
-  //this._nfcContentHelper = Cc["@mozilla.org/nfc/content-helper;1"]
-  //                           .getService(Ci.nsINfcContentHelper);
 }
 
 mozNfc.prototype = {
