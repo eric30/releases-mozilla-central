@@ -41,15 +41,24 @@ this.NFC_NOTIFICATION_TECH_DISCOVERED = 2001;
 this.NFC_NOTIFICATION_TECH_LOST = 2002;
 
 this.NFC_TECHS = {
-  0:'P2P',
-  1:'NDEF',
-  2:'NDEF_FORMATTABLE',
-  3:'NFC_A',
-  9:'MIFARE_ULTRALIGHT'
+  0:'NDEF',
+  1:'NDEF_WRITEABLE',
+  2:'NDEF_FORMATABLE',
+  3:'P2P',
+  4:'NFC_A'
 };
 
 this.GECKO_NFC_ERROR_SUCCESS = "OK";
 this.GECKO_NFC_ERROR_GENERIC_FAILURE = "FAILURE";
+
+// NFC powerlevels must match config PDUs.
+this.NFC_POWER_LEVEL_DISABLED       = 0;
+this.NFC_POWER_LEVEL_LOW            = 1;
+this.NFC_POWER_LEVEL_ENABLED        = 2;
+
+this.TOPIC_MOZSETTINGS_CHANGED      = "mozsettings-changed";
+this.TOPIC_XPCOM_SHUTDOWN           = "xpcom-shutdown";
+this.SETTING_NFC_ENABLED            = "nfc.enabled";
 
 // Allow this file to be imported via Components.utils.import().
 this.EXPORTED_SYMBOLS = Object.keys(this);

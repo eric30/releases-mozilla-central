@@ -22,11 +22,11 @@ const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
-var NFC = {};
+let NFC = {};
 Cu.import("resource://gre/modules/nfc_consts.js", NFC);
 
 // set to true in nfc_consts.js to see debug messages
-var DEBUG = NFC.DEBUG_NFC;
+let DEBUG = NFC.DEBUG_NFC;
 
 let debug;
 if (DEBUG) {
@@ -50,16 +50,6 @@ const NFC_IPC_MSG_NAMES = [
   "NFC:Connect",
   "NFC:Close"
 ];
-
-// NFC powerlevels must match config PDUs.
-const NFC_POWER_LEVEL_DISABLED       = 0;
-const NFC_POWER_LEVEL_LOW            = 1;
-const NFC_POWER_LEVEL_ENABLED        = 2;
-
-const TOPIC_MOZSETTINGS_CHANGED      = "mozsettings-changed";
-const TOPIC_XPCOM_SHUTDOWN           = "xpcom-shutdown";
-const SETTING_NFC_ENABLED            = "nfc.enabled";
-
 
 XPCOMUtils.defineLazyServiceGetter(this, "ppmm",
                                    "@mozilla.org/parentprocessmessagemanager;1",
@@ -249,8 +239,8 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
 
       switch (msg.name) {
         case "NFC:SetSessionToken":
-          this._registerMessageTarget(this.nfc.tokenSessionMap[this.nfc._connectedSessionId], msg.target);
-          if (DEBUG) debug("Registering target for this SessionToken / Topic : " + this.nfc.tokenSessionMap[this.nfc._connectedSessionId]);
+          this._registerMessageTarget(this.nfc.sessionTokenMap[this.nfc._connectedSessionId], msg.target);
+          if (DEBUG) debug("Registering target for this SessionToken / Topic : " + this.nfc.sessionTokenMap[this.nfc._connectedSessionId]);
           return null;
         default:
           if (DEBUG) debug("Not registering target for this SessionToken / Topic : : " + msg.name);
@@ -278,7 +268,7 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
 
     sendNfcResponseMessage: function sendNfcResponseMessage(message, data) {
       if (DEBUG) debug("sendNfcResponseMessage :" + message);
-      this._sendTargetMessage(this.nfc.tokenSessionMap[this.nfc._connectedSessionId], message, data);
+      this._sendTargetMessage(this.nfc.sessionTokenMap[this.nfc._connectedSessionId], message, data);
     }
   };
 });
@@ -294,17 +284,16 @@ function Nfc() {
     ppmm.addMessageListener(msgname, this);
   }
 
-  Services.obs.addObserver(this, TOPIC_MOZSETTINGS_CHANGED, false);
-  Services.obs.addObserver(this, TOPIC_XPCOM_SHUTDOWN, false);
+  Services.obs.addObserver(this, NFC.TOPIC_MOZSETTINGS_CHANGED, false);
+  Services.obs.addObserver(this, NFC.TOPIC_XPCOM_SHUTDOWN, false);
 
   gMessageManager.init(this);
   let lock = gSettingsService.createLock();
   lock.get("nfc.powerlevel", this);
-  this.powerLevel = NFC_POWER_LEVEL_DISABLED;
-  lock.get(SETTING_NFC_ENABLED, this);
-  this.sessionMap = [];
-  // Maps sessionIds (that are generated from nfcd) with a unique guid
-  this.tokenSessionMap = {};
+  this.powerLevel = NFC.NFC_POWER_LEVEL_DISABLED;
+  lock.get(NFC.SETTING_NFC_ENABLED, this);
+  // Maps sessionId (that are generated from nfcd) with a unique guid : 'SessionToken'
+  this.sessionTokenMap = {};
 
   gSystemWorkerManager.registerNfcWorker(this.worker);
 }
@@ -324,6 +313,7 @@ Nfc.prototype = {
 
   _connectedSessionId: null,
   _enabled: false,
+
   onerror: function onerror(event) {
     debug("Got an error: " + event.filename + ":" +
           event.lineno + ": " + event.message + "\n");
@@ -343,30 +333,29 @@ Nfc.prototype = {
     switch (message.type) {
       case "techDiscovered":
         this._connectedSessionId = message.sessionId;
-        this.tokenSessionMap[this._connectedSessionId] = UUIDGenerator.generateUUID().toString();
+        this.sessionTokenMap[this._connectedSessionId] = UUIDGenerator.generateUUID().toString();
         // Update the upper layers with a session token (alias)
-        message.sessionId = this.tokenSessionMap[this._connectedSessionId];
+        message.sessionId = this.sessionTokenMap[this._connectedSessionId];
         gSystemMessenger.broadcastMessage("nfc-manager-tech-discovered", message);
         break;
       case "techLost":
-        gMessageManager._unregisterMessageTarget(this.tokenSessionMap[this._connectedSessionId], null);
+        gMessageManager._unregisterMessageTarget(this.sessionTokenMap[this._connectedSessionId], null);
         // Update the upper layers with a session token (alias)
-        message.sessionId = this.tokenSessionMap[this._connectedSessionId];
+        message.sessionId = this.sessionTokenMap[this._connectedSessionId];
         gSystemMessenger.broadcastMessage("nfc-manager-tech-lost", message);
         this._connectedSessionId = null;
-        delete this.tokenSessionMap[this._connectedSessionId];
+        delete this.sessionTokenMap[this._connectedSessionId];
         break;
      case "ConfigResponse":
         gSystemMessenger.broadcastMessage("nfc-powerlevel-change", message);
         break;
       case "ConnectResponse":
-        // Fall through.
-      case "CloseResponse":
+      case "CloseResponse": // Fall through.
       case "DetailsNDEFResponse":
       case "ReadNDEFResponse":
       case "MakeReadOnlyNDEFResponse":
       case "WriteNDEFResponse":
-        message.sessionId = this.tokenSessionMap[this._connectedSessionId];
+        message.sessionId = this.sessionTokenMap[this._connectedSessionId];
         gMessageManager.sendNfcResponseMessage("NFC:" + message.type, message)
         break;
       default:
@@ -377,10 +366,9 @@ Nfc.prototype = {
   // nsINfcWorker
 
   worker: null,
-  powerLevel: NFC_POWER_LEVEL_DISABLED,
+  powerLevel: NFC.NFC_POWER_LEVEL_DISABLED,
 
-  sessionMap: null,
-  tokenSessionMap: null,
+  sessionTokenMap: null,
 
   /**
    * Process the incoming message from a content process (NfcContentHelper.js)
@@ -419,14 +407,14 @@ Nfc.prototype = {
        case "NFC:SetSessionToken":
          break;
        default:
-         if (message.json.sessionId !== this.tokenSessionMap[this._connectedSessionId]) {
+         if (message.json.sessionId !== this.sessionTokenMap[this._connectedSessionId]) {
            debug("Invalid Session : " + message.sessionId + " Expected Session: " +
                  this._connectedSessionId);
            return;
          }
 
          debug("Received Message: " + message.name + "Session Token: " +
-               this.tokenSessionMap[this._connectedSessionId]);
+               this.sessionTokenMap[this._connectedSessionId]);
     }
 
     switch (message.name) {
@@ -460,18 +448,18 @@ Nfc.prototype = {
 
   handle: function handle(aName, aResult) {
     switch(aName) {
-      case SETTING_NFC_ENABLED:
+      case NFC.SETTING_NFC_ENABLED:
         debug("'nfc.enabled' is now " + aResult);
         this._enabled = aResult;
         // General power setting
         if (this._enabled) {
-          this.setNFCPowerConfig(NFC_POWER_LEVEL_ENABLED);
+          this.setNFCPowerConfig(NFC.NFC_POWER_LEVEL_ENABLED);
           this._enabled = true;
         } else {
-          this.setNFCPowerConfig(NFC_POWER_LEVEL_DISABLED);
+          this.setNFCPowerConfig(NFC.NFC_POWER_LEVEL_DISABLED);
           this._enabled = false;
         }
-      break;
+        break;
     }
   },
 
@@ -481,14 +469,14 @@ Nfc.prototype = {
 
   observe: function observe(subject, topic, data) {
     switch (topic) {
-      case TOPIC_XPCOM_SHUTDOWN:
+      case NFC.TOPIC_XPCOM_SHUTDOWN:
         for each (let msgname in NFC_IPC_MSG_NAMES) {
           ppmm.removeMessageListener(msgname, this);
         }
         ppmm = null;
-        Services.obs.removeObserver(this, TOPIC_XPCOM_SHUTDOWN);
+        Services.obs.removeObserver(this, NFC.TOPIC_XPCOM_SHUTDOWN);
         break;
-      case TOPIC_MOZSETTINGS_CHANGED:
+      case NFC.TOPIC_MOZSETTINGS_CHANGED:
         let setting = JSON.parse(data);
         if (setting) {
           let setting = JSON.parse(data);

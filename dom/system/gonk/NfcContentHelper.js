@@ -24,7 +24,7 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/ObjectWrapper.jsm");
 Cu.import("resource://gre/modules/DOMRequestHelper.jsm");
 
-var NFC = {};
+let NFC = {};
 Cu.import("resource://gre/modules/nfc_consts.js", NFC);
 
 // set to true to in nfc_consts.js to see debug messages
@@ -79,8 +79,8 @@ NfcContentHelper.prototype = {
   // FIXME: btoa's will be unneeded when binary nfcd/gonk protocol is merged.
   encodeNdefRecords: function encodeNdefRecords(records) {
     var encodedRecords = [];
-    for(var i=0; i < records.length; i++) {
-      var record = records[i];
+    for(let i=0; i < records.length; i++) {
+      let record = records[i];
       encodedRecords.push({
         tnf: record.tnf,
         type: record.type,
@@ -92,7 +92,7 @@ NfcContentHelper.prototype = {
   },
 
   // NFC interface:
-  setSessionToken: function setSession(sessionToken) {
+  setSessionToken: function setSessionToken(sessionToken) {
     if (sessionToken== null) {
       throw Components.Exception("No session token!",
                                   Cr.NS_ERROR_UNEXPECTED);
@@ -323,7 +323,8 @@ NfcContentHelper.prototype = {
   handleDetailsNDEFResponse: function handleDetailsNDEFResponse(message) {
     debug("DetailsNDEFResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
-    if (typeof requester === 'undefined') {
+    if (!requester) {
+       debug("DetailsNDEFResponse Invalid requester="+requester+" message.sessionId="+message.sessionId);
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
@@ -340,7 +341,8 @@ NfcContentHelper.prototype = {
   handleReadNDEFResponse: function handleReadNDEFResponse(message) {
     debug("ReadNDEFResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
-    if (typeof requester === 'undefined') {
+    if (!requester) {
+       debug("ReadNDEFResponse Invalid requester="+requester+" message.sessionId="+message.sessionId);
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
@@ -376,8 +378,8 @@ NfcContentHelper.prototype = {
   handleWriteNDEFResponse: function handleWriteNDEFResponse(message) {
     debug("WriteNDEFResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
-    if (typeof requester === 'undefined') {
-       debug('Returning: requester: ' + requester);
+    if (!requester) {
+       debug("WriteNDEFResponse Invalid requester="+requester+" message.sessionId="+message.sessionId);
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
@@ -394,8 +396,8 @@ NfcContentHelper.prototype = {
   handleMakeReadOnlyNDEFResponse: function handleReadOnlyNDEFResponse(message) {
     debug("MakeReadOnlyNDEFResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
-    if (typeof requester === 'undefined') {
-       debug('Returning: requester: ' + requester);
+    if (!requester) {
+       debug("MakeReadOnlyNDEFResponse Invalid requester="+requester+" message.sessionId="+message.sessionId);
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
@@ -412,8 +414,8 @@ NfcContentHelper.prototype = {
   handleConnectResponse: function handleConnectResponse(message) {
     debug("ConnectResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
-    if (typeof requester === 'undefined') {
-       debug('ConnectResponse return requester='+requester+" message.sessionId="+message.sessionId);
+    if (!requester) {
+       debug("ConnectResponse Invalid requester="+requester+" message.sessionId="+message.sessionId);
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
@@ -430,13 +432,13 @@ NfcContentHelper.prototype = {
   handleCloseResponse: function handleCloseResponse(message) {
     debug("CloseResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
-    if (typeof requester === 'undefined') {
+    if (!requester) {
+       debug("CloseResponse Invalid requester="+requester+" message.sessionId="+message.sessionId);
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
     let result = message.content;
     let requestId = atob(message.requestId);
-
 
     if (message.content.status != "OK") {
       this.fireRequestError(requestId, result.status);
