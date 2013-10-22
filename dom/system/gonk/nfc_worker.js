@@ -79,7 +79,6 @@ let Buf = {
   mCallback: null,
 };
 
-
 /**
  * Provide a high-level API representing NFC capabilities.
  * Rensponsible for converting NFC requests from Content process to binary data

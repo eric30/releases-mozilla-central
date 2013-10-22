@@ -364,8 +364,8 @@ Nfc.prototype = {
   },
 
   // nsINfcWorker
-
   worker: null,
+
   powerLevel: NFC.NFC_POWER_LEVEL_DISABLED,
 
   sessionTokenMap: null,
@@ -407,9 +407,9 @@ Nfc.prototype = {
        case "NFC:SetSessionToken":
          break;
        default:
-         if (message.json.sessionId !== this.sessionTokenMap[this._connectedSessionId]) {
-           debug("Invalid Session : " + message.sessionId + " Expected Session: " +
-                 this._connectedSessionId);
+         if (message.json.sessionToken !== this.sessionTokenMap[this._connectedSessionId]) {
+           debug("Invalid Session Token: " + message.json.sessionToken + " Expected Session Token: " +
+                 this.sessionTokenMap[this._connectedSessionId]);
            return;
          }
 

@@ -78,8 +78,8 @@ NfcContentHelper.prototype = {
 
   // FIXME: btoa's will be unneeded when binary nfcd/gonk protocol is merged.
   encodeNdefRecords: function encodeNdefRecords(records) {
-    var encodedRecords = [];
-    for(let i=0; i < records.length; i++) {
+    let encodedRecords = [];
+    for (let i=0; i < records.length; i++) {
       let record = records[i];
       encodedRecords.push({
         tnf: record.tnf,
@@ -117,7 +117,7 @@ NfcContentHelper.prototype = {
 
     cpmm.sendAsyncMessage("NFC:GetDetailsNDEF", {
       requestId: requestId,
-      sessionId: sessionToken
+      sessionToken: sessionToken
     });
     return request;
   },
@@ -133,7 +133,7 @@ NfcContentHelper.prototype = {
 
     cpmm.sendAsyncMessage("NFC:ReadNDEF", {
       requestId: requestId,
-      sessionId: sessionToken
+      sessionToken: sessionToken
     });
     return request;
   },
@@ -152,7 +152,7 @@ NfcContentHelper.prototype = {
 
     cpmm.sendAsyncMessage("NFC:WriteNDEF", {
       requestId: requestId,
-      sessionId: sessionToken,
+      sessionToken: sessionToken,
       records: encodedRecords
     });
     return request;
@@ -170,7 +170,7 @@ NfcContentHelper.prototype = {
 
     cpmm.sendAsyncMessage("NFC:MakeReadOnlyNDEF", {
       requestId: requestId,
-      sessionId: sessionToken
+      sessionToken: sessionToken
     });
     return request;
   },
@@ -186,7 +186,7 @@ NfcContentHelper.prototype = {
 
     cpmm.sendAsyncMessage("NFC:Connect", {
       requestId: requestId,
-      sessionId: sessionToken,
+      sessionToken: sessionToken,
       techType: techType
     });
     return request;
@@ -203,7 +203,7 @@ NfcContentHelper.prototype = {
 
     cpmm.sendAsyncMessage("NFC:Close", {
       requestId: requestId,
-      sessionId: sessionToken
+      sessionToken: sessionToken
     });
     return request;
   },
@@ -242,7 +242,6 @@ NfcContentHelper.prototype = {
   unregisterNfcCallback: function unregisterNfcCallback(callback) {
     this.unregisterCallback("_nfcCallbacks", callback);
   },
-
 
   // nsIObserver
 
