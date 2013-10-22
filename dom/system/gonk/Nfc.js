@@ -122,12 +122,12 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
       }
 
       if (targets.indexOf(target) != -1) {
-        if (DEBUG) debug("Already registered this target!");
+        debug("Already registered this target!");
         return;
       }
 
       targets.push(target);
-      if (DEBUG) debug("Registered :" + topic + " target: " + target);
+      debug("Registered :" + topic + " target: " + target);
     },
 
     _unregisterMessageTarget: function _unregisterMessageTarget(topic, target) {
@@ -146,15 +146,15 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
       }
 
       if (target == null) {
-        if (DEBUG) debug("Unregistered all targets for the " + topic + " targets: " + targets);
+        debug("Unregistered all targets for the " + topic + " targets: " + targets);
         targets = [];
         let list = this.topics;
-        if (DEBUG) debug("Topic List : " + list);
+        debug("Topic List : " + list);
         if (topic !== null) {
           var index = list.indexOf(topic);
           if (index > -1) {
             list.splice(index, 1);
-            if (DEBUG) debug("Updated topic list : " + list);
+            debug("Updated topic list : " + list);
           }
         }
         return;
@@ -163,7 +163,7 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
       let index = targets.indexOf(target);
       if (index != -1) {
         targets.splice(index, 1);
-        if (DEBUG) debug("Unregistered " + topic + " target: " + target);
+        debug("Unregistered " + topic + " target: " + target);
       }
     },
 
@@ -215,7 +215,7 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
      */
 
     receiveMessage: function receiveMessage(msg) {
-      if (DEBUG) debug("Received '" + msg.name + "' message from content process");
+      debug("Received '" + msg.name + "' message from content process");
       if (msg.name == "child-process-shutdown") {
         // By the time we receive child-process-shutdown, the child process has
         // already forgotten its permissions so we need to unregister the target
@@ -226,24 +226,23 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
 
       if (NFC_IPC_MSG_NAMES.indexOf(msg.name) != -1) {
         if (!msg.target.assertPermission("nfc-read")) {
-          if (DEBUG) {
-            debug("Nfc message " + msg.name +
-                  " from a content process with no 'nfc-read' privileges.");
-          }
+          debug("Nfc message " + msg.name +
+                " from a content process with no 'nfc-read' privileges.");
           return null;
         }
       } else {
-        if (DEBUG) debug("Ignoring unknown message type: " + msg.name);
+        debug("Ignoring unknown message type: " + msg.name);
         return null;
       }
 
       switch (msg.name) {
         case "NFC:SetSessionToken":
           this._registerMessageTarget(this.nfc.sessionTokenMap[this.nfc._connectedSessionId], msg.target);
-          if (DEBUG) debug("Registering target for this SessionToken / Topic : " + this.nfc.sessionTokenMap[this.nfc._connectedSessionId]);
+          debug("Registering target for this SessionToken / Topic : " +
+                this.nfc.sessionTokenMap[this.nfc._connectedSessionId]);
           return null;
         default:
-          if (DEBUG) debug("Not registering target for this SessionToken / Topic : : " + msg.name);
+          debug("Not registering target for this SessionToken / Topic : : " + msg.name);
       }
 
       // what do we do here? Maybe pass to Nfc.receiveMessage(msg)
@@ -267,7 +266,7 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
     },
 
     sendNfcResponseMessage: function sendNfcResponseMessage(message, data) {
-      if (DEBUG) debug("sendNfcResponseMessage :" + message);
+      debug("sendNfcResponseMessage :" + message);
       this._sendTargetMessage(this.nfc.sessionTokenMap[this.nfc._connectedSessionId], message, data);
     }
   };
@@ -490,7 +489,7 @@ Nfc.prototype = {
    * NFC Config API. Properties is a set of name value pairs.
    */
   setNFCPowerConfig: function setNFCPowerConfig(powerLevel) {
-    if (DEBUG) debug("NFC setNFCPowerConfig: " + powerLevel);
+    debug("NFC setNFCPowerConfig: " + powerLevel);
     this.powerLevel = powerLevel;
     // Just one param for now.
     this.setConfig({powerLevel: powerLevel});
