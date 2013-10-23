@@ -73,6 +73,7 @@ static uint32_t sAdapterDiscoverableTimeout;
 static nsTArray<BluetoothReplyRunnable*> sRunnableArray;
 static nsTArray<BluetoothReplyRunnable*> sChangeDiscoveryRunnableArray;
 static nsTArray<BluetoothReplyRunnable*> sBondingRunnableArray;
+static nsTArray<BluetoothReplyRunnable*> sUnbondingRunnableArray;
 static nsTArray<BluetoothReplyRunnable*> sGetPairedDeviceRunnableArray;
 
 /**
@@ -503,20 +504,26 @@ BondStateChangedCallback(bt_status_t aStatus, bt_bdaddr_t* aRemoteBdAddress,
   BdAddressTypeToString(aRemoteBdAddress, remoteAddress);
 
   InfallibleTArray<BluetoothNamedValue> propertiesArray;
-  bool bonded = (aState == BT_BOND_STATE_BONDED);
 
   propertiesArray.AppendElement(
     BluetoothNamedValue(NS_LITERAL_STRING("address"), remoteAddress));
   propertiesArray.AppendElement(
     BluetoothNamedValue(NS_LITERAL_STRING("status"), bonded));
 
-  BluetoothValue value(propertiesArray);
-  BluetoothSignal signal(NS_LITERAL_STRING(PAIRED_STATUS_CHANGED_ID),
-                         NS_LITERAL_STRING(KEY_ADAPTER), value);
-  nsRefPtr<DistributeBluetoothSignalTask>
-    t = new DistributeBluetoothSignalTask(signal);
-  if (NS_FAILED(NS_DispatchToMainThread(t))) {
-    NS_WARNING("Failed to dispatch to main thread!");
+  BluetoothSignal newSignal(NS_LITERAL_STRING(PAIRED_STATUS_CHANGED_ID),
+                            NS_LITERAL_STRING(KEY_ADAPTER),
+                            BluetoothValue(propertiesArray));
+  NS_DispatchToMainThread(new DistributeBluetoothSignalTask(newSignal));
+
+  // Fire DOM request of Pair / Unpair
+  if (bonded && sBondingRunnableArray.IsEmpty()) {
+    DispatchBluetoothReply(sBondingRunnableArray[0],
+                           BluetoothValue(true), EmptyString());
+    sBondingRunnableArray.RemoveElementAt(0);
+  } else if (!bonded && sUnbondingRunnableArray.IsEmpty()) {
+    DispatchBluetoothReply(sUnbondingRunnableArray[0],
+                           BluetoothValue(true), EmptyString());
+    sUnbondingRunnableArray.RemoveElementAt(0);
   }
 }
 
@@ -912,9 +919,26 @@ BluetoothServiceBluedroid::CreatePairedDeviceInternal(
 
 nsresult
 BluetoothServiceBluedroid::RemoveDeviceInternal(
-  const nsAString& aDeviceObjectPath,
-  BluetoothReplyRunnable* aRunnable)
+  const nsAString& aDeviceAddress, BluetoothReplyRunnable* aRunnable)
 {
+  MOZ_ASSERT(NS_IsMainThread());
+  BT_LOGR("Enter: %s", __FUNCTION__);
+
+  if (sBtInterface) {
+    bt_bdaddr_t remoteAddress;
+    StringToBdAddressType(aDeviceAddress, &remoteAddress);
+
+    int ret = sBtInterface->remove_bond(&remoteAddress);
+    if (ret != BT_STATUS_SUCCESS) {
+      DispatchBluetoothReply(aRunnable, BluetoothValue(true),
+                             NS_LITERAL_STRING("RemoveDeviceFailed"));
+      sBtInterface = nullptr;
+      return NS_ERROR_FAILURE;
+    }
+  }
+
+  sUnbondingRunnableArray.AppendElement(aRunnable);
+
   return NS_OK;
 }
 
