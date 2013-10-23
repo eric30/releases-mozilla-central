@@ -227,6 +227,21 @@ nsresult
 BluetoothServiceBluedroid::GetDefaultAdapterPathInternal(
   BluetoothReplyRunnable* aRunnable)
 {
+  MOZ_ASSERT(NS_IsMainThread());
+  BT_LOGR("Enter: %s", __FUNCTION__);
+
+  nsRefPtr<BluetoothReplyRunnable> runnable(aRunnable);
+
+  BluetoothValue v = InfallibleTArray<BluetoothNamedValue>();
+  v.get_ArrayOfBluetoothNamedValue().AppendElement(
+     BluetoothNamedValue(NS_LITERAL_STRING("Name"),
+     NS_LITERAL_STRING("EricBluedroid")));
+
+  nsAutoString replyError;
+  DispatchBluetoothReply(runnable.get(), v, replyError);
+
+  runnable.forget();
+
   return NS_OK;
 }
 
@@ -249,6 +264,9 @@ nsresult
 BluetoothServiceBluedroid::StartDiscoveryInternal(
   BluetoothReplyRunnable* aRunnable)
 {
+  MOZ_ASSERT(NS_IsMainThread());
+  BT_LOGR("Enter: %s", __FUNCTION__);
+
   return NS_OK;
 }
 
@@ -256,6 +274,9 @@ nsresult
 BluetoothServiceBluedroid::StopDiscoveryInternal(
   BluetoothReplyRunnable* aRunnable)
 {
+  MOZ_ASSERT(NS_IsMainThread());
+  BT_LOGR("Enter: %s", __FUNCTION__);
+
   return NS_OK;
 }
 
