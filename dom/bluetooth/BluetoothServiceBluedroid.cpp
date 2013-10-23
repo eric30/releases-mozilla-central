@@ -31,6 +31,8 @@ using namespace mozilla;
 using namespace mozilla::ipc;
 USING_BLUETOOTH_NAMESPACE
 
+typedef char bdstr_t[18];
+
 /**
  *  Classes only used in this file
  */
@@ -62,6 +64,25 @@ private:
 static bluetooth_device_t* sBtDevice;
 static const bt_interface_t* sBtInterface;
 static bool sIsBtEnabled = false;
+static bool sAdapterDiscoverable = false;
+static nsString sAdapterBdAddress;
+static nsString sAdapterBdName;
+
+/**
+ *  Generic static functions
+ */
+static void
+BdAddressTypeToString(bt_bdaddr_t* aBdAddressType, nsAString& aRetBdAddress)
+{
+  uint8_t* addr = aBdAddressType->address;
+  bdstr_t bdstr;
+
+  sprintf((char*)bdstr, "%02x:%02x:%02x:%02x:%02x:%02x",
+          (int)addr[0],(int)addr[1],(int)addr[2],
+          (int)addr[3],(int)addr[4],(int)addr[5]);
+
+  aRetBdAddress = NS_ConvertUTF8toUTF16((char*)bdstr);
+}
 
 /**
  *  Static callback functions
@@ -90,10 +111,72 @@ AdapterStateChangeCallback(bt_state_t status)
   }
 }
 
+static void
+AdapterPropertiesChangeCallback(bt_status_t aStatus, int aNumProperties,
+                                bt_property_t *aProperties)
+{
+  nsAutoString propertyName;
+  BluetoothValue propertyValue;
+  nsAutoString addrstr;
+  InfallibleTArray<BluetoothNamedValue> propertiesArray;
+  int type;
+
+  BT_LOGR("Enter: %s, Number of properties: %d", __FUNCTION__, aNumProperties);
+
+  for (int i = 0; i < aNumProperties; i++) {
+    bt_property_t p = aProperties[i];
+
+    if (p.type == BT_PROPERTY_BDADDR) {
+      BdAddressTypeToString((bt_bdaddr_t*)p.val, sAdapterBdAddress);
+      BT_LOGR("Adapter property: BDADDR. BD_ADDR:%s",
+              NS_ConvertUTF16toUTF8(sAdapterBdAddress).get());
+
+      propertyValue = sAdapterBdAddress;
+      propertiesArray.AppendElement(
+        BluetoothNamedValue(NS_LITERAL_STRING("Address"), propertyValue));
+    } else if (p.type == BT_PROPERTY_BDNAME) {
+      BT_LOGR("Adapter property: BDNAME. Name: %s, Length: %d",
+              (const char*)p.val, p.len);
+
+      propertyValue = sAdapterBdName = NS_ConvertUTF8toUTF16((char*)p.val);
+      propertiesArray.AppendElement(
+        BluetoothNamedValue(NS_LITERAL_STRING("Name"), propertyValue));
+    } else if (p.type == BT_PROPERTY_ADAPTER_SCAN_MODE) {
+      BT_LOGR("Adapter property: SCAN_MODE. Value: %d", *(uint32_t*)p.val);
+
+      propertyValue = sAdapterDiscoverable = *(uint32_t*)p.val;
+      propertiesArray.AppendElement(
+        BluetoothNamedValue(NS_LITERAL_STRING("Discoverable"), propertyValue));
+    } else if (p.type == BT_PROPERTY_ADAPTER_DISCOVERY_TIMEOUT) {
+      BT_LOGR("DISCOVERY_TIMEOUT: Haven't supported yet");
+      return;
+    } else if (p.type == BT_PROPERTY_ADAPTER_BONDED_DEVICES) {
+      BT_LOGR("BONDED_DEVICES: Haven't supported yet");
+      return;
+    } else if (p.type == BT_PROPERTY_UUIDS) {
+      BT_LOGR("UUID: Haven't supported yet");
+      return;
+    } else {
+      BT_LOGR("Even Bluedroid hasn't supported yet. Where did you come from?");
+      return;
+    }
+    BluetoothValue value(propertiesArray);
+    BluetoothSignal signal(NS_LITERAL_STRING("PropertyChanged"),
+                           NS_LITERAL_STRING(KEY_ADAPTER), value);
+    nsRefPtr<DistributeBluetoothSignalTask>
+      t = new DistributeBluetoothSignalTask(signal);
+    if (NS_FAILED(NS_DispatchToMainThread(t))) {
+      NS_WARNING("Failed to dispatch to main thread!");
+    }
+
+    BT_LOGR("Event fired: PropertyChanged");
+  }
+}
+
 bt_callbacks_t sBluetoothCallbacks = {
   sizeof(sBluetoothCallbacks),
-  AdapterStateChangeCallback/*,
-  moz_adapter_properties_callback,
+  AdapterStateChangeCallback,
+  AdapterPropertiesChangeCallback/*,
   moz_remote_device_properties_callback,
   moz_device_found_callback,
   moz_discovery_state_changed_callback,
@@ -234,8 +317,7 @@ BluetoothServiceBluedroid::GetDefaultAdapterPathInternal(
 
   BluetoothValue v = InfallibleTArray<BluetoothNamedValue>();
   v.get_ArrayOfBluetoothNamedValue().AppendElement(
-     BluetoothNamedValue(NS_LITERAL_STRING("Name"),
-     NS_LITERAL_STRING("EricBluedroid")));
+    BluetoothNamedValue(NS_LITERAL_STRING("Name"), sAdapterBdName));
 
   nsAutoString replyError;
   DispatchBluetoothReply(runnable.get(), v, replyError);
