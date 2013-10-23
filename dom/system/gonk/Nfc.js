@@ -320,6 +320,20 @@ Nfc.prototype = {
   },
 
   /**
+   * Send arbitrary message to worker.
+   *
+   * @param nfcMessageType
+   *        A text message type.
+   * @param message [optional]
+   *        An optional message object to send.
+   */
+  send: function send(nfcMessageType, message) {
+    message = message || {};
+    message.type = nfcMessageType;
+    this.worker.postMessage(message);
+  },
+
+  /**
    * Process the incoming message from the NFC worker
    */
   onmessage: function onmessage(event) {
@@ -418,22 +432,22 @@ Nfc.prototype = {
 
     switch (message.name) {
       case "NFC:GetDetailsNDEF":
-        this.worker.postMessage({type: "getDetailsNDEF", content: message.json});
+        this.send("getDetailsNDEF", message.json);
         break;
       case "NFC:ReadNDEF":
-        this.worker.postMessage({type: "readNDEF", content: message.json});
+        this.send("readNDEF", message.json);
         break;
       case "NFC:WriteNDEF":
-        this.worker.postMessage({type: "writeNDEF", content: message.json});
+        this.send("writeNDEF", message.json);
         break;
       case "NFC:MakeReadOnlyNDEF":
-        this.worker.postMessage({type: "makeReadOnlyNDEF", content: message.json});
+        this.send("makeReadOnlyNDEF", message.json);
         break;
       case "NFC:Connect":
-        this.worker.postMessage({type: "connect", content: message.json});
+        this.send("connect", message.json);
         break;
       case "NFC:Close":
-        this.worker.postMessage({type: "close", content: message.json});
+        this.send("close", message.json);
         break;
       default:
         debug("UnSupported : Message Name " + message.name);
@@ -504,7 +518,7 @@ Nfc.prototype = {
       type: "ConfigRequest",
       powerLevel: prop.powerLevel
     };
-    this.worker.postMessage({type: "configRequest", content: outMessage});
+    this.send("configRequest", outMessage);
   }
 };
 

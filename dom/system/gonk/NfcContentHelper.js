@@ -327,10 +327,10 @@ NfcContentHelper.prototype = {
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
-    let result = message.content;
+    let result = message;
     let requestId = atob(message.requestId);
 
-    if (message.content.status != "OK") {
+    if (message.status != "OK") {
       this.fireRequestError(requestId, result.status);
     } else  {
       this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
@@ -345,7 +345,7 @@ NfcContentHelper.prototype = {
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
-    let result = message.content;
+    let result = message;
     let requestId = atob(message.requestId);
     let records = result.records.map(function(r) {
       let type = "";
@@ -382,7 +382,7 @@ NfcContentHelper.prototype = {
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
-    let result = message.content;
+    let result = message;
     let requestId = atob(message.requestId);
 
     if (result.status != "OK") {
@@ -400,7 +400,7 @@ NfcContentHelper.prototype = {
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
-    let result = message.content;
+    let result = message;
     let requestId = atob(message.requestId);
 
     if (result.status != "OK") {
@@ -418,10 +418,10 @@ NfcContentHelper.prototype = {
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
-    let result = message.content;
+    let result = message;
     let requestId = atob(message.requestId);
 
-    if (message.content.status != "OK") {
+    if (message.status != "OK") {
       this.fireRequestError(requestId, result.status);
     } else  {
       this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
@@ -436,10 +436,10 @@ NfcContentHelper.prototype = {
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
-    let result = message.content;
+    let result = message;
     let requestId = atob(message.requestId);
 
-    if (message.content.status != "OK") {
+    if (message.status != "OK") {
       this.fireRequestError(requestId, result.status);
     } else  {
       this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
