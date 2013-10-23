@@ -151,7 +151,7 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
         let list = this.topics;
         debug("Topic List : " + list);
         if (topic !== null) {
-          var index = list.indexOf(topic);
+          let index = list.indexOf(topic);
           if (index > -1) {
             list.splice(index, 1);
             debug("Updated topic list : " + list);
@@ -174,7 +174,7 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
       // Remove previous queued message of same message type, only one message
       // per message type is allowed in queue.
       let messageQueue = this.targetMessageQueue;
-      for(let i = 0; i < messageQueue.length; i++) {
+      for (let i = 0; i < messageQueue.length; i++) {
         if (messageQueue[i].message === message) {
           messageQueue.splice(i, 1);
           break;
@@ -362,8 +362,8 @@ Nfc.prototype = {
      case "ConfigResponse":
         gSystemMessenger.broadcastMessage("nfc-powerlevel-change", message);
         break;
-      case "ConnectResponse":
-      case "CloseResponse": // Fall through.
+      case "ConnectResponse": // Fall through.
+      case "CloseResponse":
       case "DetailsNDEFResponse":
       case "ReadNDEFResponse":
       case "MakeReadOnlyNDEFResponse":

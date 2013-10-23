@@ -28,7 +28,7 @@ let NFC = {};
 Cu.import("resource://gre/modules/nfc_consts.js", NFC);
 
 // set to true to in nfc_consts.js to see debug messages
-var DEBUG = NFC.DEBUG_CONTENT_HELPER;
+let DEBUG = NFC.DEBUG_CONTENT_HELPER;
 
 let debug;
 if (DEBUG) {
@@ -79,7 +79,7 @@ NfcContentHelper.prototype = {
   // FIXME: btoa's will be unneeded when binary nfcd/gonk protocol is merged.
   encodeNdefRecords: function encodeNdefRecords(records) {
     let encodedRecords = [];
-    for (let i=0; i < records.length; i++) {
+    for (let i = 0; i < records.length; i++) {
       let record = records[i];
       encodedRecords.push({
         tnf: record.tnf,
@@ -323,7 +323,8 @@ NfcContentHelper.prototype = {
     debug("DetailsNDEFResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
     if (!requester) {
-       debug("DetailsNDEFResponse Invalid requester="+requester+" message.sessionId="+message.sessionId);
+       debug("DetailsNDEFResponse Invalid requester=" + requester +
+             " message.sessionId=" + message.sessionId);
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
@@ -341,7 +342,8 @@ NfcContentHelper.prototype = {
     debug("ReadNDEFResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
     if (!requester) {
-       debug("ReadNDEFResponse Invalid requester="+requester+" message.sessionId="+message.sessionId);
+       debug("ReadNDEFResponse Invalid requester=" + requester +
+             " message.sessionId=" + message.sessionId);
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
@@ -378,7 +380,8 @@ NfcContentHelper.prototype = {
     debug("WriteNDEFResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
     if (!requester) {
-       debug("WriteNDEFResponse Invalid requester="+requester+" message.sessionId="+message.sessionId);
+       debug("WriteNDEFResponse Invalid requester=" + requester +
+             " message.sessionId=" + message.sessionId);
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
@@ -396,7 +399,8 @@ NfcContentHelper.prototype = {
     debug("MakeReadOnlyNDEFResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
     if (!requester) {
-       debug("MakeReadOnlyNDEFResponse Invalid requester="+requester+" message.sessionId="+message.sessionId);
+       debug("MakeReadOnlyNDEFResponse Invalid requester=" + requester +
+             " message.sessionId=" + message.sessionId);
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
@@ -414,7 +418,8 @@ NfcContentHelper.prototype = {
     debug("ConnectResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
     if (!requester) {
-       debug("ConnectResponse Invalid requester="+requester+" message.sessionId="+message.sessionId);
+       debug("ConnectResponse Invalid requester=" + requester +
+             " message.sessionId=" + message.sessionId);
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
@@ -432,7 +437,8 @@ NfcContentHelper.prototype = {
     debug("CloseResponse(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
     if (!requester) {
-       debug("CloseResponse Invalid requester="+requester+" message.sessionId="+message.sessionId);
+       debug("CloseResponse Invalid requester=" + requester +
+             " message.sessionId=" + message.sessionId);
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
