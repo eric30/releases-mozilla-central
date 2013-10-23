@@ -337,10 +337,7 @@ Nfc.prototype = {
    */
   onmessage: function onmessage(event) {
     let message = event.data;
-    debug("Received message: " + JSON.stringify(message));
-    if (!this._enabled) {
-      throw new Error("NFC is not enabled.");
-    }
+    debug("Received message from NFC worker: " + JSON.stringify(message));
 
     switch (message.type) {
       case "techDiscovered":
@@ -355,8 +352,8 @@ Nfc.prototype = {
         // Update the upper layers with a session token (alias)
         message.sessionId = this.sessionTokenMap[this._connectedSessionId];
         gSystemMessenger.broadcastMessage("nfc-manager-tech-lost", message);
-        this._connectedSessionId = null;
         delete this.sessionTokenMap[this._connectedSessionId];
+        this._connectedSessionId = null;
         break;
      case "ConfigResponse":
         gSystemMessenger.broadcastMessage("nfc-powerlevel-change", message);
