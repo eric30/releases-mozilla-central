@@ -67,6 +67,8 @@ static bool sIsBtEnabled = false;
 static bool sAdapterDiscoverable = false;
 static nsString sAdapterBdAddress;
 static nsString sAdapterBdName;
+static uint32_t sAdapterDiscoverableTimeout;
+static nsTArray<BluetoothReplyRunnable*> sRunnableArray;
 
 /**
  *  Generic static functions
@@ -148,7 +150,13 @@ AdapterPropertiesChangeCallback(bt_status_t aStatus, int aNumProperties,
       propertiesArray.AppendElement(
         BluetoothNamedValue(NS_LITERAL_STRING("Discoverable"), propertyValue));
     } else if (p.type == BT_PROPERTY_ADAPTER_DISCOVERY_TIMEOUT) {
-      BT_LOGR("DISCOVERY_TIMEOUT: Haven't supported yet");
+      BT_LOGR("Adapter property: DISCOVERY_TIMEOUT. Value: %d",
+              *(uint32_t*)p.val);
+
+      propertyValue = sAdapterDiscoverableTimeout = *(uint32_t*)p.val;
+      propertiesArray.AppendElement(
+        BluetoothNamedValue(NS_LITERAL_STRING("DiscoverableTimeout"),
+                            propertyValue));
       return;
     } else if (p.type == BT_PROPERTY_ADAPTER_BONDED_DEVICES) {
       BT_LOGR("BONDED_DEVICES: Haven't supported yet");
@@ -170,6 +178,16 @@ AdapterPropertiesChangeCallback(bt_status_t aStatus, int aNumProperties,
     }
 
     BT_LOGR("Event fired: PropertyChanged");
+
+    // FIXME: This is a hack for notifying Gaia app by firing DOM requests
+    // here, however we can't guarantee the fired DOM request is the right one
+    // with current implementation.
+    if (!sRunnableArray.IsEmpty()) {
+      BluetoothValue values(true);
+      DispatchBluetoothReply(sRunnableArray[0], values, EmptyString());
+
+      sRunnableArray.RemoveElementAt(0);
+    }
   }
 }
 
@@ -374,6 +392,55 @@ BluetoothServiceBluedroid::SetProperty(BluetoothObjectType aType,
                                        const BluetoothNamedValue& aValue,
                                        BluetoothReplyRunnable* aRunnable)
 {
+  MOZ_ASSERT(NS_IsMainThread());
+  BT_LOGR("Enter: %s. Name: %s", __FUNCTION__,
+          NS_ConvertUTF16toUTF8(aValue.name()).get());
+
+  const nsString propName = aValue.name();
+  bt_property_t prop;
+
+  // For Bluedroid, we need to set the property type so checking property name
+  // becomes necessary.
+  if (propName.EqualsLiteral("Name")) {
+    prop.type = BT_PROPERTY_BDNAME;
+  } else if (propName.EqualsLiteral("Discoverable")) {
+    prop.type = BT_PROPERTY_ADAPTER_SCAN_MODE;
+  } else if (propName.EqualsLiteral("DiscoverableTimeout")) {
+    prop.type = BT_PROPERTY_ADAPTER_DISCOVERY_TIMEOUT;
+  } else {
+    BT_LOGR("Currently not handled.");
+  }
+
+  if (aValue.value().type() == BluetoothValue::Tuint32_t) {
+    prop.val = (void*)aValue.value().get_uint32_t();
+
+    BT_LOGR("Int Value: %d", aValue.value().get_uint32_t());
+  } else if (aValue.value().type() == BluetoothValue::TnsString) {
+    nsString str = aValue.value().get_nsString();
+    char* cstr = ToNewUTF8String(str);
+    NS_ENSURE_TRUE(cstr, NS_ERROR_OUT_OF_MEMORY);
+
+    prop.val = cstr;
+    prop.len = str.Length();
+
+    BT_LOGR("String value: %s, String len: %d", prop.val, prop.len);
+  } else if (aValue.value().type() == BluetoothValue::Tbool) {
+    bt_scan_mode_t mode = aValue.value().get_bool() ?
+      BT_SCAN_MODE_CONNECTABLE_DISCOVERABLE :
+      BT_SCAN_MODE_CONNECTABLE;
+    bt_scan_mode_t* sss = &mode;
+    prop.val = (void*)sss;
+    prop.len = 4;
+
+    BT_LOGR("Boolean value: %d", aValue.value().get_bool());
+  } else {
+    BT_LOGR("SetProperty but the property cannot be recognized correctly.");
+    return NS_OK;
+  }
+
+  sRunnableArray.AppendElement(aRunnable);
+  sBtInterface->set_adapter_property(&prop);
+
   return NS_OK;
 }
 
