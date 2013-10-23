@@ -272,7 +272,6 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
   };
 });
 
-
 function Nfc() {
   debug("Starting Worker");
   this.worker = new ChromeWorker("resource://gre/modules/nfc_worker.js");
@@ -326,7 +325,7 @@ Nfc.prototype = {
    * @param message [optional]
    *        An optional message object to send.
    */
-  send: function send(nfcMessageType, message) {
+  sendToWorker: function sendToWorker(nfcMessageType, message) {
     message = message || {};
     message.type = nfcMessageType;
     this.worker.postMessage(message);
@@ -428,22 +427,22 @@ Nfc.prototype = {
 
     switch (message.name) {
       case "NFC:GetDetailsNDEF":
-        this.send("getDetailsNDEF", message.json);
+        this.sendToWorker("getDetailsNDEF", message.json);
         break;
       case "NFC:ReadNDEF":
-        this.send("readNDEF", message.json);
+        this.sendToWorker("readNDEF", message.json);
         break;
       case "NFC:WriteNDEF":
-        this.send("writeNDEF", message.json);
+        this.sendToWorker("writeNDEF", message.json);
         break;
       case "NFC:MakeReadOnlyNDEF":
-        this.send("makeReadOnlyNDEF", message.json);
+        this.sendToWorker("makeReadOnlyNDEF", message.json);
         break;
       case "NFC:Connect":
-        this.send("connect", message.json);
+        this.sendToWorker("connect", message.json);
         break;
       case "NFC:Close":
-        this.send("close", message.json);
+        this.sendToWorker("close", message.json);
         break;
       default:
         debug("UnSupported : Message Name " + message.name);
@@ -512,7 +511,7 @@ Nfc.prototype = {
       type: "ConfigRequest",
       powerLevel: prop.powerLevel
     };
-    this.send("configRequest", outMessage);
+    this.sendToWorker("configRequest", outMessage);
   }
 };
 

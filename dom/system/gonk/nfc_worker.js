@@ -41,7 +41,8 @@ let Buf = {
    */
   processParcel: function processParcel() {
     let pduType = this.readInt32();
-    NfcWorker.handleParcel(pduType, this.mCallback, this.readAvailable);
+    if (DEBUG) debug("No of bytes available in Parcel : " + this.readAvailable);
+    NfcWorker.handleParcel(pduType, this.mCallback);
   },
 
   /**
@@ -326,11 +327,11 @@ let NfcWorker = {
     Buf.sendParcel();
   },
 
-  handleParcel: function handleParcel(request_type, callback, length) {
+  handleParcel: function handleParcel(request_type, callback) {
     let method = this[request_type];
     if (typeof method == "function") {
       if (DEBUG) debug("Handling parcel as " + method.name);
-      method.call(this, length);
+      method.call(this);
     } else if (typeof callback == "function") {
       callback.call(this, request_type);
       this.mCallback = null;
@@ -350,14 +351,14 @@ let NfcWorker = {
 /**
  * Notification Handlers
  */
-NfcWorker[NFC_NOTIFICATION_INITIALIZED] = function NFC_NOTIFICATION_INITIALIZED (length) {
+NfcWorker[NFC_NOTIFICATION_INITIALIZED] = function NFC_NOTIFICATION_INITIALIZED () {
   let status       = Buf.readInt32();
   let majorVersion = Buf.readInt32();
   let minorVersion = Buf.readInt32();
-  debug("NFC_NOTIFICATION_INITIALIZED status:"+status+" major:"+majorVersion+" minor:"+minorVersion);
+  debug("NFC_NOTIFICATION_INITIALIZED status:" + status + " major:" + majorVersion + " minor:" + minorVersion);
 };
 
-NfcWorker[NFC_NOTIFICATION_TECH_DISCOVERED] = function NFC_NOTIFICATION_TECH_DISCOVERED(length) {
+NfcWorker[NFC_NOTIFICATION_TECH_DISCOVERED] = function NFC_NOTIFICATION_TECH_DISCOVERED() {
   debug("NFC_NOTIFICATION_TECH_DISCOVERED");
   let techs     = [];
   let sessionId = Buf.readInt32();
@@ -373,7 +374,7 @@ NfcWorker[NFC_NOTIFICATION_TECH_DISCOVERED] = function NFC_NOTIFICATION_TECH_DIS
                        });
 };
 
-NfcWorker[NFC_NOTIFICATION_TECH_LOST] = function NFC_NOTIFICATION_TECH_LOST(length) {
+NfcWorker[NFC_NOTIFICATION_TECH_LOST] = function NFC_NOTIFICATION_TECH_LOST() {
   debug("NFC_NOTIFICATION_TECH_LOST");
   let sessionId = Buf.readInt32();
   debug("sessionId = "+sessionId);
