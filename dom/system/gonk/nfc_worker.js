@@ -108,22 +108,23 @@ let NfcWorker = {
    */
   readNDEF: function readNDEF(message) {
     let cb = function callback() {
-      let erorr = Buf.readInt32();
-      let sessionId = Buf.readInt32();
-      let numOfRecords = Buf.readInt32();
       let records = [];
+      let erorr        = Buf.readInt32();
+      let sessionId    = Buf.readInt32();
+      let numOfRecords = Buf.readInt32();
+
       for (let i = 0; i < numOfRecords; i++) {
-        let tnf = Buf.readInt32();
+        let tnf        = Buf.readInt32();
         let typeLength = Buf.readInt32();
-        let type = Buf.readUint8Array(typeLength);
-        let padding = getPaddingLen(typeLength);
+        let type       = Buf.readUint8Array(typeLength);
+        let padding    = getPaddingLen(typeLength);
         for (let i = 0; i < padding; i++) {
           Buf.readUint8();
         }
 
         let idLength = Buf.readInt32();
-        let id = Buf.readUint8Array(idLength);
-        padding = getPaddingLen(idLength);
+        let id       = Buf.readUint8Array(idLength);
+        padding      = getPaddingLen(idLength);
         for (let i = 0; i < padding; i++) {
           Buf.readUint8();
         }
@@ -145,10 +146,10 @@ let NfcWorker = {
                       payload: payload});
       }
 
-      message.requestId = message.requestId;
+      message.type      = "ReadNDEFResponse";
       message.sessionId = sessionId;
-      message.records = records;
-      message.type = "ReadNDEFResponse";
+      message.requestId = message.requestId;
+      message.records   = records;
       this.sendDOMMessage(message);
     }
 
@@ -162,18 +163,20 @@ let NfcWorker = {
    */
   writeNDEF: function writeNDEF(message) {
     let cb = function callback() {
-      message.type = "WriteNDEFResponse";
-      let error = Buf.readInt32();
-      let sessionId = Buf.readInt32();
-      message.requestId = message.requestId;
+      let error         = Buf.readInt32();
+      let sessionId     = Buf.readInt32();
+
+      message.type      = "WriteNDEFResponse";
       message.sessionId = sessionId;
-      message.status = (error === 0) ? GECKO_NFC_ERROR_SUCCESS : GECKO_NFC_ERROR_GENERIC_FAILURE;
+      message.requestId = message.requestId;
+      message.status = (error === 0) ? GECKO_NFC_ERROR_SUCCESS :
+                                       GECKO_NFC_ERROR_GENERIC_FAILURE;
       this.sendDOMMessage(message);
     };
 
     Buf.newParcel(NFC_REQUEST_WRITE_NDEF, cb);
     Buf.writeInt32(message.sessionId);
-    let records = message.records;
+    let records    = message.records;
     let numRecords = records.length;
     Buf.writeInt32(numRecords);
 
@@ -210,7 +213,6 @@ let NfcWorker = {
       for (let i = 0; i < padding; i++) {
         Buf.writeUint8(0x00);
       }
-
     }
 
     Buf.sendParcel();
@@ -221,14 +223,17 @@ let NfcWorker = {
    */
   makeReadOnlyNDEF: function makeReadOnlyNDEF(message) {
     let cb = function callback() {
-      message.type = "MakeReadOnlyNDEFResponse";
-      let error = Buf.readInt32();
-      let sessionId = Buf.readInt32();
-      message.requestId = message.requestId;
+      let error         = Buf.readInt32();
+      let sessionId     = Buf.readInt32();
+
+      message.type      = "MakeReadOnlyNDEFResponse";
       message.sessionId = sessionId;
-      message.status = (error === 0) ? GECKO_NFC_ERROR_SUCCESS : GECKO_NFC_ERROR_GENERIC_FAILURE;
+      message.requestId = message.requestId;
+      message.status = (error === 0) ? GECKO_NFC_ERROR_SUCCESS :
+                                       GECKO_NFC_ERROR_GENERIC_FAILURE;
       this.sendDOMMessage(message);
     };
+
     Buf.newParcel(NFC_REQUEST_MAKE_NDEF_READ_ONLY, cb);
     Buf.writeInt32(message.sessionId);
     Buf.sendParcel();
@@ -239,16 +244,18 @@ let NfcWorker = {
    */
   getDetailsNDEF: function getDetailsNDEF(message) {
     let cb = function callback() {
-      message.type = "DetailsNDEFResponse";
-      let error = Buf.readInt32();
-      let sessionId = Buf.readInt32();
-      let maxSupportedLength = Buf.readInt32();
-      let mode = Buf.readInt32();
-      message.requestId = message.requestId;
-      message.sessionId = sessionId;
+      let error                  = Buf.readInt32();
+      let sessionId              = Buf.readInt32();
+      let maxSupportedLength     = Buf.readInt32();
+      let mode                   = Buf.readInt32();
+
+      message.type               = "DetailsNDEFResponse";
+      message.sessionId          = sessionId;
+      message.requestId          = message.requestId;
       message.maxSupportedLength = maxSupportedLength;
-      message.mode = mode;
-      message.status = (error === 0) ? GECKO_NFC_ERROR_SUCCESS : GECKO_NFC_ERROR_GENERIC_FAILURE;
+      message.mode               = mode;
+      message.status = (error === 0) ? GECKO_NFC_ERROR_SUCCESS :
+                                       GECKO_NFC_ERROR_GENERIC_FAILURE;
       this.sendDOMMessage(message);
     };
     Buf.newParcel(NFC_REQUEST_GET_DETAILS, cb);
@@ -262,14 +269,17 @@ let NfcWorker = {
    */
   connect: function connect(message) {
     let cb = function callback() {
-      message.type = "ConnectResponse";
-      let error = Buf.readInt32();
-      let sessionId = Buf.readInt32();
-      message.requestId = message.requestId;
+      let error         = Buf.readInt32();
+      let sessionId     = Buf.readInt32();
+
+      message.type      = "ConnectResponse";
       message.sessionId = sessionId;
-      message.status = (error === 0) ? GECKO_NFC_ERROR_SUCCESS : GECKO_NFC_ERROR_GENERIC_FAILURE;
+      message.requestId = message.requestId;
+      message.status = (error === 0) ? GECKO_NFC_ERROR_SUCCESS :
+                                       GECKO_NFC_ERROR_GENERIC_FAILURE;
       this.sendDOMMessage(message);
     };
+
     Buf.newParcel(NFC_REQUEST_CONNECT, cb);
     Buf.writeInt32(message.sessionId);
     Buf.writeInt32(message.techType);
@@ -280,7 +290,19 @@ let NfcWorker = {
    * NFC Configuration
    */
   configRequest: function configRequest(message) {
-    debug("config:"+JSON.stringify(message.content));
+    let cb = function callback() {
+      let error         = Buf.readInt32();
+
+      message.type      = "ConfigResponse";
+      message.requestId = message.requestId;
+      message.status = (error === 0) ? GECKO_NFC_ERROR_SUCCESS :
+                                       GECKO_NFC_ERROR_GENERIC_FAILURE;
+      this.sendDOMMessage(message);
+    };
+
+    Buf.newParcel(NFC_REQUEST_CONFIG , cb);
+    Buf.writeInt32(message.powerLevel);
+    Buf.sendParcel();
   },
 
   /**
@@ -288,12 +310,14 @@ let NfcWorker = {
    */
   close: function close(message) {
     let cb = function callback() {
-      message.type = "CloseResponse";
-      let error = Buf.readInt32();
-      let sessionId = Buf.readInt32();
-      message.requestId = message.requestId;
+      let error         = Buf.readInt32();
+      let sessionId     = Buf.readInt32();
+
+      message.type      = "CloseResponse";
       message.sessionId = sessionId;
-      message.status = (error === 0) ? GECKO_NFC_ERROR_SUCCESS : GECKO_NFC_ERROR_GENERIC_FAILURE;
+      message.requestId = message.requestId;
+      message.status = (error === 0) ? GECKO_NFC_ERROR_SUCCESS :
+                                       GECKO_NFC_ERROR_GENERIC_FAILURE;
       this.sendDOMMessage(message);
     };
 
@@ -327,7 +351,7 @@ let NfcWorker = {
  * Notification Handlers
  */
 NfcWorker[NFC_NOTIFICATION_INITIALIZED] = function NFC_NOTIFICATION_INITIALIZED (length) {
-  let status = Buf.readInt32();
+  let status       = Buf.readInt32();
   let majorVersion = Buf.readInt32();
   let minorVersion = Buf.readInt32();
   debug("NFC_NOTIFICATION_INITIALIZED status:"+status+" major:"+majorVersion+" minor:"+minorVersion);
@@ -335,10 +359,10 @@ NfcWorker[NFC_NOTIFICATION_INITIALIZED] = function NFC_NOTIFICATION_INITIALIZED 
 
 NfcWorker[NFC_NOTIFICATION_TECH_DISCOVERED] = function NFC_NOTIFICATION_TECH_DISCOVERED(length) {
   debug("NFC_NOTIFICATION_TECH_DISCOVERED");
+  let techs     = [];
   let sessionId = Buf.readInt32();
-  let num = Buf.readInt32();
+  let num       = Buf.readInt32();
 
-  let techs = [];
   for (let i = 0; i < num; i++) {
     techs.push(NFC_TECHS[Buf.readUint8()]);
   }
