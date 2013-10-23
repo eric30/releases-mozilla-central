@@ -330,7 +330,7 @@ NfcContentHelper.prototype = {
     let result = message;
     let requestId = atob(message.requestId);
 
-    if (message.status != "OK") {
+    if (message.status !== GECKO_NFC_ERROR_SUCCESS) {
       this.fireRequestError(requestId, result.status);
     } else  {
       this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
@@ -385,7 +385,7 @@ NfcContentHelper.prototype = {
     let result = message;
     let requestId = atob(message.requestId);
 
-    if (result.status != "OK") {
+    if (result.status !== NFC.GECKO_NFC_ERROR_SUCCESS) {
       this.fireRequestError(requestId, result.status);
     } else  {
       this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
@@ -403,7 +403,7 @@ NfcContentHelper.prototype = {
     let result = message;
     let requestId = atob(message.requestId);
 
-    if (result.status != "OK") {
+    if (result.status !== NFC.GECKO_NFC_ERROR_SUCCESS) {
       this.fireRequestError(requestId, ObjectWrapper.wrap(result, requester.win));
     } else  {
       this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
@@ -421,7 +421,7 @@ NfcContentHelper.prototype = {
     let result = message;
     let requestId = atob(message.requestId);
 
-    if (message.status != "OK") {
+    if (message.status !== NFC.GECKO_NFC_ERROR_SUCCESS) {
       this.fireRequestError(requestId, result.status);
     } else  {
       this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
@@ -439,7 +439,7 @@ NfcContentHelper.prototype = {
     let result = message;
     let requestId = atob(message.requestId);
 
-    if (message.status != "OK") {
+    if (message.status !== NFC.GECKO_NFC_ERROR_SUCCESS) {
       this.fireRequestError(requestId, result.status);
     } else  {
       this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));

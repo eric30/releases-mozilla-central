@@ -48,8 +48,9 @@ this.NFC_TECHS = {
   4:'NFC_A'
 };
 
-this.GECKO_NFC_ERROR_SUCCESS = "OK";
-this.GECKO_NFC_ERROR_GENERIC_FAILURE = "FAILURE";
+// TODO: Fill-in all error codes for Gonk/nfcd protocol
+this.GECKO_NFC_ERROR_SUCCESS = 0;
+this.GECKO_NFC_ERROR_GENERIC_FAILURE = 1;
 
 // NFC powerlevels must match config PDUs.
 this.NFC_POWER_LEVEL_DISABLED       = 0;
