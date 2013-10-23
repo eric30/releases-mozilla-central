@@ -289,7 +289,6 @@ function Nfc() {
   gMessageManager.init(this);
   let lock = gSettingsService.createLock();
   lock.get("nfc.powerlevel", this);
-  this.powerLevel = NFC.NFC_POWER_LEVEL_DISABLED;
   lock.get(NFC.SETTING_NFC_ENABLED, this);
   // Maps sessionId (that are generated from nfcd) with a unique guid : 'SessionToken'
   this.sessionTokenMap = {};
@@ -467,10 +466,8 @@ Nfc.prototype = {
         // General power setting
         if (this._enabled) {
           this.setNFCPowerConfig(NFC.NFC_POWER_LEVEL_ENABLED);
-          this._enabled = true;
         } else {
           this.setNFCPowerConfig(NFC.NFC_POWER_LEVEL_DISABLED);
-          this._enabled = false;
         }
         break;
     }
