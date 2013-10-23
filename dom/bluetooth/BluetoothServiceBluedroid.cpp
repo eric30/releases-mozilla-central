@@ -73,6 +73,7 @@ static uint32_t sAdapterDiscoverableTimeout;
 static nsTArray<BluetoothReplyRunnable*> sRunnableArray;
 static nsTArray<BluetoothReplyRunnable*> sChangeDiscoveryRunnableArray;
 static nsTArray<BluetoothReplyRunnable*> sBondingRunnableArray;
+static nsTArray<BluetoothReplyRunnable*> sGetPairedDeviceRunnableArray;
 
 /**
  *  Generic static functions
@@ -287,8 +288,56 @@ RemoteDevicePropertiesChangeCallback(bt_status_t aStatus,
                                      int aNumProperties,
                                      bt_property_t *aProperties)
 {
-  // FIXME: To be implemented
-  BT_LOGR("Enter: %s, Number of properties: %d", __FUNCTION__, aNumProperties);
+  BT_LOGR("Enter: %s, Number of properties: %d",
+          __FUNCTION__, aNumProperties);
+
+  // First, get remote device bd_address since it will be the key of
+  // return name value pair.
+  nsString remoteDeviceBdAddress;
+  BdAddressTypeToString(aBdAddress, remoteDeviceBdAddress);
+
+  InfallibleTArray<BluetoothNamedValue> deviceProperties;
+
+  for (int i = 0; i < aNumProperties; ++i) {
+    bt_property_t p = aProperties[i];
+
+    if (p.type == BT_PROPERTY_BDNAME) {
+      BT_LOGR("Device property: BDNAME. Name: %s, Length: %d",
+              (const char*)p.val, p.len);
+
+      BluetoothValue propertyValue = NS_ConvertUTF8toUTF16((char*)p.val);
+      deviceProperties.AppendElement(
+        BluetoothNamedValue(NS_LITERAL_STRING("Name"), propertyValue));
+    } else if (p.type == BT_PROPERTY_CLASS_OF_DEVICE) {
+      uint32_t cod = *(uint32_t*)p.val;
+      deviceProperties.AppendElement(
+        BluetoothNamedValue(NS_LITERAL_STRING("Class"), BluetoothValue(cod)));
+
+      nsString icon;
+      ClassToIcon(cod, icon);
+      deviceProperties.AppendElement(
+        BluetoothNamedValue(NS_LITERAL_STRING("Icon"), BluetoothValue(icon)));
+
+      BT_LOGR("Device property: Class: %d, Icon: %s",
+              cod, NS_ConvertUTF16toUTF8(icon).get());
+    } else {
+      BT_LOGR("Other non-handled device properties. Type: %d", p.type);
+    }
+  }
+
+  InfallibleTArray<BluetoothNamedValue> deviceArray;
+  deviceArray.AppendElement(
+    BluetoothNamedValue(remoteDeviceBdAddress, deviceProperties));
+
+  // FIXME: This is a hack for notifying Gaia app by firing DOM requests
+  // here, however we can't guarantee the fired DOM request is the right one
+  // with current implementation.
+  if (!sGetPairedDeviceRunnableArray.IsEmpty()) {
+    DispatchBluetoothReply(sGetPairedDeviceRunnableArray[0],
+                           BluetoothValue(deviceArray), EmptyString());
+
+    sGetPairedDeviceRunnableArray.RemoveElementAt(0);
+  }
 }
 
 static void
@@ -440,6 +489,16 @@ BondStateChangedCallback(bt_status_t aStatus, bt_bdaddr_t* aRemoteBdAddress,
     return;
   }
 
+  bool bonded = (aState == BT_BOND_STATE_BONDED);
+
+  // Original approach: Broadcast system message of
+  // "bluetooth-pairedstatuschanged" from BluetoothService.
+  BluetoothSignal signal(NS_LITERAL_STRING(PAIRED_STATUS_CHANGED_ID),
+                         NS_LITERAL_STRING(KEY_LOCAL_AGENT),
+                         BluetoothValue(bonded));
+  NS_DispatchToMainThread(new DistributeBluetoothSignalTask(signal));
+
+  // New approach: Dispatch event from BluetoothAdapter
   nsAutoString remoteAddress;
   BdAddressTypeToString(aRemoteBdAddress, remoteAddress);
 
@@ -628,6 +687,25 @@ nsresult
 BluetoothServiceBluedroid::GetPairedDevicePropertiesInternal(
   const nsTArray<nsString>& aDeviceAddress, BluetoothReplyRunnable* aRunnable)
 {
+  MOZ_ASSERT(NS_IsMainThread());
+  BT_LOGR("Enter: %s", __FUNCTION__);
+
+  if (sBtInterface && !aDeviceAddress.IsEmpty()) {
+    // XXX: only device[0] will be fetched.
+    bt_bdaddr_t addressType;
+    StringToBdAddressType(aDeviceAddress[0], &addressType);
+
+    int ret = sBtInterface->get_remote_device_properties(&addressType);
+    if (ret != BT_STATUS_SUCCESS) {
+      DispatchBluetoothReply(aRunnable, BluetoothValue(true),
+          NS_LITERAL_STRING("GetPairedDeviceFailed"));
+      sBtInterface = nullptr;
+      return NS_ERROR_FAILURE;
+    }
+  }
+
+  sGetPairedDeviceRunnableArray.AppendElement(aRunnable);
+
   return NS_OK;
 }
 
@@ -845,6 +923,24 @@ BluetoothServiceBluedroid::SetPinCodeInternal(
   const nsAString& aDeviceAddress, const nsAString& aPinCode,
   BluetoothReplyRunnable* aRunnable)
 {
+  MOZ_ASSERT(NS_IsMainThread());
+  BT_LOGR("Enter: %s", __FUNCTION__);
+
+  if (sBtInterface) {
+    bt_bdaddr_t remoteAddress;
+    StringToBdAddressType(aDeviceAddress, &remoteAddress);
+
+    int ret = sBtInterface->pin_reply(
+                &remoteAddress, true, aPinCode.Length(),
+                (bt_pin_code_t*)NS_ConvertUTF16toUTF8(aPinCode).get());
+    if (ret != BT_STATUS_SUCCESS) {
+      DispatchBluetoothReply(aRunnable, BluetoothValue(true),
+                             NS_LITERAL_STRING("SetPinCodeFailed"));
+      sBtInterface = nullptr;
+      return false;
+    }
+  }
+
   return true;
 }
 
@@ -861,6 +957,24 @@ BluetoothServiceBluedroid::SetPairingConfirmationInternal(
   const nsAString& aDeviceAddress, bool aConfirm,
   BluetoothReplyRunnable* aRunnable)
 {
+  MOZ_ASSERT(NS_IsMainThread());
+  BT_LOGR("Enter: %s", __FUNCTION__);
+
+  if (sBtInterface) {
+    bt_bdaddr_t remoteAddress;
+    StringToBdAddressType(aDeviceAddress, &remoteAddress);
+
+    int ret = sBtInterface->ssp_reply(&remoteAddress,
+                                      (bt_ssp_variant_t)0,
+                                      aConfirm, 0);
+    if (ret != BT_STATUS_SUCCESS) {
+      DispatchBluetoothReply(aRunnable, BluetoothValue(true),
+                             NS_LITERAL_STRING("SetPairingConfirmationFailed"));
+      sBtInterface = nullptr;
+      return false;
+    }
+  }
+
   return true;
 }
 
