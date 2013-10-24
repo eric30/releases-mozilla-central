@@ -136,7 +136,6 @@ let NfcWorker = {
         for (let i = 0; i < payloadLength; i++) {
           payload.push(Buf.readUint8());
         }
-
         padding = getPaddingLen(payloadLength);
         for (let i = 0; i < padding; i++) {
           Buf.readUint8();

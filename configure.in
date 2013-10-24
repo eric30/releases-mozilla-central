@@ -7393,7 +7393,7 @@ dnl ========================================================
 dnl = Enable NFC Interface for B2G (Gonk usually)
 dnl ========================================================
 MOZ_ARG_ENABLE_BOOL(b2g-nfc,
-[  --enable-b2g-nfc      Set compile flags necessary for testing B2G NFC via network sockets ],
+[  --enable-nfc         Set compile flags necessary for compiling NFC API ],
     MOZ_NFC=1,
     MOZ_NFC= )
 if test -n "$MOZ_NFC"; then
