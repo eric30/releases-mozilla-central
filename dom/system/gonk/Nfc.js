@@ -336,10 +336,7 @@ Nfc.prototype = {
    */
   onmessage: function onmessage(event) {
     let message = event.data;
-    debug("Received message: " + JSON.stringify(message));
-    if (!this._enabled) {
-      throw new Error("NFC is not enabled.");
-    }
+    debug("Received message from NFC worker: " + JSON.stringify(message));
 
     switch (message.type) {
       case "nfcInitialized":

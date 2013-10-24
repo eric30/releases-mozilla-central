@@ -3,5 +3,3 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 #
 # Copyright © 2013 Deutsche Telekom, Inc.
-
-include $(topsrcdir)/dom/dom-config.mk
