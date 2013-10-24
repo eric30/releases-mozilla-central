@@ -342,6 +342,9 @@ Nfc.prototype = {
     }
 
     switch (message.type) {
+      case "nfcInitialized":
+        // Silently consume it for now
+        break;
       case "techDiscovered":
         this._connectedSessionId = message.sessionId;
         this.sessionTokenMap[this._connectedSessionId] = UUIDGenerator.generateUUID().toString();

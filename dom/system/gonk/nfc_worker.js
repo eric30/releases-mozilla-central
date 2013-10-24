@@ -110,7 +110,7 @@ let NfcWorker = {
   readNDEF: function readNDEF(message) {
     let cb = function callback() {
       let records = [];
-      let erorr        = Buf.readInt32();
+      let error        = Buf.readInt32();
       let sessionId    = Buf.readInt32();
       let numOfRecords = Buf.readInt32();
 
@@ -151,6 +151,8 @@ let NfcWorker = {
       message.sessionId = sessionId;
       message.requestId = message.requestId;
       message.records   = records;
+      message.status = (error === 0) ? GECKO_NFC_ERROR_SUCCESS :
+                                       GECKO_NFC_ERROR_GENERIC_FAILURE;
       this.sendDOMMessage(message);
     }
 
@@ -247,14 +249,16 @@ let NfcWorker = {
     let cb = function callback() {
       let error                  = Buf.readInt32();
       let sessionId              = Buf.readInt32();
+      let isReadOnly             = Buf.readInt32();
+      let canBeMadeReadOnly      = Buf.readInt32();
       let maxSupportedLength     = Buf.readInt32();
-      let mode                   = Buf.readInt32();
 
       message.type               = "DetailsNDEFResponse";
       message.sessionId          = sessionId;
       message.requestId          = message.requestId;
+      message.isReadOnly         = isReadOnly;
+      message.canBeMadeReadOnly  = canBeMadeReadOnly;
       message.maxSupportedLength = maxSupportedLength;
-      message.mode               = mode;
       message.status = (error === 0) ? GECKO_NFC_ERROR_SUCCESS :
                                        GECKO_NFC_ERROR_GENERIC_FAILURE;
       this.sendDOMMessage(message);
@@ -356,6 +360,11 @@ NfcWorker[NFC_NOTIFICATION_INITIALIZED] = function NFC_NOTIFICATION_INITIALIZED 
   let majorVersion = Buf.readInt32();
   let minorVersion = Buf.readInt32();
   debug("NFC_NOTIFICATION_INITIALIZED status:" + status + " major:" + majorVersion + " minor:" + minorVersion);
+  this.sendDOMMessage({type: "nfcInitialized",
+                       status: status,
+                       majorVer : majorVersion,
+                       minorVer : minorVersion
+                       });
 };
 
 NfcWorker[NFC_NOTIFICATION_TECH_DISCOVERED] = function NFC_NOTIFICATION_TECH_DISCOVERED() {
@@ -377,7 +386,7 @@ NfcWorker[NFC_NOTIFICATION_TECH_DISCOVERED] = function NFC_NOTIFICATION_TECH_DIS
 NfcWorker[NFC_NOTIFICATION_TECH_LOST] = function NFC_NOTIFICATION_TECH_LOST() {
   debug("NFC_NOTIFICATION_TECH_LOST");
   let sessionId = Buf.readInt32();
-  debug("sessionId = "+sessionId);
+  debug("sessionId = " + sessionId);
   this.sendDOMMessage({type: "techLost",
                        sessionId: sessionId,
                        });

@@ -113,7 +113,7 @@ NfcContentHelper.prototype = {
     }
     let request = Services.DOMRequest.createRequest(window);
     let requestId = btoa(this.getRequestId(request));
-    this._requestMap[requestId] = {win: window};
+    this._requestMap[requestId] = window;
 
     cpmm.sendAsyncMessage("NFC:GetDetailsNDEF", {
       requestId: requestId,
@@ -129,7 +129,7 @@ NfcContentHelper.prototype = {
     }
     let request = Services.DOMRequest.createRequest(window);
     let requestId = btoa(this.getRequestId(request));
-    this._requestMap[requestId] = {win: window};
+    this._requestMap[requestId] = window;
 
     cpmm.sendAsyncMessage("NFC:ReadNDEF", {
       requestId: requestId,
@@ -146,7 +146,7 @@ NfcContentHelper.prototype = {
 
     let request = Services.DOMRequest.createRequest(window);
     let requestId = btoa(this.getRequestId(request));
-    this._requestMap[requestId] = {win: window};
+    this._requestMap[requestId] = window;
 
     let encodedRecords = this.encodeNdefRecords(records);
 
@@ -166,7 +166,7 @@ NfcContentHelper.prototype = {
 
     let request = Services.DOMRequest.createRequest(window);
     let requestId = btoa(this.getRequestId(request));
-    this._requestMap[requestId] = {win: window};
+    this._requestMap[requestId] = window;
 
     cpmm.sendAsyncMessage("NFC:MakeReadOnlyNDEF", {
       requestId: requestId,
@@ -182,7 +182,7 @@ NfcContentHelper.prototype = {
     }
     let request = Services.DOMRequest.createRequest(window);
     let requestId = btoa(this.getRequestId(request));
-    this._requestMap[requestId] = {win: window};
+    this._requestMap[requestId] = window;
 
     cpmm.sendAsyncMessage("NFC:Connect", {
       requestId: requestId,
@@ -199,7 +199,7 @@ NfcContentHelper.prototype = {
     }
     let request = Services.DOMRequest.createRequest(window);
     let requestId = btoa(this.getRequestId(request));
-    this._requestMap[requestId] = {win: window};
+    this._requestMap[requestId] = window;
 
     cpmm.sendAsyncMessage("NFC:Close", {
       requestId: requestId,
@@ -334,7 +334,7 @@ NfcContentHelper.prototype = {
     if (message.status !== GECKO_NFC_ERROR_SUCCESS) {
       this.fireRequestError(requestId, result.status);
     } else  {
-      this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
+      this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester));
     }
   },
 
@@ -367,12 +367,11 @@ NfcContentHelper.prototype = {
       r.payload = payload;
       return r;
     });
-    let resultA = {records: records};
 
-    if (!resultA.records) {
+    if (result.status !== NFC.GECKO_NFC_ERROR_SUCCESS) {
       this.fireRequestError(requestId, result.status);
     } else  {
-      this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
+      this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester));
     }
   },
 
@@ -391,7 +390,7 @@ NfcContentHelper.prototype = {
     if (result.status !== NFC.GECKO_NFC_ERROR_SUCCESS) {
       this.fireRequestError(requestId, result.status);
     } else  {
-      this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
+      this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester));
     }
   },
 
@@ -408,9 +407,9 @@ NfcContentHelper.prototype = {
     let requestId = atob(message.requestId);
 
     if (result.status !== NFC.GECKO_NFC_ERROR_SUCCESS) {
-      this.fireRequestError(requestId, ObjectWrapper.wrap(result, requester.win));
+      this.fireRequestError(requestId, ObjectWrapper.wrap(result, requester));
     } else  {
-      this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
+      this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester));
     }
   },
 
@@ -426,10 +425,10 @@ NfcContentHelper.prototype = {
     let result = message;
     let requestId = atob(message.requestId);
 
-    if (message.status !== NFC.GECKO_NFC_ERROR_SUCCESS) {
+    if (result.status !== NFC.GECKO_NFC_ERROR_SUCCESS) {
       this.fireRequestError(requestId, result.status);
     } else  {
-      this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
+      this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester));
     }
   },
 
@@ -445,10 +444,10 @@ NfcContentHelper.prototype = {
     let result = message;
     let requestId = atob(message.requestId);
 
-    if (message.status !== NFC.GECKO_NFC_ERROR_SUCCESS) {
+    if (result.status !== NFC.GECKO_NFC_ERROR_SUCCESS) {
       this.fireRequestError(requestId, result.status);
     } else  {
-      this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester.win));
+      this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester));
     }
   },
 
