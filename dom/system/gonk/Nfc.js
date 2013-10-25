@@ -73,10 +73,10 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
 
     nfc: null,
 
-    // Manage message targets in terms of topic. Only the authorized and
+    // Manage message targets in terms of sessionToken. Only the authorized and
     // registered contents can receive related messages.
-    targetsByTopic: {},
-    topics: [],
+    targetsBySessionTokens: {},
+    sessionTokens: [],
 
     targetMessageQueue: [],
     ready: false,
@@ -111,13 +111,13 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
       ppmm = null;
     },
 
-    _registerMessageTarget: function _registerMessageTarget(topic, target) {
-      let targets = this.targetsByTopic[topic];
+    _registerMessageTarget: function _registerMessageTarget(sessionToken, target) {
+      let targets = this.targetsBySessionTokens[sessionToken];
       if (!targets) {
-        targets = this.targetsByTopic[topic] = [];
-        let list = this.topics;
-        if (list.indexOf(topic) == -1) {
-          list.push(topic);
+        targets = this.targetsBySessionTokens[sessionToken] = [];
+        let list = this.sessionTokens;
+        if (list.indexOf(sessionToken) == -1) {
+          list.push(sessionToken);
         }
       }
 
@@ -127,34 +127,34 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
       }
 
       targets.push(target);
-      debug("Registered :" + topic + " target: " + target);
+      debug("Registered :" + sessionToken + " target: " + target);
     },
 
-    _unregisterMessageTarget: function _unregisterMessageTarget(topic, target) {
-      if (topic == null) {
-        // Unregister the target for every topic when no topic is specified.
-        for (let type of this.topics) {
+    _unregisterMessageTarget: function _unregisterMessageTarget(sessionToken, target) {
+      if (sessionToken == null) {
+        // Unregister the target for every sessionToken when no sessionToken is specified.
+        for (let type of this.sessionTokens) {
           this._unregisterMessageTarget(type, target);
         }
         return;
       }
 
-      // Unregister the target for a specified topic.
-      let targets = this.targetsByTopic[topic];
+      // Unregister the target for a specified sessionToken.
+      let targets = this.targetsBySessionTokens[sessionToken];
       if (!targets) {
         return;
       }
 
       if (target == null) {
-        debug("Unregistered all targets for the " + topic + " targets: " + targets);
+        debug("Unregistered all targets for the " + sessionToken + " targets: " + targets);
         targets = [];
-        let list = this.topics;
-        debug("Topic List : " + list);
-        if (topic !== null) {
-          let index = list.indexOf(topic);
+        let list = this.sessionTokens;
+        debug("SessionToken List : " + list);
+        if (sessionToken !== null) {
+          let index = list.indexOf(sessionToken);
           if (index > -1) {
             list.splice(index, 1);
-            debug("Updated topic list : " + list);
+            debug("Updated sessionToken list : " + list);
           }
         }
         return;
@@ -163,12 +163,12 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
       let index = targets.indexOf(target);
       if (index != -1) {
         targets.splice(index, 1);
-        debug("Unregistered " + topic + " target: " + target);
+        debug("Unregistered " + sessionToken + " target: " + target);
       }
     },
 
-    _enqueueTargetMessage: function _enqueueTargetMessage(topic, message, options) {
-      let msg = { topic : topic,
+    _enqueueTargetMessage: function _enqueueTargetMessage(sessionToken, message, options) {
+      let msg = { sessionToken : sessionToken,
                   message : message,
                   options : options };
       // Remove previous queued message of same message type, only one message
@@ -184,13 +184,13 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
       messageQueue.push(msg);
     },
 
-    _sendTargetMessage: function _sendTargetMessage(topic, message, options) {
+    _sendTargetMessage: function _sendTargetMessage(sessionToken, message, options) {
       if (!this.ready) {
-        this._enqueueTargetMessage(topic, message, options);
+        this._enqueueTargetMessage(sessionToken, message, options);
         return;
       }
 
-      let targets = this.targetsByTopic[topic];
+      let targets = this.targetsBySessionTokens[sessionToken];
       if (!targets) {
         return;
       }
@@ -205,7 +205,7 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
 
       // Dequeue and resend messages.
       for each (let msg in this.targetMessageQueue) {
-        this._sendTargetMessage(msg.topic, msg.message, msg.options);
+        this._sendTargetMessage(msg.sessionToken, msg.message, msg.options);
       }
       this.targetMessageQueue = null;
     },
@@ -237,12 +237,12 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
 
       switch (msg.name) {
         case "NFC:SetSessionToken":
-          this._registerMessageTarget(this.nfc.sessionTokenMap[this.nfc._connectedSessionId], msg.target);
-          debug("Registering target for this SessionToken / Topic : " +
-                this.nfc.sessionTokenMap[this.nfc._connectedSessionId]);
+          this._registerMessageTarget(this.nfc.sessionTokenMap[this.nfc._currentSessionId], msg.target);
+          debug("Registering target for this SessionToken : " +
+                this.nfc.sessionTokenMap[this.nfc._currentSessionId]);
           return null;
         default:
-          debug("Not registering target for this SessionToken / Topic : : " + msg.name);
+          debug("Not registering target for this SessionToken : " + msg.name);
       }
 
       // what do we do here? Maybe pass to Nfc.receiveMessage(msg)
@@ -253,8 +253,8 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
      * nsIObserver interface methods.
      */
 
-    observe: function observe(subject, topic, data) {
-      switch (topic) {
+    observe: function observe(subject, sessionToken, data) {
+      switch (sessionToken) {
         case "system-message-listener-ready":
           Services.obs.removeObserver(this, "system-message-listener-ready");
           this._resendQueuedTargetMessage();
@@ -267,7 +267,7 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
 
     sendNfcResponseMessage: function sendNfcResponseMessage(message, data) {
       debug("sendNfcResponseMessage :" + message);
-      this._sendTargetMessage(this.nfc.sessionTokenMap[this.nfc._connectedSessionId], message, data);
+      this._sendTargetMessage(this.nfc.sessionTokenMap[this.nfc._currentSessionId], message, data);
     }
   };
 });
@@ -308,7 +308,7 @@ Nfc.prototype = {
                                          Ci.nsIObserver,
                                          Ci.nsISettingsServiceCallback]),
 
-  _connectedSessionId: null,
+  _currentSessionId: null,
   _enabled: false,
 
   onerror: function onerror(event) {
@@ -343,19 +343,19 @@ Nfc.prototype = {
         // Silently consume it for now
         break;
       case "techDiscovered":
-        this._connectedSessionId = message.sessionId;
-        this.sessionTokenMap[this._connectedSessionId] = UUIDGenerator.generateUUID().toString();
+        this._currentSessionId = message.sessionId;
+        this.sessionTokenMap[this._currentSessionId] = UUIDGenerator.generateUUID().toString();
         // Update the upper layers with a session token (alias)
-        message.sessionId = this.sessionTokenMap[this._connectedSessionId];
+        message.sessionId = this.sessionTokenMap[this._currentSessionId];
         gSystemMessenger.broadcastMessage("nfc-manager-tech-discovered", message);
         break;
       case "techLost":
-        gMessageManager._unregisterMessageTarget(this.sessionTokenMap[this._connectedSessionId], null);
+        gMessageManager._unregisterMessageTarget(this.sessionTokenMap[this._currentSessionId], null);
         // Update the upper layers with a session token (alias)
-        message.sessionId = this.sessionTokenMap[this._connectedSessionId];
+        message.sessionId = this.sessionTokenMap[this._currentSessionId];
         gSystemMessenger.broadcastMessage("nfc-manager-tech-lost", message);
-        delete this.sessionTokenMap[this._connectedSessionId];
-        this._connectedSessionId = null;
+        delete this.sessionTokenMap[this._currentSessionId];
+        this._currentSessionId = null;
         break;
      case "ConfigResponse":
         gSystemMessenger.broadcastMessage("nfc-powerlevel-change", message);
@@ -366,7 +366,7 @@ Nfc.prototype = {
       case "ReadNDEFResponse":
       case "MakeReadOnlyNDEFResponse":
       case "WriteNDEFResponse":
-        message.sessionId = this.sessionTokenMap[this._connectedSessionId];
+        message.sessionId = this.sessionTokenMap[this._currentSessionId];
         gMessageManager.sendNfcResponseMessage("NFC:" + message.type, message)
         break;
       default:
@@ -418,14 +418,14 @@ Nfc.prototype = {
        case "NFC:SetSessionToken":
          break;
        default:
-         if (message.json.sessionToken !== this.sessionTokenMap[this._connectedSessionId]) {
+         if (message.json.sessionToken !== this.sessionTokenMap[this._currentSessionId]) {
            debug("Invalid Session Token: " + message.json.sessionToken + " Expected Session Token: " +
-                 this.sessionTokenMap[this._connectedSessionId]);
+                 this.sessionTokenMap[this._currentSessionId]);
            return;
          }
 
          debug("Received Message: " + message.name + "Session Token: " +
-               this.sessionTokenMap[this._connectedSessionId]);
+               this.sessionTokenMap[this._currentSessionId]);
     }
 
     switch (message.name) {
@@ -476,8 +476,8 @@ Nfc.prototype = {
    * nsIObserver
    */
 
-  observe: function observe(subject, topic, data) {
-    switch (topic) {
+  observe: function observe(subject, sessionToken, data) {
+    switch (sessionToken) {
       case NFC.TOPIC_XPCOM_SHUTDOWN:
         for each (let msgname in NFC_IPC_MSG_NAMES) {
           ppmm.removeMessageListener(msgname, this);
