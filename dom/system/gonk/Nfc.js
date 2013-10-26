@@ -306,7 +306,10 @@ Nfc.prototype = {
     switch (message.type) {
       case "techDiscovered":
         this._currentSessionId = message.sessionId;
-        this.sessionTokenMap[this._currentSessionId] = UUIDGenerator.generateUUID().toString();
+        // Check if the session token already exists. If not, generate a new token.
+        if (this.sessionTokenMap[this._currentSessionId] === undefined) {
+          this.sessionTokenMap[this._currentSessionId] = UUIDGenerator.generateUUID().toString();
+        }
         // Update the upper layers with a session token (alias)
         message.sessionId = this.sessionTokenMap[this._currentSessionId];
         gSystemMessenger.broadcastMessage("nfc-manager-tech-discovered", message);
