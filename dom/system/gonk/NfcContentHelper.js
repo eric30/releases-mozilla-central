@@ -76,7 +76,6 @@ NfcContentHelper.prototype = {
 
   _requestMap: null,
 
-  // FIXME: btoa's will be unneeded when binary nfcd/gonk protocol is merged.
   encodeNdefRecords: function encodeNdefRecords(records) {
     let encodedRecords = [];
     for (let i = 0; i < records.length; i++) {
@@ -93,7 +92,7 @@ NfcContentHelper.prototype = {
 
   // NFC interface:
   setSessionToken: function setSessionToken(sessionToken) {
-    if (sessionToken== null) {
+    if (sessionToken == null) {
       throw Components.Exception("No session token!",
                                   Cr.NS_ERROR_UNEXPECTED);
       return false;
@@ -206,41 +205,6 @@ NfcContentHelper.prototype = {
       sessionToken: sessionToken
     });
     return request;
-  },
-
-  registerCallback: function registerCallback(callbackType, callback) {
-    let callbacks = this[callbackType];
-    if (!callbacks) {
-      callbacks = this[callbackType] = [];
-    }
-
-    if (callbacks.indexOf(callback) != -1) {
-      throw new Error("Already registered this callback!");
-    }
-
-    callbacks.push(callback);
-    debug("Registered " + callbackType + " callback: " + callback);
-  },
-
-  unregisterCallback: function unregisterCallback(callbackType, callback) {
-    let callbacks = this[callbackType];
-    if (!callbacks) {
-      return;
-    }
-
-    let index = callbacks.indexOf(callback);
-    if (index != -1) {
-      callbacks.splice(index, 1);
-      debug("Unregistered telephony callback: " + callback);
-    }
-  },
-
-  registerNfcCallback: function registerNfcCallback(callback) {
-    this.registerCallback("_nfcCallbacks", callback);
-  },
-
-  unregisterNfcCallback: function unregisterNfcCallback(callback) {
-    this.unregisterCallback("_nfcCallbacks", callback);
   },
 
   // nsIObserver
@@ -451,28 +415,6 @@ NfcContentHelper.prototype = {
     }
   },
 
-  _deliverCallback: function _deliverCallback(callbackType, name, args) {
-    let thisCallbacks = this[callbackType];
-    if (!thisCallbacks) {
-      return;
-    }
-
-    let callbacks = thisCallbacks.slice();
-    for each (let callback in callbacks) {
-      if (thisCallbacks.indexOf(callback) == -1) {
-        continue;
-      }
-      let handler = callback[name];
-      if (typeof handler != "function") {
-        throw new Error("No handler for " + name);
-      }
-      try {
-        handler.apply(callback, args);
-      } catch (e) {
-        debug("callback handler for " + name + " threw an exception: " + e);
-      }
-    }
-  },
 };
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory([NfcContentHelper]);

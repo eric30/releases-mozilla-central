@@ -474,7 +474,7 @@ Nfc.prototype = {
       type: "ConfigRequest",
       powerLevel: prop.powerLevel
     };
-    this.sendToWorker("configRequest", outMessage);
+    this.sendToWorker("config", outMessage);
   }
 };
 

@@ -656,7 +656,6 @@ SystemWorkerManager::RegisterNfcWorker(const JS::Value& aWorker,
     return NS_ERROR_UNEXPECTED;
   }
 
-
   mNfcConsumer = new NfcConsumer(wctd);
 
   // We're keeping as much of this implementation as possible in JS, so the real

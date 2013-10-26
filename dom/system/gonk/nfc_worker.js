@@ -248,8 +248,11 @@ let NfcWorker = {
     let cb = function callback() {
       let error                  = Buf.readInt32();
       let sessionId              = Buf.readInt32();
-      let isReadOnly             = Buf.readInt32();
-      let canBeMadeReadOnly      = Buf.readInt32();
+      let isReadOnly             = Buf.readUint8();
+      let canBeMadeReadOnly      = Buf.readUint8();
+      // Ensure that padding is taken care here after reading two successive uint8's
+      Buf.readUint8();
+      Buf.readUint8();
       let maxSupportedLength     = Buf.readInt32();
 
       message.type               = "DetailsNDEFResponse";
@@ -293,7 +296,7 @@ let NfcWorker = {
   /**
    * NFC Configuration
    */
-  configRequest: function configRequest(message) {
+  config: function config(message) {
     let cb = function callback() {
       let error         = Buf.readInt32();
 
