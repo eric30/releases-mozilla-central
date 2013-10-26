@@ -82,7 +82,6 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
       this.nfc = nfc;
 
       Services.obs.addObserver(this, "xpcom-shutdown", false);
-      Services.obs.addObserver(this, "system-message-listener-ready", false);
       this._registerMessageListeners();
     },
 
@@ -218,12 +217,8 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
      * nsIObserver interface methods.
      */
 
-    observe: function observe(subject, sessionToken, data) {
-      switch (sessionToken) {
-        case "system-message-listener-ready":
-          Services.obs.removeObserver(this, "system-message-listener-ready");
-          this._resendQueuedTargetMessage();
-          break;
+    observe: function observe(subject, topic, data) {
+      switch (topic) {
         case "xpcom-shutdown":
           this._shutdown();
           break;
