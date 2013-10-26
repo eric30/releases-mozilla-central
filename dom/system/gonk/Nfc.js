@@ -78,9 +78,6 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
     targetsBySessionTokens: {},
     sessionTokens: [],
 
-    targetMessageQueue: [],
-    ready: false,
-
     init: function init(nfc) {
       this.nfc = nfc;
 
@@ -167,29 +164,7 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
       }
     },
 
-    _enqueueTargetMessage: function _enqueueTargetMessage(sessionToken, message, options) {
-      let msg = { sessionToken : sessionToken,
-                  message : message,
-                  options : options };
-      // Remove previous queued message of same message type, only one message
-      // per message type is allowed in queue.
-      let messageQueue = this.targetMessageQueue;
-      for (let i = 0; i < messageQueue.length; i++) {
-        if (messageQueue[i].message === message) {
-          messageQueue.splice(i, 1);
-          break;
-        }
-      }
-
-      messageQueue.push(msg);
-    },
-
     _sendTargetMessage: function _sendTargetMessage(sessionToken, message, options) {
-      if (!this.ready) {
-        this._enqueueTargetMessage(sessionToken, message, options);
-        return;
-      }
-
       let targets = this.targetsBySessionTokens[sessionToken];
       if (!targets) {
         return;
@@ -198,16 +173,6 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
       for (let target of targets) {
         target.sendAsyncMessage(message, options);
       }
-    },
-
-    _resendQueuedTargetMessage: function _resendQueuedTargetMessage() {
-      this.ready = true;
-
-      // Dequeue and resend messages.
-      for each (let msg in this.targetMessageQueue) {
-        this._sendTargetMessage(msg.sessionToken, msg.message, msg.options);
-      }
-      this.targetMessageQueue = null;
     },
 
     /**
@@ -339,9 +304,6 @@ Nfc.prototype = {
     debug("Received message from NFC worker: " + JSON.stringify(message));
 
     switch (message.type) {
-      case "nfcInitialized":
-        // Silently consume it for now
-        break;
       case "techDiscovered":
         this._currentSessionId = message.sessionId;
         this.sessionTokenMap[this._currentSessionId] = UUIDGenerator.generateUUID().toString();
@@ -476,8 +438,8 @@ Nfc.prototype = {
    * nsIObserver
    */
 
-  observe: function observe(subject, sessionToken, data) {
-    switch (sessionToken) {
+  observe: function observe(subject, topic, data) {
+    switch (topic) {
       case NFC.TOPIC_XPCOM_SHUTDOWN:
         for each (let msgname in NFC_IPC_MSG_NAMES) {
           ppmm.removeMessageListener(msgname, this);
