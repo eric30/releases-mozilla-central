@@ -43,9 +43,9 @@ const NFC_CID =
 
 const NFC_IPC_MSG_NAMES = [
   "NFC:SetSessionToken",
-  "NFC:GetDetailsNDEF",
   "NFC:ReadNDEF",
   "NFC:WriteNDEF",
+  "NFC:GetDetailsNDEF",
   "NFC:MakeReadOnlyNDEF",
   "NFC:Connect",
   "NFC:Close"
@@ -205,11 +205,8 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
           debug("Registering target for this SessionToken : " +
                 this.nfc.sessionTokenMap[this.nfc._currentSessionId]);
           return null;
-        default:
-          debug("Not registering target for this SessionToken : " + msg.name);
       }
 
-      // what do we do here? Maybe pass to Nfc.receiveMessage(msg)
       return null;
     },
 
@@ -228,7 +225,7 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
     sendNfcResponseMessage: function sendNfcResponseMessage(message, data) {
       debug("sendNfcResponseMessage :" + message);
       this._sendTargetMessage(this.nfc.sessionTokenMap[this.nfc._currentSessionId], message, data);
-    }
+    },
   };
 });
 
@@ -292,6 +289,26 @@ Nfc.prototype = {
   },
 
   /**
+   * Send Error response to content.
+   *
+   * @param message
+   *        An nsIMessageListener's message parameter.
+   */
+  sendNfcErrorResponse: function sendNfcErrorResponse(message) {
+    if (!message.target) {
+      return;
+    }
+
+    let nfcMsgType = message.name + "Response";
+    message.target.sendAsyncMessage(nfcMsgType, {
+      type: nfcMsgType,
+      sessionId: message.json.sessionToken,
+      requestId: message.json.requestId,
+      status: NFC.GECKO_NFC_ERROR_GENERIC_FAILURE
+    });
+  },
+
+  /**
    * Process the incoming message from the NFC worker
    */
   onmessage: function onmessage(event) {
@@ -322,12 +339,12 @@ Nfc.prototype = {
         break;
       case "ConnectResponse": // Fall through.
       case "CloseResponse":
-      case "DetailsNDEFResponse":
+      case "GetDetailsNDEFResponse":
       case "ReadNDEFResponse":
       case "MakeReadOnlyNDEFResponse":
       case "WriteNDEFResponse":
         message.sessionId = this.sessionTokenMap[this._currentSessionId];
-        gMessageManager.sendNfcResponseMessage("NFC:" + message.type, message)
+        gMessageManager.sendNfcResponseMessage("NFC:" + message.type, message);
         break;
       default:
         throw new Error("Don't know about this message type: " + message.type);
@@ -342,7 +359,7 @@ Nfc.prototype = {
   sessionTokenMap: null,
 
   /**
-   * Process the incoming message from a content process (NfcContentHelper.js)
+   * Process a message from the content process.
    */
   receiveMessage: function receiveMessage(message) {
     debug("Received '" + JSON.stringify(message) + "' message from content process");
@@ -358,16 +375,18 @@ Nfc.prototype = {
       case "NFC:GetDetailsNDEF":
       case "NFC:ReadNDEF":
         if (!message.target.assertPermission("nfc-read")) {
-          throw new Error("NFC message " + message.name +
+          debug("NFC message " + message.name +
                 " from a content process with no 'nfc-read' privileges.");
+          this.sendNfcErrorResponse(message);
           return null;
         }
         break;
       case "NFC:WriteNDEF": // Fall through
       case "NFC:MakeReadOnlyNDEF":
         if (!message.target.assertPermission("nfc-write")) {
-          throw new Error("NFC message " + message.name +
+          debug("NFC message " + message.name +
                 " from a content process with no 'nfc-write' privileges.");
+          this.sendNfcErrorResponse(message);
           return null;
         }
         break;
@@ -381,7 +400,8 @@ Nfc.prototype = {
          if (message.json.sessionToken !== this.sessionTokenMap[this._currentSessionId]) {
            debug("Invalid Session Token: " + message.json.sessionToken + " Expected Session Token: " +
                  this.sessionTokenMap[this._currentSessionId]);
-           return;
+           this.sendNfcErrorResponse(message);
+           return null;
          }
 
          debug("Received Message: " + message.name + "Session Token: " +
@@ -389,6 +409,9 @@ Nfc.prototype = {
     }
 
     switch (message.name) {
+       case "NFC:SetSessionToken":
+         //Do nothing here
+         break;
       case "NFC:GetDetailsNDEF":
         this.sendToWorker("getDetailsNDEF", message.json);
         break;

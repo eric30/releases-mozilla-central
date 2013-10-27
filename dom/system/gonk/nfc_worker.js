@@ -255,7 +255,7 @@ let NfcWorker = {
       Buf.readUint8();
       let maxSupportedLength     = Buf.readInt32();
 
-      message.type               = "DetailsNDEFResponse";
+      message.type               = "GetDetailsNDEFResponse";
       message.sessionId          = sessionId;
       message.requestId          = message.requestId;
       message.isReadOnly         = isReadOnly;
@@ -362,11 +362,6 @@ NfcWorker[NFC_NOTIFICATION_INITIALIZED] = function NFC_NOTIFICATION_INITIALIZED 
   let majorVersion = Buf.readInt32();
   let minorVersion = Buf.readInt32();
   debug("NFC_NOTIFICATION_INITIALIZED status:" + status + " major:" + majorVersion + " minor:" + minorVersion);
-  this.sendDOMMessage({type: "nfcInitialized",
-                       status: status,
-                       majorVer : majorVersion,
-                       minorVer : minorVersion
-                       });
 };
 
 NfcWorker[NFC_NOTIFICATION_TECH_DISCOVERED] = function NFC_NOTIFICATION_TECH_DISCOVERED() {

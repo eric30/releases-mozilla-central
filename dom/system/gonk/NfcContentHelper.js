@@ -43,9 +43,9 @@ const NFCCONTENTHELPER_CID =
   Components.ID("{4d72c120-da5f-11e1-9b23-0800200c9a66}");
 
 const NFC_IPC_MSG_NAMES = [
-  "NFC:DetailsNDEFResponse",
   "NFC:ReadNDEFResponse",
   "NFC:WriteNDEFResponse",
+  "NFC:GetDetailsNDEFResponse",
   "NFC:MakeReadOnlyNDEFResponse",
   "NFC:ConnectResponse",
   "NFC:CloseResponse"
@@ -262,43 +262,16 @@ NfcContentHelper.prototype = {
   receiveMessage: function receiveMessage(message) {
     debug("Message received: " + JSON.stringify(message));
     switch (message.name) {
-      case "NFC:DetailsNDEFResponse":
-        this.handleDetailsNDEFResponse(message.json);
-        break;
       case "NFC:ReadNDEFResponse":
         this.handleReadNDEFResponse(message.json);
         break;
-      case "NFC:WriteNDEFResponse":
-        this.handleWriteNDEFResponse(message.json);
-        break;
-      case "NFC:MakeReadOnlyNDEFResponse":
-        this.handleMakeReadOnlyNDEFResponse(message.json);
-        break;
-      case "NFC:ConnectResponse":
-        this.handleConnectResponse(message.json);
-        break;
+      case "NFC:ConnectResponse": // Fall through.
       case "NFC:CloseResponse":
-        this.handleCloseResponse(message.json);
+      case "NFC:WriteNDEFResponse":
+      case "NFC:MakeReadOnlyNDEFResponse":
+      case "NFC:GetDetailsNDEFResponse":
+        this.handleResponse(message.json);
         break;
-    }
-  },
-
-  handleDetailsNDEFResponse: function handleDetailsNDEFResponse(message) {
-    debug("DetailsNDEFResponse(" + JSON.stringify(message) + ")");
-    let requester = this._requestMap[message.requestId];
-    if (!requester) {
-       debug("DetailsNDEFResponse Invalid requester=" + requester +
-             " message.sessionId=" + message.sessionId);
-       return; // Nothing to do in this instance.
-    }
-    delete this._requestMap[message.requestId];
-    let result = message;
-    let requestId = atob(message.requestId);
-
-    if (message.status !== GECKO_NFC_ERROR_SUCCESS) {
-      this.fireRequestError(requestId, result.status);
-    } else  {
-      this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester));
     }
   },
 
@@ -339,11 +312,11 @@ NfcContentHelper.prototype = {
     }
   },
 
-  handleWriteNDEFResponse: function handleWriteNDEFResponse(message) {
-    debug("WriteNDEFResponse(" + JSON.stringify(message) + ")");
+  handleResponse: function handleResponse(message) {
+    debug("Response(" + JSON.stringify(message) + ")");
     let requester = this._requestMap[message.requestId];
     if (!requester) {
-       debug("WriteNDEFResponse Invalid requester=" + requester +
+       debug("Response Invalid requester=" + requester +
              " message.sessionId=" + message.sessionId);
        return; // Nothing to do in this instance.
     }
@@ -351,70 +324,12 @@ NfcContentHelper.prototype = {
     let result = message;
     let requestId = atob(message.requestId);
 
-    if (result.status !== NFC.GECKO_NFC_ERROR_SUCCESS) {
+    if (message.status !== NFC.GECKO_NFC_ERROR_SUCCESS) {
       this.fireRequestError(requestId, result.status);
     } else  {
       this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester));
     }
   },
-
-  handleMakeReadOnlyNDEFResponse: function handleReadOnlyNDEFResponse(message) {
-    debug("MakeReadOnlyNDEFResponse(" + JSON.stringify(message) + ")");
-    let requester = this._requestMap[message.requestId];
-    if (!requester) {
-       debug("MakeReadOnlyNDEFResponse Invalid requester=" + requester +
-             " message.sessionId=" + message.sessionId);
-       return; // Nothing to do in this instance.
-    }
-    delete this._requestMap[message.requestId];
-    let result = message;
-    let requestId = atob(message.requestId);
-
-    if (result.status !== NFC.GECKO_NFC_ERROR_SUCCESS) {
-      this.fireRequestError(requestId, ObjectWrapper.wrap(result, requester));
-    } else  {
-      this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester));
-    }
-  },
-
-  handleConnectResponse: function handleConnectResponse(message) {
-    debug("ConnectResponse(" + JSON.stringify(message) + ")");
-    let requester = this._requestMap[message.requestId];
-    if (!requester) {
-       debug("ConnectResponse Invalid requester=" + requester +
-             " message.sessionId=" + message.sessionId);
-       return; // Nothing to do in this instance.
-    }
-    delete this._requestMap[message.requestId];
-    let result = message;
-    let requestId = atob(message.requestId);
-
-    if (result.status !== NFC.GECKO_NFC_ERROR_SUCCESS) {
-      this.fireRequestError(requestId, result.status);
-    } else  {
-      this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester));
-    }
-  },
-
-  handleCloseResponse: function handleCloseResponse(message) {
-    debug("CloseResponse(" + JSON.stringify(message) + ")");
-    let requester = this._requestMap[message.requestId];
-    if (!requester) {
-       debug("CloseResponse Invalid requester=" + requester +
-             " message.sessionId=" + message.sessionId);
-       return; // Nothing to do in this instance.
-    }
-    delete this._requestMap[message.requestId];
-    let result = message;
-    let requestId = atob(message.requestId);
-
-    if (result.status !== NFC.GECKO_NFC_ERROR_SUCCESS) {
-      this.fireRequestError(requestId, result.status);
-    } else  {
-      this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester));
-    }
-  },
-
 };
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory([NfcContentHelper]);
