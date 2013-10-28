@@ -318,18 +318,23 @@ Nfc.prototype = {
     switch (message.type) {
       case "techDiscovered":
         this._currentSessionId = message.sessionId;
-        // Check if the session token already exists. If not, generate a new token.
+        // Check if the session token already exists. If exists, continue to use the same one.
+        // If not, generate a new token.
         if (this.sessionTokenMap[this._currentSessionId] === undefined) {
           this.sessionTokenMap[this._currentSessionId] = UUIDGenerator.generateUUID().toString();
         }
         // Update the upper layers with a session token (alias)
-        message.sessionId = this.sessionTokenMap[this._currentSessionId];
+        message.sessionToken = this.sessionTokenMap[this._currentSessionId];
+        // Do not expose the actual session to the content
+        message.sessionId = "";
         gSystemMessenger.broadcastMessage("nfc-manager-tech-discovered", message);
         break;
       case "techLost":
         gMessageManager._unregisterMessageTarget(this.sessionTokenMap[this._currentSessionId], null);
         // Update the upper layers with a session token (alias)
-        message.sessionId = this.sessionTokenMap[this._currentSessionId];
+        message.sessionToken = this.sessionTokenMap[this._currentSessionId];
+        // Do not expose the actual session to the content
+        message.sessionId = "";
         gSystemMessenger.broadcastMessage("nfc-manager-tech-lost", message);
         delete this.sessionTokenMap[this._currentSessionId];
         this._currentSessionId = null;
@@ -343,7 +348,9 @@ Nfc.prototype = {
       case "ReadNDEFResponse":
       case "MakeReadOnlyNDEFResponse":
       case "WriteNDEFResponse":
-        message.sessionId = this.sessionTokenMap[this._currentSessionId];
+        message.sessionToken = this.sessionTokenMap[this._currentSessionId];
+        // Do not expose the actual session to the content
+        message.sessionId = "";
         gMessageManager.sendNfcResponseMessage("NFC:" + message.type, message);
         break;
       default:
@@ -446,11 +453,8 @@ Nfc.prototype = {
         debug("'nfc.enabled' is now " + aResult);
         this._enabled = aResult;
         // General power setting
-        if (this._enabled) {
-          this.setNFCPowerConfig(NFC.NFC_POWER_LEVEL_ENABLED);
-        } else {
-          this.setNFCPowerConfig(NFC.NFC_POWER_LEVEL_DISABLED);
-        }
+        this.setNFCPowerConfig(this._enabled ? NFC.NFC_POWER_LEVEL_ENABLED :
+                                               NFC.NFC_POWER_LEVEL_DISABLED);
         break;
     }
   },

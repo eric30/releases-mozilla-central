@@ -280,7 +280,7 @@ NfcContentHelper.prototype = {
     let requester = this._requestMap[message.requestId];
     if (!requester) {
        debug("ReadNDEFResponse Invalid requester=" + requester +
-             " message.sessionId=" + message.sessionId);
+             " message.sessionToken=" + message.sessionToken);
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
@@ -317,7 +317,7 @@ NfcContentHelper.prototype = {
     let requester = this._requestMap[message.requestId];
     if (!requester) {
        debug("Response Invalid requester=" + requester +
-             " message.sessionId=" + message.sessionId);
+             " message.sessionToken=" + message.sessionToken);
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
