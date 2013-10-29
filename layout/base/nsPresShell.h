@@ -34,9 +34,8 @@
 #include "nsContentUtils.h" // For AddScriptBlocker().
 #include "nsRefreshDriver.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/EventForwards.h"
 #include "mozilla/MemoryReporting.h"
-#include "mozilla/MouseEvents.h"
-#include "mozilla/TextEvents.h"
 
 class nsRange;
 class nsIDragService;
@@ -547,70 +546,35 @@ protected:
     return rv;
   }
 
-  class nsDelayedEvent
+  class DelayedEvent
   {
   public:
-    virtual ~nsDelayedEvent() {};
-    virtual void Dispatch(PresShell* aShell) {}
+    virtual ~DelayedEvent() { }
+    virtual void Dispatch() { }
   };
 
-  class nsDelayedInputEvent : public nsDelayedEvent
+  class DelayedInputEvent : public DelayedEvent
   {
   public:
-    virtual void Dispatch(PresShell* aShell)
-    {
-      if (mEvent && mEvent->widget) {
-        nsCOMPtr<nsIWidget> w = mEvent->widget;
-        nsEventStatus status;
-        w->DispatchEvent(mEvent, status);
-      }
-    }
+    virtual void Dispatch() MOZ_OVERRIDE;
 
   protected:
-    nsDelayedInputEvent()
-    : nsDelayedEvent(), mEvent(nullptr) {}
+    DelayedInputEvent();
+    virtual ~DelayedInputEvent();
 
     mozilla::WidgetInputEvent* mEvent;
   };
 
-  class nsDelayedMouseEvent : public nsDelayedInputEvent
+  class DelayedMouseEvent : public DelayedInputEvent
   {
   public:
-    nsDelayedMouseEvent(mozilla::WidgetMouseEvent* aEvent) :
-      nsDelayedInputEvent()
-    {
-      mEvent = new mozilla::WidgetMouseEvent(aEvent->mFlags.mIsTrusted,
-                                             aEvent->message,
-                                             aEvent->widget,
-                                             aEvent->reason,
-                                             aEvent->context);
-      static_cast<mozilla::WidgetMouseEvent*>(mEvent)->
-        AssignMouseEventData(*aEvent, false);
-    }
-
-    virtual ~nsDelayedMouseEvent()
-    {
-      delete static_cast<mozilla::WidgetMouseEvent*>(mEvent);
-    }
+    DelayedMouseEvent(mozilla::WidgetMouseEvent* aEvent);
   };
 
-  class nsDelayedKeyEvent : public nsDelayedInputEvent
+  class DelayedKeyEvent : public DelayedInputEvent
   {
   public:
-    nsDelayedKeyEvent(mozilla::WidgetKeyboardEvent* aEvent) :
-      nsDelayedInputEvent()
-    {
-      mEvent = new mozilla::WidgetKeyboardEvent(aEvent->mFlags.mIsTrusted,
-                                                aEvent->message,
-                                                aEvent->widget);
-      static_cast<mozilla::WidgetKeyboardEvent*>(mEvent)->
-        AssignKeyEventData(*aEvent, false);
-    }
-
-    virtual ~nsDelayedKeyEvent()
-    {
-      delete static_cast<mozilla::WidgetKeyboardEvent*>(mEvent);
-    }
+    DelayedKeyEvent(mozilla::WidgetKeyboardEvent* aEvent);
   };
 
   // Check if aEvent is a mouse event and record the mouse location for later
@@ -720,9 +684,6 @@ protected:
   virtual void ThemeChanged() MOZ_OVERRIDE { mPresContext->ThemeChanged(); }
   virtual void BackingScaleFactorChanged() MOZ_OVERRIDE { mPresContext->UIResolutionChanged(); }
 
-  virtual void FreezePainting() MOZ_OVERRIDE;
-  virtual void ThawPainting() MOZ_OVERRIDE;
-
   void UpdateImageVisibility();
 
   nsRevocableEventPtr<nsRunnableMethod<PresShell> > mUpdateImageVisibilityEvent;
@@ -765,7 +726,7 @@ protected:
   // Reflow roots that need to be reflowed.
   nsTArray<nsIFrame*>       mDirtyRoots;
 
-  nsTArray<nsAutoPtr<nsDelayedEvent> > mDelayedEvents;
+  nsTArray<nsAutoPtr<DelayedEvent> > mDelayedEvents;
   nsRevocableEventPtr<nsRunnableMethod<PresShell> > mResizeEvent;
   nsCOMPtr<nsITimer>        mAsyncResizeEventTimer;
 private:

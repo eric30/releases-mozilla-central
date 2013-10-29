@@ -11,6 +11,7 @@ const DBG_STRINGS_URI = "chrome://browser/locale/devtools/debugger.properties";
 const NEW_SOURCE_IGNORED_URLS = ["debugger eval code", "self-hosted", "XStringBundle"];
 const NEW_SOURCE_DISPLAY_DELAY = 200; // ms
 const FETCH_SOURCE_RESPONSE_DELAY = 200; // ms
+const FETCH_EVENT_LISTENERS_DELAY = 200; // ms
 const FRAME_STEP_CLEAR_DELAY = 100; // ms
 const CALL_STACK_PAGE_SIZE = 25; // frames
 
@@ -47,6 +48,10 @@ const EVENTS = {
   CONDITIONAL_BREAKPOINT_POPUP_SHOWING: "Debugger:ConditionalBreakpointPopupShowing",
   CONDITIONAL_BREAKPOINT_POPUP_HIDING: "Debugger:ConditionalBreakpointPopupHiding",
 
+  // When event listeners are fetched or event breakpoints are updated.
+  EVENT_LISTENERS_FETCHED: "Debugger:EventListenersFetched",
+  EVENT_BREAKPOINTS_UPDATED: "Debugger:EventBreakpointsUpdated",
+
   // When a file search was performed.
   FILE_SEARCH_MATCH_FOUND: "Debugger:FileSearch:MatchFound",
   FILE_SEARCH_MATCH_NOT_FOUND: "Debugger:FileSearch:MatchNotFound",
@@ -65,19 +70,25 @@ const EVENTS = {
   // When the options popup is showing or hiding.
   OPTIONS_POPUP_SHOWING: "Debugger:OptionsPopupShowing",
   OPTIONS_POPUP_HIDDEN: "Debugger:OptionsPopupHidden",
+
+  // When the widgets layout has been changed.
+  LAYOUT_CHANGED: "Debugger:LayoutChanged"
 };
 
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/devtools/dbg-client.jsm");
-let promise = Cu.import("resource://gre/modules/commonjs/sdk/core/promise.js").Promise;
 Cu.import("resource:///modules/devtools/shared/event-emitter.js");
-Cu.import("resource:///modules/devtools/sourceeditor/source-editor.jsm");
 Cu.import("resource:///modules/devtools/BreadcrumbsWidget.jsm");
 Cu.import("resource:///modules/devtools/SideMenuWidget.jsm");
 Cu.import("resource:///modules/devtools/VariablesView.jsm");
 Cu.import("resource:///modules/devtools/VariablesViewController.jsm");
 Cu.import("resource:///modules/devtools/ViewHelpers.jsm");
+
+const require = Cu.import("resource://gre/modules/devtools/Loader.jsm", {}).devtools.require;
+const Editor = require("devtools/sourceeditor/editor");
+const promise = require("sdk/core/promise");
+const DebuggerEditor = require("devtools/sourceeditor/debugger.js");
 
 XPCOMUtils.defineLazyModuleGetter(this, "Parser",
   "resource:///modules/devtools/Parser.jsm");
@@ -88,13 +99,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "devtools",
 XPCOMUtils.defineLazyModuleGetter(this, "DevToolsUtils",
   "resource://gre/modules/devtools/DevToolsUtils.jsm");
 
-Object.defineProperty(this, "DevtoolsHelpers", {
-  get: function() {
-    return devtools.require("devtools/shared/helpers");
-  },
-  configurable: true,
-  enumerable: true
-});
+XPCOMUtils.defineLazyModuleGetter(this, "ShortcutUtils",
+  "resource://gre/modules/ShortcutUtils.jsm");
 
 Object.defineProperty(this, "NetworkHelper", {
   get: function() {
@@ -272,17 +278,25 @@ let DebuggerController = {
     switch (aType) {
       case "will-navigate": {
         // Reset UI.
-        DebuggerView._handleTabNavigation();
+        DebuggerView.handleTabNavigation();
 
-        // Discard all the old sources.
+        // Discard all the cached sources *before* the target starts navigating.
+        // Sources may be fetched during navigation, in which case we don't
+        // want to hang on to the old source contents.
+        DebuggerController.SourceScripts.clearCache();
         DebuggerController.Parser.clearCache();
         SourceUtils.clearCache();
+
+        // Prevent performing any actions that were scheduled before navigation.
+        clearNamedTimeout("new-source");
+        clearNamedTimeout("event-breakpoints-update");
+        clearNamedTimeout("event-listeners-fetch");
         break;
       }
       case "navigate": {
-        this.ThreadState._handleTabNavigation();
-        this.StackFrames._handleTabNavigation();
-        this.SourceScripts._handleTabNavigation();
+        this.ThreadState.handleTabNavigation();
+        this.StackFrames.handleTabNavigation();
+        this.SourceScripts.handleTabNavigation();
         break;
       }
     }
@@ -387,9 +401,9 @@ let DebuggerController = {
         return;
       }
 
-      // Reset UI, discard all the old sources and get them again.
-      DebuggerView._handleTabNavigation();
-      this.SourceScripts._handleTabNavigation();
+      // Reset the view and fetch all the sources again.
+      DebuggerView.handleTabNavigation();
+      this.SourceScripts.handleTabNavigation();
 
       // Update the stack frame list.
       this.activeThread._clearFrames();
@@ -451,7 +465,7 @@ ThreadState.prototype = {
     this.activeThread.addListener("resumed", this._update);
     this.activeThread.pauseOnExceptions(Prefs.pauseOnExceptions,
                                         Prefs.ignoreCaughtExceptions);
-    this._handleTabNavigation();
+    this.handleTabNavigation();
   },
 
   /**
@@ -469,7 +483,7 @@ ThreadState.prototype = {
   /**
    * Handles any initialization on a tab navigation event issued by the client.
    */
-  _handleTabNavigation: function() {
+  handleTabNavigation: function() {
     if (!this.activeThread) {
       return;
     }
@@ -499,6 +513,7 @@ function StackFrames() {
   this._onFrames = this._onFrames.bind(this);
   this._onFramesCleared = this._onFramesCleared.bind(this);
   this._onBlackBoxChange = this._onBlackBoxChange.bind(this);
+  this._onPrettyPrintChange = this._onPrettyPrintChange.bind(this);
   this._afterFramesCleared = this._afterFramesCleared.bind(this);
   this.evaluate = this.evaluate.bind(this);
 }
@@ -525,7 +540,8 @@ StackFrames.prototype = {
     this.activeThread.addListener("framesadded", this._onFrames);
     this.activeThread.addListener("framescleared", this._onFramesCleared);
     this.activeThread.addListener("blackboxchange", this._onBlackBoxChange);
-    this._handleTabNavigation();
+    this.activeThread.addListener("prettyprintchange", this._onPrettyPrintChange);
+    this.handleTabNavigation();
   },
 
   /**
@@ -541,12 +557,13 @@ StackFrames.prototype = {
     this.activeThread.removeListener("framesadded", this._onFrames);
     this.activeThread.removeListener("framescleared", this._onFramesCleared);
     this.activeThread.removeListener("blackboxchange", this._onBlackBoxChange);
+    this.activeThread.removeListener("prettyprintchange", this._onPrettyPrintChange);
   },
 
   /**
    * Handles any initialization on a tab navigation event issued by the client.
    */
-  _handleTabNavigation: function() {
+  handleTabNavigation: function() {
     dumpn("Handling tab navigation in the StackFrames");
     // Nothing to do here yet.
   },
@@ -594,7 +611,7 @@ StackFrames.prototype = {
    * Handler for the thread client's resumed notification.
    */
   _onResumed: function() {
-    DebuggerView.editor.setDebugLocation(-1);
+    DebuggerView.editor.clearDebugLocation();
 
     // Prepare the watch expression evaluation string for the next pause.
     if (!this._isWatchExpressionsEvaluation) {
@@ -727,8 +744,16 @@ StackFrames.prototype = {
    */
   _onBlackBoxChange: function() {
     if (this.activeThread.state == "paused") {
-      this.currentFrame = null;
       this._refillFrames();
+    }
+  },
+
+  /**
+   * Handler for the debugger's prettyprintchange notification.
+   */
+  _onPrettyPrintChange: function() {
+    if (this.activeThread.state == "paused") {
+      this.activeThread.fillFrames(CALL_STACK_PAGE_SIZE);
     }
   },
 
@@ -979,6 +1004,7 @@ function SourceScripts() {
   this._onNewSource = this._onNewSource.bind(this);
   this._onSourcesAdded = this._onSourcesAdded.bind(this);
   this._onBlackBoxChange = this._onBlackBoxChange.bind(this);
+  this._onPrettyPrintChange = this._onPrettyPrintChange.bind(this);
 }
 
 SourceScripts.prototype = {
@@ -994,7 +1020,8 @@ SourceScripts.prototype = {
     this.debuggerClient.addListener("newGlobal", this._onNewGlobal);
     this.debuggerClient.addListener("newSource", this._onNewSource);
     this.activeThread.addListener("blackboxchange", this._onBlackBoxChange);
-    this._handleTabNavigation();
+    this.activeThread.addListener("prettyprintchange", this._onPrettyPrintChange);
+    this.handleTabNavigation();
   },
 
   /**
@@ -1008,23 +1035,27 @@ SourceScripts.prototype = {
     this.debuggerClient.removeListener("newGlobal", this._onNewGlobal);
     this.debuggerClient.removeListener("newSource", this._onNewSource);
     this.activeThread.removeListener("blackboxchange", this._onBlackBoxChange);
+    this.activeThread.addListener("prettyprintchange", this._onPrettyPrintChange);
+  },
+
+  /**
+   * Clears all the cached source contents.
+   */
+  clearCache: function() {
+    this._cache.clear();
   },
 
   /**
    * Handles any initialization on a tab navigation event issued by the client.
    */
-  _handleTabNavigation: function() {
+  handleTabNavigation: function() {
     if (!this.activeThread) {
       return;
     }
     dumpn("Handling tab navigation in the SourceScripts");
 
-    // Don't expect the old sources to matter after the tab navigated.
-    clearNamedTimeout("new-source");
-
     // Retrieve the list of script sources known to the server from before
     // the client was ready to handle "newSource" notifications.
-    this._cache.clear();
     this.activeThread.getSources(this._onSourcesAdded);
   },
 
@@ -1068,6 +1099,11 @@ SourceScripts.prototype = {
     // both in the editor and the breakpoints pane.
     DebuggerController.Breakpoints.updateEditorBreakpoints();
     DebuggerController.Breakpoints.updatePaneBreakpoints();
+
+    // Make sure the events listeners are up to date.
+    if (DebuggerView.instrumentsPaneTab == "events-tab") {
+      DebuggerController.Breakpoints.DOM.scheduleEventListenersFetch();
+    }
 
     // Signal that a new source has been added.
     window.emit(EVENTS.NEW_SOURCE);
@@ -1120,9 +1156,14 @@ SourceScripts.prototype = {
   _onBlackBoxChange: function (aEvent, { url, isBlackBoxed }) {
     const item = DebuggerView.Sources.getItemByValue(url);
     if (item) {
-      DebuggerView.Sources.callMethod("checkItem", item.target, !isBlackBoxed);
+      if (isBlackBoxed) {
+        item.target.classList.add("black-boxed");
+      } else {
+        item.target.classList.remove("black-boxed");
+      }
     }
-    DebuggerView.Sources.maybeShowBlackBoxMessage();
+    DebuggerView.Sources.updateToolbarButtonsState();
+    DebuggerView.maybeShowBlackBoxMessage();
   },
 
   /**
@@ -1132,22 +1173,33 @@ SourceScripts.prototype = {
    *        The source form.
    * @param bool aBlackBoxFlag
    *        True to black box the source, false to un-black box it.
+   * @returns Promise
+   *          A promize that resolves to [aSource, isBlackBoxed] or rejects to
+   *          [aSource, error].
    */
   blackBox: function(aSource, aBlackBoxFlag) {
     const sourceClient = this.activeThread.source(aSource);
-    sourceClient[aBlackBoxFlag ? "blackBox" : "unblackBox"](({ error, message }) => {
+    const deferred = promise.defer();
+
+    sourceClient[aBlackBoxFlag ? "blackBox" : "unblackBox"](aPacket => {
+      const { error, message } = aPacket;
       if (error) {
         let msg = "Couldn't toggle black boxing for " + aSource.url + ": " + message;
         dumpn(msg);
         Cu.reportError(msg);
-        return;
+        deferred.reject([aSource, msg]);
+      } else {
+        deferred.resolve([aSource, sourceClient.isBlackBoxed]);
       }
     });
+
+    return deferred.promise;
   },
 
   /**
-   * Pretty print a source's text. All subsequent calls to |getText| will return
-   * the pretty text. Nothing will happen for non-javascript files.
+   * Toggle the pretty printing of a source's text. All subsequent calls to
+   * |getText| will return the pretty-toggled text. Nothing will happen for
+   * non-javascript files.
    *
    * @param Object aSource
    *        The source form from the RDP.
@@ -1155,46 +1207,54 @@ SourceScripts.prototype = {
    *          A promise that resolves to [aSource, prettyText] or rejects to
    *          [aSource, error].
    */
-  prettyPrint: function(aSource) {
+  togglePrettyPrint: function(aSource) {
     // Only attempt to pretty print JavaScript sources.
     if (!SourceUtils.isJavaScript(aSource.url, aSource.contentType)) {
       return promise.reject([aSource, "Can't prettify non-javascript files."]);
     }
 
+    const sourceClient = this.activeThread.source(aSource);
+    const wantPretty = !sourceClient.isPrettyPrinted;
+
     // Only use the existing promise if it is pretty printed.
     let textPromise = this._cache.get(aSource.url);
-    if (textPromise && textPromise.pretty) {
+    if (textPromise && textPromise.pretty === wantPretty) {
       return textPromise;
     }
 
     const deferred = promise.defer();
+    deferred.promise.pretty = wantPretty;
     this._cache.set(aSource.url, deferred.promise);
 
-    this.activeThread.source(aSource)
-      .prettyPrint(Prefs.editorTabSize, ({ error, message, source: text }) => {
-        if (error) {
-          // Revert the rejected promise from the cache, so that the original
-          // source's text may be shown when the source is selected.
-          this._cache.set(aSource.url, textPromise);
-          deferred.reject([aSource, message || error]);
-          return;
-        }
+    const afterToggle = ({ error, message, source: text }) => {
+      if (error) {
+        // Revert the rejected promise from the cache, so that the original
+        // source's text may be shown when the source is selected.
+        this._cache.set(aSource.url, textPromise);
 
-        // Remove the cached source AST from the Parser, to avoid getting
-        // wrong locations when searching for functions.
-        DebuggerController.Parser.clearSource(aSource.url);
+        deferred.reject([aSource, message || error]);
+        return;
+      }
 
-        if (this.activeThread.paused) {
-          // Update the stack frame list.
-          this.activeThread._clearFrames();
-          this.activeThread.fillFrames(CALL_STACK_PAGE_SIZE);
-        }
+      deferred.resolve([aSource, text]);
+    };
 
-        deferred.resolve([aSource, text]);
-      });
+    if (wantPretty) {
+      sourceClient.prettyPrint(Prefs.editorTabSize, afterToggle);
+    } else {
+      sourceClient.disablePrettyPrint(afterToggle);
+    }
 
-    deferred.promise.pretty = true;
     return deferred.promise;
+  },
+
+  /**
+   * Handler for the debugger's prettyprintchange notification.
+   */
+  _onPrettyPrintChange: function(aEvent, { url }) {
+    // Remove the cached source AST from the Parser, to avoid getting
+    // wrong locations when searching for functions.
+    DebuggerController.Parser.clearSource(url);
   },
 
   /**
@@ -1303,10 +1363,85 @@ SourceScripts.prototype = {
 };
 
 /**
+ * Handles breaking on event listeners in the currently debugged target.
+ */
+function EventListeners() {
+  this._onEventListeners = this._onEventListeners.bind(this);
+}
+
+EventListeners.prototype = {
+  /**
+   * A list of event names on which the debuggee will automatically pause
+   * when invoked.
+   */
+  activeEventNames: [],
+
+  /**
+   * Updates the list of events types with listeners that, when invoked,
+   * will automatically pause the debuggee. The respective events are
+   * retrieved from the UI.
+   */
+  scheduleEventBreakpointsUpdate: function() {
+    // Make sure we're not sending a batch of closely repeated requests.
+    // This can easily happen when toggling all events of a certain type.
+    setNamedTimeout("event-breakpoints-update", 0, () => {
+      this.activeEventNames = DebuggerView.EventListeners.getCheckedEvents();
+      gThreadClient.pauseOnDOMEvents(this.activeEventNames);
+
+      // Notify that event breakpoints were added/removed on the server.
+      window.emit(EVENTS.EVENT_BREAKPOINTS_UPDATED);
+    });
+  },
+
+  /**
+   * Fetches the currently attached event listeners from the debugee.
+   */
+  scheduleEventListenersFetch: function() {
+    let getListeners = aCallback => gThreadClient.eventListeners(aResponse => {
+      this._onEventListeners(aResponse);
+
+      // Notify that event listeners were fetched and shown in the view,
+      // and callback to resume the active thread if necessary.
+      window.emit(EVENTS.EVENT_LISTENERS_FETCHED);
+      aCallback && aCallback();
+    });
+
+    // Make sure we're not sending a batch of closely repeated requests.
+    // This can easily happen whenever new sources are fetched.
+    setNamedTimeout("event-listeners-fetch", FETCH_EVENT_LISTENERS_DELAY, () => {
+      if (gThreadClient.state != "paused") {
+        gThreadClient.interrupt(() => getListeners(() => gThreadClient.resume()));
+      } else {
+        getListeners();
+      }
+    });
+  },
+
+  /**
+   * Callback for the debugger's active thread eventListeners() method.
+   */
+  _onEventListeners: function(aResponse) {
+    if (aResponse.error) {
+      let msg = "Error getting event listeners: " + aResponse.message;
+      Cu.reportError(msg);
+      dumpn(msg);
+      return;
+    }
+
+    // Add all the listeners in the debugger view event linsteners container.
+    for (let listener of aResponse.listeners) {
+      DebuggerView.EventListeners.addListener(listener, { staged: true });
+    }
+
+    // Flushes all the prepared events into the event listeners container.
+    DebuggerView.EventListeners.commit();
+  }
+};
+
+/**
  * Handles all the breakpoints in the current debugger.
  */
 function Breakpoints() {
-  this._onEditorBreakpointChange = this._onEditorBreakpointChange.bind(this);
   this._onEditorBreakpointAdd = this._onEditorBreakpointAdd.bind(this);
   this._onEditorBreakpointRemove = this._onEditorBreakpointRemove.bind(this);
   this.addBreakpoint = this.addBreakpoint.bind(this);
@@ -1314,8 +1449,6 @@ function Breakpoints() {
 }
 
 Breakpoints.prototype = {
-  get activeThread() DebuggerController.activeThread,
-
   /**
    * A map of breakpoint promises as tracked by the debugger frontend.
    * The keys consist of a string representation of the breakpoint location.
@@ -1331,8 +1464,8 @@ Breakpoints.prototype = {
    *         A promise that is resolved when the breakpoints finishes initializing.
    */
   initialize: function() {
-    DebuggerView.editor.addEventListener(
-      SourceEditor.EVENTS.BREAKPOINT_CHANGE, this._onEditorBreakpointChange);
+    DebuggerView.editor.on("breakpointAdded", this._onEditorBreakpointAdd);
+    DebuggerView.editor.on("breakpointRemoved", this._onEditorBreakpointRemove);
 
     // Initialization is synchronous, for now.
     return promise.resolve(null);
@@ -1345,34 +1478,21 @@ Breakpoints.prototype = {
    *         A promise that is resolved when the breakpoints finishes destroying.
    */
   destroy: function() {
-    DebuggerView.editor.removeEventListener(
-      SourceEditor.EVENTS.BREAKPOINT_CHANGE, this._onEditorBreakpointChange);
+    DebuggerView.editor.off("breakpointAdded", this._onEditorBreakpointAdd);
+    DebuggerView.editor.off("breakpointRemoved", this._onEditorBreakpointRemove);
 
     return this.removeAllBreakpoints();
   },
 
   /**
-   * Event handler for breakpoint changes that happen in the editor. This
-   * function syncs the breakpoints in the editor to those in the debugger.
-   *
-   * @param object aEvent
-   *        The SourceEditor.EVENTS.BREAKPOINT_CHANGE event object.
-   */
-  _onEditorBreakpointChange: function(aEvent) {
-    aEvent.added.forEach(this._onEditorBreakpointAdd, this);
-    aEvent.removed.forEach(this._onEditorBreakpointRemove, this);
-  },
-
-  /**
    * Event handler for new breakpoints that come from the editor.
    *
-   * @param object aEditorBreakpoint
-   *        The breakpoint object coming from the editor.
+   * @param number aLine
+   *        Line number where breakpoint was set.
    */
-  _onEditorBreakpointAdd: function(aEditorBreakpoint) {
+  _onEditorBreakpointAdd: function(_, aLine) {
     let url = DebuggerView.Sources.selectedValue;
-    let line = aEditorBreakpoint.line + 1;
-    let location = { url: url, line: line };
+    let location = { url: url, line: aLine + 1 };
 
     // Initialize the breakpoint, but don't update the editor, since this
     // callback is invoked because a breakpoint was added in the editor itself.
@@ -1385,26 +1505,25 @@ Breakpoints.prototype = {
         DebuggerView.editor.addBreakpoint(aBreakpointClient.location.line - 1);
       }
       // Notify that we've shown a breakpoint in the source editor.
-      window.emit(EVENTS.BREAKPOINT_SHOWN, aEditorBreakpoint);
+      window.emit(EVENTS.BREAKPOINT_SHOWN);
     });
   },
 
   /**
    * Event handler for breakpoints that are removed from the editor.
    *
-   * @param object aEditorBreakpoint
-   *        The breakpoint object that was removed from the editor.
+   * @param number aLine
+   *        Line number where breakpoint was removed.
    */
-  _onEditorBreakpointRemove: function(aEditorBreakpoint) {
+  _onEditorBreakpointRemove: function(_, aLine) {
     let url = DebuggerView.Sources.selectedValue;
-    let line = aEditorBreakpoint.line + 1;
-    let location = { url: url, line: line };
+    let location = { url: url, line: aLine + 1 };
 
     // Destroy the breakpoint, but don't update the editor, since this callback
     // is invoked because a breakpoint was removed from the editor itself.
     this.removeBreakpoint(location, { noEditorUpdate: true }).then(() => {
       // Notify that we've hidden a breakpoint in the source editor.
-      window.emit(EVENTS.BREAKPOINT_HIDDEN, aEditorBreakpoint);
+      window.emit(EVENTS.BREAKPOINT_HIDDEN);
     });
   },
 
@@ -1492,7 +1611,7 @@ Breakpoints.prototype = {
     this._added.set(identifier, deferred.promise);
 
     // Try adding the breakpoint.
-    this.activeThread.setBreakpoint(aLocation, (aResponse, aBreakpointClient) => {
+    gThreadClient.setBreakpoint(aLocation, (aResponse, aBreakpointClient) => {
       // If the breakpoint response has an "actualLocation" attached, then
       // the original requested placement for the breakpoint wasn't accepted.
       if (aResponse.actualLocation) {
@@ -1518,7 +1637,7 @@ Breakpoints.prototype = {
       // after the target navigated). Note that this will get out of sync
       // if the source text contents change.
       let line = aBreakpointClient.location.line - 1;
-      aBreakpointClient.text = DebuggerView.getEditorLineText(line).trim();
+      aBreakpointClient.text = DebuggerView.editor.getText(line).trim();
 
       // Show the breakpoint in the editor and breakpoints pane, and resolve.
       this._showBreakpoint(aBreakpointClient, aOptions);
@@ -1761,6 +1880,7 @@ let Prefs = new ViewHelpers.Prefs("devtools", {
   pauseOnExceptions: ["Bool", "debugger.pause-on-exceptions"],
   ignoreCaughtExceptions: ["Bool", "debugger.ignore-caught-exceptions"],
   sourceMapsEnabled: ["Bool", "debugger.source-maps-enabled"],
+  prettyPrintEnabled: ["Bool", "debugger.pretty-print-enabled"],
   editorTabSize: ["Int", "editor.tabsize"]
 });
 
@@ -1787,6 +1907,7 @@ DebuggerController.ThreadState = new ThreadState();
 DebuggerController.StackFrames = new StackFrames();
 DebuggerController.SourceScripts = new SourceScripts();
 DebuggerController.Breakpoints = new Breakpoints();
+DebuggerController.Breakpoints.DOM = new EventListeners();
 
 /**
  * Export some properties to the global scope for easier access.
@@ -1794,6 +1915,9 @@ DebuggerController.Breakpoints = new Breakpoints();
 Object.defineProperties(window, {
   "gTarget": {
     get: function() DebuggerController._target
+  },
+  "gHostType": {
+    get: function() DebuggerView._hostType
   },
   "gClient": {
     get: function() DebuggerController.client

@@ -15,6 +15,7 @@
     macro(anonymous, anonymous, "anonymous") \
     macro(apply, apply, "apply") \
     macro(arguments, arguments, "arguments") \
+    macro(ArrayType, ArrayType, "ArrayType") \
     macro(buffer, buffer, "buffer") \
     macro(builder, builder, "builder") \
     macro(byteLength, byteLength, "byteLength") \
@@ -27,7 +28,6 @@
     macro(caller, caller, "caller") \
     macro(callFunction, callFunction, "callFunction") \
     macro(caseFirst, caseFirst, "caseFirst") \
-    macro(classPrototype, classPrototype, "prototype") \
     macro(Collator, Collator, "Collator") \
     macro(CollatorCompareGet, CollatorCompareGet, "Intl_Collator_compare_get") \
     macro(columnNumber, columnNumber, "columnNumber") \
@@ -35,8 +35,10 @@
     macro(configurable, configurable, "configurable") \
     macro(construct, construct, "construct") \
     macro(constructor, constructor, "constructor") \
+    macro(ConvertAndCopyTo, ConvertAndCopyTo, "ConvertAndCopyTo") \
     macro(currency, currency, "currency") \
     macro(currencyDisplay, currencyDisplay, "currencyDisplay") \
+    macro(std_iterator, std_iterator, "@@iterator") \
     macro(DateTimeFormat, DateTimeFormat, "DateTimeFormat") \
     macro(DateTimeFormatFormatGet, DateTimeFormatFormatGet, "Intl_DateTimeFormat_format_get") \
     macro(decodeURI, decodeURI, "decodeURI") \
@@ -61,7 +63,10 @@
     macro(fieldOffsets, fieldOffsets, "fieldOffsets") \
     macro(fieldTypes, fieldTypes, "fieldTypes") \
     macro(fileName, fileName, "fileName") \
+    macro(FillTypedArrayWithValue, FillTypedArrayWithValue, "FillTypedArrayWithValue") \
     macro(fix, fix, "fix") \
+    macro(float32, float32, "float32") \
+    macro(float64, float64, "float64") \
     macro(format, format, "format") \
     macro(get, get, "get") \
     macro(getInternals, getInternals, "getInternals") \
@@ -69,6 +74,7 @@
     macro(getOwnPropertyNames, getOwnPropertyNames, "getOwnPropertyNames") \
     macro(getPropertyDescriptor, getPropertyDescriptor, "getPropertyDescriptor") \
     macro(global, global, "global") \
+    macro(Handle, Handle, "Handle") \
     macro(has, has, "has") \
     macro(hasOwn, hasOwn, "hasOwn") \
     macro(hasOwnProperty, hasOwnProperty, "hasOwnProperty") \
@@ -85,6 +91,9 @@
     macro(isPrototypeOf, isPrototypeOf, "isPrototypeOf") \
     macro(iterate, iterate, "iterate") \
     macro(Infinity, Infinity, "Infinity") \
+    macro(int8, int8, "int8") \
+    macro(int16, int16, "int16") \
+    macro(int32, int32, "int32") \
     macro(iterator, iterator, "iterator") \
     macro(iteratorIntrinsic, iteratorIntrinsic, "__iterator__") \
     macro(join, join, "join") \
@@ -123,6 +132,8 @@
     macro(preventExtensions, preventExtensions, "preventExtensions") \
     macro(propertyIsEnumerable, propertyIsEnumerable, "propertyIsEnumerable") \
     macro(proto, proto, "__proto__") \
+    macro(prototype, prototype, "prototype") \
+    macro(Reify, Reify, "Reify") \
     macro(return, return_, "return") \
     macro(sensitivity, sensitivity, "sensitivity") \
     macro(set, set, "set") \
@@ -130,6 +141,7 @@
     macro(source, source, "source") \
     macro(stack, stack, "stack") \
     macro(sticky, sticky, "sticky") \
+    macro(StructType, StructType, "StructType") \
     macro(style, style, "style") \
     macro(test, test, "test") \
     macro(throw, throw_, "throw") \
@@ -144,6 +156,10 @@
     macro(true, true_, "true") \
     macro(unescape, unescape, "unescape") \
     macro(uneval, uneval, "uneval") \
+    macro(uint8, uint8, "uint8") \
+    macro(uint8Clamped, uint8Clamped, "uint8Clamped") \
+    macro(uint16, uint16, "uint16") \
+    macro(uint32, uint32, "uint32") \
     macro(unwatch, unwatch, "unwatch") \
     macro(url, url, "url") \
     macro(usage, usage, "usage") \

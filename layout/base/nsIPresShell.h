@@ -126,10 +126,10 @@ typedef struct CapturingContentInfo {
 } CapturingContentInfo;
 
 
-// d39cd4ce-6b38-4793-8c1a-00985c56d931
+// f5b542a9-eaf0-4560-a656-37a9d379864c
 #define NS_IPRESSHELL_IID \
-{ 0xd39cd4ce, 0x6b38, 0x4793, \
-  { 0x8c, 0x1a, 0x00, 0x98, 0x5c, 0x56, 0xd9, 0x31 } }
+{ 0xf5b542a9, 0xeaf0, 0x4560, \
+  { 0x37, 0xa9, 0xd3, 0x79, 0x86, 0x4c } }
 
 // debug VerifyReflow flags
 #define VERIFY_REFLOW_ON                    0x01
@@ -457,7 +457,7 @@ public:
 
   /**
    * Returns the page sequence frame associated with the frame hierarchy.
-   * Returns NULL if not a paginated view.
+   * Returns nullptr if not a paginated view.
    */
   virtual NS_HIDDEN_(nsIPageSequenceFrame*) GetPageSequenceFrame() const = 0;
 
@@ -822,18 +822,6 @@ public:
    * recur into our children.
    */
   bool IsPaintingSuppressed() const { return mPaintingSuppressed; }
-
-  /**
-   * Resume painting by thawing the refresh driver of this and all parent
-   * presentations.
-   */
-  virtual void FreezePainting() = 0;
-
-  /**
-   * Resume painting by thawing the refresh driver of this and all parent
-   * presentations.
-   */
-  virtual void ThawPainting() = 0;
 
   /**
    * Unsuppress painting.
@@ -1479,6 +1467,17 @@ public:
     mReflowOnZoomPending = false;
   }
 
+  /**
+   * Documents belonging to an invisible DocShell must not be painted ever.
+   */
+  bool IsNeverPainting() {
+    return mIsNeverPainting;
+  }
+
+  void SetNeverPainting(bool aNeverPainting) {
+    mIsNeverPainting = aNeverPainting;
+  }
+
 protected:
   friend class nsRefreshDriver;
 
@@ -1600,6 +1599,11 @@ protected:
   // The maximum width of a line box. Text on a single line that exceeds this
   // width will be wrapped. A value of 0 indicates that no limit is enforced.
   nscoord mMaxLineBoxWidth;
+  
+  // If a document belongs to an invisible DocShell, this flag must be set
+  // to true, so we can avoid any paint calls for widget related to this
+  // presshell.
+  bool mIsNeverPainting;
 };
 
 #endif /* nsIPresShell_h___ */

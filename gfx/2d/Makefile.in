@@ -5,8 +5,6 @@
 
 VPATH		=  $(srcdir) $(srcdir)/unittest
 
-EXPORT_LIBRARY	= 1
-
 DEFINES += -DMOZ_GFX -DUSE_CAIRO -DGFX2D_INTERNAL
 
 ifeq ($(MOZ_WIDGET_TOOLKIT),$(findstring $(MOZ_WIDGET_TOOLKIT),android gtk2 gtk3 gonk qt))
@@ -42,7 +40,6 @@ endif
 endif
 
 include $(topsrcdir)/config/rules.mk
-include $(topsrcdir)/ipc/chromium/chromium-config.mk
 
 # Due to bug 796023, we can't have -DUNICODE and -D_UNICODE; defining those
 # macros changes the type of LOGFONT to LOGFONTW instead of LOGFONTA. This

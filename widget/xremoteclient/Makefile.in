@@ -7,8 +7,6 @@
 # the application binaries. The fact that it's under mozilla/widget is a fluke
 # of tree history.
 
-FORCE_STATIC_LIB = 1
-
 DEFINES += -DXPCOM_GLUE
 
 LIBCPPSRCS = XRemoteClient.cpp
@@ -26,6 +24,11 @@ PROGCPPSRCS = \
   $(NULL)
 
 PROGOBJS = $(PROGCPPSRCS:.cpp=.$(OBJ_SUFFIX))
+
+CPPSRCS += \
+  $(filter-out $(LIBCPPSRCS),$(PROGCPPSRCS)) \
+  $(LIBCPPSRCS) \
+  $(NULL)
 
 LIBS            = \
 		$(NSPR_LIBS) \

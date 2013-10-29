@@ -254,9 +254,9 @@ function run_abstract_class_tests()
   do_check_true(ctypes.CType.prototype.prototype === ctypes.CData.prototype);
 
   // Check that the shared properties and functions on ctypes.CType.prototype throw.
-  do_check_throws(function() { ctypes.CType.prototype.name; }, Error);
-  do_check_throws(function() { ctypes.CType.prototype.size; }, Error);
-  do_check_throws(function() { ctypes.CType.prototype.ptr; }, Error);
+  do_check_throws(function() { ctypes.CType.prototype.name; }, TypeError);
+  do_check_throws(function() { ctypes.CType.prototype.size; }, TypeError);
+  do_check_throws(function() { ctypes.CType.prototype.ptr; }, TypeError);
   do_check_throws(function() { ctypes.CType.prototype.array(); }, Error);
 
 
@@ -288,8 +288,8 @@ function run_abstract_class_tests()
   do_check_true(ctypes.CData.prototype.hasOwnProperty("toSource"));
 
   // Check that the shared properties and functions on ctypes.CData.prototype throw.
-  do_check_throws(function() { ctypes.CData.prototype.value; }, Error);
-  do_check_throws(function() { ctypes.CData.prototype.value = null; }, Error);
+  do_check_throws(function() { ctypes.CData.prototype.value; }, TypeError);
+  do_check_throws(function() { ctypes.CData.prototype.value = null; }, TypeError);
   do_check_throws(function() { ctypes.CData.prototype.address(); }, Error);
   do_check_throws(function() { ctypes.CData.prototype.readString(); }, Error);
 
@@ -626,22 +626,22 @@ function run_basic_abi_tests(library, t, name, toprimitive,
   run_single_abi_tests(declare_fn_cdecl, ctypes.default_abi, t,
     toprimitive, get_test, set_tests, sum_tests, sum_many_tests);
 
-#ifdef WIN32
-  function declare_fn_stdcall(fn_t, prefix) {
-    return library.declare(prefix + name + "_stdcall", fn_t);
-  }
-  run_single_abi_tests(declare_fn_stdcall, ctypes.stdcall_abi, t,
-    toprimitive, get_test, set_tests, sum_tests, sum_many_tests);
+  if ("winLastError" in ctypes) {
+    function declare_fn_stdcall(fn_t, prefix) {
+      return library.declare(prefix + name + "_stdcall", fn_t);
+    }
+    run_single_abi_tests(declare_fn_stdcall, ctypes.stdcall_abi, t,
+                         toprimitive, get_test, set_tests, sum_tests, sum_many_tests);
 
-  // Check that declaring a WINAPI function gets the right symbol name.
-  let libuser32 = ctypes.open("user32.dll");
-  let charupper = libuser32.declare("CharUpperA",
-                                    ctypes.winapi_abi,
-                                    ctypes.char.ptr,
-                                    ctypes.char.ptr);
-  let hello = ctypes.char.array()("hello!");
-  do_check_eq(charupper(hello).readString(), "HELLO!");
-#endif
+    // Check that declaring a WINAPI function gets the right symbol name.
+    let libuser32 = ctypes.open("user32.dll");
+    let charupper = libuser32.declare("CharUpperA",
+                                      ctypes.winapi_abi,
+                                      ctypes.char.ptr,
+                                      ctypes.char.ptr);
+    let hello = ctypes.char.array()("hello!");
+    do_check_eq(charupper(hello).readString(), "HELLO!");
+  }
 
   // Check the alignment of the type, and its behavior in a struct,
   // against what C says.
@@ -750,8 +750,8 @@ function run_basic_class_tests(t)
   do_check_true(t.prototype.constructor === t);
 
   // Check that the shared properties and functions on 't.prototype' throw.
-  do_check_throws(function() { t.prototype.value; }, Error);
-  do_check_throws(function() { t.prototype.value = null; }, Error);
+  do_check_throws(function() { t.prototype.value; }, TypeError);
+  do_check_throws(function() { t.prototype.value = null; }, TypeError);
   do_check_throws(function() { t.prototype.address(); }, Error);
   do_check_throws(function() { t.prototype.readString(); }, Error);
 
@@ -1299,7 +1299,7 @@ function run_type_ctor_class_tests(c, t, t2, props, fns, instanceProps, instance
 
   // Check that the shared properties and functions on 'c.prototype' throw.
   for each (let p in props)
-    do_check_throws(function() { c.prototype[p]; }, Error);
+    do_check_throws(function() { c.prototype[p]; }, TypeError);
   for each (let f in fns)
     do_check_throws(function() { c.prototype[f](); }, Error);
 
@@ -1334,8 +1334,8 @@ function run_type_ctor_class_tests(c, t, t2, props, fns, instanceProps, instance
   // Check that the shared properties and functions on 't.prototype.__proto__'
   // (and thus also 't.prototype') throw.
   for each (let p in instanceProps) {
-    do_check_throws(function() { t.prototype.__proto__[p]; }, Error);
-    do_check_throws(function() { t.prototype[p]; }, Error);
+    do_check_throws(function() { t.prototype.__proto__[p]; }, TypeError);
+    do_check_throws(function() { t.prototype[p]; }, TypeError);
   }
   for each (let f in instanceFns) {
     do_check_throws(function() { t.prototype.__proto__[f]() }, Error);
@@ -1926,14 +1926,14 @@ function run_FunctionType_tests() {
     ctypes.char.ptr.array().ptr).ptr.ptr.array(8).array();
   do_check_eq(f3_t.name, "char*(*(**[][8])())[]");
 
-#ifdef WIN32
-  f3_t = ctypes.FunctionType(ctypes.stdcall_abi,
-    ctypes.char.ptr.array().ptr).ptr.ptr.array(8).array();
-  do_check_eq(f3_t.name, "char*(*(__stdcall**[][8])())[]");
-  f3_t = ctypes.FunctionType(ctypes.winapi_abi,
-    ctypes.char.ptr.array().ptr).ptr.ptr.array(8).array();
-  do_check_eq(f3_t.name, "char*(*(WINAPI**[][8])())[]");
-#endif
+  if ("winLastError" in ctypes) {
+    f3_t = ctypes.FunctionType(ctypes.stdcall_abi,
+                               ctypes.char.ptr.array().ptr).ptr.ptr.array(8).array();
+    do_check_eq(f3_t.name, "char*(*(__stdcall**[][8])())[]");
+    f3_t = ctypes.FunctionType(ctypes.winapi_abi,
+                               ctypes.char.ptr.array().ptr).ptr.ptr.array(8).array();
+    do_check_eq(f3_t.name, "char*(*(WINAPI**[][8])())[]");
+  }
 
   let f4_t = ctypes.FunctionType(ctypes.default_abi,
     ctypes.char.ptr.array().ptr, [ ctypes.int32_t, fp_t ]);
@@ -2228,18 +2228,18 @@ function run_void_tests(library) {
     library.declare("test_void_t_cdecl", ctypes.default_abi, ctypes.void_t, ctypes.void_t);
   }, Error);
 
-#ifdef WIN32
-  test_void_t = library.declare("test_void_t_stdcall", ctypes.stdcall_abi, ctypes.void_t);
-  do_check_eq(test_void_t(), undefined);
+  if ("winLastError" in ctypes) {
+    test_void_t = library.declare("test_void_t_stdcall", ctypes.stdcall_abi, ctypes.void_t);
+    do_check_eq(test_void_t(), undefined);
 
-  // Check that WINAPI symbol lookup for a regular stdcall function fails on
-  // Win32 (it's all the same on Win64 though).
-#ifndef HAVE_64BIT_OS
-  do_check_throws(function() {
-    let test_winapi_t = library.declare("test_void_t_stdcall", ctypes.winapi_abi, ctypes.void_t);
-  }, Error);
-#endif
-#endif
+    // Check that WINAPI symbol lookup for a regular stdcall function fails on
+    // Win32 (it's all the same on Win64 though).
+    if (ctypes.voidptr_t.size == 8) {
+      do_check_throws(function() {
+        let test_winapi_t = library.declare("test_void_t_stdcall", ctypes.winapi_abi, ctypes.void_t);
+      }, Error);
+    }
+  }
 }
 
 function run_string_tests(library) {
@@ -2562,17 +2562,17 @@ function run_function_tests(library)
 function run_closure_tests(library)
 {
   run_single_closure_tests(library, ctypes.default_abi, "cdecl");
-#ifdef WIN32
-  run_single_closure_tests(library, ctypes.stdcall_abi, "stdcall");
+  if ("winLastError" in ctypes) {
+    run_single_closure_tests(library, ctypes.stdcall_abi, "stdcall");
 
-  // Check that attempting to construct a ctypes.winapi_abi closure throws.
-  function closure_fn()
-  {
-    return 1;
+    // Check that attempting to construct a ctypes.winapi_abi closure throws.
+    function closure_fn()
+    {
+      return 1;
+    }
+    let fn_t = ctypes.FunctionType(ctypes.winapi_abi, ctypes.int32_t, []).ptr;
+    do_check_throws(function() { fn_t(closure_fn) }, Error);
   }
-  let fn_t = ctypes.FunctionType(ctypes.winapi_abi, ctypes.int32_t, []).ptr;
-  do_check_throws(function() { fn_t(closure_fn) }, Error);
-#endif
 }
 
 function run_single_closure_tests(library, abi, suffix)
@@ -2674,16 +2674,16 @@ function run_variadic_tests(library) {
     ctypes.FunctionType(ctypes.default_abi, ctypes.bool, ["..."]);
   }, Error);
 
-#ifdef WIN32
-  do_check_throws(function() {
+  if ("winLastError" in ctypes) {
+    do_check_throws(function() {
       ctypes.FunctionType(ctypes.stdcall_abi, ctypes.bool,
                           [ctypes.bool, "..."]);
-  }, Error);
-  do_check_throws(function() {
+    }, Error);
+    do_check_throws(function() {
       ctypes.FunctionType(ctypes.winapi_abi, ctypes.bool,
                           [ctypes.bool, "..."]);
-  }, Error);
-#endif
+    }, Error);
+  }
 
   do_check_throws(function() {
     // No variadic closure callbacks allowed.

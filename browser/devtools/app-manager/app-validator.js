@@ -24,27 +24,35 @@ AppValidator.prototype.warning = function (message) {
   this.warnings.push(message);
 }
 
-AppValidator.prototype._getPackagedManifestURL = function () {
+AppValidator.prototype._getPackagedManifestFile = function () {
   let manifestFile = FileUtils.File(this.project.location);
   if (!manifestFile.exists()) {
     this.error(strings.GetStringFromName("validator.nonExistingFolder"));
-    return;
+    return null;
   }
   if (!manifestFile.isDirectory()) {
     this.error(strings.GetStringFromName("validator.expectProjectFolder"));
-    return;
+    return null;
   }
   manifestFile.append("manifest.webapp");
   if (!manifestFile.exists() || !manifestFile.isFile()) {
     this.error(strings.GetStringFromName("validator.wrongManifestFileName"));
-    return;
+    return null;
   }
+  return manifestFile;
+};
 
+AppValidator.prototype._getPackagedManifestURL = function () {
+  let manifestFile = this._getPackagedManifestFile();
+  if (!manifestFile) {
+    return null;
+  }
   return Services.io.newFileURI(manifestFile).spec;
-}
+};
 
 AppValidator.prototype._fetchManifest = function (manifestURL) {
   let deferred = promise.defer();
+  this.manifestURL = manifestURL;
 
   let req = new XMLHttpRequest();
   try {
@@ -54,7 +62,7 @@ AppValidator.prototype._fetchManifest = function (manifestURL) {
     deferred.resolve(null);
     return deferred.promise;
   }
-  req.channel.loadFlags |= Ci.nsIRequest.INHIBIT_CACHING;
+  req.channel.loadFlags |= Ci.nsIRequest.LOAD_BYPASS_CACHE | Ci.nsIRequest.INHIBIT_CACHING;
   req.onload = (function () {
     let manifest = null;
     try {
@@ -113,6 +121,68 @@ AppValidator.prototype.validateManifest = function (manifest) {
   }
 }
 
+AppValidator.prototype._getOriginURL = function (manifest) {
+  if (this.project.type == "packaged") {
+    let manifestURL = Services.io.newURI(this.manifestURL, null, null);
+    return Services.io.newURI(".", null, manifestURL).spec;
+  } else if (this.project.type == "hosted") {
+    return Services.io.newURI(this.project.location, null, null).prePath;
+  }
+}
+
+AppValidator.prototype.validateLaunchPath = function (manifest) {
+  let deferred = promise.defer();
+  // The launch_path field has to start with a `/`
+  if (manifest.launch_path && manifest.launch_path[0] !== "/") {
+    this.error(strings.formatStringFromName("validator.nonAbsoluteLaunchPath", [manifest.launch_path], 1));
+    deferred.resolve();
+    return deferred.promise;
+  }
+  let origin = this._getOriginURL();
+  let path;
+  if (this.project.type == "packaged") {
+    path = "." + ( manifest.launch_path || "/index.html" );
+  } else if (this.project.type == "hosted") {
+    path = manifest.launch_path || "/";
+  }
+  let indexURL;
+  try {
+    indexURL = Services.io.newURI(path, null, Services.io.newURI(origin, null, null)).spec;
+  } catch(e) {
+    this.error(strings.formatStringFromName("validator.invalidLaunchPath", [origin + path], 1));
+    deferred.resolve();
+    return deferred.promise;
+  }
+
+  let req = new XMLHttpRequest();
+  try {
+    req.open("HEAD", indexURL, true);
+  } catch(e) {
+    this.error(strings.formatStringFromName("validator.invalidLaunchPath", [indexURL], 1));
+    deferred.resolve();
+    return deferred.promise;
+  }
+  req.channel.loadFlags |= Ci.nsIRequest.LOAD_BYPASS_CACHE | Ci.nsIRequest.INHIBIT_CACHING;
+  req.onload = () => {
+    if (req.status >= 400)
+      this.error(strings.formatStringFromName("validator.invalidLaunchPathBadHttpCode", [indexURL, req.status], 2));
+    deferred.resolve();
+  };
+  req.onerror = () => {
+    this.error(strings.formatStringFromName("validator.invalidLaunchPath", [indexURL], 1));
+    deferred.resolve();
+  };
+
+  try {
+    req.send(null);
+  } catch(e) {
+    this.error(strings.formatStringFromName("validator.invalidLaunchPath", [indexURL], 1));
+    deferred.resolve();
+  }
+
+  return deferred.promise;
+}
+
 AppValidator.prototype.validateType = function (manifest) {
   let appType = manifest.type || "web";
   if (["web", "privileged", "certified"].indexOf(appType) === -1) {
@@ -137,6 +207,7 @@ AppValidator.prototype.validate = function () {
         this.manifest = manifest;
         this.validateManifest(manifest);
         this.validateType(manifest);
+        return this.validateLaunchPath(manifest);
       }
     }).bind(this));
 }

@@ -10,6 +10,7 @@ import org.mozilla.gecko.gfx.GeckoLayerClient;
 import org.mozilla.gecko.gfx.GfxInfoThread;
 import org.mozilla.gecko.gfx.LayerView;
 import org.mozilla.gecko.gfx.PanZoomController;
+import org.mozilla.gecko.prompts.PromptService;
 import org.mozilla.gecko.mozglue.GeckoLoader;
 import org.mozilla.gecko.mozglue.GeneratableAndroidBridgeTarget;
 import org.mozilla.gecko.mozglue.OptionalGeneratedParameter;
@@ -1523,6 +1524,12 @@ public class GeckoAppShell
            However, this is not supported as of now.
            Gecko resets the locale to en-US by calling this function with an empty string.
            This affects GeckoPreferences activity in multi-locale builds.
+
+        N.B., if this code ever becomes live again, you need to hook it up to locale
+        recording in BrowserHealthRecorder: we track the current app and OS locales
+        as part of the recorded environment.
+
+        See similar note in GeckoApp.java for the startup path.
 
         //We're not using this, not need to save it (see bug 635342)
         SharedPreferences settings =

@@ -24,9 +24,11 @@ function test() {
       .then(() => {
         const finished = waitForSourceShown(gPanel, "code_ugly.js");
         clickPrettyPrintButton();
+        testProgressBarShown();
         return finished;
       })
       .then(testSourceIsPretty)
+      .then(testEditorShown)
       .then(testSourceIsStillPretty)
       .then(() => closeDebuggerAndFinish(gPanel))
       .then(null, aError => {
@@ -41,14 +43,22 @@ function testSourceIsUgly() {
 }
 
 function clickPrettyPrintButton() {
-  EventUtils.sendMouseEvent({ type: "click" },
-                            gDebugger.document.getElementById("pretty-print"),
-                            gDebugger);
+  gDebugger.document.getElementById("pretty-print").click();
+}
+
+function testProgressBarShown() {
+  const deck = gDebugger.document.getElementById("editor-deck");
+  is(deck.selectedIndex, 2, "The progress bar should be shown");
 }
 
 function testSourceIsPretty() {
   ok(gEditor.getText().contains("\n    "),
      "The source should be pretty printed.")
+}
+
+function testEditorShown() {
+  const deck = gDebugger.document.getElementById("editor-deck");
+  is(deck.selectedIndex, 0, "The editor should be shown");
 }
 
 function testSourceIsStillPretty() {

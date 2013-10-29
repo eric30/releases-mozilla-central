@@ -260,6 +260,12 @@ void SetTimezone(const nsCString& aTimezoneSpec);
 nsCString GetTimezone();
 
 /**
+ * Get timezone offset
+ * returns the timezone offset relative to UTC in minutes (DST effect included)
+ */
+int32_t GetTimezoneOffset();
+
+/**
  * Register observer for system clock changed notification.
  * @param aObserver The observer that should be added.
  */
@@ -590,6 +596,13 @@ void StartDiskSpaceWatcher();
  * This API is currently only allowed to be used from the main process.
  */
 void StopDiskSpaceWatcher();
+
+/**
+ * Get total system memory of device being run on in bytes.
+ *
+ * Returns 0 if we are unable to determine this information from /proc/meminfo.
+ */
+uint32_t GetTotalSystemMemory();
 
 } // namespace MOZ_HAL_NAMESPACE
 } // namespace mozilla

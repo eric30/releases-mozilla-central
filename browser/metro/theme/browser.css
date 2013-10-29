@@ -448,28 +448,6 @@ documenttab[selected] .documenttab-selection {
   visibility: hidden;
 }
 
-.circularprogressindicator-progressRing {
-  visibility: visible;
-  margin: 0 @toolbar_horizontal_spacing@;
-  pointer-events:none;
-  position: absolute;
-}
-.circularprogressindicator-progressTrack {
-  visibility: visible;
-  margin: 0 @toolbar_horizontal_spacing@;
-  pointer-events: none;
-  position: absolute;
-  width: 40px;
-  height: 40px;
-  background-repeat: no-repeat;
-  background-size: 40px 40px;
-  background-image: url(chrome://browser/skin/images/progresscircle-bg.png);
-}
-.circularprogressindicator-progressRing:not([progress]),
-.circularprogressindicator-progressTrack:not([progress]) {
-  visibility: hidden;
-}
-
 /* Progress meter ---------------------------------------------------------- */
 
 #progress-container {
@@ -601,6 +579,14 @@ documenttab[selected] .documenttab-selection {
   list-style-image: url("chrome://browser/skin/images/identity-icons-https-ev.png");
 }
 
+#toolbar[startpage] > #urlbar:not([autocomplete]) > #identity-box > #identity-icon {
+  list-style-image: url("chrome://browser/skin/images/icons-identity-firefox.png");
+}
+
+#urlbar[autocomplete] > #identity-box > #identity-icon {
+  list-style-image: url("chrome://browser/skin/images/icon-autocomplete-search.png");
+}
+
 /* Main URL textbox */
 #urlbar-edit {
   margin: 0 !important;
@@ -679,6 +665,14 @@ documenttab[selected] .documenttab-selection {
   #stop-button {
     list-style-image: url(chrome://browser/skin/images/urlbar-stop@1.4x.png);
   }
+
+  #toolbar[startpage] > #urlbar:not([autocomplete]) > #identity-box > #identity-icon {
+    list-style-image: url("chrome://browser/skin/images/icons-identity-firefox@1.4x.png");
+  }
+
+  #urlbar[autocomplete] > #identity-box > #identity-icon {
+    list-style-image: url("chrome://browser/skin/images/icon-autocomplete-search@1.4x.png");
+  }
 }
 
 @media (min-resolution: @min_res_180pc@) {
@@ -704,6 +698,14 @@ documenttab[selected] .documenttab-selection {
 
   #stop-button {
     list-style-image: url(chrome://browser/skin/images/urlbar-stop@1.8x.png);
+  }
+
+  #toolbar[startpage] > #urlbar:not([autocomplete]) > #identity-box > #identity-icon {
+    list-style-image: url("chrome://browser/skin/images/icons-identity-firefox@1.8x.png");
+  }
+
+  #urlbar[autocomplete] > #identity-box > #identity-icon {
+    list-style-image: url("chrome://browser/skin/images/icon-autocomplete-search@1.8x.png");
   }
 }
 
@@ -741,14 +743,17 @@ documenttab[selected] .documenttab-selection {
   visibility: collapse;
 }
 
-.circularprogressindicator-progressButton {
-  margin: 0 @toolbar_horizontal_spacing@;
+#download-progress:not([progress]) {
+  visibility: collapse;
+}
+
+#download-progress {
   -moz-image-region: rect(0px, 40px, 40px, 0px) !important;
 }
-.circularprogressindicator-progressButton:hover {
+#download-progress:hover {
   -moz-image-region: rect(40px, 40px, 80px, 0px) !important;
 }
-.circularprogressindicator-progressButton:active {
+#download-progress:active {
   -moz-image-region: rect(80px, 40px, 120px, 0px) !important;
 }
 

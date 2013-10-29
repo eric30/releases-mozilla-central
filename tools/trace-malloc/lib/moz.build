@@ -10,16 +10,16 @@ EXPORTS += [
     'nsTraceMalloc.h',
 ]
 
-CSRCS += [
+SOURCES += [
     'nsTraceMalloc.c',
 ]
 
-CPP_SOURCES += [
+SOURCES += [
     'nsTypeInfo.cpp',
 ]
 
 if CONFIG['OS_ARCH'] == 'WINNT':
-    CPP_SOURCES += [
+    SOURCES += [
         'nsDebugHelpWin32.cpp',
         'nsWinTraceMalloc.cpp',
     ]
@@ -27,4 +27,6 @@ if CONFIG['OS_ARCH'] == 'WINNT':
 LIBRARY_NAME = 'tracemalloc'
 
 LIBXUL_LIBRARY = True
+
+EXPORT_LIBRARY = True
 

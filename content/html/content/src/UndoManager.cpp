@@ -18,6 +18,7 @@
 #include "nsEventDispatcher.h"
 #include "nsContentUtils.h"
 #include "jsapi.h"
+#include "nsIDocument.h"
 
 #include "mozilla/Preferences.h"
 #include "mozilla/ErrorResult.h"
@@ -1155,7 +1156,7 @@ UndoManager::DispatchTransactionEvent(JSContext* aCx, const nsAString& aType,
   nsTArray<nsIVariant*> transactionItems;
   for (uint32_t i = 0; i < items.Length(); i++) {
     JS::Rooted<JS::Value> txVal(aCx, JS::ObjectValue(*items[i]->Callback()));
-    if (!JS_WrapValue(aCx, txVal.address())) {
+    if (!JS_WrapValue(aCx, &txVal)) {
       aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
       return;
     }

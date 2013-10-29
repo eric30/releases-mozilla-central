@@ -6,7 +6,7 @@
 
 MODULE = 'chardet'
 
-CPP_SOURCES += [
+SOURCES += [
     'nsChardetModule.cpp',
     'nsCyrillicDetector.cpp',
 ]
@@ -14,4 +14,6 @@ CPP_SOURCES += [
 LIBRARY_NAME = 'chardet'
 
 LIBXUL_LIBRARY = True
+
+EXPORT_LIBRARY = True
 

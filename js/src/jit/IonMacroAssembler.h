@@ -18,8 +18,8 @@
 #elif defined(JS_CPU_ARM)
 # include "jit/arm/MacroAssembler-arm.h"
 #endif
-#include "jit/IonCompartment.h"
 #include "jit/IonInstrumentation.h"
+#include "jit/JitCompartment.h"
 #include "jit/VMFunctions.h"
 #include "vm/ProxyObject.h"
 #include "vm/Shape.h"
@@ -237,6 +237,21 @@ class MacroAssembler : public MacroAssemblerSpecific
 #endif
     }
 
+    MacroAssembler(JSContext *cx, IonScript *ion)
+      : enoughMemory_(true),
+        embedsNurseryPointers_(false),
+        sps_(nullptr)
+    {
+        constructRoot(cx);
+         ionContext_.construct(cx, (js::jit::TempAllocator *)nullptr);
+         alloc_.construct(cx);
+#ifdef JS_CPU_ARM
+         initWithAllocator();
+         m_buffer.id = GetIonContext()->getNextAssemblerId();
+#endif
+        setFramePushed(ion->frameSize());
+    }
+
     void setInstrumentation(IonInstrumentation *sps) {
         sps_ = sps;
     }
@@ -392,8 +407,10 @@ class MacroAssembler : public MacroAssemblerSpecific
             storeValue(src.valueReg(), dest);
         } else if (IsFloatingPointType(src.type())) {
             FloatRegister reg = src.typedReg().fpu();
-            if (src.type() == MIRType_Float32)
-                convertFloatToDouble(reg, reg);
+            if (src.type() == MIRType_Float32) {
+                convertFloatToDouble(reg, ScratchFloatReg);
+                reg = ScratchFloatReg;
+            }
             storeDouble(reg, dest);
         } else {
             storeValue(ValueTypeFromMIRType(src.type()), src.typedReg().gpr(), dest);
@@ -538,8 +555,10 @@ class MacroAssembler : public MacroAssemblerSpecific
             Push(v.valueReg());
         } else if (IsFloatingPointType(v.type())) {
             FloatRegister reg = v.typedReg().fpu();
-            if (v.type() == MIRType_Float32)
-                convertFloatToDouble(reg, reg);
+            if (v.type() == MIRType_Float32) {
+                convertFloatToDouble(reg, ScratchFloatReg);
+                reg = ScratchFloatReg;
+            }
             Push(reg);
         } else {
             Push(ValueTypeFromMIRType(v.type()), v.typedReg().gpr());
@@ -628,10 +647,10 @@ class MacroAssembler : public MacroAssemblerSpecific
         Push(PreBarrierReg);
         computeEffectiveAddress(address, PreBarrierReg);
 
-        JSRuntime *runtime = GetIonContext()->runtime;
+        JitRuntime *rt = GetIonContext()->runtime->jitRuntime();
         IonCode *preBarrier = (type == MIRType_Shape)
-                              ? runtime->ionRuntime()->shapePreBarrier()
-                              : runtime->ionRuntime()->valuePreBarrier();
+                              ? rt->shapePreBarrier()
+                              : rt->valuePreBarrier();
 
         call(preBarrier);
         Pop(PreBarrierReg);
@@ -659,14 +678,6 @@ class MacroAssembler : public MacroAssemblerSpecific
         align(8);
         bind(&done);
     }
-
-    /*
-     * Call the post barrier if necessary when writing value to a slot or
-     * element of object.
-     *
-     * Returns whether the maybeScratch register was used.
-     */
-    bool maybeCallPostBarrier(Register object, ConstantOrRegister value, Register maybeScratch);
 
     void branchNurseryPtr(Condition cond, const Address &ptr1, const ImmMaybeNurseryPtr &ptr2,
                           Label *label);
@@ -726,10 +737,9 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     using MacroAssemblerSpecific::extractTag;
     Register extractTag(const TypedOrValueRegister &reg, Register scratch) {
-        if (reg.hasValue()) {
+        if (reg.hasValue())
             return extractTag(reg.valueReg(), scratch);
-        }
-        mov(ImmWord(ValueTypeFromMIRType(reg.type())), scratch);
+        mov(ImmWord(MIRTypeToTag(reg.type())), scratch);
         return scratch;
     }
 
@@ -854,13 +864,6 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     }
 
-    // Given a js::StackFrame in OsrFrameReg, performs inline on-stack
-    // replacement. The stack frame must be at a valid OSR entry-point.
-    void performOsr();
-
-    // Checks if an OSR frame is the previous frame, and if so, removes it.
-    void maybeRemoveOsrFrame(Register scratch);
-
     // Generates code used to complete a bailout.
     void generateBailoutTail(Register scratch, Register bailoutInfo);
 
@@ -912,18 +915,13 @@ class MacroAssembler : public MacroAssemblerSpecific
         // of the JSObject::isWrapper test performed in EmulatesUndefined.  If none
         // of the branches are taken, we can check class flags directly.
         loadObjClass(objReg, scratch);
-        branchPtr(Assembler::Equal, scratch, ImmPtr(&ObjectProxyObject::class_), slowCheck);
+        branchPtr(Assembler::Equal, scratch, ImmPtr(&ProxyObject::callableClass_), slowCheck);
+        branchPtr(Assembler::Equal, scratch, ImmPtr(&ProxyObject::uncallableClass_), slowCheck);
         branchPtr(Assembler::Equal, scratch, ImmPtr(&OuterWindowProxyObject::class_), slowCheck);
-        branchPtr(Assembler::Equal, scratch, ImmPtr(&FunctionProxyObject::class_), slowCheck);
 
         test32(Address(scratch, Class::offsetOfFlags()), Imm32(JSCLASS_EMULATES_UNDEFINED));
         return truthy ? Assembler::Zero : Assembler::NonZero;
     }
-
-    void pushCalleeToken(Register callee, ExecutionMode mode);
-    void PushCalleeToken(Register callee, ExecutionMode mode);
-    void tagCallee(Register callee, ExecutionMode mode);
-    void clearCalleeTag(Register callee, ExecutionMode mode);
 
   private:
     // These two functions are helpers used around call sites throughout the
@@ -1050,7 +1048,7 @@ class MacroAssembler : public MacroAssemblerSpecific
         storePtr(ImmPtr(nullptr), Address(temp, ProfileEntry::offsetOfStackAddress()));
 
         // Store 0 for PCIdx because that's what interpreter does.
-        // (See Probes::enterScript, which calls spsProfiler.enter, which pushes an entry
+        // (See probes::EnterScript, which calls spsProfiler.enter, which pushes an entry
         //  with 0 pcIdx).
         store32(Imm32(0), Address(temp, ProfileEntry::offsetOfPCIdx()));
 
@@ -1313,6 +1311,26 @@ class MacroAssembler : public MacroAssemblerSpecific
                                   Label *fail)
     {
         convertTypedOrValueToInt(src, temp, output, fail, IntConversion_ClampToUint8);
+    }
+
+  public:
+    class AfterICSaveLive {
+        friend class MacroAssembler;
+        AfterICSaveLive()
+        {}
+    };
+
+    AfterICSaveLive icSaveLive(RegisterSet &liveRegs) {
+        PushRegsInMask(liveRegs);
+        return AfterICSaveLive();
+    }
+
+    bool icBuildOOLFakeExitFrame(void *fakeReturnAddr, AfterICSaveLive &aic) {
+        return buildOOLFakeExitFrame(fakeReturnAddr);
+    }
+
+    void icRestoreLive(RegisterSet &liveRegs, AfterICSaveLive &aic) {
+        PopRegsInMask(liveRegs);
     }
 };
 

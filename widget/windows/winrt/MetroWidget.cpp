@@ -34,6 +34,7 @@
 #include "InputData.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/TouchEvents.h"
+#include "mozilla/MiscEvents.h"
 
 using namespace Microsoft::WRL;
 using namespace Microsoft::WRL::Wrappers;
@@ -59,7 +60,7 @@ extern PRLogModuleInfo* gWindowsLog;
 
 static uint32_t gInstanceCount = 0;
 const PRUnichar* kMetroSubclassThisProp = L"MetroSubclassThisProp";
-HWND MetroWidget::sICoreHwnd = NULL;
+HWND MetroWidget::sICoreHwnd = nullptr;
 
 namespace mozilla {
 namespace widget {
@@ -144,7 +145,7 @@ namespace {
     // processed.
     Log("  Inputs sent. Waiting for input messages to clear");
     MSG msg;
-    while (WinUtils::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+    while (WinUtils::PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
       if (nsTextStore::ProcessRawKeyMessage(msg)) {
         continue;  // the message is consumed by TSF
       }
@@ -163,8 +164,8 @@ nsRefPtr<mozilla::layers::APZCTreeManager> MetroWidget::sAPZC;
 
 MetroWidget::MetroWidget() :
   mTransparencyMode(eTransparencyOpaque),
-  mWnd(NULL),
-  mMetroWndProc(NULL),
+  mWnd(nullptr),
+  mMetroWndProc(nullptr),
   mTempBasicLayerInUse(false),
   mRootLayerTreeId(),
   nsWindowBase()
@@ -302,7 +303,7 @@ MetroWidget::Destroy()
   mLayerManager = nullptr;
   mView = nullptr;
   mIdleService = nullptr;
-  mWnd = NULL;
+  mWnd = nullptr;
 
   return NS_OK;
 }
@@ -567,73 +568,56 @@ CloseGesture()
 
 // Async event sending for mouse and keyboard input.
 
-// Simple Windows message wrapper for dispatching async events. 
-class DispatchMsg
+// defined in nsWindowBase, called from shared module WinMouseScrollHandler.
+bool
+MetroWidget::DispatchScrollEvent(mozilla::WidgetGUIEvent* aEvent)
 {
-public:
-  DispatchMsg(UINT aMsg, WPARAM aWParam, LPARAM aLParam) :
-    mMsg(aMsg),
-    mWParam(aWParam),
-    mLParam(aLParam)
-  {
-  }
-  ~DispatchMsg()
-  {
-  }
-
-  UINT mMsg;
-  WPARAM mWParam;
-  LPARAM mLParam;
-};
-
-DispatchMsg*
-MetroWidget::CreateDispatchMsg(UINT aMsg, WPARAM aWParam, LPARAM aLParam)
-{
-  switch (aMsg) {
-    case WM_SETTINGCHANGE:
-    case WM_MOUSEWHEEL:
-    case WM_MOUSEHWHEEL:
-    case WM_HSCROLL:
-    case WM_VSCROLL:
-    case MOZ_WM_HSCROLL:
-    case MOZ_WM_VSCROLL:
-    case WM_KEYDOWN:
-    case WM_KEYUP:
-    // MOZ_WM events are plugin specific, we keep them for completness
-    case MOZ_WM_MOUSEVWHEEL:
-    case MOZ_WM_MOUSEHWHEEL:
-      return new DispatchMsg(aMsg, aWParam, aLParam);
+  WidgetGUIEvent* newEvent = nullptr;
+  switch(aEvent->eventStructType) {
+    case NS_WHEEL_EVENT:
+    {
+      WidgetWheelEvent* oldEvent = aEvent->AsWheelEvent();
+      WidgetWheelEvent* wheelEvent =
+        new WidgetWheelEvent(oldEvent->mFlags.mIsTrusted, oldEvent->message, oldEvent->widget);
+      wheelEvent->AssignWheelEventData(*oldEvent, true);
+      newEvent = static_cast<WidgetGUIEvent*>(wheelEvent);
+    }
+    break;
+    case NS_CONTENT_COMMAND_EVENT:
+    {
+      WidgetContentCommandEvent* oldEvent = aEvent->AsContentCommandEvent();
+      WidgetContentCommandEvent* cmdEvent =
+        new WidgetContentCommandEvent(oldEvent->mFlags.mIsTrusted, oldEvent->message, oldEvent->widget);
+      cmdEvent->AssignContentCommandEventData(*oldEvent, true);
+      newEvent = static_cast<WidgetGUIEvent*>(cmdEvent);
+    }
+    break;
     default:
-      MOZ_CRASH("Unknown event being passed to CreateDispatchMsg.");
-      return nullptr;
+      MOZ_CRASH("unknown event in DispatchScrollEvent");
+    break;
   }
-}
-
-void
-MetroWidget::DispatchAsyncScrollEvent(DispatchMsg* aEvent)
-{
-  mMsgEventQueue.Push(aEvent);
+  mEventQueue.Push(newEvent);
   nsCOMPtr<nsIRunnable> runnable =
     NS_NewRunnableMethod(this, &MetroWidget::DeliverNextScrollEvent);
   NS_DispatchToCurrentThread(runnable);
+  return false;
 }
 
 void
 MetroWidget::DeliverNextScrollEvent()
 {
-  DispatchMsg* msg = static_cast<DispatchMsg*>(mMsgEventQueue.PopFront());
-  MOZ_ASSERT(msg);
-  MSGResult msgResult;
-  MouseScrollHandler::ProcessMessage(this, msg->mMsg, msg->mWParam, msg->mLParam, msgResult);
-  delete msg;
+  WidgetGUIEvent* event =
+    static_cast<WidgetInputEvent*>(mEventQueue.PopFront());
+  DispatchWindowEvent(event);
+  delete event;
 }
 
-// defined in nsWiondowBase, called from shared module KeyboardLayout.
+// defined in nsWindowBase, called from shared module KeyboardLayout.
 bool
 MetroWidget::DispatchKeyboardEvent(WidgetGUIEvent* aEvent)
 {
   MOZ_ASSERT(aEvent);
-  WidgetKeyboardEvent* oldKeyEvent = static_cast<WidgetKeyboardEvent*>(aEvent);
+  WidgetKeyboardEvent* oldKeyEvent = aEvent->AsKeyboardEvent();
   WidgetKeyboardEvent* keyEvent =
     new WidgetKeyboardEvent(oldKeyEvent->mFlags.mIsTrusted,
                             oldKeyEvent->message, oldKeyEvent->widget);
@@ -712,14 +696,10 @@ MetroWidget::WindowProcedure(HWND aWnd, UINT aMsg, WPARAM aWParam, LPARAM aLPara
   // The result returned if we do not do default processing.
   LRESULT processResult = 0;
 
-  // We ignore return results from the scroll module and pass everything
-  // to mMetroWndProc. These fall through to winrt handlers that generate
-  // input events in MetroInput. Since we have no listeners for scroll
-  // events no processing should occur. For now processDefault must be left
-  // true since the mouse module consumes non-mouse wheel related events.
-  if (MouseScrollHandler::NeedsMessage(aMsg)) {
-    DispatchMsg* msg = CreateDispatchMsg(aMsg, aWParam, aLParam);
-    DispatchAsyncScrollEvent(msg);
+  MSGResult msgResult(&processResult);
+  MouseScrollHandler::ProcessMessage(this, aMsg, aWParam, aLParam, msgResult);
+  if (msgResult.mConsumed) {
+    return processResult;
   }
 
   switch (aMsg) {
@@ -920,7 +900,7 @@ MetroWidget::RemoveSubclass()
       NS_ASSERTION(mMetroWndProc, "Should have old proc here.");
       SetWindowLongPtr(mWnd, GWLP_WNDPROC,
         reinterpret_cast<LONG_PTR>(mMetroWndProc));
-      mMetroWndProc = NULL;
+      mMetroWndProc = nullptr;
   }
   RemovePropW(mWnd, kMetroSubclassThisProp);
 }
@@ -1020,8 +1000,7 @@ MetroWidget::ApzReceiveInputEvent(WidgetInputEvent* aEvent)
   if (!MetroWidget::sAPZC) {
     return nsEventStatus_eIgnore;
   }
-  WidgetInputEvent& event = static_cast<WidgetInputEvent&>(*aEvent);
-  return MetroWidget::sAPZC->ReceiveInputEvent(event);
+  return MetroWidget::sAPZC->ReceiveInputEvent(*aEvent->AsInputEvent());
 }
 
 nsEventStatus
@@ -1034,8 +1013,8 @@ MetroWidget::ApzReceiveInputEvent(WidgetInputEvent* aInEvent,
   if (!MetroWidget::sAPZC) {
     return nsEventStatus_eIgnore;
   }
-  WidgetInputEvent& event = static_cast<WidgetInputEvent&>(*aInEvent);
-  return MetroWidget::sAPZC->ReceiveInputEvent(event, aOutEvent);
+  return MetroWidget::sAPZC->ReceiveInputEvent(*aInEvent->AsInputEvent(),
+                                               aOutEvent);
 }
 
 LayerManager*

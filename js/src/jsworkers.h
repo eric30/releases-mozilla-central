@@ -122,7 +122,7 @@ class WorkerThreadState
     }
     void resetAsmJSFailureState() {
         numAsmJSFailedJobs = 0;
-        asmJSFailedFunction = NULL;
+        asmJSFailedFunction = nullptr;
     }
     void *maybeAsmJSFailedFunction() const {
         return asmJSFailedFunction;
@@ -235,7 +235,7 @@ StartOffThreadIonCompile(JSContext *cx, jit::IonBuilder *builder);
 
 /*
  * Cancel a scheduled or in progress Ion compilation for script. If script is
- * NULL, all compilations for the compartment are cancelled.
+ * nullptr, all compilations for the compartment are cancelled.
  */
 void
 CancelOffThreadIonCompile(JSCompartment *compartment, JSScript *script);
@@ -328,7 +328,7 @@ WorkerThread::maybePause()
 #endif // JS_WORKER_THREADS
 
 /* Pause any threads that are running jobs off thread during GC activity. */
-class AutoPauseWorkersForGC
+class AutoPauseWorkersForTracing
 {
 #ifdef JS_WORKER_THREADS
     JSRuntime *runtime;
@@ -338,8 +338,8 @@ class AutoPauseWorkersForGC
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 
   public:
-    AutoPauseWorkersForGC(JSRuntime *rt MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
-    ~AutoPauseWorkersForGC();
+    AutoPauseWorkersForTracing(JSRuntime *rt MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
+    ~AutoPauseWorkersForTracing();
 };
 
 /*
@@ -377,13 +377,13 @@ struct AsmJSParallelTask
     unsigned compileTime;
 
     AsmJSParallelTask(size_t defaultChunkSize)
-      : lifo(defaultChunkSize), func(NULL), mir(NULL), lir(NULL), compileTime(0)
+      : lifo(defaultChunkSize), func(nullptr), mir(nullptr), lir(nullptr), compileTime(0)
     { }
 
     void init(void *func, jit::MIRGenerator *mir) {
         this->func = func;
         this->mir = mir;
-        this->lir = NULL;
+        this->lir = nullptr;
     }
 };
 #endif
@@ -451,10 +451,10 @@ struct SourceCompressionTask
 
   public:
     explicit SourceCompressionTask(ExclusiveContext *cx)
-      : cx(cx), ss(NULL), chars(NULL), oom(false), abort_(0)
+      : cx(cx), ss(nullptr), chars(nullptr), oom(false), abort_(0)
     {
 #ifdef JS_WORKER_THREADS
-        workerThread = NULL;
+        workerThread = nullptr;
 #endif
     }
 

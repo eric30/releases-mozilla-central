@@ -328,12 +328,6 @@ function performTest() {
     is(gVariablesView.getFocusedItem().name, "prop1",
       "The 'prop1' item should be focused.");
 
-    if (gVariablesView.getFocusedItem().name != "prop1") {
-      gDebugger.DebuggerView.toggleInstrumentsPane({ visible: true, animated: false })
-      yield promise.defer().promise;
-      yield closeDebuggerAndFinish(gPanel);
-    }
-
     EventUtils.sendKey("RIGHT", gDebugger);
     is(gVariablesView.getFocusedItem().name, "prop1",
       "The 'prop1' item should still be focused.");
@@ -481,6 +475,28 @@ function performTest() {
       "The 'someProp7' variable should have an empty value.");
     is(gVariablesView.getFocusedItem().visible, false,
       "The 'someProp7' variable should be hidden.");
+
+    // Part 11: Test that Ctrl-C copies the current item to the system clipboard
+
+    gVariablesView.focusFirstVisibleItem();
+    let copied = promise.defer();
+    let expectedValue = gVariablesView.getFocusedItem().name
+      + gVariablesView.getFocusedItem().separatorStr
+      + gVariablesView.getFocusedItem().value;
+
+    waitForClipboard(expectedValue, function setup() {
+        EventUtils.synthesizeKey("C", { metaKey: true }, gDebugger);
+      }, copied.resolve, copied.reject
+    );
+
+    try {
+      yield copied.promise;
+      ok(true,
+        "Ctrl-C copied the selected item to the clipboard.");
+    } catch (e) {
+      ok(false,
+        "Ctrl-C didn't copy the selected item to the clipboard.");
+    }
 
     yield closeDebuggerAndFinish(gPanel);
   });

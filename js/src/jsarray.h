@@ -45,12 +45,12 @@ class ArrayObject;
 
 /* Create a dense array with no capacity allocated, length set to 0. */
 extern ArrayObject * JS_FASTCALL
-NewDenseEmptyArray(JSContext *cx, JSObject *proto = NULL,
+NewDenseEmptyArray(JSContext *cx, JSObject *proto = nullptr,
                    NewObjectKind newKind = GenericObject);
 
 /* Create a dense array with length and capacity == 'length', initialized length set to 0. */
 extern ArrayObject * JS_FASTCALL
-NewDenseAllocatedArray(ExclusiveContext *cx, uint32_t length, JSObject *proto = NULL,
+NewDenseAllocatedArray(ExclusiveContext *cx, uint32_t length, JSObject *proto = nullptr,
                        NewObjectKind newKind = GenericObject);
 
 /*
@@ -58,16 +58,16 @@ NewDenseAllocatedArray(ExclusiveContext *cx, uint32_t length, JSObject *proto = 
  * contents. This is useful, e.g., when accepting length from the user.
  */
 extern ArrayObject * JS_FASTCALL
-NewDenseUnallocatedArray(ExclusiveContext *cx, uint32_t length, JSObject *proto = NULL,
+NewDenseUnallocatedArray(ExclusiveContext *cx, uint32_t length, JSObject *proto = nullptr,
                          NewObjectKind newKind = GenericObject);
 
 /* Create a dense array with a copy of the dense array elements in src. */
 extern ArrayObject *
-NewDenseCopiedArray(JSContext *cx, uint32_t length, HandleObject src, uint32_t elementOffset, JSObject *proto = NULL);
+NewDenseCopiedArray(JSContext *cx, uint32_t length, HandleObject src, uint32_t elementOffset, JSObject *proto = nullptr);
 
 /* Create a dense array from the given array values, which must be rooted */
 extern ArrayObject *
-NewDenseCopiedArray(JSContext *cx, uint32_t length, const Value *values, JSObject *proto = NULL,
+NewDenseCopiedArray(JSContext *cx, uint32_t length, const Value *values, JSObject *proto = nullptr,
                     NewObjectKind newKind = GenericObject);
 
 /*
@@ -76,16 +76,20 @@ NewDenseCopiedArray(JSContext *cx, uint32_t length, const Value *values, JSObjec
  * increase the length of the array.
  */
 extern bool
-WouldDefinePastNonwritableLength(ExclusiveContext *cx,
+WouldDefinePastNonwritableLength(ThreadSafeContext *cx,
                                  HandleObject obj, uint32_t index, bool strict,
                                  bool *definesPast);
 
 /*
  * Canonicalize |vp| to a uint32_t value potentially suitable for use as an
  * array length.
+ *
+ * For parallel execution we can only canonicalize non-object values.
  */
+template <ExecutionMode mode>
 extern bool
-CanonicalizeArrayLengthValue(JSContext *cx, HandleValue v, uint32_t *canonicalized);
+CanonicalizeArrayLengthValue(typename ExecutionModeTraits<mode>::ContextType cx,
+                             HandleValue v, uint32_t *canonicalized);
 
 extern bool
 GetLengthProperty(JSContext *cx, HandleObject obj, uint32_t *lengthp);

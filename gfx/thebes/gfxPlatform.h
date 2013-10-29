@@ -9,18 +9,14 @@
 #include "prlog.h"
 #include "nsTArray.h"
 #include "nsString.h"
-#include "nsIObserver.h"
 #include "nsCOMPtr.h"
 #include "nsAutoPtr.h"
 
 #include "gfxTypes.h"
-#include "gfxColor.h"
 #include "nsRect.h"
 
 #include "qcms.h"
 
-#include "mozilla/gfx/2D.h"
-#include "gfx2DGlue.h"
 #include "mozilla/RefPtr.h"
 #include "GfxInfoCollector.h"
 
@@ -42,10 +38,18 @@ class gfxPlatformFontList;
 class gfxTextRun;
 class nsIURI;
 class nsIAtom;
+class nsIObserver;
+struct gfxRGBA;
 
 namespace mozilla {
 namespace gl {
 class GLContext;
+}
+namespace gfx {
+class DrawTarget;
+class SourceSurface;
+class ScaledFont;
+class DrawEventRecorder;
 }
 }
 
@@ -273,6 +277,8 @@ public:
     }
 
     virtual bool UseAcceleratedSkiaCanvas();
+
+    virtual void InitializeSkiaCaches();
 
     void GetAzureBackendInfo(mozilla::widget::InfoObject &aObj) {
       aObj.DefineProperty("AzureCanvasBackend", GetBackendName(mPreferredCanvasBackend));
@@ -572,6 +578,7 @@ public:
      * for measuring text etc as if they will be rendered to the screen
      */
     gfxASurface* ScreenReferenceSurface() { return mScreenReferenceSurface; }
+    mozilla::gfx::DrawTarget* ScreenReferenceDrawTarget() { return mScreenReferenceDrawTarget; }
 
     virtual mozilla::gfx::SurfaceFormat Optimal2DFormatForContent(gfxContentType aContent);
 
@@ -704,6 +711,7 @@ private:
     virtual bool SupportsOffMainThreadCompositing() { return true; }
 
     nsRefPtr<gfxASurface> mScreenReferenceSurface;
+    mozilla::RefPtr<mozilla::gfx::DrawTarget> mScreenReferenceDrawTarget;
     nsTArray<uint32_t> mCJKPrefLangs;
     nsCOMPtr<nsIObserver> mSRGBOverrideObserver;
     nsCOMPtr<nsIObserver> mFontPrefsObserver;

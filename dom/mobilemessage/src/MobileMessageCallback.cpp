@@ -71,8 +71,7 @@ MobileMessageCallback::NotifySuccess(nsISupports *aMessage, bool aAsync)
   JSAutoCompartment ac(cx, global);
 
   JS::Rooted<JS::Value> wrappedMessage(cx);
-  rv = nsContentUtils::WrapNative(cx, global, aMessage,
-                                  wrappedMessage.address());
+  rv = nsContentUtils::WrapNative(cx, global, aMessage, &wrappedMessage);
   NS_ENSURE_SUCCESS(rv, rv);
 
   return NotifySuccess(wrappedMessage, aAsync);
@@ -164,7 +163,8 @@ MobileMessageCallback::NotifyMessageDeleted(bool *aDeleted, uint32_t aSize)
   AutoPushJSContext cx(sc->GetNativeContext());
   NS_ENSURE_TRUE(cx, NS_ERROR_FAILURE);
 
-  JS::Rooted<JSObject*> deleteArrayObj(cx, JS_NewArrayObject(cx, aSize, NULL));
+  JS::Rooted<JSObject*> deleteArrayObj(cx,
+                                       JS_NewArrayObject(cx, aSize, nullptr));
   JS::Rooted<JS::Value> value(cx);
   for (uint32_t i = 0; i < aSize; i++) {
     value.setBoolean(aDeleted[i]);

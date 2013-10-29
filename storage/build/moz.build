@@ -10,11 +10,13 @@ EXPORTS += [
     'mozStorageCID.h',
 ]
 
-CPP_SOURCES += [
+SOURCES += [
     'mozStorageModule.cpp',
 ]
 
 LIBRARY_NAME = 'storagecomps'
 
 LIBXUL_LIBRARY = True
+
+EXPORT_LIBRARY = True
 

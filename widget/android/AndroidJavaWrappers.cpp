@@ -137,7 +137,7 @@ jfieldID AndroidProgressiveUpdateData::jShouldAbortField = 0;
 RefCountedJavaObject::~RefCountedJavaObject() {
     if (mObject)
         GetJNIForThread()->DeleteGlobalRef(mObject);
-    mObject = NULL;
+    mObject = nullptr;
 }
 
 void
@@ -233,19 +233,19 @@ AndroidLocation::CreateGeoPosition(JNIEnv *jenv, jobject jobj)
     AutoLocalJNIFrame jniFrame(jenv);
 
     double latitude  = jenv->CallDoubleMethod(jobj, jGetLatitudeMethod);
-    if (jniFrame.CheckForException()) return NULL;
+    if (jniFrame.CheckForException()) return nullptr;
     double longitude = jenv->CallDoubleMethod(jobj, jGetLongitudeMethod);
-    if (jniFrame.CheckForException()) return NULL;
+    if (jniFrame.CheckForException()) return nullptr;
     double altitude  = jenv->CallDoubleMethod(jobj, jGetAltitudeMethod);
-    if (jniFrame.CheckForException()) return NULL;
+    if (jniFrame.CheckForException()) return nullptr;
     float  accuracy  = jenv->CallFloatMethod (jobj, jGetAccuracyMethod);
-    if (jniFrame.CheckForException()) return NULL;
+    if (jniFrame.CheckForException()) return nullptr;
     float  bearing   = jenv->CallFloatMethod (jobj, jGetBearingMethod);
-    if (jniFrame.CheckForException()) return NULL;
+    if (jniFrame.CheckForException()) return nullptr;
     float  speed     = jenv->CallFloatMethod (jobj, jGetSpeedMethod);
-    if (jniFrame.CheckForException()) return NULL;
+    if (jniFrame.CheckForException()) return nullptr;
     long long time   = jenv->CallLongMethod  (jobj, jGetTimeMethod);
-    if (jniFrame.CheckForException()) return NULL;
+    if (jniFrame.CheckForException()) return nullptr;
 
     return new nsGeoPosition(latitude, longitude,
                              altitude, accuracy,
@@ -394,7 +394,7 @@ AndroidGeckoEvent::ReadIntArray(nsTArray<int> &aVals,
                                 int32_t count)
 {
     jintArray jIntArray = (jintArray)jenv->GetObjectField(wrapped_obj, field);
-    jint *vals = jenv->GetIntArrayElements(jIntArray, NULL);
+    jint *vals = jenv->GetIntArrayElements(jIntArray, nullptr);
     for (int32_t i = 0; i < count; i++) {
         aVals.AppendElement(vals[i]);
     }
@@ -408,7 +408,7 @@ AndroidGeckoEvent::ReadFloatArray(nsTArray<float> &aVals,
                                   int32_t count)
 {
     jfloatArray jFloatArray = (jfloatArray)jenv->GetObjectField(wrapped_obj, field);
-    jfloat *vals = jenv->GetFloatArrayElements(jFloatArray, NULL);
+    jfloat *vals = jenv->GetFloatArrayElements(jFloatArray, nullptr);
     for (int32_t i = 0; i < count; i++) {
         aVals.AppendElement(vals[i]);
     }
@@ -455,7 +455,7 @@ AndroidGeckoEvent::ReadStringFromJString(nsString &aString, JNIEnv *jenv,
 
     int len = jenv->GetStringLength(s);
     aString.SetLength(len);
-    jenv->GetStringRegion(s, 0, len, aString.BeginWriting());
+    jenv->GetStringRegion(s, 0, len, reinterpret_cast<jchar*>(aString.BeginWriting()));
 }
 
 void
@@ -829,6 +829,53 @@ AndroidGeckoEvent::MakeMultiTouchInput(nsIWidget* widget)
                              Pressures()[i]);
         event.mTouches.AppendElement(data);
     }
+
+    return event;
+}
+
+WidgetMouseEvent
+AndroidGeckoEvent::MakeMouseEvent(nsIWidget* widget)
+{
+    uint32_t msg = NS_EVENT_NULL;
+    if (Points().Length() > 0) {
+        switch (Action()) {
+            case AndroidMotionEvent::ACTION_HOVER_MOVE:
+                msg = NS_MOUSE_MOVE;
+                break;
+            case AndroidMotionEvent::ACTION_HOVER_ENTER:
+                msg = NS_MOUSEENTER;
+                break;
+            case AndroidMotionEvent::ACTION_HOVER_EXIT:
+                msg = NS_MOUSELEAVE;
+                break;
+            default:
+                break;
+        }
+    }
+
+    WidgetMouseEvent event(true, msg, widget,
+                           WidgetMouseEvent::eReal, WidgetMouseEvent::eNormal);
+
+    if (msg == NS_EVENT_NULL) {
+        // unknown type, or no point data. abort
+        return event;
+    }
+
+    // XXX can we synthesize different buttons?
+    event.button = WidgetMouseEvent::eLeftButton;
+    if (msg != NS_MOUSE_MOVE) {
+        event.clickCount = 1;
+    }
+    event.modifiers = 0;
+    event.time = Time();
+
+    // We are dispatching this event directly into Gecko (as opposed to going
+    // through the AsyncPanZoomController), and the Points() array has points
+    // in CSS pixels, which we need to convert to LayoutDevice pixels.
+    const nsIntPoint& offset = widget->WidgetToScreenOffset();
+    CSSToLayoutDeviceScale scale = widget->GetDefaultScale();
+    event.refPoint = LayoutDeviceIntPoint((Points()[0].x * scale.scale) - offset.x,
+                                          (Points()[0].y * scale.scale) - offset.y);
 
     return event;
 }
@@ -1354,7 +1401,7 @@ nsJNIString::nsJNIString(jstring jstr, JNIEnv *jenv)
             return;
         }
     }
-    const jchar* jCharPtr = jni->GetStringChars(jstr, NULL);
+    const jchar* jCharPtr = jni->GetStringChars(jstr, nullptr);
 
     if (!jCharPtr) {
         SetIsVoid(true);
@@ -1366,7 +1413,7 @@ nsJNIString::nsJNIString(jstring jstr, JNIEnv *jenv)
     if (len <= 0) {
         SetIsVoid(true);
     } else {
-        Assign(jCharPtr, len);
+        Assign(reinterpret_cast<const PRUnichar*>(jCharPtr), len);
     }
     jni->ReleaseStringChars(jstr, jCharPtr);
 }

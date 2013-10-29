@@ -275,38 +275,23 @@ class Proxy
     static bool defaultValue(JSContext *cx, HandleObject obj, JSType hint, MutableHandleValue vp);
     static bool getPrototypeOf(JSContext *cx, HandleObject proxy, MutableHandleObject protop);
 
+    /* IC entry path for handling __noSuchMethod__ on access. */
+    static bool callProp(JSContext *cx, HandleObject proxy, HandleObject reveiver, HandleId id,
+                         MutableHandleValue vp);
+
     static JSObject * const LazyProto;
 };
 
-// These are equal to |&{Function,Object,OuterWindow}ProxyObject::class_|.  Use
-// them in places where you don't want to #include vm/ProxyObject.h.
-extern JS_FRIEND_DATA(const js::Class* const) FunctionProxyClassPtr;
-extern JS_FRIEND_DATA(const js::Class* const) ObjectProxyClassPtr;
+// Use these in places where you don't want to #include vm/ProxyObject.h.
+extern JS_FRIEND_DATA(const js::Class* const) CallableProxyClassPtr;
+extern JS_FRIEND_DATA(const js::Class* const) UncallableProxyClassPtr;
 extern JS_FRIEND_DATA(const js::Class* const) OuterWindowProxyClassPtr;
-
-inline bool IsObjectProxyClass(const Class *clasp)
-{
-    return clasp == ObjectProxyClassPtr || clasp == OuterWindowProxyClassPtr;
-}
-
-inline bool IsFunctionProxyClass(const Class *clasp)
-{
-    return clasp == FunctionProxyClassPtr;
-}
 
 inline bool IsProxyClass(const Class *clasp)
 {
-    return IsObjectProxyClass(clasp) || IsFunctionProxyClass(clasp);
-}
-
-inline bool IsObjectProxy(JSObject *obj)
-{
-    return IsObjectProxyClass(GetObjectClass(obj));
-}
-
-inline bool IsFunctionProxy(JSObject *obj)
-{
-    return IsFunctionProxyClass(GetObjectClass(obj));
+    return clasp == CallableProxyClassPtr ||
+           clasp == UncallableProxyClassPtr ||
+           clasp == OuterWindowProxyClassPtr;
 }
 
 inline bool IsProxy(JSObject *obj)
@@ -369,15 +354,42 @@ SetProxyExtra(JSObject *obj, size_t n, const Value &extra)
     SetReservedSlot(obj, PROXY_EXTRA_SLOT + n, extra);
 }
 
-enum ProxyCallable {
-    ProxyNotCallable = false,
-    ProxyIsCallable = true
+class MOZ_STACK_CLASS ProxyOptions {
+  public:
+    ProxyOptions() : callable_(false),
+                     singleton_(false),
+                     forceForegroundFinalization_(false)
+    {}
+
+    bool callable() const { return callable_; }
+    ProxyOptions &setCallable(bool flag) {
+        callable_ = flag;
+        return *this;
+    }
+
+    bool singleton() const { return singleton_; }
+    ProxyOptions &setSingleton(bool flag) {
+        singleton_ = flag;
+        return *this;
+    }
+
+    bool forceForegroundFinalization() const {
+        return forceForegroundFinalization_;
+    }
+    ProxyOptions &setForceForegroundFinalization(bool flag) {
+        forceForegroundFinalization_ = true;
+        return *this;
+    }
+
+  private:
+    bool callable_;
+    bool singleton_;
+    bool forceForegroundFinalization_;
 };
 
 JS_FRIEND_API(JSObject *)
 NewProxyObject(JSContext *cx, BaseProxyHandler *handler, HandleValue priv,
-               JSObject *proto, JSObject *parent,
-               ProxyCallable callable = ProxyNotCallable, bool singleton = false);
+               JSObject *proto, JSObject *parent, const ProxyOptions &options = ProxyOptions());
 
 JSObject *
 RenewProxyObject(JSContext *cx, JSObject *obj, BaseProxyHandler *handler, Value priv);
@@ -389,7 +401,7 @@ class JS_FRIEND_API(AutoEnterPolicy)
     AutoEnterPolicy(JSContext *cx, BaseProxyHandler *handler,
                     HandleObject wrapper, HandleId id, Action act, bool mayThrow)
 #ifdef DEBUG
-        : context(NULL)
+        : context(nullptr)
 #endif
     {
         allow = handler->hasPolicy() ? handler->enter(cx, wrapper, id, act, &rv)
@@ -412,7 +424,7 @@ class JS_FRIEND_API(AutoEnterPolicy)
     // no-op constructor for subclass
     AutoEnterPolicy()
 #ifdef DEBUG
-        : context(NULL)
+        : context(nullptr)
 #endif
         {};
     void reportErrorIfExceptionIsNotPending(JSContext *cx, jsid id);

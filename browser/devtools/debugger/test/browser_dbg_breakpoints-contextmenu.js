@@ -12,14 +12,13 @@ function test() {
   requestLongerTimeout(2);
 
   let gTab, gDebuggee, gPanel, gDebugger;
-  let gEditor, gSources, gBreakpoints;
+  let gSources, gBreakpoints;
 
   initDebugger(TAB_URL).then(([aTab, aDebuggee, aPanel]) => {
     gTab = aTab;
     gDebuggee = aDebuggee;
     gPanel = aPanel;
     gDebugger = gPanel.panelWin;
-    gEditor = gDebugger.DebuggerView.editor;
     gSources = gDebugger.DebuggerView.Sources;
     gBreakpoints = gDebugger.DebuggerController.Breakpoints;
 
@@ -39,6 +38,7 @@ function test() {
       .then(() => gPanel.addBreakpoint({ url: gSources.values[1], line: 7 }))
       .then(() => gPanel.addBreakpoint({ url: gSources.values[1], line: 8 }))
       .then(() => gPanel.addBreakpoint({ url: gSources.values[1], line: 9 }))
+      .then(() => ensureThreadClientState(gPanel, "resumed"));
   }
 
   function performTestWhileNotPaused() {
@@ -95,7 +95,9 @@ function test() {
     ok(isCaretPos(gPanel, 9),
       "The editor location is correct before pausing.");
 
-    ensureThreadClientState(gPanel, "resumed").then(() => {
+    // Spin the event loop before causing the debuggee to pause, to allow
+    // this function to return first.
+    executeSoon(() => {
       EventUtils.sendMouseEvent({ type: "click" },
         gDebuggee.document.querySelector("button"),
         gDebuggee);

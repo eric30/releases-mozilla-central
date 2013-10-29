@@ -51,8 +51,6 @@
 #define GFX_SCRIPTITEMIZER_H
 
 #include <stdint.h>
-#include "prtypes.h"
-#include "harfbuzz/hb.h"
 #include "nsUnicodeScriptCodes.h"
 
 #define PAREN_STACK_DEPTH 32

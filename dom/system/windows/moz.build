@@ -6,8 +6,13 @@
 
 MODULE = 'dom'
 
-CPP_SOURCES += [
+SOURCES += [
     'nsHapticFeedback.cpp',
+]
+
+# We fire the nsDOMDeviceAcceleration
+LOCAL_INCLUDES += [
+    '/content/events/src',
 ]
 
 FAIL_ON_WARNINGS = True
@@ -15,4 +20,6 @@ FAIL_ON_WARNINGS = True
 LIBXUL_LIBRARY = True
 
 LIBRARY_NAME = 'domsystemwindows_s'
+
+EXPORT_LIBRARY = True
 

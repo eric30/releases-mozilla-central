@@ -4,18 +4,15 @@
 
 #include "nsISupports.idl"
 
-interface nsIDOMContact;
 interface nsIDOMDOMRequest;
 interface nsIDOMMozIccInfo;
 interface nsIDOMWindow;
 
-[scriptable, uuid(82d25440-c913-11e2-8b8b-0800200c9a66)]
+[scriptable, uuid(87e9ad03-e8e2-40d1-bf28-a6d287c31b93)]
 interface nsIIccListener : nsISupports
 {
   void notifyStkCommand(in DOMString aMessage);
   void notifyStkSessionEnd();
-  void notifyIccCardLockError(in DOMString lockType,
-                              in unsigned long retryCount);
   void notifyCardStateChanged();
   void notifyIccInfoChanged();
 };
@@ -74,7 +71,7 @@ interface nsIIccProvider : nsISupports
 
   nsIDOMDOMRequest updateContact(in nsIDOMWindow window,
                                  in DOMString contactType,
-                                 in nsIDOMContact contact,
+                                 in jsval contact,
                                  in DOMString pin2);
 
   /**

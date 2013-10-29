@@ -50,6 +50,8 @@ const sdp_attrarray_t sdp_attr[SDP_MAX_ATTR_TYPES] =
      sdp_parse_attr_simple_u32, sdp_build_attr_simple_u32 },
     {"fmtp", sizeof("fmtp"),
      sdp_parse_attr_fmtp, sdp_build_attr_fmtp },
+    {"sctpmap", sizeof("sctpmap"),
+     sdp_parse_attr_sctpmap, sdp_build_attr_sctpmap },
     {"framing", sizeof("framing"),
      sdp_parse_attr_simple_string, sdp_build_attr_simple_string },
     {"inactive", sizeof("inactive"),
@@ -399,9 +401,7 @@ const sdp_namearray_t sdp_fmtp_codec_param[SDP_MAX_FMTP_PARAM] =
     {"useinbandfec",                    sizeof("useinbandfec")}, /* 46 */
     {"maxcodedaudiobandwidth",          sizeof("maxcodedaudiobandwidth")}, /* 47 */
     {"cbr",                             sizeof("cbr")}, /* 48 */
-    {"streams",                         sizeof("streams")}, /* 49 */
-    {"protocol",                        sizeof("protocol")} /* 50 */
-
+    {"max-fr",                          sizeof("max-fr")} /* 49 */
 } ;
 
 /* Note: These *must* be in the same order as the enum type. */

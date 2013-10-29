@@ -12,11 +12,13 @@ XPIDL_SOURCES += [
 
 MODULE = 'jsinspector'
 
-CPP_SOURCES += [
+SOURCES += [
     'nsJSInspector.cpp',
 ]
 
 LIBRARY_NAME = 'jsinspector'
 
 LIBXUL_LIBRARY = True
+
+EXPORT_LIBRARY = True
 

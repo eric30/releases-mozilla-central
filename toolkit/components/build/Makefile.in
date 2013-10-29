@@ -3,7 +3,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-EXPORT_LIBRARY = 1
 LOCAL_INCLUDES = \
   -I$(srcdir)/../alerts \
   -I$(srcdir)/../downloads \
@@ -29,6 +28,7 @@ SHARED_LIBRARY_LIBS = \
   ../jsdownloads/src/$(LIB_PREFIX)jsdownloads_s.$(LIB_SUFFIX) \
   ../protobuf/$(LIB_PREFIX)protobuf_s.$(LIB_SUFFIX) \
   ../intl/$(LIB_PREFIX)intl_s.$(LIB_SUFFIX) \
+  ../finalizationwitness/$(LIB_PREFIX)finalizationwitness_s.$(LIB_SUFFIX) \
   $(NULL)
 
 ifndef MOZ_DISABLE_PARENTAL_CONTROLS

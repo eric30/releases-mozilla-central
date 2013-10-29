@@ -299,7 +299,7 @@ nsXBLPrototypeHandler::ExecuteHandler(EventTarget* aTarget,
   // been compiled, above.
   JSAutoCompartment ac(cx, scopeObject);
   JS::Rooted<JSObject*> genericHandler(cx, handler.get());
-  bool ok = JS_WrapObject(cx, genericHandler.address());
+  bool ok = JS_WrapObject(cx, &genericHandler);
   NS_ENSURE_TRUE(ok, NS_ERROR_OUT_OF_MEMORY);
   MOZ_ASSERT(!js::IsCrossCompartmentWrapper(genericHandler));
 
@@ -307,7 +307,7 @@ nsXBLPrototypeHandler::ExecuteHandler(EventTarget* aTarget,
   // scope if one doesn't already exist, and potentially wraps it cross-
   // compartment into our scope (via aAllowWrapping=true).
   JS::Rooted<JS::Value> targetV(cx, JS::UndefinedValue());
-  rv = nsContentUtils::WrapNative(cx, scopeObject, scriptTarget, targetV.address(), nullptr,
+  rv = nsContentUtils::WrapNative(cx, scopeObject, scriptTarget, &targetV, nullptr,
                                   /* aAllowWrapping = */ true);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -317,7 +317,7 @@ nsXBLPrototypeHandler::ExecuteHandler(EventTarget* aTarget,
 
   // Now, wrap the bound handler into the content compartment and use it.
   JSAutoCompartment ac2(cx, globalObject);
-  if (!JS_WrapObject(cx, bound.address())) {
+  if (!JS_WrapObject(cx, &bound)) {
     return NS_ERROR_FAILURE;
   }
 
@@ -393,7 +393,7 @@ nsXBLPrototypeHandler::EnsureEventHandler(nsIScriptGlobalObject* aGlobal,
   // Wrap the handler into the content scope, since we're about to stash it
   // on the DOM window and such.
   JSAutoCompartment ac2(cx, globalObject);
-  bool ok = JS_WrapObject(cx, handlerFun.address());
+  bool ok = JS_WrapObject(cx, &handlerFun);
   NS_ENSURE_TRUE(ok, NS_ERROR_OUT_OF_MEMORY);
   aHandler.set(handlerFun);
   NS_ENSURE_TRUE(aHandler, NS_ERROR_FAILURE);
@@ -910,9 +910,8 @@ bool
 nsXBLPrototypeHandler::ModifiersMatchMask(nsIDOMUIEvent* aEvent,
                                           bool aIgnoreShiftKey)
 {
-  WidgetEvent* event = aEvent->GetInternalNSEvent();
-  NS_ENSURE_TRUE(event && event->IsInputDerivedEvent(), false);
-  WidgetInputEvent* inputEvent = static_cast<WidgetInputEvent*>(event);
+  WidgetInputEvent* inputEvent = aEvent->GetInternalNSEvent()->AsInputEvent();
+  NS_ENSURE_TRUE(inputEvent, false);
 
   if (mKeyMask & cMetaMask) {
     if (inputEvent->IsMeta() != ((mKeyMask & cMeta) != 0)) {

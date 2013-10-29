@@ -95,7 +95,8 @@ var Downloads = {
         smallIcon: URI_GENERIC_ICON_DOWNLOAD,
         text: aMessage,
         ongoing: false,
-        cookie: aDownload.guid
+        cookie: aDownload.guid,
+        when: aDownload.startTime
     };
 
     if (aOptions && aOptions.icon) {
@@ -261,9 +262,9 @@ AlertDownloadProgressListener.prototype = {
       case Ci.nsIDownloadManager.DOWNLOAD_FINISHED: {
         Downloads.removeNotification(aDownload);
         if (aDownload.isPrivate) {
-          let index = this._privateDownloads.indexOf(aDownload);
+          let index = Downloads._privateDownloads.indexOf(aDownload);
           if (index != -1) {
-            this._privateDownloads.splice(index, 1);
+            Downloads._privateDownloads.splice(index, 1);
           }
         }
 

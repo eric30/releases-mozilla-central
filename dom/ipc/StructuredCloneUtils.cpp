@@ -58,7 +58,7 @@ Read(JSContext* aCx, JSStructuredCloneReader* aReader, uint32_t aTag,
     JS::Rooted<JSObject*> global(aCx, JS::CurrentGlobalOrNull(aCx));
     nsresult rv = nsContentUtils::WrapNative(aCx, global, file,
                                              &NS_GET_IID(nsIDOMFile),
-                                             wrappedFile.address());
+                                             &wrappedFile);
     if (NS_FAILED(rv)) {
       Error(aCx, nsIDOMDOMException::DATA_CLONE_ERR);
       return nullptr;
@@ -87,7 +87,7 @@ Read(JSContext* aCx, JSStructuredCloneReader* aReader, uint32_t aTag,
     JS::Rooted<JSObject*> global(aCx, JS::CurrentGlobalOrNull(aCx));
     nsresult rv = nsContentUtils::WrapNative(aCx, global, blob,
                                              &NS_GET_IID(nsIDOMBlob),
-                                             wrappedBlob.address());
+                                             &wrappedBlob);
     if (NS_FAILED(rv)) {
       Error(aCx, nsIDOMDOMException::DATA_CLONE_ERR);
       return nullptr;
@@ -162,7 +162,8 @@ namespace dom {
 
 bool
 ReadStructuredClone(JSContext* aCx, uint64_t* aData, size_t aDataLength,
-                    const StructuredCloneClosure& aClosure, JS::Value* aClone)
+                    const StructuredCloneClosure& aClosure,
+                    JS::MutableHandle<JS::Value> aClone)
 {
   void* closure = &const_cast<StructuredCloneClosure&>(aClosure);
   return !!JS_ReadStructuredClone(aCx, aData, aDataLength,
@@ -171,7 +172,7 @@ ReadStructuredClone(JSContext* aCx, uint64_t* aData, size_t aDataLength,
 }
 
 bool
-WriteStructuredClone(JSContext* aCx, const JS::Value& aSource,
+WriteStructuredClone(JSContext* aCx, JS::Handle<JS::Value> aSource,
                      JSAutoStructuredCloneBuffer& aBuffer,
                      StructuredCloneClosure& aClosure)
 {

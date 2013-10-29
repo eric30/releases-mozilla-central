@@ -167,7 +167,7 @@ struct ParseContext : public GenericParseContext
      *    'pn' if they are in the scope of 'pn'.
      *  + Pre-existing placeholders in the scope of 'pn' have been removed.
      */
-    bool define(TokenStream &ts, PropertyName *name, Node pn, Definition::Kind);
+    bool define(TokenStream &ts, HandlePropertyName name, Node pn, Definition::Kind);
 
     /*
      * Let definitions may shadow same-named definitions in enclosing scopes.
@@ -282,6 +282,12 @@ struct ParseContext : public GenericParseContext
     //   if (cond) { function f3() { if (cond) { function f4() { } } } }
     //
     bool atBodyLevel() { return !topStmt; }
+
+    // True if this is the ParseContext for the body of a function created by
+    // the Function constructor.
+    bool isFunctionConstructorBody() const {
+        return sc->isFunctionBox() && staticLevel == 0;
+    }
 
     inline bool useAsmOrInsideUseAsm() const {
         return sc->isFunctionBox() && sc->asFunctionBox()->useAsmOrInsideUseAsm();
@@ -578,8 +584,8 @@ class Parser : private AutoGCRooter, public StrictModeGetter
     bool finishFunctionDefinition(Node pn, FunctionBox *funbox, Node prelude, Node body);
     bool addFreeVariablesFromLazyFunction(JSFunction *fun, ParseContext<ParseHandler> *pc);
 
-    bool isValidForStatementLHS(Node pn1, JSVersion version,
-                                bool forDecl, bool forEach, bool forOf);
+    bool isValidForStatementLHS(Node pn1, JSVersion version, bool forDecl, bool forEach,
+                                ParseNodeKind headKind);
     bool checkAndMarkAsIncOperand(Node kid, TokenKind tt, bool preorder);
     bool checkStrictAssignment(Node lhs, AssignmentFlavor flavor);
     bool checkStrictBinding(PropertyName *name, Node pn);
@@ -630,6 +636,15 @@ class Parser : private AutoGCRooter, public StrictModeGetter
     TokenPos pos() const { return tokenStream.currentToken().pos; }
 
     bool asmJS(Node list);
+
+  public:
+    // This function may only be called from within Parser::asmJS before
+    // parsing any tokens. It returns the canonical offset to be used as the
+    // start of the asm.js module. We use the offset in the char buffer
+    // immediately after the "use asm" processing directive statement (which
+    // includes any semicolons or newlines that end the statement).
+    uint32_t offsetOfCurrentAsmJSModule() const { return tokenStream.currentToken().pos.end; }
+  private:
 
     friend class CompExprTransplanter;
     friend class GenexpGuard<ParseHandler>;

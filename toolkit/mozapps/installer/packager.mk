@@ -73,19 +73,24 @@ ifndef MOZ_NATIVE_NSPR
 ifeq ($(_MSC_VER),1400)
 JSSHELL_BINS += $(DIST)/bin/Microsoft.VC80.CRT.manifest
 JSSHELL_BINS += $(DIST)/bin/msvcr80.dll
+JSSHELL_BINS += $(DIST)/bin/msvcp80.dll
 endif
 ifeq ($(_MSC_VER),1500)
 JSSHELL_BINS += $(DIST)/bin/Microsoft.VC90.CRT.manifest
 JSSHELL_BINS += $(DIST)/bin/msvcr90.dll
+JSSHELL_BINS += $(DIST)/bin/msvcp90.dll
 endif
 ifeq ($(_MSC_VER),1600)
 JSSHELL_BINS += $(DIST)/bin/msvcr100.dll
+JSSHELL_BINS += $(DIST)/bin/msvcp100.dll
 endif
 ifeq ($(_MSC_VER),1700)
 JSSHELL_BINS += $(DIST)/bin/msvcr110.dll
+JSSHELL_BINS += $(DIST)/bin/msvcp110.dll
 endif
 ifeq ($(_MSC_VER),1800)
 JSSHELL_BINS += $(DIST)/bin/msvcr120.dll
+JSSHELL_BINS += $(DIST)/bin/msvcp120.dll
 endif
 ifdef MOZ_FOLD_LIBS
 JSSHELL_BINS += $(DIST)/bin/$(DLL_PREFIX)nss3$(DLL_SUFFIX)
@@ -100,8 +105,8 @@ endif # MOZ_NATIVE_NSPR
 MAKE_JSSHELL  = $(ZIP) -9j $(PKG_JSSHELL) $(JSSHELL_BINS)
 endif # LIBXUL_SDK
 
-_ABS_DIST = $(call core_abspath,$(DIST))
-JARLOG_DIR = $(call core_abspath,$(DEPTH)/jarlog/)
+_ABS_DIST = $(abspath $(DIST))
+JARLOG_DIR = $(abspath $(DEPTH)/jarlog/)
 JARLOG_FILE_AB_CD = $(JARLOG_DIR)/$(AB_CD).log
 
 TAR_CREATE_FLAGS := --exclude=.mkdir.done $(TAR_CREATE_FLAGS)
@@ -324,7 +329,7 @@ ABI_DIR = armeabi
 endif
 endif
 
-GECKO_APP_AP_PATH = $(call core_abspath,$(DEPTH)/mobile/android/base)
+GECKO_APP_AP_PATH = $(abspath $(DEPTH)/mobile/android/base)
 
 ifdef ENABLE_TESTS
 INNER_ROBOCOP_PACKAGE=echo
@@ -332,6 +337,8 @@ INNER_BACKGROUND_TESTS_PACKAGE=echo
 ifeq ($(MOZ_BUILD_APP),mobile/android)
 UPLOAD_EXTRA_FILES += robocop.apk
 UPLOAD_EXTRA_FILES += fennec_ids.txt
+UPLOAD_EXTRA_FILES += geckoview_library/geckoview_library.zip
+UPLOAD_EXTRA_FILES += geckoview_library/geckoview_assets.zip
 
 # Robocop/Robotium tests, Android Background tests, and Fennec need to
 # be signed with the same key, which means release signing them all.
@@ -344,12 +351,12 @@ RELEASE_SIGN_ANDROID_APK = \
   $(ZIPALIGN) -f -v 4 $(2)-unaligned.apk $(2) && \
   $(RM) $(2)-unaligned.apk
 
-ROBOCOP_PATH = $(call core_abspath,$(_ABS_DIST)/../build/mobile/robocop)
+ROBOCOP_PATH = $(abspath $(_ABS_DIST)/../build/mobile/robocop)
 INNER_ROBOCOP_PACKAGE= \
   $(NSINSTALL) $(GECKO_APP_AP_PATH)/fennec_ids.txt $(_ABS_DIST) && \
   $(call RELEASE_SIGN_ANDROID_APK,$(ROBOCOP_PATH)/robocop-debug-unsigned-unaligned.apk,$(_ABS_DIST)/robocop.apk)
 
-BACKGROUND_TESTS_PATH = $(call core_abspath,$(_ABS_DIST)/../mobile/android/tests/background/junit3)
+BACKGROUND_TESTS_PATH = $(abspath $(_ABS_DIST)/../mobile/android/tests/background/junit3)
 INNER_BACKGROUND_TESTS_PACKAGE= \
   $(call RELEASE_SIGN_ANDROID_APK,$(BACKGROUND_TESTS_PATH)/background-debug-unsigned-unaligned.apk,$(_ABS_DIST)/background.apk)
 endif

@@ -5,6 +5,7 @@
 #include <stagefright/DataSource.h>
 #include <stagefright/MediaSource.h>
 #include <utils/RefBase.h>
+#include <stagefright/MediaExtractor.h>
 
 #include "GonkNativeWindow.h"
 #include "GonkNativeWindowClient.h"
@@ -112,6 +113,7 @@ class OmxDecoder : public OMXCodecProxy::EventListener {
   VideoFrame mVideoFrame;
   AudioFrame mAudioFrame;
   MP3FrameParser mMP3FrameParser;
+  bool mIsMp3;
 
   // Lifetime of these should be handled by OMXCodec, as long as we release
   //   them after use: see ReleaseVideoBuffer(), ReleaseAudioBuffer()
@@ -171,7 +173,16 @@ public:
   // MediaResourceManagerClient::EventListener
   virtual void statusChanged();
 
-  bool Init();
+  // The MediaExtractor provides essential information for creating OMXCodec
+  // instance. Such as video/audio codec, we can retrieve them through the
+  // MediaExtractor::getTrackMetaData().
+  // In general cases, the extractor is created by a sp<DataSource> which
+  // connect to a MediaResource like ChannelMediaResource.
+  // Data is read from the MediaResource to create a suitable extractor which
+  // extracts data from a container.
+  // Note: RTSP requires a custom extractor because it doesn't have a container.
+  bool Init(sp<MediaExtractor>& extractor);
+
   bool TryLoad();
   bool IsDormantNeeded();
   bool IsWaitingMediaResources();
@@ -180,7 +191,9 @@ public:
   bool SetVideoFormat();
   bool SetAudioFormat();
 
-  void NotifyDataArrived(const char* aBuffer, uint32_t aLength, int64_t aOffset);
+  void ReleaseDecoder();
+
+  bool NotifyDataArrived(const char* aBuffer, uint32_t aLength, int64_t aOffset);
 
   void GetDuration(int64_t *durationUs) {
     *durationUs = mDurationUs;

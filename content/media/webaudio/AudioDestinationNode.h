@@ -7,7 +7,12 @@
 #ifndef AudioDestinationNode_h_
 #define AudioDestinationNode_h_
 
+#include "mozilla/dom/AudioContextBinding.h"
 #include "AudioNode.h"
+#include "nsIDOMEventListener.h"
+#include "nsIAudioChannelAgent.h"
+#include "AudioChannelCommon.h"
+#include "nsWeakReference.h"
 
 namespace mozilla {
 namespace dom {
@@ -15,6 +20,9 @@ namespace dom {
 class AudioContext;
 
 class AudioDestinationNode : public AudioNode
+                           , public nsIDOMEventListener
+                           , public nsIAudioChannelAgentCallback
+                           , public nsSupportsWeakReference
 {
 public:
   // This node type knows what MediaStreamGraph to use based on
@@ -28,6 +36,7 @@ public:
   virtual void DestroyMediaStream() MOZ_OVERRIDE;
 
   NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(AudioDestinationNode, AudioNode)
 
   virtual JSObject* WrapObject(JSContext* aCx,
                                JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
@@ -48,9 +57,28 @@ public:
 
   void OfflineShutdown();
 
+  // nsIDOMEventListener
+  NS_IMETHOD HandleEvent(nsIDOMEvent* aEvent);
+
+  // nsIAudioChannelAgentCallback
+  NS_IMETHOD CanPlayChanged(int32_t aCanPlay);
+
+  AudioChannel MozAudioChannelType() const;
+  void SetMozAudioChannelType(AudioChannel aValue, ErrorResult& aRv);
+
 private:
+  bool CheckAudioChannelPermissions(AudioChannel aValue);
+  void CreateAudioChannelAgent();
+
+  void SetCanPlay(bool aCanPlay);
+
   SelfReference<AudioDestinationNode> mOfflineRenderingRef;
   uint32_t mFramesToProduce;
+
+  nsCOMPtr<nsIAudioChannelAgent> mAudioChannelAgent;
+
+  // Audio Channel Type.
+  AudioChannel mAudioChannel;
 };
 
 }

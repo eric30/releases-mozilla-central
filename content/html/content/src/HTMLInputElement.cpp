@@ -477,58 +477,12 @@ private:
 
 NS_IMPL_ISUPPORTS1(DirPickerRecursiveFileEnumerator, nsISimpleEnumerator)
 
-class DirPickerBuildFileListTask MOZ_FINAL
-  : public nsRunnable
-{
-public:
-  DirPickerBuildFileListTask(HTMLInputElement* aInput, nsIFile* aTopDir)
-    : mInput(aInput)
-    , mTopDir(aTopDir)
-  {}
-
-  NS_IMETHOD Run() {
-    if (!NS_IsMainThread()) {
-      // Build up list of nsDOMFileFile objects on this dedicated thread:
-      nsCOMPtr<nsISimpleEnumerator> iter =
-        new DirPickerRecursiveFileEnumerator(mTopDir);
-      bool hasMore = true;
-      nsCOMPtr<nsISupports> tmp;
-      while (NS_SUCCEEDED(iter->HasMoreElements(&hasMore)) && hasMore) {
-        iter->GetNext(getter_AddRefs(tmp));
-        nsCOMPtr<nsIDOMFile> domFile = do_QueryInterface(tmp);
-        MOZ_ASSERT(domFile);
-        mFileList.AppendElement(domFile);
-        mInput->SetFileListProgress(mFileList.Length());
-      }
-      return NS_DispatchToMainThread(this);
-    }
-
-    // Now back on the main thread, set the list on our HTMLInputElement:
-    if (mFileList.IsEmpty()) {
-      return NS_OK;
-    }
-    // The text control frame (if there is one) isn't going to send a change
-    // event because it will think this is done by a script.
-    // So, we can safely send one by ourself.
-    mInput->SetFiles(mFileList, true);
-    mInput->MaybeDispatchProgressEvent(true); // last progress event
-    nsresult rv =
-      nsContentUtils::DispatchTrustedEvent(mInput->OwnerDoc(),
-                                           static_cast<nsIDOMHTMLInputElement*>(mInput.get()),
-                                           NS_LITERAL_STRING("change"), true,
-                                           false);
-    // Clear mInput to make sure that it can't lose its last strong ref off the
-    // main thread (which may happen if our dtor runs off the main thread)!
-    mInput = nullptr;
-    return rv;
-  }
-
-private:
-  nsRefPtr<HTMLInputElement> mInput;
-  nsCOMPtr<nsIFile> mTopDir;
-  nsTArray<nsCOMPtr<nsIDOMFile> > mFileList;
-};
-
+/**
+ * This may return nullptr if aDomFile's implementation of
+ * nsIDOMFile::mozFullPathInternal does not successfully return a non-empty
+ * string that is a valid path. This can happen on Firefox OS, for example,
+ * where the file picker can create Blobs.
+ */
 static already_AddRefed<nsIFile>
 DOMFileToLocalFile(nsIDOMFile* aDomFile)
 {
@@ -548,12 +502,121 @@ DOMFileToLocalFile(nsIDOMFile* aDomFile)
 
 } // anonymous namespace
 
+class DirPickerFileListBuilderTask MOZ_FINAL
+  : public nsRunnable
+{
+public:
+  DirPickerFileListBuilderTask(HTMLInputElement* aInput, nsIFile* aTopDir)
+    : mPreviousFileListLength(0)
+    , mInput(aInput)
+    , mTopDir(aTopDir)
+    , mFileListLength(0)
+    , mCanceled(0)
+  {}
+
+  NS_IMETHOD Run() {
+    if (!NS_IsMainThread()) {
+      // Build up list of nsDOMFileFile objects on this dedicated thread:
+      nsCOMPtr<nsISimpleEnumerator> iter =
+        new DirPickerRecursiveFileEnumerator(mTopDir);
+      bool hasMore = true;
+      nsCOMPtr<nsISupports> tmp;
+      while (NS_SUCCEEDED(iter->HasMoreElements(&hasMore)) && hasMore) {
+        iter->GetNext(getter_AddRefs(tmp));
+        nsCOMPtr<nsIDOMFile> domFile = do_QueryInterface(tmp);
+        MOZ_ASSERT(domFile);
+        mFileList.AppendElement(domFile);
+        mFileListLength = mFileList.Length();
+        if (mCanceled) {
+          MOZ_ASSERT(!mInput, "This is bad - how did this happen?");
+          // There's no point dispatching to the main thread (that doesn't
+          // guarantee that we'll be destroyed there).
+          return NS_OK;
+        }
+      }
+      return NS_DispatchToMainThread(this);
+    }
+
+    // Now back on the main thread, set the list on our HTMLInputElement:
+    if (mCanceled || mFileList.IsEmpty()) {
+      return NS_OK;
+    }
+    MOZ_ASSERT(mInput->mDirPickerFileListBuilderTask,
+               "But we aren't canceled!");
+    if (mInput->mProgressTimer) {
+      mInput->mProgressTimerIsActive = false;
+      mInput->mProgressTimer->Cancel();
+    }
+
+    mInput->MaybeDispatchProgressEvent(true);        // Last progress event.
+    mInput->mDirPickerFileListBuilderTask = nullptr; // Now null out.
+
+    if (mCanceled) { // The last progress event may have canceled us
+      return NS_OK;
+    }
+
+    // The text control frame (if there is one) isn't going to send a change
+    // event because it will think this is done by a script.
+    // So, we can safely send one by ourself.
+    mInput->SetFiles(mFileList, true);
+    nsresult rv =
+      nsContentUtils::DispatchTrustedEvent(mInput->OwnerDoc(),
+                                           static_cast<nsIDOMHTMLInputElement*>(mInput.get()),
+                                           NS_LITERAL_STRING("change"), true,
+                                           false);
+    // Clear mInput to make sure that it can't lose its last strong ref off the
+    // main thread (which may happen if our dtor runs off the main thread)!
+    mInput = nullptr;
+    return rv;
+  }
+
+  void Cancel()
+  {
+    MOZ_ASSERT(NS_IsMainThread() && !mCanceled);
+    // Clear mInput to make sure that it can't lose its last strong ref off the
+    // main thread (which may happen if our dtor runs off the main thread)!
+    mInput = nullptr;
+    mCanceled = 1; // true
+  }
+
+  uint32_t GetFileListLength() const
+  {
+    return mFileListLength;
+  }
+
+  /**
+   * The number of files added to the FileList at the time the last progress
+   * event was fired.
+   *
+   * This is only read/set by HTMLInputElement on the main thread. The reason
+   * that this member is stored here rather than on HTMLInputElement is so that
+   * we don't increase the size of HTMLInputElement for something that's rarely
+   * used.
+   */
+  uint32_t mPreviousFileListLength;
+
+private:
+  nsRefPtr<HTMLInputElement> mInput;
+  nsCOMPtr<nsIFile> mTopDir;
+  nsTArray<nsCOMPtr<nsIDOMFile> > mFileList;
+
+  // We access the list length on both threads, so we need the indirection of
+  // this atomic member to make the access thread safe:
+  mozilla::Atomic<uint32_t> mFileListLength;
+
+  // We'd prefer this member to be bool, but we don't support Atomic<bool>.
+  mozilla::Atomic<uint32_t> mCanceled;
+};
+
+
 NS_IMETHODIMP
 HTMLInputElement::nsFilePickerShownCallback::Done(int16_t aResult)
 {
   if (aResult == nsIFilePicker::returnCancel) {
     return NS_OK;
   }
+
+  mInput->CancelDirectoryPickerScanIfRunning();
 
   int16_t mode;
   mFilePicker->GetMode(&mode);
@@ -584,14 +647,14 @@ HTMLInputElement::nsFilePickerShownCallback::Done(int16_t aResult)
       = do_GetService(NS_STREAMTRANSPORTSERVICE_CONTRACTID);
     NS_ASSERTION(target, "Must have stream transport service");
 
-    mInput->ResetProgressCounters();
     mInput->StartProgressEventTimer();
 
-    // DirPickerBuildFileListTask takes care of calling SetFiles() and
+    // DirPickerFileListBuilderTask takes care of calling SetFiles() and
     // dispatching the "change" event.
-    nsRefPtr<DirPickerBuildFileListTask> event =
-      new DirPickerBuildFileListTask(mInput.get(), pickedDir.get());
-    return target->Dispatch(event, NS_DISPATCH_NORMAL);
+    mInput->mDirPickerFileListBuilderTask =
+      new DirPickerFileListBuilderTask(mInput.get(), pickedDir.get());
+    return target->Dispatch(mInput->mDirPickerFileListBuilderTask,
+                            NS_DISPATCH_NORMAL);
   }
 
   // Collect new selected filenames
@@ -630,10 +693,12 @@ HTMLInputElement::nsFilePickerShownCallback::Done(int16_t aResult)
 
   // Store the last used directory using the content pref service:
   nsCOMPtr<nsIFile> file = DOMFileToLocalFile(newFiles[0]);
-  nsCOMPtr<nsIFile> lastUsedDir;
-  file->GetParent(getter_AddRefs(lastUsedDir));
-  HTMLInputElement::gUploadLastDir->StoreLastUsedDirectory(
-    mInput->OwnerDoc(), lastUsedDir);
+  if (file) {
+    nsCOMPtr<nsIFile> lastUsedDir;
+    file->GetParent(getter_AddRefs(lastUsedDir));
+    HTMLInputElement::gUploadLastDir->StoreLastUsedDirectory(
+      mInput->OwnerDoc(), lastUsedDir);
+  }
 
   // The text control frame (if there is one) isn't going to send a change
   // event because it will think this is done by a script.
@@ -1012,8 +1077,6 @@ static nsresult FireEventForAccessibility(nsIDOMHTMLInputElement* aTarget,
 HTMLInputElement::HTMLInputElement(already_AddRefed<nsINodeInfo> aNodeInfo,
                                    FromParser aFromParser)
   : nsGenericHTMLFormElementWithState(aNodeInfo)
-  , mFileListProgress(0)
-  , mLastFileListProgress(0)
   , mType(kInputDefaultType->value)
   , mDisabledChanged(false)
   , mValueChanged(false)
@@ -2456,6 +2519,20 @@ HTMLInputElement::OpenDirectoryPicker(ErrorResult& aRv)
 }
 
 void
+HTMLInputElement::CancelDirectoryPickerScanIfRunning()
+{
+  if (!mDirPickerFileListBuilderTask) {
+    return;
+  }
+  if (mProgressTimer) {
+    mProgressTimerIsActive = false;
+    mProgressTimer->Cancel();
+  }
+  mDirPickerFileListBuilderTask->Cancel();
+  mDirPickerFileListBuilderTask = nullptr;
+}
+
+void
 HTMLInputElement::StartProgressEventTimer()
 {
   if (!mProgressTimer) {
@@ -2499,8 +2576,10 @@ HTMLInputElement::MaybeDispatchProgressEvent(bool aFinalProgress)
     mProgressTimer->Cancel();
   }
 
+  uint32_t fileListLength = mDirPickerFileListBuilderTask->GetFileListLength();
+
   if (mProgressTimerIsActive ||
-      mFileListProgress == mLastFileListProgress) {
+      fileListLength == mDirPickerFileListBuilderTask->mPreviousFileListLength) {
     return;
   }
 
@@ -2508,10 +2587,11 @@ HTMLInputElement::MaybeDispatchProgressEvent(bool aFinalProgress)
     StartProgressEventTimer();
   }
 
-  mLastFileListProgress = mFileListProgress;
+  mDirPickerFileListBuilderTask->mPreviousFileListLength = fileListLength;
 
   DispatchProgressEvent(NS_LITERAL_STRING(PROGRESS_STR),
-                        false, mLastFileListProgress,
+                        false,
+                        mDirPickerFileListBuilderTask->mPreviousFileListLength,
                         0);
 }
 
@@ -2534,12 +2614,16 @@ HTMLInputElement::DispatchProgressEvent(const nsAString& aType,
     return;
   }
 
-  progress->InitProgressEvent(aType, false, false, aLengthComputable,
+  progress->InitProgressEvent(aType, false, true, aLengthComputable,
                               aLoaded, (aTotal == UINT64_MAX) ? 0 : aTotal);
 
   event->SetTrusted(true);
 
-  DispatchDOMEvent(nullptr, event, nullptr, nullptr);
+  bool doDefaultAction;
+  rv = DispatchEvent(event, &doDefaultAction);
+  if (NS_SUCCEEDED(rv) && !doDefaultAction) {
+    CancelDirectoryPickerScanIfRunning();
+  }
 }
 
 nsresult
@@ -2591,6 +2675,14 @@ HTMLInputElement::SetValueInternal(const nsAString& aValue,
           SetValueChanged(true);
         }
         OnValueChanged(!mParserCreating);
+      }
+
+      // Call parent's SetAttr for color input so its control frame is notified
+      // and updated
+      if (mType == NS_FORM_INPUT_COLOR) {
+        return nsGenericHTMLFormElement::SetAttr(kNameSpaceID_None,
+                                                 nsGkAtoms::value, aValue,
+                                                 true);
       }
 
       return NS_OK;
@@ -2811,7 +2903,7 @@ HTMLInputElement::MaybeSubmitForm(nsPresContext* aPresContext)
                            WidgetMouseEvent::eReal);
     nsEventStatus status = nsEventStatus_eIgnore;
     shell->HandleDOMEventWithTarget(submitContent, &event, &status);
-  } else if (mForm->HasSingleTextControl() &&
+  } else if (!mForm->ImplicitSubmissionIsDisabled() &&
              (mForm->HasAttr(kNameSpaceID_None, nsGkAtoms::novalidate) ||
               mForm->CheckValidFormSubmission())) {
     // TODO: removing this code and have the submit event sent by the form,
@@ -3020,8 +3112,9 @@ HTMLInputElement::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
   // cause activation of the input.  That is, if we're a click event, or a
   // DOMActivate that was dispatched directly, this will be set, but if we're
   // a DOMActivate dispatched from click handling, it will not be set.
+  WidgetMouseEvent* mouseEvent = aVisitor.mEvent->AsMouseEvent();
   bool outerActivateEvent =
-    (aVisitor.mEvent->IsLeftClickEvent() ||
+    ((mouseEvent && mouseEvent->IsLeftClickEvent()) ||
      (aVisitor.mEvent->message == NS_UI_ACTIVATE && !mInInternalActivate));
 
   if (outerActivateEvent) {
@@ -3088,8 +3181,7 @@ HTMLInputElement::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
   }
   if (IsSingleLineTextControl(false) &&
       aVisitor.mEvent->message == NS_MOUSE_CLICK &&
-      aVisitor.mEvent->eventStructType == NS_MOUSE_EVENT &&
-      static_cast<WidgetMouseEvent*>(aVisitor.mEvent)->button ==
+      aVisitor.mEvent->AsMouseEvent()->button ==
         WidgetMouseEvent::eMiddleButton) {
     aVisitor.mEvent->mFlags.mNoContentDispatch = false;
   }
@@ -3251,14 +3343,18 @@ HTMLInputElement::MaybeInitPickers(nsEventChainPostVisitor& aVisitor)
   // - it's the left mouse button.
   // We do not prevent non-trusted click because authors can already use
   // .click(). However, the pickers will follow the rules of popup-blocking.
-  if (aVisitor.mEvent->IsLeftClickEvent() &&
-      !aVisitor.mEvent->mFlags.mDefaultPrevented) {
-    if (mType == NS_FORM_INPUT_FILE) {
-      return InitFilePicker(FILE_PICKER_FILE);
-    }
-    if (mType == NS_FORM_INPUT_COLOR) {
-      return InitColorPicker();
-    }
+  if (aVisitor.mEvent->mFlags.mDefaultPrevented) {
+    return NS_OK;
+  }
+  WidgetMouseEvent* mouseEvent = aVisitor.mEvent->AsMouseEvent();
+  if (!(mouseEvent && mouseEvent->IsLeftClickEvent())) {
+    return NS_OK;
+  }
+  if (mType == NS_FORM_INPUT_FILE) {
+    return InitFilePicker(FILE_PICKER_FILE);
+  }
+  if (mType == NS_FORM_INPUT_COLOR) {
+    return InitColorPicker();
   }
   return NS_OK;
 }
@@ -3304,23 +3400,26 @@ HTMLInputElement::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
   // the click event handling, and allow cancellation of DOMActivate to cancel
   // the click.
   if (aVisitor.mEventStatus != nsEventStatus_eConsumeNoDefault &&
-      !IsSingleLineTextControl(true) &&
-      aVisitor.mEvent->IsLeftClickEvent() &&
-      !ShouldPreventDOMActivateDispatch(aVisitor.mEvent->originalTarget)) {
-    InternalUIEvent actEvent(aVisitor.mEvent->mFlags.mIsTrusted,
-                             NS_UI_ACTIVATE, 1);
+      !IsSingleLineTextControl(true)) {
+    WidgetMouseEvent* mouseEvent = aVisitor.mEvent->AsMouseEvent();
+    if (mouseEvent && mouseEvent->IsLeftClickEvent() &&
+        !ShouldPreventDOMActivateDispatch(aVisitor.mEvent->originalTarget)) {
+      InternalUIEvent actEvent(aVisitor.mEvent->mFlags.mIsTrusted,
+                               NS_UI_ACTIVATE, 1);
 
-    nsCOMPtr<nsIPresShell> shell = aVisitor.mPresContext->GetPresShell();
-    if (shell) {
-      nsEventStatus status = nsEventStatus_eIgnore;
-      mInInternalActivate = true;
-      rv = shell->HandleDOMEventWithTarget(this, &actEvent, &status);
-      mInInternalActivate = false;
+      nsCOMPtr<nsIPresShell> shell = aVisitor.mPresContext->GetPresShell();
+      if (shell) {
+        nsEventStatus status = nsEventStatus_eIgnore;
+        mInInternalActivate = true;
+        rv = shell->HandleDOMEventWithTarget(this, &actEvent, &status);
+        mInInternalActivate = false;
 
-      // If activate is cancelled, we must do the same as when click is
-      // cancelled (revert the checkbox to its original value).
-      if (status == nsEventStatus_eConsumeNoDefault)
-        aVisitor.mEventStatus = status;
+        // If activate is cancelled, we must do the same as when click is
+        // cancelled (revert the checkbox to its original value).
+        if (status == nsEventStatus_eConsumeNoDefault) {
+          aVisitor.mEventStatus = status;
+        }
+      }
     }
   }
 
@@ -3403,7 +3502,7 @@ HTMLInputElement::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
           // just because we raised a window.
           nsIFocusManager* fm = nsFocusManager::GetFocusManager();
           if (fm && IsSingleLineTextControl(false) &&
-              !(static_cast<InternalFocusEvent*>(aVisitor.mEvent))->fromRaise &&
+              !aVisitor.mEvent->AsFocusEvent()->fromRaise &&
               SelectTextFieldOnFocus()) {
             nsIDocument* document = GetCurrentDoc();
             if (document) {
@@ -3426,9 +3525,7 @@ HTMLInputElement::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
         {
           // For backwards compat, trigger checks/radios/buttons with
           // space or enter (bug 25300)
-          WidgetKeyboardEvent* keyEvent =
-            static_cast<WidgetKeyboardEvent*>(aVisitor.mEvent);
-
+          WidgetKeyboardEvent* keyEvent = aVisitor.mEvent->AsKeyboardEvent();
           if ((aVisitor.mEvent->message == NS_KEY_PRESS &&
                keyEvent->keyCode == NS_VK_RETURN) ||
               (aVisitor.mEvent->message == NS_KEY_UP &&
@@ -3449,6 +3546,7 @@ HTMLInputElement::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
               case NS_FORM_INPUT_RESET:
               case NS_FORM_INPUT_SUBMIT:
               case NS_FORM_INPUT_IMAGE: // Bug 34418
+              case NS_FORM_INPUT_COLOR:
               {
                 WidgetMouseEvent event(aVisitor.mEvent->mFlags.mIsTrusted,
                                        NS_MOUSE_CLICK, nullptr,
@@ -3518,6 +3616,7 @@ HTMLInputElement::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
               (keyEvent->keyCode == NS_VK_RETURN ||
                keyEvent->keyCode == NS_VK_ENTER) &&
                (IsSingleLineTextControl(false, mType) ||
+                mType == NS_FORM_INPUT_NUMBER ||
                 IsExperimentalMobileType(mType))) {
             FireChangeEventIfNeeded();
             rv = MaybeSubmitForm(aVisitor.mPresContext);
@@ -3591,11 +3690,9 @@ HTMLInputElement::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
         {
           // cancel all of these events for buttons
           //XXXsmaug Why?
-          if (aVisitor.mEvent->eventStructType == NS_MOUSE_EVENT &&
-              (static_cast<WidgetMouseEvent*>(aVisitor.mEvent)->button ==
-                 WidgetMouseEvent::eMiddleButton ||
-               static_cast<WidgetMouseEvent*>(aVisitor.mEvent)->button ==
-                 WidgetMouseEvent::eRightButton)) {
+          WidgetMouseEvent* mouseEvent = aVisitor.mEvent->AsMouseEvent();
+          if (mouseEvent->button == WidgetMouseEvent::eMiddleButton ||
+              mouseEvent->button == WidgetMouseEvent::eRightButton) {
             if (mType == NS_FORM_INPUT_BUTTON ||
                 mType == NS_FORM_INPUT_RESET ||
                 mType == NS_FORM_INPUT_SUBMIT) {
@@ -3706,8 +3803,7 @@ HTMLInputElement::PostHandleEventForRangeThumb(nsEventChainPostVisitor& aVisitor
       if (nsIPresShell::GetCapturingContent()) {
         break; // don't start drag if someone else is already capturing
       }
-      WidgetInputEvent* inputEvent =
-        static_cast<WidgetInputEvent*>(aVisitor.mEvent);
+      WidgetInputEvent* inputEvent = aVisitor.mEvent->AsInputEvent();
       if (inputEvent->IsShift() || inputEvent->IsControl() ||
           inputEvent->IsAlt() || inputEvent->IsMeta() ||
           inputEvent->IsAltGraph() || inputEvent->IsFn() ||
@@ -3715,17 +3811,14 @@ HTMLInputElement::PostHandleEventForRangeThumb(nsEventChainPostVisitor& aVisitor
         break; // ignore
       }
       if (aVisitor.mEvent->message == NS_MOUSE_BUTTON_DOWN) {
-        WidgetMouseEvent* mouseEvent =
-          static_cast<WidgetMouseEvent*>(aVisitor.mEvent);
-        if (mouseEvent->buttons == WidgetMouseEvent::eLeftButtonFlag) {
+        if (aVisitor.mEvent->AsMouseEvent()->buttons ==
+              WidgetMouseEvent::eLeftButtonFlag) {
           StartRangeThumbDrag(inputEvent);
         } else if (mIsDraggingRange) {
           CancelRangeThumbDrag();
         }
       } else {
-        WidgetTouchEvent* touchEvent =
-          static_cast<WidgetTouchEvent*>(aVisitor.mEvent);
-        if (touchEvent->touches.Length() == 1) {
+        if (aVisitor.mEvent->AsTouchEvent()->touches.Length() == 1) {
           StartRangeThumbDrag(inputEvent);
         } else if (mIsDraggingRange) {
           CancelRangeThumbDrag();
@@ -3745,8 +3838,7 @@ HTMLInputElement::PostHandleEventForRangeThumb(nsEventChainPostVisitor& aVisitor
         break;
       }
       SetValueOfRangeForUserEvent(
-        rangeFrame->GetValueAtEventPoint(
-          static_cast<WidgetInputEvent*>(aVisitor.mEvent)));
+        rangeFrame->GetValueAtEventPoint(aVisitor.mEvent->AsInputEvent()));
       aVisitor.mEvent->mFlags.mMultipleActionsPrevented = true;
       break;
 
@@ -3759,14 +3851,13 @@ HTMLInputElement::PostHandleEventForRangeThumb(nsEventChainPostVisitor& aVisitor
       // call CancelRangeThumbDrag() if that is the case. We just finish off
       // the drag and set our final value (unless someone has called
       // preventDefault() and prevents us getting here).
-      FinishRangeThumbDrag(static_cast<WidgetInputEvent*>(aVisitor.mEvent));
+      FinishRangeThumbDrag(aVisitor.mEvent->AsInputEvent());
       aVisitor.mEvent->mFlags.mMultipleActionsPrevented = true;
       break;
 
     case NS_KEY_PRESS:
       if (mIsDraggingRange &&
-          static_cast<WidgetKeyboardEvent*>(aVisitor.mEvent)->keyCode ==
-            NS_VK_ESCAPE) {
+          aVisitor.mEvent->AsKeyboardEvent()->keyCode == NS_VK_ESCAPE) {
         CancelRangeThumbDrag();
       }
       break;
@@ -4524,11 +4615,6 @@ HTMLInputElement::SetSelectionRange(int32_t aSelectionStart,
       if (!aRv.Failed()) {
         aRv = textControlFrame->ScrollSelectionIntoView();
       }
-
-      nsContentUtils::DispatchTrustedEvent(OwnerDoc(),
-                                           static_cast<nsIDOMHTMLInputElement*>(this),
-                                           NS_LITERAL_STRING("select"), true,
-                                           false);
     }
   }
 }
@@ -4651,6 +4737,11 @@ HTMLInputElement::SetRangeText(const nsAString& aReplacement, uint32_t aStart,
 
   Optional<nsAString> direction;
   SetSelectionRange(aSelectionStart, aSelectionEnd, direction, aRv);
+  if (!aRv.Failed()) {
+    nsRefPtr<nsAsyncDOMEvent> event =
+      new nsAsyncDOMEvent(this, NS_LITERAL_STRING("select"), true, false);
+    event->PostDOMEvent();
+  }
 }
 
 int32_t

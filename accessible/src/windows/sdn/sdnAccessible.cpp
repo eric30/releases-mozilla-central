@@ -466,12 +466,11 @@ sdnAccessible::get_innerHTML(BSTR __RPC_FAR* aInnerHTML)
   if (IsDefunct())
     return CO_E_OBJNOTCONNECTED;
 
-  nsCOMPtr<nsIDOMHTMLElement> htmlElement = do_QueryInterface(mNode);
-  if (!htmlElement)
+  if (!mNode->IsElement())
     return S_FALSE;
 
   nsAutoString innerHTML;
-  htmlElement->GetInnerHTML(innerHTML);
+  mNode->AsElement()->GetInnerHTML(innerHTML);
   if (innerHTML.IsEmpty())
     return S_FALSE;
 
@@ -517,8 +516,8 @@ sdnAccessible::get_language(BSTR __RPC_FAR* aLanguage)
     return CO_E_OBJNOTCONNECTED;
 
   nsAutoString language;
-  if (mNode->IsElement())
-    nsCoreUtils::GetLanguageFor(mNode->AsElement(), nullptr, language);
+  if (mNode->IsContent())
+    nsCoreUtils::GetLanguageFor(mNode->AsContent(), nullptr, language);
   if (language.IsEmpty()) { // Nothing found, so use document's language
     mNode->OwnerDoc()->GetHeaderData(nsGkAtoms::headerContentLanguage,
                                      language);

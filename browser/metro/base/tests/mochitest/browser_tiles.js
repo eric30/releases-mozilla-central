@@ -9,6 +9,14 @@ function test() {
   }).then(runTests);
 }
 
+function _checkIfBoundByRichGrid_Item(expected, node, idx) {
+  let binding = node.ownerDocument.defaultView.getComputedStyle(node).MozBinding;
+  let result = ('url("chrome://browser/content/bindings/grid.xml#richgrid-item")' == binding);
+  return (result == expected);
+}
+let isBoundByRichGrid_Item = _checkIfBoundByRichGrid_Item.bind(this, true);
+let isNotBoundByRichGrid_Item = _checkIfBoundByRichGrid_Item.bind(this, false);
+
 gTests.push({
   desc: "richgrid binding is applied",
   run: function() {
@@ -17,9 +25,9 @@ gTests.push({
     let grid = doc.querySelector("#grid1");
     ok(grid, "#grid1 is found");
     is(typeof grid.clearSelection, "function", "#grid1 has the binding applied");
-
-    is(grid.children.length, 2, "#grid1 has a 2 items");
-    is(grid.children[0].control, grid, "#grid1 item's control points back at #grid1'");
+    is(grid.items.length, 2, "#grid1 has a 2 items");
+    is(grid.items[0].control, grid, "#grid1 item's control points back at #grid1'");
+    ok(Array.every(grid.items, isBoundByRichGrid_Item), "All items are bound by richgrid-item");
   }
 });
 
@@ -29,7 +37,7 @@ gTests.push({
     let grid = doc.querySelector("#grid1");
     is(typeof grid.handleItemClick, "function", "grid.handleItemClick is a function");
     let handleStub = stubMethod(grid, 'handleItemClick');
-    let itemId = "grid1_item1"; // grid.children[0].getAttribute("id");
+    let itemId = "grid1_item1"; // grid.items[0].getAttribute("id");
 
     // send click to item and wait for next tick;
     EventUtils.sendMouseEvent({type: 'click'}, itemId, doc.defaultView);
@@ -114,9 +122,8 @@ gTests.push({
     grid.clearAll();
 
     is(grid.itemCount, 0, "grid has 0 itemCount after clearAll");
-    is(grid.children.length, 0, "grid has 0 children after clearAll");
-    is(grid.rowCount, 0, "grid has 0 rows when empty");
-    is(grid.columnCount, 0, "grid has 0 cols when empty");
+    is(grid.items.length, 0, "grid has 0 items after clearAll");
+    // now that we use slots, an empty grid may still have non-zero rows & columns
 
     is(arrangeSpy.callCount, 1, "arrangeItems is called once when we clearAll");
     arrangeSpy.restore();
@@ -126,19 +133,28 @@ gTests.push({
 gTests.push({
   desc: "empty grid",
   run: function() {
+    // XXX grids have minSlots and may not be ever truly empty
+
     let grid = doc.getElementById("emptyGrid");
     grid.arrangeItems();
     yield waitForCondition(() => !grid.isArranging);
 
-    // grid has rows=2 but 0 items
+    // grid has 2 rows, 6 slots, 0 items
     ok(grid.isBound, "binding was applied");
     is(grid.itemCount, 0, "empty grid has 0 items");
-    is(grid.rowCount, 0, "empty grid has 0 rows");
-    is(grid.columnCount, 0, "empty grid has 0 cols");
+    // minSlots attr. creates unpopulated slots
+    is(grid.rowCount, grid.getAttribute("rows"), "empty grid with rows-attribute has that number of rows");
+    is(grid.columnCount, 3, "empty grid has expected number of columns");
 
-    let columnsNode = grid._grid;
-    let cStyle = doc.defaultView.getComputedStyle(columnsNode);
-    is(cStyle.getPropertyValue("-moz-column-count"), "auto", "empty grid has -moz-column-count: auto");
+    // remove rows attribute and allow space for the grid to find its own height
+    // for its number of slots
+    grid.removeAttribute("rows");
+    grid.parentNode.style.height = 20+(grid.tileHeight*grid.minSlots)+"px";
+
+    grid.arrangeItems();
+    yield waitForCondition(() => !grid.isArranging);
+    is(grid.rowCount, grid.minSlots, "empty grid has this.minSlots rows");
+    is(grid.columnCount, 1, "empty grid has 1 column");
   }
 });
 
@@ -150,13 +166,13 @@ gTests.push({
     let grid = doc.querySelector("#emptygrid");
 
     is(grid.itemCount, 0, "0 itemCount when empty");
-    is(grid.children.length, 0, "0 children when empty");
+    is(grid.items.length, 0, "0 items when empty");
     is(typeof grid.appendItem, "function", "appendItem is a function on the grid");
 
     let arrangeStub = stubMethod(grid, "arrangeItems");
     let newItem = grid.appendItem("test title", "about:blank");
 
-    ok(newItem && grid.children[0]==newItem, "appendItem gives back the item");
+    ok(newItem && grid.items[0]==newItem, "appendItem gives back the item");
     is(grid.itemCount, 1, "itemCount is incremented when we appendItem");
     is(newItem.getAttribute("label"), "test title", "title ends up on label attribute");
     is(newItem.getAttribute("value"), "about:blank", "url ends up on value attribute");
@@ -193,7 +209,7 @@ gTests.push({
 
     ok(removedItem, "removeItemAt gives back an item");
     is(removedItem.getAttribute("id"), "grid2_item1", "removeItemAt gives back the correct item");
-    is(grid.children[0].getAttribute("id"), "grid2_item2", "2nd item becomes the first item");
+    is(grid.items[0].getAttribute("id"), "grid2_item2", "2nd item becomes the first item");
     is(grid.itemCount, 1, "itemCount is decremented when we removeItemAt");
 
     is(arrangeStub.callCount, 1, "arrangeItems is called when we removeItemAt");
@@ -212,16 +228,25 @@ gTests.push({
     is(typeof grid.insertItemAt, "function", "insertItemAt is a function on the grid");
 
     let arrangeStub = stubMethod(grid, "arrangeItems");
-    let insertedItem = grid.insertItemAt(1, "inserted item", "http://example.com/inserted");
+    let insertedAt0 = grid.insertItemAt(0, "inserted item 0", "http://example.com/inserted0");
+    let insertedAt00 = grid.insertItemAt(0, "inserted item 00", "http://example.com/inserted00");
 
-    ok(insertedItem, "insertItemAt gives back an item");
-    is(grid.children[1], insertedItem, "item is inserted at the correct index");
-    is(insertedItem.getAttribute("label"), "inserted item", "insertItemAt creates item with the correct label");
-    is(insertedItem.getAttribute("value"), "http://example.com/inserted", "insertItemAt creates item with the correct url value");
-    is(grid.children[2].getAttribute("id"), "grid3_item2", "following item ends up at the correct index");
-    is(grid.itemCount, 3, "itemCount is incremented when we insertItemAt");
+    ok(insertedAt0 && insertedAt00, "insertItemAt gives back an item");
 
-    is(arrangeStub.callCount, 1, "arrangeItems is called when we insertItemAt");
+    is(insertedAt0.getAttribute("label"), "inserted item 0", "insertItemAt creates item with the correct label");
+    is(insertedAt0.getAttribute("value"), "http://example.com/inserted0", "insertItemAt creates item with the correct url value");
+
+    is(grid.items[0], insertedAt00, "item is inserted at the correct index");
+    is(grid.children[0], insertedAt00, "first item occupies the first slot");
+    is(grid.items[1], insertedAt0, "item is inserted at the correct index");
+    is(grid.children[1], insertedAt0, "next item occupies the next slot");
+
+    is(grid.items[2].getAttribute("label"), "First item", "Old first item is now at index 2");
+    is(grid.items[3].getAttribute("label"), "2nd item", "Old 2nd item is now at index 3");
+
+    is(grid.itemCount, 4, "itemCount is incremented when we insertItemAt");
+
+    is(arrangeStub.callCount, 2, "arrangeItems is called when we insertItemAt");
     arrangeStub.restore();
   }
 });
@@ -275,11 +300,11 @@ gTests.push({
     is(typeof grid.removeItem, "function", "removeItem is a function on the grid");
 
     let arrangeStub = stubMethod(grid, "arrangeItems");
-    let removedFirst = grid.removeItem( grid.children[0] );
+    let removedFirst = grid.removeItem( grid.items[0] );
 
     is(arrangeStub.callCount, 1, "arrangeItems is called when we removeItem");
 
-    let removed2nd = grid.removeItem( grid.children[0], true);
+    let removed2nd = grid.removeItem( grid.items[0], true);
     is(removed2nd.getAttribute("label"), "2nd item", "the next item was returned");
     is(grid.itemCount, 2, "2 items remain");
 
@@ -316,26 +341,19 @@ gTests.push({
     is(grid.itemCount, 2, "2 items initially");
     is(grid.selectedItems.length, 0, "nothing selected initially");
 
-    grid.toggleItemSelection(grid.children[1]);
-    ok(grid.children[1].selected, "toggleItemSelection sets truthy selected prop on previously-unselected item");
+    grid.toggleItemSelection(grid.items[1]);
+    ok(grid.items[1].selected, "toggleItemSelection sets truthy selected prop on previously-unselected item");
     is(grid.selectedIndex, 1, "selectedIndex is correct");
 
-    grid.toggleItemSelection(grid.children[1]);
-    ok(!grid.children[1].selected, "toggleItemSelection sets falsy selected prop on previously-selected item");
+    grid.toggleItemSelection(grid.items[1]);
+    ok(!grid.items[1].selected, "toggleItemSelection sets falsy selected prop on previously-selected item");
     is(grid.selectedIndex, -1, "selectedIndex reports correctly with nothing selected");
 
     // item selection
-    grid.selectItem(grid.children[1]);
-    ok(grid.children[1].selected, "Item selected property is truthy after grid.selectItem");
-    ok(grid.children[1].getAttribute("selected"), "Item selected attribute is truthy after grid.selectItem");
+    grid.selectItem(grid.items[1]);
+    ok(grid.items[1].selected, "Item selected property is truthy after grid.selectItem");
+    ok(grid.items[1].getAttribute("selected"), "Item selected attribute is truthy after grid.selectItem");
     ok(grid.selectedItems.length, "There are selectedItems after grid.selectItem");
-
-    // clearSelection
-    grid.selectItem(grid.children[0]);
-    grid.selectItem(grid.children[1]);
-    grid.clearSelection();
-    is(grid.selectedItems.length, 0, "Nothing selected when we clearSelection");
-    is(grid.selectedIndex, -1, "selectedIndex resets after clearSelection");
 
     // select events
     // in seltype=single mode, select is like the default action for the tile
@@ -344,13 +362,22 @@ gTests.push({
       handleEvent: function(aEvent) {}
     };
     let handlerStub = stubMethod(handler, "handleEvent");
+
+    grid.items[1].selected = true;
+
     doc.defaultView.addEventListener("select", handler, false);
     info("select listener added");
 
-    info("calling selectItem, currently it is:" + grid.children[0].selected);
+    // clearSelection
+    grid.clearSelection();
+    is(grid.selectedItems.length, 0, "Nothing selected when we clearSelection");
+    is(grid.selectedIndex, -1, "selectedIndex resets after clearSelection");
+    is(handlerStub.callCount, 0, "clearSelection should not fire a selectionchange event");
+
+    info("calling selectItem, currently it is:" + grid.items[0].selected);
     // Note: A richgrid in seltype=single mode fires "select" events from selectItem
-    grid.selectItem(grid.children[0]);
-    info("calling selectItem, now it is:" + grid.children[0].selected);
+    grid.selectItem(grid.items[0]);
+    info("calling selectItem, now it is:" + grid.items[0].selected);
     yield waitForMs(0);
 
     is(handlerStub.callCount, 1, "select event handler was called when we selected an item");
@@ -378,22 +405,14 @@ gTests.push({
     is(grid.itemCount, 2, "2 items initially");
     is(grid.selectedItems.length, 0, "nothing selected initially");
 
-    grid.toggleItemSelection(grid.children[1]);
-    ok(grid.children[1].selected, "toggleItemSelection sets truthy selected prop on previously-unselected item");
+    grid.toggleItemSelection(grid.items[1]);
+    ok(grid.items[1].selected, "toggleItemSelection sets truthy selected prop on previously-unselected item");
     is(grid.selectedItems.length, 1, "1 item selected when we first toggleItemSelection");
-    is(grid.selectedItems[0], grid.children[1], "the right item is selected");
+    is(grid.selectedItems[0], grid.items[1], "the right item is selected");
     is(grid.selectedIndex, 1, "selectedIndex is correct");
 
-    grid.toggleItemSelection(grid.children[1]);
+    grid.toggleItemSelection(grid.items[1]);
     is(grid.selectedItems.length, 0, "Nothing selected when we toggleItemSelection again");
-
-    // clearSelection
-    grid.children[0].selected=true;
-    grid.children[1].selected=true;
-    is(grid.selectedItems.length, 2, "Both items are selected before calling clearSelection");
-    grid.clearSelection();
-    is(grid.selectedItems.length, 0, "Nothing selected when we clearSelection");
-    ok(!(grid.children[0].selected || grid.children[1].selected), "selected properties all falsy when we clearSelection");
 
     // selectionchange events
     // in seltype=multiple mode, we track selected state on all items
@@ -405,10 +424,19 @@ gTests.push({
     doc.defaultView.addEventListener("selectionchange", handler, false);
     info("selectionchange listener added");
 
-    info("calling toggleItemSelection, currently it is:" + grid.children[0].selected);
+    // clearSelection
+    grid.items[0].selected=true;
+    grid.items[1].selected=true;
+    is(grid.selectedItems.length, 2, "Both items are selected before calling clearSelection");
+    grid.clearSelection();
+    is(grid.selectedItems.length, 0, "Nothing selected when we clearSelection");
+    ok(!(grid.items[0].selected || grid.items[1].selected), "selected properties all falsy when we clearSelection");
+    is(handlerStub.callCount, 0, "clearSelection should not fire a selectionchange event");
+
+    info("calling toggleItemSelection, currently it is:" + grid.items[0].selected);
     // Note: A richgrid in seltype=single mode fires "select" events from selectItem
-    grid.toggleItemSelection(grid.children[0]);
-    info("/calling toggleItemSelection, now it is:" + grid.children[0].selected);
+    grid.toggleItemSelection(grid.items[0]);
+    info("/calling toggleItemSelection, now it is:" + grid.items[0].selected);
     yield waitForMs(0);
 
     is(handlerStub.callCount, 1, "selectionchange event handler was called when we selected an item");
@@ -419,5 +447,204 @@ gTests.push({
   }
 });
 
-     // implements a getItemAtIndex method (or grid.children[idx] ?)
+gTests.push({
+  desc: "selectNone",
+  run: function() {
+    let grid = doc.querySelector("#grid-select2");
 
+    is(typeof grid.selectNone, "function", "selectNone is a function on the grid");
+
+    is(grid.itemCount, 2, "2 items initially");
+
+    // selectNone should fire a selectionchange event
+    let handler = {
+      handleEvent: function(aEvent) {}
+    };
+    let handlerStub = stubMethod(handler, "handleEvent");
+    doc.defaultView.addEventListener("selectionchange", handler, false);
+    info("selectionchange listener added");
+
+    grid.items[0].selected=true;
+    grid.items[1].selected=true;
+    is(grid.selectedItems.length, 2, "Both items are selected before calling selectNone");
+    grid.selectNone();
+
+    is(grid.selectedItems.length, 0, "Nothing selected when we selectNone");
+    ok(!(grid.items[0].selected || grid.items[1].selected), "selected properties all falsy when we selectNone");
+
+    is(handlerStub.callCount, 1, "selectionchange event handler was called when we selectNone");
+    is(handlerStub.calledWith[0].type, "selectionchange", "handler got a selectionchange event");
+    is(handlerStub.calledWith[0].target, grid, "selectionchange event had the originating grid as the target");
+    handlerStub.restore();
+    doc.defaultView.removeEventListener("selectionchange", handler, false);
+  }
+});
+
+function gridSlotsSetup() {
+    let grid = this.grid = doc.createElement("richgrid");
+    grid.setAttribute("minSlots", 6);
+    doc.documentElement.appendChild(grid);
+    is(grid.ownerDocument, doc, "created grid in the expected document");
+}
+function gridSlotsTearDown() {
+    this.grid && this.grid.parentNode.removeChild(this.grid);
+}
+
+gTests.push({
+  desc: "richgrid slots init",
+  setUp: gridSlotsSetup,
+  run: function() {
+    let grid = this.grid;
+    // grid is initially populated with empty slots matching the minSlots attribute
+    is(grid.children.length, 6, "minSlots slots are created");
+    is(grid.itemCount, 0, "slots do not count towards itemCount");
+    ok(Array.every(grid.children, (node) => node.nodeName == 'richgriditem'), "slots have nodeName richgriditem");
+    ok(Array.every(grid.children, isNotBoundByRichGrid_Item), "slots aren't bound by the richgrid-item binding");
+  },
+  tearDown: gridSlotsTearDown
+});
+
+gTests.push({
+  desc: "richgrid using slots for items",
+  setUp: gridSlotsSetup, // creates grid with minSlots = num. slots = 6
+  run: function() {
+    let grid = this.grid;
+    let numSlots = grid.getAttribute("minSlots");
+    is(grid.children.length, numSlots);
+    // adding items occupies those slots
+    for (let idx of [0,1,2,3,4,5,6]) {
+      let slot = grid.children[idx];
+      let item = grid.appendItem("item "+idx, "about:mozilla");
+      if (idx < numSlots) {
+        is(grid.children.length, numSlots);
+        is(slot, item, "The same node is reused when an item is assigned to a slot");
+      } else {
+        is(typeof slot, 'undefined');
+        ok(item);
+        is(grid.children.length, grid.itemCount);
+      }
+    }
+  },
+  tearDown: gridSlotsTearDown
+});
+
+gTests.push({
+  desc: "richgrid assign and release slots",
+  setUp: function(){
+    info("assign and release slots setUp");
+    this.grid = doc.getElementById("slots_grid");
+    this.grid.scrollIntoView();
+    let rect = this.grid.getBoundingClientRect();
+    info("slots grid at top: " + rect.top + ", window.pageYOffset: " + doc.defaultView.pageYOffset);
+  },
+  run: function() {
+    let grid = this.grid;
+    // start with 5 of 6 slots occupied
+    for (let idx of [0,1,2,3,4]) {
+      let item = grid.appendItem("item "+idx, "about:mozilla");
+      item.setAttribute("id", "test_item_"+idx);
+    }
+    is(grid.itemCount, 5);
+    is(grid.children.length, 6); // see setup, where we init with 6 slots
+    let firstItem = grid.items[0];
+
+    ok(firstItem.ownerDocument, "item has ownerDocument");
+    is(doc, firstItem.ownerDocument, "item's ownerDocument is the document we expect");
+
+    is(firstItem, grid.children[0], "Item and assigned slot are one and the same");
+    is(firstItem.control, grid, "Item is bound and its .control points back at the grid");
+
+    // before releasing, the grid should be nofified of clicks on that slot
+    let testWindow = grid.ownerDocument.defaultView;
+
+    let rect = firstItem.getBoundingClientRect();
+    {
+      let handleStub = stubMethod(grid, 'handleItemClick');
+      // send click to item and wait for next tick;
+      sendElementTap(testWindow, firstItem);
+      yield waitForMs(0);
+
+      is(handleStub.callCount, 1, "handleItemClick was called when we clicked an item");
+      handleStub.restore();
+    }
+    // _releaseSlot is semi-private, we don't expect consumers of the binding to call it
+    // but want to be sure it does what we expect
+    grid._releaseSlot(firstItem);
+
+    is(grid.itemCount, 4, "Releasing a slot gives us one less item");
+    is(firstItem, grid.children[0],"Released slot is still the same node we started with");
+
+    // after releasing, the grid should NOT be nofified of clicks
+    {
+      let handleStub = stubMethod(grid, 'handleItemClick');
+      // send click to item and wait for next tick;
+      sendElementTap(testWindow, firstItem);
+      yield waitForMs(0);
+
+      is(handleStub.callCount, 0, "handleItemClick was NOT called when we clicked a released slot");
+      handleStub.restore();
+    }
+
+    ok(!firstItem.mozMatchesSelector("richgriditem[value]"), "Released slot doesn't match binding selector");
+    ok(isNotBoundByRichGrid_Item(firstItem), "Released slot is no longer bound");
+
+    waitForCondition(() => isNotBoundByRichGrid_Item(firstItem));
+    ok(true, "Slot eventually gets unbound");
+    is(firstItem, grid.children[0], "Released slot is still at expected index in children collection");
+
+    let firstSlot = grid.children[0];
+    firstItem = grid.insertItemAt(0, "New item 0", "about:blank");
+    ok(firstItem == grid.items[0], "insertItemAt 0 creates item at expected index");
+    ok(firstItem == firstSlot, "insertItemAt occupies the released slot with the new item");
+    is(grid.itemCount, 5);
+    is(grid.children.length, 6);
+    is(firstItem.control, grid,"Item is bound and its .control points back at the grid");
+
+    let nextSlotIndex = grid.itemCount;
+    let lastItem = grid.insertItemAt(9, "New item 9", "about:blank");
+    // Check we don't create sparse collection of items
+    is(lastItem, grid.children[nextSlotIndex], "Item is appended at the next index when an out of bounds index is provided");
+    is(grid.children.length, 6);
+    is(grid.itemCount, 6);
+
+    grid.appendItem("one more", "about:blank");
+    is(grid.children.length, 7);
+    is(grid.itemCount, 7);
+
+    // clearAll results in slots being emptied
+    grid.clearAll();
+    is(grid.children.length, 6, "Extra slots are trimmed when we clearAll");
+    ok(!Array.some(grid.children, (node) => node.hasAttribute("value")), "All slots have no value attribute after clearAll")
+  },
+  tearDown: gridSlotsTearDown
+});
+
+gTests.push({
+  desc: "richgrid slot management",
+  setUp: gridSlotsSetup,
+  run: function() {
+    let grid = this.grid;
+    // populate grid with some items
+    let numSlots = grid.getAttribute("minSlots");
+    for (let idx of [0,1,2,3,4,5]) {
+      let item = grid.appendItem("item "+idx, "about:mozilla");
+    }
+
+    is(grid.itemCount, 6, "Grid setup with 6 items");
+    is(grid.children.length, 6, "Full grid has the expected number of slots");
+
+    // removing an item creates a replacement slot *on the end of the stack*
+    let item = grid.removeItemAt(0);
+    is(item.getAttribute("label"), "item 0", "removeItemAt gives back the populated node");
+    is(grid.children.length, 6);
+    is(grid.itemCount, 5);
+    is(grid.items[0].getAttribute("label"), "item 1", "removeItemAt removes the node so the nextSibling takes its place");
+    ok(grid.children[5] && !grid.children[5].hasAttribute("value"), "empty slot is added at the end of the existing children");
+
+    let item1 = grid.removeItem(grid.items[0]);
+    is(grid.children.length, 6);
+    is(grid.itemCount, 4);
+    is(grid.items[0].getAttribute("label"), "item 2", "removeItem removes the node so the nextSibling takes its place");
+  },
+  tearDown: gridSlotsTearDown
+});

@@ -10,14 +10,18 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 const PC_CONTRACT = "@mozilla.org/dom/peerconnection;1";
+const PC_OBS_CONTRACT = "@mozilla.org/dom/peerconnectionobserver;1";
 const PC_ICE_CONTRACT = "@mozilla.org/dom/rtcicecandidate;1";
 const PC_SESSION_CONTRACT = "@mozilla.org/dom/rtcsessiondescription;1";
 const PC_MANAGER_CONTRACT = "@mozilla.org/dom/peerconnectionmanager;1";
+const PC_STATS_CONTRACT = "@mozilla.org/dom/rtcstatsreport;1";
 
-const PC_CID = Components.ID("{9878b414-afaa-4176-a887-1e02b3b047c2}");
+const PC_CID = Components.ID("{fc684a5c-c729-42c7-aa82-3c10dc4398f3}");
+const PC_OBS_CID = Components.ID("{1d44a18e-4545-4ff3-863d-6dbd6234a583}");
 const PC_ICE_CID = Components.ID("{02b9970c-433d-4cc2-923d-f7028ac66073}");
 const PC_SESSION_CID = Components.ID("{1775081b-b62d-4954-8ffe-a067bbf508a7}");
 const PC_MANAGER_CID = Components.ID("{7293e901-2be3-4c02-b4bd-cbef6fc24f78}");
+const PC_STATS_CID = Components.ID("{7fe6e18b-0da3-4056-bf3b-440ef3809e06}");
 
 // Global list of PeerConnection objects, so they can be cleaned up when
 // a page is torn down. (Maps inner window ID to an array of PC objects).
@@ -150,6 +154,46 @@ RTCSessionDescription.prototype = {
   }
 };
 
+function RTCStatsReport(win, report) {
+  this._win = win;
+  this.report = report;
+}
+RTCStatsReport.prototype = {
+  classDescription: "RTCStatsReport",
+  classID: PC_STATS_CID,
+  contractID: PC_STATS_CONTRACT,
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsISupports,
+                                         Ci.nsIDOMGlobalPropertyInitializer]),
+
+  forEach: function(cb, thisArg) {
+    for (var key in this.report) {
+      if (this.report.hasOwnProperty(key)) {
+        cb.call(thisArg || this, this.get(key), key, this.report);
+      }
+    }
+  },
+
+  get: function(key) {
+    function publify(win, obj) {
+      let props = {};
+      for (let k in obj) {
+        props[k] = {enumerable:true, configurable:true, writable:true, value:obj[k]};
+      }
+      let pubobj = Cu.createObjectIn(win);
+      Object.defineProperties(pubobj, props);
+      Cu.makeObjectPropsNormal(pubobj);
+      return pubobj;
+    }
+
+    // Return a content object rather than a wrapped chrome one.
+    return publify(this._win, this.report[key]);
+  },
+
+  has: function(key) {
+    return this.report[key] !== undefined;
+  }
+};
+
 function RTCPeerConnection() {
   this._queue = [];
 
@@ -161,6 +205,8 @@ function RTCPeerConnection() {
   this._onCreateOfferFailure = null;
   this._onCreateAnswerSuccess = null;
   this._onCreateAnswerFailure = null;
+  this._onGetStatsSuccess = null;
+  this._onGetStatsFailure = null;
 
   this._pendingType = null;
   this._localType = null;
@@ -179,18 +225,13 @@ function RTCPeerConnection() {
 
   // States
   this._iceGatheringState = this._iceConnectionState = "new";
-
-  // Deprecated callbacks
-  this._ongatheringchange = null;
-  this._onicechange = null;
 }
 RTCPeerConnection.prototype = {
   classDescription: "mozRTCPeerConnection",
   classID: PC_CID,
   contractID: PC_CONTRACT,
   QueryInterface: XPCOMUtils.generateQI([Ci.nsISupports,
-                                         Ci.nsIDOMGlobalPropertyInitializer,
-                                         Ci.nsISupportsWeakReference]),
+                                         Ci.nsIDOMGlobalPropertyInitializer]),
   init: function(win) { this._win = win; },
 
   __init: function(rtcConfig) {
@@ -217,9 +258,8 @@ RTCPeerConnection.prototype = {
     this.makeGetterSetterEH("onclosedconnection");
     this.makeGetterSetterEH("oniceconnectionstatechange");
 
-    this._pc = Cc["@mozilla.org/peerconnection;1"].
-             createInstance(Ci.IPeerConnection);
-    this._observer = new PeerConnectionObserver(this);
+    this._pc = new this._win.PeerConnectionImpl();
+    this._observer = new this._win.PeerConnectionObserver(this);
     this._winID = this._win.QueryInterface(Ci.nsIInterfaceRequestor)
                            .getInterface(Ci.nsIDOMWindowUtils).currentInnerWindowID;
 
@@ -227,11 +267,16 @@ RTCPeerConnection.prototype = {
     _globalPCList.addPC(this);
 
     this._queueOrRun({
-      func: this._getPC().initialize,
-      args: [this._observer, this._win, rtcConfig, Services.tm.currentThread],
+      func: this._initialize,
+      args: [rtcConfig],
       // If not trickling, suppress start.
       wait: !this._trickleIce
     });
+  },
+
+  _initialize: function(rtcConfig) {
+    this._getPC().initialize(this._observer, this._win, rtcConfig,
+                             Services.tm.currentThread);
   },
 
   _getPC: function() {
@@ -282,7 +327,7 @@ RTCPeerConnection.prototype = {
   /**
    * An RTCConfiguration looks like this:
    *
-   * { "iceServers": [ { url:"stun:23.21.150.121" },
+   * { "iceServers": [ { url:"stun:stun.example.org" },
    *                   { url:"turn:turn.example.org",
    *                     username:"jib", credential:"mypass"} ] }
    *
@@ -301,6 +346,9 @@ RTCPeerConnection.prototype = {
       }
     }
     function mustValidateServer(server) {
+      if (!server.url) {
+        throw new errorCtor("", errorMsg + " - missing url");
+      }
       let url = nicerNewURI(server.url, errorMsg);
       if (url.scheme in { turn:1, turns:1 }) {
         if (!server.username) {
@@ -324,75 +372,44 @@ RTCPeerConnection.prototype = {
   },
 
   /**
-   * Constraints look like this:
+   * MediaConstraints look like this:
    *
    * {
    *   mandatory: {"OfferToReceiveAudio": true, "OfferToReceiveVideo": true },
    *   optional: [{"VoiceActivityDetection": true}, {"FooBar": 10}]
    * }
    *
-   * We check for basic structure of constraints and the validity of
-   * mandatory constraints against those we support (fail if we don't).
-   * Unknown optional constraints may be of any type.
+   * WebIDL normalizes the top structure for us, but the mandatory constraints
+   * member comes in as a raw object so we can detect unknown constraints.
+   * We compare its members against ones we support, and fail if not found.
    */
   _mustValidateConstraints: function(constraints, errorMsg) {
-    function isObject(obj) {
-      return obj && (typeof obj === "object");
-    }
-    function isArraylike(obj) {
-      return isObject(obj) && ("length" in obj);
-    }
-    const SUPPORTED_CONSTRAINTS = {
-      OfferToReceiveAudio:1,
-      OfferToReceiveVideo:1,
-      MozDontOfferDataChannel:1
-    };
-    const OTHER_KNOWN_CONSTRAINTS = {
-      VoiceActivityDetection:1,
-      IceTransports:1,
-      RequestIdentity:1
-    };
-    // Parse-aid: Testing for pilot error of missing outer block avoids
-    // otherwise silent no-op since both mandatory and optional are optional
-    if (!isObject(constraints) || Array.isArray(constraints)) {
-      throw new this._win.DOMError("", errorMsg);
-    }
     if (constraints.mandatory) {
-      // Testing for pilot error of using [] on mandatory here throws nicer msg
-      // (arrays would throw in loop below regardless but with more cryptic msg)
-      if (!isObject(constraints.mandatory) || Array.isArray(constraints.mandatory)) {
-        throw new this._win.DOMError("",
-            errorMsg + " - malformed mandatory constraints");
+      let supported;
+      try {
+        // Passing the raw constraints.mandatory here validates its structure
+        supported = this._observer.getSupportedConstraints(constraints.mandatory);
+      } catch (e) {
+        throw new this._win.DOMError("", errorMsg + " - " + e.message);
       }
-      for (let constraint in constraints.mandatory) {
-        if (!(constraint in SUPPORTED_CONSTRAINTS) &&
-            constraints.mandatory.hasOwnProperty(constraint)) {
-          throw new this._win.DOMError("", errorMsg + " - " +
-              ((constraint in OTHER_KNOWN_CONSTRAINTS)? "unsupported" : "unknown") +
-              " mandatory constraint: " + constraint);
+
+      for (let constraint of Object.keys(constraints.mandatory)) {
+        if (!(constraint in supported)) {
+          throw new this._win.DOMError("",
+              errorMsg + " - unknown mandatory constraint: " + constraint);
         }
       }
     }
     if (constraints.optional) {
-      if (!isArraylike(constraints.optional)) {
-        throw new this._win.DOMError("",
-            errorMsg + " - malformed optional constraint array");
-      }
       let len = constraints.optional.length;
-      for (let i = 0; i < len; i += 1) {
-        if (!isObject(constraints.optional[i])) {
-          throw new this._win.DOMError("", errorMsg +
-              " - malformed optional constraint: " + constraints.optional[i]);
-        }
+      for (let i = 0; i < len; i++) {
         let constraints_per_entry = 0;
-        for (let constraint in constraints.optional[i]) {
-          if (constraints.optional[i].hasOwnProperty(constraint)) {
-            if (constraints_per_entry) {
-              throw new this._win.DOMError("", errorMsg +
-                  " - optional constraint must be single key/value pair");
-            }
-            constraints_per_entry += 1;
+        for (let constraint in Object.keys(constraints.optional[i])) {
+          if (constraints_per_entry) {
+            throw new this._win.DOMError("", errorMsg +
+                " - optional constraint must be single key/value pair");
           }
+          constraints_per_entry += 1;
         }
       }
     }
@@ -466,44 +483,22 @@ RTCPeerConnection.prototype = {
                           });
   },
 
-  get onicechange()       { return this._onicechange; },
-  get ongatheringchange() { return this._ongatheringchange; },
-
-  set onicechange(cb) {
-    this.deprecated("onicechange");
-    this._onicechange = cb;
-  },
-  set ongatheringchange(cb) {
-    this.deprecated("ongatheringchange");
-    this._ongatheringchange = cb;
-  },
-
-  deprecated: function(name) {
-    this.reportWarning(name + " is deprecated!", null, 0);
-  },
-
   createOffer: function(onSuccess, onError, constraints) {
     if (!constraints) {
       constraints = {};
-    }
-    if (!onError) {
-      this.deprecated("calling createOffer without failureCallback");
     }
     this._mustValidateConstraints(constraints, "createOffer passed invalid constraints");
     this._onCreateOfferSuccess = onSuccess;
     this._onCreateOfferFailure = onError;
 
-    this._queueOrRun({
-      func: this._getPC().createOffer,
-      args: [constraints],
-      wait: true
-    });
+    this._queueOrRun({ func: this._createOffer, args: [constraints], wait: true });
+  },
+
+  _createOffer: function(constraints) {
+    this._getPC().createOffer(constraints);
   },
 
   _createAnswer: function(onSuccess, onError, constraints, provisional) {
-    if (!onError) {
-      this.deprecated("calling createAnswer without failureCallback");
-    }
     this._onCreateAnswerSuccess = onSuccess;
     this._onCreateAnswerFailure = onError;
 
@@ -567,11 +562,15 @@ RTCPeerConnection.prototype = {
     }
 
     this._queueOrRun({
-      func: this._getPC().setLocalDescription,
+      func: this._setLocalDescription,
       args: [type, desc.sdp],
       wait: true,
       type: desc.type
     });
+  },
+
+  _setLocalDescription: function(type, sdp) {
+    this._getPC().setLocalDescription(type, sdp);
   },
 
   setRemoteDescription: function(desc, onSuccess, onError) {
@@ -597,11 +596,15 @@ RTCPeerConnection.prototype = {
     }
 
     this._queueOrRun({
-      func: this._getPC().setRemoteDescription,
+      func: this._setRemoteDescription,
       args: [type, desc.sdp],
       wait: true,
       type: desc.type
     });
+  },
+
+  _setRemoteDescription: function(type, sdp) {
+    this._getPC().setRemoteDescription(type, sdp);
   },
 
   updateIce: function(config, constraints) {
@@ -616,12 +619,13 @@ RTCPeerConnection.prototype = {
     this._onAddIceCandidateSuccess = onSuccess || null;
     this._onAddIceCandidateError = onError || null;
 
-    this._queueOrRun({
-      func: this._getPC().addIceCandidate,
-      args: [cand.candidate, cand.sdpMid || "",
-             (cand.sdpMLineIndex === null)? 0 : cand.sdpMLineIndex + 1],
-      wait: true
-    });
+    this._queueOrRun({ func: this._addIceCandidate, args: [cand], wait: true });
+  },
+
+  _addIceCandidate: function(cand) {
+    this._getPC().addIceCandidate(cand.candidate, cand.sdpMid || "",
+                                  (cand.sdpMLineIndex === null)? 0 :
+                                      cand.sdpMLineIndex + 1);
   },
 
   addStream: function(stream, constraints) {
@@ -629,11 +633,11 @@ RTCPeerConnection.prototype = {
       throw new this._win.DOMError("", "Invalid stream passed to addStream!");
     }
     // TODO: Implement constraints.
-    this._queueOrRun({
-      func: this._getPC().addStream,
-      args: [stream],
-      wait: false
-    });
+    this._queueOrRun({ func: this._addStream, args: [stream], wait: false });
+  },
+
+  _addStream: function(stream) {
+    this._getPC().addStream(stream);
   },
 
   removeStream: function(stream) {
@@ -646,33 +650,23 @@ RTCPeerConnection.prototype = {
   },
 
   close: function() {
-    this._queueOrRun({
-      func: this._getPC().close,
-      args: [false],
-      wait: false
-    });
+    this._queueOrRun({ func: this._close, args: [false], wait: false });
     this._closed = true;
     this.changeIceConnectionState("closed");
   },
 
+  _close: function() {
+    this._getPC().close();
+  },
+
   getLocalStreams: function() {
     this._checkClosed();
-    return this._getPC().localStreams;
+    return this._getPC().getLocalStreams();
   },
 
   getRemoteStreams: function() {
     this._checkClosed();
-    return this._getPC().remoteStreams;
-  },
-
-  // Backwards-compatible attributes
-  get localStreams() {
-    this.deprecated("localStreams");
-    return this.getLocalStreams();
-  },
-  get remoteStreams() {
-    this.deprecated("remoteStreams");
-    return this.getRemoteStreams();
+    return this._getPC().getRemoteStreams();
   },
 
   get localDescription() {
@@ -698,24 +692,21 @@ RTCPeerConnection.prototype = {
   get iceGatheringState()  { return this._iceGatheringState; },
   get iceConnectionState() { return this._iceConnectionState; },
 
-  // Corresponds to constants in IPeerConnection.idl
-  _signalingStateMap: [
-    'invalid',
-    'stable',
-    'have-local-offer',
-    'have-remote-offer',
-    'have-local-pranswer',
-    'have-remote-pranswer',
-    'closed'
-  ],
-
   get signalingState() {
     // checking for our local pc closed indication
     // before invoking the pc methods.
     if(this._closed) {
       return "closed";
     }
-    return this._signalingStateMap[this._getPC().signalingState];
+    return {
+      "SignalingInvalid":            "",
+      "SignalingStable":             "stable",
+      "SignalingHaveLocalOffer":     "have-local-offer",
+      "SignalingHaveRemoteOffer":    "have-remote-offer",
+      "SignalingHaveLocalPranswer":  "have-local-pranswer",
+      "SignalingHaveRemotePranswer": "have-remote-pranswer",
+      "SignalingClosed":             "closed"
+    }[this._getPC().signalingState];
   },
 
   changeIceGatheringState: function(state) {
@@ -727,33 +718,19 @@ RTCPeerConnection.prototype = {
     this.dispatchEvent(new this._win.Event("iceconnectionstatechange"));
   },
 
-  get readyState() {
-    this.deprecated("readyState");
-    // checking for our local pc closed indication
-    // before invoking the pc methods.
-    if(this._closed) {
-      return "closed";
-    }
+  getStats: function(selector, onSuccess, onError) {
+    this._onGetStatsSuccess = onSuccess;
+    this._onGetStatsFailure = onError;
 
-    var state="undefined";
-    switch (this._getPC().readyState) {
-      case Ci.IPeerConnection.kNew:
-        state = "new";
-        break;
-      case Ci.IPeerConnection.kNegotiating:
-        state = "negotiating";
-        break;
-      case Ci.IPeerConnection.kActive:
-        state = "active";
-        break;
-      case Ci.IPeerConnection.kClosing:
-        state = "closing";
-        break;
-      case Ci.IPeerConnection.kClosed:
-        state = "closed";
-        break;
-    }
-    return state;
+    this._queueOrRun({
+      func: this._getStats,
+      args: [selector],
+      wait: true
+    });
+  },
+
+  _getStats: function(selector) {
+    this._getPC().getStats(selector);
   },
 
   createDataChannel: function(label, dict) {
@@ -814,10 +791,14 @@ RTCPeerConnection.prototype = {
       numstreams = 16;
     }
     this._queueOrRun({
-      func: this._getPC().connectDataConnection,
+      func: this._connectDataConnection,
       args: [localport, remoteport, numstreams],
       wait: false
     });
+  },
+
+  _connectDataConnection: function(localport, remoteport, numstreams) {
+    this._getPC().connectDataConnection(localport, remoteport, numstreams);
   }
 };
 
@@ -843,12 +824,21 @@ RTCError.prototype = {
 };
 
 // This is a separate object because we don't want to expose it to DOM.
-function PeerConnectionObserver(dompc) {
-  this._dompc = dompc;
+function PeerConnectionObserver() {
+  this._dompc = null;
+  this._guard = new WeakReferent(this);
 }
 PeerConnectionObserver.prototype = {
-  QueryInterface: XPCOMUtils.generateQI([Ci.IPeerConnectionObserver,
-                                         Ci.nsISupportsWeakReference]),
+  classDescription: "PeerConnectionObserver",
+  classID: PC_OBS_CID,
+  contractID: PC_OBS_CONTRACT,
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsISupports,
+                                         Ci.nsIDOMGlobalPropertyInitializer]),
+  init: function(win) { this._win = win; },
+
+  __init: function(dompc) {
+    this._dompc = dompc;
+  },
 
   dispatchEvent: function(event) {
     this._dompc.dispatchEvent(event);
@@ -896,7 +886,7 @@ PeerConnectionObserver.prototype = {
     this._dompc._pendingType = null;
     this.callCB(this._dompc._onSetLocalDescriptionSuccess);
 
-    if (this._iceGatheringState == "complete") {
+    if (this._dompc._iceGatheringState == "complete") {
         // If we are not trickling or we completed gathering prior
         // to setLocal, then trigger a call of onicecandidate here.
         this.foundIceCandidate(null);
@@ -943,73 +933,124 @@ PeerConnectionObserver.prototype = {
         {
             candidate: candidate,
             sdpMid: mid,
-            sdpMLineIndex: level
+            sdpMLineIndex: level - 1
         }
     ));
   },
 
+
+  // This method is primarily responsible for updating two attributes:
+  // iceGatheringState and iceConnectionState. These states are defined
+  // in the WebRTC specification as follows:
+  //
+  // iceGatheringState:
+  // ------------------
+  //   new        The object was just created, and no networking has occurred
+  //              yet.
+  //
+  //   gathering  The ICE engine is in the process of gathering candidates for
+  //              this RTCPeerConnection.
+  //
+  //   complete   The ICE engine has completed gathering. Events such as adding
+  //              a new interface or a new TURN server will cause the state to
+  //              go back to gathering.
+  //
+  // iceConnectionState:
+  // -------------------
+  //   new           The ICE Agent is gathering addresses and/or waiting for
+  //                 remote candidates to be supplied.
+  //
+  //   checking      The ICE Agent has received remote candidates on at least
+  //                 one component, and is checking candidate pairs but has not
+  //                 yet found a connection. In addition to checking, it may
+  //                 also still be gathering.
+  //
+  //   connected     The ICE Agent has found a usable connection for all
+  //                 components but is still checking other candidate pairs to
+  //                 see if there is a better connection. It may also still be
+  //                 gathering.
+  //
+  //   completed     The ICE Agent has finished gathering and checking and found
+  //                 a connection for all components. Open issue: it is not
+  //                 clear how the non controlling ICE side knows it is in the
+  //                 state.
+  //
+  //   failed        The ICE Agent is finished checking all candidate pairs and
+  //                 failed to find a connection for at least one component.
+  //                 Connections may have been found for some components.
+  //
+  //   disconnected  Liveness checks have failed for one or more components.
+  //                 This is more aggressive than failed, and may trigger
+  //                 intermittently (and resolve itself without action) on a
+  //                 flaky network.
+  //
+  //   closed        The ICE Agent has shut down and is no longer responding to
+  //                 STUN requests.
+
   handleIceStateChanges: function(iceState) {
     var histogram = Services.telemetry.getHistogramById("WEBRTC_ICE_SUCCESS_RATE");
-    switch (iceState) {
-      case Ci.IPeerConnection.kIceWaiting:
-        this._dompc.changeIceConnectionState("new");
-        this.callCB(this._dompc.ongatheringchange, "complete");
-        this.callCB(this._onicechange, "starting");
 
-        if (!this._dompc._trickleIce) {
-          // If we are not trickling, then the queue is in a pending state
-          // waiting for ICE gathering and executeNext frees it
-          this._dompc._executeNext();
-        }
-        else if (this.localDescription) {
-          // If we are trickling but we have already done setLocal,
-          // then we need to send a final foundIceCandidate(null) to indicate
-          // that we are done gathering.
-          this.foundIceCandidate(null);
-        }
-        break;
-      case Ci.IPeerConnection.kIceChecking:
-        this._dompc.changeIceConnectionState("checking");
-        this.callCB(this._onicechange, "checking");
-        break;
-      case Ci.IPeerConnection.kIceGathering:
-        this._dompc.changeIceGatheringState("gathering");
-        this.callCB(this._ongatheringchange, "gathering");
-        break;
-      case Ci.IPeerConnection.kIceConnected:
-        // ICE gathering complete.
-        histogram.add(true);
-        this._dompc.changeIceConnectionState("connected");
-        this.callCB(this._onicechange, "connected");
-        break;
-      case Ci.IPeerConnection.kIceFailed:
-        histogram.add(false);
-        this._dompc.changeIceConnectionState("failed");
-        this.callCB(this._onicechange, "failed");
-        break;
-      default:
-        // Unknown ICE state!
-        this._dompc.reportWarning("Unhandled ice state: " + iceState, null, 0);
-        break;
+    const STATE_MAP = {
+      IceGathering:
+        { gathering: "gathering" },
+      IceWaiting:
+        { connection: "new",  gathering: "complete" },
+      IceChecking:
+        { connection: "checking" },
+      IceConnected:
+        { connection: "connected", success: true },
+      IceFailed:
+        { connection: "failed", success: false }
+    };
+    // These are all the allowed inputs.
+
+    let transitions = STATE_MAP[iceState];
+
+    if ("connection" in transitions) {
+        this._dompc.changeIceConnectionState(transitions.connection);
+    }
+    if ("gathering" in transitions) {
+      this._dompc.changeIceGatheringState(transitions.gathering);
+    }
+    if ("success" in transitions) {
+      histogram.add(transitions.success);
+    }
+
+    if (iceState == "IceWaiting") {
+      if (!this._dompc._trickleIce) {
+        // If we are not trickling, then the queue is in a pending state
+        // waiting for ICE gathering and executeNext frees it
+        this._dompc._executeNext();
+      }
+      else if (this.localDescription) {
+        // If we are trickling but we have already done setLocal,
+        // then we need to send a final foundIceCandidate(null) to indicate
+        // that we are done gathering.
+        this.foundIceCandidate(null);
+      }
     }
   },
 
   onStateChange: function(state) {
     switch (state) {
-      case Ci.IPeerConnectionObserver.kSignalingState:
+      case "SignalingState":
         this.callCB(this._dompc.onsignalingstatechange,
                     this._dompc.signalingState);
         break;
 
-      case Ci.IPeerConnectionObserver.kIceState:
+      case "IceState":
         this.handleIceStateChanges(this._dompc._pc.iceState);
         break;
 
-      case Ci.IPeerConnectionObserver.kSdpState:
+      case "SdpState":
         // No-op
         break;
 
-      case Ci.IPeerConnectionObserver.kSipccState:
+      case "ReadyState":
+        // No-op
+        break;
+
+      case "SipccState":
         // No-op
         break;
 
@@ -1017,6 +1058,38 @@ PeerConnectionObserver.prototype = {
         this._dompc.reportWarning("Unhandled state type: " + state, null, 0);
         break;
     }
+  },
+
+  onGetStatsSuccess: function(dict) {
+    function appendStats(stats, report) {
+      if (stats) {
+        stats.forEach(function(stat) {
+          report[stat.id] = stat;
+        });
+      }
+    }
+
+    let report = {};
+    appendStats(dict.rtpStreamStats, report);
+    appendStats(dict.inboundRTPStreamStats, report);
+    appendStats(dict.outboundRTPStreamStats, report);
+    appendStats(dict.mediaStreamTrackStats, report);
+    appendStats(dict.mediaStreamStats, report);
+    appendStats(dict.transportStats, report);
+    appendStats(dict.iceComponentStats, report);
+    appendStats(dict.iceCandidateStats, report);
+    appendStats(dict.codecStats, report);
+
+    this.callCB(this._dompc._onGetStatsSuccess,
+                this._dompc._win.RTCStatsReport._create(this._dompc._win,
+                                                        new RTCStatsReport(this._dompc._win,
+                                                                           report)));
+    this._dompc._executeNext();
+  },
+
+  onGetStatsError: function(code, message) {
+    this.callCB(this._dompc._onGetStatsFailure, new RTCError(code, message));
+    this._dompc._executeNext();
   },
 
   onAddStream: function(stream) {
@@ -1029,13 +1102,9 @@ PeerConnectionObserver.prototype = {
                                                              { stream: stream }));
   },
 
-  foundIceCandidate: function(cand, mid, line) {
+  foundIceCandidate: function(cand) {
     this.dispatchEvent(new this._dompc._win.RTCPeerConnectionIceEvent("icecandidate",
-                                                                      {
-                                                                          candidate: cand,
-                                                                          sdpMid: mid,
-                                                                          sdpMLineIndex: line
-                                                                      }));
+                                                                      { candidate: cand } ));
   },
 
   notifyDataChannel: function(channel) {
@@ -1049,9 +1118,28 @@ PeerConnectionObserver.prototype = {
 
   notifyClosedConnection: function() {
     this.dispatchEvent(new this._dompc._win.Event("closedconnection"));
+  },
+
+  getSupportedConstraints: function(dict) {
+    return dict;
+  },
+
+  get weakReferent() {
+    return this._guard;
   }
 };
 
+// A PeerConnectionObserver member that c++ can do weak references on
+
+function WeakReferent(parent) {
+  this._parent = parent; // prevents parent from going away without us
+}
+WeakReferent.prototype = {
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsISupports,
+                                         Ci.nsISupportsWeakReference]),
+};
+
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory(
-  [GlobalPCList, RTCIceCandidate, RTCSessionDescription, RTCPeerConnection]
+  [GlobalPCList, RTCIceCandidate, RTCSessionDescription, RTCPeerConnection,
+   RTCStatsReport, PeerConnectionObserver]
 );

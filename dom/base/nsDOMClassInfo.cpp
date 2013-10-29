@@ -643,13 +643,13 @@ IdToString(JSContext *cx, jsid id)
 
 static inline nsresult
 WrapNative(JSContext *cx, JSObject *scope, nsISupports *native,
-           nsWrapperCache *cache, const nsIID* aIID, jsval *vp,
+           nsWrapperCache *cache, const nsIID* aIID, JS::MutableHandle<JS::Value> vp,
            nsIXPConnectJSObjectHolder** aHolder, bool aAllowWrapping)
 {
   if (!native) {
     NS_ASSERTION(!aHolder || !*aHolder, "*aHolder should be null!");
 
-    *vp = JSVAL_NULL;
+    vp.setNull();
 
     return NS_OK;
   }
@@ -661,13 +661,13 @@ WrapNative(JSContext *cx, JSObject *scope, nsISupports *native,
 
   return nsDOMClassInfo::XPConnect()->WrapNativeToJSVal(cx, scope, native,
                                                         cache, aIID,
-                                                        aAllowWrapping, vp,
+                                                        aAllowWrapping, vp.address(),
                                                         aHolder);
 }
 
 static inline nsresult
 WrapNative(JSContext *cx, JSObject *scope, nsISupports *native,
-           const nsIID* aIID, bool aAllowWrapping, jsval *vp,
+           const nsIID* aIID, bool aAllowWrapping, JS::MutableHandle<JS::Value> vp,
            // If non-null aHolder will keep the jsval alive
            // while there's a ref to it
            nsIXPConnectJSObjectHolder** aHolder = nullptr)
@@ -679,7 +679,7 @@ WrapNative(JSContext *cx, JSObject *scope, nsISupports *native,
 // Same as the WrapNative above, but use these if aIID is nsISupports' IID.
 static inline nsresult
 WrapNative(JSContext *cx, JSObject *scope, nsISupports *native,
-           bool aAllowWrapping, jsval *vp,
+           bool aAllowWrapping, JS::MutableHandle<JS::Value> vp,
            // If non-null aHolder will keep the jsval alive
            // while there's a ref to it
            nsIXPConnectJSObjectHolder** aHolder = nullptr)
@@ -690,7 +690,8 @@ WrapNative(JSContext *cx, JSObject *scope, nsISupports *native,
 
 static inline nsresult
 WrapNative(JSContext *cx, JSObject *scope, nsISupports *native,
-           nsWrapperCache *cache, bool aAllowWrapping, jsval *vp,
+           nsWrapperCache *cache, bool aAllowWrapping,
+           JS::MutableHandle<JS::Value> vp,
            // If non-null aHolder will keep the jsval alive
            // while there's a ref to it
            nsIXPConnectJSObjectHolder** aHolder = nullptr)
@@ -1418,10 +1419,10 @@ nsDOMClassInfo::GetArrayIndexFromId(JSContext *cx, JS::Handle<jsid> id, bool *aI
   if (JSID_IS_INT(id)) {
       i = JSID_TO_INT(id);
   } else {
-      jsval idval;
+      JS::RootedValue idval(cx);
       double array_index;
-      if (!::JS_IdToValue(cx, id, &idval) ||
-          !::JS_ValueToNumber(cx, idval, &array_index) ||
+      if (!::JS_IdToValue(cx, id, idval.address()) ||
+          !JS::ToNumber(cx, idval, &array_index) ||
           !::JS_DoubleIsInt32(array_index, &i)) {
         return -1;
       }
@@ -2221,26 +2222,25 @@ BaseStubConstructor(nsIWeakReference* aWeakOwner,
         // wrap parameters in the target compartment
         // we also pass in the calling window as the first argument
         unsigned argc = args.length() + 1;
-        nsAutoArrayPtr<JS::Value> argv(new JS::Value[argc]);
-        JS::AutoArrayRooter rooter(cx, 0, argv);
+        JS::AutoValueVector argv(cx);
+        argv.resize(argc);
 
         nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
         nsCOMPtr<nsIDOMWindow> currentWin(do_GetInterface(currentInner));
         rv = WrapNative(cx, obj, currentWin, &NS_GET_IID(nsIDOMWindow),
-                        true, &argv[0], getter_AddRefs(holder));
-        if (!JS_WrapValue(cx, &argv[0]))
+                        true, argv.handleAt(0), getter_AddRefs(holder));
+        if (!JS_WrapValue(cx, argv.handleAt(0)))
           return NS_ERROR_FAILURE;
-        rooter.changeLength(1);
 
         for (size_t i = 1; i < argc; ++i) {
           argv[i] = args[i - 1];
-          if (!JS_WrapValue(cx, &argv[i]))
+          if (!JS_WrapValue(cx, argv.handleAt(i)))
             return NS_ERROR_FAILURE;
-          rooter.changeLength(i + 1);
         }
 
         JS::Rooted<JS::Value> frval(cx);
-        bool ret = JS_CallFunctionValue(cx, thisObject, funval, argc, argv,
+        bool ret = JS_CallFunctionValue(cx, thisObject, funval,
+                                        argc, argv.begin(),
                                         frval.address());
 
         if (!ret) {
@@ -2250,7 +2250,7 @@ BaseStubConstructor(nsIWeakReference* aWeakOwner,
     }
   }
 
-  return WrapNative(cx, obj, native, true, args.rval().address());
+  return WrapNative(cx, obj, native, true, args.rval());
 }
 
 static nsresult
@@ -2371,7 +2371,7 @@ public:
   {
     JS::Rooted<JS::Value> thisAsVal(cx, aThisAsVal);
     // The 'attrs' argument used to be JSPROP_PERMANENT. See bug 628612.
-    bool ok = JS_WrapValue(cx, thisAsVal.address()) &&
+    bool ok = JS_WrapValue(cx, &thisAsVal) &&
       ::JS_DefineUCProperty(cx, target,
                             reinterpret_cast<const jschar *>(mClassName),
                             NS_strlen(mClassName), thisAsVal, JS_PropertyStub,
@@ -2785,7 +2785,7 @@ GetXPCProto(nsIXPConnect *aXPConnect, JSContext *cx, nsGlobalWindow *aWin,
   NS_ENSURE_SUCCESS(rv, rv);
 
   JS::Rooted<JSObject*> proto_obj(cx, (*aProto)->GetJSObject());
-  if (!JS_WrapObject(cx, proto_obj.address())) {
+  if (!JS_WrapObject(cx, &proto_obj)) {
     return NS_ERROR_FAILURE;
   }
 
@@ -2818,7 +2818,7 @@ ResolvePrototype(nsIXPConnect *aXPConnect, nsGlobalWindow *aWin, JSContext *cx,
   JS::Rooted<JS::Value> v(cx);
 
   rv = WrapNative(cx, obj, constructor, &NS_GET_IID(nsIDOMDOMConstructor),
-                  false, v.address(), getter_AddRefs(holder));
+                  false, &v, getter_AddRefs(holder));
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (install) {
@@ -2922,7 +2922,7 @@ ResolvePrototype(nsIXPConnect *aXPConnect, nsGlobalWindow *aWin, JSContext *cx,
       if (proto &&
           (!xpc_proto_proto ||
            JS_GetClass(xpc_proto_proto) == sObjectClass)) {
-        if (!JS_WrapObject(cx, proto.address()) ||
+        if (!JS_WrapObject(cx, &proto) ||
             !JS_SetPrototype(cx, dot_prototype, proto)) {
           return NS_ERROR_UNEXPECTED;
         }
@@ -2945,7 +2945,7 @@ ResolvePrototype(nsIXPConnect *aXPConnect, nsGlobalWindow *aWin, JSContext *cx,
   JSAutoCompartment ac(cx, class_obj);
 
   // Per ECMA, the prototype property is {DontEnum, DontDelete, ReadOnly}
-  if (!JS_WrapValue(cx, v.address()) ||
+  if (!JS_WrapValue(cx, &v) ||
       !JS_DefineProperty(cx, class_obj, "prototype", v,
                          JS_PropertyStub, JS_StrictPropertyStub,
                          JSPROP_PERMANENT | JSPROP_READONLY)) {
@@ -3071,7 +3071,7 @@ nsWindowSH::GlobalResolve(nsGlobalWindow *aWin, JSContext *cx,
       if (defineOnXray) {
         // This really should be handled by the Xray for the window.
         ac.destroy();
-        if (!JS_WrapObject(cx, interfaceObject.address()) ||
+        if (!JS_WrapObject(cx, &interfaceObject) ||
             !JS_DefinePropertyById(cx, obj, id,
                                    JS::ObjectValue(*interfaceObject), JS_PropertyStub,
                                    JS_StrictPropertyStub, 0)) {
@@ -3100,7 +3100,7 @@ nsWindowSH::GlobalResolve(nsGlobalWindow *aWin, JSContext *cx,
     nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
     JS::Rooted<JS::Value> v(cx);
     rv = WrapNative(cx, obj, constructor, &NS_GET_IID(nsIDOMDOMConstructor),
-                    false, v.address(), getter_AddRefs(holder));
+                    false, &v, getter_AddRefs(holder));
     NS_ENSURE_SUCCESS(rv, rv);
 
     rv = constructor->Install(cx, obj, v);
@@ -3202,7 +3202,7 @@ nsWindowSH::GlobalResolve(nsGlobalWindow *aWin, JSContext *cx,
     JS::Rooted<JS::Value> val(cx);
     nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
     rv = WrapNative(cx, obj, constructor, &NS_GET_IID(nsIDOMDOMConstructor),
-                    false, val.address(), getter_AddRefs(holder));
+                    false, &val, getter_AddRefs(holder));
     NS_ENSURE_SUCCESS(rv, rv);
 
     rv = constructor->Install(cx, obj, val);
@@ -3251,13 +3251,13 @@ nsWindowSH::GlobalResolve(nsGlobalWindow *aWin, JSContext *cx,
         scope = aWin->GetGlobalJSObject();
       }
 
-      rv = WrapNative(cx, scope, native, true, prop_val.address(),
+      rv = WrapNative(cx, scope, native, true, &prop_val,
                       getter_AddRefs(holder));
     }
 
     NS_ENSURE_SUCCESS(rv, rv);
 
-    if (!JS_WrapValue(cx, prop_val.address())) {
+    if (!JS_WrapValue(cx, &prop_val)) {
       return NS_ERROR_UNEXPECTED;
     }
 
@@ -3303,7 +3303,7 @@ ContentWindowGetter(JSContext *cx, unsigned argc, jsval *vp)
 
 template<class Interface>
 static nsresult
-LocationSetterGuts(JSContext *cx, JSObject *obj, jsval *vp)
+LocationSetterGuts(JSContext *cx, JSObject *obj, JS::MutableHandle<JS::Value> vp)
 {
   // This function duplicates some of the logic in XPC_WN_HelperSetProperty
   obj = js::CheckedUnwrap(obj, /* stopAtOuter = */ false);
@@ -3322,7 +3322,7 @@ LocationSetterGuts(JSContext *cx, JSObject *obj, jsval *vp)
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Grab the value we're being set to before we stomp on |vp|
-  JS::Rooted<JSString*> val(cx, ::JS_ValueToString(cx, *vp));
+  JS::Rooted<JSString*> val(cx, ::JS_ValueToString(cx, vp));
   NS_ENSURE_TRUE(val, NS_ERROR_UNEXPECTED);
 
   // Make sure |val| stays alive below
@@ -3352,7 +3352,7 @@ static bool
 LocationSetter(JSContext *cx, JS::Handle<JSObject*> obj, JS::Handle<jsid> id, bool strict,
                JS::MutableHandle<JS::Value> vp)
 {
-  nsresult rv = LocationSetterGuts<Interface>(cx, obj, vp.address());
+  nsresult rv = LocationSetterGuts<Interface>(cx, obj, vp);
   if (NS_FAILED(rv)) {
     xpc::Throw(cx, rv);
     return false;
@@ -3365,7 +3365,7 @@ static bool
 LocationSetterUnwrapper(JSContext *cx, JS::Handle<JSObject*> obj_, JS::Handle<jsid> id,
                         bool strict, JS::MutableHandle<JS::Value> vp)
 {
-  JS::RootedObject obj(cx, obj_);
+  JS::Rooted<JSObject*> obj(cx, obj_);
 
   JSObject *wrapped = XPCWrapper::UnsafeUnwrapSecurityWrapper(obj);
   if (wrapped) {
@@ -3410,7 +3410,7 @@ const InterfaceShimEntry kInterfaceShimMap[] =
   { "nsIDOMXPathResult", "XPathResult" } };
 
 static nsresult
-DefineComponentsShim(JSContext *cx, JS::HandleObject global, nsPIDOMWindow *win)
+DefineComponentsShim(JSContext *cx, JS::Handle<JSObject*> global, nsPIDOMWindow *win)
 {
   // Keep track of how often this happens.
   Telemetry::Accumulate(Telemetry::COMPONENTS_SHIM_ACCESSED_BY_CONTENT, true);
@@ -3468,7 +3468,7 @@ nsWindowSH::NewResolve(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
                        JSObject *obj_, jsid id_, uint32_t flags,
                        JSObject **objp, bool *_retval)
 {
-  JS::RootedObject obj(cx, obj_);
+  JS::Rooted<JSObject*> obj(cx, obj_);
   JS::RootedId id(cx, id_);
 
   if (!JSID_IS_STRING(id)) {
@@ -3565,10 +3565,10 @@ nsWindowSH::NewResolve(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
     nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
     JS::Rooted<JS::Value> v(cx);
     rv = WrapNative(cx, scope, location, &NS_GET_IID(nsIDOMLocation), true,
-                    v.address(), getter_AddRefs(holder));
+                    &v, getter_AddRefs(holder));
     NS_ENSURE_SUCCESS(rv, rv);
 
-    bool ok = JS_WrapValue(cx, v.address()) &&
+    bool ok = JS_WrapValue(cx, &v) &&
                 JS_DefinePropertyById(cx, obj, id, v, JS_PropertyStub,
                                       LocationSetterUnwrapper,
                                       JSPROP_PERMANENT | JSPROP_ENUMERATE);
@@ -3590,7 +3590,7 @@ nsWindowSH::NewResolve(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
     JS::Rooted<JS::Value> v(cx);
     nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
     rv = WrapNative(cx, obj, top, &NS_GET_IID(nsIDOMWindow), true,
-                    v.address(), getter_AddRefs(holder));
+                    &v, getter_AddRefs(holder));
     NS_ENSURE_SUCCESS(rv, rv);
 
     // Hold on to the top window object as a global property so we
@@ -3606,7 +3606,7 @@ nsWindowSH::NewResolve(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
   }
 
   // Handle resolving if id refers to a name resolved by DOM worker code.
-  JS::RootedObject tmp(cx, NULL);
+  JS::Rooted<JSObject*> tmp(cx, nullptr);
   if (!ResolveWorkerClasses(cx, obj, id, flags, &tmp)) {
     return NS_ERROR_FAILURE;
   }
@@ -3644,7 +3644,7 @@ nsWindowSH::NewResolve(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
     }
     funObj = ::JS_GetFunctionObject(fun);
 
-    if (!JS_WrapObject(cx, funObj.address()) ||
+    if (!JS_WrapObject(cx, &funObj) ||
         !JS_DefinePropertyById(cx, obj, id, JSVAL_VOID,
                                JS_DATA_TO_FUNC_PTR(JSPropertyOp, funObj.get()),
                                JS_StrictPropertyStub,
@@ -3679,7 +3679,7 @@ nsWindowSH::NewResolve(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
       JS::Rooted<JS::Value> v(cx);
       nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
       rv = WrapNative(cx, JS::CurrentGlobalOrNull(cx), document, document,
-                      &NS_GET_IID(nsIDOMDocument), v.address(), getter_AddRefs(holder),
+                      &NS_GET_IID(nsIDOMDocument), &v, getter_AddRefs(holder),
                       false);
       NS_ENSURE_SUCCESS(rv, rv);
 
@@ -3692,7 +3692,7 @@ nsWindowSH::NewResolve(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
         // Unless our object is a native wrapper, in which case we have to
         // define it ourselves.
 
-        *_retval = JS_WrapValue(cx, v.address()) &&
+        *_retval = JS_WrapValue(cx, &v) &&
                    JS_DefineProperty(cx, obj, "document", v,
                                      JS_PropertyStub, JS_StrictPropertyStub,
                                      JSPROP_READONLY | JSPROP_ENUMERATE);
@@ -3745,7 +3745,7 @@ nsWindowSH::OuterObject(nsIXPConnectWrappedNative *wrapper, JSContext * cx,
   // might not be. If we're running script in an inactive scope and evalute
   // |this|, the outer window is actually a cross-compartment wrapper. So we
   // need to wrap here.
-  if (!JS_WrapObject(cx, winObj.address())) {
+  if (!JS_WrapObject(cx, &winObj)) {
     *_retval = nullptr;
     return NS_ERROR_UNEXPECTED;
   }
@@ -3986,9 +3986,11 @@ nsArraySH::GetProperty(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
     NS_ENSURE_SUCCESS(rv, rv);
 
     if (array_item) {
+      JS::Rooted<JS::Value> rval(cx);
       rv = WrapNative(cx, JS::CurrentGlobalOrNull(cx), array_item, cache,
-                      true, vp);
+                      true, &rval);
       NS_ENSURE_SUCCESS(rv, rv);
+      *vp = rval;
 
       rv = NS_SUCCESS_I_DID_SOMETHING;
     }
@@ -4085,7 +4087,7 @@ nsHTMLDocumentSH::GetDocumentAllNodeList(JSContext *cx,
     nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
     nsresult tmp = WrapNative(cx, JS::CurrentGlobalOrNull(cx),
                               static_cast<nsINodeList*>(list), list, false,
-                              collection.address(), getter_AddRefs(holder));
+                              &collection, getter_AddRefs(holder));
     if (NS_FAILED(tmp)) {
       rv = tmp;
     }
@@ -4189,7 +4191,7 @@ nsHTMLDocumentSH::DocumentAllGetProperty(JSContext *cx, JS::Handle<JSObject*> ob
   }
 
   if (result) {
-    rv = WrapNative(cx, JS::CurrentGlobalOrNull(cx), result, cache, true, vp.address());
+    rv = WrapNative(cx, JS::CurrentGlobalOrNull(cx), result, cache, true, vp);
     if (NS_FAILED(rv)) {
       xpc::Throw(cx, rv);
 
@@ -4207,7 +4209,7 @@ nsHTMLDocumentSH::DocumentAllNewResolve(JSContext *cx, JS::Handle<JSObject*> obj
                                         JS::Handle<jsid> id, unsigned flags,
                                         JS::MutableHandle<JSObject*> objp)
 {
-  JS::RootedValue v(cx);
+  JS::Rooted<JS::Value> v(cx);
 
   if (nsDOMClassInfo::sItem_id == id || nsDOMClassInfo::sNamedItem_id == id) {
     // Define the item() or namedItem() method.
@@ -4326,8 +4328,10 @@ nsStringArraySH::GetProperty(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
     return NS_SUCCESS_I_DID_SOMETHING;
   }
 
-  NS_ENSURE_TRUE(xpc::NonVoidStringToJsval(cx, val, vp),
+  JS::Rooted<JS::Value> rval(cx);
+  NS_ENSURE_TRUE(xpc::NonVoidStringToJsval(cx, val, &rval),
                  NS_ERROR_OUT_OF_MEMORY);
+  *vp = rval;
   return NS_SUCCESS_I_DID_SOMETHING;
 }
 

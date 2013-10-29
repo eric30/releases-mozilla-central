@@ -853,8 +853,8 @@ nsTextInputListener::HandleEvent(nsIDOMEvent* aEvent)
   }
 
   WidgetKeyboardEvent* keyEvent =
-    static_cast<WidgetKeyboardEvent*>(aEvent->GetInternalNSEvent());
-  if (keyEvent->eventStructType != NS_KEY_EVENT) {
+    aEvent->GetInternalNSEvent()->AsKeyboardEvent();
+  if (!keyEvent) {
     return NS_ERROR_UNEXPECTED;
   }
 
@@ -1562,8 +1562,7 @@ nsTextEditorState::UnbindFromFrame(nsTextControlFrame* aFrame)
     mTextListener->SetFrame(nullptr);
 
     nsCOMPtr<EventTarget> target = do_QueryInterface(mTextCtrlElement);
-    nsEventListenerManager* manager =
-      target->GetListenerManager(false);
+    nsEventListenerManager* manager = target->GetExistingListenerManager();
     if (manager) {
       manager->RemoveEventListenerByType(mTextListener,
         NS_LITERAL_STRING("keydown"),
@@ -1970,7 +1969,7 @@ nsTextEditorState::InitializeKeyboardEventListeners()
 {
   //register key listeners
   nsCOMPtr<EventTarget> target = do_QueryInterface(mTextCtrlElement);
-  nsEventListenerManager* manager = target->GetListenerManager(true);
+  nsEventListenerManager* manager = target->GetOrCreateListenerManager();
   if (manager) {
     manager->AddEventListenerByType(mTextListener,
                                     NS_LITERAL_STRING("keydown"),

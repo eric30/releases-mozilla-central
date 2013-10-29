@@ -477,7 +477,7 @@ SpeechRecognition::NotifyFinalResult(SpeechEvent* aEvent)
   srEvent->InitSpeechRecognitionEvent(NS_LITERAL_STRING("result"),
                                       true, false, 0, ilist,
                                       NS_LITERAL_STRING("NOT_IMPLEMENTED"),
-                                      NULL);
+                                      nullptr);
   domEvent->SetTrusted(true);
 
   bool defaultActionEnabled;
@@ -713,7 +713,7 @@ SpeechRecognition::Start(ErrorResult& aRv)
   NS_ENSURE_SUCCESS_VOID(rv);
 
   AutoSafeJSContext cx;
-  MediaStreamConstraintsInitializer constraints;
+  MediaStreamConstraints constraints;
   constraints.mAudio.SetAsBoolean() = true;
 
   if (!mTestConfig.mFakeFSMEvents) {

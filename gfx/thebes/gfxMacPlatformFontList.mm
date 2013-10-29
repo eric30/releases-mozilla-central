@@ -43,7 +43,6 @@
 #endif
 #include "prlog.h"
 
-#include <Carbon/Carbon.h>
 #include <algorithm>
 
 #import <AppKit/AppKit.h>
@@ -62,10 +61,12 @@
 #include "nsDirectoryServiceDefs.h"
 #include "nsISimpleEnumerator.h"
 #include "nsCharTraits.h"
+#include "gfxFontConstants.h"
 
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Telemetry.h"
+#include "mozilla/gfx/2D.h"
 
 #include <unistd.h>
 #include <time.h>
@@ -121,13 +122,13 @@ static NSFontManager *sFontManager;
 static void GetStringForNSString(const NSString *aSrc, nsAString& aDist)
 {
     aDist.SetLength([aSrc length]);
-    [aSrc getCharacters:aDist.BeginWriting()];
+    [aSrc getCharacters:reinterpret_cast<unichar*>(aDist.BeginWriting())];
 }
 
 static NSString* GetNSStringForString(const nsAString& aSrc)
 {
-    return [NSString stringWithCharacters:aSrc.BeginReading()
-                     length:aSrc.Length()];
+    return [NSString stringWithCharacters:reinterpret_cast<const unichar*>(aSrc.BeginReading())
+                                   length:aSrc.Length()];
 }
 
 #ifdef PR_LOGGING
@@ -424,11 +425,11 @@ MacOSFontEntry::HasFontTable(uint32_t aTableTag)
 }
 
 void
-MacOSFontEntry::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf,
-                                    FontListSizes*    aSizes) const
+MacOSFontEntry::AddSizeOfIncludingThis(MallocSizeOf aMallocSizeOf,
+                                       FontListSizes* aSizes) const
 {
     aSizes->mFontListSize += aMallocSizeOf(this);
-    SizeOfExcludingThis(aMallocSizeOf, aSizes);
+    AddSizeOfExcludingThis(aMallocSizeOf, aSizes);
 }
 
 /* gfxMacFontFamily */
@@ -644,12 +645,15 @@ gfxSingleFaceMacFontFamily::ReadOtherFamilyNames(gfxPlatformFontList *aPlatformF
 #pragma mark-
 
 gfxMacPlatformFontList::gfxMacPlatformFontList() :
-    gfxPlatformFontList(false), mATSGeneration(uint32_t(kATSGenerationInitial)),
+    gfxPlatformFontList(false),
     mDefaultFont(nullptr)
 {
-    ::ATSFontNotificationSubscribe(ATSNotification,
-                                   kATSFontNotifyOptionDefault,
-                                   (void*)this, nullptr);
+    ::CFNotificationCenterAddObserver(::CFNotificationCenterGetLocalCenter(),
+                                      this,
+                                      RegisteredFontsChangedNotificationCallback,
+                                      kCTFontManagerRegisteredFontsChangedNotification,
+                                      0,
+                                      CFNotificationSuspensionBehaviorDeliverImmediately);
 
     // cache this in a static variable so that MacOSFontFamily objects
     // don't have to repeatedly look it up
@@ -668,18 +672,7 @@ gfxMacPlatformFontList::InitFontList()
 {
     nsAutoreleasePool localPool;
 
-    ATSGeneration currentGeneration = ::ATSGetGeneration();
-
-    // need to ignore notifications after adding each font
-    if (mATSGeneration == currentGeneration)
-        return NS_OK;
-
     Telemetry::AutoTimer<Telemetry::MAC_INITFONTLIST_TOTAL> timer;
-
-    mATSGeneration = currentGeneration;
-#ifdef PR_LOGGING
-    LOG_FONTLIST(("(fontlist) updating to generation: %d", mATSGeneration));
-#endif
 
     // reset font lists
     gfxPlatformFontList::InitFontList();
@@ -771,49 +764,22 @@ gfxMacPlatformFontList::GetStandardFamilyName(const nsAString& aFontName, nsAStr
         return true;
     }
 
-    // Gecko 1.8 used Quickdraw font api's which produce a slightly different set of "family"
-    // names.  Try to resolve based on these names, in case this is stored in an old profile
-    // 1.8: "Futura", "Futura Condensed" ==> 1.9: "Futura"
-
-    // convert the name to a Pascal-style Str255 to try as Quickdraw name
-    Str255 qdname;
-    NS_ConvertUTF16toUTF8 utf8name(aFontName);
-    qdname[0] = std::max<size_t>(255, strlen(utf8name.get()));
-    memcpy(&qdname[1], utf8name.get(), qdname[0]);
-
-    // look up the Quickdraw name
-    ATSFontFamilyRef atsFamily = ::ATSFontFamilyFindFromQuickDrawName(qdname);
-    if (atsFamily == (ATSFontFamilyRef)kInvalidFontFamily) {
-        return false;
-    }
-
-    // if we found a family, get its ATS name
-    CFStringRef cfName;
-    OSStatus status = ::ATSFontFamilyGetName(atsFamily, kATSOptionFlagsDefault, &cfName);
-    if (status != noErr) {
-        return false;
-    }
-
-    // then use this to locate the family entry and retrieve its localized name
-    nsAutoString familyName;
-    GetStringForNSString((const NSString*)cfName, familyName);
-    ::CFRelease(cfName);
-
-    family = FindFamily(familyName);
-    if (family) {
-        family->LocalizedName(aFamilyName);
-        return true;
-    }
-
     return false;
 }
 
 void
-gfxMacPlatformFontList::ATSNotification(ATSFontNotificationInfoRef aInfo,
-                                        void* aUserArg)
+gfxMacPlatformFontList::RegisteredFontsChangedNotificationCallback(CFNotificationCenterRef center,
+                                                                   void *observer,
+                                                                   CFStringRef name,
+                                                                   const void *object,
+                                                                   CFDictionaryRef userInfo)
 {
+    if (!::CFEqual(name, kCTFontManagerRegisteredFontsChangedNotification)) {
+        return;
+    }
+
     // xxx - should be carefully pruning the list of fonts, not rebuilding it from scratch
-    static_cast<gfxMacPlatformFontList*>(aUserArg)->UpdateFontList();
+    static_cast<gfxMacPlatformFontList*>(observer)->UpdateFontList();
 
     // modify a preference that will trigger reflow everywhere
     static const char kPrefName[] = "font.internaluseonly.changed";
@@ -885,7 +851,7 @@ gfxMacPlatformFontList::GlobalFontFallback(const uint32_t aCh,
             ::CFStringGetCharacters(familyName, ::CFRangeMake(0, len),
                                     buffer.Elements());
             buffer[len] = 0;
-            nsDependentString familyName(buffer.Elements(), len);
+            nsDependentString familyName(reinterpret_cast<PRUnichar*>(buffer.Elements()), len);
 
             bool needsBold;  // ignored in the system fallback case
 

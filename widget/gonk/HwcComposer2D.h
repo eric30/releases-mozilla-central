@@ -24,8 +24,6 @@
 
 #include <hardware/hwcomposer.h>
 
-#define MAX_HWC_LAYERS 15
-
 namespace mozilla {
 
 namespace layers {
@@ -62,7 +60,11 @@ public:
     // by this composer so nothing was rendered at all
     bool TryRender(layers::Layer* aRoot, const gfxMatrix& aGLWorldTransform) MOZ_OVERRIDE;
 
+    bool Render(EGLDisplay dpy, EGLSurface sur);
+
 private:
+    void Prepare(buffer_handle_t fbHandle, int fence);
+    bool Commit();
     bool TryHwComposition();
     bool ReallocLayerList();
     bool PrepareLayerList(layers::Layer* aContainer, const nsIntRect& aClip,
@@ -79,7 +81,8 @@ private:
     //Holds all the dynamically allocated RectVectors needed
     //to render the current frame
     std::list<RectVector>   mVisibleRegions;
-    int                     mPrevRelFd[MAX_HWC_LAYERS + 1];
+    nsTArray<int>           mPrevReleaseFds;
+    nsTArray<layers::LayerComposite*> mHwcLayerMap;
 };
 
 } // namespace mozilla

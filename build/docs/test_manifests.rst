@@ -31,6 +31,9 @@ a11y.ini
 xpcshell.ini
    For *xpcshell* tests.
 
+webapprt.ini
+   For the *chrome* flavor of webapp runtime mochitests.
+
 .. _manifest_destiny_manifests:
 
 Manifest Destiny Manifests
@@ -50,7 +53,11 @@ In summary, manifests are ini files with section names describing test files::
 Keys under sections can hold metadata about each test::
 
     [test_foo.js]
-    skip-if = os == win
+    skip-if = os == "win"
+    [test_foo.js]
+    skip-if = os == "linux" && debug
+    [test_baz.js]
+    fail-if = os == "mac" || os == "android"
 
 There is a special **DEFAULT** section whose keys/metadata apply to all
 sections/tests::

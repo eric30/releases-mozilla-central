@@ -8,6 +8,7 @@ TEST_DIRS += ['tests']
 
 EXTRA_JS_MODULES += [
     'AsyncShutdown.jsm',
+    'debug.js',
     'DeferredTask.jsm',
     'Deprecated.jsm',
     'Dict.jsm',
@@ -17,8 +18,10 @@ EXTRA_JS_MODULES += [
     'Http.jsm',
     'InlineSpellChecker.jsm',
     'LoadContextInfo.jsm',
+    'Log.jsm',
     'NewTabUtils.jsm',
     'PageMenu.jsm',
+    'PermissionsUtils.jsm',
     'PopupNotifications.jsm',
     'Preferences.jsm',
     'PrivateBrowsingUtils.jsm',
@@ -33,12 +36,13 @@ EXTRA_JS_MODULES += [
     'RemoteWebProgress.jsm',
     'SelectContentHelper.jsm',
     'SelectParentHelper.jsm',
+    'ShortcutUtils.jsm',
     'Sntp.jsm',
+    'SpatialNavigation.jsm',
     'Sqlite.jsm',
     'Task.jsm',
     'TelemetryTimestamps.jsm',
     'Timer.jsm',
-    'debug.js',
 ]
 
 EXTRA_PP_JS_MODULES += [

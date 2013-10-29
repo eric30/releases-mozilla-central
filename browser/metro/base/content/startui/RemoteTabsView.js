@@ -115,6 +115,7 @@ let RemoteTabsStartView = {
     let vbox = document.getElementById("start-remotetabs");
     let uiList = [vbox];
     this._view = new RemoteTabsView(this._grid, uiList);
+    this._grid.removeAttribute("fade");
   },
 
   uninit: function uninit() {

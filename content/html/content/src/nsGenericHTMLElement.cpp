@@ -13,6 +13,7 @@
 #include "nsAttrValueInlines.h"
 #include "nsCOMPtr.h"
 #include "nsIAtom.h"
+#include "nsIContentInlines.h"
 #include "nsIContentViewer.h"
 #include "mozilla/css/StyleRule.h"
 #include "nsIDocument.h"
@@ -841,7 +842,7 @@ nsGenericHTMLElement::GetEventListenerManagerForAttr(nsIAtom* aAttrName,
     if ((win = document->GetInnerWindow())) {
       nsCOMPtr<EventTarget> piTarget(do_QueryInterface(win));
 
-      return piTarget->GetListenerManager(true);
+      return piTarget->GetOrCreateListenerManager();
     }
 
     return nullptr;
@@ -1008,8 +1009,7 @@ nsGenericHTMLElement::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
       UnsetFlags(NODE_HAS_ACCESSKEY);
     }
     else if (IsEventAttributeName(aAttribute)) {
-      nsEventListenerManager* manager = GetListenerManager(false);
-      if (manager) {
+      if (nsEventListenerManager* manager = GetExistingListenerManager()) {
         manager->RemoveEventHandler(aAttribute, EmptyString());
       }
     }
@@ -3154,7 +3154,7 @@ nsGenericHTMLElement::GetItemValue(JSContext* aCx, JSObject* aScope,
 
   nsString string;
   GetItemValueText(string);
-  JS::Value v;
+  JS::Rooted<JS::Value> v(aCx);
   if (!xpc::NonVoidStringToJsval(aCx, string, &v)) {
     aError.Throw(NS_ERROR_FAILURE);
     return JS::UndefinedValue();

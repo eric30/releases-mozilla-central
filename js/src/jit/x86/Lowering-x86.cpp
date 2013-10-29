@@ -14,6 +14,29 @@
 using namespace js;
 using namespace js::jit;
 
+LDefinition
+LIRGeneratorX86::tempForDispatchCache(MIRType outputType)
+{
+    // x86 doesn't have a scratch register and we need one for the
+    // indirect jump for dispatch-style ICs.
+    //
+    // Note that currently we only install dispatch-style ICs for parallel
+    // execution. If this assumption changes, please change it here.
+    if (gen->info().executionMode() != ParallelExecution)
+        return LDefinition::BogusTemp();
+
+    // If we don't have an output register, we need a temp.
+    if (outputType == MIRType_None)
+        return temp();
+
+    // If we have a double output register, we need a temp.
+    if (outputType == MIRType_Double)
+        return temp();
+
+    // Otherwise we have a non-double output register and we can reuse it.
+    return LDefinition::BogusTemp();
+}
+
 bool
 LIRGeneratorX86::useBox(LInstruction *lir, size_t n, MDefinition *mir,
                         LUse::Policy policy, bool useAtStart)
@@ -182,6 +205,14 @@ LIRGeneratorX86::visitAsmJSUnsignedToDouble(MAsmJSUnsignedToDouble *ins)
 }
 
 bool
+LIRGeneratorX86::visitAsmJSUnsignedToFloat32(MAsmJSUnsignedToFloat32 *ins)
+{
+    JS_ASSERT(ins->input()->type() == MIRType_Int32);
+    LAsmJSUInt32ToFloat32 *lir = new LAsmJSUInt32ToFloat32(useRegisterAtStart(ins->input()), temp());
+    return define(lir, ins);
+}
+
+bool
 LIRGeneratorX86::visitAsmJSLoadHeap(MAsmJSLoadHeap *ins)
 {
     MDefinition *ptr = ins->ptr();
@@ -274,31 +305,4 @@ bool
 LIRGeneratorX86::visitAsmJSLoadFuncPtr(MAsmJSLoadFuncPtr *ins)
 {
     return define(new LAsmJSLoadFuncPtr(useRegisterAtStart(ins->index())), ins);
-}
-
-LGetPropertyCacheT *
-LIRGeneratorX86::newLGetPropertyCacheT(MGetPropertyCache *ins)
-{
-    // Since x86 doesn't have a scratch register and we need one for the
-    // indirect jump for dispatch-style ICs, we need a temporary in the case
-    // of a double output type as we can't get a scratch from the output.
-    LDefinition scratch;
-    if (ins->type() == MIRType_Double)
-        scratch = temp();
-    else
-        scratch = LDefinition::BogusTemp();
-    return new LGetPropertyCacheT(useRegister(ins->object()), scratch);
-}
-
-LGetElementCacheT *
-LIRGeneratorX86::newLGetElementCacheT(MGetElementCache *ins)
-{
-    LDefinition scratch;
-    if (ins->type() == MIRType_Double)
-        scratch = temp();
-    else
-        scratch = LDefinition::BogusTemp();
-    return new LGetElementCacheT(useRegister(ins->object()),
-                                 useRegister(ins->index()),
-                                 scratch);
 }

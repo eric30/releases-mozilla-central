@@ -3,14 +3,14 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-import os, posixpath, shlex, subprocess, sys, traceback
+import os, posixpath, shlex, shutil, subprocess, sys, traceback
 
 def add_libdir_to_path():
     from os.path import dirname, exists, join, realpath
     js_src_dir = dirname(dirname(realpath(sys.argv[0])))
     assert exists(join(js_src_dir,'jsapi.h'))
-    sys.path.append(join(js_src_dir, 'lib'))
-    sys.path.append(join(js_src_dir, 'tests', 'lib'))
+    sys.path.insert(0, join(js_src_dir, 'lib'))
+    sys.path.insert(0, join(js_src_dir, 'tests', 'lib'))
 
 add_libdir_to_path()
 
@@ -196,6 +196,18 @@ def main(argv):
         prolog = posixpath.join(options.remote_test_root, 'jit-tests', 'jit-tests', 'lib', 'prolog.js')
 
     prefix += ['-f', prolog]
+    prefix += ['--js-cache', jittests.JS_CACHE_DIR]
+
+    # Avoid racing on the cache by having the js shell create a new cache
+    # subdir for each process. The js shell takes care of deleting these
+    # subdirs when the process exits.
+    if options.max_jobs > 1 and jittests.HAVE_MULTIPROCESSING:
+        prefix += ['--js-cache-per-process']
+
+    # Clean up any remnants from previous crashes etc
+    shutil.rmtree(jittests.JS_CACHE_DIR, ignore_errors=True)
+    os.mkdir(jittests.JS_CACHE_DIR)
+
     if options.debug:
         if len(job_list) > 1:
             print 'Multiple tests match command line arguments, debugger can only run one'

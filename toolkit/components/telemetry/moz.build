@@ -18,7 +18,7 @@ EXPORTS.mozilla += [
     'Telemetry.h',
 ]
 
-CPP_SOURCES += [
+SOURCES += [
     'Telemetry.cpp',
 ]
 
@@ -43,4 +43,8 @@ LIBXUL_LIBRARY = True
 MSVC_ENABLE_PGO = True
 
 LIBRARY_NAME = 'telemetry'
+
+EXPORT_LIBRARY = True
+
+include('/ipc/chromium/chromium-config.mozbuild')
 

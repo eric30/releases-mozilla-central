@@ -18,7 +18,7 @@ EXPORTS.mozilla.scache += [
     'StartupCacheUtils.h',
 ]
 
-CPP_SOURCES += [
+SOURCES += [
     'StartupCache.cpp',
     'StartupCacheModule.cpp',
     'StartupCacheUtils.cpp',
@@ -27,4 +27,6 @@ CPP_SOURCES += [
 LIBRARY_NAME = 'startupcache'
 
 LIBXUL_LIBRARY = True
+
+EXPORT_LIBRARY = True
 

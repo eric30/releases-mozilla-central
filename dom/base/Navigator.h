@@ -56,6 +56,8 @@ class BatteryManager;
 class FMRadio;
 #endif
 
+class Promise;
+
 class DesktopNotificationCenter;
 class MobileMessageManager;
 class MozIdleObserver;
@@ -67,12 +69,6 @@ class NavigatorUserMediaSuccessCallback;
 class NavigatorUserMediaErrorCallback;
 class MozGetUserMediaDevicesSuccessCallback;
 #endif // MOZ_MEDIA_NAVIGATOR
-
-namespace icc {
-#ifdef MOZ_B2G_RIL
-class IccManager;
-#endif
-}
 
 namespace network {
 class Connection;
@@ -89,6 +85,7 @@ class BluetoothManager;
 
 #ifdef MOZ_B2G_RIL
 class CellBroadcast;
+class IccManager;
 class Telephony;
 class Voicemail;
 #endif
@@ -175,6 +172,8 @@ public:
   // The XPCOM GetDoNotTrack is ok
   Geolocation* GetGeolocation(ErrorResult& aRv);
   battery::BatteryManager* GetBattery(ErrorResult& aRv);
+  already_AddRefed<Promise> GetDataStores(const nsAString &aName,
+                                          ErrorResult& aRv);
   bool Vibrate(uint32_t aDuration);
   bool Vibrate(const nsTArray<uint32_t>& aDuration);
   void GetAppCodeName(nsString& aAppCodeName, ErrorResult& aRv)
@@ -330,15 +329,13 @@ private:
 #endif
   nsRefPtr<PowerManager> mPowerManager;
   nsRefPtr<MobileMessageManager> mMobileMessageManager;
-#ifdef MOZ_B2G_RIL
-  nsRefPtr<Telephony> mTelephony;
-  nsRefPtr<Voicemail> mVoicemail;
-#endif
   nsRefPtr<network::Connection> mConnection;
 #ifdef MOZ_B2G_RIL
   nsRefPtr<network::MobileConnection> mMobileConnection;
   nsRefPtr<CellBroadcast> mCellBroadcast;
-  nsRefPtr<icc::IccManager> mIccManager;
+  nsRefPtr<IccManager> mIccManager;
+  nsRefPtr<Telephony> mTelephony;
+  nsRefPtr<Voicemail> mVoicemail;
 #endif
 #ifdef MOZ_B2G_BT
   nsCOMPtr<bluetooth::BluetoothManager> mBluetooth;

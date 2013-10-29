@@ -85,21 +85,24 @@ class IonFrameIterator
   private:
     mutable const SafepointIndex *cachedSafepointIndex_;
     const JitActivation *activation_;
+    ExecutionMode mode_;
 
     void dumpBaseline() const;
 
   public:
-    IonFrameIterator(uint8_t *top)
+    explicit IonFrameIterator(uint8_t *top, ExecutionMode mode)
       : current_(top),
         type_(IonFrame_Exit),
         returnAddressToFp_(nullptr),
         frameSize_(0),
         cachedSafepointIndex_(nullptr),
-        activation_(nullptr)
+        activation_(nullptr),
+        mode_(mode)
     { }
 
-    IonFrameIterator(const ActivationIterator &activations);
-    IonFrameIterator(IonJSFrameLayout *fp);
+    explicit IonFrameIterator(JSContext *cx);
+    explicit IonFrameIterator(const ActivationIterator &activations);
+    explicit IonFrameIterator(IonJSFrameLayout *fp, ExecutionMode mode);
 
     // Current frame information.
     FrameType type() const {
@@ -151,7 +154,6 @@ class IonFrameIterator
         return type_ == IonFrame_Entry;
     }
     bool isFunctionFrame() const;
-    bool isParallelFunctionFrame() const;
 
     bool isConstructing() const;
 
@@ -270,6 +272,9 @@ class SnapshotIterator : public SnapshotReader
             *scopeChain = read();
         else
             skip();
+
+        // Skip slot for return value.
+        skip();
 
         // Skip slot for arguments object.
         if (script->argumentsHasVarBinding())
@@ -417,9 +422,9 @@ class InlineFrameIteratorMaybeGC
             SnapshotIterator parent_s(it.snapshotIterator());
 
             // Skip over all slots untill we get to the last slots (= arguments slots of callee)
-            // the +2 is for [this] and [scopechain], and maybe +1 for [argsObj]
-            JS_ASSERT(parent_s.slots() >= nactual + 2 + argsObjAdj);
-            unsigned skip = parent_s.slots() - nactual - 2 - argsObjAdj;
+            // the +3 is for [this], [returnvalue], [scopechain], and maybe +1 for [argsObj]
+            JS_ASSERT(parent_s.slots() >= nactual + 3 + argsObjAdj);
+            unsigned skip = parent_s.slots() - nactual - 3 - argsObjAdj;
             for (unsigned j = 0; j < skip; j++)
                 parent_s.skip();
 
@@ -462,6 +467,9 @@ class InlineFrameIteratorMaybeGC
         SnapshotIterator s(si_);
 
         // scopeChain
+        s.skip();
+
+        // return value
         s.skip();
 
         // Arguments object.

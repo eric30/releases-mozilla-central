@@ -15,8 +15,11 @@ const {AppValidator} = require("devtools/app-manager/app-validator");
 const {Services} = Cu.import("resource://gre/modules/Services.jsm");
 const {FileUtils} = Cu.import("resource://gre/modules/FileUtils.jsm");
 const {installHosted, installPackaged, getTargetForApp} = require("devtools/app-actor-front");
+const {EventEmitter} = Cu.import("resource:///modules/devtools/shared/event-emitter.js");
 
 const promise = require("sdk/core/promise");
+
+const MANIFEST_EDITOR_ENABLED = "devtools.appmanager.manifestEditor.enabled";
 
 window.addEventListener("message", function(event) {
   try {
@@ -35,12 +38,20 @@ window.addEventListener("message", function(event) {
 }, false);
 
 let UI = {
+  isReady: false,
+
   onload: function() {
+    if (Services.prefs.getBoolPref(MANIFEST_EDITOR_ENABLED)) {
+      document.querySelector("#lense").setAttribute("manifest-editable", "");
+    }
+
     this.template = new Template(document.body, AppProjects.store, Utils.l10n);
     this.template.start();
 
     AppProjects.load().then(() => {
       AppProjects.store.object.projects.forEach(UI.validate);
+      this.isReady = true;
+      this.emit("ready");
     });
   },
 
@@ -70,25 +81,31 @@ let UI = {
     return null;
   },
 
-  addPackaged: function() {
-    let folder = this._selectFolder();
+  addPackaged: function(folder) {
+    if (!folder) {
+      folder = this._selectFolder();
+    }
     if (!folder)
       return;
-    AppProjects.addPackaged(folder)
-               .then(function (project) {
-                 UI.validate(project);
-                 UI.selectProject(project.location);
-               });
+    return AppProjects.addPackaged(folder)
+                      .then(function (project) {
+                        UI.validate(project);
+                        UI.selectProject(project.location);
+                      });
   },
 
   addHosted: function() {
+    let form = document.querySelector("#new-hosted-project-wrapper");
+    if (!form.checkValidity())
+      return;
+
     let urlInput = document.querySelector("#url-input");
     let manifestURL = urlInput.value;
-    AppProjects.addHosted(manifestURL)
-               .then(function (project) {
-                 UI.validate(project);
-                 UI.selectProject(project.location);
-               });
+    return AppProjects.addHosted(manifestURL)
+                      .then(function (project) {
+                        UI.validate(project);
+                        UI.selectProject(project.location);
+                      });
   },
 
   _getLocalIconURL: function(project, manifest) {
@@ -117,7 +134,6 @@ let UI = {
     return validation.validate()
       .then(function () {
         if (validation.manifest) {
-          project.name = validation.manifest.name;
           project.icon = UI._getLocalIconURL(project, validation.manifest);
           project.manifest = validation.manifest;
         }
@@ -149,7 +165,10 @@ let UI = {
   update: function(button, location) {
     button.disabled = true;
     let project = AppProjects.get(location);
-    this.validate(project)
+    this.manifestEditor.save()
+        .then(() => {
+          return this.validate(project);
+        })
         .then(() => {
            // Install the app to the device if we are connected,
            // and there is no error
@@ -208,8 +227,10 @@ let UI = {
   },
 
   install: function(project) {
+    this.connection.log("Installing the " + project.manifest.name + " app...");
+    let installPromise;
     if (project.type == "packaged") {
-      return installPackaged(this.connection.client, this.listTabsResponse.webappsActor, project.location, project.packagedAppOrigin)
+      installPromise = installPackaged(this.connection.client, this.listTabsResponse.webappsActor, project.location, project.packagedAppOrigin)
         .then(({ appId }) => {
           // If the packaged app specified a custom origin override,
           // we need to update the local project origin
@@ -225,8 +246,16 @@ let UI = {
         origin: origin.spec,
         manifestURL: project.location
       };
-      return installHosted(this.connection.client, this.listTabsResponse.webappsActor, appId, metadata, project.manifest);
+      installPromise = installHosted(this.connection.client, this.listTabsResponse.webappsActor, appId, metadata, project.manifest);
     }
+
+    installPromise.then(() => {
+      this.connection.log("Install completed.");
+    }, () => {
+      this.connection.log("Install failed.");
+    });
+
+    return installPromise;
   },
 
   start: function(project) {
@@ -372,5 +401,16 @@ let UI = {
     let lense = document.querySelector("#lense");
     lense.setAttribute("template-for", template);
     this.template._processFor(lense);
+
+    let project = projects[idx];
+    this._showManifestEditor(project).then(() => this.emit("project-selected"));
   },
-}
+
+  _showManifestEditor: function(project) {
+    let editorContainer = document.querySelector("#lense .manifest-editor");
+    this.manifestEditor = new ManifestEditor(project);
+    return this.manifestEditor.show(editorContainer);
+  }
+};
+
+EventEmitter.decorate(UI);

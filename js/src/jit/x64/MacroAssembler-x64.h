@@ -81,7 +81,8 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
 
     enum Result {
         GENERAL,
-        DOUBLE
+        DOUBLE,
+        FLOAT
     };
 
     typedef MoveResolver::MoveOperand MoveOperand;
@@ -466,6 +467,7 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
     }
 
     Condition testNegativeZero(const FloatRegister &reg, const Register &scratch);
+    Condition testNegativeZeroFloat32(const FloatRegister &reg, const Register &scratch);
 
     /////////////////////////////////////////////////////////////////
     // Common interface.
@@ -1040,12 +1042,23 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
     void loadConstantFloat32(float f, const FloatRegister &dest);
 
     void branchTruncateDouble(const FloatRegister &src, const Register &dest, Label *fail) {
-        const uint64_t IndefiniteIntegerValue = 0x8000000000000000;
-        JS_ASSERT(dest != ScratchReg);
         cvttsd2sq(src, dest);
-        movq(ImmWord(IndefiniteIntegerValue), ScratchReg);
-        cmpq(dest, ScratchReg);
-        j(Assembler::Equal, fail);
+
+        // cvttsd2sq returns 0x8000000000000000 on failure. Test for it by
+        // subtracting 1 and testing overflow (this avoids the need to
+        // materialize that value in a register).
+        cmpq(dest, Imm32(1));
+        j(Assembler::Overflow, fail);
+
+        movl(dest, dest); // Zero upper 32-bits.
+    }
+    void branchTruncateFloat32(const FloatRegister &src, const Register &dest, Label *fail) {
+        cvttss2sq(src, dest);
+
+        // Same trick as for Doubles
+        cmpq(dest, Imm32(1));
+        j(Assembler::Overflow, fail);
+
         movl(dest, dest); // Zero upper 32-bits.
     }
 
@@ -1095,6 +1108,10 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
 
     void convertUInt32ToDouble(const Register &src, const FloatRegister &dest) {
         cvtsq2sd(src, dest);
+    }
+
+    void convertUInt32ToFloat32(const Register &src, const FloatRegister &dest) {
+        cvtsq2ss(src, dest);
     }
 
     void inc64(AbsoluteAddress dest) {

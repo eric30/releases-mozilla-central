@@ -160,13 +160,21 @@ static const PLDHashTableOps stub_ops = {
     PL_DHashMoveEntryStub,
     PL_DHashClearEntryStub,
     PL_DHashFinalizeStub,
-    NULL
+    nullptr
 };
 
 const PLDHashTableOps *
 PL_DHashGetStubOps(void)
 {
     return &stub_ops;
+}
+
+static bool
+SizeOfEntryStore(uint32_t capacity, uint32_t entrySize, uint32_t *nbytes)
+{
+    uint64_t nbytes64 = uint64_t(capacity) * uint64_t(entrySize);
+    *nbytes = capacity * entrySize;
+    return uint64_t(*nbytes) == nbytes64;   // returns false on overflow
 }
 
 PLDHashTable *
@@ -177,10 +185,10 @@ PL_NewDHashTable(const PLDHashTableOps *ops, void *data, uint32_t entrySize,
 
     table = (PLDHashTable *) malloc(sizeof *table);
     if (!table)
-        return NULL;
+        return nullptr;
     if (!PL_DHashTableInit(table, ops, data, entrySize, capacity)) {
         free(table);
-        return NULL;
+        return nullptr;
     }
     return table;
 }
@@ -217,15 +225,14 @@ PL_DHashTableInit(PLDHashTable *table, const PLDHashTableOps *ops, void *data,
     PR_CEILING_LOG2(log2, capacity);
 
     capacity = 1u << log2;
-    if (capacity >= PL_DHASH_SIZE_LIMIT)
+    if (capacity > PL_DHASH_MAX_SIZE)
         return false;
     table->hashShift = PL_DHASH_BITS - log2;
-    table->maxAlphaFrac = (uint8_t)(0x100 * PL_DHASH_DEFAULT_MAX_ALPHA);
-    table->minAlphaFrac = (uint8_t)(0x100 * PL_DHASH_DEFAULT_MIN_ALPHA);
     table->entrySize = entrySize;
     table->entryCount = table->removedCount = 0;
     table->generation = 0;
-    nbytes = capacity * entrySize;
+    if (!SizeOfEntryStore(capacity, entrySize, &nbytes))
+        return false;   // overflowed
 
     table->entryStore = (char *) ops->allocTable(table,
                                                  nbytes + ENTRY_STORE_EXTRA);
@@ -242,54 +249,13 @@ PL_DHashTableInit(PLDHashTable *table, const PLDHashTableOps *ops, void *data,
 }
 
 /*
- * Compute max and min load numbers (entry counts) from table params.
+ * Compute max and min load numbers (entry counts).
  */
-#define MAX_LOAD(table, size)   (((table)->maxAlphaFrac * (size)) >> 8)
-#define MIN_LOAD(table, size)   (((table)->minAlphaFrac * (size)) >> 8)
-
-void
-PL_DHashTableSetAlphaBounds(PLDHashTable *table,
-                            float maxAlpha,
-                            float minAlpha)
-{
-    uint32_t size;
-
-    /*
-     * Reject obviously insane bounds, rather than trying to guess what the
-     * buggy caller intended.
-     */
-    NS_ASSERTION(0.5 <= maxAlpha && maxAlpha < 1 && 0 <= minAlpha,
-                 "0.5 <= maxAlpha && maxAlpha < 1 && 0 <= minAlpha");
-    if (maxAlpha < 0.5 || 1 <= maxAlpha || minAlpha < 0)
-        return;
-
-    /*
-     * Ensure that at least one entry will always be free.  If maxAlpha at
-     * minimum size leaves no entries free, reduce maxAlpha based on minimum
-     * size and the precision limit of maxAlphaFrac's fixed point format.
-     */
-    NS_ASSERTION(PL_DHASH_MIN_SIZE - (maxAlpha * PL_DHASH_MIN_SIZE) >= 1,
-                 "PL_DHASH_MIN_SIZE - (maxAlpha * PL_DHASH_MIN_SIZE) >= 1");
-    if (PL_DHASH_MIN_SIZE - (maxAlpha * PL_DHASH_MIN_SIZE) < 1) {
-        maxAlpha = (float)
-                   (PL_DHASH_MIN_SIZE - XPCOM_MAX(PL_DHASH_MIN_SIZE / 256, 1))
-                   / PL_DHASH_MIN_SIZE;
-    }
-
-    /*
-     * Ensure that minAlpha is strictly less than half maxAlpha.  Take care
-     * not to truncate an entry's worth of alpha when storing in minAlphaFrac
-     * (8-bit fixed point format).
-     */
-    NS_ASSERTION(minAlpha < maxAlpha / 2,
-                 "minAlpha < maxAlpha / 2");
-    if (minAlpha >= maxAlpha / 2) {
-        size = PL_DHASH_TABLE_SIZE(table);
-        minAlpha = (size * maxAlpha - XPCOM_MAX(size / 256, 1u)) / (2 * size);
-    }
-
-    table->maxAlphaFrac = (uint8_t)(maxAlpha * 256);
-    table->minAlphaFrac = (uint8_t)(minAlpha * 256);
+static inline uint32_t MaxLoad(uint32_t size) {
+    return size - (size >> 2);  // == size * 0.75
+}
+static inline uint32_t MinLoad(uint32_t size) {
+    return size >> 2;           // == size * 0.25
 }
 
 /*
@@ -334,13 +300,13 @@ PL_DHashTableFinish(PLDHashTable *table)
     PLDHashEntryHdr *entry;
 
 #ifdef DEBUG_XXXbrendan
-    static FILE *dumpfp = NULL;
+    static FILE *dumpfp = nullptr;
     if (!dumpfp) dumpfp = fopen("/tmp/pldhash.bigdump", "w");
     if (dumpfp) {
 #ifdef MOZILLA_CLIENT
         NS_TraceStack(1, dumpfp);
 #endif
-        PL_DHashTableDumpMeter(table, NULL, dumpfp);
+        PL_DHashTableDumpMeter(table, nullptr, dumpfp);
         fputc('\n', dumpfp);
     }
 #endif
@@ -408,7 +374,7 @@ SearchTable(PLDHashTable *table, const void *key, PLDHashNumber keyHash,
     sizeMask = (1u << sizeLog2) - 1;
 
     /* Save the first removed entry pointer so PL_DHASH_ADD can recycle it. */
-    firstRemoved = NULL;
+    firstRemoved = nullptr;
 
     for (;;) {
         if (MOZ_UNLIKELY(ENTRY_IS_REMOVED(entry))) {
@@ -437,7 +403,7 @@ SearchTable(PLDHashTable *table, const void *key, PLDHashNumber keyHash,
     }
 
     /* NOTREACHED */
-    return NULL;
+    return nullptr;
 }
 
 /*
@@ -495,7 +461,7 @@ FindFreeEntry(PLDHashTable *table, PLDHashNumber keyHash)
     }
 
     /* NOTREACHED */
-    return NULL;
+    return nullptr;
 }
 
 static bool
@@ -516,10 +482,11 @@ ChangeTable(PLDHashTable *table, int deltaLog2)
     newLog2 = oldLog2 + deltaLog2;
     oldCapacity = 1u << oldLog2;
     newCapacity = 1u << newLog2;
-    if (newCapacity >= PL_DHASH_SIZE_LIMIT)
+    if (newCapacity > PL_DHASH_MAX_SIZE)
         return false;
     entrySize = table->entrySize;
-    nbytes = newCapacity * entrySize;
+    if (!SizeOfEntryStore(newCapacity, entrySize, &nbytes))
+        return false;   // overflowed
 
     newEntryStore = (char *) table->ops->allocTable(table,
                                                     nbytes + ENTRY_STORE_EXTRA);
@@ -592,7 +559,7 @@ PL_DHashTableOperate(PLDHashTable *table, const void *key, PLDHashOperator op)
          * are on the edge of being overloaded.
          */
         size = PL_DHASH_TABLE_SIZE(table);
-        if (table->entryCount + table->removedCount >= MAX_LOAD(table, size)) {
+        if (table->entryCount + table->removedCount >= MaxLoad(size)) {
             /* Compress if a quarter or more of all entries are removed. */
             if (table->removedCount >= size >> 2) {
                 METER(table->stats.compresses++);
@@ -602,14 +569,10 @@ PL_DHashTableOperate(PLDHashTable *table, const void *key, PLDHashOperator op)
                 deltaLog2 = 1;
             }
 
-            /*
-             * Grow or compress table, returning null if ChangeTable fails and
-             * falling through might claim the last free entry.
-             */
-            if (!ChangeTable(table, deltaLog2) &&
-                table->entryCount + table->removedCount == size - 1) {
+            /* Grow or compress table, returning null if ChangeTable fails. */
+            if (!ChangeTable(table, deltaLog2)) {
                 METER(table->stats.addFailures++);
-                entry = NULL;
+                entry = nullptr;
                 break;
             }
         }
@@ -631,7 +594,7 @@ PL_DHashTableOperate(PLDHashTable *table, const void *key, PLDHashOperator op)
                 !table->ops->initEntry(table, entry, key)) {
                 /* We haven't claimed entry yet; fail with null return. */
                 memset(entry + 1, 0, table->entrySize - sizeof *entry);
-                entry = NULL;
+                entry = nullptr;
                 break;
             }
             entry->keyHash = keyHash;
@@ -650,18 +613,18 @@ PL_DHashTableOperate(PLDHashTable *table, const void *key, PLDHashOperator op)
             /* Shrink if alpha is <= .25 and table isn't too small already. */
             size = PL_DHASH_TABLE_SIZE(table);
             if (size > PL_DHASH_MIN_SIZE &&
-                table->entryCount <= MIN_LOAD(table, size)) {
+                table->entryCount <= MinLoad(size)) {
                 METER(table->stats.shrinks++);
                 (void) ChangeTable(table, -1);
             }
         }
         METER(else table->stats.removeMisses++);
-        entry = NULL;
+        entry = nullptr;
         break;
 
       default:
         NS_NOTREACHED("0");
-        entry = NULL;
+        entry = nullptr;
     }
 
     DECREMENT_RECURSION_LEVEL(table);
@@ -726,15 +689,15 @@ PL_DHashTableEnumerate(PLDHashTable *table, PLDHashEnumerator etor, void *arg)
 
     /*
      * Shrink or compress if a quarter or more of all entries are removed, or
-     * if the table is underloaded according to the configured minimum alpha,
-     * and is not minimal-size already.  Do this only if we removed above, so
-     * non-removing enumerations can count on stable table->entryStore until
-     * the next non-lookup-Operate or removing-Enumerate.
+     * if the table is underloaded according to the minimum alpha, and is not
+     * minimal-size already.  Do this only if we removed above, so non-removing
+     * enumerations can count on stable table->entryStore until the next
+     * non-lookup-Operate or removing-Enumerate.
      */
     if (didRemove &&
         (table->removedCount >= capacity >> 2 ||
          (capacity > PL_DHASH_MIN_SIZE &&
-          table->entryCount <= MIN_LOAD(table, capacity)))) {
+          table->entryCount <= MinLoad(capacity)))) {
         METER(table->stats.enumShrinks++);
         capacity = table->entryCount;
         capacity += capacity >> 1;
@@ -773,7 +736,7 @@ size_t
 PL_DHashTableSizeOfExcludingThis(const PLDHashTable *table,
                                  PLDHashSizeOfEntryExcludingThisFun sizeOfEntryExcludingThis,
                                  MallocSizeOf mallocSizeOf,
-                                 void *arg /* = NULL */)
+                                 void *arg /* = nullptr */)
 {
     size_t n = 0;
     n += mallocSizeOf(table->entryStore);
@@ -790,7 +753,7 @@ size_t
 PL_DHashTableSizeOfIncludingThis(const PLDHashTable *table,
                                  PLDHashSizeOfEntryExcludingThisFun sizeOfEntryExcludingThis,
                                  MallocSizeOf mallocSizeOf,
-                                 void *arg /* = NULL */)
+                                 void *arg /* = nullptr */)
 {
     return mallocSizeOf(table) +
            PL_DHashTableSizeOfExcludingThis(table, sizeOfEntryExcludingThis,

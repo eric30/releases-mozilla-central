@@ -34,7 +34,7 @@
 #define VARIANT_IDENTIFIER_NO_INHERIT 0x004000 // like above, but excluding
 // 'inherit' and 'initial'
 #define VARIANT_AUTO            0x010000  // A
-#define VARIANT_INHERIT         0x020000  // H eCSSUnit_Initial, eCSSUnit_Inherit
+#define VARIANT_INHERIT         0x020000  // H eCSSUnit_Initial, eCSSUnit_Inherit, eCSSUnit_Unset
 #define VARIANT_NONE            0x040000  // O
 #define VARIANT_NORMAL          0x080000  // M
 #define VARIANT_SYSFONT         0x100000  // eCSSUnit_System_Font
@@ -537,8 +537,10 @@ public:
   static const int32_t kSpeechRateKTable[];
   static const int32_t kStackSizingKTable[];
   static const int32_t kTableLayoutKTable[];
-  static const int32_t kTextAlignKTable[];
-  static const int32_t kTextAlignLastKTable[];
+  // Not const because we modify its entries when the pref
+  // "layout.css.text-align-true-value.enabled" changes:
+  static int32_t kTextAlignKTable[];
+  static int32_t kTextAlignLastKTable[];
   static const int32_t kTextCombineHorizontalKTable[];
   static const int32_t kTextDecorationLineKTable[];
   static const int32_t kTextDecorationStyleKTable[];

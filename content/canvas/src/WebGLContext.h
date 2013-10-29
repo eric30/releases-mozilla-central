@@ -20,12 +20,14 @@
 #include "mozilla/dom/HTMLCanvasElement.h"
 #include "nsWrapperCache.h"
 #include "nsIObserver.h"
+#include "nsLayoutUtils.h"
 
 #include "GLContextProvider.h"
 #include "gfxImageSurface.h"
 
 #include "mozilla/LinkedList.h"
 #include "mozilla/CheckedInt.h"
+#include "mozilla/Scoped.h"
 
 #ifdef XP_MACOSX
 #include "ForceDiscreteGPUHelperCGL.h"
@@ -76,15 +78,12 @@ namespace dom {
 class ImageData;
 
 struct WebGLContextAttributes;
-struct WebGLContextAttributesInitializer;
 template<typename> struct Nullable;
 }
 
 namespace gfx {
 class SourceSurface;
 }
-
-using WebGLTexelConversions::WebGLTexelFormat;
 
 WebGLTexelFormat GetWebGLTexelFormat(GLenum format, GLenum type);
 
@@ -169,6 +168,7 @@ public:
     NS_IMETHOD Render(gfxContext *ctx,
                       GraphicsFilter f,
                       uint32_t aFlags = RenderFlagPremultAlpha) MOZ_OVERRIDE;
+    virtual void GetImageBuffer(uint8_t** aImageBuffer, int32_t* aFormat);
     NS_IMETHOD GetInputStream(const char* aMimeType,
                               const PRUnichar* aEncoderOptions,
                               nsIInputStream **aStream) MOZ_OVERRIDE;
@@ -258,7 +258,7 @@ public:
     GLsizei DrawingBufferWidth() const { return IsContextLost() ? 0 : mWidth; }
     GLsizei DrawingBufferHeight() const { return IsContextLost() ? 0 : mHeight; }
 
-    void GetContextAttributes(dom::Nullable<dom::WebGLContextAttributesInitializer>& retval);
+    void GetContextAttributes(dom::Nullable<dom::WebGLContextAttributes>& retval);
     bool IsContextLost() const { return mContextStatus != ContextNotLost; }
     void GetSupportedExtensions(JSContext *cx, dom::Nullable< nsTArray<nsString> > &retval);
     JSObject* GetExtension(JSContext* cx, const nsAString& aName, ErrorResult& rv);
@@ -799,15 +799,17 @@ private:
 // -----------------------------------------------------------------------------
 // PROTECTED
 protected:
-    void SetDontKnowIfNeedFakeBlack() {
-        mFakeBlackStatus = DontKnowIfNeedFakeBlack;
+    void SetFakeBlackStatus(WebGLContextFakeBlackStatus x) {
+        mFakeBlackStatus = x;
     }
+    // Returns the current fake-black-status, except if it was Unknown,
+    // in which case this function resolves it first, so it never returns Unknown.
+    WebGLContextFakeBlackStatus ResolvedFakeBlackStatus();
 
-    bool NeedFakeBlack();
     void BindFakeBlackTextures();
     void UnbindFakeBlackTextures();
 
-    int WhatDoesVertexAttrib0Need();
+    WebGLVertexAttrib0Status WhatDoesVertexAttrib0Need();
     bool DoFakeVertexAttrib0(GLuint vertexCount);
     void UndoFakeVertexAttrib0();
     void InvalidateFakeVertexAttrib0();
@@ -1091,16 +1093,35 @@ protected:
     uint32_t mPixelStorePackAlignment, mPixelStoreUnpackAlignment, mPixelStoreColorspaceConversion;
     bool mPixelStoreFlipY, mPixelStorePremultiplyAlpha;
 
-    FakeBlackStatus mFakeBlackStatus;
+    WebGLContextFakeBlackStatus mFakeBlackStatus;
 
-    GLuint mBlackTexture2D, mBlackTextureCubeMap;
-    bool mBlackTexturesAreInitialized;
+    class FakeBlackTexture
+    {
+        gl::GLContext* mGL;
+        GLuint mGLName;
+
+    public:
+        FakeBlackTexture(gl::GLContext* gl, GLenum target, GLenum format);
+        ~FakeBlackTexture();
+        GLuint GLName() const { return mGLName; }
+    };
+
+    ScopedDeletePtr<FakeBlackTexture> mBlackOpaqueTexture2D,
+                                      mBlackOpaqueTextureCubeMap,
+                                      mBlackTransparentTexture2D,
+                                      mBlackTransparentTextureCubeMap;
+
+    void BindFakeBlackTexturesHelper(
+        GLenum target,
+        const nsTArray<WebGLRefPtr<WebGLTexture> >& boundTexturesArray,
+        ScopedDeletePtr<FakeBlackTexture> & opaqueTextureScopedPtr,
+        ScopedDeletePtr<FakeBlackTexture> & transparentTextureScopedPtr);
 
     GLfloat mVertexAttrib0Vector[4];
     GLfloat mFakeVertexAttrib0BufferObjectVector[4];
     size_t mFakeVertexAttrib0BufferObjectSize;
     GLuint mFakeVertexAttrib0BufferObject;
-    int mFakeVertexAttrib0BufferStatus;
+    WebGLVertexAttrib0Status mFakeVertexAttrib0BufferStatus;
 
     GLint mStencilRefFront, mStencilRefBack;
     GLuint mStencilValueMaskFront, mStencilValueMaskBack,

@@ -134,7 +134,7 @@ BrowserElementParent::DispatchOpenWindowEvent(Element* aOpenerFrameElement,
   // aFeatures.
 
   // Create the event's detail object.
-  OpenWindowEventDetailInitializer detail;
+  OpenWindowEventDetail detail;
   detail.mUrl = aURL;
   detail.mName = aName;
   detail.mFeatures = aFeatures;
@@ -226,7 +226,7 @@ BrowserElementParent::OpenWindowInProcess(nsIDOMWindow* aOpenerWindow,
                                           const nsACString& aFeatures,
                                           nsIDOMWindow** aReturnWindow)
 {
-  *aReturnWindow = NULL;
+  *aReturnWindow = nullptr;
 
   // If we call window.open from an <iframe> inside an <iframe mozbrowser>,
   // it's as though the top-level document inside the <iframe mozbrowser>
@@ -302,12 +302,13 @@ private:
 NS_IMETHODIMP DispatchAsyncScrollEventRunnable::Run()
 {
   nsCOMPtr<Element> frameElement = mTabParent->GetOwnerElement();
+  NS_ENSURE_STATE(frameElement);
   nsIDocument *doc = frameElement->OwnerDoc();
   nsCOMPtr<nsIGlobalObject> globalObject = doc->GetScopeObject();
   NS_ENSURE_TRUE(globalObject, NS_ERROR_UNEXPECTED);
 
   // Create the event's detail object.
-  AsyncScrollEventDetailInitializer detail;
+  AsyncScrollEventDetail detail;
   detail.mLeft = mContentRect.x;
   detail.mTop = mContentRect.y;
   detail.mWidth = mContentRect.width;

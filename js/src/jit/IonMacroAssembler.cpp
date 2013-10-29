@@ -23,6 +23,7 @@
 # include "jsgcinlines.h"
 #endif
 #include "jsinferinlines.h"
+#include "jsobjinlines.h"
 
 using namespace js;
 using namespace js::jit;
@@ -159,6 +160,14 @@ MacroAssembler::guardObjectType(Register obj, const TypeSet *types,
     }
 
     if (hasTypeObjects) {
+        // We are possibly going to overwrite the obj register. So already
+        // emit the branch, since branch depends on previous value of obj
+        // register and there is definitely a branch following. So no need
+        // to invert the condition.
+        if (lastBranch.isInitialized())
+            lastBranch.emit(*this);
+        lastBranch = BranchGCPtr();
+
         // Note: Some platforms give the same register for obj and scratch.
         // Make sure when writing to scratch, the obj register isn't used anymore!
         loadPtr(Address(obj, JSObject::offsetOfType()), scratch);
@@ -340,53 +349,6 @@ MacroAssembler::PopRegsInMaskIgnore(RegisterSet set, RegisterSet ignore)
     JS_ASSERT(diffG == 0);
 }
 
-bool MacroAssembler::maybeCallPostBarrier(Register object, ConstantOrRegister value,
-                                          Register maybeScratch) {
-    bool usedMaybeScratch = false;
-
-#ifdef JSGC_GENERATIONAL
-    JSRuntime *runtime = GetIonContext()->runtime;
-    if (value.constant()) {
-        JS_ASSERT_IF(value.value().isGCThing(),
-                     !gc::IsInsideNursery(runtime, value.value().toGCThing()));
-        return false;
-    }
-
-    TypedOrValueRegister valReg = value.reg();
-    if (valReg.hasTyped() && valReg.type() != MIRType_Object)
-        return false;
-
-    Label done;
-    Label tenured;
-    branchPtr(Assembler::Below, object, ImmWord(runtime->gcNurseryStart_), &tenured);
-    branchPtr(Assembler::Below, object, ImmWord(runtime->gcNurseryEnd_), &done);
-
-    bind(&tenured);
-    if (valReg.hasValue()) {
-        branchTestObject(Assembler::NotEqual, valReg.valueReg(), &done);
-        extractObject(valReg, maybeScratch);
-        usedMaybeScratch = true;
-    }
-    Register valObj = valReg.hasValue() ? maybeScratch : valReg.typedReg().gpr();
-    branchPtr(Assembler::Below, valObj, ImmWord(runtime->gcNurseryStart_), &done);
-    branchPtr(Assembler::AboveOrEqual, valObj, ImmWord(runtime->gcNurseryEnd_), &done);
-
-    GeneralRegisterSet saveRegs = GeneralRegisterSet::Volatile();
-    PushRegsInMask(saveRegs);
-    Register callScratch = saveRegs.getAny();
-    setupUnalignedABICall(2, callScratch);
-    movePtr(ImmPtr(runtime), callScratch);
-    passABIArg(callScratch);
-    passABIArg(object);
-    callWithABI(JS_FUNC_TO_DATA_PTR(void *, PostWriteBarrier));
-    PopRegsInMask(saveRegs);
-
-    bind(&done);
-#endif
-
-    return usedMaybeScratch;
-}
-
 void
 MacroAssembler::branchNurseryPtr(Condition cond, const Address &ptr1, const ImmMaybeNurseryPtr &ptr2,
                                  Label *label)
@@ -478,6 +440,10 @@ MacroAssembler::loadFromTypedArray(int arrayType, const T &src, AnyRegister dest
             convertUInt32ToDouble(temp, dest.fpu());
         } else {
             load32(src, dest.gpr());
+
+            // Bail out if the value doesn't fit into a signed int32 value. This
+            // is what allows MLoadTypedArrayElement to have a type() of
+            // MIRType_Int32 for UInt32 array loads.
             test32(dest.gpr(), dest.gpr());
             j(Assembler::Signed, fail);
         }
@@ -681,7 +647,7 @@ MacroAssembler::newGCThing(const Register &result, gc::AllocKind allocKind, Labe
 
     // Don't execute the inline path if the compartment has an object metadata callback,
     // as the metadata to use for the object may vary between executions of the op.
-    if (GetIonContext()->compartment->objectMetadataCallback)
+    if (GetIonContext()->compartment->hasObjectMetadataCallback())
         jump(fail);
 
 #ifdef JSGC_GENERATIONAL
@@ -907,82 +873,6 @@ MacroAssembler::checkInterruptFlagsPar(const Register &tempReg,
     movePtr(ImmPtr(&GetIonContext()->runtime->interrupt), tempReg);
     load32(Address(tempReg, 0), tempReg);
     branchTest32(Assembler::NonZero, tempReg, tempReg, fail);
-}
-
-void
-MacroAssembler::maybeRemoveOsrFrame(Register scratch)
-{
-    // Before we link an exit frame, check for an OSR frame, which is
-    // indicative of working inside an existing bailout. In this case, remove
-    // the OSR frame, so we don't explode the stack with repeated bailouts.
-    Label osrRemoved;
-    loadPtr(Address(StackPointer, IonCommonFrameLayout::offsetOfDescriptor()), scratch);
-    and32(Imm32(FRAMETYPE_MASK), scratch);
-    branch32(Assembler::NotEqual, scratch, Imm32(IonFrame_Osr), &osrRemoved);
-    addPtr(Imm32(sizeof(IonOsrFrameLayout)), StackPointer);
-    bind(&osrRemoved);
-}
-
-void
-MacroAssembler::performOsr()
-{
-    GeneralRegisterSet regs = GeneralRegisterSet::All();
-    if (FramePointer != InvalidReg && sps_ && sps_->enabled())
-        regs.take(FramePointer);
-
-    // This register must be fixed as it's used in the Osr prologue.
-    regs.take(OsrFrameReg);
-
-    // Remove any existing OSR frame so we don't create one per bailout.
-    maybeRemoveOsrFrame(regs.getAny());
-
-    const Register script = regs.takeAny();
-    const Register calleeToken = regs.takeAny();
-
-    // Grab fp.exec
-    loadPtr(Address(OsrFrameReg, StackFrame::offsetOfExec()), script);
-    mov(script, calleeToken);
-
-    Label isFunction, performOsr;
-    branchTest32(Assembler::NonZero,
-                 Address(OsrFrameReg, StackFrame::offsetOfFlags()),
-                 Imm32(StackFrame::FUNCTION),
-                 &isFunction);
-
-    {
-        // Not a function - just tag the calleeToken now.
-        orPtr(Imm32(CalleeToken_Script), calleeToken);
-        jump(&performOsr);
-    }
-
-    bind(&isFunction);
-    {
-        // Function - create the callee token, then get the script.
-
-        // Skip the or-ing of CalleeToken_Function into calleeToken since it is zero.
-        JS_ASSERT(CalleeToken_Function == 0);
-
-        loadPtr(Address(script, JSFunction::offsetOfNativeOrScript()), script);
-    }
-
-    bind(&performOsr);
-
-    const Register ionScript = regs.takeAny();
-    const Register osrEntry = regs.takeAny();
-
-    loadPtr(Address(script, JSScript::offsetOfIonScript()), ionScript);
-    load32(Address(ionScript, IonScript::offsetOfOsrEntryOffset()), osrEntry);
-
-    // Get ionScript->method->code, and scoot to the osrEntry.
-    const Register code = ionScript;
-    loadPtr(Address(ionScript, IonScript::offsetOfMethod()), code);
-    loadPtr(Address(code, IonCode::offsetOfCode()), code);
-    addPtr(osrEntry, code);
-
-    // To simplify stack handling, we create an intermediate OSR frame, that
-    // looks like a JS frame with no argv.
-    enterOsr(calleeToken, code);
-    ret();
 }
 
 static void
@@ -1312,56 +1202,7 @@ MacroAssembler::handleFailure(ExecutionMode executionMode)
         sps_->reenter(*this, InvalidReg);
 }
 
-void
-MacroAssembler::pushCalleeToken(Register callee, ExecutionMode mode)
-{
-    // Tag and push a callee, then clear the tag after pushing. This is needed
-    // if we dereference the callee pointer after pushing it as part of a
-    // frame.
-    tagCallee(callee, mode);
-    push(callee);
-    clearCalleeTag(callee, mode);
-}
-
-void
-MacroAssembler::PushCalleeToken(Register callee, ExecutionMode mode)
-{
-    tagCallee(callee, mode);
-    Push(callee);
-    clearCalleeTag(callee, mode);
-}
-
-void
-MacroAssembler::tagCallee(Register callee, ExecutionMode mode)
-{
-    switch (mode) {
-      case SequentialExecution:
-        // CalleeToken_Function is untagged, so we don't need to do anything.
-        return;
-      case ParallelExecution:
-        orPtr(Imm32(CalleeToken_ParallelFunction), callee);
-        return;
-      default:
-        MOZ_ASSUME_UNREACHABLE("No such execution mode");
-    }
-}
-
-void
-MacroAssembler::clearCalleeTag(Register callee, ExecutionMode mode)
-{
-    switch (mode) {
-      case SequentialExecution:
-        // CalleeToken_Function is untagged, so we don't need to do anything.
-        return;
-      case ParallelExecution:
-        andPtr(Imm32(~0x3), callee);
-        return;
-      default:
-        MOZ_ASSUME_UNREACHABLE("No such execution mode");
-    }
-}
-
-void printf0_(const char *output) {
+static void printf0_(const char *output) {
     printf("%s", output);
 }
 
@@ -1381,7 +1222,7 @@ MacroAssembler::printf(const char *output)
     PopRegsInMask(RegisterSet::Volatile());
 }
 
-void printf1_(const char *output, uintptr_t value) {
+static void printf1_(const char *output, uintptr_t value) {
     char *line = JS_sprintf_append(nullptr, output, value);
     printf("%s", line);
     js_free(line);
@@ -1853,6 +1694,11 @@ MacroAssembler::convertTypedOrValueToInt(TypedOrValueRegister src, FloatRegister
         break;
       case MIRType_Double:
         convertDoubleToInt(src.typedReg().fpu(), output, temp, nullptr, fail, behavior);
+        break;
+      case MIRType_Float32:
+        // Conversion to Double simplifies implementation at the expense of performance.
+        convertFloatToDouble(src.typedReg().fpu(), temp);
+        convertDoubleToInt(temp, output, temp, nullptr, fail, behavior);
         break;
       case MIRType_String:
       case MIRType_Object:

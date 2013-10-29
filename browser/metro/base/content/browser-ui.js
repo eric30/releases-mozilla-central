@@ -112,6 +112,7 @@ var BrowserUI = {
     NewTabUtils.init();
     SettingsCharm.init();
     NavButtonSlider.init();
+    SelectionHelperUI.init();
 
     // We can delay some initialization until after startup.  We wait until
     // the first page is shown, then dispatch a UIReadyDelayed event.
@@ -148,7 +149,6 @@ var BrowserUI = {
         DialogUI.init();
         FormHelperUI.init();
         FindHelperUI.init();
-        PdfJs.init();
       } catch(ex) {
         Util.dumpLn("Exception in delay load module:", ex.message);
       }
@@ -1061,7 +1061,7 @@ var BrowserUI = {
         this.undoCloseTab();
         break;
       case "cmd_sanitize":
-        SanitizeUI.onSanitize();
+        this.confirmSanitizeDialog();
         break;
       case "cmd_flyout_back":
         FlyoutPanelsUI.onBackButton();
@@ -1075,6 +1075,30 @@ var BrowserUI = {
       case "cmd_savePage":
         this.savePage();
         break;
+    }
+  },
+
+  confirmSanitizeDialog: function () {
+    let bundle = Services.strings.createBundle("chrome://browser/locale/browser.properties");
+    let title = bundle.GetStringFromName("clearPrivateData.title");
+    let message = bundle.GetStringFromName("clearPrivateData.message");
+    let clearbutton = bundle.GetStringFromName("clearPrivateData.clearButton");
+
+    let buttonPressed = Services.prompt.confirmEx(
+                          null,
+                          title,
+                          message,
+                          Ci.nsIPrompt.BUTTON_POS_0 * Ci.nsIPrompt.BUTTON_TITLE_IS_STRING +
+                          Ci.nsIPrompt.BUTTON_POS_1 * Ci.nsIPrompt.BUTTON_TITLE_CANCEL,
+                          clearbutton,
+                          null,
+                          null,
+                          null,
+                          { value: false });
+
+    // Clicking 'Clear' will call onSanitize().
+    if (buttonPressed === 0) {
+      SanitizeUI.onSanitize();
     }
   },
 

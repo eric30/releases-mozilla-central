@@ -38,6 +38,7 @@ namespace ipc {
   class NfcConsumer;
 #endif
   class UnixSocketRawData;
+  class KeyStore;
 }
 
 namespace dom {
@@ -81,6 +82,7 @@ private:
   nsresult InitNetd(JSContext *cx);
 #endif
   nsresult InitWifi(JSContext *cx);
+  nsresult InitKeyStore(JSContext *cx);
 
 #ifdef MOZ_NFC
   nsCOMPtr<nsIWorkerHolder> mNfcWorker;
@@ -95,6 +97,7 @@ private:
 #ifdef MOZ_NFC
   nsRefPtr<ipc::NfcConsumer> mNfcConsumer;
 #endif
+  nsRefPtr<ipc::KeyStore> mKeyStore;
 
   bool mShutdown;
 };

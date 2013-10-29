@@ -11,7 +11,7 @@
 #ifdef JS_ION
 #include "jit/BaselineJIT.h"
 #include "jit/Ion.h"
-#include "jit/IonCompartment.h"
+#include "jit/JitCompartment.h"
 #endif
 #include "vm/Debugger.h"
 #include "vm/Runtime.h"
@@ -183,7 +183,7 @@ Zone::sweepBreakpoints(FreeOp *fop)
 }
 
 void
-Zone::discardJitCode(FreeOp *fop, bool discardConstraints)
+Zone::discardJitCode(FreeOp *fop)
 {
 #ifdef JS_ION
     if (isPreservingCode()) {
@@ -224,10 +224,10 @@ Zone::discardJitCode(FreeOp *fop, bool discardConstraints)
 
         for (CompartmentsInZoneIter comp(this); !comp.done(); comp.next()) {
             /* Free optimized baseline stubs. */
-            if (comp->ionCompartment())
-                comp->ionCompartment()->optimizedStubSpace()->free();
+            if (comp->jitCompartment())
+                comp->jitCompartment()->optimizedStubSpace()->free();
 
-            comp->types.sweepCompilerOutputs(fop, discardConstraints);
+            comp->types.clearCompilerOutputs(fop);
         }
     }
 #endif
@@ -237,6 +237,12 @@ JS::Zone *
 js::ZoneOfObject(const JSObject &obj)
 {
     return obj.zone();
+}
+
+JS::Zone *
+js::ZoneOfObjectFromAnyThread(const JSObject &obj)
+{
+    return obj.zoneFromAnyThread();
 }
 
 

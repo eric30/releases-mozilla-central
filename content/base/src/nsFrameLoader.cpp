@@ -19,7 +19,7 @@
 #include "nsIDOMMozBrowserFrame.h"
 #include "nsIDOMWindow.h"
 #include "nsIPresShell.h"
-#include "nsIContent.h"
+#include "nsIContentInlines.h"
 #include "nsIContentViewer.h"
 #include "nsIDocument.h"
 #include "nsIDOMDocument.h"
@@ -504,7 +504,8 @@ nsFrameLoader::ReallyStartLoadingInternal()
   // Kick off the load...
   bool tmpState = mNeedsAsyncDestroy;
   mNeedsAsyncDestroy = true;
-  rv = mDocShell->LoadURI(mURIToLoad, loadInfo, flags, false);
+  nsCOMPtr<nsIURI> uriToLoad = mURIToLoad;
+  rv = mDocShell->LoadURI(uriToLoad, loadInfo, flags, false);
   mNeedsAsyncDestroy = tmpState;
   mURIToLoad = nullptr;
   NS_ENSURE_SUCCESS(rv, rv);
@@ -1449,11 +1450,9 @@ nsFrameLoader::GetOwnApp()
   nsCOMPtr<nsIAppsService> appsService = do_GetService(APPS_SERVICE_CONTRACTID);
   NS_ENSURE_TRUE(appsService, nullptr);
 
-  nsCOMPtr<mozIDOMApplication> domApp;
-  appsService->GetAppByManifestURL(manifest, getter_AddRefs(domApp));
+  nsCOMPtr<mozIApplication> app;
+  appsService->GetAppByManifestURL(manifest, getter_AddRefs(app));
 
-  nsCOMPtr<mozIApplication> app = do_QueryInterface(domApp);
-  MOZ_ASSERT_IF(domApp, app);
   return app.forget();
 }
 
@@ -1472,12 +1471,9 @@ nsFrameLoader::GetContainingApp()
   nsCOMPtr<nsIAppsService> appsService = do_GetService(APPS_SERVICE_CONTRACTID);
   NS_ENSURE_TRUE(appsService, nullptr);
 
-  nsCOMPtr<mozIDOMApplication> domApp;
-  appsService->GetAppByLocalId(appId, getter_AddRefs(domApp));
-  MOZ_ASSERT(domApp);
+  nsCOMPtr<mozIApplication> app;
+  appsService->GetAppByLocalId(appId, getter_AddRefs(app));
 
-  nsCOMPtr<mozIApplication> app = do_QueryInterface(domApp);
-  MOZ_ASSERT_IF(domApp, app);
   return app.forget();
 }
 

@@ -416,7 +416,7 @@ public class GeckoLayerClient implements LayerView.Listener, PanZoomTarget
     /* This is invoked by JNI on the gecko thread */
     DisplayPortMetrics getDisplayPort(boolean pageSizeUpdate, boolean isBrowserContentDisplayed, int tabId, ImmutableViewportMetrics metrics) {
         Tabs tabs = Tabs.getInstance();
-        if (tabs.isSelectedTab(tabs.getTab(tabId)) && isBrowserContentDisplayed) {
+        if (isBrowserContentDisplayed && tabs.isSelectedTabId(tabId)) {
             // for foreground tabs, send the viewport update unless the document
             // displayed is different from the content document. In that case, just
             // calculate the display port.
@@ -896,16 +896,20 @@ public class GeckoLayerClient implements LayerView.Listener, PanZoomTarget
     }
 
     private void setShadowVisibility() {
-        ThreadUtils.postToUiThread(new Runnable() {
-            @Override
-            public void run() {
-                if (BrowserApp.mBrowserToolbar == null) {
-                    return;
+        try {
+            if (BrowserApp.mBrowserToolbar == null) // this will throw if we don't have BrowserApp
+                return;
+            ThreadUtils.postToUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    if (BrowserApp.mBrowserToolbar == null) {
+                        return;
+                    }
+                    ImmutableViewportMetrics m = mViewportMetrics;
+                    BrowserApp.mBrowserToolbar.setShadowVisibility(m.viewportRectTop >= m.pageRectTop);
                 }
-                ImmutableViewportMetrics m = mViewportMetrics;
-                BrowserApp.mBrowserToolbar.setShadowVisibility(m.viewportRectTop >= m.pageRectTop);
-            }
-        });
+            });
+        } catch (NoClassDefFoundError ex) {}
     }
 
     /** Implementation of PanZoomTarget */

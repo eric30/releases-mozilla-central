@@ -14,6 +14,7 @@
 #include "mozilla/gfx/Matrix.h"
 #include "mozilla/gfx/Rect.h"
 #include "mozilla/gfx/2D.h"
+#include "gfxColor.h"
 
 namespace mozilla {
 namespace gfx {
@@ -30,6 +31,11 @@ inline Rect ToRect(const gfxRect &aRect)
 {
   return Rect(Float(aRect.x), Float(aRect.y),
               Float(aRect.width), Float(aRect.height));
+}
+
+inline Rect ToRect(const nsIntRect &aRect)
+{
+  return Rect(aRect.x, aRect.y, aRect.width, aRect.height);
 }
 
 inline IntRect ToIntRect(const nsIntRect &aRect)

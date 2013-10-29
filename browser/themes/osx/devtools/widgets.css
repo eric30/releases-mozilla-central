@@ -269,55 +269,83 @@
 
 /* SideMenuWidget */
 
-.side-menu-widget-container {
+.side-menu-widget-container[theme="dark"] {
   background: url(background-noise-toolbar.png), hsl(208,11%,27%);
   color: #fff;
 }
 
-.side-menu-widget-container[with-arrow=true]:-moz-locale-dir(ltr),
-.side-menu-widget-group[with-arrow=true]:-moz-locale-dir(ltr),
-.side-menu-widget-item[with-arrow=true]:-moz-locale-dir(ltr) {
+.side-menu-widget-container[theme="light"] {
+  background: #fff;
+  color: #000;
+}
+
+/* SideMenuWidget container */
+
+.side-menu-widget-container[with-arrows=true]:-moz-locale-dir(ltr) {
   box-shadow: inset -1px 0 0 #222426;
 }
 
-.side-menu-widget-container[with-arrow=true]:-moz-locale-dir(rtl),
-.side-menu-widget-group[with-arrow=true]:-moz-locale-dir(rtl),
-.side-menu-widget-item[with-arrow=true]:-moz-locale-dir(rtl) {
+.side-menu-widget-container[with-arrows=true]:-moz-locale-dir(rtl) {
   box-shadow: inset 1px 0 0 #222426;
 }
 
+.side-menu-widget-container[with-arrows=true] .side-menu-widget-group {
+  /* To allow visibility of the dark margin shadow. */
+  -moz-margin-end: 1px;
+}
+
+.side-menu-widget-container[with-arrows=true] .side-menu-widget-item {
+  /* To compensate for the arrow image's dark margin. */
+  -moz-margin-end: -1px;
+}
+
+/* SideMenuWidget groups */
+
 .side-menu-widget-group-title {
+  padding: 4px;
+}
+
+.side-menu-widget-group-title[theme="dark"] {
   background-image: linear-gradient(#1f3e4f, #1b3243);
+  text-shadow: 0 -1px 0 hsla(210,8%,5%,.45);
   box-shadow: 0 1px 0 hsla(0,0%,100%,.05) inset,
               0 -2px 0 hsla(206,37%,4%,.05) inset,
               0 -1px 1px hsla(206,37%,4%,.1) inset;
-  text-shadow: 0 -1px 0 hsla(210,8%,5%,.45);
-  padding: 4px;
-  color: #f5f7fa;
-  transition-property: color, text-shadow;
-  transition-duration: 0.3s;
 }
 
-.side-menu-widget-group:hover > .side-menu-widget-group-title {
-  text-shadow: 0 0 1px #cfcfcf;
-  color: #fff;
+.side-menu-widget-group-title[theme="light"] {
+  background-image: linear-gradient(#fff, #eee);
 }
 
-.side-menu-widget-item {
+/* SideMenuWidget items */
+
+.side-menu-widget-item[theme="dark"] {
   border-top: 1px solid hsla(210,8%,5%,.25);
   border-bottom: 1px solid hsla(210,16%,76%,.1);
   margin-top: -1px;
   margin-bottom: -1px;
-  cursor: pointer;
 }
 
-.side-menu-widget-item:last-of-type {
+.side-menu-widget-item[theme="light"] {
+  border-top: 1px solid hsla(210,8%,75%,.25);
+  margin-top: -1px;
+}
+
+.side-menu-widget-item[theme="dark"]:last-of-type {
   box-shadow: inset 0 -1px 0 hsla(210,8%,5%,.25);
 }
 
-.side-menu-widget-item.selected {
+.side-menu-widget-item[theme="light"]:last-of-type {
+  box-shadow: inset 0 -1px 0 hsla(210,8%,75%,.25);
+}
+
+.side-menu-widget-item[theme="dark"].selected {
   background: linear-gradient(hsl(206,61%,40%), hsl(206,61%,31%)) repeat-x top left !important;
   box-shadow: inset 0 1px 0 hsla(210,40%,83%,.15);
+}
+
+.side-menu-widget-item[theme="light"].selected {
+  /* Nothing here yet */
 }
 
 .side-menu-widget-item.selected > .side-menu-widget-item-arrow {
@@ -326,18 +354,19 @@
 }
 
 .side-menu-widget-item.selected > .side-menu-widget-item-arrow:-moz-locale-dir(ltr) {
-  background-image: url(itemArrow-ltr.png), linear-gradient(to right, black, black);
+  background-image: url(itemArrow-ltr.png), linear-gradient(to right, #222426, #222426);
   background-position: center right, top right;
 }
 
 .side-menu-widget-item.selected > .side-menu-widget-item-arrow:-moz-locale-dir(rtl) {
-  background-image: url(itemArrow-rtl.png), linear-gradient(to right, black, black);
+  background-image: url(itemArrow-rtl.png), linear-gradient(to right, #222426, #222426);
   background-position: center left, top left;
 }
 
+/* SideMenuWidget items contents */
+
 .side-menu-widget-item-label {
   padding: 4px 0px;
-  cursor: inherit;
 }
 
 .side-menu-widget-item-arrow {
@@ -364,11 +393,35 @@
   text-shadow: 0 1px 1px #111;
 }
 
+/* SideMenuWidget checkboxes */
+
+.side-menu-widget-group-checkbox {
+  margin: 0;
+  -moz-margin-end: 4px;
+}
+
+.side-menu-widget-item-checkbox {
+  margin: 0;
+  -moz-margin-start: 4px;
+  -moz-margin-end: -4px;
+}
+
+/* SideMenuWidget misc */
+
 .side-menu-widget-empty-notice-container {
-  background: url(background-noise-toolbar.png), hsl(208,11%,27%);
   padding: 12px;
-  color: #fff;
+}
+
+.side-menu-widget-empty-notice-container[theme="dark"] {
+  background: url(background-noise-toolbar.png), hsl(208,11%,27%);
   font-weight: 600;
+  color: #fff;
+}
+
+.side-menu-widget-empty-notice-container[theme="light"] {
+  background: #fff;
+  padding: 4px 8px;
+  color: GrayText;
 }
 
 /* VariablesView */
@@ -535,6 +588,26 @@
   text-shadow: 0 0 8px #ccf;
 }
 
+/* Aligned values */
+
+.variables-view-container[aligned-values] .title > .separator {
+  -moz-box-flex: 1;
+}
+
+.variables-view-container[aligned-values] .title > .value {
+  width: 70vw;
+}
+
+.variables-view-container[aligned-values] .title > .element-value-input {
+  width: calc(70vw - 10px);
+}
+
+/* Actions first */
+
+.variables-view-container[actions-first] .variables-view-delete {
+  -moz-box-ordinal-group: 0;
+}
+
 /* Variables and properties tooltips */
 
 .variable-or-property > tooltip > label {
@@ -568,10 +641,6 @@
 
 .variables-view-delete:active {
   -moz-image-region: rect(0,48px,16px,32px);
-}
-
-*:not(:hover) .variables-view-delete {
-  display: none;
 }
 
 .variables-view-delete > .toolbarbutton-text {
@@ -633,3 +702,5 @@
 .arrow[invisible] {
   visibility: hidden;
 }
+
+%include ../../shared/devtools/app-manager/manifest-editor.inc.css

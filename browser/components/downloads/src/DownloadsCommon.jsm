@@ -235,15 +235,12 @@ this.DownloadsCommon = {
   },
 
   /**
-   * Indicates whether we should show the full Download Manager window interface
-   * instead of the simplified panel interface.  The behavior of downloads
-   * across browsing session is consistent with the selected interface.
+   * Indicates that we should show the simplified panel interface instead of the
+   * full Download Manager window interface.  The code associated with the
+   * Download Manager window interface will be removed in bug 899110.
    */
   get useToolkitUI()
   {
-    try {
-      return Services.prefs.getBoolPref("browser.download.useToolkitUI");
-    } catch (ex) { }
     return false;
   },
 
@@ -570,17 +567,12 @@ XPCOMUtils.defineLazyGetter(DownloadsCommon, "isWinVistaOrHigher", function () {
 });
 
 /**
- * Returns true if we should hook the panel to the JavaScript API for downloads
- * instead of the nsIDownloadManager back-end.  In order for the logic to work
- * properly, this value never changes during the execution of the application,
- * even if the underlying preference value has changed.  A restart is required
- * for the change to take effect.
+ * Returns true to indicate that we should hook the panel to the JavaScript API
+ * for downloads instead of the nsIDownloadManager back-end.  The code
+ * associated with nsIDownloadManager will be removed in bug 899110.
  */
 XPCOMUtils.defineLazyGetter(DownloadsCommon, "useJSTransfer", function () {
-  try {
-    return Services.prefs.getBoolPref("browser.download.useJSTransfer");
-  } catch (ex) { }
-  return false;
+  return true;
 });
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -757,6 +749,7 @@ DownloadsDataCtor.prototype = {
    */
   _updateDataItemState: function (aDataItem)
   {
+    let oldState = aDataItem.state;
     let wasInProgress = aDataItem.inProgress;
     let wasDone = aDataItem.done;
 
@@ -766,11 +759,13 @@ DownloadsDataCtor.prototype = {
       aDataItem.endTime = Date.now();
     }
 
-    for (let view of this._views) {
-      try {
-        view.getViewItem(aDataItem).onStateChange({});
-      } catch (ex) {
-        Cu.reportError(ex);
+    if (oldState != aDataItem.state) {
+      for (let view of this._views) {
+        try {
+          view.getViewItem(aDataItem).onStateChange(oldState);
+        } catch (ex) {
+          Cu.reportError(ex);
+        }
       }
     }
 

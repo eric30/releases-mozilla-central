@@ -29,7 +29,7 @@ class CpowIdHolder : public CpowHolder
     {
     }
 
-    bool ToObject(JSContext *cx, JSObject **objp);
+    bool ToObject(JSContext *cx, JS::MutableHandleObject objp);
 
   private:
     JavaScriptShared *js_;
@@ -87,11 +87,11 @@ class JavaScriptShared
     static const uint32_t OBJECT_EXTRA_BITS  = 1;
     static const uint32_t OBJECT_IS_CALLABLE = (1 << 0);
 
-    bool Unwrap(JSContext *cx, const InfallibleTArray<CpowEntry> &aCpows, JSObject **objp);
+    bool Unwrap(JSContext *cx, const InfallibleTArray<CpowEntry> &aCpows, JS::MutableHandleObject objp);
     bool Wrap(JSContext *cx, JS::HandleObject aObj, InfallibleTArray<CpowEntry> *outCpows);
 
   protected:
-    bool toVariant(JSContext *cx, jsval from, JSVariant *to);
+    bool toVariant(JSContext *cx, JS::HandleValue from, JSVariant *to);
     bool toValue(JSContext *cx, const JSVariant &from, JS::MutableHandleValue to);
     bool fromDescriptor(JSContext *cx, JS::Handle<JSPropertyDescriptor> desc, PPropertyDescriptor *out);
     bool toDescriptor(JSContext *cx, const PPropertyDescriptor &in,

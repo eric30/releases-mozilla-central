@@ -136,7 +136,7 @@ MaybeCheckEvalFreeVariables(ExclusiveContext *cxArg, HandleScript evalCaller, Ha
     return true;
 }
 
-inline bool
+static inline bool
 CanLazilyParse(ExclusiveContext *cx, const CompileOptions &options)
 {
     return options.canLazilyParse &&
@@ -454,12 +454,17 @@ frontend::CompileLazyFunction(JSContext *cx, LazyScript *lazy, const jschar *cha
         script->directlyInsideEval = true;
     if (lazy->usesArgumentsAndApply())
         script->usesArgumentsAndApply = true;
+    if (lazy->hasBeenCloned())
+        script->hasBeenCloned = true;
 
     BytecodeEmitter bce(/* parent = */ nullptr, &parser, pn->pn_funbox, script, options.forEval,
                         /* evalCaller = */ NullPtr(), /* hasGlobalScope = */ true,
                         options.lineno, BytecodeEmitter::LazyFunction);
     if (!bce.init())
         return false;
+
+    if (lazy->treatAsRunOnce())
+        bce.lazyRunOnceLambda = true;
 
     return EmitFunctionScript(cx, &bce, pn->pn_body);
 }

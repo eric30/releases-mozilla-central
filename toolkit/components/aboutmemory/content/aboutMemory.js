@@ -50,10 +50,8 @@ let gMgr = Cc["@mozilla.org/memory-reporter-manager;1"]
 
 // We need to know about "child-memory-reporter-update" events from child
 // processes.
-let gOs = Cc["@mozilla.org/observer-service;1"]
-            .getService(Ci.nsIObserverService);
-gOs.addObserver(updateAboutMemoryFromReporters,
-                "child-memory-reporter-update", false);
+Services.obs.addObserver(updateAboutMemoryFromReporters,
+                         "child-memory-reporter-update", false);
 
 let gUnnamedProcessStr = "Main Process";
 
@@ -122,8 +120,8 @@ function debug(x)
 
 function onUnload()
 {
-  gOs.removeObserver(updateAboutMemoryFromReporters,
-                     "child-memory-reporter-update");
+  Services.obs.removeObserver(updateAboutMemoryFromReporters,
+                              "child-memory-reporter-update");
 }
 
 //---------------------------------------------------------------------------
@@ -411,9 +409,7 @@ function onLoad()
 function doGC()
 {
   Cu.forceGC();
-  let os = Cc["@mozilla.org/observer-service;1"]
-             .getService(Ci.nsIObserverService);
-  os.notifyObservers(null, "child-gc-request", null);
+  Services.obs.notifyObservers(null, "child-gc-request", null);
   updateMainAndFooter("Garbage collection completed", HIDE_FOOTER);
 }
 
@@ -422,9 +418,7 @@ function doCC()
   window.QueryInterface(Ci.nsIInterfaceRequestor)
         .getInterface(Ci.nsIDOMWindowUtils)
         .cycleCollect();
-  let os = Cc["@mozilla.org/observer-service;1"]
-             .getService(Ci.nsIObserverService);
-  os.notifyObservers(null, "child-cc-request", null);
+  Services.obs.notifyObservers(null, "child-cc-request", null);
   updateMainAndFooter("Cycle collection completed", HIDE_FOOTER);
 }
 
@@ -440,7 +434,7 @@ function doMeasure()
   // update the page.  If any reports come back from children,
   // updateAboutMemoryFromReporters() will be called again and the page will
   // regenerate.
-  gOs.notifyObservers(null, "child-memory-reporter-request", null);
+  Services.obs.notifyObservers(null, "child-memory-reporter-request", null);
   updateAboutMemoryFromReporters();
 }
 
@@ -616,8 +610,6 @@ function updateAboutMemoryFromTwoFiles(aFilename1, aFilename2)
 function updateAboutMemoryFromClipboard()
 {
   // Get the clipboard's contents.
-  let cb = Cc["@mozilla.org/widget/clipboard;1"].
-           getService(Components.interfaces.nsIClipboard);
   let transferable = Cc["@mozilla.org/widget/transferable;1"]
                        .createInstance(Ci.nsITransferable);
   let loadContext = window.QueryInterface(Ci.nsIInterfaceRequestor)
@@ -625,7 +617,7 @@ function updateAboutMemoryFromClipboard()
                           .QueryInterface(Ci.nsILoadContext);
   transferable.init(loadContext);
   transferable.addDataFlavor('text/unicode');
-  cb.getData(transferable, Ci.nsIClipboard.kGlobalClipboard);
+  Services.clipboard.getData(transferable, Ci.nsIClipboard.kGlobalClipboard);
 
   var cbData = {};
   try {
@@ -893,7 +885,7 @@ function appendAboutMemoryMain(aProcessReports, aHasMozMallocUsableSize)
     let process = processes[i];
     let section = appendElement(gMain, 'div', 'section');
 
-    appendProcessAboutMemoryElements(section, process,
+    appendProcessAboutMemoryElements(section, i, process,
                                      pcollsByProcess[process]._trees,
                                      pcollsByProcess[process]._degenerates,
                                      pcollsByProcess[process]._heapTotal,
@@ -1316,6 +1308,8 @@ function appendWarningElements(aP, aHasKnownHeapAllocated,
  *
  * @param aP
  *        The parent DOM node.
+ * @param aN
+ *        The number of the process, starting at 0.
  * @param aProcess
  *        The name of the process.
  * @param aTrees
@@ -1326,10 +1320,34 @@ function appendWarningElements(aP, aHasKnownHeapAllocated,
  *        Boolean indicating if moz_malloc_usable_size works.
  * @return The generated text.
  */
-function appendProcessAboutMemoryElements(aP, aProcess, aTrees, aDegenerates,
-                                          aHeapTotal, aHasMozMallocUsableSize)
+function appendProcessAboutMemoryElements(aP, aN, aProcess, aTrees,
+                                          aDegenerates, aHeapTotal,
+                                          aHasMozMallocUsableSize)
 {
-  appendElementWithText(aP, "h1", "", aProcess + "\n\n");
+  const kUpwardsArrow   = "\u2191",
+        kDownwardsArrow = "\u2193";
+
+  let appendLink = function(aHere, aThere, aArrow) {
+    let link = appendElementWithText(aP, "a", "upDownArrow", aArrow);
+    link.href = "#" + aThere + aN;
+    link.id = aHere + aN;
+    link.title = "Go to the " + aThere + " of " + aProcess;
+    link.style = "text-decoration: none";
+
+    // This jumps to the anchor without the page location getting the anchor
+    // name tacked onto its end, which is what happens with a vanilla link.
+    link.addEventListener("click", function(event) {
+      document.documentElement.scrollTop =
+        document.querySelector(event.target.href).offsetTop;
+      event.preventDefault();
+    }, false);
+
+    // This gives nice spacing when we copy and paste.
+    appendElementWithText(aP, "span", "", "\n");
+  }
+
+  appendElementWithText(aP, "h1", "", aProcess);
+  appendLink("start", "end", kDownwardsArrow);
 
   // We'll fill this in later.
   let warningsDiv = appendElement(aP, "div", "accuracyWarning");
@@ -1355,7 +1373,7 @@ function appendProcessAboutMemoryElements(aP, aProcess, aTrees, aDegenerates,
       appendTreeElements(pre, t, aProcess, "");
       delete aTrees[treeName];
     }
-    appendTextNode(aP, "\n");  // gives nice spacing when we cut and paste
+    appendTextNode(aP, "\n");  // gives nice spacing when we copy and paste
   }
 
   // Fill in and sort all the non-degenerate other trees.
@@ -1396,13 +1414,16 @@ function appendProcessAboutMemoryElements(aP, aProcess, aTrees, aDegenerates,
     let padText = pad("", maxStringLength - t.toString().length, ' ');
     appendTreeElements(pre, t, aProcess, padText);
   }
-  appendTextNode(aP, "\n");  // gives nice spacing when we cut and paste
+  appendTextNode(aP, "\n");  // gives nice spacing when we copy and paste
 
   // Add any warnings about inaccuracies due to platform limitations.
   // These must be computed after generating all the text.  The newlines give
-  // nice spacing if we cut+paste into a text buffer.
+  // nice spacing if we copy+paste into a text buffer.
   appendWarningElements(warningsDiv, hasKnownHeapAllocated,
                         aHasMozMallocUsableSize);
+
+  appendElementWithText(aP, "h3", "", "End of " + aProcess);
+  appendLink("end", "start", kUpwardsArrow);
 }
 
 /**
@@ -1525,7 +1546,7 @@ function pad(aS, aN, aC)
 
 // There's a subset of the Unicode "light" box-drawing chars that is widely
 // implemented in terminals, and this code sticks to that subset to maximize
-// the chance that cutting and pasting about:memory output to a terminal will
+// the chance that copying and pasting about:memory output to a terminal will
 // work correctly.
 const kHorizontal                   = "\u2500",
       kVertical                     = "\u2502",

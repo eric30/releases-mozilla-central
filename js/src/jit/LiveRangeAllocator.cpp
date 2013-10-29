@@ -428,8 +428,7 @@ LiveRangeAllocator<VREG>::init()
             for (size_t j = 0; j < ins->numDefs(); j++) {
                 LDefinition *def = ins->getDef(j);
                 if (def->policy() != LDefinition::PASSTHROUGH) {
-                    uint32_t reg = def->virtualRegister();
-                    if (!vregs[reg].init(reg, block, *ins, def, /* isTemp */ false))
+                    if (!vregs[def].init(block, *ins, def, /* isTemp */ false))
                         return false;
                 }
             }
@@ -438,14 +437,14 @@ LiveRangeAllocator<VREG>::init()
                 LDefinition *def = ins->getTemp(j);
                 if (def->isBogusTemp())
                     continue;
-                if (!vregs[def].init(def->virtualRegister(), block, *ins, def, /* isTemp */ true))
+                if (!vregs[def].init(block, *ins, def, /* isTemp */ true))
                     return false;
             }
         }
         for (size_t j = 0; j < block->numPhis(); j++) {
             LPhi *phi = block->getPhi(j);
             LDefinition *def = phi->getDef(0);
-            if (!vregs[def].init(phi->id(), block, phi, def, /* isTemp */ false))
+            if (!vregs[def].init(block, phi, def, /* isTemp */ false))
                 return false;
         }
     }
@@ -633,9 +632,28 @@ LiveRangeAllocator<VREG>::buildLivenessInfo()
                             return false;
                     }
                 } else {
+                    // Normally temps are considered to cover both the input
+                    // and output of the associated instruction. In some cases
+                    // though we want to use a fixed register as both an input
+                    // and clobbered register in the instruction, so watch for
+                    // this and shorten the temp to cover only the output.
+                    CodePosition from = inputOf(*ins);
+                    if (temp->policy() == LDefinition::PRESET) {
+                        AnyRegister reg = temp->output()->toRegister();
+                        for (LInstruction::InputIterator alloc(**ins); alloc.more(); alloc.next()) {
+                            if (alloc->isUse()) {
+                                LUse *use = alloc->toUse();
+                                if (use->isFixedRegister()) {
+                                    if (GetFixedRegister(vregs[use].def(), use) == reg)
+                                        from = outputOf(*ins);
+                                }
+                            }
+                        }
+                    }
+
                     CodePosition to =
                         ins->isCall() ? outputOf(*ins) : outputOf(*ins).next();
-                    if (!vregs[temp].getInterval(0)->addRangeAtHead(inputOf(*ins), to))
+                    if (!vregs[temp].getInterval(0)->addRangeAtHead(from, to))
                         return false;
                 }
             }
@@ -685,7 +703,6 @@ LiveRangeAllocator<VREG>::buildLivenessInfo()
                     CodePosition to;
                     if (forLSRA) {
                         if (use->isFixedRegister()) {
-                            JS_ASSERT(!use->usedAtStart());
                             AnyRegister reg = GetFixedRegister(vregs[use].def(), use);
                             if (!addFixedRangeAtHead(reg, inputOf(*ins), outputOf(*ins)))
                                 return false;

@@ -62,6 +62,8 @@ XPCOMUtils.defineLazyServiceGetter(this, "idleService",
                                    "nsIIdleService");
 XPCOMUtils.defineLazyModuleGetter(this, "UpdateChannel",
                                   "resource://gre/modules/UpdateChannel.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "AddonManagerPrivate",
+                                  "resource://gre/modules/AddonManager.jsm");
 
 function generateUUID() {
   let str = Cc["@mozilla.org/uuid-generator;1"].getService(Ci.nsIUUIDGenerator).generateUUID().toString();
@@ -158,9 +160,7 @@ TelemetryPing.prototype = {
       appTimestamps = o.TelemetryTimestamps.get();
     } catch (ex) {}
     try {
-      let o = {};
-      Cu.import("resource://gre/modules/AddonManager.jsm", o);
-      ret.addonManager = o.AddonManagerPrivate.getSimpleMeasures();
+      ret.addonManager = AddonManagerPrivate.getSimpleMeasures();
     } catch (ex) {}
 
     if (si.process) {
@@ -545,11 +545,13 @@ TelemetryPing.prototype = {
       chromeHangs: Telemetry.chromeHangs,
       lateWrites: Telemetry.lateWrites,
       addonHistograms: this.getAddonHistograms(),
+      addonDetails: AddonManagerPrivate.getTelemetryDetails(),
       info: info
     };
 
-    if (Object.keys(this._slowSQLStartup.mainThread).length
-      || Object.keys(this._slowSQLStartup.otherThreads).length) {
+    if (Object.keys(this._slowSQLStartup).length != 0 &&
+        (Object.keys(this._slowSQLStartup.mainThread).length ||
+         Object.keys(this._slowSQLStartup.otherThreads).length)) {
       payloadObj.slowSQLStartup = this._slowSQLStartup;
     }
 
@@ -679,9 +681,14 @@ TelemetryPing.prototype = {
     request.addEventListener("load", handler(true, onSuccess).bind(this), false);
 
     request.setRequestHeader("Content-Encoding", "gzip");
+    let converter = Cc["@mozilla.org/intl/scriptableunicodeconverter"]
+                    .createInstance(Ci.nsIScriptableUnicodeConverter);
+    converter.charset = "UTF-8";
+    let utf8Payload = converter.ConvertFromUnicode(JSON.stringify(ping.payload));
+    utf8Payload += converter.Finish();
     let payloadStream = Cc["@mozilla.org/io/string-input-stream;1"]
                         .createInstance(Ci.nsIStringInputStream);
-    payloadStream.data = this.gzipCompressString(JSON.stringify(ping.payload));
+    payloadStream.data = this.gzipCompressString(utf8Payload);
     request.send(payloadStream);
   },
 
@@ -689,7 +696,7 @@ TelemetryPing.prototype = {
     let observer = {
       buffer: "",
       onStreamComplete: function(loader, context, status, length, result) {
-	this.buffer = String.fromCharCode.apply(this, result);
+        this.buffer = String.fromCharCode.apply(this, result);
       }
     };
 

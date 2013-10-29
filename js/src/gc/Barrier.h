@@ -152,11 +152,14 @@ class BarrieredCell : public gc::Cell
   public:
     JS_ALWAYS_INLINE JS::Zone *zone() const { return tenuredZone(); }
     JS_ALWAYS_INLINE JS::shadow::Zone *shadowZone() const { return JS::shadow::Zone::asShadowZone(zone()); }
-    bool isInsideZone(JS::Zone *zone_) const { return tenuredIsInsideZone(zone_); }
+    JS_ALWAYS_INLINE JS::Zone *zoneFromAnyThread() const { return tenuredZoneFromAnyThread(); }
+    JS_ALWAYS_INLINE JS::shadow::Zone *shadowZoneFromAnyThread() const {
+        return JS::shadow::Zone::asShadowZone(zoneFromAnyThread());
+    }
 
     static JS_ALWAYS_INLINE void readBarrier(T *thing) {
 #ifdef JSGC_INCREMENTAL
-        JS::shadow::Zone *shadowZone = thing->shadowZone();
+        JS::shadow::Zone *shadowZone = thing->shadowZoneFromAnyThread();
         if (shadowZone->needsBarrier()) {
             MOZ_ASSERT(!RuntimeFromMainThreadIsHeapMajorCollecting(shadowZone));
             T *tmp = thing;
@@ -181,7 +184,7 @@ class BarrieredCell : public gc::Cell
         if (isNullLike(thing) || !thing->shadowRuntimeFromAnyThread()->needsBarrier())
             return;
 
-        JS::shadow::Zone *shadowZone = thing->shadowZone();
+        JS::shadow::Zone *shadowZone = thing->shadowZoneFromAnyThread();
         if (shadowZone->needsBarrier()) {
             MOZ_ASSERT(!RuntimeFromMainThreadIsHeapMajorCollecting(shadowZone));
             T *tmp = thing;
@@ -223,6 +226,31 @@ ZoneOfValue(const JS::Value &value)
     if (value.isObject())
         return ZoneOfObject(value.toObject());
     return static_cast<js::gc::Cell *>(value.toGCThing())->tenuredZone();
+}
+
+JS::Zone *
+ZoneOfObjectFromAnyThread(const JSObject &obj);
+
+static inline JS::shadow::Zone *
+ShadowZoneOfObjectFromAnyThread(JSObject *obj)
+{
+    return JS::shadow::Zone::asShadowZone(ZoneOfObjectFromAnyThread(*obj));
+}
+
+static inline JS::shadow::Zone *
+ShadowZoneOfStringFromAnyThread(JSString *str)
+{
+    return JS::shadow::Zone::asShadowZone(
+        reinterpret_cast<const js::gc::Cell *>(str)->tenuredZoneFromAnyThread());
+}
+
+JS_ALWAYS_INLINE JS::Zone *
+ZoneOfValueFromAnyThread(const JS::Value &value)
+{
+    JS_ASSERT(value.isMarkable());
+    if (value.isObject())
+        return ZoneOfObjectFromAnyThread(value.toObject());
+    return static_cast<js::gc::Cell *>(value.toGCThing())->tenuredZoneFromAnyThread();
 }
 
 /*
@@ -392,7 +420,7 @@ class RelocatablePtr : public EncapsulatedPtr<T>
 
     ~RelocatablePtr() {
         if (this->value)
-            relocate(this->value->runtimeFromMainThread());
+            relocate(this->value->runtimeFromAnyThread());
     }
 
     RelocatablePtr<T> &operator=(T *v) {
@@ -402,7 +430,7 @@ class RelocatablePtr : public EncapsulatedPtr<T>
             this->value = v;
             post();
         } else if (this->value) {
-            JSRuntime *rt = this->value->runtimeFromMainThread();
+            JSRuntime *rt = this->value->runtimeFromAnyThread();
             this->value = v;
             relocate(rt);
         }
@@ -416,7 +444,7 @@ class RelocatablePtr : public EncapsulatedPtr<T>
             this->value = v.value;
             post();
         } else if (this->value) {
-            JSRuntime *rt = this->value->runtimeFromMainThread();
+            JSRuntime *rt = this->value->runtimeFromAnyThread();
             this->value = v;
             relocate(rt);
         }
@@ -567,7 +595,7 @@ class EncapsulatedValue : public ValueOperations<EncapsulatedValue>
     static void writeBarrierPre(const Value &v) {
 #ifdef JSGC_INCREMENTAL
         if (v.isMarkable() && shadowRuntimeFromAnyThread(v)->needsBarrier())
-            writeBarrierPre(ZoneOfValue(v), v);
+            writeBarrierPre(ZoneOfValueFromAnyThread(v), v);
 #endif
     }
 
@@ -684,7 +712,7 @@ class HeapValue : public EncapsulatedValue
     static void writeBarrierPost(const Value &value, Value *addr) {
 #ifdef JSGC_GENERATIONAL
         if (value.isMarkable())
-            shadowRuntimeFromMainThread(value)->gcStoreBufferPtr()->putValue(addr);
+            shadowRuntimeFromAnyThread(value)->gcStoreBufferPtr()->putValue(addr);
 #endif
     }
 
@@ -733,7 +761,7 @@ class RelocatableValue : public EncapsulatedValue
     ~RelocatableValue()
     {
         if (value.isMarkable())
-            relocate(runtimeFromMainThread(value));
+            relocate(runtimeFromAnyThread(value));
     }
 
     RelocatableValue &operator=(const Value &v) {
@@ -743,7 +771,7 @@ class RelocatableValue : public EncapsulatedValue
             value = v;
             post();
         } else if (value.isMarkable()) {
-            JSRuntime *rt = runtimeFromMainThread(value);
+            JSRuntime *rt = runtimeFromAnyThread(value);
             relocate(rt);
             value = v;
         } else {
@@ -759,7 +787,7 @@ class RelocatableValue : public EncapsulatedValue
             value = v.value;
             post();
         } else if (value.isMarkable()) {
-            JSRuntime *rt = runtimeFromMainThread(value);
+            JSRuntime *rt = runtimeFromAnyThread(value);
             relocate(rt);
             value = v.value;
         } else {
@@ -772,7 +800,7 @@ class RelocatableValue : public EncapsulatedValue
     void post() {
 #ifdef JSGC_GENERATIONAL
         JS_ASSERT(value.isMarkable());
-        shadowRuntimeFromMainThread(value)->gcStoreBufferPtr()->putRelocatableValue(&value);
+        shadowRuntimeFromAnyThread(value)->gcStoreBufferPtr()->putRelocatableValue(&value);
 #endif
     }
 
@@ -950,14 +978,14 @@ class EncapsulatedId
 #ifdef JSGC_INCREMENTAL
         if (JSID_IS_OBJECT(value)) {
             JSObject *obj = JSID_TO_OBJECT(value);
-            JS::shadow::Zone *shadowZone = ShadowZoneOfObject(obj);
+            JS::shadow::Zone *shadowZone = ShadowZoneOfObjectFromAnyThread(obj);
             if (shadowZone->needsBarrier()) {
                 js::gc::MarkObjectUnbarriered(shadowZone->barrierTracer(), &obj, "write barrier");
                 JS_ASSERT(obj == JSID_TO_OBJECT(value));
             }
         } else if (JSID_IS_STRING(value)) {
             JSString *str = JSID_TO_STRING(value);
-            JS::shadow::Zone *shadowZone = ShadowZoneOfString(str);
+            JS::shadow::Zone *shadowZone = ShadowZoneOfStringFromAnyThread(str);
             if (shadowZone->needsBarrier()) {
                 js::gc::MarkStringUnbarriered(shadowZone->barrierTracer(), &str, "write barrier");
                 JS_ASSERT(str == JSID_TO_STRING(value));

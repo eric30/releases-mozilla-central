@@ -165,7 +165,7 @@ js::ScopeCoordinateFunctionScript(JSContext *cx, JSScript *script, jsbytecode *p
 
 /*****************************************************************************/
 
-inline void
+void
 ScopeObject::setEnclosingScope(HandleObject obj)
 {
     JS_ASSERT_IF(obj->is<CallObject>() || obj->is<DeclEnvObject>() || obj->is<BlockObject>(),
@@ -361,8 +361,8 @@ DeclEnvObject::createTemplateObject(JSContext *cx, HandleFunction fun, gc::Initi
     Rooted<jsid> id(cx, AtomToId(fun->atom()));
     const Class *clasp = obj->getClass();
     unsigned attrs = JSPROP_ENUMERATE | JSPROP_PERMANENT | JSPROP_READONLY;
-    if (!JSObject::putProperty(cx, obj, id, clasp->getProperty, clasp->setProperty,
-                               lambdaSlot(), attrs, 0, 0))
+    if (!JSObject::putProperty<SequentialExecution>(cx, obj, id, clasp->getProperty,
+                                                    clasp->setProperty, lambdaSlot(), attrs, 0, 0))
     {
         return nullptr;
     }
@@ -709,11 +709,12 @@ StaticBlockObject::addVar(ExclusiveContext *cx, Handle<StaticBlockObject*> block
      * block's shape later.
      */
     uint32_t slot = JSSLOT_FREE(&BlockObject::class_) + index;
-    return JSObject::addPropertyInternal(cx, block, id,
-                                         /* getter = */ nullptr, /* setter = */ nullptr,
-                                         slot, JSPROP_ENUMERATE | JSPROP_PERMANENT,
-                                         Shape::HAS_SHORTID, index, spp,
-                                         /* allowDictionary = */ false);
+    return JSObject::addPropertyInternal<SequentialExecution>(
+        cx, block, id,
+        /* getter = */ nullptr, /* setter = */ nullptr,
+        slot, JSPROP_ENUMERATE | JSPROP_PERMANENT,
+        Shape::HAS_SHORTID, index, spp,
+        /* allowDictionary = */ false);
 }
 
 const Class BlockObject::class_ = {
@@ -1508,7 +1509,7 @@ DebugScopeObject::create(JSContext *cx, ScopeObject &scope, HandleObject enclosi
     JS_ASSERT(scope.compartment() == cx->compartment());
     RootedValue priv(cx, ObjectValue(scope));
     JSObject *obj = NewProxyObject(cx, &DebugScopeProxy::singleton, priv,
-                                   nullptr /* proto */, &scope.global(), ProxyNotCallable);
+                                   nullptr /* proto */, &scope.global());
     if (!obj)
         return nullptr;
 
@@ -1555,9 +1556,9 @@ DebugScopeObject::isForDeclarative() const
 }
 
 bool
-js_IsDebugScopeSlow(ObjectProxyObject *proxy)
+js_IsDebugScopeSlow(ProxyObject *proxy)
 {
-    JS_ASSERT(proxy->hasClass(&ObjectProxyObject::class_));
+    JS_ASSERT(proxy->hasClass(&ProxyObject::uncallableClass_));
     return proxy->handler() == &DebugScopeProxy::singleton;
 }
 
@@ -1803,7 +1804,7 @@ DebugScopes::onPopCall(AbstractFramePtr frame, JSContext *cx)
          * but are aliased via the arguments object.
          */
         RootedScript script(cx, frame.script());
-        if (script->needsArgsObj() && frame.hasArgsObj()) {
+        if (script->analyzedArgsUsage() && script->needsArgsObj() && frame.hasArgsObj()) {
             for (unsigned i = 0; i < frame.numFormalArgs(); ++i) {
                 if (script->formalLivesInArgumentsObject(i))
                     vec[i] = frame.argsObj().arg(i);

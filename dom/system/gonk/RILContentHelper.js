@@ -18,29 +18,23 @@
 const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
 Cu.import("resource://gre/modules/DOMRequestHelper.jsm");
-Cu.import("resource://gre/modules/ObjectWrapper.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 var RIL = {};
 Cu.import("resource://gre/modules/ril_consts.js", RIL);
 
-// set to true to in ril_consts.js to see debug messages
-var DEBUG = RIL.DEBUG_CONTENT_HELPER;
+const NS_XPCOM_SHUTDOWN_OBSERVER_ID = "xpcom-shutdown";
 
-// Read debug setting from pref
-try {
-  let debugPref = Services.prefs.getBoolPref("ril.debugging.enabled");
-  DEBUG = RIL.DEBUG_CONTENT_HELPER || debugPref;
-} catch (e) {}
+const NS_PREFBRANCH_PREFCHANGE_TOPIC_ID = "nsPref:changed";
 
-let debug;
-if (DEBUG) {
-  debug = function (s) {
-    dump("-*- RILContentHelper: " + s + "\n");
-  };
-} else {
-  debug = function (s) {};
+const kPrefRilNumRadioInterfaces = "ril.numRadioInterfaces";
+const kPrefRilDebuggingEnabled = "ril.debugging.enabled";
+const kPrefVoicemailDefaultServiceId = "dom.voicemail.defaultServiceId";
+
+let DEBUG;
+function debug(s) {
+  dump("-*- RILContentHelper: " + s + "\n");
 }
 
 const RILCONTENTHELPER_CID =
@@ -65,6 +59,8 @@ const CELLBROADCASTETWSINFO_CID =
   Components.ID("{59f176ee-9dcd-4005-9d47-f6be0cd08e17}");
 const DOMMMIERROR_CID =
   Components.ID("{6b204c42-7928-4e71-89ad-f90cd82aff96}");
+const ICCCARDLOCKERROR_CID =
+  Components.ID("{08a71987-408c-44ff-93fd-177c0a85c3dd}");
 
 const RIL_IPC_MSG_NAMES = [
   "RIL:CardStateChanged",
@@ -113,6 +109,19 @@ const RIL_IPC_MSG_NAMES = [
 XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
                                    "@mozilla.org/childprocessmessagemanager;1",
                                    "nsISyncMessageSender");
+
+XPCOMUtils.defineLazyGetter(this, "gNumRadioInterfaces", function () {
+  let appInfo = Cc["@mozilla.org/xre/app-info;1"];
+  let isParentProcess = !appInfo || appInfo.getService(Ci.nsIXULRuntime)
+                          .processType == Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT;
+
+  if (isParentProcess) {
+    let ril = Cc["@mozilla.org/ril;1"].getService(Ci.nsIRadioInterfaceLayer);
+    return ril.numRadioInterfaces;
+  }
+
+  return Services.prefs.getIntPref(kPrefRilNumRadioInterfaces);
+});
 
 function MobileIccCardLockResult(options) {
   this.lockType = options.lockType;
@@ -418,7 +427,23 @@ DOMMMIError.prototype = {
   },
 };
 
+function IccCardLockError() {
+}
+IccCardLockError.prototype = {
+  classDescription: "IccCardLockError",
+  classID:          ICCCARDLOCKERROR_CID,
+  contractID:       "@mozilla.org/dom/icccardlock-error;1",
+  QueryInterface:   XPCOMUtils.generateQI([Ci.nsISupports]),
+  __init: function(lockType, errorMsg, retryCount) {
+    this.__DOM_IMPL__.init(errorMsg);
+    this.lockType = lockType;
+    this.retryCount = retryCount;
+  },
+};
+
 function RILContentHelper() {
+  this.updateDebugFlag();
+
   this.rilContext = {
     cardState:            RIL.GECKO_CARDSTATE_UNKNOWN,
     networkSelectionMode: RIL.GECKO_NETWORK_SELECTION_UNKNOWN,
@@ -427,10 +452,15 @@ function RILContentHelper() {
     dataConnectionInfo:   new MobileConnectionInfo()
   };
   this.voicemailInfo = new VoicemailInfo();
+  this.voicemailDefaultServiceId = this.getVoicemailDefaultServiceId();
 
   this.initDOMRequestHelper(/* aWindow */ null, RIL_IPC_MSG_NAMES);
   this._windowsMap = [];
-  Services.obs.addObserver(this, "xpcom-shutdown", false);
+
+  Services.obs.addObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID, false);
+
+  Services.prefs.addObserver(kPrefRilDebuggingEnabled, this, false);
+  Services.prefs.addObserver(kPrefVoicemailDefaultServiceId, this, false);
 }
 
 RILContentHelper.prototype = {
@@ -449,6 +479,13 @@ RILContentHelper.prototype = {
                                                  Ci.nsICellBroadcastProvider,
                                                  Ci.nsIVoicemailProvider,
                                                  Ci.nsIIccProvider]}),
+
+  updateDebugFlag: function updateDebugFlag() {
+    try {
+      DEBUG = RIL.DEBUG_CONTENT_HELPER ||
+              Services.prefs.getBoolPref(kPrefRilDebuggingEnabled);
+    } catch (e) {}
+  },
 
   // An utility function to copy objects.
   updateInfo: function updateInfo(srcInfo, destInfo) {
@@ -760,6 +797,8 @@ RILContentHelper.prototype = {
     }
     let request = Services.DOMRequest.createRequest(window);
     let requestId = this.getRequestId(request);
+    this._windowsMap[requestId] = window;
+
     cpmm.sendAsyncMessage("RIL:GetCardLockState", {
       clientId: 0,
       data: {
@@ -777,6 +816,8 @@ RILContentHelper.prototype = {
     }
     let request = Services.DOMRequest.createRequest(window);
     info.requestId = this.getRequestId(request);
+    this._windowsMap[info.requestId] = window;
+
     cpmm.sendAsyncMessage("RIL:UnlockCardLock", {
       clientId: 0,
       data: info
@@ -791,6 +832,8 @@ RILContentHelper.prototype = {
     }
     let request = Services.DOMRequest.createRequest(window);
     info.requestId = this.getRequestId(request);
+    this._windowsMap[info.requestId] = window;
+
     cpmm.sendAsyncMessage("RIL:SetCardLock", {
       clientId: 0,
       data: info
@@ -816,10 +859,6 @@ RILContentHelper.prototype = {
   },
 
   sendMMI: function sendMMI(window, mmi) {
-    // We need to save the global window to get the proper MMIError
-    // constructor once we get the reply from the parent process.
-    this._window = window;
-
     debug("Sending MMI " + mmi);
     if (!window) {
       throw Components.Exception("Can't get window object",
@@ -827,6 +866,10 @@ RILContentHelper.prototype = {
     }
     let request = Services.DOMRequest.createRequest(window);
     let requestId = this.getRequestId(request);
+    // We need to save the global window to get the proper MMIError
+    // constructor once we get the reply from the parent process.
+    this._windowsMap[requestId] = window;
+
     cpmm.sendAsyncMessage("RIL:SendMMI", {
       clientId: 0,
       data: {
@@ -1277,6 +1320,17 @@ RILContentHelper.prototype = {
 
   voicemailStatus: null,
 
+  voicemailDefaultServiceId: 0,
+  getVoicemailDefaultServiceId: function getVoicemailDefaultServiceId() {
+    let id = Services.prefs.getIntPref(kPrefVoicemailDefaultServiceId);
+
+    if (id >= gNumRadioInterfaces || id < 0) {
+      id = 0;
+    }
+
+    return id;
+  },
+
   getVoicemailInfo: function getVoicemailInfo() {
     // Get voicemail infomation by IPC only on first time.
     this.getVoicemailInfo = function getVoicemailInfo() {
@@ -1291,9 +1345,11 @@ RILContentHelper.prototype = {
 
     return this.voicemailInfo;
   },
+
   get voicemailNumber() {
     return this.getVoicemailInfo().number;
   },
+
   get voicemailDisplayName() {
     return this.getVoicemailInfo().displayName;
   },
@@ -1368,9 +1424,19 @@ RILContentHelper.prototype = {
   // nsIObserver
 
   observe: function observe(subject, topic, data) {
-    if (topic == "xpcom-shutdown") {
-      this.destroyDOMRequestHelper();
-      Services.obs.removeObserver(this, "xpcom-shutdown");
+    switch (topic) {
+      case NS_PREFBRANCH_PREFCHANGE_TOPIC_ID:
+        if (data == kPrefRilDebuggingEnabled) {
+          this.updateDebugFlag();
+        } else if (data == kPrefVoicemailDefaultServiceId) {
+          this.voicemailDefaultServiceId = this.getVoicemailDefaultServiceId();
+        }
+        break;
+
+      case NS_XPCOM_SHUTDOWN_OBSERVER_ID:
+        this.destroyDOMRequestHelper();
+        Services.obs.removeObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID);
+        break;
     }
   },
 
@@ -1422,6 +1488,19 @@ RILContentHelper.prototype = {
 
     currentThread.dispatch(this.fireRequestError.bind(this, requestId, error),
                            Ci.nsIThread.DISPATCH_NORMAL);
+  },
+
+  fireRequestDetailedError: function fireRequestDetailedError(requestId, detailedError) {
+    let request = this.takeRequest(requestId);
+    if (!request) {
+      if (DEBUG) {
+        debug("not firing detailed error for id: " + requestId +
+              ", detailedError: " + JSON.stringify(detailedError));
+      }
+      return;
+    }
+
+    Services.DOMRequest.fireDetailedError(request, detailedError);
   },
 
   receiveMessage: function receiveMessage(msg) {
@@ -1481,20 +1560,27 @@ RILContentHelper.prototype = {
       case "RIL:VoicemailInfoChanged":
         this.updateInfo(data, this.voicemailInfo);
         break;
-      case "RIL:CardLockResult":
+      case "RIL:CardLockResult": {
+        let requestId = data.requestId;
+        let requestWindow = this._windowsMap[requestId];
+        delete this._windowsMap[requestId];
+
         if (data.success) {
           let result = new MobileIccCardLockResult(data);
-          this.fireRequestSuccess(data.requestId, result);
+          this.fireRequestSuccess(requestId, result);
         } else {
           if (data.rilMessageType == "iccSetCardLock" ||
               data.rilMessageType == "iccUnlockCardLock") {
-            this._deliverEvent("_iccListeners",
-                               "notifyIccCardLockError",
-                               [data.lockType, data.retryCount]);
+            let cardLockError = new requestWindow.IccCardLockError(data.lockType,
+                                                                   data.errorMsg,
+                                                                   data.retryCount);
+            this.fireRequestDetailedError(requestId, cardLockError);
+          } else {
+            this.fireRequestError(requestId, data.errorMsg);
           }
-          this.fireRequestError(data.requestId, data.errorMsg);
         }
         break;
+      }
       case "RIL:CardLockRetryCount":
         if (data.success) {
           let result = new MobileIccCardLockRetryCount(data);
@@ -1664,7 +1750,6 @@ RILContentHelper.prototype = {
     delete this._windowsMap[message.requestId];
     let contacts = message.contacts;
     let result = contacts.map(function(c) {
-      let contact = Cc["@mozilla.org/contact;1"].createInstance(Ci.nsIDOMContact);
       let prop = {name: [c.alphaId], tel: [{value: c.number}]};
 
       if (c.email) {
@@ -1677,13 +1762,12 @@ RILContentHelper.prototype = {
         prop.tel.push({value: c.anr[i]});
       }
 
-      contact.init(prop);
+      let contact = new window.mozContact(prop);
       contact.id = message.iccid + c.recordId;
       return contact;
     });
 
-    this.fireRequestSuccess(message.requestId,
-                            ObjectWrapper.wrap(result, window));
+    this.fireRequestSuccess(message.requestId, result);
   },
 
   handleVoicemailNotification: function handleVoicemailNotification(message) {
@@ -1778,6 +1862,8 @@ RILContentHelper.prototype = {
   handleSendCancelMMI: function handleSendCancelMMI(message) {
     debug("handleSendCancelMMI " + JSON.stringify(message));
     let request = this.takeRequest(message.requestId);
+    let requestWindow = this._windowsMap[message.requestId];
+    delete this._windowsMap[message.requestId];
     if (!request) {
       return;
     }
@@ -1812,10 +1898,10 @@ RILContentHelper.prototype = {
       let mmiResult = new DOMMMIResult(result);
       Services.DOMRequest.fireSuccess(request, mmiResult);
     } else {
-      let mmiError = new this._window.DOMMMIError(result.serviceCode,
-                                                  message.errorMsg,
-                                                  null,
-                                                  result.additionalInformation);
+      let mmiError = new requestWindow.DOMMMIError(result.serviceCode,
+                                                   message.errorMsg,
+                                                   null,
+                                                   result.additionalInformation);
       Services.DOMRequest.fireDetailedError(request, mmiError);
     }
   },
@@ -1912,5 +1998,6 @@ RILContentHelper.prototype = {
 };
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory([RILContentHelper,
-                                                     DOMMMIError]);
+                                                     DOMMMIError,
+                                                     IccCardLockError]);
 

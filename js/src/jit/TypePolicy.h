@@ -159,7 +159,7 @@ class Float32Policy : public BoxInputsPolicy
 // Expect a float32 OR a double for operand Op, but will prioritize Float32
 // if the result type is set as such. If the input is a Value, it is unboxed.
 template <unsigned Op>
-class RuntimePolicy : public TypePolicy
+class FloatingPointPolicy : public TypePolicy
 {
     MIRType policyType_;
 
@@ -186,6 +186,16 @@ class NoFloatPolicy : public TypePolicy
 
 // Box objects or strings as an input to a ToDouble instruction.
 class ToDoublePolicy : public BoxInputsPolicy
+{
+  public:
+    static bool staticAdjustInputs(MInstruction *def);
+    bool adjustInputs(MInstruction *def) {
+        return staticAdjustInputs(def);
+    }
+};
+
+// Box objects, strings and undefined as input to a ToInt32 instruction.
+class ToInt32Policy : public BoxInputsPolicy
 {
   public:
     static bool staticAdjustInputs(MInstruction *def);

@@ -10,11 +10,11 @@
 # include <valgrind/memcheck.h>
 #endif
 
-#include "jsapi.h"
 #include "jscntxt.h"
 #include "jsgc.h"
 #include "jsonparser.h"
 #include "jsprf.h"
+#include "jstypes.h"
 #include "jswatchpoint.h"
 
 #include "builtin/MapObject.h"
@@ -647,14 +647,18 @@ js::gc::MarkRuntime(JSTracer *trc, bool useSavedRoots)
     for (RootRange r = rt->gcRootsHash.all(); !r.empty(); r.popFront()) {
         const RootEntry &entry = r.front();
         const char *name = entry.value.name ? entry.value.name : "root";
-        if (entry.value.type == JS_GC_ROOT_STRING_PTR)
-            MarkStringRoot(trc, reinterpret_cast<JSString **>(entry.key), name);
-        else if (entry.value.type == JS_GC_ROOT_OBJECT_PTR)
-            MarkObjectRoot(trc, reinterpret_cast<JSObject **>(entry.key), name);
-        else if (entry.value.type == JS_GC_ROOT_SCRIPT_PTR)
-            MarkScriptRoot(trc, reinterpret_cast<JSScript **>(entry.key), name);
-        else
+        if (entry.value.type == JS_GC_ROOT_VALUE_PTR) {
             MarkValueRoot(trc, reinterpret_cast<Value *>(entry.key), name);
+        } else if (*reinterpret_cast<void **>(entry.key)){
+            if (entry.value.type == JS_GC_ROOT_STRING_PTR)
+                MarkStringRoot(trc, reinterpret_cast<JSString **>(entry.key), name);
+            else if (entry.value.type == JS_GC_ROOT_OBJECT_PTR)
+                MarkObjectRoot(trc, reinterpret_cast<JSObject **>(entry.key), name);
+            else if (entry.value.type == JS_GC_ROOT_SCRIPT_PTR)
+                MarkScriptRoot(trc, reinterpret_cast<JSScript **>(entry.key), name);
+            else
+                MOZ_ASSUME_UNREACHABLE("unexpected js::RootInfo::type value");
+        }
     }
 
     if (rt->scriptAndCountsVector) {
@@ -670,7 +674,7 @@ js::gc::MarkRuntime(JSTracer *trc, bool useSavedRoots)
         MarkAtoms(trc);
         rt->staticStrings.trace(trc);
 #ifdef JS_ION
-        jit::IonRuntime::Mark(trc);
+        jit::JitRuntime::Mark(trc);
 #endif
     }
 

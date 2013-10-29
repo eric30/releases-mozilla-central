@@ -21,6 +21,7 @@ EXPORTS_mozilla_FILES += \
   Char16.h \
   CheckedInt.h \
   Compiler.h \
+  Compression.h \
   Constants.h \
   DebugOnly.h \
   decimal/Decimal.h \
@@ -39,6 +40,7 @@ EXPORTS_mozilla_FILES += \
   MSIntTypes.h \
   Move.h \
   NullPtr.h \
+  NumericLimits.h \
   PodOperations.h \
   Poison.h \
   Range.h \

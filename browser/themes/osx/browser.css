@@ -3036,11 +3036,42 @@ toolbarbutton.chevron > .toolbarbutton-menu-dropmarker {
   list-style-image: url("chrome://browser/skin/Secure-Glyph.png");
 }
 
+#identity-popup-help-icon {
+  -moz-appearance: none;
+  border: none;
+  margin: 10px 0 0 2px;
+  background: none;
+  min-width: 0;
+  list-style-image: url("chrome://global/skin/icons/question-16.png");
+  cursor: pointer;
+}
+
+#identity-popup-help-icon > .button-box > .button-text {
+  display: none;
+}
+
+#identity-popup-help-icon > .button-box > .button-icon {
+  height: 16px;
+  width: 16px;
+}
+
+#identity-popup-help-icon:focus {
+  @hudButtonFocused@
+}
+
+#identity-popup-help-icon:hover:active {
+  @hudButtonPressed@
+}
+
 @media (min-resolution: 2dppx) {
   #identity-popup-content-box.verifiedIdentity > #identity-popup-encryption > vbox > #identity-popup-encryption-icon ,
   #identity-popup-content-box.verifiedDomain > #identity-popup-encryption > vbox > #identity-popup-encryption-icon {
     list-style-image: url("chrome://browser/skin/Secure-Glyph@2x.png");
     width: 24px;
+  }
+
+  #identity-popup-help-icon {
+    list-style-image: url("chrome://global/skin/icons/question-32.png");
   }
 }
 
@@ -3176,29 +3207,23 @@ toolbarbutton.chevron > .toolbarbutton-menu-dropmarker {
   list-style-image: url(chrome://browser/skin/notification-pluginNormal.png);
 }
 
-#alert-plugins-notification-icon {
+#plugins-notification-icon.plugin-hidden {
   list-style-image: url(chrome://browser/skin/notification-pluginAlert.png);
 }
 
-#blocked-plugins-notification-icon {
+#plugins-notification-icon.plugin-blocked {
   list-style-image: url(chrome://browser/skin/notification-pluginBlocked.png);
 }
 
-#plugins-notification-icon,
-#alert-plugins-notification-icon,
-#blocked-plugins-notification-icon {
+#plugins-notification-icon {
   -moz-image-region: rect(0, 16px, 16px, 0);
 }
 
-#plugins-notification-icon:hover,
-#alert-plugins-notification-icon:hover,
-#blocked-plugins-notification-icon:hover {
+#plugins-notification-icon:hover {
   -moz-image-region: rect(0, 32px, 16px, 16px);
 }
 
-#plugins-notification-icon:active,
-#alert-plugins-notification-icon:active,
-#blocked-plugins-notification-icon:active {
+#plugins-notification-icon:active {
   -moz-image-region: rect(0, 48px, 16px, 32px);
 }
 
@@ -3207,29 +3232,23 @@ toolbarbutton.chevron > .toolbarbutton-menu-dropmarker {
     list-style-image: url(chrome://browser/skin/notification-pluginNormal@2x.png);
   }
 
-  #alert-plugins-notification-icon {
+  #plugins-notification-icon.plugin-hidden {
     list-style-image: url(chrome://browser/skin/notification-pluginAlert@2x.png);
   }
 
-  #blocked-plugins-notification-icon {
+  #plugins-notification-icon.plugin-blocked {
     list-style-image: url(chrome://browser/skin/notification-pluginBlocked@2x.png);
   }
 
-  #plugins-notification-icon,
-  #alert-plugins-notification-icon,
-  #blocked-plugins-notification-icon {
+  #plugins-notification-icon {
     -moz-image-region: rect(0, 32px, 32px, 0);
   }
 
-  #plugins-notification-icon:hover,
-  #alert-plugins-notification-icon:hover,
-  #blocked-plugins-notification-icon:hover {
+  #plugins-notification-icon:hover {
     -moz-image-region: rect(0, 64px, 32px, 32px);
   }
 
-  #plugins-notification-icon:active,
-  #alert-plugins-notification-icon:active,
-  #blocked-plugins-notification-icon:active {
+  #plugins-notification-icon:active {
     -moz-image-region: rect(0, 96px, 32px, 64px);
   }
 }
@@ -3250,7 +3269,7 @@ toolbarbutton.chevron > .toolbarbutton-menu-dropmarker {
   visibility: collapse;
 }
 
-#blocked-plugins-notification-icon[showing] {
+#plugins-notification-icon.plugin-blocked[showing] {
   animation: pluginBlockedNotification 500ms ease 0s 5 alternate both;
 }
 
@@ -3695,6 +3714,88 @@ toolbarbutton.chevron > .toolbarbutton-menu-dropmarker {
   text-shadow: none;
   background-image: linear-gradient(#B4211B, #8A1915);
   border-radius: 1px;
+}
+
+/* UI Tour */
+
+@keyframes uitour-wobble {
+  from {
+    transform: rotate(0deg) translateX(2px) rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg) translateX(2px) rotate(-360deg);
+  }
+}
+
+@keyframes uitour-zoom {
+  from {
+    transform: scale(0.9);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+  to {
+    transform: scale(0.9);
+  }
+}
+
+@keyframes uitour-color {
+  from {
+    border-color: #5B9CD9;
+  }
+  50% {
+    border-color: #FF0000;
+  }
+  to {
+    border-color: #5B9CD9;
+  }
+}
+
+html|div#UITourHighlight {
+  display: none;
+  position: absolute;
+  min-height: 32px;
+  min-width: 32px;
+  display: none;
+  border: 2px #5B9CD9 solid;
+  box-shadow: 0 0 2px #5B9CD9, inset 0 0 1px #5B9CD9;
+  border-radius: 20px;
+  z-index: 10000000000;
+}
+
+html|div#UITourHighlight[active] {
+  display: block;
+  animation-delay: 2s;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  animation-fill-mode: forwards;
+}
+
+html|div#UITourHighlight[active="wobble"] {
+  animation-name: uitour-wobble;
+  animation-duration: 1s;
+}
+html|div#UITourHighlight[active="zoom"] {
+  animation-name: uitour-zoom;
+  animation-duration: 1s;
+}
+html|div#UITourHighlight[active="color"] {
+  animation-name: uitour-color;
+  animation-duration: 2s;
+}
+
+#UITourTooltip {
+  max-width: 20em;
+}
+
+#UITourTooltipTitle {
+  font-weight: bold;
+  font-size: 130%;
+  margin: 0 0 5px 0;
+}
+
+#UITourTooltipDescription {
+  max-width: 20em;
 }
 
 /* === social toolbar button === */

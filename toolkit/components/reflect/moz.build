@@ -6,7 +6,7 @@
 
 MODULE = 'jsreflect'
 
-CPP_SOURCES += [
+SOURCES += [
     'reflect.cpp',
 ]
 
@@ -17,4 +17,6 @@ EXTRA_JS_MODULES += [
 ]
 
 LIBXUL_LIBRARY = True
+
+EXPORT_LIBRARY = True
 

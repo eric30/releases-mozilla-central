@@ -48,4 +48,9 @@ distclean clean:
 
 check:
 
+libs: binaries
+
+binaries: all
+	@touch $@
+
 .PHONY: compile libs export tools distclean clean check

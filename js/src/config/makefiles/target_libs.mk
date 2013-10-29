@@ -25,8 +25,8 @@ ifdef IS_COMPONENT
 	$(INSTALL) $(IFLAGS2) $(SHARED_LIBRARY) $(FINAL_TARGET)/components
 	$(ELF_DYNSTR_GC) $(FINAL_TARGET)/components/$(SHARED_LIBRARY)
 ifndef NO_COMPONENTS_MANIFEST
-	@$(PYTHON) $(MOZILLA_DIR)/config/buildlist.py $(FINAL_TARGET)/chrome.manifest "manifest components/components.manifest"
-	@$(PYTHON) $(MOZILLA_DIR)/config/buildlist.py $(FINAL_TARGET)/components/components.manifest "binary-component $(SHARED_LIBRARY)"
+	$(call py_action,buildlist,$(FINAL_TARGET)/chrome.manifest "manifest components/components.manifest")
+	$(call py_action,buildlist,$(FINAL_TARGET)/components/components.manifest "binary-component $(SHARED_LIBRARY)")
 endif
 endif # IS_COMPONENT
 endif # SHARED_LIBRARY
@@ -104,29 +104,16 @@ endif # !NO_DIST_INSTALL
 ifdef MOZ_PSEUDO_DERECURSE
 BINARIES_INSTALL_TARGETS := $(foreach category,$(INSTALL_TARGETS),$(if $(filter binaries,$($(category)_TARGET)),$(category)))
 
-ifneq (,$(strip $(BINARIES_INSTALL_TARGETS)))
 # Fill a dependency file with all the binaries installed somewhere in $(DIST)
+# and with dependencies on the relevant backend files.
 BINARIES_PP := $(MDDEPDIR)/binaries.pp
 
-$(BINARIES_PP): Makefile backend.mk $(call mkdir_deps,$(MDDEPDIR))
+$(BINARIES_PP): Makefile $(wildcard backend.mk) $(call mkdir_deps,$(MDDEPDIR))
 	@echo "$(strip $(foreach category,$(BINARIES_INSTALL_TARGETS),\
 		$(foreach file,$($(category)_FILES) $($(category)_EXECUTABLES),\
 			$($(category)_DEST)/$(notdir $(file)): $(file)%\
 		)\
-	))" | tr % '\n' > $@
-endif
-
-binaries libs:: $(TARGETS) $(BINARIES_PP)
-# Aggregate all dependency files relevant to a binaries build. If there is nothing
-# done in the current directory, just create an empty stamp.
-# Externally managed make files (gyp managed) and root make files (js/src/Makefile)
-# need to be recursed to do their duty, and creating a stamp would prevent that.
-# In the future, we'll aggregate those.
-ifneq (.,$(DEPTH))
-ifndef EXTERNALLY_MANAGED_MAKE_FILE
-	@$(if $^,$(call py_action,link_deps,-o binaries --group-all --topsrcdir $(topsrcdir) --topobjdir $(DEPTH) --dist $(DIST) $(BINARIES_PP) $(wildcard $(addsuffix .pp,$(addprefix $(MDDEPDIR)/,$(notdir $(sort $(filter-out $(BINARIES_PP),$^) $(OBJ_TARGETS))))))),$(TOUCH) binaries)
-endif
-endif
+	))binaries: Makefile $(wildcard backend.mk)" | tr % '\n' > $@
 
 else
 binaries::

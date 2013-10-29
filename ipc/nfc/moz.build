@@ -8,11 +8,15 @@ if CONFIG['MOZ_NFC']:
     EXPORTS.mozilla.ipc += [
         'Nfc.h',
     ]
-    CPP_SOURCES += [
+    SOURCES += [
         'Nfc.cpp',
     ]
 
 LIBXUL_LIBRARY = True
 
 LIBRARY_NAME = 'moznfc_s'
+
+EXPORT_LIBRARY = True
+
+include('/ipc/chromium/chromium-config.mozbuild')
 

@@ -91,7 +91,7 @@ WindowNamedPropertiesHandler::getOwnPropertyDescriptor(JSContext* aCx,
   nsCOMPtr<nsPIDOMWindow> piWin = do_QueryWrappedNative(wrapper);
   MOZ_ASSERT(piWin);
   nsGlobalWindow* win = static_cast<nsGlobalWindow*>(piWin.get());
-  if (win->GetLength() > 0) {
+  if (win->Length() > 0) {
     nsCOMPtr<nsIDOMWindow> childWin = win->GetChildWindow(str);
     if (childWin && ShouldExposeChildWindow(str, childWin)) {
       // We found a subframe of the right name. Shadowing via |var foo| in
@@ -211,11 +211,12 @@ WindowNamedPropertiesHandler::Install(JSContext* aCx,
   // chain, it needs a singleton type to avoid polluting type information
   // for properties on the window.
   JS::Rooted<JSObject*> gsp(aCx);
+  js::ProxyOptions options;
+  options.setSingleton(true);
   gsp = js::NewProxyObject(aCx, WindowNamedPropertiesHandler::getInstance(),
                            JS::NullHandleValue, protoProto,
                            js::GetGlobalForObjectCrossCompartment(aProto),
-                           js::ProxyNotCallable,
-                           /* singleton = */ true);
+                           options);
   if (!gsp) {
     return;
   }

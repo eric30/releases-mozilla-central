@@ -6,13 +6,17 @@
 
 LOCAL_INCLUDES	+= -I$(topsrcdir)/dom/base
 
+ifdef MOZ_RTSP
+LOCAL_INCLUDES  += -I$(topsrcdir)/netwerk/protocol/rtsp/controller
+LOCAL_INCLUDES  += -I$(topsrcdir)/netwerk/protocol/rtsp/rtsp
+endif
+
 ifdef MOZ_ENABLE_QTNETWORK
 	LOCAL_INCLUDES += -I$(srcdir)/../../system/qt
 	OS_INCLUDES += $(MOZ_QT_CFLAGS)
 endif
 
 include $(topsrcdir)/config/rules.mk
-include $(topsrcdir)/ipc/chromium/chromium-config.mk
 
 ifeq ($(OS_TARGET),Android)
 # this works around a "branch out of range" error when compiling this file opt

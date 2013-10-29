@@ -8,16 +8,9 @@ MODULE = 'necko'
 
 FAIL_ON_WARNINGS = True
 
-CPP_SOURCES += [
+SOURCES += [
     'nsStreamConverterService.cpp',
 ]
-
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa' and CONFIG['OS_TEST'] != 'x86_64':
-    # nsAppleFileDecoder.cpp has warnings I don't understand.
-    FAIL_ON_WARNINGS = False
-    CPP_SOURCES += [
-        'nsAppleFileDecoder.cpp',
-    ]
 
 LIBRARY_NAME = 'nkconv_s'
 

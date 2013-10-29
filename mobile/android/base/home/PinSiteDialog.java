@@ -20,6 +20,7 @@ import android.support.v4.widget.CursorAdapter;
 import android.text.Editable;
 import android.text.TextUtils;
 import android.text.TextWatcher;
+import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -98,6 +99,24 @@ class PinSiteDialog extends DialogFragment {
             }
         });
 
+        mSearch.setOnKeyListener(new View.OnKeyListener() {
+            @Override
+            public boolean onKey(View v, int keyCode, KeyEvent event) {
+                if (keyCode != KeyEvent.KEYCODE_ENTER || mOnSiteSelectedListener == null) {
+                    return false;
+                }
+
+                // If the user manually entered a search term or URL, wrap the value in
+                // a special URI until we can get a valid URL for this bookmark.
+                final String text = mSearch.getText().toString();
+                final String url = TopSitesPage.encodeUserEnteredUrl(text);
+                mOnSiteSelectedListener.onSiteSelected(url, text);
+
+                dismiss();
+                return true;
+            }
+        });
+
         mList = (HomeListView) view.findViewById(R.id.list);
         mList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
@@ -159,7 +178,7 @@ class PinSiteDialog extends DialogFragment {
         private LayoutInflater mInflater;
 
         public SearchAdapter(Context context) {
-            super(context, null);
+            super(context, null, 0);
             mInflater = LayoutInflater.from(context);
         }
 

@@ -19,6 +19,9 @@ interface Notification : EventTarget {
   [Throws]
   static void requestPermission(optional NotificationPermissionCallback permissionCallback);
 
+  [Throws]
+  static Promise get(optional GetNotificationOptions filter);
+
   attribute EventHandler onclick;
 
   attribute EventHandler onshow;
@@ -27,22 +30,22 @@ interface Notification : EventTarget {
 
   attribute EventHandler onclose;
 
-  [Constant]
+  [Pure]
   readonly attribute DOMString title;
 
-  [Constant]
+  [Pure]
   readonly attribute NotificationDirection dir;
 
-  [Constant]
+  [Pure]
   readonly attribute DOMString? lang;
 
-  [Constant]
+  [Pure]
   readonly attribute DOMString? body;
 
   [Constant]
   readonly attribute DOMString? tag;
 
-  [Constant]
+  [Pure]
   readonly attribute DOMString? icon;
 
   void close();
@@ -52,8 +55,12 @@ dictionary NotificationOptions {
   NotificationDirection dir = "auto";
   DOMString lang = "";
   DOMString body = "";
-  DOMString tag;
+  DOMString tag = "";
   DOMString icon = "";
+};
+
+dictionary GetNotificationOptions {
+  DOMString tag;
 };
 
 enum NotificationPermission {

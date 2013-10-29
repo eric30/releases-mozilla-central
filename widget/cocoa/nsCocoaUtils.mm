@@ -16,6 +16,7 @@
 #include "nsIServiceManager.h"
 #include "nsMenuUtilsX.h"
 #include "nsToolkit.h"
+#include "nsCRT.h"
 #include "mozilla/MiscEvents.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/TextEvents.h"
@@ -351,7 +352,7 @@ nsCocoaUtils::GetStringForNSString(const NSString *aSrc, nsAString& aDist)
   }
 
   aDist.SetLength([aSrc length]);
-  [aSrc getCharacters: aDist.BeginWriting()];
+  [aSrc getCharacters: reinterpret_cast<unichar*>(aDist.BeginWriting())];
 
   NS_OBJC_END_TRY_ABORT_BLOCK;
 }
@@ -363,7 +364,7 @@ nsCocoaUtils::ToNSString(const nsAString& aString)
   if (aString.IsEmpty()) {
     return [NSString string];
   }
-  return [NSString stringWithCharacters:aString.BeginReading()
+  return [NSString stringWithCharacters:reinterpret_cast<const unichar*>(aString.BeginReading())
                                  length:aString.Length()];
 }
 

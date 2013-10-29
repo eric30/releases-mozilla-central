@@ -8,16 +8,18 @@ MODULE = 'xpconnect'
 
 EXPORTS += [
     'BackstagePass.h',
-    'XPCJSMemoryReporter.h',
     'nsCxPusher.h',
     'qsObjectHelper.h',
+    'XPCJSMemoryReporter.h',
     'xpcObjectHelper.h',
     'xpcpublic.h',
 ]
 
-CPP_SOURCES += [
-    'DictionaryHelpers.cpp',
-    'GeneratedEvents.cpp',
+SOURCES += [
+    'nsCxPusher.cpp',
+    'nsScriptError.cpp',
+    'nsXPConnect.cpp',
+    'Sandbox.cpp',
     'XPCCallContext.cpp',
     'XPCComponents.cpp',
     'XPCContext.cpp',
@@ -46,11 +48,6 @@ CPP_SOURCES += [
     'XPCWrappedNativeProto.cpp',
     'XPCWrappedNativeScope.cpp',
     'XPCWrapper.cpp',
-    'dom_quickstubs.cpp',
-    'nsCxPusher.cpp',
-    'nsScriptError.cpp',
-    'nsXPConnect.cpp',
-    'Sandbox.cpp',
 ]
 
 FAIL_ON_WARNINGS = True
@@ -60,4 +57,6 @@ LIBXUL_LIBRARY = True
 MSVC_ENABLE_PGO = True
 
 LIBRARY_NAME = 'xpconnect_s'
+
+include('/ipc/chromium/chromium-config.mozbuild')
 

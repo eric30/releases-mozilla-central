@@ -30,6 +30,7 @@
 #include "vm/Interpreter.h"
 
 #include "jsinferinlines.h"
+#include "jsobjinlines.h"
 
 #include "frontend/ParseNode-inl.h"
 #include "frontend/Parser-inl.h"
@@ -262,18 +263,6 @@ FunctionName(ParseNode *fn)
 }
 
 static inline ParseNode *
-FunctionArgsList(ParseNode *fn, unsigned *numFormals)
-{
-    JS_ASSERT(fn->isKind(PNK_FUNCTION));
-    ParseNode *argsBody = fn->pn_body;
-    JS_ASSERT(argsBody->isKind(PNK_ARGSBODY));
-    *numFormals = argsBody->pn_count;
-    if (*numFormals > 0 && argsBody->last()->isKind(PNK_STATEMENTLIST))
-        (*numFormals)--;
-    return ListHead(argsBody);
-}
-
-static inline ParseNode *
 FunctionStatementList(ParseNode *fn)
 {
     JS_ASSERT(fn->pn_body->isKind(PNK_ARGSBODY));
@@ -386,8 +375,7 @@ class Type
         Signed,
         Unsigned,
         Intish,
-        Void,
-        Unknown
+        Void
     };
 
   private:
@@ -413,7 +401,7 @@ class Type
     }
 
     bool isIntish() const {
-        return isInt() || which_ == Intish || which_ == Unknown;
+        return isInt() || which_ == Intish;
     }
 
     bool isDouble() const {
@@ -421,7 +409,7 @@ class Type
     }
 
     bool isDoublish() const {
-        return isDouble() || which_ == Doublish || which_ == Unknown;
+        return isDouble() || which_ == Doublish;
     }
 
     bool isVoid() const {
@@ -448,7 +436,6 @@ class Type
           case Intish:
             return MIRType_Int32;
           case Void:
-          case Unknown:
             return MIRType_None;
         }
         MOZ_ASSUME_UNREACHABLE("Invalid Type");
@@ -464,7 +451,6 @@ class Type
           case Unsigned:  return "unsigned";
           case Intish:    return "intish";
           case Void:      return "void";
-          case Unknown:   return "unknown";
         }
         MOZ_ASSUME_UNREACHABLE("Invalid Type");
     }
@@ -1321,12 +1307,7 @@ class MOZ_STACK_CLASS ModuleCompiler
             return false;
         }
 
-        // The record offset in the char buffer officially begins the char
-        // after the "use asm" processing directive statement (including any
-        // semicolon).
-        uint32_t charsBegin = parser_.tokenStream.currentToken().pos.end;
-
-        module_ = cx_->new_<AsmJSModule>(parser_.ss, charsBegin);
+        module_ = cx_->new_<AsmJSModule>(parser_.ss, parser_.offsetOfCurrentAsmJSModule());
         if (!module_)
             return false;
 
@@ -1343,7 +1324,7 @@ class MOZ_STACK_CLASS ModuleCompiler
     }
 
     bool fail(ParseNode *pn, const char *str) {
-        return failOffset(pn ? pn->pn_pos.begin : parser_.tokenStream.currentToken().pos.end, str);
+        return failOffset(pn ? pn->pn_pos.begin : parser_.tokenStream.peekTokenPos().begin, str);
     }
 
     bool failfVA(ParseNode *pn, const char *fmt, va_list ap) {
@@ -3946,14 +3927,14 @@ CheckCoerceToInt(FunctionCompiler &f, ParseNode *expr, MDefinition **def, Type *
     if (!CheckExpr(f, operand, &operandDef, &operandType))
         return false;
 
-    if (operandType.isDouble()) {
+    if (operandType.isDoublish()) {
         *def = f.unary<MTruncateToInt32>(operandDef);
         *type = Type::Signed;
         return true;
     }
 
     if (!operandType.isIntish())
-        return f.failf(operand, "%s is not a subtype of double or intish", operandType.toChars());
+        return f.failf(operand, "%s is not a subtype of doublish or intish", operandType.toChars());
 
     *def = operandDef;
     *type = Type::Signed;
@@ -4159,28 +4140,19 @@ CheckAddOrSub(FunctionCompiler &f, ParseNode *expr, MDefinition **def, Type *typ
     if (numAddOrSub > (1<<20))
         return f.fail(expr, "too many + or - without intervening coercion");
 
-    if (expr->isKind(PNK_ADD)) {
-        if (lhsType.isInt() && rhsType.isInt()) {
-            *def = f.binary<MAdd>(lhsDef, rhsDef, MIRType_Int32);
-            *type = Type::Intish;
-        } else if (lhsType.isDouble() && rhsType.isDouble()) {
-            *def = f.binary<MAdd>(lhsDef, rhsDef, MIRType_Double);
-            *type = Type::Double;
-        } else {
-            return f.failf(expr, "operands to + must both be int or double, got %s and %s",
-                           lhsType.toChars(), rhsType.toChars());
-        }
+    if (lhsType.isInt() && rhsType.isInt()) {
+        *def = expr->isKind(PNK_ADD)
+               ? f.binary<MAdd>(lhsDef, rhsDef, MIRType_Int32)
+               : f.binary<MSub>(lhsDef, rhsDef, MIRType_Int32);
+        *type = Type::Intish;
+    } else if (lhsType.isDoublish() && rhsType.isDoublish()) {
+        *def = expr->isKind(PNK_ADD)
+               ? f.binary<MAdd>(lhsDef, rhsDef, MIRType_Double)
+               : f.binary<MSub>(lhsDef, rhsDef, MIRType_Double);
+        *type = Type::Double;
     } else {
-        if (lhsType.isInt() && rhsType.isInt()) {
-            *def = f.binary<MSub>(lhsDef, rhsDef, MIRType_Int32);
-            *type = Type::Intish;
-        } else if (lhsType.isDoublish() && rhsType.isDoublish()) {
-            *def = f.binary<MSub>(lhsDef, rhsDef, MIRType_Double);
-            *type = Type::Double;
-        } else {
-            return f.failf(expr, "operands to - must both be int or doublish, got %s and %s",
-                           lhsType.toChars(), rhsType.toChars());
-        }
+        return f.failf(expr, "operands to +/- must both be int or doublish, got %s and %s",
+                       lhsType.toChars(), rhsType.toChars());
     }
 
     if (numAddOrSubOut)
@@ -5081,7 +5053,7 @@ class ParallelCompilationGuard
 {
     WorkerThreadState *parallelState_;
   public:
-    ParallelCompilationGuard() : parallelState_(NULL) {}
+    ParallelCompilationGuard() : parallelState_(nullptr) {}
     ~ParallelCompilationGuard() {
         if (parallelState_) {
             JS_ASSERT(parallelState_->asmJSCompilationInProgress == true);
@@ -6399,9 +6371,14 @@ FinishModule(ModuleCompiler &m,
 
 static bool
 CheckModule(ExclusiveContext *cx, AsmJSParser &parser, ParseNode *stmtList,
-            ScopedJSDeletePtr<AsmJSModule> *module,
+            ScopedJSDeletePtr<AsmJSModule> *moduleOut,
             ScopedJSFreePtr<char> *compilationTimeReport)
 {
+    if (!LookupAsmJSModuleInCache(cx, parser, moduleOut, compilationTimeReport))
+        return false;
+    if (*moduleOut)
+        return true;
+
     ModuleCompiler m(cx, parser);
     if (!m.init())
         return false;
@@ -6444,13 +6421,16 @@ CheckModule(ExclusiveContext *cx, AsmJSParser &parser, ParseNode *stmtList,
     if (tk != TOK_EOF && tk != TOK_RC)
         return m.fail(nullptr, "top-level export (return) must be the last statement");
 
+    ScopedJSDeletePtr<AsmJSModule> module;
     AsmJSStaticLinkData linkData(cx);
-    if (!FinishModule(m, module, &linkData))
+    if (!FinishModule(m, &module, &linkData))
         return false;
 
-    (*module)->staticallyLink(linkData, cx);
+    StoreAsmJSModuleInCache(parser, *module, linkData, cx);
+    module->staticallyLink(linkData, cx);
 
     m.buildCompilationTimeReport(compilationTimeReport);
+    *moduleOut = module.forget();
     return true;
 }
 
@@ -6481,6 +6461,9 @@ EstablishPreconditions(ExclusiveContext *cx, AsmJSParser &parser)
 
     if (cx->compartment()->debugMode())
         return Warn(parser, JSMSG_USE_ASM_TYPE_FAIL, "Disabled by debugger");
+
+    if (parser.pc->isGenerator())
+        return Warn(parser, JSMSG_USE_ASM_TYPE_FAIL, "Disabled by generator context");
 
 #ifdef JS_WORKER_THREADS
     if (ParallelCompilationEnabled(cx)) {
@@ -6537,7 +6520,7 @@ js::IsAsmJSCompilationAvailable(JSContext *cx, unsigned argc, Value *vp)
     bool available = JSC::MacroAssembler::supportsFloatingPoint() &&
                      cx->gcSystemPageSize() == AsmJSPageSize &&
                      !cx->compartment()->debugMode() &&
-                     cx->hasOption(JSOPTION_ASMJS);
+                     cx->options().asmJS();
 
     args.rval().set(BooleanValue(available));
     return true;

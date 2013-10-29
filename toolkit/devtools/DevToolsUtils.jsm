@@ -22,5 +22,7 @@ this.DevToolsUtils = {
   safeErrorString: safeErrorString,
   reportException: reportException,
   makeInfallible: makeInfallible,
-  yieldingEach: yieldingEach
+  yieldingEach: yieldingEach,
+  reportingDisabled: false , // Used by tests.
+  defineLazyPrototypeGetter: defineLazyPrototypeGetter
 };

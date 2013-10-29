@@ -10,9 +10,13 @@ import android.net.Uri;
 import android.support.v4.view.ViewPager;
 import android.text.TextUtils;
 import android.view.View;
+import android.view.ViewGroup;
+import android.widget.GridView;
+import android.widget.LinearLayout;
 import android.widget.TabWidget;
 import android.widget.ListAdapter;
 import android.widget.ListView;
+import android.widget.TextView;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -23,7 +27,7 @@ import java.util.ArrayList;
  * The purpose of this class is to collect all the logically connected methods that deal with about:home
  * To use any of these methods in your test make sure it extends AboutHomeTest instead of BaseTest
  */
-abstract class AboutHomeTest extends BaseTest {
+abstract class AboutHomeTest extends PixelTest {
     protected enum AboutHomeTabs {HISTORY, MOST_RECENT, TABS_FROM_LAST_TIME, TOP_SITES, BOOKMARKS, READING_LIST};
     private ArrayList<String> aboutHomeTabs = new ArrayList<String>() {{
                   add("TOP_SITES");
@@ -56,12 +60,80 @@ abstract class AboutHomeTest extends BaseTest {
         return null;
     }
 
+    // Returns true if the bookmark is displayed in the bookmarks tab, false otherwise - does not check in folders
+    protected boolean isBookmarkDisplayed(String url) {
+        View bookmark = getDisplayedBookmark(url);
+        if (bookmark != null) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    // Loads a bookmark by tapping on the bookmark view in the Bookmarks tab
+    protected void loadBookmark(String url) {
+        View bookmark = getDisplayedBookmark(url);
+        if (bookmark != null) {
+            Actions.EventExpecter contentEventExpecter = mActions.expectGeckoEvent("DOMContentLoaded");
+            mSolo.clickOnView(bookmark);
+            contentEventExpecter.blockForEvent();
+            contentEventExpecter.unregisterListener();
+        } else {
+            mAsserter.ok(false, url + " is not one of the displayed bookmarks", "Please make sure the url provided is ookmarked");
+        }
+    }
+
+    // Opens the bookmark context menu by long-tapping on it
+    protected void openBookmarkContextMenu(String url) {
+        View bookmark = getDisplayedBookmark(url);
+        if (bookmark != null) {
+            mSolo.clickLongOnView(bookmark);
+            waitForText("Share");
+        } else {
+            mAsserter.ok(false, url + " is not one of the displayed bookmarks", "Please make sure the url provided is bookmarked");
+        }
+    }
+
+    // @return the View associated with bookmark for the provided url or null if the link is not bookmarked
+    protected View getDisplayedBookmark(String url) {
+        openAboutHomeTab(AboutHomeTabs.BOOKMARKS);
+        ListView bookmarksTabList = findListViewWithTag("bookmarks");
+        waitForNonEmptyListToLoad(bookmarksTabList);
+        ListAdapter adapter = bookmarksTabList.getAdapter();
+        if (adapter != null) {
+            for (int i = 0; i < adapter.getCount(); i++ ) {
+                // I am unable to click the view taken with getView for some reason so getting the child at i
+                bookmarksTabList.smoothScrollToPosition(i);
+                View bookmarkView = bookmarksTabList.getChildAt(i);
+                if (bookmarkView instanceof android.widget.LinearLayout) {
+                    ViewGroup bookmarkItemView = (ViewGroup) bookmarkView;
+                    for (int j = 0 ; j < bookmarkItemView.getChildCount(); j++) {
+                         View bookmarkContent = bookmarkItemView.getChildAt(j);
+                         if (bookmarkContent instanceof android.widget.LinearLayout) {
+                             ViewGroup bookmarkItemLayout = (ViewGroup) bookmarkContent;
+                             for (int k = 0 ; k < bookmarkItemLayout.getChildCount(); k++) {
+                                  // Both the title and url are represented as text views so we can cast the view without any ssues
+                                  TextView bookmarkTextContent = (TextView)bookmarkItemLayout.getChildAt(k);
+                                  if (url.equals(bookmarkTextContent.getText().toString())) {
+                                      return bookmarkView;
+                                  }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
     /**
-     * Waits for the given ListView to have a non-empty adapter.
+     * Waits for the given ListView to have a non-empty adapter and be populated
+     * with a minimum number of items.
      *
-     * This method will return false if the given ListView or its adapter are null.
+     * This method will return false if the given ListView or its adapter is null,
+     * or if the ListView does not have the minimum number of items.
      */
-    protected boolean waitForListToLoad(final ListView listView) {
+    protected boolean waitForListToLoad(final ListView listView, final int minSize) {
         Condition listWaitCondition = new Condition() {
             @Override
             public boolean isSatisfied() {
@@ -74,10 +146,14 @@ abstract class AboutHomeTest extends BaseTest {
                     return false;
                 }
 
-                return (adapter.getCount() > 0);
+                return (listView.getCount() - listView.getHeaderViewsCount() >= minSize);
             }
         };
         return waitForCondition(listWaitCondition, MAX_WAIT_MS);
+    }
+
+    protected boolean waitForNonEmptyListToLoad(final ListView listView) {
+        return waitForListToLoad(listView, 1);
     }
 
     /**
@@ -204,12 +280,15 @@ abstract class AboutHomeTest extends BaseTest {
     protected void openAboutHomeTab(AboutHomeTabs tab) {
         focusUrlBar();
         ViewPager pager = (ViewPager)mSolo.getView(ViewPager.class, 0);
+        final int currentTabIndex = pager.getCurrentItem();
+        int tabOffset;
 
         // Handle tablets by just clicking the visible tab title.
         if (mDevice.type.equals("tablet")) {
-            // Just click for tablets, since all the titles are visible.
             if (AboutHomeTabs.MOST_RECENT == tab || AboutHomeTabs.TABS_FROM_LAST_TIME == tab) {
-                mSolo.clickOnText(AboutHomeTabs.HISTORY.toString());
+                tabOffset = aboutHomeTabs.indexOf(AboutHomeTabs.HISTORY.toString()) - currentTabIndex;
+                swipeAboutHome(tabOffset);
+                waitForAboutHomeTab(aboutHomeTabs.indexOf(StringHelper.HISTORY_LABEL));
                 TabWidget tabwidget = (TabWidget)mSolo.getView(TabWidget.class, 0);
 
                 switch (tab) {
@@ -232,8 +311,7 @@ abstract class AboutHomeTest extends BaseTest {
         }
 
         // Handle phones (non-tablets).
-        final int currentTabIndex = pager.getCurrentItem();
-        int tabOffset = aboutHomeTabs.indexOf(tab.toString()) - currentTabIndex;
+        tabOffset = aboutHomeTabs.indexOf(tab.toString()) - currentTabIndex;
         switch (tab) {
             case TOP_SITES : {
                 swipeAboutHome(tabOffset);

@@ -9,6 +9,7 @@
 #include "jsanalyze.h"
 
 #include "jit/BaselineInspector.h"
+#include "jit/BaselineJIT.h"
 #include "jit/Ion.h"
 #include "jit/IonBuilder.h"
 #include "jit/LIR.h"
@@ -16,6 +17,7 @@
 #include "jit/MIRGraph.h"
 
 #include "jsinferinlines.h"
+#include "jsobjinlines.h"
 
 using namespace js;
 using namespace js::jit;
@@ -210,16 +212,25 @@ IsPhiObservable(MPhi *phi, Observability observe)
         break;
     }
 
-    // If the Phi is of the |this| value, it must always be observable.
     uint32_t slot = phi->slot();
     CompileInfo &info = phi->block()->info();
-    if (info.fun() && slot == info.thisSlot())
+    JSFunction *fun = info.fun();
+
+    // If the Phi is of the |this| value, it must always be observable.
+    if (fun && slot == info.thisSlot())
+        return true;
+
+    // If the function is heavyweight, and the Phi is of the |scopeChain|
+    // value, and the function may need an arguments object, then make sure
+    // to preserve the scope chain, because it may be needed to construct the
+    // arguments object during bailout.
+    if (fun && fun->isHeavyweight() && info.hasArguments() && slot == info.scopeChainSlot())
         return true;
 
     // If the Phi is one of the formal argument, and we are using an argument
     // object in the function. The phi might be observable after a bailout.
     // For inlined frames this is not needed, as they are captured in the inlineResumePoint.
-    if (info.fun() && info.hasArguments()) {
+    if (fun && info.hasArguments()) {
         uint32_t first = info.firstArgSlot();
         if (first <= slot && slot - first < info.nargs()) {
             // If arguments obj aliases formals, then the arg slots will never be used.
@@ -234,7 +245,7 @@ IsPhiObservable(MPhi *phi, Observability observe)
 // Handles cases like:
 //    x is phi(a, x) --> a
 //    x is phi(a, a) --> a
-inline MDefinition *
+static inline MDefinition *
 IsPhiRedundant(MPhi *phi)
 {
     MDefinition *first = phi->operandIfRedundant();
@@ -1274,6 +1285,8 @@ void
 jit::AssertGraphCoherency(MIRGraph &graph)
 {
 #ifdef DEBUG
+    if (!js_IonOptions.assertGraphConsistency)
+        return;
     AssertBasicGraphCoherency(graph);
     AssertReversePostOrder(graph);
 #endif
@@ -1287,6 +1300,8 @@ jit::AssertExtendedGraphCoherency(MIRGraph &graph)
     // are split)
 
 #ifdef DEBUG
+    if (!js_IonOptions.assertGraphConsistency)
+        return;
     AssertGraphCoherency(graph);
 
     uint32_t idx = 0;
@@ -1893,12 +1908,21 @@ LinearSum::print(Sprinter &sp) const
         sp.printf("%d", constant_);
 }
 
+void
+LinearSum::dump(FILE *fp) const
+{
+    Sprinter sp(GetIonContext()->cx);
+    sp.init();
+    print(sp);
+    fprintf(fp, "%s\n", sp.string());
+}
+
 static bool
 AnalyzePoppedThis(JSContext *cx, types::TypeObject *type,
                   MDefinition *thisValue, MInstruction *ins, bool definitelyExecuted,
                   HandleObject baseobj,
                   Vector<types::TypeNewScript::Initializer> *initializerList,
-                  Vector<jsid> *accessedProperties,
+                  Vector<PropertyName *> *accessedProperties,
                   bool *phandled)
 {
     // Determine the effect that a use of the |this| value when calling |new|
@@ -1907,23 +1931,21 @@ AnalyzePoppedThis(JSContext *cx, types::TypeObject *type,
     if (ins->isCallSetProperty()) {
         MCallSetProperty *setprop = ins->toCallSetProperty();
 
-        if (setprop->obj() != thisValue)
+        if (setprop->object() != thisValue)
             return true;
 
         // Don't use GetAtomId here, we need to watch for SETPROP on
         // integer properties and bail out. We can't mark the aggregate
         // JSID_VOID type property as being in a definite slot.
-        RootedId id(cx, NameToId(setprop->name()));
-        if (types::IdToTypeId(id) != id ||
-            id == NameToId(cx->names().classPrototype) ||
-            id == NameToId(cx->names().proto) ||
-            id == NameToId(cx->names().constructor))
+        if (setprop->name() == cx->names().prototype ||
+            setprop->name() == cx->names().proto ||
+            setprop->name() == cx->names().constructor)
         {
             return true;
         }
 
         // Ignore assignments to properties that were already written to.
-        if (baseobj->nativeLookup(cx, id)) {
+        if (baseobj->nativeLookup(cx, NameToId(setprop->name()))) {
             *phandled = true;
             return true;
         }
@@ -1931,7 +1953,7 @@ AnalyzePoppedThis(JSContext *cx, types::TypeObject *type,
         // Don't add definite properties for properties that were already
         // read in the constructor.
         for (size_t i = 0; i < accessedProperties->length(); i++) {
-            if ((*accessedProperties)[i] == id)
+            if ((*accessedProperties)[i] == setprop->name())
                 return true;
         }
 
@@ -1944,13 +1966,14 @@ AnalyzePoppedThis(JSContext *cx, types::TypeObject *type,
         if (!definitelyExecuted)
             return true;
 
-        if (!types::AddClearDefiniteGetterSetterForPrototypeChain(cx, type, id)) {
+        if (!types::AddClearDefiniteGetterSetterForPrototypeChain(cx, type, NameToId(setprop->name()))) {
             // The prototype chain already contains a getter/setter for this
             // property, or type information is too imprecise.
             return true;
         }
 
         DebugOnly<unsigned> slotSpan = baseobj->slotSpan();
+        RootedId id(cx, NameToId(setprop->name()));
         RootedValue value(cx, UndefinedValue());
         if (!DefineNativeProperty(cx, baseobj, id, value, nullptr, nullptr,
                                   JSPROP_ENUMERATE, 0, 0, DNP_SKIP_TYPE))
@@ -2006,9 +2029,7 @@ AnalyzePoppedThis(JSContext *cx, types::TypeObject *type,
          *   definite property before it is assigned could incorrectly hit.
          */
         RootedId id(cx, NameToId(get->name()));
-        if (types::IdToTypeId(id) != id)
-            return true;
-        if (!baseobj->nativeLookup(cx, id) && !accessedProperties->append(id.get()))
+        if (!baseobj->nativeLookup(cx, id) && !accessedProperties->append(get->name()))
             return false;
 
         if (!types::AddClearDefiniteGetterSetterForPrototypeChain(cx, type, id)) {
@@ -2037,7 +2058,7 @@ CmpInstructions(const void *a, const void *b)
 }
 
 bool
-jit::AnalyzeNewScriptProperties(JSContext *cx, JSFunction *fun,
+jit::AnalyzeNewScriptProperties(JSContext *cx, HandleFunction fun,
                                 types::TypeObject *type, HandleObject baseobj,
                                 Vector<types::TypeNewScript::Initializer> *initializerList)
 {
@@ -2045,19 +2066,15 @@ jit::AnalyzeNewScriptProperties(JSContext *cx, JSFunction *fun,
     // which will definitely be added to the created object before it has a
     // chance to escape and be accessed elsewhere.
 
-    if (fun->isInterpretedLazy() && !fun->getOrCreateScript(cx)) {
+    if (fun->isInterpretedLazy() && !fun->getOrCreateScript(cx))
         return false;
-    }
 
-    if (!fun->nonLazyScript()->compileAndGo)
+    RootedScript script(cx, fun->nonLazyScript());
+
+    if (!script->compileAndGo || !script->canBaselineCompile())
         return true;
 
-    if (!fun->nonLazyScript()->ensureHasTypes(cx))
-        return false;
-
-    types::TypeScript::SetThis(cx, fun->nonLazyScript(), types::Type::ObjectType(type));
-
-    Vector<jsid> accessedProperties(cx);
+    Vector<PropertyName *> accessedProperties(cx);
 
     LifoAlloc alloc(types::TypeZone::TYPE_LIFO_ALLOC_PRIMARY_CHUNK_SIZE);
 
@@ -2066,18 +2083,30 @@ jit::AnalyzeNewScriptProperties(JSContext *cx, JSFunction *fun,
 
     types::AutoEnterAnalysis enter(cx);
 
-    if (!fun->nonLazyScript()->ensureRanAnalysis(cx))
-        return false;
+    if (!cx->compartment()->ensureJitCompartmentExists(cx))
+        return Method_Error;
+
+    if (!script->hasBaselineScript()) {
+        MethodStatus status = BaselineCompile(cx, script);
+        if (status == Method_Error)
+            return false;
+        if (status != Method_Compiled)
+            return true;
+    }
+
+    types::TypeScript::SetThis(cx, script, types::Type::ObjectType(type));
 
     MIRGraph graph(&temp);
-    CompileInfo info(fun->nonLazyScript(), fun,
+    CompileInfo info(script, fun,
                      /* osrPc = */ nullptr, /* constructing = */ false,
                      DefinitePropertiesAnalysis);
 
     AutoTempAllocatorRooter root(cx, &temp);
 
-    BaselineInspector inspector(cx, fun->nonLazyScript());
-    IonBuilder builder(cx, &temp, &graph, &inspector, &info, /* baselineFrame = */ nullptr);
+    types::CompilerConstraintList *constraints = types::NewCompilerConstraintList();
+    BaselineInspector inspector(script);
+    IonBuilder builder(cx, &temp, &graph, constraints,
+                       &inspector, &info, /* baselineFrame = */ nullptr);
 
     if (!builder.build()) {
         if (builder.abortReason() == AbortReason_Alloc)
@@ -2143,6 +2172,13 @@ jit::AnalyzeNewScriptProperties(JSContext *cx, JSFunction *fun,
                 }
             }
         }
+
+        // Also check to see if the instruction is inside a loop body. Even if
+        // an access will always execute in the script, if it executes multiple
+        // times then we can get confused when rolling back objects while
+        // clearing the new script information.
+        if (ins->block()->loopDepth() != 0)
+            definitelyExecuted = false;
 
         bool handled = false;
         if (!AnalyzePoppedThis(cx, type, thisValue, ins, definitelyExecuted,

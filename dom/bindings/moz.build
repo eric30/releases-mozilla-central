@@ -17,9 +17,10 @@ EXPORTS.mozilla.dom += [
     'CallbackFunction.h',
     'CallbackInterface.h',
     'CallbackObject.h',
+    'Date.h',
     'DOMJSClass.h',
     'DOMJSProxyHandler.h',
-    'Date.h',
+    'DOMString.h',
     'Errors.msg',
     'Exceptions.h',
     'JSSlots.h',
@@ -40,3 +41,22 @@ MSVC_ENABLE_PGO = True
 
 LIBRARY_NAME = 'dombindings_s'
 
+EXPORT_LIBRARY = True
+
+LOCAL_INCLUDES += [
+    '../bluetooth',
+    '../camera',
+    '../file',
+    '../src/geolocation',
+    '../workers',
+    '/content/base/src',
+    '/content/events/src',
+    '/content/html/document/src',
+    '/content/media/webaudio',
+    '/content/svg/content/src',
+    '/content/xbl/src',
+    '/layout/style',
+    '/layout/xul/tree',
+]
+
+include('/ipc/chromium/chromium-config.mozbuild')

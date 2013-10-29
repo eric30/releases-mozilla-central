@@ -66,6 +66,10 @@ RemoteFinder.prototype = {
                                                     word: aWord });
   },
 
+  enableSelection: function () {
+    this._browser.messageManager.sendAsyncMessage("Finder:EnableSelection");
+  },
+
   removeSelection: function () {
     this._browser.messageManager.sendAsyncMessage("Finder:RemoveSelection");
   },
@@ -98,6 +102,7 @@ RemoteFinderListener.prototype = {
     "Finder:FastFind",
     "Finder:FindAgain",
     "Finder:Highlight",
+    "Finder:EnableSelection",
     "Finder:RemoveSelection",
     "Finder:FocusContent",
     "Finder:KeyPress"
@@ -107,6 +112,12 @@ RemoteFinderListener.prototype = {
     let data = { result: aResult, findBackwards: aFindBackwards,
                  linkURL: aLinkURL, searchString: this._finder.searchString };
     this._global.sendAsyncMessage("Finder:Result", data);
+  },
+
+  //XXXmikedeboer-20131016: implement |shouldFocusContent| here to mitigate
+  //                        issues like bug 921338 and bug 921308.
+  shouldFocusContent: function () {
+    return true;
   },
 
   receiveMessage: function (aMessage) {

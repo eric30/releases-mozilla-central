@@ -6,11 +6,11 @@
 
 MODULE = 'pref'
 
-CPP_SOURCES += [
-    'Preferences.cpp',
+SOURCES += [
     'nsPrefBranch.cpp',
     'nsPrefsFactory.cpp',
     'prefapi.cpp',
+    'Preferences.cpp',
     'prefread.cpp',
 ]
 
@@ -19,4 +19,8 @@ LIBXUL_LIBRARY = True
 MSVC_ENABLE_PGO = True
 
 LIBRARY_NAME = 'pref'
+
+EXPORT_LIBRARY = True
+
+include('/ipc/chromium/chromium-config.mozbuild')
 

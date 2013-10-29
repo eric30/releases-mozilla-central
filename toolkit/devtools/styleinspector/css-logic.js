@@ -51,8 +51,6 @@ const RX_PSEUDO = /\s*:?:([\w-]+)(\(?\)?)\s*/g;
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
-let {colorUtils} = require("devtools/css-color");
-
 function CssLogic()
 {
   // The cache of examined CSS properties.
@@ -381,8 +379,19 @@ CssLogic.prototype = {
    */
   forEachSheet: function CssLogic_forEachSheet(aCallback, aScope)
   {
-    for each (let sheet in this._sheets) {
-      sheet.forEach(aCallback, aScope);
+    for each (let sheets in this._sheets) {
+      for (let i = 0; i < sheets.length; i ++) {
+        // We take this as an opportunity to clean dead sheets
+        try {
+          let sheet = sheets[i];
+          sheet.domSheet; // If accessing domSheet raises an exception, then the
+          // style sheet is a dead object
+          aCallback.call(aScope, sheet, i, sheets);
+        } catch (e) {
+          sheets.splice(i, 1);
+          i --;
+        }
+      }
     }
   },
 
@@ -1008,8 +1017,8 @@ CssSheet.prototype = {
   get ruleCount()
   {
     return this._ruleCount > -1 ?
-        this._ruleCount :
-        this.domSheet.cssRules.length;
+      this._ruleCount :
+      this.domSheet.cssRules.length;
   },
 
   /**
@@ -1117,7 +1126,7 @@ CssSheet.prototype = {
   toString: function CssSheet_toString()
   {
     return "CssSheet[" + this.shortSource + "]";
-  },
+  }
 };
 
 /**
@@ -1367,6 +1376,7 @@ CssSelector.prototype = {
       pseudos.add("first-letter");
       pseudos.add("first-line");
       pseudos.add("selection");
+      pseudos.add("-moz-color-swatch");
       pseudos.add("-moz-focus-inner");
       pseudos.add("-moz-focus-outer");
       pseudos.add("-moz-list-bullet");
@@ -1603,7 +1613,7 @@ function CssSelectorInfo(aSelector, aProperty, aValue, aStatus)
   this.selector = aSelector;
   this.property = aProperty;
   this.status = aStatus;
-  this.value = colorUtils.processCSSString(aValue);
+  this.value = aValue;
   let priority = this.selector.cssRule.getPropertyPriority(this.property);
   this.important = (priority === "important");
 }

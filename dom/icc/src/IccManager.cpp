@@ -2,18 +2,18 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/dom/IccManager.h"
+
+#include "GeneratedEvents.h"
+#include "mozilla/dom/StkCommandEvent.h"
 #include "mozilla/Services.h"
 #include "nsIDOMClassInfo.h"
-#include "nsIDOMIccCardLockErrorEvent.h"
 #include "nsIDOMIccInfo.h"
-#include "GeneratedEvents.h"
-#include "IccManager.h"
 #include "SimToolKit.h"
-#include "StkCommandEvent.h"
 
 #define NS_RILCONTENTHELPER_CONTRACTID "@mozilla.org/ril/content-helper;1"
 
-using namespace mozilla::dom::icc;
+using namespace mozilla::dom;
 
 class IccManager::Listener : public nsIIccListener
 {
@@ -39,7 +39,7 @@ public:
 
 NS_IMPL_ISUPPORTS1(IccManager::Listener, nsIIccListener)
 
-DOMCI_DATA(MozIccManager, mozilla::dom::icc::IccManager)
+DOMCI_DATA(MozIccManager, IccManager)
 
 NS_INTERFACE_MAP_BEGIN(IccManager)
   NS_INTERFACE_MAP_ENTRY(nsIDOMMozIccManager)
@@ -235,7 +235,7 @@ IccManager::ReadContacts(const nsAString& aContactType, nsIDOMDOMRequest** aRequ
 
 NS_IMETHODIMP
 IccManager::UpdateContact(const nsAString& aContactType,
-                          nsIDOMContact* aContact,
+                          const JS::Value& aContact,
                           const nsAString& aPin2,
                           nsIDOMDOMRequest** aRequest)
 {
@@ -248,7 +248,6 @@ IccManager::UpdateContact(const nsAString& aContactType,
 
 NS_IMPL_EVENT_HANDLER(IccManager, stkcommand)
 NS_IMPL_EVENT_HANDLER(IccManager, stksessionend)
-NS_IMPL_EVENT_HANDLER(IccManager, icccardlockerror)
 NS_IMPL_EVENT_HANDLER(IccManager, cardstatechange)
 NS_IMPL_EVENT_HANDLER(IccManager, iccinfochange)
 
@@ -267,21 +266,6 @@ NS_IMETHODIMP
 IccManager::NotifyStkSessionEnd()
 {
   return DispatchTrustedEvent(NS_LITERAL_STRING("stksessionend"));
-}
-
-NS_IMETHODIMP
-IccManager::NotifyIccCardLockError(const nsAString& aLockType, uint32_t aRetryCount)
-{
-  nsCOMPtr<nsIDOMEvent> event;
-  NS_NewDOMIccCardLockErrorEvent(getter_AddRefs(event), this, nullptr, nullptr);
-
-  nsCOMPtr<nsIDOMIccCardLockErrorEvent> ce = do_QueryInterface(event);
-  nsresult rv =
-    ce->InitIccCardLockErrorEvent(NS_LITERAL_STRING("icccardlockerror"),
-                                  false, false, aLockType, aRetryCount);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  return DispatchTrustedEvent(ce);
 }
 
 NS_IMETHODIMP

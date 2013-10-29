@@ -12,23 +12,14 @@
  * implementation of this interface for non-Windows systems, for testing and
  * development purposes only.
  */
-[scriptable, uuid(fa6750a2-f0fe-411c-af23-1cd6d2fdeceb)]
+[scriptable, uuid(496b4450-5757-40f7-aeb9-a958ae86dbd1)]
 interface nsIWinMetroUtils : nsISupports
 {
-  /* return constants for the handPreference property */
-  const long handPreferenceLeft = 0;
-  const long handPreferenceRight = 1;
-
   /**
    * Determine if the current browser is running in the metro immersive
    * environment.
    */
   readonly attribute boolean immersive;
-
-  /**
-   * Determine if the user prefers left handed or right handed input.
-   */
-  readonly attribute long handPreference;
 
   /**
    * Determine the activation URI
@@ -49,7 +40,7 @@ interface nsIWinMetroUtils : nsISupports
   /**
    * Displays a native Windows 8 toast.
    */
-   void showNativeToast(in AString aTitle, in AString aMessage, in AString anImage);
+   void showNativeToast(in AString aTitle, in AString aMessage, in AString anImage, in AString aCookie);
 
   /**
    * Secondary tiles are a Windows 8 specific feature for pinning new tiles

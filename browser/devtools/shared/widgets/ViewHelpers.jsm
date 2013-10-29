@@ -974,6 +974,18 @@ this.WidgetMethods = {
   },
 
   /**
+   * Retrieves the attachment of the selected element.
+   * @return string
+   */
+  get selectedAttachment() {
+    let selectedElement = this._widget.selectedItem;
+    if (selectedElement) {
+      return this._itemsByElement.get(selectedElement).attachment;
+    }
+    return null;
+  },
+
+  /**
    * Selects the element with the entangled item in this container.
    * @param Item | function aItem
    */
@@ -1271,6 +1283,7 @@ this.WidgetMethods = {
    *         The matched item, or null if nothing is found.
    */
   getItemForPredicate: function(aPredicate, aOwner = this) {
+    // Recursively check the items in this widget for a predicate match.
     for (let [element, item] of aOwner._itemsByElement) {
       let match;
       if (aPredicate(item) && !element.hidden) {
@@ -1280,6 +1293,13 @@ this.WidgetMethods = {
       }
       if (match) {
         return match;
+      }
+    }
+    // Also check the staged items. No need to do this recursively since
+    // they're not even appended to the view yet.
+    for (let { item } of this._stagedItems) {
+      if (aPredicate(item)) {
+        return item;
       }
     }
     return null;
@@ -1347,6 +1367,14 @@ this.WidgetMethods = {
    */
   get values() {
     return this.items.map(e => e._value);
+  },
+
+  /**
+   * Returns a list of attachments in this container, in the displayed order.
+   * @return array
+   */
+  get attachments() {
+    return this.items.map(e => e.attachment);
   },
 
   /**

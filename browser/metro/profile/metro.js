@@ -36,11 +36,17 @@ pref("prompts.tab_modal.enabled", true);
 pref("layers.offmainthreadcomposition.enabled", true);
 pref("layers.async-pan-zoom.enabled", true);
 pref("layers.componentalpha.enabled", false);
-pref("gfx.azpc.touch_start_tolerance", "0.1"); // dpi * tolerance = pixel threshold
-pref("gfx.azpc.pan_repaint_interval", "50");   // prefer 20 fps
-pref("gfx.azpc.fling_repaint_interval", "50"); // prefer 20 fps
-pref("gfx.axis.fling_friction", "0.002");
-pref("gfx.axis.fling_stopped_threshold", "0.2");
+
+// Prefs to control the async pan/zoom behaviour
+pref("apz.touch_start_tolerance", "0.1"); // dpi * tolerance = pixel threshold
+pref("apz.pan_repaint_interval", "50");   // prefer 20 fps
+pref("apz.fling_repaint_interval", "50"); // prefer 20 fps
+pref("apz.fling_friction", "0.002");
+pref("apz.fling_stopped_threshold", "0.2");
+
+// 0 = free, 1 = standard, 2 = sticky
+pref("apz.axis_lock_mode", 2);
+pref("apz.cross_slide.enabled", true);
 
 // Enable Microsoft TSF support by default for imes.
 pref("intl.enable_tsf_support", true);
@@ -182,7 +188,6 @@ pref("browser.helperApps.deleteTempFileOnExit", false);
 
 /* password manager */
 pref("signon.rememberSignons", true);
-pref("signon.SignonFileName", "signons.txt");
 
 /* find helper */
 pref("findhelper.autozoom", true);
@@ -446,7 +451,7 @@ pref("app.update.silent", true);
 pref("app.update.staging.enabled", true);
 
 // Update service URL:
-#ifdef NIGHTLY_BUILD
+#ifndef RELEASE_BUILD
 pref("app.update.url", "https://aus4.mozilla.org/update/3/%PRODUCT%/%VERSION%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/update.xml");
 #else
 pref("app.update.url", "https://aus3.mozilla.org/update/3/%PRODUCT%/%VERSION%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/update.xml");
@@ -486,51 +491,22 @@ pref("app.update.log", false);
 // the failure.
 pref("app.update.backgroundMaxErrors", 10);
 
+// The aus update xml certificate checks for application update are disabled on
+// Windows since the mar signature check which is currently only implemented on
+// Windows is sufficient for preventing us from applying a mar that is not
+// valid.
+
 // When |app.update.cert.requireBuiltIn| is true or not specified the
 // final certificate and all certificates the connection is redirected to before
 // the final certificate for the url specified in the |app.update.url|
 // preference must be built-in.
-pref("app.update.cert.requireBuiltIn", true);
+pref("app.update.cert.requireBuiltIn", false);
 
 // When |app.update.cert.checkAttributes| is true or not specified the
 // certificate attributes specified in the |app.update.certs.| preference branch
 // are checked against the certificate for the url specified by the
 // |app.update.url| preference.
-pref("app.update.cert.checkAttributes", true);
-
-// The number of certificate attribute check failures to allow for background
-// update checks before notifying the user of the failure. User initiated update
-// checks always notify the user of the certificate attribute check failure.
-pref("app.update.cert.maxErrors", 5);
-
-// The |app.update.certs.| preference branch contains branches that are
-// sequentially numbered starting at 1 that contain attribute name / value
-// pairs for the certificate used by the server that hosts the update xml file
-// as specified in the |app.update.url| preference. When these preferences are
-// present the following conditions apply for a successful update check:
-// 1. the uri scheme must be https
-// 2. the preference name must exist as an attribute name on the certificate and
-//    the value for the name must be the same as the value for the attribute name
-//    on the certificate.
-// If these conditions aren't met it will be treated the same as when there is
-// no update available. This validation will not be performed when the
-// |app.update.url.override| user preference has been set for testing updates or
-// when the |app.update.cert.checkAttributes| preference is set to false. Also,
-// the |app.update.url.override| preference should ONLY be used for testing.
-// IMPORTANT! firefox.js should also be updated for updates to certs.X.issuerName
-
-// Nightly builds have switched over to aus4.mozilla.org, but we don't want anything else to yet.
-#ifdef NIGHTLY_BUILD
-pref("app.update.certs.1.issuerName", "CN=DigiCert Secure Server CA,O=DigiCert Inc,C=US");
-pref("app.update.certs.1.commonName", "aus4.mozilla.org");
-pref("app.update.certs.2.issuerName", "CN=Thawte SSL CA,O=\"Thawte, Inc.\",C=US");
-pref("app.update.certs.2.commonName", "aus4.mozilla.org");
-#else
-pref("app.update.certs.1.issuerName", "OU=Equifax Secure Certificate Authority,O=Equifax,C=US");
-pref("app.update.certs.1.commonName", "aus3.mozilla.org");
-pref("app.update.certs.2.issuerName", "CN=Thawte SSL CA,O=\"Thawte, Inc.\",C=US");
-pref("app.update.certs.2.commonName", "aus3.mozilla.org");
-#endif
+pref("app.update.cert.checkAttributes", false);
 
 // User-settable override to app.update.url for testing purposes.
 //pref("app.update.url.override", "");
@@ -564,10 +540,10 @@ pref("browser.chrome.toolbar_tips", false);
 // Completely disable pdf.js as an option to preview pdfs within firefox.
 // Note: if this is not disabled it does not necessarily mean pdf.js is the pdf
 // handler just that it is an option.
-pref("pdfjs.disabled", false);
+pref("pdfjs.disabled", true);
 // Used by pdf.js to know the first time firefox is run with it installed so it
 // can become the default pdf viewer.
-pref("pdfjs.firstRun", true);
+pref("pdfjs.firstRun", false);
 // The values of preferredAction and alwaysAskBeforeHandling before pdf.js
 // became the default.
 pref("pdfjs.previousHandler.preferredAction", 0);
@@ -609,7 +585,6 @@ pref("browser.safebrowsing.provider.0.reportMalwareURL", "http://{moz:locale}.ma
 pref("browser.safebrowsing.provider.0.reportMalwareErrorURL", "http://{moz:locale}.malware-error.mozilla.com/?hl={moz:locale}");
 
 // FAQ URLs
-pref("browser.safebrowsing.warning.infoURL", "https://www.mozilla.org/%LOCALE%/firefox/phishing-protection/");
 pref("browser.geolocation.warning.infoURL", "https://www.mozilla.org/%LOCALE%/firefox/geolocation/");
 
 // Name of the about: page contributed by safebrowsing to handle display of error

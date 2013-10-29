@@ -329,6 +329,10 @@ class HashSet
     typedef typename Impl::Ptr Ptr;
     Ptr lookup(const Lookup &l) const                 { return impl.lookup(l); }
 
+    // Like lookup, but does not assert if two threads call lookup at the same
+    // time. Only use this method when none of the threads will modify the map.
+    Ptr readonlyThreadsafeLookup(const Lookup &l) const { return impl.readonlyThreadsafeLookup(l); }
+
     // Assuming |p.found()|, remove |*p|.
     void remove(Ptr p)                                { impl.remove(p); }
 
@@ -516,7 +520,7 @@ struct PointerHasher
         JS_ASSERT(!JS::IsPoisonedPtr(l));
         size_t word = reinterpret_cast<size_t>(l) >> zeroBits;
         JS_STATIC_ASSERT(sizeof(HashNumber) == 4);
-#if JS_BYTES_PER_WORD == 4
+#if JS_BITS_PER_WORD == 32
         return HashNumber(word);
 #else
         JS_STATIC_ASSERT(sizeof word == 8);
@@ -572,6 +576,19 @@ struct DefaultHasher<double>
     }
     static bool match(double lhs, double rhs) {
         return mozilla::BitwiseCast<uint64_t>(lhs) == mozilla::BitwiseCast<uint64_t>(rhs);
+    }
+};
+
+template <>
+struct DefaultHasher<float>
+{
+    typedef float Lookup;
+    static HashNumber hash(float f) {
+        JS_STATIC_ASSERT(sizeof(HashNumber) == 4);
+        return HashNumber(mozilla::BitwiseCast<uint32_t>(f));
+    }
+    static bool match(float lhs, float rhs) {
+        return mozilla::BitwiseCast<uint32_t>(lhs) == mozilla::BitwiseCast<uint32_t>(rhs);
     }
 };
 

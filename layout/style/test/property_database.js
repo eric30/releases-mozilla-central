@@ -3079,7 +3079,7 @@ var gCSSProperties = {
 		// don't know whether left and right are same as start
 		initial_values: [ "start" ],
 		other_values: [ "center", "justify", "end" ],
-		invalid_values: []
+		invalid_values: [ "true", "true true" ]
 	},
 	"-moz-text-align-last": {
 		domProp: "MozTextAlignLast",
@@ -4442,6 +4442,12 @@ if (SpecialPowers.getBoolPref("layout.css.filters.enabled")) {
 			"grayscale(1) url(#my-filter-1)",
 			"url(#my-filter-1) brightness(50%) contrast(0.9)",
 
+			// The CSS parser will accept these weird URLs. However, we'll fail
+			// to resolve them when computing style, so we'll fall back to the
+			// initial value ("none").
+			"url('feed:javascript:5')",
+			"blur(3px) url('feed:javascript:5') grayscale(50%)",
+
 			"blur(0)",
 			"blur(0px)",
 			"blur(0.5px)",
@@ -4756,3 +4762,40 @@ if (SpecialPowers.getBoolPref("layout.css.mix-blend-mode.enabled")) {
     };
 }
 
+if (SpecialPowers.getBoolPref("layout.css.unset-value.enabled")) {
+  gCSSProperties["animation-direction"].invalid_values.push("normal, unset");
+  gCSSProperties["animation-name"].invalid_values.push("bounce, unset", "unset, bounce");
+  gCSSProperties["-moz-border-bottom-colors"].invalid_values.push("red unset", "unset red");
+  gCSSProperties["-moz-border-left-colors"].invalid_values.push("red unset", "unset red");
+  gCSSProperties["border-radius"].invalid_values.push("unset 2px", "unset / 2px", "2px unset", "2px / unset");
+  gCSSProperties["border-bottom-left-radius"].invalid_values.push("unset 2px", "2px unset");
+  gCSSProperties["border-bottom-right-radius"].invalid_values.push("unset 2px", "2px unset");
+  gCSSProperties["border-top-left-radius"].invalid_values.push("unset 2px", "2px unset");
+  gCSSProperties["border-top-right-radius"].invalid_values.push("unset 2px", "2px unset");
+  gCSSProperties["-moz-border-right-colors"].invalid_values.push("red unset", "unset red");
+  gCSSProperties["-moz-border-top-colors"].invalid_values.push("red unset", "unset red");
+  gCSSProperties["-moz-outline-radius"].invalid_values.push("unset 2px", "unset / 2px", "2px unset", "2px / unset");
+  gCSSProperties["-moz-outline-radius-bottomleft"].invalid_values.push("unset 2px", "2px unset");
+  gCSSProperties["-moz-outline-radius-bottomright"].invalid_values.push("unset 2px", "2px unset");
+  gCSSProperties["-moz-outline-radius-topleft"].invalid_values.push("unset 2px", "2px unset");
+  gCSSProperties["-moz-outline-radius-topright"].invalid_values.push("unset 2px", "2px unset");
+  gCSSProperties["background-image"].invalid_values.push("-moz-linear-gradient(unset, 10px 10px, from(blue))", "-moz-linear-gradient(unset, 10px 10px, blue 0)", "-moz-repeating-linear-gradient(unset, 10px 10px, blue 0)");
+  gCSSProperties["box-shadow"].invalid_values.push("unset, 2px 2px", "2px 2px, unset", "inset unset");
+  gCSSProperties["text-overflow"].invalid_values.push('"hello" unset', 'unset "hello"', 'clip unset', 'unset clip', 'unset inherit', 'unset none', 'initial unset');
+  gCSSProperties["text-shadow"].invalid_values.push("unset, 2px 2px", "2px 2px, unset");
+  gCSSProperties["transition"].invalid_values.push("2s unset");
+  gCSSProperties["transition-property"].invalid_values.push("unset, color", "color, unset");
+  gCSSProperties["-moz-transition"].invalid_values.push("2s unset");
+  gCSSProperties["-moz-transition-property"].invalid_values.push("unset, color", "color, unset");
+  gCSSProperties["-moz-animation"].invalid_values.push("2s unset");
+  gCSSProperties["-moz-animation-direction"].invalid_values.push("unset, normal");
+  gCSSProperties["-moz-animation-name"].invalid_values.push("bounce, unset", "unset, bounce");
+  if (SpecialPowers.getBoolPref("layout.css.filters.enabled")) {
+    gCSSProperties["filter"].invalid_values.push("drop-shadow(unset, 2px 2px)", "drop-shadow(2px 2px, unset)");
+  }
+  if (SpecialPowers.getBoolPref("layout.css.text-align-true-value.enabled")) {
+    gCSSProperties["text-align"].other_values.push("true left");
+  } else {
+    gCSSProperties["text-align"].invalid_values.push("true left");
+  }
+}

@@ -104,6 +104,7 @@
 class nsIWidget;
 struct gfxMatrix;
 struct nsIntSize;
+class nsIntRegion;
 
 namespace mozilla {
 namespace gfx {
@@ -351,6 +352,12 @@ public:
                        const gfx::Matrix4x4& transform,
                        const gfx::Point& aOffset);
 
+  void DrawDiagnostics(DiagnosticFlags aFlags,
+                       const nsIntRegion& visibleRegion,
+                       const gfx::Rect& aClipRect,
+                       const gfx::Matrix4x4& transform,
+                       const gfx::Point& aOffset);
+
 
 #ifdef MOZ_DUMP_PAINTING
   virtual const char* Name() const = 0;
@@ -399,6 +406,12 @@ public:
   virtual nsIWidget* GetWidget() const { return nullptr; }
   virtual const nsIntSize& GetWidgetSize() = 0;
 
+  // Call before and after any rendering not done by this compositor but which
+  // might affect the compositor's internal state or the state of any APIs it
+  // uses. For example, internal GL state.
+  virtual void SaveState() {}
+  virtual void RestoreState() {}
+
   /**
    * Debug-build assertion that can be called to ensure code is running on the
    * compositor thread.
@@ -416,6 +429,14 @@ public:
   static LayersBackend GetBackend();
 
 protected:
+  void DrawDiagnosticsInternal(DiagnosticFlags aFlags,
+                               const gfx::Rect& aVisibleRect,
+                               const gfx::Rect& aClipRect,
+                               const gfx::Matrix4x4& transform,
+                               const gfx::Point& aOffset);
+
+  bool ShouldDrawDiagnostics(DiagnosticFlags);
+
   uint32_t mCompositorID;
   static LayersBackend sBackend;
   DiagnosticTypes mDiagnosticTypes;

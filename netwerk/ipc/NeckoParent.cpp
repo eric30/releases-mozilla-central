@@ -12,6 +12,9 @@
 #include "mozilla/net/WyciwygChannelParent.h"
 #include "mozilla/net/FTPChannelParent.h"
 #include "mozilla/net/WebSocketChannelParent.h"
+#ifdef MOZ_RTSP
+#include "mozilla/net/RtspControllerParent.h"
+#endif
 #include "mozilla/net/RemoteOpenFileParent.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/TabParent.h"
@@ -303,6 +306,28 @@ NeckoParent::DeallocPWebSocketParent(PWebSocketParent* actor)
   return true;
 }
 
+PRtspControllerParent*
+NeckoParent::AllocPRtspControllerParent()
+{
+#ifdef MOZ_RTSP
+  RtspControllerParent* p = new RtspControllerParent();
+  p->AddRef();
+  return p;
+#else
+  return nullptr;
+#endif
+}
+
+bool
+NeckoParent::DeallocPRtspControllerParent(PRtspControllerParent* actor)
+{
+#ifdef MOZ_RTSP
+  RtspControllerParent* p = static_cast<RtspControllerParent*>(actor);
+  p->Release();
+#endif
+  return true;
+}
+
 PTCPSocketParent*
 NeckoParent::AllocPTCPSocketParent()
 {
@@ -371,13 +396,8 @@ NeckoParent::AllocPRemoteOpenFileParent(const URIParams& aURI,
       nsRefPtr<TabParent> tabParent =
         static_cast<TabParent*>(Manager()->ManagedPBrowserParent()[i]);
       uint32_t appId = tabParent->OwnOrContainingAppId();
-      nsCOMPtr<mozIDOMApplication> domApp;
-      nsresult rv = appsService->GetAppByLocalId(appId, getter_AddRefs(domApp));
-      if (!domApp) {
-        continue;
-      }
-      mozApp = do_QueryInterface(domApp);
-      if (!mozApp) {
+      nsresult rv = appsService->GetAppByLocalId(appId, getter_AddRefs(mozApp));
+      if (NS_FAILED(rv) || !mozApp) {
         continue;
       }
       hasManage = false;
