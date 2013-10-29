@@ -20,7 +20,6 @@
 #include "nsINetworkManager.h"
 #include "nsIWifi.h"
 #ifdef MOZ_NFC
-#include "nsINfc.h"
 #include "mozilla/ipc/Nfc.h"
 #include "Nfc.h"
 #include <unistd.h>

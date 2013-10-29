@@ -96,13 +96,12 @@ NfcContentHelper.prototype = {
     if (sessionToken == null) {
       throw Components.Exception("No session token!",
                                   Cr.NS_ERROR_UNEXPECTED);
-      return false;
+      return;
     }
     // Report session to Nfc.js only.
     cpmm.sendAsyncMessage("NFC:SetSessionToken", {
       sessionToken: sessionToken,
     });
-    return true;
   },
 
   // NFCTag interface
@@ -308,7 +307,7 @@ NfcContentHelper.prototype = {
 
     if (result.status !== NFC.GECKO_NFC_ERROR_SUCCESS) {
       this.fireRequestError(requestId, result.status);
-    } else  {
+    } else {
       this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester));
     }
   },
@@ -327,7 +326,7 @@ NfcContentHelper.prototype = {
 
     if (message.status !== NFC.GECKO_NFC_ERROR_SUCCESS) {
       this.fireRequestError(requestId, result.status);
-    } else  {
+    } else {
       this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester));
     }
   },

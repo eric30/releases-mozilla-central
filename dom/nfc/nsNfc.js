@@ -55,7 +55,7 @@ MozNFCTag.prototype = {
     debug("Setting session token.");
     this.session = aSessionToken;
     // report to NFC worker:
-    return this._nfcContentHelper.setSessionToken(aSessionToken);
+    this._nfcContentHelper.setSessionToken(aSessionToken);
   },
 
   _techTypesMap: null,

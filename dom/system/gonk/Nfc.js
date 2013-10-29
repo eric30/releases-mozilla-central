@@ -257,11 +257,9 @@ Nfc.prototype = {
   classID:   NFC_CID,
   classInfo: XPCOMUtils.generateCI({classID: NFC_CID,
                                     classDescription: "Nfc",
-                                    interfaces: [Ci.nsIWorkerHolder,
-                                                 Ci.nsINfc]}),
+                                    interfaces: [Ci.nsIWorkerHolder]}),
 
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIWorkerHolder,
-                                         Ci.nsINfc,
                                          Ci.nsIObserver,
                                          Ci.nsISettingsServiceCallback]),
 

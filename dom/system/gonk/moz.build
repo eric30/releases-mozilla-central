@@ -18,8 +18,6 @@ XPIDL_SOURCES += [
     'nsIAudioManager.idl',
     'nsINetworkInterfaceListService.idl',
     'nsINetworkManager.idl',
-    'nsINfc.idl',
-    'nsINfcCallback.idl',
     'nsINfcContentHelper.idl',
     'nsIRadioInterfaceLayer.idl',
     'nsISystemWorkerManager.idl',
