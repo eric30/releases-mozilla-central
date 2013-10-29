@@ -66,6 +66,7 @@ NfcContentHelper.prototype = {
   __proto__: DOMRequestIpcHelper.prototype,
 
   QueryInterface: XPCOMUtils.generateQI([Ci.nsINfcContentHelper,
+                                         Ci.nsISupportsWeakReference,
                                          Ci.nsIObserver]),
   classID:   NFCCONTENTHELPER_CID,
   classInfo: XPCOMUtils.generateCI({

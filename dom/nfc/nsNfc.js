@@ -23,7 +23,7 @@ Cu.import("resource://gre/modules/ObjectWrapper.jsm");
  * NFCTag
  */
 function MozNFCTag() {
-  debug("XXXX In MozNFCTag Constructor");
+  debug("In MozNFCTag Constructor");
   this._nfcContentHelper = Cc["@mozilla.org/nfc/content-helper;1"]
                              .getService(Ci.nsINfcContentHelper);
   this.session = null;
@@ -91,7 +91,7 @@ MozNFCTag.prototype = {
  * NFCPeer
  */
 function MozNFCPeer() {
-  debug("XXXX In MozNFCPeer Constructor");
+  debug("In MozNFCPeer Constructor");
   this._nfcContentHelper = Cc["@mozilla.org/nfc/content-helper;1"]
                              .getService(Ci.nsINfcContentHelper);
   this.session = null;
@@ -129,7 +129,7 @@ MozNFCPeer.prototype = {
  * Navigator NFC object
  */
 function mozNfc() {
-  debug("XXXX In mozNfc Constructor");
+  debug("In mozNfc Constructor");
 }
 mozNfc.prototype = {
   _nfcContentHelper: null,
@@ -139,7 +139,7 @@ mozNfc.prototype = {
   },
 
   init: function init(aWindow) {
-    debug("XXXXXXXXXX init called XXXXXXXXXXXX");
+    debug("mozNfc init called");
     this._window = aWindow;
   },
 
