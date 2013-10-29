@@ -14,8 +14,6 @@ if CONFIG['MOZ_NFC']:
         'MozNdefRecord.cpp',
     ]
     EXTRA_COMPONENTS += [
-      'MozNFCPeer.js',
-      'MozNFCTag.js',
       'nsNfc.js',
       'nsNfc.manifest',
     ]

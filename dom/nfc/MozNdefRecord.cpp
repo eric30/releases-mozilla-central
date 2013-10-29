@@ -48,12 +48,10 @@ MozNdefRecord::MozNdefRecord(nsPIDOMWindow* aWindow,
 {
   mWindow = aWindow;
   SetIsDOMBinding();
-  MOZ_COUNT_CTOR(MozNdefRecord);
 }
 
 MozNdefRecord::~MozNdefRecord()
 {
-  MOZ_COUNT_DTOR(MozNdefRecord);
 }
 
 JSObject*

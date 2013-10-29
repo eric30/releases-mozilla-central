@@ -23,9 +23,8 @@ enum NFCTechType {
   "UNKNOWN_TECH"
 };
 
-[Constructor(DOMString sessionId),
- JSImplementation="@mozilla.org/nfc/NFCTag;1"]
-interface MozNFCTag : EventTarget {
+[JSImplementation="@mozilla.org/nfc/NFCTag;1"]
+interface MozNFCTag {
   DOMRequest getDetailsNDEF();
   DOMRequest readNDEF();
   DOMRequest writeNDEF(sequence<MozNdefRecord> records);

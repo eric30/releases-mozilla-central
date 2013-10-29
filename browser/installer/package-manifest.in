@@ -464,8 +464,6 @@
 @BINPATH@/components/DOMWifiManager.manifest
 #endif
 #ifdef MOZ_NFC
-@BINPATH@/components/MozNFCPeer.js
-@BINPATH@/components/MozNFCTag.js
 @BINPATH@/components/nsNfc.manifest
 @BINPATH@/components/nsNfc.js
 @BINPATH@/components/Nfc.manifest
