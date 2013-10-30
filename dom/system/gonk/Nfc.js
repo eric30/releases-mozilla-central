@@ -244,7 +244,7 @@ function Nfc() {
 
   gMessageManager.init(this);
   let lock = gSettingsService.createLock();
-  lock.get("nfc.powerlevel", this);
+  lock.get(NFC.SETTING_NFC_POWER_LEVEL, this);
   lock.get(NFC.SETTING_NFC_ENABLED, this);
   // Maps sessionId (that are generated from nfcd) with a unique guid : 'SessionToken'
   this.sessionTokenMap = {};
@@ -318,13 +318,13 @@ Nfc.prototype = {
         this._currentSessionId = message.sessionId;
         // Check if the session token already exists. If exists, continue to use the same one.
         // If not, generate a new token.
-        if (this.sessionTokenMap[this._currentSessionId] === undefined) {
+        if (!this.sessionTokenMap[this._currentSessionId]) {
           this.sessionTokenMap[this._currentSessionId] = UUIDGenerator.generateUUID().toString();
         }
         // Update the upper layers with a session token (alias)
         message.sessionToken = this.sessionTokenMap[this._currentSessionId];
         // Do not expose the actual session to the content
-        message.sessionId = "";
+        delete message.sessionId;
         gSystemMessenger.broadcastMessage("nfc-manager-tech-discovered", message);
         break;
       case "techLost":
@@ -332,7 +332,7 @@ Nfc.prototype = {
         // Update the upper layers with a session token (alias)
         message.sessionToken = this.sessionTokenMap[this._currentSessionId];
         // Do not expose the actual session to the content
-        message.sessionId = "";
+        delete message.sessionId;
         gSystemMessenger.broadcastMessage("nfc-manager-tech-lost", message);
         delete this.sessionTokenMap[this._currentSessionId];
         this._currentSessionId = null;
@@ -348,7 +348,7 @@ Nfc.prototype = {
       case "WriteNDEFResponse":
         message.sessionToken = this.sessionTokenMap[this._currentSessionId];
         // Do not expose the actual session to the content
-        message.sessionId = "";
+        delete message.sessionId;
         gMessageManager.sendNfcResponseMessage("NFC:" + message.type, message);
         break;
       default:
@@ -408,9 +408,8 @@ Nfc.prototype = {
            this.sendNfcErrorResponse(message);
            return null;
          }
-
-         debug("Received Message: " + message.name + "Session Token: " +
-               this.sessionTokenMap[this._currentSessionId]);
+         message.sessionId = this._currentSessionId;
+         break;
     }
 
     switch (message.name) {
@@ -496,7 +495,7 @@ Nfc.prototype = {
       powerLevel: prop.powerLevel
     };
     let outMessage = {
-      type: "ConfigRequest",
+      type: "config",
       powerLevel: prop.powerLevel
     };
     this.sendToWorker("config", outMessage);

@@ -232,7 +232,7 @@ NfcContentHelper.prototype = {
     Services.DOMRequest.fireSuccess(request, result);
   },
 
-  dispatchFireRequestSuccess: function dispatchFireRequestSuccess(requestId, result) {
+  fireRequestSuccessAsync: function fireRequestSuccessAsync(requestId, result) {
     let currentThread = Services.tm.currentThread;
 
     currentThread.dispatch(this.fireRequestSuccess.bind(this, requestId, result),
@@ -252,7 +252,7 @@ NfcContentHelper.prototype = {
     Services.DOMRequest.fireError(request, error);
   },
 
-  dispatchFireRequestError: function dispatchFireRequestError(requestId, error) {
+  fireRequestErrorAsync: function fireRequestErrorAsync(requestId, error) {
     let currentThread = Services.tm.currentThread;
 
     currentThread.dispatch(this.fireRequestError.bind(this, requestId, error),
@@ -262,53 +262,14 @@ NfcContentHelper.prototype = {
   receiveMessage: function receiveMessage(message) {
     debug("Message received: " + JSON.stringify(message));
     switch (message.name) {
-      case "NFC:ReadNDEFResponse":
-        this.handleReadNDEFResponse(message.json);
-        break;
-      case "NFC:ConnectResponse": // Fall through.
+      case "NFC:ReadNDEFResponse": // Fall through.
+      case "NFC:ConnectResponse":
       case "NFC:CloseResponse":
       case "NFC:WriteNDEFResponse":
       case "NFC:MakeReadOnlyNDEFResponse":
       case "NFC:GetDetailsNDEFResponse":
         this.handleResponse(message.json);
         break;
-    }
-  },
-
-  handleReadNDEFResponse: function handleReadNDEFResponse(message) {
-    debug("ReadNDEFResponse(" + JSON.stringify(message) + ")");
-    let requester = this._requestMap[message.requestId];
-    if (!requester) {
-       debug("ReadNDEFResponse Invalid requester=" + requester +
-             " message.sessionToken=" + message.sessionToken);
-       return; // Nothing to do in this instance.
-    }
-    delete this._requestMap[message.requestId];
-    let result = message;
-    let requestId = atob(message.requestId);
-    let records = result.records.map(function(r) {
-      let type = "";
-      for (let i = 0; i < r.type.length; i++) {
-        type += String.fromCharCode(r.type[i]);
-      }
-      r.type = type;
-      let id = "";
-      for (let i = 0; i < r.id.length; i++) {
-        id += String.fromCharCode(r.id[i]);
-      }
-      r.id = id;
-      let payload = "";
-      for (let i = 0; i < r.payload.length; i++) {
-        payload += String.fromCharCode(r.payload[i]);
-      }
-      r.payload = payload;
-      return r;
-    });
-
-    if (result.status !== NFC.GECKO_NFC_ERROR_SUCCESS) {
-      this.fireRequestError(requestId, result.status);
-    } else {
-      this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester));
     }
   },
 
