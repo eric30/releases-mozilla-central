@@ -16,7 +16,7 @@
 /* Copyright © 2013, Deutsche Telekom, Inc. */
 
 // Set to true to debug all NFC layers
-this.DEBUG_ALL = false;
+this.DEBUG_ALL = true;
 
 // Set individually to debug specific layers
 this.DEBUG_WORKER = false || DEBUG_ALL;
@@ -60,6 +60,7 @@ this.NFC_POWER_LEVEL_ENABLED        = 2;
 this.TOPIC_MOZSETTINGS_CHANGED      = "mozsettings-changed";
 this.TOPIC_XPCOM_SHUTDOWN           = "xpcom-shutdown";
 this.SETTING_NFC_ENABLED            = "nfc.enabled";
+this.SETTING_NFC_POWER_LEVEL        = "nfc.powerlevel";
 
 // Allow this file to be imported via Components.utils.import().
 this.EXPORTED_SYMBOLS = Object.keys(this);

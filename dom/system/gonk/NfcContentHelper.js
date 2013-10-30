@@ -232,7 +232,7 @@ NfcContentHelper.prototype = {
     Services.DOMRequest.fireSuccess(request, result);
   },
 
-  dispatchFireRequestSuccess: function dispatchFireRequestSuccess(requestId, result) {
+  fireRequestSuccessAsync: function fireRequestSuccessAsync(requestId, result) {
     let currentThread = Services.tm.currentThread;
 
     currentThread.dispatch(this.fireRequestSuccess.bind(this, requestId, result),
@@ -252,7 +252,7 @@ NfcContentHelper.prototype = {
     Services.DOMRequest.fireError(request, error);
   },
 
-  dispatchFireRequestError: function dispatchFireRequestError(requestId, error) {
+  fireRequestErrorAsync: function fireRequestErrorAsync(requestId, error) {
     let currentThread = Services.tm.currentThread;
 
     currentThread.dispatch(this.fireRequestError.bind(this, requestId, error),

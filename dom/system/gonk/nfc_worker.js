@@ -41,7 +41,7 @@ let Buf = {
    */
   processParcel: function processParcel() {
     let pduType = this.readInt32();
-    if (DEBUG) debug("No of bytes available in Parcel : " + this.readAvailable);
+    if (DEBUG) debug("Number of bytes available in Parcel : " + this.readAvailable);
     NfcWorker.handleParcel(pduType, this.mCallback);
   },
 
@@ -54,13 +54,6 @@ let Buf = {
    */
   newParcel: function newParcel(type, callback) {
     if (DEBUG) debug("New outgoing parcel of type " + type);
-
-    if(this.mCallback) debug("Warning! Callback override :"+ type );
-    /**
-     * TODO: This needs to be fixed. A map of NFC_RESPONSE_XXX and RequestID
-     *       needs to be maintained ?? For Generic Responses (1000) ,
-     *       we may still rely on callback approach.
-     */
     this.mCallback = callback;
     // We're going to leave room for the parcel size at the beginning.
     this.outgoingIndex = this.PARCEL_SIZE_SIZE;
@@ -76,7 +69,10 @@ let Buf = {
     postNfcMessage(parcel);
   },
 
-  //TODO maintain callback
+  /**
+   * TODO: Callback map of NFC_RESPONSE_XXX and RequestID
+   *       needs to be maintained
+   */
   mCallback: null,
 };
 
