@@ -486,7 +486,7 @@ Nfc.prototype = {
     debug("NFC setNFCPowerConfig: " + powerLevel);
     this.powerLevel = powerLevel;
     // Just one param for now.
-    //this.setConfig({powerLevel: powerLevel});
+    this.setConfig({powerLevel: powerLevel});
   },
 
   setConfig: function setConfig(prop) {
