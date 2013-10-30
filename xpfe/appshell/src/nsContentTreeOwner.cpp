@@ -34,11 +34,13 @@
 #include "nsDocShellCID.h"
 #include "nsIExternalURLHandlerService.h"
 #include "nsIMIMEInfo.h"
+#include "nsIWidget.h"
 #include "mozilla/BrowserElementParent.h"
 
 #include "nsIDOMDocument.h"
 #include "nsIScriptObjectPrincipal.h"
 #include "nsIURI.h"
+#include "nsIDocument.h"
 #if defined(XP_MACOSX)
 #include "nsThreadUtils.h"
 #endif

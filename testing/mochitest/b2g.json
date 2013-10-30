@@ -92,8 +92,7 @@
     "content/base/test/test_bug431701.html":"xmlhttprequest causes crash, bug 902271",
     "content/base/test/test_bug422537.html":"xmlhttprequest causes crash, bug 902271",
 
-    "content/base/test/test_bug338583.html":"43 total - bug 901343, specialpowers.wrap issue createsystemxhr",
-    "content/base/test/test_bug804395.html":"bug 901343, specialpowers.wrap issue createsystemxhr",
+    "content/base/test/test_bug338583.html":"https not working, bug 907770",
 
     "content/base/test/test_bug475156.html":"36 total - bug 902611",
     "content/base/test/test_bug422403-1.html":"bug 901343, specialpowers.wrap issue [nsIChannel.open]",
@@ -187,6 +186,10 @@
     "content/html/content/test/test_iframe_sandbox_navigation2.html":"Crash, bug 904659",
     "content/html/content/test/test_iframe_sandbox_navigation.html":"Crash, bug 904659",
 
+    "content/html/content/test/test_iframe_sandbox_popups.html":"multiple concurrent window.open()s fail on B2G",
+    "content/html/content/test/test_iframe_sandbox_popups_inheritance.html":"multiple concurrent window.open()s fail on B2G",
+    "content/html/content/test/test_iframe_sandbox_modal.html":"modal tests fail on B2G",
+
     "content/html/content/test/test_iframe_sandbox_plugins.html":"plugins not supported",
     "content/html/content/test/test_object_plugin_nav.html":"plugins not supported",
     "content/html/document/test/test_bug741266.html":"needs control of popup window size",
@@ -198,6 +201,7 @@
     "dom/indexedDB/test/test_lowDiskSpace.html":"this needs probably modification for notifyObserversInParentProcess to be similar as pushPermissions",
 
     "content/base/test/test_object.html":"needs plugin support",
+    "content/base/test/test_bug827160.html": "needs plugin support",
 
     "content/base/test/csp/test_CSP_evalscript.html":"observer not working",
     "content/base/test/csp/test_CSP_evalscript_getCRMFRequest.html":"observer not working",
@@ -205,6 +209,7 @@
     "content/base/test/csp/test_CSP.html":"observer not working",
     "content/base/test/csp/test_bug836922_npolicies.html":"observer not working",
     "content/base/test/csp/test_CSP_bug916446.html":"observer not working",
+    "content/base/test/csp/test_CSP_bug909029.html":"observer not working",
 
     "content/base/test/test_CrossSiteXHR_origin.html":"https not working, bug 907770",
     "content/base/test/test_plugin_freezing.html":"",
@@ -249,7 +254,6 @@
     "content/base/test/test_bug422403-2.xhtml":"",
     "content/base/test/test_bug424359-1.html":"",
     "content/base/test/test_bug424359-2.html":"",
-    "content/base/test/test_bug426308.html":"",
     "content/base/test/test_mixed_content_blocker_bug803225.html":"",
     "content/html/document/test/test_non-ascii-cookie.html":"",
 
@@ -321,7 +325,7 @@
     "dom/media/tests/mochitest/test_peerConnection_throwInCallbacks.html":"",
 
     "dom/network/tests/test_networkstats_basics.html":"Will be fixed in bug 858005",
-    "dom/permission/tests/test_permission_basics.html":"Bug 907770",
+    "dom/permission/tests/test_permission_basics.html":"https not working, bug 907770",
 
     "dom/tests/mochitest/bugs/test_bug335976.xhtml":"",
     "dom/tests/mochitest/bugs/test_bug369306.html":"test timed out, can't focus back from popup window to opener?",

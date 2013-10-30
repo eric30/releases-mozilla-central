@@ -89,10 +89,6 @@
 #define JS_NO_FASTCALL
 #endif
 
-#ifndef JS_INLINE
-#define JS_INLINE MOZ_INLINE
-#endif
-
 #ifndef JS_ALWAYS_INLINE
 #define JS_ALWAYS_INLINE MOZ_ALWAYS_INLINE
 #endif
@@ -238,7 +234,11 @@
 #define JS_BITS_PER_BYTE 8
 #define JS_BITS_PER_BYTE_LOG2 3
 
-#define JS_BITS_PER_WORD (JS_BITS_PER_BYTE * JS_BYTES_PER_WORD)
+#if defined(JS_64BIT)
+# define JS_BITS_PER_WORD 64
+#else
+# define JS_BITS_PER_WORD 32
+#endif
 
 /***********************************************************************
 ** MACROS:      JS_FUNC_TO_DATA_PTR

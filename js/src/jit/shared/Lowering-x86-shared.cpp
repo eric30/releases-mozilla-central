@@ -224,9 +224,9 @@ LIRGeneratorX86Shared::visitAsmJSUDiv(MAsmJSUDiv *div)
 bool
 LIRGeneratorX86Shared::lowerUMod(MInstruction *mod)
 {
-    LUDivOrMod *lir = new LUDivOrMod(useFixed(mod->getOperand(0), eax),
+    LUDivOrMod *lir = new LUDivOrMod(useFixedAtStart(mod->getOperand(0), eax),
                                      useRegister(mod->getOperand(1)),
-                                     LDefinition::BogusTemp());
+                                     tempFixed(eax));
     return defineFixed(lir, mod, LAllocation(AnyRegister(edx)));
 }
 
@@ -293,4 +293,14 @@ LIRGeneratorX86Shared::lowerTruncateDToInt32(MTruncateToInt32 *ins)
 
     LDefinition maybeTemp = Assembler::HasSSE3() ? LDefinition::BogusTemp() : tempFloat();
     return define(new LTruncateDToInt32(useRegister(opd), maybeTemp), ins);
+}
+
+bool
+LIRGeneratorX86Shared::lowerTruncateFToInt32(MTruncateToInt32 *ins)
+{
+    MDefinition *opd = ins->input();
+    JS_ASSERT(opd->type() == MIRType_Float32);
+
+    LDefinition maybeTemp = Assembler::HasSSE3() ? LDefinition::BogusTemp() : tempFloat();
+    return define(new LTruncateFToInt32(useRegister(opd), maybeTemp), ins);
 }

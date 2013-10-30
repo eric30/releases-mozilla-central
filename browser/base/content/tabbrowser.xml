@@ -34,7 +34,7 @@
             <xul:hbox flex="1" class="browserSidebarContainer">
               <xul:vbox flex="1" class="browserContainer">
                 <xul:stack flex="1" class="browserStack" anonid="browserStack">
-                  <xul:browser anonid="initialBrowser" type="content-primary" message="true" disablehistory="true"
+                  <xul:browser anonid="initialBrowser" type="content-primary" message="true"
                                xbl:inherits="tooltip=contenttooltip,contextmenu=contentcontextmenu,autocompletepopup,selectpopup"/>
                 </xul:stack>
               </xul:vbox>
@@ -1341,6 +1341,8 @@
             if (isRemote == aRemote)
               return false;
 
+            let wasActive = document.activeElement == aBrowser;
+
             // Unhook our progress listener.
             let tab = this._getTabForBrowser(aBrowser);
             let index = tab._tPos;
@@ -1360,6 +1362,9 @@
               tab.setAttribute("remote", "true");
             else
               tab.removeAttribute("remote");
+
+            if (wasActive)
+              aBrowser.focus();
 
             return true;
           ]]>
@@ -1666,9 +1671,26 @@
               throw new Error("Invalid argument: " + aCloseTabs);
           }
 
-          if (tabsToClose <= 1 ||
-              aCloseTabs != this.closingTabsEnum.ALL ||
-              !Services.prefs.getBoolPref("browser.tabs.warnOnClose"))
+          let maxUndo =
+            Services.prefs.getIntPref("browser.sessionstore.max_tabs_undo");
+          let warnOnCloseOtherTabs =
+            Services.prefs.getBoolPref("browser.tabs.warnOnCloseOtherTabs");
+          let warnOnCloseWindow =
+            Services.prefs.getBoolPref("browser.tabs.warnOnClose");
+          let isWindowClosing = aCloseTabs == this.closingTabsEnum.ALL;
+
+          let skipWarning =
+            // 1) If there is only one tab to close, we'll never warn the user.
+            tabsToClose <= 1 ||
+            // 2) If the whole window is going to be closed, don't warn the
+            //    user if the user has browser.tabs.warnOnClose set to false.
+            (isWindowClosing && !warnOnCloseWindow) ||
+            // 3) If the number of tabs are less than the undo threshold
+            //    or if the user has specifically opted-in to ignoring
+            //    this warning via the warnOnCloseOtherTabs pref.
+            (!isWindowClosing && (!warnOnCloseOtherTabs ||
+                                            tabsToClose <= maxUndo));
+          if (skipWarning)
             return true;
 
           var ps = Services.prompt;
@@ -1697,8 +1719,11 @@
           var reallyClose = (buttonPressed == 0);
 
           // don't set the pref unless they press OK and it's false
-          if (reallyClose && !warnOnClose.value)
-            Services.prefs.setBoolPref("browser.tabs.warnOnClose", false);
+          if (reallyClose && !warnOnClose.value) {
+            let pref = isWindowClosing ? "browser.tabs.warnOnClose" :
+                                         "browser.tabs.warnOnCloseOtherTabs";
+            Services.prefs.setBoolPref(pref, false);
+          }
 
           return reallyClose;
         ]]>
@@ -1912,7 +1937,7 @@
               // Prevent this tab from showing further dialogs, since we're closing it
               var windowUtils = browser.contentWindow.QueryInterface(Ci.nsIInterfaceRequestor).
                                 getInterface(Ci.nsIDOMWindowUtils);
-              windowUtils.preventFurtherDialogs();
+              windowUtils.disableDialogs();
             }
 
             // Remove the tab's filter and progress listener.
@@ -4110,6 +4135,61 @@
         event.preventDefault();
       ]]></handler>
 
+      <handler event="click" button="0" phase="capturing"><![CDATA[
+        /* Catches extra clicks meant for the in-tab close button.
+         * Placed here to avoid leaking (a temporary handler added from the
+         * in-tab close button binding would close over the tab and leak it
+         * until the handler itself was removed). (bug 897751)
+         *
+         * The only sequence in which a second click event (i.e. dblclik)
+         * can be dispatched on an in-tab close button is when it is shown
+         * after the first click (i.e. the first click event was dispatched
+         * on the tab). This happens when we show the close button only on
+         * the active tab. (bug 352021)
+         * The only sequence in which a third click event can be dispatched
+         * on an in-tab close button is when the tab was opened with a
+         * double click on the tabbar. (bug 378344)
+         * In both cases, it is most likely that the close button area has
+         * been accidentally clicked, therefore we do not close the tab.
+         *
+         * We don't want to ignore processing of more than one click event,
+         * though, since the user might actually be repeatedly clicking to
+         * close many tabs at once.
+         */
+        let target = event.originalTarget;
+        if (target.classList.contains('tab-close-button')) {
+          // We preemptively set this to allow the closing-multiple-tabs-
+          // in-a-row case.
+          if (this._blockDblClick) {
+            target._ignoredCloseButtonClicks = true;
+          } else if (event.detail > 1 && !target._ignoredCloseButtonClicks) {
+            target._ignoredCloseButtonClicks = true;
+            event.stopPropagation();
+            return;
+          } else {
+            // Reset the "ignored click" flag
+            target._ignoredCloseButtonClicks = false;
+          }
+        }
+
+        /* Protects from close-tab-button errant doubleclick:
+         * Since we're removing the event target, if the user
+         * double-clicks the button, the dblclick event will be dispatched
+         * with the tabbar as its event target (and explicit/originalTarget),
+         * which treats that as a mouse gesture for opening a new tab.
+         * In this context, we're manually blocking the dblclick event
+         * (see tabbrowser-close-tab-button dblclick handler).
+         */
+        if (this._blockDblClick) {
+          if (!("_clickedTabBarOnce" in this)) {
+            this._clickedTabBarOnce = true;
+            return;
+          }
+          delete this._clickedTabBarOnce;
+          this._blockDblClick = false;
+        }
+      ]]></handler>
+
       <handler event="click"><![CDATA[
         if (event.button != 1)
           return;
@@ -4489,53 +4569,10 @@
       <handler event="click" button="0"><![CDATA[
         var bindingParent = document.getBindingParent(this);
         var tabContainer = bindingParent.parentNode;
-        /* The only sequence in which a second click event (i.e. dblclik)
-         * can be dispatched on an in-tab close button is when it is shown
-         * after the first click (i.e. the first click event was dispatched
-         * on the tab). This happens when we show the close button only on
-         * the active tab. (bug 352021)
-         * The only sequence in which a third click event can be dispatched
-         * on an in-tab close button is when the tab was opened with a
-         * double click on the tabbar. (bug 378344)
-         * In both cases, it is most likely that the close button area has
-         * been accidentally clicked, therefore we do not close the tab.
-         *
-         * We don't want to ignore processing of more than one click event,
-         * though, since the user might actually be repeatedly clicking to
-         * close many tabs at once.
-         */
-        if (event.detail > 1 && !this._ignoredClick) {
-          this._ignoredClick = true;
-          return;
-        }
-
-        // Reset the "ignored click" flag
-        this._ignoredClick = false;
-
         tabContainer.tabbrowser.removeTab(bindingParent, {animate: true, byMouse: true});
+        // This enables double-click protection for the tab container
+        // (see tabbrowser-tabs 'click' handler).
         tabContainer._blockDblClick = true;
-
-        /* XXXmano hack (see bug 343628):
-         * Since we're removing the event target, if the user
-         * double-clicks this button, the dblclick event will be dispatched
-         * with the tabbar as its event target (and explicit/originalTarget),
-         * which treats that as a mouse gesture for opening a new tab.
-         * In this context, we're manually blocking the dblclick event
-         * (see dblclick handler).
-         */
-        var clickedOnce = false;
-        function enableDblClick(event) {
-          var target = event.originalTarget;
-          if (target.className == 'tab-close-button')
-            target._ignoredClick = true;
-          if (!clickedOnce) {
-            clickedOnce = true;
-            return;
-          }
-          tabContainer._blockDblClick = false;
-          tabContainer.removeEventListener("click", enableDblClick, true);
-        }
-        tabContainer.addEventListener("click", enableDblClick, true);
       ]]></handler>
 
       <handler event="dblclick" button="0" phase="capturing">

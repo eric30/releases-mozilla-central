@@ -21,7 +21,7 @@ EXPORTS += [
     'AudioChannelServiceChild.h',
 ]
 
-CPP_SOURCES += [
+SOURCES += [
     'AudioChannelAgent.cpp',
     'AudioChannelService.cpp',
     'AudioChannelServiceChild.cpp',
@@ -32,4 +32,8 @@ FAIL_ON_WARNINGS = True
 LIBXUL_LIBRARY = True
 
 LIBRARY_NAME = 'domaudiochannel_s'
+
+EXPORT_LIBRARY = True
+
+include('/ipc/chromium/chromium-config.mozbuild')
 

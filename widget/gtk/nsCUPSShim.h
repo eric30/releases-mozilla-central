@@ -7,7 +7,6 @@
 #ifndef nsCUPSShim_h___
 #define nsCUPSShim_h___
 
-#include "prtypes.h"
 
 /* Various CUPS data types. We don't #include cups headers to avoid
  * requiring CUPS to be installed on the build host (and to avoid having
@@ -22,7 +21,7 @@ typedef struct                          /**** Printer Options ****/
 typedef struct               /**** Destination ****/
 {
     char          *name,       /* Printer or class name */
-                  *instance;   /* Local instance name or NULL */
+                  *instance;   /* Local instance name or nullptr */
     int           is_default;  /* Is this printer the default? */
     int           num_options; /* Number of options */
     cups_option_t *options;    /* Options */

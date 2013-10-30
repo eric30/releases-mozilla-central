@@ -63,6 +63,8 @@ const ContentPanning = {
 
     addMessageListener("Viewport:Change", this._recvViewportChange.bind(this));
     addMessageListener("Gesture:DoubleTap", this._recvDoubleTap.bind(this));
+    addEventListener("visibilitychange", this._recvVisibilityChange.bind(this));
+    Services.obs.addObserver(this, "BEC:ShownModalPrompt", false);
   },
 
   handleEvent: function cp_handleEvent(evt) {
@@ -77,6 +79,13 @@ const ContentPanning = {
       }
       return;
     }
+
+    let start = Date.now();
+    let thread = Services.tm.currentThread;
+    while (this._delayEvents && (Date.now() - start) < this._activeDurationMs) {
+      thread.processNextEvent(true);
+    }
+    this._delayEvents = false;
 
     switch (evt.type) {
       case 'mousedown':
@@ -100,6 +109,12 @@ const ContentPanning = {
                                         : target;
         view.removeEventListener('click', this, true, true);
         break;
+    }
+  },
+
+  observe: function cp_observe(subject, topic, data) {
+    if (topic === 'BEC:ShownModalPrompt') {
+      this._resetHover();
     }
   },
 
@@ -229,6 +244,16 @@ const ContentPanning = {
         // We prevent end events to avoid sending a focus event. See bug 889717.
         evt.preventDefault();
       }
+    } else if (this.target && click && !this.panning) {
+      this.notify(this._activationTimer);
+
+      this._delayEvents = true;
+      let start = Date.now();
+      let thread = Services.tm.currentThread;
+      while (this._delayEvents && (Date.now() - start) < this._activeDurationMs) {
+        thread.processNextEvent(true);
+      }
+      this._delayEvents = false;
     }
 
     this._finishPanning();
@@ -467,10 +492,22 @@ const ContentPanning = {
     return this._activationDelayMs = delay;
   },
 
+  get _activeDurationMs() {
+    let duration = Services.prefs.getIntPref('ui.touch_activation.duration_ms');
+    delete this._activeDurationMs;
+    return this._activeDurationMs = duration;
+  },
+
   _resetActive: function cp_resetActive() {
     let elt = this.target || this.pointerDownTarget;
     let root = elt.ownerDocument || elt.document;
     this._setActive(root.documentElement);
+  },
+
+  _resetHover: function cp_resetHover() {
+    const kStateHover = 0x00000004;
+    let element = content.document.createElement('foo');
+    this._domUtils.setContentState(element, kStateHover);
   },
 
   _setActive: function cp_setActive(elt) {
@@ -556,6 +593,13 @@ const ContentPanning = {
       var os = Cc["@mozilla.org/observer-service;1"].getService(Ci.nsIObserverService);
       os.notifyObservers(docShell, 'browser-zoom-to-rect', JSON.stringify(rect));
     }
+  },
+
+  _recvVisibilityChange: function(evt) {
+    if (!evt.target.hidden)
+      return;
+
+    this._resetHover();
   },
 
   _shouldZoomToElement: function(aElement) {

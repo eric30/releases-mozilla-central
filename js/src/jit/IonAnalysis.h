@@ -118,6 +118,7 @@ class LinearSum
     LinearTerm term(size_t i) const { return terms_[i]; }
 
     void print(Sprinter &sp) const;
+    void dump(FILE *) const;
 
   private:
     Vector<LinearTerm, 2, IonAllocPolicy> terms_;
@@ -125,7 +126,7 @@ class LinearSum
 };
 
 bool
-AnalyzeNewScriptProperties(JSContext *cx, JSFunction *fun,
+AnalyzeNewScriptProperties(JSContext *cx, HandleFunction fun,
                            types::TypeObject *type, HandleObject baseobj,
                            Vector<types::TypeNewScript::Initializer> *initializerList);
 

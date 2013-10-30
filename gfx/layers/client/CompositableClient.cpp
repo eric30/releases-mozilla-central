@@ -207,13 +207,7 @@ CompositableClient::CreateBufferTextureClient(gfx::SurfaceFormat aFormat,
   return result.forget();
 }
 
-TemporaryRef<BufferTextureClient>
-CompositableClient::CreateBufferTextureClient(gfx::SurfaceFormat aFormat)
-{
-  return CreateBufferTextureClient(aFormat, TEXTURE_FLAGS_DEFAULT);
-}
-
-void
+bool
 CompositableClient::AddTextureClient(TextureClient* aClient)
 {
   ++mNextTextureID;
@@ -222,7 +216,7 @@ CompositableClient::AddTextureClient(TextureClient* aClient)
     ++mNextTextureID;
   }
   aClient->SetID(mNextTextureID);
-  mForwarder->AddTexture(this, aClient);
+  return mForwarder->AddTexture(this, aClient);
 }
 
 void
@@ -231,7 +225,7 @@ CompositableClient::RemoveTextureClient(TextureClient* aClient)
   MOZ_ASSERT(aClient);
   mTexturesToRemove.AppendElement(TextureIDAndFlags(aClient->GetID(),
                                                     aClient->GetFlags()));
-  if (!(aClient->GetFlags() & TEXTURE_DEALLOCATE_HOST)) {
+  if (aClient->GetFlags() & TEXTURE_DEALLOCATE_CLIENT) {
     TextureClientData* data = aClient->DropTextureData();
     if (data) {
       mTexturesToRemoveCallbacks[aClient->GetID()] = data;

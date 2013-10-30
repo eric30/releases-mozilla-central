@@ -35,6 +35,7 @@ public final class GeckoProfile {
     private final String mName;
     private File mMozDir;
     private File mDir;
+    public static boolean sIsUsingCustomProfile = false;
 
     // Constants to cache whether or not a profile is "locked".
     private enum LockState {
@@ -60,7 +61,13 @@ public final class GeckoProfile {
     }
 
     public static GeckoProfile get(Context context) {
-        if (context instanceof GeckoApp) {
+        boolean isGeckoApp = false;
+        try {
+            isGeckoApp = context instanceof GeckoApp;
+        } catch (NoClassDefFoundError ex) {}
+        
+
+        if (isGeckoApp) {
             // Check for a cached profile on this context already
             // TODO: We should not be caching profile information on the Activity context
             if (((GeckoApp)context).mProfile != null) {
@@ -74,7 +81,7 @@ public final class GeckoProfile {
             return guest;
         }
 
-        if (context instanceof GeckoApp) {
+        if (isGeckoApp) {
             // Otherwise, get the default profile for the Activity
             return get(context, ((GeckoApp)context).getDefaultProfileName());
         }
@@ -313,8 +320,13 @@ public final class GeckoProfile {
     }
 
     public synchronized File getDir() {
+        forceCreate();
+        return mDir;
+    }
+
+    public synchronized GeckoProfile forceCreate() {
         if (mDir != null) {
-            return mDir;
+            return this;
         }
 
         try {
@@ -330,7 +342,7 @@ public final class GeckoProfile {
         } catch (IOException ioe) {
             Log.e(LOGTAG, "Error getting profile dir", ioe);
         }
-        return mDir;
+        return this;
     }
 
     public File getFile(String aFile) {

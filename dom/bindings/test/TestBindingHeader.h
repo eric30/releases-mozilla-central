@@ -513,6 +513,9 @@ public:
   void PassUnion9(JSContext*, const ObjectOrStringOrLongOrBoolean& arg);
   void PassUnion10(const EventInitOrLong& arg);
   void PassUnion11(JSContext*, const CustomEventInitOrLong& arg);
+  void PassUnion12(const EventInitOrLong& arg);
+  void PassUnion13(JSContext*, const ObjectOrLongOrNull& arg);
+  void PassUnion14(JSContext*, const ObjectOrLongOrNull& arg);
 #endif
   void PassNullableUnion(JSContext*, const Nullable<ObjectOrLong>&);
   void PassOptionalUnion(JSContext*, const Optional<ObjectOrLong>&);
@@ -587,7 +590,7 @@ public:
   // Dictionary tests
   void PassDictionary(JSContext*, const Dict&);
   void ReceiveDictionary(JSContext*, Dict&);
-  void ReceiveNullableDictionary(JSContext*, Nullable<DictInitializer>&);
+  void ReceiveNullableDictionary(JSContext*, Nullable<Dict>&);
   void PassOtherDictionary(const GrandparentDict&);
   void PassSequenceOfDictionaries(JSContext*, const Sequence<Dict>&);
   void PassDictionaryOrLong(JSContext*, const Dict&);

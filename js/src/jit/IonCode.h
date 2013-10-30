@@ -11,6 +11,7 @@
 #include "mozilla/PodOperations.h"
 
 #include "jsinfer.h"
+#include "jstypes.h"
 
 #include "gc/Heap.h"
 #include "jit/IonTypes.h"
@@ -328,7 +329,8 @@ struct IonScript
     // Do not call directly, use IonScript::New. This is public for cx->new_.
     IonScript();
 
-    static IonScript *New(JSContext *cx, uint32_t frameLocals, uint32_t frameSize,
+    static IonScript *New(JSContext *cx, types::RecompileInfo recompileInfo,
+                          uint32_t frameLocals, uint32_t frameSize,
                           size_t snapshotsSize, size_t snapshotEntries,
                           size_t constants, size_t safepointIndexEntries, size_t osiIndexEntries,
                           size_t cacheEntries, size_t runtimeSize, size_t safepointsSize,
@@ -694,8 +696,8 @@ struct IonScriptCounts
 
 struct VMFunction;
 
-class IonCompartment;
-class IonRuntime;
+class JitCompartment;
+class JitRuntime;
 
 struct AutoFlushCache
 {
@@ -703,14 +705,14 @@ struct AutoFlushCache
     uintptr_t start_;
     uintptr_t stop_;
     const char *name_;
-    IonRuntime *runtime_;
+    JitRuntime *runtime_;
     bool used_;
 
   public:
     void update(uintptr_t p, size_t len);
     static void updateTop(uintptr_t p, size_t len);
     ~AutoFlushCache();
-    AutoFlushCache(const char *nonce, IonRuntime *rt);
+    AutoFlushCache(const char *nonce, JitRuntime *rt);
     void flushAnyway();
 };
 
@@ -725,10 +727,10 @@ struct AutoFlushCache
 struct AutoFlushInhibitor
 {
   private:
-    IonRuntime *runtime_;
+    JitRuntime *runtime_;
     AutoFlushCache *afc;
   public:
-    AutoFlushInhibitor(IonRuntime *rt);
+    AutoFlushInhibitor(JitRuntime *rt);
     ~AutoFlushInhibitor();
 };
 } // namespace jit

@@ -80,7 +80,7 @@ ThrowExceptionObject(JSContext* aCx, Exception* aException)
   // thread.
   if (NS_IsMainThread() && !IsCallerChrome() &&
       aException->StealJSVal(thrown.address())) {
-    if (!JS_WrapValue(aCx, thrown.address())) {
+    if (!JS_WrapValue(aCx, &thrown)) {
       return false;
     }
     JS_SetPendingException(aCx, thrown);
@@ -114,7 +114,16 @@ Throw(JSContext* aCx, nsresult aRv, const char* aMessage)
     nsresult nr;
     if (NS_SUCCEEDED(existingException->GetResult(&nr)) && 
         aRv == nr) {
-      // Just reuse the existing exception.
+      // Reuse the existing exception.
+
+      // Clear pending exception
+      runtime->SetPendingException(nullptr);
+
+      if (!ThrowExceptionObject(aCx, existingException)) {
+        // If we weren't able to throw an exception we're
+        // most likely out of memory
+        JS_ReportOutOfMemory(aCx);
+      }
       return false;
     }
   }

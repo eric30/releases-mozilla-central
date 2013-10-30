@@ -21,12 +21,11 @@ include $(srcdir)/android-services-files.mk
 
 # BACKGROUND_TESTS_{JAVA,RES}_FILES are defined in android-services-files.mk.
 JAVAFILES := $(BACKGROUND_TESTS_JAVA_FILES)
-ANDROID_RESFILES := $(BACKGROUND_TESTS_RES_FILES)
 
 # The test APK needs to know the contents of the target APK while not
 # being linked against them.  This is a best effort to avoid getting
 # out of sync with base's build config.
-JARS_DIR := $(DEPTH)/mobile/android/base/jars
+JARS_DIR := $(DEPTH)/mobile/android/base
 JAVA_BOOTCLASSPATH := $(JAVA_BOOTCLASSPATH):$(subst $(NULL) ,:,$(wildcard $(JARS_DIR)/*.jar))
 # We also want to re-compile classes.dex when the associated base
 # content changes.

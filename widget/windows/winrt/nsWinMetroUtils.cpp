@@ -331,7 +331,7 @@ nsWinMetroUtils::LaunchInDesktop(const nsAString &aPath, const nsAString &aArgum
   // SEE_MASK_FLAG_LOG_USAGE is needed to change from immersive mode
   // to desktop.
   sinfo.fMask        = SEE_MASK_FLAG_LOG_USAGE;
-  sinfo.hwnd         = NULL;
+  sinfo.hwnd         = nullptr;
   sinfo.lpFile       = aPath.BeginReading();
   sinfo.lpParameters = aArguments.BeginReading();
   sinfo.lpVerb       = L"open";
@@ -345,7 +345,8 @@ nsWinMetroUtils::LaunchInDesktop(const nsAString &aPath, const nsAString &aArgum
 
 NS_IMETHODIMP
 nsWinMetroUtils::ShowNativeToast(const nsAString &aTitle,
-  const nsAString &aMessage, const nsAString &anImage)
+  const nsAString &aMessage, const nsAString &anImage,
+  const nsAString &aCookie)
 {
   // Firefox is in the foreground, no need for a notification.
   if (::GetActiveWindow() == ::GetForegroundWindow()) {
@@ -358,7 +359,7 @@ nsWinMetroUtils::ShowNativeToast(const nsAString &aTitle,
   HSTRING title = HStringReference(aTitle.BeginReading()).Get();
   HSTRING msg = HStringReference(aMessage.BeginReading()).Get();
   HSTRING imagePath = HStringReference(anImage.BeginReading()).Get();
-  notification_handler->DisplayNotification(title, msg, imagePath);
+  notification_handler->DisplayNotification(title, msg, imagePath, aCookie);
 
   return NS_OK;
 }
@@ -380,27 +381,6 @@ nsWinMetroUtils::GetImmersive(bool *aImersive)
 {
   *aImersive =
     XRE_GetWindowsEnvironment() == WindowsEnvironmentType_Metro;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsWinMetroUtils::GetHandPreference(int32_t *aHandPreference)
-{
-  if (XRE_GetWindowsEnvironment() == WindowsEnvironmentType_Desktop) {
-    *aHandPreference = nsIWinMetroUtils::handPreferenceRight;
-    return NS_OK;
-  }
-
-  ComPtr<IUISettings> uiSettings;
-  AssertRetHRESULT(ActivateGenericInstance(RuntimeClass_Windows_UI_ViewManagement_UISettings, uiSettings), NS_ERROR_UNEXPECTED);
-
-  HandPreference value;
-  uiSettings->get_HandPreference(&value);
-  if (value == HandPreference::HandPreference_LeftHanded)
-    *aHandPreference = nsIWinMetroUtils::handPreferenceLeft;
-  else
-    *aHandPreference = nsIWinMetroUtils::handPreferenceRight;
-
   return NS_OK;
 }
 

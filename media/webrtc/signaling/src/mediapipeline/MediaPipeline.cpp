@@ -1,3 +1,4 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -148,15 +149,15 @@ nsresult MediaPipeline::TransportReady_s(TransportFlow *flow) {
   // failure. bug 852665.
   if (*state != MP_CONNECTING) {
     MOZ_MTLOG(ML_ERROR, "Transport ready for flow in wrong state:" <<
-	      description_ << ": " << (rtcp ? "rtcp" : "rtp"));
+              description_ << ": " << (rtcp ? "rtcp" : "rtp"));
     return NS_ERROR_FAILURE;
   }
 
   nsresult res;
 
   MOZ_MTLOG(ML_DEBUG, "Transport ready for pipeline " <<
-	    static_cast<void *>(this) << " flow " << description_ << ": " <<
-	    (rtcp ? "rtcp" : "rtp"));
+            static_cast<void *>(this) << " flow " << description_ << ": " <<
+            (rtcp ? "rtcp" : "rtp"));
 
   // Now instantiate the SRTP objects
   TransportLayerDtls *dtls = static_cast<TransportLayerDtls *>(
@@ -330,7 +331,7 @@ void MediaPipeline::increment_rtp_packets_sent() {
   ++rtp_packets_sent_;
 
   if (!(rtp_packets_sent_ % 100)) {
-    MOZ_MTLOG(ML_DEBUG, "RTP sent packet count for " << description_
+    MOZ_MTLOG(ML_INFO, "RTP sent packet count for " << description_
               << " Pipeline " << static_cast<void *>(this)
               << " Flow : " << static_cast<void *>(rtp_transport_)
               << ": " << rtp_packets_sent_);
@@ -340,7 +341,7 @@ void MediaPipeline::increment_rtp_packets_sent() {
 void MediaPipeline::increment_rtcp_packets_sent() {
   ++rtcp_packets_sent_;
   if (!(rtcp_packets_sent_ % 100)) {
-    MOZ_MTLOG(ML_DEBUG, "RTCP sent packet count for " << description_
+    MOZ_MTLOG(ML_INFO, "RTCP sent packet count for " << description_
               << " Pipeline " << static_cast<void *>(this)
               << " Flow : " << static_cast<void *>(rtcp_transport_)
               << ": " << rtcp_packets_sent_);
@@ -350,7 +351,7 @@ void MediaPipeline::increment_rtcp_packets_sent() {
 void MediaPipeline::increment_rtp_packets_received() {
   ++rtp_packets_received_;
   if (!(rtp_packets_received_ % 100)) {
-    MOZ_MTLOG(ML_DEBUG, "RTP received packet count for " << description_
+    MOZ_MTLOG(ML_INFO, "RTP received packet count for " << description_
               << " Pipeline " << static_cast<void *>(this)
               << " Flow : " << static_cast<void *>(rtp_transport_)
               << ": " << rtp_packets_received_);
@@ -360,7 +361,7 @@ void MediaPipeline::increment_rtp_packets_received() {
 void MediaPipeline::increment_rtcp_packets_received() {
   ++rtcp_packets_received_;
   if (!(rtcp_packets_received_ % 100)) {
-    MOZ_MTLOG(ML_DEBUG, "RTCP received packet count for " << description_
+    MOZ_MTLOG(ML_INFO, "RTCP received packet count for " << description_
               << " Pipeline " << static_cast<void *>(this)
               << " Flow : " << static_cast<void *>(rtcp_transport_)
               << ": " << rtcp_packets_received_);

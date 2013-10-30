@@ -2,9 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "CacheLog.h"
 #include "CacheEntry.h"
 #include "CacheStorageService.h"
-#include "CacheLog.h"
 
 #include "nsIInputStream.h"
 #include "nsIOutputStream.h"
@@ -100,7 +100,7 @@ CacheEntry::~CacheEntry()
   MOZ_COUNT_DTOR(CacheEntry);
 }
 
-#ifdef MOZ_LOGGING
+#ifdef PR_LOG
 
 char const * CacheEntry::StateString(uint32_t aState)
 {

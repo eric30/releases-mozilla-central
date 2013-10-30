@@ -9,11 +9,7 @@ dir-tests    := $(DEPTH)/$(mobile-tests)
 ANDROID_APK_NAME := robocop-debug
 
 ANDROID_EXTRA_JARS += \
-  $(srcdir)/robotium-solo-4.2.jar \
-  $(NULL)
-
-ANDROID_RESFILES = \
-  res/values/strings.xml \
+  $(srcdir)/robotium-solo-4.3.jar \
   $(NULL)
 
 ANDROID_ASSETS_DIR := $(TESTPATH)/assets
@@ -58,7 +54,6 @@ robocop_DEST    := $(CURDIR)
 robocop_FILES   := \
   $(TESTPATH)/robocop.ini \
   $(TESTPATH)/robocop_autophone.ini \
-  $(TESTPATH)/robocop_x86.ini \
   $(NULL)
 robocop-deps := $(notdir $(robocop_FILES))
 

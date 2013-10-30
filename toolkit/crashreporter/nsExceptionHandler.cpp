@@ -8,6 +8,7 @@
 #include "mozilla/dom/CrashReporterChild.h"
 #include "mozilla/Services.h"
 #include "nsIObserverService.h"
+#include "mozilla/unused.h"
 #include "mozilla/Util.h"
 
 #include "nsThreadUtils.h"
@@ -221,6 +222,11 @@ static const char kIsGarbageCollectingParameter[] = "IsGarbageCollecting=";
 static const int kIsGarbageCollectingParameterLen =
   sizeof(kIsGarbageCollectingParameter)-1;
 
+#ifdef XP_WIN
+static const char kBlockedDllsParameter[] = "BlockedDllList=";
+static const int kBlockedDllsParameterLen = sizeof(kBlockedDllsParameter) - 1;
+#endif
+
 // this holds additional data sent via the API
 static Mutex* crashReporterAPILock;
 static Mutex* notesFieldLock;
@@ -253,7 +259,7 @@ struct ChildProcessData : public nsUint32HashKey
     : nsUint32HashKey(aKey)
     , sequence(0)
 #ifdef MOZ_CRASHREPORTER_INJECTOR
-    , callback(NULL)
+    , callback(nullptr)
 #endif
   { }
 
@@ -320,7 +326,7 @@ patched_SetUnhandledExceptionFilter (LPTOP_LEVEL_EXCEPTION_FILTER lpTopLevelExce
   }
 
   // intercept attempts to change the filter
-  return NULL;
+  return nullptr;
 }
 #endif
 
@@ -441,11 +447,11 @@ bool MinidumpCallback(
     // Leave a marker indicating that there was a crash.
 #if defined(XP_WIN32)
     HANDLE hFile = CreateFile(crashMarkerFilename, GENERIC_WRITE, 0,
-                              NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL,
-                              NULL);
+                              nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL,
+                              nullptr);
     if(hFile != INVALID_HANDLE_VALUE) {
       DWORD nBytes;
-      WriteFile(hFile, minidumpPath, 2*wcslen(minidumpPath), &nBytes, NULL);
+      WriteFile(hFile, minidumpPath, 2*wcslen(minidumpPath), &nBytes, nullptr);
       CloseHandle(hFile);
     }
 #elif defined(XP_UNIX)
@@ -453,8 +459,7 @@ bool MinidumpCallback(
                       O_WRONLY | O_CREAT | O_TRUNC,
                       0600);
     if (fd != -1) {
-      ssize_t ignored = sys_write(fd, minidumpPath, my_strlen(minidumpPath));
-      (void)ignored;
+      unused << sys_write(fd, minidumpPath, my_strlen(minidumpPath));
       sys_close(fd);
     }
 #endif
@@ -472,10 +477,10 @@ bool MinidumpCallback(
   time_t crashTime;
 #ifdef XP_LINUX
   struct kernel_timeval tv;
-  sys_gettimeofday(&tv, NULL);
+  sys_gettimeofday(&tv, nullptr);
   crashTime = tv.tv_sec;
 #else
-  crashTime = time(NULL);
+  crashTime = time(nullptr);
 #endif
   time_t timeSinceLastCrash = 0;
   // stringified versions of the above
@@ -495,11 +500,11 @@ bool MinidumpCallback(
   if (lastCrashTimeFilename[0] != 0) {
 #if defined(XP_WIN32)
     HANDLE hFile = CreateFile(lastCrashTimeFilename, GENERIC_WRITE, 0,
-                              NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL,
-                              NULL);
+                              nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL,
+                              nullptr);
     if(hFile != INVALID_HANDLE_VALUE) {
       DWORD nBytes;
-      WriteFile(hFile, crashTimeString, crashTimeStringLen, &nBytes, NULL);
+      WriteFile(hFile, crashTimeString, crashTimeStringLen, &nBytes, nullptr);
       CloseHandle(hFile);
     }
 #elif defined(XP_UNIX)
@@ -507,8 +512,7 @@ bool MinidumpCallback(
                       O_WRONLY | O_CREAT | O_TRUNC,
                       0600);
     if (fd != -1) {
-      ssize_t ignored = sys_write(fd, crashTimeString, crashTimeStringLen);
-      (void)ignored;
+      unused << sys_write(fd, crashTimeString, crashTimeStringLen);
       sys_close(fd);
     }
 #endif
@@ -518,29 +522,32 @@ bool MinidumpCallback(
   if (!crashReporterAPIData->IsEmpty()) {
     // write out API data
     HANDLE hFile = CreateFile(extraDataPath, GENERIC_WRITE, 0,
-                              NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL,
-                              NULL);
+                              nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL,
+                              nullptr);
     if(hFile != INVALID_HANDLE_VALUE) {
       DWORD nBytes;
       WriteFile(hFile, crashReporterAPIData->get(),
-                crashReporterAPIData->Length(), &nBytes, NULL);
+                crashReporterAPIData->Length(), &nBytes, nullptr);
       WriteFile(hFile, kCrashTimeParameter, kCrashTimeParameterLen,
-                &nBytes, NULL);
-      WriteFile(hFile, crashTimeString, crashTimeStringLen, &nBytes, NULL);
-      WriteFile(hFile, "\n", 1, &nBytes, NULL);
+                &nBytes, nullptr);
+      WriteFile(hFile, crashTimeString, crashTimeStringLen, &nBytes, nullptr);
+      WriteFile(hFile, "\n", 1, &nBytes, nullptr);
       if (timeSinceLastCrash != 0) {
         WriteFile(hFile, kTimeSinceLastCrashParameter,
-                  kTimeSinceLastCrashParameterLen, &nBytes, NULL);
+                  kTimeSinceLastCrashParameterLen, &nBytes, nullptr);
         WriteFile(hFile, timeSinceLastCrashString, timeSinceLastCrashStringLen,
-                  &nBytes, NULL);
-        WriteFile(hFile, "\n", 1, &nBytes, NULL);
+                  &nBytes, nullptr);
+        WriteFile(hFile, "\n", 1, &nBytes, nullptr);
       }
       if (isGarbageCollecting) {
         WriteFile(hFile, kIsGarbageCollectingParameter, kIsGarbageCollectingParameterLen,
-                  &nBytes, NULL);
-        WriteFile(hFile, isGarbageCollecting ? "1" : "0", 1, &nBytes, NULL);
-        WriteFile(hFile, "\n", 1, &nBytes, NULL);
+                  &nBytes, nullptr);
+        WriteFile(hFile, isGarbageCollecting ? "1" : "0", 1, &nBytes, nullptr);
+        WriteFile(hFile, "\n", 1, &nBytes, nullptr);
       }
+      WriteFile(hFile, kBlockedDllsParameter, kBlockedDllsParameterLen, &nBytes, nullptr);
+      WriteBlockedDlls(hFile);
+      WriteFile(hFile, "\n", 1, &nBytes, nullptr);
 
       // Try to get some information about memory.
       MEMORYSTATUSEX statex;
@@ -549,13 +556,13 @@ bool MinidumpCallback(
         char buffer[128];
         int bufferLen;
 
-#define WRITE_STATEX_FIELD(field, paramName, conversionFunc)  \
-        WriteFile(hFile, k##paramName##Parameter,             \
-                  k##paramName##ParameterLen, &nBytes, NULL); \
-        conversionFunc(statex.field, buffer, 10);             \
-        bufferLen = strlen(buffer);                           \
-        WriteFile(hFile, buffer, bufferLen, &nBytes, NULL);   \
-        WriteFile(hFile, "\n", 1, &nBytes, NULL);
+#define WRITE_STATEX_FIELD(field, paramName, conversionFunc)     \
+        WriteFile(hFile, k##paramName##Parameter,                \
+                  k##paramName##ParameterLen, &nBytes, nullptr); \
+        conversionFunc(statex.field, buffer, 10);                \
+        bufferLen = strlen(buffer);                              \
+        WriteFile(hFile, buffer, bufferLen, &nBytes, nullptr);   \
+        WriteFile(hFile, "\n", 1, &nBytes, nullptr);
 
         WRITE_STATEX_FIELD(dwMemoryLoad, SysMemory, ltoa);
         WRITE_STATEX_FIELD(ullTotalVirtual, TotalVirtualMemory, _ui64toa);
@@ -568,10 +575,10 @@ bool MinidumpCallback(
 
       if (oomAllocationSizeBufferLen) {
         WriteFile(hFile, kOOMAllocationSizeParameter,
-                  kOOMAllocationSizeParameterLen, &nBytes, NULL);
+                  kOOMAllocationSizeParameterLen, &nBytes, nullptr);
         WriteFile(hFile, oomAllocationSizeBuffer, oomAllocationSizeBufferLen,
-                  &nBytes, NULL);
-        WriteFile(hFile, "\n", 1, &nBytes, NULL);
+                  &nBytes, nullptr);
+        WriteFile(hFile, "\n", 1, &nBytes, nullptr);
       }
       CloseHandle(hFile);
     }
@@ -598,8 +605,8 @@ bool MinidumpCallback(
   si.wShowWindow = SW_SHOWNORMAL;
   ZeroMemory(&pi, sizeof(pi));
 
-  if (CreateProcess(NULL, (LPWSTR)cmdLine, NULL, NULL, FALSE, 0,
-                    NULL, NULL, &si, &pi)) {
+  if (CreateProcess(nullptr, (LPWSTR)cmdLine, nullptr, nullptr, FALSE, 0,
+                    nullptr, nullptr, &si, &pi)) {
     CloseHandle( pi.hProcess );
     CloseHandle( pi.hThread );
   }
@@ -614,29 +621,30 @@ bool MinidumpCallback(
 
     if (fd != -1) {
       // not much we can do in case of error
-      ssize_t ignored = sys_write(fd, crashReporterAPIData->get(),
+      unused << sys_write(fd, crashReporterAPIData->get(),
                                   crashReporterAPIData->Length());
-      ignored = sys_write(fd, kCrashTimeParameter, kCrashTimeParameterLen);
-      ignored = sys_write(fd, crashTimeString, crashTimeStringLen);
-      ignored = sys_write(fd, "\n", 1);
+      unused << sys_write(fd, kCrashTimeParameter, kCrashTimeParameterLen);
+      unused << sys_write(fd, crashTimeString, crashTimeStringLen);
+      unused << sys_write(fd, "\n", 1);
       if (timeSinceLastCrash != 0) {
-        ignored = sys_write(fd, kTimeSinceLastCrashParameter,
+        unused << sys_write(fd, kTimeSinceLastCrashParameter,
                         kTimeSinceLastCrashParameterLen);
-        ignored = sys_write(fd, timeSinceLastCrashString,
+        unused << sys_write(fd, timeSinceLastCrashString,
                         timeSinceLastCrashStringLen);
-        ignored = sys_write(fd, "\n", 1);
+        unused << sys_write(fd, "\n", 1);
       }
       if (isGarbageCollecting) {
-        ignored = sys_write(fd, kIsGarbageCollectingParameter, kIsGarbageCollectingParameterLen);
-        ignored = sys_write(fd, isGarbageCollecting ? "1" : "0", 1);
-        ignored = sys_write(fd, "\n", 1);
+        unused << sys_write(fd, kIsGarbageCollectingParameter, kIsGarbageCollectingParameterLen);
+        unused << sys_write(fd, isGarbageCollecting ? "1" : "0", 1);
+        unused << sys_write(fd, "\n", 1);
       }
       if (oomAllocationSizeBufferLen) {
-        sys_write(fd, kOOMAllocationSizeParameter,
-                  kOOMAllocationSizeParameterLen);
-        sys_write(fd, oomAllocationSizeBuffer, oomAllocationSizeBufferLen);
-        sys_write(fd, "\n", 1);
-      }        
+        unused << sys_write(fd, kOOMAllocationSizeParameter,
+                            kOOMAllocationSizeParameterLen);
+        unused << sys_write(fd, oomAllocationSizeBuffer,
+                            oomAllocationSizeBufferLen);
+        unused << sys_write(fd, "\n", 1);
+      }
       sys_close(fd);
     }
   }
@@ -649,16 +657,16 @@ bool MinidumpCallback(
   char* const my_argv[] = {
     crashReporterPath,
     minidumpPath,
-    NULL
+    nullptr
   };
 
-  char **env = NULL;
+  char **env = nullptr;
   char ***nsEnv = _NSGetEnviron();
   if (nsEnv)
     env = *nsEnv;
-  int result = posix_spawnp(NULL,
+  int result = posix_spawnp(nullptr,
                             my_argv[0],
-                            NULL,
+                            nullptr,
                             &spawnattr,
                             my_argv,
                             env);
@@ -676,27 +684,27 @@ bool MinidumpCallback(
     // need to clobber this, as libcurl might load NSS,
     // and we want it to load the system NSS.
     unsetenv("LD_LIBRARY_PATH");
-    (void) execl(crashReporterPath,
-                 crashReporterPath, minidumpPath, (char*)0);
+    unused << execl(crashReporterPath,
+                    crashReporterPath, minidumpPath, (char*)0);
 #else
     // Invoke the reportCrash activity using am
     if (androidUserSerial) {
-      (void) execlp("/system/bin/am",
-                    "/system/bin/am",
-                    "start",
-                    "--user", androidUserSerial,
-                    "-a", "org.mozilla.gecko.reportCrash",
-                    "-n", crashReporterPath,
-                    "--es", "minidumpPath", minidumpPath,
-                    (char*)0);
+      unused << execlp("/system/bin/am",
+                       "/system/bin/am",
+                       "start",
+                       "--user", androidUserSerial,
+                       "-a", "org.mozilla.gecko.reportCrash",
+                       "-n", crashReporterPath,
+                       "--es", "minidumpPath", minidumpPath,
+                       (char*)0);
     } else {
-      (void) execlp("/system/bin/am",
-                    "/system/bin/am",
-                    "start",
-                    "-a", "org.mozilla.gecko.reportCrash",
-                    "-n", crashReporterPath,
-                    "--es", "minidumpPath", minidumpPath,
-                    (char*)0);
+      unused << execlp("/system/bin/am",
+                       "/system/bin/am",
+                       "start",
+                       "-a", "org.mozilla.gecko.reportCrash",
+                       "-n", crashReporterPath,
+                       "--es", "minidumpPath", minidumpPath,
+                       (char*)0);
     }
 #endif
     _exit(1);
@@ -721,7 +729,7 @@ static void
 ReserveBreakpadVM()
 {
   if (!gBreakpadReservedVM) {
-    gBreakpadReservedVM = VirtualAlloc(NULL, kReserveSize, MEM_RESERVE, 0);
+    gBreakpadReservedVM = VirtualAlloc(nullptr, kReserveSize, MEM_RESERVE, 0);
   }
 }
 
@@ -879,7 +887,7 @@ nsresult SetExceptionHandler(nsIFile* aXREDirectory,
   nsString tempPath;
 
   // first figure out buffer size
-  int pathLen = GetTempPath(0, NULL);
+  int pathLen = GetTempPath(0, nullptr);
   if (pathLen == 0)
     return NS_ERROR_FAILURE;
 
@@ -940,7 +948,7 @@ nsresult SetExceptionHandler(nsIFile* aXREDirectory,
   // Try to determine what version of dbghelp.dll we're using.
   // MinidumpWithFullMemoryInfo is only available in 6.1.x or newer.
 
-  DWORD version_size = GetFileVersionInfoSizeW(L"dbghelp.dll", NULL);
+  DWORD version_size = GetFileVersionInfoSizeW(L"dbghelp.dll", nullptr);
   if (version_size > 0) {
     std::vector<BYTE> buffer(version_size);
     if (GetFileVersionInfoW(L"dbghelp.dll",
@@ -993,12 +1001,12 @@ nsresult SetExceptionHandler(nsIFile* aXREDirectory,
 #ifdef XP_WIN32
                      google_breakpad::ExceptionHandler::HANDLER_ALL,
                      minidump_type,
-                     (const wchar_t*) NULL,
-                     NULL);
+                     (const wchar_t*) nullptr,
+                     nullptr);
 #else
                      true
 #ifdef XP_MACOSX
-                       , NULL
+                       , nullptr
 #endif
 #ifdef XP_LINUX
                        , -1
@@ -1027,7 +1035,7 @@ nsresult SetExceptionHandler(nsIFile* aXREDirectory,
 
   // store application start time
   char timeString[32];
-  time_t startupTime = time(NULL);
+  time_t startupTime = time(nullptr);
   XP_TTOA(startupTime, timeString, 10);
   AnnotateCrashReport(NS_LITERAL_CSTRING("StartupTime"),
                       nsDependentCString(timeString));
@@ -1180,7 +1188,7 @@ GetOrInit(nsIFile* aDir, const nsACString& filename,
 static nsresult
 InitInstallTime(nsACString& aInstallTime)
 {
-  time_t t = time(NULL);
+  time_t t = time(nullptr);
   char buf[16];
   sprintf(buf, "%ld", t);
   aInstallTime = buf;
@@ -1250,7 +1258,7 @@ nsresult SetupExtraData(nsIFile* aAppDataDirectory,
   // (now - LastCrash), so we just get a value if it exists,
   // and store it in a time_t value.
   if(NS_SUCCEEDED(GetOrInit(dataDirectory, NS_LITERAL_CSTRING("LastCrash"),
-                            data, NULL))) {
+                            data, nullptr))) {
     lastCrashTime = (time_t)atol(data.get());
   }
 
@@ -1846,7 +1854,7 @@ static nsresult PrefSubmitReports(bool* aSubmitReports, bool writePref)
                               *aSubmitReports ?  NS_LITERAL_CSTRING("1") :
                                                  NS_LITERAL_CSTRING("0"));
     NS_ENSURE_SUCCESS(rv, rv);
-    rv = iniWriter->WriteFile(NULL, 0);
+    rv = iniWriter->WriteFile(nullptr, 0);
     return rv;
   }
   
@@ -1964,7 +1972,7 @@ GetMinidumpLimboDir(nsIFile** dir)
     CreateFileFromPath(gExceptionHandler->minidump_descriptor().directory(),
                        dir);
 #endif
-    return NULL != *dir;
+    return nullptr != *dir;
   }
 }
 
@@ -2015,7 +2023,7 @@ GetExtraFileForMinidump(nsIFile* minidump, nsIFile** extraFile)
   if (NS_FAILED(rv))
     return false;
 
-  *extraFile = NULL;
+  *extraFile = nullptr;
   extraF.swap(*extraFile);
   return true;
 }
@@ -2033,7 +2041,7 @@ AppendExtraData(const nsAString& id, const AnnotationTable& data)
 // Helpers for AppendExtraData()
 //
 struct Blacklist {
-  Blacklist() : mItems(NULL), mLen(0) { }
+  Blacklist() : mItems(nullptr), mLen(0) { }
   Blacklist(const char** items, int len) : mItems(items), mLen(len) { }
 
   bool Contains(const nsACString& key) const {
@@ -2098,7 +2106,7 @@ WriteExtraData(nsIFile* extraFile,
   data.EnumerateRead(EnumerateAnnotations, &ctx);
 
   if (writeCrashTime) {
-    time_t crashTime = time(NULL);
+    time_t crashTime = time(nullptr);
     char crashTimeString[32];
     XP_TTOA(crashTime, crashTimeString, 10);
 
@@ -2133,7 +2141,7 @@ WriteExtraForMinidump(nsIFile* minidump,
                       true /*truncate*/))
     return false;
 
-  *extraFile = NULL;
+  *extraFile = nullptr;
   extra.swap(*extraFile);
 
   return true;
@@ -2208,7 +2216,7 @@ OnChildProcessDumpRequested(void* aContext,
       pd->minidump = minidump;
       pd->sequence = ++crashSequence;
 #ifdef MOZ_CRASHREPORTER_INJECTOR
-      runCallback = NULL != pd->callback;
+      runCallback = nullptr != pd->callback;
 #endif
     }
 #ifdef MOZ_CRASHREPORTER_INJECTOR
@@ -2221,7 +2229,7 @@ OnChildProcessDumpRequested(void* aContext,
 static bool
 OOPInitialized()
 {
-  return pidToMinidump != NULL;
+  return pidToMinidump != nullptr;
 }
 
 #ifdef XP_MACOSX
@@ -2239,7 +2247,7 @@ OOPInit()
 
   MOZ_ASSERT(NS_IsMainThread());
 
-  NS_ABORT_IF_FALSE(gExceptionHandler != NULL,
+  NS_ABORT_IF_FALSE(gExceptionHandler != nullptr,
                     "attempt to initialize OOP crash reporter before in-process crashreporter!");
 
 #if defined(XP_WIN)
@@ -2250,11 +2258,11 @@ OOPInit()
   const std::wstring dumpPath = gExceptionHandler->dump_path();
   crashServer = new CrashGenerationServer(
     NS_ConvertASCIItoUTF16(childCrashNotifyPipe).get(),
-    NULL,                       // default security attributes
-    NULL, NULL,                 // we don't care about process connect here
-    OnChildProcessDumpRequested, NULL,
-    NULL, NULL,                 // we don't care about process exit here
-    NULL, NULL,                 // we don't care about upload request here
+    nullptr,                    // default security attributes
+    nullptr, nullptr,           // we don't care about process connect here
+    OnChildProcessDumpRequested, nullptr,
+    nullptr, nullptr,           // we don't care about process exit here
+    nullptr, nullptr,           // we don't care about upload request here
     true,                       // automatically generate dumps
     &dumpPath);
 
@@ -2267,8 +2275,8 @@ OOPInit()
       gExceptionHandler->minidump_descriptor().directory();
   crashServer = new CrashGenerationServer(
     serverSocketFd,
-    OnChildProcessDumpRequested, NULL,
-    NULL, NULL,                 // we don't care about process exit here
+    OnChildProcessDumpRequested, nullptr,
+    nullptr, nullptr,           // we don't care about process exit here
     true,
     &dumpPath);
 
@@ -2281,9 +2289,9 @@ OOPInit()
   crashServer = new CrashGenerationServer(
     childCrashNotifyPipe,
     ChildFilter,
-    NULL,
-    OnChildProcessDumpRequested, NULL,
-    NULL, NULL,
+    nullptr,
+    OnChildProcessDumpRequested, nullptr,
+    nullptr, nullptr,
     true, // automatically generate dumps
     dumpPath);
 #endif
@@ -2314,17 +2322,17 @@ OOPDeinit()
 #endif
 
   delete crashServer;
-  crashServer = NULL;
+  crashServer = nullptr;
 
   delete dumpMapLock;
-  dumpMapLock = NULL;
+  dumpMapLock = nullptr;
 
   delete pidToMinidump;
-  pidToMinidump = NULL;
+  pidToMinidump = nullptr;
 
 #if defined(XP_WIN)
   PR_Free(childCrashNotifyPipe);
-  childCrashNotifyPipe = NULL;
+  childCrashNotifyPipe = nullptr;
 #endif
 }
 
@@ -2488,12 +2496,12 @@ SetRemoteExceptionHandler(const nsACString& crashPipe)
   gExceptionHandler = new google_breakpad::
     ExceptionHandler(L"",
                      FPEFilter,
-                     NULL,    // no minidump callback
-                     NULL,    // no callback context
+                     nullptr,    // no minidump callback
+                     nullptr,    // no callback context
                      google_breakpad::ExceptionHandler::HANDLER_ALL,
                      MiniDumpNormal,
                      NS_ConvertASCIItoUTF16(crashPipe).BeginReading(),
-                     NULL);
+                     nullptr);
 #ifdef XP_WIN
   gExceptionHandler->set_handle_debug_exceptions(true);
 #endif
@@ -2537,10 +2545,10 @@ SetRemoteExceptionHandler()
 #endif
   gExceptionHandler = new google_breakpad::
     ExceptionHandler(path,
-                     NULL,    // no filter callback
-                     NULL,    // no minidump callback
-                     NULL,    // no callback context
-                     true,    // install signal handlers
+                     nullptr,    // no filter callback
+                     nullptr,    // no minidump callback
+                     nullptr,    // no callback context
+                     true,       // install signal handlers
                      kMagicChildCrashReportFd);
 
   if (gDelayedAnnotations) {
@@ -2569,9 +2577,9 @@ SetRemoteExceptionHandler(const nsACString& crashPipe)
   gExceptionHandler = new google_breakpad::
     ExceptionHandler("",
                      Filter,
-                     NULL,    // no minidump callback
-                     NULL,    // no callback context
-                     true,    // install signal handlers
+                     nullptr,    // no minidump callback
+                     nullptr,    // no callback context
+                     true,       // install signal handlers
                      crashPipe.BeginReading());
 
   // we either do remote or nothing, no fallback to regular crash reporting
@@ -2836,7 +2844,7 @@ bool
 UnsetRemoteExceptionHandler()
 {
   delete gExceptionHandler;
-  gExceptionHandler = NULL;
+  gExceptionHandler = nullptr;
   return true;
 }
 

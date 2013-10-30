@@ -96,6 +96,14 @@ pref("app.update.log", false);
 // the failure.
 pref("app.update.backgroundMaxErrors", 10);
 
+// The aus update xml certificate checks for application update are disabled on
+// Windows since the mar signature check which is currently only implemented on
+// Windows is sufficient for preventing us from applying a mar that is not
+// valid.
+#ifdef XP_WIN
+pref("app.update.cert.requireBuiltIn", false);
+pref("app.update.cert.checkAttributes", false);
+#else
 // When |app.update.cert.requireBuiltIn| is true or not specified the
 // final certificate and all certificates the connection is redirected to before
 // the final certificate for the url specified in the |app.update.url|
@@ -129,8 +137,9 @@ pref("app.update.cert.maxErrors", 5);
 // the |app.update.url.override| preference should ONLY be used for testing.
 // IMPORTANT! metro.js should also be updated for updates to certs.X.issuerName
 
-// Nightly builds have switched over to aus4.mozilla.org, but we don't want anything else to yet.
-#ifdef NIGHTLY_BUILD
+// Non-release builds (Nightly, Aurora, etc.) have been switched over to aus4.mozilla.org.
+// This condition protects us against accidentally using it for release builds.
+#ifndef RELEASE_BUILD
 pref("app.update.certs.1.issuerName", "CN=DigiCert Secure Server CA,O=DigiCert Inc,C=US");
 pref("app.update.certs.1.commonName", "aus4.mozilla.org");
 
@@ -142,6 +151,7 @@ pref("app.update.certs.1.commonName", "aus3.mozilla.org");
 
 pref("app.update.certs.2.issuerName", "CN=Thawte SSL CA,O=\"Thawte, Inc.\",C=US");
 pref("app.update.certs.2.commonName", "aus3.mozilla.org");
+#endif
 #endif
 
 // Whether or not app updates are enabled
@@ -172,7 +182,7 @@ pref("app.update.silent", false);
 pref("app.update.staging.enabled", true);
 
 // Update service URL:
-#ifdef NIGHTLY_BUILD
+#ifndef RELEASE_BUILD
 pref("app.update.url", "https://aus4.mozilla.org/update/3/%PRODUCT%/%VERSION%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/update.xml");
 #else
 pref("app.update.url", "https://aus3.mozilla.org/update/3/%PRODUCT%/%VERSION%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/update.xml");
@@ -231,6 +241,12 @@ pref("xpinstall.whitelist.add", "addons.mozilla.org");
 pref("xpinstall.whitelist.add.180", "marketplace.firefox.com");
 
 pref("lightweightThemes.update.enabled", true);
+
+// UI tour experience.
+pref("browser.uitour.enabled", true);
+pref("browser.uitour.themeOrigin", "https://addons.mozilla.org/%LOCALE%/firefox/themes/");
+pref("browser.uitour.pinnedTabUrl", "https://support.mozilla.org/%LOCALE%/kb/pinned-tabs-keep-favorite-websites-open");
+pref("browser.uitour.whitelist.add.260", "www.mozilla.org,support.mozilla.org");
 
 pref("keyword.enabled", true);
 
@@ -348,12 +364,6 @@ pref("browser.download.manager.addToRecentDocs", true);
 pref("browser.download.manager.quitBehavior", 0);
 pref("browser.download.manager.scanWhenDone", true);
 pref("browser.download.manager.resumeOnWakeDelay", 10000);
-
-// Enables the asynchronous Downloads API in the Downloads Panel.
-pref("browser.download.useJSTransfer", true);
-
-// This allows disabling the Downloads Panel in favor of the old interface.
-pref("browser.download.useToolkitUI", false);
 
 // This allows disabling the animated notifications shown by
 // the Downloads Indicator when a download starts or completes.
@@ -795,7 +805,6 @@ pref("browser.safebrowsing.reportPhishURL", "http://%LOCALE%.phish-report.mozill
 pref("browser.safebrowsing.reportMalwareURL", "http://%LOCALE%.malware-report.mozilla.com/?hl=%LOCALE%");
 pref("browser.safebrowsing.reportMalwareErrorURL", "http://%LOCALE%.malware-error.mozilla.com/?hl=%LOCALE%");
 
-pref("browser.safebrowsing.warning.infoURL", "https://www.mozilla.org/%LOCALE%/firefox/phishing-protection/");
 pref("browser.safebrowsing.malware.reportURL", "http://safebrowsing.clients.google.com/safebrowsing/diagnostic?client=%NAME%&hl=%LOCALE%&site=");
 // Since the application reputation query isn't hooked in anywhere yet, this
 // preference does not matter. To be extra safe, don't turn this preference on
@@ -1083,9 +1092,10 @@ pref("devtools.toolbar.visible", false);
 pref("devtools.gcli.allowSet", false);
 pref("devtools.commands.dir", "");
 
-// Disable the app manager
+// Enable the app manager
 pref("devtools.appmanager.enabled", true);
 pref("devtools.appmanager.firstrun", true);
+pref("devtools.appmanager.manifestEditor.enabled", false);
 
 // Toolbox preferences
 pref("devtools.toolbox.footer.height", 250);
@@ -1119,6 +1129,7 @@ pref("devtools.debugger.remote-timeout", 20000);
 pref("devtools.debugger.pause-on-exceptions", false);
 pref("devtools.debugger.ignore-caught-exceptions", true);
 pref("devtools.debugger.source-maps-enabled", true);
+pref("devtools.debugger.pretty-print-enabled", true);
 
 // The default Debugger UI settings
 pref("devtools.debugger.ui.panes-sources-width", 200);
@@ -1155,6 +1166,9 @@ pref("devtools.scratchpad.recentFilesMax", 10);
 pref("devtools.styleeditor.enabled", true);
 pref("devtools.styleeditor.transitions", true);
 
+// Enable the Shader Editor.
+pref("devtools.shadereditor.enabled", false);
+
 // Enable tools for Chrome development.
 pref("devtools.chrome.enabled", false);
 
@@ -1173,6 +1187,7 @@ pref("devtools.webconsole.filter.networkinfo", true);
 pref("devtools.webconsole.filter.netwarn", true);
 pref("devtools.webconsole.filter.csserror", true);
 pref("devtools.webconsole.filter.cssparser", true);
+pref("devtools.webconsole.filter.csslog", false);
 pref("devtools.webconsole.filter.exception", true);
 pref("devtools.webconsole.filter.jswarn", true);
 pref("devtools.webconsole.filter.jslog", true);
@@ -1189,6 +1204,7 @@ pref("devtools.browserconsole.filter.networkinfo", true);
 pref("devtools.browserconsole.filter.netwarn", true);
 pref("devtools.browserconsole.filter.csserror", true);
 pref("devtools.browserconsole.filter.cssparser", true);
+pref("devtools.browserconsole.filter.csslog", false);
 pref("devtools.browserconsole.filter.exception", true);
 pref("devtools.browserconsole.filter.jswarn", true);
 pref("devtools.browserconsole.filter.jslog", true);
@@ -1284,8 +1300,10 @@ pref("pdfjs.firstRun", true);
 pref("pdfjs.previousHandler.preferredAction", 0);
 pref("pdfjs.previousHandler.alwaysAskBeforeHandling", false);
 
+#ifdef NIGHTLY_BUILD
 // Shumway component (SWF player) is disabled by default. Also see bug 904346.
 pref("shumway.disabled", true);
+#endif
 
 // The maximum amount of decoded image data we'll willingly keep around (we
 // might keep around more than this, but we'll try to get down to this value).

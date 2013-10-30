@@ -145,7 +145,7 @@ static const char* kObservedPrefs[] = {
   "accessibility.tabfocus_applies_to_xul",
   "accessibility.mouse_focuses_formcontrol",
   "focusmanager.testmode",
-  NULL
+  nullptr
 };
 
 nsFocusManager::nsFocusManager()
@@ -2544,6 +2544,9 @@ nsFocusManager::DetermineElementToMoveFocus(nsPIDOMWindow* aWindow,
     ignoreTabIndex = false;
 
     if (aNoParentTraversal) {
+      if (startContent == rootContent)
+        return NS_OK;
+
       startContent = rootContent;
       tabIndex = forward ? 1 : 0;
       continue;

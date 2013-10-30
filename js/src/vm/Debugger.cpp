@@ -6,7 +6,6 @@
 
 #include "vm/Debugger-inl.h"
 
-#include "jsapi.h"
 #include "jscntxt.h"
 #include "jscompartment.h"
 #include "jsnum.h"
@@ -85,7 +84,7 @@ enum {
 
 /*** Utils ***************************************************************************************/
 
-bool
+static bool
 ReportMoreArgsNeeded(JSContext *cx, const char *name, unsigned required)
 {
     JS_ASSERT(required > 0);
@@ -104,14 +103,14 @@ ReportMoreArgsNeeded(JSContext *cx, const char *name, unsigned required)
             return ReportMoreArgsNeeded(cx, name, n);                         \
     JS_END_MACRO
 
-bool
+static bool
 ReportObjectRequired(JSContext *cx)
 {
     JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_NOT_NONNULL_OBJECT);
     return false;
 }
 
-bool
+static bool
 ValueToIdentifier(JSContext *cx, HandleValue v, MutableHandleId id)
 {
     if (!ValueToId<CanGC>(cx, v, id))
@@ -903,7 +902,7 @@ Debugger::parseResumptionValue(Maybe<AutoCompartment> &ac, bool ok, const Value 
     }
 
     RootedValue v(cx, vp.get());
-    if (!js_NativeGet(cx, obj, obj, shape, &v) || !unwrapDebuggeeValue(cx, &v))
+    if (!NativeGet(cx, obj, obj, shape, &v) || !unwrapDebuggeeValue(cx, &v))
         return handleUncaughtException(ac, &v, callHook);
 
     ac.destroy();
@@ -2087,7 +2086,7 @@ Debugger::construct(JSContext *cx, unsigned argc, Value *vp)
     /* Get Debugger.prototype. */
     RootedValue v(cx);
     RootedObject callee(cx, &args.callee());
-    if (!JSObject::getProperty(cx, callee, callee, cx->names().classPrototype, &v))
+    if (!JSObject::getProperty(cx, callee, callee, cx->names().prototype, &v))
         return false;
     RootedObject proto(cx, &v.toObject());
     JS_ASSERT(proto->getClass() == &Debugger::jsclass);

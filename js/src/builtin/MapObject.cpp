@@ -25,6 +25,7 @@ using mozilla::DoubleIsInt32;
 using mozilla::IsNaN;
 using mozilla::OldMove;
 using mozilla::MoveRef;
+using mozilla::ArrayLength;
 using JS::DoubleNaNValue;
 
 
@@ -473,24 +474,6 @@ class OrderedHashTable
                 *ep = &entry;
             }
         }
-
-        /*
-         * Change the key of the front entry without calling Ops::hash on the
-         * entry's current key. The caller must ensure that k has the same hash
-         * code that the current key had when it was inserted.
-         */
-        void rekeyFrontWithSameHashCode(const Key &k) {
-            MOZ_ASSERT(valid());
-#ifdef DEBUG
-            // Assert that k falls in the same hash bucket as the old key.
-            HashNumber h = Ops::hash(k) >> ht.hashShift;
-            Data *e = ht.hashTable[h];
-            while (e && e != &ht.data[i])
-                e = e->chain;
-            MOZ_ASSERT(e == &ht.data[i]);
-#endif
-            Ops::setKey(ht.data[i].element, k);
-        }
     };
 
     Range all() { return Range(*this); }
@@ -889,6 +872,7 @@ const Class MapIteratorObject::class_ = {
 };
 
 const JSFunctionSpec MapIteratorObject::methods[] = {
+    JS_SELF_HOSTED_FN("@@iterator", "IteratorIdentity", 0, 0),
     JS_FN("next", next, 0, 0),
     JS_FS_END
 };
@@ -965,35 +949,44 @@ MapIteratorObject::next_impl(JSContext *cx, CallArgs args)
 {
     MapIteratorObject &thisobj = args.thisv().toObject().as<MapIteratorObject>();
     ValueMap::Range *range = thisobj.range();
-    if (!range)
-        return js_ThrowStopIteration(cx);
-    if (range->empty()) {
+    RootedValue value(cx);
+    bool done;
+
+    if (!range || range->empty()) {
         js_delete(range);
         thisobj.setReservedSlot(RangeSlot, PrivateValue(nullptr));
-        return js_ThrowStopIteration(cx);
+        value.setUndefined();
+        done = true;
+    } else {
+        switch (thisobj.kind()) {
+          case MapObject::Keys:
+            value = range->front().key.get();
+            break;
+
+          case MapObject::Values:
+            value = range->front().value;
+            break;
+
+          case MapObject::Entries: {
+            Value pair[2] = { range->front().key.get(), range->front().value };
+            AutoValueArray root(cx, pair, ArrayLength(pair));
+
+            JSObject *pairobj = NewDenseCopiedArray(cx, ArrayLength(pair), pair);
+            if (!pairobj)
+                return false;
+            value.setObject(*pairobj);
+            break;
+          }
+        }
+        range->popFront();
+        done = false;
     }
 
-    switch (thisobj.kind()) {
-      case MapObject::Keys:
-        args.rval().set(range->front().key.get());
-        break;
+    RootedObject result(cx, CreateItrResultObject(cx, value, done));
+    if (!result)
+        return false;
+    args.rval().setObject(*result);
 
-      case MapObject::Values:
-        args.rval().set(range->front().value);
-        break;
-
-      case MapObject::Entries: {
-        Value pair[2] = { range->front().key.get(), range->front().value };
-        AutoValueArray root(cx, pair, 2);
-
-        JSObject *pairobj = NewDenseCopiedArray(cx, 2, pair);
-        if (!pairobj)
-            return false;
-        args.rval().setObject(*pairobj);
-        break;
-      }
-    }
-    range->popFront();
     return true;
 }
 
@@ -1077,7 +1070,7 @@ MapObject::initClass(JSContext *cx, JSObject *obj)
 
         // Define its alias.
         RootedValue funval(cx, ObjectValue(*fun));
-        if (!JS_DefineProperty(cx, proto, "iterator", funval, nullptr, nullptr, 0))
+        if (!JS_DefineProperty(cx, proto, js_std_iterator_str, funval, nullptr, nullptr, 0))
             return nullptr;
     }
     return proto;
@@ -1090,23 +1083,9 @@ MarkKey(Range &r, const HashableValue &key, JSTracer *trc)
     HashableValue newKey = key.mark(trc);
 
     if (newKey.get() != key.get()) {
-        if (newKey.get().isString()) {
-            // GC moved a string. The key stored in the OrderedHashTable must
-            // be updated to point to the string's new location, but rekeyFront
-            // would not work because it would access the string's old
-            // location.
-            //
-            // So as a specially gruesome hack, overwrite the key in place.
-            // FIXME bug 769504.
-            r.rekeyFrontWithSameHashCode(newKey);
-        } else {
-            // GC moved an object. It must be rekeyed, and rekeying is safe
-            // because the old key's hash() method is still safe to call (it
-            // does not access the object's old location).
-
-            JS_ASSERT(newKey.get().isObject());
-            r.rekeyFront(newKey);
-        }
+        // The hash function only uses the bits of the Value, so it is safe to
+        // rekey even when the object or string has been modified by the GC.
+        r.rekeyFront(newKey);
     }
 }
 
@@ -1173,14 +1152,28 @@ MapObject::construct(JSContext *cx, unsigned argc, Value *vp)
 
     CallArgs args = CallArgsFromVp(argc, vp);
     if (args.hasDefined(0)) {
-        ForOfIterator iter(cx, args[0]);
-        while (iter.next()) {
-            RootedObject pairobj(cx, js_ValueToNonNullObject(cx, iter.value()));
-            if (!pairobj)
+        ForOfIterator iter(cx);
+        if (!iter.init(args[0]))
+            return false;
+        RootedValue pairVal(cx);
+        RootedObject pairObj(cx);
+        while (true) {
+            bool done;
+            if (!iter.next(&pairVal, &done))
+                return false;
+            if (done)
+                break;
+            if (!pairVal.isObject()) {
+                JS_ReportErrorNumber(cx, js_GetErrorMessage, nullptr, JSMSG_INVALID_MAP_ITERABLE);
+                return false;
+            }
+
+            pairObj = &pairVal.toObject();
+            if (!pairObj)
                 return false;
 
             RootedValue key(cx);
-            if (!JSObject::getElement(cx, pairobj, pairobj, 0, &key))
+            if (!JSObject::getElement(cx, pairObj, pairObj, 0, &key))
                 return false;
 
             AutoHashableValueRooter hkey(cx);
@@ -1188,7 +1181,7 @@ MapObject::construct(JSContext *cx, unsigned argc, Value *vp)
                 return false;
 
             RootedValue val(cx);
-            if (!JSObject::getElement(cx, pairobj, pairobj, 1, &val))
+            if (!JSObject::getElement(cx, pairObj, pairObj, 1, &val))
                 return false;
 
             RelocatableValue rval(val);
@@ -1198,8 +1191,6 @@ MapObject::construct(JSContext *cx, unsigned argc, Value *vp)
             }
             WriteBarrierPost(cx->runtime(), map, hkey);
         }
-        if (!iter.close())
-            return false;
     }
 
     args.rval().setObject(*obj);
@@ -1456,6 +1447,7 @@ const Class SetIteratorObject::class_ = {
 };
 
 const JSFunctionSpec SetIteratorObject::methods[] = {
+    JS_SELF_HOSTED_FN("@@iterator", "IteratorIdentity", 0, 0),
     JS_FN("next", next, 0, 0),
     JS_FS_END
 };
@@ -1531,32 +1523,40 @@ SetIteratorObject::next_impl(JSContext *cx, CallArgs args)
 {
     SetIteratorObject &thisobj = args.thisv().toObject().as<SetIteratorObject>();
     ValueSet::Range *range = thisobj.range();
-    if (!range)
-        return js_ThrowStopIteration(cx);
-    if (range->empty()) {
+    RootedValue value(cx);
+    bool done;
+
+    if (!range || range->empty()) {
         js_delete(range);
         thisobj.setReservedSlot(RangeSlot, PrivateValue(nullptr));
-        return js_ThrowStopIteration(cx);
+        value.setUndefined();
+        done = true;
+    } else {
+        switch (thisobj.kind()) {
+          case SetObject::Values:
+            value = range->front().get();
+            break;
+
+          case SetObject::Entries: {
+            Value pair[2] = { range->front().get(), range->front().get() };
+            AutoValueArray root(cx, pair, 2);
+
+            JSObject *pairObj = NewDenseCopiedArray(cx, 2, pair);
+            if (!pairObj)
+              return false;
+            value.setObject(*pairObj);
+            break;
+          }
+        }
+        range->popFront();
+        done = false;
     }
 
-    switch (thisobj.kind()) {
-      case SetObject::Values:
-        args.rval().set(range->front().get());
-        break;
+    RootedObject result(cx, CreateItrResultObject(cx, value, done));
+    if (!result)
+        return false;
+    args.rval().setObject(*result);
 
-      case SetObject::Entries: {
-        Value pair[2] = { range->front().get(), range->front().get() };
-        AutoValueArray root(cx, pair, 2);
-
-        JSObject *pairobj = NewDenseCopiedArray(cx, 2, pair);
-        if (!pairobj)
-          return false;
-        args.rval().setObject(*pairobj);
-        break;
-      }
-    }
-
-    range->popFront();
     return true;
 }
 
@@ -1620,7 +1620,7 @@ SetObject::initClass(JSContext *cx, JSObject *obj)
         RootedValue funval(cx, ObjectValue(*fun));
         if (!JS_DefineProperty(cx, proto, "keys", funval, nullptr, nullptr, 0))
             return nullptr;
-        if (!JS_DefineProperty(cx, proto, "iterator", funval, nullptr, nullptr, 0))
+        if (!JS_DefineProperty(cx, proto, js_std_iterator_str, funval, nullptr, nullptr, 0))
             return nullptr;
     }
     return proto;
@@ -1662,10 +1662,18 @@ SetObject::construct(JSContext *cx, unsigned argc, Value *vp)
 
     CallArgs args = CallArgsFromVp(argc, vp);
     if (args.hasDefined(0)) {
-        ForOfIterator iter(cx, args[0]);
-        while (iter.next()) {
-            AutoHashableValueRooter key(cx);
-            if (!key.setValue(cx, iter.value()))
+        RootedValue keyVal(cx);
+        ForOfIterator iter(cx);
+        if (!iter.init(args[0]))
+            return false;
+        AutoHashableValueRooter key(cx);
+        while (true) {
+            bool done;
+            if (!iter.next(&keyVal, &done))
+                return false;
+            if (done)
+                break;
+            if (!key.setValue(cx, keyVal))
                 return false;
             if (!set->put(key)) {
                 js_ReportOutOfMemory(cx);
@@ -1673,8 +1681,6 @@ SetObject::construct(JSContext *cx, unsigned argc, Value *vp)
             }
             WriteBarrierPost(cx->runtime(), set, key);
         }
-        if (!iter.close())
-            return false;
     }
 
     args.rval().setObject(*obj);

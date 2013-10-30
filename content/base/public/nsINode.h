@@ -20,6 +20,7 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/EventTarget.h" // for base class
 #include "js/TypeDecls.h"     // for Handle, Value, JSObject, JSContext
+#include "mozilla/dom/DOMString.h"
 
 // Including 'windows.h' will #define GetClassInfo to something else.
 #ifdef XP_WIN
@@ -799,6 +800,12 @@ public:
    * See nsIDOMEventTarget
    */
   NS_DECL_NSIDOMEVENTTARGET
+
+  virtual nsEventListenerManager*
+  GetExistingListenerManager() const MOZ_OVERRIDE;
+  virtual nsEventListenerManager*
+  GetOrCreateListenerManager() MOZ_OVERRIDE;
+
   using mozilla::dom::EventTarget::RemoveEventListener;
   using nsIDOMEventTarget::AddEventListener;
   virtual void AddEventListener(const nsAString& aType,
@@ -1483,9 +1490,11 @@ public:
    */
   uint32_t Length() const;
 
-  void GetNodeName(nsAString& aNodeName) const
+  void GetNodeName(mozilla::dom::DOMString& aNodeName)
   {
-    aNodeName = NodeName();
+    const nsString& nodeName = NodeName();
+    aNodeName.SetStringBuffer(nsStringBuffer::FromString(nodeName),
+                              nodeName.Length());
   }
   void GetBaseURI(nsAString& aBaseURI) const;
   bool HasChildNodes() const
@@ -1536,9 +1545,15 @@ public:
     mNodeInfo->GetPrefix(aPrefix);
   }
 #endif
-  void GetLocalName(nsAString& aLocalName)
+  void GetLocalName(mozilla::dom::DOMString& aLocalName)
   {
-    aLocalName = mNodeInfo->LocalName();
+    const nsString& localName = LocalName();
+    if (localName.IsVoid()) {
+      aLocalName.SetNull();
+    } else {
+      aLocalName.SetStringBuffer(nsStringBuffer::FromString(localName),
+                                 localName.Length());
+    }
   }
   // HasAttributes is defined inline in Element.h.
   bool HasAttributes() const;
@@ -1756,7 +1771,7 @@ ToCanonicalSupports(nsINode* aPointer)
 #define NS_FORWARD_NSIDOMNODE_TO_NSINODE_HELPER(...) \
   NS_IMETHOD GetNodeName(nsAString& aNodeName) __VA_ARGS__ \
   { \
-    nsINode::GetNodeName(aNodeName); \
+    aNodeName = nsINode::NodeName(); \
     return NS_OK; \
   } \
   NS_IMETHOD GetNodeValue(nsAString& aNodeValue) __VA_ARGS__ \
@@ -1858,7 +1873,7 @@ ToCanonicalSupports(nsINode* aPointer)
   } \
   NS_IMETHOD GetLocalName(nsAString& aLocalName) __VA_ARGS__ \
   { \
-    nsINode::GetLocalName(aLocalName); \
+    aLocalName = nsINode::LocalName(); \
     return NS_OK; \
   } \
   using nsINode::HasAttributes; \

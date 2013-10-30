@@ -10,10 +10,11 @@ MODULE = 'necko'
 
 EXPORTS.mozilla.net += [
     'DataChannel.h',
-    'DataChannelProtocol.h',
+    'DataChannelListener.h',
+    'DataChannelProtocol.h'
 ]
 
-CPP_SOURCES += [
+SOURCES += [
     'DataChannel.cpp',
 ]
 
@@ -22,4 +23,6 @@ FAIL_ON_WARNINGS = True
 LIBXUL_LIBRARY = True
 
 LIBRARY_NAME = 'nkdatachan_s'
+
+include('/ipc/chromium/chromium-config.mozbuild')
 

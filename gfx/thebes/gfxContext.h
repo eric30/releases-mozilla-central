@@ -9,14 +9,13 @@
 #include "gfxTypes.h"
 
 #include "gfxASurface.h"
-#include "gfxColor.h"
 #include "gfxPoint.h"
 #include "gfxRect.h"
 #include "gfxMatrix.h"
 #include "gfxPattern.h"
 #include "gfxPath.h"
-#include "nsISupportsImpl.h"
 #include "nsTArray.h"
+#include "nsAutoPtr.h"
 
 #include "mozilla/gfx/2D.h"
 
@@ -132,12 +131,12 @@ public:
     /**
      * Copies the current path and returns the copy.
      */
-    already_AddRefed<gfxPath> CopyPath() const;
+    already_AddRefed<gfxPath> CopyPath();
 
     /**
      * Appends the given path to the current path.
      */
-    void AppendPath(gfxPath* path);
+    void SetPath(gfxPath* path);
 
     /**
      * Moves the pen to a new point without drawing a line.
@@ -647,11 +646,6 @@ public:
     gfxRect GetUserStrokeExtent();
 
     /**
-     ** Obtaining a "flattened" path - path converted to all line segments
-     **/
-    already_AddRefed<gfxFlattenedPath> GetFlattenedPath();
-
-    /**
      ** Flags
      **/
 
@@ -708,6 +702,8 @@ public:
      */
     void CopyAsDataURL();
 #endif
+
+    static mozilla::gfx::UserDataKey sDontUseAsSourceKey;
 
 private:
   friend class GeneralPattern;
@@ -885,8 +881,7 @@ public:
     void Restore()
     {
         if (mPath) {
-            mContext->NewPath();
-            mContext->AppendPath(mPath);
+            mContext->SetPath(mPath);
             mPath = nullptr;
         }
     }
@@ -905,6 +900,11 @@ private:
 class gfxContextMatrixAutoSaveRestore
 {
 public:
+    gfxContextMatrixAutoSaveRestore() :
+        mContext(nullptr)
+    {
+    }
+
     gfxContextMatrixAutoSaveRestore(gfxContext *aContext) :
         mContext(aContext), mMatrix(aContext->CurrentMatrix())
     {
@@ -912,11 +912,28 @@ public:
 
     ~gfxContextMatrixAutoSaveRestore()
     {
-        mContext->SetMatrix(mMatrix);
+        if (mContext) {
+            mContext->SetMatrix(mMatrix);
+        }
+    }
+
+    void SetContext(gfxContext *aContext)
+    {
+        NS_ASSERTION(!mContext, "Not going to restore the matrix on some context!");
+        mContext = aContext;
+        mMatrix = aContext->CurrentMatrix();
+    }
+
+    void Restore()
+    {
+        if (mContext) {
+            mContext->SetMatrix(mMatrix);
+        }
     }
 
     const gfxMatrix& Matrix()
     {
+        MOZ_ASSERT(mContext, "mMatrix doesn't contain a useful matrix");
         return mMatrix;
     }
 

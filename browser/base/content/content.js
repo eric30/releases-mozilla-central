@@ -15,6 +15,8 @@ XPCOMUtils.defineLazyModuleGetter(this,
   "InsecurePasswordUtils", "resource://gre/modules/InsecurePasswordUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
   "resource://gre/modules/PrivateBrowsingUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "UITour",
+  "resource:///modules/UITour.jsm");
 
 // Creates a new nsIURI object.
 function makeURI(uri, originCharset, baseURI) {
@@ -49,6 +51,15 @@ if (Services.prefs.getBoolPref("browser.tabs.remote")) {
   addEventListener("blur", function(event) {
     LoginManagerContent.onUsernameInput(event);
   });
+
+  addEventListener("mozUITour", function(event) {
+    if (!Services.prefs.getBoolPref("browser.uitour.enabled"))
+      return;
+
+    let handled = UITour.onPageEvent(event);
+    if (handled)
+      addEventListener("pagehide", UITour);
+  }, false, true);
 }
 
 let AboutHomeListener = {
@@ -88,7 +99,7 @@ let AboutHomeListener = {
     if (aData.showKnowYourRights)
       docElt.setAttribute("showKnowYourRights", "true");
     docElt.setAttribute("snippetsVersion", aData.snippetsVersion);
-    docElt.setAttribute("searchEngineName", Services.search.defaultEngine.name);
+    docElt.setAttribute("searchEngineName", aData.defaultEngineName);
   },
 
   onPageLoad: function() {

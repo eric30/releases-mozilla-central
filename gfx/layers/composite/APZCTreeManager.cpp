@@ -21,7 +21,7 @@
 #include "nsThreadUtils.h"              // for NS_IsMainThread
 
 #define APZC_LOG(...)
-// #define APZC_LOG(args...) printf_stderr(args)
+// #define APZC_LOG(...) printf_stderr("APZC: " __VA_ARGS__)
 
 namespace mozilla {
 namespace layers {
@@ -117,7 +117,11 @@ APZCTreeManager::UpdatePanZoomControllerTree(CompositorParent* aCompositor,
 
         apzc = container->GetAsyncPanZoomController();
 
-        bool newApzc = (apzc == nullptr);
+        // The APZC we get off the layer may have been destroyed previously if the layer was inactive
+        // or omitted from the layer tree for whatever reason from a layers update. If it later comes
+        // back it will have a reference to a destroyed APZC and so we need to throw that out and make
+        // a new one.
+        bool newApzc = (apzc == nullptr || apzc->IsDestroyed());
         if (newApzc) {
           apzc = new AsyncPanZoomController(aLayersId, this, state->mController,
                                             AsyncPanZoomController::USE_GESTURE_DETECTOR);
@@ -345,9 +349,8 @@ APZCTreeManager::ProcessTouchEvent(const WidgetTouchEvent& aEvent,
   gfx3DMatrix transformToScreen;
   GetInputTransforms(mApzcForInputBlock, transformToApzc, transformToScreen);
   gfx3DMatrix outTransform = transformToApzc * transformToScreen;
-  WidgetTouchEvent* outEvent = static_cast<WidgetTouchEvent*>(aOutEvent);
-  for (size_t i = 0; i < outEvent->touches.Length(); i++) {
-    ApplyTransform(&(outEvent->touches[i]->mRefPoint), outTransform);
+  for (size_t i = 0; i < aOutEvent->touches.Length(); i++) {
+    ApplyTransform(&(aOutEvent->touches[i]->mRefPoint), outTransform);
   }
 
   // If we have an mApzcForInputBlock and it's the end of the touch sequence
@@ -373,8 +376,7 @@ APZCTreeManager::ProcessMouseEvent(const WidgetMouseEvent& aEvent,
   MultiTouchInput inputForApzc(aEvent);
   ApplyTransform(&(inputForApzc.mTouches[0].mScreenPoint), transformToApzc);
   gfx3DMatrix outTransform = transformToApzc * transformToScreen;
-  ApplyTransform(&(static_cast<WidgetMouseEvent*>(aOutEvent)->refPoint),
-                 outTransform);
+  ApplyTransform(&aOutEvent->refPoint, outTransform);
   return apzc->ReceiveInputEvent(inputForApzc);
 }
 
@@ -404,8 +406,7 @@ APZCTreeManager::ReceiveInputEvent(const WidgetInputEvent& aEvent,
 
   switch (aEvent.eventStructType) {
     case NS_TOUCH_EVENT: {
-      const WidgetTouchEvent& touchEvent =
-        static_cast<const WidgetTouchEvent&>(aEvent);
+      const WidgetTouchEvent& touchEvent = *aEvent.AsTouchEvent();
       if (!touchEvent.touches.Length()) {
         return nsEventStatus_eIgnore;
       }
@@ -416,15 +417,13 @@ APZCTreeManager::ReceiveInputEvent(const WidgetInputEvent& aEvent,
       if (!mApzcForInputBlock) {
         return nsEventStatus_eIgnore;
       }
-      WidgetTouchEvent* outEvent = static_cast<WidgetTouchEvent*>(aOutEvent);
-      return ProcessTouchEvent(touchEvent, outEvent);
+      return ProcessTouchEvent(touchEvent, aOutEvent->AsTouchEvent());
     }
     case NS_MOUSE_EVENT: {
       // For b2g emulation
-      const WidgetMouseEvent& mouseEvent =
-        static_cast<const WidgetMouseEvent&>(aEvent);
-      WidgetMouseEvent* outEvent = static_cast<WidgetMouseEvent*>(aOutEvent);
-      return ProcessMouseEvent(mouseEvent, outEvent);
+      const WidgetMouseEvent& mouseEvent = *aEvent.AsMouseEvent();
+      WidgetMouseEvent* outMouseEvent = aOutEvent->AsMouseEvent();
+      return ProcessMouseEvent(mouseEvent, outMouseEvent);
     }
     default: {
       return ProcessEvent(aEvent, aOutEvent);
@@ -439,7 +438,7 @@ APZCTreeManager::ReceiveInputEvent(WidgetInputEvent& aEvent)
 
   switch (aEvent.eventStructType) {
     case NS_TOUCH_EVENT: {
-      WidgetTouchEvent& touchEvent = static_cast<WidgetTouchEvent&>(aEvent);
+      WidgetTouchEvent& touchEvent = *aEvent.AsTouchEvent();
       if (!touchEvent.touches.Length()) {
         return nsEventStatus_eIgnore;
       }

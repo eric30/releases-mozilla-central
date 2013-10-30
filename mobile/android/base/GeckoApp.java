@@ -12,6 +12,7 @@ import org.mozilla.gecko.gfx.BitmapUtils;
 import org.mozilla.gecko.gfx.Layer;
 import org.mozilla.gecko.gfx.LayerView;
 import org.mozilla.gecko.gfx.PluginLayer;
+import org.mozilla.gecko.prompts.PromptService;
 import org.mozilla.gecko.menu.GeckoMenu;
 import org.mozilla.gecko.menu.GeckoMenuInflater;
 import org.mozilla.gecko.menu.MenuPanel;
@@ -116,6 +117,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -170,7 +172,6 @@ abstract public class GeckoApp
     public static int mOrientation;
     protected boolean mIsRestoringActivity;
     private String mCurrentResponse = "";
-    public static boolean sIsUsingCustomProfile = false;
 
     private ContactService mContactService;
     private PromptService mPromptService;
@@ -1173,7 +1174,7 @@ abstract public class GeckoApp
                         if (profileName == null)
                             profileName = "default";
                     }
-                    GeckoApp.sIsUsingCustomProfile = true;
+                    GeckoProfile.sIsUsingCustomProfile = true;
                 }
 
                 if (profileName != null || profilePath != null) {
@@ -1191,7 +1192,11 @@ abstract public class GeckoApp
         ThreadUtils.setUiThread(Thread.currentThread(), new Handler());
 
         Tabs.getInstance().attachToContext(this);
-        Favicons.attachToContext(this);
+        try {
+            Favicons.attachToContext(this);
+        } catch (Exception e) {
+            Log.e(LOGTAG, "Exception starting favicon cache. Corrupt resources?", e);
+        }
 
         // When we detect a locale change, we need to restart Gecko, which
         // actually means restarting the entire application. This logic should
@@ -1286,7 +1291,16 @@ abstract public class GeckoApp
                 final String profilePath = getProfile().getDir().getAbsolutePath();
                 final EventDispatcher dispatcher = GeckoAppShell.getEventDispatcher();
                 Log.i(LOGTAG, "Creating BrowserHealthRecorder.");
-                mHealthRecorder = new BrowserHealthRecorder(GeckoApp.this, profilePath, dispatcher,
+                final String osLocale = Locale.getDefault().toString();
+                Log.d(LOGTAG, "Locale is " + osLocale);
+
+                // Replace the duplicate `osLocale` argument when we support switchable
+                // application locales.
+                mHealthRecorder = new BrowserHealthRecorder(GeckoApp.this,
+                                                            profilePath,
+                                                            dispatcher,
+                                                            osLocale,
+                                                            osLocale,    // Placeholder.
                                                             previousSession);
             }
         });
@@ -1456,6 +1470,7 @@ abstract public class GeckoApp
         //register for events
         registerEventListener("log");
         registerEventListener("Reader:ListCountRequest");
+        registerEventListener("Reader:ListStatusRequest");
         registerEventListener("Reader:Added");
         registerEventListener("Reader:Removed");
         registerEventListener("Reader:Share");
@@ -1549,8 +1564,15 @@ abstract public class GeckoApp
                 GeckoPreferences.broadcastHealthReportUploadPref(context);
 
                 /*
-                  XXXX see bug 635342
-                   We want to disable this code if possible.  It is about 145ms in runtime
+                XXXX see Bug 635342.
+                We want to disable this code if possible.  It is about 145ms in runtime.
+
+                If this code ever becomes live again, you'll need to chain the
+                new locale into BrowserHealthRecorder correctly. See
+                GeckoAppShell.setSelectedLocale.
+                We pass the OS locale into the BHR constructor: we need to grab
+                that *before* we modify the current locale!
+
                 SharedPreferences settings = getPreferences(Activity.MODE_PRIVATE);
                 String localeCode = settings.getString(getPackageName() + ".locale", "");
                 if (localeCode != null && localeCode.length() > 0)
@@ -1991,6 +2013,7 @@ abstract public class GeckoApp
     {
         unregisterEventListener("log");
         unregisterEventListener("Reader:ListCountRequest");
+        unregisterEventListener("Reader:ListStatusRequest");
         unregisterEventListener("Reader:Added");
         unregisterEventListener("Reader:Removed");
         unregisterEventListener("Reader:Share");

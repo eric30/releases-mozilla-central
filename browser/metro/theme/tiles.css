@@ -32,6 +32,7 @@ richgrid {
   display: -moz-box;
   overflow: hidden;
 }
+
 richgrid > .richgrid-grid {
   -moz-column-width: @grid_double_column_width@; /* tile width (2x unit + gutter) */
   min-width: @grid_double_column_width@; /* min 1 column */
@@ -54,9 +55,6 @@ richgriditem {
   -moz-column-gap: 0;
   overflow:hidden;
   cursor: default;
-  transition: 300ms height ease-out,
-              150ms opacity ease-out,
-              100ms transform ease-out;
 }
 
 .tile-content {
@@ -273,6 +271,26 @@ richgriditem[customColor] {
 
 richgriditem[bending] > .tile-content {
   transform-origin: center center;
+}
+
+/* Empty/unused tiles */
+richgriditem:not([value]) {
+  visibility: hidden;
+}
+richgriditem[tiletype="thumbnail"]:not([value]) {
+  visibility: visible;
+}
+richgriditem:not([value]) > .tile-content {
+  padding: 10px 14px;
+}
+richgriditem[tiletype="thumbnail"]:not([value]) > .tile-content {
+  box-shadow: 0px 0px 0px 1px rgba(0, 0, 0, 0.05);
+  background-image: url("chrome://browser/skin/images/firefox-watermark.png");
+  background-origin: content-box;
+  background-repeat: no-repeat;
+  background-color: rgba(255,255,255, 0.2);
+  background-position: center center;
+  background-size: @grid_row_height@;
 }
 
 /* Snapped-view variation

@@ -18,6 +18,7 @@
 #include "nsIPrincipal.h"
 #include "nsIXPConnect.h"
 #include "nsDataHashtable.h"
+#include "nsClassHashtable.h"
 #include "mozilla/Services.h"
 #include "nsIObserverService.h"
 #include "nsThreadUtils.h"
@@ -32,6 +33,7 @@ class ContentParent;
 class ContentChild;
 struct StructuredCloneData;
 class ClonedMessageData;
+class MessageManagerReporter;
 
 namespace ipc {
 
@@ -115,13 +117,12 @@ struct nsMessageListenerInfo
   // Exactly one of mStrongListener and mWeakListener must be non-null.
   nsCOMPtr<nsIMessageListener> mStrongListener;
   nsWeakPtr mWeakListener;
-  nsCOMPtr<nsIAtom> mMessage;
 };
 
 class CpowHolder
 {
   public:
-    virtual bool ToObject(JSContext* cx, JSObject** objp) = 0;
+    virtual bool ToObject(JSContext* cx, JS::MutableHandleObject objp) = 0;
 };
 
 class MOZ_STACK_CLASS SameProcessCpowHolder : public CpowHolder
@@ -132,7 +133,7 @@ class MOZ_STACK_CLASS SameProcessCpowHolder : public CpowHolder
     {
     }
 
-    bool ToObject(JSContext* aCx, JSObject** aObjp);
+    bool ToObject(JSContext* aCx, JS::MutableHandleObject aObjp);
 
   private:
     JS::Rooted<JSObject*> mObj;
@@ -143,6 +144,7 @@ class nsFrameMessageManager MOZ_FINAL : public nsIContentFrameMessageManager,
                                         public nsIFrameScriptLoader,
                                         public nsIProcessChecker
 {
+  friend class mozilla::dom::MessageManagerReporter;
   typedef mozilla::dom::StructuredCloneData StructuredCloneData;
 public:
   nsFrameMessageManager(mozilla::dom::ipc::MessageManagerCallback* aCallback,
@@ -266,7 +268,9 @@ private:
                        bool aIsSync);
 protected:
   friend class MMListenerRemover;
-  nsTArray<nsMessageListenerInfo> mListeners;
+  // We keep the message listeners as arrays in a hastable indexed by the
+  // message name. That gives us fast lookups in ReceiveMessage().
+  nsClassHashtable<nsStringHashKey, nsTArray<nsMessageListenerInfo>> mListeners;
   nsCOMArray<nsIContentFrameMessageManager> mChildManagers;
   bool mChrome;     // true if we're in the chrome process
   bool mGlobal;     // true if we're the global frame message manager

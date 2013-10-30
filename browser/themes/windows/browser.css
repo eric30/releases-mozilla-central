@@ -2361,6 +2361,30 @@ toolbarbutton.bookmark-item[dragover="true"][open="true"] {
   list-style-image: url("chrome://browser/skin/Secure24.png");
 }
 
+#identity-popup-help-icon {
+  -moz-appearance: none;
+  border: none;
+  margin: 7px 0 0 -3px;
+  background: none;
+  min-width: 0;
+  list-style-image: url("chrome://global/skin/icons/question-16.png");
+  cursor: pointer;
+}
+
+#identity-popup-help-icon > .button-box > .button-text {
+  display: none;
+}
+
+#identity-popup-help-icon > .button-box > .button-icon {
+  height: 16px;
+  width: 16px;
+}
+
+#identity-popup-help-icon:-moz-focusring {
+  outline: 1px dotted;
+  outline-offset: 1px;
+}
+
 #identity-popup-more-info-button {
   margin-top: 6px;
   margin-bottom: 0;
@@ -2544,30 +2568,23 @@ toolbarbutton.bookmark-item[dragover="true"][open="true"] {
 #plugins-notification-icon {
   list-style-image: url(chrome://browser/skin/notification-pluginNormal.png);
 }
-
-#alert-plugins-notification-icon {
+#plugins-notification-icon.plugin-hidden {
   list-style-image: url(chrome://browser/skin/notification-pluginAlert.png);
 }
 
-#blocked-plugins-notification-icon {
+#plugins-notification-icon.plugin-blocked {
   list-style-image: url(chrome://browser/skin/notification-pluginBlocked.png);
 }
 
-#plugins-notification-icon,
-#alert-plugins-notification-icon,
-#blocked-plugins-notification-icon {
+#plugins-notification-icon {
   -moz-image-region: rect(0, 16px, 16px, 0);
 }
 
-#plugins-notification-icon:hover,
-#alert-plugins-notification-icon:hover,
-#blocked-plugins-notification-icon:hover {
+#plugins-notification-icon:hover {
   -moz-image-region: rect(0, 32px, 16px, 16px);
 }
 
-#plugins-notification-icon:active,
-#alert-plugins-notification-icon:active,
-#blocked-plugins-notification-icon:active {
+#plugins-notification-icon:active {
   -moz-image-region: rect(0, 48px, 16px, 32px);
 }
 
@@ -2582,7 +2599,7 @@ toolbarbutton.bookmark-item[dragover="true"][open="true"] {
   visibility: collapse;
 }
 
-#blocked-plugins-notification-icon[showing] {
+#plugins-notification-icon.plugin-blocked[showing] {
   animation: pluginBlockedNotification 500ms ease 0s 5 alternate both;
 }
 
@@ -2829,6 +2846,87 @@ toolbarbutton.bookmark-item[dragover="true"][open="true"] {
   background-image: linear-gradient(#B4211B, #8A1915);
   border-radius: 1px;
   -moz-margin-end: 5px;
+}
+
+/* UI Tour */
+
+@keyframes uitour-wobble {
+  from {
+    transform: rotate(0deg) translateX(2px) rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg) translateX(2px) rotate(-360deg);
+  }
+}
+
+@keyframes uitour-zoom {
+  from {
+    transform: scale(0.9);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+  to {
+    transform: scale(0.9);
+  }
+}
+
+@keyframes uitour-color {
+  from {
+    border-color: #5B9CD9;
+  }
+  50% {
+    border-color: #FF0000;
+  }
+  to {
+    border-color: #5B9CD9;
+  }
+}
+
+html|div#UITourHighlight {
+  display: none;
+  position: absolute;
+  min-height: 32px;
+  min-width: 32px;
+  display: none;
+  border: 2px #5B9CD9 solid;
+  box-shadow: 0 0 2px #5B9CD9, inset 0 0 1px #5B9CD9;
+  border-radius: 20px;
+  z-index: 10000000000;
+}
+
+html|div#UITourHighlight[active] {
+  display: block;
+  animation-delay: 2s;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  animation-fill-mode: forwards;
+}
+
+html|div#UITourHighlight[active="wobble"] {
+  animation-name: uitour-wobble;
+  animation-duration: 1s;
+}
+html|div#UITourHighlight[active="zoom"] {
+  animation-name: uitour-zoom;
+  animation-duration: 1s;
+}
+html|div#UITourHighlight[active="color"] {
+  animation-name: uitour-color;
+  animation-duration: 2s;
+}
+
+#UITourTooltip {
+}
+
+#UITourTooltipTitle {
+  font-weight: bold;
+  font-size: 130%;
+  margin: 0 0 5px 0;
+}
+
+#UITourTooltipDescription {
+  max-width: 20em;
 }
 
 /* Social toolbar item */

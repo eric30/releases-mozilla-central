@@ -20,7 +20,6 @@
 #include "MediaStreamList.h"
 #include "nsIScriptGlobalObject.h"
 #include "mozilla/Preferences.h"
-#include "jsapi.h"
 #endif
 
 using namespace mozilla;
@@ -112,6 +111,16 @@ void RemoteSourceStreamInfo::DetachMedia_m()
     it->second->ShutdownMedia_m();
   }
   mMediaStream = nullptr;
+}
+
+already_AddRefed<PeerConnectionImpl>
+PeerConnectionImpl::Constructor(const dom::GlobalObject& aGlobal, ErrorResult& rv)
+{
+  nsRefPtr<PeerConnectionImpl> pc = new PeerConnectionImpl(&aGlobal);
+
+  CSFLogDebug(logTag, "Created PeerConnection: %p", pc.get());
+
+  return pc.forget();
 }
 
 PeerConnectionImpl* PeerConnectionImpl::CreatePeerConnection()

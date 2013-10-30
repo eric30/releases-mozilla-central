@@ -1,9 +1,9 @@
 // Stuff to link the old imp to the new api - will go away!
 
+#include "CacheLog.h"
 #include "OldWrappers.h"
 #include "CacheStorage.h"
 #include "CacheStorageService.h"
-#include "CacheLog.h"
 #include "LoadContextInfo.h"
 
 #include "nsIURI.h"
@@ -211,7 +211,7 @@ _OldCacheEntryWrapper::_OldCacheEntryWrapper(nsICacheEntryDescriptor* desc)
 }
 
 _OldCacheEntryWrapper::_OldCacheEntryWrapper(nsICacheEntryInfo* info)
-: mOldInfo(info)
+: mOldDesc(nullptr), mOldInfo(info)
 {
   MOZ_COUNT_CTOR(_OldCacheEntryWrapper);
   LOG(("Creating _OldCacheEntryWrapper %p for info %p", this, info));
@@ -704,6 +704,11 @@ NS_IMETHODIMP _OldStorage::AsyncOpenURI(nsIURI *aURI,
   if (!mAppCache && (mLookupAppCache || mOfflineStorage)) {
     rv = ChooseApplicationCache(cacheKey, getter_AddRefs(mAppCache));
     NS_ENSURE_SUCCESS(rv, rv);
+
+    if (mAppCache) {
+      // From a chosen appcache open only as readonly
+      aFlags &= ~nsICacheStorage::OPEN_TRUNCATE;
+    }
   }
 
   nsRefPtr<_OldCacheLoad> cacheLoad =

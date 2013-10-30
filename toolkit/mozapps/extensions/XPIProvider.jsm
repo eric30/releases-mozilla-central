@@ -25,6 +25,14 @@ XPCOMUtils.defineLazyModuleGetter(this, "FileUtils",
                                   "resource://gre/modules/FileUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
                                   "resource://gre/modules/NetUtil.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "PermissionsUtils",
+                                  "resource://gre/modules/PermissionsUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Promise",
+                                  "resource://gre/modules/Promise.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Task",
+                                  "resource://gre/modules/Task.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "OS",
+                                  "resource://gre/modules/osfile.jsm");
 
 XPCOMUtils.defineLazyServiceGetter(this,
                                    "ChromeRegistry",
@@ -57,8 +65,7 @@ const PREF_EM_AUTO_DISABLED_SCOPES    = "extensions.autoDisableScopes";
 const PREF_EM_SHOW_MISMATCH_UI        = "extensions.showMismatchUI";
 const PREF_XPI_ENABLED                = "xpinstall.enabled";
 const PREF_XPI_WHITELIST_REQUIRED     = "xpinstall.whitelist.required";
-const PREF_XPI_WHITELIST_PERMISSIONS  = "xpinstall.whitelist.add";
-const PREF_XPI_BLACKLIST_PERMISSIONS  = "xpinstall.blacklist.add";
+const PREF_XPI_PERMISSIONS_BRANCH     = "xpinstall.";
 const PREF_XPI_UNPACK                 = "extensions.alwaysUnpack";
 const PREF_INSTALL_REQUIREBUILTINCERTS = "extensions.install.requireBuiltInCerts";
 const PREF_INSTALL_DISTRO_ADDONS      = "extensions.installDistroAddons";
@@ -95,12 +102,16 @@ const KEY_APP_SYSTEM_LOCAL            = "app-system-local";
 const KEY_APP_SYSTEM_SHARE            = "app-system-share";
 const KEY_APP_SYSTEM_USER             = "app-system-user";
 
+const NOTIFICATION_FLUSH_PERMISSIONS  = "flush-pending-permissions";
 const XPI_PERMISSION                  = "install";
 
 const RDFURI_INSTALL_MANIFEST_ROOT    = "urn:mozilla:install-manifest";
 const PREFIX_NS_EM                    = "http://www.mozilla.org/2004/em-rdf#";
 
 const TOOLKIT_ID                      = "toolkit@mozilla.org";
+
+// The maximum amount of file data to buffer at a time during file extraction
+const EXTRACTION_BUFFER               = 1024 * 512;
 
 // The value for this is in Makefile.in
 #expand const DB_SCHEMA                       = __MOZ_EXTENSIONS_DB_SCHEMA__;
@@ -1110,6 +1121,140 @@ function getTemporaryFile() {
 }
 
 /**
+ * Asynchronously writes data from an nsIInputStream to an OS.File instance.
+ * The source stream and OS.File are closed regardless of whether the operation
+ * succeeds or fails.
+ * Returns a promise that will be resolved when complete.
+ *
+ * @param  aPath
+ *         The name of the file being extracted for logging purposes.
+ * @param  aStream
+ *         The source nsIInputStream.
+ * @param  aFile
+ *         The open OS.File instance to write to.
+ */
+function saveStreamAsync(aPath, aStream, aFile) {
+  let deferred = Promise.defer();
+
+  // Read the input stream on a background thread
+  let sts = Cc["@mozilla.org/network/stream-transport-service;1"].
+            getService(Ci.nsIStreamTransportService);
+  let transport = sts.createInputTransport(aStream, -1, -1, true);
+  let input = transport.openInputStream(0, 0, 0)
+                       .QueryInterface(Ci.nsIAsyncInputStream);
+  let source = Cc["@mozilla.org/binaryinputstream;1"].
+               createInstance(Ci.nsIBinaryInputStream);
+  source.setInputStream(input);
+
+  let data = Uint8Array(EXTRACTION_BUFFER);
+
+  function readFailed(error) {
+    try {
+      aStream.close();
+    }
+    catch (e) {
+      ERROR("Failed to close JAR stream for " + aPath);
+    }
+
+    aFile.close().then(function() {
+      deferred.reject(error);
+    }, function(e) {
+      ERROR("Failed to close file for " + aPath);
+      deferred.reject(error);
+    });
+  }
+
+  function readData() {
+    try {
+      let count = Math.min(source.available(), data.byteLength);
+      source.readArrayBuffer(count, data.buffer);
+
+      aFile.write(data, { bytes: count }).then(function() {
+        input.asyncWait(readData, 0, 0, Services.tm.currentThread);
+      }, readFailed);
+    }
+    catch (e if e.result == Cr.NS_BASE_STREAM_CLOSED) {
+      deferred.resolve(aFile.close());
+    }
+    catch (e) {
+      readFailed(e);
+    }
+  }
+
+  input.asyncWait(readData, 0, 0, Services.tm.currentThread);
+
+  return deferred.promise;
+}
+
+/**
+ * Asynchronously extracts files from a ZIP file into a directory.
+ * Returns a promise that will be resolved when the extraction is complete.
+ *
+ * @param  aZipFile
+ *         The source ZIP file that contains the add-on.
+ * @param  aDir
+ *         The nsIFile to extract to.
+ */
+function extractFilesAsync(aZipFile, aDir) {
+  let zipReader = Cc["@mozilla.org/libjar/zip-reader;1"].
+                  createInstance(Ci.nsIZipReader);
+  zipReader.open(aZipFile);
+
+  let promises = [];
+
+  // Get all of the entries in the zip and sort them so we create directories
+  // before files
+  let entries = zipReader.findEntries(null);
+  let names = [];
+  while (entries.hasMore())
+    names.push(entries.getNext());
+  names.sort();
+
+  for (let name of names) {
+    let entryName = name;
+    let zipentry = zipReader.getEntry(name);
+    let path = OS.Path.join(aDir.path, ...name.split("/"));
+
+    if (zipentry.isDirectory) {
+      promises.push(OS.File.makeDir(path).then(null, function(e) {
+        ERROR("extractFilesAsync: failed to create directory " + path, e);
+        throw e;
+      }));
+    }
+    else {
+      let options = { unixMode: zipentry.permissions | FileUtils.PERMS_FILE };
+      let promise = OS.File.open(path, { truncate: true }, options).then(function(file) {
+        if (zipentry.realSize == 0)
+          return file.close();
+
+        return saveStreamAsync(path, zipReader.getInputStream(entryName), file);
+      });
+
+      promises.push(promise.then(null, function(e) {
+        ERROR("extractFilesAsync: failed to extract file " + path, e);
+        throw e;
+      }));
+    }
+  }
+
+  // Will be rejected if any of the promises are rejected and resolved otherwise
+  let result = Promise.defer();
+
+  // If any promise is rejected then result is rejected, the resulting array of
+  // promises are all resolved though
+  promises = promises.map(p => p.then(null, result.reject));
+
+  // Wait for all of the promises to be resolved
+  return Promise.all(promises).then(function() {
+    // Resolve the result if it hasn't already been rejected
+    result.resolve();
+
+    zipReader.close();
+    return result.promise;
+  });
+}
+
+/**
  * Extracts files from a ZIP file into a directory.
  *
  * @param  aZipFile
@@ -1243,42 +1388,43 @@ function escapeAddonURI(aAddon, aUri, aUpdateType, aAppVersion)
   return uri;
 }
 
-
-/**
- * Removes the specified files or directories in a staging directory and then if
- * the staging directory is empty attempts to remove it.
- *
- * @param  aDir
- *         nsIFile for the staging directory to clean up
- * @param  aLeafNames
- *         An array of file or directory to remove from the directory, the
- *         array may be empty
- */
-function cleanStagingDir(aDir, aLeafNames) {
-  aLeafNames.forEach(function(aName) {
-    let file = aDir.clone();
-    file.append(aName);
-    if (file.exists())
-      recursiveRemove(file);
-  });
-
-  let dirEntries = aDir.directoryEntries.QueryInterface(Ci.nsIDirectoryEnumerator);
-  try {
-    if (dirEntries.nextFile)
+function recursiveRemoveAsync(aFile) {
+  return Task.spawn(function () {
+    let info = null;
+    try {
+      info = yield OS.File.stat(aFile.path);
+    }
+    catch (e if e instanceof OS.File.Error && e.becauseNoSuchFile) {
+      // The file has already gone away
       return;
-  }
-  finally {
-    dirEntries.close();
-  }
+    }
 
-  try {
-    setFilePermissions(aDir, FileUtils.PERMS_DIRECTORY);
-    aDir.remove(false);
-  }
-  catch (e) {
-    WARN("Failed to remove staging dir", e);
-    // Failing to remove the staging directory is ignorable
-  }
+    setFilePermissions(aFile, info.isDir ? FileUtils.PERMS_DIRECTORY
+                                         : FileUtils.PERMS_FILE);
+
+    // OS.File means we have to recurse into directories
+    if (info.isDir) {
+      let iterator = new OS.File.DirectoryIterator(aFile.path);
+      yield iterator.forEach(function(entry) {
+        let nextFile = aFile.clone();
+        nextFile.append(entry.name);
+        return recursiveRemoveAsync(nextFile);
+      });
+      yield iterator.close();
+    }
+
+    try {
+      yield info.isDir ? OS.File.removeEmptyDir(aFile.path)
+                       : OS.File.remove(aFile.path);
+    }
+    catch (e if e instanceof OS.File.Error && e.becauseNoSuchFile) {
+      // The file has already gone away
+    }
+    catch (e) {
+      ERROR("Failed to remove file " + aFile.path, e);
+      throw e;
+    }
+  });
 }
 
 /**
@@ -1298,6 +1444,8 @@ function recursiveRemove(aFile) {
     // happen on OSX where the resource fork is automatically moved with the
     // data fork for the file. See bug 733436.
     if (e.result == Cr.NS_ERROR_FILE_TARGET_DOES_NOT_EXIST)
+      return;
+    if (e.result == Cr.NS_ERROR_FILE_NOT_FOUND)
       return;
 
     throw e;
@@ -1334,28 +1482,33 @@ function recursiveRemove(aFile) {
 }
 
 /**
- * Returns the timestamp of the most recently modified file in a directory,
+ * Returns the timestamp and leaf file name of the most recently modified
+ * entry in a directory,
  * or simply the file's own timestamp if it is not a directory.
  *
  * @param  aFile
  *         A non-null nsIFile object
- * @return Epoch time, as described above. 0 for an empty directory.
+ * @return [File Name, Epoch time], as described above.
  */
 function recursiveLastModifiedTime(aFile) {
   try {
+    let modTime = aFile.lastModifiedTime;
+    let fileName = aFile.leafName;
     if (aFile.isFile())
-      return aFile.lastModifiedTime;
+      return [fileName, modTime];
 
     if (aFile.isDirectory()) {
       let entries = aFile.directoryEntries.QueryInterface(Ci.nsIDirectoryEnumerator);
-      let entry, time;
-      let maxTime = aFile.lastModifiedTime;
+      let entry;
       while ((entry = entries.nextFile)) {
-        time = recursiveLastModifiedTime(entry);
-        maxTime = Math.max(time, maxTime);
+        let [subName, subTime] = recursiveLastModifiedTime(entry);
+        if (subTime > modTime) {
+          modTime = subTime;
+          fileName = subName;
+        }
       }
       entries.close();
-      return maxTime;
+      return [fileName, modTime];
     }
   }
   catch (e) {
@@ -1363,7 +1516,7 @@ function recursiveLastModifiedTime(aFile) {
   }
 
   // If the file is something else, just ignore it.
-  return 0;
+  return ["", 0];
 }
 
 /**
@@ -1542,10 +1695,22 @@ var XPIProvider = {
   enabledAddons: null,
   // An array of add-on IDs of add-ons that were inactive during startup
   inactiveAddonIDs: [],
-  // Count of unpacked add-ons
-  unpackedAddons: 0,
   // Keep track of startup phases for telemetry
   runPhase: XPI_STARTING,
+  // Keep track of the newest file in each add-on, in case we want to
+  // report it to telemetry.
+  _mostRecentlyModifiedFile: {},
+  // Per-addon telemetry information
+  _telemetryDetails: {},
+
+  /*
+   * Set a value in the telemetry hash for a given ID
+   */
+  setTelemetry: function XPI_setTelemetry(aId, aName, aValue) {
+    if (!this._telemetryDetails[aId])
+      this._telemetryDetails[aId] = {};
+    this._telemetryDetails[aId][aName] = aValue;
+  },
 
   /**
    * Adds or updates a URI mapping for an Addon.id.
@@ -1688,6 +1853,11 @@ var XPIProvider = {
     this.installLocationsByName = {};
     // Hook for tests to detect when saving database at shutdown time fails
     this._shutdownError = null;
+    // Clear this at startup for xpcshell test restarts
+    this._telemetryDetails = {};
+    // Register our details structure with AddonManager
+    AddonManagerPrivate.setTelemetryDetails("XPI", this._telemetryDetails);
+
 
     AddonManagerPrivate.recordTimestamp("XPI_startup_begin");
 
@@ -1783,6 +1953,7 @@ var XPIProvider = {
 
     Services.prefs.addObserver(PREF_EM_MIN_COMPAT_APP_VERSION, this, false);
     Services.prefs.addObserver(PREF_EM_MIN_COMPAT_PLATFORM_VERSION, this, false);
+    Services.obs.addObserver(this, NOTIFICATION_FLUSH_PERMISSIONS, false);
 
     let flushCaches = this.checkForChanges(aAppChanged, aOldAppVersion,
                                            aOldPlatformVersion);
@@ -2032,18 +2203,22 @@ var XPIProvider = {
     let addonStates = {};
     aLocation.addonLocations.forEach(function(file) {
       let id = aLocation.getIDForLocation(file);
+      let unpacked = 0;
+      let [modFile, modTime] = recursiveLastModifiedTime(file);
       addonStates[id] = {
         descriptor: file.persistentDescriptor,
-        mtime: recursiveLastModifiedTime(file)
+        mtime: modTime
       };
       try {
         // get the install.rdf update time, if any
         file.append(FILE_INSTALL_MANIFEST);
         let rdfTime = file.lastModifiedTime;
         addonStates[id].rdfTime = rdfTime;
-        this.unpackedAddons += 1;
+        unpacked = 1;
       }
       catch (e) { }
+      this._mostRecentlyModifiedFile[id] = modFile;
+      this.setTelemetry(id, "unpacked", unpacked);
     }, this);
 
     return addonStates;
@@ -2060,7 +2235,6 @@ var XPIProvider = {
    */
   getInstallLocationStates: function XPI_getInstallLocationStates() {
     let states = [];
-    this.unpackedAddons = 0;
     this.installLocations.forEach(function(aLocation) {
       let addons = aLocation.addonLocations;
       if (addons.length == 0)
@@ -2350,7 +2524,7 @@ var XPIProvider = {
       }
 
       try {
-        cleanStagingDir(stagingDir, seenFiles);
+        aLocation.cleanStagingDir(seenFiles);
       }
       catch (e) {
         // Non-critical, just saves some perf on startup if we clean this up.
@@ -3005,11 +3179,6 @@ var XPIProvider = {
     let changed = false;
     let knownLocations = XPIDatabase.getInstallLocations();
 
-    // Gather stats for addon telemetry
-    let modifiedUnpacked = 0;
-    let modifiedExManifest = 0;
-    let modifiedXPI = 0;
-
     // The install locations are iterated in reverse order of priority so when
     // there are multiple add-ons installed with the same ID the one that
     // should be visible is the first one encountered.
@@ -3044,15 +3213,22 @@ var XPIProvider = {
             if (aOldAddon.visible && !aOldAddon.active)
               XPIProvider.inactiveAddonIDs.push(aOldAddon.id);
 
-            // Check if the add-on is unpacked, and has had other files changed
-            // on disk without the install.rdf manifest being changed
-            if ((addonState.rdfTime) && (aOldAddon.updateDate != addonState.mtime)) {
-              modifiedUnpacked += 1;
-              if (aOldAddon.updateDate >= addonState.rdfTime)
-                modifiedExManifest += 1;
-            }
-            else if (aOldAddon.updateDate != addonState.mtime) {
-              modifiedXPI += 1;
+            // Check if the add-on has been changed outside the XPI provider
+            if (aOldAddon.updateDate != addonState.mtime) {
+              // Is the add-on unpacked?
+              if (addonState.rdfTime) {
+                // Was the addon manifest "install.rdf" modified, or some other file?
+                if (addonState.rdfTime > aOldAddon.updateDate) {
+                  this.setTelemetry(aOldAddon.id, "modifiedInstallRDF", 1);
+                }
+                else {
+                  this.setTelemetry(aOldAddon.id, "modifiedFile",
+                                    this._mostRecentlyModifiedFile[aOldAddon.id]);
+                }
+              }
+              else {
+                this.setTelemetry(aOldAddon.id, "modifiedXPI", 1);
+              }
             }
 
             // The add-on has changed if the modification time has changed, or
@@ -3106,12 +3282,6 @@ var XPIProvider = {
       }, this);
     }
 
-    // Tell Telemetry what we found
-    AddonManagerPrivate.recordSimpleMeasure("modifiedUnpacked", modifiedUnpacked);
-    if (modifiedUnpacked > 0)
-      AddonManagerPrivate.recordSimpleMeasure("modifiedExceptInstallRDF", modifiedExManifest);
-    AddonManagerPrivate.recordSimpleMeasure("modifiedXPI", modifiedXPI);
-
     // Cache the new install location states
     let cache = JSON.stringify(this.getInstallLocationStates());
     Services.prefs.setCharPref(PREF_INSTALL_CACHE, cache);
@@ -3128,26 +3298,8 @@ var XPIProvider = {
    * manager for the user to change later.
    */
   importPermissions: function XPI_importPermissions() {
-    function importList(aPrefBranch, aAction) {
-      let list = Services.prefs.getChildList(aPrefBranch, {});
-      list.forEach(function(aPref) {
-        let hosts = Prefs.getCharPref(aPref, "");
-        if (!hosts)
-          return;
-
-        hosts.split(",").forEach(function(aHost) {
-          Services.perms.add(NetUtil.newURI("http://" + aHost), XPI_PERMISSION,
-                             aAction);
-        });
-
-        Services.prefs.setCharPref(aPref, "");
-      });
-    }
-
-    importList(PREF_XPI_WHITELIST_PERMISSIONS,
-               Ci.nsIPermissionManager.ALLOW_ACTION);
-    importList(PREF_XPI_BLACKLIST_PERMISSIONS,
-               Ci.nsIPermissionManager.DENY_ACTION);
+    PermissionsUtils.importFromPrefs(PREF_XPI_PERMISSIONS_BRANCH,
+                                     XPI_PERMISSION);
   },
 
   /**
@@ -3171,10 +3323,6 @@ var XPIProvider = {
   checkForChanges: function XPI_checkForChanges(aAppChanged, aOldAppVersion,
                                                 aOldPlatformVersion) {
     LOG("checkForChanges");
-
-    // Import the website installation permissions if the application has changed
-    if (aAppChanged !== false)
-      this.importPermissions();
 
     // Keep track of whether and why we need to open and update the database at
     // startup time.
@@ -3280,7 +3428,6 @@ var XPIProvider = {
           ERROR("Failed to process extension changes at startup", e);
         }
       }
-      AddonManagerPrivate.recordSimpleMeasure("installedUnpacked", this.unpackedAddons);
 
       if (aAppChanged) {
         // When upgrading the app and using a custom skin make sure it is still
@@ -3372,6 +3519,7 @@ var XPIProvider = {
     if (aUri.schemeIs("chrome") || aUri.schemeIs("file"))
       return true;
 
+    this.importPermissions();
 
     let permission = Services.perms.testPermission(aUri, XPI_PERMISSION);
     if (permission == Ci.nsIPermissionManager.DENY_ACTION)
@@ -3700,15 +3848,24 @@ var XPIProvider = {
    * @see nsIObserver
    */
   observe: function XPI_observe(aSubject, aTopic, aData) {
-    switch (aData) {
-    case PREF_EM_MIN_COMPAT_APP_VERSION:
-    case PREF_EM_MIN_COMPAT_PLATFORM_VERSION:
-      this.minCompatibleAppVersion = Prefs.getCharPref(PREF_EM_MIN_COMPAT_APP_VERSION,
-                                                       null);
-      this.minCompatiblePlatformVersion = Prefs.getCharPref(PREF_EM_MIN_COMPAT_PLATFORM_VERSION,
-                                                            null);
-      this.updateAddonAppDisabledStates();
-      break;
+    if (aTopic == NOTIFICATION_FLUSH_PERMISSIONS) {
+      if (!aData || aData == XPI_PERMISSION) {
+        this.importPermissions();
+      }
+      return;
+    }
+
+    if (aTopic == "nsPref:changed") {
+      switch (aData) {
+      case PREF_EM_MIN_COMPAT_APP_VERSION:
+      case PREF_EM_MIN_COMPAT_PLATFORM_VERSION:
+        this.minCompatibleAppVersion = Prefs.getCharPref(PREF_EM_MIN_COMPAT_APP_VERSION,
+                                                         null);
+        this.minCompatiblePlatformVersion = Prefs.getCharPref(PREF_EM_MIN_COMPAT_PLATFORM_VERSION,
+                                                              null);
+        this.updateAddonAppDisabledStates();
+        break;
+      }
     }
   },
 
@@ -3990,6 +4147,7 @@ var XPIProvider = {
     if (Services.appinfo.inSafeMode)
       return;
 
+    let timeStart = new Date();
     if (aMethod == "startup") {
       LOG("Registering manifest for " + aFile.path);
       Components.manager.addBootstrappedManifestLocation(aFile);
@@ -4036,6 +4194,7 @@ var XPIProvider = {
         LOG("Removing manifest for " + aFile.path);
         Components.manager.removeBootstrappedManifestLocation(aFile);
       }
+      this.setTelemetry(aId, aMethod + "_MS", new Date() - timeStart);
     }
   },
 
@@ -4281,7 +4440,7 @@ var XPIProvider = {
     if (!(aAddon.inDatabase))
       throw new Error("Can only cancel uninstall for installed addons.");
 
-    cleanStagingDir(aAddon._installLocation.getStagingDir(), [aAddon.id]);
+    aAddon._installLocation.cleanStagingDir([aAddon.id]);
 
     XPIDatabase.setAddonProperties(aAddon, {
       pendingUninstall: false
@@ -4602,9 +4761,8 @@ AddonInstall.prototype = {
       let xpi = this.installLocation.getStagingDir();
       xpi.append(this.addon.id + ".xpi");
       flushJarCache(xpi);
-      cleanStagingDir(this.installLocation.getStagingDir(),
-                      [this.addon.id, this.addon.id + ".xpi",
-                       this.addon.id + ".json"]);
+      this.installLocation.cleanStagingDir([this.addon.id, this.addon.id + ".xpi",
+                                            this.addon.id + ".json"]);
       this.state = AddonManager.STATE_CANCELLED;
       XPIProvider.removeActiveInstall(this);
 
@@ -5239,27 +5397,28 @@ AddonInstall.prototype = {
     AddonManagerPrivate.callAddonListeners("onInstalling",
                                            createWrapper(this.addon),
                                            requiresRestart);
-    let stagedAddon = this.installLocation.getStagingDir();
 
-    try {
+    let stagingDir = this.installLocation.getStagingDir();
+    let stagedAddon = stagingDir.clone();
+
+    Task.spawn((function() {
+      yield this.installLocation.requestStagingDir();
+
       // First stage the file regardless of whether restarting is necessary
       if (this.addon.unpack || Prefs.getBoolPref(PREF_XPI_UNPACK, false)) {
         LOG("Addon " + this.addon.id + " will be installed as " +
             "an unpacked directory");
         stagedAddon.append(this.addon.id);
-        if (stagedAddon.exists())
-          recursiveRemove(stagedAddon);
-        stagedAddon.create(Ci.nsIFile.DIRECTORY_TYPE, FileUtils.PERMS_DIRECTORY);
-        extractFiles(this.file, stagedAddon);
+        yield recursiveRemoveAsync(stagedAddon);
+        yield OS.File.makeDir(stagedAddon.path);
+        yield extractFilesAsync(this.file, stagedAddon);
       }
       else {
         LOG("Addon " + this.addon.id + " will be installed as " +
             "a packed xpi");
         stagedAddon.append(this.addon.id + ".xpi");
-        if (stagedAddon.exists())
-          stagedAddon.remove(true);
-        this.file.copyTo(this.installLocation.getStagingDir(),
-                         this.addon.id + ".xpi");
+        yield recursiveRemoveAsync(stagedAddon);
+        yield OS.File.copy(this.file.path, stagedAddon.path);
       }
 
       if (requiresRestart) {
@@ -5343,12 +5502,12 @@ AddonInstall.prototype = {
         let existingAddonID = this.existingAddon ? this.existingAddon.id : null;
         let file = this.installLocation.installAddon(this.addon.id, stagedAddon,
                                                      existingAddonID);
-        cleanStagingDir(stagedAddon.parent, []);
 
         // Update the metadata in the database
         this.addon._sourceBundle = file;
         this.addon._installLocation = this.installLocation;
-        this.addon.updateDate = recursiveLastModifiedTime(file); // XXX sync recursive scan
+        let [mFile, mTime] = recursiveLastModifiedTime(file);
+        this.addon.updateDate = mTime;
         this.addon.visible = true;
         if (isUpgrade) {
           this.addon =  XPIDatabase.updateAddonMetadata(this.existingAddon, this.addon,
@@ -5393,9 +5552,8 @@ AddonInstall.prototype = {
           }
         }
       }
-    }
-    catch (e) {
-      WARN("Failed to install", e);
+    }).bind(this)).then(null, (e) => {
+      WARN("Failed to install " + this.file.path + " from " + this.sourceURI.spec, e);
       if (stagedAddon.exists())
         recursiveRemove(stagedAddon);
       this.state = AddonManager.STATE_INSTALL_FAILED;
@@ -5404,10 +5562,10 @@ AddonInstall.prototype = {
       AddonManagerPrivate.callInstallListeners("onInstallFailed",
                                                this.listeners,
                                                this.wrapper);
-    }
-    finally {
+    }).then(() => {
       this.removeTemporaryFile();
-    }
+      return this.installLocation.releaseStagingDir();
+    });
   },
 
   getInterface: function AI_getInterface(iid) {
@@ -6510,6 +6668,7 @@ function DirectoryInstallLocation(aName, aDirectory, aScope, aLocked) {
   this._IDToFileMap = {};
   this._FileToIDMap = {};
   this._linkedAddons = [];
+  this._stagingDirLock = 0;
 
   if (!aDirectory.exists())
     return;
@@ -6655,6 +6814,72 @@ DirectoryInstallLocation.prototype = {
     let dir = this._directory.clone();
     dir.append(DIR_STAGE);
     return dir;
+  },
+
+  requestStagingDir: function() {
+    this._stagingDirLock++;
+
+    if (this._stagingDirPromise)
+      return this._stagingDirPromise;
+
+    OS.File.makeDir(this._directory.path);
+    let stagepath = OS.Path.join(this._directory.path, DIR_STAGE);
+    return this._stagingDirPromise = OS.File.makeDir(stagepath).then(null, (e) => {
+      if (e instanceof OS.File.Error && e.becauseExists)
+        return;
+      ERROR("Failed to create staging directory", e);
+      throw e;
+    });
+  },
+
+  releaseStagingDir: function() {
+    this._stagingDirLock--;
+
+    if (this._stagingDirLock == 0) {
+      this._stagingDirPromise = null;
+      this.cleanStagingDir();
+    }
+
+    return Promise.resolve();
+  },
+
+  /**
+   * Removes the specified files or directories in the staging directory and
+   * then if the staging directory is empty attempts to remove it.
+   *
+   * @param  aLeafNames
+   *         An array of file or directory to remove from the directory, the
+   *         array may be empty
+   */
+  cleanStagingDir: function(aLeafNames = []) {
+    let dir = this.getStagingDir();
+
+    for (let name of aLeafNames) {
+      let file = dir.clone();
+      file.append(name);
+      recursiveRemove(file);
+    }
+
+    if (this.stagingDirLock > 0)
+      return;
+
+    let dirEntries = dir.directoryEntries.QueryInterface(Ci.nsIDirectoryEnumerator);
+    try {
+      if (dirEntries.nextFile)
+        return;
+    }
+    finally {
+      dirEntries.close();
+    }
+
+    try {
+      setFilePermissions(dir, FileUtils.PERMS_DIRECTORY);
+      dir.remove(false);
+    }
+    catch (e) {
+      WARN("Failed to remove staging dir", e);
+      // Failing to remove the staging directory is ignorable
+    }
   },
 
   /**

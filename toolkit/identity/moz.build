@@ -12,7 +12,7 @@ XPIDL_SOURCES += [
 
 MODULE = 'identity'
 
-CPP_SOURCES += [
+SOURCES += [
     'IdentityCryptoService.cpp',
 ]
 
@@ -25,14 +25,16 @@ EXTRA_JS_MODULES += [
     'IdentityProvider.jsm',
     'IdentityStore.jsm',
     'IdentityUtils.jsm',
+    'jwcrypto.jsm',
     'LogUtils.jsm',
     'MinimalIdentity.jsm',
     'RelyingParty.jsm',
     'Sandbox.jsm',
-    'jwcrypto.jsm',
 ]
 
 FAIL_ON_WARNINGS = True
 
 LIBXUL_LIBRARY = True
+
+EXPORT_LIBRARY = True
 

@@ -6,11 +6,8 @@
 #ifndef GFX_DRAWABLE_H
 #define GFX_DRAWABLE_H
 
-#include "nsISupportsImpl.h"
 #include "nsAutoPtr.h"
-#include "gfxTypes.h"
 #include "gfxRect.h"
-#include "gfxColor.h"
 #include "gfxMatrix.h"
 #include "GraphicsFilter.h"
 
@@ -126,7 +123,7 @@ class gfxPatternDrawable : public gfxDrawable {
 public:
     gfxPatternDrawable(gfxPattern* aPattern,
                        const gfxIntSize aSize);
-    virtual ~gfxPatternDrawable() {}
+    virtual ~gfxPatternDrawable();
 
     virtual bool Draw(gfxContext* aContext,
                         const gfxRect& aFillRect,

@@ -36,7 +36,7 @@ funcTransition2(const JSFunction *, const JSScript*, const JSContext*, int)
 }
 
 static int overlays = 0;
-static JSFunctionCallback innerCallback = NULL;
+static JSFunctionCallback innerCallback = nullptr;
 static void
 funcTransitionOverlay(const JSFunction *fun,
                       const JSScript *script,
@@ -78,7 +78,7 @@ BEGIN_TEST(testFuncCallback_bug507012)
     CHECK_EQUAL(enters, 777);
 
     // Check whether we can turn off function tracing
-    JS_SetFunctionCallback(cx, NULL);
+    JS_SetFunctionCallback(cx, nullptr);
     EXEC("f(1)");
     CHECK_EQUAL(enters, 777);
     interpreted = enters = leaves = depth = 0;
@@ -131,8 +131,10 @@ virtual
 JSContext *createContext()
 {
     JSContext *cx = JSAPITest::createContext();
-    if (cx)
-        JS_SetOptions(cx, JS_GetOptions(cx) | JSOPTION_BASELINE | JSOPTION_ION);
+    if (!cx)
+        return nullptr;
+    JS::ContextOptionsRef(cx).setBaseline(true)
+                             .setIon(true);
     return cx;
 }
 

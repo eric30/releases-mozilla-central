@@ -364,20 +364,6 @@ LIRGeneratorARM::newLTableSwitchV(MTableSwitch *tableswitch)
     return new LTableSwitchV(temp(), tempFloat(), tableswitch);
 }
 
-LGetPropertyCacheT *
-LIRGeneratorARM::newLGetPropertyCacheT(MGetPropertyCache *ins)
-{
-    return new LGetPropertyCacheT(useRegister(ins->object()), LDefinition::BogusTemp());
-}
-
-LGetElementCacheT *
-LIRGeneratorARM::newLGetElementCacheT(MGetElementCache *ins)
-{
-    return new LGetElementCacheT(useRegister(ins->object()),
-                                 useRegister(ins->index()),
-                                 LDefinition::BogusTemp());
-}
-
 bool
 LIRGeneratorARM::visitGuardShape(MGuardShape *ins)
 {
@@ -481,7 +467,15 @@ bool
 LIRGeneratorARM::visitAsmJSUnsignedToDouble(MAsmJSUnsignedToDouble *ins)
 {
     JS_ASSERT(ins->input()->type() == MIRType_Int32);
-    LUInt32ToDouble *lir = new LUInt32ToDouble(useRegisterAtStart(ins->input()));
+    LAsmJSUInt32ToDouble *lir = new LAsmJSUInt32ToDouble(useRegisterAtStart(ins->input()));
+    return define(lir, ins);
+}
+
+bool
+LIRGeneratorARM::visitAsmJSUnsignedToFloat32(MAsmJSUnsignedToFloat32 *ins)
+{
+    JS_ASSERT(ins->input()->type() == MIRType_Int32);
+    LAsmJSUInt32ToFloat32 *lir = new LAsmJSUInt32ToFloat32(useRegisterAtStart(ins->input()));
     return define(lir, ins);
 }
 
@@ -533,6 +527,15 @@ LIRGeneratorARM::lowerTruncateDToInt32(MTruncateToInt32 *ins)
     JS_ASSERT(opd->type() == MIRType_Double);
 
     return define(new LTruncateDToInt32(useRegister(opd), LDefinition::BogusTemp()), ins);
+}
+
+bool
+LIRGeneratorARM::lowerTruncateFToInt32(MTruncateToInt32 *ins)
+{
+    MDefinition *opd = ins->input();
+    JS_ASSERT(opd->type() == MIRType_Float32);
+
+    return define(new LTruncateFToInt32(useRegister(opd), LDefinition::BogusTemp()), ins);
 }
 
 bool

@@ -48,7 +48,7 @@
     _(ApplyArgsGeneric)             \
     _(Bail)                         \
     _(GetDynamicName)               \
-    _(FilterArguments)              \
+    _(FilterArgumentsOrEval)        \
     _(CallDirectEval)               \
     _(StackArgT)                    \
     _(StackArgV)                    \
@@ -71,6 +71,7 @@
     _(Phi)                          \
     _(TestIAndBranch)               \
     _(TestDAndBranch)               \
+    _(TestFAndBranch)               \
     _(TestVAndBranch)               \
     _(TestOAndBranch)               \
     _(FunctionDispatch)             \
@@ -79,6 +80,8 @@
     _(CompareAndBranch)             \
     _(CompareD)                     \
     _(CompareDAndBranch)            \
+    _(CompareF)                     \
+    _(CompareFAndBranch)            \
     _(CompareS)                     \
     _(CompareStrictS)               \
     _(CompareB)                     \
@@ -98,14 +101,18 @@
     _(NegF)                         \
     _(AbsI)                         \
     _(AbsD)                         \
+    _(AbsF)                         \
     _(SqrtD)                        \
+    _(SqrtF)                        \
     _(Atan2D)                       \
     _(PowI)                         \
     _(PowD)                         \
     _(Random)                       \
     _(MathFunctionD)                \
+    _(MathFunctionF)                \
     _(NotI)                         \
     _(NotD)                         \
+    _(NotF)                         \
     _(NotO)                         \
     _(NotV)                         \
     _(AddI)                         \
@@ -129,12 +136,14 @@
     _(DoubleToInt32)                \
     _(Float32ToInt32)               \
     _(TruncateDToInt32)             \
+    _(TruncateFToInt32)             \
     _(IntToString)                  \
     _(DoubleToString)               \
     _(Start)                        \
     _(OsrEntry)                     \
     _(OsrValue)                     \
     _(OsrScopeChain)                \
+    _(OsrReturnValue)               \
     _(OsrArgumentsObject)           \
     _(RegExp)                       \
     _(RegExpTest)                   \
@@ -237,6 +246,7 @@
     _(TypeOfV)                      \
     _(ToIdV)                        \
     _(Floor)                        \
+    _(FloorF)                       \
     _(Round)                        \
     _(In)                           \
     _(InArray)                      \

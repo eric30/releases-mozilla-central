@@ -215,7 +215,7 @@ XPCWrappedNativeScope::GetComponentsJSObject()
     // The call to wrap() here is necessary even though the object is same-
     // compartment, because it applies our security wrapper.
     JS::RootedObject obj(cx, wrapper->GetFlatJSObject());
-    if (!JS_WrapObject(cx, obj.address()))
+    if (!JS_WrapObject(cx, &obj))
         return nullptr;
     return obj;
 }
@@ -245,7 +245,7 @@ XPCWrappedNativeScope::EnsureXBLScope(JSContext *cx)
     // However, wantXrays lives a secret double life, and one of its other
     // hobbies is to waive Xray on the returned sandbox when set to false.
     // So make sure to keep this set to true, here.
-    SandboxOptions options(cx);
+    SandboxOptions options;
     options.wantXrays = true;
     options.wantComponents = true;
     options.proto = global;
@@ -260,8 +260,8 @@ XPCWrappedNativeScope::EnsureXBLScope(JSContext *cx)
     ep = new nsExpandedPrincipal(principalAsArray);
 
     // Create the sandbox.
-    JS::RootedValue v(cx, JS::UndefinedValue());
-    nsresult rv = CreateSandboxObject(cx, v.address(), ep, options);
+    RootedValue v(cx);
+    nsresult rv = CreateSandboxObject(cx, &v, ep, options);
     NS_ENSURE_SUCCESS(rv, nullptr);
     mXBLScope = &v.toObject();
 

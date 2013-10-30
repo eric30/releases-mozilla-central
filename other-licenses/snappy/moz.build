@@ -10,14 +10,16 @@ EXPORTS.snappy += [
     'src/snappy.h',
 ]
 
-CPP_SOURCES += [
-    'snappy-c.cc',
-    'snappy-sinksource.cc',
-    'snappy-stubs-internal.cc',
-    'snappy.cc',
+SOURCES += [
+    'src/snappy-c.cc',
+    'src/snappy-sinksource.cc',
+    'src/snappy-stubs-internal.cc',
+    'src/snappy.cc',
 ]
 
 LIBRARY_NAME = 'snappy_s'
 
 LIBXUL_LIBRARY = True
+
+EXPORT_LIBRARY = True
 

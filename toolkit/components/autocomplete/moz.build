@@ -17,7 +17,7 @@ XPIDL_SOURCES += [
 
 MODULE = 'autocomplete'
 
-CPP_SOURCES += [
+SOURCES += [
     'nsAutoCompleteController.cpp',
     'nsAutoCompleteSimpleResult.cpp',
 ]
@@ -27,4 +27,6 @@ LIBRARY_NAME = 'tkautocomplete'
 FAIL_ON_WARNINGS = True
 
 LIBXUL_LIBRARY = True
+
+EXPORT_LIBRARY = True
 

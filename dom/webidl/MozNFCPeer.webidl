@@ -8,9 +8,8 @@
  * Copyright © 2013 Deutsche Telekom, Inc.
  */
 
-[Constructor(DOMString sessionId),
- JSImplementation="@mozilla.org/nfc/NFCPeer;1"]
-interface MozNFCPeer : EventTarget {
+[JSImplementation="@mozilla.org/nfc/NFCPeer;1"]
+interface MozNFCPeer {
   DOMRequest sendNDEF(sequence<MozNdefRecord> records);
 };
 
@@ -19,5 +18,5 @@ partial interface MozNFCPeer {
   [ChromeOnly]
   attribute DOMString session;
   [ChromeOnly]
-  boolean setSessionToken(DOMString sessionToken);
+  void setSessionToken(DOMString sessionToken);
 };

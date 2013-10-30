@@ -6,7 +6,7 @@
 
 MODULE = 'pippki'
 
-CPP_SOURCES += [
+SOURCES += [
     'nsASN1Tree.cpp',
     'nsFormSigningDialog.cpp',
     'nsNSSDialogHelper.cpp',
@@ -20,4 +20,6 @@ LIBRARY_NAME = 'pippki'
 FAIL_ON_WARNINGS = True
 
 LIBXUL_LIBRARY = True
+
+EXPORT_LIBRARY = True
 

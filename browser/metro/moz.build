@@ -16,5 +16,4 @@ DIRS += [
 if CONFIG['OS_ARCH'] == 'WINNT':
     DIRS += ['shell']
 
-TEST_DIRS += ['base/tests']
-
+DIST_SUBDIR = 'metro'

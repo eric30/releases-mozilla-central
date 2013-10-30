@@ -15,8 +15,12 @@ XPIDL_SOURCES += [
 
 MODULE = 'satchel'
 
-CPP_SOURCES += [
+SOURCES += [
     'nsFormFillController.cpp',
+]
+
+LOCAL_INCLUDES += [
+    '../build',
 ]
 
 EXTRA_COMPONENTS += [
@@ -41,4 +45,6 @@ EXTRA_PP_JS_MODULES += [
 ]
 
 LIBXUL_LIBRARY = True
+
+EXPORT_LIBRARY = True
 

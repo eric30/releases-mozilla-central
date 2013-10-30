@@ -6,7 +6,7 @@
 
 MODULE = 'htmlparser'
 
-CPP_SOURCES += [
+SOURCES += [
     'CNavDTD.cpp',
     'CParserContext.cpp',
     'nsElementTable.cpp',
@@ -25,4 +25,6 @@ CPP_SOURCES += [
 LIBRARY_NAME = 'htmlpars'
 
 LIBXUL_LIBRARY = True
+
+EXPORT_LIBRARY = True
 

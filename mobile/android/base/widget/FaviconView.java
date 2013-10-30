@@ -64,7 +64,7 @@ public class FaviconView extends ImageView {
     private void formatImage() {
         // If we're called before bitmap is set, or before size is set, show blank.
         if (mIconBitmap == null || mActualWidth == 0 || mActualHeight == 0) {
-            clearImage();
+            showNoImage();
             return;
         }
 
@@ -106,7 +106,11 @@ public class FaviconView extends ImageView {
      * space.
      */
     private void showBackground() {
-        int color = Favicons.getFaviconColor(mIconBitmap, mIconKey);
+        int color = Favicons.getFaviconColor(mIconKey);
+        if (color == -1) {
+            hideBackground();
+            return;
+        }
         color = Color.argb(70, Color.red(color), Color.green(color), Color.blue(color));
         final Drawable drawable = getResources().getDrawable(R.drawable.favicon_bg);
         drawable.setColorFilter(color, Mode.SRC_ATOP);
@@ -152,8 +156,13 @@ public class FaviconView extends ImageView {
         formatImage();
     }
 
-    private void showDefaultFavicon() {
+    public void showDefaultFavicon() {
         setImageResource(R.drawable.favicon);
+        hideBackground();
+    }
+
+    private void showNoImage() {
+        setImageBitmap(null);
         hideBackground();
     }
 
@@ -161,8 +170,7 @@ public class FaviconView extends ImageView {
      * Clear image and background shown by this view.
      */
     public void clearImage() {
-        setImageResource(0);
-        hideBackground();
+        showNoImage();
         mUnscaledBitmap = null;
         mIconBitmap = null;
         mIconKey = null;

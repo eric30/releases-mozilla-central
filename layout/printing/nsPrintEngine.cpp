@@ -120,6 +120,7 @@ static const char kPrintingPromptService[] = "@mozilla.org/embedcomp/printingpro
 #include "nsIURIFixup.h"
 #include "mozilla/dom/Element.h"
 #include "nsContentList.h"
+#include "nsIChannel.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -303,7 +304,7 @@ nsresult nsPrintEngine::Initialize(nsIDocumentViewerPrint* aDocViewerPrint,
   mDocument       = aDocument;
   mScreenDPI      = aScreenDPI;
 
-  mDebugFile      = aDebugFile;      // ok to be NULL
+  mDebugFile      = aDebugFile;      // ok to be nullptr
 
   return NS_OK;
 }
@@ -517,7 +518,7 @@ nsPrintEngine::DoCommonPrint(bool                    aIsPrintPreview,
 
   // Get the currently focused window and cache it
   // because the Print Dialog will "steal" focus and later when you try
-  // to get the currently focused windows it will be NULL
+  // to get the currently focused windows it will be nullptr
   mPrt->mCurrentFocusWin = FindFocusedDOMWindow();
 
   // Check to see if there is a "regular" selection
@@ -2682,7 +2683,7 @@ nsPrintEngine::PrePrintPage()
   NS_ASSERTION(mPageSeqFrame,  "mPageSeqFrame is null!");
   NS_ASSERTION(mPrt,           "mPrt is null!");
 
-  // Although these should NEVER be NULL
+  // Although these should NEVER be nullptr
   // This is added insurance, to make sure we don't crash in optimized builds
   if (!mPrt || !mPageSeqFrame) {
     return true; // means we are done preparing the page.
@@ -2720,7 +2721,7 @@ nsPrintEngine::PrintPage(nsPrintObject*    aPO,
   NS_ASSERTION(mPageSeqFrame,  "mPageSeqFrame is null!");
   NS_ASSERTION(mPrt,           "mPrt is null!");
 
-  // Although these should NEVER be NULL
+  // Although these should NEVER be nullptr
   // This is added insurance, to make sure we don't crash in optimized builds
   if (!mPrt || !aPO || !mPageSeqFrame) {
     ShowPrintErrorDialog(NS_ERROR_FAILURE);
@@ -3018,7 +3019,7 @@ nsPrintEngine::CleanupDocTitleArray(PRUnichar**& aArray, int32_t& aCount)
     nsMemory::Free(aArray[i]);
   }
   nsMemory::Free(aArray);
-  aArray = NULL;
+  aArray = nullptr;
   aCount = 0;
 }
 

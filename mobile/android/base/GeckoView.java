@@ -46,7 +46,12 @@ public class GeckoView extends LayerView
 
         // If running outside of a GeckoActivity (eg, from a library project),
         // load the native code and disable content providers
-        if (!(context instanceof GeckoActivity)) {
+        boolean isGeckoActivity = false;
+        try {
+            isGeckoActivity = context instanceof GeckoActivity;
+        } catch (NoClassDefFoundError ex) {}
+
+        if (!isGeckoActivity) {
             // Set the GeckoInterface if the context is an activity and the GeckoInterface
             // has not already been set
             if (context instanceof Activity && getGeckoInterface() == null) {
@@ -55,10 +60,11 @@ public class GeckoView extends LayerView
 
             Clipboard.init(context);
             HardwareUtils.init(context);
+            GeckoNetworkManager.getInstance().init(context);
 
             GeckoLoader.loadMozGlue();
             BrowserDB.setEnableContentProviders(false);
-        }
+         }
 
         if (url != null) {
             GeckoThread.setUri(url);
@@ -75,7 +81,7 @@ public class GeckoView extends LayerView
         ThreadUtils.setUiThread(Thread.currentThread(), new Handler());
         initializeView(GeckoAppShell.getEventDispatcher());
 
-        GeckoProfile profile = GeckoProfile.get(context);
+        GeckoProfile profile = GeckoProfile.get(context).forceCreate();
         BrowserDB.initialize(profile.getName());
 
         if (GeckoThread.checkAndSetLaunchState(GeckoThread.LaunchState.Launching, GeckoThread.LaunchState.Launched)) {

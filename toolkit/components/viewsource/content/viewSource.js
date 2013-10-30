@@ -110,9 +110,9 @@ function viewSource(url)
         if (typeof(arg) == "string" && arg.indexOf('charset=') != -1) {
           var arrayArgComponents = arg.split('=');
           if (arrayArgComponents) {
-            //we should "inherit" the charset menu setting in a new window
+            // Remember the charset here so that it can be used below in case
+            // the document had a forced charset.
             charset = arrayArgComponents[1];
-            gBrowser.markupDocumentViewer.defaultCharacterSet = charset;
           }
         }
       } catch (ex) {
@@ -263,13 +263,10 @@ function onClickContent(event) {
         } catch (e) {
           Components.utils.reportError("Couldn't get malware report URL: " + e);
         }
-      } else { // It's a phishing site, not malware
-        try {
-          var infoURL = Services.urlFormatter.formatURLPref("browser.safebrowsing.warning.infoURL", true);
-          openURL(infoURL);
-        } catch (e) {
-          Components.utils.reportError("Couldn't get phishing info URL: " + e);
-        }
+      } else {
+        // It's a phishing site, just link to the generic information page
+        let url = Services.urlFormatter.formatURLPref("app.support.baseURL");
+        openURL(url + "phishing-malware");
       }
     } else if (target == errorDoc.getElementById('ignoreWarningButton')) {
       // Allow users to override and continue through to the site

@@ -10,9 +10,11 @@ EXPORTS += [
     'jprof.h',
 ]
 
-CPP_SOURCES += [
+SOURCES += [
     'libmalloc.cpp',
 ]
 
 LIBRARY_NAME = 'jprof'
+
+EXPORT_LIBRARY = True
 

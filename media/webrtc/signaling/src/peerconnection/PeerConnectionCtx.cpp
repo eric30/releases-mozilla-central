@@ -20,8 +20,13 @@
 #include "runnable_utils.h"
 #include "cpr_socket.h"
 #include "debug-psipcc-types.h"
+#include "prcvar.h"
 
 #include "mozilla/Telemetry.h"
+
+#ifdef MOZILLA_INTERNAL_API
+#include "mozilla/dom/RTCPeerConnectionBinding.h"
+#endif
 
 #include "nsIObserverService.h"
 #include "nsIObserver.h"
@@ -40,6 +45,57 @@ extern char ccAppReadyToStart;
 }
 
 namespace mozilla {
+
+using namespace dom;
+
+// Convert constraints to C structures
+
+#ifdef MOZILLA_INTERNAL_API
+static void
+Apply(const Optional<bool> &aSrc, cc_boolean_constraint_t *aDst,
+      bool mandatory = false) {
+  if (aSrc.WasPassed() && (mandatory || !aDst->was_passed)) {
+    aDst->was_passed = true;
+    aDst->value = aSrc.Value();
+    aDst->mandatory = mandatory;
+  }
+}
+#endif
+
+MediaConstraintsExternal::MediaConstraintsExternal() {
+  memset(&mConstraints, 0, sizeof(mConstraints));
+}
+
+MediaConstraintsExternal::MediaConstraintsExternal(
+    const MediaConstraintsInternal &aSrc) {
+  cc_media_constraints_t* c = &mConstraints;
+  memset(c, 0, sizeof(*c));
+#ifdef MOZILLA_INTERNAL_API
+  Apply(aSrc.mMandatory.mOfferToReceiveAudio, &c->offer_to_receive_audio, true);
+  Apply(aSrc.mMandatory.mOfferToReceiveVideo, &c->offer_to_receive_video, true);
+  Apply(aSrc.mMandatory.mMozDontOfferDataChannel, &c->moz_dont_offer_datachannel,
+        true);
+  if (aSrc.mOptional.WasPassed()) {
+    const Sequence<MediaConstraintSet> &array = aSrc.mOptional.Value();
+    for (uint32_t i = 0; i < array.Length(); i++) {
+      Apply(array[i].mOfferToReceiveAudio, &c->offer_to_receive_audio);
+      Apply(array[i].mOfferToReceiveVideo, &c->offer_to_receive_video);
+      Apply(array[i].mMozDontOfferDataChannel, &c->moz_dont_offer_datachannel);
+    }
+  }
+#endif
+}
+
+cc_media_constraints_t*
+MediaConstraintsExternal::build() const {
+  cc_media_constraints_t* cc  = (cc_media_constraints_t*)
+    cpr_malloc(sizeof(cc_media_constraints_t));
+  if (cc) {
+    *cc = mConstraints;
+  }
+  return cc;
+}
+
 class PeerConnectionCtxShutdown : public nsIObserver
 {
 public:
@@ -230,7 +286,7 @@ nsresult PeerConnectionCtx::Initialize() {
   mDevice = mCCM->getActiveDevice();
   mCCM->addCCObserver(this);
   NS_ENSURE_TRUE(mDevice.get(), NS_ERROR_FAILURE);
-  ChangeSipccState(PeerConnectionImpl::kStarting);
+  ChangeSipccState(mozilla::dom::PCImplSipccState::Starting);
 
   // Now that everything is set up, we let the CCApp thread
   // know that it's okay to start processing messages.
@@ -265,7 +321,7 @@ void PeerConnectionCtx::onDeviceEvent(ccapi_device_event_e aDeviceEvent,
   cc_service_state_t state = aInfo->getServiceState();
   // We are keeping this in a local var to avoid a data race
   // with ChangeSipccState in the debug message and compound if below
-  PeerConnectionImpl::SipccState currentSipccState = mSipccState;
+  mozilla::dom::PCImplSipccState currentSipccState = mSipccState;
 
   switch (aDeviceEvent) {
     case CCAPI_DEVICE_EV_STATE:
@@ -273,9 +329,9 @@ void PeerConnectionCtx::onDeviceEvent(ccapi_device_event_e aDeviceEvent,
 
       if (CC_STATE_INS == state) {
         // SIPCC is up
-        if (PeerConnectionImpl::kStarting == currentSipccState ||
-            PeerConnectionImpl::kIdle == currentSipccState) {
-          ChangeSipccState(PeerConnectionImpl::kStarted);
+        if (mozilla::dom::PCImplSipccState::Starting == currentSipccState ||
+            mozilla::dom::PCImplSipccState::Idle == currentSipccState) {
+          ChangeSipccState(mozilla::dom::PCImplSipccState::Started);
         } else {
           CSFLogError(logTag, "%s PeerConnection already started", __FUNCTION__);
         }
@@ -322,7 +378,7 @@ static void onCallEvent_m(nsAutoPtr<std::string> peerconnection,
   if (!pc.impl())  // This must be an event on a dead PC. Ignore
     return;
   CSFLogDebug(logTag, "Calling PC");
-  pc.impl()->onCallEvent(aCallEvent, aInfo);
+  pc.impl()->onCallEvent(OnCallEventArgs(aCallEvent, aInfo));
 }
 
 }  // namespace sipcc

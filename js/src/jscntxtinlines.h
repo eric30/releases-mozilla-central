@@ -133,12 +133,14 @@ class CompartmentChecker
  * depends on other objects not having been swept yet.
  */
 #define START_ASSERT_SAME_COMPARTMENT()                                       \
+    if (!cx->isExclusiveContext())                                            \
+        return;                                                               \
     if (cx->isHeapBusy())                                                     \
         return;                                                               \
-    CompartmentChecker c(cx)
+    CompartmentChecker c(cx->asExclusiveContext())
 
 template <class T1> inline void
-assertSameCompartment(ExclusiveContext *cx, const T1 &t1)
+assertSameCompartment(ThreadSafeContext *cx, const T1 &t1)
 {
 #ifdef JS_CRASH_DIAGNOSTICS
     START_ASSERT_SAME_COMPARTMENT();
@@ -147,7 +149,7 @@ assertSameCompartment(ExclusiveContext *cx, const T1 &t1)
 }
 
 template <class T1> inline void
-assertSameCompartmentDebugOnly(ExclusiveContext *cx, const T1 &t1)
+assertSameCompartmentDebugOnly(ThreadSafeContext *cx, const T1 &t1)
 {
 #ifdef DEBUG
     START_ASSERT_SAME_COMPARTMENT();
@@ -156,7 +158,7 @@ assertSameCompartmentDebugOnly(ExclusiveContext *cx, const T1 &t1)
 }
 
 template <class T1, class T2> inline void
-assertSameCompartment(ExclusiveContext *cx, const T1 &t1, const T2 &t2)
+assertSameCompartment(ThreadSafeContext *cx, const T1 &t1, const T2 &t2)
 {
 #ifdef JS_CRASH_DIAGNOSTICS
     START_ASSERT_SAME_COMPARTMENT();
@@ -166,7 +168,7 @@ assertSameCompartment(ExclusiveContext *cx, const T1 &t1, const T2 &t2)
 }
 
 template <class T1, class T2, class T3> inline void
-assertSameCompartment(ExclusiveContext *cx, const T1 &t1, const T2 &t2, const T3 &t3)
+assertSameCompartment(ThreadSafeContext *cx, const T1 &t1, const T2 &t2, const T3 &t3)
 {
 #ifdef JS_CRASH_DIAGNOSTICS
     START_ASSERT_SAME_COMPARTMENT();
@@ -177,7 +179,7 @@ assertSameCompartment(ExclusiveContext *cx, const T1 &t1, const T2 &t2, const T3
 }
 
 template <class T1, class T2, class T3, class T4> inline void
-assertSameCompartment(ExclusiveContext *cx,
+assertSameCompartment(ThreadSafeContext *cx,
                       const T1 &t1, const T2 &t2, const T3 &t3, const T4 &t4)
 {
 #ifdef JS_CRASH_DIAGNOSTICS
@@ -190,7 +192,7 @@ assertSameCompartment(ExclusiveContext *cx,
 }
 
 template <class T1, class T2, class T3, class T4, class T5> inline void
-assertSameCompartment(ExclusiveContext *cx,
+assertSameCompartment(ThreadSafeContext *cx,
                       const T1 &t1, const T2 &t2, const T3 &t3, const T4 &t4, const T5 &t5)
 {
 #ifdef JS_CRASH_DIAGNOSTICS
@@ -271,7 +273,7 @@ CallJSNativeConstructor(JSContext *cx, Native native, const CallArgs &args)
      *
      * - (new Object(Object)) returns the callee.
      */
-    JS_ASSERT_IF(native != FunctionProxyObject::class_.construct &&
+    JS_ASSERT_IF(native != ProxyObject::callableClass_.construct &&
                  native != js::CallOrConstructBoundFunction &&
                  native != js::IteratorConstructor &&
                  (!callee->is<JSFunction>() || callee->as<JSFunction>().native() != obj_construct),
@@ -387,7 +389,7 @@ class AutoLockForExclusiveAccess
         if (runtime->numExclusiveThreads) {
             JS_ASSERT(runtime->exclusiveAccessOwner == PR_GetCurrentThread());
 #ifdef DEBUG
-            runtime->exclusiveAccessOwner = NULL;
+            runtime->exclusiveAccessOwner = nullptr;
 #endif
             PR_Unlock(runtime->exclusiveAccessLock);
         } else {
@@ -431,14 +433,14 @@ JSContext::setPendingException(js::Value v) {
 inline void
 JSContext::setDefaultCompartmentObject(JSObject *obj)
 {
-    JS_ASSERT(!hasOption(JSOPTION_NO_DEFAULT_COMPARTMENT_OBJECT));
+    JS_ASSERT(!options().noDefaultCompartmentObject());
     defaultCompartmentObject_ = obj;
 }
 
 inline void
 JSContext::setDefaultCompartmentObjectIfUnset(JSObject *obj)
 {
-    if (!hasOption(JSOPTION_NO_DEFAULT_COMPARTMENT_OBJECT) &&
+    if (!options().noDefaultCompartmentObject() &&
         !defaultCompartmentObject_)
     {
         setDefaultCompartmentObject(obj);
@@ -501,8 +503,8 @@ js::ExclusiveContext::setCompartment(JSCompartment *comp)
     JS_ASSERT_IF(comp, comp->hasBeenEntered());
 
     compartment_ = comp;
-    zone_ = comp ? comp->zone() : NULL;
-    allocator_ = zone_ ? &zone_->allocator : NULL;
+    zone_ = comp ? comp->zone() : nullptr;
+    allocator_ = zone_ ? &zone_->allocator : nullptr;
 }
 
 inline JSScript *
@@ -510,23 +512,23 @@ JSContext::currentScript(jsbytecode **ppc,
                          MaybeAllowCrossCompartment allowCrossCompartment) const
 {
     if (ppc)
-        *ppc = NULL;
+        *ppc = nullptr;
 
     js::Activation *act = mainThread().activation();
     while (act && (act->cx() != this || (act->isJit() && !act->asJit()->isActive())))
         act = act->prev();
 
     if (!act)
-        return NULL;
+        return nullptr;
 
     JS_ASSERT(act->cx() == this);
 
 #ifdef JS_ION
     if (act->isJit()) {
-        JSScript *script = NULL;
+        JSScript *script = nullptr;
         js::jit::GetPcScript(const_cast<JSContext *>(this), &script, ppc);
         if (!allowCrossCompartment && script->compartment() != compartment())
-            return NULL;
+            return nullptr;
         return script;
     }
 #endif
@@ -538,7 +540,7 @@ JSContext::currentScript(jsbytecode **ppc,
 
     JSScript *script = fp->script();
     if (!allowCrossCompartment && script->compartment() != compartment())
-        return NULL;
+        return nullptr;
 
     if (ppc) {
         *ppc = act->asInterpreter()->regs().pc;
@@ -555,10 +557,16 @@ JSNativeThreadSafeWrapper(JSContext *cx, unsigned argc, JS::Value *vp)
 }
 
 template <JSThreadSafeNative threadSafeNative>
-inline js::ParallelResult
+inline bool
 JSParallelNativeThreadSafeWrapper(js::ForkJoinSlice *slice, unsigned argc, JS::Value *vp)
 {
-    return threadSafeNative(slice, argc, vp) ? js::TP_SUCCESS : js::TP_FATAL;
+    return threadSafeNative(slice, argc, vp);
+}
+
+/* static */ inline JSContext *
+js::ExecutionModeTraits<js::SequentialExecution>::toContextType(ExclusiveContext *cx)
+{
+    return cx->asJSContext();
 }
 
 #endif /* jscntxtinlines_h */

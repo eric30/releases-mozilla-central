@@ -7,7 +7,6 @@
 #include "nsIXPConnect.h"
 #include "nsThreadUtils.h"
 #include "nsCxPusher.h"
-#include "jsapi.h"
 #include "jsfriendapi.h"
 #include "js/OldDebugAPI.h"
 #include "mozilla/ModuleUtils.h"
@@ -105,13 +104,13 @@ nsJSInspector::GetLastNestRequestor(JS::Value *out)
 NS_DEFINE_NAMED_CID(JSINSPECTOR_CID);
 
 static const mozilla::Module::CIDEntry kJSInspectorCIDs[] = {
-  { &kJSINSPECTOR_CID, false, NULL, mozilla::jsinspector::nsJSInspectorConstructor },
-  { NULL }
+  { &kJSINSPECTOR_CID, false, nullptr, mozilla::jsinspector::nsJSInspectorConstructor },
+  { nullptr }
 };
 
 static const mozilla::Module::ContractIDEntry kJSInspectorContracts[] = {
   { JSINSPECTOR_CONTRACTID, &kJSINSPECTOR_CID },
-  { NULL }
+  { nullptr }
 };
 
 static const mozilla::Module kJSInspectorModule = {

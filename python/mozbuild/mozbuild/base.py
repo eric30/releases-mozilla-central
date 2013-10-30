@@ -172,15 +172,22 @@ class MozbuildObject(ProcessExecutionMixin):
         # inside an objdir you probably want to perform actions on that objdir,
         # not another one. This prevents accidental usage of the wrong objdir
         # when the current objdir is ambiguous.
-        if topobjdir and config_topobjdir \
-            and not samepath(topobjdir, config_topobjdir) \
-            and not samepath(topobjdir, os.path.join(config_topobjdir, "mozilla")):
+        if topobjdir and config_topobjdir:
+            mozilla_dir = os.path.join(config_topobjdir, 'mozilla')
+            if not samepath(topobjdir, config_topobjdir) \
+                and (os.path.exists(mozilla_dir) and not samepath(topobjdir,
+                mozilla_dir)):
 
-            raise ObjdirMismatchException(topobjdir, config_topobjdir)
+                raise ObjdirMismatchException(topobjdir, config_topobjdir)
 
         topobjdir = topobjdir or config_topobjdir
         if topobjdir:
             topobjdir = os.path.normpath(topobjdir)
+
+            if topsrcdir == topobjdir:
+                raise BadEnvironmentException('The object directory appears '
+                    'to be the same as your source directory (%s). This build '
+                    'configuration is not supported.' % topsrcdir)
 
         # If we can't resolve topobjdir, oh well. The constructor will figure
         # it out via config.guess.
@@ -456,6 +463,13 @@ class MozbuildObject(ProcessExecutionMixin):
         return fn(**params)
 
     def _make_path(self, force_pymake=False):
+        if self._is_windows() and not force_pymake:
+            # Use mozmake if it's available.
+            try:
+                return [which.which('mozmake')]
+            except which.WhichError:
+                pass
+
         if self._is_windows() or force_pymake:
             make_py = os.path.join(self.topsrcdir, 'build', 'pymake',
                 'make.py').replace(os.sep, '/')
@@ -508,12 +522,17 @@ class MachCommandBase(MozbuildObject):
     def __init__(self, context):
         # Attempt to discover topobjdir through environment detection, as it is
         # more reliable than mozconfig when cwd is inside an objdir.
-        dummy = MozbuildObject.from_environment(cwd=context.cwd)
-
-        topsrcdir = dummy.topsrcdir or context.topdir
+        topsrcdir = context.topdir
+        topobjdir = None
+        try:
+            dummy = MozbuildObject.from_environment(cwd=context.cwd)
+            topsrcdir = dummy.topsrcdir
+            topobjdir = dummy._topobjdir
+        except BuildEnvironmentNotFoundException:
+            pass
 
         MozbuildObject.__init__(self, topsrcdir, context.settings,
-            context.log_manager, topobjdir=dummy._topobjdir)
+            context.log_manager, topobjdir=topobjdir)
 
         self._mach_context = context
 

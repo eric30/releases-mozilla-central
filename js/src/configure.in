@@ -2125,15 +2125,6 @@ else
   AC_MSG_RESULT(no)
 fi
 
-MOZ_SIZE_OF_TYPE(JS_BYTES_PER_WORD, void*, 4 8)
-if test "$moz_cv_size_of_JS_BYTES_PER_WORD" -eq "4"; then
-  AC_DEFINE(JS_BITS_PER_WORD_LOG2, 5)
-elif test "$moz_cv_size_of_JS_BYTES_PER_WORD" -eq "8"; then
-  AC_DEFINE(JS_BITS_PER_WORD_LOG2, 6)
-else
-  AC_MSG_ERROR([Unexpected JS_BYTES_PER_WORD])
-fi
-
 MOZ_CHECK_HEADERS(endian.h)
 if test "$ac_cv_header_endian_h" = yes; then
     AC_DEFINE(JS_HAVE_ENDIAN_H)
@@ -2149,69 +2140,7 @@ if test "$ac_cv_header_sys_isa_defs_h" = yes; then
     AC_DEFINE(JS_HAVE_SYS_ISA_DEFS_H)
 fi
 
-dnl Check for uint and uint_t.
-dnl ========================================================
-AC_MSG_CHECKING(for uint)
-AC_CACHE_VAL(ac_cv_uint,
- [AC_TRY_COMPILE([#include <stdio.h>
-                  #include <sys/types.h>],
-                 [uint foo = 0;],
-                 [ac_cv_uint=true],
-                 [ac_cv_uint=false])])
-if test "$ac_cv_uint" = true ; then
-  AC_DEFINE(HAVE_UINT)
-  AC_MSG_RESULT(yes)
-else
-  AC_MSG_RESULT(no)
-fi
-AC_MSG_CHECKING(for uint_t)
-AC_CACHE_VAL(ac_cv_uint_t,
- [AC_TRY_COMPILE([#include <stdio.h>
-                  #include <sys/types.h>],
-                 [uint_t foo = 0;],
-                 [ac_cv_uint_t=true],
-                 [ac_cv_uint_t=false])])
-if test "$ac_cv_uint_t" = true ; then
-  AC_DEFINE(HAVE_UINT_T)
-  AC_MSG_RESULT(yes)
-else
-  AC_MSG_RESULT(no)
-fi
-
-dnl On the gcc trunk (as of 2001-02-09) _GNU_SOURCE, and thus __USE_GNU,
-dnl are defined when compiling C++ but not C.  Since the result of this
-dnl test is used only in C++, do it in C++.
 AC_LANG_CPLUSPLUS
-
-AC_MSG_CHECKING(for uname.domainname)
-AC_CACHE_VAL(ac_cv_have_uname_domainname_field,
-    [AC_TRY_COMPILE([#include <sys/utsname.h>],
-        [ struct utsname *res; char *domain;
-            (void)uname(res);  if (res != 0) { domain = res->domainname; } ],
-        [ac_cv_have_uname_domainname_field=true],
-        [ac_cv_have_uname_domainname_field=false])])
-
-if test "$ac_cv_have_uname_domainname_field" = "true"; then
-    AC_DEFINE(HAVE_UNAME_DOMAINNAME_FIELD)
-    AC_MSG_RESULT(yes)
-else
-    AC_MSG_RESULT(no)
-fi
-
-AC_MSG_CHECKING(for uname.__domainname)
-AC_CACHE_VAL(ac_cv_have_uname_us_domainname_field,
-    [AC_TRY_COMPILE([#include <sys/utsname.h>],
-        [ struct utsname *res; char *domain;
-            (void)uname(res);  if (res != 0) { domain = res->__domainname; } ],
-        [ac_cv_have_uname_us_domainname_field=true],
-        [ac_cv_have_uname_us_domainname_field=false])])
-
-if test "$ac_cv_have_uname_us_domainname_field" = "true"; then
-    AC_DEFINE(HAVE_UNAME_US_DOMAINNAME_FIELD)
-    AC_MSG_RESULT(yes)
-else
-    AC_MSG_RESULT(no)
-fi
 
 MOZ_CXX11
 
@@ -2628,24 +2557,6 @@ dnl    AC_CHECK_LIB(bind, res_ninit, AC_DEFINE(HAVE_RES_NINIT),
 dnl        AC_CHECK_LIB(resolv, res_ninit, AC_DEFINE(HAVE_RES_NINIT)))
 fi
 
-AC_LANG_CPLUSPLUS
-AC_CACHE_CHECK(
-    [for gnu_get_libc_version()],
-    ac_cv_func_gnu_get_libc_version,
-    [AC_TRY_LINK([
-        #ifdef HAVE_GNU_LIBC_VERSION_H
-        #include <gnu/libc-version.h>
-        #endif
-        ],
-        [const char *glibc_version = gnu_get_libc_version();],
-        [ac_cv_func_gnu_get_libc_version=yes],
-        [ac_cv_func_gnu_get_libc_version=no]
-        )]
-    )
-
-if test "$ac_cv_func_gnu_get_libc_version" = "yes"; then
-    AC_DEFINE(HAVE_GNU_GET_LIBC_VERSION)
-fi
 AC_LANG_C
 
 dnl **********************
@@ -3291,29 +3202,6 @@ if test "$NS_TRACE_MALLOC"; then
 fi
 
 if test "$MOZ_MEMORY"; then
-
-  dnl Don't try to run compiler tests on Windows
-  if test "$OS_ARCH" = "WINNT"; then
-    if test -z "$HAVE_64BIT_OS"; then
-      AC_DEFINE_UNQUOTED([MOZ_MEMORY_SIZEOF_PTR_2POW], 2)
-    else
-      AC_DEFINE_UNQUOTED([MOZ_MEMORY_SIZEOF_PTR_2POW], 3)
-    fi
-  else
-    AC_CHECK_SIZEOF([int *], [4])
-    case "${ac_cv_sizeof_int_p}" in
-    4)
-      AC_DEFINE_UNQUOTED([MOZ_MEMORY_SIZEOF_PTR_2POW], 2)
-      ;;
-    8)
-      AC_DEFINE_UNQUOTED([MOZ_MEMORY_SIZEOF_PTR_2POW], 3)
-      ;;
-    *)
-      AC_MSG_ERROR([Unexpected pointer size])
-      ;;
-    esac
-  fi
-
   AC_DEFINE(MOZ_MEMORY)
   if test "x$MOZ_DEBUG" = "x1"; then
     AC_DEFINE(MOZ_MEMORY_DEBUG)
@@ -4058,6 +3946,14 @@ COMPILE_CXXFLAGS=`echo \
 	$_DEPEND_CFLAGS \
     $COMPILE_CXXFLAGS`
 
+HOST_CFLAGS=`echo \
+    $HOST_CFLAGS \
+    $_DEPEND_CFLAGS`
+
+HOST_CXXFLAGS=`echo \
+    $HOST_CXXFLAGS \
+    $_DEPEND_CFLAGS`
+
 AC_SUBST(NSPR_CFLAGS)
 AC_SUBST(NSPR_LIBS)
 AC_SUBST(MOZ_NATIVE_NSPR)
@@ -4188,11 +4084,14 @@ elif test "$OS_ARCH" != "WINNT" -a "$OS_ARCH" != "OS2"; then
   AC_DEFINE(XP_UNIX)
 fi
 
-AC_ARG_ENABLE(threadsafe,
-    [  --enable-threadsafe     Enable support for multiple threads.],
-    [if test "x$enableval" = "xyes"; then
-        AC_DEFINE(JS_THREADSAFE)
-    fi],)
+JS_THREADSAFE=1
+MOZ_ARG_DISABLE_BOOL(threadsafe,
+[  --disable-threadsafe    Disable support for multiple threads.],
+    JS_THREADSAFE= ,
+    JS_THREADSAFE=1 )
+if test -n "$JS_THREADSAFE"; then
+    AC_DEFINE(JS_THREADSAFE)
+fi
 
 if test "$MOZ_DEBUG"; then
     AC_DEFINE(MOZ_REFLOW_PERF)
@@ -4300,6 +4199,7 @@ if test -n "$ENABLE_INTL_API" -a -z "$MOZ_NATIVE_ICU"; then
     ICU_CPPFLAGS="$ICU_CPPFLAGS -DUCONFIG_NO_REGULAR_EXPRESSIONS"
     ICU_CPPFLAGS="$ICU_CPPFLAGS -DUCONFIG_NO_BREAK_ITERATION"
 
+    ICU_SRCDIR=""
     # Set OS dependent options for ICU
     case "$OS_TARGET" in
         Darwin)
@@ -4310,6 +4210,7 @@ if test -n "$ENABLE_INTL_API" -a -z "$MOZ_NATIVE_ICU"; then
             ;;
         WINNT)
             ICU_TARGET=MSYS/MSVC
+            ICU_SRCDIR="--srcdir=$(cd $srcdir/../../intl/icu/source; pwd -W)"
             ;;
         DragonFly|FreeBSD|NetBSD|OpenBSD)
             ICU_TARGET=BSD
@@ -4343,6 +4244,8 @@ if test -n "$ENABLE_INTL_API" -a -z "$MOZ_NATIVE_ICU"; then
             $ICU_BUILD_OPTS \
             $ICU_TARGET \
             $ICU_LINK_OPTS \
+dnl Shell quoting is fun.
+            ${ICU_SRCDIR+"$ICU_SRCDIR"} \
             --enable-extras=no --enable-icuio=no  --enable-layout=no \
             --enable-tests=no --enable-samples=no || exit 1
      ])

@@ -440,9 +440,6 @@ CycleCollectedJSRuntime::CycleCollectedJSRuntime(uint32_t aMaxbytes,
     mJSZoneCycleCollectorGlobal(sJSZoneCycleCollectorGlobal),
     mJSRuntime(nullptr),
     mJSHolders(512)
-#ifdef DEBUG
-  , mObjectToUnlink(nullptr)
-#endif
 {
   mJSRuntime = JS_NewRuntime(aMaxbytes, aUseHelperThreads);
   if (!mJSRuntime) {
@@ -488,7 +485,7 @@ CycleCollectedJSRuntime::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 {
   size_t n = 0;
 
-  // NULL for the second arg;  we're not measuring anything hanging off the
+  // nullptr for the second arg;  we're not measuring anything hanging off the
   // entries in mJSHolders.
   n += mJSHolders.SizeOfExcludingThis(nullptr, aMallocSizeOf);
 

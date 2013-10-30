@@ -20,6 +20,7 @@ import org.mozilla.gecko.home.BrowserSearch;
 import org.mozilla.gecko.home.HomePager;
 import org.mozilla.gecko.home.HomePager.OnUrlOpenListener;
 import org.mozilla.gecko.menu.GeckoMenu;
+import org.mozilla.gecko.prompts.Prompt;
 import org.mozilla.gecko.util.Clipboard;
 import org.mozilla.gecko.util.GamepadUtils;
 import org.mozilla.gecko.util.HardwareUtils;
@@ -52,11 +53,11 @@ import android.nfc.NfcAdapter;
 import android.nfc.NfcEvent;
 import android.os.Build;
 import android.os.Bundle;
+import android.support.v4.app.FragmentManager;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.InputDevice;
 import android.view.KeyEvent;
-import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
@@ -340,6 +341,26 @@ abstract public class BrowserApp extends GeckoApp
         });
     }
 
+    void handleReaderListStatusRequest(final String url) {
+        ThreadUtils.postToBackgroundThread(new Runnable() {
+            @Override
+            public void run() {
+                final int inReadingList = BrowserDB.isReadingListItem(getContentResolver(), url) ? 1 : 0;
+
+                final JSONObject json = new JSONObject();
+                try {
+                    json.put("url", url);
+                    json.put("inReadingList", inReadingList);
+                } catch (JSONException e) {
+                    Log.e(LOGTAG, "JSON error - failed to return inReadingList status", e);
+                    return;
+                }
+
+                GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Reader:ListStatusReturn", json.toString()));
+            }
+        });
+    }
+
     void handleReaderAdded(int result, final String title, final String url) {
         if (result != READER_ADD_SUCCESS) {
             if (result == READER_ADD_FAILED) {
@@ -485,7 +506,7 @@ abstract public class BrowserApp extends GeckoApp
         registerEventListener("Updater:Launch");
         registerEventListener("Reader:GoToReadingList");
 
-        Distribution.init(this, getPackageResourcePath());
+        Distribution.init(this);
         JavaAddonManager.getInstance().init(getApplicationContext());
         mSharedPreferencesHelper = new SharedPreferencesHelper(getApplicationContext());
         mOrderedBroadcastHelper = new OrderedBroadcastHelper(getApplicationContext());
@@ -596,7 +617,7 @@ abstract public class BrowserApp extends GeckoApp
                     String title = tab.getDisplayTitle();
                     Bitmap favicon = tab.getFavicon();
                     if (url != null && title != null) {
-                        GeckoAppShell.createShortcut(title, url, url, favicon == null ? null : favicon, "");
+                        GeckoAppShell.createShortcut(title, url, url, favicon, "");
                     }
                 }
             }
@@ -709,11 +730,11 @@ abstract public class BrowserApp extends GeckoApp
                     return true;
                 }
 
-                Favicons.loadFavicon(url, tab.getFaviconURL(), 0,
+                Favicons.getFaviconForSize(url, tab.getFaviconURL(), Integer.MAX_VALUE, LoadFaviconTask.FLAG_PERSIST,
                 new OnFaviconLoadedListener() {
                     @Override
-                    public void onFaviconLoaded(String url, Bitmap favicon) {
-                        GeckoAppShell.createShortcut(title, url, url, favicon == null ? null : favicon, "");
+                    public void onFaviconLoaded(String pageUrl, String faviconURL, Bitmap favicon) {
+                        GeckoAppShell.createShortcut(title, url, url, favicon, "");
                     }
                 });
             }
@@ -1104,6 +1125,8 @@ abstract public class BrowserApp extends GeckoApp
                 Telemetry.HistogramAdd("FENNEC_THUMBNAILS_COUNT", BrowserDB.getCount(getContentResolver(), "thumbnails"));
             } else if (event.equals("Reader:ListCountRequest")) {
                 handleReaderListCountRequest();
+            } else if (event.equals("Reader:ListStatusRequest")) {
+                handleReaderListStatusRequest(message.getString("url"));
             } else if (event.equals("Reader:Added")) {
                 final int result = message.getInt("result");
                 final String title = message.getString("title");
@@ -1273,13 +1296,13 @@ abstract public class BrowserApp extends GeckoApp
         }
 
         final Tabs tabs = Tabs.getInstance();
-        final int tabId = tabs.getTabIdForUrl(url);
+        final int tabId = tabs.getTabIdForUrl(url, tabs.getSelectedTab().isPrivate());
         if (tabId < 0) {
             return false;
         }
 
         // If this tab is already selected, just hide the home pager.
-        if (tabs.isSelectedTab(tabs.getTab(tabId))) {
+        if (tabs.isSelectedTabId(tabId)) {
             hideHomePager();
         } else {
             tabs.selectTab(tabId);
@@ -1329,37 +1352,36 @@ abstract public class BrowserApp extends GeckoApp
     private void loadFavicon(final Tab tab) {
         maybeCancelFaviconLoad(tab);
 
-        int flags = LoadFaviconTask.FLAG_SCALE | ( (tab.isPrivate() || tab.getErrorType() != Tab.ErrorType.NONE) ? 0 : LoadFaviconTask.FLAG_PERSIST);
-        int id = Favicons.loadFavicon(tab.getURL(), tab.getFaviconURL(), flags,
-                        new OnFaviconLoadedListener() {
+        final int tabFaviconSize = getResources().getDimensionPixelSize(R.dimen.browser_toolbar_favicon_size);
 
-            @Override
-            public void onFaviconLoaded(String pageUrl, Bitmap favicon) {
-                // Leave favicon UI untouched if we failed to load the image
-                // for some reason.
-                if (favicon == null)
-                    return;
+        int flags = (tab.isPrivate() || tab.getErrorType() != Tab.ErrorType.NONE) ? 0 : LoadFaviconTask.FLAG_PERSIST;
+        int id = Favicons.getFaviconForSize(tab.getURL(), tab.getFaviconURL(), tabFaviconSize, flags,
+            new OnFaviconLoadedListener() {
+                @Override
+                public void onFaviconLoaded(String pageUrl, String faviconURL, Bitmap favicon) {
+                    // If we failed to load a favicon, we use the default favicon instead.
+                    if (favicon == null) {
+                        favicon = Favicons.sDefaultFavicon;
+                    }
 
-                // The tab might be pointing to another URL by the time the
-                // favicon is finally loaded, in which case we simply ignore it.
-                if (!tab.getURL().equals(pageUrl))
-                    return;
+                    // The tab might be pointing to another URL by the time the
+                    // favicon is finally loaded, in which case we simply ignore it.
+                    // See also: Bug 920331.
+                    if (!tab.getURL().equals(pageUrl)) {
+                        return;
+                    }
 
-                tab.updateFavicon(favicon);
-                tab.setFaviconLoadId(Favicons.NOT_LOADING);
-
-                Tabs.getInstance().notifyListeners(tab, Tabs.TabEvents.FAVICON);
-            }
-        });
+                    tab.updateFavicon(favicon);
+                    tab.setFaviconLoadId(Favicons.NOT_LOADING);
+                    Tabs.getInstance().notifyListeners(tab, Tabs.TabEvents.FAVICON);
+                }
+            });
 
         tab.setFaviconLoadId(id);
     }
 
     private void maybeCancelFaviconLoad(Tab tab) {
         int faviconLoadId = tab.getFaviconLoadId();
-
-        if (faviconLoadId == Favicons.NOT_LOADING)
-            return;
 
         // Cancel pending favicon load task
         Favicons.cancelFaviconLoad(faviconLoadId);
@@ -1582,8 +1604,16 @@ abstract public class BrowserApp extends GeckoApp
 
         mBrowserSearchContainer.setVisibility(View.VISIBLE);
 
-        getSupportFragmentManager().beginTransaction()
-                .add(R.id.search_container, mBrowserSearch, BROWSER_SEARCH_TAG).commitAllowingStateLoss();
+        final FragmentManager fm = getSupportFragmentManager();
+
+        // In certain situations, showBrowserSearch() can be called immediately after hideBrowserSearch()
+        // (see bug 925012). Because of an Android bug (http://code.google.com/p/android/issues/detail?id=61179),
+        // calling FragmentTransaction#add immediately after FragmentTransaction#remove won't add the fragment's
+        // view to the layout. Calling FragmentManager#executePendingTransactions before re-adding the fragment
+        // prevents this issue.
+        fm.executePendingTransactions();
+
+        fm.beginTransaction().add(R.id.search_container, mBrowserSearch, BROWSER_SEARCH_TAG).commitAllowingStateLoss();
         mBrowserSearch.setUserVisibleHint(true);
     }
 
@@ -1755,13 +1785,14 @@ abstract public class BrowserApp extends GeckoApp
         // Set attribute for the menu item in cache, if available
         if (mAddonMenuItemsCache != null && !mAddonMenuItemsCache.isEmpty()) {
             for (MenuItemInfo item : mAddonMenuItemsCache) {
-                 if (item.id == id) {
-                     item.checkable = options.optBoolean("checkable", item.checkable);
-                     item.checked = options.optBoolean("checked", item.checked);
-                     item.enabled = options.optBoolean("enabled", item.enabled);
-                     item.visible = options.optBoolean("visible", item.visible);
-                     break;
-                 }
+                if (item.id == id) {
+                    item.label = options.optString("name", item.label);
+                    item.checkable = options.optBoolean("checkable", item.checkable);
+                    item.checked = options.optBoolean("checked", item.checked);
+                    item.enabled = options.optBoolean("enabled", item.enabled);
+                    item.visible = options.optBoolean("visible", item.visible);
+                    break;
+                }
             }
         }
 
@@ -1770,6 +1801,7 @@ abstract public class BrowserApp extends GeckoApp
 
         MenuItem menuItem = mMenu.findItem(id);
         if (menuItem != null) {
+            menuItem.setTitle(options.optString("name", menuItem.getTitle().toString()));
             menuItem.setCheckable(options.optBoolean("checkable", menuItem.isCheckable()));
             menuItem.setChecked(options.optBoolean("checked", menuItem.isChecked()));
             menuItem.setEnabled(options.optBoolean("enabled", menuItem.isEnabled()));

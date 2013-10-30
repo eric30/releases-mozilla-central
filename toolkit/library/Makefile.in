@@ -82,14 +82,16 @@ STATIC_LIBS += \
   $(NULL)
 
 ifdef MOZ_CONTENT_SANDBOX #{
+ifeq ($(OS_ARCH),Linux)
 STATIC_LIBS += sandbox_s
+endif
 endif #}
 
 ifdef MOZ_B2G_RIL #{
 STATIC_LIBS += mozril_s
 endif #}
 
-ifdef MOZ_B2G_BT #{
+ifdef MOZ_B2G_BT_BLUEZ #{
 STATIC_LIBS += mozdbus_s
 ifeq (gonk,$(MOZ_WIDGET_TOOLKIT))
 OS_LIBS += -ldbus
@@ -97,7 +99,7 @@ endif
 endif #}
 
 ifneq ($(strip $(MOZ_B2G_RIL)$(MOZ_B2G_BT)),) #{
-STATIC_LIBS += mozipcunixsocket_s
+STATIC_LIBS += mozipcunixsocket_s mozkeystore_s
 endif #}
 
 ifeq (gonk,$(MOZ_WIDGET_TOOLKIT))
@@ -415,21 +417,20 @@ ifdef MOZ_PEERCONNECTION
 COMPONENT_LIBS += peerconnection
 endif
 ifdef MOZ_WEBRTC_SIGNALING
-EXTRA_DSO_LDOPTS += \
+SHARED_LIBRARY_LIBS += \
   $(DEPTH)/media/mtransport/build/$(LIB_PREFIX)mtransport.$(LIB_SUFFIX) \
   $(DEPTH)/media/webrtc/signaling/signaling_ecc/$(LIB_PREFIX)ecc.$(LIB_SUFFIX) \
   $(DEPTH)/media/webrtc/signaling/signaling_sipcc/$(LIB_PREFIX)sipcc.$(LIB_SUFFIX) \
   $(NULL)
 endif
-ifdef MOZ_WEBRTC_IN_LIBXUL
-include $(topsrcdir)/media/webrtc/shared_libs.mk
-EXTRA_DSO_LDOPTS += $(WEBRTC_LIBS)
+
+SHARED_LIBRARY_LIBS += $(call EXPAND_LIBNAME_PATH,webrtc,$(DEPTH)/layout/media/webrtc)
+
 ifeq (WINNT,$(OS_TARGET))
 EXTRA_DSO_LDOPTS += \
   -LIBPATH:"$(MOZ_DIRECTX_SDK_PATH)/lib/$(MOZ_DIRECTX_SDK_CPU_SUFFIX)" \
   $(NULL)
 OS_LIBS += $(call EXPAND_LIBNAME,secur32 crypt32 iphlpapi strmiids dmoguids wmcodecdspuuid amstrmid msdmo wininet)
-endif
 endif
 endif
 
@@ -469,6 +470,10 @@ OS_LIBS += \
   -lgui \
   $(DEPTH)/widget/gonk/nativewindow/$(LIB_PREFIX)nativewindow.$(LIB_SUFFIX) \
   $(NULL)
+endif
+
+ifdef MOZ_RTSP
+OS_LIBS += -lstagefright_foundation
 endif
 
 ifdef MOZ_WMF
@@ -554,7 +559,7 @@ EXTRA_DSO_LDOPTS += -Wl,--warn-unresolved-symbols
 endif
 
 ifeq ($(OS_ARCH),WINNT)
-OS_LIBS += $(call EXPAND_LIBNAME,shell32 ole32 version winspool comdlg32 imm32 msimg32 shlwapi psapi ws2_32 dbghelp rasapi32 rasdlg iphlpapi uxtheme setupapi secur32 sensorsapi portabledeviceguids windowscodecs wininet)
+OS_LIBS += $(call EXPAND_LIBNAME,shell32 ole32 version winspool comdlg32 imm32 msimg32 shlwapi psapi ws2_32 dbghelp rasapi32 rasdlg iphlpapi uxtheme setupapi secur32 sensorsapi portabledeviceguids windowscodecs wininet wbemuuid)
 ifdef ACCESSIBILITY
 OS_LIBS += $(call EXPAND_LIBNAME,oleacc)
 endif
@@ -589,7 +594,7 @@ endif
 ifdef ACCESSIBILITY
 EXTRA_DSO_LDOPTS += -DELAYLOAD:oleacc.dll
 endif
-ifdef MOZ_WEBRTC_IN_LIBXUL
+ifdef MOZ_WEBRTC
 EXTRA_DSO_LDOPTS += -DELAYLOAD:msdmo.dll
 endif
 endif
@@ -698,6 +703,7 @@ ifdef LINK_GTEST
 COMPONENT_LIBS += \
   gtest \
   gfxtest \
+  ssltest \
   $(NULL)
 endif
 

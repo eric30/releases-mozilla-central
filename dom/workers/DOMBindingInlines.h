@@ -6,17 +6,19 @@
 #ifndef mozilla_dom_workers_dombindinginlines_h__
 #define mozilla_dom_workers_dombindinginlines_h__
 
+#include "jsfriendapi.h"
 #include "mozilla/dom/JSSlots.h"
+#include "mozilla/dom/URLBinding.h"
+#include "mozilla/dom/WorkerMessagePortBinding.h"
 #include "mozilla/dom/XMLHttpRequestBinding.h"
 #include "mozilla/dom/XMLHttpRequestUploadBinding.h"
-#include "mozilla/dom/URLBinding.h"
-#include "jsfriendapi.h"
 
 BEGIN_WORKERS_NAMESPACE
 
+class URL;
+class WorkerMessagePort;
 class XMLHttpRequest;
 class XMLHttpRequestUpload;
-class URL;
 
 namespace {
 
@@ -45,9 +47,10 @@ struct WrapPrototypeTraits
     }                                                                          \
   };
 
+SPECIALIZE_PROTO_TRAITS(URL)
+SPECIALIZE_PROTO_TRAITS(WorkerMessagePort)
 SPECIALIZE_PROTO_TRAITS(XMLHttpRequest)
 SPECIALIZE_PROTO_TRAITS(XMLHttpRequestUpload)
-SPECIALIZE_PROTO_TRAITS(URL)
 
 #undef SPECIALIZE_PROTO_TRAITS
 
@@ -62,20 +65,20 @@ Wrap(JSContext* aCx, JSObject* aGlobal, nsRefPtr<T>& aConcreteObject)
   if (!aGlobal) {
     aGlobal = JS::CurrentGlobalOrNull(aCx);
     if (!aGlobal) {
-      return NULL;
+      return nullptr;
     }
   }
 
   JS::Rooted<JSObject*> global(aCx, aGlobal);
   JSObject* proto = WrapPrototypeTraits<T>::GetProtoObject(aCx, global);
   if (!proto) {
-    return NULL;
+    return nullptr;
   }
 
   JSObject* wrapper =
     JS_NewObject(aCx, WrapPrototypeTraits<T>::GetJSClass(), proto, global);
   if (!wrapper) {
-    return NULL;
+    return nullptr;
   }
 
   js::SetReservedSlot(wrapper, DOM_OBJECT_SLOT,

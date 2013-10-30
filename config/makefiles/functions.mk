@@ -16,7 +16,19 @@ $(error Do not include functions.mk twice!)
 endif
 INCLUDED_FUNCTIONS_MK = 1
 
-core_abspath = $(if $(findstring :,$(1)),$(1),$(if $(filter /%,$(1)),$(1),$(CURDIR)/$(1)))
-core_realpath = $(if $(realpath $(1)),$(realpath $(1)),$(call core_abspath,$(1)))
+core_abspath = $(error core_abspath is unsupported, use $$(abspath) instead)
+core_realpath = $(error core_realpath is unsupported)
 
-core_winabspath = $(firstword $(subst /, ,$(call core_abspath,$(1)))):$(subst $(space),,$(patsubst %,\\%,$(wordlist 2,$(words $(subst /, ,$(call core_abspath,$(1)))), $(strip $(subst /, ,$(call core_abspath,$(1)))))))
+core_winabspath = $(error core_winabspath is unsupported)
+
+# Run a named Python build action. The first argument is the name of the build
+# action. The second argument are the arguments to pass to the action (space
+# delimited arguments). e.g.
+#
+#   libs::
+#       $(call py_action,purge_manifests,_build_manifests/purge/foo.manifest)
+ifdef .PYMAKE
+py_action = %mozbuild.action.$(1) main $(2)
+else
+py_action = $(PYTHON) -m mozbuild.action.$(1) $(2)
+endif

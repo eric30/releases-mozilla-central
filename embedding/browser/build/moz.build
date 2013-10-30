@@ -6,7 +6,7 @@
 
 MODULE = 'webbrwsr'
 
-CPP_SOURCES += [
+SOURCES += [
     'nsWebBrowserModule.cpp',
 ]
 
@@ -15,4 +15,6 @@ LIBRARY_NAME = 'webbrwsr'
 FAIL_ON_WARNINGS = True
 
 LIBXUL_LIBRARY = True
+
+EXPORT_LIBRARY = True
 

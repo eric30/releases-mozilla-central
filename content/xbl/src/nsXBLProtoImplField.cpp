@@ -345,7 +345,7 @@ nsXBLProtoImplField::InstallAccessors(JSContext* aCx,
   // First, enter the XBL scope, and compile the functions there.
   JSAutoCompartment ac(aCx, scopeObject);
   JS::Rooted<JS::Value> wrappedClassObj(aCx, JS::ObjectValue(*aTargetClassObject));
-  if (!JS_WrapValue(aCx, wrappedClassObj.address()) || !JS_WrapId(aCx, id.address()))
+  if (!JS_WrapValue(aCx, &wrappedClassObj) || !JS_WrapId(aCx, id.address()))
     return NS_ERROR_OUT_OF_MEMORY;
 
   JS::Rooted<JSObject*> get(aCx,
@@ -371,7 +371,7 @@ nsXBLProtoImplField::InstallAccessors(JSContext* aCx,
   // Now, re-enter the class object's scope, wrap the getters/setters, and define
   // them there.
   JSAutoCompartment ac2(aCx, aTargetClassObject);
-  if (!JS_WrapObject(aCx, get.address()) || !JS_WrapObject(aCx, set.address()) ||
+  if (!JS_WrapObject(aCx, &get) || !JS_WrapObject(aCx, &set) ||
       !JS_WrapId(aCx, id.address()))
   {
     return NS_ERROR_OUT_OF_MEMORY;
@@ -424,7 +424,7 @@ nsXBLProtoImplField::InstallField(nsIScriptContext* aContext,
   JSAutoCompartment ac(cx, scopeObject);
 
   JS::Rooted<JSObject*> wrappedNode(cx, aBoundNode);
-  if (!JS_WrapObject(cx, wrappedNode.address()))
+  if (!JS_WrapObject(cx, &wrappedNode))
       return NS_ERROR_OUT_OF_MEMORY;
 
   JS::Rooted<JS::Value> result(cx);
@@ -445,9 +445,9 @@ nsXBLProtoImplField::InstallField(nsIScriptContext* aContext,
   // the bound node.
   JSAutoCompartment ac2(cx, aBoundNode);
   nsDependentString name(mName);
-  if (!JS_WrapValue(cx, result.address()) ||
+  if (!JS_WrapValue(cx, &result) ||
       !::JS_DefineUCProperty(cx, aBoundNode,
-                             reinterpret_cast<const jschar*>(mName), 
+                             reinterpret_cast<const jschar*>(mName),
                              name.Length(), result, nullptr, nullptr,
                              mJSAttributes)) {
     return NS_ERROR_OUT_OF_MEMORY;

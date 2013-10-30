@@ -131,8 +131,8 @@ extern "C" {
     GWorldPtr *   offscreenGWorld,
     UInt32        PixelFormat,
     const Rect *  boundsRect,
-    CTabHandle    cTable,                /* can be NULL */
-    GDHandle      aGDevice,              /* can be NULL */
+    CTabHandle    cTable,                /* can be nullptr */
+    GDHandle      aGDevice,              /* can be nullptr */
     GWorldFlags   flags,
     Ptr           newBuffer,
     SInt32        rowBytes)
@@ -145,7 +145,6 @@ extern "C" {
 #endif /* #if defined(XP_MACOSX) && !defined(__LP64__) */
 
 using namespace mozilla;
-using namespace mozilla::plugins;
 using namespace mozilla::layers;
 
 class PluginBackgroundSink : public ReadbackSink {
@@ -1348,7 +1347,8 @@ nsObjectFrame::PrintPlugin(nsRenderingContext& aRenderingContext,
     return;
   }
   GWorldPtr gWorld;
-  if (::NewGWorldFromPtr(&gWorld, k32ARGBPixelFormat, &gwBounds, NULL, NULL, 0,
+  if (::NewGWorldFromPtr(&gWorld, k32ARGBPixelFormat, &gwBounds,
+                         nullptr, nullptr, 0,
                          buffer.Elements(), window.width * 4) != noErr) {
     ::CGContextRelease(cgBuffer);
     nativeDraw.EndNativeDrawing();
@@ -1742,7 +1742,7 @@ nsObjectFrame::PaintPlugin(nsDisplayListBuilder* aBuilder,
 
       // this rect is used only in the CoreGraphics drawing model
       gfxRect tmpRect(0, 0, 0, 0);
-      mInstanceOwner->Paint(tmpRect, NULL);
+      mInstanceOwner->Paint(tmpRect, nullptr);
     }
   }
 #elif defined(MOZ_X11)
@@ -1790,7 +1790,7 @@ nsObjectFrame::PaintPlugin(nsDisplayListBuilder* aBuilder,
         // double pass render. If this plugin isn't oop, the register window message
         // will be ignored.
         NPEvent pluginEvent;
-        pluginEvent.event = DoublePassRenderingEvent();
+        pluginEvent.event = plugins::DoublePassRenderingEvent();
         pluginEvent.wParam = 0;
         pluginEvent.lParam = 0;
         if (pluginEvent.event)

@@ -11,6 +11,7 @@
 #include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "Latency.h"
+#include "mozilla/StaticMutex.h"
 
 namespace soundtouch {
 class SoundTouch;
@@ -92,6 +93,10 @@ class AudioClock
 class AudioStream
 {
 public:
+  enum LatencyRequest {
+    HighLatency,
+    LowLatency
+  };
   AudioStream();
 
   virtual ~AudioStream();
@@ -112,11 +117,16 @@ public:
   // Returns the maximum number of channels supported by the audio hardware.
   static int MaxNumberOfChannels();
 
+  // Returns the samplerate the systems prefer, because it is the
+  // samplerate the hardware/mixer supports.
+  static int PreferredSampleRate();
+
   // Initialize the audio stream. aNumChannels is the number of audio
   // channels (1 for mono, 2 for stereo, etc) and aRate is the sample rate
   // (22050Hz, 44100Hz, etc).
   virtual nsresult Init(int32_t aNumChannels, int32_t aRate,
-                        const dom::AudioChannelType aAudioStreamType) = 0;
+                        const dom::AudioChannelType aAudioStreamType,
+                        LatencyRequest aLatencyRequest) = 0;
 
   // Closes the stream. All future use of the stream is an error.
   virtual void Shutdown() = 0;
@@ -124,8 +134,9 @@ public:
   // Write audio data to the audio hardware.  aBuf is an array of AudioDataValues
   // AudioDataValue of length aFrames*mChannels.  If aFrames is larger
   // than the result of Available(), the write will block until sufficient
-  // buffer space is available.
-  virtual nsresult Write(const mozilla::AudioDataValue* aBuf, uint32_t aFrames) = 0;
+  // buffer space is available.  aTime is the time in ms associated with the first sample
+  // for latency calculations
+  virtual nsresult Write(const mozilla::AudioDataValue* aBuf, uint32_t aFrames, TimeStamp *aTime = nullptr) = 0;
 
   // Return the number of audio frames that can be written without blocking.
   virtual uint32_t Available() = 0;
@@ -178,6 +189,11 @@ public:
   virtual nsresult SetPreservesPitch(bool aPreservesPitch);
 
 protected:
+  // This mutex protects the mPreferedSamplerate member below.
+  static StaticMutex mMutex;
+  // Prefered samplerate, in Hz (characteristic of the
+  // hardware/mixer/platform/API used).
+  static uint32_t mPreferredSampleRate;
   // Input rate in Hz (characteristic of the media being played)
   int mInRate;
   // Output rate in Hz (characteristic of the playback rate)
@@ -188,6 +204,19 @@ protected:
   AudioClock mAudioClock;
   nsAutoPtr<soundtouch::SoundTouch> mTimeStretcher;
   nsRefPtr<AsyncLatencyLogger> mLatencyLog;
+
+  // copy of Latency logger's starting time for offset calculations
+  TimeStamp mStartTime;
+  // Where in the current mInserts[0] block cubeb has read to
+  int64_t mReadPoint;
+  // Keep track of each inserted block of samples and the time it was inserted
+  // so we can estimate the clock time for a specific sample's insertion (for when
+  // we send data to cubeb).  Blocks are aged out as needed.
+  struct Inserts {
+    int64_t mTimeMs;
+    int64_t mFrames;
+  };
+  nsAutoTArray<Inserts,8> mInserts;
 };
 
 } // namespace mozilla

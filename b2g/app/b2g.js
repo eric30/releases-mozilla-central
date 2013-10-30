@@ -96,7 +96,6 @@ pref("browser.helperApps.deleteTempFileOnExit", false);
 /* password manager */
 pref("signon.rememberSignons", true);
 pref("signon.expireMasterPassword", false);
-pref("signon.SignonFileName", "signons.txt");
 
 /* autocomplete */
 pref("browser.formfill.enable", true);
@@ -324,7 +323,6 @@ pref("browser.safebrowsing.provider.0.reportMalwareURL", "http://{moz:locale}.ma
 pref("browser.safebrowsing.provider.0.reportMalwareErrorURL", "http://{moz:locale}.malware-error.mozilla.com/?hl={moz:locale}");
 
 // FAQ URLs
-pref("browser.safebrowsing.warning.infoURL", "http://www.mozilla.com/%LOCALE%/%APP%/phishing-protection/");
 pref("browser.geolocation.warning.infoURL", "http://www.mozilla.com/%LOCALE%/%APP%/geolocation/");
 
 // Name of the about: page contributed by safebrowsing to handle display of error
@@ -362,6 +360,7 @@ pref("browser.dom.window.dump.enabled", false);
 
 // Default Content Security Policy to apply to privileged and certified apps
 pref("security.apps.privileged.CSP.default", "default-src *; script-src 'self'; object-src 'none'; style-src 'self' 'unsafe-inline'");
+// If you change this CSP, make sure to update the fast path in nsCSPService.cpp
 pref("security.apps.certified.CSP.default", "default-src *; script-src 'self'; object-src 'none'; style-src 'self'");
 
 // Temporarily force-enable GL compositing.  This is default-disabled
@@ -390,9 +389,6 @@ pref("dom.ipc.browser_frames.oop_by_default", false);
 
 // SMS/MMS
 pref("dom.sms.enabled", true);
-pref("dom.sms.strict7BitEncoding", false); // Disabled by default.
-pref("dom.sms.requestStatusReport", true); // Enabled by default.
-pref("dom.mms.requestStatusReport", true); // Enabled by default.
 
 //The waiting time in network manager.
 pref("network.gonk.ms-release-mms-connection", 30000);
@@ -436,7 +432,6 @@ pref("services.push.udp.wakeupEnabled", true);
 // NetworkStats
 #ifdef MOZ_B2G_RIL
 pref("dom.mozNetworkStats.enabled", true);
-pref("ril.cellbroadcast.disabled", false);
 pref("dom.webapps.firstRunWithSIM", true);
 #endif
 
@@ -561,6 +556,7 @@ pref("dom.webapps.useCurrentProfile", true);
 pref("dom.sysmsg.enabled", true);
 pref("media.plugins.enabled", false);
 pref("media.omx.enabled", true);
+pref("media.rtsp.enabled", true);
 
 // Disable printing (particularly, window.print())
 pref("dom.disable_window_print", true);
@@ -731,11 +727,8 @@ pref("font.size.inflation.disabledInMasterProcess", true);
 // consumption when applications are sent to the background.
 pref("memory.free_dirty_pages", true);
 
-// UAProfile settings
-pref("wap.UAProf.url", "");
-pref("wap.UAProf.tagname", "x-wap-profile");
-
 pref("layout.imagevisibility.enabled", false);
+pref("layout.imagevisibility.enabled_for_browser_elements_only", true);
 pref("layout.imagevisibility.numscrollportwidths", 1);
 pref("layout.imagevisibility.numscrollportheights", 1);
 
@@ -757,7 +750,7 @@ pref("memory_info_dumper.watch_fifo.directory", "/data/local");
 pref("general.useragent.enable_overrides", true);
 // See ua-update.json.in for the packaged UA override list
 pref("general.useragent.updates.enabled", true);
-pref("general.useragent.updates.url", "");
+pref("general.useragent.updates.url", "https://dynamicua.cdn.mozilla.net/0/%APP_ID%");
 pref("general.useragent.updates.interval", 604800); // 1 week
 pref("general.useragent.updates.retry", 86400); // 1 day
 
@@ -795,11 +788,15 @@ pref("network.sntp.timeout", 30); // In seconds.
 // Enable promise
 pref("dom.promise.enabled", false);
 
-// DOM Inter-App Communication API.
-#ifdef MOZ_WIDGET_GONK
-// Enable this only for gonk-specific build but not for desktop build.
-pref("dom.inter-app-communication-api.enabled", true);
+// Enable dataStore
+#ifdef RELEASE_BUILD
+pref("dom.datastore.enabled", false);
+#else
+pref("dom.datastore.enabled", true);
 #endif
+
+// DOM Inter-App Communication API.
+pref("dom.inter-app-communication-api.enabled", true);
 
 // Allow ADB to run for this many hours before disabling
 // (only applies when marionette is disabled)
@@ -818,8 +815,27 @@ pref("devtools.debugger.unix-domain-socket", "/data/local/debugger-socket");
 pref("gfx.canvas.azure.backends", "skia");
 pref("gfx.canvas.azure.accelerated", true);
 
+// Turn on dynamic cache size for Skia
+pref("gfx.canvas.skiagl.dynamic-cache", true);
+
+// enable fence with readpixels for SurfaceStream
+pref("gfx.gralloc.fence-with-readpixels", true);
+
 // Enable Telephony API
 pref("dom.telephony.enabled", true);
+
+// Cell Broadcast API
+pref("dom.cellbroadcast.enabled", true);
+pref("ril.cellbroadcast.disabled", false);
+
+// ICC API
+pref("dom.icc.enabled", true);
+
+// Mobile Connection API
+pref("dom.mobileconnection.enabled", true);
+
+// Voice Mail API
+pref("dom.voicemail.enabled", true);
 
 // The url of the page used to display network error details.
 pref("b2g.neterror.url", "app://system.gaiamobile.org/net_error.html");

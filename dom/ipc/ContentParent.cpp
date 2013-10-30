@@ -62,7 +62,6 @@
 #include "nsIAlertsService.h"
 #include "nsIAppsService.h"
 #include "nsIClipboard.h"
-#include "nsIDOMApplicationRegistry.h"
 #include "nsIDOMGeoGeolocation.h"
 #include "nsIDOMWakeLock.h"
 #include "nsIDOMWindow.h"
@@ -986,10 +985,9 @@ TryGetNameFromManifestURL(const nsAString& aManifestURL,
     nsCOMPtr<nsIAppsService> appsService = do_GetService(APPS_SERVICE_CONTRACTID);
     NS_ENSURE_TRUE_VOID(appsService);
 
-    nsCOMPtr<mozIDOMApplication> domApp;
-    appsService->GetAppByManifestURL(aManifestURL, getter_AddRefs(domApp));
+    nsCOMPtr<mozIApplication> app;
+    appsService->GetAppByManifestURL(aManifestURL, getter_AddRefs(app));
 
-    nsCOMPtr<mozIApplication> app = do_QueryInterface(domApp);
     if (!app) {
         return;
     }
@@ -1059,14 +1057,14 @@ ContentParent::MarkAsDead()
             sAppContentParents->Remove(mAppManifestURL);
             if (!sAppContentParents->Count()) {
                 delete sAppContentParents;
-                sAppContentParents = NULL;
+                sAppContentParents = nullptr;
             }
         }
     } else if (sNonAppContentParents) {
         sNonAppContentParents->RemoveElement(this);
         if (!sNonAppContentParents->Length()) {
             delete sNonAppContentParents;
-            sNonAppContentParents = NULL;
+            sNonAppContentParents = nullptr;
         }
     }
 
@@ -1074,7 +1072,7 @@ ContentParent::MarkAsDead()
         sPrivateContent->RemoveElement(this);
         if (!sPrivateContent->Length()) {
             delete sPrivateContent;
-            sPrivateContent = NULL;
+            sPrivateContent = nullptr;
         }
     }
 
@@ -1263,7 +1261,7 @@ ContentParent::ActorDestroy(ActorDestroyReason why)
                                                        NS_ConvertUTF16toUTF8(mAppManifestURL));
                 }
 
-                crashReporter->GenerateCrashReport(this, NULL);
+                crashReporter->GenerateCrashReport(this, nullptr);
 
                 nsAutoString dumpID(crashReporter->ChildDumpID());
                 props->SetPropertyAsAString(NS_LITERAL_STRING("dumpID"), dumpID);
@@ -1281,7 +1279,7 @@ ContentParent::ActorDestroy(ActorDestroyReason why)
     MessageLoop::current()->
         PostTask(FROM_HERE,
                  NewRunnableFunction(DelayedDeleteSubprocess, mSubprocess));
-    mSubprocess = NULL;
+    mSubprocess = nullptr;
 
     // IPDL rules require actors to live on past ActorDestroy, but it
     // may be that the kungFuDeathGrip above is the last reference to
@@ -1504,6 +1502,17 @@ ContentParent::ContentParent(mozIApplication* aApp,
         }
     }
 
+#ifdef MOZ_CONTENT_SANDBOX
+    // Bug 921817.  We enable the sandbox in RecvSetProcessPrivileges,
+    // which is where a preallocated process drops unnecessary privileges,
+    // but a non-preallocated process will already have changed its
+    // uid/gid/etc immediately after forking.  Thus, we send this message,
+    // which is otherwise a no-op, to sandbox it at an appropriate point
+    // during startup.
+    if (aOSPrivileges != base::PRIVILEGES_INHERIT) {
+        SendSetProcessPrivileges(base::PRIVILEGES_INHERIT);
+    }
+#endif
 }
 
 #ifdef MOZ_NUWA_PROCESS
@@ -1596,9 +1605,9 @@ ContentParent::~ContentParent()
                    !sNonAppContentParents->Contains(this));
     } else {
         // In general, we expect sAppContentParents->Get(mAppManifestURL) to be
-        // NULL.  But it could be that we created another ContentParent for this
-        // app after we did this->ActorDestroy(), so the right check is that
-        // sAppContentParents->Get(mAppManifestURL) != this.
+        // nullptr.  But it could be that we created another ContentParent for
+        // this app after we did this->ActorDestroy(), so the right check is
+        // that sAppContentParents->Get(mAppManifestURL) != this.
         MOZ_ASSERT(!sAppContentParents ||
                    sAppContentParents->Get(mAppManifestURL) != this);
     }
@@ -1724,7 +1733,7 @@ ContentParent::RecvSetClipboardText(const nsString& text,
                                 text.Length() * sizeof(PRUnichar));
     NS_ENSURE_SUCCESS(rv, true);
     
-    clipboard->SetData(trans, NULL, whichClipboard);
+    clipboard->SetData(trans, nullptr, whichClipboard);
     return true;
 }
 
@@ -1924,18 +1933,6 @@ ContentParent::RecvBroadcastVolume(const nsString& aVolumeName)
     NS_WARNING("ContentParent::RecvBroadcastVolume shouldn't be called when MOZ_WIDGET_GONK is not defined");
     return false;
 #endif
-}
-
-bool
-ContentParent::RecvRecordingDeviceEvents(const nsString& aRecordingStatus)
-{
-    nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-    if (obs) {
-        obs->NotifyObservers(nullptr, "recording-device-events", aRecordingStatus.get());
-    } else {
-        NS_WARNING("Could not get the Observer service for ContentParent::RecvRecordingDeviceEvents.");
-    }
-    return true;
 }
 
 bool
@@ -2139,7 +2136,7 @@ ContentParent::AllocPJavaScriptParent()
     mozilla::jsipc::JavaScriptParent *parent = new mozilla::jsipc::JavaScriptParent();
     if (!parent->init()) {
         delete parent;
-        return NULL;
+        return nullptr;
     }
     return parent;
 }
@@ -3169,7 +3166,7 @@ ContentParent::RecvPrivateDocShellsExist(const bool& aExist)
       nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
       obs->NotifyObservers(nullptr, "last-pb-context-exited", nullptr);
       delete sPrivateContent;
-      sPrivateContent = NULL;
+      sPrivateContent = nullptr;
     }
   }
   return true;

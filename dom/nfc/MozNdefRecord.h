@@ -17,8 +17,6 @@
 
 #include "nsIDocument.h"
 
-#include "mozilla/dom/MozNdefRecordBinding.h"
-
 struct JSContext;
 
 namespace mozilla {

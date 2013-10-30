@@ -271,6 +271,9 @@
 @BINPATH@/components/necko_websocket.xpt
 @BINPATH@/components/necko_wifi.xpt
 @BINPATH@/components/necko_wyciwyg.xpt
+#ifdef MOZ_RTSP
+@BINPATH@/components/necko_rtsp.xpt
+#endif
 @BINPATH@/components/necko.xpt
 @BINPATH@/components/loginmgr.xpt
 @BINPATH@/components/parentalcontrols.xpt
@@ -302,6 +305,7 @@
 @BINPATH@/components/spellchecker.xpt
 @BINPATH@/components/storage.xpt
 @BINPATH@/components/telemetry.xpt
+@BINPATH@/components/toolkit_finalizationwitness.xpt
 @BINPATH@/components/toolkitprofile.xpt
 #ifdef MOZ_ENABLE_XREMOTE
 @BINPATH@/components/toolkitremote.xpt
@@ -351,6 +355,8 @@
 @BINPATH@/components/ContactManager.manifest
 @BINPATH@/components/PhoneNumberService.js
 @BINPATH@/components/PhoneNumberService.manifest
+@BINPATH@/components/NotificationStorage.js
+@BINPATH@/components/NotificationStorage.manifest
 @BINPATH@/components/PermissionSettings.js
 @BINPATH@/components/PermissionSettings.manifest
 @BINPATH@/components/PermissionPromptService.js
@@ -386,7 +392,6 @@
 @BINPATH@/components/HttpDataUsage.js
 @BINPATH@/components/SiteSpecificUserAgent.js
 @BINPATH@/components/SiteSpecificUserAgent.manifest
-@BINPATH@/components/storage-Legacy.js
 @BINPATH@/components/storage-mozStorage.js
 @BINPATH@/components/crypto-SDR.js
 @BINPATH@/components/jsconsole-clhandler.manifest
@@ -486,8 +491,6 @@
 @BINPATH@/components/NetworkStatsServiceProxy.js
 #endif
 #ifdef MOZ_NFC
-@BINPATH@/components/MozNFCPeer.js
-@BINPATH@/components/MozNFCTag.js
 @BINPATH@/components/nsNfc.manifest
 @BINPATH@/components/nsNfc.js
 @BINPATH@/components/Nfc.manifest
@@ -777,6 +780,10 @@ bin/components/@DLL_PREFIX@nkgnomevfs@DLL_SUFFIX@
 @BINPATH@/components/TelProtocolHandler.js
 @BINPATH@/components/B2GAboutRedirector.js
 @BINPATH@/components/FilePicker.js
+
+@BINPATH@/components/DataStore.manifest
+@BINPATH@/components/DataStoreService.js
+@BINPATH@/components/dom_datastore.xpt
 
 #ifdef MOZ_WEBSPEECH
 @BINPATH@/components/dom_webspeechsynth.xpt

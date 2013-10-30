@@ -22,15 +22,15 @@ EXPORTS += [
     'CacheStorageService.h',
 ]
 
-CPP_SOURCES += [
+SOURCES += [
     'AppCacheStorage.cpp',
     'CacheEntriesEnumerator.cpp',
     'CacheEntry.cpp',
     'CacheFile.cpp',
     'CacheFileChunk.cpp',
-    'CacheFileMetadata.cpp',
     'CacheFileInputStream.cpp',
     'CacheFileIOManager.cpp',
+    'CacheFileMetadata.cpp',
     'CacheFileOutputStream.cpp',
     'CacheHashUtils.cpp',
     'CacheIOThread.cpp',
@@ -39,6 +39,10 @@ CPP_SOURCES += [
     'CacheStorage.cpp',
     'CacheStorageService.cpp',
     'OldWrappers.cpp',
+]
+
+LOCAL_INCLUDES += [
+    '../base/src',
 ]
 
 LIBRARY_NAME = 'nkcache2_s'

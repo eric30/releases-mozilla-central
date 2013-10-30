@@ -14,6 +14,7 @@
 #include "mozilla/BrowserElementParent.h"
 #include "mozilla/docshell/OfflineCacheUpdateParent.h"
 #include "mozilla/dom/ContentParent.h"
+#include "mozilla/dom/PContentPermissionRequestParent.h"
 #include "mozilla/Hal.h"
 #include "mozilla/ipc/DocumentRendererParent.h"
 #include "mozilla/layers/CompositorParent.h"
@@ -30,6 +31,7 @@
 #include "nsEventStateManager.h"
 #include "nsFocusManager.h"
 #include "nsFrameLoader.h"
+#include "nsHashPropertyBag.h"
 #include "nsIContent.h"
 #include "nsIDocShell.h"
 #include "nsIDocShellTreeOwner.h"
@@ -191,7 +193,7 @@ NS_IMPL_ISUPPORTS3(TabParent, nsITabParent, nsIAuthPromptProvider, nsISecureBrow
 
 TabParent::TabParent(ContentParent* aManager, const TabContext& aContext)
   : TabContext(aContext)
-  , mFrameElement(NULL)
+  , mFrameElement(nullptr)
   , mIMESelectionAnchor(0)
   , mIMESelectionFocus(0)
   , mIMEComposing(false)
@@ -294,7 +296,9 @@ TabParent::ActorDestroy(ActorDestroyReason why)
   }
   nsRefPtr<nsFrameLoader> frameLoader = GetFrameLoader();
   nsCOMPtr<nsIObserverService> os = services::GetObserverService();
+  nsRefPtr<nsFrameMessageManager> fmm;
   if (frameLoader) {
+    fmm = frameLoader->GetFrameMessageManager();
     nsCOMPtr<Element> frameElement(mFrameElement);
     ReceiveMessage(CHILD_PROCESS_SHUTDOWN_MESSAGE, false, nullptr, nullptr);
     frameLoader->DestroyChild();
@@ -310,6 +314,9 @@ TabParent::ActorDestroy(ActorDestroyReason why)
 
   if (os) {
     os->NotifyObservers(NS_ISUPPORTS_CAST(nsITabParent*, this), "ipc:browser-destroyed", nullptr);
+  }
+  if (fmm) {
+    fmm->Disconnect();
   }
 }
 
@@ -564,9 +571,10 @@ TabParent::DeallocPDocumentRendererParent(PDocumentRendererParent* actor)
 }
 
 PContentPermissionRequestParent*
-TabParent::AllocPContentPermissionRequestParent(const nsCString& type, const nsCString& access, const IPC::Principal& principal)
+TabParent::AllocPContentPermissionRequestParent(const InfallibleTArray<PermissionRequest>& aRequests,
+                                                const IPC::Principal& aPrincipal)
 {
-  return new ContentPermissionRequestParent(type, access, mFrameElement, principal);
+  return CreateContentPermissionRequestParent(aRequests, mFrameElement, aPrincipal);
 }
 
 bool
@@ -621,10 +629,10 @@ TabParent::MapEventCoordinatesForChildProcess(
     aEvent->refPoint = aOffset;
   } else {
     aEvent->refPoint = LayoutDeviceIntPoint();
-    WidgetTouchEvent* touchEvent = static_cast<WidgetTouchEvent*>(aEvent);
     // Then offset all the touch points by that distance, to put them
     // in the space where top-left is 0,0.
-    const nsTArray< nsRefPtr<Touch> >& touches = touchEvent->touches;
+    const nsTArray< nsRefPtr<Touch> >& touches =
+      aEvent->AsTouchEvent()->touches;
     for (uint32_t i = 0; i < touches.Length(); ++i) {
       Touch* touch = touches[i];
       if (touch) {
@@ -647,12 +655,12 @@ bool TabParent::SendRealMouseEvent(WidgetMouseEvent& event)
   return PBrowserParent::SendRealMouseEvent(e);
 }
 
-bool TabParent::SendMouseWheelEvent(WheelEvent& event)
+bool TabParent::SendMouseWheelEvent(WidgetWheelEvent& event)
 {
   if (mIsDestroyed) {
     return false;
   }
-  WheelEvent e(event);
+  WidgetWheelEvent e(event);
   MaybeForwardEventToRenderFrame(event, &e);
   if (!MapEventCoordinatesForChildProcess(&e)) {
     return false;
@@ -736,7 +744,7 @@ TabParent::TryCapture(const WidgetGUIEvent& aEvent)
     return false;
   }
 
-  WidgetTouchEvent event(static_cast<const WidgetTouchEvent&>(aEvent));
+  WidgetTouchEvent event(*aEvent.AsTouchEvent());
 
   bool isTouchPointUp = (event.message == NS_TOUCH_END ||
                          event.message == NS_TOUCH_CANCEL);
@@ -1618,6 +1626,40 @@ TabParent::RecvContentReceivedTouch(const bool& aPreventDefault)
     rfp->ContentReceivedTouch(aPreventDefault);
   }
   return true;
+}
+
+bool
+TabParent::RecvRecordingDeviceEvents(const nsString& aRecordingStatus,
+                                     const bool& aIsAudio,
+                                     const bool& aIsVideo)
+{
+    nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
+    if (obs) {
+        // recording-device-ipc-events needs to gather more information from content process
+        nsRefPtr<nsHashPropertyBag> props = new nsHashPropertyBag();
+        props->SetPropertyAsUint64(NS_LITERAL_STRING("childID"), Manager()->ChildID());
+        props->SetPropertyAsBool(NS_LITERAL_STRING("isApp"), Manager()->IsForApp());
+        props->SetPropertyAsBool(NS_LITERAL_STRING("isAudio"), aIsAudio);
+        props->SetPropertyAsBool(NS_LITERAL_STRING("isVideo"), aIsVideo);
+
+        nsString requestURL;
+        if (Manager()->IsForApp()) {
+          requestURL = Manager()->AppManifestURL();
+        } else {
+          nsRefPtr<nsFrameLoader> frameLoader = GetFrameLoader();
+          NS_ENSURE_TRUE(frameLoader, true);
+
+          frameLoader->GetURL(requestURL);
+        }
+        props->SetPropertyAsAString(NS_LITERAL_STRING("requestURL"), requestURL);
+
+        obs->NotifyObservers((nsIPropertyBag2*) props,
+                             "recording-device-ipc-events",
+                             aRecordingStatus.get());
+    } else {
+        NS_WARNING("Could not get the Observer service for ContentParent::RecvRecordingDeviceEvents.");
+    }
+    return true;
 }
 
 } // namespace tabs

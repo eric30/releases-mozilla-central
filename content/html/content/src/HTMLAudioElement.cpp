@@ -17,19 +17,17 @@
 #include "AudioSampleFormat.h"
 #include "AudioChannelCommon.h"
 #include <algorithm>
-#include "mozilla/Preferences.h"
 #include "nsComponentManagerUtils.h"
-
-static bool
-IsAudioAPIEnabled()
-{
-  return mozilla::Preferences::GetBool("media.audio_data.enabled", true);
-}
+#include "nsIHttpChannel.h"
+#include "mozilla/dom/TimeRanges.h"
+#include "AudioStream.h"
 
 NS_IMPL_NS_NEW_HTML_ELEMENT(Audio)
 
 namespace mozilla {
 namespace dom {
+
+extern bool IsAudioAPIEnabled();
 
 NS_IMPL_ISUPPORTS_INHERITED4(HTMLAudioElement, HTMLMediaElement,
                              nsIDOMHTMLMediaElement, nsIDOMHTMLAudioElement,
@@ -114,7 +112,7 @@ HTMLAudioElement::MozSetup(uint32_t aChannels, uint32_t aRate, ErrorResult& aRv)
 #endif
 
   mAudioStream = AudioStream::AllocateStream();
-  aRv = mAudioStream->Init(aChannels, aRate, mAudioChannelType);
+  aRv = mAudioStream->Init(aChannels, aRate, mAudioChannelType, AudioStream::HighLatency);
   if (aRv.Failed()) {
     mAudioStream->Shutdown();
     mAudioStream = nullptr;

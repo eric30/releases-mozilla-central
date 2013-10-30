@@ -18,24 +18,24 @@ if CONFIG['MOZ_WEBSPEECH']:
 
     EXPORTS.mozilla.dom += [
         'EnableSpeechSynthesisCheck.h',
-        'SpeechSynthesis.h',
-        'SpeechSynthesisUtterance.h',
-        'SpeechSynthesisVoice.h',
         'ipc/SpeechSynthesisChild.h',
         'ipc/SpeechSynthesisParent.h',
         'nsSpeechTask.h',
         'nsSynthVoiceRegistry.h',
+        'SpeechSynthesis.h',
+        'SpeechSynthesisUtterance.h',
+        'SpeechSynthesisVoice.h',
     ]
 
-    CPP_SOURCES += [
+    SOURCES += [
         'EnableSpeechSynthesisCheck.cpp',
-        'SpeechSynthesis.cpp',
-        'SpeechSynthesisChild.cpp',
-        'SpeechSynthesisParent.cpp',
-        'SpeechSynthesisUtterance.cpp',
-        'SpeechSynthesisVoice.cpp',
+        'ipc/SpeechSynthesisChild.cpp',
+        'ipc/SpeechSynthesisParent.cpp',
         'nsSpeechTask.cpp',
         'nsSynthVoiceRegistry.cpp',
+        'SpeechSynthesis.cpp',
+        'SpeechSynthesisUtterance.cpp',
+        'SpeechSynthesisVoice.cpp',
     ]
 
     if CONFIG['MOZ_SYNTH_PICO']:
@@ -51,4 +51,8 @@ FAIL_ON_WARNINGS = True
 LIBXUL_LIBRARY = True
 
 LIBRARY_NAME = 'gkconwebspeechsynth_s'
+
+EXPORT_LIBRARY = True
+
+include('/ipc/chromium/chromium-config.mozbuild')
 

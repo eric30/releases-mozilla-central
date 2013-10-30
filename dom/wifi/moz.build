@@ -22,8 +22,13 @@ EXTRA_COMPONENTS += [
     'WifiWorker.manifest',
 ]
 
+EXTRA_JS_MODULES += [
+    'WifiCommand.jsm',
+    'WifiNetUtil.jsm',
+]
+
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
-    CPP_SOURCES = [
+    SOURCES = [
         'NetUtils.cpp',
         'WifiProxyService.cpp',
         'WifiUtils.cpp',
@@ -32,4 +37,6 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
 LIBXUL_LIBRARY = True
 
 LIBRARY_NAME = 'domwifi_s'
+
+EXPORT_LIBRARY = True
 

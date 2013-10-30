@@ -126,9 +126,9 @@ struct ParamTraits<mozilla::WidgetMouseEventBase>
 };
 
 template<>
-struct ParamTraits<mozilla::WheelEvent>
+struct ParamTraits<mozilla::WidgetWheelEvent>
 {
-  typedef mozilla::WheelEvent paramType;
+  typedef mozilla::WidgetWheelEvent paramType;
 
   static void Write(Message* aMsg, const paramType& aParam)
   {
@@ -166,7 +166,7 @@ struct ParamTraits<mozilla::WheelEvent>
       ReadParam(aMsg, aIter, &aResult->overflowDeltaX) &&
       ReadParam(aMsg, aIter, &aResult->overflowDeltaY);
     aResult->scrollType =
-      static_cast<mozilla::WheelEvent::ScrollType>(scrollType);
+      static_cast<mozilla::WidgetWheelEvent::ScrollType>(scrollType);
     return rv;
   }
 };
@@ -289,7 +289,7 @@ struct ParamTraits<mozilla::WidgetKeyboardEvent>
         ReadParam(aMsg, aIter, &aResult->mUniqueId))
     {
       aResult->mKeyNameIndex = static_cast<mozilla::KeyNameIndex>(keyNameIndex);
-      aResult->mNativeKeyEvent = NULL;
+      aResult->mNativeKeyEvent = nullptr;
       return true;
     }
     return false;

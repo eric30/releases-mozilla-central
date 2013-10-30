@@ -2969,7 +2969,85 @@ SVGTextDrawPathCallbacks::StrokeGeometry()
   }
 }
 
+//----------------------------------------------------------------------
+// SVGTextContextPaint methods:
+
+already_AddRefed<gfxPattern>
+SVGTextContextPaint::GetFillPattern(float aOpacity,
+                                    const gfxMatrix& aCTM)
+{
+  return mFillPaint.GetPattern(aOpacity, &nsStyleSVG::mFill, aCTM);
 }
+
+already_AddRefed<gfxPattern>
+SVGTextContextPaint::GetStrokePattern(float aOpacity,
+                                      const gfxMatrix& aCTM)
+{
+  return mStrokePaint.GetPattern(aOpacity, &nsStyleSVG::mStroke, aCTM);
+}
+
+already_AddRefed<gfxPattern>
+SVGTextContextPaint::Paint::GetPattern(float aOpacity,
+                                       nsStyleSVGPaint nsStyleSVG::*aFillOrStroke,
+                                       const gfxMatrix& aCTM)
+{
+  nsRefPtr<gfxPattern> pattern;
+  if (mPatternCache.Get(aOpacity, getter_AddRefs(pattern))) {
+    // Set the pattern matrix just in case it was messed with by a previous
+    // caller. We should get the same matrix each time a pattern is constructed
+    // so this should be fine.
+    pattern->SetMatrix(aCTM * mPatternMatrix);
+    return pattern.forget();
+  }
+
+  switch (mPaintType) {
+  case eStyleSVGPaintType_None:
+    pattern = new gfxPattern(gfxRGBA(0.0f, 0.0f, 0.0f, 0.0f));
+    mPatternMatrix = gfxMatrix();
+    break;
+  case eStyleSVGPaintType_Color:
+    pattern = new gfxPattern(gfxRGBA(NS_GET_R(mPaintDefinition.mColor) / 255.0,
+                                     NS_GET_G(mPaintDefinition.mColor) / 255.0,
+                                     NS_GET_B(mPaintDefinition.mColor) / 255.0,
+                                     NS_GET_A(mPaintDefinition.mColor) / 255.0 * aOpacity));
+    mPatternMatrix = gfxMatrix();
+    break;
+  case eStyleSVGPaintType_Server:
+    pattern = mPaintDefinition.mPaintServerFrame->GetPaintServerPattern(mFrame,
+                                                                        mContextMatrix,
+                                                                        aFillOrStroke,
+                                                                        aOpacity);
+    {
+      // m maps original-user-space to pattern space
+      gfxMatrix m = pattern->GetMatrix();
+      gfxMatrix deviceToOriginalUserSpace = mContextMatrix;
+      deviceToOriginalUserSpace.Invert();
+      // mPatternMatrix maps device space to pattern space via original user space
+      mPatternMatrix = deviceToOriginalUserSpace * m;
+    }
+    pattern->SetMatrix(aCTM * mPatternMatrix);
+    break;
+  case eStyleSVGPaintType_ContextFill:
+    pattern = mPaintDefinition.mContextPaint->GetFillPattern(aOpacity, aCTM);
+    // Don't cache this. mContextPaint will have cached it anyway. If we
+    // cache it, we'll have to compute mPatternMatrix, which is annoying.
+    return pattern.forget();
+  case eStyleSVGPaintType_ContextStroke:
+    pattern = mPaintDefinition.mContextPaint->GetStrokePattern(aOpacity, aCTM);
+    // Don't cache this. mContextPaint will have cached it anyway. If we
+    // cache it, we'll have to compute mPatternMatrix, which is annoying.
+    return pattern.forget();
+  default:
+    MOZ_ASSERT(false, "invalid paint type");
+    return nullptr;
+  }
+
+  mPatternCache.Put(aOpacity, pattern);
+  return pattern.forget();
+}
+
+} // namespace mozilla
+
 
 // ============================================================================
 // nsSVGTextFrame2
@@ -3687,13 +3765,15 @@ nsSVGTextFrame2::ReflowSVG()
     nsSVGEffects::UpdateEffects(this);
   }
 
+  // Now unset the various reflow bits. Do this before calling
+  // FinishAndStoreOverflow since FinishAndStoreOverflow can require glyph
+  // positions (to resolve transform-origin).
+  mState &= ~(NS_FRAME_FIRST_REFLOW | NS_FRAME_IS_DIRTY |
+              NS_FRAME_HAS_DIRTY_CHILDREN);
+
   nsRect overflow = nsRect(nsPoint(0,0), mRect.Size());
   nsOverflowAreas overflowAreas(overflow, overflow);
   FinishAndStoreOverflow(overflowAreas, mRect.Size());
-
-  // Now unset the various reflow bits:
-  mState &= ~(NS_FRAME_FIRST_REFLOW | NS_FRAME_IS_DIRTY |
-              NS_FRAME_HAS_DIRTY_CHILDREN);
 
   // XXX nsSVGContainerFrame::ReflowSVG only looks at its nsISVGChildFrame
   // children, and calls ConsiderChildOverflow on them.  Does it matter
@@ -3729,9 +3809,22 @@ nsSVGTextFrame2::GetBBoxContribution(const gfxMatrix &aToBBoxUserspace,
 {
   NS_ASSERTION(GetFirstPrincipalChild(), "must have a child frame");
 
+  SVGBBox bbox;
+  nsIFrame* kid = GetFirstPrincipalChild();
+  if (kid && NS_SUBTREE_DIRTY(kid)) {
+    // Return an empty bbox if our kid's subtree is dirty. This may be called
+    // in that situation, e.g. when we're building a display list after an
+    // interrupted reflow. This can also be called during reflow before we've
+    // been reflowed, e.g. if an earlier sibling is calling FinishAndStoreOverflow and
+    // needs our parent's perspective matrix, which depends on the SVG bbox
+    // contribution of this frame. In the latter situation, when all siblings have
+    // been reflowed, the parent will compute its perspective and rerun
+    // FinishAndStoreOverflow for all its children.
+    return bbox;
+  }
+
   UpdateGlyphPositioning();
 
-  SVGBBox bbox;
   nsPresContext* presContext = PresContext();
 
   TextRenderedRunIterator it(this);
@@ -4637,8 +4730,8 @@ nsSVGTextFrame2::GetTextPathPathFrame(nsIFrame* aTextPathFrame)
   return property->GetReferencedFrame(nsGkAtoms::svgPathGeometryFrame, nullptr);
 }
 
-already_AddRefed<gfxFlattenedPath>
-nsSVGTextFrame2::GetFlattenedTextPath(nsIFrame* aTextPathFrame)
+already_AddRefed<gfxPath>
+nsSVGTextFrame2::GetTextPath(nsIFrame* aTextPathFrame)
 {
   nsIFrame *path = GetTextPathPathFrame(aTextPathFrame);
 
@@ -4646,7 +4739,7 @@ nsSVGTextFrame2::GetFlattenedTextPath(nsIFrame* aTextPathFrame)
     nsSVGPathGeometryElement *element =
       static_cast<nsSVGPathGeometryElement*>(path->GetContent());
 
-    return element->GetFlattenedPath(element->PrependLocalTransformsTo(gfxMatrix()));
+    return element->GetPath(element->PrependLocalTransformsTo(gfxMatrix()));
   }
   return nullptr;
 }
@@ -4671,7 +4764,7 @@ nsSVGTextFrame2::GetStartOffset(nsIFrame* aTextPathFrame)
     &tp->mLengthAttributes[dom::SVGTextPathElement::STARTOFFSET];
 
   if (length->IsPercentage()) {
-    nsRefPtr<gfxFlattenedPath> data = GetFlattenedTextPath(aTextPathFrame);
+    nsRefPtr<gfxPath> data = GetTextPath(aTextPathFrame);
     return data ?
              length->GetAnimValInSpecifiedUnits() * data->GetLength() / 100.0 :
              0.0;
@@ -4694,7 +4787,7 @@ nsSVGTextFrame2::DoTextPathLayout()
     }
 
     // Get the path itself.
-    nsRefPtr<gfxFlattenedPath> data = GetFlattenedTextPath(textPathFrame);
+    nsRefPtr<gfxPath> data = GetTextPath(textPathFrame);
     if (!data) {
       it.AdvancePastCurrentTextPathFrame();
       continue;

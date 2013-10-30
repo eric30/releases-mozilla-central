@@ -5,7 +5,6 @@
 
 #include "mozilla/Util.h"
 
-#include "prtypes.h"
 #include "prlink.h"
 #include "gfxTypes.h"
 
@@ -29,6 +28,7 @@
 #include "nsUnicodeScriptCodes.h"
 #include "gfxFontconfigUtils.h"
 #include "gfxUserFontSet.h"
+#include "gfxFontConstants.h"
 
 #include <cairo.h>
 #include <cairo-ft.h>

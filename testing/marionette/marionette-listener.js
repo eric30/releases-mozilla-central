@@ -59,6 +59,8 @@ let heartbeatCallback = function () {}; // Called by the simpletest methods.
 let originalOnError;
 //timer for doc changes
 let checkTimer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
+//timer for readystate
+let readyStateTimer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
 // Send move events about this often
 let EVENT_INTERVAL = 30; // milliseconds
 // For assigning unique ids to all touches
@@ -72,8 +74,8 @@ let isTap = false;
 // whether to send mouse event
 let mouseEventsOnly = false;
 
-Cu.import("resource://gre/modules/services-common/log4moz.js");
-let logger = Log4Moz.repository.getLogger("Marionette");
+Cu.import("resource://gre/modules/Log.jsm");
+let logger = Log.repository.getLogger("Marionette");
 logger.info("loaded marionette-listener.js");
 let modalHandler = function() {
   sendSyncMessage("Marionette:switchedToFrame", { frameValue: null, storePrevious: true });
@@ -96,7 +98,7 @@ function registerSelf() {
 
   if (register[0]) {
     listenerId = register[0].id;
-    importedScripts = FileUtils.File(register[0].importedScripts);
+    importedScripts = FileUtils.getFile('TmpD', ['marionetteContentScripts']);
     startListeners();
   }
 }
@@ -141,7 +143,8 @@ function startListeners() {
   addMessageListenerId("Marionette:getElementText", getElementText);
   addMessageListenerId("Marionette:getElementTagName", getElementTagName);
   addMessageListenerId("Marionette:isElementDisplayed", isElementDisplayed);
-  addMessageListenerId("Marionette:getElementValueOfCssProperty", getElementValueOfCssProperty)
+  addMessageListenerId("Marionette:getElementValueOfCssProperty", getElementValueOfCssProperty);
+  addMessageListenerId("Marionette:submitElement", submitElement);
   addMessageListenerId("Marionette:getElementSize", getElementSize);
   addMessageListenerId("Marionette:isElementEnabled", isElementEnabled);
   addMessageListenerId("Marionette:isElementSelected", isElementSelected);
@@ -163,13 +166,29 @@ function startListeners() {
 }
 
 /**
+ * Used during newSession and restart, called to set up the modal dialog listener in b2g
+ */
+function waitForReady() {
+  if (content.document.readyState == 'complete') {
+    readyStateTimer.cancel();
+    content.addEventListener("mozbrowsershowmodalprompt", modalHandler, false);
+    content.addEventListener("unload", waitForReady, false);
+  }
+  else {
+    readyStateTimer.initWithCallback(waitForReady, 100, Ci.nsITimer.TYPE_ONE_SHOT);
+  }
+}
+
+/**
  * Called when we start a new session. It registers the
  * current environment, and resets all values
  */
 function newSession(msg) {
   isB2G = msg.json.B2G;
   resetValues();
-  content.addEventListener("mozbrowsershowmodalprompt", modalHandler, false);
+  if (isB2G) {
+    readyStateTimer.initWithCallback(waitForReady, 100, Ci.nsITimer.TYPE_ONE_SHOT);
+  }
 }
  
 /**
@@ -187,7 +206,9 @@ function sleepSession(msg) {
  */
 function restart(msg) {
   removeMessageListener("Marionette:restart", restart);
-  content.addEventListener("mozbrowsershowmodalprompt", modalHandler, false);
+  if (isB2G) {
+    readyStateTimer.initWithCallback(waitForReady, 100, Ci.nsITimer.TYPE_ONE_SHOT);
+  }
   registerSelf();
 }
 
@@ -217,6 +238,7 @@ function deleteSession(msg) {
   removeMessageListenerId("Marionette:getElementTagName", getElementTagName);
   removeMessageListenerId("Marionette:isElementDisplayed", isElementDisplayed);
   removeMessageListenerId("Marionette:getElementValueOfCssProperty", getElementValueOfCssProperty);
+  removeMessageListenerId("Marionette:submitElement", submitElement);
   removeMessageListenerId("Marionette:getElementSize", getElementSize);
   removeMessageListenerId("Marionette:isElementEnabled", isElementEnabled);
   removeMessageListenerId("Marionette:isElementSelected", isElementSelected);
@@ -235,7 +257,9 @@ function deleteSession(msg) {
   removeMessageListenerId("Marionette:getAllCookies", getAllCookies);
   removeMessageListenerId("Marionette:deleteAllCookies", deleteAllCookies);
   removeMessageListenerId("Marionette:deleteCookie", deleteCookie);
-  content.removeEventListener("mozbrowsershowmodalprompt", modalHandler, false);
+  if (isB2G) {
+    content.removeEventListener("mozbrowsershowmodalprompt", modalHandler, false);
+  }
   this.elementManager.reset();
   // reset frame to the top-most frame
   curFrame = content;
@@ -422,7 +446,7 @@ function executeScript(msg, directInject) {
   }
 
   asyncTestCommandId = msg.json.command_id;
-  let script = msg.json.value;
+  let script = msg.json.script;
 
   if (msg.json.newSandbox || !sandbox) {
     sandbox = createExecuteContentSandbox(curFrame,
@@ -545,7 +569,7 @@ function executeWithCallback(msg, useFinish) {
     };
   }
 
-  let script = msg.json.value;
+  let script = msg.json.script;
   asyncTestCommandId = msg.json.command_id;
 
   onunload = function() {
@@ -847,7 +871,7 @@ function generateEvents(type, x, y, touchId, target) {
 function singleTap(msg) {
   let command_id = msg.json.command_id;
   try {
-    let el = elementManager.getKnownElement(msg.json.value, curFrame);
+    let el = elementManager.getKnownElement(msg.json.id, curFrame);
     // after this block, the element will be scrolled into view
     if (!checkVisible(el)) {
        sendError("Element is not currently visible and may not be manipulated", 11, null, command_id);
@@ -1207,7 +1231,7 @@ function goUrl(msg) {
     checkTimer.initWithCallback(timerFunc, msg.json.pageTimeout, Ci.nsITimer.TYPE_ONE_SHOT);
   }
   addEventListener("DOMContentLoaded", onDOMContentLoaded, false);
-  curFrame.location = msg.json.value;
+  curFrame.location = msg.json.url;
 }
 
 /**
@@ -1311,7 +1335,7 @@ function clickElement(msg) {
   let command_id = msg.json.command_id;
   let el;
   try {
-    el = elementManager.getKnownElement(msg.json.element, curFrame);
+    el = elementManager.getKnownElement(msg.json.id, curFrame);
     if (checkVisible(el)) {
       if (utils.isElementEnabled(el)) {
         utils.synthesizeMouseAtCenter(el, {}, el.ownerDocument.defaultView)
@@ -1336,7 +1360,7 @@ function clickElement(msg) {
 function getElementAttribute(msg) {
   let command_id = msg.json.command_id;
   try {
-    let el = elementManager.getKnownElement(msg.json.element, curFrame);
+    let el = elementManager.getKnownElement(msg.json.id, curFrame);
     sendResponse({value: utils.getElementAttribute(el, msg.json.name)},
                  command_id);
   }
@@ -1351,7 +1375,7 @@ function getElementAttribute(msg) {
 function getElementText(msg) {
   let command_id = msg.json.command_id;
   try {
-    let el = elementManager.getKnownElement(msg.json.element, curFrame);
+    let el = elementManager.getKnownElement(msg.json.id, curFrame);
     sendResponse({value: utils.getElementText(el)}, command_id);
   }
   catch (e) {
@@ -1365,7 +1389,7 @@ function getElementText(msg) {
 function getElementTagName(msg) {
   let command_id = msg.json.command_id;
   try {
-    let el = elementManager.getKnownElement(msg.json.element, curFrame);
+    let el = elementManager.getKnownElement(msg.json.id, curFrame);
     sendResponse({value: el.tagName.toLowerCase()}, command_id);
   }
   catch (e) {
@@ -1379,7 +1403,7 @@ function getElementTagName(msg) {
 function isElementDisplayed(msg) {
   let command_id = msg.json.command_id;
   try {
-    let el = elementManager.getKnownElement(msg.json.element, curFrame);
+    let el = elementManager.getKnownElement(msg.json.id, curFrame);
     sendResponse({value: utils.isElementDisplayed(el)}, command_id);
   }
   catch (e) {
@@ -1399,9 +1423,35 @@ function getElementValueOfCssProperty(msg){
   let command_id = msg.json.command_id;
   let propertyName = msg.json.propertyName;
   try {
-    let el = elementManager.getKnownElement(msg.json.element, curFrame);
+    let el = elementManager.getKnownElement(msg.json.id, curFrame);
     sendResponse({value: curFrame.document.defaultView.getComputedStyle(el, null).getPropertyValue(propertyName)},
                  command_id);
+  }
+  catch (e) {
+    sendError(e.message, e.code, e.stack, command_id);
+  }
+}
+
+/**
+  * Submit a form on a content page by either using form or element in a form
+  * @param object msg
+  *               'json' JSON object containing 'id' member of the element
+  */
+function submitElement (msg) {
+  let command_id = msg.json.command_id;
+  try {
+    let el = elementManager.getKnownElement(msg.json.id, curFrame);
+    while (el.parentNode != null && el.tagName.toLowerCase() != 'form') {
+      el = el.parentNode;
+    }
+    if (el.tagName && el.tagName.toLowerCase() == 'form') {
+      el.submit();
+      sendOk(command_id);
+    }
+    else {
+      sendError("Element is not a form element or in a form", 7, null, command_id);
+    }
+
   }
   catch (e) {
     sendError(e.message, e.code, e.stack, command_id);
@@ -1414,8 +1464,8 @@ function getElementValueOfCssProperty(msg){
 function getElementSize(msg){
   let command_id = msg.json.command_id;
   try {
-    let el = elementManager.getKnownElement(msg.json.element, curFrame);
-    let clientRect = el.getBoundingClientRect();  
+    let el = elementManager.getKnownElement(msg.json.id, curFrame);
+    let clientRect = el.getBoundingClientRect();
     sendResponse({value: {width: clientRect.width, height: clientRect.height}},
                  command_id);
   }
@@ -1430,7 +1480,7 @@ function getElementSize(msg){
 function isElementEnabled(msg) {
   let command_id = msg.json.command_id;
   try {
-    let el = elementManager.getKnownElement(msg.json.element, curFrame);
+    let el = elementManager.getKnownElement(msg.json.id, curFrame);
     sendResponse({value: utils.isElementEnabled(el)}, command_id);
   }
   catch (e) {
@@ -1444,7 +1494,7 @@ function isElementEnabled(msg) {
 function isElementSelected(msg) {
   let command_id = msg.json.command_id;
   try {
-    let el = elementManager.getKnownElement(msg.json.element, curFrame);
+    let el = elementManager.getKnownElement(msg.json.id, curFrame);
     sendResponse({value: utils.isElementSelected(el)}, command_id);
   }
   catch (e) {
@@ -1458,7 +1508,7 @@ function isElementSelected(msg) {
 function sendKeysToElement(msg) {
   let command_id = msg.json.command_id;
   try {
-    let el = elementManager.getKnownElement(msg.json.element, curFrame);
+    let el = elementManager.getKnownElement(msg.json.id, curFrame);
     if (checkVisible(el)) {
       utils.type(curFrame.document, el, msg.json.value.join(""), true);
       sendOk(command_id);
@@ -1478,7 +1528,7 @@ function sendKeysToElement(msg) {
 function getElementPosition(msg) {
   let command_id = msg.json.command_id;
   try{
-    let el = elementManager.getKnownElement(msg.json.element, curFrame);
+    let el = elementManager.getKnownElement(msg.json.id, curFrame);
     let rect = el.getBoundingClientRect();
 
     let location = {};
@@ -1498,7 +1548,7 @@ function getElementPosition(msg) {
 function clearElement(msg) {
   let command_id = msg.json.command_id;
   try {
-    let el = elementManager.getKnownElement(msg.json.element, curFrame);
+    let el = elementManager.getKnownElement(msg.json.id, curFrame);
     utils.clearElement(el);
     sendOk(command_id);
   }
@@ -1539,10 +1589,10 @@ function switchToFrame(msg) {
     // We probably have a dead compartment so accessing it is going to make Firefox
     // very upset. Let's now try redirect everything to the top frame even if the 
     // user has given us a frame since search doesnt look up.
-    msg.json.value = null;
+    msg.json.id = null;
     msg.json.element = null;
   }
-  if ((msg.json.value == null) && (msg.json.element == null)) {
+  if ((msg.json.id == null) && (msg.json.element == null)) {
     // returning to root frame
     sendSyncMessage("Marionette:switchedToFrame", { frameValue: null });
 
@@ -1573,7 +1623,7 @@ function switchToFrame(msg) {
     }
   }
   if (foundFrame == null) {
-    switch(typeof(msg.json.value)) {
+    switch(typeof(msg.json.id)) {
       case "string" :
         let foundById = null;
         for (let i = 0; i < frames.length; i++) {
@@ -1581,10 +1631,10 @@ function switchToFrame(msg) {
           let frame = frames[i];
           let name = utils.getElementAttribute(frame, 'name');
           let id = utils.getElementAttribute(frame, 'id');
-          if (name == msg.json.value) {
+          if (name == msg.json.id) {
             foundFrame = i;
             break;
-          } else if ((foundById == null) && (id == msg.json.value)) {
+          } else if ((foundById == null) && (id == msg.json.id)) {
             foundById = i;
           }
         }
@@ -1594,15 +1644,15 @@ function switchToFrame(msg) {
         }
         break;
       case "number":
-        if (frames[msg.json.value] != undefined) {
-          foundFrame = msg.json.value;
+        if (frames[msg.json.id] != undefined) {
+          foundFrame = msg.json.id;
           curFrame = frames[foundFrame];
         }
         break;
     }
   }
   if (foundFrame == null) {
-    sendError("Unable to locate frame: " + msg.json.value, 8, null, command_id);
+    sendError("Unable to locate frame: " + msg.json.id, 8, null, command_id);
     return;
   }
 
@@ -1825,9 +1875,9 @@ function importScript(msg) {
  */
 function screenShot(msg) {
   let node = null;
-  if (msg.json.element) {
+  if (msg.json.id) {
     try {
-      node = elementManager.getKnownElement(msg.json.element, curFrame)
+      node = elementManager.getKnownElement(msg.json.id, curFrame)
     }
     catch (e) {
       sendResponse(e.message, e.code, e.stack, msg.json.command_id);

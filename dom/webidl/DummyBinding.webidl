@@ -7,7 +7,6 @@
 // Dummy bindings that we need to force generation of things that
 // aren't actually referenced anywhere in IDL yet but are used in C++.
 
-[Global]
 interface DummyInterface : EventTarget {
   readonly attribute OnErrorEventHandlerNonNull onErrorEventHandler;
   FilePropertyBag fileBag();
@@ -27,6 +26,7 @@ interface DummyInterface : EventTarget {
   void DOMWindowResizeEventDetail(optional DOMWindowResizeEventDetail arg);
   void WifiOptions(optional WifiCommandOptions arg1,
                    optional WifiResultOptions arg2);
+  void AppNotificationServiceOptions(optional AppNotificationServiceOptions arg);
 };
 
 interface DummyInterfaceWorkers {

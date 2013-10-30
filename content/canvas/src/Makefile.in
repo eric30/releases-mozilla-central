@@ -10,7 +10,6 @@ LOCAL_INCLUDES += \
 endif
 
 include $(topsrcdir)/config/rules.mk
-include $(topsrcdir)/ipc/chromium/chromium-config.mk
 
 CXXFLAGS	+= $(MOZ_CAIRO_CFLAGS) $(MOZ_PIXMAN_CFLAGS) $(TK_CFLAGS)
 
@@ -22,5 +21,6 @@ INCLUDES	+= \
 		-I$(srcdir)/../../html/content/src \
 		-I$(srcdir)/../../../js/xpconnect/src \
 		-I$(srcdir)/../../../dom/base \
+		-I$(srcdir)/../../../image/src \
 		-I$(topsrcdir)/content/xul/content/src \
 		$(NULL)

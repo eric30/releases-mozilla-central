@@ -70,7 +70,7 @@ class ChunkPool {
 
   public:
     ChunkPool()
-      : emptyChunkListHead(NULL),
+      : emptyChunkListHead(nullptr),
         emptyCount(0) { }
 
     size_t getEmptyCount() const {
@@ -359,7 +359,7 @@ struct ArenaList {
     }
 
     void clear() {
-        head = NULL;
+        head = nullptr;
         cursor = &head;
     }
 
@@ -419,8 +419,8 @@ class ArenaLists
         for (size_t i = 0; i != FINALIZE_LIMIT; ++i)
             backgroundFinalizeState[i] = BFS_DONE;
         for (size_t i = 0; i != FINALIZE_LIMIT; ++i)
-            arenaListsToSweep[i] = NULL;
-        gcShapeArenasToSweep = NULL;
+            arenaListsToSweep[i] = nullptr;
+        gcShapeArenasToSweep = nullptr;
     }
 
     ~ArenaLists() {
@@ -817,14 +817,14 @@ class GCHelperThread {
   public:
     GCHelperThread(JSRuntime *rt)
       : rt(rt),
-        thread(NULL),
-        wakeup(NULL),
-        done(NULL),
+        thread(nullptr),
+        wakeup(nullptr),
+        done(nullptr),
         state(IDLE),
         sweepFlag(false),
         shrinkFlag(false),
-        freeCursor(NULL),
-        freeCursorEnd(NULL),
+        freeCursor(nullptr),
+        freeCursorEnd(nullptr),
         backgroundAllocation(true)
     { }
 
@@ -915,11 +915,11 @@ struct MarkStack {
     size_t sizeLimit;
 
     MarkStack(size_t sizeLimit)
-      : stack(NULL),
-        tos(NULL),
-        limit(NULL),
-        ballast(NULL),
-        ballastLimit(NULL),
+      : stack(nullptr),
+        tos(nullptr),
+        limit(nullptr),
+        ballast(nullptr),
+        ballastLimit(nullptr),
         sizeLimit(sizeLimit) { }
 
     ~MarkStack() {
@@ -1274,9 +1274,9 @@ typedef void (*IterateCellCallback)(JSRuntime *rt, void *data, void *thing,
                                     JSGCTraceKind traceKind, size_t thingSize);
 
 /*
- * This function calls |compartmentCallback| on every compartment,
- * |arenaCallback| on every in-use arena, and |cellCallback| on every in-use
- * cell in the GC heap.
+ * This function calls |zoneCallback| on every zone, |compartmentCallback| on
+ * every compartment, |arenaCallback| on every in-use arena, and |cellCallback|
+ * on every in-use cell in the GC heap.
  */
 extern void
 IterateZonesCompartmentsArenasCells(JSRuntime *rt, void *data,
@@ -1284,6 +1284,17 @@ IterateZonesCompartmentsArenasCells(JSRuntime *rt, void *data,
                                     JSIterateCompartmentCallback compartmentCallback,
                                     IterateArenaCallback arenaCallback,
                                     IterateCellCallback cellCallback);
+
+/*
+ * This function is like IterateZonesCompartmentsArenasCells, but does it for a
+ * single zone.
+ */
+extern void
+IterateZoneCompartmentsArenasCells(JSRuntime *rt, Zone *zone, void *data,
+                                   IterateZoneCallback zoneCallback,
+                                   JSIterateCompartmentCallback compartmentCallback,
+                                   IterateArenaCallback arenaCallback,
+                                   IterateCellCallback cellCallback);
 
 /*
  * Invoke chunkCallback on every in-use chunk.
@@ -1310,7 +1321,7 @@ js_FinalizeStringRT(JSRuntime *rt, JSString *str);
  * Macro to test if a traversal is the marking phase of the GC.
  */
 #define IS_GC_MARKING_TRACER(trc) \
-    ((trc)->callback == NULL || (trc)->callback == GCMarker::GrayCallback)
+    ((trc)->callback == nullptr || (trc)->callback == GCMarker::GrayCallback)
 
 namespace js {
 
@@ -1349,10 +1360,8 @@ const int ZealAllocValue = 2;
 const int ZealFrameGCValue = 3;
 const int ZealVerifierPreValue = 4;
 const int ZealFrameVerifierPreValue = 5;
-// These two values used to be distinct.  They no longer are, but both were
-// kept to avoid breaking fuzz tests.  Avoid using ZealStackRootingValue__2.
 const int ZealStackRootingValue = 6;
-const int ZealStackRootingValue__2 = 7;
+const int ZealGenerationalGCValue = 7;
 const int ZealIncrementalRootsThenFinish = 8;
 const int ZealIncrementalMarkAllThenFinish = 9;
 const int ZealIncrementalMultipleSlices = 10;

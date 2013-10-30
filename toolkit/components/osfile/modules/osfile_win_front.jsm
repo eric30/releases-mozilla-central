@@ -19,18 +19,19 @@
   (function(exports) {
      "use strict";
 
-     exports.OS = require("resource://gre/modules/osfile/osfile_shared_allthreads.jsm").OS;
-     let Path = require("resource://gre/modules/osfile/ospath.jsm");
 
       // exports.OS.Win is created by osfile_win_back.jsm
      if (exports.OS && exports.OS.File) {
         return; // Avoid double-initialization
      }
 
+     let SharedAll = require("resource://gre/modules/osfile/osfile_shared_allthreads.jsm");
+     let Path = require("resource://gre/modules/osfile/ospath.jsm");
+     let SysAll = require("resource://gre/modules/osfile/osfile_win_allthreads.jsm");
      exports.OS.Win.File._init();
      let Const = exports.OS.Constants.Win;
      let WinFile = exports.OS.Win.File;
-     let LOG = OS.Shared.LOG.bind(OS.Shared, "Win front-end");
+     let Type = WinFile.Type;
 
      // Mutable thread-global data
      // In the Windows implementation, methods |read| and |write|
@@ -47,7 +48,7 @@
      let gBytesWrittenPtr = gBytesWritten.address();
 
      // Same story for GetFileInformationByHandle
-     let gFileInfo = new OS.Shared.Type.FILE_INFORMATION.implementation();
+     let gFileInfo = new Type.FILE_INFORMATION.implementation();
      let gFileInfoPtr = gFileInfo.address();
 
      /**
@@ -133,6 +134,11 @@
       * @throws {OS.File.Error} In case of I/O error.
       */
      File.prototype._write = function _write(buffer, nbytes, options) {
+       if (this._appendMode) {
+         // Need to manually seek on Windows, as O_APPEND is not supported.
+         // This is, of course, a race, but there is no real way around this.
+         this.setPosition(0, File.POS_END);
+       }
        // |gBytesWrittenPtr| is a pointer to |gBytesWritten|.
        throw_on_zero("write",
          WinFile.WriteFile(this.fd, buffer, nbytes, gBytesWrittenPtr, null)
@@ -183,8 +189,37 @@
      };
 
      /**
+      * Set the last access and modification date of the file.
+      * The time stamp resolution is 1 second at best, but might be worse
+      * depending on the platform.
+      *
+      * @param {Date,number=} accessDate The last access date. If numeric,
+      * milliseconds since epoch. If omitted or null, then the current date
+      * will be used.
+      * @param {Date,number=} modificationDate The last modification date. If
+      * numeric, milliseconds since epoch. If omitted or null, then the current
+      * date will be used.
+      *
+      * @throws {TypeError} In case of invalid parameters.
+      * @throws {OS.File.Error} In case of I/O error.
+      */
+     File.prototype.setDates = function setDates(accessDate, modificationDate) {
+       accessDate = Date_to_FILETIME("File.prototype.setDates", accessDate);
+       modificationDate = Date_to_FILETIME("File.prototype.setDates",
+                                           modificationDate);
+       throw_on_zero("setDates",
+                     WinFile.SetFileTime(this.fd, null, accessDate.address(),
+                                         modificationDate.address()));
+     };
+
+     /**
       * Flushes the file's buffers and causes all buffered data
       * to be written.
+      * Disk flushes are very expensive and therefore should be used carefully,
+      * sparingly and only in scenarios where it is vital that data survives
+      * system crashes. Even though the function will be executed off the
+      * main-thread, it might still affect the overall performance of any
+      * running application.
       *
       * @throws {OS.File.Error} In case of I/O error.
       */
@@ -224,8 +259,11 @@
       *  on the other fields of |mode|.
       * - {bool} write If |true|, the file will be opened for
       *  writing. The file may also be opened for reading, depending
-      *  on the other fields of |mode|. If neither |truncate| nor
-      *  |create| is specified, the file is opened for appending.
+      *  on the other fields of |mode|.
+      * - {bool} append If |true|, the file will be opened for appending,
+      *  meaning the equivalent of |.setPosition(0, POS_END)| is executed
+      *  before each write. The default is |true|, i.e. opening a file for
+      *  appending. Specify |append: false| to open the file in regular mode.
       *
       * If neither |truncate|, |create| or |write| is specified, the file
       * is opened for reading.
@@ -263,6 +301,9 @@
        let template = options.winTemplate ? options.winTemplate._fd : null;
        let access;
        let disposition;
+
+       mode = OS.Shared.AbstractFile.normalizeOpenMode(mode);
+
        if ("winAccess" in options && "winDisposition" in options) {
          access = options.winAccess;
          disposition = options.winDisposition;
@@ -271,7 +312,6 @@
          throw new TypeError("OS.File.open requires either both options " +
            "winAccess and winDisposition or neither");
        } else {
-         mode = OS.Shared.AbstractFile.normalizeOpenMode(mode);
          if (mode.read) {
            access |= Const.GENERIC_READ;
          }
@@ -292,16 +332,18 @@
            disposition = Const.CREATE_NEW;
          } else if (mode.read && !mode.write) {
            disposition = Const.OPEN_EXISTING;
-         } else /*append*/ {
-           if (mode.existing) {
-             disposition = Const.OPEN_EXISTING;
-           } else {
-             disposition = Const.OPEN_ALWAYS;
-           }
+         } else if (mode.existing) {
+           disposition = Const.OPEN_EXISTING;
+         } else {
+           disposition = Const.OPEN_ALWAYS;
          }
        }
+
        let file = error_or_file(WinFile.CreateFile(path,
          access, share, security, disposition, flags, template));
+
+       file._appendMode = !!mode.append;
+
        if (!(mode.trunc && mode.existing)) {
          return file;
        }
@@ -388,7 +430,7 @@
        let result = WinFile.CreateDirectory(path, security);
        if (result ||
            options.ignoreExisting &&
-           ctypes.winLastError == OS.Constants.Win.ERROR_ALREADY_EXISTS) {
+           ctypes.winLastError == Const.ERROR_ALREADY_EXISTS) {
         return;
        }
        throw new File.Error("makeDir");
@@ -465,7 +507,7 @@
      /**
       * A global value used to receive data during time conversions.
       */
-     let gSystemTime = new OS.Shared.Type.SystemTime.implementation();
+     let gSystemTime = new Type.SystemTime.implementation();
      let gSystemTimePtr = gSystemTime.address();
 
      /**
@@ -487,6 +529,38 @@
                           gSystemTime.wMinute, gSystemTime.wSecond,
                           gSystemTime.wMilliSeconds);
        return new Date(utc);
+     };
+
+     /**
+      * Utility function: convert Javascript Date to FileTime.
+      *
+      * @param {string} fn Name of the calling function.
+      * @param {Date,number} date The date to be converted. If omitted or null,
+      * then the current date will be used. If numeric, assumed to be the date
+      * in milliseconds since epoch.
+      */
+     let Date_to_FILETIME = function Date_to_FILETIME(fn, date) {
+       if (typeof date === "number") {
+         date = new Date(date);
+       } else if (!date) {
+         date = new Date();
+       } else if (typeof date.getUTCFullYear !== "function") {
+         throw new TypeError("|date| parameter of " + fn + " must be a " +
+                             "|Date| instance or number");
+       }
+       gSystemTime.wYear = date.getUTCFullYear();
+       // Windows counts months from 1, JS from 0.
+       gSystemTime.wMonth = date.getUTCMonth() + 1;
+       gSystemTime.wDay = date.getUTCDate();
+       gSystemTime.wHour = date.getUTCHours();
+       gSystemTime.wMinute = date.getUTCMinutes();
+       gSystemTime.wSecond = date.getUTCSeconds();
+       gSystemTime.wMilliseconds = date.getUTCMilliseconds();
+       let result = new OS.Shared.Type.FILETIME.implementation();
+       throw_on_zero("Date_to_FILETIME",
+                     WinFile.SystemTimeToFileTime(gSystemTimePtr,
+                                                  result.address()));
+       return result;
      };
 
      /**
@@ -514,7 +588,7 @@
 
        // Pre-open the first item.
        this._first = true;
-       this._findData = new OS.Shared.Type.FindData.implementation();
+       this._findData = new Type.FindData.implementation();
        this._findDataPtr = this._findData.address();
        this._handle = WinFile.FindFirstFile(this._pattern, this._findDataPtr);
        if (this._handle == Const.INVALID_HANDLE_VALUE) {
@@ -523,12 +597,12 @@
          this._findDataPtr = null;
          if (error == Const.ERROR_FILE_NOT_FOUND) {
            // Directory is empty, let's behave as if it were closed
-           LOG("Directory is empty");
+           SharedAll.LOG("Directory is empty");
            this._closed = true;
            this._exists = true;
          } else if (error == Const.ERROR_PATH_NOT_FOUND) {
            // Directory does not exist, let's throw if we attempt to walk it
-           LOG("Directory does not exist");
+           SharedAll.LOG("Directory does not exist");
            this._closed = true;
            this._exists = false;
          } else {
@@ -650,11 +724,11 @@
 
        let path = Path.join(this._parent, name);
 
-       exports.OS.Shared.Win.AbstractEntry.call(this, isDir, isSymLink, name,
-                                                winCreationDate, winLastWriteDate,
-                                                winLastAccessDate, path);
+       SysAll.AbstractEntry.call(this, isDir, isSymLink, name,
+         winCreationDate, winLastWriteDate,
+         winLastAccessDate, path);
      };
-     File.DirectoryIterator.Entry.prototype = Object.create(exports.OS.Shared.Win.AbstractEntry.prototype);
+     File.DirectoryIterator.Entry.prototype = Object.create(SysAll.AbstractEntry.prototype);
 
      /**
       * Return a version of an instance of
@@ -695,13 +769,13 @@
        let lastWriteDate = FILETIME_to_Date(stat.ftLastWriteTime);
 
        let value = ctypes.UInt64.join(stat.nFileSizeHigh, stat.nFileSizeLow);
-       let size = exports.OS.Shared.Type.uint64_t.importFromC(value);
+       let size = Type.uint64_t.importFromC(value);
 
-       exports.OS.Shared.Win.AbstractInfo.call(this, isDir, isSymLink, size,
-                                               winBirthDate, lastAccessDate,
-                                               lastWriteDate);
+       SysAll.AbstractInfo.call(this, isDir, isSymLink, size,
+         winBirthDate, lastAccessDate,
+         lastWriteDate);
      };
-     File.Info.prototype = Object.create(exports.OS.Shared.Win.AbstractInfo.prototype);
+     File.Info.prototype = Object.create(SysAll.AbstractInfo.prototype);
 
      /**
       * Return a version of an instance of File.Info that can be sent
@@ -744,52 +818,98 @@
      // All of the following is required to ensure that File.stat
      // also works on directories.
      const FILE_STAT_MODE = {
-       read:true
+       read: true
      };
      const FILE_STAT_OPTIONS = {
        // Directories can be opened neither for reading(!) nor for writing
        winAccess: 0,
        // Directories can only be opened with backup semantics(!)
-       winFlags: OS.Constants.Win.FILE_FLAG_BACKUP_SEMANTICS,
-       winDisposition: OS.Constants.Win.OPEN_EXISTING
+       winFlags: Const.FILE_FLAG_BACKUP_SEMANTICS,
+       winDisposition: Const.OPEN_EXISTING
+     };
+
+     /**
+      * Set the last access and modification date of the file.
+      * The time stamp resolution is 1 second at best, but might be worse
+      * depending on the platform.
+      *
+      * Performance note: if you have opened the file already in write mode,
+      * method |File.prototype.stat| is generally much faster
+      * than method |File.stat|.
+      *
+      * Platform-specific note: under Windows, if the file is
+      * already opened without sharing of the write capability,
+      * this function will fail.
+      *
+      * @param {string} path The full name of the file to set the dates for.
+      * @param {Date,number=} accessDate The last access date. If numeric,
+      * milliseconds since epoch. If omitted or null, then the current date
+      * will be used.
+      * @param {Date,number=} modificationDate The last modification date. If
+      * numeric, milliseconds since epoch. If omitted or null, then the current
+      * date will be used.
+      *
+      * @throws {TypeError} In case of invalid paramters.
+      * @throws {OS.File.Error} In case of I/O error.
+      */
+     File.setDates = function setDates(path, accessDate, modificationDate) {
+       let file = File.open(path, FILE_SETDATES_MODE, FILE_SETDATES_OPTIONS);
+       try {
+         return file.setDates(accessDate, modificationDate);
+       } finally {
+         file.close();
+       }
+     };
+     // All of the following is required to ensure that File.setDates
+     // also works on directories.
+     const FILE_SETDATES_MODE = {
+       write: true
+     };
+     const FILE_SETDATES_OPTIONS = {
+       winAccess: Const.GENERIC_WRITE,
+       // Directories can only be opened with backup semantics(!)
+       winFlags: Const.FILE_FLAG_BACKUP_SEMANTICS,
+       winDisposition: Const.OPEN_EXISTING
      };
 
      File.read = exports.OS.Shared.AbstractFile.read;
      File.writeAtomic = exports.OS.Shared.AbstractFile.writeAtomic;
+     File.openUnique = exports.OS.Shared.AbstractFile.openUnique;
+     File.removeDir = exports.OS.Shared.AbstractFile.removeDir;
 
      /**
       * Get the current directory by getCurrentDirectory.
       */
      File.getCurrentDirectory = function getCurrentDirectory() {
-           // This function is more complicated than one could hope.
-           //
-           // This is due to two facts:
-           // - the maximal length of a path under Windows is not completely
-           //  specified (there is a constant MAX_PATH, but it is quite possible
-           //  to create paths that are much larger, see bug 744413);
-           // - if we attempt to call |GetCurrentDirectory| with a buffer that
-           //  is too short, it returns the length of the current directory, but
-           //  this length might be insufficient by the time we can call again
-           //  the function with a larger buffer, in the (unlikely byt possible)
-           //  case in which the process changes directory to a directory with
-           //  a longer name between both calls.
-           let buffer_size = 4096;
-           while (true) {
-             let array = new (ctypes.ArrayType(ctypes.jschar, buffer_size))();
+       // This function is more complicated than one could hope.
+       //
+       // This is due to two facts:
+       // - the maximal length of a path under Windows is not completely
+       //  specified (there is a constant MAX_PATH, but it is quite possible
+       //  to create paths that are much larger, see bug 744413);
+       // - if we attempt to call |GetCurrentDirectory| with a buffer that
+       //  is too short, it returns the length of the current directory, but
+       //  this length might be insufficient by the time we can call again
+       //  the function with a larger buffer, in the (unlikely but possible)
+       //  case in which the process changes directory to a directory with
+       //  a longer name between both calls.
+       //
+       let buffer_size = 4096;
+       while (true) {
+         let array = new (ctypes.ArrayType(ctypes.jschar, buffer_size))();
          let expected_size = throw_on_zero("getCurrentDirectory",
-               WinFile.GetCurrentDirectory(buffer_size, array)
-             );
-             if (expected_size <= buffer_size) {
-               return array.readString();
-             }
-             // At this point, we are in a case in which our buffer was not
-             // large enough to hold the name of the current directory.
-             // Consequently
-
-             // Note that, even in crazy scenarios, the loop will eventually
-             // converge, as the length of the paths cannot increase infinitely.
-             buffer_size = expected_size;
-           }
+           WinFile.GetCurrentDirectory(buffer_size, array)
+         );
+         if (expected_size <= buffer_size) {
+           return array.readString();
+         }
+         // At this point, we are in a case in which our buffer was not
+         // large enough to hold the name of the current directory.
+         // Consequently, we need to increase the size of the buffer.
+         // Note that, even in crazy scenarios, the loop will eventually
+         // converge, as the length of the paths cannot increase infinitely.
+         buffer_size = expected_size + 1 /* to store \0 */;
+       }
      };
 
      /**
@@ -815,7 +935,7 @@
 
      // Utility functions, used for error-handling
      function error_or_file(maybe) {
-       if (maybe == exports.OS.Constants.Win.INVALID_HANDLE_VALUE) {
+       if (maybe == Const.INVALID_HANDLE_VALUE) {
          throw new File.Error("open");
        }
        return new File(maybe);
@@ -840,13 +960,12 @@
      }
 
      File.Win = exports.OS.Win.File;
-     File.Error = exports.OS.Shared.Win.Error;
+     File.Error = SysAll.Error;
      exports.OS.File = File;
+     exports.OS.Shared.Type = Type;
 
-     exports.OS.Path = exports.Path;
-
-     Object.defineProperty(File, "POS_START", { value: OS.Shared.POS_START });
-     Object.defineProperty(File, "POS_CURRENT", { value: OS.Shared.POS_CURRENT });
-     Object.defineProperty(File, "POS_END", { value: OS.Shared.POS_END });
+     Object.defineProperty(File, "POS_START", { value: SysAll.POS_START });
+     Object.defineProperty(File, "POS_CURRENT", { value: SysAll.POS_CURRENT });
+     Object.defineProperty(File, "POS_END", { value: SysAll.POS_END });
    })(this);
 }

@@ -100,7 +100,7 @@ TopSitesView.prototype = Util.extend(Object.create(View.prototype), {
       case "pin":
         let pinIndices = [];
         Array.forEach(selectedTiles, function(aNode) {
-          pinIndices.push( Array.indexOf(aNode.control.children, aNode) );
+          pinIndices.push( Array.indexOf(aNode.control.items, aNode) );
           aNode.contextActions.delete('pin');
           aNode.contextActions.add('unpin');
         });
@@ -153,26 +153,35 @@ TopSitesView.prototype = Util.extend(Object.create(View.prototype), {
         // flush, recreate all
       this.isUpdating = true;
       // destroy and recreate all item nodes, skip calling arrangeItems
-      grid.clearAll(true);
       this.populateGrid();
     }
   },
 
   updateTile: function(aTileNode, aSite, aArrangeGrid) {
+    if (!(aSite && aSite.url)) {
+      throw new Error("Invalid Site object passed to TopSitesView updateTile");
+    }
     this._updateFavicon(aTileNode, Util.makeURI(aSite.url));
 
     Task.spawn(function() {
       let filepath = PageThumbsStorage.getFilePathForURL(aSite.url);
       if (yield OS.File.exists(filepath)) {
         aSite.backgroundImage = 'url("'+PageThumbs.getThumbnailURL(aSite.url)+'")';
-        aTileNode.setAttribute("customImage", aSite.backgroundImage);
-        if (aTileNode.refresh) {
-          aTileNode.refresh()
+        // use the setter when available to update the backgroundImage value
+        if ('backgroundImage' in aTileNode &&
+            aTileNode.backgroundImage != aSite.backgroundImage) {
+          aTileNode.backgroundImage = aSite.backgroundImage;
+        } else {
+          // just update the attribute for when the node gets the binding applied
+          aTileNode.setAttribute("customImage", aSite.backgroundImage);
         }
       }
     });
 
     aSite.applyToTileNode(aTileNode);
+    if (aTileNode.refresh) {
+      aTileNode.refresh();
+    }
     if (aArrangeGrid) {
       this._set.arrangeItems();
     }
@@ -182,24 +191,15 @@ TopSitesView.prototype = Util.extend(Object.create(View.prototype), {
     this.isUpdating = true;
 
     let sites = TopSites.getSites();
-    let length = Math.min(sites.length, this._topSitesMax || Infinity);
-    let tileset = this._set;
-
-    // if we're updating with a collection that is smaller than previous
-    // remove any extra tiles
-    while (tileset.children.length > length) {
-      tileset.removeChild(tileset.children[tileset.children.length -1]);
+    if (this._topSitesMax) {
+      sites = sites.slice(0, this._topSitesMax);
     }
+    let tileset = this._set;
+    tileset.clearAll(true);
 
-    for (let idx=0; idx < length; idx++) {
-      let isNew = !tileset.children[idx],
-          site = sites[idx];
-      let item = isNew ? tileset.createItemElement(site.title, site.url) : tileset.children[idx];
-
-      this.updateTile(item, site);
-      if (isNew) {
-        tileset.appendChild(item);
-      }
+    for (let site of sites) {
+      let slot = tileset.nextSlot();
+      this.updateTile(slot, site);
     }
     tileset.arrangeItems();
     this.isUpdating = false;
@@ -246,7 +246,7 @@ TopSitesView.prototype = Util.extend(Object.create(View.prototype), {
 
   // nsIObservers
   observe: function (aSubject, aTopic, aState) {
-    switch(aTopic) {
+    switch (aTopic) {
       case "Metro:RefreshTopsiteThumbnail":
         this.forceReloadOfThumbnail(aState);
         break;
@@ -271,7 +271,8 @@ TopSitesView.prototype = Util.extend(Object.create(View.prototype), {
   },
 
   onClearHistory: function() {
-    this._set.clearAll();
+    if ('clearAll' in this._set)
+      this._set.clearAll();
   },
 
   onPageChanged: function(aURI, aWhat, aValue) {
@@ -300,6 +301,7 @@ let TopSitesStartView = {
       let topsitesVbox = document.getElementById("start-topsites");
       topsitesVbox.setAttribute("hidden", "true");
     }
+    this._grid.removeAttribute("fade");
   },
 
   uninit: function uninit() {

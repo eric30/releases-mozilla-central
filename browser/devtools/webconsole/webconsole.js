@@ -106,14 +106,14 @@ const SEVERITY_CLASS_FRAGMENTS = [
 // Most of these rather idiosyncratic names are historical and predate the
 // division of message type into "category" and "severity".
 const MESSAGE_PREFERENCE_KEYS = [
-//  Error         Warning   Info    Log
-  [ "network",    "netwarn",    null,   "networkinfo", ],  // Network
-  [ "csserror",   "cssparser",  null,   null,          ],  // CSS
-  [ "exception",  "jswarn",     null,   "jslog",       ],  // JS
-  [ "error",      "warn",       "info", "log",         ],  // Web Developer
-  [ null,         null,         null,   null,          ],  // Input
-  [ null,         null,         null,   null,          ],  // Output
-  [ "secerror",   "secwarn",    null,   null,          ],  // Security
+//  Error         Warning       Info      Log
+  [ "network",    "netwarn",    null,     "networkinfo", ],  // Network
+  [ "csserror",   "cssparser",  null,     "csslog",      ],  // CSS
+  [ "exception",  "jswarn",     null,     "jslog",       ],  // JS
+  [ "error",      "warn",       "info",   "log",         ],  // Web Developer
+  [ null,         null,         null,     null,          ],  // Input
+  [ null,         null,         null,     null,          ],  // Output
+  [ "secerror",   "secwarn",    null,     null,          ],  // Security
 ];
 
 // A mapping from the console API log event levels to the Web Console
@@ -490,7 +490,6 @@ WebConsoleFrame.prototype = {
 
     this._setFilterTextBoxEvents();
     this._initFilterButtons();
-    this._changeClearModifier();
 
     let fontSize = this.owner._browserConsole ?
                    Services.prefs.getIntPref("devtools.webconsole.fontSize") : 0;
@@ -564,12 +563,34 @@ WebConsoleFrame.prototype = {
    */
   _initDefaultFilterPrefs: function WCF__initDefaultFilterPrefs()
   {
-    let prefs = ["network", "networkinfo", "csserror", "cssparser", "exception",
-                 "jswarn", "jslog", "error", "info", "warn", "log", "secerror",
-                 "secwarn", "netwarn"];
+    let prefs = ["network", "networkinfo", "csserror", "cssparser", "csslog",
+                 "exception", "jswarn", "jslog", "error", "info", "warn", "log",
+                 "secerror", "secwarn", "netwarn"];
     for (let pref of prefs) {
       this.filterPrefs[pref] = Services.prefs
                                .getBoolPref(this._filterPrefsPrefix + pref);
+    }
+  },
+
+  /**
+   * Attach / detach reflow listeners depending on the checked status
+   * of the `CSS > Log` menuitem.
+   *
+   * @param function [aCallback=null]
+   *        Optional function to invoke when the listener has been
+   *        added/removed.
+   *
+   */
+  _updateReflowActivityListener:
+    function WCF__updateReflowActivityListener(aCallback)
+  {
+    if (this.webConsoleClient) {
+      let pref = this._filterPrefsPrefix + "csslog";
+      if (Services.prefs.getBoolPref(pref)) {
+        this.webConsoleClient.startListeners(["ReflowActivity"], aCallback);
+      } else {
+        this.webConsoleClient.stopListeners(["ReflowActivity"], aCallback);
+      }
     }
   },
 
@@ -592,21 +613,6 @@ WebConsoleFrame.prototype = {
 
     this.filterBox.addEventListener("command", onChange, false);
     this.filterBox.addEventListener("input", onChange, false);
-  },
-
-  /**
-   * Changes modifier for the clear output shorcut on Macs.
-   *
-   * @private
-   */
-  _changeClearModifier: function WCF__changeClearModifier()
-  {
-    if (Services.appinfo.OS != "Darwin") {
-      return;
-    }
-
-    let clear = this.document.querySelector("#key_clearOutput");
-    clear.setAttribute("modifiers", "access");
   },
 
   /**
@@ -653,6 +659,9 @@ WebConsoleFrame.prototype = {
       let net = this.document.querySelector("toolbarbutton[category=net]");
       let accesskey = net.getAttribute("accesskeyMacOSX");
       net.setAttribute("accesskey", accesskey);
+
+      let logging = this.document.querySelector("toolbarbutton[category=logging]");
+      logging.removeAttribute("accesskey");
     }
   },
 
@@ -800,6 +809,7 @@ WebConsoleFrame.prototype = {
     this.filterPrefs[aToggleType] = aState;
     this.adjustVisibilityForMessageType(aToggleType, aState);
     Services.prefs.setBoolPref(this._filterPrefsPrefix + aToggleType, aState);
+    this._updateReflowActivityListener();
   },
 
   /**
@@ -886,7 +896,7 @@ WebConsoleFrame.prototype = {
       let node = nodes[i];
 
       // hide nodes that match the strings
-      let text = node.clipboardText;
+      let text = node.textContent;
 
       // if the text matches the words in aSearchString...
       if (this.stringMatchesFilters(text, searchString)) {
@@ -1545,6 +1555,42 @@ WebConsoleFrame.prototype = {
   handleFileActivity: function WCF_handleFileActivity(aFileURI)
   {
     this.outputMessage(CATEGORY_NETWORK, this.logFileActivity, [aFileURI]);
+  },
+
+  /**
+   * Handle the reflow activity messages coming from the remote Web Console.
+   *
+   * @param object aMessage
+   *        An object holding information about a reflow batch.
+   */
+  logReflowActivity: function WCF_logReflowActivity(aMessage)
+  {
+    let {start, end, sourceURL, sourceLine} = aMessage;
+    let duration = Math.round((end - start) * 100) / 100;
+    let node = this.document.createElementNS(XHTML_NS, "span");
+    if (sourceURL) {
+      node.textContent = l10n.getFormatStr("reflow.messageWithLink", [duration]);
+      let a = this.document.createElementNS(XHTML_NS, "a");
+      a.href = "#";
+      a.draggable = "false";
+      let filename = WebConsoleUtils.abbreviateSourceURL(sourceURL);
+      let functionName = aMessage.functionName || l10n.getStr("stacktrace.anonymousFunction");
+      a.textContent = l10n.getFormatStr("reflow.messageLinkText",
+                         [functionName, filename, sourceLine]);
+      this._addMessageLinkCallback(a, () => {
+        this.owner.viewSourceInDebugger(sourceURL, sourceLine);
+      });
+      node.appendChild(a);
+    } else {
+      node.textContent = l10n.getFormatStr("reflow.messageWithNoLink", [duration]);
+    }
+    return this.createMessageNode(CATEGORY_CSS, SEVERITY_LOG, node);
+  },
+
+
+  handleReflowActivity: function WCF_handleReflowActivity(aMessage)
+  {
+    this.outputMessage(CATEGORY_CSS, this.logReflowActivity, [aMessage]);
   },
 
   /**
@@ -2362,8 +2408,10 @@ WebConsoleFrame.prototype = {
 
     // Add the message repeats node only when needed.
     let repeatNode = null;
-    if (aCategory != CATEGORY_INPUT && aCategory != CATEGORY_OUTPUT &&
-        aCategory != CATEGORY_NETWORK) {
+    if (aCategory != CATEGORY_INPUT &&
+        aCategory != CATEGORY_OUTPUT &&
+        aCategory != CATEGORY_NETWORK &&
+        !(aCategory == CATEGORY_CSS && aSeverity == SEVERITY_LOG)) {
       repeatNode = this.document.createElementNS(XHTML_NS, "span");
       repeatNode.setAttribute("value", "1");
       repeatNode.className = "repeats";
@@ -2589,16 +2637,7 @@ WebConsoleFrame.prototype = {
     // Make the location clickable.
     this._addMessageLinkCallback(locationNode, () => {
       if (isScratchpad) {
-        let wins = Services.wm.getEnumerator("devtools:scratchpad");
-
-        while (wins.hasMoreElements()) {
-          let win = wins.getNext();
-
-          if (!win.closed && win.Scratchpad.uniqueName === aSourceURL) {
-            win.focus();
-            return;
-          }
-        }
+        this.owner.viewSourceInScratchpad(aSourceURL);
       }
       else if (locationNode.parentNode.category == CATEGORY_CSS) {
         this.owner.viewSourceInStyleEditor(fullURL, aSourceLine);
@@ -4678,6 +4717,7 @@ function WebConsoleConnectionProxy(aWebConsole, aTarget)
   this._onNetworkEvent = this._onNetworkEvent.bind(this);
   this._onNetworkEventUpdate = this._onNetworkEventUpdate.bind(this);
   this._onFileActivity = this._onFileActivity.bind(this);
+  this._onReflowActivity = this._onReflowActivity.bind(this);
   this._onTabNavigated = this._onTabNavigated.bind(this);
   this._onAttachConsole = this._onAttachConsole.bind(this);
   this._onCachedMessages = this._onCachedMessages.bind(this);
@@ -4784,6 +4824,7 @@ WebConsoleConnectionProxy.prototype = {
     client.addListener("networkEvent", this._onNetworkEvent);
     client.addListener("networkEventUpdate", this._onNetworkEventUpdate);
     client.addListener("fileActivity", this._onFileActivity);
+    client.addListener("reflowActivity", this._onReflowActivity);
     client.addListener("lastPrivateContextExited", this._onLastPrivateContextExited);
     this.target.on("will-navigate", this._onTabNavigated);
     this.target.on("navigate", this._onTabNavigated);
@@ -4849,6 +4890,8 @@ WebConsoleConnectionProxy.prototype = {
 
     let msgs = ["PageError", "ConsoleAPI"];
     this.webConsoleClient.getCachedMessages(msgs, this._onCachedMessages);
+
+    this.owner._updateReflowActivityListener();
   },
 
   /**
@@ -4986,6 +5029,13 @@ WebConsoleConnectionProxy.prototype = {
     }
   },
 
+  _onReflowActivity: function WCCP__onReflowActivity(aType, aPacket)
+  {
+    if (this.owner && aPacket.from == this._consoleActor) {
+      this.owner.handleReflowActivity(aPacket);
+    }
+  },
+
   /**
    * The "lastPrivateContextExited" message type handler. When this message is
    * received the Web Console UI is cleared.
@@ -5061,6 +5111,7 @@ WebConsoleConnectionProxy.prototype = {
     this.client.removeListener("networkEvent", this._onNetworkEvent);
     this.client.removeListener("networkEventUpdate", this._onNetworkEventUpdate);
     this.client.removeListener("fileActivity", this._onFileActivity);
+    this.client.removeListener("reflowActivity", this._onReflowActivity);
     this.client.removeListener("lastPrivateContextExited", this._onLastPrivateContextExited);
     this.target.off("will-navigate", this._onTabNavigated);
     this.target.off("navigate", this._onTabNavigated);

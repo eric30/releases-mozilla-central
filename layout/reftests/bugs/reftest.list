@@ -1560,7 +1560,7 @@ fails-if(Android) == 579323-1.html 579323-1-ref.html
 == 579655-1.html 579655-1-ref.html
 skip-if(B2G) fails-if(Android) == 579808-1.html 579808-1-ref.html
 skip-if(B2G) fails-if(Android) random-if(layersGPUAccelerated) == 579985-1.html 579985-1-ref.html # bug 623452 for WinXP; this bug was only for a regression in BasicLayers anyway
-skip-if(B2G) fails-if(Android) == 580160-1.html 580160-1-ref.html
+skip-if(B2G) skip-if(Android) == 580160-1.html 580160-1-ref.html # bug 920927 for Android; issues without the test-plugin
 HTTP(..) == 580863-1.html 580863-1-ref.html
 skip-if(B2G) fails-if(Android) random-if(layersGPUAccelerated) fails-if(/^Windows\x20NT\x205\.1/.test(http.oscpu))  == 581317-1.html 581317-1-ref.html # bug 623456 for WinXP
 == 581579-1.html 581579-1-ref.html
@@ -1734,7 +1734,7 @@ fuzzy(40,850) fuzzy-if(azureQuartz,68,586) == 797797-2.html 797797-2-ref.html # 
 == 801681-2.html 801681-2-ref.html
 == 801994-1.html 801994-1-ref.html
 == 804323-1.html 804323-1-ref.html
-fuzzy-if(Android,8,400) == 811301-1.html 811301-1-ref.html
+fuzzy-if(Android,8,608) == 811301-1.html 811301-1-ref.html
 == 812824-1.html 812824-1-ref.html
 == 814677.html 814677-ref.html
 skip-if(B2G) == 814952-1.html 814952-1-ref.html
@@ -1775,3 +1775,4 @@ test-pref(layout.css.flexbox.enabled,true) == 849407-1.html 849407-1-ref.html
 fuzzy(1,10000) fuzzy-if(Android&&AndroidVersion>=15,5,10000) == 902330-1.html 902330-1-ref.html
 fuzzy-if(Android,8,400) == 906199-1.html 906199-1-ref.html
 == 921716-1.html 921716-1-ref.html
+fuzzy-if(cocoaWidget,1,40) == 928607-1.html 928607-1-ref.html

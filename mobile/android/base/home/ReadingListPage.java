@@ -101,7 +101,7 @@ public class ReadingListPage extends HomeFragment {
                 }
 
                 String url = c.getString(c.getColumnIndexOrThrow(URLColumns.URL));
-                url = ReaderModeUtils.getAboutReaderForUrl(url, true);
+                url = ReaderModeUtils.getAboutReaderForUrl(url);
 
                 // This item is a TwoLinePageRow, so we allow switch-to-tab.
                 mUrlOpenListener.onUrlOpen(url, EnumSet.of(OnUrlOpenListener.Flags.ALLOW_SWITCH_TO_TAB));
@@ -198,7 +198,7 @@ public class ReadingListPage extends HomeFragment {
      */
     private class ReadingListAdapter extends CursorAdapter {
         public ReadingListAdapter(Context context, Cursor cursor) {
-            super(context, cursor);
+            super(context, cursor, 0);
         }
 
         @Override

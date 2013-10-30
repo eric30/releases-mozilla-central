@@ -172,6 +172,8 @@
 #include "mozilla/HangMonitor.h"
 #include "WinIMEHandler.h"
 
+#include "npapi.h"
+
 using namespace mozilla;
 using namespace mozilla::dom;
 using namespace mozilla::layers;
@@ -197,7 +199,7 @@ bool            nsWindow::sDropShadowEnabled      = true;
 uint32_t        nsWindow::sInstanceCount          = 0;
 bool            nsWindow::sSwitchKeyboardLayout   = false;
 BOOL            nsWindow::sIsOleInitialized       = FALSE;
-HCURSOR         nsWindow::sHCursor                = NULL;
+HCURSOR         nsWindow::sHCursor                = nullptr;
 imgIContainer*  nsWindow::sCursorImgContainer     = nullptr;
 nsWindow*       nsWindow::sCurrentWindow          = nullptr;
 bool            nsWindow::sJustGotDeactivate      = false;
@@ -210,12 +212,12 @@ TriStateBool    nsWindow::sCanQuit                = TRI_UNKNOWN;
 // Hook Data Memebers for Dropdowns. sProcessHook Tells the
 // hook methods whether they should be processing the hook
 // messages.
-HHOOK           nsWindow::sMsgFilterHook          = NULL;
-HHOOK           nsWindow::sCallProcHook           = NULL;
-HHOOK           nsWindow::sCallMouseHook          = NULL;
+HHOOK           nsWindow::sMsgFilterHook          = nullptr;
+HHOOK           nsWindow::sCallProcHook           = nullptr;
+HHOOK           nsWindow::sCallMouseHook          = nullptr;
 bool            nsWindow::sProcessHook            = false;
 UINT            nsWindow::sRollupMsgId            = 0;
-HWND            nsWindow::sRollupMsgWnd           = NULL;
+HWND            nsWindow::sRollupMsgWnd           = nullptr;
 UINT            nsWindow::sHookTimerId            = 0;
 
 // Mouse Clicks - static variable definitions for figuring
@@ -370,7 +372,7 @@ nsWindow::nsWindow() : nsWindowBase()
     mozilla::widget::WinTaskbar::RegisterAppUserModelID();
     KeyboardLayout::GetInstance()->OnLayoutChange(::GetKeyboardLayout(0));
     IMEHandler::Initialize();
-    if (SUCCEEDED(::OleInitialize(NULL))) {
+    if (SUCCEEDED(::OleInitialize(nullptr))) {
       sIsOleInitialized = TRUE;
     }
     NS_ASSERTION(sIsOleInitialized, "***** OLE is not initialized!\n");
@@ -395,7 +397,7 @@ nsWindow::~nsWindow()
   // exists, and we need to destroy it. This will also result in a call to OnDestroy.
   //
   // XXX How could this happen???
-  if (NULL != mWnd)
+  if (nullptr != mWnd)
     Destroy();
 
   // Free app icon resources.  This must happen after `OnDestroy` (see bug 708033).
@@ -467,7 +469,7 @@ nsWindow::Create(nsIWidget *aParent,
 
   HWND parent;
   if (aParent) { // has a nsIWidget parent
-    parent = aParent ? (HWND)aParent->GetNativeData(NS_NATIVE_WINDOW) : NULL;
+    parent = aParent ? (HWND)aParent->GetNativeData(NS_NATIVE_WINDOW) : nullptr;
     mParent = aParent;
   } else { // has a nsNative parent
     parent = (HWND)aNativeParent;
@@ -482,7 +484,7 @@ nsWindow::Create(nsIWidget *aParent,
 
   if (mWindowType == eWindowType_popup) {
     if (!aParent) {
-      parent = NULL;
+      parent = nullptr;
     }
 
     if (WinUtils::GetWindowsVersion() >= WinUtils::VISTA_VERSION &&
@@ -531,9 +533,9 @@ nsWindow::Create(nsIWidget *aParent,
                            aRect.width,
                            GetHeight(aRect.height),
                            parent,
-                           NULL,
+                           nullptr,
                            nsToolkit::mDllInstance,
-                           NULL);
+                           nullptr);
 
   if (!mWnd) {
     NS_WARNING("nsWindow CreateWindowEx failed.");
@@ -571,11 +573,12 @@ nsWindow::Create(nsIWidget *aParent,
     HWND scrollContainerWnd = ::CreateWindowW
       (className.get(), L"FAKETRACKPOINTSCROLLCONTAINER",
        WS_CHILD | WS_VISIBLE,
-       0, 0, 0, 0, mWnd, NULL, nsToolkit::mDllInstance, NULL);
+       0, 0, 0, 0, mWnd, nullptr, nsToolkit::mDllInstance, nullptr);
     HWND scrollableWnd = ::CreateWindowW
       (className.get(), L"FAKETRACKPOINTSCROLLABLE",
        WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_TABSTOP | 0x30,
-       0, 0, 0, 0, scrollContainerWnd, NULL, nsToolkit::mDllInstance, NULL);
+       0, 0, 0, 0, scrollContainerWnd, nullptr, nsToolkit::mDllInstance,
+       nullptr);
 
     // Give the FAKETRACKPOINTSCROLLABLE window a specific ID so that
     // WindowProcInternal can distinguish it from the top-level window
@@ -642,7 +645,7 @@ NS_METHOD nsWindow::Destroy()
 
   /**
    * On windows the LayerManagerOGL destructor wants the widget to be around for
-   * cleanup. It also would like to have the HWND intact, so we NULL it here.
+   * cleanup. It also would like to have the HWND intact, so we nullptr it here.
    */
   if (mLayerManager) {
     mLayerManager->Destroy();
@@ -699,10 +702,10 @@ void nsWindow::RegisterWindowClass(const nsString& aClassName, UINT aExtraStyle,
   wc.cbClsExtra    = 0;
   wc.cbWndExtra    = 0;
   wc.hInstance     = nsToolkit::mDllInstance;
-  wc.hIcon         = aIconID ? ::LoadIconW(::GetModuleHandleW(NULL), aIconID) : NULL;
-  wc.hCursor       = NULL;
+  wc.hIcon         = aIconID ? ::LoadIconW(::GetModuleHandleW(nullptr), aIconID) : nullptr;
+  wc.hCursor       = nullptr;
   wc.hbrBackground = mBrush;
-  wc.lpszMenuName  = NULL;
+  wc.lpszMenuName  = nullptr;
   wc.lpszClassName = aClassName.get();
 
   if (!::RegisterClassW(&wc)) {
@@ -903,8 +906,8 @@ void nsWindow::SubclassWindow(BOOL bState)
                           reinterpret_cast<LONG_PTR>(mPrevWndProc));
       }
     }
-    WinUtils::SetNSWindowBasePtr(mWnd, NULL);
-    mPrevWndProc = NULL;
+    WinUtils::SetNSWindowBasePtr(mWnd, nullptr);
+    mPrevWndProc = nullptr;
   }
 }
 
@@ -1233,7 +1236,7 @@ void nsWindow::ClearThemeRegion()
       !HasGlass() &&
       (mWindowType == eWindowType_popup && !IsPopupWithTitleBar() &&
        (mPopupType == ePopupTypeTooltip || mPopupType == ePopupTypePanel))) {
-    SetWindowRgn(mWnd, NULL, false);
+    SetWindowRgn(mWnd, nullptr, false);
   }
 }
 
@@ -1386,7 +1389,7 @@ NS_METHOD nsWindow::Move(double aX, double aY)
         (mClipRectCount != 1 || !mClipRects[0].IsEqualInterior(nsIntRect(0, 0, mBounds.width, mBounds.height)))) {
       flags |= SWP_NOCOPYBITS;
     }
-    VERIFY(::SetWindowPos(mWnd, NULL, x, y, 0, 0, flags));
+    VERIFY(::SetWindowPos(mWnd, nullptr, x, y, 0, 0, flags));
 
     SetThemeRegion();
   }
@@ -1434,7 +1437,8 @@ NS_METHOD nsWindow::Resize(double aWidth, double aHeight, bool aRepaint)
     }
 
     ClearThemeRegion();
-    VERIFY(::SetWindowPos(mWnd, NULL, 0, 0, width, GetHeight(height), flags));
+    VERIFY(::SetWindowPos(mWnd, nullptr, 0, 0,
+                          width, GetHeight(height), flags));
     SetThemeRegion();
   }
 
@@ -1489,7 +1493,8 @@ NS_METHOD nsWindow::Resize(double aX, double aY, double aWidth, double aHeight, 
     }
 
     ClearThemeRegion();
-    VERIFY(::SetWindowPos(mWnd, NULL, x, y, width, GetHeight(height), flags));
+    VERIFY(::SetWindowPos(mWnd, nullptr, x, y,
+                          width, GetHeight(height), flags));
     SetThemeRegion();
   }
 
@@ -1512,8 +1517,7 @@ nsWindow::BeginResizeDrag(WidgetGUIEvent* aEvent,
     return NS_ERROR_INVALID_ARG;
   }
 
-  WidgetMouseEvent* mouseEvent = static_cast<WidgetMouseEvent*>(aEvent);
-  if (mouseEvent->button != WidgetMouseEvent::eLeftButton) {
+  if (aEvent->AsMouseEvent()->button != WidgetMouseEvent::eLeftButton) {
     // you can only begin a resize drag with the left mouse button
     return NS_ERROR_INVALID_ARG;
   }
@@ -1999,7 +2003,7 @@ nsWindow::ResetLayout()
 // margins are set.
 static const PRUnichar kManageWindowInfoProperty[] = L"ManageWindowInfoProperty";
 typedef BOOL (WINAPI *GetWindowInfoPtr)(HWND hwnd, PWINDOWINFO pwi);
-static GetWindowInfoPtr sGetWindowInfoPtrStub = NULL;
+static GetWindowInfoPtr sGetWindowInfoPtrStub = nullptr;
 
 BOOL WINAPI
 GetWindowInfoHook(HWND hWnd, PWINDOWINFO pwi)
@@ -2152,7 +2156,7 @@ nsWindow::UpdateNonClientMargins(int32_t aSizeMode, bool aReflowWindow)
     UINT taskbarState = SHAppBarMessage(ABM_GETSTATE, &appBarData);
     if (ABS_AUTOHIDE & taskbarState) {
       UINT edge = -1;
-      appBarData.hWnd = FindWindow(L"Shell_TrayWnd", NULL);
+      appBarData.hWnd = FindWindow(L"Shell_TrayWnd", nullptr);
       if (appBarData.hWnd) {
         HMONITOR taskbarMonitor = ::MonitorFromWindow(appBarData.hWnd,
                                                       MONITOR_DEFAULTTOPRIMARY);
@@ -2276,7 +2280,7 @@ nsWindow::InvalidateNonClientRegion()
   // client area = app *
   RECT rect;
   GetWindowRect(mWnd, &rect);
-  MapWindowPoints(NULL, mWnd, (LPPOINT)&rect, 2);
+  MapWindowPoints(nullptr, mWnd, (LPPOINT)&rect, 2);
   HRGN winRgn = CreateRectRgnIndirect(&rect);
 
   // Subtract app client chrome and app content leaving
@@ -2287,13 +2291,13 @@ nsWindow::InvalidateNonClientRegion()
   rect.right -= mHorResizeMargin;
   rect.bottom -= mHorResizeMargin;
   rect.left += mVertResizeMargin;
-  MapWindowPoints(NULL, mWnd, (LPPOINT)&rect, 2);
+  MapWindowPoints(nullptr, mWnd, (LPPOINT)&rect, 2);
   HRGN clientRgn = CreateRectRgnIndirect(&rect);
   CombineRgn(winRgn, winRgn, clientRgn, RGN_DIFF);
   DeleteObject(clientRgn);
 
   // triggers ncpaint and paint events for the two areas
-  RedrawWindow(mWnd, NULL, winRgn, RDW_FRAME|RDW_INVALIDATE);
+  RedrawWindow(mWnd, nullptr, winRgn, RDW_FRAME | RDW_INVALIDATE);
   DeleteObject(winRgn);
 }
 
@@ -2301,7 +2305,7 @@ HRGN
 nsWindow::ExcludeNonClientFromPaintRegion(HRGN aRegion)
 {
   RECT rect;
-  HRGN rgn = NULL;
+  HRGN rgn = nullptr;
   if (aRegion == (HRGN)1) { // undocumented value indicating a full refresh
     GetWindowRect(mWnd, &rect);
     rgn = CreateRectRgnIndirect(&rect);
@@ -2309,7 +2313,7 @@ nsWindow::ExcludeNonClientFromPaintRegion(HRGN aRegion)
     rgn = aRegion;
   }
   GetClientRect(mWnd, &rect);
-  MapWindowPoints(mWnd, NULL, (LPPOINT)&rect, 2);
+  MapWindowPoints(mWnd, nullptr, (LPPOINT)&rect, 2);
   HRGN nonClientRgn = CreateRectRgnIndirect(&rect);
   CombineRgn(rgn, rgn, nonClientRgn, RGN_DIFF);
   DeleteObject(nonClientRgn);
@@ -2332,7 +2336,7 @@ NS_METHOD nsWindow::SetBackgroundColor(const nscolor &aColor)
     ::DeleteObject(mBrush);
 
   mBrush = ::CreateSolidBrush(NSRGB_2_COLOREF(mBackground));
-  if (mWnd != NULL) {
+  if (mWnd != nullptr) {
     ::SetClassLongPtrW(mWnd, GCLP_HBRBACKGROUND, (LONG_PTR)mBrush);
   }
   return NS_OK;
@@ -2354,58 +2358,58 @@ NS_METHOD nsWindow::SetCursor(nsCursor aCursor)
   //XXX mCursor isn't always right.  Scrollbars and others change it, too.
   //XXX If we want this optimization we need a better way to do it.
   //if (aCursor != mCursor) {
-  HCURSOR newCursor = NULL;
+  HCURSOR newCursor = nullptr;
 
   switch (aCursor) {
     case eCursor_select:
-      newCursor = ::LoadCursor(NULL, IDC_IBEAM);
+      newCursor = ::LoadCursor(nullptr, IDC_IBEAM);
       break;
 
     case eCursor_wait:
-      newCursor = ::LoadCursor(NULL, IDC_WAIT);
+      newCursor = ::LoadCursor(nullptr, IDC_WAIT);
       break;
 
     case eCursor_hyperlink:
     {
-      newCursor = ::LoadCursor(NULL, IDC_HAND);
+      newCursor = ::LoadCursor(nullptr, IDC_HAND);
       break;
     }
 
     case eCursor_standard:
     case eCursor_context_menu: // XXX See bug 258960.
-      newCursor = ::LoadCursor(NULL, IDC_ARROW);
+      newCursor = ::LoadCursor(nullptr, IDC_ARROW);
       break;
 
     case eCursor_n_resize:
     case eCursor_s_resize:
-      newCursor = ::LoadCursor(NULL, IDC_SIZENS);
+      newCursor = ::LoadCursor(nullptr, IDC_SIZENS);
       break;
 
     case eCursor_w_resize:
     case eCursor_e_resize:
-      newCursor = ::LoadCursor(NULL, IDC_SIZEWE);
+      newCursor = ::LoadCursor(nullptr, IDC_SIZEWE);
       break;
 
     case eCursor_nw_resize:
     case eCursor_se_resize:
-      newCursor = ::LoadCursor(NULL, IDC_SIZENWSE);
+      newCursor = ::LoadCursor(nullptr, IDC_SIZENWSE);
       break;
 
     case eCursor_ne_resize:
     case eCursor_sw_resize:
-      newCursor = ::LoadCursor(NULL, IDC_SIZENESW);
+      newCursor = ::LoadCursor(nullptr, IDC_SIZENESW);
       break;
 
     case eCursor_crosshair:
-      newCursor = ::LoadCursor(NULL, IDC_CROSS);
+      newCursor = ::LoadCursor(nullptr, IDC_CROSS);
       break;
 
     case eCursor_move:
-      newCursor = ::LoadCursor(NULL, IDC_SIZEALL);
+      newCursor = ::LoadCursor(nullptr, IDC_SIZEALL);
       break;
 
     case eCursor_help:
-      newCursor = ::LoadCursor(NULL, IDC_HELP);
+      newCursor = ::LoadCursor(nullptr, IDC_HELP);
       break;
 
     case eCursor_copy: // CSS3
@@ -2429,7 +2433,7 @@ NS_METHOD nsWindow::SetCursor(nsCursor aCursor)
       break;
 
     case eCursor_spinning:
-      newCursor = ::LoadCursor(NULL, IDC_APPSTARTING);
+      newCursor = ::LoadCursor(nullptr, IDC_APPSTARTING);
       break;
 
     case eCursor_zoom_in:
@@ -2442,7 +2446,7 @@ NS_METHOD nsWindow::SetCursor(nsCursor aCursor)
 
     case eCursor_not_allowed:
     case eCursor_no_drop:
-      newCursor = ::LoadCursor(NULL, IDC_NO);
+      newCursor = ::LoadCursor(nullptr, IDC_NO);
       break;
 
     case eCursor_col_resize:
@@ -2459,23 +2463,23 @@ NS_METHOD nsWindow::SetCursor(nsCursor aCursor)
 
     case eCursor_all_scroll:
       // XXX not 100% appropriate perhaps
-      newCursor = ::LoadCursor(NULL, IDC_SIZEALL);
+      newCursor = ::LoadCursor(nullptr, IDC_SIZEALL);
       break;
 
     case eCursor_nesw_resize:
-      newCursor = ::LoadCursor(NULL, IDC_SIZENESW);
+      newCursor = ::LoadCursor(nullptr, IDC_SIZENESW);
       break;
 
     case eCursor_nwse_resize:
-      newCursor = ::LoadCursor(NULL, IDC_SIZENWSE);
+      newCursor = ::LoadCursor(nullptr, IDC_SIZENWSE);
       break;
 
     case eCursor_ns_resize:
-      newCursor = ::LoadCursor(NULL, IDC_SIZENS);
+      newCursor = ::LoadCursor(nullptr, IDC_SIZENS);
       break;
 
     case eCursor_ew_resize:
-      newCursor = ::LoadCursor(NULL, IDC_SIZEWE);
+      newCursor = ::LoadCursor(nullptr, IDC_SIZEWE);
       break;
 
     case eCursor_none:
@@ -2487,15 +2491,15 @@ NS_METHOD nsWindow::SetCursor(nsCursor aCursor)
       break;
   }
 
-  if (NULL != newCursor) {
+  if (nullptr != newCursor) {
     mCursor = aCursor;
     HCURSOR oldCursor = ::SetCursor(newCursor);
     
     if (sHCursor == oldCursor) {
       NS_IF_RELEASE(sCursorImgContainer);
-      if (sHCursor != NULL)
+      if (sHCursor != nullptr)
         ::DestroyIcon(sHCursor);
-      sHCursor = NULL;
+      sHCursor = nullptr;
     }
   }
 
@@ -2540,7 +2544,7 @@ NS_IMETHODIMP nsWindow::SetCursor(imgIContainer* aCursor,
   sCursorImgContainer = aCursor;
   NS_ADDREF(sCursorImgContainer);
 
-  if (sHCursor != NULL)
+  if (sHCursor != nullptr)
     ::DestroyIcon(sHCursor);
   sHCursor = cursor;
 
@@ -2747,7 +2751,7 @@ NS_METHOD nsWindow::Invalidate(bool aEraseBackground,
     flags |= RDW_ALLCHILDREN;
   }
 
-  VERIFY(::RedrawWindow(mWnd, NULL, NULL, flags));
+  VERIFY(::RedrawWindow(mWnd, nullptr, nullptr, flags));
   return NS_OK;
 }
 
@@ -2779,7 +2783,7 @@ NS_METHOD nsWindow::Invalidate(const nsIntRect & aRect)
 NS_IMETHODIMP
 nsWindow::MakeFullScreen(bool aFullScreen)
 {
-  // taskbarInfo will be NULL pre Windows 7 until Bug 680227 is resolved.
+  // taskbarInfo will be nullptr pre Windows 7 until Bug 680227 is resolved.
   nsCOMPtr<nsIWinTaskbar> taskbarInfo =
     do_GetService(NS_TASKBAR_CONTRACTID);
 
@@ -2852,9 +2856,9 @@ void* nsWindow::GetNativeData(uint32_t aDataType)
                                       CW_USEDEFAULT,
                                       CW_USEDEFAULT,
                                       mWnd,
-                                      NULL,
+                                      nullptr,
                                       nsToolkit::mDllInstance,
-                                      NULL);
+                                      nullptr);
     case NS_NATIVE_PLUGIN_PORT:
     case NS_NATIVE_WIDGET:
     case NS_NATIVE_WINDOW:
@@ -2878,7 +2882,7 @@ void* nsWindow::GetNativeData(uint32_t aDataType)
       break;
   }
 
-  return NULL;
+  return nullptr;
 }
 
 // Free some native data according to aDataType
@@ -2943,13 +2947,13 @@ NS_METHOD nsWindow::SetIcon(const nsAString& aIconSpec)
 
   ::SetLastError(0);
 
-  HICON bigIcon = (HICON)::LoadImageW(NULL,
+  HICON bigIcon = (HICON)::LoadImageW(nullptr,
                                       (LPCWSTR)iconPath.get(),
                                       IMAGE_ICON,
                                       ::GetSystemMetrics(SM_CXICON),
                                       ::GetSystemMetrics(SM_CYICON),
                                       LR_LOADFROMFILE );
-  HICON smallIcon = (HICON)::LoadImageW(NULL,
+  HICON smallIcon = (HICON)::LoadImageW(nullptr,
                                         (LPCWSTR)iconPath.get(),
                                         IMAGE_ICON,
                                         ::GetSystemMetrics(SM_CXSMICON),
@@ -3036,7 +3040,7 @@ NS_METHOD nsWindow::EnableDragDrop(bool aEnable)
   if (aEnable) {
     if (nullptr == mNativeDragTarget) {
        mNativeDragTarget = new nsNativeDragTarget(this);
-       if (NULL != mNativeDragTarget) {
+       if (nullptr != mNativeDragTarget) {
          mNativeDragTarget->AddRef();
          if (S_OK == ::CoLockObjectExternal((LPUNKNOWN)mNativeDragTarget,TRUE,FALSE)) {
            if (S_OK == ::RegisterDragDrop(mWnd, (LPDROPTARGET)mNativeDragTarget)) {
@@ -3046,7 +3050,7 @@ NS_METHOD nsWindow::EnableDragDrop(bool aEnable)
        }
     }
   } else {
-    if (nullptr != mWnd && NULL != mNativeDragTarget) {
+    if (nullptr != mWnd && nullptr != mNativeDragTarget) {
       ::RevokeDragDrop(mWnd);
       if (S_OK == ::CoLockObjectExternal((LPUNKNOWN)mNativeDragTarget, FALSE, TRUE)) {
         rv = NS_OK;
@@ -3077,7 +3081,7 @@ NS_METHOD nsWindow::CaptureMouse(bool aCapture)
     nsToolkit::gMouseTrailer->SetCaptureWindow(mWnd);
     ::SetCapture(mWnd);
   } else {
-    nsToolkit::gMouseTrailer->SetCaptureWindow(NULL);
+    nsToolkit::gMouseTrailer->SetCaptureWindow(nullptr);
     ::ReleaseCapture();
   }
   sIsInMouseCapture = aCapture;
@@ -3594,7 +3598,7 @@ void nsWindow::InitEvent(WidgetGUIEvent& event, nsIntPoint* aPoint)
 {
   if (nullptr == aPoint) {     // use the point from the event
     // get the message position in client coordinates
-    if (mWnd != NULL) {
+    if (mWnd != nullptr) {
 
       DWORD pos = ::GetMessagePos();
       POINT cpos;
@@ -3671,6 +3675,13 @@ bool nsWindow::DispatchStandardEvent(uint32_t aMsg)
 }
 
 bool nsWindow::DispatchKeyboardEvent(WidgetGUIEvent* event)
+{
+  nsEventStatus status;
+  DispatchEvent(event, status);
+  return ConvertStatus(status);
+}
+
+bool nsWindow::DispatchScrollEvent(WidgetGUIEvent* event)
 {
   nsEventStatus status;
   DispatchEvent(event, status);
@@ -3764,7 +3775,7 @@ BOOL CALLBACK nsWindow::DispatchStarvedPaints(HWND aWnd, LPARAM aMsg)
     // its one of our windows so check to see if it has a
     // invalidated rect. If it does. Dispatch a synchronous
     // paint.
-    if (GetUpdateRect(aWnd, NULL, FALSE))
+    if (GetUpdateRect(aWnd, nullptr, FALSE))
       VERIFY(::UpdateWindow(aWnd));
   }
   return TRUE;
@@ -4023,7 +4034,7 @@ bool nsWindow::DispatchMouseEvent(uint32_t aEventType, WPARAM wParam,
       rect.y = 0;
 
       if (rect.Contains(LayoutDeviceIntPoint::ToUntyped(event.refPoint))) {
-        if (sCurrentWindow == NULL || sCurrentWindow != this) {
+        if (sCurrentWindow == nullptr || sCurrentWindow != this) {
           if ((nullptr != sCurrentWindow) && (!sCurrentWindow->mInDtor)) {
             LPARAM pos = sCurrentWindow->lParamToClient(lParamToScreen(lParam));
             sCurrentWindow->DispatchMouseEvent(NS_MOUSE_EXIT, wParam, pos, false, 
@@ -4067,7 +4078,7 @@ void nsWindow::DispatchFocusToTopLevelWindow(bool aIsActivate)
 
   // retrive the toplevel window or dialog
   HWND curWnd = mWnd;
-  HWND toplevelWnd = NULL;
+  HWND toplevelWnd = nullptr;
   while (curWnd) {
     toplevelWnd = curWnd;
 
@@ -4204,7 +4215,7 @@ nsWindow::IPCWindowProcHandler(UINT& msg, WPARAM& wParam, LPARAM& lParam)
 
   // Modal UI being displayed in windowless plugins.
   if (mozilla::ipc::MessageChannel::IsSpinLoopActive() &&
-      (InSendMessageEx(NULL)&(ISMEX_REPLIED|ISMEX_SEND)) == ISMEX_SEND) {
+      (InSendMessageEx(nullptr) & (ISMEX_REPLIED|ISMEX_SEND)) == ISMEX_SEND) {
     LRESULT res;
     if (IsAsyncResponseEvent(msg, res)) {
       ReplyMessage(res);
@@ -4226,7 +4237,7 @@ nsWindow::IPCWindowProcHandler(UINT& msg, WPARAM& wParam, LPARAM& lParam)
           IsWindow((HWND)lParam)) {
         // Check for Adobe Reader X sync activate message from their
         // helper window and ignore. Fixes an annoying focus problem.
-        if ((InSendMessageEx(NULL)&(ISMEX_REPLIED|ISMEX_SEND)) == ISMEX_SEND) {
+        if ((InSendMessageEx(nullptr) & (ISMEX_REPLIED|ISMEX_SEND)) == ISMEX_SEND) {
           PRUnichar szClass[10];
           HWND focusWnd = (HWND)lParam;
           if (IsWindowVisible(focusWnd) &&
@@ -4256,7 +4267,7 @@ nsWindow::IPCWindowProcHandler(UINT& msg, WPARAM& wParam, LPARAM& lParam)
   }
 
   if (handled &&
-      (InSendMessageEx(NULL)&(ISMEX_REPLIED|ISMEX_SEND)) == ISMEX_SEND) {
+      (InSendMessageEx(nullptr) & (ISMEX_REPLIED|ISMEX_SEND)) == ISMEX_SEND) {
     ReplyMessage(dwResult);
   }
 }
@@ -4321,7 +4332,7 @@ DisplaySystemMenu(HWND hWnd, nsSizeMode sizeMode, bool isRtl, int32_t x, int32_t
                      (TPM_LEFTBUTTON|TPM_RIGHTBUTTON|
                       TPM_RETURNCMD|TPM_TOPALIGN|
                       (isRtl ? TPM_RIGHTALIGN : TPM_LEFTALIGN)),
-                     x, y, 0, hWnd, NULL);
+                     x, y, 0, hWnd, nullptr);
     if (cmd) {
       PostMessage(hWnd, WM_SYSCOMMAND, cmd, 0);
       return true;
@@ -4801,7 +4812,7 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
           fc->Flush();
         }
       }
-      *aRetValue = (int) OnPaint(NULL, 0);
+      *aRetValue = (int) OnPaint(nullptr, 0);
       result = true;
       break;
 
@@ -5274,7 +5285,7 @@ nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
       if (objId == OBJID_CLIENT) { // oleacc.dll will be loaded dynamically
         a11y::Accessible* rootAccessible = GetAccessible(); // Held by a11y cache
         if (rootAccessible) {
-          IAccessible *msaaAccessible = NULL;
+          IAccessible *msaaAccessible = nullptr;
           rootAccessible->GetNativeInterface((void**)&msaaAccessible); // does an addref
           if (msaaAccessible) {
             *aRetValue = LresultFromObject(IID_IAccessible, wParam, msaaAccessible); // does an addref
@@ -5959,7 +5970,7 @@ void nsWindow::OnWindowPosChanged(WINDOWPOS* wp)
       drect.right  = drect.left + (newWidth - mLastSize.width);
       drect.bottom = drect.top + newHeight;
 
-      ::RedrawWindow(mWnd, &drect, NULL,
+      ::RedrawWindow(mWnd, &drect, nullptr,
                      RDW_INVALIDATE |
                      RDW_NOERASE |
                      RDW_NOINTERNALPAINT |
@@ -5976,7 +5987,7 @@ void nsWindow::OnWindowPosChanged(WINDOWPOS* wp)
       drect.right  = drect.left + newWidth;
       drect.bottom = drect.top + (newHeight - mLastSize.height);
 
-      ::RedrawWindow(mWnd, &drect, NULL,
+      ::RedrawWindow(mWnd, &drect, nullptr,
                      RDW_INVALIDATE |
                      RDW_NOERASE |
                      RDW_NOINTERNALPAINT |
@@ -6220,7 +6231,7 @@ bool nsWindow::OnGesture(WPARAM wParam, LPARAM lParam)
 
     nsEventStatus status;
 
-    WheelEvent wheelEvent(true, NS_WHEEL_WHEEL, this);
+    WidgetWheelEvent wheelEvent(true, NS_WHEEL_WHEEL, this);
 
     ModifierKeyState modifierKeyState;
     modifierKeyState.InitInputEvent(wheelEvent);
@@ -6373,7 +6384,7 @@ CreateHRGNFromArray(const nsTArray<nsIntRect>& aRects)
   int32_t size = sizeof(RGNDATAHEADER) + sizeof(RECT)*aRects.Length();
   nsAutoTArray<uint8_t,100> buf;
   if (!buf.SetLength(size))
-    return NULL;
+    return nullptr;
   RGNDATA* data = reinterpret_cast<RGNDATA*>(buf.Elements());
   RECT* rects = reinterpret_cast<RECT*>(data->Buffer);
   data->rdh.dwSize = sizeof(data->rdh);
@@ -6386,7 +6397,7 @@ CreateHRGNFromArray(const nsTArray<nsIntRect>& aRects)
     ::SetRect(&rects[i], r.x, r.y, r.XMost(), r.YMost());
   }
   ::SetRect(&data->rdh.rcBound, bounds.x, bounds.y, bounds.XMost(), bounds.YMost());
-  return ::ExtCreateRegion(NULL, buf.Length(), data);
+  return ::ExtCreateRegion(nullptr, buf.Length(), data);
 }
 
 static void
@@ -6534,7 +6545,7 @@ void nsWindow::OnDestroy()
   // Free GDI window class objects
   if (mBrush) {
     VERIFY(::DeleteObject(mBrush));
-    mBrush = NULL;
+    mBrush = nullptr;
   }
 
 
@@ -6552,7 +6563,7 @@ void nsWindow::OnDestroy()
   mGesture.PanFeedbackFinalize(mWnd, true);
 
   // Clear the main HWND.
-  mWnd = NULL;
+  mWnd = nullptr;
 }
 
 // Send a resize message to the listener
@@ -6560,7 +6571,7 @@ bool nsWindow::OnResize(nsIntRect &aWindowRect)
 {
 #ifdef CAIRO_HAS_D2D_SURFACE
   if (mD2DWindowSurface) {
-    mD2DWindowSurface = NULL;
+    mD2DWindowSurface = nullptr;
     Invalidate();
   }
 #endif
@@ -6592,7 +6603,7 @@ nsWindow::AllowD3D9Callback(nsWindow *aWindow)
 {
   if (aWindow->mLayerManager && !aWindow->ShouldUseOffMainThreadCompositing()) {
     aWindow->mLayerManager->Destroy();
-    aWindow->mLayerManager = NULL;
+    aWindow->mLayerManager = nullptr;
   }
 }
 
@@ -6601,7 +6612,7 @@ nsWindow::AllowD3D9WithReinitializeCallback(nsWindow *aWindow)
 {
   if (aWindow->mLayerManager && !aWindow->ShouldUseOffMainThreadCompositing()) {
     aWindow->mLayerManager->Destroy();
-    aWindow->mLayerManager = NULL;
+    aWindow->mLayerManager = nullptr;
     (void) aWindow->GetLayerManager();
   }
 }
@@ -6644,6 +6655,9 @@ nsWindow::GetPreferredCompositorBackends(nsTArray<LayersBackend>& aHints)
   GetLayerManagerPrefs(&prefs);
 
   if (!prefs.mDisableAcceleration) {
+    if (prefs.mPreferOpenGL) {
+      aHints.AppendElement(LAYERS_OPENGL);
+    }
     if (!prefs.mPreferD3D9) {
       aHints.AppendElement(LAYERS_D3D11);
     }
@@ -6923,7 +6937,7 @@ void nsWindow::SetupTranslucentWindowMemoryBitmap(nsTransparencyMode aMode)
     ResizeTranslucentWindow(mBounds.width, mBounds.height, true);
   } else {
     mTransparentSurface = nullptr;
-    mMemoryDC = NULL;
+    mMemoryDC = nullptr;
   }
 }
 
@@ -6960,7 +6974,8 @@ nsresult nsWindow::UpdateTranslucentWindow()
 #endif
   // perform the alpha blend
   bool updateSuccesful = 
-    ::UpdateLayeredWindow(hWnd, NULL, (POINT*)&winRect, &winSize, mMemoryDC, &srcPos, 0, &bf, ULW_ALPHA);
+    ::UpdateLayeredWindow(hWnd, nullptr, (POINT*)&winRect, &winSize, mMemoryDC,
+                          &srcPos, 0, &bf, ULW_ALPHA);
 
 #ifdef CAIRO_HAS_D2D_SURFACE
   if (gfxWindowsPlatform::GetPlatform()->GetRenderMode() ==
@@ -7000,7 +7015,7 @@ void nsWindow::ScheduleHookTimer(HWND aWnd, UINT aMsgId)
     sRollupMsgWnd = aWnd;
     // Schedule native timer for doing the rollup after
     // this event is done being processed
-    sHookTimerId = ::SetTimer(NULL, 0, 0, (TIMERPROC)HookTimerForPopups);
+    sHookTimerId = ::SetTimer(nullptr, 0, 0, (TIMERPROC)HookTimerForPopups);
     NS_ASSERTION(sHookTimerId, "Timer couldn't be created.");
   }
 }
@@ -7018,7 +7033,7 @@ LRESULT CALLBACK nsWindow::MozSpecialMsgFilter(int code, WPARAM wParam, LPARAM l
     MSG* pMsg = (MSG*)lParam;
 
     int inx = 0;
-    while (gMSGFEvents[inx].mId != code && gMSGFEvents[inx].mStr != NULL) {
+    while (gMSGFEvents[inx].mId != code && gMSGFEvents[inx].mStr != nullptr) {
       inx++;
     }
     if (code != gLastMsgCode) {
@@ -7112,7 +7127,8 @@ void nsWindow::RegisterSpecialDropdownHooks()
   // Install msg hook for moving the window and resizing
   if (!sMsgFilterHook) {
     DISPLAY_NMM_PRT("***** Hooking sMsgFilterHook!\n");
-    sMsgFilterHook = SetWindowsHookEx(WH_MSGFILTER, MozSpecialMsgFilter, NULL, GetCurrentThreadId());
+    sMsgFilterHook = SetWindowsHookEx(WH_MSGFILTER, MozSpecialMsgFilter,
+                                      nullptr, GetCurrentThreadId());
 #ifdef POPUP_ROLLUP_DEBUG_OUTPUT
     if (!sMsgFilterHook) {
       PR_LOG(gWindowsLog, PR_LOG_ALWAYS, 
@@ -7124,7 +7140,8 @@ void nsWindow::RegisterSpecialDropdownHooks()
   // Install msg hook for menus
   if (!sCallProcHook) {
     DISPLAY_NMM_PRT("***** Hooking sCallProcHook!\n");
-    sCallProcHook  = SetWindowsHookEx(WH_CALLWNDPROC, MozSpecialWndProc, NULL, GetCurrentThreadId());
+    sCallProcHook  = SetWindowsHookEx(WH_CALLWNDPROC, MozSpecialWndProc,
+                                      nullptr, GetCurrentThreadId());
 #ifdef POPUP_ROLLUP_DEBUG_OUTPUT
     if (!sCallProcHook) {
       PR_LOG(gWindowsLog, PR_LOG_ALWAYS, 
@@ -7136,7 +7153,8 @@ void nsWindow::RegisterSpecialDropdownHooks()
   // Install msg hook for the mouse
   if (!sCallMouseHook) {
     DISPLAY_NMM_PRT("***** Hooking sCallMouseHook!\n");
-    sCallMouseHook  = SetWindowsHookEx(WH_MOUSE, MozSpecialMouseProc, NULL, GetCurrentThreadId());
+    sCallMouseHook  = SetWindowsHookEx(WH_MOUSE, MozSpecialMouseProc,
+                                       nullptr, GetCurrentThreadId());
 #ifdef POPUP_ROLLUP_DEBUG_OUTPUT
     if (!sCallMouseHook) {
       PR_LOG(gWindowsLog, PR_LOG_ALWAYS, 
@@ -7156,7 +7174,7 @@ void nsWindow::UnregisterSpecialDropdownHooks()
     if (!::UnhookWindowsHookEx(sCallProcHook)) {
       DISPLAY_NMM_PRT("***** UnhookWindowsHookEx failed for sCallProcHook!\n");
     }
-    sCallProcHook = NULL;
+    sCallProcHook = nullptr;
   }
 
   if (sMsgFilterHook) {
@@ -7164,7 +7182,7 @@ void nsWindow::UnregisterSpecialDropdownHooks()
     if (!::UnhookWindowsHookEx(sMsgFilterHook)) {
       DISPLAY_NMM_PRT("***** UnhookWindowsHookEx failed for sMsgFilterHook!\n");
     }
-    sMsgFilterHook = NULL;
+    sMsgFilterHook = nullptr;
   }
 
   if (sCallMouseHook) {
@@ -7172,7 +7190,7 @@ void nsWindow::UnregisterSpecialDropdownHooks()
     if (!::UnhookWindowsHookEx(sCallMouseHook)) {
       DISPLAY_NMM_PRT("***** UnhookWindowsHookEx failed for sCallMouseHook!\n");
     }
-    sCallMouseHook = NULL;
+    sCallMouseHook = nullptr;
   }
 }
 
@@ -7186,8 +7204,8 @@ void nsWindow::UnregisterSpecialDropdownHooks()
 VOID CALLBACK nsWindow::HookTimerForPopups(HWND hwnd, UINT uMsg, UINT idEvent, DWORD dwTime)
 {
   if (sHookTimerId != 0) {
-    // if the window is NULL then we need to use the ID to kill the timer
-    BOOL status = ::KillTimer(NULL, sHookTimerId);
+    // if the window is nullptr then we need to use the ID to kill the timer
+    BOOL status = ::KillTimer(nullptr, sHookTimerId);
     NS_ASSERTION(status, "Hook Timer was not killed.");
     sHookTimerId = 0;
   }
@@ -7198,7 +7216,7 @@ VOID CALLBACK nsWindow::HookTimerForPopups(HWND hwnd, UINT uMsg, UINT idEvent, D
     nsAutoRollup autoRollup;
     DealWithPopups(sRollupMsgWnd, sRollupMsgId, 0, 0, &popupHandlingResult);
     sRollupMsgId = 0;
-    sRollupMsgWnd = NULL;
+    sRollupMsgWnd = nullptr;
   }
 }
 
@@ -7226,7 +7244,7 @@ nsWindow::ClearCachedResources()
 
 static bool IsDifferentThreadWindow(HWND aWnd)
 {
-  return ::GetCurrentThreadId() != ::GetWindowThreadProcessId(aWnd, NULL);
+  return ::GetCurrentThreadId() != ::GetWindowThreadProcessId(aWnd, nullptr);
 }
 
 bool
@@ -7337,7 +7355,7 @@ nsWindow::DealWithPopups(HWND inWnd, UINT inMsg, WPARAM inWParam, LPARAM inLPara
       // Tell hook to stop processing messages
       sProcessHook = false;
       sRollupMsgId = 0;
-      sRollupMsgWnd = NULL;
+      sRollupMsgWnd = nullptr;
 
       // return TRUE tells Windows that the event is consumed,
       // false allows the event to be dispatched

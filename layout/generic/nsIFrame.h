@@ -994,6 +994,8 @@ public:
 
   NS_DECLARE_FRAME_PROPERTY(InvalidationRect, DestroyRect)
 
+  NS_DECLARE_FRAME_PROPERTY(RefusedAsyncAnimation, nullptr)
+
   /**
    * Return the distance between the border edge of the frame and the
    * margin edge of the frame.  Like GetRect(), returns the dimensions
@@ -2057,7 +2059,7 @@ public:
   virtual nsIWidget* GetNearestWidget(nsPoint& aOffset) const;
 
   /**
-   * Get the "type" of the frame. May return a NULL atom pointer
+   * Get the "type" of the frame. May return nullptr.
    *
    * @see nsGkAtoms
    */

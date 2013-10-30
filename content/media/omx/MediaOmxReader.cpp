@@ -69,6 +69,33 @@ void MediaOmxReader::ReleaseMediaResources()
   }
 }
 
+void MediaOmxReader::ReleaseDecoder()
+{
+  if (mOmxDecoder.get()) {
+    mOmxDecoder->ReleaseDecoder();
+  }
+}
+
+nsresult MediaOmxReader::InitOmxDecoder()
+{
+  if (!mOmxDecoder.get()) {
+    //register sniffers, if they are not registered in this process.
+    DataSource::RegisterDefaultSniffers();
+    mDecoder->GetResource()->SetReadMode(MediaCacheStream::MODE_METADATA);
+
+    sp<DataSource> dataSource = new MediaStreamSource(mDecoder->GetResource(), mDecoder);
+    dataSource->initCheck();
+
+    sp<MediaExtractor> extractor = MediaExtractor::Create(dataSource);
+
+    mOmxDecoder = new OmxDecoder(mDecoder->GetResource(), mDecoder);
+    if (!mOmxDecoder->Init(extractor)) {
+      return NS_ERROR_FAILURE;
+    }
+  }
+  return NS_OK;
+}
+
 nsresult MediaOmxReader::ReadMetadata(MediaInfo* aInfo,
                                       MetadataTags** aTags)
 {
@@ -76,11 +103,10 @@ nsresult MediaOmxReader::ReadMetadata(MediaInfo* aInfo,
 
   *aTags = nullptr;
 
-  if (!mOmxDecoder.get()) {
-    mOmxDecoder = new OmxDecoder(mDecoder->GetResource(), mDecoder);
-    if (!mOmxDecoder->Init()) {
-      return NS_ERROR_FAILURE;
-    }
+  // Initialize the internal OMX Decoder.
+  nsresult rv = InitOmxDecoder();
+  if (NS_FAILED(rv)) {
+    return rv;
   }
 
   if (!mOmxDecoder->TryLoad()) {
@@ -236,7 +262,7 @@ bool MediaOmxReader::DecodeVideoFrame(bool &aKeyframeSkip,
                             mDecoder->GetImageContainer(),
                             pos,
                             frame.mTimeUs,
-                            frame.mTimeUs+1, // We don't know the end time.
+                            1, // We don't know the duration.
                             b,
                             frame.mKeyFrame,
                             -1,
@@ -246,7 +272,7 @@ bool MediaOmxReader::DecodeVideoFrame(bool &aKeyframeSkip,
                             mDecoder->GetImageContainer(),
                             pos,
                             frame.mTimeUs,
-                            frame.mTimeUs+1, // We don't know the end time.
+                            1, // We don't know the duration.
                             frame.mGraphicBuffer,
                             frame.mKeyFrame,
                             -1,
@@ -319,6 +345,10 @@ nsresult MediaOmxReader::Seek(int64_t aTarget, int64_t aStartTime, int64_t aEndT
 {
   NS_ASSERTION(mDecoder->OnDecodeThread(), "Should be on decode thread.");
 
+  VideoFrameContainer* container = mDecoder->GetVideoFrameContainer();
+  if (container && container->GetImageContainer()) {
+    container->GetImageContainer()->ClearAllImagesExceptFront();
+  }
   mVideoQueue.Reset();
   mAudioQueue.Reset();
 

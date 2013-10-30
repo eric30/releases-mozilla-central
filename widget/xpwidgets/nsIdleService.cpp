@@ -45,7 +45,7 @@ using namespace mozilla;
 #define SECONDS_PER_DAY 86400
 
 #ifdef PR_LOGGING
-static PRLogModuleInfo *sLog = NULL;
+static PRLogModuleInfo *sLog = nullptr;
 #endif
 
 // Use this to find previously added observers in our array:
@@ -105,7 +105,8 @@ nsIdleServiceDaily::Observe(nsISupports *,
                                          nullptr);
 
   // Notify the category observers.
-  const nsCOMArray<nsIObserver> &entries = mCategoryObservers.GetEntries();
+  nsCOMArray<nsIObserver> entries;
+  mCategoryObservers.GetEntries(entries);
   for (int32_t i = 0; i < entries.Count(); ++i) {
     (void)entries[i]->Observe(nullptr, OBSERVER_TOPIC_IDLE_DAILY, nullptr);
   }
@@ -391,7 +392,7 @@ nsIdleService::nsIdleService() : mCurrentlySetToTimeoutAt(TimeStamp()),
                                  mLastUserInteraction(TimeStamp::Now())
 {
 #ifdef PR_LOGGING
-  if (sLog == NULL)
+  if (sLog == nullptr)
     sLog = PR_NewLogModule("idleService");
 #endif
   MOZ_ASSERT(!gIdleService);

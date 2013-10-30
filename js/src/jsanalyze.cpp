@@ -15,6 +15,7 @@
 #include "jscompartment.h"
 
 #include "jsinferinlines.h"
+#include "jsobjinlines.h"
 
 using namespace js;
 using namespace js::analyze;
@@ -252,6 +253,7 @@ ScriptAnalysis::analyzeBytecode(JSContext *cx)
 
           case JSOP_EVAL:
           case JSOP_SPREADEVAL:
+          case JSOP_ENTERLET2:
           case JSOP_ENTERWITH:
             canTrackVars = false;
             break;
@@ -439,7 +441,7 @@ ScriptAnalysis::analyzeLifetimes(JSContext *cx)
     }
     unsigned savedCount = 0;
 
-    LoopAnalysis *loop = NULL;
+    LoopAnalysis *loop = nullptr;
 
     uint32_t offset = script_->length - 1;
     while (offset < script_->length) {
@@ -524,7 +526,7 @@ ScriptAnalysis::analyzeLifetimes(JSContext *cx)
                     setOOM(cx);
                     return;
                 }
-                var.saved = NULL;
+                var.saved = nullptr;
                 saved[i--] = saved[--savedCount];
             }
             savedCount = 0;
@@ -616,7 +618,7 @@ ScriptAnalysis::analyzeLifetimes(JSContext *cx)
                             setOOM(cx);
                             return;
                         }
-                        var.saved = NULL;
+                        var.saved = nullptr;
                         saved[i--] = saved[--savedCount];
                     } else if (loop && !var.savedEnd) {
                         /*
@@ -679,7 +681,7 @@ ScriptAnalysis::addVariable(JSContext *cx, LifetimeVariable &var, unsigned offse
             setOOM(cx);
             return;
         }
-        var.saved = NULL;
+        var.saved = nullptr;
     }
 }
 
@@ -729,7 +731,7 @@ ScriptAnalysis::killVariable(JSContext *cx, LifetimeVariable &var, unsigned offs
     } else {
         var.saved = var.lifetime;
         var.savedEnd = 0;
-        var.lifetime = NULL;
+        var.lifetime = nullptr;
 
         saved[savedCount++] = &var;
     }
@@ -1509,7 +1511,7 @@ ScriptAnalysis::freezeNewValues(JSContext *cx, uint32_t offset)
     Bytecode &code = getCode(offset);
 
     Vector<SlotValue> *pending = code.pendingValues;
-    code.pendingValues = NULL;
+    code.pendingValues = nullptr;
 
     unsigned count = pending->length();
     if (count == 0) {

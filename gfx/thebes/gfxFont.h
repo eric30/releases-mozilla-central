@@ -6,7 +6,6 @@
 #ifndef GFX_FONT_H
 #define GFX_FONT_H
 
-#include "nsAlgorithm.h"
 #include "gfxTypes.h"
 #include "nsString.h"
 #include "gfxPoint.h"
@@ -17,22 +16,19 @@
 #include "gfxSkipChars.h"
 #include "gfxRect.h"
 #include "nsExpirationTracker.h"
-#include "gfxFontConstants.h"
 #include "gfxPlatform.h"
 #include "nsIAtom.h"
-#include "nsISupportsImpl.h"
-#include "gfxPattern.h"
 #include "mozilla/HashFunctions.h"
 #include "nsIMemoryReporter.h"
 #include "nsIObserver.h"
 #include "gfxFontFeatures.h"
 #include "mozilla/MemoryReporting.h"
-#include "mozilla/gfx/Types.h"
 #include "mozilla/Attributes.h"
 #include <algorithm>
-#include "nsUnicodeProperties.h"
-#include "harfbuzz/hb.h"
 #include "DrawMode.h"
+#include "nsUnicodeScriptCodes.h"
+#include "nsDataHashtable.h"
+#include "harfbuzz/hb.h"
 
 typedef struct _cairo_scaled_font cairo_scaled_font_t;
 typedef struct gr_face            gr_face;
@@ -61,6 +57,12 @@ class nsILanguageAtomService;
 
 struct FontListSizes;
 struct gfxTextRunDrawCallbacks;
+
+namespace mozilla {
+namespace gfx {
+class GlyphRenderingOptions;
+}
+}
 
 struct gfxFontStyle {
     gfxFontStyle();
@@ -408,12 +410,12 @@ public:
     // Called to notify that aFont is being destroyed. Needed when we're tracking
     // the fonts belonging to this font entry.
     void NotifyFontDestroyed(gfxFont* aFont);
-    
+
     // For memory reporting
-    virtual void SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,
-                                     FontListSizes*    aSizes) const;
-    virtual void SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf,
-                                     FontListSizes*    aSizes) const;
+    virtual void AddSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,
+                                        FontListSizes* aSizes) const;
+    virtual void AddSizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf,
+                                        FontListSizes* aSizes) const;
 
     nsString         mName;
     nsString         mFamilyName;
@@ -613,8 +615,8 @@ private:
 
         static size_t
         SizeOfEntryExcludingThis(FontTableHashEntry *aEntry,
-                                 mozilla::MallocSizeOf   aMallocSizeOf,
-                                 void*               aUserArg);
+                                 mozilla::MallocSizeOf aMallocSizeOf,
+                                 void* aUserArg);
 
     private:
         static void DeleteFontTableBlobData(void *aBlobData);
@@ -774,10 +776,10 @@ public:
     void CheckForSimpleFamily();
 
     // For memory reporter
-    virtual void SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,
-                                     FontListSizes*    aSizes) const;
-    virtual void SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf,
-                                     FontListSizes*    aSizes) const;
+    virtual void AddSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,
+                                        FontListSizes* aSizes) const;
+    virtual void AddSizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf,
+                                        FontListSizes* aSizes) const;
 
     // Only used for debugging checks - does a linear search
     bool ContainsFace(gfxFontEntry* aFontEntry) {
@@ -942,10 +944,10 @@ public:
         mFonts.EnumerateEntries(ClearCachedWordsForFont, nullptr);
     }
 
-    void SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,
-                             FontCacheSizes*   aSizes) const;
-    void SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf,
-                             FontCacheSizes*   aSizes) const;
+    void AddSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,
+                                FontCacheSizes* aSizes) const;
+    void AddSizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf,
+                                FontCacheSizes* aSizes) const;
 
 protected:
     class MemoryReporter MOZ_FINAL
@@ -997,9 +999,9 @@ protected:
         gfxFont* mFont;
     };
 
-    static size_t SizeOfFontEntryExcludingThis(HashEntry*        aHashEntry,
-                                               mozilla::MallocSizeOf aMallocSizeOf,
-                                               void*             aUserArg);
+    static size_t AddSizeOfFontEntryExcludingThis(HashEntry* aHashEntry,
+                                                  mozilla::MallocSizeOf aMallocSizeOf,
+                                                  void* aUserArg);
 
     nsTHashtable<HashEntry> mFonts;
 
@@ -1668,10 +1670,10 @@ public:
     // Glyph rendering/geometry has changed, so invalidate data as necessary.
     void NotifyGlyphsChanged();
 
-    virtual void SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,
-                                     FontCacheSizes*   aSizes) const;
-    virtual void SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf,
-                                     FontCacheSizes*   aSizes) const;
+    virtual void AddSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,
+                                        FontCacheSizes* aSizes) const;
+    virtual void AddSizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf,
+                                        FontCacheSizes* aSizes) const;
 
     typedef enum {
         FONT_TYPE_DWRITE,

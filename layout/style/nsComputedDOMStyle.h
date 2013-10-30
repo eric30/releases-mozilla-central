@@ -28,6 +28,7 @@ class Element;
 }
 }
 
+struct nsComputedStyleMap;
 class nsIFrame;
 class nsIPresShell;
 class nsDOMCSSValueList;
@@ -128,6 +129,9 @@ public:
 
   static nsROCSSPrimitiveValue* MatrixToCSSValue(gfx3DMatrix& aMatrix);
 
+  static void RegisterPrefChangeCallbacks();
+  static void UnregisterPrefChangeCallbacks();
+
 private:
   void AssertFlushedPendingReflows() {
     NS_ASSERTION(mFlushedPendingReflows,
@@ -135,6 +139,11 @@ private:
   }
 
   nsMargin GetAdjustedValuesForBoxSizing();
+
+  // Helper method for DoGetTextAlign[Last].
+  mozilla::dom::CSSValue* CreateTextAlignValue(uint8_t aAlign,
+                                               bool aAlignTrue,
+                                               const int32_t aTable[]);
 
 #define STYLE_STRUCT(name_, checkdata_cb_)                              \
   const nsStyle##name_ * Style##name_() {                               \
@@ -537,22 +546,7 @@ private:
   mozilla::dom::CSSValue* CreatePrimitiveValueForStyleFilter(
     const nsStyleFilter& aStyleFilter);
 
-  struct ComputedStyleMapEntry
-  {
-    // Create a pointer-to-member-function type.
-    typedef mozilla::dom::CSSValue* (nsComputedDOMStyle::*ComputeMethod)();
-
-    nsCSSProperty mProperty;
-    ComputeMethod mGetter;
-
-    bool IsLayoutFlushNeeded() const
-    {
-      return nsCSSProps::PropHasFlags(mProperty,
-                                      CSS_PROPERTY_GETCS_NEEDS_LAYOUT_FLUSH);
-    }
-  };
-
-  static const ComputedStyleMapEntry* GetQueryablePropertyMap(uint32_t* aLength);
+  static nsComputedStyleMap* GetComputedStyleMap();
 
   // We don't really have a good immutable representation of "presentation".
   // Given the way GetComputedStyle is currently used, we should just grab the

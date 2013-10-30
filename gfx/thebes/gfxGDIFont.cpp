@@ -16,6 +16,7 @@
 #include "gfxContext.h"
 #include "mozilla/Preferences.h"
 #include "nsUnicodeProperties.h"
+#include "gfxFontConstants.h"
 
 #include "cairo-win32.h"
 
@@ -564,10 +565,10 @@ gfxGDIFont::GetGlyphWidth(gfxContext *aCtx, uint16_t aGID)
 }
 
 void
-gfxGDIFont::SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,
-                                FontCacheSizes*   aSizes) const
+gfxGDIFont::AddSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,
+                                   FontCacheSizes* aSizes) const
 {
-    gfxFont::SizeOfExcludingThis(aMallocSizeOf, aSizes);
+    gfxFont::AddSizeOfExcludingThis(aMallocSizeOf, aSizes);
     aSizes->mFontInstances += aMallocSizeOf(mMetrics);
     if (mGlyphWidths) {
         aSizes->mFontInstances +=
@@ -576,9 +577,9 @@ gfxGDIFont::SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,
 }
 
 void
-gfxGDIFont::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf,
-                                FontCacheSizes*   aSizes) const
+gfxGDIFont::AddSizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf,
+                                   FontCacheSizes* aSizes) const
 {
     aSizes->mFontInstances += aMallocSizeOf(this);
-    SizeOfExcludingThis(aMallocSizeOf, aSizes);
+    AddSizeOfExcludingThis(aMallocSizeOf, aSizes);
 }

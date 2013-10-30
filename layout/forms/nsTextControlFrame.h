@@ -39,8 +39,6 @@ public:
   virtual void DestroyFrom(nsIFrame* aDestructRoot) MOZ_OVERRIDE;
 
   virtual nsIScrollableFrame* GetScrollTargetFrame() MOZ_OVERRIDE {
-    if (!IsScrollable())
-      return nullptr;
     return do_QueryFrame(GetFirstPrincipalChild());
   }
 
@@ -235,13 +233,6 @@ protected:
   nsresult OffsetToDOMPoint(int32_t aOffset, nsIDOMNode** aResult, int32_t* aPosition);
 
   /**
-   * Find out whether this control is scrollable (i.e. if it is not a single
-   * line text control)
-   * @return whether this control is scrollable
-   */
-  bool IsScrollable() const;
-
-  /**
    * Update the textnode under our anonymous div to show the new
    * value. This should only be called when we have no editor yet.
    * @throws NS_ERROR_UNEXPECTED if the div has no text content
@@ -301,7 +292,7 @@ private:
 
 private:
   // these packed bools could instead use the high order bits on mState, saving 4 bytes 
-  bool mUseEditor;
+  bool mEditorHasBeenInitialized;
   bool mIsProcessing;
   // Keep track if we have asked a placeholder node creation.
   bool mUsePlaceholder;

@@ -20,7 +20,7 @@ EXPORTS.angle += [
 
 # Target: 'preprocessor'
 # src/compiler/preprocessor:
-CPP_SOURCES += [
+SOURCES += ['src/compiler/preprocessor/' + src for src in [
     'DiagnosticsBase.cpp',
     'DirectiveHandlerBase.cpp',
     'DirectiveParser.cpp',
@@ -32,16 +32,17 @@ CPP_SOURCES += [
     'Preprocessor.cpp',
     'Token.cpp',
     'Tokenizer.cpp',
-]
+]]
 
 
 # Target: 'translator_common'
 #   Requires: 'preprocessor'
 # src/compiler:
-CPP_SOURCES += [
+SOURCES += ['src/compiler/' + src for src in [
     'BuiltInFunctionEmulator.cpp',
     'Compiler.cpp',
     'compiler_debug.cpp',
+    'CompilerUniform.cpp',
     'DetectCallDepth.cpp',
     'Diagnostics.cpp',
     'DirectiveHandler.cpp',
@@ -62,61 +63,63 @@ CPP_SOURCES += [
     'QualifierAlive.cpp',
     'RemoveTree.cpp',
     'SymbolTable.cpp',
-    'CompilerUniform.cpp',
     'util.cpp',
     'ValidateLimitations.cpp',
     'VariableInfo.cpp',
     'VariablePacker.cpp',
-]
+]]
 
 # src/compiler/depgraph:
-CPP_SOURCES += [
+SOURCES += ['src/compiler/depgraph/' + src for src in [
     'DependencyGraph.cpp',
     'DependencyGraphBuilder.cpp',
     'DependencyGraphOutput.cpp',
     'DependencyGraphTraverse.cpp',
-]
+]]
 
 # src/compiler/timing:
-CPP_SOURCES += [
+SOURCES += ['src/compiler/timing/' + src for src in [
     'RestrictFragmentShaderTiming.cpp',
     'RestrictVertexShaderTiming.cpp',
-]
+]]
 
 # src/third_party/compiler:
-CPP_SOURCES += [
+SOURCES += ['src/third_party/compiler/' + src for src in [
     'ArrayBoundsClamper.cpp',
-]
+]]
 
 # src/third_party/murmurhash:
-CPP_SOURCES += [
+SOURCES += ['src/third_party/murmurhash/' + src for src in [
     'MurmurHash3.cpp',
-]
+]]
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
-    CPP_SOURCES += [
-        'ossource_win.cpp',
+    SOURCES += [
+        'src/compiler/ossource_win.cpp',
     ]
 else:
-    CPP_SOURCES += [
-        'ossource_posix.cpp',
+    SOURCES += [
+        'src/compiler/ossource_posix.cpp',
     ]
 
 
 # Target: 'translator_glsl'
 #   Requires: 'translator_common'
 # src/compiler:
-CPP_SOURCES += [
+SOURCES += ['src/compiler/' + src for src in [
     'CodeGenGLSL.cpp',
     'OutputESSL.cpp',
-    'OutputGLSLBase.cpp',
     'OutputGLSL.cpp',
+    'OutputGLSLBase.cpp',
     'ShaderLang.cpp',
     'TranslatorESSL.cpp',
     'TranslatorGLSL.cpp',
     'VersionGLSL.cpp',
-]
+]]
 
 LIBRARY_NAME = 'angle'
 LIBXUL_LIBRARY = True
 MSVC_ENABLE_PGO = True
+
+if CONFIG['OS_TARGET'] == 'WINNT':
+    NO_VISIBILITY_FLAGS = True

@@ -108,6 +108,14 @@ interface NavigatorBattery {
 };
 Navigator implements NavigatorBattery;
 
+// https://wiki.mozilla.org/WebAPI/DataStore
+[NoInterfaceObject]
+interface NavigatorDataStore {
+    [Throws, NewObject, Pref="dom.datastore.enabled"]
+    Promise getDataStores(DOMString name);
+};
+Navigator implements NavigatorDataStore;
+
 // http://www.w3.org/TR/vibration/#vibration-interface
 partial interface Navigator {
     // We don't support sequences in unions yet

@@ -448,6 +448,11 @@ public:
    * mutable.
    */
   virtual FillRule GetFillRule() const = 0;
+
+  virtual Float ComputeLength() { return 0; }
+
+  virtual Point ComputePointAtLength(Float aLength,
+                                     Point* aTangent) { return Point(); }
 };
 
 /* The PathBuilder class allows path creation. Once finish is called on the
@@ -573,6 +578,15 @@ public:
   virtual TemporaryRef<SourceSurface> Snapshot() = 0;
   virtual IntSize GetSize() = 0;
 
+  /**
+   * If possible returns the bits to this DrawTarget for direct manipulation. While
+   * the bits is locked any modifications to this DrawTarget is forbidden.
+   * Release takes the original data pointer for safety.
+   */
+  virtual bool LockBits(uint8_t** aData, IntSize* aSize,
+                        int32_t* aStride, SurfaceFormat* aFormat) { return false; }
+  virtual void ReleaseBits(uint8_t* aData) {}
+
   /* Ensure that the DrawTarget backend has flushed all drawing operations to
    * this draw target. This must be called before using the backing surface of
    * this draw target outside of GFX 2D code.
@@ -637,6 +651,19 @@ public:
   virtual void CopySurface(SourceSurface *aSurface,
                            const IntRect &aSourceRect,
                            const IntPoint &aDestination) = 0;
+
+  /*
+   * Same as CopySurface, except uses itself as the source.
+   *
+   * Some backends may be able to optimize this better
+   * than just taking a snapshot and using CopySurface.
+   */
+  virtual void CopyRect(const IntRect &aSourceRect,
+                        const IntPoint &aDestination)
+  {
+    RefPtr<SourceSurface> source = Snapshot();
+    CopySurface(source, aSourceRect, aDestination);
+  }
 
   /*
    * Fill a rectangle on the DrawTarget with a certain source pattern.
@@ -971,6 +998,9 @@ public:
                                                       GrGLInterface* aGrGLInterface,
                                                       const IntSize &aSize,
                                                       SurfaceFormat aFormat);
+
+  static void
+    SetGlobalSkiaCacheLimits(int aCount, int aSizeInBytes);
 #endif
 
 #if defined(USE_SKIA) && defined(MOZ_ENABLE_FREETYPE)

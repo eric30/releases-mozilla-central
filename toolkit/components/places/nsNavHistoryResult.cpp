@@ -61,8 +61,8 @@
 #define END_RESULT_BATCH_AND_REFRESH_CONTENTS() \
   PR_BEGIN_MACRO \
   nsNavHistoryResult* result = GetResult(); \
-  NS_ENSURE_STATE(result); \
-  if (result->mBatchInProgress) { \
+  NS_WARN_IF_FALSE(result, "Working with a non-live-updating Places container"); \
+  if (result && result->mBatchInProgress) { \
     result->EndBatch(); \
   } \
   PR_END_MACRO
@@ -1633,8 +1633,8 @@ nsNavHistoryContainerResultNode::ChangeTitles(nsIURI* aURI,
   NS_ENSURE_SUCCESS(rv, rv);
 
   // The recursive function will update the result's tree nodes, but only if we
-  // give it a non-null pointer.  So if there isn't a tree, just pass NULL so
-  // it doesn't bother trying to call the result.
+  // give it a non-null pointer.  So if there isn't a tree, just pass nullptr
+  // so it doesn't bother trying to call the result.
   nsNavHistoryResult* result = GetResult();
   NS_ENSURE_STATE(result);
 

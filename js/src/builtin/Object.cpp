@@ -30,14 +30,12 @@ js::obj_construct(JSContext *cx, unsigned argc, Value *vp)
     CallArgs args = CallArgsFromVp(argc, vp);
 
     RootedObject obj(cx, nullptr);
-    if (args.length() > 0) {
-        /* If argv[0] is null or undefined, obj comes back null. */
-        if (!js_ValueToObjectOrNull(cx, args[0], &obj))
+    if (args.length() > 0 && !args[0].isNullOrUndefined()) {
+        obj = ToObject(cx, args[0]);
+        if (!obj)
             return false;
-    }
-    if (!obj) {
+    } else {
         /* Make an object whether this was called with 'new' or not. */
-        JS_ASSERT(!args.length() || args[0].isNullOrUndefined());
         if (!NewObjectScriptedCall(cx, &obj))
             return false;
     }
@@ -486,7 +484,7 @@ obj_lookupSetter(JSContext *cx, unsigned argc, Value *vp)
 #endif /* JS_OLD_GETTER_SETTER_METHODS */
 
 /* ES5 15.2.3.2. */
-bool
+static bool
 obj_getPrototypeOf(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);

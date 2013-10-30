@@ -95,6 +95,38 @@ public:
  * mozilla::widget::ModifierKeyState
  *****************************************************************************/
 
+ModifierKeyState::ModifierKeyState()
+{
+  Update();
+}
+
+ModifierKeyState::ModifierKeyState(bool aIsShiftDown,
+                                   bool aIsControlDown,
+                                   bool aIsAltDown)
+{
+  Update();
+  Unset(MODIFIER_SHIFT | MODIFIER_CONTROL | MODIFIER_ALT | MODIFIER_ALTGRAPH);
+  Modifiers modifiers = 0;
+  if (aIsShiftDown) {
+    modifiers |= MODIFIER_SHIFT;
+  }
+  if (aIsControlDown) {
+    modifiers |= MODIFIER_CONTROL;
+  }
+  if (aIsAltDown) {
+    modifiers |= MODIFIER_ALT;
+  }
+  if (modifiers) {
+    Set(modifiers);
+  }
+}
+
+ModifierKeyState::ModifierKeyState(Modifiers aModifiers) :
+  mModifiers(aModifiers)
+{
+  EnsureAltGr();
+}
+
 void
 ModifierKeyState::Update()
 {
@@ -125,6 +157,22 @@ ModifierKeyState::Update()
 }
 
 void
+ModifierKeyState::Unset(Modifiers aRemovingModifiers)
+{
+  mModifiers &= ~aRemovingModifiers;
+  // Note that we don't need to unset AltGr flag here automatically.
+  // For nsEditor, we need to remove Alt and Control flags but AltGr isn't
+  // checked in nsEditor, so, it can be kept.
+}
+
+void
+ModifierKeyState::Set(Modifiers aAddingModifiers)
+{
+  mModifiers |= aAddingModifiers;
+  EnsureAltGr();
+}
+
+void
 ModifierKeyState::InitInputEvent(WidgetInputEvent& aInputEvent) const
 {
   aInputEvent.modifiers = mModifiers;
@@ -151,8 +199,7 @@ ModifierKeyState::InitMouseEvent(WidgetInputEvent& aMouseEvent) const
                aMouseEvent.eventStructType == NS_SIMPLE_GESTURE_EVENT,
                "called with non-mouse event");
 
-  WidgetMouseEventBase& mouseEvent =
-    static_cast<WidgetMouseEventBase&>(aMouseEvent);
+  WidgetMouseEventBase& mouseEvent = *aMouseEvent.AsMouseEventBase();
   mouseEvent.buttons = 0;
   if (::GetKeyState(VK_LBUTTON) < 0) {
     mouseEvent.buttons |= WidgetMouseEvent::eLeftButtonFlag;
@@ -168,6 +215,72 @@ ModifierKeyState::InitMouseEvent(WidgetInputEvent& aMouseEvent) const
   }
   if (::GetKeyState(VK_XBUTTON2) < 0) {
     mouseEvent.buttons |= WidgetMouseEvent::e5thButtonFlag;
+  }
+}
+
+bool
+ModifierKeyState::IsShift() const
+{
+  return (mModifiers & MODIFIER_SHIFT) != 0;
+}
+
+bool
+ModifierKeyState::IsControl() const
+{
+  return (mModifiers & MODIFIER_CONTROL) != 0;
+}
+
+bool
+ModifierKeyState::IsAlt() const
+{
+  return (mModifiers & MODIFIER_ALT) != 0;
+}
+
+bool
+ModifierKeyState::IsAltGr() const
+{
+  return IsControl() && IsAlt();
+}
+
+bool
+ModifierKeyState::IsWin() const
+{
+  return (mModifiers & MODIFIER_OS) != 0;
+}
+
+bool
+ModifierKeyState::IsCapsLocked() const
+{
+  return (mModifiers & MODIFIER_CAPSLOCK) != 0;
+}
+
+bool
+ModifierKeyState::IsNumLocked() const
+{
+  return (mModifiers & MODIFIER_NUMLOCK) != 0;
+}
+
+bool
+ModifierKeyState::IsScrollLocked() const
+{
+  return (mModifiers & MODIFIER_SCROLLLOCK) != 0;
+}
+
+Modifiers
+ModifierKeyState::GetModifiers() const
+{
+  return mModifiers;
+}
+
+void
+ModifierKeyState::EnsureAltGr()
+{
+  // If both Control key and Alt key are pressed, it means AltGr is pressed.
+  // Ideally, we should check whether the current keyboard layout has AltGr
+  // or not.  However, setting AltGr flags for keyboard which doesn't have
+  // AltGr must not be serious bug.  So, it should be OK for now.
+  if (IsAltGr()) {
+    mModifiers |= MODIFIER_ALTGRAPH;
   }
 }
 
@@ -236,6 +349,50 @@ UniCharsAndModifiers::operator+(const UniCharsAndModifiers& aOther) const
 /*****************************************************************************
  * mozilla::widget::VirtualKey
  *****************************************************************************/
+
+// static
+VirtualKey::ShiftState
+VirtualKey::ModifiersToShiftState(Modifiers aModifiers)
+{
+  ShiftState state = 0;
+  if (aModifiers & MODIFIER_SHIFT) {
+    state |= STATE_SHIFT;
+  }
+  if (aModifiers & MODIFIER_CONTROL) {
+    state |= STATE_CONTROL;
+  }
+  if (aModifiers & MODIFIER_ALT) {
+    state |= STATE_ALT;
+  }
+  if (aModifiers & MODIFIER_CAPSLOCK) {
+    state |= STATE_CAPSLOCK;
+  }
+  return state;
+}
+
+// static
+Modifiers
+VirtualKey::ShiftStateToModifiers(ShiftState aShiftState)
+{
+  Modifiers modifiers = 0;
+  if (aShiftState & STATE_SHIFT) {
+    modifiers |= MODIFIER_SHIFT;
+  }
+  if (aShiftState & STATE_CONTROL) {
+    modifiers |= MODIFIER_CONTROL;
+  }
+  if (aShiftState & STATE_ALT) {
+    modifiers |= MODIFIER_ALT;
+  }
+  if (aShiftState & STATE_CAPSLOCK) {
+    modifiers |= MODIFIER_CAPSLOCK;
+  }
+  if ((modifiers & (MODIFIER_ALT | MODIFIER_CONTROL)) ==
+         (MODIFIER_ALT | MODIFIER_CONTROL)) {
+    modifiers |= MODIFIER_ALTGRAPH;
+  }
+  return modifiers;
+}
 
 inline PRUnichar
 VirtualKey::GetCompositeChar(ShiftState aShiftState, PRUnichar aBaseChar) const
@@ -751,6 +908,12 @@ NativeKey::ComputeUnicharFromScanCode() const
   return static_cast<PRUnichar>(
            ::MapVirtualKeyEx(ComputeVirtualKeyCodeFromScanCode(),
                              MAPVK_VK_TO_CHAR, mKeyboardLayout));
+}
+
+void
+NativeKey::InitKeyEvent(WidgetKeyboardEvent& aKeyEvent) const
+{
+  InitKeyEvent(aKeyEvent, mModKeyState);
 }
 
 void
@@ -2234,7 +2397,7 @@ KeyboardLayout::SynthesizeNativeKeyEvent(nsWindowBase* aWidget,
                                          const nsAString& aCharacters,
                                          const nsAString& aUnmodifiedCharacters)
 {
-  UINT keyboardLayoutListCount = ::GetKeyboardLayoutList(0, NULL);
+  UINT keyboardLayoutListCount = ::GetKeyboardLayoutList(0, nullptr);
   NS_ASSERTION(keyboardLayoutListCount > 0,
                "One keyboard layout must be installed at least");
   HKL keyboardLayoutListBuff[50];
@@ -2248,7 +2411,7 @@ KeyboardLayout::SynthesizeNativeKeyEvent(nsWindowBase* aWidget,
 
   nsPrintfCString layoutName("%08x", aNativeKeyboardLayout);
   HKL loadedLayout = LoadKeyboardLayoutA(layoutName.get(), KLF_NOTELLSHELL);
-  if (loadedLayout == NULL) {
+  if (loadedLayout == nullptr) {
     if (keyboardLayoutListBuff != keyboardLayoutList) {
       delete [] keyboardLayoutList;
     }

@@ -6,7 +6,7 @@
 
 MODULE = 'dom'
 
-CPP_SOURCES += [
+SOURCES += [
     'AndroidLocationProvider.cpp',
     'nsHapticFeedback.cpp',
 ]
@@ -16,4 +16,8 @@ FAIL_ON_WARNINGS = True
 LIBXUL_LIBRARY = True
 
 LIBRARY_NAME = 'domsystemandroid_s'
+
+EXPORT_LIBRARY = True
+
+include('/ipc/chromium/chromium-config.mozbuild')
 

@@ -46,12 +46,12 @@ class SetElemICInspector : public ICInspector
 class BaselineInspector
 {
   private:
-    RootedScript script;
+    JSScript *script;
     ICEntry *prevLookedUpEntry;
 
   public:
-    BaselineInspector(JSContext *cx, JSScript *rawScript)
-      : script(cx, rawScript), prevLookedUpEntry(nullptr)
+    BaselineInspector(JSScript *script)
+      : script(script), prevLookedUpEntry(nullptr)
     {
         JS_ASSERT(script);
     }
@@ -110,6 +110,12 @@ class BaselineInspector
     bool hasSeenAccessedGetter(jsbytecode *pc);
     bool hasSeenDoubleResult(jsbytecode *pc);
     bool hasSeenNonStringIterNext(jsbytecode *pc);
+
+    JSObject *getTemplateObject(jsbytecode *pc);
+    JSObject *getTemplateObjectForNative(jsbytecode *pc, Native native);
+
+    DeclEnvObject *templateDeclEnvObject();
+    CallObject *templateCallObject();
 };
 
 } // namespace jit

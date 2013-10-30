@@ -14,14 +14,14 @@ DIRS += [
 if CONFIG['MOZ_B2G_RIL']:
     DIRS += ['ril']
 
-if CONFIG['MOZ_B2G_BT']:
+if CONFIG['MOZ_B2G_BT_BLUEZ']:
     DIRS += ['dbus']
 
 if CONFIG['MOZ_NFC']:
     DIRS += ['nfc']
 
 if CONFIG['MOZ_B2G_RIL'] or CONFIG['MOZ_B2G_BT']:
-    DIRS += ['unixsocket']
+    DIRS += ['unixsocket', 'keystore']
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
     DIRS += ['netd']

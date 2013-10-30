@@ -146,7 +146,6 @@ pref("browser.helperApps.deleteTempFileOnExit", false);
 /* password manager */
 pref("signon.rememberSignons", true);
 pref("signon.expireMasterPassword", false);
-pref("signon.SignonFileName", "signons.txt");
 pref("signon.debug", false);
 
 /* form helper (scroll to and optionally zoom into editable fields)  */
@@ -245,6 +244,7 @@ pref("browser.search.log", false);
 // ordering of search engines in the engine list.
 pref("browser.search.order.1", "chrome://browser/locale/region.properties");
 pref("browser.search.order.2", "chrome://browser/locale/region.properties");
+pref("browser.search.order.3", "chrome://browser/locale/region.properties");
 
 // disable updating
 pref("browser.search.update", false);
@@ -587,7 +587,6 @@ pref("browser.safebrowsing.reportPhishURL", "http://%LOCALE%.phish-report.mozill
 pref("browser.safebrowsing.reportMalwareURL", "http://%LOCALE%.malware-report.mozilla.com/?hl=%LOCALE%");
 pref("browser.safebrowsing.reportMalwareErrorURL", "http://%LOCALE%.malware-error.mozilla.com/?hl=%LOCALE%");
 
-pref("browser.safebrowsing.warning.infoURL", "http://www.mozilla.com/%LOCALE%/firefox/phishing-protection/");
 pref("browser.safebrowsing.malware.reportURL", "http://safebrowsing.clients.google.com/safebrowsing/diagnostic?client=%NAME%&hl=%LOCALE%&site=");
 
 pref("browser.safebrowsing.id", @MOZ_APP_UA_NAME@);
@@ -729,6 +728,9 @@ pref("browser.chrome.dynamictoolbar", true);
 // 1: Show a current page url.
 pref("browser.chrome.titlebarMode", 0);
 
+// Hide common parts of URLs like "www." or "http://"
+pref("browser.urlbar.trimURLs", true);
+
 #ifdef MOZ_PKG_SPECIAL
 // Disable webgl on ARMv6 because running the reftests takes
 // too long for some reason (bug 843738)
@@ -760,13 +762,6 @@ pref("dom.payment.provider.0.type", "mozilla/payments/pay/v1");
 pref("dom.payment.provider.0.requestMethod", "GET");
 #endif
 
-#ifdef NIGHTLY_BUILD
-// Contacts API
-pref("dom.mozContacts.enabled", true);
-pref("dom.navigator-property.disable.mozContacts", false);
-pref("dom.global-constructor.disable.mozContact", false);
-#endif
-
 // Shortnumber matching needed for e.g. Brazil:
 // 01187654321 can be found with 87654321
 pref("dom.phonenumber.substringmatching.BR", 8);
@@ -788,3 +783,5 @@ pref("general.useragent.override.youtube.com", "Android; Tablet;#Android; Mobile
 // When true, phone number linkification is enabled.
 pref("browser.ui.linkify.phone", false);
 
+// Enables/disables Spatial Navigation
+pref("snav.enabled", true);

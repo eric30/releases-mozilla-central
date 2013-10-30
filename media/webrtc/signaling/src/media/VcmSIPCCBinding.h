@@ -14,6 +14,7 @@ extern "C"
 
 class nsIThread;
 class nsIEventTarget;
+class nsIPrefBranch;
 
 namespace mozilla {
     class NrIceMediaStream;
@@ -63,10 +64,13 @@ namespace CSF
 
 	static void setMainThread(nsIThread *thread);
 	static nsIThread *getMainThread();
+	static nsIEventTarget *getSTSThread();
 
 	static void setSTSThread(nsIEventTarget *thread);
 
 	static void connectCandidateSignal(mozilla::NrIceMediaStream* stream);
+
+        static nsCOMPtr<nsIPrefBranch> getPrefBranch();
 
     private:
 	void CandidateReady(mozilla::NrIceMediaStream* stream,
@@ -79,6 +83,7 @@ namespace CSF
         static int gVideoCodecMask;
 	static nsIThread *gMainThread;
 	static nsIEventTarget *gSTSThread;
+        static nsCOMPtr<nsIPrefBranch> gBranch;
     };
 }
 

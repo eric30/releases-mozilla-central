@@ -18,6 +18,7 @@
 #include "nsRuleWalker.h"
 #include "nsNthIndexCache.h"
 #include "nsILoadContext.h"
+#include "nsIDocument.h"
 #include "mozilla/AutoRestore.h"
 #include "mozilla/BloomFilter.h"
 #include "mozilla/GuardObjects.h"
@@ -172,9 +173,33 @@ struct MOZ_STACK_CLASS TreeMatchContext {
     return true;
   }
 
+#ifdef DEBUG
+  void AssertHasAllStyleScopes(mozilla::dom::Element* aElement)
+  {
+    int32_t i = mStyleScopes.Length() - 1;
+    nsINode* node = aElement->GetParentNode();
+    while (node && i != -1) {
+      if (node->IsScopedStyleRoot()) {
+        MOZ_ASSERT(mStyleScopes[i] == node);
+        --i;
+      }
+      node = node->GetParentNode();
+    }
+    while (node) {
+      MOZ_ASSERT(!node->IsScopedStyleRoot());
+      node = node->GetParentNode();
+    }
+    MOZ_ASSERT(i == -1);
+  }
+#endif
+
   bool SetStyleScopeForSelectorMatching(mozilla::dom::Element* aSubject,
                                         mozilla::dom::Element* aScope)
   {
+#ifdef DEBUG
+    AssertHasAllStyleScopes(aSubject);
+#endif
+
     mForScopedStyle = !!aScope;
     if (!aScope) {
       // This is not for a scoped style sheet; return true, as we want
@@ -424,19 +449,27 @@ struct MOZ_STACK_CLASS PseudoElementRuleProcessorData :
                                  mozilla::dom::Element* aParentElement,
                                  nsRuleWalker* aRuleWalker,
                                  nsCSSPseudoElements::Type aPseudoType,
-                                 TreeMatchContext& aTreeMatchContext)
+                                 TreeMatchContext& aTreeMatchContext,
+                                 mozilla::dom::Element* aPseudoElement)
     : ElementDependentRuleProcessorData(aPresContext, aParentElement, aRuleWalker,
                                         aTreeMatchContext),
-      mPseudoType(aPseudoType)
+      mPseudoType(aPseudoType),
+      mPseudoElement(aPseudoElement)
   {
     NS_PRECONDITION(aPseudoType <
                       nsCSSPseudoElements::ePseudo_PseudoElementCount,
                     "invalid aPseudoType value");
     NS_PRECONDITION(aTreeMatchContext.mForStyling, "Styling here!");
     NS_PRECONDITION(aRuleWalker, "Must have rule walker");
+    if (nsCSSPseudoElements::PseudoElementSupportsStyleAttribute(aPseudoType)) {
+      NS_PRECONDITION(aPseudoElement,
+          "If pseudo element is supposed to support style attribute, it must "
+          "have a pseudo element set");
+    }
   }
 
   nsCSSPseudoElements::Type mPseudoType;
+  mozilla::dom::Element* const mPseudoElement; // weak ref
 };
 
 struct MOZ_STACK_CLASS AnonBoxRuleProcessorData : public RuleProcessorData {

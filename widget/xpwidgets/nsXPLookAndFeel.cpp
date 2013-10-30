@@ -12,6 +12,7 @@
 #include "nsCRT.h"
 #include "nsFont.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/gfx/2D.h"
 
 #include "gfxPlatform.h"
 #include "qcms.h"
@@ -110,6 +111,9 @@ nsLookAndFeelIntPref nsXPLookAndFeel::sIntPrefs[] =
     false, 0 },
   { "ui.tooltipDelay",
     eIntID_TooltipDelay,
+    false, 0 },
+  { "ui.physicalHomeButton",
+    eIntID_PhysicalHomeButton,
     false, 0 },
 };
 

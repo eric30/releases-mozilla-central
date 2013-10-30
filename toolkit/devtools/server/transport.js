@@ -7,6 +7,8 @@
 "use strict";
 Components.utils.import("resource://gre/modules/NetUtil.jsm");
 
+let wantLogging = Services.prefs.getBoolPref("devtools.debugger.log");
+
 /**
  * An adapter that handles data transfers between the debugger client and
  * server. It can work with both nsIPipe and nsIServerSocket transports so
@@ -66,8 +68,7 @@ DebuggerTransport.prototype = {
    * they are passed to this method.
    */
   send: function DT_send(aPacket) {
-    // TODO (bug 709088): remove pretty printing when the protocol is done.
-    let data = JSON.stringify(aPacket, null, 2);
+    let data = JSON.stringify(aPacket);
     data = this._converter.ConvertFromUnicode(data);
     data = data.length + ':' + data;
     this._outgoing += data;
@@ -189,7 +190,9 @@ DebuggerTransport.prototype = {
       return true;
     }
 
-    dumpn("Got: " + packet);
+    if (wantLogging) {
+      dumpn("Got: " + JSON.stringify(parsed, null, 2));
+    }
     let self = this;
     Services.tm.currentThread.dispatch(makeInfallible(function() {
       // Ensure the hooks are still around by the time this runs (they will go
@@ -266,7 +269,7 @@ LocalDebuggerTransport.prototype = {
       // Remove the reference to the other endpoint before calling close(), to
       // avoid infinite recursion.
       let other = this.other;
-      delete this.other;
+      this.other = null;
       other.close();
     }
     if (this.hooks) {

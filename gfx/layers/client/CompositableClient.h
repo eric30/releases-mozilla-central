@@ -85,10 +85,8 @@ public:
                                 gfxContentType aContentType = GFX_CONTENT_SENTINEL);
 
   virtual TemporaryRef<BufferTextureClient>
-  CreateBufferTextureClient(gfx::SurfaceFormat aFormat, TextureFlags aFlags);
-
-  virtual TemporaryRef<BufferTextureClient>
-  CreateBufferTextureClient(gfx::SurfaceFormat aFormat);
+  CreateBufferTextureClient(gfx::SurfaceFormat aFormat,
+                            TextureFlags aFlags = TEXTURE_FLAGS_DEFAULT);
 
   virtual void SetDescriptorFromReply(TextureIdentifier aTextureId,
                                       const SurfaceDescriptor& aDescriptor)
@@ -126,7 +124,7 @@ public:
   /**
    * Tells the Compositor to create a TextureHost for this TextureClient.
    */
-  virtual void AddTextureClient(TextureClient* aClient);
+  virtual bool AddTextureClient(TextureClient* aClient);
 
   /**
    * Tells the Compositor to delete the TextureHost corresponding to this

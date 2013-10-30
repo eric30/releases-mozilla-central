@@ -557,7 +557,7 @@ JavaScriptParent::unwrap(JSContext *cx, ObjectId objId)
 {
     RootedObject obj(cx, findObject(objId));
     if (obj) {
-        if (!JS_WrapObject(cx, obj.address()))
+        if (!JS_WrapObject(cx, &obj))
             return nullptr;
         return obj;
     }
@@ -572,12 +572,14 @@ JavaScriptParent::unwrap(JSContext *cx, ObjectId objId)
     RootedObject global(cx, JS::CurrentGlobalOrNull(cx));
 
     RootedValue v(cx, UndefinedValue());
+    ProxyOptions options;
+    options.setCallable(callable);
     obj = NewProxyObject(cx,
                          &CPOWProxyHandler::singleton,
                          v,
                          nullptr,
                          global,
-                         callable ? ProxyIsCallable : ProxyNotCallable);
+                         options);
     if (!obj)
         return nullptr;
 

@@ -16,6 +16,8 @@
 #include "vm/NumericConversions.h"
 
 #include "jscntxtinlines.h"
+#include "jsinferinlines.h"
+#include "jsobjinlines.h"
 
 using namespace js;
 using namespace js::frontend;
@@ -190,7 +192,7 @@ FoldBinaryNumeric(ExclusiveContext *cx, JSOp op, ParseNode *pn1, ParseNode *pn2,
 // to the parse node being replaced. The replacement, *pn, is unchanged except
 // for its pn_next pointer; updating that is necessary if *pn's new parent is a
 // list node.
-void
+static void
 ReplaceNode(ParseNode **pnp, ParseNode *pn)
 {
     pn->pn_next = (*pnp)->pn_next;
@@ -762,10 +764,11 @@ Fold(ExclusiveContext *cx, ParseNode **pnp,
             }
         }
 
-        if (name) {
+        if (name && NameToId(name) == types::IdToTypeId(NameToId(name))) {
             // Optimization 3: We have pn1["foo"] where foo is not an index.
             // Convert to a property access (like pn1.foo) which we optimize
-            // better downstream.
+            // better downstream. Don't bother with this for names which TI
+            // considers to be indexes, to simplify downstream analysis.
             ParseNode *expr = handler.newPropertyAccess(pn->pn_left, name, pn->pn_pos.end);
             if (!expr)
                 return false;

@@ -20,12 +20,19 @@
 #include "ssl.h"
 #include "prthread.h"
 
+#include "cpr_stdlib.h"
+#include "FakePCObserver.h"
 #include "FakeMediaStreams.h"
 #include "FakeMediaStreamsImpl.h"
 #include "PeerConnectionImpl.h"
 #include "PeerConnectionCtx.h"
+#include "PeerConnectionMedia.h"
+#include "MediaPipeline.h"
 #include "runnable_utils.h"
 #include "nsServiceManagerUtils.h"
+#include "mozilla/Services.h"
+#include "nsIPrefService.h"
+#include "nsIPrefBranch.h"
 #include "nsNetUtil.h"
 #include "nsIIOService.h"
 #include "nsIDNSService.h"
@@ -35,10 +42,18 @@
 #include "logging.h"
 #include "stunserver.h"
 #include "stunserver.cpp"
+#include "PeerConnectionImplEnumsBinding.cpp"
 
 #include "mtransport_test_utils.h"
 MtransportTestUtils *test_utils;
 nsCOMPtr<nsIThread> gThread;
+
+#ifndef USE_FAKE_MEDIA_STREAMS
+#error USE_FAKE_MEDIA_STREAMS undefined
+#endif
+#ifndef USE_FAKE_PCOBSERVER
+#error USE_FAKE_PCOBSERVER undefined
+#endif
 
 static int kDefaultTimeout = 5000;
 static bool fRtcpMux = true;
@@ -55,6 +70,36 @@ std::string g_stun_server_address((char *)"23.21.150.121");
 uint16_t g_stun_server_port(3478);
 std::string kBogusSrflxAddress((char *)"192.0.2.1");
 uint16_t kBogusSrflxPort(1001);
+
+namespace sipcc {
+
+// We can't use mozilla/dom/MediaConstraintsBinding.h here because it uses
+// nsString, so we pass constraints in using MediaConstraintsExternal instead
+
+class MediaConstraints : public MediaConstraintsExternal {
+public:
+  void setBooleanConstraint(const char *namePtr, bool value, bool mandatory) {
+    cc_boolean_constraint_t &member (getMember(namePtr));
+    member.was_passed = true;
+    member.value = value;
+    member.mandatory = mandatory;
+  }
+private:
+  cc_boolean_constraint_t &getMember(const char *namePtr) {
+    if (strcmp(namePtr, "OfferToReceiveAudio") == 0) {
+        return mConstraints.offer_to_receive_audio;
+    }
+    if (strcmp(namePtr, "OfferToReceiveVideo") == 0) {
+        return mConstraints.offer_to_receive_video;
+    }
+    MOZ_ASSERT(false);
+    return mConstraints.moz_dont_offer_datachannel;
+  }
+};
+}
+
+using namespace mozilla;
+using namespace mozilla::dom;
 
 namespace test {
 
@@ -114,6 +159,7 @@ enum sdpTestFlags
   SHOULD_REJECT_AUDIO   = (1<<3),
   SHOULD_OMIT_AUDIO     = (1<<4),
   DONT_CHECK_AUDIO      = (1<<5),
+  SHOULD_CHECK_AUDIO    = (1<<6),
 
   SHOULD_SEND_VIDEO     = (1<<8),
   SHOULD_RECV_VIDEO     = (1<<9),
@@ -121,6 +167,7 @@ enum sdpTestFlags
   SHOULD_REJECT_VIDEO   = (1<<11),
   SHOULD_OMIT_VIDEO     = (1<<12),
   DONT_CHECK_VIDEO      = (1<<13),
+  SHOULD_CHECK_VIDEO    = (1<<14),
 
   SHOULD_INCLUDE_DATA   = (1 << 16),
   DONT_CHECK_DATA       = (1 << 17),
@@ -128,14 +175,17 @@ enum sdpTestFlags
   SHOULD_SENDRECV_AUDIO = SHOULD_SEND_AUDIO | SHOULD_RECV_AUDIO,
   SHOULD_SENDRECV_VIDEO = SHOULD_SEND_VIDEO | SHOULD_RECV_VIDEO,
   SHOULD_SENDRECV_AV = SHOULD_SENDRECV_AUDIO | SHOULD_SENDRECV_VIDEO,
+  SHOULD_CHECK_AV = SHOULD_CHECK_AUDIO | SHOULD_CHECK_VIDEO,
 
   AUDIO_FLAGS = SHOULD_SEND_AUDIO | SHOULD_RECV_AUDIO
                 | SHOULD_INACTIVE_AUDIO | SHOULD_REJECT_AUDIO
-                | DONT_CHECK_AUDIO | SHOULD_OMIT_AUDIO,
+                | DONT_CHECK_AUDIO | SHOULD_OMIT_AUDIO
+                | SHOULD_CHECK_AUDIO,
 
   VIDEO_FLAGS = SHOULD_SEND_VIDEO | SHOULD_RECV_VIDEO
                 | SHOULD_INACTIVE_VIDEO | SHOULD_REJECT_VIDEO
                 | DONT_CHECK_VIDEO | SHOULD_OMIT_VIDEO
+                | SHOULD_CHECK_VIDEO
 };
 
 enum offerAnswerFlags
@@ -175,33 +225,12 @@ static bool SetupGlobalThread() {
   return true;
 }
 
-class TestObserver : public IPeerConnectionObserver,
-                     public nsSupportsWeakReference
+class TestObserver : public AFakePCObserver
 {
 public:
-  enum Action {
-    OFFER,
-    ANSWER
-  };
-
-  enum ResponseState {
-    stateNoResponse,
-    stateSuccess,
-    stateError
-  };
-
   TestObserver(sipcc::PeerConnectionImpl *peerConnection,
                const std::string &aName) :
-    state(stateNoResponse), addIceSuccessCount(0),
-    onAddStreamCalled(false),
-    name(aName),
-    candidates(),
-    pc(peerConnection) {
-  }
-
-  virtual ~TestObserver() {}
-
-  std::vector<DOMMediaStream *> GetStreams() { return streams; }
+    AFakePCObserver(peerConnection, aName) {}
 
   size_t MatchingCandidates(const std::string& cand) {
     size_t count = 0;
@@ -215,28 +244,31 @@ public:
   }
 
   NS_DECL_THREADSAFE_ISUPPORTS
-  NS_DECL_IPEERCONNECTIONOBSERVER
-
-  ResponseState state;
-  char *lastString;
-  sipcc::PeerConnectionImpl::Error lastStatusCode;
-  uint32_t lastStateType;
-  int addIceSuccessCount;
-  bool onAddStreamCalled;
-  std::string name;
-  std::vector<std::string> candidates;
-
-private:
-  sipcc::PeerConnectionImpl *pc;
-  std::vector<DOMMediaStream *> streams;
+  NS_IMETHODIMP OnCreateOfferSuccess(const char* offer, ER&);
+  NS_IMETHODIMP OnCreateOfferError(uint32_t code, const char *msg, ER&);
+  NS_IMETHODIMP OnCreateAnswerSuccess(const char* answer, ER&);
+  NS_IMETHODIMP OnCreateAnswerError(uint32_t code, const char *msg, ER&);
+  NS_IMETHODIMP OnSetLocalDescriptionSuccess(ER&);
+  NS_IMETHODIMP OnSetRemoteDescriptionSuccess(ER&);
+  NS_IMETHODIMP OnSetLocalDescriptionError(uint32_t code, const char *msg, ER&);
+  NS_IMETHODIMP OnSetRemoteDescriptionError(uint32_t code, const char *msg, ER&);
+  NS_IMETHODIMP NotifyConnection(ER&);
+  NS_IMETHODIMP NotifyClosedConnection(ER&);
+  NS_IMETHODIMP NotifyDataChannel(nsIDOMDataChannel *channel, ER&);
+  NS_IMETHODIMP OnStateChange(PCObserverStateType state_type, ER&, void*);
+  NS_IMETHODIMP OnAddStream(nsIDOMMediaStream *stream, ER&);
+  NS_IMETHODIMP OnRemoveStream(ER&);
+  NS_IMETHODIMP OnAddTrack(ER&);
+  NS_IMETHODIMP OnRemoveTrack(ER&);
+  NS_IMETHODIMP OnAddIceCandidateSuccess(ER&);
+  NS_IMETHODIMP OnAddIceCandidateError(uint32_t code, const char *msg, ER&);
+  NS_IMETHODIMP OnIceCandidate(uint16_t level, const char *mid, const char *cand, ER&);
 };
 
-NS_IMPL_ISUPPORTS2(TestObserver,
-                   IPeerConnectionObserver,
-                   nsISupportsWeakReference)
+NS_IMPL_ISUPPORTS1(TestObserver, nsISupportsWeakReference)
 
 NS_IMETHODIMP
-TestObserver::OnCreateOfferSuccess(const char* offer)
+TestObserver::OnCreateOfferSuccess(const char* offer, ER&)
 {
   lastString = strdup(offer);
   state = stateSuccess;
@@ -246,7 +278,7 @@ TestObserver::OnCreateOfferSuccess(const char* offer)
 }
 
 NS_IMETHODIMP
-TestObserver::OnCreateOfferError(uint32_t code, const char *message)
+TestObserver::OnCreateOfferError(uint32_t code, const char *message, ER&)
 {
   lastStatusCode = static_cast<sipcc::PeerConnectionImpl::Error>(code);
   state = stateError;
@@ -256,7 +288,7 @@ TestObserver::OnCreateOfferError(uint32_t code, const char *message)
 }
 
 NS_IMETHODIMP
-TestObserver::OnCreateAnswerSuccess(const char* answer)
+TestObserver::OnCreateAnswerSuccess(const char* answer, ER&)
 {
   lastString = strdup(answer);
   state = stateSuccess;
@@ -266,7 +298,7 @@ TestObserver::OnCreateAnswerSuccess(const char* answer)
 }
 
 NS_IMETHODIMP
-TestObserver::OnCreateAnswerError(uint32_t code, const char *message)
+TestObserver::OnCreateAnswerError(uint32_t code, const char *message, ER&)
 {
   lastStatusCode = static_cast<sipcc::PeerConnectionImpl::Error>(code);
   std::cout << name << ": onCreateAnswerError = " << code
@@ -276,7 +308,7 @@ TestObserver::OnCreateAnswerError(uint32_t code, const char *message)
 }
 
 NS_IMETHODIMP
-TestObserver::OnSetLocalDescriptionSuccess()
+TestObserver::OnSetLocalDescriptionSuccess(ER&)
 {
   lastStatusCode = sipcc::PeerConnectionImpl::kNoError;
   state = stateSuccess;
@@ -285,7 +317,7 @@ TestObserver::OnSetLocalDescriptionSuccess()
 }
 
 NS_IMETHODIMP
-TestObserver::OnSetRemoteDescriptionSuccess()
+TestObserver::OnSetRemoteDescriptionSuccess(ER&)
 {
   lastStatusCode = sipcc::PeerConnectionImpl::kNoError;
   state = stateSuccess;
@@ -294,7 +326,7 @@ TestObserver::OnSetRemoteDescriptionSuccess()
 }
 
 NS_IMETHODIMP
-TestObserver::OnSetLocalDescriptionError(uint32_t code, const char *message)
+TestObserver::OnSetLocalDescriptionError(uint32_t code, const char *message, ER&)
 {
   lastStatusCode = static_cast<sipcc::PeerConnectionImpl::Error>(code);
   state = stateError;
@@ -304,7 +336,7 @@ TestObserver::OnSetLocalDescriptionError(uint32_t code, const char *message)
 }
 
 NS_IMETHODIMP
-TestObserver::OnSetRemoteDescriptionError(uint32_t code, const char *message)
+TestObserver::OnSetRemoteDescriptionError(uint32_t code, const char *message, ER&)
 {
   lastStatusCode = static_cast<sipcc::PeerConnectionImpl::Error>(code);
   state = stateError;
@@ -314,85 +346,70 @@ TestObserver::OnSetRemoteDescriptionError(uint32_t code, const char *message)
 }
 
 NS_IMETHODIMP
-TestObserver::NotifyConnection()
+TestObserver::NotifyConnection(ER&)
 {
   std::cout << name << ": NotifyConnection" << std::endl;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-TestObserver::NotifyClosedConnection()
+TestObserver::NotifyClosedConnection(ER&)
 {
   std::cout << name << ": NotifyClosedConnection" << std::endl;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-TestObserver::NotifyDataChannel(nsIDOMDataChannel *channel)
+TestObserver::NotifyDataChannel(nsIDOMDataChannel *channel, ER&)
 {
   std::cout << name << ": NotifyDataChannel" << std::endl;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-TestObserver::OnStateChange(uint32_t state_type)
+TestObserver::OnStateChange(PCObserverStateType state_type, ER&, void*)
 {
   nsresult rv;
-  uint32_t gotstate;
+  PCImplReadyState gotready;
+  PCImplIceState gotice;
+  PCImplSipccState gotsipcc;
+  PCImplSignalingState gotsignaling;
 
   std::cout << name << ": ";
 
   switch (state_type)
   {
-  case IPeerConnectionObserver::kReadyState:
-    rv = pc->GetReadyState(&gotstate);
+  case PCObserverStateType::ReadyState:
+    rv = pc->ReadyState(&gotready);
     NS_ENSURE_SUCCESS(rv, rv);
-    std::cout << "Ready State: " << gotstate << std::endl;
+    std::cout << "Ready State: "
+              << PCImplReadyStateValues::strings[int(gotready)].value
+              << std::endl;
     break;
-  case IPeerConnectionObserver::kIceState:
-    rv = pc->GetIceState(&gotstate);
+  case PCObserverStateType::IceState:
+    rv = pc->IceState(&gotice);
     NS_ENSURE_SUCCESS(rv, rv);
-    std::cout << "ICE State: " << gotstate << std::endl;
+    std::cout << "ICE State: "
+              << PCImplIceStateValues::strings[int(gotice)].value
+              << std::endl;
     break;
-  case IPeerConnectionObserver::kSdpState:
+  case PCObserverStateType::SdpState:
     std::cout << "SDP State: " << std::endl;
     // NS_ENSURE_SUCCESS(rv, rv);
     break;
-  case IPeerConnectionObserver::kSipccState:
-    rv = pc->GetSipccState(&gotstate);
+  case PCObserverStateType::SipccState:
+    rv = pc->SipccState(&gotsipcc);
     NS_ENSURE_SUCCESS(rv, rv);
-    std::cout << "SIPCC State: " << gotstate << std::endl;
+    std::cout << "SIPCC State: "
+              << PCImplSipccStateValues::strings[int(gotsipcc)].value
+              << std::endl;
     break;
-  case IPeerConnectionObserver::kSignalingState:
-    rv = pc->GetSignalingState(&gotstate);
+  case PCObserverStateType::SignalingState:
+    rv = pc->SignalingState(&gotsignaling);
     NS_ENSURE_SUCCESS(rv, rv);
-    std::cout << "Signaling State: " << gotstate << " (";
-    switch (gotstate) {
-      case sipcc::PeerConnectionImpl::kSignalingInvalid:
-        std::cout << "INVALID";
-        break;
-      case sipcc::PeerConnectionImpl::kSignalingStable:
-        std::cout << "stable";
-        break;
-      case sipcc::PeerConnectionImpl::kSignalingHaveLocalOffer:
-        std::cout << "have-local-offer";
-        break;
-      case sipcc::PeerConnectionImpl::kSignalingHaveRemoteOffer:
-        std::cout << "have-remote-offer";
-        break;
-      case sipcc::PeerConnectionImpl::kSignalingHaveLocalPranswer:
-        std::cout << "have-local-pranswer";
-        break;
-      case sipcc::PeerConnectionImpl::kSignalingHaveRemotePranswer:
-        std::cout << "have-remote-pranswer";
-        break;
-      case sipcc::PeerConnectionImpl::kSignalingClosed:
-        std::cout << "closed";
-        break;
-      default:
-        std::cout << "UNKNOWN";
-    }
-    std::cout << ")" << std::endl;
+    std::cout << "Signaling State: "
+              << PCImplSignalingStateValues::strings[int(gotsignaling)].value
+              << std::endl;
     break;
   default:
     // Unknown State
@@ -405,7 +422,7 @@ TestObserver::OnStateChange(uint32_t state_type)
 
 
 NS_IMETHODIMP
-TestObserver::OnAddStream(nsIDOMMediaStream *stream)
+TestObserver::OnAddStream(nsIDOMMediaStream *stream, ER&)
 {
   PR_ASSERT(stream);
 
@@ -430,21 +447,21 @@ TestObserver::OnAddStream(nsIDOMMediaStream *stream)
 }
 
 NS_IMETHODIMP
-TestObserver::OnRemoveStream()
+TestObserver::OnRemoveStream(ER&)
 {
   state = stateSuccess;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-TestObserver::OnAddTrack()
+TestObserver::OnAddTrack(ER&)
 {
   state = stateSuccess;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-TestObserver::OnRemoveTrack()
+TestObserver::OnRemoveTrack(ER&)
 {
   state = stateSuccess;
   return NS_OK;
@@ -453,7 +470,7 @@ TestObserver::OnRemoveTrack()
 NS_IMETHODIMP
 TestObserver::OnIceCandidate(uint16_t level,
                              const char * mid,
-                             const char * candidate)
+                             const char * candidate, ER&)
 {
   std::cout << name << ": onIceCandidate [" << level << "/"
             << mid << "] " << candidate << std::endl;
@@ -462,7 +479,7 @@ TestObserver::OnIceCandidate(uint16_t level,
 }
 
 NS_IMETHODIMP
-TestObserver::OnAddIceCandidateSuccess()
+TestObserver::OnAddIceCandidateSuccess(ER&)
 {
   lastStatusCode = sipcc::PeerConnectionImpl::kNoError;
   state = stateSuccess;
@@ -472,7 +489,7 @@ TestObserver::OnAddIceCandidateSuccess()
 }
 
 NS_IMETHODIMP
-TestObserver::OnAddIceCandidateError(uint32_t code, const char *message)
+TestObserver::OnAddIceCandidateError(uint32_t code, const char *message, ER&)
 {
   lastStatusCode = static_cast<sipcc::PeerConnectionImpl::Error>(code);
   state = stateError;
@@ -684,7 +701,7 @@ class SignalingAgent {
     pObserver = new TestObserver(pc, name);
     ASSERT_TRUE(pObserver);
 
-    ASSERT_EQ(pc->Initialize(pObserver, nullptr, cfg_, thread), NS_OK);
+    ASSERT_EQ(pc->Initialize(*pObserver, nullptr, cfg_, thread), NS_OK);
   }
 
   void Init(nsCOMPtr<nsIThread> thread)
@@ -692,21 +709,21 @@ class SignalingAgent {
     mozilla::SyncRunnable::DispatchToThread(thread,
       WrapRunnable(this, &SignalingAgent::Init_m, thread));
 
-    ASSERT_TRUE_WAIT(sipcc_state() == sipcc::PeerConnectionImpl::kStarted,
+    ASSERT_TRUE_WAIT(sipcc_state() == PCImplSipccState::Started,
                      kDefaultTimeout);
   }
 
   void WaitForGather() {
-    ASSERT_TRUE_WAIT(ice_state() == sipcc::PeerConnectionImpl::kIceWaiting, 5000);
+    ASSERT_TRUE_WAIT(ice_state() == PCImplIceState::IceWaiting, 5000);
 
     std::cout << name << ": Init Complete" << std::endl;
   }
 
   bool WaitForGatherAllowFail() {
-    EXPECT_TRUE_WAIT(ice_state() == sipcc::PeerConnectionImpl::kIceWaiting ||
-                     ice_state() == sipcc::PeerConnectionImpl::kIceFailed, 5000);
+    EXPECT_TRUE_WAIT(ice_state() == PCImplIceState::IceWaiting ||
+                     ice_state() == PCImplIceState::IceFailed, 5000);
 
-    if (ice_state() == sipcc::PeerConnectionImpl::kIceFailed) {
+    if (ice_state() == PCImplIceState::IceFailed) {
       std::cout << name << ": Init Failed" << std::endl;
       return false;
     }
@@ -715,28 +732,19 @@ class SignalingAgent {
     return true;
   }
 
-  uint32_t sipcc_state()
+  PCImplSipccState sipcc_state()
   {
-    uint32_t res;
-
-    pc->GetSipccState(&res);
-    return res;
+    return pc->SipccState();
   }
 
-  uint32_t ice_state()
+  PCImplIceState ice_state()
   {
-    uint32_t res;
-
-    pc->GetIceState(&res);
-    return res;
+    return pc->IceState();
   }
 
-  sipcc::PeerConnectionImpl::SignalingState signaling_state()
+  PCImplSignalingState signaling_state()
   {
-    uint32_t res;
-
-   pc->GetSignalingState(&res);
-    return static_cast<sipcc::PeerConnectionImpl::SignalingState>(res);
+    return pc->SignalingState();
   }
 
   void Close()
@@ -804,7 +812,7 @@ class SignalingAgent {
     }
 
     domMediaStream->SetHintContents(hint);
-    ASSERT_EQ(pc->AddStream(domMediaStream), NS_OK);
+    ASSERT_EQ(pc->AddStream(*domMediaStream), NS_OK);
     domMediaStream_ = domMediaStream;
   }
 
@@ -813,13 +821,13 @@ class SignalingAgent {
   // parameter is absent, removes the stream that was most
   // recently added to the PeerConnection.
   void RemoveLastStreamAdded() {
-    ASSERT_EQ(pc->RemoveStream(domMediaStream_), NS_OK);
+    ASSERT_EQ(pc->RemoveStream(*domMediaStream_), NS_OK);
   }
 
   void CreateOffer(sipcc::MediaConstraints& constraints,
                    uint32_t offerFlags, uint32_t sdpCheck,
-                   sipcc::PeerConnectionImpl::SignalingState endState =
-                     sipcc::PeerConnectionImpl::kSignalingStable) {
+                   PCImplSignalingState endState =
+                     PCImplSignalingState::SignalingStable) {
 
     // Create a media stream as if it came from GUM
     Fake_AudioStreamSource *audio_stream =
@@ -857,8 +865,8 @@ void CreateAnswer(sipcc::MediaConstraints& constraints, std::string offer,
                     uint32_t sdpCheck = DONT_CHECK_AUDIO|
                                         DONT_CHECK_VIDEO|
                                         DONT_CHECK_DATA,
-                    sipcc::PeerConnectionImpl::SignalingState endState =
-                    sipcc::PeerConnectionImpl::kSignalingHaveRemoteOffer) {
+                    PCImplSignalingState endState =
+                    PCImplSignalingState::SignalingHaveRemoteOffer) {
 
     uint32_t aHintContents = 0;
     if (offerAnswerFlags & ANSWER_AUDIO) {
@@ -896,7 +904,7 @@ void CreateAnswer(sipcc::MediaConstraints& constraints, std::string offer,
     // hints as were passed in.
     // When complete RemoveStream will remove and entire stream and its tracks
     // not just disable a track as this is currently doing
-    ASSERT_EQ(pc->RemoveStream(domMediaStream_), NS_OK);
+    ASSERT_EQ(pc->RemoveStream(*domMediaStream_), NS_OK);
 
     // Now call CreateOffer as JS would
     pObserver->state = TestObserver::stateNoResponse;
@@ -910,13 +918,13 @@ void CreateAnswer(sipcc::MediaConstraints& constraints, std::string offer,
 
   void SetRemote(TestObserver::Action action, std::string remote,
                  bool ignoreError = false,
-                 sipcc::PeerConnectionImpl::SignalingState endState =
-                   sipcc::PeerConnectionImpl::kSignalingInvalid) {
+                 PCImplSignalingState endState =
+                   PCImplSignalingState::SignalingInvalid) {
 
-    if (endState == sipcc::PeerConnectionImpl::kSignalingInvalid) {
+    if (endState == PCImplSignalingState::SignalingInvalid) {
       endState = (action == TestObserver::OFFER ?
-                  sipcc::PeerConnectionImpl::kSignalingHaveRemoteOffer :
-                  sipcc::PeerConnectionImpl::kSignalingStable);
+                  PCImplSignalingState::SignalingHaveRemoteOffer :
+                  PCImplSignalingState::SignalingStable);
     }
 
     pObserver->state = TestObserver::stateNoResponse;
@@ -931,13 +939,13 @@ void CreateAnswer(sipcc::MediaConstraints& constraints, std::string offer,
 
   void SetLocal(TestObserver::Action action, std::string local,
                 bool ignoreError = false,
-                sipcc::PeerConnectionImpl::SignalingState endState =
-                  sipcc::PeerConnectionImpl::kSignalingInvalid) {
+                PCImplSignalingState endState =
+                  PCImplSignalingState::SignalingInvalid) {
 
-    if (endState == sipcc::PeerConnectionImpl::kSignalingInvalid) {
+    if (endState == PCImplSignalingState::SignalingInvalid) {
       endState = (action == TestObserver::OFFER ?
-                  sipcc::PeerConnectionImpl::kSignalingHaveLocalOffer :
-                  sipcc::PeerConnectionImpl::kSignalingStable);
+                  PCImplSignalingState::SignalingHaveLocalOffer :
+                  PCImplSignalingState::SignalingStable);
     }
 
     pObserver->state = TestObserver::stateNoResponse;
@@ -988,14 +996,12 @@ void CreateAnswer(sipcc::MediaConstraints& constraints, std::string offer,
 
 
   bool IceCompleted() {
-    uint32_t state;
-    pc->GetIceState(&state);
-    return state == sipcc::PeerConnectionImpl::kIceConnected;
+    return pc->IceState() == PCImplIceState::IceConnected;
   }
 
   void AddIceCandidate(const char* candidate, const char* mid, unsigned short level,
                        bool expectSuccess) {
-    sipcc::PeerConnectionImpl::SignalingState endState = signaling_state();
+    PCImplSignalingState endState = signaling_state();
     pObserver->state = TestObserver::stateNoResponse;
     pc->AddIceCandidate(candidate, mid, level);
     ASSERT_TRUE_WAIT(pObserver->state != TestObserver::stateNoResponse,
@@ -1027,7 +1033,7 @@ void CreateAnswer(sipcc::MediaConstraints& constraints, std::string offer,
   //Stops generating new audio data for transmission.
   //Should be called before Cleanup of the peer connection.
   void CloseSendStreams() {
-    static_cast<Fake_AudioStreamSource*>(
+    static_cast<Fake_MediaStream*>(
         domMediaStream_->GetStream())->StopStream();
   }
 
@@ -1151,6 +1157,12 @@ private:
       case 0:
             ASSERT_EQ(sdp.find("a=rtpmap:109 opus/48000"), std::string::npos);
         break;
+      case SHOULD_CHECK_AUDIO:
+            ASSERT_NE(sdp.find("a=rtpmap:109 opus/48000"), std::string::npos);
+            if (offer) {
+              ASSERT_NE(sdp.find("a=rtpmap:0 PCMU/8000"), std::string::npos);
+            }
+        break;
       case SHOULD_SEND_AUDIO:
             ASSERT_NE(sdp.find("a=rtpmap:109 opus/48000"), std::string::npos);
             ASSERT_NE(sdp.find(" 0-15\r\na=sendonly"), std::string::npos);
@@ -1192,6 +1204,9 @@ private:
     switch(flags & VIDEO_FLAGS) {
       case 0:
             ASSERT_EQ(sdp.find("a=rtpmap:120 VP8/90000"), std::string::npos);
+        break;
+      case SHOULD_CHECK_VIDEO:
+            ASSERT_NE(sdp.find("a=rtpmap:120 VP8/90000"), std::string::npos);
         break;
       case SHOULD_SEND_VIDEO:
             ASSERT_NE(sdp.find("a=rtpmap:120 VP8/90000\r\na=sendonly"),
@@ -1540,6 +1555,50 @@ public:
         kBogusSrflxAddress, kBogusSrflxPort);
   }
 
+  // Check max-fs and max-fr in SDP
+  void CheckMaxFsFrSdp(const std::string sdp,
+                       int format,
+                       int max_fs,
+                       int max_fr) {
+    ParsedSDP sdpWrapper(sdp);
+    std::stringstream ss;
+    ss << "a=fmtp:" << format;
+    std::vector<std::string> lines = sdpWrapper.GetLines(ss.str());
+
+    // Both max-fs and max-fr not exist
+    if (lines.empty()) {
+      ASSERT_EQ(max_fs, 0);
+      ASSERT_EQ(max_fr, 0);
+      return;
+    }
+
+    // At most one instance allowed for each format
+    ASSERT_EQ(lines.size(), 1U);
+
+    std::string line = lines.front();
+
+    // Make sure that max-fs doesn't exist
+    if (max_fs == 0) {
+      ASSERT_EQ(line.find("max-fs="), std::string::npos);
+    }
+    // Check max-fs value
+    if (max_fs > 0) {
+      std::stringstream ss;
+      ss << "max-fs=" << max_fs;
+      ASSERT_NE(line.find(ss.str()), std::string::npos);
+    }
+    // Make sure that max-fr doesn't exist
+    if (max_fr == 0) {
+      ASSERT_EQ(line.find("max-fr="), std::string::npos);
+    }
+    // Check max-fr value
+    if (max_fr > 0) {
+      std::stringstream ss;
+      ss << "max-fr=" << max_fr;
+      ASSERT_NE(line.find(ss.str()), std::string::npos);
+    }
+  }
+
  protected:
   bool init_;
   ScopedDeletePtr<SignalingAgent> a1_;  // Canonically "caller"
@@ -1547,6 +1606,17 @@ public:
   bool wait_for_gather_;
   std::string stun_addr_;
   uint16_t stun_port_;
+};
+
+class FsFrPrefClearer {
+  public:
+    FsFrPrefClearer(nsCOMPtr<nsIPrefBranch> prefs): mPrefs(prefs) {}
+    ~FsFrPrefClearer() {
+      mPrefs->ClearUserPref("media.navigator.video.max_fs");
+      mPrefs->ClearUserPref("media.navigator.video.max_fr");
+    }
+  private:
+    nsCOMPtr<nsIPrefBranch> mPrefs;
 };
 
 TEST_F(SignalingTest, JustInit)
@@ -1606,7 +1676,6 @@ TEST_F(SignalingTest, CreateOfferDontReceiveAudio)
   sipcc::MediaConstraints constraints;
   constraints.setBooleanConstraint("OfferToReceiveAudio", false, false);
   constraints.setBooleanConstraint("OfferToReceiveVideo", true, false);
-  constraints.setBooleanConstraint("VoiceActivityDetection", true, true);
   CreateOffer(constraints, OFFER_AV,
               SHOULD_SEND_AUDIO | SHOULD_SENDRECV_VIDEO);
 }
@@ -2425,7 +2494,7 @@ TEST_F(SignalingTest, BigOValuesExtraChars)
   // The signaling state will remain "stable" because the unparsable
   // SDP leads to a failure in SetRemoteDescription.
   a2_->SetRemote(TestObserver::OFFER, offer, true,
-                sipcc::PeerConnectionImpl::kSignalingStable);
+                 PCImplSignalingState::SignalingStable);
   ASSERT_TRUE(a2_->pObserver->state == TestObserver::stateError);
 }
 
@@ -2440,7 +2509,7 @@ TEST_F(SignalingTest, BigOValuesTooBig)
   // The signaling state will remain "stable" because the unparsable
   // SDP leads to a failure in SetRemoteDescription.
   a2_->SetRemote(TestObserver::OFFER, offer, true,
-                sipcc::PeerConnectionImpl::kSignalingStable);
+                 PCImplSignalingState::SignalingStable);
   ASSERT_TRUE(a2_->pObserver->state == TestObserver::stateError);
 }
 
@@ -2454,7 +2523,7 @@ TEST_F(SignalingTest, SetLocalAnswerInStable)
   // The signaling state will remain "stable" because the
   // SetLocalDescription call fails.
   a1_->SetLocal(TestObserver::ANSWER, a1_->offer(), true,
-               sipcc::PeerConnectionImpl::kSignalingStable);
+                PCImplSignalingState::SignalingStable);
   ASSERT_EQ(a1_->pObserver->lastStatusCode,
             sipcc::PeerConnectionImpl::kInvalidState);
 }
@@ -2465,7 +2534,7 @@ TEST_F(SignalingTest, SetRemoteAnswerInStable) {
   // The signaling state will remain "stable" because the
   // SetRemoteDescription call fails.
   a1_->SetRemote(TestObserver::ANSWER, strSampleSdpAudioVideoNoIce, true,
-                sipcc::PeerConnectionImpl::kSignalingStable);
+                PCImplSignalingState::SignalingStable);
   ASSERT_EQ(a1_->pObserver->lastStatusCode,
             sipcc::PeerConnectionImpl::kInvalidState);
 }
@@ -2480,7 +2549,7 @@ TEST_F(SignalingTest, SetLocalAnswerInHaveLocalOffer) {
   // The signaling state will remain "have-local-offer" because the
   // SetLocalDescription call fails.
   a1_->SetLocal(TestObserver::ANSWER, a1_->offer(), true,
-               sipcc::PeerConnectionImpl::kSignalingHaveLocalOffer);
+                PCImplSignalingState::SignalingHaveLocalOffer);
   ASSERT_EQ(a1_->pObserver->lastStatusCode,
             sipcc::PeerConnectionImpl::kInvalidState);
 }
@@ -2495,7 +2564,7 @@ TEST_F(SignalingTest, SetRemoteOfferInHaveLocalOffer) {
   // The signaling state will remain "have-local-offer" because the
   // SetRemoteDescription call fails.
   a1_->SetRemote(TestObserver::OFFER, a1_->offer(), true,
-                sipcc::PeerConnectionImpl::kSignalingHaveLocalOffer);
+                 PCImplSignalingState::SignalingHaveLocalOffer);
   ASSERT_EQ(a1_->pObserver->lastStatusCode,
             sipcc::PeerConnectionImpl::kInvalidState);
 }
@@ -2510,7 +2579,7 @@ TEST_F(SignalingTest, SetLocalOfferInHaveRemoteOffer) {
   // The signaling state will remain "have-remote-offer" because the
   // SetLocalDescription call fails.
   a2_->SetLocal(TestObserver::OFFER, a1_->offer(), true,
-               sipcc::PeerConnectionImpl::kSignalingHaveRemoteOffer);
+                PCImplSignalingState::SignalingHaveRemoteOffer);
   ASSERT_EQ(a2_->pObserver->lastStatusCode,
             sipcc::PeerConnectionImpl::kInvalidState);
 }
@@ -2525,7 +2594,7 @@ TEST_F(SignalingTest, SetRemoteAnswerInHaveRemoteOffer) {
   // The signaling state will remain "have-remote-offer" because the
   // SetRemoteDescription call fails.
   a2_->SetRemote(TestObserver::ANSWER, a1_->offer(), true,
-               sipcc::PeerConnectionImpl::kSignalingHaveRemoteOffer);
+               PCImplSignalingState::SignalingHaveRemoteOffer);
   ASSERT_EQ(a2_->pObserver->lastStatusCode,
             sipcc::PeerConnectionImpl::kInvalidState);
 }
@@ -2710,7 +2779,7 @@ TEST_F(SignalingTest, missingUfrag)
   a1_->SetLocal(TestObserver::OFFER, offer, true);
   // We now detect the missing ICE parameters at SetRemoteDescription
   a2_->SetRemote(TestObserver::OFFER, offer, true,
-    sipcc::PeerConnectionImpl::kSignalingStable);
+                 PCImplSignalingState::SignalingStable);
   ASSERT_TRUE(a2_->pObserver->state == TestObserver::stateError);
 }
 
@@ -3326,6 +3395,167 @@ TEST_F(SignalingTest, hugeSdp)
   a2_->SetRemote(TestObserver::OFFER, offer, true);
   ASSERT_GE(a2_->getRemoteDescription().length(), 4096U);
   a2_->CreateAnswer(constraints, offer, OFFER_AV);
+}
+
+// Test max_fs and max_fr prefs have proper impact on SDP offer
+TEST_F(SignalingTest, MaxFsFrInOffer)
+{
+  EnsureInit();
+
+  sipcc::MediaConstraints constraints;
+
+  nsCOMPtr<nsIPrefBranch> prefs = do_GetService(NS_PREFSERVICE_CONTRACTID);
+  ASSERT_TRUE(prefs);
+  FsFrPrefClearer prefClearer(prefs);
+
+  prefs->SetIntPref("media.navigator.video.max_fs", 300);
+  prefs->SetIntPref("media.navigator.video.max_fr", 30);
+
+  a1_->CreateOffer(constraints, OFFER_AV, SHOULD_CHECK_AV);
+
+  // Verify that SDP contains correct max-fs and max-fr
+  CheckMaxFsFrSdp(a1_->offer(), 120, 300, 30);
+}
+
+// Test max_fs and max_fr prefs have proper impact on SDP answer
+TEST_F(SignalingTest, MaxFsFrInAnswer)
+{
+  EnsureInit();
+
+  sipcc::MediaConstraints constraints;
+
+  nsCOMPtr<nsIPrefBranch> prefs = do_GetService(NS_PREFSERVICE_CONTRACTID);
+  ASSERT_TRUE(prefs);
+  FsFrPrefClearer prefClearer(prefs);
+
+  // We don't want max_fs and max_fr prefs impact SDP at this moment
+  prefs->SetIntPref("media.navigator.video.max_fs", 0);
+  prefs->SetIntPref("media.navigator.video.max_fr", 0);
+
+  a1_->CreateOffer(constraints, OFFER_AV, SHOULD_CHECK_AV);
+
+  // SDP should not contain max-fs and max-fr here
+  CheckMaxFsFrSdp(a1_->offer(), 120, 0, 0);
+
+  a2_->SetRemote(TestObserver::OFFER, a1_->offer());
+
+  prefs->SetIntPref("media.navigator.video.max_fs", 600);
+  prefs->SetIntPref("media.navigator.video.max_fr", 60);
+
+  a2_->CreateAnswer(constraints, a1_->offer(), OFFER_AV | ANSWER_AV);
+
+  // Verify that SDP contains correct max-fs and max-fr
+  CheckMaxFsFrSdp(a2_->answer(), 120, 600, 60);
+}
+
+// Test SDP offer has proper impact on callee's codec configuration
+TEST_F(SignalingTest, MaxFsFrCalleeCodec)
+{
+  EnsureInit();
+
+  sipcc::MediaConstraints constraints;
+
+  nsCOMPtr<nsIPrefBranch> prefs = do_GetService(NS_PREFSERVICE_CONTRACTID);
+  ASSERT_TRUE(prefs);
+  FsFrPrefClearer prefClearer(prefs);
+
+  // We don't want max_fs and max_fr prefs impact SDP at this moment
+  prefs->SetIntPref("media.navigator.video.max_fs", 0);
+  prefs->SetIntPref("media.navigator.video.max_fr", 0);
+
+  a1_->CreateOffer(constraints, OFFER_AV, SHOULD_CHECK_AV);
+
+  ParsedSDP sdpWrapper(a1_->offer());
+
+  sdpWrapper.ReplaceLine("a=rtpmap:120",
+    "a=rtpmap:120 VP8/90000\r\na=fmtp:120 max-fs=300;max-fr=30\r\n");
+
+  std::cout << "Modified SDP " << std::endl
+            << indent(sdpWrapper.getSdp()) << std::endl;
+
+  // Double confirm that SDP offer contains correct max-fs and max-fr
+  CheckMaxFsFrSdp(sdpWrapper.getSdp(), 120, 300, 30);
+
+  a1_->SetLocal(TestObserver::OFFER, sdpWrapper.getSdp());
+  a2_->SetRemote(TestObserver::OFFER, sdpWrapper.getSdp());
+
+  a2_->CreateAnswer(constraints, sdpWrapper.getSdp(), OFFER_AV | ANSWER_AV);
+
+  // SDP should not contain max-fs and max-fr here
+  CheckMaxFsFrSdp(a2_->answer(), 120, 0, 0);
+
+  a2_->SetLocal(TestObserver::ANSWER, a2_->answer());
+  a1_->SetRemote(TestObserver::ANSWER, a2_->answer());
+
+  ASSERT_TRUE_WAIT(a1_->IceCompleted() == true, kDefaultTimeout);
+  ASSERT_TRUE_WAIT(a2_->IceCompleted() == true, kDefaultTimeout);
+
+  // Checking callee's video sending configuration does respect max-fs and
+  // max-fr in SDP offer.
+  mozilla::RefPtr<mozilla::MediaPipeline> pipeline =
+    a2_->GetMediaPipeline(1, 0, 1);
+  ASSERT_TRUE(pipeline);
+  mozilla::MediaSessionConduit *conduit = pipeline->Conduit();
+  ASSERT_TRUE(conduit);
+  ASSERT_EQ(conduit->type(), mozilla::MediaSessionConduit::VIDEO);
+  mozilla::VideoSessionConduit *video_conduit =
+    static_cast<mozilla::VideoSessionConduit*>(conduit);
+
+  ASSERT_EQ(video_conduit->SendingMaxFs(), (unsigned short) 300);
+  ASSERT_EQ(video_conduit->SendingMaxFr(), (unsigned short) 30);
+}
+
+// Test SDP answer has proper impact on caller's codec configuration
+TEST_F(SignalingTest, MaxFsFrCallerCodec)
+{
+  EnsureInit();
+
+  sipcc::MediaConstraints constraints;
+
+  nsCOMPtr<nsIPrefBranch> prefs = do_GetService(NS_PREFSERVICE_CONTRACTID);
+  ASSERT_TRUE(prefs);
+  FsFrPrefClearer prefClearer(prefs);
+
+  // We don't want max_fs and max_fr prefs impact SDP at this moment
+  prefs->SetIntPref("media.navigator.video.max_fs", 0);
+  prefs->SetIntPref("media.navigator.video.max_fr", 0);
+
+  a1_->CreateOffer(constraints, OFFER_AV, SHOULD_CHECK_AV);
+  a1_->SetLocal(TestObserver::OFFER, a1_->offer());
+  a2_->SetRemote(TestObserver::OFFER, a1_->offer());
+
+  a2_->CreateAnswer(constraints, a1_->offer(), OFFER_AV | ANSWER_AV);
+
+  ParsedSDP sdpWrapper(a2_->answer());
+
+  sdpWrapper.ReplaceLine("a=rtpmap:120",
+    "a=rtpmap:120 VP8/90000\r\na=fmtp:120 max-fs=600;max-fr=60\r\n");
+
+  std::cout << "Modified SDP " << std::endl
+            << indent(sdpWrapper.getSdp()) << std::endl;
+
+  // Double confirm that SDP answer contains correct max-fs and max-fr
+  CheckMaxFsFrSdp(sdpWrapper.getSdp(), 120, 600, 60);
+
+  a2_->SetLocal(TestObserver::ANSWER, sdpWrapper.getSdp());
+  a1_->SetRemote(TestObserver::ANSWER, sdpWrapper.getSdp());
+
+  ASSERT_TRUE_WAIT(a1_->IceCompleted() == true, kDefaultTimeout);
+  ASSERT_TRUE_WAIT(a2_->IceCompleted() == true, kDefaultTimeout);
+
+  // Checking caller's video sending configuration does respect max-fs and
+  // max-fr in SDP answer.
+  mozilla::RefPtr<mozilla::MediaPipeline> pipeline =
+    a1_->GetMediaPipeline(1, 0, 1);
+  ASSERT_TRUE(pipeline);
+  mozilla::MediaSessionConduit *conduit = pipeline->Conduit();
+  ASSERT_TRUE(conduit);
+  ASSERT_EQ(conduit->type(), mozilla::MediaSessionConduit::VIDEO);
+  mozilla::VideoSessionConduit *video_conduit =
+    static_cast<mozilla::VideoSessionConduit*>(conduit);
+
+  ASSERT_EQ(video_conduit->SendingMaxFs(), (unsigned short) 600);
+  ASSERT_EQ(video_conduit->SendingMaxFr(), (unsigned short) 60);
 }
 
 } // End namespace test.

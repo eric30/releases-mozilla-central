@@ -22,13 +22,12 @@
 #include "mozilla/dom/JSSlots.h"
 #include "nsMathUtils.h"
 #include "nsStringBuffer.h"
-#include "nsIGlobalObject.h"
 #include "mozilla/dom/BindingDeclarations.h"
 
 class nsIPrincipal;
-class nsIXPConnectWrappedJS;
 class nsScriptNameSpaceManager;
 class nsIGlobalObject;
+class nsIMemoryReporterCallback;
 
 #ifndef BAD_TLS_INDEX
 #define BAD_TLS_INDEX ((uint32_t) -1)
@@ -37,11 +36,6 @@ class nsIGlobalObject;
 namespace xpc {
 JSObject *
 TransplantObject(JSContext *cx, JS::HandleObject origobj, JS::HandleObject target);
-
-JSObject *
-TransplantObjectWithWrapper(JSContext *cx,
-                            JS::HandleObject origobj, JS::HandleObject origwrapper,
-                            JS::HandleObject targetobj, JS::HandleObject targetwrapper);
 
 // Return a raw XBL scope object corresponding to contentScope, which must
 // be an object whose global is a DOM window.
@@ -82,32 +76,11 @@ struct RuntimeStats;
 
 #define XPCONNECT_GLOBAL_FLAGS XPCONNECT_GLOBAL_FLAGS_WITH_EXTRA_SLOTS(0)
 
-void
-TraceXPCGlobal(JSTracer *trc, JSObject *obj);
-
-// XXX These should be moved into XPCJSRuntime!
-NS_EXPORT_(bool)
-xpc_LocalizeRuntime(JSRuntime *rt);
-NS_EXPORT_(void)
-xpc_DelocalizeRuntime(JSRuntime *rt);
-
-// If IS_WN_CLASS for the JSClass of an object is true, the object is a
-// wrappednative wrapper, holding the XPCWrappedNative in its private slot.
-
-static inline bool IS_WN_CLASS(const js::Class* clazz)
-{
-    return clazz->ext.isWrappedNative;
-}
-static inline bool IS_WN_REFLECTOR(JSObject *obj)
-{
-    return IS_WN_CLASS(js::GetObjectClass(obj));
-}
-
 extern bool
 xpc_OkToHandOutWrapper(nsWrapperCache *cache);
 
 inline JSObject*
-xpc_FastGetCachedWrapper(nsWrapperCache *cache, JSObject *scope, jsval *vp)
+xpc_FastGetCachedWrapper(nsWrapperCache *cache, JSObject *scope, JS::MutableHandleValue vp)
 {
     if (cache) {
         JSObject* wrapper = cache->GetWrapper();
@@ -115,7 +88,7 @@ xpc_FastGetCachedWrapper(nsWrapperCache *cache, JSObject *scope, jsval *vp)
             js::GetObjectCompartment(wrapper) == js::GetObjectCompartment(scope) &&
             (cache->IsDOMBinding() ? !cache->HasSystemOnlyWrapper() :
                                      xpc_OkToHandOutWrapper(cache))) {
-            *vp = OBJECT_TO_JSVAL(wrapper);
+            vp.setObject(*wrapper);
             return wrapper;
         }
     }
@@ -163,8 +136,6 @@ xpc_UnmarkSkippableJSHolders();
 NS_EXPORT_(void)
 xpc_ActivateDebugMode();
 
-class nsIMemoryReporterCallback;
-
 // readable string conversions, static methods and members only
 class XPCStringConvert
 {
@@ -179,12 +150,12 @@ public:
     // Convert the given stringbuffer/length pair to a jsval
     static MOZ_ALWAYS_INLINE bool
     StringBufferToJSVal(JSContext* cx, nsStringBuffer* buf, uint32_t length,
-                        JS::Value* rval, bool* sharedBuffer)
+                        JS::MutableHandleValue rval, bool* sharedBuffer)
     {
         if (buf == sCachedBuffer &&
             JS::GetGCThingZone(sCachedString) == js::GetContextZone(cx))
         {
-            *rval = JS::StringValue(sCachedString);
+            rval.set(JS::StringValue(sCachedString));
             *sharedBuffer = false;
             return true;
         }
@@ -195,7 +166,7 @@ public:
         if (!str) {
             return false;
         }
-        *rval = JS::StringValue(str);
+        rval.setString(str);
         sCachedString = str;
         sCachedBuffer = buf;
         *sharedBuffer = true;
@@ -225,26 +196,26 @@ NS_EXPORT_(bool) Base64Decode(JSContext *cx, JS::Value val, JS::Value *out);
  * Note, the ownership of the string buffer may be moved from str to rval.
  * If that happens, str will point to an empty string after this call.
  */
-bool NonVoidStringToJsval(JSContext *cx, nsAString &str, JS::Value *rval);
-inline bool StringToJsval(JSContext *cx, nsAString &str, JS::Value *rval)
+bool NonVoidStringToJsval(JSContext *cx, nsAString &str, JS::MutableHandleValue rval);
+inline bool StringToJsval(JSContext *cx, nsAString &str, JS::MutableHandleValue rval)
 {
     // From the T_DOMSTRING case in XPCConvert::NativeData2JS.
     if (str.IsVoid()) {
-        *rval = JSVAL_NULL;
+        rval.setNull();
         return true;
     }
     return NonVoidStringToJsval(cx, str, rval);
 }
 
 inline bool
-NonVoidStringToJsval(JSContext* cx, const nsAString& str, JS::Value *rval)
+NonVoidStringToJsval(JSContext* cx, const nsAString& str, JS::MutableHandleValue rval)
 {
     nsString mutableCopy(str);
     return NonVoidStringToJsval(cx, mutableCopy, rval);
 }
 
 inline bool
-StringToJsval(JSContext* cx, const nsAString& str, JS::Value *rval)
+StringToJsval(JSContext* cx, const nsAString& str, JS::MutableHandleValue rval)
 {
     nsString mutableCopy(str);
     return StringToJsval(cx, mutableCopy, rval);
@@ -255,7 +226,7 @@ StringToJsval(JSContext* cx, const nsAString& str, JS::Value *rval)
  */
 MOZ_ALWAYS_INLINE
 bool NonVoidStringToJsval(JSContext* cx, mozilla::dom::DOMString& str,
-                          JS::Value *rval)
+                          JS::MutableHandleValue rval)
 {
     if (!str.HasStringBuffer()) {
         // It's an actual XPCOM string
@@ -264,7 +235,7 @@ bool NonVoidStringToJsval(JSContext* cx, mozilla::dom::DOMString& str,
 
     uint32_t length = str.StringBufferLength();
     if (length == 0) {
-        *rval = JS_GetEmptyStringValue(cx);
+        rval.set(JS_GetEmptyStringValue(cx));
         return true;
     }
 
@@ -283,44 +254,21 @@ bool NonVoidStringToJsval(JSContext* cx, mozilla::dom::DOMString& str,
 
 MOZ_ALWAYS_INLINE
 bool StringToJsval(JSContext* cx, mozilla::dom::DOMString& str,
-                   JS::Value *rval)
+                   JS::MutableHandleValue rval)
 {
     if (str.IsNull()) {
-        *rval = JS::NullValue();
+        rval.setNull();
         return true;
     }
     return NonVoidStringToJsval(cx, str, rval);
 }
 
 nsIPrincipal *GetCompartmentPrincipal(JSCompartment *compartment);
-nsIPrincipal *GetObjectPrincipal(JSObject *obj);
 
 bool IsXBLScope(JSCompartment *compartment);
 
 void SetLocationForGlobal(JSObject *global, const nsACString& location);
 void SetLocationForGlobal(JSObject *global, nsIURI *locationURI);
-
-/**
- * Define quick stubs on the given object, @a proto.
- *
- * @param cx
- *     A context.  Requires request.
- * @param proto
- *     The (newly created) prototype object for a DOM class.  The JS half
- *     of an XPCWrappedNativeProto.
- * @param flags
- *     Property flags for the quick stub properties--should be either
- *     JSPROP_ENUMERATE or 0.
- * @param interfaceCount
- *     The number of interfaces the class implements.
- * @param interfaceArray
- *     The interfaces the class implements; interfaceArray and
- *     interfaceCount are like what nsIClassInfo.getInterfaces returns.
- */
-bool
-DOM_DefineQuickStubs(JSContext *cx, JSObject *proto, uint32_t flags,
-                     uint32_t interfaceCount, const nsIID **interfaceArray);
-
 
 // ReportJSRuntimeExplicitTreeStats will expect this in the |extra| member
 // of JS::ZoneStats.
@@ -360,7 +308,7 @@ nsresult
 ReportJSRuntimeExplicitTreeStats(const JS::RuntimeStats &rtStats,
                                  const nsACString &rtPath,
                                  nsIMemoryReporterCallback *cb,
-                                 nsISupports *closure, size_t *rtTotal = NULL);
+                                 nsISupports *closure, size_t *rtTotal = nullptr);
 
 /**
  * Throws an exception on cx and returns false.
@@ -411,6 +359,12 @@ SystemErrorReporterExternal(JSContext *cx, const char *message,
 NS_EXPORT_(void)
 SimulateActivityCallback(bool aActive);
 
+void
+RecordAdoptedNode(JSCompartment *c);
+
+void
+RecordDonatedNode(JSCompartment *c);
+
 } // namespace xpc
 
 namespace mozilla {
@@ -432,8 +386,6 @@ typedef JSObject*
 typedef bool
 (ConstructorEnabled)(JSContext* cx, JS::Handle<JSObject*> obj);
 
-extern bool
-DefineStaticJSVals(JSContext *cx);
 void
 Register(nsScriptNameSpaceManager* aNameSpaceManager);
 

@@ -5,32 +5,28 @@
 
 package org.mozilla.gecko.home;
 
-import org.mozilla.gecko.favicons.Favicons;
 import org.mozilla.gecko.R;
-import org.mozilla.gecko.Tabs;
 import org.mozilla.gecko.db.BrowserContract.Bookmarks;
 import org.mozilla.gecko.db.BrowserDB;
-import org.mozilla.gecko.db.BrowserDB.URLColumns;
-import org.mozilla.gecko.gfx.BitmapUtils;
 import org.mozilla.gecko.home.BookmarksListAdapter.OnRefreshFolderListener;
 import org.mozilla.gecko.home.HomePager.OnUrlOpenListener;
-import org.mozilla.gecko.util.ThreadUtils;
 
 import android.app.Activity;
-import android.content.ContentResolver;
 import android.content.Context;
 import android.content.res.Configuration;
 import android.database.Cursor;
-import android.graphics.Bitmap;
 import android.os.Bundle;
-import android.support.v4.app.LoaderManager;
 import android.support.v4.app.LoaderManager.LoaderCallbacks;
 import android.support.v4.content.Loader;
-import android.text.TextUtils;
-import android.util.Log;
+import android.util.Pair;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.view.ViewStub;
 import android.view.ViewGroup;
+import android.widget.ImageView;
+import android.widget.TextView;
+
+import java.util.List;
 
 /**
  * A page in about:home that displays a ListView of bookmarks.
@@ -49,6 +45,12 @@ public class BookmarksPage extends HomeFragment {
 
     // Adapter for list of bookmarks.
     private BookmarksListAdapter mListAdapter;
+
+    // Adapter's parent stack.
+    private List<Pair<Integer, String>> mSavedParentStack;
+
+    // Reference to the View to display when there are no results.
+    private View mEmptyView;
 
     // Callback for cursor loaders.
     private CursorLoaderCallbacks mLoaderCallbacks;
@@ -87,7 +89,7 @@ public class BookmarksPage extends HomeFragment {
         final Activity activity = getActivity();
 
         // Setup the list adapter.
-        mListAdapter = new BookmarksListAdapter(activity, null);
+        mListAdapter = new BookmarksListAdapter(activity, null, mSavedParentStack);
         mListAdapter.setOnRefreshFolderListener(new OnRefreshFolderListener() {
             @Override
             public void onRefreshFolder(int folderId) {
@@ -112,6 +114,7 @@ public class BookmarksPage extends HomeFragment {
     public void onDestroyView() {
         mList = null;
         mListAdapter = null;
+        mEmptyView = null;
         super.onDestroyView();
     }
 
@@ -128,6 +131,10 @@ public class BookmarksPage extends HomeFragment {
         // be used between the Activity's onSaveInstanceState() and
         // onResume().
         if (isVisible()) {
+            // The parent stack is saved just so that the folder state can be
+            // restored on rotation.
+            mSavedParentStack = mListAdapter.getParentStack();
+
             getFragmentManager().beginTransaction()
                                 .detach(this)
                                 .attach(this)
@@ -138,6 +145,22 @@ public class BookmarksPage extends HomeFragment {
     @Override
     protected void load() {
         getLoaderManager().initLoader(LOADER_ID_BOOKMARKS_LIST, null, mLoaderCallbacks);
+    }
+
+    private void updateUiFromCursor(Cursor c) {
+        if ((c == null || c.getCount() == 0) && mEmptyView == null) {
+            // Set empty page view. We delay this so that the empty view won't flash.
+            final ViewStub emptyViewStub = (ViewStub) getView().findViewById(R.id.home_empty_view_stub);
+            mEmptyView = emptyViewStub.inflate();
+
+            final ImageView emptyIcon = (ImageView) mEmptyView.findViewById(R.id.home_empty_image);
+            emptyIcon.setImageResource(R.drawable.icon_bookmarks_empty);
+
+            final TextView emptyText = (TextView) mEmptyView.findViewById(R.id.home_empty_text);
+            emptyText.setText(R.string.home_bookmarks_empty);
+
+            mList.setEmptyView(mEmptyView);
+        }
     }
 
     /**
@@ -177,6 +200,7 @@ public class BookmarksPage extends HomeFragment {
         @Override
         public void onLoadFinished(Loader<Cursor> loader, Cursor c) {
             mListAdapter.swapCursor(c);
+            updateUiFromCursor(c);
         }
 
         @Override

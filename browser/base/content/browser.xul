@@ -22,6 +22,7 @@
 <window id="main-window"
         xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
         xmlns:svg="http://www.w3.org/2000/svg"
+        xmlns:html="http://www.w3.org/1999/xhtml"
         xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
         onload="gBrowserInit.onLoad()" onunload="gBrowserInit.onUnload()" onclose="return WindowIsClosing();"
         title="&mainWindow.title;@PRE_RELEASE_SUFFIX@"
@@ -183,6 +184,22 @@
       </hbox>
     </panel>
 
+    <!-- UI tour experience -->
+    <panel id="UITourTooltip"
+           type="arrow"
+           hidden="true"
+           consumeoutsideclicks="false"
+           noautofocus="true"
+           align="start"
+           orient="vertical"
+           role="alert">
+      <label id="UITourTooltipTitle" flex="1"/>
+      <description id="UITourTooltipDescription" flex="1"/>
+    </panel>
+    <html:div id="UITourHighlightContainer" style="position:relative">
+      <html:div id="UITourHighlight"></html:div>
+    </html:div>
+
     <panel id="socialActivatedNotification"
            type="arrow"
            hidden="true"
@@ -342,7 +359,11 @@
         </vbox>
       </hbox>
       <!-- Footer button to open security page info -->
-      <hbox id="identity-popup-button-container" pack="end">
+      <hbox id="identity-popup-button-container" align="center">
+        <button id="identity-popup-help-icon"
+               oncommand="gIdentityHandler.handleHelpCommand(event);"
+               tooltiptext="&identity.help.tooltip;"/>
+        <spacer flex="1"/>
         <button id="identity-popup-more-info-button"
                 label="&identity.moreInfoLinkText;"
                 oncommand="gIdentityHandler.handleMoreInfoClick(event);"/>
@@ -392,6 +413,11 @@
 
 #include popup-notifications.inc
 
+    <hbox id="downloads-animation-container" mousethrough="always">
+      <vbox id="downloads-notification-anchor">
+        <vbox id="downloads-indicator-notification"/>
+      </vbox>
+    </hbox>
   </popupset>
 
 #ifdef CAN_DRAW_IN_TITLEBAR
@@ -508,8 +534,6 @@
             <image id="webapps-notification-icon" class="notification-anchor-icon" role="button"/>
             <image id="plugins-notification-icon" class="notification-anchor-icon" role="button"/>
             <image id="web-notifications-notification-icon" class="notification-anchor-icon" role="button"/>
-            <image id="alert-plugins-notification-icon" class="notification-anchor-icon" role="button"/>
-            <image id="blocked-plugins-notification-icon" class="notification-anchor-icon" role="button"/>
             <image id="plugin-install-notification-icon" class="notification-anchor-icon" role="button"/>
             <image id="mixed-content-blocked-notification-icon" class="notification-anchor-icon" role="button"/>
             <image id="webRTC-shareDevices-notification-icon" class="notification-anchor-icon" role="button"/>
@@ -545,7 +569,7 @@
                    onclick="gPopupBlockerObserver.onReportButtonClick(event);"/>
             <image id="star-button"
                    class="urlbar-icon"
-                   onclick="BookmarkingUI.onCommand(event);"/>
+                   onclick="if (event.button === 0) BookmarkingUI.onCommand(event);"/>
             <image id="go-button"
                    class="urlbar-icon"
                    tooltiptext="&goEndCap.tooltip;"
@@ -912,16 +936,8 @@
                      ondrop="DownloadsIndicatorView.onDrop(event);"
                      ondragover="DownloadsIndicatorView.onDragOver(event);"
                      ondragenter="DownloadsIndicatorView.onDragOver(event);"
-                     xmlns:xbl="http://www.mozilla.org/xbl"
                      label="&downloads.label;"
-                     tooltiptext="&downloads.tooltip;">
-        <!-- We need a different binding for the notification and progress bar, which means
-             we don't get these for free. Adding them in our binding loses them when dragging
-             to the customize window, so we add them in here as 'real' children -->
-        <image class="toolbarbutton-icon" xbl:inherits="validate,src=image,label"/>
-        <label class="toolbarbutton-text" crop="right" flex="1"
-               xbl:inherits="value=label,accesskey,crop"/>
-      </toolbarbutton>
+                     tooltiptext="&downloads.tooltip;"/>
 
       <toolbarbutton id="history-button" class="toolbarbutton-1 chromeclass-toolbar-additional"
                      observes="viewHistorySidebar" label="&historyButton.label;"
@@ -1027,7 +1043,7 @@
 
     <splitter id="sidebar-splitter" class="chromeclass-extrachrome sidebar-splitter" hidden="true"/>
     <vbox id="appcontent" flex="1">
-      <tabbrowser id="content" disablehistory="true"
+      <tabbrowser id="content"
                   flex="1" contenttooltip="aHTMLTooltip"
                   tabcontainer="tabbrowser-tabs"
                   contentcontextmenu="contentAreaContextMenu"

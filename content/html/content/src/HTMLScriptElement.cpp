@@ -11,7 +11,6 @@
 #include "nsNetUtil.h"
 #include "nsContentUtils.h"
 #include "nsUnicharUtils.h"  // for nsCaseInsensitiveStringComparator()
-#include "jsapi.h"
 #include "nsIScriptContext.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIXPConnect.h"
@@ -226,10 +225,11 @@ HTMLScriptElement::AfterSetAttr(int32_t aNamespaceID, nsIAtom* aName,
                                             aNotify);
 }
 
-void
-HTMLScriptElement::GetInnerHTML(nsAString& aInnerHTML, ErrorResult& aError)
+NS_IMETHODIMP
+HTMLScriptElement::GetInnerHTML(nsAString& aInnerHTML)
 {
   nsContentUtils::GetNodeTextContent(this, false, aInnerHTML);
+  return NS_OK;
 }
 
 void

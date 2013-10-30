@@ -77,6 +77,22 @@ nsHTMLScrollFrame::nsHTMLScrollFrame(nsIPresShell* aShell, nsStyleContext* aCont
 {
 }
 
+void
+nsHTMLScrollFrame::ScrollbarActivityStarted() const
+{
+  if (mInner.mScrollbarActivity) {
+    mInner.mScrollbarActivity->ActivityStarted();
+  }
+}
+
+void
+nsHTMLScrollFrame::ScrollbarActivityStopped() const
+{
+  if (mInner.mScrollbarActivity) {
+    mInner.mScrollbarActivity->ActivityStopped();
+  }
+}
+
 nsresult
 nsHTMLScrollFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
 {
@@ -900,6 +916,22 @@ nsXULScrollFrame::nsXULScrollFrame(nsIPresShell* aShell, nsStyleContext* aContex
 {
   SetLayoutManager(nullptr);
   mInner.mClipAllDescendants = aClipAllDescendants;
+}
+
+void
+nsXULScrollFrame::ScrollbarActivityStarted() const
+{
+  if (mInner.mScrollbarActivity) {
+    mInner.mScrollbarActivity->ActivityStarted();
+  }
+}
+
+void
+nsXULScrollFrame::ScrollbarActivityStopped() const
+{
+  if (mInner.mScrollbarActivity) {
+    mInner.mScrollbarActivity->ActivityStopped();
+  }
 }
 
 nsMargin
@@ -2320,8 +2352,13 @@ nsGfxScrollFrameInner::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       (scrollRange.width > 0 || scrollRange.height > 0) &&
       ((styles.mHorizontal != NS_STYLE_OVERFLOW_HIDDEN && mHScrollbarBox) ||
        (styles.mVertical   != NS_STYLE_OVERFLOW_HIDDEN && mVScrollbarBox));
-    // TODO Turn this on for inprocess OMTC
+    // TODO Turn this on for inprocess OMTC on all platforms
     bool wantSubAPZC = (XRE_GetProcessType() == GeckoProcessType_Content);
+#ifdef XP_WIN
+    if (XRE_GetWindowsEnvironment() == WindowsEnvironmentType_Metro) {
+      wantSubAPZC = true;
+    }
+#endif
     mShouldBuildLayer =
       wantSubAPZC &&
       hasScrollableOverflow &&
@@ -2334,6 +2371,22 @@ nsGfxScrollFrameInner::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     ScrollLayerWrapper wrapper(mOuter, mScrolledFrame);
 
     if (usingDisplayport) {
+      DisplayListClipState::AutoSaveRestore clipState(aBuilder);
+
+      // For root scrollframes in documents where the CSS viewport has been
+      // modified, the CSS viewport no longer corresponds to what is visible,
+      // so we don't want to clip the content to it. For root scrollframes
+      // in documents where the CSS viewport is NOT modified, the mScrollPort
+      // is the same as the CSS viewport, modulo scrollbars.
+      if (!(mIsRoot && mOuter->PresContext()->PresShell()->GetIsViewportOverridden())) {
+        nsRect clip = mScrollPort + aBuilder->ToReferenceFrame(mOuter);
+        if (mClipAllDescendants) {
+          clipState.ClipContentDescendants(clip);
+        } else {
+          clipState.ClipContainingBlockDescendants(clip);
+        }
+      }
+
       // Once a displayport is set, assume that scrolling needs to be fast
       // so create a layer with all the content inside. The compositor
       // process will be able to scroll the content asynchronously.
@@ -3739,9 +3792,15 @@ nsGfxScrollFrameInner::UpdateOverflow()
       GetScrollPosition() != nsPoint()) {
     // If there are scrollbars, or we're not at the beginning of the pane,
     // the scroll position may change. In this case, mark the frame as
-    // needing reflow.
+    // needing reflow. Don't use NS_FRAME_IS_DIRTY as dirty as that means
+    // we have to reflow the frame and all its descendants, and we don't
+    // have to do that here. Only this frame needs to be reflowed.
     mOuter->PresContext()->PresShell()->FrameNeedsReflow(
-      mOuter, nsIPresShell::eResize, NS_FRAME_IS_DIRTY);
+      mOuter, nsIPresShell::eResize, NS_FRAME_HAS_DIRTY_CHILDREN);
+    // Ensure that next time nsHTMLScrollFrame::Reflow runs, we don't skip
+    // updating the scrollbars. (Because the overflow area of the scrolled
+    // frame has probably just been updated, Reflow won't see it change.)
+    mSkippedScrollbarLayout = true;
     return false;  // reflowing will update overflow
   }
   return mOuter->nsContainerFrame::UpdateOverflow();

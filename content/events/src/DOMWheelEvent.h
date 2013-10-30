@@ -9,7 +9,7 @@
 
 #include "nsIDOMWheelEvent.h"
 #include "nsDOMMouseEvent.h"
-#include "mozilla/MouseEvents.h"
+#include "mozilla/EventForwards.h"
 #include "mozilla/dom/WheelEventBinding.h"
 
 namespace mozilla {
@@ -21,8 +21,7 @@ class DOMWheelEvent : public nsDOMMouseEvent,
 public:
   DOMWheelEvent(mozilla::dom::EventTarget* aOwner,
                 nsPresContext* aPresContext,
-                WheelEvent* aWheelEvent);
-  virtual ~DOMWheelEvent();
+                WidgetWheelEvent* aWheelEvent);
 
   NS_DECL_ISUPPORTS_INHERITED
 
@@ -44,25 +43,10 @@ public:
     return mozilla::dom::WheelEventBinding::Wrap(aCx, aScope, this);
   }
 
-  double DeltaX()
-  {
-    return static_cast<WheelEvent*>(mEvent)->deltaX;
-  }
-
-  double DeltaY()
-  {
-    return static_cast<WheelEvent*>(mEvent)->deltaY;
-  }
-
-  double DeltaZ()
-  {
-    return static_cast<WheelEvent*>(mEvent)->deltaZ;
-  }
-
-  uint32_t DeltaMode()
-  {
-    return static_cast<WheelEvent*>(mEvent)->deltaMode;
-  }
+  double DeltaX();
+  double DeltaY();
+  double DeltaZ();
+  uint32_t DeltaMode();
 };
 
 } // namespace dom

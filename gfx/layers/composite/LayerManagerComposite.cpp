@@ -326,7 +326,9 @@ LayerManagerComposite::Render()
 
   {
     PROFILER_LABEL("LayerManagerComposite", "PreRender");
-    mCompositor->GetWidget()->PreRender(this);
+    if (!mCompositor->GetWidget()->PreRender(this)) {
+      return;
+    }
   }
 
   nsIntRect clipRect;
@@ -344,23 +346,28 @@ LayerManagerComposite::Render()
   }
 
   if (actualBounds.IsEmpty()) {
+    mCompositor->GetWidget()->PostRender(this);
     return;
   }
 
   // Allow widget to render a custom background.
+  mCompositor->SaveState();
   mCompositor->GetWidget()->DrawWindowUnderlay(this, nsIntRect(actualBounds.x,
                                                                actualBounds.y,
                                                                actualBounds.width,
                                                                actualBounds.height));
+  mCompositor->RestoreState();
 
   // Render our layers.
   RootLayer()->RenderLayer(nsIntPoint(0, 0), clipRect);
 
   // Allow widget to render a custom foreground.
+  mCompositor->SaveState();
   mCompositor->GetWidget()->DrawWindowOverlay(this, nsIntRect(actualBounds.x,
                                                               actualBounds.y,
                                                               actualBounds.width,
                                                               actualBounds.height));
+  mCompositor->RestoreState();
 
   // Debugging
   RenderDebugOverlay(actualBounds);
@@ -369,6 +376,8 @@ LayerManagerComposite::Render()
     PROFILER_LABEL("LayerManagerComposite", "EndFrame");
     mCompositor->EndFrame();
   }
+
+  mCompositor->GetWidget()->PostRender(this);
 }
 
 void
@@ -722,6 +731,7 @@ LayerComposite::LayerComposite(LayerManagerComposite *aManager)
   , mUseShadowClipRect(false)
   , mShadowTransformSetByAnimation(false)
   , mDestroyed(false)
+  , mLayerComposited(false)
 { }
 
 LayerComposite::~LayerComposite()
