@@ -370,7 +370,9 @@ Nfc.prototype = {
     debug("Received '" + JSON.stringify(message) + "' message from content process");
 
     if (!this._enabled) {
-      throw new Error("NFC is not enabled.");
+      debug("NFC is not enabled.");
+      this.sendNfcErrorResponse(message);
+      return null;
     }
 
     // Enforce bare minimums for NFC permissions

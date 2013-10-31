@@ -23,6 +23,10 @@ this.DEBUG_WORKER = false || DEBUG_ALL;
 this.DEBUG_CONTENT_HELPER = false || DEBUG_ALL;
 this.DEBUG_NFC = false || DEBUG_ALL;
 
+// Current version
+this.NFC_MAJOR_VERSION = 1;
+this.NFC_MINOR_VERSION = 7;
+
 this.NFC_REQUEST_CONFIG = 0;
 this.NFC_REQUEST_CONNECT = 1;
 this.NFC_REQUEST_CLOSE = 2;

@@ -128,7 +128,6 @@ let NfcWorker = {
         }
 
         let payloadLength = Buf.readInt32();
-        //TODO using Uint8Array will make the payload become an object, not an array.
         let payload = [];
         for (let i = 0; i < payloadLength; i++) {
           payload.push(Buf.readUint8());
@@ -190,7 +189,6 @@ let NfcWorker = {
     let records    = message.records;
     let numRecords = records.length;
     Buf.writeInt32(numRecords);
-
     for (let i = 0; i < numRecords; i++) {
       let record = records[i];
       Buf.writeInt32(record.tnf);
@@ -370,7 +368,12 @@ NfcWorker[NFC_NOTIFICATION_INITIALIZED] = function NFC_NOTIFICATION_INITIALIZED 
   let status       = Buf.readInt32();
   let majorVersion = Buf.readInt32();
   let minorVersion = Buf.readInt32();
-  debug("NFC_NOTIFICATION_INITIALIZED status:" + status + " major:" + majorVersion + " minor:" + minorVersion);
+  debug("NFC_NOTIFICATION_INITIALIZED status:" + status);
+  if ((majorVersion != NFC_MAJOR_VERSION) || (minorVersion != NFC_MINOR_VERSION)) {
+    debug("Version Mismatch! Current Supported Version : " +
+            NFC_MAJOR_VERSION + NFC_MINOR_VERSION + "." +
+           " Received Version : " + majorVersion + "." + minorVersion);
+  }
 };
 
 NfcWorker[NFC_NOTIFICATION_TECH_DISCOVERED] = function NFC_NOTIFICATION_TECH_DISCOVERED() {
@@ -395,8 +398,8 @@ NfcWorker[NFC_NOTIFICATION_TECH_DISCOVERED] = function NFC_NOTIFICATION_TECH_DIS
   }
   this.sendDOMMessage({type: "techDiscovered",
                        sessionId: sessionId,
-                       content: { tech: techs,
-                                  ndef: ndefMsgs}
+                       tech: techs,
+                       ndef: ndefMsgs
                        });
 };
 
