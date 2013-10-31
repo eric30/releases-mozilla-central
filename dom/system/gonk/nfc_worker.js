@@ -104,44 +104,47 @@ let NfcWorker = {
    * Unmarshals a NDEF message
    */
   unMarshallNdefMessage: function unMarshallNdefMessage() {
-      let records = [];
-      let numOfRecords = Buf.readInt32();
-      debug("numOfRecords = " + numOfRecords);
+    let numOfRecords = Buf.readInt32();
+    debug("numOfRecords = " + numOfRecords);
+    if (numOfRecords <= 0 ) {
+      return null;
+    }
+    let records = [];
 
-      for (let i = 0; i < numOfRecords; i++) {
-        let tnf        = Buf.readInt32();
-        let typeLength = Buf.readInt32();
-        let type  = [];
-        for (let i = 0; i < typeLength; i++) {
-          type.push(Buf.readUint8());
-        }
-        let padding    = getPaddingLen(typeLength);
-        for (let i = 0; i < padding; i++) {
-          Buf.readUint8();
-        }
-
-        let idLength = Buf.readInt32();
-        let id       = Buf.readUint8Array(idLength);
-        padding      = getPaddingLen(idLength);
-        for (let i = 0; i < padding; i++) {
-          Buf.readUint8();
-        }
-
-        let payloadLength = Buf.readInt32();
-        let payload = [];
-        for (let i = 0; i < payloadLength; i++) {
-          payload.push(Buf.readUint8());
-        }
-        padding = getPaddingLen(payloadLength);
-        for (let i = 0; i < padding; i++) {
-          Buf.readUint8();
-        }
-        records.push({tnf: tnf,
-                      type: type,
-                      id: id,
-                      payload: payload});
+    for (let i = 0; i < numOfRecords; i++) {
+      let tnf        = Buf.readInt32();
+      let typeLength = Buf.readInt32();
+      let type  = [];
+      for (let i = 0; i < typeLength; i++) {
+        type.push(Buf.readUint8());
       }
-      return records;
+      let padding    = getPaddingLen(typeLength);
+      for (let i = 0; i < padding; i++) {
+        Buf.readUint8();
+      }
+
+      let idLength = Buf.readInt32();
+      let id       = Buf.readUint8Array(idLength);
+      padding      = getPaddingLen(idLength);
+      for (let i = 0; i < padding; i++) {
+        Buf.readUint8();
+      }
+
+      let payloadLength = Buf.readInt32();
+      let payload = [];
+      for (let i = 0; i < payloadLength; i++) {
+        payload.push(Buf.readUint8());
+      }
+      padding = getPaddingLen(payloadLength);
+      for (let i = 0; i < padding; i++) {
+        Buf.readUint8();
+      }
+      records.push({tnf: tnf,
+                    type: type,
+                    id: id,
+                    payload: payload});
+    }
+    return records;
   },
 
   /**
@@ -149,7 +152,6 @@ let NfcWorker = {
    */
   readNDEF: function readNDEF(message) {
     let cb = function callback() {
-      let records = [];
       let error        = Buf.readInt32();
       let sessionId    = Buf.readInt32();
       let records      = this.unMarshallNdefMessage();
@@ -364,7 +366,7 @@ NfcWorker[NFC_NOTIFICATION_INITIALIZED] = function NFC_NOTIFICATION_INITIALIZED 
   debug("NFC_NOTIFICATION_INITIALIZED status:" + status);
   if ((majorVersion != NFC_MAJOR_VERSION) || (minorVersion != NFC_MINOR_VERSION)) {
     debug("Version Mismatch! Current Supported Version : " +
-            NFC_MAJOR_VERSION + NFC_MINOR_VERSION + "." +
+            NFC_MAJOR_VERSION + "." + NFC_MINOR_VERSION  +
            " Received Version : " + majorVersion + "." + minorVersion);
   }
 };

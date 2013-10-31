@@ -129,8 +129,8 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
     _unregisterMessageTarget: function _unregisterMessageTarget(sessionToken, target) {
       if (sessionToken == null) {
         // Unregister the target for every sessionToken when no sessionToken is specified.
-        for (let type of this.sessionTokens) {
-          this._unregisterMessageTarget(type, target);
+        for (let session of this.sessionTokens) {
+          this._unregisterMessageTarget(session, target);
         }
         return;
       }
@@ -145,12 +145,10 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
         debug("Unregistered all targets for the " + sessionToken + " targets: " + targets);
         targets = [];
         let list = this.sessionTokens;
-        debug("SessionToken List : " + list);
         if (sessionToken !== null) {
           let index = list.indexOf(sessionToken);
           if (index > -1) {
             list.splice(index, 1);
-            debug("Updated sessionToken list : " + list);
           }
         }
         return;
@@ -159,7 +157,6 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
       let index = targets.indexOf(target);
       if (index != -1) {
         targets.splice(index, 1);
-        debug("Unregistered " + sessionToken + " target: " + target);
       }
     },
 
@@ -223,7 +220,6 @@ XPCOMUtils.defineLazyGetter(this, "gMessageManager", function () {
     },
 
     sendNfcResponseMessage: function sendNfcResponseMessage(message, data) {
-      debug("sendNfcResponseMessage :" + message);
       this._sendTargetMessage(this.nfc.sessionTokenMap[this.nfc._currentSessionId], message, data);
     },
   };
@@ -299,7 +295,6 @@ Nfc.prototype = {
 
     let nfcMsgType = message.name + "Response";
     message.target.sendAsyncMessage(nfcMsgType, {
-      type: nfcMsgType,
       sessionId: message.json.sessionToken,
       requestId: message.json.requestId,
       status: NFC.GECKO_NFC_ERROR_GENERIC_FAILURE
@@ -397,27 +392,23 @@ Nfc.prototype = {
           return null;
         }
         break;
+      case "NFC:SetSessionToken":
+        //Do nothing here. No need to process this message further
+        return;
     }
 
-    // Check the sessionId except for message(s) : "NFC:SetSessionToken"
-    switch (message.name) {
-       case "NFC:SetSessionToken":
-         break;
-       default:
-         if (message.json.sessionToken !== this.sessionTokenMap[this._currentSessionId]) {
-           debug("Invalid Session Token: " + message.json.sessionToken + " Expected Session Token: " +
-                 this.sessionTokenMap[this._currentSessionId]);
-           this.sendNfcErrorResponse(message);
-           return null;
-         }
-         message.sessionId = this._currentSessionId;
-         break;
+    // Sanity check on sessionId
+    if (message.json.sessionToken !== this.sessionTokenMap[this._currentSessionId]) {
+      debug("Invalid Session Token: " + message.json.sessionToken +
+            " Expected Session Token: " + this.sessionTokenMap[this._currentSessionId]);
+      this.sendNfcErrorResponse(message);
+      return null;
     }
 
+    // Update the current sessionId before sending to the worker
+    message.sessionId = this._currentSessionId;
+
     switch (message.name) {
-       case "NFC:SetSessionToken":
-         //Do nothing here
-         break;
       case "NFC:GetDetailsNDEF":
         this.sendToWorker("getDetailsNDEF", message.json);
         break;
@@ -457,7 +448,7 @@ Nfc.prototype = {
         // Only if the value changes, set the power config and persist
         if (powerLevel !== this.powerLevel) {
           debug("New Power Level " + powerLevel);
-          this.setConfig({powerLevel: this.powerLevel});
+          //this.setConfig({powerLevel: powerLevel});
           this.powerLevel = powerLevel;
         }
         break;
@@ -488,10 +479,6 @@ Nfc.prototype = {
   },
 
   setConfig: function setConfig(prop) {
-    // Add to property set. -1 if no change.
-    let configset = {
-      powerLevel: prop.powerLevel
-    };
     let outMessage = {
       type: "config",
       powerLevel: prop.powerLevel
