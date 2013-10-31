@@ -106,7 +106,7 @@ let NfcWorker = {
   unMarshallNdefMessage: function unMarshallNdefMessage() {
     let numOfRecords = Buf.readInt32();
     debug("numOfRecords = " + numOfRecords);
-    if (numOfRecords <= 0 ) {
+    if (numOfRecords <= 0) {
       return null;
     }
     let records = [];
@@ -114,7 +114,7 @@ let NfcWorker = {
     for (let i = 0; i < numOfRecords; i++) {
       let tnf        = Buf.readInt32();
       let typeLength = Buf.readInt32();
-      let type  = [];
+      let type = [];
       for (let i = 0; i < typeLength; i++) {
         type.push(Buf.readUint8());
       }

@@ -448,7 +448,7 @@ Nfc.prototype = {
         // Only if the value changes, set the power config and persist
         if (powerLevel !== this.powerLevel) {
           debug("New Power Level " + powerLevel);
-          //this.setConfig({powerLevel: powerLevel});
+          this.setConfig({powerLevel: powerLevel});
           this.powerLevel = powerLevel;
         }
         break;
