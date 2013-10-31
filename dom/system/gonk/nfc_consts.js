@@ -16,7 +16,7 @@
 /* Copyright © 2013, Deutsche Telekom, Inc. */
 
 // Set to true to debug all NFC layers
-this.DEBUG_ALL = false;
+this.DEBUG_ALL = true;
 
 // Set individually to debug specific layers
 this.DEBUG_WORKER = false || DEBUG_ALL;
@@ -57,6 +57,7 @@ this.GECKO_NFC_ERROR_SUCCESS             = 0;
 this.GECKO_NFC_ERROR_GENERIC_FAILURE     = 1;
 
 // NFC powerlevels must match config PDUs.
+this.NFC_POWER_LEVEL_UNKNOWN        = -1;
 this.NFC_POWER_LEVEL_DISABLED       = 0;
 this.NFC_POWER_LEVEL_LOW            = 1;
 this.NFC_POWER_LEVEL_ENABLED        = 2;
