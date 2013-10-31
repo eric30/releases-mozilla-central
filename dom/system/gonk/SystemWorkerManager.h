@@ -23,21 +23,13 @@
 #include "nsIObserver.h"
 #include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
-#include "nsDebug.h"
-#include "nsDOMEventTargetHelper.h"
-#include "nsString.h"
-#include "nsTArray.h"
+#include "nsXULAppAPI.h" // For XRE_GetProcessType
 
 class nsIWorkerHolder;
 
 namespace mozilla {
 
 namespace ipc {
-  class RilConsumer;
-#ifdef MOZ_NFC
-  class NfcConsumer;
-#endif
-  class UnixSocketRawData;
   class KeyStore;
 }
 
@@ -63,40 +55,17 @@ public:
   static nsIInterfaceRequestor*
   GetInterfaceRequestor();
 
-  static bool SendRilRawData(unsigned long aClientId,
-                             ipc::UnixSocketRawData* aRaw);
-
-#ifdef MOZ_NFC
-  static bool SendNfcRawData(ipc::UnixSocketRawData* aRaw);
-  static bool IsNfcEnabled();
-#endif
-
 private:
   SystemWorkerManager();
   ~SystemWorkerManager();
 
-#ifdef MOZ_NFC
-  nsresult InitNfc(JSContext *cx);
-#endif
-#ifdef MOZ_WIDGET_GONK
   nsresult InitNetd(JSContext *cx);
-#endif
   nsresult InitWifi(JSContext *cx);
   nsresult InitKeyStore(JSContext *cx);
 
-#ifdef MOZ_NFC
-  nsCOMPtr<nsIWorkerHolder> mNfcWorker;
-#endif
-
-#ifdef MOZ_WIDGET_GONK
   nsCOMPtr<nsIWorkerHolder> mNetdWorker;
-#endif
   nsCOMPtr<nsIWorkerHolder> mWifiWorker;
 
-  nsTArray<nsRefPtr<ipc::RilConsumer> > mRilConsumers;
-#ifdef MOZ_NFC
-  nsRefPtr<ipc::NfcConsumer> mNfcConsumer;
-#endif
   nsRefPtr<ipc::KeyStore> mKeyStore;
 
   bool mShutdown;

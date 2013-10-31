@@ -16,19 +16,27 @@ namespace ipc {
 class NfcConsumer : public mozilla::ipc::UnixSocketConsumer
 {
 public:
-    NfcConsumer(mozilla::dom::workers::WorkerCrossThreadDispatcher* aDispatcher);
-    virtual ~NfcConsumer() { }
-    void Shutdown();
-private:
-    virtual void ReceiveSocketData(nsAutoPtr<UnixSocketRawData>& aMessage);
+  virtual ~NfcConsumer() { }
 
-    virtual void OnConnectSuccess();
-    virtual void OnConnectError();
-    virtual void OnDisconnect();
+  static nsresult Register(unsigned int aClientId,
+                           mozilla::dom::workers::WorkerCrossThreadDispatcher* aDispatcher);
+  static void Shutdown();
 
 private:
-    nsRefPtr<mozilla::dom::workers::WorkerCrossThreadDispatcher> mDispatcher;
-    bool mShutdown;
+  NfcConsumer(unsigned long aClientId,
+              mozilla::dom::workers::WorkerCrossThreadDispatcher* aDispatcher);
+
+  virtual void ReceiveSocketData(nsAutoPtr<UnixSocketRawData>& aMessage);
+
+  virtual void OnConnectSuccess();
+  virtual void OnConnectError();
+  virtual void OnDisconnect();
+
+private:
+  nsRefPtr<mozilla::dom::workers::WorkerCrossThreadDispatcher> mDispatcher;
+  unsigned long mClientId;
+  nsCString mAddress;
+  bool mShutdown;
 };
 
 } // namespace ipc
