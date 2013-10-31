@@ -452,8 +452,14 @@ Nfc.prototype = {
         debug("'nfc.enabled' is now " + aResult);
         this._enabled = aResult;
         // General power setting
-        this.setNFCPowerConfig(this._enabled ? NFC.NFC_POWER_LEVEL_ENABLED :
-                                               NFC.NFC_POWER_LEVEL_DISABLED);
+        let powerLevel = this._enabled ? NFC.NFC_POWER_LEVEL_ENABLED :
+                                         NFC.NFC_POWER_LEVEL_DISABLED;
+        // Only if the value changes, set the power config and persist
+        if (powerLevel !== this.powerLevel) {
+          debug("New Power Level " + powerLevel);
+          this.setConfig({powerLevel: this.powerLevel});
+          this.powerLevel = powerLevel;
+        }
         break;
     }
   },
@@ -479,16 +485,6 @@ Nfc.prototype = {
         }
         break;
     }
-  },
-
-  /**
-   * NFC Config API. Properties is a set of name value pairs.
-   */
-  setNFCPowerConfig: function setNFCPowerConfig(powerLevel) {
-    debug("NFC setNFCPowerConfig: " + powerLevel);
-    this.powerLevel = powerLevel;
-    // Just one param for now.
-    this.setConfig({powerLevel: powerLevel});
   },
 
   setConfig: function setConfig(prop) {

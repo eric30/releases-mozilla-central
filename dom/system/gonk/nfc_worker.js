@@ -156,7 +156,6 @@ let NfcWorker = {
 
       message.type      = "ReadNDEFResponse";
       message.sessionId = sessionId;
-      message.requestId = message.requestId;
       message.records   = records;
       message.status = (error === 0) ? GECKO_NFC_ERROR_SUCCESS :
                                        GECKO_NFC_ERROR_GENERIC_FAILURE;
@@ -178,7 +177,6 @@ let NfcWorker = {
 
       message.type      = "WriteNDEFResponse";
       message.sessionId = sessionId;
-      message.requestId = message.requestId;
       message.status = (error === 0) ? GECKO_NFC_ERROR_SUCCESS :
                                        GECKO_NFC_ERROR_GENERIC_FAILURE;
       this.sendDOMMessage(message);
@@ -237,7 +235,6 @@ let NfcWorker = {
 
       message.type      = "MakeReadOnlyNDEFResponse";
       message.sessionId = sessionId;
-      message.requestId = message.requestId;
       message.status = (error === 0) ? GECKO_NFC_ERROR_SUCCESS :
                                        GECKO_NFC_ERROR_GENERIC_FAILURE;
       this.sendDOMMessage(message);
@@ -264,7 +261,6 @@ let NfcWorker = {
 
       message.type               = "GetDetailsNDEFResponse";
       message.sessionId          = sessionId;
-      message.requestId          = message.requestId;
       message.isReadOnly         = isReadOnly;
       message.canBeMadeReadOnly  = canBeMadeReadOnly;
       message.maxSupportedLength = maxSupportedLength;
@@ -288,7 +284,6 @@ let NfcWorker = {
 
       message.type      = "ConnectResponse";
       message.sessionId = sessionId;
-      message.requestId = message.requestId;
       message.status = (error === 0) ? GECKO_NFC_ERROR_SUCCESS :
                                        GECKO_NFC_ERROR_GENERIC_FAILURE;
       this.sendDOMMessage(message);
@@ -308,7 +303,6 @@ let NfcWorker = {
       let error         = Buf.readInt32();
 
       message.type      = "ConfigResponse";
-      message.requestId = message.requestId;
       message.status = (error === 0) ? GECKO_NFC_ERROR_SUCCESS :
                                        GECKO_NFC_ERROR_GENERIC_FAILURE;
       this.sendDOMMessage(message);
@@ -329,7 +323,6 @@ let NfcWorker = {
 
       message.type      = "CloseResponse";
       message.sessionId = sessionId;
-      message.requestId = message.requestId;
       message.status = (error === 0) ? GECKO_NFC_ERROR_SUCCESS :
                                        GECKO_NFC_ERROR_GENERIC_FAILURE;
       this.sendDOMMessage(message);
