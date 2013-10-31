@@ -31,7 +31,7 @@
 #ifdef MOZ_B2G_RIL
 #include "mozilla/ipc/Ril.h"
 #endif
-#ifdef MOZ_B2G_NFC
+#ifdef MOZ_NFC
 #include "mozilla/ipc/Nfc.h"
 #endif
 #include "mozilla/ipc/KeyStore.h"
@@ -57,10 +57,6 @@ namespace {
 
 NS_DEFINE_CID(kWifiWorkerCID, NS_WIFIWORKER_CID);
 NS_DEFINE_CID(kNetworkManagerCID, NS_NETWORKMANAGER_CID);
-
-#ifdef MOZ_NFC
-NS_DEFINE_CID(kNfcWorkerCID, NS_NFC_CID);
-#endif
 
 // Doesn't carry a reference, we're owned by services.
 SystemWorkerManager *gInstance = nullptr;
@@ -374,7 +370,7 @@ SystemWorkerManager::RegisterRilWorker(unsigned int aClientId,
 
 nsresult
 SystemWorkerManager::RegisterNfcWorker(const JS::Value& aWorker,
-                                       JSContext *aCx)
+                                       JSContext* aCx)
 {
 #ifndef MOZ_NFC
   return NS_ERROR_NOT_IMPLEMENTED;
@@ -383,14 +379,14 @@ SystemWorkerManager::RegisterNfcWorker(const JS::Value& aWorker,
 
   JSAutoCompartment ac(aCx, JSVAL_TO_OBJECT(aWorker));
 
-  WorkerCrossThreadDispatcher *wctd =
+  WorkerCrossThreadDispatcher* wctd =
     GetWorkerCrossThreadDispatcher(aCx, aWorker);
   if (!wctd) {
-    NS_WARNING("Failed to GetWorkerCrossThreadDispatcher for ril");
+    NS_WARNING("Failed to GetWorkerCrossThreadDispatcher for nfc");
     return NS_ERROR_FAILURE;
   }
 
-  return NfcConsumer::Register(0 /* FIXME */, wctd);
+  return NfcConsumer::Register(wctd);
 #endif // MOZ_NFC
 }
 

@@ -4,6 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/* Copyright © 2013, Deutsche Telekom, Inc. */
+
 #ifndef mozilla_ipc_Nfc_h
 #define mozilla_ipc_Nfc_h 1
 
@@ -18,13 +20,11 @@ class NfcConsumer : public mozilla::ipc::UnixSocketConsumer
 public:
   virtual ~NfcConsumer() { }
 
-  static nsresult Register(unsigned int aClientId,
-                           mozilla::dom::workers::WorkerCrossThreadDispatcher* aDispatcher);
+  static nsresult Register(mozilla::dom::workers::WorkerCrossThreadDispatcher* aDispatcher);
   static void Shutdown();
 
 private:
-  NfcConsumer(unsigned long aClientId,
-              mozilla::dom::workers::WorkerCrossThreadDispatcher* aDispatcher);
+  NfcConsumer(mozilla::dom::workers::WorkerCrossThreadDispatcher* aDispatcher);
 
   virtual void ReceiveSocketData(nsAutoPtr<UnixSocketRawData>& aMessage);
 
@@ -34,7 +34,6 @@ private:
 
 private:
   nsRefPtr<mozilla::dom::workers::WorkerCrossThreadDispatcher> mDispatcher;
-  unsigned long mClientId;
   nsCString mAddress;
   bool mShutdown;
 };
