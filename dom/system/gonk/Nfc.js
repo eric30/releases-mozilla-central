@@ -479,11 +479,7 @@ Nfc.prototype = {
   },
 
   setConfig: function setConfig(prop) {
-    let outMessage = {
-      type: "config",
-      powerLevel: prop.powerLevel
-    };
-    this.sendToWorker("config", outMessage);
+    //this.sendToWorker("config", prop);
   }
 };
 

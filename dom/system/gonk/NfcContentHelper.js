@@ -256,24 +256,46 @@ NfcContentHelper.prototype = {
     Services.DOMRequest.fireError(request, error);
   },
 
-  fireRequestErrorAsync: function fireRequestErrorAsync(requestId, error) {
-    let currentThread = Services.tm.currentThread;
-
-    currentThread.dispatch(this.fireRequestError.bind(this, requestId, error),
-                           Ci.nsIThread.DISPATCH_NORMAL);
-  },
-
   receiveMessage: function receiveMessage(message) {
     debug("Message received: " + JSON.stringify(message));
     switch (message.name) {
-      case "NFC:ReadNDEFResponse": // Fall through.
-      case "NFC:ConnectResponse":
+      case "NFC:ReadNDEFResponse":
+        this.handleReadNDEFResponse(message.json);
+        break;
+      case "NFC:ConnectResponse": // Fall through.
       case "NFC:CloseResponse":
       case "NFC:WriteNDEFResponse":
       case "NFC:MakeReadOnlyNDEFResponse":
       case "NFC:GetDetailsNDEFResponse":
         this.handleResponse(message.json);
         break;
+    }
+  },
+
+  handleReadNDEFResponse: function handleReadNDEFResponse(message) {
+    debug("ReadNDEFResponse(" + JSON.stringify(message) + ")");
+    let requester = this._requestMap[message.requestId];
+    if (!requester) {
+       debug("ReadNDEFResponse Invalid requester=" + requester +
+             " message.sessionToken=" + message.sessionToken);
+       return; // Nothing to do in this instance.
+    }
+    delete this._requestMap[message.requestId];
+    let result = message.records;
+    let requestId = atob(message.requestId);
+
+    if (message.status !== NFC.GECKO_NFC_ERROR_SUCCESS) {
+      this.fireRequestError(requestId, message.status);
+    } else {
+      let ndefMsg = new Array();
+      for(let i = 0; i < result.length; i++) {
+        let record = result[i];
+        ndefMsg.push(new requester.MozNdefRecord(record.tnf,
+                                                 record.type,
+                                                 record.id,
+                                                 record.payload));
+      }
+      this.fireRequestSuccess(requestId, ndefMsg);
     }
   },
 

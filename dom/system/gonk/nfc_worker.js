@@ -70,7 +70,7 @@ let Buf = {
   },
 
   /**
-   * TODO: Callback map of NFC_RESPONSE_XXX and RequestID
+   * TODO: Bug 933593. Callback map of NFC_RESPONSE_XXX and RequestID
    *       needs to be maintained
    */
   mCallback: null,
@@ -124,7 +124,10 @@ let NfcWorker = {
       }
 
       let idLength = Buf.readInt32();
-      let id       = Buf.readUint8Array(idLength);
+      let id = [];
+      for (let i = 0; i < idLength; i++) {
+        id.push(Buf.readUint8());
+      }
       padding      = getPaddingLen(idLength);
       for (let i = 0; i < padding; i++) {
         Buf.readUint8();

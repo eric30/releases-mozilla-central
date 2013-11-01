@@ -52,7 +52,7 @@ this.NFC_TECHS = {
   4:'NFC_A'
 };
 
-// TODO: Fill-in all error codes for Gonk/nfcd protocol
+// TODO: Bug 933595. Fill-in all error codes for Gonk/nfcd protocol
 this.GECKO_NFC_ERROR_SUCCESS             = 0;
 this.GECKO_NFC_ERROR_GENERIC_FAILURE     = 1;
 
