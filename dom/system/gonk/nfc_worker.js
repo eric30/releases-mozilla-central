@@ -438,4 +438,3 @@ onerror = function onerror(event) {
   debug("NFC Worker error " + event.message + " " + event.filename + ":" +
         event.lineno + ":\n");
 };
-

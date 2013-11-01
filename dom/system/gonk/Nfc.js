@@ -394,7 +394,7 @@ Nfc.prototype = {
         break;
       case "NFC:SetSessionToken":
         //Do nothing here. No need to process this message further
-        return;
+        return null;
     }
 
     // Sanity check on sessionId
@@ -429,7 +429,7 @@ Nfc.prototype = {
         break;
       default:
         debug("UnSupported : Message Name " + message.name);
-        break;
+        return null;
     }
   },
 

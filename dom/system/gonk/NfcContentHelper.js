@@ -77,7 +77,7 @@ NfcContentHelper.prototype = {
 
   _requestMap: null,
 
-  /* TODO: This is a limitation when a DOMString is used in sequences of Moz DOM Objects.
+  /* TODO: Bug 815526: This is a limitation when a DOMString is used in sequences of Moz DOM Objects.
    *       Strings such as 'type', 'id' 'payload' will not be acccessible to NfcWorker.
    *       Therefore this function exists till the bug is addressed.
    */
@@ -236,13 +236,6 @@ NfcContentHelper.prototype = {
     Services.DOMRequest.fireSuccess(request, result);
   },
 
-  fireRequestSuccessAsync: function fireRequestSuccessAsync(requestId, result) {
-    let currentThread = Services.tm.currentThread;
-
-    currentThread.dispatch(this.fireRequestSuccess.bind(this, requestId, result),
-                           Ci.nsIThread.DISPATCH_NORMAL);
-  },
-
   fireRequestError: function fireRequestError(requestId, error) {
     let request = this.takeRequest(requestId);
     if (!request) {
@@ -314,6 +307,7 @@ NfcContentHelper.prototype = {
     if (message.status !== NFC.GECKO_NFC_ERROR_SUCCESS) {
       this.fireRequestError(requestId, result.status);
     } else {
+      // TODO: Bug 933671. Is is necessary to ObjectWrapper all the responses here?
       this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester));
     }
   },
