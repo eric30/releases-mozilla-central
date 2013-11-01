@@ -11,7 +11,6 @@
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/un.h>
-#include <netdb.h> // For gethostbyname.
 
 #undef LOG
 #if defined(MOZ_WIDGET_GONK)
@@ -22,7 +21,6 @@
 #endif
 
 #include "jsfriendapi.h"
-#include "nsTArray.h"
 #include "nsThreadUtils.h" // For NS_IsMainThread.
 
 USING_WORKERS_NAMESPACE
@@ -145,14 +143,14 @@ ConnectWorkerToNFC::RunTask(JSContext* aCx)
 class DispatchNFCEvent : public WorkerTask
 {
 public:
-        DispatchNFCEvent(UnixSocketRawData* aMessage)
-            : mMessage(aMessage)
-        { }
+    DispatchNFCEvent(UnixSocketRawData* aMessage)
+        : mMessage(aMessage)
+    { }
 
-        virtual bool RunTask(JSContext* aCx);
+    virtual bool RunTask(JSContext* aCx);
 
 private:
-        nsAutoPtr<UnixSocketRawData> mMessage;
+    nsAutoPtr<UnixSocketRawData> mMessage;
 };
 
 bool
@@ -174,21 +172,21 @@ DispatchNFCEvent::RunTask(JSContext* aCx)
 class NfcConnector : public mozilla::ipc::UnixSocketConnector
 {
 public:
-  NfcConnector()
-  {}
+    NfcConnector()
+    {}
 
-  virtual ~NfcConnector()
-  {}
+    virtual ~NfcConnector()
+    {}
 
-  virtual int Create();
-  virtual bool CreateAddr(bool aIsServer,
-                          socklen_t& aAddrSize,
-                          sockaddr_any& aAddr,
-                          const char* aAddress);
-  virtual bool SetUp(int aFd);
-  virtual bool SetUpListenSocket(int aFd);
-  virtual void GetSocketAddr(const sockaddr_any& aAddr,
-                             nsAString& aAddrStr);
+    virtual int Create();
+    virtual bool CreateAddr(bool aIsServer,
+                            socklen_t& aAddrSize,
+                            sockaddr_any& aAddr,
+                            const char* aAddress);
+    virtual bool SetUp(int aFd);
+    virtual bool SetUpListenSocket(int aFd);
+    virtual void GetSocketAddr(const sockaddr_any& aAddr,
+                               nsAString& aAddrStr);
 };
 
 int
