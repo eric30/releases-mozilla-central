@@ -479,7 +479,7 @@ Nfc.prototype = {
   },
 
   setConfig: function setConfig(prop) {
-    //this.sendToWorker("config", prop);
+    this.sendToWorker("config", prop);
   }
 };
 

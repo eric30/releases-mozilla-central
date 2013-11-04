@@ -307,8 +307,7 @@ NfcContentHelper.prototype = {
     if (message.status !== NFC.GECKO_NFC_ERROR_SUCCESS) {
       this.fireRequestError(requestId, result.status);
     } else {
-      // TODO: Bug 933671. Is is necessary to ObjectWrapper all the responses here?
-      this.fireRequestSuccess(requestId, ObjectWrapper.wrap(result, requester));
+      this.fireRequestSuccess(requestId, result);
     }
   },
 };
