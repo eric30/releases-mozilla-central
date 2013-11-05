@@ -21,7 +21,6 @@ const {classes: Cc, interfaces: Ci, utils: Cu, results: Cr} = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource://gre/modules/ObjectWrapper.jsm");
 Cu.import("resource://gre/modules/DOMRequestHelper.jsm");
 
 let NFC = {};
@@ -274,15 +273,15 @@ NfcContentHelper.prototype = {
        return; // Nothing to do in this instance.
     }
     delete this._requestMap[message.requestId];
-    let result = message.records;
+    let records = message.records;
     let requestId = atob(message.requestId);
 
     if (message.status !== NFC.GECKO_NFC_ERROR_SUCCESS) {
       this.fireRequestError(requestId, message.status);
     } else {
-      let ndefMsg = new Array();
-      for(let i = 0; i < result.length; i++) {
-        let record = result[i];
+      let ndefMsg = [];
+      for (let i = 0; i < records.length; i++) {
+        let record = records[i];
         ndefMsg.push(new requester.MozNdefRecord(record.tnf,
                                                  record.type,
                                                  record.id,
