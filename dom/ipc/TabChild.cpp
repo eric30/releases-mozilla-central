@@ -69,6 +69,7 @@
 #include "JavaScriptChild.h"
 #include "APZCCallbackHelper.h"
 #include "nsILoadContext.h"
+#include "ipc/nsGUIEventIPC.h"
 
 #define BROWSER_ELEMENT_CHILD_SCRIPT \
     NS_LITERAL_STRING("chrome://global/content/BrowserElementChild.js")
@@ -1989,8 +1990,7 @@ TabChild::DeallocPContentDialogChild(PContentDialogChild* aDialog)
 }
 
 PContentPermissionRequestChild*
-TabChild::AllocPContentPermissionRequestChild(const InfallibleTArray<PermissionRequest>& aRequests,
-                                              const IPC::Principal& aPrincipal)
+TabChild::AllocPContentPermissionRequestChild(const nsCString& aType, const nsCString& aAccess, const IPC::Principal&)
 {
   NS_RUNTIMEABORT("unused");
   return nullptr;

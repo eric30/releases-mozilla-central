@@ -232,6 +232,7 @@ pref("media.navigator.video.default_fps",30);
 pref("media.navigator.video.default_minfps",10);
 pref("media.navigator.video.max_fs", 0); // unrestricted
 pref("media.navigator.video.max_fr", 0); // unrestricted
+pref("media.navigator.load_adapt", false);
 pref("media.peerconnection.enabled", true);
 pref("media.navigator.permission.disabled", false);
 pref("media.peerconnection.default_iceservers", "[{\"url\": \"stun:stun.services.mozilla.com\"}]");
@@ -1519,7 +1520,7 @@ pref("intl.charsetmenu.mailview.cache",     "");
 pref("intl.charsetmenu.composer.cache",     "");
 pref("intl.charsetmenu.browser.cache.size", 5);
 pref("intl.charset.detector",               "chrome://global/locale/intl.properties");
-pref("intl.charset.default",                "chrome://global-platform/locale/intl.properties");
+pref("intl.charset.fallback.override",      "");
 pref("intl.ellipsis",                       "chrome://global-platform/locale/intl.properties");
 pref("intl.locale.matchOS",                 false);
 // fallback charset list for Unicode conversion (converting from Unicode)
@@ -2751,12 +2752,12 @@ pref("font.name-list.serif.ja", "Hiragino Mincho ProN,Hiragino Mincho Pro");
 pref("font.name-list.sans-serif.ja", "Hiragino Kaku Gothic ProN,Hiragino Kaku Gothic Pro");
 pref("font.name-list.monospace.ja", "Osaka-Mono"); 
 
-pref("font.name.serif.ko", "AppleMyungjo"); 
-pref("font.name.sans-serif.ko", "AppleGothic"); 
-pref("font.name.monospace.ko", "AppleGothic"); 
-pref("font.name-list.serif.ko", "AppleMyungjo"); 
-pref("font.name-list.sans-serif.ko", "AppleGothic"); 
-pref("font.name-list.monospace.ko", "AppleGothic"); 
+pref("font.name.serif.ko", "AppleMyungjo");
+pref("font.name.sans-serif.ko", "Apple SD Gothic Neo");
+pref("font.name.monospace.ko", "Apple SD Gothic Neo");
+pref("font.name-list.serif.ko", "AppleMyungjo");
+pref("font.name-list.sans-serif.ko", "Apple SD Gothic Neo,AppleGothic");
+pref("font.name-list.monospace.ko", "Apple SD Gothic Neo,AppleGothic");
 
 pref("font.name.serif.th", "Thonburi");
 pref("font.name.sans-serif.th", "Thonburi");
