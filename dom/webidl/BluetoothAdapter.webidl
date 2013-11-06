@@ -84,6 +84,8 @@ interface BluetoothAdapter : EventTarget {
   [NewObject, Throws]
   DOMRequest getConnectedDevices(unsigned short serviceUuid);
   [NewObject, Throws]
+  DOMRequest getDevice(DOMString deviceAddress);
+  [NewObject, Throws]
   DOMRequest setPinCode(DOMString deviceAddress, DOMString pinCode);
   [NewObject, Throws]
   DOMRequest setPasskey(DOMString deviceAddress, unsigned long passkey);

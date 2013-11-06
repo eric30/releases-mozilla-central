@@ -102,6 +102,8 @@ public:
   already_AddRefed<DOMRequest>
     GetPairedDevices(ErrorResult& aRv);
   already_AddRefed<DOMRequest>
+    GetDevice(const nsAString& aDeviceAddress, ErrorResult& aRv);
+  already_AddRefed<DOMRequest>
     SetPinCode(const nsAString& aDeviceAddress, const nsAString& aPinCode,
                ErrorResult& aRv);
   already_AddRefed<DOMRequest>
