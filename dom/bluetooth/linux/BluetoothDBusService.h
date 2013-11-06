@@ -45,6 +45,10 @@ public:
                                      const nsTArray<nsString>& aDeviceAddresses,
                                      BluetoothReplyRunnable* aRunnable) MOZ_OVERRIDE;
 
+  virtual nsresult GetDeviceInternal(
+    const nsAString& aDeviceAddress,
+    BluetoothReplyRunnable* aRunnable) MOZ_OVERRIDE;
+
   virtual nsresult StartDiscoveryInternal(BluetoothReplyRunnable* aRunnable) MOZ_OVERRIDE;
 
   virtual nsresult StopDiscoveryInternal(BluetoothReplyRunnable* aRunnable) MOZ_OVERRIDE;

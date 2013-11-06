@@ -533,8 +533,7 @@ BluetoothAdapter::GetDevice(const nsAString& aDeviceAddress, ErrorResult& aRv)
   }
 
   nsRefPtr<DOMRequest> request = new DOMRequest(win);
-  nsRefPtr<BluetoothVoidReplyRunnable> results =
-    new BluetoothVoidReplyRunnable(request);
+  nsRefPtr<BluetoothReplyRunnable> results = new GetDevicesTask(this, request);
 
   BluetoothService* bs = BluetoothService::Get();
   if (!bs) {

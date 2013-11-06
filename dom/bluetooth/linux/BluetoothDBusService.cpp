@@ -2336,6 +2336,15 @@ BluetoothDBusService::GetDevicePath(const nsAString& aAdapterPath,
   return true;
 }
 
+bool
+BluetoothDBusService::GetDeviceInternal(const nsAString& aDeviceAddress,
+                                        BluetoothReplyRunnable* aRunnable)
+{
+  // Since it's a hack for NFC on JB, no need to implement here.
+  MOZ_ASSERT(false);
+  return true;
+}
+
 nsresult
 BluetoothDBusService::CreatePairedDeviceInternal(
                                               const nsAString& aDeviceAddress,

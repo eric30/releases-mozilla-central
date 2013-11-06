@@ -88,6 +88,11 @@ struct ConnectedDevicePropertiesRequest
   uint16_t serviceUuid;
 };
 
+struct GetDeviceRequest
+{
+  nsString address;
+};
+
 struct ConnectRequest
 {
   nsString address;
@@ -192,6 +197,7 @@ union Request
   ToggleCallsRequest;
   SendMetaDataRequest;
   SendPlayStatusRequest;
+  GetDeviceRequest;
 };
 
 protocol PBluetooth

@@ -143,6 +143,15 @@ public:
                                        BluetoothReplyRunnable* aRunnable) = 0;
 
   /**
+   * Returns a new BluetoothDevice object created by BD address.
+   *
+   * @return NS_OK on success, NS_ERROR_FAILURE otherwise
+   */
+  virtual nsresult
+  GetDeviceInternal(const nsAString& aDeviceAddress,
+                    BluetoothReplyRunnable* aRunnable) = 0;
+
+  /**
    * Stop device discovery (platform specific implementation)
    *
    * @return NS_OK if discovery stopped correctly, false otherwise

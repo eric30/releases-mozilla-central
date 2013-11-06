@@ -31,6 +31,9 @@ public:
                                      const nsTArray<nsString>& aDeviceAddress,
                                      BluetoothReplyRunnable* aRunnable);
 
+  virtual nsresult GetDeviceInternal(const nsAString& aDeviceAddress,
+                                     BluetoothReplyRunnable* aRunnable);
+
   virtual nsresult StartDiscoveryInternal(BluetoothReplyRunnable* aRunnable);
   virtual nsresult StopDiscoveryInternal(BluetoothReplyRunnable* aRunnable);
 

@@ -124,6 +124,15 @@ BluetoothServiceChildProcess::GetPairedDevicePropertiesInternal(
 }
 
 nsresult
+BluetoothServiceChildProcess::GetDeviceInternal(
+                                     const nsAString& aDeviceAddress,
+                                     BluetoothReplyRunnable* aRunnable)
+{
+  SendRequest(aRunnable, GetDeviceRequest(nsString(aDeviceAddress)));
+  return NS_OK;
+}
+
+nsresult
 BluetoothServiceChildProcess::StopDiscoveryInternal(
                                               BluetoothReplyRunnable* aRunnable)
 {

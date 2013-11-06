@@ -55,6 +55,11 @@ public:
   GetConnectedDevicePropertiesInternal(uint16_t aServiceUuid,
                                        BluetoothReplyRunnable* aRunnable)
                                        MOZ_OVERRIDE;
+
+  virtual nsresult
+  GetDeviceInternal(const nsAString& aDeviceAddress,
+                    BluetoothReplyRunnable* aRunnable) MOZ_OVERRIDE;
+
   virtual nsresult
   StopDiscoveryInternal(BluetoothReplyRunnable* aRunnable) MOZ_OVERRIDE;
 

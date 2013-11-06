@@ -787,6 +787,29 @@ BluetoothServiceBluedroid::GetPairedDevicePropertiesInternal(
 }
 
 nsresult
+BluetoothServiceBluedroid::GetDeviceInternal(
+  const nsAString& aDeviceAddress, BluetoothReplyRunnable* aRunnable)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  BT_LOGR("CreateDevice: %s", NS_ConvertUTF16toUTF8(aDeviceAddress).get());
+
+  // The only valid property that the created device would have is 'Address'
+  InfallibleTArray<BluetoothNamedValue> properties;
+  nsString address(aDeviceAddress);
+  properties.AppendElement(BluetoothNamedValue(NS_LITERAL_STRING("Address"),
+                                               address));
+
+  // Only one device object would be created
+  InfallibleTArray<BluetoothNamedValue> theDevice;
+  theDevice.AppendElement(BluetoothNamedValue(nsString(aDeviceAddress), properties));
+
+  DispatchBluetoothReply(aRunnable, BluetoothValue(theDevice), EmptyString());
+
+  return NS_OK;
+}
+
+nsresult
 BluetoothServiceBluedroid::StartDiscoveryInternal(
   BluetoothReplyRunnable* aRunnable)
 {

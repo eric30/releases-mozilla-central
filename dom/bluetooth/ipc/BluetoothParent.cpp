@@ -200,6 +200,8 @@ BluetoothParent::RecvPBluetoothRequestConstructor(
       return actor->DoRequest(aRequest.get_PairedDevicePropertiesRequest());
     case Request::TConnectedDevicePropertiesRequest:
       return actor->DoRequest(aRequest.get_ConnectedDevicePropertiesRequest());
+    case Request::TGetDeviceRequest:
+      return actor->DoRequest(aRequest.get_GetDeviceRequest());
     case Request::TSetPinCodeRequest:
       return actor->DoRequest(aRequest.get_SetPinCodeRequest());
     case Request::TSetPasskeyRequest:
@@ -407,6 +409,18 @@ BluetoothRequestParent::DoRequest(const ConnectedDevicePropertiesRequest& aReque
                                                 mReplyRunnable.get());
   NS_ENSURE_SUCCESS(rv, false);
 
+  return true;
+}
+
+bool
+BluetoothRequestParent::DoRequest(const GetDeviceRequest& aRequest)
+{
+  MOZ_ASSERT(mService);
+  MOZ_ASSERT(mRequestType == Request::TGetDeviceRequest);
+
+  nsresult rv =
+    mService->GetDeviceInternal(aRequest.address(), mReplyRunnable.get());
+  NS_ENSURE_SUCCESS(rv, false);
   return true;
 }
 
