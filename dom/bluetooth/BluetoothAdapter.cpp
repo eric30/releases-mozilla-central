@@ -563,9 +563,33 @@ BluetoothAdapter::PairUnpair(bool aPair, BluetoothDevice& aDevice,
 }
 
 already_AddRefed<DOMRequest>
-BluetoothAdapter::Pair(BluetoothDevice& aDevice, ErrorResult& aRv)
+BluetoothAdapter::Pair(const nsAString& aDeviceAddress, ErrorResult& aRv)
 {
-  return PairUnpair(true, aDevice, aRv);
+  nsCOMPtr<nsPIDOMWindow> win = GetOwner();
+  if (!win) {
+    aRv.Throw(NS_ERROR_FAILURE);
+    return nullptr;
+  }
+
+  nsRefPtr<DOMRequest> request = new DOMRequest(win);
+  nsRefPtr<BluetoothVoidReplyRunnable> results =
+    new BluetoothVoidReplyRunnable(request);
+
+  BluetoothService* bs = BluetoothService::Get();
+  if (!bs) {
+    aRv.Throw(NS_ERROR_FAILURE);
+    return nullptr;
+  }
+  nsresult rv = bs->CreatePairedDeviceInternal(aDeviceAddress,
+                                               kCreatePairedDeviceTimeout,
+                                               results);
+  if (NS_FAILED(rv)) {
+    BT_WARNING("Pair/Unpair failed!");
+    aRv.Throw(rv);
+    return nullptr;
+  }
+
+  return request.forget();
 }
 
 already_AddRefed<DOMRequest>
