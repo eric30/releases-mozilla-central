@@ -96,7 +96,7 @@ public:
   already_AddRefed<DOMRequest> StopDiscovery(ErrorResult& aRv);
 
   already_AddRefed<DOMRequest>
-    Pair(BluetoothDevice& aDevice, ErrorResult& aRv);
+    Pair(const nsAString& aDeviceAddress, ErrorResult& aRv);
   already_AddRefed<DOMRequest>
     Unpair(BluetoothDevice& aDevice, ErrorResult& aRv);
   already_AddRefed<DOMRequest>
