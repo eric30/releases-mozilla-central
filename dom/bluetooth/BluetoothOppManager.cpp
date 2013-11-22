@@ -158,11 +158,7 @@ public:
   void Run() MOZ_OVERRIDE
   {
     MOZ_ASSERT(NS_IsMainThread());
-
-    if (mSocket->GetConnectionStatus() ==
-        SocketConnectionStatus::SOCKET_CONNECTED) {
-      mSocket->Disconnect();
-    }
+    mSocket->CloseDroidSocket();
   }
 
 private:
@@ -249,11 +245,6 @@ BluetoothOppManager::ConnectInternal(const nsAString& aDeviceAddress)
     mRfcommSocket = nullptr;
   }
 
-  if (mL2capSocket) {
-    mL2capSocket->Disconnect();
-    mL2capSocket = nullptr;
-  }
-
   mIsServer = false;
 
   BluetoothService* bs = BluetoothService::Get();
@@ -262,6 +253,7 @@ BluetoothOppManager::ConnectInternal(const nsAString& aDeviceAddress)
     return;
   }
 
+#if 0
   mNeedsUpdatingSdpRecords = true;
 
   nsString uuid;
@@ -271,9 +263,12 @@ BluetoothOppManager::ConnectInternal(const nsAString& aDeviceAddress)
     OnSocketConnectError(mSocket);
     return;
   }
+#endif
 
   mSocket =
     new BluetoothSocket(this, BluetoothSocketType::RFCOMM, true, true);
+
+  mSocket->Connect(aDeviceAddress, -1);
 }
 
 void
@@ -289,10 +284,6 @@ BluetoothOppManager::HandleShutdown()
   if (mRfcommSocket) {
     mRfcommSocket->Disconnect();
     mRfcommSocket = nullptr;
-  }
-  if (mL2capSocket) {
-    mL2capSocket->Disconnect();
-    mL2capSocket = nullptr;
   }
   sBluetoothOppManager = nullptr;
 }
@@ -314,19 +305,6 @@ BluetoothOppManager::Listen()
     if (!mRfcommSocket->Listen(BluetoothReservedChannels::CHANNEL_OPUSH)) {
       BT_WARNING("[OPP] Can't listen on RFCOMM socket!");
       mRfcommSocket = nullptr;
-      return false;
-    }
-  }
-
-  if (!mL2capSocket) {
-    mL2capSocket =
-      new BluetoothSocket(this, BluetoothSocketType::EL2CAP, true, true);
-
-    if (!mL2capSocket->Listen(BluetoothReservedChannels::CHANNEL_OPUSH_L2CAP)) {
-      BT_WARNING("[OPP] Can't listen on L2CAP socket!");
-      mRfcommSocket->Disconnect();
-      mRfcommSocket = nullptr;
-      mL2capSocket = nullptr;
       return false;
     }
   }
@@ -1250,7 +1228,7 @@ BluetoothOppManager::SendObexData(uint8_t* aData, uint8_t aOpcode, int aSize)
 
   UnixSocketRawData* s = new UnixSocketRawData(aSize);
   memcpy(s->mData, aData, s->mSize);
-  mSocket->SendSocketData(s);
+  mSocket->SendDroidSocketData(s);
 }
 
 void
@@ -1420,15 +1398,6 @@ BluetoothOppManager::OnSocketConnectSuccess(BluetoothSocket* aSocket)
   if (aSocket == mRfcommSocket) {
     MOZ_ASSERT(!mSocket);
     mRfcommSocket.swap(mSocket);
-
-    mL2capSocket->Disconnect();
-    mL2capSocket = nullptr;
-  } else if (aSocket == mL2capSocket) {
-    MOZ_ASSERT(!mSocket);
-    mL2capSocket.swap(mSocket);
-
-    mRfcommSocket->Disconnect();
-    mRfcommSocket = nullptr;
   }
 
   // Cache device address since we can't get socket address when a remote
@@ -1447,7 +1416,6 @@ BluetoothOppManager::OnSocketConnectError(BluetoothSocket* aSocket)
   BT_LOGR("%s: [%s]", __FUNCTION__, (mIsServer)? "server" : "client");
 
   mRfcommSocket = nullptr;
-  mL2capSocket = nullptr;
   mSocket = nullptr;
 
   if (!mIsServer) {
@@ -1507,26 +1475,6 @@ BluetoothOppManager::OnGetServiceChannel(const nsAString& aDeviceAddress,
                                          const nsAString& aServiceUuid,
                                          int aChannel)
 {
-  MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(!aDeviceAddress.IsEmpty());
-
-  BluetoothService* bs = BluetoothService::Get();
-  NS_ENSURE_TRUE_VOID(bs);
-
-  if (aChannel < 0) {
-    if (mNeedsUpdatingSdpRecords) {
-      mNeedsUpdatingSdpRecords = false;
-      bs->UpdateSdpRecords(aDeviceAddress, this);
-    } else {
-      OnSocketConnectError(mSocket);
-    }
-
-    return;
-  }
-
-  if (!mSocket->Connect(NS_ConvertUTF16toUTF8(aDeviceAddress), aChannel)) {
-    OnSocketConnectError(mSocket);
-  }
 }
 
 void

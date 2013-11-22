@@ -20,8 +20,9 @@
 
 #include <hardware/hardware.h>
 
-#include "bluedroid/BluetoothA2dpManager.h"
-#include "bluedroid/BluetoothHfpManager.h"
+#include "BluetoothA2dpManager.h"
+#include "BluetoothHfpManager.h"
+#include "BluetoothOppManager.h"
 #include "BluetoothProfileController.h"
 #include "BluetoothReplyRunnable.h"
 #include "BluetoothUtils.h"
@@ -709,6 +710,7 @@ BluetoothServiceBluedroid::BluetoothServiceBluedroid()
   // It is required to register a2dp callbacks before a2dp media task starts up.
   BluetoothHfpManager::Get();
   BluetoothA2dpManager::Get();
+  BluetoothOppManager::Get();
 }
 
 BluetoothServiceBluedroid::~BluetoothServiceBluedroid()
@@ -1255,14 +1257,45 @@ BluetoothServiceBluedroid::SendFile(const nsAString& aDeviceAddress,
                                     BlobChild* aBlobChild,
                                     BluetoothReplyRunnable* aRunnable)
 {
+  MOZ_ASSERT(NS_IsMainThread());
 
+  // Stop discovery before connecting socket
+  sBtInterface->cancel_discovery();
+
+  // Currently we only support one device sending one file at a time,
+  // so we don't need aDeviceAddress here because the target device
+  // has been determined when calling 'Connect()'. Nevertheless, keep
+  // it for future use.
+  BluetoothOppManager* opp = BluetoothOppManager::Get();
+  NS_ENSURE_TRUE_VOID(opp);
+
+  nsAutoString errorStr;
+  if (!opp->SendFile(aDeviceAddress, aBlobParent)) {
+    errorStr.AssignLiteral("Calling SendFile() failed");
+  }
+
+  DispatchBluetoothReply(aRunnable, BluetoothValue(true), errorStr);
 }
 
 void
 BluetoothServiceBluedroid::StopSendingFile(const nsAString& aDeviceAddress,
                                            BluetoothReplyRunnable* aRunnable)
 {
+  MOZ_ASSERT(NS_IsMainThread());
 
+  // Currently we only support one device sending one file at a time,
+  // so we don't need aDeviceAddress here because the target device
+  // has been determined when calling 'Connect()'. Nevertheless, keep
+  // it for future use.
+  BluetoothOppManager* opp = BluetoothOppManager::Get();
+  NS_ENSURE_TRUE_VOID(opp);
+
+  nsAutoString errorStr;
+  if (!opp->StopSendingFile()) {
+    errorStr.AssignLiteral("Calling StopSendingFile() failed");
+  }
+
+  DispatchBluetoothReply(aRunnable, BluetoothValue(true), errorStr);
 }
 
 void
@@ -1270,7 +1303,21 @@ BluetoothServiceBluedroid::ConfirmReceivingFile(
   const nsAString& aDeviceAddress, bool aConfirm,
   BluetoothReplyRunnable* aRunnable)
 {
+  NS_ASSERTION(NS_IsMainThread(), "Must be called from main thread!");
 
+  // Currently we only support one device sending one file at a time,
+  // so we don't need aDeviceAddress here because the target device
+  // has been determined when calling 'Connect()'. Nevertheless, keep
+  // it for future use.
+  BluetoothOppManager* opp = BluetoothOppManager::Get();
+  NS_ENSURE_TRUE_VOID(opp);
+
+  nsAutoString errorStr;
+  if (!opp->ConfirmReceivingFile(aConfirm)) {
+    errorStr.AssignLiteral("Calling ConfirmReceivingFile() failed");
+  }
+
+  DispatchBluetoothReply(aRunnable, BluetoothValue(true), errorStr);
 }
 
 void
@@ -1288,7 +1335,12 @@ BluetoothServiceBluedroid::DisconnectSco(BluetoothReplyRunnable* aRunnable)
 void
 BluetoothServiceBluedroid::IsScoConnected(BluetoothReplyRunnable* aRunnable)
 {
+  MOZ_ASSERT(NS_IsMainThread());
 
+  BluetoothHfpManager* hfp = BluetoothHfpManager::Get();
+  NS_ENSURE_TRUE_VOID(hfp);
+  DispatchBluetoothReply(aRunnable,
+                         hfp->IsScoConnected(), EmptyString());
 }
 
 void
